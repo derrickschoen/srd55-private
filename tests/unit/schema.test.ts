@@ -98,6 +98,12 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
     ],
     numeric: ['reviewed_at'],
   },
+  catalog_content_supersessions: {
+    text: [
+      'content_kind', 'superseded_content_key', 'successor_content_key',
+    ],
+    numeric: ['recorded_at'],
+  },
   catalog_data_migrations: {
     text: ['id', 'scheme', 'checksum'],
     numeric: ['applied_at'],
@@ -750,6 +756,10 @@ const expectedNotNull: Record<string, string[]> = {
     'incoming_fingerprint_digest', 'decision', 'target_content_key',
     'reviewed_at',
   ],
+  catalog_content_supersessions: [
+    'content_kind', 'superseded_content_key', 'successor_content_key',
+    'recorded_at',
+  ],
   catalog_data_migrations: [
     'id', 'scheme', 'checksum', 'applied_at',
   ],
@@ -1005,6 +1015,8 @@ const expectedNamedIndexes: Record<string, string> = {
     'catalog_content_drafts:content_kind,updated_at,draft_uuid',
   catalog_content_drafts_base_content_index:
     'catalog_content_drafts:content_kind,base_content_key',
+  catalog_content_supersessions_successor_index:
+    'catalog_content_supersessions:content_kind,successor_content_key',
   background_definitions_content_key_unique:
     'background_definitions:content_key:unique',
   background_definitions_name_rules_edition_index:
@@ -1373,6 +1385,7 @@ const expectedDefaults: Record<string, Record<string, string>> = {
     updated_at: 'CURRENT_TIMESTAMP',
   },
   catalog_content_match_decisions: { reviewed_at: 'CURRENT_TIMESTAMP' },
+  catalog_content_supersessions: { recorded_at: 'CURRENT_TIMESTAMP' },
   catalog_data_migrations: { applied_at: 'CURRENT_TIMESTAMP' },
   change_log: { reversible: 'true' },
   character_class_levels: { is_starting_class: 'false', level: '1' },
@@ -1492,6 +1505,10 @@ const expectedForeignKeys: Record<string, string[]> = {
   ],
   catalog_content_match_decisions: [
     'content_kind,target_content_key->catalog_content_identities.content_kind,content_key|RESTRICT',
+  ],
+  catalog_content_supersessions: [
+    'content_kind,superseded_content_key->catalog_content_identities.content_kind,content_key|RESTRICT',
+    'content_kind,successor_content_key->catalog_content_identities.content_kind,content_key|RESTRICT',
   ],
   party_document_states: ['character_id->characters.id|SET NULL'],
   class_definitions: [

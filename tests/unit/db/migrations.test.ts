@@ -1408,6 +1408,53 @@ describe('database migration chain', () => {
     lifecycle.close();
   });
 
+  it('CI7 0038 adds same-kind immutable lineage without rewriting catalog roots', async () => {
+    const beforeSupersessions = DATABASE_MIGRATIONS
+      .slice(0, DATABASE_MIGRATIONS.findIndex(
+        (entry) => entry.id === '0038_catalog_content_supersessions',
+      ))
+      .map((entry) => entry.sql)
+      .join('\n');
+    const storage = await storageHolding(`${beforeSupersessions}
+      INSERT INTO catalog_content_identities (
+        content_key, content_kind, key_kind, catalog_layer, normalized_name
+      ) VALUES
+        ('expanded:migration.fixture:version-one', 'species', 'asserted', 'external', 'version one'),
+        ('expanded:migration.fixture:version-two', 'species', 'asserted', 'external', 'version two');`);
+    const lifecycle = new DatabaseLifecycle(
+      sqlite3,
+      storage,
+      schema,
+      () => undefined,
+      DATABASE_MIGRATIONS,
+    );
+    lifecycle.open();
+
+    expect(lifecycle.database.scalar<number>(
+      `SELECT count(*) FROM catalog_content_identities
+       WHERE content_key LIKE 'expanded:migration.fixture:version-%'`,
+    )).toBe(2);
+    lifecycle.database.exec(
+      `INSERT INTO catalog_content_supersessions (
+         content_kind, superseded_content_key, successor_content_key
+       ) VALUES ('species', 'expanded:migration.fixture:version-one',
+                 'expanded:migration.fixture:version-two')`,
+    );
+    expect(lifecycle.database.oneRaw(
+      `SELECT content_kind, superseded_content_key, successor_content_key
+       FROM catalog_content_supersessions`,
+    )).toEqual({
+      content_kind: 'species',
+      superseded_content_key: 'expanded:migration.fixture:version-one',
+      successor_content_key: 'expanded:migration.fixture:version-two',
+    });
+    expect(() => lifecycle.database.exec(
+      `DELETE FROM catalog_content_identities
+       WHERE content_key = 'expanded:migration.fixture:version-one'`,
+    )).toThrow('FOREIGN KEY constraint failed');
+    lifecycle.close();
+  });
+
   it('Q4 rejects General background keys and reverse category mutation', () => {
     const database = new sqlite3.oo1.DB(':memory:', 'c');
     try {

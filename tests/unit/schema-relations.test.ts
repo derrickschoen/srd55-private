@@ -133,7 +133,7 @@ afterAll(() => {
 });
 
 describe('declared relations match the foreign keys', () => {
-  it('budgets 104 constraints across 122 PRAGMA rows', () => {
+  it('budgets 106 constraints across 126 PRAGMA rows', () => {
     const tables = db
       .selectValues(
         `SELECT name FROM sqlite_schema
@@ -240,8 +240,10 @@ describe('declared relations match the foreign keys', () => {
     // `background_templates.default_origin_feat_content_key` edge into
     // `feat_definitions`. It is one single-column constraint, so it adds
     // exactly one constraint and one PRAGMA row.
-    expect(constraintEdges(db)).toHaveLength(104);
-    expect(rowCount).toBe(122);
+    // CI-7 adds two composite lineage edges from the superseded and successor
+    // keys to the same-kind identity: two constraints across four PRAGMA rows.
+    expect(constraintEdges(db)).toHaveLength(106);
+    expect(rowCount).toBe(126);
   });
 
   it('declares a relation for every foreign key, and a foreign key for every relation', () => {
@@ -250,7 +252,7 @@ describe('declared relations match the foreign keys', () => {
     expect(declaredEdges()).toEqual(constraintEdges(db));
   });
 
-  it('keeps all sixteen composite foreign keys composite', () => {
+  it('keeps all eighteen composite foreign keys composite', () => {
     const edges = declaredEdges();
     expect(edges).toContain(
       'character_class_levels: subclass_definition_id,class_definition_id -> subclass_definitions.id,class_definition_id',
@@ -302,6 +304,12 @@ describe('declared relations match the foreign keys', () => {
     );
     expect(edges).toContain(
       'catalog_content_drafts: content_kind,base_content_key -> catalog_content_identities.content_kind,content_key',
+    );
+    expect(edges).toContain(
+      'catalog_content_supersessions: content_kind,superseded_content_key -> catalog_content_identities.content_kind,content_key',
+    );
+    expect(edges).toContain(
+      'catalog_content_supersessions: content_kind,successor_content_key -> catalog_content_identities.content_kind,content_key',
     );
   });
 

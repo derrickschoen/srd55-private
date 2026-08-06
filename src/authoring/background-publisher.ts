@@ -7,12 +7,14 @@ import {
   normalizeCatalogKeyComponent,
 } from '../catalog/catalog-key';
 import {
-  commitContentImport,
-  planContentImport,
   type ContentImportChoices,
   type ContentImportNode,
   type ContentImportProjection,
 } from '../catalog/content-adoption';
+import {
+  commitImmutableCatalogPublication,
+  planImmutableCatalogPublication,
+} from '../catalog/authoring-lifecycle';
 import { deriveContentIdentityV1 } from '../catalog/content-identity';
 import { portableSourceContentImportNode } from '../catalog/source-content-importer';
 import { projectAuthoredContentAggregateV1 } from '../catalog/stored-authored-content-projector-v1';
@@ -307,7 +309,10 @@ export function previewBackgroundPublish(
   const aggregate = backgroundDraftToAggregate(db, draft.document);
   const assertedKey = assertedKeyFor(aggregate);
   const node = authoringNode(db, aggregate, assertedKey);
-  const plan = planContentImport(db, [node], Object.freeze({}), Object.freeze([]), operationIdentity(draft, aggregate));
+  const plan = planImmutableCatalogPublication(db, {
+    node,
+    operationIdentity: operationIdentity(draft, aggregate),
+  });
   const collision = plan.reviews.find((review) => review.matchClass === 'key-collision');
   if (collision !== undefined) {
     throw new BackgroundPublishError('The asserted background key already names different content.', {
@@ -426,7 +431,19 @@ export function commitBackgroundPublish(
   const node = authoringNode(db, aggregate, assertedKey);
   const choices = choicesFor(preview, decisions, node.id);
   const operation = operationIdentity(draft, aggregate);
-  const chosenPlan = planContentImport(db, [node], choices, Object.freeze([]), operation);
+  const publication = {
+    node,
+    operationIdentity: operation,
+    supersedesContentKey: draft.base_content_key,
+    afterInstall: (transaction: DatabaseContext) => {
+      const deleted = transaction.exec(
+        'DELETE FROM catalog_content_drafts WHERE draft_uuid = ? AND revision = ?',
+        [draft.draft_uuid, draft.revision],
+      );
+      if (deleted.changes !== 1) throw new Error('Draft changed before publish commit.');
+    },
+  } as const;
+  const chosenPlan = planImmutableCatalogPublication(db, publication, choices);
   const chosenRefusal = chosenPlan.outcomes.find((outcome) => outcome.kind === 'refused');
   if (chosenRefusal?.kind === 'refused') {
     if (chosenRefusal.reason === 'clone_key_collision') {
@@ -438,15 +455,9 @@ export function commitBackgroundPublish(
       reason: 'publish_refused', refusal: chosenRefusal.reason,
     });
   }
-  const committed = commitContentImport(db, {
-    nodes: [node], token: chosenPlan.token, choices, operationIdentity: operation,
-    afterInstall: (transaction) => {
-      const deleted = transaction.exec(
-        'DELETE FROM catalog_content_drafts WHERE draft_uuid = ? AND revision = ?',
-        [draft.draft_uuid, draft.revision],
-      );
-      if (deleted.changes !== 1) throw new Error('Draft changed before publish commit.');
-    },
+  const committed = commitImmutableCatalogPublication(db, publication, {
+    token: chosenPlan.token,
+    choices,
   });
   if (committed.kind === 'stale-plan') {
     throw new BackgroundPublishError('The publish plan is stale.', {

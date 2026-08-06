@@ -38,6 +38,7 @@ import removeLegacyOpaque from '../../drizzle/0034_remove_legacy_opaque.sql?raw'
 import catalogContentDrafts from '../../drizzle/0035_catalog_content_drafts.sql?raw';
 import catalogContentArchive from '../../drizzle/0036_catalog_content_archive.sql?raw';
 import backgroundDefaultOriginFeatKey from '../../drizzle/0037_background_default_origin_feat_key.sql?raw';
+import catalogContentSupersessions from '../../drizzle/0038_catalog_content_supersessions.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -433,6 +434,16 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
     resultSchemaChecksum:
       'f98f35c6e38eed6755915863bae874c6df4aa50433743289c2e9bfdd23d3a86d',
     replayPolicy: 'skip_when_result_schema_matches',
+  }),
+  // CI-7: an immutable edit records recipient-local version lineage while
+  // leaving both catalog aggregates and every character reference untouched.
+  Object.freeze({
+    id: '0038_catalog_content_supersessions',
+    sql: catalogContentSupersessions,
+    checksum:
+      '1b52fb3e323c95d751bc3597d559c49af63eb17ae41fbda0d5866c510cde429c',
+    resultSchemaChecksum:
+      '98b62b5428ca4cfe04e9f9e9a8c9921e5751250a6a2af66ce9c907d3bfa6bb6d',
   }),
 ]);
 

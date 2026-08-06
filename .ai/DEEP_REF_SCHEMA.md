@@ -22,8 +22,9 @@ common way to break this repository.** Its first four lines say so, and
 The schema modules under `db/schema/`:
 
 Published content lifecycle state begins at
-`db/schema/catalog-content.ts`: `catalog_content_identities` (`:71`); portable
-manifests deliberately project the aggregate, not that local archive metadata.
+`db/schema/catalog-content.ts`: `catalog_content_identities` and
+`catalog_content_supersessions`; portable manifests deliberately project the
+aggregate, not recipient-local archive or immutable-version-lineage metadata.
 
 | File | Holds |
 |---|---|

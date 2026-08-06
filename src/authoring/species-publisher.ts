@@ -12,12 +12,14 @@ import {
   assertedExternalContentKey,
 } from '../catalog/catalog-key';
 import {
-  commitContentImport,
-  planContentImport,
   type ContentImportChoices,
   type ContentImportNode,
   type ContentImportProjection,
 } from '../catalog/content-adoption';
+import {
+  commitImmutableCatalogPublication,
+  planImmutableCatalogPublication,
+} from '../catalog/authoring-lifecycle';
 import {
   CONTENT_FINGERPRINT_SCHEME_V1,
   deriveContentIdentityV1,
@@ -488,13 +490,10 @@ export function previewSpeciesPublish(
   const aggregate = speciesDraftToAggregate(db, draft.document);
   const contentKey = assertedKeyFor(aggregate);
   const node = authoringNode(db, aggregate, contentKey);
-  const plan = planContentImport(
-    db,
-    [node],
-    Object.freeze({}),
-    Object.freeze([]),
-    operationIdentity(draft, aggregate),
-  );
+  const plan = planImmutableCatalogPublication(db, {
+    node,
+    operationIdentity: operationIdentity(draft, aggregate),
+  });
   const collision = plan.reviews.find((review) => review.matchClass === 'key-collision');
   if (collision !== undefined) {
     throw new SpeciesPublishError('The asserted species key already names different content.', {
@@ -622,13 +621,19 @@ export function commitSpeciesPublish(
   const node = authoringNode(db, aggregate, assertedKey);
   const choices = choicesFor(preview, decisions, node.id);
   const operation = operationIdentity(draft, aggregate);
-  const chosenPlan = planContentImport(
-    db,
-    [node],
-    choices,
-    Object.freeze([]),
-    operation,
-  );
+  const publication = {
+    node,
+    operationIdentity: operation,
+    supersedesContentKey: draft.base_content_key,
+    afterInstall: (transaction: DatabaseContext) => {
+      const deleted = transaction.exec(
+        'DELETE FROM catalog_content_drafts WHERE draft_uuid = ? AND revision = ?',
+        [draft.draft_uuid, draft.revision],
+      );
+      if (deleted.changes !== 1) throw new Error('Draft changed before publish commit.');
+    },
+  } as const;
+  const chosenPlan = planImmutableCatalogPublication(db, publication, choices);
   const chosenRefusal = chosenPlan.outcomes.find((outcome) => outcome.kind === 'refused');
   if (chosenRefusal?.kind === 'refused') {
     throw new SpeciesPublishError('The chosen species publish was refused.', {
@@ -640,18 +645,9 @@ export function commitSpeciesPublish(
         : { refusal: chosenRefusal.reason }),
     } as SpeciesPublishRefusal);
   }
-  const committed = commitContentImport(db, {
-    nodes: [node],
+  const committed = commitImmutableCatalogPublication(db, publication, {
     token: chosenPlan.token,
     choices,
-    operationIdentity: operation,
-    afterInstall: (transaction) => {
-      const deleted = transaction.exec(
-        'DELETE FROM catalog_content_drafts WHERE draft_uuid = ? AND revision = ?',
-        [draft.draft_uuid, draft.revision],
-      );
-      if (deleted.changes !== 1) throw new Error('Draft changed before publish commit.');
-    },
   });
   if (committed.kind === 'stale-plan') {
     throw new SpeciesPublishError('The publish plan is stale.', {

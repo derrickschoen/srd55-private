@@ -1273,6 +1273,66 @@ describe('HA-3 species publisher', () => {
       'SELECT name, base_speed_feet FROM character_species WHERE character_id = ?',
       [character.id],
     )).toEqual({ name: 'Usage Species', base_speed_feet: 35 });
+    expect(db.oneRaw(
+      `SELECT content_kind, superseded_content_key, successor_content_key
+       FROM catalog_content_supersessions`,
+    )).toEqual({
+      content_kind: 'species',
+      superseded_content_key: original.result.content_key,
+      successor_content_key: published.result.content_key,
+    });
+    expect(authoring.list().published.map((entry) => ({
+      key: entry.content_key,
+      superseded_by: entry.superseded_by,
+    }))).toEqual(expect.arrayContaining([
+      {
+        key: original.result.content_key,
+        superseded_by: published.result.content_key,
+      },
+      { key: published.result.content_key, superseded_by: null },
+    ]));
+  });
+
+  it('CI7-VERSION-ATOMIC rolls the new aggregate and lineage back together', async () => {
+    const db = await database();
+    const authoring = service(db);
+    const original = publish(authoring, savedSpecies(authoring, 'Atomic Version Species'));
+    const copied = authoring.createDraft({
+      content_kind: 'species',
+      base_content_key: original.result.content_key,
+    });
+    if (copied.document.kind !== 'species') throw new Error('Copied draft is not species.');
+    const revised = authoring.saveDraft({
+      draft_uuid: copied.draft_uuid,
+      expected_revision: copied.revision,
+      document: { ...copied.document, name: 'Atomic Version Species Revised' },
+    });
+    const preview = authoring.previewPublish({
+      draft_uuid: revised.draft_uuid,
+      expected_revision: revised.revision,
+    });
+    db.exec(
+      `CREATE TEMP TRIGGER ci7_refuse_supersession
+       BEFORE INSERT ON catalog_content_supersessions
+       BEGIN SELECT RAISE(ABORT, 'CI7 injected supersession failure'); END`,
+    );
+
+    expect(authoringError(() => authoring.commitPublish({
+      token: preview.token,
+      decisions: [],
+    })).data).toEqual({ reason: 'publish_refused', refusal: 'commit_failed' });
+    expect(db.scalar<number>('SELECT count(*) FROM catalog_content_supersessions')).toBe(0);
+    expect(db.scalar<number>(
+      `SELECT count(*) FROM species_definitions
+       WHERE content_key = 'expanded:content.species:atomic-version-species-revised'`,
+    )).toBe(0);
+    expect(authoring.readDraft(revised.draft_uuid).revision).toBe(revised.revision);
+    expect(authoring.list().published).toEqual([
+      expect.objectContaining({
+        content_key: original.result.content_key,
+        superseded_by: null,
+      }),
+    ]);
   });
 
   it('rolls registry, both roots, children, and draft deletion back as one transaction', async () => {

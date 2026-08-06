@@ -199,6 +199,61 @@ export const catalog_content_identities = sqliteTable(
   ],
 );
 
+/**
+ * Recipient-local version lineage for immutable external catalog content.
+ * The old and new aggregates both remain installed; this row is metadata for
+ * library presentation and later explicit replacement workflows only.
+ */
+export const catalog_content_supersessions = sqliteTable(
+  'catalog_content_supersessions',
+  {
+    content_kind: varchar<ContentKind>()('content_kind').notNull(),
+    superseded_content_key: varchar<ContentKey>()(
+      'superseded_content_key',
+    ).notNull(),
+    successor_content_key: varchar<ContentKey>()(
+      'successor_content_key',
+    ).notNull(),
+    recorded_at: datetime<Timestamp>()('recorded_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    check(
+      'catalog_content_supersessions_content_kind_check',
+      oneOf('content_kind', contentKinds),
+    ),
+    check(
+      'catalog_content_supersessions_distinct_keys_check',
+      sql`${table.superseded_content_key} <> ${table.successor_content_key}`,
+    ),
+    foreignKey({
+      name: 'catalog_content_supersessions_superseded_foreign',
+      columns: [table.content_kind, table.superseded_content_key],
+      foreignColumns: [
+        catalog_content_identities.content_kind,
+        catalog_content_identities.content_key,
+      ],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'catalog_content_supersessions_successor_foreign',
+      columns: [table.content_kind, table.successor_content_key],
+      foreignColumns: [
+        catalog_content_identities.content_kind,
+        catalog_content_identities.content_key,
+      ],
+    }).onDelete('restrict'),
+    primaryKey({
+      name: 'catalog_content_supersessions_primary',
+      columns: [table.content_kind, table.superseded_content_key],
+    }),
+    index('catalog_content_supersessions_successor_index').on(
+      table.content_kind,
+      table.successor_content_key,
+    ),
+  ],
+);
+
 export const catalog_content_fingerprints = sqliteTable(
   'catalog_content_fingerprints',
   {
