@@ -13,6 +13,7 @@ function historyHarness(initialUrl: string): {
   readonly back: () => void;
   readonly forward: () => void;
   readonly go: (delta: number) => void;
+  readonly navigateLikeBrowserFixture: (target: string, state?: unknown) => void;
   readonly settled: () => Promise<void>;
 } {
   const events = new EventTarget();
@@ -84,6 +85,10 @@ function historyHarness(initialUrl: string): {
     back: history.back,
     forward: history.forward,
     go: history.go,
+    navigateLikeBrowserFixture: (target, state = null) => {
+      history.pushState(state, '', target);
+      events.dispatchEvent(new Event('popstate'));
+    },
     settled: () =>
       pendingMoves === 0
         ? Promise.resolve()
@@ -96,6 +101,61 @@ function urls(entries: readonly HistoryEntry[]): readonly string[] {
 }
 
 describe('router history-stack navigation guards', () => {
+  it('mounts each route when the browser fixture pushes a URL and dispatches popstate', () => {
+    const harness = historyHarness('https://example.test/');
+    const router = new Router(harness.windowObject);
+    const visited: string[] = [];
+    router.start();
+    router.subscribe((route) => visited.push(route.path));
+
+    harness.navigateLikeBrowserFixture('/characters/7/sheet');
+    harness.navigateLikeBrowserFixture('/characters/7/print');
+    harness.navigateLikeBrowserFixture('/characters/7/sheet');
+
+    expect(router.current.path).toBe('/characters/7/sheet');
+    expect(visited).toEqual([
+      '/characters/7/sheet',
+      '/characters/7/print',
+      '/characters/7/sheet',
+    ]);
+    router.stop();
+  });
+
+  it('merges its position into state supplied by an external history push', () => {
+    const harness = historyHarness('https://example.test/');
+    const router = new Router(harness.windowObject);
+    router.start();
+
+    harness.navigateLikeBrowserFixture('/characters/7/sheet', {
+      fixtureState: 'retained',
+    });
+
+    expect(harness.entries()[1]?.state).toMatchObject({
+      fixtureState: 'retained',
+      srd55RouterHistoryPosition: 1,
+    });
+    router.stop();
+  });
+
+  it('repairs refusal of an external history push without changing the stack', async () => {
+    const harness = historyHarness('https://example.test/');
+    const router = new Router(harness.windowObject);
+    const visited: string[] = [];
+    router.start();
+    router.subscribe((route) => visited.push(route.path));
+    const removeGuard = router.registerNavigationGuard(() => false);
+
+    harness.navigateLikeBrowserFixture('/characters/7/sheet');
+    await harness.settled();
+
+    expect(urls(harness.entries())).toEqual(['/', '/characters/7/sheet']);
+    expect(harness.index()).toBe(0);
+    expect(router.current.path).toBe('/');
+    expect(visited).toEqual([]);
+    removeGuard();
+    router.stop();
+  });
+
   it('forward-refusal leaves the history stack unchanged', async () => {
     const harness = historyHarness('https://example.test/a');
     const router = new Router(harness.windowObject);

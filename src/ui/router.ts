@@ -72,16 +72,30 @@ export class Router {
   #acceptedHistoryPosition: number;
   #pendingPopStateRepairTarget: number | null = null;
   readonly #onPopState = (event: PopStateEvent): void => {
-    const targetPosition = historyPosition(event.state);
+    const targetUrl = new URL(this.windowObject.location.href);
+    const currentHistoryState = this.windowObject.history.state;
+    let targetPosition =
+      historyPosition(event.state) ?? historyPosition(currentHistoryState);
     if (targetPosition === null) {
-      throw new Error('Router history entry has no position.');
+      /**
+       * A caller outside Router may use the History API and then dispatch the
+       * popstate notification that asks the application to mount the new URL.
+       * Such a push is the adjacent entry after the last route Router accepted.
+       * Adopt and stamp it before guard handling so a refusal can still return
+       * with history.go(-1), preserving the stack instead of replacing it.
+       */
+      targetPosition = this.#acceptedHistoryPosition + 1;
+      this.windowObject.history.replaceState(
+        withHistoryPosition(currentHistoryState, targetPosition),
+        '',
+        targetUrl,
+      );
     }
     if (targetPosition === this.#pendingPopStateRepairTarget) {
       this.#pendingPopStateRepairTarget = null;
       return;
     }
     this.#pendingPopStateRepairTarget = null;
-    const targetUrl = new URL(this.windowObject.location.href);
     const target = parseRoute(targetUrl);
     if (!this.#allows(target, 'popstate')) {
       const delta = this.#acceptedHistoryPosition - targetPosition;
