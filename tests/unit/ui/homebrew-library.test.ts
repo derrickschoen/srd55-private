@@ -564,9 +564,12 @@ describe('HA-6 homebrew library routing and tabs', () => {
       });
       const root = interactiveElement(screenContext.root);
 
-      expect(root.querySelector('[data-authoring-form-kind="subclass"]')).not.toBeNull();
-      expect(root.querySelector('form')?.getAttribute('aria-label'))
-        .toBe('Subclass authoring form');
+      const formMount = root.querySelector('[data-authoring-form-kind="subclass"]');
+      expect(formMount).not.toBeNull();
+      // The accessible name lives on the mount alone (species convention);
+      // a second label on the form element is a strict-mode ambiguity.
+      expect(formMount?.getAttribute('aria-label')).toBe('Subclass authoring form');
+      expect(root.querySelector('form')?.getAttribute('aria-label')).toBeNull();
       expect(root.querySelectorAll('option').map((option) => option.textContent))
         .toContain('Fighter');
       cleanup();
