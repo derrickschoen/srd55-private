@@ -13,7 +13,11 @@ import {
   type ContentImportProjection,
 } from '../catalog/content-adoption';
 import { deriveContentIdentityV1 } from '../catalog/content-identity';
-import { projectAuthoredContentAggregateV1 } from '../catalog/stored-authored-content-projector-v1';
+import {
+  projectAuthoredContentAggregateV1,
+  readStoredAuthoredContentAggregateV1,
+  storedAuthoredRegistryReferencesV1,
+} from '../catalog/stored-authored-content-projector-v1';
 import { portableSubclassContentImportNode } from '../backup/portable-content';
 import type {
   AuthoringValidationIssue,
@@ -227,6 +231,7 @@ function overrideProgression(
 export function subclassDraftToAggregate(
   db: DatabaseContext,
   draft: SubclassAuthoringDraft,
+  baseContentKey: ContentKey | null,
 ): SubclassContentAggregate {
   const issues: AuthoringValidationIssue[] = [];
   authoringNonEmpty(draft.name, ['name'], issues);
@@ -292,7 +297,7 @@ export function subclassDraftToAggregate(
   ) {
     throw new SubclassSemanticValidationError(Object.freeze(issues));
   }
-  return Object.freeze({
+  const aggregate = Object.freeze({
     kind: 'subclass',
     name: draft.name.trim(),
     rules_edition: draft.rules_edition,
@@ -302,6 +307,35 @@ export function subclassDraftToAggregate(
     progression,
     features: Object.freeze(features),
   });
+  if (aggregate.progression.mode === 'root_only') {
+    let unchangedRootOnlyCopy = false;
+    if (baseContentKey !== null) {
+      try {
+        const base = readStoredAuthoredContentAggregateV1(db, {
+          kind: 'subclass',
+          contentKey: baseContentKey,
+          references: storedAuthoredRegistryReferencesV1(db),
+        });
+        unchangedRootOnlyCopy =
+          base.progression.mode === 'root_only' &&
+          canonicalJson(base) === canonicalJson(aggregate);
+      } catch {
+        // The normal validation issue below is the public boundary for a stale
+        // or otherwise unreadable copied base.
+      }
+    }
+    if (!unchangedRootOnlyCopy) {
+      const preservationIssues: AuthoringValidationIssue[] = [];
+      authoringIssue(
+        preservationIssues,
+        ['progression'],
+        'invalid_value',
+        'Root-only progression can only preserve an unchanged copy of published content; authored spellcasting requires a dense 20-level override.',
+      );
+      throw new SubclassSemanticValidationError(Object.freeze(preservationIssues));
+    }
+  }
+  return aggregate;
 }
 
 function assertedKeyFor(aggregate: SubclassContentAggregate): ContentKey {
@@ -354,7 +388,7 @@ export function previewSubclassPublish(db: DatabaseContext, draft: StoredHomebre
   if (draft.content_kind !== 'subclass' || draft.document.kind !== 'subclass') {
     throw new SubclassPublishError('HA-5 publishes subclass drafts only.', { reason: 'invalid_reference' });
   }
-  const aggregate = subclassDraftToAggregate(db, draft.document);
+  const aggregate = subclassDraftToAggregate(db, draft.document, draft.base_content_key);
   const assertedKey = assertedKeyFor(aggregate);
   const node = authoringNode(db, aggregate, assertedKey);
   const plan = planContentImport(db, [node], Object.freeze({}), Object.freeze([]), operationIdentity(draft, aggregate));

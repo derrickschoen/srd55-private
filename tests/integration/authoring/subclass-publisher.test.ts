@@ -36,6 +36,7 @@ import type { ContentKey } from '../../../src/domain/ids';
 import { SourceRuleReader } from '../../../src/grants/source-rule-reader';
 import { BuildReportBuilder } from '../../../src/reports/build-report-builder';
 import { SavePointQueries } from '../../../src/queries/save-points';
+import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
 import { SheetContentLookup } from '../../../src/rules/sheet-content-lookup';
 import { attacksPerAction } from '../../../src/rules/sheet';
 import { raiseClassLevelForTest } from '../../helpers/class-levels';
@@ -216,6 +217,33 @@ function fingerprintedSpellKey(db: DatabaseContext): ContentKey {
   throw new Error('A uniquely fingerprinted spell is required.');
 }
 
+function installPublishedRootOnlySubclass(
+  db: DatabaseContext,
+  authoring: CatalogAuthoringService,
+  name: string,
+): ContentKey {
+  const draft = savedSubclass(authoring, name);
+  const preview = authoring.previewPublish({
+    draft_uuid: draft.draft_uuid,
+    expected_revision: draft.revision,
+  });
+  if (preview.aggregate.kind !== 'subclass') throw new Error('Subclass aggregate is required.');
+  const contentKey = assertedExternalContentKey('subclass', 'expanded', name);
+  const node = portableSubclassContentImportNode(db, {
+    ...preview.aggregate,
+    progression: {
+      mode: 'root_only',
+      spellcasting_ability: 'intelligence',
+      caster_fraction: '1/3',
+      caster_rounding: 'down',
+    },
+  }, contentKey);
+  const plan = planContentImport(db, [node]);
+  const committed = commitContentImport(db, { nodes: [node], token: plan.token });
+  if (committed.kind !== 'committed') throw new Error('Root-only subclass fixture did not install.');
+  return contentKey;
+}
+
 describe('HA-5 subclass publisher', () => {
   it('collects parent, dense progression, feature, duplicate, and effect errors before install', async () => {
     const db = await database();
@@ -304,7 +332,81 @@ describe('HA-5 subclass publisher', () => {
     });
   });
 
-  it('materializes the typed 20-level override and proves report, grant, and spell-access consumers', async () => {
+  it('refuses fresh root_only third-caster spellcasting without a dense progression', async () => {
+    const db = await database();
+    const authoring = service(db);
+    const draft = savedSubclass(authoring, 'Sparse Third Caster', (document) => ({
+      ...document,
+      progression: {
+        mode: 'root_only',
+        spellcasting_ability: 'intelligence',
+        caster_fraction: '1/3',
+        caster_rounding: 'down',
+      },
+    }));
+    expect(authoringError(() => authoring.previewPublish({
+      draft_uuid: draft.draft_uuid,
+      expected_revision: draft.revision,
+    })).data).toMatchObject({
+      reason: 'validation_failed',
+      issues: [{ path: ['progression'], code: 'invalid_value' }],
+    });
+  });
+
+  it('refuses a spellcasting-ability override on a copied root_only progression', async () => {
+    const db = await database();
+    const authoring = service(db);
+    const baseKey = installPublishedRootOnlySubclass(db, authoring, 'Copied Root Ward');
+    const copied = authoring.createDraft({ content_kind: 'subclass', base_content_key: baseKey });
+    if (copied.document.kind !== 'subclass' || copied.document.progression.mode !== 'root_only') {
+      throw new Error('A copied root-only subclass is required.');
+    }
+    const changed = authoring.saveDraft({
+      draft_uuid: copied.draft_uuid,
+      expected_revision: copied.revision,
+      document: {
+        ...copied.document,
+        progression: {
+          ...copied.document.progression,
+          spellcasting_ability: copied.document.progression.spellcasting_ability === 'charisma'
+            ? 'wisdom'
+            : 'charisma',
+        },
+      },
+    });
+    expect(authoringError(() => authoring.previewPublish({
+      draft_uuid: changed.draft_uuid,
+      expected_revision: changed.revision,
+    })).data).toMatchObject({
+      reason: 'validation_failed',
+      issues: [{ path: ['progression'], code: 'invalid_value' }],
+    });
+  });
+
+  it('round-trips an unchanged copy-from-published root_only progression', async () => {
+    const db = await database();
+    const authoring = service(db);
+    const baseKey = installPublishedRootOnlySubclass(db, authoring, 'Round Trip Root Ward');
+    const copied = authoring.createDraft({ content_kind: 'subclass', base_content_key: baseKey });
+    const preview = authoring.previewPublish({
+      draft_uuid: copied.draft_uuid,
+      expected_revision: copied.revision,
+    });
+    expect(preview.aggregate).toMatchObject({
+      kind: 'subclass',
+      progression: { mode: 'root_only' },
+    });
+    expect(preview.review).toEqual([]);
+    expect(authoring.commitPublish({
+      token: preview.token,
+      decisions: [],
+    })).toMatchObject({
+      outcome: 'matched_existing',
+      content_key: baseKey,
+    });
+  });
+
+  it('materializes the typed 20-level override and reports level 7 slots as 4/2', async () => {
     const db = await database();
     const authoring = service(db);
     const spellKey = fingerprintedSpellKey(db);
@@ -327,6 +429,13 @@ describe('HA-5 subclass publisher', () => {
         spell_content_key: String(spell.content_key) as ContentKey,
         always_prepared: true,
       }],
+    };
+    rows[6] = {
+      ...rows[6]!,
+      cantrips_known: 2,
+      prepared_or_known_count: 5,
+      maximum_spell_level: 2,
+      slot_counts: [4, 2, 0, 0, 0, 0, 0, 0, 0],
     };
     const draft = savedSubclass(authoring, 'Dense Aegis', (document) => ({
       ...document,
@@ -353,17 +462,20 @@ describe('HA-5 subclass publisher', () => {
       [published.result.content_key],
     )).toBe(20);
 
-    const character = characterWithSubclass(db, published.result.content_key, 6);
-    const reportClass = new BuildReportBuilder(db).build(character.characterId).classes[0];
+    const character = characterWithSubclass(db, published.result.content_key, 7);
+    const report = new BuildReportBuilder(db).build(character.characterId);
+    const reportClass = report.classes[0];
     expect(reportClass).toMatchObject({
       name: 'Fighter',
       subclass: 'Dense Aegis',
-      class_level: 6,
+      class_level: 7,
       spellcasting_ability: 'intelligence',
       progression_type: 'third_down',
-      prepared_count: 4,
-      max_preparable_level: 3,
+      prepared_count: 5,
+      max_preparable_level: 2,
     });
+    expect(report.caster.slots, 'level 7 authored third-caster slots are 4 first-level and 2 second-level')
+      .toEqual([{ level: 1, count: 4 }, { level: 2, count: 2 }]);
     expect(new SourceRuleReader(db).activeRulesForSource(character.sourceId).map((rule) => rule.ruleKey))
       .toContain('aegis-map-spell');
     expect(new SpellAccessBuilder(db).buildForCharacter(character.characterId)).toEqual(expect.arrayContaining([
@@ -377,39 +489,45 @@ describe('HA-5 subclass publisher', () => {
     ]));
   }, 20_000);
 
-  it('applies multiple feature effects only at levels 3, 6, and 14', async () => {
+  it('applies authored resistance and attack mechanics only at levels 3, 6, and 14', async () => {
     const db = await database();
     const authoring = service(db);
-    const published = publish(authoring, savedSubclass(authoring, 'Threshold Aegis'));
+    const published = publish(authoring, savedSubclass(authoring, 'Threshold Aegis', (document) => ({
+      ...document,
+      parent_class_content_key: '2024:class:bard' as ContentKey,
+      features: document.features.map((feature) => {
+        if (feature.class_level !== 6 && feature.class_level !== 14) return feature;
+        return {
+          ...feature,
+          effects: [{
+            kind: 'extra_attack' as const,
+            draft_item_uuid: itemUuid(`threshold-attack-${String(feature.class_level)}`),
+            label: feature.name,
+            notes: null,
+            attack_count: feature.class_level === 6 ? 2 : 3,
+            weapon_scope: 'any_weapon' as const,
+          }],
+        };
+      }),
+    })));
     const character = characterWithSubclass(db, published.result.content_key, 3);
-    const generatedCount = () => Number(db.scalar(
-      `SELECT count(*) FROM character_effects
-       WHERE character_id = ? AND template_ref LIKE 'subclass_feature_effects:%'`,
-      [character.characterId],
-    ));
-    expect(generatedCount()).toBe(2);
-    for (const [level, count] of [[6, 3], [13, 3], [14, 4]] as const) {
+    const sheet = () => new CharacterSheetBuilder(db).build(character.characterId);
+    expect(sheet()).toMatchObject({
+      attacks_per_action: { count: 1, unresolved: [] },
+      damage_resistances: ['Void'],
+    });
+    for (const [level, attackCount] of [[6, 2], [13, 2], [14, 3]] as const) {
       raiseClassLevelForTest(db, character.characterId, character.classId, level);
       new UpdateClassCommand(
         db,
         { type: 'update_class', class_definition_id: character.classId, subclass_definition_id: character.subclassId },
         new CharacterCommandIntegrity(`ha5-threshold-${String(level)}`),
       ).apply(character.characterId);
-      expect(generatedCount(), `Fighter ${String(level)}`).toBe(count);
+      expect(sheet(), `Bard ${String(level)}`).toMatchObject({
+        attacks_per_action: { count: attackCount, unresolved: [] },
+        damage_resistances: ['Void'],
+      });
     }
-    expect(db.allRaw(
-      `SELECT feature.class_level, feature.name, feature.description,
-              count(effect.id) AS effect_count
-       FROM subclass_features AS feature
-       LEFT JOIN subclass_feature_effects AS effect ON effect.subclass_feature_id = feature.id
-       WHERE feature.subclass_definition_id = ?
-       GROUP BY feature.id ORDER BY feature.sort_order`,
-      [character.subclassId],
-    )).toEqual([
-      { class_level: 3, name: 'Aegis', description: 'The first mapped defense becomes available.', effect_count: 2 },
-      { class_level: 6, name: 'Second Route', description: 'A second defense is charted.', effect_count: 1 },
-      { class_level: 14, name: 'Aegis', description: 'The original defense reaches its final form.', effect_count: 1 },
-    ]);
   });
 
   it('publishes prose plus the feature-only Extra Attack mechanic at its class threshold', async () => {
@@ -619,6 +737,102 @@ describe('HA-5 subclass publisher', () => {
     expect(authoring.readDraft(draft.draft_uuid).revision).toBe(draft.revision);
   });
 
+  it('binds divergent-Match identical effect payloads to their correct subclass features', async () => {
+    const identicalFeatureEffects = (document: SubclassAuthoringDraft): SubclassAuthoringDraft => ({
+      ...document,
+      features: [
+        {
+          draft_item_uuid: itemUuid('shared-first-feature'),
+          class_level: 3,
+          name: 'First Shared Ward',
+          description: 'The first feature carries the shared effect.',
+          effects: [{
+            kind: 'armor_class_bonus',
+            draft_item_uuid: itemUuid('shared-first-effect'),
+            label: 'Shared ward',
+            notes: null,
+            amount: 1,
+          }],
+        },
+        {
+          draft_item_uuid: itemUuid('shared-second-feature'),
+          class_level: 6,
+          name: 'Second Shared Ward',
+          description: 'The second feature carries the same effect.',
+          effects: [{
+            kind: 'armor_class_bonus',
+            draft_item_uuid: itemUuid('shared-second-effect'),
+            label: 'Shared ward',
+            notes: null,
+            amount: 1,
+          }],
+        },
+      ],
+    });
+    const source = await database();
+    const sourceAuthoring = service(source);
+    const published = publish(sourceAuthoring, savedSubclass(
+      sourceAuthoring,
+      'Divergent Feature Aegis',
+      identicalFeatureEffects,
+    ));
+    const character = characterWithSubclass(source, published.result.content_key, 6);
+    const document = exportCharacterBackup(source, character.characterId, '2042-06-10T00:00:00.000Z');
+
+    const target = await database();
+    const targetAuthoring = service(target);
+    publish(targetAuthoring, savedSubclass(
+      targetAuthoring,
+      'Divergent Feature Aegis',
+      (draft) => ({
+        ...identicalFeatureEffects(draft),
+        reference_text: 'A deliberately divergent local revision.',
+      }),
+    ));
+    const plan = planCharacterBackupImport(target, document);
+    expect(plan.reviews).toEqual([
+      expect.objectContaining({
+        kind: 'subclass',
+        targetContentKey: published.result.content_key,
+        matchClass: 'key-collision',
+      }),
+    ]);
+    const committed = commitCharacterBackupImport(
+      target,
+      document,
+      plan.token,
+      Object.fromEntries(plan.reviews.map((review) => [
+        review.id,
+        { decision: 'match' as const },
+      ])),
+    );
+    expect(committed.kind).toBe('committed');
+    if (committed.kind !== 'committed') throw new Error('Character import did not commit.');
+    expect(committed.result.notices).toEqual([]);
+    const targetFeatureRefs = target.allRaw(
+      `SELECT feature.name,
+              'subclass_feature_effects:' || effect.id AS template_ref
+       FROM subclass_feature_effects AS effect
+       JOIN subclass_features AS feature ON feature.id = effect.subclass_feature_id
+       JOIN subclass_definitions AS subclass ON subclass.id = feature.subclass_definition_id
+       WHERE subclass.content_key = ?
+       ORDER BY feature.sort_order, effect.sort_order`,
+      [published.result.content_key],
+    );
+    expect(targetFeatureRefs.map((row) => row.name)).toEqual([
+      'First Shared Ward',
+      'Second Shared Ward',
+    ]);
+    expect(target.allRaw(
+      `SELECT template_ref FROM character_effects
+       WHERE character_id = ? AND label = 'Shared ward'
+       ORDER BY sort_order`,
+      [committed.result.characterId],
+    ).map((row) => row.template_ref)).toEqual(
+      targetFeatureRefs.map((row) => row.template_ref),
+    );
+  }, 20_000);
+
   it('rebinds current and save-point subclass effect refs to target-local ids and notices modified payloads', async () => {
     const source = await database();
     const sourceAuthoring = service(source);
@@ -696,5 +910,101 @@ describe('HA-5 subclass publisher', () => {
       [alteredCommit.result.characterId],
     )).toEqual({ amount: 99, template_ref: null });
   // Measured alone at 2.46s on 2026-08-06; two full backup imports are intentional.
+  }, 20_000);
+
+  it('imports numeric legacy subclass refs as null with typed notices in current and save-point paths', async () => {
+    const source = await database();
+    const sourceAuthoring = service(source);
+    const published = publish(sourceAuthoring, savedSubclass(sourceAuthoring, 'Numeric Ref Aegis'));
+    const character = characterWithSubclass(source, published.result.content_key, 3);
+    new SavePointQueries(source, undefined, () => '2042-06-10T00:00:00.000Z')
+      .create(character.characterId, 'Numeric subclass refs before export');
+    const exported = exportCharacterBackup(source, character.characterId, '2042-06-10T00:00:00.000Z');
+    let currentReplaced = false;
+    let savePointReplaced = false;
+    const document = {
+      ...exported,
+      tables: {
+        ...exported.tables,
+        character_effects: exported.tables.character_effects.map((row) => {
+          if (!currentReplaced && row.label === 'First Aegis') {
+            currentReplaced = true;
+            return { ...row, template_ref: 9001 };
+          }
+          return row;
+        }),
+        character_save_points: exported.tables.character_save_points.map((row) => {
+          const snapshot = JSON.parse(String(row.snapshot)) as {
+            character_effects: Array<Record<string, unknown>>;
+            readonly [table: string]: unknown;
+          };
+          return {
+            ...row,
+            snapshot: JSON.stringify({
+              ...snapshot,
+              character_effects: snapshot.character_effects.map((effect) => {
+                if (!savePointReplaced && effect.label === 'First Aegis') {
+                  savePointReplaced = true;
+                  return { ...effect, template_ref: 9002 };
+                }
+                return effect;
+              }),
+            }),
+          };
+        }),
+      },
+    };
+    expect({ currentReplaced, savePointReplaced }).toEqual({
+      currentReplaced: true,
+      savePointReplaced: true,
+    });
+
+    const target = await database();
+    const plan = planCharacterBackupImport(target, document);
+    const committed = commitCharacterBackupImport(target, document, plan.token);
+    expect(committed.kind).toBe('committed');
+    if (committed.kind !== 'committed') throw new Error('Character import did not commit.');
+    expect(committed.result.notices).toHaveLength(2);
+    expect(committed.result.notices).toEqual(expect.arrayContaining([
+      {
+        kind: 'subclass_effect_template_ref_unresolved',
+        effect: {
+          templateRef: '9001',
+          label: 'First Aegis',
+          effectKind: 'armor_class_bonus',
+        },
+        subclass: {
+          contentKey: published.result.content_key,
+          name: 'Numeric Ref Aegis',
+        },
+      },
+      {
+        kind: 'subclass_effect_template_ref_unresolved',
+        effect: {
+          templateRef: '9002',
+          label: 'First Aegis',
+          effectKind: 'armor_class_bonus',
+        },
+        subclass: {
+          contentKey: published.result.content_key,
+          name: 'Numeric Ref Aegis',
+        },
+      },
+    ]));
+    expect(target.scalar<string>(
+      `SELECT template_ref FROM character_effects
+       WHERE character_id = ? AND label = 'First Aegis'`,
+      [committed.result.characterId],
+    )).toBeNull();
+    const savedSnapshot = target.scalar<string>(
+      'SELECT snapshot FROM character_save_points WHERE character_id = ?',
+      [committed.result.characterId],
+    );
+    if (savedSnapshot === null) throw new Error('Imported save point is missing.');
+    const saved = JSON.parse(savedSnapshot) as {
+      character_effects: Array<{ readonly label: string; readonly template_ref: string | null }>;
+    };
+    expect(saved.character_effects.find((effect) => effect.label === 'First Aegis')?.template_ref)
+      .toBeNull();
   }, 20_000);
 });

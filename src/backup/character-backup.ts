@@ -700,9 +700,9 @@ function validateCharacterRows(
   maps: Readonly<Record<ReferenceKind, Map<number, string>>>,
   label: string,
 ): void {
-  const backgroundSourceIds = new Set(
+  const legacyNumericTemplateRefSourceIds = new Set(
     (tables.character_source_instances ?? [])
-      .filter((row) => row.source_type === 'background')
+      .filter((row) => row.source_type === 'background' || row.source_type === 'subclass')
       .map((row) => row.id),
   );
   for (const table of CHARACTER_STATE_TABLES) {
@@ -726,7 +726,7 @@ function validateCharacterRows(
         table === 'character_effects' &&
         typeof row.template_ref === 'number' &&
         Number.isSafeInteger(row.template_ref) &&
-        backgroundSourceIds.has(row.source_instance_id)
+        legacyNumericTemplateRefSourceIds.has(row.source_instance_id)
           ? { ...row, template_ref: null }
           : legacy === null ? row : legacy.row;
       assertRowShape(
