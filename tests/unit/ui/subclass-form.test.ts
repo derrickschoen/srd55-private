@@ -806,7 +806,7 @@ describe('HA-8 subclass timeline form', () => {
       } = { finish: null };
       let saveCalls = 0;
       const saveExpectedRevisions: DraftRevision[] = [];
-      let laterSavedDocument: SubclassAuthoringDraft | null = null;
+      const laterSave: { document: SubclassAuthoringDraft | null } = { document: null };
       const authoring = client({
         saveDraft: (params) => {
           if (params.document.kind !== 'subclass') throw new Error('Expected subclass.');
@@ -815,7 +815,7 @@ describe('HA-8 subclass timeline form', () => {
           if (saveCalls === 1) {
             return new Promise((resolve) => { saveControl.finish = resolve; });
           }
-          laterSavedDocument = params.document;
+          laterSave.document = params.document;
           return Promise.resolve({ ...stored(params.document), revision: 2 as DraftRevision });
         },
       });
@@ -854,7 +854,7 @@ describe('HA-8 subclass timeline form', () => {
       expect(router.navigate('/blocked-after-in-flight-save')).toBe(false);
       button(root, 'Save draft').click();
       await settle();
-      expect(laterSavedDocument?.name).toBe('Newer local edit');
+      expect(laterSave.document?.name).toBe('Newer local edit');
       expect(saveExpectedRevisions).toEqual([0, 1]);
       expect(router.navigate('/clean-after-latest-save')).toBe(true);
 
