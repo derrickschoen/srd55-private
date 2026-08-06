@@ -23,7 +23,39 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-06-e (newest - read first)
+## RESTART POINT 2026-08-06-f (newest - read first)
+MAIN 959ac04 (mirror pushed). FLOORS: vitest 246/4,049 (onTaskUpdate
+noise rule stands); PW 126 pool; build 0; migrations 0000-0037 FROZEN
+(next free mint 0038); backup v5. THIRTY-THREE merges. Rulings through
+D210.
+
+MERGED SINCE 08-06-e (parallel lanes):
+ - HA-5 (0717c14, 32nd): subclass backend, mint-free. Dense 20-level
+   progressions (root_only = unchanged copy-from-published only, canonical
+   projection equality), REAL-NUMBER consumer pins (level-7 slots 4/2
+   through BuildReportBuilder), subclass template_ref closure - the
+   THREE-KIND matrix now complete (species degradation was missing
+   despite HA-3's record; fixed with pins + class-source negative
+   control). CI-5's template_ref remainder CLOSED for all kinds.
+   HA-EXTERNAL-SELF-MATCH passed. Cap blocker (unpinned refusal type)
+   resolved by supervisor 2-line assertion, disclosed.
+ - HA-6 (959ac04, 33rd): homebrew library + shared form components,
+   mint-free. /homebrew route, draft-conflict modal, ordered cards,
+   compile-coupled effect cards, hostile-string inertness, D108 a11y.
+   Router gained a navigation-guard seam + history-faithful refusal;
+   the PW gate caught a REAL 10-spec Chromium regression (stateless
+   external pushState stranded mounted screens) - root-caused and fixed
+   with a node reproduction. Shared adoption dialog (CI-8) fixed to
+   attach-before-showModal.
+
+QUEUE: unblocked now: CI-7 (L authoring immutability), HA-7 (species
+form), HA-8 (subclass timeline form), HA-9 (background form). HA-10
+(consumer cutover) after 7/8/9; HA-11 after 10; HA-12 after 11. Parked
+owner questions unchanged (Veteran prose vs D152).
+
+WORKTREES: wt/party only (owner's - never prune).
+
+## RESTART POINT 2026-08-06-e (superseded by 08-06-f)
 MAIN 40330a7 (mirror pushed). FLOORS: vitest 242/4,009 (onTaskUpdate
 noise rule stands: all-counts-green + exit 1 -> serial --maxWorkers=1
 adjudication; also: do not run full suites while codex targeted runs are
