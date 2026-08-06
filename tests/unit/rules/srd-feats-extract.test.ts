@@ -472,8 +472,12 @@ describe('bundled SRD feats', () => {
   it('repairs the complete 0023-era feat seed after migration 0024', async () => {
     const sqlite3 = await getSqlite3();
     const oldConnection = new sqlite3.oo1.DB(':memory:', 'c');
+    const featApplicationMigrationIndex = DATABASE_MIGRATIONS.findIndex(
+      (migration) => migration.id === '0024_feat_application_model',
+    );
+    expect(featApplicationMigrationIndex).toBeGreaterThan(0);
     oldConnection.exec(
-      DATABASE_MIGRATIONS.slice(0, -1)
+      DATABASE_MIGRATIONS.slice(0, featApplicationMigrationIndex)
         .map((migration) => migration.sql)
         .join('\n'),
     );
@@ -510,6 +514,12 @@ describe('bundled SRD feats', () => {
         ],
       );
     }
+    expect(
+      oldDb.scalar<number>(
+        `SELECT count(*) FROM catalog_content_identities
+         WHERE content_kind = 'feat' AND key_kind = 'legacy-opaque'`,
+      ),
+    ).toBe(17);
     const oldBytes =
       sqlite3.capi.sqlite3_js_db_export(oldConnection).slice();
     oldConnection.close();
@@ -562,6 +572,18 @@ describe('bundled SRD feats', () => {
              AND grant_rules <> '[]'`,
         ),
       ).toBe(0);
+      expect(
+        migrated.scalar<number>(
+          `SELECT count(*)
+           FROM feat_definitions AS feat
+           JOIN catalog_content_identities AS identity
+             ON identity.content_key = feat.content_key
+            AND identity.content_kind = 'feat'
+           WHERE feat.content_key LIKE '2024:feat:%'
+             AND identity.key_kind = 'bundled-stable'
+             AND identity.catalog_layer = 'bundled'`,
+        ),
+      ).toBe(17);
     } finally {
       lifecycle.close();
     }
