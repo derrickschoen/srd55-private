@@ -359,6 +359,7 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
   let stored = options.draft;
   let document = stored.document;
   let dirty = false;
+  let editGeneration = 0;
   let disposed = false;
   const dialogs: (DraftConflictDialog | ContentAdoptionDialog)[] = [];
   const openLevels = new Set<CharacterLevel>(
@@ -373,6 +374,7 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
 
   const update = (changed: SubclassAuthoringDraft): void => {
     document = changed;
+    editGeneration += 1;
     dirty = true;
     options.mount.querySelector('.subclass-publish-preview')?.remove();
     const status = options.mount.querySelector<HTMLElement>('.subclass-authoring-status');
@@ -1219,6 +1221,7 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
       attributes: { type: 'submit' },
     });
     const saveDraft = async (): Promise<boolean> => {
+      const savedGeneration = editGeneration;
       save.disabled = true;
       preview.disabled = true;
       status.textContent = 'Saving draft…';
@@ -1232,9 +1235,13 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
           throw new TypeError('Saving the subclass draft returned a different content kind.');
         }
         stored = saved as StoredSubclassDraft;
-        document = stored.document;
-        dirty = false;
-        status.textContent = `Saved revision ${String(stored.revision)}.`;
+        if (editGeneration === savedGeneration) {
+          document = stored.document;
+          dirty = false;
+          status.textContent = `Saved revision ${String(stored.revision)}.`;
+        } else {
+          status.textContent = `Saved revision ${String(stored.revision)}; newer unsaved changes remain.`;
+        }
         return true;
       } catch (error) {
         const conflict = draftRevisionConflict(error);
@@ -1304,12 +1311,19 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
         return;
       }
       preview.disabled = true;
+      const previewGeneration = editGeneration;
       status.textContent = 'Validating publish preview…';
       void options.client.previewPublish({
         draft_uuid: stored.draft_uuid,
         expected_revision: stored.revision,
       }).then((publishPreview) => {
         if (disposed) return;
+        if (editGeneration !== previewGeneration) {
+          options.mount.querySelector('.subclass-publish-preview')?.remove();
+          status.textContent = 'Draft changed; preview again.';
+          status.setAttribute('role', 'alert');
+          return;
+        }
         clear(validationMount);
         options.mount.querySelector('.subclass-publish-preview')?.remove();
         const renderedPreview = previewElement(publishPreview);
@@ -1349,6 +1363,12 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
           : 'Preview ready; content adoption review is required.';
       }).catch((error: unknown) => {
         if (disposed) return;
+        if (editGeneration !== previewGeneration) {
+          options.mount.querySelector('.subclass-publish-preview')?.remove();
+          status.textContent = 'Draft changed; preview again.';
+          status.setAttribute('role', 'alert');
+          return;
+        }
         const issues = validationIssues(error);
         if (issues !== null) {
           clear(validationMount);

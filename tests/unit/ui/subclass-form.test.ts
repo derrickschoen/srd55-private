@@ -791,7 +791,117 @@ describe('HA-8 subclass timeline form', () => {
     }
   });
 
-  it('clears a dirty Router guard when publishing starts from a dirty draft', async () => {
+  it('preserves edits made during an in-flight save and keeps the Router guard dirty', async () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const router = new Router(routerWindow(
+        'https://example.test/homebrew/drafts/ha8-subclass-draft',
+      ));
+      const screenRoot = document.createElement('div');
+      const mount = document.createElement('div');
+      screenRoot.append(mount);
+      document.body.append(screenRoot);
+      const saveControl: {
+        finish: ((result: Awaited<ReturnType<AuthoringClient['saveDraft']>>) => void) | null;
+      } = { finish: null };
+      let saveCalls = 0;
+      let laterSavedDocument: SubclassAuthoringDraft | null = null;
+      const authoring = client({
+        saveDraft: (params) => {
+          if (params.document.kind !== 'subclass') throw new Error('Expected subclass.');
+          saveCalls += 1;
+          if (saveCalls === 1) {
+            return new Promise((resolve) => { saveControl.finish = resolve; });
+          }
+          laterSavedDocument = params.document;
+          return Promise.resolve({ ...stored(params.document), revision: 2 as DraftRevision });
+        },
+      });
+      const draft = stored();
+      if (!isStoredSubclassDraft(draft)) throw new Error('Subclass fixture did not narrow.');
+      const cleanup = renderSubclassForm({
+        context: {
+          root: screenRoot,
+          route: router.current,
+          router,
+          rpc: null as never,
+          registerNavigationGuard: (guard) => router.registerNavigationGuard(guard),
+        },
+        client: authoring,
+        mount,
+        draft,
+        parentClasses: parents,
+        confirmLeave: () => false,
+        windowObject: new EventTarget() as unknown as Window,
+      });
+      const root = interactiveElement(mount);
+
+      input(control(root, 'input', 'subclass-name'), 'Snapshot sent to storage');
+      button(root, 'Save draft').click();
+      if (saveControl.finish === null) throw new Error('Save resolver was not installed.');
+      input(control(root, 'input', 'subclass-name'), 'Newer local edit');
+      saveControl.finish({
+        ...stored({ ...draft.document, name: 'Snapshot sent to storage' }),
+        revision: 1 as DraftRevision,
+      });
+      await settle();
+
+      expect(control(root, 'input', 'subclass-name').value).toBe('Newer local edit');
+      expect(root.querySelector('.subclass-authoring-status')?.textContent)
+        .toContain('newer unsaved changes remain');
+      expect(router.navigate('/blocked-after-in-flight-save')).toBe(false);
+      button(root, 'Save draft').click();
+      await settle();
+      expect(laterSavedDocument?.name).toBe('Newer local edit');
+      expect(router.navigate('/clean-after-latest-save')).toBe(true);
+
+      cleanup();
+      router.stop();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('drops a publish preview that resolves after the draft changes', async () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const previewControl: {
+        finish: ((result: PublishPreview) => void) | null;
+      } = { finish: null };
+      const screenContext = context();
+      const mount = document.createElement('div');
+      screenContext.root.append(mount);
+      const draft = stored();
+      if (!isStoredSubclassDraft(draft)) throw new Error('Subclass fixture did not narrow.');
+      const cleanup = renderSubclassForm({
+        context: screenContext,
+        client: client({
+          previewPublish: () => new Promise((resolve) => { previewControl.finish = resolve; }),
+        }),
+        mount,
+        draft,
+        parentClasses: parents,
+        windowObject: new EventTarget() as unknown as Window,
+      });
+      const root = interactiveElement(mount);
+
+      root.querySelector('form')?.dispatchEvent(new Event('submit', { cancelable: true }));
+      if (previewControl.finish === null) throw new Error('Preview resolver was not installed.');
+      input(control(root, 'input', 'subclass-name'), 'Changed during preview');
+      previewControl.finish(preview());
+      await settle();
+
+      expect(root.querySelector('[data-authoring-action="publish-subclass"]')).toBeNull();
+      expect(root.querySelector('.subclass-authoring-status')?.textContent)
+        .toBe('Draft changed; preview again.');
+      expect(button(root, 'Preview publish').disabled).toBe(false);
+      cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('clears a dirty Router guard only when a connected publish resolves', async () => {
     const restoreDocument = installInteractiveDocument();
     try {
       const router = new Router(routerWindow(
@@ -829,10 +939,11 @@ describe('HA-8 subclass timeline form', () => {
       root.querySelector('form')?.dispatchEvent(new Event('submit', { cancelable: true }));
       await settle();
       const publish = button(root, 'Publish subclass');
-      input(control(root, 'input', 'subclass-name'), 'Dirty while publishing');
-      expect(router.navigate('/blocked-before-dirty-publish')).toBe(false);
+      expect(publish.isConnected).toBe(true);
       publish.click();
       if (publishControl.finish === null) throw new Error('Publish resolver was not installed.');
+      input(control(root, 'input', 'subclass-name'), 'Dirty while publishing');
+      expect(router.navigate('/blocked-before-dirty-publish')).toBe(false);
       publishControl.finish({
         outcome: 'created',
         content_key: 'expanded:subclass:dirty-publish' as ContentKey,

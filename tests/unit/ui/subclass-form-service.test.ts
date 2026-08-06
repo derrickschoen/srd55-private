@@ -519,6 +519,13 @@ describe('HA-8 production-service form boundaries', () => {
       const rendered = render(service, db, saved);
       rendered.root.querySelector('form')?.dispatchEvent(new Event('submit', { cancelable: true }));
       await settle();
+      const installedSubclassId = db.scalar<number>(
+        `SELECT seq + 1 FROM sqlite_sequence WHERE name = 'subclass_definitions'`,
+      ) ?? 1;
+      const firstInstalledFeatureId = db.scalar<number>(
+        `SELECT seq + 1 FROM sqlite_sequence WHERE name = 'subclass_features'`,
+      ) ?? 1;
+      const secondInstalledFeatureId = firstInstalledFeatureId + 1;
       db.exec(
         `CREATE TEMP TRIGGER ha8_refuse_draft_delete
          BEFORE DELETE ON catalog_content_drafts
@@ -537,25 +544,17 @@ describe('HA-8 production-service form boundaries', () => {
         `SELECT
            (SELECT count(*) FROM catalog_content_identities WHERE content_key = ?) AS identities,
            (SELECT count(*) FROM catalog_content_fingerprints WHERE content_key = ?) AS fingerprints,
-           (SELECT count(*) FROM catalog_content_aliases WHERE content_key = ? OR alias_key = ?) AS aliases,
-           (SELECT count(*) FROM catalog_content_match_decisions WHERE target_content_key = ?) AS review_decisions,
            (SELECT count(*) FROM subclass_definitions WHERE content_key = ?) AS definitions,
-           (SELECT count(*) FROM subclass_progressions WHERE subclass_definition_id IN
-             (SELECT id FROM subclass_definitions WHERE content_key = ?)) AS progressions,
-           (SELECT count(*) FROM subclass_features WHERE subclass_definition_id IN
-             (SELECT id FROM subclass_definitions WHERE content_key = ?)) AS features,
-           (SELECT count(*) FROM subclass_feature_effects WHERE subclass_feature_id IN
-             (SELECT id FROM subclass_features WHERE subclass_definition_id IN
-               (SELECT id FROM subclass_definitions WHERE content_key = ?))) AS effects`,
+           (SELECT count(*) FROM subclass_progressions WHERE subclass_definition_id = ?) AS progressions,
+           (SELECT count(*) FROM subclass_features WHERE subclass_definition_id = ?) AS features,
+           (SELECT count(*) FROM subclass_feature_effects WHERE subclass_feature_id IN (?, ?)) AS effects`,
         [
-          contentKey, contentKey, contentKey, contentKey, contentKey,
-          contentKey, contentKey, contentKey, contentKey,
+          contentKey, contentKey, contentKey, installedSubclassId,
+          installedSubclassId, firstInstalledFeatureId, secondInstalledFeatureId,
         ],
       )).toEqual({
         identities: 0,
         fingerprints: 0,
-        aliases: 0,
-        review_decisions: 0,
         definitions: 0,
         progressions: 0,
         features: 0,
@@ -566,6 +565,98 @@ describe('HA-8 production-service form boundaries', () => {
       restoreDocument();
     }
   });
+
+  it('rolls back an alias-backed reviewed Match decision at the last publish step', async () => {
+    const { service, db } = await fixture();
+    const parent = listGuidedClassOptions(db).find((candidate) => candidate.name === 'Fighter');
+    if (parent === undefined) throw new Error('Bundled Fighter is required.');
+    const created = service.createDraft({ content_kind: 'subclass' });
+    const incoming = service.saveDraft({
+      draft_uuid: created.draft_uuid,
+      expected_revision: created.revision,
+      document: validDocument(
+        created,
+        parent.content_key as ContentKey,
+        'Refused Reviewed Timeline',
+      ),
+    });
+    const initialPreview = service.previewPublish({
+      draft_uuid: incoming.draft_uuid,
+      expected_revision: incoming.revision,
+    });
+    if (initialPreview.aggregate.kind !== 'subclass') {
+      throw new Error('Incoming preview is not subclass.');
+    }
+    const targetKey = 'expanded:alternate.owner:refused-reviewed-timeline' as ContentKey;
+    const targetNode = portableSubclassContentImportNode(db, initialPreview.aggregate, targetKey);
+    const targetPlan = planContentImport(db, [targetNode]);
+    expect(commitContentImport(db, {
+      nodes: [targetNode],
+      token: targetPlan.token,
+    }).kind).toBe('committed');
+    const aliasKey = assertedExternalContentKey(
+      'subclass',
+      'expanded',
+      'Refused Reviewed Timeline',
+    );
+    registerContentAlias(db, {
+      kind: 'subclass',
+      aliasKey,
+      contentKey: targetKey,
+      aliasKind: 'declared-legacy',
+    });
+    const reviewedPreview = service.previewPublish({
+      draft_uuid: incoming.draft_uuid,
+      expected_revision: incoming.revision,
+    });
+    expect(reviewedPreview.review).toEqual([{
+      candidate_content_key: targetKey,
+      candidate_name: 'Refused Reviewed Timeline',
+      reason: 'alias',
+      default_decision: 'match',
+    }]);
+    const incomingIdentity = reviewedPreview.facts.candidate_identities[0];
+    if (incomingIdentity === undefined) throw new Error('Incoming identity is missing.');
+
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const rendered = render(service, db, incoming);
+      rendered.root.querySelector('form')?.dispatchEvent(new Event('submit', { cancelable: true }));
+      await settle();
+      db.exec(
+        `CREATE TEMP TRIGGER ha8_refuse_reviewed_draft_delete
+         BEFORE DELETE ON catalog_content_drafts
+         WHEN OLD.draft_uuid = '${incoming.draft_uuid}'
+         BEGIN SELECT RAISE(ABORT, 'ha8 reviewed publish rollback'); END`,
+      );
+      button(rendered.root, 'Publish subclass').click();
+      const modal = interactiveElement(document.body)
+        .querySelector('[data-testid="content-adoption-modal"]');
+      if (modal === null) throw new Error('Adoption modal did not open.');
+      button(modal, 'Publish with these choices').click();
+      await settle();
+
+      expect(modal.querySelector('[role="alert"]')?.textContent)
+        .toBe('The subclass publish transaction was refused.');
+      expect(button(modal, 'Publish with these choices').disabled).toBe(false);
+      expect(service.readDraft(incoming.draft_uuid).document).toEqual(incoming.document);
+      expect(db.scalar<number>(
+        `SELECT count(*) FROM catalog_content_match_decisions
+         WHERE content_kind = ?
+           AND incoming_fingerprint_scheme = ?
+           AND incoming_fingerprint_digest = ?`,
+        [incomingIdentity.kind, incomingIdentity.scheme, incomingIdentity.digest],
+      )).toBe(0);
+      expect(db.scalar<number>(
+        `SELECT count(*) FROM catalog_content_aliases
+         WHERE content_kind = 'subclass' AND alias_key = ? AND content_key = ?`,
+        [aliasKey, targetKey],
+      )).toBe(1);
+      rendered.cleanup();
+    } finally {
+      restoreDocument();
+    }
+  }, 20_000);
 
   it('keeps an unchanged real published root-only copy publishable and offers dense mode before editing', async () => {
     const { service, db } = await fixture();
