@@ -133,7 +133,7 @@ afterAll(() => {
 });
 
 describe('declared relations match the foreign keys', () => {
-  it('budgets 103 constraints across 121 PRAGMA rows', () => {
+  it('budgets 104 constraints across 122 PRAGMA rows', () => {
     const tables = db
       .selectValues(
         `SELECT name FROM sqlite_schema
@@ -236,8 +236,12 @@ describe('declared relations match the foreign keys', () => {
     // the newest local clone. The row survives local character deletion.
     // HA-2 adds the composite draft base-content edge: one constraint across
     // two PRAGMA rows, so a species draft cannot cite a background identity.
-    expect(constraintEdges(db)).toHaveLength(103);
-    expect(rowCount).toBe(121);
+    // HA-4 migration 0037 adds the nullable
+    // `background_templates.default_origin_feat_content_key` edge into
+    // `feat_definitions`. It is one single-column constraint, so it adds
+    // exactly one constraint and one PRAGMA row.
+    expect(constraintEdges(db)).toHaveLength(104);
+    expect(rowCount).toBe(122);
   });
 
   it('declares a relation for every foreign key, and a foreign key for every relation', () => {

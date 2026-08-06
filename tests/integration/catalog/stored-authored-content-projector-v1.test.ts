@@ -272,8 +272,8 @@ function seedBackground(contentKey: ContentKey, aggregate: BackgroundContentAggr
        skill_proficiency_1,
        skill_proficiency_2, tool_proficiency, equipment_option_a,
        equipment_option_b
-     ) VALUES (?, ?, ?, ?, ?, ?, 'CI-3a Feat', ?, ?, ?, ?, ?, ?)`,
-    [contentKey, aggregate.name, aggregate.rules_edition, ...aggregate.suggested_abilities, aggregate.default_origin_feat_content_key, ...aggregate.skill_proficiencies, aggregate.tool_reference_text ?? '', aggregate.equipment_option_a_description, aggregate.equipment_option_b_description],
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [contentKey, aggregate.name, aggregate.rules_edition, ...aggregate.suggested_abilities, aggregate.default_origin_feat_display_name, aggregate.default_origin_feat_content_key, ...aggregate.skill_proficiencies, aggregate.tool_reference_text ?? '', aggregate.equipment_option_a_description, aggregate.equipment_option_b_description],
   ).lastInsertId;
   for (const [option, equipment] of [['a', aggregate.equipment_option_a], ['b', aggregate.equipment_option_b]] as const) {
     for (const item of equipment) {

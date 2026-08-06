@@ -244,6 +244,7 @@ describe(`ported persistence invariants (${sourceLabel})`, () => {
          ORDER BY name`,
       ),
     ).toEqual([
+      'background_default_origin_feat_before_update',
       'catalog_register_armor_identity_before_insert',
       'catalog_register_background_definition_identity_before_insert',
       'catalog_register_background_template_identity_before_insert',
@@ -257,6 +258,7 @@ describe(`ported persistence invariants (${sourceLabel})`, () => {
       'catalog_register_weapon_identity_before_insert',
       'character_items_clear_attunement_slots_before_delete',
       'character_sources_clear_level_feat_choices_before_delete',
+      'feat_category_preserves_background_default_before_update',
       'spell_slots_exclusive_assignment_insert',
       'spell_slots_exclusive_assignment_update',
     ]);
