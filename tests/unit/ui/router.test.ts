@@ -13,6 +13,7 @@ function historyHarness(initialUrl: string): {
   readonly back: () => void;
   readonly forward: () => void;
   readonly go: (delta: number) => void;
+  readonly settled: () => Promise<void>;
 } {
   const events = new EventTarget();
   const location = {
@@ -21,12 +22,30 @@ function historyHarness(initialUrl: string): {
   };
   let entries: HistoryEntry[] = [{ url: initialUrl, state: null }];
   let index = 0;
+  let pendingMoves = 0;
+  const settleResolvers = new Set<() => void>();
+  const resolveSettled = (): void => {
+    if (pendingMoves !== 0) return;
+    for (const resolve of settleResolvers) resolve();
+    settleResolvers.clear();
+  };
   const move = (delta: number): void => {
-    const target = index + delta;
-    if (target < 0 || target >= entries.length || target === index) return;
-    index = target;
-    location.href = entries[index]!.url;
-    events.dispatchEvent(new Event('popstate'));
+    pendingMoves += 1;
+    setTimeout(() => {
+      try {
+        const target = index + delta;
+        if (target < 0 || target >= entries.length || target === index) return;
+        index = target;
+        const entry = entries[index]!;
+        location.href = entry.url;
+        const event = new Event('popstate');
+        Object.defineProperty(event, 'state', { value: entry.state });
+        events.dispatchEvent(event);
+      } finally {
+        pendingMoves -= 1;
+        resolveSettled();
+      }
+    }, 0);
   };
   const history = {
     get state(): unknown {
@@ -65,6 +84,10 @@ function historyHarness(initialUrl: string): {
     back: history.back,
     forward: history.forward,
     go: history.go,
+    settled: () =>
+      pendingMoves === 0
+        ? Promise.resolve()
+        : new Promise((resolve) => settleResolvers.add(resolve)),
   };
 }
 
@@ -73,17 +96,19 @@ function urls(entries: readonly HistoryEntry[]): readonly string[] {
 }
 
 describe('router history-stack navigation guards', () => {
-  it('forward-refusal leaves the history stack unchanged', () => {
+  it('forward-refusal leaves the history stack unchanged', async () => {
     const harness = historyHarness('https://example.test/a');
     const router = new Router(harness.windowObject);
     router.start();
     router.navigate('/b');
     router.navigate('/c');
     harness.back();
+    await harness.settled();
     const before = urls(harness.entries());
     const removeGuard = router.registerNavigationGuard(() => false);
 
     harness.forward();
+    await harness.settled();
 
     expect(urls(harness.entries())).toEqual(before);
     expect(harness.index()).toBe(1);
@@ -92,7 +117,7 @@ describe('router history-stack navigation guards', () => {
     router.stop();
   });
 
-  it('go(-2) refusal returns to the accepted entry with intermediates intact', () => {
+  it('go(-2) refusal returns to the accepted entry with intermediates intact', async () => {
     const harness = historyHarness('https://example.test/a');
     const router = new Router(harness.windowObject);
     router.start();
@@ -103,6 +128,7 @@ describe('router history-stack navigation guards', () => {
     const removeGuard = router.registerNavigationGuard(() => false);
 
     harness.go(-2);
+    await harness.settled();
 
     expect(urls(harness.entries())).toEqual(before);
     expect(harness.index()).toBe(3);
@@ -111,7 +137,33 @@ describe('router history-stack navigation guards', () => {
     router.stop();
   });
 
-  it('accepted push, replace, back, and forward navigations still work', () => {
+  it('does not swallow an immediate user traversal while a refusal repair echo is pending', async () => {
+    const harness = historyHarness('https://example.test/a');
+    const router = new Router(harness.windowObject);
+    const attempted: string[] = [];
+    const visited: string[] = [];
+    router.start();
+    router.navigate('/b');
+    router.navigate('/c');
+    router.subscribe((route) => visited.push(route.path));
+    const removeGuard = router.registerNavigationGuard(({ target }) => {
+      attempted.push(target.path);
+      if (attempted.length === 1) harness.back();
+      return false;
+    });
+
+    harness.back();
+    await harness.settled();
+
+    expect(attempted).toEqual(['/b', '/a', '/b']);
+    expect(visited).toEqual([]);
+    expect(harness.index()).toBe(2);
+    expect(router.current.path).toBe('/c');
+    removeGuard();
+    router.stop();
+  });
+
+  it('accepted push, replace, back, and forward navigations still work', async () => {
     const harness = historyHarness('https://example.test/a');
     const router = new Router(harness.windowObject);
     const visited: string[] = [];
@@ -122,7 +174,9 @@ describe('router history-stack navigation guards', () => {
     expect(router.navigate('/b?mode=replaced', { replace: true })).toBe(true);
     expect(router.navigate('/c')).toBe(true);
     harness.back();
+    await harness.settled();
     harness.forward();
+    await harness.settled();
 
     expect(urls(harness.entries())).toEqual(['/a', '/b', '/c']);
     expect(harness.index()).toBe(2);

@@ -179,7 +179,6 @@ describe('the item attunement surface', () => {
     try {
       const calls: string[] = [];
       const invoker = document.createElement('button');
-      invoker.focus();
       const actions: PlannerItemActions = {
         addItem: () => undefined,
         updateItem: () => undefined,
@@ -208,6 +207,8 @@ describe('the item attunement surface', () => {
           onEditingChanged: () => undefined,
         }),
       );
+      document.body.append(invoker, rendered as unknown as Node);
+      invoker.focus();
       // The add-item button follows the modal in the rendered section.
       const dialog = rendered.children.at(-2);
       const choices = dialog?.children[2];

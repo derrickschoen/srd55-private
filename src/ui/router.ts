@@ -70,31 +70,28 @@ export class Router {
   readonly #navigationGuards = new Set<NavigationGuard>();
   #acceptedUrl: string;
   #acceptedHistoryPosition: number;
-  #repairingPopState = false;
-  readonly #onPopState = (): void => {
-    if (this.#repairingPopState) {
-      this.#repairingPopState = false;
+  #pendingPopStateRepairTarget: number | null = null;
+  readonly #onPopState = (event: PopStateEvent): void => {
+    const targetPosition = historyPosition(event.state);
+    if (targetPosition === null) {
+      throw new Error('Router history entry has no position.');
+    }
+    if (targetPosition === this.#pendingPopStateRepairTarget) {
+      this.#pendingPopStateRepairTarget = null;
       return;
     }
+    this.#pendingPopStateRepairTarget = null;
     const targetUrl = new URL(this.windowObject.location.href);
     const target = parseRoute(targetUrl);
     if (!this.#allows(target, 'popstate')) {
-      const targetPosition = historyPosition(this.windowObject.history.state);
-      if (targetPosition === null) {
-        throw new Error('Cannot repair refused navigation without router history position.');
-      }
       const delta = this.#acceptedHistoryPosition - targetPosition;
       if (delta !== 0) {
-        this.#repairingPopState = true;
+        this.#pendingPopStateRepairTarget = this.#acceptedHistoryPosition;
         this.windowObject.history.go(delta);
       }
       return;
     }
     this.#acceptedUrl = targetUrl.href;
-    const targetPosition = historyPosition(this.windowObject.history.state);
-    if (targetPosition === null) {
-      throw new Error('Accepted router history entry has no position.');
-    }
     this.#acceptedHistoryPosition = targetPosition;
     this.#emit(target);
   };
@@ -125,7 +122,7 @@ export class Router {
 
   stop(): void {
     this.windowObject.removeEventListener('popstate', this.#onPopState);
-    this.#repairingPopState = false;
+    this.#pendingPopStateRepairTarget = null;
     this.#listeners.clear();
     this.#navigationGuards.clear();
   }
