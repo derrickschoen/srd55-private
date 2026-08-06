@@ -3,6 +3,7 @@ import { sha256 } from '../crypto/sha256';
 import {
   parseJson,
   sqlInteger,
+  sqlNullableInteger,
   sqlNullableString,
   sqlString,
   type SqlRow,
@@ -37,15 +38,24 @@ import {
   ORIGIN_FEAT_KEY_CONFIG,
 } from '../rules/background-definitions-srd';
 import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
-import { fillSkillGrant } from '../grants/skill-grants';
+import { fillSkillGrant, SkillGrantRefusal } from '../grants/skill-grants';
+import {
+  fillSkillExpertiseGrant,
+  SkillExpertiseGrantRefusal,
+} from '../grants/skill-expertise-grants';
+import { SpellSelectionEligibility } from '../eligibility/spell-selection-eligibility';
 import { syncSubclassSources } from '../commands/update-class';
-import { EQUIPMENT_CHOICE_CONFIG_KEY } from '../builder/contracts';
+import {
+  EQUIPMENT_CHOICE_CONFIG_KEY,
+  SKILL_GRANT_KEYS,
+} from '../builder/contracts';
 import type {
   AuthoredContentKind,
   AuthoringErrorData,
   ReplacementChoiceSelection,
   ReplacementDecision,
   ReplacementPlan,
+  ReplacementNotice,
   ReplacementResult,
   ReplacementTokenFacts,
 } from './contracts';
@@ -463,42 +473,552 @@ function backgroundParams(db: DatabaseContext, facts: ReplacementTokenFacts) {
   } as const;
 }
 
-function speciesSelections(
-  db: DatabaseContext,
-  characterId: CharacterId,
-  sourceId: number,
-): readonly {
-  readonly grantKey: string;
+interface RetargetSourceNode {
+  readonly id: number;
+  readonly path: readonly string[];
+}
+
+interface RetargetSpellSelection {
+  readonly sourceId: number;
+  readonly path: readonly string[];
+  readonly ruleKey: string;
+  readonly ordinal: number;
+  readonly spellVersionId: number;
+}
+
+interface RetargetSkillSelection {
+  readonly sourceId: number;
+  readonly path: readonly string[];
+  readonly ruleKey: string;
   readonly ordinal: number;
   readonly skill: Skill;
-}[] {
-  return db.all(
-    `SELECT grant_key, ordinal, skill
-     FROM character_skill_grants
-     WHERE character_id = ? AND source_instance_id = ?
-       AND state = 'active' AND skill IS NOT NULL
-     ORDER BY grant_key, ordinal`,
-    [characterId, sourceId],
-    (row) => {
-      const skill = sqlString(row, 'skill');
-      if (!isEnumValue(skills, skill)) {
-        throw new TypeError('Stored species skill choice is unknown.');
+}
+
+interface RetargetOwnedRow {
+  readonly id: number;
+  readonly path: readonly string[];
+}
+
+interface RetargetLevelFeatChoice extends RetargetOwnedRow {
+  readonly oldSourceId: number;
+}
+
+interface RetargetState {
+  readonly rootConfig: string | null;
+  readonly nodes: readonly RetargetSourceNode[];
+  readonly slots: readonly RetargetSpellSelection[];
+  readonly spellbook: readonly RetargetSpellSelection[];
+  readonly skills: readonly RetargetSkillSelection[];
+  readonly expertise: readonly RetargetSkillSelection[];
+  readonly manualEffects: readonly RetargetOwnedRow[];
+  readonly items: readonly RetargetOwnedRow[];
+  readonly levelFeatChoices: readonly RetargetLevelFeatChoice[];
+}
+
+function pathKey(path: readonly string[]): string {
+  return JSON.stringify(path);
+}
+
+/**
+ * Enumerates the complete source-instance tree by the generator's durable
+ * child address (`grant_rule:...`). An unaddressed child cannot be mapped to a
+ * different immutable aggregate, so the whole retarget refuses instead of
+ * guessing from row ids or display names.
+ */
+function retargetSourceTree(
+  db: DatabaseContext,
+  rootId: number,
+): readonly RetargetSourceNode[] {
+  const nodes: RetargetSourceNode[] = [];
+  const visit = (id: number, path: readonly string[]): void => {
+    nodes.push(Object.freeze({ id, path: Object.freeze([...path]) }));
+    const children = db.all(
+      `SELECT id, notes FROM character_source_instances
+       WHERE parent_source_instance_id = ? ORDER BY id`,
+      [id],
+      (row) => ({
+        id: sqlInteger(row, 'id'),
+        notes: sqlNullableString(row, 'notes'),
+      }),
+    );
+    const markers = new Set<string>();
+    for (const child of children) {
+      if (
+        child.notes === null ||
+        !child.notes.startsWith('grant_rule:') ||
+        markers.has(child.notes)
+      ) {
+        throw new ReferenceRetargetError(
+          'The source tree contains a child that cannot be safely retargeted.',
+          {
+            reason: 'replacement_refused',
+            refusal: 'unsupported_character_choices',
+          },
+        );
       }
-      return {
-        grantKey: sqlString(row, 'grant_key'),
+      markers.add(child.notes);
+      visit(child.id, [...path, child.notes]);
+    }
+  };
+  visit(rootId, []);
+  return Object.freeze(nodes);
+}
+
+function sourceIds(nodes: readonly RetargetSourceNode[]): readonly number[] {
+  return nodes.map((node) => node.id);
+}
+
+function sourceIdPlaceholders(nodes: readonly RetargetSourceNode[]): string {
+  return nodes.map(() => '?').join(', ');
+}
+
+/**
+ * The source subtree's character-facing tables are intentionally explicit:
+ * spell_selection_slots, wizard_spellbook_entries, character_skill_grants,
+ * character_skill_expertise_grants, character_effects, character_items, and
+ * character_level_feat_choices. Source instances themselves supply the
+ * logical paths. Generated effects are regenerated; filled choices and
+ * unsourced-template effects/items are remapped; an unaddressable child
+ * refuses before mutation.
+ */
+function captureRetargetState(
+  db: DatabaseContext,
+  facts: ReplacementTokenFacts,
+  rootId: number,
+): RetargetState {
+  const nodes = retargetSourceTree(db, rootId);
+  const ids = sourceIds(nodes);
+  const placeholders = sourceIdPlaceholders(nodes);
+  const paths = new Map(nodes.map((node) => [node.id, node.path]));
+  const pathFor = (sourceId: number): readonly string[] => {
+    const path = paths.get(sourceId);
+    if (path === undefined) throw new Error('Captured source path is missing.');
+    return path;
+  };
+  const slots = db.all(
+    `SELECT source_instance_id, rule_key, ordinal, current_spell_version_id
+     FROM spell_selection_slots
+     WHERE source_instance_id IN (${placeholders})
+       AND state IN ('active', 'kept_override')
+       AND current_spell_version_id IS NOT NULL
+     ORDER BY source_instance_id, rule_key, ordinal`,
+    ids,
+    (row) => {
+      const sourceId = sqlInteger(row, 'source_instance_id');
+      return Object.freeze({
+        sourceId,
+        path: pathFor(sourceId),
+        ruleKey: sqlString(row, 'rule_key'),
         ordinal: sqlInteger(row, 'ordinal'),
-        skill,
-      };
+        spellVersionId: sqlInteger(row, 'current_spell_version_id'),
+      });
     },
   );
+  const spellbook = db.all(
+    `SELECT source_instance_id, rule_key, ordinal, spell_version_id
+     FROM wizard_spellbook_entries
+     WHERE source_instance_id IN (${placeholders}) AND state = 'active'
+       AND spell_version_id IS NOT NULL
+     ORDER BY source_instance_id, rule_key, ordinal`,
+    ids,
+    (row) => {
+      const sourceId = sqlInteger(row, 'source_instance_id');
+      return Object.freeze({
+        sourceId,
+        path: pathFor(sourceId),
+        ruleKey: sqlString(row, 'rule_key'),
+        ordinal: sqlInteger(row, 'ordinal'),
+        spellVersionId: sqlInteger(row, 'spell_version_id'),
+      });
+    },
+  );
+  const selectedSkills = (
+    table: 'character_skill_grants' | 'character_skill_expertise_grants',
+  ): readonly RetargetSkillSelection[] => db.all(
+    `SELECT source_instance_id, grant_key, ordinal, skill
+     FROM ${table}
+     WHERE source_instance_id IN (${placeholders}) AND state = 'active'
+       AND skill IS NOT NULL
+     ORDER BY source_instance_id, grant_key, ordinal`,
+    ids,
+    (row) => {
+      const sourceId = sqlInteger(row, 'source_instance_id');
+      const skill = sqlString(row, 'skill');
+      if (!isEnumValue(skills, skill)) {
+        throw new TypeError('Stored retarget skill choice is unknown.');
+      }
+      return Object.freeze({
+        sourceId,
+        path: pathFor(sourceId),
+        ruleKey: sqlString(row, 'grant_key'),
+        ordinal: sqlInteger(row, 'ordinal'),
+        skill,
+      });
+    },
+  );
+  const ownedRows = (
+    table: 'character_effects' | 'character_items',
+    predicate = '',
+  ): readonly RetargetOwnedRow[] => db.all(
+    `SELECT id, source_instance_id FROM ${table}
+     WHERE source_instance_id IN (${placeholders}) ${predicate}
+     ORDER BY id`,
+    ids,
+    (row) => {
+      const sourceId = sqlInteger(row, 'source_instance_id');
+      return Object.freeze({ id: sqlInteger(row, 'id'), path: pathFor(sourceId) });
+    },
+  );
+  const levelFeatChoices = db.all(
+    `SELECT id, feat_source_instance_id
+     FROM character_level_feat_choices
+     WHERE feat_source_instance_id IN (${placeholders}) ORDER BY id`,
+    ids,
+    (row) => {
+      const oldSourceId = sqlInteger(row, 'feat_source_instance_id');
+      return Object.freeze({
+        id: sqlInteger(row, 'id'),
+        oldSourceId,
+        path: pathFor(oldSourceId),
+      });
+    },
+  );
+  return Object.freeze({
+    rootConfig: db.scalar<string>('SELECT config FROM character_source_instances WHERE id = ?', [rootId]),
+    nodes,
+    slots: Object.freeze(slots),
+    spellbook: Object.freeze(spellbook),
+    skills: Object.freeze(selectedSkills('character_skill_grants')),
+    expertise: Object.freeze(selectedSkills('character_skill_expertise_grants')),
+    manualEffects: Object.freeze(ownedRows(
+      'character_effects',
+      facts.content_kind === 'background'
+        ? `AND template_ref IS NULL
+           AND NOT (effect_kind = 'ability_increase' AND maximum = ${String(BACKGROUND_ABILITY_INCREASE_MAXIMUM)})`
+        : 'AND template_ref IS NULL',
+    )),
+    items: Object.freeze(ownedRows('character_items')),
+    levelFeatChoices: Object.freeze(levelFeatChoices),
+  });
+}
+
+function retireDeletableGuidedSource(
+  db: DatabaseContext,
+  facts: ReplacementTokenFacts,
+  rootId: number,
+): void {
+  db.exec(
+    `UPDATE character_source_instances
+     SET notes = ?, state = 'tombstoned', updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?`,
+    [`retargeted:${facts.content_kind}:${facts.old_content_key}`, rootId],
+  );
+  new GrantRuleSlotGenerator(db).generateForSource(rootId);
+}
+
+function targetSourceMap(
+  db: DatabaseContext,
+  rootId: number,
+): ReadonlyMap<string, number> {
+  return new Map(
+    retargetSourceTree(db, rootId).map((node) => [pathKey(node.path), node.id]),
+  );
+}
+
+function invalidSelectionNotice(
+  table: Extract<ReplacementNotice, { kind: 'retargeted_selection_invalid' }>['table'],
+  selection: RetargetSpellSelection | RetargetSkillSelection,
+  selectedValue: number | Skill,
+  reason: Extract<ReplacementNotice, { kind: 'retargeted_selection_invalid' }>['reason'],
+  detail: string | null = null,
+): ReplacementNotice {
+  return Object.freeze({
+    kind: 'retargeted_selection_invalid',
+    table,
+    source_path: selection.path,
+    rule_key: selection.ruleKey,
+    ordinal: selection.ordinal,
+    selected_value: selectedValue,
+    reason,
+    detail,
+  });
+}
+
+function remapRetargetState(
+  db: DatabaseContext,
+  facts: ReplacementTokenFacts,
+  state: RetargetState,
+  newRootId: number,
+): readonly ReplacementNotice[] {
+  const notices: ReplacementNotice[] = [];
+  const targets = targetSourceMap(db, newRootId);
+  const targetFor = (path: readonly string[]): number | null =>
+    targets.get(pathKey(path)) ?? null;
+  const requiredTargetFor = (path: readonly string[]): number => {
+    const target = targetFor(path);
+    if (target === null) {
+      throw new ReferenceRetargetError(
+        'Source-owned character state cannot be mapped to the replacement.',
+        {
+          reason: 'replacement_refused',
+          refusal: 'unsupported_character_choices',
+        },
+      );
+    }
+    return target;
+  };
+
+  const manualEffectIds = new Set(state.manualEffects.map((row) => row.id));
+  const oldIds = sourceIds(state.nodes);
+  const placeholders = sourceIdPlaceholders(state.nodes);
+  const generatedPredicate = manualEffectIds.size === 0
+    ? ''
+    : `AND id NOT IN (${[...manualEffectIds].map(() => '?').join(', ')})`;
+  db.exec(
+    `DELETE FROM character_effects
+     WHERE source_instance_id IN (${placeholders}) ${generatedPredicate}`,
+    [...oldIds, ...manualEffectIds],
+  );
+  for (const effect of state.manualEffects) {
+    db.exec(
+      'UPDATE character_effects SET source_instance_id = ? WHERE id = ?',
+      [requiredTargetFor(effect.path), effect.id],
+    );
+  }
+  for (const item of state.items) {
+    db.exec(
+      'UPDATE character_items SET source_instance_id = ? WHERE id = ?',
+      [requiredTargetFor(item.path), item.id],
+    );
+  }
+
+  const eligibility = new SpellSelectionEligibility(db);
+  for (const selection of state.slots) {
+    const sourceId = targetFor(selection.path);
+    if (sourceId === null) {
+      notices.push(invalidSelectionNotice(
+        'spell_selection_slots', selection, selection.spellVersionId,
+        'target_source_missing',
+      ));
+      continue;
+    }
+    const target = db.one(
+      `SELECT id, fixed_spell_version_id, is_locked
+       FROM spell_selection_slots
+       WHERE source_instance_id = ? AND rule_key = ? AND ordinal = ?
+         AND state IN ('active', 'kept_override')`,
+      [sourceId, selection.ruleKey, selection.ordinal],
+      (row) => ({
+        id: sqlInteger(row, 'id'),
+        fixedSpellVersionId: sqlNullableInteger(row, 'fixed_spell_version_id'),
+        locked: sqlInteger(row, 'is_locked') === 1,
+      }),
+    );
+    if (target === null) {
+      notices.push(invalidSelectionNotice(
+        'spell_selection_slots', selection, selection.spellVersionId,
+        'target_rule_missing',
+      ));
+      continue;
+    }
+    if (target.fixedSpellVersionId !== null || target.locked) {
+      notices.push(invalidSelectionNotice(
+        'spell_selection_slots', selection, selection.spellVersionId,
+        'target_rule_changed',
+      ));
+      continue;
+    }
+    db.exec(
+      `UPDATE spell_selection_slots
+       SET current_spell_version_id = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [selection.spellVersionId, target.id],
+    );
+    eligibility.refresh(target.id);
+    const evaluation = db.one(
+      `SELECT selection_eligibility, selection_invalid_reason
+       FROM spell_selection_slots WHERE id = ?`,
+      [target.id],
+      (row) => ({
+        status: sqlString(row, 'selection_eligibility'),
+        reason: sqlNullableString(row, 'selection_invalid_reason'),
+      }),
+    );
+    if (evaluation?.status === 'invalid') {
+      notices.push(invalidSelectionNotice(
+        'spell_selection_slots', selection, selection.spellVersionId,
+        'selection_ineligible', evaluation.reason,
+      ));
+    }
+  }
+
+  for (const selection of state.spellbook) {
+    const sourceId = targetFor(selection.path);
+    if (sourceId === null) {
+      notices.push(invalidSelectionNotice(
+        'wizard_spellbook_entries', selection, selection.spellVersionId,
+        'target_source_missing',
+      ));
+      continue;
+    }
+    const targetId = db.scalar<number>(
+      `SELECT id FROM wizard_spellbook_entries
+       WHERE source_instance_id = ? AND rule_key = ? AND ordinal = ?
+         AND state = 'active'`,
+      [sourceId, selection.ruleKey, selection.ordinal],
+    );
+    if (targetId === null) {
+      notices.push(invalidSelectionNotice(
+        'wizard_spellbook_entries', selection, selection.spellVersionId,
+        'target_rule_missing',
+      ));
+      continue;
+    }
+    db.exec(
+      `UPDATE wizard_spellbook_entries
+       SET spell_version_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      [selection.spellVersionId, targetId],
+    );
+    eligibility.refreshSpellbookAcquisition(targetId);
+    const evaluation = db.one(
+      `SELECT selection_eligibility, selection_invalid_reason
+       FROM wizard_spellbook_entries WHERE id = ?`,
+      [targetId],
+      (row) => ({
+        status: sqlString(row, 'selection_eligibility'),
+        reason: sqlNullableString(row, 'selection_invalid_reason'),
+      }),
+    );
+    if (evaluation?.status === 'invalid') {
+      notices.push(invalidSelectionNotice(
+        'wizard_spellbook_entries', selection, selection.spellVersionId,
+        'selection_ineligible', evaluation.reason,
+      ));
+    }
+  }
+
+  for (const selection of state.skills) {
+    const sourceId = targetFor(selection.path);
+    if (sourceId === null) {
+      notices.push(invalidSelectionNotice(
+        'character_skill_grants', selection, selection.skill,
+        'target_source_missing',
+      ));
+      continue;
+    }
+    const target = db.one(
+      `SELECT id, skill FROM character_skill_grants
+       WHERE source_instance_id = ? AND grant_key = ? AND ordinal = ?
+         AND state = 'active'`,
+      [sourceId, selection.ruleKey, selection.ordinal],
+      (row) => ({
+        id: sqlInteger(row, 'id'),
+        skill: sqlNullableString(row, 'skill'),
+      }),
+    );
+    if (target === null) {
+      notices.push(invalidSelectionNotice(
+        'character_skill_grants', selection, selection.skill,
+        'target_rule_missing',
+      ));
+      continue;
+    }
+    if (target.skill === selection.skill) continue;
+    // A background's printed proficiency is a regenerated fact. Every other
+    // non-null row is a remembered choice on a revived target source; replace
+    // that remembered choice with the selection from the source being
+    // retargeted.
+    if (target.skill !== null) {
+      if (selection.ruleKey === SKILL_GRANT_KEYS.backgroundSkill) continue;
+      fillSkillGrant(db, facts.character_id, target.id, null);
+    }
+    try {
+      fillSkillGrant(db, facts.character_id, target.id, selection.skill);
+    } catch (error) {
+      if (!(error instanceof SkillGrantRefusal)) throw error;
+      notices.push(invalidSelectionNotice(
+        'character_skill_grants', selection, selection.skill,
+        'selection_ineligible', error.reason,
+      ));
+    }
+  }
+
+  for (const selection of state.expertise) {
+    const sourceId = targetFor(selection.path);
+    if (sourceId === null) {
+      notices.push(invalidSelectionNotice(
+        'character_skill_expertise_grants', selection, selection.skill,
+        'target_source_missing',
+      ));
+      continue;
+    }
+    const target = db.one(
+      `SELECT id, skill FROM character_skill_expertise_grants
+       WHERE source_instance_id = ? AND grant_key = ? AND ordinal = ?
+         AND state = 'active'`,
+      [sourceId, selection.ruleKey, selection.ordinal],
+      (row) => ({
+        id: sqlInteger(row, 'id'),
+        skill: sqlNullableString(row, 'skill'),
+      }),
+    );
+    if (target === null) {
+      notices.push(invalidSelectionNotice(
+        'character_skill_expertise_grants', selection, selection.skill,
+        'target_rule_missing',
+      ));
+      continue;
+    }
+    if (target.skill === selection.skill) continue;
+    try {
+      if (target.skill !== null) {
+        fillSkillExpertiseGrant(db, facts.character_id, target.id, null);
+      }
+      fillSkillExpertiseGrant(db, facts.character_id, target.id, selection.skill);
+    } catch (error) {
+      if (!(error instanceof SkillExpertiseGrantRefusal)) throw error;
+      notices.push(invalidSelectionNotice(
+        'character_skill_expertise_grants', selection, selection.skill,
+        'selection_ineligible', error.reason,
+      ));
+    }
+  }
+
+  for (const choice of state.levelFeatChoices) {
+    const targetSourceId = targetFor(choice.path);
+    if (targetSourceId === null) {
+      db.exec(
+        `UPDATE character_level_feat_choices
+         SET feat_source_instance_id = NULL, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [choice.id],
+      );
+      notices.push(Object.freeze({
+        kind: 'retargeted_level_feat_invalid',
+        source_path: choice.path,
+        character_level_feat_choice_id: choice.id,
+        reason: 'target_source_missing',
+      }));
+      continue;
+    }
+    db.exec(
+      `UPDATE character_level_feat_choices
+       SET feat_source_instance_id = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND feat_source_instance_id = ?`,
+      [targetSourceId, choice.id, choice.oldSourceId],
+    );
+  }
+  return Object.freeze(notices);
 }
 
 function retargetCharacter(
   db: DatabaseContext,
   facts: ReplacementTokenFacts,
   targetContentKey: ContentKey,
-): CharacterRevision {
+): { readonly revision: CharacterRevision; readonly notices: readonly ReplacementNotice[] } {
   const resolvedFacts = { ...facts, new_content_key: targetContentKey };
+  let retargetState: RetargetState;
+  let newRootId: number;
   switch (facts.content_kind) {
     case 'species': {
       const guidedSourceId = db.scalar<number>(
@@ -512,7 +1032,8 @@ function retargetCharacter(
         [facts.character_id, GUIDED_SPECIES_SOURCE_MARKER, facts.old_content_key],
       );
       if (guidedSourceId === null) throw new Error('Species choices cannot be preserved.');
-      const selections = speciesSelections(db, facts.character_id, guidedSourceId);
+      retargetState = captureRetargetState(db, facts, guidedSourceId);
+      retireDeletableGuidedSource(db, facts, guidedSourceId);
       applyGuidedOrigin(db, {
         character_id: facts.character_id,
         kind: 'species',
@@ -528,23 +1049,34 @@ function retargetCharacter(
            AND definition.content_key = ?`,
         [facts.character_id, GUIDED_SPECIES_SOURCE_MARKER, targetContentKey],
       );
-      if (newSourceId === null && selections.length > 0) {
-        throw new Error('Replacement species has no compatible grant source.');
+      if (newSourceId === null) {
+        throw new Error('Replacement species source is missing.');
       }
-      for (const selection of selections) {
-        const grantId = db.scalar<number>(
-          `SELECT id FROM character_skill_grants
-           WHERE character_id = ? AND source_instance_id = ?
-             AND grant_key = ? AND ordinal = ? AND state = 'active'`,
-          [facts.character_id, newSourceId, selection.grantKey, selection.ordinal],
+      newRootId = newSourceId;
+      if (retargetState.rootConfig !== null) {
+        db.exec(
+          `UPDATE character_source_instances SET config = ? WHERE id = ?`,
+          [retargetState.rootConfig, newRootId],
         );
-        if (grantId === null) throw new Error('Replacement species choice is no longer valid.');
-        fillSkillGrant(db, facts.character_id, grantId, selection.skill);
+        new GrantRuleSlotGenerator(db).generateForSource(newRootId);
       }
       break;
     }
     case 'background': {
       const background = backgroundParams(db, resolvedFacts);
+      const guidedSourceId = db.scalar<number>(
+        `SELECT source.id
+         FROM character_source_instances AS source
+         JOIN background_definitions AS definition
+           ON definition.id = source.source_definition_id
+         WHERE source.character_id = ? AND source.source_type = 'background'
+           AND source.state = 'active' AND source.notes = ?
+           AND definition.content_key = ?`,
+        [facts.character_id, GUIDED_BACKGROUND_SOURCE_MARKER, facts.old_content_key],
+      );
+      if (guidedSourceId === null) throw new Error('Background choices cannot be preserved.');
+      retargetState = captureRetargetState(db, facts, guidedSourceId);
+      retireDeletableGuidedSource(db, facts, guidedSourceId);
       applyGuidedBackgroundChoices(db, background.params);
       if (background.equipmentChoice !== null) {
         const source = db.one(
@@ -569,6 +1101,18 @@ function retargetCharacter(
           }), source.id],
         );
       }
+      const replacementSourceId = db.scalar<number>(
+        `SELECT source.id
+         FROM character_source_instances AS source
+         JOIN background_definitions AS definition
+           ON definition.id = source.source_definition_id
+         WHERE source.character_id = ? AND source.source_type = 'background'
+           AND source.state = 'active' AND source.notes = ?
+           AND definition.content_key = ?`,
+        [facts.character_id, GUIDED_BACKGROUND_SOURCE_MARKER, targetContentKey],
+      );
+      if (replacementSourceId === null) throw new Error('Replacement background source is missing.');
+      newRootId = replacementSourceId;
       break;
     }
     case 'subclass': {
@@ -603,6 +1147,8 @@ function retargetCharacter(
            AND source_definition_id = ? AND state = 'active'`,
         [facts.character_id, level.oldSubclassId],
       );
+      if (oldSourceId === null) throw new Error('Replacement subclass source is missing.');
+      retargetState = captureRetargetState(db, facts, oldSourceId);
       db.exec(
         `UPDATE character_class_levels
          SET subclass_definition_id = ?, updated_at = CURRENT_TIMESTAMP
@@ -618,23 +1164,18 @@ function retargetCharacter(
         target.id,
         level.level,
       );
-      if (oldSourceId !== null) {
-        const newSourceId = db.scalar<number>(
-          `SELECT id FROM character_source_instances
-           WHERE character_id = ? AND source_type = 'subclass'
-             AND source_definition_id = ? AND state = 'active'`,
-          [facts.character_id, target.id],
-        );
-        if (newSourceId === null) throw new Error('Replacement subclass source is missing.');
-        db.exec(
-          `UPDATE character_effects SET source_instance_id = ?
-           WHERE character_id = ? AND source_instance_id = ? AND template_ref IS NULL`,
-          [newSourceId, facts.character_id, oldSourceId],
-        );
-      }
+      const newSourceId = db.scalar<number>(
+        `SELECT id FROM character_source_instances
+         WHERE character_id = ? AND source_type = 'subclass'
+           AND source_definition_id = ? AND state = 'active'`,
+        [facts.character_id, target.id],
+      );
+      if (newSourceId === null) throw new Error('Replacement subclass source is missing.');
+      newRootId = newSourceId;
       break;
     }
   }
+  const notices = remapRetargetState(db, facts, retargetState, newRootId);
   const nextRevision = (Number(facts.character_revision) + 1) as CharacterRevision;
   const updated = db.exec(
     `UPDATE characters SET revision = ?, updated_at = CURRENT_TIMESTAMP
@@ -642,7 +1183,7 @@ function retargetCharacter(
     [nextRevision, facts.character_id, facts.character_revision],
   );
   if (updated.changes !== 1) throw new Error('Character revision changed.');
-  return nextRevision;
+  return Object.freeze({ revision: nextRevision, notices });
 }
 
 export function commitReferenceRetarget(
@@ -677,13 +1218,16 @@ export function commitReferenceRetarget(
   const { node, plan } = importNodeAndPlan(db, facts, choices);
   const outcome = nonRefusedOutcome(plan);
   let revision: CharacterRevision | null = null;
+  let notices: readonly ReplacementNotice[] = Object.freeze([]);
   const committed = commitContentImport(db, {
     nodes: [node],
     token: plan.token,
     choices,
     operationIdentity: operationIdentity(facts),
     afterInstall: (transaction) => {
-      revision = retargetCharacter(transaction, facts, outcome.contentKey);
+      const retargeted = retargetCharacter(transaction, facts, outcome.contentKey);
+      revision = retargeted.revision;
+      notices = retargeted.notices;
     },
   });
   if (committed.kind !== 'committed' || revision === null) {
@@ -698,5 +1242,6 @@ export function commitReferenceRetarget(
     character_revision: revision,
     old_content_key: facts.old_content_key,
     new_content_key: outcome.contentKey,
+    notices,
   });
 }

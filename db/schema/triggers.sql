@@ -17,6 +17,16 @@ BEGIN
   SELECT RAISE(ABORT, 'catalog content supersession lineage is immutable');
 END;
 
+-- Both identity foreign keys are ON DELETE RESTRICT, not CASCADE: installed
+-- identities that participate in history cannot be uninstalled. A direct
+-- edge delete therefore has no legitimate cascade exception and must always
+-- refuse, closing DELETE+INSERT as a successor-rewrite path.
+CREATE TRIGGER catalog_content_supersessions_refuse_delete_before_delete
+BEFORE DELETE ON catalog_content_supersessions
+BEGIN
+  SELECT RAISE(ABORT, 'catalog content supersession lineage is immutable');
+END;
+
 -- Walk the same-kind successor chain before accepting a new edge. UNION (not
 -- UNION ALL) also terminates safely if this guard is installed over damaged
 -- legacy data; the candidate edge is refused when its successor reaches its

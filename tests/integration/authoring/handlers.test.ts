@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import type { SpeciesAuthoringDraft, StoredHomebrewDraft } from '../../../src/authoring/contracts';
+import type {
+  HomebrewDraftItemUuid,
+  SpeciesAuthoringDraft,
+  StoredHomebrewDraft,
+} from '../../../src/authoring/contracts';
 import { AUTHORING_RPC, createAuthoringClient } from '../../../src/authoring/client';
 import { CatalogAuthoringService } from '../../../src/authoring/draft-service';
 import { speciesDraftToAggregate } from '../../../src/authoring/species-publisher';
@@ -16,6 +20,7 @@ import { projectAuthoredContentAggregateV1 } from '../../../src/catalog/stored-a
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import type { CharacterId, ContentKey } from '../../../src/domain/ids';
 import { assertedExternalContentKey } from '../../../src/catalog/catalog-key';
+import { assignSpellSelection } from '../../../src/eligibility/spell-selection-assignment';
 import { RpcClient, type RpcTransport } from '../../../src/rpc/client';
 import type { RpcRequest, RpcResponse } from '../../../src/rpc/protocol';
 import type { HandlerContext } from '../../../src/worker/handler';
@@ -79,12 +84,30 @@ function completeSpecies(
   };
 }
 
-function publishSpecies(service: CatalogAuthoringService, name: string, speed: number) {
+function publishSpecies(
+  service: CatalogAuthoringService,
+  name: string,
+  speed: number,
+  maximumSpellLevel?: number,
+) {
   const created = service.createDraft({ content_kind: 'species' });
+  const document = completeSpecies(created, name, speed);
   const saved = service.saveDraft({
     draft_uuid: created.draft_uuid,
     expected_revision: created.revision,
-    document: completeSpecies(created, name, speed),
+    document: maximumSpellLevel === undefined
+      ? document
+      : {
+          ...document,
+          grants: [{
+            kind: 'choice_from_list',
+            draft_item_uuid: `${name}-spell-choice` as HomebrewDraftItemUuid,
+            rule_key: 'retarget-spell-choice',
+            list: 'Wizard',
+            count: 1,
+            maximum_spell_level: maximumSpellLevel,
+          }],
+        },
   });
   const preview = service.previewPublish({
     draft_uuid: saved.draft_uuid,
@@ -456,4 +479,134 @@ describe('catalog authoring RPC handlers', () => {
       [refused.id, derived.derivedKey],
     )).toBe(0);
   });
+
+  it('preserves selected species spells and returns a typed notice for a newly incompatible selection', async () => {
+    const rpc = await open();
+    client = new RpcClient(new WorkerTransport(rpc.context));
+    const authoringClient = createAuthoringClient(client);
+    const service = new CatalogAuthoringService(rpc.context.db, {
+      randomUuid: (() => {
+        let sequence = 0;
+        return () => `rpc-retarget-spells-${String(++sequence)}`;
+      })(),
+      now: () => '2042-08-09T10:11:12.000Z',
+    });
+    const old = publishSpecies(service, 'Spell Retarget Old', 30, 1);
+    const compatible = publishSpecies(service, 'Spell Retarget Compatible', 35, 1);
+    const incompatible = publishSpecies(service, 'Spell Retarget Incompatible', 40, 0);
+    const classOption = listGuidedClassOptions(rpc.context.db)[0];
+    if (classOption === undefined) throw new Error('Seeded class option missing.');
+    const spellVersionId = rpc.context.db.scalar<number>(
+      `SELECT version.id
+       FROM spell_versions AS version
+       JOIN spell_list_memberships AS membership
+         ON membership.spell_version_id = version.id
+       WHERE membership.spell_list_key = 'Wizard'
+         AND version.level = 1 AND version.is_active = 1
+       ORDER BY version.id LIMIT 1`,
+    );
+    if (spellVersionId === null) throw new Error('Seeded Wizard spell missing.');
+
+    const retarget = async (
+      name: string,
+      targetContentKey: ContentKey,
+    ) => {
+      const character = createGuidedCharacter(
+        rpc.context.db,
+        { name, class_content_key: classOption.content_key },
+        new CharacterCommandIntegrity(`rpc-${name}`),
+      );
+      applyGuidedOrigin(rpc.context.db, {
+        character_id: character.id,
+        kind: 'species',
+        content_key: old.content_key,
+      });
+      const slotId = rpc.context.db.scalar<number>(
+        `SELECT id FROM spell_selection_slots
+         WHERE character_id = ? AND rule_key = 'retarget-spell-choice'
+           AND state = 'active'`,
+        [character.id],
+      );
+      if (slotId === null) throw new Error('Species spell slot missing.');
+      assignSpellSelection(rpc.context.db, {
+        address: { kind: 'slot_selection', id: slotId },
+        character_id: character.id,
+        spell_version_id: spellVersionId,
+      });
+      const preview = await authoringClient.previewReplacement({
+        old_content_key: old.content_key,
+        new_content_key: targetContentKey,
+        character_id: character.id as CharacterId,
+      });
+      const result = await authoringClient.commitReplacement({
+        token: preview.token,
+        decisions: preview.review.map((review) => ({
+          candidate_content_key: review.candidate_content_key,
+          decision: 'match' as const,
+        })),
+        choices: [],
+      });
+      return { character, result };
+    };
+
+    const preserved = await retarget(
+      'Compatible Spell Hero',
+      compatible.content_key,
+    );
+    expect(preserved.result.notices).toEqual([]);
+    expect(rpc.context.db.oneRaw(
+      `SELECT slot.current_spell_version_id, slot.selection_eligibility
+       FROM spell_selection_slots AS slot
+       JOIN character_source_instances AS source
+         ON source.id = slot.source_instance_id
+       WHERE slot.character_id = ? AND slot.rule_key = 'retarget-spell-choice'
+         AND slot.state = 'active' AND source.state = 'active'`,
+      [preserved.character.id],
+    )).toEqual({
+      current_spell_version_id: spellVersionId,
+      selection_eligibility: 'valid',
+    });
+
+    const degraded = await retarget(
+      'Incompatible Spell Hero',
+      incompatible.content_key,
+    );
+    expect(degraded.result.notices).toEqual([{
+      kind: 'retargeted_selection_invalid',
+      table: 'spell_selection_slots',
+      source_path: [],
+      rule_key: 'retarget-spell-choice',
+      ordinal: 1,
+      selected_value: spellVersionId,
+      reason: 'selection_ineligible',
+      detail: 'Selected spell is outside the slot level range.',
+    }]);
+    expect(rpc.context.db.oneRaw(
+      `SELECT slot.current_spell_version_id, slot.selection_eligibility,
+              slot.selection_invalid_reason
+       FROM spell_selection_slots AS slot
+       JOIN character_source_instances AS source
+         ON source.id = slot.source_instance_id
+       WHERE slot.character_id = ? AND slot.rule_key = 'retarget-spell-choice'
+         AND slot.state = 'active' AND source.state = 'active'`,
+      [degraded.character.id],
+    )).toEqual({
+      current_spell_version_id: spellVersionId,
+      selection_eligibility: 'invalid',
+      selection_invalid_reason: 'Selected spell is outside the slot level range.',
+    });
+    expect(rpc.context.db.oneRaw(
+      `SELECT slot.current_spell_version_id, slot.state, source.state AS source_state
+       FROM spell_selection_slots AS slot
+       JOIN character_source_instances AS source
+         ON source.id = slot.source_instance_id
+       WHERE slot.character_id = ? AND slot.rule_key = 'retarget-spell-choice'
+         AND source.state = 'tombstoned'`,
+      [degraded.character.id],
+    )).toEqual({
+      current_spell_version_id: spellVersionId,
+      state: 'orphaned',
+      source_state: 'tombstoned',
+    });
+  }, 20_000);
 });

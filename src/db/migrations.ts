@@ -446,15 +446,15 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
     resultSchemaChecksum:
       '98b62b5428ca4cfe04e9f9e9a8c9921e5751250a6a2af66ce9c907d3bfa6bb6d',
   }),
-  // CI-7: version edges are permanent historical facts. Storage rejects both
-  // mutation of an existing edge and insertion of any same-kind cycle.
+  // CI-7: version edges are permanent historical facts. Storage rejects
+  // mutation or deletion of an existing edge and any same-kind cycle.
   Object.freeze({
     id: '0039_catalog_content_supersession_guards',
     sql: catalogContentSupersessionGuards,
     checksum:
-      '8fa2e74124c97b6fbe772d5ee56f973514e5a080fe8622e1b32bfb8764f5676e',
+      'd18e373f4792a7a12259cf9744d8bc9b29502d399626d111a16c6f72a233704d',
     resultSchemaChecksum:
-      '7489fe1516d1b7e3ad387901036445d0ef768f4122f8a50f531a88501e7a4e93',
+      '406099a77335a08cf23f76d7425d7c6cf8c1a19d7e93c8532cb52497000640ca',
   }),
 ]);
 

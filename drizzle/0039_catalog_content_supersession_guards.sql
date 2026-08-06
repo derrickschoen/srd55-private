@@ -4,6 +4,12 @@ BEGIN
   SELECT RAISE(ABORT, 'catalog content supersession lineage is immutable');
 END;
 --> statement-breakpoint
+CREATE TRIGGER catalog_content_supersessions_refuse_delete_before_delete
+BEFORE DELETE ON catalog_content_supersessions
+BEGIN
+  SELECT RAISE(ABORT, 'catalog content supersession lineage is immutable');
+END;
+--> statement-breakpoint
 CREATE TRIGGER catalog_content_supersessions_prevent_cycle_before_insert
 BEFORE INSERT ON catalog_content_supersessions
 WHEN NEW.superseded_content_key <> NEW.successor_content_key

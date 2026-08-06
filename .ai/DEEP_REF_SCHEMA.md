@@ -40,7 +40,7 @@ aggregate, not recipient-local archive or immutable-version-lineage metadata.
 | `columns.ts` | The column primitives (`varchar`, `sqlText`, `datetime`, `tinyint1`) |
 | `relations.ts` | Drizzle relation blocks |
 | `index.ts` | Re-exports EVERY module above. Not optional — see below |
-| `triggers.sql` | Hand-authored storage invariants, including immutable acyclic content lineage |
+| `triggers.sql` | Hand-authored storage invariants, including insert/update/delete-guarded immutable acyclic content lineage |
 
 `db/schema/origins.ts`:
 

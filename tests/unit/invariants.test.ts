@@ -246,6 +246,7 @@ describe(`ported persistence invariants (${sourceLabel})`, () => {
     ).toEqual([
       'background_default_origin_feat_before_update',
       'catalog_content_supersessions_prevent_cycle_before_insert',
+      'catalog_content_supersessions_refuse_delete_before_delete',
       'catalog_content_supersessions_refuse_update_before_update',
       'catalog_register_armor_identity_before_insert',
       'catalog_register_background_definition_identity_before_insert',
@@ -264,6 +265,49 @@ describe(`ported persistence invariants (${sourceLabel})`, () => {
       'spell_slots_exclusive_assignment_insert',
       'spell_slots_exclusive_assignment_update',
     ]);
+  });
+
+  it('refuses direct lineage deletion and DELETE+INSERT successor rewrites', () => {
+    const db = openDb(schemaSql);
+    const context = new DatabaseContext(db);
+    for (const [contentKey, name] of [
+      ['expanded:content.species:lineage-a', 'Lineage A'],
+      ['expanded:content.species:lineage-b', 'Lineage B'],
+      ['expanded:content.species:lineage-c', 'Lineage C'],
+    ] as const) {
+      registerFixtureContentIdentity(context, {
+        kind: 'species', contentKey, name, keyKind: 'asserted',
+      });
+    }
+    db.exec(
+      `INSERT INTO catalog_content_supersessions (
+         content_kind, superseded_content_key, successor_content_key
+       ) VALUES ('species', 'expanded:content.species:lineage-a',
+                 'expanded:content.species:lineage-b')`,
+    );
+
+    expect(caughtErrorMessage(() => db.exec(
+      `DELETE FROM catalog_content_supersessions
+       WHERE content_kind = 'species'
+         AND superseded_content_key = 'expanded:content.species:lineage-a'`,
+    ))).toContain('catalog content supersession lineage is immutable');
+    expect(caughtErrorMessage(() => db.exec(
+      `DELETE FROM catalog_content_supersessions
+       WHERE content_kind = 'species'
+         AND superseded_content_key = 'expanded:content.species:lineage-a';
+       INSERT INTO catalog_content_supersessions (
+         content_kind, superseded_content_key, successor_content_key
+       ) VALUES ('species', 'expanded:content.species:lineage-a',
+                 'expanded:content.species:lineage-c');`,
+    ))).toContain('catalog content supersession lineage is immutable');
+    expect(db.selectObject(
+      `SELECT successor_content_key
+       FROM catalog_content_supersessions
+       WHERE content_kind = 'species'
+         AND superseded_content_key = 'expanded:content.species:lineage-a'`,
+    )).toEqual({
+      successor_content_key: 'expanded:content.species:lineage-b',
+    });
   });
 
   it('rejects both cross-character source and wrong-class subclass composite FKs', () => {

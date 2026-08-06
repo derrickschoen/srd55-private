@@ -1455,7 +1455,7 @@ describe('database migration chain', () => {
     lifecycle.close();
   });
 
-  it('CI7 0039 rejects lineage cycles and mutation on migrated databases', async () => {
+  it('CI7 0039 rejects lineage cycles, mutation, and deletion on migrated databases', async () => {
     const beforeGuards = DATABASE_MIGRATIONS
       .slice(0, DATABASE_MIGRATIONS.findIndex(
         (entry) => entry.id === '0039_catalog_content_supersession_guards',
@@ -1494,6 +1494,20 @@ describe('database migration chain', () => {
        SET successor_content_key = 'expanded:migration.fixture:lineage-c'
        WHERE content_kind = 'species'
          AND superseded_content_key = 'expanded:migration.fixture:lineage-a'`,
+    )).toThrow('catalog content supersession lineage is immutable');
+    expect(() => lifecycle.database.exec(
+      `DELETE FROM catalog_content_supersessions
+       WHERE content_kind = 'species'
+         AND superseded_content_key = 'expanded:migration.fixture:lineage-a'`,
+    )).toThrow('catalog content supersession lineage is immutable');
+    expect(() => lifecycle.database.exec(
+      `DELETE FROM catalog_content_supersessions
+       WHERE content_kind = 'species'
+         AND superseded_content_key = 'expanded:migration.fixture:lineage-a';
+       INSERT INTO catalog_content_supersessions (
+         content_kind, superseded_content_key, successor_content_key
+       ) VALUES ('species', 'expanded:migration.fixture:lineage-a',
+                 'expanded:migration.fixture:lineage-c');`,
     )).toThrow('catalog content supersession lineage is immutable');
     expect(lifecycle.database.allRaw(
       `SELECT superseded_content_key, successor_content_key

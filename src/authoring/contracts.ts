@@ -584,12 +584,39 @@ export interface ReplacementDecision {
   readonly decision: Extract<CatalogContentMatchDecision, 'match'>;
 }
 
+export type ReplacementNotice =
+  | {
+      readonly kind: 'retargeted_selection_invalid';
+      readonly table:
+        | 'spell_selection_slots'
+        | 'wizard_spellbook_entries'
+        | 'character_skill_grants'
+        | 'character_skill_expertise_grants';
+      readonly source_path: readonly string[];
+      readonly rule_key: string;
+      readonly ordinal: number;
+      readonly selected_value: number | Skill;
+      readonly reason:
+        | 'target_source_missing'
+        | 'target_rule_missing'
+        | 'target_rule_changed'
+        | 'selection_ineligible';
+      readonly detail: string | null;
+    }
+  | {
+      readonly kind: 'retargeted_level_feat_invalid';
+      readonly source_path: readonly string[];
+      readonly character_level_feat_choice_id: number;
+      readonly reason: 'target_source_missing';
+    };
+
 export interface ReplacementResult {
   readonly content_kind: AuthoredContentKind;
   readonly character_id: CharacterId;
   readonly character_revision: CharacterRevision;
   readonly old_content_key: ContentKey;
   readonly new_content_key: ContentKey;
+  readonly notices: readonly ReplacementNotice[];
 }
 
 export type AuthoringValidationIssueCode =
