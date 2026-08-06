@@ -19,6 +19,9 @@ import { sha256 } from '../../../src/crypto/sha256';
 import { CHARACTER_SNAPSHOT_SCHEMA_VERSION } from '../../../src/character/character-state';
 import { verifyMigrations } from '../../../scripts/verify-migrations';
 import { bootDatabase } from '../../../src/worker/boot';
+import { applicationSeed } from '../../../src/db/bootstrap';
+import { CharacterCommandExecutor } from '../../../src/commands/character-command-executor';
+import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import {
   ACTIVE_CHARACTER_LIST_QUERY,
   ARCHIVED_CHARACTER_LIST_QUERY,
@@ -60,6 +63,65 @@ INSERT INTO "__new_migration_parent" (id, name)
   SELECT id, name FROM migration_parent;
 DROP TABLE migration_parent;
 ALTER TABLE "__new_migration_parent" RENAME TO migration_parent;`;
+
+const CI4B_NEGATIVE_ID_CENSUS_TABLES = [
+  'character_effects',
+  'character_skill_proficiencies',
+  'character_skill_grants',
+  'character_skill_expertise_grants',
+  'character_level_feat_choices',
+  'character_class_levels',
+  'spell_loadout_entries',
+  'spell_selection_slots',
+  'wizard_spellbook_entries',
+  'character_spell_preferences',
+  'character_items',
+  'character_source_instances',
+  'subclass_feature_effects',
+  'subclass_features',
+  'subclass_progressions',
+  'named_feature_effects',
+  'named_features',
+  'class_armor_training',
+  'class_extra_attack_grants',
+  'class_feature_effects',
+  'class_martial_arts_dice',
+  'class_progressions',
+  'class_resource_formulas',
+  'class_resources',
+  'class_saving_throw_proficiencies',
+  'class_sheet_traits',
+  'class_skill_options',
+  'class_weapon_mastery_counts',
+  'class_weapon_mastery_grants',
+  'class_weapon_proficiencies',
+  'class_equipment_items',
+  'background_equipment_items',
+  'background_template_effects',
+  'species_template_trait_effects',
+  'species_template_traits',
+  'item_definition_effects',
+  'spell_list_memberships',
+  'spell_version_attack_modes',
+  'spell_version_cantrip_upgrade_levels',
+  'spell_version_conditions',
+  'spell_version_damage_types',
+  'spell_version_publications',
+  'spell_version_save_abilities',
+  'spell_version_tags',
+  'spell_version_upcast_levels',
+  'subclass_definitions',
+  'class_definitions',
+  'feat_definitions',
+  'species_definitions',
+  'species_templates',
+  'background_definitions',
+  'background_templates',
+  'spell_versions',
+  'weapon_templates',
+  'armor_templates',
+  'item_definitions',
+] as const;
 
 let sqlite3: Sqlite3Static;
 
@@ -162,6 +224,15 @@ const SCHEMA_BEFORE_ASSERTED_CONTENT_KEYS = DATABASE_MIGRATIONS
       (entry) => entry.id === '0033_asserted_content_keys',
     ),
   )
+  .map((entry) => entry.sql)
+  .join('\n');
+
+const ASSERTED_CONTENT_KEYS_MIGRATION_COUNT =
+  DATABASE_MIGRATIONS.findIndex(
+    (entry) => entry.id === '0033_asserted_content_keys',
+  ) + 1;
+const SCHEMA_AFTER_ASSERTED_CONTENT_KEYS = DATABASE_MIGRATIONS
+  .slice(0, ASSERTED_CONTENT_KEYS_MIGRATION_COUNT)
   .map((entry) => entry.sql)
   .join('\n');
 
@@ -350,6 +421,258 @@ async function storageHolding(sql: string): Promise<MemoryDatabaseStorage> {
   return storage;
 }
 
+function historicalLifecycleThrough0033(
+  storage: MemoryDatabaseStorage,
+): DatabaseLifecycle {
+  return new DatabaseLifecycle(
+    sqlite3,
+    storage,
+    SCHEMA_AFTER_ASSERTED_CONTENT_KEYS,
+    () => undefined,
+    DATABASE_MIGRATIONS.slice(0, ASSERTED_CONTENT_KEYS_MIGRATION_COUNT),
+  );
+}
+
+const CI4B_SURVIVOR_CLASS_KEY =
+  'expanded:content.v1:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd';
+const CI4B_SURVIVOR_FEAT_KEY =
+  'expanded:content.v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+
+const CI4B_THROUGH_0032_FIXTURE = `
+INSERT INTO catalog_content_identities (
+  content_key, content_kind, key_kind, catalog_layer, normalized_name, created_at
+) VALUES
+  ('2024:class:wizard', 'class', 'legacy-opaque', 'external', 'wizard', '2031-01-01'),
+  ('ci4b:discarded-class', 'class', 'legacy-opaque', 'external', 'discarded class', '2031-01-02'),
+  ('ci4b:legacy-subclass', 'subclass', 'legacy-opaque', 'external', 'legacy subclass', '2031-01-03'),
+  ('ci4b:legacy-feat', 'feat', 'legacy-opaque', 'external', 'legacy feat', '2031-01-04'),
+  ('ci4b:legacy-species', 'species', 'legacy-opaque', 'external', 'legacy species', '2031-01-05'),
+  ('ci4b:legacy-background', 'background', 'legacy-opaque', 'external', 'legacy background', '2031-01-06'),
+  ('2024:acid-splash', 'spell', 'legacy-opaque', 'external', 'acid splash', '2031-01-07'),
+  ('ci4b:legacy-weapon', 'weapon', 'legacy-opaque', 'external', 'legacy weapon', '2031-01-08'),
+  ('ci4b:legacy-armor', 'armor', 'legacy-opaque', 'external', 'legacy armor', '2031-01-09'),
+  ('ci4b:legacy-item', 'item', 'legacy-opaque', 'external', 'legacy item', '2031-01-10'),
+  ('${CI4B_SURVIVOR_CLASS_KEY}', 'class', 'derived', 'external', 'survivor class', '2031-01-11'),
+  ('${CI4B_SURVIVOR_FEAT_KEY}', 'feat', 'derived', 'external', 'survivor feat', '2031-01-12');
+
+INSERT INTO class_definitions (id, content_key, name, rules_edition, progression_type)
+VALUES
+  (-101, '2024:class:wizard', 'Wizard', '2024', 'full'),
+  (-102, 'ci4b:discarded-class', 'Discarded Class', 'expanded', 'none'),
+  (120, '${CI4B_SURVIVOR_CLASS_KEY}', 'Survivor Class', 'expanded', 'none');
+INSERT INTO subclass_definitions (
+  id, content_key, class_definition_id, name, rules_edition
+) VALUES (-103, 'ci4b:legacy-subclass', 120, 'Legacy Subclass', 'expanded');
+INSERT INTO feat_definitions (
+  id, content_key, name, rules_edition, repeatable
+) VALUES
+  (-105, 'ci4b:legacy-feat', 'Legacy Feat', 'expanded', 0),
+  (103, '${CI4B_SURVIVOR_FEAT_KEY}', 'Survivor Feat', 'expanded', 1);
+INSERT INTO species_definitions (id, content_key, name, rules_edition)
+VALUES (-106, 'ci4b:legacy-species', 'Legacy Species', 'expanded');
+INSERT INTO species_templates (
+  id, content_key, rules_edition, name, creature_type, size, base_speed_feet
+) VALUES (-107, 'ci4b:legacy-species', 'expanded', 'Legacy Species', 'Humanoid', 'Medium', 30);
+INSERT INTO background_definitions (id, content_key, name, rules_edition)
+VALUES (-108, 'ci4b:legacy-background', 'Legacy Background', 'expanded');
+INSERT INTO background_templates (
+  id, content_key, rules_edition, name, ability_score_1, ability_score_2,
+  ability_score_3, feat_name, skill_proficiency_1, skill_proficiency_2,
+  tool_proficiency, equipment_option_a, equipment_option_b
+) VALUES (
+  -109, 'ci4b:legacy-background', 'expanded', 'Legacy Background',
+  'Strength', 'Dexterity', 'Constitution', 'Legacy Feat', 'Arcana', 'History',
+  'Legacy Tools', 'A', 'B'
+);
+INSERT INTO spell_identities (id, content_key, canonical_name, normalized_name)
+VALUES (-110, 'migration:acid-splash', 'Acid Splash', 'acid splash');
+INSERT INTO spell_versions (
+  id, content_key, spell_identity_id, display_name, rules_edition, level,
+  school, provenance
+) VALUES (
+  -111, '2024:acid-splash', -110, 'Acid Splash', '2024', 0, 'Evocation', 'srd'
+);
+INSERT INTO weapon_templates (
+  id, content_key, rules_edition, name, srd_group, damage_kind, damage_dice,
+  damage_type, mastery_property
+) VALUES (
+  -112, 'ci4b:legacy-weapon', 'expanded', 'Legacy Weapon', 'simple_melee',
+  'dice', '1d6', 'Slashing', 'Sap'
+);
+INSERT INTO armor_templates (
+  id, content_key, rules_edition, name, category, armor_class, dex_bonus
+) VALUES (-113, 'ci4b:legacy-armor', 'expanded', 'Legacy Armor', 'light', 11, 'full');
+INSERT INTO item_definitions (
+  id, content_key, rules_edition, name, description, requires_attunement
+) VALUES (-114, 'ci4b:legacy-item', 'expanded', 'Legacy Item', 'Debris', 0);
+
+INSERT INTO class_progressions (id, class_definition_id, class_level)
+VALUES (-121, -102, 1);
+INSERT INTO class_equipment_items (
+  id, class_definition_id, option, sort_order, quantity, item_name, item_kind,
+  weapon_template_id, armor_template_id
+) VALUES
+  (-122, -102, 'a', 1, 1, 'Legacy Weapon', 'weapon', -112, NULL),
+  (-123, -102, 'a', 2, 1, 'Legacy Armor', 'armor', NULL, -113);
+INSERT INTO named_features (
+  id, content_key, class_definition_id, name, rules_edition, prerequisite,
+  description, class_level
+) VALUES (-124, 'ci4b:named-feature', -102, 'Legacy Feature', 'expanded', '', 'Debris', 1);
+INSERT INTO named_feature_effects (
+  id, named_feature_id, sort_order, effect_kind, damage_type
+) VALUES (-125, -124, 1, 'damage_resistance', 'Cold');
+INSERT INTO subclass_features (
+  id, subclass_definition_id, class_level, sort_order, name, description
+) VALUES (-126, -103, 3, 1, 'Legacy Subclass Feature', 'Debris');
+INSERT INTO subclass_feature_effects (
+  id, subclass_feature_id, sort_order, effect_kind, damage_type, label
+) VALUES (-127, -126, 1, 'damage_resistance', 'Fire', 'Legacy ward');
+INSERT INTO species_template_traits (
+  id, species_template_id, sort_order, name, description
+) VALUES (-128, -107, 1, 'Legacy Trait', 'Debris');
+INSERT INTO species_template_trait_effects (
+  id, species_template_trait_id, sort_order, effect_kind, speed_bonus_feet, label
+) VALUES (-129, -128, 1, 'speed', 5, 'Legacy speed');
+INSERT INTO background_template_effects (
+  id, background_template_id, sort_order, effect_kind, speed_bonus_feet, label
+) VALUES (-130, -109, 1, 'speed', 5, 'Legacy pace');
+INSERT INTO background_equipment_items (
+  id, background_template_id, option, sort_order, quantity, item_name,
+  item_kind, weapon_template_id
+) VALUES (-131, -109, 'a', 1, 1, 'Legacy Weapon', 'weapon', -112);
+INSERT INTO item_definition_effects (
+  id, item_definition_id, sort_order, effect_kind, damage_type, label
+) VALUES (-132, -114, 1, 'damage_resistance', 'Cold', 'Legacy item ward');
+INSERT INTO spell_version_tags (id, spell_version_id, tag)
+VALUES (-133, -111, 'acid');
+INSERT INTO catalog_content_aliases (
+  content_kind, alias_key, content_key, alias_kind
+) VALUES ('item', 'ci4b:old-item', 'ci4b:legacy-item', 'declared-legacy');
+INSERT INTO catalog_content_fingerprints (
+  content_kind, fingerprint_scheme, fingerprint_digest, canonical_json,
+  content_key, fingerprint_role
+) VALUES (
+  'item', 'content-v1',
+  'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+  'ci4b-item-bytes', 'ci4b:legacy-item', 'current'
+);
+INSERT INTO catalog_content_match_decisions (
+  content_kind, incoming_fingerprint_scheme, incoming_fingerprint_digest,
+  decision, target_content_key
+) VALUES (
+  'spell', 'content-v1',
+  'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+  'match', '2024:acid-splash'
+);
+
+INSERT INTO characters (id, name) VALUES (107, 'Disposable links');
+INSERT INTO character_source_instances (
+  id, character_id, instance_uuid, parent_source_instance_id, source_type,
+  source_definition_id, display_name
+) VALUES
+  (-201, 107, 'ci4b-class-source', NULL, 'class', -101, 'Wizard'),
+  (-203, 107, 'ci4b-feat-source', NULL, 'feat', -105, 'Legacy Feat'),
+  (-204, 107, 'ci4b-species-source', NULL, 'species', -106, 'Legacy Species'),
+  (-205, 107, 'ci4b-background-source', NULL, 'background', -108, 'Legacy Background'),
+  (-206, 107, 'ci4b-subclass-source', NULL, 'subclass', -103, 'Legacy Subclass');
+INSERT INTO character_effects (
+  id, character_id, sort_order, effect_kind, damage_type, source_instance_id, label
+) VALUES (-207, 107, 1, 'damage_resistance', 'Cold', -201, 'Active class ward');
+INSERT INTO character_skill_grants (
+  id, character_id, source_instance_id, grant_key, ordinal, skill, state
+) VALUES (-208, 107, -201, 'ci4b-skill', 1, 'arcana', 'active');
+INSERT INTO character_skill_proficiencies (id, character_id, skill)
+VALUES (-209, 107, 'arcana');
+INSERT INTO character_skill_expertise_grants (
+  id, character_id, source_instance_id, grant_key, ordinal,
+  granted_at_class_level, skill, state
+) VALUES (-210, 107, -201, 'ci4b-expertise', 1, 1, 'history', 'active');
+INSERT INTO character_class_levels (
+  id, character_id, class_definition_id, level
+) VALUES (-211, 107, -101, 1);
+INSERT INTO spell_loadouts (id, character_id, name)
+VALUES (-212, 107, 'Disposable loadout');
+INSERT INTO spell_loadout_entries (
+  id, spell_loadout_id, spell_version_id, role
+) VALUES (-213, -212, -111, 'prepared');
+INSERT INTO spell_selection_slots (
+  id, character_id, source_instance_id, slot_key, rule_key, bucket,
+  eligibility_kind, current_spell_version_id
+) VALUES (
+  -214, 107, -201, 'ci4b-slot', 'ci4b-rule', 'known',
+  'choice_from_list', -111
+);
+INSERT INTO wizard_spellbook_entries (
+  id, character_id, source_instance_id, rule_key, ordinal, spell_version_id
+) VALUES (-215, 107, -201, 'ci4b-book', 1, -111);
+INSERT INTO character_spell_preferences (
+  id, character_id, spell_version_id, favourite
+) VALUES (-216, 107, -111, 1);
+INSERT INTO character_save_points (
+  id, character_id, label, snapshot, schema_version
+) VALUES (
+  219, 107, 'Before CI-4b', '{"class_definition_id":-101}',
+  '${CHARACTER_SNAPSHOT_SCHEMA_VERSION}'
+);
+INSERT INTO character_operations (
+  id, character_id, operation_uuid, expected_revision, resulting_revision,
+  inverse_command
+) VALUES (
+  220, 107, 'ci4b-operation', 0, 1,
+  '{"type":"ci4b_restore","source_definition_id":-101}'
+);
+INSERT INTO characters (id, name) VALUES (108, 'Historical links only');
+INSERT INTO character_save_points (
+  id, character_id, label, snapshot, schema_version
+) VALUES
+  (221, 108, 'Legacy id only', '{"source_definition_id":-105}',
+   '${CHARACTER_SNAPSHOT_SCHEMA_VERSION}'),
+  (223, 108, 'Clean sibling in affected timeline', '{"note":"clean"}',
+   '${CHARACTER_SNAPSHOT_SCHEMA_VERSION}');
+INSERT INTO character_operations (
+  id, character_id, operation_uuid, expected_revision, resulting_revision,
+  inverse_command
+) VALUES (
+  222, 108, 'ci4b-history-only-operation', 0, 1,
+  '{"type":"ci4b_restore","content_key":"ci4b:legacy-feat"}'
+);`;
+
+const CI4B_AFTER_0033_EDGE_FIXTURE = `
+INSERT INTO catalog_content_identities (
+  content_key, content_kind, key_kind, catalog_layer, normalized_name
+) VALUES (
+  'expanded:ci4b-child', 'subclass', 'asserted', 'external', 'ci4b child'
+);
+INSERT INTO subclass_definitions (
+  id, content_key, class_definition_id, name, rules_edition
+) VALUES (-104, 'expanded:ci4b-child', -102, 'Asserted Child', 'expanded');
+INSERT INTO subclass_progressions (
+  id, subclass_definition_id, class_level
+) VALUES (-134, -104, 1);
+INSERT INTO character_source_instances (
+  id, character_id, instance_uuid, parent_source_instance_id, source_type,
+  source_definition_id, display_name
+) VALUES (
+  -202, 107, 'ci4b-asserted-child-source', -201, 'subclass', -104,
+  'Asserted Child'
+);
+INSERT INTO character_items (
+  id, character_id, name, source_instance_id
+) VALUES (-217, 107, 'Child-granted item', -202);
+INSERT INTO character_attunement_slots (character_id, slot_1_item_id)
+VALUES (107, -217);
+INSERT INTO character_effects (
+  id, character_id, sort_order, effect_kind, speed_bonus_feet,
+  character_item_id, label
+) VALUES (-218, 107, 2, 'speed', 5, -217, 'Child item speed');
+INSERT INTO character_class_levels (
+  id, character_id, class_definition_id, subclass_definition_id, level
+) VALUES (-219, 107, -102, -104, 2);
+INSERT INTO character_level_feat_choices (
+  id, character_id, character_class_level_id, class_level, choice_kind,
+  feat_source_instance_id
+) VALUES (-220, 107, -219, 2, 'asi_level_feat', -203);`;
+
 class ProbedStorage extends MemoryDatabaseStorage {
   migrationExecutions = 0;
 
@@ -375,7 +698,7 @@ function probedRegistry(targetSchema: string): readonly DatabaseMigration[] {
 }
 
 describe('database migration chain', () => {
-  it('0033 preserves legacy identities and requires external roots to assert portable keys first', async () => {
+  it('0033 preserves legacy identities before 0034 wipes them and closes the vocabulary', async () => {
     const storage = await storageHolding(
       `${SCHEMA_BEFORE_ASSERTED_CONTENT_KEYS}
        INSERT INTO item_definitions (
@@ -384,10 +707,16 @@ describe('database migration chain', () => {
          'expanded:preserved-belt', 'expanded', 'Preserved Belt', '', 0
        );`,
     );
-    const lifecycle = new DatabaseLifecycle(sqlite3, storage, schema);
-    lifecycle.open();
+    const historical = new DatabaseLifecycle(
+      sqlite3,
+      storage,
+      SCHEMA_AFTER_ASSERTED_CONTENT_KEYS,
+      () => undefined,
+      DATABASE_MIGRATIONS.slice(0, ASSERTED_CONTENT_KEYS_MIGRATION_COUNT),
+    );
+    historical.open();
     try {
-      expect(lifecycle.database.oneRaw(
+      expect(historical.database.oneRaw(
         `SELECT content_kind, key_kind, catalog_layer
          FROM catalog_content_identities
          WHERE content_key = 'expanded:preserved-belt'`,
@@ -396,7 +725,7 @@ describe('database migration chain', () => {
         key_kind: 'legacy-opaque',
         catalog_layer: 'external',
       });
-      expectTriggerRefusal(() => lifecycle.database.exec(
+      expectTriggerRefusal(() => historical.database.exec(
         `INSERT INTO item_definitions (
            content_key, rules_edition, name, description, requires_attunement
          ) VALUES (
@@ -405,7 +734,7 @@ describe('database migration chain', () => {
       ),
         'item content key must be registered before insert',
       );
-      expectTriggerRefusal(() => lifecycle.database.exec(
+      expectTriggerRefusal(() => historical.database.exec(
         `INSERT INTO item_definitions (
            content_key, rules_edition, name, description, requires_attunement
          ) VALUES (
@@ -414,14 +743,14 @@ describe('database migration chain', () => {
       ),
         'item content key must be registered before insert',
       );
-      expect(lifecycle.database.scalar<number>(
+      expect(historical.database.scalar<number>(
         `SELECT count(*) FROM catalog_content_identities
          WHERE content_key = 'fresh-unrecognized-root'
            OR key_kind = 'legacy-opaque'
              AND content_key <> 'expanded:preserved-belt'`,
       )).toBe(0);
 
-      lifecycle.database.exec(
+      historical.database.exec(
         `INSERT INTO catalog_content_identities (
            content_key, content_kind, key_kind, catalog_layer, normalized_name
          ) VALUES (
@@ -429,17 +758,419 @@ describe('database migration chain', () => {
            'new belt'
          )`,
       );
-      lifecycle.database.exec(
+      historical.database.exec(
         `INSERT INTO item_definitions (
            content_key, rules_edition, name, description, requires_attunement
          ) VALUES (
            'expanded:content.item:new-belt', 'expanded', 'New Belt', '', 0
          )`,
       );
-      expect(lifecycle.database.scalar<number>(
+      expect(historical.database.scalar<number>(
         `SELECT count(*) FROM item_definitions
          WHERE content_key = 'expanded:content.item:new-belt'`,
       )).toBe(1);
+    } finally {
+      historical.close();
+    }
+
+    const current = new DatabaseLifecycle(sqlite3, storage, schema);
+    current.open();
+    try {
+      expect(current.database.scalar<number>(
+        `SELECT count(*) FROM catalog_content_identities
+         WHERE key_kind = 'legacy-opaque'`,
+      )).toBe(0);
+      expect(current.database.scalar<number>(
+        `SELECT count(*) FROM item_definitions
+         WHERE content_key = 'expanded:preserved-belt'`,
+      )).toBe(0);
+      expect(current.database.scalar<number>(
+        `SELECT count(*) FROM item_definitions
+         WHERE content_key = 'expanded:content.item:new-belt'`,
+      )).toBe(1);
+      expect(() => current.database.exec(
+        `INSERT INTO catalog_content_identities (
+           content_key, content_kind, key_kind, catalog_layer, normalized_name
+         ) VALUES (
+           'expanded:forbidden-legacy', 'item', 'legacy-opaque', 'external',
+           'forbidden legacy'
+         )`,
+      )).toThrow('catalog_content_identities_key_kind_check');
+    } finally {
+      current.close();
+    }
+  });
+
+  it('0034 wipes hand-authored legacy aggregates and next boot reseeds bundled roots under stable keys', async () => {
+    const survivorKey =
+      'expanded:content.v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const storage = await storageHolding(
+      `${SCHEMA_BEFORE_ASSERTED_CONTENT_KEYS}
+       INSERT INTO catalog_content_identities (
+         content_key, content_kind, key_kind, catalog_layer,
+         normalized_name, created_at
+       ) VALUES
+         ('2024:class:wizard', 'class', 'legacy-opaque', 'external',
+          'wizard', '2031-01-01T00:00:00.000Z'),
+         ('expanded:discarded-class', 'class', 'legacy-opaque', 'external',
+          'discarded class', '2031-01-02T00:00:00.000Z'),
+         ('2024:acid-splash', 'spell', 'legacy-opaque', 'external',
+          'acid splash', '2031-01-03T00:00:00.000Z'),
+         ('expanded:orphaned-item', 'item', 'legacy-opaque', 'external',
+          'orphaned item', '2031-01-04T00:00:00.000Z'),
+         ('${survivorKey}', 'feat', 'derived', 'external',
+          'survivor feat', '2031-01-05T00:00:00.000Z');
+       INSERT INTO class_definitions (
+         id, content_key, name, rules_edition, progression_type
+       ) VALUES
+         (101, '2024:class:wizard', 'Wizard', '2024', 'full'),
+         (102, 'expanded:discarded-class', 'Discarded Class', 'expanded',
+          'none');
+       INSERT INTO feat_definitions (
+         id, content_key, name, rules_edition, repeatable, created_at
+       ) VALUES (
+         103, '${survivorKey}', 'Survivor Feat', 'expanded', 1,
+         '2031-02-01T00:00:00.000Z'
+       );
+       INSERT INTO item_definitions (
+         id, content_key, rules_edition, name, description,
+         requires_attunement
+       ) VALUES (
+         104, 'expanded:orphaned-item', 'expanded', 'Orphaned Item',
+         'No item reseeder owns this row.', 0
+       );
+       INSERT INTO item_definition_effects (
+         id, item_definition_id, sort_order, effect_kind, damage_type, label
+       ) VALUES (116, 104, 1, 'damage_resistance', 'Cold', 'Discarded ward');
+       INSERT INTO class_progressions (
+         id, class_definition_id, class_level
+       ) VALUES (117, 102, 1);
+       INSERT INTO spell_identities (
+         id, content_key, canonical_name, normalized_name
+       ) VALUES (105, 'migration:acid-splash', 'Acid Splash', 'acid splash');
+       INSERT INTO spell_versions (
+         id, content_key, spell_identity_id, display_name, rules_edition,
+         level, school, provenance
+       ) VALUES (
+         106, '2024:acid-splash', 105, 'Acid Splash', '2024', 0,
+         'Evocation', 'srd'
+       );
+       INSERT INTO spell_version_tags (spell_version_id, tag)
+       VALUES (106, 'acid');
+       INSERT INTO catalog_content_aliases (
+         content_kind, alias_key, content_key, alias_kind
+       ) VALUES (
+         'item', 'expanded:old-orphaned-item', 'expanded:orphaned-item',
+         'declared-legacy'
+       );
+       INSERT INTO catalog_content_fingerprints (
+         content_kind, fingerprint_scheme, fingerprint_digest,
+         canonical_json, content_key, fingerprint_role
+       ) VALUES (
+         'item', 'content-v1',
+         'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+         'hand-authored-item-bytes', 'expanded:orphaned-item', 'current'
+       );
+       INSERT INTO catalog_content_match_decisions (
+         content_kind, incoming_fingerprint_scheme,
+         incoming_fingerprint_digest, decision, target_content_key
+       ) VALUES (
+         'spell', 'content-v1',
+         'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+         'match', '2024:acid-splash'
+       );
+       INSERT INTO characters (id, name) VALUES (107, 'Disposable links');
+       INSERT INTO character_source_instances (
+         id, character_id, instance_uuid, source_type,
+         source_definition_id, display_name
+       ) VALUES (
+         108, 107, 'ci4b-disposable-source', 'class', 101, 'Wizard'
+       );
+       INSERT INTO character_class_levels (
+         id, character_id, class_definition_id, level
+       ) VALUES
+         (109, 107, 101, 1),
+         (110, 107, 102, 1);
+       INSERT INTO spell_loadouts (id, character_id, name)
+       VALUES (111, 107, 'Disposable loadout');
+       INSERT INTO spell_loadout_entries (
+         id, spell_loadout_id, spell_version_id, role
+       ) VALUES (112, 111, 106, 'prepared');
+       INSERT INTO spell_selection_slots (
+         id, character_id, source_instance_id, slot_key, rule_key, bucket,
+         eligibility_kind, current_spell_version_id
+       ) VALUES (
+         113, 107, 108, 'ci4b-slot', 'ci4b-rule', 'known',
+         'choice_from_list', 106
+       );
+       INSERT INTO wizard_spellbook_entries (
+         id, character_id, spell_version_id
+       ) VALUES (114, 107, 106);
+       INSERT INTO character_spell_preferences (
+         id, character_id, spell_version_id, favourite
+       ) VALUES (115, 107, 106, 1);`,
+    );
+
+    const lifecycle = new DatabaseLifecycle(
+      sqlite3,
+      storage,
+      schema,
+      applicationSeed,
+    );
+    lifecycle.open();
+    try {
+      const db = lifecycle.database;
+      expect(db.scalar<number>(
+        `SELECT count(*) FROM catalog_content_identities
+         WHERE key_kind = 'legacy-opaque'`,
+      )).toBe(0);
+      expect(db.scalar<number>(
+        `SELECT count(*) FROM sqlite_schema
+         WHERE sql LIKE '%legacy-opaque%'`,
+      )).toBe(0);
+      expect(db.scalar<number>(
+        `SELECT count(*) FROM catalog_content_identities
+         WHERE key_kind = 'bundled-stable' AND catalog_layer = 'bundled'`,
+      )).toBe(447);
+      expect(db.oneRaw(
+        `SELECT identity.key_kind, identity.catalog_layer, root.name
+         FROM catalog_content_identities AS identity
+         JOIN class_definitions AS root
+           ON root.content_key = identity.content_key
+         WHERE identity.content_key = '2024:class:wizard'`,
+      )).toEqual({
+        key_kind: 'bundled-stable',
+        catalog_layer: 'bundled',
+        name: 'Wizard',
+      });
+      expect(db.oneRaw(
+        `SELECT identity.key_kind, identity.catalog_layer, root.display_name
+         FROM catalog_content_identities AS identity
+         JOIN spell_versions AS root
+           ON root.content_key = identity.content_key
+         WHERE identity.content_key = '2024:acid-splash'`,
+      )).toEqual({
+        key_kind: 'bundled-stable',
+        catalog_layer: 'bundled',
+        display_name: 'Acid Splash',
+      });
+      expect(db.scalar<number>(
+        `SELECT count(*) FROM catalog_content_identities
+         WHERE content_key IN (
+           'expanded:discarded-class', 'expanded:orphaned-item'
+         )`,
+      )).toBe(0);
+      expect(db.scalar<number>(
+        `SELECT count(*) FROM class_definitions
+         WHERE content_key = 'expanded:discarded-class'`,
+      )).toBe(0);
+      expect(db.scalar<number>(
+        `SELECT count(*) FROM item_definitions
+         WHERE content_key = 'expanded:orphaned-item'`,
+      )).toBe(0);
+      expect(db.scalar<number>(
+        `SELECT count(*) FROM catalog_content_aliases
+         WHERE content_key = 'expanded:orphaned-item'`,
+      )).toBe(0);
+      expect(db.scalar<number>(
+        `SELECT count(*) FROM catalog_content_fingerprints
+         WHERE content_key = 'expanded:orphaned-item'`,
+      )).toBe(0);
+      expect(db.scalar<number>(
+        `SELECT count(*) FROM catalog_content_match_decisions
+         WHERE incoming_fingerprint_digest =
+           'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'`,
+      )).toBe(0);
+      expect(db.scalar<number>(
+        'SELECT count(*) FROM class_progressions WHERE id = 117',
+      )).toBe(0);
+      expect(db.scalar<number>(
+        'SELECT count(*) FROM item_definition_effects WHERE id = 116',
+      )).toBe(0);
+      expect(db.scalar<number>(
+        `SELECT count(*) FROM spell_version_tags
+         WHERE spell_version_id = 106 AND tag = 'acid'`,
+      )).toBe(0);
+      expect(db.oneRaw(
+        `SELECT content_key, content_kind, key_kind, catalog_layer,
+                normalized_name, created_at
+         FROM catalog_content_identities WHERE content_key = ?`,
+        [survivorKey],
+      )).toEqual({
+        content_key: survivorKey,
+        content_kind: 'feat',
+        key_kind: 'derived',
+        catalog_layer: 'external',
+        normalized_name: 'survivor feat',
+        created_at: '2031-01-05T00:00:00.000Z',
+      });
+      expect(db.oneRaw(
+        `SELECT id, content_key, name, rules_edition, repeatable, created_at
+         FROM feat_definitions WHERE content_key = ?`,
+        [survivorKey],
+      )).toEqual({
+        id: 103,
+        content_key: survivorKey,
+        name: 'Survivor Feat',
+        rules_edition: 'expanded',
+        repeatable: 1,
+        created_at: '2031-02-01T00:00:00.000Z',
+      });
+      for (const table of [
+        'character_class_levels',
+        'spell_loadout_entries',
+        'spell_selection_slots',
+        'wizard_spellbook_entries',
+        'character_spell_preferences',
+      ]) {
+        expect(db.scalar<number>(`SELECT count(*) FROM ${table}`), table).toBe(0);
+      }
+      expect(() => db.exec(
+        `INSERT INTO catalog_content_identities (
+           content_key, content_kind, key_kind, catalog_layer, normalized_name
+         ) VALUES (
+           'expanded:legacy-rejected', 'feat', 'legacy-opaque', 'external',
+           'legacy rejected'
+         )`,
+      )).toThrow('catalog_content_identities_key_kind_check');
+      expect(db.scalar<number>('SELECT count(*) FROM pragma_foreign_key_check')).toBe(0);
+    } finally {
+      lifecycle.close();
+    }
+  });
+
+  it('0034 closes catalog and polymorphic subtrees and removes affected history before reseeding', async () => {
+    const storage = await storageHolding(
+      `${SCHEMA_BEFORE_ASSERTED_CONTENT_KEYS}
+       ${CI4B_THROUGH_0032_FIXTURE}`,
+    );
+
+    // The base image is genuinely through 0032. Apply 0033 alone, then add the
+    // one adjudicated mixed-classification edge that only 0033 can represent:
+    // an asserted subclass whose parent class is legacy-opaque.
+    const through0033 = historicalLifecycleThrough0033(storage);
+    through0033.open();
+    try {
+      through0033.database.exec(CI4B_AFTER_0033_EDGE_FIXTURE);
+      expect(through0033.database.oneRaw(
+        `SELECT child.content_key, identity.key_kind, parent.content_key AS parent_key
+         FROM subclass_definitions AS child
+         JOIN catalog_content_identities AS identity
+           ON identity.content_key = child.content_key
+         JOIN class_definitions AS parent
+           ON parent.id = child.class_definition_id
+         WHERE child.id = -104`,
+      )).toEqual({
+        content_key: 'expanded:ci4b-child',
+        key_kind: 'asserted',
+        parent_key: 'ci4b:discarded-class',
+      });
+    } finally {
+      through0033.close();
+    }
+
+    const lifecycle = new DatabaseLifecycle(
+      sqlite3,
+      storage,
+      schema,
+      applicationSeed,
+    );
+    lifecycle.open();
+    // Reopen from the exported image: the asserted child disappearing is a
+    // committed migration result, not an observation made before rollback.
+    lifecycle.reopen();
+    try {
+      const db = lifecycle.database;
+
+      // Every id-bearing table explicitly deleted by 0034 participates in the
+      // sentinel census. Bundled reseeding uses positive ids, so it cannot
+      // manufacture this expectation from the migration's own output.
+      for (const table of CI4B_NEGATIVE_ID_CENSUS_TABLES) {
+        expect(
+          db.scalar<number>(`SELECT count(*) FROM ${table} WHERE id < 0`),
+          table,
+        ).toBe(0);
+      }
+      expect(db.scalar<number>(
+        `SELECT count(*) FROM character_save_points
+         WHERE id IN (219, 221, 223)`,
+      )).toBe(0);
+      expect(db.scalar<number>(
+        `SELECT count(*) FROM character_operations
+         WHERE id IN (220, 222)`,
+      )).toBe(0);
+      expect(db.scalar<number>(
+        `SELECT count(*) FROM catalog_content_match_decisions
+         WHERE incoming_fingerprint_digest =
+           'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'`,
+      )).toBe(0);
+      expect(db.scalar<number>(
+        `SELECT count(*) FROM catalog_content_aliases
+         WHERE alias_key = 'ci4b:old-item'`,
+      )).toBe(0);
+      expect(db.scalar<number>(
+        `SELECT count(*) FROM catalog_content_fingerprints
+         WHERE canonical_json = 'ci4b-item-bytes'`,
+      )).toBe(0);
+      expect(db.scalar<number>(
+        `SELECT count(*) FROM catalog_content_identities
+         WHERE key_kind = 'legacy-opaque'
+            OR content_key = 'expanded:ci4b-child'`,
+      )).toBe(0);
+
+      // character_attunement_slots is updated, not deleted: the sourced item
+      // is gone and the existing trigger clears the surviving aggregate slot.
+      expect(db.oneRaw(
+        `SELECT character_id, slot_1_item_id, slot_2_item_id, slot_3_item_id
+         FROM character_attunement_slots WHERE character_id = 107`,
+      )).toEqual({
+        character_id: 107,
+        slot_1_item_id: null,
+        slot_2_item_id: null,
+        slot_3_item_id: null,
+      });
+
+      // A pre-0034 save-point id now reaches the typed not-found refusal. It
+      // cannot parse/replay stale raw ids and therefore cannot surface an FK
+      // failure after the migration.
+      expect(new CharacterCommandExecutor(
+        db,
+        new CharacterCommandIntegrity('ci4b-migration-test-integrity'),
+      ).restoreSavePoint({
+        character_id: 108,
+        save_point_id: 221,
+        expected_revision: 0,
+      })).toEqual({
+        status: 'refused',
+        reason: 'save_point_not_found',
+        current_revision: 0,
+      });
+
+      expect(db.oneRaw(
+        `SELECT identity.key_kind, identity.catalog_layer, root.name
+         FROM catalog_content_identities AS identity
+         JOIN class_definitions AS root ON root.content_key = identity.content_key
+         WHERE identity.content_key = '2024:class:wizard'`,
+      )).toEqual({
+        key_kind: 'bundled-stable',
+        catalog_layer: 'bundled',
+        name: 'Wizard',
+      });
+      expect(db.oneRaw(
+        `SELECT id, name FROM class_definitions WHERE content_key = ?`,
+        [CI4B_SURVIVOR_CLASS_KEY],
+      )).toEqual({ id: 120, name: 'Survivor Class' });
+      expect(db.oneRaw(
+        `SELECT id, name FROM feat_definitions WHERE content_key = ?`,
+        [CI4B_SURVIVOR_FEAT_KEY],
+      )).toEqual({ id: 103, name: 'Survivor Feat' });
+      expect(db.scalar<number>(
+        `SELECT count(*) FROM sqlite_temp_schema
+         WHERE name LIKE 'ci4b_%'`,
+      )).toBe(0);
+      expect(db.scalar<number>(
+        'SELECT count(*) FROM pragma_foreign_key_check',
+      )).toBe(0);
     } finally {
       lifecycle.close();
     }
@@ -497,7 +1228,7 @@ describe('database migration chain', () => {
     } finally {
       beforeMigration.close();
     }
-    const lifecycle = new DatabaseLifecycle(sqlite3, storage, schema);
+    const lifecycle = historicalLifecycleThrough0033(storage);
 
     lifecycle.open();
 
@@ -601,7 +1332,7 @@ describe('database migration chain', () => {
          '2040-01-02T03:04:05.000Z', '2041-02-03T04:05:06.000Z'
        );`,
     );
-    const lifecycle = new DatabaseLifecycle(sqlite3, storage, schema);
+    const lifecycle = historicalLifecycleThrough0033(storage);
     lifecycle.open();
 
     expect(lifecycle.database.oneRaw(
@@ -690,13 +1421,7 @@ describe('database migration chain', () => {
     `);
     old.close();
 
-    const lifecycle = new DatabaseLifecycle(
-      sqlite3,
-      storage,
-      schema,
-      () => undefined,
-      DATABASE_MIGRATIONS,
-    );
+    const lifecycle = historicalLifecycleThrough0033(storage);
     lifecycle.open();
     expect(lifecycle.database.oneRaw(`
       SELECT effect_kind, damage_type, ability, amount, maximum, label, notes
@@ -796,7 +1521,7 @@ describe('database migration chain', () => {
         2, 'expanded:subclass:notes', 1, 'Notes Subclass', 'expanded', '[]'
       );`);
 
-    const lifecycle = new DatabaseLifecycle(sqlite3, storage, schema);
+    const lifecycle = historicalLifecycleThrough0033(storage);
     lifecycle.open();
 
     expect(lifecycle.database.oneRaw(`
@@ -841,7 +1566,7 @@ describe('database migration chain', () => {
        );`,
     );
 
-    const lifecycle = new DatabaseLifecycle(sqlite3, storage, schema);
+    const lifecycle = historicalLifecycleThrough0033(storage);
     const db = lifecycle.open();
 
     expect(
@@ -902,7 +1627,7 @@ describe('database migration chain', () => {
        );`,
     );
     const before = await storage.exportFile();
-    const lifecycle = new DatabaseLifecycle(sqlite3, storage, schema);
+    const lifecycle = historicalLifecycleThrough0033(storage);
 
     expect(() => lifecycle.open()).toThrow(
       'UNIQUE constraint failed: catalog_content_identities.content_key',
@@ -940,7 +1665,7 @@ describe('database migration chain', () => {
          'one_bonded_weapon'
        );`,
     );
-    const lifecycle = new DatabaseLifecycle(sqlite3, storage, schema);
+    const lifecycle = historicalLifecycleThrough0033(storage);
     lifecycle.open();
     expect(
       lifecycle.database.allRaw(
@@ -1275,7 +2000,7 @@ describe('database migration chain', () => {
     );
     before.close();
 
-    const lifecycle = new DatabaseLifecycle(sqlite3, storage, schema);
+    const lifecycle = historicalLifecycleThrough0033(storage);
     lifecycle.open();
     expect(
       lifecycle.database.connection.selectArrays(
@@ -1332,7 +2057,7 @@ describe('database migration chain', () => {
          '2040-01-02T03:04:05.000Z', '2041-02-03T04:05:06.000Z'
        );`,
     );
-    const lifecycle = new DatabaseLifecycle(sqlite3, storage, schema);
+    const lifecycle = historicalLifecycleThrough0033(storage);
     lifecycle.open();
 
     expect(
@@ -1460,7 +2185,7 @@ describe('database migration chain', () => {
     const storage = await storageHolding(
       `${SCHEMA_BEFORE_COIN_RETIREMENT}\n${HISTORICAL_BACKGROUND_ROWS}`,
     );
-    const lifecycle = new DatabaseLifecycle(sqlite3, storage, schema);
+    const lifecycle = historicalLifecycleThrough0033(storage);
     lifecycle.open();
 
     const expected = [
@@ -1496,10 +2221,8 @@ describe('database migration chain', () => {
     ]);
 
     const migratedBytes = await lifecycle.exportBytes();
-    const imported = new DatabaseLifecycle(
-      sqlite3,
+    const imported = historicalLifecycleThrough0033(
       new MemoryDatabaseStorage(sqlite3),
-      schema,
     );
     imported.open();
     await imported.replace(migratedBytes);
@@ -1535,7 +2258,7 @@ describe('database migration chain', () => {
        SET coin_copper = 12345678900
        WHERE id = 101;`,
     );
-    const lifecycle = new DatabaseLifecycle(sqlite3, storage, schema);
+    const lifecycle = historicalLifecycleThrough0033(storage);
 
     lifecycle.open();
 

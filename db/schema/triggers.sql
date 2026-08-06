@@ -55,9 +55,8 @@ BEGIN
     SELECT RAISE(ABORT, 'a spell slot cannot hold both a fixed grant and a user selection');
 END;
 
--- CI-2a/CI-4a registry guards. Every fresh aggregate root, including a spell,
--- must pass through the asserted/bundled registration seam first. None of
--- these triggers is permitted to mint legacy-opaque.
+-- CI-2a/CI-4 registry guards. Every aggregate root, including a spell, must
+-- pass through the asserted/bundled registration seam first.
 CREATE TRIGGER catalog_register_class_identity_before_insert
 BEFORE INSERT ON class_definitions
 BEGIN

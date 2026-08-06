@@ -735,10 +735,8 @@ function reconcileBundledSpellEntry(
       if (registry !== null) {
         const isBundled =
           sqlString(registry, 'content_kind') === 'spell' &&
-          (sqlString(registry, 'key_kind') === 'bundled-stable' &&
-              sqlString(registry, 'catalog_layer') === 'bundled' ||
-            sqlString(registry, 'key_kind') === 'legacy-opaque' &&
-              sqlString(registry, 'catalog_layer') === 'external');
+          sqlString(registry, 'key_kind') === 'bundled-stable' &&
+          sqlString(registry, 'catalog_layer') === 'bundled';
         if (!isBundled) {
           return Object.freeze({
             kind: 'refused' as const,
@@ -800,17 +798,6 @@ function reconcileBundledSpellEntry(
       );
       if (installedRegistry === null) {
         throw new BundledSpellSeedEntryRefusal('replacement-refused');
-      }
-      if (
-        sqlString(installedRegistry, 'key_kind') === 'legacy-opaque' &&
-        sqlString(installedRegistry, 'catalog_layer') === 'external'
-      ) {
-        db.exec(
-          `UPDATE catalog_content_identities
-           SET key_kind = 'bundled-stable', catalog_layer = 'bundled'
-           WHERE content_kind = 'spell' AND content_key = ?`,
-          [contentKey],
-        );
       }
       const authoritativeName = sqlString(
         installedRegistry,

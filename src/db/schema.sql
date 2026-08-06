@@ -193,7 +193,7 @@ CREATE TABLE `catalog_content_identities` (
 	`normalized_name` VARCHAR NOT NULL,
 	`created_at` DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	CONSTRAINT "catalog_content_identities_content_kind_check" CHECK(`content_kind` IN ('class', 'subclass', 'feat', 'species', 'background', 'spell', 'weapon', 'armor', 'item')),
-	CONSTRAINT "catalog_content_identities_key_kind_check" CHECK("catalog_content_identities"."key_kind" IN ('derived', 'asserted', 'bundled-stable', 'legacy-opaque')),
+	CONSTRAINT "catalog_content_identities_key_kind_check" CHECK("catalog_content_identities"."key_kind" IN ('derived', 'asserted', 'bundled-stable')),
 	CONSTRAINT "catalog_content_identities_catalog_layer_check" CHECK("catalog_content_identities"."catalog_layer" IN ('bundled', 'external')),
 	CONSTRAINT "catalog_content_identities_normalized_name_check" CHECK(length("catalog_content_identities"."normalized_name") > 0),
 	CONSTRAINT "catalog_content_identities_key_layer_check" CHECK((
@@ -266,8 +266,6 @@ CREATE TABLE `catalog_content_identities` (
           ))
         OR ("catalog_content_identities"."key_kind" = 'bundled-stable'
           AND "catalog_content_identities"."catalog_layer" = 'bundled')
-        OR ("catalog_content_identities"."key_kind" = 'legacy-opaque'
-          AND "catalog_content_identities"."catalog_layer" = 'external')
       ))
 );
 
@@ -1897,9 +1895,8 @@ BEGIN
     SELECT RAISE(ABORT, 'a spell slot cannot hold both a fixed grant and a user selection');
 END;
 
--- CI-2a/CI-4a registry guards. Every fresh aggregate root, including a spell,
--- must pass through the asserted/bundled registration seam first. None of
--- these triggers is permitted to mint legacy-opaque.
+-- CI-2a/CI-4 registry guards. Every aggregate root, including a spell, must
+-- pass through the asserted/bundled registration seam first.
 CREATE TRIGGER catalog_register_class_identity_before_insert
 BEFORE INSERT ON class_definitions
 BEGIN

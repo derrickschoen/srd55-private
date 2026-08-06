@@ -15,6 +15,7 @@ import {
 } from '../../../src/rules/sheet-srd';
 import { parseSrdClassTraits } from '../../../src/rules/class-traits-srd';
 import { openTestDatabase } from '../../helpers/open-db';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 
 describe('primary-ability catalog seed', () => {
   let connection: Database;
@@ -106,13 +107,10 @@ describe('primary-ability catalog seed', () => {
 
   it('never seeds a same-named class from another rules edition', () => {
     const timestamp = new Date().toISOString();
-    db.exec(
-      `INSERT INTO catalog_content_identities (
-         content_key, content_kind, key_kind, catalog_layer, normalized_name,
-         created_at
-       ) VALUES (?, 'class', 'legacy-opaque', 'external', ?, ?)`,
-      ['2014:class:fighter', 'fighter', timestamp],
-    );
+    registerFixtureContentIdentity(db, {
+      kind: 'class', contentKey: '2014:class:fighter', name: 'Fighter',
+      keyKind: 'bundled-stable',
+    });
     db.exec(
       `INSERT INTO class_definitions (
          content_key, name, rules_edition, progression_type,

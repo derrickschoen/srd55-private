@@ -156,7 +156,6 @@ export const castingModes = [
   'free_cast_only',
   'granted',
   'ritual_only',
-  'available_on_long_rest',
 ] as const;
 export type CastingMode = (typeof castingModes)[number];
 

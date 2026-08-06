@@ -419,6 +419,8 @@ The subclass projector also has a closed progression union:
   a pre-existing one follows D82's `legacy-opaque` preservation path until an
   explicit edit can publish a complete replacement.
 
+> Superseded by D205/0034: `legacy-opaque` no longer exists.
+
 CI-3a uses that same projection for stored bundled/external rows and HA-5 uses it
 for authored DTOs. CI-3s therefore fingerprints a bundled spellcasting subclass
 from the same dense semantic schedule an authored copy produces. Absence is

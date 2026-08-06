@@ -8,6 +8,7 @@ import {
   seedClassResources,
 } from '../../../src/rules/class-resources-srd';
 import { openTestDatabase } from '../../helpers/open-db';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 
 describe('class resource catalog seed', () => {
   let connection: Database;
@@ -122,14 +123,13 @@ describe('class resource catalog seed', () => {
   });
 
   it('leaves resource rows attached to imported classes untouched', () => {
-    db.exec(
-      `INSERT INTO catalog_content_identities (
-         content_key, content_kind, key_kind, catalog_layer, normalized_name
-       ) VALUES ('homebrew:class:oracle', 'class', 'legacy-opaque', 'external', 'oracle')`,
-    );
+    registerFixtureContentIdentity(db, {
+      kind: 'class', contentKey: 'expanded:oracle', name: 'Oracle',
+      keyKind: 'asserted',
+    });
     const importedId = db.exec(
       `INSERT INTO class_definitions (content_key, name, rules_edition)
-       VALUES ('homebrew:class:oracle', 'Oracle', 'expanded')`,
+       VALUES ('expanded:oracle', 'Oracle', 'expanded')`,
     ).lastInsertId;
     db.exec(
       `INSERT INTO class_resources (

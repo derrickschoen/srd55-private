@@ -96,9 +96,6 @@ export function catalogContentIdentityInvariantError(
   ) {
     return null;
   }
-  if (keyKind === 'legacy-opaque' && layer === 'external') {
-    return null;
-  }
   return `${label} has an invalid key-kind/catalog-layer identity combination.`;
 }
 
