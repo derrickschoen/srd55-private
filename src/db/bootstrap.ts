@@ -10,6 +10,9 @@ import {
   assertBundledSrdSubclassSpellReferences,
   ensureBundledSrdSubclassContent,
 } from '../rules/srd-subclass-content';
+import {
+  ensureBundledVeteranSubclassContent,
+} from '../rules/veteran-subclass-content';
 import { ensureBundledWeaponContent } from '../rules/weapons-srd';
 import { ensureBundledOriginContent } from '../rules/origins-srd';
 import { ensureBundledSpeciesDefinitions } from '../rules/origin-definitions-srd';
@@ -61,6 +64,7 @@ import { reconcileBundledContentRegistryWithStoredProjectionsV1 } from '../catal
 export const applicationSeed: DatabaseSeed = (db) => {
   ensureBundledClassContent(db);
   ensureBundledSrdSubclassContent(db);
+  ensureBundledVeteranSubclassContent(db);
   ensureBundledClassResources(db);
   ensureBundledWeaponContent(db);
   ensureBundledSheetContent(db);

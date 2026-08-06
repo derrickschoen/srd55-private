@@ -804,10 +804,15 @@ describe('planner build reference JSON block', () => {
       'no tool proficiency fact or choice is modelled',
     );
 
-    // Subclass is neither absent nor complete: there are subclass tables and a
-    // Subclass column on the page, covering 2 of 12 classes.
+    // Subclass is neither absent nor exhaustive: every class has a bundled
+    // choice, while only the two legacy third-casters change spellcasting.
     expect(stateOf('subclass')).toBe('partial');
-    expect(factFor('subclass')?.note).toContain('2 of the');
+    expect(factFor('subclass')?.note).toBe(
+      'Every class has at least one bundled subclass to choose at its ' +
+        'subclass level. Fifteen subclasses are bundled, including the ' +
+        'owner-authored Veteran. The legacy EK and Arcane ' +
+        'Trickster are the two subclasses that change spellcasting.',
+    );
 
     // WEAPONS. `partial` still, but for the opposite half of the reason it used
     // to be: the derivations exist now and it is the melee/ranged fact, the
@@ -1026,7 +1031,12 @@ describe('planner build reference — the two forms hold the same content', () =
       (fact) => fact.concept === 'subclass',
     );
     expect(table.rows[subclass]?.[1]?.text).toBe('partly');
-    expect(table.rows[subclass]?.[2]?.text).toContain('2 of the');
+    expect(table.rows[subclass]?.[2]?.text).toBe(
+      'Every class has at least one bundled subclass to choose at its ' +
+        'subclass level. Fifteen subclasses are bundled, including the ' +
+        'owner-authored Veteran. The legacy EK and Arcane ' +
+        'Trickster are the two subclasses that change spellcasting.',
+    );
     // Every state renders, so a row cannot go blank unnoticed.
     expect(
       new Set(table.rows.map((row) => row[1]?.text)),

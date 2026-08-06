@@ -22,9 +22,11 @@ import {
 } from '../../../src/rules/class-progression-lookup';
 import {
   assertBundledSrdSubclassSpellReferences,
-  bundledSubclassDefinitionContentKeys,
   hasBundledSrdSubclassContent,
 } from '../../../src/rules/srd-subclass-content';
+import {
+  bundledSubclassDefinitionContentKeys,
+} from '../../../src/rules/bundled-subclass-content';
 import { getSqlite3, MemoryDatabaseStorage } from '../../helpers/open-db';
 import { hasBundledClassResourceContent } from '../../../src/rules/class-resources-srd';
 import {
@@ -75,6 +77,7 @@ const BUNDLED_SUBCLASSES = [
   'Oath of Devotion',
   'Path of the Berserker',
   'Thief',
+  'Veteran',
   'Warrior of the Open Hand',
 ] as const;
 
@@ -161,7 +164,7 @@ describe('application database bootstrap', () => {
     ).toBe(40);
     expect(
       lifecycle.database.scalar('SELECT count(*) FROM subclass_features'),
-    ).toBe(58);
+    ).toBe(70);
     expect(subclassFixedRuleCount(lifecycle)).toBe(40);
     expect(
       lifecycle.database.scalar(
@@ -475,7 +478,7 @@ describe('application database bootstrap', () => {
            AND feature.name = 'Frenzy'
        )`,
     );
-    expect(db.scalar('SELECT count(*) FROM subclass_features')).toBe(57);
+    expect(db.scalar('SELECT count(*) FROM subclass_features')).toBe(69);
     expect(hasBundledSrdSubclassContent(db)).toBe(false);
 
     lifecycle.reopen();
@@ -844,7 +847,7 @@ describe('application database bootstrap', () => {
     ).toBe(SRD_CLASSES.length);
     expect(
       lifecycle.database.scalar('SELECT count(*) FROM subclass_definitions'),
-    ).toBe(13);
+    ).toBe(14);
     expect(
       lifecycle.database.scalar(
         `SELECT count(*) FROM subclass_features
@@ -1048,6 +1051,7 @@ describe('bundled class content detection', () => {
       '2024:subclass:evoker',
       '2024:subclass:ek',
       '2024:subclass:at',
+      '2024:subclass:veteran',
     ]);
     expect(hasBundledClassContent(db)).toBe(true);
 

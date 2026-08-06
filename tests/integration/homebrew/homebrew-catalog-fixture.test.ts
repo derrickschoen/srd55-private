@@ -579,6 +579,7 @@ describe('the College of the Long Road imports and reaches the sheet', () => {
       ['2024:subclass:oath-of-devotion', null],
       ['2024:subclass:path-of-the-berserker', null],
       ['2024:subclass:thief', null],
+      ['2024:subclass:veteran', null],
       ['2024:subclass:warrior-of-the-open-hand', null],
     ]);
   });
@@ -661,7 +662,7 @@ describe('the College of the Long Road imports and reaches the sheet', () => {
     expect(JSON.stringify(response)).toContain('2024:class:hedge-knight');
     expect(
       rpc.context.db.scalar('SELECT count(*) AS n FROM subclass_definitions'),
-    ).toBe(14);
+    ).toBe(15);
   });
 });
 

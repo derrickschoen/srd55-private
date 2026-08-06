@@ -72,6 +72,13 @@ const INDEPENDENT_ROOT_ANCHORS = [
     content_key: '2024:subclass:at',
     root_name: 'AT',
   },
+  // Original owner-authored subclass:
+  // docs/homebrew/2026-08-04-rogue-veteran-subclass.md:1.
+  {
+    content_kind: 'subclass',
+    content_key: '2024:subclass:veteran',
+    root_name: 'Veteran',
+  },
   // SRD subclass names: docs/srd/source/subclasses.txt:40-165.
   {
     content_kind: 'subclass',
@@ -253,16 +260,38 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
       });
       expect(anchoredRootName(db, anchor)).toBe(anchor.root_name);
     }
+    expect(
+      db.oneRaw(
+        `SELECT identity.content_key, identity.normalized_name,
+                identity.key_kind, identity.catalog_layer,
+                fingerprint.fingerprint_scheme,
+                fingerprint.fingerprint_role
+           FROM catalog_content_identities AS identity
+           JOIN catalog_content_fingerprints AS fingerprint
+             ON fingerprint.content_kind = identity.content_kind
+            AND fingerprint.content_key = identity.content_key
+          WHERE identity.content_kind = 'subclass'
+            AND identity.content_key = '2024:subclass:veteran'
+            AND fingerprint.fingerprint_role = 'current'`,
+      ),
+    ).toEqual({
+      content_key: '2024:subclass:veteran',
+      normalized_name: 'veteran',
+      key_kind: 'bundled-stable',
+      catalog_layer: 'bundled',
+      fingerprint_scheme: 'content-v1',
+      fingerprint_role: 'current',
+    });
     expect(db.scalar(
       `SELECT count(*) FROM catalog_content_identities
        WHERE key_kind <> 'bundled-stable' OR catalog_layer <> 'bundled'`,
     )).toBe(0);
     expect(reconcileBundledContentRegistryV1(db)).toEqual({
-      projected: 446,
+      projected: 447,
       orphaned: 0,
       refused: 0,
       registered: 0,
-      unchanged: 446,
+      unchanged: 447,
       moved: 0,
     });
   });
@@ -420,11 +449,11 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
     );
 
     expect(reconcileBundledContentRegistryV1(db)).toEqual({
-      projected: 445,
+      projected: 446,
       orphaned: 1,
       refused: 0,
       registered: 0,
-      unchanged: 445,
+      unchanged: 446,
       moved: 0,
     });
     expect(db.oneRaw(
@@ -449,11 +478,11 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
     )).toBe(0);
 
     expect(reconcileBundledContentRegistryV1(db)).toEqual({
-      projected: 446,
+      projected: 447,
       orphaned: 0,
       refused: 0,
       registered: 0,
-      unchanged: 446,
+      unchanged: 447,
       moved: 0,
     });
   });
@@ -466,11 +495,11 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
     );
 
     expect(reconcileBundledContentRegistryV1(db)).toEqual({
-      projected: 446,
+      projected: 447,
       orphaned: 0,
       refused: 0,
       registered: 0,
-      unchanged: 445,
+      unchanged: 446,
       moved: 1,
     });
   });
@@ -487,11 +516,11 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
     );
 
     expect(reconcileBundledContentRegistryV1(db)).toEqual({
-      projected: 445,
+      projected: 446,
       orphaned: 1,
       refused: 0,
       registered: 0,
-      unchanged: 445,
+      unchanged: 446,
       moved: 0,
     });
   });
@@ -503,11 +532,11 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
     );
 
     expect(reconcileBundledContentRegistryV1(db)).toEqual({
-      projected: 445,
+      projected: 446,
       orphaned: 1,
       refused: 0,
       registered: 0,
-      unchanged: 445,
+      unchanged: 446,
       moved: 0,
     });
   });
@@ -519,11 +548,11 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
     );
 
     expect(reconcileBundledContentRegistryV1(db)).toEqual({
-      projected: 445,
+      projected: 446,
       orphaned: 1,
       refused: 0,
       registered: 0,
-      unchanged: 445,
+      unchanged: 446,
       moved: 0,
     });
   });
@@ -584,11 +613,11 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
     );
 
     expect(reconcileBundledContentRegistryV1(db)).toEqual({
-      projected: 445,
+      projected: 446,
       orphaned: 0,
       refused: 1,
       registered: 0,
-      unchanged: 445,
+      unchanged: 446,
       moved: 0,
     });
     expect(db.oneRaw(

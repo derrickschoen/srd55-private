@@ -12,7 +12,6 @@ import type { DatabaseContext } from '../db/database';
 import { GrantRule, type GrantRuleObject } from '../grants/grant-rule';
 import {
   BUNDLED_RULES_EDITION,
-  BUNDLED_SUBCLASS_OVERRIDE_SCHEDULE_CONTENT_KEYS,
   classContentKey,
 } from './class-progression-lookup';
 import {
@@ -20,20 +19,27 @@ import {
   srdSubclassClassNames,
   type SrdSubclassDefinition,
   type SrdSubclassClassName,
-  type SrdSubclassFeatureHeading,
 } from './srd-subclasses';
 import type { Ability } from '../domain/enums';
+import type { CharacterLevel } from '../domain/enums';
 import {
   HEADING_ONLY_DESCRIPTION,
   type HeadingOnlyDescription,
 } from '../domain/subclass-feature-description';
 
-interface SrdSubclassSeed {
+export interface BundledSubclassFeatureHeading {
+  readonly name: string;
+  readonly class_level: CharacterLevel;
+  /** Zero-based order across the whole subclass. */
+  readonly sort_position: number;
+}
+
+export interface BundledSubclassSeed {
   readonly class_name: string;
   readonly subclass_name: string;
   readonly content_key: string;
   readonly spellcasting_ability: Ability | null;
-  readonly features: readonly SrdSubclassFeatureHeading[];
+  readonly features: readonly BundledSubclassFeatureHeading[];
   readonly grant_rules: readonly GrantRuleObject[] | null;
 }
 
@@ -61,7 +67,7 @@ const SRD_SUBCLASS_SPELLCASTING_ABILITIES: Readonly<
   Wizard: 'intelligence',
 });
 
-function subclassContentKey(name: string): string {
+export function subclassContentKey(name: string): string {
   return `${BUNDLED_RULES_EDITION}:subclass:${normalizeCatalogKeyComponent(name)}`;
 }
 
@@ -82,9 +88,9 @@ function grantRulesFor(
   return normalizedRuleObjects(definition.mechanical_outcome.rule_set.rules);
 }
 
-let cachedSeeds: readonly SrdSubclassSeed[] | undefined;
+let cachedSeeds: readonly BundledSubclassSeed[] | undefined;
 
-function srdSubclassSeeds(): readonly SrdSubclassSeed[] {
+function srdSubclassSeeds(): readonly BundledSubclassSeed[] {
   if (cachedSeeds !== undefined) {
     return cachedSeeds;
   }
@@ -111,14 +117,6 @@ export function bundledSrdSubclassDefinitionContentKeys(): readonly string[] {
   return Object.freeze(srdSubclassSeeds().map((seed) => seed.content_key));
 }
 
-/** Every bundled subclass definition key, independent of progression shape. */
-export function bundledSubclassDefinitionContentKeys(): readonly string[] {
-  return Object.freeze([
-    ...bundledSrdSubclassDefinitionContentKeys(),
-    ...BUNDLED_SUBCLASS_OVERRIDE_SCHEDULE_CONTENT_KEYS,
-  ]);
-}
-
 function canonicalValue(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map(canonicalValue);
@@ -142,18 +140,18 @@ function normalizedStoredRules(value: unknown): string | null {
     return null;
   }
   if (typeof value !== 'string') {
-    throw new TypeError('SRD subclass grant rules must be JSON text or null.');
+    throw new TypeError('Bundled subclass grant rules must be JSON text or null.');
   }
   const decoded: unknown = JSON.parse(value);
   if (!Array.isArray(decoded)) {
-    throw new TypeError('SRD subclass grant rules must decode to an array.');
+    throw new TypeError('Bundled subclass grant rules must decode to an array.');
   }
   return encodedRules(normalizedRuleObjects(decoded));
 }
 
 function sameDefinition(
   db: DatabaseContext,
-  seed: SrdSubclassSeed,
+  seed: BundledSubclassSeed,
 ): number | null {
   const row = db.oneRaw(
     `SELECT subclass.id, parent.content_key AS parent_content_key,
@@ -194,7 +192,7 @@ function sameDefinition(
 function hasExactFeatures(
   db: DatabaseContext,
   subclassId: number,
-  expected: readonly SrdSubclassFeatureHeading[],
+  expected: readonly BundledSubclassFeatureHeading[],
 ): boolean {
   const stored = db.allRaw(
     `SELECT class_level, sort_order, name, description
@@ -228,9 +226,12 @@ function hasExactFeatures(
   );
 }
 
-/** Exact guard for the twelve inherit-parent SRD subclass aggregates. */
-export function hasBundledSrdSubclassContent(db: DatabaseContext): boolean {
-  for (const seed of srdSubclassSeeds()) {
+/** Exact guard shared by every heading-only bundled subclass aggregate. */
+export function hasBundledSubclassContent(
+  db: DatabaseContext,
+  seeds: readonly BundledSubclassSeed[],
+): boolean {
+  for (const seed of seeds) {
     const subclassId = sameDefinition(db, seed);
     if (
       subclassId === null ||
@@ -248,9 +249,14 @@ export function hasBundledSrdSubclassContent(db: DatabaseContext): boolean {
   return true;
 }
 
+/** Exact guard for the twelve inherit-parent SRD subclass aggregates. */
+export function hasBundledSrdSubclassContent(db: DatabaseContext): boolean {
+  return hasBundledSubclassContent(db, srdSubclassSeeds());
+}
+
 function upsertDefinition(
   db: DatabaseContext,
-  seed: SrdSubclassSeed,
+  seed: BundledSubclassSeed,
   timestamp: string,
 ): number | null {
   const parentId = db.scalar<number>(
@@ -308,7 +314,7 @@ function upsertDefinition(
     [seed.content_key],
   );
   if (subclassId === null) {
-    throw new Error(`Failed to persist SRD subclass ${seed.content_key}.`);
+    throw new Error(`Failed to persist bundled subclass ${seed.content_key}.`);
   }
   return subclassId;
 }
@@ -316,7 +322,7 @@ function upsertDefinition(
 function replaceOwnedDescendants(
   db: DatabaseContext,
   subclassId: number,
-  features: readonly SrdSubclassFeatureHeading[],
+  features: readonly BundledSubclassFeatureHeading[],
   description: HeadingOnlyDescription,
   timestamp: string,
 ): void {
@@ -346,14 +352,17 @@ function replaceOwnedDescendants(
   }
 }
 
-/** Seeds or exactly repairs only the twelve SC-2 manifest-owned aggregates. */
-export function ensureBundledSrdSubclassContent(db: DatabaseContext): boolean {
-  if (hasBundledSrdSubclassContent(db)) {
+/** Seeds or exactly repairs heading-only bundled subclass aggregates. */
+export function ensureBundledSubclassContent(
+  db: DatabaseContext,
+  seeds: readonly BundledSubclassSeed[],
+): boolean {
+  if (hasBundledSubclassContent(db, seeds)) {
     return false;
   }
   db.transaction((transactionDb) => {
     const timestamp = new Date().toISOString();
-    for (const seed of srdSubclassSeeds()) {
+    for (const seed of seeds) {
       const subclassId = upsertDefinition(transactionDb, seed, timestamp);
       if (subclassId !== null) {
         replaceOwnedDescendants(
@@ -367,6 +376,11 @@ export function ensureBundledSrdSubclassContent(db: DatabaseContext): boolean {
     }
   });
   return true;
+}
+
+/** Seeds or exactly repairs only the twelve SC-2 manifest-owned aggregates. */
+export function ensureBundledSrdSubclassContent(db: DatabaseContext): boolean {
+  return ensureBundledSubclassContent(db, srdSubclassSeeds());
 }
 
 /**

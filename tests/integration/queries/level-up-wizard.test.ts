@@ -115,6 +115,11 @@ const EXPECTED_SUBCLASS_VARIANTS = [
         name: 'Thief',
         rules_edition: '2024',
       },
+      {
+        content_key: '2024:subclass:veteran',
+        name: 'Veteran',
+        rules_edition: '2024',
+      },
     ],
   },
   {

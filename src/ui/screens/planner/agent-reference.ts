@@ -183,9 +183,10 @@ export const COVERAGE: readonly CoverageFact[] = [
     concept: 'subclass',
     state: 'partial',
     note:
-      'Subclasses exist here only where they change spellcasting: 2 of the ' +
-      '12 classes have any subclass to choose, and nothing in this ' +
-      'application requires a subclass at any level.',
+      'Every class has at least one bundled subclass to choose at its ' +
+      'subclass level. Fifteen subclasses are bundled, including the ' +
+      'owner-authored Veteran. The legacy EK and Arcane ' +
+      'Trickster are the two subclasses that change spellcasting.',
   },
   {
     concept: 'hit points',
