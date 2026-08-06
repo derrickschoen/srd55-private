@@ -23,7 +23,40 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-06-c (newest - read first)
+## RESTART POINT 2026-08-06-d (newest - read first)
+MAIN fa96990 (mirror pushed). FLOORS: vitest 240/3,977 (onTaskUpdate
+teardown noise may drive exit 1 with all counts green - adjudicate via
+serial --maxWorkers=1, never gate on exit alone); PW 126 pool (~9 min);
+build 0; migrations 0000-0036 FROZEN (next free mint 0037); backup v5.
+TWENTY-NINE merges. Rulings through D210.
+
+MERGED SINCE 08-06-c (both dispatched in parallel worktrees):
+ - CI-8 (ce36a96, 28th): adversarial controls + UI disclosure. 23-mutation
+   suite (verifier proves apply -> detect -> byte-exact restore -> clean,
+   23/23), real-planner import preview counts, normalized-identity
+   match-reason labels, remembered-choice management, JSON-vs-reference
+   wording, no-modal fast path kept per design, honest worker-boot errors
+   (bare "Failed:" fixed). Mint-free. 3 review rounds + 1 PW gate round;
+   round-3 blocker (stale mutation anchor) fixed by supervisor, disclosed,
+   verifier re-run 23/23.
+ - HA-3 (fa96990, 29th): species backend. Common publisher, provenance-
+   gated skill dispatch (authored keys cannot impersonate bundled pools),
+   trait-identity-bound target-local template_ref regeneration with typed
+   unresolved notices, HA-EXTERNAL-SELF-MATCH passed. Mint-free. 3 review
+   rounds + 1 vitest gate round (sheet-inputs fixture was an unregistered
+   impersonator - fixture fixed). CI-8/HA-3 auto-merge reconciled cleanly.
+
+QUEUE: dispatchable now: HA-4 (XL, background backend - NEXT in the
+serial HA-3/4/5 mint lane), CI-6 (L, share resolver), CI-7 (L, authoring
+immutability), HA-6 (L, library + form components, depends HA-2+CI-4a).
+Blocked: HA-5 behind HA-4 (serial mint lane), HA-7..HA-12 per edge list.
+Parked owner questions: Veteran prose vs D152; CI-5 remaining items
+(template_ref regeneration now DONE for species via HA-3; still open for
+background/subclass kinds).
+
+WORKTREES: wt/party only (owner's - never prune).
+
+## RESTART POINT 2026-08-06-c (superseded by 08-06-d)
 MAIN 3a2c324 (mirror pushed). FLOORS: vitest 237/3,941; PW 126 on the
 pool (~9 min); build 0; migrations 0000-0036 FROZEN; wire v1-v17;
 character backup at v5. TWENTY-SEVEN merges. Rulings through D210.
