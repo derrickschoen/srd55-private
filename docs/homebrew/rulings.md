@@ -5,6 +5,69 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-06 — Barbed Court: spellcasting becomes a chooseable Wizard list plus granted Court Spells; Focus converts to spell slots at 13/17
+
+Owner's rulings, verbatim:
+
+> Let 1/3 caster spells come from the wizard list and the player can choose just
+> like ek/at.
+
+> Give extra spells known from the bard list and the important ones like shield
+> and mirror image to help reinforce the theme. Have the spells that can be
+> spent with focus points also given I. The spells known section. I am ok with
+> giving spells known to this subclass like the paladins and ranger also get
+
+> For monk 13, let the player exchange focus points for spell slots(1 point per
+> spell level, max 3rd level)
+> For 17 raise the limit to 5th level
+
+Effect: the curated fixed list frozen by D191 is **withdrawn**. Spellcasting
+becomes two parts — a player-chosen Wizard-list pool, plus a granted
+always-prepared Court Spells table on the SRD Paladin-oath / Ranger-subclass
+pattern carrying the bard-list picks and the thematic guarantees (*Shield*,
+*Mirror Image*). The Monk-13 Focus-castable spell menu proposed earlier is
+superseded by a general Focus-to-slot conversion at 1 Focus Point per spell
+level, capped at level 3 from Monk 13 and level 5 from Monk 17.
+
+Findings reported at ruling time, recorded not corrected:
+
+- **Licensing.** Eldritch Knight and Arcane Trickster are **not in SRD 5.2.1**
+  (grep-verified, zero hits). Under D59/D191 they may be named as distance
+  markers only, never used as a source or mechanical template — their prepared-
+  spell tables and wording cannot be copied. The structure the owner asked for
+  has SRD-native precedents that the doc will cite instead: Bard **Magical
+  Secrets** ("you can choose any of your new prepared spells from the Bard,
+  Cleric, Druid, and Wizard spell lists, and the chosen spells count as Bard
+  spells for you"), College of Lore **Magical Discoveries**, and the **Magic
+  Initiate** feat. The always-prepared subclass table follows the SRD Paladin
+  oath pattern the owner named.
+- **The bard grant is narrower than it looks.** Nine in-school spells exist on
+  the bard list and not the wizard list: *Bane*, *Command*, *Dissonant
+  Whispers*, *Heroism* (level 1); *Calm Emotions*, *Enthrall*, *Silence*,
+  *Zone of Truth* (level 2); *Compulsion* (level 4). Everything else the owner
+  named — including *Shield* and *Mirror Image* — is already on the Wizard
+  list and therefore already chooseable; putting those two in the granted
+  table guarantees them rather than adding them.
+- **The conversion rate is the largest number in the design.** SRD Font of
+  Magic prices slots at 2/3/5/6/7 Sorcery Points for levels 1–5, and Sorcery
+  Points return only on a **Long Rest**. Focus Points equal Monk level and
+  return on **every Short Rest**. At 1 Focus per spell level: a Monk 13 with two
+  Short Rests has 39 Focus/day, buying **13 third-level slots**, against a
+  Sorcerer 13's 3. A Monk 17 has 51 Focus/day, buying **10 fifth-level slots**,
+  against a Sorcerer 17's 3 — and against a Wizard 17's 2 printed fifth-level
+  slots. Bound options were put to the owner; none applied.
+- **Self-consistency gain.** At 1 Focus per spell level, "cast *Shield* for 1
+  Focus Point" is exactly the conversion rate rather than a special exception,
+  which resolves the open Shield-for-Focus pricing ruling by construction.
+- **Open ambiguity flagged:** whether a converted slot also raises the level of
+  spell a Barbed Court monk may *prepare*. If it does, Monk 17 unlocks
+  5th-level Wizard spells (*Hold Monster*, *Dominate Person*, *Mislead*,
+  *Modify Memory*, *Seeming*), six levels ahead of the third-caster chassis.
+- **Distance Checklist rule #1 is broken by this ruling** — it reads "the fixed
+  list is a bardic pressure, mockery, and social-control slice rather than a
+  general arcane list." A school-restricted but player-chosen Wizard list is a
+  general arcane list. The rule needs an owner-ruled amendment.
+
 ## 2026-08-06 — Barbed Court: power-budget directive — front-load level 6, add Focus-cast high-level spells at 13/17, remove close-combat ranged Disadvantage
 
 Owner's rulings, verbatim:
