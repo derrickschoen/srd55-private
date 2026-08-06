@@ -23,7 +23,61 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-06-g (newest - read first)
+## RESTART POINT 2026-08-06-h (newest - read first)
+MAIN 25b62cf (mirror pushed; includes bb4ec32 CI-7 merge + D211-D213).
+FLOORS: vitest 248/4,087; PW 127 pool (~9.7 min); build 0; migrations
+0000-0039 FROZEN on main (next free mint 0040); backup v5. THIRTY-FIVE
+merges. Rulings through D213.
+
+MERGED SINCE 08-06-g:
+ - CI-7 (bb4ec32, 35th): authoring immutability, mints 0038+0039.
+   Recipient-local supersession lineage (composite RESTRICT FKs, cycle
+   walk, UPDATE refusal, BEFORE DELETE permanence - DELETE+INSERT rewrite
+   refused, pinned). Reference-retarget command (preview/commit RPCs,
+   CI-4a discipline, D82 review) preserving the full character subtree
+   with typed notices. Spell forks on the common lifecycle. Gate history
+   in the merge message; round 1's claimed-unbuilt-retarget finding
+   recorded there at full length.
+
+RULINGS 08-06: D211 VET-REPUB queued (publish Veteran through HA-5
+backend as external homebrew with prose, retire bundled seed, wipe-and-
+reseed); D212 acceptance walk still deferred; D213 post-HA-12 autonomous
+hardening (no publish without explicit ask).
+
+OPEN FINDING (first seen CI-7 post-merge vitest on main, 2026-08-06):
+2 unhandled rejections "TypeError: Cannot read properties of undefined
+(reading 'close')" at src/ui/content-adoption-dialog.ts:411
+(modal.close() after await onCommitted), attributed to
+character-list.test.ts (likely cross-file async leak; that file does not
+use the dialog). Counts were complete all-pass (248/4,087) so it did not
+gate; the other 2 errors were the recorded onTaskUpdate noise. Root
+cause NOT established - modal is assigned synchronously at creation, so
+undefined-at-close has no obvious path. Investigation unit ADF
+dispatched. Until resolved, any run showing this signature is NOT
+adjudicable as noise.
+
+IN FLIGHT: HA-8 (wt/ha8 @ 6a1ad2e) - review round 1 returned
+FIX-ROUND-NEEDED, 10 findings (2 HIGH: publisher/client progression rule
+mismatch - supervisor VERIFIED publisher lacks monotonic/gap/max-level
+rules; journey missing grid-edit + library stages). Fix round 1
+dispatched (brief ha8-fix1.md, log ha8-fix1.log). ADF investigation
+dispatched in wt/adf off 25b62cf (brief adf-invest.md, log
+adf-invest.log; reproduce-first, no speculative fix).
+
+NEW OWNER QUESTION SURFACED (HA-11-gating): D138 delete-with-characters
+purge vs CI-7 lineage permanence - a superseded creation cannot be
+hard-deleted under 0038 RESTRICT FKs + 0039 BEFORE DELETE refusal.
+Asked in the 08-06 questions round; do not start HA-11 without the
+ruling.
+
+QUEUE after HA-8: HA-9 (background form) -> VET-REPUB (D211) -> HA-10 ->
+HA-11 (D138 in full; cascade underspec goes to owner BEFORE
+implementation) -> HA-12 -> D213 hardening.
+
+WORKTREES: wt/party (owner's - never prune), wt/ha8 (active), wt/adf
+(active).
+
+## RESTART POINT 2026-08-06-g (superseded by 08-06-h)
 MAIN 7e4d4e6 (mirror pushed). FLOORS: vitest 248/4,067; PW 127 pool
 (~9.3 min; homebrew-species-authoring journey added, measured 17.7s of a
 90s budget); build 0; migrations 0000-0037 FROZEN on main (0038/0039
