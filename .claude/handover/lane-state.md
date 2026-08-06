@@ -49,10 +49,21 @@ numbering stale), install through CI-4a adoption protocol, mint 0036
 expected. If found dead with no report, re-dispatch from the same brief
 pair; log at ~/.claude/jobs/27b61756/tmp/ci5.log.
 
-QUEUE AFTER CI-5: no named units recorded. Follow-ups:
-SUBCLASS-EMPTY-PROSE-AUDIT; CI-8 follows CI-5 in the design dependency
-graph; HA-12 depends on HA-11 and CI-5. Owner's subclass session owes
-the nine docs/homebrew notices and the pending-rulings.md queue.
+QUEUE AFTER CI-5: no named units recorded. Follow-ups: CI-8 follows
+CI-5 in the design dependency graph; HA-12 depends on HA-11 and CI-5.
+Owner's subclass session owes the nine docs/homebrew notices and the
+pending-rulings.md queue.
+
+SUBCLASS-EMPTY-PROSE-AUDIT: CLOSED 08-06 (sol scout, verified against
+the pinning tests it named). All 70 bundled feature rows (58 SRD + 12
+Veteran) have description='' BY CONSTRUCTION per D152 - the source
+parser throws on prose lines and class-progression.test.ts pins every
+row to HEADING_ONLY_DESCRIPTION, including a repair test reverting
+injected prose to ''. EK/AT have zero feature rows (progression-only).
+Not a defect. PARKED OWNER QUESTION for the next questions round:
+Veteran is owner-authored with full prose in docs/homebrew - should its
+bundled seed carry prose, or does D152 heading-only apply to homebrew-
+bundled content too?
 
 WORKTREES: wt/party (owner's - never prune) and wt/ci5 (active lane).
 
