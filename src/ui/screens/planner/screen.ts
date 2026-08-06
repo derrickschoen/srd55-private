@@ -64,6 +64,7 @@ import {
   activateAttunementReplacementModal, renderItems, type AttunementReplacement,
   type PlannerItemActions,
 } from './items';
+import { HOMEBREW_ROUTE } from '../homebrew/homebrew-library';
 
 export interface PlannerCommandClient {
   execute(
@@ -548,9 +549,17 @@ function renderPlanner(
   sheet.href = `/characters/${session.characterId}/sheet`;
   sheet.className = 'button-secondary';
   sheet.textContent = 'Character sheet';
+  const homebrew = document.createElement('a');
+  homebrew.href = HOMEBREW_ROUTE;
+  homebrew.className = 'button-secondary';
+  homebrew.textContent = 'Homebrew library';
+  homebrew.addEventListener('click', (event) => {
+    event.preventDefault();
+    context.router.navigate(HOMEBREW_ROUTE);
+  });
   const actions = document.createElement('div');
   actions.className = 'planner-header-actions';
-  actions.append(status, sheet);
+  actions.append(status, homebrew, sheet);
   header.append(identity, actions);
   shell.append(header);
   if (session.error !== null) {
