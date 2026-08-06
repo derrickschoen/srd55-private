@@ -16,6 +16,7 @@ import {
 } from '../../domain/enums';
 import { element } from '../dom';
 import { freeTextSpan } from '../free-text';
+import type { Router } from '../router';
 
 export type AuthoringEffectDraft =
   | AuthoringDraftCharacterEffect
@@ -414,18 +415,15 @@ export function isFeatureEffectKind(
 export interface DraftNavigationGuardOptions {
   readonly isDirty: () => boolean;
   readonly confirmLeave: () => boolean;
-  readonly navigate: (target: string) => void;
 }
 
-/** The explicit Save draft boundary: dirty navigation always asks first. */
-export function createDraftNavigationGuard(
+/** Register the explicit Save draft boundary for every router entry point. */
+export function installDraftNavigationGuard(
+  router: Router,
   options: DraftNavigationGuardOptions,
-): (target: string) => boolean {
-  return (target) => {
-    if (options.isDirty() && !options.confirmLeave()) return false;
-    options.navigate(target);
-    return true;
-  };
+): () => void {
+  return router.registerNavigationGuard(() =>
+    !options.isDirty() || options.confirmLeave());
 }
 
 export function installDraftBeforeUnloadGuard(

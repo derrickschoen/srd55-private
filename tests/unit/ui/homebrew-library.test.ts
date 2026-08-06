@@ -117,8 +117,10 @@ function context(
   url: string,
   navigated: string[],
 ): ScreenContext {
+  const root = document.createElement('div');
+  document.body.append(root);
   return {
-    root: document.createElement('div'),
+    root,
     route: parseRoute(new URL(url)),
     router: {
       navigate: (target: string) => navigated.push(target),
@@ -230,7 +232,7 @@ describe('HA-6 homebrew library routing and tabs', () => {
     }
   });
 
-  it('renders Draft badges (never Homebrew) and surfaces revision conflicts through the modal', async () => {
+  it('attaches the revision-conflict dialog before showModal on the real library screen', async () => {
     const restoreDocument = installInteractiveDocument();
     try {
       const navigated: string[] = [];
@@ -267,11 +269,110 @@ describe('HA-6 homebrew library routing and tabs', () => {
 
       const dialog = root.querySelector('[data-testid="authoring-draft-conflict"]');
       expect(dialog).not.toBeNull();
+      expect(dialog?.isConnected).toBe(true);
+      expect((dialog as unknown as HTMLDialogElement | null)?.open).toBe(true);
       expect(dialog?.getAttribute('aria-modal')).toBe('true');
       expect(elementText(dialog as unknown as Node)).toContain(
         'Nothing was overwritten.',
       );
       expect(elementText(dialog as unknown as Node)).not.toContain('Overwrite');
+      cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('restores reachable action-specific focus and removes stale dialog ids across repeated conflicts', async () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      let listCalls = 0;
+      let discardCalls = 0;
+      const client = authoringClient({
+        list: () => {
+          listCalls += 1;
+          const revision = (listCalls === 1 ? 3 : 4) as DraftRevision;
+          return Promise.resolve({
+            ...library,
+            drafts: library.drafts.map((draft) => ({ ...draft, revision })),
+          });
+        },
+        discardDraft: (params) => {
+          discardCalls += 1;
+          return Promise.reject(new RpcError(
+            'handler_error',
+            'Draft revision is stale.',
+            {
+              reason: 'stale_draft_revision',
+              draft_uuid: params.draft_uuid,
+              expected_revision: params.expected_revision,
+              actual_revision: Number(params.expected_revision) + 1,
+            },
+          ));
+        },
+      });
+      const screenContext = context(
+        'https://example.test/homebrew?tab=drafts',
+        [],
+      );
+      const cleanup = await renderHomebrewLibrary(screenContext, {
+        client,
+        confirmDiscard: () => true,
+      });
+      const root = interactiveElement(screenContext.root);
+      const discardButton = (): ReturnType<typeof interactiveElement> => {
+        const button = root.querySelectorAll('button').find(
+          (candidate) => candidate.textContent === 'Discard draft',
+        );
+        if (button === undefined) throw new Error('Discard button did not render.');
+        return button;
+      };
+      const dialogButton = (label: string): ReturnType<typeof interactiveElement> => {
+        const dialog = root.querySelector('[data-testid="authoring-draft-conflict"]');
+        const button = dialog?.querySelectorAll('button').find(
+          (candidate) => candidate.textContent === label,
+        );
+        if (button === undefined) throw new Error(`${label} did not render.`);
+        return button;
+      };
+
+      discardButton().click();
+      await settle();
+      dialogButton('Load saved revision').click();
+      await settle();
+
+      const reloadedDraftLink = root
+        .querySelector('.homebrew-tab-panel')
+        ?.querySelector('a');
+      expect(reloadedDraftLink).not.toBeNull();
+      expect(reloadedDraftLink?.isConnected).toBe(true);
+      expect(document.activeElement).toBe(reloadedDraftLink);
+      expect(root.querySelectorAll('dialog')).toHaveLength(0);
+
+      const reloadedDiscard = discardButton();
+      reloadedDiscard.click();
+      await settle();
+
+      const dialogs = root.querySelectorAll('dialog');
+      expect(dialogs).toHaveLength(1);
+      const currentDialog = dialogs[0];
+      const describedBy = currentDialog?.getAttribute('aria-describedby');
+      if (describedBy === null || describedBy === undefined) {
+        throw new Error('Conflict dialog has no description id.');
+      }
+      const currentDescription = currentDialog?.querySelector(`[id="${describedBy}"]`);
+      expect(currentDescription).not.toBeNull();
+      expect(elementText(currentDescription as unknown as Node)).toContain(
+        'revision 4, but revision 5 is now saved',
+      );
+
+      dialogButton('Keep my unsaved changes').click();
+      await settle();
+
+      expect(discardCalls).toBe(2);
+      expect(reloadedDiscard.disabled).toBe(false);
+      expect(reloadedDiscard.isConnected).toBe(true);
+      expect(document.activeElement).toBe(reloadedDiscard);
+      expect(root.querySelectorAll('dialog')).toHaveLength(0);
       cleanup();
     } finally {
       restoreDocument();

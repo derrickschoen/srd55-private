@@ -236,14 +236,25 @@ function draftCard(
       }
       const dialog = createDraftConflictDialog({
         conflict,
-        restoreFocus: () => discard.focus(),
+        mount: context.root,
+        restoreFocus: (action) => {
+          if (action === 'keep-local') {
+            discard.focus();
+            return;
+          }
+          const reloadedDraftControl = context.root
+            .querySelector<HTMLElement>('.homebrew-tab-panel')
+            ?.querySelector<HTMLElement>('a');
+          (reloadedDraftControl ?? context.root.querySelector<HTMLElement>('[aria-selected="true"]'))
+            ?.focus();
+        },
         onLoadSaved: reload,
         onKeepLocal: () => {
+          discard.disabled = false;
           status.textContent = 'The newer saved revision was left unchanged.';
         },
       });
       dialogs.push(dialog);
-      context.root.append(dialog.element);
     });
   }));
   return element('article', { className: 'homebrew-card panel' }, [

@@ -35,10 +35,13 @@ export function draftRevisionConflict(error: unknown): DraftRevisionConflict | n
 
 export interface DraftConflictDialogOptions {
   readonly conflict: DraftRevisionConflict;
-  readonly restoreFocus: () => void;
+  readonly mount: HTMLElement;
+  readonly restoreFocus: (action: DraftConflictAction) => void;
   readonly onLoadSaved: () => void | Promise<void>;
   readonly onKeepLocal: () => void | Promise<void>;
 }
+
+export type DraftConflictAction = 'keep-local' | 'load-saved';
 
 export interface DraftConflictDialog {
   readonly element: HTMLDialogElement;
@@ -90,7 +93,10 @@ export function createDraftConflictDialog(
   let dismissed = false;
   let latestOperation = Promise.resolve();
   const controls = [keep, load];
-  const finish = (operation: () => void | Promise<void>): void => {
+  const finish = (
+    action: DraftConflictAction,
+    operation: () => void | Promise<void>,
+  ): void => {
     if (dismissed || disposed) return;
     dismissed = true;
     keep.disabled = true;
@@ -98,7 +104,8 @@ export function createDraftConflictDialog(
     latestOperation = Promise.resolve().then(operation).then(() => {
       if (disposed) return;
       dialog.close?.();
-      options.restoreFocus();
+      dialog.remove();
+      options.restoreFocus(action);
     }).catch((error: unknown) => {
       dismissed = false;
       keep.disabled = false;
@@ -108,16 +115,16 @@ export function createDraftConflictDialog(
       keep.focus();
     });
   };
-  const onKeep = (): void => finish(options.onKeepLocal);
-  const onLoad = (): void => finish(options.onLoadSaved);
+  const onKeep = (): void => finish('keep-local', options.onKeepLocal);
+  const onLoad = (): void => finish('load-saved', options.onLoadSaved);
   const onCancel = (event: Event): void => {
     event.preventDefault();
-    finish(options.onKeepLocal);
+    finish('keep-local', options.onKeepLocal);
   };
   const onKeydown = (event: KeyboardEvent): void => {
     if (event.key === 'Escape') {
       event.preventDefault();
-      finish(options.onKeepLocal);
+      finish('keep-local', options.onKeepLocal);
       return;
     }
     if (event.key !== 'Tab') return;
@@ -134,6 +141,7 @@ export function createDraftConflictDialog(
   load.addEventListener('click', onLoad);
   dialog.addEventListener('cancel', onCancel);
   dialog.addEventListener('keydown', onKeydown);
+  options.mount.append(dialog);
   if (typeof dialog.showModal === 'function') {
     if (!dialog.open) dialog.showModal();
   } else {
@@ -151,6 +159,7 @@ export function createDraftConflictDialog(
       dialog.removeEventListener('cancel', onCancel);
       dialog.removeEventListener('keydown', onKeydown);
       dialog.close?.();
+      dialog.remove();
     },
   };
 }

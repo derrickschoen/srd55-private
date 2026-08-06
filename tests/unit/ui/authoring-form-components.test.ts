@@ -11,11 +11,11 @@ import { RpcError } from '../../../src/rpc/protocol';
 import { damageType } from '../../../src/domain/enums';
 import {
   authoringPathKey,
-  createDraftNavigationGuard,
   createEffectCard,
   createOrderedCardControls,
   effectPreview,
   installDraftBeforeUnloadGuard,
+  installDraftNavigationGuard,
   renderValidationSummary,
   type AuthoringEffectDraft,
 } from '../../../src/ui/authoring/form-components';
@@ -28,6 +28,7 @@ import {
   installInteractiveDocument,
   interactiveElement,
 } from '../../fixtures/interactive-dom';
+import { Router } from '../../../src/ui/router';
 
 function uuid(value: string): HomebrewDraftItemUuid {
   return value as HomebrewDraftItemUuid;
@@ -101,6 +102,48 @@ function keydown(key: string, shiftKey = false): KeyboardEvent {
     shiftKey: { value: shiftKey },
   });
   return event;
+}
+
+function routerHarness(initialUrl: string): {
+  readonly windowObject: Window;
+  readonly popTo: (target: string) => void;
+} {
+  const events = new EventTarget();
+  const location = {
+    href: initialUrl,
+    origin: new URL(initialUrl).origin,
+  };
+  let state: unknown = null;
+  const moveTo = (target: string | URL): void => {
+    location.href = new URL(String(target), location.href).href;
+  };
+  const history = {
+    get state(): unknown {
+      return state;
+    },
+    pushState(nextState: unknown, _unused: string, target?: string | URL | null): void {
+      state = nextState;
+      if (target !== undefined && target !== null) moveTo(target);
+    },
+    replaceState(nextState: unknown, _unused: string, target?: string | URL | null): void {
+      state = nextState;
+      if (target !== undefined && target !== null) moveTo(target);
+    },
+  };
+  return {
+    windowObject: {
+      location,
+      history,
+      addEventListener: (type: string, listener: EventListenerOrEventListenerObject) =>
+        events.addEventListener(type, listener),
+      removeEventListener: (type: string, listener: EventListenerOrEventListenerObject) =>
+        events.removeEventListener(type, listener),
+    } as unknown as Window,
+    popTo: (target) => {
+      moveTo(target);
+      events.dispatchEvent(new Event('popstate'));
+    },
+  };
 }
 
 describe('HA-6 shared authoring form controls', () => {
@@ -236,22 +279,45 @@ describe('HA-6 shared authoring form controls', () => {
     }
   });
 
-  it('prompts before dirty draft navigation and never navigates after refusal', () => {
-    const navigated: string[] = [];
+  it('dirty draft guard blocks router.navigate and popstate, keeps the refused route, and allows clean navigation', () => {
+    const harness = routerHarness('https://example.test/');
+    const router = new Router(harness.windowObject);
+    const visited: string[] = [];
     let dirty = true;
     let allow = false;
-    const navigate = createDraftNavigationGuard({
+    router.start();
+    const removeGuard = installDraftNavigationGuard(router, {
       isDirty: () => dirty,
       confirmLeave: () => allow,
-      navigate: (target) => navigated.push(target),
     });
-    expect(navigate('/homebrew')).toBe(false);
-    expect(navigated).toEqual([]);
-    allow = true;
-    expect(navigate('/homebrew')).toBe(true);
+    const unsubscribe = router.subscribe((route) => visited.push(route.path));
+
+    expect(router.navigate('/homebrew')).toBe(false);
+    expect(router.current.path).toBe('/');
+    expect(visited).toEqual([]);
+
+    harness.popTo('/characters/7');
+    expect(router.current.path).toBe('/');
+    expect(visited).toEqual([]);
+
     dirty = false;
-    expect(navigate('/')).toBe(true);
-    expect(navigated).toEqual(['/homebrew', '/']);
+    expect(router.navigate('/homebrew')).toBe(true);
+    expect(router.current.path).toBe('/homebrew');
+    expect(visited).toEqual(['/homebrew']);
+
+    dirty = true;
+    harness.popTo('/');
+    expect(router.current.path).toBe('/homebrew');
+    expect(visited).toEqual(['/homebrew']);
+
+    dirty = false;
+    harness.popTo('/');
+    expect(router.current.path).toBe('/');
+    expect(visited).toEqual(['/homebrew', '/']);
+
+    unsubscribe();
+    removeGuard();
+    router.stop();
   });
 
   it('warns on browser unload only while the draft has unsaved local changes', () => {
@@ -273,7 +339,7 @@ describe('HA-6 shared authoring form controls', () => {
 });
 
 describe('HA-6 stale draft conflict dialog', () => {
-  it('recognizes structured revision-CAS errors and traps/restores focus without an overwrite action', async () => {
+  it('attaches before showModal, recognizes revision-CAS errors, and traps/restores focus', async () => {
     const conflict = draftRevisionConflict(new RpcError(
       'handler_error',
       'Draft revision is stale.',
@@ -292,10 +358,12 @@ describe('HA-6 stale draft conflict dialog', () => {
     const restoreDocument = installInteractiveDocument();
     try {
       const invoker = document.createElement('button');
+      document.body.append(invoker);
       invoker.focus();
       const choices: string[] = [];
       const rendered = createDraftConflictDialog({
         conflict,
+        mount: document.body,
         restoreFocus: () => invoker.focus(),
         onLoadSaved: () => { choices.push('load'); },
         onKeepLocal: () => { choices.push('keep'); },
@@ -304,6 +372,7 @@ describe('HA-6 stale draft conflict dialog', () => {
       const buttons = dialog.querySelectorAll('button');
 
       expect(dialog.getAttribute('aria-modal')).toBe('true');
+      expect(dialog.isConnected).toBe(true);
       expect(dialog.getAttribute('aria-labelledby')).toBe('authoring-conflict-heading');
       expect(elementText(dialog as unknown as Node)).toContain(
         'revision 3, but revision 4 is now saved. Nothing was overwritten.',
