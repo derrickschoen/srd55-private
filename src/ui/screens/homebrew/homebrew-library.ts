@@ -18,6 +18,10 @@ import {
   draftRevisionConflict,
   type DraftConflictDialog,
 } from '../../authoring/draft-conflict-dialog';
+import {
+  isStoredSpeciesDraft,
+  renderSpeciesForm,
+} from './species-form';
 
 export const HOMEBREW_ROUTE = '/homebrew';
 
@@ -319,23 +323,28 @@ async function renderDraftRoute(
   const view = shell(context, cleanups);
   const draft = await client.readDraft({ draft_uuid: draftUuid });
   const back = routedLink(context, cleanups, '← All drafts', homebrewTabPath('drafts'));
+  const formMount = element('div', {
+    className: 'homebrew-form-mount',
+    attributes: {
+      'data-authoring-form-kind': draft.content_kind,
+      'aria-label': `${KIND_LABELS[draft.content_kind]} authoring form`,
+    },
+  });
   view.main.append(
     back,
     element('article', { className: 'homebrew-draft-shell panel' }, [
       draftHeading(draft),
       element('p', { text: `Saved revision ${String(draft.revision)}.` }),
-      element('p', {
-        text: `The shared ${KIND_LABELS[draft.content_kind].toLowerCase()} draft shell is ready for its authoring form.`,
-      }),
-      element('div', {
-        className: 'homebrew-form-mount',
-        attributes: {
-          'data-authoring-form-kind': draft.content_kind,
-          'aria-label': `${KIND_LABELS[draft.content_kind]} authoring form`,
-        },
-      }),
+      formMount,
     ]),
   );
+  if (isStoredSpeciesDraft(draft)) {
+    cleanups.push(renderSpeciesForm({ context, client, mount: formMount, draft }));
+  } else {
+    formMount.append(element('p', {
+      text: `The shared ${KIND_LABELS[draft.content_kind].toLowerCase()} draft shell is ready for its authoring form.`,
+    }));
+  }
 }
 
 export async function renderHomebrewLibrary(

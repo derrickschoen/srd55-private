@@ -190,8 +190,89 @@
 
 .homebrew-form-mount {
   min-height: 8rem;
-  border: 1px dashed #a99d8c;
-  border-radius: 0.5rem;
+}
+
+.species-authoring-form,
+.species-root-fields,
+.species-traits-section,
+.species-grants-section,
+.species-trait-card,
+.species-grant-card,
+.species-trait-effects,
+.species-publish-preview,
+.species-publish-result {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.species-authoring-form {
+  margin-top: 1rem;
+}
+
+.species-root-fields,
+.species-trait-card,
+.species-grant-card,
+.species-publish-preview,
+.species-publish-result {
+  border: 1px solid #cfc6b6;
+  border-radius: 0.6rem;
+  padding: 1rem;
+}
+
+.species-authoring-form input:not([type="checkbox"]):not([type="radio"]),
+.species-authoring-form select,
+.species-authoring-form textarea,
+.content-adoption-modal input[type="text"] {
+  width: 100%;
+  min-height: 2.6rem;
+}
+
+.species-authoring-form textarea {
+  min-height: 7rem;
+}
+
+.species-root-fields legend,
+.species-trait-card > legend,
+.species-grant-card > legend,
+.species-skill-choices legend {
+  font-weight: 750;
+}
+
+.species-skill-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.5rem;
+}
+
+.species-skill-choices label {
+  margin-right: 0.75rem;
+}
+
+.species-form-actions,
+.content-adoption-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.content-adoption-modal {
+  width: min(100% - 2rem, 42rem);
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  border: 1px solid #a99d8c;
+  border-radius: 0.65rem;
+  padding: 1.25rem;
+}
+
+.content-adoption-modal::backdrop {
+  background: rgb(0 0 0 / 55%);
+}
+
+.content-adoption-row {
+  display: grid;
+  gap: 0.55rem;
+  margin-block: 0.75rem;
+  padding: 0.75rem;
 }
 
 .authoring-effect-card {
