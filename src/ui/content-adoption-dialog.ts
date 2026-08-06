@@ -4,6 +4,7 @@ import type {
   ContentImportPlan,
   ContentImportReviewRow,
 } from '../catalog/content-adoption';
+import { contentKinds, type ContentKind } from '../catalog/content-identity';
 import { clear, element, listen, type Cleanup } from './dom';
 
 export interface ContentAdoptionDialogOptions {
@@ -32,8 +33,121 @@ function reasonLabel(reason: ContentImportReviewRow['matchClass']): string {
     case 'compatible-fingerprint': return 'Compatible fingerprint';
     case 'srd-fallback': return 'SRD fingerprint fallback';
     case 'metadata-conflict': return 'Metadata conflict';
-    case 'key-collision': return 'Asserted key collision';
+    case 'key-collision': return 'Same name, distinct rules content';
   }
+}
+
+interface PreviewKindCounts {
+  readonly newCount: number;
+  readonly matchedCount: number;
+  readonly reviewCount: number;
+  readonly refusedCount: number;
+}
+
+interface PortablePreviewShape {
+  readonly new_by_kind: Readonly<Record<ContentKind, number>>;
+  readonly matched_by_kind: Readonly<Record<ContentKind, number>>;
+  readonly review_required_by_kind: Readonly<Record<ContentKind, number>>;
+  readonly refused_by_kind: Readonly<Record<ContentKind, number>>;
+}
+
+function portablePreview(plan: ContentImportPlan): PortablePreviewShape | null {
+  if (!('preview' in plan)) return null;
+  const preview = plan.preview;
+  if (preview === null || typeof preview !== 'object') return null;
+  return preview as PortablePreviewShape;
+}
+
+function emptyPreviewCounts(): Record<ContentKind, PreviewKindCounts> {
+  return Object.fromEntries(contentKinds.map((kind) => [kind, {
+    newCount: 0,
+    matchedCount: 0,
+    reviewCount: 0,
+    refusedCount: 0,
+  }])) as Record<ContentKind, PreviewKindCounts>;
+}
+
+function planKind(id: string, plan: ContentImportPlan): ContentKind | null {
+  const reviewed = plan.reviews.find((review) => review.id === id)?.kind;
+  if (reviewed !== undefined) return reviewed;
+  return contentKinds.find((kind) =>
+    id.startsWith(`portable:${kind}:`) || id.startsWith(`${kind}:`),
+  ) ?? null;
+}
+
+function previewCounts(plan: ContentImportPlan): Readonly<Record<ContentKind, PreviewKindCounts>> {
+  const portable = portablePreview(plan);
+  if (portable !== null) {
+    return Object.fromEntries(contentKinds.map((kind) => [kind, {
+      newCount: portable.new_by_kind[kind],
+      matchedCount: portable.matched_by_kind[kind],
+      reviewCount: portable.review_required_by_kind[kind],
+      refusedCount: portable.refused_by_kind[kind],
+    }])) as Readonly<Record<ContentKind, PreviewKindCounts>>;
+  }
+  const counts = emptyPreviewCounts();
+  for (const outcome of plan.outcomes) {
+    const kind = planKind(outcome.id, plan);
+    if (kind === null) continue;
+    const current = counts[kind];
+    switch (outcome.kind) {
+      case 'create':
+        counts[kind] = { ...current, newCount: current.newCount + 1 };
+        break;
+      case 'match':
+      case 'remembered-match':
+      case 'remembered-clone':
+        counts[kind] = { ...current, matchedCount: current.matchedCount + 1 };
+        break;
+      case 'review':
+        counts[kind] = { ...current, reviewCount: current.reviewCount + 1 };
+        break;
+      case 'refused':
+        counts[kind] = { ...current, refusedCount: current.refusedCount + 1 };
+        break;
+    }
+  }
+  return counts;
+}
+
+function createPreview(plan: ContentImportPlan): HTMLElement {
+  const counts = previewCounts(plan);
+  const nonEmpty = contentKinds.filter((kind) => {
+    const count = counts[kind];
+    return count.newCount + count.matchedCount + count.reviewCount +
+      count.refusedCount > 0;
+  });
+  const list = element('ul');
+  for (const kind of nonEmpty) {
+    const count = counts[kind];
+    list.append(element('li', {
+      text: `${kind}: ${String(count.newCount)} new, ` +
+        `${String(count.matchedCount)} matched, ` +
+        `${String(count.reviewCount)} needs review, ` +
+        `${String(count.refusedCount)} refused`,
+    }));
+  }
+  if (nonEmpty.length === 0) {
+    list.append(element('li', { text: 'No catalog content changes.' }));
+  }
+  const conflicts = plan.reviews.filter((review) =>
+    review.matchClass === 'key-collision' ||
+    review.matchClass === 'metadata-conflict' ||
+    review.conflictDetails.length > 0,
+  );
+  return element('section', {
+    className: 'content-import-preview',
+    attributes: { 'aria-label': 'Import preview' },
+  }, [
+    element('h3', { text: 'Import preview' }),
+    list,
+    ...(conflicts.length === 0
+      ? []
+      : [element('p', {
+          text: `${String(conflicts.length)} conflict${conflicts.length === 1 ? '' : 's'} ` +
+            'must be reviewed below.',
+        })]),
+  ]);
 }
 
 function openModal(dialog: HTMLDialogElement): void {
@@ -70,13 +184,16 @@ export function createContentAdoptionDialog(
   const cleanups: Cleanup[] = [];
 
   const heading = element('h2', {
-    text: 'Review matching catalog content',
+    text: 'Review content import',
     attributes: { id: 'content-adoption-heading' },
   });
   const explanation = element('p', {
-    text: 'Choose whether each incoming entry should use the matching local content or become a renamed private copy.',
+    text: options.plan.reviews.length === 0
+      ? 'Check the content counts before importing.'
+      : 'Choose whether each incoming entry should use the matching local content or become a renamed private copy.',
     attributes: { id: 'content-adoption-explanation' },
   });
+  const preview = createPreview(options.plan);
   const status = element('p', {
     attributes: { role: 'status', 'aria-live': 'polite' },
   });
@@ -89,11 +206,14 @@ export function createContentAdoptionDialog(
     text: 'Import with these choices',
     attributes: { type: 'button' },
   });
+  commit.disabled = options.plan.outcomes.some(
+    (outcome) => outcome.kind === 'refused',
+  );
   const actions = element('div', { className: 'content-adoption-actions' }, [
     cancel,
     commit,
   ]);
-  dialog.append(heading, explanation, status, list, actions);
+  dialog.append(heading, explanation, preview, status, list, actions);
 
   const currentChoices = (): ContentImportChoices => Object.freeze(
     Object.fromEntries(Object.entries(choices).map(([id, choice]) => [
@@ -110,6 +230,8 @@ export function createContentAdoptionDialog(
       const refreshed = await options.replan(currentChoices());
       if (disposed || requested !== generation) return;
       plan = refreshed;
+      const refreshedPreview = createPreview(refreshed);
+      preview.replaceChildren(...Array.from(refreshedPreview.children));
       rows.clear();
       for (const row of refreshed.reviews) rows.set(row.id, row);
       status.textContent = refreshed.outcomes.some((outcome) => outcome.kind === 'refused')
@@ -142,8 +264,13 @@ export function createContentAdoptionDialog(
         text: `${row.kind}: ${row.incomingName}`,
       }));
       fieldset.append(element('p', {
-        text: `${reasonLabel(row.matchClass)} — local: ${row.localName}`,
+        text: `Match reason: ${reasonLabel(row.matchClass)} — local: ${row.localName}`,
       }));
+      if (row.matchClass === 'key-collision') {
+        fieldset.append(element('p', {
+          text: 'The normalized name is already in use for different rules. Rename the private copy to keep both.',
+        }));
+      }
       for (const conflict of row.conflictDetails) {
         fieldset.append(element('p', {
           text: `${conflict.field} — incoming: ${conflict.incomingValue}; local: ${conflict.localValue}`,
@@ -219,6 +346,8 @@ export function createContentAdoptionDialog(
       if (disposed) return;
       if (result.kind === 'stale-plan') {
         plan = result.freshPlan;
+        const refreshedPreview = createPreview(result.freshPlan);
+        preview.replaceChildren(...Array.from(refreshedPreview.children));
         rows.clear();
         for (const row of result.freshPlan.reviews) rows.set(row.id, row);
         status.textContent = 'The catalog changed. Review the refreshed plan before committing.';

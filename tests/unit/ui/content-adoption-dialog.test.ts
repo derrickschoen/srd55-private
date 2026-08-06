@@ -20,6 +20,7 @@ import {
 import { assertedExternalContentKey } from '../../../src/catalog/catalog-key';
 import { DatabaseContext } from '../../../src/db/database';
 import type { ContentKey } from '../../../src/domain/ids';
+import type { PortableImportPlan } from '../../../src/backup/portable-content';
 import { createContentAdoptionDialog } from '../../../src/ui/content-adoption-dialog';
 import {
   elementText,
@@ -68,6 +69,96 @@ function plan(token: string): ContentImportPlan {
 }
 
 describe('the D82 content-adoption dialog', () => {
+  it('CI-8 discloses per-kind preview counts, every match reason, and same-name-distinct conflicts', () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const reasons = [
+        ['alias', 'Alias'],
+        ['compatible-fingerprint', 'Compatible fingerprint'],
+        ['srd-fallback', 'SRD fingerprint fallback'],
+        ['metadata-conflict', 'Metadata conflict'],
+        ['key-collision', 'Same name, distinct rules content'],
+      ] as const;
+      const reviews = reasons.map(([matchClass], index) => ({
+        id: `item:review-${String(index)}`,
+        kind: 'item' as const,
+        incomingName: index === 4 ? 'Shared Relic' : `Incoming ${String(index)}`,
+        localName: index === 4 ? 'Shared Relic' : `Local ${String(index)}`,
+        targetContentKey: `2024:item:target-${String(index)}` as ContentKey,
+        incomingFingerprint: String(index).repeat(64) as ContentFingerprintDigest,
+        matchClass,
+        defaultChoice: 'match' as const,
+        selectedChoice: 'match' as const,
+        cloneName: `Private ${String(index)}`,
+        dependencies: [],
+        conflictDetails: index < 3 ? [] : [{
+          field: 'Rules identity',
+          incomingValue: 'incoming',
+          localValue: 'local',
+        }],
+      }));
+      const kindCounts = (item: number) => ({
+        class: 0,
+        subclass: 0,
+        feat: 0,
+        species: 0,
+        background: 0,
+        spell: 0,
+        weapon: 0,
+        armor: 0,
+        item,
+      });
+      const previewPlan: PortableImportPlan = {
+        token: 'preview' as ContentImportPlanToken,
+        inputHash: 'input',
+        graphHash: 'graph',
+        targetHash: 'target',
+        spellActivityChanges: [],
+        reviews,
+        outcomes: [
+          { id: 'item:new', kind: 'create', contentKey: '2024:item:new' as ContentKey },
+          { id: 'item:matched', kind: 'match', contentKey: '2024:item:matched' as ContentKey },
+          ...reviews.map((review) => ({
+            id: review.id,
+            kind: 'review' as const,
+            contentKey: review.targetContentKey,
+            matchClass: review.matchClass,
+          })),
+          { id: 'portable:item:refused', kind: 'refused', reason: 'unresolved_reference' as const },
+        ],
+        preview: {
+          new_by_kind: kindCounts(2),
+          matched_by_kind: kindCounts(3),
+          review_required_by_kind: kindCounts(5),
+          refused_by_kind: kindCounts(4),
+        },
+      };
+      const rendered = createContentAdoptionDialog({
+        plan: previewPlan,
+        replan: async () => previewPlan,
+        commit: async () => ({ kind: 'committed', outcomes: previewPlan.outcomes }),
+        onCommitted: () => undefined,
+      });
+      const text = elementText(rendered.element);
+
+      expect(text).toContain('item: 2 new, 3 matched, 5 needs review, 4 refused');
+      expect(text).toContain('2 conflicts must be reviewed below.');
+      for (const [, label] of reasons) {
+        expect(text).toContain(`Match reason: ${label}`);
+      }
+      expect(text).toContain(
+        'The normalized name is already in use for different rules. Rename the private copy to keep both.',
+      );
+      const commitButton = interactiveElement(rendered.element)
+        .querySelectorAll('button')
+        .find((button) => button.textContent === 'Import with these choices');
+      expect(commitButton?.disabled).toBe(true);
+      rendered.cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
   it('lists every review with Match selected and replans before clone commit', async () => {
     const restoreDocument = installInteractiveDocument();
     try {
@@ -111,8 +202,7 @@ describe('the D82 content-adoption dialog', () => {
       if (cloneName === undefined) throw new Error('Clone-name input missing.');
       cloneName.value = 'Road Mage (Private copy)';
       inputs[1]?.dispatchEvent(new Event('change'));
-      await Promise.resolve();
-      await Promise.resolve();
+      for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
 
       expect(replans).toEqual([{
         'subclass:road-mage': {

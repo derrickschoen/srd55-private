@@ -436,19 +436,6 @@ export function createImportBackupControls(
           throw new TypeError('Choose a character JSON backup.');
         }
         const prepared = await controller.prepareCharacterImport(file);
-        if (prepared.plan.reviews.length === 0) {
-          const committed = await services.backup.commitCharacterImport(
-            prepared.document,
-            prepared.plan.token,
-            {},
-          );
-          if (committed.kind !== 'committed') {
-            throw new TypeError(`Character import was ${committed.kind}.`);
-          }
-          await options.onPersistedChange();
-          characterInput.value = '';
-          return `Character imported as #${committed.result.characterId}.`;
-        }
         adoptionCleanup?.();
         const rendered = createContentAdoptionDialog({
           plan: prepared.plan,
@@ -474,7 +461,9 @@ export function createImportBackupControls(
         });
         adoptionCleanup = rendered.cleanup;
         root.append(rendered.element);
-        return 'Review each matching content entry before importing.';
+        return prepared.plan.reviews.length === 0
+          ? 'Review the complete character JSON preview before importing.'
+          : 'Review each matching content entry before importing.';
       });
     }),
   );
@@ -491,6 +480,9 @@ export function createImportBackupControls(
 
   const root = element('details', { className: 'transfer-panel' }, [
     element('summary', { text: 'Import and backups' }),
+    element('p', {
+      text: 'Character JSON backups include the character and its complete referenced external content. Share links are reference-only and do not include catalog definitions.',
+    }),
     element('div', { className: 'transfer-grid' }, [
       control('Catalog JSON', catalogInput, catalogButton),
       control('Restore complete database', databaseInput, databaseImportButton),
@@ -498,10 +490,10 @@ export function createImportBackupControls(
         element('span', { text: 'Back up complete database' }),
         databaseExportButton,
       ]),
-      control('Import one character', characterInput, characterImportButton),
+      control('Import complete character JSON', characterInput, characterImportButton),
       element('div', { className: 'transfer-control' }, [
         element('label', {}, [
-          element('span', { text: 'Back up one character' }),
+          element('span', { text: 'Back up complete character JSON' }),
           characterSelect,
         ]),
         characterExportButton,
@@ -525,7 +517,8 @@ export function createImportBackupControls(
     }
     const receipts = await services.catalog.listMatchDecisions();
     receiptSelect.replaceChildren(...receipts.map((receipt) => element('option', {
-      text: `${receipt.kind}: ${receipt.decision} → ${receipt.targetContentKey}`,
+      text: `${receipt.kind}: ${receipt.decision} → ${receipt.targetContentKey} ` +
+        `(${receipt.scheme} ${receipt.digest.slice(0, 12)}…, reviewed ${receipt.reviewedAt})`,
       attributes: {
         value: JSON.stringify({
           kind: receipt.kind,
@@ -544,19 +537,25 @@ export function createImportBackupControls(
     forgetReceipt,
   ]));
   cleanups.push(listen(forgetReceipt, 'click', () => {
-    void run(forgetReceipt, async () => {
-      if (services.catalog.forgetMatchDecision === undefined) {
-        throw new TypeError('Catalog receipt service is unavailable.');
+    void (async () => {
+      await run(forgetReceipt, async () => {
+        if (services.catalog.forgetMatchDecision === undefined) {
+          throw new TypeError('Catalog receipt service is unavailable.');
+        }
+        const input = JSON.parse(receiptSelect.value) as Parameters<
+          NonNullable<typeof services.catalog.forgetMatchDecision>
+        >[0];
+        const result = await services.catalog.forgetMatchDecision(input);
+        return result.forgotten
+          ? 'Remembered catalog choice forgotten.'
+          : 'That remembered catalog choice no longer exists.';
+      });
+      try {
+        await refreshReceipts();
+      } catch (error) {
+        announce(errorMessage(error), true);
       }
-      const input = JSON.parse(receiptSelect.value) as Parameters<
-        NonNullable<typeof services.catalog.forgetMatchDecision>
-      >[0];
-      const result = await services.catalog.forgetMatchDecision(input);
-      await refreshReceipts();
-      return result.forgotten
-        ? 'Remembered catalog choice forgotten.'
-        : 'That remembered catalog choice no longer exists.';
-    });
+    })();
   }));
   void refreshReceipts().catch((error: unknown) => announce(errorMessage(error), true));
 

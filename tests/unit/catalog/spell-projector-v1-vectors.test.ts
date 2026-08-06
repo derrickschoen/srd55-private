@@ -27,6 +27,12 @@ function identity(payload: SpellProjectorPayloadV1) {
 }
 
 describe('CI-3s-PRE spell content-v1 projector contracts', () => {
+  it('CI-8 spell projector includes its load-bearing field', () => {
+    const vector = spellProjectorV1Vectors[0]!;
+    expect(projectSpellContentAggregateV1(vector.aggregate).payload)
+      .toEqual(vector.payload);
+  });
+
   it.each(spellProjectorV1Vectors)(
     'pins $label',
     ({ aggregate, payload, canonicalJson, sha256, derivedKey }) => {

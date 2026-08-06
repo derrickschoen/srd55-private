@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AUTHORED_PROJECTOR_INVENTORY_V1 } from '../../../src/catalog/authored-content-projector-contract-v1';
+import { projectAuthoredContentAggregateV1 } from '../../../src/catalog/stored-authored-content-projector-v1';
 import {
   contentIdentitySequence,
   deriveContentIdentityV1,
@@ -10,9 +11,22 @@ import {
 } from './fixtures/authored-projector-v1-vectors';
 
 describe('HA-1 authored content-v1 projector contracts', () => {
+  it.each([
+    ['species', authoredProjectorV1Vectors[0]],
+    ['background', authoredProjectorV1Vectors[1]],
+    ['subclass', authoredProjectorV1Vectors[2]],
+  ] as const)(
+    'CI-8 %s projector includes its load-bearing field',
+    (_kind, vector) => {
+      expect(projectAuthoredContentAggregateV1(vector.aggregate).payload)
+        .toEqual(vector.payload);
+    },
+  );
+
   it.each(authoredProjectorV1Vectors)(
     'pins $label',
     ({ aggregate, kind, payload, canonicalJson, sha256, derivedKey }) => {
+      expect(projectAuthoredContentAggregateV1(aggregate).payload).toEqual(payload);
       const identity = deriveContentIdentityV1({
         kind,
         edition: aggregate.rules_edition,

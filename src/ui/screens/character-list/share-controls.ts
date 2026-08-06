@@ -431,7 +431,7 @@ export function createShareControls(
       element('div', { className: 'share-column' }, [
         exportTitle,
         element('p', {
-          text: 'Only character choices are included; spell rules text is never embedded.',
+          text: 'Share links are reference-only: they do not include catalog definitions. Use a complete character JSON backup when the recipient also needs external content.',
         }),
         element('label', { className: 'share-option' }, [
           includeAcks,
