@@ -23,7 +23,53 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-05-b (newest - read first)
+## RESTART POINT 2026-08-05-c (newest - read first)
+MAIN 8606517 (mirror pushed). FLOORS: vitest 231/3,861; PW 126 on the
+pool (~9 min); build 0; migrations 0000-0033 FROZEN; wire v1-v17.
+TWENTY-THREE merges. Rulings through D210 (D206 pointer:
+docs/homebrew/rulings.md is authoritative for subclass-session rulings).
+
+MERGED SINCE 08-05-b:
+ - wt/party (e024fb7, 21st): homebrew docs + rulings log + the Veteran
+   kit (docs-only, 21 files).
+ - SEEDER-CARD (8af141d, 22nd): content-verified seeder health - one
+   shared stored projection per boot, three-way equality, source-wins
+   healing. Review caught the fast path re-creating the laundering one
+   level up; fix round 2 repaired seed-pass gating and made the
+   339-spell install atomic (23s browser boots were the entire
+   103-failure PW cascade). Boot 258->307ms, accepted on record.
+ - VET-SEED (8606517, 23rd): the rogue Veteran, first homebrew-bundled
+   subclass. 2024:subclass:veteran, fifteen bundled subclasses,
+   mechanics fidelity reviewed clean line-by-line, spell-absence pinned,
+   stale agent-reference claim fixed in-lane.
+
+RULINGS BATCH D204-D210: wt/party-before-VET-SEED (done); CI-4b = WIPE
+AND RESEED (owner: "Wipe old stuff and reseed in all cases. No users
+yet"); rulings fold = pointer only; three standing orders (COMMON.md
+no-second-agent-CLIs - line appended; dead-code deletion license;
+prune merged worktrees - being applied); zero-users window closes at
+the owner's first real campaign, announced by them; NOTICE prep
+authorized (unit IN FLIGHT in wt/notice); no acceptance walk yet.
+
+IN FLIGHT AT WRITE TIME:
+ - NOTICE unit (wt/notice, codex): root NOTICE.md attribution inventory,
+   docs-only. Gate: read + verify citations, no suite needed.
+ - CI-4b inventory scout (sonnet, read-only): what legacy-opaque content
+   exists, who consumes it, what a wipe touches - feeds the CI-4b brief.
+
+QUEUE: CI-4b (wipe-and-reseed per D205, brief after the scout returns;
+mint 0034 only if the wipe genuinely needs it), HA-2, CI-5. Follow-ups:
+SUBCLASS-EMPTY-PROSE-AUDIT, SC3-VITEST-WORKER-RPC-NOISE (three
+supervisor error-classes this arc: pipe-exit traps, push-before-verdict,
+brief-omitted standing lines - all disclosed in transcript; standing
+lines now in COMMON.md), dead enum available_on_long_rest (D207 license:
+next lane touching enums.ts deletes it).
+
+WORKTREES: wt/attunement (merged, idle - prune candidate), wt/notice
+(active), wt/party (owner's session - never prune), wt/pwa (stale,
+prune candidate). Others pruned per D207.
+
+## RESTART POINT 2026-08-05-b (superseded by 08-05-c)
 MAIN 12ba5ec (mirror pushed). FLOORS: vitest 231/3,855; PW 126 on the
 PARALLEL POOL (~9 min wall, was 24-28 serial); build 0; migrations
 0000-0033 FROZEN (0033 = asserted keys + registry-first triggers);
