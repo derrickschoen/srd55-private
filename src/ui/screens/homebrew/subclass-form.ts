@@ -442,7 +442,7 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
     clear(options.mount);
     const form = element('form', {
       className: 'subclass-authoring-form',
-      attributes: { novalidate: '', 'aria-label': 'Subclass authoring form' },
+      attributes: { novalidate: '' },
     });
     const validationMount = element('div', { className: 'authoring-validation-mount' });
     const status = element('p', {
