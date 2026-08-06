@@ -39,6 +39,7 @@ import catalogContentDrafts from '../../drizzle/0035_catalog_content_drafts.sql?
 import catalogContentArchive from '../../drizzle/0036_catalog_content_archive.sql?raw';
 import backgroundDefaultOriginFeatKey from '../../drizzle/0037_background_default_origin_feat_key.sql?raw';
 import catalogContentSupersessions from '../../drizzle/0038_catalog_content_supersessions.sql?raw';
+import catalogContentSupersessionGuards from '../../drizzle/0039_catalog_content_supersession_guards.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -445,6 +446,16 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
     resultSchemaChecksum:
       '98b62b5428ca4cfe04e9f9e9a8c9921e5751250a6a2af66ce9c907d3bfa6bb6d',
   }),
+  // CI-7: version edges are permanent historical facts. Storage rejects both
+  // mutation of an existing edge and insertion of any same-kind cycle.
+  Object.freeze({
+    id: '0039_catalog_content_supersession_guards',
+    sql: catalogContentSupersessionGuards,
+    checksum:
+      '8fa2e74124c97b6fbe772d5ee56f973514e5a080fe8622e1b32bfb8764f5676e',
+    resultSchemaChecksum:
+      '7489fe1516d1b7e3ad387901036445d0ef768f4122f8a50f531a88501e7a4e93',
+  }),
 ]);
 
 export function databaseSchemaChecksum(signature: string): string {
@@ -521,13 +532,16 @@ export function applyMigrationSuffix(
     transactionOpen = true;
     try {
       for (const migration of pending) {
-        // 0037 alone declares that an explicit replay against its exact result
-        // schema is a no-op. Every other migration keeps the historical
-        // dispatcher behaviour and executes its SQL when included in a suffix.
+        // 0037 alone declares that an explicit replay against its own result,
+        // or against the already-reached target schema of a later chain, is a
+        // no-op. Every other migration retains normal suffix execution.
         if (
           migration.replayPolicy === 'skip_when_result_schema_matches' &&
-          databaseSchemaChecksum(signatureOf(db)) ===
-          migration.resultSchemaChecksum
+          (
+            databaseSchemaChecksum(signatureOf(db)) ===
+              migration.resultSchemaChecksum ||
+            signatureOf(db) === expectedSignature
+          )
         ) {
           continue;
         }

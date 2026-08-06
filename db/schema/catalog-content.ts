@@ -202,7 +202,8 @@ export const catalog_content_identities = sqliteTable(
 /**
  * Recipient-local version lineage for immutable external catalog content.
  * The old and new aggregates both remain installed; this row is metadata for
- * library presentation and later explicit replacement workflows only.
+ * library presentation and later explicit replacement workflows only. Named
+ * storage triggers reject updates and any insert that closes a lineage cycle.
  */
 export const catalog_content_supersessions = sqliteTable(
   'catalog_content_supersessions',

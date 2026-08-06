@@ -43,7 +43,7 @@ import { portableSourceContentImportNode } from '../../../src/catalog/source-con
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { applicationSeed } from '../../../src/db/bootstrap';
 import { DatabaseContext } from '../../../src/db/database';
-import type { ContentKey } from '../../../src/domain/ids';
+import type { CharacterId, ContentKey } from '../../../src/domain/ids';
 import { EquipmentGrantRefusal } from '../../../src/grants/equipment-grants';
 import { SavePointQueries } from '../../../src/queries/save-points';
 import { featProjectorV1Vector } from '../../unit/catalog/fixtures/source-projector-v1-vectors';
@@ -772,7 +772,17 @@ describe('HA-4 background publisher', () => {
   it('requires review despite a remembered alias decision and commits an explicit Match', async () => {
     const db = await database(true);
     const authoring = service(db);
-    const incoming = savedBackground(db, authoring, 'Explicit Match Wayfarer');
+    const base = publish(authoring, savedBackground(db, authoring, 'Explicit Match Base'));
+    const copied = authoring.createDraft({
+      content_kind: 'background',
+      base_content_key: base.result.content_key,
+    });
+    if (copied.document.kind !== 'background') throw new Error('Background draft required.');
+    const incoming = authoring.saveDraft({
+      draft_uuid: copied.draft_uuid,
+      expected_revision: copied.revision,
+      document: { ...copied.document, name: 'Explicit Match Wayfarer' },
+    });
     const initial = authoring.previewPublish({
       draft_uuid: incoming.draft_uuid,
       expected_revision: incoming.revision,
@@ -831,6 +841,13 @@ describe('HA-4 background publisher', () => {
       name: 'Explicit Match Wayfarer',
       catalog_layer: 'external',
       previous_key_usage_count: 0,
+    });
+    expect(db.oneRaw(
+      `SELECT superseded_content_key, successor_content_key
+       FROM catalog_content_supersessions`,
+    )).toEqual({
+      superseded_content_key: base.result.content_key,
+      successor_content_key: targetKey,
     });
     expect(() => authoring.readDraft(incoming.draft_uuid)).toThrow(AuthoringServiceError);
     expect(db.scalar<number>(
@@ -1158,4 +1175,127 @@ describe('HA-4 background publisher', () => {
       [committed.result.characterId],
     )).toBeNull();
   }, 20_000);
+
+  it('versions background lineage without changing an existing character', async () => {
+    const db = await database(true);
+    const authoring = service(db);
+    const original = publish(authoring, savedBackground(db, authoring, 'Versioned Surveyor'));
+    const guidedClass = listGuidedClassOptions(db)[0];
+    if (guidedClass === undefined) throw new Error('A guided class is required.');
+    const character = createGuidedCharacter(
+      db,
+      { name: 'Versioned Mapper', class_content_key: guidedClass.content_key },
+      new CharacterCommandIntegrity('ha4-versioned-background'),
+    );
+    applyGuidedBackgroundChoices(db, {
+      character_id: character.id,
+      content_key: original.result.content_key,
+      increases: [{ ability: 'strength', amount: 2 }, { ability: 'dexterity', amount: 1 }],
+      origin_feat_content_key: originFeatKey(db),
+      origin_feat_config: {},
+    });
+    const copied = authoring.createDraft({
+      content_kind: 'background',
+      base_content_key: original.result.content_key,
+    });
+    if (copied.document.kind !== 'background') throw new Error('Background draft required.');
+    const revised = authoring.saveDraft({
+      draft_uuid: copied.draft_uuid,
+      expected_revision: copied.revision,
+      document: { ...copied.document, name: 'Versioned Surveyor Revised' },
+    });
+    const successor = publish(authoring, revised);
+
+    expect(successor.result).toMatchObject({ outcome: 'created', previous_key_usage_count: 1 });
+    expect(authoring.usages(original.result.content_key).usages).toHaveLength(1);
+    expect(authoring.usages(successor.result.content_key).usages).toHaveLength(0);
+    expect(db.scalar<string>(
+      'SELECT name FROM character_background WHERE character_id = ?',
+      [character.id],
+    )).toBe('Versioned Surveyor');
+    expect(db.oneRaw(
+      `SELECT content_kind, superseded_content_key, successor_content_key
+       FROM catalog_content_supersessions`,
+    )).toEqual({
+      content_kind: 'background',
+      superseded_content_key: original.result.content_key,
+      successor_content_key: successor.result.content_key,
+    });
+    expect(authoring.list().published).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        content_key: original.result.content_key,
+        superseded_by: successor.result.content_key,
+      }),
+      expect.objectContaining({
+        content_key: successor.result.content_key,
+        superseded_by: null,
+      }),
+    ]));
+    const replacement = authoring.previewReplacement({
+      old_content_key: original.result.content_key,
+      new_content_key: successor.result.content_key,
+      character_id: character.id as CharacterId,
+    });
+    expect(replacement.review).toEqual([
+      expect.objectContaining({
+        candidate_content_key: successor.result.content_key,
+        reason: 'key-collision',
+      }),
+    ]);
+    expect(authoring.commitReplacement({
+      token: replacement.token,
+      decisions: [{
+        candidate_content_key: successor.result.content_key,
+        decision: 'match',
+      }],
+      choices: [],
+    })).toMatchObject({
+      content_kind: 'background',
+      character_id: character.id,
+      new_content_key: successor.result.content_key,
+    });
+    expect(db.scalar<string>(
+      'SELECT name FROM character_background WHERE character_id = ?',
+      [character.id],
+    )).toBe('Versioned Surveyor Revised');
+  });
+
+  it('rolls background installation and lineage back atomically', async () => {
+    const db = await database(true);
+    const authoring = service(db);
+    const original = publish(authoring, savedBackground(db, authoring, 'Atomic Surveyor'));
+    const copied = authoring.createDraft({
+      content_kind: 'background',
+      base_content_key: original.result.content_key,
+    });
+    if (copied.document.kind !== 'background') throw new Error('Background draft required.');
+    const revised = authoring.saveDraft({
+      draft_uuid: copied.draft_uuid,
+      expected_revision: copied.revision,
+      document: { ...copied.document, name: 'Atomic Surveyor Revised' },
+    });
+    const preview = authoring.previewPublish({
+      draft_uuid: revised.draft_uuid,
+      expected_revision: revised.revision,
+    });
+    db.exec(
+      `CREATE TEMP TRIGGER ci7_refuse_background_supersession
+       BEFORE INSERT ON catalog_content_supersessions
+       BEGIN SELECT RAISE(ABORT, 'CI7 injected background lineage failure'); END`,
+    );
+    expect(authoringError(() => authoring.commitPublish({
+      token: preview.token,
+      decisions: [],
+    })).data).toEqual({ reason: 'publish_refused', refusal: 'commit_failed' });
+    expect(db.scalar<number>('SELECT count(*) FROM catalog_content_supersessions')).toBe(0);
+    expect(db.scalar<number>(
+      `SELECT count(*) FROM background_definitions
+       WHERE content_key = 'expanded:content.background:atomic-surveyor-revised'`,
+    )).toBe(0);
+    expect(authoring.readDraft(revised.draft_uuid).revision).toBe(revised.revision);
+    expect(authoring.list().published).toEqual([
+      expect.objectContaining({ content_key: original.result.content_key, superseded_by: null }),
+    ]);
+  });
+
 });

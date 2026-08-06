@@ -362,12 +362,19 @@ describe('portable content manifests', () => {
   it('CI5-LIBRARY-SELECTED-SUBSET round-trips only the selected creation closure', async () => {
     const source = await database();
     const fixture = seedClosureLibrary(source);
+    source.exec(
+      `INSERT INTO catalog_content_supersessions (
+         content_kind, superseded_content_key, successor_content_key, recorded_at
+       ) VALUES ('feat', ?, ?, 'CI7-SUPERSESSION-SENTINEL')`,
+      [fixture.featKey, fixture.unrelatedKey],
+    );
     const document = exportSelectedLibraryContent(
       source,
       [fixture.speciesKey],
       exportedAt,
     );
     expect(document.selected_content_keys).toEqual([fixture.speciesKey]);
+    expect(JSON.stringify(document)).not.toContain('CI7-SUPERSESSION-SENTINEL');
     expect(manifestEnumeration(document)).toEqual([
       'feat:expanded:content.feat:keen-memory',
       'species:expanded:content.species:closure-species',
@@ -389,12 +396,19 @@ describe('portable content manifests', () => {
 
   it('CI5-LIBRARY-WHOLE exports every installed external creation as a library document', async () => {
     const source = await database();
-    seedClosureLibrary(source);
+    const fixture = seedClosureLibrary(source);
+    source.exec(
+      `INSERT INTO catalog_content_supersessions (
+         content_kind, superseded_content_key, successor_content_key, recorded_at
+       ) VALUES ('feat', ?, ?, 'CI7-SUPERSESSION-SENTINEL')`,
+      [fixture.featKey, fixture.unrelatedKey],
+    );
     const document = exportWholeLibrary(source, exportedAt);
 
     expect(document.format).toBe('dnd-multiclass-spells/library');
     expect(document.version).toBe(1);
     expect(document.selection).toBe('all');
+    expect(JSON.stringify(document)).not.toContain('CI7-SUPERSESSION-SENTINEL');
     expect(manifestEnumeration(document)).toEqual([
       'feat:expanded:content.feat:keen-memory',
       'feat:expanded:content.feat:unreferenced-feat',

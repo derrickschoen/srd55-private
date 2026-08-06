@@ -1,10 +1,12 @@
 import {
   AUTHORING_RPC,
   type ContentUsagesParams,
+  type CommitReplacementParams,
   type CreateDraftParams,
   type DiscardDraftParams,
   type CommitPublishParams,
   type PreviewPublishParams,
+  type PreviewReplacementParams,
   type ReadDraftParams,
   type SaveDraftParams,
 } from '../../authoring/client';
@@ -108,6 +110,40 @@ function isCommitPublishParams(value: unknown): value is CommitPublishParams {
     Array.isArray(value.decisions) && value.decisions.every(isPublishDecision);
 }
 
+function isCharacterId(value: unknown): boolean {
+  return Number.isSafeInteger(value) && Number(value) > 0;
+}
+
+function isPreviewReplacementParams(value: unknown): value is PreviewReplacementParams {
+  return isRecord(value) &&
+    hasExactKeys(value, ['old_content_key', 'new_content_key', 'character_id']) &&
+    isBoundedKey(value.old_content_key) &&
+    isBoundedKey(value.new_content_key) &&
+    isCharacterId(value.character_id);
+}
+
+function isReplacementDecision(value: unknown): boolean {
+  return isRecord(value) &&
+    hasExactKeys(value, ['candidate_content_key', 'decision']) &&
+    isBoundedKey(value.candidate_content_key) && value.decision === 'match';
+}
+
+function isReplacementChoice(value: unknown): boolean {
+  return isRecord(value) &&
+    hasExactKeys(value, ['path', 'value']) &&
+    Array.isArray(value.path) &&
+    value.path.every((part) => typeof part === 'string' || Number.isSafeInteger(part)) &&
+    typeof value.value === 'string';
+}
+
+function isCommitReplacementParams(value: unknown): value is CommitReplacementParams {
+  return isRecord(value) &&
+    hasExactKeys(value, ['token', 'decisions', 'choices']) &&
+    typeof value.token === 'string' && value.token.length > 0 &&
+    Array.isArray(value.decisions) && value.decisions.every(isReplacementDecision) &&
+    Array.isArray(value.choices) && value.choices.every(isReplacementChoice);
+}
+
 function authoringError(error: unknown): never {
   if (error instanceof AuthoringServiceError) {
     throw new RpcError(
@@ -204,6 +240,28 @@ export const handlers: readonly RpcHandler[] = [
     ({ db }, params) => {
       try {
         return new CatalogAuthoringService(db).usages(params.content_key);
+      } catch (error) {
+        return authoringError(error);
+      }
+    },
+  ),
+  defineRpcHandler(
+    AUTHORING_RPC.previewReplacement,
+    isPreviewReplacementParams,
+    ({ db }, params) => {
+      try {
+        return new CatalogAuthoringService(db).previewReplacement(params);
+      } catch (error) {
+        return authoringError(error);
+      }
+    },
+  ),
+  defineRpcHandler(
+    AUTHORING_RPC.commitReplacement,
+    isCommitReplacementParams,
+    ({ db }, params) => {
+      try {
+        return new CatalogAuthoringService(db).commitReplacement(params);
       } catch (error) {
         return authoringError(error);
       }

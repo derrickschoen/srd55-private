@@ -5,7 +5,7 @@ import {
   sqlString,
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
-import type { ContentKey } from '../domain/ids';
+import type { CharacterId, ContentKey } from '../domain/ids';
 import type { JsonValue } from '../domain/models';
 import { skills, spellSchool, type Skill } from '../domain/enums';
 import {
@@ -39,6 +39,10 @@ import type {
   PublishDecision,
   PublishPreview,
   PublishResult,
+  ReplacementChoiceSelection,
+  ReplacementDecision,
+  ReplacementPlan,
+  ReplacementResult,
   SpeciesAuthoringDraft,
   StoredHomebrewDraft,
   SubclassAuthoringDraft,
@@ -76,6 +80,12 @@ import {
   SubclassPublishError,
   SubclassSemanticValidationError,
 } from './subclass-publisher';
+import type { ReplacementPlanToken } from './ids';
+import {
+  commitReferenceRetarget,
+  previewReferenceRetarget,
+  ReferenceRetargetError,
+} from './reference-retarget';
 
 interface DraftRow {
   readonly draft_uuid: HomebrewDraftUuid;
@@ -182,6 +192,13 @@ function publishServiceError(error: unknown): never {
     }, { cause: error });
   }
   if (error instanceof SubclassPublishError) {
+    throw new AuthoringServiceError(error.message, error.data, { cause: error });
+  }
+  throw error;
+}
+
+function replacementServiceError(error: unknown): never {
+  if (error instanceof ReferenceRetargetError) {
     throw new AuthoringServiceError(error.message, error.data, { cause: error });
   }
   throw error;
@@ -897,5 +914,29 @@ export class CatalogAuthoringService {
       content_key: contentKey,
       usages: Object.freeze(usages),
     });
+  }
+
+  previewReplacement(input: {
+    readonly old_content_key: ContentKey;
+    readonly new_content_key: ContentKey;
+    readonly character_id: CharacterId;
+  }): ReplacementPlan {
+    try {
+      return previewReferenceRetarget(this.db, input);
+    } catch (error) {
+      return replacementServiceError(error);
+    }
+  }
+
+  commitReplacement(input: {
+    readonly token: ReplacementPlanToken;
+    readonly decisions: readonly ReplacementDecision[];
+    readonly choices: readonly ReplacementChoiceSelection[];
+  }): ReplacementResult {
+    try {
+      return commitReferenceRetarget(this.db, input);
+    } catch (error) {
+      return replacementServiceError(error);
+    }
   }
 }

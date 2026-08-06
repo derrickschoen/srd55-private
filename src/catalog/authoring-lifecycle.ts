@@ -73,10 +73,7 @@ function recordSupersession(
   db.exec(
     `INSERT INTO catalog_content_supersessions (
        content_kind, superseded_content_key, successor_content_key
-     ) VALUES (?, ?, ?)
-     ON CONFLICT(content_kind, superseded_content_key) DO UPDATE SET
-       successor_content_key = excluded.successor_content_key,
-       recorded_at = CURRENT_TIMESTAMP`,
+     ) VALUES (?, ?, ?)`,
     [kind, oldContentKey, newContentKey],
   );
 }

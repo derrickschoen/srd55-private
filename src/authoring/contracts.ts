@@ -527,6 +527,7 @@ interface ReplacementPlanBase<K extends AuthoredContentKind> {
   readonly character_name: string;
   readonly changes: readonly ReplacementChange[];
   readonly required_choices: readonly ReplacementChoiceRequirement[];
+  readonly review: readonly ReplacementReviewItem[];
 }
 
 export interface SpeciesReplacementPlan
@@ -569,6 +570,18 @@ export type ReplacementPlan =
 export interface ReplacementChoiceSelection {
   readonly path: readonly (string | number)[];
   readonly value: string;
+}
+
+export interface ReplacementReviewItem {
+  readonly candidate_content_key: ContentKey;
+  readonly candidate_name: string;
+  readonly reason: PublishReviewReason | 'key-collision';
+  readonly default_decision: 'match';
+}
+
+export interface ReplacementDecision {
+  readonly candidate_content_key: ContentKey;
+  readonly decision: Extract<CatalogContentMatchDecision, 'match'>;
 }
 
 export interface ReplacementResult {
@@ -642,6 +655,20 @@ export type AuthoringErrorData =
   | {
       readonly reason: 'replacement_choices_required';
       readonly choices: readonly ReplacementChoiceRequirement[];
+    }
+  | {
+      readonly reason: 'replacement_review_required';
+      readonly candidates: readonly ContentKey[];
+    }
+  | {
+      readonly reason: 'replacement_refused';
+      readonly refusal:
+        | 'ambiguous_target'
+        | 'target_integrity_refused'
+        | 'character_reference_not_found'
+        | 'unsupported_character_choices'
+        | 'wrong_parent_class'
+        | 'commit_failed';
     }
   | {
       readonly reason:

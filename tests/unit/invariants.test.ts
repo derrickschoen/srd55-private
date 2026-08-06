@@ -245,6 +245,8 @@ describe(`ported persistence invariants (${sourceLabel})`, () => {
       ),
     ).toEqual([
       'background_default_origin_feat_before_update',
+      'catalog_content_supersessions_prevent_cycle_before_insert',
+      'catalog_content_supersessions_refuse_update_before_update',
       'catalog_register_armor_identity_before_insert',
       'catalog_register_background_definition_identity_before_insert',
       'catalog_register_background_template_identity_before_insert',

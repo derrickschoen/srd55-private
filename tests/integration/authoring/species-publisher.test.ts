@@ -1335,6 +1335,75 @@ describe('HA-3 species publisher', () => {
     ]);
   });
 
+  it('refuses a public-publish lineage cycle and an attempted successor rewrite', async () => {
+    const db = await database();
+    const authoring = service(db);
+    const original = publish(authoring, savedSpecies(authoring, 'Cycle Species A'));
+    const versionDraft = authoring.createDraft({
+      content_kind: 'species',
+      base_content_key: original.result.content_key,
+    });
+    if (versionDraft.document.kind !== 'species') throw new Error('Species draft required.');
+    const version = publish(authoring, authoring.saveDraft({
+      draft_uuid: versionDraft.draft_uuid,
+      expected_revision: versionDraft.revision,
+      document: { ...versionDraft.document, name: 'Cycle Species B', walking_speed_feet: 40 },
+    }));
+
+    const originalCopy = authoring.createDraft({
+      content_kind: 'species',
+      base_content_key: original.result.content_key,
+    });
+    const cycleDraft = authoring.createDraft({
+      content_kind: 'species',
+      base_content_key: version.result.content_key,
+    });
+    if (originalCopy.document.kind !== 'species' || cycleDraft.document.kind !== 'species') {
+      throw new Error('Species drafts required.');
+    }
+    const cycle = authoring.saveDraft({
+      draft_uuid: cycleDraft.draft_uuid,
+      expected_revision: cycleDraft.revision,
+      document: originalCopy.document,
+    });
+    const cyclePreview = authoring.previewPublish({
+      draft_uuid: cycle.draft_uuid,
+      expected_revision: cycle.revision,
+    });
+    expect(authoringError(() => authoring.commitPublish({
+      token: cyclePreview.token,
+      decisions: [],
+    })).data).toEqual({ reason: 'publish_refused', refusal: 'commit_failed' });
+    expect(authoring.readDraft(cycle.draft_uuid).revision).toBe(cycle.revision);
+
+    const rewriteDraft = authoring.createDraft({
+      content_kind: 'species',
+      base_content_key: original.result.content_key,
+    });
+    if (rewriteDraft.document.kind !== 'species') throw new Error('Species draft required.');
+    const rewrite = authoring.saveDraft({
+      draft_uuid: rewriteDraft.draft_uuid,
+      expected_revision: rewriteDraft.revision,
+      document: { ...rewriteDraft.document, name: 'Cycle Species C', walking_speed_feet: 45 },
+    });
+    const rewritePreview = authoring.previewPublish({
+      draft_uuid: rewrite.draft_uuid,
+      expected_revision: rewrite.revision,
+    });
+    expect(authoringError(() => authoring.commitPublish({
+      token: rewritePreview.token,
+      decisions: [],
+    })).data).toEqual({ reason: 'publish_refused', refusal: 'commit_failed' });
+    expect(db.allRaw(
+      `SELECT superseded_content_key, successor_content_key
+       FROM catalog_content_supersessions ORDER BY superseded_content_key`,
+    )).toEqual([{
+      superseded_content_key: original.result.content_key,
+      successor_content_key: version.result.content_key,
+    }]);
+    expect(authoring.readDraft(rewrite.draft_uuid).revision).toBe(rewrite.revision);
+  });
+
   it('rolls registry, both roots, children, and draft deletion back as one transaction', async () => {
     const db = await database();
     const authoring = service(db);

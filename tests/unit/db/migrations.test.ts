@@ -1455,6 +1455,62 @@ describe('database migration chain', () => {
     lifecycle.close();
   });
 
+  it('CI7 0039 rejects lineage cycles and mutation on migrated databases', async () => {
+    const beforeGuards = DATABASE_MIGRATIONS
+      .slice(0, DATABASE_MIGRATIONS.findIndex(
+        (entry) => entry.id === '0039_catalog_content_supersession_guards',
+      ))
+      .map((entry) => entry.sql)
+      .join('\n');
+    const storage = await storageHolding(`${beforeGuards}
+      INSERT INTO catalog_content_identities (
+        content_key, content_kind, key_kind, catalog_layer, normalized_name
+      ) VALUES
+        ('expanded:migration.fixture:lineage-a', 'species', 'asserted', 'external', 'lineage a'),
+        ('expanded:migration.fixture:lineage-b', 'species', 'asserted', 'external', 'lineage b'),
+        ('expanded:migration.fixture:lineage-c', 'species', 'asserted', 'external', 'lineage c');
+      INSERT INTO catalog_content_supersessions (
+        content_kind, superseded_content_key, successor_content_key
+      ) VALUES
+        ('species', 'expanded:migration.fixture:lineage-a', 'expanded:migration.fixture:lineage-b'),
+        ('species', 'expanded:migration.fixture:lineage-b', 'expanded:migration.fixture:lineage-c');`);
+    const lifecycle = new DatabaseLifecycle(
+      sqlite3,
+      storage,
+      schema,
+      () => undefined,
+      DATABASE_MIGRATIONS,
+    );
+    lifecycle.open();
+
+    expect(() => lifecycle.database.exec(
+      `INSERT INTO catalog_content_supersessions (
+         content_kind, superseded_content_key, successor_content_key
+       ) VALUES ('species', 'expanded:migration.fixture:lineage-c',
+                 'expanded:migration.fixture:lineage-a')`,
+    )).toThrow('catalog content supersession would create a cycle');
+    expect(() => lifecycle.database.exec(
+      `UPDATE catalog_content_supersessions
+       SET successor_content_key = 'expanded:migration.fixture:lineage-c'
+       WHERE content_kind = 'species'
+         AND superseded_content_key = 'expanded:migration.fixture:lineage-a'`,
+    )).toThrow('catalog content supersession lineage is immutable');
+    expect(lifecycle.database.allRaw(
+      `SELECT superseded_content_key, successor_content_key
+       FROM catalog_content_supersessions ORDER BY superseded_content_key`,
+    )).toEqual([
+      {
+        superseded_content_key: 'expanded:migration.fixture:lineage-a',
+        successor_content_key: 'expanded:migration.fixture:lineage-b',
+      },
+      {
+        superseded_content_key: 'expanded:migration.fixture:lineage-b',
+        successor_content_key: 'expanded:migration.fixture:lineage-c',
+      },
+    ]);
+    lifecycle.close();
+  });
+
   it('Q4 rejects General background keys and reverse category mutation', () => {
     const database = new sqlite3.oo1.DB(':memory:', 'c');
     try {

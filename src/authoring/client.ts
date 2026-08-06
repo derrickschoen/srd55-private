@@ -12,6 +12,7 @@ import {
   type PublishPreview,
   type PublishResult,
   type ReplacementChoiceSelection,
+  type ReplacementDecision,
   type ReplacementPlan,
   type ReplacementPlanToken,
   type ReplacementResult,
@@ -76,6 +77,7 @@ export interface PreviewReplacementParams {
 
 export interface CommitReplacementParams {
   readonly token: ReplacementPlanToken;
+  readonly decisions: readonly ReplacementDecision[];
   readonly choices: readonly ReplacementChoiceSelection[];
 }
 
