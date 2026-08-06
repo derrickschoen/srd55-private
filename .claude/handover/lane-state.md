@@ -23,7 +23,39 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-06-i (newest - read first)
+## RESTART POINT 2026-08-06-j (newest - read first)
+MAIN bf26846 (mirror pushed). FLOORS: vitest 250/4,114 zero errors; PW
+128 pool (~9.6 min; subclass journey 14.8s of 125s budget); build 0;
+migrations 0000-0039 FROZEN (next free mint 0040); backup v5.
+THIRTY-SEVEN merges. Rulings through D214.
+
+MERGED SINCE 08-06-i:
+ - HA-8 (bf26846, 37th): subclass timeline form, mint-free. Publisher
+   now owns monotonic/gap/max-level progression rules (shared validator);
+   edit-generation discipline kills two HIGH data-loss races (late save
+   clobber, stale-preview publish); byte round-trip, 15-issue census,
+   captured-ID rollback census, reachable dirty-publish pin. Gate
+   history: 3 review rounds + blocker round (two false pins escalated
+   and fixed; failure-branch pin mutation-tested by supervisor).
+   Journey exposed 3 spec defects post-cap (aria-label duplicate,
+   hasText ambiguity, route-owned readiness) - route-owned readiness is
+   now the recorded journey convention (homebrewReady + cross-route
+   global-ready check). Supervisor deltas 4x APPROVE by codex
+   micro-review. SUPERVISOR PROCESS FAILURE recorded in the merge
+   message: one commit landed behind a grep-gated && chain while a test
+   was red (caught pre-merge; rule: never gate a commit on a pipeline
+   that eats the suite's exit).
+
+IN FLIGHT: HA-9 dispatching (brief briefs/ha-9.md: background form,
+generation-discipline EXTRACTION to a shared seam, all HA-8 lessons
+pre-empted, PW port 4774).
+
+QUEUE: HA-9 -> VET-REPUB (D211) -> HA-10 -> HA-11 (D138+D214) -> HA-12
+-> D213 hardening.
+
+WORKTREES: wt/party (owner's - never prune), wt/ha9 (creating).
+
+## RESTART POINT 2026-08-06-i (superseded by 08-06-j)
 MAIN 92204c5 (mirror pushed). GATE DEBT CLEARED: full vitest on main
 248/4,087 complete all-pass, zero errors, run WHILE two codex processes
 loaded the machine - the budget fix holds. 92204c5 is supervisor-
