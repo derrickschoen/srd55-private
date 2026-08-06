@@ -23,7 +23,41 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-06-d (newest - read first)
+## RESTART POINT 2026-08-06-e (newest - read first)
+MAIN 40330a7 (mirror pushed). FLOORS: vitest 242/4,009 (onTaskUpdate
+noise rule stands: all-counts-green + exit 1 -> serial --maxWorkers=1
+adjudication; also: do not run full suites while codex targeted runs are
+active - that overlap likely CAUSES the noise); PW 126 pool; build 0;
+migrations 0000-0037 FROZEN (0037 = background default Origin feat key;
+next free mint 0038); backup v5. THIRTY-ONE merges. Rulings through D210.
+
+MERGED SINCE 08-06-d (parallel lanes):
+ - CI-6 (c2a212c, 30th): share resolver review conversion. Uniform
+   evidence rule (silence requires evidence: derived keys embed digests,
+   asserted keys always review, bundled-stable key-authoritative per
+   D84); reference-scoped receipts; byte-frozen v10/v17 wires;
+   unevidenced-reference wording (+24th mutation). Production bug found
+   by gates: subclass share refs were wrongly UNREVIEWABLE - fixed via
+   live projector. Round-3 "blocker" (derived-silence vs asserted-review
+   contradiction) REFUTED by supervisor code verification.
+ - HA-4 (40330a7, 31st): background backend, MINT 0037. Feat references
+   keyed end-to-end with origin-category enforcement and 0037-scoped
+   replay policy; display sidecar outside identity with conflict review;
+   compile-proven grant-rule config registry; one publish/apply drift
+   seam; background template_refs rebound with typed notices (CI-5
+   remaining item now closed for species+background; subclass remains,
+   lands with HA-5). Cap escalated: 3 blockers resolved + verified.
+   FIFTH inventory-debt recurrence (late trigger addition) - COMMON.md
+   checklist amended.
+
+QUEUE: dispatchable next: HA-5 (XL subclass backend, serial mint lane,
+owns 0038), CI-7 (L authoring immutability), HA-6 (L library/form
+components). Blocked: HA-7..HA-12 per edge list. Parked owner questions
+unchanged (Veteran prose vs D152; CI-5 subclass template_ref remainder).
+
+WORKTREES: wt/party only (owner's - never prune).
+
+## RESTART POINT 2026-08-06-d (superseded by 08-06-e)
 MAIN fa96990 (mirror pushed). FLOORS: vitest 240/3,977 (onTaskUpdate
 teardown noise may drive exit 1 with all counts green - adjudicate via
 serial --maxWorkers=1, never gate on exit alone); PW 126 pool (~9 min);

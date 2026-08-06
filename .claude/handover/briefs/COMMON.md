@@ -86,3 +86,10 @@ A MINT lane, in the same dispatch that adds migration 00NN:
   (schema-signature.test.ts), and .ai Symbol anchors;
 - updates migrations.ts checksums for 00NN only.
 Every one of these was missed at least once and cost a fix round.
+
+## Mint checklist amendment (learned a FIFTH time, HA-4 0037)
+A trigger, FK, or CHECK added in a LATER fix round re-triggers the ENTIRE census:
+trigger inventory (tests/unit/invariants.test.ts), FK/constraint budget
+(tests/unit/schema-relations.test.ts), and every checklist inventory - not just the
+ones the original mint updated. Any schema element added after the first mint commit
+must repeat the checklist before the lane reports done.
