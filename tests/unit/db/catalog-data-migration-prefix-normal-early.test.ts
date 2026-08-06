@@ -67,5 +67,8 @@ describe('early schema-prefix catalog data migrations', () => {
       expect(await lifecycle.exportBytes()).toEqual(firstOpenBytes);
     }
     lifecycle.close();
-  }, 60_000);
+    // Hang-guard, not a perf pin: measured 32.3s isolated, 67.5s under
+    // concurrent codex load (timed out twice at 60s). 120s keeps 1.8x
+    // headroom over the loaded observation while still catching hangs.
+  }, 120_000);
 });

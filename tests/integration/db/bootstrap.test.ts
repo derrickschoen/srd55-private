@@ -663,7 +663,10 @@ describe('application database bootstrap', () => {
         [longRoadId],
       ),
     }).toEqual(importedBefore);
-  });
+    // Hang-guard, not a perf pin: measured 3.5s quiet, 6.2s under
+    // concurrent codex load (timed out once at the 5s default). 30s keeps
+    // ample headroom over the loaded observation while still catching hangs.
+  }, 30_000);
 
   it('repairs an inherit-parent subclass from its authoritative ability when replacement-image class metadata is corrupt', async () => {
     const { sqlite3, lifecycle: source } = await freshApplicationLifecycle();
