@@ -5,6 +5,53 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-06 — Barbed Court: Unarmed Strikes gain the Light and Finesse properties so Nick works
+
+Context: the owner opened a fundamental redesign of the Barbed Court (arcane
+tank: abjuration/enchantment/illusion list, *Shield* for Focus, taunt goad,
+weapon-mastery choice on Unarmed Strikes, cantrip engine). During the
+brainstorm both reviewers confirmed that **Nick as printed does nothing on an
+Unarmed Strike** — Nick relocates "the extra attack of the *Light property*,"
+and Unarmed Strikes have no Light property, so there is no attack to relocate.
+Martial Arts' Bonus Action Unarmed Strike is a separate class permission and is
+not the Light-property attack.
+
+Owner's ruling, verbatim:
+
+> Give the unarmed strikes the light and finesse properties so that it can use
+> nick to free up the bonus action
+
+Effect: the subclass grants Unarmed Strikes the Light and Finesse properties.
+Nick becomes live. Two clauses must be printed explicitly for the chain to
+function, because the SRD wording does not cover fists:
+
+- Two Unarmed Strikes count as **different Light weapons** for the Light
+  property (the SRD requires "a different Light weapon" for the extra attack).
+- *True Strike*'s material component exception (already required) is unchanged.
+
+Measured consequences, recorded not corrected:
+
+- The Light property's extra attack **adds no ability modifier to damage**
+  (SRD, verbatim). The Nick attack is therefore a bare Martial Arts die:
+  expected +2.3 / +2.9 / +3.6 / +4.2 damage per turn at Monk 3/6/11/17 at a
+  65% hit rate — about **53% of a normal Unarmed Strike** (d10+5 = 6.8 expected
+  at Monk 11). It is a real extra attack, not merely a freed Bonus Action:
+  Martial Arts already gave the Bonus Action strike for free, so the net is
+  **+1 attack per turn** (3→4 free attacks at Monk 5, 5→6 with Flurry at 10+).
+- **Finesse is redundant for the Monk itself** — Dexterous Attacks already
+  allows Dexterity on Unarmed Strikes. What Finesse adds is that an Unarmed
+  Strike becomes a Finesse-weapon attack, and **Rogue Sneak Attack requires
+  "a Finesse or a Ranged weapon."** A Rogue/Monk 3 dip can therefore apply
+  Sneak Attack to Unarmed Strikes, including Flurry strikes. Labeled F3
+  amber-high; the guard (a clause limiting the properties to this subclass's
+  own features) was offered to the owner, not applied.
+- The ruling makes the Court Forms mastery menu closer to a real choice: Nick
+  +3.6/turn at Monk 11 against uncapped Vex +7.4. Vex still wins roughly 2:1
+  uncapped; capped to the first hit per turn (+2.4) Nick becomes the damage
+  pick. The Vex cap remains an open ruling.
+- Bound worth noting: at Monk 3, replacing the Attack action's only attack with
+  a cantrip means no Light-weapon attack was made, so no Nick attack follows.
+
 ## 2026-08-05 — Barbed Court: EXPOSURE goad adopted, monk included; Challenge goes Disadvantage
 
 Resolving the goad redesign floated in the previous entry. Rulings,
