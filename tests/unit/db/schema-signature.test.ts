@@ -66,11 +66,9 @@ describe('pre-Drizzle database images', () => {
     // It has since diverged from the generated schema in BOTH directions, which
     // is why the counts are asserted rather than left as a surprise: the
     // fixture still declares the eight Laravel-only tables that were dropped,
-    // and it has never held the four native weapon tables or the six native
-    // origins tables that were added, plus class starting equipment.
-    // SIGNATURE tripped, because the two
-    // declared the same 38 tables in a different presentation; an old image is
-    // now short of `applicationTables` too, so it fails EARLIER, not less.
+    // leaving 30 tables shared with the generated artifact. The generated
+    // artifact now declares 80 tables, so the old image is also short of 50
+    // `applicationTables` and fails EARLIER, not less.
     //
     // These are COUNTS, not an equivalence proof, and do not claim to be one.
     // `tests/unit/schema.test.ts` runs against the generated artifact and is
@@ -80,7 +78,7 @@ describe('pre-Drizzle database images', () => {
     const tableCount = (sql: string) =>
       [...sql.matchAll(/CREATE TABLE/g)].length;
     expect(tableCount(preDrizzleSchema)).toBe(38);
-    expect(tableCount(schema)).toBe(79);
+    expect(tableCount(schema)).toBe(80);
   });
 
   it('rejects a pre-Drizzle image at open instead of half-working', async () => {
@@ -97,17 +95,14 @@ describe('pre-Drizzle database images', () => {
     // actually short of. Both paths produce the same recoverable
     // `schema_mismatch` status, which is what the next test depends on.
     expect(boot.detail).toContain(
-      // All current native tables, in the order the check reports them:
-      // the four weapon tables, the eight of the sheet core, the SEVEN origins
-      // tables, the two effect tables, the ONE AC-1 (D72) items table, the two
-      // D19 class-feature tables, the four stored sheet inputs, and the two
-      // progression ladders, `spell_version_cantrip_upgrade_levels` and
-      // `spell_version_upcast_levels`. A pre-Drizzle image has none of them.
+      // All 50 current application tables absent from the frozen fixture, in
+      // the order the missing-table check reports them.
       'Database image is missing application tables: armor_templates, ' +
         'background_equipment_items, ' +
         'background_template_effects, ' +
         'background_templates, ' +
-        'catalog_content_aliases, catalog_content_fingerprints, ' +
+        'catalog_content_aliases, catalog_content_drafts, ' +
+        'catalog_content_fingerprints, ' +
         'catalog_content_identities, catalog_content_match_decisions, ' +
         'catalog_data_migrations, ' +
         'class_equipment_items, character_armor, ' +
@@ -162,7 +157,7 @@ describe('pre-Drizzle database images', () => {
  * THE SIGNATURE LIMB, EXERCISED ON ITS OWN.
  *
  * The pre-Drizzle image above no longer reaches the signature comparison: it
- * predates 26 tables, so the missing-tables check refuses it first. That is
+ * predates 50 tables, so the missing-tables check refuses it first. That is
  * correct behaviour and the test says so — but it means nothing was left
  * proving what happens to an image that has EVERY table and merely disagrees
  * about the DDL text.
