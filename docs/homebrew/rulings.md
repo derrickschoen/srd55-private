@@ -5,6 +5,33 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-05 — Barbed Court survivability: goad stays vs-others; free Mirror Image PB/Long Rest at 3
+
+Context: the owner raised "the monk is not durable enough to be a tank for
+enemies damage" against the Barbed Court goad's attack-me incentive, then
+directed "Can we do something with mirror image to help survivability?
+Maybe a single target bane."
+
+Rulings, verbatim answers in order:
+
+- Reshape Barbed Goad to a single-target-Bane form (penalty on all attack
+  rolls)? — "No, keep vs-others only." The choice-pressure identity stays.
+- Mirror Image on the level-7 spell row? — "Not as a spell because it comes
+  in too late for a 1/3 caster." It arrives as a level-3 feature instead.
+- Delivery shape — "Free Mirror image prof bonus times per long rest."
+
+Effect: the level-3 bundle gains an innate-casting feature: Mirror Image
+always prepared, castable without a slot PB times per Long Rest (2 uses at
+Monk 3 rising to 6 at 17). This is an owner amendment to the D190-frozen
+level-3 bundle. Sibling-overlap note due in both monk docs: duplicates are
+the Ten Selves' engine centerpiece; here they are printed defense only.
+The goad-gated free Patient Defense option was then declined — "No —
+Mirror Image is enough." Survivability rides on the images alone; the
+dodge idea is dropped. Follow-on risk noted at recording time: the free
+casts scale with Proficiency Bonus (character level), so a 3-level dip
+exports PB-scaling free Mirror Images — labeled F3 amber in the doc, not
+changed.
+
 ## 2026-08-04 — Veteran: Master of Experience uses the BROAD reading (all 18 skills)
 
 Asked: whether Master of Experience (17) grants Expertise only in already-

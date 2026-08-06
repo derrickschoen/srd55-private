@@ -37,6 +37,12 @@ D191. They are part of the subclass's power budget, not flavor beside it.
 **Cantrip known.** At Monk level 3, you know *Minor Illusion*. No additional
 fixed cantrip is granted later.
 
+Sibling overlap, disclosed (owner ruling 2026-08-05): the Warrior of the
+Barbed Court gains innate *Mirror Image* casts as a level-3 defensive
+feature. The engine relationship below — duplicates as reroll fuel and
+Focus-preserved defense — remains unique to the Ten Selves; the Barbed
+Court's images carry no feature interaction.
+
 All eleven named spells are present in SRD 5.2.1:
 [*Color Spray*](../srd/full/srd-5.2.1.txt#L7146),
 [*Disguise Self*](../srd/full/srd-5.2.1.txt#L7665),

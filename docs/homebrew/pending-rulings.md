@@ -43,7 +43,13 @@ public: CC0 for our original text, SRD notice retained.
 
 ## monk-barbed-court.md — Warrior of the Barbed Court (bard-list goad)
 
+Survivability **resolved** 2026-08-05 (`rulings.md`): goad keeps its
+vs-others form; Faces of the Court added at 3 (innate *Mirror Image*, PB
+free casts per Long Rest); free-dodge option declined. Still open:
+
 - Identity paragraph / ancestry wording.
+- **Faces of the Court feature name** (mechanic owner-ruled; name is not).
+- Spellwoven Flurry (6) full text + Vicious Mockery interaction note.
 - Scandalous Echo (11): 30-ft second-target carry, Focus costs — full text
   awaiting approval.
 - Unanswerable Challenge (17): 3 Focus, 1 minute, repeat saves —
@@ -51,7 +57,8 @@ public: CC0 for our original text, SRD notice retained.
 - F8 risk the doc flags itself: Vicious Mockery's Disadvantage may stack
   with the Martial-Arts-die subtraction — does the stack overperform?
 - All playtest gaps unrun (acquisition, mid-tier, 11/17, harmed-seat,
-  table-speed).
+  table-speed, and now goad-magnet damage-taken rounds and Faces dip
+  builds).
 
 ## monk-ten-selves.md — Warrior of the Ten Selves (illusion/duplicates)
 
