@@ -192,6 +192,28 @@ function exactResolution(
     contentKey: identity.content_key,
   });
 
+  // A share-created placeholder records absence under the asserted external
+  // key; it is not local rules content competing with the incoming reference.
+  // Repeated imports therefore reuse that exact row without review. A later
+  // aggregate import upgrades the placeholder through the installExact path.
+  if (
+    contentKind === 'spell' &&
+    identity.key_kind === 'asserted' &&
+    identity.catalog_layer === 'external' &&
+    db.scalar<number>(
+      `SELECT 1 FROM spell_versions
+       WHERE content_key = ? AND provenance = 'placeholder'`,
+      [identity.content_key],
+    ) === 1
+  ) {
+    return Object.freeze({
+      kind: 'exact',
+      contentKey: identity.content_key,
+      matchClass: 'stored-key',
+      reviewRequired: false,
+    });
+  }
+
   // D84 makes bundled stable keys authoritative even when extraction fixes
   // move their fingerprints. External references have no such authority: an
   // embedded content.v1 digest must agree with the recipient's current

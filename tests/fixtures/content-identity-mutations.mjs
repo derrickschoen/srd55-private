@@ -188,6 +188,15 @@ const mutations = {
         : 'Alias points to distinct rules content';`,
     )],
   },
+  'ui-unevidenced-reason': {
+    testFile: 'tests/unit/ui/content-adoption-dialog.test.ts',
+    testName: 'CI-8 discloses real planner counts, every match reason, and both collision labels',
+    changes: [edit(
+      'src/ui/content-adoption-dialog.ts',
+      "  if (review.incomingFingerprint === null) {\n    return 'Reference supplied no rules evidence';\n  }",
+      "  if (review.incomingFingerprint === null) {\n    return 'Same name, distinct rules content'; // CI8_MUTANT hide absent evidence\n  }",
+    )],
+  },
   'ui-same-name-guidance': {
     testFile: 'tests/unit/ui/content-adoption-dialog.test.ts',
     testName: 'CI-8 discloses real planner counts, every match reason, and both collision labels',

@@ -431,19 +431,39 @@ describe('CI-SHARE-REFERENCE', () => {
     ]);
   });
 
-  it('keeps missing spell references as placeholders', () => {
+  it('reuses one placeholder when the same missing spell share is imported twice', () => {
     const missingKey = '2024:content.spell:not-installed';
     const document = oneSpellDocument(missingKey, 'Missing');
     expect(previewCharacterShare(db, document)).toMatchObject({
       placeholderCount: 1,
       adoptionPlan: { reviews: [] },
     });
-    const imported = importCharacterShare(db, document);
-    expect(importedSpellKey(imported.characterId)).toBe(missingKey);
-    expect(db.scalar<string>(
-      'SELECT provenance FROM spell_versions WHERE content_key = ?',
+    const first = importCharacterShare(db, document);
+    const placeholderId = db.scalar<number>(
+      'SELECT id FROM spell_versions WHERE content_key = ?',
       [missingKey],
-    )).toBe('placeholder');
+    );
+    expect(importedSpellKey(first.characterId)).toBe(missingKey);
+
+    expect(previewCharacterShare(db, document)).toMatchObject({
+      placeholderCount: 0,
+      adoptionPlan: { reviews: [], outcomes: [] },
+    });
+    const second = importCharacterShare(db, document);
+    expect(second.characterId).not.toBe(first.characterId);
+    expect(importedSpellKey(second.characterId)).toBe(missingKey);
+    expect(db.allRaw(
+      `SELECT id, provenance FROM spell_versions WHERE content_key = ?`,
+      [missingKey],
+    )).toEqual([{ id: placeholderId, provenance: 'placeholder' }]);
+    expect(db.scalar<number>(
+      `SELECT count(*) FROM catalog_content_identities
+       WHERE content_kind = 'spell' AND content_key = ?`,
+      [missingKey],
+    )).toBe(1);
+    expect(db.scalar<number>(
+      'SELECT count(*) FROM catalog_content_match_decisions',
+    )).toBe(0);
   });
 
   it('refuses an alias candidate that cannot supply the local clone projection', () => {
