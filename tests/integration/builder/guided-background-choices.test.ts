@@ -672,7 +672,7 @@ describe('B3 guided background choices on a seeded application database', () => 
       ok: false,
       error: {
         code: 'handler_error',
-        message: expect.stringMatching(/No bundled Origin feat exists/u),
+        message: expect.stringMatching(/No installed Origin feat exists/u),
         data: { reason: 'unknown_origin' },
       },
     });

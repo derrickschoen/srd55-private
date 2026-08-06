@@ -21,6 +21,7 @@ import {
 import {
   CONTENT_FINGERPRINT_SCHEME_V1,
   deriveContentIdentityV1,
+  type ContentKind,
 } from '../catalog/content-identity';
 import { portableSourceContentImportNode } from '../catalog/source-content-importer';
 import { projectAuthoredContentAggregateV1 } from '../catalog/stored-authored-content-projector-v1';
@@ -78,7 +79,7 @@ export class SpeciesPublishError extends Error {
   }
 }
 
-function issue(
+export function authoringIssue(
   issues: AuthoringValidationIssue[],
   path: readonly (string | number)[],
   code: AuthoringValidationIssue['code'],
@@ -87,21 +88,21 @@ function issue(
   issues.push(Object.freeze({ path: Object.freeze([...path]), code, message }));
 }
 
-function nonEmpty(
+export function authoringNonEmpty(
   value: string,
   path: readonly (string | number)[],
   issues: AuthoringValidationIssue[],
 ): boolean {
   if (value.trim() !== '') return true;
-  issue(issues, path, 'required', 'Must not be empty.');
+  authoringIssue(issues, path, 'required', 'Must not be empty.');
   return false;
 }
 
-function fingerprintReference(
+export function authoringFingerprintReference<K extends ContentKind>(
   db: DatabaseContext,
-  kind: 'spell',
+  kind: K,
   contentKey: ContentKey,
-): ContentFingerprintReference<'spell'> | null {
+): ContentFingerprintReference<K> | null {
   const rows = db.all(
     `SELECT fingerprint.fingerprint_digest
      FROM catalog_content_identities AS identity
@@ -116,6 +117,7 @@ function fingerprintReference(
     (row) => sqlString(row, 'fingerprint_digest'),
   );
   if (rows.length !== 1) return null;
+  if (!/^[0-9a-f]{64}$/u.test(rows[0]!)) return null;
   const targets = db.all(
     `SELECT DISTINCT content_key
      FROM catalog_content_fingerprints
@@ -127,32 +129,34 @@ function fingerprintReference(
     (row) => sqlString(row, 'content_key'),
   );
   if (targets.length !== 1 || targets[0] !== contentKey) return null;
-  try {
-    const stored = projectStoredContentV1(db, kind, contentKey);
-    const live = deriveContentIdentityV1({
-      kind: stored.kind,
-      edition: stored.edition,
-      name: stored.name,
-      payload: stored.payload,
-    });
-    if (live.digest !== rows[0]) return null;
-  } catch {
-    return null;
+  if (kind === 'spell') {
+    try {
+      const stored = projectStoredContentV1(db, kind, contentKey);
+      const live = deriveContentIdentityV1({
+        kind: stored.kind,
+        edition: stored.edition,
+        name: stored.name,
+        payload: stored.payload,
+      });
+      if (live.digest !== rows[0]) return null;
+    } catch {
+      return null;
+    }
   }
   return Object.freeze({
     kind,
     scheme: CONTENT_FINGERPRINT_SCHEME_V1,
     digest: rows[0]!,
-  }) as ContentFingerprintReference<'spell'>;
+  }) as ContentFingerprintReference<K>;
 }
 
-function resolvedEffect(
+export function resolvedAuthoringEffect(
   draft: AuthoringDraftCharacterEffect,
   sortOrder: number,
   path: readonly (string | number)[],
   issues: AuthoringValidationIssue[],
 ): AuthoringCharacterEffect | null {
-  const labelReady = nonEmpty(draft.label, [...path, 'label'], issues);
+  const labelReady = authoringNonEmpty(draft.label, [...path, 'label'], issues);
   const common = {
     label: draft.label,
     notes: draft.notes === '' ? null : draft.notes,
@@ -161,14 +165,14 @@ function resolvedEffect(
   switch (draft.kind) {
     case 'damage_resistance':
       if (draft.damage_type === null) {
-        issue(issues, [...path, 'damage_type'], 'required', 'Damage type is required.');
+        authoringIssue(issues, [...path, 'damage_type'], 'required', 'Damage type is required.');
         return null;
       }
-      if (!nonEmpty(draft.damage_type, [...path, 'damage_type'], issues) || !labelReady) return null;
+      if (!authoringNonEmpty(draft.damage_type, [...path, 'damage_type'], issues) || !labelReady) return null;
       return { kind: draft.kind, ...common, damage_type: damageType(draft.damage_type) };
     case 'hp_modifier':
       if (draft.hit_points_flat === null && draft.hit_points_per_level === null) {
-        issue(issues, path, 'required', 'At least one hit point modifier is required.');
+        authoringIssue(issues, path, 'required', 'At least one hit point modifier is required.');
         return null;
       }
       if (!labelReady) return null;
@@ -180,32 +184,32 @@ function resolvedEffect(
       };
     case 'speed':
       if (draft.speed_bonus_feet === null) {
-        issue(issues, [...path, 'speed_bonus_feet'], 'required', 'Speed is required.');
+        authoringIssue(issues, [...path, 'speed_bonus_feet'], 'required', 'Speed is required.');
         return null;
       }
       if (!labelReady) return null;
       return { kind: draft.kind, ...common, speed_bonus_feet: draft.speed_bonus_feet };
     case 'ability_increase':
-      if (draft.ability === null) issue(issues, [...path, 'ability'], 'required', 'Ability is required.');
-      if (draft.amount === null) issue(issues, [...path, 'amount'], 'required', 'Amount is required.');
-      else if (draft.amount === 0) issue(issues, [...path, 'amount'], 'invalid_value', 'Amount must be non-zero.');
-      if (draft.maximum === null) issue(issues, [...path, 'maximum'], 'required', 'Maximum is required.');
+      if (draft.ability === null) authoringIssue(issues, [...path, 'ability'], 'required', 'Ability is required.');
+      if (draft.amount === null) authoringIssue(issues, [...path, 'amount'], 'required', 'Amount is required.');
+      else if (draft.amount === 0) authoringIssue(issues, [...path, 'amount'], 'invalid_value', 'Amount must be non-zero.');
+      if (draft.maximum === null) authoringIssue(issues, [...path, 'maximum'], 'required', 'Maximum is required.');
       if (!labelReady || draft.ability === null || draft.amount === null || draft.amount === 0 || draft.maximum === null) return null;
       return { kind: draft.kind, ...common, ability: draft.ability, amount: draft.amount, maximum: draft.maximum };
     case 'ability_override':
-      if (draft.ability === null) issue(issues, [...path, 'ability'], 'required', 'Ability is required.');
-      if (draft.maximum === null) issue(issues, [...path, 'maximum'], 'required', 'Set-to score is required.');
+      if (draft.ability === null) authoringIssue(issues, [...path, 'ability'], 'required', 'Ability is required.');
+      if (draft.maximum === null) authoringIssue(issues, [...path, 'maximum'], 'required', 'Set-to score is required.');
       if (!labelReady || draft.ability === null || draft.maximum === null) return null;
       return { kind: draft.kind, ...common, ability: draft.ability, maximum: draft.maximum };
     case 'armor_class_bonus':
-      if (draft.amount === null) issue(issues, [...path, 'amount'], 'required', 'Amount is required.');
-      else if (draft.amount === 0) issue(issues, [...path, 'amount'], 'invalid_value', 'Amount must be non-zero.');
+      if (draft.amount === null) authoringIssue(issues, [...path, 'amount'], 'required', 'Amount is required.');
+      else if (draft.amount === 0) authoringIssue(issues, [...path, 'amount'], 'invalid_value', 'Amount must be non-zero.');
       if (!labelReady || draft.amount === null || draft.amount === 0) return null;
       return { kind: draft.kind, ...common, amount: draft.amount };
     case 'armor_class_formula':
-      if (draft.base === null) issue(issues, [...path, 'base'], 'required', 'Base Armor Class is required.');
-      if (draft.ability_1 === null) issue(issues, [...path, 'ability_1'], 'required', 'First ability is required.');
-      if (draft.allows_shield === null) issue(issues, [...path, 'allows_shield'], 'required', 'Shield permission must be resolved.');
+      if (draft.base === null) authoringIssue(issues, [...path, 'base'], 'required', 'Base Armor Class is required.');
+      if (draft.ability_1 === null) authoringIssue(issues, [...path, 'ability_1'], 'required', 'First ability is required.');
+      if (draft.allows_shield === null) authoringIssue(issues, [...path, 'allows_shield'], 'required', 'Shield permission must be resolved.');
       if (!labelReady || draft.base === null || draft.ability_1 === null || draft.allows_shield === null) return null;
       return {
         kind: draft.kind,
@@ -216,15 +220,15 @@ function resolvedEffect(
         allows_shield: draft.allows_shield,
       };
     case 'attack_ability_override':
-      if (draft.ability === null) issue(issues, [...path, 'ability'], 'required', 'Ability is required.');
-      if (draft.weapon_scope === null) issue(issues, [...path, 'weapon_scope'], 'required', 'Weapon scope is required.');
+      if (draft.ability === null) authoringIssue(issues, [...path, 'ability'], 'required', 'Ability is required.');
+      if (draft.weapon_scope === null) authoringIssue(issues, [...path, 'weapon_scope'], 'required', 'Weapon scope is required.');
       if (!labelReady || draft.ability === null || draft.weapon_scope === null) return null;
       return { kind: draft.kind, ...common, ability: draft.ability, weapon_scope: draft.weapon_scope };
     case 'weapon_attack_bonus':
     case 'weapon_damage_bonus':
-      if (draft.amount === null) issue(issues, [...path, 'amount'], 'required', 'Amount is required.');
-      else if (draft.amount === 0) issue(issues, [...path, 'amount'], 'invalid_value', 'Amount must be non-zero.');
-      if (draft.weapon_scope === null) issue(issues, [...path, 'weapon_scope'], 'required', 'Weapon scope is required.');
+      if (draft.amount === null) authoringIssue(issues, [...path, 'amount'], 'required', 'Amount is required.');
+      else if (draft.amount === 0) authoringIssue(issues, [...path, 'amount'], 'invalid_value', 'Amount must be non-zero.');
+      if (draft.weapon_scope === null) authoringIssue(issues, [...path, 'weapon_scope'], 'required', 'Weapon scope is required.');
       if (!labelReady || draft.amount === null || draft.amount === 0 || draft.weapon_scope === null) return null;
       return { kind: draft.kind, ...common, amount: draft.amount, weapon_scope: draft.weapon_scope };
   }
@@ -236,7 +240,7 @@ function duplicateItemUuids(
 ): void {
   const seen = new Set<string>();
   const check = (value: string, path: readonly (string | number)[]) => {
-    if (seen.has(value)) issue(issues, path, 'duplicate', 'Draft item UUID must be unique.');
+    if (seen.has(value)) authoringIssue(issues, path, 'duplicate', 'Draft item UUID must be unique.');
     seen.add(value);
   };
   draft.traits.forEach((trait, traitIndex) => {
@@ -255,16 +259,16 @@ function resolvedGrant(
   issues: AuthoringValidationIssue[],
 ): AuthoringGrant | null {
   const path = ['grants', index] as const;
-  const ruleKeyReady = nonEmpty(draft.rule_key, [...path, 'rule_key'], issues);
+  const ruleKeyReady = authoringNonEmpty(draft.rule_key, [...path, 'rule_key'], issues);
   switch (draft.kind) {
     case 'fixed_spell': {
       if (draft.spell_content_key === null) {
-        issue(issues, [...path, 'spell_content_key'], 'required', 'Spell is required.');
+        authoringIssue(issues, [...path, 'spell_content_key'], 'required', 'Spell is required.');
         return null;
       }
-      const spell = fingerprintReference(db, 'spell', draft.spell_content_key);
+      const spell = authoringFingerprintReference(db, 'spell', draft.spell_content_key);
       if (spell === null) {
-        issue(issues, [...path, 'spell_content_key'], 'unresolved_reference', 'Spell content key does not resolve to one current fingerprint.');
+        authoringIssue(issues, [...path, 'spell_content_key'], 'unresolved_reference', 'Spell content key does not resolve to one current fingerprint.');
         return null;
       }
       if (!ruleKeyReady) return null;
@@ -280,9 +284,9 @@ function resolvedGrant(
       };
     }
     case 'choice_from_list': {
-      const listReady = nonEmpty(draft.list, [...path, 'list'], issues);
+      const listReady = authoringNonEmpty(draft.list, [...path, 'list'], issues);
       if (draft.count === null) {
-        issue(issues, [...path, 'count'], 'required', 'Choice count is required.');
+        authoringIssue(issues, [...path, 'count'], 'required', 'Choice count is required.');
       }
       if (!ruleKeyReady || !listReady || draft.count === null) return null;
       return {
@@ -299,11 +303,11 @@ function resolvedGrant(
       };
     }
     case 'choice_from_query': {
-      if (draft.count === null) issue(issues, [...path, 'count'], 'required', 'Choice count is required.');
+      if (draft.count === null) authoringIssue(issues, [...path, 'count'], 'required', 'Choice count is required.');
       const minimum = draft.minimum_spell_level ?? 0;
       const maximum = draft.maximum_spell_level ?? 9;
       if (minimum > maximum) {
-        issue(issues, [...path, 'maximum_spell_level'], 'out_of_range', 'Maximum spell level must not be below the minimum.');
+        authoringIssue(issues, [...path, 'maximum_spell_level'], 'out_of_range', 'Maximum spell level must not be below the minimum.');
       }
       if (!ruleKeyReady || draft.count === null || minimum > maximum) return null;
       return {
@@ -321,11 +325,11 @@ function resolvedGrant(
       };
     }
     case 'skill_proficiency': {
-      if (draft.count === null) issue(issues, [...path, 'count'], 'required', 'Skill count is required.');
-      if (draft.skills.length === 0) issue(issues, [...path, 'skills'], 'required', 'At least one skill is required.');
-      if (new Set(draft.skills).size !== draft.skills.length) issue(issues, [...path, 'skills'], 'duplicate', 'Skills must not repeat.');
+      if (draft.count === null) authoringIssue(issues, [...path, 'count'], 'required', 'Skill count is required.');
+      if (draft.skills.length === 0) authoringIssue(issues, [...path, 'skills'], 'required', 'At least one skill is required.');
+      if (new Set(draft.skills).size !== draft.skills.length) authoringIssue(issues, [...path, 'skills'], 'duplicate', 'Skills must not repeat.');
       if (draft.count !== null && draft.count > new Set(draft.skills).size) {
-        issue(issues, [...path, 'count'], 'out_of_range', 'Skill count exceeds the available distinct skills.');
+        authoringIssue(issues, [...path, 'count'], 'out_of_range', 'Skill count exceeds the available distinct skills.');
       }
       if (
         !ruleKeyReady || draft.count === null || draft.skills.length === 0 ||
@@ -350,33 +354,33 @@ export function speciesDraftToAggregate(
   draft: SpeciesAuthoringDraft,
 ): SpeciesContentAggregate {
   const issues: AuthoringValidationIssue[] = [];
-  nonEmpty(draft.name, ['name'], issues);
-  if (draft.rules_edition === null) issue(issues, ['rules_edition'], 'required', 'Rules edition is required.');
-  nonEmpty(draft.creature_type, ['creature_type'], issues);
-  nonEmpty(draft.primary_size, ['primary_size'], issues);
-  if (draft.alternate_size !== null) nonEmpty(draft.alternate_size, ['alternate_size'], issues);
-  if (draft.walking_speed_feet === null) issue(issues, ['walking_speed_feet'], 'required', 'Walking speed is required.');
+  authoringNonEmpty(draft.name, ['name'], issues);
+  if (draft.rules_edition === null) authoringIssue(issues, ['rules_edition'], 'required', 'Rules edition is required.');
+  authoringNonEmpty(draft.creature_type, ['creature_type'], issues);
+  authoringNonEmpty(draft.primary_size, ['primary_size'], issues);
+  if (draft.alternate_size !== null) authoringNonEmpty(draft.alternate_size, ['alternate_size'], issues);
+  if (draft.walking_speed_feet === null) authoringIssue(issues, ['walking_speed_feet'], 'required', 'Walking speed is required.');
   duplicateItemUuids(draft, issues);
 
   const ruleKeys = new Set<string>();
   const grants = draft.grants.flatMap((grant, index) => {
     if (ruleKeys.has(grant.rule_key)) {
-      issue(issues, ['grants', index, 'rule_key'], 'duplicate', 'Grant rule key must be unique.');
+      authoringIssue(issues, ['grants', index, 'rule_key'], 'duplicate', 'Grant rule key must be unique.');
     }
     ruleKeys.add(grant.rule_key);
     const resolved = resolvedGrant(db, grant, index, issues);
     return resolved === null ? [] : [resolved];
   });
   const traits = draft.traits.flatMap((trait, traitIndex) => {
-    const nameReady = nonEmpty(trait.name, ['traits', traitIndex, 'name'], issues);
-    const descriptionReady = nonEmpty(
+    const nameReady = authoringNonEmpty(trait.name, ['traits', traitIndex, 'name'], issues);
+    const descriptionReady = authoringNonEmpty(
       trait.description,
       ['traits', traitIndex, 'description'],
       issues,
     );
     const traitReady = nameReady && descriptionReady;
     const effects = trait.effects.flatMap((effect, effectIndex) => {
-      const resolved = resolvedEffect(
+      const resolved = resolvedAuthoringEffect(
         effect,
         effectIndex + 1,
         ['traits', traitIndex, 'effects', effectIndex],

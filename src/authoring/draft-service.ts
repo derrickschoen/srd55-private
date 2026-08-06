@@ -64,6 +64,12 @@ import {
   SpeciesPublishError,
   SpeciesSemanticValidationError,
 } from './species-publisher';
+import {
+  BackgroundPublishError,
+  BackgroundSemanticValidationError,
+  commitBackgroundPublish,
+  previewBackgroundPublish,
+} from './background-publisher';
 
 interface DraftRow {
   readonly draft_uuid: HomebrewDraftUuid;
@@ -142,7 +148,7 @@ function validationError(error: DraftCodecError): AuthoringServiceError {
   }, { cause: error });
 }
 
-function speciesPublishServiceError(error: unknown): never {
+function publishServiceError(error: unknown): never {
   if (error instanceof SpeciesSemanticValidationError) {
     throw new AuthoringServiceError('Species publish validation failed.', {
       reason: 'validation_failed',
@@ -150,6 +156,15 @@ function speciesPublishServiceError(error: unknown): never {
     }, { cause: error });
   }
   if (error instanceof SpeciesPublishError) {
+    throw new AuthoringServiceError(error.message, error.data, { cause: error });
+  }
+  if (error instanceof BackgroundSemanticValidationError) {
+    throw new AuthoringServiceError('Background publish validation failed.', {
+      reason: 'validation_failed',
+      issues: error.issues,
+    }, { cause: error });
+  }
+  if (error instanceof BackgroundPublishError) {
     throw new AuthoringServiceError(error.message, error.data, { cause: error });
   }
   throw error;
@@ -751,9 +766,18 @@ export class CatalogAuthoringService {
       });
     }
     try {
-      return previewSpeciesPublish(this.db, draft);
+      switch (draft.content_kind) {
+        case 'species':
+          return previewSpeciesPublish(this.db, draft);
+        case 'background':
+          return previewBackgroundPublish(this.db, draft);
+        case 'subclass':
+          throw new AuthoringServiceError('Subclass publishing is not implemented.', {
+            reason: 'invalid_reference',
+          });
+      }
     } catch (error) {
-      return speciesPublishServiceError(error);
+      return publishServiceError(error);
     }
   }
 
@@ -779,15 +803,22 @@ export class CatalogAuthoringService {
       ? 0
       : this.usages(draft.base_content_key).usages.length;
     try {
-      return commitSpeciesPublish(
-        this.db,
-        draft,
-        input.token,
-        input.decisions,
-        previousKeyUsageCount,
-      );
+      switch (draft.content_kind) {
+        case 'species':
+          return commitSpeciesPublish(
+            this.db, draft, input.token, input.decisions, previousKeyUsageCount,
+          );
+        case 'background':
+          return commitBackgroundPublish(
+            this.db, draft, input.token, input.decisions, previousKeyUsageCount,
+          );
+        case 'subclass':
+          throw new AuthoringServiceError('Subclass publishing is not implemented.', {
+            reason: 'invalid_reference',
+          });
+      }
     } catch (error) {
-      return speciesPublishServiceError(error);
+      return publishServiceError(error);
     }
   }
 

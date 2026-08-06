@@ -264,10 +264,7 @@ export function isGuidedApplyBackgroundParams(
 /* ------------------------------------------------------ printed pairing */
 
 const ABILITY_BY_PRINTED_NAME: ReadonlyMap<string, Ability> = new Map(
-  abilities.map((ability) => [
-    `${ability.slice(0, 1).toUpperCase()}${ability.slice(1)}`,
-    ability,
-  ]),
+  abilities.map((ability) => [ability, ability]),
 );
 
 /**
@@ -294,7 +291,7 @@ export function printedPairing(
   ];
   const parsedAbilities: Ability[] = [];
   for (const printed of printedAbilities) {
-    const ability = ABILITY_BY_PRINTED_NAME.get(printed.trim());
+    const ability = ABILITY_BY_PRINTED_NAME.get(printed.trim().toLowerCase());
     if (ability !== undefined) {
       parsedAbilities.push(ability);
     }
