@@ -71,3 +71,15 @@ A codex dispatch never invokes another agent CLI (claude or otherwise) for criti
 review, or anything else. Internal self-review is welcome but carries no gate weight;
 the supervisor runs all reviews. This line is standing; briefs need not repeat it but
 may.
+
+## The mint checklist (learned three times: 0032, 0033, 0034)
+
+A MINT lane, in the same dispatch that adds migration 00NN:
+- changes src/db/schema.sql in lockstep (and the trigger SOURCE + composer where
+  they exist - four-way, composer idempotence proven);
+- extends the hand-authored historical prefix inventory
+  (tests/helpers/catalog-data-migration-prefixes.ts);
+- extends the schema column/index inventories, row-contract fixtures, and .ai
+  Symbol anchors its changes touch;
+- updates migrations.ts checksums for 00NN only.
+Every one of these was missed at least once and cost a fix round.
