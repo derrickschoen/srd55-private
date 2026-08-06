@@ -84,6 +84,8 @@ export type TableRole =
   | 'catalog_spell'
   /** Recipient-local catalog identity and match-review registry state. */
   | 'catalog_registry'
+  /** Durable incomplete authoring state; retained only by whole-DB images. */
+  | 'catalog_draft'
   /** Classes, subclasses and their progressions. */
   | 'catalog_class'
   /** Feats, species, backgrounds. */
@@ -504,6 +506,17 @@ export const TABLE_SCOPES = {
   },
   catalog_data_migrations: {
     role: 'catalog_registry',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
+  // D139: drafts never enter character backup, share, closure, or a future
+  // library export. A whole-database image still carries every application
+  // table and is the only portable container allowed to retain these rows.
+  catalog_content_drafts: {
+    role: 'catalog_draft',
     snapshot: false,
     backupDirect: false,
     backup: false,
@@ -1275,6 +1288,7 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'background_template_effects',
   'background_templates',
   'catalog_content_aliases',
+  'catalog_content_drafts',
   'catalog_content_fingerprints',
   'catalog_content_identities',
   'catalog_content_match_decisions',

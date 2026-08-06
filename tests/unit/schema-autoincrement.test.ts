@@ -161,11 +161,13 @@ const allAutoIncrementTables = [
  * fingerprint tuples, and CI-2b's applied marker is keyed by its immutable
  * migration id, just as D92's one-row-per-character attunement slots are keyed
  * by character_id. P3's observation index is keyed by forge/repository/path,
- * the stable roster address. A table added with a natural primary key fails here and
- * forces the decision to be made deliberately.
+ * and a catalog draft is keyed by its durable UUID. A table added with a
+ * natural primary key fails here and forces the decision to be made
+ * deliberately.
  */
 const naturalKeyTables = [
   'catalog_content_aliases',
+  'catalog_content_drafts',
   'catalog_content_fingerprints',
   'catalog_content_identities',
   'catalog_content_match_decisions',
@@ -210,17 +212,13 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
         .map(String);
 
       expect(declared).toEqual(allAutoIncrementTables);
-      // 30 surviving Laravel tables plus 36 native: 4 weapons, 8 sheet core,
-      // 7 origins (the seventh is `background_equipment_items`), 2 effects,
-      // 2 class features, 4 stored sheet inputs, the TWO progression
-      // ladders on the catalog side (`spell_version_upcast_levels` and
-      // `spell_version_cantrip_upgrade_levels`), the ONE
-      // skills-with-provenance table, `character_skill_grants`, the GF-2
-      // Expertise grant table, and the ONE
-      // AC-1 (D72) items table, `character_items`, and AC-2a's three feature
-      // effect tables. Counted in parts so one group shrinking while another
-      // grows cannot pass unnoticed. D92's slot row uses character_id as its
-      // natural primary key and therefore belongs in `naturalKeyTables`.
+      // 30 surviving Laravel tables plus 42 native: 4 weapons, 9 origins, 2
+      // character/template effects, 1 character-items table, 2 item-catalog
+      // tables, 10 sheet-core tables, 2 class-feature tables, 3 feature-effect
+      // tables, 7 stored character-input/choice tables, and 2 spell progression
+      // ladders. Counted in parts so one group shrinking while another grows
+      // cannot pass unnoticed. D92's slot row and the draft UUID use natural
+      // primary keys and therefore belong in `naturalKeyTables`.
       expect(declared).toHaveLength(72);
       expect(autoIncrementTables).toHaveLength(30);
       expect(nativeAutoIncrementTables).toHaveLength(42);

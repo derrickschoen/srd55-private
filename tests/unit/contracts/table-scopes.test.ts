@@ -112,6 +112,8 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'background_templates',
       // CI-2a registry state is application data but not character-scoped.
       'catalog_content_aliases',
+      // HA-2 incomplete drafts are whole-database state only (D139).
+      'catalog_content_drafts',
       'catalog_content_fingerprints',
       'catalog_content_identities',
       'catalog_content_match_decisions',
@@ -342,7 +344,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
 });
 
 describe('table scope classification', () => {
-  it('classifies all 77 tables exactly once', () => {
+  it('classifies all 80 tables exactly once', () => {
     const names = Object.keys(TABLE_SCOPES);
     // 30 Laravel-derived tables — 38 until the eight Laravel-only
     // infrastructure ones were dropped — plus the four native weapon tables,
@@ -359,8 +361,8 @@ describe('table scope classification', () => {
     // tables and CI-2b's ONE applied data-migration marker table. Each group is named
     // rather than folded into one total, so a group that vanishes while
     // another grows cannot pass unnoticed.
-    expect(names).toHaveLength(79);
-    expect(new Set(names).size).toBe(79);
+    expect(names).toHaveLength(80);
+    expect(new Set(names).size).toBe(80);
     expect([...names].sort()).toEqual([...APPLICATION_TABLES].sort());
   });
 
@@ -513,5 +515,21 @@ describe('table scope classification', () => {
     expect([...BACKUP_DIRECT_TABLES]).not.toContain('party_document_states');
     expect([...BACKUP_TABLES]).not.toContain('party_document_states');
     expect(Object.keys(SHARE_TABLES)).not.toContain('party_document_states');
+  });
+
+  it('HA-DRAFT-NOT-PORTABLE keeps incomplete drafts out of every portable surface', () => {
+    expect(TABLE_SCOPES.catalog_content_drafts).toEqual({
+      role: 'catalog_draft',
+      snapshot: false,
+      backupDirect: false,
+      backup: false,
+      share: false,
+      backupReference: false,
+    });
+    expect([...APPLICATION_TABLES]).toContain('catalog_content_drafts');
+    expect([...CHARACTER_STATE_TABLES]).not.toContain('catalog_content_drafts');
+    expect([...BACKUP_DIRECT_TABLES]).not.toContain('catalog_content_drafts');
+    expect([...BACKUP_TABLES]).not.toContain('catalog_content_drafts');
+    expect(Object.keys(SHARE_TABLES)).not.toContain('catalog_content_drafts');
   });
 });

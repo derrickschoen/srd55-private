@@ -106,7 +106,7 @@ export function openDatabaseImage(
   }
 }
 
-export function validateDatabaseConnection(db: Database): void {
+function validateDatabaseConnectionCore(db: Database): void {
   const integrity = db.selectValue('PRAGMA quick_check');
   if (integrity !== 'ok') {
     throw new Error(`SQLite integrity check failed: ${String(integrity)}.`);
@@ -121,6 +121,25 @@ export function validateDatabaseConnection(db: Database): void {
     );
   }
 
+  const triggers = new Set(
+    db
+      .selectValues(
+        `SELECT name FROM sqlite_schema WHERE type = 'trigger'`,
+      )
+      .map(String),
+  );
+  for (const trigger of [
+    'spell_slots_exclusive_assignment_insert',
+    'spell_slots_exclusive_assignment_update',
+  ]) {
+    if (!triggers.has(trigger)) {
+      throw new Error(`Database image is missing trigger ${trigger}.`);
+    }
+  }
+}
+
+export function validateDatabaseConnection(db: Database): void {
+  validateDatabaseConnectionCore(db);
   const tables = new Set(
     db
       .selectValues(
@@ -135,24 +154,6 @@ export function validateDatabaseConnection(db: Database): void {
     throw new Error(
       `Database image is missing application tables: ${missing.join(', ')}.`,
     );
-  }
-
-  const triggers = new Set(
-    db
-      .selectValues(
-        `SELECT name
-         FROM sqlite_schema
-         WHERE type = 'trigger'`,
-      )
-      .map(String),
-  );
-  for (const trigger of [
-    'spell_slots_exclusive_assignment_insert',
-    'spell_slots_exclusive_assignment_update',
-  ]) {
-    if (!triggers.has(trigger)) {
-      throw new Error(`Database image is missing trigger ${trigger}.`);
-    }
   }
 }
 
@@ -363,7 +364,12 @@ export class DatabaseLifecycle {
   }
 
   #validateApplicationDatabase(db: Database): void {
-    validateDatabaseConnection(db);
+    // The exact target signature below is the authoritative table inventory.
+    // Keeping the static current-build inventory out of this path also lets
+    // migration tests instantiate a lifecycle for a genuine historical target
+    // without pretending that a later table already existed. The public
+    // validator still uses the current inventory for unknown-image diagnosis.
+    validateDatabaseConnectionCore(db);
     if (databaseSchemaSignature(db) !== this.#applicationSchemaSignature()) {
       throw new Error(
         'Database image schema does not match the application schema.',
@@ -441,7 +447,7 @@ export class DatabaseLifecycle {
     const expected = new this.sqlite3.oo1.DB(':memory:', 'c');
     try {
       expected.exec(this.schema);
-      validateDatabaseConnection(expected);
+      validateDatabaseConnectionCore(expected);
       this.#expectedSchemaSignature = databaseSchemaSignature(expected);
       return this.#expectedSchemaSignature;
     } finally {

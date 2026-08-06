@@ -1058,6 +1058,19 @@ const abilityOverrideEffect =
     });
   };
 
+const catalogContentDraft =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'catalog_content_drafts', {
+      draft_uuid: uid('catalog-content-draft'),
+      content_kind: 'species',
+      document_version: 1,
+      revision: 0,
+      document_json: '{}',
+      ...values,
+    });
+  };
+
 const catalogDataMigration =
   (values: Values): Write =>
   (db) => {
@@ -1309,6 +1322,66 @@ function authoredCharacterEffectConstraintCases(
 }
 
 const CONSTRAINT_CASES: readonly ConstraintCase[] = [
+  {
+    constraint: 'catalog_content_drafts_uuid_check',
+    rejects: [['an empty draft UUID', catalogContentDraft({ draft_uuid: '' })]],
+    accepts: [['a non-empty durable UUID', catalogContentDraft({})]],
+  },
+  {
+    constraint: 'catalog_content_drafts_kind_check',
+    rejects: [
+      [
+        'a non-authorable class kind',
+        catalogContentDraft({ content_kind: 'class' }),
+      ],
+    ],
+    accepts: [
+      ['a species draft', catalogContentDraft({ content_kind: 'species' })],
+      ['a subclass draft', catalogContentDraft({ content_kind: 'subclass' })],
+      ['a background draft', catalogContentDraft({ content_kind: 'background' })],
+    ],
+  },
+  {
+    constraint: 'catalog_content_drafts_document_version_check',
+    rejects: [
+      ['document version zero', catalogContentDraft({ document_version: 0 })],
+      [
+        'a text document version',
+        catalogContentDraft({ document_version: 'one' }),
+      ],
+    ],
+    accepts: [
+      [
+        'the first document version',
+        catalogContentDraft({ document_version: 1 }),
+      ],
+    ],
+  },
+  {
+    constraint: 'catalog_content_drafts_revision_check',
+    rejects: [
+      ['a negative revision', catalogContentDraft({ revision: -1 })],
+      ['a text revision', catalogContentDraft({ revision: 'zero' })],
+    ],
+    accepts: [['the initial revision', catalogContentDraft({ revision: 0 })]],
+  },
+  {
+    constraint: 'catalog_content_drafts_document_size_check',
+    rejects: [
+      ['an empty document', catalogContentDraft({ document_json: '' })],
+      [
+        'a document one byte above the 524288-byte limit',
+        catalogContentDraft({ document_json: 'x'.repeat(524_289) }),
+      ],
+    ],
+    accepts: [
+      ['a one-byte document', catalogContentDraft({ document_json: 'x' })],
+      [
+        'a document at the 524288-byte limit',
+        catalogContentDraft({ document_json: 'x'.repeat(524_288) }),
+      ],
+    ],
+  },
   {
     constraint: 'party_document_states_forge_check',
     rejects: [

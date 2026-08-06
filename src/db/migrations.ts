@@ -35,6 +35,7 @@ import itemDefinitions from '../../drizzle/0031_item_definitions.sql?raw';
 import characterArchive from '../../drizzle/0032_character_archive.sql?raw';
 import assertedContentKeys from '../../drizzle/0033_asserted_content_keys.sql?raw';
 import removeLegacyOpaque from '../../drizzle/0034_remove_legacy_opaque.sql?raw';
+import catalogContentDrafts from '../../drizzle/0035_catalog_content_drafts.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -394,6 +395,17 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       'f1aaa672d4093fd3eb1e682a15d2b97bf7e28f1838505d4b0a0aea22f6047c7b',
     resultSchemaChecksum:
       '7dda133c3b753483136c86ed8d1163c0bbea6827bf63ad8787ef1cfae8c9212d',
+  }),
+  // HA-2 / D133 / D139: incomplete local drafts for exactly species,
+  // subclass, and background. They may point at a published aggregate for
+  // copy/edit context but are excluded from every portable document surface.
+  Object.freeze({
+    id: '0035_catalog_content_drafts',
+    sql: catalogContentDrafts,
+    checksum:
+      '715574aa7a098a75b7ecb9af8ed0071badd819e6b8007d3b37222e5fb51ba37b',
+    resultSchemaChecksum:
+      'c95472fb49c52699354169753554973c2edfe7f79a3cd6e440f9de6e16c53293',
   }),
 ]);
 

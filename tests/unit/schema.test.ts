@@ -84,6 +84,13 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
   catalog_content_aliases: {
     text: ['content_kind', 'alias_key', 'content_key', 'alias_kind'],
   },
+  catalog_content_drafts: {
+    integer: ['document_version', 'revision'],
+    text: [
+      'draft_uuid', 'content_kind', 'base_content_key', 'document_json',
+    ],
+    numeric: ['created_at', 'updated_at'],
+  },
   catalog_content_match_decisions: {
     text: [
       'content_kind', 'incoming_fingerprint_scheme',
@@ -733,6 +740,10 @@ const expectedNotNull: Record<string, string[]> = {
   catalog_content_aliases: [
     'content_kind', 'alias_key', 'content_key', 'alias_kind',
   ],
+  catalog_content_drafts: [
+    'draft_uuid', 'content_kind', 'document_version', 'revision',
+    'document_json', 'created_at', 'updated_at',
+  ],
   catalog_content_match_decisions: [
     'content_kind', 'incoming_fingerprint_scheme',
     'incoming_fingerprint_digest', 'decision', 'target_content_key',
@@ -987,6 +998,10 @@ const expectedNamedIndexes: Record<string, string> = {
     'catalog_content_fingerprints:content_kind,fingerprint_scheme,fingerprint_digest',
   catalog_content_aliases_resolution_index:
     'catalog_content_aliases:content_kind,alias_key',
+  catalog_content_drafts_kind_updated_index:
+    'catalog_content_drafts:content_kind,updated_at,draft_uuid',
+  catalog_content_drafts_base_content_index:
+    'catalog_content_drafts:content_kind,base_content_key',
   background_definitions_content_key_unique:
     'background_definitions:content_key:unique',
   background_definitions_name_rules_edition_index:
@@ -1350,6 +1365,10 @@ const expectedUniqueGroups: Record<string, string[]> = {
  */
 const expectedDefaults: Record<string, Record<string, string>> = {
   catalog_content_identities: { created_at: 'CURRENT_TIMESTAMP' },
+  catalog_content_drafts: {
+    revision: '0', created_at: 'CURRENT_TIMESTAMP',
+    updated_at: 'CURRENT_TIMESTAMP',
+  },
   catalog_content_match_decisions: { reviewed_at: 'CURRENT_TIMESTAMP' },
   catalog_data_migrations: { applied_at: 'CURRENT_TIMESTAMP' },
   change_log: { reversible: 'true' },
@@ -1459,6 +1478,9 @@ const expectedDefaultedRow: Record<string, unknown> = {
 };
 
 const expectedForeignKeys: Record<string, string[]> = {
+  catalog_content_drafts: [
+    'content_kind,base_content_key->catalog_content_identities.content_kind,content_key|RESTRICT',
+  ],
   catalog_content_fingerprints: [
     'content_kind,content_key->catalog_content_identities.content_kind,content_key|CASCADE',
   ],

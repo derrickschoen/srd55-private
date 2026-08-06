@@ -82,6 +82,7 @@ import {
   catalogContentLayers,
   catalogContentMatchDecisions,
 } from '../../catalog/content-registry';
+import { authoredContentKinds } from '../../authoring/contracts';
 import {
   HEADING_ONLY_DESCRIPTION,
   nonEmptySubclassFeatureDescription,
@@ -396,6 +397,7 @@ const damageTypeEnum = z.enum(damageTypes);
 const creatureTypeEnum = z.enum(creatureTypes);
 const creatureSizeEnum = z.enum(creatureSizes);
 const contentKindEnum = z.enum(contentKinds);
+const authoredContentKindEnum = z.enum(authoredContentKinds);
 const contentKeyKindEnum = z.enum(catalogContentKeyKinds);
 const contentLayerEnum = z.enum(catalogContentLayers);
 const contentFingerprintSchemeEnum = z.literal(
@@ -474,6 +476,7 @@ export const COLUMN_REFINEMENTS = {
   creatureTypeEnum,
   creatureSizeEnum,
   contentKindEnum,
+  authoredContentKindEnum,
   contentKeyKindEnum,
   contentLayerEnum,
   contentFingerprintSchemeEnum,
@@ -593,6 +596,7 @@ export type RowContractTable =
  */
 type NativeContractTable =
   | 'catalog_content_identities'
+  | 'catalog_content_drafts'
   | 'catalog_content_fingerprints'
   | 'catalog_content_aliases'
   | 'catalog_content_match_decisions'
@@ -694,6 +698,15 @@ const REFINEMENTS = {
   'catalog_content_match_decisions.decision': contentMatchDecisionEnum,
   'catalog_content_match_decisions.target_content_key': nonEmptyText,
   'catalog_content_match_decisions.reviewed_at': sqlTimestamp,
+
+  'catalog_content_drafts.draft_uuid': nonEmptyText,
+  'catalog_content_drafts.content_kind': authoredContentKindEnum,
+  'catalog_content_drafts.document_version': positiveInt,
+  'catalog_content_drafts.base_content_key': sqlText,
+  'catalog_content_drafts.revision': nonNegativeInt,
+  'catalog_content_drafts.document_json': nonEmptyText,
+  'catalog_content_drafts.created_at': sqlTimestamp,
+  'catalog_content_drafts.updated_at': sqlTimestamp,
 
   // --- bundled feat catalog -----------------------------------------------
   'feat_definitions.id': positiveInt,

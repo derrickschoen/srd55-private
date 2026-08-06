@@ -163,6 +163,17 @@ export type BackgroundAuthoringDraftEquipment =
 
 export type SubclassAuthoringDraftProgression =
   | { readonly mode: 'inherit_parent' }
+  // Some installed subclasses carry caster contribution only on the root and
+  // intentionally have no progression rows. Copy-from-published must preserve
+  // that semantic state rather than laundering it into inherit_parent or a
+  // fabricated dense schedule. HA-5 may present this as a non-editable copied
+  // shape; it is part of the durable draft vocabulary from v1.
+  | {
+      readonly mode: 'root_only';
+      readonly spellcasting_ability: Ability | null;
+      readonly caster_fraction: '1' | '1/2' | '1/3' | null;
+      readonly caster_rounding: 'up' | 'down' | null;
+    }
   | {
       readonly mode: 'override';
       readonly spellcasting_ability: Ability | null;
@@ -590,9 +601,12 @@ export type AuthoringErrorData =
   | {
       readonly reason: 'draft_upgrade_required';
       readonly draft_uuid: HomebrewDraftUuid;
+      readonly content_kind: AuthoredContentKind;
       readonly stored_version: number;
       readonly latest_supported_version: number;
       readonly recovery_available: true;
+      /** Exact stored bytes; the UI may offer these as a recovery download. */
+      readonly recovery_document_json: string;
     }
   | {
       readonly reason: 'stale_publish_plan';
