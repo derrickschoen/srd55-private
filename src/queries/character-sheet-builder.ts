@@ -525,10 +525,10 @@ export const SHEET_GAPS: readonly SheetGap[] = Object.freeze([
     kind: 'partial_subclass_catalog',
     title: 'Subclass coverage is partial',
     detail:
-      'Two subclasses are bundled — EK and AT. A ' +
-      'character of any other class has no subclass to choose here, so this ' +
-      'sheet shows none rather than showing an empty list that reads as ' +
-      '"no subclass taken".',
+      'Fifteen subclasses are bundled: one SRD subclass for every core class, ' +
+      'the legacy EK and AT, and the owner-authored ' +
+      'Veteran. This is a curated catalog rather than exhaustive subclass ' +
+      'coverage.',
   },
   {
     kind: 'languages_and_tools_not_modelled',

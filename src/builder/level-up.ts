@@ -50,13 +50,10 @@ export const LEVEL_UP_CLASS_COMMAND_TYPE = 'level_up_class' as const;
  *  - `level_not_adjacent` (L-ADJACENT): a target level that is not exactly
  *    the class's current level plus one.
  *
- * `subclass_required` IS DELIBERATELY ABSENT — struck by D70. Only two
- * subclasses are seeded (EK, AT), so a level-3
- * refusal would dead-end ten of twelve classes with nothing to choose, which
- * D54's bar forbids by name. D70 already rules an unpicked subclass a
- * SAVEABLE state that WARNS: level 3 proceeds, the command records the
- * level, and the owed choice is the wizard's warning and the sheet's gap
- * (L-B), never this command's police.
+ * `subclass_required` IS DELIBERATELY ABSENT — struck by D70. An unpicked
+ * subclass remains a SAVEABLE state that WARNS: level 3 proceeds, the command
+ * records the level, and the owed choice is the wizard's warning and the
+ * sheet's gap (L-B), never this command's police.
  */
 export const LEVEL_UP_REFUSAL_REASONS = Object.freeze({
   classNotHeld: 'class_not_held',

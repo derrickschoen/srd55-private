@@ -866,12 +866,21 @@ describe('the derived character sheet', () => {
     // `gear_not_itemised` JOINED with E-B (D65): gear renders from the rules
     // tables and is never owned, which is true of every character equally —
     // no gear table exists under that ruling.
-    expect(builder.build(characterId).gaps.map((gap) => gap.kind)).toEqual([
+    const gaps = builder.build(characterId).gaps;
+    expect(gaps.map((gap) => gap.kind)).toEqual([
       'no_class_feature_text',
       'partial_subclass_catalog',
       'weapon_reach_not_recorded',
       'gear_not_itemised',
     ]);
+    expect(
+      gaps.find((gap) => gap.kind === 'partial_subclass_catalog')?.detail,
+    ).toBe(
+      'Fifteen subclasses are bundled: one SRD subclass for every core class, ' +
+        'the legacy EK and AT, and the owner-authored ' +
+        'Veteran. This is a curated catalog rather than exhaustive subclass ' +
+        'coverage.',
+    );
   });
 
   it('shows granting feature text and adds the languages/tools gap only when it applies', () => {

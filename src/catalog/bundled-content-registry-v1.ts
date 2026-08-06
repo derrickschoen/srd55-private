@@ -14,7 +14,7 @@ import {
 import { bundledArmorTemplates } from '../rules/armor-srd';
 import { parseSrdSpellDescriptions } from '../rules/spells-srd';
 import { bundledWeaponTemplates } from '../rules/weapons-srd';
-import { bundledSubclassDefinitionContentKeys } from '../rules/srd-subclass-content';
+import { bundledSubclassDefinitionContentKeys } from '../rules/bundled-subclass-content';
 import {
   CONTENT_FINGERPRINT_SCHEME_V1,
   contentKinds,

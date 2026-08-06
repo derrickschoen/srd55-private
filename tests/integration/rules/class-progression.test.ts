@@ -10,6 +10,10 @@ import {
   ensureBundledSrdSubclassContent,
 } from '../../../src/rules/srd-subclass-content';
 import {
+  ensureBundledVeteranSubclassContent,
+  hasBundledVeteranSubclassContent,
+} from '../../../src/rules/veteran-subclass-content';
+import {
   HEADING_ONLY_DESCRIPTION,
 } from '../../../src/domain/subclass-feature-description';
 import {
@@ -154,18 +158,19 @@ describe('persisted class progression catalog', () => {
     db = new DatabaseContext(connection);
     seedClassProgressions(db);
     ensureBundledSrdSubclassContent(db);
+    ensureBundledVeteranSubclassContent(db);
   });
 
   afterEach(() => {
     connection.close();
   });
 
-  it('persists twelve complete class tables and two complete subclass tables', () => {
+  it('persists the bundled class and subclass catalogs at exact cardinality', () => {
     expect(db.scalar('SELECT count(*) FROM class_definitions')).toBe(12);
     expect(db.scalar('SELECT count(*) FROM class_progressions')).toBe(240);
-    expect(db.scalar('SELECT count(*) FROM subclass_definitions')).toBe(14);
+    expect(db.scalar('SELECT count(*) FROM subclass_definitions')).toBe(15);
     expect(db.scalar('SELECT count(*) FROM subclass_progressions')).toBe(40);
-    expect(db.scalar('SELECT count(*) FROM subclass_features')).toBe(58);
+    expect(db.scalar('SELECT count(*) FROM subclass_features')).toBe(70);
     expect(db.scalar('SELECT count(*) FROM subclass_feature_effects')).toBe(0);
 
     const classCoverage = db.allRaw(`
@@ -192,8 +197,9 @@ describe('persisted class progression catalog', () => {
           ON subclass.id = feature.subclass_definition_id
         JOIN class_definitions AS class
           ON class.id = subclass.class_definition_id
+        WHERE subclass.content_key IN (${bundledSrdSubclassDefinitionContentKeys().map(() => '?').join(', ')})
         ORDER BY class.name, feature.sort_order
-      `),
+      `, [...bundledSrdSubclassDefinitionContentKeys()]),
     ).toEqual(
       srdSubclassClassNames.flatMap((className) => {
         const definition = parsed.by_class[className];
@@ -207,6 +213,123 @@ describe('persisted class progression catalog', () => {
         }));
       }),
     );
+  });
+
+  it('pins the Veteran headings and its complete absence from spell machinery', () => {
+    expect(hasBundledVeteranSubclassContent(db)).toBe(true);
+    expect(
+      db.oneRaw(
+        `SELECT subclass.content_key, subclass.name, subclass.rules_edition,
+                class.name AS class_name, subclass.spellcasting_ability,
+                subclass.caster_fraction, subclass.caster_rounding,
+                subclass.grant_rules, subclass.notes
+           FROM subclass_definitions AS subclass
+           JOIN class_definitions AS class
+             ON class.id = subclass.class_definition_id
+          WHERE subclass.content_key = '2024:subclass:veteran'`,
+      ),
+    ).toEqual({
+      content_key: '2024:subclass:veteran',
+      name: 'Veteran',
+      rules_edition: '2024',
+      class_name: 'Rogue',
+      spellcasting_ability: null,
+      caster_fraction: null,
+      caster_rounding: null,
+      grant_rules: null,
+      notes: null,
+    });
+    expect(
+      db.allRaw(
+        `SELECT feature.class_level, feature.sort_order, feature.name,
+                feature.description
+           FROM subclass_features AS feature
+           JOIN subclass_definitions AS subclass
+             ON subclass.id = feature.subclass_definition_id
+          WHERE subclass.content_key = '2024:subclass:veteran'
+          ORDER BY feature.sort_order`,
+      ),
+    ).toEqual([
+      { class_level: 3, sort_order: 1, name: 'Seasoned Professional', description: HEADING_ONLY_DESCRIPTION },
+      { class_level: 3, sort_order: 2, name: 'Too Old for This', description: HEADING_ONLY_DESCRIPTION },
+      { class_level: 3, sort_order: 3, name: 'Deuces Are Wild', description: HEADING_ONLY_DESCRIPTION },
+      { class_level: 3, sort_order: 4, name: 'Sure Strike', description: HEADING_ONLY_DESCRIPTION },
+      { class_level: 9, sort_order: 5, name: "Veteran's Strike", description: HEADING_ONLY_DESCRIPTION },
+      { class_level: 9, sort_order: 6, name: 'Extensive Experience', description: HEADING_ONLY_DESCRIPTION },
+      { class_level: 13, sort_order: 7, name: 'Veteran Reflexes', description: HEADING_ONLY_DESCRIPTION },
+      { class_level: 13, sort_order: 8, name: 'Critical Instincts', description: HEADING_ONLY_DESCRIPTION },
+      { class_level: 13, sort_order: 9, name: 'Fighting Style', description: HEADING_ONLY_DESCRIPTION },
+      { class_level: 17, sort_order: 10, name: 'Master of Experience', description: HEADING_ONLY_DESCRIPTION },
+      { class_level: 17, sort_order: 11, name: 'Heightened Lethality', description: HEADING_ONLY_DESCRIPTION },
+      { class_level: 17, sort_order: 12, name: 'Blindsight', description: HEADING_ONLY_DESCRIPTION },
+    ]);
+    expect(
+      db.scalar(
+        `SELECT count(*) FROM subclass_progressions
+          WHERE subclass_definition_id = (
+            SELECT id FROM subclass_definitions
+             WHERE content_key = '2024:subclass:veteran'
+          )`,
+      ),
+    ).toBe(0);
+    expect(
+      db.scalar(
+        `SELECT count(*)
+           FROM subclass_feature_effects AS effect
+           JOIN subclass_features AS feature
+             ON feature.id = effect.subclass_feature_id
+           JOIN subclass_definitions AS subclass
+             ON subclass.id = feature.subclass_definition_id
+          WHERE subclass.content_key = '2024:subclass:veteran'`,
+      ),
+    ).toBe(0);
+  });
+
+  it('exactly repairs the Veteran aggregate without reallocating its stable root', () => {
+    const veteranId = db.scalar<number>(
+      `SELECT id FROM subclass_definitions
+        WHERE content_key = '2024:subclass:veteran'`,
+    );
+    expect(veteranId).not.toBeNull();
+    db.exec(
+      `UPDATE subclass_features
+          SET class_level = 16, description = 'prose must stay in the doc'
+        WHERE subclass_definition_id = ? AND name = 'Blindsight'`,
+      [veteranId],
+    );
+    db.exec(
+      `INSERT INTO subclass_progressions (
+         subclass_definition_id, class_level, cantrips_known,
+         prepared_count, max_spell_level, slots
+       ) VALUES (?, 1, 1, 1, 1, '[1]')`,
+      [veteranId],
+    );
+
+    expect(hasBundledVeteranSubclassContent(db)).toBe(false);
+    expect(ensureBundledVeteranSubclassContent(db)).toBe(true);
+    expect(hasBundledVeteranSubclassContent(db)).toBe(true);
+    expect(
+      db.oneRaw(
+        `SELECT subclass.id, feature.class_level, feature.sort_order,
+                feature.description
+           FROM subclass_definitions AS subclass
+           JOIN subclass_features AS feature
+             ON feature.subclass_definition_id = subclass.id
+          WHERE subclass.content_key = '2024:subclass:veteran'
+            AND feature.name = 'Blindsight'`,
+      ),
+    ).toEqual({
+      id: veteranId,
+      class_level: 17,
+      sort_order: 12,
+      description: HEADING_ONLY_DESCRIPTION,
+    });
+    expect(
+      db.scalar(
+        'SELECT count(*) FROM subclass_progressions WHERE subclass_definition_id = ?',
+        [veteranId],
+      ),
+    ).toBe(0);
   });
 
   it('marks every SC-3 feature description with the D152 heading-only constant', () => {
@@ -272,6 +395,7 @@ describe('persisted class progression catalog', () => {
       { name: 'Oath of Devotion', class_name: 'Paladin', spellcasting_ability: 'charisma', caster_fraction: null, caster_rounding: null },
       { name: 'Path of the Berserker', class_name: 'Barbarian', spellcasting_ability: null, caster_fraction: null, caster_rounding: null },
       { name: 'Thief', class_name: 'Rogue', spellcasting_ability: null, caster_fraction: null, caster_rounding: null },
+      { name: 'Veteran', class_name: 'Rogue', spellcasting_ability: null, caster_fraction: null, caster_rounding: null },
       { name: 'Warrior of the Open Hand', class_name: 'Monk', spellcasting_ability: null, caster_fraction: null, caster_rounding: null },
     ]);
 

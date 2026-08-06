@@ -222,10 +222,9 @@ export class LevelUpClassCommand {
     }
 
     // The subclass choice is OFFERED at level 3, never required (D70 struck
-    // the plan's L-SUBCLASS refusal: only two subclasses are seeded, so a
-    // refusal would dead-end ten of twelve classes; an unpicked subclass is
-    // a saveable state that warns — the wizard's and the sheet's job, not
-    // this command's). A key at any other level is still a wrong program.
+    // the plan's L-SUBCLASS refusal; an unpicked subclass is a saveable state
+    // that warns — the wizard's and the sheet's job, not this command's). A
+    // key at any other level is still a wrong program.
     const subclassKey = this.payload.subclass_content_key ?? null;
     if (targetLevel !== LEVEL_UP_SUBCLASS_LEVEL && subclassKey !== null) {
       throw new TypeError(

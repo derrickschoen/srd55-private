@@ -1419,6 +1419,14 @@ describe('the character sheet is projected twice from one value', () => {
     for (const gap of SHEET_GAPS) {
       expect(readable).toContain(gap.detail);
     }
+    expect(
+      textOf(row(value, 'gap:partial_subclass_catalog').detail),
+    ).toBe(
+      'Fifteen subclasses are bundled: one SRD subclass for every core class, ' +
+        'the legacy EK and AT, and the owner-authored ' +
+        'Veteran. This is a curated catalog rather than exhaustive subclass ' +
+        'coverage.',
+    );
   });
 
   it('prints granting prose as free text, not structured facts, and omits the conditional gap when it does not apply', () => {
