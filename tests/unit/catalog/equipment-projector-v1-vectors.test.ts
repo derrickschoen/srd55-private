@@ -3,12 +3,43 @@ import {
   contentIdentitySequence,
   deriveContentIdentityV1,
 } from '../../../src/catalog/content-identity';
+import {
+  projectArmorContentV1,
+  projectItemContentV1,
+  projectWeaponContentV1,
+} from '../../../src/catalog/equipment-content-projector-v1';
 import { equipmentProjectorV1Vectors } from './fixtures/equipment-projector-v1-vectors';
 
 describe('CI-3c equipment content-v1 vectors', () => {
+  it.each([
+    ['weapon', equipmentProjectorV1Vectors[0]],
+    ['armor', equipmentProjectorV1Vectors[1]],
+    ['item', equipmentProjectorV1Vectors[2]],
+  ] as const)(
+    'CI-8 %s projector includes its load-bearing field',
+    (_kind, vector) => {
+      const projected = (() => {
+        switch (vector.aggregate.kind) {
+          case 'weapon': return projectWeaponContentV1(vector.aggregate);
+          case 'armor': return projectArmorContentV1(vector.aggregate);
+          case 'item': return projectItemContentV1(vector.aggregate);
+        }
+      })();
+      expect(projected).toEqual(vector.payload);
+    },
+  );
+
   it.each(equipmentProjectorV1Vectors)(
     'pins $label',
     ({ aggregate, kind, payload, canonicalJson, sha256, derivedKey }) => {
+      const projected = (() => {
+        switch (aggregate.kind) {
+          case 'weapon': return projectWeaponContentV1(aggregate);
+          case 'armor': return projectArmorContentV1(aggregate);
+          case 'item': return projectItemContentV1(aggregate);
+        }
+      })();
+      expect(projected).toEqual(payload);
       const identity = deriveContentIdentityV1({
         kind,
         edition: aggregate.rules_edition,

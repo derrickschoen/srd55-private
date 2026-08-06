@@ -30,6 +30,22 @@ interface PendingRequest {
   reject(error: Error): void;
 }
 
+export function transportErrorMessage(event: ErrorEvent): string {
+  const message = event.message.trim();
+  if (message !== '') {
+    return message;
+  }
+  if (event.error instanceof Error) {
+    const nestedMessage = event.error.message.trim();
+    if (nestedMessage !== '') {
+      return nestedMessage;
+    }
+  } else if (typeof event.error === 'string' && event.error.trim() !== '') {
+    return event.error.trim();
+  }
+  return 'Database worker failed to load or crashed; the browser reported no details.';
+}
+
 export class RpcClient {
   #nextId = 1;
   readonly #pending = new Map<number, PendingRequest>();
@@ -56,7 +72,9 @@ export class RpcClient {
   };
 
   readonly #onError = (event: ErrorEvent): void => {
-    this.#rejectAll(new RpcError('transport_error', event.message));
+    this.#rejectAll(
+      new RpcError('transport_error', transportErrorMessage(event)),
+    );
   };
 
   constructor(private readonly transport: RpcTransport) {
