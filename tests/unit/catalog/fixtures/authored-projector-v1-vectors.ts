@@ -167,6 +167,7 @@ const backgroundAggregate: BackgroundContentAggregate = {
   suggested_abilities: ['intelligence', 'wisdom', 'charisma'],
   default_origin_feat_content_key: 'expanded:feat:void-adept' as ContentKey,
   default_origin_feat: featReference,
+  default_origin_feat_display_name: 'Void Adept (Scholar)',
   skill_proficiencies: ['arcana', 'insight'],
   tool_reference_text: 'Astrolabe only; no structured tool grant.',
   equipment_option_a_description: 'An astrolabe.',

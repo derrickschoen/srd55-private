@@ -37,6 +37,7 @@ const backgroundDraft = (): BackgroundAuthoringDraft => ({
   reference_text: '',
   suggested_abilities: [],
   default_origin_feat_content_key: null,
+  default_origin_feat_display_name: null,
   skill_proficiencies: [],
   tool_reference_text: null,
   equipment_option_a_description: '',

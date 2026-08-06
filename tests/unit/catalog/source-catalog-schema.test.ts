@@ -45,6 +45,7 @@ function background(): BackgroundContentAggregate {
     suggested_abilities: ['strength', 'wisdom', 'constitution'],
     default_origin_feat_content_key: 'expanded:feat:fixture' as ContentKey,
     default_origin_feat: { kind: 'feat', scheme: CONTENT_FINGERPRINT_SCHEME_V1, digest },
+    default_origin_feat_display_name: 'Fixture Feat (Cleric)',
     skill_proficiencies: ['athletics', 'perception'],
     tool_reference_text: null,
     equipment_option_a_description: 'A',

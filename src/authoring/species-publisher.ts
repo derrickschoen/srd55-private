@@ -25,7 +25,7 @@ import {
 } from '../catalog/content-identity';
 import { portableSourceContentImportNode } from '../catalog/source-content-importer';
 import { projectAuthoredContentAggregateV1 } from '../catalog/stored-authored-content-projector-v1';
-import { projectStoredContentV1 } from '../catalog/stored-content-projector-v1';
+import { storedContentMatchesFingerprintReferenceV1 } from '../catalog/stored-content-projector-v1';
 import type {
   AuthoringDraftGrant,
   AuthoringGrant,
@@ -129,23 +129,14 @@ export function authoringFingerprintReference<K extends ContentKind>(
     (row) => sqlString(row, 'content_key'),
   );
   if (targets.length !== 1 || targets[0] !== contentKey) return null;
-  try {
-    const stored = projectStoredContentV1(db, kind, contentKey);
-    const live = deriveContentIdentityV1({
-      kind: stored.kind,
-      edition: stored.edition,
-      name: stored.name,
-      payload: stored.payload,
-    });
-    if (live.digest !== rows[0]) return null;
-  } catch {
-    return null;
-  }
-  return Object.freeze({
+  const reference = Object.freeze({
     kind,
     scheme: CONTENT_FINGERPRINT_SCHEME_V1,
     digest: rows[0]!,
   }) as ContentFingerprintReference<K>;
+  return storedContentMatchesFingerprintReferenceV1(db, contentKey, reference)
+    ? reference
+    : null;
 }
 
 export function resolvedAuthoringEffect(

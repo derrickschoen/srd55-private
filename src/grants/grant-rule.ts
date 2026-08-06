@@ -17,6 +17,92 @@ export interface ActiveIfConfig {
 
 export type GrantRuleObject = Readonly<Record<string, unknown>>;
 
+type GrantRuleConfigConsumption =
+  | 'never'
+  | 'when_present'
+  | 'when_config_path'
+  | 'when_true';
+
+/**
+ * The complete grant-rule field vocabulary and each field's config semantics.
+ * Import validation and guided-feat eligibility both consume this registry, so
+ * adding a field requires an explicit config classification at the type's own
+ * boundary instead of relying on a second hand-maintained detector.
+ */
+export const GRANT_RULE_FIELD_CONFIG_CONSUMPTION = Object.freeze({
+  kind: 'never',
+  rule_key: 'never',
+  count: 'never',
+  bucket: 'never',
+  always_prepared: 'never',
+  with_slots: 'never',
+  free_cast: 'never',
+  active_from_class_level: 'never',
+  active_if_config: 'when_present',
+  distinct_config_by: 'when_present',
+  level_min: 'never',
+  level_max: 'never',
+  spell: 'never',
+  spell_version_id: 'never',
+  spell_version_key: 'never',
+  list: 'when_config_path',
+  schools: 'never',
+  tags: 'never',
+  source_type: 'never',
+  source_definition: 'never',
+  source_definition_id: 'never',
+  source_definition_key: 'never',
+  definition_key_config: 'when_present',
+  child_config: 'never',
+  child_config_config: 'when_present',
+  capability_key: 'never',
+  collection: 'never',
+  access_mode: 'never',
+  acquisitions_config: 'when_present',
+  initial_count: 'never',
+  count_per_level: 'never',
+  style_key: 'never',
+  selection_pool: 'never',
+  skills: 'never',
+  allows_tool_instead: 'when_true',
+  required: 'never',
+  counts_against_limit: 'never',
+  label: 'never',
+  selection_collection: 'never',
+} as const satisfies Readonly<Record<string, GrantRuleConfigConsumption>>);
+
+export type GrantRuleField = keyof typeof GRANT_RULE_FIELD_CONFIG_CONSUMPTION;
+
+export const GRANT_RULE_FIELDS: readonly GrantRuleField[] = Object.freeze(
+  Object.keys(GRANT_RULE_FIELD_CONFIG_CONSUMPTION) as GrantRuleField[],
+);
+
+/** True when materialising this rule can read character/source config. */
+export function grantRuleConsumesConfig(input: GrantRuleObject): boolean {
+  for (const field of Object.keys(input)) {
+    if (!Object.hasOwn(GRANT_RULE_FIELD_CONFIG_CONSUMPTION, field)) {
+      // Unknown future semantics are not safe to offer through a config-less UI.
+      return true;
+    }
+    const typedField = field as GrantRuleField;
+    const value = input[typedField];
+    switch (GRANT_RULE_FIELD_CONFIG_CONSUMPTION[typedField]) {
+      case 'never':
+        break;
+      case 'when_present':
+        if (value !== undefined && value !== null) return true;
+        break;
+      case 'when_config_path':
+        if (typeof value === 'string' && value.startsWith('$config.')) return true;
+        break;
+      case 'when_true':
+        if (value === true) return true;
+        break;
+    }
+  }
+  return false;
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }

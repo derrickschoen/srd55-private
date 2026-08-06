@@ -2039,11 +2039,24 @@ BEGIN
     SELECT 1 FROM catalog_content_identities
     WHERE content_key = NEW.content_key AND content_kind = 'background'
   );
-  SELECT RAISE(ABORT, 'background default Origin feat key must name an installed feat')
+  SELECT RAISE(ABORT, 'background default Origin feat key must name an installed Origin feat')
   WHERE NEW.default_origin_feat_content_key IS NOT NULL
     AND NOT EXISTS (
       SELECT 1 FROM feat_definitions
       WHERE content_key = NEW.default_origin_feat_content_key
+        AND category = 'origin'
+    );
+END;
+
+CREATE TRIGGER background_default_origin_feat_before_update
+BEFORE UPDATE OF default_origin_feat_content_key ON background_templates
+BEGIN
+  SELECT RAISE(ABORT, 'background default Origin feat key must name an installed Origin feat')
+  WHERE NEW.default_origin_feat_content_key IS NOT NULL
+    AND NOT EXISTS (
+      SELECT 1 FROM feat_definitions
+      WHERE content_key = NEW.default_origin_feat_content_key
+        AND category = 'origin'
     );
 END;
 

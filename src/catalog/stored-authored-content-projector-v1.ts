@@ -1261,6 +1261,7 @@ function readBackground(
     suggested_abilities: [ability(root.abilities[0], 'first suggested ability'), ability(root.abilities[1], 'second suggested ability'), ability(root.abilities[2], 'third suggested ability')],
     default_origin_feat_content_key: root.default_origin_feat_content_key,
     default_origin_feat: references.feat(root.default_origin_feat_content_key),
+    default_origin_feat_display_name: nonEmpty(root.feat_name, 'background default Origin feat display name'),
     skill_proficiencies: [
       normalizedGrantSkill(root.skills[0], 'first background skill', projectionError),
       normalizedGrantSkill(root.skills[1], 'second background skill', projectionError),

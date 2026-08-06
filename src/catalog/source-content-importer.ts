@@ -229,8 +229,13 @@ function insertBackground(db: DatabaseContext, aggregate: BackgroundContentAggre
   if (featKey !== aggregate.default_origin_feat_content_key) {
     throw new UnresolvedSourceContentReference('feat', aggregate.default_origin_feat.digest);
   }
-  const featName = db.scalar<string>('SELECT name FROM feat_definitions WHERE content_key = ?', [featKey]);
-  if (featName === null) throw new UnresolvedSourceContentReference('feat', aggregate.default_origin_feat.digest);
+  const featCategory = db.scalar<string>(
+    'SELECT category FROM feat_definitions WHERE content_key = ?',
+    [featKey],
+  );
+  if (featCategory !== 'origin') {
+    throw new UnresolvedSourceContentReference('Origin feat', aggregate.default_origin_feat.digest);
+  }
   db.exec(
     `INSERT INTO background_definitions
        (content_key, name, rules_edition, repeatable, grant_rules, notes, created_at, updated_at)
@@ -246,7 +251,7 @@ function insertBackground(db: DatabaseContext, aggregate: BackgroundContentAggre
      ) VALUES (${Array.from({ length: 15 }, () => '?').join(', ')})`,
     [
       contentKey, aggregate.rules_edition, aggregate.name,
-      ...aggregate.suggested_abilities, featName, featKey,
+      ...aggregate.suggested_abilities, aggregate.default_origin_feat_display_name, featKey,
       ...aggregate.skill_proficiencies,
       aggregate.tool_reference_text ?? '', aggregate.equipment_option_a_description,
       aggregate.equipment_option_b_description, now, now,

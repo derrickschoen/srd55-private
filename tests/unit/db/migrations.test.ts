@@ -11,6 +11,7 @@ import {
 } from '../../../src/db/database-lifecycle';
 import type { DatabaseContext } from '../../../src/db/database';
 import {
+  applyMigrationSuffix,
   DATABASE_MIGRATIONS,
   databaseSchemaChecksum,
   type DatabaseMigration,
@@ -1336,7 +1337,7 @@ describe('database migration chain', () => {
     lifecycle.close();
   });
 
-  it('0037 backfills only unambiguous background feat keys and preserves ambiguous legacy absence', async () => {
+  it('Q6 0037 keys exactly one Origin match and leaves no-match or ambiguity NULL', async () => {
     const beforeKeyedBackgroundFeat = DATABASE_MIGRATIONS
       .slice(0, DATABASE_MIGRATIONS.findIndex(
         (entry) => entry.id === '0037_background_default_origin_feat_key',
@@ -1350,12 +1351,15 @@ describe('database migration chain', () => {
         ('expanded:migration.fixture:unique-feat', 'feat', 'asserted', 'external', 'unique feat'),
         ('expanded:migration.fixture:ambiguous-feat-a', 'feat', 'asserted', 'external', 'shared feat'),
         ('expanded:migration.fixture:ambiguous-feat-b', 'feat', 'asserted', 'external', 'shared feat'),
+        ('expanded:migration.fixture:same-name-general', 'feat', 'asserted', 'external', 'unique feat general'),
         ('expanded:migration.fixture:unique-background', 'background', 'asserted', 'external', 'unique background'),
-        ('expanded:migration.fixture:ambiguous-background', 'background', 'asserted', 'external', 'ambiguous background');
+        ('expanded:migration.fixture:ambiguous-background', 'background', 'asserted', 'external', 'ambiguous background'),
+        ('expanded:migration.fixture:no-match-background', 'background', 'asserted', 'external', 'no match background');
       INSERT INTO feat_definitions (
         content_key, name, rules_edition, category
       ) VALUES
         ('expanded:migration.fixture:unique-feat', 'Unique Feat', 'expanded', 'origin'),
+        ('expanded:migration.fixture:same-name-general', 'Unique Feat', 'expanded', 'general'),
         ('expanded:migration.fixture:ambiguous-feat-a', 'Shared Feat', 'expanded', 'origin'),
         ('expanded:migration.fixture:ambiguous-feat-b', 'Shared Feat', 'expanded', 'origin');
       INSERT INTO background_templates (
@@ -1369,7 +1373,10 @@ describe('database migration chain', () => {
          'Unique Feat', 'Athletics', 'Acrobatics', 'Tools', 'A', 'B'),
         (42, 'expanded:migration.fixture:ambiguous-background', 'expanded',
          'Ambiguous Background', 'Strength', 'Dexterity', 'Constitution',
-         'Shared Feat', 'Athletics', 'Acrobatics', 'Tools', 'A', 'B');`);
+         'Shared Feat', 'Athletics', 'Acrobatics', 'Tools', 'A', 'B'),
+        (43, 'expanded:migration.fixture:no-match-background', 'expanded',
+         'No Match Background', 'Strength', 'Dexterity', 'Constitution',
+         'Missing Feat', 'Athletics', 'Acrobatics', 'Tools', 'A', 'B');`);
     const lifecycle = new DatabaseLifecycle(
       sqlite3,
       storage,
@@ -1392,8 +1399,122 @@ describe('database migration chain', () => {
         content_key: 'expanded:migration.fixture:ambiguous-background',
         default_origin_feat_content_key: null,
       },
+      {
+        id: 43,
+        content_key: 'expanded:migration.fixture:no-match-background',
+        default_origin_feat_content_key: null,
+      },
     ]);
     lifecycle.close();
+  });
+
+  it('Q4 rejects a General feat key on background insert and update', () => {
+    const database = new sqlite3.oo1.DB(':memory:', 'c');
+    try {
+      database.exec(schema);
+      database.exec(`
+        INSERT INTO catalog_content_identities (
+          content_key, content_kind, key_kind, catalog_layer, normalized_name
+        ) VALUES
+          ('expanded:content.feat:origin-feat', 'feat', 'asserted', 'external', 'same named feat origin'),
+          ('expanded:content.feat:general-feat', 'feat', 'asserted', 'external', 'same named feat general'),
+          ('expanded:content.background:origin-scholar', 'background', 'asserted', 'external', 'origin scholar');
+        INSERT INTO feat_definitions (content_key, name, rules_edition, category)
+        VALUES
+          ('expanded:content.feat:origin-feat', 'Same Named Feat', 'expanded', 'origin'),
+          ('expanded:content.feat:general-feat', 'Same Named Feat', 'expanded', 'general');
+      `);
+      const templateInsert = (key: string) => database.exec(`
+        INSERT INTO background_templates (
+          content_key, rules_edition, name, ability_score_1, ability_score_2,
+          ability_score_3, feat_name, default_origin_feat_content_key,
+          skill_proficiency_1, skill_proficiency_2, tool_proficiency,
+          equipment_option_a, equipment_option_b
+        ) VALUES (
+          'expanded:content.background:origin-scholar', 'expanded', 'Origin Scholar',
+          'Strength', 'Dexterity', 'Constitution', 'Same Named Feat', '${key}',
+          'Athletics', 'Acrobatics', 'Tools', 'A', 'B'
+        )
+      `);
+      expectTriggerRefusal(
+        () => templateInsert('expanded:content.feat:general-feat'),
+        'background default Origin feat key must name an installed Origin feat',
+      );
+      templateInsert('expanded:content.feat:origin-feat');
+      expectTriggerRefusal(
+        () => database.exec(`
+          UPDATE background_templates
+          SET default_origin_feat_content_key = 'expanded:content.feat:general-feat'
+          WHERE content_key = 'expanded:content.background:origin-scholar'
+        `),
+        'background default Origin feat key must name an installed Origin feat',
+      );
+      expect(database.selectValue(
+        `SELECT default_origin_feat_content_key FROM background_templates
+         WHERE content_key = 'expanded:content.background:origin-scholar'`,
+      )).toBe('expanded:content.feat:origin-feat');
+    } finally {
+      database.close();
+    }
+  });
+
+  it('Q5 explicitly replaying 0037 preserves populated background data', () => {
+    const database = new sqlite3.oo1.DB(':memory:', 'c');
+    try {
+      database.exec(schema);
+      database.exec(`
+        INSERT INTO catalog_content_identities (
+          content_key, content_kind, key_kind, catalog_layer, normalized_name
+        ) VALUES
+          ('expanded:content.feat:replay-feat', 'feat', 'asserted', 'external', 'replay feat'),
+          ('expanded:content.background:replay-background', 'background', 'asserted', 'external', 'replay background');
+        INSERT INTO feat_definitions (content_key, name, rules_edition, category)
+        VALUES ('expanded:content.feat:replay-feat', 'Replay Feat', 'expanded', 'origin');
+        INSERT INTO background_templates (
+          id, content_key, rules_edition, name, ability_score_1, ability_score_2,
+          ability_score_3, feat_name, default_origin_feat_content_key,
+          skill_proficiency_1, skill_proficiency_2, tool_proficiency,
+          equipment_option_a, equipment_option_b
+        ) VALUES (
+          901, 'expanded:content.background:replay-background', 'expanded', 'Replay Background',
+          'Strength', 'Dexterity', 'Constitution', 'Authored Replay Feat',
+          'expanded:content.feat:replay-feat', 'Athletics', 'Acrobatics', 'Tools', 'A', 'B'
+        );
+        INSERT INTO background_equipment_items (
+          background_template_id, option, sort_order, quantity, item_name, item_kind
+        ) VALUES (901, 'a', 1, 3, 'Preserved chalk', 'gear');
+      `);
+      const migration0037 = DATABASE_MIGRATIONS.find(
+        (entry) => entry.id === '0037_background_default_origin_feat_key',
+      );
+      if (migration0037 === undefined) throw new Error('0037 is not registered.');
+      const signature = databaseSchemaSignature(database);
+
+      applyMigrationSuffix(
+        database,
+        [migration0037],
+        0,
+        signature,
+        databaseSchemaSignature,
+      );
+
+      expect(database.selectObject(`
+        SELECT template.feat_name, template.default_origin_feat_content_key,
+               item.quantity, item.item_name
+        FROM background_templates AS template
+        JOIN background_equipment_items AS item
+          ON item.background_template_id = template.id
+        WHERE template.id = 901
+      `)).toEqual({
+        feat_name: 'Authored Replay Feat',
+        default_origin_feat_content_key: 'expanded:content.feat:replay-feat',
+        quantity: 3,
+        item_name: 'Preserved chalk',
+      });
+      expect(databaseSchemaSignature(database)).toBe(signature);
+    } finally {
+      database.close();
+    }
   });
 
   it('uses the archive-list indexes for character and creation lifecycle orderings', () => {

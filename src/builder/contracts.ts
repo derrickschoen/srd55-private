@@ -1083,16 +1083,23 @@ export type EquipmentChoiceConfig =
  * be ANY row — a hand-added one or a previous mint's, now indistinguishable
  * — and the remedy is the player's own removal.
  */
-export type EquipmentGrantRefusalReason = 'armor_slot_occupied';
+export type EquipmentGrantRefusalReason =
+  | 'armor_slot_occupied'
+  | 'equipment_dependency_drift';
 
-export interface EquipmentGrantRefusalData {
-  readonly reason: EquipmentGrantRefusalReason;
-  readonly slot: ArmorSlot;
-  /** The granted item that could not be placed. */
-  readonly item: string;
-  /** The name of the row already occupying the slot. */
-  readonly holder: string;
-}
+export type EquipmentGrantRefusalData =
+  | {
+      readonly reason: 'armor_slot_occupied';
+      readonly slot: ArmorSlot;
+      readonly item: string;
+      readonly holder: string;
+    }
+  | {
+      readonly reason: 'equipment_dependency_drift';
+      readonly content_key: string;
+      readonly dependency_kind: 'weapon' | 'armor';
+      readonly item: string;
+    };
 
 /**
  * §6b value 5 — THE DECLARED CLASS WEAPON-EQUIPMENT MAP'S MODULE. The

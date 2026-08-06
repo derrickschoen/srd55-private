@@ -44,6 +44,7 @@ import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { applicationSeed } from '../../../src/db/bootstrap';
 import { DatabaseContext } from '../../../src/db/database';
 import type { ContentKey } from '../../../src/domain/ids';
+import { EquipmentGrantRefusal } from '../../../src/grants/equipment-grants';
 import { SavePointQueries } from '../../../src/queries/save-points';
 import { featProjectorV1Vector } from '../../unit/catalog/fixtures/source-projector-v1-vectors';
 import { openTestDatabase } from '../../helpers/open-db';
@@ -399,7 +400,7 @@ describe('HA-4 background publisher', () => {
     )).toBe('Void Cartographer');
   }, 20_000);
 
-  it('round-trips and applies the keyed default feat when another installed Origin feat has the same name', async () => {
+  it('Q1 round-trips authored feat display through export and copy-to-draft', async () => {
     const db = await database(true);
     const selectedKey = '2024:feat:alert' as ContentKey;
     const selectedName = db.scalar<string>(
@@ -444,6 +445,7 @@ describe('HA-4 background publisher', () => {
       (document) => ({
         ...document,
         default_origin_feat_content_key: selectedKey,
+        default_origin_feat_display_name: `${selectedName} (Night Watch)`,
       }),
     ));
     const backgroundKey = published.result.content_key;
@@ -452,7 +454,7 @@ describe('HA-4 background publisher', () => {
        FROM background_templates WHERE content_key = ?`,
       [backgroundKey],
     )).toEqual({
-      feat_name: selectedName,
+      feat_name: `${selectedName} (Night Watch)`,
       default_origin_feat_content_key: selectedKey,
     });
     expect(listGuidedBackgroundChoiceOptions(db).backgrounds.find(
@@ -465,6 +467,7 @@ describe('HA-4 background publisher', () => {
     ).content[0]).toEqual(expect.objectContaining({
       aggregate: expect.objectContaining({
         default_origin_feat_content_key: selectedKey,
+        default_origin_feat_display_name: `${selectedName} (Night Watch)`,
       }),
     }));
     const copied = authoring.createDraft({
@@ -473,6 +476,7 @@ describe('HA-4 background publisher', () => {
     });
     expect(copied.document).toEqual(expect.objectContaining({
       default_origin_feat_content_key: selectedKey,
+      default_origin_feat_display_name: `${selectedName} (Night Watch)`,
     }));
 
     const guidedClass = listGuidedClassOptions(db)[0];
@@ -501,7 +505,7 @@ describe('HA-4 background publisher', () => {
     )).toBe(selectedKey);
   }, 20_000);
 
-  it('withholds configurable external Origin feats while retaining external no-config feats', async () => {
+  it('Q3 withholds active_if_config external Origin feats while retaining no-config feats', async () => {
     const db = await database(true);
     const importer = new CatalogImporter(db);
     const passive = {
@@ -517,13 +521,11 @@ describe('HA-4 background publisher', () => {
       rules_edition: 'expanded',
       category: 'origin',
       grants: [{
-        kind: 'choice_from_list',
-        rule_key: 'configurable-echo-cantrip',
+        kind: 'skill_proficiency',
+        rule_key: 'configurable-echo-skill',
         count: 1,
-        bucket: 'cantrip_known',
-        list: '$config.chosen_list',
-        level_min: 0,
-        level_max: 0,
+        skills: ['arcana'],
+        active_if_config: { key: 'training', equals: 'arcana' },
       }],
     };
     importer.import({
@@ -566,6 +568,64 @@ describe('HA-4 background publisher', () => {
        WHERE name = 'Drifted Weapon Surveyor'`,
     )).toBe(0);
   });
+
+  it('Q2 publishes clean, then refuses typed dependency drift at equipment apply', async () => {
+    const db = await database(true);
+    const authoring = service(db);
+    const published = publish(
+      authoring,
+      savedBackground(db, authoring, 'Post-Publish Drift Surveyor'),
+    );
+    const guidedClass = listGuidedClassOptions(db)[0];
+    if (guidedClass === undefined) throw new Error('A guided class is required.');
+    const character = createGuidedCharacter(
+      db,
+      {
+        name: 'Post-Publish Drift Hero',
+        class_content_key: guidedClass.content_key,
+      },
+      new CharacterCommandIntegrity('ha4-post-publish-drift'),
+    );
+    applyGuidedBackgroundChoices(db, {
+      character_id: character.id,
+      content_key: published.result.content_key,
+      increases: [
+        { ability: 'strength', amount: 2 },
+        { ability: 'dexterity', amount: 1 },
+      ],
+      origin_feat_content_key: originFeatKey(db),
+      origin_feat_config: {},
+    });
+    db.exec(
+      `UPDATE weapon_templates SET damage_type = 'Drifted Void'
+       WHERE content_key = '2024:weapon:club'`,
+    );
+
+    let refusal: EquipmentGrantRefusal | undefined;
+    try {
+      applyGuidedEquipment(db, {
+        character_id: character.id,
+        kind: 'background',
+        content_key: published.result.content_key,
+        option: 'a',
+      });
+    } catch (error) {
+      refusal = error as EquipmentGrantRefusal;
+    }
+    expect(refusal).toBeInstanceOf(EquipmentGrantRefusal);
+    expect(refusal?.data).toEqual({
+      reason: 'equipment_dependency_drift',
+      content_key: '2024:weapon:club',
+      dependency_kind: 'weapon',
+      item: 'Club',
+    });
+    expect(db.scalar<number>(
+      'SELECT count(*) FROM character_weapons WHERE character_id = ?',
+      [character.id],
+    )).toBe(0);
+    expect(guidedEquipmentStepState(db, character.id).background_package)
+      .toEqual(expect.objectContaining({ chosen_option: null }));
+  }, 20_000);
 
   it('surfaces and applies an external background package with external dependencies, and refuses a missing dependency by name', async () => {
     const db = await database(true);

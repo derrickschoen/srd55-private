@@ -427,9 +427,9 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
     id: '0037_background_default_origin_feat_key',
     sql: backgroundDefaultOriginFeatKey,
     checksum:
-      'd20d81a4defa39c0d8f8445f8f8fb70743845d26188fe1ecff047b87bc676148',
+      'f24b36550ae9468ffd9356dff97b64e1e1ec9690df51f94c30d63ca4dc761b33',
     resultSchemaChecksum:
-      '960027dde562045c21181e2cf9efbf8ffbcf57549eaabf568e22f30780ceed22',
+      '2f19e525f71f81066312d9cb5824208b4d77d385532f9793806379c2979b81dd',
   }),
 ]);
 
@@ -507,6 +507,16 @@ export function applyMigrationSuffix(
     transactionOpen = true;
     try {
       for (const migration of pending) {
+        // A caller may explicitly replay a migration suffix (for example while
+        // proving a composed schema). Once this migration's exact result schema
+        // is already present, skip its whole SQL body: rebuild migrations must
+        // never drop/recreate populated tables a second time.
+        if (
+          databaseSchemaChecksum(signatureOf(db)) ===
+          migration.resultSchemaChecksum
+        ) {
+          continue;
+        }
         db.exec(migration.sql);
       }
 

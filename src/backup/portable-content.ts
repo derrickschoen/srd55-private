@@ -253,7 +253,7 @@ function aggregateTopLevelKeys(kind: ContentKind): readonly string[] {
       return [
         'kind', 'name', 'rules_edition', 'reference_text', 'repeatable',
         'grants', 'suggested_abilities', 'default_origin_feat_content_key',
-        'default_origin_feat',
+        'default_origin_feat', 'default_origin_feat_display_name',
         'skill_proficiencies', 'tool_reference_text',
         'equipment_option_a_description', 'equipment_option_b_description',
         'equipment_option_a', 'equipment_option_b', 'effects',

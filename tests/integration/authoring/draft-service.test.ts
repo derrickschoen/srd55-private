@@ -433,8 +433,8 @@ describe('catalog authoring draft service', () => {
     const featKey = 'expanded:feat:authoring-origin' as ContentKey;
     registerDependency('feat', featKey, 'Authoring Origin Feat');
     db.exec(
-      `INSERT INTO feat_definitions (content_key, name, rules_edition)
-       VALUES (?, 'Authoring Origin Feat', 'expanded')`,
+      `INSERT INTO feat_definitions (content_key, name, rules_edition, category)
+       VALUES (?, 'Authoring Origin Feat', 'expanded', 'origin')`,
       [featKey],
     );
     const contentKey = registerAssertedFixtureContentIdentity(db, {
@@ -458,7 +458,7 @@ describe('catalog authoring draft service', () => {
          equipment_option_b
        ) VALUES (
          ?, 'expanded', 'Ordered Artisan', 'Wisdom', 'Intelligence',
-         'Charisma', 'Authoring Origin Feat', ?, 'Insight', 'Arcana',
+         'Charisma', 'Authoring Origin Feat (Cleric)', ?, 'Insight', 'Arcana',
          'Glassblower tools', 'Choose the satchel.', 'Choose the ledger.'
        )`,
       [contentKey, featKey],
@@ -506,6 +506,7 @@ describe('catalog authoring draft service', () => {
       reference_text: 'Background reference',
       suggested_abilities: ['wisdom', 'intelligence', 'charisma'],
       default_origin_feat_content_key: featKey,
+      default_origin_feat_display_name: 'Authoring Origin Feat (Cleric)',
       skill_proficiencies: ['insight', 'arcana'],
       tool_reference_text: 'Glassblower tools',
       equipment_option_a_description: 'Choose the satchel.',

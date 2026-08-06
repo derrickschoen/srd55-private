@@ -153,6 +153,7 @@ export function backgroundDraftToAggregate(
   duplicateDraftItemUuids(draft, issues);
 
   let defaultOriginFeat = null;
+  let defaultOriginFeatDisplayName = null;
   if (draft.default_origin_feat_content_key === null) {
     authoringIssue(issues, ['default_origin_feat_content_key'], 'required', 'Default Origin feat is required.');
   } else {
@@ -171,6 +172,13 @@ export function backgroundDraftToAggregate(
       feat.rulesEdition === draft.rules_edition
         ? authoringFingerprintReference(db, 'feat', draft.default_origin_feat_content_key)
         : null;
+    defaultOriginFeatDisplayName = draft.default_origin_feat_display_name === null
+      ? feat?.name ?? null
+      : draft.default_origin_feat_display_name.trim();
+    if (defaultOriginFeatDisplayName === '') {
+      authoringIssue(issues, ['default_origin_feat_display_name'], 'required', 'Default Origin feat display name must not be empty.');
+      defaultOriginFeatDisplayName = null;
+    }
     if (defaultOriginFeat === null) {
       authoringIssue(issues, ['default_origin_feat_content_key'], 'unresolved_reference', 'Default Origin feat must resolve to one current Origin-feat fingerprint.');
     }
@@ -190,6 +198,7 @@ export function backgroundDraftToAggregate(
   });
   if (issues.length > 0 || draft.rules_edition === null ||
       draft.default_origin_feat_content_key === null || defaultOriginFeat === null ||
+      defaultOriginFeatDisplayName === null ||
       draft.suggested_abilities.length !== 3 || draft.skill_proficiencies.length !== 2) {
     throw new BackgroundSemanticValidationError(Object.freeze(issues));
   }
@@ -220,6 +229,7 @@ export function backgroundDraftToAggregate(
     ] as const,
     default_origin_feat_content_key: draft.default_origin_feat_content_key,
     default_origin_feat: defaultOriginFeat,
+    default_origin_feat_display_name: defaultOriginFeatDisplayName,
     skill_proficiencies: [
       draft.skill_proficiencies[0]!,
       draft.skill_proficiencies[1]!,

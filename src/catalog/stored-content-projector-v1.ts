@@ -1,6 +1,11 @@
 import type { DatabaseContext } from '../db/database';
 import type { ContentKey } from '../domain/ids';
-import type { ContentKind } from './content-identity';
+import type { ContentFingerprintReference } from '../authoring/contracts';
+import {
+  CONTENT_FINGERPRINT_SCHEME_V1,
+  deriveContentIdentityV1,
+  type ContentKind,
+} from './content-identity';
 import { projectStoredEquipmentContentV1 } from './equipment-content-projector-v1';
 import { projectStoredSpellContentV1 } from './spell-content-projector-v1';
 import {
@@ -76,4 +81,41 @@ export function projectStoredContentV1(
     name: stored.aggregate.name,
     payload: stored.payload,
   });
+}
+
+/**
+ * The one verification seam for a recorded dependency fingerprint. It proves
+ * both that the registry edge resolves uniquely to the expected key and that
+ * the key's live stored projection still derives the recorded digest.
+ */
+export function storedContentMatchesFingerprintReferenceV1<
+  K extends ContentKind,
+>(
+  db: DatabaseContext,
+  contentKey: ContentKey,
+  reference: ContentFingerprintReference<K>,
+): boolean {
+  if (reference.scheme !== CONTENT_FINGERPRINT_SCHEME_V1) return false;
+  const targets = db.allRaw(
+    `SELECT DISTINCT content_key
+     FROM catalog_content_fingerprints
+     WHERE content_kind = ? AND fingerprint_scheme = ?
+       AND fingerprint_digest = ?
+       AND fingerprint_role IN ('current', 'compatible')
+     ORDER BY content_key`,
+    [reference.kind, reference.scheme, reference.digest],
+  ).map((row) => String(row.content_key));
+  if (targets.length !== 1 || targets[0] !== contentKey) return false;
+  try {
+    const stored = projectStoredContentV1(db, reference.kind, contentKey);
+    const live = deriveContentIdentityV1({
+      kind: stored.kind,
+      edition: stored.edition,
+      name: stored.name,
+      payload: stored.payload,
+    });
+    return live.digest === reference.digest;
+  } catch {
+    return false;
+  }
 }

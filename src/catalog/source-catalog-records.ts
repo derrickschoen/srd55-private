@@ -20,7 +20,7 @@ import {
   AUTHORING_TEXT_LIMITS,
 } from '../authoring/limits';
 import { isRecord } from '../worker/handler';
-import { GrantRule } from '../grants/grant-rule';
+import { GRANT_RULE_FIELDS, GrantRule } from '../grants/grant-rule';
 import { deriveContentIdentityV1 } from './content-identity';
 import { CONTENT_FINGERPRINT_SCHEME_V1 } from './content-identity';
 import { projectAuthoredContentAggregateV1 } from './stored-authored-content-projector-v1';
@@ -170,18 +170,7 @@ function baseAggregate(value: unknown, kind: SourceCatalogRecordKind) {
 
 function normalizedGrant(value: unknown, label: string): AuthoringGrant {
   const grant = record(value, label);
-  exactKeys(grant, label, [
-    'kind', 'rule_key', 'count', 'bucket', 'always_prepared', 'with_slots',
-    'free_cast', 'active_from_class_level', 'active_if_config',
-    'distinct_config_by', 'level_min', 'level_max', 'spell',
-    'spell_version_id', 'spell_version_key', 'list', 'schools', 'tags',
-    'source_type', 'source_definition', 'source_definition_id',
-    'source_definition_key', 'definition_key_config', 'child_config',
-    'child_config_config', 'capability_key', 'collection', 'access_mode',
-    'acquisitions_config', 'initial_count', 'count_per_level', 'style_key',
-    'selection_pool', 'skills', 'allows_tool_instead', 'required',
-    'counts_against_limit', 'label', 'selection_collection',
-  ]);
+  exactKeys(grant, label, GRANT_RULE_FIELDS);
   boundedText(grant.rule_key, `${label}.rule_key`, AUTHORING_TEXT_LIMITS.ruleKey);
   for (const localLocator of [
     'spell_version_id', 'spell_version_key',
@@ -423,7 +412,7 @@ function validateBackground(aggregate: Record<string, unknown>): void {
   exactKeys(aggregate, 'aggregate', [
     'kind', 'name', 'rules_edition', 'reference_text', 'repeatable', 'grants',
     'suggested_abilities', 'default_origin_feat_content_key',
-    'default_origin_feat', 'skill_proficiencies',
+    'default_origin_feat', 'default_origin_feat_display_name', 'skill_proficiencies',
     'tool_reference_text', 'equipment_option_a_description',
     'equipment_option_b_description', 'equipment_option_a',
     'equipment_option_b', 'effects',
@@ -436,6 +425,11 @@ function validateBackground(aggregate: Record<string, unknown>): void {
     throw new TypeError("Catalog field 'aggregate.suggested_abilities' must contain three abilities.");
   }
   fingerprint(aggregate.default_origin_feat, 'aggregate.default_origin_feat', 'feat');
+  boundedText(
+    aggregate.default_origin_feat_display_name,
+    'aggregate.default_origin_feat_display_name',
+    AUTHORING_TEXT_LIMITS.shortLabel,
+  );
   boundedText(
     aggregate.default_origin_feat_content_key,
     'aggregate.default_origin_feat_content_key',

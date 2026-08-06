@@ -1,7 +1,9 @@
 -- HA-4 fix round 1 / N1: a background's printed feat name is display text,
 -- not content identity. Preserve the exact installed Origin feat by content
 -- key. Legacy rows are backfilled only when their old name is unambiguous;
--- an ambiguous absence remains NULL instead of guessing.
+-- no match or an ambiguous match remains NULL instead of guessing. Migration
+-- execution is guarded by its result-schema checksum in applyMigrationSuffix;
+-- an explicit rerun is therefore a no-op before this rebuild can touch data.
 DROP TRIGGER `catalog_register_background_template_identity_before_insert`;
 
 CREATE TABLE `__new_background_templates` (
@@ -43,6 +45,7 @@ SELECT
       FROM `feat_definitions` AS feat
       WHERE feat.`name` = template.`feat_name`
         AND feat.`rules_edition` = template.`rules_edition`
+        AND feat.`category` = 'origin'
       HAVING COUNT(*) = 1
     ),
     CASE
@@ -51,6 +54,7 @@ SELECT
         FROM `feat_definitions` AS feat
         WHERE feat.`name` = 'Magic Initiate'
           AND feat.`rules_edition` = template.`rules_edition`
+          AND feat.`category` = 'origin'
         HAVING COUNT(*) = 1
       )
       ELSE NULL
@@ -79,10 +83,23 @@ BEGIN
     SELECT 1 FROM catalog_content_identities
     WHERE content_key = NEW.content_key AND content_kind = 'background'
   );
-  SELECT RAISE(ABORT, 'background default Origin feat key must name an installed feat')
+  SELECT RAISE(ABORT, 'background default Origin feat key must name an installed Origin feat')
   WHERE NEW.default_origin_feat_content_key IS NOT NULL
     AND NOT EXISTS (
       SELECT 1 FROM feat_definitions
       WHERE content_key = NEW.default_origin_feat_content_key
+        AND category = 'origin'
+    );
+END;
+
+CREATE TRIGGER background_default_origin_feat_before_update
+BEFORE UPDATE OF default_origin_feat_content_key ON background_templates
+BEGIN
+  SELECT RAISE(ABORT, 'background default Origin feat key must name an installed Origin feat')
+  WHERE NEW.default_origin_feat_content_key IS NOT NULL
+    AND NOT EXISTS (
+      SELECT 1 FROM feat_definitions
+      WHERE content_key = NEW.default_origin_feat_content_key
+        AND category = 'origin'
     );
 END;

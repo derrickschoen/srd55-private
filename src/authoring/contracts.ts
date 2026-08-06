@@ -137,6 +137,8 @@ export interface BackgroundAuthoringDraft
   extends AuthoringDraftBase<'background'> {
   readonly suggested_abilities: readonly Ability[];
   readonly default_origin_feat_content_key: ContentKey | null;
+  /** Authored presentation text; null until a feat has been selected. */
+  readonly default_origin_feat_display_name: string | null;
   readonly skill_proficiencies: readonly Skill[];
   readonly tool_reference_text: string | null;
   readonly equipment_option_a_description: string;
@@ -267,6 +269,12 @@ export interface BackgroundContentAggregate
   readonly suggested_abilities: readonly [Ability, Ability, Ability];
   readonly default_origin_feat_content_key: ContentKey;
   readonly default_origin_feat: ContentFingerprintReference<'feat'>;
+  /**
+   * Presentation metadata, deliberately outside the content-v1 payload. The
+   * keyed fingerprint owns mechanics; this preserves qualifiers such as
+   * "Magic Initiate (Cleric)" without splitting otherwise-identical identity.
+   */
+  readonly default_origin_feat_display_name: string;
   readonly skill_proficiencies: readonly [Skill, Skill];
   readonly tool_reference_text: string | null;
   readonly equipment_option_a_description: string;

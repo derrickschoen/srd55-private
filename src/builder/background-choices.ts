@@ -39,6 +39,7 @@ import {
   MAGIC_INITIATE_LISTS,
 } from '../domain/background-feat-name';
 import { hasExactKeys } from './contracts';
+import { grantRuleConsumesConfig } from '../grants/grant-rule';
 
 /**
  * Magic Initiate's closed casting-ability choice set. Its spell lists and
@@ -246,19 +247,11 @@ export function isGuidedOriginFeatOfferable(
     return false;
   }
   if (!Array.isArray(decoded)) return false;
-  const demandsConfig = (value: unknown): boolean => {
-    if (typeof value === 'string') return value.startsWith('$config.');
-    if (Array.isArray(value)) return value.some(demandsConfig);
-    if (value === null || typeof value !== 'object') return false;
-    const record = value as Readonly<Record<string, unknown>>;
-    if (record['allows_tool_instead'] === true) return true;
-    if (
-      typeof record['definition_key_config'] === 'string' ||
-      typeof record['child_config_config'] === 'string'
-    ) return true;
-    return Object.values(record).some(demandsConfig);
-  };
-  return !decoded.some(demandsConfig);
+  return !decoded.some((rule) =>
+    rule === null || typeof rule !== 'object' || Array.isArray(rule)
+      ? true
+      : grantRuleConsumesConfig(rule as Readonly<Record<string, unknown>>),
+  );
 }
 
 export function isGuidedApplyBackgroundParams(
