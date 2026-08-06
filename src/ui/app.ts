@@ -98,20 +98,52 @@ export class Application {
 
     this.root.setAttribute('aria-busy', 'true');
     clear(this.root);
+    const screenCleanups: Cleanup[] = [];
+    let screenScopeActive = true;
+    const disposeScreenScope = (): void => {
+      if (!screenScopeActive) return;
+      screenScopeActive = false;
+      for (const cleanup of screenCleanups.splice(0)) cleanup();
+    };
     try {
       const cleanup = await screen.render({
         root: this.root,
         route,
         router: this.router,
         rpc: this.rpc,
+        registerNavigationGuard: (guard) => {
+          if (!screenScopeActive) {
+            throw new Error('Cannot register a navigation guard after screen teardown.');
+          }
+          const removeGuard = this.router.registerNavigationGuard(guard);
+          let registered = true;
+          const dispose = (): void => {
+            if (!registered) return;
+            registered = false;
+            removeGuard();
+          };
+          screenCleanups.push(dispose);
+          return dispose;
+        },
       });
       if (sequence !== this.#renderSequence) {
-        cleanup?.();
+        try {
+          cleanup?.();
+        } finally {
+          disposeScreenScope();
+        }
         return;
       }
-      this.#cleanup = cleanup ?? undefined;
+      this.#cleanup = () => {
+        try {
+          cleanup?.();
+        } finally {
+          disposeScreenScope();
+        }
+      };
       this.root.setAttribute('aria-busy', 'false');
     } catch (error) {
+      disposeScreenScope();
       if (sequence === this.#renderSequence) {
         showError(this.root, error);
         this.root.setAttribute('aria-busy', 'false');

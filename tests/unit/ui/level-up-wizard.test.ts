@@ -415,6 +415,7 @@ describe('W-ROUTE-EXACT level-up route', () => {
       route: route('/characters/7/level-up'),
       router: { navigate } as unknown as Router,
       rpc: { call } as unknown as RpcClient,
+      registerNavigationGuard: () => () => undefined,
     });
 
     expect(call).toHaveBeenCalledOnce();

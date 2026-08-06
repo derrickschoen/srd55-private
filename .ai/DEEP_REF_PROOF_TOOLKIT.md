@@ -218,7 +218,7 @@ grep -rono '\.all(\|\.one(' --include=*.ts src/ | grep -v 'Promise\.all' | wc -l
 ```
 
 still returns the inflated count, because `-o` already threw the word away. In
-`src/ui/screens/planner/screen.ts`, the `workspace` (`:315`) declaration is
+`src/ui/screens/planner/screen.ts`, the `workspace` (`:316`) declaration is
 initialized with `Promise.all`, but the line emitted by grep is only `.all(` and
 `Promise` is not in it to
 filter. A post-filter cannot recover context the first command discarded, so the

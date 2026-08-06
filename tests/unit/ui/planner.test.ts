@@ -911,15 +911,17 @@ describe('completeness panel wording', () => {
         new_armor_class: 15,
       });
 
-      // The interactive DOM keeps appended strings as children rather than
-      // synthesising Text nodes, so assert the exact three-node composition.
-      const children = interactiveElement(warning).children as unknown[];
+      // Assert the exact three-node composition: plain-text prefix, marked
+      // hostile name, then plain-text suffix.
+      const children = interactiveElement(warning).children;
       expect(children).toHaveLength(3);
-      expect(children[0]).toBe('Equipping ');
-      const marked = interactiveElement(children[1] as Node);
+      expect(children[0]?.tagName).toBe('#text');
+      expect(children[0]?.textContent).toBe('Equipping ');
+      const marked = children[1]!;
       expect(marked.getAttribute('data-free-text')).toBe('unverified-origin');
       expect(marked.textContent).toBe(hostileName);
-      expect(children[2]).toBe(
+      expect(children[2]?.tagName).toBe('#text');
+      expect(children[2]?.textContent).toBe(
         ' reduces Armor Class from 16 to 15.',
       );
     } finally {

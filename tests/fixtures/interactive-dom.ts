@@ -21,8 +21,10 @@ export class InteractiveTestElement {
   min = '';
   max = '';
   value = '';
+  open = false;
 
   private readonly listeners = new Map<string, Set<Listener>>();
+  private parent: InteractiveTestElement | null = null;
 
   constructor(
     readonly tagName: string,
@@ -66,6 +68,7 @@ export class InteractiveTestElement {
 
   setAttribute(name: string, value: string): void {
     this.attributes.set(name, value);
+    if (name === 'open') this.open = true;
   }
 
   getAttribute(name: string): string | null {
@@ -74,14 +77,68 @@ export class InteractiveTestElement {
 
   removeAttribute(name: string): void {
     this.attributes.delete(name);
+    if (name === 'open') this.open = false;
   }
 
-  append(...nodes: InteractiveTestElement[]): void {
-    this.children.push(...nodes);
+  append(...values: (InteractiveTestElement | string)[]): void {
+    for (const value of values) {
+      const node = typeof value === 'string'
+        ? new InteractiveTestElement('#text', this.owner)
+        : value;
+      if (typeof value === 'string') node.textContent = value;
+      node.remove();
+      node.parent = this;
+      this.children.push(node);
+    }
   }
 
-  replaceChildren(...nodes: InteractiveTestElement[]): void {
-    this.children.splice(0, this.children.length, ...nodes);
+  replaceChildren(...nodes: (InteractiveTestElement | string)[]): void {
+    for (const child of this.children) child.parent = null;
+    this.children.splice(0, this.children.length);
+    this.append(...nodes);
+  }
+
+  get parentElement(): InteractiveTestElement | null {
+    return this.parent;
+  }
+
+  get isConnected(): boolean {
+    let current: InteractiveTestElement | null = this;
+    while (current !== null) {
+      if (this.owner.isDocumentRoot(current)) return true;
+      current = current.parent;
+    }
+    return false;
+  }
+
+  remove(): void {
+    if (this.parent === null) return;
+    const index = this.parent.children.indexOf(this);
+    if (index >= 0) this.parent.children.splice(index, 1);
+    this.parent = null;
+  }
+
+  showModal(): void {
+    if (this.tagName !== 'dialog') {
+      throw new TypeError('showModal is only available on dialog elements.');
+    }
+    if (!this.isConnected) {
+      throw new DOMException(
+        'The dialog element is not connected to a Document.',
+        'InvalidStateError',
+      );
+    }
+    if (this.open) {
+      throw new DOMException(
+        'The dialog element is already open.',
+        'InvalidStateError',
+      );
+    }
+    this.setAttribute('open', '');
+  }
+
+  close(): void {
+    if (this.tagName === 'dialog') this.removeAttribute('open');
   }
 
   addEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
@@ -164,6 +221,18 @@ export class InteractiveTestElement {
 
 class InteractiveTestDocument {
   activeElement: InteractiveTestElement | null = null;
+  readonly documentElement: InteractiveTestElement;
+  readonly body: InteractiveTestElement;
+
+  constructor() {
+    this.documentElement = new InteractiveTestElement('html', this);
+    this.body = new InteractiveTestElement('body', this);
+    this.documentElement.append(this.body);
+  }
+
+  isDocumentRoot(element: InteractiveTestElement): boolean {
+    return element === this.documentElement;
+  }
 
   createElement(tagName: string): InteractiveTestElement {
     return new InteractiveTestElement(tagName, this);

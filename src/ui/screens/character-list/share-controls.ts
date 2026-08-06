@@ -333,6 +333,7 @@ export function createShareControls(
       const showAdoptionDialog = (plan: ContentImportPlan): void => {
         adoptionCleanup?.();
         const rendered = createContentAdoptionDialog({
+          mount: root,
           plan,
           replan: async (choices) =>
             (await client.preview(fragment, choices)).adoptionPlan,
@@ -354,7 +355,6 @@ export function createShareControls(
           onCancel: () => announce('Shared character import cancelled.'),
         });
         adoptionCleanup = rendered.cleanup;
-        root.append(rendered.element);
       };
       if (
         activePreview.adoptionPlan.reviews.length > 0 ||

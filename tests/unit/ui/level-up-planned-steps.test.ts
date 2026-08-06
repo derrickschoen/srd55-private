@@ -741,6 +741,7 @@ describe('W-LU2-DRAFT planned Skills, Expertise, and Spells', () => {
       )),
       router: { navigate: vi.fn() } as unknown as Router,
       rpc: { call: calls } as unknown as RpcClient,
+      registerNavigationGuard: () => () => undefined,
     });
     click(root, LEVEL_UP_ATTR.next);
     click(root, LEVEL_UP_ATTR.next);

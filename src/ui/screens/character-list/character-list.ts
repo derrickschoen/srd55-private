@@ -24,6 +24,7 @@ import {
   createShareControls,
   type ShareControls,
 } from './share-controls';
+import { HOMEBREW_ROUTE } from '../homebrew/homebrew-library';
 
 export interface CharacterListQueries {
   listCharacters(): Promise<CharacterSummary[]>;
@@ -177,7 +178,16 @@ function createShell(
     );
   };
   updateThemeButton();
+  const homebrew = element('a', {
+    className: 'button-secondary',
+    text: 'Homebrew library',
+    attributes: { href: HOMEBREW_ROUTE },
+  });
   cleanups.push(
+    listen(homebrew, 'click', (event) => {
+      event.preventDefault();
+      context.router.navigate(HOMEBREW_ROUTE);
+    }),
     listen(theme, 'click', () => {
       dark = !dark;
       localStorage.setItem(
@@ -217,7 +227,7 @@ function createShell(
               text: 'Open a character or start a new character build.',
             }),
           ]),
-          element('div', { className: 'header-actions' }, [status, theme]),
+          element('div', { className: 'header-actions' }, [status, homebrew, theme]),
         ]),
       ]),
       main,
