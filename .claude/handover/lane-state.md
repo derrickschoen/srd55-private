@@ -23,7 +23,40 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-06-a (newest - read first)
+## RESTART POINT 2026-08-06-b (newest - read first)
+MAIN 69dd7ad (mirror pushed, 9d59f48). FLOORS: vitest 235/3,909; PW 126
+on the pool (~9 min); build 0; migrations 0000-0035 FROZEN; wire v1-v17.
+TWENTY-SIX merges. Rulings through D210.
+
+MERGED SINCE 08-06-a:
+ - HA-2 (69dd7ad, 26th): catalog content draft store, mint 0035.
+   catalog_content_drafts (species|background|subclass), revision-CAS,
+   copy-from-published, byte-exact future recovery. Drafts are
+   whole-database-only: six adversarial sentinel pins in
+   tests/integration/authoring/draft-export-boundaries.test.ts prove
+   drafts leak into NO export surface (character share, portable backup,
+   save-point snapshot, agent JSON, print payload) and DO survive
+   whole-database backup. Supervisor authored the 10k->30k budget raise
+   in tests/unit/authoring-contracts.test.ts (measured, commented,
+   flagged for independent review since supervisor-authored).
+
+IN FLIGHT: CI-5 (wt/ci5, codex dispatched with
+.claude/handover/briefs/ci-5.md + supervisor addendum): portable export
+complete-content-manifest reconciled to D198/D205 - NO legacy-opaque
+union (D205 voided it and the BACKUP-LEGACY control), asserted keys per
+D198, backup version currency verified in code (v4, brief's v2/v3
+numbering stale), install through CI-4a adoption protocol, mint 0036
+expected. If found dead with no report, re-dispatch from the same brief
+pair; log at ~/.claude/jobs/27b61756/tmp/ci5.log.
+
+QUEUE AFTER CI-5: no named units recorded. Follow-ups:
+SUBCLASS-EMPTY-PROSE-AUDIT; CI-8 follows CI-5 in the design dependency
+graph; HA-12 depends on HA-11 and CI-5. Owner's subclass session owes
+the nine docs/homebrew notices and the pending-rulings.md queue.
+
+WORKTREES: wt/party (owner's - never prune) and wt/ci5 (active lane).
+
+## RESTART POINT 2026-08-06-a (superseded by 08-06-b)
 MAIN ba97db9 (mirror pushed). FLOORS: vitest 231/3,863; PW 126 on the
 pool (~9 min); build 0; migrations 0000-0034 FROZEN (0034 = the D205
 wipe: legacy-opaque no longer exists as a vocabulary member); wire
