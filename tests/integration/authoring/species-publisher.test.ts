@@ -47,6 +47,7 @@ import { applicationSeed } from '../../../src/db/bootstrap';
 import { DatabaseContext } from '../../../src/db/database';
 import { damageType, skills } from '../../../src/domain/enums';
 import type { ContentKey } from '../../../src/domain/ids';
+import { SavePointQueries } from '../../../src/queries/save-points';
 import {
   fillSkillGrant,
   unfilledSpeciesSkillGrants,
@@ -488,7 +489,7 @@ describe('HA-3 species publisher', () => {
     )).toEqual(exported);
   }, 20_000);
 
-  it('remaps a source character species effect provenance to target-local template rows', async () => {
+  it('remaps current and save-point species effect provenance to target-local template rows across offset ids', async () => {
     const source = await database(true);
     const sourceAuthoring = service(source);
     const published = publish(
@@ -507,6 +508,11 @@ describe('HA-3 species publisher', () => {
       kind: 'species',
       content_key: published.result.content_key,
     });
+    new SavePointQueries(
+      source,
+      undefined,
+      () => '2042-06-08T00:00:00.000Z',
+    ).create(sourceCharacter.id, 'Species effects before export');
     const sourceRefs = source.allRaw(
       `SELECT template_ref FROM character_effects
        WHERE character_id = ? AND template_ref LIKE 'species_template_trait_effects:%'
@@ -540,6 +546,7 @@ describe('HA-3 species publisher', () => {
     );
     expect(committed.kind).toBe('committed');
     if (committed.kind !== 'committed') throw new Error('Character import did not commit.');
+    expect(committed.result.notices).toEqual([]);
     const targetRefs = target.allRaw(
       `SELECT template_ref FROM character_effects
        WHERE character_id = ? AND template_ref LIKE 'species_template_trait_effects:%'
@@ -560,6 +567,207 @@ describe('HA-3 species publisher', () => {
     expect(targetRefs).toEqual(installedTargetRefs);
     expect(targetRefs).toHaveLength(3);
     expect(targetRefs.every((reference) => !sourceRefs.includes(reference))).toBe(true);
+
+    const importedSavePoint = target.oneRaw(
+      'SELECT snapshot FROM character_save_points WHERE character_id = ?',
+      [committed.result.characterId],
+    );
+    if (importedSavePoint === null) throw new Error('Imported save point is missing.');
+    const saved = JSON.parse(String(importedSavePoint.snapshot)) as {
+      character_effects: Array<{ readonly template_ref: string | null }>;
+    };
+    const savedRefs = saved.character_effects
+      .map((row) => row.template_ref)
+      .filter((reference): reference is string =>
+        reference?.startsWith('species_template_trait_effects:') === true);
+    expect(savedRefs).toEqual(installedTargetRefs);
+    expect(savedRefs.every((reference) =>
+      reference !== null && !sourceRefs.includes(reference))).toBe(true);
+  }, 20_000);
+
+  it('binds divergent-Match identical effect payloads to the correct portable trait identity', async () => {
+    const identicalTraitEffects = (
+      document: SpeciesAuthoringDraft,
+    ): SpeciesAuthoringDraft => ({
+      ...document,
+      traits: [
+        {
+          draft_item_uuid: itemUuid('shared-first-trait'),
+          name: 'First Shared Ward',
+          description: 'The first trait carries the shared effect.',
+          effects: [{
+            kind: 'armor_class_bonus',
+            draft_item_uuid: itemUuid('shared-first-effect'),
+            label: 'Shared ward',
+            notes: null,
+            amount: 1,
+          }],
+        },
+        {
+          draft_item_uuid: itemUuid('shared-second-trait'),
+          name: 'Second Shared Ward',
+          description: 'The second trait carries the same effect.',
+          effects: [{
+            kind: 'armor_class_bonus',
+            draft_item_uuid: itemUuid('shared-second-effect'),
+            label: 'Shared ward',
+            notes: null,
+            amount: 1,
+          }],
+        },
+      ],
+      grants: [],
+    });
+    const source = await database(true);
+    const sourceAuthoring = service(source);
+    const published = publish(sourceAuthoring, savedSpecies(
+      sourceAuthoring,
+      'Divergent Trait Voyager',
+      identicalTraitEffects,
+    ));
+    const sourceClass = listGuidedClassOptions(source)[0];
+    if (sourceClass === undefined) throw new Error('Source class option is missing.');
+    const sourceCharacter = createGuidedCharacter(
+      source,
+      { name: 'Divergent Trait Hero', class_content_key: sourceClass.content_key },
+      new CharacterCommandIntegrity('ha3-divergent-trait-source'),
+    );
+    applyGuidedOrigin(source, {
+      character_id: sourceCharacter.id,
+      kind: 'species',
+      content_key: published.result.content_key,
+    });
+    source.exec(
+      `DELETE FROM character_effects
+       WHERE character_id = ? AND template_ref = (
+         SELECT 'species_template_trait_effects:' || effect.id
+         FROM species_template_trait_effects AS effect
+         JOIN species_template_traits AS trait
+           ON trait.id = effect.species_template_trait_id
+         JOIN species_templates AS template
+           ON template.id = trait.species_template_id
+         WHERE template.content_key = ? AND trait.name = 'First Shared Ward'
+       )`,
+      [sourceCharacter.id, published.result.content_key],
+    );
+    const document = exportCharacterBackup(
+      source,
+      sourceCharacter.id,
+      '2042-06-08T00:00:00.000Z',
+    );
+
+    const target = await database(true);
+    const targetAuthoring = service(target);
+    publish(targetAuthoring, savedSpecies(
+      targetAuthoring,
+      'Divergent Trait Voyager',
+      (draft) => ({
+        ...identicalTraitEffects(draft),
+        reference_text: 'A deliberately divergent local revision.',
+      }),
+    ));
+    const plan = planCharacterBackupImport(target, document);
+    expect(plan.reviews).toEqual([
+      expect.objectContaining({
+        kind: 'species',
+        targetContentKey: published.result.content_key,
+        matchClass: 'key-collision',
+      }),
+    ]);
+    const committed = commitCharacterBackupImport(
+      target,
+      document,
+      plan.token,
+      Object.fromEntries(plan.reviews.map((review) => [
+        review.id,
+        { decision: 'match' as const },
+      ])),
+    );
+    expect(committed.kind).toBe('committed');
+    if (committed.kind !== 'committed') throw new Error('Character import did not commit.');
+    expect(committed.result.notices).toEqual([]);
+
+    const targetTraitRefs = target.allRaw(
+      `SELECT trait.name,
+              'species_template_trait_effects:' || effect.id AS template_ref
+       FROM species_template_trait_effects AS effect
+       JOIN species_template_traits AS trait
+         ON trait.id = effect.species_template_trait_id
+       JOIN species_templates AS template
+         ON template.id = trait.species_template_id
+       WHERE template.content_key = ?
+       ORDER BY trait.sort_order`,
+      [published.result.content_key],
+    );
+    const importedRef = target.scalar<string>(
+      `SELECT template_ref FROM character_effects
+       WHERE character_id = ?
+         AND template_ref LIKE 'species_template_trait_effects:%'`,
+      [committed.result.characterId],
+    );
+    expect(importedRef).toBe(targetTraitRefs[1]?.template_ref);
+    expect(importedRef).not.toBe(targetTraitRefs[0]?.template_ref);
+    expect(targetTraitRefs[1]?.name).toBe('Second Shared Ward');
+  }, 20_000);
+
+  it('surfaces a typed notice when a modified species effect has no target template match', async () => {
+    const source = await database(true);
+    const sourceAuthoring = service(source);
+    const published = publish(
+      sourceAuthoring,
+      savedSpecies(sourceAuthoring, 'Notice Voyager'),
+    );
+    const sourceClass = listGuidedClassOptions(source)[0];
+    if (sourceClass === undefined) throw new Error('Source class option is missing.');
+    const sourceCharacter = createGuidedCharacter(
+      source,
+      { name: 'Notice Hero', class_content_key: sourceClass.content_key },
+      new CharacterCommandIntegrity('ha3-notice-source'),
+    );
+    applyGuidedOrigin(source, {
+      character_id: sourceCharacter.id,
+      kind: 'species',
+      content_key: published.result.content_key,
+    });
+    source.exec(
+      `UPDATE character_effects
+       SET damage_type = 'Changed Void'
+       WHERE id = (
+         SELECT min(id) FROM character_effects
+         WHERE character_id = ? AND effect_kind = 'damage_resistance'
+           AND template_ref LIKE 'species_template_trait_effects:%'
+       )`,
+      [sourceCharacter.id],
+    );
+    const document = exportCharacterBackup(
+      source,
+      sourceCharacter.id,
+      '2042-06-08T00:00:00.000Z',
+    );
+
+    const target = await database(true);
+    const plan = planCharacterBackupImport(target, document);
+    const committed = commitCharacterBackupImport(target, document, plan.token);
+    expect(committed.kind).toBe('committed');
+    if (committed.kind !== 'committed') throw new Error('Character import did not commit.');
+    expect(target.oneRaw(
+      `SELECT damage_type, template_ref FROM character_effects
+       WHERE character_id = ? AND damage_type = 'Changed Void'`,
+      [committed.result.characterId],
+    )).toEqual({ damage_type: 'Changed Void', template_ref: null });
+    expect(committed.result.notices).toEqual([
+      expect.objectContaining({
+        kind: 'species_effect_template_ref_unresolved',
+        effect: expect.objectContaining({
+          label: 'Void Ward',
+          effectKind: 'damage_resistance',
+        }),
+        species: {
+          contentKey: published.result.content_key,
+          name: 'Notice Voyager',
+        },
+      }),
+    ]);
   }, 20_000);
 
   it('keeps bundled species skill plans provenance-gated from authored rule keys', async () => {

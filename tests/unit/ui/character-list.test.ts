@@ -338,7 +338,7 @@ describe('catalog and backup entry points', () => {
           return {
             kind: 'committed',
             outcomes: [],
-            result: { characterId: id, spellOutcomes: [] },
+            result: { characterId: id, spellOutcomes: [], notices: [] },
           };
         },
       },
