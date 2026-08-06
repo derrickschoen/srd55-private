@@ -7,7 +7,6 @@ import type { CatalogClient } from '../../../catalog/client';
 import { createCatalogClient } from '../../../catalog/client';
 import type {
   CharacterBackupDocument,
-  CharacterImportResult,
 } from '../../../backup/character-backup';
 import type { BackupClient } from '../../../backup/client';
 import { createBackupClient } from '../../../backup/client';
@@ -44,7 +43,8 @@ export interface ImportBackupServices {
     | 'exportDatabase'
     | 'importDatabase'
     | 'exportCharacter'
-    | 'importCharacter'
+    | 'planCharacterImport'
+    | 'commitCharacterImport'
   >;
   readonly confirm: (message: string) => boolean;
   readonly save: (file: SavedFile) => void;
@@ -166,16 +166,27 @@ export class ImportBackupController {
     });
   }
 
-  async importCharacter(file: ReadableFile): Promise<CharacterImportResult> {
+  async prepareCharacterImport(file: ReadableFile): Promise<{
+    readonly document: CharacterBackupDocument;
+    readonly plan: ContentImportPlan;
+  }> {
+    const document = await this.readCharacterDocument(file);
+    return {
+      document,
+      plan: await this.services.backup.planCharacterImport(document, {}),
+    };
+  }
+
+  private async readCharacterDocument(
+    file: ReadableFile,
+  ): Promise<CharacterBackupDocument> {
     let document: unknown;
     try {
       document = JSON.parse(await file.text());
     } catch {
       throw new TypeError('Character backup must contain valid JSON.');
     }
-    return this.services.backup.importCharacter(
-      document as CharacterBackupDocument,
-    );
+    return document as CharacterBackupDocument;
   }
 }
 
@@ -424,10 +435,46 @@ export function createImportBackupControls(
         if (file === undefined) {
           throw new TypeError('Choose a character JSON backup.');
         }
-        const imported = await controller.importCharacter(file);
-        await options.onPersistedChange();
-        characterInput.value = '';
-        return `Character imported as #${imported.characterId}.`;
+        const prepared = await controller.prepareCharacterImport(file);
+        if (prepared.plan.reviews.length === 0) {
+          const committed = await services.backup.commitCharacterImport(
+            prepared.document,
+            prepared.plan.token,
+            {},
+          );
+          if (committed.kind !== 'committed') {
+            throw new TypeError(`Character import was ${committed.kind}.`);
+          }
+          await options.onPersistedChange();
+          characterInput.value = '';
+          return `Character imported as #${committed.result.characterId}.`;
+        }
+        adoptionCleanup?.();
+        const rendered = createContentAdoptionDialog({
+          plan: prepared.plan,
+          replan: (choices) => services.backup.planCharacterImport(
+            prepared.document,
+            choices,
+          ),
+          commit: (plan, choices) => services.backup.commitCharacterImport(
+            prepared.document,
+            plan.token,
+            choices,
+          ),
+          onCommitted: async (result) => {
+            const committed = result as Extract<
+              Awaited<ReturnType<BackupClient['commitCharacterImport']>>,
+              { readonly kind: 'committed' }
+            >;
+            await options.onPersistedChange();
+            characterInput.value = '';
+            announce(`Character imported as #${committed.result.characterId}.`);
+          },
+          onCancel: () => announce('Character import cancelled.'),
+        });
+        adoptionCleanup = rendered.cleanup;
+        root.append(rendered.element);
+        return 'Review each matching content entry before importing.';
       });
     }),
   );

@@ -9,6 +9,7 @@ import {
 import {
   CHARACTER_BACKUP_FORMAT,
   CHARACTER_BACKUP_VERSION,
+  PRE_ARCHIVE_CHARACTER_BACKUP_VERSION,
   PRE_FLAVOR_CHARACTER_BACKUP_VERSION,
   PREVIOUS_CHARACTER_BACKUP_VERSION,
 } from '../../../src/backup/backup-version';
@@ -33,6 +34,17 @@ import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 const opened: Database[] = [];
 const lifecycles: DatabaseLifecycle[] = [];
 const timestamp = '2026-07-23 12:00:00';
+
+function emptyHistoricalSpellDefinitions() {
+  return {
+    spell_identities: [], spell_identity_aliases: [], spell_versions: [],
+    spell_version_publications: [], spell_list_memberships: [],
+    spell_version_tags: [], spell_version_damage_types: [],
+    spell_version_conditions: [], spell_version_attack_modes: [],
+    spell_version_save_abilities: [], spell_version_upcast_levels: [],
+    spell_version_cantrip_upgrade_levels: [],
+  };
+}
 
 interface CatalogIds {
   classId: number;
@@ -464,6 +476,8 @@ describe('portable character backup', () => {
       ),
     ) as unknown as Record<string, unknown>;
     historical.version = PRE_FLAVOR_CHARACTER_BACKUP_VERSION;
+    historical.spell_definitions = emptyHistoricalSpellDefinitions();
+    delete historical.content;
     const root = historical.character as Record<string, unknown>;
     delete root.alignment;
     delete root.appearance;
@@ -516,7 +530,9 @@ describe('portable character backup', () => {
       string,
       unknown
     >;
-    historical.version = PREVIOUS_CHARACTER_BACKUP_VERSION;
+    historical.version = PRE_ARCHIVE_CHARACTER_BACKUP_VERSION;
+    historical.spell_definitions = emptyHistoricalSpellDefinitions();
+    delete historical.content;
     delete (historical.character as Record<string, unknown>).archived_at;
     const activeTarget = await database();
     seedCatalog(activeTarget, true);
@@ -1493,20 +1509,7 @@ describe('a backup file written while the dormant orphan column existed', () => 
         background_definitions: [],
         spell_versions: [],
       },
-      spell_definitions: {
-        spell_identities: [],
-        spell_identity_aliases: [],
-        spell_versions: [],
-        spell_version_publications: [],
-        spell_list_memberships: [],
-        spell_version_tags: [],
-        spell_version_damage_types: [],
-        spell_version_conditions: [],
-        spell_version_attack_modes: [],
-        spell_version_save_abilities: [],
-        spell_version_upcast_levels: [],
-        spell_version_cantrip_upgrade_levels: [],
-      },
+      content: [],
     };
   }
 
@@ -1682,6 +1685,11 @@ describe('complete database backup', () => {
       kind: 'subclass', contentKey: 'expanded:subclass:image',
       name: 'Image Subclass', keyKind: 'bundled-stable',
     });
+    lifecycle.database.exec(
+      `UPDATE catalog_content_identities
+       SET archived_at = '2042-03-04T05:06:07.000Z'
+       WHERE content_key = 'expanded:subclass:image'`,
+    );
     lifecycle.database.exec(`
       INSERT INTO class_definitions (
         content_key, name, rules_edition, progression_type
@@ -1702,6 +1710,10 @@ describe('complete database backup', () => {
     lifecycle.database.exec('DELETE FROM spell_identities');
     lifecycle.database.exec(
       "DELETE FROM class_definitions WHERE content_key = 'expanded:class:image'",
+    );
+    lifecycle.database.exec(
+      `UPDATE catalog_content_identities SET archived_at = NULL
+       WHERE content_key = 'expanded:subclass:image'`,
     );
 
     await importDatabaseBackup(lifecycle, backup);
@@ -1732,6 +1744,10 @@ describe('complete database backup', () => {
       name: 'Image Subclass',
       notes: 'Non-empty subclass reference.',
     }]);
+    expect(lifecycle.database.oneRaw(
+      `SELECT archived_at FROM catalog_content_identities
+       WHERE content_key = 'expanded:subclass:image'`,
+    )).toEqual({ archived_at: '2042-03-04T05:06:07.000Z' });
 
     const connection = lifecycle.database.connection;
     await expect(

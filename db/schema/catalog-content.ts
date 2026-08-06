@@ -81,6 +81,7 @@ export const catalog_content_identities = sqliteTable(
     created_at: datetime<Timestamp>()('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
+    archived_at: datetime<Timestamp>()('archived_at'),
   },
   (table) => [
     check(
@@ -98,6 +99,10 @@ export const catalog_content_identities = sqliteTable(
     check(
       'catalog_content_identities_normalized_name_check',
       sql`length(${table.normalized_name}) > 0`,
+    ),
+    check(
+      'catalog_content_identities_archived_at_check',
+      sql`${table.archived_at} IS NULL OR typeof(${table.archived_at}) = 'text'`,
     ),
     check(
       'catalog_content_identities_key_layer_check',
@@ -184,6 +189,12 @@ export const catalog_content_identities = sqliteTable(
     index('catalog_content_identities_name_index').on(
       table.content_kind,
       table.normalized_name,
+    ),
+    index('catalog_content_identities_archive_list_index').on(
+      sql`${table.archived_at} desc`,
+      table.content_kind,
+      table.normalized_name,
+      table.content_key,
     ),
   ],
 );

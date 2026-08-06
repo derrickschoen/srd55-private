@@ -20,6 +20,46 @@ export interface StoredContentProjectionV1 {
 }
 
 /**
+ * The complete stored projection used by portable documents. Unlike the
+ * identity-only view above, this retains the validated display aggregate and
+ * its typed outbound fingerprint edges. Database ids and lifecycle metadata
+ * have already been removed by the kind-specific projector.
+ */
+export type StoredPortableContentProjectionV1 = ReturnType<
+  typeof projectStoredPortableContentV1
+>;
+
+export function projectStoredPortableContentV1(
+  db: DatabaseContext,
+  kind: ContentKind,
+  contentKey: ContentKey,
+) {
+  const references = storedAuthoredRegistryReferencesV1(db);
+  switch (kind) {
+    case 'class':
+      return projectStoredClassContentV1(db, contentKey, references);
+    case 'feat':
+      return projectStoredFeatContentV1(db, contentKey, references);
+    case 'subclass':
+    case 'species':
+    case 'background':
+      return projectStoredAuthoredContentV1(db, {
+        kind,
+        contentKey,
+        references,
+      });
+    case 'spell':
+      return projectStoredSpellContentV1(db, contentKey);
+    case 'weapon':
+      return projectStoredEquipmentContentV1(db, { kind, contentKey });
+    case 'armor':
+      return projectStoredEquipmentContentV1(db, { kind, contentKey });
+    case 'item':
+      return projectStoredEquipmentContentV1(db, { kind, contentKey });
+  }
+}
+
+/**
  * The one live stored-row projection switch used by graph staleness checks.
  * Keeping it beside the projectors prevents each importer from defining a
  * partial view of the referenced aggregate it happens to understand.
@@ -29,41 +69,7 @@ export function projectStoredContentV1(
   kind: ContentKind,
   contentKey: ContentKey,
 ): StoredContentProjectionV1 {
-  const references = storedAuthoredRegistryReferencesV1(db);
-  let stored: {
-    readonly kind: ContentKind;
-    readonly aggregate: { readonly rules_edition: string; readonly name: string };
-    readonly payload: unknown;
-  };
-  switch (kind) {
-    case 'class':
-      stored = projectStoredClassContentV1(db, contentKey, references);
-      break;
-    case 'feat':
-      stored = projectStoredFeatContentV1(db, contentKey, references);
-      break;
-    case 'subclass':
-    case 'species':
-    case 'background':
-      stored = projectStoredAuthoredContentV1(db, {
-        kind,
-        contentKey,
-        references,
-      });
-      break;
-    case 'spell':
-      stored = projectStoredSpellContentV1(db, contentKey);
-      break;
-    case 'weapon':
-      stored = projectStoredEquipmentContentV1(db, { kind: 'weapon', contentKey });
-      break;
-    case 'armor':
-      stored = projectStoredEquipmentContentV1(db, { kind: 'armor', contentKey });
-      break;
-    case 'item':
-      stored = projectStoredEquipmentContentV1(db, { kind: 'item', contentKey });
-      break;
-  }
+  const stored = projectStoredPortableContentV1(db, kind, contentKey);
   return Object.freeze({
     kind: stored.kind,
     edition: stored.aggregate.rules_edition,

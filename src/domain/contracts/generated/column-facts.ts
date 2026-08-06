@@ -126,6 +126,7 @@ export const COLUMN_FACTS = {
     catalog_layer: { base: 'degraded', notNull: true },
     normalized_name: { base: 'degraded', notNull: true },
     created_at: { base: 'degraded', notNull: true },
+    archived_at: { base: 'degraded', notNull: false },
   },
   catalog_content_match_decisions: {
     content_kind: { base: 'degraded', notNull: true },

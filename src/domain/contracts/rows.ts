@@ -674,6 +674,7 @@ const REFINEMENTS = {
   'catalog_content_identities.catalog_layer': contentLayerEnum,
   'catalog_content_identities.normalized_name': nonEmptyText,
   'catalog_content_identities.created_at': sqlTimestamp,
+  'catalog_content_identities.archived_at': sqlTimestamp,
 
   'catalog_content_fingerprints.content_kind': contentKindEnum,
   'catalog_content_fingerprints.fingerprint_scheme':

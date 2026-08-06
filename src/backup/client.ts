@@ -1,17 +1,28 @@
 import type { RpcClient } from '../rpc/client';
 import type {
   CharacterBackupDocument,
-  CharacterImportResult,
+  CharacterImportCommitResult,
 } from './character-backup';
 import type { DatabaseBackup } from './database-backup';
+import type {
+  ContentImportChoices,
+  ContentImportPlanToken,
+} from '../catalog/content-adoption';
+import type { PortableImportPlan } from './portable-content';
 
 export interface BackupClient {
   exportDatabase(): Promise<DatabaseBackup>;
   importDatabase(backup: DatabaseBackup): Promise<{ imported: true }>;
   exportCharacter(characterId: number): Promise<CharacterBackupDocument>;
-  importCharacter(
+  planCharacterImport(
     document: CharacterBackupDocument,
-  ): Promise<CharacterImportResult>;
+    choices: ContentImportChoices,
+  ): Promise<PortableImportPlan>;
+  commitCharacterImport(
+    document: CharacterBackupDocument,
+    token: ContentImportPlanToken,
+    choices: ContentImportChoices,
+  ): Promise<CharacterImportCommitResult>;
 }
 
 export function createBackupClient(rpc: RpcClient): BackupClient {
@@ -31,10 +42,24 @@ export function createBackupClient(rpc: RpcClient): BackupClient {
         'backup.exportCharacter',
         { characterId },
       ),
-    importCharacter: (document: CharacterBackupDocument) =>
-      rpc.call<{ document: CharacterBackupDocument }, CharacterImportResult>(
-        'backup.importCharacter',
-        { document },
-      ),
+    planCharacterImport: (
+      document: CharacterBackupDocument,
+      choices: ContentImportChoices,
+    ) => rpc.call<
+      { document: CharacterBackupDocument; choices: ContentImportChoices },
+      PortableImportPlan
+    >('backup.planCharacterImport', { document, choices }),
+    commitCharacterImport: (
+      document: CharacterBackupDocument,
+      token: ContentImportPlanToken,
+      choices: ContentImportChoices,
+    ) => rpc.call<
+      {
+        document: CharacterBackupDocument;
+        token: ContentImportPlanToken;
+        choices: ContentImportChoices;
+      },
+      CharacterImportCommitResult
+    >('backup.commitCharacterImport', { document, token, choices }),
   });
 }

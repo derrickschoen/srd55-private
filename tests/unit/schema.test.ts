@@ -73,7 +73,7 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
       'content_key', 'content_kind', 'key_kind', 'catalog_layer',
       'normalized_name',
     ],
-    numeric: ['created_at'],
+    numeric: ['archived_at', 'created_at'],
   },
   catalog_content_fingerprints: {
     text: [
@@ -992,6 +992,8 @@ const expectedNamedIndexes: Record<string, string> = {
     'catalog_content_identities:catalog_layer,content_kind',
   catalog_content_identities_name_index:
     'catalog_content_identities:content_kind,normalized_name',
+  catalog_content_identities_archive_list_index:
+    'catalog_content_identities:archived_at,content_kind,normalized_name,content_key',
   catalog_content_fingerprints_current_scheme_unique:
     'catalog_content_fingerprints:content_key,fingerprint_scheme:unique',
   catalog_content_fingerprints_resolution_index:

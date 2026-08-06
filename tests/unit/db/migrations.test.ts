@@ -1287,7 +1287,56 @@ describe('database migration chain', () => {
     lifecycle.close();
   });
 
-  it('uses the archive-list index for both lifecycle orderings', () => {
+  it('0036 preserves published identities as active and adds creation archive storage', async () => {
+    const beforeCatalogArchive = DATABASE_MIGRATIONS
+      .slice(0, DATABASE_MIGRATIONS.findIndex(
+        (entry) => entry.id === '0036_catalog_content_archive',
+      ))
+      .map((entry) => entry.sql)
+      .join('\n');
+    const storage = await storageHolding(`${beforeCatalogArchive}
+      INSERT INTO catalog_content_identities (
+        content_key, content_kind, key_kind, catalog_layer, normalized_name,
+        created_at
+      ) VALUES (
+        'expanded:content.feat:preserved', 'feat', 'asserted', 'external',
+        'preserved', '2040-01-02T03:04:05.000Z'
+      );`);
+    const lifecycle = new DatabaseLifecycle(
+      sqlite3,
+      storage,
+      schema,
+      () => undefined,
+      DATABASE_MIGRATIONS,
+    );
+    lifecycle.open();
+    expect(lifecycle.database.oneRaw(
+      `SELECT content_key, content_kind, key_kind, catalog_layer,
+              normalized_name, created_at, archived_at
+       FROM catalog_content_identities
+       WHERE content_key = 'expanded:content.feat:preserved'`,
+    )).toEqual({
+      content_key: 'expanded:content.feat:preserved',
+      content_kind: 'feat',
+      key_kind: 'asserted',
+      catalog_layer: 'external',
+      normalized_name: 'preserved',
+      created_at: '2040-01-02T03:04:05.000Z',
+      archived_at: null,
+    });
+    lifecycle.database.exec(
+      `UPDATE catalog_content_identities
+       SET archived_at = '2042-03-04T05:06:07.000Z'
+       WHERE content_key = 'expanded:content.feat:preserved'`,
+    );
+    expect(lifecycle.database.scalar<string>(
+      `SELECT archived_at FROM catalog_content_identities
+       WHERE content_key = 'expanded:content.feat:preserved'`,
+    )).toBe('2042-03-04T05:06:07.000Z');
+    lifecycle.close();
+  });
+
+  it('uses the archive-list indexes for character and creation lifecycle orderings', () => {
     const db = new sqlite3.oo1.DB(':memory:', 'c');
     try {
       db.exec(schema);
@@ -1299,6 +1348,28 @@ describe('database migration chain', () => {
         expect.objectContaining({
           detail:
             'SEARCH characters USING COVERING INDEX characters_archive_list_index (archived_at=?)',
+        }),
+      ]);
+      expect(db.selectObjects(
+        `EXPLAIN QUERY PLAN
+         SELECT content_key FROM catalog_content_identities
+         WHERE archived_at IS NULL
+         ORDER BY archived_at DESC, content_kind, normalized_name, content_key`,
+      )).toEqual([
+        expect.objectContaining({
+          detail:
+            'SEARCH catalog_content_identities USING COVERING INDEX catalog_content_identities_archive_list_index (archived_at=?)',
+        }),
+      ]);
+      expect(db.selectObjects(
+        `EXPLAIN QUERY PLAN
+         SELECT content_key FROM catalog_content_identities
+         WHERE archived_at IS NOT NULL
+         ORDER BY archived_at DESC, content_kind, normalized_name, content_key`,
+      )).toEqual([
+        expect.objectContaining({
+          detail:
+            'SEARCH catalog_content_identities USING COVERING INDEX catalog_content_identities_archive_list_index (archived_at>?)',
         }),
       ]);
       expect(

@@ -211,10 +211,12 @@ CREATE TABLE `catalog_content_identities` (
 	`catalog_layer` VARCHAR NOT NULL,
 	`normalized_name` VARCHAR NOT NULL,
 	`created_at` DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`archived_at` DATETIME,
 	CONSTRAINT "catalog_content_identities_content_kind_check" CHECK(`content_kind` IN ('class', 'subclass', 'feat', 'species', 'background', 'spell', 'weapon', 'armor', 'item')),
 	CONSTRAINT "catalog_content_identities_key_kind_check" CHECK("catalog_content_identities"."key_kind" IN ('derived', 'asserted', 'bundled-stable')),
 	CONSTRAINT "catalog_content_identities_catalog_layer_check" CHECK("catalog_content_identities"."catalog_layer" IN ('bundled', 'external')),
 	CONSTRAINT "catalog_content_identities_normalized_name_check" CHECK(length("catalog_content_identities"."normalized_name") > 0),
+	CONSTRAINT "catalog_content_identities_archived_at_check" CHECK("catalog_content_identities"."archived_at" IS NULL OR typeof("catalog_content_identities"."archived_at") = 'text'),
 	CONSTRAINT "catalog_content_identities_key_layer_check" CHECK((
         ("catalog_content_identities"."key_kind" = 'derived'
           AND "catalog_content_identities"."catalog_layer" = 'external'
@@ -291,6 +293,7 @@ CREATE TABLE `catalog_content_identities` (
 CREATE UNIQUE INDEX `catalog_content_identities_kind_key_unique` ON `catalog_content_identities` (`content_kind`,`content_key`);
 CREATE INDEX `catalog_content_identities_layer_kind_index` ON `catalog_content_identities` (`catalog_layer`,`content_kind`);
 CREATE INDEX `catalog_content_identities_name_index` ON `catalog_content_identities` (`content_kind`,`normalized_name`);
+CREATE INDEX `catalog_content_identities_archive_list_index` ON `catalog_content_identities` ("archived_at" desc,`content_kind`,`normalized_name`,`content_key`);
 CREATE TABLE `catalog_content_match_decisions` (
 	`content_kind` VARCHAR NOT NULL,
 	`incoming_fingerprint_scheme` VARCHAR NOT NULL,

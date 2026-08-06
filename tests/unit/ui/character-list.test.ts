@@ -25,6 +25,7 @@ import type {
 } from '../../../src/catalog/content-adoption';
 import type { ContentFingerprintDigest } from '../../../src/catalog/content-identity';
 import type { ContentKey } from '../../../src/domain/ids';
+import type { PortableImportPlan } from '../../../src/backup/portable-content';
 import {
   installInteractiveDocument,
   interactiveElement,
@@ -249,6 +250,32 @@ describe('catalog and backup entry points', () => {
     };
     const saved: SavedFile[] = [];
     let confirmation = true;
+    const zeroKinds = {
+      class: 0,
+      subclass: 0,
+      feat: 0,
+      species: 0,
+      background: 0,
+      spell: 0,
+      weapon: 0,
+      armor: 0,
+      item: 0,
+    } as const;
+    const characterPlan: PortableImportPlan = {
+      token: 'c'.repeat(64) as ContentImportPlanToken,
+      inputHash: 'input',
+      graphHash: 'graph',
+      targetHash: 'target',
+      spellActivityChanges: [],
+      reviews: [],
+      outcomes: [],
+      preview: {
+        new_by_kind: zeroKinds,
+        matched_by_kind: zeroKinds,
+        review_required_by_kind: zeroKinds,
+        refused_by_kind: zeroKinds,
+      },
+    };
     const value: ImportBackupServices = {
       catalog: {
         importCatalog: async (documents) => {
@@ -301,15 +328,18 @@ describe('catalog and backup entry points', () => {
             tables: {},
             references: {},
           }) as never,
-        importCharacter: async (document) => {
+        planCharacterImport: async () => characterPlan,
+        commitCharacterImport: async (document) => {
           const id = persisted.characters.length + 7;
-          persisted.characters.push(
-            summary(
-              id,
-              String((document.character as { name?: unknown }).name),
-            ),
-          );
-          return { characterId: id, spellOutcomes: [] };
+          persisted.characters.push(summary(
+            id,
+            String((document.character as { name?: unknown }).name),
+          ));
+          return {
+            kind: 'committed',
+            outcomes: [],
+            result: { characterId: id, spellOutcomes: [] },
+          };
         },
       },
       confirm: () => confirmation,
@@ -626,8 +656,13 @@ describe('catalog and backup entry points', () => {
     expect(characterJson).toContain('"source_character_id": 7');
     expect(characterJson?.endsWith('\n')).toBe(true);
 
-    await controller.importCharacter(
+    const prepared = await controller.prepareCharacterImport(
       readableFile('backup-hero.json', characterJson ?? ''),
+    );
+    await fixture.value.backup.commitCharacterImport(
+      prepared.document,
+      prepared.plan.token,
+      {},
     );
 
     expect(fixture.saved.map((file) => file.filename)).toEqual([

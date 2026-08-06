@@ -36,6 +36,7 @@ import characterArchive from '../../drizzle/0032_character_archive.sql?raw';
 import assertedContentKeys from '../../drizzle/0033_asserted_content_keys.sql?raw';
 import removeLegacyOpaque from '../../drizzle/0034_remove_legacy_opaque.sql?raw';
 import catalogContentDrafts from '../../drizzle/0035_catalog_content_drafts.sql?raw';
+import catalogContentArchive from '../../drizzle/0036_catalog_content_archive.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -406,6 +407,17 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       '715574aa7a098a75b7ecb9af8ed0071badd819e6b8007d3b37222e5fb51ba37b',
     resultSchemaChecksum:
       'c95472fb49c52699354169753554973c2edfe7f79a3cd6e440f9de6e16c53293',
+  }),
+  // D138 / CI-5: published creations have the same archive-state primitive as
+  // characters. The later cascade service owns set membership and lifecycle;
+  // this column makes the creation half durable in complete database images.
+  Object.freeze({
+    id: '0036_catalog_content_archive',
+    sql: catalogContentArchive,
+    checksum:
+      '1df1bd509d44f3647dfbfd9ff3a5b9e8040476d21bd0a942f402bc00e6ec1267',
+    resultSchemaChecksum:
+      'cbf37d18775ad5e489c7adb90df5aa24c04d4194569750de2de86b66844ae066',
   }),
 ]);
 

@@ -9,11 +9,16 @@ import {
 } from '../character/character-state';
 import type { DatabaseContext } from '../db/database';
 import type { SqlRow } from '../db/codecs';
+import { canonicalJson } from '../commands/canonical-json';
+import { sha256 } from '../crypto/sha256';
 import {
   commitContentImport,
   planContentImport,
+  type ContentImportChoices,
+  type ContentImportCommitResult,
   type ContentImportEntryOutcome,
   type ContentImportNode,
+  type ContentImportPlanToken,
 } from '../catalog/content-adoption';
 import { projectStoredContentV1 } from '../catalog/stored-content-projector-v1';
 import { projectStoredSpellRowsContentV1 } from '../catalog/spell-content-projector-v1';
@@ -39,9 +44,19 @@ import {
   CHARACTER_BACKUP_FORMAT,
   CHARACTER_BACKUP_VERSION,
   LEGACY_CHARACTER_BACKUP_VERSION,
+  PRE_ARCHIVE_CHARACTER_BACKUP_VERSION,
   PRE_FLAVOR_CHARACTER_BACKUP_VERSION,
   PREVIOUS_CHARACTER_BACKUP_VERSION,
 } from './backup-version';
+import {
+  exportPortableContentClosure,
+  portableContentKeyForExport,
+  portableImportPlan,
+  portableContentImportNodes,
+  validatePortableContent,
+  type PortableImportPlan,
+  type PortableContentAggregate,
+} from './portable-content';
 import { CHARACTER_TEXT_LIMITS } from '../domain/character-limits';
 import {
   BACKUP_DIRECT_TABLES,
@@ -121,7 +136,7 @@ export interface CharacterBackupDocument {
   readonly character: BackupRow;
   readonly tables: CharacterBackupTables;
   readonly references: CharacterBackupReferences;
-  readonly spell_definitions: CharacterBackupSpellDefinitions;
+  readonly content: readonly PortableContentAggregate[];
 }
 
 export interface LegacyCharacterBackupDocument {
@@ -137,6 +152,17 @@ export interface LegacyCharacterBackupDocument {
 export interface PreviousCharacterBackupDocument {
   readonly format: typeof CHARACTER_BACKUP_FORMAT;
   readonly version: typeof PREVIOUS_CHARACTER_BACKUP_VERSION;
+  readonly exported_at: string;
+  readonly source_character_id: number;
+  readonly character: BackupRow;
+  readonly tables: CharacterBackupTables;
+  readonly references: CharacterBackupReferences;
+  readonly spell_definitions: CharacterBackupSpellDefinitions;
+}
+
+export interface PreArchiveCharacterBackupDocument {
+  readonly format: typeof CHARACTER_BACKUP_FORMAT;
+  readonly version: typeof PRE_ARCHIVE_CHARACTER_BACKUP_VERSION;
   readonly exported_at: string;
   readonly source_character_id: number;
   readonly character: BackupRow;
@@ -161,6 +187,14 @@ export interface CharacterImportResult {
   readonly spellOutcomes: readonly CharacterBackupSpellOutcome[];
 }
 
+export type CharacterImportCommitResult =
+  | {
+      readonly kind: 'committed';
+      readonly outcomes: Extract<ContentImportCommitResult, { readonly kind: 'committed' }>['outcomes'];
+      readonly result: CharacterImportResult;
+    }
+  | Exclude<ContentImportCommitResult, { readonly kind: 'committed' }>;
+
 export type CharacterBackupSpellOutcome =
   | {
       readonly contentKey: string;
@@ -175,6 +209,7 @@ export type CharacterBackupSpellOutcome =
 
 interface ValidatedDocument {
   readonly document: CharacterBackupDocument;
+  readonly legacySpellDefinitions: CharacterBackupSpellDefinitions;
   readonly snapshots: readonly CharacterSnapshotData[];
   readonly referenceMaps: Readonly<Record<ReferenceKind, Map<number, string>>>;
   readonly legacyArmorClassBonuses: readonly LegacyArmorClassBonus[];
@@ -217,6 +252,15 @@ type ResolvedReferences = Readonly<Record<ReferenceKind, Map<number, number>>>;
  */
 const sourceReferenceKinds: Readonly<Record<string, ReferenceKind>> =
   SOURCE_REFERENCE_KIND;
+
+const contentKindForReference = {
+  class_definitions: 'class',
+  subclass_definitions: 'subclass',
+  feat_definitions: 'feat',
+  species_definitions: 'species',
+  background_definitions: 'background',
+  spell_versions: 'spell',
+} as const satisfies Readonly<Record<ReferenceKind, import('../catalog/content-identity').ContentKind>>;
 
 function sourceReferenceKind(sourceType: unknown): ReferenceKind {
   const kind =
@@ -1113,6 +1157,7 @@ function validateDocument(input: unknown): ValidatedDocument {
   if (
     version !== CHARACTER_BACKUP_VERSION &&
     version !== PREVIOUS_CHARACTER_BACKUP_VERSION &&
+    version !== PRE_ARCHIVE_CHARACTER_BACKUP_VERSION &&
     version !== PRE_FLAVOR_CHARACTER_BACKUP_VERSION &&
     version !== LEGACY_CHARACTER_BACKUP_VERSION
   ) {
@@ -1135,7 +1180,18 @@ function validateDocument(input: unknown): ValidatedDocument {
           'tables',
           'references',
         ]
-      : [
+      : version === CHARACTER_BACKUP_VERSION
+        ? [
+            'format',
+            'version',
+            'exported_at',
+            'source_character_id',
+            'character',
+            'tables',
+            'references',
+            'content',
+          ]
+        : [
           'format',
           'version',
           'exported_at',
@@ -1196,17 +1252,19 @@ function validateDocument(input: unknown): ValidatedDocument {
   ] as const;
   assertExactKeys(
     rawCharacter,
-    version === CHARACTER_BACKUP_VERSION
+    version === CHARACTER_BACKUP_VERSION ||
+    version === PREVIOUS_CHARACTER_BACKUP_VERSION
       ? currentCharacterColumns
-      : version === PREVIOUS_CHARACTER_BACKUP_VERSION
+      : version === PRE_ARCHIVE_CHARACTER_BACKUP_VERSION
         ? preArchiveCharacterColumns
         : preFlavorCharacterColumns,
     'Character backup character',
   );
   const character: MutableRow =
-    version === CHARACTER_BACKUP_VERSION
+    version === CHARACTER_BACKUP_VERSION ||
+    version === PREVIOUS_CHARACTER_BACKUP_VERSION
       ? rawCharacter
-      : version === PREVIOUS_CHARACTER_BACKUP_VERSION
+      : version === PRE_ARCHIVE_CHARACTER_BACKUP_VERSION
         ? { ...rawCharacter, archived_at: null }
         : {
             ...rawCharacter,
@@ -1385,10 +1443,15 @@ function validateDocument(input: unknown): ValidatedDocument {
   const spellDefinitions =
     version === LEGACY_CHARACTER_BACKUP_VERSION
       ? emptySpellDefinitions()
+      : version === CHARACTER_BACKUP_VERSION
+        ? emptySpellDefinitions()
       : validateSpellDefinitions(
           document.spell_definitions,
           referenceMaps.spell_versions,
         );
+  const content = version === CHARACTER_BACKUP_VERSION
+    ? validatePortableContent(document.content)
+    : Object.freeze([]);
 
   // The five snapshot tables get their shape checked inside
   // `validateCharacterRows`, which also runs for every save point; the rest are
@@ -1497,8 +1560,9 @@ function validateDocument(input: unknown): ValidatedDocument {
           })),
         ]),
       ) as unknown as CharacterBackupReferences,
-      spell_definitions: spellDefinitions,
+      content,
     },
+    legacySpellDefinitions: spellDefinitions,
     snapshots,
     referenceMaps,
     legacyArmorClassBonuses: currentLegacyArmorClassBonuses,
@@ -1510,6 +1574,7 @@ export function validateCharacterBackup(
 ): asserts input is
   | CharacterBackupDocument
   | PreviousCharacterBackupDocument
+  | PreArchiveCharacterBackupDocument
   | PreFlavorCharacterBackupDocument
   | LegacyCharacterBackupDocument {
   validateDocument(input);
@@ -1568,114 +1633,6 @@ function selectCharacterRows(
     }`,
     [characterId],
   );
-}
-
-function selectRowsByForeignIds(
-  db: DatabaseContext,
-  table: SpellDefinitionTable,
-  column: 'id' | 'spell_identity_id' | 'spell_version_id',
-  ids: ReadonlySet<number>,
-): SqlRow[] {
-  if (ids.size === 0) {
-    return [];
-  }
-  return db.allRaw(
-    `SELECT *
-     FROM "${table}"
-     WHERE "${column}" IN (${placeholders(ids)})
-     ORDER BY id`,
-    [...ids],
-  );
-}
-
-function selectSpellDefinitions(
-  db: DatabaseContext,
-  referencedVersionIds: ReadonlySet<number>,
-): CharacterBackupSpellDefinitions {
-  if (referencedVersionIds.size === 0) {
-    return emptySpellDefinitions();
-  }
-  const versions = db.allRaw(
-    `SELECT *
-     FROM spell_versions
-     WHERE id IN (${placeholders(referencedVersionIds)})
-       AND provenance IN ('user', 'import')
-     ORDER BY id`,
-    [...referencedVersionIds],
-  );
-  const versionIds = new Set(versions.map((row) => Number(row.id)));
-  const identityIds = new Set(
-    versions.map((row) => Number(row.spell_identity_id)),
-  );
-  return {
-    spell_identities: selectRowsByForeignIds(
-      db,
-      'spell_identities',
-      'id',
-      identityIds,
-    ),
-    spell_identity_aliases: selectRowsByForeignIds(
-      db,
-      'spell_identity_aliases',
-      'spell_identity_id',
-      identityIds,
-    ),
-    spell_versions: versions,
-    spell_version_publications: selectRowsByForeignIds(
-      db,
-      'spell_version_publications',
-      'spell_version_id',
-      versionIds,
-    ),
-    spell_list_memberships: selectRowsByForeignIds(
-      db,
-      'spell_list_memberships',
-      'spell_version_id',
-      versionIds,
-    ),
-    spell_version_tags: selectRowsByForeignIds(
-      db,
-      'spell_version_tags',
-      'spell_version_id',
-      versionIds,
-    ),
-    spell_version_damage_types: selectRowsByForeignIds(
-      db,
-      'spell_version_damage_types',
-      'spell_version_id',
-      versionIds,
-    ),
-    spell_version_conditions: selectRowsByForeignIds(
-      db,
-      'spell_version_conditions',
-      'spell_version_id',
-      versionIds,
-    ),
-    spell_version_attack_modes: selectRowsByForeignIds(
-      db,
-      'spell_version_attack_modes',
-      'spell_version_id',
-      versionIds,
-    ),
-    spell_version_save_abilities: selectRowsByForeignIds(
-      db,
-      'spell_version_save_abilities',
-      'spell_version_id',
-      versionIds,
-    ),
-    spell_version_upcast_levels: selectRowsByForeignIds(
-      db,
-      'spell_version_upcast_levels',
-      'spell_version_id',
-      versionIds,
-    ),
-    spell_version_cantrip_upgrade_levels: selectRowsByForeignIds(
-      db,
-      'spell_version_cantrip_upgrade_levels',
-      'spell_version_id',
-      versionIds,
-    ),
-  };
 }
 
 export function exportCharacterBackup(
@@ -1773,6 +1730,19 @@ export function exportCharacterBackup(
       return [kind, rows];
     }),
   ) as unknown as CharacterBackupReferences;
+  const portableReferences = Object.fromEntries(
+    referenceKinds.map((referenceKind) => [
+      referenceKind,
+      references[referenceKind].map((reference) => ({
+        ...reference,
+        content_key: portableContentKeyForExport(
+          db,
+          contentKindForReference[referenceKind],
+          reference.content_key as ContentKey,
+        ),
+      })),
+    ]),
+  ) as unknown as CharacterBackupReferences;
 
   const result: CharacterBackupDocument = {
     format: CHARACTER_BACKUP_FORMAT,
@@ -1781,10 +1751,15 @@ export function exportCharacterBackup(
     source_character_id: characterId,
     character,
     tables: allTables,
-    references,
-    spell_definitions: selectSpellDefinitions(
+    references: portableReferences,
+    content: exportPortableContentClosure(
       db,
-      referenceIds.spell_versions,
+      referenceKinds.flatMap((referenceKind) =>
+        references[referenceKind].map((reference) => ({
+          kind: contentKindForReference[referenceKind],
+          contentKey: reference.content_key as ContentKey,
+        })),
+      ),
     ),
   };
   validateCharacterBackup(result);
@@ -1795,7 +1770,7 @@ function resolveReferences(
   db: DatabaseContext,
   maps: Readonly<Record<ReferenceKind, Map<number, string>>>,
   portableSpellKeys: ReadonlySet<string>,
-  portableSpellTargets: ReadonlyMap<string, string> = new Map(),
+  portableTargets: ReadonlyMap<string, string> = new Map(),
 ): ResolvedReferences {
   return Object.fromEntries(
     referenceKinds.map((kind) => {
@@ -1804,9 +1779,7 @@ function resolveReferences(
         return [kind, new Map<number, number>()];
       }
       const keys = [...source.values()];
-      const targetKeys = kind === 'spell_versions'
-        ? keys.map((key) => portableSpellTargets.get(key) ?? key)
-        : keys;
+      const targetKeys = keys.map((key) => portableTargets.get(key) ?? key);
       const rows = db.all<{
         id: number;
         content_key: string;
@@ -1828,9 +1801,7 @@ function resolveReferences(
       const byKey = new Map(rows.map((row) => [row.content_key, row]));
       const resolved = new Map<number, number>();
       for (const [sourceId, contentKey] of source) {
-        const targetKey = kind === 'spell_versions'
-          ? portableSpellTargets.get(contentKey) ?? contentKey
-          : contentKey;
+        const targetKey = portableTargets.get(contentKey) ?? contentKey;
         const target = byKey.get(targetKey);
         if (
           target === undefined ||
@@ -1993,6 +1964,66 @@ function restoreSpellDefinitions(
       : [[outcome.contentKey, outcome.targetContentKey] as const],
   ));
   return { portableKeys, targets, outcomes: Object.freeze(outcomes) };
+}
+
+function restorePortableContent(
+  db: DatabaseContext,
+  input: unknown,
+): {
+  readonly portableSpellKeys: ReadonlySet<string>;
+  readonly targets: ReadonlyMap<string, string>;
+  readonly spellOutcomes: readonly CharacterBackupSpellOutcome[];
+} {
+  const entries = validatePortableContent(input);
+  if (entries.length === 0) {
+    return {
+      portableSpellKeys: new Set(),
+      targets: new Map(),
+      spellOutcomes: Object.freeze([]),
+    };
+  }
+  const nodes = portableContentImportNodes(db, entries);
+  const sourceKeyByNode = new Map(
+    nodes.map((node, index) => [node.id, entries[index]!.content_key]),
+  );
+  const plan = planContentImport(db, nodes);
+  if (plan.reviews.length > 0) {
+    throw new BackupValidationError(
+      'Character backup content requires adoption review; use the plan/commit import service.',
+    );
+  }
+  const committed = commitContentImport(db, { nodes, token: plan.token });
+  if (committed.kind !== 'committed') {
+    const outcomes = committed.kind === 'stale-plan'
+      ? committed.freshPlan.outcomes
+      : committed.outcomes;
+    throw new BackupValidationError(
+      `Character backup content adoption was refused: ${JSON.stringify(outcomes)}.`,
+    );
+  }
+  const targets = new Map<string, string>();
+  const spellOutcomes: CharacterBackupSpellOutcome[] = [];
+  for (const outcome of committed.outcomes) {
+    if (outcome.kind === 'refused' || outcome.kind === 'review') continue;
+    const sourceKey = sourceKeyByNode.get(outcome.id);
+    if (sourceKey === undefined) continue;
+    targets.set(sourceKey, outcome.contentKey);
+    const entry = entries.find((candidate) => candidate.content_key === sourceKey);
+    if (entry?.kind === 'spell') {
+      spellOutcomes.push(Object.freeze({
+        contentKey: sourceKey,
+        targetContentKey: outcome.contentKey,
+        kind: outcome.kind === 'create' ? 'adopted' : 'matched',
+      }));
+    }
+  }
+  return {
+    portableSpellKeys: new Set(
+      entries.filter((entry) => entry.kind === 'spell').map((entry) => entry.content_key),
+    ),
+    targets,
+    spellOutcomes: Object.freeze(spellOutcomes),
+  };
 }
 
 function installPortableSpellDefinition(
@@ -3026,13 +3057,25 @@ export function importCharacterBackup(
   return db.transaction((transaction) => {
     const restoredSpells = restoreSpellDefinitions(
       transaction,
-      validated.document.spell_definitions,
+      validated.legacySpellDefinitions,
     );
+    const restoredContent = restorePortableContent(
+      transaction,
+      validated.document.content,
+    );
+    const portableSpellKeys = new Set([
+      ...restoredSpells.portableKeys,
+      ...restoredContent.portableSpellKeys,
+    ]);
+    const portableTargets = new Map([
+      ...restoredSpells.targets,
+      ...restoredContent.targets,
+    ]);
     const references = resolveReferences(
       transaction,
       validated.referenceMaps,
-      restoredSpells.portableKeys,
-      restoredSpells.targets,
+      portableSpellKeys,
+      portableTargets,
     );
     const characterId = insertPortableRow(
       transaction,
@@ -3079,7 +3122,117 @@ export function importCharacterBackup(
     }
     return {
       characterId,
-      spellOutcomes: restoredSpells.outcomes,
+      spellOutcomes: Object.freeze([
+        ...restoredSpells.outcomes,
+        ...restoredContent.spellOutcomes,
+      ]),
     };
   });
+}
+
+/** CI-4a preview for portable content; character writes remain rolled back. */
+export function planCharacterBackupImport(
+  db: DatabaseContext,
+  input: unknown,
+  choices: ContentImportChoices = Object.freeze({}),
+): PortableImportPlan {
+  const validated = validateDocument(input);
+  const nodes = portableContentImportNodes(db, validated.document.content);
+  const plan = planContentImport(
+    db,
+    nodes,
+    choices,
+    Object.freeze([]),
+    characterImportOperationIdentity(validated),
+  );
+  assertPlannedCharacterReferences(db, validated, nodes, plan);
+  return portableImportPlan(plan);
+}
+
+function characterImportOperationIdentity(validated: ValidatedDocument): string {
+  return sha256(canonicalJson({
+    document: validated.document,
+    legacySpellDefinitions: validated.legacySpellDefinitions,
+  }));
+}
+
+function assertPlannedCharacterReferences(
+  db: DatabaseContext,
+  validated: ValidatedDocument,
+  nodes: readonly ContentImportNode[],
+  plan: import('../catalog/content-adoption').ContentImportPlan,
+): void {
+  const portableTargets = new Map<string, string>();
+  const refusedPortable = new Set<string>();
+  for (const [index, node] of nodes.entries()) {
+    const entry = validated.document.content[index];
+    const outcome = plan.outcomes.find((candidate) => candidate.id === node.id);
+    if (entry === undefined || outcome === undefined) continue;
+    if (outcome.kind === 'refused') {
+      refusedPortable.add(`${entry.kind}\u0000${entry.content_key}`);
+    } else {
+      portableTargets.set(
+        `${entry.kind}\u0000${entry.content_key}`,
+        outcome.contentKey,
+      );
+    }
+  }
+  const legacySpellKeys = new Set(
+    validated.legacySpellDefinitions.spell_versions.map((row) =>
+      String(row.content_key)),
+  );
+  for (const referenceKind of referenceKinds) {
+    const contentKind = contentKindForReference[referenceKind];
+    for (const contentKey of validated.referenceMaps[referenceKind].values()) {
+      const marker = `${contentKind}\u0000${contentKey}`;
+      const targetKey = portableTargets.get(marker);
+      if (targetKey !== undefined) continue;
+      if (refusedPortable.has(marker)) continue;
+      if (referenceKind === 'spell_versions' && legacySpellKeys.has(contentKey)) {
+        continue;
+      }
+      const available = db.scalar<number>(
+        `SELECT 1 FROM "${referenceKind}"
+         WHERE content_key = ?${referenceKind === 'spell_versions' ? ' AND is_active = 1' : ''}`,
+        [contentKey],
+      ) === 1;
+      if (!available) {
+        throw new BackupValidationError(
+          `Character backup requires unavailable active ${referenceKind} content_key "${contentKey}".`,
+        );
+      }
+    }
+  }
+}
+
+/**
+ * Installs the manifest, remembered decisions, and character clone in one
+ * CI-4a transaction. `importCharacterBackup` sees the just-installed exact
+ * targets (or the just-written receipt), so its compatibility adapters remain
+ * the single character-row implementation.
+ */
+export function commitCharacterBackupImport(
+  db: DatabaseContext,
+  input: unknown,
+  token: ContentImportPlanToken,
+  choices: ContentImportChoices = Object.freeze({}),
+): CharacterImportCommitResult {
+  const validated = validateDocument(input);
+  const nodes = portableContentImportNodes(db, validated.document.content);
+  const operationIdentity = characterImportOperationIdentity(validated);
+  let imported: CharacterImportResult | null = null;
+  const committed = commitContentImport(db, {
+    nodes,
+    token,
+    choices,
+    operationIdentity,
+    afterInstall: (transaction) => {
+      imported = importCharacterBackup(transaction, input);
+    },
+  });
+  if (committed.kind !== 'committed') return committed;
+  if (imported === null) {
+    throw new Error('Character import committed without producing a character.');
+  }
+  return Object.freeze({ ...committed, result: imported });
 }

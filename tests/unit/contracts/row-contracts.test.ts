@@ -101,6 +101,18 @@ function catalogDraftRow(): Record<string, unknown> {
   };
 }
 
+function catalogContentIdentityRow(): Record<string, unknown> {
+  return {
+    content_key: '2024:test.owner:archived-species',
+    content_kind: 'species',
+    key_kind: 'asserted',
+    catalog_layer: 'external',
+    normalized_name: 'archivedspecies',
+    created_at: '2026-08-06T10:00:00.000Z',
+    archived_at: null,
+  };
+}
+
 function slotRow(): Record<string, unknown> {
   return {
     id: 12,
@@ -263,6 +275,33 @@ describe('per-table row contracts', () => {
         'Catalog draft',
       ),
     ).toBeNull();
+    expect(
+      rowContractError(
+        'catalog_content_identities',
+        catalogContentIdentityRow(),
+        'Catalog identity',
+      ),
+    ).toBeNull();
+  });
+
+  it('holds creation archive storage to nullable SQL timestamps', () => {
+    expect(
+      rowContractError(
+        'catalog_content_identities',
+        {
+          ...catalogContentIdentityRow(),
+          archived_at: '2026-08-06T11:00:00.000Z',
+        },
+        'Catalog identity',
+      ),
+    ).toBeNull();
+    expect(
+      rowContractError(
+        'catalog_content_identities',
+        { ...catalogContentIdentityRow(), archived_at: 1 },
+        'Catalog identity',
+      ),
+    ).toContain('Catalog identity.archived_at:');
   });
 
   it('holds draft rows to the three-kind and revision storage contract', () => {

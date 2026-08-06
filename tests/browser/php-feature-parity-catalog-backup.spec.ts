@@ -1,4 +1,12 @@
 import { expect, test } from './fixtures/parallel-test';
+import type { Page } from '@playwright/test';
+import type {
+  CharacterBackupDocument,
+  CharacterImportCommitResult,
+  CharacterImportResult,
+} from '../../src/backup/character-backup';
+import type { DatabaseBackup } from '../../src/backup/database-backup';
+import type { PortableImportPlan } from '../../src/backup/portable-content';
 import {
   catalogRecord,
   workspaceFixtureImage,
@@ -22,6 +30,25 @@ import {
 
 let workspaceImage: FixtureImage<WorkspaceFixtureIds>;
 let catalogImage: FixtureImage<SourceCatalogIds>;
+
+async function importCharacterThroughPlan(
+  page: Page,
+  document: CharacterBackupDocument,
+): Promise<CharacterImportResult> {
+  const plan = await rpc<PortableImportPlan>(page, 'backup.planCharacterImport', {
+    document,
+    choices: {},
+  });
+  const committed = await rpc<CharacterImportCommitResult>(
+    page,
+    'backup.commitCharacterImport',
+    { document, token: plan.token, choices: {} },
+  );
+  if (committed.kind !== 'committed') {
+    throw new Error(`Character import was ${committed.kind}.`);
+  }
+  return committed.result;
+}
 
 test.beforeAll(async () => {
   [workspaceImage, catalogImage] =
@@ -215,17 +242,17 @@ test('whole-database and portable-character export/import round-trip, corrupt-ve
   const exported = await page.evaluate(async (characterId) => {
     const character = await window.appRpc.call<
       { characterId: number },
-      any
+      CharacterBackupDocument
     >('backup.exportCharacter', { characterId });
     const database = await window.appRpc.call<
       Record<string, never>,
-      any
+      DatabaseBackup
     >('backup.exportDatabase', {});
     return { character, database };
   }, workspaceImage.ids.character);
   expect(exported.character).toMatchObject({
     format: 'dnd-multiclass-spells/character',
-    version: 4,
+    version: 5,
     source_character_id: workspaceImage.ids.character,
   });
   expect(exported.database).toMatchObject({
@@ -239,9 +266,7 @@ test('whole-database and portable-character export/import round-trip, corrupt-ve
   });
   expect(await rows(page, 'characters')).toEqual(initialRows);
 
-  const imported = await rpc<any>(page, 'backup.importCharacter', {
-    document: exported.character,
-  });
+  const imported = await importCharacterThroughPlan(page, exported.character);
   expect(imported.characterId).not.toBe(workspaceImage.ids.character);
   expect((await rows(page, 'characters')).map((row) => row.name)).toEqual([
     'R40 Golden',
@@ -270,16 +295,17 @@ test('whole-database and portable-character export/import round-trip, corrupt-ve
   const countBeforeCorruption = (await rows(page, 'characters')).length;
   const beforeCorruption = await databaseBytes(page);
   const corruptCharacter = structuredClone(exported.character);
-  corruptCharacter.version = 99;
+  (corruptCharacter as unknown as { version: number }).version = 99;
   expect(
     (
-      await rejectedRpc(page, 'backup.importCharacter', {
+      await rejectedRpc(page, 'backup.planCharacterImport', {
         document: corruptCharacter,
+        choices: {},
       })
     ).message,
   ).toBe('Unsupported character backup version 99.');
   const corruptDatabase = structuredClone(exported.database);
-  corruptDatabase.version = 99;
+  (corruptDatabase as unknown as { version: number }).version = 99;
   expect(
     (
       await rejectedRpc(page, 'backup.importDatabase', {
@@ -383,10 +409,14 @@ test('fresh-profile catalog import → create/use → export → reload durabili
     280,
   );
   const backups = await page.evaluate(async (characterId) => ({
-    character: await window.appRpc.call('backup.exportCharacter', {
-      characterId,
-    }),
-    database: await window.appRpc.call('backup.exportDatabase', {}),
+    character: await window.appRpc.call<
+      { characterId: number },
+      CharacterBackupDocument
+    >('backup.exportCharacter', { characterId }),
+    database: await window.appRpc.call<Record<string, never>, DatabaseBackup>(
+      'backup.exportDatabase',
+      {},
+    ),
   }), character.id);
   expect(backups.character).toMatchObject({
     format: 'dnd-multiclass-spells/character',
@@ -417,9 +447,7 @@ test('fresh-profile catalog import → create/use → export → reload durabili
       (row) => row.id === slot.id,
     ),
   ).toMatchObject({ current_spell_version_id: spell.id });
-  const clone = await rpc<any>(page, 'backup.importCharacter', {
-    document: backups.character,
-  });
+  const clone = await importCharacterThroughPlan(page, backups.character);
   expect(await rows(page, 'characters')).toHaveLength(2);
   expect(
     forCharacter(

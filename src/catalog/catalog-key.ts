@@ -180,11 +180,17 @@ export function assertedExternalContentKeyFromDeclared(
   const declaredOwner = declaredKey === undefined
     ? null
     : importedContentKeyOwner(declaredKey);
+  const owner = declaredOwner !== null && (
+    !declaredOwner.startsWith('content.') ||
+    declaredOwner === `content.${kind}`
+  )
+    ? declaredOwner
+    : `content.${kind}`;
   return assertedExternalContentKey(
     kind,
     edition,
     name,
-    declaredOwner ?? `content.${kind}`,
+    owner,
   );
 }
 
