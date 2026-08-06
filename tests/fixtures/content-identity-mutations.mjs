@@ -180,10 +180,10 @@ const mutations = {
     testName: 'CI-8 discloses real planner counts, every match reason, and both collision labels',
     changes: [edit(
       'src/ui/content-adoption-dialog.ts',
-      `      return sameDisplayName(review)
+      `      return sameIdentityName(review)
         ? 'Same name, distinct rules content'
         : 'Alias points to distinct rules content';`,
-      `      return sameDisplayName(review)
+      `      return sameIdentityName(review)
         ? 'Collision' // CI8_MUTANT hide same-name distinction
         : 'Alias points to distinct rules content';`,
     )],
