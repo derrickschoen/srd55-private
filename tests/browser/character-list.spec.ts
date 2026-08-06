@@ -235,7 +235,7 @@ test('catalog, complete database, and character backup controls preserve durable
     page.getByRole('button', { name: 'Download character backup' }).click(),
   ]);
   const characterBytes = await downloadBytes(characterDownload);
-  await page.getByLabel('Import one character').setInputFiles({
+  await page.getByLabel('Import complete character JSON').setInputFiles({
     name: 'backup-hero.json',
     mimeType: 'application/json',
     buffer: characterBytes,

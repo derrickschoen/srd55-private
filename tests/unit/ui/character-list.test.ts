@@ -388,6 +388,35 @@ describe('catalog and backup entry points', () => {
     };
   }
 
+  it('labels the complete character JSON input with its rendered accessible name', () => {
+    const fixture = services();
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const controls = createImportBackupControls({
+        rpc: null as never,
+        characters: [],
+        onPersistedChange: () => undefined,
+        services: fixture.value,
+      });
+      const root = interactiveElement(controls.element);
+      const characterInput = root.querySelectorAll('input')[2];
+      if (characterInput === undefined) throw new Error('Character input missing.');
+      const characterImportLabel = root.querySelectorAll('label').find(
+        (label) => label.children.includes(characterInput),
+      );
+      if (characterImportLabel === undefined) {
+        throw new Error('Character import label missing.');
+      }
+
+      expect(elementText(characterImportLabel as unknown as Node)).toContain(
+        'Import complete character JSON',
+      );
+      controls.cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
   it('imports catalog JSON and reports the persisted import summary', async () => {
     const fixture = services();
     const controller = new ImportBackupController(fixture.value);
