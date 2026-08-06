@@ -4,7 +4,11 @@ import type {
   ContentImportPlan,
   ContentImportReviewRow,
 } from '../catalog/content-adoption';
-import { contentKinds, type ContentKind } from '../catalog/content-identity';
+import {
+  contentKinds,
+  normalizeContentIdentityName,
+  type ContentKind,
+} from '../catalog/content-identity';
 import { clear, element, listen, type Cleanup } from './dom';
 
 export interface ContentAdoptionDialogOptions {
@@ -29,8 +33,9 @@ export interface ContentAdoptionDialog {
   readonly cleanup: Cleanup;
 }
 
-function sameDisplayName(review: ContentImportReviewRow): boolean {
-  return review.incomingName === review.localName;
+function sameIdentityName(review: ContentImportReviewRow): boolean {
+  return normalizeContentIdentityName(review.incomingName) ===
+    normalizeContentIdentityName(review.localName);
 }
 
 function reasonLabel(review: ContentImportReviewRow): string {
@@ -40,7 +45,7 @@ function reasonLabel(review: ContentImportReviewRow): string {
     case 'srd-fallback': return 'SRD fingerprint fallback';
     case 'metadata-conflict': return 'Metadata conflict';
     case 'key-collision':
-      return sameDisplayName(review)
+      return sameIdentityName(review)
         ? 'Same name, distinct rules content'
         : 'Alias points to distinct rules content';
   }
@@ -278,7 +283,7 @@ export function createContentAdoptionDialog(
       }));
       if (row.matchClass === 'key-collision') {
         fieldset.append(element('p', {
-          text: sameDisplayName(row)
+          text: sameIdentityName(row)
             ? 'The normalized name is already in use for different rules. Rename the private copy to keep both.'
             : 'The incoming alias points to differently named local content with different rules. Match them only if they are meant to be the same; otherwise keep a renamed private copy.',
         }));

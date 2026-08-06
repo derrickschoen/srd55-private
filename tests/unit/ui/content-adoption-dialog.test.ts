@@ -43,6 +43,7 @@ function itemProjection(
   options: {
     readonly declaredAlias?: ContentKey;
     readonly metadataConflict?: boolean;
+    readonly conflictDetails?: ContentImportProjection<'item'>['conflictDetails'];
   } = {},
 ): ContentImportProjection<'item'> {
   const assertedKey = assertedExternalContentKey('item', '2024', name);
@@ -58,6 +59,9 @@ function itemProjection(
     ...(options.metadataConflict === undefined
       ? {}
       : { metadataConflict: options.metadataConflict }),
+    ...(options.conflictDetails === undefined
+      ? {}
+      : { conflictDetails: options.conflictDetails }),
     projectStored: (database, contentKey) => {
       const row = database.oneRaw(
         `SELECT rules_edition, name, description
@@ -144,7 +148,16 @@ describe('the D82 content-adoption dialog', () => {
     const db = new DatabaseContext(connection);
 
     const exact = itemNode('exact', 'Exact Relic', { rule: 'exact' });
-    const metadata = itemNode('metadata', 'Metadata Relic', { rule: 'metadata' });
+    const exactIdentity = deriveContentIdentityV1(exact.projection);
+    const metadataPayload = {
+      rule: 'metadata',
+      dependency: {
+        kind: exactIdentity.envelope.kind,
+        scheme: exactIdentity.envelope.scheme,
+        digest: exactIdentity.digest,
+      },
+    };
+    const metadata = itemNode('metadata', 'Metadata Relic', metadataPayload);
     const sameNameStored = itemNode(
       'same-name-stored',
       'Shared Relic',
@@ -209,10 +222,15 @@ describe('the D82 content-adoption dialog', () => {
       }),
       itemNode('compatible', 'Compatible Relic', compatiblePayload),
       itemNode('srd', 'Bundled Relic', { rule: 'bundled' }),
-      itemNode('metadata-review', 'Metadata Relic', { rule: 'metadata' }, {
+      itemNode('metadata-review', 'Metadata Relic', metadataPayload, {
         metadataConflict: true,
+        conflictDetails: [{
+          field: 'Source book',
+          incomingValue: 'Incoming Guide',
+          localValue: 'Local Guide',
+        }],
       }),
-      itemNode('same-name-distinct', 'Shared Relic', { rule: 'incoming' }),
+      itemNode('same-name-distinct', 'shared-relic', { rule: 'incoming' }),
       itemNode('alias-distinct', 'Incoming Alias Source', { rule: 'incoming-alias-rules' }, {
         declaredAlias: collisionAlias,
       }),
@@ -240,10 +258,21 @@ describe('the D82 content-adoption dialog', () => {
       'portable:item:same-name-distinct': 'review',
       'portable:item:refused': 'refused',
     });
+    expect(Object.fromEntries(previewPlan.reviews.map((review) => [
+      review.id,
+      review.matchClass,
+    ]))).toEqual({
+      'portable:item:alias': 'alias',
+      'portable:item:compatible': 'compatible-fingerprint',
+      'portable:item:srd': 'srd-fallback',
+      'portable:item:metadata-review': 'metadata-conflict',
+      'portable:item:same-name-distinct': 'key-collision',
+      'portable:item:alias-distinct': 'key-collision',
+    });
     expect(previewPlan.reviews.find((review) =>
       review.id === 'portable:item:same-name-distinct',
     )).toEqual(expect.objectContaining({
-      incomingName: 'Shared Relic',
+      incomingName: 'shared-relic',
       localName: 'Shared Relic',
       matchClass: 'key-collision',
     }));
@@ -267,24 +296,32 @@ describe('the D82 content-adoption dialog', () => {
 
       expect(text).toContain('item: 1 new, 1 matched, 6 needs review, 1 refused');
       expect(text).toContain('3 conflicts must be reviewed below.');
-      for (const label of [
-        'Alias',
-        'Compatible fingerprint',
-        'SRD fingerprint fallback',
-        'Metadata conflict',
-        'Same name, distinct rules content',
-        'Alias points to distinct rules content',
-      ]) {
-        expect(text).toContain(`Match reason: ${label}`);
-      }
+      const dialog = interactiveElement(rendered.element);
+      const renderedReasons = Object.fromEntries(
+        dialog.querySelectorAll('.content-adoption-row').map((row) => [
+          row.getAttribute('data-content-id'),
+          elementText(row as unknown as Node).match(/Match reason: ([^—]+)—/)?.[1]?.trim(),
+        ]),
+      );
+      expect(renderedReasons).toEqual({
+        'portable:item:alias': 'Alias',
+        'portable:item:compatible': 'Compatible fingerprint',
+        'portable:item:srd': 'SRD fingerprint fallback',
+        'portable:item:metadata-review': 'Metadata conflict',
+        'portable:item:same-name-distinct': 'Same name, distinct rules content',
+        'portable:item:alias-distinct': 'Alias points to distinct rules content',
+      });
+      expect(text).toContain(
+        'Source book — incoming: Incoming Guide; local: Local Guide',
+      );
+      expect(text).toContain('Depends on: portable:item:exact');
       expect(text).toContain(
         'The normalized name is already in use for different rules. Rename the private copy to keep both.',
       );
       expect(text).toContain(
         'The incoming alias points to differently named local content with different rules.',
       );
-      const commitButton = interactiveElement(rendered.element)
-        .querySelectorAll('button')
+      const commitButton = dialog.querySelectorAll('button')
         .find((button) => button.textContent === 'Import with these choices');
       expect(commitButton?.disabled).toBe(true);
       rendered.cleanup();
