@@ -16,6 +16,7 @@ import {
   exportCharacterBackup,
   planCharacterBackupImport,
 } from '../../../src/backup/character-backup';
+import { BackupValidationError } from '../../../src/backup/backup-version';
 import {
   exportSelectedLibraryContent,
   importLibraryDocument,
@@ -583,6 +584,182 @@ describe('HA-3 species publisher', () => {
     expect(savedRefs).toEqual(installedTargetRefs);
     expect(savedRefs.every((reference) =>
       reference !== null && !sourceRefs.includes(reference))).toBe(true);
+  }, 20_000);
+
+  it('species-numeric-ref-current-save-point-pin degrades legacy refs to null with typed notices', async () => {
+    const source = await database(true);
+    const sourceAuthoring = service(source);
+    const published = publish(
+      sourceAuthoring,
+      savedSpecies(sourceAuthoring, 'Numeric Ref Voyager'),
+    );
+    const sourceClass = listGuidedClassOptions(source)[0];
+    if (sourceClass === undefined) throw new Error('Source class option is missing.');
+    const sourceCharacter = createGuidedCharacter(
+      source,
+      { name: 'Numeric Ref Hero', class_content_key: sourceClass.content_key },
+      new CharacterCommandIntegrity('ha3-numeric-ref-source'),
+    );
+    applyGuidedOrigin(source, {
+      character_id: sourceCharacter.id,
+      kind: 'species',
+      content_key: published.result.content_key,
+    });
+    new SavePointQueries(
+      source,
+      undefined,
+      () => '2042-06-08T00:00:00.000Z',
+    ).create(sourceCharacter.id, 'Numeric species refs before export');
+    const exported = exportCharacterBackup(
+      source,
+      sourceCharacter.id,
+      '2042-06-08T00:00:00.000Z',
+    );
+    let currentReplaced = false;
+    let savePointReplaced = false;
+    const document = {
+      ...exported,
+      tables: {
+        ...exported.tables,
+        character_effects: exported.tables.character_effects.map((row) => {
+          if (!currentReplaced && row.label === 'Void Ward') {
+            currentReplaced = true;
+            return { ...row, template_ref: 9001 };
+          }
+          return row;
+        }),
+        character_save_points: exported.tables.character_save_points.map((row) => {
+          const snapshot = JSON.parse(String(row.snapshot)) as {
+            character_effects: Array<Record<string, unknown>>;
+            readonly [table: string]: unknown;
+          };
+          return {
+            ...row,
+            snapshot: JSON.stringify({
+              ...snapshot,
+              character_effects: snapshot.character_effects.map((effect) => {
+                if (!savePointReplaced && effect.label === 'Void Ward') {
+                  savePointReplaced = true;
+                  return { ...effect, template_ref: 9002 };
+                }
+                return effect;
+              }),
+            }),
+          };
+        }),
+      },
+    };
+    expect({ currentReplaced, savePointReplaced }).toEqual({
+      currentReplaced: true,
+      savePointReplaced: true,
+    });
+
+    const target = await database(true);
+    const plan = planCharacterBackupImport(target, document);
+    const committed = commitCharacterBackupImport(target, document, plan.token);
+    expect(committed.kind).toBe('committed');
+    if (committed.kind !== 'committed') throw new Error('Character import did not commit.');
+    expect(committed.result.notices).toHaveLength(2);
+    expect(committed.result.notices).toEqual(expect.arrayContaining([
+      {
+        kind: 'species_effect_template_ref_unresolved',
+        effect: {
+          templateRef: '9001',
+          label: 'Void Ward',
+          effectKind: 'damage_resistance',
+        },
+        species: {
+          contentKey: published.result.content_key,
+          name: 'Numeric Ref Voyager',
+        },
+      },
+      {
+        kind: 'species_effect_template_ref_unresolved',
+        effect: {
+          templateRef: '9002',
+          label: 'Void Ward',
+          effectKind: 'damage_resistance',
+        },
+        species: {
+          contentKey: published.result.content_key,
+          name: 'Numeric Ref Voyager',
+        },
+      },
+    ]));
+    expect(target.scalar<string>(
+      `SELECT template_ref FROM character_effects
+       WHERE character_id = ? AND label = 'Void Ward'`,
+      [committed.result.characterId],
+    )).toBeNull();
+    const savedSnapshot = target.scalar<string>(
+      'SELECT snapshot FROM character_save_points WHERE character_id = ?',
+      [committed.result.characterId],
+    );
+    if (savedSnapshot === null) throw new Error('Imported save point is missing.');
+    const saved = JSON.parse(savedSnapshot) as {
+      character_effects: Array<{
+        readonly label: string;
+        readonly template_ref: string | null;
+      }>;
+    };
+    expect(saved.character_effects.find((effect) => effect.label === 'Void Ward')?.template_ref)
+      .toBeNull();
+  }, 20_000);
+
+  it('species-numeric-ref-three-kind-negative-control refuses a class-sourced numeric ref', async () => {
+    const source = await database(true);
+    const sourceAuthoring = service(source);
+    const published = publish(
+      sourceAuthoring,
+      savedSpecies(sourceAuthoring, 'Numeric Boundary Voyager'),
+    );
+    const sourceClass = listGuidedClassOptions(source)[0];
+    if (sourceClass === undefined) throw new Error('Source class option is missing.');
+    const sourceCharacter = createGuidedCharacter(
+      source,
+      { name: 'Numeric Boundary Hero', class_content_key: sourceClass.content_key },
+      new CharacterCommandIntegrity('ha3-numeric-boundary-source'),
+    );
+    applyGuidedOrigin(source, {
+      character_id: sourceCharacter.id,
+      kind: 'species',
+      content_key: published.result.content_key,
+    });
+    const exported = exportCharacterBackup(
+      source,
+      sourceCharacter.id,
+      '2042-06-08T00:00:00.000Z',
+    );
+    const classSourceId = exported.tables.character_source_instances.find(
+      (row) => row.source_type === 'class',
+    )?.id;
+    if (typeof classSourceId !== 'number') throw new Error('Class source is missing.');
+    let replacedIndex: number | null = null;
+    const document = {
+      ...exported,
+      tables: {
+        ...exported.tables,
+        character_effects: exported.tables.character_effects.map((row, index) => {
+          if (replacedIndex === null && row.label === 'Void Ward') {
+            replacedIndex = index;
+            return {
+              ...row,
+              source_instance_id: classSourceId,
+              template_ref: 9003,
+            };
+          }
+          return row;
+        }),
+      },
+    };
+    expect(replacedIndex).not.toBeNull();
+    if (replacedIndex === null) throw new Error('Species effect is missing.');
+
+    const target = await database();
+    expect(() => planCharacterBackupImport(target, document)).toThrow(BackupValidationError);
+    expect(() => planCharacterBackupImport(target, document)).toThrow(
+      `Character backup tables.character_effects[${String(replacedIndex)}].template_ref: Invalid input.`,
+    );
   }, 20_000);
 
   it('binds divergent-Match identical effect payloads to the correct portable trait identity', async () => {
