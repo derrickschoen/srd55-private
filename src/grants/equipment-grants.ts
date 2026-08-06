@@ -10,6 +10,15 @@ import { GUIDED_BACKGROUND_SOURCE_MARKER } from '../builder/guided-creation';
 import type { ArmorSlot, SrdWeaponGroup } from '../domain/enums';
 import { armorSlots, isEnumValue, srdWeaponGroups } from '../domain/enums';
 import { rowContractError } from '../domain/contracts/rows';
+import type { ContentKey } from '../domain/ids';
+import type {
+  BackgroundContentAggregate,
+  ContentFingerprintReference,
+} from '../authoring/contracts';
+import {
+  projectStoredPortableContentV1,
+  storedContentMatchesFingerprintReferenceV1,
+} from '../catalog/stored-content-projector-v1';
 import {
   weaponAttackKindOf,
   weaponProficiencyCategoryOf,
@@ -79,6 +88,7 @@ interface GrantableItem {
   readonly quantity: number;
   readonly weapon_template_id: number | null;
   readonly armor_template_id: number | null;
+  readonly expected_dependency: ContentFingerprintReference<'weapon' | 'armor'> | null;
 }
 
 function timestamp(): string {
@@ -98,6 +108,22 @@ function grantableItems(
   db: DatabaseContext,
   params: EquipmentChoiceParams,
 ): GrantableItem[] {
+  const recordedEquipment = params.kind === 'background'
+    ? (() => {
+        const projection = projectStoredPortableContentV1(
+          db,
+          'background',
+          params.content_key as ContentKey,
+        );
+        if (projection.kind !== 'background') {
+          throw new Error('Stored background projection returned another content kind.');
+        }
+        const aggregate = projection.aggregate as BackgroundContentAggregate;
+        return params.option === 'a'
+          ? aggregate.equipment_option_a
+          : aggregate.equipment_option_b;
+      })()
+    : [];
   const [table, ownerColumn, ownerId] =
     params.kind === 'class'
       ? [
@@ -123,21 +149,69 @@ function grantableItems(
     );
   }
   return db.allRaw(
-    `SELECT item_kind, item_name, quantity, weapon_template_id,
+    `SELECT sort_order, item_kind, item_name, quantity, weapon_template_id,
             armor_template_id
      FROM ${table}
      WHERE ${ownerColumn} = ? AND option = ?
      ORDER BY sort_order`,
     [ownerId, params.option],
-  ).map((row) => ({
-    item_kind: String(row.item_kind),
-    item_name: String(row.item_name),
-    quantity: Number(row.quantity),
-    weapon_template_id:
-      row.weapon_template_id === null ? null : Number(row.weapon_template_id),
-    armor_template_id:
-      row.armor_template_id === null ? null : Number(row.armor_template_id),
-  }));
+  ).map((row) => {
+    const kind = String(row.item_kind);
+    const recorded = recordedEquipment.find(
+      (item) => item.sort_order === Number(row.sort_order),
+    );
+    const expectedDependency =
+      (kind === 'weapon' || kind === 'armor') && recorded?.kind === kind
+        ? recorded.content
+        : null;
+    return {
+      item_kind: kind,
+      item_name: String(row.item_name),
+      quantity: Number(row.quantity),
+      weapon_template_id:
+        row.weapon_template_id === null ? null : Number(row.weapon_template_id),
+      armor_template_id:
+        row.armor_template_id === null ? null : Number(row.armor_template_id),
+      expected_dependency: expectedDependency,
+    };
+  });
+}
+
+function assertDependencyCurrent(
+  db: DatabaseContext,
+  params: EquipmentChoiceParams,
+  item: GrantableItem,
+): void {
+  if (params.kind !== 'background' || item.item_kind === 'gear') return;
+  const dependencyKind = item.item_kind === 'weapon' ? 'weapon' : 'armor';
+  const templateId = dependencyKind === 'weapon'
+    ? item.weapon_template_id
+    : item.armor_template_id;
+  const table = dependencyKind === 'weapon' ? 'weapon_templates' : 'armor_templates';
+  const contentKey = templateId === null
+    ? null
+    : db.scalar<string>(`SELECT content_key FROM ${table} WHERE id = ?`, [templateId]);
+  if (
+    contentKey !== null &&
+    item.expected_dependency?.kind === dependencyKind &&
+    storedContentMatchesFingerprintReferenceV1(
+      db,
+      contentKey as ContentKey,
+      item.expected_dependency,
+    )
+  ) {
+    return;
+  }
+  throw new EquipmentGrantRefusal(
+    {
+      reason: 'equipment_dependency_drift',
+      content_key: contentKey ?? params.content_key,
+      dependency_kind: dependencyKind,
+      item: item.item_name,
+    },
+    `The ${dependencyKind} dependency for "${item.item_name}" no longer ` +
+      'matches the fingerprint recorded by this background.',
+  );
 }
 
 /**
@@ -465,6 +539,7 @@ export function applyEquipmentPackageChoice(
 ): void {
   db.transaction(() => {
     const items = grantableItems(db, params);
+    for (const item of items) assertDependencyCurrent(db, params, item);
     const sourceInstanceId = recordingSourceInstanceId(db, params);
     const config = storedConfig(db, sourceInstanceId);
     if (choiceAlreadyRecorded(config, params)) {

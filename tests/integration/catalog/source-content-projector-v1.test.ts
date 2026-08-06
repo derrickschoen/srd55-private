@@ -26,7 +26,7 @@ const BACKGROUND_KEY = '2024:ci3b-background' as ContentKey;
 
 const references: StoredAuthoredReferenceResolverV1 = {
   spell: () => ({ kind: 'spell', scheme: CONTENT_FINGERPRINT_SCHEME_V1, digest: '1'.repeat(64) as ContentFingerprintDigest }),
-  featByStoredName: () => ({ kind: 'feat', scheme: CONTENT_FINGERPRINT_SCHEME_V1, digest: '2'.repeat(64) as ContentFingerprintDigest }),
+  feat: () => ({ kind: 'feat', scheme: CONTENT_FINGERPRINT_SCHEME_V1, digest: '2'.repeat(64) as ContentFingerprintDigest }),
   class: () => ({ kind: 'class', scheme: CONTENT_FINGERPRINT_SCHEME_V1, digest: '3'.repeat(64) as ContentFingerprintDigest }),
   weapon: () => ({ kind: 'weapon', scheme: CONTENT_FINGERPRINT_SCHEME_V1, digest: '4'.repeat(64) as ContentFingerprintDigest }),
   armor: () => ({ kind: 'armor', scheme: CONTENT_FINGERPRINT_SCHEME_V1, digest: '5'.repeat(64) as ContentFingerprintDigest }),
@@ -299,6 +299,12 @@ describe('stored class and feat content-v1 projection', () => {
 
   it('changes one background identity key when either half changes', () => {
     db.exec(
+      `INSERT INTO feat_definitions (
+         content_key, name, rules_edition, category, ability_points, repeatable
+       ) VALUES (?, 'Alert', '2024', 'origin', 0, 0)`,
+      [FEAT_KEY],
+    );
+    db.exec(
       `INSERT INTO background_definitions
          (content_key, name, rules_edition, repeatable, grant_rules)
        VALUES (?, 'Observer', '2024', 0, '[]')`,
@@ -307,14 +313,15 @@ describe('stored class and feat content-v1 projection', () => {
     db.exec(
       `INSERT INTO background_templates (
          content_key, rules_edition, name, ability_score_1, ability_score_2,
-         ability_score_3, feat_name, skill_proficiency_1,
+         ability_score_3, feat_name, default_origin_feat_content_key,
+         skill_proficiency_1,
          skill_proficiency_2, tool_proficiency, equipment_option_a,
          equipment_option_b
        ) VALUES (
          ?, '2024', 'Observer', 'Wisdom', 'Intelligence', 'Charisma',
-         'Alert', 'Insight', 'Perception', 'Calligrapher tools', 'Book', '10 GP'
+         'Alert', ?, 'Insight', 'Perception', 'Calligrapher tools', 'Book', '10 GP'
        )`,
-      [BACKGROUND_KEY],
+      [BACKGROUND_KEY, FEAT_KEY],
     );
     const project = () => {
       const projection = projectStoredAuthoredContentV1(db, {

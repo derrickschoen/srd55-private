@@ -39,6 +39,7 @@ import {
   MAGIC_INITIATE_LISTS,
 } from '../domain/background-feat-name';
 import { hasExactKeys } from './contracts';
+import { grantRuleConsumesConfig } from '../grants/grant-rule';
 
 /**
  * Magic Initiate's closed casting-ability choice set. Its spell lists and
@@ -225,6 +226,34 @@ function isValidOriginFeatConfig(
   );
 }
 
+/**
+ * Whether the current guided contract can honestly offer an installed Origin
+ * feat. Bundled feats keep their explicitly modelled key-specific forms.
+ * External feats are offered only when their grant rules require no config:
+ * the current option record has no schema describing an arbitrary homebrew
+ * config form, so listing one that will fail during materialisation is worse
+ * than withholding it.
+ */
+export function isGuidedOriginFeatOfferable(
+  catalogLayer: string,
+  grantRulesJson: string | null,
+): boolean {
+  if (catalogLayer === 'bundled') return true;
+  if (catalogLayer !== 'external' || grantRulesJson === null) return false;
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(grantRulesJson);
+  } catch {
+    return false;
+  }
+  if (!Array.isArray(decoded)) return false;
+  return !decoded.some((rule) =>
+    rule === null || typeof rule !== 'object' || Array.isArray(rule)
+      ? true
+      : grantRuleConsumesConfig(rule as Readonly<Record<string, unknown>>),
+  );
+}
+
 export function isGuidedApplyBackgroundParams(
   value: unknown,
 ): value is GuidedApplyBackgroundParams {
@@ -264,18 +293,16 @@ export function isGuidedApplyBackgroundParams(
 /* ------------------------------------------------------ printed pairing */
 
 const ABILITY_BY_PRINTED_NAME: ReadonlyMap<string, Ability> = new Map(
-  abilities.map((ability) => [
-    `${ability.slice(0, 1).toUpperCase()}${ability.slice(1)}`,
-    ability,
-  ]),
+  abilities.map((ability) => [ability, ability]),
 );
 
 /**
  * Parses one background's printed pairing into a suggestion. The feat name
  * may carry a parenthetical ("Magic Initiate (Cleric)"): the base name is
- * matched against the Origin feats by NAME — the template stores prose, not a
- * key — and the parenthetical becomes the suggested spell list only when the
- * feat is Magic Initiate and the option is one of its three printed lists.
+ * resolved by its stored content key. The name remains display prose and may
+ * carry a parenthetical; that parenthetical becomes the suggested spell list
+ * only when the keyed feat is Magic Initiate. A null key is an ambiguous
+ * migrated legacy absence and therefore produces no feat suggestion.
  */
 export function printedPairing(
   template: {
@@ -284,8 +311,8 @@ export function printedPairing(
     readonly ability_score_2: string;
     readonly ability_score_3: string;
     readonly feat_name: string;
+    readonly default_origin_feat_content_key: string | null;
   },
-  originFeatKeyByName: ReadonlyMap<string, string>,
 ): BackgroundPrintedPairing {
   const printedAbilities: readonly [string, string, string] = [
     template.ability_score_1,
@@ -294,7 +321,7 @@ export function printedPairing(
   ];
   const parsedAbilities: Ability[] = [];
   for (const printed of printedAbilities) {
-    const ability = ABILITY_BY_PRINTED_NAME.get(printed.trim());
+    const ability = ABILITY_BY_PRINTED_NAME.get(printed.trim().toLowerCase());
     if (ability !== undefined) {
       parsedAbilities.push(ability);
     }
@@ -306,7 +333,7 @@ export function printedPairing(
 
   const printedFeat = template.feat_name.trim();
   const parsedFeat = backgroundFeatBaseName(printedFeat);
-  const featKey = originFeatKeyByName.get(parsedFeat.base) ?? null;
+  const featKey = template.default_origin_feat_content_key;
   const magicInitiateList =
     featKey === MAGIC_INITIATE_FEAT_CONTENT_KEY &&
     parsedFeat.option !== null &&

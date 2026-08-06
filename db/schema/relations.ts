@@ -308,6 +308,10 @@ export const backgroundTemplatesRelations = relations(
       fields: [background_templates.content_key],
       references: [catalog_content_identities.content_key],
     }),
+    default_origin_feat: one(feat_definitions, {
+      fields: [background_templates.default_origin_feat_content_key],
+      references: [feat_definitions.content_key],
+    }),
     effects: many(background_template_effects),
   }),
 );

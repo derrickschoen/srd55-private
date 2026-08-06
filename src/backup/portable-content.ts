@@ -1,5 +1,6 @@
 import type {
   AuthoringGrant,
+  BackgroundContentAggregate,
   SubclassContentAggregate,
 } from '../authoring/contracts';
 import type {
@@ -251,7 +252,8 @@ function aggregateTopLevelKeys(kind: ContentKind): readonly string[] {
     case 'background':
       return [
         'kind', 'name', 'rules_edition', 'reference_text', 'repeatable',
-        'grants', 'suggested_abilities', 'default_origin_feat',
+        'grants', 'suggested_abilities', 'default_origin_feat_content_key',
+        'default_origin_feat', 'default_origin_feat_display_name',
         'skill_proficiencies', 'tool_reference_text',
         'equipment_option_a_description', 'equipment_option_b_description',
         'equipment_option_a', 'equipment_option_b', 'effects',
@@ -629,6 +631,16 @@ export function exportPortableContentClosure(
           local.aggregate,
           dependencies,
         );
+        if (local.kind === 'background') {
+          const background = local.aggregate as BackgroundContentAggregate;
+          aggregate = {
+            ...aggregate,
+            default_origin_feat_content_key:
+              dependencies.get(contentFingerprintReferenceKey(
+                background.default_origin_feat,
+              ))?.contentKey ?? background.default_origin_feat_content_key,
+          } as PortableContentAggregateValue;
+        }
         if (local.kind === 'spell') {
           aggregate = {
             ...aggregate,

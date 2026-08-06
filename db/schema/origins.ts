@@ -59,6 +59,7 @@ import {
   varchar,
 } from './columns';
 import { catalog_content_identities } from './catalog-content';
+import { feat_definitions } from './catalog-sources';
 import {
   characterEffectColumns,
   featureEffectChecks,
@@ -973,14 +974,16 @@ export const character_effects = sqliteTable(
  * equipment. One table for both would be two tables in a trench coat, each
  * row leaving the other's columns null.
  *
- * EVERY COLUMN IS TEXT AND NOTHING IS APPLIED. The three abilities are NAMES,
+ * EVERY PRINTED COLUMN IS TEXT. The three abilities are NAMES,
  * not increases: "increase one by 2 and another one by 1, or increase all three
  * by 1" is a choice the user makes, and `characters.strength`..`charisma` are
  * values the user already owns and edits directly. D1b applied literally — the
- * template SUGGESTS and the character keeps the value. The feat is a NAME; the
- * grant itself travels the existing `grant_source` rule on
- * `background_definitions.grant_rules`, not this column. The two skills are
- * text because the skills model belongs to the class-sheet track.
+ * template SUGGESTS and the character keeps the value. The feat keeps both its
+ * printed NAME and its content-key relation: the name is display text (and can
+ * include a printed option such as `Magic Initiate (Cleric)`), while the key is
+ * the identity that export, copy/edit, and guided defaults follow. The grant
+ * itself travels the existing `grant_source` rule on
+ * `background_definitions.grant_rules`. The two skills remain printed text.
  */
 export const background_templates = sqliteTable(
   'background_templates',
@@ -1011,6 +1014,16 @@ export const background_templates = sqliteTable(
     ability_score_3: varchar()('ability_score_3').notNull(),
     /** The Origin feat's printed name, e.g. `Magic Initiate (Cleric)`. */
     feat_name: varchar()('feat_name').notNull(),
+    /**
+     * The exact installed Origin feat represented by `feat_name`.
+     *
+     * Nullable only for a migrated legacy row whose old name cannot be mapped
+     * uniquely. New bundled and authored writers always provide it. Keeping
+     * that absence visible is safer than binding an ambiguous homebrew name.
+     */
+    default_origin_feat_content_key: varchar<ContentKey>()(
+      'default_origin_feat_content_key',
+    ).references(() => feat_definitions.content_key),
     skill_proficiency_1: varchar()('skill_proficiency_1').notNull(),
     skill_proficiency_2: varchar()('skill_proficiency_2').notNull(),
     /**

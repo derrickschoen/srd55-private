@@ -22,6 +22,7 @@ import {
   creatureType,
   damageType,
 } from '../../../../src/domain/enums';
+import type { ContentKey } from '../../../../src/domain/ids';
 
 const digest = (digit: string) =>
   digit.repeat(64) as ContentFingerprintDigest;
@@ -164,7 +165,9 @@ const backgroundAggregate: BackgroundContentAggregate = {
     free_cast: null,
   }],
   suggested_abilities: ['intelligence', 'wisdom', 'charisma'],
+  default_origin_feat_content_key: 'expanded:feat:void-adept' as ContentKey,
   default_origin_feat: featReference,
+  default_origin_feat_display_name: 'Void Adept (Scholar)',
   skill_proficiencies: ['arcana', 'insight'],
   tool_reference_text: 'Astrolabe only; no structured tool grant.',
   equipment_option_a_description: 'An astrolabe.',
@@ -250,6 +253,11 @@ const backgroundPayload: BackgroundProjectorPayloadV1 = {
     notes: null,
     damage_type: canonicalOpenPassthroughValue('void'),
   }]),
+};
+
+const alternateBackgroundSidecarAggregate: BackgroundContentAggregate = {
+  ...backgroundAggregate,
+  default_origin_feat_display_name: 'Void Adept (Archivist)',
 };
 
 const inheritSubclassAggregate: SubclassContentAggregate = {
@@ -605,6 +613,20 @@ export const authoredProjectorV1Vectors = [
     canonicalJson: '{"edition":"expanded","kind":"subclass","normalizedName":"notestriker","payload":{"features":[{"class_level":5,"description":"Attacks twice.","effects":[{"attack_count":2,"kind":"extra_attack","label":"Noted attack","notes":"Attack line\\nSecond attack","weapon_scope":"any_weapon"}],"name":"Noted Attack"}],"grants":[],"parent_class":{"digest":"3333333333333333333333333333333333333333333333333333333333333333","kind":"class","scheme":"content-v1"},"progression":{"mode":"inherit_parent"},"reference_text":""},"scheme":"content-v1"}',
     sha256: 'f1b7fb7a4e0214818258b11e66b9bc9845c3f2b146cfd9887a889302b3b7860e',
     derivedKey: 'expanded:content.v1:f1b7fb7a4e0214818258b11e66b9bc9845c3f2b146cfd9887a889302b3b7860e',
+  },
+  {
+    label: 'background display sidecar stays outside frozen identity bytes',
+    kind: 'background',
+    aggregate: alternateBackgroundSidecarAggregate,
+    payload: backgroundPayload,
+    // HA-4 adds the stored feat key and presentation sidecar to the aggregate
+    // contract, but neither is a new content-v1 byte: the fingerprint reference
+    // already owns identity and this alternate label is display-only. This is
+    // a new vector alongside the frozen lowercase-passthrough vector above;
+    // that vector's reviewed canonical literal and digest remain untouched.
+    canonicalJson: '{"edition":"expanded","kind":"background","normalizedName":"voidscholar","payload":{"default_origin_feat":{"digest":"2222222222222222222222222222222222222222222222222222222222222222","kind":"feat","scheme":"content-v1"},"effects":[{"damage_type":"void","kind":"damage_resistance","label":"Lowercase void ward","notes":null}],"equipment_option_a":[{"kind":"gear","printed_name":"Astrolabe","quantity":1},{"content":{"digest":"4444444444444444444444444444444444444444444444444444444444444444","kind":"weapon","scheme":"content-v1"},"kind":"weapon","printed_name":"Void Blade","quantity":1}],"equipment_option_a_description":"An astrolabe.","equipment_option_b":[{"content":{"digest":"5555555555555555555555555555555555555555555555555555555555555555","kind":"armor","scheme":"content-v1"},"kind":"armor","printed_name":"Clockwork Mail","quantity":1}],"equipment_option_b_description":"Nothing.","grants":[{"active_from_class_level":null,"active_if_config":null,"always_prepared":false,"child_config_config":"origin_feat_config","count":1,"definition_key_config":"origin_feat_key","distinct_config_by":null,"free_cast":null,"kind":"grant_source","rule_key":"void-scholar-origin-feat","source_type":"feat","with_slots":true}],"reference_text":"Studies the gap.","repeatable":false,"skill_proficiencies":["arcana","insight"],"suggested_abilities":["intelligence","wisdom","charisma"],"tool_reference_text":"Astrolabe only; no structured tool grant."},"scheme":"content-v1"}',
+    sha256: '15ff580a3544fe808e86d862306a064fe3237d7e999d2707acda4135c2ff9584',
+    derivedKey: 'expanded:content.v1:15ff580a3544fe808e86d862306a064fe3237d7e999d2707acda4135c2ff9584',
   },
 ] as const;
 

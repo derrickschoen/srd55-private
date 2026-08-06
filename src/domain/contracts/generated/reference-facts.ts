@@ -64,6 +64,12 @@ export const FOREIGN_KEY_FACTS = [
     targetColumns: ['content_key'],
   },
   {
+    table: 'background_templates',
+    columns: ['default_origin_feat_content_key'],
+    target: 'feat_definitions',
+    targetColumns: ['content_key'],
+  },
+  {
     table: 'catalog_content_aliases',
     columns: ['content_kind', 'content_key'],
     target: 'catalog_content_identities',

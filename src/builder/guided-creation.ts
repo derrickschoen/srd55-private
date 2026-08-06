@@ -45,6 +45,8 @@ import {
   abilityAllocationMethods,
   backgroundEquipmentOptions,
   classEquipmentOptions,
+  isEnumValue,
+  skills,
   type KnownAbilityAllocationMethod,
   type Skill,
 } from '../domain/enums';
@@ -76,10 +78,12 @@ import {
   isBundledSourceContentKey,
 } from '../catalog/bundled-source-membership';
 import {
+  backgroundEffectsFromTemplate,
   backgroundFromTemplate,
   effectsFromTemplate,
   speciesFromTemplate,
   speciesTraitFromTemplate,
+  type BackgroundTemplateEffectRow,
   type BackgroundTemplateRow,
   type SpeciesTemplateRow,
   type SpeciesTemplateTraitEffectRow,
@@ -89,9 +93,9 @@ import {
   ORIGIN_FEAT_CONFIG_CONFIG,
   ORIGIN_FEAT_KEY_CONFIG,
 } from '../rules/background-definitions-srd';
-import { bundledFeatDefinitions } from '../rules/feats-srd';
 import {
   BACKGROUND_ABILITY_INCREASE_MAXIMUM,
+  isGuidedOriginFeatOfferable,
   printedPairing,
   type GuidedApplyBackgroundParams,
   type GuidedBackgroundChoiceOptions,
@@ -718,10 +722,6 @@ function bundledSpeciesKeys(db: DatabaseContext): readonly string[] {
 }
 
 /** The background twin (A5), derived from the same SRD parse the seeder uses. */
-function bundledBackgroundKeys(db: DatabaseContext): readonly string[] {
-  return bundledSourceContentKeys('background', db);
-}
-
 const speciesTemplateRow: RowCodec<SpeciesTemplateRow> = (row) => ({
   id: sqlInteger(row, 'id'),
   content_key: sqlString(row, 'content_key'),
@@ -783,32 +783,36 @@ const speciesTemplateTraitEffectRow: RowCodec<SpeciesTemplateTraitEffectRow> = (
  * seam's set is species-only; backgrounds are always false" — not a lookup
  * that happens to miss.
  *
- * Background authoring remains outside HA-3, so backgrounds retain their
- * bundled-only filter.
+ * HA-4 gives backgrounds the same complete-two-half rule as species.
  */
 export function listGuidedOriginOptions(
   db: DatabaseContext,
   kind: OriginKind,
 ): readonly GuidedOriginOption[] {
   if (kind === 'background') {
-    const keys = bundledBackgroundKeys(db);
-    const placeholders = keys.map(() => '?').join(', ');
     return db
       .all(
-        `SELECT content_key, name
-         FROM background_templates
-         WHERE content_key IN (${placeholders})
-         ORDER BY name`,
-        [...keys],
+        `SELECT template.content_key, template.name, identity.catalog_layer
+         FROM background_templates AS template
+         JOIN catalog_content_identities AS identity
+           ON identity.content_kind = 'background'
+          AND identity.content_key = template.content_key
+         LEFT JOIN background_definitions AS definition
+           ON definition.content_key = template.content_key
+         WHERE identity.catalog_layer = 'bundled'
+            OR definition.content_key IS NOT NULL
+         ORDER BY template.name, template.content_key`,
+        undefined,
         (row) => ({
           content_key: sqlString(row, 'content_key'),
           name: sqlString(row, 'name'),
+          catalog_layer: sqlString(row, 'catalog_layer'),
         }),
       )
-      .map(({ content_key, name }) => ({
+      .map(({ content_key, name, catalog_layer }) => ({
         content_key,
         name,
-        catalog_layer: 'bundled' as const,
+        catalog_layer: catalog_layer === 'external' ? 'external' as const : 'bundled' as const,
         grants_lineage_spells: false,
       }));
   }
@@ -898,31 +902,57 @@ const backgroundTemplateRow: RowCodec<BackgroundTemplateRow> = (row) => ({
   updated_at: sqlNullableString(row, 'updated_at'),
 });
 
-/** The background gate, `gateBundledSpecies`'s twin, same refusal vocabulary. */
-function gateBundledBackground(
+const backgroundTemplateEffectRow: RowCodec<BackgroundTemplateEffectRow> = (row) => ({
+  id: sqlInteger(row, 'id'),
+  background_template_id: sqlInteger(row, 'background_template_id'),
+  sort_order: sqlInteger(row, 'sort_order'),
+  effect_kind: sqlString(row, 'effect_kind'),
+  damage_type: sqlNullableDamageType(row, 'damage_type'),
+  hit_points_flat: sqlNullableInteger(row, 'hit_points_flat'),
+  hit_points_per_level: sqlNullableInteger(row, 'hit_points_per_level'),
+  speed_bonus_feet: sqlNullableInteger(row, 'speed_bonus_feet'),
+  ability: sqlNullableString(row, 'ability'),
+  amount: sqlNullableInteger(row, 'amount'),
+  maximum: sqlNullableInteger(row, 'maximum'),
+  base: sqlNullableInteger(row, 'base'),
+  ability_1: sqlNullableString(row, 'ability_1'),
+  ability_2: sqlNullableString(row, 'ability_2'),
+  allows_shield: sqlNullableInteger(row, 'allows_shield'),
+  weapon_scope: sqlNullableString(row, 'weapon_scope'),
+  label: sqlString(row, 'label'),
+  notes: sqlNullableString(row, 'notes'),
+  created_at: sqlNullableString(row, 'created_at'),
+  updated_at: sqlNullableString(row, 'updated_at'),
+});
+
+/** A complete installed background aggregate, with the same refusal vocabulary. */
+function gateInstalledBackground(
   db: DatabaseContext,
   contentKey: string,
 ): BackgroundTemplateRow {
-  if (!isBundledSourceContentKey('background', contentKey, db)) {
-    throw new GuidedCreationRefusal(
-      'unknown_origin',
-      `No bundled background exists for content key "${contentKey}".`,
-    );
-  }
   const template = db.one(
-    `SELECT id, content_key, rules_edition, name, ability_score_1,
-            ability_score_2, ability_score_3, feat_name, skill_proficiency_1,
-            skill_proficiency_2, tool_proficiency, equipment_option_a,
-            equipment_option_b, created_at, updated_at
-     FROM background_templates
-     WHERE content_key = ?`,
+    `SELECT template.id, template.content_key, template.rules_edition,
+            template.name, template.ability_score_1,
+            template.ability_score_2, template.ability_score_3,
+            template.feat_name, template.skill_proficiency_1,
+            template.skill_proficiency_2, template.tool_proficiency,
+            template.equipment_option_a, template.equipment_option_b,
+            template.created_at, template.updated_at
+     FROM background_templates AS template
+     JOIN catalog_content_identities AS identity
+       ON identity.content_kind = 'background'
+      AND identity.content_key = template.content_key
+     LEFT JOIN background_definitions AS definition
+       ON definition.content_key = template.content_key
+     WHERE template.content_key = ?
+       AND (identity.catalog_layer = 'bundled' OR definition.content_key IS NOT NULL)`,
     [contentKey],
     backgroundTemplateRow,
   );
   if (template === null) {
     throw new GuidedCreationRefusal(
       'unknown_origin',
-      `The bundled background "${contentKey}" has no row in this database.`,
+      `The installed background "${contentKey}" is incomplete or unavailable.`,
     );
   }
   return template;
@@ -989,7 +1019,7 @@ export function applyGuidedOrigin(
     }
 
     if (params.kind === 'background') {
-      const backgroundTemplate = gateBundledBackground(db, params.content_key);
+      const backgroundTemplate = gateInstalledBackground(db, params.content_key);
       // Replace. A5 could say "the parent row is the whole footprint of a
       // background apply"; B3 widened the footprint to a marker-tagged source
       // instance owning ability_increase contributions and a child feat
@@ -1341,25 +1371,6 @@ function deleteGuidedBackgroundSources(
 }
 
 /**
- * The bundled ORIGIN feats, keyed by printed name. Derived from the same SRD
- * parse the feat seeder writes from, so the suggestion resolver and the gate
- * cannot drift from the catalog — the identical reasoning as
- * `bundledBackgroundKeys` above.
- */
-function bundledOriginFeatKeysByName(
-  db: DatabaseContext,
-): ReadonlyMap<string, string> {
-  return new Map(
-    bundledFeatDefinitions()
-      .filter((feat) => feat.source_category === 'Origin')
-      .filter((feat) =>
-        isBundledSourceContentKey('feat', feat.content_key, db)
-      )
-      .map((feat) => [feat.name, feat.content_key]),
-  );
-}
-
-/**
  * The background step's option data: every bundled background with its
  * printed pairing (the background's own DEFAULT, per D61/D68 never a
  * constraint), and
@@ -1370,17 +1381,21 @@ function bundledOriginFeatKeysByName(
 export function listGuidedBackgroundChoiceOptions(
   db: DatabaseContext,
 ): GuidedBackgroundChoiceOptions {
-  const featKeysByName = bundledOriginFeatKeysByName(db);
-  const backgroundKeys = bundledBackgroundKeys(db);
-  const backgroundPlaceholders = backgroundKeys.map(() => '?').join(', ');
   const backgrounds = db
     .all(
-      `SELECT content_key, name, ability_score_1, ability_score_2,
-              ability_score_3, feat_name
-       FROM background_templates
-       WHERE content_key IN (${backgroundPlaceholders})
-       ORDER BY name`,
-      [...backgroundKeys],
+      `SELECT template.content_key, template.name, template.ability_score_1,
+              template.ability_score_2, template.ability_score_3,
+              template.feat_name, template.default_origin_feat_content_key
+       FROM background_templates AS template
+       JOIN catalog_content_identities AS identity
+         ON identity.content_kind = 'background'
+        AND identity.content_key = template.content_key
+       LEFT JOIN background_definitions AS definition
+         ON definition.content_key = template.content_key
+       WHERE identity.catalog_layer = 'bundled'
+          OR definition.content_key IS NOT NULL
+       ORDER BY template.name, template.content_key`,
+      undefined,
       (row) => ({
         content_key: sqlString(row, 'content_key'),
         name: sqlString(row, 'name'),
@@ -1388,27 +1403,37 @@ export function listGuidedBackgroundChoiceOptions(
         ability_score_2: sqlString(row, 'ability_score_2'),
         ability_score_3: sqlString(row, 'ability_score_3'),
         feat_name: sqlString(row, 'feat_name'),
+        default_origin_feat_content_key: sqlNullableString(
+          row,
+          'default_origin_feat_content_key',
+        ),
       }),
     )
     .map((template) => ({
       content_key: template.content_key,
       name: template.name,
-      pairing: printedPairing(template, featKeysByName),
+      pairing: printedPairing(template),
     }));
 
-  const featKeys = [...featKeysByName.values()];
-  const featPlaceholders = featKeys.map(() => '?').join(', ');
   const originFeats = db.all(
-    `SELECT content_key, name
-     FROM feat_definitions
-     WHERE content_key IN (${featPlaceholders})
-     ORDER BY name`,
-    [...featKeys],
+    `SELECT feat.content_key, feat.name, feat.grant_rules,
+            identity.catalog_layer
+     FROM feat_definitions AS feat
+     JOIN catalog_content_identities AS identity
+       ON identity.content_kind = 'feat'
+      AND identity.content_key = feat.content_key
+     WHERE feat.category = 'origin'
+     ORDER BY feat.name, feat.content_key`,
+    undefined,
     (row) => ({
       content_key: sqlString(row, 'content_key'),
       name: sqlString(row, 'name'),
+      grant_rules: sqlNullableString(row, 'grant_rules'),
+      catalog_layer: sqlString(row, 'catalog_layer'),
     }),
-  );
+  ).filter((feat) =>
+    isGuidedOriginFeatOfferable(feat.catalog_layer, feat.grant_rules)
+  ).map(({ content_key, name }) => ({ content_key, name }));
 
   return { backgrounds, origin_feats: originFeats };
 }
@@ -1421,31 +1446,35 @@ export function listGuidedBackgroundChoiceOptions(
  * a key outside the bundled Origin set nor a bundled key whose row was
  * yielded is a feat the guided builder knows.
  */
-function gateBundledOriginFeat(
+function gateInstalledOriginFeat(
   db: DatabaseContext,
   contentKey: string,
 ): { readonly id: number; readonly name: string } {
-  if (![...bundledOriginFeatKeysByName(db).values()].includes(contentKey)) {
-    throw new GuidedCreationRefusal(
-      'unknown_origin',
-      `No bundled Origin feat exists for content key "${contentKey}".`,
-    );
-  }
   const feat = db.one(
-    `SELECT id, name FROM feat_definitions WHERE content_key = ?`,
+    `SELECT feat.id, feat.name, feat.grant_rules, identity.catalog_layer
+     FROM feat_definitions AS feat
+     JOIN catalog_content_identities AS identity
+       ON identity.content_kind = 'feat'
+      AND identity.content_key = feat.content_key
+     WHERE feat.content_key = ? AND feat.category = 'origin'`,
     [contentKey],
     (row) => ({
       id: sqlInteger(row, 'id'),
       name: sqlString(row, 'name'),
+      grant_rules: sqlNullableString(row, 'grant_rules'),
+      catalog_layer: sqlString(row, 'catalog_layer'),
     }),
   );
-  if (feat === null) {
+  if (
+    feat === null ||
+    !isGuidedOriginFeatOfferable(feat.catalog_layer, feat.grant_rules)
+  ) {
     throw new GuidedCreationRefusal(
       'unknown_origin',
-      `The bundled Origin feat "${contentKey}" has no row in this database.`,
+      `No installed Origin feat exists for content key "${contentKey}".`,
     );
   }
-  return feat;
+  return { id: feat.id, name: feat.name };
 }
 
 /**
@@ -1461,8 +1490,12 @@ function gateBundledOriginFeat(
 function backgroundSkillsFromTemplate(
   template: BackgroundTemplateRow,
 ): readonly [Skill, Skill] {
-  const first = skillFromLabel(template.skill_proficiency_1);
-  const second = skillFromLabel(template.skill_proficiency_2);
+  const first = isEnumValue(skills, template.skill_proficiency_1)
+    ? template.skill_proficiency_1
+    : skillFromLabel(template.skill_proficiency_1);
+  const second = isEnumValue(skills, template.skill_proficiency_2)
+    ? template.skill_proficiency_2
+    : skillFromLabel(template.skill_proficiency_2);
   if (first === null || second === null) {
     throw new Error(
       `The background "${template.name}" prints a skill the vocabulary ` +
@@ -1521,8 +1554,8 @@ export function applyGuidedBackgroundChoices(
       throw new Error(`No character with id ${characterId} exists.`);
     }
 
-    const template = gateBundledBackground(db, params.content_key);
-    gateBundledOriginFeat(db, params.origin_feat_content_key);
+    const template = gateInstalledBackground(db, params.content_key);
+    gateInstalledOriginFeat(db, params.origin_feat_content_key);
     const definitionId = db.one(
       `SELECT id FROM background_definitions WHERE content_key = ?`,
       [template.content_key],
@@ -1628,6 +1661,39 @@ export function applyGuidedBackgroundChoices(
           BACKGROUND_ABILITY_INCREASE_MAXIMUM,
           instanceId,
           `${template.name} (background increase)`,
+        ],
+      );
+    }
+
+    const templateEffects = db.all(
+      `SELECT id, background_template_id, sort_order, effect_kind,
+              damage_type, hit_points_flat, hit_points_per_level,
+              speed_bonus_feet, ability, amount, maximum, base, ability_1,
+              ability_2, allows_shield, weapon_scope, label, notes,
+              created_at, updated_at
+       FROM background_template_effects
+       WHERE background_template_id = ?
+       ORDER BY sort_order`,
+      [template.id],
+      backgroundTemplateEffectRow,
+    );
+    for (const effect of backgroundEffectsFromTemplate(templateEffects)) {
+      effectOrder += 1;
+      db.exec(
+        `INSERT INTO character_effects (
+           character_id, sort_order, effect_kind, damage_type,
+           hit_points_flat, hit_points_per_level, speed_bonus_feet,
+           ability, amount, maximum, base, ability_1, ability_2,
+           allows_shield, weapon_scope, source_instance_id, template_ref,
+           label, notes
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          characterId, effectOrder, effect.effect_kind, effect.damage_type,
+          effect.hit_points_flat, effect.hit_points_per_level,
+          effect.speed_bonus_feet, effect.ability, effect.amount,
+          effect.maximum, effect.base, effect.ability_1, effect.ability_2,
+          effect.allows_shield, effect.weapon_scope, instanceId,
+          effect.template_ref, effect.label, effect.notes,
         ],
       );
     }

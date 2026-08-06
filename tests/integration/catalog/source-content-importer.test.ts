@@ -70,6 +70,7 @@ function fingerprint(contentKey: ContentKey) {
 function backgroundReferencingFeat(
   name: string,
   featKey: ContentKey,
+  displayName = 'Imported Origin Feat (Cleric)',
 ): BackgroundContentAggregate {
   return {
     kind: 'background',
@@ -79,7 +80,9 @@ function backgroundReferencingFeat(
     repeatable: false,
     grants: [],
     suggested_abilities: ['intelligence', 'wisdom', 'charisma'],
+    default_origin_feat_content_key: featKey,
     default_origin_feat: { kind: 'feat', ...fingerprint(featKey) },
+    default_origin_feat_display_name: displayName,
     skill_proficiencies: ['arcana', 'insight'],
     tool_reference_text: null,
     equipment_option_a_description: 'Runes.',
@@ -91,10 +94,11 @@ function backgroundReferencingFeat(
 }
 
 describe('class, feat, species and background catalog import', () => {
-  it('imports a parenthetical homebrew feat and an exact-name background reference', () => {
+  it('Q1 preserves authored feat display metadata outside background identity through import', () => {
     const feat = {
       ...featProjectorV1Vector.aggregate,
       name: 'Rune Adept (Frost)',
+      category: 'origin',
     };
     new CatalogImporter(db).import({ documents: [document('feat', feat)] });
     const featKey = db.scalar<string>(
@@ -106,7 +110,11 @@ describe('class, feat, species and background catalog import', () => {
     const result = new CatalogImporter(db).import({
       documents: [document(
         'background',
-        backgroundReferencingFeat('Frost Rune Keeper', featKey as ContentKey),
+        backgroundReferencingFeat(
+          'Frost Rune Keeper',
+          featKey as ContentKey,
+          'Rune Adept (Cleric)',
+        ),
       )],
     });
     const backgroundKey = db.scalar<string>(
@@ -125,17 +133,85 @@ describe('class, feat, species and background catalog import', () => {
       `SELECT feat_name FROM background_templates
        WHERE content_key = ?`,
       [backgroundKey],
-    )).toBe('Rune Adept (Frost)');
+    )).toBe('Rune Adept (Cleric)');
     expect(projected.aggregate.default_origin_feat).toEqual({
       kind: 'feat',
       ...fingerprint(featKey as ContentKey),
     });
+    expect(projected.aggregate.default_origin_feat_display_name)
+      .toBe('Rune Adept (Cleric)');
+    const renamedDisplay: BackgroundContentAggregate = {
+      ...projected.aggregate,
+      default_origin_feat_display_name: 'Rune Adept (Wizard)',
+    };
+    expect(projectAuthoredContentAggregateV1(renamedDisplay).payload)
+      .toEqual(projectAuthoredContentAggregateV1(projected.aggregate).payload);
+  });
+
+  it('reviews a conflicting background feat display sidecar and silently matches an identical one', () => {
+    new CatalogImporter(db).import({
+      documents: [document('feat', {
+        ...featProjectorV1Vector.aggregate,
+        name: 'Sidecar Origin Feat',
+        category: 'origin',
+      })],
+    });
+    const featKey = db.scalar<string>(
+      `SELECT content_key FROM feat_definitions WHERE name = 'Sidecar Origin Feat'`,
+    );
+    if (featKey === null) throw new Error('Sidecar feat fixture is missing.');
+    const aggregate = backgroundReferencingFeat(
+      'Sidecar Background',
+      featKey as ContentKey,
+      'Sidecar Origin Feat (Cleric)',
+    );
+    const importer = new CatalogImporter(db);
+
+    const created = importer.import({
+      documents: [document('background', aggregate)],
+    });
+    const identical = importer.import({
+      documents: [document('background', aggregate)],
+    });
+    const conflict = importer.import({
+      documents: [document('background', {
+        ...aggregate,
+        default_origin_feat_display_name: 'Sidecar Origin Feat (Wizard)',
+      })],
+    });
+
+    expect(created.backgrounds_created).toBe(1);
+    expect(identical.backgrounds_matched).toBe(1);
+    assertContentImportPlan(
+      conflict,
+      'Expected the background display sidecar conflict to require review.',
+    );
+    expect(conflict.reviews).toEqual([
+      expect.objectContaining({
+        kind: 'background',
+        matchClass: 'metadata-conflict',
+        conflictDetails: [{
+          field: 'Default Origin feat display name',
+          incomingValue: 'Sidecar Origin Feat (Wizard)',
+          localValue: 'Sidecar Origin Feat (Cleric)',
+        }],
+      }),
+    ]);
+    expect(db.scalar<string>(
+      `SELECT feat_name FROM background_templates
+       WHERE content_key = ?`,
+      [assertedExternalContentKey('background', 'expanded', aggregate.name)],
+    )).toBe('Sidecar Origin Feat (Cleric)');
   });
 
   it('does not resolve a parenthetical feat reference to a colliding base name', () => {
     for (const name of ['Rune Adept', 'Rune Adept (Frost)']) {
       new CatalogImporter(db).import({
-        documents: [document('feat', { ...featProjectorV1Vector.aggregate, name })],
+        documents: [document('feat', {
+          ...featProjectorV1Vector.aggregate,
+          name,
+          category: 'origin',
+        })],
       });
     }
     const baseKey = db.scalar<string>(
@@ -175,6 +251,46 @@ describe('class, feat, species and background catalog import', () => {
       kind: 'feat',
       ...fingerprint(baseKey as ContentKey),
     });
+  });
+
+  it('Q4 refuses a keyed General feat as a background default Origin feat', () => {
+    const generalFeat = {
+      ...featProjectorV1Vector.aggregate,
+      name: 'Same Named Default',
+      category: 'general',
+    };
+    new CatalogImporter(db).import({
+      documents: [document('feat', generalFeat)],
+    });
+    const generalKey = db.scalar<string>(
+      `SELECT content_key FROM feat_definitions WHERE name = 'Same Named Default'`,
+    );
+    if (generalKey === null) throw new Error('General feat fixture is missing.');
+
+    const refusal = new CatalogImporter(db).import({
+      documents: [document(
+        'background',
+        backgroundReferencingFeat(
+          'Invalid General Binding',
+          generalKey as ContentKey,
+          'Same Named Default',
+        ),
+      )],
+    });
+    assertContentImportPlan(
+      refusal,
+      'Expected the General-feat background import to be refused.',
+    );
+    expect(refusal.outcomes).toEqual([
+      expect.objectContaining({
+        kind: 'refused',
+        reason: 'install_refused',
+      }),
+    ]);
+    expect(db.scalar<number>(
+      `SELECT count(*) FROM background_definitions
+       WHERE name = 'Invalid General Binding'`,
+    )).toBe(0);
   });
 
   it('normalizes omitted skill-proficiency defaults before hashing and silently matches re-import', () => {
@@ -275,11 +391,13 @@ describe('class, feat, species and background catalog import', () => {
         skills: ['arcana'],
       }],
       suggested_abilities: ['strength', 'dexterity', 'constitution'],
+      default_origin_feat_content_key: 'expanded:feat:invalid' as ContentKey,
       default_origin_feat: {
         kind: 'feat',
         scheme: CONTENT_FINGERPRINT_SCHEME_V1,
         digest: 'a'.repeat(64),
       },
+      default_origin_feat_display_name: 'Invalid Feat Display',
       skill_proficiencies: ['athletics', 'acrobatics'],
       tool_reference_text: null,
       equipment_option_a_description: 'None.',
@@ -418,7 +536,10 @@ describe('class, feat, species and background catalog import', () => {
 
   it('imports a null-tool background, resolves catalog edges, and reprojects byte-stably', () => {
     new CatalogImporter(db).import({
-      documents: [document('feat', featProjectorV1Vector.aggregate)],
+      documents: [document('feat', {
+        ...featProjectorV1Vector.aggregate,
+        category: 'origin',
+      })],
     });
     const featKey = db.scalar<string>('SELECT content_key FROM feat_definitions');
     if (featKey === null) throw new Error('Fixture feat is missing.');
@@ -496,7 +617,9 @@ describe('class, feat, species and background catalog import', () => {
       repeatable: false,
       grants: [],
       suggested_abilities: ['strength', 'wisdom', 'constitution'],
+      default_origin_feat_content_key: featKey as ContentKey,
       default_origin_feat: { kind: 'feat', ...featRef },
+      default_origin_feat_display_name: 'Graph Origin Feat (Cleric)',
       skill_proficiencies: ['athletics', 'perception'],
       tool_reference_text: null,
       equipment_option_a_description: 'A spear.',
@@ -554,7 +677,12 @@ describe('class, feat, species and background catalog import', () => {
     });
     expect(reprojected.canonicalJson).toBe(incoming.canonicalJson);
     expect(new CatalogQueries(db).read().sources.background).toEqual([]);
-    expect(listGuidedOriginOptions(db, 'background')).toEqual([]);
+    expect(listGuidedOriginOptions(db, 'background')).toEqual([{
+      content_key: contentKey,
+      name: 'Fen Guard',
+      catalog_layer: 'external',
+      grants_lineage_spells: false,
+    }]);
   });
 
   it('requires review for an installed bundled class and refuses creation under D133', () => {

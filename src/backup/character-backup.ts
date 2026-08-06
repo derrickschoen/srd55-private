@@ -23,7 +23,10 @@ import {
 import { projectStoredContentV1 } from '../catalog/stored-content-projector-v1';
 import { projectStoredSpellRowsContentV1 } from '../catalog/spell-content-projector-v1';
 import type { ContentKey } from '../domain/ids';
-import type { SpeciesContentAggregate } from '../authoring/contracts';
+import type {
+  BackgroundContentAggregate,
+  SpeciesContentAggregate,
+} from '../authoring/contracts';
 import {
   migrateLegacyTraitRows,
   splitLegacyTraitEffect,
@@ -189,18 +192,31 @@ export interface CharacterImportResult {
   readonly notices: readonly CharacterImportNotice[];
 }
 
-export interface CharacterImportNotice {
-  readonly kind: 'species_effect_template_ref_unresolved';
-  readonly effect: {
-    readonly templateRef: string;
-    readonly label: string;
-    readonly effectKind: string;
-  };
-  readonly species: {
-    readonly contentKey: string;
-    readonly name: string;
-  };
-}
+export type CharacterImportNotice =
+  | {
+      readonly kind: 'species_effect_template_ref_unresolved';
+      readonly effect: {
+        readonly templateRef: string;
+        readonly label: string;
+        readonly effectKind: string;
+      };
+      readonly species: {
+        readonly contentKey: string;
+        readonly name: string;
+      };
+    }
+  | {
+      readonly kind: 'background_effect_template_ref_unresolved';
+      readonly effect: {
+        readonly templateRef: string;
+        readonly label: string;
+        readonly effectKind: string;
+      };
+      readonly background: {
+        readonly contentKey: string;
+        readonly name: string;
+      };
+    };
 
 export type CharacterImportCommitResult =
   | {
@@ -671,6 +687,11 @@ function validateCharacterRows(
   maps: Readonly<Record<ReferenceKind, Map<number, string>>>,
   label: string,
 ): void {
+  const backgroundSourceIds = new Set(
+    (tables.character_source_instances ?? [])
+      .filter((row) => row.source_type === 'background')
+      .map((row) => row.id),
+  );
   for (const table of CHARACTER_STATE_TABLES) {
     const rows = tables[table];
     if (rows === undefined) {
@@ -688,9 +709,16 @@ function validateCharacterRows(
         table === 'character_species_traits'
           ? splitLegacyTraitEffect(row)
           : null;
+      const contractRow =
+        table === 'character_effects' &&
+        typeof row.template_ref === 'number' &&
+        Number.isSafeInteger(row.template_ref) &&
+        backgroundSourceIds.has(row.source_instance_id)
+          ? { ...row, template_ref: null }
+          : legacy === null ? row : legacy.row;
       assertRowShape(
         table,
-        legacy === null ? row : legacy.row,
+        contractRow,
         `${label}.${table}[${index}]`,
       );
       if (legacy?.effect != null) {
@@ -1660,6 +1688,10 @@ const storedSpeciesEffectTemplateRef =
   /^species_template_trait_effects:(\d+)$/u;
 const portableSpeciesEffectTemplateRef =
   /^species_template_trait_effects:portable:(\d+):(\d+):(.+)$/u;
+const storedBackgroundEffectTemplateRef =
+  /^background_template_effects:(\d+)$/u;
+const portableBackgroundEffectTemplateRef =
+  /^background_template_effects:portable:(\d+)$/u;
 
 function encodedPortableSpeciesEffectTemplateRef(
   identity: PortableSpeciesEffectTemplateIdentity,
@@ -1727,6 +1759,31 @@ function portableSpeciesEffectRef(
   });
 }
 
+function portableBackgroundEffectRef(
+  db: DatabaseContext,
+  row: BackupRow,
+  sourceRows: ReadonlyMap<number, BackupRow>,
+): unknown {
+  if (typeof row.template_ref !== 'string') return row.template_ref;
+  const match = storedBackgroundEffectTemplateRef.exec(row.template_ref);
+  if (match === null || row.source_instance_id === null) return row.template_ref;
+  const source = sourceRows.get(Number(row.source_instance_id));
+  if (source === undefined || source.source_type !== 'background') return row.template_ref;
+  const sortOrder = db.scalar<number>(
+    `SELECT effect.sort_order
+     FROM background_template_effects AS effect
+     JOIN background_templates AS template
+       ON template.id = effect.background_template_id
+     JOIN background_definitions AS definition
+       ON definition.content_key = template.content_key
+     WHERE effect.id = ? AND definition.id = ?`,
+    [Number(match[1]), Number(source.source_definition_id)],
+  );
+  return sortOrder === null
+    ? row.template_ref
+    : `background_template_effects:portable:${String(sortOrder)}`;
+}
+
 function portableSpeciesEffectRows(
   db: DatabaseContext,
   rows: readonly BackupRow[],
@@ -1734,7 +1791,11 @@ function portableSpeciesEffectRows(
 ): readonly BackupRow[] {
   return rows.map((row) => ({
     ...row,
-    template_ref: portableSpeciesEffectRef(db, row, sourceRows),
+    template_ref: portableBackgroundEffectRef(
+      db,
+      { ...row, template_ref: portableSpeciesEffectRef(db, row, sourceRows) },
+      sourceRows,
+    ),
   }));
 }
 
@@ -2513,6 +2574,97 @@ function speciesEffectTemplateRefResolver(
   };
 }
 
+function backgroundEffectTemplateRefResolver(
+  db: DatabaseContext,
+  document: CharacterBackupDocument,
+  notices: CharacterImportNotice[],
+): (
+  row: BackupRow,
+  sourceType: string | null,
+  sourceBackgroundDefinitionId: number | null,
+  backgroundDefinitionId: number | null,
+) => unknown {
+  const sourceKeys = new Map(
+    document.references.background_definitions.map((reference) => [
+      reference.id,
+      reference.content_key,
+    ]),
+  );
+  const portableBackgrounds = new Map(
+    document.content
+      .filter((entry) => entry.kind === 'background')
+      .map((entry) => [
+        entry.content_key,
+        entry.aggregate as BackgroundContentAggregate,
+      ]),
+  );
+  const noticed = new Set<string>();
+  return (row, sourceType, sourceBackgroundDefinitionId, backgroundDefinitionId) => {
+    if (
+      sourceType !== 'background' ||
+      sourceBackgroundDefinitionId === null ||
+      backgroundDefinitionId === null ||
+      row.template_ref === null
+    ) return row.template_ref;
+    const target = db.oneRaw(
+      'SELECT content_key, name FROM background_definitions WHERE id = ?',
+      [backgroundDefinitionId],
+    );
+    if (target === null) {
+      throw new BackupValidationError(
+        `Character backup background definition ${String(backgroundDefinitionId)} is missing.`,
+      );
+    }
+    const sourceContentKey = sourceKeys.get(sourceBackgroundDefinitionId) ?? String(target.content_key);
+    const aggregate = portableBackgrounds.get(sourceContentKey);
+    const unresolved = (): null => {
+      const marker = [row.template_ref, row.effect_kind, row.label, sourceContentKey].join('\u0000');
+      if (!noticed.has(marker)) {
+        noticed.add(marker);
+        notices.push(Object.freeze({
+          kind: 'background_effect_template_ref_unresolved',
+          effect: Object.freeze({
+            templateRef: String(row.template_ref),
+            label: String(row.label),
+            effectKind: String(row.effect_kind),
+          }),
+          background: Object.freeze({
+            contentKey: sourceContentKey,
+            name: aggregate?.name ?? String(target.name),
+          }),
+        }));
+      }
+      return null;
+    };
+    if (
+      typeof row.template_ref !== 'string' ||
+      (!storedBackgroundEffectTemplateRef.test(row.template_ref) &&
+        !portableBackgroundEffectTemplateRef.test(row.template_ref))
+    ) return unresolved();
+
+    const portableMatch = portableBackgroundEffectTemplateRef.exec(row.template_ref);
+    const sortOrder = portableMatch === null ? null : Number(portableMatch[1]);
+    const sourceEffectExists = aggregate === undefined || sortOrder === null
+      ? sortOrder !== null
+      : aggregate.effects.some((effect) => effect.sort_order === sortOrder);
+    const candidate = sortOrder === null || !sourceEffectExists
+      ? null
+      : db.allRaw(
+          `SELECT effect.*
+           FROM background_template_effects AS effect
+           JOIN background_templates AS template
+             ON template.id = effect.background_template_id
+           WHERE template.content_key = ? AND effect.sort_order = ?`,
+          [String(target.content_key), sortOrder],
+        ).find((effect) =>
+          speciesEffectTemplateColumns.every((column) => effect[column] === row[column])) ?? null;
+    if (candidate !== null) {
+      return `background_template_effects:${String(candidate.id)}`;
+    }
+    return unresolved();
+  };
+}
+
 function importCurrentTables(
   db: DatabaseContext,
   document: CharacterBackupDocument,
@@ -2550,6 +2702,11 @@ function importCurrentTables(
     ),
   };
   const speciesTemplateRef = speciesEffectTemplateRefResolver(
+    db,
+    document,
+    notices,
+  );
+  const backgroundTemplateRef = backgroundEffectTemplateRefResolver(
     db,
     document,
     notices,
@@ -2919,6 +3076,14 @@ function importCurrentTables(
             sourceRow?.source_definition_id,
           )
         : null;
+    const backgroundDefinitionId =
+      sourceType === 'background'
+        ? resolvedId(
+            references,
+            'background_definitions',
+            sourceRow?.source_definition_id,
+          )
+        : null;
     const oldItemId =
       row.character_item_id === null ? null : Number(row.character_item_id);
     const itemId =
@@ -2946,14 +3111,24 @@ function importCurrentTables(
         source_instance_id: sourceId,
         character_item_id: itemId ?? null,
         character_weapon_id: weaponId ?? null,
-        template_ref: speciesTemplateRef(
-          row,
+        template_ref: backgroundTemplateRef(
+          {
+            ...row,
+            template_ref: speciesTemplateRef(
+              row,
+              sourceType,
+              sourceType === 'species'
+                ? Number(sourceRow?.source_definition_id)
+                : null,
+              speciesDefinitionId,
+              oldSourceId,
+            ),
+          },
           sourceType,
-          sourceType === 'species'
+          sourceType === 'background'
             ? Number(sourceRow?.source_definition_id)
             : null,
-          speciesDefinitionId,
-          oldSourceId,
+          backgroundDefinitionId,
         ),
       }),
     );
@@ -3113,6 +3288,11 @@ function portableSnapshots(
 
   const transformed = snapshots.map((snapshot) => {
     const speciesTemplateRef = speciesEffectTemplateRefResolver(
+      db,
+      document,
+      notices,
+    );
+    const backgroundTemplateRef = backgroundEffectTemplateRefResolver(
       db,
       document,
       notices,
@@ -3311,6 +3491,13 @@ function portableSnapshots(
                     source?.source_definition_id,
                   )
                 : null;
+              const backgroundDefinitionId = sourceType === 'background'
+                ? resolvedId(
+                    references,
+                    'background_definitions',
+                    source?.source_definition_id,
+                  )
+                : null;
               return {
                 ...row,
                 id: ids[table].get(Number(row.id)),
@@ -3331,14 +3518,24 @@ function portableSnapshots(
                     : ids.character_weapons.get(
                         Number(row.character_weapon_id),
                       ) ?? null,
-                template_ref: speciesTemplateRef(
-                  row,
+                template_ref: backgroundTemplateRef(
+                  {
+                    ...row,
+                    template_ref: speciesTemplateRef(
+                      row,
+                      sourceType,
+                      sourceType === 'species'
+                        ? Number(source?.source_definition_id)
+                        : null,
+                      speciesDefinitionId,
+                      oldSourceId,
+                    ),
+                  },
                   sourceType,
-                  sourceType === 'species'
+                  sourceType === 'background'
                     ? Number(source?.source_definition_id)
                     : null,
-                  speciesDefinitionId,
-                  oldSourceId,
+                  backgroundDefinitionId,
                 ),
               };
             }),

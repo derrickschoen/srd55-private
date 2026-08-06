@@ -79,7 +79,10 @@ interface ClosureFixture {
 function seedClosureLibrary(db: DatabaseContext): ClosureFixture {
   const importer = new CatalogImporter(db);
   importer.import({
-    documents: [catalogDocument('feat', featProjectorV1Vector.aggregate)],
+    documents: [catalogDocument('feat', {
+      ...featProjectorV1Vector.aggregate,
+      category: 'origin',
+    })],
   });
   const featKey = 'expanded:content.feat:keen-memory' as ContentKey;
 
@@ -118,7 +121,9 @@ function seedClosureLibrary(db: DatabaseContext): ClosureFixture {
     repeatable: false,
     grants: [],
     suggested_abilities: ['intelligence', 'wisdom', 'charisma'],
+    default_origin_feat_content_key: featKey,
     default_origin_feat: { kind: 'feat', ...fingerprint(db, featKey) },
+    default_origin_feat_display_name: 'Portable Origin Feat (Cleric)',
     skill_proficiencies: ['arcana', 'insight'],
     tool_reference_text: null,
     equipment_option_a_description: 'None.',
@@ -193,6 +198,12 @@ function rekeyExternalContentAsDerived(
       `UPDATE species_definitions
        SET grant_rules = replace(grant_rules, ?, ?)`,
       [assertedKey, derivedKey],
+    );
+    transaction.exec(
+      `UPDATE background_templates
+       SET default_origin_feat_content_key = ?
+       WHERE default_origin_feat_content_key = ?`,
+      [derivedKey, assertedKey],
     );
     transaction.exec(
       `UPDATE catalog_content_identities

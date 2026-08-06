@@ -310,6 +310,7 @@ const backgroundV1 = z.strictObject({
   ...baseDraft,
   suggested_abilities: z.array(ability).max(3),
   default_origin_feat_content_key: nullable(contentKey),
+  default_origin_feat_display_name: nullable(shortText),
   skill_proficiencies: z.array(skill).max(2),
   tool_reference_text: nullable(
     codePointText(AUTHORING_TEXT_LIMITS.toolReference),

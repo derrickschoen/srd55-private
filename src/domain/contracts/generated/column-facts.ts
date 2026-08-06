@@ -87,6 +87,7 @@ export const COLUMN_FACTS = {
     ability_score_2: { base: 'degraded', notNull: true },
     ability_score_3: { base: 'degraded', notNull: true },
     feat_name: { base: 'degraded', notNull: true },
+    default_origin_feat_content_key: { base: 'degraded', notNull: false },
     skill_proficiency_1: { base: 'degraded', notNull: true },
     skill_proficiency_2: { base: 'degraded', notNull: true },
     tool_proficiency: { base: 'degraded', notNull: true },

@@ -87,6 +87,29 @@ export interface SpeciesTemplateTraitEffectRow {
   readonly updated_at: string | null;
 }
 
+export interface BackgroundTemplateEffectRow {
+  readonly id: number;
+  readonly background_template_id: number;
+  readonly sort_order: number;
+  readonly effect_kind: string;
+  readonly damage_type: DamageType | null;
+  readonly hit_points_flat: number | null;
+  readonly hit_points_per_level: number | null;
+  readonly speed_bonus_feet: number | null;
+  readonly ability: string | null;
+  readonly amount: number | null;
+  readonly maximum: number | null;
+  readonly base: number | null;
+  readonly ability_1: string | null;
+  readonly ability_2: string | null;
+  readonly allows_shield: number | null;
+  readonly weapon_scope: string | null;
+  readonly label: string;
+  readonly notes: string | null;
+  readonly created_at: string | null;
+  readonly updated_at: string | null;
+}
+
 export interface BackgroundTemplateRow {
   readonly id: number;
   readonly content_key: string;
@@ -249,6 +272,27 @@ export function effectsFromTemplate(
     return {
       ...profile,
       template_ref: `species_template_trait_effects:${String(id)}`,
+      label: effect.label,
+      notes: effect.notes,
+    };
+  });
+}
+
+export function backgroundEffectsFromTemplate(
+  effects: readonly BackgroundTemplateEffectRow[],
+): CharacterEffectProfile[] {
+  return effects.map((effect) => {
+    const {
+      id,
+      background_template_id: _template,
+      sort_order: _order,
+      created_at: _created,
+      updated_at: _updated,
+      ...profile
+    } = effect;
+    return {
+      ...profile,
+      template_ref: `background_template_effects:${String(id)}`,
       label: effect.label,
       notes: effect.notes,
     };

@@ -70,6 +70,12 @@ export function applyEquipmentRefusalMessage(error: unknown): string | null {
             `granted. Remove or reslot ${holder} first, then confirm the ` +
             'package again. Nothing was changed.';
     }
+    case 'equipment_dependency_drift':
+      return (
+        'A weapon or armour definition used by this background changed after ' +
+        'publication. Repair or republish the background before confirming ' +
+        'its package. Nothing was changed.'
+      );
     case 'equipment_option_not_offered':
       return (
         'That option is not offered. Equipment is the package only — the ' +

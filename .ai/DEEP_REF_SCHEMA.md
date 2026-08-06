@@ -41,6 +41,13 @@ manifests deliberately project the aggregate, not that local archive metadata.
 | `index.ts` | Re-exports EVERY module above. Not optional — see below |
 | `triggers.sql` | The two hand-authored triggers |
 
+`db/schema/origins.ts`:
+
+- `background_templates` (`:988`) stores the printed background template and
+  its nullable migrated/default Origin-feat content key. New writers always
+  supply the key; null represents only an ambiguous legacy name that migration
+  0037 could not bind without guessing.
+
 ### `index.ts` is load-bearing
 
 Every module under `db/schema/` must be re-exported from `db/schema/index.ts`.
@@ -82,7 +89,7 @@ artifact, keep the split.
 |---|---|
 | `generated/column-facts.ts` | GENERATED. Per-column facts: does the column exist, is it `notNull`, could drizzle-zod type it |
 | `generated/reference-facts.ts` | GENERATED. Catalog tables a backup resolves references against |
-| `rows.ts` | The Zod contracts. `COLUMN_REFINEMENTS` (`:419`), `NARROWED_REFINEMENTS` (`:502`), `rowContractError` (`:1565`) |
+| `rows.ts` | The Zod contracts. `COLUMN_REFINEMENTS` (`:419`), `NARROWED_REFINEMENTS` (`:502`), `rowContractError` (`:1566`) |
 | `row-rules.ts` | Cross-column rules a per-column contract cannot express |
 | `json-columns.ts` | WHICH text columns hold serialized JSON, and what SHAPE each reader needs |
 | `tables.ts` | The table inventory and scope classification — §3 below |

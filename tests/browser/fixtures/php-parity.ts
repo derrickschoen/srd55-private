@@ -120,9 +120,9 @@ function seedSourceCatalog(
     existingMagicInitiateId ??
     db.exec(
       `INSERT INTO feat_definitions (
-         content_key, name, rules_edition, repeatable, grant_rules
+         content_key, name, rules_edition, category, repeatable, grant_rules
        ) VALUES (
-         '2024:feat:magic-initiate', 'Magic Initiate', '2024', 1, ?
+         '2024:feat:magic-initiate', 'Magic Initiate', '2024', 'origin', 1, ?
        )`,
       [JSON.stringify(magicInitiateRules())],
     ).lastInsertId;
@@ -131,6 +131,7 @@ function seedSourceCatalog(
     db.exec(
       `UPDATE feat_definitions
        SET content_key = '2024:feat:magic-initiate',
+           category = 'origin',
            repeatable = 1,
            grant_rules = ?
        WHERE id = ?`,
@@ -195,12 +196,14 @@ function seedSourceCatalog(
   db.exec(
     `INSERT INTO background_templates (
        content_key, name, rules_edition, ability_score_1, ability_score_2,
-       ability_score_3, feat_name, skill_proficiency_1,
+       ability_score_3, feat_name, default_origin_feat_content_key,
+       skill_proficiency_1,
        skill_proficiency_2, tool_proficiency, equipment_option_a,
        equipment_option_b
      ) VALUES (
        ?, 'Custom Background', '2024', 'intelligence', 'wisdom', 'charisma',
-       'Magic Initiate (Cleric)', 'Arcana', 'Religion', '', '', ''
+       'Magic Initiate (Cleric)', '2024:feat:magic-initiate',
+       'Arcana', 'Religion', '', '', ''
      )`,
     [backgroundContentKey],
   );

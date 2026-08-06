@@ -37,6 +37,7 @@ import assertedContentKeys from '../../drizzle/0033_asserted_content_keys.sql?ra
 import removeLegacyOpaque from '../../drizzle/0034_remove_legacy_opaque.sql?raw';
 import catalogContentDrafts from '../../drizzle/0035_catalog_content_drafts.sql?raw';
 import catalogContentArchive from '../../drizzle/0036_catalog_content_archive.sql?raw';
+import backgroundDefaultOriginFeatKey from '../../drizzle/0037_background_default_origin_feat_key.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -47,6 +48,8 @@ export interface DatabaseMigration {
   readonly checksum: string;
   /** SHA-256 of the exact sqlite_schema signature after this chain prefix. */
   readonly resultSchemaChecksum: string;
+  /** Exceptional replay handling; absent migrations retain normal execution. */
+  readonly replayPolicy?: 'skip_when_result_schema_matches';
 }
 
 const baselineSql = [
@@ -419,6 +422,18 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
     resultSchemaChecksum:
       'cbf37d18775ad5e489c7adb90df5aa24c04d4194569750de2de86b66844ae066',
   }),
+  // HA-4 N1: a printed feat name is display text, not identity. Legacy rows
+  // backfill only on an unambiguous edition/name match; current writers store
+  // the exact installed Origin feat key.
+  Object.freeze({
+    id: '0037_background_default_origin_feat_key',
+    sql: backgroundDefaultOriginFeatKey,
+    checksum:
+      '8cc9c87ed1dc24c88e21bda3b55feff4d577977e0ffd9dc90d5957525c6de9b3',
+    resultSchemaChecksum:
+      'f98f35c6e38eed6755915863bae874c6df4aa50433743289c2e9bfdd23d3a86d',
+    replayPolicy: 'skip_when_result_schema_matches',
+  }),
 ]);
 
 export function databaseSchemaChecksum(signature: string): string {
@@ -495,6 +510,16 @@ export function applyMigrationSuffix(
     transactionOpen = true;
     try {
       for (const migration of pending) {
+        // 0037 alone declares that an explicit replay against its exact result
+        // schema is a no-op. Every other migration keeps the historical
+        // dispatcher behaviour and executes its SQL when included in a suffix.
+        if (
+          migration.replayPolicy === 'skip_when_result_schema_matches' &&
+          databaseSchemaChecksum(signatureOf(db)) ===
+          migration.resultSchemaChecksum
+        ) {
+          continue;
+        }
         db.exec(migration.sql);
       }
 
