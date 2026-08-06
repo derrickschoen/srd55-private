@@ -23,7 +23,40 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-06-b (newest - read first)
+## RESTART POINT 2026-08-06-c (newest - read first)
+MAIN 3a2c324 (mirror pushed). FLOORS: vitest 237/3,941; PW 126 on the
+pool (~9 min); build 0; migrations 0000-0036 FROZEN; wire v1-v17;
+character backup at v5. TWENTY-SEVEN merges. Rulings through D210.
+
+MERGED SINCE 08-06-b:
+ - CI-5 (3a2c324, 27th): character backup v5 complete content manifest.
+   Asserted keys (D198), no legacy union (D205), install through CI-4a
+   plan/commit, mint 0036 catalog_content_archive (additive). Spell
+   identity sidecar (canonical/normalized/aliases) OUTSIDE the
+   fingerprint, restored on install, conflict-refused even on exact
+   match. Validation derives the expected asserted key via the shared
+   normalization seam. Character + library document digests bound into
+   adoption tokens. Legacy backup.importCharacter DELETED everywhere.
+   subclass-provenance pins reconciled as strict supersets. Gate history:
+   3 review rounds (1 BLOCKER + 5 MAJOR/HIGH found and fixed), 2
+   gate-failure fix rounds (superseded provenance pins; fixtures not
+   registering completed projections), 1 supervisor 2-line stale-pin fix
+   (v4->v5 version pins, supervisor-authored, disclosed).
+   REMAINING before full CI-5 closure (recorded, not blocking):
+   target-local regeneration of generated template_ref effects;
+   fresh-restore of surviving external classes; library UI.
+
+WORKTREE SWEEP: wt/attr, wt/mint2, wt/pwa, wt/resp found still present
+despite earlier "all pruned" record - all four verified 0 ahead of main
+and 0 dirty, pruned per D207. wt/party only remains (owner's - never
+prune).
+
+QUEUE: no named units. CI-8 follows CI-5 in the design graph; HA-12
+depends on HA-11 and CI-5 - read their design rows fresh before
+dispatch. Parked owner questions: Veteran prose vs D152 (see audit
+closure below); CI-5 remaining items above.
+
+## RESTART POINT 2026-08-06-b (superseded by 08-06-c)
 MAIN 69dd7ad (mirror pushed, 9d59f48). FLOORS: vitest 235/3,909; PW 126
 on the pool (~9 min); build 0; migrations 0000-0035 FROZEN; wire v1-v17.
 TWENTY-SIX merges. Rulings through D210.
