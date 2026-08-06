@@ -8,11 +8,15 @@ import {
 import { DatabaseContext } from '../../../src/db/database';
 import { GrantRuleSlotGenerator } from '../../../src/grants/grant-rule-slot-generator';
 import {
+  commitCharacterShareImport,
   ensureSharedSpell,
   exportCharacterShare,
   importCharacterShare,
   previewCharacterShare,
 } from '../../../src/sharing/character-share';
+import { deriveContentIdentityV1 } from '../../../src/catalog/content-identity';
+import { reconcileCurrentContentFingerprintV1 } from '../../../src/catalog/content-registry';
+import { projectStoredContentV1 } from '../../../src/catalog/stored-content-projector-v1';
 import {
   decodeShareFragment,
   encodeShareFragment,
@@ -31,6 +35,7 @@ import {
 import { ShareImportCompatibilityError } from '../../../src/sharing/import-issues';
 import { validateCharacterCommandPayload } from '../../../src/commands/payload-validator';
 import { CHARACTER_TEXT_LIMITS } from '../../../src/domain/character-limits';
+import type { ContentKey } from '../../../src/domain/ids';
 import {
   WEAPON_RANGE_MAX_FEET,
   WEAPON_TEXT_LIMITS,
@@ -1064,11 +1069,27 @@ describe('adversarial character-share fidelity', () => {
   it('preserves homebrew subclass config that controls regenerated slots', async () => {
     const seed = (db: DatabaseContext) => {
       const shieldId = spell(db, '2024:shield', 'Shield');
+      const classKey = '2024:class:homebrew-mage' as ContentKey;
       const classId = classDefinition(
         db,
-        '2024:class:homebrew-mage',
+        classKey,
         'Homebrew Mage',
       );
+      db.exec(
+        `UPDATE class_progressions SET slots = '[]'
+         WHERE class_definition_id = ?`,
+        [classId],
+      );
+      const storedClass = projectStoredContentV1(
+        db,
+        'class',
+        classKey,
+      );
+      reconcileCurrentContentFingerprintV1(db, {
+        kind: 'class',
+        contentKey: classKey,
+        identity: deriveContentIdentityV1(storedClass),
+      });
       const subclassKey = '2024:sharing.fixture:configured-path';
       registerFixtureContentIdentity(db, {
         kind: 'subclass', contentKey: subclassKey, name: 'Configured Path',
@@ -1116,17 +1137,18 @@ describe('adversarial character-share fidelity', () => {
       { spellcasting_ability: 'intelligence', class_choice: 'alpha' },
       1,
     );
+    const subclassConfig = {
+      spellcasting_ability: 'wisdom',
+      enabled: 'yes',
+      path_choice: 'tab\tline\nemoji🧙',
+    };
     const subclassSourceId = source(
       sourceDb,
       characterId,
       'subclass',
       catalog.subclassId,
       'Configured Path',
-      {
-        spellcasting_ability: 'wisdom',
-        enabled: 'yes',
-        path_choice: 'tab\tline\nemoji🧙',
-      },
+      subclassConfig,
       7,
     );
     new GrantRuleSlotGenerator(sourceDb).generateForSource(subclassSourceId);
@@ -1142,7 +1164,37 @@ describe('adversarial character-share fidelity', () => {
     const targetDb = await database();
     seed(targetDb);
     const shared = await throughShareLink(document);
-    const imported = importCharacterShare(targetDb, shared);
+    expect(shared.classes[0]?.subclassConfig).toEqual(subclassConfig);
+    expect(targetDb.scalar<number>(
+      `SELECT count(*) FROM catalog_content_fingerprints
+       WHERE content_kind = 'subclass' AND content_key = ?`,
+      ['2024:sharing.fixture:configured-path'],
+    )).toBe(0);
+    const preview = previewCharacterShare(targetDb, shared);
+    expect(preview.adoptionPlan.reviews).toEqual([
+      expect.objectContaining({
+        kind: 'subclass',
+        targetContentKey: '2024:sharing.fixture:configured-path',
+        incomingFingerprint: null,
+        matchClass: 'key-collision',
+        defaultChoice: 'match',
+      }),
+    ]);
+    const choices = Object.fromEntries(
+      preview.adoptionPlan.reviews.map((review) => [
+        review.id,
+        { decision: 'match' as const },
+      ]),
+    );
+    const committed = commitCharacterShareImport(
+      targetDb,
+      shared,
+      preview.adoptionPlan.token,
+      choices,
+    );
+    expect(committed.kind).toBe('committed');
+    if (committed.kind !== 'committed') throw new Error('Expected commit.');
+    const imported = committed.result;
     expect(selectedChoices(targetDb, imported.characterId)).toEqual(
       selectedChoices(sourceDb, characterId),
     );

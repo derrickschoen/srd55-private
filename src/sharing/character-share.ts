@@ -1479,26 +1479,41 @@ function prepareShareReferences(
     }
     targets.set(marker, resolution.contentKey);
     if (!resolution.reviewRequired) continue;
-    const projectable = db.scalar<number>(
+    const hasRegisteredFingerprint = db.scalar<number>(
       `SELECT 1 FROM catalog_content_fingerprints
        WHERE content_kind = ? AND content_key = ? LIMIT 1`,
       [reference.kind, resolution.contentKey],
     ) === 1;
-    if (!projectable) {
+    if (!hasRegisteredFingerprint && reference.kind !== 'subclass') {
       issues.push(unprojectableReferenceIssue(
         reference.issueType,
         reference.contentKey,
       ));
       continue;
     }
-    const nodeId = `${reference.kind}:share:${reference.contentKey}`;
-    nodes.push(localContentReferenceImportNode(db, {
-      id: nodeId,
-      kind: reference.kind,
-      incomingContentKey: reference.contentKey,
-      localContentKey: resolution.contentKey,
-    }));
-    markersByNodeId.set(nodeId, marker);
+    let node: ContentImportNode;
+    try {
+      // A subclass's own current fingerprint is not the test for whether its
+      // live aggregate can be reviewed. The subclass projector validates its
+      // stored rows and every fingerprinted dependency (including its parent
+      // class), so an asserted subclass with an absent root fingerprint is
+      // still safe to present for explicit Match. Other kinds retain the
+      // registry-integrity requirement above.
+      node = localContentReferenceImportNode(db, {
+        id: `${reference.kind}:share:${reference.contentKey}`,
+        kind: reference.kind,
+        incomingContentKey: reference.contentKey,
+        localContentKey: resolution.contentKey,
+      });
+    } catch {
+      issues.push(unprojectableReferenceIssue(
+        reference.issueType,
+        reference.contentKey,
+      ));
+      continue;
+    }
+    nodes.push(node);
+    markersByNodeId.set(node.id, marker);
   }
   return Object.freeze({
     nodes: Object.freeze(nodes),
