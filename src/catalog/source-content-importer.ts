@@ -128,6 +128,14 @@ function storedGrants(db: DatabaseContext, grants: readonly AuthoringGrant[]): s
   return JSON.stringify(grants.map((grant) => storedGrant(db, grant)));
 }
 
+/** Resolve portable fingerprint edges back to target-local stored keys. */
+export function portableStoredGrantRules(
+  db: DatabaseContext,
+  grants: readonly AuthoringGrant[],
+): string {
+  return storedGrants(db, grants);
+}
+
 function insertEffects(
   db: DatabaseContext,
   table: 'species_template_trait_effects' | 'background_template_effects',
@@ -286,7 +294,7 @@ function rootMetadataConflict(
   return row !== null && (row.name !== name || row.rules_edition !== edition);
 }
 
-type SourceAggregate =
+export type SourceAggregate =
   | CatalogClassRecord['aggregate']
   | CatalogFeatRecord['aggregate']
   | CatalogSpeciesRecord['aggregate']
@@ -299,6 +307,53 @@ function sourcePayload(aggregate: SourceAggregate): unknown {
     case 'species':
     case 'background': return projectAuthoredContentAggregateV1(aggregate).payload;
   }
+}
+
+function emptySourceCounters(): MutableSourceContentImportCounters {
+  return {
+    classes_matched: 0,
+    feats_created: 0,
+    feats_matched: 0,
+    species_created: 0,
+    species_matched: 0,
+    backgrounds_created: 0,
+    backgrounds_matched: 0,
+  };
+}
+
+/** One complete semantic source aggregate entering through the CI-4a seam. */
+export function portableSourceContentImportNode(
+  db: DatabaseContext,
+  aggregate: SourceAggregate,
+  assertedKey: ContentKey,
+  declaredAlias?: ContentKey,
+): ContentImportNode {
+  const counters = emptySourceCounters();
+  const build = (
+    name: string,
+    nextKey: ContentKey,
+    dependencies: ReadonlyMap<string, ContentImportDependencyTarget>,
+  ): ContentImportProjection => {
+    const remapped = remapProjectionFingerprintReferences(
+      { ...aggregate, name },
+      dependencies,
+    ) as SourceAggregate;
+    const projection = sourceProjectionForDatabase(
+      db,
+      remapped,
+      nextKey,
+      counters,
+    );
+    return declaredAlias === undefined
+      ? projection
+      : { ...projection, declaredAlias };
+  };
+  return Object.freeze({
+    id: `portable:${aggregate.kind}:${assertedKey}`,
+    projection: build(aggregate.name, assertedKey, new Map()),
+    reproject: (input: Parameters<NonNullable<ContentImportNode['reproject']>>[0]) =>
+      build(input.name, input.assertedKey, input.dependencies),
+  });
 }
 
 function sourceProjection(

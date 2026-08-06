@@ -1,7 +1,10 @@
 import {
   exportCharacterBackup,
+  commitCharacterBackupImport,
   importCharacterBackup,
+  planCharacterBackupImport,
 } from '../../backup/character-backup';
+import { isContentImportChoices } from '../../catalog/catalog-schema';
 import {
   exportDatabaseBackup,
   importDatabaseBackup,
@@ -58,6 +61,27 @@ function isImportCharacterParams(
   return isSingleValueParams(params, 'document');
 }
 
+function isPlanCharacterParams(params: unknown): params is {
+  readonly document: unknown;
+  readonly choices: import('../../catalog/content-adoption').ContentImportChoices;
+} {
+  return isRecord(params) && Object.keys(params).every((key) =>
+    ['document', 'choices'].includes(key)) && Object.hasOwn(params, 'document') &&
+    isContentImportChoices(params.choices);
+}
+
+function isCommitCharacterParams(params: unknown): params is {
+  readonly document: unknown;
+  readonly token: import('../../catalog/content-adoption').ContentImportPlanToken;
+  readonly choices: import('../../catalog/content-adoption').ContentImportChoices;
+} {
+  return isRecord(params) && Object.keys(params).every((key) =>
+    ['document', 'token', 'choices'].includes(key)) &&
+    Object.hasOwn(params, 'document') && Object.hasOwn(params, 'token') &&
+    isContentImportChoices(params.choices) &&
+    typeof params.token === 'string' && /^[0-9a-f]{64}$/u.test(params.token);
+}
+
 export const handlers: readonly RpcHandler[] = Object.freeze([
   defineRpcHandler(
     'backup.exportDatabase',
@@ -83,5 +107,21 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
     isImportCharacterParams,
     (context, params) =>
       importCharacterBackup(context.db, params.document),
+  ),
+  defineRpcHandler(
+    'backup.planCharacterImport',
+    isPlanCharacterParams,
+    (context, params) =>
+      planCharacterBackupImport(context.db, params.document, params.choices),
+  ),
+  defineRpcHandler(
+    'backup.commitCharacterImport',
+    isCommitCharacterParams,
+    (context, params) => commitCharacterBackupImport(
+      context.db,
+      params.document,
+      params.token,
+      params.choices,
+    ),
   ),
 ]);

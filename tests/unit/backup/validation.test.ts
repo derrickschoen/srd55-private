@@ -9,6 +9,7 @@ import {
   BackupValidationError,
   CHARACTER_BACKUP_FORMAT,
   CHARACTER_BACKUP_VERSION,
+  PREVIOUS_CHARACTER_BACKUP_VERSION,
   DATABASE_BACKUP_FORMAT,
   DATABASE_BACKUP_VERSION,
 } from '../../../src/backup/backup-version';
@@ -16,6 +17,10 @@ import {
   validateDatabaseBackup,
   type DatabaseBackup,
 } from '../../../src/backup/database-backup';
+import {
+  PORTABLE_CONTENT_LIMITS,
+  validatePortableContent,
+} from '../../../src/backup/portable-content';
 import { DatabaseContext } from '../../../src/db/database';
 import { openTestDatabase } from '../../helpers/open-db';
 
@@ -81,20 +86,7 @@ function minimalCharacterBackup(): CharacterBackupDocument {
       background_definitions: [],
       spell_versions: [],
     },
-    spell_definitions: {
-      spell_identities: [],
-      spell_identity_aliases: [],
-      spell_versions: [],
-      spell_version_publications: [],
-      spell_list_memberships: [],
-      spell_version_tags: [],
-      spell_version_damage_types: [],
-      spell_version_conditions: [],
-      spell_version_attack_modes: [],
-      spell_version_save_abilities: [],
-      spell_version_upcast_levels: [],
-      spell_version_cantrip_upgrade_levels: [],
-    },
+    content: [],
   };
 }
 
@@ -295,6 +287,92 @@ const FROZEN_V1_BACKUP_JSON = `{
     "spell_versions": []
   }
 }`;
+
+/** Hand-authored freeze of the complete v4 envelope immediately before v5. */
+const FROZEN_V4_BACKUP = {
+  format: 'dnd-multiclass-spells/character',
+  version: 4,
+  exported_at: '2026-08-05T12:00:00.000Z',
+  source_character_id: 44,
+  character: {
+    id: 44,
+    name: 'Frozen V4 Hero',
+    strength: 10,
+    dexterity: 10,
+    constitution: 10,
+    intelligence: 10,
+    wisdom: 10,
+    charisma: 10,
+    ability_allocation_method: null,
+    proficiency_bonus_override: null,
+    rules_edition_preference: '2024',
+    allow_legacy: 0,
+    revision: 0,
+    alignment: null,
+    appearance: null,
+    backstory: null,
+    notes: 'The last pre-manifest format.',
+    archived_at: '2042-03-04T05:06:07.000Z',
+    created_at: null,
+    updated_at: null,
+  },
+  tables: {
+    character_class_levels: [],
+    character_source_instances: [],
+    spell_selection_slots: [],
+    wizard_spellbook_entries: [],
+    character_spell_preferences: [],
+    character_rule_overrides: [],
+    warning_acknowledgements: [],
+    character_save_points: [],
+    spell_loadouts: [],
+    spell_loadout_entries: [],
+    character_weapons: [],
+    character_species: [],
+    character_species_traits: [],
+    character_background: [],
+    character_armor: [],
+    character_hit_point_rolls: [],
+    character_skill_proficiencies: [],
+    character_sheet_adjustments: [],
+    character_effects: [],
+    character_skill_grants: [],
+    character_skill_expertise_grants: [],
+    character_items: [],
+    character_attunement_slots: [],
+    character_level_feat_choices: [],
+  },
+  references: {
+    class_definitions: [],
+    subclass_definitions: [],
+    feat_definitions: [],
+    species_definitions: [],
+    background_definitions: [],
+    spell_versions: [],
+  },
+  spell_definitions: {
+    spell_identities: [],
+    spell_identity_aliases: [],
+    spell_versions: [],
+    spell_version_publications: [],
+    spell_list_memberships: [],
+    spell_version_tags: [],
+    spell_version_damage_types: [],
+    spell_version_conditions: [],
+    spell_version_attack_modes: [],
+    spell_version_save_abilities: [],
+    spell_version_upcast_levels: [],
+    spell_version_cantrip_upgrade_levels: [],
+  },
+} as const;
+
+describe('the frozen immediately previous character backup', () => {
+  it('CI5-V4-FROZEN validates the hand-authored v4 envelope without a content manifest', () => {
+    expect(PREVIOUS_CHARACTER_BACKUP_VERSION).toBe(4);
+    expect(Object.hasOwn(FROZEN_V4_BACKUP, 'content')).toBe(false);
+    expect(() => validateCharacterBackup(FROZEN_V4_BACKUP)).not.toThrow();
+  });
+});
 
 describe('a backup file written before weapons travelled', () => {
   it('still imports, and reads as a character with no weapons', () => {
@@ -683,6 +761,22 @@ describe('database backup validation', () => {
 });
 
 describe('portable character validation', () => {
+  it('CI5-MANIFEST-LIMIT refuses an entry count above the portable ceiling before decoding entries', () => {
+    expect(() => validatePortableContent(
+      Array.from({ length: PORTABLE_CONTENT_LIMITS.entries + 1 }, () => null),
+    )).toThrow(
+      `Portable content must contain at most ${String(PORTABLE_CONTENT_LIMITS.entries)} entries.`,
+    );
+  });
+
+  it('CI5-MANIFEST-CYCLE refuses a non-JSON object graph before semantic projection', () => {
+    const cyclic: unknown[] = [];
+    cyclic.push(cyclic);
+    expect(() => validatePortableContent(cyclic)).toThrow(
+      'Portable content must not contain cycles.',
+    );
+  });
+
   it('accepts the current format and rejects incompatible headers', () => {
     const document = minimalCharacterBackup();
     expect(() => validateCharacterBackup(document)).not.toThrow();

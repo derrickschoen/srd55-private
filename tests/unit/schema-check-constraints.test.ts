@@ -1071,6 +1071,19 @@ const catalogContentDraft =
     });
   };
 
+const catalogContentIdentity =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'catalog_content_identities', {
+      content_key: `2024:test.owner:${uid('archived-content')}`,
+      content_kind: 'species',
+      key_kind: 'asserted',
+      catalog_layer: 'external',
+      normalized_name: uid('archived-content'),
+      ...values,
+    });
+  };
+
 const catalogDataMigration =
   (values: Values): Write =>
   (db) => {
@@ -1322,6 +1335,20 @@ function authoredCharacterEffectConstraintCases(
 }
 
 const CONSTRAINT_CASES: readonly ConstraintCase[] = [
+  {
+    constraint: 'catalog_content_identities_archived_at_check',
+    rejects: [
+      ['an integer lifecycle value', catalogContentIdentity({ archived_at: 20420304 })],
+      ['a binary lifecycle value', catalogContentIdentity({
+        archived_at: new Uint8Array([65]) as unknown as string,
+      })],
+    ],
+    accepts: [
+      ['the active NULL', catalogContentIdentity({ archived_at: null })],
+      ['an ISO timestamp', catalogContentIdentity({ archived_at: '2042-03-04T05:06:07.000Z' })],
+      ['a SQLite timestamp', catalogContentIdentity({ archived_at: '2042-03-04 05:06:07' })],
+    ],
+  },
   {
     constraint: 'catalog_content_drafts_uuid_check',
     rejects: [['an empty draft UUID', catalogContentDraft({ draft_uuid: '' })]],

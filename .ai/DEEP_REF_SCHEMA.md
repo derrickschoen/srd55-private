@@ -21,6 +21,10 @@ common way to break this repository.** Its first four lines say so, and
 
 The schema modules under `db/schema/`:
 
+Published content lifecycle state begins at
+`db/schema/catalog-content.ts`: `catalog_content_identities` (`:71`); portable
+manifests deliberately project the aggregate, not that local archive metadata.
+
 | File | Holds |
 |---|---|
 | `catalog-authoring.ts` | Durable incomplete homebrew drafts (whole-database only) |
@@ -78,7 +82,7 @@ artifact, keep the split.
 |---|---|
 | `generated/column-facts.ts` | GENERATED. Per-column facts: does the column exist, is it `notNull`, could drizzle-zod type it |
 | `generated/reference-facts.ts` | GENERATED. Catalog tables a backup resolves references against |
-| `rows.ts` | The Zod contracts. `COLUMN_REFINEMENTS` (`:419`), `NARROWED_REFINEMENTS` (`:502`), `rowContractError` (`:1564`) |
+| `rows.ts` | The Zod contracts. `COLUMN_REFINEMENTS` (`:419`), `NARROWED_REFINEMENTS` (`:502`), `rowContractError` (`:1565`) |
 | `row-rules.ts` | Cross-column rules a per-column contract cannot express |
 | `json-columns.ts` | WHICH text columns hold serialized JSON, and what SHAPE each reader needs |
 | `tables.ts` | The table inventory and scope classification — §3 below |

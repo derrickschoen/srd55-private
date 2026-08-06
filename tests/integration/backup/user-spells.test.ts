@@ -2,9 +2,12 @@ import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   exportCharacterBackup,
+  commitCharacterBackupImport,
   importCharacterBackup,
+  planCharacterBackupImport,
   type CharacterBackupSpellDefinitions,
 } from '../../../src/backup/character-backup';
+import { PRE_FLAVOR_CHARACTER_BACKUP_VERSION } from '../../../src/backup/backup-version';
 import { DatabaseContext } from '../../../src/db/database';
 import { deriveContentIdentityV1 } from '../../../src/catalog/content-identity';
 import { registerContentFingerprint } from '../../../src/catalog/content-registry';
@@ -314,6 +317,51 @@ afterEach(() => {
 });
 
 describe('portable character backup user-authored spells', () => {
+  it('CI5-V2-ABSENT-NOT-INVENTED imports only the spell definition carried by a v2 document', async () => {
+    const source = await database();
+    const contentKey = '2024:local.dnd-wt:historical-hour';
+    const displayName = 'Historical Hour';
+    const seeded = seedReferencedSpell(
+      source,
+      'user',
+      contentKey,
+      displayName,
+      null,
+    );
+    const historical = structuredClone(
+      exportCharacterBackup(source, seeded.characterId),
+    ) as unknown as Record<string, unknown>;
+    historical.version = PRE_FLAVOR_CHARACTER_BACKUP_VERSION;
+    historical.spell_definitions = expectedDefinitions(
+      'user',
+      contentKey,
+      displayName,
+      null,
+    );
+    delete historical.content;
+    const character = historical.character as Record<string, unknown>;
+    delete character.alignment;
+    delete character.appearance;
+    delete character.backstory;
+    delete character.archived_at;
+
+    const target = await database();
+    const imported = importCharacterBackup(target, historical);
+
+    expect(target.allRaw(
+      `SELECT content_kind, content_key FROM catalog_content_identities
+       ORDER BY content_kind, content_key`,
+    )).toEqual([{ content_kind: 'spell', content_key: contentKey }]);
+    expect(storedDefinitions(target)).toEqual(
+      expectedDefinitions('user', contentKey, displayName, null),
+    );
+    expect(target.scalar(
+      `SELECT spell_version_id FROM character_spell_preferences
+       WHERE character_id = ?`,
+      [imported.characterId],
+    )).toBe(1);
+  });
+
   it.each([
     {
       label: 'fork',
@@ -345,17 +393,22 @@ describe('portable character backup user-authored spells', () => {
         seeded.characterId,
         '2026-07-28T13:15:00.000Z',
       );
-      const expected = expectedDefinitions(
-        provenance,
-        contentKey,
-        displayName,
-        ancestry,
+      expect(document.content.map((entry) => [entry.kind, entry.content_key])).toEqual([
+        ['spell', contentKey],
+      ]);
+      const sourceProjection = projectStoredContentV1(
+        source,
+        'spell',
+        contentKey as ContentKey,
       );
-      expect(document.spell_definitions).toEqual(expected);
 
       const target = await database();
       const imported = importCharacterBackup(target, document);
-      expect(storedDefinitions(target)).toEqual(expected);
+      expect(projectStoredContentV1(
+        target,
+        'spell',
+        contentKey as ContentKey,
+      )).toEqual(sourceProjection);
       expect(
         target.oneRaw(
           `SELECT name, notes, created_at, updated_at
@@ -407,9 +460,7 @@ describe('portable character backup user-authored spells', () => {
       bundled.characterId,
     );
     expect(
-      Object.values(bundledDocument.spell_definitions).every(
-        (rows) => rows.length === 0,
-      ),
+      bundledDocument.content.length === 0,
     ).toBe(true);
     expect(bundledDocument.references.spell_versions).toEqual([
       { id: bundled.versionId, content_key: '2024:time-stop' },
@@ -424,10 +475,10 @@ describe('portable character backup user-authored spells', () => {
       '2024:time-stop',
     );
     const forkDocument = exportCharacterBackup(forkDb, fork.characterId);
-    expect(forkDocument.spell_definitions.spell_versions).toHaveLength(1);
-    expect(forkDocument.spell_definitions.spell_versions[0]).toMatchObject({
-      provenance: 'user',
-      forked_from_content_key: '2024:time-stop',
+    expect(forkDocument.content).toHaveLength(1);
+    expect(forkDocument.content[0]).toMatchObject({
+      kind: 'spell',
+      content_key: '2024:local.dnd-wt:time-stop-copy',
     });
   });
 
@@ -475,12 +526,22 @@ describe('portable character backup user-authored spells', () => {
       '2024:local.dnd-wt:carried-version',
     );
     const before = storedDefinitions(collisionTarget);
-    const imported = importCharacterBackup(collisionTarget, document);
-    expect(imported.spellOutcomes).toEqual([{
-      contentKey: '2024:local.dnd-wt:carried-version',
-      targetContentKey: '2024:local.dnd-wt:carried-version',
-      kind: 'adopted',
-    }]);
+    const plan = planCharacterBackupImport(collisionTarget, document);
+    expect(plan.reviews.map((review) => review.matchClass)).toEqual([
+      'key-collision',
+    ]);
+    const committed = commitCharacterBackupImport(
+      collisionTarget,
+      document,
+      plan.token,
+      Object.fromEntries(plan.reviews.map((review) => [
+        review.id,
+        { decision: 'match' as const },
+      ])),
+    );
+    expect(committed.kind).toBe('committed');
+    if (committed.kind !== 'committed') throw new Error('Expected commit.');
+    const imported = committed.result;
     expect(storedDefinitions(collisionTarget)).toEqual(before);
     expect(
       collisionTarget.oneRaw(

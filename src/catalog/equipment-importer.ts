@@ -392,6 +392,43 @@ function projectionForAggregate(
   };
 }
 
+function emptyEquipmentCounters(): MutableEquipmentImportCounters {
+  return {
+    weapons_created: 0,
+    weapons_matched: 0,
+    armors_created: 0,
+    armors_matched: 0,
+    items_created: 0,
+    items_matched: 0,
+    item_definition_effects_created: 0,
+  };
+}
+
+/** One complete equipment aggregate entering through the CI-4a seam. */
+export function portableEquipmentContentImportNode(
+  aggregate: EquipmentContentAggregate,
+  assertedKey: ContentKey,
+  declaredAlias?: ContentKey,
+): ContentImportNode {
+  const counters = emptyEquipmentCounters();
+  const build = (name: string, nextKey: ContentKey): ContentImportProjection => {
+    const projection = projectionForAggregate(
+      { ...aggregate, name } as EquipmentContentAggregate,
+      nextKey,
+      counters,
+    );
+    return declaredAlias === undefined
+      ? projection
+      : { ...projection, declaredAlias };
+  };
+  return Object.freeze({
+    id: `portable:${aggregate.kind}:${assertedKey}`,
+    projection: build(aggregate.name, assertedKey),
+    reproject: (input: Parameters<NonNullable<ContentImportNode['reproject']>>[0]) =>
+      build(input.name, input.assertedKey),
+  });
+}
+
 export function equipmentImportNodes(
   records: {
     readonly weapons: readonly CatalogWeaponRecord[];

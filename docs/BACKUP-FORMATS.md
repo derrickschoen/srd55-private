@@ -1,6 +1,6 @@
 # Backup formats
 
-The application exposes two deliberately different versioned backup formats.
+The application exposes three deliberately different versioned backup formats.
 Imports accept only the current format name and integer version. A format change
 that cannot be read without guessing requires a new version.
 
@@ -31,12 +31,12 @@ storage replacement or reopen fails, that prior image is restored and reopened.
 ## Portable character document
 
 The Worker RPC methods are `backup.exportCharacter` and
-`backup.importCharacter`. The current version 3 is JSON-compatible:
+`backup.importCharacter`. The current version 5 is JSON-compatible:
 
 ```text
 {
   format: "dnd-multiclass-spells/character",
-  version: 3,
+  version: 5,
   exported_at: "<ISO-8601 timestamp>",
   source_character_id: 17,
   character: {
@@ -44,19 +44,50 @@ The Worker RPC methods are `backup.exportCharacter` and
     alignment: string | null,
     appearance: string | null,
     backstory: string | null,
-    notes: string | null
+    notes: string | null,
+    archived_at: string | null
   },
   tables: { ... },
-  references: { ... }
+  references: { ... },
+  content: [
+    {
+      kind: "species",
+      content_key: "expanded:content.species:marsh-kin",
+      key_kind: "asserted",
+      fingerprint_scheme: "content-v1",
+      fingerprint_digest: "<64 lowercase hex characters>",
+      aggregate: { ... }
+    }
+  ]
 }
 ```
 
-Version 3 requires the three flavor keys. Alignment is limited to 120 Unicode
+Version 5 adds the semantic `content` manifest. It contains exactly the
+external reference closure of this character's class/subclass/source/spell
+references, recursively following the HA-1 projector reference vocabulary.
+Unreferenced library creations and incomplete drafts are absent. Bundled
+dependencies are represented by their fingerprints inside aggregates and are
+not copied as external content.
+
+Each manifest entry is a complete display-and-mechanics aggregate plus its
+asserted/name-derived key and current fingerprint. A surviving local
+digest-derived identity is reprojected under that asserted portable key, as are
+all transitive fingerprint references to it; neither the digest key nor local
+resolver aliases become wire semantics. Database ids, timestamps, catalog
+layer, active state, publications/provenance, and other recipient-local metadata
+are excluded. Entries are emitted in stable content kind/key order; import
+computes a dependency-safe install plan independently of document order.
+Planning and commit use the shared CI-4a adoption protocol, so review decisions,
+content installation, and the new character commit together.
+
+Version 3 added the three flavor keys. Alignment is limited to 120 Unicode
 code points, appearance to 4,000, and backstory to 20,000. Notes remains
 type-only during backup validation so a grandfathered note longer than the
 20,000-code-point new-write limit can still be exported and restored losslessly.
-Historical v1 and v2 documents remain readable; their missing flavor fields
-migrate to `null`, never empty or invented text.
+Version 4 added `archived_at`; an archived character remains archived after a
+portable import. Historical versions 1 through 4 remain readable. Missing
+flavor/archive fields migrate to `null`, and v1-v4 import only the content those
+documents actually carry—older documents never synthesize a v5 closure.
 
 `tables` contains:
 
@@ -96,6 +127,29 @@ database format.
 
 Character import validates the header, exact top-level sections, list/object
 shape, ownership, local references, save-point JSON/schema, and catalog keys
-before starting writes. All inserts and sequence reservations then run in one
-SQLite transaction; any constraint or write failure rolls back the character
-and every child row.
+before starting writes. Content, remembered adoption decisions, sequence
+reservations, character, and children then commit in one SQLite transaction;
+any late reference, constraint, or write failure rolls everything back.
+
+## Portable library document
+
+The library service can export the whole installed external library or an
+explicitly selected subset. UI exposure is intentionally later. Version 1 is a
+different document kind from a character:
+
+```text
+{
+  format: "dnd-multiclass-spells/library",
+  version: 1,
+  exported_at: "<ISO-8601 timestamp>",
+  selection: "all" | "selected",
+  selected_content_keys: ["expanded:content.species:marsh-kin"],
+  content: [ ...same semantic manifest entries as character v5... ]
+}
+```
+
+A selected export includes each selected creation and its transitive external
+dependencies, but not unrelated creations. Whole-library export treats every
+installed external aggregate as a root. Import uses the same plan/token/commit
+adoption protocol and identity resolver as character v5, so repeated imports
+match existing content rather than duplicating it.
