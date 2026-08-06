@@ -1,5 +1,4 @@
 import { sqlString } from '../db/codecs';
-import { sha256 } from '../crypto/sha256';
 import type { DatabaseContext } from '../db/database';
 import { isEnumValue } from '../domain/enums';
 import type { ContentKey } from '../domain/ids';
@@ -20,14 +19,13 @@ import {
   contentKinds,
   deriveContentIdentityV1FromNormalizedName,
   normalizeContentIdentityName,
-  type ContentFingerprintDigest,
   type ContentKind,
   type DerivedContentIdentityV1,
   type NormalizedContentName,
 } from './content-identity';
 import {
   ContentIdentityCollision,
-  registerContentFingerprint,
+  reconcileCurrentContentFingerprintV1,
 } from './content-registry';
 import { projectStoredEquipmentContentV1 } from './equipment-content-projector-v1';
 import { projectStoredSpellContentV1 } from './spell-content-projector-v1';
@@ -40,7 +38,7 @@ import {
   storedAuthoredRegistryReferencesV1,
 } from './stored-authored-content-projector-v1';
 
-interface BundledManifestEntryV1 {
+export interface BundledManifestEntryV1 {
   readonly kind: ContentKind;
   readonly contentKey: ContentKey;
 }
@@ -52,6 +50,24 @@ export interface BundledContentRegistryResultV1 {
   readonly registered: number;
   readonly unchanged: number;
   readonly moved: number;
+}
+
+export interface BundledStoredProjectionV1 {
+  readonly kind: ContentKind;
+  readonly contentKey: ContentKey;
+  readonly identity: DerivedContentIdentityV1<ContentKind, unknown>;
+}
+
+export interface BundledContentRegistryProjectionResultV1 {
+  readonly summary: BundledContentRegistryResultV1;
+  readonly storedProjections: readonly BundledStoredProjectionV1[];
+}
+
+export interface BundledContentRegistryProjectionHooksV1 {
+  readonly afterKind?: (
+    kind: ContentKind,
+    storedProjections: readonly BundledStoredProjectionV1[],
+  ) => void;
 }
 
 const KIND_ORDER: Readonly<Record<ContentKind, number>> = Object.freeze({
@@ -66,7 +82,25 @@ const KIND_ORDER: Readonly<Record<ContentKind, number>> = Object.freeze({
   background: 8,
 });
 
+const RECONCILIATION_KIND_ORDER: Readonly<Record<ContentKind, number>> =
+  Object.freeze({
+    // Spell reconciliation is the stored-projection half of the spell seed
+    // pass. It runs first so its after-kind hook can complete the seeder's
+    // source comparison and hard-failure gate before general reconciliation.
+    spell: 0,
+    weapon: 1,
+    armor: 2,
+    item: 3,
+    class: 4,
+    feat: 5,
+    subclass: 6,
+    species: 7,
+    background: 8,
+  });
+
 let staticManifest: readonly BundledManifestEntryV1[] | undefined;
+
+class BundledRegistryEntryRefusal extends Error {}
 
 /**
  * The stable-key manifest is constructed from the exact exported collections
@@ -241,7 +275,8 @@ function allBundledCandidates(
     entries.set(`${entry.kind}\u0000${entry.contentKey}`, entry);
   }
   return Object.freeze([...entries.values()].sort((left, right) =>
-    KIND_ORDER[left.kind] - KIND_ORDER[right.kind] ||
+    RECONCILIATION_KIND_ORDER[left.kind] -
+      RECONCILIATION_KIND_ORDER[right.kind] ||
     left.contentKey.localeCompare(right.contentKey),
   ));
 }
@@ -257,7 +292,7 @@ function ensureBundledRegistryRoot(
       [entry.contentKey],
     );
     if (registry === null || registry.content_kind !== entry.kind) {
-      throw new TypeError(
+      throw new BundledRegistryEntryRefusal(
         `Bundled ${entry.kind} '${entry.contentKey}' has no matching registry root.`,
       );
     }
@@ -267,7 +302,7 @@ function ensureBundledRegistryRoot(
       (keyKind !== 'legacy-opaque' || layer !== 'external') &&
       (keyKind !== 'bundled-stable' || layer !== 'bundled')
     ) {
-      throw new TypeError(
+      throw new BundledRegistryEntryRefusal(
         `Bundled ${entry.kind} '${entry.contentKey}' is registered as ${keyKind}/${layer}.`,
       );
     }
@@ -348,92 +383,6 @@ function projectBundledIdentityV1(
   });
 }
 
-function reconcileCurrentFingerprint(
-  db: DatabaseContext,
-  entry: BundledManifestEntryV1,
-  identity: DerivedContentIdentityV1<ContentKind, unknown>,
-): 'registered' | 'unchanged' | 'moved' {
-  const current = db.oneRaw(
-    `SELECT fingerprint_digest, canonical_json
-     FROM catalog_content_fingerprints
-     WHERE content_kind = ? AND content_key = ?
-       AND fingerprint_scheme = ? AND fingerprint_role = 'current'`,
-    [entry.kind, entry.contentKey, CONTENT_FINGERPRINT_SCHEME_V1],
-  );
-  const currentDigest = current === null
-    ? null
-    : sqlString(current, 'fingerprint_digest');
-  const currentCanonical = current === null
-    ? null
-    : sqlString(current, 'canonical_json');
-  if (
-    currentDigest !== null && currentCanonical !== null &&
-    sha256(currentCanonical) !== currentDigest
-  ) {
-    throw new ContentIdentityCollision();
-  }
-  if (currentDigest === identity.digest) {
-    if (currentCanonical !== identity.canonicalJson) {
-      throw new ContentIdentityCollision();
-    }
-    return 'unchanged';
-  }
-
-  if (current !== null) {
-    db.exec(
-      `UPDATE catalog_content_fingerprints
-       SET fingerprint_role = 'bundled-historical'
-       WHERE content_kind = ? AND content_key = ?
-         AND fingerprint_scheme = ? AND fingerprint_role = 'current'`,
-      [entry.kind, entry.contentKey, CONTENT_FINGERPRINT_SCHEME_V1],
-    );
-  }
-
-  const prior = db.oneRaw(
-    `SELECT canonical_json
-     FROM catalog_content_fingerprints
-     WHERE content_kind = ? AND content_key = ?
-       AND fingerprint_scheme = ? AND fingerprint_digest = ?`,
-    [
-      entry.kind,
-      entry.contentKey,
-      CONTENT_FINGERPRINT_SCHEME_V1,
-      identity.digest,
-    ],
-  );
-  if (prior !== null) {
-    const priorCanonical = sqlString(prior, 'canonical_json');
-    if (
-      sha256(priorCanonical) !== identity.digest ||
-      priorCanonical !== identity.canonicalJson
-    ) {
-      throw new ContentIdentityCollision();
-    }
-    db.exec(
-      `UPDATE catalog_content_fingerprints
-       SET fingerprint_role = 'current'
-       WHERE content_kind = ? AND content_key = ?
-         AND fingerprint_scheme = ? AND fingerprint_digest = ?`,
-      [
-        entry.kind,
-        entry.contentKey,
-        CONTENT_FINGERPRINT_SCHEME_V1,
-        identity.digest,
-      ],
-    );
-  } else {
-    registerContentFingerprint(db, {
-      kind: entry.kind,
-      contentKey: entry.contentKey,
-      scheme: CONTENT_FINGERPRINT_SCHEME_V1,
-      digest: identity.digest as ContentFingerprintDigest,
-      canonicalJson: identity.canonicalJson,
-      role: 'current',
-    });
-  }
-  return current === null ? 'registered' : 'moved';
-}
-
 /**
  * Promote and fingerprint every reconcilable seeder-owned aggregate. Each
  * aggregate is reconciled atomically: a known identity collision rolls back
@@ -443,18 +392,21 @@ function reconcileCurrentFingerprint(
  * never updated. A changed live projection demotes the old bytes to
  * bundled-historical and installs the new projection as current.
  */
-export function reconcileBundledContentRegistryV1(
+export function reconcileBundledContentRegistryWithStoredProjectionsV1(
   db: DatabaseContext,
-): BundledContentRegistryResultV1 {
+  hooks: BundledContentRegistryProjectionHooksV1 = Object.freeze({}),
+): BundledContentRegistryProjectionResultV1 {
   return db.transaction(() => {
     const entries = allBundledCandidates(db);
+    const storedProjections: BundledStoredProjectionV1[] = [];
     let projected = 0;
     let orphaned = 0;
     let refused = 0;
     let registered = 0;
     let unchanged = 0;
     let moved = 0;
-    for (const entry of entries) {
+    let projectionsForKind: BundledStoredProjectionV1[] = [];
+    for (const [index, entry] of entries.entries()) {
       try {
         const result = db.transaction(() => {
           const root = inspectAggregateRoot(db, entry);
@@ -463,30 +415,58 @@ export function reconcileBundledContentRegistryV1(
           }
           ensureBundledRegistryRoot(db, entry, root.name);
           const identity = projectBundledIdentityV1(db, entry);
-          return reconcileCurrentFingerprint(db, entry, identity);
+          const fingerprint = reconcileCurrentContentFingerprintV1(db, {
+            kind: entry.kind,
+            contentKey: entry.contentKey,
+            identity,
+          });
+          return Object.freeze({ fingerprint, identity });
         });
         if (result === 'orphaned') {
           orphaned += 1;
-          continue;
+        } else {
+          const storedProjection = Object.freeze({
+            kind: entry.kind,
+            contentKey: entry.contentKey,
+            identity: result.identity,
+          });
+          storedProjections.push(storedProjection);
+          projectionsForKind.push(storedProjection);
+          projected += 1;
+          if (result.fingerprint === 'registered') registered += 1;
+          if (result.fingerprint === 'unchanged') unchanged += 1;
+          if (result.fingerprint === 'moved') moved += 1;
         }
-        projected += 1;
-        if (result === 'registered') registered += 1;
-        if (result === 'unchanged') unchanged += 1;
-        if (result === 'moved') moved += 1;
       } catch (error) {
-        if (!(error instanceof ContentIdentityCollision)) {
+        if (
+          !(error instanceof ContentIdentityCollision) &&
+          !(error instanceof BundledRegistryEntryRefusal)
+        ) {
           throw error;
         }
         refused += 1;
       }
+      if (entries[index + 1]?.kind !== entry.kind) {
+        hooks.afterKind?.(entry.kind, Object.freeze(projectionsForKind));
+        projectionsForKind = [];
+      }
     }
     return Object.freeze({
-      projected,
-      orphaned,
-      refused,
-      registered,
-      unchanged,
-      moved,
+      summary: Object.freeze({
+        projected,
+        orphaned,
+        refused,
+        registered,
+        unchanged,
+        moved,
+      }),
+      storedProjections: Object.freeze(storedProjections),
     });
   });
+}
+
+export function reconcileBundledContentRegistryV1(
+  db: DatabaseContext,
+): BundledContentRegistryResultV1 {
+  return reconcileBundledContentRegistryWithStoredProjectionsV1(db).summary;
 }
