@@ -1,8 +1,16 @@
 import { createHash } from 'node:crypto';
+import { deriveContentIdentityV1 } from '../../../src/catalog/content-identity';
+import { reconcileCurrentContentFingerprintV1 } from '../../../src/catalog/content-registry';
+import { projectStoredSpellContentV1 } from '../../../src/catalog/spell-content-projector-v1';
 import { sqlString } from '../../../src/db/codecs';
 import { DatabaseContext } from '../../../src/db/database';
+import type { ContentKey } from '../../../src/domain/ids';
 import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
-import { registerFixtureContentIdentity } from '../../helpers/content-identity';
+import {
+  registerAssertedFixtureContentIdentity,
+  registerFixtureContentIdentity,
+  type FixtureContentKeyKind,
+} from '../../helpers/content-identity';
 
 export interface BuildReportFixture {
   readonly characterId: number;
@@ -26,6 +34,11 @@ interface SpellOptions {
   readonly identityId?: number;
   readonly ritual?: boolean;
   readonly attack?: boolean;
+  readonly contentIdentity?: {
+    readonly contentKey: string;
+    readonly keyKind: FixtureContentKeyKind;
+  };
+  readonly deferFingerprint?: boolean;
 }
 
 interface SlotOptions {
@@ -157,10 +170,15 @@ export function createSpell(
   const identityId =
     options.identityId ?? createSpellIdentity(db, name);
   const edition = options.edition ?? '2024';
-  const contentKey = nextKey(`version:${edition}`);
-  registerFixtureContentIdentity(db, {
-    kind: 'spell', contentKey, name, keyKind: 'asserted',
-  });
+  const contentKey = options.contentIdentity?.contentKey ??
+    registerAssertedFixtureContentIdentity(db, {
+      kind: 'spell', edition, name,
+    });
+  if (options.contentIdentity !== undefined) {
+    registerFixtureContentIdentity(db, {
+      kind: 'spell', name, ...options.contentIdentity,
+    });
+  }
   const versionId = db.exec(
     `INSERT INTO spell_versions (
        content_key, spell_identity_id, display_name, rules_edition,
@@ -183,7 +201,44 @@ export function createSpell(
       [versionId],
     );
   }
+  if (options.deferFingerprint !== true) {
+    registerFixtureSpellFingerprintV1(db, versionId);
+  }
   return versionId;
+}
+
+/**
+ * Finish a fixture spell through the same stored projector and current-row
+ * reconciliation seam used by production seed replacement. Callers that add
+ * pivots after createSpell defer registration and invoke this exactly once
+ * after the aggregate is complete.
+ */
+export function registerFixtureSpellFingerprintV1(
+  db: DatabaseContext,
+  spellVersionId: number,
+): void {
+  const contentKey = db.scalar<string>(
+    'SELECT content_key FROM spell_versions WHERE id = ?',
+    [spellVersionId],
+  );
+  if (contentKey === null) {
+    throw new Error(`Missing fixture spell version ${String(spellVersionId)}.`);
+  }
+  const projection = projectStoredSpellContentV1(
+    db,
+    contentKey as ContentKey,
+  );
+  const identity = deriveContentIdentityV1({
+    kind: 'spell',
+    edition: projection.aggregate.rules_edition,
+    name: projection.aggregate.name,
+    payload: projection.payload,
+  });
+  reconcileCurrentContentFingerprintV1(db, {
+    kind: 'spell',
+    contentKey: contentKey as ContentKey,
+    identity,
+  });
 }
 
 export function createSlot(

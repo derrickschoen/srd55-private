@@ -24,11 +24,17 @@ import {
   CONTENT_FINGERPRINT_SCHEME_V1,
   type ContentFingerprintDigest,
 } from '../../../src/catalog/content-identity';
+import { createApplicationLifecycle } from '../../../src/db/bootstrap';
 import { DatabaseContext } from '../../../src/db/database';
 import { creatureSize, creatureType } from '../../../src/domain/enums';
 import type { ContentKey } from '../../../src/domain/ids';
+import { workspaceFixtureImage } from '../../browser/fixtures/php-parity';
 import { featProjectorV1Vector } from '../../unit/catalog/fixtures/source-projector-v1-vectors';
-import { openTestDatabase } from '../../helpers/open-db';
+import {
+  getSqlite3,
+  MemoryDatabaseStorage,
+  openTestDatabase,
+} from '../../helpers/open-db';
 
 const opened: Database[] = [];
 const exportedAt = '2042-03-05T00:00:00.000Z';
@@ -216,6 +222,28 @@ function emptyHistoricalSpellDefinitions() {
 }
 
 describe('portable content manifests', () => {
+  it('CI5-PW-R40-FINGERPRINT finalizes parity fixture spells before portable export', async () => {
+    const fixture = await workspaceFixtureImage();
+    const sqlite3 = await getSqlite3();
+    const storage = new MemoryDatabaseStorage(sqlite3);
+    await storage.replaceFile(Uint8Array.from(fixture.bytes));
+    const lifecycle = createApplicationLifecycle(sqlite3, storage);
+    lifecycle.open();
+    try {
+      const document = exportCharacterBackup(
+        lifecycle.database,
+        fixture.ids.character,
+        exportedAt,
+      );
+      expect(document.content.some((entry) =>
+        entry.kind === 'spell' &&
+        entry.content_key.startsWith('2024:content.spell:'),
+      )).toBe(true);
+    } finally {
+      lifecycle.close();
+    }
+  });
+
   it('CI5-CLOSURE-EXACT enumerates exactly two referenced creations plus their transitive external reference', async () => {
     const source = await database();
     const fixture = seedClosureLibrary(source);

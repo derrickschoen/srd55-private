@@ -193,6 +193,7 @@ function createReferenceSpell(
         : { level: options.level }),
     ...(options.edition === undefined ? {} : { edition: options.edition }),
     ...(options.ritual === undefined ? {} : { ritual: options.ritual }),
+    deferFingerprint: true,
   });
   db.exec(
     `UPDATE spell_versions

@@ -8,6 +8,7 @@ import {
   createSlot,
   createSource,
   createSpell,
+  registerFixtureSpellFingerprintV1,
 } from '../../integration/reports/build-report-fixture';
 import {
   createSheetSpellRetirementFixture,
@@ -362,17 +363,9 @@ function controlledSpell(
   const id = createSpell(db, name, {
     level: options.level ?? 0,
     edition: options.edition ?? '2024',
+    contentIdentity: { contentKey: key, keyKind: 'bundled-stable' },
+    deferFingerprint: true,
   });
-  registerBrowserFixtureContentIdentity(db, {
-    kind: 'spell',
-    contentKey: key,
-    name,
-    keyKind: 'bundled-stable',
-  });
-  db.exec(
-    'UPDATE spell_versions SET content_key = ? WHERE id = ?',
-    [key, id],
-  );
   if (options.list !== undefined) {
     addListMembership(db, id, options.list);
   }
@@ -392,6 +385,7 @@ function controlledSpell(
       [id, options.save],
     );
   }
+  registerFixtureSpellFingerprintV1(db, id);
   return id;
 }
 
