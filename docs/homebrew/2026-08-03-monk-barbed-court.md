@@ -9,14 +9,17 @@ the goad-magnet risk, and the goad deliberately keeps its vs-others form.
 
 ## 1. Identity
 
-OWNER-APPROVAL: Identity paragraph and ancestry disclosure.
+OWNER-APPROVAL: Identity paragraph (redrafted 2026-08-05 for the exposure
+goad; the prior approval covered the choice-pressure form). Ancestry
+disclosure approved 2026-08-05.
 
 A Warrior of the Barbed Court turns an insult into supernatural pressure in
-order to make a foe choose between facing the monk and striking an ally through
-a cutting doubt. Its repeated visible verb is **goad**: in combat the monk
-names the weakness exposed by a failed spell, in exploration a needling whisper
-draws a watcher into revealing itself, and in social scenes a perfectly timed
-word punctures a bully's performance without drawing a weapon.
+order to tear a foe's composure open and let every strike find the gap. Its
+repeated visible verb is **expose**: in combat the monk names the weakness a
+failed spell reveals and the whole party exploits it, in exploration a
+needling whisper draws a watcher into revealing itself, and in social scenes
+a perfectly timed word punctures a bully's performance without drawing a
+weapon.
 
 The 3.5 SRD Psionic Fist is used only as open-content, concept-level precedent
 for the frame of a monk who develops supernatural casting; no wording or
@@ -100,24 +103,27 @@ support beside the level-3 engine.
 
 ### Level 3: Barbed Goad
 
-FROZEN BAKE-OFF ENGINE: reproduced without mechanical change.
+OWNER-RULED MECHANIC (2026-08-05, exposure form, monk included). The
+original frozen bake-off engine (Martial Arts-die penalty on attacks
+against others) was superseded by owner ruling: the spell list already owns
+attack reduction (*Vicious Mockery*, *Bane*) and forced movement or
+incapacitation (*Dissonant Whispers*, *Command*), so the goad supplies the
+one verb the list lacks.
 
 Once on each of your turns when one or more creatures fail a saving throw
 against a spell you cast that has a Verbal component, you can choose one of
 those creatures that can hear you. Until the start of your next turn, that
-creature is goaded by you. The first time before then that it makes an attack
-roll against a target other than you, it must subtract one roll of your Martial
-Arts die from the attack roll.
+creature is goaded by you: the first attack roll made against it has
+Advantage.
 
-When you goad a creature in this way, you can expend 1 Focus Point to sharpen
-the taunt. If you do, the creature must subtract one roll of your Martial Arts
-die from every attack roll it makes against a target other than you for the
-duration, rather than only the first such attack roll.
+When you goad a creature in this way, you can expend 1 Focus Point to
+sharpen the taunt. If you do, every attack roll made against the creature
+has Advantage for the duration, rather than only the first.
 
-The vs-others form is a deliberate owner ruling (2026-08-05): a
-single-target-Bane reshape (penalty on all attack rolls) was presented and
-declined. The goad's attack-me incentive stays, and survivability is
-answered by Faces of the Court below.
+**Design note.** An allies-only form (excluding the monk's own attacks) was
+offered as the F5 Advantage-Faucet guard and declined — the monk's attacks
+share the Advantage by explicit ruling. See the failure-taxonomy pass: F5
+is now the kit's primary labeled risk.
 
 ### Level 3: Faces of the Court
 
@@ -142,7 +148,7 @@ or Focus interaction attaches to them.
 
 ### Level 6: Spellwoven Flurry
 
-OWNER-APPROVAL: Full rules text and Barbed Court cantrip interaction note.
+Approved by owner ruling 2026-08-05 (`rulings.md`).
 
 While you aren't holding a weapon, whenever you use Flurry of Blows, you can
 replace one of the Unarmed Strikes it grants with casting a cantrip you know
@@ -154,17 +160,23 @@ For this subclass, *Vicious Mockery* is the signature interaction. On a failed
 save, it can trigger Barbed Goad. It replaces one strike of the Focus-funded
 Flurry; it never adds a strike or a second cantrip.
 
+**F5 note (owner-ruled inclusion):** because the monk's own attacks share
+the goad's Advantage, a Flurry whose replaced-strike *Vicious Mockery*
+fails the save gives the Flurry's remaining strike Advantage — a
+self-accuracy loop inside one Bonus Action. Labeled as the primary
+playtest target, not changed.
+
 ### Level 11: Scandalous Echo
 
-OWNER-APPROVAL: Entire feature, including the second listener, 30-foot range,
-Focus costs, and shared sharpening.
+Structure (second listener, 30-foot range, Focus costs, shared sharpening)
+approved by owner ruling 2026-08-05; the effect text below inherits the
+same ruling's exposure goad.
 
 When you goad a creature with Barbed Goad, you can expend 1 Focus Point to
 carry the taunt to a second creature of your choice within 30 feet of the
 goaded creature that can hear you. Until the start of your next turn, the
-second creature is also goaded by you. The first time before then that it makes
-an attack roll against a target other than you, it must subtract one roll of
-your Martial Arts die from the attack roll.
+second creature is also goaded by you: the first attack roll made against it
+has Advantage.
 
 If you also expend the Focus Point that sharpens Barbed Goad, the sharpened
 taunt applies to both goaded creatures. Thus carrying and sharpening the taunt
@@ -172,14 +184,15 @@ costs a total of 2 Focus Points.
 
 ### Level 17: Unanswerable Challenge
 
-OWNER-APPROVAL: Entire feature, including the 3-Focus cost, one-minute
-duration, repeated save, hearing boundary, and one-target limit.
+OWNER-RULED (2026-08-05): the per-attack Martial Arts-die subtraction was
+replaced with Disadvantage "to keep it faster to play at the table." The
+3-Focus cost, one-minute duration, repeated save, hearing boundary, and
+one-target limit carry over.
 
 When you goad a creature with Barbed Goad, you can expend 3 Focus Points to
 issue an unanswerable challenge instead of using Barbed Goad's normal duration
 and Focus option. The creature is goaded by you for 1 minute. While goaded in
-this way, it must subtract one roll of your Martial Arts die from every attack
-roll it makes against a target other than you.
+this way, its attack rolls against targets other than you have Disadvantage.
 
 At the end of each of its turns, the creature can make a Wisdom saving throw
 against your Focus Point save DC, ending the effect on itself on a success. The
@@ -193,24 +206,30 @@ at a time; issuing another unanswerable challenge ends the first.
 
 Monk subclass dependence is **Medium**. The base class already has damage,
 defense, mobility, and a Short-Rest Focus engine, so this subclass spends its
-budget on a fixed spell list, ally-protective control, and (by owner ruling
-2026-08-05) a bounded defensive cast. It adds no damage die, attack, armor,
-accuracy bonus, or save-DC bonus; Faces of the Court adds the kit's one
-limited-use counter (PB free *Mirror Image* casts per Long Rest). The
-protected dial is the target-choice pressure created by Barbed Goad;
-frequency, target count, duration, hearing, saves, and Focus are its
-balancing dials.
+budget on a fixed spell list, party-facing offense enablement, and (by owner
+ruling 2026-08-05) a bounded defensive cast. It adds no damage die, attack,
+armor, or save-DC bonus; by explicit owner ruling it **does grant
+Advantage** (the exposure goad, monk included), which is the kit's hottest
+dial, and Faces of the Court adds its one limited-use counter (PB free
+*Mirror Image* casts per Long Rest). The protected dial is the exposure
+window created by Barbed Goad; frequency, target count, duration, hearing,
+saves, and Focus bound it.
 
-**The goad-magnet ledger (why Faces of the Court exists).** The goad's
-incentive gradient points hostile attention at the monk, whose defensive
-budget is thinner than a defender's: Unarmored Defense lands near AC 18 at
-tier 2–3, hit points run about 75–80% of a d10 defender's, Deflect Attacks
-answers one B/P/S attack per round, and Patient Defense — the monk's real
-tanking tool — costs the same Focus pool the goad's sharpen/carry/prolong
-levers spend. Free, Concentration-less, Focus-less *Mirror Image* breaks
-that collision: the monk can invite the switch and absorb two to three
-attacks per cast without bidding against its own engine. A goad-gated free
-Patient Defense was considered and declined by the same ruling.
+Note on scaling: the exposure goad no longer touches the Martial Arts die.
+Advantage does not scale — the kit's growth comes from better carrier
+spells, larger Focus pools, and Echo's second target, which is flatter
+scaling than the die-penalty form had. Recorded, not corrected.
+
+**The goad-magnet ledger (historical, and why Faces of the Court stays).**
+This ledger was written for the vs-others penalty goad, whose incentive
+gradient aimed hostile attention at a monk with AC ~18, 75–80% of a
+defender's hit points, one Deflect Attacks Reaction, and a Patient Defense
+that bids against the goad's own Focus levers. The exposure form removed
+the magnet — nothing now aims the foe at the monk. Faces of the Court
+(free, Concentration-less, Focus-less *Mirror Image*, absorbing two to
+three attacks per cast) stays by the same ruling as the kit's defense
+budget; its rationale is now general durability rather than taunt
+insurance. A goad-gated free Patient Defense was considered and declined.
 
 The list itself is a major entry grant: ten always-prepared level 1–4 spells
 plus three fixed cantrips, compared with no spell grant on Warrior of the Open
@@ -222,39 +241,43 @@ damage.
 | Feature | Tier; weight | At-will / nova | Actions, concentration, and uses | Relevance, scaling, pillars, export | Open Hand comparison and verdict |
 |---|---|---|---|---|---|
 | Barbed Court Spellcasting | Entry support; rock | Cantrips at will; slots are the nova | Normal spell action/components/concentration; 2 level-1 slots at 3, eventually 4/3/3/1 | Ten prepared spells + three cantrips; Wisdom and Monk slots; C/E/S; a 3-level dip gets four spells, two cantrips, and two slots | Open Hand gets no spells. This consumes most of the entry breadth budget; **high-value but progression-gated, playtest amber** |
-| Barbed Goad | Entry engine; rock | Baseline first-attack penalty; 1 Focus makes it all attacks for one round | Free rider after a failed Verbal-spell save; no added concentration | Expected 1–3 offers/fight when casting; Martial Arts die and Focus scale; C; dip die remains d6 | Open Hand Technique can affect each Flurry hit immediately. Goad needs a spell failure and protects only other targets; **within budget on paper** |
+| Barbed Goad | Entry engine; rock | Baseline first-attack Advantage against the target; 1 Focus makes it every attack for one round | Free rider after a failed Verbal-spell save; no added concentration | Expected 1–3 offers/fight when casting; Advantage is flat (no die scaling); Focus pool and carrier spells scale; C; fully understood by any dip | *Faerie Fire* buys the same party-wide Advantage for a 1st-level slot + Concentration + Dex save; Open Hand's Topple buys melee-only Advantage via Prone per hit. Goad is single-target, save-gated, one round; **F5 amber-high, owner-ruled monk inclusion** |
 | Faces of the Court | Entry defense; rock | PB free casts are the whole feature; no at-will expression | Action to cast; no Concentration, no Focus; PB uses per Long Rest (2 at Monk 3, 6 at 17) | Relevant whenever the goad draws attention; images don't scale but use count does; C; **fully dip-portable and PB scales with character level** | Open Hand has no defensive grant at 3. This is the ruling's answer to the goad-magnet ledger; **entry bundle reads rich vs Open Hand — owner-ruled, labeled** |
 | Spellwoven Flurry | Tier 2 bridge; rock | Exchanges one strike for one cantrip; no extra cast | Part of the existing 1-Focus Bonus Action Flurry; weapon-free | Offered when a cantrip is worth a strike; cantrip and Flurry scale; C/E/S; six Monk levels | Wholeness of Body averages 8.5 healing/use at Wisdom +4 and d8, about 34 over four uses. This grants flexibility rather than extra economy; **within budget, synergy amber** |
-| Scandalous Echo | Tier 3 scope; rock | One second baseline goad for 1 Focus; 2 total Focus sharpens both | Same trigger; no action or concentration; one-round duration | Expected 0–2 spends/fight; d10 then d12; C; eleven Monk levels | Fleet Step adds Step of the Wind after almost any Bonus Action. Echo instead prices a second one-round listener from the native pool; **within budget on paper** |
-| Unanswerable Challenge | Tier 4 culmination; rock | No at-will change; 3 Focus extends one goad | Same trigger; one minute; end-turn Wisdom saves; one target | Expected once in a decisive fight; d12 penalty; C/S fiction; seventeen Monk levels | Quivering Palm costs 4 Focus and a later action/attack trade for 10d12 Force damage, half on save. Challenge deals 0 and permits repeated saves; **provisional, control-duration amber** |
+| Scandalous Echo | Tier 3 scope; rock | One second baseline goad for 1 Focus; 2 total Focus sharpens both | Same trigger; no action or concentration; one-round duration | Expected 0–2 spends/fight; two exposed targets maximum; C; eleven Monk levels | Fleet Step adds Step of the Wind after almost any Bonus Action. Echo instead prices a second one-round exposed listener from the native pool; **within budget on paper, F5 load doubles** |
+| Unanswerable Challenge | Tier 4 culmination; rock | No at-will change; 3 Focus converts one goad to a 1-minute defender clamp | Same trigger; one minute; end-turn Wisdom saves; one target | Expected once in a decisive fight; Disadvantage on its attacks vs others (owner-ruled fast form, 2026-08-05); C/S fiction; seventeen Monk levels | Quivering Palm costs 4 Focus and a later action/attack trade for 10d12 Force damage, half on save. Challenge deals 0, uses one word at the table, and permits repeated saves; **provisional, control-duration amber** |
 
 ### Explicit numerical checks
 
-- At level 3, subtracting a d6 changes a typical d20 success chance by about
-  `(6 + 1) / 40 = 17.5` percentage points. At levels 11 and 17 the d10 and d12
-  estimates are 27.5 and 32.5 points. Boundary Armor Classes reduce those
-  approximations.
+- Advantage raises a 65% hit chance to `1 − 0.35² = 87.75%` (+22.75
+  percentage points; +25 at the 50% boundary) and does not scale with level.
+  It also switches on ally riders: a party rogue's Sneak Attack becomes
+  automatic against the goaded target, and the monk's own Stunning Strike
+  fishing gains the same lift (owner-ruled inclusion). Disadvantage, used by
+  the level-17 challenge, is the mirror: 65% falls to 42.25%.
 - At level 6 with a 65% hit or failed-save chance, Dexterity +4, and a d8
   Martial Arts die, one strike contributes about `0.65 × 8.5 = 5.53` expected
   damage. *Vicious Mockery* contributes about `0.65 × 7 = 4.55`, roughly 0.98
   less, in exchange for its printed rider and a possible goad. No damage is
   added to Flurry.
-- At level 11, Scandalous Echo can place at most two d10 penalties. The
-  all-attacks expression costs 2 Focus after the carrier spell; neither target
-  is forced to attack, and attacks against the monk are unaffected.
-- At level 17, a Flurry-delivered *Vicious Mockery* plus Unanswerable Challenge
-  costs 4 Focus total: 1 for Flurry and 3 for the challenge. That equals
-  Quivering Palm's setup cost before Palm's later activation cost, while the
-  challenge deals no damage and offers a save after every affected turn.
+- At level 11, Scandalous Echo can expose at most two creatures. The
+  sharpened both-targets expression costs 2 Focus after the carrier spell; a
+  4-ally round against two sharpened targets is on the order of 8
+  advantaged attack rolls, the kit's nova ceiling.
+- At level 17, a Flurry-delivered *Vicious Mockery* plus Unanswerable
+  Challenge costs 4 Focus total: 1 for Flurry and 3 for the challenge. That
+  equals Quivering Palm's setup cost before Palm's later activation cost,
+  while the challenge deals no damage, resolves as one word (Disadvantage),
+  and offers a save after every affected turn.
 
 ### Whole-kit snapshots
 
 | Snapshot | Barbed Court | Open Hand comparator | Budget verdict |
 |---|---|---|---|
-| Entry (3) | Broad fixed magic, conditional ally-facing d20 control, and PB free *Mirror Image* casts | Immediate Push, Topple, or Addle on each Flurry hit | More breadth and now real defense vs. one direct tool; **the richest entry bundle of the four monks — owner-ruled, amber** |
-| Tier 2 (6) | Cantrip replaces one weapon-free Flurry strike | Repeatable self-healing with a separate Long-Rest count | Similar slot weight; **Vicious Mockery stack needs live testing** |
-| Tier 3 (11) | Focus can carry one-round pressure to a second listener | Step of the Wind is folded into other Bonus Actions | Narrower and resource-priced; **within budget on paper** |
-| Tier 4 (17) | One foe can face a repeat-save, damage-free challenge | 4-Focus delayed 10d12 damage, half on save | Lower damage, potentially higher defense; **duration and harmed-party amber** |
+| Entry (3) | Broad fixed magic, save-gated party Advantage against one foe, and PB free *Mirror Image* casts | Immediate Push, Topple, or Addle on each Flurry hit | More breadth, party offense, and real defense vs. one direct tool; **the richest entry bundle of the four monks — owner-ruled, F5 amber-high** |
+| Tier 2 (6) | Cantrip replaces one weapon-free Flurry strike; a failed VM save can advantage the Flurry's remaining strike | Repeatable self-healing with a separate Long-Rest count | Similar slot weight; **the self-advantage loop is the primary stack test** |
+| Tier 3 (11) | Focus can expose a second listener; nova ≈ 8 advantaged party attacks for 2 Focus | Step of the Wind is folded into other Bonus Actions | Resource-priced but party-multiplied; **F5 load doubles, playtest required** |
+| Tier 4 (17) | One foe can face a repeat-save, damage-free Disadvantage clamp | 4-Focus delayed 10d12 damage, half on save | Lower damage, faster table resolution; **duration and harmed-party amber** |
 
 ### Action economy and resource stress
 
@@ -281,10 +304,10 @@ All sixteen traps in guideline 04 were checked against the assembled subclass.
 | F2 Imported Chassis Mismatch | Rules use spell saves, Martial Arts dice, Focus, Flurry, and SRD timing. | Clear |
 | F3 Dip Bait | Three levels grant four prepared spells, two cantrips, two slots, a d6 goad, and **PB free *Mirror Image* casts whose count scales with character level** (a Fighter 17/Monk 3 gets six per Long Rest). Stronger goad delivery, dice, targets, and duration require Monk 6/11/17 and Focus, but Faces of the Court is fully portable. | **Amber-high; outsider tests required. Owner-ruled PB scaling, labeled not changed** |
 | F4 Farmable or Famine Triggers | Allies and harmless targets consume slots/actions and restore nothing. Failed saves are ordinary but not guaranteed; the spell list supplies deterministic attempts. | Clear on paper |
-| F5 Advantage Faucet | No Advantage is granted. The d20 subtraction is conditional, short, target-limited, and often Focus-priced. | Clear |
+| F5 Advantage Faucet | **The goad now grants Advantage to every attacker including the monk (owner-ruled 2026-08-05).** Bounds: once per turn, one target (two at 11 for Focus), requires a real cast plus a failed save, one-round duration, all-attacks costs Focus. The VM-in-Flurry self-loop and party-rider chain (rogue Sneak Attack, crit fishing) are the exposure. | **Amber-high; primary playtest target. Owner-ruled, labeled not changed** |
 | F6 Action Congestion / Economy Multiplication | Casting contests the Action; Flurry owns the Bonus Action and replaces rather than adds a strike. No extra action or attack exists. | Clear; choice quality amber |
 | F7 Runaway Interaction Math | Once-per-turn trigger, two-target maximum at 11, one prolonged target at 17, and explicit durations cap multiplication. | Clear |
-| F8 Stacking Blindness | *Vicious Mockery* Disadvantage can stack with the Martial Arts-die subtraction. | Amber; primary stack test |
+| F8 Stacking Blindness | The exposure Advantage feeds every party rider at once: rogue Sneak Attack, crit-range builds, the monk's own Stunning Strike, and *Vicious Mockery*'s printed next-attack Disadvantage on the same target. | Amber; primary stack test with a full party |
 | F9 Golden-Cage Benchmark | Every slot and whole-kit snapshot uses Warrior of the Open Hand only. | Clear |
 | F10 White-Room Day | Best legal resources, no-rest, and rest-rich days are recorded; maximum damage added is 0. | Amber; control swing needs play |
 | F11 Campaign-Contingent Payload | No creature family, terrain, or ally condition gates a core feature; hearing is player-addressable but not universal. | Clear |
@@ -344,8 +367,8 @@ no Red items.
 |---|---|---|
 | Action-economy tally | Green | Action Attack or cast; Bonus Action Martial Arts/Flurry/Patient Defense/Step; Reaction base; optional concentration; one free goad rider. |
 | Extra-economy carrier | Green | Spellwoven replaces one strike; no action or attack is added. |
-| Advantage gate | Green | None granted. |
-| Flat-bonus gate | Green | No flat bonus; bounded rolled subtraction only. |
+| Advantage gate | **Amber-high** | Deliberately opened by owner ruling 2026-08-05: the exposure goad grants save-gated, one-round, one-to-two-target Advantage to all attackers including the monk. See F5. |
+| Flat-bonus gate | Green | No flat bonus; the kit's d20 effects are Advantage/Disadvantage only. |
 | Farmability audit | Green | Allies, objects, summons, and repeated setup restore nothing and still consume real actions/resources. |
 | Famine audit | Green | Several listed save spells and *Vicious Mockery* offer player-initiated triggers. |
 | Frequency statement | Green | Goad 1–3 offers/fight; Spellwoven 0–3 uses/fight; Echo 0–2 spends/fight; Challenge about once/decisive fight. |
@@ -411,11 +434,11 @@ no Red items.
 
 | Provisional item | Risk | Required test | Owner/status |
 |---|---|---|---|
-| Identity and Spellwoven wording | Register or interaction may miss owner intent | Owner text review and cold-reader adjudication | OWNER-APPROVAL pending |
-| Faces of the Court | Name unapproved; PB-scaling free casts are dip-portable; entry bundle reads rich | Name approval; three outsider dip builds; acquisition test with goad-magnet rounds measuring monk damage taken | Mechanic owner-ruled 2026-08-05; name OWNER-APPROVAL pending |
-| Barbed Goad stack | *Vicious Mockery* plus d6–d12 subtraction may suppress attacks too reliably | Acquisition and 5/11/17 stack tests across one- and multiattack foes | Frozen engine; untested |
-| Scandalous Echo | A no-save second listener or two sharpened listeners may exceed Fleet Step slot value | Level-11 repeated encounters; record attacks, misses caused, and Focus opportunity cost | OWNER-APPROVAL pending |
-| Unanswerable Challenge | One-minute defender pressure may overperform despite repeated saves | Level-17 one-shot with high-save, multiattack, ranged, and mobile foes | OWNER-APPROVAL pending |
+| Redrafted identity paragraph | The exposure rewrite may miss owner intent (prior approval covered the choice-pressure form) | Owner re-read of section 1 | OWNER-APPROVAL pending (redraft only) |
+| Faces of the Court | PB-scaling free casts are dip-portable; entry bundle reads rich | Three outsider dip builds; acquisition test | Mechanic and name owner-ruled/approved 2026-08-05 |
+| Exposure goad (F5) | Party-wide Advantage incl. the monk may over-amplify accuracy; VM-in-Flurry self-loop | Acquisition and 5/11/17 stack tests with a full party incl. a rogue seat | Owner-ruled 2026-08-05; untested |
+| Scandalous Echo | Two sharpened exposed targets ≈ 8 advantaged party attacks for 2 Focus | Level-11 repeated encounters; record advantaged attacks and Focus opportunity cost | Structure approved 2026-08-05; effect inherits exposure ruling; untested |
+| Unanswerable Challenge | One-minute Disadvantage clamp may overperform despite repeated saves | Level-17 one-shot with high-save, multiattack, ranged, and mobile foes | Owner-ruled Disadvantage form 2026-08-05; untested |
 | Niche and speed | Defender/controller/face participation or table speed may fall | Harmed-seat observation and timed fifth use | Reviewer unassigned |
 
 **Pre-flight result:** **Ready for design review only.** Schedule, rules

@@ -5,6 +5,52 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-05 — Barbed Court: EXPOSURE goad adopted, monk included; Challenge goes Disadvantage
+
+Resolving the goad redesign floated in the previous entry. Rulings,
+verbatim:
+
+- Exposure goad (Advantage against the goaded creature; baseline first
+  attack, sharpened = every attack for the round) — "Yes, monk included."
+  The allies-only F5 guard was offered and declined; the monk's own attacks
+  share the Advantage. F5 Advantage-Faucet is now the kit's primary labeled
+  risk (VM-in-Flurry can advantage the Flurry's own remaining strike from
+  level 6), owner-ruled, labeled not changed.
+- Unanswerable Challenge (17) — "Disadvantage (Recommended)": its attack
+  rolls against targets other than you have Disadvantage for 1 minute,
+  repeat end-of-turn Wisdom saves, hearing/Incapacitated outs, one target.
+  Replaces the per-attack d12 subtraction for table speed.
+
+Consequences applied to the doc: identity paragraph redrafted around
+"expose" (needs re-approval — the prior approval covered the
+choice-pressure identity); Scandalous Echo's text inherits the exposure
+effect (its 30-ft/Focus structure keeps its approval); the goad-magnet
+survivability rationale softens (nothing aims the foe at the monk any
+more) while Faces of the Court stays as ruled; the vs-others form and its
+2026-08-05 morning ruling are superseded by this entry.
+
+## 2026-08-05 — Barbed Court approvals round: identity, 6, 11 approved; 17 to flat/Disadvantage; goad direction reopened
+
+Rulings, verbatim:
+
+- Identity paragraph, concept-ancestry line, and the "Faces of the Court"
+  feature name — "Approve all three."
+- Spellwoven Flurry (6) text + Vicious Mockery note — "Approve as written."
+- Scandalous Echo (11) — "Approve as written."
+- Unanswerable Challenge (17) — "Make it a flat penalty or disadvantage to
+  keep it faster to play at the table." (Rolling a Martial Arts die per
+  enemy attack is the objection; the redesign lands in a follow-up ruling.)
+
+Immediately after, the owner floated a goad redesign (same message thread,
+verbatim): "Bard vicious mocker and bane reduce attacks against everyone.
+Dissonant whispers and command force movements or incapacitate. I kind of
+like the idea of making the enemy confused or reckless and giving allies
+advantage on attacks against it when goaded." Direction under discussion at
+recording time: the goad may flip from penalizing the target's attacks on
+others to granting allies Advantage against the target — which would reopen
+the just-approved identity wording and Scandalous Echo's inherited text.
+Resolution recorded in the next entry once ruled.
+
 ## 2026-08-05 — Barbed Court survivability: goad stays vs-others; free Mirror Image PB/Long Rest at 3
 
 Context: the owner raised "the monk is not durable enough to be a tank for
