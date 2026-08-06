@@ -51,10 +51,16 @@ despite earlier "all pruned" record - all four verified 0 ahead of main
 and 0 dirty, pruned per D207. wt/party only remains (owner's - never
 prune).
 
-QUEUE: no named units. CI-8 follows CI-5 in the design graph; HA-12
-depends on HA-11 and CI-5 - read their design rows fresh before
-dispatch. Parked owner questions: Veteran prose vs D152 (see audit
-closure below); CI-5 remaining items above.
+IN FLIGHT (dispatched 08-06): CI-8 (wt/ci8, brief
+.claude/handover/briefs/ci-8.md + COMMON.md, MINT-FREE unit, log
+~/.claude/jobs/27b61756/tmp/ci8.log) and HA-3 (wt/ha3, brief
+.claude/handover/briefs/ha-3.md + COMMON.md, owns mint 0037 if needed,
+log ~/.claude/jobs/27b61756/tmp/ha3.log). HA-3/4/5 are a SERIAL mint
+lane - do not dispatch HA-4/HA-5 until HA-3 lands. Also dispatchable
+when capacity frees: CI-6, CI-7, HA-6 (prereqs met). Blocked: HA-7
+(needs HA-3+HA-6), HA-8 (HA-5+HA-6), HA-9 (HA-4+HA-6), HA-10 (7/8/9),
+HA-11 (10), HA-12 (11+CI-5). Parked owner questions: Veteran prose vs
+D152 (see audit closure below); CI-5 remaining items above.
 
 ## RESTART POINT 2026-08-06-b (superseded by 08-06-c)
 MAIN 69dd7ad (mirror pushed, 9d59f48). FLOORS: vitest 235/3,909; PW 126
