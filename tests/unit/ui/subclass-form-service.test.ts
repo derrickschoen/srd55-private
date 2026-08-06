@@ -231,6 +231,48 @@ function errorData(operation: () => unknown): unknown {
   throw new Error('Expected authoring service refusal.');
 }
 
+function storedDraftBytes(db: DatabaseContext, draftUuid: StoredHomebrewDraft['draft_uuid']): string {
+  const bytes = db.scalar<string>(
+    'SELECT document_json FROM catalog_content_drafts WHERE draft_uuid = ?',
+    [draftUuid],
+  );
+  if (typeof bytes !== 'string') throw new Error('Stored draft JSON is missing.');
+  return bytes;
+}
+
+function installRootOnlySubclass(
+  service: CatalogAuthoringService,
+  db: DatabaseContext,
+  parentKey: ContentKey,
+  name: string,
+): ContentKey {
+  const created = service.createDraft({ content_kind: 'subclass' });
+  const saved = service.saveDraft({
+    draft_uuid: created.draft_uuid,
+    expected_revision: created.revision,
+    document: validDocument(created, parentKey, name),
+  });
+  const preview = service.previewPublish({
+    draft_uuid: saved.draft_uuid,
+    expected_revision: saved.revision,
+  });
+  if (preview.aggregate.kind !== 'subclass') throw new Error('Subclass aggregate is required.');
+  const contentKey = assertedExternalContentKey('subclass', 'expanded', name);
+  const node = portableSubclassContentImportNode(db, {
+    ...preview.aggregate,
+    progression: {
+      mode: 'root_only',
+      spellcasting_ability: 'intelligence',
+      caster_fraction: '1/3',
+      caster_rounding: 'down',
+    },
+  }, contentKey);
+  const plan = planContentImport(db, [node]);
+  const committed = commitContentImport(db, { nodes: [node], token: plan.token });
+  if (committed.kind !== 'committed') throw new Error('Root-only subclass fixture did not install.');
+  return contentKey;
+}
+
 describe('HA-8 production-service form boundaries', () => {
   // Measured alone at 2.123s; the explicit timeout preserves headroom for seeded DB boots.
   it('round-trips the full draft and aggregate through the production codec with byte-equivalent save, reload, and rehydration', async () => {
@@ -252,7 +294,7 @@ describe('HA-8 production-service form boundaries', () => {
       expected_revision: created.revision,
       document: expected,
     });
-    expect(service.readDraft(saved.draft_uuid).document).toEqual(expected);
+    const firstPassBytes = storedDraftBytes(db, saved.draft_uuid);
     const aggregateBefore = service.previewPublish({
       draft_uuid: saved.draft_uuid,
       expected_revision: saved.revision,
@@ -260,23 +302,22 @@ describe('HA-8 production-service form boundaries', () => {
 
     const restoreDocument = installInteractiveDocument();
     try {
-      const first = render(service, db, saved);
-      button(first.root, 'Save draft').click();
+      const rehydrated = service.readDraft(saved.draft_uuid);
+      const freshForm = render(service, db, rehydrated);
+      expect(freshForm.root.querySelectorAll('.subclass-progression-row')).toHaveLength(20);
+      expect(freshForm.root.querySelectorAll('.subclass-feature-card')).toHaveLength(2);
+      expect(freshForm.root.querySelectorAll('.authoring-effect-card')).toHaveLength(3);
+      button(freshForm.root, 'Save draft').click();
       await settle();
+      const secondPassBytes = storedDraftBytes(db, saved.draft_uuid);
+      expect(secondPassBytes).toBe(firstPassBytes);
       const resaved = service.readDraft(saved.draft_uuid);
-      expect(resaved.document).toEqual(expected);
-      first.cleanup();
-
-      const second = render(service, db, resaved);
-      expect(second.root.querySelectorAll('.subclass-progression-row')).toHaveLength(20);
-      expect(second.root.querySelectorAll('.subclass-feature-card')).toHaveLength(2);
-      expect(second.root.querySelectorAll('.authoring-effect-card')).toHaveLength(3);
       const aggregateAfter = service.previewPublish({
         draft_uuid: resaved.draft_uuid,
         expected_revision: resaved.revision,
       }).aggregate;
       expect(aggregateAfter).toEqual(aggregateBefore);
-      second.cleanup();
+      freshForm.cleanup();
     } finally {
       restoreDocument();
     }
@@ -320,6 +361,29 @@ describe('HA-8 production-service form boundaries', () => {
         }],
       },
     });
+    expect(errorData(() => service.previewPublish({
+      draft_uuid: invalid.draft_uuid,
+      expected_revision: invalid.revision,
+    }))).toEqual({
+      reason: 'validation_failed',
+      issues: [
+        { path: ['name'], code: 'required', message: 'Must not be empty.' },
+        { path: ['rules_edition'], code: 'required', message: 'Rules edition is required.' },
+        { path: ['parent_class_content_key'], code: 'required', message: 'Parent class is required.' },
+        { path: ['progression', 'caster_contribution'], code: 'required', message: 'Caster contribution is required.' },
+        { path: ['progression', 'rows'], code: 'required', message: 'Override progression requires exactly 20 rows.' },
+        { path: ['progression', 'rows', 0, 'class_level'], code: 'invalid_value', message: 'Expected class level 1.' },
+        { path: ['progression', 'rows', 0, 'cantrips_known'], code: 'required', message: 'Cantrips known is required.' },
+        { path: ['progression', 'rows', 0, 'prepared_or_known_count'], code: 'required', message: 'Prepared or known count is required.' },
+        { path: ['progression', 'rows', 0, 'maximum_spell_level'], code: 'required', message: 'Maximum spell level is required.' },
+        { path: ['progression', 'rows', 0, 'slot_counts'], code: 'required', message: 'Exactly nine slot counts are required.' },
+        { path: ['features', 0, 'name'], code: 'required', message: 'Must not be empty.' },
+        { path: ['features', 0, 'description'], code: 'required', message: 'Must not be empty.' },
+        { path: ['features', 0, 'effects', 0, 'label'], code: 'required', message: 'Must not be empty.' },
+        { path: ['features', 0, 'effects', 0, 'attack_count'], code: 'required', message: 'Attack count is required.' },
+        { path: ['features', 0, 'effects', 0, 'weapon_scope'], code: 'required', message: 'Weapon scope is required.' },
+      ],
+    });
     const restoreDocument = installInteractiveDocument();
     try {
       const rendered = render(service, db, invalid);
@@ -327,14 +391,7 @@ describe('HA-8 production-service form boundaries', () => {
       await settle();
       const summary = rendered.root.querySelector('.authoring-validation-summary');
       if (summary === null) throw new Error('Publisher validation summary is missing.');
-      const text = elementText(summary as unknown as Node);
-      expect(text).toContain('Must not be empty.');
-      expect(text).toContain('Rules edition is required.');
-      expect(text).toContain('Parent class is required.');
-      expect(text).toContain('Caster contribution is required.');
-      expect(text).toContain('Override progression requires exactly 20 rows.');
-      expect(text).toContain('Attack count is required.');
-      expect(text).toContain('Weapon scope is required.');
+      expect(summary.querySelectorAll('li')).toHaveLength(15);
       expect(button(rendered.root, 'Preview publish').disabled).toBe(false);
       rendered.cleanup();
     } finally {
@@ -476,15 +533,99 @@ describe('HA-8 production-service form boundaries', () => {
       expect(button(rendered.root, 'Publish subclass').disabled).toBe(false);
       expect(service.readDraft(saved.draft_uuid).document).toEqual(saved.document);
       const contentKey = assertedExternalContentKey('subclass', 'expanded', 'Refused Timeline');
-      expect(db.scalar<number>(
-        'SELECT count(*) FROM subclass_definitions WHERE content_key = ?',
-        [contentKey],
-      )).toBe(0);
+      expect(db.oneRaw(
+        `SELECT
+           (SELECT count(*) FROM catalog_content_identities WHERE content_key = ?) AS identities,
+           (SELECT count(*) FROM catalog_content_fingerprints WHERE content_key = ?) AS fingerprints,
+           (SELECT count(*) FROM catalog_content_aliases WHERE content_key = ? OR alias_key = ?) AS aliases,
+           (SELECT count(*) FROM catalog_content_match_decisions WHERE target_content_key = ?) AS review_decisions,
+           (SELECT count(*) FROM subclass_definitions WHERE content_key = ?) AS definitions,
+           (SELECT count(*) FROM subclass_progressions WHERE subclass_definition_id IN
+             (SELECT id FROM subclass_definitions WHERE content_key = ?)) AS progressions,
+           (SELECT count(*) FROM subclass_features WHERE subclass_definition_id IN
+             (SELECT id FROM subclass_definitions WHERE content_key = ?)) AS features,
+           (SELECT count(*) FROM subclass_feature_effects WHERE subclass_feature_id IN
+             (SELECT id FROM subclass_features WHERE subclass_definition_id IN
+               (SELECT id FROM subclass_definitions WHERE content_key = ?))) AS effects`,
+        [
+          contentKey, contentKey, contentKey, contentKey, contentKey,
+          contentKey, contentKey, contentKey, contentKey,
+        ],
+      )).toEqual({
+        identities: 0,
+        fingerprints: 0,
+        aliases: 0,
+        review_decisions: 0,
+        definitions: 0,
+        progressions: 0,
+        features: 0,
+        effects: 0,
+      });
       rendered.cleanup();
     } finally {
       restoreDocument();
     }
   });
+
+  it('keeps an unchanged real published root-only copy publishable and offers dense mode before editing', async () => {
+    const { service, db } = await fixture();
+    const parent = listGuidedClassOptions(db).find((candidate) => candidate.name === 'Fighter');
+    if (parent === undefined) throw new Error('Bundled Fighter is required.');
+    const baseKey = installRootOnlySubclass(
+      service,
+      db,
+      parent.content_key as ContentKey,
+      'Root Copy Timeline',
+    );
+    const copied = service.createDraft({ content_kind: 'subclass', base_content_key: baseKey });
+    const unchanged = service.previewPublish({
+      draft_uuid: copied.draft_uuid,
+      expected_revision: copied.revision,
+    });
+    expect(unchanged.aggregate).toMatchObject({
+      kind: 'subclass',
+      progression: { mode: 'root_only' },
+    });
+
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const rendered = render(service, db, copied);
+      const mode = rendered.root.querySelectorAll('select').find((candidate) =>
+        candidate.getAttribute('id') === 'subclass-progression-mode');
+      const name = rendered.root.querySelectorAll('input').find((candidate) =>
+        candidate.getAttribute('id') === 'subclass-name');
+      if (mode === undefined || name === undefined) throw new Error('Root-only form controls are missing.');
+      expect(mode.disabled).toBe(false);
+      expect(name.disabled).toBe(true);
+      mode.value = 'override';
+      mode.dispatchEvent(new Event('change'));
+      const unlockedName = rendered.root.querySelectorAll('input').find((candidate) =>
+        candidate.getAttribute('id') === 'subclass-name');
+      expect(unlockedName?.disabled).toBe(false);
+      if (unlockedName === undefined) throw new Error('Unlocked name control is missing.');
+      unlockedName.value = 'Editable Dense Timeline';
+      unlockedName.dispatchEvent(new Event('input'));
+      button(rendered.root, 'Save draft').click();
+      await settle();
+      const dense = service.readDraft(copied.draft_uuid);
+      expect(dense.document.kind).toBe('subclass');
+      if (dense.document.kind !== 'subclass' || dense.document.progression.mode !== 'override') {
+        throw new Error('Edited root copy did not save as a dense subclass.');
+      }
+      expect(dense.document.name).toBe('Editable Dense Timeline');
+      expect(dense.document.progression.rows).toHaveLength(20);
+      expect(service.previewPublish({
+        draft_uuid: dense.draft_uuid,
+        expected_revision: dense.revision,
+      }).aggregate).toMatchObject({
+        name: 'Editable Dense Timeline',
+        progression: { mode: 'override' },
+      });
+      rendered.cleanup();
+    } finally {
+      restoreDocument();
+    }
+  }, 20_000);
 
   // Measured alone at 1.644s; the explicit timeout preserves headroom for alias installation and preview.
   it('keeps a real review-required refusal inside the shared focusable adoption modal', async () => {

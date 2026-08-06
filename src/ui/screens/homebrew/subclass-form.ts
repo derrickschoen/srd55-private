@@ -13,6 +13,7 @@ import type {
   AuthoringDraftFeatureEffect,
 } from '../../../authoring/effect-forms';
 import type { HomebrewDraftItemUuid } from '../../../authoring/ids';
+import { subclassProgressionScheduleIssues } from '../../../authoring/subclass-progression-validation';
 import type { GuidedClassOption } from '../../../builder/contracts';
 import {
   abilities,
@@ -223,89 +224,20 @@ function validationIssues(error: unknown): readonly AuthoringValidationIssue[] |
   return valid ? issues as unknown as readonly AuthoringValidationIssue[] : null;
 }
 
-function progressionIssue(
-  issues: AuthoringValidationIssue[],
-  path: readonly (string | number)[],
-  code: AuthoringValidationIssue['code'],
-  message: string,
-): void {
-  issues.push(Object.freeze({ path: Object.freeze(path), code, message }));
-}
-
-/** Form-level schedule checks beyond the publisher's dense-row/refusal boundary. */
+/** Inline mirror of the publisher's dense progression schedule checks. */
 export function subclassProgressionGridIssues(
   progression: SubclassAuthoringDraft['progression'],
 ): readonly AuthoringValidationIssue[] {
   if (progression.mode !== 'override') return [];
-  const issues: AuthoringValidationIssue[] = [];
+  const issues = [...subclassProgressionScheduleIssues(progression)];
   progression.rows.forEach((current, index) => {
     const path = ['progression', 'rows', index] as const;
     if (current.class_level !== index + 1) {
-      progressionIssue(
-        issues,
-        [...path, 'class_level'],
-        'invalid_value',
-        `Progression row ${String(index + 1)} must represent class level ${String(index + 1)}.`,
-      );
-    }
-    const prior = index === 0 ? undefined : progression.rows[index - 1];
-    if (prior !== undefined) {
-      const monotonic: readonly {
-        readonly key: 'cantrips_known' | 'prepared_or_known_count' | 'maximum_spell_level';
-        readonly label: string;
-      }[] = [
-        { key: 'cantrips_known', label: 'Cantrips known' },
-        { key: 'prepared_or_known_count', label: 'Prepared or known count' },
-        { key: 'maximum_spell_level', label: 'Maximum spell level' },
-      ];
-      for (const field of monotonic) {
-        const before = prior[field.key];
-        const after = current[field.key];
-        if (before !== null && after !== null && after < before) {
-          progressionIssue(
-            issues,
-            [...path, field.key],
-            'invalid_value',
-            `${field.label} cannot decrease at class level ${String(current.class_level)}.`,
-          );
-        }
-      }
-      for (const [slotIndex, count] of current.slot_counts.entries()) {
-        const previousCount = prior.slot_counts[slotIndex];
-        if (previousCount !== undefined && count < previousCount) {
-          progressionIssue(
-            issues,
-            [...path, 'slot_counts'],
-            'invalid_value',
-            `${String(slotIndex + 1)}-level spell slots cannot decrease at class level ${String(current.class_level)}.`,
-          );
-        }
-      }
-    }
-    if (current.slot_counts.length === 9 && current.maximum_spell_level !== null) {
-      const highestSlot = current.slot_counts.reduce(
-        (highest, count, slotIndex) => count > 0 ? slotIndex + 1 : highest,
-        0,
-      );
-      if (highestSlot !== current.maximum_spell_level) {
-        progressionIssue(
-          issues,
-          [...path, 'slot_counts'],
-          'invalid_value',
-          `Class level ${String(current.class_level)} maximum spell level must match its highest non-zero slot level.`,
-        );
-      }
-      if (
-        highestSlot > 0 &&
-        current.slot_counts.slice(0, highestSlot).some((count) => count === 0)
-      ) {
-        progressionIssue(
-          issues,
-          [...path, 'slot_counts'],
-          'invalid_value',
-          `Class level ${String(current.class_level)} slot levels must be contiguous through level ${String(highestSlot)}.`,
-        );
-      }
+      issues.push(Object.freeze({
+        path: Object.freeze([...path, 'class_level']),
+        code: 'invalid_value',
+        message: `Progression row ${String(index + 1)} must represent class level ${String(index + 1)}.`,
+      }));
     }
   });
   return Object.freeze(issues);
@@ -579,7 +511,7 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
       rootFields.append(element('p', {
         className: 'authoring-mechanic-disclosure',
         attributes: { role: 'status' },
-        text: 'This copied subclass uses a root-only progression. It can only be republished unchanged; fields and timeline controls are read-only.',
+        text: 'This copied subclass uses a root-only progression. It can be republished unchanged; choose the dense progression mode to unlock fields and timeline controls for editing.',
       }));
     }
 
@@ -594,10 +526,16 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
     const mode = element('select', {
       attributes: { id: 'subclass-progression-mode', ...pathAttribute(['progression']) },
     });
-    mode.append(
-      element('option', { text: 'Inherit parent progression', attributes: { value: 'inherit_parent' } }),
-      element('option', { text: 'Override with a dense 20-level progression', attributes: { value: 'override' } }),
-    );
+    if (document.progression.mode !== 'root_only') {
+      mode.append(element('option', {
+        text: 'Inherit parent progression',
+        attributes: { value: 'inherit_parent' },
+      }));
+    }
+    mode.append(element('option', {
+      text: 'Override with a dense 20-level progression',
+      attributes: { value: 'override' },
+    }));
     if (document.progression.mode === 'root_only') {
       mode.append(element('option', {
         text: 'Preserve copied root-only progression',
@@ -605,7 +543,6 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
       }));
     }
     mode.value = document.progression.mode;
-    mode.disabled = locked;
     mode.addEventListener('change', () => {
       if (mode.value === 'inherit_parent') {
         update({ ...document, progression: { mode: 'inherit_parent' } });
@@ -626,6 +563,7 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
       progressionHeading,
       ...labelledControl('Progression mode', mode.id, mode),
     );
+    form.append(validationMount, rootFields, progressionSection);
 
     if (document.progression.mode === 'root_only') {
       progressionSection.append(element('p', {
@@ -1237,7 +1175,9 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
           onMoveUp: () => {
             if (withinLevelIndex === 0) return;
             const prior = levelFeatures[withinLevelIndex - 1]!;
-            const priorIndex = document.features.indexOf(prior);
+            const priorIndex = document.features.findIndex((candidate) =>
+              candidate.draft_item_uuid === prior.draft_item_uuid);
+            if (priorIndex < 0) return;
             const features = [...document.features];
             [features[featureIndex], features[priorIndex]] = [features[priorIndex]!, features[featureIndex]!];
             update({ ...document, features });
@@ -1246,7 +1186,9 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
           onMoveDown: () => {
             const next = levelFeatures[withinLevelIndex + 1];
             if (next === undefined) return;
-            const nextIndex = document.features.indexOf(next);
+            const nextIndex = document.features.findIndex((candidate) =>
+              candidate.draft_item_uuid === next.draft_item_uuid);
+            if (nextIndex < 0) return;
             const features = [...document.features];
             [features[featureIndex], features[nextIndex]] = [features[nextIndex]!, features[featureIndex]!];
             update({ ...document, features });
@@ -1421,9 +1363,6 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
       });
     });
     form.append(
-      validationMount,
-      rootFields,
-      progressionSection,
       timeline,
       element('div', { className: 'subclass-form-actions' }, [save, preview]),
       status,

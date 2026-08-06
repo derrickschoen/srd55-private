@@ -80,6 +80,41 @@ function emptyRows(): SubclassAuthoringDraftProgressionRow[] {
   }));
 }
 
+function thirdCasterRows(): SubclassAuthoringDraftProgressionRow[] {
+  return emptyRows().map((row, index) => {
+    const level = index + 1;
+    if (level < 3) return row;
+    if (level < 4) return {
+      ...row,
+      cantrips_known: 2,
+      prepared_or_known_count: 3,
+      maximum_spell_level: 1,
+      slot_counts: [2, 0, 0, 0, 0, 0, 0, 0, 0],
+    };
+    if (level < 5) return {
+      ...row,
+      cantrips_known: 2,
+      prepared_or_known_count: 4,
+      maximum_spell_level: 1,
+      slot_counts: [3, 0, 0, 0, 0, 0, 0, 0, 0],
+    };
+    if (level < 7) return {
+      ...row,
+      cantrips_known: 2,
+      prepared_or_known_count: 4,
+      maximum_spell_level: 1,
+      slot_counts: [3, 0, 0, 0, 0, 0, 0, 0, 0],
+    };
+    return {
+      ...row,
+      cantrips_known: 2,
+      prepared_or_known_count: 5,
+      maximum_spell_level: 2,
+      slot_counts: [4, 2, 0, 0, 0, 0, 0, 0, 0],
+    };
+  });
+}
+
 function validSubclass(
   created: StoredHomebrewDraft,
   name = 'Aegis Cartographer',
@@ -179,6 +214,23 @@ function authoringError(operation: () => unknown): AuthoringServiceError {
     return error as AuthoringServiceError;
   }
   throw new Error('Expected an authoring service error.');
+}
+
+function expectScheduleRefusal(
+  authoring: CatalogAuthoringService,
+  draft: StoredHomebrewDraft,
+  path: readonly (string | number)[],
+  message: string,
+): void {
+  const previewError = authoringError(() => authoring.previewPublish({
+    draft_uuid: draft.draft_uuid,
+    expected_revision: draft.revision,
+  }));
+  expect(previewError.data).toMatchObject({ reason: 'validation_failed' });
+  if (previewError.data.reason !== 'validation_failed') {
+    throw new Error('Expected collected schedule validation issues.');
+  }
+  expect(previewError.data.issues).toContainEqual({ path, code: 'invalid_value', message });
 }
 
 function characterWithSubclass(
@@ -406,6 +458,142 @@ describe('HA-5 subclass publisher', () => {
     });
   });
 
+  it('collects a decreasing-slot issue in preview and refuses commit through the real publisher', async () => {
+    const db = await database();
+    const authoring = service(db);
+    const valid = savedSubclass(authoring, 'Decreasing Slot Refusal', (document) => ({
+      ...document,
+      progression: {
+        mode: 'override',
+        spellcasting_ability: 'intelligence',
+        caster_contribution: 'third_down',
+        rows: thirdCasterRows(),
+      },
+    }));
+    const token = authoring.previewPublish({
+      draft_uuid: valid.draft_uuid,
+      expected_revision: valid.revision,
+    }).token;
+    if (valid.document.kind !== 'subclass' || valid.document.progression.mode !== 'override') {
+      throw new Error('Dense subclass fixture is required.');
+    }
+    const rows = [...valid.document.progression.rows];
+    rows[3] = { ...rows[3]!, slot_counts: [1, 0, 0, 0, 0, 0, 0, 0, 0] };
+    const invalid = authoring.saveDraft({
+      draft_uuid: valid.draft_uuid,
+      expected_revision: valid.revision,
+      document: { ...valid.document, progression: { ...valid.document.progression, rows } },
+    });
+    const issue = {
+      path: ['progression', 'rows', 3, 'slot_counts'] as const,
+      message: '1-level spell slots cannot decrease at class level 4.',
+    };
+    expectScheduleRefusal(authoring, invalid, issue.path, issue.message);
+    expect(authoringError(() => authoring.commitPublish({ token, decisions: [] })).data)
+      .toMatchObject({ reason: 'validation_failed', issues: [expect.objectContaining(issue)] });
+  });
+
+  it('collects a slot-level gap issue in preview and refuses commit through the real publisher', async () => {
+    const db = await database();
+    const authoring = service(db);
+    const valid = savedSubclass(authoring, 'Slot Gap Refusal', (document) => ({
+      ...document,
+      progression: {
+        mode: 'override',
+        spellcasting_ability: 'intelligence',
+        caster_contribution: 'third_down',
+        rows: thirdCasterRows(),
+      },
+    }));
+    const token = authoring.previewPublish({
+      draft_uuid: valid.draft_uuid,
+      expected_revision: valid.revision,
+    }).token;
+    if (valid.document.kind !== 'subclass' || valid.document.progression.mode !== 'override') {
+      throw new Error('Dense subclass fixture is required.');
+    }
+    const rows = valid.document.progression.rows.map((row, index) => index < 6 ? row : {
+      ...row,
+      maximum_spell_level: 3,
+      slot_counts: [4, 0, 2, 0, 0, 0, 0, 0, 0],
+    });
+    const invalid = authoring.saveDraft({
+      draft_uuid: valid.draft_uuid,
+      expected_revision: valid.revision,
+      document: { ...valid.document, progression: { ...valid.document.progression, rows } },
+    });
+    const issue = {
+      path: ['progression', 'rows', 6, 'slot_counts'] as const,
+      message: 'Class level 7 slot levels must be contiguous through level 3.',
+    };
+    expectScheduleRefusal(authoring, invalid, issue.path, issue.message);
+    expect(authoringError(() => authoring.commitPublish({ token, decisions: [] })).data)
+      .toMatchObject({ reason: 'validation_failed', issues: expect.arrayContaining([expect.objectContaining(issue)]) });
+  });
+
+  it('collects a maximum-slot mismatch in preview and refuses commit through the real publisher', async () => {
+    const db = await database();
+    const authoring = service(db);
+    const valid = savedSubclass(authoring, 'Maximum Slot Refusal', (document) => ({
+      ...document,
+      progression: {
+        mode: 'override',
+        spellcasting_ability: 'intelligence',
+        caster_contribution: 'third_down',
+        rows: thirdCasterRows(),
+      },
+    }));
+    const token = authoring.previewPublish({
+      draft_uuid: valid.draft_uuid,
+      expected_revision: valid.revision,
+    }).token;
+    if (valid.document.kind !== 'subclass' || valid.document.progression.mode !== 'override') {
+      throw new Error('Dense subclass fixture is required.');
+    }
+    const rows = [...valid.document.progression.rows];
+    rows[19] = { ...rows[19]!, maximum_spell_level: 3 };
+    const invalid = authoring.saveDraft({
+      draft_uuid: valid.draft_uuid,
+      expected_revision: valid.revision,
+      document: { ...valid.document, progression: { ...valid.document.progression, rows } },
+    });
+    const issue = {
+      path: ['progression', 'rows', 19, 'slot_counts'] as const,
+      message: 'Class level 20 maximum spell level must match its highest non-zero slot level.',
+    };
+    expectScheduleRefusal(authoring, invalid, issue.path, issue.message);
+    expect(authoringError(() => authoring.commitPublish({ token, decisions: [] })).data)
+      .toMatchObject({ reason: 'validation_failed', issues: [expect.objectContaining(issue)] });
+  });
+
+  it('publishes a plateaued third-caster schedule whose slots begin at class level 3', async () => {
+    const db = await database();
+    const authoring = service(db);
+    const published = publish(authoring, savedSubclass(authoring, 'Plateau Third Caster', (document) => ({
+      ...document,
+      progression: {
+        mode: 'override',
+        spellcasting_ability: 'intelligence',
+        caster_contribution: 'third_down',
+        rows: thirdCasterRows(),
+      },
+    })));
+    expect(published.result).toMatchObject({ outcome: 'created', name: 'Plateau Third Caster' });
+    if (published.preview.aggregate.kind !== 'subclass' || published.preview.aggregate.progression.mode !== 'override') {
+      throw new Error('Published dense subclass fixture is required.');
+    }
+    expect(published.preview.aggregate.progression.rows.slice(0, 7).map((row) => row.slot_counts))
+      .toEqual([
+        [0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [2, 0, 0, 0, 0, 0, 0, 0, 0],
+        [3, 0, 0, 0, 0, 0, 0, 0, 0],
+        [3, 0, 0, 0, 0, 0, 0, 0, 0],
+        [3, 0, 0, 0, 0, 0, 0, 0, 0],
+        [4, 2, 0, 0, 0, 0, 0, 0, 0],
+      ]);
+  });
+
   it('materializes the typed 20-level override and reports level 7 slots as 4/2', async () => {
     const db = await database();
     const authoring = service(db);
@@ -415,13 +603,9 @@ describe('HA-5 subclass publisher', () => {
       [spellKey],
     );
     if (spell === null) throw new Error('A fingerprinted spell is required.');
-    const rows = emptyRows();
-    rows[5] = {
-      ...rows[5]!,
-      cantrips_known: 2,
-      prepared_or_known_count: 4,
-      maximum_spell_level: 3,
-      slot_counts: [4, 3, 3, 0, 0, 0, 0, 0, 0],
+    const rows = thirdCasterRows();
+    rows[6] = {
+      ...rows[6]!,
       grants: [{
         kind: 'fixed_spell',
         draft_item_uuid: itemUuid('dense-fixed-spell'),
@@ -429,13 +613,6 @@ describe('HA-5 subclass publisher', () => {
         spell_content_key: String(spell.content_key) as ContentKey,
         always_prepared: true,
       }],
-    };
-    rows[6] = {
-      ...rows[6]!,
-      cantrips_known: 2,
-      prepared_or_known_count: 5,
-      maximum_spell_level: 2,
-      slot_counts: [4, 2, 0, 0, 0, 0, 0, 0, 0],
     };
     const draft = savedSubclass(authoring, 'Dense Aegis', (document) => ({
       ...document,

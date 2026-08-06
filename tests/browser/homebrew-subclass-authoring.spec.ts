@@ -17,10 +17,10 @@ async function ready(page: Page): Promise<void> {
 test('authors a subclass timeline and persists only threshold-eligible character effects', async ({
   page,
 }) => {
-  // Budget: the measured guided baseline is 25.2s. Add 20s for the XL grid and
+  // Budget: the HA-7 measured guided baseline is 17.7s. Add 20s for the XL grid and
   // timeline, 15s for publish, and 20s for character threshold commands/reload
-  // = 80.2s guided. A 1.5 contention reserve yields 120.3s; 125s leaves 4.7s
-  // (3.9%) explicit headroom beyond that reserve.
+  // = 72.7s guided. A 1.5 contention reserve yields 109.05s; 125s leaves 15.95s
+  // (14.6%) explicit headroom beyond that reserve.
   test.setTimeout(125_000);
   await page.goto('/');
   await ready(page);
@@ -41,6 +41,9 @@ test('authors a subclass timeline and persists only threshold-eligible character
   await page.getByLabel('Caster contribution').selectOption('third_down');
   await expect(page.getByLabel('Levels 1 through 20 spellcasting progression grid'))
     .toContainText('Class levels 1–20 — unchanged run; expand to edit');
+  await page.getByText('Class levels 1–20 — unchanged run; expand to edit').click();
+  const levelTwentyProgression = page.getByRole('group', { name: 'Class level 20 progression' });
+  await levelTwentyProgression.getByLabel('Cantrips known').fill('1');
 
   await page.getByLabel('Timeline level').selectOption('3');
   await page.getByRole('button', { name: 'Add level' }).click();
@@ -77,6 +80,10 @@ test('authors a subclass timeline and persists only threshold-eligible character
   await expect(page.getByLabel('Subclass feature preview')).toContainText('Later Ward');
   await page.getByRole('button', { name: 'Publish subclass' }).click();
   await expect(page.getByRole('heading', { name: 'Subclass published' })).toBeVisible();
+  await page.getByRole('link', { name: 'View subclass library' }).click();
+  const publishedCard = page.locator('.homebrew-card').filter({ hasText: 'Threshold Cartographer' });
+  await expect(publishedCard.getByRole('heading', { name: 'Threshold Cartographer' })).toBeVisible();
+  await expect(publishedCard).toContainText('Subclass · immutable published version');
 
   const journey = await page.evaluate(async () => {
     const classes = await window.staticApp.inspectRows('class_definitions', { name: 'Fighter' });
@@ -90,6 +97,10 @@ test('authors a subclass timeline and persists only threshold-eligible character
     if (!Number.isSafeInteger(fighterId) || !Number.isSafeInteger(subclassId)) {
       throw new Error('Published Fighter subclass was not persisted.');
     }
+    const levelTwentyProgressions = await window.staticApp.inspectRows(
+      'subclass_progressions',
+      { subclass_definition_id: subclassId, class_level: 20 },
+    );
     const options = await window.appRpc.call<
       Record<string, never>,
       readonly { readonly name: string; readonly content_key: string }[]
@@ -149,6 +160,7 @@ test('authors a subclass timeline and persists only threshold-eligible character
     return {
       characterId: character.id,
       subclassId,
+      levelTwentyCantrips: Number(levelTwentyProgressions[0]?.['cantrips_known']),
       afterLevelTwo,
       afterLevelThree,
       classLevels,
@@ -157,6 +169,7 @@ test('authors a subclass timeline and persists only threshold-eligible character
   });
 
   expect(journey.afterLevelTwo).toEqual([]);
+  expect(journey.levelTwentyCantrips).toBe(1);
   expect(journey.classLevels).toEqual([
     expect.objectContaining({
       character_id: journey.characterId,

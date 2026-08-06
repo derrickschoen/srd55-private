@@ -431,6 +431,229 @@ describe('HA-8 subclass timeline form', () => {
     }
   });
 
+  it('edits every level in the dense 20-row progression through its grid controls', async () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const savedDocuments: SubclassAuthoringDraft[] = [];
+      const screenContext = context();
+      const mount = document.createElement('div');
+      screenContext.root.append(mount);
+      const draft = stored();
+      if (!isStoredSubclassDraft(draft)) throw new Error('Subclass fixture did not narrow.');
+      const cleanup = renderSubclassForm({
+        context: screenContext,
+        client: client({
+          saveDraft: async (params) => {
+            if (params.document.kind !== 'subclass') throw new Error('Expected subclass.');
+            savedDocuments.push(params.document);
+            return { ...stored(params.document), revision: 1 as DraftRevision };
+          },
+        }),
+        mount,
+        draft,
+        parentClasses: parents,
+        windowObject: new EventTarget() as unknown as Window,
+      });
+      const root = interactiveElement(mount);
+      for (let level = 1; level <= 20; level += 1) {
+        input(control(root, 'input', `subclass-progression-${String(level)}-cantrips_known`), String(level));
+        input(control(root, 'input', `subclass-progression-${String(level)}-prepared_or_known_count`), String(level + 1));
+      }
+      button(root, 'Save draft').click();
+      await settle();
+      const saved = savedDocuments[0];
+      if (saved === undefined || saved.progression.mode !== 'override') {
+        throw new Error('Dense progression was not saved.');
+      }
+      expect(saved.progression.rows.map((entry) => entry.cantrips_known))
+        .toEqual(Array.from({ length: 20 }, (_unused, index) => index + 1));
+      expect(saved.progression.rows.map((entry) => entry.prepared_or_known_count))
+        .toEqual(Array.from({ length: 20 }, (_unused, index) => index + 2));
+      cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('creates level groups, moves a feature between levels, and reorders same-level features', async () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const empty: SubclassAuthoringDraft = {
+        ...richDocument(),
+        progression: { mode: 'inherit_parent' },
+        features: [],
+      };
+      const savedDocuments: SubclassAuthoringDraft[] = [];
+      const screenContext = context();
+      const mount = document.createElement('div');
+      screenContext.root.append(mount);
+      const draft = stored(empty);
+      if (!isStoredSubclassDraft(draft)) throw new Error('Subclass fixture did not narrow.');
+      let uuid = 0;
+      const cleanup = renderSubclassForm({
+        context: screenContext,
+        client: client({
+          saveDraft: async (params) => {
+            if (params.document.kind !== 'subclass') throw new Error('Expected subclass.');
+            savedDocuments.push(params.document);
+            return { ...stored(params.document), revision: 1 as DraftRevision };
+          },
+        }),
+        mount,
+        draft,
+        parentClasses: parents,
+        randomUuid: () => `timeline-item-${String(++uuid)}`,
+        windowObject: new EventTarget() as unknown as Window,
+      });
+      const root = interactiveElement(mount);
+      const level = control(root, 'select', 'subclass-add-level');
+      level.value = '3';
+      button(root, 'Add level').click();
+      button(root, 'Add feature at level 3').click();
+      button(root, 'Add feature at level 3').click();
+      input(control(root, 'input', 'subclass-feature-timeline-item-1-name'), 'First route');
+      input(control(root, 'input', 'subclass-feature-timeline-item-2-name'), 'Second route');
+      const moveSecondUp = root.querySelectorAll('button').find((candidate) =>
+        candidate.getAttribute('aria-label') === 'Move up level 3 feature 2, item 2 of 2');
+      if (moveSecondUp === undefined) throw new Error('Second feature reorder control is missing.');
+      moveSecondUp.click();
+      const firstLevel = control(root, 'select', 'subclass-feature-timeline-item-1-level');
+      firstLevel.value = '6';
+      firstLevel.dispatchEvent(new Event('change'));
+      expect(root.querySelectorAll('.subclass-level-group')).toHaveLength(2);
+      expect(root.querySelectorAll('.subclass-feature-card').map((card) => card.getAttribute('aria-label')))
+        .toEqual(['Level 3 feature 1 of 1', 'Level 6 feature 1 of 1']);
+      button(root, 'Save draft').click();
+      await settle();
+      expect(savedDocuments[0]?.features.map((feature) => ({
+        level: feature.class_level,
+        name: feature.name,
+      }))).toEqual([
+        { level: 3, name: 'Second route' },
+        { level: 6, name: 'First route' },
+      ]);
+      cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('adds, removes, and reorders multiple effects independently on each feature', async () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const savedDocuments: SubclassAuthoringDraft[] = [];
+      const screenContext = context();
+      const mount = document.createElement('div');
+      screenContext.root.append(mount);
+      const draft = stored();
+      if (!isStoredSubclassDraft(draft)) throw new Error('Subclass fixture did not narrow.');
+      let uuid = 0;
+      const cleanup = renderSubclassForm({
+        context: screenContext,
+        client: client({
+          saveDraft: async (params) => {
+            if (params.document.kind !== 'subclass') throw new Error('Expected subclass.');
+            savedDocuments.push(params.document);
+            return { ...stored(params.document), revision: 1 as DraftRevision };
+          },
+        }),
+        mount,
+        draft,
+        parentClasses: parents,
+        randomUuid: () => `effect-item-${String(++uuid)}`,
+        windowObject: new EventTarget() as unknown as Window,
+      });
+      const root = interactiveElement(mount);
+      const featureCards = () => root.querySelectorAll('.subclass-feature-card');
+      const addEffect = (featureIndex: number): void => {
+        const add = featureCards()[featureIndex]?.querySelectorAll('button')
+          .find((candidate) => candidate.textContent === 'Add effect');
+        if (add === undefined) throw new Error('Feature add-effect control is missing.');
+        add.click();
+      };
+      addEffect(0);
+      input(control(root, 'input', 'authoring-effect-effect-item-1-label'), 'Third effect');
+      const moveThirdUp = root.querySelectorAll('button').find((candidate) =>
+        candidate.getAttribute('aria-label') === 'Move up Armor Class bonus, item 3 of 3');
+      if (moveThirdUp === undefined) throw new Error('First feature effect reorder control is missing.');
+      moveThirdUp.click();
+      const removeSecondTempo = root.querySelectorAll('button').find((candidate) =>
+        candidate.getAttribute('aria-label') === 'Remove Second tempo, item 3 of 3');
+      if (removeSecondTempo === undefined) throw new Error('First feature effect remove control is missing.');
+      removeSecondTempo.click();
+
+      addEffect(1);
+      input(control(root, 'input', 'authoring-effect-effect-item-2-label'), 'Second feature first effect');
+      addEffect(1);
+      input(control(root, 'input', 'authoring-effect-effect-item-3-label'), 'Second feature second effect');
+      const moveSecondFeatureEffectUp = root.querySelectorAll('button').find((candidate) =>
+        candidate.getAttribute('aria-label') === 'Move up Armor Class bonus, item 2 of 2');
+      if (moveSecondFeatureEffectUp === undefined) throw new Error('Second feature effect reorder control is missing.');
+      moveSecondFeatureEffectUp.click();
+      const removeFirstFeatureEffect = root.querySelectorAll('button').find((candidate) =>
+        candidate.getAttribute('aria-label') === 'Remove Second feature first effect, item 2 of 2');
+      if (removeFirstFeatureEffect === undefined) throw new Error('Second feature effect remove control is missing.');
+      removeFirstFeatureEffect.click();
+
+      button(root, 'Save draft').click();
+      await settle();
+      expect(savedDocuments[0]?.features.slice(0, 2).map((feature) =>
+        feature.effects.map((effect) => effect.label))).toEqual([
+        [hostile, 'Third effect'],
+        ['Second feature second effect'],
+      ]);
+      cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('makes grid and ordering controls keyboard-focusable and applies their actions', () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const screenContext = context();
+      const mount = document.createElement('div');
+      screenContext.root.append(mount);
+      const draft = stored();
+      if (!isStoredSubclassDraft(draft)) throw new Error('Subclass fixture did not narrow.');
+      const cleanup = renderSubclassForm({
+        context: screenContext,
+        client: client(),
+        mount,
+        draft,
+        parentClasses: parents,
+        windowObject: new EventTarget() as unknown as Window,
+      });
+      const root = interactiveElement(mount);
+      const gridCell = control(root, 'input', 'subclass-progression-20-cantrips_known');
+      gridCell.focus();
+      expect(document.activeElement).toBe(gridCell);
+      input(gridCell, '4');
+      expect(gridCell.value).toBe('4');
+
+      const featureMove = root.querySelectorAll('button').find((candidate) =>
+        candidate.getAttribute('aria-label') === 'Move up Second feature, item 2 of 2');
+      if (featureMove === undefined) throw new Error('Feature ordering control is missing.');
+      featureMove.focus();
+      expect(document.activeElement).toBe(featureMove);
+      featureMove.click();
+      expect(root.querySelectorAll('.subclass-feature-card')[0]?.getAttribute('data-draft-item-uuid'))
+        .toBe('feature-three-b');
+
+      const effectMove = root.querySelectorAll('button').find((candidate) =>
+        candidate.getAttribute('aria-label') === 'Move up Second tempo, item 2 of 2');
+      if (effectMove === undefined) throw new Error('Effect ordering control is missing.');
+      effectMove.focus();
+      expect(document.activeElement).toBe(effectMove);
+      effectMove.click();
+      expect(root.querySelectorAll('.authoring-effect-card').slice(0, 2).map((card) =>
+        card.getAttribute('data-draft-item-uuid'))).toEqual(['effect-three-b', 'effect-three-a']);
+      cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
   it('surfaces monotonic and slot-gap paths inline and refuses preview until corrected', async () => {
     const progressionRows = [...rows()];
     progressionRows[2] = {
@@ -476,6 +699,13 @@ describe('HA-8 subclass timeline form', () => {
       const root = interactiveElement(mount);
       const inlineIssues = root.querySelector('.subclass-progression-issues');
       expect(inlineIssues?.querySelectorAll('li').length).toBeGreaterThanOrEqual(2);
+      const decreasing = inlineIssues?.querySelectorAll('button').find((candidate) =>
+        candidate.textContent === 'Cantrips known cannot decrease at class level 4.');
+      const offendingCell = control(root, 'input', 'subclass-progression-4-cantrips_known');
+      if (decreasing === undefined) throw new Error('Linked progression issue control is missing.');
+      expect(offendingCell.getAttribute('aria-invalid')).toBe('true');
+      decreasing.click();
+      expect(document.activeElement).toBe(offendingCell);
       root.querySelector('form')?.dispatchEvent(new Event('submit', { cancelable: true }));
       await settle();
       expect(previewCalls).toBe(0);
@@ -561,7 +791,65 @@ describe('HA-8 subclass timeline form', () => {
     }
   });
 
-  it('renders copied root-only progression as an unchanged read-only preservation state', () => {
+  it('clears a dirty Router guard when publishing starts from a dirty draft', async () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const router = new Router(routerWindow(
+        'https://example.test/homebrew/drafts/ha8-subclass-draft',
+      ));
+      const screenRoot = document.createElement('div');
+      const mount = document.createElement('div');
+      screenRoot.append(mount);
+      document.body.append(screenRoot);
+      const publishControl: {
+        finish: ((result: Awaited<ReturnType<AuthoringClient['commitPublish']>>) => void) | null;
+      } = { finish: null };
+      const authoring = client({
+        previewPublish: async () => preview(),
+        commitPublish: () => new Promise((resolve) => { publishControl.finish = resolve; }),
+      });
+      const draft = stored();
+      if (!isStoredSubclassDraft(draft)) throw new Error('Subclass fixture did not narrow.');
+      const cleanup = renderSubclassForm({
+        context: {
+          root: screenRoot,
+          route: router.current,
+          router,
+          rpc: null as never,
+          registerNavigationGuard: (guard) => router.registerNavigationGuard(guard),
+        },
+        client: authoring,
+        mount,
+        draft,
+        parentClasses: parents,
+        confirmLeave: () => false,
+        windowObject: new EventTarget() as unknown as Window,
+      });
+      const root = interactiveElement(mount);
+      root.querySelector('form')?.dispatchEvent(new Event('submit', { cancelable: true }));
+      await settle();
+      const publish = button(root, 'Publish subclass');
+      input(control(root, 'input', 'subclass-name'), 'Dirty while publishing');
+      expect(router.navigate('/blocked-before-dirty-publish')).toBe(false);
+      publish.click();
+      if (publishControl.finish === null) throw new Error('Publish resolver was not installed.');
+      publishControl.finish({
+        outcome: 'created',
+        content_key: 'expanded:subclass:dirty-publish' as ContentKey,
+        name: 'Dirty publish',
+        catalog_layer: 'external',
+        previous_key_usage_count: 0,
+      });
+      await settle();
+      expect(router.navigate('/clean-after-in-flight-publish')).toBe(true);
+      cleanup();
+      router.stop();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('lets a malformed fresh root-only draft switch to dense mode before editing', () => {
     const restoreDocument = installInteractiveDocument();
     try {
       const rootOnly: SubclassAuthoringDraft = {
@@ -575,7 +863,7 @@ describe('HA-8 subclass timeline form', () => {
       };
       const draft = {
         ...stored(rootOnly),
-        base_content_key: 'expanded:subclass:copied-root-only' as ContentKey,
+        base_content_key: null,
       };
       if (!isStoredSubclassDraft(draft)) throw new Error('Subclass fixture did not narrow.');
       const screenContext = context();
@@ -591,13 +879,23 @@ describe('HA-8 subclass timeline form', () => {
       });
       const root = interactiveElement(mount);
       expect(elementText(root as unknown as Node)).toContain(
-        'It can only be republished unchanged',
+        'choose the dense progression mode to unlock',
       );
       expect(control(root, 'input', 'subclass-name').disabled).toBe(true);
       expect(control(root, 'select', 'subclass-parent-class').disabled).toBe(true);
-      expect(control(root, 'select', 'subclass-progression-mode').disabled).toBe(true);
+      const mode = control(root, 'select', 'subclass-progression-mode');
+      expect(mode.disabled).toBe(false);
+      expect(mode.querySelectorAll('option').map((option) => option.getAttribute('value')))
+        .toEqual(['override', 'root_only']);
       expect(root.querySelectorAll('.subclass-feature-card').flatMap((card) =>
         card.querySelectorAll('input')).every((entry) => entry.disabled)).toBe(true);
+      mode.value = 'override';
+      mode.dispatchEvent(new Event('change'));
+      expect(control(root, 'input', 'subclass-name').disabled).toBe(false);
+      expect(control(root, 'select', 'subclass-parent-class').disabled).toBe(false);
+      expect(root.querySelectorAll('.subclass-progression-row')).toHaveLength(20);
+      expect(root.querySelectorAll('.subclass-feature-card').flatMap((card) =>
+        card.querySelectorAll('input')).every((entry) => !entry.disabled)).toBe(true);
       cleanup();
     } finally {
       restoreDocument();
