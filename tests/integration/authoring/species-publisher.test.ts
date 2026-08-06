@@ -16,6 +16,7 @@ import {
   exportCharacterBackup,
   planCharacterBackupImport,
 } from '../../../src/backup/character-backup';
+import { BackupValidationError } from '../../../src/backup/backup-version';
 import {
   exportSelectedLibraryContent,
   importLibraryDocument,
@@ -755,6 +756,7 @@ describe('HA-3 species publisher', () => {
     if (replacedIndex === null) throw new Error('Species effect is missing.');
 
     const target = await database();
+    expect(() => planCharacterBackupImport(target, document)).toThrow(BackupValidationError);
     expect(() => planCharacterBackupImport(target, document)).toThrow(
       `Character backup tables.character_effects[${String(replacedIndex)}].template_ref: Invalid input.`,
     );
