@@ -23,7 +23,42 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-06-h (newest - read first)
+## RESTART POINT 2026-08-06-i (newest - read first)
+MAIN f341f4b (MIRROR PUSH PENDING - held until quiet post-merge suite).
+THIRTY-SIX merges. Rulings through D214 (purge removes whole lineage set
+via one guarded 0039 exception; set restore all-or-nothing; HA-11 pins).
+
+MERGED SINCE 08-06-h:
+ - ADF (f33105a, 36th): test-only. The CI-7 post-merge unhandled
+   rejections were NOT a production bug: two character-list tests
+   interacted with unmounted import controls; showModal threw in the
+   test DOM before the modal assignment, leaving a half-created dialog.
+   Fix mounts controls + pins dialog connected/open. Supervisor-verified:
+   tsc 0, targeted 2/26 all-pass, zero unhandled errors. The 08-06-h
+   OPEN FINDING is CLOSED. PW skipped (no src/dist change).
+
+GATE DEBT: ADF post-merge full vitest ran while HA-8 review2 codex was
+active -> 2 TIMEOUT failures (bootstrap.test.ts repair test 5s cap;
+prefix-normal-early 67.5s vs 60s cap), 246/248 files, 4085/4087. Both
+files re-run in isolation by supervisor: 2 files / 18 tests all-pass.
+Contention hypothesis; NOT adjudicable as noise per the counts rule.
+A QUIET full vitest on main must complete all-pass before the mirror
+push (f33105a + f341f4b + this file) goes out.
+
+IN FLIGHT: HA-8 fix round 1 committed 4384474 (codex-authored,
+supervisor-committed: codex sandbox could not create index.lock; content
+untouched). Scan CLEAN. Review round 2 running (ha8-review2.log).
+Publisher gained shared progression validator
+(subclass-progression-validation.ts) - monotonic/gap/max-level rules now
+publisher-side.
+
+QUEUE unchanged: HA-9 -> VET-REPUB -> HA-10 -> HA-11 (D138+D214 in
+full) -> HA-12 -> D213 hardening.
+
+WORKTREES: wt/party (owner's - never prune), wt/ha8 (active), wt/adf
+(prune after mirror push).
+
+## RESTART POINT 2026-08-06-h (superseded by 08-06-i)
 MAIN 25b62cf (mirror pushed; includes bb4ec32 CI-7 merge + D211-D213).
 FLOORS: vitest 248/4,087; PW 127 pool (~9.7 min); build 0; migrations
 0000-0039 FROZEN on main (next free mint 0040); backup v5. THIRTY-FIVE
