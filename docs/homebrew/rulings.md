@@ -5,6 +5,67 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-06 — Barbed Court: power-budget directive — front-load level 6, add Focus-cast high-level spells at 13/17, remove close-combat ranged Disadvantage
+
+Owner's rulings, verbatim:
+
+> I want to eliminate the disadvantage on ranged spell attacks as well. Give
+> some free high level spells that cost a focus point at 13 and 17. The monk
+> needs a lot of help to keep up with paladins and fighters.
+
+> I want to load up level 6 more than usual because most don't see level 12+ so
+> that fighters and paladins aren't overpowering what the monk can do
+
+Effect — three bindings, all raising the subclass's power budget deliberately:
+
+1. **Stated design intent, now on the record:** this subclass is allowed to sit
+   above the Monk's usual budget, because the owner judges the Monk behind the
+   Paladin and Fighter. The guidelines' comparators still get measured and
+   reported; they no longer function as a ceiling. This supersedes the "adds no
+   damage die, attack, armor, or save-DC bonus" posture in the draft's
+   power-budget section.
+2. **Level 6 is deliberately overloaded**, with the reason recorded: most
+   tables never reach level 12+, so the subclass's competitiveness has to be
+   delivered by level 6 rather than at 11/17. This resolves the open ruling on
+   level-6 feature count — the deviation from the SRD Monk corpus (one named
+   feature per subclass level; four proposed here) is **approved by design
+   rationale, not overlooked**.
+3. **Close-combat ranged Disadvantage removed.** SRD "Ranged Attacks in Close
+   Combat" reads: "When you make a ranged attack roll with a weapon, a spell,
+   or some other means, you have Disadvantage on the roll if you are within 5
+   feet of an enemy who can see you and doesn't have the Incapacitated
+   condition." The subclass cancels that.
+4. **Focus-cast high-level spells at Monk 13 and 17.** Higher-level spells
+   castable for 1 Focus Point instead of a spell slot, at Monk levels 13 and
+   17 — levels the third-caster slot table already advances on, so this is
+   printed as a clause of the Spellcasting feature rather than a new feature
+   slot.
+
+Findings reported to the owner at ruling time, recorded not corrected:
+
+- The close-combat clause is **inert against the current spell grants**. All
+  three granted cantrips are Touch or Self (*Shocking Grasp*, *Chill Touch*
+  melee spell attacks; *True Strike* Self), and the curated
+  abjuration/enchantment/illusion list is saves and utility — SRD 5.2.1 has
+  **no ranged-attack cantrip in those three schools** on the wizard or bard
+  list. As written the clause only bites on thrown Monk weapons (Dagger,
+  Handaxe, Javelin, Light Hammer, Spear are Simple Melee with Thrown) and on
+  ranged attacks acquired elsewhere. F14 Bounced Flavor Cheque risk; the fix
+  (grant an out-of-school attack cantrip) was offered, not applied.
+- **Focus-cast spells break the draft's own Delivery Distance rule #2**, which
+  states "no Focus-to-upcast, concentration-scaled strike damage, or
+  Focus-bought spell menu exists." A Focus-bought spell menu is precisely what
+  this is. The distance checklist needs an owner-ruled amendment, the way
+  Faces of the Court already amended it once.
+- Uncapped, "1 Focus Point" is not a bound: Focus equals Monk level and returns
+  on a Short Rest (33 points/day at 13, 51 at 17 across three windows). The
+  cost that actually binds is a per-rest use limit; the specific limit is the
+  open ruling.
+
+Implementation (which spells, which use limit, and the exact level-6 roster)
+was presented to the owner with numbers at the same sitting and is pending
+approval; the directives above are settled.
+
 ## 2026-08-06 — Barbed Court: Unarmed Strikes gain the Light and Finesse properties so Nick works
 
 Context: the owner opened a fundamental redesign of the Barbed Court (arcane
