@@ -255,7 +255,7 @@ function resolvedGrant(
   issues: AuthoringValidationIssue[],
 ): AuthoringGrant | null {
   const path = ['grants', index] as const;
-  if (!nonEmpty(draft.rule_key, [...path, 'rule_key'], issues)) return null;
+  const ruleKeyReady = nonEmpty(draft.rule_key, [...path, 'rule_key'], issues);
   switch (draft.kind) {
     case 'fixed_spell': {
       if (draft.spell_content_key === null) {
@@ -267,6 +267,7 @@ function resolvedGrant(
         issue(issues, [...path, 'spell_content_key'], 'unresolved_reference', 'Spell content key does not resolve to one current fingerprint.');
         return null;
       }
+      if (!ruleKeyReady) return null;
       return {
         kind: draft.kind,
         rule_key: draft.rule_key,
@@ -278,12 +279,12 @@ function resolvedGrant(
         spell,
       };
     }
-    case 'choice_from_list':
-      if (!nonEmpty(draft.list, [...path, 'list'], issues)) return null;
+    case 'choice_from_list': {
+      const listReady = nonEmpty(draft.list, [...path, 'list'], issues);
       if (draft.count === null) {
         issue(issues, [...path, 'count'], 'required', 'Choice count is required.');
-        return null;
       }
+      if (!ruleKeyReady || !listReady || draft.count === null) return null;
       return {
         kind: draft.kind,
         rule_key: draft.rule_key,
@@ -296,6 +297,7 @@ function resolvedGrant(
         with_slots: true,
         free_cast: null,
       };
+    }
     case 'choice_from_query': {
       if (draft.count === null) issue(issues, [...path, 'count'], 'required', 'Choice count is required.');
       const minimum = draft.minimum_spell_level ?? 0;
@@ -303,7 +305,7 @@ function resolvedGrant(
       if (minimum > maximum) {
         issue(issues, [...path, 'maximum_spell_level'], 'out_of_range', 'Maximum spell level must not be below the minimum.');
       }
-      if (draft.count === null || minimum > maximum) return null;
+      if (!ruleKeyReady || draft.count === null || minimum > maximum) return null;
       return {
         kind: draft.kind,
         rule_key: draft.rule_key,
@@ -326,7 +328,7 @@ function resolvedGrant(
         issue(issues, [...path, 'count'], 'out_of_range', 'Skill count exceeds the available distinct skills.');
       }
       if (
-        draft.count === null || draft.skills.length === 0 ||
+        !ruleKeyReady || draft.count === null || draft.skills.length === 0 ||
         new Set(draft.skills).size !== draft.skills.length ||
         draft.count > draft.skills.length
       ) return null;
@@ -672,7 +674,7 @@ export function commitSpeciesPublish(
     });
   }
   const outcome = committed.outcomes[0];
-  if (outcome === undefined || outcome.kind === 'refused' || outcome.kind === 'review') {
+  if (outcome === undefined || outcome.kind === 'refused') {
     throw new SpeciesPublishError('The species publisher returned no result.', {
       reason: 'publish_refused',
       refusal: 'missing_outcome',

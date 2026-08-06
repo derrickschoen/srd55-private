@@ -2165,6 +2165,86 @@ interface CurrentImportMaps {
   readonly sourceRows: Map<number, BackupRow>;
 }
 
+const speciesEffectTemplateColumns = [
+  'effect_kind',
+  'damage_type',
+  'hit_points_flat',
+  'hit_points_per_level',
+  'speed_bonus_feet',
+  'ability',
+  'amount',
+  'maximum',
+  'base',
+  'ability_1',
+  'ability_2',
+  'allows_shield',
+  'weapon_scope',
+  'label',
+  'notes',
+] as const;
+
+/**
+ * Rebind generated species-effect provenance to this database's installed
+ * aggregate. Numeric template ids are store-local, while the copied effect
+ * payload and the source's resolved species definition are portable.
+ *
+ * A character-owned effect that no longer equals any template effect keeps
+ * all of its authored mechanics but loses the stale template claim. Other
+ * template-ref families remain byte-preserved for their owning units to
+ * decide; this resolver is deliberately species-only.
+ */
+function speciesEffectTemplateRefResolver(db: DatabaseContext): (
+  row: BackupRow,
+  sourceType: string | null,
+  speciesDefinitionId: number | null,
+  sourceInstanceId: number | null,
+) => unknown {
+  const candidates = new Map<number, readonly BackupRow[]>();
+  const used = new Map<number, Set<number>>();
+  return (row, sourceType, speciesDefinitionId, sourceInstanceId) => {
+    if (
+      sourceType !== 'species' ||
+      speciesDefinitionId === null ||
+      sourceInstanceId === null ||
+      typeof row.template_ref !== 'string' ||
+      !/^species_template_trait_effects:\d+$/u.test(row.template_ref)
+    ) {
+      return row.template_ref;
+    }
+    let effects = candidates.get(speciesDefinitionId);
+    if (effects === undefined) {
+      effects = db.allRaw(
+        `SELECT effect.id, ${speciesEffectTemplateColumns
+          .map((column) => `effect.${column}`)
+          .join(', ')}
+         FROM species_definitions AS definition
+         JOIN species_templates AS template
+           ON template.content_key = definition.content_key
+         JOIN species_template_traits AS trait
+           ON trait.species_template_id = template.id
+         JOIN species_template_trait_effects AS effect
+           ON effect.species_template_trait_id = trait.id
+         WHERE definition.id = ?
+         ORDER BY trait.sort_order, effect.sort_order, effect.id`,
+        [speciesDefinitionId],
+      );
+      candidates.set(speciesDefinitionId, effects);
+    }
+    let claimed = used.get(sourceInstanceId);
+    if (claimed === undefined) {
+      claimed = new Set();
+      used.set(sourceInstanceId, claimed);
+    }
+    const target = effects.find((effect) =>
+      !claimed.has(Number(effect.id)) &&
+      speciesEffectTemplateColumns.every((column) => effect[column] === row[column]));
+    if (target === undefined) return null;
+    const id = Number(target.id);
+    claimed.add(id);
+    return `species_template_trait_effects:${String(id)}`;
+  };
+}
+
 function importCurrentTables(
   db: DatabaseContext,
   document: CharacterBackupDocument,
@@ -2200,6 +2280,7 @@ function importCurrentTables(
       ]),
     ),
   };
+  const speciesTemplateRef = speciesEffectTemplateRefResolver(db);
 
   for (const row of document.tables.character_class_levels) {
     maps.character_class_levels.set(
@@ -2555,6 +2636,16 @@ function importCurrentTables(
       }
       sourceId = mapped;
     }
+    const sourceRow = oldSourceId === null ? undefined : maps.sourceRows.get(oldSourceId);
+    const sourceType = sourceRow === undefined ? null : String(sourceRow.source_type);
+    const speciesDefinitionId =
+      sourceType === 'species'
+        ? resolvedId(
+            references,
+            'species_definitions',
+            sourceRow?.source_definition_id,
+          )
+        : null;
     const oldItemId =
       row.character_item_id === null ? null : Number(row.character_item_id);
     const itemId =
@@ -2582,6 +2673,12 @@ function importCurrentTables(
         source_instance_id: sourceId,
         character_item_id: itemId ?? null,
         character_weapon_id: weaponId ?? null,
+        template_ref: speciesTemplateRef(
+          row,
+          sourceType,
+          speciesDefinitionId,
+          oldSourceId,
+        ),
       }),
     );
   }
@@ -2737,6 +2834,7 @@ function portableSnapshots(
   const sourceRows = new Map(current.sourceRows);
 
   const transformed = snapshots.map((snapshot) => {
+    const speciesTemplateRef = speciesEffectTemplateRefResolver(db);
     const rowsOf = (table: SnapshotTable): readonly BackupRow[] =>
       snapshot.rows[table] ?? [];
     const orderedSources = topologicalSources(
@@ -2918,29 +3016,47 @@ function portableSnapshots(
         // foreign key would then refuse on the next restore, mid-undo.
         case 'character_effects':
           return [
-            ...rowsOf(table).map((row) => ({
-              ...row,
-              id: ids[table].get(Number(row.id)),
-              character_id: characterId,
-              source_instance_id:
-                row.source_instance_id === null
-                  ? null
-                  : ids.character_source_instances.get(
-                      Number(row.source_instance_id),
-                    ) ?? null,
-              character_item_id:
-                row.character_item_id === null
-                  ? null
-                  : ids.character_items.get(
-                      Number(row.character_item_id),
-                    ) ?? null,
-              character_weapon_id:
-                row.character_weapon_id === null
-                  ? null
-                  : ids.character_weapons.get(
-                      Number(row.character_weapon_id),
-                    ) ?? null,
-            })),
+            ...rowsOf(table).map((row) => {
+              const oldSourceId = row.source_instance_id === null
+                ? null
+                : Number(row.source_instance_id);
+              const source = oldSourceId === null ? undefined : sourceRows.get(oldSourceId);
+              const sourceType = source === undefined ? null : String(source.source_type);
+              const speciesDefinitionId = sourceType === 'species'
+                ? resolvedId(
+                    references,
+                    'species_definitions',
+                    source?.source_definition_id,
+                  )
+                : null;
+              return {
+                ...row,
+                id: ids[table].get(Number(row.id)),
+                character_id: characterId,
+                source_instance_id:
+                  oldSourceId === null
+                    ? null
+                    : ids.character_source_instances.get(oldSourceId) ?? null,
+                character_item_id:
+                  row.character_item_id === null
+                    ? null
+                    : ids.character_items.get(
+                        Number(row.character_item_id),
+                      ) ?? null,
+                character_weapon_id:
+                  row.character_weapon_id === null
+                    ? null
+                    : ids.character_weapons.get(
+                        Number(row.character_weapon_id),
+                      ) ?? null,
+                template_ref: speciesTemplateRef(
+                  row,
+                  sourceType,
+                  speciesDefinitionId,
+                  oldSourceId,
+                ),
+              };
+            }),
             ...snapshot.legacyArmorClassBonuses.map((effect, index) => ({
               ...effect,
               id: next.character_effects.value++,

@@ -616,16 +616,26 @@ function speciesSkillPool(
   db: DatabaseContext,
   grant: SkillGrantRow,
 ): Skill[] | null {
-  const sourceType = db.scalar<string>(
-    'SELECT source_type FROM character_source_instances WHERE id = ?',
+  const source = db.oneRaw(
+    `SELECT source.source_type, definition.content_key,
+            identity.catalog_layer
+     FROM character_source_instances AS source
+     LEFT JOIN species_definitions AS definition
+       ON source.source_type = 'species'
+      AND definition.id = source.source_definition_id
+     LEFT JOIN catalog_content_identities AS identity
+       ON identity.content_kind = 'species'
+      AND identity.content_key = definition.content_key
+     WHERE source.id = ?`,
     [grant.source_instance_id],
   );
-  if (sourceType !== 'species') return null;
-  if (isEnumValue(SPECIES_SKILL_GRANT_KEYS, grant.grant_key)) {
-    const plan = Object.values(SPECIES_SKILL_GRANT_PLANS).find(
-      (candidate) => candidate.grant_key === grant.grant_key,
-    );
-    if (plan !== undefined) {
+  if (source?.source_type !== 'species') return null;
+  if (
+    source.catalog_layer === 'bundled' &&
+    typeof source.content_key === 'string'
+  ) {
+    const plan = SPECIES_SKILL_GRANT_PLANS[source.content_key];
+    if (plan?.grant_key === grant.grant_key) {
       return plan.pool === 'any_skill' ? [...skills] : [...plan.pool];
     }
   }

@@ -12,6 +12,11 @@ import type {
 } from '../../../src/authoring/contracts';
 import type { HomebrewDraftItemUuid } from '../../../src/authoring/ids';
 import {
+  commitCharacterBackupImport,
+  exportCharacterBackup,
+  planCharacterBackupImport,
+} from '../../../src/backup/character-backup';
+import {
   exportSelectedLibraryContent,
   importLibraryDocument,
   planLibraryImport,
@@ -40,7 +45,7 @@ import { projectStoredContentV1 } from '../../../src/catalog/stored-content-proj
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { applicationSeed } from '../../../src/db/bootstrap';
 import { DatabaseContext } from '../../../src/db/database';
-import { damageType } from '../../../src/domain/enums';
+import { damageType, skills } from '../../../src/domain/enums';
 import type { ContentKey } from '../../../src/domain/ids';
 import {
   fillSkillGrant,
@@ -195,6 +200,13 @@ describe('HA-3 species publisher', () => {
           count: null,
           maximum_spell_level: null,
         },
+        {
+          kind: 'skill_proficiency',
+          draft_item_uuid: itemUuid('bad-skill'),
+          rule_key: '',
+          count: null,
+          skills: [],
+        },
       ],
       traits: [{
         draft_item_uuid: itemUuid('bad-trait'),
@@ -236,6 +248,10 @@ describe('HA-3 species publisher', () => {
         { path: ['grants', 0, 'spell_content_key'], code: 'unresolved_reference' },
         { path: ['grants', 1, 'rule_key'], code: 'duplicate' },
         { path: ['grants', 1, 'list'], code: 'required' },
+        { path: ['grants', 1, 'count'], code: 'required' },
+        { path: ['grants', 2, 'rule_key'], code: 'required' },
+        { path: ['grants', 2, 'count'], code: 'required' },
+        { path: ['grants', 2, 'skills'], code: 'required' },
         { path: ['traits', 0, 'name'], code: 'required' },
         { path: ['traits', 0, 'description'], code: 'required' },
         { path: ['traits', 0, 'effects', 0, 'damage_type'], code: 'required' },
@@ -472,6 +488,160 @@ describe('HA-3 species publisher', () => {
     )).toEqual(exported);
   }, 20_000);
 
+  it('remaps a source character species effect provenance to target-local template rows', async () => {
+    const source = await database(true);
+    const sourceAuthoring = service(source);
+    const published = publish(
+      sourceAuthoring,
+      savedSpecies(sourceAuthoring, 'Portable Effect Voyager'),
+    );
+    const sourceClass = listGuidedClassOptions(source)[0];
+    if (sourceClass === undefined) throw new Error('Source class option is missing.');
+    const sourceCharacter = createGuidedCharacter(
+      source,
+      { name: 'Portable Effect Hero', class_content_key: sourceClass.content_key },
+      new CharacterCommandIntegrity('ha3-portable-effect-source'),
+    );
+    applyGuidedOrigin(source, {
+      character_id: sourceCharacter.id,
+      kind: 'species',
+      content_key: published.result.content_key,
+    });
+    const sourceRefs = source.allRaw(
+      `SELECT template_ref FROM character_effects
+       WHERE character_id = ? AND template_ref LIKE 'species_template_trait_effects:%'
+       ORDER BY sort_order`,
+      [sourceCharacter.id],
+    ).map((row) => String(row.template_ref));
+    expect(sourceRefs).toHaveLength(3);
+    const document = exportCharacterBackup(
+      source,
+      sourceCharacter.id,
+      '2042-06-08T00:00:00.000Z',
+    );
+
+    const target = await database(true);
+    const targetAuthoring = service(target);
+    publish(
+      targetAuthoring,
+      savedSpecies(targetAuthoring, 'Target Sequence Offset'),
+    );
+    const plan = planCharacterBackupImport(target, document);
+    expect(plan.outcomes).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'create',
+        contentKey: published.result.content_key,
+      }),
+    ]));
+    const committed = commitCharacterBackupImport(
+      target,
+      document,
+      plan.token,
+    );
+    expect(committed.kind).toBe('committed');
+    if (committed.kind !== 'committed') throw new Error('Character import did not commit.');
+    const targetRefs = target.allRaw(
+      `SELECT template_ref FROM character_effects
+       WHERE character_id = ? AND template_ref LIKE 'species_template_trait_effects:%'
+       ORDER BY sort_order`,
+      [committed.result.characterId],
+    ).map((row) => String(row.template_ref));
+    const installedTargetRefs = target.allRaw(
+      `SELECT 'species_template_trait_effects:' || effect.id AS template_ref
+       FROM species_template_trait_effects AS effect
+       JOIN species_template_traits AS trait
+         ON trait.id = effect.species_template_trait_id
+       JOIN species_templates AS template
+         ON template.id = trait.species_template_id
+       WHERE template.content_key = ?
+       ORDER BY trait.sort_order, effect.sort_order`,
+      [published.result.content_key],
+    ).map((row) => String(row.template_ref));
+    expect(targetRefs).toEqual(installedTargetRefs);
+    expect(targetRefs).toHaveLength(3);
+    expect(targetRefs.every((reference) => !sourceRefs.includes(reference))).toBe(true);
+  }, 20_000);
+
+  it('keeps bundled species skill plans provenance-gated from authored rule keys', async () => {
+    const db = await database(true);
+    const authoring = service(db);
+    const classOption = listGuidedClassOptions(db)[0];
+    if (classOption === undefined) throw new Error('Seeded class option is missing.');
+    const cases = [
+      {
+        name: 'Authored Keen Senses',
+        ruleKey: 'keen_senses',
+        pool: ['arcana'] as const,
+      },
+      {
+        name: 'Authored Skillful',
+        ruleKey: 'skillful',
+        pool: ['history', 'nature'] as const,
+      },
+    ];
+    for (const [index, fixture] of cases.entries()) {
+      const installed = publish(authoring, savedSpecies(
+        authoring,
+        fixture.name,
+        (document) => ({
+          ...document,
+          grants: [{
+            kind: 'skill_proficiency',
+            draft_item_uuid: itemUuid(`${fixture.name}-skill`),
+            rule_key: fixture.ruleKey,
+            count: 1,
+            skills: [...fixture.pool],
+          }],
+        }),
+      ));
+      const character = createGuidedCharacter(
+        db,
+        {
+          name: `${fixture.name} Hero`,
+          class_content_key: classOption.content_key,
+        },
+        new CharacterCommandIntegrity(`ha3-authored-skill-${String(index)}`),
+      );
+      applyGuidedOrigin(db, {
+        character_id: character.id,
+        kind: 'species',
+        content_key: installed.result.content_key,
+      });
+      expect(unfilledSpeciesSkillGrants(db, character.id)).toEqual([
+        expect.objectContaining({
+          grant_key: fixture.ruleKey,
+          available: [...fixture.pool],
+        }),
+      ]);
+    }
+
+    for (const fixture of [
+      { species: 'Elf', pool: ['insight', 'perception', 'survival'] },
+      { species: 'Human', pool: [...skills] },
+    ]) {
+      const option = listGuidedOriginOptions(db, 'species').find(
+        (candidate) => candidate.name === fixture.species,
+      );
+      if (option === undefined) throw new Error(`${fixture.species} option is missing.`);
+      const character = createGuidedCharacter(
+        db,
+        {
+          name: `Bundled ${fixture.species} Hero`,
+          class_content_key: classOption.content_key,
+        },
+        new CharacterCommandIntegrity(`ha3-bundled-${fixture.species}`),
+      );
+      applyGuidedOrigin(db, {
+        character_id: character.id,
+        kind: 'species',
+        content_key: option.content_key,
+      });
+      expect(unfilledSpeciesSkillGrants(db, character.id)[0]?.available).toEqual(
+        fixture.pool,
+      );
+    }
+  }, 20_000);
+
   it('freezes draft-to-projector bytes independently of the installer result', async () => {
     const db = await database();
     const authoring = service(db);
@@ -622,6 +792,59 @@ describe('HA-3 species publisher', () => {
       candidates: [targetKey],
     });
     expect(authoring.readDraft(incoming.draft_uuid).revision).toBe(incoming.revision);
+  });
+
+  it('commits an explicit Match as success before deleting the reviewed draft', async () => {
+    const db = await database();
+    const authoring = service(db);
+    const incoming = savedSpecies(authoring, 'Explicit Match Species');
+    const initial = authoring.previewPublish({
+      draft_uuid: incoming.draft_uuid,
+      expected_revision: incoming.revision,
+    });
+    if (initial.aggregate.kind !== 'species') throw new Error('Preview aggregate is not species.');
+    const targetKey = 'expanded:alternate.owner:explicit-match-species' as ContentKey;
+    const targetNode = portableSourceContentImportNode(db, initial.aggregate, targetKey);
+    const targetPlan = planContentImport(db, [targetNode]);
+    expect(commitContentImport(db, {
+      nodes: [targetNode],
+      token: targetPlan.token,
+    }).kind).toBe('committed');
+    registerContentAlias(db, {
+      kind: 'species',
+      aliasKey: assertedExternalContentKey(
+        'species',
+        'expanded',
+        'Explicit Match Species',
+      ),
+      contentKey: targetKey,
+      aliasKind: 'declared-legacy',
+    });
+    const preview = authoring.previewPublish({
+      draft_uuid: incoming.draft_uuid,
+      expected_revision: incoming.revision,
+    });
+    expect(preview.review).toEqual([
+      expect.objectContaining({ candidate_content_key: targetKey }),
+    ]);
+
+    expect(authoring.commitPublish({
+      token: preview.token,
+      decisions: [{
+        candidate_content_key: targetKey,
+        decision: 'match',
+      }],
+    })).toEqual({
+      outcome: 'matched_existing',
+      content_key: targetKey,
+      name: 'Explicit Match Species',
+      catalog_layer: 'external',
+      previous_key_usage_count: 0,
+    });
+    expect(() => authoring.readDraft(incoming.draft_uuid)).toThrow(AuthoringServiceError);
+    expect(db.scalar<number>('SELECT count(*) FROM species_definitions')).toBe(1);
+    expect(db.scalar<number>('SELECT count(*) FROM species_templates')).toBe(1);
+    expect(db.scalar<number>('SELECT count(*) FROM catalog_content_match_decisions')).toBe(1);
   });
 
   it('reports base-key usage without propagating an immutable new version to characters', async () => {
