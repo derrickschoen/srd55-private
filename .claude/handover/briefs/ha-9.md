@@ -11,14 +11,29 @@ own output. Targeted vitest only; you may run ONLY your own journey spec
 in Playwright (PLAYWRIGHT_PORT=4774). Commit at green boundaries; if
 index.lock refuses, leave the tree and say so.
 
-## Scope
+## Scope — EXACTLY the HA-4 BackgroundAuthoringDraft contract
+(src/authoring/contracts.ts, BackgroundAuthoringDraft). CORRECTED
+2026-08-06 after a correct codex stop: the first version of this brief
+invented fields the backend never had (feature name/description,
+language grants). The form authors the contract as it exists — nothing
+more. If the contract lacks something you believe essential, STOP and
+say so; do not extend schema or contract.
 
-/homebrew Backgrounds tab -> form for draft backgrounds: name, rules
-edition, description, skill proficiencies, tool/language grants, starting
-equipment lines, feature (name + description + effects via the shared
-compile-coupled effect cards), Origin-feat reference. Save/preview/publish
-through the REAL HA-4 publisher; draft conflict + adoption via the shared
-dialogs; dirty-navigation via the router guard seam.
+/homebrew Backgrounds tab -> form for draft backgrounds covering:
+- name + rules edition (AuthoringDraftBase)
+- suggested_abilities (Ability multi-select)
+- default_origin_feat_content_key + display name (feat picker from
+  installed catalog; null allowed until selected)
+- skill_proficiencies (Skill multi-select)
+- tool_reference_text (nullable free text)
+- equipment options A and B: description line + structured entry list
+  (kind gear/weapon/armor; quantity nullable; printed_name; weapon/armor
+  entries carry an optional content_key reference) with add/remove/
+  reorder per the shared ordering controls
+- flat effects via the shared compile-coupled effect cards
+Save/preview/publish through the REAL HA-4 publisher; draft conflict +
+adoption via the shared dialogs; dirty-navigation via the router guard
+seam.
 
 ## Build on merged seams — do not fork them
 
