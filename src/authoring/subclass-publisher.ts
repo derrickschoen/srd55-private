@@ -38,6 +38,7 @@ import type {
   AuthoringFeatureEffect,
 } from './effect-forms';
 import type { HomebrewDraftUuid, PublishPlanToken } from './ids';
+import { subclassProgressionScheduleIssues } from './subclass-progression-validation';
 import {
   authoringFingerprintReference,
   authoringIssue,
@@ -163,6 +164,7 @@ function overrideProgression(
   draft: Extract<SubclassAuthoringDraft['progression'], { readonly mode: 'override' }>,
   issues: AuthoringValidationIssue[],
 ): SubclassContentProgression | null {
+  issues.push(...subclassProgressionScheduleIssues(draft));
   if (draft.caster_contribution === null) {
     authoringIssue(issues, ['progression', 'caster_contribution'], 'required', 'Caster contribution is required.');
   } else if (draft.caster_contribution === 'pact') {

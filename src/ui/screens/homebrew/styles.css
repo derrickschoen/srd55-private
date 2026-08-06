@@ -205,7 +205,28 @@
   gap: 0.8rem;
 }
 
+.subclass-authoring-form,
+.subclass-root-fields,
+.subclass-progression-section,
+.subclass-progression-grid,
+.subclass-progression-row,
+.subclass-progression-grants,
+.subclass-progression-grant-card,
+.subclass-timeline,
+.subclass-level-group,
+.subclass-feature-card,
+.subclass-feature-effects,
+.subclass-publish-preview,
+.subclass-publish-result {
+  display: grid;
+  gap: 0.8rem;
+}
+
 .species-authoring-form {
+  margin-top: 1rem;
+}
+
+.subclass-authoring-form {
   margin-top: 1rem;
 }
 
@@ -219,6 +240,17 @@
   padding: 1rem;
 }
 
+.subclass-root-fields,
+.subclass-progression-section,
+.subclass-level-group,
+.subclass-feature-card,
+.subclass-publish-preview,
+.subclass-publish-result {
+  border: 1px solid #cfc6b6;
+  border-radius: 0.6rem;
+  padding: 1rem;
+}
+
 .species-authoring-form input:not([type="checkbox"]):not([type="radio"]),
 .species-authoring-form select,
 .species-authoring-form textarea,
@@ -227,8 +259,59 @@
   min-height: 2.6rem;
 }
 
+.subclass-authoring-form input:not([type="checkbox"]):not([type="radio"]),
+.subclass-authoring-form select,
+.subclass-authoring-form textarea {
+  width: 100%;
+  min-height: 2.6rem;
+}
+
 .species-authoring-form textarea {
   min-height: 7rem;
+}
+
+.subclass-authoring-form textarea {
+  min-height: 6rem;
+}
+
+.subclass-progression-run > summary {
+  cursor: pointer;
+  font-weight: 700;
+  padding: 0.55rem;
+}
+
+.subclass-progression-row,
+.subclass-progression-grant-card {
+  margin-block: 0.6rem;
+  padding: 0.75rem;
+}
+
+.subclass-slot-counts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.45rem;
+}
+
+.subclass-progression-issues {
+  border-inline-start: 0.3rem solid #b91c1c;
+  padding-inline-start: 0.75rem;
+}
+
+.subclass-progression-issues button {
+  border: 0;
+  padding: 0;
+  color: inherit;
+  text-align: start;
+  text-decoration: underline;
+  background: transparent;
+}
+
+.subclass-add-level-controls,
+.subclass-form-actions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: end;
+  flex-wrap: wrap;
 }
 
 .species-root-fields legend,

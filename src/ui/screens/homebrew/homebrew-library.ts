@@ -10,6 +10,8 @@ import type {
   StoredHomebrewDraft,
 } from '../../../authoring/contracts';
 import type { HomebrewDraftUuid } from '../../../authoring/ids';
+import type { GuidedClassOption } from '../../../builder/contracts';
+import { createQueriesClient } from '../../../queries/client';
 import type { ScreenContext } from '../../screen';
 import { clear, element, listen, type Cleanup } from '../../dom';
 import { freeTextSpan } from '../../free-text';
@@ -22,6 +24,10 @@ import {
   isStoredSpeciesDraft,
   renderSpeciesForm,
 } from './species-form';
+import {
+  isStoredSubclassDraft,
+  renderSubclassForm,
+} from './subclass-form';
 
 export const HOMEBREW_ROUTE = '/homebrew';
 
@@ -60,6 +66,7 @@ export function selectedHomebrewTab(value: string | null): HomebrewLibraryTab {
 export interface HomebrewLibraryRenderOptions {
   readonly client?: AuthoringClient;
   readonly confirmDiscard?: (draft: HomebrewDraftSummary) => boolean;
+  readonly parentClasses?: readonly GuidedClassOption[];
 }
 
 function badge(text: string, tone: 'draft' | 'homebrew' | 'neutral'): HTMLElement {
@@ -319,6 +326,7 @@ async function renderDraftRoute(
   client: AuthoringClient,
   draftUuid: HomebrewDraftUuid,
   cleanups: Cleanup[],
+  parentClasses?: readonly GuidedClassOption[],
 ): Promise<void> {
   const view = shell(context, cleanups);
   const draft = await client.readDraft({ draft_uuid: draftUuid });
@@ -340,6 +348,15 @@ async function renderDraftRoute(
   );
   if (isStoredSpeciesDraft(draft)) {
     cleanups.push(renderSpeciesForm({ context, client, mount: formMount, draft }));
+  } else if (isStoredSubclassDraft(draft)) {
+    const bundledParents = parentClasses ?? await createQueriesClient(context.rpc).guidedClassOptions();
+    cleanups.push(renderSubclassForm({
+      context,
+      client,
+      mount: formMount,
+      draft,
+      parentClasses: bundledParents,
+    }));
   } else {
     formMount.append(element('p', {
       text: `The shared ${KIND_LABELS[draft.content_kind].toLowerCase()} draft shell is ready for its authoring form.`,
@@ -362,7 +379,7 @@ export async function renderHomebrewLibrary(
     ? context.route.segments[2] as HomebrewDraftUuid
     : null;
   if (draftUuid !== null) {
-    await renderDraftRoute(context, client, draftUuid, cleanups);
+    await renderDraftRoute(context, client, draftUuid, cleanups, options.parentClasses);
     return () => {
       active = false;
       for (const dialog of dialogs.splice(0)) dialog.cleanup();
