@@ -18,12 +18,16 @@ import { ensureBundledOriginContent } from '../rules/origins-srd';
 import { ensureBundledSpeciesDefinitions } from '../rules/origin-definitions-srd';
 import { ensureBundledBackgroundDefinitions } from '../rules/background-definitions-srd';
 import { ensureBundledSheetContent } from '../rules/sheet-srd';
-import { ensureBundledSpellContent } from '../rules/spells-srd';
+import {
+  ensureBundledSpellContent,
+  installMissingBundledSpellContent,
+  type BundledSpellSeedResult,
+} from '../rules/spells-srd';
 import { ensureBundledClassEquipment } from '../rules/class-equipment-srd';
 import { ensureBundledFeatContent } from '../rules/feats-srd';
 import { reconcileLegacyLevelFeatChoices } from '../rules/legacy-level-feat-choices';
 import { ensureBundledClassResources } from '../rules/class-resources-srd';
-import { reconcileBundledContentRegistryV1 } from '../catalog/bundled-content-registry-v1';
+import { reconcileBundledContentRegistryWithStoredProjectionsV1 } from '../catalog/bundled-content-registry-v1';
 
 /**
  * The bundled content every application database is expected to carry: the SRD
@@ -75,16 +79,44 @@ export const applicationSeed: DatabaseSeed = (db) => {
   // the instance config, at grant generation — never at seed time.
   ensureBundledBackgroundDefinitions(db);
   ensureBundledFeatContent(db);
-  ensureBundledSpellContent(db);
-  assertBundledSrdSubclassSpellReferences(db);
-  reconcileLegacyLevelFeatChoices(db);
+  // Install absent spell roots before the general projector pass. On a light
+  // boot the exact-cardinality guard writes nothing; present rows, including
+  // drifted rows, remain untouched for reconciliation to observe.
+  installMissingBundledSpellContent(db);
   // D84 runs only after every definition/template half and dependency catalog
   // is present, so all nine stored projectors observe the same graph runtime
-  // consumers do. Reconciliation preserves each stable root key verbatim.
-  const registry = reconcileBundledContentRegistryV1(db);
-  if (registry.orphaned > 0 || registry.refused > 0) {
+  // consumers do. Spell is the first reconciled kind: its projection is the
+  // stored half of the existing seed pass, and the hook completes that pass in
+  // its pinned order before general reconciliation continues to later kinds.
+  // A subclass-reference failure therefore skips both the legacy repair and
+  // every later registry kind while retaining one stored spell projection.
+  let spells: BundledSpellSeedResult | undefined;
+  const registryPass = reconcileBundledContentRegistryWithStoredProjectionsV1(
+    db,
+    {
+      afterKind: (kind, storedProjections) => {
+        if (kind === 'spell') {
+          spells = ensureBundledSpellContent(db, storedProjections);
+          assertBundledSrdSubclassSpellReferences(db);
+          reconcileLegacyLevelFeatChoices(db);
+        }
+      },
+    },
+  );
+  if (spells === undefined) {
+    throw new TypeError('Bundled spell reconciliation did not run.');
+  }
+  const registry = registryPass.summary;
+  if (
+    spells.updated > 0 || spells.refused > 0 ||
+    registry.orphaned > 0 || registry.refused > 0
+  ) {
     console.warn(
-      `Bundled content registry reconciliation: ${String(registry.orphaned)} orphaned, ${String(registry.refused)} refused.`,
+      'Bundled content reconciliation: ' +
+      `${String(spells.healthy)} spell entries healthy, ` +
+      `${String(spells.updated)} updated, ${String(spells.refused)} refused; ` +
+      `${String(registry.orphaned)} registry entries orphaned, ` +
+      `${String(registry.refused)} refused.`,
     );
   }
 };

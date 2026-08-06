@@ -7,6 +7,28 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D210 — OWNER: no acceptance walk yet (2026-08-05)
+
+The guided owner acceptance walk against the D54 bar is declined for
+now ("Not yet"). Keep building; the bar test waits for the owner's
+word.
+
+## D209 — OWNER: going public is PLAUSIBLE; NOTICE prep authorized (2026-08-05)
+
+A small unit adds and maintains a NOTICE/attribution file covering SRD
+5.2 CC-BY material, the project's own CC-BY-4.0 originals (Veteran, the
+monk drafts, the oath), and the 3.5-SRD concept ancestry disclosure.
+Kept current at each merge that adds licensed content. The CC0 license
+flip stays a recorded option, not yet planned.
+
+## D208 — OWNER: the zero-users window closes at the first real campaign (2026-08-05)
+
+"When I start a real campaign" - the D60 window closes the day the
+owner creates a character they intend to keep, announced by them. Until
+then, destructive simplifications (wipes, resets, compat deletions)
+remain supervisor defaults: recorded, reversible, no per-case owner
+ruling required. After that day, data compatibility is real.
+
 ## D207 — OWNER: three standing orders (2026-08-05)
 
 All three made permanent: (1) COMMON.md forbids codex dispatches from

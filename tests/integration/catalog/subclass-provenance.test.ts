@@ -15,7 +15,7 @@ import { DatabaseContext } from '../../../src/db/database';
 import { raiseClassLevelForTest } from '../../helpers/class-levels';
 import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
 import { ensureBundledSrdSubclassContent } from '../../../src/rules/srd-subclass-content';
-import { ensureBundledSpellContent } from '../../../src/rules/spells-srd';
+import { seedSpellContent } from '../../../src/rules/spells-srd';
 import {
   assessImportCompatibility,
   exportCharacterShare,
@@ -49,7 +49,7 @@ async function database(): Promise<DatabaseContext> {
   const db = new DatabaseContext(connection);
   seedClassProgressions(db);
   ensureBundledSrdSubclassContent(db);
-  ensureBundledSpellContent(db);
+  seedSpellContent(db);
   reconcileBundledContentRegistryV1(db);
   return db;
 }

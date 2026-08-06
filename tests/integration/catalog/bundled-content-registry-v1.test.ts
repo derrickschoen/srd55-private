@@ -1,7 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   bundledContentManifestV1,
   reconcileBundledContentRegistryV1,
+  reconcileBundledContentRegistryWithStoredProjectionsV1,
 } from '../../../src/catalog/bundled-content-registry-v1';
 import {
   ContentIdentityCollision,
@@ -12,6 +14,7 @@ import { createApplicationLifecycle } from '../../../src/db/bootstrap';
 import type { DatabaseContext } from '../../../src/db/database';
 import type { DatabaseLifecycle } from '../../../src/db/database-lifecycle';
 import type { ContentKey } from '../../../src/domain/ids';
+import { ensureBundledSpellContent } from '../../../src/rules/spells-srd';
 import { getSqlite3, MemoryDatabaseStorage } from '../../helpers/open-db';
 
 const INDEPENDENT_ROOT_ANCHORS = [
@@ -630,7 +633,7 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
     )).toEqual(beforeFingerprints);
   });
 
-  it('repairs a stale current fingerprint while refusing damaged bytes elsewhere in the same boot', () => {
+  it('repairs seed-stale content while refusing damaged bytes elsewhere in the same pass', () => {
     const staleCurrent = db.oneRaw(
       `SELECT fingerprint_digest, canonical_json
        FROM catalog_content_fingerprints
@@ -640,12 +643,14 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
       [MUTATED_SPELL_KEY],
     );
     expect(staleCurrent).not.toBeNull();
-    db.exec(
-      `UPDATE spell_versions
-       SET short_summary = short_summary || ' Corrected extraction.'
-       WHERE content_key = ?`,
-      [MUTATED_SPELL_KEY],
+    const descriptions = readFileSync(
+      new URL('../../../docs/srd/source/spell-descriptions.txt', import.meta.url),
+      'utf8',
     );
+    const shippedSentence = 'within range and bursts in a spray of acid.';
+    const correctedSentence =
+      'within range and bursts in a corrected spray of acid.';
+    expect(descriptions.split(shippedSentence)).toHaveLength(2);
     db.exec(
       `UPDATE catalog_content_fingerprints SET canonical_json = 'damaged'
        WHERE content_kind = 'spell' AND content_key = ?
@@ -665,15 +670,19 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
       [DAMAGED_SPELL_KEY],
     );
 
-    const bootErrors = vi.spyOn(console, 'error')
-      .mockImplementation(() => undefined);
-    try {
-      lifecycle.reopen();
-      db = lifecycle.database;
-      expect(bootErrors).not.toHaveBeenCalled();
-    } finally {
-      bootErrors.mockRestore();
-    }
+    const reconciliation =
+      reconcileBundledContentRegistryWithStoredProjectionsV1(db);
+    const result = ensureBundledSpellContent(
+      db,
+      reconciliation.storedProjections,
+      {
+        descriptionExtract: descriptions.replace(
+          shippedSentence,
+          correctedSentence,
+        ),
+      },
+    );
+    expect(result).toMatchObject({ healthy: 337, updated: 1, refused: 1 });
     const repairedFingerprints = db.allRaw(
       `SELECT fingerprint_digest, canonical_json, fingerprint_role
        FROM catalog_content_fingerprints
@@ -694,7 +703,7 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
     expect(repairedCurrent?.fingerprint_digest)
       .not.toBe(staleCurrent!.fingerprint_digest);
     expect(repairedCurrent?.canonical_json)
-      .toContain('Corrected extraction.');
+      .toContain('corrected spray of acid.');
     expect(db.oneRaw(
       `SELECT * FROM catalog_content_identities
        WHERE content_kind = 'spell' AND content_key = ?`,
@@ -706,5 +715,70 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
        ORDER BY fingerprint_scheme, fingerprint_digest, fingerprint_role`,
       [DAMAGED_SPELL_KEY],
     )).toEqual(beforeRefusedFingerprints);
+  });
+
+  it('BOOT-SEEDER-STORED-DRIFT heals stored prose whose registry fingerprint was untouched', () => {
+    const beforeSummary = db.scalar<string>(
+      `SELECT short_summary FROM spell_versions WHERE content_key = ?`,
+      [MUTATED_SPELL_KEY],
+    );
+    const beforeCurrent = db.oneRaw(
+      `SELECT fingerprint_digest, canonical_json
+       FROM catalog_content_fingerprints
+       WHERE content_kind = 'spell' AND content_key = ?
+         AND fingerprint_scheme = 'content-v1'
+         AND fingerprint_role = 'current'`,
+      [MUTATED_SPELL_KEY],
+    );
+    expect(beforeSummary).not.toBeNull();
+    expect(beforeCurrent).not.toBeNull();
+    const drift = ' Stored drift that must not survive boot.';
+    db.exec(
+      `UPDATE spell_versions SET short_summary = short_summary || ?
+       WHERE content_key = ?`,
+      [drift, MUTATED_SPELL_KEY],
+    );
+    expect(db.scalar<string>(
+      `SELECT fingerprint_digest FROM catalog_content_fingerprints
+       WHERE content_kind = 'spell' AND content_key = ?
+         AND fingerprint_scheme = 'content-v1'
+         AND fingerprint_role = 'current'`,
+      [MUTATED_SPELL_KEY],
+    )).toBe(beforeCurrent!.fingerprint_digest);
+
+    lifecycle.reopen();
+    db = lifecycle.database;
+
+    expect(db.scalar<string>(
+      `SELECT short_summary FROM spell_versions WHERE content_key = ?`,
+      [MUTATED_SPELL_KEY],
+    )).toBe(beforeSummary);
+    const afterFingerprints = db.allRaw(
+      `SELECT fingerprint_digest, canonical_json, fingerprint_role
+       FROM catalog_content_fingerprints
+       WHERE content_kind = 'spell' AND content_key = ?
+         AND fingerprint_scheme = 'content-v1'
+       ORDER BY fingerprint_role, fingerprint_digest`,
+      [MUTATED_SPELL_KEY],
+    );
+    expect(afterFingerprints).toHaveLength(2);
+    expect(afterFingerprints).toContainEqual({
+      fingerprint_digest: beforeCurrent!.fingerprint_digest,
+      canonical_json: beforeCurrent!.canonical_json,
+      fingerprint_role: 'current',
+    });
+    const reviewedDrift = afterFingerprints.find(
+      (fingerprint) => fingerprint.fingerprint_role === 'bundled-historical',
+    );
+    expect(reviewedDrift?.fingerprint_digest)
+      .not.toBe(beforeCurrent!.fingerprint_digest);
+    expect(reviewedDrift?.canonical_json).toContain(drift.trim());
+  });
+
+  it('BOOT-SEEDER-UNCHANGED-CONTROL writes nothing on an unchanged real boot', () => {
+    lifecycle.reopen();
+    db = lifecycle.database;
+
+    expect(db.scalar<number>('SELECT total_changes()')).toBe(0);
   });
 });

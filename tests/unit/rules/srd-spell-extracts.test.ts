@@ -1,6 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { reconcileBundledContentRegistryV1 } from '../../../src/catalog/bundled-content-registry-v1';
+import {
+  reconcileBundledContentRegistryV1,
+  reconcileBundledContentRegistryWithStoredProjectionsV1,
+} from '../../../src/catalog/bundled-content-registry-v1';
 import { CatalogImporter } from '../../../src/catalog/catalog-importer';
 import {
   assertSpellVersionCommandAllowed,
@@ -8,6 +11,7 @@ import {
 } from '../../../src/commands/srd-spell-policy';
 import { DatabaseContext } from '../../../src/db/database';
 import {
+  ensureBundledSpellContent,
   parseSrdSpellDescriptions,
   parseSrdSpellList,
   parseSrdSpellListMemberships,
@@ -645,6 +649,100 @@ describe('SRD spell extracts', () => {
     connection.close();
   });
 
+  it('SEEDER-SAME-CARDINALITY replaces corrected prose and moves the current fingerprint', async () => {
+    const connection = await openTestDatabase();
+    const db = new DatabaseContext(connection);
+    seedSpellContent(db);
+    const reconciliation =
+      reconcileBundledContentRegistryWithStoredProjectionsV1(db);
+    const beforeRoot = db.oneRaw(
+      `SELECT id, content_key FROM spell_versions
+       WHERE content_key = '2024:fireball'`,
+    );
+    const beforeFingerprint = db.oneRaw(
+      `SELECT fingerprint_digest, canonical_json
+       FROM catalog_content_fingerprints
+       WHERE content_kind = 'spell' AND content_key = '2024:fireball'
+         AND fingerprint_scheme = 'content-v1'
+         AND fingerprint_role = 'current'`,
+    );
+    const descriptions = extract('spell-descriptions.txt');
+    const shippedSentence = 'low roar into a fiery explosion.';
+    const correctedSentence = 'low roar into a corrected fiery explosion.';
+    expect(descriptions.split(shippedSentence)).toHaveLength(2);
+    const correctedExtract = descriptions.replace(
+      shippedSentence,
+      correctedSentence,
+    );
+
+    const result = ensureBundledSpellContent(
+      db,
+      reconciliation.storedProjections,
+      { descriptionExtract: correctedExtract },
+    );
+
+    expect(result).toMatchObject({ healthy: 338, updated: 1, refused: 0 });
+    expect(result.outcomes.filter((outcome) => outcome.kind === 'updated'))
+      .toEqual([{ kind: 'updated', contentKey: '2024:fireball' }]);
+    expect(db.oneRaw(
+      `SELECT id, content_key FROM spell_versions
+       WHERE content_key = '2024:fireball'`,
+    )).toEqual(beforeRoot);
+    expect(db.scalar(
+      `SELECT count(*) FROM spell_versions WHERE provenance = 'srd'`,
+    )).toBe(339);
+    expect(db.scalar<string>(
+      `SELECT short_summary FROM spell_versions
+       WHERE content_key = '2024:fireball'`,
+    )).toContain(correctedSentence);
+    const fingerprints = db.allRaw(
+      `SELECT fingerprint_digest, canonical_json, fingerprint_role
+       FROM catalog_content_fingerprints
+       WHERE content_kind = 'spell' AND content_key = '2024:fireball'
+         AND fingerprint_scheme = 'content-v1'
+       ORDER BY fingerprint_role`,
+    );
+    expect(fingerprints).toHaveLength(2);
+    expect(fingerprints).toContainEqual({
+      fingerprint_digest: beforeFingerprint?.fingerprint_digest,
+      canonical_json: beforeFingerprint?.canonical_json,
+      fingerprint_role: 'bundled-historical',
+    });
+    expect(fingerprints.find((row) => row.fingerprint_role === 'current')
+      ?.fingerprint_digest).not.toBe(beforeFingerprint?.fingerprint_digest);
+    connection.close();
+  });
+
+  it('SEEDER-UNCHANGED-CONTROL classifies every spell healthy with zero writes', async () => {
+    const connection = await openTestDatabase();
+    const db = new DatabaseContext(connection);
+    seedSpellContent(db);
+    const reconciliation =
+      reconcileBundledContentRegistryWithStoredProjectionsV1(db);
+    const beforeChanges = db.scalar<number>('SELECT total_changes()');
+    const beforeFingerprints = db.allRaw(
+      `SELECT * FROM catalog_content_fingerprints
+       WHERE content_kind = 'spell'
+       ORDER BY content_key, fingerprint_digest`,
+    );
+
+    const result = ensureBundledSpellContent(
+      db,
+      reconciliation.storedProjections,
+    );
+
+    expect(result).toMatchObject({ healthy: 339, updated: 0, refused: 0 });
+    expect(result.outcomes.every((outcome) => outcome.kind === 'healthy'))
+      .toBe(true);
+    expect(db.scalar<number>('SELECT total_changes()')).toBe(beforeChanges);
+    expect(db.allRaw(
+      `SELECT * FROM catalog_content_fingerprints
+       WHERE content_kind = 'spell'
+       ORDER BY content_key, fingerprint_digest`,
+    )).toEqual(beforeFingerprints);
+    connection.close();
+  });
+
   it('keeps direct commands read-only, reviews SRD edits, and imports renamed clones', async () => {
     const connection = await openTestDatabase();
     const db = new DatabaseContext(connection);
@@ -790,13 +888,31 @@ describe('SRD spell extracts', () => {
     expect(() => seedSpellContent(db)).toThrow(
       'SRD spells: cannot seed 2024:acid-arrow: the key already belongs to provenance "import".',
     );
+    const reconciliation =
+      reconcileBundledContentRegistryWithStoredProjectionsV1(db);
+    const reconciled = ensureBundledSpellContent(
+      db,
+      reconciliation.storedProjections,
+    );
+    expect(reconciled).toMatchObject({
+      healthy: 0,
+      updated: 338,
+      refused: 1,
+    });
+    expect(reconciled.outcomes.find(
+      (outcome) => outcome.contentKey === '2024:acid-arrow',
+    )).toEqual({
+      kind: 'refused',
+      contentKey: '2024:acid-arrow',
+      reason: 'user-owned-key',
+    });
     expect(
       db.oneRaw(
         `SELECT display_name, provenance FROM spell_versions
          WHERE content_key = '2024:acid-arrow'`,
       ),
     ).toEqual({ display_name: 'User Acid Arrow', provenance: 'import' });
-    expect(db.scalar('SELECT count(*) FROM spell_versions')).toBe(1);
+    expect(db.scalar('SELECT count(*) FROM spell_versions')).toBe(339);
     connection.close();
   });
 });
