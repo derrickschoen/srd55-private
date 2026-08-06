@@ -3,6 +3,7 @@ import type { CharacterId, ContentKey } from '../domain/ids';
 import {
   type AuthoredContentKind,
   type AuthoringLibrary,
+  type BackgroundAuthoringReferences,
   type ContentUsageList,
   type DraftRevision,
   type HomebrewDraft,
@@ -21,6 +22,7 @@ import {
 
 export const AUTHORING_RPC = Object.freeze({
   list: 'authoring.list',
+  backgroundReferences: 'authoring.backgroundReferences',
   createDraft: 'authoring.createDraft',
   readDraft: 'authoring.readDraft',
   saveDraft: 'authoring.saveDraft',
@@ -83,6 +85,7 @@ export interface CommitReplacementParams {
 
 export interface AuthoringClient {
   list(): Promise<AuthoringLibrary>;
+  backgroundReferences(): Promise<BackgroundAuthoringReferences>;
   createDraft(params: CreateDraftParams): Promise<StoredHomebrewDraft>;
   readDraft(params: ReadDraftParams): Promise<StoredHomebrewDraft>;
   saveDraft(params: SaveDraftParams): Promise<StoredHomebrewDraft>;
@@ -103,6 +106,11 @@ export function createAuthoringClient(rpc: RpcClient): AuthoringClient {
     list: () =>
       rpc.call<Record<string, never>, AuthoringLibrary>(
         AUTHORING_RPC.list,
+        {},
+      ),
+    backgroundReferences: () =>
+      rpc.call<Record<string, never>, BackgroundAuthoringReferences>(
+        AUTHORING_RPC.backgroundReferences,
         {},
       ),
     createDraft: (params: CreateDraftParams) =>

@@ -418,6 +418,19 @@ export interface AuthoringLibrary {
   readonly drafts: readonly HomebrewDraftSummary[];
 }
 
+export interface BackgroundAuthoringReferenceOption {
+  readonly content_key: ContentKey;
+  readonly name: string;
+  readonly rules_edition: RulesEdition;
+}
+
+/** Installed catalog rows the background draft may reference by content key. */
+export interface BackgroundAuthoringReferences {
+  readonly origin_feats: readonly BackgroundAuthoringReferenceOption[];
+  readonly weapons: readonly BackgroundAuthoringReferenceOption[];
+  readonly armors: readonly BackgroundAuthoringReferenceOption[];
+}
+
 /**
  * Facts authenticated by a publish token. They are intentionally not shared
  * with replacement tokens: a draft revision is not a character revision, and

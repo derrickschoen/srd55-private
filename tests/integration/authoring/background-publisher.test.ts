@@ -233,21 +233,27 @@ describe('HA-4 background publisher', () => {
     }));
     expect(error.data.reason).toBe('validation_failed');
     if (error.data.reason !== 'validation_failed') throw new Error('Expected validation issues.');
-    expect(error.data.issues.map(({ path, code }) => ({ path, code }))).toEqual(expect.arrayContaining([
-      { path: ['name'], code: 'required' },
-      { path: ['rules_edition'], code: 'required' },
-      { path: ['suggested_abilities'], code: 'required' },
-      { path: ['suggested_abilities'], code: 'duplicate' },
-      { path: ['default_origin_feat_content_key'], code: 'unresolved_reference' },
-      { path: ['skill_proficiencies'], code: 'required' },
-      { path: ['equipment_option_a_description'], code: 'required' },
-      { path: ['equipment_option_b_description'], code: 'required' },
-      { path: ['equipment_option_a', 0, 'quantity'], code: 'required' },
-      { path: ['equipment_option_a', 0, 'printed_name'], code: 'required' },
-      { path: ['equipment_option_a', 0, 'content_key'], code: 'required' },
-      { path: ['equipment_option_b', 0, 'quantity'], code: 'required' },
-      { path: ['effects', 0, 'damage_type'], code: 'required' },
-    ]));
+    const expectedIssues = [
+      { path: ['name'], code: 'required', message: 'Must not be empty.' },
+      { path: ['rules_edition'], code: 'required', message: 'Rules edition is required.' },
+      { path: ['suggested_abilities'], code: 'required', message: 'Exactly three suggested abilities are required.' },
+      { path: ['suggested_abilities'], code: 'duplicate', message: 'Suggested abilities must not repeat.' },
+      { path: ['default_origin_feat_content_key'], code: 'unresolved_reference', message: 'Default Origin feat must resolve to one current Origin-feat fingerprint.' },
+      { path: ['skill_proficiencies'], code: 'required', message: 'Exactly two skill proficiencies are required.' },
+      { path: ['equipment_option_a_description'], code: 'required', message: 'Must not be empty.' },
+      { path: ['equipment_option_b_description'], code: 'required', message: 'Must not be empty.' },
+      { path: ['equipment_option_a', 0, 'quantity'], code: 'required', message: 'Quantity is required.' },
+      { path: ['equipment_option_a', 0, 'printed_name'], code: 'required', message: 'Must not be empty.' },
+      { path: ['equipment_option_a', 0, 'content_key'], code: 'required', message: 'Weapon is required.' },
+      { path: ['equipment_option_b', 0, 'quantity'], code: 'required', message: 'Quantity is required.' },
+      { path: ['equipment_option_b', 0, 'printed_name'], code: 'required', message: 'Must not be empty.' },
+      { path: ['effects', 0, 'label'], code: 'required', message: 'Must not be empty.' },
+      { path: ['effects', 0, 'damage_type'], code: 'required', message: 'Damage type is required.' },
+    ] as const;
+    expect(error.data.issues).toHaveLength(expectedIssues.length);
+    for (const expectedIssue of expectedIssues) {
+      expect(error.data.issues).toContainEqual(expectedIssue);
+    }
     expect(db.scalar<number>('SELECT count(*) FROM catalog_content_identities')).toBe(identitiesBefore);
     expect(db.scalar<number>("SELECT count(*) FROM background_definitions WHERE name = ' '")).toBe(0);
     expect(authoring.readDraft(draft.draft_uuid).revision).toBe(draft.revision);
@@ -873,6 +879,22 @@ describe('HA-4 background publisher', () => {
       draft_uuid: draft.draft_uuid,
       expected_revision: draft.revision,
     });
+    const capturedDefinitionId = db.scalar<number>(
+      `SELECT coalesce((SELECT seq FROM sqlite_sequence
+                        WHERE name = 'background_definitions'), 0) + 1`,
+    );
+    const capturedTemplateId = db.scalar<number>(
+      `SELECT coalesce((SELECT seq FROM sqlite_sequence
+                        WHERE name = 'background_templates'), 0) + 1`,
+    );
+    const firstEquipmentId = db.scalar<number>(
+      `SELECT coalesce((SELECT seq FROM sqlite_sequence
+                        WHERE name = 'background_equipment_items'), 0) + 1`,
+    );
+    const firstEffectId = db.scalar<number>(
+      `SELECT coalesce((SELECT seq FROM sqlite_sequence
+                        WHERE name = 'background_template_effects'), 0) + 1`,
+    );
     db.exec(
       `CREATE TRIGGER ha4_refuse_draft_delete
        BEFORE DELETE ON catalog_content_drafts
@@ -886,6 +908,30 @@ describe('HA-4 background publisher', () => {
     expect(db.scalar<number>('SELECT count(*) FROM background_definitions WHERE content_key = ?', [key])).toBe(0);
     expect(db.scalar<number>('SELECT count(*) FROM background_templates WHERE content_key = ?', [key])).toBe(0);
     expect(db.scalar<number>('SELECT count(*) FROM catalog_content_match_decisions WHERE target_content_key = ?', [key])).toBe(0);
+    expect(db.oneRaw(
+      `SELECT
+         (SELECT count(*) FROM catalog_content_fingerprints WHERE content_key = ?) AS fingerprints,
+         (SELECT count(*) FROM background_definitions WHERE id = ?) AS definitions,
+         (SELECT count(*) FROM background_templates
+          WHERE id = ? AND content_key = ?) AS templates,
+         (SELECT count(*) FROM background_equipment_items
+          WHERE id IN (?, ?, ?) AND background_template_id = ?) AS equipment,
+         (SELECT count(*) FROM background_template_effects
+          WHERE id IN (?, ?) AND background_template_id = ?) AS effects`,
+      [
+        key,
+        capturedDefinitionId,
+        capturedTemplateId,
+        key,
+        firstEquipmentId,
+        firstEquipmentId + 1,
+        firstEquipmentId + 2,
+        capturedTemplateId,
+        firstEffectId,
+        firstEffectId + 1,
+        capturedTemplateId,
+      ],
+    )).toEqual({ fingerprints: 0, definitions: 0, templates: 0, equipment: 0, effects: 0 });
     expect(db.oneRaw(
       `SELECT
          (SELECT count(*) FROM catalog_content_identities) AS identities,

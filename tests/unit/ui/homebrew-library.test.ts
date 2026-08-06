@@ -77,6 +77,26 @@ function subclassDraft(): StoredHomebrewDraft {
   };
 }
 
+function backgroundDraft(): StoredHomebrewDraft {
+  return {
+    draft_uuid: 'draft-background' as HomebrewDraftUuid,
+    content_kind: 'background',
+    document_version: 1,
+    base_content_key: null,
+    revision: 1 as DraftRevision,
+    document: {
+      kind: 'background', document_version: 1, name: 'Route Keeper',
+      rules_edition: null, reference_text: '', suggested_abilities: [],
+      default_origin_feat_content_key: null, default_origin_feat_display_name: null,
+      skill_proficiencies: [], tool_reference_text: null,
+      equipment_option_a_description: '', equipment_option_b_description: '',
+      equipment_option_a: [], equipment_option_b: [], effects: [],
+    },
+    created_at: '2026-08-06T12:00:00.000Z',
+    updated_at: '2026-08-06T12:00:00.000Z',
+  };
+}
+
 const parentClasses: readonly GuidedClassOption[] = [{
   content_key: '2024:class:fighter' as ContentKey,
   name: 'Fighter',
@@ -129,6 +149,7 @@ function authoringClient(
 ): AuthoringClient {
   return {
     list: () => Promise.resolve(library),
+    backgroundReferences: () => unused(),
     createDraft: () => unused(),
     readDraft: () => unused(),
     saveDraft: () => unused(),
@@ -572,6 +593,40 @@ describe('HA-6 homebrew library routing and tabs', () => {
       expect(root.querySelector('form')?.getAttribute('aria-label')).toBeNull();
       expect(root.querySelectorAll('option').map((option) => option.textContent))
         .toContain('Fighter');
+      cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('routes a background draft through installed references with the accessible name on the mount only', async () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      let referenceCalls = 0;
+      const screenContext = context(
+        'https://example.test/homebrew/drafts/draft-background',
+        [],
+      );
+      const cleanup = await renderHomebrewLibrary(screenContext, {
+        client: authoringClient({
+          readDraft: async () => backgroundDraft(),
+          backgroundReferences: async () => {
+            referenceCalls += 1;
+            return {
+              origin_feats: [{ content_key: '2024:feat:alert' as ContentKey, name: 'Alert', rules_edition: '2024' }],
+              weapons: [],
+              armors: [],
+            };
+          },
+        }),
+      });
+      const root = interactiveElement(screenContext.root);
+      const formMount = root.querySelector('[data-authoring-form-kind="background"]');
+      expect(referenceCalls).toBe(1);
+      expect(formMount?.getAttribute('aria-label')).toBe('Background authoring form');
+      expect(root.querySelector('form')?.getAttribute('aria-label')).toBeNull();
+      expect(root.querySelectorAll('option').map((option) => option.textContent))
+        .toContain('Alert (2024)');
       cleanup();
     } finally {
       restoreDocument();

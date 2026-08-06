@@ -28,6 +28,10 @@ import {
   isStoredSubclassDraft,
   renderSubclassForm,
 } from './subclass-form';
+import {
+  isStoredBackgroundDraft,
+  renderBackgroundForm,
+} from './background-form';
 
 export const HOMEBREW_ROUTE = '/homebrew';
 
@@ -356,6 +360,15 @@ async function renderDraftRoute(
       mount: formMount,
       draft,
       parentClasses: bundledParents,
+    }));
+  } else if (isStoredBackgroundDraft(draft)) {
+    const references = await client.backgroundReferences();
+    cleanups.push(renderBackgroundForm({
+      context,
+      client,
+      mount: formMount,
+      draft,
+      references,
     }));
   } else {
     formMount.append(element('p', {
