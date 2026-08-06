@@ -343,6 +343,7 @@ export function createImportBackupControls(
         }
         adoptionCleanup?.();
         const rendered = createContentAdoptionDialog({
+          mount: root,
           plan: prepared.result,
           replan: (choices) => services.catalog.planImport!(
             prepared.documents,
@@ -363,7 +364,6 @@ export function createImportBackupControls(
           onCancel: () => announce('Catalog import cancelled.'),
         });
         adoptionCleanup = rendered.cleanup;
-        root.append(rendered.element);
         return 'Review each matching catalog entry before importing.';
       });
     }),
@@ -439,6 +439,7 @@ export function createImportBackupControls(
         const showAdoptionDialog = (plan: ContentImportPlan): void => {
           adoptionCleanup?.();
           const rendered = createContentAdoptionDialog({
+            mount: root,
             plan,
             replan: (choices) => services.backup.planCharacterImport(
               prepared.document,
@@ -461,7 +462,6 @@ export function createImportBackupControls(
             onCancel: () => announce('Character import cancelled.'),
           });
           adoptionCleanup = rendered.cleanup;
-          root.append(rendered.element);
         };
         const hasRefusal = prepared.plan.outcomes.some(
           (outcome) => outcome.kind === 'refused',

@@ -12,6 +12,7 @@ import {
 import { clear, element, listen, type Cleanup } from './dom';
 
 export interface ContentAdoptionDialogOptions {
+  readonly mount: HTMLElement;
   readonly plan: ContentImportPlan;
   readonly replan: (
     choices: ContentImportChoices,
@@ -392,6 +393,7 @@ export function createContentAdoptionDialog(
   }));
 
   renderRows();
+  options.mount.append(dialog);
   openModal(dialog);
   return {
     element: dialog,

@@ -29,6 +29,7 @@ import {
   interactiveElement,
 } from '../../fixtures/interactive-dom';
 import { Router } from '../../../src/ui/router';
+import { Application } from '../../../src/ui/app';
 
 function uuid(value: string): HomebrewDraftItemUuid {
   return value as HomebrewDraftItemUuid;
@@ -104,10 +105,7 @@ function keydown(key: string, shiftKey = false): KeyboardEvent {
   return event;
 }
 
-function routerHarness(initialUrl: string): {
-  readonly windowObject: Window;
-  readonly popTo: (target: string) => void;
-} {
+function routerWindow(initialUrl: string): Window {
   const events = new EventTarget();
   const location = {
     href: initialUrl,
@@ -131,19 +129,17 @@ function routerHarness(initialUrl: string): {
     },
   };
   return {
-    windowObject: {
-      location,
-      history,
-      addEventListener: (type: string, listener: EventListenerOrEventListenerObject) =>
-        events.addEventListener(type, listener),
-      removeEventListener: (type: string, listener: EventListenerOrEventListenerObject) =>
-        events.removeEventListener(type, listener),
-    } as unknown as Window,
-    popTo: (target) => {
-      moveTo(target);
-      events.dispatchEvent(new Event('popstate'));
-    },
-  };
+    location,
+    history,
+    addEventListener: (type: string, listener: EventListenerOrEventListenerObject) =>
+      events.addEventListener(type, listener),
+    removeEventListener: (type: string, listener: EventListenerOrEventListenerObject) =>
+      events.removeEventListener(type, listener),
+  } as unknown as Window;
+}
+
+async function settle(): Promise<void> {
+  for (let turn = 0; turn < 4; turn += 1) await Promise.resolve();
 }
 
 describe('HA-6 shared authoring form controls', () => {
@@ -279,45 +275,52 @@ describe('HA-6 shared authoring form controls', () => {
     }
   });
 
-  it('dirty draft guard blocks router.navigate and popstate, keeps the refused route, and allows clean navigation', () => {
-    const harness = routerHarness('https://example.test/');
-    const router = new Router(harness.windowObject);
-    const visited: string[] = [];
-    let dirty = true;
+  it('screen-scoped dirty guard refuses navigation and is disposed on real screen unmount', async () => {
+    const restoreDocument = installInteractiveDocument();
     let allow = false;
-    router.start();
-    const removeGuard = installDraftNavigationGuard(router, {
-      isDirty: () => dirty,
-      confirmLeave: () => allow,
-    });
-    const unsubscribe = router.subscribe((route) => visited.push(route.path));
+    try {
+      const root = document.createElement('div');
+      document.body.append(root);
+      const router = new Router(routerWindow('https://example.test/guarded'));
+      const application = new Application(
+        root,
+        null as never,
+        router,
+        () => true,
+        [
+          {
+            id: 'guarded-test-screen',
+            matches: (route) => route.path === '/guarded',
+            render: (context) => {
+              installDraftNavigationGuard(context, {
+                isDirty: () => true,
+                confirmLeave: () => allow,
+              });
+            },
+          },
+          {
+            id: 'plain-test-screen',
+            matches: () => true,
+            render: () => undefined,
+          },
+        ],
+      );
+      application.start();
+      await settle();
 
-    expect(router.navigate('/homebrew')).toBe(false);
-    expect(router.current.path).toBe('/');
-    expect(visited).toEqual([]);
+      expect(router.navigate('/refused')).toBe(false);
+      expect(router.current.path).toBe('/guarded');
 
-    harness.popTo('/characters/7');
-    expect(router.current.path).toBe('/');
-    expect(visited).toEqual([]);
+      allow = true;
+      expect(router.navigate('/unmounted')).toBe(true);
+      allow = false;
+      expect(router.navigate('/after-unmount')).toBe(true);
+      expect(router.current.path).toBe('/after-unmount');
 
-    dirty = false;
-    expect(router.navigate('/homebrew')).toBe(true);
-    expect(router.current.path).toBe('/homebrew');
-    expect(visited).toEqual(['/homebrew']);
-
-    dirty = true;
-    harness.popTo('/');
-    expect(router.current.path).toBe('/homebrew');
-    expect(visited).toEqual(['/homebrew']);
-
-    dirty = false;
-    harness.popTo('/');
-    expect(router.current.path).toBe('/');
-    expect(visited).toEqual(['/homebrew', '/']);
-
-    unsubscribe();
-    removeGuard();
-    router.stop();
+      application.stop();
+    } finally {
+      restoreDocument();
+    }
   });
 
   it('warns on browser unload only while the draft has unsaved local changes', () => {

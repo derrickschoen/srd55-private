@@ -126,6 +126,7 @@ function context(
       navigate: (target: string) => navigated.push(target),
     } as unknown as Router,
     rpc: null as never,
+    registerNavigationGuard: () => () => undefined,
   };
 }
 
@@ -374,6 +375,120 @@ describe('HA-6 homebrew library routing and tabs', () => {
       expect(document.activeElement).toBe(reloadedDiscard);
       expect(root.querySelectorAll('dialog')).toHaveLength(0);
       cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('focuses the active tab after Load saved removes the last draft', async () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      let listCalls = 0;
+      const client = authoringClient({
+        list: () => {
+          listCalls += 1;
+          return Promise.resolve(listCalls === 1 ? library : { ...library, drafts: [] });
+        },
+        discardDraft: (params) => Promise.reject(new RpcError(
+          'handler_error',
+          'Draft revision is stale.',
+          {
+            reason: 'stale_draft_revision',
+            draft_uuid: params.draft_uuid,
+            expected_revision: params.expected_revision,
+            actual_revision: Number(params.expected_revision) + 1,
+          },
+        )),
+      });
+      const screenContext = context(
+        'https://example.test/homebrew?tab=drafts',
+        [],
+      );
+      const cleanup = await renderHomebrewLibrary(screenContext, {
+        client,
+        confirmDiscard: () => true,
+      });
+      const root = interactiveElement(screenContext.root);
+      root.querySelectorAll('button').find(
+        (button) => button.textContent === 'Discard draft',
+      )?.click();
+      await settle();
+      root.querySelector('[data-testid="authoring-draft-conflict"]')
+        ?.querySelectorAll('button')
+        .find((button) => button.textContent === 'Load saved revision')
+        ?.click();
+      await settle();
+
+      const activeTab = root.querySelector('[aria-selected="true"]');
+      expect(root.querySelector('.homebrew-tab-panel')?.querySelector('a')).toBeNull();
+      expect(activeTab?.getAttribute('data-homebrew-tab')).toBe('drafts');
+      expect(document.activeElement).toBe(activeTab);
+      cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('mid-modal navigation teardown closes and removes the dialog without later focus restoration', async () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      let listCalls = 0;
+      let resolveReload: ((library: AuthoringLibrary) => void) | undefined;
+      const pendingReload = new Promise<AuthoringLibrary>((resolve) => {
+        resolveReload = resolve;
+      });
+      const client = authoringClient({
+        list: () => {
+          listCalls += 1;
+          return listCalls === 1 ? Promise.resolve(library) : pendingReload;
+        },
+        discardDraft: (params) => Promise.reject(new RpcError(
+          'handler_error',
+          'Draft revision is stale.',
+          {
+            reason: 'stale_draft_revision',
+            draft_uuid: params.draft_uuid,
+            expected_revision: params.expected_revision,
+            actual_revision: Number(params.expected_revision) + 1,
+          },
+        )),
+      });
+      const navigated: string[] = [];
+      const screenContext = context(
+        'https://example.test/homebrew?tab=drafts',
+        navigated,
+      );
+      const cleanup = await renderHomebrewLibrary(screenContext, {
+        client,
+        confirmDiscard: () => true,
+      });
+      const root = interactiveElement(screenContext.root);
+      root.querySelectorAll('button').find(
+        (button) => button.textContent === 'Discard draft',
+      )?.click();
+      await settle();
+      const dialog = root.querySelector('[data-testid="authoring-draft-conflict"]');
+      if (dialog === null) throw new Error('Conflict dialog did not render.');
+      dialog.querySelectorAll('button').find(
+        (button) => button.textContent === 'Load saved revision',
+      )?.click();
+      await Promise.resolve();
+
+      screenContext.router.navigate('/');
+      cleanup();
+      const focusSentinel = document.createElement('button');
+      document.body.append(focusSentinel);
+      focusSentinel.focus();
+      expect(navigated).toEqual(['/']);
+      expect(dialog.open).toBe(false);
+      expect(dialog.isConnected).toBe(false);
+      expect(root.querySelectorAll('dialog')).toHaveLength(0);
+
+      if (resolveReload === undefined) throw new Error('Reload did not start.');
+      resolveReload({ ...library, drafts: [] });
+      await settle();
+      expect(document.activeElement).toBe(focusSentinel);
+      expect(root.querySelectorAll('dialog')).toHaveLength(0);
     } finally {
       restoreDocument();
     }

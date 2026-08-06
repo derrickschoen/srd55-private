@@ -16,7 +16,7 @@ import {
 } from '../../domain/enums';
 import { element } from '../dom';
 import { freeTextSpan } from '../free-text';
-import type { Router } from '../router';
+import type { ScreenContext } from '../screen';
 
 export type AuthoringEffectDraft =
   | AuthoringDraftCharacterEffect
@@ -419,10 +419,10 @@ export interface DraftNavigationGuardOptions {
 
 /** Register the explicit Save draft boundary for every router entry point. */
 export function installDraftNavigationGuard(
-  router: Router,
+  screen: Pick<ScreenContext, 'registerNavigationGuard'>,
   options: DraftNavigationGuardOptions,
 ): () => void {
-  return router.registerNavigationGuard(() =>
+  return screen.registerNavigationGuard(() =>
     !options.isDirty() || options.confirmLeave());
 }
 

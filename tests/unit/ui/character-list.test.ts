@@ -193,6 +193,7 @@ describe('character share links', () => {
         },
         browser: { baseUrl: 'https://example.test/' },
       });
+      document.body.append(controls.element);
       const root = interactiveElement(controls.element);
       const input = root.querySelectorAll('input').find((candidate) =>
         candidate.getAttribute('aria-label') === 'Character share link',

@@ -304,6 +304,7 @@ describe('the D82 content-adoption dialog', () => {
     const restoreDocument = installInteractiveDocument();
     try {
       const rendered = createContentAdoptionDialog({
+        mount: document.body,
         plan: previewPlan,
         replan: async () => previewPlan,
         commit: async () => ({ kind: 'committed', outcomes: previewPlan.outcomes }),
@@ -314,6 +315,11 @@ describe('the D82 content-adoption dialog', () => {
       expect(text).toContain('item: 1 new, 1 matched, 7 needs review, 1 refused');
       expect(text).toContain('4 conflicts must be reviewed below.');
       const dialog = interactiveElement(rendered.element);
+      expect(dialog.isConnected).toBe(true);
+      expect(dialog.open).toBe(true);
+      expect(() => dialog.showModal()).toThrowError(
+        expect.objectContaining({ name: 'InvalidStateError' }),
+      );
       const renderedReasons = Object.fromEntries(
         dialog.querySelectorAll('.content-adoption-row').map((row) => [
           row.getAttribute('data-content-id'),
@@ -375,6 +381,7 @@ describe('the D82 content-adoption dialog', () => {
       const commits: ContentImportChoices[] = [];
       const initial = planContentImport(db, [incoming]);
       const rendered = createContentAdoptionDialog({
+        mount: document.body,
         plan: initial,
         replan: async (choices) => {
           replans.push(choices);
@@ -489,6 +496,7 @@ describe('the D82 content-adoption dialog', () => {
     try {
       let committed = false;
       const rendered = createContentAdoptionDialog({
+        mount: document.body,
         plan: initial,
         replan: async (choices) => planContentImport(db, [node], choices),
         commit: async (submitted, choices) => commitContentImport(db, {

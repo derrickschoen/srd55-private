@@ -80,15 +80,19 @@ export class InteractiveTestElement {
     if (name === 'open') this.open = false;
   }
 
-  append(...nodes: InteractiveTestElement[]): void {
-    for (const node of nodes) {
+  append(...values: (InteractiveTestElement | string)[]): void {
+    for (const value of values) {
+      const node = typeof value === 'string'
+        ? new InteractiveTestElement('#text', this.owner)
+        : value;
+      if (typeof value === 'string') node.textContent = value;
       node.remove();
       node.parent = this;
       this.children.push(node);
     }
   }
 
-  replaceChildren(...nodes: InteractiveTestElement[]): void {
+  replaceChildren(...nodes: (InteractiveTestElement | string)[]): void {
     for (const child of this.children) child.parent = null;
     this.children.splice(0, this.children.length);
     this.append(...nodes);
@@ -121,6 +125,12 @@ export class InteractiveTestElement {
     if (!this.isConnected) {
       throw new DOMException(
         'The dialog element is not connected to a Document.',
+        'InvalidStateError',
+      );
+    }
+    if (this.open) {
+      throw new DOMException(
+        'The dialog element is already open.',
         'InvalidStateError',
       );
     }

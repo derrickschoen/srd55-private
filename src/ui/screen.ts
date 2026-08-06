@@ -1,5 +1,5 @@
 import type { RpcClient } from '../rpc/client';
-import type { Route, Router } from './router';
+import type { NavigationGuard, Route, Router } from './router';
 import type { Cleanup } from './dom';
 
 export interface ScreenContext {
@@ -7,6 +7,7 @@ export interface ScreenContext {
   readonly route: Route;
   readonly router: Router;
   readonly rpc: RpcClient;
+  registerNavigationGuard(guard: NavigationGuard): Cleanup;
 }
 
 export interface ScreenModule {

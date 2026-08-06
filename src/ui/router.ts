@@ -15,6 +15,23 @@ export interface NavigationAttempt {
 export type NavigationGuard = (attempt: NavigationAttempt) => boolean;
 
 const ROUTER_LAUNCH_URL_KEY = 'srd55RouterLaunchUrl';
+const ROUTER_HISTORY_POSITION_KEY = 'srd55RouterHistoryPosition';
+
+function historyPosition(state: unknown): number | null {
+  if (typeof state !== 'object' || state === null) return null;
+  const position = Reflect.get(state, ROUTER_HISTORY_POSITION_KEY);
+  return Number.isSafeInteger(position) ? Number(position) : null;
+}
+
+function withHistoryPosition(
+  state: unknown,
+  position: number,
+): Readonly<Record<string, unknown>> {
+  return Object.freeze({
+    ...(typeof state === 'object' && state !== null ? state : {}),
+    [ROUTER_HISTORY_POSITION_KEY]: position,
+  });
+}
 
 export function hasSameOriginInAppHistory(
   state: unknown,
@@ -52,30 +69,54 @@ export class Router {
   readonly #listeners = new Set<RouteListener>();
   readonly #navigationGuards = new Set<NavigationGuard>();
   #acceptedUrl: string;
-  #acceptedHistoryState: unknown;
+  #acceptedHistoryPosition: number;
+  #repairingPopState = false;
   readonly #onPopState = (): void => {
+    if (this.#repairingPopState) {
+      this.#repairingPopState = false;
+      return;
+    }
     const targetUrl = new URL(this.windowObject.location.href);
     const target = parseRoute(targetUrl);
     if (!this.#allows(target, 'popstate')) {
-      this.windowObject.history.pushState(
-        this.#acceptedHistoryState,
-        '',
-        this.#acceptedUrl,
-      );
+      const targetPosition = historyPosition(this.windowObject.history.state);
+      if (targetPosition === null) {
+        throw new Error('Cannot repair refused navigation without router history position.');
+      }
+      const delta = this.#acceptedHistoryPosition - targetPosition;
+      if (delta !== 0) {
+        this.#repairingPopState = true;
+        this.windowObject.history.go(delta);
+      }
       return;
     }
     this.#acceptedUrl = targetUrl.href;
-    this.#acceptedHistoryState = this.windowObject.history.state;
+    const targetPosition = historyPosition(this.windowObject.history.state);
+    if (targetPosition === null) {
+      throw new Error('Accepted router history entry has no position.');
+    }
+    this.#acceptedHistoryPosition = targetPosition;
     this.#emit(target);
   };
 
   constructor(private readonly windowObject: Window = window) {
     this.#acceptedUrl = this.windowObject.location.href;
-    this.#acceptedHistoryState = this.windowObject.history.state;
+    this.#acceptedHistoryPosition = historyPosition(
+      this.windowObject.history.state,
+    ) ?? 0;
+    const initialState = withHistoryPosition(
+      this.windowObject.history.state,
+      this.#acceptedHistoryPosition,
+    );
+    this.windowObject.history.replaceState(
+      initialState,
+      '',
+      this.#acceptedUrl,
+    );
   }
 
   get current(): Route {
-    return parseRoute(new URL(this.windowObject.location.href));
+    return parseRoute(new URL(this.#acceptedUrl));
   }
 
   start(): void {
@@ -84,6 +125,7 @@ export class Router {
 
   stop(): void {
     this.windowObject.removeEventListener('popstate', this.#onPopState);
+    this.#repairingPopState = false;
     this.#listeners.clear();
     this.#navigationGuards.clear();
   }
@@ -106,12 +148,18 @@ export class Router {
     const route = parseRoute(url);
     if (!this.#allows(route, 'navigate')) return false;
     const method = options.replace ? 'replaceState' : 'pushState';
-    const state = options.replace
-      ? this.windowObject.history.state
-      : { [ROUTER_LAUNCH_URL_KEY]: this.windowObject.location.href };
+    const position = options.replace
+      ? this.#acceptedHistoryPosition
+      : this.#acceptedHistoryPosition + 1;
+    const state = withHistoryPosition(
+      options.replace
+        ? this.windowObject.history.state
+        : { [ROUTER_LAUNCH_URL_KEY]: this.windowObject.location.href },
+      position,
+    );
     this.windowObject.history[method](state, '', url);
     this.#acceptedUrl = url.href;
-    this.#acceptedHistoryState = state;
+    this.#acceptedHistoryPosition = position;
     this.#emit(route);
     return true;
   }
