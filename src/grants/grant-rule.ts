@@ -15,8 +15,6 @@ export interface ActiveIfConfig {
   readonly equals: string;
 }
 
-export type GrantRuleObject = Readonly<Record<string, unknown>>;
-
 type GrantRuleConfigConsumption =
   | 'never'
   | 'when_present'
@@ -72,6 +70,11 @@ export const GRANT_RULE_FIELD_CONFIG_CONSUMPTION = Object.freeze({
 } as const satisfies Readonly<Record<string, GrantRuleConfigConsumption>>);
 
 export type GrantRuleField = keyof typeof GRANT_RULE_FIELD_CONFIG_CONSUMPTION;
+
+/** Closed semantic shape; untrusted parser input remains an open record. */
+export type GrantRuleObject = Readonly<{
+  [Field in GrantRuleField]?: unknown;
+}>;
 
 export const GRANT_RULE_FIELDS: readonly GrantRuleField[] = Object.freeze(
   Object.keys(GRANT_RULE_FIELD_CONFIG_CONSUMPTION) as GrantRuleField[],

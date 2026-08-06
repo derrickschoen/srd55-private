@@ -2,8 +2,8 @@
 -- not content identity. Preserve the exact installed Origin feat by content
 -- key. Legacy rows are backfilled only when their old name is unambiguous;
 -- no match or an ambiguous match remains NULL instead of guessing. Migration
--- execution is guarded by its result-schema checksum in applyMigrationSuffix;
--- an explicit rerun is therefore a no-op before this rebuild can touch data.
+-- this migration alone declares a result-schema replay skip in the migration
+-- registry, so an explicit rerun is a no-op before this rebuild can touch data.
 DROP TRIGGER `catalog_register_background_template_identity_before_insert`;
 
 CREATE TABLE `__new_background_templates` (
@@ -102,4 +102,15 @@ BEGIN
       WHERE content_key = NEW.default_origin_feat_content_key
         AND category = 'origin'
     );
+END;
+
+CREATE TRIGGER feat_category_preserves_background_default_before_update
+BEFORE UPDATE OF category ON feat_definitions
+WHEN OLD.category = 'origin' AND NEW.category <> 'origin'
+BEGIN
+  SELECT RAISE(ABORT, 'referenced background default feat must remain an Origin feat')
+  WHERE EXISTS (
+    SELECT 1 FROM background_templates
+    WHERE default_origin_feat_content_key = OLD.content_key
+  );
 END;

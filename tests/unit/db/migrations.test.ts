@@ -1408,7 +1408,7 @@ describe('database migration chain', () => {
     lifecycle.close();
   });
 
-  it('Q4 rejects a General feat key on background insert and update', () => {
+  it('Q4 rejects General background keys and reverse category mutation', () => {
     const database = new sqlite3.oo1.DB(':memory:', 'c');
     try {
       database.exec(schema);
@@ -1453,6 +1453,18 @@ describe('database migration chain', () => {
         `SELECT default_origin_feat_content_key FROM background_templates
          WHERE content_key = 'expanded:content.background:origin-scholar'`,
       )).toBe('expanded:content.feat:origin-feat');
+      expectTriggerRefusal(
+        () => database.exec(`
+          UPDATE feat_definitions
+          SET category = 'general'
+          WHERE content_key = 'expanded:content.feat:origin-feat'
+        `),
+        'referenced background default feat must remain an Origin feat',
+      );
+      expect(database.selectValue(
+        `SELECT category FROM feat_definitions
+         WHERE content_key = 'expanded:content.feat:origin-feat'`,
+      )).toBe('origin');
     } finally {
       database.close();
     }
@@ -1512,6 +1524,39 @@ describe('database migration chain', () => {
         item_name: 'Preserved chalk',
       });
       expect(databaseSchemaSignature(database)).toBe(signature);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('defaults migration replay policy off and executes a matching-schema migration', () => {
+    const database = new sqlite3.oo1.DB(':memory:', 'c');
+    try {
+      database.exec(`
+        CREATE TABLE replay_policy_probe (
+          id INTEGER PRIMARY KEY,
+          note TEXT NOT NULL
+        );
+      `);
+      const signature = databaseSchemaSignature(database);
+      const ordinaryMigration = migration(
+        'ordinary_replay_policy_probe',
+        "INSERT INTO replay_policy_probe (id, note) VALUES (1, 'executed')",
+        databaseSchemaChecksum(signature),
+      );
+
+      applyMigrationSuffix(
+        database,
+        [ordinaryMigration],
+        0,
+        signature,
+        databaseSchemaSignature,
+      );
+
+      expect(ordinaryMigration.replayPolicy).toBeUndefined();
+      expect(database.selectObject(
+        'SELECT id, note FROM replay_policy_probe',
+      )).toEqual({ id: 1, note: 'executed' });
     } finally {
       database.close();
     }

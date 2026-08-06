@@ -48,6 +48,8 @@ export interface DatabaseMigration {
   readonly checksum: string;
   /** SHA-256 of the exact sqlite_schema signature after this chain prefix. */
   readonly resultSchemaChecksum: string;
+  /** Exceptional replay handling; absent migrations retain normal execution. */
+  readonly replayPolicy?: 'skip_when_result_schema_matches';
 }
 
 const baselineSql = [
@@ -427,9 +429,10 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
     id: '0037_background_default_origin_feat_key',
     sql: backgroundDefaultOriginFeatKey,
     checksum:
-      'f24b36550ae9468ffd9356dff97b64e1e1ec9690df51f94c30d63ca4dc761b33',
+      '8cc9c87ed1dc24c88e21bda3b55feff4d577977e0ffd9dc90d5957525c6de9b3',
     resultSchemaChecksum:
-      '2f19e525f71f81066312d9cb5824208b4d77d385532f9793806379c2979b81dd',
+      'f98f35c6e38eed6755915863bae874c6df4aa50433743289c2e9bfdd23d3a86d',
+    replayPolicy: 'skip_when_result_schema_matches',
   }),
 ]);
 
@@ -507,11 +510,11 @@ export function applyMigrationSuffix(
     transactionOpen = true;
     try {
       for (const migration of pending) {
-        // A caller may explicitly replay a migration suffix (for example while
-        // proving a composed schema). Once this migration's exact result schema
-        // is already present, skip its whole SQL body: rebuild migrations must
-        // never drop/recreate populated tables a second time.
+        // 0037 alone declares that an explicit replay against its exact result
+        // schema is a no-op. Every other migration keeps the historical
+        // dispatcher behaviour and executes its SQL when included in a suffix.
         if (
+          migration.replayPolicy === 'skip_when_result_schema_matches' &&
           databaseSchemaChecksum(signatureOf(db)) ===
           migration.resultSchemaChecksum
         ) {

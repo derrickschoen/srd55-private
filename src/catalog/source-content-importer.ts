@@ -29,6 +29,7 @@ import {
 import {
   contentFingerprintReferenceKey,
   remapProjectionFingerprintReferences,
+  type ContentImportConflictDetail,
   type ContentImportDependencyTarget,
   type ContentImportNode,
   type ContentImportProjection,
@@ -294,6 +295,25 @@ function rootMetadataConflict(
   return row !== null && (row.name !== name || row.rules_edition !== edition);
 }
 
+function backgroundDisplayConflict(
+  db: DatabaseContext,
+  contentKey: ContentKey,
+  incomingDisplayName: string,
+): ContentImportConflictDetail | null {
+  const localDisplayName = db.scalar<string>(
+    `SELECT feat_name FROM background_templates WHERE content_key = ?`,
+    [contentKey],
+  );
+  if (localDisplayName === null || localDisplayName === incomingDisplayName) {
+    return null;
+  }
+  return Object.freeze({
+    field: 'Default Origin feat display name',
+    incomingValue: incomingDisplayName,
+    localValue: localDisplayName,
+  });
+}
+
 export type SourceAggregate =
   | CatalogClassRecord['aggregate']
   | CatalogFeatRecord['aggregate']
@@ -415,6 +435,13 @@ function sourceProjectionForDatabase(
   counters: MutableSourceContentImportCounters,
 ): ContentImportProjection {
   const projection = sourceProjection(aggregate, assertedKey, counters);
+  const displayConflict = aggregate.kind === 'background'
+    ? backgroundDisplayConflict(
+        db,
+        assertedKey,
+        aggregate.default_origin_feat_display_name,
+      )
+    : null;
   return {
     ...projection,
     metadataConflict: rootMetadataConflict(
@@ -423,7 +450,10 @@ function sourceProjectionForDatabase(
       assertedKey,
       aggregate.name,
       aggregate.rules_edition,
-    ),
+    ) || displayConflict !== null,
+    ...(displayConflict === null
+      ? {}
+      : { conflictDetails: Object.freeze([displayConflict]) }),
   };
 }
 

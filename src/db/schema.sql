@@ -2060,6 +2060,17 @@ BEGIN
     );
 END;
 
+CREATE TRIGGER feat_category_preserves_background_default_before_update
+BEFORE UPDATE OF category ON feat_definitions
+WHEN OLD.category = 'origin' AND NEW.category <> 'origin'
+BEGIN
+  SELECT RAISE(ABORT, 'referenced background default feat must remain an Origin feat')
+  WHERE EXISTS (
+    SELECT 1 FROM background_templates
+    WHERE default_origin_feat_content_key = OLD.content_key
+  );
+END;
+
 CREATE TRIGGER catalog_register_armor_identity_before_insert
 BEFORE INSERT ON armor_templates
 BEGIN

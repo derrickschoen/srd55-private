@@ -148,6 +148,62 @@ describe('class, feat, species and background catalog import', () => {
       .toEqual(projectAuthoredContentAggregateV1(projected.aggregate).payload);
   });
 
+  it('reviews a conflicting background feat display sidecar and silently matches an identical one', () => {
+    new CatalogImporter(db).import({
+      documents: [document('feat', {
+        ...featProjectorV1Vector.aggregate,
+        name: 'Sidecar Origin Feat',
+        category: 'origin',
+      })],
+    });
+    const featKey = db.scalar<string>(
+      `SELECT content_key FROM feat_definitions WHERE name = 'Sidecar Origin Feat'`,
+    );
+    if (featKey === null) throw new Error('Sidecar feat fixture is missing.');
+    const aggregate = backgroundReferencingFeat(
+      'Sidecar Background',
+      featKey as ContentKey,
+      'Sidecar Origin Feat (Cleric)',
+    );
+    const importer = new CatalogImporter(db);
+
+    const created = importer.import({
+      documents: [document('background', aggregate)],
+    });
+    const identical = importer.import({
+      documents: [document('background', aggregate)],
+    });
+    const conflict = importer.import({
+      documents: [document('background', {
+        ...aggregate,
+        default_origin_feat_display_name: 'Sidecar Origin Feat (Wizard)',
+      })],
+    });
+
+    expect(created.backgrounds_created).toBe(1);
+    expect(identical.backgrounds_matched).toBe(1);
+    assertContentImportPlan(
+      conflict,
+      'Expected the background display sidecar conflict to require review.',
+    );
+    expect(conflict.reviews).toEqual([
+      expect.objectContaining({
+        kind: 'background',
+        matchClass: 'metadata-conflict',
+        conflictDetails: [{
+          field: 'Default Origin feat display name',
+          incomingValue: 'Sidecar Origin Feat (Wizard)',
+          localValue: 'Sidecar Origin Feat (Cleric)',
+        }],
+      }),
+    ]);
+    expect(db.scalar<string>(
+      `SELECT feat_name FROM background_templates
+       WHERE content_key = ?`,
+      [assertedExternalContentKey('background', 'expanded', aggregate.name)],
+    )).toBe('Sidecar Origin Feat (Cleric)');
+  });
+
   it('does not resolve a parenthetical feat reference to a colliding base name', () => {
     for (const name of ['Rune Adept', 'Rune Adept (Frost)']) {
       new CatalogImporter(db).import({
