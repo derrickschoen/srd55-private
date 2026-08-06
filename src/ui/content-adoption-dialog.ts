@@ -24,16 +24,25 @@ export interface ContentAdoptionDialogOptions {
 
 export interface ContentAdoptionDialog {
   readonly element: HTMLDialogElement;
+  /** Resolves after the latest user-triggered replan or commit settles. */
+  readonly whenSettled: () => Promise<void>;
   readonly cleanup: Cleanup;
 }
 
-function reasonLabel(reason: ContentImportReviewRow['matchClass']): string {
-  switch (reason) {
+function sameDisplayName(review: ContentImportReviewRow): boolean {
+  return review.incomingName === review.localName;
+}
+
+function reasonLabel(review: ContentImportReviewRow): string {
+  switch (review.matchClass) {
     case 'alias': return 'Alias';
     case 'compatible-fingerprint': return 'Compatible fingerprint';
     case 'srd-fallback': return 'SRD fingerprint fallback';
     case 'metadata-conflict': return 'Metadata conflict';
-    case 'key-collision': return 'Same name, distinct rules content';
+    case 'key-collision':
+      return sameDisplayName(review)
+        ? 'Same name, distinct rules content'
+        : 'Alias points to distinct rules content';
   }
 }
 
@@ -181,6 +190,7 @@ export function createContentAdoptionDialog(
   let plan = options.plan;
   let generation = 0;
   let disposed = false;
+  let latestOperation: Promise<void> = Promise.resolve();
   const cleanups: Cleanup[] = [];
 
   const heading = element('h2', {
@@ -264,11 +274,13 @@ export function createContentAdoptionDialog(
         text: `${row.kind}: ${row.incomingName}`,
       }));
       fieldset.append(element('p', {
-        text: `Match reason: ${reasonLabel(row.matchClass)} — local: ${row.localName}`,
+        text: `Match reason: ${reasonLabel(row)} — local: ${row.localName}`,
       }));
       if (row.matchClass === 'key-collision') {
         fieldset.append(element('p', {
-          text: 'The normalized name is already in use for different rules. Rename the private copy to keep both.',
+          text: sameDisplayName(row)
+            ? 'The normalized name is already in use for different rules. Rename the private copy to keep both.'
+            : 'The incoming alias points to differently named local content with different rules. Match them only if they are meant to be the same; otherwise keep a renamed private copy.',
         }));
       }
       for (const conflict of row.conflictDetails) {
@@ -320,15 +332,15 @@ export function createContentAdoptionDialog(
       );
       match.addEventListener('change', () => {
         choices[row.id] = { decision: 'match', cloneName: cloneName.value };
-        void refresh();
+        latestOperation = refresh();
       });
       clone.addEventListener('change', () => {
         choices[row.id] = { decision: 'clone', cloneName: cloneName.value };
-        void refresh();
+        latestOperation = refresh();
       });
       cloneName.addEventListener('change', () => {
         choices[row.id] = { decision: 'clone', cloneName: cloneName.value };
-        void refresh();
+        latestOperation = refresh();
       });
       list.append(fieldset);
     }
@@ -342,7 +354,7 @@ export function createContentAdoptionDialog(
     if (commit.disabled) return;
     commit.disabled = true;
     status.textContent = 'Committing import…';
-    void options.commit(plan, currentChoices()).then(async (result) => {
+    latestOperation = options.commit(plan, currentChoices()).then(async (result) => {
       if (disposed) return;
       if (result.kind === 'stale-plan') {
         plan = result.freshPlan;
@@ -371,6 +383,7 @@ export function createContentAdoptionDialog(
   openModal(dialog);
   return {
     element: dialog,
+    whenSettled: () => latestOperation,
     cleanup: () => {
       disposed = true;
       generation += 1;

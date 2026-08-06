@@ -661,15 +661,22 @@ describe('catalog and backup entry points', () => {
     }
   });
 
-  it('CI-8 previews a no-conflict complete character JSON before commit', async () => {
+  it('imports a zero-review, zero-refusal complete character JSON without a dialog', async () => {
     const fixture = services();
     let persistedChanges = 0;
+    let persisted!: () => void;
+    const persistedSignal = new Promise<void>((resolve) => {
+      persisted = resolve;
+    });
     const restoreDocument = installInteractiveDocument();
     try {
       const controls = createImportBackupControls({
         rpc: null as never,
         characters: [],
-        onPersistedChange: () => { persistedChanges += 1; },
+        onPersistedChange: () => {
+          persistedChanges += 1;
+          persisted();
+        },
         services: fixture.value,
       });
       const root = interactiveElement(controls.element);
@@ -690,24 +697,93 @@ describe('catalog and backup entry points', () => {
       );
       if (importButton === undefined) throw new Error('Character import button missing.');
       importButton.click();
-      for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+      await persistedSignal;
+
+      expect(fixture.persisted.characters).toHaveLength(2);
+      expect(controls.element.querySelector(
+        '[data-testid="content-adoption-modal"]',
+      )).toBeNull();
+      expect(persistedChanges).toBe(1);
+      controls.cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('keeps the character adoption dialog for a review-required plan', async () => {
+    const fixture = services();
+    const reviewPlan: ContentImportPlan = {
+      token: 'character-review' as ContentImportPlanToken,
+      inputHash: 'input',
+      graphHash: 'graph',
+      targetHash: 'target',
+      spellActivityChanges: [],
+      reviews: [{
+        id: 'portable:item:reviewed',
+        kind: 'item',
+        incomingName: 'Reviewed Relic',
+        localName: 'Reviewed Relic',
+        targetContentKey: '2024:item:reviewed' as ContentKey,
+        incomingFingerprint: 'b'.repeat(64) as ContentFingerprintDigest,
+        matchClass: 'metadata-conflict',
+        defaultChoice: 'match',
+        selectedChoice: 'match',
+        cloneName: 'Reviewed Relic (Private copy)',
+        dependencies: [],
+        conflictDetails: [],
+      }],
+      outcomes: [{
+        id: 'portable:item:reviewed',
+        kind: 'review',
+        contentKey: '2024:item:reviewed' as ContentKey,
+        matchClass: 'metadata-conflict',
+      }],
+    };
+    let persisted!: () => void;
+    const persistedSignal = new Promise<void>((resolve) => {
+      persisted = resolve;
+    });
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const controls = createImportBackupControls({
+        rpc: null as never,
+        characters: [],
+        onPersistedChange: persisted,
+        services: {
+          ...fixture.value,
+          backup: {
+            ...fixture.value.backup,
+            planCharacterImport: async () => reviewPlan as never,
+          },
+        },
+      });
+      const root = interactiveElement(controls.element);
+      const characterInput = root.querySelectorAll('input')[2];
+      if (characterInput === undefined) throw new Error('Character input missing.');
+      Object.defineProperty(characterInput, 'files', {
+        configurable: true,
+        value: [readableFile('hero.json', JSON.stringify({ character: { name: 'Modal Hero' } }))],
+      });
+      const importButton = root.querySelectorAll('button').find((button) =>
+        button.textContent === 'Import character backup',
+      );
+      if (importButton === undefined) throw new Error('Character import button missing.');
+      importButton.click();
+      for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
 
       expect(fixture.persisted.characters).toHaveLength(1);
       const dialogNode = controls.element.querySelector(
         '[data-testid="content-adoption-modal"]',
       );
       if (dialogNode === null) throw new Error('Adoption dialog missing.');
-      expect(elementText(dialogNode)).toContain('No catalog content changes.');
-      const dialog = interactiveElement(dialogNode);
-      const commitButton = dialog?.querySelectorAll('button').find((button) =>
-        button.textContent === 'Import with these choices',
-      );
+      const commitButton = interactiveElement(dialogNode)
+        .querySelectorAll('button')
+        .find((button) => button.textContent === 'Import with these choices');
       if (commitButton === undefined) throw new Error('Commit button missing.');
       commitButton.click();
-      for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+      await persistedSignal;
 
       expect(fixture.persisted.characters).toHaveLength(2);
-      expect(persistedChanges).toBe(1);
       controls.cleanup();
     } finally {
       restoreDocument();
@@ -772,6 +848,56 @@ describe('catalog and backup entry points', () => {
       expect(elementText(controls.element)).toContain(
         'Remembered catalog choice forgotten.',
       );
+      controls.cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('keeps remembered-choice controls disabled until receipts resolve', async () => {
+    const fixture = services();
+    let resolveReceipts!: (receipts: readonly never[]) => void;
+    const receipts = new Promise<readonly never[]>((resolve) => {
+      resolveReceipts = resolve;
+    });
+    let forgetCalls = 0;
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const controls = createImportBackupControls({
+        rpc: null as never,
+        characters: [],
+        onPersistedChange: () => undefined,
+        services: {
+          ...fixture.value,
+          catalog: {
+            ...fixture.value.catalog,
+            listMatchDecisions: () => receipts,
+            forgetMatchDecision: async () => {
+              forgetCalls += 1;
+              return { forgotten: false };
+            },
+          },
+        },
+      });
+      const root = interactiveElement(controls.element);
+      const forget = root.querySelectorAll('button').find((button) =>
+        button.textContent === 'Forget remembered choice',
+      );
+      if (forget === undefined) throw new Error('Forget button missing.');
+      const receiptSelect = root.querySelector(
+        '[aria-label="Remembered catalog match choice"]',
+      );
+      if (receiptSelect === null) throw new Error('Receipt select missing.');
+
+      expect(forget.disabled).toBe(true);
+      expect(receiptSelect.disabled).toBe(true);
+      forget.click();
+      await Promise.resolve();
+      expect(forgetCalls).toBe(0);
+      expect(elementText(controls.element)).not.toContain('Unexpected end of JSON input');
+
+      resolveReceipts([]);
+      await receipts;
       controls.cleanup();
     } finally {
       restoreDocument();

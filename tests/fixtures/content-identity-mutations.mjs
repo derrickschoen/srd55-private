@@ -154,16 +154,16 @@ const mutations = {
   },
   'ui-preview-counts': {
     testFile: 'tests/unit/ui/content-adoption-dialog.test.ts',
-    testName: 'CI-8 discloses per-kind preview counts, every match reason, and same-name-distinct conflicts',
+    testName: 'CI-8 discloses real planner counts, every match reason, and both collision labels',
     changes: [edit(
       'src/ui/content-adoption-dialog.ts',
-      '  const portable = portablePreview(plan);',
-      '  const portable = null; // CI8_MUTANT ignore authenticated portable counts',
+      '      newCount: portable.new_by_kind[kind],',
+      '      newCount: portable.new_by_kind[kind] + 1, // CI8_MUTANT corrupt preview count',
     )],
   },
   'ui-preview-conflicts': {
     testFile: 'tests/unit/ui/content-adoption-dialog.test.ts',
-    testName: 'CI-8 discloses per-kind preview counts, every match reason, and same-name-distinct conflicts',
+    testName: 'CI-8 discloses real planner counts, every match reason, and both collision labels',
     changes: [edit(
       'src/ui/content-adoption-dialog.ts',
       `      : [element('p', {
@@ -177,25 +177,29 @@ const mutations = {
   },
   'ui-match-reason': {
     testFile: 'tests/unit/ui/content-adoption-dialog.test.ts',
-    testName: 'CI-8 discloses per-kind preview counts, every match reason, and same-name-distinct conflicts',
+    testName: 'CI-8 discloses real planner counts, every match reason, and both collision labels',
     changes: [edit(
       'src/ui/content-adoption-dialog.ts',
-      "    case 'key-collision': return 'Same name, distinct rules content';",
-      "    case 'key-collision': return 'Collision'; // CI8_MUTANT hide same-name distinction",
+      `      return sameDisplayName(review)
+        ? 'Same name, distinct rules content'
+        : 'Alias points to distinct rules content';`,
+      `      return sameDisplayName(review)
+        ? 'Collision' // CI8_MUTANT hide same-name distinction
+        : 'Alias points to distinct rules content';`,
     )],
   },
   'ui-same-name-guidance': {
     testFile: 'tests/unit/ui/content-adoption-dialog.test.ts',
-    testName: 'CI-8 discloses per-kind preview counts, every match reason, and same-name-distinct conflicts',
+    testName: 'CI-8 discloses real planner counts, every match reason, and both collision labels',
     changes: [edit(
       'src/ui/content-adoption-dialog.ts',
-      "          text: 'The normalized name is already in use for different rules. Rename the private copy to keep both.',",
-      "          text: 'Rename this entry.', // CI8_MUTANT hide same-name-distinct guidance",
+      "'The normalized name is already in use for different rules. Rename the private copy to keep both.'",
+      "'Rename this entry.' /* CI8_MUTANT hide same-name-distinct guidance */",
     )],
   },
   'ui-refusal-block': {
     testFile: 'tests/unit/ui/content-adoption-dialog.test.ts',
-    testName: 'CI-8 discloses per-kind preview counts, every match reason, and same-name-distinct conflicts',
+    testName: 'CI-8 discloses real planner counts, every match reason, and both collision labels',
     changes: [edit(
       'src/ui/content-adoption-dialog.ts',
       `  commit.disabled = options.plan.outcomes.some(
@@ -206,26 +210,14 @@ const mutations = {
   },
   'ui-preview-before-commit': {
     testFile: 'tests/unit/ui/character-list.test.ts',
-    testName: 'CI-8 previews a no-conflict complete character JSON before commit',
+    testName: 'imports a zero-review, zero-refusal complete character JSON without a dialog',
     changes: [edit(
       'src/ui/screens/character-list/import-backup-controls.ts',
-      `        const prepared = await controller.prepareCharacterImport(file);
-        adoptionCleanup?.();`,
-      `        const prepared = await controller.prepareCharacterImport(file);
-        if (prepared.plan.reviews.length === 0) {
-          const committed = await services.backup.commitCharacterImport(
-            prepared.document,
-            prepared.plan.token,
-            {},
-          );
-          if (committed.kind !== 'committed') {
-            throw new TypeError(\`Character import was \${committed.kind}.\`);
-          }
-          await options.onPersistedChange();
-          characterInput.value = '';
-          return 'CI8_MUTANT imported without preview';
-        }
-        adoptionCleanup?.();`,
+      `        if (prepared.plan.reviews.length === 0 && !hasRefusal) {
+          const committed = await services.backup.commitCharacterImport(`,
+      `        if (prepared.plan.reviews.length === 0 && !hasRefusal) {
+          showAdoptionDialog(prepared.plan); // CI8_MUTANT needless trivial-import modal
+          const committed = await services.backup.commitCharacterImport(`,
     )],
   },
   'ui-remembered-refresh': {
@@ -249,7 +241,7 @@ const mutations = {
   },
   'ui-complete-backup-wording': {
     testFile: 'tests/unit/ui/character-list.test.ts',
-    testName: 'CI-8 previews a no-conflict complete character JSON before commit',
+    testName: 'imports a zero-review, zero-refusal complete character JSON without a dialog',
     changes: [edit(
       'src/ui/screens/character-list/import-backup-controls.ts',
       "      text: 'Character JSON backups include the character and its complete referenced external content. Share links are reference-only and do not include catalog definitions.',",

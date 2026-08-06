@@ -78,16 +78,21 @@ function jsonSummary(report) {
     `${String(report.numFailedTests)} failed, ${String(report.numPassedTests)} passed`;
 }
 
-function namedDetectorFailed(report, testName) {
-  const normalizedExpected = testName.replaceAll("'", '').replaceAll('"', '');
-  return report.testResults.some((file) =>
-    file.assertionResults.some((assertion) => {
-      const candidate = `${assertion.fullName ?? ''} ${assertion.title ?? ''}`
-        .replaceAll("'", '')
-        .replaceAll('"', '');
-      return assertion.status === 'failed' && candidate.includes(normalizedExpected);
-    }),
-  );
+function failureSet(report) {
+  return report.testResults.flatMap((file) => {
+    const assertions = file.assertionResults
+      .filter((assertion) => assertion.status === 'failed')
+      .map((assertion) => ({
+        detector: `${assertion.fullName ?? ''} ${assertion.title ?? ''}`.trim(),
+        description: `${file.name} :: ` +
+          `${assertion.fullName ?? assertion.title ?? '<unnamed assertion>'}`,
+      }));
+    if (assertions.length > 0 || file.status !== 'failed') return assertions;
+    return [{
+      detector: '',
+      description: `${file.name} :: suite failed before reporting an assertion`,
+    }];
+  });
 }
 
 for (const name of mutationNames) {
@@ -112,13 +117,20 @@ for (const name of mutationNames) {
     } catch {
       throw new Error(`${name}: detector report was not JSON.\n${killedOutput}`);
     }
-    if (!namedDetectorFailed(killedReport, testName)) {
+    const failures = failureSet(killedReport);
+    const normalizedExpected = testName.replaceAll("'", '').replaceAll('"', '');
+    if (!failures.some((failure) =>
+      failure.detector.replaceAll("'", '').replaceAll('"', '')
+        .includes(normalizedExpected),
+    )) {
       throw new Error(
         `${name}: expected detector name was absent.\n${killedOutput}`,
       );
     }
     process.stdout.write(
-      `DETECTED ${name} by "${testName}"\n${jsonSummary(killedReport)}\n`,
+      `DETECTED ${name}; expected detector "${testName}" is in the full failure set\n` +
+      `${failures.map((failure) => ` - ${failure.description}`).join('\n')}\n` +
+      `${jsonSummary(killedReport)}\n`,
     );
   } finally {
     if (applied) mutationCommand('restore', name);

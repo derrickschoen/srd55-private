@@ -2,25 +2,28 @@ import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, describe, expect, it } from 'vitest';
 import type {
   ContentImportChoices,
-  ContentImportPlan,
-  ContentImportPlanToken,
 } from '../../../src/catalog/content-adoption';
 import {
   commitContentImport,
   planContentImport,
   type ContentImportNode,
+  type ContentImportProjection,
 } from '../../../src/catalog/content-adoption';
-import type { ContentFingerprintDigest } from '../../../src/catalog/content-identity';
-import { deriveContentIdentityV1 } from '../../../src/catalog/content-identity';
+import {
+  CONTENT_FINGERPRINT_SCHEME_V1,
+  deriveContentIdentityV1,
+} from '../../../src/catalog/content-identity';
 import {
   registerBundledStableContentIdentity,
   registerContentAlias,
+  registerDerivedContentIdentity,
   registerContentFingerprint,
 } from '../../../src/catalog/content-registry';
 import { assertedExternalContentKey } from '../../../src/catalog/catalog-key';
+import { canonicalJson } from '../../../src/commands/canonical-json';
 import { DatabaseContext } from '../../../src/db/database';
 import type { ContentKey } from '../../../src/domain/ids';
-import type { PortableImportPlan } from '../../../src/backup/portable-content';
+import { portableImportPlan } from '../../../src/backup/portable-content';
 import { createContentAdoptionDialog } from '../../../src/ui/content-adoption-dialog';
 import {
   elementText,
@@ -34,105 +37,226 @@ afterEach(() => {
   for (const connection of connections.splice(0)) connection.close();
 });
 
-function plan(token: string): ContentImportPlan {
+function itemProjection(
+  name: string,
+  payload: unknown,
+  options: {
+    readonly declaredAlias?: ContentKey;
+    readonly metadataConflict?: boolean;
+  } = {},
+): ContentImportProjection<'item'> {
+  const assertedKey = assertedExternalContentKey('item', '2024', name);
   return {
-    token: token as ContentImportPlanToken,
-    inputHash: 'input',
-    graphHash: 'graph',
-    targetHash: 'target',
-    spellActivityChanges: [],
-    reviews: [{
-      id: 'subclass:road-mage',
-      kind: 'subclass',
-      incomingName: 'Road Mage',
-      localName: 'Road Mage',
-      targetContentKey: '2024:srd:road-mage' as ContentKey,
-      incomingFingerprint: 'a'.repeat(64) as ContentFingerprintDigest,
-      matchClass: 'srd-fallback',
-      defaultChoice: 'match',
-      selectedChoice: 'match',
-      cloneName: 'Road Mage (Private copy)',
-      dependencies: ['class:mage'],
-      conflictDetails: [{
-        field: 'Source book',
-        incomingValue: 'Incoming Guide',
-        localValue: 'Local Guide',
-      }],
-    }],
-    outcomes: [{
-      id: 'subclass:road-mage',
-      kind: 'review',
-      contentKey: '2024:srd:road-mage' as ContentKey,
-      matchClass: 'srd-fallback',
-    }],
+    kind: 'item',
+    edition: '2024',
+    name,
+    assertedKey,
+    payload,
+    ...(options.declaredAlias === undefined
+      ? {}
+      : { declaredAlias: options.declaredAlias }),
+    ...(options.metadataConflict === undefined
+      ? {}
+      : { metadataConflict: options.metadataConflict }),
+    projectStored: (database, contentKey) => {
+      const row = database.oneRaw(
+        `SELECT rules_edition, name, description
+         FROM item_definitions WHERE content_key = ?`,
+        [contentKey],
+      );
+      if (row === null) throw new TypeError(`Missing stored item '${contentKey}'.`);
+      return {
+        kind: 'item',
+        edition: String(row.rules_edition),
+        name: String(row.name),
+        payload: JSON.parse(String(row.description)) as unknown,
+      };
+    },
+    install: (database, contentKey, installed) => {
+      database.exec(
+        `INSERT INTO item_definitions (
+           content_key, rules_edition, name, description, requires_attunement
+         ) VALUES (?, '2024', ?, ?, 0)`,
+        [contentKey, installed.name, canonicalJson(installed.payload)],
+      );
+    },
   };
 }
 
+function itemNode(
+  id: string,
+  name: string,
+  payload: unknown,
+  options: Parameters<typeof itemProjection>[2] = {},
+): ContentImportNode<'item'> {
+  return { id: `portable:item:${id}`, projection: itemProjection(name, payload, options) };
+}
+
+function insertItem(
+  db: DatabaseContext,
+  contentKey: ContentKey,
+  name: string,
+  payload: unknown,
+): void {
+  db.exec(
+    `INSERT INTO item_definitions (
+       content_key, rules_edition, name, description, requires_attunement
+     ) VALUES (?, '2024', ?, ?, 0)`,
+    [contentKey, name, canonicalJson(payload)],
+  );
+}
+
+function bundledItem(
+  db: DatabaseContext,
+  contentKey: ContentKey,
+  name: string,
+  payload: unknown,
+): void {
+  const identity = deriveContentIdentityV1({
+    kind: 'item', edition: '2024', name, payload,
+  });
+  registerBundledStableContentIdentity(db, {
+    kind: 'item', contentKey, normalizedName: identity.envelope.normalizedName,
+  });
+  insertItem(db, contentKey, name, payload);
+  registerContentFingerprint(db, {
+    kind: 'item',
+    contentKey,
+    scheme: identity.envelope.scheme,
+    digest: identity.digest,
+    canonicalJson: identity.canonicalJson,
+    role: 'current',
+  });
+}
+
+function commitNewItem(db: DatabaseContext, node: ContentImportNode<'item'>): void {
+  const initial = planContentImport(db, [node]);
+  const committed = commitContentImport(db, { nodes: [node], token: initial.token });
+  if (committed.kind !== 'committed') {
+    throw new TypeError(`Could not install test item: ${committed.kind}.`);
+  }
+}
+
 describe('the D82 content-adoption dialog', () => {
-  it('CI-8 discloses per-kind preview counts, every match reason, and same-name-distinct conflicts', () => {
+  it('CI-8 discloses real planner counts, every match reason, and both collision labels', async () => {
+    const connection = await openTestDatabase();
+    connections.push(connection);
+    const db = new DatabaseContext(connection);
+
+    const exact = itemNode('exact', 'Exact Relic', { rule: 'exact' });
+    const metadata = itemNode('metadata', 'Metadata Relic', { rule: 'metadata' });
+    const sameNameStored = itemNode(
+      'same-name-stored',
+      'Shared Relic',
+      { rule: 'stored' },
+    );
+    commitNewItem(db, exact);
+    commitNewItem(db, metadata);
+    commitNewItem(db, sameNameStored);
+
+    const aliasKey = '2014:item:alias-relic' as ContentKey;
+    bundledItem(
+      db,
+      '2024:item:alias-target' as ContentKey,
+      'Alias Relic',
+      { rule: 'alias' },
+    );
+    registerContentAlias(db, {
+      kind: 'item', aliasKey, contentKey: '2024:item:alias-target' as ContentKey,
+      aliasKind: 'declared-legacy',
+    });
+
+    bundledItem(
+      db,
+      '2024:item:srd-target' as ContentKey,
+      'Bundled Relic',
+      { rule: 'bundled' },
+    );
+
+    const compatiblePayload = { rule: 'compatible' };
+    const compatibleIdentity = registerDerivedContentIdentity(db, {
+      kind: 'item',
+      edition: '2024',
+      name: 'Compatible Relic',
+      payload: compatiblePayload,
+    });
+    insertItem(
+      db,
+      compatibleIdentity.derivedKey,
+      'Compatible Relic',
+      compatiblePayload,
+    );
+
+    const collisionAlias = '2014:item:foreign-alias' as ContentKey;
+    bundledItem(
+      db,
+      '2024:item:local-alias-target' as ContentKey,
+      'Local Alias Target',
+      { rule: 'local-alias-rules' },
+    );
+    registerContentAlias(db, {
+      kind: 'item',
+      aliasKey: collisionAlias,
+      contentKey: '2024:item:local-alias-target' as ContentKey,
+      aliasKind: 'declared-legacy',
+    });
+
+    const nodes: readonly ContentImportNode<'item'>[] = [
+      itemNode('new', 'New Relic', { rule: 'new' }),
+      exact,
+      itemNode('alias', 'Alias Relic', { rule: 'alias' }, {
+        declaredAlias: aliasKey,
+      }),
+      itemNode('compatible', 'Compatible Relic', compatiblePayload),
+      itemNode('srd', 'Bundled Relic', { rule: 'bundled' }),
+      itemNode('metadata-review', 'Metadata Relic', { rule: 'metadata' }, {
+        metadataConflict: true,
+      }),
+      itemNode('same-name-distinct', 'Shared Relic', { rule: 'incoming' }),
+      itemNode('alias-distinct', 'Incoming Alias Source', { rule: 'incoming-alias-rules' }, {
+        declaredAlias: collisionAlias,
+      }),
+      itemNode('refused', 'Refused Relic', {
+        missing: {
+          kind: 'item',
+          scheme: CONTENT_FINGERPRINT_SCHEME_V1,
+          digest: 'f'.repeat(64),
+        },
+      }),
+    ];
+    const previewPlan = portableImportPlan(planContentImport(db, nodes));
+    expect(previewPlan.preview.new_by_kind.item).toBe(1);
+    expect(previewPlan.preview.matched_by_kind.item).toBe(1);
+    expect(previewPlan.preview.review_required_by_kind.item).toBe(6);
+    expect(previewPlan.preview.refused_by_kind.item).toBe(1);
+    expect(Object.fromEntries(previewPlan.outcomes.map((outcome) => [
+      outcome.id,
+      outcome.kind,
+    ]))).toMatchObject({
+      'portable:item:new': 'create',
+      'portable:item:exact': 'match',
+      'portable:item:alias': 'review',
+      'portable:item:compatible': 'review',
+      'portable:item:same-name-distinct': 'review',
+      'portable:item:refused': 'refused',
+    });
+    expect(previewPlan.reviews.find((review) =>
+      review.id === 'portable:item:same-name-distinct',
+    )).toEqual(expect.objectContaining({
+      incomingName: 'Shared Relic',
+      localName: 'Shared Relic',
+      matchClass: 'key-collision',
+    }));
+    expect(previewPlan.reviews.find((review) =>
+      review.id === 'portable:item:alias-distinct',
+    )).toEqual(expect.objectContaining({
+      incomingName: 'Incoming Alias Source',
+      localName: 'Local Alias Target',
+      matchClass: 'key-collision',
+    }));
+
     const restoreDocument = installInteractiveDocument();
     try {
-      const reasons = [
-        ['alias', 'Alias'],
-        ['compatible-fingerprint', 'Compatible fingerprint'],
-        ['srd-fallback', 'SRD fingerprint fallback'],
-        ['metadata-conflict', 'Metadata conflict'],
-        ['key-collision', 'Same name, distinct rules content'],
-      ] as const;
-      const reviews = reasons.map(([matchClass], index) => ({
-        id: `item:review-${String(index)}`,
-        kind: 'item' as const,
-        incomingName: index === 4 ? 'Shared Relic' : `Incoming ${String(index)}`,
-        localName: index === 4 ? 'Shared Relic' : `Local ${String(index)}`,
-        targetContentKey: `2024:item:target-${String(index)}` as ContentKey,
-        incomingFingerprint: String(index).repeat(64) as ContentFingerprintDigest,
-        matchClass,
-        defaultChoice: 'match' as const,
-        selectedChoice: 'match' as const,
-        cloneName: `Private ${String(index)}`,
-        dependencies: [],
-        conflictDetails: index < 3 ? [] : [{
-          field: 'Rules identity',
-          incomingValue: 'incoming',
-          localValue: 'local',
-        }],
-      }));
-      const kindCounts = (item: number) => ({
-        class: 0,
-        subclass: 0,
-        feat: 0,
-        species: 0,
-        background: 0,
-        spell: 0,
-        weapon: 0,
-        armor: 0,
-        item,
-      });
-      const previewPlan: PortableImportPlan = {
-        token: 'preview' as ContentImportPlanToken,
-        inputHash: 'input',
-        graphHash: 'graph',
-        targetHash: 'target',
-        spellActivityChanges: [],
-        reviews,
-        outcomes: [
-          { id: 'item:new', kind: 'create', contentKey: '2024:item:new' as ContentKey },
-          { id: 'item:matched', kind: 'match', contentKey: '2024:item:matched' as ContentKey },
-          ...reviews.map((review) => ({
-            id: review.id,
-            kind: 'review' as const,
-            contentKey: review.targetContentKey,
-            matchClass: review.matchClass,
-          })),
-          { id: 'portable:item:refused', kind: 'refused', reason: 'unresolved_reference' as const },
-        ],
-        preview: {
-          new_by_kind: kindCounts(2),
-          matched_by_kind: kindCounts(3),
-          review_required_by_kind: kindCounts(5),
-          refused_by_kind: kindCounts(4),
-        },
-      };
       const rendered = createContentAdoptionDialog({
         plan: previewPlan,
         replan: async () => previewPlan,
@@ -141,13 +265,23 @@ describe('the D82 content-adoption dialog', () => {
       });
       const text = elementText(rendered.element);
 
-      expect(text).toContain('item: 2 new, 3 matched, 5 needs review, 4 refused');
-      expect(text).toContain('2 conflicts must be reviewed below.');
-      for (const [, label] of reasons) {
+      expect(text).toContain('item: 1 new, 1 matched, 6 needs review, 1 refused');
+      expect(text).toContain('3 conflicts must be reviewed below.');
+      for (const label of [
+        'Alias',
+        'Compatible fingerprint',
+        'SRD fingerprint fallback',
+        'Metadata conflict',
+        'Same name, distinct rules content',
+        'Alias points to distinct rules content',
+      ]) {
         expect(text).toContain(`Match reason: ${label}`);
       }
       expect(text).toContain(
         'The normalized name is already in use for different rules. Rename the private copy to keep both.',
+      );
+      expect(text).toContain(
+        'The incoming alias points to differently named local content with different rules.',
       );
       const commitButton = interactiveElement(rendered.element)
         .querySelectorAll('button')
@@ -160,40 +294,46 @@ describe('the D82 content-adoption dialog', () => {
   });
 
   it('lists every review with Match selected and replans before clone commit', async () => {
+    const connection = await openTestDatabase();
+    connections.push(connection);
+    const db = new DatabaseContext(connection);
+    const alias = '2014:item:road-mage' as ContentKey;
+    bundledItem(
+      db,
+      '2024:item:road-mage' as ContentKey,
+      'Road Mage',
+      { rule: 'road' },
+    );
+    registerContentAlias(db, {
+      kind: 'item', aliasKey: alias, contentKey: '2024:item:road-mage' as ContentKey,
+      aliasKind: 'declared-legacy',
+    });
+    const incoming = itemNode('road-mage', 'Road Mage', { rule: 'road' }, {
+      declaredAlias: alias,
+    });
     const restoreDocument = installInteractiveDocument();
     try {
       const replans: ContentImportChoices[] = [];
       const commits: ContentImportChoices[] = [];
-      const initial = plan('initial');
-      const refreshed: ContentImportPlan = {
-        ...initial,
-        token: 'refreshed' as ContentImportPlanToken,
-        outcomes: [{
-          id: 'subclass:road-mage',
-          kind: 'create',
-          contentKey: '2024:srd:road-mage-private-copy' as ContentKey,
-        }],
-      };
+      const initial = planContentImport(db, [incoming]);
       const rendered = createContentAdoptionDialog({
         plan: initial,
         replan: async (choices) => {
           replans.push(choices);
-          return refreshed;
+          return planContentImport(db, [incoming], choices);
         },
-        commit: async (_plan, choices) => {
+        commit: async (submitted, choices) => {
           commits.push(choices);
-          return { kind: 'committed', outcomes: refreshed.outcomes };
+          return commitContentImport(db, {
+            nodes: [incoming], token: submitted.token, choices,
+          });
         },
         onCommitted: () => undefined,
       });
       const dialog = interactiveElement(rendered.element);
 
       expect(dialog.getAttribute('aria-modal')).toBe('true');
-      expect(elementText(rendered.element)).toContain('SRD fingerprint fallback');
-      expect(elementText(rendered.element)).toContain(
-        'Source book — incoming: Incoming Guide; local: Local Guide',
-      );
-      expect(elementText(rendered.element)).toContain('Depends on: class:mage');
+      expect(elementText(rendered.element)).toContain('Match reason: Alias');
       const inputs = dialog.querySelectorAll('input');
       expect(inputs[0]?.getAttribute('value')).toBe('match');
       expect(inputs[0]?.getAttribute('checked')).toBe('');
@@ -202,10 +342,10 @@ describe('the D82 content-adoption dialog', () => {
       if (cloneName === undefined) throw new Error('Clone-name input missing.');
       cloneName.value = 'Road Mage (Private copy)';
       inputs[1]?.dispatchEvent(new Event('change'));
-      for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+      await rendered.whenSettled();
 
       expect(replans).toEqual([{
-        'subclass:road-mage': {
+        'portable:item:road-mage': {
           decision: 'clone',
           cloneName: 'Road Mage (Private copy)',
         },
@@ -216,8 +356,7 @@ describe('the D82 content-adoption dialog', () => {
       if (commitButton === undefined) throw new Error('Commit button missing.');
       expect(commitButton.disabled).toBe(false);
       commitButton.click();
-      await Promise.resolve();
-      await Promise.resolve();
+      await rendered.whenSettled();
       expect(commits).toEqual(replans);
       rendered.cleanup();
     } finally {
@@ -305,9 +444,7 @@ describe('the D82 content-adoption dialog', () => {
       );
       if (commitButton === undefined) throw new Error('Commit button missing.');
       commitButton.click();
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
+      await rendered.whenSettled();
 
       expect(committed).toBe(true);
       expect(db.scalar<number>('SELECT count(*) FROM item_definitions')).toBe(1);

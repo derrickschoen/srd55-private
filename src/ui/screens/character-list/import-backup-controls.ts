@@ -436,33 +436,56 @@ export function createImportBackupControls(
           throw new TypeError('Choose a character JSON backup.');
         }
         const prepared = await controller.prepareCharacterImport(file);
-        adoptionCleanup?.();
-        const rendered = createContentAdoptionDialog({
-          plan: prepared.plan,
-          replan: (choices) => services.backup.planCharacterImport(
+        const showAdoptionDialog = (plan: ContentImportPlan): void => {
+          adoptionCleanup?.();
+          const rendered = createContentAdoptionDialog({
+            plan,
+            replan: (choices) => services.backup.planCharacterImport(
+              prepared.document,
+              choices,
+            ),
+            commit: (submitted, choices) => services.backup.commitCharacterImport(
+              prepared.document,
+              submitted.token,
+              choices,
+            ),
+            onCommitted: async (result) => {
+              const committed = result as Extract<
+                Awaited<ReturnType<BackupClient['commitCharacterImport']>>,
+                { readonly kind: 'committed' }
+              >;
+              await options.onPersistedChange();
+              characterInput.value = '';
+              announce(`Character imported as #${committed.result.characterId}.`);
+            },
+            onCancel: () => announce('Character import cancelled.'),
+          });
+          adoptionCleanup = rendered.cleanup;
+          root.append(rendered.element);
+        };
+        const hasRefusal = prepared.plan.outcomes.some(
+          (outcome) => outcome.kind === 'refused',
+        );
+        if (prepared.plan.reviews.length === 0 && !hasRefusal) {
+          const committed = await services.backup.commitCharacterImport(
             prepared.document,
-            choices,
-          ),
-          commit: (plan, choices) => services.backup.commitCharacterImport(
-            prepared.document,
-            plan.token,
-            choices,
-          ),
-          onCommitted: async (result) => {
-            const committed = result as Extract<
-              Awaited<ReturnType<BackupClient['commitCharacterImport']>>,
-              { readonly kind: 'committed' }
-            >;
-            await options.onPersistedChange();
-            characterInput.value = '';
-            announce(`Character imported as #${committed.result.characterId}.`);
-          },
-          onCancel: () => announce('Character import cancelled.'),
-        });
-        adoptionCleanup = rendered.cleanup;
-        root.append(rendered.element);
+            prepared.plan.token,
+            {},
+          );
+          if (committed.kind === 'stale-plan') {
+            showAdoptionDialog(committed.freshPlan);
+            return 'The catalog changed. Review the refreshed character import.';
+          }
+          if (committed.kind === 'refused') {
+            throw new TypeError('Character import was refused; no changes were committed.');
+          }
+          await options.onPersistedChange();
+          characterInput.value = '';
+          return `Character imported as #${committed.result.characterId}.`;
+        }
+        showAdoptionDialog(prepared.plan);
         return prepared.plan.reviews.length === 0
-          ? 'Review the complete character JSON preview before importing.'
+          ? 'Review the refused character JSON preview before importing.'
           : 'Review each matching content entry before importing.';
       });
     }),
@@ -505,14 +528,16 @@ export function createImportBackupControls(
   const receiptSelect = element('select', {
     attributes: { 'aria-label': 'Remembered catalog match choice' },
   });
+  receiptSelect.disabled = true;
   const forgetReceipt = element('button', {
     text: 'Forget remembered choice',
     attributes: { type: 'button' },
   });
+  forgetReceipt.disabled = true;
   const refreshReceipts = async (): Promise<void> => {
+    receiptSelect.disabled = true;
+    forgetReceipt.disabled = true;
     if (services.catalog.listMatchDecisions === undefined) {
-      receiptSelect.disabled = true;
-      forgetReceipt.disabled = true;
       return;
     }
     const receipts = await services.catalog.listMatchDecisions();
