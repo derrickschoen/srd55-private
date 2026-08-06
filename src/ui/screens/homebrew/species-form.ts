@@ -877,7 +877,10 @@ export function renderSpeciesForm(options: SpeciesFormOptions): Cleanup {
     renderGrants();
 
     const save = element('button', {
-      className: 'button-secondary', text: 'Save draft', attributes: { type: 'button' },
+      className: 'button-secondary', text: 'Save draft', attributes: {
+        type: 'button',
+        'data-authoring-action': 'save-draft',
+      },
     });
     const preview = element('button', {
       className: 'button-primary', text: 'Preview publish', attributes: { type: 'submit' },
@@ -906,7 +909,11 @@ export function renderSpeciesForm(options: SpeciesFormOptions): Cleanup {
           const dialog = createDraftConflictDialog({
             conflict,
             mount: options.context.root,
-            restoreFocus: () => save.focus(),
+            restoreFocus: () => {
+              options.mount.querySelector<HTMLButtonElement>(
+                '[data-authoring-action="save-draft"]',
+              )?.focus();
+            },
             onLoadSaved: async () => {
               const loaded = await options.client.readDraft({ draft_uuid: stored.draft_uuid });
               if (loaded.content_kind !== 'species' || loaded.document.kind !== 'species') {
@@ -961,7 +968,10 @@ export function renderSpeciesForm(options: SpeciesFormOptions): Cleanup {
         options.mount.querySelector('.species-publish-preview')?.remove();
         const previewElement = previewList(publishPreview);
         const publish = element('button', {
-          className: 'button-primary', text: 'Publish species', attributes: { type: 'button' },
+          className: 'button-primary', text: 'Publish species', attributes: {
+            type: 'button',
+            'data-authoring-action': 'publish-species',
+          },
         });
         const commit = (decisions: Parameters<AuthoringClient['commitPublish']>[0]['decisions']) =>
           options.client.commitPublish({ token: publishPreview.token, decisions });
@@ -981,7 +991,11 @@ export function renderSpeciesForm(options: SpeciesFormOptions): Cleanup {
             preview: publishPreview,
             commit,
             onCommitted: renderPublished,
-            restoreFocus: () => publish.focus(),
+            restoreFocus: () => {
+              options.mount.querySelector<HTMLButtonElement>(
+                '[data-authoring-action="publish-species"]',
+              )?.focus();
+            },
           });
           dialogs.push(dialog);
         });

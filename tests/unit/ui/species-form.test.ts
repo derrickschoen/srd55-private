@@ -12,7 +12,7 @@ import type {
 } from '../../../src/authoring/ids';
 import type { ContentKey } from '../../../src/domain/ids';
 import { RpcError } from '../../../src/rpc/protocol';
-import { parseRoute, type Router } from '../../../src/ui/router';
+import { parseRoute, Router } from '../../../src/ui/router';
 import type { ScreenContext } from '../../../src/ui/screen';
 import {
   isStoredSpeciesDraft,
@@ -134,6 +134,35 @@ function context(navigated: string[] = []): ScreenContext {
     rpc: null as never,
     registerNavigationGuard: () => () => undefined,
   };
+}
+
+function routerWindow(initialUrl: string): Window {
+  const events = new EventTarget();
+  const location = { href: initialUrl, origin: new URL(initialUrl).origin };
+  let state: unknown = null;
+  const history = {
+    get state(): unknown { return state; },
+    pushState(nextState: unknown, _unused: string, target?: string | URL | null): void {
+      state = nextState;
+      if (target !== undefined && target !== null) {
+        location.href = new URL(String(target), location.href).href;
+      }
+    },
+    replaceState(nextState: unknown, _unused: string, target?: string | URL | null): void {
+      state = nextState;
+      if (target !== undefined && target !== null) {
+        location.href = new URL(String(target), location.href).href;
+      }
+    },
+  };
+  return {
+    location,
+    history,
+    addEventListener: (type: string, listener: EventListenerOrEventListenerObject) =>
+      events.addEventListener(type, listener),
+    removeEventListener: (type: string, listener: EventListenerOrEventListenerObject) =>
+      events.removeEventListener(type, listener),
+  } as unknown as Window;
 }
 
 function byId(
@@ -464,6 +493,256 @@ describe('HA-7 species authoring form', () => {
       expect(elementText(root as unknown as Node)).toContain('Species published');
       expect(elementText(root as unknown as Node)).toContain('Homebrew');
       cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('rehydrates the live Save control after loading a conflicting saved revision', async () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const remote = stored({ ...speciesDocument(), name: 'Remote saved name' });
+      const authoring = client({
+        saveDraft: (params) => Promise.reject(new RpcError(
+          'handler_error',
+          'Draft revision is stale.',
+          {
+            reason: 'stale_draft_revision',
+            draft_uuid: params.draft_uuid,
+            expected_revision: params.expected_revision,
+            actual_revision: 2,
+          },
+        )),
+        readDraft: async () => ({ ...remote, revision: 2 as DraftRevision }),
+      });
+      const screenContext = context();
+      const mount = document.createElement('div');
+      screenContext.root.append(mount);
+      const draft = stored();
+      if (!isStoredSpeciesDraft(draft)) throw new Error('Species fixture did not narrow.');
+      const cleanup = renderSpeciesForm({
+        context: screenContext,
+        client: authoring,
+        mount,
+        draft,
+        windowObject: new EventTarget() as unknown as Window,
+      });
+      const root = interactiveElement(mount);
+      input(byId(root, 'input', 'species-name'), 'Local unsaved name');
+      const disconnectedSave = button(root, 'Save draft');
+      disconnectedSave.click();
+      await settle();
+      const conflict = interactiveElement(screenContext.root)
+        .querySelector('[data-testid="authoring-draft-conflict"]');
+      conflict?.querySelectorAll('button').find((candidate) =>
+        candidate.textContent === 'Load saved revision',
+      )?.click();
+      await settle();
+
+      const liveSave = button(root, 'Save draft');
+      expect(disconnectedSave.isConnected).toBe(false);
+      expect(liveSave.isConnected).toBe(true);
+      expect(document.activeElement).toBe(liveSave);
+      expect(liveSave.disabled).toBe(false);
+      expect(button(root, 'Preview publish').disabled).toBe(false);
+      expect(byId(root, 'input', 'species-name').value).toBe('Remote saved name');
+      cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('round-trips ordered custom vocabulary and every species grant/effect variant through save, reload, and rehydration', async () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const effects: SpeciesAuthoringDraft['traits'][number]['effects'] = [
+        { kind: 'damage_resistance', draft_item_uuid: itemUuid('effect-01'), label: 'Void ward', notes: 'one', damage_type: 'Void' as never },
+        { kind: 'hp_modifier', draft_item_uuid: itemUuid('effect-02'), label: 'Dense', notes: 'two', hit_points_flat: 2, hit_points_per_level: 1 },
+        { kind: 'speed', draft_item_uuid: itemUuid('effect-03'), label: 'Fast', notes: 'three', speed_bonus_feet: 5 },
+        { kind: 'ability_increase', draft_item_uuid: itemUuid('effect-04'), label: 'Clever', notes: 'four', ability: 'intelligence', amount: 2, maximum: 22 },
+        { kind: 'ability_override', draft_item_uuid: itemUuid('effect-05'), label: 'Strong', notes: 'five', ability: 'strength', maximum: 23 },
+        { kind: 'armor_class_bonus', draft_item_uuid: itemUuid('effect-06'), label: 'Guarded', notes: 'six', amount: 1 },
+        { kind: 'armor_class_formula', draft_item_uuid: itemUuid('effect-07'), label: 'Shell', notes: 'seven', base: 13, ability_1: 'dexterity', ability_2: 'constitution', allows_shield: true },
+        { kind: 'attack_ability_override', draft_item_uuid: itemUuid('effect-08'), label: 'Bonded', notes: 'eight', ability: 'charisma', weapon_scope: 'one_bonded_weapon' },
+        { kind: 'weapon_attack_bonus', draft_item_uuid: itemUuid('effect-09'), label: 'Accurate', notes: 'nine', amount: 1, weapon_scope: 'any_weapon' },
+        { kind: 'weapon_damage_bonus', draft_item_uuid: itemUuid('effect-10'), label: 'Forceful', notes: 'ten', amount: 2, weapon_scope: 'one_bonded_weapon' },
+      ];
+      const roundTripDocument: SpeciesAuthoringDraft = {
+        ...speciesDocument(),
+        name: 'Round Trip Voyager',
+        traits: [{
+          draft_item_uuid: itemUuid('trait-round-trip'),
+          name: 'Ordered machinery',
+          description: 'Every supported effect remains ordered.',
+          effects,
+        }],
+      };
+      let persisted: StoredHomebrewDraft | null = null;
+      const authoring = client({
+        saveDraft: async (params) => {
+          persisted = {
+            ...stored(structuredClone(params.document) as SpeciesAuthoringDraft),
+            revision: 1 as DraftRevision,
+          };
+          return persisted;
+        },
+        readDraft: async () => {
+          if (persisted === null) throw new Error('Round-trip draft was not saved.');
+          return structuredClone(persisted);
+        },
+      });
+      const screenContext = context();
+      const mount = document.createElement('div');
+      screenContext.root.append(mount);
+      const draft = stored(roundTripDocument);
+      if (!isStoredSpeciesDraft(draft)) throw new Error('Species fixture did not narrow.');
+      const firstCleanup = renderSpeciesForm({
+        context: screenContext,
+        client: authoring,
+        mount,
+        draft,
+        windowObject: new EventTarget() as unknown as Window,
+      });
+      const root = interactiveElement(mount);
+      button(root, 'Save draft').click();
+      await settle();
+      const reloaded = await authoring.readDraft({ draft_uuid: draft.draft_uuid });
+      if (!isStoredSpeciesDraft(reloaded)) throw new Error('Reloaded draft is not species.');
+      expect(reloaded.document).toEqual(roundTripDocument);
+      firstCleanup();
+      mount.replaceChildren();
+      const secondCleanup = renderSpeciesForm({
+        context: screenContext,
+        client: authoring,
+        mount,
+        draft: reloaded,
+        windowObject: new EventTarget() as unknown as Window,
+      });
+
+      expect(byId(root, 'input', 'species-creature-type').value).toBe('Clockwork');
+      expect(byId(root, 'input', 'species-primary-size').value).toBe('Colossal');
+      const effectCards = root.querySelectorAll('.authoring-effect-card');
+      expect(effectCards.map((card) => card.getAttribute('data-draft-item-uuid')))
+        .toEqual(effects.map((effect) => effect.draft_item_uuid));
+      expect(effectCards.map((card) => card.querySelectorAll('select')[0]?.value))
+        .toEqual(effects.map((effect) => effect.kind));
+      expect(byId(root, 'input', 'authoring-effect-effect-01-damage_type').value)
+        .toBe('Void');
+      const grantCards = root.querySelectorAll('.species-grant-card');
+      expect(grantCards.map((card) => card.getAttribute('data-draft-item-uuid')))
+        .toEqual(roundTripDocument.grants.map((grant) => grant.draft_item_uuid));
+      expect(grantCards.map((card) => card.querySelectorAll('select')[0]?.value))
+        .toEqual(['fixed_spell', 'choice_from_list', 'choice_from_query', 'skill_proficiency']);
+      expect(byId(root, 'textarea', 'species-grant-grant-query-schools').value)
+        .toBe('Chronomancy');
+      expect(byId(root, 'input', 'species-grant-grant-skill-skill-arcana').checked)
+        .toBe(true);
+      secondCleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('pins the species dirty lifecycle through the real Router guard seam', async () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const router = new Router(routerWindow(
+        'https://example.test/homebrew/drafts/ha7-species-draft',
+      ));
+      const screenRoot = document.createElement('div');
+      const mount = document.createElement('div');
+      screenRoot.append(mount);
+      document.body.append(screenRoot);
+      let saveMode: 'fail' | 'success' | 'conflict' = 'fail';
+      const remote = { ...stored({ ...speciesDocument(), name: 'Remote revision' }), revision: 3 as DraftRevision };
+      const authoring = client({
+        saveDraft: async (params) => {
+          if (saveMode === 'fail') throw new Error('Storage unavailable.');
+          if (saveMode === 'conflict') {
+            throw new RpcError('handler_error', 'Draft revision is stale.', {
+              reason: 'stale_draft_revision',
+              draft_uuid: params.draft_uuid,
+              expected_revision: params.expected_revision,
+              actual_revision: 3,
+            });
+          }
+          if (params.document.kind !== 'species') throw new Error('Expected species.');
+          return { ...stored(params.document), revision: 2 as DraftRevision };
+        },
+        readDraft: async () => remote,
+        previewPublish: async () => preview(),
+        commitPublish: async () => ({
+          outcome: 'created',
+          content_key: 'expanded:species:router-guard' as ContentKey,
+          name: 'Router Guard Species',
+          catalog_layer: 'external',
+          previous_key_usage_count: 0,
+        }),
+      });
+      const draft = stored();
+      if (!isStoredSpeciesDraft(draft)) throw new Error('Species fixture did not narrow.');
+      const cleanup = renderSpeciesForm({
+        context: {
+          root: screenRoot,
+          route: router.current,
+          router,
+          rpc: null as never,
+          registerNavigationGuard: (guard) => router.registerNavigationGuard(guard),
+        },
+        client: authoring,
+        mount,
+        draft,
+        confirmLeave: () => false,
+        windowObject: new EventTarget() as unknown as Window,
+      });
+      const root = interactiveElement(mount);
+
+      input(byId(root, 'input', 'species-name'), 'Dirty local');
+      expect(router.navigate('/blocked-after-edit')).toBe(false);
+      button(root, 'Save draft').click();
+      await settle();
+      expect(button(root, 'Save draft').disabled).toBe(false);
+      expect(button(root, 'Preview publish').disabled).toBe(false);
+      expect(router.navigate('/blocked-after-failed-save')).toBe(false);
+
+      saveMode = 'success';
+      button(root, 'Save draft').click();
+      await settle();
+      expect(router.navigate('/clean-after-save')).toBe(true);
+
+      input(byId(root, 'input', 'species-name'), 'Keep this local');
+      saveMode = 'conflict';
+      button(root, 'Save draft').click();
+      await settle();
+      interactiveElement(screenRoot).querySelector('[data-testid="authoring-draft-conflict"]')
+        ?.querySelectorAll('button').find((candidate) =>
+          candidate.textContent === 'Keep my unsaved changes',
+        )?.click();
+      await settle();
+      expect(router.navigate('/blocked-after-keep-local')).toBe(false);
+
+      button(root, 'Save draft').click();
+      await settle();
+      interactiveElement(screenRoot).querySelector('[data-testid="authoring-draft-conflict"]')
+        ?.querySelectorAll('button').find((candidate) =>
+          candidate.textContent === 'Load saved revision',
+        )?.click();
+      await settle();
+      expect(router.navigate('/clean-after-load-saved')).toBe(true);
+
+      input(byId(root, 'input', 'species-name'), 'Publish clears dirty');
+      saveMode = 'success';
+      button(root, 'Save draft').click();
+      await settle();
+      root.querySelector('form')?.dispatchEvent(new Event('submit', { cancelable: true }));
+      await settle();
+      button(root, 'Publish species').click();
+      await settle();
+      expect(elementText(root as unknown as Node)).toContain('Species published');
+      expect(router.navigate('/clean-after-publish')).toBe(true);
+
+      cleanup();
+      router.stop();
     } finally {
       restoreDocument();
     }

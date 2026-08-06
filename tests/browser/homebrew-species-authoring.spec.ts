@@ -21,9 +21,12 @@ async function resetHome(page: Page): Promise<void> {
 test('authors, previews, publishes, lists, and applies a homebrew species', async ({
   page,
 }) => {
-  // The neighboring full guided journey uses this 65s pool budget; this spec
-  // adds the authoring half before the same guided application path.
-  test.setTimeout(65_000);
+  // Budget derivation (pool measurement belongs to the supervisor): the guided
+  // journey measured 25.2s + 15s reserved for this spec's second app boot +
+  // 15s reserved for authoring/publish/grant interactions = 55.2s. Multiplying
+  // by 1.6 for pool contention gives 88.32s, rounded up to 90s. If the measured
+  // pool run exceeds 36s (40%), D200 discipline requires a measured revision.
+  test.setTimeout(90_000);
   await resetHome(page);
 
   await page.getByRole('link', { name: 'Homebrew library' }).click();
@@ -98,6 +101,34 @@ test('authors, previews, publishes, lists, and applies a homebrew species', asyn
     `[${persistedSeam.panelAttribute}="${persistedSeam.backgroundStepPanel}"]`,
   )).toBeVisible();
 
+  const acolyte = page
+    .locator('.guided-background-choice')
+    .filter({ hasText: 'Acolyte' })
+    .locator('input');
+  await acolyte.check();
+  await page.locator('[data-background-submit]').click();
+  await expect(page.locator(
+    `[${persistedSeam.panelAttribute}="${persistedSeam.skillsStepPanel}"]`,
+  )).toBeVisible();
+
+  const authoredGrant = page.getByLabel(
+    'Clockwork Voyager skill grant skill',
+    { exact: true },
+  );
+  await expect(authoredGrant.locator('option')).toHaveText([
+    'Choose a skill',
+    'Arcana',
+    'History',
+  ]);
+  await authoredGrant.selectOption('arcana');
+  await page.getByRole('button', {
+    name: 'Choose Clockwork Voyager skill grant skill',
+    exact: true,
+  }).click();
+  await expect(page.locator(
+    `[${persistedSeam.skillGrantedAttribute}="arcana"]`,
+  )).toContainText('Arcana — Clockwork Voyager (skill grant)');
+
   expect(
     await page.evaluate(() => window.staticApp.inspectRows('character_species')),
   ).toEqual([
@@ -126,5 +157,23 @@ test('authors, previews, publishes, lists, and applies a homebrew species', asyn
       damage_type: 'Void',
       label: 'Void resistance',
     }),
+  ]));
+  expect(
+    await page.evaluate(() => window.staticApp.inspectRows('character_skill_grants')),
+  ).toEqual(expect.arrayContaining([
+    expect.objectContaining({
+      character_id: characterId,
+      grant_key: 'clockwork-lore',
+      ordinal: 1,
+      skill: 'arcana',
+      state: 'active',
+    }),
+  ]));
+  expect(
+    await page.evaluate(() =>
+      window.staticApp.inspectRows('character_skill_proficiencies'),
+    ),
+  ).toEqual(expect.arrayContaining([
+    expect.objectContaining({ character_id: characterId, skill: 'arcana' }),
   ]));
 });

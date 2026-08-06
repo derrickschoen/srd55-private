@@ -493,7 +493,7 @@ export function createPublishAdoptionDialog(
         type: 'radio',
         name: prefix,
         value: 'match',
-        checked: '',
+        ...(selected.decision === 'match' ? { checked: '' } : {}),
       },
     });
     const clone = element('input', {
@@ -502,6 +502,7 @@ export function createPublishAdoptionDialog(
         type: 'radio',
         name: prefix,
         value: 'clone',
+        ...(selected.decision === 'clone' ? { checked: '' } : {}),
       },
     });
     const cloneName = element('input', {
@@ -509,11 +510,11 @@ export function createPublishAdoptionDialog(
         id: `${prefix}-clone-name`,
         type: 'text',
         value: selected.cloneName,
-        disabled: '',
+        ...(selected.decision === 'match' ? { disabled: '' } : {}),
       },
     });
     cloneName.value = selected.cloneName;
-    cloneName.disabled = true;
+    cloneName.disabled = selected.decision === 'match';
     const choose = (decision: 'match' | 'clone'): void => {
       selections.set(key, { decision, cloneName: cloneName.value });
       cloneName.disabled = decision === 'match';
@@ -575,7 +576,7 @@ export function createPublishAdoptionDialog(
     latestOperation = options.commit(decisions()).then(async (result) => {
       if (disposed) return;
       await options.onCommitted(result);
-      if (!disposed) close(false);
+      if (!disposed) close(true);
     }).catch((error: unknown) => {
       if (disposed) return;
       commit.disabled = false;
