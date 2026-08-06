@@ -42,6 +42,7 @@ import {
   catalog_content_identities,
   catalog_content_match_decisions,
 } from './catalog-content';
+import { catalog_content_drafts } from './catalog-authoring';
 import {
   change_log,
   character_class_levels,
@@ -1200,6 +1201,7 @@ export const catalogContentIdentitiesRelations = relations(
     fingerprints: many(catalog_content_fingerprints),
     aliases: many(catalog_content_aliases),
     decisions: many(catalog_content_match_decisions),
+    drafts_based_on_content: many(catalog_content_drafts),
     classes: many(class_definitions),
     subclasses: many(subclass_definitions),
     feats: many(feat_definitions),
@@ -1211,6 +1213,22 @@ export const catalogContentIdentitiesRelations = relations(
     weapon_templates: many(weapon_templates),
     armor_templates: many(armor_templates),
     item_definitions: many(item_definitions),
+  }),
+);
+
+export const catalogContentDraftsRelations = relations(
+  catalog_content_drafts,
+  ({ one }) => ({
+    base_content_identity: one(catalog_content_identities, {
+      fields: [
+        catalog_content_drafts.content_kind,
+        catalog_content_drafts.base_content_key,
+      ],
+      references: [
+        catalog_content_identities.content_kind,
+        catalog_content_identities.content_key,
+      ],
+    }),
   }),
 );
 

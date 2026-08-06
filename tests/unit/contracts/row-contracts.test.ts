@@ -88,6 +88,19 @@ function featDefinitionRow(): Record<string, unknown> {
   };
 }
 
+function catalogDraftRow(): Record<string, unknown> {
+  return {
+    draft_uuid: '9f58bc31-4b10-44c4-98d5-73fb51d5c897',
+    content_kind: 'species',
+    document_version: 1,
+    base_content_key: null,
+    revision: 0,
+    document_json: '{"kind":"species","document_version":1}',
+    created_at: '2026-08-06T10:00:00.000Z',
+    updated_at: '2026-08-06T10:00:00.000Z',
+  };
+}
+
 function slotRow(): Record<string, unknown> {
   return {
     id: 12,
@@ -243,6 +256,30 @@ describe('per-table row contracts', () => {
     expect(
       rowContractError('character_source_instances', sourceRow(), label),
     ).toBeNull();
+    expect(
+      rowContractError(
+        'catalog_content_drafts',
+        catalogDraftRow(),
+        'Catalog draft',
+      ),
+    ).toBeNull();
+  });
+
+  it('holds draft rows to the three-kind and revision storage contract', () => {
+    expect(
+      rowContractError(
+        'catalog_content_drafts',
+        { ...catalogDraftRow(), content_kind: 'class' },
+        'Catalog draft',
+      ),
+    ).toContain('Catalog draft.content_kind:');
+    expect(
+      rowContractError(
+        'catalog_content_drafts',
+        { ...catalogDraftRow(), revision: -1 },
+        'Catalog draft',
+      ),
+    ).toContain('Catalog draft.revision:');
   });
 
   it('refuses an unknown column, which would become an INSERT identifier', () => {

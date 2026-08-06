@@ -101,6 +101,16 @@ export const COLUMN_FACTS = {
     content_key: { base: 'degraded', notNull: true },
     alias_kind: { base: 'degraded', notNull: true },
   },
+  catalog_content_drafts: {
+    draft_uuid: { base: 'degraded', notNull: true },
+    content_kind: { base: 'degraded', notNull: true },
+    document_version: { base: 'integer', notNull: true },
+    base_content_key: { base: 'degraded', notNull: false },
+    revision: { base: 'integer', notNull: true },
+    document_json: { base: 'degraded', notNull: true },
+    created_at: { base: 'degraded', notNull: true },
+    updated_at: { base: 'degraded', notNull: true },
+  },
   catalog_content_fingerprints: {
     content_kind: { base: 'degraded', notNull: true },
     fingerprint_scheme: { base: 'degraded', notNull: true },

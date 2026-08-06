@@ -19,10 +19,11 @@ common way to break this repository.** Its first four lines say so, and
 `tests/unit/schema-generation.test.ts` fails the moment it drifts from what
 `db/schema/*.ts` would produce.
 
-The twelve files under `db/schema/`:
+The schema modules under `db/schema/`:
 
 | File | Holds |
 |---|---|
+| `catalog-authoring.ts` | Durable incomplete homebrew drafts (whole-database only) |
 | `catalog-classes.ts` | Classes, subclasses, their progressions and sheet traits |
 | `catalog-sources.ts` | Feats, species, background DEFINITIONS (spell-grant sources) |
 | `catalog-spells.ts` | Spell identities, versions, publications, pivots |
@@ -116,7 +117,7 @@ snapshots, backups, shares, both or neither.
 
 | Field | Meaning |
 |---|---|
-| `role` | `character_root`, `character_owned`, `catalog_spell`, `catalog_class`, `catalog_source`, `catalog_weapon`, `catalog_origin`, `catalog_armor`, `catalog_item`, `party_observation` |
+| `role` | Semantic role, including `catalog_draft` for whole-database-only incomplete authoring state |
 | `snapshot` | In `CHARACTER_STATE_TABLES` — undo/redo |
 | `backupDirect` | In `directCharacterTables` — the `character_id`-keyed pass |
 | `backup` | In `backupTableNames` — the portable-character document |

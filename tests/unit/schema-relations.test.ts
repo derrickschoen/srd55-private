@@ -133,7 +133,7 @@ afterAll(() => {
 });
 
 describe('declared relations match the foreign keys', () => {
-  it('budgets 91 constraints across 105 PRAGMA rows', () => {
+  it('budgets 103 constraints across 121 PRAGMA rows', () => {
     const tables = db
       .selectValues(
         `SELECT name FROM sqlite_schema
@@ -234,8 +234,10 @@ describe('declared relations match the foreign keys', () => {
     // HA-1 adds the background effect table's one parent constraint/row.
     // P3 adds one nullable SET NULL association from the observation index to
     // the newest local clone. The row survives local character deletion.
-    expect(constraintEdges(db)).toHaveLength(102);
-    expect(rowCount).toBe(119);
+    // HA-2 adds the composite draft base-content edge: one constraint across
+    // two PRAGMA rows, so a species draft cannot cite a background identity.
+    expect(constraintEdges(db)).toHaveLength(103);
+    expect(rowCount).toBe(121);
   });
 
   it('declares a relation for every foreign key, and a foreign key for every relation', () => {
@@ -244,7 +246,7 @@ describe('declared relations match the foreign keys', () => {
     expect(declaredEdges()).toEqual(constraintEdges(db));
   });
 
-  it('keeps all fifteen composite foreign keys composite', () => {
+  it('keeps all sixteen composite foreign keys composite', () => {
     const edges = declaredEdges();
     expect(edges).toContain(
       'character_class_levels: subclass_definition_id,class_definition_id -> subclass_definitions.id,class_definition_id',
@@ -293,6 +295,9 @@ describe('declared relations match the foreign keys', () => {
     );
     expect(edges).toContain(
       'catalog_content_match_decisions: content_kind,target_content_key -> catalog_content_identities.content_kind,content_key',
+    );
+    expect(edges).toContain(
+      'catalog_content_drafts: content_kind,base_content_key -> catalog_content_identities.content_kind,content_key',
     );
   });
 
