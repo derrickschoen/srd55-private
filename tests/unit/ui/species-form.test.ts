@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AuthoringClient } from '../../../src/authoring/client';
+import { CatalogAuthoringService } from '../../../src/authoring/draft-service';
 import type {
   DraftRevision,
   PublishPreview,
@@ -11,6 +12,7 @@ import type {
   HomebrewDraftUuid,
 } from '../../../src/authoring/ids';
 import type { ContentKey } from '../../../src/domain/ids';
+import { DatabaseContext } from '../../../src/db/database';
 import { RpcError } from '../../../src/rpc/protocol';
 import { parseRoute, Router } from '../../../src/ui/router';
 import type { ScreenContext } from '../../../src/ui/screen';
@@ -24,6 +26,7 @@ import {
   interactiveElement,
   type InteractiveTestElement,
 } from '../../fixtures/interactive-dom';
+import { openTestDatabase } from '../../helpers/open-db';
 
 const hostile = '</textarea><img data-ha7-hostile src=x> "quoted" 🐉 \u202eRTL\u202c nul\u0000\u0001tail';
 
@@ -399,36 +402,17 @@ describe('HA-7 species authoring form', () => {
     }
   });
 
-  it('reports every backend validation path and uses the common adoption modal for review-required publish', async () => {
+  it('uses the common adoption modal for review-required publish', async () => {
     const restoreDocument = installInteractiveDocument();
     try {
-      let mode: 'invalid' | 'review' = 'invalid';
       const decisions: unknown[] = [];
       const authoring = client({
-        previewPublish: () => mode === 'invalid'
-          ? Promise.reject(new RpcError('handler_error', 'Validation failed.', {
-              reason: 'validation_failed',
-              issues: [
-                { path: ['name'], code: 'required', message: 'Name is required.' },
-                { path: ['traits', 0, 'name'], code: 'required', message: 'Trait name is required.' },
-                {
-                  path: ['traits', 0, 'effects', 0, 'damage_type'],
-                  code: 'required',
-                  message: 'Damage type is required.',
-                },
-                {
-                  path: ['grants', 3, 'skills'],
-                  code: 'required',
-                  message: 'At least one skill is required.',
-                },
-              ],
-            }))
-          : Promise.resolve(preview([{
-              candidate_content_key: '2024:species:human' as ContentKey,
-              candidate_name: 'Human',
-              reason: 'srd-fallback',
-              default_decision: 'match',
-            }])),
+        previewPublish: () => Promise.resolve(preview([{
+          candidate_content_key: '2024:species:human' as ContentKey,
+          candidate_name: 'Human',
+          reason: 'srd-fallback',
+          default_decision: 'match',
+        }])),
         commitPublish: async (params) => {
           decisions.push(...params.decisions);
           return {
@@ -454,19 +438,6 @@ describe('HA-7 species authoring form', () => {
       });
       const root = interactiveElement(mount);
 
-      root.querySelector('form')?.dispatchEvent(new Event('submit', { cancelable: true }));
-      await settle();
-      expect(elementText(root as unknown as Node)).toContain('Name is required.');
-      expect(elementText(root as unknown as Node)).toContain('Trait name is required.');
-      expect(elementText(root as unknown as Node)).toContain('Damage type is required.');
-      expect(elementText(root as unknown as Node)).toContain('At least one skill is required.');
-      const damageType = root.querySelectorAll('input').find((control) =>
-        control.getAttribute('data-authoring-path') ===
-          JSON.stringify(['traits', 0, 'effects', 0, 'damage_type']));
-      expect(damageType?.getAttribute('aria-invalid')).toBe('true');
-      expect(root.querySelectorAll('[aria-invalid="true"]')).toHaveLength(4);
-
-      mode = 'review';
       root.querySelector('form')?.dispatchEvent(new Event('submit', { cancelable: true }));
       await settle();
       button(root, 'Publish species').click();
@@ -553,6 +524,7 @@ describe('HA-7 species authoring form', () => {
   });
 
   it('round-trips ordered custom vocabulary and every species grant/effect variant through save, reload, and rehydration', async () => {
+    const connection = await openTestDatabase();
     const restoreDocument = installInteractiveDocument();
     try {
       const effects: SpeciesAuthoringDraft['traits'][number]['effects'] = [
@@ -577,24 +549,26 @@ describe('HA-7 species authoring form', () => {
           effects,
         }],
       };
-      let persisted: StoredHomebrewDraft | null = null;
+      const database = new DatabaseContext(connection);
+      let uuid = 0;
+      const service = new CatalogAuthoringService(database, {
+        randomUuid: () => `ha7-round-trip-${String(++uuid)}`,
+        now: () => '2042-08-06T12:00:00.000Z',
+      });
+      const created = service.createDraft({ content_kind: 'species' });
+      const initial = service.saveDraft({
+        draft_uuid: created.draft_uuid,
+        expected_revision: created.revision,
+        document: roundTripDocument,
+      });
       const authoring = client({
-        saveDraft: async (params) => {
-          persisted = {
-            ...stored(structuredClone(params.document) as SpeciesAuthoringDraft),
-            revision: 1 as DraftRevision,
-          };
-          return persisted;
-        },
-        readDraft: async () => {
-          if (persisted === null) throw new Error('Round-trip draft was not saved.');
-          return structuredClone(persisted);
-        },
+        saveDraft: (params) => Promise.resolve(service.saveDraft(params)),
+        readDraft: (params) => Promise.resolve(service.readDraft(params.draft_uuid)),
       });
       const screenContext = context();
       const mount = document.createElement('div');
       screenContext.root.append(mount);
-      const draft = stored(roundTripDocument);
+      const draft = initial;
       if (!isStoredSpeciesDraft(draft)) throw new Error('Species fixture did not narrow.');
       const firstCleanup = renderSpeciesForm({
         context: screenContext,
@@ -609,6 +583,12 @@ describe('HA-7 species authoring form', () => {
       const reloaded = await authoring.readDraft({ draft_uuid: draft.draft_uuid });
       if (!isStoredSpeciesDraft(reloaded)) throw new Error('Reloaded draft is not species.');
       expect(reloaded.document).toEqual(roundTripDocument);
+      const firstSavedDocument = structuredClone(reloaded.document);
+      const firstEncodedDocument = database.scalar<string>(
+        'SELECT document_json FROM catalog_content_drafts WHERE draft_uuid = ?',
+        [draft.draft_uuid],
+      );
+      if (firstEncodedDocument === null) throw new Error('First encoded draft is missing.');
       firstCleanup();
       mount.replaceChildren();
       const secondCleanup = renderSpeciesForm({
@@ -637,9 +617,22 @@ describe('HA-7 species authoring form', () => {
         .toBe('Chronomancy');
       expect(byId(root, 'input', 'species-grant-grant-skill-skill-arcana').checked)
         .toBe(true);
+      button(root, 'Save draft').click();
+      await settle();
+      const savedAgain = await authoring.readDraft({ draft_uuid: draft.draft_uuid });
+      if (!isStoredSpeciesDraft(savedAgain)) throw new Error('Second saved draft is not species.');
+      const secondEncodedDocument = database.scalar<string>(
+        'SELECT document_json FROM catalog_content_drafts WHERE draft_uuid = ?',
+        [draft.draft_uuid],
+      );
+      if (secondEncodedDocument === null) throw new Error('Second encoded draft is missing.');
+      expect(savedAgain.revision).toBe(3);
+      expect(savedAgain.document).toEqual(firstSavedDocument);
+      expect(secondEncodedDocument).toBe(firstEncodedDocument);
       secondCleanup();
     } finally {
       restoreDocument();
+      connection.close();
     }
   });
 

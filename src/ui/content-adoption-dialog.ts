@@ -15,6 +15,7 @@ import type {
   PublishResult,
 } from '../authoring/contracts';
 import { clear, element, listen, type Cleanup } from './dom';
+import { attachModalTrap, type ModalTrap } from './modal-trap';
 
 export interface ContentAdoptionDialogOptions {
   readonly mount: HTMLElement;
@@ -182,14 +183,6 @@ function createPreview(plan: ContentImportPlan): HTMLElement {
   ]);
 }
 
-function openModal(dialog: HTMLDialogElement): void {
-  if (typeof dialog.showModal === 'function') {
-    if (!dialog.open) dialog.showModal();
-    return;
-  }
-  dialog.setAttribute('open', '');
-}
-
 /**
  * The common D82 review surface. Replanning is mandatory after every choice:
  * it disables commit, simulates the whole dependency graph, and only enables
@@ -213,8 +206,11 @@ export function createContentAdoptionDialog(
   let plan = options.plan;
   let generation = 0;
   let disposed = false;
+  let closed = false;
   let latestOperation: Promise<void> = Promise.resolve();
   const cleanups: Cleanup[] = [];
+  let focusable: HTMLElement[] = [];
+  let modal: ModalTrap;
 
   const heading = element('h2', {
     text: 'Review content import',
@@ -283,6 +279,7 @@ export function createContentAdoptionDialog(
 
   function renderRows(): void {
     clear(list);
+    const rowControls: HTMLElement[] = [];
     for (const row of rows.values()) {
       const selected = choices[row.id] ?? {
         decision: 'match' as const,
@@ -349,6 +346,7 @@ export function createContentAdoptionDialog(
           ...(selected.decision === 'match' ? { disabled: '' } : {}),
         },
       });
+      cloneName.disabled = selected.decision === 'match';
       fieldset.append(
         match,
         element('label', { text: 'Match', attributes: { for: matchId } }),
@@ -370,12 +368,19 @@ export function createContentAdoptionDialog(
         latestOperation = refresh();
       });
       list.append(fieldset);
+      rowControls.push(match, clone, cloneName);
     }
+    focusable = [...rowControls, cancel, commit];
   }
 
-  cleanups.push(listen(cancel, 'click', () => {
-    dialog.close?.();
+  const cancelDialog = (): void => {
+    if (disposed || closed) return;
+    closed = true;
+    modal.close();
     options.onCancel?.();
+  };
+  cleanups.push(listen(cancel, 'click', () => {
+    cancelDialog();
   }));
   cleanups.push(listen(commit, 'click', () => {
     if (commit.disabled) return;
@@ -402,13 +407,18 @@ export function createContentAdoptionDialog(
         return;
       }
       await options.onCommitted(result);
-      dialog.close?.();
+      closed = true;
+      modal.close();
     });
   }));
 
   renderRows();
-  options.mount.append(dialog);
-  openModal(dialog);
+  modal = attachModalTrap({
+    dialog,
+    mount: options.mount,
+    focusable: () => focusable,
+    onDismiss: cancelDialog,
+  });
   return {
     element: dialog,
     whenSettled: () => latestOperation,
@@ -416,7 +426,7 @@ export function createContentAdoptionDialog(
       disposed = true;
       generation += 1;
       for (const cleanup of cleanups.splice(0)) cleanup();
-      dialog.close?.();
+      modal.cleanup();
     },
   };
 }
@@ -542,6 +552,7 @@ export function createPublishAdoptionDialog(
   let disposed = false;
   let closed = false;
   let latestOperation = Promise.resolve();
+  let modal: ModalTrap;
   const decisions = (): readonly PublishDecision[] =>
     options.preview.review.map((review) => {
       const selected = selections.get(review.candidate_content_key)!;
@@ -556,17 +567,14 @@ export function createPublishAdoptionDialog(
             clone_name: selected.cloneName,
           };
     });
-  const close = (restore: boolean): void => {
+  const close = (): void => {
     if (closed) return;
     closed = true;
-    dialog.close?.();
-    dialog.remove();
-    if (restore) options.restoreFocus();
+    modal.close();
   };
-  const onCancel = (event?: Event): void => {
-    event?.preventDefault();
+  const onCancel = (): void => {
     if (disposed || closed) return;
-    close(true);
+    close();
     options.onCancel?.();
   };
   const onCommit = (): void => {
@@ -576,7 +584,7 @@ export function createPublishAdoptionDialog(
     latestOperation = options.commit(decisions()).then(async (result) => {
       if (disposed) return;
       await options.onCommitted(result);
-      if (!disposed) close(true);
+      if (!disposed) close();
     }).catch((error: unknown) => {
       if (disposed) return;
       commit.disabled = false;
@@ -585,29 +593,15 @@ export function createPublishAdoptionDialog(
       commit.focus();
     });
   };
-  const onKeydown = (event: KeyboardEvent): void => {
-    if (event.key === 'Escape') {
-      onCancel(event);
-      return;
-    }
-    if (event.key !== 'Tab') return;
-    const enabled = focusable.filter((control) => Reflect.get(control, 'disabled') !== true);
-    const current = enabled.indexOf(document.activeElement as HTMLElement);
-    if (event.shiftKey && current <= 0) {
-      event.preventDefault();
-      enabled.at(-1)?.focus();
-    } else if (!event.shiftKey && (current < 0 || current >= enabled.length - 1)) {
-      event.preventDefault();
-      enabled[0]?.focus();
-    }
-  };
   cancel.addEventListener('click', onCancel);
   commit.addEventListener('click', onCommit);
-  dialog.addEventListener('cancel', onCancel);
-  dialog.addEventListener('keydown', onKeydown);
-  options.mount.append(dialog);
-  openModal(dialog);
-  focusable[0]?.focus();
+  modal = attachModalTrap({
+    dialog,
+    mount: options.mount,
+    focusable: () => focusable,
+    onDismiss: onCancel,
+    restoreFocus: options.restoreFocus,
+  });
 
   return {
     element: dialog,
@@ -616,10 +610,7 @@ export function createPublishAdoptionDialog(
       disposed = true;
       cancel.removeEventListener('click', onCancel);
       commit.removeEventListener('click', onCommit);
-      dialog.removeEventListener('cancel', onCancel);
-      dialog.removeEventListener('keydown', onKeydown);
-      dialog.close?.();
-      dialog.remove();
+      modal.cleanup();
     },
   };
 }

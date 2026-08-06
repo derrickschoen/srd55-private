@@ -147,11 +147,31 @@ function button(root: InteractiveTestElement, label: string): InteractiveTestEle
   return found;
 }
 
-function nameInput(root: InteractiveTestElement): InteractiveTestElement {
-  const found = root.querySelectorAll('input').find((candidate) =>
-    candidate.getAttribute('id') === 'species-name');
-  if (found === undefined) throw new Error('Species name input is missing.');
+function controlById(
+  root: InteractiveTestElement,
+  tag: 'input' | 'textarea',
+  id: string,
+): InteractiveTestElement {
+  const found = root.querySelectorAll(tag).find((candidate) =>
+    candidate.getAttribute('id') === id);
+  if (found === undefined) throw new Error(`Missing ${tag}#${id}.`);
   return found;
+}
+
+function controlByPath(
+  root: InteractiveTestElement,
+  tag: 'input' | 'textarea',
+  path: readonly (string | number)[],
+): InteractiveTestElement {
+  const encoded = JSON.stringify(path);
+  const found = root.querySelectorAll(tag).find((candidate) =>
+    candidate.getAttribute('data-authoring-path') === encoded);
+  if (found === undefined) throw new Error(`Missing ${tag} for ${encoded}.`);
+  return found;
+}
+
+function nameInput(root: InteractiveTestElement): InteractiveTestElement {
+  return controlByPath(root, 'input', ['name']);
 }
 
 function editName(root: InteractiveTestElement, value: string): void {
@@ -199,6 +219,90 @@ function publishDirectly(
 }
 
 describe('HA-7 service-driven refusal and terminal paths', () => {
+  it('HA7-REFUSAL renders real semantic issues, re-enables Preview, and recovers through corrected UI state', async () => {
+    const service = await authoringService();
+    const created = service.createDraft({ content_kind: 'species' });
+    const invalid = service.saveDraft({
+      draft_uuid: created.draft_uuid,
+      expected_revision: created.revision,
+      document: {
+        ...validDocument(created, ''),
+        name: '',
+        traits: [{
+          draft_item_uuid: itemUuid('real-refusal-trait'),
+          name: '',
+          description: 'The invalid fields are corrected through rendered controls.',
+          effects: [{
+            kind: 'damage_resistance',
+            draft_item_uuid: itemUuid('real-refusal-effect'),
+            label: 'Unresolved ward',
+            notes: 'Real publisher refusal.',
+            damage_type: null,
+          }],
+        }],
+        grants: [{
+          kind: 'skill_proficiency',
+          draft_item_uuid: itemUuid('real-refusal-grant'),
+          rule_key: 'real-refusal-skills',
+          count: 1,
+          skills: [],
+        }],
+      },
+    });
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const rendered = render(service, invalid);
+      rendered.root.querySelector('form')?.dispatchEvent(
+        new Event('submit', { cancelable: true }),
+      );
+      await settle();
+
+      const summary = rendered.root.querySelector('.authoring-validation-summary');
+      if (summary === null) throw new Error('Semantic validation summary is missing.');
+      const issues = summary.querySelectorAll('li').map((issue) =>
+        elementText(issue as unknown as Node).trim());
+      expect(issues).toEqual([
+        'Must not be empty.',
+        'At least one skill is required.',
+        'Skill count exceeds the available distinct skills.',
+        'Must not be empty.',
+        'Damage type is required.',
+      ]);
+      expect(rendered.root.querySelectorAll('[aria-invalid="true"]')).toHaveLength(5);
+      expect(button(rendered.root, 'Preview publish').disabled).toBe(false);
+
+      editName(rendered.root, 'Recovered Species');
+      const traitName = controlByPath(rendered.root, 'input', ['traits', 0, 'name']);
+      traitName.value = 'Recovered ward';
+      traitName.dispatchEvent(new Event('input'));
+      const damageType = controlByPath(
+        rendered.root, 'input', ['traits', 0, 'effects', 0, 'damage_type'],
+      );
+      damageType.value = 'Force';
+      damageType.dispatchEvent(new Event('change'));
+      const skill = controlById(
+        rendered.root, 'input', 'species-grant-real-refusal-grant-skill-arcana',
+      );
+      skill.checked = true;
+      skill.dispatchEvent(new Event('change'));
+      button(rendered.root, 'Save draft').click();
+      await settle();
+      expect(button(rendered.root, 'Preview publish').disabled).toBe(false);
+
+      rendered.root.querySelector('form')?.dispatchEvent(
+        new Event('submit', { cancelable: true }),
+      );
+      await settle();
+      expect(elementText(rendered.root as unknown as Node)).toContain('Publish preview');
+      expect(elementText(rendered.root as unknown as Node)).toContain('Recovered Species');
+      expect(rendered.root.querySelector('.authoring-validation-summary')).toBeNull();
+      expect(button(rendered.root, 'Preview publish').disabled).toBe(false);
+      rendered.cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
   it('HA7-REFUSAL dirty preview and generic preview refusal render alerts with reachable enabled controls', async () => {
     const service = await authoringService();
     const draft = savedSpecies(service, 'Preview Refusal Species');

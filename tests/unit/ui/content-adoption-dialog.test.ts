@@ -417,6 +417,61 @@ describe('the D82 content-adoption dialog', () => {
     }
   });
 
+  it('D108-CI8 traps focus and restores the invoker for Cancel, native cancel, and Escape', async () => {
+    const connection = await openTestDatabase();
+    connections.push(connection);
+    const db = new DatabaseContext(connection);
+    const plan = planContentImport(db, [itemNode(
+      'modal-discipline', 'Modal Discipline', { rule: 'shared trap' },
+    )]);
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const actions: readonly ((dialog: InteractiveTestElement) => void)[] = [
+        (dialog) => dialog.querySelectorAll('button').find((candidate) =>
+          candidate.textContent === 'Cancel',
+        )?.click(),
+        (dialog) => { dialog.dispatchEvent(new Event('cancel', { cancelable: true })); },
+        (dialog) => { dialog.dispatchEvent(keydown('Escape')); },
+      ];
+      for (const [index, action] of actions.entries()) {
+        const invoker = document.createElement('button');
+        document.body.append(invoker);
+        invoker.focus();
+        let cancellations = 0;
+        const rendered = createContentAdoptionDialog({
+          mount: document.body,
+          plan,
+          replan: async () => plan,
+          commit: async () => ({ kind: 'committed', outcomes: plan.outcomes }),
+          onCommitted: () => undefined,
+          onCancel: () => { cancellations += 1; },
+        });
+        const dialog = interactiveElement(rendered.element);
+        const buttons = dialog.querySelectorAll('button');
+        const cancel = buttons.find((candidate) => candidate.textContent === 'Cancel');
+        const commit = buttons.find((candidate) =>
+          candidate.textContent === 'Import with these choices');
+        if (cancel === undefined || commit === undefined) {
+          throw new Error('CI-8 modal controls are missing.');
+        }
+        expect(document.activeElement).toBe(cancel);
+        if (index === 0) {
+          dialog.dispatchEvent(keydown('Tab', true));
+          expect(document.activeElement).toBe(commit);
+          dialog.dispatchEvent(keydown('Tab'));
+          expect(document.activeElement).toBe(cancel);
+        }
+        action(dialog);
+        expect(cancellations).toBe(1);
+        expect(dialog.isConnected).toBe(false);
+        expect(document.activeElement).toBe(invoker);
+        rendered.cleanup();
+      }
+    } finally {
+      restoreDocument();
+    }
+  });
+
   it('lists every review with Match selected and replans before clone commit', async () => {
     const connection = await openTestDatabase();
     connections.push(connection);
