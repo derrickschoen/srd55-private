@@ -1,6 +1,21 @@
 import type { SqlValue } from '@sqlite.org/sqlite-wasm';
 import { normalizeCatalogName } from '../catalog/catalog-normalize';
-import { registerAssertedPlaceholderContentIdentity } from '../catalog/content-registry';
+import {
+  registerAssertedPlaceholderContentIdentity,
+  resolveContentReference,
+} from '../catalog/content-registry';
+import {
+  commitContentImport,
+  planContentImport,
+  type ContentImportChoices,
+  type ContentImportCommitResult,
+  type ContentImportNode,
+  type ContentImportPlan,
+  type ContentImportPlanToken,
+} from '../catalog/content-adoption';
+import { localContentReferenceImportNode } from '../backup/portable-content';
+import { canonicalJson } from '../commands/canonical-json';
+import { sha256 } from '../crypto/sha256';
 import { assertSourceRepeatable } from '../commands/add-source';
 import {
   sqlVersatileWeaponDamage,
@@ -53,6 +68,7 @@ import {
   validateShareDocument,
 } from './schema';
 import {
+  ambiguousReferenceIssue,
   missingClassIssue,
   missingSourceIssue,
   missingSubclassIssue,
@@ -60,8 +76,11 @@ import {
   selectionSlotIssue,
   ShareImportCompatibilityError,
   subclassMismatchIssue,
+  unprojectableReferenceIssue,
   type ShareImportIssue,
 } from './import-issues';
+import type { ContentKind } from '../catalog/content-identity';
+import type { ContentKey } from '../domain/ids';
 import type {
   VersatileWeaponDamage,
   WeaponDamage,
@@ -135,7 +154,14 @@ export interface SharePreview {
    * is written.
    */
   readonly includesWrittenText: boolean;
+  readonly adoptionPlan: ContentImportPlan;
 }
+
+export type ShareImportCommitResult =
+  | (Extract<ContentImportCommitResult, { readonly kind: 'committed' }> & {
+      readonly result: ShareImportResult;
+    })
+  | Exclude<ContentImportCommitResult, { readonly kind: 'committed' }>;
 
 /**
  * Share export/import is a GENERIC TABLE WALK: every read here is
@@ -1317,10 +1343,10 @@ export function exportCharacterShare(
   return validateShareDocument(document);
 }
 
-function definition(
+function definitionByResolvedKey(
   db: DatabaseContext,
   table: string,
-  key: string,
+  key: ContentKey,
 ): Row {
   const row = db.oneRaw(
     `SELECT * FROM ${table} WHERE content_key = ?`,
@@ -1334,15 +1360,182 @@ function definition(
   return row;
 }
 
-function lookup(
+interface ShareCatalogReference {
+  readonly kind: ContentKind;
+  readonly contentKey: ContentKey;
+  readonly issueType: 'class' | 'subclass' | ShareSource['type'] | 'spell';
+}
+
+interface PreparedShareReferences {
+  readonly nodes: readonly ContentImportNode[];
+  readonly markersByNodeId: ReadonlyMap<string, string>;
+  readonly targets: ReadonlyMap<string, ContentKey>;
+  readonly missingSpellKeys: ReadonlySet<string>;
+  readonly issues: readonly ShareImportIssue[];
+}
+
+function referenceMarker(kind: ContentKind, contentKey: string): string {
+  return `${kind}\u0000${contentKey}`;
+}
+
+function shareSpellKeys(document: CharacterShareDocument): readonly string[] {
+  return [...new Set([
+    ...document.selections.map((row) => row.spellKey),
+    ...document.spellbook.flatMap((row) =>
+      row.spellKey === undefined ? [] : [row.spellKey]
+    ),
+    ...document.preferences.map((row) => row.spellKey),
+    ...(document.loadouts ?? []).flatMap((row) =>
+      row.entries.map((entry) => entry.spellKey),
+    ),
+  ])];
+}
+
+function shareCatalogReferences(
+  document: CharacterShareDocument,
+): readonly ShareCatalogReference[] {
+  const references: ShareCatalogReference[] = [];
+  for (const item of document.classes) {
+    references.push({
+      kind: 'class',
+      contentKey: item.classKey as ContentKey,
+      issueType: 'class',
+    });
+    if (item.subclassKey !== undefined) {
+      references.push({
+        kind: 'subclass',
+        contentKey: item.subclassKey as ContentKey,
+        issueType: 'subclass',
+      });
+    }
+  }
+  for (const item of document.sources) {
+    if (item.generated === true) continue;
+    references.push({
+      kind: item.type,
+      contentKey: item.key as ContentKey,
+      issueType: item.type,
+    });
+  }
+  for (const contentKey of shareSpellKeys(document)) {
+    references.push({
+      kind: 'spell',
+      contentKey: contentKey as ContentKey,
+      issueType: 'spell',
+    });
+  }
+  const seen = new Set<string>();
+  return Object.freeze(references.filter((reference) => {
+    const marker = referenceMarker(reference.kind, reference.contentKey);
+    if (seen.has(marker)) return false;
+    seen.add(marker);
+    return true;
+  }));
+}
+
+function missingReferenceIssue(reference: ShareCatalogReference): ShareImportIssue {
+  switch (reference.issueType) {
+    case 'class': return missingClassIssue(reference.contentKey);
+    case 'subclass': return missingSubclassIssue(reference.contentKey);
+    case 'feat':
+    case 'species':
+    case 'background':
+      return missingSourceIssue(reference.issueType, reference.contentKey);
+    case 'spell':
+      throw new Error('Missing spells become placeholders, not compatibility issues.');
+  }
+}
+
+function prepareShareReferences(
   db: DatabaseContext,
-  table: string,
-  key: string,
-): Row | null {
-  return db.oneRaw(
-    `SELECT * FROM ${table} WHERE content_key = ?`,
-    [key],
-  );
+  document: CharacterShareDocument,
+): PreparedShareReferences {
+  const nodes: ContentImportNode[] = [];
+  const markersByNodeId = new Map<string, string>();
+  const targets = new Map<string, ContentKey>();
+  const missingSpellKeys = new Set<string>();
+  const issues: ShareImportIssue[] = [];
+  for (const reference of shareCatalogReferences(document)) {
+    const marker = referenceMarker(reference.kind, reference.contentKey);
+    const resolution = resolveContentReference(db, {
+      kind: reference.kind,
+      contentKey: reference.contentKey,
+    });
+    if (resolution.kind === 'missing') {
+      if (reference.kind === 'spell') {
+        missingSpellKeys.add(reference.contentKey);
+      } else {
+        issues.push(missingReferenceIssue(reference));
+      }
+      continue;
+    }
+    if (resolution.kind === 'ambiguous') {
+      issues.push(ambiguousReferenceIssue(
+        reference.issueType,
+        reference.contentKey,
+        resolution.candidates,
+      ));
+      continue;
+    }
+    targets.set(marker, resolution.contentKey);
+    if (!resolution.reviewRequired) continue;
+    const hasRegisteredFingerprint = db.scalar<number>(
+      `SELECT 1 FROM catalog_content_fingerprints
+       WHERE content_kind = ? AND content_key = ? LIMIT 1`,
+      [reference.kind, resolution.contentKey],
+    ) === 1;
+    if (!hasRegisteredFingerprint && reference.kind !== 'subclass') {
+      issues.push(unprojectableReferenceIssue(
+        reference.issueType,
+        reference.contentKey,
+      ));
+      continue;
+    }
+    let node: ContentImportNode;
+    try {
+      // A subclass's own current fingerprint is not the test for whether its
+      // live aggregate can be reviewed. The subclass projector validates its
+      // stored rows and every fingerprinted dependency (including its parent
+      // class), so an asserted subclass with an absent root fingerprint is
+      // still safe to present for explicit Match. Other kinds retain the
+      // registry-integrity requirement above.
+      node = localContentReferenceImportNode(db, {
+        id: `${reference.kind}:share:${reference.contentKey}`,
+        kind: reference.kind,
+        incomingContentKey: reference.contentKey,
+        localContentKey: resolution.contentKey,
+      });
+    } catch {
+      issues.push(unprojectableReferenceIssue(
+        reference.issueType,
+        reference.contentKey,
+      ));
+      continue;
+    }
+    nodes.push(node);
+    markersByNodeId.set(node.id, marker);
+  }
+  return Object.freeze({
+    nodes: Object.freeze(nodes),
+    markersByNodeId,
+    targets,
+    missingSpellKeys,
+    issues: Object.freeze(issues),
+  });
+}
+
+function targetKey(
+  targets: ReadonlyMap<string, ContentKey>,
+  kind: ContentKind,
+  incomingKey: string,
+): ContentKey {
+  const resolved = targets.get(referenceMarker(kind, incomingKey));
+  if (resolved === undefined) {
+    throw new ShareValidationError(
+      `catalog definition '${incomingKey}' is unavailable.`,
+    );
+  }
+  return resolved;
 }
 
 /**
@@ -1365,25 +1558,32 @@ function lookup(
 export function assessImportCompatibility(
   db: DatabaseContext,
   document: CharacterShareDocument,
+  targets?: ReadonlyMap<string, ContentKey>,
 ): readonly ShareImportIssue[] {
-  const issues: ShareImportIssue[] = [];
+  const prepared = targets === undefined
+    ? prepareShareReferences(db, document)
+    : null;
+  const resolvedTargets = targets ?? prepared?.targets ?? new Map();
+  const issues: ShareImportIssue[] = [...(prepared?.issues ?? [])];
 
   for (const item of document.classes) {
-    const classRow = lookup(db, 'class_definitions', item.classKey);
-    if (classRow === null) {
-      issues.push(missingClassIssue(item.classKey));
-    }
+    const resolvedClassKey = resolvedTargets.get(
+      referenceMarker('class', item.classKey),
+    );
+    const classRow = resolvedClassKey === undefined
+      ? null
+      : definitionByResolvedKey(db, 'class_definitions', resolvedClassKey);
     if (item.subclassKey === undefined) {
       continue;
     }
-    const subclassRow = lookup(
-      db,
-      'subclass_definitions',
-      item.subclassKey,
+    const resolvedSubclassKey = resolvedTargets.get(
+      referenceMarker('subclass', item.subclassKey),
     );
-    if (subclassRow === null) {
-      issues.push(missingSubclassIssue(item.subclassKey));
-    } else if (
+    const subclassRow = resolvedSubclassKey === undefined
+      ? null
+      : definitionByResolvedKey(db, 'subclass_definitions', resolvedSubclassKey);
+    if (
+      subclassRow !== null &&
       classRow !== null &&
       Number(subclassRow.class_definition_id) !== Number(classRow.id)
     ) {
@@ -1404,13 +1604,11 @@ export function assessImportCompatibility(
     }
     const table = SOURCE_TABLES[item.type];
     const key = item.key as string;
-    const row = lookup(db, table, key);
-    if (row === null) {
-      issues.push(missingSourceIssue(item.type, key));
-      continue;
-    }
-    const seen = (sourceCounts.get(key) ?? 0) + 1;
-    sourceCounts.set(key, seen);
+    const resolvedKey = resolvedTargets.get(referenceMarker(item.type, key));
+    if (resolvedKey === undefined) continue;
+    const row = definitionByResolvedKey(db, table, resolvedKey);
+    const seen = (sourceCounts.get(resolvedKey) ?? 0) + 1;
+    sourceCounts.set(resolvedKey, seen);
     if (seen === 2 && Number(row.repeatable) !== 1) {
       issues.push(
         notRepeatableIssue(item.type, key, String(row.name)),
@@ -1434,11 +1632,35 @@ export function ensureSharedSpell(
   db: DatabaseContext,
   key: string,
   displayName?: string,
+  resolvedContentKey?: ContentKey,
 ): number {
-  const existing = db.oneRaw(
-    'SELECT id FROM spell_versions WHERE content_key = ?',
-    [key],
-  );
+  const resolution = resolvedContentKey === undefined
+    ? resolveContentReference(db, {
+        kind: 'spell',
+        contentKey: key as ContentKey,
+      })
+    : Object.freeze({
+        kind: 'exact' as const,
+        contentKey: resolvedContentKey,
+        matchClass: 'stored-key' as const,
+        reviewRequired: false as const,
+      });
+  if (resolution.kind === 'ambiguous') {
+    throw new ShareImportCompatibilityError([
+      ambiguousReferenceIssue('spell', key, resolution.candidates),
+    ]);
+  }
+  if (resolvedContentKey === undefined && resolution.reviewRequired) {
+    throw new ShareValidationError(
+      `spell reference '${key}' requires content adoption review.`,
+    );
+  }
+  const existing = resolution.kind === 'missing'
+    ? null
+    : db.oneRaw(
+        'SELECT id FROM spell_versions WHERE content_key = ?',
+        [resolution.contentKey],
+      );
   if (existing !== null) {
     return Number(existing.id);
   }
@@ -1537,13 +1759,89 @@ function spellNameMap(
 
 const PREVIEW_ROLLBACK = new Error('Rollback successful share preview.');
 
+function shareOperationIdentity(document: CharacterShareDocument): string {
+  return sha256(canonicalJson(document));
+}
+
+function targetsForPlan(
+  prepared: PreparedShareReferences,
+  plan: ContentImportPlan,
+): ReadonlyMap<string, ContentKey> {
+  const targets = new Map(prepared.targets);
+  for (const outcome of plan.outcomes) {
+    if (outcome.kind === 'refused') continue;
+    const marker = prepared.markersByNodeId.get(outcome.id);
+    if (marker !== undefined) targets.set(marker, outcome.contentKey);
+  }
+  return targets;
+}
+
+function throwCompatibilityIssues(issues: readonly ShareImportIssue[]): void {
+  if (issues.length > 0) throw new ShareImportCompatibilityError(issues);
+}
+
+function shareImportPlan(
+  db: DatabaseContext,
+  document: CharacterShareDocument,
+  choices: ContentImportChoices,
+): {
+  readonly prepared: PreparedShareReferences;
+  readonly plan: ContentImportPlan;
+  readonly targets: ReadonlyMap<string, ContentKey>;
+} {
+  const prepared = prepareShareReferences(db, document);
+  throwCompatibilityIssues(prepared.issues);
+  const plan = planContentImport(
+    db,
+    prepared.nodes,
+    choices,
+    Object.freeze([]),
+    shareOperationIdentity(document),
+  );
+  return Object.freeze({
+    prepared,
+    plan,
+    targets: targetsForPlan(prepared, plan),
+  });
+}
+
 function assertImportableWithoutMutation(
   db: DatabaseContext,
   document: CharacterShareDocument,
+  prepared: PreparedShareReferences,
+  plan: ContentImportPlan,
+  targets: ReadonlyMap<string, ContentKey>,
+  choices: ContentImportChoices,
 ): void {
   try {
     db.transaction(() => {
-      importCharacterShare(db, document);
+      const createsClone = Object.values(choices).some(
+        (choice) => choice.decision === 'clone',
+      );
+      if (!createsClone) {
+        throwCompatibilityIssues(
+          assessImportCompatibility(db, document, targets),
+        );
+        insertCharacterShare(db, document, targets);
+        throw PREVIEW_ROLLBACK;
+      }
+      const result = commitContentImport(db, {
+        nodes: prepared.nodes,
+        token: plan.token,
+        choices,
+        operationIdentity: shareOperationIdentity(document),
+        afterInstall: (database) => {
+          throwCompatibilityIssues(
+            assessImportCompatibility(database, document, targets),
+          );
+          insertCharacterShare(database, document, targets);
+        },
+      });
+      if (result.kind !== 'committed') {
+        throw new ShareValidationError(
+          'Share content adoption could not be simulated.',
+        );
+      }
       throw PREVIEW_ROLLBACK;
     });
   } catch (error) {
@@ -1556,31 +1854,18 @@ function assertImportableWithoutMutation(
 export function previewCharacterShare(
   db: DatabaseContext,
   input: unknown,
+  choices: ContentImportChoices = Object.freeze({}),
 ): SharePreview {
   const document = validateShareDocument(input);
-  assertImportableWithoutMutation(db, document);
-  const keys = new Set([
-    ...document.selections.map((row) => row.spellKey),
-    ...document.spellbook.flatMap((row) =>
-      row.spellKey === undefined ? [] : [row.spellKey]
-    ),
-    ...document.preferences.map((row) => row.spellKey),
-    ...(document.loadouts ?? []).flatMap((row) =>
-      row.entries.map((entry) => entry.spellKey),
-    ),
-  ]);
-  const existing = new Set<string>();
-  const allKeys = [...keys];
-  for (let offset = 0; offset < allKeys.length; offset += 500) {
-    const chunk = allKeys.slice(offset, offset + 500);
-    for (const row of db.allRaw(
-      `SELECT content_key FROM spell_versions
-       WHERE content_key IN (${chunk.map(() => '?').join(', ')})`,
-      chunk,
-    )) {
-      existing.add(String(row.content_key));
-    }
-  }
+  const planned = shareImportPlan(db, document, choices);
+  assertImportableWithoutMutation(
+    db,
+    document,
+    planned.prepared,
+    planned.plan,
+    planned.targets,
+    choices,
+  );
   return {
     name: document.character.name,
     classes: document.classes.map((row) => ({
@@ -1593,7 +1878,7 @@ export function previewCharacterShare(
     sourceCount: document.sources.length,
     selectionCount: document.selections.length,
     spellbookCount: document.spellbook.length,
-    placeholderCount: allKeys.filter((key) => !existing.has(key)).length,
+    placeholderCount: planned.prepared.missingSpellKeys.size,
     weaponCount: document.weapons?.length ?? 0,
     armorCount: document.armor?.length ?? 0,
     hitPointRollCount: document.hitPointRolls?.length ?? 0,
@@ -1606,18 +1891,15 @@ export function previewCharacterShare(
       document.character.appearance !== undefined ||
       document.character.backstory !== undefined ||
       document.character.notes !== undefined,
+    adoptionPlan: planned.plan,
   };
 }
 
-export function importCharacterShare(
+function insertCharacterShare(
   db: DatabaseContext,
-  input: unknown,
+  document: CharacterShareDocument,
+  targets: ReadonlyMap<string, ContentKey>,
 ): ShareImportResult {
-  const document = validateShareDocument(input);
-  const preflight = assessImportCompatibility(db, document);
-  if (preflight.length > 0) {
-    throw new ShareImportCompatibilityError(preflight);
-  }
   return db.transaction(() => {
     const now = timestamp();
     const c = document.character;
@@ -1662,15 +1944,19 @@ export function importCharacterShare(
     for (const item of [...document.classes].sort(
       (left, right) => left.start - right.start || left.id - right.id,
     )) {
-      const classRow = definition(
+      const classRow = definitionByResolvedKey(
         db,
         'class_definitions',
-        item.classKey,
+        targetKey(targets, 'class', item.classKey),
       );
       const subclassRow =
         item.subclassKey === undefined
           ? null
-          : definition(db, 'subclass_definitions', item.subclassKey);
+          : definitionByResolvedKey(
+              db,
+              'subclass_definitions',
+              targetKey(targets, 'subclass', item.subclassKey),
+            );
       if (
         subclassRow !== null &&
         Number(subclassRow.class_definition_id) !== Number(classRow.id)
@@ -1762,7 +2048,11 @@ export function importCharacterShare(
         continue;
       }
       const key = item.key as string;
-      const sourceRow = definition(db, SOURCE_TABLES[item.type], key);
+      const sourceRow = definitionByResolvedKey(
+        db,
+        SOURCE_TABLES[item.type],
+        targetKey(targets, item.type, key),
+      );
       assertSourceRepeatable(
         db,
         characterId,
@@ -1949,7 +2239,12 @@ export function importCharacterShare(
     const resolveSpell = (key: string): number => {
       let id = spellIds.get(key);
       if (id === undefined) {
-        id = ensureSharedSpell(db, key, names.get(key));
+        id = ensureSharedSpell(
+          db,
+          key,
+          names.get(key),
+          targets.get(referenceMarker('spell', key)),
+        );
         spellIds.set(key, id);
       }
       return id;
@@ -2524,4 +2819,58 @@ export function importCharacterShare(
     reconcileCharacterSkillExpertise(db, characterId);
     return { characterId };
   });
+}
+
+export function commitCharacterShareImport(
+  db: DatabaseContext,
+  input: unknown,
+  token: ContentImportPlanToken,
+  choices: ContentImportChoices = Object.freeze({}),
+): ShareImportCommitResult {
+  const document = validateShareDocument(input);
+  const planned = shareImportPlan(db, document, choices);
+  let imported: ShareImportResult | null = null;
+  const committed = commitContentImport(db, {
+    nodes: planned.prepared.nodes,
+    token,
+    choices,
+    operationIdentity: shareOperationIdentity(document),
+    afterInstall: (database) => {
+      throwCompatibilityIssues(
+        assessImportCompatibility(database, document, planned.targets),
+      );
+      imported = insertCharacterShare(database, document, planned.targets);
+    },
+  });
+  if (committed.kind !== 'committed') return committed;
+  if (imported === null) {
+    throw new Error('Committed share import did not create a character.');
+  }
+  return Object.freeze({ ...committed, result: imported });
+}
+
+/**
+ * Sharing's direct import seam remains available for callers whose references
+ * need no review. Review-required links must use preview + commit so the common
+ * adoption dialog is never bypassed.
+ */
+export function importCharacterShare(
+  db: DatabaseContext,
+  input: unknown,
+): ShareImportResult {
+  const preview = previewCharacterShare(db, input);
+  if (preview.adoptionPlan.reviews.length > 0) {
+    throw new ShareValidationError(
+      'Share content adoption requires review before import.',
+    );
+  }
+  const committed = commitCharacterShareImport(
+    db,
+    input,
+    preview.adoptionPlan.token,
+  );
+  if (committed.kind !== 'committed') {
+    throw new ShareValidationError('Share content adoption was refused.');
+  }
+  return committed.result;
 }

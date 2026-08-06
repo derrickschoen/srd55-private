@@ -24,6 +24,7 @@ const mutationNames = [
   'ui-preview-counts',
   'ui-preview-conflicts',
   'ui-match-reason',
+  'ui-unevidenced-reason',
   'ui-same-name-guidance',
   'ui-refusal-block',
   'ui-preview-before-commit',

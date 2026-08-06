@@ -1,9 +1,14 @@
 import type { RpcClient } from '../rpc/client';
 import type {
+  ShareImportCommitResult,
   ShareExportOptions,
   ShareImportResult,
   SharePreview,
 } from './character-share';
+import type {
+  ContentImportChoices,
+  ContentImportPlanToken,
+} from '../catalog/content-adoption';
 import {
   encodeShareFragment,
   tryEncodeShareFragment,
@@ -24,8 +29,16 @@ export interface ShareClient {
     characterId: number,
     options?: ShareExportOptions,
   ): Promise<ShareEncodeResult>;
-  preview(fragment: string): Promise<SharePreview>;
+  preview(
+    fragment: string,
+    choices?: ContentImportChoices,
+  ): Promise<SharePreview>;
   importCharacter(fragment: string): Promise<ShareImportResult>;
+  commitCharacter(
+    fragment: string,
+    token: ContentImportPlanToken,
+    choices: ContentImportChoices,
+  ): Promise<ShareImportCommitResult>;
 }
 
 export function createShareClient(rpc: RpcClient): ShareClient {
@@ -57,14 +70,27 @@ export function createShareClient(rpc: RpcClient): ShareClient {
       characterId: number,
       options: ShareExportOptions = {},
     ) => tryEncodeShareFragment(await exportDebug(characterId, options)),
-    preview: (fragment: string) =>
-      rpc.call<{ fragment: string }, SharePreview>('share.preview', {
-        fragment,
-      }),
+    preview: (fragment: string, choices = Object.freeze({})) =>
+      rpc.call<
+        { fragment: string; choices: ContentImportChoices },
+        SharePreview
+      >('share.preview', { fragment, choices }),
     importCharacter: (fragment: string) =>
       rpc.call<{ fragment: string }, ShareImportResult>(
         'share.importCharacter',
         { fragment },
       ),
+    commitCharacter: (
+      fragment: string,
+      token: ContentImportPlanToken,
+      choices: ContentImportChoices,
+    ) => rpc.call<
+      {
+        fragment: string;
+        token: ContentImportPlanToken;
+        choices: ContentImportChoices;
+      },
+      ShareImportCommitResult
+    >('share.importCharacter', { fragment, token, choices }),
   });
 }

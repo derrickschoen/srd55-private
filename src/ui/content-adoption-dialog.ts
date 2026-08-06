@@ -39,6 +39,9 @@ function sameIdentityName(review: ContentImportReviewRow): boolean {
 }
 
 function reasonLabel(review: ContentImportReviewRow): string {
+  if (review.incomingFingerprint === null) {
+    return 'Reference supplied no rules evidence';
+  }
   switch (review.matchClass) {
     case 'alias': return 'Alias';
     case 'compatible-fingerprint': return 'Compatible fingerprint';
@@ -281,7 +284,11 @@ export function createContentAdoptionDialog(
       fieldset.append(element('p', {
         text: `Match reason: ${reasonLabel(row)} — local: ${row.localName}`,
       }));
-      if (row.matchClass === 'key-collision') {
+      if (row.incomingFingerprint === null) {
+        fieldset.append(element('p', {
+          text: 'The share supplied only a reference, not incoming rules. Confirm that your local content should stand in for it, or keep a renamed private copy.',
+        }));
+      } else if (row.matchClass === 'key-collision') {
         fieldset.append(element('p', {
           text: sameIdentityName(row)
             ? 'The normalized name is already in use for different rules. Rename the private copy to keep both.'

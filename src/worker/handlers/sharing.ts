@@ -1,8 +1,10 @@
 import {
+  commitCharacterShareImport,
   exportCharacterShare,
   importCharacterShare,
   previewCharacterShare,
 } from '../../sharing/character-share';
+import { isContentImportChoices } from '../../catalog/catalog-schema';
 import { decodeShareFragment } from '../../sharing/codec';
 import type { JsonValue } from '../../domain/models';
 import { ShareImportCompatibilityError } from '../../sharing/import-issues';
@@ -38,6 +40,8 @@ interface ExportParams {
 
 interface FragmentParams {
   readonly fragment: string;
+  readonly choices?: import('../../catalog/content-adoption').ContentImportChoices;
+  readonly token?: import('../../catalog/content-adoption').ContentImportPlanToken;
 }
 
 function isExportParams(params: unknown): params is ExportParams {
@@ -55,8 +59,24 @@ function isExportParams(params: unknown): params is ExportParams {
 function isFragmentParams(params: unknown): params is FragmentParams {
   return (
     isRecord(params) &&
-    Object.keys(params).length === 1 &&
-    typeof params.fragment === 'string'
+    Object.keys(params).every((key) =>
+      ['fragment', 'choices', 'token'].includes(key)) &&
+    typeof params.fragment === 'string' &&
+    (params.choices === undefined || isContentImportChoices(params.choices)) &&
+    (params.token === undefined ||
+      typeof params.token === 'string' && /^[0-9a-f]{64}$/u.test(params.token))
+  );
+}
+
+function isPreviewParams(params: unknown): params is FragmentParams {
+  return isFragmentParams(params) && params.token === undefined;
+}
+
+function isImportParams(params: unknown): params is FragmentParams {
+  return isFragmentParams(params) && (
+    params.token === undefined
+      ? params.choices === undefined
+      : params.choices !== undefined
   );
 }
 
@@ -73,11 +93,15 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
   ),
   defineRpcHandler(
     'share.preview',
-    isFragmentParams,
+    isPreviewParams,
     async (context, params) => {
       const document = await decodeShareFragment(params.fragment);
       try {
-        return previewCharacterShare(context.db, document);
+        return previewCharacterShare(
+          context.db,
+          document,
+          params.choices ?? Object.freeze({}),
+        );
       } catch (error) {
         // Preview runs the real import inside a rollback, so it raises the same
         // compatibility failures. This is the surface that matters most: the
@@ -88,11 +112,18 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
   ),
   defineRpcHandler(
     'share.importCharacter',
-    isFragmentParams,
+    isImportParams,
     async (context, params) => {
       const document = await decodeShareFragment(params.fragment);
       try {
-        return importCharacterShare(context.db, document);
+        return params.token === undefined
+          ? importCharacterShare(context.db, document)
+          : commitCharacterShareImport(
+              context.db,
+              document,
+              params.token,
+              params.choices ?? Object.freeze({}),
+            );
       } catch (error) {
         // The generic registry catch keeps only `error.message`, so structured
         // issues would be flattened to one string before reaching the UI.

@@ -1153,10 +1153,11 @@ function installSpell(
 function portableNode(
   db: DatabaseContext,
   entry: PortableContentAggregate,
+  allowReferenceKey = false,
 ): ContentImportNode {
   const projected = projectPortableAggregate(entry.kind, entry.aggregate);
   const assertedKey = entry.content_key as ContentKey;
-  if (!isAssertedExternalContentKey(assertedKey)) {
+  if (!allowReferenceKey && !isAssertedExternalContentKey(assertedKey)) {
     throw new BackupValidationError(`Portable asserted key '${entry.content_key}' is invalid.`);
   }
   switch (entry.kind) {
@@ -1229,6 +1230,75 @@ function portableNode(
       });
     }
   }
+}
+
+/**
+ * Convert a recipient-local candidate into the CI-4a adoption shape for a
+ * reference-only character share. The share contributes no aggregate bytes:
+ * this projection exists only so the common Clone choice can copy and rename
+ * the matched local aggregate. Match continues to resolve the incoming key.
+ */
+export function localContentReferenceImportNode(
+  db: DatabaseContext,
+  input: {
+    readonly id: string;
+    readonly kind: ContentKind;
+    readonly incomingContentKey: ContentKey;
+    readonly localContentKey: ContentKey;
+  },
+): ContentImportNode {
+  const stored = projectStoredPortableContentV1(
+    db,
+    input.kind,
+    input.localContentKey,
+  );
+  const aggregate = stored.aggregate as PortableContentAggregateValue;
+  const identity = deriveContentIdentityV1({
+    kind: input.kind,
+    edition: aggregate.rules_edition,
+    name: aggregate.name,
+    payload: stored.payload,
+  });
+  const base = portableNode(db, {
+    kind: input.kind,
+    content_key: input.incomingContentKey,
+    key_kind: 'asserted',
+    fingerprint_scheme: identity.envelope.scheme,
+    fingerprint_digest: identity.digest,
+    aggregate,
+    ...(input.kind === 'spell'
+      ? {
+          spell_identity: portableSpellIdentityMetadata(
+            db,
+            aggregate as SpellContentAggregateV1,
+          ),
+        }
+      : {}),
+  }, true);
+  const withReference = (
+    projection: ContentImportProjection,
+  ): ContentImportProjection => Object.freeze({
+    ...projection,
+    referenceOnly: Object.freeze({
+      contentKey: input.incomingContentKey,
+    }),
+  });
+  return Object.freeze({
+    id: input.id,
+    projection: withReference(base.projection),
+    reproject: (
+      reprojection: Parameters<NonNullable<ContentImportNode['reproject']>>[0],
+    ) => {
+      const projected = base.reproject?.(reprojection) ?? {
+        ...base.projection,
+        name: reprojection.name,
+        assertedKey: reprojection.assertedKey,
+      };
+      return reprojection.assertedKey === input.incomingContentKey
+        ? withReference(projected)
+        : projected;
+    },
+  });
 }
 
 export function portableContentImportNodes(
