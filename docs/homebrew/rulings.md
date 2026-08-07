@@ -5,6 +5,45 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-07 — Barbed Court: the slot refresh costs no action; rate closes at ×2 — open item 1 of 9 CLOSED
+
+Owner's ruling, verbatim:
+
+> Refresh is free because monk bonus action is busy
+
+Effect: the refresh requires no action. This deliberately deviates from the
+SRD's Font of Magic pattern (Creating Spell Slots is a Bonus Action there);
+the SRD's own precedent for the free direction is the same feature's mirror
+clause, *"Converting Spell Slots to Sorcery Points … (no action required)"*,
+so the drafting shape exists in licensed text. Rules text will read: **"no
+action required."**
+
+The rate closes at **2 Focus Points per level of the slot regained** — the
+owner's standing directive ("Make the cost 2 and it will be more useful at
+higher levels") plus the session's concurring recommendation under the refresh
+model; the invited sliding-scale alternatives were run and reported and none
+was chosen.
+
+Consequence flagged, recorded not corrected: with no action cost and no
+per-turn bound on the refresh itself, the feature can run off-turn — at Monk
+7+ a Barbed Court monk can cast *Shield* as a Reaction every round, regaining
+the slot for 2 Focus each time, roughly floor(pool ÷ 2) extra *Shield*s per
+short-rest window beyond native slots. *Shield*'s once-per-round Reaction and
+the One-Spell-with-a-Spell-Slot-per-Turn rule are the only limiters. This is
+consistent with the arcane-tank intent and the owner's front-load directive;
+it is the number a reviewer will circle first.
+
+Assembled feature, all sub-rulings now closed — refresh model (native slots
+only, no 5th-level slots), from Monk 6, 2 Focus per slot level, no action,
+granted rows at 3/6/11/17 with accepted dead windows:
+
+> **Focus Refresh (Monk 6).** You can spend Focus Points to regain one of your
+> expended spell slots (no action required). The cost is 2 Focus Points per
+> level of the slot regained.
+
+Wording above is the working draft for the rewrite, not yet owner-approved
+verbatim.
+
 ## 2026-08-07 — Barbed Court: granted Court Spells rows stay at 3/6/11/17; early grants accepted, dead windows and all
 
 Owner's ruling, verbatim:
