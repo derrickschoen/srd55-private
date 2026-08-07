@@ -5,6 +5,63 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-06 — Barbed Court: every progression row realigned to the 3/6/11/17 subclass levels
+
+Owner's ruling, verbatim:
+
+> I got the monk subclass levels wrong. Re align everything that was below 9 to
+> 6 and everything 9 to 15 to 11 and anything 16 and above to 17
+
+Interpretation stated explicitly, because one reading is impossible: features
+already sitting at **Monk 3 stay at Monk 3**. A Monk gains its subclass at
+level 3 and must have a feature there, so "below 9 → 6" is read as applying to
+the *non-subclass* levels this design had been using — 7, 13 and 19, inherited
+from the third-caster slot table — rather than sweeping level 3 into 6.
+
+Applied to every progression row:
+
+**Court Spells (granted, always prepared)** — was 3 / 7 / 13 / 19:
+
+| Monk level | Court Spells |
+|---:|---|
+| 3 | *Shield*, *Dissonant Whispers*, *Command* |
+| 6 | *Mirror Image*, *Misty Step*, *Silence* |
+| 11 | *Hypnotic Pattern*, *Fear* |
+| 17 | *Compulsion* |
+
+**Focus-to-slot conversion cap** — was 6 / 7 / 13 / 17:
+
+| Monk level | Highest slot you can create | Focus cost |
+|---:|---:|---:|
+| 6 | 2nd | 2 |
+| 11 | 3rd | 3 |
+| 17 | 5th | 5 |
+
+**Chosen prepared spells** — increments snapped to the subclass cadence:
+3 at Monk 3, 5 at Monk 6, 7 at Monk 11, 9 at Monk 17.
+
+Consequence, and it is a good one — recorded because it changes the reading of
+an earlier finding rather than merely restating it:
+
+- **The realignment makes the conversion structural instead of a bolt-on.**
+  Each granted Court Spells row now becomes castable exactly when the
+  conversion tier that funds it arrives. The Monk-6 row is 2nd-level spells and
+  native 2nd-level slots do not exist until Monk 7; the Monk-11 row is
+  3rd-level and native slots arrive at 13; the Monk-17 row is 4th-level and
+  native slots arrive at 19. In every case the Focus conversion is what makes
+  the granted spell usable on schedule. Without it each row would sit dead for
+  one to two levels.
+- **The flip side, stated plainly:** the conversion is therefore running ahead
+  of the third-caster chassis at every tier — one level ahead at Monk 6, two at
+  Monk 11, four at Monk 17. That is the intended effect of the owner's
+  level-6-loading directive, not an oversight, but it means the conversion can
+  no longer be removed or repriced without leaving three granted spells
+  uncastable.
+- The open conversion-rate question (recorded below) is unchanged in kind but
+  its cheapest tier now buys 2nd-level rather than 1st-level castings from Monk
+  6: 18 Focus/day at Monk 6 buys **9 second-level castings**, against a Wizard
+  6's three 2nd-level slots.
+
 ## 2026-08-06 — Barbed Court drops the Psionic Fist ancestry; a straight Psionic Fist conversion is commissioned separately
 
 Owner's ruling, verbatim:
