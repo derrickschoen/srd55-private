@@ -87,6 +87,7 @@ function minimalCharacterBackup(): CharacterBackupDocument {
       spell_versions: [],
     },
     content: [],
+    supersessions: [],
   };
 }
 

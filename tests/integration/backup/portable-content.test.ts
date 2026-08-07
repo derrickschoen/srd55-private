@@ -16,6 +16,7 @@ import {
   importLibraryDocument,
 } from '../../../src/backup/library-export';
 import {
+  PRE_LINEAGE_CHARACTER_BACKUP_VERSION,
   PRE_FLAVOR_CHARACTER_BACKUP_VERSION,
   PREVIOUS_CHARACTER_BACKUP_VERSION,
 } from '../../../src/backup/backup-version';
@@ -359,7 +360,7 @@ describe('portable content manifests', () => {
     expect(target.scalar<number>('SELECT count(*) FROM characters')).toBe(2);
   });
 
-  it('CI5-LIBRARY-SELECTED-SUBSET round-trips only the selected creation closure', async () => {
+  it('CI5-LIBRARY-SELECTED-SUBSET round-trips the selected creation and its lineage closure', async () => {
     const source = await database();
     const fixture = seedClosureLibrary(source);
     source.exec(
@@ -374,9 +375,10 @@ describe('portable content manifests', () => {
       exportedAt,
     );
     expect(document.selected_content_keys).toEqual([fixture.speciesKey]);
-    expect(JSON.stringify(document)).not.toContain('CI7-SUPERSESSION-SENTINEL');
+    expect(JSON.stringify(document)).toContain('CI7-SUPERSESSION-SENTINEL');
     expect(manifestEnumeration(document)).toEqual([
       'feat:expanded:content.feat:keen-memory',
+      'feat:expanded:content.feat:unreferenced-feat',
       'species:expanded:content.species:closure-species',
     ]);
 
@@ -388,10 +390,15 @@ describe('portable content manifests', () => {
       exportedAt,
     )).toEqual(document);
     expect(target.scalar<number>('SELECT count(*) FROM background_definitions')).toBe(0);
-    expect(target.scalar<number>(
-      'SELECT count(*) FROM feat_definitions WHERE content_key = ?',
-      [fixture.unrelatedKey],
-    )).toBe(0);
+    expect(target.allRaw(
+      `SELECT content_kind, superseded_content_key, successor_content_key, recorded_at
+       FROM catalog_content_supersessions`,
+    )).toEqual([{
+      content_kind: 'feat',
+      superseded_content_key: fixture.featKey,
+      successor_content_key: fixture.unrelatedKey,
+      recorded_at: 'CI7-SUPERSESSION-SENTINEL',
+    }]);
   });
 
   it('CI5-LIBRARY-WHOLE exports every installed external creation as a library document', async () => {
@@ -406,15 +413,53 @@ describe('portable content manifests', () => {
     const document = exportWholeLibrary(source, exportedAt);
 
     expect(document.format).toBe('dnd-multiclass-spells/library');
-    expect(document.version).toBe(1);
+    expect(document.version).toBe(2);
     expect(document.selection).toBe('all');
-    expect(JSON.stringify(document)).not.toContain('CI7-SUPERSESSION-SENTINEL');
+    expect(JSON.stringify(document)).toContain('CI7-SUPERSESSION-SENTINEL');
     expect(manifestEnumeration(document)).toEqual([
       'feat:expanded:content.feat:keen-memory',
       'feat:expanded:content.feat:unreferenced-feat',
       'species:expanded:content.species:closure-species',
       'background:expanded:content.background:closure-background',
     ]);
+    const target = await database();
+    importLibraryDocument(target, document);
+    expect(target.allRaw(
+      `SELECT content_kind, superseded_content_key, successor_content_key, recorded_at
+       FROM catalog_content_supersessions`,
+    )).toEqual(document.supersessions);
+  });
+
+  it('HA12-LIBRARY-V1-FROZEN imports the pre-lineage library shape without inventing edges', async () => {
+    const source = await database();
+    const fixture = seedClosureLibrary(source);
+    source.exec(
+      `INSERT INTO catalog_content_supersessions (
+         content_kind, superseded_content_key, successor_content_key, recorded_at
+       ) VALUES ('feat', ?, ?, 'CI7-SUPERSESSION-SENTINEL')`,
+      [fixture.featKey, fixture.unrelatedKey],
+    );
+    const previous = structuredClone(
+      exportWholeLibrary(source, exportedAt),
+    ) as unknown as Record<string, unknown>;
+    previous.version = 1;
+    delete previous.supersessions;
+
+    const target = await database();
+    importLibraryDocument(target, previous);
+    expect(target.allRaw(
+      `SELECT content_kind, content_key FROM catalog_content_identities
+       ORDER BY content_kind, content_key`,
+    )).toEqual([
+      { content_kind: 'background', content_key: fixture.backgroundKey },
+      { content_kind: 'feat', content_key: fixture.featKey },
+      { content_kind: 'feat', content_key: fixture.unrelatedKey },
+      { content_kind: 'species', content_key: fixture.speciesKey },
+    ]);
+    expect(target.allRaw(
+      `SELECT content_kind, superseded_content_key, successor_content_key
+       FROM catalog_content_supersessions`,
+    )).toEqual([]);
   });
 
   it('CI5-ITEM-DEFINITION round-trips attunement and the complete ability-override definition effect', async () => {
@@ -543,6 +588,7 @@ describe('portable content manifests', () => {
     historical.version = PRE_FLAVOR_CHARACTER_BACKUP_VERSION;
     historical.spell_definitions = emptyHistoricalSpellDefinitions();
     delete historical.content;
+    delete historical.supersessions;
     const character = historical.character as Record<string, unknown>;
     delete character.alignment;
     delete character.appearance;
@@ -567,7 +613,7 @@ describe('portable content manifests', () => {
     )).toEqual({ name: 'Historical Hero', archived_at: null });
   });
 
-  it('CI5-V4-FROZEN imports the immediately previous archived character shape through its adapter', async () => {
+  it('CI5-V4-FROZEN imports the pre-content archived character shape through its adapter', async () => {
     const source = await database();
     const characterId = source.exec(
       `INSERT INTO characters (name, archived_at)
@@ -579,6 +625,7 @@ describe('portable content manifests', () => {
     previous.version = PREVIOUS_CHARACTER_BACKUP_VERSION;
     previous.spell_definitions = emptyHistoricalSpellDefinitions();
     delete previous.content;
+    delete previous.supersessions;
 
     const target = await database();
     const imported = importCharacterBackup(target, previous);
@@ -590,6 +637,41 @@ describe('portable content manifests', () => {
       name: 'V4 Hero',
       archived_at: '2042-03-04T05:06:07.000Z',
     });
+  });
+
+  it('HA12-CHARACTER-V5-FROZEN imports carried content without inventing lineage', async () => {
+    const source = await database();
+    const fixture = seedClosureLibrary(source);
+    source.exec(
+      `INSERT INTO catalog_content_supersessions (
+         content_kind, superseded_content_key, successor_content_key, recorded_at
+       ) VALUES ('feat', ?, ?, 'CI7-SUPERSESSION-SENTINEL')`,
+      [fixture.featKey, fixture.unrelatedKey],
+    );
+    const previous = structuredClone(exportCharacterBackup(
+      source,
+      seedClosureCharacter(source, fixture),
+      exportedAt,
+    )) as unknown as Record<string, unknown>;
+    previous.version = PRE_LINEAGE_CHARACTER_BACKUP_VERSION;
+    delete previous.supersessions;
+
+    const target = await database();
+    importCharacterBackup(target, previous);
+    expect(PRE_LINEAGE_CHARACTER_BACKUP_VERSION).toBe(5);
+    expect(target.allRaw(
+      `SELECT content_kind, content_key FROM catalog_content_identities
+       ORDER BY content_kind, content_key`,
+    )).toEqual([
+      { content_kind: 'background', content_key: fixture.backgroundKey },
+      { content_kind: 'feat', content_key: fixture.featKey },
+      { content_kind: 'feat', content_key: fixture.unrelatedKey },
+      { content_kind: 'species', content_key: fixture.speciesKey },
+    ]);
+    expect(target.allRaw(
+      `SELECT content_kind, superseded_content_key, successor_content_key
+       FROM catalog_content_supersessions`,
+    )).toEqual([]);
   });
 
   it('binds a character import plan token to the complete character payload', async () => {

@@ -115,6 +115,10 @@ const ROOT_LEVEL_FEAT_CHOICES_INDEX = fieldIndex(
   WIRE_SCHEMA.tuples.root.fields,
   'levelFeatChoices',
 );
+const ROOT_PORTABLE_CONTENT_INDEX = fieldIndex(
+  WIRE_SCHEMA.tuples.root.fields,
+  'portableContent',
+);
 
 const CHARACTER_TUPLE_LENGTHS = WIRE_SCHEMA.tuples.character.arities;
 const SHEET_TUPLE_LENGTH = WIRE_SCHEMA.tuples.sheet.arities[0];
@@ -604,6 +608,7 @@ export function shareDocumentToPositional(
       levelFeatChoices: document.levelFeatChoices?.map((row) =>
         objectToPositional(row, WIRE_SCHEMA.tuples.levelFeatChoice.fields)
       ),
+      portableContent: document.portableContent,
     },
     WIRE_SCHEMA.tuples.root.fields,
   );
@@ -624,6 +629,7 @@ function decodeCurrentWire(input: unknown): CharacterShareDocument {
   const wireItems = root[ROOT_ITEMS_INDEX];
   const wireExpertiseGrants = root[ROOT_EXPERTISE_GRANTS_INDEX];
   const wireLevelFeatChoices = root[ROOT_LEVEL_FEAT_CHOICES_INDEX];
+  const wirePortableContent = root[ROOT_PORTABLE_CONTENT_INDEX];
   const wireAttunementSlots =
     root[ROOT_ATTUNEMENT_SLOTS_INDEX] === null
       ? null
@@ -1023,7 +1029,20 @@ function decodeCurrentWire(input: unknown): CharacterShareDocument {
       )
     );
   }
+  if (wirePortableContent !== null) {
+    raw.portableContent = wirePortableContent;
+  }
   return validateShareDocument(raw);
+}
+
+/** Frozen v17 reference-only projection used for SRD links and v18 fallback. */
+export function shareDocumentToReferencePositional(
+  document: CharacterShareDocument,
+): unknown[] {
+  const positional = shareDocumentToPositional(document);
+  positional[ROOT_VERSION_INDEX] = 17;
+  positional.splice(ROOT_PORTABLE_CONTENT_INDEX, 1);
+  return positional;
 }
 
 export function positionalToShareDocument(
@@ -1121,6 +1140,8 @@ export function positionalToShareDocument(
       }
       return decodeCurrentWire(migrated);
     }
+    case 18:
+      return decodeCurrentWire(input);
     default:
       throw new ShareValidationError('version is unsupported.');
   }
@@ -1227,8 +1248,15 @@ export type ShareEncodeResult =
       readonly limit: 'compressed' | 'encoded';
     };
 
-function encodedInput(document: CharacterShareDocument): Uint8Array {
-  const json = JSON.stringify(shareDocumentToPositional(document));
+function encodedInput(
+  document: CharacterShareDocument,
+  referenceOnly = false,
+): Uint8Array {
+  const json = JSON.stringify(
+    referenceOnly
+      ? shareDocumentToReferencePositional(document)
+      : shareDocumentToPositional(document),
+  );
   const input = new TextEncoder().encode(json);
   if (input.byteLength > SHARE_LIMITS.decompressedBytes) {
     throw new ShareValidationError(
@@ -1276,6 +1304,12 @@ export function tryEncodeShareFragment(
   document: CharacterShareDocument,
 ): Promise<ShareEncodeResult> {
   return tryEncodeInput(encodedInput(document));
+}
+
+export function tryEncodeReferenceOnlyShareFragment(
+  document: CharacterShareDocument,
+): Promise<ShareEncodeResult> {
+  return tryEncodeInput(encodedInput(document, true));
 }
 
 export function encodeShareFragment(
