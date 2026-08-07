@@ -114,6 +114,7 @@ function unused<T>(): Promise<T> {
 function client(overrides: Partial<AuthoringClient> = {}): AuthoringClient {
   return {
     list: () => unused(),
+    backgroundReferences: () => unused(),
     createDraft: () => unused(),
     readDraft: () => unused(),
     saveDraft: () => unused(),

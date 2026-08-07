@@ -45,6 +45,7 @@ import {
   createPublishAdoptionDialog,
   type ContentAdoptionDialog,
 } from '../../content-adoption-dialog';
+import { createAuthoringEditGeneration } from '../../authoring/edit-generation';
 import { clear, element, type Cleanup } from '../../dom';
 import { freeTextSpan } from '../../free-text';
 import type { ScreenContext } from '../../screen';
@@ -358,8 +359,7 @@ function progressionRuns(
 export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
   let stored = options.draft;
   let document = stored.document;
-  let dirty = false;
-  let editGeneration = 0;
+  const edits = createAuthoringEditGeneration();
   let disposed = false;
   const dialogs: (DraftConflictDialog | ContentAdoptionDialog)[] = [];
   const openLevels = new Set<CharacterLevel>(
@@ -374,24 +374,23 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
 
   const update = (changed: SubclassAuthoringDraft): void => {
     document = changed;
-    editGeneration += 1;
-    dirty = true;
+    edits.edit();
     options.mount.querySelector('.subclass-publish-preview')?.remove();
     const status = options.mount.querySelector<HTMLElement>('.subclass-authoring-status');
     if (status !== null) status.textContent = 'Unsaved changes.';
   };
 
   const installGuards: Cleanup[] = [installDraftNavigationGuard(options.context, {
-    isDirty: () => dirty,
+    isDirty: () => edits.dirty,
     confirmLeave: options.confirmLeave ?? (() =>
       runtimeWindow?.confirm('Leave this subclass draft with unsaved changes?') ?? false),
   })];
   if (runtimeWindow !== null) {
-    installGuards.push(installDraftBeforeUnloadGuard(runtimeWindow, () => dirty));
+    installGuards.push(installDraftBeforeUnloadGuard(runtimeWindow, () => edits.dirty));
   }
 
   const renderPublished = (result: PublishResult): void => {
-    dirty = false;
+    edits.publish();
     clear(options.mount);
     const heading = element('h2', {
       text: result.outcome === 'created' ? 'Subclass published' : 'Matched existing content',
@@ -447,7 +446,7 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
     const validationMount = element('div', { className: 'authoring-validation-mount' });
     const status = element('p', {
       className: 'subclass-authoring-status',
-      text: dirty ? 'Unsaved changes.' : `Saved revision ${String(stored.revision)}.`,
+      text: edits.dirty ? 'Unsaved changes.' : `Saved revision ${String(stored.revision)}.`,
       attributes: { role: 'status', 'aria-live': 'polite' },
     });
     const locked = readOnlyRootOnly();
@@ -1229,7 +1228,7 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
       attributes: { type: 'submit' },
     });
     const saveDraft = async (): Promise<boolean> => {
-      const savedGeneration = editGeneration;
+      const savedGeneration = edits.capture();
       save.disabled = true;
       preview.disabled = true;
       status.textContent = 'Saving draft…';
@@ -1243,9 +1242,8 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
           throw new TypeError('Saving the subclass draft returned a different content kind.');
         }
         stored = saved as StoredSubclassDraft;
-        if (editGeneration === savedGeneration) {
+        if (edits.acceptSave(savedGeneration)) {
           document = stored.document;
-          dirty = false;
           status.textContent = `Saved revision ${String(stored.revision)}.`;
         } else {
           status.textContent = `Saved revision ${String(stored.revision)}; newer unsaved changes remain.`;
@@ -1267,7 +1265,7 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
               }
               stored = loaded as StoredSubclassDraft;
               document = stored.document;
-              dirty = false;
+              edits.replaceWithSaved();
               openLevels.clear();
               for (const feature of document.features) {
                 if (feature.class_level !== null) openLevels.add(feature.class_level);
@@ -1275,7 +1273,7 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
               render();
             },
             onKeepLocal: () => {
-              dirty = true;
+              edits.edit();
               status.textContent = 'The newer saved revision was left unchanged.';
             },
           });
@@ -1301,7 +1299,7 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
     save.addEventListener('click', () => void saveDraft());
     form.addEventListener('submit', (event) => {
       event.preventDefault();
-      if (dirty) {
+      if (edits.dirty) {
         status.textContent = 'Save the draft before previewing publish.';
         status.setAttribute('role', 'alert');
         save.focus();
@@ -1319,14 +1317,14 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
         return;
       }
       preview.disabled = true;
-      const previewGeneration = editGeneration;
+      const previewGeneration = edits.capture();
       status.textContent = 'Validating publish preview…';
       void options.client.previewPublish({
         draft_uuid: stored.draft_uuid,
         expected_revision: stored.revision,
       }).then((publishPreview) => {
         if (disposed) return;
-        if (editGeneration !== previewGeneration) {
+        if (!edits.isCurrent(previewGeneration)) {
           discardStalePreview();
           return;
         }
@@ -1369,7 +1367,7 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
           : 'Preview ready; content adoption review is required.';
       }).catch((error: unknown) => {
         if (disposed) return;
-        if (editGeneration !== previewGeneration) {
+        if (!edits.isCurrent(previewGeneration)) {
           discardStalePreview();
           return;
         }

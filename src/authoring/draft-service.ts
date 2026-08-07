@@ -7,7 +7,7 @@ import {
 import type { DatabaseContext } from '../db/database';
 import type { CharacterId, ContentKey } from '../domain/ids';
 import type { JsonValue } from '../domain/models';
-import { skills, spellSchool, type Skill } from '../domain/enums';
+import { skills, spellSchool, type RulesEdition, type Skill } from '../domain/enums';
 import {
   CONTENT_FINGERPRINT_SCHEME_V1,
   type ContentKind,
@@ -26,6 +26,7 @@ import type {
   AuthoringDraftGrant,
   AuthoringGrant,
   AuthoringLibrary,
+  BackgroundAuthoringReferences,
   BackgroundAuthoringDraft,
   BackgroundAuthoringDraftEquipment,
   BackgroundContentAggregate,
@@ -146,10 +147,7 @@ function draftRow(row: SqlRow): DraftRow {
 }
 
 function publishedRow(row: SqlRow): PublishedRow {
-  const edition = sqlString(row, 'rules_edition');
-  if (edition !== '2014' && edition !== '2024' && edition !== 'expanded') {
-    throw new TypeError(`Published content has unknown rules edition "${edition}".`);
-  }
+  const edition = rulesEdition(sqlString(row, 'rules_edition'));
   return {
     content_key: sqlString(row, 'content_key') as ContentKey,
     content_kind: authoredKind(sqlString(row, 'content_kind')),
@@ -157,6 +155,13 @@ function publishedRow(row: SqlRow): PublishedRow {
     rules_edition: edition,
     superseded_by: sqlNullableString(row, 'superseded_by') as ContentKey | null,
   };
+}
+
+function rulesEdition(edition: string): RulesEdition {
+  if (edition !== '2014' && edition !== '2024' && edition !== 'expanded') {
+    throw new TypeError(`Published content has unknown rules edition "${edition}".`);
+  }
+  return edition;
 }
 
 function validationError(error: DraftCodecError): AuthoringServiceError {
@@ -675,6 +680,28 @@ export class CatalogAuthoringService {
       };
     });
     return Object.freeze({ published: Object.freeze(published), drafts: Object.freeze(drafts) });
+  }
+
+  backgroundReferences(): BackgroundAuthoringReferences {
+    const references = (
+      table: 'feat_definitions' | 'weapon_templates' | 'armor_templates',
+      where = '',
+    ) => this.db.all(
+      `SELECT content_key, name, rules_edition
+       FROM ${table} ${where}
+       ORDER BY name, rules_edition, content_key`,
+      undefined,
+      (row) => ({
+        content_key: sqlString(row, 'content_key') as ContentKey,
+        name: sqlString(row, 'name'),
+        rules_edition: rulesEdition(sqlString(row, 'rules_edition')),
+      }),
+    );
+    return Object.freeze({
+      origin_feats: Object.freeze(references('feat_definitions', "WHERE category = 'origin'")),
+      weapons: Object.freeze(references('weapon_templates')),
+      armors: Object.freeze(references('armor_templates')),
+    });
   }
 
   createDraft(input: {

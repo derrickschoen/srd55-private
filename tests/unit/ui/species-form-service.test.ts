@@ -114,6 +114,7 @@ function serviceClient(
 ): AuthoringClient {
   return {
     list: () => rpcCall(() => service.list()),
+    backgroundReferences: () => rpcCall(() => service.backgroundReferences()),
     createDraft: (params) => rpcCall(() => service.createDraft(params)),
     readDraft: (params) => rpcCall(() => service.readDraft(params.draft_uuid)),
     saveDraft: (params) => rpcCall(() => service.saveDraft(params)),
