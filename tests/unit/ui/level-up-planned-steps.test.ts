@@ -25,10 +25,12 @@ import type { RpcClient } from '../../../src/rpc/client';
 import { parseRoute, type Router } from '../../../src/ui/router';
 import { createLevelUpWizard } from '../../../src/ui/screens/level-up/level-up-wizard';
 import {
+  createPlannedSkillsStep,
   plannedGrantLocatorKey,
   type SpellPickerFactory,
 } from '../../../src/ui/screens/level-up/planned-choice-steps';
 import { screen } from '../../../src/ui/screens/level-up/screen';
+import { createSpellPicker } from '../../../src/ui/screens/planner/spell-picker';
 import {
   elementText,
   installInteractiveDocument,
@@ -88,11 +90,13 @@ const planned = (): LevelUpPlannedChoiceProjection => ({
   skills: [{
     locator: classLocator('scholar-skill', 1),
     source_label: 'Wizard — Scholar',
+    source_catalog_layer: 'bundled',
     available_skills: ['arcana', 'history'],
   }],
   expertise: [{
     locator: classLocator('class_expertise_2', 1),
     source_label: 'Wizard — Scholar',
+    source_catalog_layer: 'bundled',
     available_skills: ['arcana', 'history'],
   }],
   spells: [
@@ -100,19 +104,23 @@ const planned = (): LevelUpPlannedChoiceProjection => ({
       kind: 'new_slot',
       locator: classLocator('wizard-prepared', 5),
       source_label: 'Wizard',
+      source_catalog_layer: 'bundled',
       required: true,
     },
     {
       kind: 'spellbook_acquisition',
       locator: classLocator('wizard-spellbook', 7),
       source_label: 'Wizard spellbook',
+      source_catalog_layer: 'bundled',
     },
     {
       kind: 'optional_swap',
       locator: classLocator('wizard-prepared', 1),
       source_label: 'Wizard',
+      source_catalog_layer: 'bundled',
       current_spell_version_id: 41 as SpellVersionId,
       current_spell_name: 'Shield',
+      current_spell_catalog_layer: 'external',
     },
   ],
 });
@@ -126,6 +134,7 @@ function classOption(
     class_definition_id: id as ClassDefinitionId,
     content_key: 'test:class:wizard' as ContentKey,
     name: 'Wizard',
+    catalog_layer: 'bundled',
     rules_edition: '2024',
     current_level: 1 as ClassLevel,
     target_level: 2 as ClassLevel,
@@ -223,6 +232,7 @@ function sheet(level: number): CharacterSheet {
       subclass_name: null,
       saving_throws: ['intelligence', 'wisdom'],
     }],
+    catalog_sources: [],
     proficiencies: {
       armor_training: [],
       weapon_proficiencies: [],
@@ -317,6 +327,7 @@ const eligible: EligibleSpell = {
   ritual: false,
   concentration: false,
   edition: '2024',
+  catalog_layer: 'external',
 };
 
 const pickerFactory: SpellPickerFactory = (options) => {
@@ -327,6 +338,9 @@ const pickerFactory: SpellPickerFactory = (options) => {
   button.setAttribute('aria-label', options.label);
   button.setAttribute('data-address-key', options.addressKey);
   button.addEventListener('click', () => options.onSelect(eligible));
+  if (options.contextDescriptionId !== null) {
+    button.setAttribute('aria-describedby', options.contextDescriptionId);
+  }
   return {
     element: button,
     focus: () => button.focus(),
@@ -334,12 +348,74 @@ const pickerFactory: SpellPickerFactory = (options) => {
   };
 };
 
+describe('shared eligible spell picker provenance', () => {
+  it('keeps a hostile persistent selected value inert with its exact layer', () => {
+    const hostile = '</input><img data-ha10-selected-spell src=x>';
+    const picker = createSpellPicker({
+      addressKey: 'selected-hostile-spell',
+      label: 'Chosen hostile spell',
+      contextDescriptionId: null,
+      value: hostile,
+      valueCatalogLayer: 'external',
+      freeTextValue: false,
+      invalid: false,
+      disabled: false,
+      search: async () => [],
+      onSelect: () => undefined,
+    });
+    const view = interactiveElement(picker.element);
+
+    expect(view.querySelector('.spell-picker-input')?.value).toBe(hostile);
+    expect(view.querySelector('.spell-picker-current-layer')?.textContent).toBe(
+      'Homebrew · external layer',
+    );
+    expect(view.querySelector('[data-ha10-selected-spell]')).toBeNull();
+    picker.destroy();
+  });
+
+  it('renders a hostile external spell inert with the exact disclosed layer', async () => {
+    const hostile = '</strong><img data-ha10-spell-hostile src=x>';
+    const picker = createSpellPicker({
+      addressKey: 'hostile-spell',
+      label: 'Choose hostile spell',
+      contextDescriptionId: null,
+      value: null,
+      valueCatalogLayer: null,
+      freeTextValue: false,
+      invalid: false,
+      disabled: false,
+      search: async () => [{ ...eligible, name: hostile }],
+      onSelect: () => undefined,
+    });
+    document.body.append(picker.element);
+
+    picker.focus();
+    await settle();
+    expect(elementText(picker.element)).toContain(hostile);
+    expect(
+      elementText(
+        interactiveElement(picker.element).querySelector(
+          'small',
+        )! as unknown as Node,
+      ),
+    ).toBe('L1 · Evocation · 2024 · Homebrew · external layer');
+    expect(
+      interactiveElement(picker.element).querySelector(
+        '[data-ha10-spell-hostile]',
+      ),
+    ).toBeNull();
+    picker.destroy();
+  });
+});
+
 function epicBoonCandidate(key: string, name: string): LevelUpFeatCandidate {
   const eligibility = { status: 'qualified', reasons: [] } as const;
   return {
+    catalog_layer: 'bundled',
     definition: {
       content_key: key as ContentKey,
       name,
+      catalog_layer: 'bundled',
       grouping: 'epic_boon',
       min_level: 19 as CharacterLevel,
       ability_points: 1,
@@ -380,7 +456,47 @@ function epicBoonCandidate(key: string, name: string): LevelUpFeatCandidate {
 }
 
 describe('W-LU2-DRAFT planned Skills, Expertise, and Spells', () => {
+  it('renders an external selected feat layer on its later planned-choice card', () => {
+    const hostileFeatName = '</p><img data-ha10-feat-layer src=x>';
+    const step = createPlannedSkillsStep({
+      projections: [{
+        locator: sourceLocator(
+          { kind: 'selected_feat' },
+          'external-feat-skill',
+          1,
+        ),
+        source_label: hostileFeatName,
+        source_catalog_layer: 'external',
+        available_skills: ['arcana'],
+      }],
+      draft: { skills: [], expertise: [], spells: [] },
+      onSelect: vi.fn(),
+    });
+
+    expect(elementText(step.element)).toContain(
+      `Granted by ${hostileFeatName} — Homebrew · external layer.`,
+    );
+    expect(
+      interactiveElement(step.element).querySelector('[data-ha10-feat-layer]'),
+    ).toBeNull();
+    step.cleanup();
+  });
+
   it('W-DRAFT-FIDELITY carries named planned_subchoices through Review, Confirm, and Complete', async () => {
+    const hostileSpell = '</dd><img data-ha10-level-spell src=x>';
+    const hostilePickerFactory: SpellPickerFactory = (options) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = `Select ${options.label}`;
+      button.addEventListener('click', () =>
+        options.onSelect({ ...eligible, name: hostileSpell })
+      );
+      return {
+        element: button,
+        focus: () => button.focus(),
+        destroy: () => undefined,
+      };
+    };
     const before = sheet(1);
     const after = sheet(2);
     const preview = vi.fn().mockResolvedValue({
@@ -397,7 +513,7 @@ describe('W-LU2-DRAFT planned Skills, Expertise, and Spells', () => {
     const wizard = createLevelUpWizard({
       state: ready(),
       cancel: () => undefined,
-      spellPickerFactory: pickerFactory,
+      spellPickerFactory: hostilePickerFactory,
       preview,
       submit,
       loadSheet: vi.fn().mockResolvedValue(after),
@@ -448,11 +564,14 @@ describe('W-LU2-DRAFT planned Skills, Expertise, and Spells', () => {
     for (const text of [
       'Skill proficiency Arcana — Wizard — Scholar',
       'Expertise History — Wizard — Scholar',
-      'Spell Thunderwave — Wizard',
+      `Spell ${hostileSpell} — Wizard — Homebrew · external layer`,
       'New class feature Scholar',
     ]) {
       expect(elementText(wizard.element)).toContain(text);
     }
+    expect(
+      interactiveElement(wizard.element).querySelector('[data-ha10-level-spell]'),
+    ).toBeNull();
 
     click(wizard.element, LEVEL_UP_ATTR.confirm);
     await settle();
@@ -464,11 +583,14 @@ describe('W-LU2-DRAFT planned Skills, Expertise, and Spells', () => {
     for (const text of [
       'Skill proficiency: Arcana — Wizard — Scholar.',
       'Expertise: History — Wizard — Scholar.',
-      'Spell: Thunderwave — Wizard.',
+      `Spell: ${hostileSpell} — Wizard — Homebrew · external layer.`,
       'New class feature: Scholar.',
     ]) {
       expect(elementText(wizard.element)).toContain(text);
     }
+    expect(
+      interactiveElement(wizard.element).querySelector('[data-ha10-level-spell]'),
+    ).toBeNull();
     expect(wizard.element.getAttribute('aria-busy')).toBe('false');
     wizard.cleanup();
   });
@@ -811,7 +933,22 @@ describe('W-LU2-DRAFT planned Skills, Expertise, and Spells', () => {
     expect(
       spellCard(wizard.element, classLocator('wizard-prepared', 5))
         .querySelector('button')?.getAttribute('aria-label'),
-    ).toBe('New spell choice — Required from Wizard');
+    ).toBe(
+      'New spell choice — Required from Wizard',
+    );
+    const describedBy = spellCard(
+      wizard.element,
+      classLocator('wizard-prepared', 5),
+    ).querySelector('button')?.getAttribute('aria-describedby');
+    expect(describedBy).not.toBeNull();
+    const description = spellCard(
+      wizard.element,
+      classLocator('wizard-prepared', 5),
+    ).querySelector('.level-up-planned-source');
+    expect(description?.getAttribute('id')).toBe(describedBy);
+    expect(description?.textContent).toContain(
+      'Granted by Wizard — SRD · bundled layer.',
+    );
     wizard.cleanup();
   });
 

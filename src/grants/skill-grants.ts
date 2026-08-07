@@ -25,6 +25,7 @@ import {
 } from '../builder/contracts';
 import { GrantRule } from './grant-rule';
 import { SourceRuleReader } from './source-rule-reader';
+import { catalogLayerDisclosure } from '../catalog/catalog-disclosure';
 
 /**
  * THE SKILL GRANTS — resolver, projection reconciler, and the generator's
@@ -580,8 +581,13 @@ export function resolveSkillGrants(
     if (classDefinitionId === null) {
       continue;
     }
-    const className = db.scalar<string>(
-      'SELECT name FROM class_definitions WHERE id = ?',
+    const classDefinition = db.oneRaw(
+      `SELECT class.name, identity.catalog_layer
+       FROM class_definitions AS class
+       LEFT JOIN catalog_content_identities AS identity
+         ON identity.content_kind = 'class'
+        AND identity.content_key = class.content_key
+       WHERE class.id = ?`,
       [Number(classDefinitionId)],
     );
     const pool = classSkillPool(db, grant.grant_key, Number(classDefinitionId));
@@ -591,7 +597,13 @@ export function resolveSkillGrants(
       grant_key: grant.grant_key,
       ordinal: grant.ordinal,
       class_definition_id: Number(classDefinitionId),
-      class_name: className === null ? null : String(className),
+      class_name:
+        classDefinition === null ? null : String(classDefinition.name),
+      class_catalog_layer: catalogLayerDisclosure(
+        classDefinition === null || classDefinition.catalog_layer === null
+          ? null
+          : String(classDefinition.catalog_layer),
+      ),
       available: pool.filter((skill) => !held.has(skill)),
     });
   }

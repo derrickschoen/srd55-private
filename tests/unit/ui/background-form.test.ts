@@ -100,9 +100,9 @@ function stored(
 }
 
 const references: BackgroundAuthoringReferences = {
-  origin_feats: [{ content_key: '2024:feat:alert' as ContentKey, name: 'Alert', rules_edition: '2024' }],
-  weapons: [{ content_key: '2024:weapon:club' as ContentKey, name: hostile, rules_edition: '2024' }],
-  armors: [{ content_key: '2024:armor:leather-armor' as ContentKey, name: 'Leather Armor', rules_edition: '2024' }],
+  origin_feats: [{ content_key: '2024:feat:alert' as ContentKey, name: 'Alert', rules_edition: '2024', catalog_layer: 'bundled' }],
+  weapons: [{ content_key: '2024:weapon:club' as ContentKey, name: hostile, rules_edition: '2024', catalog_layer: 'external' }],
+  armors: [{ content_key: '2024:armor:leather-armor' as ContentKey, name: 'Leather Armor', rules_edition: '2024', catalog_layer: 'unknown' }],
 };
 
 function unused<T>(): Promise<T> {
@@ -282,6 +282,25 @@ describe('HA-9 background authoring form', () => {
       }).map((control) => `${control.tagName}#${control.getAttribute('id') ?? ''}`)).toEqual([]);
       expect(rendered.root.querySelectorAll('img')).toHaveLength(0);
       expect(rendered.root.querySelectorAll('[data-ha9-hostile]')).toHaveLength(0);
+      const optionLabels = rendered.root.querySelectorAll('option').map(
+        (option) => elementText(option as unknown as Node),
+      );
+      expect(optionLabels).toContain('Alert (2024)');
+      expect(optionLabels).toContain(
+        `${hostile} (2024)`,
+      );
+      expect(optionLabels).toContain(
+        'Leather Armor (2024)',
+      );
+      expect(
+        rendered.root.querySelectorAll('optgroup').map((group) =>
+          group.getAttribute('label')
+        ),
+      ).toEqual(expect.arrayContaining([
+        'SRD · bundled layer',
+        'Homebrew · external layer',
+        'Unknown catalog layer',
+      ]));
 
       form?.dispatchEvent(new Event('submit', { cancelable: true }));
       await settle();
@@ -524,6 +543,7 @@ describe('HA-9 background authoring form', () => {
         review: [{
           candidate_content_key: '2024:alternate:background' as ContentKey,
           candidate_name: hostile,
+          candidate_catalog_layer: 'external',
           reason: 'alias',
           default_decision: 'match',
         }],
@@ -545,6 +565,10 @@ describe('HA-9 background authoring form', () => {
       if (modal === null) throw new Error('Adoption dialog missing.');
       expect(modal.open).toBe(true);
       expect(document.activeElement?.parentElement?.isConnected).toBe(true);
+      expect(modal.querySelector('legend')?.textContent).toBe(
+        `${hostile} — Homebrew · external layer`,
+      );
+      expect(modal.querySelector('[data-ha9-hostile]')).toBeNull();
       expect(modal.querySelectorAll('img')).toHaveLength(0);
       button(modal, 'Publish with these choices').click();
       await settle();

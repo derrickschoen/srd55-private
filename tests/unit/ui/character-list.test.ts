@@ -6,6 +6,7 @@ import {
   catalogGapLabel,
   characterCardRouteActions,
   classSummary,
+  renderClassSummary,
   completenessByCharacter,
   outstandingLabel,
   warningLabel,
@@ -149,6 +150,7 @@ describe('character share links', () => {
         kind: 'spell',
         incomingName: 'Fireball',
         localName: 'Fireball',
+        localCatalogLayer: 'bundled',
         targetContentKey: '2024:fireball' as ContentKey,
         incomingFingerprint: 'e'.repeat(64) as ContentFingerprintDigest,
         matchClass: 'srd-fallback',
@@ -330,14 +332,41 @@ describe('character list behavior', () => {
     expect(
       classSummary({
         ...summary(1, 'Sixfold'),
-        classes: ['Bard 1', 'Wizard 1'],
+        classes: [
+          { name: 'Bard', level: 1, catalog_layer: 'external' },
+          { name: 'Wizard', level: 1, catalog_layer: 'unknown' },
+        ],
       }),
-    ).toBe('Bard 1 / Wizard 1');
+    ).toBe(
+      'Bard 1 — Homebrew · external layer / Wizard 1 — Unknown catalog layer',
+    );
     expect(classSummary(summary(2, 'Empty'))).toBe(
       'No classes yet. Open the build to add one.',
     );
     expect(warningLabel(1)).toBe('1 warning');
     expect(warningLabel(0)).toBe('0 warnings');
+  });
+
+  it('renders a hostile class name inert with its exact external disclosure', () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const hostile = '</p><img data-ha10-character-list-hostile src=x>';
+      const row = renderClassSummary({
+        ...summary(1, 'Hostile holder'),
+        classes: [{ name: hostile, level: 7, catalog_layer: 'external' }],
+      });
+
+      expect(elementText(row as unknown as Node)).toBe(
+        `${hostile} 7 — Homebrew · external layer`,
+      );
+      expect(
+        interactiveElement(row).querySelector(
+          '[data-ha10-character-list-hostile]',
+        ),
+      ).toBeNull();
+    } finally {
+      restoreDocument();
+    }
   });
 
   it('labels outstanding work in words that no reader can mistake for a warning', () => {
@@ -714,6 +743,7 @@ describe('catalog and backup entry points', () => {
         kind: 'spell',
         incomingName: 'Fireball',
         localName: 'Fireball',
+        localCatalogLayer: 'bundled',
         targetContentKey: '2024:fireball' as ContentKey,
         incomingFingerprint: 'a'.repeat(64) as ContentFingerprintDigest,
         matchClass: 'srd-fallback',
@@ -866,6 +896,7 @@ describe('catalog and backup entry points', () => {
         kind: 'item',
         incomingName: 'Reviewed Relic',
         localName: 'Reviewed Relic',
+        localCatalogLayer: 'external',
         targetContentKey: '2024:item:reviewed' as ContentKey,
         incomingFingerprint: 'b'.repeat(64) as ContentFingerprintDigest,
         matchClass: 'metadata-conflict',

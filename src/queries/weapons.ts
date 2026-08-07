@@ -40,6 +40,7 @@ import { weaponProficiency } from '../rules/multiclass-proficiency';
 import { SheetContentLookup } from '../rules/sheet-content-lookup';
 import { WeaponMasteryLookup } from '../rules/weapon-mastery-lookup';
 import { ClassProficiencyLookup } from './class-proficiency-lookup';
+import { catalogLayerDisclosure } from '../catalog/catalog-disclosure';
 
 /**
  * The three things the attack derivation needs that are NOT weapon rows.
@@ -198,8 +199,13 @@ export class WeaponQueries {
    */
   templates(): WeaponTemplate[] {
     return this.db.all(
-      `SELECT id, content_key, srd_group, ${PROFILE_COLUMNS.join(', ')}
-       FROM weapon_templates
+      `SELECT template.id, template.content_key, template.srd_group,
+              ${PROFILE_COLUMNS.map((column) => `template.${column}`).join(', ')},
+              identity.catalog_layer
+       FROM weapon_templates AS template
+       LEFT JOIN catalog_content_identities AS identity
+         ON identity.content_kind = 'weapon'
+        AND identity.content_key = template.content_key
        ORDER BY CASE srd_group
                   WHEN 'simple_melee' THEN 1
                   WHEN 'simple_ranged' THEN 2
@@ -218,6 +224,9 @@ export class WeaponQueries {
           id: sqlInteger(row, 'id'),
           content_key: sqlString(row, 'content_key'),
           srd_group: group as SrdWeaponGroup,
+          catalog_layer: catalogLayerDisclosure(
+            sqlNullableString(row, 'catalog_layer'),
+          ),
           ...weaponProfile(row),
         };
       },

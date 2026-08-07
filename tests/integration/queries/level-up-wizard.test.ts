@@ -430,6 +430,23 @@ describe('level-up wizard state RPC', () => {
       fighterClassId,
       5,
     );
+    registerFixtureContentIdentity(harness.context.db, {
+      kind: 'feat',
+      contentKey: 'expanded:content.feat:breadth-probe',
+      name: 'Breadth Probe',
+      keyKind: 'asserted',
+    });
+    harness.context.db.exec(
+      `INSERT INTO feat_definitions (
+         content_key, name, rules_edition, category, ability_points,
+         repeatable, prerequisites, grant_rules, notes
+       ) VALUES (
+         'expanded:content.feat:breadth-probe', 'Breadth Probe', 'expanded',
+         'general', 0, 0, '[]',
+         '[{"kind":"skill_proficiency","rule_key":"breadth-probe-skill","count":1}]',
+         'Breadth Probe. A homebrew benefit.'
+       )`,
+    );
     const asiState = await client.levelUpState(fighterId);
     expect(asiState).toMatchObject({
       kind: 'ready',
@@ -469,7 +486,23 @@ describe('level-up wizard state RPC', () => {
         choices: ['level_feat'],
       },
     });
-    expect(occurrence?.candidates).toHaveLength(17);
+    expect(occurrence?.candidates).toHaveLength(18);
+    expect(occurrence?.candidates).toContainEqual(expect.objectContaining({
+      catalog_layer: 'external',
+      definition: expect.objectContaining({
+        content_key: 'expanded:content.feat:breadth-probe',
+        name: 'Breadth Probe',
+        catalog_layer: 'external',
+      }),
+      applications: [expect.objectContaining({
+        planned_choices: expect.objectContaining({
+          skills: [expect.objectContaining({
+            source_label: 'Breadth Probe',
+            source_catalog_layer: 'external',
+          })],
+        }),
+      })],
+    }));
     expect(
       occurrence?.candidates.filter((candidate) => candidate.is_class_default),
     ).toMatchObject([{
@@ -536,18 +569,20 @@ describe('level-up wizard state RPC', () => {
 
   it('keeps a held imported class disabled even when its hit die is known', async () => {
     const characterId = createCharacter('Imported Class Holder');
+    const hostile = '</span><img data-ha10-held-class src=x>';
     registerFixtureContentIdentity(harness.context.db, {
       kind: 'class', contentKey: 'expanded:level-up-probe',
-      name: 'Imported Adept', keyKind: 'asserted',
+      name: hostile, keyKind: 'asserted',
     });
     const importedClassId = harness.context.db.exec(
       `INSERT INTO class_definitions (
          content_key, name, rules_edition, progression_type,
          supports_ritual_casting
        ) VALUES (
-         'expanded:level-up-probe', 'Imported Adept', 'expanded',
+         'expanded:level-up-probe', ?, 'expanded',
          'none', 0
        )`,
+      [hostile],
     ).lastInsertId;
     harness.context.db.exec(
       `INSERT INTO class_sheet_traits (
@@ -570,14 +605,16 @@ describe('level-up wizard state RPC', () => {
     expect(state).toMatchObject({
       kind: 'no_guideable_class',
       explanation:
-        'No held class is currently guideable; imported class application is deferred to CI-4a/HA-10.',
+        'No held class is currently guideable; homebrew classes are outside the v1 guided flows (D133).',
       class_options: [{
         guideability: 'disabled',
         class_definition_id: importedClassId,
+        name: hostile,
+        catalog_layer: 'external',
         hit_die: 8,
         reason: 'class_not_bundled',
         explanation:
-          'Imported classes remain held but cannot be guided until CI-4a/HA-10 completes aggregate application.',
+          'Homebrew classes remain held but are outside the v1 guided flows (D133).',
       }],
     });
     if (state.kind !== 'no_guideable_class') {

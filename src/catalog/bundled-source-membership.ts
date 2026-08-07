@@ -17,13 +17,10 @@ export type BundledSourceKind =
 const keyCache = new Map<BundledSourceKind, readonly string[]>();
 
 /**
- * Production membership is the union of the exact definition and template
- * arrays consumed by boot seeding: guided creation reads the template half,
- * while planner/workspace catalogs read the definition half. Alternate image
- * seeders register extra definitions as bundled-stable while inserting them,
- * so the database-aware manifest is constructed from the same source of truth
- * on both boot paths. CI-3s can remove the static half after all boot identities
- * are promoted; CI-4a/HA-10 lifts the consumer filter entirely.
+ * With no database this returns the static boot manifest. With a database it
+ * returns only registry-confirmed bundled identities. The two facts must never
+ * be unioned: a manifest key says what boot intends to install, while only the
+ * registry can say what layer a stored row actually belongs to.
  */
 export function bundledSourceContentKeys(
   kind: BundledSourceKind,
@@ -57,7 +54,7 @@ export function bundledSourceContentKeys(
     keyCache.set(kind, staticKeys);
   }
   if (db === undefined) return staticKeys;
-  const registeredKeys = db.allRaw(
+  return Object.freeze(db.allRaw(
     `SELECT content_key
      FROM catalog_content_identities
      WHERE content_kind = ?
@@ -65,10 +62,7 @@ export function bundledSourceContentKeys(
        AND catalog_layer = 'bundled'
      ORDER BY content_key`,
     [kind],
-  ).map((row) => String(row.content_key));
-  return Object.freeze(
-    [...new Set([...staticKeys, ...registeredKeys])].sort(),
-  );
+  ).map((row) => String(row.content_key)));
 }
 
 export function isBundledSourceContentKey(

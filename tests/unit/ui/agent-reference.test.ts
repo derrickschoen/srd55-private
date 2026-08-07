@@ -54,6 +54,7 @@ function slot(changes: Partial<WorkspaceSlot> = {}): WorkspaceSlot {
     level_max: 0,
     spell_id: 10,
     spell_name: 'Mage Hand',
+    spell_catalog_layer: 'bundled',
     spell_level: 0,
     spell_edition: '2024',
     ability: 'intelligence',
@@ -77,8 +78,10 @@ function route(changes: Partial<SpellRoute> = {}): SpellRoute {
     spell_identity_id: 1,
     spell_version_id: 10,
     spell_name: 'Mage Hand',
+    spell_catalog_layer: 'bundled',
     spell_level: 0,
     source_name: 'Wizard 1',
+    source_catalog_layer: 'bundled',
     slot_id: 1,
     slot_key: 'wizard:cantrip:1',
     casting_mode: 'at_will',
@@ -132,8 +135,11 @@ function workspace(): Workspace {
           progression_type: 'full',
           prepared_count: 5,
           max_preparable_level: 2,
+          class_catalog_layer: 'bundled',
+          subclass_catalog_layer: null,
         },
       ],
+      catalog_sources: [],
       preparation_callout: 'This build possesses 2nd-level slots.',
       access_routes: [
         route(),
@@ -154,14 +160,24 @@ function workspace(): Workspace {
       duplicate_assessments: [],
       wizard: {
         spellbook: [
-          { spellbook_entry_id: 1, spell_name: 'Mage Armor', active: true },
+          {
+            spellbook_entry_id: 1,
+            spell_name: 'Mage Armor',
+            spell_catalog_layer: 'bundled',
+            active: true,
+          },
           {
             spellbook_entry_id: 2,
             spell_name: HOSTILE_SPELL_NAME,
+            spell_catalog_layer: 'external',
             active: false,
           },
         ],
-        prepared: [{ spell_version_id: 10, spell_name: 'Mage Armor' }],
+        prepared: [{
+          spell_version_id: 10,
+          spell_name: 'Mage Armor',
+          spell_catalog_layer: 'bundled',
+        }],
         ritual_only: [],
         explanation: 'Wizard spellbook.',
       },
@@ -331,6 +347,35 @@ function declaredColumns<T>(map: ColumnMap<T>): string[] {
 }
 
 describe('planner build reference projection', () => {
+  it('carries a hostile homebrew catalog source inert with its exact external layer', () => {
+    const hostile = '</td><img data-ha10-agent-hostile src=x>';
+    const base = workspace();
+    const source: Workspace = {
+      ...base,
+      report: {
+        ...base.report,
+        catalog_sources: [{
+          kind: 'subclass',
+          name: hostile,
+          content_key: 'expanded:content.subclass:hostile',
+          catalog_layer: 'external',
+        }],
+      },
+    };
+    const projection = buildAgentReference(source, completeness);
+
+    expect(projection.reference.catalog_sources).toEqual([{
+      kind: 'subclass',
+      name: null,
+      name_withheld: true,
+      catalog_layer: 'external',
+    }]);
+    expect(agentReferenceJson(projection.reference)).not.toContain(hostile);
+    expect(
+      sectionById(agentReferenceSections(projection), 'catalog-sources'),
+    ).toMatchObject({ heading: 'Catalog provenance' });
+  });
+
   it('derives every fact from the workspace read-model it was given', () => {
     const source = workspace();
     const { reference } = buildAgentReference(source, completeness);
@@ -605,12 +650,14 @@ describe('planner build reference projection', () => {
       {
         index: 0,
         spell_name: 'Mage Armor',
+        spell_catalog_layer: 'bundled',
         spell_name_withheld: false,
         active: true,
       },
       {
         index: 1,
         spell_name: null,
+        spell_catalog_layer: 'external',
         spell_name_withheld: true,
         active: false,
       },
@@ -808,10 +855,11 @@ describe('planner build reference JSON block', () => {
     // choice, while only the two legacy third-casters change spellcasting.
     expect(stateOf('subclass')).toBe('partial');
     expect(factFor('subclass')?.note).toBe(
-      'Every class has at least one bundled subclass to choose at its ' +
-        'subclass level. Fifteen subclasses are bundled, including the ' +
-        'owner-authored Veteran. The legacy EK and Arcane ' +
-        'Trickster are the two subclasses that change spellcasting.',
+      'Every class has at least one bundled subclass at its subclass level, ' +
+        'and externally published subclasses for bundled parents are selectable ' +
+        'with their catalog layer disclosed. Fifteen subclasses are bundled, ' +
+        'including the owner-authored Veteran; external subclasses can add their ' +
+        'own progression and mechanics.',
     );
 
     // WEAPONS. `partial` still, but for the opposite half of the reason it used
@@ -883,6 +931,43 @@ describe('planner build reference JSON block', () => {
 });
 
 describe('planner build reference text sections', () => {
+  it('discloses an external class beside its weapon-mastery allowance', () => {
+    const source = workspace();
+    source.classes = [{
+      id: 81,
+      class_definition_id: 17,
+      subclass_definition_id: null,
+      level: 5,
+      name: 'Homebrew Vanguard',
+      catalog_layer: 'external',
+      subclass_name: null,
+      subclass_catalog_layer: null,
+      subclasses: [],
+    }];
+    source.weapons.allowance = {
+      state: 'known',
+      count: 2,
+      classes: [{
+        class_definition_id: 17,
+        class_name: 'Homebrew Vanguard',
+        class_level: 5,
+        allowance: { state: 'known', count: 2 },
+      }],
+    };
+    const projection = buildAgentReference(source, completeness);
+
+    expect(projection.reference.weapon_mastery.by_class[0]).toMatchObject({
+      class_name: 'Homebrew Vanguard',
+      class_catalog_layer: 'external',
+    });
+    expect(
+      tableIn(
+        sectionById(agentReferenceSections(projection), 'weapons'),
+        'Weapon mastery allowance by class',
+      ).rows[0]?.[0]?.text,
+    ).toBe('Homebrew Vanguard — Homebrew · external layer');
+  });
+
   it('renders the same projection as readable rows', () => {
     const projection = buildAgentReference(workspace(), completeness);
     const sections = agentReferenceSections(projection);
@@ -891,6 +976,7 @@ describe('planner build reference text sections', () => {
       'scope',
       'character',
       'classes',
+      'catalog-sources',
       'sources',
       'spell-choices',
       'access-routes',
@@ -996,6 +1082,7 @@ describe('planner build reference — the two forms hold the same content', () =
       srd_attribution: 'scope',
       character: 'character',
       classes: 'classes',
+      catalog_sources: 'catalog-sources',
       caster: 'character',
       sources: 'sources',
       spell_choices: 'spell-choices',
@@ -1032,10 +1119,11 @@ describe('planner build reference — the two forms hold the same content', () =
     );
     expect(table.rows[subclass]?.[1]?.text).toBe('partly');
     expect(table.rows[subclass]?.[2]?.text).toBe(
-      'Every class has at least one bundled subclass to choose at its ' +
-        'subclass level. Fifteen subclasses are bundled, including the ' +
-        'owner-authored Veteran. The legacy EK and Arcane ' +
-        'Trickster are the two subclasses that change spellcasting.',
+      'Every class has at least one bundled subclass at its subclass level, ' +
+        'and externally published subclasses for bundled parents are selectable ' +
+        'with their catalog layer disclosed. Fifteen subclasses are bundled, ' +
+        'including the owner-authored Veteran; external subclasses can add their ' +
+        'own progression and mechanics.',
     );
     // Every state renders, so a row cannot go blank unnoticed.
     expect(
@@ -1070,6 +1158,7 @@ describe('planner build reference — the two forms hold the same content', () =
       spell_level_max: 'Slot spell levels',
       selected: 'Chosen spell',
       spell_name: 'Chosen spell',
+      spell_catalog_layer: 'Spell catalog layer',
       spell_name_withheld: 'Chosen spell',
       spell_level: 'Spell level',
       rules_edition: 'Rules edition',
@@ -1110,9 +1199,11 @@ describe('planner build reference — the two forms hold the same content', () =
       // Row order is the index; a column repeating it would say nothing more.
       index: null,
       spell_name: 'Spell',
+      spell_catalog_layer: 'Spell catalog layer',
       spell_name_withheld: 'Spell',
       spell_level: 'Spell level',
       source_ref: 'Source',
+      source_catalog_layer: 'Source catalog layer',
       slot_id: 'Slot id',
       casting_mode: 'Casting mode',
       spellcasting_ability: 'Ability',
@@ -1129,6 +1220,7 @@ describe('planner build reference — the two forms hold the same content', () =
     const map: ColumnMap<ReferenceSpellbookEntry> = {
       index: null,
       spell_name: 'Spell',
+      spell_catalog_layer: 'Spell catalog layer',
       spell_name_withheld: 'Spell',
       active: 'Prepared',
     };
@@ -1156,8 +1248,10 @@ describe('planner build reference — the two forms hold the same content', () =
   it('gives every class field a column', () => {
     const map: ColumnMap<AgentReference['classes'][number]> = {
       name: 'Class',
+      class_catalog_layer: 'Class catalog layer',
       class_level: 'Level',
       subclass: 'Subclass',
+      subclass_catalog_layer: 'Subclass catalog layer',
       spellcasting_ability: 'Spellcasting ability',
       progression_type: 'Progression',
       prepared_count: 'Prepared',

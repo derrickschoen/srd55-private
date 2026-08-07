@@ -1,6 +1,7 @@
 import {
   sqlBoolean,
   sqlInteger,
+  sqlNullableString,
   sqlNullableSpellSchoolList,
   sqlSpellSchool,
   sqlString,
@@ -8,6 +9,10 @@ import {
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import type { RulesEdition, SpellSchool } from '../domain/enums';
+import {
+  catalogLayerDisclosure,
+  type CatalogLayerDisclosure,
+} from '../catalog/catalog-disclosure';
 import {
   SpellSelectionEligibility,
   type EligibilitySlot,
@@ -25,6 +30,7 @@ export interface EligibleSpell {
   ritual: boolean;
   concentration: boolean;
   edition: RulesEdition;
+  catalog_layer: CatalogLayerDisclosure;
 }
 
 export class EligibleSpellSearchNotFoundError extends Error {
@@ -71,6 +77,9 @@ function decodeCandidate(row: SqlRow): EligibleSpell {
     ritual: sqlBoolean(row, 'ritual'),
     concentration: sqlBoolean(row, 'concentration'),
     edition: sqlString(row, 'rules_edition') as RulesEdition,
+    catalog_layer: catalogLayerDisclosure(
+      sqlNullableString(row, 'catalog_layer'),
+    ),
   };
 }
 
@@ -117,8 +126,11 @@ export class EligibleSpellSearch {
     const candidates = this.db.all(
       `SELECT version.id, version.display_name, version.level,
               version.school, version.ritual, version.concentration,
-              version.rules_edition
+              version.rules_edition, identity.catalog_layer
        FROM spell_versions AS version
+       LEFT JOIN catalog_content_identities AS identity
+         ON identity.content_kind = 'spell'
+        AND identity.content_key = version.content_key
        WHERE ${clauses.join('\nAND ')}
        ORDER BY version.level, version.display_name, version.id
        LIMIT 50`,

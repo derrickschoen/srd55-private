@@ -428,7 +428,7 @@ export function previewSubclassPublish(db: DatabaseContext, draft: StoredHomebre
     aggregate,
     review: Object.freeze(plan.reviews.map((review) => {
       if (review.matchClass === 'key-collision') throw new SubclassPublishError('The asserted subclass key already names different content.', { reason: 'content_key_collision', content_key: review.targetContentKey });
-      return Object.freeze({ candidate_content_key: review.targetContentKey, candidate_name: review.localName, reason: review.matchClass, default_decision: 'match' as const });
+      return Object.freeze({ candidate_content_key: review.targetContentKey, candidate_name: review.localName, candidate_catalog_layer: review.localCatalogLayer, reason: review.matchClass, default_decision: 'match' as const });
     })),
   });
 }

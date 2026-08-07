@@ -25,6 +25,7 @@ import type {
   CatalogContentLayer,
   CatalogContentMatchDecision,
 } from '../catalog/content-registry';
+import type { CatalogLayerDisclosure } from '../catalog/catalog-disclosure';
 import type {
   AuthoringCharacterEffect,
   AuthoringDraftCharacterEffect,
@@ -422,6 +423,7 @@ export interface BackgroundAuthoringReferenceOption {
   readonly content_key: ContentKey;
   readonly name: string;
   readonly rules_edition: RulesEdition;
+  readonly catalog_layer: CatalogLayerDisclosure;
 }
 
 /** Installed catalog rows the background draft may reference by content key. */
@@ -466,6 +468,7 @@ export type PublishReviewReason =
 export interface PublishReviewItem {
   readonly candidate_content_key: ContentKey;
   readonly candidate_name: string;
+  readonly candidate_catalog_layer: CatalogLayerDisclosure;
   readonly reason: PublishReviewReason;
   readonly default_decision: 'match';
 }
@@ -588,6 +591,7 @@ export interface ReplacementChoiceSelection {
 export interface ReplacementReviewItem {
   readonly candidate_content_key: ContentKey;
   readonly candidate_name: string;
+  readonly candidate_catalog_layer: CatalogLayerDisclosure;
   readonly reason: PublishReviewReason | 'key-collision';
   readonly default_decision: 'match';
 }

@@ -54,7 +54,12 @@ describe('character list and workspace query builders', () => {
         id: fixture.characterId,
         name: 'R40 Golden',
         level: 8,
-        classes: ['Paladin 1', 'Ranger 1', 'Warlock 5', 'Wizard 1'],
+        classes: [
+          { name: 'Paladin', level: 1, catalog_layer: 'bundled' },
+          { name: 'Ranger', level: 1, catalog_layer: 'bundled' },
+          { name: 'Warlock', level: 5, catalog_layer: 'bundled' },
+          { name: 'Wizard', level: 1, catalog_layer: 'bundled' },
+        ],
         warning_count: 5,
       },
     ]);
@@ -124,7 +129,7 @@ describe('character list and workspace query builders', () => {
     });
   });
 
-  it('builds the workspace while excluding external aggregates from every planner selection catalog before CI-4a/HA-10', () => {
+  it('cuts planner catalogs over to external content while keeping the class picker bundled-only', () => {
     const wizardId = Number(
       db.scalar(
         "SELECT id FROM class_definitions WHERE name = 'Wizard'",
@@ -192,6 +197,16 @@ describe('character list and workspace query builders', () => {
     db.exec("INSERT INTO feat_definitions (content_key, name, rules_edition, ability_points, repeatable) VALUES ('expanded:external-feat', 'External Feat', 'expanded', 0, 0)");
     db.exec("INSERT INTO species_definitions (content_key, name, rules_edition, repeatable, grant_rules) VALUES ('expanded:external-species', 'External Species', 'expanded', 0, '[]')");
     db.exec("INSERT INTO background_definitions (content_key, name, rules_edition, repeatable, grant_rules) VALUES ('expanded:external-background', 'External Background', 'expanded', 0, '[]')");
+    registerFixtureContentIdentity(db, {
+      kind: 'subclass', contentKey: 'expanded:external-tradition',
+      name: 'External Tradition', keyKind: 'asserted',
+    });
+    const externalSubclassId = db.exec(
+      `INSERT INTO subclass_definitions (
+         content_key, class_definition_id, name, rules_edition
+       ) VALUES ('expanded:external-tradition', ?, 'External Tradition', 'expanded')`,
+      [wizardId],
+    ).lastInsertId;
     db.exec(
       `INSERT INTO character_save_points (
          character_id, label, snapshot, schema_version, created_at
@@ -211,8 +226,13 @@ describe('character list and workspace query builders', () => {
       subclass_definition_id: subclassId,
       level: 1,
       name: 'Wizard',
+      catalog_layer: 'bundled',
       subclass_name: 'Abjurer',
-      subclasses: [{ id: subclassId, name: 'Abjurer' }],
+      subclass_catalog_layer: 'bundled',
+      subclasses: [
+        { id: subclassId, name: 'Abjurer', catalog_layer: 'bundled' },
+        { id: externalSubclassId, name: 'External Tradition', catalog_layer: 'external' },
+      ],
     });
     expect(workspace.available_classes.map((item) => item.name)).toEqual(
       [
@@ -243,10 +263,16 @@ describe('character list and workspace query builders', () => {
       workspace.source_catalog.species.find(
         (source) => source.content_key === 'q60:origin-species',
       ),
-    ).toBeUndefined();
-    expect(workspace.source_catalog.feat.map((source) => source.name)).not.toContain('External Feat');
-    expect(workspace.source_catalog.species.map((source) => source.name)).not.toContain('External Species');
-    expect(workspace.source_catalog.background.map((source) => source.name)).not.toContain('External Background');
+    ).toMatchObject({ name: 'Origin Species', catalog_layer: 'external' });
+    expect(workspace.source_catalog.feat).toContainEqual(
+      expect.objectContaining({ name: 'External Feat', catalog_layer: 'external' }),
+    );
+    expect(workspace.source_catalog.species).toContainEqual(
+      expect.objectContaining({ name: 'External Species', catalog_layer: 'external' }),
+    );
+    expect(workspace.source_catalog.background).toContainEqual(
+      expect.objectContaining({ name: 'External Background', catalog_layer: 'external' }),
+    );
     expect(workspace.report.invalid_selections.map((slot) => slot.id)).toEqual(
       fixture.invalidSlotIds,
     );
@@ -275,7 +301,7 @@ describe('character list and workspace query builders', () => {
     );
   });
 
-  it('shows boot-seeded manifest members and hides an imported aggregate without identity promotion', async () => {
+  it('shows boot-seeded manifest members and discloses an imported aggregate from the external layer', async () => {
     const sqlite3 = await getSqlite3();
     const lifecycle = createApplicationLifecycle(
       sqlite3,
@@ -311,13 +337,13 @@ describe('character list and workspace query builders', () => {
         feats: catalog.sources.feat.length,
         species: catalog.sources.species.length,
         backgrounds: catalog.sources.background.length,
-      }).toEqual({ classes: 12, feats: 17, species: 4, backgrounds: 4 });
+      }).toEqual({ classes: 12, feats: 18, species: 4, backgrounds: 4 });
       expect({
         classes: workspace.available_classes.length,
         feats: workspace.source_catalog.feat.length,
         species: workspace.source_catalog.species.length,
         backgrounds: workspace.source_catalog.background.length,
-      }).toEqual({ classes: 12, feats: 17, species: 4, backgrounds: 4 });
+      }).toEqual({ classes: 12, feats: 18, species: 4, backgrounds: 4 });
       expect(catalog.classes.map((entry) => entry.name)).toContain('Fighter');
       expect(catalog.sources.species.map((entry) => entry.name)).toEqual([
         'Elf',
@@ -331,15 +357,17 @@ describe('character list and workspace query builders', () => {
         'Sage',
         'Soldier',
       ]);
-      expect(catalog.sources.feat.map((entry) => entry.name)).not.toContain(
-        'External Selection Probe',
-      );
+      expect(catalog.sources.feat).toContainEqual(expect.objectContaining({
+        name: 'External Selection Probe',
+        catalog_layer: 'external',
+      }));
       expect(workspace.available_classes.map((entry) => entry.name)).toContain(
         'Fighter',
       );
-      expect(workspace.source_catalog.feat.map((entry) => entry.name)).not.toContain(
-        'External Selection Probe',
-      );
+      expect(workspace.source_catalog.feat).toContainEqual(expect.objectContaining({
+        name: 'External Selection Probe',
+        catalog_layer: 'external',
+      }));
     } finally {
       lifecycle.close();
     }

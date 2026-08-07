@@ -295,6 +295,7 @@ describe('level-up rollback preview RPC', () => {
     expect(option.planned_choices.expertise).toEqual([{
       locator: ACCEPTANCE_WIZARD_2_CHOICES.expertise[0]?.locator,
       source_label: 'Wizard — Scholar',
+      source_catalog_layer: 'bundled',
       available_skills: [
         'arcana',
         'history',
@@ -309,12 +310,14 @@ describe('level-up rollback preview RPC', () => {
               kind: 'new_slot',
               locator: choice.locator,
               source_label: 'Wizard',
+              source_catalog_layer: 'bundled',
               required: true,
             }
           : {
               kind: choice.kind,
               locator: choice.locator,
               source_label: 'Wizard',
+              source_catalog_layer: 'bundled',
             },
       ),
     );

@@ -2,6 +2,10 @@ import type { DatabaseContext } from '../db/database';
 import type { EquipmentItemKind } from '../domain/enums';
 import { equipmentItemKinds, isEnumValue } from '../domain/enums';
 import { isEquipmentMoneyLine } from './equipment-packages';
+import {
+  catalogLayerDisclosure,
+  type CatalogLayerDisclosure,
+} from '../catalog/catalog-disclosure';
 
 /**
  * READ-TIME VIEWS OF THE SEEDED EQUIPMENT PACKAGES — dispatch E-B of
@@ -31,6 +35,7 @@ import { isEquipmentMoneyLine } from './equipment-packages';
 /** One seeded package line, as the rules tables carry it. */
 export interface EquipmentPackageLine {
   readonly item_name: string;
+  readonly catalog_layer: CatalogLayerDisclosure | null;
   readonly quantity: number;
   readonly item_kind: EquipmentItemKind;
 }
@@ -74,10 +79,25 @@ export function readEquipmentPackageOptions(
     return [];
   }
   const rows = db.allRaw(
-    `SELECT option, item_name, quantity, item_kind
-     FROM ${table}
-     WHERE ${ownerColumn} = ?
-     ORDER BY option, sort_order`,
+    `SELECT item.option, item.item_name, item.quantity, item.item_kind,
+            CASE item.item_kind
+              WHEN 'weapon' THEN weapon_identity.catalog_layer
+              WHEN 'armor' THEN armor_identity.catalog_layer
+              ELSE NULL
+            END AS catalog_layer
+     FROM ${table} AS item
+     LEFT JOIN weapon_templates AS weapon
+       ON weapon.id = item.weapon_template_id
+     LEFT JOIN catalog_content_identities AS weapon_identity
+       ON weapon_identity.content_kind = 'weapon'
+      AND weapon_identity.content_key = weapon.content_key
+     LEFT JOIN armor_templates AS armor
+       ON armor.id = item.armor_template_id
+     LEFT JOIN catalog_content_identities AS armor_identity
+       ON armor_identity.content_kind = 'armor'
+      AND armor_identity.content_key = armor.content_key
+     WHERE item.${ownerColumn} = ?
+     ORDER BY item.option, item.sort_order`,
     [ownerId],
   );
   const grouped = new Map<string, EquipmentPackageLine[]>();
@@ -93,6 +113,11 @@ export function readEquipmentPackageOptions(
     const lines = grouped.get(option) ?? [];
     lines.push({
       item_name: String(row.item_name),
+      catalog_layer: kindValue === 'gear'
+        ? null
+        : catalogLayerDisclosure(
+            row.catalog_layer === null ? null : String(row.catalog_layer),
+          ),
       quantity: Number(row.quantity),
       item_kind: kindValue,
     });

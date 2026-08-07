@@ -34,6 +34,7 @@ import {
   type GuidedEquipmentSourcePackage,
   type GuidedEquipmentStepState,
 } from '../../../builder/contracts';
+import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
 import { RpcError } from '../../../rpc/protocol';
 import { clear, element, listen, type Cleanup } from '../../dom';
 import {
@@ -178,7 +179,11 @@ export function createEquipmentStep(deps: EquipmentStepDeps): EquipmentStep {
       },
       contents.map((line) =>
         element('li', {
-          text: lineText(line),
+          text:
+            lineText(line) +
+            (line.catalog_layer === null
+              ? ''
+              : ` — ${catalogLayerLabel(line.catalog_layer)}`),
           className:
             line.item_kind === 'gear'
               ? 'guided-equipment-line guided-equipment-gear'
@@ -196,7 +201,11 @@ export function createEquipmentStep(deps: EquipmentStepDeps): EquipmentStep {
     makeParams: (option: Option) => GuidedApplyEquipmentParams,
   ): HTMLElement => {
     const children: HTMLElement[] = [
-      element('h3', { text: `${SOURCE_LABELS[kind]} — ${pack.source_name}` }),
+      element('h3', {
+        text:
+          `${SOURCE_LABELS[kind]} — ${pack.source_name} — ` +
+          catalogLayerLabel(pack.catalog_layer),
+      }),
     ];
     if (pack.chosen_option !== null) {
       children.push(
@@ -214,7 +223,7 @@ export function createEquipmentStep(deps: EquipmentStepDeps): EquipmentStep {
         element('p', {
           className: 'guided-equipment-empty',
           text:
-            `This ${kind} has no bundled equipment package, so there is ` +
+            `This ${kind} has no installed equipment package, so there is ` +
             'nothing to confirm here.',
         }),
       );
@@ -298,7 +307,7 @@ export function createEquipmentStep(deps: EquipmentStepDeps): EquipmentStep {
           element('p', {
             className: 'guided-equipment-unresolved',
             text:
-              'This character’s background does not match any bundled ' +
+              'This character’s background does not match one installed ' +
               'background, so its equipment package cannot be offered and ' +
               'this step cannot complete.',
           }),

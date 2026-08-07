@@ -17,6 +17,10 @@ import {
   type SlotBucket,
 } from '../domain/enums';
 import type { JsonValue } from '../domain/models';
+import {
+  catalogLayerDisclosure,
+  type CatalogLayerDisclosure,
+} from '../catalog/catalog-disclosure';
 import { SpellSelectionEligibility } from '../eligibility/spell-selection-eligibility';
 import { SourceRuleReader } from '../grants/source-rule-reader';
 import {
@@ -68,10 +72,12 @@ interface SlotRouteRow {
   readonly routeSpellVersionId: number;
   readonly spellIdentityId: number;
   readonly spellName: string;
+  readonly spellCatalogLayer: CatalogLayerDisclosure;
   readonly spellContentKey: string;
   readonly spellRulesEdition: RulesEdition;
   readonly spellLevel: number;
   readonly identityName: string;
+  readonly sourceCatalogLayer: CatalogLayerDisclosure;
   readonly slotKey: string;
   readonly bucket: SlotBucket;
   readonly alwaysPrepared: boolean;
@@ -98,6 +104,7 @@ interface SpellbookEntry {
   readonly spellVersionId: number;
   readonly spellIdentityId: number;
   readonly spellName: string;
+  readonly spellCatalogLayer: CatalogLayerDisclosure;
   readonly spellContentKey: string;
   readonly spellRulesEdition: RulesEdition;
   readonly spellLevel: number;
@@ -108,6 +115,7 @@ interface SpellbookEntry {
 interface RitualCapability {
   readonly source_instance_id: number;
   readonly source_name: string;
+  readonly source_catalog_layer: CatalogLayerDisclosure;
   readonly spellcasting_ability: Ability | null;
 }
 
@@ -115,6 +123,7 @@ export interface SpellAccessRoute {
   readonly spell_identity_id: number;
   readonly identity_name: string;
   readonly spell_name: string;
+  readonly spell_catalog_layer: CatalogLayerDisclosure;
   readonly spell_content_key: string;
   readonly rules_edition: RulesEdition;
   readonly spell_level: number;
@@ -126,6 +135,7 @@ export interface SpellAccessRoute {
   readonly spell_version_id: number;
   readonly source_instance_id: number;
   readonly source_name: string;
+  readonly source_catalog_layer: CatalogLayerDisclosure;
   readonly slot_id: number | null;
   readonly slot_key: string | null;
   readonly selection_key: string | null;
@@ -183,6 +193,9 @@ function decodeSlotRoute(row: SqlRow): SlotRouteRow {
     routeSpellVersionId: sqlInteger(row, 'route_spell_version_id'),
     spellIdentityId: sqlInteger(row, 'spell_identity_id'),
     spellName: sqlString(row, 'spell_name'),
+    spellCatalogLayer: catalogLayerDisclosure(
+      sqlNullableString(row, 'spell_catalog_layer'),
+    ),
     spellContentKey: sqlString(row, 'spell_content_key'),
     spellRulesEdition: sqlString(
       row,
@@ -190,6 +203,9 @@ function decodeSlotRoute(row: SqlRow): SlotRouteRow {
     ) as RulesEdition,
     spellLevel: sqlInteger(row, 'spell_level'),
     identityName: sqlString(row, 'identity_name'),
+    sourceCatalogLayer: catalogLayerDisclosure(
+      sqlNullableString(row, 'source_catalog_layer'),
+    ),
     slotKey: sqlString(row, 'slot_key'),
     bucket,
     alwaysPrepared: sqlBoolean(row, 'always_prepared'),
@@ -226,6 +242,9 @@ function decodeSpellbookEntry(row: SqlRow): SpellbookEntry {
     spellVersionId: sqlInteger(row, 'spell_version_id'),
     spellIdentityId: sqlInteger(row, 'spell_identity_id'),
     spellName: sqlString(row, 'spell_name'),
+    spellCatalogLayer: catalogLayerDisclosure(
+      sqlNullableString(row, 'spell_catalog_layer'),
+    ),
     spellContentKey: sqlString(row, 'spell_content_key'),
     spellRulesEdition: sqlString(
       row,
@@ -373,7 +392,9 @@ export class SpellAccessBuilder {
               version.content_key AS spell_content_key,
               version.rules_edition AS spell_rules_edition,
               version.level AS spell_level,
-              identity.canonical_name AS identity_name
+              identity.canonical_name AS identity_name,
+              spell_catalog_identity.catalog_layer AS spell_catalog_layer,
+              source_catalog_identity.catalog_layer AS source_catalog_layer
        FROM spell_selection_slots AS slot
        INNER JOIN character_source_instances AS source
          ON source.id = slot.source_instance_id
@@ -384,6 +405,31 @@ export class SpellAccessBuilder {
          )
        INNER JOIN spell_identities AS identity
          ON identity.id = version.spell_identity_id
+       LEFT JOIN catalog_content_identities AS spell_catalog_identity
+         ON spell_catalog_identity.content_kind = 'spell'
+        AND spell_catalog_identity.content_key = version.content_key
+       LEFT JOIN class_definitions AS source_class
+         ON source.source_type = 'class'
+        AND source_class.id = source.source_definition_id
+       LEFT JOIN subclass_definitions AS source_subclass
+         ON source.source_type = 'subclass'
+        AND source_subclass.id = source.source_definition_id
+       LEFT JOIN feat_definitions AS source_feat
+         ON source.source_type = 'feat'
+        AND source_feat.id = source.source_definition_id
+       LEFT JOIN species_definitions AS source_species
+         ON source.source_type = 'species'
+        AND source_species.id = source.source_definition_id
+       LEFT JOIN background_definitions AS source_background
+         ON source.source_type = 'background'
+        AND source_background.id = source.source_definition_id
+       LEFT JOIN catalog_content_identities AS source_catalog_identity
+         ON source_catalog_identity.content_kind = source.source_type
+        AND source_catalog_identity.content_key = COALESCE(
+              source_class.content_key, source_subclass.content_key,
+              source_feat.content_key, source_species.content_key,
+              source_background.content_key
+            )
        WHERE slot.character_id = ?
          AND version.is_active = 1
          AND (
@@ -424,6 +470,7 @@ export class SpellAccessBuilder {
           spell_version_id: row.routeSpellVersionId,
           source_instance_id: row.source_instance_id,
           source_name: row.sourceName,
+          source_catalog_layer: row.sourceCatalogLayer,
           slot_id: row.id,
           slot_key: row.slotKey,
           selection_key: row.slotKey,
@@ -481,12 +528,16 @@ export class SpellAccessBuilder {
               version.content_key AS spell_content_key,
               version.rules_edition AS spell_rules_edition,
               version.level AS spell_level, version.ritual,
-              identity.canonical_name AS identity_name
+              identity.canonical_name AS identity_name,
+              spell_catalog_identity.catalog_layer AS spell_catalog_layer
        FROM wizard_spellbook_entries AS entry
        INNER JOIN spell_versions AS version
          ON version.id = entry.spell_version_id
        INNER JOIN spell_identities AS identity
          ON identity.id = version.spell_identity_id
+       LEFT JOIN catalog_content_identities AS spell_catalog_identity
+         ON spell_catalog_identity.content_kind = 'spell'
+        AND spell_catalog_identity.content_key = version.content_key
        WHERE entry.character_id = ?
          AND version.is_active = 1
        ORDER BY version.display_name`,
@@ -523,6 +574,7 @@ export class SpellAccessBuilder {
           spell_version_id: entry.spellVersionId,
           source_instance_id: capability.source_instance_id,
           source_name: capability.source_name,
+          source_catalog_layer: capability.source_catalog_layer,
           slot_id: null,
           slot_key: null,
           selection_key: null,
@@ -541,10 +593,35 @@ export class SpellAccessBuilder {
 
   private ritualCapabilities(characterId: number): RitualCapability[] {
     const sources = this.db.all(
-      `SELECT id, display_name, source_type, source_definition_id, config
+      `SELECT source.id, source.display_name, source.source_type,
+              source.source_definition_id, source.config,
+              catalog_identity.catalog_layer AS source_catalog_layer
        FROM character_source_instances
+       AS source
+       LEFT JOIN class_definitions AS source_class
+         ON source.source_type = 'class'
+        AND source_class.id = source.source_definition_id
+       LEFT JOIN subclass_definitions AS source_subclass
+         ON source.source_type = 'subclass'
+        AND source_subclass.id = source.source_definition_id
+       LEFT JOIN feat_definitions AS source_feat
+         ON source.source_type = 'feat'
+        AND source_feat.id = source.source_definition_id
+       LEFT JOIN species_definitions AS source_species
+         ON source.source_type = 'species'
+        AND source_species.id = source.source_definition_id
+       LEFT JOIN background_definitions AS source_background
+         ON source.source_type = 'background'
+        AND source_background.id = source.source_definition_id
+       LEFT JOIN catalog_content_identities AS catalog_identity
+         ON catalog_identity.content_kind = source.source_type
+        AND catalog_identity.content_key = COALESCE(
+              source_class.content_key, source_subclass.content_key,
+              source_feat.content_key, source_species.content_key,
+              source_background.content_key
+            )
        WHERE character_id = ? AND state = 'active'
-       ORDER BY id`,
+       ORDER BY source.id`,
       [characterId],
       (row) => ({
         id: sqlInteger(row, 'id'),
@@ -552,6 +629,9 @@ export class SpellAccessBuilder {
         source_type: sqlString(row, 'source_type'),
         source_definition_id: sqlNullableInteger(row, 'source_definition_id'),
         config: sqlNullableString(row, 'config'),
+        catalog_layer: catalogLayerDisclosure(
+          sqlNullableString(row, 'source_catalog_layer'),
+        ),
       }),
     );
     const capabilities: RitualCapability[] = [];
@@ -571,6 +651,7 @@ export class SpellAccessBuilder {
         capabilities.push({
           source_instance_id: sourceId,
           source_name: source.display_name,
+          source_catalog_layer: source.catalog_layer,
           spellcasting_ability: this.spellcastingAbility({
             sourceType: source.source_type,
             sourceDefinitionId: source.source_definition_id,
@@ -590,6 +671,7 @@ export class SpellAccessBuilder {
       | 'spell_identity_id'
       | 'identity_name'
       | 'spell_name'
+      | 'spell_catalog_layer'
       | 'spell_content_key'
       | 'rules_edition'
       | 'spell_level'
@@ -615,6 +697,7 @@ export class SpellAccessBuilder {
       spell_identity_id: spell.spellIdentityId,
       identity_name: spell.identityName,
       spell_name: spell.spellName,
+      spell_catalog_layer: spell.spellCatalogLayer,
       spell_content_key: spell.spellContentKey,
       rules_edition: spell.spellRulesEdition,
       spell_level: spell.spellLevel,

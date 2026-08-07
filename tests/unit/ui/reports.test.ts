@@ -52,6 +52,28 @@ describe('read-only report presentation', () => {
     );
   });
 
+  it('escapes a hostile homebrew name and discloses its external catalog layer', () => {
+    const characterId = db.exec(
+      `INSERT INTO characters (name) VALUES ('Catalog disclosure')`,
+    ).lastInsertId;
+    const hostile = '</strong><img data-ha10-report-hostile src=x>';
+    const report = {
+      ...new BuildReportBuilder(db).build(characterId),
+      catalog_sources: [{
+        kind: 'background' as const,
+        name: hostile,
+        content_key: 'expanded:content.background:hostile',
+        catalog_layer: 'external' as const,
+      }],
+    };
+
+    const markup = renderBuildReport(report);
+
+    expect(markup).toContain('&lt;/strong&gt;&lt;img data-ha10-report-hostile src=x&gt;');
+    expect(markup).not.toContain('<img data-ha10-report-hostile');
+    expect(markup).toContain('Homebrew · external layer');
+  });
+
   it('renders exact source, route, duplicate, and invalid-selection annotations without writes', () => {
     const fixture = createBuildReportFixture(db);
     db.exec(

@@ -75,8 +75,11 @@ import { skillFromLabel } from '../rules/skills';
 import { characterLevel } from '../rules/character-level';
 import {
   bundledSourceContentKeys,
-  isBundledSourceContentKey,
 } from '../catalog/bundled-source-membership';
+import {
+  catalogLayerDisclosure,
+  type CatalogLayerDisclosure,
+} from '../catalog/catalog-disclosure';
 import {
   backgroundEffectsFromTemplate,
   backgroundFromTemplate,
@@ -235,6 +238,7 @@ export function deriveBuildStep(evidence: GuidedStepEvidence): BuildStep {
 export interface ResolvedEquipmentSource {
   readonly content_key: string;
   readonly source_name: string;
+  readonly catalog_layer: CatalogLayerDisclosure;
   readonly source_instance_id: number | null;
 }
 
@@ -250,10 +254,13 @@ export function resolveEquipmentClassSource(
 ): ResolvedEquipmentSource | null {
   const definition = db.one(
     `SELECT definition.id AS definition_id, definition.content_key,
-            definition.name
+            definition.name, identity.catalog_layer
      FROM character_class_levels AS level
      INNER JOIN class_definitions AS definition
        ON definition.id = level.class_definition_id
+     LEFT JOIN catalog_content_identities AS identity
+       ON identity.content_kind = 'class'
+      AND identity.content_key = definition.content_key
      WHERE level.character_id = ?
      ORDER BY level.is_starting_class DESC, level.id
      LIMIT 1`,
@@ -262,6 +269,9 @@ export function resolveEquipmentClassSource(
       definition_id: sqlInteger(row, 'definition_id'),
       content_key: sqlString(row, 'content_key'),
       name: sqlString(row, 'name'),
+      catalog_layer: catalogLayerDisclosure(
+        sqlNullableString(row, 'catalog_layer'),
+      ),
     }),
   );
   if (definition === null) {
@@ -278,6 +288,7 @@ export function resolveEquipmentClassSource(
   return {
     content_key: definition.content_key,
     source_name: definition.name,
+    catalog_layer: definition.catalog_layer,
     source_instance_id: typeof instanceId === 'number' ? instanceId : null,
   };
 }
@@ -300,10 +311,13 @@ export function resolveEquipmentBackgroundSource(
 ): ResolvedEquipmentSource | null {
   const instance = db.one(
     `SELECT source.id AS instance_id, definition.content_key,
-            source.display_name
+            source.display_name, identity.catalog_layer
      FROM character_source_instances AS source
      INNER JOIN background_definitions AS definition
        ON definition.id = source.source_definition_id
+     LEFT JOIN catalog_content_identities AS identity
+       ON identity.content_kind = 'background'
+      AND identity.content_key = definition.content_key
      WHERE source.character_id = ?
        AND source.source_type = 'background'
        AND source.parent_source_instance_id IS NULL
@@ -315,6 +329,9 @@ export function resolveEquipmentBackgroundSource(
       instance_id: sqlInteger(row, 'instance_id'),
       content_key: sqlString(row, 'content_key'),
       display_name: sqlString(row, 'display_name'),
+      catalog_layer: catalogLayerDisclosure(
+        sqlNullableString(row, 'catalog_layer'),
+      ),
     }),
   );
   if (instance !== null) {
@@ -322,6 +339,7 @@ export function resolveEquipmentBackgroundSource(
       content_key: instance.content_key,
       source_name: instance.display_name,
       source_instance_id: instance.instance_id,
+      catalog_layer: instance.catalog_layer,
     };
   }
   const recordedName = db.scalar(
@@ -332,11 +350,19 @@ export function resolveEquipmentBackgroundSource(
     return null;
   }
   const templates = db.all(
-    'SELECT content_key, name FROM background_templates WHERE name = ?',
+    `SELECT template.content_key, template.name, identity.catalog_layer
+     FROM background_templates AS template
+     LEFT JOIN catalog_content_identities AS identity
+       ON identity.content_kind = 'background'
+      AND identity.content_key = template.content_key
+     WHERE template.name = ?`,
     [recordedName],
     (row) => ({
       content_key: sqlString(row, 'content_key'),
       name: sqlString(row, 'name'),
+      catalog_layer: catalogLayerDisclosure(
+        sqlNullableString(row, 'catalog_layer'),
+      ),
     }),
   );
   const template = templates[0];
@@ -347,6 +373,7 @@ export function resolveEquipmentBackgroundSource(
     content_key: template.content_key,
     source_name: template.name,
     source_instance_id: null,
+    catalog_layer: template.catalog_layer,
   };
 }
 
@@ -525,7 +552,8 @@ export class GuidedCreationRefusal extends Error {
  * server-side gate cannot drift apart.
  */
 function bundledClassKeys(db: DatabaseContext): readonly string[] {
-  return bundledSourceContentKeys('class', db);
+  void db;
+  return bundledSourceContentKeys('class');
 }
 
 interface BundledClassRow {
@@ -564,8 +592,8 @@ const classIdentityRow: RowCodec<ClassIdentityRow> = (row) => ({
  * held by homebrew and skips that class). A key with no row is simply not
  * offered.
  *
- * CI-4a/HA-10 lifts this bundled-only boundary after imported class
- * aggregates have a complete application consumer.
+ * D133 keeps this boundary permanently bundled-only in v1. HA-10 widens the
+ * origin and subclass consumers, never this class picker.
  *
  * `hit_die` comes from `class_sheet_traits` via LEFT JOIN and the row can be
  * absent; a null stays null so the UI renders "unknown" (D33) — never the
@@ -582,16 +610,30 @@ export function listGuidedClassOptions(
       `SELECT definition.id AS id,
               definition.content_key AS content_key,
               definition.name AS name,
-              traits.hit_die AS hit_die
+              traits.hit_die AS hit_die,
+              identity.catalog_layer AS catalog_layer
        FROM class_definitions AS definition
        LEFT JOIN class_sheet_traits AS traits
          ON traits.class_definition_id = definition.id
+       LEFT JOIN catalog_content_identities AS identity
+         ON identity.content_kind = 'class'
+        AND identity.content_key = definition.content_key
        WHERE definition.content_key IN (${placeholders})
        ORDER BY definition.name`,
       [...keys],
-      bundledClassRow,
+      (row) => ({
+        ...bundledClassRow(row),
+        catalog_layer: catalogLayerDisclosure(
+          sqlNullableString(row, 'catalog_layer'),
+        ),
+      }),
     )
-    .map(({ content_key, name, hit_die }) => ({ content_key, name, hit_die }));
+    .map(({ content_key, name, hit_die, catalog_layer }) => ({
+      content_key,
+      name,
+      hit_die,
+      catalog_layer,
+    }));
 }
 
 /**
@@ -623,7 +665,7 @@ function gateBundledClass(
       `No class exists for content key "${contentKey}".`,
     );
   }
-  if (!isBundledSourceContentKey('class', contentKey, db)) {
+  if (!bundledSourceContentKeys('class').includes(contentKey)) {
     throw new GuidedCreationRefusal(
       'class_not_bundled',
       `"${definition.name}" is not a bundled class; the guided builder does not guide homebrew classes.`,
@@ -711,17 +753,6 @@ export function createGuidedCharacter(
  */
 export type { GuidedApplyOriginResult };
 
-/**
- * THE BUNDLED ORIGIN IDENTITY IS CONTENT-KEY MEMBERSHIP, mirroring the class
- * gate. `species_templates` carries no provenance column either; the bundled
- * set is derived from the same SRD parse the seeder writes from, so the option
- * list and the apply gate cannot drift apart.
- */
-function bundledSpeciesKeys(db: DatabaseContext): readonly string[] {
-  return bundledSourceContentKeys('species', db);
-}
-
-/** The background twin (A5), derived from the same SRD parse the seeder uses. */
 const speciesTemplateRow: RowCodec<SpeciesTemplateRow> = (row) => ({
   id: sqlInteger(row, 'id'),
   content_key: sqlString(row, 'content_key'),
@@ -794,7 +825,7 @@ export function listGuidedOriginOptions(
       .all(
         `SELECT template.content_key, template.name, identity.catalog_layer
          FROM background_templates AS template
-         JOIN catalog_content_identities AS identity
+         LEFT JOIN catalog_content_identities AS identity
            ON identity.content_kind = 'background'
           AND identity.content_key = template.content_key
          LEFT JOIN background_definitions AS definition
@@ -806,13 +837,13 @@ export function listGuidedOriginOptions(
         (row) => ({
           content_key: sqlString(row, 'content_key'),
           name: sqlString(row, 'name'),
-          catalog_layer: sqlString(row, 'catalog_layer'),
+          catalog_layer: sqlNullableString(row, 'catalog_layer'),
         }),
       )
       .map(({ content_key, name, catalog_layer }) => ({
         content_key,
         name,
-        catalog_layer: catalog_layer === 'external' ? 'external' as const : 'bundled' as const,
+        catalog_layer: catalogLayerDisclosure(catalog_layer),
         grants_lineage_spells: false,
       }));
   }
@@ -820,7 +851,7 @@ export function listGuidedOriginOptions(
     .all(
       `SELECT template.content_key, template.name, identity.catalog_layer
        FROM species_templates AS template
-       JOIN catalog_content_identities AS identity
+       LEFT JOIN catalog_content_identities AS identity
          ON identity.content_kind = 'species'
         AND identity.content_key = template.content_key
        LEFT JOIN species_definitions AS definition
@@ -832,22 +863,22 @@ export function listGuidedOriginOptions(
       (row) => ({
         content_key: sqlString(row, 'content_key'),
         name: sqlString(row, 'name'),
-        catalog_layer: sqlString(row, 'catalog_layer'),
+        catalog_layer: sqlNullableString(row, 'catalog_layer'),
       }),
     )
     .map(({ content_key, name, catalog_layer }) => ({
       content_key,
       name,
-      catalog_layer: catalog_layer === 'external' ? 'external' as const : 'bundled' as const,
+      catalog_layer: catalogLayerDisclosure(catalog_layer),
       grants_lineage_spells: grantsLineageSpells(content_key),
     }));
 }
 
 /**
- * The origin gate, mirroring `gateBundledClass`. The seam's refusal vocabulary
- * has only `unknown_origin` for this path — there is no `origin_not_bundled` —
- * so a key outside the bundled set and a bundled key whose row is absent both
- * refuse with the same reason: neither is a species the guided builder knows.
+ * The origin gate accepts a bundled template or a complete external
+ * definition/template aggregate. The seam's refusal vocabulary has only
+ * `unknown_origin` for this path, so an incomplete or absent aggregate refuses
+ * with that reason rather than being partially applied.
  */
 function gateInstalledSpecies(
   db: DatabaseContext,
@@ -1371,12 +1402,10 @@ function deleteGuidedBackgroundSources(
 }
 
 /**
- * The background step's option data: every bundled background with its
- * printed pairing (the background's own DEFAULT, per D61/D68 never a
- * constraint), and
- * every bundled Origin feat the player may pick instead. Both lists follow
- * the class-options rule — a bundled key whose row was yielded to
- * user-authored content is simply not offered.
+ * The background step's option data: every bundled or complete external
+ * background with its printed pairing (the background's own DEFAULT, per
+ * D61/D68 never a constraint), and every mechanically offerable installed
+ * Origin feat the player may pick instead. Both carry the registry layer.
  */
 export function listGuidedBackgroundChoiceOptions(
   db: DatabaseContext,
@@ -1385,14 +1414,16 @@ export function listGuidedBackgroundChoiceOptions(
     .all(
       `SELECT template.content_key, template.name, template.ability_score_1,
               template.ability_score_2, template.ability_score_3,
-              template.feat_name, template.default_origin_feat_content_key
+              template.feat_name, template.default_origin_feat_content_key,
+              identity.catalog_layer
        FROM background_templates AS template
-       JOIN catalog_content_identities AS identity
+       LEFT JOIN catalog_content_identities AS identity
          ON identity.content_kind = 'background'
         AND identity.content_key = template.content_key
        LEFT JOIN background_definitions AS definition
          ON definition.content_key = template.content_key
-       WHERE identity.catalog_layer = 'bundled'
+       WHERE identity.catalog_layer IS NULL
+          OR identity.catalog_layer = 'bundled'
           OR definition.content_key IS NOT NULL
        ORDER BY template.name, template.content_key`,
       undefined,
@@ -1407,11 +1438,15 @@ export function listGuidedBackgroundChoiceOptions(
           row,
           'default_origin_feat_content_key',
         ),
+        catalog_layer: catalogLayerDisclosure(
+          sqlNullableString(row, 'catalog_layer'),
+        ),
       }),
     )
     .map((template) => ({
       content_key: template.content_key,
       name: template.name,
+      catalog_layer: template.catalog_layer,
       pairing: printedPairing(template),
     }));
 
@@ -1433,18 +1468,20 @@ export function listGuidedBackgroundChoiceOptions(
     }),
   ).filter((feat) =>
     isGuidedOriginFeatOfferable(feat.catalog_layer, feat.grant_rules)
-  ).map(({ content_key, name }) => ({ content_key, name }));
+  ).map(({ content_key, name, catalog_layer }) => ({
+    content_key,
+    name,
+    catalog_layer: catalogLayerDisclosure(catalog_layer),
+  }));
 
   return { backgrounds, origin_feats: originFeats };
 }
 
 /**
- * The Origin-feat gate, `gateBundledBackground`'s shape with the feat
- * catalog. The seam's refusal vocabulary is a CLOSED union with no
- * feat-specific member — a gap reported with this dispatch — so both refusals
- * ride `unknown_origin`: the feat is part of applying the origin, and neither
- * a key outside the bundled Origin set nor a bundled key whose row was
- * yielded is a feat the guided builder knows.
+ * The Origin-feat gate admits each mechanically offerable installed feat from
+ * the same registry-backed list the picker displays. The seam's refusal
+ * vocabulary is a CLOSED union with no feat-specific member, so an unavailable
+ * key rides `unknown_origin`: the feat is part of applying the origin.
  */
 function gateInstalledOriginFeat(
   db: DatabaseContext,
@@ -1846,6 +1883,55 @@ export async function allocateGuidedAbilities(
  * Expertise is no longer a disclosure: GF-2 models it as sourced grant state
  * in the dedicated step that follows every skill source.
  */
+function guidedSourceDisplay(
+  db: DatabaseContext,
+  sourceInstanceId: number,
+): {
+    readonly source_name: string;
+    readonly source_catalog_layer: CatalogLayerDisclosure;
+  } {
+  const source = db.oneRaw(
+    `SELECT source.display_name,
+              identity.catalog_layer
+       FROM character_source_instances AS source
+       LEFT JOIN class_definitions AS class
+         ON source.source_type = 'class'
+        AND class.id = source.source_definition_id
+       LEFT JOIN subclass_definitions AS subclass
+         ON source.source_type = 'subclass'
+        AND subclass.id = source.source_definition_id
+       LEFT JOIN feat_definitions AS feat
+         ON source.source_type = 'feat'
+        AND feat.id = source.source_definition_id
+       LEFT JOIN species_definitions AS species
+         ON source.source_type = 'species'
+        AND species.id = source.source_definition_id
+       LEFT JOIN background_definitions AS background
+         ON source.source_type = 'background'
+        AND background.id = source.source_definition_id
+       LEFT JOIN catalog_content_identities AS identity
+         ON identity.content_kind = source.source_type
+        AND identity.content_key = COALESCE(
+          class.content_key,
+          subclass.content_key,
+          feat.content_key,
+          species.content_key,
+          background.content_key
+        )
+     WHERE source.id = ?`,
+    [sourceInstanceId],
+  );
+  return {
+    source_name:
+      source === null ? 'Unknown source' : String(source.display_name),
+    source_catalog_layer: catalogLayerDisclosure(
+      source === null || source.catalog_layer === null
+        ? null
+        : String(source.catalog_layer),
+    ),
+  };
+}
+
 export function guidedSkillsStepState(
   db: DatabaseContext,
   characterId: number,
@@ -1860,13 +1946,6 @@ export function guidedSkillsStepState(
   }
 
   const resolved = resolveSkillGrants(db, characterId);
-  const sourceName = (sourceInstanceId: number): string => {
-    const name = db.scalar<string>(
-      'SELECT display_name FROM character_source_instances WHERE id = ?',
-      [sourceInstanceId],
-    );
-    return name === null ? 'Unknown source' : String(name);
-  };
 
   const clearableKeys: readonly string[] = [
     SKILL_GRANT_KEYS.classSkill,
@@ -1883,7 +1962,7 @@ export function guidedSkillsStepState(
       grant_id: grant.id,
       skill: grant.skill,
       grant_key: grant.grant_key,
-      source_name: sourceName(grant.source_instance_id),
+      ...guidedSourceDisplay(db, grant.source_instance_id),
       // A background's printed skills are FACTS, not choices — shown, never
       // clearable here. The §3.3 collision's clear remedy targets the CHOICE
       // grants, which are exactly the fillable keys.
@@ -1894,7 +1973,7 @@ export function guidedSkillsStepState(
     (grant) => ({
       grant_id: grant.grant_id,
       grant_key: grant.grant_key,
-      source_name: sourceName(grant.source_instance_id),
+      ...guidedSourceDisplay(db, grant.source_instance_id),
       available: grant.available,
     }),
   );
@@ -1907,7 +1986,9 @@ export function guidedSkillsStepState(
     [characterId],
     rowId,
   );
-  const unmodelledToolAlternativeSources: string[] = [];
+  const unmodelledToolAlternativeSources: Array<
+    ReturnType<typeof guidedSourceDisplay>
+  > = [];
   for (const sourceInstanceId of activeSourceIds) {
     for (const rule of reader.activeRulesForSource(sourceInstanceId)) {
       if (rule.kind !== GrantRule.SKILL_PROFICIENCY) {
@@ -1926,7 +2007,9 @@ export function guidedSkillsStepState(
         ),
       );
       if (recorded < (rule.count ?? 0)) {
-        unmodelledToolAlternativeSources.push(sourceName(sourceInstanceId));
+        unmodelledToolAlternativeSources.push(
+          guidedSourceDisplay(db, sourceInstanceId),
+        );
         break;
       }
     }
@@ -1978,14 +2061,10 @@ export function guidedExpertiseStepState(
   const choices = resolveSkillExpertiseGrants(db, characterId)
     .filter((grant) => grant.state === 'active' && grant.skill === null)
     .map((grant) => {
-      const sourceName =
-        db.scalar<string>(
-          `SELECT display_name FROM character_source_instances WHERE id = ?`,
-          [grant.source_instance_id],
-        ) ?? 'Unknown source';
+      const source = guidedSourceDisplay(db, grant.source_instance_id);
       return {
         grant_id: grant.id,
-        source_name: String(sourceName),
+        ...source,
         ordinal: grant.ordinal,
         available: availableSkillsForExpertiseGrant(
           db,

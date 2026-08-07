@@ -79,6 +79,7 @@ function warning(kind: string, title: string): LevelUpPermanentWarning {
 function classOption(options: {
   readonly id?: number;
   readonly name?: string;
+  readonly catalogLayer?: LevelUpGuideableClassOption['catalog_layer'];
   readonly current?: number;
   readonly steps?: readonly LevelUpStep[];
   readonly hp?: LevelUpGuideableClassOption['gains']['hit_points'];
@@ -91,6 +92,7 @@ function classOption(options: {
     class_definition_id: (options.id ?? 11) as ClassDefinitionId,
     content_key: `test:class:${options.name ?? 'wizard'}` as ContentKey,
     name: options.name ?? 'Wizard',
+    catalog_layer: options.catalogLayer ?? 'bundled',
     rules_edition: '2024',
     current_level: current as ClassLevel,
     target_level: (current + 1) as ClassLevel,
@@ -133,6 +135,7 @@ function classOption(options: {
               content_key: 'test:subclass:abjurer' as ContentKey,
               name: 'Abjurer',
               rules_edition: '2024',
+              catalog_layer: 'bundled',
             },
           ],
         }
@@ -165,6 +168,7 @@ function pendingEpicResolution(
 function boonCandidate(options: {
   readonly key?: string;
   readonly name?: string;
+  readonly catalogLayer?: LevelUpFeatCandidate['catalog_layer'];
   readonly status?: 'qualified' | 'unmet' | 'unprovable';
 } = {}): LevelUpFeatCandidate {
   const key = options.key ?? '2024:feat:boon-of-fate';
@@ -210,9 +214,11 @@ function boonCandidate(options: {
     },
   };
   return {
+    catalog_layer: options.catalogLayer ?? 'bundled',
     definition: {
       content_key: key as ContentKey,
       name: options.name ?? 'Boon of Fate',
+      catalog_layer: options.catalogLayer ?? 'bundled',
       grouping: 'epic_boon',
       min_level: 19 as CharacterLevel,
       ability_points: 1,
@@ -311,6 +317,7 @@ function sheet(options: {
       subclass_name: null,
       saving_throws: ['intelligence', 'wisdom'],
     }],
+    catalog_sources: [],
     proficiencies: {
       armor_training: [],
       weapon_proficiencies: [],
@@ -435,6 +442,40 @@ describe('W-ROUTE-EXACT level-up route', () => {
 });
 
 describe('W-STEP-SOURCE returned applicability', () => {
+  it('renders a hostile held class inert with its exact live-route layer', () => {
+    const hostile = '</span><img data-ha10-held-class src=x>';
+    const wizard = createLevelUpWizard({
+      state: ready({
+        classes: [classOption({
+          name: hostile,
+          catalogLayer: 'external',
+        })],
+      }),
+      cancel: () => undefined,
+    });
+    const card = interactiveElement(wizard.element).querySelector(
+      `[${LEVEL_UP_ATTR.classOption}="11"]`,
+    );
+
+    expect(card?.getAttribute('aria-label')).toBe(
+      `${hostile} 1 → 2, 2024 rules, d6 hit die`,
+    );
+    const describedBy = card?.getAttribute('aria-describedby');
+    expect(describedBy).not.toBeNull();
+    expect(
+      elementText(
+        interactiveElement(wizard.element).querySelector(
+          `[id="${describedBy}"]`,
+        ) as unknown as Node,
+      ),
+    ).toBe('Homebrew · external layer');
+    expect(elementText(wizard.element)).toContain(hostile);
+    expect(
+      interactiveElement(wizard.element).querySelector('[data-ha10-held-class]'),
+    ).toBeNull();
+    wizard.cleanup();
+  });
+
   it('orders only the Wizard 2 steps returned by state', () => {
     const wizard = createLevelUpWizard({
       state: ready({
@@ -680,6 +721,15 @@ describe('W-FOCUS navigation and errors', () => {
     expect(classRadio?.getAttribute('aria-label')).toBe(
       'Wizard 1 → 2, 2024 rules, d6 hit die',
     );
+    const classDescription = classRadio?.getAttribute('aria-describedby');
+    expect(classDescription).not.toBeNull();
+    expect(
+      elementText(
+        interactiveElement(wizard.element).querySelector(
+          `[id="${classDescription}"]`,
+        ) as unknown as Node,
+      ),
+    ).toBe('SRD · bundled layer');
 
     click(wizard.element, LEVEL_UP_ATTR.next);
     click(wizard.element, LEVEL_UP_ATTR.next);
@@ -691,8 +741,58 @@ describe('W-FOCUS navigation and errors', () => {
       'Abjurer — Wizard, 2024 rules',
       'Decide later',
     ]);
+    const subclassDescription = subclassRadios[0]?.getAttribute('aria-describedby');
+    expect(subclassDescription).not.toBeNull();
+    expect(
+      elementText(
+        interactiveElement(wizard.element).querySelector(
+          `[id="${subclassDescription}"]`,
+        ) as unknown as Node,
+      ),
+    ).toBe('SRD · bundled layer');
     expect(elementText(wizard.element)).toContain('Abjurer — Wizard, 2024 rules');
     expect(elementText(wizard.element)).toContain('Decide later');
+    wizard.cleanup();
+  });
+
+  it('renders a hostile external subclass inert with an exact disclosed accessible name', () => {
+    const hostile = '</span><img data-ha10-level-up-hostile src=x>';
+    const base = classOption({
+      steps: ['class', 'gains', 'subclass', 'review', 'complete'],
+      subclass: true,
+    });
+    const bundled = base.subclass_choice?.options[0];
+    if (bundled === undefined) throw new Error('Subclass fixture is missing.');
+    const option = {
+      ...base,
+      subclass_choice: {
+        options: [{ ...bundled, name: hostile, catalog_layer: 'external' as const }],
+      },
+    };
+    const wizard = createLevelUpWizard({
+      state: ready({ classes: [option] }),
+      cancel: () => undefined,
+    });
+
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    const radios = interactiveElement(wizard.element).querySelectorAll('[type="radio"]');
+    expect(radios[0]?.getAttribute('aria-label')).toBe(
+      `${hostile} — Wizard, 2024 rules`,
+    );
+    const describedBy = radios[0]?.getAttribute('aria-describedby');
+    expect(describedBy).not.toBeNull();
+    expect(
+      elementText(
+        interactiveElement(wizard.element).querySelector(
+          `[id="${describedBy}"]`,
+        ) as unknown as Node,
+      ),
+    ).toBe('Homebrew · external layer');
+    expect(elementText(wizard.element)).toContain(hostile);
+    expect(
+      interactiveElement(wizard.element).querySelector('[data-ha10-level-up-hostile]'),
+    ).toBeNull();
     wizard.cleanup();
   });
 
@@ -837,6 +937,7 @@ describe('D118 and D119 route choices', () => {
           class_definition_id: 44 as ClassDefinitionId,
           content_key: 'test:class:no-die' as ContentKey,
           name: 'Unrecorded Class',
+          catalog_layer: 'unknown',
           rules_edition: '2024',
           current_level: 2 as ClassLevel,
           hit_die: null,
@@ -876,6 +977,7 @@ describe('D118 and D119 route choices', () => {
           class_definition_id: 44 as ClassDefinitionId,
           content_key: 'test:class:no-die' as ContentKey,
           name: 'Unrecorded Class',
+          catalog_layer: 'unknown',
           rules_edition: '2024',
           current_level: 2 as ClassLevel,
           hit_die: null,
@@ -913,6 +1015,7 @@ describe('D118 and D119 route choices', () => {
           class_definition_id: 44 as ClassDefinitionId,
           content_key: 'test:class:no-die' as ContentKey,
           name: 'Unrecorded Class',
+          catalog_layer: 'unknown',
           rules_edition: '2024',
           current_level: 19 as ClassLevel,
           hit_die: null,
@@ -1140,11 +1243,24 @@ describe('W-E review, atomic confirm, and complete', () => {
   it('W-SUBCLASS-DRAFT names a selected subclass on Review and Complete', async () => {
     const before = sheet({ totalLevel: 2, classLevel: 2, hp: 14 });
     const after = sheet({ totalLevel: 3, classLevel: 3, hp: 20 });
-    const selectedClass = classOption({
+    const baseClass = classOption({
       current: 2,
       subclass: true,
       steps: ['class', 'gains', 'subclass', 'review', 'complete'],
     });
+    const originalSubclass = baseClass.subclass_choice?.options[0];
+    if (originalSubclass === undefined) throw new Error('Subclass fixture missing.');
+    const hostile = '</dd><img data-ha10-review-subclass src=x>';
+    const selectedClass = {
+      ...baseClass,
+      subclass_choice: {
+        options: [{
+          ...originalSubclass,
+          name: hostile,
+          catalog_layer: 'external' as const,
+        }],
+      },
+    };
     const submit = vi.fn().mockResolvedValue({
       operation_uuid: 'level-up-operation',
       revision: 5,
@@ -1157,7 +1273,7 @@ describe('W-E review, atomic confirm, and complete', () => {
       submit,
       loadSheet: vi.fn().mockResolvedValue({
         ...after,
-        classes: [{ ...after.classes[0]!, subclass_name: 'Abjurer' }],
+        classes: [{ ...after.classes[0]!, subclass_name: hostile }],
       }),
       randomUuid: () => '61616161-6161-4161-8161-616161616161',
     });
@@ -1167,7 +1283,16 @@ describe('W-E review, atomic confirm, and complete', () => {
     chooseRadio(wizard.element, '31');
     click(wizard.element, LEVEL_UP_ATTR.next);
     await settle();
-    expect(elementText(wizard.element)).toContain('Subclass Abjurer');
+    expect(
+      interactiveElement(wizard.element)
+        .querySelectorAll('dd')
+        .map((entry) => elementText(entry as unknown as Node)),
+    ).toContain(`${hostile} — Homebrew · external layer`);
+    expect(
+      interactiveElement(wizard.element).querySelector(
+        '[data-ha10-review-subclass]',
+      ),
+    ).toBeNull();
     expect(elementText(wizard.element)).toContain('New class feature Scholar');
 
     click(wizard.element, LEVEL_UP_ATTR.confirm);
@@ -1177,7 +1302,16 @@ describe('W-E review, atomic confirm, and complete', () => {
       expect.objectContaining({ subclass_content_key: 'test:subclass:abjurer' }),
       '61616161-6161-4161-8161-616161616161',
     );
-    expect(elementText(wizard.element)).toContain('Subclass: Abjurer.');
+    expect(
+      interactiveElement(wizard.element)
+        .querySelectorAll('li')
+        .map((entry) => elementText(entry as unknown as Node)),
+    ).toContain(`Subclass: ${hostile} — Homebrew · external layer.`);
+    expect(
+      interactiveElement(wizard.element).querySelector(
+        '[data-ha10-review-subclass]',
+      ),
+    ).toBeNull();
     expect(elementText(wizard.element)).toContain('New class feature: Scholar.');
     wizard.cleanup();
   });
@@ -1216,7 +1350,7 @@ describe('W-E review, atomic confirm, and complete', () => {
       ),
     ).not.toBeNull();
     expect(elementText(wizard.element)).toContain(
-      'Wizard level 3 will be saved without a subclass selection',
+      'Wizard level 3 (SRD · bundled layer) will be saved without a subclass selection',
     );
 
     click(wizard.element, LEVEL_UP_ATTR.confirm);
@@ -1224,7 +1358,7 @@ describe('W-E review, atomic confirm, and complete', () => {
     expect(elementText(wizard.element)).toContain('Subclass: Decide later.');
     expect(elementText(wizard.element)).toContain('Subclass choice still needed');
     expect(elementText(wizard.element)).toContain(
-      'Wizard level 3 will be saved without a subclass selection',
+      'Wizard level 3 (SRD · bundled layer) will be saved without a subclass selection',
     );
     wizard.cleanup();
   });
@@ -1558,6 +1692,7 @@ describe('W-E review, atomic confirm, and complete', () => {
 
   it('D118 completes a resolution pass without claiming any level changed', async () => {
     const unchanged = sheet({ totalLevel: 20, classLevel: 20, hp: 120 });
+    const hostile = '</dd><img data-ha10-level-feat src=x>';
     const state: LevelUpStateResult = {
       kind: 'maximum_level',
       character: {
@@ -1568,7 +1703,10 @@ describe('W-E review, atomic confirm, and complete', () => {
         warnings: [],
       },
       held_classes: [],
-      pending_epic_resolution: pendingEpicResolution([boonCandidate()]),
+      pending_epic_resolution: pendingEpicResolution([boonCandidate({
+        name: hostile,
+        catalogLayer: 'external',
+      })]),
     };
     const submit = vi.fn().mockResolvedValue({
       operation_uuid: 'level-up-operation',
@@ -1588,12 +1726,22 @@ describe('W-E review, atomic confirm, and complete', () => {
     chooseRadio(wizard.element, '2024:feat:boon-of-fate:0');
     click(wizard.element, LEVEL_UP_ATTR.next);
     await settle();
-    expect(elementText(wizard.element)).toContain('Feat Boon of Fate');
+    expect(elementText(wizard.element)).toContain(
+      `Feat ${hostile} — Homebrew · external layer`,
+    );
+    expect(
+      interactiveElement(wizard.element).querySelector('[data-ha10-level-feat]'),
+    ).toBeNull();
     click(wizard.element, LEVEL_UP_ATTR.confirm);
     await settle();
 
     expect(elementText(wizard.element)).toContain('Epic Boon choice complete');
-    expect(elementText(wizard.element)).toContain('Feat: Boon of Fate.');
+    expect(elementText(wizard.element)).toContain(
+      `Feat: ${hostile} — Homebrew · external layer.`,
+    );
+    expect(
+      interactiveElement(wizard.element).querySelector('[data-ha10-level-feat]'),
+    ).toBeNull();
     expect(elementText(wizard.element)).toContain(
       'without changing total or class levels',
     );

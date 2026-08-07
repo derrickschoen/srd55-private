@@ -55,6 +55,7 @@ export type SrdFeatCategory =
 export interface SrdFeatDefinition {
   readonly content_key: BundledFeatContentKey & ContentKey;
   readonly name: string;
+  readonly catalog_layer: 'bundled';
   readonly source_category: SrdFeatCategory;
   readonly grouping: KnownFeatGrouping;
   readonly min_level: CharacterLevel | null;
@@ -368,6 +369,7 @@ export function parseSrdFeatDefinitions(
     feats.push({
       content_key: contentKey as BundledFeatContentKey & ContentKey,
       name,
+      catalog_layer: 'bundled',
       source_category: category,
       grouping: GROUPING_BY_SOURCE_CATEGORY[category],
       min_level: parsedPrerequisites.min_level,

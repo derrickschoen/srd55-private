@@ -11,7 +11,13 @@ import {
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { GrantRuleSlotGenerator } from '../../../src/grants/grant-rule-slot-generator';
 import { bundledClassContentKeys } from '../../../src/rules/class-progression-lookup';
+import { createClassChooser } from '../../../src/ui/screens/guided-builder/class-chooser';
 import { rpcRegistry } from '../../../src/worker/registry';
+import {
+  elementText,
+  installInteractiveDocument,
+  interactiveElement,
+} from '../../fixtures/interactive-dom';
 import {
   createRpcHarness,
   type RpcHarness,
@@ -120,22 +126,23 @@ describe('guided class gate', () => {
       'Chronomancer',
     );
 
-    await expect(
-      rpcRegistry.dispatch(
-        {
-          id: 1,
-          method: GUIDED_RPC.create,
-          params: {
-            name: attemptedName,
-            class_content_key: homebrewContentKey,
-          },
+    const response = await rpcRegistry.dispatch(
+      {
+        id: 1,
+        method: GUIDED_RPC.create,
+        params: {
+          name: attemptedName,
+          class_content_key: homebrewContentKey,
         },
-        rpcHarness.context,
-      ),
-    ).resolves.toMatchObject({
+      },
+      rpcHarness.context,
+    );
+    expect(response).toEqual({
+      id: 1,
       ok: false,
       error: {
         code: 'handler_error',
+        message: '"Chronomancer" is not a bundled class; the guided builder does not guide homebrew classes.',
         data: {
           reason: 'class_not_bundled',
         } satisfies GuidedRefusalData,
@@ -154,22 +161,23 @@ describe('guided class gate', () => {
     const missingContentKey = 'test:class:no-such-row';
     const attemptedName = 'Unknown Refusal';
 
-    await expect(
-      rpcRegistry.dispatch(
-        {
-          id: 2,
-          method: GUIDED_RPC.create,
-          params: {
-            name: attemptedName,
-            class_content_key: missingContentKey,
-          },
+    const response = await rpcRegistry.dispatch(
+      {
+        id: 2,
+        method: GUIDED_RPC.create,
+        params: {
+          name: attemptedName,
+          class_content_key: missingContentKey,
         },
-        rpcHarness.context,
-      ),
-    ).resolves.toMatchObject({
+      },
+      rpcHarness.context,
+    );
+    expect(response).toEqual({
+      id: 2,
       ok: false,
       error: {
         code: 'handler_error',
+        message: `No class exists for content key "${missingContentKey}".`,
         data: {
           reason: 'unknown_class',
         } satisfies GuidedRefusalData,
@@ -278,6 +286,8 @@ describe('listGuidedClassOptions', () => {
     expect(new Set(options.map((option) => option.content_key))).toEqual(
       new Set(bundledClassContentKeys().classes),
     );
+    expect(options.every((option) => option.catalog_layer === 'bundled')).toBe(true);
+    expect(options.map((option) => option.name)).not.toContain('Cartographer');
   });
 
   it('reports an unknown hit die as null when the bundled class traits row is absent', async () => {
@@ -297,6 +307,43 @@ describe('listGuidedClassOptions', () => {
         contentKey,
       ).hit_die,
     ).toBeNull();
+  });
+
+  it('keeps a manifest class visible but discloses unknown after its registry row is deleted', async () => {
+    const rpcHarness = await realApplicationDatabase();
+    const contentKey = firstBundledClassContentKey();
+    rpcHarness.context.db.exec('PRAGMA foreign_keys = OFF');
+    rpcHarness.context.db.exec(
+      `DELETE FROM catalog_content_identities
+       WHERE content_kind = 'class' AND content_key = ?`,
+      [contentKey],
+    );
+    rpcHarness.context.db.exec('PRAGMA foreign_keys = ON');
+
+    const option = optionFor(
+      listGuidedClassOptions(rpcHarness.context.db),
+      contentKey,
+    );
+    expect(option).toMatchObject({ catalog_layer: 'unknown' });
+
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const chooser = createClassChooser({
+        options: [option],
+        createGuided: () => Promise.reject(new Error('not submitted')),
+        navigate: () => undefined,
+      });
+      expect(
+        elementText(
+          interactiveElement(chooser.element).querySelector(
+            '.catalog-layer-disclosure',
+          )! as unknown as Node,
+        ),
+      ).toBe('Unknown catalog layer');
+      chooser.cleanup();
+    } finally {
+      restoreDocument();
+    }
   });
 });
 
@@ -336,8 +383,14 @@ describe('guided creation revision and history', () => {
 });
 
 describe('guided RPC registry contracts', () => {
-  it('registers and serves the seam-defined class-options RPC', async () => {
+  it('serves only bundled classes through the live class-options RPC when an external class is installed', async () => {
     const rpcHarness = await realApplicationDatabase();
+    const externalContentKey = '2024:test.homebrew:rpc-cartographer';
+    insertHomebrewClass(
+      rpcHarness,
+      externalContentKey,
+      'RPC Cartographer',
+    );
 
     expect(rpcRegistry.methods).toContain(GUIDED_RPC.classOptions);
     const response = await rpcRegistry.dispatch(
@@ -355,6 +408,9 @@ describe('guided RPC registry contracts', () => {
     }
     expect(classOptionKeysFromRpcResult(response.result)).toEqual(
       new Set(bundledClassContentKeys().classes),
+    );
+    expect(classOptionKeysFromRpcResult(response.result)).not.toContain(
+      externalContentKey,
     );
   });
 

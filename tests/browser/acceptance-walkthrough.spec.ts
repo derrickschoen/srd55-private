@@ -370,7 +370,10 @@ test('an unassisted sitting creates a caster through the current guided level 1 
   await expect(page.getByText('Arcana — Wizard — Scholar', { exact: true })).toBeVisible();
   for (const choice of ACCEPTANCE_WIZARD_2_CHOICES.spells) {
     await expect(
-      page.getByText(`${choice.spell_name} — Wizard`, { exact: true }),
+      page.getByText(
+        `${choice.spell_name} — Wizard — SRD · bundled layer`,
+        { exact: true },
+      ),
     ).toBeVisible();
   }
   await page.locator('[data-level-up-confirm]').click();

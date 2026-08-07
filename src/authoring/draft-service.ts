@@ -49,6 +49,7 @@ import type {
   SubclassAuthoringDraft,
   SubclassContentAggregate,
 } from './contracts';
+import { catalogLayerDisclosure } from '../catalog/catalog-disclosure';
 import type {
   AuthoringCharacterEffect,
   AuthoringDraftCharacterEffect,
@@ -687,14 +688,27 @@ export class CatalogAuthoringService {
       table: 'feat_definitions' | 'weapon_templates' | 'armor_templates',
       where = '',
     ) => this.db.all(
-      `SELECT content_key, name, rules_edition
-       FROM ${table} ${where}
-       ORDER BY name, rules_edition, content_key`,
+      `SELECT definition.content_key, definition.name, definition.rules_edition,
+              identity.catalog_layer
+       FROM ${table} AS definition
+       LEFT JOIN catalog_content_identities AS identity
+         ON identity.content_kind = CASE
+              WHEN '${table}' = 'feat_definitions' THEN 'feat'
+              WHEN '${table}' = 'weapon_templates' THEN 'weapon'
+              ELSE 'armor'
+            END
+        AND identity.content_key = definition.content_key
+       ${where.replaceAll('category', 'definition.category')}
+       ORDER BY definition.name, definition.rules_edition,
+                definition.content_key`,
       undefined,
       (row) => ({
         content_key: sqlString(row, 'content_key') as ContentKey,
         name: sqlString(row, 'name'),
         rules_edition: rulesEdition(sqlString(row, 'rules_edition')),
+        catalog_layer: catalogLayerDisclosure(
+          sqlNullableString(row, 'catalog_layer'),
+        ),
       }),
     );
     return Object.freeze({

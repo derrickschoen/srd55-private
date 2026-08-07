@@ -62,13 +62,15 @@ describe('the item attunement surface', () => {
   it('copies a catalog definition into a quantity-one character item without a live key', () => {
     const restoreDocument = installInteractiveDocument();
     try {
+      const hostile = '</option><img data-ha10-item src=x>';
       const added: Parameters<PlannerItemActions['addItem']>[0][] = [];
       const rendered = interactiveElement(renderItems({
         panel: {
           items: [],
           definitions: [{
             content_key: 'expanded:content.v1:definition' as ContentKey,
-            name: 'Giant Belt',
+            name: hostile,
+            catalog_layer: 'external',
             description: 'Sets Strength.',
             requires_attunement: true,
             effects: [{
@@ -104,11 +106,17 @@ describe('the item attunement surface', () => {
       }
       const definitionSelect = rendered.querySelector('select');
       if (definitionSelect === null) throw new Error('Catalog select missing.');
+      const homebrewGroup = definitionSelect.querySelector('optgroup');
+      expect(homebrewGroup?.getAttribute('label')).toBe(
+        'Homebrew · external layer',
+      );
+      expect(homebrewGroup?.querySelector('option')?.textContent).toBe(hostile);
+      expect(rendered.querySelector('[data-ha10-item]')).toBeNull();
       definitionSelect.value = 'expanded:content.v1:definition';
       catalogButton.click();
 
       expect(added).toEqual([{
-        name: 'Giant Belt',
+        name: hostile,
         description: 'Sets Strength.',
         quantity: 1,
         requires_attunement: true,

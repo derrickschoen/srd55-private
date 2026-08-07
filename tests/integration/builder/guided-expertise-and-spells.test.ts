@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { GUIDED_RPC, type GuidedExpertiseStepState } from '../../../src/builder/contracts';
 import {
   allocateGuidedAbilities,
   applyGuidedBackgroundChoices,
@@ -19,14 +20,28 @@ import {
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import type { DatabaseContext } from '../../../src/db/database';
 import type { Skill } from '../../../src/domain/enums';
+import { createExpertiseStep } from '../../../src/ui/screens/guided-builder/expertise-step';
+import { rpcRegistry } from '../../../src/worker/registry';
+import {
+  elementText,
+  installInteractiveDocument,
+  interactiveElement,
+} from '../../fixtures/interactive-dom';
 import {
   createRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
 
 let harness: RpcHarness | undefined;
+let restoreDocument: (() => void) | undefined;
+
+beforeEach(() => {
+  restoreDocument = installInteractiveDocument();
+});
 
 afterEach(() => {
+  restoreDocument?.();
+  restoreDocument = undefined;
   harness?.close();
   harness = undefined;
 });
@@ -148,6 +163,65 @@ describe('GF-2 guided Expertise and spell adoption', () => {
     expect(guidedBuildState(db, characterId)).toMatchObject({
       current_step: 'expertise',
     });
+
+    const hostile = '</span><img data-ha10-expertise-source src=x>';
+    const source = db.oneRaw(
+      `SELECT source.id, definition.content_key
+       FROM character_source_instances AS source
+       JOIN class_definitions AS definition
+         ON definition.id = source.source_definition_id
+       WHERE source.character_id = ? AND source.source_type = 'class'`,
+      [characterId],
+    );
+    if (source === null) throw new Error('Rogue source fixture is missing.');
+    db.exec(
+      'UPDATE character_source_instances SET display_name = ? WHERE id = ?',
+      [hostile, Number(source.id)],
+    );
+    db.exec('PRAGMA foreign_keys = OFF');
+    db.exec(
+      `DELETE FROM catalog_content_identities
+       WHERE content_kind = 'class' AND content_key = ?`,
+      [String(source.content_key)],
+    );
+    db.exec('PRAGMA foreign_keys = ON');
+    const response = await rpcRegistry.dispatch(
+      {
+        id: 1,
+        method: GUIDED_RPC.expertiseStep,
+        params: { character_id: characterId },
+      },
+      harness.context,
+    );
+    if (!response.ok) throw new Error(response.error.message);
+    const routedState = response.result as GuidedExpertiseStepState;
+    expect(routedState.choices[0]).toMatchObject({
+      source_name: hostile,
+      source_catalog_layer: 'unknown',
+    });
+    const step = createExpertiseStep({
+      characterId,
+      state: routedState,
+      fill: () => Promise.reject(new Error('not submitted')),
+      navigate: () => undefined,
+    });
+    const expertiseSelect = interactiveElement(step.element).querySelector('select');
+    expect(expertiseSelect?.getAttribute('aria-label')).toBe(
+      `${hostile} Expertise 1`,
+    );
+    const describedBy = expertiseSelect?.getAttribute('aria-describedby');
+    expect(describedBy).not.toBeNull();
+    expect(
+      interactiveElement(step.element).querySelector(
+        `[id="${describedBy}"]`,
+      )?.textContent,
+    ).toBe('Unknown catalog layer');
+    expect(
+      interactiveElement(step.element).querySelector(
+        '[data-ha10-expertise-source]',
+      ),
+    ).toBeNull();
+    step.cleanup();
 
     while (true) {
       const state = guidedExpertiseStepState(db, characterId);

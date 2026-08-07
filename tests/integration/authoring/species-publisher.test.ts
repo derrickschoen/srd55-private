@@ -1152,6 +1152,7 @@ describe('HA-3 species publisher', () => {
     expect(firstPreview.review).toEqual([{
       candidate_content_key: targetKey,
       candidate_name: 'Alias Species',
+      candidate_catalog_layer: 'external',
       reason: 'alias',
       default_decision: 'match',
     }]);

@@ -1,4 +1,5 @@
 import type { DomainSourceType } from '../../../domain/enums';
+import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
 import type {
   EligibleSpell,
   Workspace,
@@ -335,12 +336,18 @@ export function renderPlannerGrid(options: {
       if (slot.spell_name === null) selection.textContent = 'Locked grant';
       else if (slot.placeholder === true) {
         selection.append(freeTextSpan(slot.spell_name));
-      } else selection.textContent = slot.spell_name;
+      } else {
+        selection.textContent =
+          `${slot.spell_name} — ` +
+          catalogLayerLabel(slot.spell_catalog_layer ?? 'unknown');
+      }
     } else {
       const picker = createSpellPicker({
         addressKey: `slot-${slot.id}`,
         label: `Spell selection for slot ${slot.id}`,
+        contextDescriptionId: null,
         value: slot.spell_name,
+        valueCatalogLayer: slot.spell_catalog_layer,
         freeTextValue: slot.placeholder === true,
         invalid: attention,
         disabled: options.disabled,

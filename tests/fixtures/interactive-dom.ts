@@ -141,6 +141,30 @@ export class InteractiveTestElement {
     if (this.tagName === 'dialog') this.removeAttribute('open');
   }
 
+  createTHead(): InteractiveTestElement {
+    const head = new InteractiveTestElement('thead', this.owner);
+    this.append(head);
+    return head;
+  }
+
+  createTBody(): InteractiveTestElement {
+    const body = new InteractiveTestElement('tbody', this.owner);
+    this.append(body);
+    return body;
+  }
+
+  insertRow(): InteractiveTestElement {
+    const row = new InteractiveTestElement('tr', this.owner);
+    this.append(row);
+    return row;
+  }
+
+  insertCell(): InteractiveTestElement {
+    const cell = new InteractiveTestElement('td', this.owner);
+    this.append(cell);
+    return cell;
+  }
+
   addEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
     const callback: Listener =
       typeof listener === 'function'

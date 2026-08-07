@@ -359,6 +359,7 @@ export function previewBackgroundPublish(
       return Object.freeze({
         candidate_content_key: review.targetContentKey,
         candidate_name: review.localName,
+        candidate_catalog_layer: review.localCatalogLayer,
         reason: review.matchClass,
         default_decision: 'match' as const,
       });

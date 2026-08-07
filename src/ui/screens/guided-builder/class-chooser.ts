@@ -26,6 +26,7 @@ import {
 import type { CharacterRow } from '../../../domain/models';
 import { RpcError } from '../../../rpc/protocol';
 import { clear, element, listen, type Cleanup } from '../../dom';
+import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
 import { characterListLink, guidedShell } from './guided-builder';
 
 /**
@@ -235,6 +236,7 @@ export function createClassChooser(deps: ClassChooserDeps): ClassChooser {
       attributes: { 'aria-label': 'Bundled classes' },
     },
     deps.options.map((option) => {
+      const idStem = `guided-class-${option.content_key.replace(/[^a-z0-9]+/giu, '-')}`;
       const card = element(
         'button',
         {
@@ -243,6 +245,8 @@ export function createClassChooser(deps: ClassChooserDeps): ClassChooser {
             type: 'button',
             'data-class-option': option.content_key,
             'aria-pressed': 'false',
+            'aria-label': option.name,
+            'aria-describedby': `${idStem}-hit-die ${idStem}-catalog-layer`,
           },
         },
         [
@@ -253,6 +257,12 @@ export function createClassChooser(deps: ClassChooserDeps): ClassChooser {
           element('span', {
             className: 'guided-class-hit-die',
             text: hitDieLabel(option.hit_die),
+            attributes: { id: `${idStem}-hit-die` },
+          }),
+          element('span', {
+            className: 'catalog-layer-disclosure',
+            text: catalogLayerLabel(option.catalog_layer),
+            attributes: { id: `${idStem}-catalog-layer` },
           }),
         ],
       );

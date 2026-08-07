@@ -16,6 +16,7 @@ import type {
 } from '../authoring/contracts';
 import { clear, element, listen, type Cleanup } from './dom';
 import { attachModalTrap, type ModalTrap } from './modal-trap';
+import { catalogLayerLabel } from '../catalog/catalog-disclosure';
 
 export interface ContentAdoptionDialogOptions {
   readonly mount: HTMLElement;
@@ -294,7 +295,9 @@ export function createContentAdoptionDialog(
         text: `${row.kind}: ${row.incomingName}`,
       }));
       fieldset.append(element('p', {
-        text: `Match reason: ${reasonLabel(row)} — local: ${row.localName}`,
+        text:
+          `Match reason: ${reasonLabel(row)} — local: ${row.localName} — ` +
+          catalogLayerLabel(row.localCatalogLayer),
       }));
       if (row.incomingFingerprint === null) {
         fieldset.append(element('p', {
@@ -536,7 +539,11 @@ export function createPublishAdoptionDialog(
       className: 'content-adoption-row',
       attributes: { 'data-content-key': key },
     }, [
-      element('legend', { text: review.candidate_name }),
+      element('legend', {
+        text:
+          `${review.candidate_name} — ` +
+          catalogLayerLabel(review.candidate_catalog_layer),
+      }),
       element('p', { text: `Match reason: ${publishReasonLabel(review.reason)}` }),
       match,
       element('label', { text: 'Match', attributes: { for: `${prefix}-match` } }),

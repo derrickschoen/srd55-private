@@ -96,6 +96,11 @@ import {
   CharacterSpellSectionBuilder,
   type CharacterSpellSection,
 } from './character-spell-section-builder';
+import type {
+  CatalogLayerDisclosure,
+  CharacterCatalogDisclosure,
+} from '../catalog/catalog-disclosure';
+import { characterCatalogDisclosures } from './character-catalog-disclosures';
 
 /**
  * THE CHARACTER SHEET, ASSEMBLED AND THROWN AWAY.
@@ -327,9 +332,11 @@ export interface SheetGap {
 export interface SheetEquipmentPackage {
   readonly kind: 'class' | 'background';
   readonly source_name: string;
+  readonly source_catalog_layer: CatalogLayerDisclosure;
   readonly option: string;
   readonly contents: readonly {
     readonly item_name: string;
+    readonly catalog_layer: CatalogLayerDisclosure | null;
     readonly quantity: number;
   }[];
 }
@@ -380,6 +387,7 @@ export interface CharacterSheet {
    */
   readonly unchosen_damage_resistances: readonly string[];
   readonly classes: readonly SheetClassLine[];
+  readonly catalog_sources: readonly CharacterCatalogDisclosure[];
   readonly proficiencies: SheetProficiencies;
   readonly armor: readonly SheetArmorRow[];
   readonly items: readonly SheetItemRow[];
@@ -973,6 +981,7 @@ export class CharacterSheetBuilder {
             ?.name ?? null,
         saving_throws: entry.saving_throws,
       })),
+      catalog_sources: characterCatalogDisclosures(this.db, characterId),
       armor: armorRows,
       items: this.#items(characterId),
       printed_features: printedFeatures.features,

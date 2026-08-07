@@ -52,6 +52,8 @@ import {
 import { SKILL_LABELS } from '../../../rules/skills';
 import { RpcError } from '../../../rpc/protocol';
 import { clear, element, listen, type Cleanup } from '../../dom';
+import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
+import { catalogSelectGroups } from '../../catalog-control-disclosure';
 import { characterListLink, guidedShell } from './guided-builder';
 
 /**
@@ -323,21 +325,16 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
   const renderFeatOptions = (): void => {
     clear(featSelect);
     const defaultFeat = selected?.pairing.suggested_feat_content_key ?? null;
-    featSelect.append(
-      ...deps.options.origin_feats.map((feat) => {
-        const option = element('option', {
-          text:
-            feat.content_key === defaultFeat
-              ? `${feat.name} (default)`
-              : feat.name,
-          attributes: { value: feat.content_key },
-        });
-        if (feat.content_key === featKey) {
-          option.selected = true;
-        }
-        return option;
-      }),
-    );
+    featSelect.append(...catalogSelectGroups(
+      deps.options.origin_feats.map((feat) => ({
+        value: feat.content_key,
+        label: feat.content_key === defaultFeat
+          ? `${feat.name} (default)`
+          : feat.name,
+        catalogLayer: feat.catalog_layer,
+        selected: feat.content_key === featKey,
+      })),
+    ));
   };
 
   const magicInitiateFields = element(
@@ -517,15 +514,17 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
     'ul',
     {
       className: 'guided-background-options',
-      attributes: { 'aria-label': 'Bundled backgrounds' },
+      attributes: { 'aria-label': 'Catalog backgrounds' },
     },
     deps.options.backgrounds.map((option) => {
+      const disclosureId = `guided-background-${option.content_key.replace(/[^a-z0-9]+/giu, '-')}-catalog-layer`;
       const radio = element('input', {
         attributes: {
           type: 'radio',
           name: 'background-option',
           value: option.content_key,
           [BACKGROUND_STEP_ATTR.option]: option.content_key,
+          'aria-describedby': disclosureId,
         },
       });
       cleanups.push(
@@ -544,9 +543,14 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
           }),
         ]),
         element('p', {
+          className: 'catalog-layer-disclosure',
+          text: catalogLayerLabel(option.catalog_layer),
+          attributes: { id: disclosureId },
+        }),
+        element('p', {
           className: 'guided-background-printed',
           text:
-            `SRD: ${option.pairing.printed_abilities.join(', ')}; ` +
+            `Printed defaults: ${option.pairing.printed_abilities.join(', ')}; ` +
             `${option.pairing.printed_feat}.`,
         }),
       ]);
@@ -640,7 +644,7 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
             element('p', {
               className: 'guided-empty-catalog',
               text:
-                'No bundled backgrounds are available in this database, so ' +
+                'No catalog backgrounds are available in this database, so ' +
                 'this step cannot offer one.',
             }),
           ]

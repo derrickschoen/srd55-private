@@ -299,6 +299,7 @@ function planShape(
     review: Object.freeze(plan.reviews.map((row) => Object.freeze({
       candidate_content_key: row.targetContentKey,
       candidate_name: row.localName,
+      candidate_catalog_layer: row.localCatalogLayer,
       reason: row.matchClass,
       default_decision: 'match' as const,
     }))),

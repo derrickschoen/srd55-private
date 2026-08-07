@@ -12,6 +12,10 @@ import {
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import {
+  catalogLayerDisclosure,
+  type CatalogLayerDisclosure,
+} from '../catalog/catalog-disclosure';
+import {
   isEnumValue,
   rulesEditions,
   type Ability,
@@ -72,6 +76,7 @@ export interface SheetSpellReference {
 export interface SheetSpellbookEntry {
   readonly spell_version_id: SpellVersionId;
   readonly name: string;
+  readonly catalog_layer: CatalogLayerDisclosure;
   readonly level: SheetSpellLevel;
   readonly reference: SheetSpellReference;
 }
@@ -85,6 +90,7 @@ export type SheetSpellGroup =
       readonly kind: 'class';
       readonly class_definition_id: ClassDefinitionId;
       readonly class_name: string;
+      readonly class_catalog_layer: CatalogLayerDisclosure;
       readonly statistics: readonly SheetSpellcastingStatistic[];
       readonly spells: readonly SheetSpell[];
       readonly spellbook: readonly SheetSpellbookEntry[];
@@ -93,6 +99,7 @@ export type SheetSpellGroup =
       readonly kind: 'other_source';
       readonly source_instance_id: SourceInstanceId;
       readonly source_name: string;
+      readonly source_catalog_layer: CatalogLayerDisclosure;
       readonly statistics: readonly SheetSpellcastingStatistic[];
       readonly spells: readonly SheetSpell[];
     };
@@ -103,6 +110,7 @@ export type CharacterSpellSection = readonly SheetSpellGroup[];
 interface SpellFacts {
   readonly spell_version_id: SpellVersionId;
   readonly name: string;
+  readonly catalog_layer: CatalogLayerDisclosure;
   readonly level: SheetSpellLevel;
   readonly reference: SheetSpellReference;
 }
@@ -111,6 +119,7 @@ interface ClassAttribution {
   readonly origin_id: SourceInstanceId;
   readonly class_definition_id: ClassDefinitionId;
   readonly class_name: string;
+  readonly class_catalog_layer: CatalogLayerDisclosure;
 }
 
 interface SpellbookAcquisition {
@@ -122,6 +131,7 @@ interface MutableClassGroup {
   readonly kind: 'class';
   readonly class_definition_id: ClassDefinitionId;
   readonly class_name: string;
+  readonly class_catalog_layer: CatalogLayerDisclosure;
   readonly statistics: Map<string, SheetSpellcastingStatistic>;
   readonly spells: Map<SpellVersionId, SheetSpell>;
   readonly spellbook: Map<SpellVersionId, SheetSpellbookEntry>;
@@ -131,6 +141,7 @@ interface MutableOtherSourceGroup {
   readonly kind: 'other_source';
   readonly source_instance_id: SourceInstanceId;
   readonly source_name: string;
+  readonly source_catalog_layer: CatalogLayerDisclosure;
   readonly statistics: Map<string, SheetSpellcastingStatistic>;
   readonly spells: Map<SpellVersionId, SheetSpell>;
 }
@@ -224,6 +235,9 @@ function decodeClassAttribution(row: SqlRow): ClassAttribution {
       'class_definition_id',
     ) as ClassDefinitionId,
     class_name: sqlString(row, 'class_name'),
+    class_catalog_layer: catalogLayerDisclosure(
+      sqlNullableString(row, 'class_catalog_layer'),
+    ),
   };
 }
 
@@ -253,6 +267,9 @@ function decodeSpellFacts(row: SqlRow): Omit<
   return {
     spell_version_id: sqlInteger(row, 'id') as SpellVersionId,
     name: sqlString(row, 'display_name'),
+    catalog_layer: catalogLayerDisclosure(
+      sqlNullableString(row, 'catalog_layer'),
+    ),
     level: spellLevel(sqlInteger(row, 'level')),
     reference: {
       edition: rulesEdition(sqlString(row, 'rules_edition')),
@@ -466,6 +483,7 @@ export class CharacterSpellSectionBuilder {
                 kind: 'other_source',
                 source_instance_id: sourceId,
                 source_name: route.source_name,
+                source_catalog_layer: route.source_catalog_layer,
                 statistics: new Map(),
                 spells: new Map(),
               }
@@ -473,6 +491,7 @@ export class CharacterSpellSectionBuilder {
                 kind: 'class',
                 class_definition_id: attribution.class_definition_id,
                 class_name: attribution.class_name,
+                class_catalog_layer: attribution.class_catalog_layer,
                 statistics: new Map(),
                 spells: new Map(),
                 spellbook: new Map(),
@@ -512,6 +531,7 @@ export class CharacterSpellSectionBuilder {
           kind: 'class',
           class_definition_id: attribution.class_definition_id,
           class_name: attribution.class_name,
+          class_catalog_layer: attribution.class_catalog_layer,
           statistics: new Map(),
           spells: new Map(),
           spellbook: new Map(),
@@ -540,6 +560,7 @@ export class CharacterSpellSectionBuilder {
           kind: group.kind,
           class_definition_id: group.class_definition_id,
           class_name: group.class_name,
+          class_catalog_layer: group.class_catalog_layer,
           spellbook: [...group.spellbook.values()].sort(compareSheetSpells),
           ...common,
         };
@@ -548,6 +569,7 @@ export class CharacterSpellSectionBuilder {
         kind: group.kind,
         source_instance_id: group.source_instance_id,
         source_name: group.source_name,
+        source_catalog_layer: group.source_catalog_layer,
         ...common,
       };
     });
@@ -613,10 +635,14 @@ export class CharacterSpellSectionBuilder {
        )
        SELECT candidate.origin_id,
               definition.id AS class_definition_id,
-              definition.name AS class_name
+              definition.name AS class_name,
+              identity.catalog_layer AS class_catalog_layer
        FROM class_candidates AS candidate
        INNER JOIN class_definitions AS definition
          ON definition.id = candidate.class_definition_id
+       LEFT JOIN catalog_content_identities AS identity
+         ON identity.content_kind = 'class'
+        AND identity.content_key = definition.content_key
        ORDER BY candidate.origin_id, candidate.depth, definition.id`,
       [characterId, ...sourceIds, characterId],
       decodeClassAttribution,
@@ -654,13 +680,17 @@ export class CharacterSpellSectionBuilder {
     const facts = new Map<SpellVersionId, SpellFacts>();
 
     for (const row of this.db.all(
-      `SELECT id, display_name, rules_edition, level, school,
+      `SELECT version.id, version.display_name, version.rules_edition,
+              version.level, version.school,
               casting_time, action_type, range, duration, concentration,
               ritual, components, short_summary, upcast_summary,
-              cantrip_upgrade_summary
-       FROM spell_versions
-       WHERE id IN (${placeholders(versionIds)})
-       ORDER BY id`,
+              cantrip_upgrade_summary, identity.catalog_layer
+       FROM spell_versions AS version
+       LEFT JOIN catalog_content_identities AS identity
+         ON identity.content_kind = 'spell'
+        AND identity.content_key = version.content_key
+       WHERE version.id IN (${placeholders(versionIds)})
+       ORDER BY version.id`,
       [...versionIds],
       decodeSpellFacts,
     )) {

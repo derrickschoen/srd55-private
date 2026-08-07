@@ -33,6 +33,7 @@ const parents: readonly GuidedClassOption[] = [{
   content_key: fighterKey,
   name: 'Fighter',
   hit_die: 10,
+  catalog_layer: 'bundled',
 }];
 
 function itemUuid(value: string): HomebrewDraftItemUuid {

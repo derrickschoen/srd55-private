@@ -189,13 +189,15 @@ describe('HA-9 production-service form boundaries', () => {
     const { db, service } = await fixture();
     const refs = service.backgroundReferences();
     expect(refs.origin_feats).toContainEqual(expect.objectContaining({
-      content_key: originFeatKey(db), rules_edition: '2024',
+      content_key: originFeatKey(db), rules_edition: '2024', catalog_layer: 'bundled',
     }));
     expect(refs.weapons).toContainEqual({
       content_key: '2024:weapon:club', name: 'Club', rules_edition: '2024',
+      catalog_layer: 'bundled',
     });
     expect(refs.armors).toContainEqual({
       content_key: '2024:armor:leather-armor', name: 'Leather Armor', rules_edition: '2024',
+      catalog_layer: 'bundled',
     });
     const created = service.createDraft({ content_kind: 'background' });
     const saved = service.saveDraft({
