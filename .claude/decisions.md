@@ -7,6 +7,30 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D216 — OWNER: EK and AT are dropped entirely (2026-08-06)
+
+Completes D215's SRD-only seed. The two legacy non-SRD subclasses leave the
+seed AND the repo; their third-caster spell-slot test coverage converts
+onto the Barbed Court Monk (also third_down) as strict-superset
+replacements, not deletions. Cleanest D59 posture. D60 applies: no user
+data exists.
+
+## D215 — OWNER: SRD-only default seed; bundled homebrew is click-to-import; Veteran + Barbed Court Monk included (2026-08-06)
+
+Refines D211's fresh-database story. (1) Default boot seeds SRD content
+ONLY. (2) The app ships a "bundled homebrew" catalog surfaced as an OPTION
+the user can click when importing — installed idempotently through the real
+HA-5 external-publish path, landing in the external layer (deletable,
+supersedable, lineage-capable like any user homebrew). (3) That catalog
+includes the Veteran rogue (docs/homebrew/2026-08-04-rogue-veteran-subclass.md)
+and the Barbed Court Monk (docs/homebrew/2026-08-03-monk-barbed-court.md)
+for testing. The bundled seed 2024:subclass:veteran retires per D211;
+expected external key form: 2024:content.subclass:veteran. Owner's answer
+verbatim: "I want idempotent boot install. Only seed srd by default.
+include bundled homebrew as an option the user can click on when
+importing. I want the veteran rogue and the barbed court monk included
+for testing".
+
 ## D214 — OWNER: purge purges the whole lineage set; set restore is all-or-nothing (2026-08-06)
 
 Resolves the D138-vs-CI-7 collision (supersession lineage rows are permanent
