@@ -14,6 +14,7 @@ import { RpcError } from '../../../src/rpc/protocol';
 import {
   defaultGridFilters,
   filterAndSortSlots,
+  renderPlannerGrid,
 } from '../../../src/ui/screens/planner/planner-grid';
 import {
   catalogGapHeading,
@@ -73,6 +74,7 @@ function slot(
     level_max: 0,
     spell_id: 10,
     spell_name: 'Mage Hand',
+    spell_catalog_layer: 'bundled',
     spell_level: 0,
     spell_edition: '2024',
     ability: 'intelligence',
@@ -197,6 +199,49 @@ const emptyCompleteness: CompletenessResult = {
 };
 
 describe('planner catalog disclosure', () => {
+  it('renders a hostile persisted planner spell inert with its exact layer', () => {
+    const restoreDocument = installInteractiveDocument();
+    const windowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {
+        setTimeout: globalThis.setTimeout.bind(globalThis),
+        clearTimeout: globalThis.clearTimeout.bind(globalThis),
+      },
+    });
+    try {
+      const hostile = '</input><img data-ha10-planner-spell src=x>';
+      const base = workspace(0, 10, false);
+      const view = renderPlannerGrid({
+        workspace: {
+          ...base,
+          slots: [slot({ spell_name: hostile, spell_catalog_layer: 'external' })],
+        },
+        filters: { ...defaultGridFilters },
+        queries: { eligibleSpells: async () => [] },
+        disabled: false,
+        onFiltersChanged: () => undefined,
+        onSelect: () => undefined,
+        onClear: () => undefined,
+        onOverride: () => undefined,
+      });
+      const rendered = interactiveElement(view.element);
+
+      expect(rendered.querySelector('.spell-picker-input')?.value).toBe(hostile);
+      expect(rendered.querySelector('.spell-picker-current-layer')?.textContent)
+        .toBe('Homebrew · external layer');
+      expect(rendered.querySelector('[data-ha10-planner-spell]')).toBeNull();
+      view.destroy();
+    } finally {
+      restoreDocument();
+      if (windowDescriptor === undefined) {
+        Reflect.deleteProperty(globalThis, 'window');
+      } else {
+        Object.defineProperty(globalThis, 'window', windowDescriptor);
+      }
+    }
+  });
+
   it('renders hostile external subclass and source names inert with exact layers', () => {
     const restoreDocument = installInteractiveDocument();
     try {

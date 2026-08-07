@@ -1,4 +1,8 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import {
+  BACKGROUND_RPC,
+  type GuidedBackgroundChoiceOptions,
+} from '../../../src/builder/background-choices';
 import {
   GUIDED_LEVEL_ONE_STEP_ORDER,
   GUIDED_RPC,
@@ -12,7 +16,13 @@ import {
 } from '../../../src/builder/guided-creation';
 import { rebuildSkillProjection } from '../../../src/grants/skill-grants';
 import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
+import { createBackgroundStep } from '../../../src/ui/screens/guided-builder/background-step';
 import { rpcRegistry } from '../../../src/worker/registry';
+import {
+  elementText,
+  installInteractiveDocument,
+  interactiveElement,
+} from '../../fixtures/interactive-dom';
 import {
   createRpcHarness,
   type RpcHarness,
@@ -20,8 +30,15 @@ import {
 import { createCharacter } from '../reports/build-report-fixture';
 
 let harness: RpcHarness | undefined;
+let restoreDocument: (() => void) | undefined;
+
+beforeEach(() => {
+  restoreDocument = installInteractiveDocument();
+});
 
 afterEach(() => {
+  restoreDocument?.();
+  restoreDocument = undefined;
   harness?.close();
   harness = undefined;
 });
@@ -286,11 +303,20 @@ describe('guided background catalogue and gate', () => {
     }
   });
 
-  it('keeps a surviving background aggregate visible as unknown when its registry row is deleted', async () => {
+  it('keeps a hostile surviving aggregate visible and inert as unknown through the live background-choice route', async () => {
     const rpcHarness = await applicationDatabase();
     const original = backgrounds(rpcHarness)[0];
     if (original === undefined) throw new Error('No background fixture exists.');
+    const hostile = '</span><img data-ha10-live-background src=x>';
+    rpcHarness.context.db.exec(
+      'UPDATE background_templates SET name = ? WHERE content_key = ?',
+      [hostile, original.content_key],
+    );
     rpcHarness.context.db.exec('PRAGMA foreign_keys = OFF');
+    rpcHarness.context.db.exec(
+      'DELETE FROM background_definitions WHERE content_key = ?',
+      [original.content_key],
+    );
     rpcHarness.context.db.exec(
       `DELETE FROM catalog_content_identities
        WHERE content_kind = 'background' AND content_key = ?`,
@@ -298,11 +324,56 @@ describe('guided background catalogue and gate', () => {
     );
     rpcHarness.context.db.exec('PRAGMA foreign_keys = ON');
 
+    const response = await rpcRegistry.dispatch(
+      {
+        id: 1,
+        method: BACKGROUND_RPC.choiceOptions,
+        params: {},
+      },
+      rpcHarness.context,
+    );
+    expect(response).toMatchObject({ ok: true });
+    if (!response.ok) throw new Error(response.error.message);
+    const options = response.result as GuidedBackgroundChoiceOptions;
+    const routedOption = options.backgrounds.find(
+      (option) => option.content_key === original.content_key,
+    );
+    expect(routedOption).toMatchObject({
+      name: hostile,
+      catalog_layer: 'unknown',
+    });
+    if (routedOption === undefined) {
+      throw new Error('The live route omitted the surviving background.');
+    }
+
+    const step = createBackgroundStep({
+      characterId: 1,
+      options,
+      applyBackground: () => Promise.reject(new Error('not submitted')),
+      navigate: () => undefined,
+    });
+    const card = Array.from(
+      interactiveElement(step.element).querySelectorAll('.guided-background-card'),
+    ).find((candidate) =>
+      elementText(candidate as unknown as Node).includes(hostile)
+    );
+    expect(card).toBeDefined();
+    expect(card?.querySelector('.guided-background-name')?.textContent).toBe(
+      hostile,
+    );
+    expect(card?.querySelector('.catalog-layer-disclosure')?.textContent).toBe(
+      'Unknown catalog layer',
+    );
+    expect(card?.querySelector('.guided-background-printed')?.textContent).toBe(
+      `Printed defaults: ${routedOption.pairing.printed_abilities.join(', ')}; ` +
+        `${routedOption.pairing.printed_feat}.`,
+    );
     expect(
-      backgrounds(rpcHarness).find(
-        (option) => option.content_key === original.content_key,
+      interactiveElement(step.element).querySelector(
+        '[data-ha10-live-background]',
       ),
-    ).toMatchObject({ name: original.name, catalog_layer: 'unknown' });
+    ).toBeNull();
+    step.cleanup();
   });
 
   it('refuses a non-bundled background key through the real RPC with the domain discriminator', async () => {

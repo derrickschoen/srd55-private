@@ -127,6 +127,7 @@ function classOption(
     class_definition_id: id as ClassDefinitionId,
     content_key: 'test:class:wizard' as ContentKey,
     name: 'Wizard',
+    catalog_layer: 'bundled',
     rules_edition: '2024',
     current_level: 1 as ClassLevel,
     target_level: 2 as ClassLevel,
@@ -338,12 +339,36 @@ const pickerFactory: SpellPickerFactory = (options) => {
 };
 
 describe('shared eligible spell picker provenance', () => {
+  it('keeps a hostile persistent selected value inert with its exact layer', () => {
+    const hostile = '</input><img data-ha10-selected-spell src=x>';
+    const picker = createSpellPicker({
+      addressKey: 'selected-hostile-spell',
+      label: 'Chosen hostile spell',
+      value: hostile,
+      valueCatalogLayer: 'external',
+      freeTextValue: false,
+      invalid: false,
+      disabled: false,
+      search: async () => [],
+      onSelect: () => undefined,
+    });
+    const view = interactiveElement(picker.element);
+
+    expect(view.querySelector('.spell-picker-input')?.value).toBe(hostile);
+    expect(view.querySelector('.spell-picker-current-layer')?.textContent).toBe(
+      'Homebrew · external layer',
+    );
+    expect(view.querySelector('[data-ha10-selected-spell]')).toBeNull();
+    picker.destroy();
+  });
+
   it('renders a hostile external spell inert with the exact disclosed layer', async () => {
     const hostile = '</strong><img data-ha10-spell-hostile src=x>';
     const picker = createSpellPicker({
       addressKey: 'hostile-spell',
       label: 'Choose hostile spell',
       value: null,
+      valueCatalogLayer: null,
       freeTextValue: false,
       invalid: false,
       disabled: false,
@@ -419,6 +444,20 @@ function epicBoonCandidate(key: string, name: string): LevelUpFeatCandidate {
 
 describe('W-LU2-DRAFT planned Skills, Expertise, and Spells', () => {
   it('W-DRAFT-FIDELITY carries named planned_subchoices through Review, Confirm, and Complete', async () => {
+    const hostileSpell = '</dd><img data-ha10-level-spell src=x>';
+    const hostilePickerFactory: SpellPickerFactory = (options) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = `Select ${options.label}`;
+      button.addEventListener('click', () =>
+        options.onSelect({ ...eligible, name: hostileSpell })
+      );
+      return {
+        element: button,
+        focus: () => button.focus(),
+        destroy: () => undefined,
+      };
+    };
     const before = sheet(1);
     const after = sheet(2);
     const preview = vi.fn().mockResolvedValue({
@@ -435,7 +474,7 @@ describe('W-LU2-DRAFT planned Skills, Expertise, and Spells', () => {
     const wizard = createLevelUpWizard({
       state: ready(),
       cancel: () => undefined,
-      spellPickerFactory: pickerFactory,
+      spellPickerFactory: hostilePickerFactory,
       preview,
       submit,
       loadSheet: vi.fn().mockResolvedValue(after),
@@ -486,11 +525,14 @@ describe('W-LU2-DRAFT planned Skills, Expertise, and Spells', () => {
     for (const text of [
       'Skill proficiency Arcana — Wizard — Scholar',
       'Expertise History — Wizard — Scholar',
-      'Spell Thunderwave — Wizard',
+      `Spell ${hostileSpell} — Wizard — Homebrew · external layer`,
       'New class feature Scholar',
     ]) {
       expect(elementText(wizard.element)).toContain(text);
     }
+    expect(
+      interactiveElement(wizard.element).querySelector('[data-ha10-level-spell]'),
+    ).toBeNull();
 
     click(wizard.element, LEVEL_UP_ATTR.confirm);
     await settle();
@@ -502,11 +544,14 @@ describe('W-LU2-DRAFT planned Skills, Expertise, and Spells', () => {
     for (const text of [
       'Skill proficiency: Arcana — Wizard — Scholar.',
       'Expertise: History — Wizard — Scholar.',
-      'Spell: Thunderwave — Wizard.',
+      `Spell: ${hostileSpell} — Wizard — Homebrew · external layer.`,
       'New class feature: Scholar.',
     ]) {
       expect(elementText(wizard.element)).toContain(text);
     }
+    expect(
+      interactiveElement(wizard.element).querySelector('[data-ha10-level-spell]'),
+    ).toBeNull();
     expect(wizard.element.getAttribute('aria-busy')).toBe('false');
     wizard.cleanup();
   });

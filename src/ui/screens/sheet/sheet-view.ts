@@ -1390,17 +1390,22 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
       value: `Option ${pack.option.toUpperCase()}`,
       detail: [
         { text: pack.source_name, free_text: true },
-        { text: ' — ' },
         {
-          text: pack.contents
-            .map((line) =>
-              line.quantity === 1
-                ? line.item_name
-                : `${String(line.quantity)} ${line.item_name}`,
-            )
-            .join(', '),
-          free_text: true,
+          text:
+            ` — ${catalogLayerLabel(pack.source_catalog_layer)} — `,
         },
+        ...pack.contents.flatMap((line, index) => [
+          ...(index === 0 ? [] : [{ text: ', ' }]),
+          {
+            text: line.quantity === 1
+              ? line.item_name
+              : `${String(line.quantity)} ${line.item_name}`,
+            free_text: true as const,
+          },
+          ...(line.catalog_layer === null
+            ? []
+            : [{ text: ` — ${catalogLayerLabel(line.catalog_layer)}` }]),
+        ]),
         {
           text:
             '. Shown from the rules tables; these items are not tracked ' +

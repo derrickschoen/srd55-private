@@ -339,6 +339,7 @@ export interface LevelUpHeldClass {
   readonly class_definition_id: ClassDefinitionId;
   readonly content_key: ContentKey;
   readonly name: string;
+  readonly catalog_layer: CatalogLayerDisclosure;
   readonly rules_edition: RulesEdition;
   readonly current_level: ClassLevel;
   readonly hit_die: HitDieSize | null;
@@ -384,6 +385,7 @@ export type LevelUpProjectedHitPoints =
       readonly missing_hit_dice: readonly {
         readonly class_definition_id: ClassDefinitionId;
         readonly class_name: string;
+        readonly class_catalog_layer: CatalogLayerDisclosure;
       }[];
     };
 

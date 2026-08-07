@@ -534,6 +534,7 @@ describe('HA-9 background authoring form', () => {
         review: [{
           candidate_content_key: '2024:alternate:background' as ContentKey,
           candidate_name: hostile,
+          candidate_catalog_layer: 'external',
           reason: 'alias',
           default_decision: 'match',
         }],
@@ -555,6 +556,10 @@ describe('HA-9 background authoring form', () => {
       if (modal === null) throw new Error('Adoption dialog missing.');
       expect(modal.open).toBe(true);
       expect(document.activeElement?.parentElement?.isConnected).toBe(true);
+      expect(modal.querySelector('legend')?.textContent).toBe(
+        `${hostile} — Homebrew · external layer`,
+      );
+      expect(modal.querySelector('[data-ha9-hostile]')).toBeNull();
       expect(modal.querySelectorAll('img')).toHaveLength(0);
       button(modal, 'Publish with these choices').click();
       await settle();

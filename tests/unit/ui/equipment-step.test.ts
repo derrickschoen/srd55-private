@@ -57,9 +57,9 @@ function wizardAcolyteState(): GuidedEquipmentStepState {
         {
           option: 'a',
           contents: [
-            { item_name: 'Quarterstaff', quantity: 1, item_kind: 'weapon' },
-            { item_name: 'Dagger', quantity: 2, item_kind: 'weapon' },
-            { item_name: "Scholar's Pack", quantity: 1, item_kind: 'gear' },
+            { item_name: 'Quarterstaff', catalog_layer: 'bundled', quantity: 1, item_kind: 'weapon' },
+            { item_name: 'Dagger', catalog_layer: 'bundled', quantity: 2, item_kind: 'weapon' },
+            { item_name: "Scholar's Pack", catalog_layer: null, quantity: 1, item_kind: 'gear' },
           ],
         },
       ],
@@ -73,8 +73,8 @@ function wizardAcolyteState(): GuidedEquipmentStepState {
         {
           option: 'a',
           contents: [
-            { item_name: 'Holy Symbol', quantity: 1, item_kind: 'gear' },
-            { item_name: 'Parchment', quantity: 10, item_kind: 'gear' },
+            { item_name: 'Holy Symbol', catalog_layer: null, quantity: 1, item_kind: 'gear' },
+            { item_name: 'Parchment', catalog_layer: null, quantity: 10, item_kind: 'gear' },
           ],
         },
       ],
@@ -94,16 +94,16 @@ function fighterClassPackage(): GuidedEquipmentStepState['class_package'] {
       {
         option: 'a',
         contents: [
-          { item_name: 'Chain Mail', quantity: 1, item_kind: 'armor' },
-          { item_name: 'Greatsword', quantity: 1, item_kind: 'weapon' },
-          { item_name: "Dungeoneer's Pack", quantity: 1, item_kind: 'gear' },
+          { item_name: 'Chain Mail', catalog_layer: 'bundled', quantity: 1, item_kind: 'armor' },
+          { item_name: 'Greatsword', catalog_layer: 'bundled', quantity: 1, item_kind: 'weapon' },
+          { item_name: "Dungeoneer's Pack", catalog_layer: null, quantity: 1, item_kind: 'gear' },
         ],
       },
       {
         option: 'b',
         contents: [
-          { item_name: 'Studded Leather Armor', quantity: 1, item_kind: 'armor' },
-          { item_name: 'Scimitar', quantity: 1, item_kind: 'weapon' },
+          { item_name: 'Studded Leather Armor', catalog_layer: 'bundled', quantity: 1, item_kind: 'armor' },
+          { item_name: 'Scimitar', catalog_layer: 'bundled', quantity: 1, item_kind: 'weapon' },
         ],
       },
     ],

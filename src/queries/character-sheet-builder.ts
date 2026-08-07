@@ -96,7 +96,10 @@ import {
   CharacterSpellSectionBuilder,
   type CharacterSpellSection,
 } from './character-spell-section-builder';
-import type { CharacterCatalogDisclosure } from '../catalog/catalog-disclosure';
+import type {
+  CatalogLayerDisclosure,
+  CharacterCatalogDisclosure,
+} from '../catalog/catalog-disclosure';
 import { characterCatalogDisclosures } from './character-catalog-disclosures';
 
 /**
@@ -329,9 +332,11 @@ export interface SheetGap {
 export interface SheetEquipmentPackage {
   readonly kind: 'class' | 'background';
   readonly source_name: string;
+  readonly source_catalog_layer: CatalogLayerDisclosure;
   readonly option: string;
   readonly contents: readonly {
     readonly item_name: string;
+    readonly catalog_layer: CatalogLayerDisclosure | null;
     readonly quantity: number;
   }[];
 }

@@ -8,6 +8,7 @@ import type { Skill } from '../../../domain/enums';
 import { SKILL_LABELS } from '../../../rules/skills';
 import { element, listen, type Cleanup } from '../../dom';
 import { characterListLink, guidedShell } from './guided-builder';
+import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
 
 export function createExpertiseStep(options: {
   readonly characterId: number;
@@ -21,7 +22,10 @@ export function createExpertiseStep(options: {
 }): { readonly element: HTMLElement; readonly cleanup: Cleanup } {
   const cleanups: Cleanup[] = [];
   const choices = options.state.choices.map((choice) => {
-    const label = `${choice.source_name} Expertise ${String(choice.ordinal)}`;
+    const label =
+      `${choice.source_name} — ` +
+      `${catalogLayerLabel(choice.source_catalog_layer)} Expertise ` +
+      String(choice.ordinal);
     const select = element(
       'select',
       { attributes: { 'aria-label': label } },

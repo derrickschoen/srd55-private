@@ -593,7 +593,30 @@ describe('HA-6 homebrew library routing and tabs', () => {
       expect(formMount?.getAttribute('aria-label')).toBe('Subclass authoring form');
       expect(root.querySelector('form')?.getAttribute('aria-label')).toBeNull();
       expect(root.querySelectorAll('option').map((option) => option.textContent))
-        .toContain('Fighter');
+        .toContain('Fighter — SRD · bundled layer');
+      cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('keeps a hostile routed subclass parent choice inert beside its exact layer', async () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const hostileParent = '</option><img data-ha10-parent-class src=x>';
+      const screenContext = context(
+        'https://example.test/homebrew/drafts/draft-subclass',
+        [],
+      );
+      const cleanup = await renderHomebrewLibrary(screenContext, {
+        client: authoringClient({ readDraft: async () => subclassDraft() }),
+        parentClasses: [{ ...parentClasses[0]!, name: hostileParent }],
+      });
+      const root = interactiveElement(screenContext.root);
+
+      expect(root.querySelectorAll('option').map((option) => option.textContent))
+        .toContain(`${hostileParent} — SRD · bundled layer`);
+      expect(root.querySelector('[data-ha10-parent-class]')).toBeNull();
       cleanup();
     } finally {
       restoreDocument();

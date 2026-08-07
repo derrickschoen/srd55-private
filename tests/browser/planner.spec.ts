@@ -481,6 +481,9 @@ test('the item picker copies catalog values and effects without a live definitio
   );
 
   const picker = page.locator('[data-testid="item-catalog-picker"]');
+  await expect(picker.getByLabel('Item definition').locator('option')).toHaveText(
+    'Browser Giant Belt — Homebrew · external layer',
+  );
   await expect(picker.getByLabel('Item definition')).toHaveValue(
     'expanded:content.item:browser-giant-belt',
   );

@@ -709,6 +709,7 @@ export interface UnfilledClassSkillGrant {
   readonly ordinal: number;
   readonly class_definition_id: number;
   readonly class_name: string | null;
+  readonly class_catalog_layer: CatalogLayerDisclosure;
   readonly available: readonly Skill[];
 }
 
@@ -952,6 +953,7 @@ export interface GuidedGrantedSkillDisplay {
   readonly skill: Skill;
   readonly grant_key: string;
   readonly source_name: string;
+  readonly source_catalog_layer: CatalogLayerDisclosure;
   /**
    * True when the grant is a CHOICE the step may CLEAR (class and species
    * keys). A background's printed skills are minted filled and are not
@@ -965,6 +967,7 @@ export interface GuidedSpeciesSkillChoice {
   readonly grant_id: number;
   readonly grant_key: string;
   readonly source_name: string;
+  readonly source_catalog_layer: CatalogLayerDisclosure;
   /** The seam's plan pool minus every skill an active grant already holds. */
   readonly available: readonly Skill[];
 }
@@ -986,12 +989,16 @@ export interface GuidedSkillsStepState {
   readonly granted: readonly GuidedGrantedSkillDisplay[];
   readonly class_choices: readonly UnfilledClassSkillGrant[];
   readonly species_choices: readonly GuidedSpeciesSkillChoice[];
-  readonly unmodelled_tool_alternative_sources: readonly string[];
+  readonly unmodelled_tool_alternative_sources: readonly {
+    readonly source_name: string;
+    readonly source_catalog_layer: CatalogLayerDisclosure;
+  }[];
 }
 
 export interface GuidedExpertiseChoice {
   readonly grant_id: number;
   readonly source_name: string;
+  readonly source_catalog_layer: CatalogLayerDisclosure;
   readonly ordinal: number;
   readonly available: readonly Skill[];
 }

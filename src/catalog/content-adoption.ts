@@ -14,6 +14,10 @@ import {
 } from './content-identity';
 import { projectStoredContentV1 } from './stored-content-projector-v1';
 import {
+  catalogLayerDisclosure,
+  type CatalogLayerDisclosure,
+} from './catalog-disclosure';
+import {
   ContentIdentityCollision,
   ContentIdentityKeyRefusal,
   projectContentGraphInDependencyOrder,
@@ -121,6 +125,7 @@ export interface ContentImportReviewRow {
   readonly kind: ContentKind;
   readonly incomingName: string;
   readonly localName: string;
+  readonly localCatalogLayer: CatalogLayerDisclosure;
   readonly targetContentKey: ContentKey;
   readonly incomingFingerprint: ContentFingerprintDigest | null;
   readonly matchClass: ContentImportMatchClass;
@@ -556,6 +561,20 @@ function localName(
     if (displayName !== null) return displayName;
   }
   return String(contentKey);
+}
+
+function localCatalogLayer(
+  db: DatabaseContext,
+  kind: ContentKind,
+  contentKey: ContentKey,
+): CatalogLayerDisclosure {
+  return catalogLayerDisclosure(
+    db.scalar<string>(
+      `SELECT catalog_layer FROM catalog_content_identities
+       WHERE content_kind = ? AND content_key = ?`,
+      [kind, contentKey],
+    ),
+  );
 }
 
 function matchClass(resolution: ContentResolution): ContentImportMatchClass | null {
@@ -1118,6 +1137,11 @@ function evaluate(
         kind: projection.kind,
         incomingName: projection.name,
         localName: localName(db, projection.kind, resolution.contentKey),
+        localCatalogLayer: localCatalogLayer(
+          db,
+          projection.kind,
+          resolution.contentKey,
+        ),
         targetContentKey: resolution.contentKey,
         incomingFingerprint: incomingFingerprint.evidenceDigest,
         matchClass: reviewClass,

@@ -5,7 +5,10 @@ import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { validateCharacterCommandPayload } from '../../../src/commands/payload-validator';
 import { DatabaseContext } from '../../../src/db/database';
 import type { CharacterCommandPayload } from '../../../src/domain/command-contracts';
-import { registerFixtureContentIdentity } from '../../helpers/content-identity';
+import {
+  registerAssertedFixtureContentIdentity,
+  registerFixtureContentIdentity,
+} from '../../helpers/content-identity';
 import { openTestDatabase } from '../../helpers/open-db';
 import { ItemQueries } from '../../../src/queries/items';
 
@@ -48,15 +51,17 @@ describe('item commands and effect ownership', () => {
   }
 
   it('picker query copies a definition and effects into severed character rows', async () => {
-    registerFixtureContentIdentity(db, {
-      kind: 'item', contentKey: 'expanded:legacy:severed-belt',
-      name: 'Severed Belt', keyKind: 'bundled-stable',
+    const hostile = '</option><img data-ha10-item src=x>';
+    const contentKey = registerAssertedFixtureContentIdentity(db, {
+      kind: 'item',
+      edition: 'expanded',
+      name: hostile,
     });
     db.exec(
       `INSERT INTO item_definitions (
          content_key, name, rules_edition, description, requires_attunement
        ) VALUES (
-         'expanded:legacy:severed-belt', 'Severed Belt', 'expanded',
+         ?, ?, 'expanded',
          'Catalog description', 1
        );
        INSERT INTO item_definition_effects (
@@ -66,9 +71,14 @@ describe('item commands and effect ownership', () => {
          1, 1, 'ability_override', 'strength', 23,
          'Catalog strength', 'Catalog note'
        );`,
+      [contentKey, hostile],
     );
     const definition = new ItemQueries(db).panel(characterId).definitions[0];
     if (definition === undefined) throw new Error('Definition was not queryable.');
+    expect(definition).toMatchObject({
+      name: hostile,
+      catalog_layer: 'external',
+    });
 
     await run({
       type: 'add_item',
@@ -88,7 +98,7 @@ describe('item commands and effect ownership', () => {
        FROM character_items WHERE character_id = ?`,
       [characterId],
     )).toEqual({
-      name: 'Severed Belt',
+      name: hostile,
       description: 'Catalog description',
       quantity: 1,
       requires_attunement: 1,

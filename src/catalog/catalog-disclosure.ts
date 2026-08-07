@@ -27,6 +27,12 @@ export interface CharacterCatalogDisclosure {
   readonly catalog_layer: CatalogLayerDisclosure;
 }
 
+/** A catalog name kept inseparable from the layer a consumer must disclose. */
+export interface CatalogNamedDisclosure {
+  readonly name: string;
+  readonly catalog_layer: CatalogLayerDisclosure;
+}
+
 export function catalogLayerDisclosure(
   stored: string | null,
 ): CatalogLayerDisclosure {

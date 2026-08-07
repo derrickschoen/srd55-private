@@ -179,7 +179,11 @@ export function createEquipmentStep(deps: EquipmentStepDeps): EquipmentStep {
       },
       contents.map((line) =>
         element('li', {
-          text: lineText(line),
+          text:
+            lineText(line) +
+            (line.catalog_layer === null
+              ? ''
+              : ` — ${catalogLayerLabel(line.catalog_layer)}`),
           className:
             line.item_kind === 'gear'
               ? 'guided-equipment-line guided-equipment-gear'

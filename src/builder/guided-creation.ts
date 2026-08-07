@@ -1417,12 +1417,13 @@ export function listGuidedBackgroundChoiceOptions(
               template.feat_name, template.default_origin_feat_content_key,
               identity.catalog_layer
        FROM background_templates AS template
-       JOIN catalog_content_identities AS identity
+       LEFT JOIN catalog_content_identities AS identity
          ON identity.content_kind = 'background'
         AND identity.content_key = template.content_key
        LEFT JOIN background_definitions AS definition
          ON definition.content_key = template.content_key
-       WHERE identity.catalog_layer = 'bundled'
+       WHERE identity.catalog_layer IS NULL
+          OR identity.catalog_layer = 'bundled'
           OR definition.content_key IS NOT NULL
        ORDER BY template.name, template.content_key`,
       undefined,
@@ -1882,6 +1883,55 @@ export async function allocateGuidedAbilities(
  * Expertise is no longer a disclosure: GF-2 models it as sourced grant state
  * in the dedicated step that follows every skill source.
  */
+function guidedSourceDisplay(
+  db: DatabaseContext,
+  sourceInstanceId: number,
+): {
+    readonly source_name: string;
+    readonly source_catalog_layer: CatalogLayerDisclosure;
+  } {
+  const source = db.oneRaw(
+    `SELECT source.display_name,
+              identity.catalog_layer
+       FROM character_source_instances AS source
+       LEFT JOIN class_definitions AS class
+         ON source.source_type = 'class'
+        AND class.id = source.source_definition_id
+       LEFT JOIN subclass_definitions AS subclass
+         ON source.source_type = 'subclass'
+        AND subclass.id = source.source_definition_id
+       LEFT JOIN feat_definitions AS feat
+         ON source.source_type = 'feat'
+        AND feat.id = source.source_definition_id
+       LEFT JOIN species_definitions AS species
+         ON source.source_type = 'species'
+        AND species.id = source.source_definition_id
+       LEFT JOIN background_definitions AS background
+         ON source.source_type = 'background'
+        AND background.id = source.source_definition_id
+       LEFT JOIN catalog_content_identities AS identity
+         ON identity.content_kind = source.source_type
+        AND identity.content_key = COALESCE(
+          class.content_key,
+          subclass.content_key,
+          feat.content_key,
+          species.content_key,
+          background.content_key
+        )
+     WHERE source.id = ?`,
+    [sourceInstanceId],
+  );
+  return {
+    source_name:
+      source === null ? 'Unknown source' : String(source.display_name),
+    source_catalog_layer: catalogLayerDisclosure(
+      source === null || source.catalog_layer === null
+        ? null
+        : String(source.catalog_layer),
+    ),
+  };
+}
+
 export function guidedSkillsStepState(
   db: DatabaseContext,
   characterId: number,
@@ -1896,13 +1946,6 @@ export function guidedSkillsStepState(
   }
 
   const resolved = resolveSkillGrants(db, characterId);
-  const sourceName = (sourceInstanceId: number): string => {
-    const name = db.scalar<string>(
-      'SELECT display_name FROM character_source_instances WHERE id = ?',
-      [sourceInstanceId],
-    );
-    return name === null ? 'Unknown source' : String(name);
-  };
 
   const clearableKeys: readonly string[] = [
     SKILL_GRANT_KEYS.classSkill,
@@ -1919,7 +1962,7 @@ export function guidedSkillsStepState(
       grant_id: grant.id,
       skill: grant.skill,
       grant_key: grant.grant_key,
-      source_name: sourceName(grant.source_instance_id),
+      ...guidedSourceDisplay(db, grant.source_instance_id),
       // A background's printed skills are FACTS, not choices — shown, never
       // clearable here. The §3.3 collision's clear remedy targets the CHOICE
       // grants, which are exactly the fillable keys.
@@ -1930,7 +1973,7 @@ export function guidedSkillsStepState(
     (grant) => ({
       grant_id: grant.grant_id,
       grant_key: grant.grant_key,
-      source_name: sourceName(grant.source_instance_id),
+      ...guidedSourceDisplay(db, grant.source_instance_id),
       available: grant.available,
     }),
   );
@@ -1943,7 +1986,9 @@ export function guidedSkillsStepState(
     [characterId],
     rowId,
   );
-  const unmodelledToolAlternativeSources: string[] = [];
+  const unmodelledToolAlternativeSources: Array<
+    ReturnType<typeof guidedSourceDisplay>
+  > = [];
   for (const sourceInstanceId of activeSourceIds) {
     for (const rule of reader.activeRulesForSource(sourceInstanceId)) {
       if (rule.kind !== GrantRule.SKILL_PROFICIENCY) {
@@ -1962,7 +2007,9 @@ export function guidedSkillsStepState(
         ),
       );
       if (recorded < (rule.count ?? 0)) {
-        unmodelledToolAlternativeSources.push(sourceName(sourceInstanceId));
+        unmodelledToolAlternativeSources.push(
+          guidedSourceDisplay(db, sourceInstanceId),
+        );
         break;
       }
     }
@@ -2014,14 +2061,10 @@ export function guidedExpertiseStepState(
   const choices = resolveSkillExpertiseGrants(db, characterId)
     .filter((grant) => grant.state === 'active' && grant.skill === null)
     .map((grant) => {
-      const sourceName =
-        db.scalar<string>(
-          `SELECT display_name FROM character_source_instances WHERE id = ?`,
-          [grant.source_instance_id],
-        ) ?? 'Unknown source';
+      const source = guidedSourceDisplay(db, grant.source_instance_id);
       return {
         grant_id: grant.id,
-        source_name: String(sourceName),
+        ...source,
         ordinal: grant.ordinal,
         available: availableSkillsForExpertiseGrant(
           db,

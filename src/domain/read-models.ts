@@ -102,6 +102,7 @@ export interface CharacterItem {
 export interface ItemDefinition {
   readonly content_key: ContentKey;
   readonly name: string;
+  readonly catalog_layer: CatalogLayerDisclosure;
   readonly description: string;
   readonly requires_attunement: boolean;
   readonly effects: readonly EquipmentEffectInput[];
@@ -164,6 +165,7 @@ export interface WorkspaceSlot {
   level_max: number;
   spell_id: number | null;
   spell_name: string | null;
+  spell_catalog_layer: CatalogLayerDisclosure | null;
   placeholder?: boolean;
   spell_level: number | null;
   spell_edition: RulesEdition | null;

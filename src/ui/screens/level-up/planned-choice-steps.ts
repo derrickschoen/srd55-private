@@ -15,6 +15,7 @@ import {
 } from '../../../builder/level-up-wizard';
 import type { Skill } from '../../../domain/enums';
 import type { EligibleSpell } from '../../../domain/read-models';
+import type { CatalogLayerDisclosure } from '../../../catalog/catalog-disclosure';
 import { element, listen, type Cleanup } from '../../dom';
 import {
   createSpellPicker,
@@ -24,6 +25,7 @@ import {
 export interface PlannedSpellDraft {
   readonly choice: PlannedSpellChoice;
   readonly spell_name: string;
+  readonly spell_catalog_layer: CatalogLayerDisclosure;
 }
 
 export interface PlannedSubchoiceDraft {
@@ -300,6 +302,7 @@ function plannedSpellChoice(
           mode: 'new',
         },
         spell_name: spell.name,
+        spell_catalog_layer: spell.catalog_layer,
       };
     case 'spellbook_acquisition':
       return {
@@ -309,6 +312,7 @@ function plannedSpellChoice(
           spell_version_id: spell.id,
         },
         spell_name: spell.name,
+        spell_catalog_layer: spell.catalog_layer,
       };
     case 'optional_swap':
       return {
@@ -319,6 +323,7 @@ function plannedSpellChoice(
           mode: 'replace',
         },
         spell_name: spell.name,
+        spell_catalog_layer: spell.catalog_layer,
       };
   }
 }
@@ -363,6 +368,7 @@ export function createPlannedSpellsStep(options: {
       label: `${spellChoiceLabel(projection)} from ${projection.source_label}`,
       value:
         selected?.spell_name ?? null,
+      valueCatalogLayer: selected?.spell_catalog_layer ?? null,
       freeTextValue: false,
       invalid: false,
       disabled: projection.kind === 'optional_swap' && !replacing,

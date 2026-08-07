@@ -1,6 +1,7 @@
 import type { EligibleSpell } from '../../../domain/read-models';
 import { FREE_TEXT_MARKER } from '../../free-text';
 import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
+import type { CatalogLayerDisclosure } from '../../../catalog/catalog-disclosure';
 
 export interface EligibleSpellClient {
   eligibleSpells(
@@ -20,6 +21,7 @@ export function createSpellPicker(options: {
   addressKey: string;
   label: string;
   value: string | null;
+  valueCatalogLayer: CatalogLayerDisclosure | null;
   /** The current value is a share-link name of unverified origin. */
   freeTextValue: boolean;
   invalid: boolean;
@@ -55,7 +57,12 @@ export function createSpellPicker(options: {
   list.setAttribute('role', 'listbox');
   list.hidden = true;
   input.setAttribute('aria-controls', listId);
-  wrapper.append(input, list);
+  const currentLayer = document.createElement('span');
+  currentLayer.className = 'spell-picker-current-layer';
+  currentLayer.textContent = options.valueCatalogLayer === null
+    ? ''
+    : catalogLayerLabel(options.valueCatalogLayer);
+  wrapper.append(input, currentLayer, list);
 
   let choices: EligibleSpell[] = [];
   let active = 0;
@@ -106,6 +113,7 @@ export function createSpellPicker(options: {
         event.preventDefault();
         acceptedValue = spell.name;
         input.value = spell.name;
+        currentLayer.textContent = catalogLayerLabel(spell.catalog_layer);
         close(false);
         options.onSelect(spell);
       });
@@ -168,6 +176,7 @@ export function createSpellPicker(options: {
         event.preventDefault();
         acceptedValue = spell.name;
         input.value = spell.name;
+        currentLayer.textContent = catalogLayerLabel(spell.catalog_layer);
         close(false);
         options.onSelect(spell);
       }

@@ -56,7 +56,10 @@ import {
   compareSpellEntries,
   compareWizardSpellbookEntries,
 } from './build-report-ordering';
-import { catalogLayerDisclosure } from '../catalog/catalog-disclosure';
+import {
+  catalogLayerDisclosure,
+  type CatalogLayerDisclosure,
+} from '../catalog/catalog-disclosure';
 import { characterCatalogDisclosures } from '../queries/character-catalog-disclosures';
 
 interface Character {
@@ -358,6 +361,7 @@ interface ReportSlotRow {
   readonly source_definition_id: number | null;
   readonly source_config: string | null;
   readonly spell_name: string | null;
+  readonly spell_catalog_layer: CatalogLayerDisclosure | null;
   readonly spell_level: number | null;
   readonly spell_edition: RulesEdition | null;
   readonly spell_identity_id: number | null;
@@ -388,6 +392,9 @@ const reportSlotRow: RowCodec<ReportSlotRow> = (row) => ({
   source_definition_id: sqlNullableInteger(row, 'source_definition_id'),
   source_config: sqlNullableString(row, 'source_config'),
   spell_name: sqlNullableString(row, 'spell_name'),
+  spell_catalog_layer: catalogLayerDisclosure(
+    sqlNullableString(row, 'spell_catalog_layer'),
+  ),
   spell_level: sqlNullableInteger(row, 'spell_level'),
   spell_edition: sqlNullableString(row, 'spell_edition') as RulesEdition | null,
   spell_identity_id: sqlNullableInteger(row, 'spell_identity_id'),
@@ -754,6 +761,7 @@ export class BuildReportBuilder {
               source.display_name AS source_name, source.source_type,
               source.source_definition_id, source.config AS source_config,
               selected.display_name AS spell_name,
+              selected_identity.catalog_layer AS spell_catalog_layer,
               selected.level AS spell_level,
               selected.rules_edition AS spell_edition,
               selected.spell_identity_id, selected.ritual,
@@ -766,6 +774,9 @@ export class BuildReportBuilder {
            slot.fixed_spell_version_id,
            slot.current_spell_version_id
          )
+       LEFT JOIN catalog_content_identities AS selected_identity
+         ON selected_identity.content_kind = 'spell'
+        AND selected_identity.content_key = selected.content_key
        WHERE slot.character_id = ?
          AND slot.state IN ('active', 'orphaned', 'kept_override')`,
       [character.id],
@@ -816,6 +827,8 @@ export class BuildReportBuilder {
           level_max: row.spell_level_max,
           spell_id: versionId,
           spell_name: row.spell_name,
+          spell_catalog_layer:
+            row.spell_name === null ? null : row.spell_catalog_layer,
           spell_level: row.spell_level,
           spell_edition: row.spell_edition,
           ability,

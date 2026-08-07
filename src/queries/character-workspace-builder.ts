@@ -8,7 +8,10 @@ import {
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import { bundledSourceContentKeys } from '../catalog/bundled-source-membership';
-import { catalogLayerDisclosure } from '../catalog/catalog-disclosure';
+import {
+  catalogLayerDisclosure,
+  type CatalogLayerDisclosure,
+} from '../catalog/catalog-disclosure';
 import {
   abilities,
   type Ability,
@@ -108,6 +111,7 @@ interface WorkspaceSlotRow {
   readonly source_type: DomainSourceType;
   readonly source_config: string | null;
   readonly spell_name: string | null;
+  readonly spell_catalog_layer: CatalogLayerDisclosure | null;
   readonly spell_provenance: string | null;
   readonly spell_level: number | null;
   readonly spell_edition: RulesEdition | null;
@@ -138,6 +142,9 @@ const workspaceSlotRow: RowCodec<WorkspaceSlotRow> = (row) => ({
   source_type: sqlString(row, 'source_type') as DomainSourceType,
   source_config: sqlNullableString(row, 'source_config'),
   spell_name: sqlNullableString(row, 'spell_name'),
+  spell_catalog_layer: catalogLayerDisclosure(
+    sqlNullableString(row, 'spell_catalog_layer'),
+  ),
   spell_provenance: sqlNullableString(row, 'spell_provenance'),
   spell_level: sqlNullableInteger(row, 'spell_level'),
   spell_edition: sqlNullableString(row, 'spell_edition') as RulesEdition | null,
@@ -449,6 +456,7 @@ export class CharacterWorkspaceBuilder {
               slot.ordinal, source.display_name AS source_name,
               source.source_type, source.config AS source_config,
               selected.display_name AS spell_name,
+              selected_identity.catalog_layer AS spell_catalog_layer,
               selected.provenance AS spell_provenance,
               selected.level AS spell_level,
               selected.rules_edition AS spell_edition,
@@ -462,6 +470,9 @@ export class CharacterWorkspaceBuilder {
            slot.fixed_spell_version_id,
            slot.current_spell_version_id
          )
+       LEFT JOIN catalog_content_identities AS selected_identity
+         ON selected_identity.content_kind = 'spell'
+        AND selected_identity.content_key = selected.content_key
        WHERE slot.character_id = ?
          AND slot.state IN ('active', 'orphaned', 'kept_override')
        ORDER BY source.display_name, slot.sort_order, slot.id`,
@@ -516,6 +527,8 @@ export class CharacterWorkspaceBuilder {
         level_max: row.spell_level_max,
         spell_id: versionId,
         spell_name: row.spell_name,
+        spell_catalog_layer:
+          row.spell_name === null ? null : row.spell_catalog_layer,
         placeholder: row.spell_provenance === 'placeholder',
         spell_level: row.spell_level,
         spell_edition: row.spell_edition,

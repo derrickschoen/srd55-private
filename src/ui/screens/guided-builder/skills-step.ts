@@ -44,6 +44,7 @@ import { SKILL_LABELS } from '../../../rules/skills';
 import { RpcError } from '../../../rpc/protocol';
 import { clear, element, listen, type Cleanup } from '../../dom';
 import { characterListLink, guidedShell } from './guided-builder';
+import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
 
 /**
  * The seam's `SkillGrantRefusalData` on the wire: `handler_error` with a
@@ -191,6 +192,7 @@ export function createSkillsStep(deps: SkillsStepDeps): SkillsStep {
             element('span', {
               text:
                 `${SKILL_LABELS[grant.skill]} — ${grant.source_name} ` +
+                `— ${catalogLayerLabel(grant.source_catalog_layer)} ` +
                 `(${grantKeyLabel(grant.grant_key)})`,
             }),
           ];
@@ -327,7 +329,8 @@ export function createSkillsStep(deps: SkillsStepDeps): SkillsStep {
           // D33: a vanished class definition renders as unknown, not a guess.
           heading:
             `${grant.class_name ?? 'Unknown class'} skill ` +
-            `${String(grant.ordinal)}`,
+            `${String(grant.ordinal)} — ` +
+            catalogLayerLabel(grant.class_catalog_layer),
           available: grant.available,
         }),
       ),
@@ -349,7 +352,10 @@ export function createSkillsStep(deps: SkillsStepDeps): SkillsStep {
       ...deps.state.species_choices.map((grant) =>
         choiceForm({
           grantId: grant.grant_id,
-          heading: `${grant.source_name} ${grantKeyLabel(grant.grant_key)} skill`,
+          heading:
+            `${grant.source_name} — ` +
+            `${catalogLayerLabel(grant.source_catalog_layer)} ` +
+            `${grantKeyLabel(grant.grant_key)} skill`,
           available: grant.available,
         }),
       ),
@@ -364,7 +370,9 @@ export function createSkillsStep(deps: SkillsStepDeps): SkillsStep {
           className: 'guided-skill-gap',
           attributes: { [SKILL_STEP_ATTR.toolAlternativeGap]: '' },
           text:
-            `${source} allows each remaining choice to be a skill or a tool. ` +
+            `${source.source_name} — ` +
+            `${catalogLayerLabel(source.source_catalog_layer)} allows each ` +
+            'remaining choice to be a skill or a tool. ' +
             'No skill is owed for an unrecorded ordinal, and this application ' +
             'does not model tool choices; read the sourced feat text for that ' +
             'unmodelled benefit.',

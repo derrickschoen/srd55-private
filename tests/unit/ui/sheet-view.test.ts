@@ -313,10 +313,11 @@ function sheet(changes: Partial<CharacterSheet> = {}): CharacterSheet {
       {
         kind: 'class',
         source_name: HOSTILE_CLASS_NAME,
+        source_catalog_layer: 'bundled',
         option: 'a',
         contents: [
-          { item_name: HOSTILE_ARMOR_NAME, quantity: 1 },
-          { item_name: 'Dagger', quantity: 2 },
+          { item_name: HOSTILE_ARMOR_NAME, catalog_layer: 'external', quantity: 1 },
+          { item_name: 'Dagger', catalog_layer: 'bundled', quantity: 2 },
         ],
       },
     ],

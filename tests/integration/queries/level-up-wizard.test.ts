@@ -558,18 +558,20 @@ describe('level-up wizard state RPC', () => {
 
   it('keeps a held imported class disabled even when its hit die is known', async () => {
     const characterId = createCharacter('Imported Class Holder');
+    const hostile = '</span><img data-ha10-held-class src=x>';
     registerFixtureContentIdentity(harness.context.db, {
       kind: 'class', contentKey: 'expanded:level-up-probe',
-      name: 'Imported Adept', keyKind: 'asserted',
+      name: hostile, keyKind: 'asserted',
     });
     const importedClassId = harness.context.db.exec(
       `INSERT INTO class_definitions (
          content_key, name, rules_edition, progression_type,
          supports_ritual_casting
        ) VALUES (
-         'expanded:level-up-probe', 'Imported Adept', 'expanded',
+         'expanded:level-up-probe', ?, 'expanded',
          'none', 0
        )`,
+      [hostile],
     ).lastInsertId;
     harness.context.db.exec(
       `INSERT INTO class_sheet_traits (
@@ -596,6 +598,8 @@ describe('level-up wizard state RPC', () => {
       class_options: [{
         guideability: 'disabled',
         class_definition_id: importedClassId,
+        name: hostile,
+        catalog_layer: 'external',
         hit_die: 8,
         reason: 'class_not_bundled',
         explanation:

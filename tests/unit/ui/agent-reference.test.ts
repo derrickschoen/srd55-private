@@ -54,6 +54,7 @@ function slot(changes: Partial<WorkspaceSlot> = {}): WorkspaceSlot {
     level_max: 0,
     spell_id: 10,
     spell_name: 'Mage Hand',
+    spell_catalog_layer: 'bundled',
     spell_level: 0,
     spell_edition: '2024',
     ability: 'intelligence',

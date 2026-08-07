@@ -28,6 +28,7 @@ export function createSpellsStep(options: {
       addressKey: `${choice.kind}-${String(choice.id)}`,
       label: choice.label,
       value: null,
+      valueCatalogLayer: null,
       freeTextValue: false,
       invalid: false,
       disabled: false,

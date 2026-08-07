@@ -182,6 +182,7 @@ function publishPreview(): PublishPreview {
     review: [{
       candidate_content_key: '2024:species:human' as ContentKey,
       candidate_name: 'Human',
+      candidate_catalog_layer: 'bundled',
       reason: 'srd-fallback',
       default_decision: 'match',
     }],
@@ -351,6 +352,7 @@ describe('the D82 content-adoption dialog', () => {
     )).toEqual(expect.objectContaining({
       incomingName: 'shared-relic',
       localName: 'Shared Relic',
+      localCatalogLayer: 'external',
       matchClass: 'key-collision',
     }));
     expect(previewPlan.reviews.find((review) =>
@@ -397,6 +399,9 @@ describe('the D82 content-adoption dialog', () => {
       });
       expect(text).toContain(
         'Source book — incoming: Incoming Guide; local: Local Guide',
+      );
+      expect(text).toContain(
+        'local: Shared Relic — Homebrew · external layer',
       );
       expect(text).toContain('Depends on: portable:item:exact');
       expect(text).toContain(

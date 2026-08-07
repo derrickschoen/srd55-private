@@ -422,6 +422,7 @@ export class LevelUpStateQuery {
       `SELECT level.class_definition_id, level.level,
               level.is_starting_class, definition.content_key,
               definition.name, definition.rules_edition, traits.hit_die,
+              class_identity.catalog_layer AS class_catalog_layer,
               subclass.id AS subclass_id,
               subclass.content_key AS subclass_content_key,
               subclass.name AS subclass_name,
@@ -430,6 +431,9 @@ export class LevelUpStateQuery {
        FROM character_class_levels AS level
        JOIN class_definitions AS definition
          ON definition.id = level.class_definition_id
+       LEFT JOIN catalog_content_identities AS class_identity
+         ON class_identity.content_kind = 'class'
+        AND class_identity.content_key = definition.content_key
        LEFT JOIN class_sheet_traits AS traits
          ON traits.class_definition_id = definition.id
        LEFT JOIN subclass_definitions AS subclass
@@ -445,6 +449,9 @@ export class LevelUpStateQuery {
           sqlInteger(row, 'class_definition_id') as ClassDefinitionId,
         content_key: sqlString(row, 'content_key') as ContentKey,
         name: sqlString(row, 'name'),
+        catalog_layer: catalogLayerDisclosure(
+          sqlNullableString(row, 'class_catalog_layer'),
+        ),
         rules_edition: rulesEdition(
           sqlString(row, 'rules_edition'),
           'Class',
@@ -728,6 +735,7 @@ export class LevelUpStateQuery {
       .map((entry) => ({
         class_definition_id: entry.class_definition_id,
         class_name: entry.name,
+        class_catalog_layer: entry.catalog_layer,
       }));
     if (missing.length > 0 || selected.hit_die === null) {
       return {

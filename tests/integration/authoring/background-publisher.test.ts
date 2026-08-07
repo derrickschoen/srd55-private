@@ -814,6 +814,7 @@ describe('HA-4 background publisher', () => {
     expect(preview.review).toEqual([{
       candidate_content_key: targetKey,
       candidate_name: 'Explicit Match Wayfarer',
+      candidate_catalog_layer: 'external',
       reason: 'alias',
       default_decision: 'match',
     }]);

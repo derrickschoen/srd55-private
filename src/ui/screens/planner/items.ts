@@ -8,6 +8,7 @@ import type {
   CharacterItem,
   ItemsPanel,
 } from '../../../domain/read-models';
+import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
 import { freeTextSpan } from '../../free-text';
 
 export interface AttunementReplacement {
@@ -244,7 +245,8 @@ export function renderItems(options: ItemsPanelOptions): HTMLElement {
     for (const definition of options.panel.definitions) {
       const entry = document.createElement('option');
       entry.value = definition.content_key;
-      entry.textContent = definition.name;
+      entry.textContent =
+        `${definition.name} — ${catalogLayerLabel(definition.catalog_layer)}`;
       select.append(entry);
     }
     const addDefinition = document.createElement('button');

@@ -20,6 +20,7 @@ import type { Skill } from '../../../domain/enums';
 import type { CharacterRevision } from '../../../domain/ids';
 import type { EligibleSpell } from '../../../domain/read-models';
 import type { CharacterCommandRpcResult } from '../../../commands/character-command-executor';
+import type { CatalogNamedDisclosure } from '../../../catalog/catalog-disclosure';
 import type { CharacterSheet } from '../../../queries/character-sheet-builder';
 import { element, type Cleanup } from '../../dom';
 import {
@@ -145,15 +146,19 @@ function plannedSubchoiceRefusalMessage(error: unknown): string | null {
   );
 }
 
-function selectedFeatName(
+function selectedFeat(
   draft: FeatStepDraft,
   candidates: readonly LevelUpFeatCandidate[],
-): string | null {
+): CatalogNamedDisclosure | null {
   if (draft?.kind !== 'selected') return null;
   const key = draft.application.selection.feat_content_key;
-  return candidates.find(
+  const candidate = candidates.find(
     (candidate) => candidate.definition.content_key === key,
-  )?.definition.name ?? String(key);
+  );
+  return {
+    name: candidate?.definition.name ?? String(key),
+    catalog_layer: candidate?.catalog_layer ?? 'unknown',
+  };
 }
 
 function orderedSteps(steps: readonly LevelUpStep[]): readonly LevelUpStep[] {
@@ -209,7 +214,7 @@ function createTerminalEpicResolutionWizard(options: {
   let completion: Completion | null = null;
 
   const draftReview = (): LevelUpDraftReview => {
-    const feat = selectedFeatName(
+    const feat = selectedFeat(
       draft,
       options.state.pending_epic_resolution.candidates,
     );
@@ -677,7 +682,7 @@ export function createLevelUpWizard(options: {
 
   const draftReview = (): LevelUpDraftReview => {
     if (isEpicResolutionPass()) {
-      const feat = selectedFeatName(
+      const feat = selectedFeat(
         epicResolutionDraft,
         state.pending_epic_resolution?.candidates ?? [],
       );
@@ -713,7 +718,7 @@ export function createLevelUpWizard(options: {
         plannedGrantLocatorKey(choice.locator) ===
         plannedGrantLocatorKey(locator),
     )?.source_label ?? 'Unknown granting source';
-    const feat = selectedFeatName(
+    const feat = selectedFeat(
       levelFeatDraft,
       selected.feat_occurrence?.candidates ?? [],
     );
@@ -738,6 +743,7 @@ export function createLevelUpWizard(options: {
         : {
             kind: 'deferred' as const,
             class_name: selected.name,
+            class_catalog_layer: selected.catalog_layer,
             target_level: selected.target_level,
           };
     return {
@@ -751,9 +757,12 @@ export function createLevelUpWizard(options: {
         (choice) =>
           `${titleCaseIdentifier(choice.skill)} — ${sourceLabel(choice.locator, projection.expertise)}`,
       ),
-      spells: plannedDraft.spells.map((entry) =>
-        `${entry.spell_name} — ${sourceLabel(entry.choice.locator, projection.spells)}`,
-      ),
+      spells: plannedDraft.spells.map((entry) => ({
+        name:
+          `${entry.spell_name} — ` +
+          sourceLabel(entry.choice.locator, projection.spells),
+        catalog_layer: entry.spell_catalog_layer,
+      })),
       new_class_features: selected.gains.target_features,
     };
   };

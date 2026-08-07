@@ -141,7 +141,9 @@ export function renderDisabledClassOption(
     },
     [
       element('h3', {
-        text: `${option.name} ${String(option.current_level)}`,
+        text:
+          `${option.name} ${String(option.current_level)} — ` +
+          catalogLayerLabel(option.catalog_layer),
         attributes: { id: headingId },
       }),
       element('p', {
@@ -178,7 +180,7 @@ export function createClassStep(options: {
         type: 'radio',
         name: 'level-up-class',
         value: String(classOption.class_definition_id),
-        'aria-label': `${classOption.name} ${String(classOption.current_level)} → ${String(classOption.target_level)}, ${classOption.rules_edition} rules, d${String(classOption.hit_die)} hit die`,
+        'aria-label': `${classOption.name} ${String(classOption.current_level)} → ${String(classOption.target_level)}, ${classOption.rules_edition} rules, d${String(classOption.hit_die)} hit die, ${catalogLayerLabel(classOption.catalog_layer)}`,
         [LEVEL_UP_ATTR.classOption]: String(classOption.class_definition_id),
         ...checkedAttributes(
           classOption.class_definition_id === options.selectedClassId,
@@ -195,7 +197,10 @@ export function createClassStep(options: {
     return element('label', { className: 'level-up-class-card' }, [
       radio,
       element('span', {
-        text: `${classOption.name} ${String(classOption.current_level)} → ${String(classOption.target_level)}`,
+        text:
+          `${classOption.name} ${String(classOption.current_level)} → ` +
+          `${String(classOption.target_level)} — ` +
+          catalogLayerLabel(classOption.catalog_layer),
         attributes: { id: headingId },
       }),
       element('span', {
@@ -273,7 +278,12 @@ export function renderGainsStep(
         ...(hp.missing_hit_dice.length === 0
           ? []
           : [element('p', {
-              text: `Missing recorded hit dice: ${hp.missing_hit_dice.map((entry) => entry.class_name).join(', ')}.`,
+              text:
+                'Missing recorded hit dice: ' +
+                hp.missing_hit_dice.map((entry) =>
+                  `${entry.class_name} — ` +
+                  catalogLayerLabel(entry.class_catalog_layer)
+                ).join(', ') + '.',
             })]),
       ])
     : element('section', { className: 'level-up-gain' }, [

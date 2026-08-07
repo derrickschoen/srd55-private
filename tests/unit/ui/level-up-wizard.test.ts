@@ -79,6 +79,7 @@ function warning(kind: string, title: string): LevelUpPermanentWarning {
 function classOption(options: {
   readonly id?: number;
   readonly name?: string;
+  readonly catalogLayer?: LevelUpGuideableClassOption['catalog_layer'];
   readonly current?: number;
   readonly steps?: readonly LevelUpStep[];
   readonly hp?: LevelUpGuideableClassOption['gains']['hit_points'];
@@ -91,6 +92,7 @@ function classOption(options: {
     class_definition_id: (options.id ?? 11) as ClassDefinitionId,
     content_key: `test:class:${options.name ?? 'wizard'}` as ContentKey,
     name: options.name ?? 'Wizard',
+    catalog_layer: options.catalogLayer ?? 'bundled',
     rules_edition: '2024',
     current_level: current as ClassLevel,
     target_level: (current + 1) as ClassLevel,
@@ -166,6 +168,7 @@ function pendingEpicResolution(
 function boonCandidate(options: {
   readonly key?: string;
   readonly name?: string;
+  readonly catalogLayer?: LevelUpFeatCandidate['catalog_layer'];
   readonly status?: 'qualified' | 'unmet' | 'unprovable';
 } = {}): LevelUpFeatCandidate {
   const key = options.key ?? '2024:feat:boon-of-fate';
@@ -211,7 +214,7 @@ function boonCandidate(options: {
     },
   };
   return {
-    catalog_layer: 'bundled',
+    catalog_layer: options.catalogLayer ?? 'bundled',
     definition: {
       content_key: key as ContentKey,
       name: options.name ?? 'Boon of Fate',
@@ -438,6 +441,34 @@ describe('W-ROUTE-EXACT level-up route', () => {
 });
 
 describe('W-STEP-SOURCE returned applicability', () => {
+  it('renders a hostile held class inert with its exact live-route layer', () => {
+    const hostile = '</span><img data-ha10-held-class src=x>';
+    const wizard = createLevelUpWizard({
+      state: ready({
+        classes: [classOption({
+          name: hostile,
+          catalogLayer: 'external',
+        })],
+      }),
+      cancel: () => undefined,
+    });
+    const card = interactiveElement(wizard.element).querySelector(
+      `[${LEVEL_UP_ATTR.classOption}="11"]`,
+    );
+
+    expect(card?.getAttribute('aria-label')).toBe(
+      `${hostile} 1 → 2, 2024 rules, d6 hit die, ` +
+        'Homebrew · external layer',
+    );
+    expect(elementText(wizard.element)).toContain(
+      `${hostile} 1 → 2 — Homebrew · external layer`,
+    );
+    expect(
+      interactiveElement(wizard.element).querySelector('[data-ha10-held-class]'),
+    ).toBeNull();
+    wizard.cleanup();
+  });
+
   it('orders only the Wizard 2 steps returned by state', () => {
     const wizard = createLevelUpWizard({
       state: ready({
@@ -681,7 +712,7 @@ describe('W-FOCUS navigation and errors', () => {
     expect(classRadio).not.toBeNull();
     expect(classRadio?.tagName).toBe('input');
     expect(classRadio?.getAttribute('aria-label')).toBe(
-      'Wizard 1 → 2, 2024 rules, d6 hit die',
+      'Wizard 1 → 2, 2024 rules, d6 hit die, SRD · bundled layer',
     );
 
     click(wizard.element, LEVEL_UP_ATTR.next);
@@ -874,6 +905,7 @@ describe('D118 and D119 route choices', () => {
           class_definition_id: 44 as ClassDefinitionId,
           content_key: 'test:class:no-die' as ContentKey,
           name: 'Unrecorded Class',
+          catalog_layer: 'unknown',
           rules_edition: '2024',
           current_level: 2 as ClassLevel,
           hit_die: null,
@@ -913,6 +945,7 @@ describe('D118 and D119 route choices', () => {
           class_definition_id: 44 as ClassDefinitionId,
           content_key: 'test:class:no-die' as ContentKey,
           name: 'Unrecorded Class',
+          catalog_layer: 'unknown',
           rules_edition: '2024',
           current_level: 2 as ClassLevel,
           hit_die: null,
@@ -950,6 +983,7 @@ describe('D118 and D119 route choices', () => {
           class_definition_id: 44 as ClassDefinitionId,
           content_key: 'test:class:no-die' as ContentKey,
           name: 'Unrecorded Class',
+          catalog_layer: 'unknown',
           rules_edition: '2024',
           current_level: 19 as ClassLevel,
           hit_die: null,
@@ -1284,7 +1318,7 @@ describe('W-E review, atomic confirm, and complete', () => {
       ),
     ).not.toBeNull();
     expect(elementText(wizard.element)).toContain(
-      'Wizard level 3 will be saved without a subclass selection',
+      'Wizard level 3 (SRD · bundled layer) will be saved without a subclass selection',
     );
 
     click(wizard.element, LEVEL_UP_ATTR.confirm);
@@ -1292,7 +1326,7 @@ describe('W-E review, atomic confirm, and complete', () => {
     expect(elementText(wizard.element)).toContain('Subclass: Decide later.');
     expect(elementText(wizard.element)).toContain('Subclass choice still needed');
     expect(elementText(wizard.element)).toContain(
-      'Wizard level 3 will be saved without a subclass selection',
+      'Wizard level 3 (SRD · bundled layer) will be saved without a subclass selection',
     );
     wizard.cleanup();
   });
@@ -1626,6 +1660,7 @@ describe('W-E review, atomic confirm, and complete', () => {
 
   it('D118 completes a resolution pass without claiming any level changed', async () => {
     const unchanged = sheet({ totalLevel: 20, classLevel: 20, hp: 120 });
+    const hostile = '</dd><img data-ha10-level-feat src=x>';
     const state: LevelUpStateResult = {
       kind: 'maximum_level',
       character: {
@@ -1636,7 +1671,10 @@ describe('W-E review, atomic confirm, and complete', () => {
         warnings: [],
       },
       held_classes: [],
-      pending_epic_resolution: pendingEpicResolution([boonCandidate()]),
+      pending_epic_resolution: pendingEpicResolution([boonCandidate({
+        name: hostile,
+        catalogLayer: 'external',
+      })]),
     };
     const submit = vi.fn().mockResolvedValue({
       operation_uuid: 'level-up-operation',
@@ -1656,12 +1694,22 @@ describe('W-E review, atomic confirm, and complete', () => {
     chooseRadio(wizard.element, '2024:feat:boon-of-fate:0');
     click(wizard.element, LEVEL_UP_ATTR.next);
     await settle();
-    expect(elementText(wizard.element)).toContain('Feat Boon of Fate');
+    expect(elementText(wizard.element)).toContain(
+      `Feat ${hostile} — Homebrew · external layer`,
+    );
+    expect(
+      interactiveElement(wizard.element).querySelector('[data-ha10-level-feat]'),
+    ).toBeNull();
     click(wizard.element, LEVEL_UP_ATTR.confirm);
     await settle();
 
     expect(elementText(wizard.element)).toContain('Epic Boon choice complete');
-    expect(elementText(wizard.element)).toContain('Feat: Boon of Fate.');
+    expect(elementText(wizard.element)).toContain(
+      `Feat: ${hostile} — Homebrew · external layer.`,
+    );
+    expect(
+      interactiveElement(wizard.element).querySelector('[data-ha10-level-feat]'),
+    ).toBeNull();
     expect(elementText(wizard.element)).toContain(
       'without changing total or class levels',
     );

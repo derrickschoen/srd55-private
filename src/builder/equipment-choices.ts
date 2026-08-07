@@ -82,6 +82,7 @@ export const EQUIPMENT_STEP_ATTR = Object.freeze({
 /** One rendered package line: the printed name, count and classification. */
 export interface GuidedEquipmentItemLine {
   readonly item_name: string;
+  readonly catalog_layer: CatalogLayerDisclosure | null;
   readonly quantity: number;
   readonly item_kind: EquipmentItemKind;
 }

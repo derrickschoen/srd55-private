@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   GUIDED_RPC,
   SKILL_GRANT_KEYS,
@@ -24,6 +24,12 @@ import {
 } from '../../../src/queries/character-completeness';
 import { skillFromLabel } from '../../../src/rules/skills';
 import { rpcRegistry } from '../../../src/worker/registry';
+import { createSkillsStep } from '../../../src/ui/screens/guided-builder/skills-step';
+import {
+  elementText,
+  installInteractiveDocument,
+  interactiveElement,
+} from '../../fixtures/interactive-dom';
 import {
   createRpcHarness,
   type RpcHarness,
@@ -43,8 +49,15 @@ import {
  * applies and the REAL RPC surface, never hand-planted rows.
  */
 let harness: RpcHarness | undefined;
+let restoreDocument: (() => void) | undefined;
+
+beforeEach(() => {
+  restoreDocument = installInteractiveDocument();
+});
 
 afterEach(() => {
+  restoreDocument?.();
+  restoreDocument = undefined;
   harness?.close();
   harness = undefined;
 });
@@ -322,6 +335,61 @@ describe('the S-C exit: a Fighter with a skill-granting background still owes tw
       ),
     ).toMatchObject({ ok: false, error: { code: 'invalid_params' } });
   });
+
+  it('carries a hostile class source through the live skills RPC and renders it inert', async () => {
+    const rpcHarness = await applicationDatabase();
+    const db = rpcHarness.context.db;
+    const characterId = createGuided(db, 'Fighter');
+    const hostile = '</h3><img data-ha10-skill-source src=x>';
+    const classKey = String(db.scalar(
+      `SELECT definition.content_key
+       FROM character_class_levels AS level
+       JOIN class_definitions AS definition
+         ON definition.id = level.class_definition_id
+       WHERE level.character_id = ?`,
+      [characterId],
+    ));
+    db.exec('UPDATE class_definitions SET name = ? WHERE content_key = ?', [
+      hostile,
+      classKey,
+    ]);
+    db.exec('PRAGMA foreign_keys = OFF');
+    db.exec(
+      `DELETE FROM catalog_content_identities
+       WHERE content_kind = 'class' AND content_key = ?`,
+      [classKey],
+    );
+    db.exec('PRAGMA foreign_keys = ON');
+
+    const response = await rpcRegistry.dispatch(
+      {
+        id: 3,
+        method: GUIDED_RPC.skillsStep,
+        params: { character_id: characterId },
+      },
+      rpcHarness.context,
+    );
+    if (!response.ok) throw new Error(response.error.message);
+    const state = response.result as ReturnType<typeof guidedSkillsStepState>;
+    expect(state.class_choices[0]).toMatchObject({
+      class_name: hostile,
+      class_catalog_layer: 'unknown',
+    });
+
+    const step = createSkillsStep({
+      characterId,
+      state,
+      fillSkillGrant: () => Promise.reject(new Error('not submitted')),
+      navigate: () => undefined,
+    });
+    expect(elementText(step.element)).toContain(
+      `${hostile} skill 1 — Unknown catalog layer`,
+    );
+    expect(
+      interactiveElement(step.element).querySelector('[data-ha10-skill-source]'),
+    ).toBeNull();
+    step.cleanup();
+  });
 });
 
 describe('the D102 skill-or-tool boundary, as step data', () => {
@@ -333,7 +401,10 @@ describe('the D102 skill-or-tool boundary, as step data', () => {
 
     const state = guidedSkillsStepState(db, characterId);
     expect(state.unmodelled_tool_alternative_sources).toHaveLength(1);
-    expect(state.unmodelled_tool_alternative_sources[0]).toContain('Skilled');
+    expect(state.unmodelled_tool_alternative_sources[0]).toMatchObject({
+      source_name: 'Skilled',
+      source_catalog_layer: 'bundled',
+    });
     expect(
       db.scalar(
         `SELECT count(*) FROM character_skill_grants
