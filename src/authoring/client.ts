@@ -1,4 +1,9 @@
 import type { RpcClient } from '../rpc/client';
+import type { ContentImportPlanToken } from '../catalog/content-adoption';
+import type {
+  BundledHomebrewInstallPlan,
+  BundledHomebrewInstallResult,
+} from './bundled-homebrew-installer';
 import type { CharacterId, ContentKey } from '../domain/ids';
 import {
   type AuthoredContentKind,
@@ -32,6 +37,8 @@ export const AUTHORING_RPC = Object.freeze({
   usages: 'authoring.usages',
   previewReplacement: 'authoring.previewReplacement',
   commitReplacement: 'authoring.commitReplacement',
+  previewBundledHomebrew: 'authoring.previewBundledHomebrew',
+  installBundledHomebrew: 'authoring.installBundledHomebrew',
 } as const);
 
 export type AuthoringRpcMethod =
@@ -65,6 +72,10 @@ export interface PreviewPublishParams {
 export interface CommitPublishParams {
   readonly token: PublishPlanToken;
   readonly decisions: readonly PublishDecision[];
+}
+
+export interface InstallBundledHomebrewParams {
+  readonly token: ContentImportPlanToken;
 }
 
 export interface ContentUsagesParams {
@@ -101,7 +112,16 @@ export interface AuthoringClient {
   ): Promise<ReplacementResult>;
 }
 
-export function createAuthoringClient(rpc: RpcClient): AuthoringClient {
+export interface BundledHomebrewClient {
+  previewBundledHomebrew(): Promise<BundledHomebrewInstallPlan>;
+  installBundledHomebrew(
+    params: InstallBundledHomebrewParams,
+  ): Promise<BundledHomebrewInstallResult>;
+}
+
+export function createAuthoringClient(
+  rpc: RpcClient,
+): AuthoringClient & BundledHomebrewClient {
   return Object.freeze({
     list: () =>
       rpc.call<Record<string, never>, AuthoringLibrary>(
@@ -142,6 +162,16 @@ export function createAuthoringClient(rpc: RpcClient): AuthoringClient {
     commitPublish: (params: CommitPublishParams) =>
       rpc.call<CommitPublishParams, PublishResult>(
         AUTHORING_RPC.commitPublish,
+        params,
+      ),
+    previewBundledHomebrew: () =>
+      rpc.call<Record<string, never>, BundledHomebrewInstallPlan>(
+        AUTHORING_RPC.previewBundledHomebrew,
+        {},
+      ),
+    installBundledHomebrew: (params: InstallBundledHomebrewParams) =>
+      rpc.call<InstallBundledHomebrewParams, BundledHomebrewInstallResult>(
+        AUTHORING_RPC.installBundledHomebrew,
         params,
       ),
     usages: (params: ContentUsagesParams) =>

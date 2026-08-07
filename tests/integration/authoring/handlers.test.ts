@@ -286,6 +286,42 @@ describe('catalog authoring RPC handlers', () => {
     });
   });
 
+  it('previews and atomically installs bundled homebrew through the public RPC surface', async () => {
+    // Measured alone at 1.94s; 20s retains contention headroom.
+    const rpc = await open();
+    client = new RpcClient(new WorkerTransport(rpc.context));
+    const authoring = createAuthoringClient(client);
+
+    const preview = await authoring.previewBundledHomebrew();
+    expect(preview.entries).toEqual([
+      expect.objectContaining({ name: 'Veteran', outcome: 'create' }),
+      expect.objectContaining({ name: 'Warrior of the Barbed Court', outcome: 'create' }),
+      expect.objectContaining({ name: 'Spell Student', outcome: 'create' }),
+    ]);
+    expect(await authoring.installBundledHomebrew({ token: preview.token })).toMatchObject({
+      kind: 'committed',
+      outcomes: [
+        { kind: 'create' },
+        { kind: 'create' },
+        { kind: 'create' },
+      ],
+    });
+    expect((await authoring.list()).published
+      .filter((entry) => ['Veteran', 'Warrior of the Barbed Court', 'Spell Student']
+        .includes(entry.name))
+      .map((entry) => ({ name: entry.name, catalog_layer: entry.catalog_layer })))
+      .toEqual([
+        { name: 'Spell Student', catalog_layer: 'external' },
+        { name: 'Veteran', catalog_layer: 'external' },
+        { name: 'Warrior of the Barbed Court', catalog_layer: 'external' },
+      ]);
+
+    expect(await rpc.call(AUTHORING_RPC.previewBundledHomebrew, { extra: true }))
+      .toMatchObject({ ok: false, error: { code: 'invalid_params' } });
+    expect(await rpc.call(AUTHORING_RPC.installBundledHomebrew, { token: '', extra: true }))
+      .toMatchObject({ ok: false, error: { code: 'invalid_params' } });
+  }, 20_000);
+
   it('retargets exact and reviewed references through client, worker, and service without silent divergence', async () => {
     const rpc = await open();
     client = new RpcClient(new WorkerTransport(rpc.context));

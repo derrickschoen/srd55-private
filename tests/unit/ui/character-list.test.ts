@@ -29,6 +29,7 @@ import type {
 import type { ContentFingerprintDigest } from '../../../src/catalog/content-identity';
 import type { ContentKey } from '../../../src/domain/ids';
 import type { PortableImportPlan } from '../../../src/backup/portable-content';
+import type { BundledHomebrewInstallPlan } from '../../../src/authoring/bundled-homebrew-installer';
 import {
   elementText,
   installInteractiveDocument,
@@ -697,6 +698,121 @@ describe('catalog and backup entry points', () => {
         descriptions_loaded: 0,
       }),
     ).toBe('0 created, 0 updated, 0 tombstoned, 0 subclasses created, 1 subclass updated');
+  });
+
+  it('previews and confirms bundled homebrew in the shared modal while keeping hostile names inert', async () => {
+    const fixture = services();
+    const plan: BundledHomebrewInstallPlan = {
+      token: 'bundled-plan' as ContentImportPlanToken,
+      inputHash: 'input',
+      graphHash: 'graph',
+      targetHash: 'target',
+      spellActivityChanges: [],
+      reviews: [],
+      outcomes: [
+        { id: 'subclass:bundled:veteran', kind: 'create', contentKey: '2024:content.subclass:veteran' as ContentKey },
+        { id: 'subclass:bundled:barbed', kind: 'create', contentKey: '2024:content.subclass:barbed' as ContentKey },
+        { id: 'subclass:bundled:student', kind: 'match', contentKey: '2024:content.subclass:student' as ContentKey },
+      ],
+      entries: [
+        { catalog_key: 'veteran', kind: 'subclass', name: 'Veteran', outcome: 'create', error: null },
+        { catalog_key: 'barbed', kind: 'subclass', name: '<img src=x onerror=alert(1)>', outcome: 'create', error: null },
+        { catalog_key: 'student', kind: 'subclass', name: 'Spell Student', outcome: 'matched_existing', error: null },
+      ],
+    };
+    const previewHolder: {
+      resolve: ((value: BundledHomebrewInstallPlan) => void) | null;
+    } = { resolve: null };
+    let commits = 0;
+    let persistedChanges = 0;
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const controls = createImportBackupControls({
+        rpc: null as never,
+        characters: [],
+        onPersistedChange: () => { persistedChanges += 1; },
+        services: {
+          ...fixture.value,
+          authoring: {
+            previewBundledHomebrew: () => new Promise((resolve) => {
+              previewHolder.resolve = resolve;
+            }),
+            installBundledHomebrew: async ({ token }) => {
+              expect(token).toBe(plan.token);
+              commits += 1;
+              return { kind: 'committed', outcomes: plan.outcomes };
+            },
+          },
+        },
+      });
+      document.body.append(controls.element);
+      const root = interactiveElement(controls.element);
+      const button = root.querySelectorAll('button').find((candidate) =>
+        candidate.textContent === 'Import bundled homebrew');
+      if (button === undefined) throw new Error('Bundled homebrew button missing.');
+      button.click();
+      expect(button.disabled).toBe(true);
+      expect(elementText(controls.element)).toContain('Previewing bundled homebrew…');
+
+      previewHolder.resolve?.(plan);
+      for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+      const dialogNode = root.querySelector('[data-testid="content-adoption-modal"]');
+      if (dialogNode === null) throw new Error('Shared adoption modal missing.');
+      const dialog = interactiveElement(dialogNode as unknown as HTMLElement);
+      expect(dialog.open).toBe(true);
+      expect(button.disabled).toBe(true);
+      expect(elementText(dialogNode as unknown as Node)).toContain('Veteran — subclass; external homebrew; create');
+      expect(elementText(dialogNode as unknown as Node)).toContain('<img src=x onerror=alert(1)>');
+      expect(dialogNode.querySelector('img')).toBeNull();
+
+      const confirm = dialog.querySelectorAll('button').find((candidate) =>
+        candidate.textContent === 'Import with these choices');
+      if (confirm === undefined) throw new Error('Bundled import confirmation missing.');
+      confirm.click();
+      for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+
+      expect(commits).toBe(1);
+      expect(persistedChanges).toBe(1);
+      expect(button.disabled).toBe(false);
+      expect(elementText(controls.element)).toContain(
+        'Bundled homebrew imported: 2 published, 1 matched existing.',
+      );
+      controls.cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('announces bundled-homebrew preview errors accessibly and restores the trigger', async () => {
+    const fixture = services();
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const controls = createImportBackupControls({
+        rpc: null as never,
+        characters: [],
+        onPersistedChange: () => undefined,
+        services: {
+          ...fixture.value,
+          authoring: {
+            previewBundledHomebrew: async () => { throw new Error('Catalog preview failed.'); },
+            installBundledHomebrew: async () => { throw new Error('Unexpected install.'); },
+          },
+        },
+      });
+      const root = interactiveElement(controls.element);
+      const button = root.querySelectorAll('button').find((candidate) =>
+        candidate.textContent === 'Import bundled homebrew');
+      if (button === undefined) throw new Error('Bundled homebrew button missing.');
+      button.click();
+      for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+      const status = root.querySelector('[role="alert"]');
+
+      expect(status?.textContent).toBe('Catalog preview failed.');
+      expect(button.disabled).toBe(false);
+      controls.cleanup();
+    } finally {
+      restoreDocument();
+    }
   });
 
   it('opens the real adoption dialog and routes its accepted choice through catalog commit', async () => {
