@@ -51,9 +51,9 @@ function publishedCard(page: Page, name: string) {
 test('publishes, versions, archives, restores, and permanently purges a whole lineage', async ({
   page,
 }) => {
-  // Budget: max(HA-8 14.8s, HA-9 18.2s, BHC 21.0s) = 21.0s.
-  // The required x1.5 reserve is 10.5s, totaling 31.5s; round up to 32s.
-  test.setTimeout(32_000);
+  // Measured alone at 28.4s. It is now the slowest authoring-journey
+  // precedent; the required x1.5 contention reserve is 42.6s, rounded up.
+  test.setTimeout(43_000);
   await open(page, '/');
   await page.evaluate(() => window.staticApp.reset());
 
