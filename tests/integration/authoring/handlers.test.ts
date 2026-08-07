@@ -924,6 +924,80 @@ describe('catalog authoring RPC handlers', () => {
       .toEqual([adjacent.id]);
   }, 20_000);
 
+  it('HA11-ARCHIVED-REPLACEMENT refuses stale and fresh replacement plans through the public worker route', async () => {
+    const rpc = await open();
+    client = new RpcClient(new WorkerTransport(rpc.context));
+    const authoring = createAuthoringClient(client);
+    const service = new CatalogAuthoringService(rpc.context.db, {
+      randomUuid: (() => {
+        let sequence = 0;
+        return () => `ha11-archived-replacement-${String(++sequence)}`;
+      })(),
+      now: () => '2042-08-11T12:13:14.000Z',
+    });
+    const predecessor = publishSpecies(service, 'Archived Replacement Old', 30);
+    const successor = publishSpecies(service, 'Archived Replacement New', 35);
+    const classOption = listGuidedClassOptions(rpc.context.db)[0];
+    if (classOption === undefined) throw new Error('Seeded class option missing.');
+    const character = createGuidedCharacter(
+      rpc.context.db,
+      { name: 'Archived Replacement Hero', class_content_key: classOption.content_key },
+      new CharacterCommandIntegrity('ha11-archived-replacement'),
+    );
+    applyGuidedOrigin(rpc.context.db, {
+      character_id: character.id,
+      kind: 'species',
+      content_key: predecessor.content_key,
+    });
+
+    const replacement = await authoring.previewReplacement({
+      old_content_key: predecessor.content_key,
+      new_content_key: successor.content_key,
+      character_id: character.id,
+    });
+    const archive = await authoring.previewArchiveSet({
+      content_key: predecessor.content_key,
+    });
+    await authoring.commitArchiveSet({ token: archive.token });
+
+    await expect(authoring.commitReplacement({
+      token: replacement.token,
+      decisions: replacement.review.map((review) => ({
+        candidate_content_key: review.candidate_content_key,
+        decision: 'match' as const,
+      })),
+      choices: [],
+    })).rejects.toMatchObject({
+      data: { reason: 'replacement_refused', refusal: 'archived_reference' },
+    });
+    rpc.context.db.exec(
+      'UPDATE catalog_content_identities SET archived_at = NULL WHERE content_key = ?',
+      [predecessor.content_key],
+    );
+    await expect(authoring.previewReplacement({
+      old_content_key: predecessor.content_key,
+      new_content_key: successor.content_key,
+      character_id: character.id,
+    })).rejects.toMatchObject({
+      data: { reason: 'replacement_refused', refusal: 'archived_reference' },
+    });
+    rpc.context.db.exec(
+      'UPDATE characters SET archived_at = NULL WHERE id = ?',
+      [character.id],
+    );
+    rpc.context.db.exec(
+      'UPDATE catalog_content_identities SET archived_at = ? WHERE content_key = ?',
+      ['2042-08-11T12:13:14.000Z', predecessor.content_key],
+    );
+    await expect(authoring.previewReplacement({
+      old_content_key: predecessor.content_key,
+      new_content_key: successor.content_key,
+      character_id: character.id,
+    })).rejects.toMatchObject({
+      data: { reason: 'replacement_refused', refusal: 'archived_reference' },
+    });
+  }, 20_000);
+
   it('HA11-ROUTE-ARCHIVE archives and restores one complete set with no partial path or adjacent deletion', async () => {
     const rpc = await open();
     client = new RpcClient(new WorkerTransport(rpc.context));
@@ -1061,6 +1135,29 @@ describe('catalog authoring RPC handlers', () => {
     rpc.context.db.exec(
       'UPDATE characters SET archived_at = ? WHERE id = ?',
       [archivedAt, second.id],
+    );
+    rpc.context.db.exec(
+      `UPDATE character_source_instances
+       SET source_definition_id = (
+         SELECT id FROM species_definitions WHERE content_key = ?
+       )
+       WHERE character_id = ? AND source_type = 'species' AND state = 'active'`,
+      [neighbour.content_key, first.id],
+    );
+    await expect(authoring.previewRestoreSet({ content_key: target.content_key }))
+      .rejects.toMatchObject({
+        message: expect.stringContaining(
+          `"Archive First" (character ${String(first.id)}) no longer references`,
+        ),
+        data: { reason: 'archive_set_refused', refusal: 'incomplete_archive_set' },
+      });
+    rpc.context.db.exec(
+      `UPDATE character_source_instances
+       SET source_definition_id = (
+         SELECT id FROM species_definitions WHERE content_key = ?
+       )
+       WHERE character_id = ? AND source_type = 'species' AND state = 'active'`,
+      [target.content_key, first.id],
     );
     const restore = await authoring.previewRestoreSet({ content_key: target.content_key });
     rpc.context.db.exec(

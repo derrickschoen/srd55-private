@@ -56,6 +56,7 @@ interface ArchiveManifestMemberRow {
   readonly current_character_revision: CharacterRevision | null;
   readonly current_archived_at: string | null;
   readonly character_exists: boolean;
+  readonly references_manifested_creation: boolean;
 }
 
 interface ArchiveSetTokenFacts {
@@ -110,6 +111,8 @@ function archiveManifestMemberRow(row: SqlRow): ArchiveManifestMemberRow {
     ) as CharacterRevision | null,
     current_archived_at: sqlNullableString(row, 'current_archived_at'),
     character_exists: sqlInteger(row, 'character_exists') === 1,
+    references_manifested_creation:
+      sqlInteger(row, 'references_manifested_creation') === 1,
   });
 }
 
@@ -235,7 +238,37 @@ export class HomebrewArchiveSetService {
               member.archived_at,
               character.revision AS current_character_revision,
               character.archived_at AS current_archived_at,
-              CASE WHEN character.id IS NULL THEN 0 ELSE 1 END AS character_exists
+              CASE WHEN character.id IS NULL THEN 0 ELSE 1 END AS character_exists,
+              CASE member.content_kind
+                WHEN 'species' THEN EXISTS (
+                  SELECT 1
+                  FROM character_source_instances AS source
+                  JOIN species_definitions AS definition
+                    ON definition.id = source.source_definition_id
+                  WHERE source.character_id = member.character_id
+                    AND source.source_type = 'species'
+                    AND source.state = 'active'
+                    AND definition.content_key = member.content_key
+                )
+                WHEN 'background' THEN EXISTS (
+                  SELECT 1
+                  FROM character_source_instances AS source
+                  JOIN background_definitions AS definition
+                    ON definition.id = source.source_definition_id
+                  WHERE source.character_id = member.character_id
+                    AND source.source_type = 'background'
+                    AND source.state = 'active'
+                    AND definition.content_key = member.content_key
+                )
+                WHEN 'subclass' THEN EXISTS (
+                  SELECT 1
+                  FROM character_class_levels AS level
+                  JOIN subclass_definitions AS definition
+                    ON definition.id = level.subclass_definition_id
+                  WHERE level.character_id = member.character_id
+                    AND definition.content_key = member.content_key
+                )
+              END AS references_manifested_creation
        FROM catalog_content_archive_members AS member
        LEFT JOIN characters AS character ON character.id = member.character_id
        WHERE member.content_kind = ? AND member.content_key = ?
@@ -287,6 +320,19 @@ export class HomebrewArchiveSetService {
         ).join(', ');
         throw new ArchiveSetLifecycleError(
           `The archived set cannot be restored because ${named} no longer exists.`,
+          { reason: 'archive_set_refused', refusal: 'incomplete_archive_set' },
+        );
+      }
+      const retargeted = archivedMembers.filter((member) =>
+        !member.references_manifested_creation
+      );
+      if (retargeted.length > 0) {
+        const named = retargeted.map((member) =>
+          `"${member.character_name}" (character ${String(member.character_id)})`
+        ).join(', ');
+        throw new ArchiveSetLifecycleError(
+          `The archived set cannot be restored because ${named} no longer ` +
+            'references the manifested creation.',
           { reason: 'archive_set_refused', refusal: 'incomplete_archive_set' },
         );
       }

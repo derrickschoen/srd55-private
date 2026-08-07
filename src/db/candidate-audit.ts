@@ -153,6 +153,7 @@ export const CONTAMINABLE_REFERENCES = FOREIGN_KEY_FACTS.filter(
  */
 const POLYMORPHIC_SOURCE_TABLE = 'character_source_instances' satisfies AnyTableName;
 const SAVE_POINT_TABLE = 'character_save_points' satisfies AnyTableName;
+const ARCHIVE_MEMBER_TABLE = 'catalog_content_archive_members' satisfies AnyTableName;
 
 function quoted(identifier: string): string {
   return `"${identifier.replaceAll('"', '""')}"`;
@@ -190,6 +191,100 @@ function auditIntegrity(db: Database): void {
       `Candidate database failed PRAGMA foreign_key_check in table ` +
         `${String(violation.table)} (rowid ${String(violation.rowid)}).`,
     );
+  }
+}
+
+/**
+ * An archive manifest intentionally has no character foreign key: deleting an
+ * archived character must leave the promise behind so restore can name the
+ * missing member. Whole-image import therefore validates the semantics SQLite
+ * cannot express. A missing id is credible deletion evidence only when the
+ * `characters` AUTOINCREMENT allocator has issued at least that id; an id above
+ * its durable high-water mark has never been allocated by this database.
+ */
+function auditArchiveManifests(db: Database): void {
+  const characterHighWater = Number(db.selectValue(
+    `SELECT coalesce(
+       (SELECT seq FROM sqlite_sequence WHERE name = 'characters'), 0
+     )`,
+  ));
+  const rows: ReadonlyArray<Record<string, SqlValue>> = db.selectObjects(
+    `SELECT member.rowid AS row_id,
+            member.content_kind,
+            member.content_key,
+            member.character_id,
+            member.archived_at AS member_archived_at,
+            identity.archived_at AS content_archived_at,
+            character.id AS current_character_id,
+            character.archived_at AS character_archived_at,
+            CASE member.content_kind
+              WHEN 'species' THEN EXISTS (
+                SELECT 1
+                FROM character_source_instances AS source
+                JOIN species_definitions AS definition
+                  ON definition.id = source.source_definition_id
+                WHERE source.character_id = member.character_id
+                  AND source.source_type = 'species'
+                  AND source.state = 'active'
+                  AND definition.content_key = member.content_key
+              )
+              WHEN 'background' THEN EXISTS (
+                SELECT 1
+                FROM character_source_instances AS source
+                JOIN background_definitions AS definition
+                  ON definition.id = source.source_definition_id
+                WHERE source.character_id = member.character_id
+                  AND source.source_type = 'background'
+                  AND source.state = 'active'
+                  AND definition.content_key = member.content_key
+              )
+              WHEN 'subclass' THEN EXISTS (
+                SELECT 1
+                FROM character_class_levels AS level
+                JOIN subclass_definitions AS definition
+                  ON definition.id = level.subclass_definition_id
+                WHERE level.character_id = member.character_id
+                  AND definition.content_key = member.content_key
+              )
+            END AS references_manifested_creation
+     FROM ${quoted(ARCHIVE_MEMBER_TABLE)} AS member
+     JOIN catalog_content_identities AS identity
+       ON identity.content_kind = member.content_kind
+      AND identity.content_key = member.content_key
+     LEFT JOIN characters AS character ON character.id = member.character_id
+     ORDER BY member.content_kind, member.content_key, member.character_id`,
+  );
+  for (const row of rows) {
+    const label = `Candidate database ${ARCHIVE_MEMBER_TABLE} rowid ${String(
+      row.row_id,
+    )}`;
+    if (row.content_archived_at !== row.member_archived_at) {
+      throw new CandidateAuditError(
+        `${label} does not match the manifested creation archive timestamp.`,
+      );
+    }
+    const characterId = Number(row.character_id);
+    if (row.current_character_id === null) {
+      if (characterId > characterHighWater) {
+        throw new CandidateAuditError(
+          `${label} names character ${String(characterId)}, which this database ` +
+            'has never allocated.',
+        );
+      }
+      continue;
+    }
+    if (row.character_archived_at !== row.member_archived_at) {
+      throw new CandidateAuditError(
+        `${label} names character ${String(characterId)} with a different ` +
+          'archive timestamp.',
+      );
+    }
+    if (Number(row.references_manifested_creation) !== 1) {
+      throw new CandidateAuditError(
+        `${label} names character ${String(characterId)}, which does not ` +
+          'reference the manifested creation.',
+      );
+    }
   }
 }
 
@@ -838,6 +933,7 @@ function auditSavePointSnapshots(db: Database): void {
  */
 export const AUDIT_PASSES = [
   { name: 'integrity', run: auditIntegrity },
+  { name: 'archive-manifests', run: auditArchiveManifests },
   { name: 'character-ownership', run: auditCharacterOwnership },
   { name: 'cross-character-references', run: auditCrossCharacterReferences },
   { name: 'polymorphic-sources', run: auditPolymorphicSources },

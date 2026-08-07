@@ -769,6 +769,7 @@ export type AuthoringErrorData =
       readonly refusal:
         | 'ambiguous_target'
         | 'target_integrity_refused'
+        | 'archived_reference'
         | 'character_reference_not_found'
         | 'unsupported_character_choices'
         | 'wrong_parent_class'

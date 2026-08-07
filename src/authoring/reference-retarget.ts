@@ -100,13 +100,14 @@ function characterReference(
   },
 ): CharacterReference {
   const identity = db.one(
-    `SELECT content_kind, catalog_layer
+    `SELECT content_kind, catalog_layer, archived_at
      FROM catalog_content_identities
      WHERE content_key = ? AND content_kind IN ('species', 'background', 'subclass')`,
     [input.oldContentKey],
     (row) => ({
       kind: authoredKind(sqlString(row, 'content_kind')),
       layer: sqlString(row, 'catalog_layer'),
+      archivedAt: sqlNullableString(row, 'archived_at'),
     }),
   );
   if (identity === null) {
@@ -119,17 +120,30 @@ function characterReference(
       reason: 'invalid_reference',
     });
   }
+  if (identity.archivedAt !== null) {
+    throw new ReferenceRetargetError('Archived content cannot be retargeted.', {
+      reason: 'replacement_refused',
+      refusal: 'archived_reference',
+    });
+  }
   const character = db.one(
-    'SELECT name, revision FROM characters WHERE id = ?',
+    'SELECT name, revision, archived_at FROM characters WHERE id = ?',
     [input.characterId],
     (row) => ({
       name: sqlString(row, 'name'),
       revision: sqlInteger(row, 'revision') as CharacterRevision,
+      archivedAt: sqlNullableString(row, 'archived_at'),
     }),
   );
   if (character === null) {
     throw new ReferenceRetargetError('The character was not found.', {
       reason: 'character_not_found',
+    });
+  }
+  if (character.archivedAt !== null) {
+    throw new ReferenceRetargetError('Archived characters cannot be retargeted.', {
+      reason: 'replacement_refused',
+      refusal: 'archived_reference',
     });
   }
   const definitionTable = identity.kind === 'species'
