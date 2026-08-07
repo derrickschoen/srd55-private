@@ -7,6 +7,14 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D216 — OWNER: EK and AT are dropped entirely (2026-08-06)
+
+Completes D215's SRD-only seed. The two legacy non-SRD subclasses leave the
+seed AND the repo; their third-caster spell-slot test coverage converts
+onto the Barbed Court Monk (also third_down) as strict-superset
+replacements, not deletions. Cleanest D59 posture. D60 applies: no user
+data exists.
+
 ## D215 — OWNER: SRD-only default seed; bundled homebrew is click-to-import; Veteran + Barbed Court Monk included (2026-08-06)
 
 Refines D211's fresh-database story. (1) Default boot seeds SRD content
