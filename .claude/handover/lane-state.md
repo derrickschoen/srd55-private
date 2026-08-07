@@ -23,7 +23,62 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-07-b (newest - read first)
+## RESTART POINT 2026-08-07-c (newest - read first)
+MAIN 9578ea2 (mirror pushed). FLOORS: vitest 257/4,186 all-pass; PW 131
+pool; build 0; migrations 0000-0039 FROZEN on main (HA-11 holds an
+unmerged 0040). FORTY-TWO merges. Rulings through D225.
+
+MERGED SINCE 08-07-b:
+ - SRD-ONLY (9578ea2, 42nd): boot seeds SRD only; EK/AT removed from the
+   repo; bundled Veteran retired; third-caster coverage on Spell
+   Student. Checksum-frozen SEMANTIC migration (NOT a schema mint) that
+   suspends/restores 0039's guard in one EXCLUSIVE transaction and
+   deletes attached characters per D217.
+
+THE FINDINGS THAT MATTERED (full detail in the merge message):
+ - A dangling reference the FK check STRUCTURALLY CANNOT SEE: changing
+   away from a subclass tombstones its character_source_instances row,
+   and source_definition_id is polymorphic with NO FK. Hidden because
+   the fixture used raw SQL instead of the real update-class command.
+   LESSON: a fixture that bypasses the production writer cannot see what
+   the production writer creates.
+ - Surviving characters kept unusable undo history (purged narrowly).
+ - A "strict superset" conversion that silently lost its discriminating
+   power: the build-report test proves the report reads a PERSISTED slot
+   table, and that only worked because EK's stored 4/2 differed from the
+   derived 3. Spell Student's D223 table EQUALS the derivation, so the
+   branch could have been deleted with the test still green. Restored
+   with an authored "Persistent Arcanist" fixture.
+ - The conversion ledger came from the design pass, not from the test
+   tree, and missed migrations.test.ts entirely.
+
+BOOT-DESTABILISATION QUESTION: CLOSED. Three specs failed an earlier run
+with "Execution context was destroyed"; because this lane changes boot
+and D225 flags boot as overloaded, they were NOT written off. All three
+passed the clean run (17.9s / 18.1s / 27.6s). The migration does not
+destabilise boot.
+
+IN FLIGHT: HA-11 (wt/ha11). Deliverables 1-4 and 6 done; DELIVERABLE 5
+(purge) IS NOW UNBLOCKED — SRD-ONLY's guard-suspension mechanism is on
+main, and HA-11's brief requires REUSING it rather than writing a second
+one. Blocker-resolution round running (5 findings from the cap round).
+Carries mint 0040 with a fully re-run census (8 of 9 inventories moved).
+SUPERVISOR THREAT-MODEL RULING recorded in that brief: the candidate
+audit catches CORRUPTION, not forgery — a browser-local app has no
+authenticity boundary on imported images, so the audit's contract text
+was wrong, not its check.
+
+QUEUE: HA-11 (finish purge after the blocker round) -> HA-12 -> D213
+hardening (readiness/boot per D225, plus the mutation-suite and a11y
+work).
+
+OPEN OWNER ITEM: EK/AT git-history rewrite still undecided. The
+working-tree removal is now DONE and merged under D216; only the history
+question is parked.
+
+WORKTREES: wt/party (owner's - never prune), wt/ha11 (active).
+
+## RESTART POINT 2026-08-07-b (superseded by 08-07-c)
 MAIN f9d5af3 (mirror pushed). FLOORS: vitest 256/4,181 all-pass; PW 131
 pool; build 0; migrations 0000-0039 FROZEN (next free mint 0040).
 FORTY-ONE merges. Rulings through D224.
