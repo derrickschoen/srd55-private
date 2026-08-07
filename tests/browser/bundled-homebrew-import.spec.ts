@@ -105,7 +105,7 @@ test('imports bundled homebrew through publish, applies derived third-caster slo
   await page.getByRole('link', { name: '← Characters', exact: true }).click();
   await globalReady(page);
   await page.getByRole('link', { name: 'Create a character', exact: true }).click();
-  await page.getByRole('button', { name: 'Fighter Hit die: d10', exact: true }).click();
+  await page.getByRole('button', { name: 'Fighter', exact: true }).click();
   await page.getByRole('textbox', { name: 'Character name', exact: true })
     .fill('Bundled Spell Student');
   await page.getByRole('button', { name: 'Create character', exact: true }).click();
