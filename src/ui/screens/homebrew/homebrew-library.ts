@@ -465,6 +465,28 @@ async function renderArchiveRoute(
             status.setAttribute('role', 'alert');
           });
       }));
+      const purge = element('button', {
+        className: 'button-danger',
+        text: 'Permanently purge entire lineage',
+        attributes: {
+          type: 'button',
+          'aria-label': `Permanently purge ${set.content_name} and its entire version lineage`,
+        },
+      });
+      cleanups.push(listen(purge, 'click', () => {
+        purge.disabled = true;
+        restore.disabled = true;
+        status.textContent = 'Permanently purging the complete version lineage…';
+        void client.purgeArchivedSet({
+          content_kind: set.content_kind,
+          content_key: set.content_key,
+        }).then(render).catch((error: unknown) => {
+          purge.disabled = false;
+          restore.disabled = false;
+          status.textContent = error instanceof Error ? error.message : String(error);
+          status.setAttribute('role', 'alert');
+        });
+      }));
       list.append(element('article', { className: 'homebrew-card panel' }, [
         heading,
         badge(catalogLayerLabel(set.content_catalog_layer), 'homebrew'),
@@ -472,6 +494,10 @@ async function renderArchiveRoute(
         element('h4', { text: 'Characters in this set' }),
         characterList(set.characters),
         restore,
+        element('p', {
+          text: 'Permanent purge removes every predecessor and successor version and all characters attached to that lineage.',
+        }),
+        purge,
       ]));
     }
     status.textContent = 'Archive loaded.';

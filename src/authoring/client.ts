@@ -20,6 +20,7 @@ import {
   type PublishPlanToken,
   type PublishPreview,
   type PublishResult,
+  type PermanentPurgeResult,
   type ReplacementChoiceSelection,
   type ReplacementDecision,
   type ReplacementPlan,
@@ -50,6 +51,7 @@ export const AUTHORING_RPC = Object.freeze({
   listArchivedSets: 'authoring.listArchivedSets',
   previewRestoreSet: 'authoring.previewRestoreSet',
   commitRestoreSet: 'authoring.commitRestoreSet',
+  purgeArchivedSet: 'authoring.purgeArchivedSet',
   previewBundledHomebrew: 'authoring.previewBundledHomebrew',
   installBundledHomebrew: 'authoring.installBundledHomebrew',
 } as const);
@@ -124,6 +126,11 @@ export interface CommitArchiveSetParams {
   readonly token: ArchiveSetPlan['token'];
 }
 
+export interface PermanentPurgeParams {
+  readonly content_kind: AuthoredContentKind;
+  readonly content_key: ContentKey;
+}
+
 export interface AuthoringClient {
   list(): Promise<AuthoringLibrary>;
   backgroundReferences(): Promise<BackgroundAuthoringReferences>;
@@ -151,6 +158,7 @@ export interface AuthoringClient {
   listArchivedSets(): Promise<readonly ArchivedHomebrewSet[]>;
   previewRestoreSet(params: ContentLifecycleParams): Promise<ArchiveSetPlan>;
   commitRestoreSet(params: CommitArchiveSetParams): Promise<ArchiveSetResult>;
+  purgeArchivedSet(params: PermanentPurgeParams): Promise<PermanentPurgeResult>;
 }
 
 export interface BundledHomebrewClient {
@@ -263,6 +271,11 @@ export function createAuthoringClient(
     commitRestoreSet: (params: CommitArchiveSetParams) =>
       rpc.call<CommitArchiveSetParams, ArchiveSetResult>(
         AUTHORING_RPC.commitRestoreSet,
+        params,
+      ),
+    purgeArchivedSet: (params: PermanentPurgeParams) =>
+      rpc.call<PermanentPurgeParams, PermanentPurgeResult>(
+        AUTHORING_RPC.purgeArchivedSet,
         params,
       ),
   });

@@ -12,6 +12,7 @@ import {
   type PreviewPublishParams,
   type PreviewReplacementParams,
   type PreviewReplacementSetParams,
+  type PermanentPurgeParams,
   type ReadDraftParams,
   type SaveDraftParams,
 } from '../../authoring/client';
@@ -190,6 +191,14 @@ function isContentLifecycleParams(value: unknown): value is ContentLifecyclePara
 function isCommitArchiveSetParams(value: unknown): value is CommitArchiveSetParams {
   return isRecord(value) && hasExactKeys(value, ['token']) &&
     typeof value.token === 'string' && value.token.length > 0;
+}
+
+function isPermanentPurgeParams(value: unknown): value is PermanentPurgeParams {
+  return isRecord(value) &&
+    hasExactKeys(value, ['content_kind', 'content_key']) &&
+    (value.content_kind === 'species' || value.content_kind === 'background' ||
+      value.content_kind === 'subclass') &&
+    isBoundedKey(value.content_key);
 }
 
 function authoringError(error: unknown): never {
@@ -396,6 +405,20 @@ export const handlers: readonly RpcHandler[] = [
     ({ db }, params) => {
       try {
         return new HomebrewArchiveSetService(db).commitRestore(params.token);
+      } catch (error) {
+        return authoringError(error);
+      }
+    },
+  ),
+  defineRpcHandler(
+    AUTHORING_RPC.purgeArchivedSet,
+    isPermanentPurgeParams,
+    ({ db }, params) => {
+      try {
+        return new HomebrewArchiveSetService(db).purgeArchived(
+          params.content_kind,
+          params.content_key,
+        );
       } catch (error) {
         return authoringError(error);
       }

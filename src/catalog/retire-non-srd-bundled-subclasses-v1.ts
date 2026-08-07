@@ -1,4 +1,5 @@
 import type { DatabaseContext } from '../db/database';
+import { withCatalogLineageDeleteGuardSuspended } from './catalog-lineage-delete-guard';
 
 export const RETIRED_BUNDLED_SUBCLASS_CONTENT_KEYS = Object.freeze([
   '2024:subclass:ek',
@@ -124,25 +125,17 @@ export function retireNonSrdBundledSubclassesV1(db: DatabaseContext): void {
     keys,
   );
 
-  const lineageDeleteGuard = db.scalar<string>(
-    `SELECT sql FROM sqlite_schema
-      WHERE type = 'trigger'
-        AND name = 'catalog_content_supersessions_refuse_delete_before_delete'`,
-  );
-  if (lineageDeleteGuard === null) {
-    throw new Error('Catalog supersession delete guard is missing.');
-  }
-  db.exec('DROP TRIGGER catalog_content_supersessions_refuse_delete_before_delete');
-  db.exec(
-    `DELETE FROM catalog_content_supersessions
-      WHERE content_kind = 'subclass'
-        AND (
-          superseded_content_key IN (${placeholders})
-          OR successor_content_key IN (${placeholders})
-        )`,
-    [...keys, ...keys],
-  );
-  db.exec(lineageDeleteGuard);
+  withCatalogLineageDeleteGuardSuspended(db, () => {
+    db.exec(
+      `DELETE FROM catalog_content_supersessions
+        WHERE content_kind = 'subclass'
+          AND (
+            superseded_content_key IN (${placeholders})
+            OR successor_content_key IN (${placeholders})
+          )`,
+      [...keys, ...keys],
+    );
+  });
 
   db.exec(
     `DELETE FROM subclass_definitions

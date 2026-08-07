@@ -35,7 +35,7 @@ export const CATALOG_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
       projectorScheme: CONTENT_FINGERPRINT_SCHEME_V1,
       source: retirementSource,
       checksum:
-        '501bb363cd32f4f48a230b5771761670492bc20a975c38598601784e9d74b563',
+        '75f251741104d3d358173e3633d3ac6b7d91d9fb8efc0fb22018e29fcfecacf9',
       run: retireNonSrdBundledSubclassesV1,
     }),
   ]);

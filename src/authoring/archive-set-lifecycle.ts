@@ -8,6 +8,7 @@ import {
   type SqlRow,
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
+import { withCatalogLineageDeleteGuardSuspended } from '../catalog/catalog-lineage-delete-guard';
 import {
   catalogLayerDisclosure,
   type CatalogLayerDisclosure,
@@ -21,6 +22,7 @@ import type {
   ArchiveSetResult,
   AuthoredContentKind,
   AuthoringErrorData,
+  PermanentPurgeResult,
 } from './contracts';
 import type { ArchiveSetPlanToken } from './ids';
 
@@ -529,6 +531,223 @@ export class HomebrewArchiveSetService {
       throw new ArchiveSetLifecycleError('The restore-set transaction was refused.', {
         reason: 'archive_set_refused', refusal: 'commit_failed',
       }, { cause: error });
+    }
+  }
+
+  /**
+   * D214's sole permanent-deletion path. The recursive scope follows both
+   * directions of every same-kind edge, so starting at an endpoint or a middle
+   * version identifies the same complete connected lineage component.
+   */
+  purgeArchived(
+    contentKind: AuthoredContentKind,
+    contentKey: ContentKey,
+  ): PermanentPurgeResult {
+    try {
+      return this.db.transaction(() => {
+        const target = this.db.oneRaw(
+          `SELECT content_kind, catalog_layer, archived_at
+             FROM catalog_content_identities
+            WHERE content_key = ?`,
+          [contentKey],
+        );
+        if (target === null) {
+          this.#assertForeignKeys();
+          return Object.freeze({
+            requested_content_key: contentKey,
+            content_kind: contentKind,
+            purged_content_keys: Object.freeze([]),
+            purged_character_ids: Object.freeze([]),
+          });
+        }
+        if (
+          target.content_kind !== contentKind ||
+          target.catalog_layer !== 'external' ||
+          typeof target.archived_at !== 'string'
+        ) {
+          throw new ArchiveSetLifecycleError(
+            'Permanent purge is available only for an archived external creation.',
+            { reason: 'archive_set_refused', refusal: 'purge_requires_archive' },
+          );
+        }
+
+        this.db.exec(
+          `CREATE TEMP TABLE ha11_catalog_lineage_purge_scope (
+             content_key TEXT PRIMARY KEY NOT NULL
+           ) WITHOUT ROWID`,
+        );
+        this.db.exec(
+          `WITH RECURSIVE lineage(content_key) AS (
+             VALUES (?)
+             UNION
+             SELECT edge.superseded_content_key
+               FROM catalog_content_supersessions AS edge
+               JOIN lineage ON lineage.content_key = edge.successor_content_key
+              WHERE edge.content_kind = ?
+             UNION
+             SELECT edge.successor_content_key
+               FROM catalog_content_supersessions AS edge
+               JOIN lineage ON lineage.content_key = edge.superseded_content_key
+              WHERE edge.content_kind = ?
+           )
+           INSERT INTO ha11_catalog_lineage_purge_scope (content_key)
+           SELECT content_key FROM lineage`,
+          [contentKey, contentKind, contentKind],
+        );
+
+        const purgedContentKeys = Object.freeze(
+          this.db.allRaw(
+            `SELECT content_key FROM ha11_catalog_lineage_purge_scope
+             ORDER BY content_key`,
+          ).map((row) => {
+            if (typeof row.content_key !== 'string') {
+              throw new TypeError('Lineage scope contains an invalid content key.');
+            }
+            return row.content_key as ContentKey;
+          }),
+        );
+        const definitionTable = contentKind === 'species'
+          ? 'species_definitions'
+          : contentKind === 'background'
+          ? 'background_definitions'
+          : 'subclass_definitions';
+        const subclassAttachment = contentKind === 'subclass'
+          ? `UNION
+             SELECT level.character_id
+               FROM character_class_levels AS level
+               JOIN subclass_definitions AS definition
+                 ON definition.id = level.subclass_definition_id
+               JOIN ha11_catalog_lineage_purge_scope AS scope
+                 ON scope.content_key = definition.content_key`
+          : '';
+        const purgedCharacterIds = Object.freeze(
+          this.db.allRaw(
+            `SELECT character.id
+               FROM characters AS character
+              WHERE character.id IN (
+                SELECT source.character_id
+                  FROM character_source_instances AS source
+                  JOIN ${definitionTable} AS definition
+                    ON definition.id = source.source_definition_id
+                  JOIN ha11_catalog_lineage_purge_scope AS scope
+                    ON scope.content_key = definition.content_key
+                 WHERE source.source_type = ?
+                ${subclassAttachment}
+                UNION
+                SELECT member.character_id
+                  FROM catalog_content_archive_members AS member
+                  JOIN ha11_catalog_lineage_purge_scope AS scope
+                    ON scope.content_key = member.content_key
+                 WHERE member.content_kind = ?
+              )
+              ORDER BY character.id`,
+            [contentKind, contentKind],
+          ).map((row) => {
+            if (typeof row.id !== 'number' || !Number.isSafeInteger(row.id)) {
+              throw new TypeError('Purge scope contains an invalid character id.');
+            }
+            return row.id as CharacterId;
+          }),
+        );
+
+        this.db.exec(
+          `DELETE FROM characters
+            WHERE id IN (${purgedCharacterIds.map(() => '?').join(', ') || 'NULL'})`,
+          [...purgedCharacterIds],
+        );
+        this.db.exec(
+          `DELETE FROM catalog_content_drafts
+            WHERE content_kind = ? AND base_content_key IN (
+              SELECT content_key FROM ha11_catalog_lineage_purge_scope
+            )`,
+          [contentKind],
+        );
+        this.db.exec(
+          `DELETE FROM catalog_content_match_decisions
+            WHERE content_kind = ? AND target_content_key IN (
+              SELECT content_key FROM ha11_catalog_lineage_purge_scope
+            )`,
+          [contentKind],
+        );
+
+        withCatalogLineageDeleteGuardSuspended(this.db, () => {
+          this.db.exec(
+            `DELETE FROM catalog_content_supersessions
+              WHERE content_kind = ? AND (
+                superseded_content_key IN (
+                  SELECT content_key FROM ha11_catalog_lineage_purge_scope
+                ) OR successor_content_key IN (
+                  SELECT content_key FROM ha11_catalog_lineage_purge_scope
+                )
+              )`,
+            [contentKind],
+          );
+        });
+
+        if (contentKind === 'species') {
+          this.#deleteContentGraph('species_templates');
+          this.#deleteContentGraph('species_definitions');
+        } else if (contentKind === 'background') {
+          this.#deleteContentGraph('background_templates');
+          this.#deleteContentGraph('background_definitions');
+        } else {
+          this.#deleteContentGraph('subclass_definitions');
+        }
+        for (const table of [
+          'catalog_content_archive_members',
+          'catalog_content_aliases',
+          'catalog_content_fingerprints',
+        ] as const) {
+          this.db.exec(
+            `DELETE FROM ${table}
+              WHERE content_kind = ? AND content_key IN (
+                SELECT content_key FROM ha11_catalog_lineage_purge_scope
+              )`,
+            [contentKind],
+          );
+        }
+        this.db.exec(
+          `DELETE FROM catalog_content_identities
+            WHERE content_kind = ? AND content_key IN (
+              SELECT content_key FROM ha11_catalog_lineage_purge_scope
+            )`,
+          [contentKind],
+        );
+
+        this.db.exec('DROP TABLE ha11_catalog_lineage_purge_scope');
+        this.#assertForeignKeys();
+        return Object.freeze({
+          requested_content_key: contentKey,
+          content_kind: contentKind,
+          purged_content_keys: purgedContentKeys,
+          purged_character_ids: purgedCharacterIds,
+        });
+      }, 'EXCLUSIVE');
+    } catch (error) {
+      if (error instanceof ArchiveSetLifecycleError) throw error;
+      throw new ArchiveSetLifecycleError(
+        'The permanent purge transaction was refused.',
+        { reason: 'archive_set_refused', refusal: 'commit_failed' },
+        { cause: error },
+      );
+    }
+  }
+
+  #deleteContentGraph(table: string): void {
+    this.db.exec(
+      `DELETE FROM ${table}
+        WHERE content_key IN (
+          SELECT content_key FROM ha11_catalog_lineage_purge_scope
+        )`,
+    );
+  }
+
+  #assertForeignKeys(): void {
+    const violation = this.db.connection.selectObject('PRAGMA foreign_key_check');
+    if (violation !== undefined) {
+      throw new Error(
+        `Permanent purge foreign-key check failed for table ${String(violation.table)}.`,
+      );
     }
   }
 

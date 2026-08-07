@@ -456,6 +456,13 @@ export interface ArchiveSetResult {
   readonly character_ids: readonly CharacterId[];
 }
 
+export interface PermanentPurgeResult {
+  readonly requested_content_key: ContentKey;
+  readonly content_kind: AuthoredContentKind;
+  readonly purged_content_keys: readonly ContentKey[];
+  readonly purged_character_ids: readonly CharacterId[];
+}
+
 export interface BackgroundAuthoringReferenceOption {
   readonly content_key: ContentKey;
   readonly name: string;
@@ -785,6 +792,7 @@ export type AuthoringErrorData =
         | 'bundled_content'
         | 'already_archived_character'
         | 'incomplete_archive_set'
+        | 'purge_requires_archive'
         | 'commit_failed';
     }
   | {

@@ -171,6 +171,7 @@ function authoringClient(
     listArchivedSets: () => unused(),
     previewRestoreSet: () => unused(),
     commitRestoreSet: () => unused(),
+    purgeArchivedSet: () => unused(),
     ...overrides,
   };
 }
@@ -839,6 +840,7 @@ describe('HA-6 homebrew library routing and tabs', () => {
       deleteCleanup();
 
       const restoreCalls: unknown[] = [];
+      const purgeCalls: unknown[] = [];
       const archiveContext = context(
         `https://example.test${HOMEBREW_ARCHIVE_ROUTE}`,
         [],
@@ -868,6 +870,15 @@ describe('HA-6 homebrew library routing and tabs', () => {
               archived_at: null, character_ids: [23 as never],
             };
           },
+          purgeArchivedSet: async (params) => {
+            purgeCalls.push(params);
+            return {
+              requested_content_key: contentKey,
+              content_kind: 'species',
+              purged_content_keys: [contentKey],
+              purged_character_ids: [23 as never],
+            };
+          },
         }),
       });
       const archiveRoot = interactiveElement(archiveContext.root);
@@ -876,6 +887,10 @@ describe('HA-6 homebrew library routing and tabs', () => {
       );
       const labels = archiveRoot.querySelectorAll('button').map((button) => button.textContent);
       expect(labels).toContain('Restore creation and all listed characters');
+      expect(labels).toContain('Permanently purge entire lineage');
+      expect(elementText(archiveRoot as unknown as Node)).toContain(
+        'every predecessor and successor version',
+      );
       expect(labels.some((label) => label?.includes('Restore character'))).toBe(false);
       archiveRoot.querySelectorAll('button').find(
         (button) => button.textContent === 'Restore creation and all listed characters',
@@ -885,6 +900,14 @@ describe('HA-6 homebrew library routing and tabs', () => {
         ['preview', { content_key: contentKey }],
         ['commit', { token: 'restore-token' }],
       ]);
+      archiveRoot.querySelectorAll('button').find(
+        (button) => button.textContent === 'Permanently purge entire lineage',
+      )?.click();
+      await settle();
+      expect(purgeCalls).toEqual([{
+        content_kind: 'species',
+        content_key: contentKey,
+      }]);
       archiveCleanup();
     } finally {
       restoreDocument();

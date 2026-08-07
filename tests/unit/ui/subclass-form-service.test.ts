@@ -179,6 +179,7 @@ function serviceClient(
     listArchivedSets: () => Promise.reject(new Error('Unused archive list.')),
     previewRestoreSet: () => Promise.reject(new Error('Unused restore preview.')),
     commitRestoreSet: () => Promise.reject(new Error('Unused restore commit.')),
+    purgeArchivedSet: () => Promise.reject(new Error('Unused permanent purge.')),
     ...overrides,
   };
 }

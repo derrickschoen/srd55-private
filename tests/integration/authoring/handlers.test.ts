@@ -28,6 +28,7 @@ import { registerContentAlias } from '../../../src/catalog/content-registry';
 import { portableSourceContentImportNode } from '../../../src/catalog/source-content-importer';
 import { projectAuthoredContentAggregateV1 } from '../../../src/catalog/stored-authored-content-projector-v1';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
+import { DatabaseContext } from '../../../src/db/database';
 import type { CharacterId, ContentKey } from '../../../src/domain/ids';
 import { assertedExternalContentKey } from '../../../src/catalog/catalog-key';
 import { assignSpellSelection } from '../../../src/eligibility/spell-selection-assignment';
@@ -155,6 +156,100 @@ function publishSpecies(
     expected_revision: saved.revision,
   });
   return service.commitPublish({ token: preview.token, decisions: [] });
+}
+
+function publishSpeciesVersion(
+  service: CatalogAuthoringService,
+  baseContentKey: ContentKey,
+  name: string,
+  speed: number,
+) {
+  const created = service.createDraft({
+    content_kind: 'species',
+    base_content_key: baseContentKey,
+  });
+  const saved = service.saveDraft({
+    draft_uuid: created.draft_uuid,
+    expected_revision: created.revision,
+    document: completeSpecies(created, name, speed),
+  });
+  const preview = service.previewPublish({
+    draft_uuid: saved.draft_uuid,
+    expected_revision: saved.revision,
+  });
+  return service.commitPublish({ token: preview.token, decisions: [] });
+}
+
+function lineageDeleteGuard(db: DatabaseContext): string {
+  const sql = db.scalar<string>(
+    `SELECT sql FROM sqlite_schema
+      WHERE type = 'trigger'
+        AND name = 'catalog_content_supersessions_refuse_delete_before_delete'`,
+  );
+  if (sql === null) throw new Error('The 0039 lineage delete guard is missing.');
+  return sql;
+}
+
+class FailPermanentPurgeAfterGuardSuspensionDatabase extends DatabaseContext {
+  #guardWasDropped = false;
+  droppedAtDepth: number | null = null;
+  recreatedAtDepth: number | null = null;
+
+  override exec(
+    sql: string,
+    bind?: Parameters<DatabaseContext['exec']>[1],
+  ): ReturnType<DatabaseContext['exec']> {
+    if (
+      this.#guardWasDropped &&
+      sql.includes('DELETE FROM catalog_content_supersessions')
+    ) {
+      throw new Error('Injected permanent-purge failure after 0039 guard suspension.');
+    }
+    const result = super.exec(sql, bind);
+    if (
+      sql.trim() ===
+        'DROP TRIGGER catalog_content_supersessions_refuse_delete_before_delete'
+    ) {
+      this.#guardWasDropped = true;
+      this.droppedAtDepth = this.transactionDepth;
+    } else if (
+      this.#guardWasDropped &&
+      sql.includes(
+        'CREATE TRIGGER catalog_content_supersessions_refuse_delete_before_delete',
+      )
+    ) {
+      this.recreatedAtDepth = this.transactionDepth;
+    }
+    return result;
+  }
+}
+
+class PermanentPurgeGuardTrackingDatabase extends DatabaseContext {
+  #guardWasDropped = false;
+  droppedAtDepth: number | null = null;
+  recreatedAtDepth: number | null = null;
+
+  override exec(
+    sql: string,
+    bind?: Parameters<DatabaseContext['exec']>[1],
+  ): ReturnType<DatabaseContext['exec']> {
+    const result = super.exec(sql, bind);
+    if (
+      sql.trim() ===
+        'DROP TRIGGER catalog_content_supersessions_refuse_delete_before_delete'
+    ) {
+      this.#guardWasDropped = true;
+      this.droppedAtDepth = this.transactionDepth;
+    } else if (
+      this.#guardWasDropped &&
+      sql.includes(
+        'CREATE TRIGGER catalog_content_supersessions_refuse_delete_before_delete',
+      )
+    ) {
+      this.recreatedAtDepth = this.transactionDepth;
+    }
+    return result;
+  }
 }
 
 async function open(): Promise<RpcHarness> {
@@ -1346,5 +1441,363 @@ describe('catalog authoring RPC handlers', () => {
       { content_key: neighbour.content_key, archived_at: null },
       { content_key: target.content_key, archived_at: expect.any(String) },
     ].sort((left, right) => left.content_key.localeCompare(right.content_key)));
+  });
+
+  it('HA11-PERMANENT-PURGE purges a middle version whole while every named destructive-path control survives', async () => {
+    const rpc = await open();
+    client = new RpcClient(new WorkerTransport(rpc.context));
+    const authoring = createAuthoringClient(client);
+    const service = new CatalogAuthoringService(rpc.context.db, {
+      randomUuid: (() => {
+        let sequence = 0;
+        return () => `ha11-purge-${String(++sequence)}`;
+      })(),
+      now: () => '2042-08-13T14:15:16.000Z',
+    });
+    const classOption = listGuidedClassOptions(rpc.context.db)[0];
+    if (classOption === undefined) throw new Error('Seeded class option missing.');
+    const attach = (name: string, contentKey: ContentKey) => {
+      const character = createGuidedCharacter(
+        rpc.context.db,
+        { name, class_content_key: classOption.content_key },
+        new CharacterCommandIntegrity(`ha11-purge-${name}`),
+      );
+      applyGuidedOrigin(rpc.context.db, {
+        character_id: character.id,
+        kind: 'species',
+        content_key: contentKey,
+      });
+      return character;
+    };
+
+    const first = publishSpecies(service, 'Purge Version One', 30);
+    const firstCharacter = attach('Purge First Character', first.content_key);
+    const middle = publishSpeciesVersion(
+      service,
+      first.content_key,
+      'Purge Version Two',
+      35,
+    );
+    const middleCharacter = attach('Purge Middle Character', middle.content_key);
+    const last = publishSpeciesVersion(
+      service,
+      middle.content_key,
+      'Purge Version Three',
+      40,
+    );
+    const lastCharacter = attach('Purge Last Character', last.content_key);
+
+    // Mandatory control: a neighbouring standalone creation survives.
+    const neighbour = publishSpecies(service, 'Purge Neighbour', 45);
+    // Mandatory control: an unrelated character survives independently.
+    const unrelatedCharacter = createGuidedCharacter(
+      rpc.context.db,
+      { name: 'Purge Unrelated Character', class_content_key: classOption.content_key },
+      new CharacterCommandIntegrity('ha11-purge-unrelated-character'),
+    );
+    // Mandatory control: the same display name under a different key survives.
+    const sameNameDraft = service.createDraft({ content_kind: 'species' });
+    const sameNameAggregate = speciesDraftToAggregate(
+      rpc.context.db,
+      completeSpecies(sameNameDraft, 'Purge Version Two', 50),
+    );
+    const sameNameKey = 'expanded:other.owner:purge-version-two' as ContentKey;
+    const sameNameNode = portableSourceContentImportNode(
+      rpc.context.db,
+      sameNameAggregate,
+      sameNameKey,
+    );
+    const sameNamePlan = planContentImport(rpc.context.db, [sameNameNode]);
+    expect(commitContentImport(rpc.context.db, {
+      nodes: [sameNameNode], token: sameNamePlan.token,
+    }).kind).toBe('committed');
+    // Mandatory control: a different connected lineage chain survives whole.
+    const otherFirst = publishSpecies(service, 'Other Chain One', 25);
+    const otherLast = publishSpeciesVersion(
+      service,
+      otherFirst.content_key,
+      'Other Chain Two',
+      30,
+    );
+    const otherChainCharacter = attach(
+      'Other Chain Character',
+      otherLast.content_key,
+    );
+
+    registerContentAlias(rpc.context.db, {
+      kind: 'species',
+      aliasKey: 'expanded:legacy.owner:purge-version-one' as ContentKey,
+      contentKey: first.content_key,
+      aliasKind: 'declared-legacy',
+    });
+    service.createDraft({
+      content_kind: 'species',
+      base_content_key: last.content_key,
+    });
+    rpc.context.db.exec(
+      `INSERT INTO catalog_content_match_decisions (
+         content_kind, incoming_fingerprint_scheme,
+         incoming_fingerprint_digest, decision, target_content_key
+       ) VALUES ('species', 'content-v1', ?, 'match', ?)`,
+      ['a'.repeat(64), middle.content_key],
+    );
+
+    const archive = await authoring.previewArchiveSet({
+      content_key: middle.content_key,
+    });
+    expect(archive.characters.map((entry) => entry.character_id))
+      .toEqual([middleCharacter.id]);
+    await authoring.commitArchiveSet({ token: archive.token });
+
+    const purged = await authoring.purgeArchivedSet({
+      content_kind: 'species',
+      content_key: middle.content_key,
+    });
+    expect(purged.purged_content_keys).toEqual(
+      [first.content_key, middle.content_key, last.content_key].sort(),
+    );
+    expect(purged.purged_character_ids).toEqual(
+      [firstCharacter.id, middleCharacter.id, lastCharacter.id].sort((a, b) => a - b),
+    );
+
+    const purgedPlaceholders = purged.purged_content_keys.map(() => '?').join(', ');
+    for (const table of [
+      'catalog_content_identities',
+      'catalog_content_archive_members',
+      'catalog_content_aliases',
+      'catalog_content_fingerprints',
+      'species_definitions',
+      'species_templates',
+    ] as const) {
+      expect(rpc.context.db.scalar<number>(
+        `SELECT count(*) FROM ${table}
+          WHERE content_key IN (${purgedPlaceholders})`,
+        [...purged.purged_content_keys],
+      ), table).toBe(0);
+    }
+    expect(rpc.context.db.scalar<number>(
+      `SELECT count(*) FROM catalog_content_drafts
+        WHERE base_content_key IN (${purgedPlaceholders})`,
+      [...purged.purged_content_keys],
+    )).toBe(0);
+    expect(rpc.context.db.scalar<number>(
+      `SELECT count(*) FROM catalog_content_match_decisions
+        WHERE target_content_key IN (${purgedPlaceholders})`,
+      [...purged.purged_content_keys],
+    )).toBe(0);
+    expect(rpc.context.db.scalar<number>(
+      `SELECT count(*) FROM catalog_content_supersessions
+        WHERE superseded_content_key IN (${purgedPlaceholders})
+           OR successor_content_key IN (${purgedPlaceholders})`,
+      [...purged.purged_content_keys, ...purged.purged_content_keys],
+    )).toBe(0);
+
+    expect(rpc.context.db.allRaw(
+      `SELECT content_key FROM catalog_content_identities
+        WHERE content_key IN (?, ?, ?, ?) ORDER BY content_key`,
+      [neighbour.content_key, sameNameKey, otherFirst.content_key, otherLast.content_key],
+    )).toEqual(
+      [neighbour.content_key, sameNameKey, otherFirst.content_key, otherLast.content_key]
+        .sort().map((content_key) => ({ content_key })),
+    );
+    expect(rpc.context.db.allRaw(
+      'SELECT id FROM characters WHERE id IN (?, ?) ORDER BY id',
+      [unrelatedCharacter.id, otherChainCharacter.id],
+    )).toEqual(
+      [unrelatedCharacter.id, otherChainCharacter.id]
+        .sort((a, b) => a - b).map((id) => ({ id })),
+    );
+    expect(rpc.context.db.oneRaw(
+      `SELECT superseded_content_key, successor_content_key
+         FROM catalog_content_supersessions
+        WHERE superseded_content_key = ?`,
+      [otherFirst.content_key],
+    )).toEqual({
+      superseded_content_key: otherFirst.content_key,
+      successor_content_key: otherLast.content_key,
+    });
+    expect(rpc.context.db.connection.selectObject('PRAGMA foreign_key_check'))
+      .toBeUndefined();
+
+    // Idempotence: retrying the exact scoped request is a successful no-op.
+    await expect(authoring.purgeArchivedSet({
+      content_kind: 'species',
+      content_key: middle.content_key,
+    })).resolves.toEqual({
+      requested_content_key: middle.content_key,
+      content_kind: 'species',
+      purged_content_keys: [],
+      purged_character_ids: [],
+    });
+  }, 20_000);
+
+  it('HA11-PURGE-GUARD restores 0039 inside the outer transaction and leaves no suspension scope', async () => {
+    const rpc = await open();
+    const service = new CatalogAuthoringService(rpc.context.db);
+    const target = publishSpecies(service, 'Tracked Purge', 30);
+    const lifecycle = new HomebrewArchiveSetService(rpc.context.db);
+    lifecycle.commitArchive(lifecycle.previewArchive(target.content_key).token);
+    const guardBefore = lineageDeleteGuard(rpc.context.db);
+    const tracked = new PermanentPurgeGuardTrackingDatabase(rpc.context.db.connection);
+
+    new HomebrewArchiveSetService(tracked).purgeArchived('species', target.content_key);
+
+    expect(tracked.droppedAtDepth).toBe(1);
+    expect(tracked.recreatedAtDepth).toBe(1);
+    expect(tracked.transactionDepth).toBe(0);
+    expect(lineageDeleteGuard(rpc.context.db)).toBe(guardBefore);
+    expect(rpc.context.db.scalar<number>(
+      `SELECT count(*) FROM sqlite_temp_schema
+        WHERE type = 'table' AND name = 'ha11_catalog_lineage_purge_scope'`,
+    )).toBe(0);
+  });
+
+  it('HA11-PURGE-CONTENT-GRAPHS removes background and subclass graph roots and children', async () => {
+    const rpc = await open();
+    const db = rpc.context.db;
+    const backgroundKey = 'expanded:test.owner:purge-background' as ContentKey;
+    const subclassKey = 'expanded:test.owner:purge-subclass' as ContentKey;
+    db.exec(
+      `INSERT INTO catalog_content_identities (
+         content_key, content_kind, key_kind, catalog_layer, normalized_name,
+         archived_at
+       ) VALUES
+         (?, 'background', 'asserted', 'external', 'purge background',
+          '2042-08-13T14:15:16.000Z'),
+         (?, 'subclass', 'asserted', 'external', 'purge subclass',
+          '2042-08-13T14:15:16.000Z')`,
+      [backgroundKey, subclassKey],
+    );
+    db.exec(
+      `INSERT INTO background_definitions (
+         content_key, name, rules_edition
+       ) VALUES (?, 'Purge Background', 'expanded')`,
+      [backgroundKey],
+    );
+    db.exec(
+      `INSERT INTO background_templates (
+         content_key, rules_edition, name, ability_score_1, ability_score_2,
+         ability_score_3, feat_name, skill_proficiency_1,
+         skill_proficiency_2, tool_proficiency, equipment_option_a,
+         equipment_option_b
+       ) VALUES (
+         ?, 'expanded', 'Purge Background', 'Strength', 'Dexterity',
+         'Constitution', 'None', 'Athletics', 'Acrobatics', 'None', 'A', 'B'
+       )`,
+      [backgroundKey],
+    );
+    const backgroundTemplateId = db.scalar<number>(
+      'SELECT id FROM background_templates WHERE content_key = ?',
+      [backgroundKey],
+    );
+    if (backgroundTemplateId === null) throw new Error('Background fixture missing.');
+    db.exec(
+      `INSERT INTO background_template_effects (
+         background_template_id, sort_order, effect_kind,
+         speed_bonus_feet, label
+       ) VALUES (?, 1, 'speed', 5, 'Purge speed')`,
+      [backgroundTemplateId],
+    );
+    const fighterId = db.scalar<number>(
+      `SELECT id FROM class_definitions
+        WHERE content_key = '2024:class:fighter'`,
+    );
+    if (fighterId === null) throw new Error('Fighter fixture missing.');
+    db.exec(
+      `INSERT INTO subclass_definitions (
+         content_key, class_definition_id, name, rules_edition
+       ) VALUES (?, ?, 'Purge Subclass', 'expanded')`,
+      [subclassKey, fighterId],
+    );
+    const subclassId = db.scalar<number>(
+      'SELECT id FROM subclass_definitions WHERE content_key = ?',
+      [subclassKey],
+    );
+    if (subclassId === null) throw new Error('Subclass fixture missing.');
+    db.exec(
+      `INSERT INTO subclass_features (
+         subclass_definition_id, class_level, sort_order, name, description
+       ) VALUES (?, 3, 1, 'Purge Feature', 'Removed with its root.')`,
+      [subclassId],
+    );
+    db.exec(
+      `INSERT INTO subclass_progressions (
+         subclass_definition_id, class_level
+       ) VALUES (?, 3)`,
+      [subclassId],
+    );
+
+    const lifecycle = new HomebrewArchiveSetService(db);
+    expect(lifecycle.purgeArchived('background', backgroundKey).purged_content_keys)
+      .toEqual([backgroundKey]);
+    expect(lifecycle.purgeArchived('subclass', subclassKey).purged_content_keys)
+      .toEqual([subclassKey]);
+
+    expect(db.scalar<number>(
+      'SELECT count(*) FROM background_template_effects WHERE background_template_id = ?',
+      [backgroundTemplateId],
+    )).toBe(0);
+    expect(db.scalar<number>(
+      'SELECT count(*) FROM subclass_features WHERE subclass_definition_id = ?',
+      [subclassId],
+    )).toBe(0);
+    expect(db.scalar<number>(
+      'SELECT count(*) FROM subclass_progressions WHERE subclass_definition_id = ?',
+      [subclassId],
+    )).toBe(0);
+    expect(db.connection.selectObject('PRAGMA foreign_key_check')).toBeUndefined();
+  });
+
+  it('HA11-PURGE-GUARD-INJECTED rolls back a mid-suspension failure and restores the exact guard', async () => {
+    const rpc = await open();
+    const service = new CatalogAuthoringService(rpc.context.db);
+    const target = publishSpecies(service, 'Injected Purge', 30);
+    const lifecycle = new HomebrewArchiveSetService(rpc.context.db);
+    lifecycle.commitArchive(lifecycle.previewArchive(target.content_key).token);
+    const guardBefore = lineageDeleteGuard(rpc.context.db);
+    const injected = new FailPermanentPurgeAfterGuardSuspensionDatabase(
+      rpc.context.db.connection,
+    );
+
+    expect(() => new HomebrewArchiveSetService(injected).purgeArchived(
+      'species',
+      target.content_key,
+    )).toThrow('The permanent purge transaction was refused.');
+    expect(injected.droppedAtDepth).toBe(1);
+    expect(injected.recreatedAtDepth).toBe(1);
+    expect(injected.transactionDepth).toBe(0);
+    expect(lineageDeleteGuard(rpc.context.db)).toBe(guardBefore);
+    expect(rpc.context.db.oneRaw(
+      'SELECT content_key, archived_at FROM catalog_content_identities WHERE content_key = ?',
+      [target.content_key],
+    )).toEqual({ content_key: target.content_key, archived_at: expect.any(String) });
+    expect(rpc.context.db.scalar<number>(
+      `SELECT count(*) FROM sqlite_temp_schema
+        WHERE type = 'table' AND name = 'ha11_catalog_lineage_purge_scope'`,
+    )).toBe(0);
+  });
+
+  it('HA11-PURGE-FK-CHECK rolls back the purge after guard restoration when the final check fails', async () => {
+    const rpc = await open();
+    const service = new CatalogAuthoringService(rpc.context.db);
+    const target = publishSpecies(service, 'FK Purge', 30);
+    const lifecycle = new HomebrewArchiveSetService(rpc.context.db);
+    lifecycle.commitArchive(lifecycle.previewArchive(target.content_key).token);
+    const guardBefore = lineageDeleteGuard(rpc.context.db);
+    rpc.context.db.exec('PRAGMA foreign_keys = OFF');
+    rpc.context.db.exec(
+      `INSERT INTO character_rule_overrides (
+         character_id, rule_key, value
+       ) VALUES (999999, 'forced-purge-fk-failure', '1')`,
+    );
+    rpc.context.db.exec('PRAGMA foreign_keys = ON');
+
+    expect(() => lifecycle.purgeArchived('species', target.content_key))
+      .toThrow('The permanent purge transaction was refused.');
+    expect(lineageDeleteGuard(rpc.context.db)).toBe(guardBefore);
+    expect(rpc.context.db.scalar<string>(
+      'SELECT archived_at FROM catalog_content_identities WHERE content_key = ?',
+      [target.content_key],
+    )).not.toBeNull();
   });
 });
