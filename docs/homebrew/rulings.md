@@ -5,6 +5,49 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-06 — Barbed Court: Focus-to-slot conversion starts at Monk 6
+
+Owner's ruling, verbatim:
+
+> Make the Focus→slot conversion start at Monk 6
+
+Effect: conversion is a level-6 feature, not level 3 and not level 13. Combined
+with the earlier 13/17 caps the ladder is:
+
+| Monk level | Highest slot you can create | Focus cost |
+|---:|---:|---:|
+| 6 | 1st | 1 |
+| 7 | 2nd | 2 |
+| 13 | 3rd | 3 |
+| 17 | 5th | 5 |
+
+There is no 4th-level cap tier; 4th-level slots become creatable at Monk 17
+when the cap moves to 5th. Converted slots still grant no new preparation
+(ruling below) — they only upcast prepared level 1–4 spells.
+
+Consequences:
+
+- **This is a fifth thing landing at level 6**, alongside Court Forms, Warding
+  Image, Spellwoven Strike and Unshaken Aim. That is consistent with the
+  owner's directive to overload level 6 because most tables never reach 12+,
+  and conversion is arguably the heaviest of the five.
+- **Court Ward reopens as a question.** When conversion was assumed to start at
+  Monk 3, "cast *Shield* for 1 Focus" was simply the general rule and the
+  bespoke clause disappeared. With conversion at 6, levels 3–5 have no
+  conversion, so either *Shield*-for-Focus waits until Monk 6 (one rule, no
+  exception) or Court Ward returns as a level-3 exception. Recommended to the
+  owner: drop Court Ward — *Shield* is on the Court Spells list at Monk 3 and
+  castable with the two native slots, and Faces of the Court already carries
+  the level-3 defence budget.
+- **The rate remains the open exposure, and it now starts five levels earlier
+  than the earlier entry measured.** Focus equals Monk level over three
+  short-rest windows: 18/day at Monk 6 buying up to **18 first-level
+  castings** against a Wizard 6's seven (four slots plus Arcane Recovery); 21
+  at Monk 7 buying **10 second-level castings**; 39 at Monk 13 buying **13
+  third-level castings** against a Wizard 13's three. The *Shield* case is
+  self-limiting because the Reaction caps it at one per round regardless of
+  supply; the multi-target upcast case is not.
+
 ## 2026-08-06 — Barbed Court: the provocation's form is the player's choice, spoken or physical
 
 Owner's ruling, verbatim:
