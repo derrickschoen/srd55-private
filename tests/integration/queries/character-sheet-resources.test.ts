@@ -2,9 +2,12 @@ import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseContext } from '../../../src/db/database';
 import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
-import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
-import { seedClassResources } from '../../../src/rules/class-resources-srd';
-import { seedSheetContent } from '../../../src/rules/sheet-srd';
+import { applicationSeed } from '../../../src/db/bootstrap';
+import { BUNDLED_HOMEBREW_CATALOG } from '../../../src/authoring/bundled-homebrew-catalog';
+import {
+  commitBundledHomebrewInstall,
+  planBundledHomebrewInstall,
+} from '../../../src/authoring/bundled-homebrew-installer';
 import type { SheetResourceMaximum } from '../../../src/rules/sheet';
 import { openTestDatabase } from '../../helpers/open-db';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
@@ -17,9 +20,7 @@ describe('character sheet resource projection', () => {
   beforeEach(async () => {
     connection = await openTestDatabase();
     db = new DatabaseContext(connection);
-    seedClassProgressions(db);
-    seedSheetContent(db);
-    seedClassResources(db);
+    applicationSeed(db);
     builder = new CharacterSheetBuilder(db);
   });
 
@@ -144,7 +145,8 @@ describe('character sheet resource projection', () => {
     expect(computed(after, 'lay_on_hands')[0]?.maximum).toBe(25);
   });
 
-  it('combines shared slots, guards a sole subclass caster, and keeps Pact slots separate', () => {
+  // Measured alone at 2.2s; 20s retains contention headroom.
+  it('combines shared slots, guards a sole published subclass caster, and keeps Pact slots separate', () => {
     const multiclass = character('Spell resources', [
       { name: 'Wizard', level: 3 },
       { name: 'Cleric', level: 2 },
@@ -168,8 +170,16 @@ describe('character sheet resource projection', () => {
       ]),
     ).toEqual([[2, 2]]);
 
+    const catalog = BUNDLED_HOMEBREW_CATALOG.filter(
+      (entry) => entry.catalog_key === 'spell-student',
+    );
+    const plan = planBundledHomebrewInstall(db, catalog);
+    expect(commitBundledHomebrewInstall(db, plan.token, catalog)).toMatchObject({
+      kind: 'committed',
+      outcomes: [{ kind: 'create', contentKey: '2024:content.subclass:spell-student' }],
+    });
     const subclass = character('Subclass caster', [
-      { name: 'Fighter', level: 3, subclass: 'EK' },
+      { name: 'Fighter', level: 3, subclass: 'Spell Student' },
     ]);
     expect(
       computed(builder.build(subclass).resources, 'spell_slot').map((entry) => [
@@ -177,7 +187,7 @@ describe('character sheet resource projection', () => {
         entry.maximum,
       ]),
     ).toEqual([[1, 2]]);
-  });
+  }, 20_000);
 
   it('keeps unknown catalogs, missing rows, invalid formulas, and invalid spell content distinct', () => {
     const barbarian = character('Missing ladder', [

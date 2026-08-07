@@ -33,10 +33,9 @@ import { projectStoredContentV1 } from './stored-content-projector-v1';
  * `subclass_definitions` HAS NEITHER, and the difference is not cosmetic:
  *
  *  1. There is no `provenance` column, so a sweep would have nothing to scope
- *     itself by. Unlike spells — which this application bundles NONE of, by
- *     `src/db/bootstrap.ts` — the bundled SRD subclasses live in THIS table,
- *     beside any imported one. A `NOT IN (seen)` sweep would take out
- *     `2024:subclass:ek`.
+ *     itself by. Bundled SRD subclasses live in THIS table beside any imported
+ *     one. A `NOT IN (seen)` sweep would take out
+ *     `2024:subclass:champion`.
  *  2. There is no `is_active` column, so removal would have to be a hard
  *     DELETE. `character_class_levels` holds a composite foreign key to this
  *     table with NO `ON DELETE` clause, so deleting a subclass a character has
@@ -349,9 +348,9 @@ function importSubclass(
    * THE NAME SLOT, CHECKED BEFORE IT IS TAKEN.
    *
    * `subclass_definitions_class_definition_id_name_rules_edition_unique` is the
-   * same triple `upsertThirdCaster` yields on, and the yield runs both ways: the
+   * same triple the bundled seeder yields on, and the yield runs both ways: the
    * seeder refuses to overwrite a key it does not own, and so does this. The
-   * KEY grammar already stops a document naming `2024:subclass:ek`
+   * KEY grammar already stops a document naming `2024:subclass:champion`
    * (see `importedContentKeyOwner`); this stops the same row being taken by its
    * NAME under a different key.
    */

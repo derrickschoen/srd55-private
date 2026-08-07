@@ -2,8 +2,13 @@ import type { DatabaseContext } from '../db/database';
 import { sha256 } from '../crypto/sha256';
 import {
   contentFingerprintSchemeRegistry,
+  CONTENT_FINGERPRINT_SCHEME_V1,
   type ContentFingerprintScheme,
 } from './content-identity';
+import retirementSource from './retire-non-srd-bundled-subclasses-v1.ts?raw';
+import {
+  retireNonSrdBundledSubclassesV1,
+} from './retire-non-srd-bundled-subclasses-v1';
 
 /**
  * One append-only semantic catalog migration.
@@ -22,13 +27,18 @@ export interface CatalogDataMigration {
   run(db: DatabaseContext): void;
 }
 
-/**
- * Append-only product data. CI-2b intentionally registers no semantic
- * migrations: `content_identity_v1_backfill` joins this array only in CI-4b,
- * after every projector it calls exists.
- */
+/** Append-only, checksum-frozen product-data migrations. */
 export const CATALOG_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
-  Object.freeze([]);
+  Object.freeze([
+    Object.freeze({
+      id: 'retire_non_srd_bundled_subclasses_v1',
+      projectorScheme: CONTENT_FINGERPRINT_SCHEME_V1,
+      source: retirementSource,
+      checksum:
+        '3fdeee928e80e1b64642a212abb15526732f8521fa3aa33bd45cd2f064e374f2',
+      run: retireNonSrdBundledSubclassesV1,
+    }),
+  ]);
 
 interface AppliedCatalogDataMigration {
   readonly id: string;

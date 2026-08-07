@@ -5,6 +5,12 @@ import { DatabaseContext } from '../../../src/db/database';
 import type { SlotBucket } from '../../../src/domain/enums';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import { openTestDatabase } from '../../helpers/open-db';
+import { applicationSeed } from '../../../src/db/bootstrap';
+import { BUNDLED_HOMEBREW_CATALOG } from '../../../src/authoring/bundled-homebrew-catalog';
+import {
+  commitBundledHomebrewInstall,
+  planBundledHomebrewInstall,
+} from '../../../src/authoring/bundled-homebrew-installer';
 
 interface SpellOptions {
   readonly level?: number;
@@ -576,31 +582,42 @@ describe('persisted spell access routes', () => {
     expect(persistedAccessState(characterId)).toEqual(before);
   });
 
-  it('resolves a persisted subclass ability and proficiency override', () => {
+  // Measured alone at 2.1s; 20s retains contention headroom.
+  it('resolves the published Spell Student ability and proficiency override', () => {
+    applicationSeed(db);
+    const catalog = BUNDLED_HOMEBREW_CATALOG.filter(
+      (entry) => entry.catalog_key === 'spell-student',
+    );
+    const plan = planBundledHomebrewInstall(db, catalog);
+    expect(commitBundledHomebrewInstall(db, plan.token, catalog)).toMatchObject({
+      kind: 'committed',
+      outcomes: [{ kind: 'create', contentKey: '2024:content.subclass:spell-student' }],
+    });
     const characterId = character(
       'Subclass Caster',
       { intelligence: 14 },
       5,
     );
-    const fighterId = classDefinition('Fighter', null);
+    const fighterId = Number(db.scalar(
+      `SELECT id FROM class_definitions WHERE content_key = '2024:class:fighter'`,
+    ));
     classLevel(characterId, fighterId, 3);
-    const subclassId = subclassDefinition(
-      fighterId,
-      'EK',
-      'intelligence',
-    );
+    const subclassId = Number(db.scalar(
+      `SELECT id FROM subclass_definitions
+        WHERE content_key = '2024:content.subclass:spell-student'`,
+    ));
     const sourceId = source(
       characterId,
       'subclass',
       subclassId,
-      'EK 3',
+      'Spell Student 3',
     );
     const versionId = spell('2024:subclass-spell', 'Subclass Spell');
     const slotId = slot(
       characterId,
       sourceId,
       versionId,
-      'ek:known:1',
+      'spell-student:known:1',
     );
     const before = persistedAccessState(characterId);
 
@@ -635,7 +652,7 @@ describe('persisted spell access routes', () => {
       proficiency_bonus_override: 5,
     });
     expect(persistedAccessState(characterId)).toEqual(before);
-  });
+  }, 20_000);
 
   it('evaluates ordinary routes live, lets kept overrides bypass source and eligibility, but never inactive versions', () => {
     const characterId = character();

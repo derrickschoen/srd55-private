@@ -6,6 +6,13 @@
 **Persistence:** MINT-FREE  
 **Implementation:** not started
 
+> **Superseded status (2026-08-07):** the additive fourteen-subclass outcome
+> below was replaced by D216. The product now seeds exactly the twelve SRD
+> subclasses; EK, AT, and bundled Veteran are retired.
+> Per D222/D223, third-caster pins use the optional bundled-homebrew Spell Student
+> and derive its ladder from the SRD multiclass table. The remainder is retained
+> as the design/decision record.
+
 ## 1. Outcome and ruling chain
 
 This unit adds the twelve subclasses actually printed in the pinned SRD 5.2.1

@@ -566,12 +566,10 @@ describe('the College of the Long Road imports and reaches the sheet', () => {
       ]);
     expect(owners).toEqual([
       [SUBCLASS_KEY, 'longroad.homebrew'],
-      ['2024:subclass:at', null],
       ['2024:subclass:champion', null],
       ['2024:subclass:circle-of-the-land', null],
       ['2024:subclass:college-of-lore', null],
       ['2024:subclass:draconic-sorcery', null],
-      ['2024:subclass:ek', null],
       ['2024:subclass:evoker', null],
       ['2024:subclass:fiend-patron', null],
       ['2024:subclass:hunter', null],
@@ -579,7 +577,6 @@ describe('the College of the Long Road imports and reaches the sheet', () => {
       ['2024:subclass:oath-of-devotion', null],
       ['2024:subclass:path-of-the-berserker', null],
       ['2024:subclass:thief', null],
-      ['2024:subclass:veteran', null],
       ['2024:subclass:warrior-of-the-open-hand', null],
     ]);
   });
@@ -596,7 +593,7 @@ describe('the College of the Long Road imports and reaches the sheet', () => {
     const byKey = await rpc.call('catalog.import', {
       documents: [
         JSON.stringify([
-          { ...record, contentKey: '2024:subclass:ek' },
+          { ...record, contentKey: '2024:subclass:champion' },
         ]),
       ],
     });
@@ -604,8 +601,8 @@ describe('the College of the Long Road imports and reaches the sheet', () => {
     expect(JSON.stringify(byKey)).toContain('imported content key');
 
     // BY NAME: the key follows the shared name-derived grammar, but the
-    // (class, name, edition) slot is already held by the bundled Eldritch
-    // Knight. Planning succeeds and records a typed install refusal without
+    // (class, name, edition) slot is already held by the bundled Champion.
+    // Planning succeeds and records a typed install refusal without
     // writing anything, rather than raising an RPC error midway through.
     const byName = await rpc.call<
       { documents: string[] },
@@ -615,9 +612,9 @@ describe('the College of the Long Road imports and reaches the sheet', () => {
         JSON.stringify([
           {
             ...record,
-            contentKey: '2024:longroad.homebrew:ek',
+            contentKey: '2024:longroad.homebrew:champion',
             parentClassKey: '2024:class:fighter',
-            name: 'EK',
+            name: 'Champion',
           },
         ]),
       ],
@@ -632,7 +629,7 @@ describe('the College of the Long Road imports and reaches the sheet', () => {
     );
     expect(byName.result.reviews).toEqual([]);
     expect(byName.result.outcomes).toEqual([{
-      id: 'subclass:2024:longroad.homebrew:ek',
+      id: 'subclass:2024:longroad.homebrew:champion',
       kind: 'refused',
       reason: 'install_refused',
     }]);
@@ -641,9 +638,9 @@ describe('the College of the Long Road imports and reaches the sheet', () => {
     expect(
       rpc.context.db.oneRaw(
         `SELECT name, spellcasting_ability FROM subclass_definitions
-         WHERE content_key = '2024:subclass:ek'`,
+         WHERE content_key = '2024:subclass:champion'`,
       ),
-    ).toEqual({ name: 'EK', spellcasting_ability: 'intelligence' });
+    ).toEqual({ name: 'Champion', spellcasting_ability: null });
   });
 
   it('refuses a parent class this catalog does not have', async () => {
@@ -662,7 +659,7 @@ describe('the College of the Long Road imports and reaches the sheet', () => {
     expect(JSON.stringify(response)).toContain('2024:class:hedge-knight');
     expect(
       rpc.context.db.scalar('SELECT count(*) AS n FROM subclass_definitions'),
-    ).toBe(15);
+    ).toBe(12);
   });
 });
 

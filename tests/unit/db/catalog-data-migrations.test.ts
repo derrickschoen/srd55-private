@@ -51,8 +51,16 @@ function migration(
 }
 
 describe('catalog data-migration registry', () => {
-  it('lands with no semantic migration or v1 backfill registered', () => {
-    expect(CATALOG_DATA_MIGRATIONS).toEqual([]);
+  it('registers the checksum-frozen one-time subclass retirement', () => {
+    expect(CATALOG_DATA_MIGRATIONS.map((entry) => ({
+      id: entry.id,
+      projectorScheme: entry.projectorScheme,
+      checksum: entry.checksum,
+    }))).toEqual([{
+      id: 'retire_non_srd_bundled_subclasses_v1',
+      projectorScheme: 'content-v1',
+      checksum: '3fdeee928e80e1b64642a212abb15526732f8521fa3aa33bd45cd2f064e374f2',
+    }]);
   });
 
   it('refuses edited source whose independently pinned checksum was not changed', () => {

@@ -45,8 +45,8 @@ describe('per-class caster contribution', () => {
     expect(casterLevel([halfUp('Paladin', 1), halfUp('Ranger', 1)])).toBe(2);
     expect(
       casterLevel([
-        thirdDown('EK', 5),
-        thirdDown('AT', 4),
+        thirdDown('Spell Student A', 5),
+        thirdDown('Spell Student B', 4),
       ]),
     ).toBe(2);
   });

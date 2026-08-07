@@ -108,9 +108,8 @@ const FEATURES: readonly HomebrewFeature[] = [
  * catalog, and returns the new `subclass_definitions.id`.
  *
  * The parent class is resolved BY NAME here because a test database's Bard is
- * the seeded Bard; production code resolves a parent class by CONTENT KEY
- * (`upsertThirdCaster` says why at length) and an importer would have to do the
- * same.
+ * the seeded Bard; production code and importers resolve a parent class by
+ * CONTENT KEY.
  */
 export function insertHomebrewSubclass(
   db: DatabaseContext,

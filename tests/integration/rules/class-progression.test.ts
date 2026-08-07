@@ -5,14 +5,15 @@ import {
   ClassProgressionLookup,
   seedClassProgressions,
 } from '../../../src/rules/class-progression-lookup';
+import { applicationSeed } from '../../../src/db/bootstrap';
+import { BUNDLED_HOMEBREW_CATALOG } from '../../../src/authoring/bundled-homebrew-catalog';
+import {
+  commitBundledHomebrewInstall,
+  planBundledHomebrewInstall,
+} from '../../../src/authoring/bundled-homebrew-installer';
 import {
   bundledSrdSubclassDefinitionContentKeys,
-  ensureBundledSrdSubclassContent,
 } from '../../../src/rules/srd-subclass-content';
-import {
-  ensureBundledVeteranSubclassContent,
-  hasBundledVeteranSubclassContent,
-} from '../../../src/rules/veteran-subclass-content';
 import {
   HEADING_ONLY_DESCRIPTION,
 } from '../../../src/domain/subclass-feature-description';
@@ -87,64 +88,61 @@ const EXPECTED_SRD_FIXED_SPELL_RULES = [
   ['Oath of Devotion', 'oath-of-devotion', 17, 'flame-strike'],
 ] as const;
 
-const THIRD_CASTER_LEVELS = [
-  [1, 0, 0, []],
-  [2, 0, 0, []],
-  [3, 3, 1, { 1: 2 }],
-  [4, 4, 1, { 1: 3 }],
-  [5, 4, 1, { 1: 3 }],
-  [6, 4, 1, { 1: 3 }],
-  [7, 5, 2, { 1: 4, 2: 2 }],
-  [8, 6, 2, { 1: 4, 2: 2 }],
-  [9, 6, 2, { 1: 4, 2: 2 }],
-  [10, 7, 2, { 1: 4, 2: 3 }],
-  [11, 8, 2, { 1: 4, 2: 3 }],
-  [12, 8, 2, { 1: 4, 2: 3 }],
-  [13, 9, 3, { 1: 4, 2: 3, 3: 2 }],
-  [14, 10, 3, { 1: 4, 2: 3, 3: 2 }],
-  [15, 10, 3, { 1: 4, 2: 3, 3: 2 }],
-  [16, 11, 3, { 1: 4, 2: 3, 3: 3 }],
-  [17, 11, 3, { 1: 4, 2: 3, 3: 3 }],
-  [18, 11, 3, { 1: 4, 2: 3, 3: 3 }],
-  [19, 12, 4, { 1: 4, 2: 3, 3: 3, 4: 1 }],
-  [20, 13, 4, { 1: 4, 2: 3, 3: 3, 4: 1 }],
+const SPELL_STUDENT_LEVELS = [
+  [1, 0, 0, 0, {}],
+  [2, 0, 0, 0, {}],
+  [3, 1, 1, 1, { 1: 2 }],
+  [4, 1, 1, 1, { 1: 2 }],
+  [5, 1, 1, 1, { 1: 2 }],
+  [6, 1, 1, 1, { 1: 3 }],
+  [7, 1, 2, 1, { 1: 3 }],
+  [8, 1, 2, 1, { 1: 3 }],
+  [9, 1, 2, 2, { 1: 4, 2: 2 }],
+  [10, 1, 2, 2, { 1: 4, 2: 2 }],
+  [11, 2, 3, 2, { 1: 4, 2: 2 }],
+  [12, 2, 3, 2, { 1: 4, 2: 3 }],
+  [13, 2, 3, 2, { 1: 4, 2: 3 }],
+  [14, 2, 3, 2, { 1: 4, 2: 3 }],
+  [15, 2, 4, 3, { 1: 4, 2: 3, 3: 2 }],
+  [16, 2, 4, 3, { 1: 4, 2: 3, 3: 2 }],
+  [17, 2, 4, 3, { 1: 4, 2: 3, 3: 2 }],
+  [18, 2, 4, 3, { 1: 4, 2: 3, 3: 3 }],
+  [19, 2, 5, 3, { 1: 4, 2: 3, 3: 3 }],
+  [20, 2, 5, 3, { 1: 4, 2: 3, 3: 3 }],
 ] as const;
 
-function expectedThirdCasterRules(
-  prefix: string,
+function expectedSpellStudentGrantRules(
+  classLevel: number,
   cantripsKnown: number,
-  preparedCount: number,
+  spellsKnown: number,
   maximumSpellLevel: number,
-): readonly Readonly<Record<string, unknown>>[] {
+): readonly Record<string, unknown>[] {
+  if (classLevel < 3) return [];
   return [
-    ...(cantripsKnown === 0
-      ? []
-      : [
-          {
-            kind: 'choice_from_list',
-            rule_key: `${prefix}-cantrips`,
-            count: cantripsKnown,
-            bucket: 'cantrip_known',
-            list: 'Wizard',
-            level_min: 0,
-            level_max: 0,
-            with_slots: false,
-          },
-        ]),
-    ...(preparedCount === 0
-      ? []
-      : [
-          {
-            kind: 'choice_from_list',
-            rule_key: `${prefix}-prepared`,
-            count: preparedCount,
-            bucket: 'prepared',
-            list: 'Wizard',
-            level_min: 1,
-            level_max: maximumSpellLevel,
-            with_slots: true,
-          },
-        ]),
+    {
+      kind: 'choice_from_list',
+      rule_key: 'spell-student-cantrips',
+      list: 'Wizard',
+      count: cantripsKnown,
+      bucket: 'known',
+      level_min: 0,
+      level_max: 0,
+      always_prepared: false,
+      with_slots: true,
+      free_cast: null,
+    },
+    {
+      kind: 'choice_from_list',
+      rule_key: 'spell-student-spells',
+      list: 'Wizard',
+      count: spellsKnown,
+      bucket: 'known',
+      level_min: 0,
+      level_max: maximumSpellLevel,
+      always_prepared: false,
+      with_slots: true,
+      free_cast: null,
+    },
   ];
 }
 
@@ -156,9 +154,7 @@ describe('persisted class progression catalog', () => {
   beforeEach(async () => {
     connection = await openTestDatabase();
     db = new DatabaseContext(connection);
-    seedClassProgressions(db);
-    ensureBundledSrdSubclassContent(db);
-    ensureBundledVeteranSubclassContent(db);
+    applicationSeed(db);
   });
 
   afterEach(() => {
@@ -168,9 +164,9 @@ describe('persisted class progression catalog', () => {
   it('persists the bundled class and subclass catalogs at exact cardinality', () => {
     expect(db.scalar('SELECT count(*) FROM class_definitions')).toBe(12);
     expect(db.scalar('SELECT count(*) FROM class_progressions')).toBe(240);
-    expect(db.scalar('SELECT count(*) FROM subclass_definitions')).toBe(15);
-    expect(db.scalar('SELECT count(*) FROM subclass_progressions')).toBe(40);
-    expect(db.scalar('SELECT count(*) FROM subclass_features')).toBe(70);
+    expect(db.scalar('SELECT count(*) FROM subclass_definitions')).toBe(12);
+    expect(db.scalar('SELECT count(*) FROM subclass_progressions')).toBe(0);
+    expect(db.scalar('SELECT count(*) FROM subclass_features')).toBe(58);
     expect(db.scalar('SELECT count(*) FROM subclass_feature_effects')).toBe(0);
 
     const classCoverage = db.allRaw(`
@@ -215,122 +211,79 @@ describe('persisted class progression catalog', () => {
     );
   });
 
-  it('pins the Veteran headings and its complete absence from spell machinery', () => {
-    expect(hasBundledVeteranSubclassContent(db)).toBe(true);
-    expect(
-      db.oneRaw(
-        `SELECT subclass.content_key, subclass.name, subclass.rules_edition,
-                class.name AS class_name, subclass.spellcasting_ability,
-                subclass.caster_fraction, subclass.caster_rounding,
-                subclass.grant_rules, subclass.notes
-           FROM subclass_definitions AS subclass
-           JOIN class_definitions AS class
-             ON class.id = subclass.class_definition_id
-          WHERE subclass.content_key = '2024:subclass:veteran'`,
-      ),
-    ).toEqual({
-      content_key: '2024:subclass:veteran',
-      name: 'Veteran',
-      rules_edition: '2024',
-      class_name: 'Rogue',
-      spellcasting_ability: null,
-      caster_fraction: null,
-      caster_rounding: null,
-      grant_rules: null,
-      notes: null,
+  it('publishes Veteran as full external homebrew with its exact feature schedule', () => {
+    const catalog = BUNDLED_HOMEBREW_CATALOG.filter(
+      (entry) => entry.catalog_key === 'veteran',
+    );
+    const plan = planBundledHomebrewInstall(db, catalog);
+    expect(plan.entries).toEqual([
+      expect.objectContaining({ name: 'Veteran', outcome: 'create' }),
+    ]);
+    expect(commitBundledHomebrewInstall(db, plan.token, catalog)).toMatchObject({
+      kind: 'committed',
+      outcomes: [{ kind: 'create', contentKey: '2024:content.subclass:veteran' }],
     });
     expect(
       db.allRaw(
         `SELECT feature.class_level, feature.sort_order, feature.name,
-                feature.description
+                length(feature.description) > 0 AS has_description
            FROM subclass_features AS feature
            JOIN subclass_definitions AS subclass
              ON subclass.id = feature.subclass_definition_id
-          WHERE subclass.content_key = '2024:subclass:veteran'
+          WHERE subclass.content_key = '2024:content.subclass:veteran'
           ORDER BY feature.sort_order`,
       ),
     ).toEqual([
-      { class_level: 3, sort_order: 1, name: 'Seasoned Professional', description: HEADING_ONLY_DESCRIPTION },
-      { class_level: 3, sort_order: 2, name: 'Too Old for This', description: HEADING_ONLY_DESCRIPTION },
-      { class_level: 3, sort_order: 3, name: 'Deuces Are Wild', description: HEADING_ONLY_DESCRIPTION },
-      { class_level: 3, sort_order: 4, name: 'Sure Strike', description: HEADING_ONLY_DESCRIPTION },
-      { class_level: 9, sort_order: 5, name: "Veteran's Strike", description: HEADING_ONLY_DESCRIPTION },
-      { class_level: 9, sort_order: 6, name: 'Extensive Experience', description: HEADING_ONLY_DESCRIPTION },
-      { class_level: 13, sort_order: 7, name: 'Veteran Reflexes', description: HEADING_ONLY_DESCRIPTION },
-      { class_level: 13, sort_order: 8, name: 'Critical Instincts', description: HEADING_ONLY_DESCRIPTION },
-      { class_level: 13, sort_order: 9, name: 'Fighting Style', description: HEADING_ONLY_DESCRIPTION },
-      { class_level: 17, sort_order: 10, name: 'Master of Experience', description: HEADING_ONLY_DESCRIPTION },
-      { class_level: 17, sort_order: 11, name: 'Heightened Lethality', description: HEADING_ONLY_DESCRIPTION },
-      { class_level: 17, sort_order: 12, name: 'Blindsight', description: HEADING_ONLY_DESCRIPTION },
+      { class_level: 3, sort_order: 1, name: 'Seasoned Professional', has_description: 1 },
+      { class_level: 3, sort_order: 2, name: 'Too Old for This', has_description: 1 },
+      { class_level: 3, sort_order: 3, name: 'Deuces Are Wild', has_description: 1 },
+      { class_level: 3, sort_order: 4, name: 'Sure Strike', has_description: 1 },
+      { class_level: 9, sort_order: 5, name: "Veteran's Strike", has_description: 1 },
+      { class_level: 9, sort_order: 6, name: 'Extensive Experience', has_description: 1 },
+      { class_level: 13, sort_order: 7, name: 'Veteran Reflexes', has_description: 1 },
+      { class_level: 13, sort_order: 8, name: 'Critical Instincts', has_description: 1 },
+      { class_level: 13, sort_order: 9, name: 'Fighting Style', has_description: 1 },
+      { class_level: 17, sort_order: 10, name: 'Master of Experience', has_description: 1 },
+      { class_level: 17, sort_order: 11, name: 'Heightened Lethality', has_description: 1 },
+      { class_level: 17, sort_order: 12, name: 'Blindsight', has_description: 1 },
     ]);
-    expect(
-      db.scalar(
-        `SELECT count(*) FROM subclass_progressions
-          WHERE subclass_definition_id = (
-            SELECT id FROM subclass_definitions
-             WHERE content_key = '2024:subclass:veteran'
-          )`,
-      ),
-    ).toBe(0);
-    expect(
-      db.scalar(
-        `SELECT count(*)
-           FROM subclass_feature_effects AS effect
-           JOIN subclass_features AS feature
-             ON feature.id = effect.subclass_feature_id
-           JOIN subclass_definitions AS subclass
-             ON subclass.id = feature.subclass_definition_id
-          WHERE subclass.content_key = '2024:subclass:veteran'`,
-      ),
-    ).toBe(0);
-  });
+  }, 20_000);
 
-  it('exactly repairs the Veteran aggregate without reallocating its stable root', () => {
-    const veteranId = db.scalar<number>(
-      `SELECT id FROM subclass_definitions
-        WHERE content_key = '2024:subclass:veteran'`,
+  it('reinstalling external Veteran preserves its root and complete feature graph', () => {
+    const catalog = BUNDLED_HOMEBREW_CATALOG.filter(
+      (entry) => entry.catalog_key === 'veteran',
     );
-    expect(veteranId).not.toBeNull();
-    db.exec(
-      `UPDATE subclass_features
-          SET class_level = 16, description = 'prose must stay in the doc'
-        WHERE subclass_definition_id = ? AND name = 'Blindsight'`,
-      [veteranId],
-    );
-    db.exec(
-      `INSERT INTO subclass_progressions (
-         subclass_definition_id, class_level, cantrips_known,
-         prepared_count, max_spell_level, slots
-       ) VALUES (?, 1, 1, 1, 1, '[1]')`,
-      [veteranId],
+    const first = planBundledHomebrewInstall(db, catalog);
+    commitBundledHomebrewInstall(db, first.token, catalog);
+    const before = db.allRaw(
+      `SELECT subclass.id AS subclass_id, feature.id AS feature_id,
+              feature.class_level, feature.sort_order, feature.name,
+              feature.description
+         FROM subclass_definitions AS subclass
+         JOIN subclass_features AS feature
+           ON feature.subclass_definition_id = subclass.id
+        WHERE subclass.content_key = '2024:content.subclass:veteran'
+        ORDER BY feature.sort_order`,
     );
 
-    expect(hasBundledVeteranSubclassContent(db)).toBe(false);
-    expect(ensureBundledVeteranSubclassContent(db)).toBe(true);
-    expect(hasBundledVeteranSubclassContent(db)).toBe(true);
+    const second = planBundledHomebrewInstall(db, catalog);
+    expect(second.entries.map((entry) => entry.outcome)).toEqual([
+      'matched_existing',
+    ]);
+    commitBundledHomebrewInstall(db, second.token, catalog);
     expect(
-      db.oneRaw(
-        `SELECT subclass.id, feature.class_level, feature.sort_order,
+      db.allRaw(
+        `SELECT subclass.id AS subclass_id, feature.id AS feature_id,
+                feature.class_level, feature.sort_order, feature.name,
                 feature.description
            FROM subclass_definitions AS subclass
            JOIN subclass_features AS feature
              ON feature.subclass_definition_id = subclass.id
-          WHERE subclass.content_key = '2024:subclass:veteran'
-            AND feature.name = 'Blindsight'`,
+          WHERE subclass.content_key = '2024:content.subclass:veteran'
+          ORDER BY feature.sort_order`,
       ),
-    ).toEqual({
-      id: veteranId,
-      class_level: 17,
-      sort_order: 12,
-      description: HEADING_ONLY_DESCRIPTION,
-    });
-    expect(
-      db.scalar(
-        'SELECT count(*) FROM subclass_progressions WHERE subclass_definition_id = ?',
-        [veteranId],
-      ),
-    ).toBe(0);
-  });
+    ).toEqual(before);
+  }, 20_000);
 
   it('marks every SC-3 feature description with the D152 heading-only constant', () => {
     expect(HEADING_ONLY_DESCRIPTION).toBe('');
@@ -382,12 +335,10 @@ describe('persisted class progression catalog', () => {
         ORDER BY subclass.name
       `),
     ).toEqual([
-      { name: 'AT', class_name: 'Rogue', spellcasting_ability: 'intelligence', caster_fraction: '1/3', caster_rounding: 'down' },
       { name: 'Champion', class_name: 'Fighter', spellcasting_ability: null, caster_fraction: null, caster_rounding: null },
       { name: 'Circle of the Land', class_name: 'Druid', spellcasting_ability: 'wisdom', caster_fraction: null, caster_rounding: null },
       { name: 'College of Lore', class_name: 'Bard', spellcasting_ability: 'charisma', caster_fraction: null, caster_rounding: null },
       { name: 'Draconic Sorcery', class_name: 'Sorcerer', spellcasting_ability: 'charisma', caster_fraction: null, caster_rounding: null },
-      { name: 'EK', class_name: 'Fighter', spellcasting_ability: 'intelligence', caster_fraction: '1/3', caster_rounding: 'down' },
       { name: 'Evoker', class_name: 'Wizard', spellcasting_ability: 'intelligence', caster_fraction: null, caster_rounding: null },
       { name: 'Fiend Patron', class_name: 'Warlock', spellcasting_ability: 'charisma', caster_fraction: null, caster_rounding: null },
       { name: 'Hunter', class_name: 'Ranger', spellcasting_ability: 'wisdom', caster_fraction: null, caster_rounding: null },
@@ -395,7 +346,6 @@ describe('persisted class progression catalog', () => {
       { name: 'Oath of Devotion', class_name: 'Paladin', spellcasting_ability: 'charisma', caster_fraction: null, caster_rounding: null },
       { name: 'Path of the Berserker', class_name: 'Barbarian', spellcasting_ability: null, caster_fraction: null, caster_rounding: null },
       { name: 'Thief', class_name: 'Rogue', spellcasting_ability: null, caster_fraction: null, caster_rounding: null },
-      { name: 'Veteran', class_name: 'Rogue', spellcasting_ability: null, caster_fraction: null, caster_rounding: null },
       { name: 'Warrior of the Open Hand', class_name: 'Monk', spellcasting_ability: null, caster_fraction: null, caster_rounding: null },
     ]);
 
@@ -572,7 +522,15 @@ describe('persisted class progression catalog', () => {
     }
   });
 
-  it('persists every legacy third-caster count, slot row, and complete grant-rule payload', () => {
+  it('persists every Spell Student third-caster count and SRD-derived slot row through the publish route', () => {
+    const catalog = BUNDLED_HOMEBREW_CATALOG.filter(
+      (entry) => entry.catalog_key === 'spell-student',
+    );
+    const plan = planBundledHomebrewInstall(db, catalog);
+    expect(commitBundledHomebrewInstall(db, plan.token, catalog)).toMatchObject({
+      kind: 'committed',
+      outcomes: [{ kind: 'create', contentKey: '2024:content.subclass:spell-student' }],
+    });
     expect(
       db.allRaw(`
         SELECT subclass.name, progression.class_level,
@@ -582,45 +540,32 @@ describe('persisted class progression catalog', () => {
         FROM subclass_progressions progression
         JOIN subclass_definitions subclass
           ON subclass.id = progression.subclass_definition_id
-        ORDER BY subclass.name, progression.class_level
+        WHERE subclass.content_key = '2024:content.subclass:spell-student'
+        ORDER BY progression.class_level
       `).map((row) => ({
         ...row,
         slots: JSON.parse(String(row.slots)),
         grant_rules: JSON.parse(String(row.grant_rules)),
       })),
     ).toEqual(
-      [
-        ['AT', 'at', 3, 4],
-        ['EK', 'ek', 2, 3],
-      ].flatMap(
-        ([name, prefix, startingCantrips, levelTenCantrips]) =>
-          THIRD_CASTER_LEVELS.map(
-            ([classLevel, preparedCount, maximumSpellLevel, slots]) => {
-              const cantripsKnown =
-                classLevel < 3
-                  ? 0
-                  : classLevel < 10
-                    ? Number(startingCantrips)
-                    : Number(levelTenCantrips);
-              return {
-                name,
-                class_level: classLevel,
-                cantrips_known: cantripsKnown,
-                prepared_count: preparedCount,
-                max_spell_level: maximumSpellLevel,
-                slots,
-                grant_rules: expectedThirdCasterRules(
-                  String(prefix),
-                  cantripsKnown,
-                  preparedCount,
-                  maximumSpellLevel,
-                ),
-              };
-            },
+      SPELL_STUDENT_LEVELS.map(
+        ([classLevel, cantripsKnown, preparedCount, maximumSpellLevel, slots]) => ({
+          name: 'Spell Student',
+          class_level: classLevel,
+          cantrips_known: cantripsKnown,
+          prepared_count: preparedCount,
+          max_spell_level: maximumSpellLevel,
+          slots,
+          grant_rules: expectedSpellStudentGrantRules(
+            classLevel,
+            cantripsKnown,
+            preparedCount,
+            maximumSpellLevel,
           ),
+        }),
       ),
     );
-  });
+  }, 20_000);
 
   it('looks up the persisted class-table count independently of ability score', () => {
     const wizardId = Number(

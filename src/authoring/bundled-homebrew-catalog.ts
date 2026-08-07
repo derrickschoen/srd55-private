@@ -76,6 +76,24 @@ function fixedSpellGrant(
   });
 }
 
+function spellStudentChoiceGrant(
+  classLevel: CharacterLevel,
+  kind: 'cantrips' | 'spells',
+  count: number,
+  maximumSpellLevel: number,
+): NonNullable<SubclassAuthoringDraftProgressionRow['grants']>[number] {
+  return Object.freeze({
+    kind: 'choice_from_list' as const,
+    draft_item_uuid: itemUuid(
+      `bundled-spell-student-${kind}-${String(classLevel)}`,
+    ),
+    rule_key: `spell-student-${kind}`,
+    list: 'Wizard',
+    count,
+    maximum_spell_level: maximumSpellLevel,
+  });
+}
+
 const barbedCourtGrants = Object.freeze(new Map<CharacterLevel, readonly NonNullable<
   SubclassAuthoringDraftProgressionRow['grants']
 >[number][]>([
@@ -222,6 +240,16 @@ const spellStudent: SubclassAuthoringDraft = Object.freeze<SubclassAuthoringDraf
       cantripsKnown: (level) => level < 3 ? 0 : level < 11 ? 1 : 2,
       // Owner-authored choice: one spell at 3, then one more every four levels.
       spellsKnown: (level) => level < 3 ? 0 : 1 + Math.floor((level - 3) / 4),
+      grants: (level) => {
+        if (level < 3) return [];
+        const cantrips = level < 11 ? 1 : 2;
+        const spells = 1 + Math.floor((level - 3) / 4);
+        const spellLevel = maximumSpellLevel(deriveThirdCasterSlotCounts(level));
+        return [
+          spellStudentChoiceGrant(level, 'cantrips', cantrips, 0),
+          spellStudentChoiceGrant(level, 'spells', spells, spellLevel),
+        ];
+      },
     }),
   },
   features: [{

@@ -206,7 +206,7 @@ export interface CatalogSubclassRecord {
    * The subclass's own content key, and it MUST be an imported key — three
    * parts with a dotted owner namespace in the middle. See
    * `importedContentKeyOwner`: this is what stops a document naming
-   * `2024:subclass:ek` and rewriting a bundled row, and it is what
+   * `2024:subclass:champion` and rewriting a bundled row, and it is what
    * keeps the subclass identifiable as imported inside a backup and a share
    * link, neither of which carries any other field of it.
    */
@@ -214,9 +214,9 @@ export interface CatalogSubclassRecord {
   /**
    * The parent class BY CONTENT KEY, never by display name.
    *
-   * Every resolver in this application already works this way and
-   * `upsertThirdCaster` says why at length: a user-authored class that happens
-   * to be called "Fighter" must not be able to adopt EK, and the
+   * Every resolver in this application already works this way: a user-authored
+   * class that happens to be called "Fighter" must not be able to adopt
+   * Champion, and the
    * same argument runs in reverse here — a document naming "Bard" would attach
    * a homebrew subclass to whichever row won the name, which is a different
    * class from the one the author meant.
@@ -730,7 +730,7 @@ function catalogSubclassRecord(value: Record<string, unknown>): CatalogSubclassR
   const contentKey = nonEmptyString(value.contentKey, 'contentKey');
   if (!isImportedContentKey(contentKey)) {
     throw new TypeError(
-      `Catalog field 'contentKey' must be an imported content key of the form <edition>:<owner.namespace>:<name>; '${contentKey}' is not, and bundled keys such as '2024:subclass:ek' are refused by that shape on purpose.`,
+      `Catalog field 'contentKey' must be an imported content key of the form <edition>:<owner.namespace>:<name>; '${contentKey}' is not, and bundled keys such as '2024:subclass:champion' are refused by that shape on purpose.`,
     );
   }
   const edition = nonEmptyString(value.edition, 'edition');

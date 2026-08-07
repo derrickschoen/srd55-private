@@ -142,12 +142,10 @@ describe('an imported subclass stays distinguishable from a bundled one', () => 
         ]),
     ).toEqual([
       [SUBCLASS_KEY, 'longroad.homebrew'],
-      ['2024:subclass:at', null],
       ['2024:subclass:champion', null],
       ['2024:subclass:circle-of-the-land', null],
       ['2024:subclass:college-of-lore', null],
       ['2024:subclass:draconic-sorcery', null],
-      ['2024:subclass:ek', null],
       ['2024:subclass:evoker', null],
       ['2024:subclass:fiend-patron', null],
       ['2024:subclass:hunter', null],
