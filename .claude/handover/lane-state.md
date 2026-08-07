@@ -23,7 +23,64 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-06-j (newest - read first)
+## RESTART POINT 2026-08-06-k (newest - read first)
+MAIN cd7b190 (mirror push pending this commit). FLOORS: vitest 252/4,126
+zero errors; PW 129 pool; build 0; migrations 0000-0039 FROZEN (next free
+mint 0040); backup v5. THIRTY-EIGHT merges. Rulings through D216.
+
+MERGED SINCE 08-06-j:
+ - HA-9 (cd7b190, 38th): background authoring form on the exact
+   BackgroundAuthoringDraft contract + read-only backgroundReferences
+   seam; edit-generation extracted to src/ui/authoring/edit-generation.ts
+   and shared by both forms (one superseding semantic, pinned).
+
+GATE RULE CHANGED (COMMON.md amended, edac8c4): THE COMPILE GATE IS
+`npm run build`. `tsc -p tsconfig.app.json --noEmit` does NOT typecheck
+test files the way `tsc -b` does; TS2349 closure-narrowing broke the
+build in BOTH HA-8 and HA-9 while app-config tsc read 0. Holder-object
+pattern recorded. Codex census: no remaining sites in species/subclass
+lane tests.
+
+FINDING AGAINST A CODEX REPORT (HA-9 review round 1): the implementation
+report pasted a green targeted run that OMITTED tests/unit/authoring-
+contracts.test.ts - the one pin its own change broke. Supervisor ran it:
+failed. Rule now in the fix-round briefs: after adding a field to an
+exported contract constant, grep for shape assertions and run them.
+
+FINDING AGAINST A SUPERVISOR BRIEF (HA-9): the first ha-9.md invented
+backend fields (background feature name/description, language grants).
+Codex stopped and reported infeasibility - correct. Brief rewritten
+against the real contract before any code; recorded in the merge message.
+
+RULINGS 08-06 (later): D215 SRD-only default seed, bundled homebrew as a
+click-to-import option installed via the real publish path, Veteran +
+Barbed Court Monk included; D216 EK and AT
+dropped ENTIRELY (repo, not just seed), their third-caster coverage
+converting onto Barbed Court Monk.
+
+OWNER DECISION OPEN - DO NOT ACT WITHOUT IT: licensing sweep (2026-08-06)
+reported to the owner. Findings: (a) Elemental Adept and Elven Accuracy
+are non-SRD feats with mechanics IMPLEMENTED in shipping
+src/ui/screens/planner/dice.ts - the largest exposure found; (b) test
+fixtures carry an Artificer 20-level progression, an Echo Knight subclass
+with features, and a Thorn Whip stat block; (c) ~15 name-only mentions,
+mostly meta-discussion in decisions.md of content deliberately NOT used;
+(d) 15 captured GitHub .http fixtures have no NOTICE.md entry; (e)
+attribution itself is correct (NOTICE.md + docs/srd/ATTRIBUTION.md carry
+the verbatim CC-BY notice). The owner asked about rewriting history to
+purge EK/AT: VERIFIED that NO EK/AT rules prose ever entered git (searched
+all history for Weapon Bond, War Magic, Mage Hand Legerdemain: zero
+hits) - only names + a third-caster numeric table, first at b0af6f8
+(2026-07-23), with 889 of 896 commits downstream. Awaiting the owner's
+call on both the rewrite and the EA/Elven-Accuracy removal.
+
+QUEUE: VET-REPUB (now D211+D215+D216 - bigger: seed-scope change, import
+option, two subclasses; brief needs a rebuild) -> HA-10 -> HA-11
+(D138+D214) -> HA-12 -> D213 hardening.
+
+WORKTREES: wt/party (owner's - never prune). wt/ha9 prunable.
+
+## RESTART POINT 2026-08-06-j (superseded by 08-06-k)
 MAIN bf26846 (mirror pushed). FLOORS: vitest 250/4,114 zero errors; PW
 128 pool (~9.6 min; subclass journey 14.8s of 125s budget); build 0;
 migrations 0000-0039 FROZEN (next free mint 0040); backup v5.
