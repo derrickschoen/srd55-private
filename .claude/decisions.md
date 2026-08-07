@@ -7,6 +7,130 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D223 — SUPERVISOR: third-caster slot ladders are DERIVED from the SRD table, never transcribed (2026-08-07)
+
+Answers the owner's question "am I violating the license by making a 1/3
+caster based on the table only found in the PHB?". VERIFIED IN THE SRD
+TEXT: SRD 5.2.1's multiclass spell-slot rule lists only full casters
+(Bard/Cleric/Druid/Sorcerer/Wizard) and half casters (Paladin/Ranger,
+round up) — docs/srd/full/srd-5.2.1.txt:1599-1603. There is NO third-caster
+fraction in the SRD, because EK/AT are not in the SRD. The Multiclass
+Spellcaster slot table itself IS in the SRD (line 1638ff) and is CC-BY.
+
+RULE: any third-caster progression this project ships is COMPUTED as
+`MulticlassSpellcasterTable[floor(subclass_class_level / 3)]` — our own
+stated fraction applied to a table we are licensed to reproduce. It is
+never transcribed from a PHB table. Verified this derivation reproduces
+the familiar ladder exactly (level 3 -> 2 first-level slots; 7 -> 3;
+10 -> 4/2; 13 -> 4/3). The committed artifact is therefore SRD data plus
+our rule.
+
+Prepared/known-spell counts are NOT derivable this way — they are a
+per-subclass design choice. Every project third-caster picks its own; do
+not reuse the numbers currently seeded for EK/AT.
+
+Not legal advice. The reasoning, for the record: mechanics and systems are
+excluded from copyright (17 USC 102(b)), and unoriginal number tables have
+thin-to-no protection (Feist), so the real exposure was always copied
+PROSE and NAMES — which is why D216 removes the names and why no EK/AT
+prose ever entered this repo. Deriving costs us nothing and removes the
+question entirely.
+
+## D224 — SUPERVISOR: D222's "content only" means NO TEST PINS, not "no mechanics" (2026-08-07)
+
+Amends D222's wording, which was mine and was ambiguous. BHC's review
+round 1 found Barbed Court Monk published with
+`progression: { mode: 'inherit_parent' }` and no grants — i.e. as a
+NON-CASTER — while its authoritative document promises curated cantrips,
+prepared spells, Wisdom casting, and a third-caster ladder. Importing it
+would have delivered none of the advertised mechanics. The implementer
+read "content only" as "no mechanics"; I meant "no test pins".
+
+BINDING READING: Barbed Court Monk ships with its FULL mechanics —
+override progression, Wisdom, third_down, 20 dense rows derived per D223,
+and its curated spell grants. What D222 withholds is its role as TEST
+INFRASTRUCTURE: the third-caster slot-math pins live on Spell Student, so
+revising Barbed Court's design never churns them. Barbed Court still gets
+ordinary content pins (prose fidelity, publishes-and-applies), just not
+the slot-math contract.
+
+## D222 — OWNER: a deliberately boring third-caster carries the test pins (2026-08-07)
+(See D224: "content only" here means no TEST PINS. Barbed Court ships
+with full mechanics.)
+
+Owner: "Author the deliberately boring 1/3 caster to test with." The
+third-caster spell-slot coverage vacated by D216 moves onto a new,
+intentionally minimal owner-authored subclass built for testing, NOT onto
+the Barbed Court Monk. Its slot ladder derives per D223. Barbed Court Monk
+ships as CONTENT ONLY in the bundled-homebrew catalog, so revising its
+design never churns the slot-math pins. Supersedes D216's sentence routing
+that coverage to Barbed Court.
+
+## D221 — OWNER: seed-scope runs in parallel with the HA chain (2026-08-07)
+
+Owner chose parallel over queue-jumping or waiting. The bundled-homebrew
+catalog unit and the SRD-only retirement unit run in their own worktrees
+alongside HA-11/HA-12. Supervisor accepts the collision risk the owner was
+shown (both touch catalog seams) and owns the arbitration. Ordering
+constraint from the design pass still binds: the catalog unit merges
+BEFORE the retirement unit, so the boring third-caster (D222) is
+exercising every retained third-caster seam before EK/AT coverage is
+removed.
+
+## D220 — OWNER: rename Elven Accuracy, generalize Elemental Adept (2026-08-07)
+
+The two non-SRD feat mechanics found in shipping
+src/ui/screens/planner/dice.ts are not deleted — they are de-branded and
+generalized. (1) "Elven Accuracy" becomes "Triple Advantage". (2)
+"Elemental Adept" becomes a generic die-upgrade mechanic parameterized by
+a list of low die outcomes promoted to a higher outcome — owner's
+examples: "1s and 2s become 3s on a weapon attack", "1s become 2s on a d8
+spell attack". The generalized form is a dice-planner capability, not a
+named feat, and must be strictly more expressive than the mechanic it
+replaces. Existing dice-planner assertions convert as strict supersets.
+
+## D219 — OWNER: shipped-catalog prose revisions publish a successor with lineage (2026-08-06)
+
+Owner asked "Do we have the successor with lineage built? If not, don't
+build it." SUPERVISOR ANSWER, VERIFIED: yes — CI-7 (merged bb4ec32, mints
+0038 catalog_content_supersessions + 0039 cycle/rewrite/delete guards)
+built edit-as-new-version with recipient-local supersession lineage AND the
+reference-retarget command (previewReplacement/commitReplacement). So the
+ruling stands as the recommended option: a revised shipped-catalog entry
+publishes as a successor superseding the old version, recording lineage;
+existing characters keep the old version until explicitly retargeted.
+BUILD NOTHING NEW for this — reuse CI-7's machinery. If an implementer
+finds themselves adding lineage plumbing, that is a finding: stop and
+report it.
+
+## D218 — OWNER: full export carries non-SRD content, share links try to and warn when they can't (2026-08-06)
+
+Baseline is install-then-open: a share link naming content the recipient
+lacks refuses with a message saying what to import. On top of that:
+(1) The full JSON export MUST include non-SRD library data so an export is
+self-sufficient. Supervisor note: character backup already calls
+`exportPortableContentClosure` (src/backup/character-backup.ts:57) and
+library export goes through the same portable-content seam — VERIFY this
+already satisfies the ruling before building anything; if it does, the
+work is a pin, not a feature.
+(2) Share LINKS should make an effort to carry non-SRD content when it
+fits the link budget, and WARN AT EXPORT TIME when it does not fit, rather
+than silently emitting a link the recipient cannot open. Owner's words:
+"maybe we should make an effort to fit the content in if we can and
+[w]arn if we can't". A link that cannot carry its content is still a valid
+link under the install-then-open baseline — the warning is the contract,
+not a refusal.
+
+## D217 — OWNER: SRD-only retirement just deletes affected characters (2026-08-06)
+
+Owner: "Just delete. No one has used the site yet." The one-time retirement
+of the bundled Veteran, EK and AT deletes the
+characters attached to them outright — no detach-and-preserve, no
+auto-retarget, no abort-and-demand-backup. Supersedes the design pass's
+detach proposal (docs/design/2026-08-06-seed-scope-srd-only.md section E).
+D60 applies: zero real users. This licence is scoped to THIS retirement;
+it is not a general permission to delete characters.
+
 ## D216 — OWNER: EK and AT are dropped entirely (2026-08-06)
 
 Completes D215's SRD-only seed. The two legacy non-SRD subclasses leave the
