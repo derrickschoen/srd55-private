@@ -574,7 +574,7 @@ export function createImportBackupControls(
   const root = element('details', { className: 'transfer-panel' }, [
     element('summary', { text: 'Import and backups' }),
     element('p', {
-      text: 'Character JSON backups include the character and its complete referenced external content. Share links are reference-only and do not include catalog definitions.',
+      text: 'Character JSON backups include the character and its complete referenced external content. Share links include referenced external content when it fits and warn when it does not.',
     }),
     element('div', { className: 'transfer-grid' }, [
       element('div', { className: 'transfer-control' }, [

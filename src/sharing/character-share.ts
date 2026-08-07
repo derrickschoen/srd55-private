@@ -14,7 +14,12 @@ import {
   type ContentImportPlan,
   type ContentImportPlanToken,
 } from '../catalog/content-adoption';
-import { localContentReferenceImportNode } from '../backup/portable-content';
+import {
+  exportPortableContentBundle,
+  localContentReferenceImportNode,
+  portableContentImportNodes,
+  restorePortableContentSupersessions,
+} from '../backup/portable-content';
 import { canonicalJson } from '../commands/canonical-json';
 import { sha256 } from '../crypto/sha256';
 import { assertSourceRepeatable } from '../commands/add-source';
@@ -1246,7 +1251,7 @@ export function exportCharacterShare(
       spellName: String(version.display_name),
     }))
     .sort((left, right) => left.spellKey.localeCompare(right.spellKey));
-  const document: CharacterShareDocument = {
+  const referenceDocument: CharacterShareDocument = {
     format: CHARACTER_SHARE_FORMAT,
     version: CHARACTER_SHARE_VERSION,
     character: {
@@ -1341,7 +1346,31 @@ export function exportCharacterShare(
       ? {}
       : { attunementSlots }),
   };
-  return validateShareDocument(document);
+  const validatedReference = validateShareDocument(referenceDocument);
+  const portableContent = exportPortableContentBundle(
+    db,
+    shareCatalogReferences(validatedReference)
+      .filter((reference) => !isPlaceholderSpellReference(db, reference))
+      .map((reference) => ({
+        kind: reference.kind,
+        contentKey: reference.contentKey,
+      })),
+  );
+  return validateShareDocument({
+    ...validatedReference,
+    ...(portableContent.content.length === 0 ? {} : { portableContent }),
+  });
+}
+
+function isPlaceholderSpellReference(
+  db: DatabaseContext,
+  reference: ShareCatalogReference,
+): boolean {
+  if (reference.kind !== 'spell') return false;
+  return db.scalar<string>(
+    `SELECT provenance FROM spell_versions WHERE content_key = ?`,
+    [reference.contentKey],
+  ) === 'placeholder';
 }
 
 function definitionByResolvedKey(
@@ -1456,8 +1485,24 @@ function prepareShareReferences(
   const targets = new Map<string, ContentKey>();
   const missingSpellKeys = new Set<string>();
   const issues: ShareImportIssue[] = [];
+  const carriedMarkers = new Set<string>();
+  if (document.portableContent !== undefined) {
+    const portableNodes = portableContentImportNodes(
+      db,
+      document.portableContent.content,
+    );
+    for (const [index, node] of portableNodes.entries()) {
+      const entry = document.portableContent.content[index];
+      if (entry === undefined) continue;
+      const marker = referenceMarker(entry.kind, entry.content_key);
+      carriedMarkers.add(marker);
+      nodes.push(node);
+      markersByNodeId.set(node.id, marker);
+    }
+  }
   for (const reference of shareCatalogReferences(document)) {
     const marker = referenceMarker(reference.kind, reference.contentKey);
+    if (carriedMarkers.has(marker)) continue;
     const resolution = resolveContentReference(db, {
       kind: reference.kind,
       contentKey: reference.contentKey,
@@ -1819,7 +1864,7 @@ function assertImportableWithoutMutation(
       const createsClone = Object.values(choices).some(
         (choice) => choice.decision === 'clone',
       );
-      if (!createsClone) {
+      if (!createsClone && prepared.nodes.length === 0) {
         throwCompatibilityIssues(
           assessImportCompatibility(db, document, targets),
         );
@@ -1832,6 +1877,13 @@ function assertImportableWithoutMutation(
         choices,
         operationIdentity: shareOperationIdentity(document),
         afterInstall: (database) => {
+          if (document.portableContent !== undefined) {
+            restorePortableContentSupersessions(
+              database,
+              document.portableContent,
+              targets,
+            );
+          }
           throwCompatibilityIssues(
             assessImportCompatibility(database, document, targets),
           );
@@ -2837,6 +2889,13 @@ export function commitCharacterShareImport(
     choices,
     operationIdentity: shareOperationIdentity(document),
     afterInstall: (database) => {
+      if (document.portableContent !== undefined) {
+        restorePortableContentSupersessions(
+          database,
+          document.portableContent,
+          planned.targets,
+        );
+      }
       throwCompatibilityIssues(
         assessImportCompatibility(database, document, planned.targets),
       );

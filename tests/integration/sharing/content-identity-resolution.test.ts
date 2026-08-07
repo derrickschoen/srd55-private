@@ -27,7 +27,7 @@ import {
 } from '../../../src/sharing/character-share';
 import {
   positionalToShareDocument,
-  shareDocumentToPositional,
+  shareDocumentToReferencePositional,
 } from '../../../src/sharing/codec';
 import type { CharacterShareDocument } from '../../../src/sharing/schema';
 import { openTestDatabase } from '../../helpers/open-db';
@@ -281,7 +281,7 @@ describe('CI-SHARE-REFERENCE', () => {
 
     const matchingWire = frozenWire(FROZEN_V17_MATCHING_DIGEST_REFERENCE_FRAGMENT);
     const emitted = Buffer.from(JSON.stringify(
-      shareDocumentToPositional(matchingWire.document),
+      shareDocumentToReferencePositional(matchingWire.document),
     ));
     expect(emitted.equals(matchingWire.original)).toBe(true);
 

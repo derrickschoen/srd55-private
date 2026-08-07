@@ -361,6 +361,7 @@ describe('portable character backup user-authored spells', () => {
       null,
     );
     delete historical.content;
+    delete historical.supersessions;
     const character = historical.character as Record<string, unknown>;
     delete character.alignment;
     delete character.appearance;

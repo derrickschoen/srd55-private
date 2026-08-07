@@ -23,8 +23,9 @@ The schema modules under `db/schema/`:
 
 Published content lifecycle state begins at
 `db/schema/catalog-content.ts`: `catalog_content_identities` and
-`catalog_content_supersessions`; portable manifests deliberately project the
-aggregate, not recipient-local archive or immutable-version-lineage metadata.
+`catalog_content_supersessions`; portable manifests project complete aggregates
+and their connected immutable supersession lineage, but not recipient-local
+archive metadata.
 
 | File | Holds |
 |---|---|

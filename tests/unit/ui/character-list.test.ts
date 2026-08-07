@@ -103,7 +103,7 @@ describe('character share links', () => {
     );
   });
 
-  it('CI-8 labels links as reference-only and directs complete content to character JSON', () => {
+  it('HA-12 explains that links try to include external content', () => {
     const restoreDocument = installInteractiveDocument();
     try {
       const controls = createShareControls({
@@ -121,10 +121,10 @@ describe('character share links', () => {
       });
 
       expect(elementText(controls.element)).toContain(
-        'Share links are reference-only: they do not include catalog definitions.',
+        'Share links include referenced external content when it fits.',
       );
       expect(elementText(controls.element)).toContain(
-        'Use a complete character JSON backup when the recipient also needs external content.',
+        'If it does not fit, the recipient can import the content named in the warning before opening the link.',
       );
       controls.cleanup();
     } finally {
@@ -1000,7 +1000,7 @@ describe('catalog and backup entry points', () => {
         'Character JSON backups include the character and its complete referenced external content.',
       );
       expect(elementText(controls.element)).toContain(
-        'Share links are reference-only and do not include catalog definitions.',
+        'Share links include referenced external content when it fits and warn when it does not.',
       );
       const characterInput = root.querySelectorAll('input')[2];
       if (characterInput === undefined) throw new Error('Character input missing.');

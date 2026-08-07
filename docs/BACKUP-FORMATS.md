@@ -31,12 +31,12 @@ storage replacement or reopen fails, that prior image is restored and reopened.
 ## Portable character document
 
 The Worker RPC methods are `backup.exportCharacter` and
-`backup.importCharacter`. The current version 5 is JSON-compatible:
+`backup.importCharacter`. The current version 6 is JSON-compatible:
 
 ```text
 {
   format: "dnd-multiclass-spells/character",
-  version: 5,
+  version: 6,
   exported_at: "<ISO-8601 timestamp>",
   source_character_id: 17,
   character: {
@@ -58,11 +58,19 @@ The Worker RPC methods are `backup.exportCharacter` and
       fingerprint_digest: "<64 lowercase hex characters>",
       aggregate: { ... }
     }
+  ],
+  supersessions: [
+    {
+      content_kind: "species",
+      superseded_content_key: "expanded:content.species:marsh-kin",
+      successor_content_key: "expanded:content.species:marsh-kin-revised",
+      recorded_at: "<ISO-8601 timestamp>"
+    }
   ]
 }
 ```
 
-Version 5 adds the semantic `content` manifest. It contains exactly the
+Version 5 added the semantic `content` manifest. It contains exactly the
 external reference closure of this character's class/subclass/source/spell
 references, recursively following the HA-1 projector reference vocabulary.
 Unreferenced library creations and incomplete drafts are absent. Bundled
@@ -80,14 +88,21 @@ computes a dependency-safe install plan independently of document order.
 Planning and commit use the shared CI-4a adoption protocol, so review decisions,
 content installation, and the new character commit together.
 
+Version 6 adds the immutable supersession edges connected to that content
+closure. Traversal follows lineage in both directions, so every endpoint of an
+included edge is also present as a complete aggregate. Import restores those
+edges only after all endpoints have been installed, in the same transaction as
+the character.
+
 Version 3 added the three flavor keys. Alignment is limited to 120 Unicode
 code points, appearance to 4,000, and backstory to 20,000. Notes remains
 type-only during backup validation so a grandfathered note longer than the
 20,000-code-point new-write limit can still be exported and restored losslessly.
 Version 4 added `archived_at`; an archived character remains archived after a
-portable import. Historical versions 1 through 4 remain readable. Missing
+portable import. Historical versions 1 through 5 remain readable. Missing
 flavor/archive fields migrate to `null`, and v1-v4 import only the content those
-documents actually carry—older documents never synthesize a v5 closure.
+documents actually carry. Version 5 imports its content with empty lineage;
+older documents never synthesize data they did not carry.
 
 `tables` contains:
 
@@ -134,22 +149,25 @@ any late reference, constraint, or write failure rolls everything back.
 ## Portable library document
 
 The library service can export the whole installed external library or an
-explicitly selected subset. UI exposure is intentionally later. Version 1 is a
+explicitly selected subset. UI exposure is intentionally later. Version 2 is a
 different document kind from a character:
 
 ```text
 {
   format: "dnd-multiclass-spells/library",
-  version: 1,
+  version: 2,
   exported_at: "<ISO-8601 timestamp>",
   selection: "all" | "selected",
   selected_content_keys: ["expanded:content.species:marsh-kin"],
-  content: [ ...same semantic manifest entries as character v5... ]
+  content: [ ...same semantic manifest entries as character v6... ],
+  supersessions: [ ...connected immutable lineage edges... ]
 }
 ```
 
-A selected export includes each selected creation and its transitive external
-dependencies, but not unrelated creations. Whole-library export treats every
-installed external aggregate as a root. Import uses the same plan/token/commit
-adoption protocol and identity resolver as character v5, so repeated imports
-match existing content rather than duplicating it.
+A selected export includes each selected creation, its transitive external
+dependencies, and connected supersession lineage, but not unrelated creations.
+Whole-library export treats every installed external aggregate as a root.
+Import uses the same plan/token/commit adoption protocol and identity resolver
+as character v6, so repeated imports match existing content rather than
+duplicating it. Historical version 1 remains readable and imports with empty
+lineage.

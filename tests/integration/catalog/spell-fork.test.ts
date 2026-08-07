@@ -32,6 +32,8 @@ import {
 import {
   decodeShareFragment,
   encodeShareFragment,
+  positionalToShareDocument,
+  shareDocumentToReferencePositional,
 } from '../../../src/sharing/codec';
 import { handlers } from '../../../src/worker/handlers/catalog';
 import {
@@ -484,7 +486,7 @@ describe('bundled spell forks', () => {
     });
   });
 
-  it('carries forks and imported homebrew as the same reference-only payload', async () => {
+  it('carries forks and imported homebrew in v18 while v17 stays reference-only', async () => {
     const sender = await seededDatabase();
     const fork = forkSrdSpell(sender, {
       sourceContentKey: '2024:fireball',
@@ -524,7 +526,39 @@ describe('bundled spell forks', () => {
     expect(JSON.stringify(shared)).not.toContain(
       'forked_from_content_key',
     );
-    expect(JSON.stringify(shared)).not.toContain(
+    const forkFingerprint = sender.scalar<string>(
+      `SELECT fingerprint_digest FROM catalog_content_fingerprints
+       WHERE content_kind = 'spell' AND content_key = ?
+         AND fingerprint_role = 'current'`,
+      [fork.contentKey],
+    );
+    expect(shared.portableContent?.content).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'spell',
+          content_key: fork.contentKey,
+          fingerprint_scheme: 'content-v1',
+          fingerprint_digest: forkFingerprint,
+        }),
+        expect.objectContaining({
+          kind: 'spell',
+          content_key: importedKey,
+          fingerprint_scheme: 'content-v1',
+          fingerprint_digest: expect.stringMatching(/^[0-9a-f]{64}$/),
+        }),
+      ]),
+    );
+    expect(JSON.stringify(shared.portableContent)).toContain(
+      'material_component_summary',
+    );
+
+    const referenceOnly = positionalToShareDocument(
+      shareDocumentToReferencePositional(shared),
+    );
+    expect(referenceOnly.version).toBe(18);
+    expect(referenceOnly.spellbook).toEqual(shared.spellbook);
+    expect(referenceOnly.portableContent).toBeUndefined();
+    expect(JSON.stringify(referenceOnly)).not.toContain(
       'material_component_summary',
     );
 
@@ -540,7 +574,7 @@ describe('bundled spell forks', () => {
     ]);
 
     const recipient = await seededDatabase();
-    expect(previewCharacterShare(recipient, shared).placeholderCount).toBe(2);
+    expect(previewCharacterShare(recipient, shared).placeholderCount).toBe(0);
     const imported = importCharacterShare(recipient, shared);
     expect(
       recipient
@@ -554,6 +588,39 @@ describe('bundled spell forks', () => {
            ORDER BY version.content_key`,
           [imported.characterId],
         )
+    ).toEqual([
+      {
+        content_key: fork.contentKey,
+        provenance: 'import',
+        forked_from_content_key: null,
+      },
+      {
+        content_key: importedKey,
+        provenance: 'import',
+        forked_from_content_key: null,
+      },
+    ]);
+
+    const fallbackRecipient = await seededDatabase();
+    expect(
+      previewCharacterShare(fallbackRecipient, referenceOnly).placeholderCount,
+    ).toBe(2);
+    const fallbackImported = importCharacterShare(
+      fallbackRecipient,
+      referenceOnly,
+    );
+    expect(
+      fallbackRecipient
+        .allRaw(
+          `SELECT version.content_key, version.provenance,
+                  version.forked_from_content_key
+           FROM wizard_spellbook_entries AS entry
+           INNER JOIN spell_versions AS version
+             ON version.id = entry.spell_version_id
+           WHERE entry.character_id = ?
+           ORDER BY version.content_key`,
+          [fallbackImported.characterId],
+        ),
     ).toEqual([
       {
         content_key: fork.contentKey,

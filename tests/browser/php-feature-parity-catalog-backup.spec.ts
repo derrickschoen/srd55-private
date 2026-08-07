@@ -252,7 +252,7 @@ test('whole-database and portable-character export/import round-trip, corrupt-ve
   }, workspaceImage.ids.character);
   expect(exported.character).toMatchObject({
     format: 'dnd-multiclass-spells/character',
-    version: 5,
+    version: 6,
     source_character_id: workspaceImage.ids.character,
   });
   expect(exported.database).toMatchObject({

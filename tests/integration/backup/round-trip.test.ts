@@ -478,6 +478,7 @@ describe('portable character backup', () => {
     historical.version = PRE_FLAVOR_CHARACTER_BACKUP_VERSION;
     historical.spell_definitions = emptyHistoricalSpellDefinitions();
     delete historical.content;
+    delete historical.supersessions;
     const root = historical.character as Record<string, unknown>;
     delete root.alignment;
     delete root.appearance;
@@ -533,6 +534,7 @@ describe('portable character backup', () => {
     historical.version = PRE_ARCHIVE_CHARACTER_BACKUP_VERSION;
     historical.spell_definitions = emptyHistoricalSpellDefinitions();
     delete historical.content;
+    delete historical.supersessions;
     delete (historical.character as Record<string, unknown>).archived_at;
     const activeTarget = await database();
     seedCatalog(activeTarget, true);
@@ -1510,6 +1512,7 @@ describe('a backup file written while the dormant orphan column existed', () => 
         spell_versions: [],
       },
       content: [],
+      supersessions: [],
     };
   }
 
@@ -1682,13 +1685,25 @@ describe('complete database backup', () => {
       keyKind: 'bundled-stable',
     });
     registerFixtureContentIdentity(lifecycle.database, {
-      kind: 'subclass', contentKey: 'expanded:subclass:image',
-      name: 'Image Subclass', keyKind: 'bundled-stable',
+      kind: 'subclass', contentKey: 'expanded:content.subclass:image-subclass',
+      name: 'Image Subclass', keyKind: 'asserted',
+    });
+    for (const [contentKey, name] of [
+      ['expanded:content.species:image-species', 'Image Species'],
+      ['expanded:content.species:image-species-revised', 'Image Species Revised'],
+    ] as const) {
+      registerFixtureContentIdentity(lifecycle.database, {
+        kind: 'species', contentKey, name, keyKind: 'asserted',
+      });
+    }
+    registerFixtureContentIdentity(lifecycle.database, {
+      kind: 'background', contentKey: 'expanded:content.background:image-background',
+      name: 'Image Background', keyKind: 'asserted',
     });
     lifecycle.database.exec(
       `UPDATE catalog_content_identities
        SET archived_at = '2042-03-04T05:06:07.000Z'
-       WHERE content_key = 'expanded:subclass:image'`,
+       WHERE content_key = 'expanded:content.subclass:image-subclass'`,
     );
     lifecycle.database.exec(`
       INSERT INTO class_definitions (
@@ -1697,9 +1712,22 @@ describe('complete database backup', () => {
       INSERT INTO subclass_definitions (
         content_key, class_definition_id, name, rules_edition, notes
       ) VALUES (
-        'expanded:subclass:image',
+        'expanded:content.subclass:image-subclass',
         (SELECT id FROM class_definitions WHERE content_key = 'expanded:class:image'),
         'Image Subclass', 'expanded', 'Non-empty subclass reference.'
+      );
+      INSERT INTO species_definitions (content_key, name, rules_edition)
+      VALUES
+        ('expanded:content.species:image-species', 'Image Species', 'expanded'),
+        ('expanded:content.species:image-species-revised', 'Image Species Revised', 'expanded');
+      INSERT INTO background_definitions (content_key, name, rules_edition)
+      VALUES ('expanded:content.background:image-background', 'Image Background', 'expanded');
+      INSERT INTO catalog_content_supersessions (
+        content_kind, superseded_content_key, successor_content_key, recorded_at
+      ) VALUES (
+        'species', 'expanded:content.species:image-species',
+        'expanded:content.species:image-species-revised',
+        '2042-03-04T06:07:08.000Z'
       );
     `);
     const backup = await exportDatabaseBackup(
@@ -1713,7 +1741,7 @@ describe('complete database backup', () => {
     );
     lifecycle.database.exec(
       `UPDATE catalog_content_identities SET archived_at = NULL
-       WHERE content_key = 'expanded:subclass:image'`,
+       WHERE content_key = 'expanded:content.subclass:image-subclass'`,
     );
 
     await importDatabaseBackup(lifecycle, backup);
@@ -1739,15 +1767,39 @@ describe('complete database backup', () => {
     ]);
     expect(lifecycle.database.allRaw(`
       SELECT name, notes FROM subclass_definitions
-      WHERE content_key = 'expanded:subclass:image'
+      WHERE content_key = 'expanded:content.subclass:image-subclass'
     `)).toEqual([{
       name: 'Image Subclass',
       notes: 'Non-empty subclass reference.',
     }]);
     expect(lifecycle.database.oneRaw(
       `SELECT archived_at FROM catalog_content_identities
-       WHERE content_key = 'expanded:subclass:image'`,
+       WHERE content_key = 'expanded:content.subclass:image-subclass'`,
     )).toEqual({ archived_at: '2042-03-04T05:06:07.000Z' });
+    expect(lifecycle.database.allRaw(
+      `SELECT content_key, name FROM species_definitions
+       WHERE content_key LIKE 'expanded:content.species:image-species%'
+       ORDER BY content_key`,
+    )).toEqual([
+      { content_key: 'expanded:content.species:image-species', name: 'Image Species' },
+      { content_key: 'expanded:content.species:image-species-revised', name: 'Image Species Revised' },
+    ]);
+    expect(lifecycle.database.allRaw(
+      `SELECT content_key, name FROM background_definitions
+       WHERE content_key = 'expanded:content.background:image-background'`,
+    )).toEqual([{
+      content_key: 'expanded:content.background:image-background',
+      name: 'Image Background',
+    }]);
+    expect(lifecycle.database.allRaw(
+      `SELECT content_kind, superseded_content_key, successor_content_key, recorded_at
+       FROM catalog_content_supersessions`,
+    )).toEqual([{
+      content_kind: 'species',
+      superseded_content_key: 'expanded:content.species:image-species',
+      successor_content_key: 'expanded:content.species:image-species-revised',
+      recorded_at: '2042-03-04T06:07:08.000Z',
+    }]);
 
     const connection = lifecycle.database.connection;
     await expect(

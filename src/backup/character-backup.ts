@@ -51,16 +51,20 @@ import {
   LEGACY_CHARACTER_BACKUP_VERSION,
   PRE_ARCHIVE_CHARACTER_BACKUP_VERSION,
   PRE_FLAVOR_CHARACTER_BACKUP_VERSION,
+  PRE_LINEAGE_CHARACTER_BACKUP_VERSION,
   PREVIOUS_CHARACTER_BACKUP_VERSION,
 } from './backup-version';
 import {
-  exportPortableContentClosure,
+  exportPortableContentBundle,
   portableContentKeyForExport,
   portableImportPlan,
   portableContentImportNodes,
+  restorePortableContentSupersessions,
   validatePortableContent,
+  validatePortableContentBundle,
   type PortableImportPlan,
   type PortableContentAggregate,
+  type PortableContentSupersession,
 } from './portable-content';
 import { CHARACTER_TEXT_LIMITS } from '../domain/character-limits';
 import {
@@ -136,6 +140,18 @@ export type CharacterBackupSpellDefinitions = {
 export interface CharacterBackupDocument {
   readonly format: typeof CHARACTER_BACKUP_FORMAT;
   readonly version: typeof CHARACTER_BACKUP_VERSION;
+  readonly exported_at: string;
+  readonly source_character_id: number;
+  readonly character: BackupRow;
+  readonly tables: CharacterBackupTables;
+  readonly references: CharacterBackupReferences;
+  readonly content: readonly PortableContentAggregate[];
+  readonly supersessions: readonly PortableContentSupersession[];
+}
+
+export interface PreLineageCharacterBackupDocument {
+  readonly format: typeof CHARACTER_BACKUP_FORMAT;
+  readonly version: typeof PRE_LINEAGE_CHARACTER_BACKUP_VERSION;
   readonly exported_at: string;
   readonly source_character_id: number;
   readonly character: BackupRow;
@@ -1215,6 +1231,7 @@ function validateDocument(input: unknown): ValidatedDocument {
   const version = document.version;
   if (
     version !== CHARACTER_BACKUP_VERSION &&
+    version !== PRE_LINEAGE_CHARACTER_BACKUP_VERSION &&
     version !== PREVIOUS_CHARACTER_BACKUP_VERSION &&
     version !== PRE_ARCHIVE_CHARACTER_BACKUP_VERSION &&
     version !== PRE_FLAVOR_CHARACTER_BACKUP_VERSION &&
@@ -1249,7 +1266,19 @@ function validateDocument(input: unknown): ValidatedDocument {
             'tables',
             'references',
             'content',
+            'supersessions',
           ]
+        : version === PRE_LINEAGE_CHARACTER_BACKUP_VERSION
+          ? [
+              'format',
+              'version',
+              'exported_at',
+              'source_character_id',
+              'character',
+              'tables',
+              'references',
+              'content',
+            ]
         : [
           'format',
           'version',
@@ -1312,6 +1341,7 @@ function validateDocument(input: unknown): ValidatedDocument {
   assertExactKeys(
     rawCharacter,
     version === CHARACTER_BACKUP_VERSION ||
+    version === PRE_LINEAGE_CHARACTER_BACKUP_VERSION ||
     version === PREVIOUS_CHARACTER_BACKUP_VERSION
       ? currentCharacterColumns
       : version === PRE_ARCHIVE_CHARACTER_BACKUP_VERSION
@@ -1321,6 +1351,7 @@ function validateDocument(input: unknown): ValidatedDocument {
   );
   const character: MutableRow =
     version === CHARACTER_BACKUP_VERSION ||
+    version === PRE_LINEAGE_CHARACTER_BACKUP_VERSION ||
     version === PREVIOUS_CHARACTER_BACKUP_VERSION
       ? rawCharacter
       : version === PRE_ARCHIVE_CHARACTER_BACKUP_VERSION
@@ -1504,12 +1535,21 @@ function validateDocument(input: unknown): ValidatedDocument {
       ? emptySpellDefinitions()
       : version === CHARACTER_BACKUP_VERSION
         ? emptySpellDefinitions()
+      : version === PRE_LINEAGE_CHARACTER_BACKUP_VERSION
+        ? emptySpellDefinitions()
       : validateSpellDefinitions(
           document.spell_definitions,
           referenceMaps.spell_versions,
         );
-  const content = version === CHARACTER_BACKUP_VERSION
+  const content = version === CHARACTER_BACKUP_VERSION ||
+      version === PRE_LINEAGE_CHARACTER_BACKUP_VERSION
     ? validatePortableContent(document.content)
+    : Object.freeze([]);
+  const supersessions = version === CHARACTER_BACKUP_VERSION
+    ? validatePortableContentBundle({
+        content,
+        supersessions: document.supersessions,
+      }).supersessions
     : Object.freeze([]);
 
   // The five snapshot tables get their shape checked inside
@@ -1620,6 +1660,7 @@ function validateDocument(input: unknown): ValidatedDocument {
         ]),
       ) as unknown as CharacterBackupReferences,
       content,
+      supersessions,
     },
     legacySpellDefinitions: spellDefinitions,
     snapshots,
@@ -2051,6 +2092,15 @@ export function exportCharacterBackup(
     ]),
   ) as unknown as CharacterBackupReferences;
 
+  const portable = exportPortableContentBundle(
+    db,
+    referenceKinds.flatMap((referenceKind) =>
+      references[referenceKind].map((reference) => ({
+        kind: contentKindForReference[referenceKind],
+        contentKey: reference.content_key as ContentKey,
+      })),
+    ),
+  );
   const result: CharacterBackupDocument = {
     format: CHARACTER_BACKUP_FORMAT,
     version: CHARACTER_BACKUP_VERSION,
@@ -2059,15 +2109,8 @@ export function exportCharacterBackup(
     character,
     tables: allTables,
     references: portableReferences,
-    content: exportPortableContentClosure(
-      db,
-      referenceKinds.flatMap((referenceKind) =>
-        references[referenceKind].map((reference) => ({
-          kind: contentKindForReference[referenceKind],
-          contentKey: reference.content_key as ContentKey,
-        })),
-      ),
-    ),
+    content: portable.content,
+    supersessions: portable.supersessions,
   };
   validateCharacterBackup(result);
   return result;
@@ -2276,12 +2319,17 @@ function restoreSpellDefinitions(
 function restorePortableContent(
   db: DatabaseContext,
   input: unknown,
+  supersessions: unknown,
 ): {
   readonly portableSpellKeys: ReadonlySet<string>;
   readonly targets: ReadonlyMap<string, string>;
   readonly spellOutcomes: readonly CharacterBackupSpellOutcome[];
 } {
-  const entries = validatePortableContent(input);
+  const bundle = validatePortableContentBundle({
+    content: input,
+    supersessions,
+  });
+  const entries = bundle.content;
   if (entries.length === 0) {
     return {
       portableSpellKeys: new Set(),
@@ -2290,8 +2338,8 @@ function restorePortableContent(
     };
   }
   const nodes = portableContentImportNodes(db, entries);
-  const sourceKeyByNode = new Map(
-    nodes.map((node, index) => [node.id, entries[index]!.content_key]),
+  const entryByNode = new Map(
+    nodes.map((node, index) => [node.id, entries[index]!]),
   );
   const plan = planContentImport(db, nodes);
   if (plan.reviews.length > 0) {
@@ -2309,21 +2357,30 @@ function restorePortableContent(
     );
   }
   const targets = new Map<string, string>();
+  const lineageTargets = new Map<string, ContentKey>();
   const spellOutcomes: CharacterBackupSpellOutcome[] = [];
   for (const outcome of committed.outcomes) {
     if (outcome.kind === 'refused' || outcome.kind === 'review') continue;
-    const sourceKey = sourceKeyByNode.get(outcome.id);
-    if (sourceKey === undefined) continue;
-    targets.set(sourceKey, outcome.contentKey);
-    const entry = entries.find((candidate) => candidate.content_key === sourceKey);
-    if (entry?.kind === 'spell') {
+    const entry = entryByNode.get(outcome.id);
+    if (entry === undefined) continue;
+    targets.set(entry.content_key, outcome.contentKey);
+    lineageTargets.set(
+      `${entry.kind}\u0000${entry.content_key}`,
+      outcome.contentKey,
+    );
+    if (entry.kind === 'spell') {
       spellOutcomes.push(Object.freeze({
-        contentKey: sourceKey,
+        contentKey: entry.content_key,
         targetContentKey: outcome.contentKey,
         kind: outcome.kind === 'create' ? 'adopted' : 'matched',
       }));
     }
   }
+  restorePortableContentSupersessions(
+    db,
+    bundle,
+    lineageTargets,
+  );
   return {
     portableSpellKeys: new Set(
       entries.filter((entry) => entry.kind === 'spell').map((entry) => entry.content_key),
@@ -3898,6 +3955,7 @@ export function importCharacterBackup(
     const restoredContent = restorePortableContent(
       transaction,
       validated.document.content,
+      validated.document.supersessions,
     );
     const portableSpellKeys = new Set([
       ...restoredSpells.portableKeys,

@@ -12,9 +12,24 @@ import type {
 import {
   encodeShareFragment,
   tryEncodeShareFragment,
+  tryEncodeReferenceOnlyShareFragment,
   type ShareEncodeResult,
 } from './codec';
 import type { CharacterShareDocument } from './schema';
+import type { ContentKind } from '../catalog/content-identity';
+
+export interface OmittedShareContent {
+  readonly kind: ContentKind;
+  readonly contentKey: string;
+}
+
+export type ShareFragmentResult =
+  | ShareEncodeResult
+  | {
+      readonly kind: 'encoded';
+      readonly fragment: string;
+      readonly omittedContent: readonly OmittedShareContent[];
+    };
 
 export interface ShareClient {
   exportDebug(
@@ -28,7 +43,7 @@ export interface ShareClient {
   createFragmentResult(
     characterId: number,
     options?: ShareExportOptions,
-  ): Promise<ShareEncodeResult>;
+  ): Promise<ShareFragmentResult>;
   preview(
     fragment: string,
     choices?: ContentImportChoices,
@@ -69,7 +84,20 @@ export function createShareClient(rpc: RpcClient): ShareClient {
     createFragmentResult: async (
       characterId: number,
       options: ShareExportOptions = {},
-    ) => tryEncodeShareFragment(await exportDebug(characterId, options)),
+    ) => {
+      const document = await exportDebug(characterId, options);
+      if (document.portableContent === undefined) {
+        return tryEncodeReferenceOnlyShareFragment(document);
+      }
+      const embedded = await tryEncodeShareFragment(document);
+      if (embedded.kind === 'encoded') return embedded;
+      const fallback = await tryEncodeReferenceOnlyShareFragment(document);
+      if (fallback.kind === 'too_large') return fallback;
+      return Object.freeze({
+        ...fallback,
+        omittedContent: omittedPortableReferences(document),
+      });
+    },
     preview: (fragment: string, choices = Object.freeze({})) =>
       rpc.call<
         { fragment: string; choices: ContentImportChoices },
@@ -93,4 +121,45 @@ export function createShareClient(rpc: RpcClient): ShareClient {
       ShareImportCommitResult
     >('share.importCharacter', { fragment, token, choices }),
   });
+}
+
+function omittedPortableReferences(
+  document: CharacterShareDocument,
+): readonly OmittedShareContent[] {
+  const carried = new Set((document.portableContent?.content ?? []).map(
+    (entry) => `${entry.kind}\u0000${entry.content_key}`,
+  ));
+  const references: OmittedShareContent[] = [];
+  for (const item of document.classes) {
+    references.push({ kind: 'class', contentKey: item.classKey });
+    if (item.subclassKey !== undefined) {
+      references.push({ kind: 'subclass', contentKey: item.subclassKey });
+    }
+  }
+  for (const item of document.sources) {
+    if (item.generated !== true && item.key !== undefined) {
+      references.push({ kind: item.type, contentKey: item.key });
+    }
+  }
+  const spellKeys = [
+    ...document.selections.map((item) => item.spellKey),
+    ...document.spellbook.flatMap((item) =>
+      item.spellKey === undefined ? [] : [item.spellKey]
+    ),
+    ...document.preferences.map((item) => item.spellKey),
+    ...(document.loadouts ?? []).flatMap((loadout) =>
+      loadout.entries.map((item) => item.spellKey)
+    ),
+  ];
+  references.push(...spellKeys.map((contentKey) => ({
+    kind: 'spell' as const,
+    contentKey,
+  })));
+  const seen = new Set<string>();
+  return Object.freeze(references.filter((reference) => {
+    const marker = `${reference.kind}\u0000${reference.contentKey}`;
+    if (!carried.has(marker) || seen.has(marker)) return false;
+    seen.add(marker);
+    return true;
+  }));
 }

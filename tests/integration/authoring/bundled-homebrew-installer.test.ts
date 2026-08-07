@@ -26,6 +26,12 @@ import { UpdateClassCommand } from '../../../src/commands/update-class';
 import { raiseClassLevelForTest } from '../../helpers/class-levels';
 import { BuildReportBuilder } from '../../../src/reports/build-report-builder';
 import { SpellAccessBuilder } from '../../../src/access/spell-access-builder';
+import { CatalogImporter } from '../../../src/catalog/catalog-importer';
+import {
+  CONTENT_FINGERPRINT_SCHEME_V1,
+  type ContentFingerprintDigest,
+} from '../../../src/catalog/content-identity';
+import { featProjectorV1Vector } from '../../unit/catalog/fixtures/source-projector-v1-vectors';
 
 const connections: Database[] = [];
 
@@ -46,6 +52,84 @@ function spellStudent(): SubclassAuthoringDraft {
     entry.catalog_key === 'spell-student')?.revisions[0];
   if (document?.kind !== 'subclass') throw new Error('Spell Student fixture is missing.');
   return document;
+}
+
+function installPortableOrigins(db: DatabaseContext): {
+  readonly speciesKey: ContentKey;
+  readonly successorSpeciesKey: ContentKey;
+  readonly backgroundKey: ContentKey;
+} {
+  const importer = new CatalogImporter(db);
+  importer.import({ documents: [JSON.stringify([{
+    kind: 'feat',
+    aggregate: { ...featProjectorV1Vector.aggregate, category: 'origin' },
+  }])] });
+  const featKey = 'expanded:content.feat:keen-memory' as ContentKey;
+  const digest = db.scalar<string>(
+    `SELECT fingerprint_digest FROM catalog_content_fingerprints
+     WHERE content_kind = 'feat' AND content_key = ?
+       AND fingerprint_role = 'current'`,
+    [featKey],
+  );
+  if (digest === null) throw new Error('Portable origin feat fingerprint is missing.');
+  const featReference = {
+    kind: 'feat' as const,
+    scheme: CONTENT_FINGERPRINT_SCHEME_V1,
+    digest: digest as ContentFingerprintDigest,
+  };
+  const species = (name: string, referenceText: string) => ({
+    kind: 'species',
+    name,
+    rules_edition: 'expanded',
+    reference_text: referenceText,
+    repeatable: false,
+    creature_type: 'Chronal Being',
+    primary_size: 'Medium',
+    alternate_size: null,
+    walking_speed_feet: 30,
+    grants: [],
+    traits: [{
+      sort_order: 1,
+      name: 'Temporal Step',
+      description: 'Moves between adjacent moments.',
+      effects: [],
+    }],
+  });
+  importer.import({ documents: [JSON.stringify([
+    { kind: 'species', aggregate: species('Portable Species', 'First edition.') },
+    { kind: 'species', aggregate: species('Portable Species Revised', 'Successor edition.') },
+    { kind: 'background', aggregate: {
+      kind: 'background',
+      name: 'Portable Background',
+      rules_edition: 'expanded',
+      reference_text: 'A complete authored background aggregate.',
+      repeatable: false,
+      grants: [],
+      suggested_abilities: ['intelligence', 'wisdom', 'charisma'],
+      default_origin_feat_content_key: featKey,
+      default_origin_feat: featReference,
+      default_origin_feat_display_name: 'Keen Memory',
+      skill_proficiencies: ['arcana', 'insight'],
+      tool_reference_text: null,
+      equipment_option_a_description: 'A journal.',
+      equipment_option_b_description: 'A map.',
+      equipment_option_a: [],
+      equipment_option_b: [],
+      effects: [],
+    } },
+  ])] });
+  const speciesKey = 'expanded:content.species:portable-species' as ContentKey;
+  const successorSpeciesKey =
+    'expanded:content.species:portable-species-revised' as ContentKey;
+  const backgroundKey =
+    'expanded:content.background:portable-background' as ContentKey;
+  db.exec(
+    `INSERT INTO catalog_content_supersessions (
+       content_kind, superseded_content_key, successor_content_key, recorded_at
+     ) VALUES ('species', ?, ?, '2042-08-07T11:59:00.000Z')`,
+    [speciesKey, successorSpeciesKey],
+  );
+  return { speciesKey, successorSpeciesKey, backgroundKey };
 }
 
 function catalogCensus(db: DatabaseContext) {
@@ -314,7 +398,7 @@ describe('bundled authored-kind installer', () => {
     expect(db.scalar<number>('SELECT count(*) FROM catalog_content_drafts')).toBe(0);
   }, 20_000);
 
-  it('round-trips the complete external subclass aggregate through full character export', async () => {
+  it('round-trips all three authored kinds, lineage, and their dependent character through full export', async () => {
     // Measured alone at 2.56s; 20s retains contention headroom.
     const source = await database();
     const plan = planBundledHomebrewInstall(source);
@@ -330,15 +414,27 @@ describe('bundled authored-kind installer', () => {
       [barbedCourt.contentKey],
     );
     if (definition === null) throw new Error('Barbed Court definition is missing.');
-    const characterId = source.exec(
-      "INSERT INTO characters (name) VALUES ('Portable Barbed Court')",
-    ).lastInsertId;
+    const origins = installPortableOrigins(source);
+    const characterId = applySubclass(source, barbedCourt.contentKey, 9);
+    const speciesId = source.scalar<number>(
+      'SELECT id FROM species_definitions WHERE content_key = ?',
+      [origins.speciesKey],
+    );
+    const backgroundId = source.scalar<number>(
+      'SELECT id FROM background_definitions WHERE content_key = ?',
+      [origins.backgroundKey],
+    );
+    if (speciesId === null || backgroundId === null) {
+      throw new Error('Portable authored origin definitions are missing.');
+    }
     source.exec(
-      `INSERT INTO character_class_levels (
-         character_id, class_definition_id, subclass_definition_id, level,
-         is_starting_class
-       ) VALUES (?, ?, ?, 9, 1)`,
-      [characterId, Number(definition.class_definition_id), Number(definition.id)],
+      `INSERT INTO character_source_instances (
+         character_id, instance_uuid, source_type, source_definition_id,
+         display_name
+       ) VALUES
+         (?, 'portable-species-source', 'species', ?, 'Portable Species'),
+         (?, 'portable-background-source', 'background', ?, 'Portable Background')`,
+      [characterId, speciesId, characterId, backgroundId],
     );
 
     const backup = exportCharacterBackup(
@@ -352,13 +448,44 @@ describe('bundled authored-kind installer', () => {
         content_key: barbedCourt.contentKey,
         aggregate: expect.objectContaining({ name: 'Warrior of the Barbed Court' }),
       }),
+      expect.objectContaining({
+        kind: 'species',
+        content_key: origins.speciesKey,
+        aggregate: expect.objectContaining({ name: 'Portable Species' }),
+      }),
+      expect.objectContaining({
+        kind: 'species',
+        content_key: origins.successorSpeciesKey,
+        aggregate: expect.objectContaining({ name: 'Portable Species Revised' }),
+      }),
+      expect.objectContaining({
+        kind: 'background',
+        content_key: origins.backgroundKey,
+        aggregate: expect.objectContaining({ name: 'Portable Background' }),
+      }),
     ]));
+    expect(backup.supersessions).toEqual([{
+      content_kind: 'species',
+      superseded_content_key: origins.speciesKey,
+      successor_content_key: origins.successorSpeciesKey,
+      recorded_at: '2042-08-07T11:59:00.000Z',
+    }]);
     const sourceProjection = projectStoredAuthoredContentV1(source, {
       kind: 'subclass',
       contentKey: barbedCourt.contentKey,
       references: storedAuthoredRegistryReferencesV1(source),
     });
     const sourceAggregate = sourceProjection.aggregate;
+    const sourceSpecies = projectStoredAuthoredContentV1(source, {
+      kind: 'species',
+      contentKey: origins.speciesKey,
+      references: storedAuthoredRegistryReferencesV1(source),
+    });
+    const sourceBackground = projectStoredAuthoredContentV1(source, {
+      kind: 'background',
+      contentKey: origins.backgroundKey,
+      references: storedAuthoredRegistryReferencesV1(source),
+    });
 
     const target = await database();
     const imported = importCharacterBackup(target, backup);
@@ -374,6 +501,39 @@ describe('bundled authored-kind installer', () => {
     expect(importedDefinition).toMatchObject({
       name: 'Warrior of the Barbed Court', catalog_layer: 'external',
     });
+    expect(target.allRaw(
+      `SELECT source.source_type, identity.content_key, identity.catalog_layer
+       FROM character_source_instances AS source
+       JOIN catalog_content_identities AS identity
+         ON identity.content_kind = source.source_type
+        AND identity.content_key = CASE source.source_type
+          WHEN 'species' THEN (
+            SELECT content_key FROM species_definitions WHERE id = source.source_definition_id
+          )
+          WHEN 'background' THEN (
+            SELECT content_key FROM background_definitions WHERE id = source.source_definition_id
+          )
+        END
+       WHERE source.character_id = ?
+         AND source.source_type IN ('species', 'background')
+       ORDER BY source.source_type`,
+      [imported.characterId],
+    )).toEqual([
+      {
+        source_type: 'background',
+        content_key: origins.backgroundKey,
+        catalog_layer: 'external',
+      },
+      {
+        source_type: 'species',
+        content_key: origins.speciesKey,
+        catalog_layer: 'external',
+      },
+    ]);
+    expect(target.allRaw(
+      `SELECT content_kind, superseded_content_key, successor_content_key, recorded_at
+       FROM catalog_content_supersessions`,
+    )).toEqual(backup.supersessions);
     if (importedDefinition === null) throw new Error('Imported Barbed Court is missing.');
     const destinationProjection = projectStoredAuthoredContentV1(target, {
       kind: 'subclass',
@@ -400,5 +560,15 @@ describe('bundled authored-kind installer', () => {
     expect(destinationAggregate.features).toEqual(sourceAggregate.features);
     expect(destinationAggregate.grants).toEqual(sourceAggregate.grants);
     expect(destinationAggregate).toEqual(sourceAggregate);
+    expect(projectStoredAuthoredContentV1(target, {
+      kind: 'species',
+      contentKey: origins.speciesKey,
+      references: storedAuthoredRegistryReferencesV1(target),
+    })).toEqual(sourceSpecies);
+    expect(projectStoredAuthoredContentV1(target, {
+      kind: 'background',
+      contentKey: origins.backgroundKey,
+      references: storedAuthoredRegistryReferencesV1(target),
+    })).toEqual(sourceBackground);
   }, 20_000);
 });

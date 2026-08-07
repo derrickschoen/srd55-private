@@ -74,23 +74,31 @@ const SOURCE_LABEL: Readonly<Record<string, string>> = {
   background: 'background',
 };
 
+/** One shared label for sender warnings and recipient import remedies. */
+export function contentImportLabel(type: string, key: string): string {
+  const label = type === 'class' || type === 'subclass' || type === 'spell'
+    ? type
+    : SOURCE_LABEL[type] ?? type;
+  return `${label} '${key}'`;
+}
+
 export function missingClassIssue(classKey: string): ShareImportIssue {
+  const required = contentImportLabel('class', classKey);
   return {
     code: 'missing_class',
     contentKeys: [classKey],
-    summary: `your catalog has no class '${classKey}'.`,
-    remedy:
-      'Load a catalog that defines this class, then open the link again.',
+    summary: `your catalog has no ${required}.`,
+    remedy: `Import ${required}, then open the link again.`,
   };
 }
 
 export function missingSubclassIssue(subclassKey: string): ShareImportIssue {
+  const required = contentImportLabel('subclass', subclassKey);
   return {
     code: 'missing_subclass',
     contentKeys: [subclassKey],
-    summary: `your catalog has no subclass '${subclassKey}'.`,
-    remedy:
-      'Load a catalog that defines this subclass, then open the link again.',
+    summary: `your catalog has no ${required}.`,
+    remedy: `Import ${required}, then open the link again.`,
   };
 }
 
@@ -98,12 +106,12 @@ export function missingSourceIssue(
   type: string,
   key: string,
 ): ShareImportIssue {
-  const label = SOURCE_LABEL[type] ?? type;
+  const required = contentImportLabel(type, key);
   return {
     code: 'missing_source',
     contentKeys: [key],
-    summary: `your catalog has no ${label} '${key}'.`,
-    remedy: `Load a catalog that defines this ${label}, then open the link again.`,
+    summary: `your catalog has no ${required}.`,
+    remedy: `Import ${required}, then open the link again.`,
   };
 }
 
