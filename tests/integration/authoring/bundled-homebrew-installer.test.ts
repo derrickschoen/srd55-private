@@ -1,0 +1,404 @@
+import type { Database } from '@sqlite.org/sqlite-wasm';
+import { afterEach, describe, expect, it } from 'vitest';
+import {
+  BUNDLED_HOMEBREW_CATALOG,
+  type BundledHomebrewCatalogEntry,
+} from '../../../src/authoring/bundled-homebrew-catalog';
+import {
+  commitBundledHomebrewInstall,
+  planBundledHomebrewInstall,
+} from '../../../src/authoring/bundled-homebrew-installer';
+import type { SubclassAuthoringDraft } from '../../../src/authoring/contracts';
+import type { ContentKey } from '../../../src/domain/ids';
+import { applicationSeed } from '../../../src/db/bootstrap';
+import { DatabaseContext } from '../../../src/db/database';
+import { openTestDatabase } from '../../helpers/open-db';
+import {
+  exportCharacterBackup,
+  importCharacterBackup,
+} from '../../../src/backup/character-backup';
+import {
+  projectStoredAuthoredContentV1,
+  storedAuthoredRegistryReferencesV1,
+} from '../../../src/catalog/stored-authored-content-projector-v1';
+import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
+import { UpdateClassCommand } from '../../../src/commands/update-class';
+import { raiseClassLevelForTest } from '../../helpers/class-levels';
+import { BuildReportBuilder } from '../../../src/reports/build-report-builder';
+import { SpellAccessBuilder } from '../../../src/access/spell-access-builder';
+
+const connections: Database[] = [];
+
+afterEach(() => {
+  for (const connection of connections.splice(0)) connection.close();
+});
+
+async function database(): Promise<DatabaseContext> {
+  const connection = await openTestDatabase();
+  connections.push(connection);
+  const db = new DatabaseContext(connection);
+  applicationSeed(db);
+  return db;
+}
+
+function spellStudent(): SubclassAuthoringDraft {
+  const document = BUNDLED_HOMEBREW_CATALOG.find((entry) =>
+    entry.catalog_key === 'spell-student')?.revisions[0];
+  if (document?.kind !== 'subclass') throw new Error('Spell Student fixture is missing.');
+  return document;
+}
+
+function catalogCensus(db: DatabaseContext) {
+  return {
+    identities: db.allRaw(
+      'SELECT content_kind, content_key FROM catalog_content_identities ORDER BY content_kind, content_key',
+    ),
+    definitions: db.allRaw('SELECT id, content_key FROM subclass_definitions ORDER BY id'),
+    progressions: db.allRaw(
+      'SELECT id, subclass_definition_id, class_level FROM subclass_progressions ORDER BY id',
+    ),
+    features: db.allRaw(
+      'SELECT id, subclass_definition_id, sort_order FROM subclass_features ORDER BY id',
+    ),
+    fingerprints: db.allRaw(
+      `SELECT content_kind, content_key, fingerprint_scheme, fingerprint_digest, fingerprint_role
+       FROM catalog_content_fingerprints
+       ORDER BY content_kind, content_key, fingerprint_scheme, fingerprint_digest, fingerprint_role`,
+    ),
+    aliases: db.allRaw(
+      `SELECT content_kind, alias_key, content_key, alias_kind
+       FROM catalog_content_aliases ORDER BY content_kind, alias_key`,
+    ),
+    lineage: db.allRaw(
+      `SELECT content_kind, superseded_content_key, successor_content_key
+       FROM catalog_content_supersessions ORDER BY content_kind, superseded_content_key`,
+    ),
+    drafts: db.allRaw(
+      'SELECT draft_uuid, content_kind, revision FROM catalog_content_drafts ORDER BY draft_uuid',
+    ),
+  };
+}
+
+function applySubclass(db: DatabaseContext, contentKey: ContentKey, level: number): number {
+  const definition = db.oneRaw(
+    'SELECT id, class_definition_id FROM subclass_definitions WHERE content_key = ?',
+    [contentKey],
+  );
+  if (definition === null) throw new Error('Installed subclass definition is missing.');
+  const characterId = db.exec("INSERT INTO characters (name) VALUES ('Bundled Subclass Adept')")
+    .lastInsertId;
+  const classId = Number(definition.class_definition_id);
+  const subclassId = Number(definition.id);
+  const update = () => new UpdateClassCommand(
+    db,
+    { type: 'update_class', class_definition_id: classId, subclass_definition_id: subclassId },
+    new CharacterCommandIntegrity('bundled-barbed-court-apply'),
+  ).apply(characterId);
+  update();
+  raiseClassLevelForTest(db, characterId, classId, level);
+  update();
+  return characterId;
+}
+
+describe('bundled authored-kind installer', () => {
+  it('publishes all three entries atomically through drafts and is an exact-fingerprint no-op on repeat', async () => {
+    // Measured alone at 3.58s; 20s retains contention headroom.
+    const db = await database();
+    const beforeRoots = db.scalar<number>(
+      "SELECT count(*) FROM catalog_content_identities WHERE catalog_layer = 'external'",
+    );
+    const firstPlan = planBundledHomebrewInstall(db);
+
+    expect(firstPlan.entries.map((entry) => [entry.name, entry.outcome, entry.error])).toEqual([
+      ['Veteran', 'create', null],
+      ['Warrior of the Barbed Court', 'create', null],
+      ['Spell Student', 'create', null],
+    ]);
+    expect(commitBundledHomebrewInstall(db, firstPlan.token)).toMatchObject({
+      kind: 'committed',
+      outcomes: [{ kind: 'create' }, { kind: 'create' }, { kind: 'create' }],
+    });
+    expect(db.scalar<number>("SELECT count(*) FROM catalog_content_identities WHERE catalog_layer = 'external'"))
+      .toBe((beforeRoots ?? 0) + 3);
+    expect(db.scalar<number>('SELECT count(*) FROM catalog_content_drafts')).toBe(0);
+
+    const rootsAfterFirst = db.scalar<number>('SELECT count(*) FROM catalog_content_identities');
+    const secondPlan = planBundledHomebrewInstall(db);
+    expect(secondPlan.entries.map((entry) => entry.outcome)).toEqual([
+      'matched_existing', 'matched_existing', 'matched_existing',
+    ]);
+    expect(commitBundledHomebrewInstall(db, secondPlan.token)).toMatchObject({
+      kind: 'committed',
+      outcomes: [{ kind: 'match' }, { kind: 'match' }, { kind: 'match' }],
+    });
+    expect(db.scalar<number>('SELECT count(*) FROM catalog_content_identities')).toBe(rootsAfterFirst);
+    expect(db.scalar<number>('SELECT count(*) FROM catalog_content_supersessions')).toBe(0);
+    expect(db.scalar<number>('SELECT count(*) FROM catalog_content_drafts')).toBe(0);
+  }, 20_000);
+
+  it('publishes and applies Barbed Court as a Wisdom third-caster with its curated grants', async () => {
+    const db = await database();
+    const plan = planBundledHomebrewInstall(db);
+    const installed = commitBundledHomebrewInstall(db, plan.token);
+    if (installed.kind !== 'committed') throw new Error('Bundled catalog install failed.');
+    const outcome = installed.outcomes.find((candidate) =>
+      candidate.id === 'subclass:bundled:warrior-of-the-barbed-court');
+    if (outcome === undefined || outcome.kind === 'refused' || outcome.kind === 'review') {
+      throw new Error('Barbed Court install outcome is missing.');
+    }
+    const characterId = applySubclass(db, outcome.contentKey, 7);
+    const report = new BuildReportBuilder(db).build(characterId);
+    expect(report.classes[0]).toMatchObject({
+      name: 'Monk',
+      subclass: 'Warrior of the Barbed Court',
+      class_level: 7,
+      spellcasting_ability: 'wisdom',
+      progression_type: 'third_down',
+    });
+    expect(db.allRaw(
+      `SELECT class_level FROM subclass_progressions
+       WHERE subclass_definition_id = ? ORDER BY class_level`,
+      [db.scalar<number>(
+        'SELECT id FROM subclass_definitions WHERE content_key = ?',
+        [outcome.contentKey],
+      )],
+    ).map((row) => Number(row.class_level))).toEqual(
+      Array.from({ length: 20 }, (_, index) => index + 1),
+    );
+    expect(new SpellAccessBuilder(db).buildForCharacter(characterId).map((spell) => ({
+      name: spell.spell_name,
+      ability: spell.spellcasting_ability,
+      alwaysPrepared: spell.always_prepared,
+    }))).toEqual(expect.arrayContaining([
+      { name: 'Bane', ability: 'wisdom', alwaysPrepared: true },
+      { name: 'Command', ability: 'wisdom', alwaysPrepared: true },
+      { name: 'Dissonant Whispers', ability: 'wisdom', alwaysPrepared: true },
+      { name: 'Hideous Laughter', ability: 'wisdom', alwaysPrepared: true },
+      { name: 'Enthrall', ability: 'wisdom', alwaysPrepared: true },
+      { name: 'Suggestion', ability: 'wisdom', alwaysPrepared: true },
+      { name: 'Prestidigitation', ability: 'wisdom', alwaysPrepared: true },
+      { name: 'Vicious Mockery', ability: 'wisdom', alwaysPrepared: true },
+    ]));
+  }, 20_000);
+
+  it('applies Spell Student through the publisher with its derived level-7 slots', async () => {
+    const db = await database();
+    const plan = planBundledHomebrewInstall(db);
+    const installed = commitBundledHomebrewInstall(db, plan.token);
+    if (installed.kind !== 'committed') throw new Error('Bundled catalog install failed.');
+    const outcome = installed.outcomes.find((candidate) =>
+      candidate.id === 'subclass:bundled:spell-student');
+    if (outcome === undefined || outcome.kind === 'refused' || outcome.kind === 'review') {
+      throw new Error('Spell Student install outcome is missing.');
+    }
+    const characterId = applySubclass(db, outcome.contentKey, 7);
+
+    expect(new BuildReportBuilder(db).build(characterId).caster.slots)
+      .toEqual([{ level: 1, count: 3 }]);
+  }, 20_000);
+
+  it('publishes registered changed bytes as a CI-7 successor and leaves the previous root in place', async () => {
+    // Measured alone at 2.02s; 20s retains contention headroom.
+    const db = await database();
+    const first = spellStudent();
+    const revised: SubclassAuthoringDraft = {
+      ...first,
+      reference_text: `${first.reference_text} The lessons are carefully recorded.`,
+    };
+    const v1 = Object.freeze([Object.freeze({
+      catalog_key: 'spell-student',
+      revisions: Object.freeze([first] as const),
+    })] as const satisfies readonly BundledHomebrewCatalogEntry[]);
+    const v2 = Object.freeze([Object.freeze({
+      catalog_key: 'spell-student',
+      revisions: Object.freeze([first, revised] as const),
+    })] as const satisfies readonly BundledHomebrewCatalogEntry[]);
+    const initial = planBundledHomebrewInstall(db, v1);
+    const initialCommit = commitBundledHomebrewInstall(db, initial.token, v1);
+    if (initialCommit.kind !== 'committed') throw new Error('Initial catalog install failed.');
+    const oldKey = initialCommit.outcomes[0];
+    if (oldKey?.kind !== 'create') throw new Error('Initial catalog root was not created.');
+
+    const successorPlan = planBundledHomebrewInstall(db, v2);
+    expect(successorPlan.entries).toEqual([
+      expect.objectContaining({ catalog_key: 'spell-student', outcome: 'successor' }),
+    ]);
+    const successor = commitBundledHomebrewInstall(db, successorPlan.token, v2);
+    if (successor.kind !== 'committed') throw new Error('Successor catalog install failed.');
+    const newKey = successor.outcomes[0];
+    if (newKey?.kind !== 'create') throw new Error('Successor catalog root was not created.');
+
+    expect(newKey.contentKey).not.toBe(oldKey.contentKey);
+    expect(db.oneRaw(
+      `SELECT superseded_content_key, successor_content_key
+       FROM catalog_content_supersessions WHERE content_kind = 'subclass'`,
+    )).toEqual({
+      superseded_content_key: oldKey.contentKey,
+      successor_content_key: newKey.contentKey,
+    });
+    expect(db.scalar<number>(
+      `SELECT count(*) FROM subclass_definitions WHERE name LIKE 'Spell Student%'`,
+    )).toBe(2);
+    const repeated = planBundledHomebrewInstall(db, v2);
+    expect(repeated.entries[0]?.outcome).toBe('matched_existing');
+    expect(commitBundledHomebrewInstall(db, repeated.token, v2)).toMatchObject({
+      kind: 'committed', outcomes: [{ kind: 'match', contentKey: newKey.contentKey }],
+    });
+  }, 20_000);
+
+  it('rolls back every captured catalog row when a later entry fails only during commit', async () => {
+    const db = await database();
+    const before = catalogCensus(db);
+    const catalog = Object.freeze([
+      BUNDLED_HOMEBREW_CATALOG[0],
+      BUNDLED_HOMEBREW_CATALOG[2],
+    ] as const satisfies readonly BundledHomebrewCatalogEntry[]);
+
+    const plan = planBundledHomebrewInstall(db, catalog);
+    expect(plan.entries.map((entry) => entry.outcome)).toEqual(['create', 'create']);
+    let spellStudentInsertions = 0;
+    connections.at(-1)?.createFunction('bundled_commit_probe', () => {
+      spellStudentInsertions += 1;
+      if (spellStudentInsertions >= 7) throw new Error('Injected commit-only failure.');
+      return null;
+    });
+    db.exec(
+      `CREATE TEMP TRIGGER bundled_commit_only_failure
+       BEFORE INSERT ON subclass_definitions
+       WHEN NEW.name = 'Spell Student'
+       BEGIN SELECT bundled_commit_probe(); END`,
+    );
+    expect(commitBundledHomebrewInstall(db, plan.token, catalog)).toEqual({
+      kind: 'refused',
+      reason: 'commit_failed',
+      outcomes: plan.outcomes,
+    });
+    expect(spellStudentInsertions).toBeGreaterThanOrEqual(7);
+    expect(catalogCensus(db)).toEqual(before);
+  }, 20_000);
+
+  it('refuses an unregistered same-key root without leaving any staged draft or partial catalog write', async () => {
+    const db = await database();
+    const first = spellStudent();
+    const unrelated: SubclassAuthoringDraft = {
+      ...first,
+      reference_text: 'Unrelated user-authored bytes under the same asserted key.',
+    };
+    const unrelatedCatalog = Object.freeze([Object.freeze({
+      catalog_key: 'unrelated',
+      revisions: Object.freeze([unrelated] as const),
+    })] as const satisfies readonly BundledHomebrewCatalogEntry[]);
+    const unrelatedPlan = planBundledHomebrewInstall(db, unrelatedCatalog);
+    expect(commitBundledHomebrewInstall(db, unrelatedPlan.token, unrelatedCatalog).kind).toBe('committed');
+    const roots = db.scalar<number>('SELECT count(*) FROM catalog_content_identities');
+
+    const refused = planBundledHomebrewInstall(db, [Object.freeze({
+      catalog_key: 'spell-student',
+      revisions: Object.freeze([first] as const),
+    })]);
+    expect(refused.outcomes).toEqual([
+      expect.objectContaining({ kind: 'refused', reason: 'install_refused' }),
+    ]);
+    expect(refused.entries).toEqual([{
+      catalog_key: 'spell-student',
+      kind: 'subclass',
+      name: 'Spell Student',
+      outcome: 'refused',
+      error: 'Installed content at "2024:content.subclass:spell-student" is not a registered revision of bundled entry "spell-student".',
+    }]);
+    expect(commitBundledHomebrewInstall(db, refused.token, [Object.freeze({
+      catalog_key: 'spell-student',
+      revisions: Object.freeze([first] as const),
+    })])).toMatchObject({ kind: 'refused', reason: 'entry_refused' });
+    expect(db.scalar<number>('SELECT count(*) FROM catalog_content_identities')).toBe(roots);
+    expect(db.scalar<number>('SELECT count(*) FROM catalog_content_drafts')).toBe(0);
+  }, 20_000);
+
+  it('round-trips the complete external subclass aggregate through full character export', async () => {
+    // Measured alone at 2.56s; 20s retains contention headroom.
+    const source = await database();
+    const plan = planBundledHomebrewInstall(source);
+    const installed = commitBundledHomebrewInstall(source, plan.token);
+    if (installed.kind !== 'committed') throw new Error('Bundled catalog install failed.');
+    const barbedCourt = installed.outcomes.find((outcome) =>
+      outcome.id === 'subclass:bundled:warrior-of-the-barbed-court');
+    if (barbedCourt === undefined || barbedCourt.kind === 'refused' || barbedCourt.kind === 'review') {
+      throw new Error('Barbed Court install outcome is missing.');
+    }
+    const definition = source.oneRaw(
+      `SELECT id, class_definition_id FROM subclass_definitions WHERE content_key = ?`,
+      [barbedCourt.contentKey],
+    );
+    if (definition === null) throw new Error('Barbed Court definition is missing.');
+    const characterId = source.exec(
+      "INSERT INTO characters (name) VALUES ('Portable Barbed Court')",
+    ).lastInsertId;
+    source.exec(
+      `INSERT INTO character_class_levels (
+         character_id, class_definition_id, subclass_definition_id, level,
+         is_starting_class
+       ) VALUES (?, ?, ?, 9, 1)`,
+      [characterId, Number(definition.class_definition_id), Number(definition.id)],
+    );
+
+    const backup = exportCharacterBackup(
+      source,
+      characterId,
+      '2042-08-07T12:00:00.000Z',
+    );
+    expect(backup.content).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'subclass',
+        content_key: barbedCourt.contentKey,
+        aggregate: expect.objectContaining({ name: 'Warrior of the Barbed Court' }),
+      }),
+    ]));
+    const sourceProjection = projectStoredAuthoredContentV1(source, {
+      kind: 'subclass',
+      contentKey: barbedCourt.contentKey,
+      references: storedAuthoredRegistryReferencesV1(source),
+    });
+    const sourceAggregate = sourceProjection.aggregate;
+
+    const target = await database();
+    const imported = importCharacterBackup(target, backup);
+    const importedDefinition = target.oneRaw(
+      `SELECT subclass.name, subclass.content_key, identity.catalog_layer
+       FROM character_class_levels AS level
+       JOIN subclass_definitions AS subclass ON subclass.id = level.subclass_definition_id
+       JOIN catalog_content_identities AS identity
+         ON identity.content_kind = 'subclass' AND identity.content_key = subclass.content_key
+      WHERE level.character_id = ?`,
+      [imported.characterId],
+    );
+    expect(importedDefinition).toMatchObject({
+      name: 'Warrior of the Barbed Court', catalog_layer: 'external',
+    });
+    if (importedDefinition === null) throw new Error('Imported Barbed Court is missing.');
+    const destinationProjection = projectStoredAuthoredContentV1(target, {
+      kind: 'subclass',
+      contentKey: String(importedDefinition.content_key) as ContentKey,
+      references: storedAuthoredRegistryReferencesV1(target),
+    });
+    const destinationAggregate = destinationProjection.aggregate;
+    expect(destinationProjection.kind).toBe(sourceProjection.kind);
+    expect(destinationAggregate.rules_edition).toBe(sourceAggregate.rules_edition);
+    expect(destinationAggregate.name).toBe(sourceAggregate.name);
+    expect(destinationProjection.payload).toEqual(sourceProjection.payload);
+    expect(destinationAggregate.reference_text).toBe(sourceAggregate.reference_text);
+    expect(destinationAggregate.progression).toEqual(sourceAggregate.progression);
+    if (
+      destinationAggregate.progression.mode !== 'override' ||
+      sourceAggregate.progression.mode !== 'override'
+    ) {
+      throw new Error('Barbed Court round-trip requires dense progressions.');
+    }
+    expect(destinationAggregate.progression.rows.map((row) => row.slot_counts))
+      .toEqual(sourceAggregate.progression.rows.map((row) => row.slot_counts));
+    expect(destinationAggregate.progression.rows.map((row) => row.grants))
+      .toEqual(sourceAggregate.progression.rows.map((row) => row.grants));
+    expect(destinationAggregate.features).toEqual(sourceAggregate.features);
+    expect(destinationAggregate.grants).toEqual(sourceAggregate.grants);
+    expect(destinationAggregate).toEqual(sourceAggregate);
+  }, 20_000);
+});

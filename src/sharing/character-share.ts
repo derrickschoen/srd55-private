@@ -1,5 +1,6 @@
 import type { SqlValue } from '@sqlite.org/sqlite-wasm';
 import { normalizeCatalogName } from '../catalog/catalog-normalize';
+import { normalizeContentIdentityName } from '../catalog/content-identity';
 import {
   registerAssertedPlaceholderContentIdentity,
   resolveContentReference,
@@ -1668,7 +1669,7 @@ export function ensureSharedSpell(
   const now = timestamp();
   registerAssertedPlaceholderContentIdentity(db, {
     contentKey: key,
-    normalizedName: normalizeCatalogName(name),
+    normalizedName: normalizeContentIdentityName(name),
   });
   const identityId = db.exec(
     `INSERT INTO spell_identities (

@@ -20,7 +20,7 @@ const PROBES = [
 ] as const;
 
 describe('authoring contract seam', () => {
-  it('pins the eleven catalog RPC names', () => {
+  it('pins the thirteen catalog RPC names', () => {
     expect(AUTHORING_RPC).toEqual({
       list: 'authoring.list',
       backgroundReferences: 'authoring.backgroundReferences',
@@ -33,6 +33,8 @@ describe('authoring contract seam', () => {
       usages: 'authoring.usages',
       previewReplacement: 'authoring.previewReplacement',
       commitReplacement: 'authoring.commitReplacement',
+      previewBundledHomebrew: 'authoring.previewBundledHomebrew',
+      installBundledHomebrew: 'authoring.installBundledHomebrew',
     });
   });
 

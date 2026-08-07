@@ -15,7 +15,14 @@ export interface PactMagicSlots {
   readonly level: number;
 }
 
-const SHARED_SLOT_TABLE = [
+/**
+ * SRD 5.2.1's Multiclass Spellcaster table, indexed by caster level minus one.
+ *
+ * This is exported as the single licensed input for derived fractional-caster
+ * schedules. A subclass may state its own fraction, but must never transcribe
+ * a separate slot ladder when this table can derive it.
+ */
+export const MULTICLASS_SPELLCASTER_TABLE = [
   [2, 0, 0, 0, 0, 0, 0, 0, 0],
   [3, 0, 0, 0, 0, 0, 0, 0, 0],
   [4, 2, 0, 0, 0, 0, 0, 0, 0],
@@ -78,7 +85,7 @@ export function slotsForCasterLevel(level: number): SpellSlotCounts {
     return {};
   }
 
-  const row = SHARED_SLOT_TABLE[Math.min(level, 20) - 1]!;
+  const row = MULTICLASS_SPELLCASTER_TABLE[Math.min(level, 20) - 1]!;
   return Object.fromEntries(
     row.flatMap((count, index) =>
       count > 0 ? [[index + 1, count] as const] : [],

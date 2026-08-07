@@ -21,6 +21,9 @@ import { encodePartyDocument } from '../../../party/storage/document-bytes';
 import { element, listen, type Cleanup } from '../../dom';
 import type { ContentImportPlan } from '../../../catalog/content-adoption';
 import { createContentAdoptionDialog } from '../../content-adoption-dialog';
+import type { BundledHomebrewClient } from '../../../authoring/client';
+import { createAuthoringClient } from '../../../authoring/client';
+import type { BundledHomebrewInstallPlan } from '../../../authoring/bundled-homebrew-installer';
 
 export interface ReadableFile {
   readonly name: string;
@@ -45,6 +48,10 @@ export interface ImportBackupServices {
     | 'exportCharacter'
     | 'planCharacterImport'
     | 'commitCharacterImport'
+  >;
+  readonly authoring?: Pick<
+    BundledHomebrewClient,
+    'previewBundledHomebrew' | 'installBundledHomebrew'
   >;
   readonly confirm: (message: string) => boolean;
   readonly save: (file: SavedFile) => void;
@@ -95,6 +102,7 @@ export function defaultImportBackupServices(
   return {
     catalog: createCatalogClient(rpc),
     backup: createBackupClient(rpc),
+    authoring: createAuthoringClient(rpc),
     confirm: (message) => window.confirm(message),
     save: saveBrowserFile,
     now: () => new Date().toISOString(),
@@ -369,6 +377,68 @@ export function createImportBackupControls(
     }),
   );
 
+  const bundledHomebrewButton = element('button', {
+    text: 'Import bundled homebrew',
+    attributes: { type: 'button' },
+  });
+
+  function bundledEntrySummary(plan: BundledHomebrewInstallPlan): HTMLElement {
+    const summary = element('section', {
+      className: 'bundled-homebrew-entry-summary',
+      attributes: { 'aria-label': 'Bundled homebrew entries' },
+    }, [element('h3', { text: 'Entries' })]);
+    const list = element('ul');
+    for (const entry of plan.entries) {
+      list.append(element('li', {
+        text: `${entry.name} — ${entry.kind}; external homebrew; ${entry.outcome.replaceAll('_', ' ')}` +
+          (entry.error === null ? '' : `; ${entry.error}`),
+      }));
+    }
+    summary.append(list);
+    return summary;
+  }
+
+  cleanups.push(listen(bundledHomebrewButton, 'click', () => {
+    if (bundledHomebrewButton.disabled) return;
+    bundledHomebrewButton.disabled = true;
+    announce('Previewing bundled homebrew…');
+    const authoring = services.authoring;
+    if (authoring === undefined) {
+      announce('Bundled homebrew services are unavailable.', true);
+      bundledHomebrewButton.disabled = false;
+      return;
+    }
+    void authoring.previewBundledHomebrew().then((plan) => {
+      adoptionCleanup?.();
+      const rendered = createContentAdoptionDialog({
+        mount: root,
+        plan,
+        replan: () => authoring.previewBundledHomebrew(),
+        commit: (submitted) => authoring.installBundledHomebrew({ token: submitted.token }),
+        renderPlanDetails: (submitted) => bundledEntrySummary(
+          submitted as BundledHomebrewInstallPlan,
+        ),
+        onCommitted: async (result) => {
+          await options.onPersistedChange();
+          const matched = result.outcomes.filter((outcome) =>
+            outcome.kind === 'match' || outcome.kind === 'remembered-match').length;
+          const created = result.outcomes.filter((outcome) => outcome.kind === 'create').length;
+          announce(`Bundled homebrew imported: ${String(created)} published, ${String(matched)} matched existing.`);
+          bundledHomebrewButton.disabled = false;
+        },
+        onCancel: () => {
+          announce('Bundled homebrew import cancelled.');
+          bundledHomebrewButton.disabled = false;
+        },
+      });
+      adoptionCleanup = rendered.cleanup;
+      announce('Review three bundled homebrew entries before importing.');
+    }).catch((error: unknown) => {
+      announce(errorMessage(error), true);
+      bundledHomebrewButton.disabled = false;
+    });
+  }));
+
   const databaseExportButton = element('button', {
     text: 'Download database backup',
     attributes: { type: 'button' },
@@ -507,7 +577,13 @@ export function createImportBackupControls(
       text: 'Character JSON backups include the character and its complete referenced external content. Share links are reference-only and do not include catalog definitions.',
     }),
     element('div', { className: 'transfer-grid' }, [
-      control('Catalog JSON', catalogInput, catalogButton),
+      element('div', { className: 'transfer-control' }, [
+        element('label', {}, [element('span', { text: 'Catalog JSON' }), catalogInput]),
+        element('div', { className: 'transfer-control-actions' }, [
+          catalogButton,
+          bundledHomebrewButton,
+        ]),
+      ]),
       control('Restore complete database', databaseInput, databaseImportButton),
       element('div', { className: 'transfer-control' }, [
         element('span', { text: 'Back up complete database' }),

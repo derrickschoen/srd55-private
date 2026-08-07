@@ -5,11 +5,16 @@ import {
   type CreateDraftParams,
   type DiscardDraftParams,
   type CommitPublishParams,
+  type InstallBundledHomebrewParams,
   type PreviewPublishParams,
   type PreviewReplacementParams,
   type ReadDraftParams,
   type SaveDraftParams,
 } from '../../authoring/client';
+import {
+  commitBundledHomebrewInstall,
+  planBundledHomebrewInstall,
+} from '../../authoring/bundled-homebrew-installer';
 import {
   CatalogAuthoringService,
   AuthoringServiceError,
@@ -110,6 +115,13 @@ function isCommitPublishParams(value: unknown): value is CommitPublishParams {
     Array.isArray(value.decisions) && value.decisions.every(isPublishDecision);
 }
 
+function isInstallBundledHomebrewParams(
+  value: unknown,
+): value is InstallBundledHomebrewParams {
+  return isRecord(value) && hasExactKeys(value, ['token']) &&
+    typeof value.token === 'string' && value.token.length > 0;
+}
+
 function isCharacterId(value: unknown): boolean {
   return Number.isSafeInteger(value) && Number(value) > 0;
 }
@@ -156,6 +168,16 @@ function authoringError(error: unknown): never {
 }
 
 export const handlers: readonly RpcHandler[] = [
+  defineRpcHandler(
+    AUTHORING_RPC.previewBundledHomebrew,
+    isEmptyParams,
+    ({ db }) => planBundledHomebrewInstall(db),
+  ),
+  defineRpcHandler(
+    AUTHORING_RPC.installBundledHomebrew,
+    isInstallBundledHomebrewParams,
+    ({ db }, params) => commitBundledHomebrewInstall(db, params.token),
+  ),
   defineRpcHandler(
     AUTHORING_RPC.list,
     isEmptyParams,

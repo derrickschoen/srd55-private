@@ -5,6 +5,14 @@ import type {
   StoredHomebrewDraft,
 } from '../../../src/authoring/contracts';
 import { AUTHORING_RPC, createAuthoringClient } from '../../../src/authoring/client';
+import {
+  BUNDLED_HOMEBREW_CATALOG,
+  type BundledHomebrewCatalogEntry,
+} from '../../../src/authoring/bundled-homebrew-catalog';
+import {
+  commitBundledHomebrewInstall,
+  planBundledHomebrewInstall,
+} from '../../../src/authoring/bundled-homebrew-installer';
 import { CatalogAuthoringService } from '../../../src/authoring/draft-service';
 import { speciesDraftToAggregate } from '../../../src/authoring/species-publisher';
 import {
@@ -23,10 +31,17 @@ import { assertedExternalContentKey } from '../../../src/catalog/catalog-key';
 import { assignSpellSelection } from '../../../src/eligibility/spell-selection-assignment';
 import { RpcClient, type RpcTransport } from '../../../src/rpc/client';
 import type { RpcRequest, RpcResponse } from '../../../src/rpc/protocol';
-import type { HandlerContext } from '../../../src/worker/handler';
+import type { HandlerContext, RpcHandler } from '../../../src/worker/handler';
 import { handlers } from '../../../src/worker/handlers/authoring';
-import { createRpcRegistry } from '../../../src/worker/registry';
+import { createRpcRegistry, type RpcRegistry } from '../../../src/worker/registry';
 import { createRpcHarness, type RpcHarness } from '../../helpers/rpc-harness';
+import { createImportBackupControls } from '../../../src/ui/screens/character-list/import-backup-controls';
+import {
+  elementText,
+  installInteractiveDocument,
+  interactiveElement,
+} from '../../fixtures/interactive-dom';
+import type { SubclassAuthoringDraft } from '../../../src/authoring/contracts';
 
 let harness: RpcHarness | undefined;
 let client: RpcClient | undefined;
@@ -43,10 +58,13 @@ class WorkerTransport implements RpcTransport {
   readonly #messages = new Set<(event: MessageEvent<RpcResponse>) => void>();
   readonly #errors = new Set<(event: ErrorEvent) => void>();
 
-  constructor(private readonly context: HandlerContext) {}
+  constructor(
+    private readonly context: HandlerContext,
+    private readonly dispatcher: RpcRegistry = registry,
+  ) {}
 
   postMessage(message: RpcRequest): void {
-    void registry.dispatch(message, this.context).then((response) => {
+    void this.dispatcher.dispatch(message, this.context).then((response) => {
       for (const listener of this.#messages) {
         listener(new MessageEvent<RpcResponse>('message', { data: response }));
       }
@@ -66,6 +84,15 @@ class WorkerTransport implements RpcTransport {
     if (type === 'message') this.#messages.delete(listener as (event: MessageEvent<RpcResponse>) => void);
     else this.#errors.delete(listener as (event: ErrorEvent) => void);
   }
+}
+
+function keydown(key: string, shiftKey = false): KeyboardEvent {
+  const event = new Event('keydown', { cancelable: true }) as KeyboardEvent;
+  Object.defineProperties(event, {
+    key: { value: key },
+    shiftKey: { value: shiftKey },
+  });
+  return event;
 }
 
 function completeSpecies(
@@ -285,6 +312,116 @@ describe('catalog authoring RPC handlers', () => {
       error: { data: { reason: 'draft_not_found' } },
     });
   });
+
+  it('previews and atomically installs bundled homebrew through the public RPC surface', async () => {
+    // Measured alone at 1.94s; 20s retains contention headroom.
+    const rpc = await open();
+    client = new RpcClient(new WorkerTransport(rpc.context));
+    const authoring = createAuthoringClient(client);
+
+    const preview = await authoring.previewBundledHomebrew();
+    expect(preview.entries).toEqual([
+      expect.objectContaining({ name: 'Veteran', outcome: 'create' }),
+      expect.objectContaining({ name: 'Warrior of the Barbed Court', outcome: 'create' }),
+      expect.objectContaining({ name: 'Spell Student', outcome: 'create' }),
+    ]);
+    expect(await authoring.installBundledHomebrew({ token: preview.token })).toMatchObject({
+      kind: 'committed',
+      outcomes: [
+        { kind: 'create' },
+        { kind: 'create' },
+        { kind: 'create' },
+      ],
+    });
+    expect((await authoring.list()).published
+      .filter((entry) => ['Veteran', 'Warrior of the Barbed Court', 'Spell Student']
+        .includes(entry.name))
+      .map((entry) => ({ name: entry.name, catalog_layer: entry.catalog_layer })))
+      .toEqual([
+        { name: 'Spell Student', catalog_layer: 'external' },
+        { name: 'Veteran', catalog_layer: 'external' },
+        { name: 'Warrior of the Barbed Court', catalog_layer: 'external' },
+      ]);
+
+    expect(await rpc.call(AUTHORING_RPC.previewBundledHomebrew, { extra: true }))
+      .toMatchObject({ ok: false, error: { code: 'invalid_params' } });
+    expect(await rpc.call(AUTHORING_RPC.installBundledHomebrew, { token: '', extra: true }))
+      .toMatchObject({ ok: false, error: { code: 'invalid_params' } });
+  }, 20_000);
+
+  it('invokes the real bundled installer through client and RPC with inert hostile text and modal focus discipline', async () => {
+    const rpc = await open();
+    const base = BUNDLED_HOMEBREW_CATALOG[2].revisions[0];
+    const hostileName = '<img src=x onerror=alert(1)> Hostile Student';
+    const hostileDocument: SubclassAuthoringDraft = { ...base, name: hostileName };
+    const hostileCatalog = Object.freeze([Object.freeze({
+      catalog_key: 'hostile-spell-student',
+      revisions: Object.freeze([hostileDocument] as const),
+    })] as const satisfies readonly BundledHomebrewCatalogEntry[]);
+    const routedHandlers = handlers.map((handler): RpcHandler => {
+      if (handler.method === AUTHORING_RPC.previewBundledHomebrew) {
+        return { ...handler, handle: ({ db }) => planBundledHomebrewInstall(db, hostileCatalog) };
+      }
+      if (handler.method === AUTHORING_RPC.installBundledHomebrew) {
+        return {
+          ...handler,
+          handle: ({ db }, params) => commitBundledHomebrewInstall(
+            db,
+            String(Reflect.get(params as object, 'token')) as never,
+            hostileCatalog,
+          ),
+        };
+      }
+      return handler;
+    });
+    const routedRegistry = createRpcRegistry({ authoring: { handlers: routedHandlers } });
+    client = new RpcClient(new WorkerTransport(rpc.context, routedRegistry));
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const controls = createImportBackupControls({
+        rpc: client,
+        characters: [],
+        onPersistedChange: () => undefined,
+      });
+      document.body.append(controls.element);
+      const root = interactiveElement(controls.element);
+      const trigger = root.querySelectorAll('button').find((candidate) =>
+        candidate.textContent === 'Import bundled homebrew');
+      if (trigger === undefined) throw new Error('Bundled homebrew trigger is missing.');
+      trigger.focus();
+      trigger.click();
+      for (let turn = 0; turn < 30; turn += 1) await Promise.resolve();
+
+      const dialogNode = root.querySelector('[data-testid="content-adoption-modal"]');
+      if (dialogNode === null) throw new Error('Bundled adoption dialog is missing.');
+      const dialog = interactiveElement(dialogNode as unknown as HTMLElement);
+      const cancel = dialog.querySelectorAll('button').find((candidate) =>
+        candidate.textContent === 'Cancel');
+      const commit = dialog.querySelectorAll('button').find((candidate) =>
+        candidate.textContent === 'Import with these choices');
+      if (cancel === undefined || commit === undefined) throw new Error('Modal controls are missing.');
+
+      expect(elementText(dialogNode as unknown as Node)).toContain(hostileName);
+      expect(dialogNode.querySelector('img')).toBeNull();
+      expect(document.activeElement).toBe(cancel);
+      dialog.dispatchEvent(keydown('Tab', true));
+      expect(document.activeElement).toBe(commit);
+      dialog.dispatchEvent(keydown('Tab'));
+      expect(document.activeElement).toBe(cancel);
+
+      commit.click();
+      for (let turn = 0; turn < 30; turn += 1) await Promise.resolve();
+      expect(dialog.isConnected).toBe(false);
+      expect(document.activeElement).toBe(trigger);
+      expect(rpc.context.db.oneRaw(
+        'SELECT name FROM subclass_definitions WHERE name = ?',
+        [hostileName],
+      )).toEqual({ name: hostileName });
+      controls.cleanup();
+    } finally {
+      restoreDocument();
+    }
+  }, 20_000);
 
   it('retargets exact and reviewed references through client, worker, and service without silent divergence', async () => {
     const rpc = await open();

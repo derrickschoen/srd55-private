@@ -32,6 +32,8 @@ export interface ContentAdoptionDialogOptions {
     result: Extract<ContentImportCommitResult, { readonly kind: 'committed' }>,
   ) => void | Promise<void>;
   readonly onCancel?: () => void;
+  /** Invocation-specific plan facts rendered and refreshed beside the shared counts. */
+  readonly renderPlanDetails?: (plan: ContentImportPlan) => HTMLElement;
 }
 
 export interface ContentAdoptionDialog {
@@ -224,6 +226,7 @@ export function createContentAdoptionDialog(
     attributes: { id: 'content-adoption-explanation' },
   });
   const preview = createPreview(options.plan);
+  const planDetails = element('div', { className: 'content-adoption-plan-details' });
   const status = element('p', {
     attributes: { role: 'status', 'aria-live': 'polite' },
   });
@@ -243,7 +246,17 @@ export function createContentAdoptionDialog(
     cancel,
     commit,
   ]);
-  dialog.append(heading, explanation, preview, status, list, actions);
+  dialog.append(heading, explanation, preview, planDetails, status, list, actions);
+
+  function renderPlan(planToRender: ContentImportPlan): void {
+    const refreshedPreview = createPreview(planToRender);
+    preview.replaceChildren(...Array.from(refreshedPreview.children));
+    planDetails.replaceChildren(
+      ...(options.renderPlanDetails === undefined
+        ? []
+        : [options.renderPlanDetails(planToRender)]),
+    );
+  }
 
   const currentChoices = (): ContentImportChoices => Object.freeze(
     Object.fromEntries(Object.entries(choices).map(([id, choice]) => [
@@ -260,8 +273,7 @@ export function createContentAdoptionDialog(
       const refreshed = await options.replan(currentChoices());
       if (disposed || requested !== generation) return;
       plan = refreshed;
-      const refreshedPreview = createPreview(refreshed);
-      preview.replaceChildren(...Array.from(refreshedPreview.children));
+      renderPlan(refreshed);
       rows.clear();
       for (const row of refreshed.reviews) rows.set(row.id, row);
       status.textContent = refreshed.outcomes.some((outcome) => outcome.kind === 'refused')
@@ -393,8 +405,7 @@ export function createContentAdoptionDialog(
       if (disposed) return;
       if (result.kind === 'stale-plan') {
         plan = result.freshPlan;
-        const refreshedPreview = createPreview(result.freshPlan);
-        preview.replaceChildren(...Array.from(refreshedPreview.children));
+        renderPlan(result.freshPlan);
         rows.clear();
         for (const row of result.freshPlan.reviews) rows.set(row.id, row);
         status.textContent = 'The catalog changed. Review the refreshed plan before committing.';
@@ -415,6 +426,7 @@ export function createContentAdoptionDialog(
     });
   }));
 
+  renderPlan(options.plan);
   renderRows();
   modal = attachModalTrap({
     dialog,

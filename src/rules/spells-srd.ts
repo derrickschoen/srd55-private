@@ -32,6 +32,7 @@ import {
 } from '../catalog/content-registry';
 import {
   deriveContentIdentityV1FromNormalizedName,
+  normalizeContentIdentityName,
   type DerivedContentIdentityV1,
   type NormalizedContentName,
 } from '../catalog/content-identity';
@@ -519,7 +520,6 @@ function bundledSpellSource(
 function seedSpellIdentityV1(
   spell: SrdSpellDescription,
   memberships: readonly SrdSpellListMembership[],
-  normalizedName: NormalizedContentName,
 ): DerivedContentIdentityV1<'spell', unknown> {
   const range = encodeSpellRange(parseSpellRange(spell.range));
   const components = encodeSpellComponents(
@@ -560,7 +560,7 @@ function seedSpellIdentityV1(
   return deriveContentIdentityV1FromNormalizedName({
     kind: 'spell',
     edition: BUNDLED_SPELL_RULES_EDITION,
-    normalizedName,
+    normalizedName: normalizeContentIdentityName(spell.name),
     payload: projection.payload,
   });
 }
@@ -616,7 +616,7 @@ function writeBundledSpell(
   ensureBundledStableContentIdentity(db, {
     kind: 'spell',
     contentKey: spell.content_key,
-    normalizedName: normalizeCatalogName(spell.name),
+    normalizedName: normalizeContentIdentityName(spell.name),
   });
   db.exec(
     `INSERT INTO spell_versions (
@@ -707,6 +707,61 @@ function writeBundledSpell(
   return versionId;
 }
 
+/**
+ * D205/D208 permit replacing development-era bundled registrations. The
+ * pre-fix spell registrar stored catalog-lookup names in the content registry,
+ * so remove only those mismatched spell fingerprints and remembered matches
+ * before the normal registry pass recreates them from the corrected name.
+ */
+function repairBundledSpellIdentityRegistrations(
+  db: DatabaseContext,
+  spells: readonly SrdSpellDescription[],
+): void {
+  db.transaction(() => {
+    for (const spell of spells) {
+      const registration = db.oneRaw(
+        `SELECT key_kind, catalog_layer, normalized_name
+         FROM catalog_content_identities
+         WHERE content_kind = 'spell' AND content_key = ?`,
+        [spell.content_key],
+      );
+      const normalizedName = normalizeContentIdentityName(spell.name);
+      if (
+        registration === null ||
+        registration.key_kind !== 'bundled-stable' ||
+        registration.catalog_layer !== 'bundled' ||
+        registration.normalized_name === normalizedName
+      ) {
+        continue;
+      }
+      db.exec(
+        `DELETE FROM catalog_content_match_decisions
+         WHERE content_kind = 'spell'
+           AND (
+             target_content_key = ? OR
+             incoming_fingerprint_digest IN (
+               SELECT fingerprint_digest
+               FROM catalog_content_fingerprints
+               WHERE content_kind = 'spell' AND content_key = ?
+             )
+           )`,
+        [spell.content_key, spell.content_key],
+      );
+      db.exec(
+        `DELETE FROM catalog_content_fingerprints
+         WHERE content_kind = 'spell' AND content_key = ?`,
+        [spell.content_key],
+      );
+      db.exec(
+        `UPDATE catalog_content_identities
+         SET normalized_name = ?
+         WHERE content_kind = 'spell' AND content_key = ?`,
+        [normalizedName, spell.content_key],
+      );
+    }
+  });
+}
+
 function reconcileBundledSpellEntry(
   db: DatabaseContext,
   spell: SrdSpellDescription,
@@ -751,7 +806,7 @@ function reconcileBundledSpellEntry(
         : sqlString(registry, 'normalized_name') as NormalizedContentName;
       const desired = normalizedName === null
         ? null
-        : seedSpellIdentityV1(spell, memberships, normalizedName);
+        : seedSpellIdentityV1(spell, memberships);
       if (
         desired !== null &&
         storedProjection !== undefined &&
@@ -813,7 +868,6 @@ function reconcileBundledSpellEntry(
       const installedDesired = seedSpellIdentityV1(
         spell,
         memberships,
-        authoritativeName,
       );
       if (
         installedIdentity.digest !== installedDesired.digest ||
@@ -881,17 +935,19 @@ export function ensureBundledSpellContent(
 }
 
 /**
- * Install only absent bundled spell roots before the general registry pass.
- * Present roots are deliberately never rewritten here: reconciliation must
- * observe their actual stored state before the source-wins seeder runs.
+ * Repair pre-fix bundled spell registrations, then install only absent roots
+ * before the general registry pass. Present roots are deliberately never
+ * rewritten here: reconciliation must observe their actual stored state before
+ * the source-wins seeder runs.
  */
 export function installMissingBundledSpellContent(
   db: DatabaseContext,
 ): void {
+  const source = bundledSpellSource();
+  repairBundledSpellIdentityRegistrations(db, source.spells);
   if (hasBundledSpellCardinality(db)) {
     return;
   }
-  const source = bundledSpellSource();
   const timestamp = new Date().toISOString();
   // One seed pass is one durable transaction. OPFS commits are materially
   // expensive, and committing once per missing spell made a real browser boot
@@ -925,10 +981,11 @@ export function installMissingBundledSpellContent(
  * refuses the collision transactionally and leaves the existing row untouched.
  */
 export function seedSpellContent(db: DatabaseContext): void {
+  const source = bundledSpellSource();
+  repairBundledSpellIdentityRegistrations(db, source.spells);
   if (hasBundledSpellCardinality(db)) {
     return;
   }
-  const source = bundledSpellSource();
 
   db.transaction(() => {
     const timestamp = new Date().toISOString();

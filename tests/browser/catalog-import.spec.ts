@@ -1,4 +1,5 @@
 import { expect, test } from './fixtures/parallel-test';
+import type { ContentImportPlan } from '../../src/catalog/content-adoption';
 
 function record(overrides: Record<string, unknown> = {}) {
   return {
@@ -90,8 +91,11 @@ test('catalog RPC dry-runs, commits atomically, tombstones, and persists across 
     }),
   ]);
 
-  const refusalPlan = await page.evaluate((documents) =>
-    window.appRpc.call('catalog.import', { documents }), [
+  const collisionPlan = await page.evaluate((documents) =>
+    window.appRpc.call<{ documents: string[] }, ContentImportPlan>(
+      'catalog.import',
+      { documents },
+    ), [
     JSON.stringify([
       record({
         identityKey: 'conflict',
@@ -105,13 +109,25 @@ test('catalog RPC dry-runs, commits atomically, tombstones, and persists across 
       }),
     ]),
   ]);
-  expect(refusalPlan).toEqual(expect.objectContaining({
-    reviews: [],
+  // The bundled-spell normalization root fix makes Magic Missile's registered
+  // identity agree with its live stored projection. This fixture still has the
+  // same key but deliberately different rules bytes, so CI-4a must offer the
+  // key-collision review/clone path instead of falsely refusing target integrity.
+  expect(collisionPlan).toEqual(expect.objectContaining({
+    reviews: [expect.objectContaining({
+      id: 'spell:2024:magic-missile',
+      targetContentKey: '2024:magic-missile',
+      matchClass: 'key-collision',
+      cloneName: 'Magic Missile (Private copy)',
+      conflictDetails: [expect.objectContaining({
+        field: 'Rules identity',
+      })],
+    })],
     outcomes: expect.arrayContaining([
       expect.objectContaining({
         id: 'spell:2024:magic-missile',
-        kind: 'refused',
-        reason: 'target_integrity_refused',
+        kind: 'review',
+        matchClass: 'key-collision',
       }),
     ]),
     spellActivityChanges: [{
@@ -119,6 +135,11 @@ test('catalog RPC dry-runs, commits atomically, tombstones, and persists across 
       action: 'deactivate',
     }],
   }));
+  const rulesIdentity = collisionPlan.reviews[0]?.conflictDetails[0];
+  expect(rulesIdentity).toEqual(expect.objectContaining({
+    field: 'Rules identity',
+  }));
+  expect(rulesIdentity?.incomingValue).not.toBe(rulesIdentity?.localValue);
   expect(
     await page.evaluate(() =>
       window.staticApp.inspectRows('spell_versions', {
