@@ -49,6 +49,7 @@ export const RECORDED_SCHEMA_PREFIX_IDS = [
   '0037_background_default_origin_feat_key',
   '0038_catalog_content_supersessions',
   '0039_catalog_content_supersession_guards',
+  '0040_catalog_content_archive_members',
 ] as const;
 
 export const PREFIX_MIGRATION_ID = 'test_catalog_prefix_probe';

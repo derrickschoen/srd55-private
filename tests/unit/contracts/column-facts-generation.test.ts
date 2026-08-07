@@ -89,4 +89,25 @@ describe('reference-facts generation freshness', () => {
       'character_id',
     ]);
   });
+
+  it('records archive membership without inventing a character foreign key', () => {
+    expect(COLUMN_FACTS.catalog_content_archive_members).toEqual({
+      content_kind: { base: 'degraded', notNull: true },
+      content_key: { base: 'degraded', notNull: true },
+      character_id: { base: 'integer', notNull: true },
+      character_revision: { base: 'integer', notNull: true },
+      character_name: { base: 'degraded', notNull: true },
+      archived_at: { base: 'degraded', notNull: true },
+    });
+    expect(
+      FOREIGN_KEY_FACTS.filter(
+        (fact) => fact.table === 'catalog_content_archive_members',
+      ),
+    ).toEqual([{
+      table: 'catalog_content_archive_members',
+      columns: ['content_kind', 'content_key'],
+      target: 'catalog_content_identities',
+      targetColumns: ['content_kind', 'content_key'],
+    }]);
+  });
 });

@@ -113,6 +113,17 @@ function catalogContentIdentityRow(): Record<string, unknown> {
   };
 }
 
+function catalogContentArchiveMemberRow(): Record<string, unknown> {
+  return {
+    content_kind: 'species',
+    content_key: '2024:test.owner:archived-species',
+    character_id: 7,
+    character_revision: 0,
+    character_name: 'Promised Hero',
+    archived_at: '2026-08-06T10:01:00.000Z',
+  };
+}
+
 function catalogContentSupersessionRow(): Record<string, unknown> {
   return {
     content_kind: 'species',
@@ -293,6 +304,13 @@ describe('per-table row contracts', () => {
     ).toBeNull();
     expect(
       rowContractError(
+        'catalog_content_archive_members',
+        catalogContentArchiveMemberRow(),
+        'Archive member',
+      ),
+    ).toBeNull();
+    expect(
+      rowContractError(
         'catalog_content_supersessions',
         catalogContentSupersessionRow(),
         'Catalog supersession',
@@ -318,6 +336,25 @@ describe('per-table row contracts', () => {
         'Catalog identity',
       ),
     ).toContain('Catalog identity.archived_at:');
+  });
+
+  it('holds archive members to authored kinds, integer identities, and non-null evidence', () => {
+    for (const [field, value] of [
+      ['content_kind', 'class'],
+      ['character_id', 0],
+      ['character_revision', -1],
+      ['archived_at', 1],
+      ['character_name', null],
+    ] as const) {
+      expect(
+        rowContractError(
+          'catalog_content_archive_members',
+          { ...catalogContentArchiveMemberRow(), [field]: value },
+          'Archive member',
+        ),
+        field,
+      ).toContain(`Archive member.${field}:`);
+    }
   });
 
   it('holds draft rows to the three-kind and revision storage contract', () => {

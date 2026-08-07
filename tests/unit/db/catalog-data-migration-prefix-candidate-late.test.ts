@@ -24,7 +24,7 @@ beforeAll(async () => {
 });
 
 describe('late quarantined schema-prefix candidates', () => {
-  it('runs prefixes 0011 through 0021 without changing input bytes', () => {
+  it('runs prefixes 0011 through 0040 without changing input bytes', () => {
     const lifecycle = new DatabaseLifecycle(
       sqlite3,
       new MemoryDatabaseStorage(sqlite3),
