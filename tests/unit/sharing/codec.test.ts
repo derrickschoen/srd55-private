@@ -1152,6 +1152,9 @@ const COMPLETE_V17_WIRE = [
   ],
   ...COMPLETE_V16_WIRE.slice(3),
 ];
+/** HA-12: v18 appends portable content; this fixture has none. */
+const COMPLETE_V18_WIRE = [...COMPLETE_V17_WIRE.slice(0, 1), 18,
+  ...COMPLETE_V17_WIRE.slice(2), null];
 
 /** The honest v13 migration: old wire carried neither provenance field. */
 const MIGRATED_COMPLETE_V15_WIRE = [
@@ -1189,6 +1192,12 @@ const MIGRATED_COMPLETE_V17_WIRE = [
     null,
   ],
   ...MIGRATED_COMPLETE_V16_WIRE.slice(3),
+];
+const MIGRATED_COMPLETE_V18_WIRE = [
+  ...MIGRATED_COMPLETE_V17_WIRE.slice(0, 1),
+  18,
+  ...MIGRATED_COMPLETE_V17_WIRE.slice(2),
+  null,
 ];
 
 const {
@@ -1310,8 +1319,8 @@ describe('character-share positional codec', () => {
     );
   });
 
-  it('pins v17 as the frozen version-16 layout plus three appended flavor members', () => {
-    expect(shareDocumentToPositional(complete)).toEqual(COMPLETE_V17_WIRE);
+  it('pins v18 as frozen v17 plus one appended portable-content absence', () => {
+    expect(shareDocumentToPositional(complete)).toEqual(COMPLETE_V18_WIRE);
   });
 
   it('accepts ability_override only in a hand-frozen v13 document', () => {
@@ -1383,11 +1392,11 @@ describe('character-share positional codec', () => {
     expect(migrated).toEqual(COMPLETE_V13_WIRE);
   });
 
-  it('migrates v13 acquisitions through v17 without inventing later rows', () => {
-    const migrated = MIGRATIONS[16](MIGRATIONS[15](MIGRATIONS[14](
-      MIGRATIONS[13](COMPLETE_V13_WIRE),
+  it('migrates v13 acquisitions through v18 without inventing later rows', () => {
+    const migrated = MIGRATIONS[17](MIGRATIONS[16](MIGRATIONS[15](
+      MIGRATIONS[14](MIGRATIONS[13](COMPLETE_V13_WIRE)),
     ))) as unknown[];
-    expect(migrated).toEqual(MIGRATED_COMPLETE_V17_WIRE);
+    expect(migrated).toEqual(MIGRATED_COMPLETE_V18_WIRE);
     expect(positionalToShareDocument(COMPLETE_V13_WIRE)).toEqual(
       migratedComplete,
     );
@@ -1403,7 +1412,7 @@ describe('character-share positional codec', () => {
     );
   });
 
-  it('current wire migrates flavor by trailing nulls only', () => {
+  it('v16 migrates flavor by trailing nulls only', () => {
     const migrated = MIGRATIONS[16](COMPLETE_V16_WIRE) as unknown[];
     expect(migrated).toEqual([
       COMPLETE_V16_WIRE[0],
@@ -1581,7 +1590,7 @@ describe('character-share positional codec', () => {
     const positional = shareDocumentToPositional(minimal);
     expect(positional).toEqual([
       'dnd-multiclass-spells-character-share',
-      17,
+      18,
       [
         'Ten',
         null,
@@ -1651,8 +1660,10 @@ describe('character-share positional codec', () => {
       null,
       // Element 20: LU-1's durable class-level feat occurrences.
       null,
+      // Element 21: HA-12 portable content, absent for this SRD-only link.
+      null,
     ]);
-    expect(positional).toHaveLength(21);
+    expect(positional).toHaveLength(22);
     expect((positional[2] as unknown[]).length).toBe(15);
     expect((positional[3] as unknown[][])[0]).toHaveLength(8);
     expect((positional[4] as unknown[][])[0]).toHaveLength(7);
@@ -1669,6 +1680,7 @@ describe('character-share positional codec', () => {
     expect(minimal).not.toHaveProperty('effects');
     expect(minimal).not.toHaveProperty('skillGrants');
     expect(minimal).not.toHaveProperty('items');
+    expect(minimal).not.toHaveProperty('portableContent');
     await expect(
       decodeShareFragment(await encodeShareFragment(minimal)),
     ).resolves.toEqual(minimal);
@@ -2256,6 +2268,7 @@ describe('a share link generated before the sheet inputs travelled', () => {
     currentWithoutSheet.push(null); // items, absent (AC-1, D72)
     currentWithoutSheet.push(null); // expertiseGrants, absent (GF-2)
     currentWithoutSheet.push(null); // levelFeatChoices, absent (LU-1)
+    currentWithoutSheet.push(null); // portableContent, absent (HA-12)
     // NOT re-expressed at v6/v7: v6 appended a sourceRef slot to the weapon
     // tuples and v7 (D69) removed it again, so the current weapon tuple is
     // the v5 shape this migrated root already carries.
@@ -2480,6 +2493,7 @@ describe('a share link generated before weapons travelled', () => {
     baseline.push(null); // items (AC-1, D72)
     baseline.push(null); // expertiseGrants (GF-2)
     baseline.push(null); // levelFeatChoices (LU-1)
+    baseline.push(null); // portableContent (HA-12)
     const decodedBaseline = positionalToShareDocument(baseline);
 
     const withNullTupleOrigin = [...baseline];
@@ -2520,6 +2534,7 @@ describe('a share link generated before weapons travelled', () => {
     withWeapons.push(null); // items (AC-1, D72)
     withWeapons.push(null); // expertiseGrants (GF-2)
     withWeapons.push(null); // levelFeatChoices (LU-1)
+    withWeapons.push(null); // portableContent (HA-12)
     const decoded = positionalToShareDocument(withWeapons);
     expect(decoded.weapons).toEqual([]);
     expect(decoded).not.toHaveProperty('species');
@@ -2547,6 +2562,7 @@ describe('a share link generated before weapons travelled', () => {
     withOrigin.push(null); // items (AC-1, D72)
     withOrigin.push(null); // expertiseGrants (GF-2)
     withOrigin.push(null); // levelFeatChoices (LU-1)
+    withOrigin.push(null); // portableContent (HA-12)
     const decoded = positionalToShareDocument(withOrigin);
     expect(decoded.weapons).toEqual([]);
     expect(decoded).not.toHaveProperty('armor');
@@ -2666,6 +2682,7 @@ describe('a share link generated before a character note could travel', () => {
     migratedRoot.push(null); // items (AC-1, D72)
     migratedRoot.push(null); // expertiseGrants (GF-2)
     migratedRoot.push(null); // levelFeatChoices (LU-1)
+    migratedRoot.push(null); // portableContent (HA-12)
     const decoded = positionalToShareDocument(migratedRoot);
     expect(decoded.character.notes).toBe(
       'Sent on purpose, by a sharer who opted in.',

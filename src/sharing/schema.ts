@@ -48,6 +48,11 @@ import {
   ABILITY_SCORE_MIN,
 } from '../builder/contracts';
 import { CURRENT_CHARACTER_SHARE_VERSION } from './wire-schemas';
+import {
+  validatePortableContentBundle,
+  type PortableContentBundle,
+} from '../backup/portable-content';
+import { BackupValidationError } from '../backup/backup-version';
 
 export const CHARACTER_SHARE_FORMAT =
   'dnd-multiclass-spells-character-share' as const;
@@ -791,6 +796,8 @@ export interface CharacterShareDocument {
   readonly items?: readonly ShareItem[];
   /** D92: exactly three nullable zero-based references into `items`. */
   readonly attunementSlots?: ShareAttunementSlots;
+  /** V18: exact external aggregate closure plus immutable version lineage. */
+  readonly portableContent?: PortableContentBundle;
 }
 
 export class ShareValidationError extends TypeError {
@@ -1955,6 +1962,7 @@ export function validateShareDocument(
       'levelFeatChoices',
       'items',
       'attunementSlots',
+      'portableContent',
     ],
     'document',
   );
@@ -2910,6 +2918,23 @@ export function validateShareDocument(
     );
   }
 
+  let portableContent: PortableContentBundle | undefined;
+  if (source.portableContent !== undefined) {
+    try {
+      portableContent = validatePortableContentBundle(source.portableContent);
+    } catch (error) {
+      if (error instanceof BackupValidationError) {
+        throw new ShareValidationError(error.message);
+      }
+      throw error;
+    }
+    if (portableContent.content.length === 0) {
+      throw new ShareValidationError(
+        'portableContent must be absent when it carries no external content.',
+      );
+    }
+  }
+
   return {
     format: CHARACTER_SHARE_FORMAT,
     version: CHARACTER_SHARE_VERSION,
@@ -2936,5 +2961,6 @@ export function validateShareDocument(
     ...(levelFeatChoices === undefined ? {} : { levelFeatChoices }),
     ...(items === undefined ? {} : { items }),
     ...(attunementSlots === undefined ? {} : { attunementSlots }),
+    ...(portableContent === undefined ? {} : { portableContent }),
   };
 }

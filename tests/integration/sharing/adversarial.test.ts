@@ -21,6 +21,7 @@ import {
   decodeShareFragment,
   encodeShareFragment,
   positionalToShareDocument,
+  shareDocumentToReferencePositional,
   shareDocumentToPositional,
   tryEncodeShareFragment,
 } from '../../../src/sharing/codec';
@@ -1116,6 +1117,16 @@ describe('adversarial character-share fidelity', () => {
           ]),
         ],
       ).lastInsertId;
+      const storedSubclass = projectStoredContentV1(
+        db,
+        'subclass',
+        subclassKey as ContentKey,
+      );
+      reconcileCurrentContentFingerprintV1(db, {
+        kind: 'subclass',
+        contentKey: subclassKey as ContentKey,
+        identity: deriveContentIdentityV1(storedSubclass),
+      });
       return { shieldId, classId, subclassId };
     };
     const sourceDb = await database();
@@ -1169,28 +1180,14 @@ describe('adversarial character-share fidelity', () => {
       `SELECT count(*) FROM catalog_content_fingerprints
        WHERE content_kind = 'subclass' AND content_key = ?`,
       ['2024:sharing.fixture:configured-path'],
-    )).toBe(0);
+    )).toBe(1);
     const preview = previewCharacterShare(targetDb, shared);
-    expect(preview.adoptionPlan.reviews).toEqual([
-      expect.objectContaining({
-        kind: 'subclass',
-        targetContentKey: '2024:sharing.fixture:configured-path',
-        incomingFingerprint: null,
-        matchClass: 'key-collision',
-        defaultChoice: 'match',
-      }),
-    ]);
-    const choices = Object.fromEntries(
-      preview.adoptionPlan.reviews.map((review) => [
-        review.id,
-        { decision: 'match' as const },
-      ]),
-    );
+    expect(preview.adoptionPlan.reviews).toEqual([]);
     const committed = commitCharacterShareImport(
       targetDb,
       shared,
       preview.adoptionPlan.token,
-      choices,
+      {},
     );
     expect(committed.kind).toBe('committed');
     if (committed.kind !== 'committed') throw new Error('Expected commit.');
@@ -1866,6 +1863,7 @@ describe('adversarial character-share rejection', () => {
 
   it('rejects wrong format/version, tuple arity errors, and extra or missing elements', async () => {
     const positional = shareDocumentToPositional(minimalDocument());
+    const v17 = shareDocumentToReferencePositional(minimalDocument());
     const withEffect = shareDocumentToPositional(
       minimalDocument({
         effects: [{
@@ -1884,8 +1882,8 @@ describe('adversarial character-share rejection', () => {
       null,
     ];
     const cases: Array<[unknown, RegExp]> = [
-      [[...positional.slice(0, 10)], /tuple of length 21/],
-      [[...positional, null], /tuple of length 21/],
+      [[...positional.slice(0, 10)], /tuple of length 22/],
+      [[...positional, null], /tuple of length 22/],
       [
         ['wrong-format', ...positional.slice(1)],
         /format is unsupported/,
@@ -1906,6 +1904,13 @@ describe('adversarial character-share rejection', () => {
         decodeShareFragment(await arbitraryFragment(value)),
       ).rejects.toThrow(message);
     }
+    expect(v17).toHaveLength(21);
+    await expect(
+      decodeShareFragment(await arbitraryFragment(v17)),
+    ).resolves.toEqual(minimalDocument());
+    await expect(
+      decodeShareFragment(await arbitraryFragment([...v17, null])),
+    ).rejects.toThrow(/unsupported v17 tuple length/);
   });
 
   it('rejects every over-count collection before database mutation', async () => {

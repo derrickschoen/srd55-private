@@ -70,7 +70,8 @@ import type { ContentKey } from '../domain/ids';
 import { BackupValidationError, assertExactKeys, backupRecord } from './backup-version';
 
 export const LIBRARY_EXPORT_FORMAT = 'dnd-multiclass-spells/library' as const;
-export const LIBRARY_EXPORT_VERSION = 1 as const;
+export const LIBRARY_EXPORT_VERSION = 2 as const;
+export const LEGACY_LIBRARY_EXPORT_VERSION = 1 as const;
 
 export const PORTABLE_CONTENT_LIMITS = Object.freeze({
   entries: 4_096,
@@ -104,14 +105,36 @@ export interface PortableContentAggregate {
   readonly spell_identity?: PortableSpellIdentityMetadata;
 }
 
-export interface LibraryExportDocument {
+export interface PortableContentSupersession {
+  readonly content_kind: ContentKind;
+  readonly superseded_content_key: string;
+  readonly successor_content_key: string;
+  readonly recorded_at: string;
+}
+
+export interface PortableContentBundle {
+  readonly content: readonly PortableContentAggregate[];
+  readonly supersessions: readonly PortableContentSupersession[];
+}
+
+interface LibraryExportBase {
   readonly format: typeof LIBRARY_EXPORT_FORMAT;
-  readonly version: typeof LIBRARY_EXPORT_VERSION;
   readonly exported_at: string;
   readonly selection: 'all' | 'selected';
   readonly selected_content_keys: readonly string[];
   readonly content: readonly PortableContentAggregate[];
 }
+
+export type LibraryExportDocument = LibraryExportBase & (
+  | {
+      readonly version: typeof LIBRARY_EXPORT_VERSION;
+      readonly supersessions: readonly PortableContentSupersession[];
+    }
+  | {
+      readonly version: typeof LEGACY_LIBRARY_EXPORT_VERSION;
+      readonly supersessions?: never;
+    }
+);
 
 export interface PortableImportPreview {
   readonly new_by_kind: Readonly<Record<ContentKind, number>>;
@@ -592,6 +615,25 @@ export function exportPortableContentClosure(
     const marker = `${root.kind}\u0000${root.contentKey}`;
     if (seen.has(marker)) continue;
     seen.add(marker);
+    for (const lineage of db.allRaw(
+      `SELECT superseded_content_key, successor_content_key
+       FROM catalog_content_supersessions
+       WHERE content_kind = ?
+         AND (superseded_content_key = ? OR successor_content_key = ?)
+       ORDER BY superseded_content_key, successor_content_key`,
+      [root.kind, root.contentKey, root.contentKey],
+    )) {
+      pending.push(
+        {
+          kind: root.kind,
+          contentKey: String(lineage.superseded_content_key) as ContentKey,
+        },
+        {
+          kind: root.kind,
+          contentKey: String(lineage.successor_content_key) as ContentKey,
+        },
+      );
+    }
     const entry = localPortableEntry(db, root.kind, root.contentKey);
     localEntries.push(entry);
     for (const dependency of entry.dependencies) {
@@ -690,6 +732,39 @@ export function exportPortableContentClosure(
   return Object.freeze(entries);
 }
 
+/** Portable aggregates plus every lineage edge wholly inside their closure. */
+export function exportPortableContentBundle(
+  db: DatabaseContext,
+  roots: readonly { readonly kind: ContentKind; readonly contentKey: ContentKey }[],
+): PortableContentBundle {
+  const content = exportPortableContentClosure(db, roots);
+  const markers = new Set(content.map(
+    (entry) => `${entry.kind}\u0000${entry.content_key}`,
+  ));
+  const supersessions = db.allRaw(
+    `SELECT content_kind, superseded_content_key, successor_content_key, recorded_at
+     FROM catalog_content_supersessions
+     ORDER BY content_kind, superseded_content_key, successor_content_key`,
+  ).flatMap((row): PortableContentSupersession[] => {
+    const kind = String(row.content_kind) as ContentKind;
+    const superseded = String(row.superseded_content_key);
+    const successor = String(row.successor_content_key);
+    return markers.has(`${kind}\u0000${superseded}`) &&
+        markers.has(`${kind}\u0000${successor}`)
+      ? [{
+          content_kind: kind,
+          superseded_content_key: superseded,
+          successor_content_key: successor,
+          recorded_at: String(row.recorded_at),
+        }]
+      : [];
+  });
+  return Object.freeze({
+    content,
+    supersessions: Object.freeze(supersessions),
+  });
+}
+
 function externalRoots(db: DatabaseContext): readonly {
   readonly kind: ContentKind;
   readonly contentKey: ContentKey;
@@ -725,7 +800,8 @@ export function exportLibraryDocument(
         }
         return { kind: String(row.content_kind) as ContentKind, contentKey };
       });
-  const content = exportPortableContentClosure(db, roots);
+  const portable = exportPortableContentBundle(db, roots);
+  const content = portable.content;
   const keys = selection === 'all'
     ? content.map((entry) => entry.content_key).sort()
     : roots.map((root) => portableContentKeyForExport(
@@ -740,6 +816,7 @@ export function exportLibraryDocument(
     selection,
     selected_content_keys: Object.freeze(keys),
     content,
+    supersessions: portable.supersessions,
   };
   validateLibraryDocument(document);
   return Object.freeze(document);
@@ -883,13 +960,73 @@ export function validatePortableContent(input: unknown): readonly PortableConten
   return Object.freeze(entries);
 }
 
+export function validatePortableContentBundle(input: unknown): PortableContentBundle {
+  const value = backupRecord(input, 'Portable content bundle');
+  exactKeys(value, ['content', 'supersessions'], 'Portable content bundle');
+  const content = validatePortableContent(value.content);
+  if (!Array.isArray(value.supersessions)) {
+    throw new BackupValidationError('Portable content supersessions must be a list.');
+  }
+  const carried = new Set(content.map(
+    (entry) => `${entry.kind}\u0000${entry.content_key}`,
+  ));
+  const seen = new Set<string>();
+  const supersessions = value.supersessions.map((inputRow, index) => {
+    const label = `Portable content supersessions[${String(index)}]`;
+    const row = backupRecord(inputRow, label);
+    exactKeys(row, [
+      'content_kind', 'superseded_content_key', 'successor_content_key',
+      'recorded_at',
+    ], label);
+    if (
+      typeof row.content_kind !== 'string' ||
+      !(contentKinds as readonly string[]).includes(row.content_kind) ||
+      typeof row.superseded_content_key !== 'string' ||
+      row.superseded_content_key === '' ||
+      typeof row.successor_content_key !== 'string' ||
+      row.successor_content_key === '' ||
+      typeof row.recorded_at !== 'string' ||
+      row.recorded_at === ''
+    ) {
+      throw new BackupValidationError(`${label} is invalid.`);
+    }
+    if (row.superseded_content_key === row.successor_content_key) {
+      throw new BackupValidationError(`${label} must name distinct versions.`);
+    }
+    const kind = row.content_kind as ContentKind;
+    if (
+      !carried.has(`${kind}\u0000${row.superseded_content_key}`) ||
+      !carried.has(`${kind}\u0000${row.successor_content_key}`)
+    ) {
+      throw new BackupValidationError(`${label} must name carried content.`);
+    }
+    const marker = `${kind}\u0000${row.superseded_content_key}`;
+    if (seen.has(marker)) {
+      throw new BackupValidationError(`${label} repeats a superseded version.`);
+    }
+    seen.add(marker);
+    return Object.freeze({
+      content_kind: kind,
+      superseded_content_key: row.superseded_content_key,
+      successor_content_key: row.successor_content_key,
+      recorded_at: row.recorded_at,
+    });
+  });
+  return Object.freeze({ content, supersessions: Object.freeze(supersessions) });
+}
+
 export function validateLibraryDocument(input: unknown): asserts input is LibraryExportDocument {
   const value = backupRecord(input, 'Library export');
   exactKeys(value, [
     'format', 'version', 'exported_at', 'selection',
     'selected_content_keys', 'content',
+    ...(value.version === LIBRARY_EXPORT_VERSION ? ['supersessions'] : []),
   ], 'Library export');
-  if (value.format !== LIBRARY_EXPORT_FORMAT || value.version !== LIBRARY_EXPORT_VERSION) {
+  if (
+    value.format !== LIBRARY_EXPORT_FORMAT ||
+    value.version !== LIBRARY_EXPORT_VERSION &&
+      value.version !== LEGACY_LIBRARY_EXPORT_VERSION
+  ) {
     throw new BackupValidationError('Unsupported library export format or version.');
   }
   if (typeof value.exported_at !== 'string' || new Date(value.exported_at).toISOString() !== value.exported_at) {
@@ -911,6 +1048,10 @@ export function validateLibraryDocument(input: unknown): asserts input is Librar
     throw new BackupValidationError('Library export selected_content_keys must be unique and sorted.');
   }
   const content = validatePortableContent(value.content);
+  validatePortableContentBundle({
+    content,
+    supersessions: value.supersessions ?? [],
+  });
   const carriedKeys = new Set(content.map((entry) => entry.content_key));
   if (selectedKeys.some((key) => !carriedKeys.has(key))) {
     throw new BackupValidationError('Library export selected_content_keys must name carried content.');
@@ -1359,6 +1500,46 @@ export function portableContentImportNodes(
   input: unknown,
 ): readonly ContentImportNode[] {
   return Object.freeze(validatePortableContent(input).map((entry) => portableNode(db, entry)));
+}
+
+/** Restore immutable recipient-local lineage after every aggregate is present. */
+export function restorePortableContentSupersessions(
+  db: DatabaseContext,
+  input: unknown,
+  targets: ReadonlyMap<string, ContentKey>,
+): void {
+  const bundle = validatePortableContentBundle(input);
+  for (const edge of bundle.supersessions) {
+    const superseded = targets.get(
+      `${edge.content_kind}\u0000${edge.superseded_content_key}`,
+    ) ?? edge.superseded_content_key as ContentKey;
+    const successor = targets.get(
+      `${edge.content_kind}\u0000${edge.successor_content_key}`,
+    ) ?? edge.successor_content_key as ContentKey;
+    const existing = db.oneRaw(
+      `SELECT successor_content_key, recorded_at
+       FROM catalog_content_supersessions
+       WHERE content_kind = ? AND superseded_content_key = ?`,
+      [edge.content_kind, superseded],
+    );
+    if (existing !== null) {
+      if (
+        String(existing.successor_content_key) !== successor ||
+        String(existing.recorded_at) !== edge.recorded_at
+      ) {
+        throw new BackupValidationError(
+          `Portable ${edge.content_kind} lineage for '${superseded}' conflicts with the recipient.`,
+        );
+      }
+      continue;
+    }
+    db.exec(
+      `INSERT INTO catalog_content_supersessions (
+         content_kind, superseded_content_key, successor_content_key, recorded_at
+       ) VALUES (?, ?, ?, ?)`,
+      [edge.content_kind, superseded, successor, edge.recorded_at],
+    );
+  }
 }
 
 export function libraryContentImportNodes(

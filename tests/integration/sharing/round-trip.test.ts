@@ -1299,6 +1299,7 @@ describe('minimal character sharing', () => {
       ),
     );
     expect(shared.placeholders).toEqual([{ spellKey, spellName }]);
+    expect(shared.portableContent).toBeUndefined();
 
     const target = await database();
     importCharacterShare(target, shared);
@@ -2408,7 +2409,7 @@ describe('D83 ability override sharing', () => {
     const decoded = await decodeShareFragment(
       await encodeShareFragment(exportCharacterShare(source, characterId)),
     );
-    expect(decoded.version).toBe(17);
+    expect(decoded.version).toBe(18);
     expect(decoded.effects).toMatchObject([
       {
         kind: 'ability_override',

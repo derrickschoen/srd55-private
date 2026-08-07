@@ -13,6 +13,11 @@ import {
   CHARACTER_SHARE_VERSION,
   type CharacterShareDocument,
 } from '../../../src/sharing/schema';
+import { featProjectorV1Vector } from '../catalog/fixtures/source-projector-v1-vectors';
+import {
+  CONTENT_FINGERPRINT_SCHEME_V1,
+  type ContentFingerprintDigest,
+} from '../../../src/catalog/content-identity';
 
 /**
  * A RETIRED fixture's fragment is still hand-frozen and still exercised: the
@@ -616,6 +621,36 @@ const VERSION_FIXTURES = {
       }],
     },
   },
+  18: {
+    // Independently compressed with `gzip -n -9` from a hand-authored v18
+    // positional tuple. The appended root object carries one reviewed feat
+    // aggregate and an explicitly empty immutable-lineage list.
+    fragment:
+      'H4sIAAAAAAACA6VSXWvjMBD8K2af7WI3ib9-QaEclHu4l7SYjTV2RWTZJ8mloeS_d-0md0fusSCENDs7O7vsnpRVyTCboFvD3id-gjE-aV_ZcRvgEi8vUJyV8Z5-ZWX0NLrAB4PoAW6k2M7GfPt6iff_ne9oflA72gAbqN5_0FFbRTV14EDxNdIccRIQ7xNbBVVf4LuFVR8BmwwYRneSDGE2Fw2ZEFyAErTTtoebnBYt375igMQvKslbdsNQuocXO1Qc0jIvOC_ybnOviqraZYxqVxVZut1ytcmzVpVpWXGX3qcHpSoItt3ku1SVRZGy6HLfO_QcpOBtc5ZXG4_iP_px9e9mA99A6aBH-0_PyzBEpV9YNfWwcGwEHLRtDN5gqF6nSXzQRodTM43Siqc6_Qtp2zqwR_MFaPjbpD-Mgd_1MA_XuMMknpdNorpj4xHT5ODwe9Zeh0VHloB6x2vJ5W3HFaafaNmYSCGwNv4uip7ds31yaLWHOcl_Beh8lhw_T3Ae3kvrq8z55RPWaVYq8wIAAA',
+    expected: {
+      format: CHARACTER_SHARE_FORMAT,
+      version: CHARACTER_SHARE_VERSION,
+      character: { name: 'V18 Portable Hero' },
+      classes: [],
+      sources: [],
+      selections: [],
+      spellbook: [],
+      preferences: [],
+      overrides: [],
+      portableContent: {
+        content: [{
+          kind: 'feat',
+          content_key: 'expanded:content.feat:keen-memory',
+          key_kind: 'asserted',
+          fingerprint_scheme: CONTENT_FINGERPRINT_SCHEME_V1,
+          fingerprint_digest:
+            featProjectorV1Vector.sha256 as ContentFingerprintDigest,
+          aggregate: featProjectorV1Vector.aggregate,
+        }],
+        supersessions: [],
+      },
+    },
+  },
 } satisfies Record<SupportedShareVersion, FrozenFixture>;
 
 const HISTORICAL_SCHEMA_MODULE_SHA256 = {
@@ -624,6 +659,7 @@ const HISTORICAL_SCHEMA_MODULE_SHA256 = {
   'v8.ts': '1ac43e5dbc33e34ef025af12e80914a51daa8ecda5599a8c1143cbe2baf748af',
   'v13.ts': 'ef1e06d92ca9e302b6bc148aad5ba2fba40110c5909c2a2e972628e992fd6435',
   'v16.ts': '05b89733bfa8838a688506d56feae6fcf314ba7c0b46b2e3d93e5a1fe1995c02',
+  'v17.ts': 'b3eb347c4636a094eb112d710aadd7b68523c56b84b38b8d4602dbcff1692089',
 } as const;
 
 function allObjects(root: object): object[] {

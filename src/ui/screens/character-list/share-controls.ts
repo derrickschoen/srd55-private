@@ -8,6 +8,7 @@ import {
 import type { SharePreview } from '../../../sharing/character-share';
 import type { ContentImportPlan } from '../../../catalog/content-adoption';
 import { createContentAdoptionDialog } from '../../content-adoption-dialog';
+import { contentImportLabel } from '../../../sharing/import-issues';
 import { element, listen, type Cleanup } from '../../dom';
 
 const QR_MAX_LINK_LENGTH = 2_000;
@@ -437,9 +438,16 @@ export function createShareControls(
             qr.removeAttribute('src');
           }
           announce(
-            link.length <= QR_MAX_LINK_LENGTH
-              ? 'Share link and QR code ready.'
-              : 'Share link ready. It is too long for a reliable QR code.',
+            'omittedContent' in result
+              ? `Share link ready without external content. The recipient must import ${
+                  result.omittedContent.map((item) =>
+                    contentImportLabel(item.kind, item.contentKey)
+                  ).join(', ')
+                } before opening it.`
+              : link.length <= QR_MAX_LINK_LENGTH
+                ? 'Share link and QR code ready.'
+                : 'Share link ready. It is too long for a reliable QR code.',
+            'omittedContent' in result,
           );
         })
         .catch((error: unknown) => announceFailure(error))
@@ -486,7 +494,7 @@ export function createShareControls(
       element('div', { className: 'share-column' }, [
         exportTitle,
         element('p', {
-          text: 'Share links are reference-only: they do not include catalog definitions. Use a complete character JSON backup when the recipient also needs external content.',
+          text: 'Share links include referenced external content when it fits. If it does not fit, the recipient can import the content named in the warning before opening the link.',
         }),
         element('label', { className: 'share-option' }, [
           includeAcks,

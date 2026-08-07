@@ -2,6 +2,7 @@ import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import { readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { DatabaseContext } from '../../src/db/database';
+import { CatalogImporter } from '../../src/catalog/catalog-importer';
 import { expect, test } from './fixtures/parallel-test';
 
 const schema = readFileSync(
@@ -9,7 +10,7 @@ const schema = readFileSync(
   'utf8',
 );
 
-async function oversizedShareImage(): Promise<readonly number[]> {
+async function authoredShareImage(): Promise<readonly number[]> {
   const sqlite3 = await sqlite3InitModule();
   const connection = new sqlite3.oo1.DB(':memory:', 'c');
   connection.exec(schema);
@@ -36,6 +37,69 @@ async function oversizedShareImage(): Promise<readonly number[]> {
       [characterId, `Blade ${index}`, noise(500), noise(2_000)],
     );
   }
+  const speciesDocument = (
+    name: string,
+    traits: readonly { readonly name: string; readonly description: string }[],
+  ) => JSON.stringify([{ kind: 'species', aggregate: {
+    kind: 'species',
+    name,
+    rules_edition: 'expanded',
+    reference_text: `${name} reference.`,
+    repeatable: false,
+    creature_type: 'Chronal Being',
+    primary_size: 'Medium',
+    alternate_size: null,
+    walking_speed_feet: 30,
+    grants: [],
+    traits: traits.map((trait, index) => ({
+      ...trait,
+      sort_order: index + 1,
+      effects: [],
+    })),
+  } }]);
+  const importer = new CatalogImporter(db);
+  importer.import({
+    documents: [speciesDocument('Portable Fit Species', [{
+      name: 'Pocket Chronicle',
+      description: 'This small authored aggregate fits in a share link.',
+    }])],
+  });
+  importer.import({
+    documents: [speciesDocument(
+      'Oversized Portable Species',
+      Array.from({ length: 100 }, (_, index) => ({
+        name: `Chronicle ${String(index + 1)}`,
+        description: noise(3_500),
+      })),
+    )],
+  });
+  const addSpeciesCharacter = (name: string, contentKey: string): void => {
+    const speciesId = db.scalar<number>(
+      'SELECT id FROM species_definitions WHERE content_key = ?',
+      [contentKey],
+    );
+    if (speciesId === null) throw new Error(`Missing browser fixture ${contentKey}.`);
+    const id = db.exec('INSERT INTO characters (name) VALUES (?)', [name])
+      .lastInsertId;
+    db.exec(
+      `INSERT INTO character_source_instances (
+         character_id, instance_uuid, source_type, source_definition_id,
+         display_name, acquired_at_character_level
+       ) VALUES (?, ?, 'species', ?, ?, 1)`,
+      [id, `${name.toLowerCase().replaceAll(' ', '-')}-source`, speciesId,
+        contentKey.includes('oversized')
+          ? 'Oversized Portable Species'
+          : 'Portable Fit Species'],
+    );
+  };
+  addSpeciesCharacter(
+    'Portable Fit Hero',
+    'expanded:content.species:portable-fit-species',
+  );
+  addSpeciesCharacter(
+    'Omitted Content Hero',
+    'expanded:content.species:oversized-portable-species',
+  );
   const bytes = Array.from(sqlite3.capi.sqlite3_js_db_export(connection));
   connection.close();
   return bytes;
@@ -265,7 +329,7 @@ test('creates, independently verifies, previews, and explicitly imports a durabl
 test('oversized share refusal exposes no link, copy, share, or QR output', async ({
   page,
 }) => {
-  const bytes = await oversizedShareImage();
+  const bytes = await authoredShareImage();
   await page.goto('/');
   await ready(page);
   await page.evaluate(
@@ -290,4 +354,113 @@ test('oversized share refusal exposes no link, copy, share, or QR output', async
   await expect.soft(page.getByRole('button', { name: 'Share…' })).toBeHidden();
   await expect.soft(page.locator('.share-qr')).toBeHidden();
   await expect.soft(page.locator('.share-qr')).not.toHaveAttribute('src');
+});
+
+test('fits authored content into v18 and imports it with the dependent character', async ({
+  browser,
+  page,
+}) => {
+  const bytes = await authoredShareImage();
+  await page.goto('/');
+  await ready(page);
+  await page.evaluate(
+    (image) => window.staticApp.replaceDatabase(Uint8Array.from(image)),
+    bytes,
+  );
+  await page.reload();
+  await ready(page);
+
+  await page.getByRole('button', { name: 'Share Portable Fit Hero by link' }).click();
+  await page.getByRole('button', { name: 'Create share link' }).click();
+  const output = page.getByLabel('Generated character share link');
+  await expect(output).toBeVisible();
+  await expect(page.locator('.share-status')).toHaveText(
+    'Share link and QR code ready.',
+  );
+  const link = await output.inputValue();
+  const positional = JSON.parse(gunzipSync(
+    Buffer.from(new URL(link).hash.slice(1), 'base64url'),
+  ).toString('utf8')) as unknown[];
+  expect(positional[1]).toBe(18);
+  expect(positional[21]).toMatchObject({
+    content: [expect.objectContaining({
+      kind: 'species',
+      content_key: 'expanded:content.species:portable-fit-species',
+    })],
+    supersessions: [],
+  });
+
+  const freshProfile = await browser.newContext();
+  try {
+    const recipient = await freshProfile.newPage();
+    await recipient.goto(link);
+    await ready(recipient);
+    await recipient.getByRole('button', { name: 'Add to my characters' }).click();
+    await expect(recipient.locator('.share-status')).toContainText(
+      'Character added as #1.',
+    );
+    expect(await recipient.evaluate(async () => ({
+      characters: await window.staticApp.inspectRows('characters'),
+      species: (await window.staticApp.inspectRows('species_definitions'))
+        .filter((row) => row.content_key ===
+          'expanded:content.species:portable-fit-species'),
+    }))).toMatchObject({
+      characters: [expect.objectContaining({ name: 'Portable Fit Hero' })],
+      species: [expect.objectContaining({
+        content_key: 'expanded:content.species:portable-fit-species',
+      })],
+    });
+  } finally {
+    await freshProfile.close();
+  }
+});
+
+test('falls back to v17, warns by content name, and the recipient refuses by the same name', async ({
+  browser,
+  page,
+}) => {
+  const bytes = await authoredShareImage();
+  await page.goto('/');
+  await ready(page);
+  await page.evaluate(
+    (image) => window.staticApp.replaceDatabase(Uint8Array.from(image)),
+    bytes,
+  );
+  await page.reload();
+  await ready(page);
+
+  await page.getByRole('button', { name: 'Share Omitted Content Hero by link' }).click();
+  await page.getByRole('button', { name: 'Create share link' }).click();
+  const required = "species 'expanded:content.species:oversized-portable-species'";
+  const warning = page.locator('.share-status');
+  await expect(warning).toHaveText(
+    `Share link ready without external content. The recipient must import ${required} before opening it.`,
+  );
+  const output = page.getByLabel('Generated character share link');
+  await expect(output).toBeVisible();
+  const link = await output.inputValue();
+  const positional = JSON.parse(gunzipSync(
+    Buffer.from(new URL(link).hash.slice(1), 'base64url'),
+  ).toString('utf8')) as unknown[];
+  expect(positional[1]).toBe(17);
+  expect(positional).toHaveLength(21);
+
+  const freshProfile = await browser.newContext();
+  try {
+    const recipient = await freshProfile.newPage();
+    await recipient.goto(link);
+    await ready(recipient);
+    await expect(recipient.locator('.share-status')).toContainText(required);
+    await expect(recipient.locator('.share-status')).toContainText(
+      `Import ${required}, then open the link again.`,
+    );
+    await expect(
+      recipient.getByRole('button', { name: 'Add to my characters' }),
+    ).toBeHidden();
+    expect(await recipient.evaluate(() =>
+      window.staticApp.inspectRows('characters')
+    )).toEqual([]);
+  } finally {
+    await freshProfile.close();
+  }
 });

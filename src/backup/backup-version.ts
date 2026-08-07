@@ -4,7 +4,8 @@ export const DATABASE_BACKUP_VERSION = 1 as const;
 
 export const CHARACTER_BACKUP_FORMAT =
   'dnd-multiclass-spells/character' as const;
-export const CHARACTER_BACKUP_VERSION = 5 as const;
+export const CHARACTER_BACKUP_VERSION = 6 as const;
+export const PRE_LINEAGE_CHARACTER_BACKUP_VERSION = 5 as const;
 export const PREVIOUS_CHARACTER_BACKUP_VERSION = 4 as const;
 export const PRE_ARCHIVE_CHARACTER_BACKUP_VERSION = 3 as const;
 export const PRE_FLAVOR_CHARACTER_BACKUP_VERSION = 2 as const;

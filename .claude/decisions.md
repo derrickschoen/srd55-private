@@ -7,6 +7,50 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D229 — OWNER: boot verification moves to a rolled-up digest (2026-08-07)
+
+Ruling on D225's fix shape, chosen from three integrity/speed trades:
+a build-time canonical digest over ALL bundled aggregates; boot verifies
+ONE hash pass instead of 339 per-spell verifications; a mismatch
+triggers the full per-aggregate re-verify to NAME the culprit. Boot
+stays tamper-evident every load. "Verify once and stamp" (post-first-
+boot corruption undetected) and "keep full verify, just batch it"
+(smallest win) were both declined. D225's prohibitions stand: the
+digest is a designed guarantee, not an earlier readiness stamp, and
+timeouts still may not be raised to conceal boot cost. D226 applies to
+the digest: it covers the transitive source of what it claims to
+freeze. Scheduled as the lead item of D213 hardening, after HA-12.
+
+## D228 — OWNER: v1 publishes as local serve + ngrok tunnel (2026-08-07)
+
+Owner's answer to "where does v1 get published": "Local + ngrok" — not
+a static-host deploy, not a public repo. The git history therefore
+stays private under every publication path (ngrok exposes the BUILT
+app, never the repo), and D227's rewrite is motivated on its own, not
+by publication. STARTING a tunnel is an outward-facing action: it
+happens only when the owner runs it or explicitly asks for it. The
+moment a real person creates a character through the tunnel, D60's
+"data loss is not a stop condition" FLIPS OFF.
+
+## D227 — OWNER: rewrite the EK/AT names + table out of git history, NOW (2026-08-07)
+
+Owner chose "Rewrite now" over leaving the private history as-is. This
+LIFTS the destruction hard stop for EXACTLY this operation: a
+git-filter-repo pass expunging the transcribed third-caster slot table
+and the EK/AT names from pre-b0af6f8 history, followed by a force-push
+of the mirror. Scope of the lift: this rewrite, once; it is not a
+general licence to rewrite, force-push, or delete.
+
+SEQUENCING (supervisor call, recorded as a reversible default): the two
+in-flight HA-12 lanes branched off pre-rewrite main; rewriting under
+them would strand their commits on old history. The rewrite runs
+IMMEDIATELY AFTER the HA-12 merges land, on the complete history, in
+this session. Cost to flip: none — running it first would only force a
+rebase of both lanes. After the rewrite: every commit hash recorded in
+decisions/lane-state/briefs refers to PRE-REWRITE history; a mapping
+note gets appended to lane-state, existing entries stay unedited per
+the append-only rule.
+
 ## D223 — SUPERVISOR: third-caster slot ladders are DERIVED from the SRD table, never transcribed (2026-08-07)
 
 Answers the owner's question "am I violating the license by making a 1/3

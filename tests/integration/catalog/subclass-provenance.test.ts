@@ -27,6 +27,10 @@ import {
 } from '../../../src/sharing/character-share';
 import { assertContentImportPlan } from '../../helpers/content-import-plan';
 import { openTestDatabase } from '../../helpers/open-db';
+import {
+  positionalToShareDocument,
+  shareDocumentToReferencePositional,
+} from '../../../src/sharing/codec';
 
 const SUBCLASS = readFileSync(
   fileURLToPath(
@@ -314,7 +318,7 @@ describe('an imported subclass stays distinguishable from a bundled one', () => 
     ).toBe(SUBCLASS_KEY);
   });
 
-  it('travels through a share link as subclassKey, and is missed by key', async () => {
+  it('travels through an embedded share and stays identifiable in the reference-only fallback', async () => {
     const source = await database();
     const shared = exportCharacterShare(
       source,
@@ -329,11 +333,33 @@ describe('an imported subclass stays distinguishable from a bundled one', () => 
     );
     expect(sourceCurrentFingerprint).toMatch(/^[0-9a-f]{64}$/);
 
-    // A recipient without it is TOLD, in terms of the key. `missingSubclassIssue`
-    // is what the share screen prints, and this is the sentence that only means
-    // something because the key says whose content it is.
+    // The v18 link carries authenticated rules, so a bare recipient can install
+    // them before resolving the same portable key on the character.
     const bare = await database();
-    expect(assessImportCompatibility(bare, shared)).toEqual([
+    expect(assessImportCompatibility(bare, shared)).toEqual([]);
+    const embeddedImport = importCharacterShare(bare, shared);
+    expect(
+      bare.scalar(
+        `SELECT subclass.content_key
+         FROM character_class_levels AS level
+         JOIN subclass_definitions AS subclass
+           ON subclass.id = level.subclass_definition_id
+         WHERE level.character_id = ?`,
+        [embeddedImport.characterId],
+      ),
+    ).toBe(SUBCLASS_KEY);
+    expect(importedContentKeyOwner(SUBCLASS_KEY)).toBe('longroad.homebrew');
+
+    const referenceOnly = positionalToShareDocument(
+      shareDocumentToReferencePositional(shared),
+    );
+    expect(referenceOnly.portableContent).toBeUndefined();
+
+    // A reference-only recipient without it is TOLD, in terms of the key.
+    // `missingSubclassIssue` is what the share screen prints, and this is the
+    // sentence that only means something because the key says whose content it is.
+    const fallbackBare = await database();
+    expect(assessImportCompatibility(fallbackBare, referenceOnly)).toEqual([
       expect.objectContaining({
         code: 'missing_subclass',
         contentKeys: [SUBCLASS_KEY],
@@ -347,13 +373,13 @@ describe('an imported subclass stays distinguishable from a bundled one', () => 
     // row; catalog rows never travel through the share.
     const recipient = await database();
     const recipientSubclassId = importSubclass(recipient);
-    expect(assessImportCompatibility(recipient, shared)).toEqual([]);
-    expect(() => importCharacterShare(recipient, shared)).toThrow(
+    expect(assessImportCompatibility(recipient, referenceOnly)).toEqual([]);
+    expect(() => importCharacterShare(recipient, referenceOnly)).toThrow(
       'requires review before import',
     );
     expect(recipient.scalar<number>('SELECT count(*) FROM characters')).toBe(0);
 
-    const preview = previewCharacterShare(recipient, shared);
+    const preview = previewCharacterShare(recipient, referenceOnly);
     expect(preview.adoptionPlan.reviews).toEqual([
       expect.objectContaining({
         kind: 'subclass',
@@ -375,7 +401,7 @@ describe('an imported subclass stays distinguishable from a bundled one', () => 
     ]));
     const committed = commitCharacterShareImport(
       recipient,
-      shared,
+      referenceOnly,
       preview.adoptionPlan.token,
       choices,
     );

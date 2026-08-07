@@ -13,6 +13,7 @@ import {
   exportLibraryDocument,
   libraryContentImportNodes,
   portableImportPlan,
+  restorePortableContentSupersessions,
   validateLibraryDocument,
   type LibraryExportDocument,
   type PortableImportPlan,
@@ -66,11 +67,35 @@ export function commitLibraryImport(
   choices: ContentImportChoices = Object.freeze({}),
 ): ContentImportCommitResult {
   validateLibraryDocument(document);
+  const nodes = libraryContentImportNodes(db, document);
+  const plan = planContentImport(
+    db,
+    nodes,
+    choices,
+    Object.freeze([]),
+    libraryImportOperationIdentity(document),
+  );
+  const targets = new Map<string, ContentKey>();
+  for (const [index, node] of nodes.entries()) {
+    const entry = document.content[index];
+    const outcome = plan.outcomes.find((candidate) => candidate.id === node.id);
+    if (
+      entry !== undefined && outcome !== undefined &&
+      outcome.kind !== 'refused' && outcome.kind !== 'review'
+    ) {
+      targets.set(`${entry.kind}\u0000${entry.content_key}`, outcome.contentKey);
+    }
+  }
   return commitContentImport(db, {
-    nodes: libraryContentImportNodes(db, document),
+    nodes,
     token,
     choices,
     operationIdentity: libraryImportOperationIdentity(document),
+    afterInstall: (transaction) => restorePortableContentSupersessions(
+      transaction,
+      { content: document.content, supersessions: document.supersessions ?? [] },
+      targets,
+    ),
   });
 }
 
