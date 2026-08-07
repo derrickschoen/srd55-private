@@ -23,7 +23,69 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-07-d (newest - read first)
+## RESTART POINT 2026-08-07-e (newest - read first)
+MAIN 89421d6 (mirror pushed). FLOORS: vitest 257/4,233 all-pass; PW 137
+(a11y-side pool; share-side pool saw 134 before the a11y spec landed);
+build 0; migrations 0000-0040 unchanged. FORTY-FIVE merges. Rulings
+through D229. THE HA CHAIN IS COMPLETE.
+
+MERGED SINCE 08-07-d (HA-12 ran as TWO parallel lanes off one brief):
+ - 44th, wt/ha12 (74f1722): D218's second half — share links TRY to
+   embed non-SRD content (wire v18 = v17's 21-slot root + appended
+   portableContent) and fall back to the exact byte-frozen v17 shape
+   with an export-time warning naming what the recipient must import;
+   sender warning and recipient refusal share ONE label source.
+   Portability closure: character backup v6 / library v2 carry
+   supersession lineage; v5/v1 readable, pinned to not invent lineage.
+ - 45th, wt/ha12a11y (89421d6): the final D108 behaviour pass — real
+   key events, focus continuity, mutation-time announcement capture
+   across the homebrew library, three authoring forms, fix-review,
+   archive/restore/purge, HA-10 disclosures. Product fixes: ordering
+   controls announce and keep focus (incl. remove-to-empty anchoring),
+   background equipment stale-closure discard bug, restore/purge
+   specific announcements.
+
+FINDINGS THAT MATTERED (full detail in the merge messages):
+ - Lesson-4 grep (find and RUN tests asserting a changed contract)
+   was skipped once and then scoped too narrowly once: 6 vitest
+   failures in 5 files, then 2 MORE stale pins in tests/browser. The
+   lesson's scope now explicitly includes browser specs.
+ - Two gate failures were FIXTURE defects: a v2 frozen-format fixture
+   downgraded from a CURRENT export kept v6's new key; the adversarial
+   share fixture wrote subclass rows around the production fingerprint
+   writer. Third recurrence of "a fixture that bypasses the production
+   writer cannot see what the production writer creates".
+ - The old reorder focus assertions passed VACUOUSLY: JSDOM keeps a
+   detached node as activeElement, so identity checks against the
+   pre-render button proved nothing while NO focus code existed at all.
+ - SUPERVISOR ERROR, recorded: lane Playwright base ports were assigned
+   2 apart; a pool spans base+N per worker slot, so the share pool
+   collided with the a11y server. Lane bases are now >= 8 apart.
+ - Residual, recorded not fixed: the announcement recorder still
+   records a live region INSERTED with initial text (unexercised); a
+   library import runs planContentImport twice (perf, D213 note).
+
+D108 COVERAGE GAPS (named in the a11y merge message; this is the D213
+backlog, not a claim of coverage): planner, weapons/items,
+character-list, guided skill/expertise/spell, and level-up feat
+disclosure controls are static-text pinned only; validation-error
+focus and several refusal paths not route-level asserted.
+
+IN FLIGHT: nothing. NEXT, IN ORDER:
+ 1. D227 EK/AT HISTORY REWRITE (owner-authorized, exactly once):
+    filter-repo expunging the transcribed PHB third-caster table and
+    EK/AT names from pre-b0af6f8 history; bundle-backup refs first;
+    verify by git log -S on the result; full vitest to prove the tree
+    unaffected; force-push mirror; append hash-mapping note HERE.
+ 2. D213 hardening dispatch, leading with D229's rolled-up digest boot
+    fix (design: docs/design/2026-08-07-boot-readiness-diagnosis.md).
+    Also queued: D108 gap list above, mutation-suite expansion,
+    planContentImport double-plan, recorder residual.
+
+OPEN FOR THE OWNER: nothing new. D227/D228/D229 answered the parked
+questions (rewrite now; publish = local + ngrok; digest boot fix).
+
+## RESTART POINT 2026-08-07-d
 MAIN b309c66 (mirror pushed). FLOORS: vitest 257/4,229 all-pass; PW 132
 pool; build 0; migrations 0000-0040 FROZEN on main. FORTY-THREE merges.
 Rulings through D226.
