@@ -64,6 +64,16 @@ function close(actual: number, expected: number): void {
   expect(Math.abs(actual - expected)).toBeLessThanOrEqual(1e-12);
 }
 
+function caughtError(action: () => unknown): Error {
+  try {
+    action();
+  } catch (error) {
+    if (error instanceof Error) return error;
+    throw error;
+  }
+  throw new Error('Expected action to throw an Error.');
+}
+
 describe('planner dice oracle', () => {
   it('composes exact d20 modes, rerolls, modifiers, and defenses', () => {
     const normal = attackProbabilities(config());
@@ -373,16 +383,16 @@ describe('planner dice oracle', () => {
 
 describe('promoted die outcome contract', () => {
   it('rejects invalid promoted outcomes with exact messages', () => {
-    expect(() => promotedDieOutcome(Number.NaN, 8)).toThrowError(
+    expect(caughtError(() => promotedDieOutcome(Number.NaN, 8)).message).toBe(
       'Promoted die outcome must be finite; received NaN.',
     );
-    expect(() => promotedDieOutcome(2.5, 8)).toThrowError(
+    expect(caughtError(() => promotedDieOutcome(2.5, 8)).message).toBe(
       'Promoted die outcome must be an integer; received 2.5.',
     );
-    expect(() => promotedDieOutcome(9, 8)).toThrowError(
+    expect(caughtError(() => promotedDieOutcome(9, 8)).message).toBe(
       'Promoted die outcome must be no greater than d8; received 9.',
     );
-    expect(() => promotedDieOutcome(1, 8)).toThrowError(
+    expect(caughtError(() => promotedDieOutcome(1, 8)).message).toBe(
       'Promoted die outcome must be at least 2; received 1.',
     );
   });
