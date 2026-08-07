@@ -36,6 +36,28 @@ PROSE and NAMES — which is why D216 removes the names and why no EK/AT
 prose ever entered this repo. Deriving costs us nothing and removes the
 question entirely.
 
+## D226 — SUPERVISOR: a checksum-frozen migration must cover every source its behaviour depends on (2026-08-07)
+
+Found by codex during HA-11 after the supervisor ordered the 0039
+guard-suspension seam extracted so retirement and purge could share one
+mechanism. The extraction was right — two ways to lower an immutability
+guard is how the guard stops meaning anything — but it silently weakened
+a different property: the retirement migration's checksum hashes only
+the caller file's bytes, so changing the EXTRACTED guard module would
+alter the migration's behaviour without altering its checksum. A
+"checksum-frozen" migration that can change behaviour without changing
+its checksum is only partly frozen.
+
+RULE: a checksum-frozen migration's checksum covers the TRANSITIVE
+source it depends on, not just its own file. Where that is impractical,
+the claim must be RESTATED to what it actually freezes — the same
+principle applied to the candidate audit's contract wording in HA-11.
+Never leave a freezing claim broader than the freeze.
+
+Cost accepted: changing the shared guard now re-pins every migration
+that uses it. That is the point — if the guard changes, those
+migrations' behaviour changed and a frozen artefact should notice.
+
 ## D225 — SUPERVISOR: boot readiness slowness is a PRODUCT defect, queued for D213 hardening (2026-08-07)
 
 The route-readiness timeouts recurring across four lanes are not a test
