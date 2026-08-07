@@ -5,6 +5,69 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-06 — Barbed Court: the duel is a Focus-cost feature, not a spell (supersedes the Barbed Challenge draft)
+
+Owner's ruling, verbatim:
+
+> Changed my mind. Since compelled duel is not in the srd. Recreate it as a
+> non-spell effect that costs focus. Do not put compelled duel in the spells
+> known list.
+>
+> It should have the same effect as the spell, but has to be on a melee hit,
+> not ranged and doesn't require concentration
+
+Effect: the *Barbed Challenge* spell drafted in the entry below is **withdrawn**
+before it was ever written into the doc. The duel returns to being the goad's
+1-Focus option, gated on the melee hit that already triggers the goad. Nothing
+is added to the spells-known or Court Spells list. This resolves the licensing
+problem by construction — there is no longer any spell to name, grant, or seed.
+
+Authored text, from SRD primitives only:
+
+> **Level 3: Barbed Goad**
+>
+> Once each round, when you hit a creature with a melee attack, you can goad it
+> until the end of your next turn. While goaded by you, the first attack roll it
+> makes against a creature other than you on each of its turns has Disadvantage.
+>
+> When you goad a creature, you can expend 1 Focus Point to bind it to a duel
+> with you. The creature makes a Wisdom saving throw against your Focus Point
+> save DC. On a failed save, for 1 minute it has Disadvantage on attack rolls
+> against creatures other than you, and it can't willingly move to a space more
+> than 30 feet away from you.
+>
+> The duel ends early if you have the Incapacitated condition, if you end your
+> turn more than 30 feet from the creature, or if you make an attack roll
+> against a creature other than it. You can have only one creature bound in this
+> way at a time.
+
+Measured consequences, recorded not corrected:
+
+- **Dropping Concentration removes the single largest bound the spell form
+  had.** As a feature the duel now runs *alongside* *Blur*, *Hypnotic Pattern*,
+  *Hold Person*, *Fear* or *Silence* rather than instead of one of them. It
+  also no longer costs a Bonus Action, so the turn's Flurry survives, and it
+  can no longer be Counterspelled or Dispelled.
+- **The remaining bounds are the Wisdom save, and the single-target
+  restriction.** "Ends if you make an attack roll against a creature other than
+  it" is load-bearing and deliberate: a monk with six attacks a turn must spend
+  the entire duel on one target, forgoing Topple spread and every other
+  creature in the fight. That restriction, not the Focus cost, is what the
+  player actually pays.
+- **Value:** against a boss making three attacks a round, Disadvantage takes a
+  65% hit chance to 42.25%, so a bound target prevents roughly **8.2 damage per
+  round** — about 33 over a four-round fight — for **1 Focus Point**, plus the
+  30-foot leash. The duration exceeds most fights, so this is effectively one
+  Focus per encounter.
+- **No repeat saves.** The spell form was bounded by Concentration instead; with
+  Concentration gone and no end-of-turn save, one failed Wisdom save locks a
+  creature for the full minute. Adding end-of-turn saves — the pattern the
+  draft's own level-17 feature already used — was offered to the owner, not
+  applied.
+- **Level 17 still has no job.** Unanswerable Challenge was this effect at 3
+  Focus with repeat saves and a leash; the whole payload now sits at level 3 for
+  1 Focus. The capstone needs replacing.
+
 ## 2026-08-06 — Barbed Court: goad once per round; the duel becomes an ordinary spell; hearing clause dropped
 
 Owner's rulings, verbatim:
