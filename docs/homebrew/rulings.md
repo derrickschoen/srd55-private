@@ -5,6 +5,131 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-07 — Barbed Court: the third-caster slot table stays, with its derivation recipe printed and sourced to the SRD 5.2.1 Multiclass Spellcaster table
+
+Owner's question and ruling, verbatim:
+
+> Also, am I ok to use the 1/3 caster chart from the phb in cc-by license? Or am
+> I safer using the 1/2 caster table?
+
+> Ok, keep the third-caster table, print the derivation recipe in the design
+> notes, and cite the SRD 5.2.1 Multiclass Spellcaster table as its source.
+
+Facts established by grep before answering, not from folklore:
+
+- **The third-caster table is in neither SRD.** "Eldritch Knight" and "Arcane
+  Trickster": zero hits in SRD 5.1 and SRD 5.2.1. Even the PHB multiclass
+  clause "a third of your Fighter or Rogue levels" is absent — the SRD 5.2.1
+  multiclass Spell Slots rule counts only full casters and "Half your levels
+  (round up) in the Paladin and Ranger classes". The PHB EK/AT table as a
+  *source* is therefore off-limits under D59/D191.
+- **The table's numbers are fully derivable from CC-BY text.** The Multiclass
+  Spellcaster table is in SRD 5.2.1 (its own example: caster level 5 → four
+  level-1, three level-2, two level-3 slots). Recipe: **caster level =
+  one-third your Monk level, rounded up; read that row of the Multiclass
+  Spellcaster table, columns 1–4.** Every row of the draft's table verified as
+  an exact match: ceil(3/3)=1 → 2; ceil(6/3)=2 → 3; ceil(7/3)=3 → 4/2;
+  ceil(13/3)=5 → 4/3/2; ceil(19/3)=7 → 4/3/3/1. "Rounded up" is our own design
+  choice — it is what makes slots exist at Monk 3 when the subclass arrives.
+
+Rationale recorded — two independent layers: (1) a slot progression is a game
+mechanic outside copyright (17 U.S.C. §102(b), *Baker v. Selden*) — no
+protectable expression in the numbers; (2) the clean-room layer the project
+actually relies on — the table is independently generated from licensed SRD
+5.2.1 content by a stated one-line formula, so the PHB containing the same
+numbers is a fact about arithmetic, not about copying.
+
+The half-caster alternative was assessed and declined: the Paladin/Ranger
+progression is licensed verbatim, but it is a different chassis — 2nd-level
+slots at Monk 5, 3rd at 9, 5th-level slots at 17 (reintroducing what the
+refresh ruling just abolished), fifteen total slots at 17 against ten. The
+legal delta is the difference between "verbatim licensed" and "derivable from
+licensed by one line of arithmetic", which layer (1) makes close to nothing.
+
+Applied: the derivation recipe and SRD 5.2.1 citation added as a design note
+under the slot table in `cc-by/2026-08-03-monk-barbed-court.md`. The note is
+written to survive the pending full rewrite.
+
+## 2026-08-07 — Barbed Court: Focus conversion becomes slot REFRESH — native slots only, no 5th-level slots; rate/row-alignment/action still open
+
+Owner's rulings, verbatim — first the rate directive rejecting the
+long-rest-refresh option, then the model change:
+
+> Once per long rest is too weird to match with short rest point refresh. Make
+> the cost 2 and it will be more useful at higher levels.
+>
+> Or come up with a sliding scale (ex 1point - 1st level, 3/2,5/3,…) brainstorm
+> and play around with the numbers
+
+> Also, make it so that we are spending points to refresh spell slots, so no
+> more 5th level spell slots and we are limited by the 1 leveled spell per turn
+
+Effect — the conversion no longer *creates* slots, it **regains expended slots
+from the monk's own third-caster table**. Highest slot ever: 2nd at Monk 7, 3rd
+at 13, 4th at 19. Superseded by construction: the 2nd/3rd/5th cap ladder, the
+5th-level ceiling at Monk 17, and the "converted slots only upcast" clause —
+there is nothing above the native table to cap. The burst limiter the owner
+named is native SRD 5.2.1 law, quoted: *"On a turn, you can expend only one
+spell slot to cast a spell"* (One Spell with a Spell Slot per Turn); the doc
+need only not contradict it.
+
+Two open ambiguities from earlier entries die with the model: whether a
+converted slot raises what can be *prepared* (preparation now follows the
+native table), and the 5th-level nova (top effect at Monk 17 is a 3rd-level
+slot, so casting volume stops being the dangerous number).
+
+**Correction to this session's own arithmetic, recorded at full length:** the
+daily figures previously reported for the creation model — 9/11/10 castings at
+Monk 6/11/17 — were wrong in the design's favour. They divided the *daily*
+Focus total by the slot cost, silently banking Focus across short rests; Focus
+refreshes *to* Monk level and does not accumulate, so the correct method is
+3 × floor(pool ÷ cost) and the correct figures were 9/9/9. The same division
+error appears in the 2026-08-06 entries ("13 third-level castings at Monk 13"
+— actually 12; "10 fifth-level castings at Monk 17" — actually 9). Those
+entries stand as written per the append-only rule; this paragraph is the
+correction.
+
+Rate exploration run at the owner's direction (creation model, then refresh
+model). Creation model: ×2 through ×5 collapse to a cliff — ×2 and ×3 are
+mechanically identical (one top-tier casting per window at every tier), ×4/×5
+make the printed caps unreachable in principle. Refresh model at the two live
+rates, castings/day of the top native slot (native + 3 windows of refreshes),
+theoretical ceiling with the pool uncontested:
+
+| Monk | Top slot | Native | ×2 flat (2/4/6/8) | Odd (1/3/5/7) |
+|---:|---|---:|---:|---:|
+| 6 | 1st | 3 | 12 | 21 |
+| 7 | 2nd | 2 | 5 | 8 |
+| 11 | 2nd | 3 | 9 | 12 |
+| 13 | 3rd | 2 | 8 | 8 |
+| 17 | 3rd | 3 | 9 | 12 |
+| 19 | 4th | 1 | 7 | 7 |
+
+Recommendation reversed under the new model and the reversal recorded: the odd
+scale's virtue (a 5th-level slot at half-pool) is unemployed with no 5th-level
+slots, and its 1-point 1st-level refresh yields 21 castings/day at Monk 6.
+**×2 flat recommended** — one clause, "2 Focus Points per level of the slot
+regained". The *Shield*-for-1-Focus identity is dead under refresh either way
+(the spell is cast with a slot; Focus only regains the slot afterwards).
+
+**The structural coupling from the realignment entry breaks, and the break is
+the open decision.** Refresh cannot regain a slot level the table has not yet
+granted, so the granted Court Spells rows go dead on arrival: the Monk-6 row
+(2nd-level) is castable at 7, the Monk-11 row (3rd) at 13, the Monk-17 row
+(4th) at **19**. Options put to the owner: (a) move the granted rows to the
+slot-arrival levels 3/7/13/19 on the SRD Paladin-oath pattern (recommended —
+features stay at 3/6/11/17, only the spell grants move; partially walks back
+the realignment ruling for this one table and needs the owner's word); (b)
+keep 6/11/17 and accept 1–2 level dead windows, worst at 17→19 which most
+tables never see; (c) downshift the row contents, which costs *Compulsion*
+outright (recommended against).
+
+**Still open to close this ruling: the rate (×2 recommended), the granted-rows
+fix (a recommended), and the refresh's action cost (Bonus Action per the SRD's
+own Font of Magic pattern recommended — the tension with Flurry does real
+balancing work).** Doc text unchanged pending those three; the model itself is
+settled.
+
 ## 2026-08-07 — ki and Focus Points are one resource; the Psionic Fist doc brought to full OGL compliance
 
 Owner's rulings, verbatim:
