@@ -101,13 +101,16 @@ concrete species/subclass/background work in §11.
   the subclass's spellcasting ability (`src/access/spell-access-builder.ts:
   622-652`). The missing piece is therefore a typed authoring/import document
   and validation, not a new rules interpretation.
-- **Every bundled subclass progression is dense today.** The bundled key set is
-  exactly EK and AT, and the boot guard requires 20
+- **Historical baseline (superseded by D216/D222).** At this design's date the
+  bundled subclass-progression key set was exactly EK and Arcane
+  Trickster, and the boot guard required 20
   progression rows for each (`src/rules/class-progression-lookup.ts:180-257`).
   Their shared seeder loops from level 1 through `PROGRESSION_LEVELS`, and both
   definitions call it (`:610-684`). Thus CI-3s can project the current bundled
   spellcasting subclasses through the 20-level `override` arm; density is a
-  proved baseline fact, not inferred from the schema's optional FK child.
+  proved baseline fact, not inferred from the schema's optional FK child. The
+  current seed has no bundled subclass progression rows; the optional
+  bundled-homebrew Spell Student now owns this authoring/runtime seam.
 - **The three class-feature effect tables now share the complete payload shape.**
   `featureEffectColumns()` contains effect kind, damage/HP/speed,
   ability/amount/maximum, AC formula, weapon scope, and attack count

@@ -282,15 +282,15 @@ test('a subclass import lands, survives a reload, and outlives a spell replaceme
   await page.reload();
   await ready(page);
   expect(await stored()).toHaveLength(1);
-  // The seeder runs at every boot and repairs its own fifteen subclasses. An
+  // The seeder runs at every boot and repairs its twelve SRD subclasses. An
   // imported row parked beside them must be neither overwritten nor swept.
   expect(
     await page.evaluate(() =>
       window.staticApp.inspectRows('subclass_definitions'),
     ),
-  ).toHaveLength(16);
+  ).toHaveLength(13);
   expect(await importedFeatures()).toHaveLength(2);
-  expect(await seededFeatureCount()).toBe(70);
+  expect(await seededFeatureCount()).toBe(58);
 
   // A spell import is a FULL REPLACEMENT of the spell catalog. It must not
   // reach the subclass — this is the silent-data-loss case.
@@ -301,7 +301,7 @@ test('a subclass import lands, survives a reload, and outlives a spell replaceme
   );
   expect(await stored()).toHaveLength(1);
   expect(await importedFeatures()).toHaveLength(2);
-  expect(await seededFeatureCount()).toBe(70);
+  expect(await seededFeatureCount()).toBe(58);
 
   // And the reverse: emptying the spell catalog leaves the subclass alone too.
   await page.evaluate(() =>
@@ -311,7 +311,7 @@ test('a subclass import lands, survives a reload, and outlives a spell replaceme
   await ready(page);
   expect(await stored()).toHaveLength(1);
   expect(await importedFeatures()).toHaveLength(2);
-  expect(await seededFeatureCount()).toBe(70);
+  expect(await seededFeatureCount()).toBe(58);
   expect(
     await page.evaluate(() =>
       window.staticApp.inspectRows('spell_versions', { is_active: 0 }),

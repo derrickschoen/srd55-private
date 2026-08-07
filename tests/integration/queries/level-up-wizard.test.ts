@@ -30,6 +30,10 @@ import {
   createRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
+import {
+  commitBundledHomebrewInstall,
+  planBundledHomebrewInstall,
+} from '../../../src/authoring/bundled-homebrew-installer';
 
 const EXPECTED_SUBCLASS_VARIANTS = [
   {
@@ -66,18 +70,11 @@ const EXPECTED_SUBCLASS_VARIANTS = [
   },
   {
     class_name: 'Fighter',
-    options: [
-      {
-        content_key: '2024:subclass:champion',
-        name: 'Champion',
-        rules_edition: '2024',
-      },
-      {
-        content_key: '2024:subclass:ek',
-        name: 'EK',
-        rules_edition: '2024',
-      },
-    ],
+    options: [{
+      content_key: '2024:subclass:champion',
+      name: 'Champion',
+      rules_edition: '2024',
+    }],
   },
   {
     class_name: 'Monk',
@@ -105,23 +102,11 @@ const EXPECTED_SUBCLASS_VARIANTS = [
   },
   {
     class_name: 'Rogue',
-    options: [
-      {
-        content_key: '2024:subclass:at',
-        name: 'AT',
-        rules_edition: '2024',
-      },
-      {
-        content_key: '2024:subclass:thief',
-        name: 'Thief',
-        rules_edition: '2024',
-      },
-      {
-        content_key: '2024:subclass:veteran',
-        name: 'Veteran',
-        rules_edition: '2024',
-      },
-    ],
+    options: [{
+      content_key: '2024:subclass:thief',
+      name: 'Thief',
+      rules_edition: '2024',
+    }],
   },
   {
     class_name: 'Sorcerer',
@@ -369,18 +354,11 @@ describe('level-up wizard state RPC', () => {
           'complete',
         ],
         subclass_choice: {
-          options: [
-            expect.objectContaining({
-              content_key: '2024:subclass:champion',
-              name: 'Champion',
-              rules_edition: '2024',
-            }),
-            expect.objectContaining({
-              content_key: '2024:subclass:ek',
-              name: 'EK',
-              rules_edition: '2024',
-            }),
-          ],
+          options: [expect.objectContaining({
+            content_key: '2024:subclass:champion',
+            name: 'Champion',
+            rules_edition: '2024',
+          })],
         },
       }],
     });
@@ -531,6 +509,43 @@ describe('level-up wizard state RPC', () => {
 
     rpc.close();
   });
+
+  // Measured alone at 3.9s; 20s retains contention headroom.
+  it('adds the three external catalog subclasses to their SRD parent choices only after explicit import', async () => {
+    const plan = planBundledHomebrewInstall(harness.context.db);
+    expect(commitBundledHomebrewInstall(harness.context.db, plan.token)).toMatchObject({
+      kind: 'committed',
+      outcomes: [{ kind: 'create' }, { kind: 'create' }, { kind: 'create' }],
+    });
+    const rpc = new RpcClient(new RegistryTransport());
+    const client = createQueriesClient(rpc);
+
+    for (const [className, expectedNames] of [
+      ['Fighter', ['Champion', 'Spell Student']],
+      ['Monk', ['Warrior of the Barbed Court', 'Warrior of the Open Hand']],
+      ['Rogue', ['Thief', 'Veteran']],
+    ] as const) {
+      const characterId = createCharacter(`${className} Imported Choices`);
+      const definitionId = enterClass(characterId, className);
+      raiseClassLevelForTest(harness.context.db, characterId, definitionId, 2);
+      const state = await client.levelUpState(characterId);
+      if (state.kind !== 'ready') {
+        throw new Error(`${className} imported choices did not return ready state.`);
+      }
+      const held = state.class_options.find(
+        (candidate) => candidate.class_definition_id === definitionId,
+      );
+      if (held?.guideability !== 'guideable') {
+        throw new Error(`${className} imported choices were not guideable.`);
+      }
+      expect(
+        held.subclass_choice?.options.map((option) => option.name),
+        className,
+      ).toEqual(expectedNames);
+    }
+
+    rpc.close();
+  }, 20_000);
 
   it('makes an only unknown-hit-die class terminal with no command path', async () => {
     const characterId = createCharacter('Unknown Hit Die Fighter');

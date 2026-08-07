@@ -67,10 +67,10 @@ export function isSpellVersionKey(value: string): boolean {
  *
  * THE THREE-PART FORM IS THE IMPORTED ONE, AND THE MIDDLE SEGMENT IS WHY. Every
  * bundled class-catalog key the seeder mints puts a RECORD-KIND LITERAL there —
- * `2024:class:bard`, `2024:subclass:ek`, `2024:feature:thirsting-blade`
+ * `2024:class:bard`, `2024:subclass:champion`, `2024:feature:thirsting-blade`
  * — and none of those literals contains a dot. `OWNER_NAMESPACE` REQUIRES at
  * least one dot, so `2024:longroad.homebrew:college-of-the-long-road` is
- * accepted and `2024:subclass:ek` is refused BY SHAPE. An importer
+ * accepted and `2024:subclass:champion` is refused BY SHAPE. An importer
  * that only accepts imported keys therefore cannot overwrite a bundled row even
  * if a document asks it to, and no convention has to be remembered for that to
  * stay true.

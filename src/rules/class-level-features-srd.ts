@@ -14,10 +14,19 @@
  */
 import classLevelTables from '../../docs/srd/source/class-level-tables.txt?raw';
 import {
+  abilities,
   characterLevels,
+  isEnumValue,
+  type Ability,
   type CharacterLevel,
 } from '../domain/enums';
 import type { ContentKey } from '../domain/ids';
+import type { DatabaseContext } from '../db/database';
+import { sqlNullableString } from '../db/codecs';
+import {
+  catalogLayerDisclosure,
+  type CatalogLayerDisclosure,
+} from '../catalog/catalog-disclosure';
 import type { FeatFeatureEvidence } from '../builder/level-up-wizard';
 
 export const classFeatureEntitlementKinds = [
@@ -260,17 +269,47 @@ export function epicBoonLevelsForClassName(
 export interface ProjectedBundledClass {
   readonly class_name: string;
   readonly class_level: CharacterLevel;
-  /**
-   * Null means no subclass. An unrecognised non-null key is imported content,
-   * so a negative feature claim becomes unprovable rather than absent.
-   */
-  readonly subclass_content_key: ContentKey | null;
+  readonly subclass: ProjectedSubclassFeatureSource | null;
 }
 
-const BUNDLED_SPELLCASTING_SUBCLASS_KEYS = new Set<string>([
-  '2024:subclass:ek',
-  '2024:subclass:at',
-]);
+export interface ProjectedSubclassFeatureSource {
+  readonly content_key: ContentKey;
+  readonly catalog_layer: CatalogLayerDisclosure;
+  readonly spellcasting_ability: Ability | null;
+}
+
+export function projectedSubclassFeatureSource(
+  db: DatabaseContext,
+  contentKey: ContentKey,
+): ProjectedSubclassFeatureSource {
+  const source = db.one(
+    `SELECT subclass.spellcasting_ability, identity.catalog_layer
+       FROM subclass_definitions AS subclass
+       LEFT JOIN catalog_content_identities AS identity
+         ON identity.content_kind = 'subclass'
+        AND identity.content_key = subclass.content_key
+      WHERE subclass.content_key = ?`,
+    [contentKey],
+    (row) => {
+      const ability = sqlNullableString(row, 'spellcasting_ability');
+      if (ability !== null && !isEnumValue(abilities, ability)) {
+        throw new TypeError(`Subclass has unknown spellcasting ability '${ability}'.`);
+      }
+      return {
+        content_key: contentKey,
+        catalog_layer: catalogLayerDisclosure(
+          sqlNullableString(row, 'catalog_layer'),
+        ),
+        spellcasting_ability: ability,
+      };
+    },
+  );
+  return source ?? {
+    content_key: contentKey,
+    catalog_layer: 'unknown',
+    spellcasting_ability: null,
+  };
+}
 
 /**
  * Evidence for the only two feature prerequisites in the bundled feat corpus.
@@ -300,19 +339,10 @@ export function featFeatureEvidenceForProjectedClasses(
     spellcasting ||= cells.some((cell) =>
       cell.entitlements.includes('spellcasting_feature'),
     );
-    if (held.subclass_content_key !== null) {
-      if (
-        BUNDLED_SPELLCASTING_SUBCLASS_KEYS.has(
-          held.subclass_content_key,
-        ) &&
-        held.class_level >= 3
-      ) {
+    if (held.subclass !== null) {
+      if (held.subclass.spellcasting_ability !== null && held.class_level >= 3) {
         spellcasting = true;
-      } else if (
-        !BUNDLED_SPELLCASTING_SUBCLASS_KEYS.has(
-          held.subclass_content_key,
-        )
-      ) {
+      } else if (held.subclass.catalog_layer !== 'bundled') {
         hasUnknownFeatureSource = true;
       }
     }

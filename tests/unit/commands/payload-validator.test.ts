@@ -140,7 +140,7 @@ describe('character command payload validation', () => {
         type: 'level_up_class',
         class_definition_id: 9,
         target_level: 3,
-        subclass_content_key: '2024:subclass:ek',
+        subclass_content_key: '2024:content.subclass:spell-student',
         planned_subchoices: {
           skills: [
             {
@@ -170,7 +170,7 @@ describe('character command payload validation', () => {
               kind: 'slot_selection',
               locator: {
                 source: { kind: 'selected_class_subclass' },
-                rule_key: 'ek-spells',
+                rule_key: 'spell-student-spells',
                 ordinal: 1,
               },
               spell_version_id: 11,

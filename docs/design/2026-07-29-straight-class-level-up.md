@@ -219,8 +219,9 @@ This is not hypothetical here: it is what the planner input does today.
   must live in the COMMAND**: the levelling path refuses a class the character
   does not already have, with a named reason. Mutate the guard away; the refusal
   must fail.
-- **L-SUBCLASS — STRUCK by D80.** Only EK and AT are
-  seeded, so refusing level 3 without a subclass is a dead end for ten of twelve
+- **L-SUBCLASS — STRUCK by D80.** At this design's date only EK and
+  AT were seeded; D216 later replaced that catalog with exactly one
+  SRD subclass per class. Refusing level 3 without a subclass was a dead end for ten of twelve
   classes, which D54's bar forbids and D70 already governs: an unpicked subclass
   is a saveable, warned state. Level 3 proceeds; the choice is offered, never
   required. **Three refusals remain, not four.**

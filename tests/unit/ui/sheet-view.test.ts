@@ -1484,10 +1484,9 @@ describe('the character sheet is projected twice from one value', () => {
     expect(
       textOf(row(value, 'gap:partial_subclass_catalog').detail),
     ).toBe(
-      'Fifteen subclasses are bundled: one SRD subclass for every core class, ' +
-        'the legacy EK and AT, and the owner-authored ' +
-        'Veteran. This is a curated catalog rather than exhaustive subclass ' +
-        'coverage.',
+        'Twelve SRD subclasses are bundled: one for every core class. ' +
+        'User-published subclasses and optional bundled-homebrew imports can ' +
+        'extend this curated catalog.',
     );
   });
 

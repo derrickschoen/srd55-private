@@ -112,7 +112,7 @@ describe('SRD class level feature cells', () => {
         {
           class_name: 'Fighter',
           class_level: 1,
-          subclass_content_key: null,
+          subclass: null,
         },
       ]),
     ).toEqual({
@@ -124,7 +124,7 @@ describe('SRD class level feature cells', () => {
         {
           class_name: 'Wizard',
           class_level: 1,
-          subclass_content_key: null,
+          subclass: null,
         },
       ]),
     ).toEqual({
@@ -136,7 +136,7 @@ describe('SRD class level feature cells', () => {
         {
           class_name: 'Chronomancer',
           class_level: 4,
-          subclass_content_key: null,
+          subclass: null,
         },
       ]),
     ).toEqual({
@@ -148,12 +148,12 @@ describe('SRD class level feature cells', () => {
         {
           class_name: 'Wizard',
           class_level: 1,
-          subclass_content_key: null,
+          subclass: null,
         },
         {
           class_name: 'Chronomancer',
           class_level: 4,
-          subclass_content_key: null,
+          subclass: null,
         },
       ]),
     ).toEqual({
@@ -162,14 +162,17 @@ describe('SRD class level feature cells', () => {
     });
   });
 
-  it('counts bundled subclass Spellcasting and withholds imported subclass negatives', () => {
+  it('uses published subclass spellcasting metadata and withholds external negatives', () => {
     expect(
       featFeatureEvidenceForProjectedClasses([
         {
           class_name: 'Fighter',
           class_level: 19,
-          subclass_content_key:
-            '2024:subclass:ek' as ContentKey,
+          subclass: {
+            content_key: '2024:content.subclass:spell-student' as ContentKey,
+            catalog_layer: 'external',
+            spellcasting_ability: 'intelligence',
+          },
         },
       ]),
     ).toEqual({
@@ -181,21 +184,27 @@ describe('SRD class level feature cells', () => {
         {
           class_name: 'Rogue',
           class_level: 19,
-          subclass_content_key:
-            '2024:subclass:at' as ContentKey,
+          subclass: {
+            content_key: '2024:subclass:thief' as ContentKey,
+            catalog_layer: 'bundled',
+            spellcasting_ability: null,
+          },
         },
       ]),
     ).toEqual({
       fighting_style: 'absent',
-      spellcasting: 'present',
+      spellcasting: 'absent',
     });
     expect(
       featFeatureEvidenceForProjectedClasses([
         {
           class_name: 'Barbarian',
           class_level: 19,
-          subclass_content_key:
-            'homebrew:subclass:rune-singer' as ContentKey,
+          subclass: {
+            content_key: 'homebrew:subclass:rune-singer' as ContentKey,
+            catalog_layer: 'external',
+            spellcasting_ability: null,
+          },
         },
       ]),
     ).toEqual({

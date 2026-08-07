@@ -332,8 +332,8 @@ describe(`ported persistence invariants (${sourceLabel})`, () => {
       keyKind: 'bundled-stable',
     });
     registerFixtureContentIdentity(context, {
-      kind: 'subclass', contentKey: 'subclass:ek',
-      name: 'EK', keyKind: 'bundled-stable',
+      kind: 'subclass', contentKey: 'subclass:champion',
+      name: 'Champion', keyKind: 'bundled-stable',
     });
     db.exec(`
       INSERT INTO class_definitions
@@ -344,7 +344,7 @@ describe(`ported persistence invariants (${sourceLabel})`, () => {
       INSERT INTO subclass_definitions
         (content_key, class_definition_id, name, rules_edition)
       VALUES
-        ('subclass:ek', 2, 'EK', '2024');
+        ('subclass:champion', 2, 'Champion', '2024');
     `);
 
     expect(

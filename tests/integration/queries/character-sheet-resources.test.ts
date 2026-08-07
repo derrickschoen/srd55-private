@@ -1,13 +1,21 @@
 import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseContext } from '../../../src/db/database';
-import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
-import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
-import { seedClassResources } from '../../../src/rules/class-resources-srd';
-import { seedSheetContent } from '../../../src/rules/sheet-srd';
+import {
+  CharacterSheetBuilder,
+  type CharacterSheet,
+} from '../../../src/queries/character-sheet-builder';
+import { applicationSeed } from '../../../src/db/bootstrap';
+import { BUNDLED_HOMEBREW_CATALOG } from '../../../src/authoring/bundled-homebrew-catalog';
+import {
+  commitBundledHomebrewInstall,
+  planBundledHomebrewInstall,
+} from '../../../src/authoring/bundled-homebrew-installer';
 import type { SheetResourceMaximum } from '../../../src/rules/sheet';
 import { openTestDatabase } from '../../helpers/open-db';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
+import { rpcRegistry } from '../../../src/worker/registry';
+import { createRpcHarness } from '../../helpers/rpc-harness';
 
 describe('character sheet resource projection', () => {
   let connection: Database;
@@ -17,9 +25,7 @@ describe('character sheet resource projection', () => {
   beforeEach(async () => {
     connection = await openTestDatabase();
     db = new DatabaseContext(connection);
-    seedClassProgressions(db);
-    seedSheetContent(db);
-    seedClassResources(db);
+    applicationSeed(db);
     builder = new CharacterSheetBuilder(db);
   });
 
@@ -144,40 +150,83 @@ describe('character sheet resource projection', () => {
     expect(computed(after, 'lay_on_hands')[0]?.maximum).toBe(25);
   });
 
-  it('combines shared slots, guards a sole subclass caster, and keeps Pact slots separate', () => {
-    const multiclass = character('Spell resources', [
-      { name: 'Wizard', level: 3 },
-      { name: 'Cleric', level: 2 },
-      { name: 'Warlock', level: 3 },
-    ]);
-    const resources = builder.build(multiclass).resources;
-    expect(
-      computed(resources, 'spell_slot').map((entry) => [
-        entry.spell_level,
-        entry.maximum,
-      ]),
-    ).toEqual([
-      [1, 4],
-      [2, 3],
-      [3, 2],
-    ]);
-    expect(
-      computed(resources, 'pact_slot').map((entry) => [
-        entry.spell_level,
-        entry.maximum,
-      ]),
-    ).toEqual([[2, 2]]);
+  // Measured alone at 2.2s; 20s retains contention headroom.
+  it('combines shared slots, guards a sole published subclass caster, and keeps Pact slots separate', async () => {
+    const harness = await createRpcHarness([]);
+    try {
+      db = harness.context.db;
+      const multiclass = character('Spell resources', [
+        { name: 'Wizard', level: 3 },
+        { name: 'Cleric', level: 2 },
+        { name: 'Warlock', level: 3 },
+      ]);
+      const multiclassResponse = await rpcRegistry.dispatch(
+        {
+          id: 1,
+          method: 'queries.characters.sheet',
+          params: { character_id: multiclass },
+        },
+        harness.context,
+      );
+      expect(multiclassResponse).toMatchObject({ ok: true });
+      if (!multiclassResponse.ok) {
+        throw new Error(multiclassResponse.error.message);
+      }
+      const resources = (multiclassResponse.result as CharacterSheet).resources;
+      expect(
+        computed(resources, 'spell_slot').map((entry) => [
+          entry.spell_level,
+          entry.maximum,
+        ]),
+      ).toEqual([
+        [1, 4],
+        [2, 3],
+        [3, 2],
+      ]);
+      expect(
+        computed(resources, 'pact_slot').map((entry) => [
+          entry.spell_level,
+          entry.maximum,
+        ]),
+      ).toEqual([[2, 2]]);
 
-    const subclass = character('Subclass caster', [
-      { name: 'Fighter', level: 3, subclass: 'EK' },
-    ]);
-    expect(
-      computed(builder.build(subclass).resources, 'spell_slot').map((entry) => [
-        entry.spell_level,
-        entry.maximum,
-      ]),
-    ).toEqual([[1, 2]]);
-  });
+      const catalog = BUNDLED_HOMEBREW_CATALOG.filter(
+        (entry) => entry.catalog_key === 'spell-student',
+      );
+      const plan = planBundledHomebrewInstall(db, catalog);
+      expect(
+        commitBundledHomebrewInstall(db, plan.token, catalog),
+      ).toMatchObject({
+        kind: 'committed',
+        outcomes: [{
+          kind: 'create',
+          contentKey: '2024:content.subclass:spell-student',
+        }],
+      });
+      const subclass = character('Subclass caster', [
+        { name: 'Fighter', level: 3, subclass: 'Spell Student' },
+      ]);
+      const response = await rpcRegistry.dispatch(
+        {
+          id: 2,
+          method: 'queries.characters.sheet',
+          params: { character_id: subclass },
+        },
+        harness.context,
+      );
+      expect(response).toMatchObject({ ok: true });
+      if (!response.ok) throw new Error(response.error.message);
+      const sheet = response.result as CharacterSheet;
+      expect(
+        computed(sheet.resources, 'spell_slot').map((entry) => [
+          entry.spell_level,
+          entry.maximum,
+        ]),
+      ).toEqual([[1, 2]]);
+    } finally {
+      harness.close();
+    }
+  }, 20_000);
 
   it('keeps unknown catalogs, missing rows, invalid formulas, and invalid spell content distinct', () => {
     const barbarian = character('Missing ladder', [

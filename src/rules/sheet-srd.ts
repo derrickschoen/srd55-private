@@ -679,8 +679,8 @@ function sameClassFeatureEffect(
  * rules_edition)`, so a user who authored a 2024 Warlock feature of the same
  * name under a different content key would make this INSERT fail — and, because
  * the seed runs in ONE transaction, take the armour catalog and every class's
- * sheet content down with it on every boot. `upsertThirdCaster` settled the
- * policy for exactly this collision: the slot's holder wins. After the clear
+ * sheet content down with it on every boot. Bundled content uses one policy for
+ * exactly this collision: the slot's holder wins. After the clear
  * above, any holder is by definition a row this seeder does not own, so the
  * test is simply "is the slot occupied".
  *

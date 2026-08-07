@@ -1,4 +1,7 @@
 import { expect, test } from './fixtures/parallel-test';
+import {
+  RETIRED_BUNDLED_SUBCLASS_CONTENT_KEYS,
+} from '../../src/catalog/retire-non-srd-bundled-subclasses-v1';
 
 const SRD_CLASSES = [
   'Barbarian',
@@ -41,6 +44,16 @@ async function countRows(
   return rows.length;
 }
 
+async function retiredSubclassKeys(page: import('@playwright/test').Page) {
+  const rows = await page.evaluate(() =>
+    window.staticApp.inspectRows('subclass_definitions'),
+  );
+  const retired = new Set<string>(RETIRED_BUNDLED_SUBCLASS_CONTENT_KEYS);
+  return rows
+    .map((row) => String(row.content_key))
+    .filter((contentKey) => retired.has(contentKey));
+}
+
 test('a fresh OPFS install carries the bundled classes and keeps them across reset and reload', async ({
   page,
 }) => {
@@ -57,9 +70,10 @@ test('a fresh OPFS install carries the bundled classes and keeps them across res
   await page.evaluate(() => window.staticApp.reset());
   expect(await classNames(page)).toEqual(SRD_CLASSES);
   expect(await countRows(page, 'class_progressions')).toBe(240);
-  expect(await countRows(page, 'subclass_definitions')).toBe(15);
-  expect(await countRows(page, 'subclass_features')).toBe(70);
-  expect(await countRows(page, 'subclass_progressions')).toBe(40);
+  expect(await countRows(page, 'subclass_definitions')).toBe(12);
+  expect(await countRows(page, 'subclass_features')).toBe(58);
+  expect(await countRows(page, 'subclass_progressions')).toBe(0);
+  expect(await retiredSubclassKeys(page)).toEqual([]);
 
   // The read-only SRD spell layer ships beside the classes.
   expect(await countRows(page, 'spell_versions')).toBe(339);
@@ -70,7 +84,8 @@ test('a fresh OPFS install carries the bundled classes and keeps them across res
   // Re-opening the stored image must neither duplicate the content nor lose it.
   expect(await classNames(page)).toEqual(SRD_CLASSES);
   expect(await countRows(page, 'class_progressions')).toBe(240);
-  expect(await countRows(page, 'subclass_definitions')).toBe(15);
-  expect(await countRows(page, 'subclass_features')).toBe(70);
-  expect(await countRows(page, 'subclass_progressions')).toBe(40);
+  expect(await countRows(page, 'subclass_definitions')).toBe(12);
+  expect(await countRows(page, 'subclass_features')).toBe(58);
+  expect(await countRows(page, 'subclass_progressions')).toBe(0);
+  expect(await retiredSubclassKeys(page)).toEqual([]);
 });

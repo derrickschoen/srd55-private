@@ -63,6 +63,7 @@ import type { JsonObject } from '../domain/models';
 import {
   featFeatureEvidenceForProjectedClasses,
   classLevelFeaturesForClassName,
+  projectedSubclassFeatureSource,
   type ProjectedBundledClass,
 } from '../rules/class-level-features-srd';
 import {
@@ -830,7 +831,12 @@ export class LevelUpStateQuery {
         advanced?.classDefinitionId === entry.class_definition_id
           ? advanced.targetLevel
           : entry.current_level,
-      subclass_content_key: entry.current_subclass?.content_key ?? null,
+      subclass: entry.current_subclass === null
+        ? null
+        : projectedSubclassFeatureSource(
+            this.db,
+            entry.current_subclass.content_key,
+          ),
     }));
     const activeFeats: ActiveFeatInstance[] = this.db.all(
       `SELECT definition.content_key, source.config
