@@ -96,7 +96,13 @@ test('authors, previews, publishes, lists, and applies a homebrew species', asyn
   await expect(page.locator(
     `[${persistedSeam.panelAttribute}="${persistedSeam.speciesStepPanel}"]`,
   )).toBeVisible();
-  await page.getByRole('button', { name: 'Choose Clockwork Voyager' }).click();
+  const chooseSpecies = page.getByRole('button', {
+    name: 'Choose Clockwork Voyager',
+  });
+  await expect(chooseSpecies).toHaveAccessibleDescription(
+    'Homebrew · external layer',
+  );
+  await chooseSpecies.click();
   await expect(page.locator(
     `[${persistedSeam.panelAttribute}="${persistedSeam.backgroundStepPanel}"]`,
   )).toBeVisible();
@@ -115,19 +121,28 @@ test('authors, previews, publishes, lists, and applies a homebrew species', asyn
     'Clockwork Voyager skill grant skill',
     { exact: true },
   );
+  await expect(authoredGrant).toHaveAccessibleDescription(
+    'Homebrew · external layer',
+  );
   await expect(authoredGrant.locator('option')).toHaveText([
     'Choose a skill',
     'Arcana',
     'History',
   ]);
   await authoredGrant.selectOption('arcana');
-  await page.getByRole('button', {
+  const chooseSkill = page.getByRole('button', {
     name: 'Choose Clockwork Voyager skill grant skill',
     exact: true,
-  }).click();
+  });
+  await expect(chooseSkill).toHaveAccessibleDescription(
+    'Homebrew · external layer',
+  );
+  await chooseSkill.click();
   await expect(page.locator(
     `[${persistedSeam.skillGrantedAttribute}="arcana"]`,
-  )).toContainText('Arcana — Clockwork Voyager (skill grant)');
+  )).toContainText(
+    'Arcana — Clockwork Voyager — Homebrew · external layer (skill grant)',
+  );
 
   expect(
     await page.evaluate(() => window.staticApp.inspectRows('character_species')),

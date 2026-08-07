@@ -458,12 +458,18 @@ describe('W-STEP-SOURCE returned applicability', () => {
     );
 
     expect(card?.getAttribute('aria-label')).toBe(
-      `${hostile} 1 → 2, 2024 rules, d6 hit die, ` +
-        'Homebrew · external layer',
+      `${hostile} 1 → 2, 2024 rules, d6 hit die`,
     );
-    expect(elementText(wizard.element)).toContain(
-      `${hostile} 1 → 2 — Homebrew · external layer`,
-    );
+    const describedBy = card?.getAttribute('aria-describedby');
+    expect(describedBy).not.toBeNull();
+    expect(
+      elementText(
+        interactiveElement(wizard.element).querySelector(
+          `[id="${describedBy}"]`,
+        ) as unknown as Node,
+      ),
+    ).toBe('Homebrew · external layer');
+    expect(elementText(wizard.element)).toContain(hostile);
     expect(
       interactiveElement(wizard.element).querySelector('[data-ha10-held-class]'),
     ).toBeNull();
@@ -713,8 +719,17 @@ describe('W-FOCUS navigation and errors', () => {
     expect(classRadio).not.toBeNull();
     expect(classRadio?.tagName).toBe('input');
     expect(classRadio?.getAttribute('aria-label')).toBe(
-      'Wizard 1 → 2, 2024 rules, d6 hit die, SRD · bundled layer',
+      'Wizard 1 → 2, 2024 rules, d6 hit die',
     );
+    const classDescription = classRadio?.getAttribute('aria-describedby');
+    expect(classDescription).not.toBeNull();
+    expect(
+      elementText(
+        interactiveElement(wizard.element).querySelector(
+          `[id="${classDescription}"]`,
+        ) as unknown as Node,
+      ),
+    ).toBe('SRD · bundled layer');
 
     click(wizard.element, LEVEL_UP_ATTR.next);
     click(wizard.element, LEVEL_UP_ATTR.next);
@@ -723,12 +738,19 @@ describe('W-FOCUS navigation and errors', () => {
     expect(
       subclassRadios.map((radio) => radio.getAttribute('aria-label')),
     ).toEqual([
-      'Abjurer — Wizard, 2024 rules — SRD · bundled layer',
+      'Abjurer — Wizard, 2024 rules',
       'Decide later',
     ]);
-    expect(elementText(wizard.element)).toContain(
-      'Abjurer — Wizard, 2024 rules — SRD · bundled layer',
-    );
+    const subclassDescription = subclassRadios[0]?.getAttribute('aria-describedby');
+    expect(subclassDescription).not.toBeNull();
+    expect(
+      elementText(
+        interactiveElement(wizard.element).querySelector(
+          `[id="${subclassDescription}"]`,
+        ) as unknown as Node,
+      ),
+    ).toBe('SRD · bundled layer');
+    expect(elementText(wizard.element)).toContain('Abjurer — Wizard, 2024 rules');
     expect(elementText(wizard.element)).toContain('Decide later');
     wizard.cleanup();
   });
@@ -756,8 +778,17 @@ describe('W-FOCUS navigation and errors', () => {
     click(wizard.element, LEVEL_UP_ATTR.next);
     const radios = interactiveElement(wizard.element).querySelectorAll('[type="radio"]');
     expect(radios[0]?.getAttribute('aria-label')).toBe(
-      `${hostile} — Wizard, 2024 rules — Homebrew · external layer`,
+      `${hostile} — Wizard, 2024 rules`,
     );
+    const describedBy = radios[0]?.getAttribute('aria-describedby');
+    expect(describedBy).not.toBeNull();
+    expect(
+      elementText(
+        interactiveElement(wizard.element).querySelector(
+          `[id="${describedBy}"]`,
+        ) as unknown as Node,
+      ),
+    ).toBe('Homebrew · external layer');
     expect(elementText(wizard.element)).toContain(hostile);
     expect(
       interactiveElement(wizard.element).querySelector('[data-ha10-level-up-hostile]'),

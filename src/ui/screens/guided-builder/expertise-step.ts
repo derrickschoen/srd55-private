@@ -8,7 +8,7 @@ import type { Skill } from '../../../domain/enums';
 import { SKILL_LABELS } from '../../../rules/skills';
 import { element, listen, type Cleanup } from '../../dom';
 import { characterListLink, guidedShell } from './guided-builder';
-import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
+import { catalogControlDescription } from '../../catalog-control-disclosure';
 
 export function createExpertiseStep(options: {
   readonly characterId: number;
@@ -23,8 +23,7 @@ export function createExpertiseStep(options: {
   const cleanups: Cleanup[] = [];
   const choices = options.state.choices.map((choice) => {
     const label =
-      `${choice.source_name} — ` +
-      `${catalogLayerLabel(choice.source_catalog_layer)} Expertise ` +
+      `${choice.source_name} Expertise ` +
       String(choice.ordinal);
     const select = element(
       'select',
@@ -46,6 +45,13 @@ export function createExpertiseStep(options: {
       text: `Choose ${label}`,
       attributes: { type: 'button', 'data-expertise-fill': String(choice.grant_id) },
     });
+    const disclosureId = `guided-expertise-${String(choice.grant_id)}-catalog-layer`;
+    const disclosure = catalogControlDescription(
+      select,
+      disclosureId,
+      choice.source_catalog_layer,
+    );
+    button.setAttribute('aria-describedby', disclosureId);
     cleanups.push(
       listen(button, 'click', () => {
         if (select.value === '') return;
@@ -64,6 +70,7 @@ export function createExpertiseStep(options: {
     );
     return element('div', { className: 'guided-expertise-choice' }, [
       element('label', {}, [element('span', { text: label }), select]),
+      disclosure,
       button,
     ]);
   });

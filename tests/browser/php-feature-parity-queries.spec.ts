@@ -308,6 +308,7 @@ test('returns an exact eligible-spell DTO and treats wildcard characters literal
     {
       id: workspaceImage.ids.replacementSpell,
       name: 'Parity Replacement',
+      catalog_layer: 'bundled',
       level: 0,
       school: 'Abjuration',
       ritual: false,

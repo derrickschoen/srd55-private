@@ -36,7 +36,7 @@ function weaponRows(page: Page) {
 async function addFighterLevel(page: Page): Promise<void> {
   await page
     .getByRole('combobox', { name: 'Class to add' })
-    .selectOption({ label: 'Fighter — SRD · bundled layer' });
+    .selectOption({ label: 'Fighter' });
   await page.getByRole('button', { name: 'Add class', exact: true }).click();
   await expect(page.getByTestId('weapon-mastery-status')).toContainText(
     'Fighter',
@@ -181,9 +181,14 @@ test('a weapon is added from a reference template, then edited without touching 
 
   // Chosen by OPTION TEXT — no id, no index. The picker exposes all 38 options
   // to the accessibility tree at once, which is why it is a <select>.
-  await form
-    .getByLabel('Start from a reference weapon')
-    .selectOption({ label: 'Longsword' });
+  const referenceWeapon = form.getByLabel('Start from a reference weapon');
+  await referenceWeapon.selectOption({ label: 'Longsword' });
+  expect(await referenceWeapon.evaluate((select) => {
+    const selected = (select as HTMLSelectElement).selectedOptions[0];
+    return selected?.parentElement instanceof HTMLOptGroupElement
+      ? selected.parentElement.label
+      : null;
+  })).toBe('Martial Melee — SRD · bundled layer');
 
   // Pre-fill: every field below now carries the template's value...
   await expect(form.getByLabel('Name', { exact: true })).toHaveValue(
@@ -364,10 +369,10 @@ test('a weapon can be removed, and the panel says nothing about the licensor', a
     ),
   );
   expect(groupLabels).toEqual([
-    'Simple Melee',
-    'Simple Ranged',
-    'Martial Melee',
-    'Martial Ranged',
+    'Simple Melee — SRD · bundled layer',
+    'Simple Ranged — SRD · bundled layer',
+    'Martial Melee — SRD · bundled layer',
+    'Martial Ranged — SRD · bundled layer',
   ]);
   for (const label of groupLabels) {
     expect(label).not.toMatch(/D&D|Dungeons|Wizards/);
@@ -498,7 +503,7 @@ test('a Wizard’s Greatsword loses the proficiency bonus, and both screens say 
   await openPlanner(page, 'Unqualified Wielder');
   await page
     .getByRole('combobox', { name: 'Class to add' })
-    .selectOption({ label: 'Wizard — SRD · bundled layer' });
+    .selectOption({ label: 'Wizard' });
   await page.getByRole('button', { name: 'Add class', exact: true }).click();
   await expect(page.getByTestId('weapons-panel')).toBeVisible();
 
@@ -578,7 +583,7 @@ test('the damage-type choice is undecided on both sides until it is made', async
 
   await page
     .getByRole('combobox', { name: 'Class to add' })
-    .selectOption({ label: 'Wizard — SRD · bundled layer' });
+    .selectOption({ label: 'Wizard' });
   await page.getByRole('button', { name: 'Add class', exact: true }).click();
 
   // Slot 1 is the class's first cantrip slot. Selecting the spell there is what
@@ -691,7 +696,7 @@ test('a grant it cannot apply is stated on the page, not folded into the number'
 
   await page
     .getByRole('combobox', { name: 'Class to add' })
-    .selectOption({ label: 'Warlock — SRD · bundled layer' });
+    .selectOption({ label: 'Warlock' });
   await page.getByRole('button', { name: 'Add class', exact: true }).click();
   // Waited on the class's own level display rather than on the mastery
   // status: no Warlock row grants Weapon Mastery, so that panel correctly

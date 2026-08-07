@@ -106,9 +106,11 @@ describe('the item attunement surface', () => {
       }
       const definitionSelect = rendered.querySelector('select');
       if (definitionSelect === null) throw new Error('Catalog select missing.');
-      expect(elementText(definitionSelect.children[0]! as unknown as Node)).toBe(
-        `${hostile} — Homebrew · external layer`,
+      const homebrewGroup = definitionSelect.querySelector('optgroup');
+      expect(homebrewGroup?.getAttribute('label')).toBe(
+        'Homebrew · external layer',
       );
+      expect(homebrewGroup?.querySelector('option')?.textContent).toBe(hostile);
       expect(rendered.querySelector('[data-ha10-item]')).toBeNull();
       definitionSelect.value = 'expanded:content.v1:definition';
       catalogButton.click();

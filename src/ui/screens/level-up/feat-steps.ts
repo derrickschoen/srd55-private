@@ -354,6 +354,7 @@ function createCandidateCard(options: {
   const { candidate } = options;
   const headingId = `level-up-${options.step}-candidate-${String(options.candidateIndex)}-heading`;
   const descriptionId = `level-up-${options.step}-candidate-${String(options.candidateIndex)}-eligibility`;
+  const catalogLayerId = `level-up-${options.step}-candidate-${String(options.candidateIndex)}-catalog-layer`;
   const qualified = candidate.eligibility.status === 'qualified';
   const selectable = qualified
     ? candidate.applications.filter(
@@ -368,6 +369,7 @@ function createCandidateCard(options: {
         name: `level-up-${options.step}-choice`,
         value: `${candidate.definition.content_key}:${String(applicationIndex)}`,
         'aria-label': `${candidate.definition.name}: ${applicationLabel(application)}`,
+        'aria-describedby': `${descriptionId} ${catalogLayerId}`,
         [LEVEL_UP_ATTR.featOption]: String(candidate.definition.content_key),
         ...checkedAttributes(
           options.draft?.kind === 'selected' &&
@@ -427,7 +429,10 @@ function createCandidateCard(options: {
             text: candidate.definition.repeatable ? 'Repeatable' : 'Not repeatable',
           }),
           element('dt', { text: 'Catalog layer' }),
-          element('dd', { text: catalogLayerLabel(candidate.catalog_layer) }),
+          element('dd', {
+            text: catalogLayerLabel(candidate.catalog_layer),
+            attributes: { id: catalogLayerId },
+          }),
         ]),
         eligibilityDescription(candidate, descriptionId),
         abilityPresentation(candidate),

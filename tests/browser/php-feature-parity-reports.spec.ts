@@ -312,6 +312,7 @@ test('builds Mutt printable sources with complete facts and only the mechanicall
   expect(command).toEqual({
     spell_version_id: sheetSpellImage.ids.command,
     name: 'Command',
+    catalog_layer: 'external',
     level: { status: 'known', value: 1 },
     marker: 'prepared',
     reference: {

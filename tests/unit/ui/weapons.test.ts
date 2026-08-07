@@ -85,9 +85,11 @@ it('renders a hostile external reference weapon inert with its exact layer', () 
       '[data-focus-key="weapon-template"]',
     );
 
-    expect(elementText(picker! as unknown as Node)).toContain(
-      `${hostile} — Homebrew · external layer`,
+    const homebrewGroup = picker?.querySelector('optgroup');
+    expect(homebrewGroup?.getAttribute('label')).toBe(
+      'Martial Melee — Homebrew · external layer',
     );
+    expect(homebrewGroup?.querySelector('option')?.textContent).toBe(hostile);
     expect(
       interactiveElement(view).querySelector('[data-ha10-weapon-template]'),
     ).toBeNull();

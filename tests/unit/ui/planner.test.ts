@@ -320,11 +320,17 @@ describe('planner catalog disclosure', () => {
       }));
 
       const optionText = rendered.querySelectorAll('option').map((entry) => entry.textContent);
-      expect(optionText).toContain(
-        `${hostileSubclass} — Homebrew · external layer`,
-      );
-      expect(optionText).toContain('Fighter — SRD · bundled layer');
-      expect(optionText).toContain(`${hostileSource} — Homebrew · external layer`);
+      expect(optionText).toContain(hostileSubclass);
+      expect(optionText).toContain('Fighter');
+      expect(optionText).toContain(hostileSource);
+      expect(
+        rendered.querySelectorAll('optgroup').map((group) =>
+          group.getAttribute('label')
+        ),
+      ).toEqual(expect.arrayContaining([
+        'SRD · bundled layer',
+        'Homebrew · external layer',
+      ]));
       expect(elementText(rendered as unknown as Node)).toContain(
         `${hostileSource} feat · Homebrew · external layer`,
       );

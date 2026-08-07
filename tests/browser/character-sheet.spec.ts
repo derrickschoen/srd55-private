@@ -326,8 +326,8 @@ async function sheetImage(): Promise<SheetImage> {
   });
   const featDefinition = db.exec(
     `INSERT INTO feat_definitions (
-       content_key, name, rules_edition, repeatable, grant_rules
-     ) VALUES (?, 'Hostile spell source', '2024', 1, '[]')`,
+       content_key, name, rules_edition, category, repeatable, grant_rules
+     ) VALUES (?, 'Hostile spell source', '2024', 'general', 1, '[]')`,
     [hostileFeatContentKey],
   ).lastInsertId;
   const otherSpellSource = db.exec(
@@ -873,7 +873,7 @@ test('hostile spell text is visible inert and absent from sheet facts', async ({
   await expect(section.getByRole('heading', { name: 'Wizard' })).toHaveCount(0);
   const otherSource = section.locator('[data-spell-group^="source:"]');
   await expect(otherSource.getByRole('heading', { level: 3 })).toHaveText(
-    HOSTILE_SPELL_SOURCE,
+    `${HOSTILE_SPELL_SOURCE} — Homebrew · external layer`,
   );
   await expect(
     otherSource
@@ -1312,7 +1312,13 @@ test('spell section and print appendix replace the legacy print route without wr
   ).toHaveClass(/sheet-chrome/);
   await expect(
     spellSection.locator('.sheet-spell-group-heading').allTextContents(),
-  ).resolves.toEqual(['Cleric', 'Druid', 'Wizard', 'Gift 2', 'Gift 10']);
+  ).resolves.toEqual([
+    'Cleric — SRD · bundled layer',
+    'Druid — SRD · bundled layer',
+    'Wizard — SRD · bundled layer',
+    'Gift 2 — Homebrew · external layer',
+    'Gift 10 — Homebrew · external layer',
+  ]);
 
   const groups = spellSection.locator('[data-spell-group]');
   const cleric = groups.filter({ hasText: 'Cleric' });
@@ -1407,16 +1413,22 @@ test('spell section and print appendix replace the legacy print route without wr
   await expect(appendix).toHaveCSS('break-before', 'page');
   const appendixGroups = appendix.locator('[data-spell-appendix-group]');
   await expect(appendixGroups.locator(':scope > h3').allTextContents())
-    .resolves.toEqual(['Cleric', 'Druid', 'Wizard', 'Gift 2', 'Gift 10']);
+    .resolves.toEqual([
+      'Cleric — SRD · bundled layer',
+      'Druid — SRD · bundled layer',
+      'Wizard — SRD · bundled layer',
+      'Gift 2 — Homebrew · external layer',
+      'Gift 10 — Homebrew · external layer',
+    ]);
   await expect(appendixGroups.nth(0).locator('h4').allTextContents())
     .resolves.toEqual([
-      'Guidance — Cantrip · Abjuration',
-      'Command — Level 1 · Enchantment',
+      'Guidance — Cantrip · Abjuration · Homebrew · external layer',
+      'Command — Level 1 · Enchantment · Homebrew · external layer',
     ]);
   await expect(appendixGroups.nth(1).locator('h4').allTextContents())
     .resolves.toEqual([
-      'Thorn Whip — Cantrip · Transmutation',
-      'Goodberry — Level 1 · Transmutation',
+      'Thorn Whip — Cantrip · Transmutation · Homebrew · external layer',
+      'Goodberry — Level 1 · Transmutation · Homebrew · external layer',
     ]);
   await expect(appendix.locator('h3').first()).toHaveCSS('break-after', 'avoid');
   await expect(appendix.locator('.sheet-spell-appendix-summary').first())

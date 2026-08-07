@@ -602,7 +602,19 @@ describe('guided background step', () => {
     });
 
     expect(elementText(step.element)).toContain(hostile);
-    expect(elementText(step.element)).toContain('Homebrew · external layer');
+    const feat = elementsWithAttribute(
+      step.element,
+      BACKGROUND_STEP_ATTR.feat,
+      '',
+    )[0];
+    if (feat === undefined) {
+      throw new Error('The Origin feat selector was not rendered.');
+    }
+    expect(
+      elementsByTagName(feat as unknown as Node, 'optgroup').map((group) =>
+        group.getAttribute('label')
+      ),
+    ).toContain('Homebrew · external layer');
     expect(
       interactiveElement(step.element).querySelector('[data-ha10-origin-feat-hostile]'),
     ).toBeNull();
@@ -729,11 +741,14 @@ describe('guided background step', () => {
       return elementText(option as unknown as Node);
     };
     expect(featOptionText(MAGIC_INITIATE_FEAT_CONTENT_KEY)).toBe(
-      'Magic Initiate — SRD · bundled layer (default)',
+      'Magic Initiate (default)',
     );
-    expect(featOptionText('2024:feat:lucky')).toBe(
-      'Lucky — SRD · bundled layer',
-    );
+    expect(featOptionText('2024:feat:lucky')).toBe('Lucky');
+    expect(
+      elementsByTagName(feat as unknown as Node, 'optgroup').map((group) =>
+        group.getAttribute('label')
+      ),
+    ).toContain('SRD · bundled layer');
 
     // Each ability select marks exactly the three printed abilities.
     const slot = elementsWithAttribute(
@@ -761,7 +776,7 @@ describe('guided background step', () => {
     featSelect.value = '2024:feat:lucky';
     featSelect.dispatchEvent(new Event('change'));
     expect(featOptionText(MAGIC_INITIATE_FEAT_CONTENT_KEY)).toBe(
-      'Magic Initiate — SRD · bundled layer (default)',
+      'Magic Initiate (default)',
     );
     expect(elementText(step.element)).not.toMatch(
       /house rule|homebrew|departure/i,

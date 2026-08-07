@@ -43,8 +43,17 @@ test('authors and applies a background with persisted skill grants and a flat ef
   await page.getByRole('checkbox', { name: 'Intelligence', exact: true }).check();
   await page.getByRole('checkbox', { name: 'Wisdom', exact: true }).check();
   await page.getByRole('checkbox', { name: 'Dexterity', exact: true }).check();
-  await page.getByRole('combobox', { name: 'Installed Origin feat', exact: true })
-    .selectOption({ label: 'Alert (2024)' });
+  const originFeat = page.getByRole('combobox', {
+    name: 'Installed Origin feat',
+    exact: true,
+  });
+  await originFeat.selectOption({ label: 'Alert (2024)' });
+  expect(await originFeat.evaluate((select) => {
+    const selected = (select as HTMLSelectElement).selectedOptions[0];
+    return selected?.parentElement instanceof HTMLOptGroupElement
+      ? selected.parentElement.label
+      : null;
+  })).toBe('SRD · bundled layer');
   await page.getByRole('checkbox', { name: 'Investigation', exact: true }).check();
   await page.getByRole('checkbox', { name: 'Survival', exact: true }).check();
   await page.getByRole('textbox', { name: 'Tool reference text (optional)', exact: true })
@@ -73,7 +82,7 @@ test('authors and applies a background with persisted skill grants and a flat ef
   await globalReady(page);
   await page.getByRole('link', { name: 'Create a character', exact: true }).click();
   await page.getByRole('button', {
-    name: 'Fighter Hit die: d10 SRD · bundled layer',
+    name: 'Fighter',
     exact: true,
   }).click();
   await page.getByRole('textbox', { name: 'Character name', exact: true }).fill('Background Journey Hero');

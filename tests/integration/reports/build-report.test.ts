@@ -249,6 +249,7 @@ describe('deterministic read-only build report', () => {
     expect(Object.keys(report.wizard.prepared[0]!)).toEqual([
       'spell_version_id',
       'spell_name',
+      'spell_catalog_layer',
       'level',
     ]);
     expect(

@@ -23,7 +23,10 @@ import type {
 } from '../../../rules/sheet';
 import type { WeaponProficiencyVerdict } from '../../../rules/multiclass-proficiency';
 import { SRD_ATTRIBUTION_NOTICE } from '../../../rules/srd-attribution';
-import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
+import {
+  catalogLayerLabel,
+  type CatalogLayerDisclosure,
+} from '../../../catalog/catalog-disclosure';
 import {
   classFormulaResourceKinds,
   classFormulaResourceLabel,
@@ -146,6 +149,7 @@ export interface SpellAppendixContent {
   readonly groups: readonly {
     readonly id: string;
     readonly name: string;
+    readonly catalog_layer: CatalogLayerDisclosure;
     readonly cards: readonly SpellAppendixCardContent[];
   }[];
   readonly missing_spell_names: readonly string[];
@@ -356,6 +360,10 @@ export function spellAppendix(
     groups.push({
       id: spellGroupId(group),
       name: group.kind === 'class' ? group.class_name : group.source_name,
+      catalog_layer:
+        group.kind === 'class'
+          ? group.class_catalog_layer
+          : group.source_catalog_layer,
       cards,
     });
   }
@@ -2035,7 +2043,10 @@ function renderSpellAppendix(
       'sheet-print-appendix-section sheet-spell-appendix-group';
     groupElement.dataset.spellAppendixGroup = group.id;
     const groupHeading = document.createElement('h3');
-    groupHeading.append(freeTextSpan(group.name));
+    groupHeading.append(
+      freeTextSpan(group.name),
+      ` — ${catalogLayerLabel(group.catalog_layer)}`,
+    );
     groupElement.append(groupHeading);
 
     for (const card of group.cards) {

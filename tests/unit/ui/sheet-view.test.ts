@@ -770,6 +770,7 @@ describe('the character sheet is projected twice from one value', () => {
         {
           id: 'class:11',
           name: 'Wizard',
+          catalog_layer: 'bundled',
           cards: [
             {
               spell_version_id: 101,

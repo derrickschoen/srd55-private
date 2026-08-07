@@ -481,10 +481,15 @@ test('the item picker copies catalog values and effects without a live definitio
   );
 
   const picker = page.locator('[data-testid="item-catalog-picker"]');
-  await expect(picker.getByLabel('Item definition').locator('option')).toHaveText(
-    'Browser Giant Belt — Homebrew · external layer',
-  );
-  await expect(picker.getByLabel('Item definition')).toHaveValue(
+  const itemDefinition = picker.getByLabel('Item definition');
+  await expect(itemDefinition.locator('option')).toHaveText('Browser Giant Belt');
+  expect(await itemDefinition.evaluate((select) => {
+    const selected = (select as HTMLSelectElement).selectedOptions[0];
+    return selected?.parentElement instanceof HTMLOptGroupElement
+      ? selected.parentElement.label
+      : null;
+  })).toBe('Homebrew · external layer');
+  await expect(itemDefinition).toHaveValue(
     'expanded:content.item:browser-giant-belt',
   );
   await picker.getByRole('button', { name: 'Add catalog item' }).click();
@@ -746,9 +751,14 @@ test('planner parity flows persist override, clear, selection, acknowledgement, 
   });
   await picker.fill('Mage Hand');
   const fixtureMageHandOption = page.getByRole('option', {
-    name: /Mage Hand L0 · Abjuration/,
+    name: 'Mage Hand',
+    exact: true,
+    description: 'L0 · Abjuration · 2024 · Homebrew · external layer',
   });
   await expect(fixtureMageHandOption).toBeVisible();
+  await expect(fixtureMageHandOption).toHaveAccessibleDescription(
+    'L0 · Abjuration · 2024 · Homebrew · external layer',
+  );
   await fixtureMageHandOption.click();
   await expect
     .poll(() =>
@@ -791,7 +801,7 @@ test('planner parity flows persist override, clear, selection, acknowledgement, 
   await expect(page.getByText('Level 8 · revision 5')).toBeVisible();
 
   await page.getByLabel('Source to add').selectOption({
-    label: 'Magic Initiate — SRD · bundled layer',
+    label: 'Magic Initiate',
   });
   await page
     .getByRole('button', { name: 'Add Magic Initiate' })

@@ -9,7 +9,7 @@ import type {
   PublishResult,
   StoredHomebrewDraft,
 } from '../../../authoring/contracts';
-import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
+import { catalogSelectGroups } from '../../catalog-control-disclosure';
 import type { AuthoringDraftCharacterEffect } from '../../../authoring/effect-forms';
 import type { HomebrewDraftItemUuid } from '../../../authoring/ids';
 import {
@@ -206,14 +206,11 @@ function referenceOptions(
   select: HTMLSelectElement,
   references: readonly BackgroundAuthoringReferenceOption[],
 ): void {
-  for (const reference of references) {
-    select.append(element('option', {
-      text:
-        `${reference.name} (${reference.rules_edition}) — ` +
-        catalogLayerLabel(reference.catalog_layer),
-      attributes: { value: reference.content_key },
-    }));
-  }
+  select.append(...catalogSelectGroups(references.map((reference) => ({
+    value: reference.content_key,
+    label: `${reference.name} (${reference.rules_edition})`,
+    catalogLayer: reference.catalog_layer,
+  }))));
 }
 
 /** Render the complete HA-9 background authoring session. */

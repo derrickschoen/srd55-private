@@ -15,7 +15,7 @@ import type {
 import type { HomebrewDraftItemUuid } from '../../../authoring/ids';
 import { subclassProgressionScheduleIssues } from '../../../authoring/subclass-progression-validation';
 import type { GuidedClassOption } from '../../../builder/contracts';
-import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
+import { catalogSelectGroups } from '../../catalog-control-disclosure';
 import {
   abilities,
   characterLevels,
@@ -479,13 +479,11 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
       },
     });
     parent.append(element('option', { text: 'Choose a bundled class…', attributes: { value: '' } }));
-    for (const candidate of options.parentClasses) {
-      parent.append(element('option', {
-        text:
-          `${candidate.name} — ${catalogLayerLabel(candidate.catalog_layer)}`,
-        attributes: { value: candidate.content_key },
-      }));
-    }
+    parent.append(...catalogSelectGroups(options.parentClasses.map((candidate) => ({
+      value: candidate.content_key,
+      label: candidate.name,
+      catalogLayer: candidate.catalog_layer,
+    }))));
     if (
       document.parent_class_content_key !== null &&
       !options.parentClasses.some((candidate) => candidate.content_key === document.parent_class_content_key)

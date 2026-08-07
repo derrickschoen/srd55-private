@@ -285,13 +285,22 @@ describe('HA-9 background authoring form', () => {
       const optionLabels = rendered.root.querySelectorAll('option').map(
         (option) => elementText(option as unknown as Node),
       );
-      expect(optionLabels).toContain('Alert (2024) — SRD · bundled layer');
+      expect(optionLabels).toContain('Alert (2024)');
       expect(optionLabels).toContain(
-        `${hostile} (2024) — Homebrew · external layer`,
+        `${hostile} (2024)`,
       );
       expect(optionLabels).toContain(
-        'Leather Armor (2024) — Unknown catalog layer',
+        'Leather Armor (2024)',
       );
+      expect(
+        rendered.root.querySelectorAll('optgroup').map((group) =>
+          group.getAttribute('label')
+        ),
+      ).toEqual(expect.arrayContaining([
+        'SRD · bundled layer',
+        'Homebrew · external layer',
+        'Unknown catalog layer',
+      ]));
 
       form?.dispatchEvent(new Event('submit', { cancelable: true }));
       await settle();

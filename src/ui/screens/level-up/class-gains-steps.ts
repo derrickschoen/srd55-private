@@ -14,6 +14,7 @@ import type {
 } from '../../../domain/ids';
 import { element, listen, type Cleanup } from '../../dom';
 import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
+import { catalogControlDescription } from '../../catalog-control-disclosure';
 
 export type PendingEpicPath = 'resolve_now' | 'next_level';
 export type SubclassDraft =
@@ -174,13 +175,14 @@ export function createClassStep(options: {
     }
 
     const inputId = `level-up-class-${String(index)}`;
+    const disclosureId = `level-up-class-${String(index)}-catalog-layer`;
     const radio = element('input', {
       attributes: {
         id: inputId,
         type: 'radio',
         name: 'level-up-class',
         value: String(classOption.class_definition_id),
-        'aria-label': `${classOption.name} ${String(classOption.current_level)} → ${String(classOption.target_level)}, ${classOption.rules_edition} rules, d${String(classOption.hit_die)} hit die, ${catalogLayerLabel(classOption.catalog_layer)}`,
+        'aria-label': `${classOption.name} ${String(classOption.current_level)} → ${String(classOption.target_level)}, ${classOption.rules_edition} rules, d${String(classOption.hit_die)} hit die`,
         [LEVEL_UP_ATTR.classOption]: String(classOption.class_definition_id),
         ...checkedAttributes(
           classOption.class_definition_id === options.selectedClassId,
@@ -194,19 +196,24 @@ export function createClassStep(options: {
         }
       }),
     );
+    const disclosure = catalogControlDescription(
+      radio,
+      disclosureId,
+      classOption.catalog_layer,
+    );
     return element('label', { className: 'level-up-class-card' }, [
       radio,
       element('span', {
         text:
           `${classOption.name} ${String(classOption.current_level)} → ` +
-          `${String(classOption.target_level)} — ` +
-          catalogLayerLabel(classOption.catalog_layer),
+          String(classOption.target_level),
         attributes: { id: headingId },
       }),
       element('span', {
         text: `${classOption.rules_edition} rules · d${String(classOption.hit_die)} hit die`,
         attributes: { id: detailId },
       }),
+      disclosure,
     ]);
   });
 
@@ -364,8 +371,8 @@ export function createSubclassStep(options: {
     throw new Error('The subclass step requires a returned subclass choice.');
   }
   const choices = choice.options.map((subclass, index) => {
-    const disclosure = catalogLayerLabel(subclass.catalog_layer);
-    const accessibleName = `${subclass.name} — ${selectedClassName(options.selectedClass)}, ${subclass.rules_edition} rules — ${disclosure}`;
+    const accessibleName = `${subclass.name} — ${selectedClassName(options.selectedClass)}, ${subclass.rules_edition} rules`;
+    const disclosureId = `level-up-subclass-${String(index)}-catalog-layer`;
     const radio = element('input', {
       attributes: {
         id: `level-up-subclass-${String(index)}`,
@@ -389,11 +396,17 @@ export function createSubclassStep(options: {
         }
       }),
     );
+    const disclosure = catalogControlDescription(
+      radio,
+      disclosureId,
+      subclass.catalog_layer,
+    );
     return element('label', { className: 'level-up-subclass-option' }, [
       radio,
       element('span', {
         text: accessibleName,
       }),
+      disclosure,
     ]);
   });
   const later = element('input', {

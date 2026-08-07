@@ -490,9 +490,9 @@ test('W-BROWSER-PLANNED-DRAFT carries planned_subchoices from UI through Review 
   await openWizardPlannedReview(page, character);
 
   for (const text of [
-    'Thunderwave — Wizard',
-    'Chromatic Orb — Wizard',
-    'Comprehend Languages — Wizard',
+    'Thunderwave — Wizard — SRD · bundled layer',
+    'Chromatic Orb — Wizard — SRD · bundled layer',
+    'Comprehend Languages — Wizard — SRD · bundled layer',
     'Arcana — Wizard — Scholar',
     'Scholar',
   ]) {
@@ -506,7 +506,10 @@ test('W-BROWSER-PLANNED-DRAFT carries planned_subchoices from UI through Review 
   for (const name of ACCEPTANCE_WIZARD_2_CHOICES.spells.map(
     (choice) => choice.spell_name,
   )) {
-    await expect(page.getByText(`Spell: ${name} — Wizard.`, { exact: true })).toBeVisible();
+    await expect(page.getByText(
+      `Spell: ${name} — Wizard — SRD · bundled layer.`,
+      { exact: true },
+    )).toBeVisible();
   }
 
   expect(await rows(page, 'character_class_levels')).toEqual([

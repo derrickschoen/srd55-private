@@ -58,10 +58,13 @@ export function createSpellPicker(options: {
   list.hidden = true;
   input.setAttribute('aria-controls', listId);
   const currentLayer = document.createElement('span');
+  const currentLayerId = `spell-current-layer-${options.addressKey}`;
+  currentLayer.id = currentLayerId;
   currentLayer.className = 'spell-picker-current-layer';
   currentLayer.textContent = options.valueCatalogLayer === null
     ? ''
     : catalogLayerLabel(options.valueCatalogLayer);
+  input.setAttribute('aria-describedby', currentLayerId);
   wrapper.append(input, currentLayer, list);
 
   let choices: EligibleSpell[] = [];
@@ -96,6 +99,7 @@ export function createSpellPicker(options: {
         index === active ? 'spell-option is-active' : 'spell-option';
       choice.setAttribute('role', 'option');
       choice.setAttribute('aria-selected', String(index === active));
+      choice.setAttribute('aria-label', spell.name);
       const traits = [
         `L${spell.level}`,
         spell.school,
@@ -107,7 +111,9 @@ export function createSpellPicker(options: {
       const name = document.createElement('strong');
       name.textContent = spell.name;
       const details = document.createElement('small');
+      details.id = `spell-option-${options.addressKey}-${index}-details`;
       details.textContent = traits.join(' · ');
+      choice.setAttribute('aria-describedby', details.id);
       choice.append(name, details);
       choice.addEventListener('mousedown', (event) => {
         event.preventDefault();

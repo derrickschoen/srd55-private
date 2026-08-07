@@ -9,6 +9,7 @@ import type {
   Workspace,
 } from '../../../domain/read-models';
 import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
+import { catalogSelectGroups } from '../../catalog-control-disclosure';
 import type { JsonObject } from '../../../domain/models';
 import type {
   CharacterFlavorChanges,
@@ -363,9 +364,11 @@ function renderSources(
   const drawDefinitions = (): void => {
     definition.replaceChildren(
       option('', 'Choose a source…', true),
-      ...workspace.source_catalog[sourceType].map((item) =>
-        option(String(item.id), `${item.name} — ${catalogLayerLabel(item.catalog_layer)}`),
-      ),
+      ...catalogSelectGroups(workspace.source_catalog[sourceType].map((item) => ({
+        value: String(item.id),
+        label: item.name,
+        catalogLayer: item.catalog_layer,
+      }))),
     );
     listField.hidden = true;
     abilityField.hidden = true;
@@ -545,13 +548,12 @@ function renderClasses(
     subclass.setAttribute('aria-label', `${entry.name} subclass`);
     subclass.append(
       option('', 'None', entry.subclass_definition_id === null),
-      ...entry.subclasses.map((item) =>
-        option(
-          String(item.id),
-          `${item.name} — ${catalogLayerLabel(item.catalog_layer)}`,
-          item.id === entry.subclass_definition_id,
-        ),
-      ),
+      ...catalogSelectGroups(entry.subclasses.map((item) => ({
+        value: String(item.id),
+        label: item.name,
+        catalogLayer: item.catalog_layer,
+        selected: item.id === entry.subclass_definition_id,
+      }))),
     );
     subclass.disabled = disabled || entry.subclasses.length === 0;
     subclass.addEventListener('change', () =>
@@ -596,9 +598,11 @@ function renderClasses(
   selection.setAttribute('aria-label', 'Class to add');
   selection.append(
     option('', 'Choose a class…', true),
-    ...available.map((entry) =>
-      option(String(entry.id), `${entry.name} — ${catalogLayerLabel(entry.catalog_layer)}`)
-    ),
+    ...catalogSelectGroups(available.map((entry) => ({
+      value: String(entry.id),
+      label: entry.name,
+      catalogLayer: entry.catalog_layer,
+    }))),
   );
   const add = document.createElement('button');
   add.type = 'button';

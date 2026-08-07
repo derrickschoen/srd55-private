@@ -45,6 +45,8 @@ import { RpcError } from '../../../rpc/protocol';
 import { clear, element, listen, type Cleanup } from '../../dom';
 import { characterListLink, guidedShell } from './guided-builder';
 import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
+import type { CatalogLayerDisclosure } from '../../../catalog/catalog-disclosure';
+import { catalogControlDescription } from '../../catalog-control-disclosure';
 
 /**
  * The seam's `SkillGrantRefusalData` on the wire: `handler_error` with a
@@ -229,6 +231,7 @@ export function createSkillsStep(deps: SkillsStepDeps): SkillsStep {
   const choiceForm = (options: {
     readonly grantId: number;
     readonly heading: string;
+    readonly catalogLayer: CatalogLayerDisclosure;
     readonly available: readonly Skill[];
   }): HTMLElement => {
     const grantKey = String(options.grantId);
@@ -261,6 +264,13 @@ export function createSkillsStep(deps: SkillsStepDeps): SkillsStep {
         [SKILL_STEP_ATTR.fill]: grantKey,
       },
     });
+    const disclosureId = `guided-skill-choice-${grantKey}-catalog-layer`;
+    const disclosure = catalogControlDescription(
+      select,
+      disclosureId,
+      options.catalogLayer,
+    );
+    fill.setAttribute('aria-describedby', disclosureId);
     if (options.available.length === 0) {
       select.disabled = true;
       fill.disabled = true;
@@ -281,6 +291,7 @@ export function createSkillsStep(deps: SkillsStepDeps): SkillsStep {
         element('span', { text: options.heading }),
         select,
       ]),
+      disclosure,
       fill,
     ];
     if (options.available.length === 0) {
@@ -329,8 +340,8 @@ export function createSkillsStep(deps: SkillsStepDeps): SkillsStep {
           // D33: a vanished class definition renders as unknown, not a guess.
           heading:
             `${grant.class_name ?? 'Unknown class'} skill ` +
-            `${String(grant.ordinal)} — ` +
-            catalogLayerLabel(grant.class_catalog_layer),
+            String(grant.ordinal),
+          catalogLayer: grant.class_catalog_layer,
           available: grant.available,
         }),
       ),
@@ -353,9 +364,9 @@ export function createSkillsStep(deps: SkillsStepDeps): SkillsStep {
         choiceForm({
           grantId: grant.grant_id,
           heading:
-            `${grant.source_name} — ` +
-            `${catalogLayerLabel(grant.source_catalog_layer)} ` +
+            `${grant.source_name} ` +
             `${grantKeyLabel(grant.grant_key)} skill`,
+          catalogLayer: grant.source_catalog_layer,
           available: grant.available,
         }),
       ),

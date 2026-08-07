@@ -49,7 +49,7 @@ async function publishBackground(page: Page): Promise<void> {
   await page.getByRole('checkbox', { name: 'Dexterity', exact: true }).check();
   await page.getByRole('checkbox', { name: 'Constitution', exact: true }).check();
   await page.getByRole('combobox', { name: 'Installed Origin feat', exact: true })
-    .selectOption({ label: 'Alert (2024) — SRD · bundled layer' });
+    .selectOption({ label: 'Alert (2024)' });
   await page.getByRole('checkbox', { name: 'Athletics', exact: true }).check();
   await page.getByRole('checkbox', { name: 'Survival', exact: true }).check();
   await page.getByRole('textbox', { name: 'Equipment option A description', exact: true })
@@ -69,7 +69,7 @@ async function publishSubclass(page: Page): Promise<void> {
   await page.getByRole('textbox', { name: 'Name', exact: true }).fill('HA10 Horizon Guard');
   await page.getByRole('combobox', { name: 'Rules edition', exact: true }).selectOption('expanded');
   await page.getByRole('combobox', { name: 'Parent bundled class', exact: true })
-    .selectOption({ label: 'Fighter — SRD · bundled layer' });
+    .selectOption({ label: 'Fighter' });
   await page.getByRole('combobox', { name: 'Progression mode', exact: true })
     .selectOption('inherit_parent');
   await page.getByRole('combobox', { name: 'Timeline level', exact: true }).selectOption('3');
@@ -106,7 +106,7 @@ test('published origins and subclass cut over to ordinary consumers with catalog
   const classCatalog = page.getByRole('list', { name: 'Bundled classes', exact: true });
   await expect(classCatalog.getByText('Homebrew · external layer', { exact: true })).toHaveCount(0);
   await page.getByRole('button', {
-    name: 'Fighter Hit die: d10 SRD · bundled layer',
+    name: 'Fighter',
     exact: true,
   }).click();
   await page.getByRole('textbox', { name: 'Character name', exact: true }).fill('HA10 Cutover Hero');
@@ -147,9 +147,13 @@ test('published origins and subclass cut over to ordinary consumers with catalog
   await page.locator('[data-level-up-next]').click();
   await page.locator('[data-level-up-next]').click();
   await page.getByRole('radio', {
-    name: 'HA10 Horizon Guard — Fighter, expanded rules — Homebrew · external layer',
+    name: 'HA10 Horizon Guard — Fighter, expanded rules',
     exact: true,
   }).check();
+  await expect(page.getByRole('radio', {
+    name: 'HA10 Horizon Guard — Fighter, expanded rules',
+    exact: true,
+  })).toHaveAccessibleDescription('Homebrew · external layer');
   await page.locator('[data-level-up-next]').click();
   await expect(
     page.getByText('HA10 Horizon Guard — Homebrew · external layer', {

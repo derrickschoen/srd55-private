@@ -53,6 +53,7 @@ import { SKILL_LABELS } from '../../../rules/skills';
 import { RpcError } from '../../../rpc/protocol';
 import { clear, element, listen, type Cleanup } from '../../dom';
 import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
+import { catalogSelectGroups } from '../../catalog-control-disclosure';
 import { characterListLink, guidedShell } from './guided-builder';
 
 /**
@@ -324,22 +325,16 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
   const renderFeatOptions = (): void => {
     clear(featSelect);
     const defaultFeat = selected?.pairing.suggested_feat_content_key ?? null;
-    featSelect.append(
-      ...deps.options.origin_feats.map((feat) => {
-        const layer = catalogLayerLabel(feat.catalog_layer);
-        const option = element('option', {
-          text:
-            feat.content_key === defaultFeat
-              ? `${feat.name} — ${layer} (default)`
-              : `${feat.name} — ${layer}`,
-          attributes: { value: feat.content_key },
-        });
-        if (feat.content_key === featKey) {
-          option.selected = true;
-        }
-        return option;
-      }),
-    );
+    featSelect.append(...catalogSelectGroups(
+      deps.options.origin_feats.map((feat) => ({
+        value: feat.content_key,
+        label: feat.content_key === defaultFeat
+          ? `${feat.name} (default)`
+          : feat.name,
+        catalogLayer: feat.catalog_layer,
+        selected: feat.content_key === featKey,
+      })),
+    ));
   };
 
   const magicInitiateFields = element(
@@ -522,12 +517,14 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
       attributes: { 'aria-label': 'Catalog backgrounds' },
     },
     deps.options.backgrounds.map((option) => {
+      const disclosureId = `guided-background-${option.content_key.replace(/[^a-z0-9]+/giu, '-')}-catalog-layer`;
       const radio = element('input', {
         attributes: {
           type: 'radio',
           name: 'background-option',
           value: option.content_key,
           [BACKGROUND_STEP_ATTR.option]: option.content_key,
+          'aria-describedby': disclosureId,
         },
       });
       cleanups.push(
@@ -548,6 +545,7 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
         element('p', {
           className: 'catalog-layer-disclosure',
           text: catalogLayerLabel(option.catalog_layer),
+          attributes: { id: disclosureId },
         }),
         element('p', {
           className: 'guided-background-printed',

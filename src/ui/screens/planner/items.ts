@@ -8,7 +8,7 @@ import type {
   CharacterItem,
   ItemsPanel,
 } from '../../../domain/read-models';
-import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
+import { catalogSelectGroups } from '../../catalog-control-disclosure';
 import { freeTextSpan } from '../../free-text';
 
 export interface AttunementReplacement {
@@ -242,13 +242,11 @@ export function renderItems(options: ItemsPanelOptions): HTMLElement {
     legend.textContent = 'Add from catalog';
     const select = document.createElement('select');
     select.setAttribute('aria-label', 'Item definition');
-    for (const definition of options.panel.definitions) {
-      const entry = document.createElement('option');
-      entry.value = definition.content_key;
-      entry.textContent =
-        `${definition.name} — ${catalogLayerLabel(definition.catalog_layer)}`;
-      select.append(entry);
-    }
+    select.append(...catalogSelectGroups(options.panel.definitions.map((definition) => ({
+      value: definition.content_key,
+      label: definition.name,
+      catalogLayer: definition.catalog_layer,
+    }))));
     const addDefinition = document.createElement('button');
     addDefinition.type = 'button';
     addDefinition.textContent = 'Add catalog item';
