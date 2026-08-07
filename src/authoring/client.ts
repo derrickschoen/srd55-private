@@ -7,6 +7,9 @@ import type {
 import type { CharacterId, ContentKey } from '../domain/ids';
 import {
   type AuthoredContentKind,
+  type ArchivedHomebrewSet,
+  type ArchiveSetPlan,
+  type ArchiveSetResult,
   type AuthoringLibrary,
   type BackgroundAuthoringReferences,
   type ContentUsageList,
@@ -17,11 +20,15 @@ import {
   type PublishPlanToken,
   type PublishPreview,
   type PublishResult,
+  type PermanentPurgeResult,
   type ReplacementChoiceSelection,
   type ReplacementDecision,
   type ReplacementPlan,
   type ReplacementPlanToken,
   type ReplacementResult,
+  type ReplacementSetCommit,
+  type ReplacementSetPlan,
+  type ReplacementSetResult,
   type StoredHomebrewDraft,
 } from './contracts';
 
@@ -37,6 +44,14 @@ export const AUTHORING_RPC = Object.freeze({
   usages: 'authoring.usages',
   previewReplacement: 'authoring.previewReplacement',
   commitReplacement: 'authoring.commitReplacement',
+  previewReplacementSet: 'authoring.previewReplacementSet',
+  commitReplacementSet: 'authoring.commitReplacementSet',
+  previewArchiveSet: 'authoring.previewArchiveSet',
+  commitArchiveSet: 'authoring.commitArchiveSet',
+  listArchivedSets: 'authoring.listArchivedSets',
+  previewRestoreSet: 'authoring.previewRestoreSet',
+  commitRestoreSet: 'authoring.commitRestoreSet',
+  purgeArchivedSet: 'authoring.purgeArchivedSet',
   previewBundledHomebrew: 'authoring.previewBundledHomebrew',
   installBundledHomebrew: 'authoring.installBundledHomebrew',
 } as const);
@@ -94,6 +109,28 @@ export interface CommitReplacementParams {
   readonly choices: readonly ReplacementChoiceSelection[];
 }
 
+export interface PreviewReplacementSetParams {
+  readonly old_content_key: ContentKey;
+  readonly new_content_key: ContentKey;
+}
+
+export interface CommitReplacementSetParams extends PreviewReplacementSetParams {
+  readonly replacements: readonly ReplacementSetCommit[];
+}
+
+export interface ContentLifecycleParams {
+  readonly content_key: ContentKey;
+}
+
+export interface CommitArchiveSetParams {
+  readonly token: ArchiveSetPlan['token'];
+}
+
+export interface PermanentPurgeParams {
+  readonly content_kind: AuthoredContentKind;
+  readonly content_key: ContentKey;
+}
+
 export interface AuthoringClient {
   list(): Promise<AuthoringLibrary>;
   backgroundReferences(): Promise<BackgroundAuthoringReferences>;
@@ -110,6 +147,18 @@ export interface AuthoringClient {
   commitReplacement(
     params: CommitReplacementParams,
   ): Promise<ReplacementResult>;
+  previewReplacementSet(
+    params: PreviewReplacementSetParams,
+  ): Promise<ReplacementSetPlan>;
+  commitReplacementSet(
+    params: CommitReplacementSetParams,
+  ): Promise<ReplacementSetResult>;
+  previewArchiveSet(params: ContentLifecycleParams): Promise<ArchiveSetPlan>;
+  commitArchiveSet(params: CommitArchiveSetParams): Promise<ArchiveSetResult>;
+  listArchivedSets(): Promise<readonly ArchivedHomebrewSet[]>;
+  previewRestoreSet(params: ContentLifecycleParams): Promise<ArchiveSetPlan>;
+  commitRestoreSet(params: CommitArchiveSetParams): Promise<ArchiveSetResult>;
+  purgeArchivedSet(params: PermanentPurgeParams): Promise<PermanentPurgeResult>;
 }
 
 export interface BundledHomebrewClient {
@@ -187,6 +236,46 @@ export function createAuthoringClient(
     commitReplacement: (params: CommitReplacementParams) =>
       rpc.call<CommitReplacementParams, ReplacementResult>(
         AUTHORING_RPC.commitReplacement,
+        params,
+      ),
+    previewReplacementSet: (params: PreviewReplacementSetParams) =>
+      rpc.call<PreviewReplacementSetParams, ReplacementSetPlan>(
+        AUTHORING_RPC.previewReplacementSet,
+        params,
+      ),
+    commitReplacementSet: (params: CommitReplacementSetParams) =>
+      rpc.call<CommitReplacementSetParams, ReplacementSetResult>(
+        AUTHORING_RPC.commitReplacementSet,
+        params,
+      ),
+    previewArchiveSet: (params: ContentLifecycleParams) =>
+      rpc.call<ContentLifecycleParams, ArchiveSetPlan>(
+        AUTHORING_RPC.previewArchiveSet,
+        params,
+      ),
+    commitArchiveSet: (params: CommitArchiveSetParams) =>
+      rpc.call<CommitArchiveSetParams, ArchiveSetResult>(
+        AUTHORING_RPC.commitArchiveSet,
+        params,
+      ),
+    listArchivedSets: () =>
+      rpc.call<Record<string, never>, readonly ArchivedHomebrewSet[]>(
+        AUTHORING_RPC.listArchivedSets,
+        {},
+      ),
+    previewRestoreSet: (params: ContentLifecycleParams) =>
+      rpc.call<ContentLifecycleParams, ArchiveSetPlan>(
+        AUTHORING_RPC.previewRestoreSet,
+        params,
+      ),
+    commitRestoreSet: (params: CommitArchiveSetParams) =>
+      rpc.call<CommitArchiveSetParams, ArchiveSetResult>(
+        AUTHORING_RPC.commitRestoreSet,
+        params,
+      ),
+    purgeArchivedSet: (params: PermanentPurgeParams) =>
+      rpc.call<PermanentPurgeParams, PermanentPurgeResult>(
+        AUTHORING_RPC.purgeArchivedSet,
         params,
       ),
   });

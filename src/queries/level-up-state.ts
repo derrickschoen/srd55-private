@@ -477,6 +477,7 @@ export class LevelUpStateQuery {
          ON identity.content_kind = 'subclass'
         AND identity.content_key = subclass.content_key
        WHERE subclass.class_definition_id = ?
+         AND identity.archived_at IS NULL
        ORDER BY subclass.name, subclass.id`,
       [classDefinitionId],
       (row): LevelUpSubclassOption => ({

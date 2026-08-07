@@ -50,6 +50,7 @@ import { createAuthoringEditGeneration } from '../../authoring/edit-generation';
 import { clear, element, type Cleanup } from '../../dom';
 import { freeTextSpan } from '../../free-text';
 import type { ScreenContext } from '../../screen';
+import { homebrewReplacementPath } from './homebrew-routes';
 
 type StoredSubclassDraft = StoredHomebrewDraft & {
   readonly content_kind: 'subclass';
@@ -408,6 +409,26 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
       event.preventDefault();
       options.context.router.navigate('/homebrew?tab=subclass');
     });
+    const actions: HTMLElement[] = [library];
+    if (
+      options.draft.base_content_key !== null &&
+      options.draft.base_content_key !== result.content_key &&
+      result.previous_key_usage_count > 0
+    ) {
+      const fixPath = homebrewReplacementPath(
+        options.draft.base_content_key,
+        result.content_key,
+      );
+      const fix = element('a', {
+        className: 'button-secondary', text: 'Review character fixes',
+        attributes: { href: fixPath },
+      });
+      fix.addEventListener('click', (event) => {
+        event.preventDefault();
+        options.context.router.navigate(fixPath);
+      });
+      actions.push(fix);
+    }
     options.mount.append(element('section', {
       className: 'subclass-publish-result',
       attributes: { role: 'status' },
@@ -423,7 +444,7 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
           ? 'No characters use a previous version.'
           : `${String(result.previous_key_usage_count)} character(s) still use the previous version.`,
       }),
-      library,
+      element('div', { className: 'homebrew-card-actions' }, actions),
     ]));
     setTimeout(() => {
       if (heading.isConnected) heading.focus();

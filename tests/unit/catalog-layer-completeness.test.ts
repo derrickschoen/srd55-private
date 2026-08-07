@@ -58,6 +58,7 @@ const EXEMPTIONS = new Map<string, string>([
   ['src/authoring/contracts.ts::BackgroundContentAggregate::default_origin_feat_display_name', 'This preserves authored aggregate text; the separately linked feat content key controls installed identity.'],
   ['src/authoring/contracts.ts::PublishDecision::clone_name', 'This is the requested name for content that does not exist until the publication command succeeds.'],
   ['src/authoring/contracts.ts::ContentUsage::character_name', 'Character names are character-owned text, not catalog content.'],
+  ['src/authoring/contracts.ts::ArchiveSetCharacter::character_name', 'DEFENDED: Character names are character-owned text recorded in an archive membership manifest, not names of installed catalog content.'],
   ['src/access/spell-access-builder.ts::SpellAccessRoute::identity_name', 'The canonical identity name is mechanical deduplication input; spell_name is the rendered catalog value.'],
   ['src/builder/background-choices.ts::BackgroundPrintedPairing::background_name', 'The pairing is nested under GuidedBackgroundOption, whose catalog layer owns and accompanies this printed text.'],
   ['src/builder/armor-class-effects.ts::CharacterItemRow::name', 'Character item rows are editable character-owned values, not installed catalog references.'],

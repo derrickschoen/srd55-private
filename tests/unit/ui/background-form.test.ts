@@ -122,6 +122,14 @@ function client(overrides: Partial<AuthoringClient> = {}): AuthoringClient {
     usages: () => unused(),
     previewReplacement: () => unused(),
     commitReplacement: () => unused(),
+    previewReplacementSet: () => unused(),
+    commitReplacementSet: () => unused(),
+    previewArchiveSet: () => unused(),
+    commitArchiveSet: () => unused(),
+    listArchivedSets: () => unused(),
+    previewRestoreSet: () => unused(),
+    commitRestoreSet: () => unused(),
+    purgeArchivedSet: () => unused(),
     ...overrides,
   };
 }

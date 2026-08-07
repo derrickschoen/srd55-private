@@ -49,17 +49,22 @@ export const RECORDED_SCHEMA_PREFIX_IDS = [
   '0037_background_default_origin_feat_key',
   '0038_catalog_content_supersessions',
   '0039_catalog_content_supersession_guards',
+  '0040_catalog_content_archive_members',
 ] as const;
 
 export const PREFIX_MIGRATION_ID = 'test_catalog_prefix_probe';
+const PREFIX_MIGRATION_SOURCES = Object.freeze([Object.freeze({
+  path: 'tests/fixtures/catalog-data-migration-probe.ts',
+  bytes: migrationProbeSource,
+})]);
 export const PREFIX_MIGRATION_CHECKSUM =
-  '604ff0d0a8bd0e5e1edb779e43165206295ad3bbcf0f78e5ab315b091cdf449d';
+  '1687a5bcda8866d044c32c0ec565fc4598bed77c611d3b93e0638eaaf0b61be6';
 export const PREFIX_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
   Object.freeze([
     Object.freeze({
       id: PREFIX_MIGRATION_ID,
       projectorScheme: CONTENT_FINGERPRINT_SCHEME_V1,
-      source: migrationProbeSource,
+      sources: PREFIX_MIGRATION_SOURCES,
       checksum: PREFIX_MIGRATION_CHECKSUM,
       run: runCatalogDataMigrationProbe,
     }),

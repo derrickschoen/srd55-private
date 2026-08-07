@@ -84,6 +84,11 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
   catalog_content_aliases: {
     text: ['content_kind', 'alias_key', 'content_key', 'alias_kind'],
   },
+  catalog_content_archive_members: {
+    integer: ['character_id', 'character_revision'],
+    text: ['content_kind', 'content_key', 'character_name'],
+    numeric: ['archived_at'],
+  },
   catalog_content_drafts: {
     integer: ['document_version', 'revision'],
     text: [
@@ -746,6 +751,10 @@ const expectedNotNull: Record<string, string[]> = {
   ],
   catalog_content_aliases: [
     'content_kind', 'alias_key', 'content_key', 'alias_kind',
+  ],
+  catalog_content_archive_members: [
+    'content_kind', 'content_key', 'character_id', 'character_revision',
+    'character_name', 'archived_at',
   ],
   catalog_content_drafts: [
     'draft_uuid', 'content_kind', 'document_version', 'revision',
@@ -1494,6 +1503,9 @@ const expectedDefaultedRow: Record<string, unknown> = {
 };
 
 const expectedForeignKeys: Record<string, string[]> = {
+  catalog_content_archive_members: [
+    'content_kind,content_key->catalog_content_identities.content_kind,content_key|CASCADE',
+  ],
   catalog_content_drafts: [
     'content_kind,base_content_key->catalog_content_identities.content_kind,content_key|RESTRICT',
   ],

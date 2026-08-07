@@ -3,12 +3,15 @@ import {
   type AuthoringClient,
 } from '../../../authoring/client';
 import type {
+  ArchiveSetCharacter,
   AuthoredContentKind,
   AuthoringLibrary,
   HomebrewDraftSummary,
   PublishedHomebrewSummary,
+  ReplacementNotice,
   StoredHomebrewDraft,
 } from '../../../authoring/contracts';
+import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
 import type { HomebrewDraftUuid } from '../../../authoring/ids';
 import type { GuidedClassOption } from '../../../builder/contracts';
 import { createQueriesClient } from '../../../queries/client';
@@ -32,8 +35,19 @@ import {
   isStoredBackgroundDraft,
   renderBackgroundForm,
 } from './background-form';
+import {
+  HOMEBREW_ARCHIVE_ROUTE,
+  HOMEBREW_ROUTE,
+  homebrewDeletePath,
+  homebrewReplacementPath,
+} from './homebrew-routes';
 
-export const HOMEBREW_ROUTE = '/homebrew';
+export {
+  HOMEBREW_ARCHIVE_ROUTE,
+  HOMEBREW_ROUTE,
+  homebrewDeletePath,
+  homebrewReplacementPath,
+} from './homebrew-routes';
 
 export type HomebrewLibraryTab = AuthoredContentKind | 'drafts';
 
@@ -80,6 +94,34 @@ function badge(text: string, tone: 'draft' | 'homebrew' | 'neutral'): HTMLElemen
   });
 }
 
+function replacementNoticeText(notice: ReplacementNotice): string {
+  switch (notice.kind) {
+    case 'retargeted_selection_invalid': {
+      const selection = (() => {
+        switch (notice.table) {
+          case 'spell_selection_slots': return 'Spell selection';
+          case 'wizard_spellbook_entries': return 'Spellbook selection';
+          case 'character_skill_grants': return 'Skill selection';
+          case 'character_skill_expertise_grants': return 'Expertise selection';
+        }
+      })();
+      const detail = notice.detail ?? (() => {
+        switch (notice.reason) {
+          case 'target_source_missing': return 'The replacement has no matching source.';
+          case 'target_rule_missing': return 'The replacement has no matching choice rule.';
+          case 'target_rule_changed': return 'The replacement changed the choice rule.';
+          case 'selection_ineligible': return 'The selected value is no longer eligible.';
+        }
+      })();
+      return `${selection} “${String(notice.selected_value)}” for “${notice.rule_key}” ` +
+        `became invalid: ${detail}`;
+    }
+    case 'retargeted_level_feat_invalid':
+      return `Feat selection ${String(notice.character_level_feat_choice_id)} became invalid ` +
+        'because the replacement has no matching source.';
+  }
+}
+
 function routedLink(
   context: ScreenContext,
   cleanups: Cleanup[],
@@ -115,6 +157,13 @@ function shell(
             text: 'Draft locally, then publish an immutable catalog entry.',
           }),
         ]),
+        routedLink(
+          context,
+          cleanups,
+          'Archive',
+          HOMEBREW_ARCHIVE_ROUTE,
+          'button-secondary',
+        ),
       ]),
     ]),
     main,
@@ -170,17 +219,17 @@ function publishedCard(
   status: HTMLElement,
   cleanups: Cleanup[],
 ): HTMLElement {
-  const copy = element('button', {
+  const edit = element('button', {
     className: 'button-secondary',
-    text: 'Make a homebrew copy',
+    text: 'Edit as new version',
     attributes: {
       type: 'button',
-      'aria-label': `Make a homebrew copy of ${item.name}`,
+      'aria-label': `Edit ${item.name} as a new version`,
     },
   });
-  cleanups.push(listen(copy, 'click', () => {
-    copy.disabled = true;
-    status.textContent = `Creating a draft from ${item.name}…`;
+  cleanups.push(listen(edit, 'click', () => {
+    edit.disabled = true;
+    status.textContent = `Creating a new version of ${item.name}…`;
     void client.createDraft({
       content_kind: item.content_kind,
       base_content_key: item.content_key,
@@ -189,9 +238,16 @@ function publishedCard(
     }).catch((error: unknown) => {
       status.textContent = error instanceof Error ? error.message : String(error);
       status.setAttribute('role', 'alert');
-      copy.disabled = false;
+      edit.disabled = false;
     });
   }));
+  const remove = routedLink(
+    context,
+    cleanups,
+    'Delete',
+    homebrewDeletePath(item.content_key),
+    'button-danger',
+  );
   const title = element('h2');
   title.append(freeTextSpan(item.name));
   return element('article', { className: 'homebrew-card panel' }, [
@@ -203,8 +259,251 @@ function publishedCard(
       ]),
     ]),
     element('p', { text: `${KIND_LABELS[item.content_kind]} · immutable published version` }),
-    copy,
+    element('div', { className: 'homebrew-card-actions' }, [
+      ...(item.superseded_by === null ? [edit] : []),
+      remove,
+    ]),
   ]);
+}
+
+function characterList(characters: readonly ArchiveSetCharacter[]): HTMLElement {
+  if (characters.length === 0) {
+    return element('p', { text: 'No characters are attached.' });
+  }
+  const list = element('ul');
+  for (const character of characters) {
+    const item = element('li');
+    item.append(freeTextSpan(character.character_name));
+    list.append(item);
+  }
+  return list;
+}
+
+async function renderReplacementRoute(
+  context: ScreenContext,
+  client: AuthoringClient,
+  oldContentKey: string,
+  newContentKey: string,
+  cleanups: Cleanup[],
+): Promise<void> {
+  const view = shell(context, cleanups);
+  const status = element('p', {
+    className: 'homebrew-status', text: 'Loading replacement review…',
+    attributes: { role: 'status', 'aria-live': 'polite' },
+  });
+  view.main.append(status);
+  const plan = await client.previewReplacementSet({
+    old_content_key: oldContentKey as PublishedHomebrewSummary['content_key'],
+    new_content_key: newContentKey as PublishedHomebrewSummary['content_key'],
+  });
+  const review = element('section', {
+    className: 'panel homebrew-replacement-review',
+    attributes: { 'aria-label': 'Fix affected characters' },
+  }, [
+    element('h2', { text: 'Review character fixes' }),
+    element('p', {
+      text: 'Each listed character keeps the previous version unless you explicitly apply every change below.',
+    }),
+  ]);
+  for (const replacement of plan.replacements) {
+    const name = element('h3');
+    name.append(freeTextSpan(replacement.character_name));
+    const changes = element('dl');
+    for (const change of replacement.changes) {
+      changes.append(
+        element('dt', { text: change.label }),
+        element('dd', { text: `Before: ${String(change.before)}` }),
+        element('dd', { text: `After: ${String(change.after)}` }),
+      );
+    }
+    review.append(element('article', { className: 'homebrew-card' }, [name, changes]));
+  }
+  if (plan.replacements.length === 0) {
+    review.append(element('p', { text: 'No characters use the previous version.' }));
+  } else {
+    const apply = element('button', {
+      className: 'button-primary',
+      text: 'Apply to all listed characters',
+      attributes: { type: 'button' },
+    });
+    cleanups.push(listen(apply, 'click', () => {
+      apply.disabled = true;
+      status.textContent = 'Applying every reviewed replacement…';
+      void client.commitReplacementSet({
+        old_content_key: plan.old_content_key,
+        new_content_key: plan.new_content_key,
+        replacements: plan.replacements.map((replacement) => ({
+          token: replacement.token,
+          decisions: replacement.review.map((candidate) => ({
+            candidate_content_key: candidate.candidate_content_key,
+            decision: 'match' as const,
+          })),
+          choices: [],
+        })),
+      }).then((result) => {
+        clear(review);
+        review.append(
+          element('h2', { text: 'Character fixes applied' }),
+          element('p', {
+            text: `${String(result.replacements.length)} character(s) now use the new version.`,
+          }),
+        );
+        for (const replacement of result.replacements) {
+          if (replacement.notices.length === 0) continue;
+          const planned = plan.replacements.find((entry) =>
+            entry.facts.character_id === replacement.character_id
+          );
+          const heading = element('h3');
+          heading.append(freeTextSpan(
+            planned?.character_name ?? `Character ${String(replacement.character_id)}`,
+          ));
+          review.append(element('article', {
+            className: 'homebrew-card homebrew-replacement-notices',
+          }, [
+            heading,
+            element('p', { text: 'Needs review after replacement:' }),
+            element('ul', {}, replacement.notices.map((notice) =>
+              element('li', { text: replacementNoticeText(notice) })
+            )),
+          ]));
+        }
+        status.textContent = 'All listed characters were updated.';
+      }).catch((error: unknown) => {
+        apply.disabled = false;
+        status.textContent = error instanceof Error ? error.message : String(error);
+        status.setAttribute('role', 'alert');
+      });
+    }));
+    review.append(apply);
+  }
+  view.main.append(review);
+  status.textContent = 'Replacement review loaded.';
+}
+
+async function renderDeleteRoute(
+  context: ScreenContext,
+  client: AuthoringClient,
+  contentKey: string,
+  cleanups: Cleanup[],
+): Promise<void> {
+  const view = shell(context, cleanups);
+  const status = element('p', {
+    className: 'homebrew-status', text: 'Loading delete review…',
+    attributes: { role: 'status', 'aria-live': 'polite' },
+  });
+  view.main.append(status);
+  const plan = await client.previewArchiveSet({
+    content_key: contentKey as PublishedHomebrewSummary['content_key'],
+  });
+  const name = element('h2', { text: 'Delete creation and attached characters' });
+  const creation = element('p');
+  creation.append('Creation: ', freeTextSpan(plan.content_name));
+  const commit = element('button', {
+    className: 'button-danger',
+    text: 'Archive creation and all listed characters',
+    attributes: { type: 'button' },
+  });
+  cleanups.push(listen(commit, 'click', () => {
+    commit.disabled = true;
+    status.textContent = 'Archiving the reviewed set…';
+    void client.commitArchiveSet({ token: plan.token }).then(() => {
+      context.router.navigate(HOMEBREW_ARCHIVE_ROUTE);
+    }).catch((error: unknown) => {
+      commit.disabled = false;
+      status.textContent = error instanceof Error ? error.message : String(error);
+      status.setAttribute('role', 'alert');
+    });
+  }));
+  view.main.append(element('section', { className: 'panel' }, [
+    name,
+    badge(catalogLayerLabel(plan.content_catalog_layer), 'homebrew'),
+    element('p', {
+      text: 'Nothing is removed silently. This entire set moves to the restorable archive:',
+    }),
+    creation,
+    element('h3', { text: 'Attached characters' }),
+    characterList(plan.characters),
+    commit,
+  ]));
+  status.textContent = 'Delete review loaded.';
+}
+
+async function renderArchiveRoute(
+  context: ScreenContext,
+  client: AuthoringClient,
+  cleanups: Cleanup[],
+): Promise<void> {
+  const view = shell(context, cleanups);
+  const status = element('p', {
+    className: 'homebrew-status', text: 'Loading archive…',
+    attributes: { role: 'status', 'aria-live': 'polite' },
+  });
+  const list = element('section', { attributes: { 'aria-label': 'Archived homebrew sets' } });
+  view.main.append(status, list);
+  const render = async (): Promise<void> => {
+    const sets = await client.listArchivedSets();
+    clear(list);
+    list.append(element('h2', { text: 'Archive' }));
+    if (sets.length === 0) list.append(element('p', { text: 'The archive is empty.' }));
+    for (const set of sets) {
+      const heading = element('h3');
+      heading.append(freeTextSpan(set.content_name));
+      const restore = element('button', {
+        className: 'button-primary',
+        text: 'Restore creation and all listed characters',
+        attributes: { type: 'button' },
+      });
+      cleanups.push(listen(restore, 'click', () => {
+        restore.disabled = true;
+        status.textContent = 'Restoring the complete set…';
+        void client.previewRestoreSet({ content_key: set.content_key })
+          .then((plan) => client.commitRestoreSet({ token: plan.token }))
+          .then(render)
+          .catch((error: unknown) => {
+            restore.disabled = false;
+            status.textContent = error instanceof Error ? error.message : String(error);
+            status.setAttribute('role', 'alert');
+          });
+      }));
+      const purge = element('button', {
+        className: 'button-danger',
+        text: 'Permanently purge entire lineage',
+        attributes: {
+          type: 'button',
+          'aria-label': `Permanently purge ${set.content_name} and its entire version lineage`,
+        },
+      });
+      cleanups.push(listen(purge, 'click', () => {
+        purge.disabled = true;
+        restore.disabled = true;
+        status.textContent = 'Permanently purging the complete version lineage…';
+        void client.purgeArchivedSet({
+          content_kind: set.content_kind,
+          content_key: set.content_key,
+        }).then(render).catch((error: unknown) => {
+          purge.disabled = false;
+          restore.disabled = false;
+          status.textContent = error instanceof Error ? error.message : String(error);
+          status.setAttribute('role', 'alert');
+        });
+      }));
+      list.append(element('article', { className: 'homebrew-card panel' }, [
+        heading,
+        badge(catalogLayerLabel(set.content_catalog_layer), 'homebrew'),
+        element('p', { text: `Archived ${set.archived_at.split('#', 1)[0]}` }),
+        element('h4', { text: 'Characters in this set' }),
+        characterList(set.characters),
+        restore,
+        element('p', {
+          text: 'Permanent purge removes every predecessor and successor version and all characters attached to that lineage.',
+        }),
+        purge,
+      ]));
+    }
+    status.textContent = 'Archive loaded.';
+    status.setAttribute('role', 'status');
+  };
+  await render();
 }
 
 function draftCard(
@@ -386,6 +685,46 @@ export async function renderHomebrewLibrary(
   const cardCleanups: Cleanup[] = [];
   const dialogs: DraftConflictDialog[] = [];
   let active = true;
+  if (
+    context.route.segments.length === 4 &&
+    context.route.segments[0] === 'homebrew' &&
+    context.route.segments[1] === 'replacements'
+  ) {
+    await renderReplacementRoute(
+      context,
+      client,
+      context.route.segments[2]!,
+      context.route.segments[3]!,
+      cleanups,
+    );
+    return () => {
+      active = false;
+      for (const cleanup of cleanups.splice(0)) cleanup();
+    };
+  }
+  if (
+    context.route.segments.length === 3 &&
+    context.route.segments[0] === 'homebrew' &&
+    context.route.segments[1] === 'delete'
+  ) {
+    await renderDeleteRoute(
+      context,
+      client,
+      context.route.segments[2]!,
+      cleanups,
+    );
+    return () => {
+      active = false;
+      for (const cleanup of cleanups.splice(0)) cleanup();
+    };
+  }
+  if (context.route.path === HOMEBREW_ARCHIVE_ROUTE) {
+    await renderArchiveRoute(context, client, cleanups);
+    return () => {
+      active = false;
+      for (const cleanup of cleanups.splice(0)) cleanup();
+    };
+  }
   const draftUuid = context.route.segments.length === 3 &&
     context.route.segments[0] === 'homebrew' &&
     context.route.segments[1] === 'drafts'

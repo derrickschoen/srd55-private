@@ -1527,6 +1527,65 @@ describe('database migration chain', () => {
     lifecycle.close();
   });
 
+  it('HA11 0040 manifests existing archived members once and survives character deletion', async () => {
+    const beforeArchiveMembers = DATABASE_MIGRATIONS
+      .slice(0, DATABASE_MIGRATIONS.findIndex(
+        (entry) => entry.id === '0040_catalog_content_archive_members',
+      ))
+      .map((entry) => entry.sql)
+      .join('\n');
+    const archivedAt = '2042-08-12T13:14:15.000Z';
+    const storage = await storageHolding(`${beforeArchiveMembers}
+      INSERT INTO catalog_content_identities (
+        content_key, content_kind, key_kind, catalog_layer, normalized_name,
+        archived_at
+      ) VALUES (
+        'expanded:migration.fixture:manifest-species', 'species', 'asserted',
+        'external', 'manifest species', '${archivedAt}'
+      );
+      INSERT INTO species_definitions (
+        id, content_key, name, rules_edition
+      ) VALUES (
+        901, 'expanded:migration.fixture:manifest-species',
+        'Manifest Species', 'expanded'
+      );
+      INSERT INTO characters (id, name, revision, archived_at) VALUES
+        (701, 'Promised Archived Hero', 4, '${archivedAt}'),
+        (702, 'Active Bystander', 2, NULL);
+      INSERT INTO character_source_instances (
+        character_id, instance_uuid, source_type, source_definition_id,
+        display_name, state
+      ) VALUES
+        (701, 'manifest-archived-source', 'species', 901, 'Manifest Species', 'active'),
+        (702, 'manifest-active-source', 'species', 901, 'Manifest Species', 'active');`);
+    const lifecycle = new DatabaseLifecycle(
+      sqlite3,
+      storage,
+      schema,
+      () => undefined,
+      DATABASE_MIGRATIONS,
+    );
+    lifecycle.open();
+    expect(lifecycle.database.allRaw(
+      `SELECT content_kind, content_key, character_id, character_revision,
+              character_name, archived_at
+       FROM catalog_content_archive_members`,
+    )).toEqual([{
+      content_kind: 'species',
+      content_key: 'expanded:migration.fixture:manifest-species',
+      character_id: 701,
+      character_revision: 4,
+      character_name: 'Promised Archived Hero',
+      archived_at: archivedAt,
+    }]);
+    lifecycle.database.exec('DELETE FROM characters WHERE id = 701');
+    expect(lifecycle.database.scalar<number>(
+      `SELECT count(*) FROM catalog_content_archive_members
+       WHERE character_id = 701`,
+    )).toBe(1);
+    lifecycle.close();
+  });
+
   it('Q4 rejects General background keys and reverse category mutation', () => {
     const database = new sqlite3.oo1.DB(':memory:', 'c');
     try {

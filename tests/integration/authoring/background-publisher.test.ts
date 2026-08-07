@@ -1292,6 +1292,33 @@ describe('HA-4 background publisher', () => {
         reason: 'key-collision',
       }),
     ]);
+    db.exec(
+      'UPDATE catalog_content_identities SET archived_at = ? WHERE content_key = ?',
+      ['2042-08-12T13:14:15.000Z', successor.result.content_key],
+    );
+    expect(authoringError(() => authoring.commitReplacement({
+      token: replacement.token,
+      decisions: [{
+        candidate_content_key: successor.result.content_key,
+        decision: 'match',
+      }],
+      choices: [],
+    })).data).toEqual({
+      reason: 'replacement_refused',
+      refusal: 'archived_reference',
+    });
+    expect(authoringError(() => authoring.previewReplacement({
+      old_content_key: original.result.content_key,
+      new_content_key: successor.result.content_key,
+      character_id: character.id as CharacterId,
+    })).data).toEqual({
+      reason: 'replacement_refused',
+      refusal: 'archived_reference',
+    });
+    db.exec(
+      'UPDATE catalog_content_identities SET archived_at = NULL WHERE content_key = ?',
+      [successor.result.content_key],
+    );
     expect(authoring.commitReplacement({
       token: replacement.token,
       decisions: [{

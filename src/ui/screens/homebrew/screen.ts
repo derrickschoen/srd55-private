@@ -8,6 +8,12 @@ export const screen = defineScreen({
     route.segments.length === 3 &&
     route.segments[0] === 'homebrew' &&
     route.segments[1] === 'drafts'
+  ) || route.path === '/homebrew/archive' || (
+    route.segments.length === 3 && route.segments[0] === 'homebrew' &&
+    route.segments[1] === 'delete'
+  ) || (
+    route.segments.length === 4 && route.segments[0] === 'homebrew' &&
+    route.segments[1] === 'replacements'
   ),
   render: renderHomebrewLibrary,
 });

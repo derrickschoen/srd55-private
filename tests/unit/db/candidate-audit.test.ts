@@ -25,6 +25,9 @@ import {
 } from '../../../src/character/character-state';
 import { rowContractError } from '../../../src/domain/contracts/rows';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
+import { HomebrewArchiveSetService } from '../../../src/authoring/archive-set-lifecycle';
+import type { ContentKey } from '../../../src/domain/ids';
+import { DATABASE_MIGRATIONS } from '../../../src/db/migrations';
 
 /**
  * THE MALFORMED-ARTIFACT PROOF FOR WHOLE-IMAGE RESTORE.
@@ -76,6 +79,70 @@ function seedTwoCharacters(db: Database): void {
      VALUES (1, 1, 'alice-source', 'class', 1, 'Wizard'),
             (2, 2, 'bob-source', 'class', 1, 'Wizard')`,
   );
+}
+
+const ARCHIVE_TIMESTAMP = '2042-08-12T13:14:15.000Z';
+
+function seedSpeciesArchiveManifest(
+  db: Database,
+  input: {
+    readonly characterId: number;
+    readonly referencedCreation: 'manifested' | 'foreign' | 'none';
+  },
+): ContentKey {
+  const context = new DatabaseContext(db);
+  const manifestedKey = '2024:audit.owner:manifested-species' as ContentKey;
+  const foreignKey = '2024:audit.owner:foreign-species' as ContentKey;
+  registerFixtureContentIdentity(context, {
+    kind: 'species', contentKey: manifestedKey, name: 'Manifested Species',
+    keyKind: 'asserted',
+  });
+  registerFixtureContentIdentity(context, {
+    kind: 'species', contentKey: foreignKey, name: 'Foreign Species',
+    keyKind: 'asserted',
+  });
+  db.exec(
+    `UPDATE catalog_content_identities SET archived_at = ?
+     WHERE content_key = ?`,
+    { bind: [ARCHIVE_TIMESTAMP, manifestedKey] },
+  );
+  db.exec(
+    `INSERT INTO species_definitions (content_key, name, rules_edition)
+     VALUES (?, 'Manifested Species', '2024'), (?, 'Foreign Species', '2024')`,
+    { bind: [manifestedKey, foreignKey] },
+  );
+  const characterExists = Number(db.selectValue(
+    'SELECT count(*) FROM characters WHERE id = ?',
+    [input.characterId],
+  )) === 1;
+  if (characterExists) {
+    db.exec(
+      'UPDATE characters SET archived_at = ? WHERE id = ?',
+      { bind: [ARCHIVE_TIMESTAMP, input.characterId] },
+    );
+  }
+  if (input.referencedCreation !== 'none') {
+    const definitionKey = input.referencedCreation === 'manifested'
+      ? manifestedKey
+      : foreignKey;
+    db.exec(
+      `INSERT INTO character_source_instances (
+         character_id, instance_uuid, source_type, source_definition_id,
+         display_name, state
+       ) VALUES (?, 'audit-archive-species', 'species',
+         (SELECT id FROM species_definitions WHERE content_key = ?),
+         'Archive Species', 'active')`,
+      { bind: [input.characterId, definitionKey] },
+    );
+  }
+  db.exec(
+    `INSERT INTO catalog_content_archive_members (
+       content_kind, content_key, character_id, character_revision,
+       character_name, archived_at
+     ) VALUES ('species', ?, ?, 0, 'Promised Hero', ?)`,
+    { bind: [manifestedKey, input.characterId, ARCHIVE_TIMESTAMP] },
+  );
+  return manifestedKey;
 }
 
 /** Two catalog spells, both active, so a slot has something legal to point at. */
@@ -226,6 +293,100 @@ describe('candidate database semantic audit', () => {
   it('passes a clean, populated candidate', () => {
     const db = freshDatabase();
     seedTwoCharacters(db);
+    expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).not.toThrow();
+  });
+
+  it('accepts a pre-0040 candidate with no archive manifest table', () => {
+    const db = new sqlite3.oo1.DB(':memory:', 'c');
+    opened.push(db);
+    for (const migration of DATABASE_MIGRATIONS) {
+      if (migration.id === '0040_catalog_content_archive_members') {
+        break;
+      }
+      db.exec(migration.sql);
+    }
+
+    expect(
+      db.selectValue(
+        `SELECT count(*) FROM sqlite_schema
+         WHERE type = 'table'
+           AND name = 'catalog_content_archive_members'`,
+      ),
+    ).toBe(0);
+    expect(() => auditCandidateDatabase(db)).not.toThrow();
+  });
+
+  it('refuses an archive manifest member whose character id was never allocated', () => {
+    const db = freshDatabase();
+    seedTwoCharacters(db);
+    seedSpeciesArchiveManifest(db, {
+      characterId: 3,
+      referencedCreation: 'none',
+    });
+
+    expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).toThrow(
+      'names character 3, which this database has never allocated',
+    );
+  });
+
+  it('refuses an archive manifest member that belongs to another creation', () => {
+    const db = freshDatabase();
+    seedTwoCharacters(db);
+    seedSpeciesArchiveManifest(db, {
+      characterId: 1,
+      referencedCreation: 'foreign',
+    });
+
+    expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).toThrow(
+      'names character 1, which does not reference the manifested creation',
+    );
+  });
+
+  it('accepts a legitimately deleted archive member and restore still refuses it by name', () => {
+    const db = freshDatabase();
+    seedTwoCharacters(db);
+    const contentKey = seedSpeciesArchiveManifest(db, {
+      characterId: 1,
+      referencedCreation: 'manifested',
+    });
+    db.exec('DELETE FROM characters WHERE id = 1');
+    const imported = quarantined(bytesOf(db));
+
+    expect(() => auditCandidateDatabase(imported)).not.toThrow();
+    expect(() =>
+      new HomebrewArchiveSetService(new DatabaseContext(imported))
+        .previewRestore(contentKey)
+    ).toThrow('"Promised Hero" (character 1) no longer exists');
+  });
+
+  it.each([
+    {
+      label: 'absent',
+      change: "DELETE FROM sqlite_sequence WHERE name = 'characters'",
+    },
+    {
+      label: 'reset',
+      change: "UPDATE sqlite_sequence SET seq = 0 WHERE name = 'characters'",
+    },
+    {
+      label: 'non-numeric',
+      change: "UPDATE sqlite_sequence SET seq = 'reset' WHERE name = 'characters'",
+    },
+    {
+      label: 'unsafe',
+      change:
+        "UPDATE sqlite_sequence SET seq = 9007199254740992 WHERE name = 'characters'",
+    },
+  ])('accepts a deleted archive member when the characters sequence is $label', ({ change }) => {
+    const db = freshDatabase();
+    seedTwoCharacters(db);
+    seedSpeciesArchiveManifest(db, {
+      characterId: 1,
+      referencedCreation: 'manifested',
+    });
+    db.exec('DELETE FROM characters WHERE id = 1');
+    db.exec(change);
+
     expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).not.toThrow();
   });
 

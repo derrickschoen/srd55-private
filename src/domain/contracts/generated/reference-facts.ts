@@ -76,6 +76,12 @@ export const FOREIGN_KEY_FACTS = [
     targetColumns: ['content_kind', 'content_key'],
   },
   {
+    table: 'catalog_content_archive_members',
+    columns: ['content_kind', 'content_key'],
+    target: 'catalog_content_identities',
+    targetColumns: ['content_kind', 'content_key'],
+  },
+  {
     table: 'catalog_content_drafts',
     columns: ['content_kind', 'base_content_key'],
     target: 'catalog_content_identities',

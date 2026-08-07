@@ -47,7 +47,7 @@ import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { applicationSeed } from '../../../src/db/bootstrap';
 import { DatabaseContext } from '../../../src/db/database';
 import { damageType, skills } from '../../../src/domain/enums';
-import type { ContentKey } from '../../../src/domain/ids';
+import type { CharacterId, ContentKey } from '../../../src/domain/ids';
 import { SavePointQueries } from '../../../src/queries/save-points';
 import {
   fillSkillGrant,
@@ -389,7 +389,7 @@ describe('HA-3 species publisher', () => {
       grants_lineage_spells: false,
     });
     applyGuidedOrigin(source, {
-      character_id: character.id,
+      character_id: character.id as CharacterId,
       kind: 'species',
       content_key: expectedKey,
     });
@@ -1245,7 +1245,7 @@ describe('HA-3 species publisher', () => {
       new CharacterCommandIntegrity('ha3-usage'),
     );
     applyGuidedOrigin(db, {
-      character_id: character.id,
+      character_id: character.id as CharacterId,
       kind: 'species',
       content_key: original.result.content_key,
     });
@@ -1270,6 +1270,38 @@ describe('HA-3 species publisher', () => {
     });
     expect(authoring.usages(original.result.content_key).usages).toHaveLength(1);
     expect(authoring.usages(published.result.content_key).usages).toHaveLength(0);
+    const replacement = authoring.previewReplacement({
+      old_content_key: original.result.content_key,
+      new_content_key: published.result.content_key,
+      character_id: character.id as CharacterId,
+    });
+    db.exec(
+      'UPDATE catalog_content_identities SET archived_at = ? WHERE content_key = ?',
+      ['2042-08-12T13:14:15.000Z', published.result.content_key],
+    );
+    expect(authoringError(() => authoring.commitReplacement({
+      token: replacement.token,
+      decisions: replacement.review.map((candidate) => ({
+        candidate_content_key: candidate.candidate_content_key,
+        decision: 'match' as const,
+      })),
+      choices: [],
+    })).data).toEqual({
+      reason: 'replacement_refused',
+      refusal: 'archived_reference',
+    });
+    expect(authoringError(() => authoring.previewReplacement({
+      old_content_key: original.result.content_key,
+      new_content_key: published.result.content_key,
+      character_id: character.id as CharacterId,
+    })).data).toEqual({
+      reason: 'replacement_refused',
+      refusal: 'archived_reference',
+    });
+    db.exec(
+      'UPDATE catalog_content_identities SET archived_at = NULL WHERE content_key = ?',
+      [published.result.content_key],
+    );
     expect(db.oneRaw(
       'SELECT name, base_speed_feet FROM character_species WHERE character_id = ?',
       [character.id],
@@ -1433,6 +1465,32 @@ describe('HA-3 species publisher', () => {
     expect(db.scalar<number>('SELECT count(*) FROM species_template_traits')).toBe(0);
     expect(db.scalar<number>('SELECT count(*) FROM species_template_trait_effects')).toBe(0);
     expect(authoring.readDraft(draft.draft_uuid).revision).toBe(1 as DraftRevision);
+  });
+
+  it('refuses apply-to-all for an archived creation with zero usages', async () => {
+    const db = await database();
+    const authoring = service(db);
+    const archived = publish(
+      authoring,
+      savedSpecies(authoring, 'Archived Empty Usage Species'),
+    );
+    const target = publish(
+      authoring,
+      savedSpecies(authoring, 'Active Empty Usage Species'),
+    );
+    expect(authoring.usages(archived.result.content_key).usages).toEqual([]);
+    db.exec(
+      'UPDATE catalog_content_identities SET archived_at = ? WHERE content_key = ?',
+      ['2042-08-12T13:14:15.000Z', archived.result.content_key],
+    );
+
+    expect(authoringError(() => authoring.previewReplacementSet({
+      old_content_key: archived.result.content_key,
+      new_content_key: target.result.content_key,
+    })).data).toEqual({
+      reason: 'replacement_refused',
+      refusal: 'archived_reference',
+    });
   });
 
   it('returns a typed asserted-name collision and leaves the existing aggregate immutable', async () => {

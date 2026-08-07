@@ -37,7 +37,7 @@ describe('late schema-prefix catalog data migrations', () => {
     );
   });
 
-  it('runs prefixes 0011 through 0021 on normal boot exactly once', async () => {
+  it('runs prefixes 0011 through 0040 on normal boot exactly once', async () => {
     const storage = new MemoryDatabaseStorage(sqlite3);
     const lifecycle = new DatabaseLifecycle(
       sqlite3,

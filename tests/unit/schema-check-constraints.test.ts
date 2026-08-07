@@ -1084,6 +1084,29 @@ const catalogContentIdentity =
     });
   };
 
+const catalogContentArchiveMember =
+  (values: Values): Write =>
+  (db) => {
+    const contentKind = values.content_kind ?? 'species';
+    const contentKey = `2024:test.owner:${uid('archive-member')}`;
+    insert(db, 'catalog_content_identities', {
+      content_key: contentKey,
+      content_kind: contentKind,
+      key_kind: 'asserted',
+      catalog_layer: 'external',
+      normalized_name: uid('archivemember'),
+    });
+    insert(db, 'catalog_content_archive_members', {
+      content_kind: 'species',
+      content_key: contentKey,
+      character_id: 1,
+      character_revision: 0,
+      character_name: 'Promised Hero',
+      archived_at: '2042-08-12T13:14:15.000Z',
+      ...values,
+    });
+  };
+
 const catalogContentSupersession =
   (values: Values): Write =>
   (db) => {
@@ -1373,6 +1396,47 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
       ['the active NULL', catalogContentIdentity({ archived_at: null })],
       ['an ISO timestamp', catalogContentIdentity({ archived_at: '2042-03-04T05:06:07.000Z' })],
       ['a SQLite timestamp', catalogContentIdentity({ archived_at: '2042-03-04 05:06:07' })],
+    ],
+  },
+  {
+    constraint: 'catalog_content_archive_members_kind_check',
+    rejects: [[
+      'a non-authorable class kind',
+      catalogContentArchiveMember({ content_kind: 'class' }),
+    ]],
+    accepts: [
+      ['a species member', catalogContentArchiveMember({ content_kind: 'species' })],
+      ['a subclass member', catalogContentArchiveMember({ content_kind: 'subclass' })],
+      ['a background member', catalogContentArchiveMember({ content_kind: 'background' })],
+    ],
+  },
+  {
+    constraint: 'catalog_content_archive_members_character_id_check',
+    rejects: [
+      ['character id zero', catalogContentArchiveMember({ character_id: 0 })],
+      ['a text character id', catalogContentArchiveMember({ character_id: 'one' })],
+    ],
+    accepts: [['the first character id', catalogContentArchiveMember({ character_id: 1 })]],
+  },
+  {
+    constraint: 'catalog_content_archive_members_character_revision_check',
+    rejects: [
+      ['a negative revision', catalogContentArchiveMember({ character_revision: -1 })],
+      ['a text revision', catalogContentArchiveMember({ character_revision: 'zero' })],
+    ],
+    accepts: [['the initial revision', catalogContentArchiveMember({ character_revision: 0 })]],
+  },
+  {
+    constraint: 'catalog_content_archive_members_archived_at_check',
+    rejects: [
+      ['an integer timestamp', catalogContentArchiveMember({ archived_at: 20420812 })],
+      ['a binary timestamp', catalogContentArchiveMember({
+        archived_at: new Uint8Array([65]) as unknown as string,
+      })],
+    ],
+    accepts: [
+      ['an ISO timestamp', catalogContentArchiveMember({ archived_at: '2042-08-12T13:14:15.000Z' })],
+      ['a SQLite timestamp', catalogContentArchiveMember({ archived_at: '2042-08-12 13:14:15' })],
     ],
   },
   {

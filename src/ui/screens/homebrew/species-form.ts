@@ -44,6 +44,7 @@ import {
 import { clear, element, type Cleanup } from '../../dom';
 import { freeTextSpan } from '../../free-text';
 import type { ScreenContext } from '../../screen';
+import { homebrewReplacementPath } from './homebrew-routes';
 
 type StoredSpeciesDraft = StoredHomebrewDraft & {
   readonly content_kind: 'species';
@@ -313,6 +314,26 @@ export function renderSpeciesForm(options: SpeciesFormOptions): Cleanup {
       event.preventDefault();
       options.context.router.navigate('/homebrew');
     });
+    const actions: HTMLElement[] = [library];
+    if (
+      options.draft.base_content_key !== null &&
+      options.draft.base_content_key !== result.content_key &&
+      result.previous_key_usage_count > 0
+    ) {
+      const fixPath = homebrewReplacementPath(
+        options.draft.base_content_key,
+        result.content_key,
+      );
+      const fix = element('a', {
+        className: 'button-secondary', text: 'Review character fixes',
+        attributes: { href: fixPath },
+      });
+      fix.addEventListener('click', (event) => {
+        event.preventDefault();
+        options.context.router.navigate(fixPath);
+      });
+      actions.push(fix);
+    }
     options.mount.append(element('section', {
       className: 'species-publish-result',
       attributes: { role: 'status' },
@@ -328,7 +349,7 @@ export function renderSpeciesForm(options: SpeciesFormOptions): Cleanup {
           ? 'No characters use a previous version.'
           : `${String(result.previous_key_usage_count)} character(s) still use the previous version.`,
       }),
-      library,
+      element('div', { className: 'homebrew-card-actions' }, actions),
     ]));
     setTimeout(() => {
       if (heading.isConnected) heading.focus();

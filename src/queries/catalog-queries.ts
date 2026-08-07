@@ -258,6 +258,7 @@ export class CatalogQueries {
          LEFT JOIN catalog_content_identities AS identity
            ON identity.content_kind = 'class'
           AND identity.content_key = definition.content_key
+         WHERE identity.archived_at IS NULL
          -- D133: class consumers remain bundled-only in v1.
          ORDER BY definition.name, definition.rules_edition, definition.id`,
         undefined,
@@ -276,6 +277,7 @@ export class CatalogQueries {
          LEFT JOIN catalog_content_identities AS identity
            ON identity.content_kind = 'subclass'
           AND identity.content_key = definition.content_key
+         WHERE identity.archived_at IS NULL
          ORDER BY definition.class_definition_id, definition.name,
                   definition.rules_edition, definition.id`,
         undefined,
@@ -333,6 +335,7 @@ export class CatalogQueries {
          LEFT JOIN catalog_content_identities AS identity
            ON identity.content_kind = 'spell'
           AND identity.content_key = version.content_key
+         WHERE identity.archived_at IS NULL
          ORDER BY version.level, version.display_name,
                   version.rules_edition, version.id`,
         undefined,
@@ -363,6 +366,7 @@ export class CatalogQueries {
        LEFT JOIN catalog_content_identities AS identity
          ON identity.content_kind = '${kind}'
         AND identity.content_key = definition.content_key
+       WHERE identity.archived_at IS NULL
        ORDER BY definition.name, definition.rules_edition, definition.id`,
       undefined,
       (row) => ({

@@ -43,7 +43,10 @@ import {
   catalog_content_match_decisions,
   catalog_content_supersessions,
 } from './catalog-content';
-import { catalog_content_drafts } from './catalog-authoring';
+import {
+  catalog_content_archive_members,
+  catalog_content_drafts,
+} from './catalog-authoring';
 import {
   change_log,
   character_class_levels,
@@ -1213,6 +1216,7 @@ export const catalogContentIdentitiesRelations = relations(
       relationName: 'successor_content',
     }),
     drafts_based_on_content: many(catalog_content_drafts),
+    archive_members: many(catalog_content_archive_members),
     classes: many(class_definitions),
     subclasses: many(subclass_definitions),
     feats: many(feat_definitions),
@@ -1234,6 +1238,22 @@ export const catalogContentDraftsRelations = relations(
       fields: [
         catalog_content_drafts.content_kind,
         catalog_content_drafts.base_content_key,
+      ],
+      references: [
+        catalog_content_identities.content_kind,
+        catalog_content_identities.content_key,
+      ],
+    }),
+  }),
+);
+
+export const catalogContentArchiveMembersRelations = relations(
+  catalog_content_archive_members,
+  ({ one }) => ({
+    content_identity: one(catalog_content_identities, {
+      fields: [
+        catalog_content_archive_members.content_kind,
+        catalog_content_archive_members.content_key,
       ],
       references: [
         catalog_content_identities.content_kind,

@@ -167,6 +167,7 @@ const allAutoIncrementTables = [
  */
 const naturalKeyTables = [
   'catalog_content_aliases',
+  'catalog_content_archive_members',
   'catalog_content_drafts',
   'catalog_content_fingerprints',
   'catalog_content_identities',

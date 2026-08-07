@@ -40,6 +40,7 @@ import catalogContentArchive from '../../drizzle/0036_catalog_content_archive.sq
 import backgroundDefaultOriginFeatKey from '../../drizzle/0037_background_default_origin_feat_key.sql?raw';
 import catalogContentSupersessions from '../../drizzle/0038_catalog_content_supersessions.sql?raw';
 import catalogContentSupersessionGuards from '../../drizzle/0039_catalog_content_supersession_guards.sql?raw';
+import catalogContentArchiveMembers from '../../drizzle/0040_catalog_content_archive_members.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -455,6 +456,17 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       'd18e373f4792a7a12259cf9744d8bc9b29502d399626d111a16c6f72a233704d',
     resultSchemaChecksum:
       '406099a77335a08cf23f76d7425d7c6cf8c1a19d7e93c8532cb52497000640ca',
+  }),
+  // D214 / HA-11: set membership is captured at archive time. The absent
+  // character FK is intentional so public character deletion leaves behind
+  // the evidence required for an honest all-or-nothing restore refusal.
+  Object.freeze({
+    id: '0040_catalog_content_archive_members',
+    sql: catalogContentArchiveMembers,
+    checksum:
+      'ad932395613511dba695db38a213d2dcf7269cb415353c40fae4c694c0007258',
+    resultSchemaChecksum:
+      '08178919ea2115feb15574dcf748226b88a44f99d409e95dcccb623904a05727',
   }),
 ]);
 

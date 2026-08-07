@@ -3,6 +3,7 @@ import type { AuthoringClient } from '../../../src/authoring/client';
 import type {
   AuthoringLibrary,
   DraftRevision,
+  ReplacementSetPlan,
   StoredHomebrewDraft,
 } from '../../../src/authoring/contracts';
 import type { HomebrewDraftUuid } from '../../../src/authoring/ids';
@@ -13,7 +14,10 @@ import { parseRoute, type Router } from '../../../src/ui/router';
 import type { ScreenContext } from '../../../src/ui/screen';
 import {
   HOMEBREW_LIBRARY_TABS,
+  HOMEBREW_ARCHIVE_ROUTE,
+  homebrewDeletePath,
   homebrewDraftPath,
+  homebrewReplacementPath,
   homebrewTabPath,
   renderHomebrewLibrary,
   selectedHomebrewTab,
@@ -160,6 +164,14 @@ function authoringClient(
     usages: () => unused(),
     previewReplacement: () => unused(),
     commitReplacement: () => unused(),
+    previewReplacementSet: () => unused(),
+    commitReplacementSet: () => unused(),
+    previewArchiveSet: () => unused(),
+    commitArchiveSet: () => unused(),
+    listArchivedSets: () => unused(),
+    previewRestoreSet: () => unused(),
+    commitRestoreSet: () => unused(),
+    purgeArchivedSet: () => unused(),
     ...overrides,
   };
 }
@@ -205,6 +217,10 @@ describe('HA-6 homebrew library routing and tabs', () => {
     expect(homebrewDraftPath('draft / rtl' as HomebrewDraftUuid)).toBe(
       '/homebrew/drafts/draft%20%2F%20rtl',
     );
+    expect(homebrewReplacementPath('old/key', 'new key')).toBe(
+      '/homebrew/replacements/old%2Fkey/new%20key',
+    );
+    expect(homebrewDeletePath('old/key')).toBe('/homebrew/delete/old%2Fkey');
     expect(homebrewScreen.matches(parseRoute(new URL('https://example.test/homebrew'))))
       .toBe(true);
     expect(homebrewScreen.matches(parseRoute(
@@ -213,6 +229,15 @@ describe('HA-6 homebrew library routing and tabs', () => {
     expect(homebrewScreen.matches(parseRoute(
       new URL('https://example.test/homebrew/classes/new'),
     ))).toBe(false);
+    expect(homebrewScreen.matches(parseRoute(
+      new URL('https://example.test/homebrew/archive'),
+    ))).toBe(true);
+    expect(homebrewScreen.matches(parseRoute(
+      new URL('https://example.test/homebrew/delete/expanded%3Acontent.species%3Aold'),
+    ))).toBe(true);
+    expect(homebrewScreen.matches(parseRoute(
+      new URL('https://example.test/homebrew/replacements/old/new'),
+    ))).toBe(true);
   });
 
   it('renders labelled keyboard tabs, truthful badges, hostile names as inert text, and new/copy draft navigation', async () => {
@@ -258,10 +283,10 @@ describe('HA-6 homebrew library routing and tabs', () => {
 
       const buttons = root.querySelectorAll('button');
       const directNew = buttons.find((button) => button.textContent === 'New species');
-      const copy = buttons.find((button) => button.textContent === 'Make a homebrew copy');
+      const copy = buttons.find((button) => button.textContent === 'Edit as new version');
       expect(directNew).toBeDefined();
       expect(copy?.getAttribute('aria-label')).toBe(
-        `Make a homebrew copy of ${hostileName}`,
+        `Edit ${hostileName} as a new version`,
       );
       directNew?.click();
       copy?.click();
@@ -670,6 +695,220 @@ describe('HA-6 homebrew library routing and tabs', () => {
         'SRD · bundled layer',
       );
       cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('HA11-FIX-REVIEW shows inert before/after values and commits every listed CI-7 plan explicitly', async () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const oldKey = 'expanded:content.species:old' as ContentKey;
+      const newKey = 'expanded:content.species:new' as ContentKey;
+      const hostileCharacter = '<img data-ha11-character src=x> Fix Hero';
+      const plan: ReplacementSetPlan = {
+        old_content_key: oldKey,
+        new_content_key: newKey,
+        replacements: [{
+          kind: 'species',
+          token: 'replacement-token' as never,
+          facts: {
+            content_kind: 'species', old_content_key: oldKey,
+            new_content_key: newKey, character_id: 17 as never,
+            character_revision: 3 as never,
+          },
+          character_name: hostileCharacter,
+          changes: [{
+            path: ['content_key'], label: 'species content reference',
+            before: '<b data-ha11-before>Old</b>',
+            after: '<i data-ha11-after>New</i>',
+          }],
+          required_choices: [], review: [],
+          replaces: ['root_fields', 'traits', 'effects', 'grants', 'filled_choices'],
+        }],
+      };
+      const commits: unknown[] = [];
+      const screenContext = context(
+        `https://example.test${homebrewReplacementPath(oldKey, newKey)}`,
+        [],
+      );
+      const cleanup = await renderHomebrewLibrary(screenContext, {
+        client: authoringClient({
+          previewReplacementSet: async () => plan,
+          commitReplacementSet: async (params) => {
+            commits.push(params);
+            return {
+              old_content_key: oldKey, new_content_key: newKey,
+              replacements: [{
+                content_kind: 'species', character_id: 17 as never,
+                character_revision: 4 as never, old_content_key: oldKey,
+                new_content_key: newKey,
+                notices: [{
+                  kind: 'retargeted_selection_invalid',
+                  table: 'spell_selection_slots', source_path: [],
+                  rule_key: 'changed-spell-choice', ordinal: 1,
+                  selected_value: 42, reason: 'selection_ineligible',
+                  detail: 'Selected spell is outside the replacement slot range.',
+                }],
+              }],
+            };
+          },
+        }),
+      });
+      const root = interactiveElement(screenContext.root);
+      expect(elementText(root as unknown as Node)).toContain(hostileCharacter);
+      expect(elementText(root as unknown as Node)).toContain(
+        'Before: <b data-ha11-before>Old</b>',
+      );
+      expect(elementText(root as unknown as Node)).toContain(
+        'After: <i data-ha11-after>New</i>',
+      );
+      expect(root.querySelector('[data-ha11-character]')).toBeNull();
+      expect(root.querySelector('[data-ha11-before]')).toBeNull();
+      expect(root.querySelector('[data-ha11-after]')).toBeNull();
+      root.querySelectorAll('button').find(
+        (button) => button.textContent === 'Apply to all listed characters',
+      )?.click();
+      await settle();
+      expect(commits).toEqual([{
+        old_content_key: oldKey,
+        new_content_key: newKey,
+        replacements: [{ token: 'replacement-token', decisions: [], choices: [] }],
+      }]);
+      expect(elementText(root as unknown as Node)).toContain('Character fixes applied');
+      expect(elementText(root as unknown as Node)).toContain(hostileCharacter);
+      expect(elementText(root as unknown as Node)).toContain(
+        'Spell selection “42” for “changed-spell-choice” became invalid: ' +
+        'Selected spell is outside the replacement slot range.',
+      );
+      cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('HA11-ARCHIVE-UI exposes only whole-set delete and restore actions with listed inert names', async () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const contentKey = 'expanded:content.species:archive' as ContentKey;
+      const hostileCreation = '<img data-ha11-creation src=x> Archive Species';
+      const hostileCharacter = '<img data-ha11-archive-character src=x> Archive Hero';
+      const characters = [{
+        character_id: 23 as never,
+        character_revision: 5 as never,
+        character_name: hostileCharacter,
+      }];
+      const navigated: string[] = [];
+      const archiveCommits: unknown[] = [];
+      const deleteContext = context(
+        `https://example.test${homebrewDeletePath(contentKey)}`,
+        navigated,
+      );
+      const deleteCleanup = await renderHomebrewLibrary(deleteContext, {
+        client: authoringClient({
+          previewArchiveSet: async () => ({
+            token: 'archive-token' as never, operation: 'archive', content_key: contentKey,
+            content_kind: 'species', content_name: hostileCreation,
+            content_catalog_layer: 'external',
+            rules_edition: 'expanded', archived_at: null, characters,
+          }),
+          commitArchiveSet: async (params) => {
+            archiveCommits.push(params);
+            return {
+              content_key: contentKey, content_kind: 'species',
+              archived_at: '2042-08-11T12:13:14.000Z', character_ids: [23 as never],
+            };
+          },
+        }),
+      });
+      const deleteRoot = interactiveElement(deleteContext.root);
+      expect(elementText(deleteRoot as unknown as Node)).toContain(hostileCreation);
+      expect(elementText(deleteRoot as unknown as Node)).toContain(hostileCharacter);
+      expect(elementText(deleteRoot as unknown as Node)).toContain(
+        'Homebrew · external layer',
+      );
+      expect(deleteRoot.querySelector('[data-ha11-creation]')).toBeNull();
+      expect(deleteRoot.querySelector('[data-ha11-archive-character]')).toBeNull();
+      expect(deleteRoot.querySelectorAll('button').map((button) => button.textContent))
+        .toContain('Archive creation and all listed characters');
+      deleteRoot.querySelectorAll('button').find(
+        (button) => button.textContent === 'Archive creation and all listed characters',
+      )?.click();
+      await settle();
+      expect(archiveCommits).toEqual([{ token: 'archive-token' }]);
+      expect(navigated).toEqual([HOMEBREW_ARCHIVE_ROUTE]);
+      deleteCleanup();
+
+      const restoreCalls: unknown[] = [];
+      const purgeCalls: unknown[] = [];
+      const archiveContext = context(
+        `https://example.test${HOMEBREW_ARCHIVE_ROUTE}`,
+        [],
+      );
+      const archiveCleanup = await renderHomebrewLibrary(archiveContext, {
+        client: authoringClient({
+          listArchivedSets: async () => [{
+            content_key: contentKey, content_kind: 'species',
+            content_name: hostileCreation, content_catalog_layer: 'external',
+            rules_edition: 'expanded',
+            archived_at: '2042-08-11T12:13:14.000Z', characters,
+          }],
+          previewRestoreSet: async (params) => {
+            restoreCalls.push(['preview', params]);
+            return {
+              token: 'restore-token' as never, operation: 'restore', content_key: contentKey,
+              content_kind: 'species', content_name: hostileCreation,
+              content_catalog_layer: 'external',
+              rules_edition: 'expanded', archived_at: '2042-08-11T12:13:14.000Z',
+              characters,
+            };
+          },
+          commitRestoreSet: async (params) => {
+            restoreCalls.push(['commit', params]);
+            return {
+              content_key: contentKey, content_kind: 'species',
+              archived_at: null, character_ids: [23 as never],
+            };
+          },
+          purgeArchivedSet: async (params) => {
+            purgeCalls.push(params);
+            return {
+              requested_content_key: contentKey,
+              content_kind: 'species',
+              purged_content_keys: [contentKey],
+              purged_character_ids: [23 as never],
+            };
+          },
+        }),
+      });
+      const archiveRoot = interactiveElement(archiveContext.root);
+      expect(elementText(archiveRoot as unknown as Node)).toContain(
+        'Homebrew · external layer',
+      );
+      const labels = archiveRoot.querySelectorAll('button').map((button) => button.textContent);
+      expect(labels).toContain('Restore creation and all listed characters');
+      expect(labels).toContain('Permanently purge entire lineage');
+      expect(elementText(archiveRoot as unknown as Node)).toContain(
+        'every predecessor and successor version',
+      );
+      expect(labels.some((label) => label?.includes('Restore character'))).toBe(false);
+      archiveRoot.querySelectorAll('button').find(
+        (button) => button.textContent === 'Restore creation and all listed characters',
+      )?.click();
+      await settle();
+      expect(restoreCalls).toEqual([
+        ['preview', { content_key: contentKey }],
+        ['commit', { token: 'restore-token' }],
+      ]);
+      archiveRoot.querySelectorAll('button').find(
+        (button) => button.textContent === 'Permanently purge entire lineage',
+      )?.click();
+      await settle();
+      expect(purgeCalls).toEqual([{
+        content_kind: 'species',
+        content_key: contentKey,
+      }]);
+      archiveCleanup();
     } finally {
       restoreDocument();
     }

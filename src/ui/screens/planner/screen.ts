@@ -368,6 +368,7 @@ export class PlannerSession {
   ): void {
     const messages: Readonly<Record<typeof refusal.reason, string>> = {
       character_not_found: 'The character no longer exists.',
+      character_archived: 'The character is archived and cannot be changed.',
       operation_not_found: 'That history operation no longer exists.',
       operation_character_mismatch: 'That history operation belongs to another character.',
       revision_mismatch: 'The character changed before the history action could run.',
@@ -383,6 +384,7 @@ export class PlannerSession {
   ): void {
     const messages: Readonly<Record<typeof refusal.reason, string>> = {
       character_not_found: 'The character no longer exists.',
+      character_archived: 'The character is archived and cannot be changed.',
       save_point_not_found: 'That save point no longer exists.',
       save_point_character_mismatch: 'That save point belongs to another character.',
       revision_mismatch: 'The character changed before the save point could be restored.',

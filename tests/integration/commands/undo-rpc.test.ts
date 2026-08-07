@@ -396,6 +396,55 @@ describe('internal operation undo RPC', () => {
     });
   });
 
+  it('refuses undo and save-point restore after another tab archives the character', async () => {
+    const before = new CharacterState(harness.context.db).capture(characterId);
+    const written = await writeFlavor('archived before undo');
+    expect(written).toMatchObject({ ok: true, result: { revision: 1 } });
+    const savePointId = harness.context.db.exec(
+      `INSERT INTO character_save_points (
+         character_id, label, snapshot, schema_version
+       ) VALUES (?, 'Before archive', ?, ?)`,
+      [characterId, JSON.stringify(before), before.schema_version],
+    ).lastInsertId;
+    harness.context.db.exec(
+      'UPDATE characters SET archived_at = ? WHERE id = ?',
+      ['2042-08-12T13:14:15.000Z', characterId],
+    );
+
+    expect(await undo({
+      character_id: characterId,
+      operation_uuid: flavorOperation,
+      expected_revision: 1,
+    })).toMatchObject({
+      ok: true,
+      result: {
+        status: 'refused',
+        reason: 'character_archived',
+        current_revision: 1,
+      },
+    });
+    expect(await restoreSavePoint({
+      character_id: characterId,
+      save_point_id: savePointId,
+      expected_revision: 1,
+    })).toMatchObject({
+      ok: true,
+      result: {
+        status: 'refused',
+        reason: 'character_archived',
+        current_revision: 1,
+      },
+    });
+    expect(harness.context.db.oneRaw(
+      'SELECT notes, revision, archived_at FROM characters WHERE id = ?',
+      [characterId],
+    )).toEqual({
+      notes: 'archived before undo',
+      revision: 1,
+      archived_at: '2042-08-12T13:14:15.000Z',
+    });
+  });
+
   it('refuses an older stack top after compensation and only follows the operation that produced the current revision', async () => {
     await writeFlavor();
     await harness.call('commands.execute', {

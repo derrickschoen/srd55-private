@@ -4,10 +4,17 @@ import {
   CharacterCommandPayloadError,
 } from '../commands/payload-validator';
 import { RevisionConflict } from '../commands/revision-conflict';
+import { CharacterArchivedRefusal } from '../commands/character-command-preflight';
 import { RpcError } from '../rpc/protocol';
 
 /** One structured transport mapping shared by Confirm and rollback Preview. */
 export function characterCommandRpcError(error: unknown): RpcError | null {
+  if (error instanceof CharacterArchivedRefusal) {
+    return new RpcError('handler_error', error.message, {
+      reason: error.reason,
+      current_revision: error.currentRevision,
+    });
+  }
   if (error instanceof RevisionConflict) {
     return new RpcError('handler_error', error.message, {
       current_revision: error.currentRevision,

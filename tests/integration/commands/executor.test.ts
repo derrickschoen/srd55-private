@@ -6,6 +6,7 @@ import type {
   CharacterAuditWriter,
 } from '../../../src/commands/audit-log';
 import { CharacterCommandExecutor } from '../../../src/commands/character-command-executor';
+import type { CharacterArchivedRefusal } from '../../../src/commands/character-command-preflight';
 import { CharacterCommandFactory } from '../../../src/commands/character-command-factory';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { RemoveSourceCommand } from '../../../src/commands/remove-source';
@@ -171,6 +172,40 @@ describe('character command factory and executor', () => {
       snapshot: { schema_version: 'a7-v1' },
       integrity: '0'.repeat(64),
     })).rejects.toThrow('Unknown character command type.');
+  });
+
+  it('refuses a command opened at revision N when the character is archived before commit', async () => {
+    const characterId = character('Archive Race Character');
+    const request = {
+      character_id: characterId,
+      operation_uuid: firstOperation,
+      expected_revision: 0,
+      command: {
+        type: 'update_ability' as const,
+        ability: 'wisdom' as const,
+        score: 16,
+      },
+    };
+    db.exec(
+      'UPDATE characters SET archived_at = ? WHERE id = ?',
+      ['2042-08-12T13:14:15.000Z', characterId],
+    );
+
+    await expect(
+      new CharacterCommandExecutor(db, integrity).execute(request),
+    ).rejects.toMatchObject({
+      reason: 'character_archived',
+      currentRevision: 0,
+    } satisfies Partial<CharacterArchivedRefusal>);
+    expect(db.oneRaw(
+      'SELECT wisdom, revision, archived_at FROM characters WHERE id = ?',
+      [characterId],
+    )).toEqual({
+      wisdom: 13,
+      revision: 0,
+      archived_at: '2042-08-12T13:14:15.000Z',
+    });
+    expect(db.scalar<number>('SELECT count(*) FROM character_operations')).toBe(0);
   });
 
   it('update_character_flavor stores a current inverse and refuses the legacy stored-row fixture without writes', async () => {

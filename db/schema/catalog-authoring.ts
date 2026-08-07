@@ -4,6 +4,7 @@ import {
   foreignKey,
   index,
   integer,
+  primaryKey,
   sqliteTable,
 } from 'drizzle-orm/sqlite-core';
 import {
@@ -12,7 +13,12 @@ import {
 } from '../../src/authoring/contracts';
 import { AUTHORING_DOCUMENT_LIMITS } from '../../src/authoring/limits';
 import type { HomebrewDraftUuid } from '../../src/authoring/ids';
-import type { ContentKey, Timestamp } from '../../src/domain/ids';
+import type {
+  CharacterId,
+  CharacterRevision,
+  ContentKey,
+  Timestamp,
+} from '../../src/domain/ids';
 import { catalog_content_identities } from './catalog-content';
 import { datetime, oneOf, sqlText, varchar } from './columns';
 
@@ -75,5 +81,58 @@ export const catalog_content_drafts = sqliteTable(
       table.content_kind,
       table.base_content_key,
     ),
+  ],
+);
+
+/**
+ * The durable membership promise for one archived homebrew set (D214).
+ *
+ * `character_id` deliberately has no foreign key: deleting an archived
+ * character must leave this evidence behind so restore can name the missing
+ * member and refuse instead of silently shrinking the set. The catalog
+ * identity owns the manifest and a future whole-lineage purge may remove it
+ * together with that identity.
+ */
+export const catalog_content_archive_members = sqliteTable(
+  'catalog_content_archive_members',
+  {
+    content_kind: varchar<AuthoredContentKind>()('content_kind').notNull(),
+    content_key: varchar<ContentKey>()('content_key').notNull(),
+    character_id: integer('character_id').notNull().$type<CharacterId>(),
+    character_revision: integer('character_revision')
+      .notNull()
+      .$type<CharacterRevision>(),
+    character_name: varchar()('character_name').notNull(),
+    archived_at: datetime<Timestamp>()('archived_at').notNull(),
+  },
+  (table) => [
+    check(
+      'catalog_content_archive_members_kind_check',
+      oneOf('content_kind', authoredContentKinds),
+    ),
+    check(
+      'catalog_content_archive_members_character_id_check',
+      sql`typeof(${table.character_id}) = 'integer' AND ${table.character_id} >= 1`,
+    ),
+    check(
+      'catalog_content_archive_members_character_revision_check',
+      sql`typeof(${table.character_revision}) = 'integer' AND ${table.character_revision} >= 0`,
+    ),
+    check(
+      'catalog_content_archive_members_archived_at_check',
+      sql`typeof(${table.archived_at}) = 'text'`,
+    ),
+    foreignKey({
+      name: 'catalog_content_archive_members_content_foreign',
+      columns: [table.content_kind, table.content_key],
+      foreignColumns: [
+        catalog_content_identities.content_kind,
+        catalog_content_identities.content_key,
+      ],
+    }).onDelete('cascade'),
+    primaryKey({
+      name: 'catalog_content_archive_members_primary',
+      columns: [table.content_kind, table.content_key, table.character_id],
+    }),
   ],
 );

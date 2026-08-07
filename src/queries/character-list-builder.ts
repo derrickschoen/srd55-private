@@ -5,6 +5,7 @@ import {
 import type { DatabaseContext } from '../db/database';
 import type { CharacterSummary } from '../domain/read-models';
 import { BuildReportBuilder } from '../reports/build-report-builder';
+import { ACTIVE_CHARACTER_LIST_QUERY } from './character-lifecycle-queries';
 
 export class CharacterListBuilder {
   readonly #reports: BuildReportBuilder;
@@ -19,7 +20,7 @@ export class CharacterListBuilder {
   build(): CharacterSummary[] {
     return this.db
       .all(
-        'SELECT id, name FROM characters ORDER BY name, id',
+        ACTIVE_CHARACTER_LIST_QUERY,
         undefined,
         (row) => ({
           id: sqlInteger(row, 'id'),

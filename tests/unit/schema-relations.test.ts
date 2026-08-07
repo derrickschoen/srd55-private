@@ -24,8 +24,8 @@ import schemaSql from '../../src/db/schema.sql?raw';
  *   reverse — every FK constraint has a matching declared `one()` edge.
  *
  * Comparison is by CONSTRAINT SET, not row count. `PRAGMA foreign_key_list`
- * returns one row per column, so the two composite foreign keys contribute two
- * rows each: 40 constraints, 42 rows. Counting rows would let a composite key
+ * returns one row per column, so the 21 composite foreign keys contribute two
+ * rows each: 107 constraints, 128 rows. Counting rows would let a composite key
  * degrade into two single-column keys unnoticed — which would silently drop
  * exactly the cross-character and wrong-class protections those keys exist for.
  */
@@ -133,7 +133,7 @@ afterAll(() => {
 });
 
 describe('declared relations match the foreign keys', () => {
-  it('budgets 106 constraints across 126 PRAGMA rows', () => {
+  it('budgets 107 constraints across 128 PRAGMA rows', () => {
     const tables = db
       .selectValues(
         `SELECT name FROM sqlite_schema
@@ -240,10 +240,10 @@ describe('declared relations match the foreign keys', () => {
     // `background_templates.default_origin_feat_content_key` edge into
     // `feat_definitions`. It is one single-column constraint, so it adds
     // exactly one constraint and one PRAGMA row.
-    // CI-7 adds two composite lineage edges from the superseded and successor
-    // keys to the same-kind identity: two constraints across four PRAGMA rows.
-    expect(constraintEdges(db)).toHaveLength(106);
-    expect(rowCount).toBe(126);
+    // CI-7 adds two composite lineage edges; D214 adds the archive manifest's
+    // composite owner edge. Those three constraints occupy six PRAGMA rows.
+    expect(constraintEdges(db)).toHaveLength(107);
+    expect(rowCount).toBe(128);
   });
 
   it('declares a relation for every foreign key, and a foreign key for every relation', () => {
@@ -252,7 +252,7 @@ describe('declared relations match the foreign keys', () => {
     expect(declaredEdges()).toEqual(constraintEdges(db));
   });
 
-  it('keeps all eighteen composite foreign keys composite', () => {
+  it('keeps all 21 composite foreign keys composite', () => {
     const edges = declaredEdges();
     expect(edges).toContain(
       'character_class_levels: subclass_definition_id,class_definition_id -> subclass_definitions.id,class_definition_id',
@@ -310,6 +310,15 @@ describe('declared relations match the foreign keys', () => {
     );
     expect(edges).toContain(
       'catalog_content_supersessions: content_kind,successor_content_key -> catalog_content_identities.content_kind,content_key',
+    );
+    expect(edges).toContain(
+      'catalog_content_archive_members: content_kind,content_key -> catalog_content_identities.content_kind,content_key',
+    );
+    expect(edges).toContain(
+      'character_level_feat_choices: feat_source_instance_id,character_id -> character_source_instances.id,character_id',
+    );
+    expect(edges).toContain(
+      'character_level_feat_choices: character_class_level_id,character_id -> character_class_levels.id,character_id',
     );
   });
 

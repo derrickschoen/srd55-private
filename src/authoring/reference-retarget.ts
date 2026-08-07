@@ -100,13 +100,14 @@ function characterReference(
   },
 ): CharacterReference {
   const identity = db.one(
-    `SELECT content_kind, catalog_layer
+    `SELECT content_kind, catalog_layer, archived_at
      FROM catalog_content_identities
      WHERE content_key = ? AND content_kind IN ('species', 'background', 'subclass')`,
     [input.oldContentKey],
     (row) => ({
       kind: authoredKind(sqlString(row, 'content_kind')),
       layer: sqlString(row, 'catalog_layer'),
+      archivedAt: sqlNullableString(row, 'archived_at'),
     }),
   );
   if (identity === null) {
@@ -119,17 +120,30 @@ function characterReference(
       reason: 'invalid_reference',
     });
   }
+  if (identity.archivedAt !== null) {
+    throw new ReferenceRetargetError('Archived content cannot be retargeted.', {
+      reason: 'replacement_refused',
+      refusal: 'archived_reference',
+    });
+  }
   const character = db.one(
-    'SELECT name, revision FROM characters WHERE id = ?',
+    'SELECT name, revision, archived_at FROM characters WHERE id = ?',
     [input.characterId],
     (row) => ({
       name: sqlString(row, 'name'),
       revision: sqlInteger(row, 'revision') as CharacterRevision,
+      archivedAt: sqlNullableString(row, 'archived_at'),
     }),
   );
   if (character === null) {
     throw new ReferenceRetargetError('The character was not found.', {
       reason: 'character_not_found',
+    });
+  }
+  if (character.archivedAt !== null) {
+    throw new ReferenceRetargetError('Archived characters cannot be retargeted.', {
+      reason: 'replacement_refused',
+      refusal: 'archived_reference',
     });
   }
   const definitionTable = identity.kind === 'species'
@@ -228,6 +242,7 @@ function importNodeAndPlan(
       refusal: 'ambiguous_target',
     });
   }
+  assertActiveReplacementTarget(db, facts.content_kind, resolution.contentKey);
   const node = localContentReferenceImportNode(db, {
     id: NODE_ID,
     kind: facts.content_kind,
@@ -245,6 +260,28 @@ function importNodeAndPlan(
       operationIdentity(facts),
     ),
   });
+}
+
+function assertActiveReplacementTarget(
+  db: DatabaseContext,
+  kind: AuthoredContentKind,
+  contentKey: ContentKey,
+): void {
+  const archivedAt = db.scalar<string>(
+    `SELECT archived_at
+     FROM catalog_content_identities
+     WHERE content_kind = ? AND content_key = ?`,
+    [kind, contentKey],
+  );
+  if (archivedAt !== null) {
+    throw new ReferenceRetargetError(
+      'Archived content cannot be a replacement target.',
+      {
+        reason: 'replacement_refused',
+        refusal: 'archived_reference',
+      },
+    );
+  }
 }
 
 function nonRefusedOutcome(plan: ContentImportPlan): Exclude<
@@ -356,6 +393,7 @@ export function previewReferenceRetarget(
   });
   const { plan } = importNodeAndPlan(db, facts);
   const outcome = nonRefusedOutcome(plan);
+  assertActiveReplacementTarget(db, facts.content_kind, outcome.contentKey);
   if (facts.content_kind === 'subclass') {
     const parentIds = db.one(
       `SELECT old_subclass.class_definition_id AS old_parent_id,
@@ -1218,6 +1256,7 @@ export function commitReferenceRetarget(
   const choices = matchChoices(preview, input.decisions);
   const { node, plan } = importNodeAndPlan(db, facts, choices);
   const outcome = nonRefusedOutcome(plan);
+  assertActiveReplacementTarget(db, facts.content_kind, outcome.contentKey);
   let revision: CharacterRevision | null = null;
   let notices: readonly ReplacementNotice[] = Object.freeze([]);
   const committed = commitContentImport(db, {

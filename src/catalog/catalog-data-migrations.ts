@@ -5,6 +5,7 @@ import {
   CONTENT_FINGERPRINT_SCHEME_V1,
   type ContentFingerprintScheme,
 } from './content-identity';
+import lineageDeleteGuardSource from './catalog-lineage-delete-guard.ts?raw';
 import retirementSource from './retire-non-srd-bundled-subclasses-v1.ts?raw';
 import {
   retireNonSrdBundledSubclassesV1,
@@ -13,18 +14,38 @@ import {
 /**
  * One append-only semantic catalog migration.
  *
- * `source` is the exact committed TypeScript module text imported with
- * Vite's `?raw` suffix by the registry. It is deliberately separate from
- * `run.toString()`: emitted JavaScript function source is not a stable
- * persistence checksum. The manually pinned checksum freezes those source
- * bytes before a database is touched.
+ * `sources` explicitly lists the committed TypeScript modules whose behaviour
+ * the migration owns: its implementation and any bespoke extracted seam it
+ * invokes. General runtime infrastructure and type-only imports stay outside
+ * this boundary. Each module is imported with Vite's `?raw` suffix; emitted
+ * JavaScript function source is not a stable persistence checksum.
  */
+export interface CatalogDataMigrationSource {
+  readonly path: string;
+  readonly bytes: string;
+}
+
 export interface CatalogDataMigration {
   readonly id: string;
   readonly projectorScheme: ContentFingerprintScheme;
-  readonly source: string;
+  readonly sources: readonly CatalogDataMigrationSource[];
   readonly checksum: string;
   run(db: DatabaseContext): void;
+}
+
+/**
+ * Hash an explicit source set without depending on discovery or caller order.
+ * Repository paths define the fixed order; JSON tuple framing keeps adjacent
+ * paths and source bytes unambiguous.
+ */
+export function catalogDataMigrationChecksum(
+  sources: readonly CatalogDataMigrationSource[],
+): string {
+  const ordered = [...sources].sort((left, right) =>
+    left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
+  return sha256(JSON.stringify(
+    ordered.map(({ path, bytes }) => [path, bytes]),
+  ));
 }
 
 /** Append-only, checksum-frozen product-data migrations. */
@@ -33,9 +54,18 @@ export const CATALOG_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
     Object.freeze({
       id: 'retire_non_srd_bundled_subclasses_v1',
       projectorScheme: CONTENT_FINGERPRINT_SCHEME_V1,
-      source: retirementSource,
+      sources: Object.freeze([
+        Object.freeze({
+          path: 'src/catalog/retire-non-srd-bundled-subclasses-v1.ts',
+          bytes: retirementSource,
+        }),
+        Object.freeze({
+          path: 'src/catalog/catalog-lineage-delete-guard.ts',
+          bytes: lineageDeleteGuardSource,
+        }),
+      ]),
       checksum:
-        '501bb363cd32f4f48a230b5771761670492bc20a975c38598601784e9d74b563',
+        'dd0c26c46278a9bbc28cc448c0489adf5719dfd957de9594ed96ecad76ae795e',
       run: retireNonSrdBundledSubclassesV1,
     }),
   ]);
@@ -95,7 +125,20 @@ export function validateCatalogDataMigrationRegistry(
       );
     }
 
-    const actual = sha256(migration.source);
+    if (migration.sources.length === 0) {
+      throw new Error(
+        `Catalog data migration "${migration.id}" has no checksum sources.`,
+      );
+    }
+    const paths = migration.sources.map(({ path }) => path);
+    if (new Set(paths).size !== paths.length) {
+      throw new Error(
+        `Catalog data migration "${migration.id}" has duplicate checksum ` +
+          'source paths.',
+      );
+    }
+
+    const actual = catalogDataMigrationChecksum(migration.sources);
     if (actual !== migration.checksum) {
       throw new Error(
         `Catalog data migration "${migration.id}" source checksum mismatch: ` +
