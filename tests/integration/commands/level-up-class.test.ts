@@ -26,6 +26,9 @@ import { CharacterCompletenessQueries } from '../../../src/queries/character-com
 import { EligibleSpellSearch } from '../../../src/eligibility/eligible-spell-search';
 import { openTestDatabase } from '../../helpers/open-db';
 import { raiseClassLevelForTest } from '../../helpers/class-levels';
+import { LEVEL_UP_RPC } from '../../../src/builder/level-up-wizard';
+import { rpcRegistry } from '../../../src/worker/registry';
+import { createRpcHarness } from '../../helpers/rpc-harness';
 
 /**
  * THE ONE LEVELLING PATH (straight-class level-up plan §3/§8b, reduced by
@@ -1001,70 +1004,114 @@ describe('level_up_class', () => {
   });
 
   // Measured alone at 2.2s; 20s retains contention headroom.
-  it('resolves published Spell Student by logical locator before its source row exists', () => {
-    const catalog = BUNDLED_HOMEBREW_CATALOG.filter(
-      (entry) => entry.catalog_key === 'spell-student',
-    );
-    const install = planBundledHomebrewInstall(db, catalog);
-    expect(commitBundledHomebrewInstall(db, install.token, catalog)).toMatchObject({
-      kind: 'committed',
-      outcomes: [{ kind: 'create', contentKey: '2024:content.subclass:spell-student' }],
-    });
-    enterClass('Fighter');
-    raiseClassLevelForTest(db, characterId, classId('Fighter'), 2);
-    enterClass('Fighter');
-    const locator = {
-      source: { kind: 'selected_class_subclass' as const },
-      rule_key: 'spell-student-cantrips',
-      ordinal: 1,
-    };
-    const planned = new LevelUpPlannedEligibleSpells(db).search({
-      character_id: characterId as never,
-      expected_revision: 0 as never,
-      class_definition_id: classId('Fighter') as never,
-      target_class_level: 3 as never,
-      subclass_content_key: '2024:content.subclass:spell-student' as never,
-      locator: locator as never,
-      query: '',
-    });
-    const offered = planned[0];
-    if (offered === undefined) {
-      throw new Error('Spell Student offered no Wizard cantrip.');
-    }
-
-    levelUp({
-      class_definition_id: classId('Fighter'),
-      target_level: 3,
-      subclass_content_key: '2024:content.subclass:spell-student',
-      planned_subchoices: {
-        skills: [],
-        expertise: [],
-        spells: [{
-          kind: 'slot_selection',
-          locator,
-          spell_version_id: offered.id,
-          mode: 'new',
+  it('resolves published Spell Student by logical locator before its source row exists', async () => {
+    const harness = await createRpcHarness([]);
+    try {
+      db = harness.context.db;
+      integrity = new CharacterCommandIntegrity('level-up-class-rpc-test-key');
+      characterId = db.exec(
+        `INSERT INTO characters (name, constitution)
+         VALUES ('Level Up RPC Hero', 14)`,
+      ).lastInsertId;
+      const catalog = BUNDLED_HOMEBREW_CATALOG.filter(
+        (entry) => entry.catalog_key === 'spell-student',
+      );
+      const install = planBundledHomebrewInstall(db, catalog);
+      expect(
+        commitBundledHomebrewInstall(db, install.token, catalog),
+      ).toMatchObject({
+        kind: 'committed',
+        outcomes: [{
+          kind: 'create',
+          contentKey: '2024:content.subclass:spell-student',
         }],
-      },
-    });
+      });
+      enterClass('Fighter');
+      raiseClassLevelForTest(db, characterId, classId('Fighter'), 2);
+      enterClass('Fighter');
+      const locator = {
+        source: { kind: 'selected_class_subclass' as const },
+        rule_key: 'spell-student-cantrips',
+        ordinal: 1,
+      };
+      const plannedResponse = await rpcRegistry.dispatch(
+        {
+          id: 1,
+          method: LEVEL_UP_RPC.plannedEligibleSpells,
+          params: {
+            character_id: characterId,
+            expected_revision: 0,
+            class_definition_id: classId('Fighter'),
+            target_class_level: 3,
+            subclass_content_key: '2024:content.subclass:spell-student',
+            locator,
+            query: '',
+          },
+        },
+        harness.context,
+      );
+      expect(plannedResponse).toMatchObject({ ok: true });
+      if (!plannedResponse.ok) {
+        throw new Error(plannedResponse.error.message);
+      }
+      const planned = plannedResponse.result as ReturnType<
+        LevelUpPlannedEligibleSpells['search']
+      >;
+      const offered = planned[0];
+      if (offered === undefined) {
+        throw new Error('Spell Student offered no Wizard cantrip.');
+      }
 
-    const slotId = Number(
-      db.scalar(
-        `SELECT slot.id FROM spell_selection_slots AS slot
-         JOIN character_source_instances AS source
-           ON source.id = slot.source_instance_id
-         JOIN subclass_definitions AS subclass
-           ON subclass.id = source.source_definition_id
-         WHERE source.character_id = ? AND source.source_type = 'subclass'
-           AND subclass.content_key = '2024:content.subclass:spell-student'
-           AND slot.rule_key = 'spell-student-cantrips'
-           AND slot.ordinal = 1`,
-        [characterId],
-      ),
-    );
-    expect(new EligibleSpellSearch(db).search(characterId, slotId, '')).toEqual(
-      planned,
-    );
+      levelUp({
+        class_definition_id: classId('Fighter'),
+        target_level: 3,
+        subclass_content_key: '2024:content.subclass:spell-student',
+        planned_subchoices: {
+          skills: [],
+          expertise: [],
+          spells: [{
+            kind: 'slot_selection',
+            locator,
+            spell_version_id: offered.id,
+            mode: 'new',
+          }],
+        },
+      });
+
+      const slotId = Number(
+        db.scalar(
+          `SELECT slot.id FROM spell_selection_slots AS slot
+           JOIN character_source_instances AS source
+             ON source.id = slot.source_instance_id
+           JOIN subclass_definitions AS subclass
+             ON subclass.id = source.source_definition_id
+           WHERE source.character_id = ? AND source.source_type = 'subclass'
+             AND subclass.content_key = '2024:content.subclass:spell-student'
+             AND slot.rule_key = 'spell-student-cantrips'
+             AND slot.ordinal = 1`,
+          [characterId],
+        ),
+      );
+      const durableResponse = await rpcRegistry.dispatch(
+        {
+          id: 2,
+          method: 'queries.eligibleSpells.search',
+          params: {
+            character_id: characterId,
+            slot_id: slotId,
+            query: '',
+          },
+        },
+        harness.context,
+      );
+      expect(durableResponse).toMatchObject({ ok: true });
+      if (!durableResponse.ok) {
+        throw new Error(durableResponse.error.message);
+      }
+      expect(durableResponse.result).toEqual(planned);
+    } finally {
+      harness.close();
+    }
   }, 20_000);
 
   it('commits with omitted owed skill and spell choices and leaves named D70 warnings', () => {

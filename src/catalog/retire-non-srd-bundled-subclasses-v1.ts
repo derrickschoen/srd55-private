@@ -42,6 +42,44 @@ export function retireNonSrdBundledSubclassesV1(db: DatabaseContext): void {
     keys,
   );
 
+  // D217 permits deleting characters that still hold a retiring subclass.
+  // Its narrower companion is history on a surviving character: an inverse
+  // or save point that would restore the retired definition can never succeed,
+  // so only those unusable entries are discarded. json_tree matches an exact
+  // numeric reference field, rather than treating arbitrary JSON text as an id.
+  db.exec(
+    `DELETE FROM character_operations AS operation
+      WHERE EXISTS (
+        SELECT 1
+          FROM json_tree(operation.inverse_command) AS payload
+          JOIN subclass_definitions AS subclass
+            ON payload.type = 'integer'
+           AND payload.atom = subclass.id
+          JOIN catalog_content_identities AS identity
+            ON identity.content_kind = 'subclass'
+           AND identity.content_key = subclass.content_key
+         WHERE payload.key = 'subclass_definition_id'
+           AND ${retiredBundledIdentity('identity')}
+      )`,
+    keys,
+  );
+  db.exec(
+    `DELETE FROM character_save_points AS save_point
+      WHERE EXISTS (
+        SELECT 1
+          FROM json_tree(save_point.snapshot) AS payload
+          JOIN subclass_definitions AS subclass
+            ON payload.type = 'integer'
+           AND payload.atom = subclass.id
+          JOIN catalog_content_identities AS identity
+            ON identity.content_kind = 'subclass'
+           AND identity.content_key = subclass.content_key
+         WHERE payload.key = 'subclass_definition_id'
+           AND ${retiredBundledIdentity('identity')}
+      )`,
+    keys,
+  );
+
   db.exec(
     `DELETE FROM catalog_content_drafts
       WHERE content_kind = 'subclass'

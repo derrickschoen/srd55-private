@@ -11,9 +11,13 @@ import { ensureBundledStableContentIdentity } from '../../../src/catalog/content
 import {
   RETIRED_BUNDLED_SUBCLASS_CONTENT_KEYS,
 } from '../../../src/catalog/retire-non-srd-bundled-subclasses-v1';
+import { runCatalogDataMigrations } from '../../../src/catalog/catalog-data-migrations';
+import { CharacterState } from '../../../src/character/character-state';
+import { CharacterCommandExecutor } from '../../../src/commands/character-command-executor';
+import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { sha256 } from '../../../src/crypto/sha256';
 import { applicationSeed, createApplicationLifecycle } from '../../../src/db/bootstrap';
-import type { DatabaseContext } from '../../../src/db/database';
+import { DatabaseContext } from '../../../src/db/database';
 import { DatabaseLifecycle } from '../../../src/db/database-lifecycle';
 import type { ContentKey } from '../../../src/domain/ids';
 import { getSqlite3, MemoryDatabaseStorage } from '../../helpers/open-db';
@@ -32,6 +36,61 @@ afterEach(() => {
 function track(lifecycle: DatabaseLifecycle): DatabaseLifecycle {
   lifecycles.push(lifecycle);
   return lifecycle;
+}
+
+function oldApplicationLifecycle(): DatabaseLifecycle {
+  const lifecycle = track(new DatabaseLifecycle(
+    sqlite3,
+    new MemoryDatabaseStorage(sqlite3),
+    schema,
+    applicationSeed,
+    undefined,
+    [],
+  ));
+  lifecycle.open();
+  return lifecycle;
+}
+
+function lineageDeleteGuard(db: DatabaseContext): string {
+  const sql = db.scalar<string>(
+    `SELECT sql FROM sqlite_schema
+      WHERE type = 'trigger'
+        AND name = 'catalog_content_supersessions_refuse_delete_before_delete'`,
+  );
+  if (sql === null) throw new Error('The 0039 lineage delete guard is missing.');
+  return sql;
+}
+
+function retirementMarker(db: DatabaseContext): Record<string, unknown> | null {
+  return db.oneRaw(
+    `SELECT id, scheme, checksum
+       FROM catalog_data_migrations
+      WHERE id = 'retire_non_srd_bundled_subclasses_v1'`,
+  );
+}
+
+class FailAfterGuardSuspensionDatabase extends DatabaseContext {
+  #guardWasDropped = false;
+
+  override exec(
+    sql: string,
+    bind?: Parameters<DatabaseContext['exec']>[1],
+  ): ReturnType<DatabaseContext['exec']> {
+    if (
+      this.#guardWasDropped &&
+      sql.includes('DELETE FROM catalog_content_supersessions')
+    ) {
+      throw new Error('Injected failure after 0039 guard suspension.');
+    }
+    const result = super.exec(sql, bind);
+    if (
+      sql.trim() ===
+        'DROP TRIGGER catalog_content_supersessions_refuse_delete_before_delete'
+    ) {
+      this.#guardWasDropped = true;
+    }
+    return result;
+  }
 }
 
 function installExternalVeteran(db: DatabaseContext): ContentKey {
@@ -175,15 +234,7 @@ function installRetiringFixtureGraph(
 describe('one-time non-SRD bundled subclass retirement', () => {
   // Measured alone at 3.8s; 20s retains contention headroom.
   it('upgrades an old image atomically, deletes attached characters, and preserves SRD and external Veteran content', async () => {
-    const old = track(new DatabaseLifecycle(
-      sqlite3,
-      new MemoryDatabaseStorage(sqlite3),
-      schema,
-      applicationSeed,
-      undefined,
-      [],
-    ));
-    old.open();
+    const old = oldApplicationLifecycle();
     const externalVeteranKey = installExternalVeteran(old.database);
     const externalBefore = externalVeteranGraph(old.database, externalVeteranKey);
     const characterNames = installRetiringFixtureGraph(
@@ -196,6 +247,9 @@ describe('one-time non-SRD bundled subclass retirement', () => {
     const championId = Number(old.database.scalar(
       "SELECT id FROM subclass_definitions WHERE content_key = '2024:subclass:champion'",
     ));
+    const retiredEKId = Number(old.database.scalar(
+      "SELECT id FROM subclass_definitions WHERE content_key = '2024:subclass:ek'",
+    ));
     const survivorId = old.database.exec(
       "INSERT INTO characters (name) VALUES ('SRD Survivor')",
     ).lastInsertId;
@@ -204,13 +258,61 @@ describe('one-time non-SRD bundled subclass retirement', () => {
          character_id, class_definition_id, subclass_definition_id,
          level, is_starting_class
        ) VALUES (?, ?, ?, 3, 1)`,
-      [survivorId, fighterId, championId],
+      [survivorId, fighterId, retiredEKId],
     );
-    const guardBefore = old.database.scalar<string>(
-      `SELECT sql FROM sqlite_schema
-        WHERE type = 'trigger'
-          AND name = 'catalog_content_supersessions_refuse_delete_before_delete'`,
+    const retiringSnapshot = new CharacterState(old.database).capture(survivorId);
+    old.database.exec(
+      `UPDATE character_class_levels
+          SET subclass_definition_id = ?
+        WHERE character_id = ? AND class_definition_id = ?`,
+      [championId, survivorId, fighterId],
     );
+    old.database.exec(
+      `UPDATE characters
+          SET revision = 2, notes = 'After safe history entry'
+        WHERE id = ?`,
+      [survivorId],
+    );
+    const championSnapshot = new CharacterState(old.database).capture(survivorId);
+    old.database.exec(
+      `INSERT INTO character_operations (
+         character_id, operation_uuid, expected_revision,
+         resulting_revision, inverse_command
+       ) VALUES
+         (?, 'survivor-retiring-inverse', 0, 1, ?),
+         (?, 'survivor-safe-inverse', 1, 2, ?)`,
+      [
+        survivorId,
+        JSON.stringify({
+          type: 'internal_snapshot_restore',
+          snapshot: retiringSnapshot,
+        }),
+        survivorId,
+        JSON.stringify({
+          type: 'internal_flavor_restore',
+          alignment: null,
+          appearance: null,
+          backstory: null,
+          notes: 'Before safe history entry',
+        }),
+      ],
+    );
+    old.database.exec(
+      `INSERT INTO character_save_points (
+         character_id, label, snapshot, schema_version
+       ) VALUES
+         (?, 'Retiring subclass snapshot', ?, ?),
+         (?, 'Champion snapshot', ?, ?)`,
+      [
+        survivorId,
+        JSON.stringify(retiringSnapshot),
+        retiringSnapshot.schema_version,
+        survivorId,
+        JSON.stringify(championSnapshot),
+        championSnapshot.schema_version,
+      ],
+    );
+    const guardBefore = lineageDeleteGuard(old.database);
     const bytes = await old.exportBytes();
     old.close();
 
@@ -246,6 +348,16 @@ describe('one-time non-SRD bundled subclass retirement', () => {
       name: 'SRD Survivor',
       content_key: '2024:subclass:champion',
     });
+    expect(db.allRaw(
+      `SELECT operation_uuid FROM character_operations
+        WHERE character_id = ? ORDER BY operation_uuid`,
+      [survivorId],
+    )).toEqual([{ operation_uuid: 'survivor-safe-inverse' }]);
+    expect(db.allRaw(
+      `SELECT label FROM character_save_points
+        WHERE character_id = ? ORDER BY label`,
+      [survivorId],
+    )).toEqual([{ label: 'Champion snapshot' }]);
     for (const table of [
       'subclass_definitions',
       'catalog_content_identities',
@@ -288,11 +400,19 @@ describe('one-time non-SRD bundled subclass retirement', () => {
     )).toBe(12);
     expect(db.scalar('SELECT count(*) FROM class_definitions')).toBe(12);
     expect(db.connection.selectObject('PRAGMA foreign_key_check')).toBeUndefined();
-    expect(db.scalar(
-      `SELECT sql FROM sqlite_schema
-        WHERE type = 'trigger'
-          AND name = 'catalog_content_supersessions_refuse_delete_before_delete'`,
-    )).toBe(guardBefore);
+    expect(lineageDeleteGuard(db)).toBe(guardBefore);
+
+    const undo = await new CharacterCommandExecutor(
+      db,
+      new CharacterCommandIntegrity('retirement-history-test-key'),
+    ).undo({
+      character_id: survivorId as never,
+      operation_uuid: 'survivor-safe-inverse',
+      expected_revision: 2 as never,
+    });
+    expect(undo).toMatchObject({ status: 'applied', revision: 3 });
+    expect(db.scalar('SELECT notes FROM characters WHERE id = ?', [survivorId]))
+      .toBe('Before safe history entry');
 
     const markerBefore = db.oneRaw(
       `SELECT id, scheme, checksum, applied_at
@@ -306,5 +426,38 @@ describe('one-time non-SRD bundled subclass retirement', () => {
          FROM catalog_data_migrations
         WHERE id = 'retire_non_srd_bundled_subclasses_v1'`,
     )).toEqual(markerBefore);
+  }, 20_000);
+
+  it('rolls the exact 0039 delete guard back when execution fails after suspension', () => {
+    const old = oldApplicationLifecycle();
+    const guardBefore = lineageDeleteGuard(old.database);
+    const injected = new FailAfterGuardSuspensionDatabase(
+      old.database.connection,
+    );
+
+    expect(() => runCatalogDataMigrations(injected)).toThrow(
+      'Injected failure after 0039 guard suspension.',
+    );
+    expect(lineageDeleteGuard(old.database)).toBe(guardBefore);
+    expect(retirementMarker(old.database)).toBeNull();
+  }, 20_000);
+
+  it('rolls the exact 0039 delete guard and marker back on a forced FK-check failure', () => {
+    const old = oldApplicationLifecycle();
+    const db = old.database;
+    const guardBefore = lineageDeleteGuard(db);
+    db.exec('PRAGMA foreign_keys = OFF');
+    db.exec(
+      `INSERT INTO character_rule_overrides (
+         character_id, rule_key, value
+       ) VALUES (999999, 'forced-retirement-fk-failure', '1')`,
+    );
+    db.exec('PRAGMA foreign_keys = ON');
+
+    expect(() => runCatalogDataMigrations(db)).toThrow(
+      /foreign-key check failed for table character_rule_overrides/,
+    );
+    expect(lineageDeleteGuard(db)).toBe(guardBefore);
+    expect(retirementMarker(db)).toBeNull();
   }, 20_000);
 });

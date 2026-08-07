@@ -247,6 +247,27 @@ describe('persisted class progression catalog', () => {
       { class_level: 17, sort_order: 11, name: 'Heightened Lethality', has_description: 1 },
       { class_level: 17, sort_order: 12, name: 'Blindsight', has_description: 1 },
     ]);
+    expect(
+      db.oneRaw(
+        `SELECT subclass.spellcasting_ability, subclass.caster_fraction,
+                (SELECT count(*) FROM subclass_progressions AS progression
+                  WHERE progression.subclass_definition_id = subclass.id)
+                  AS progression_rows,
+                (SELECT count(*)
+                   FROM subclass_feature_effects AS effect
+                   JOIN subclass_features AS feature
+                     ON feature.id = effect.subclass_feature_id
+                  WHERE feature.subclass_definition_id = subclass.id)
+                  AS feature_effect_rows
+           FROM subclass_definitions AS subclass
+          WHERE subclass.content_key = '2024:content.subclass:veteran'`,
+      ),
+    ).toEqual({
+      spellcasting_ability: null,
+      caster_fraction: null,
+      progression_rows: 0,
+      feature_effect_rows: 0,
+    });
   }, 20_000);
 
   it('reinstalling external Veteran preserves its root and complete feature graph', () => {

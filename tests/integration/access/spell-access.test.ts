@@ -11,6 +11,9 @@ import {
   commitBundledHomebrewInstall,
   planBundledHomebrewInstall,
 } from '../../../src/authoring/bundled-homebrew-installer';
+import type { BuildReportResult } from '../../../src/reports/build-report-builder';
+import { rpcRegistry } from '../../../src/worker/registry';
+import { createRpcHarness } from '../../helpers/rpc-harness';
 
 interface SpellOptions {
   readonly level?: number;
@@ -583,75 +586,98 @@ describe('persisted spell access routes', () => {
   });
 
   // Measured alone at 2.1s; 20s retains contention headroom.
-  it('resolves the published Spell Student ability and proficiency override', () => {
-    applicationSeed(db);
-    const catalog = BUNDLED_HOMEBREW_CATALOG.filter(
-      (entry) => entry.catalog_key === 'spell-student',
-    );
-    const plan = planBundledHomebrewInstall(db, catalog);
-    expect(commitBundledHomebrewInstall(db, plan.token, catalog)).toMatchObject({
-      kind: 'committed',
-      outcomes: [{ kind: 'create', contentKey: '2024:content.subclass:spell-student' }],
-    });
-    const characterId = character(
-      'Subclass Caster',
-      { intelligence: 14 },
-      5,
-    );
-    const fighterId = Number(db.scalar(
-      `SELECT id FROM class_definitions WHERE content_key = '2024:class:fighter'`,
-    ));
-    classLevel(characterId, fighterId, 3);
-    const subclassId = Number(db.scalar(
-      `SELECT id FROM subclass_definitions
-        WHERE content_key = '2024:content.subclass:spell-student'`,
-    ));
-    const sourceId = source(
-      characterId,
-      'subclass',
-      subclassId,
-      'Spell Student 3',
-    );
-    const versionId = spell('2024:subclass-spell', 'Subclass Spell');
-    const slotId = slot(
-      characterId,
-      sourceId,
-      versionId,
-      'spell-student:known:1',
-    );
-    const before = persistedAccessState(characterId);
+  it('resolves the published Spell Student ability and proficiency override', async () => {
+    const harness = await createRpcHarness([]);
+    try {
+      db = harness.context.db;
+      applicationSeed(db);
+      const catalog = BUNDLED_HOMEBREW_CATALOG.filter(
+        (entry) => entry.catalog_key === 'spell-student',
+      );
+      const plan = planBundledHomebrewInstall(db, catalog);
+      expect(
+        commitBundledHomebrewInstall(db, plan.token, catalog),
+      ).toMatchObject({
+        kind: 'committed',
+        outcomes: [{
+          kind: 'create',
+          contentKey: '2024:content.subclass:spell-student',
+        }],
+      });
+      const characterId = character(
+        'Subclass Caster',
+        { intelligence: 14 },
+        5,
+      );
+      const fighterId = Number(db.scalar(
+        `SELECT id FROM class_definitions
+          WHERE content_key = '2024:class:fighter'`,
+      ));
+      classLevel(characterId, fighterId, 3);
+      const subclassId = Number(db.scalar(
+        `SELECT id FROM subclass_definitions
+          WHERE content_key = '2024:content.subclass:spell-student'`,
+      ));
+      const sourceId = source(
+        characterId,
+        'subclass',
+        subclassId,
+        'Spell Student 3',
+      );
+      const versionId = spell('2024:subclass-spell', 'Subclass Spell');
+      const slotId = slot(
+        characterId,
+        sourceId,
+        versionId,
+        'spell-student:known:1',
+      );
+      const before = persistedAccessState(characterId);
 
-    expect(builder.buildForCharacter(characterId)).toEqual([
-      expect.objectContaining({
-        spell_version_id: versionId,
-        source_instance_id: sourceId,
-        slot_id: slotId,
+      const response = await rpcRegistry.dispatch(
+        {
+          id: 1,
+          method: 'queries.reports.build',
+          params: { character_id: characterId },
+        },
+        harness.context,
+      );
+      expect(response).toMatchObject({ ok: true });
+      if (!response.ok) throw new Error(response.error.message);
+      const routes = (response.result as BuildReportResult).access_routes;
+      expect(routes).toEqual([
+        expect.objectContaining({
+          spell_version_id: versionId,
+          source_instance_id: sourceId,
+          slot_id: slotId,
+          spellcasting_ability: 'intelligence',
+          ability_modifier: 2,
+          attack_bonus: 7,
+          save_dc: 15,
+        }),
+      ]);
+      expect(
+        db.oneRaw(
+          `SELECT source.source_type, source.source_definition_id,
+                  subclass.spellcasting_ability,
+                  character.proficiency_bonus_override
+           FROM character_source_instances AS source
+           INNER JOIN subclass_definitions AS subclass
+             ON subclass.id = source.source_definition_id
+           INNER JOIN characters AS character
+             ON character.id = source.character_id
+           WHERE source.id = ?`,
+          [sourceId],
+        ),
+      ).toEqual({
+        source_type: 'subclass',
+        source_definition_id: subclassId,
         spellcasting_ability: 'intelligence',
-        ability_modifier: 2,
-        attack_bonus: 7,
-        save_dc: 15,
-      }),
-    ]);
-    expect(
-      db.oneRaw(
-        `SELECT source.source_type, source.source_definition_id,
-                subclass.spellcasting_ability,
-                character.proficiency_bonus_override
-         FROM character_source_instances AS source
-         INNER JOIN subclass_definitions AS subclass
-           ON subclass.id = source.source_definition_id
-         INNER JOIN characters AS character
-           ON character.id = source.character_id
-         WHERE source.id = ?`,
-        [sourceId],
-      ),
-    ).toEqual({
-      source_type: 'subclass',
-      source_definition_id: subclassId,
-      spellcasting_ability: 'intelligence',
-      proficiency_bonus_override: 5,
-    });
-    expect(persistedAccessState(characterId)).toEqual(before);
+        proficiency_bonus_override: 5,
+      });
+      expect(persistedAccessState(characterId)).toEqual(before);
+    } finally {
+      harness.close();
+    }
   }, 20_000);
 
   it('evaluates ordinary routes live, lets kept overrides bypass source and eligibility, but never inactive versions', () => {
