@@ -27,6 +27,7 @@ import { rowContractError } from '../../../src/domain/contracts/rows';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import { HomebrewArchiveSetService } from '../../../src/authoring/archive-set-lifecycle';
 import type { ContentKey } from '../../../src/domain/ids';
+import { DATABASE_MIGRATIONS } from '../../../src/db/migrations';
 
 /**
  * THE MALFORMED-ARTIFACT PROOF FOR WHOLE-IMAGE RESTORE.
@@ -293,6 +294,26 @@ describe('candidate database semantic audit', () => {
     const db = freshDatabase();
     seedTwoCharacters(db);
     expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).not.toThrow();
+  });
+
+  it('accepts a pre-0040 candidate with no archive manifest table', () => {
+    const db = new sqlite3.oo1.DB(':memory:', 'c');
+    opened.push(db);
+    for (const migration of DATABASE_MIGRATIONS) {
+      if (migration.id === '0040_catalog_content_archive_members') {
+        break;
+      }
+      db.exec(migration.sql);
+    }
+
+    expect(
+      db.selectValue(
+        `SELECT count(*) FROM sqlite_schema
+         WHERE type = 'table'
+           AND name = 'catalog_content_archive_members'`,
+      ),
+    ).toBe(0);
+    expect(() => auditCandidateDatabase(db)).not.toThrow();
   });
 
   it('refuses an archive manifest member whose character id was never allocated', () => {

@@ -245,6 +245,23 @@ function characterAllocationHighWater(db: Database): number | null {
  * inferred.
  */
 function auditArchiveManifests(db: Database): void {
+  // A lifecycle may deliberately target a historical schema (migration-chain
+  // probes do this), and callers may audit an already-validated historical
+  // image directly. Before 0040 there was no manifest relation to validate:
+  // absence means the candidate has no manifests, not that the candidate is
+  // corrupt.
+  if (
+    db.selectValue(
+      `SELECT EXISTS (
+         SELECT 1
+         FROM sqlite_schema
+         WHERE type = 'table' AND name = ?
+       )`,
+      [ARCHIVE_MEMBER_TABLE],
+    ) !== 1
+  ) {
+    return;
+  }
   const characterHighWater = characterAllocationHighWater(db);
   const rows: ReadonlyArray<Record<string, SqlValue>> = db.selectObjects(
     `SELECT member.rowid AS row_id,
