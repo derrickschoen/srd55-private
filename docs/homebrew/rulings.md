@@ -5,6 +5,76 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-06 — Barbed Court: goad once per round; the duel becomes an ordinary spell; hearing clause dropped
+
+Owner's rulings, verbatim:
+
+> Goad once per round.
+> Compelled duel is cast with normal rules
+> Drop the hear and understand, most monk things are around hitting in melee
+
+Effect:
+
+- Barbed Goad fires **once each round**, not once on each of your turns. The
+  distinction is deliberate and preserved: because the limit is per round
+  rather than per turn, an Opportunity Attack can carry the goad, but only if
+  the round's goad is unspent. This also preserves Scandalous Echo at level 11,
+  which a per-hit trigger would have made worthless.
+- The duel-binding effect is **cast as an ordinary spell**, with a normal
+  casting time, saving throw, Concentration and end conditions, paid for with
+  1 Focus Point rather than treated as a free feature rider.
+- The "can hear and understand you" clause is **dropped**, on the owner's
+  stated reasoning that Monk features are built around connecting in melee.
+
+Licensing consequence — this one constrains the deliverable, not just the risk
+labelling. The 2014 spell the owner is naming is **absent from SRD 5.2.1**, so
+the doc cannot grant it: naming a spell whose text exists only in a non-SRD
+book *is* using that book as a source, which D59/D191 forbids, and it could
+never be seeded into app content either. The only legal route is an original
+subclass spell with our own name and wording delivering the same function. The
+draft below is authored from SRD primitives:
+
+> **Barbed Challenge**
+> *Level 1 Enchantment*
+> **Casting Time:** Bonus Action · **Range:** 30 feet · **Components:** V, S ·
+> **Duration:** Concentration, up to 1 minute
+>
+> Choose one creature you can see within range. It makes a Wisdom saving throw.
+> On a failed save, it is bound to you for the duration: it has Disadvantage on
+> attack rolls against creatures other than you, and it can't willingly move to
+> a space more than 30 feet away from you.
+>
+> The spell ends early if you have the Incapacitated condition, if you end your
+> turn more than 30 feet from the target, or if you make an attack roll against
+> a creature other than the target.
+
+Measured consequences, recorded not corrected:
+
+- **Casting it as a spell adds three real bounds the feature version had none
+  of:** it costs a **Bonus Action**, which for a Monk is the Flurry of Blows /
+  Patient Defense / Step of the Wind slot, so binding a target costs the turn's
+  Flurry; it takes **Concentration**, so it competes with *Blur*, *Hold
+  Person*, *Hypnotic Pattern*, *Fear* and *Silence*; and it can be
+  Counterspelled or Dispelled. This is a materially better-priced version of
+  the same effect.
+- The "ends if you attack another creature" clause is the load-bearing
+  balancer and is kept deliberately. Without it the monk could lock a boss and
+  then freely attack elsewhere.
+- **Ruling H is now load-bearing.** If Focus-to-slot conversion begins at Monk
+  3 with a 1st-level cap, then "1 Focus casts *Barbed Challenge*" and "1 Focus
+  casts *Shield*" are both simply the general conversion rule, and Court Ward
+  disappears as a special case. If conversion stays at 13/17 only, the subclass
+  needs two bespoke 1-Focus casting exceptions instead. Recommended to the
+  owner: start conversion at Monk 3.
+- **F14 Bounced Flavor Cheque, raised for the owner.** With the hearing clause
+  gone and the trigger a melee hit, no mechanic in the subclass involves speech
+  any more, while the subclass is named for a court of insults and its whole
+  identity paragraph is built on verbal taunting. The identity text — already
+  awaiting a rewrite from earlier in this session — now needs rebuilding around
+  a physical, not verbal, provocation, or the name needs to change.
+- Dropping hearing removes the goad's only natural immunities: deafened,
+  mindless and language-less creatures are now goadable.
+
 ## 2026-08-06 — Barbed Court: the goad triggers on a melee hit; 1 Focus buys the duel-binding effect
 
 Owner's ruling, verbatim:
