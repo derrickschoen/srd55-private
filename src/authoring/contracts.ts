@@ -33,6 +33,7 @@ import type {
   AuthoringFeatureEffect,
 } from './effect-forms';
 import type {
+  ArchiveSetPlanToken,
   DraftRevision,
   HomebrewDraftItemUuid,
   HomebrewDraftUuid,
@@ -41,6 +42,7 @@ import type {
 } from './ids';
 
 export type {
+  ArchiveSetPlanToken,
   DraftRevision,
   HomebrewDraftItemUuid,
   HomebrewDraftUuid,
@@ -419,6 +421,39 @@ export interface AuthoringLibrary {
   readonly drafts: readonly HomebrewDraftSummary[];
 }
 
+export interface ArchiveSetCharacter {
+  readonly character_id: CharacterId;
+  readonly character_revision: CharacterRevision;
+  readonly character_name: string;
+}
+
+export interface ArchiveSetPlan {
+  readonly token: ArchiveSetPlanToken;
+  readonly operation: 'archive' | 'restore';
+  readonly content_key: ContentKey;
+  readonly content_kind: AuthoredContentKind;
+  readonly content_name: string;
+  readonly rules_edition: RulesEdition;
+  readonly archived_at: string | null;
+  readonly characters: readonly ArchiveSetCharacter[];
+}
+
+export interface ArchivedHomebrewSet {
+  readonly content_key: ContentKey;
+  readonly content_kind: AuthoredContentKind;
+  readonly content_name: string;
+  readonly rules_edition: RulesEdition;
+  readonly archived_at: string;
+  readonly characters: readonly ArchiveSetCharacter[];
+}
+
+export interface ArchiveSetResult {
+  readonly content_key: ContentKey;
+  readonly content_kind: AuthoredContentKind;
+  readonly archived_at: string | null;
+  readonly character_ids: readonly CharacterId[];
+}
+
 export interface BackgroundAuthoringReferenceOption {
   readonly content_key: ContentKey;
   readonly name: string;
@@ -518,6 +553,24 @@ export interface ContentUsageList {
   readonly content_kind: AuthoredContentKind;
   readonly content_key: ContentKey;
   readonly usages: readonly ContentUsage[];
+}
+
+export interface ReplacementSetPlan {
+  readonly old_content_key: ContentKey;
+  readonly new_content_key: ContentKey;
+  readonly replacements: readonly ReplacementPlan[];
+}
+
+export interface ReplacementSetCommit {
+  readonly token: ReplacementPlanToken;
+  readonly decisions: readonly ReplacementDecision[];
+  readonly choices: readonly ReplacementChoiceSelection[];
+}
+
+export interface ReplacementSetResult {
+  readonly old_content_key: ContentKey;
+  readonly new_content_key: ContentKey;
+  readonly replacements: readonly ReplacementResult[];
 }
 
 export interface ReplacementChange {
@@ -697,6 +750,11 @@ export type AuthoringErrorData =
       readonly actual_revision: CharacterRevision;
     }
   | {
+      readonly reason: 'stale_replacement_set_plan';
+      readonly old_content_key: ContentKey;
+      readonly new_content_key: ContentKey;
+    }
+  | {
       readonly reason: 'replacement_choices_required';
       readonly choices: readonly ReplacementChoiceRequirement[];
     }
@@ -712,6 +770,18 @@ export type AuthoringErrorData =
         | 'character_reference_not_found'
         | 'unsupported_character_choices'
         | 'wrong_parent_class'
+        | 'commit_failed';
+    }
+  | {
+      readonly reason: 'stale_archive_set_plan';
+      readonly content_key: ContentKey;
+    }
+  | {
+      readonly reason: 'archive_set_refused';
+      readonly refusal:
+        | 'bundled_content'
+        | 'already_archived_character'
+        | 'incomplete_archive_set'
         | 'commit_failed';
     }
   | {

@@ -16,6 +16,7 @@ import { DatabaseContext } from '../../../src/db/database';
 import { RpcError } from '../../../src/rpc/protocol';
 import { parseRoute, Router } from '../../../src/ui/router';
 import type { ScreenContext } from '../../../src/ui/screen';
+import { homebrewReplacementPath } from '../../../src/ui/screens/homebrew/homebrew-routes';
 import {
   isStoredSpeciesDraft,
   renderSpeciesForm,
@@ -124,6 +125,13 @@ function client(overrides: Partial<AuthoringClient> = {}): AuthoringClient {
     usages: () => unused(),
     previewReplacement: () => unused(),
     commitReplacement: () => unused(),
+    previewReplacementSet: () => unused(),
+    commitReplacementSet: () => unused(),
+    previewArchiveSet: () => unused(),
+    commitArchiveSet: () => unused(),
+    listArchivedSets: () => unused(),
+    previewRestoreSet: () => unused(),
+    commitRestoreSet: () => unused(),
     ...overrides,
   };
 }
@@ -465,6 +473,47 @@ describe('HA-7 species authoring form', () => {
       }]);
       expect(elementText(root as unknown as Node)).toContain('Species published');
       expect(elementText(root as unknown as Node)).toContain('Homebrew');
+      cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('HA11-VERSION-RESULT routes an edited publication with usages to the explicit fix review', async () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const oldKey = 'expanded:content.species:version-old' as ContentKey;
+      const newKey = 'expanded:content.species:version-new' as ContentKey;
+      const navigated: string[] = [];
+      const screenContext = context(navigated);
+      const mount = document.createElement('div');
+      screenContext.root.append(mount);
+      const draft = { ...stored(), base_content_key: oldKey };
+      if (!isStoredSpeciesDraft(draft)) throw new Error('Species fixture did not narrow.');
+      const cleanup = renderSpeciesForm({
+        context: screenContext,
+        client: client({
+          previewPublish: async () => preview(),
+          commitPublish: async () => ({
+            outcome: 'created', content_key: newKey, name: 'Clockwork Voyager',
+            catalog_layer: 'external', previous_key_usage_count: 2,
+          }),
+        }),
+        mount,
+        draft,
+        windowObject: new EventTarget() as unknown as Window,
+      });
+      const root = interactiveElement(mount);
+      root.querySelector('form')?.dispatchEvent(new Event('submit', { cancelable: true }));
+      await settle();
+      button(root, 'Publish species').click();
+      await settle();
+      const fix = root.querySelectorAll('a').find(
+        (link) => link.textContent === 'Review character fixes',
+      );
+      expect(fix?.getAttribute('href')).toBe(homebrewReplacementPath(oldKey, newKey));
+      fix?.click();
+      expect(navigated).toEqual([homebrewReplacementPath(oldKey, newKey)]);
       cleanup();
     } finally {
       restoreDocument();

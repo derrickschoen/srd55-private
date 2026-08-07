@@ -2,12 +2,16 @@ import {
   AUTHORING_RPC,
   type ContentUsagesParams,
   type CommitReplacementParams,
+  type CommitReplacementSetParams,
+  type CommitArchiveSetParams,
+  type ContentLifecycleParams,
   type CreateDraftParams,
   type DiscardDraftParams,
   type CommitPublishParams,
   type InstallBundledHomebrewParams,
   type PreviewPublishParams,
   type PreviewReplacementParams,
+  type PreviewReplacementSetParams,
   type ReadDraftParams,
   type SaveDraftParams,
 } from '../../authoring/client';
@@ -19,6 +23,10 @@ import {
   CatalogAuthoringService,
   AuthoringServiceError,
 } from '../../authoring/draft-service';
+import {
+  ArchiveSetLifecycleError,
+  HomebrewArchiveSetService,
+} from '../../authoring/archive-set-lifecycle';
 import type { HomebrewDraft } from '../../authoring/contracts';
 import { AUTHORING_TEXT_LIMITS } from '../../authoring/limits';
 import type { JsonValue } from '../../domain/models';
@@ -156,8 +164,36 @@ function isCommitReplacementParams(value: unknown): value is CommitReplacementPa
     Array.isArray(value.choices) && value.choices.every(isReplacementChoice);
 }
 
+function isPreviewReplacementSetParams(
+  value: unknown,
+): value is PreviewReplacementSetParams {
+  return isRecord(value) &&
+    hasExactKeys(value, ['old_content_key', 'new_content_key']) &&
+    isBoundedKey(value.old_content_key) && isBoundedKey(value.new_content_key);
+}
+
+function isCommitReplacementSetParams(
+  value: unknown,
+): value is CommitReplacementSetParams {
+  return isRecord(value) &&
+    hasExactKeys(value, ['old_content_key', 'new_content_key', 'replacements']) &&
+    isBoundedKey(value.old_content_key) && isBoundedKey(value.new_content_key) &&
+    Array.isArray(value.replacements) &&
+    value.replacements.every(isCommitReplacementParams);
+}
+
+function isContentLifecycleParams(value: unknown): value is ContentLifecycleParams {
+  return isRecord(value) && hasExactKeys(value, ['content_key']) &&
+    isBoundedKey(value.content_key);
+}
+
+function isCommitArchiveSetParams(value: unknown): value is CommitArchiveSetParams {
+  return isRecord(value) && hasExactKeys(value, ['token']) &&
+    typeof value.token === 'string' && value.token.length > 0;
+}
+
 function authoringError(error: unknown): never {
-  if (error instanceof AuthoringServiceError) {
+  if (error instanceof AuthoringServiceError || error instanceof ArchiveSetLifecycleError) {
     throw new RpcError(
       'handler_error',
       error.message,
@@ -289,6 +325,77 @@ export const handlers: readonly RpcHandler[] = [
     ({ db }, params) => {
       try {
         return new CatalogAuthoringService(db).commitReplacement(params);
+      } catch (error) {
+        return authoringError(error);
+      }
+    },
+  ),
+  defineRpcHandler(
+    AUTHORING_RPC.previewReplacementSet,
+    isPreviewReplacementSetParams,
+    ({ db }, params) => {
+      try {
+        return new CatalogAuthoringService(db).previewReplacementSet(params);
+      } catch (error) {
+        return authoringError(error);
+      }
+    },
+  ),
+  defineRpcHandler(
+    AUTHORING_RPC.commitReplacementSet,
+    isCommitReplacementSetParams,
+    ({ db }, params) => {
+      try {
+        return new CatalogAuthoringService(db).commitReplacementSet(params);
+      } catch (error) {
+        return authoringError(error);
+      }
+    },
+  ),
+  defineRpcHandler(
+    AUTHORING_RPC.previewArchiveSet,
+    isContentLifecycleParams,
+    ({ db }, params) => {
+      try {
+        return new HomebrewArchiveSetService(db).previewArchive(params.content_key);
+      } catch (error) {
+        return authoringError(error);
+      }
+    },
+  ),
+  defineRpcHandler(
+    AUTHORING_RPC.commitArchiveSet,
+    isCommitArchiveSetParams,
+    ({ db }, params) => {
+      try {
+        return new HomebrewArchiveSetService(db).commitArchive(params.token);
+      } catch (error) {
+        return authoringError(error);
+      }
+    },
+  ),
+  defineRpcHandler(
+    AUTHORING_RPC.listArchivedSets,
+    isEmptyParams,
+    ({ db }) => new HomebrewArchiveSetService(db).listArchived(),
+  ),
+  defineRpcHandler(
+    AUTHORING_RPC.previewRestoreSet,
+    isContentLifecycleParams,
+    ({ db }, params) => {
+      try {
+        return new HomebrewArchiveSetService(db).previewRestore(params.content_key);
+      } catch (error) {
+        return authoringError(error);
+      }
+    },
+  ),
+  defineRpcHandler(
+    AUTHORING_RPC.commitRestoreSet,
+    isCommitArchiveSetParams,
+    ({ db }, params) => {
+      try {
+        return new HomebrewArchiveSetService(db).commitRestore(params.token);
       } catch (error) {
         return authoringError(error);
       }

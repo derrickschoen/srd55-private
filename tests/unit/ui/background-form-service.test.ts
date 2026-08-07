@@ -129,6 +129,13 @@ function client(service: CatalogAuthoringService): AuthoringClient {
     usages: (params) => rpcCall(() => service.usages(params.content_key)),
     previewReplacement: () => Promise.reject(new Error('Unused replacement preview.')),
     commitReplacement: () => Promise.reject(new Error('Unused replacement commit.')),
+    previewReplacementSet: () => Promise.reject(new Error('Unused replacement-set preview.')),
+    commitReplacementSet: () => Promise.reject(new Error('Unused replacement-set commit.')),
+    previewArchiveSet: () => Promise.reject(new Error('Unused archive preview.')),
+    commitArchiveSet: () => Promise.reject(new Error('Unused archive commit.')),
+    listArchivedSets: () => Promise.reject(new Error('Unused archive list.')),
+    previewRestoreSet: () => Promise.reject(new Error('Unused restore preview.')),
+    commitRestoreSet: () => Promise.reject(new Error('Unused restore commit.')),
   };
 }
 

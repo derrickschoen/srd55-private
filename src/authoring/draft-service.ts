@@ -44,6 +44,9 @@ import type {
   ReplacementDecision,
   ReplacementPlan,
   ReplacementResult,
+  ReplacementSetCommit,
+  ReplacementSetPlan,
+  ReplacementSetResult,
   SpeciesAuthoringDraft,
   StoredHomebrewDraft,
   SubclassAuthoringDraft,
@@ -643,6 +646,7 @@ export class CatalogAuthoringService {
          ON supersession.content_kind = identity.content_kind
         AND supersession.superseded_content_key = identity.content_key
        WHERE identity.catalog_layer = 'external'
+         AND identity.archived_at IS NULL
          AND identity.content_kind IN ('species', 'background', 'subclass')
          AND (
            species.content_key IS NOT NULL
@@ -929,6 +933,7 @@ export class CatalogAuthoringService {
            JOIN character_source_instances AS source ON source.character_id = character.id
            JOIN ${definitionTable} AS definition ON definition.id = source.source_definition_id
            WHERE source.source_type = ? AND definition.content_key = ?
+             AND source.state = 'active'
            ORDER BY character.id`,
           [identity, contentKey],
           usageCodec,
@@ -979,5 +984,72 @@ export class CatalogAuthoringService {
     } catch (error) {
       return replacementServiceError(error);
     }
+  }
+
+  previewReplacementSet(input: {
+    readonly old_content_key: ContentKey;
+    readonly new_content_key: ContentKey;
+  }): ReplacementSetPlan {
+    const usages = this.usages(input.old_content_key);
+    return Object.freeze({
+      old_content_key: input.old_content_key,
+      new_content_key: input.new_content_key,
+      replacements: Object.freeze(usages.usages.map((usage) =>
+        this.previewReplacement({
+          old_content_key: input.old_content_key,
+          new_content_key: input.new_content_key,
+          character_id: usage.character_id,
+        }))),
+    });
+  }
+
+  commitReplacementSet(input: {
+    readonly old_content_key: ContentKey;
+    readonly new_content_key: ContentKey;
+    readonly replacements: readonly ReplacementSetCommit[];
+  }): ReplacementSetResult {
+    return this.db.transaction(() => {
+      const fresh = this.previewReplacementSet(input);
+      if (
+        fresh.replacements.length !== input.replacements.length ||
+        fresh.replacements.some((plan, index) =>
+          plan.token !== input.replacements[index]?.token)
+      ) {
+        throw new AuthoringServiceError('The replacement-set plan is stale.', {
+          reason: 'stale_replacement_set_plan',
+          old_content_key: input.old_content_key,
+          new_content_key: input.new_content_key,
+        });
+      }
+      const replacements = input.replacements.map((replacement, index) => {
+        const reviewed = fresh.replacements[index];
+        if (reviewed === undefined) throw new Error('Replacement-set plan is incomplete.');
+        // Each CI-7 commit may legitimately change global catalog/import-plan
+        // facts used by the next token. The set preview above authenticates the
+        // exact reviewed members; refresh only the transport token immediately
+        // before composing the existing commit seam inside this transaction.
+        const current = this.previewReplacement({
+          old_content_key: reviewed.facts.old_content_key,
+          new_content_key: reviewed.facts.new_content_key,
+          character_id: reviewed.facts.character_id,
+        });
+        if (
+          current.review.length !== reviewed.review.length ||
+          current.review.some((candidate, reviewIndex) =>
+            candidate.candidate_content_key !==
+              reviewed.review[reviewIndex]?.candidate_content_key)
+        ) {
+          throw new AuthoringServiceError('The replacement-set review changed.', {
+            reason: 'invalid_reference',
+          });
+        }
+        return this.commitReplacement({ ...replacement, token: current.token });
+      });
+      return Object.freeze({
+        old_content_key: input.old_content_key,
+        new_content_key: input.new_content_key,
+        replacements: Object.freeze(replacements),
+      });
+    });
   }
 }

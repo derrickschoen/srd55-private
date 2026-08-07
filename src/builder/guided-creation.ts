@@ -830,8 +830,9 @@ export function listGuidedOriginOptions(
           AND identity.content_key = template.content_key
          LEFT JOIN background_definitions AS definition
            ON definition.content_key = template.content_key
-         WHERE identity.catalog_layer = 'bundled'
-            OR definition.content_key IS NOT NULL
+         WHERE identity.archived_at IS NULL
+           AND (identity.catalog_layer = 'bundled'
+             OR definition.content_key IS NOT NULL)
          ORDER BY template.name, template.content_key`,
         undefined,
         (row) => ({
@@ -856,8 +857,9 @@ export function listGuidedOriginOptions(
         AND identity.content_key = template.content_key
        LEFT JOIN species_definitions AS definition
          ON definition.content_key = template.content_key
-       WHERE identity.catalog_layer = 'bundled'
-          OR definition.content_key IS NOT NULL
+       WHERE identity.archived_at IS NULL
+         AND (identity.catalog_layer = 'bundled'
+           OR definition.content_key IS NOT NULL)
        ORDER BY template.name, template.content_key`,
       undefined,
       (row) => ({
@@ -896,6 +898,7 @@ function gateInstalledSpecies(
      LEFT JOIN species_definitions AS definition
        ON definition.content_key = template.content_key
      WHERE template.content_key = ?
+       AND identity.archived_at IS NULL
        AND (identity.catalog_layer = 'bundled' OR definition.content_key IS NOT NULL)`,
     [contentKey],
     speciesTemplateRow,
@@ -976,6 +979,7 @@ function gateInstalledBackground(
      LEFT JOIN background_definitions AS definition
        ON definition.content_key = template.content_key
      WHERE template.content_key = ?
+       AND identity.archived_at IS NULL
        AND (identity.catalog_layer = 'bundled' OR definition.content_key IS NOT NULL)`,
     [contentKey],
     backgroundTemplateRow,
@@ -1422,9 +1426,10 @@ export function listGuidedBackgroundChoiceOptions(
         AND identity.content_key = template.content_key
        LEFT JOIN background_definitions AS definition
          ON definition.content_key = template.content_key
-       WHERE identity.catalog_layer IS NULL
-          OR identity.catalog_layer = 'bundled'
-          OR definition.content_key IS NOT NULL
+       WHERE identity.archived_at IS NULL
+         AND (identity.catalog_layer IS NULL
+           OR identity.catalog_layer = 'bundled'
+           OR definition.content_key IS NOT NULL)
        ORDER BY template.name, template.content_key`,
       undefined,
       (row) => ({

@@ -19,6 +19,7 @@ import {
   applyGuidedOrigin,
   createGuidedCharacter,
   listGuidedClassOptions,
+  listGuidedOriginOptions,
 } from '../../../src/builder/guided-creation';
 import { planContentImport, commitContentImport } from '../../../src/catalog/content-adoption';
 import { deriveContentIdentityV1 } from '../../../src/catalog/content-identity';
@@ -42,6 +43,7 @@ import {
   interactiveElement,
 } from '../../fixtures/interactive-dom';
 import type { SubclassAuthoringDraft } from '../../../src/authoring/contracts';
+import { CharacterListBuilder } from '../../../src/queries/character-list-builder';
 
 let harness: RpcHarness | undefined;
 let client: RpcClient | undefined;
@@ -747,4 +749,323 @@ describe('catalog authoring RPC handlers', () => {
       source_state: 'tombstoned',
     });
   }, 20_000);
+
+  it('HA11-ROUTE-SET composes CI-7 apply-to-all atomically through the public worker route', async () => {
+    const rpc = await open();
+    client = new RpcClient(new WorkerTransport(rpc.context));
+    const authoring = createAuthoringClient(client);
+    const service = new CatalogAuthoringService(rpc.context.db, {
+      randomUuid: (() => {
+        let sequence = 0;
+        return () => `ha11-route-set-${String(++sequence)}`;
+      })(),
+      now: () => '2042-08-10T11:12:13.000Z',
+    });
+    const predecessor = publishSpecies(service, 'Route Set Species', 30);
+    const neighbour = publishSpecies(service, 'Route Set Neighbour', 35);
+    const versionDraft = service.createDraft({
+      content_kind: 'species',
+      base_content_key: predecessor.content_key,
+    });
+    if (versionDraft.document.kind !== 'species') throw new Error('Species draft required.');
+    const savedVersion = service.saveDraft({
+      draft_uuid: versionDraft.draft_uuid,
+      expected_revision: versionDraft.revision,
+      document: {
+        ...versionDraft.document,
+        name: 'Route Set Species Revised',
+        walking_speed_feet: 40,
+      },
+    });
+    const versionPreview = service.previewPublish({
+      draft_uuid: savedVersion.draft_uuid,
+      expected_revision: savedVersion.revision,
+    });
+    const successor = service.commitPublish({ token: versionPreview.token, decisions: [] });
+    const classOption = listGuidedClassOptions(rpc.context.db)[0];
+    if (classOption === undefined) throw new Error('Seeded class option missing.');
+    const first = createGuidedCharacter(
+      rpc.context.db,
+      { name: 'Route Set First', class_content_key: classOption.content_key },
+      new CharacterCommandIntegrity('ha11-route-set-first'),
+    );
+    const second = createGuidedCharacter(
+      rpc.context.db,
+      { name: 'Route Set Second', class_content_key: classOption.content_key },
+      new CharacterCommandIntegrity('ha11-route-set-second'),
+    );
+    const adjacent = createGuidedCharacter(
+      rpc.context.db,
+      { name: 'Route Set Adjacent', class_content_key: classOption.content_key },
+      new CharacterCommandIntegrity('ha11-route-set-adjacent'),
+    );
+    for (const character of [first, second]) {
+      applyGuidedOrigin(rpc.context.db, {
+        character_id: character.id,
+        kind: 'species',
+        content_key: predecessor.content_key,
+      });
+    }
+    applyGuidedOrigin(rpc.context.db, {
+      character_id: adjacent.id,
+      kind: 'species',
+      content_key: neighbour.content_key,
+    });
+
+    const setPreview = await authoring.previewReplacementSet({
+      old_content_key: predecessor.content_key,
+      new_content_key: successor.content_key,
+    });
+    expect(setPreview.replacements.map((replacement) => ({
+      id: replacement.facts.character_id,
+      before: replacement.changes[0]?.before,
+      after: replacement.changes[0]?.after,
+    }))).toEqual([
+      { id: first.id, before: 'Route Set Species', after: 'Route Set Species Revised' },
+      { id: second.id, before: 'Route Set Species', after: 'Route Set Species Revised' },
+    ]);
+    const commits = setPreview.replacements.map((replacement) => ({
+      token: replacement.token,
+      decisions: replacement.review.map((review) => ({
+        candidate_content_key: review.candidate_content_key,
+        decision: 'match' as const,
+      })),
+      choices: [],
+    }));
+    rpc.context.db.exec(
+      `CREATE TEMP TRIGGER ha11_refuse_second_retarget
+       BEFORE UPDATE OF revision ON characters
+       WHEN OLD.id = ${String(second.id)}
+       BEGIN SELECT RAISE(ABORT, 'HA11 injected second retarget failure'); END`,
+    );
+    await expect(authoring.commitReplacementSet({
+      old_content_key: predecessor.content_key,
+      new_content_key: successor.content_key,
+      replacements: commits,
+    })).rejects.toMatchObject({ data: { reason: 'replacement_refused', refusal: 'commit_failed' } });
+    expect(service.usages(predecessor.content_key).usages.map((usage) => usage.character_id))
+      .toEqual([first.id, second.id]);
+    expect(service.usages(successor.content_key).usages).toEqual([]);
+    rpc.context.db.exec('DROP TRIGGER ha11_refuse_second_retarget');
+
+    expect(await authoring.commitReplacementSet({
+      old_content_key: predecessor.content_key,
+      new_content_key: successor.content_key,
+      replacements: commits,
+    })).toMatchObject({ replacements: [{ character_id: first.id }, { character_id: second.id }] });
+    expect(service.usages(predecessor.content_key).usages).toEqual([]);
+    expect(service.usages(successor.content_key).usages.map((usage) => usage.character_id))
+      .toEqual([first.id, second.id]);
+    expect(service.usages(neighbour.content_key).usages.map((usage) => usage.character_id))
+      .toEqual([adjacent.id]);
+  }, 20_000);
+
+  it('HA11-ROUTE-ARCHIVE archives and restores one complete set with no partial path or adjacent deletion', async () => {
+    const rpc = await open();
+    client = new RpcClient(new WorkerTransport(rpc.context));
+    const authoring = createAuthoringClient(client);
+    const service = new CatalogAuthoringService(rpc.context.db, {
+      randomUuid: (() => {
+        let sequence = 0;
+        return () => `ha11-archive-${String(++sequence)}`;
+      })(),
+      now: () => '2042-08-11T12:13:14.000Z',
+    });
+    const target = publishSpecies(service, 'Archive Target', 30);
+    const neighbour = publishSpecies(service, 'Archive Neighbour', 35);
+    const sameNameDraft = service.createDraft({ content_kind: 'species' });
+    const sameNameAggregate = speciesDraftToAggregate(
+      rpc.context.db,
+      completeSpecies(sameNameDraft, 'Archive Target', 45),
+    );
+    const sameNameKey = 'expanded:other.owner:archive-target' as ContentKey;
+    const sameNameNode = portableSourceContentImportNode(
+      rpc.context.db,
+      sameNameAggregate,
+      sameNameKey,
+    );
+    const sameNamePlan = planContentImport(rpc.context.db, [sameNameNode]);
+    expect(commitContentImport(rpc.context.db, {
+      nodes: [sameNameNode], token: sameNamePlan.token,
+    }).kind).toBe('committed');
+    const classOption = listGuidedClassOptions(rpc.context.db)[0];
+    if (classOption === undefined) throw new Error('Seeded class option missing.');
+    const first = createGuidedCharacter(
+      rpc.context.db,
+      { name: 'Archive First', class_content_key: classOption.content_key },
+      new CharacterCommandIntegrity('ha11-archive-first'),
+    );
+    const second = createGuidedCharacter(
+      rpc.context.db,
+      { name: 'Archive Second', class_content_key: classOption.content_key },
+      new CharacterCommandIntegrity('ha11-archive-second'),
+    );
+    const unrelated = createGuidedCharacter(
+      rpc.context.db,
+      { name: 'Archive Unrelated', class_content_key: classOption.content_key },
+      new CharacterCommandIntegrity('ha11-archive-unrelated'),
+    );
+    for (const character of [first, second]) {
+      applyGuidedOrigin(rpc.context.db, {
+        character_id: character.id,
+        kind: 'species',
+        content_key: target.content_key,
+      });
+    }
+    applyGuidedOrigin(rpc.context.db, {
+      character_id: unrelated.id,
+      kind: 'species',
+      content_key: neighbour.content_key,
+    });
+
+    const preview = await authoring.previewArchiveSet({ content_key: target.content_key });
+    expect(preview.characters.map((character) => character.character_id))
+      .toEqual([first.id, second.id]);
+    rpc.context.db.exec(
+      `CREATE TEMP TRIGGER ha11_refuse_second_archive
+       BEFORE UPDATE OF archived_at ON characters
+       WHEN OLD.id = ${String(second.id)} AND NEW.archived_at IS NOT NULL
+       BEGIN SELECT RAISE(ABORT, 'HA11 injected second archive failure'); END`,
+    );
+    await expect(authoring.commitArchiveSet({ token: preview.token }))
+      .rejects.toMatchObject({ data: { reason: 'archive_set_refused', refusal: 'commit_failed' } });
+    expect(rpc.context.db.scalar<string>(
+      'SELECT archived_at FROM catalog_content_identities WHERE content_key = ?',
+      [target.content_key],
+    )).toBeNull();
+    expect(rpc.context.db.allRaw(
+      'SELECT id, archived_at FROM characters WHERE id IN (?, ?) ORDER BY id',
+      [first.id, second.id],
+    )).toEqual([
+      { id: first.id, archived_at: null },
+      { id: second.id, archived_at: null },
+    ]);
+    rpc.context.db.exec('DROP TRIGGER ha11_refuse_second_archive');
+
+    const archived = await authoring.commitArchiveSet({ token: preview.token });
+    expect(archived.character_ids).toEqual([first.id, second.id]);
+    expect(archived.archived_at).not.toBeNull();
+    const archivedAt = archived.archived_at;
+    if (archivedAt === null) throw new Error('Archive timestamp missing.');
+    expect((await authoring.list()).published.map((entry) => entry.content_key))
+      .not.toContain(target.content_key);
+    expect(new CharacterListBuilder(rpc.context.db).build().map((character) => character.id))
+      .toEqual([unrelated.id]);
+    expect(listGuidedOriginOptions(rpc.context.db, 'species')
+      .map((option) => option.content_key)).not.toContain(target.content_key);
+    expect(() => applyGuidedOrigin(rpc.context.db, {
+      character_id: unrelated.id,
+      kind: 'species',
+      content_key: target.content_key,
+    })).toThrow(`The installed species "${target.content_key}" is incomplete or unavailable.`);
+    expect(service.usages(neighbour.content_key).usages.map((usage) => usage.character_id))
+      .toEqual([unrelated.id]);
+    expect(await authoring.listArchivedSets()).toEqual([
+      expect.objectContaining({
+        content_key: target.content_key,
+        characters: [
+          expect.objectContaining({ character_id: first.id }),
+          expect.objectContaining({ character_id: second.id }),
+        ],
+      }),
+    ]);
+    expect(rpc.context.db.allRaw(
+      `SELECT content_key, archived_at FROM catalog_content_identities
+       WHERE content_key IN (?, ?, ?) ORDER BY content_key`,
+      [target.content_key, neighbour.content_key, sameNameKey],
+    )).toEqual([
+      { content_key: sameNameKey, archived_at: null },
+      { content_key: neighbour.content_key, archived_at: null },
+      { content_key: target.content_key, archived_at: archivedAt },
+    ].sort((left, right) => left.content_key.localeCompare(right.content_key)));
+    expect(rpc.context.db.oneRaw(
+      'SELECT id, archived_at FROM characters WHERE id = ?', [unrelated.id],
+    )).toEqual({ id: unrelated.id, archived_at: null });
+
+    rpc.context.db.exec(
+      'UPDATE characters SET archived_at = ? WHERE id = ?',
+      ['2042-01-01T00:00:00.000Z', second.id],
+    );
+    await expect(authoring.previewRestoreSet({ content_key: target.content_key }))
+      .rejects.toMatchObject({
+        data: { reason: 'archive_set_refused', refusal: 'incomplete_archive_set' },
+      });
+    expect(rpc.context.db.scalar<string>(
+      'SELECT archived_at FROM catalog_content_identities WHERE content_key = ?',
+      [target.content_key],
+    )).toBe(archivedAt);
+    rpc.context.db.exec(
+      'UPDATE characters SET archived_at = ? WHERE id = ?',
+      [archivedAt, second.id],
+    );
+    const restore = await authoring.previewRestoreSet({ content_key: target.content_key });
+    rpc.context.db.exec(
+      `CREATE TEMP TRIGGER ha11_refuse_second_restore
+       BEFORE UPDATE OF archived_at ON characters
+       WHEN OLD.id = ${String(second.id)} AND NEW.archived_at IS NULL
+       BEGIN SELECT RAISE(ABORT, 'HA11 injected second restore failure'); END`,
+    );
+    await expect(authoring.commitRestoreSet({ token: restore.token }))
+      .rejects.toMatchObject({ data: { reason: 'archive_set_refused', refusal: 'commit_failed' } });
+    expect(rpc.context.db.scalar<string>(
+      'SELECT archived_at FROM catalog_content_identities WHERE content_key = ?',
+      [target.content_key],
+    )).toBe(archivedAt);
+    expect(rpc.context.db.allRaw(
+      'SELECT id, archived_at FROM characters WHERE id IN (?, ?) ORDER BY id',
+      [first.id, second.id],
+    )).toEqual([
+      { id: first.id, archived_at: archivedAt },
+      { id: second.id, archived_at: archivedAt },
+    ]);
+    rpc.context.db.exec('DROP TRIGGER ha11_refuse_second_restore');
+
+    expect(await authoring.commitRestoreSet({ token: restore.token })).toEqual({
+      content_key: target.content_key,
+      content_kind: 'species',
+      archived_at: null,
+      character_ids: [first.id, second.id],
+    });
+    expect(listGuidedOriginOptions(rpc.context.db, 'species')
+      .map((option) => option.content_key)).toContain(target.content_key);
+    expect(new CharacterListBuilder(rpc.context.db).build().map((character) => character.id))
+      .toEqual([first.id, second.id, unrelated.id]);
+    expect(rpc.context.db.allRaw(
+      'SELECT id, archived_at FROM characters WHERE id IN (?, ?, ?) ORDER BY id',
+      [first.id, second.id, unrelated.id],
+    )).toEqual([
+      { id: first.id, archived_at: null },
+      { id: second.id, archived_at: null },
+      { id: unrelated.id, archived_at: null },
+    ]);
+  }, 20_000);
+
+  it('HA11-UNREFERENCED-DELETE archives an unreferenced published creation and no neighbour', async () => {
+    const rpc = await open();
+    client = new RpcClient(new WorkerTransport(rpc.context));
+    const authoring = createAuthoringClient(client);
+    const service = new CatalogAuthoringService(rpc.context.db, {
+      randomUuid: (() => {
+        let sequence = 0;
+        return () => `ha11-unreferenced-${String(++sequence)}`;
+      })(),
+    });
+    const target = publishSpecies(service, 'Unreferenced Delete Target', 30);
+    const neighbour = publishSpecies(service, 'Unreferenced Delete Neighbour', 35);
+    const preview = await authoring.previewArchiveSet({ content_key: target.content_key });
+    expect(preview.characters).toEqual([]);
+    expect(await authoring.commitArchiveSet({ token: preview.token })).toMatchObject({
+      content_key: target.content_key,
+      character_ids: [],
+      archived_at: expect.any(String),
+    });
+    expect(rpc.context.db.allRaw(
+      `SELECT content_key, archived_at FROM catalog_content_identities
+       WHERE content_key IN (?, ?) ORDER BY content_key`,
+      [target.content_key, neighbour.content_key],
+    )).toEqual([
+      { content_key: neighbour.content_key, archived_at: null },
+      { content_key: target.content_key, archived_at: expect.any(String) },
+    ].sort((left, right) => left.content_key.localeCompare(right.content_key)));
+  });
 });
