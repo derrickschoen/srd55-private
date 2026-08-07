@@ -85,7 +85,7 @@ function applySubclass(db: DatabaseContext, contentKey: ContentKey, level: numbe
     [contentKey],
   );
   if (definition === null) throw new Error('Installed subclass definition is missing.');
-  const characterId = db.exec("INSERT INTO characters (name) VALUES ('Barbed Court Adept')")
+  const characterId = db.exec("INSERT INTO characters (name) VALUES ('Bundled Subclass Adept')")
     .lastInsertId;
   const classId = Number(definition.class_definition_id);
   const subclassId = Number(definition.id);
@@ -155,7 +155,16 @@ describe('bundled authored-kind installer', () => {
       spellcasting_ability: 'wisdom',
       progression_type: 'third_down',
     });
-    expect(report.caster.slots).toEqual([{ level: 1, count: 3 }]);
+    expect(db.allRaw(
+      `SELECT class_level FROM subclass_progressions
+       WHERE subclass_definition_id = ? ORDER BY class_level`,
+      [db.scalar<number>(
+        'SELECT id FROM subclass_definitions WHERE content_key = ?',
+        [outcome.contentKey],
+      )],
+    ).map((row) => Number(row.class_level))).toEqual(
+      Array.from({ length: 20 }, (_, index) => index + 1),
+    );
     expect(new SpellAccessBuilder(db).buildForCharacter(characterId).map((spell) => ({
       name: spell.spell_name,
       ability: spell.spellcasting_ability,
@@ -170,6 +179,22 @@ describe('bundled authored-kind installer', () => {
       { name: 'Prestidigitation', ability: 'wisdom', alwaysPrepared: true },
       { name: 'Vicious Mockery', ability: 'wisdom', alwaysPrepared: true },
     ]));
+  }, 20_000);
+
+  it('applies Spell Student through the publisher with its derived level-7 slots', async () => {
+    const db = await database();
+    const plan = planBundledHomebrewInstall(db);
+    const installed = commitBundledHomebrewInstall(db, plan.token);
+    if (installed.kind !== 'committed') throw new Error('Bundled catalog install failed.');
+    const outcome = installed.outcomes.find((candidate) =>
+      candidate.id === 'subclass:bundled:spell-student');
+    if (outcome === undefined || outcome.kind === 'refused' || outcome.kind === 'review') {
+      throw new Error('Spell Student install outcome is missing.');
+    }
+    const characterId = applySubclass(db, outcome.contentKey, 7);
+
+    expect(new BuildReportBuilder(db).build(characterId).caster.slots)
+      .toEqual([{ level: 1, count: 3 }]);
   }, 20_000);
 
   it('publishes registered changed bytes as a CI-7 successor and leaves the previous root in place', async () => {

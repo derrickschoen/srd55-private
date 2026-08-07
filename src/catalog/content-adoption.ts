@@ -7,12 +7,10 @@ import {
   CONTENT_FINGERPRINT_SCHEME_V1,
   contentKinds,
   deriveContentIdentityV1,
-  deriveContentIdentityV1FromNormalizedName,
   parseDerivedContentKeyV1,
   type ContentFingerprintDigest,
   type ContentFingerprintScheme,
   type ContentKind,
-  type NormalizedContentName,
 } from './content-identity';
 import { projectStoredContentV1 } from './stored-content-projector-v1';
 import {
@@ -445,26 +443,11 @@ function deriveDependencyGraph(
         continue;
       }
       try {
-        const registeredCanonical = db.scalar<string>(
-          `SELECT canonical_json FROM catalog_content_fingerprints
-           WHERE content_kind = ? AND content_key = ?
-             AND fingerprint_scheme = ? AND fingerprint_digest = ?
-             AND fingerprint_role IN ('current', 'compatible')`,
-          [reference.kind, contentKey, reference.scheme, reference.digest],
-        );
-        if (registeredCanonical === null) throw new ContentIdentityCollision();
-        const registered = JSON.parse(registeredCanonical) as unknown;
-        const normalizedName = registered !== null && typeof registered === 'object'
-          ? Reflect.get(registered, 'normalizedName')
-          : null;
-        if (typeof normalizedName !== 'string' || normalizedName === '') {
-          throw new ContentIdentityCollision();
-        }
         const stored = projectStoredContentV1(db, reference.kind, contentKey);
-        const liveIdentity = deriveContentIdentityV1FromNormalizedName({
+        const liveIdentity = deriveContentIdentityV1({
           kind: stored.kind,
           edition: stored.edition,
-          normalizedName: normalizedName as NormalizedContentName,
+          name: stored.name,
           payload: stored.payload,
         });
         targets.set(referenceKey, Object.freeze({

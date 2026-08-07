@@ -10,8 +10,18 @@ import {
   SRD_SPELL_READ_ONLY_MESSAGE,
 } from '../../../src/commands/srd-spell-policy';
 import { DatabaseContext } from '../../../src/db/database';
+import type { ContentKey } from '../../../src/domain/ids';
+import {
+  CONTENT_FINGERPRINT_SCHEME_V1,
+  deriveContentIdentityV1FromNormalizedName,
+  type ContentFingerprintDigest,
+  type NormalizedContentName,
+} from '../../../src/catalog/content-identity';
+import { storedContentMatchesFingerprintReferenceV1 } from '../../../src/catalog/stored-content-projector-v1';
+import { projectStoredSpellContentV1 } from '../../../src/catalog/spell-content-projector-v1';
 import {
   ensureBundledSpellContent,
+  installMissingBundledSpellContent,
   parseSrdSpellDescriptions,
   parseSrdSpellList,
   parseSrdSpellListMemberships,
@@ -26,6 +36,9 @@ const VERBATIM_ATTRIBUTION = `This work includes material from the System Refere
 https://www.dndbeyond.com/srd. The SRD 5.2 is licensed under the Creative
 Commons Attribution 4.0 International License, available at
 https://creativecommons.org/licenses/by/4.0/legalcode.`;
+
+const BANE_CONTENT_KEY = '2024:bane' as ContentKey;
+const DISSONANT_WHISPERS_CONTENT_KEY = '2024:dissonant-whispers' as ContentKey;
 
 const SPELL_LIST_FILES = {
   'bard-spell-list.txt': 129,
@@ -646,6 +659,120 @@ describe('SRD spell extracts', () => {
         'SELECT * FROM spell_list_memberships ORDER BY id',
       ),
     }).toEqual(before);
+    connection.close();
+  });
+
+  it('registers Dissonant Whispers with content-name normalization and matches its live fingerprint', async () => {
+    const connection = await openTestDatabase();
+    const db = new DatabaseContext(connection);
+    seedSpellContent(db);
+    reconcileBundledContentRegistryV1(db);
+    const registered = db.oneRaw(
+      `SELECT registry.normalized_name AS content_name,
+              identity.normalized_name AS catalog_name,
+              fingerprint.fingerprint_digest
+       FROM catalog_content_identities AS registry
+       JOIN spell_versions AS version USING (content_key)
+       JOIN spell_identities AS identity ON identity.id = version.spell_identity_id
+       JOIN catalog_content_fingerprints AS fingerprint USING (content_key)
+       WHERE registry.content_kind = 'spell'
+         AND registry.content_key = '2024:dissonant-whispers'
+         AND fingerprint.fingerprint_role = 'current'`,
+    );
+    expect(registered).toMatchObject({
+      content_name: 'dissonantwhispers',
+      catalog_name: 'dissonant whispers',
+    });
+    expect(storedContentMatchesFingerprintReferenceV1(
+      db,
+      DISSONANT_WHISPERS_CONTENT_KEY,
+      {
+        kind: 'spell',
+        scheme: CONTENT_FINGERPRINT_SCHEME_V1,
+        digest: String(registered?.fingerprint_digest) as ContentFingerprintDigest,
+      },
+    )).toBe(true);
+    connection.close();
+  });
+
+  it('rejects a Bane fingerprint after stored display-name drift to Command', async () => {
+    const connection = await openTestDatabase();
+    const db = new DatabaseContext(connection);
+    seedSpellContent(db);
+    reconcileBundledContentRegistryV1(db);
+    const digest = db.scalar<string>(
+      `SELECT fingerprint_digest FROM catalog_content_fingerprints
+       WHERE content_kind = 'spell' AND content_key = '2024:bane'
+         AND fingerprint_role = 'current'`,
+    );
+    if (digest === null) throw new Error('Bane current fingerprint is missing.');
+    db.exec(
+      `UPDATE spell_versions SET display_name = 'Command'
+       WHERE content_key = '2024:bane'`,
+    );
+
+    expect(storedContentMatchesFingerprintReferenceV1(
+      db,
+      BANE_CONTENT_KEY,
+      {
+        kind: 'spell',
+        scheme: CONTENT_FINGERPRINT_SCHEME_V1,
+        digest: digest as ContentFingerprintDigest,
+      },
+    )).toBe(false);
+    connection.close();
+  });
+
+  it('wipes and reseeds pre-fix multiword spell fingerprints on an existing development image', async () => {
+    const connection = await openTestDatabase();
+    const db = new DatabaseContext(connection);
+    seedSpellContent(db);
+    reconcileBundledContentRegistryV1(db);
+    const stored = projectStoredSpellContentV1(db, DISSONANT_WHISPERS_CONTENT_KEY);
+    const oldIdentity = deriveContentIdentityV1FromNormalizedName({
+      kind: 'spell',
+      edition: stored.aggregate.rules_edition,
+      normalizedName: 'dissonant whispers' as NormalizedContentName,
+      payload: stored.payload,
+    });
+    db.exec(
+      `UPDATE catalog_content_identities SET normalized_name = 'dissonant whispers'
+       WHERE content_kind = 'spell' AND content_key = '2024:dissonant-whispers'`,
+    );
+    db.exec(
+      `UPDATE catalog_content_fingerprints
+       SET fingerprint_digest = ?, canonical_json = ?
+       WHERE content_kind = 'spell' AND content_key = '2024:dissonant-whispers'
+         AND fingerprint_role = 'current'`,
+      [oldIdentity.digest, oldIdentity.canonicalJson],
+    );
+
+    installMissingBundledSpellContent(db);
+    expect(db.oneRaw(
+      `SELECT normalized_name FROM catalog_content_identities
+       WHERE content_kind = 'spell' AND content_key = '2024:dissonant-whispers'`,
+    )).toEqual({ normalized_name: 'dissonantwhispers' });
+    expect(db.scalar<number>(
+      `SELECT count(*) FROM catalog_content_fingerprints
+       WHERE content_kind = 'spell' AND content_key = '2024:dissonant-whispers'`,
+    )).toBe(0);
+
+    reconcileBundledContentRegistryV1(db);
+    const correctedDigest = db.scalar<string>(
+      `SELECT fingerprint_digest FROM catalog_content_fingerprints
+       WHERE content_kind = 'spell' AND content_key = '2024:dissonant-whispers'
+         AND fingerprint_role = 'current'`,
+    );
+    expect(correctedDigest).not.toBe(oldIdentity.digest);
+    expect(storedContentMatchesFingerprintReferenceV1(
+      db,
+      DISSONANT_WHISPERS_CONTENT_KEY,
+      {
+        kind: 'spell',
+        scheme: CONTENT_FINGERPRINT_SCHEME_V1,
+        digest: correctedDigest as ContentFingerprintDigest,
+      },
+    )).toBe(true);
     connection.close();
   });
 
