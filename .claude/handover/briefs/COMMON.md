@@ -18,6 +18,18 @@ PROCESS RULES (all mandatory):
    list is a re-dispatch.
 2. No Vite ?raw import reachable from any Playwright spec's node-side
    EXECUTABLE import graph (type-only imports are fine).
+2b. THE COMPILE GATE IS `npm run build`, NOT `npx tsc -p tsconfig.app.json
+   --noEmit`. The app config does not typecheck test files the way
+   `tsc -b` (inside `npm run build`) does, so a green app-config tsc is
+   NOT evidence the build passes. Never report a compile gate green
+   without `npm run build`.
+   RECURRENCE LEDGER — the same TS2349 has now broken the build twice
+   (HA-8 4384474, HA-9 fix round 1), both times from the identical shape:
+   `let fn: ((v: T) => void) | null = null` assigned inside a callback,
+   narrowed to `never` at the call site. Use a holder object instead:
+   `const h: { fn: ((v: T) => void) | null } = { fn: null }`. If you write
+   a closure-assigned local of any kind in a test, run `npm run build`
+   before reporting.
 3. Run the FULL Playwright suite yourself on the PLAYWRIGHT_PORT given in
    the unit brief (env var is PLAYWRIGHT_PORT). Full vitest too. Paste real
    numbers. Other lanes run suites concurrently — contention is the norm;
