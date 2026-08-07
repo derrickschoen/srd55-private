@@ -5,6 +5,43 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-06 — Barbed Court: converted slots grant no new preparation, only upcasting
+
+Owner's ruling, verbatim:
+
+> Converting focus points to spells does not let you prepare new spells. Just
+> get the slots to let you upcast prepared 1,2,3,4 lvl spells up to fifth level
+
+Effect: the Focus-to-slot conversion creates slots only. The level of spell a
+Barbed Court monk may **prepare** is still governed by the third-caster slot
+table (3rd level from Monk 13, 4th from Monk 19), so a converted 5th-level slot
+can only be spent upcasting a prepared level 1–4 spell. This closes the
+preparation ambiguity flagged in the conversion entry below: *Hold Monster*,
+*Dominate Person*, *Mislead*, *Wall of Force* and every other level 5 spell
+remain out of reach.
+
+Measured consequence, recorded because it materially lowers the risk this
+session had flagged as the design's largest number:
+
+- **Most of this kit's signature spells do not upcast at all.** *Shield*,
+  *Mirror Image*, *Misty Step*, *Silence*, *Hypnotic Pattern*, *Fear* and
+  *Compulsion* have no higher-level clause, so paying 5 Focus for a 5th-level
+  slot buys them exactly what 1–3 Focus already bought. The 5th-level cap is
+  close to a trap for the granted list.
+- **Damage upcasts are also a bad trade**, because two base-level casts beat
+  one upcast at this rate: *Fireball* is 8d6 (28) for 3 Focus against 10d6 (35)
+  for 5; *Dissonant Whispers* is 3d6 (10.5) for 1 Focus against 7d6 (24.5) for
+  5. A rational player never upcasts for damage.
+- **Multi-target upcasts are the one live use, and they are genuinely strong:**
+  *Command* affects one additional creature per slot level above 1 (5 targets
+  at 5th) and *Hold Person* one per level above 2 (4 targets at 5th). Three to
+  four of those a day at Monk 17 is a real 5th-level-tier control button.
+- **The remaining exposure is the rate, not the cap.** At 1 Focus per spell
+  level with Short Rest recovery, Monk 13 still converts 39 Focus/day into as
+  many as **13 third-level castings**, against a Wizard 13's three 3rd-level
+  slots. The Monk-17 tier is largely self-limiting after this ruling; the
+  Monk-13 tier is not. The bound question stays open.
+
 ## 2026-08-06 — Barbed Court: the school names are guidance, not a restriction; Misty Step kept
 
 Owner's ruling, verbatim:
