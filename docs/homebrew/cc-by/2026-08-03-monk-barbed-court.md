@@ -41,19 +41,19 @@ D191. They are part of the subclass's power budget, not flavor beside it.
 **Cantrips known.** At Monk level 3, you know *Vicious Mockery* and
 *Prestidigitation*. At Monk level 10, you also know *Message*.
 
-All thirteen named spells are present in SRD 5.2.1: [*Bane*](../srd/full/srd-5.2.1.txt#L6848),
-[*Command*](../srd/full/srd-5.2.1.txt#L7162),
-[*Dissonant Whispers*](../srd/full/srd-5.2.1.txt#L7703),
-[*Hideous Laughter*](../srd/full/srd-5.2.1.txt#L8824),
-[*Enthrall*](../srd/full/srd-5.2.1.txt#L7950),
-[*Suggestion*](../srd/full/srd-5.2.1.txt#L10595),
-[*Hypnotic Pattern*](../srd/full/srd-5.2.1.txt#L8867),
-[*Tongues*](../srd/full/srd-5.2.1.txt#L10831),
-[*Compulsion*](../srd/full/srd-5.2.1.txt#L7210),
-[*Confusion*](../srd/full/srd-5.2.1.txt#L7181),
-[*Vicious Mockery*](../srd/full/srd-5.2.1.txt#L10963),
-[*Prestidigitation*](../srd/full/srd-5.2.1.txt#L9770), and
-[*Message*](../srd/full/srd-5.2.1.txt#L9417).
+All thirteen named spells are present in SRD 5.2.1: [*Bane*](../../srd/full/srd-5.2.1.txt#L6848),
+[*Command*](../../srd/full/srd-5.2.1.txt#L7162),
+[*Dissonant Whispers*](../../srd/full/srd-5.2.1.txt#L7703),
+[*Hideous Laughter*](../../srd/full/srd-5.2.1.txt#L8824),
+[*Enthrall*](../../srd/full/srd-5.2.1.txt#L7950),
+[*Suggestion*](../../srd/full/srd-5.2.1.txt#L10595),
+[*Hypnotic Pattern*](../../srd/full/srd-5.2.1.txt#L8867),
+[*Tongues*](../../srd/full/srd-5.2.1.txt#L10831),
+[*Compulsion*](../../srd/full/srd-5.2.1.txt#L7210),
+[*Confusion*](../../srd/full/srd-5.2.1.txt#L7181),
+[*Vicious Mockery*](../../srd/full/srd-5.2.1.txt#L10963),
+[*Prestidigitation*](../../srd/full/srd-5.2.1.txt#L9770), and
+[*Message*](../../srd/full/srd-5.2.1.txt#L9417).
 
 ### Monk third-caster spell slots
 
@@ -98,8 +98,8 @@ Proficiency Bonus.
 ## 3. Subclass Features
 
 The substantive feature schedule is 3, 6, 11, and 17, matching the SRD Monk
-and Warrior of the Open Hand schedule ([SRD Monk table](../srd/full/srd-5.2.1.txt#L3022)
-and [Open Hand](../srd/full/srd-5.2.1.txt#L3130)). Spellcasting is compact
+and Warrior of the Open Hand schedule ([SRD Monk table](../../srd/full/srd-5.2.1.txt#L3022)
+and [Open Hand](../../srd/full/srd-5.2.1.txt#L3130)). Spellcasting is compact
 support beside the level-3 engine.
 
 ### Level 3: Barbed Goad

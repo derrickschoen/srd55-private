@@ -74,7 +74,7 @@ The following tenets reproduce the binding creative inputs verbatim.
 The magic of your oath ensures you always have certain spells ready. When you
 reach a Paladin level specified in the Oath of Domination Spells table, you
 thereafter always have the listed spells prepared
-([SRD prepared-spell cadence](../srd/full/srd-5.2.1.txt#L3383)).
+([SRD prepared-spell cadence](../../srd/full/srd-5.2.1.txt#L3383)).
 
 | Paladin level | Spells |
 |---:|---|
@@ -85,22 +85,22 @@ thereafter always have the listed spells prepared
 | 17 | *Dominate Person*, *Dream* |
 
 The table is fixed by the owner. All ten spells are present in SRD 5.2.1:
-[*Command*](../srd/full/srd-5.2.1.txt#L7162),
-[*Bane*](../srd/full/srd-5.2.1.txt#L6848),
-[*Suggestion*](../srd/full/srd-5.2.1.txt#L10595),
-[*Augury*](../srd/full/srd-5.2.1.txt#L6769),
-[*Clairvoyance*](../srd/full/srd-5.2.1.txt#L7065),
-[*Slow*](../srd/full/srd-5.2.1.txt#L10376),
-[*Compulsion*](../srd/full/srd-5.2.1.txt#L7210),
-[*Divination*](../srd/full/srd-5.2.1.txt#L7733),
-[*Dominate Person*](../srd/full/srd-5.2.1.txt#L7826), and
-[*Dream*](../srd/full/srd-5.2.1.txt#L7815).
+[*Command*](../../srd/full/srd-5.2.1.txt#L7162),
+[*Bane*](../../srd/full/srd-5.2.1.txt#L6848),
+[*Suggestion*](../../srd/full/srd-5.2.1.txt#L10595),
+[*Augury*](../../srd/full/srd-5.2.1.txt#L6769),
+[*Clairvoyance*](../../srd/full/srd-5.2.1.txt#L7065),
+[*Slow*](../../srd/full/srd-5.2.1.txt#L10376),
+[*Compulsion*](../../srd/full/srd-5.2.1.txt#L7210),
+[*Divination*](../../srd/full/srd-5.2.1.txt#L7733),
+[*Dominate Person*](../../srd/full/srd-5.2.1.txt#L7826), and
+[*Dream*](../../srd/full/srd-5.2.1.txt#L7815).
 
 ## 4. Subclass Features
 
 The feature schedule is 3, 7, 15, and 20, matching the SRD paladin schedule
-([SRD 5.2.1, Paladin Features](../srd/full/srd-5.2.1.txt#L3211) and
-[Oath of Devotion](../srd/full/srd-5.2.1.txt#L3364)). Oath spell access and one
+([SRD 5.2.1, Paladin Features](../../srd/full/srd-5.2.1.txt#L3211) and
+[Oath of Devotion](../../srd/full/srd-5.2.1.txt#L3364)). Oath spell access and one
 Channel Divinity option form the two-feature level-3 bundle; later levels each
 grant one feature.
 
@@ -164,7 +164,7 @@ follow the normal rules of Voice of Domination.
 **Unbroken Purpose.** You and your allies have Immunity to the Charmed
 condition while in your Aura of Protection. If a Charmed ally enters the aura,
 that condition has no effect on that ally while there
-([SRD aura wording](../srd/full/srd-5.2.1.txt#L3417)).
+([SRD aura wording](../../srd/full/srd-5.2.1.txt#L3417)).
 
 You can end these benefits early (no action required). The activation of Voice
 of Domination granted by this feature ends when Dominion Foretold ends.
@@ -203,12 +203,12 @@ more flexible than the prior draft.
 | Foreseen Formation | Tier 3 active support; rock | No at-will effect; one Reaction can move at most five creatures for a typical maximum Charisma modifier of +5 | Reaction; one Channel Divinity; no Concentration | Offered after an enemy succeeds against a listed spell; expected zero to two offers per session and chosen only when formation matters more than another Channel Divinity use | Target count uses the paladin's existing Charisma; range of eligible allies scales with the base aura; 15 Paladin levels required | C | Smite of Protection grants every ally in the aura Half Cover after Divine Smite until the next turn. Formation instead gives one immediate half-Speed move, costs a Reaction and Channel Divinity, and has no lasting AC or save bonus |
 | Dominion Foretold | Tier 4 transformation; rock | One 1-minute state; no direct damage | Bonus Action; activation includes the first Voice casting; later castings continue to occupy Bonus Actions; no Concentration | Once per Long Rest, reloadable with a level 5 slot; expected in one decisive scene; grants one Voice activation without spending Channel Divinity | Fixed 60-foot Truesight; base aura radius; level-20 gate; reload uses the parent spell engine | C/E/S | Holy Nimbus lasts 10 minutes, damages every enemy in the aura each turn, and adds a defense against two creature families. Dominion lasts one-tenth as long and deals no damage; it modestly upgrades Voice only by waiving its Channel Divinity cost, while Truesight and temporary Charm immunity carry the rest of the capstone budget |
 
-The comparator rules are at [Sacred Weapon and Aura of Devotion](../srd/full/srd-5.2.1.txt#L3400),
-[Smite of Protection](../srd/full/srd-5.2.1.txt#L3427), and
-[Holy Nimbus](../srd/full/srd-5.2.1.txt#L3434). The paladin's native Channel
-Divinity count and recovery are at [lines 3267–3306](../srd/full/srd-5.2.1.txt#L3267),
+The comparator rules are at [Sacred Weapon and Aura of Devotion](../../srd/full/srd-5.2.1.txt#L3400),
+[Smite of Protection](../../srd/full/srd-5.2.1.txt#L3427), and
+[Holy Nimbus](../../srd/full/srd-5.2.1.txt#L3434). The paladin's native Channel
+Divinity count and recovery are at [lines 3267–3306](../../srd/full/srd-5.2.1.txt#L3267),
 and Divine Smite's Bonus Action timing is at
-[lines 7767–7782](../srd/full/srd-5.2.1.txt#L7767).
+[lines 7767–7782](../../srd/full/srd-5.2.1.txt#L7767).
 
 ### Explicit numerical checks
 

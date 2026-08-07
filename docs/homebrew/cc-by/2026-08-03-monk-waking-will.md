@@ -41,19 +41,19 @@ subclass's power budget, not flavor beside it.
 Monk level 10, you also know *Guidance*.
 
 All thirteen named spells are present in SRD 5.2.1:
-[*Comprehend Languages*](../srd/full/srd-5.2.1.txt#L7195),
-[*Expeditious Retreat*](../srd/full/srd-5.2.1.txt#L8008),
-[*Longstrider*](../srd/full/srd-5.2.1.txt#L9199),
-[*Shield*](../srd/full/srd-5.2.1.txt#L10287),
-[*Blur*](../srd/full/srd-5.2.1.txt#L6977),
-[*Detect Thoughts*](../srd/full/srd-5.2.1.txt#L7595),
-[*Gaseous Form*](../srd/full/srd-5.2.1.txt#L8443),
-[*Haste*](../srd/full/srd-5.2.1.txt#L8727),
-[*Freedom of Movement*](../srd/full/srd-5.2.1.txt#L8446),
-[*Stoneskin*](../srd/full/srd-5.2.1.txt#L10542),
-[*Mage Hand*](../srd/full/srd-5.2.1.txt#L9164),
-[*Message*](../srd/full/srd-5.2.1.txt#L9417), and
-[*Guidance*](../srd/full/srd-5.2.1.txt#L8696).
+[*Comprehend Languages*](../../srd/full/srd-5.2.1.txt#L7195),
+[*Expeditious Retreat*](../../srd/full/srd-5.2.1.txt#L8008),
+[*Longstrider*](../../srd/full/srd-5.2.1.txt#L9199),
+[*Shield*](../../srd/full/srd-5.2.1.txt#L10287),
+[*Blur*](../../srd/full/srd-5.2.1.txt#L6977),
+[*Detect Thoughts*](../../srd/full/srd-5.2.1.txt#L7595),
+[*Gaseous Form*](../../srd/full/srd-5.2.1.txt#L8443),
+[*Haste*](../../srd/full/srd-5.2.1.txt#L8727),
+[*Freedom of Movement*](../../srd/full/srd-5.2.1.txt#L8446),
+[*Stoneskin*](../../srd/full/srd-5.2.1.txt#L10542),
+[*Mage Hand*](../../srd/full/srd-5.2.1.txt#L9164),
+[*Message*](../../srd/full/srd-5.2.1.txt#L9417), and
+[*Guidance*](../../srd/full/srd-5.2.1.txt#L8696).
 
 ### Monk third-caster spell slots
 
@@ -97,8 +97,8 @@ Proficiency Bonus.
 ## 3. Subclass Features
 
 The substantive feature schedule is 3, 6, 11, and 17, matching the SRD Monk
-and Warrior of the Open Hand schedule ([SRD Monk table](../srd/full/srd-5.2.1.txt#L3022)
-and [Open Hand](../srd/full/srd-5.2.1.txt#L3130)). Spellcasting is compact
+and Warrior of the Open Hand schedule ([SRD Monk table](../../srd/full/srd-5.2.1.txt#L3022)
+and [Open Hand](../../srd/full/srd-5.2.1.txt#L3130)). Spellcasting is compact
 support beside the level-3 engine.
 
 ### Level 3: Unbroken Motion

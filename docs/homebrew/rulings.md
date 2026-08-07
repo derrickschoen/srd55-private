@@ -5,6 +5,102 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-06 — homebrew/ split by licence; OGL quarantine built; Barbed Court cleared against the 3.5 SRD
+
+Owner's rulings, verbatim:
+
+> Make an ogl separate folder and include the 3 and 3.5 srd
+
+> Maybe make subfolders for different licenses in homebrew.
+> Put the psionic fist in the ogl subfolder with the 3 and 3.5 srd and the
+> appropriate attributes and licenses.
+> Put the non 3e/3.5 subclasses in a appropriately named folder as long as they
+> do not have any ogl content in them
+
+> Double check the barbed court monk for similarities to ogl prestige classes
+
+> Maybe zip the rtf files
+
+> Research how the license works converting an ogl prestige class into a 5.2
+> cc-4 srd compatible subclass
+
+**Scope note.** This session was framed "nothing outside `docs/homebrew/`". The
+owner directed the work; placing the quarantine at `docs/homebrew/ogl/` rather
+than `docs/ogl/` keeps it inside the session boundary and is permitted by D176's
+own wording ("docs/ogl/ **unless implementation finds better**").
+
+### Applied
+
+- `docs/homebrew/cc-by/` — the ten subclass docs and inputs moved by `git mv`,
+  with their relative SRD links repaired (`../srd/` → `../../srd/`). Carries
+  CC-BY-4.0 and the SRD 5.2 notice; no OGL content, no Section 15 chain.
+- `docs/homebrew/ogl/` — `OGL-1.0a.txt` (verbatim), `SECTION-15.md` (the
+  copyright chain), `README.md` (quarantine rules), `LICENSING.md` (the research
+  below), and `srd-3.5/` with the SRD zipped, its `Legal.txt`, the extracted
+  Psionic Fist text, and a `SOURCE.md` carrying URL, size, SHA-256 and a
+  re-derivation recipe.
+- The 3.5 SRD was **fetched, not written from memory** — Wizards' own download
+  paths are dead (404) and the Open Gaming Foundation's SRD page now reads only
+  "This page is no longer maintained." The surviving official RTF distribution
+  is the Internet Archive item `dnd35srd`; SHA-256
+  `a8ccb96c8acbe0c9f70aaa04157433bb8f71f31cfcf6c74fc32043d88bab95ea`. Committed
+  zipped per the owner's suggestion (2.3 MB rather than 20 MB expanded).
+
+### Licensing research — the headline
+
+**There is no conversion path. OGL content cannot become CC-BY.** OGL 1.0a §2:
+"No other terms or conditions may be applied to any Open Game Content
+distributed using this License." The 3.5 SRD's own legal file says permission is
+granted "**solely** through the use of the Open Gaming License."
+
+What is actually available is the idea/expression line: copyright does not
+protect systems (17 U.S.C. §102(b)), so reusing a *concept* and writing original
+expression never triggers the OGL, while reusing *text, names, tables or number
+sequences* does. Three routes, set out in full in `ogl/LICENSING.md`: clean-room
+concept-only shipping CC-BY (what D193 did for Waking Will); genuine adaptation
+shipping OGL and staying in the quarantine; or building native from SRD 5.2.1
+alone.
+
+One finding worth flagging: **"Psionic Fist" is Open Game Content, not Product
+Identity.** The 3.5 SRD's legal file designates a specific PI list — D&D, d20,
+beholder, illithid and so on — then says "all of the rest of the SRD is Open
+Game Content." So the name is usable **under the OGL**, and unusable in a CC-BY
+document.
+
+### Barbed Court cleared against the 3.5 SRD
+
+Checked by grepping the converted 3.5 SRD text, not from memory. Results:
+
+- **No taunt or forced-attack mechanic exists anywhere in the 3.5 SRD.** The
+  only match for "must attack" in the whole corpus is a cursed-item random
+  effect in `MagicItemsVI`. The goad and the duel-binding have **no OGL
+  prestige-class ancestor**.
+- **No "AC bonus while unarmoured" prestige-class text matched.** The nearest
+  analogues are Duelist's Canny Defense (Intelligence bonus to AC per class
+  level, melee weapon required) and Dwarven Defender's Defensive stance
+  (racial, alignment-gated, uses/day) — neither resembles Warding Image, which
+  is a flat +2 conditioned on a creature being goaded.
+- *Mirror image* and *displacement* appear only as monster spell-like
+  abilities, never as a prestige-class feature.
+- Psionic Fist itself: monk-ability stacking, power points, bonus psionic feats.
+  No overlap with the Barbed Court's kit.
+
+**Verdict: clear.** The Barbed Court has no similarity to any OGL prestige class
+beyond the generic "martial character who also casts," which is a system and not
+protectable expression. It stays in `cc-by/`.
+
+### Outstanding
+
+- The **3.0 SRD** was not obtained in this sitting. No zip survives on Wizards,
+  the Internet Archive or the Wayback Machine; the only surviving copy is the
+  Open Gaming Foundation's individual RTFs in the Wayback Machine, being fetched
+  file-by-file. `ogl/srd-3.0/` is created but its contents and `SOURCE.md` are
+  pending, and it will be recorded as partial if the set is incomplete.
+- The Psionic Fist **conversion doc** itself is not written. The source extract
+  is staged at `ogl/srd-3.5/psionic-fist.txt`; the owner must first pick a route
+  from `ogl/LICENSING.md`, since Route A and Route B produce different documents
+  in different folders under different licences.
+
 ## 2026-08-06 — Barbed Court: every progression row realigned to the 3/6/11/17 subclass levels
 
 Owner's ruling, verbatim:
