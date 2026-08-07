@@ -788,7 +788,7 @@ test('planner parity flows persist override, clear, selection, acknowledgement, 
   await expect(page.getByText('Level 8 · revision 5')).toBeVisible();
 
   await page.getByLabel('Source to add').selectOption({
-    label: 'Magic Initiate',
+    label: 'Magic Initiate — SRD · bundled layer',
   });
   await page
     .getByRole('button', { name: 'Add Magic Initiate' })

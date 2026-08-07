@@ -101,6 +101,7 @@ const parentClasses: readonly GuidedClassOption[] = [{
   content_key: '2024:class:fighter' as ContentKey,
   name: 'Fighter',
   hit_die: 10,
+  catalog_layer: 'bundled',
 }];
 
 const library: AuthoringLibrary = {

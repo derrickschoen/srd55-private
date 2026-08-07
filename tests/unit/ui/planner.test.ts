@@ -32,9 +32,23 @@ import {
 } from '../../../src/ui/screens/planner/editors';
 import { CHARACTER_TEXT_LIMITS } from '../../../src/domain/character-limits';
 import {
+  elementText,
   installInteractiveDocument,
   interactiveElement,
 } from '../../fixtures/interactive-dom';
+
+const NOOP_EDITOR_ACTIONS: PlannerEditorActions = {
+  updateFlavor: () => undefined,
+  updateAbility: () => undefined,
+  updateLegacy: () => undefined,
+  updateClass: () => undefined,
+  removeClass: () => undefined,
+  addClass: () => undefined,
+  updateSourceList: () => undefined,
+  updateClassOrder: () => undefined,
+  addSource: () => undefined,
+  removeSource: () => undefined,
+};
 
 const unexpectedUndo: PlannerCommandClient['undo'] = async () => {
   throw new Error('Unexpected test undo.');
@@ -115,6 +129,7 @@ function workspace(
       },
       caster: { caster_level: 1, slots: [], pact_magic: null },
       classes: [],
+      catalog_sources: [],
       preparation_callout: 'Class levels set preparation limits.',
       access_routes: [],
       duplicate_assessments: [],
@@ -180,6 +195,74 @@ const emptyCompleteness: CompletenessResult = {
   items: [],
   catalog_gaps: [],
 };
+
+describe('planner catalog disclosure', () => {
+  it('renders hostile external subclass and source names inert with exact layers', () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const hostileSubclass = '</option><img data-ha10-planner-subclass src=x>';
+      const hostileSource = '</option><img data-ha10-planner-source src=x>';
+      const hostileHeldClass = '</strong><img data-ha10-planner-class src=x>';
+      const base = workspace(0, 10, false);
+      const disclosed: Workspace = {
+        ...base,
+        classes: [{
+          id: 1,
+          class_definition_id: 1,
+          subclass_definition_id: null,
+          level: 1,
+          name: hostileHeldClass,
+          catalog_layer: 'external',
+          subclass_name: null,
+          subclass_catalog_layer: null,
+          subclasses: [{ id: 9, name: hostileSubclass, catalog_layer: 'external' }],
+        }],
+        available_classes: [{ id: 2, name: 'Fighter', catalog_layer: 'bundled' }],
+        source_catalog: {
+          ...base.source_catalog,
+          feat: [{
+            id: 7,
+            content_key: 'expanded:content.feat:hostile',
+            name: hostileSource,
+            catalog_layer: 'external',
+            repeatable: false,
+            configuration_kind: 'none',
+          }],
+        },
+        removable_sources: [{
+          id: 70,
+          parent_source_instance_id: null,
+          source_type: 'feat',
+          source_definition_id: 7,
+          display_name: hostileSource,
+        }],
+      };
+      const rendered = interactiveElement(renderEditors({
+        workspace: disclosed,
+        actions: NOOP_EDITOR_ACTIONS,
+        disabled: false,
+      }));
+
+      const optionText = rendered.querySelectorAll('option').map((entry) => entry.textContent);
+      expect(optionText).toContain(
+        `${hostileSubclass} — Homebrew · external layer`,
+      );
+      expect(optionText).toContain('Fighter — SRD · bundled layer');
+      expect(optionText).toContain(`${hostileSource} — Homebrew · external layer`);
+      expect(elementText(rendered as unknown as Node)).toContain(
+        `${hostileSource} feat · Homebrew · external layer`,
+      );
+      expect(elementText(rendered as unknown as Node)).toContain(
+        `${hostileHeldClass} — Homebrew · external layer`,
+      );
+      expect(rendered.querySelector('[data-ha10-planner-subclass]')).toBeNull();
+      expect(rendered.querySelector('[data-ha10-planner-source]')).toBeNull();
+      expect(rendered.querySelector('[data-ha10-planner-class]')).toBeNull();
+    } finally {
+      restoreDocument();
+    }
+  });
+});
 
 describe('planner ability editor', () => {
   it('submits one complete Character details value and counts code points live', () => {

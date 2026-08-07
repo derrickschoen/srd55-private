@@ -56,6 +56,8 @@ import {
   compareSpellEntries,
   compareWizardSpellbookEntries,
 } from './build-report-ordering';
+import { catalogLayerDisclosure } from '../catalog/catalog-disclosure';
+import { characterCatalogDisclosures } from '../queries/character-catalog-disclosures';
 
 interface Character {
   readonly id: number;
@@ -80,6 +82,8 @@ interface ClassRow {
   readonly baseProgressionType: string;
   readonly subclassFraction: string | null;
   readonly subclassRounding: string | null;
+  readonly classCatalogLayer: ReturnType<typeof catalogLayerDisclosure>;
+  readonly subclassCatalogLayer: ReturnType<typeof catalogLayerDisclosure> | null;
 }
 
 interface ProgressionRow {
@@ -96,6 +100,8 @@ interface BuildClass {
   readonly progression_type: ProgressionType;
   readonly prepared_count: number;
   readonly max_preparable_level: number;
+  readonly class_catalog_layer: ReturnType<typeof catalogLayerDisclosure>;
+  readonly subclass_catalog_layer: ReturnType<typeof catalogLayerDisclosure> | null;
 }
 
 interface WizardSpellbookEntry {
@@ -206,6 +212,15 @@ function decodeClassRow(row: SqlRow): ClassRow {
     baseProgressionType: sqlString(row, 'progression_type'),
     subclassFraction: sqlNullableString(row, 'subclass_caster_fraction'),
     subclassRounding: sqlNullableString(row, 'subclass_caster_rounding'),
+    classCatalogLayer: catalogLayerDisclosure(
+      sqlNullableString(row, 'class_catalog_layer'),
+    ),
+    subclassCatalogLayer:
+      sqlNullableString(row, 'subclass_name') === null
+        ? null
+        : catalogLayerDisclosure(
+            sqlNullableString(row, 'subclass_catalog_layer'),
+          ),
   };
 }
 
@@ -474,6 +489,7 @@ export class BuildReportBuilder {
         pact_magic: pact,
       },
       classes,
+      catalog_sources: characterCatalogDisclosures(this.db, characterId),
       preparation_callout: preparationCallout(
         sharedSlots,
         pact,
@@ -508,12 +524,20 @@ export class BuildReportBuilder {
               class.progression_type, subclass.name AS subclass_name,
               subclass.spellcasting_ability AS subclass_spellcasting_ability,
               subclass.caster_fraction AS subclass_caster_fraction,
-              subclass.caster_rounding AS subclass_caster_rounding
+              subclass.caster_rounding AS subclass_caster_rounding,
+              class_identity.catalog_layer AS class_catalog_layer,
+              subclass_identity.catalog_layer AS subclass_catalog_layer
        FROM character_class_levels AS level
        INNER JOIN class_definitions AS class
          ON class.id = level.class_definition_id
+       LEFT JOIN catalog_content_identities AS class_identity
+         ON class_identity.content_kind = 'class'
+        AND class_identity.content_key = class.content_key
        LEFT JOIN subclass_definitions AS subclass
          ON subclass.id = level.subclass_definition_id
+       LEFT JOIN catalog_content_identities AS subclass_identity
+         ON subclass_identity.content_kind = 'subclass'
+        AND subclass_identity.content_key = subclass.content_key
        WHERE level.character_id = ?`,
       [characterId],
       decodeClassRow,
@@ -571,6 +595,8 @@ export class BuildReportBuilder {
         max_preparable_level:
           subclassProgression?.maxSpellLevel ??
           maxPreparableLevelForClass(contribution),
+        class_catalog_layer: row.classCatalogLayer,
+        subclass_catalog_layer: row.subclassCatalogLayer,
       });
     }
 

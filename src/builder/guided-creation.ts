@@ -77,6 +77,7 @@ import {
   bundledSourceContentKeys,
   isBundledSourceContentKey,
 } from '../catalog/bundled-source-membership';
+import { catalogLayerDisclosure } from '../catalog/catalog-disclosure';
 import {
   backgroundEffectsFromTemplate,
   backgroundFromTemplate,
@@ -564,8 +565,8 @@ const classIdentityRow: RowCodec<ClassIdentityRow> = (row) => ({
  * held by homebrew and skips that class). A key with no row is simply not
  * offered.
  *
- * CI-4a/HA-10 lifts this bundled-only boundary after imported class
- * aggregates have a complete application consumer.
+ * D133 keeps this boundary permanently bundled-only in v1. HA-10 widens the
+ * origin and subclass consumers, never this class picker.
  *
  * `hit_die` comes from `class_sheet_traits` via LEFT JOIN and the row can be
  * absent; a null stays null so the UI renders "unknown" (D33) — never the
@@ -591,7 +592,12 @@ export function listGuidedClassOptions(
       [...keys],
       bundledClassRow,
     )
-    .map(({ content_key, name, hit_die }) => ({ content_key, name, hit_die }));
+    .map(({ content_key, name, hit_die }) => ({
+      content_key,
+      name,
+      hit_die,
+      catalog_layer: 'bundled' as const,
+    }));
 }
 
 /**
@@ -711,17 +717,6 @@ export function createGuidedCharacter(
  */
 export type { GuidedApplyOriginResult };
 
-/**
- * THE BUNDLED ORIGIN IDENTITY IS CONTENT-KEY MEMBERSHIP, mirroring the class
- * gate. `species_templates` carries no provenance column either; the bundled
- * set is derived from the same SRD parse the seeder writes from, so the option
- * list and the apply gate cannot drift apart.
- */
-function bundledSpeciesKeys(db: DatabaseContext): readonly string[] {
-  return bundledSourceContentKeys('species', db);
-}
-
-/** The background twin (A5), derived from the same SRD parse the seeder uses. */
 const speciesTemplateRow: RowCodec<SpeciesTemplateRow> = (row) => ({
   id: sqlInteger(row, 'id'),
   content_key: sqlString(row, 'content_key'),
@@ -812,7 +807,7 @@ export function listGuidedOriginOptions(
       .map(({ content_key, name, catalog_layer }) => ({
         content_key,
         name,
-        catalog_layer: catalog_layer === 'external' ? 'external' as const : 'bundled' as const,
+        catalog_layer: catalogLayerDisclosure(catalog_layer),
         grants_lineage_spells: false,
       }));
   }
@@ -838,16 +833,16 @@ export function listGuidedOriginOptions(
     .map(({ content_key, name, catalog_layer }) => ({
       content_key,
       name,
-      catalog_layer: catalog_layer === 'external' ? 'external' as const : 'bundled' as const,
+      catalog_layer: catalogLayerDisclosure(catalog_layer),
       grants_lineage_spells: grantsLineageSpells(content_key),
     }));
 }
 
 /**
- * The origin gate, mirroring `gateBundledClass`. The seam's refusal vocabulary
- * has only `unknown_origin` for this path — there is no `origin_not_bundled` —
- * so a key outside the bundled set and a bundled key whose row is absent both
- * refuse with the same reason: neither is a species the guided builder knows.
+ * The origin gate accepts a bundled template or a complete external
+ * definition/template aggregate. The seam's refusal vocabulary has only
+ * `unknown_origin` for this path, so an incomplete or absent aggregate refuses
+ * with that reason rather than being partially applied.
  */
 function gateInstalledSpecies(
   db: DatabaseContext,
@@ -1371,12 +1366,10 @@ function deleteGuidedBackgroundSources(
 }
 
 /**
- * The background step's option data: every bundled background with its
- * printed pairing (the background's own DEFAULT, per D61/D68 never a
- * constraint), and
- * every bundled Origin feat the player may pick instead. Both lists follow
- * the class-options rule — a bundled key whose row was yielded to
- * user-authored content is simply not offered.
+ * The background step's option data: every bundled or complete external
+ * background with its printed pairing (the background's own DEFAULT, per
+ * D61/D68 never a constraint), and every mechanically offerable installed
+ * Origin feat the player may pick instead. Both carry the registry layer.
  */
 export function listGuidedBackgroundChoiceOptions(
   db: DatabaseContext,
@@ -1385,7 +1378,8 @@ export function listGuidedBackgroundChoiceOptions(
     .all(
       `SELECT template.content_key, template.name, template.ability_score_1,
               template.ability_score_2, template.ability_score_3,
-              template.feat_name, template.default_origin_feat_content_key
+              template.feat_name, template.default_origin_feat_content_key,
+              identity.catalog_layer
        FROM background_templates AS template
        JOIN catalog_content_identities AS identity
          ON identity.content_kind = 'background'
@@ -1407,11 +1401,15 @@ export function listGuidedBackgroundChoiceOptions(
           row,
           'default_origin_feat_content_key',
         ),
+        catalog_layer: catalogLayerDisclosure(
+          sqlNullableString(row, 'catalog_layer'),
+        ),
       }),
     )
     .map((template) => ({
       content_key: template.content_key,
       name: template.name,
+      catalog_layer: template.catalog_layer,
       pairing: printedPairing(template),
     }));
 
@@ -1433,18 +1431,20 @@ export function listGuidedBackgroundChoiceOptions(
     }),
   ).filter((feat) =>
     isGuidedOriginFeatOfferable(feat.catalog_layer, feat.grant_rules)
-  ).map(({ content_key, name }) => ({ content_key, name }));
+  ).map(({ content_key, name, catalog_layer }) => ({
+    content_key,
+    name,
+    catalog_layer: catalogLayerDisclosure(catalog_layer),
+  }));
 
   return { backgrounds, origin_feats: originFeats };
 }
 
 /**
- * The Origin-feat gate, `gateBundledBackground`'s shape with the feat
- * catalog. The seam's refusal vocabulary is a CLOSED union with no
- * feat-specific member — a gap reported with this dispatch — so both refusals
- * ride `unknown_origin`: the feat is part of applying the origin, and neither
- * a key outside the bundled Origin set nor a bundled key whose row was
- * yielded is a feat the guided builder knows.
+ * The Origin-feat gate admits each mechanically offerable installed feat from
+ * the same registry-backed list the picker displays. The seam's refusal
+ * vocabulary is a CLOSED union with no feat-specific member, so an unavailable
+ * key rides `unknown_origin`: the feat is part of applying the origin.
  */
 function gateInstalledOriginFeat(
   db: DatabaseContext,

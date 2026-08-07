@@ -38,6 +38,7 @@ import {
   backgroundFeatBaseName,
   MAGIC_INITIATE_LISTS,
 } from '../domain/background-feat-name';
+import type { CatalogLayerDisclosure } from '../catalog/catalog-disclosure';
 import { hasExactKeys } from './contracts';
 import { grantRuleConsumesConfig } from '../grants/grant-rule';
 
@@ -86,6 +87,7 @@ export const SKILLED_FEAT_CONTENT_KEY = '2024:feat:skilled';
 export interface GuidedOriginFeatOption {
   readonly content_key: string;
   readonly name: string;
+  readonly catalog_layer: CatalogLayerDisclosure;
 }
 
 /**
@@ -112,6 +114,7 @@ export interface BackgroundPrintedPairing {
 export interface GuidedBackgroundOption {
   readonly content_key: string;
   readonly name: string;
+  readonly catalog_layer: CatalogLayerDisclosure;
   readonly pairing: BackgroundPrintedPairing;
 }
 

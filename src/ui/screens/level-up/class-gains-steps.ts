@@ -13,6 +13,7 @@ import type {
   SubclassDefinitionId,
 } from '../../../domain/ids';
 import { element, listen, type Cleanup } from '../../dom';
+import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
 
 export type PendingEpicPath = 'resolve_now' | 'next_level';
 export type SubclassDraft =
@@ -353,13 +354,15 @@ export function createSubclassStep(options: {
     throw new Error('The subclass step requires a returned subclass choice.');
   }
   const choices = choice.options.map((subclass, index) => {
+    const disclosure = catalogLayerLabel(subclass.catalog_layer);
+    const accessibleName = `${subclass.name} — ${selectedClassName(options.selectedClass)}, ${subclass.rules_edition} rules — ${disclosure}`;
     const radio = element('input', {
       attributes: {
         id: `level-up-subclass-${String(index)}`,
         type: 'radio',
         name: 'level-up-subclass',
         value: String(subclass.subclass_definition_id),
-        'aria-label': `${subclass.name} — ${selectedClassName(options.selectedClass)}, ${subclass.rules_edition} rules`,
+        'aria-label': accessibleName,
         ...checkedAttributes(
           options.draft.kind === 'selected' &&
           options.draft.subclass_definition_id === subclass.subclass_definition_id,
@@ -379,7 +382,7 @@ export function createSubclassStep(options: {
     return element('label', { className: 'level-up-subclass-option' }, [
       radio,
       element('span', {
-        text: `${subclass.name} — ${selectedClassName(options.selectedClass)}, ${subclass.rules_edition} rules`,
+        text: accessibleName,
       }),
     ]);
   });

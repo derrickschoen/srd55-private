@@ -120,22 +120,23 @@ describe('guided class gate', () => {
       'Chronomancer',
     );
 
-    await expect(
-      rpcRegistry.dispatch(
-        {
-          id: 1,
-          method: GUIDED_RPC.create,
-          params: {
-            name: attemptedName,
-            class_content_key: homebrewContentKey,
-          },
+    const response = await rpcRegistry.dispatch(
+      {
+        id: 1,
+        method: GUIDED_RPC.create,
+        params: {
+          name: attemptedName,
+          class_content_key: homebrewContentKey,
         },
-        rpcHarness.context,
-      ),
-    ).resolves.toMatchObject({
+      },
+      rpcHarness.context,
+    );
+    expect(response).toEqual({
+      id: 1,
       ok: false,
       error: {
         code: 'handler_error',
+        message: '"Chronomancer" is not a bundled class; the guided builder does not guide homebrew classes.',
         data: {
           reason: 'class_not_bundled',
         } satisfies GuidedRefusalData,
@@ -154,22 +155,23 @@ describe('guided class gate', () => {
     const missingContentKey = 'test:class:no-such-row';
     const attemptedName = 'Unknown Refusal';
 
-    await expect(
-      rpcRegistry.dispatch(
-        {
-          id: 2,
-          method: GUIDED_RPC.create,
-          params: {
-            name: attemptedName,
-            class_content_key: missingContentKey,
-          },
+    const response = await rpcRegistry.dispatch(
+      {
+        id: 2,
+        method: GUIDED_RPC.create,
+        params: {
+          name: attemptedName,
+          class_content_key: missingContentKey,
         },
-        rpcHarness.context,
-      ),
-    ).resolves.toMatchObject({
+      },
+      rpcHarness.context,
+    );
+    expect(response).toEqual({
+      id: 2,
       ok: false,
       error: {
         code: 'handler_error',
+        message: `No class exists for content key "${missingContentKey}".`,
         data: {
           reason: 'unknown_class',
         } satisfies GuidedRefusalData,
@@ -278,6 +280,8 @@ describe('listGuidedClassOptions', () => {
     expect(new Set(options.map((option) => option.content_key))).toEqual(
       new Set(bundledClassContentKeys().classes),
     );
+    expect(options.every((option) => option.catalog_layer === 'bundled')).toBe(true);
+    expect(options.map((option) => option.name)).not.toContain('Cartographer');
   });
 
   it('reports an unknown hit die as null when the bundled class traits row is absent', async () => {

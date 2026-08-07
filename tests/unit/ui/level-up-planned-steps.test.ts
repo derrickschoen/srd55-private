@@ -223,6 +223,7 @@ function sheet(level: number): CharacterSheet {
       subclass_name: null,
       saving_throws: ['intelligence', 'wisdom'],
     }],
+    catalog_sources: [],
     proficiencies: {
       armor_training: [],
       weapon_proficiencies: [],

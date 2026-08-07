@@ -133,7 +133,12 @@ function option(
   name: string,
   hitDie: number | null,
 ): GuidedClassOption {
-  return { content_key: contentKey, name, hit_die: hitDie };
+  return {
+    content_key: contentKey,
+    name,
+    hit_die: hitDie,
+    catalog_layer: 'bundled',
+  };
 }
 
 function firstClassCard(view: HTMLElement) {
@@ -218,6 +223,22 @@ describe('guided class chooser', () => {
 
     expect(cardText).toContain('Hit die: unknown');
     expect(cardText).not.toContain('8');
+    chooser.cleanup();
+  });
+
+  it('renders a hostile bundled class inert with its exact catalog layer', () => {
+    const hostile = '</span><img data-ha10-class-hostile src=x>';
+    const chooser = createClassChooser({
+      options: [option('2024:class:hostile', hostile, 10)],
+      createGuided: () => Promise.reject(new Error('not submitted')),
+      navigate: () => undefined,
+    });
+
+    expect(elementText(chooser.element)).toContain(hostile);
+    expect(elementText(chooser.element)).toContain('SRD · bundled layer');
+    expect(
+      interactiveElement(chooser.element).querySelector('[data-ha10-class-hostile]'),
+    ).toBeNull();
     chooser.cleanup();
   });
 
@@ -317,11 +338,12 @@ function originOption(
   contentKey: string,
   name: string,
   grantsLineageSpells: boolean,
+  catalogLayer: GuidedOriginOption['catalog_layer'] = 'bundled',
 ): GuidedOriginOption {
   return {
     content_key: contentKey,
     name,
-    catalog_layer: 'bundled',
+    catalog_layer: catalogLayer,
     grants_lineage_spells: grantsLineageSpells,
   };
 }
@@ -337,6 +359,23 @@ function lineageKeyEndingIn(suffix: string): string {
 }
 
 describe('guided species step', () => {
+  it('renders a hostile external species inert with its catalog layer disclosed', () => {
+    const hostile = '</h3><img data-ha10-species-hostile src=x>';
+    const step = createSpeciesStep({
+      characterId: 1,
+      options: [originOption('expanded:species:hostile', hostile, false, 'external')],
+      applyOrigin: () => Promise.reject(new Error('not submitted')),
+      navigate: () => undefined,
+    });
+
+    expect(elementText(step.element)).toContain(hostile);
+    expect(elementText(step.element)).toContain('Homebrew · external layer');
+    expect(
+      interactiveElement(step.element).querySelector('[data-ha10-species-hostile]'),
+    ).toBeNull();
+    step.cleanup();
+  });
+
   it('does not retain the deleted abilities-skipped disclosure', () => {
     const step = createSpeciesStep({
       characterId: 1,
@@ -444,6 +483,7 @@ describe('guided background step', () => {
       {
         content_key: 'test:background:honesty',
         name: 'Honesty Background',
+        catalog_layer: 'bundled',
         pairing: {
           background_name: 'Honesty Background',
           printed_abilities: ['Intelligence', 'Wisdom', 'Charisma'],
@@ -458,17 +498,69 @@ describe('guided background step', () => {
       {
         content_key: MAGIC_INITIATE_FEAT_CONTENT_KEY,
         name: 'Magic Initiate',
+        catalog_layer: 'bundled',
       },
       {
         content_key: '2024:feat:lucky',
         name: 'Lucky',
+        catalog_layer: 'bundled',
       },
       {
         content_key: SKILLED_FEAT_CONTENT_KEY,
         name: 'Skilled',
+        catalog_layer: 'bundled',
       },
     ],
   };
+
+  it('renders a hostile external background inert with its catalog layer disclosed', () => {
+    const hostile = '</span><img data-ha10-background-hostile src=x>';
+    const step = createBackgroundStep({
+      characterId: 1,
+      options: {
+        ...backgroundChoices,
+        backgrounds: [{
+          ...backgroundChoices.backgrounds[0]!,
+          content_key: 'expanded:background:hostile',
+          name: hostile,
+          catalog_layer: 'external',
+        }],
+      },
+      applyBackground: () => Promise.reject(new Error('not submitted')),
+      navigate: () => undefined,
+    });
+
+    expect(elementText(step.element)).toContain(hostile);
+    expect(elementText(step.element)).toContain('Homebrew · external layer');
+    expect(
+      interactiveElement(step.element).querySelector('[data-ha10-background-hostile]'),
+    ).toBeNull();
+    step.cleanup();
+  });
+
+  it('renders a hostile external Origin feat inert with its catalog layer disclosed', () => {
+    const hostile = '</option><img data-ha10-origin-feat-hostile src=x>';
+    const step = createBackgroundStep({
+      characterId: 1,
+      options: {
+        ...backgroundChoices,
+        origin_feats: backgroundChoices.origin_feats.map((feat, index) =>
+          index === 1
+            ? { ...feat, name: hostile, catalog_layer: 'external' as const }
+            : feat
+        ),
+      },
+      applyBackground: () => Promise.reject(new Error('not submitted')),
+      navigate: () => undefined,
+    });
+
+    expect(elementText(step.element)).toContain(hostile);
+    expect(elementText(step.element)).toContain('Homebrew · external layer');
+    expect(
+      interactiveElement(step.element).querySelector('[data-ha10-origin-feat-hostile]'),
+    ).toBeNull();
+    step.cleanup();
+  });
 
   it('B3-HONESTY says what background apply now does and discloses only the three remaining gaps', () => {
     const step = createBackgroundStep({
@@ -590,9 +682,11 @@ describe('guided background step', () => {
       return elementText(option as unknown as Node);
     };
     expect(featOptionText(MAGIC_INITIATE_FEAT_CONTENT_KEY)).toBe(
-      'Magic Initiate (default)',
+      'Magic Initiate — SRD · bundled layer (default)',
     );
-    expect(featOptionText('2024:feat:lucky')).toBe('Lucky');
+    expect(featOptionText('2024:feat:lucky')).toBe(
+      'Lucky — SRD · bundled layer',
+    );
 
     // Each ability select marks exactly the three printed abilities.
     const slot = elementsWithAttribute(
@@ -620,7 +714,7 @@ describe('guided background step', () => {
     featSelect.value = '2024:feat:lucky';
     featSelect.dispatchEvent(new Event('change'));
     expect(featOptionText(MAGIC_INITIATE_FEAT_CONTENT_KEY)).toBe(
-      'Magic Initiate (default)',
+      'Magic Initiate — SRD · bundled layer (default)',
     );
     expect(elementText(step.element)).not.toMatch(
       /house rule|homebrew|departure/i,

@@ -26,6 +26,7 @@ import {
 import type { CharacterRow } from '../../../domain/models';
 import { RpcError } from '../../../rpc/protocol';
 import { clear, element, listen, type Cleanup } from '../../dom';
+import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
 import { characterListLink, guidedShell } from './guided-builder';
 
 /**
@@ -253,6 +254,10 @@ export function createClassChooser(deps: ClassChooserDeps): ClassChooser {
           element('span', {
             className: 'guided-class-hit-die',
             text: hitDieLabel(option.hit_die),
+          }),
+          element('span', {
+            className: 'catalog-layer-disclosure',
+            text: catalogLayerLabel(option.catalog_layer),
           }),
         ],
       );

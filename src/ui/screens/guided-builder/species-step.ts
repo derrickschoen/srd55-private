@@ -52,6 +52,7 @@ import {
 import { BUNDLED_ORIGIN_RULES_EDITION } from '../../../rules/origins-srd';
 import { RpcError } from '../../../rpc/protocol';
 import { clear, element, listen, type Cleanup } from '../../dom';
+import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
 import { characterListLink, guidedShell } from './guided-builder';
 
 /**
@@ -300,7 +301,7 @@ export function createSpeciesStep(deps: SpeciesStepDeps): SpeciesStep {
     'ul',
     {
       className: 'guided-species-options',
-      attributes: { 'aria-label': 'Bundled species' },
+      attributes: { 'aria-label': 'Catalog species' },
     },
     deps.options.map((option) => {
       // A container with an explicit apply button, NOT one giant clickable
@@ -323,6 +324,10 @@ export function createSpeciesStep(deps: SpeciesStepDeps): SpeciesStep {
           element('h3', {
             className: 'guided-species-name',
             text: option.name,
+          }),
+          element('p', {
+            className: 'catalog-layer-disclosure',
+            text: catalogLayerLabel(option.catalog_layer),
           }),
           unmadeChoicesBlock(option),
           ...(LINEAGE_GATED_SPECIES_CONTENT_KEYS.has(option.content_key)
@@ -358,7 +363,7 @@ export function createSpeciesStep(deps: SpeciesStepDeps): SpeciesStep {
             element('p', {
               className: 'guided-empty-catalog',
               text:
-                'No bundled species are available in this database, so ' +
+                'No catalog species are available in this database, so ' +
                 'this step cannot offer one.',
             }),
           ]

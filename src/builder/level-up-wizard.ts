@@ -45,6 +45,7 @@ import type { JsonObject } from '../domain/models';
 import type { EligibleSpell } from '../domain/read-models';
 import type { GrantRuleObject } from '../grants/grant-rule';
 import type { CharacterSheet } from '../queries/character-sheet-builder';
+import type { CatalogLayerDisclosure } from '../catalog/catalog-disclosure';
 
 export type AbilityIncreaseAbilities = 'any' | readonly Ability[];
 
@@ -330,6 +331,7 @@ export interface LevelUpSubclassOption {
   readonly content_key: ContentKey;
   readonly name: string;
   readonly rules_edition: RulesEdition;
+  readonly catalog_layer: CatalogLayerDisclosure;
 }
 
 export interface LevelUpHeldClass {

@@ -155,14 +155,26 @@ describe('guided background application', () => {
     const {
       printed_features: beforePrintedFeatures,
       gaps: beforeGaps,
+      catalog_sources: beforeCatalogSources,
       ...beforeMechanical
     } = before;
     const {
       printed_features: afterPrintedFeatures,
       gaps: afterGaps,
+      catalog_sources: afterCatalogSources,
       ...afterMechanical
     } = after;
     expect(afterMechanical).toEqual(beforeMechanical);
+    expect(afterCatalogSources).toEqual(expect.arrayContaining([
+      ...beforeCatalogSources,
+      {
+        kind: 'background',
+        name: 'Acolyte',
+        content_key: null,
+        catalog_layer: 'unknown',
+      },
+    ]));
+    expect(afterCatalogSources).toHaveLength(beforeCatalogSources.length + 1);
     expect(beforePrintedFeatures).toEqual([]);
     expect(afterPrintedFeatures).toEqual([
       {

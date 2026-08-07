@@ -26,6 +26,7 @@ import {
   type ProjectedFeatCharacter,
 } from '../builder/level-up-wizard';
 import { isBundledSourceContentKey } from '../catalog/bundled-source-membership';
+import { catalogLayerDisclosure } from '../catalog/catalog-disclosure';
 import {
   sqlBoolean,
   sqlInteger,
@@ -156,6 +157,9 @@ function subclassOption(
     rules_edition: rulesEdition(
       sqlString(row, `${prefix}rules_edition`),
       'Subclass',
+    ),
+    catalog_layer: catalogLayerDisclosure(
+      sqlNullableString(row, `${prefix}catalog_layer`),
     ),
   };
 }
@@ -354,7 +358,7 @@ export class LevelUpStateQuery {
         explanation: disabledOptions.some(
           (option) => option.reason === 'class_not_bundled',
         )
-          ? 'No held class is currently guideable; imported class application is deferred to CI-4a/HA-10.'
+          ? 'No held class is currently guideable; homebrew classes are outside the v1 guided flows (D133).'
           : 'Fixed HP cannot be derived for any held class until its missing hit die is repaired or catalogued.',
         class_options: disabledOptions,
         pending_epic_resolution: pendingEpicResolution,
@@ -424,7 +428,8 @@ export class LevelUpStateQuery {
               subclass.id AS subclass_id,
               subclass.content_key AS subclass_content_key,
               subclass.name AS subclass_name,
-              subclass.rules_edition AS subclass_rules_edition
+              subclass.rules_edition AS subclass_rules_edition,
+              subclass_identity.catalog_layer AS subclass_catalog_layer
        FROM character_class_levels AS level
        JOIN class_definitions AS definition
          ON definition.id = level.class_definition_id
@@ -432,6 +437,9 @@ export class LevelUpStateQuery {
          ON traits.class_definition_id = definition.id
        LEFT JOIN subclass_definitions AS subclass
          ON subclass.id = level.subclass_definition_id
+       LEFT JOIN catalog_content_identities AS subclass_identity
+         ON subclass_identity.content_kind = 'subclass'
+        AND subclass_identity.content_key = subclass.content_key
        WHERE level.character_id = ?
        ORDER BY level.id`,
       [characterId],
@@ -457,10 +465,14 @@ export class LevelUpStateQuery {
 
   #subclassOptions(classDefinitionId: ClassDefinitionId): LevelUpSubclassOption[] {
     return this.db.all(
-      `SELECT id, content_key, name, rules_edition
-       FROM subclass_definitions
-       WHERE class_definition_id = ?
-       ORDER BY name, id`,
+      `SELECT subclass.id, subclass.content_key, subclass.name,
+              subclass.rules_edition, identity.catalog_layer
+       FROM subclass_definitions AS subclass
+       LEFT JOIN catalog_content_identities AS identity
+         ON identity.content_kind = 'subclass'
+        AND identity.content_key = subclass.content_key
+       WHERE subclass.class_definition_id = ?
+       ORDER BY subclass.name, subclass.id`,
       [classDefinitionId],
       (row): LevelUpSubclassOption => ({
         subclass_definition_id:
@@ -470,6 +482,9 @@ export class LevelUpStateQuery {
         rules_edition: rulesEdition(
           sqlString(row, 'rules_edition'),
           'Subclass',
+        ),
+        catalog_layer: catalogLayerDisclosure(
+          sqlNullableString(row, 'catalog_layer'),
         ),
       }),
     );
@@ -546,7 +561,7 @@ export class LevelUpStateQuery {
         guideability: 'disabled',
         reason,
         explanation:
-          'Imported classes remain held but cannot be guided until CI-4a/HA-10 completes aggregate application.',
+          'Homebrew classes remain held but are outside the v1 guided flows (D133).',
       };
     }
     if (selected.hit_die !== null) {

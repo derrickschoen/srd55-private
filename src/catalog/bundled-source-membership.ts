@@ -23,7 +23,8 @@ const keyCache = new Map<BundledSourceKind, readonly string[]>();
  * seeders register extra definitions as bundled-stable while inserting them,
  * so the database-aware manifest is constructed from the same source of truth
  * on both boot paths. CI-3s can remove the static half after all boot identities
- * are promoted; CI-4a/HA-10 lifts the consumer filter entirely.
+ * are promoted. HA-10 retains this membership seam for D133's bundled-only
+ * class consumers; other catalog consumers read registry layers directly.
  */
 export function bundledSourceContentKeys(
   kind: BundledSourceKind,

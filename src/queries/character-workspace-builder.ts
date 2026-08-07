@@ -8,6 +8,7 @@ import {
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import { isBundledSourceContentKey } from '../catalog/bundled-source-membership';
+import { catalogLayerDisclosure } from '../catalog/catalog-disclosure';
 import {
   abilities,
   type Ability,
@@ -338,12 +339,20 @@ export class CharacterWorkspaceBuilder {
     return this.db.all(
       `SELECT level.id, level.class_definition_id,
               level.subclass_definition_id, level.level,
-              class.name, subclass.name AS subclass_name
+              class.name, class_identity.catalog_layer,
+              subclass.name AS subclass_name,
+              subclass_identity.catalog_layer AS subclass_catalog_layer
        FROM character_class_levels AS level
        INNER JOIN class_definitions AS class
          ON class.id = level.class_definition_id
+       LEFT JOIN catalog_content_identities AS class_identity
+         ON class_identity.content_kind = 'class'
+        AND class_identity.content_key = class.content_key
        LEFT JOIN subclass_definitions AS subclass
          ON subclass.id = level.subclass_definition_id
+       LEFT JOIN catalog_content_identities AS subclass_identity
+         ON subclass_identity.content_kind = 'subclass'
+        AND subclass_identity.content_key = subclass.content_key
        WHERE level.character_id = ?
        ORDER BY class.name, level.id`,
       [characterId],
@@ -361,7 +370,16 @@ export class CharacterWorkspaceBuilder {
           ),
           level: sqlInteger(row, 'level'),
           name: sqlString(row, 'name'),
+          catalog_layer: catalogLayerDisclosure(
+            sqlNullableString(row, 'catalog_layer'),
+          ),
           subclass_name: sqlNullableString(row, 'subclass_name'),
+          subclass_catalog_layer:
+            sqlNullableString(row, 'subclass_name') === null
+              ? null
+              : catalogLayerDisclosure(
+                  sqlNullableString(row, 'subclass_catalog_layer'),
+                ),
           subclasses: this.classOptions(classDefinitionId),
         };
       },
@@ -373,8 +391,7 @@ export class CharacterWorkspaceBuilder {
       ? this.db.all(
           `SELECT definition.id, definition.content_key, definition.name
            FROM class_definitions AS definition
-           -- CI-4a/HA-10 lifts this filter when imported classes can be
-           -- applied completely by planner consumers.
+           -- D133: planner class authoring/selection remains bundled-only.
            ORDER BY definition.name, definition.id`,
           undefined,
           (row) => ({
@@ -386,16 +403,26 @@ export class CharacterWorkspaceBuilder {
           .filter((definition) =>
             isBundledSourceContentKey('class', definition.content_key, this.db)
           )
-          .map(({ id, name }) => ({ id, name }))
+          .map(({ id, name }) => ({
+            id,
+            name,
+            catalog_layer: 'bundled' as const,
+          }))
       : this.db.all(
-          `SELECT id, name
-           FROM subclass_definitions
-           WHERE class_definition_id = ?
-           ORDER BY name, id`,
+          `SELECT subclass.id, subclass.name, identity.catalog_layer
+           FROM subclass_definitions AS subclass
+           LEFT JOIN catalog_content_identities AS identity
+             ON identity.content_kind = 'subclass'
+            AND identity.content_key = subclass.content_key
+           WHERE subclass.class_definition_id = ?
+           ORDER BY subclass.name, subclass.id`,
           [classDefinitionId],
           (row) => ({
             id: sqlInteger(row, 'id'),
             name: sqlString(row, 'name'),
+            catalog_layer: catalogLayerDisclosure(
+              sqlNullableString(row, 'catalog_layer'),
+            ),
           }),
         );
   }
@@ -551,24 +578,27 @@ export class CharacterWorkspaceBuilder {
   ): SourceDefinition[] {
     return this.db.all(
       `SELECT definition.id, definition.content_key, definition.name,
-              definition.repeatable, definition.grant_rules
+              definition.repeatable, definition.grant_rules,
+              identity.catalog_layer
        FROM ${sourceType}_definitions AS definition
-       -- CI-4a/HA-10 lifts this filter after imported aggregate application
-       -- replaces today's partial AddSource consumer.
+       LEFT JOIN catalog_content_identities AS identity
+         ON identity.content_kind = '${sourceType}'
+        AND identity.content_key = definition.content_key
        ORDER BY definition.name, definition.id`,
       undefined,
       (row): SourceDefinition => ({
         id: sqlInteger(row, 'id'),
         content_key: sqlString(row, 'content_key'),
         name: sqlString(row, 'name'),
+        catalog_layer: catalogLayerDisclosure(
+          sqlNullableString(row, 'catalog_layer'),
+        ),
         repeatable: sqlBoolean(row, 'repeatable'),
         configuration_kind: configurationKind(
           sqlString(row, 'content_key'),
           sqlNullableString(row, 'grant_rules'),
         ),
       }),
-    ).filter((definition) =>
-      isBundledSourceContentKey(sourceType, definition.content_key, this.db)
     );
   }
 

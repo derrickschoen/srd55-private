@@ -60,6 +60,28 @@ describe('sheet route actions', () => {
   });
 });
 
+describe('catalog provenance disclosure', () => {
+  it('marks a hostile external source as inert free text and says its exact layer', () => {
+    const hostile = '</span><img data-ha10-sheet-hostile src=x>';
+    const value = sheet({
+      catalog_sources: [{
+        kind: 'species',
+        name: hostile,
+        content_key: 'expanded:content.species:hostile',
+        catalog_layer: 'external',
+      }],
+    });
+    const disclosure = row(value, 'catalog_source:species:0');
+
+    expect(disclosure.label).toEqual([
+      { text: 'Species — ' },
+      { text: hostile, free_text: true },
+    ]);
+    expect(disclosure.value).toBe('Homebrew · external layer');
+    expect(JSON.stringify(sheetFacts(value))).not.toContain(hostile);
+  });
+});
+
 /**
  * D4, ON THE SHEET.
  *
@@ -207,6 +229,7 @@ function sheet(changes: Partial<CharacterSheet> = {}): CharacterSheet {
         saving_throws: ['strength', 'constitution'],
       },
     ],
+    catalog_sources: [],
     // D28's union, with a HOSTILE class name in it too: the class names in this
     // section come from the recipient's own catalog by way of a content key, but
     // the projection must still route them through the free-text path rather
@@ -1203,6 +1226,9 @@ describe('the character sheet is projected twice from one value', () => {
       unchosen_damage_resistances: () =>
         readable.includes('plus one from Fiendish Legacy whose type is not yet chosen'),
       classes: () => [...ids].some((id) => id.startsWith('class:')),
+      catalog_sources: () =>
+        (parsed.catalog_sources as unknown[]).length === 0 ||
+        [...ids].some((id) => id.startsWith('catalog_source:')),
       armor: () => ids.has('armor:worn'),
       items: () => ids.has('item:0'),
       hit_point_rolls: () =>

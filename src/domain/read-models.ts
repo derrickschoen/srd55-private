@@ -2,6 +2,10 @@ import type { WeaponFields } from './command-contracts';
 import type { EquipmentEffectInput } from './equipment-effects';
 import type { AttunementSlot } from './attunement';
 import type { ContentKey } from './ids';
+import type {
+  CatalogLayerDisclosure,
+  CharacterCatalogDisclosure,
+} from '../catalog/catalog-disclosure';
 import type { AttackProfileResult } from '../rules/attack-profiles';
 import type { CharacterMasteryAllowance } from '../rules/weapon-mastery-lookup';
 import type {
@@ -179,6 +183,7 @@ export interface WorkspaceSlot {
 export interface ClassOption {
   id: number;
   name: string;
+  catalog_layer: CatalogLayerDisclosure;
 }
 
 export interface CharacterClass {
@@ -187,7 +192,9 @@ export interface CharacterClass {
   subclass_definition_id: number | null;
   level: number;
   name: string;
+  catalog_layer: CatalogLayerDisclosure;
   subclass_name: string | null;
+  subclass_catalog_layer: CatalogLayerDisclosure | null;
   subclasses: ClassOption[];
 }
 
@@ -201,6 +208,7 @@ export interface SourceDefinition {
   id: number;
   content_key: string;
   name: string;
+  catalog_layer: CatalogLayerDisclosure;
   repeatable: boolean;
   configuration_kind:
     | 'magic_initiate'
@@ -277,7 +285,10 @@ export interface BuildReport {
     progression_type: ProgressionType;
     prepared_count: number;
     max_preparable_level: number;
+    class_catalog_layer: CatalogLayerDisclosure;
+    subclass_catalog_layer: CatalogLayerDisclosure | null;
   }>;
+  catalog_sources: readonly CharacterCatalogDisclosure[];
   preparation_callout: string;
   access_routes: SpellRoute[];
   duplicate_assessments: DuplicateAssessment[];

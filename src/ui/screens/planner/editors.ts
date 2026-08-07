@@ -8,6 +8,7 @@ import type {
   SourceDefinition,
   Workspace,
 } from '../../../domain/read-models';
+import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
 import type { JsonObject } from '../../../domain/models';
 import type {
   CharacterFlavorChanges,
@@ -363,7 +364,7 @@ function renderSources(
     definition.replaceChildren(
       option('', 'Choose a source…', true),
       ...workspace.source_catalog[sourceType].map((item) =>
-        option(String(item.id), item.name),
+        option(String(item.id), `${item.name} — ${catalogLayerLabel(item.catalog_layer)}`),
       ),
     );
     listField.hidden = true;
@@ -441,6 +442,15 @@ function renderSources(
     const name = document.createElement('strong');
     // A feat instance's display name can have come from an imported share link.
     name.append(freeTextSpan(source.display_name));
+    const removable = workspace.removable_sources.find(
+      (candidate) => candidate.id === source.id,
+    );
+    const configuredDefinition = removable?.source_definition_id === null || removable === undefined
+      ? undefined
+      : workspace.source_catalog[removable.source_type].find(
+          (candidate) => candidate.id === removable.source_definition_id,
+        );
+    name.append(` — ${catalogLayerLabel(configuredDefinition?.catalog_layer ?? 'unknown')}`);
     const input = document.createElement('select');
     for (const spellList of workspace.spell_lists) {
       input.append(
@@ -475,8 +485,13 @@ function renderSources(
     // Feat, species and background display names can come from a share link.
     descriptionName.append(freeTextSpan(source.display_name));
     const descriptionType = document.createElement('small');
+    const sourceDefinition = source.source_definition_id === null
+      ? undefined
+      : workspace.source_catalog[source.source_type].find(
+          (candidate) => candidate.id === source.source_definition_id,
+        );
     descriptionType.textContent =
-      source.source_type +
+      `${source.source_type} · ${catalogLayerLabel(sourceDefinition?.catalog_layer ?? 'unknown')}` +
       (source.parent_source_instance_id === null
         ? ''
         : ' · granted by another source');
@@ -516,7 +531,7 @@ function renderClasses(
   for (const entry of workspace.classes) {
     const row = document.createElement('article');
     const name = document.createElement('strong');
-    name.textContent = entry.name;
+    name.textContent = `${entry.name} — ${catalogLayerLabel(entry.catalog_layer)}`;
     // NOT AN INPUT ANY MORE (level-up plan §3): the numeric level control was
     // the second writer §0 names — it could move a level to any number
     // without a hit-point row ever being written. The level is read-only
@@ -533,7 +548,7 @@ function renderClasses(
       ...entry.subclasses.map((item) =>
         option(
           String(item.id),
-          item.name,
+          `${item.name} — ${catalogLayerLabel(item.catalog_layer)}`,
           item.id === entry.subclass_definition_id,
         ),
       ),
@@ -581,7 +596,9 @@ function renderClasses(
   selection.setAttribute('aria-label', 'Class to add');
   selection.append(
     option('', 'Choose a class…', true),
-    ...available.map((entry) => option(String(entry.id), entry.name)),
+    ...available.map((entry) =>
+      option(String(entry.id), `${entry.name} — ${catalogLayerLabel(entry.catalog_layer)}`)
+    ),
   );
   const add = document.createElement('button');
   add.type = 'button';

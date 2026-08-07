@@ -97,6 +97,7 @@ describe('deterministic read-only build report', () => {
       'character',
       'caster',
       'classes',
+      'catalog_sources',
       'preparation_callout',
       'access_routes',
       'wizard',
@@ -403,6 +404,8 @@ describe('deterministic read-only build report', () => {
       {
         name: 'Fighter',
         subclass: 'EK',
+        class_catalog_layer: 'bundled',
+        subclass_catalog_layer: 'bundled',
         class_level: 7,
         spellcasting_ability: 'intelligence',
         progression_type: 'third_down',

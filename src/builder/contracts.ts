@@ -26,6 +26,7 @@ import type { EligibleSpell } from '../domain/read-models';
 // through the command layer, and a `?raw` in its closure breaks their
 // transpilers — Playwright's whole suite failed collection on exactly this.
 import { BUNDLED_ORIGIN_RULES_EDITION } from '../rules/origin-rules-edition';
+import type { CatalogLayerDisclosure } from '../catalog/catalog-disclosure';
 
 /* ------------------------------------------------------------------ steps */
 
@@ -77,12 +78,14 @@ export interface GuidedClassOption {
   readonly content_key: string;
   readonly name: string;
   readonly hit_die: number | null;
+  /** D133: this picker admits only registry-confirmed bundled classes. */
+  readonly catalog_layer: 'bundled';
 }
 
 export interface GuidedOriginOption {
   readonly content_key: string;
   readonly name: string;
-  readonly catalog_layer: 'bundled' | 'external';
+  readonly catalog_layer: CatalogLayerDisclosure;
   readonly grants_lineage_spells: boolean;
 }
 

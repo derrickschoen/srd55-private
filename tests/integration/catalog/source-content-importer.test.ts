@@ -511,8 +511,21 @@ describe('class, feat, species and background catalog import', () => {
     expect(featMatched.feats_matched).toBe(1);
     expect(speciesMatched.species_matched).toBe(1);
     expect(db.scalar<number>('SELECT count(*) FROM species_definitions')).toBe(1);
-    expect(new CatalogQueries(db).read().sources.feat).toEqual([]);
-    expect(new CatalogQueries(db).read().sources.species).toEqual([]);
+    const catalog = new CatalogQueries(db).read();
+    expect(catalog.sources.feat).toEqual([
+      expect.objectContaining({
+        content_key: featKey,
+        name: 'Keen Memory',
+        catalog_layer: 'external',
+      }),
+    ]);
+    expect(catalog.sources.species).toEqual([
+      expect.objectContaining({
+        content_key: speciesKey,
+        name: 'Marsh Kin',
+        catalog_layer: 'external',
+      }),
+    ]);
     expect(listGuidedOriginOptions(db, 'species')).toEqual([{
       content_key: speciesKey,
       name: 'Marsh Kin',
@@ -676,7 +689,13 @@ describe('class, feat, species and background catalog import', () => {
       payload: stored.payload,
     });
     expect(reprojected.canonicalJson).toBe(incoming.canonicalJson);
-    expect(new CatalogQueries(db).read().sources.background).toEqual([]);
+    expect(new CatalogQueries(db).read().sources.background).toEqual([
+      expect.objectContaining({
+        content_key: contentKey,
+        name: 'Fen Guard',
+        catalog_layer: 'external',
+      }),
+    ]);
     expect(listGuidedOriginOptions(db, 'background')).toEqual([{
       content_key: contentKey,
       name: 'Fen Guard',

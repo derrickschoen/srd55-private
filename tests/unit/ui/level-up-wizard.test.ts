@@ -133,6 +133,7 @@ function classOption(options: {
               content_key: 'test:subclass:abjurer' as ContentKey,
               name: 'Abjurer',
               rules_edition: '2024',
+              catalog_layer: 'bundled',
             },
           ],
         }
@@ -311,6 +312,7 @@ function sheet(options: {
       subclass_name: null,
       saving_throws: ['intelligence', 'wisdom'],
     }],
+    catalog_sources: [],
     proficiencies: {
       armor_training: [],
       weapon_proficiencies: [],
@@ -688,11 +690,45 @@ describe('W-FOCUS navigation and errors', () => {
     expect(
       subclassRadios.map((radio) => radio.getAttribute('aria-label')),
     ).toEqual([
-      'Abjurer — Wizard, 2024 rules',
+      'Abjurer — Wizard, 2024 rules — SRD · bundled layer',
       'Decide later',
     ]);
-    expect(elementText(wizard.element)).toContain('Abjurer — Wizard, 2024 rules');
+    expect(elementText(wizard.element)).toContain(
+      'Abjurer — Wizard, 2024 rules — SRD · bundled layer',
+    );
     expect(elementText(wizard.element)).toContain('Decide later');
+    wizard.cleanup();
+  });
+
+  it('renders a hostile external subclass inert with an exact disclosed accessible name', () => {
+    const hostile = '</span><img data-ha10-level-up-hostile src=x>';
+    const base = classOption({
+      steps: ['class', 'gains', 'subclass', 'review', 'complete'],
+      subclass: true,
+    });
+    const bundled = base.subclass_choice?.options[0];
+    if (bundled === undefined) throw new Error('Subclass fixture is missing.');
+    const option = {
+      ...base,
+      subclass_choice: {
+        options: [{ ...bundled, name: hostile, catalog_layer: 'external' as const }],
+      },
+    };
+    const wizard = createLevelUpWizard({
+      state: ready({ classes: [option] }),
+      cancel: () => undefined,
+    });
+
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    const radios = interactiveElement(wizard.element).querySelectorAll('[type="radio"]');
+    expect(radios[0]?.getAttribute('aria-label')).toBe(
+      `${hostile} — Wizard, 2024 rules — Homebrew · external layer`,
+    );
+    expect(elementText(wizard.element)).toContain(hostile);
+    expect(
+      interactiveElement(wizard.element).querySelector('[data-ha10-level-up-hostile]'),
+    ).toBeNull();
     wizard.cleanup();
   });
 

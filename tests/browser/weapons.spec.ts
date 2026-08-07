@@ -36,7 +36,7 @@ function weaponRows(page: Page) {
 async function addFighterLevel(page: Page): Promise<void> {
   await page
     .getByRole('combobox', { name: 'Class to add' })
-    .selectOption({ label: 'Fighter' });
+    .selectOption({ label: 'Fighter — SRD · bundled layer' });
   await page.getByRole('button', { name: 'Add class', exact: true }).click();
   await expect(page.getByTestId('weapon-mastery-status')).toContainText(
     'Fighter',
@@ -498,7 +498,7 @@ test('a Wizard’s Greatsword loses the proficiency bonus, and both screens say 
   await openPlanner(page, 'Unqualified Wielder');
   await page
     .getByRole('combobox', { name: 'Class to add' })
-    .selectOption({ label: 'Wizard' });
+    .selectOption({ label: 'Wizard — SRD · bundled layer' });
   await page.getByRole('button', { name: 'Add class', exact: true }).click();
   await expect(page.getByTestId('weapons-panel')).toBeVisible();
 
@@ -578,7 +578,7 @@ test('the damage-type choice is undecided on both sides until it is made', async
 
   await page
     .getByRole('combobox', { name: 'Class to add' })
-    .selectOption({ label: 'Wizard' });
+    .selectOption({ label: 'Wizard — SRD · bundled layer' });
   await page.getByRole('button', { name: 'Add class', exact: true }).click();
 
   // Slot 1 is the class's first cantrip slot. Selecting the spell there is what
@@ -691,7 +691,7 @@ test('a grant it cannot apply is stated on the page, not folded into the number'
 
   await page
     .getByRole('combobox', { name: 'Class to add' })
-    .selectOption({ label: 'Warlock' });
+    .selectOption({ label: 'Warlock — SRD · bundled layer' });
   await page.getByRole('button', { name: 'Add class', exact: true }).click();
   // Waited on the class's own level display rather than on the mastery
   // status: no Warlock row grants Weapon Mastery, so that panel correctly

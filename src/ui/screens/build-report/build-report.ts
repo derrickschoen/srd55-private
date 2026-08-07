@@ -1,6 +1,7 @@
 import { abilities } from '../../../domain/enums';
 import type { BuildReportResult } from '../../../reports/build-report-builder';
 import { SRD_ATTRIBUTION_NOTICE } from '../../../rules/srd-attribution';
+import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
 
 function escapeHtml(value: unknown): string {
   return String(value)
@@ -110,6 +111,18 @@ export function renderBuildReport(report: BuildReportResult): string {
               </tr>`,
           )
           .join('');
+  const catalogSources = report.catalog_sources.length === 0
+    ? '<li class="empty-value">No applied catalog content is recorded.</li>'
+    : report.catalog_sources
+        .map(
+          (source) => `
+            <li data-catalog-kind="${escapeHtml(source.kind)}">
+              <strong>${escapeHtml(source.name)}</strong> ·
+              ${escapeHtml(titleCase(source.kind))} ·
+              ${escapeHtml(catalogLayerLabel(source.catalog_layer))}
+            </li>`,
+        )
+        .join('');
   const routes =
     report.access_routes.length === 0
       ? '<tr><td colspan="6" class="empty-value">No castable spell routes.</td></tr>'
@@ -248,6 +261,12 @@ export function renderBuildReport(report: BuildReportResult): string {
               </table>
             </div>
           </article>
+        </section>
+
+        <section class="report-panel" aria-labelledby="catalog-provenance-heading">
+          <h2 id="catalog-provenance-heading">Catalog provenance</h2>
+          <p class="report-muted">Publication layers come from the catalog identity registry; missing identities are shown as unknown.</p>
+          <ul class="catalog-provenance-list">${catalogSources}</ul>
         </section>
 
         <aside class="preparation-callout" data-testid="preparation-callout">

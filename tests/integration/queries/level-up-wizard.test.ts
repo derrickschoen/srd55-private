@@ -570,14 +570,14 @@ describe('level-up wizard state RPC', () => {
     expect(state).toMatchObject({
       kind: 'no_guideable_class',
       explanation:
-        'No held class is currently guideable; imported class application is deferred to CI-4a/HA-10.',
+        'No held class is currently guideable; homebrew classes are outside the v1 guided flows (D133).',
       class_options: [{
         guideability: 'disabled',
         class_definition_id: importedClassId,
         hit_die: 8,
         reason: 'class_not_bundled',
         explanation:
-          'Imported classes remain held but cannot be guided until CI-4a/HA-10 completes aggregate application.',
+          'Homebrew classes remain held but are outside the v1 guided flows (D133).',
       }],
     });
     if (state.kind !== 'no_guideable_class') {

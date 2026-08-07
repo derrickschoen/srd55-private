@@ -23,6 +23,7 @@ import type {
 } from '../../../rules/sheet';
 import type { WeaponProficiencyVerdict } from '../../../rules/multiclass-proficiency';
 import { SRD_ATTRIBUTION_NOTICE } from '../../../rules/srd-attribution';
+import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
 import {
   classFormulaResourceKinds,
   classFormulaResourceLabel,
@@ -971,6 +972,21 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
       ),
     });
   }
+  for (const [index, source] of sheet.catalog_sources.entries()) {
+    identity.push({
+      id: `catalog_source:${source.kind}:${String(index)}`,
+      label: [
+        { text: `${source.kind[0]?.toUpperCase() ?? ''}${source.kind.slice(1)} — ` },
+        { text: source.name, free_text: true },
+      ],
+      value: catalogLayerLabel(source.catalog_layer),
+      detail: plain(
+        source.content_key === null
+          ? 'The applied content remains readable, but its catalog identity is not recorded.'
+          : 'Publication layer read from the catalog identity registry.',
+      ),
+    });
+  }
   sections.push({ caption: 'Character', rows: identity });
 
   const core: SheetRow[] = [
@@ -1497,6 +1513,10 @@ export function sheetFacts(sheet: CharacterSheet): Record<string, unknown> {
       hit_die: entry.hit_die,
       is_starting_class: entry.is_starting_class,
       saving_throws: [...entry.saving_throws],
+    })),
+    catalog_sources: sheet.catalog_sources.map((source) => ({
+      kind: source.kind,
+      catalog_layer: source.catalog_layer,
     })),
     armor: sheet.armor.map((row) => ({
       slot: row.slot,

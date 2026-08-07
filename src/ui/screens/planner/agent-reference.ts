@@ -81,7 +81,7 @@ import type { WeaponRange } from '../../../domain/weapon-range';
 
 export const AGENT_REFERENCE_FORMAT =
   'dnd-multiclass-spells.planner-reference' as const;
-export const AGENT_REFERENCE_VERSION = 2 as const;
+export const AGENT_REFERENCE_VERSION = 3 as const;
 export const AGENT_REFERENCE_SCRIPT_ID = 'planner-build-reference';
 
 /**
@@ -183,10 +183,11 @@ export const COVERAGE: readonly CoverageFact[] = [
     concept: 'subclass',
     state: 'partial',
     note:
-      'Every class has at least one bundled subclass to choose at its ' +
-      'subclass level. Fifteen subclasses are bundled, including the ' +
-      'owner-authored Veteran. The legacy EK and Arcane ' +
-      'Trickster are the two subclasses that change spellcasting.',
+      'Every class has at least one bundled subclass at its subclass level, ' +
+      'and externally published subclasses for bundled parents are selectable ' +
+      'with their catalog layer disclosed. Fifteen subclasses are bundled, ' +
+      'including the owner-authored Veteran; external subclasses can add their ' +
+      'own progression and mechanics.',
   },
   {
     concept: 'hit points',
@@ -571,6 +572,18 @@ export interface AgentReference {
     readonly progression_type: ProgressionType | Unrecognised;
     readonly prepared_count: number;
     readonly max_preparable_level: number;
+    readonly class_catalog_layer: 'bundled' | 'external' | 'unknown';
+    readonly subclass_catalog_layer:
+      | 'bundled'
+      | 'external'
+      | 'unknown'
+      | null;
+  }[];
+  readonly catalog_sources: readonly {
+    readonly kind: 'class' | 'subclass' | 'feat' | 'species' | 'background';
+    readonly name: string | null;
+    readonly name_withheld: boolean;
+    readonly catalog_layer: 'bundled' | 'external' | 'unknown';
   }[];
   readonly caster: {
     readonly caster_level: number;
@@ -1107,6 +1120,14 @@ export function buildAgentReference(
       progression_type: known(progressionTypes, entry.progression_type),
       prepared_count: entry.prepared_count,
       max_preparable_level: entry.max_preparable_level,
+      class_catalog_layer: entry.class_catalog_layer,
+      subclass_catalog_layer: entry.subclass_catalog_layer,
+    })),
+    catalog_sources: report.catalog_sources.map((source) => ({
+      kind: source.kind,
+      name: source.catalog_layer === 'bundled' ? source.name : null,
+      name_withheld: source.catalog_layer !== 'bundled',
+      catalog_layer: source.catalog_layer,
     })),
     caster: {
       caster_level: report.caster.caster_level,
@@ -1421,8 +1442,10 @@ export function agentReferenceSections(
         caption: 'Class levels and preparation',
         columns: [
           'Class',
+          'Class catalog layer',
           'Level',
           'Subclass',
+          'Subclass catalog layer',
           'Spellcasting ability',
           'Progression',
           'Prepared',
@@ -1430,12 +1453,33 @@ export function agentReferenceSections(
         ],
         rows: reference.classes.map((entry) => [
           cell(entry.name),
+          cell(entry.class_catalog_layer),
           cell(String(entry.class_level)),
           cell(entry.subclass ?? 'none'),
+          cell(entry.subclass_catalog_layer ?? 'none'),
           cell(entry.spellcasting_ability ?? 'none'),
           cell(entry.progression_type),
           cell(String(entry.prepared_count)),
           cell(String(entry.max_preparable_level)),
+        ]),
+      },
+    ],
+  });
+
+  sections.push({
+    id: 'catalog-sources',
+    heading: 'Catalog provenance',
+    notes: [
+      'Publication layers are read from the catalog identity registry; unknown means no readable registry fact was available.',
+    ],
+    tables: [
+      {
+        caption: 'Applied catalog content',
+        columns: ['Kind', 'Name', 'Catalog layer'],
+        rows: reference.catalog_sources.map((source) => [
+          cell(source.kind),
+          cell(source.name ?? 'withheld (unverified free text)'),
+          cell(source.catalog_layer),
         ]),
       },
     ],

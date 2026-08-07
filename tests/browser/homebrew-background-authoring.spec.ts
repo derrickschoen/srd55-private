@@ -72,7 +72,10 @@ test('authors and applies a background with persisted skill grants and a flat ef
   await page.getByRole('link', { name: '← Characters', exact: true }).click();
   await globalReady(page);
   await page.getByRole('link', { name: 'Create a character', exact: true }).click();
-  await page.getByRole('button', { name: 'Fighter Hit die: d10', exact: true }).click();
+  await page.getByRole('button', {
+    name: 'Fighter Hit die: d10 SRD · bundled layer',
+    exact: true,
+  }).click();
   await page.getByRole('textbox', { name: 'Character name', exact: true }).fill('Background Journey Hero');
   await page.getByRole('button', { name: 'Create character', exact: true }).click();
   await page.getByRole('radio', { name: 'Manual entry', exact: true }).check();
