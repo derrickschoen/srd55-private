@@ -2,6 +2,12 @@ import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseContext } from '../../../src/db/database';
 import { BuildReportBuilder } from '../../../src/reports/build-report-builder';
+import { applicationSeed } from '../../../src/db/bootstrap';
+import { BUNDLED_HOMEBREW_CATALOG } from '../../../src/authoring/bundled-homebrew-catalog';
+import {
+  commitBundledHomebrewInstall,
+  planBundledHomebrewInstall,
+} from '../../../src/authoring/bundled-homebrew-installer';
 import { openTestDatabase } from '../../helpers/open-db';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import {
@@ -386,11 +392,25 @@ describe('deterministic read-only build report', () => {
   });
 
   it('uses a lone third-caster subclass table and shared slots for multiple providers', () => {
+    applicationSeed(db);
     const fighterId = classDefinitionId(db, 'Fighter');
+    const spellStudentCatalog = BUNDLED_HOMEBREW_CATALOG.filter(
+      (entry) => entry.catalog_key === 'spell-student',
+    );
+    const plan = planBundledHomebrewInstall(db, spellStudentCatalog);
+    const installed = commitBundledHomebrewInstall(
+      db,
+      plan.token,
+      spellStudentCatalog,
+    );
+    if (installed.kind !== 'committed') {
+      throw new Error(`Spell Student install failed: ${installed.kind}`);
+    }
     const subclassId = Number(
       db.scalar(
         `SELECT id FROM subclass_definitions
-         WHERE class_definition_id = ? AND name = 'EK'`,
+         WHERE class_definition_id = ?
+           AND content_key = '2024:content.subclass:spell-student'`,
         [fighterId],
       ),
     );
@@ -404,22 +424,19 @@ describe('deterministic read-only build report', () => {
     expect(single.classes).toEqual([
       {
         name: 'Fighter',
-        subclass: 'EK',
+        subclass: 'Spell Student',
         class_catalog_layer: 'bundled',
-        subclass_catalog_layer: 'bundled',
+        subclass_catalog_layer: 'external',
         class_level: 7,
         spellcasting_ability: 'intelligence',
         progression_type: 'third_down',
-        prepared_count: 5,
-        max_preparable_level: 2,
+        prepared_count: 2,
+        max_preparable_level: 1,
       },
     ]);
     expect(single.caster).toEqual({
       caster_level: 2,
-      slots: [
-        { level: 1, count: 4 },
-        { level: 2, count: 2 },
-      ],
+      slots: [{ level: 1, count: 3 }],
       pact_magic: null,
     });
     expect(persistedReportTableHashes(db, singleId)).toEqual(singleBefore);
@@ -443,7 +460,7 @@ describe('deterministic read-only build report', () => {
         [multiclassId],
       ),
     ).toEqual([
-      { name: 'Fighter', level: 7, subclass: 'EK' },
+      { name: 'Fighter', level: 7, subclass: 'Spell Student' },
       { name: 'Wizard', level: 3, subclass: null },
     ]);
     const multiclassBefore = persistedReportTableHashes(db, multiclassId);
