@@ -468,7 +468,7 @@ async function renderArchiveRoute(
       list.append(element('article', { className: 'homebrew-card panel' }, [
         heading,
         badge(catalogLayerLabel(set.content_catalog_layer), 'homebrew'),
-        element('p', { text: `Archived ${set.archived_at}` }),
+        element('p', { text: `Archived ${set.archived_at.split('#', 1)[0]}` }),
         element('h4', { text: 'Characters in this set' }),
         characterList(set.characters),
         restore,

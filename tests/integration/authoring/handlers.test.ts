@@ -14,6 +14,7 @@ import {
   planBundledHomebrewInstall,
 } from '../../../src/authoring/bundled-homebrew-installer';
 import { CatalogAuthoringService } from '../../../src/authoring/draft-service';
+import { HomebrewArchiveSetService } from '../../../src/authoring/archive-set-lifecycle';
 import { speciesDraftToAggregate } from '../../../src/authoring/species-publisher';
 import {
   applyGuidedOrigin,
@@ -945,7 +946,7 @@ describe('catalog authoring RPC handlers', () => {
       new CharacterCommandIntegrity('ha11-archived-replacement'),
     );
     applyGuidedOrigin(rpc.context.db, {
-      character_id: character.id,
+      character_id: character.id as CharacterId,
       kind: 'species',
       content_key: predecessor.content_key,
     });
@@ -953,7 +954,7 @@ describe('catalog authoring RPC handlers', () => {
     const replacement = await authoring.previewReplacement({
       old_content_key: predecessor.content_key,
       new_content_key: successor.content_key,
-      character_id: character.id,
+      character_id: character.id as CharacterId,
     });
     const archive = await authoring.previewArchiveSet({
       content_key: predecessor.content_key,
@@ -977,7 +978,7 @@ describe('catalog authoring RPC handlers', () => {
     await expect(authoring.previewReplacement({
       old_content_key: predecessor.content_key,
       new_content_key: successor.content_key,
-      character_id: character.id,
+      character_id: character.id as CharacterId,
     })).rejects.toMatchObject({
       data: { reason: 'replacement_refused', refusal: 'archived_reference' },
     });
@@ -992,7 +993,7 @@ describe('catalog authoring RPC handlers', () => {
     await expect(authoring.previewReplacement({
       old_content_key: predecessor.content_key,
       new_content_key: successor.content_key,
-      character_id: character.id,
+      character_id: character.id as CharacterId,
     })).rejects.toMatchObject({
       data: { reason: 'replacement_refused', refusal: 'archived_reference' },
     });
@@ -1200,6 +1201,44 @@ describe('catalog authoring RPC handlers', () => {
       { id: unrelated.id, archived_at: null },
     ]);
   }, 20_000);
+
+  it('HA11-ARCHIVE-EVENT rejects a stale restore after restore and rearchive under a frozen clock', async () => {
+    const rpc = await open();
+    const authoring = new CatalogAuthoringService(rpc.context.db, {
+      randomUuid: (() => {
+        let sequence = 0;
+        return () => `ha11-event-publish-${String(++sequence)}`;
+      })(),
+    });
+    const target = publishSpecies(authoring, 'Archive Event Target', 30);
+    const lifecycle = new HomebrewArchiveSetService(
+      rpc.context.db,
+      () => '2042-08-11T12:13:14.000Z',
+      (() => {
+        let sequence = 0;
+        return () => `ha11-archive-event-${String(++sequence)}`;
+      })(),
+    );
+
+    const firstArchive = lifecycle.commitArchive(
+      lifecycle.previewArchive(target.content_key).token,
+    );
+    const staleRestore = lifecycle.previewRestore(target.content_key);
+    lifecycle.commitRestore(staleRestore.token);
+    const secondArchive = lifecycle.commitArchive(
+      lifecycle.previewArchive(target.content_key).token,
+    );
+
+    expect(secondArchive.archived_at).not.toBe(firstArchive.archived_at);
+    expect(() => lifecycle.commitRestore(staleRestore.token)).toThrowError(
+      expect.objectContaining({
+        data: {
+          reason: 'stale_archive_set_plan',
+          content_key: target.content_key,
+        },
+      }),
+    );
+  });
 
   it('HA11-ARCHIVE-MISSING-MEMBER refuses restore after public RPC deletion names the promised member', async () => {
     const rpc = await open();

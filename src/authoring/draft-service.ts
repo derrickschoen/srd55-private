@@ -991,6 +991,20 @@ export class CatalogAuthoringService {
     readonly new_content_key: ContentKey;
   }): ReplacementSetPlan {
     const usages = this.usages(input.old_content_key);
+    const archivedAt = this.db.scalar<string>(
+      `SELECT archived_at FROM catalog_content_identities
+       WHERE content_kind = ? AND content_key = ?`,
+      [usages.content_kind, usages.content_key],
+    );
+    if (archivedAt !== null) {
+      throw new AuthoringServiceError(
+        'Archived content cannot be replaced across its usages.',
+        {
+          reason: 'replacement_refused',
+          refusal: 'archived_reference',
+        },
+      );
+    }
     return Object.freeze({
       old_content_key: input.old_content_key,
       new_content_key: input.new_content_key,

@@ -242,6 +242,7 @@ function importNodeAndPlan(
       refusal: 'ambiguous_target',
     });
   }
+  assertActiveReplacementTarget(db, facts.content_kind, resolution.contentKey);
   const node = localContentReferenceImportNode(db, {
     id: NODE_ID,
     kind: facts.content_kind,
@@ -259,6 +260,28 @@ function importNodeAndPlan(
       operationIdentity(facts),
     ),
   });
+}
+
+function assertActiveReplacementTarget(
+  db: DatabaseContext,
+  kind: AuthoredContentKind,
+  contentKey: ContentKey,
+): void {
+  const archivedAt = db.scalar<string>(
+    `SELECT archived_at
+     FROM catalog_content_identities
+     WHERE content_kind = ? AND content_key = ?`,
+    [kind, contentKey],
+  );
+  if (archivedAt !== null) {
+    throw new ReferenceRetargetError(
+      'Archived content cannot be a replacement target.',
+      {
+        reason: 'replacement_refused',
+        refusal: 'archived_reference',
+      },
+    );
+  }
 }
 
 function nonRefusedOutcome(plan: ContentImportPlan): Exclude<
@@ -370,6 +393,7 @@ export function previewReferenceRetarget(
   });
   const { plan } = importNodeAndPlan(db, facts);
   const outcome = nonRefusedOutcome(plan);
+  assertActiveReplacementTarget(db, facts.content_kind, outcome.contentKey);
   if (facts.content_kind === 'subclass') {
     const parentIds = db.one(
       `SELECT old_subclass.class_definition_id AS old_parent_id,
@@ -1232,6 +1256,7 @@ export function commitReferenceRetarget(
   const choices = matchChoices(preview, input.decisions);
   const { node, plan } = importNodeAndPlan(db, facts, choices);
   const outcome = nonRefusedOutcome(plan);
+  assertActiveReplacementTarget(db, facts.content_kind, outcome.contentKey);
   let revision: CharacterRevision | null = null;
   let notices: readonly ReplacementNotice[] = Object.freeze([]);
   const committed = commitContentImport(db, {

@@ -87,6 +87,13 @@ import {
  * called. It deliberately does NOT run on `open()`: that is the user's own live
  * database, and failing it at boot would take away the app rather than protect
  * it.
+ *
+ * SECURITY BOUNDARY.
+ * This pass rejects manifest members that are structurally impossible or
+ * inconsistent with live relations. It does not authenticate an imported
+ * image and cannot detect a forged allocation history. In particular,
+ * `sqlite_sequence` is candidate-owned evidence: its usable high-water mark is
+ * retained as a corruption signal, never treated as proof of provenance.
  */
 
 export class CandidateAuditError extends Error {
@@ -195,19 +202,50 @@ function auditIntegrity(db: Database): void {
 }
 
 /**
+ * Returns a usable allocator high-water mark, or null when the candidate does
+ * not carry one we can safely interpret. An absent row, a reset/non-positive
+ * value, a non-number, an unsafe integer, or a value below a live character id
+ * all make the detector unavailable. None is converted to zero: doing that
+ * falsely refuses legitimately deleted archive members.
+ */
+function characterAllocationHighWater(db: Database): number | null {
+  const value = db.selectValue(
+    "SELECT seq FROM sqlite_sequence WHERE name = 'characters'",
+  );
+  if (
+    typeof value !== 'number' ||
+    !Number.isSafeInteger(value) ||
+    value < 1
+  ) {
+    return null;
+  }
+  const liveMaximum = db.selectValue('SELECT max(id) FROM characters');
+  if (
+    typeof liveMaximum === 'number' &&
+    Number.isSafeInteger(liveMaximum) &&
+    value < liveMaximum
+  ) {
+    return null;
+  }
+  return value;
+}
+
+/**
  * An archive manifest intentionally has no character foreign key: deleting an
  * archived character must leave the promise behind so restore can name the
  * missing member. Whole-image import therefore validates the semantics SQLite
- * cannot express. A missing id is credible deletion evidence only when the
- * `characters` AUTOINCREMENT allocator has issued at least that id; an id above
- * its durable high-water mark has never been allocated by this database.
+ * cannot express.
+ *
+ * This pass rejects manifest members that are structurally impossible or
+ * inconsistent with live relations. It does not authenticate an imported
+ * image and cannot detect a forged allocation history. When the candidate has
+ * a usable `characters` allocator high-water mark, ids above it are rejected
+ * as corruption. When that candidate-owned signal is unavailable, live
+ * relation checks still run but historical allocation is deliberately not
+ * inferred.
  */
 function auditArchiveManifests(db: Database): void {
-  const characterHighWater = Number(db.selectValue(
-    `SELECT coalesce(
-       (SELECT seq FROM sqlite_sequence WHERE name = 'characters'), 0
-     )`,
-  ));
+  const characterHighWater = characterAllocationHighWater(db);
   const rows: ReadonlyArray<Record<string, SqlValue>> = db.selectObjects(
     `SELECT member.rowid AS row_id,
             member.content_kind,
@@ -265,7 +303,10 @@ function auditArchiveManifests(db: Database): void {
     }
     const characterId = Number(row.character_id);
     if (row.current_character_id === null) {
-      if (characterId > characterHighWater) {
+      if (
+        characterHighWater !== null &&
+        characterId > characterHighWater
+      ) {
         throw new CandidateAuditError(
           `${label} names character ${String(characterId)}, which this database ` +
             'has never allocated.',

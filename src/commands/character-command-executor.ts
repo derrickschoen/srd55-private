@@ -88,6 +88,7 @@ export interface CharacterCommandRpcResult {
 
 export type UndoCharacterOperationRefusalReason =
   | 'character_not_found'
+  | 'character_archived'
   | 'operation_not_found'
   | 'operation_character_mismatch'
   | 'revision_mismatch'
@@ -104,6 +105,7 @@ export type UndoCharacterOperationResult =
 
 export type RestoreCharacterSavePointRefusalReason =
   | 'character_not_found'
+  | 'character_archived'
   | 'save_point_not_found'
   | 'save_point_character_mismatch'
   | 'revision_mismatch';
@@ -767,18 +769,25 @@ export class CharacterCommandExecutor {
         readonly inverse_command: string;
       }
     | Extract<UndoCharacterOperationResult, { status: 'refused' }> {
-    const revision = this.db.scalar(
-      'SELECT revision FROM characters WHERE id = ?',
+    const character = this.db.oneRaw(
+      'SELECT revision, archived_at FROM characters WHERE id = ?',
       [request.character_id],
     );
-    if (revision === null) {
+    if (character === null) {
       return {
         status: 'refused',
         reason: 'character_not_found',
         current_revision: null,
       };
     }
-    const currentRevision = Number(revision);
+    const currentRevision = Number(character.revision);
+    if (character.archived_at !== null) {
+      return {
+        status: 'refused',
+        reason: 'character_archived',
+        current_revision: currentRevision,
+      };
+    }
     const operation = this.db.oneRaw(
       `SELECT character_id, inverse_command, resulting_revision
        FROM character_operations
@@ -836,18 +845,25 @@ export class CharacterCommandExecutor {
   ):
     | { readonly status: 'authorized'; readonly snapshot: string }
     | Extract<RestoreCharacterSavePointResult, { status: 'refused' }> {
-    const revision = this.db.scalar(
-      'SELECT revision FROM characters WHERE id = ?',
+    const character = this.db.oneRaw(
+      'SELECT revision, archived_at FROM characters WHERE id = ?',
       [request.character_id],
     );
-    if (revision === null) {
+    if (character === null) {
       return {
         status: 'refused',
         reason: 'character_not_found',
         current_revision: null,
       };
     }
-    const currentRevision = Number(revision);
+    const currentRevision = Number(character.revision);
+    if (character.archived_at !== null) {
+      return {
+        status: 'refused',
+        reason: 'character_archived',
+        current_revision: currentRevision,
+      };
+    }
     const point = this.db.oneRaw(
       `SELECT character_id, snapshot
        FROM character_save_points

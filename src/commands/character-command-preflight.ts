@@ -26,6 +26,15 @@ export interface CharacterCommandPreflightOptions {
   readonly validator?: CharacterCommandPayloadValidator;
 }
 
+export class CharacterArchivedRefusal extends Error {
+  readonly reason = 'character_archived' as const;
+
+  constructor(readonly currentRevision: number) {
+    super('Archived characters cannot be changed.');
+    this.name = 'CharacterArchivedRefusal';
+  }
+}
+
 /**
  * The shared command boundary used by durable execution and rollback preview.
  *
@@ -78,7 +87,7 @@ export class CharacterCommandPreflight {
     >,
     input: unknown,
   ): void {
-    const currentRevision = this.currentRevision(request.character_id);
+    const currentRevision = this.currentMutableRevision(request.character_id);
     if (
       currentRevision !== request.expected_revision &&
       !this.canMergeStaleSlotCommand(
@@ -101,6 +110,21 @@ export class CharacterCommandPreflight {
       throw new Error(`Character ${characterId} does not exist.`);
     }
     return Number(revision);
+  }
+
+  private currentMutableRevision(characterId: number): number {
+    const character = this.db.oneRaw(
+      'SELECT revision, archived_at FROM characters WHERE id = ?',
+      [characterId],
+    );
+    if (character === null) {
+      throw new Error(`Character ${characterId} does not exist.`);
+    }
+    const revision = Number(character.revision);
+    if (character.archived_at !== null) {
+      throw new CharacterArchivedRefusal(revision);
+    }
+    return revision;
   }
 
   private canMergeStaleSlotCommand(

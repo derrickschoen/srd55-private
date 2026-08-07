@@ -61,6 +61,7 @@ interface ArchiveManifestMemberRow {
 
 interface ArchiveSetTokenFacts {
   readonly operation: 'archive' | 'restore';
+  readonly archive_event_id: string | null;
   readonly content_key: ContentKey;
   readonly content_kind: AuthoredContentKind;
   readonly archived_at: string | null;
@@ -170,6 +171,7 @@ export class HomebrewArchiveSetService {
   constructor(
     private readonly db: DatabaseContext,
     private readonly now: () => string = () => new Date().toISOString(),
+    private readonly randomUuid: () => string = () => crypto.randomUUID(),
   ) {}
 
   #content(contentKey: ContentKey): ContentLifecycleRow {
@@ -287,7 +289,13 @@ export class HomebrewArchiveSetService {
     });
   }
 
-  #plan(operation: 'archive' | 'restore', contentKey: ContentKey): ArchiveSetPlan {
+  #plan(
+    operation: 'archive' | 'restore',
+    contentKey: ContentKey,
+    archiveEventId: string | null = operation === 'archive'
+      ? this.randomUuid()
+      : null,
+  ): ArchiveSetPlan {
     const content = this.#content(contentKey);
     const liveCharacters = operation === 'archive'
       ? this.#characters(content)
@@ -357,6 +365,7 @@ export class HomebrewArchiveSetService {
         }));
     const facts: ArchiveSetTokenFacts = Object.freeze({
       operation,
+      archive_event_id: archiveEventId,
       content_key: content.contentKey,
       content_kind: content.kind,
       archived_at: content.archivedAt,
@@ -415,9 +424,22 @@ export class HomebrewArchiveSetService {
 
   commitArchive(token: ArchiveSetPlanToken): ArchiveSetResult {
     const facts = this.#facts(token, 'archive');
-    const preview = this.previewArchive(facts.content_key);
+    const preview = this.#plan(
+      'archive',
+      facts.content_key,
+      facts.archive_event_id,
+    );
     if (preview.token !== token) this.#stale(facts.content_key);
-    const archivedAt = this.now();
+    if (facts.archive_event_id === null) {
+      throw new ArchiveSetLifecycleError('The archive-set token is invalid.', {
+        reason: 'invalid_reference',
+      });
+    }
+    // `archived_at` remains the one lifecycle marker shared by the creation,
+    // characters, and manifest. Its wall-clock prefix is for display/order;
+    // the nonce digest is the archive event identity, so token revalidation
+    // never depends on clock resolution or direction.
+    const archivedAt = `${this.now()}#${sha256(facts.archive_event_id)}`;
     try {
       return this.db.transaction(() => {
         const identity = this.db.exec(
@@ -535,6 +557,9 @@ export class HomebrewArchiveSetService {
     const digest = decoded[1];
     if (
       facts === null || typeof facts !== 'object' || facts.operation !== operation ||
+      (operation === 'archive'
+        ? typeof facts.archive_event_id !== 'string' || facts.archive_event_id.length === 0
+        : facts.archive_event_id !== null) ||
       typeof facts.content_key !== 'string' ||
       (facts.content_kind !== 'species' && facts.content_kind !== 'background' &&
         facts.content_kind !== 'subclass') ||

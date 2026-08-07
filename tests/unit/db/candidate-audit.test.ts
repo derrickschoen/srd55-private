@@ -338,6 +338,37 @@ describe('candidate database semantic audit', () => {
     ).toThrow('"Promised Hero" (character 1) no longer exists');
   });
 
+  it.each([
+    {
+      label: 'absent',
+      change: "DELETE FROM sqlite_sequence WHERE name = 'characters'",
+    },
+    {
+      label: 'reset',
+      change: "UPDATE sqlite_sequence SET seq = 0 WHERE name = 'characters'",
+    },
+    {
+      label: 'non-numeric',
+      change: "UPDATE sqlite_sequence SET seq = 'reset' WHERE name = 'characters'",
+    },
+    {
+      label: 'unsafe',
+      change:
+        "UPDATE sqlite_sequence SET seq = 9007199254740992 WHERE name = 'characters'",
+    },
+  ])('accepts a deleted archive member when the characters sequence is $label', ({ change }) => {
+    const db = freshDatabase();
+    seedTwoCharacters(db);
+    seedSpeciesArchiveManifest(db, {
+      characterId: 1,
+      referencedCreation: 'manifested',
+    });
+    db.exec('DELETE FROM characters WHERE id = 1');
+    db.exec(change);
+
+    expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).not.toThrow();
+  });
+
   it('derives its table set from the classification, not a hand list', () => {
     // An independent transcription: this is the oracle, TABLE_SCOPES is the
     // thing under test. A character-owned table classified wrongly, or a new
