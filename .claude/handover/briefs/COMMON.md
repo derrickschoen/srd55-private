@@ -30,11 +30,26 @@ PROCESS RULES (all mandatory):
    `const h: { fn: ((v: T) => void) | null } = { fn: null }`. If you write
    a closure-assigned local of any kind in a test, run `npm run build`
    before reporting.
-3. Run the FULL Playwright suite yourself on the PLAYWRIGHT_PORT given in
-   the unit brief (env var is PLAYWRIGHT_PORT). Full vitest too. Paste real
-   numbers. Other lanes run suites concurrently — contention is the norm;
-   any test >1.5s alone gets a per-test timeout (20_000) with the measured
-   alone-time in a comment. Never a config edit.
+3. SUITES — REWRITTEN 2026-08-07, and the old text was wrong. This rule
+   used to say "run the FULL Playwright suite yourself. Full vitest too."
+   That contradicted every unit brief's "targeted only" instruction and
+   contradicted the project's ONE-FULL-SUITE-MACHINE-WIDE law. Two lanes
+   (BHC, DICE-DEBRAND) correctly followed THIS file over their brief and
+   were briefly mis-recorded as having exceeded scope. They had not; the
+   collision was the supervisor's. Both then hit exactly the contention
+   the law exists to prevent — a discarded vitest run from worker
+   starvation, and an unrelated Playwright setup timeout.
+   THE RULE NOW: run TARGETED vitest for the files you touched, and ONLY
+   your own new/changed Playwright spec on the PLAYWRIGHT_PORT given in
+   the unit brief. Do NOT run a full vitest or the full Playwright pool —
+   several lanes run concurrently and the supervisor owns the full-suite
+   gates and the merge. Paste real numbers for what you did run.
+   If you believe a full suite is genuinely required to prove something,
+   STOP and say so rather than running one.
+   Contention still applies to targeted runs: any test >1.5s alone gets a
+   per-test timeout (20_000) with the measured alone-time in a comment.
+   Never a config edit. Note that a hang-guard timeout is not a perf pin —
+   record the measured number in the comment so a later reader can tell.
 4. No any/@ts-ignore/@ts-expect-error/.skip/.todo, no config edits
    (vite/vitest/playwright/tsconfig/package.json), no weakened assertions,
    no deleting a test to pass (stated strict-superset replacement is the
