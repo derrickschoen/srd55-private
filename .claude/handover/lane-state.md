@@ -23,7 +23,53 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-07-a (newest - read first)
+## RESTART POINT 2026-08-07-b (newest - read first)
+MAIN f9d5af3 (mirror pushed). FLOORS: vitest 256/4,181 all-pass; PW 131
+pool; build 0; migrations 0000-0039 FROZEN (next free mint 0040).
+FORTY-ONE merges. Rulings through D224.
+
+MERGED SINCE 08-07-a:
+ - HA-10 (4c3f9f2, 40th): consumer cutover + homebrew disclosure. Two
+   durable results: a DERIVED catalog-layer completeness guard (165
+   modules via the TS checker, no file allowlist) and a shared
+   catalog-control-disclosure seam (optgroup labels + aria-describedby;
+   form controls keep clean selectable names, static displays keep
+   inline `name - layer`). 3 review rounds + blocker + 2 gate-fix
+   rounds; findings included provenance HARD-CODED as bundled, a false
+   pin against an unused seam, a FALSE GUARD, and 17 broken specs of
+   which 9 were real product defects.
+ - BHC (f9d5af3, 41st): bundled-homebrew catalog + click-to-import
+   through the real publish path; Veteran, Barbed Court Monk, Spell
+   Student. D218 verified already-satisfied (pinned, not built).
+
+PRODUCTION BUG FOUND AND FIXED BY BHC (predates the unit): bundled spell
+registration used normalizeCatalogName (keeps separators) while identity
+derivation strips them, so EVERY multiword bundled spell had a
+mismatched fingerprint. It was MASKING a real path - importing a
+conflicting multiword spell returned target_integrity_refused (the local
+target failing its OWN integrity check) instead of the CI-4a
+key-collision review with a clone offer. Root-fixed at registration with
+a bundled-only D205 repair; the same defect in shared-spell placeholder
+registration fixed too. An attempt to paper over it by substituting the
+REGISTERED name into live verification was caught and reverted
+byte-clean - it would have made stored-name drift invisible.
+
+IN FLIGHT: SRD-ONLY (wt/srdonly, dispatched). Its precondition is now
+satisfied - BHC is on main, so Spell Student exercises every third-caster
+seam before EK/AT coverage is removed (D221).
+
+QUEUE: SRD-ONLY -> HA-11 (brief written, D138+D214) -> HA-12 -> D213
+hardening (include the readiness-timeout fragility from 08-07-a).
+
+OPEN OWNER ITEM: the EK/AT git-history rewrite is still undecided. The
+working-tree removal proceeds under D216 regardless; only the history
+question is parked. Verified earlier: NO EK/AT rules prose ever entered
+git - names + a numeric table only, first at b0af6f8 (2026-07-23), 889
+of 896 commits downstream.
+
+WORKTREES: wt/party (owner's - never prune), wt/srdonly (active).
+
+## RESTART POINT 2026-08-07-a (superseded by 08-07-b)
 MAIN e121578 (mirror push pending). FLOORS: vitest 252/4,132 all-pass;
 PW 129 pool; build 0; migrations 0000-0039 FROZEN (next free mint 0040).
 THIRTY-NINE merges. Rulings through D224.
