@@ -224,6 +224,8 @@ describe('HA-6 shared authoring form controls', () => {
     try {
       const calls: string[] = [];
       const controls = interactiveElement(createOrderedCardControls({
+        collectionKey: 'aegis-collection',
+        itemKey: 'aegis-item',
         accessibleName: 'Aegis', position: 1, count: 2,
         onMoveUp: () => calls.push('up'),
         onMoveDown: () => calls.push('down'),

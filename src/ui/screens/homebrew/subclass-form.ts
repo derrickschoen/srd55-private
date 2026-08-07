@@ -870,6 +870,8 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
           );
         }
         card.append(createOrderedCardControls({
+          collectionKey: `subclass-progression-${String(rowIndex)}-grants`,
+          itemKey: grant.draft_item_uuid,
           accessibleName: grant.rule_key || `spell grant ${String(grantIndex + 1)}`,
           position: grantIndex + 1,
           count: progression.rows[rowIndex]!.grants.length,
@@ -1198,6 +1200,8 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
           render();
         });
         const reorder = createOrderedCardControls({
+          collectionKey: `subclass-level-${String(level)}-features`,
+          itemKey: feature.draft_item_uuid,
           accessibleName: feature.name || `level ${String(level)} feature ${String(withinLevelIndex + 1)}`,
           position: withinLevelIndex + 1,
           count: levelFeatures.length,

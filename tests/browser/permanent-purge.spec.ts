@@ -1,4 +1,9 @@
 import type { Page } from '@playwright/test';
+import {
+  announcedMessages,
+  clearAnnouncements,
+  installAnnouncementRecorder,
+} from './fixtures/announcements';
 import { expect, test } from './fixtures/parallel-test';
 import { readGuidedSeam } from './fixtures/guided-seam';
 
@@ -54,6 +59,7 @@ test('publishes, versions, archives, restores, and permanently purges a whole li
   // Measured alone at 28.4s. It is now the slowest authoring-journey
   // precedent; the required x1.5 contention reserve is 42.6s, rounded up.
   test.setTimeout(43_000);
+  await installAnnouncementRecorder(page);
   await open(page, '/');
   await page.evaluate(() => window.staticApp.reset());
 
@@ -94,9 +100,16 @@ test('publishes, versions, archives, restores, and permanently purges a whole li
   await expect(page.getByLabel('Fix affected characters')).toContainText(
     'Purge Journey Hero',
   );
-  await page.getByRole('button', { name: 'Apply to all listed characters' }).click();
+  await clearAnnouncements(page);
+  const applyFixes = page.getByRole('button', { name: 'Apply to all listed characters' });
+  await applyFixes.focus();
+  await applyFixes.press('Enter');
   await expect(page.getByRole('heading', { name: 'Character fixes applied' }))
     .toBeVisible();
+  await expect.poll(() => announcedMessages(page)).toEqual(expect.arrayContaining([
+    'Applying every reviewed replacement…',
+    'All listed characters were updated.',
+  ]));
 
   const lineageKeys = await page.evaluate(async () =>
     (await window.staticApp.inspectRows('species_definitions'))
@@ -114,16 +127,28 @@ test('publishes, versions, archives, restores, and permanently purges a whole li
     name: 'Delete creation and attached characters',
   })).toBeVisible();
   await expect(page.getByText('Purge Journey Hero', { exact: true })).toBeVisible();
-  await page.getByRole('button', {
+  await clearAnnouncements(page);
+  const archive = page.getByRole('button', {
     name: 'Archive creation and all listed characters',
-  }).click();
+  });
+  await archive.focus();
+  await archive.press('Enter');
   await expect(page.getByRole('heading', { name: 'Archive' })).toBeVisible();
   await expect(page.getByText('Purge Journey Hero', { exact: true })).toBeVisible();
+  await expect.poll(() => announcedMessages(page))
+    .toContain('Archiving the reviewed set…');
 
-  await page.getByRole('button', {
+  await clearAnnouncements(page);
+  const restore = page.getByRole('button', {
     name: 'Restore creation and all listed characters',
-  }).click();
+  });
+  await restore.focus();
+  await restore.press('Enter');
   await expect(page.getByText('The archive is empty.')).toBeVisible();
+  await expect.poll(() => announcedMessages(page)).toEqual(expect.arrayContaining([
+    'Restoring the complete set…',
+    'Creation and all listed characters restored.',
+  ]));
   expect(await page.evaluate(async (id) =>
     (await window.staticApp.inspectRows('characters'))
       .some((row) => row['id'] === id),
@@ -134,14 +159,23 @@ test('publishes, versions, archives, restores, and permanently purges a whole li
   await publishedCard(page, 'Purge Journey Species Revised')
     .getByRole('link', { name: 'Delete' })
     .click();
-  await page.getByRole('button', {
+  const archiveAgain = page.getByRole('button', {
     name: 'Archive creation and all listed characters',
-  }).click();
+  });
+  await archiveAgain.focus();
+  await archiveAgain.press('Enter');
   await expect(page.getByRole('heading', { name: 'Archive' })).toBeVisible();
-  await page.getByRole('button', {
+  await clearAnnouncements(page);
+  const purge = page.getByRole('button', {
     name: 'Permanently purge Purge Journey Species Revised and its entire version lineage',
-  }).click();
+  });
+  await purge.focus();
+  await purge.press('Enter');
   await expect(page.getByText('The archive is empty.')).toBeVisible();
+  await expect.poll(() => announcedMessages(page)).toEqual(expect.arrayContaining([
+    'Permanently purging the complete version lineage…',
+    'Entire version lineage permanently purged.',
+  ]));
 
   expect(await page.evaluate(async ({ keys, id }) => ({
     remainingLineage: (await window.staticApp.inspectRows('catalog_content_identities'))

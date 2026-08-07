@@ -35,6 +35,8 @@ type FeatureEffectFormField = {
 type RenderableEffectFormField = CharacterEffectFormField | FeatureEffectFormField;
 
 export interface OrderedCardControlsOptions {
+  readonly collectionKey: string;
+  readonly itemKey: string;
   readonly accessibleName: string;
   readonly position: number;
   readonly count: number;
@@ -42,6 +44,17 @@ export interface OrderedCardControlsOptions {
   readonly onMoveUp: () => void;
   readonly onMoveDown: () => void;
   readonly onRemove: () => void;
+}
+
+function authoringHost(control: HTMLElement): HTMLElement {
+  let current: HTMLElement | null = control.parentElement;
+  let formParent: HTMLElement | null = null;
+  while (current !== null) {
+    if (current.getAttribute('data-authoring-form-kind') !== null) return current;
+    if (current.tagName.toLowerCase() === 'form') formParent = current.parentElement;
+    current = current.parentElement;
+  }
+  return formParent ?? document.body;
 }
 
 /**
@@ -59,22 +72,62 @@ export function createOrderedCardControls(
     label: string,
     disabled: boolean,
     action: () => void,
+    nextPosition: number | null,
   ): HTMLButtonElement => {
     const control = element('button', {
       text: label,
       attributes: {
         type: 'button',
         'aria-label': `${label} ${options.accessibleName}, item ${String(options.position)} of ${String(options.count)}`,
+        'data-authoring-order-action': label.toLowerCase().replace(' ', '-'),
+        'data-authoring-order-collection': options.collectionKey,
+        'data-authoring-order-item': options.itemKey,
+        'data-authoring-order-position': String(options.position),
       },
     });
     control.disabled = disabled || options.disabled === true;
-    control.addEventListener('click', action);
+    control.addEventListener('click', () => {
+      const host = authoringHost(controls);
+      action();
+
+      const available = Array.from(host.querySelectorAll<HTMLButtonElement>(
+        '[data-authoring-order-action]',
+      ));
+      const sameItem = available.filter((candidate) =>
+        candidate.getAttribute('data-authoring-order-item') === options.itemKey
+      );
+      const sameCollection = available.filter((candidate) =>
+        candidate.getAttribute('data-authoring-order-collection') === options.collectionKey
+      );
+      const requestedAction = label.toLowerCase().replace(' ', '-');
+      const requested = sameItem.find((candidate) =>
+        candidate.getAttribute('data-authoring-order-action') === requestedAction &&
+        !candidate.disabled
+      );
+      const replacementPosition = Math.max(1, Math.min(options.position, options.count - 1));
+      const replacement = label === 'Remove'
+        ? sameCollection.find((candidate) =>
+            candidate.getAttribute('data-authoring-order-position') === String(replacementPosition) &&
+            !candidate.disabled
+          )
+        : sameItem.find((candidate) => !candidate.disabled);
+      const liveAccessibleName = sameItem[0]?.parentElement
+        ?.getAttribute('aria-label')?.replace(/^Reorder /u, '') ?? options.accessibleName;
+      const status = Array.from(host.querySelectorAll<HTMLElement>('[role="status"]'))
+        .find((candidate) => candidate.getAttribute('aria-live') !== null);
+      if (status !== undefined) {
+        status.textContent = label === 'Remove'
+          ? `Removed ${options.accessibleName}.`
+          : `Moved ${liveAccessibleName} to position ${String(nextPosition ?? options.position)} of ${String(options.count)}.`;
+      }
+      (requested ?? replacement)?.focus();
+    });
     return control;
   };
   controls.append(
-    button('Move up', options.position <= 1, options.onMoveUp),
-    button('Move down', options.position >= options.count, options.onMoveDown),
-    button('Remove', false, options.onRemove),
+    button('Move up', options.position <= 1, options.onMoveUp, options.position - 1),
+    button('Move down', options.position >= options.count, options.onMoveDown, options.position + 1),
+    button('Remove', false, options.onRemove, null),
   );
   return controls;
 }
@@ -359,6 +412,8 @@ export function createEffectCard(options: EffectCardOptions): HTMLFieldSetElemen
     card.append(prose);
   }
   card.append(createOrderedCardControls({
+    collectionKey: authoringPathKey(options.pathPrefix?.slice(0, -1) ?? ['effects']),
+    itemKey: effect.draft_item_uuid,
     accessibleName: effect.label || definition.label,
     position: options.position,
     count: options.count,

@@ -593,6 +593,8 @@ export function renderSpeciesForm(options: SpeciesFormOptions): Cleanup {
           render();
         });
         card.append(effects, addEffect, createOrderedCardControls({
+          collectionKey: 'species-traits',
+          itemKey: trait.draft_item_uuid,
           accessibleName: trait.name || `trait ${String(traitIndex + 1)}`,
           position: traitIndex + 1,
           count: document.traits.length,
@@ -873,6 +875,8 @@ export function renderSpeciesForm(options: SpeciesFormOptions): Cleanup {
           card.append(...labelledControl('Number of skills to choose', count.id, count), choices);
         }
         card.append(createOrderedCardControls({
+          collectionKey: 'species-grants',
+          itemKey: grant.draft_item_uuid,
           accessibleName: grant.rule_key || `grant ${String(grantIndex + 1)}`,
           position: grantIndex + 1,
           count: document.grants.length,

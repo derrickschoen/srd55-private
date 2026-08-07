@@ -900,6 +900,8 @@ describe('HA-6 homebrew library routing and tabs', () => {
         ['preview', { content_key: contentKey }],
         ['commit', { token: 'restore-token' }],
       ]);
+      expect(archiveRoot.querySelector('.homebrew-status')?.textContent)
+        .toBe('Creation and all listed characters restored.');
       archiveRoot.querySelectorAll('button').find(
         (button) => button.textContent === 'Permanently purge entire lineage',
       )?.click();
@@ -908,6 +910,8 @@ describe('HA-6 homebrew library routing and tabs', () => {
         content_kind: 'species',
         content_key: contentKey,
       }]);
+      expect(archiveRoot.querySelector('.homebrew-status')?.textContent)
+        .toBe('Entire version lineage permanently purged.');
       archiveCleanup();
     } finally {
       restoreDocument();

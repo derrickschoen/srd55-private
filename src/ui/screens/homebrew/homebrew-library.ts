@@ -440,7 +440,7 @@ async function renderArchiveRoute(
   });
   const list = element('section', { attributes: { 'aria-label': 'Archived homebrew sets' } });
   view.main.append(status, list);
-  const render = async (): Promise<void> => {
+  const render = async (announcement = 'Archive loaded.'): Promise<void> => {
     const sets = await client.listArchivedSets();
     clear(list);
     list.append(element('h2', { text: 'Archive' }));
@@ -458,7 +458,7 @@ async function renderArchiveRoute(
         status.textContent = 'Restoring the complete set…';
         void client.previewRestoreSet({ content_key: set.content_key })
           .then((plan) => client.commitRestoreSet({ token: plan.token }))
-          .then(render)
+          .then(() => render('Creation and all listed characters restored.'))
           .catch((error: unknown) => {
             restore.disabled = false;
             status.textContent = error instanceof Error ? error.message : String(error);
@@ -480,7 +480,7 @@ async function renderArchiveRoute(
         void client.purgeArchivedSet({
           content_kind: set.content_kind,
           content_key: set.content_key,
-        }).then(render).catch((error: unknown) => {
+        }).then(() => render('Entire version lineage permanently purged.')).catch((error: unknown) => {
           purge.disabled = false;
           restore.disabled = false;
           status.textContent = error instanceof Error ? error.message : String(error);
@@ -500,7 +500,7 @@ async function renderArchiveRoute(
         purge,
       ]));
     }
-    status.textContent = 'Archive loaded.';
+    status.textContent = announcement;
     status.setAttribute('role', 'status');
   };
   await render();
