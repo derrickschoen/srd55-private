@@ -5,6 +5,37 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-07 — Barbed Court: granted Court Spells rows stay at 3/6/11/17; early grants accepted, dead windows and all
+
+Owner's ruling, verbatim:
+
+> Keep the levels to 3,6,11,17.
+>
+> You can give spells known early and it's fine
+
+Effect: option (b) from the refresh-model entry. The granted always-prepared
+rows stay on the subclass feature levels; the Paladin-oath-style move to slot
+arrival levels (3/7/13/19) is declined. The dead windows are accepted as
+intended design, not an oversight:
+
+| Row arrives | Spell level | First castable | Prepared-but-uncastable window |
+|---|---|---|---|
+| Monk 6 | 2nd | Monk 7 | 1 level |
+| Monk 11 | 3rd | Monk 13 | 2 levels |
+| Monk 17 | 4th | Monk 19 | 2 levels |
+
+Recorded, not corrected: the Monk-17 row (*Compulsion*, 4th) is unusable until
+19, which most tables never reach — the F14 exposure named at ruling time. The
+owner's framing is that an early grant is a promise of what is coming, and the
+doc will print the rows with their spell levels visible so the wait is legible
+rather than a surprise.
+
+The realignment ruling (2026-08-06) therefore stands in full for this table;
+nothing walks back.
+
+Still open on the refresh feature: the **rate** (×2 flat recommended) and the
+**action cost** (Bonus Action per Font of Magic recommended).
+
 ## 2026-08-07 — Barbed Court: the third-caster slot table stays, with its derivation recipe printed and sourced to the SRD 5.2.1 Multiclass Spellcaster table
 
 Owner's question and ruling, verbatim:
