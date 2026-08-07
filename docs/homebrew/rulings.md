@@ -5,6 +5,48 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-07 — Barbed Court: Unarmed Strikes gain +1/+2/+3 to attack and damage at Monk 6/11/17
+
+Owner's ruling, verbatim:
+
+> Monks struggle getting magic weapons, give unarmed strikes +1 at 6, 2 at 11,
+> 3 at 17
+
+Effect: a flat bonus to attack and damage rolls with Unarmed Strikes — +1 from
+Monk 6, +2 from 11, +3 from 17. Rationale on the record: magic-item
+compensation, not a raw power raise — martials at those tiers are assumed to
+carry +1/+2/+3 weapons, and unarmed monks are the one martial the treasure
+tables structurally skip.
+
+Measurements reported at ruling time:
+
+- **The ladder matches the DMG's own rarity-by-level assumptions** — +1
+  weapons are uncommon (tier 2, levels 5–10), +2 rare (tier 3, 11–16), +3
+  very rare (tier 4, 17+). The feature grants at 6/11/17 exactly what the
+  treasure ladder hands a Fighter in the same tier, so against an equipped
+  Fighter this is parity, not overtake. Against a table that *does* hand out
+  Insignia-of-Claws-style items, it is double dipping — see the stacking note.
+- **Magnitude:** +1 to hit ≈ +5 percentage points per attack; at Monk 6
+  (three attacks/round with the bonus action) the full rider is worth roughly
+  +2 DPR at +1, scaling to roughly +9 DPR at +3 with four attacks at 17.
+  Comparator precedent (distance markers only): the 2014 Kensei pays 3 ki per
+  minute at level 11 for the +3 this feature gives free at 17; official items
+  granting the same ladder to unarmed strikes exist in non-SRD books, which
+  is evidence the effect is item-shaped rather than unprecedented.
+- **Unarmed only** — Martial Arts weapons are excluded as ruled, which stacks
+  with the Light/Finesse/mastery ruling to make unarmed the subclass's
+  intended delivery. A Barbed Court monk fighting with a Spear forgoes the
+  bonus; recorded as intended identity pressure, not an oversight.
+- **Level 6 now carries six grants** (Court Forms, Warding Image, Spellwoven
+  Strike, Unshaken Aim, Focus Refresh from 6, +1 Unarmed) — covered by the
+  front-load directive, restated so the count stays visible.
+
+Drafting question, open: stacking with magic items that grant the same bonus.
+Bonuses from different sources stack by default in 5e. Recommended clause for
+the rewrite: *"If a magic item gives your Unarmed Strike a bonus to the same
+roll, use the higher bonus."* Pending owner word; without it, the feature
+stacks.
+
 ## 2026-08-07 — Barbed Court: bespoke *Shield* clause at level 3 — open item 2 of 9 CLOSED
 
 Owner's ruling, verbatim:
