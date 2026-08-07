@@ -3,6 +3,7 @@ import type { Database, Sqlite3Static } from '@sqlite.org/sqlite-wasm';
 import schema from '../../../src/db/schema.sql?raw';
 import {
   CATALOG_DATA_MIGRATIONS,
+  catalogDataMigrationChecksum,
   runCatalogDataMigrations,
   type CatalogDataMigration,
   validateCatalogDataMigrationRegistry,
@@ -44,8 +45,14 @@ function migration(
   return Object.freeze({
     id,
     projectorScheme: CONTENT_FINGERPRINT_SCHEME_V1,
-    source,
-    checksum: sha256(source),
+    sources: Object.freeze([Object.freeze({
+      path: `tests/fixtures/${id}.ts`,
+      bytes: source,
+    })]),
+    checksum: catalogDataMigrationChecksum([{
+      path: `tests/fixtures/${id}.ts`,
+      bytes: source,
+    }]),
     run,
   });
 }
@@ -55,25 +62,52 @@ describe('catalog data-migration registry', () => {
     expect(CATALOG_DATA_MIGRATIONS.map((entry) => ({
       id: entry.id,
       projectorScheme: entry.projectorScheme,
+      sources: entry.sources.map(({ path }) => path),
       checksum: entry.checksum,
     }))).toEqual([{
       id: 'retire_non_srd_bundled_subclasses_v1',
       projectorScheme: 'content-v1',
-      checksum: '75f251741104d3d358173e3633d3ac6b7d91d9fb8efc0fb22018e29fcfecacf9',
+      sources: [
+        'src/catalog/retire-non-srd-bundled-subclasses-v1.ts',
+        'src/catalog/catalog-lineage-delete-guard.ts',
+      ],
+      checksum: 'dd0c26c46278a9bbc28cc448c0489adf5719dfd957de9594ed96ecad76ae795e',
     }]);
+    expect(() =>
+      validateCatalogDataMigrationRegistry(CATALOG_DATA_MIGRATIONS)
+    ).not.toThrow();
   });
 
   it('refuses edited source whose independently pinned checksum was not changed', () => {
     const originalSource = 'export function frozenMigration() { return 1; }\n';
     const edited = {
       ...migration('frozen_source', originalSource, () => undefined),
-      source: `${originalSource}// edited\n`,
+      sources: [{
+        path: 'tests/fixtures/frozen_source.ts',
+        bytes: `${originalSource}// edited\n`,
+      }],
     };
 
     expect(() =>
       validateCatalogDataMigrationRegistry([edited]),
     ).toThrow(
       'Catalog data migration "frozen_source" source checksum mismatch',
+    );
+  });
+
+  it('refuses changed guard-module bytes until the retirement checksum is re-pinned', () => {
+    const retirement = CATALOG_DATA_MIGRATIONS[0]!;
+    const edited = {
+      ...retirement,
+      sources: retirement.sources.map((source) =>
+        source.path === 'src/catalog/catalog-lineage-delete-guard.ts'
+          ? { ...source, bytes: `${source.bytes}// changed guard byte\n` }
+          : source),
+    };
+
+    expect(() => validateCatalogDataMigrationRegistry([edited])).toThrow(
+      'Catalog data migration "retire_non_srd_bundled_subclasses_v1" ' +
+        'source checksum mismatch',
     );
   });
 
