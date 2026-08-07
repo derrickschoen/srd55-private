@@ -17,6 +17,15 @@ import {
   exportCharacterBackup,
   importCharacterBackup,
 } from '../../../src/backup/character-backup';
+import {
+  projectStoredAuthoredContentV1,
+  storedAuthoredRegistryReferencesV1,
+} from '../../../src/catalog/stored-authored-content-projector-v1';
+import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
+import { UpdateClassCommand } from '../../../src/commands/update-class';
+import { raiseClassLevelForTest } from '../../helpers/class-levels';
+import { BuildReportBuilder } from '../../../src/reports/build-report-builder';
+import { SpellAccessBuilder } from '../../../src/access/spell-access-builder';
 
 const connections: Database[] = [];
 
@@ -37,6 +46,58 @@ function spellStudent(): SubclassAuthoringDraft {
     entry.catalog_key === 'spell-student')?.revisions[0];
   if (document?.kind !== 'subclass') throw new Error('Spell Student fixture is missing.');
   return document;
+}
+
+function catalogCensus(db: DatabaseContext) {
+  return {
+    identities: db.allRaw(
+      'SELECT content_kind, content_key FROM catalog_content_identities ORDER BY content_kind, content_key',
+    ),
+    definitions: db.allRaw('SELECT id, content_key FROM subclass_definitions ORDER BY id'),
+    progressions: db.allRaw(
+      'SELECT id, subclass_definition_id, class_level FROM subclass_progressions ORDER BY id',
+    ),
+    features: db.allRaw(
+      'SELECT id, subclass_definition_id, sort_order FROM subclass_features ORDER BY id',
+    ),
+    fingerprints: db.allRaw(
+      `SELECT content_kind, content_key, fingerprint_scheme, fingerprint_digest, fingerprint_role
+       FROM catalog_content_fingerprints
+       ORDER BY content_kind, content_key, fingerprint_scheme, fingerprint_digest, fingerprint_role`,
+    ),
+    aliases: db.allRaw(
+      `SELECT content_kind, alias_key, content_key, alias_kind
+       FROM catalog_content_aliases ORDER BY content_kind, alias_key`,
+    ),
+    lineage: db.allRaw(
+      `SELECT content_kind, superseded_content_key, successor_content_key
+       FROM catalog_content_supersessions ORDER BY content_kind, superseded_content_key`,
+    ),
+    drafts: db.allRaw(
+      'SELECT draft_uuid, content_kind, revision FROM catalog_content_drafts ORDER BY draft_uuid',
+    ),
+  };
+}
+
+function applySubclass(db: DatabaseContext, contentKey: ContentKey, level: number): number {
+  const definition = db.oneRaw(
+    'SELECT id, class_definition_id FROM subclass_definitions WHERE content_key = ?',
+    [contentKey],
+  );
+  if (definition === null) throw new Error('Installed subclass definition is missing.');
+  const characterId = db.exec("INSERT INTO characters (name) VALUES ('Barbed Court Adept')")
+    .lastInsertId;
+  const classId = Number(definition.class_definition_id);
+  const subclassId = Number(definition.id);
+  const update = () => new UpdateClassCommand(
+    db,
+    { type: 'update_class', class_definition_id: classId, subclass_definition_id: subclassId },
+    new CharacterCommandIntegrity('bundled-barbed-court-apply'),
+  ).apply(characterId);
+  update();
+  raiseClassLevelForTest(db, characterId, classId, level);
+  update();
+  return characterId;
 }
 
 describe('bundled authored-kind installer', () => {
@@ -73,6 +134,42 @@ describe('bundled authored-kind installer', () => {
     expect(db.scalar<number>('SELECT count(*) FROM catalog_content_identities')).toBe(rootsAfterFirst);
     expect(db.scalar<number>('SELECT count(*) FROM catalog_content_supersessions')).toBe(0);
     expect(db.scalar<number>('SELECT count(*) FROM catalog_content_drafts')).toBe(0);
+  }, 20_000);
+
+  it('publishes and applies Barbed Court as a Wisdom third-caster with its curated grants', async () => {
+    const db = await database();
+    const plan = planBundledHomebrewInstall(db);
+    const installed = commitBundledHomebrewInstall(db, plan.token);
+    if (installed.kind !== 'committed') throw new Error('Bundled catalog install failed.');
+    const outcome = installed.outcomes.find((candidate) =>
+      candidate.id === 'subclass:bundled:warrior-of-the-barbed-court');
+    if (outcome === undefined || outcome.kind === 'refused' || outcome.kind === 'review') {
+      throw new Error('Barbed Court install outcome is missing.');
+    }
+    const characterId = applySubclass(db, outcome.contentKey, 7);
+    const report = new BuildReportBuilder(db).build(characterId);
+    expect(report.classes[0]).toMatchObject({
+      name: 'Monk',
+      subclass: 'Warrior of the Barbed Court',
+      class_level: 7,
+      spellcasting_ability: 'wisdom',
+      progression_type: 'third_down',
+    });
+    expect(report.caster.slots).toEqual([{ level: 1, count: 3 }]);
+    expect(new SpellAccessBuilder(db).buildForCharacter(characterId).map((spell) => ({
+      name: spell.spell_name,
+      ability: spell.spellcasting_ability,
+      alwaysPrepared: spell.always_prepared,
+    }))).toEqual(expect.arrayContaining([
+      { name: 'Bane', ability: 'wisdom', alwaysPrepared: true },
+      { name: 'Command', ability: 'wisdom', alwaysPrepared: true },
+      { name: 'Dissonant Whispers', ability: 'wisdom', alwaysPrepared: true },
+      { name: 'Hideous Laughter', ability: 'wisdom', alwaysPrepared: true },
+      { name: 'Enthrall', ability: 'wisdom', alwaysPrepared: true },
+      { name: 'Suggestion', ability: 'wisdom', alwaysPrepared: true },
+      { name: 'Prestidigitation', ability: 'wisdom', alwaysPrepared: true },
+      { name: 'Vicious Mockery', ability: 'wisdom', alwaysPrepared: true },
+    ]));
   }, 20_000);
 
   it('publishes registered changed bytes as a CI-7 successor and leaves the previous root in place', async () => {
@@ -124,50 +221,35 @@ describe('bundled authored-kind installer', () => {
     });
   }, 20_000);
 
-  it('rolls an earlier valid entry back when a later entry refuses, preserving captured IDs', async () => {
+  it('rolls back every captured catalog row when a later entry fails only during commit', async () => {
     const db = await database();
-    const capturedIdentityIds = db.allRaw(
-      'SELECT rowid FROM catalog_content_identities ORDER BY rowid',
-    ).map((row) => Number(row.rowid));
-    const capturedDraftIds = db.allRaw(
-      'SELECT rowid FROM catalog_content_drafts ORDER BY rowid',
-    ).map((row) => Number(row.rowid));
-    const broken: SubclassAuthoringDraft = {
-      ...spellStudent(),
-      parent_class_content_key: '2024:class:missing-bundled-parent' as ContentKey,
-    };
+    const before = catalogCensus(db);
     const catalog = Object.freeze([
       BUNDLED_HOMEBREW_CATALOG[0],
-      Object.freeze({
-        catalog_key: 'broken-spell-student',
-        revisions: Object.freeze([broken] as const),
-      }),
+      BUNDLED_HOMEBREW_CATALOG[2],
     ] as const satisfies readonly BundledHomebrewCatalogEntry[]);
 
     const plan = planBundledHomebrewInstall(db, catalog);
-    expect(plan.outcomes).toEqual([{
-      id: 'subclass:bundled:broken-spell-student',
-      kind: 'refused',
-      reason: 'install_refused',
-    }]);
-    expect(plan.entries).toEqual([{
-      catalog_key: 'broken-spell-student',
-      kind: 'subclass',
-      name: 'Spell Student',
-      outcome: 'refused',
-      error: 'Subclass draft semantic validation failed. [{"path":["parent_class_content_key"],"code":"unresolved_reference","message":"Parent class must resolve to one bundled class fingerprint."}]',
-    }]);
+    expect(plan.entries.map((entry) => entry.outcome)).toEqual(['create', 'create']);
+    let spellStudentInsertions = 0;
+    connections.at(-1)?.createFunction('bundled_commit_probe', () => {
+      spellStudentInsertions += 1;
+      if (spellStudentInsertions >= 7) throw new Error('Injected commit-only failure.');
+      return null;
+    });
+    db.exec(
+      `CREATE TEMP TRIGGER bundled_commit_only_failure
+       BEFORE INSERT ON subclass_definitions
+       WHEN NEW.name = 'Spell Student'
+       BEGIN SELECT bundled_commit_probe(); END`,
+    );
     expect(commitBundledHomebrewInstall(db, plan.token, catalog)).toEqual({
       kind: 'refused',
-      reason: 'entry_refused',
+      reason: 'commit_failed',
       outcomes: plan.outcomes,
     });
-    expect(db.allRaw(
-      'SELECT rowid FROM catalog_content_identities ORDER BY rowid',
-    ).map((row) => Number(row.rowid))).toEqual(capturedIdentityIds);
-    expect(db.allRaw(
-      'SELECT rowid FROM catalog_content_drafts ORDER BY rowid',
-    ).map((row) => Number(row.rowid))).toEqual(capturedDraftIds);
+    expect(spellStudentInsertions).toBeGreaterThanOrEqual(7);
+    expect(catalogCensus(db)).toEqual(before);
   }, 20_000);
 
   it('refuses an unregistered same-key root without leaving any staged draft or partial catalog write', async () => {
@@ -207,24 +289,24 @@ describe('bundled authored-kind installer', () => {
     expect(db.scalar<number>('SELECT count(*) FROM catalog_content_drafts')).toBe(0);
   }, 20_000);
 
-  it('carries an installed non-SRD subclass through full character export and import', async () => {
+  it('round-trips the complete external subclass aggregate through full character export', async () => {
     // Measured alone at 2.56s; 20s retains contention headroom.
     const source = await database();
     const plan = planBundledHomebrewInstall(source);
     const installed = commitBundledHomebrewInstall(source, plan.token);
     if (installed.kind !== 'committed') throw new Error('Bundled catalog install failed.');
-    const spellStudent = installed.outcomes.find((outcome) =>
-      outcome.id === 'subclass:bundled:spell-student');
-    if (spellStudent === undefined || spellStudent.kind === 'refused' || spellStudent.kind === 'review') {
-      throw new Error('Spell Student install outcome is missing.');
+    const barbedCourt = installed.outcomes.find((outcome) =>
+      outcome.id === 'subclass:bundled:warrior-of-the-barbed-court');
+    if (barbedCourt === undefined || barbedCourt.kind === 'refused' || barbedCourt.kind === 'review') {
+      throw new Error('Barbed Court install outcome is missing.');
     }
     const definition = source.oneRaw(
       `SELECT id, class_definition_id FROM subclass_definitions WHERE content_key = ?`,
-      [spellStudent.contentKey],
+      [barbedCourt.contentKey],
     );
-    if (definition === null) throw new Error('Spell Student definition is missing.');
+    if (definition === null) throw new Error('Barbed Court definition is missing.');
     const characterId = source.exec(
-      "INSERT INTO characters (name) VALUES ('Portable Spell Student')",
+      "INSERT INTO characters (name) VALUES ('Portable Barbed Court')",
     ).lastInsertId;
     source.exec(
       `INSERT INTO character_class_levels (
@@ -242,21 +324,56 @@ describe('bundled authored-kind installer', () => {
     expect(backup.content).toEqual(expect.arrayContaining([
       expect.objectContaining({
         kind: 'subclass',
-        content_key: spellStudent.contentKey,
-        aggregate: expect.objectContaining({ name: 'Spell Student' }),
+        content_key: barbedCourt.contentKey,
+        aggregate: expect.objectContaining({ name: 'Warrior of the Barbed Court' }),
       }),
     ]));
+    const sourceProjection = projectStoredAuthoredContentV1(source, {
+      kind: 'subclass',
+      contentKey: barbedCourt.contentKey,
+      references: storedAuthoredRegistryReferencesV1(source),
+    });
+    const sourceAggregate = sourceProjection.aggregate;
 
     const target = await database();
     const imported = importCharacterBackup(target, backup);
-    expect(target.oneRaw(
-      `SELECT subclass.name, identity.catalog_layer
+    const importedDefinition = target.oneRaw(
+      `SELECT subclass.name, subclass.content_key, identity.catalog_layer
        FROM character_class_levels AS level
        JOIN subclass_definitions AS subclass ON subclass.id = level.subclass_definition_id
        JOIN catalog_content_identities AS identity
          ON identity.content_kind = 'subclass' AND identity.content_key = subclass.content_key
-       WHERE level.character_id = ?`,
+      WHERE level.character_id = ?`,
       [imported.characterId],
-    )).toEqual({ name: 'Spell Student', catalog_layer: 'external' });
+    );
+    expect(importedDefinition).toMatchObject({
+      name: 'Warrior of the Barbed Court', catalog_layer: 'external',
+    });
+    if (importedDefinition === null) throw new Error('Imported Barbed Court is missing.');
+    const destinationProjection = projectStoredAuthoredContentV1(target, {
+      kind: 'subclass',
+      contentKey: String(importedDefinition.content_key) as ContentKey,
+      references: storedAuthoredRegistryReferencesV1(target),
+    });
+    const destinationAggregate = destinationProjection.aggregate;
+    expect(destinationProjection.kind).toBe(sourceProjection.kind);
+    expect(destinationAggregate.rules_edition).toBe(sourceAggregate.rules_edition);
+    expect(destinationAggregate.name).toBe(sourceAggregate.name);
+    expect(destinationProjection.payload).toEqual(sourceProjection.payload);
+    expect(destinationAggregate.reference_text).toBe(sourceAggregate.reference_text);
+    expect(destinationAggregate.progression).toEqual(sourceAggregate.progression);
+    if (
+      destinationAggregate.progression.mode !== 'override' ||
+      sourceAggregate.progression.mode !== 'override'
+    ) {
+      throw new Error('Barbed Court round-trip requires dense progressions.');
+    }
+    expect(destinationAggregate.progression.rows.map((row) => row.slot_counts))
+      .toEqual(sourceAggregate.progression.rows.map((row) => row.slot_counts));
+    expect(destinationAggregate.progression.rows.map((row) => row.grants))
+      .toEqual(sourceAggregate.progression.rows.map((row) => row.grants));
+    expect(destinationAggregate.features).toEqual(sourceAggregate.features);
+    expect(destinationAggregate.grants).toEqual(sourceAggregate.grants);
+    expect(destinationAggregate).toEqual(sourceAggregate);
   }, 20_000);
 });

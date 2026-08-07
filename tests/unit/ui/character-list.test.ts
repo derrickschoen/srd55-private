@@ -700,7 +700,7 @@ describe('catalog and backup entry points', () => {
     ).toBe('0 created, 0 updated, 0 tombstoned, 0 subclasses created, 1 subclass updated');
   });
 
-  it('previews and confirms bundled homebrew in the shared modal while keeping hostile names inert', async () => {
+  it('refreshes the bundled summary on a stale plan while keeping hostile names inert', async () => {
     const fixture = services();
     const plan: BundledHomebrewInstallPlan = {
       token: 'bundled-plan' as ContentImportPlanToken,
@@ -723,6 +723,16 @@ describe('catalog and backup entry points', () => {
     const previewHolder: {
       resolve: ((value: BundledHomebrewInstallPlan) => void) | null;
     } = { resolve: null };
+    const freshPlan: BundledHomebrewInstallPlan = {
+      ...plan,
+      token: 'bundled-fresh-plan' as ContentImportPlanToken,
+      outcomes: plan.outcomes.map((outcome) => ({
+        id: outcome.id,
+        kind: 'match' as const,
+        contentKey: 'contentKey' in outcome ? outcome.contentKey : '2024:content.subclass:fresh' as ContentKey,
+      })),
+      entries: plan.entries.map((entry) => ({ ...entry, outcome: 'matched_existing' as const })),
+    };
     let commits = 0;
     let persistedChanges = 0;
     const restoreDocument = installInteractiveDocument();
@@ -738,9 +748,13 @@ describe('catalog and backup entry points', () => {
               previewHolder.resolve = resolve;
             }),
             installBundledHomebrew: async ({ token }) => {
-              expect(token).toBe(plan.token);
               commits += 1;
-              return { kind: 'committed', outcomes: plan.outcomes };
+              if (commits === 1) {
+                expect(token).toBe(plan.token);
+                return { kind: 'stale-plan' as const, freshPlan };
+              }
+              expect(token).toBe(freshPlan.token);
+              return { kind: 'committed' as const, outcomes: freshPlan.outcomes };
             },
           },
         },
@@ -772,10 +786,23 @@ describe('catalog and backup entry points', () => {
       for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
 
       expect(commits).toBe(1);
+      expect(elementText(dialogNode as unknown as Node)).not.toContain(
+        'Veteran — subclass; external homebrew; create',
+      );
+      expect(elementText(dialogNode as unknown as Node)).toContain(
+        'Veteran — subclass; external homebrew; matched existing',
+      );
+      expect(elementText(dialogNode as unknown as Node)).toContain(
+        'The catalog changed. Review the refreshed plan before committing.',
+      );
+      confirm.click();
+      for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+
+      expect(commits).toBe(2);
       expect(persistedChanges).toBe(1);
       expect(button.disabled).toBe(false);
       expect(elementText(controls.element)).toContain(
-        'Bundled homebrew imported: 2 published, 1 matched existing.',
+        'Bundled homebrew imported: 0 published, 3 matched existing.',
       );
       controls.cleanup();
     } finally {

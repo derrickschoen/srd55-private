@@ -3,8 +3,9 @@ import type { ContentKey } from '../domain/ids';
 import type { ContentFingerprintReference } from '../authoring/contracts';
 import {
   CONTENT_FINGERPRINT_SCHEME_V1,
-  deriveContentIdentityV1,
+  deriveContentIdentityV1FromNormalizedName,
   type ContentKind,
+  type NormalizedContentName,
 } from './content-identity';
 import { projectStoredEquipmentContentV1 } from './equipment-content-projector-v1';
 import { projectStoredSpellContentV1 } from './spell-content-projector-v1';
@@ -97,21 +98,26 @@ export function storedContentMatchesFingerprintReferenceV1<
 ): boolean {
   if (reference.scheme !== CONTENT_FINGERPRINT_SCHEME_V1) return false;
   const targets = db.allRaw(
-    `SELECT DISTINCT content_key
+    `SELECT DISTINCT content_key, canonical_json
      FROM catalog_content_fingerprints
      WHERE content_kind = ? AND fingerprint_scheme = ?
        AND fingerprint_digest = ?
        AND fingerprint_role IN ('current', 'compatible')
      ORDER BY content_key`,
     [reference.kind, reference.scheme, reference.digest],
-  ).map((row) => String(row.content_key));
-  if (targets.length !== 1 || targets[0] !== contentKey) return false;
+  );
+  if (targets.length !== 1 || String(targets[0]!.content_key) !== contentKey) return false;
   try {
+    const registered = JSON.parse(String(targets[0]!.canonical_json)) as unknown;
+    const normalizedName = registered !== null && typeof registered === 'object'
+      ? Reflect.get(registered, 'normalizedName')
+      : null;
+    if (typeof normalizedName !== 'string' || normalizedName === '') return false;
     const stored = projectStoredContentV1(db, reference.kind, contentKey);
-    const live = deriveContentIdentityV1({
+    const live = deriveContentIdentityV1FromNormalizedName({
       kind: stored.kind,
       edition: stored.edition,
-      name: stored.name,
+      normalizedName: normalizedName as NormalizedContentName,
       payload: stored.payload,
     });
     return live.digest === reference.digest;

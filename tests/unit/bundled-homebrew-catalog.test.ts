@@ -76,7 +76,7 @@ describe('bundled homebrew catalog payload', () => {
       .toEqual(Object.fromEntries(features));
   });
 
-  it('matches Barbed Court identity and feature prose independently without pinning its progression', () => {
+  it('matches Barbed Court prose and publishes its complete Wisdom third-caster grants', () => {
     const source = markdown('docs/homebrew/2026-08-03-monk-barbed-court.md');
     const identity = section(source, 'OWNER-APPROVAL: Identity paragraph and ancestry disclosure.', '## 2. Level 3: Barbed Court Spellcasting');
     const features = featureProse(source, '## 3. Subclass Features', '## 4. Power-Budget Worksheet');
@@ -97,6 +97,36 @@ describe('bundled homebrew catalog payload', () => {
       'Barbed Court Spellcasting': spellcasting,
       ...Object.fromEntries(features),
     });
+    expect(barbed.progression).toMatchObject({
+      mode: 'override',
+      spellcasting_ability: 'wisdom',
+      caster_contribution: 'third_down',
+    });
+    if (barbed.progression.mode !== 'override') throw new Error('Dense progression required.');
+    expect(barbed.progression.rows.map((row) => row.class_level)).toEqual(characterLevels);
+    expect(barbed.progression.rows.map((row) => row.cantrips_known)).toEqual([
+      0, 0, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+    ]);
+    expect(barbed.progression.rows.flatMap((row) => row.grants.map((grant) => [
+      row.class_level,
+      grant.rule_key,
+      grant.kind === 'fixed_spell' ? grant.spell_content_key : null,
+      grant.kind === 'fixed_spell' ? grant.always_prepared : null,
+    ]))).toEqual([
+      [3, 'barbed-court-vicious-mockery', '2024:vicious-mockery', true],
+      [3, 'barbed-court-prestidigitation', '2024:prestidigitation', true],
+      [3, 'barbed-court-bane', '2024:bane', true],
+      [3, 'barbed-court-command', '2024:command', true],
+      [3, 'barbed-court-dissonant-whispers', '2024:dissonant-whispers', true],
+      [3, 'barbed-court-hideous-laughter', '2024:hideous-laughter', true],
+      [7, 'barbed-court-enthrall', '2024:enthrall', true],
+      [7, 'barbed-court-suggestion', '2024:suggestion', true],
+      [10, 'barbed-court-message', '2024:message', true],
+      [13, 'barbed-court-hypnotic-pattern', '2024:hypnotic-pattern', true],
+      [13, 'barbed-court-tongues', '2024:tongues', true],
+      [19, 'barbed-court-compulsion', '2024:compulsion', true],
+      [19, 'barbed-court-confusion', '2024:confusion', true],
+    ]);
   });
 
   it('keeps every committed draft inside the shared code-point, list, and encoded-byte limits', () => {

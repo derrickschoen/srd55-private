@@ -382,10 +382,7 @@ export function createImportBackupControls(
     attributes: { type: 'button' },
   });
 
-  function appendBundledEntrySummary(plan: BundledHomebrewInstallPlan): void {
-    const dialog = root.querySelector<HTMLDialogElement>('[data-testid="content-adoption-modal"]');
-    const preview = dialog?.querySelector('.content-import-preview');
-    if (preview === null || preview === undefined) return;
+  function bundledEntrySummary(plan: BundledHomebrewInstallPlan): HTMLElement {
     const summary = element('section', {
       className: 'bundled-homebrew-entry-summary',
       attributes: { 'aria-label': 'Bundled homebrew entries' },
@@ -398,7 +395,7 @@ export function createImportBackupControls(
       }));
     }
     summary.append(list);
-    dialog?.append(summary);
+    return summary;
   }
 
   cleanups.push(listen(bundledHomebrewButton, 'click', () => {
@@ -418,6 +415,9 @@ export function createImportBackupControls(
         plan,
         replan: () => authoring.previewBundledHomebrew(),
         commit: (submitted) => authoring.installBundledHomebrew({ token: submitted.token }),
+        renderPlanDetails: (submitted) => bundledEntrySummary(
+          submitted as BundledHomebrewInstallPlan,
+        ),
         onCommitted: async (result) => {
           await options.onPersistedChange();
           const matched = result.outcomes.filter((outcome) =>
@@ -432,7 +432,6 @@ export function createImportBackupControls(
         },
       });
       adoptionCleanup = rendered.cleanup;
-      appendBundledEntrySummary(plan);
       announce('Review three bundled homebrew entries before importing.');
     }).catch((error: unknown) => {
       announce(errorMessage(error), true);

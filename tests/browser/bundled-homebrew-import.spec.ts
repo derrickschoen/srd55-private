@@ -74,7 +74,7 @@ function publishedCard(page: Page, name: string) {
   });
 }
 
-test('imports bundled homebrew through publish, applies derived third-caster slots, and repeats as a no-op', async ({
+test('imports bundled homebrew, applies Barbed Court casting, and repeats as a no-op', async ({
   page,
 }) => {
   // The slower measured precedent is HA-9 at 18.2s. Its required x1.5
@@ -105,32 +105,32 @@ test('imports bundled homebrew through publish, applies derived third-caster slo
   await page.getByRole('link', { name: '← Characters', exact: true }).click();
   await globalReady(page);
   await page.getByRole('link', { name: 'Create a character', exact: true }).click();
-  await page.getByRole('button', { name: 'Fighter Hit die: d10', exact: true }).click();
+  await page.getByRole('button', { name: 'Monk Hit die: d8', exact: true }).click();
   await page.getByRole('textbox', { name: 'Character name', exact: true })
-    .fill('Bundled Spell Student');
+    .fill('Bundled Barbed Court');
   await page.getByRole('button', { name: 'Create character', exact: true }).click();
 
   const persisted = await page.evaluate(async () => {
     const characters = await window.staticApp.inspectRows('characters', {
-      name: 'Bundled Spell Student',
+      name: 'Bundled Barbed Court',
     });
     const characterId = Number(characters[0]?.['id']);
     const revision = Number(characters[0]?.['revision']);
-    const classes = await window.staticApp.inspectRows('class_definitions', { name: 'Fighter' });
+    const classes = await window.staticApp.inspectRows('class_definitions', { name: 'Monk' });
     const subclasses = await window.staticApp.inspectRows(
       'subclass_definitions',
-      { name: 'Spell Student' },
+      { name: 'Warrior of the Barbed Court' },
     );
-    const fighterId = Number(classes[0]?.['id']);
+    const classId = Number(classes[0]?.['id']);
     const subclassId = Number(subclasses[0]?.['id']);
     const subclassKey = String(subclasses[0]?.['content_key']);
     if (
       !Number.isSafeInteger(characterId) ||
       !Number.isSafeInteger(revision) ||
-      !Number.isSafeInteger(fighterId) ||
+      !Number.isSafeInteger(classId) ||
       !Number.isSafeInteger(subclassId)
     ) {
-      throw new Error('The imported Spell Student character inputs were not persisted.');
+      throw new Error('The imported Barbed Court character inputs were not persisted.');
     }
     const afterTwo = await window.appRpc.call<
       {
@@ -150,7 +150,7 @@ test('imports bundled homebrew through publish, applies derived third-caster slo
       expected_revision: revision,
       command: {
         type: 'level_up_class',
-        class_definition_id: fighterId,
+        class_definition_id: classId,
         target_level: 2,
       },
     });
@@ -160,7 +160,7 @@ test('imports bundled homebrew through publish, applies derived third-caster slo
       expected_revision: afterTwo.revision,
       command: {
         type: 'level_up_class',
-        class_definition_id: fighterId,
+        class_definition_id: classId,
         target_level: 3,
         subclass_content_key: subclassKey,
       },

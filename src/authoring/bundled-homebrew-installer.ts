@@ -137,34 +137,25 @@ function lineageHead(
   kind: AuthoredContentKind,
   stableKey: ContentKey,
 ): ContentKey | null {
-  const stable = db.oneRaw(
-    `SELECT catalog_layer FROM catalog_content_identities
-     WHERE content_kind = ? AND content_key = ?`,
-    [kind, stableKey],
+  const published = new CatalogAuthoringService(db).list().published.filter(
+    (entry) => entry.content_kind === kind,
   );
-  if (stable === null) return null;
-  if (stable.catalog_layer !== 'external') {
-    throw new TypeError(`Bundled key "${stableKey}" is not external content.`);
+  const byKey = new Map(published.map((entry) => [entry.content_key, entry]));
+  if (!byKey.has(stableKey)) return null;
+  const visited = new Set<ContentKey>();
+  let head = stableKey;
+  while (true) {
+    if (visited.has(head)) {
+      throw new TypeError(`Bundled lineage "${stableKey}" contains a cycle.`);
+    }
+    visited.add(head);
+    const successor = byKey.get(head)?.superseded_by ?? null;
+    if (successor === null) return head;
+    if (!byKey.has(successor)) {
+      throw new TypeError(`Bundled lineage "${stableKey}" has a missing successor.`);
+    }
+    head = successor;
   }
-  const head = db.scalar<string>(
-    `WITH RECURSIVE lineage(content_key) AS (
-       SELECT ?
-       UNION ALL
-       SELECT successor.successor_content_key
-       FROM catalog_content_supersessions AS successor
-       JOIN lineage ON successor.content_kind = ?
-        AND successor.superseded_content_key = lineage.content_key
-     )
-     SELECT lineage.content_key
-     FROM lineage
-     LEFT JOIN catalog_content_supersessions AS successor
-       ON successor.content_kind = ?
-      AND successor.superseded_content_key = lineage.content_key
-     WHERE successor.successor_content_key IS NULL`,
-    [stableKey, kind, kind],
-  );
-  if (head === null) throw new TypeError(`Bundled lineage "${stableKey}" has no head.`);
-  return head as ContentKey;
 }
 
 function currentDigest(

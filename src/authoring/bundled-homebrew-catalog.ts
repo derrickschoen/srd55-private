@@ -8,6 +8,7 @@ import type { CharacterLevel } from '../domain/enums';
 import type { ContentKey } from '../domain/ids';
 import { characterLevels } from '../domain/enums';
 import { MULTICLASS_SPELLCASTER_TABLE } from '../rules/spell-slots';
+import { officialSpellKey } from '../catalog/catalog-key';
 
 export interface BundledHomebrewCatalogEntry<
   D extends HomebrewDraft = HomebrewDraft,
@@ -61,6 +62,45 @@ function thirdCasterRows(input: {
     });
   });
 }
+
+function fixedSpellGrant(
+  spellName: string,
+  ruleKey: string,
+): NonNullable<SubclassAuthoringDraftProgressionRow['grants']>[number] {
+  return Object.freeze({
+    kind: 'fixed_spell' as const,
+    draft_item_uuid: itemUuid(`bundled-barbed-grant-${ruleKey}`),
+    rule_key: `barbed-court-${ruleKey}`,
+    spell_content_key: officialSpellKey('2024', spellName) as ContentKey,
+    always_prepared: true,
+  });
+}
+
+const barbedCourtGrants = Object.freeze(new Map<CharacterLevel, readonly NonNullable<
+  SubclassAuthoringDraftProgressionRow['grants']
+>[number][]>([
+  [3, [
+    fixedSpellGrant('Vicious Mockery', 'vicious-mockery'),
+    fixedSpellGrant('Prestidigitation', 'prestidigitation'),
+    fixedSpellGrant('Bane', 'bane'),
+    fixedSpellGrant('Command', 'command'),
+    fixedSpellGrant('Dissonant Whispers', 'dissonant-whispers'),
+    fixedSpellGrant('Hideous Laughter', 'hideous-laughter'),
+  ]],
+  [7, [
+    fixedSpellGrant('Enthrall', 'enthrall'),
+    fixedSpellGrant('Suggestion', 'suggestion'),
+  ]],
+  [10, [fixedSpellGrant('Message', 'message')]],
+  [13, [
+    fixedSpellGrant('Hypnotic Pattern', 'hypnotic-pattern'),
+    fixedSpellGrant('Tongues', 'tongues'),
+  ]],
+  [19, [
+    fixedSpellGrant('Compulsion', 'compulsion'),
+    fixedSpellGrant('Confusion', 'confusion'),
+  ]],
+]));
 
 const veteran: SubclassAuthoringDraft = Object.freeze<SubclassAuthoringDraft>({
   kind: 'subclass',
@@ -123,8 +163,18 @@ const barbedCourt: SubclassAuthoringDraft = Object.freeze<SubclassAuthoringDraft
     'The 3.5 SRD Psionic Fist is used only as open-content, concept-level precedent for the frame of a monk who develops supernatural casting; no wording or mechanical form is taken from it.',
   ].join('\n\n'),
   parent_class_content_key: '2024:class:monk' as ContentKey,
-  // D222: printed content only. Spell Student owns the mechanical third-caster seam.
-  progression: { mode: 'inherit_parent' },
+  // D224: full ordinary content. Spell Student alone owns exact slot-contract pins.
+  progression: {
+    mode: 'override',
+    spellcasting_ability: 'wisdom',
+    caster_contribution: 'third_down',
+    rows: thirdCasterRows({
+      cantripsKnown: (level) => level < 3 ? 0 : level < 10 ? 2 : 3,
+      // Every leveled spell is a curated always-prepared grant, not a free choice.
+      spellsKnown: () => 0,
+      grants: (level) => barbedCourtGrants.get(level) ?? [],
+    }),
+  },
   features: [
     [3, 'Barbed Court Spellcasting', [
       'You know the cantrips shown on the Barbed Court curated list.',
