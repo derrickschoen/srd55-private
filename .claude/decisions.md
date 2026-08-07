@@ -36,7 +36,27 @@ PROSE and NAMES — which is why D216 removes the names and why no EK/AT
 prose ever entered this repo. Deriving costs us nothing and removes the
 question entirely.
 
+## D224 — SUPERVISOR: D222's "content only" means NO TEST PINS, not "no mechanics" (2026-08-07)
+
+Amends D222's wording, which was mine and was ambiguous. BHC's review
+round 1 found Barbed Court Monk published with
+`progression: { mode: 'inherit_parent' }` and no grants — i.e. as a
+NON-CASTER — while its authoritative document promises curated cantrips,
+prepared spells, Wisdom casting, and a third-caster ladder. Importing it
+would have delivered none of the advertised mechanics. The implementer
+read "content only" as "no mechanics"; I meant "no test pins".
+
+BINDING READING: Barbed Court Monk ships with its FULL mechanics —
+override progression, Wisdom, third_down, 20 dense rows derived per D223,
+and its curated spell grants. What D222 withholds is its role as TEST
+INFRASTRUCTURE: the third-caster slot-math pins live on Spell Student, so
+revising Barbed Court's design never churns them. Barbed Court still gets
+ordinary content pins (prose fidelity, publishes-and-applies), just not
+the slot-math contract.
+
 ## D222 — OWNER: a deliberately boring third-caster carries the test pins (2026-08-07)
+(See D224: "content only" here means no TEST PINS. Barbed Court ships
+with full mechanics.)
 
 Owner: "Author the deliberately boring 1/3 caster to test with." The
 third-caster spell-slot coverage vacated by D216 moves onto a new,
