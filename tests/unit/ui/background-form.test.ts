@@ -203,6 +203,15 @@ function input(target: InteractiveTestElement, value: string): void {
   target.dispatchEvent(new Event('input'));
 }
 
+function keyboardActivate(target: InteractiveTestElement): void {
+  target.focus();
+  const enter = new Event('keydown', { cancelable: true }) as KeyboardEvent;
+  Object.defineProperty(enter, 'key', { value: 'Enter' });
+  // The lightweight DOM has no user-agent default actions, so model the
+  // native Enter activation after giving application listeners first refusal.
+  if (target.dispatchEvent(enter)) target.click();
+}
+
 async function settle(): Promise<void> {
   for (let turn = 0; turn < 12; turn += 1) await Promise.resolve();
 }
@@ -291,7 +300,7 @@ describe('HA-9 background authoring form', () => {
     }
   });
 
-  it('adds, changes, reorders, and removes equipment and shared flat effects with keyboard-focusable controls', async () => {
+  it('adds, changes, keyboard-reorders, and removes equipment and shared flat effects', async () => {
     const restore = installInteractiveDocument();
     try {
       const saved: BackgroundAuthoringDraft[] = [];
@@ -302,7 +311,9 @@ describe('HA-9 background authoring form', () => {
           saved.push(params.document);
           return stored(params.document, 1 as DraftRevision);
         },
-      }), stored({ ...documentFixture(), equipment_option_a: [], effects: [] }), undefined, () => `ha9-item-${String(++sequence)}`);
+      }), stored({
+        ...documentFixture(), equipment_option_a: [], equipment_option_b: [], effects: [],
+      }), undefined, () => `ha9-item-${String(++sequence)}`);
       button(rendered.root, 'Add equipment to option A').click();
       input(byId(rendered.root, 'input', 'background-equipment-a-ha9-item-1-printed-name'), 'Rope');
       input(byId(rendered.root, 'input', 'background-equipment-a-ha9-item-1-quantity'), '2');
@@ -318,21 +329,43 @@ describe('HA-9 background authoring form', () => {
       const moveUp = rendered.root.querySelectorAll('button').find((candidate) =>
         candidate.getAttribute('aria-label') === 'Move up option A item 2, item 2 of 2');
       if (moveUp === undefined) throw new Error('Equipment reorder is missing.');
-      moveUp.focus();
+      keyboardActivate(moveUp);
       expect(document.activeElement).toBe(moveUp);
-      moveUp.click();
+      const moveDown = rendered.root.querySelectorAll('button').find((candidate) =>
+        candidate.getAttribute('aria-label') === 'Move down option A Club, item 1 of 2');
+      if (moveDown === undefined) throw new Error('Equipment move-down control is missing.');
+      keyboardActivate(moveDown);
+      expect(document.activeElement).toBe(moveDown);
+      const removeRope = rendered.root.querySelectorAll('button').find((candidate) =>
+        candidate.getAttribute('aria-label') === 'Remove option A Rope, item 1 of 2');
+      if (removeRope === undefined) throw new Error('Equipment removal control is missing.');
+      keyboardActivate(removeRope);
+
+      button(rendered.root, 'Add equipment to option B').click();
+      const armorKind = byId(rendered.root, 'select', 'background-equipment-b-ha9-item-3-kind');
+      armorKind.value = 'armor';
+      armorKind.dispatchEvent(new Event('change'));
+      input(byId(rendered.root, 'input', 'background-equipment-b-ha9-item-3-printed-name'), 'Leather Armor');
+      input(byId(rendered.root, 'input', 'background-equipment-b-ha9-item-3-quantity'), '1');
+      const armorCatalog = byId(rendered.root, 'select', 'background-equipment-b-ha9-item-3-catalog');
+      expect(armorCatalog.querySelectorAll('option').map((option) => option.getAttribute('value')))
+        .toEqual(['', '2024:armor:leather-armor']);
+      expect(elementText(armorCatalog as unknown as Node)).toContain('Leather Armor');
+      expect(elementText(armorCatalog as unknown as Node)).not.toContain(hostile);
+      armorCatalog.value = '2024:armor:leather-armor';
+      armorCatalog.dispatchEvent(new Event('change'));
 
       button(rendered.root, 'Add effect').click();
-      input(byId(rendered.root, 'input', 'authoring-effect-ha9-item-3-label'), 'Route armor');
-      input(byId(rendered.root, 'input', 'authoring-effect-ha9-item-3-amount'), '2');
-      byId(rendered.root, 'input', 'authoring-effect-ha9-item-3-amount').dispatchEvent(new Event('change'));
+      input(byId(rendered.root, 'input', 'authoring-effect-ha9-item-4-label'), 'Route armor');
+      input(byId(rendered.root, 'input', 'authoring-effect-ha9-item-4-amount'), '2');
+      byId(rendered.root, 'input', 'authoring-effect-ha9-item-4-amount').dispatchEvent(new Event('change'));
       button(rendered.root, 'Add effect').click();
-      const secondEffectKind = byId(rendered.root, 'select', 'authoring-effect-ha9-item-4-kind');
+      const secondEffectKind = byId(rendered.root, 'select', 'authoring-effect-ha9-item-5-kind');
       secondEffectKind.value = 'damage_resistance';
       secondEffectKind.dispatchEvent(new Event('change'));
-      input(byId(rendered.root, 'input', 'authoring-effect-ha9-item-4-label'), 'Void ward');
-      input(byId(rendered.root, 'input', 'authoring-effect-ha9-item-4-damage_type'), 'Void');
-      byId(rendered.root, 'input', 'authoring-effect-ha9-item-4-damage_type').dispatchEvent(new Event('change'));
+      input(byId(rendered.root, 'input', 'authoring-effect-ha9-item-5-label'), 'Void ward');
+      input(byId(rendered.root, 'input', 'authoring-effect-ha9-item-5-damage_type'), 'Void');
+      byId(rendered.root, 'input', 'authoring-effect-ha9-item-5-damage_type').dispatchEvent(new Event('change'));
       const removeFirst = rendered.root.querySelectorAll('button').find((candidate) =>
         candidate.getAttribute('aria-label') === 'Remove Route armor, item 1 of 2');
       if (removeFirst === undefined) throw new Error('Effect removal is missing.');
@@ -342,8 +375,18 @@ describe('HA-9 background authoring form', () => {
       button(rendered.root, 'Save draft').click();
       await settle();
       expect(saved[0]?.equipment_option_a).toEqual([
-        expect.objectContaining({ kind: 'weapon', printed_name: 'Club', quantity: 1, content_key: '2024:weapon:club' }),
-        expect.objectContaining({ kind: 'gear', printed_name: 'Rope', quantity: 2 }),
+        {
+          kind: 'weapon', draft_item_uuid: itemUuid('ha9-item-2'),
+          printed_name: 'Club', quantity: 1,
+          content_key: '2024:weapon:club' as ContentKey,
+        },
+      ]);
+      expect(saved[0]?.equipment_option_b).toEqual([
+        {
+          kind: 'armor', draft_item_uuid: itemUuid('ha9-item-3'),
+          printed_name: 'Leather Armor', quantity: 1,
+          content_key: '2024:armor:leather-armor' as ContentKey,
+        },
       ]);
       expect(saved[0]?.effects).toEqual([
         expect.objectContaining({ kind: 'damage_resistance', label: 'Void ward', damage_type: 'Void' }),
@@ -397,8 +440,13 @@ describe('HA-9 background authoring form', () => {
         const rendered = render(client({
           previewPublish: () => new Promise((resolve, reject) => { finish = resolve; fail = reject; }),
         }));
-        rendered.root.querySelector('form')?.dispatchEvent(new Event('submit', { cancelable: true }));
-        input(byId(rendered.root, 'input', 'background-name'), `Changed before ${outcome}`);
+        const previewForm = rendered.root.querySelector('form');
+        previewForm?.dispatchEvent(new Event('submit', { cancelable: true }));
+        const strength = byId(
+          rendered.root, 'input', 'background-suggested_abilities-strength',
+        );
+        strength.checked = false;
+        strength.dispatchEvent(new Event('change'));
         if (outcome === 'success') {
           if (finish === null) throw new Error('Preview resolver missing.');
           finish(preview());
@@ -407,8 +455,11 @@ describe('HA-9 background authoring form', () => {
           fail(new Error('Preview failure.'));
         }
         await settle();
+        const attachedForm = rendered.root.querySelector('form');
+        expect(previewForm?.isConnected).toBe(false);
+        expect(attachedForm?.isConnected).toBe(true);
         expect(rendered.root.querySelector('[data-authoring-action="publish-background"]')).toBeNull();
-        expect(rendered.root.querySelector('.background-authoring-status')?.textContent)
+        expect(attachedForm?.querySelector('.background-authoring-status')?.textContent)
           .toBe('Draft changed; preview again.');
         rendered.cleanup();
       }

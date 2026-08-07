@@ -247,26 +247,70 @@ describe('HA-9 production-service form boundaries', () => {
         }],
       },
     });
+    const expectedCases = [
+      { issue: { path: ['name'], code: 'required', message: 'Must not be empty.' }, targetPath: ['name'] },
+      { issue: { path: ['rules_edition'], code: 'required', message: 'Rules edition is required.' }, targetPath: ['rules_edition'] },
+      { issue: { path: ['suggested_abilities'], code: 'required', message: 'Exactly three suggested abilities are required.' }, targetPath: ['suggested_abilities'] },
+      { issue: { path: ['suggested_abilities'], code: 'duplicate', message: 'Suggested abilities must not repeat.' }, targetPath: ['suggested_abilities'] },
+      { issue: { path: ['default_origin_feat_content_key'], code: 'unresolved_reference', message: 'Default Origin feat must resolve to one current Origin-feat fingerprint.' }, targetPath: ['default_origin_feat_content_key'] },
+      { issue: { path: ['skill_proficiencies'], code: 'required', message: 'Exactly two skill proficiencies are required.' }, targetPath: ['skill_proficiencies'] },
+      { issue: { path: ['equipment_option_a_description'], code: 'required', message: 'Must not be empty.' }, targetPath: ['equipment_option_a_description'] },
+      { issue: { path: ['equipment_option_b_description'], code: 'required', message: 'Must not be empty.' }, targetPath: ['equipment_option_b_description'] },
+      { issue: { path: ['equipment_option_a', 0, 'quantity'], code: 'required', message: 'Quantity is required.' }, targetPath: ['equipment_option_a', 0, 'quantity'] },
+      { issue: { path: ['equipment_option_a', 0, 'printed_name'], code: 'required', message: 'Must not be empty.' }, targetPath: ['equipment_option_a', 0, 'printed_name'] },
+      { issue: { path: ['equipment_option_a', 0, 'content_key'], code: 'required', message: 'Weapon is required.' }, targetPath: ['equipment_option_a', 0, 'content_key'] },
+      { issue: { path: ['equipment_option_b', 0, 'quantity'], code: 'required', message: 'Quantity is required.' }, targetPath: ['equipment_option_b', 0, 'quantity'] },
+      { issue: { path: ['equipment_option_b', 0, 'printed_name'], code: 'required', message: 'Must not be empty.' }, targetPath: ['equipment_option_b', 0, 'printed_name'] },
+      { issue: { path: ['effects', 0, 'label'], code: 'required', message: 'Must not be empty.' }, targetPath: ['effects', 0, 'label'] },
+      { issue: { path: ['effects', 0, 'damage_type'], code: 'required', message: 'Damage type is required.' }, targetPath: ['effects', 0, 'damage_type'] },
+    ] as const;
+    let publisherIssues: readonly unknown[] = [];
+    try {
+      service.previewPublish({
+        draft_uuid: invalid.draft_uuid,
+        expected_revision: invalid.revision,
+      });
+    } catch (error) {
+      if (!(error instanceof AuthoringServiceError) || error.data.reason !== 'validation_failed') {
+        throw error;
+      }
+      publisherIssues = error.data.issues;
+    }
+    expect(publisherIssues).toHaveLength(expectedCases.length);
+    for (const expected of expectedCases) {
+      expect(publisherIssues).toContainEqual(expected.issue);
+    }
     const restore = installInteractiveDocument();
     try {
       const rendered = render(service, invalid);
       rendered.root.querySelector('form')?.dispatchEvent(new Event('submit', { cancelable: true }));
       await settle();
       const summary = rendered.root.querySelector('.authoring-validation-summary');
-      expect(summary?.querySelectorAll('li')).toHaveLength(15);
-      const messages = summary?.querySelectorAll('li').map((entry) => elementText(entry as unknown as Node)) ?? [];
-      for (const expected of [
-        'Exactly three suggested abilities are required.',
-        'Suggested abilities must not repeat.',
-        'Default Origin feat must resolve to one current Origin-feat fingerprint.',
-        'Exactly two skill proficiencies are required.',
-        'Weapon is required.',
-        'Damage type is required.',
-      ]) expect(messages.some((message) => message.includes(expected))).toBe(true);
-      const first = rendered.root.querySelectorAll('[data-authoring-path]').find((entry) =>
-        entry.getAttribute('data-authoring-path') === '["name"]');
-      expect(first?.getAttribute('aria-invalid')).toBe('true');
-      expect(document.activeElement).toBe(first);
+      const entries = summary?.querySelectorAll('li') ?? [];
+      expect(entries).toHaveLength(expectedCases.length);
+      const firstTarget = rendered.root.querySelectorAll('[data-authoring-path]').find((entry) =>
+        entry.getAttribute('data-authoring-path') === JSON.stringify(expectedCases[0].targetPath));
+      expect(firstTarget?.getAttribute('aria-invalid')).toBe('true');
+      expect(document.activeElement).toBe(firstTarget);
+      const unmatchedEntries = new Set(entries);
+      for (const expected of expectedCases) {
+        const target = rendered.root.querySelectorAll('[data-authoring-path]').find((candidate) =>
+          candidate.getAttribute('data-authoring-path') === JSON.stringify(expected.targetPath));
+        if (target === undefined) throw new Error(`Missing target for ${JSON.stringify(expected.issue.path)}.`);
+        expect(target.getAttribute('aria-invalid')).toBe('true');
+        const entry = [...unmatchedEntries].find((candidate) =>
+          elementText(candidate as unknown as Node).trim() === expected.issue.message &&
+          candidate.querySelector('a')?.getAttribute('href') === `#${target.id}`);
+        if (entry === undefined) {
+          throw new Error(`Missing linked validation entry for ${JSON.stringify(expected.issue)}.`);
+        }
+        unmatchedEntries.delete(entry);
+        const link = entry.querySelector('a');
+        expect(link?.getAttribute('href')).toBe(`#${target.id}`);
+        link?.click();
+        expect(document.activeElement).toBe(target);
+      }
+      expect(unmatchedEntries.size).toBe(0);
       rendered.cleanup();
     } finally {
       restore();

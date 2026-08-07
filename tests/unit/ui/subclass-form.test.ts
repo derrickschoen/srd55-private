@@ -12,6 +12,7 @@ import type {
 } from '../../../src/authoring/ids';
 import type { GuidedClassOption } from '../../../src/builder/contracts';
 import type { ContentKey } from '../../../src/domain/ids';
+import { RpcError } from '../../../src/rpc/protocol';
 import { parseRoute, Router } from '../../../src/ui/router';
 import type { ScreenContext } from '../../../src/ui/screen';
 import {
@@ -946,6 +947,74 @@ describe('HA-8 subclass timeline form', () => {
       expect(root.querySelector('.subclass-authoring-status')?.textContent)
         .toBe('Draft changed; preview again.');
       expect(button(root, 'Preview publish').disabled).toBe(false);
+      cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('discards a pending preview when a clean-save conflict loads the saved revision', async () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const previewControl: {
+        finish: ((result: PublishPreview) => void) | null;
+      } = { finish: null };
+      const remote = {
+        ...stored({ ...richDocument(), name: 'Remote saved subclass' }),
+        revision: 2 as DraftRevision,
+      };
+      const authoring = client({
+        previewPublish: () => new Promise((resolve) => { previewControl.finish = resolve; }),
+        saveDraft: (params) => Promise.reject(new RpcError(
+          'handler_error',
+          'Draft revision is stale.',
+          {
+            reason: 'stale_draft_revision',
+            draft_uuid: params.draft_uuid,
+            expected_revision: params.expected_revision,
+            actual_revision: 2,
+          },
+        )),
+        readDraft: async () => remote,
+      });
+      const screenContext = context();
+      const mount = document.createElement('div');
+      screenContext.root.append(mount);
+      const draft = stored();
+      if (!isStoredSubclassDraft(draft)) throw new Error('Subclass fixture did not narrow.');
+      const cleanup = renderSubclassForm({
+        context: screenContext,
+        client: authoring,
+        mount,
+        draft,
+        parentClasses: parents,
+        windowObject: new EventTarget() as unknown as Window,
+      });
+      const root = interactiveElement(mount);
+
+      const previewForm = root.querySelector('form');
+      previewForm?.dispatchEvent(new Event('submit', { cancelable: true }));
+      if (previewControl.finish === null) throw new Error('Preview resolver was not installed.');
+      button(root, 'Save draft').click();
+      await settle();
+      const conflict = interactiveElement(screenContext.root)
+        .querySelector('[data-testid="authoring-draft-conflict"]');
+      conflict?.querySelectorAll('button').find((candidate) =>
+        candidate.textContent === 'Load saved revision',
+      )?.click();
+      await settle();
+
+      // HA-8 accepted the pending preview after "Load saved revision"; HA-9
+      // supersedes that behavior because loading changes the document.
+      previewControl.finish(preview());
+      await settle();
+      const attachedForm = root.querySelector('form');
+      expect(previewForm?.isConnected).toBe(false);
+      expect(attachedForm?.isConnected).toBe(true);
+      expect(control(root, 'input', 'subclass-name').value).toBe('Remote saved subclass');
+      expect(root.querySelector('[data-authoring-action="publish-subclass"]')).toBeNull();
+      expect(attachedForm?.querySelector('.subclass-authoring-status')?.textContent)
+        .toBe('Draft changed; preview again.');
       cleanup();
     } finally {
       restoreDocument();

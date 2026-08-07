@@ -20,9 +20,10 @@ const PROBES = [
 ] as const;
 
 describe('authoring contract seam', () => {
-  it('pins the ten catalog RPC names', () => {
+  it('pins the eleven catalog RPC names', () => {
     expect(AUTHORING_RPC).toEqual({
       list: 'authoring.list',
+      backgroundReferences: 'authoring.backgroundReferences',
       createDraft: 'authoring.createDraft',
       readDraft: 'authoring.readDraft',
       saveDraft: 'authoring.saveDraft',
