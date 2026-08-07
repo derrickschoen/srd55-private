@@ -21,9 +21,10 @@ needling whisper draws a watcher into revealing itself, and in social scenes
 a perfectly timed word punctures a bully's performance without drawing a
 weapon.
 
-The 3.5 SRD Psionic Fist is used only as open-content, concept-level precedent
-for the frame of a monk who develops supernatural casting; no wording or
-mechanical form is taken from it.
+No open-content ancestry disclosure is carried. The Psionic Fist concept
+precedent was dropped by owner ruling 2026-08-06: after the arcane-tank
+redesign this subclass no longer descends from it in concept, and the
+disclosure would be inaccurate rather than cautious.
 
 ## 2. Level 3: Barbed Court Spellcasting
 

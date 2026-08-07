@@ -5,6 +5,56 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-06 — Barbed Court drops the Psionic Fist ancestry; a straight Psionic Fist conversion is commissioned separately
+
+Owner's ruling, verbatim:
+
+> I think this is now distinct from the psionic fist.
+>
+> Make a separate monk subclass that is a straight conversion of the psionic
+> fist
+
+**Part one — applied.** The concept-ancestry disclosure line is removed from
+`2026-08-03-monk-barbed-court.md`. After the arcane-tank redesign the Barbed
+Court is a Wisdom-cast abjuration/illusion taunt-tank with no self-buff
+mind-body content; the disclosure would now be inaccurate rather than cautious.
+The line approved 2026-08-05 is superseded.
+
+**Part two — not applied; blocked on a path decision and outside this session's
+scope.** Three findings, all from the decisions record:
+
+1. **The commissioned artifact already exists.** D193 (2026-08-03) commissioned
+   `2026-08-03-monk-waking-will.md` as "a fourth third-caster monk, the
+   FAITHFUL adaptation of the 3.5 SRD Psionic Fist… Focus in the power-point
+   seat, mind-body fusion identity." It ships CC-BY under an original name with
+   a one-line ancestry disclosure, and it carries a full set of open
+   OWNER-APPROVAL items in `pending-rulings.md`. A second doc on the same
+   source would duplicate it unless the owner intends Waking Will to be
+   retired or re-angled.
+2. **D193 already anticipated this exact request and named the flip:** "the
+   alternative — carrying the 'Psionic Fist' name as OGL-attributed content in
+   the D176 quarantine folder — is the flip if the owner prefers name
+   fidelity."
+3. **A *straight* conversion cannot live in `docs/homebrew/`.** D176 is
+   binding: "Any content derived-with-text or reused from OGL 1.0a sources
+   lives under a dedicated folder (docs/ogl/…) containing the OGL 1.0a license
+   text and the full Section 15 chain for exactly what that folder holds. The
+   rest of the repo stays CC-BY/MIT with no OGL obligations." A straight
+   conversion reuses subsystem mechanics by definition, so it is OGL-derived
+   and must be quarantined. `docs/ogl/` does not exist yet, and this session is
+   scoped to `docs/homebrew/` only.
+
+Additional practical finding: **the repo contains no 3.5 SRD source.**
+`docs/srd/` holds only `full/srd-5.2.1.txt`. A faithful feature-for-feature
+conversion has nothing to check itself against, which is the accuracy failure
+the clean-room process exists to prevent. A 3.5 SRD text would need to land in
+the repo first.
+
+Three paths were put to the owner: work Waking Will's open rulings as the
+answer; build the OGL-quarantined straight conversion in a session scoped to
+`docs/ogl/` after a 3.5 SRD source lands; or commission a third,
+deliberately-differentiated psionics monk clean-room in `docs/homebrew/`.
+
 ## 2026-08-06 — Barbed Court: Focus-to-slot conversion starts at Monk 6
 
 Owner's ruling, verbatim:
