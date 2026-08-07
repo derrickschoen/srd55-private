@@ -8,6 +8,15 @@ export type DamageProfile =
   | 'sorcerous-burst'
   | 'chromatic-orb';
 
+export type DamageRollKind = 'weapon' | 'spell';
+
+export interface DieUpgrade {
+  promotedOutcomes: readonly number[];
+  promotedTo: number;
+  appliesTo: DamageRollKind | 'all';
+  dieSize: DieSize | null;
+}
+
 export interface DiceConfig {
   profile: DamageProfile;
   armorClass: number;
@@ -15,10 +24,11 @@ export interface DiceConfig {
   rollMode: RollMode;
   halflingLuck: boolean;
   luckyFeat: boolean;
-  elvenAccuracy: boolean;
+  tripleAdvantage: boolean;
   bless: boolean;
   bane: boolean;
-  elementalAdept: boolean;
+  dieUpgrade: DieUpgrade | null;
+  resistanceBypass: boolean;
   resistance: boolean;
   vulnerability: boolean;
   basicDice: number;
@@ -137,7 +147,7 @@ function selectedD20(config: DiceConfig): Distribution {
   const count =
     mode === 'normal'
       ? 1
-      : mode === 'advantage' && config.elvenAccuracy
+      : mode === 'advantage' && config.tripleAdvantage
         ? 3
         : 2;
   let states: Array<{ faces: number[]; probability: number }> = [
@@ -213,13 +223,28 @@ export function attackProbabilities(
   };
 }
 
-function dieValue(raw: number, adept: boolean): number {
-  return adept && raw === 1 ? 2 : raw;
+function dieValue(
+  raw: number,
+  size: DieSize,
+  kind: DamageRollKind,
+  upgrade: DieUpgrade | null,
+): number {
+  if (
+    upgrade === null ||
+    (upgrade.appliesTo !== 'all' && upgrade.appliesTo !== kind) ||
+    (upgrade.dieSize !== null && upgrade.dieSize !== size) ||
+    upgrade.promotedTo <= raw ||
+    upgrade.promotedTo > size ||
+    !upgrade.promotedOutcomes.includes(raw)
+  ) {
+    return raw;
+  }
+  return upgrade.promotedTo;
 }
 
 function adjustedDamage(total: number, config: DiceConfig): number {
   let result = Math.max(0, total);
-  if (config.resistance && !config.elementalAdept) {
+  if (config.resistance && !config.resistanceBypass) {
     result = Math.floor(result / 2);
   }
   if (config.vulnerability) result *= 2;
@@ -230,6 +255,7 @@ function ordinaryDamage(
   count: number,
   size: DieSize,
   modifier: number,
+  kind: DamageRollKind,
   config: DiceConfig,
 ): number {
   let sums = new Map<number, number>([[0, 1]]);
@@ -239,7 +265,7 @@ function ordinaryDamage(
       for (let face = 1; face <= size; face += 1) {
         add(
           next,
-          sum + dieValue(face, config.elementalAdept),
+          sum + dieValue(face, size, kind, config.dieUpgrade),
           probability / size,
         );
       }
@@ -285,9 +311,12 @@ export function sorcerousExpectedExtraDice(
 export function sorcerousExpectedRawDamage(
   baseDice: number,
   cap: number,
-  elementalAdept: boolean,
+  dieUpgrade: DieUpgrade | null,
 ): number {
-  const mean = elementalAdept ? 37 / 8 : 9 / 2;
+  let mean = 0;
+  for (let face = 1; face <= 8; face += 1) {
+    mean += dieValue(face, 8, 'spell', dieUpgrade) / 8;
+  }
   return (baseDice + sorcerousExpectedExtraDice(baseDice, cap)) * mean;
 }
 
@@ -318,7 +347,7 @@ function sorcerousDamage(
         const candidate: State = {
           remaining: state.remaining - 1 + (addsDie ? 1 : 0),
           extras: state.extras + (addsDie ? 1 : 0),
-          sum: state.sum + dieValue(face, config.elementalAdept),
+          sum: state.sum + dieValue(face, 8, 'spell', config.dieUpgrade),
           probability: state.probability / 8,
         };
         const key = `${candidate.remaining}:${candidate.extras}:${candidate.sum}`;
@@ -338,14 +367,14 @@ function sorcerousDamage(
 
 export function chromaticLeapChance(
   dice: number,
-  elementalAdept: boolean,
+  dieUpgrade: DieUpgrade | null,
 ): number {
   let unique = new Map<number, number>([[0, 1]]);
   for (let die = 0; die < dice; die += 1) {
     const next = new Map<number, number>();
     for (const [mask, probability] of unique) {
       for (let face = 1; face <= 8; face += 1) {
-        const bit = 1 << dieValue(face, elementalAdept);
+        const bit = 1 << dieValue(face, 8, 'spell', dieUpgrade);
         if ((mask & bit) === 0) add(next, mask | bit, probability / 8);
       }
     }
@@ -374,6 +403,7 @@ function profileDamage(config: DiceConfig, critical: boolean): number {
       (config.chromaticSlotLevel + 2) * multiplier,
       8,
       0,
+      'spell',
       config,
     );
   }
@@ -381,6 +411,7 @@ function profileDamage(config: DiceConfig, critical: boolean): number {
     config.basicDice * multiplier,
     config.basicDieSize,
     config.damageModifier,
+    'weapon',
     config,
   );
 }
@@ -400,11 +431,11 @@ export function exactResult(config: DiceConfig): ExactResult {
   if (config.profile === 'chromatic-orb') {
     normalLeapChance = chromaticLeapChance(
       config.chromaticSlotLevel + 2,
-      config.elementalAdept,
+      config.dieUpgrade,
     );
     criticalLeapChance = chromaticLeapChance(
       (config.chromaticSlotLevel + 2) * 2,
-      config.elementalAdept,
+      config.dieUpgrade,
     );
     chanceToLeap =
       attacks.normalHit * normalLeapChance +
@@ -493,7 +524,7 @@ function rollAttack(
     d20.push(tracedDie(random, 20, config.halflingLuck));
   }
   let chosenD20: number;
-  if (mode === 'advantage' && config.elvenAccuracy) {
+  if (mode === 'advantage' && config.tripleAdvantage) {
     const first = d20[0]!;
     const second = d20[1]!;
     const lower = first.final <= second.final ? 0 : 1;
@@ -529,8 +560,9 @@ function rollAttack(
 
 function ordinaryRoll(
   count: number,
-  size: number,
+  size: DieSize,
   modifier: number,
+  kind: DamageRollKind,
   config: DiceConfig,
   random: () => number,
 ) {
@@ -539,7 +571,7 @@ function ordinaryRoll(
     const raw = rollDie(random, size);
     damageDice.push({
       raw,
-      value: dieValue(raw, config.elementalAdept),
+      value: dieValue(raw, size, kind, config.dieUpgrade),
       added: false,
     });
   }
@@ -568,7 +600,7 @@ function sorcerousRoll(
     const raw = rollDie(random, 8);
     damageDice.push({
       raw,
-      value: dieValue(raw, config.elementalAdept),
+      value: dieValue(raw, 8, 'spell', config.dieUpgrade),
       added: damageDice.length >= baseDice,
     });
     if (raw === 8 && extras < config.explosionCap) {
@@ -629,6 +661,7 @@ export function seededRoll(
               (config.chromaticSlotLevel + 2) * multiplier,
               8,
               0,
+              'spell',
               config,
               random,
             )
@@ -636,6 +669,7 @@ export function seededRoll(
               config.basicDice * multiplier,
               config.basicDieSize,
               config.damageModifier,
+              'weapon',
               config,
               random,
             );
@@ -674,10 +708,11 @@ export function defaultDiceConfig(): DiceConfig {
     rollMode: 'normal',
     halflingLuck: false,
     luckyFeat: false,
-    elvenAccuracy: false,
+    tripleAdvantage: false,
     bless: false,
     bane: false,
-    elementalAdept: false,
+    dieUpgrade: null,
+    resistanceBypass: false,
     resistance: false,
     vulnerability: false,
     basicDice: 1,
@@ -737,6 +772,23 @@ export function selectedDieSize(raw: string): DieSize {
   return isDieSize(parsed) ? parsed : DEFAULT_BASIC_DIE_SIZE;
 }
 
+function selectedUpgradeOutcomes(
+  raw: string,
+  promotedTo: number,
+): readonly number[] {
+  return [
+    ...new Set(
+      raw
+        .split(',')
+        .map((value) => Number(value.trim()))
+        .filter(
+          (value) =>
+            Number.isInteger(value) && value >= 1 && value < promotedTo,
+        ),
+    ),
+  ];
+}
+
 function signedLabel(value: number): string {
   return value >= 0 ? `+${value}` : String(value);
 }
@@ -787,7 +839,7 @@ export function renderDiceHelper(
   profile.append(
     new Option('Sorcerous Burst (2024)', 'manual-sorcerous-burst'),
     new Option('Chromatic Orb (2024)', 'manual-chromatic-orb'),
-    new Option('Basic attack', 'basic'),
+    new Option('Basic weapon attack', 'basic'),
   );
   const selectedSpellOptions = slots.filter(
     (slot) =>
@@ -912,10 +964,10 @@ export function renderDiceHelper(
       DiceConfig,
       | 'halflingLuck'
       | 'luckyFeat'
-      | 'elvenAccuracy'
+      | 'tripleAdvantage'
       | 'bless'
       | 'bane'
-      | 'elementalAdept'
+      | 'resistanceBypass'
       | 'resistance'
       | 'vulnerability'
     >,
@@ -924,10 +976,10 @@ export function renderDiceHelper(
   for (const [key, label] of [
     ['halflingLuck', 'Halfling Luck'],
     ['luckyFeat', 'Lucky feat: spend point'],
-    ['elvenAccuracy', 'Elven Accuracy'],
+    ['tripleAdvantage', 'Triple Advantage'],
     ['bless', 'Bless +d4'],
     ['bane', 'Bane −d4'],
-    ['elementalAdept', 'Elemental Adept'],
+    ['resistanceBypass', 'Bypass Resistance'],
     ['resistance', 'Resistance'],
     ['vulnerability', 'Vulnerability'],
   ] as const) {
@@ -939,6 +991,37 @@ export function renderDiceHelper(
     labelNode.append(input, ` ${label}`);
     effects.append(labelNode);
   }
+  const dieUpgradeEnabled = document.createElement('input');
+  dieUpgradeEnabled.type = 'checkbox';
+  dieUpgradeEnabled.dataset.diceEffect = 'dieUpgrade';
+  const dieUpgradeToggle = document.createElement('label');
+  dieUpgradeToggle.append(dieUpgradeEnabled, ' Upgrade die outcomes');
+  const upgradeOutcomes = document.createElement('input');
+  upgradeOutcomes.type = 'text';
+  upgradeOutcomes.value = '1';
+  const upgradeTo = document.createElement('input');
+  upgradeTo.type = 'number';
+  upgradeTo.min = '2';
+  upgradeTo.max = '100';
+  upgradeTo.value = '2';
+  const upgradeAppliesTo = document.createElement('select');
+  upgradeAppliesTo.append(
+    new Option('Weapon attack damage', 'weapon'),
+    new Option('Spell damage', 'spell'),
+    new Option('Weapon and spell damage', 'all'),
+  );
+  const upgradeDieSize = document.createElement('select');
+  upgradeDieSize.append(new Option('Any', 'any'));
+  for (const size of dieSizes) {
+    upgradeDieSize.append(new Option(`d${String(size)}`, String(size)));
+  }
+  const dieUpgradeFields = [
+    labeledInput('Promote outcomes', upgradeOutcomes),
+    labeledInput('Promote to', upgradeTo),
+    labeledInput('Roll scope', upgradeAppliesTo),
+    labeledInput('Apply to die', upgradeDieSize),
+  ];
+  effects.append(dieUpgradeToggle, ...dieUpgradeFields);
   const metrics = document.createElement('dl');
   metrics.className = 'dice-metrics';
   const profileNote = document.createElement('p');
@@ -1003,13 +1086,15 @@ export function renderDiceHelper(
         : config.rollMode === 'disadvantage'
           ? -1
           : 0) + (config.luckyFeat ? 1 : 0);
-    const elvenEligible =
+    const tripleAdvantageEligible =
       config.profile !== 'basic' ||
       ['dexterity', 'intelligence', 'wisdom', 'charisma'].includes(
         basicAbility.value,
       );
-    config.elvenAccuracy =
-      config.elvenAccuracy && netAdvantage > 0 && elvenEligible;
+    config.tripleAdvantage =
+      config.tripleAdvantage &&
+      netAdvantage > 0 &&
+      tripleAdvantageEligible;
     config.basicDice = boundedInteger(Number(basicDice.value), 1, 20);
     // NOT `boundedInteger(…, 2, 100)`. A clamp answers "how big may this be";
     // the question here is "which die is it", and the two gave different
@@ -1017,6 +1102,26 @@ export function renderDiceHelper(
     // clamp — the neighbours in this block are separate subjects and are not
     // folded in.
     config.basicDieSize = selectedDieSize(basicDieSize.value);
+    const selectedUpgradeDieSize =
+      upgradeDieSize.value === 'any'
+        ? null
+        : selectedDieSize(upgradeDieSize.value);
+    const promotedTo = boundedInteger(
+      Number(upgradeTo.value),
+      2,
+      selectedUpgradeDieSize ?? 100,
+    );
+    config.dieUpgrade = dieUpgradeEnabled.checked
+      ? {
+          promotedOutcomes: selectedUpgradeOutcomes(
+            upgradeOutcomes.value,
+            promotedTo,
+          ),
+          promotedTo,
+          appliesTo: upgradeAppliesTo.value as DieUpgrade['appliesTo'],
+          dieSize: selectedUpgradeDieSize,
+        }
+      : null;
     config.damageModifier = boundedInteger(
       Number(damageModifier.value),
       -20,
@@ -1064,15 +1169,23 @@ export function renderDiceHelper(
         : mode.value === 'disadvantage'
           ? -1
           : 0) + (lucky ? 1 : 0);
-    const elvenEligible =
+    const tripleAdvantageEligible =
       kind !== 'basic' ||
       ['dexterity', 'intelligence', 'wisdom', 'charisma'].includes(
         basicAbility.value,
       );
-    const elven = effectInputs.get('elvenAccuracy');
-    if (elven !== undefined) {
-      elven.disabled = net <= 0 || !elvenEligible;
-      if (elven.disabled) elven.checked = false;
+    const tripleAdvantage = effectInputs.get('tripleAdvantage');
+    if (tripleAdvantage !== undefined) {
+      tripleAdvantage.disabled = net <= 0 || !tripleAdvantageEligible;
+      if (tripleAdvantage.disabled) tripleAdvantage.checked = false;
+    }
+    for (const field of [
+      upgradeOutcomes,
+      upgradeTo,
+      upgradeAppliesTo,
+      upgradeDieSize,
+    ]) {
+      field.disabled = !dieUpgradeEnabled.checked;
     }
     const exact = exactResult(read());
     metrics.replaceChildren(
@@ -1179,7 +1292,7 @@ export function renderDiceHelper(
   const assumptions = document.createElement('details');
   assumptions.className = 'dice-assumptions';
   assumptions.innerHTML =
-    '<summary>Composition and table assumptions</summary><p>Order: net Advantage/Disadvantage → Halfling/Elven rerolls → Bless/Bane → critical doubles initial dice → Elemental Adept changes damage-die 1s to 2 → spell triggers → total → Resistance → Vulnerability.</p><p>Chromatic Orb uses the same AC and checked attack effects for every new target, never retargets a creature, and stops after the slot-level leap limit. Checking Lucky assumes a Luck Point is available for each attack in a chain.</p>';
+    '<summary>Composition and table assumptions</summary><p>Order: net Advantage/Disadvantage → Halfling rerolls/Triple Advantage → Bless/Bane → critical doubles initial dice → configured die-outcome upgrades → spell triggers → total → Resistance (unless bypassed) → Vulnerability.</p><p>Chromatic Orb uses the same AC and checked attack effects for every new target, never retargets a creature, and stops after the slot-level leap limit. Checking Lucky assumes a Luck Point is available for each attack in a chain.</p>';
   section.append(
     controls,
     profileControls,

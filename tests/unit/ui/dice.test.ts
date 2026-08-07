@@ -9,6 +9,7 @@ import {
   sorcerousExpectedExtraDice,
   sorcerousExpectedRawDamage,
   type DiceConfig,
+  type DieUpgrade,
 } from '../../../src/ui/screens/planner/dice';
 import { dieSizes, isDieSize } from '../../../src/domain/enums';
 
@@ -22,10 +23,11 @@ function config(
     rollMode: 'normal',
     halflingLuck: false,
     luckyFeat: false,
-    elvenAccuracy: false,
+    tripleAdvantage: false,
     bless: false,
     bane: false,
-    elementalAdept: false,
+    dieUpgrade: null,
+    resistanceBypass: false,
     resistance: false,
     vulnerability: false,
     basicDice: 1,
@@ -34,6 +36,16 @@ function config(
     sorcerousBaseDice: 1,
     explosionCap: 3,
     chromaticSlotLevel: 1,
+    ...changes,
+  };
+}
+
+function upgrade(changes: Partial<DieUpgrade> = {}): DieUpgrade {
+  return {
+    promotedOutcomes: [1],
+    promotedTo: 2,
+    appliesTo: 'all',
+    dieSize: null,
     ...changes,
   };
 }
@@ -66,7 +78,7 @@ describe('planner dice oracle', () => {
     );
     close(
       attackProbabilities(
-        config({ rollMode: 'advantage', elvenAccuracy: true }),
+        config({ rollMode: 'advantage', tripleAdvantage: true }),
       ).criticalHit,
       1 - 0.95 ** 3,
     );
@@ -113,16 +125,84 @@ describe('planner dice oracle', () => {
       ).normalDamage,
       2,
     );
+  });
+
+  it('expresses the old 1-to-2 promotion plus resistance bypass as one configuration', () => {
+    const oldBehavior = config({
+      basicDice: 1,
+      basicDieSize: 4,
+      dieUpgrade: upgrade(),
+      resistance: true,
+      resistanceBypass: true,
+    });
+    close(exactResult(oldBehavior).normalDamage, 2.75);
+
+    close(
+      exactResult(
+        config({
+          basicDice: 1,
+          basicDieSize: 4,
+          dieUpgrade: upgrade(),
+          resistance: true,
+        }),
+      ).normalDamage,
+      1.25,
+    );
     close(
       exactResult(
         config({
           basicDice: 1,
           basicDieSize: 4,
           resistance: true,
-          elementalAdept: true,
+          resistanceBypass: true,
         }),
       ).normalDamage,
-      2.75,
+      2.5,
+    );
+  });
+
+  it('promotes configured outcomes only for the configured roll kind and die size', () => {
+    const weaponD6Upgrade = upgrade({
+      promotedOutcomes: [1, 2],
+      promotedTo: 3,
+      appliesTo: 'weapon',
+      dieSize: 6,
+    });
+    close(
+      exactResult(
+        config({ basicDice: 1, basicDieSize: 6, dieUpgrade: weaponD6Upgrade }),
+      ).normalDamage,
+      4,
+    );
+    close(
+      exactResult(
+        config({ basicDice: 1, basicDieSize: 8, dieUpgrade: weaponD6Upgrade }),
+      ).normalDamage,
+      4.5,
+    );
+    close(
+      sorcerousExpectedRawDamage(
+        1,
+        0,
+        upgrade({
+          promotedOutcomes: [1, 2],
+          promotedTo: 3,
+          appliesTo: 'weapon',
+        }),
+      ),
+      4.5,
+    );
+
+    const spellD8Upgrade = upgrade({
+      appliesTo: 'spell',
+      dieSize: 8,
+    });
+    close(sorcerousExpectedRawDamage(1, 0, spellD8Upgrade), 37 / 8);
+    close(
+      exactResult(
+        config({ basicDice: 1, basicDieSize: 8, dieUpgrade: spellD8Upgrade }),
+      ).normalDamage,
+      4.5,
     );
   });
 
@@ -132,23 +212,23 @@ describe('planner dice oracle', () => {
       1 / 8 + 1 / 64 + 1 / 512,
     );
     close(
-      sorcerousExpectedRawDamage(1, 3, false),
+      sorcerousExpectedRawDamage(1, 3, null),
       (1 + 73 / 512) * 4.5,
     );
-    close(sorcerousExpectedRawDamage(1, 0, false), 4.5);
+    close(sorcerousExpectedRawDamage(1, 0, null), 4.5);
     const criticalExtra = 15 / 64 + 11 / 256 + 29 / 4096;
     close(sorcerousExpectedExtraDice(2, 3), criticalExtra);
     close(
-      sorcerousExpectedRawDamage(2, 3, false),
+      sorcerousExpectedRawDamage(2, 3, null),
       (2 + criticalExtra) * 4.5,
     );
-    close(sorcerousExpectedRawDamage(1, 0, true), 37 / 8);
+    close(sorcerousExpectedRawDamage(1, 0, upgrade()), 37 / 8);
     const burst = exactResult(config({ profile: 'sorcerous-burst' }));
     close(burst.normalDamage, (1 + 73 / 512) * 4.5);
     close(burst.criticalDamage, (2 + criticalExtra) * 4.5);
-    close(chromaticLeapChance(3, false), 176 / 512);
-    close(chromaticLeapChance(3, true), 212 / 512);
-    close(chromaticLeapChance(9, false), 1);
+    close(chromaticLeapChance(3, null), 176 / 512);
+    close(chromaticLeapChance(3, upgrade()), 212 / 512);
+    close(chromaticLeapChance(9, null), 1);
     const orbInput = config({
       profile: 'chromatic-orb',
       chromaticSlotLevel: 1,
@@ -175,8 +255,9 @@ describe('planner dice oracle', () => {
       profile: 'sorcerous-burst',
       rollMode: 'advantage',
       halflingLuck: true,
-      elvenAccuracy: true,
-      elementalAdept: true,
+      tripleAdvantage: true,
+      dieUpgrade: upgrade(),
+      resistanceBypass: true,
       resistance: true,
       vulnerability: true,
     });
