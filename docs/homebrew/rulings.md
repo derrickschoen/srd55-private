@@ -5,6 +5,30 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-06 — Barbed Court: the provocation's form is the player's choice, spoken or physical
+
+Owner's ruling, verbatim:
+
+> Let the player decide if it is a spoken insult or one done with body language
+
+Effect: the F14 Bounced Flavor Cheque raised when the hearing clause was
+dropped is resolved without changing a mechanic. The goad's fiction is
+player-declared — a spoken barb, a curled lip, a dismissive gesture — and no
+rule gates on speech, language or hearing. The name **Warrior of the Barbed
+Court** survives: courtly contempt is as often silent as spoken, so a
+body-language reading is on-theme rather than a concession.
+
+Consequences:
+
+- The identity paragraph, open since the start of this session and twice
+  invalidated by goad redesigns, is rebuilt around **provoke** rather than
+  **expose**, with the player's choice of form stated in the text. Draft
+  presented to the owner for approval at this sitting.
+- Goading creatures that share no language with the monk, or that are mindless
+  or deafened, is now flavour-consistent rather than an unexplained gap.
+- The concept-only 3.5 SRD Psionic Fist ancestry line is unaffected and stands
+  as approved 2026-08-05.
+
 ## 2026-08-06 — Barbed Court: the duel is a Focus-cost feature, not a spell (supersedes the Barbed Challenge draft)
 
 Owner's ruling, verbatim:
