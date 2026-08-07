@@ -628,7 +628,27 @@ test('planner parity flows persist override, clear, selection, acknowledgement, 
   await expect(
     page.getByText('Composition and table assumptions'),
   ).toBeVisible();
+  await expect(page.getByLabel('Triple Advantage')).toBeVisible();
+  await expect(page.getByLabel('Upgrade die outcomes')).toBeVisible();
+  await expect(page.getByLabel('Bypass Resistance')).toBeVisible();
+  await expect(page.getByLabel('Promote outcomes')).toHaveValue('1');
+  await expect(page.getByLabel('Promote to')).toHaveValue('2');
+  await expect(page.getByLabel('Roll scope')).toHaveValue('weapon');
+  await expect(page.getByLabel('Apply to die')).toHaveValue('any');
+  await expect(page.locator('.dice-assumptions')).toContainText(
+    'configured die-outcome upgrades',
+  );
   await expect(page.getByLabel('Added-d8 cap')).toBeVisible();
+
+  await page.getByLabel('Attack profile').selectOption('basic');
+  await page.getByLabel('Upgrade die outcomes').check();
+  await page.getByLabel('Promote outcomes').fill('1, 2');
+  await page.getByLabel('Promote to').fill('3');
+  await page.getByLabel('Apply to die').selectOption('8');
+  await expect(page.locator('.dice-metrics')).toContainText('2.92');
+  await page.getByLabel('Roll scope').selectOption('spell');
+  await expect(page.locator('.dice-metrics')).toContainText('2.70');
+  await page.getByLabel('Upgrade die outcomes').uncheck();
 
   // THE DIE-SIZE CONTROL OFFERS THE VOCABULARY AND NOTHING ELSE.
   //
