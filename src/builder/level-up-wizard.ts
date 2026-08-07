@@ -166,7 +166,8 @@ export type FeatTextGap =
   | 'light_weapon_attack_predicate_unmodelled'
   | 'epic_boon_benefit_text_only'
   | 'conditional_resistance_unmodelled'
-  | 'senses_unmodelled';
+  | 'senses_unmodelled'
+  | 'homebrew_benefit_text_only';
 
 export interface FeatTextBenefit {
   readonly benefit_key: string;
@@ -408,6 +409,7 @@ export interface LevelUpFeatApplication {
 
 export interface LevelUpFeatCandidate {
   readonly definition: FeatDefinitionForApplication;
+  readonly catalog_layer: CatalogLayerDisclosure;
   readonly eligibility: FeatEligibilityResult;
   readonly is_class_default: boolean;
   readonly applications: readonly LevelUpFeatApplication[];

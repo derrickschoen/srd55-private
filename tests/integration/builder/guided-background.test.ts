@@ -286,6 +286,25 @@ describe('guided background catalogue and gate', () => {
     }
   });
 
+  it('keeps a surviving background aggregate visible as unknown when its registry row is deleted', async () => {
+    const rpcHarness = await applicationDatabase();
+    const original = backgrounds(rpcHarness)[0];
+    if (original === undefined) throw new Error('No background fixture exists.');
+    rpcHarness.context.db.exec('PRAGMA foreign_keys = OFF');
+    rpcHarness.context.db.exec(
+      `DELETE FROM catalog_content_identities
+       WHERE content_kind = 'background' AND content_key = ?`,
+      [original.content_key],
+    );
+    rpcHarness.context.db.exec('PRAGMA foreign_keys = ON');
+
+    expect(
+      backgrounds(rpcHarness).find(
+        (option) => option.content_key === original.content_key,
+      ),
+    ).toMatchObject({ name: original.name, catalog_layer: 'unknown' });
+  });
+
   it('refuses a non-bundled background key through the real RPC with the domain discriminator', async () => {
     const rpcHarness = await applicationDatabase();
     const characterId = createCharacter(

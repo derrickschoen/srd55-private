@@ -42,7 +42,12 @@ test('serves the seeded character list and editable workspace', async ({
       id: workspaceImage.ids.character,
       name: 'R40 Golden',
       level: 8,
-      classes: ['Paladin 1', 'Ranger 1', 'Warlock 5', 'Wizard 1'],
+      classes: [
+        { name: 'Paladin', level: 1, catalog_layer: 'bundled' },
+        { name: 'Ranger', level: 1, catalog_layer: 'bundled' },
+        { name: 'Warlock', level: 5, catalog_layer: 'bundled' },
+        { name: 'Wizard', level: 1, catalog_layer: 'bundled' },
+      ],
       warning_count: 4,
     },
   ]);
@@ -116,7 +121,12 @@ test('builds the complete character list card contract in deterministic order', 
     id: workspaceImage.ids.character,
     name: 'R40 Golden',
     level: 8,
-    classes: ['Paladin 1', 'Ranger 1', 'Warlock 5', 'Wizard 1'],
+    classes: [
+      { name: 'Paladin', level: 1, catalog_layer: 'bundled' },
+      { name: 'Ranger', level: 1, catalog_layer: 'bundled' },
+      { name: 'Warlock', level: 5, catalog_layer: 'bundled' },
+      { name: 'Wizard', level: 1, catalog_layer: 'bundled' },
+    ],
     warning_count: 4,
   }]);
   expect(

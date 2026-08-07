@@ -15,7 +15,10 @@ export type CharacterCatalogSourceKind =
   | 'subclass'
   | 'feat'
   | 'species'
-  | 'background';
+  | 'background'
+  | 'spell'
+  | 'weapon'
+  | 'armor';
 
 export interface CharacterCatalogDisclosure {
   readonly kind: CharacterCatalogSourceKind;

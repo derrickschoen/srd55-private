@@ -57,6 +57,7 @@ export interface WeaponTemplate extends WeaponProfile {
   id: number;
   content_key: string;
   srd_group: SrdWeaponGroup;
+  catalog_layer: CatalogLayerDisclosure;
 }
 
 export interface CharacterWeapon extends WeaponFields {
@@ -356,12 +357,17 @@ export interface EligibleSpell {
   ritual: boolean;
   concentration: boolean;
   edition: RulesEdition;
+  catalog_layer: CatalogLayerDisclosure;
 }
 
 export interface CharacterSummary {
   id: number;
   name: string;
   level: number | null;
-  classes: string[];
+  classes: readonly {
+    readonly name: string;
+    readonly level: number;
+    readonly catalog_layer: CatalogLayerDisclosure;
+  }[];
   warning_count: number;
 }

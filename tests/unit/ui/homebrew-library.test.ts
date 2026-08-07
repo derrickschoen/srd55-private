@@ -614,7 +614,7 @@ describe('HA-6 homebrew library routing and tabs', () => {
           backgroundReferences: async () => {
             referenceCalls += 1;
             return {
-              origin_feats: [{ content_key: '2024:feat:alert' as ContentKey, name: 'Alert', rules_edition: '2024' }],
+              origin_feats: [{ content_key: '2024:feat:alert' as ContentKey, name: 'Alert', rules_edition: '2024', catalog_layer: 'bundled' }],
               weapons: [],
               armors: [],
             };
@@ -627,7 +627,7 @@ describe('HA-6 homebrew library routing and tabs', () => {
       expect(formMount?.getAttribute('aria-label')).toBe('Background authoring form');
       expect(root.querySelector('form')?.getAttribute('aria-label')).toBeNull();
       expect(root.querySelectorAll('option').map((option) => option.textContent))
-        .toContain('Alert (2024)');
+        .toContain('Alert (2024) — SRD · bundled layer');
       cleanup();
     } finally {
       restoreDocument();

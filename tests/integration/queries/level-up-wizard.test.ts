@@ -430,6 +430,21 @@ describe('level-up wizard state RPC', () => {
       fighterClassId,
       5,
     );
+    registerFixtureContentIdentity(harness.context.db, {
+      kind: 'feat',
+      contentKey: 'expanded:content.feat:breadth-probe',
+      name: 'Breadth Probe',
+      keyKind: 'asserted',
+    });
+    harness.context.db.exec(
+      `INSERT INTO feat_definitions (
+         content_key, name, rules_edition, category, ability_points,
+         repeatable, prerequisites, grant_rules, notes
+       ) VALUES (
+         'expanded:content.feat:breadth-probe', 'Breadth Probe', 'expanded',
+         'general', 0, 0, '[]', '[]', 'Breadth Probe. A homebrew benefit.'
+       )`,
+    );
     const asiState = await client.levelUpState(fighterId);
     expect(asiState).toMatchObject({
       kind: 'ready',
@@ -469,7 +484,14 @@ describe('level-up wizard state RPC', () => {
         choices: ['level_feat'],
       },
     });
-    expect(occurrence?.candidates).toHaveLength(17);
+    expect(occurrence?.candidates).toHaveLength(18);
+    expect(occurrence?.candidates).toContainEqual(expect.objectContaining({
+      catalog_layer: 'external',
+      definition: expect.objectContaining({
+        content_key: 'expanded:content.feat:breadth-probe',
+        name: 'Breadth Probe',
+      }),
+    }));
     expect(
       occurrence?.candidates.filter((candidate) => candidate.is_class_default),
     ).toMatchObject([{

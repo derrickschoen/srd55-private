@@ -78,8 +78,8 @@ export interface GuidedClassOption {
   readonly content_key: string;
   readonly name: string;
   readonly hit_die: number | null;
-  /** D133: this picker admits only registry-confirmed bundled classes. */
-  readonly catalog_layer: 'bundled';
+  /** D133 limits membership; the registry alone supplies this disclosure. */
+  readonly catalog_layer: CatalogLayerDisclosure;
 }
 
 export interface GuidedOriginOption {

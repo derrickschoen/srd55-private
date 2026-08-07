@@ -9,10 +9,18 @@ import {
 } from '../../../builder/level-up-wizard';
 import type { CharacterSheet } from '../../../queries/character-sheet-builder';
 import { element, listen, type Cleanup } from '../../dom';
+import {
+  catalogLayerLabel,
+  type CatalogLayerDisclosure,
+} from '../../../catalog/catalog-disclosure';
 
 export interface LevelUpDraftReview {
   readonly subclass:
-    | { readonly kind: 'selected'; readonly name: string }
+    | {
+        readonly kind: 'selected';
+        readonly name: string;
+        readonly catalog_layer: CatalogLayerDisclosure;
+      }
     | {
         readonly kind: 'deferred';
         readonly class_name: string;
@@ -145,7 +153,7 @@ function draftRows(draft: LevelUpDraftReview): readonly HTMLDivElement[] {
           element('dt', { text: 'Subclass' }),
           element('dd', {
             text: draft.subclass.kind === 'selected'
-              ? draft.subclass.name
+              ? `${draft.subclass.name} — ${catalogLayerLabel(draft.subclass.catalog_layer)}`
               : 'Decide later',
           }),
         ]),

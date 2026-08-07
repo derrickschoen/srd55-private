@@ -580,7 +580,15 @@ export interface AgentReference {
       | null;
   }[];
   readonly catalog_sources: readonly {
-    readonly kind: 'class' | 'subclass' | 'feat' | 'species' | 'background';
+    readonly kind:
+      | 'class'
+      | 'subclass'
+      | 'feat'
+      | 'species'
+      | 'background'
+      | 'spell'
+      | 'weapon'
+      | 'armor';
     readonly name: string | null;
     readonly name_withheld: boolean;
     readonly catalog_layer: 'bundled' | 'external' | 'unknown';

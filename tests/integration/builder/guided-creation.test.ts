@@ -11,7 +11,13 @@ import {
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { GrantRuleSlotGenerator } from '../../../src/grants/grant-rule-slot-generator';
 import { bundledClassContentKeys } from '../../../src/rules/class-progression-lookup';
+import { createClassChooser } from '../../../src/ui/screens/guided-builder/class-chooser';
 import { rpcRegistry } from '../../../src/worker/registry';
+import {
+  elementText,
+  installInteractiveDocument,
+  interactiveElement,
+} from '../../fixtures/interactive-dom';
 import {
   createRpcHarness,
   type RpcHarness,
@@ -301,6 +307,43 @@ describe('listGuidedClassOptions', () => {
         contentKey,
       ).hit_die,
     ).toBeNull();
+  });
+
+  it('keeps a manifest class visible but discloses unknown after its registry row is deleted', async () => {
+    const rpcHarness = await realApplicationDatabase();
+    const contentKey = firstBundledClassContentKey();
+    rpcHarness.context.db.exec('PRAGMA foreign_keys = OFF');
+    rpcHarness.context.db.exec(
+      `DELETE FROM catalog_content_identities
+       WHERE content_kind = 'class' AND content_key = ?`,
+      [contentKey],
+    );
+    rpcHarness.context.db.exec('PRAGMA foreign_keys = ON');
+
+    const option = optionFor(
+      listGuidedClassOptions(rpcHarness.context.db),
+      contentKey,
+    );
+    expect(option).toMatchObject({ catalog_layer: 'unknown' });
+
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const chooser = createClassChooser({
+        options: [option],
+        createGuided: () => Promise.reject(new Error('not submitted')),
+        navigate: () => undefined,
+      });
+      expect(
+        elementText(
+          interactiveElement(chooser.element).querySelector(
+            '.catalog-layer-disclosure',
+          )! as unknown as Node,
+        ),
+      ).toBe('Unknown catalog layer');
+      chooser.cleanup();
+    } finally {
+      restoreDocument();
+    }
   });
 });
 

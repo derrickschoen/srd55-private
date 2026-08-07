@@ -12,7 +12,13 @@ import {
   masteryStatement,
   propertySummary,
   weaponFromTemplate,
+  renderWeapons,
 } from '../../../src/ui/screens/planner/weapons';
+import {
+  elementText,
+  installInteractiveDocument,
+  interactiveElement,
+} from '../../fixtures/interactive-dom';
 
 function weapon(changes: Partial<CharacterWeapon> = {}): CharacterWeapon {
   return {
@@ -30,6 +36,7 @@ function template(changes: Partial<WeaponTemplate> = {}): WeaponTemplate {
     id: 9,
     content_key: '2024:weapon:longsword',
     srd_group: 'martial_melee',
+    catalog_layer: 'bundled',
     ...profile,
     name: 'Longsword',
     damage: { kind: 'dice', dice: '1d8' },
@@ -55,6 +62,39 @@ function panel(changes: Partial<WeaponsPanel> = {}): WeaponsPanel {
     ...changes,
   };
 }
+
+it('renders a hostile external reference weapon inert with its exact layer', () => {
+  const restoreDocument = installInteractiveDocument();
+  try {
+    const hostile = '</option><img data-ha10-weapon-template src=x>';
+    const view = renderWeapons({
+      panel: panel({
+        templates: [template({ name: hostile, catalog_layer: 'external' })],
+      }),
+      actions: {
+        addWeapon: () => undefined,
+        updateWeapon: () => undefined,
+        removeWeapon: () => undefined,
+        setWeaponMastery: () => undefined,
+      },
+      disabled: false,
+      editing: 'new',
+      onEditingChanged: () => undefined,
+    });
+    const picker = interactiveElement(view).querySelector(
+      '[data-focus-key="weapon-template"]',
+    );
+
+    expect(elementText(picker! as unknown as Node)).toContain(
+      `${hostile} — Homebrew · external layer`,
+    );
+    expect(
+      interactiveElement(view).querySelector('[data-ha10-weapon-template]'),
+    ).toBeNull();
+  } finally {
+    restoreDocument();
+  }
+});
 
 describe('pre-filling a weapon from a template', () => {
   it('copies every fillable field and adds an empty notes field', () => {

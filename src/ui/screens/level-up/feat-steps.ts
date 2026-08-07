@@ -14,6 +14,7 @@ import type { Ability } from '../../../domain/enums';
 import type { JsonObject, JsonValue } from '../../../domain/models';
 import type { PlannedCharacterEffect } from '../../../builder/level-up-wizard';
 import { element, listen, type Cleanup } from '../../dom';
+import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
 
 export type FeatStepDraft =
   | {
@@ -425,6 +426,8 @@ function createCandidateCard(options: {
           element('dd', {
             text: candidate.definition.repeatable ? 'Repeatable' : 'Not repeatable',
           }),
+          element('dt', { text: 'Catalog layer' }),
+          element('dd', { text: catalogLayerLabel(candidate.catalog_layer) }),
         ]),
         eligibilityDescription(candidate, descriptionId),
         abilityPresentation(candidate),

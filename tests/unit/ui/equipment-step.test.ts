@@ -52,6 +52,7 @@ function wizardAcolyteState(): GuidedEquipmentStepState {
     class_package: {
       content_key: '2024:class:wizard',
       source_name: 'Wizard',
+      catalog_layer: 'bundled',
       offered: [
         {
           option: 'a',
@@ -67,6 +68,7 @@ function wizardAcolyteState(): GuidedEquipmentStepState {
     background_package: {
       content_key: '2024:background:acolyte',
       source_name: 'Acolyte',
+      catalog_layer: 'bundled',
       offered: [
         {
           option: 'a',
@@ -87,6 +89,7 @@ function fighterClassPackage(): GuidedEquipmentStepState['class_package'] {
   return {
     content_key: '2024:class:fighter',
     source_name: 'Fighter',
+    catalog_layer: 'bundled',
     offered: [
       {
         option: 'a',
@@ -133,6 +136,34 @@ async function settle(): Promise<void> {
 }
 
 describe('the confirmation shape', () => {
+  it('renders a hostile external package source inert with its exact layer', () => {
+    const hostile = '</h3><img data-ha10-equipment-source src=x>';
+    const state = wizardAcolyteState();
+    const { step } = stepWith({
+      ...state,
+      background_package: state.background_package === null
+        ? null
+        : {
+            ...state.background_package,
+            source_name: hostile,
+            catalog_layer: 'external',
+          },
+    });
+    const section = interactiveElement(step.element).querySelector(
+      selector(EQUIPMENT_STEP_ATTR.source, 'background'),
+    );
+
+    expect(elementText(section! as unknown as Node)).toContain(
+      `Background package — ${hostile} — Homebrew · external layer`,
+    );
+    expect(
+      interactiveElement(step.element).querySelector(
+        '[data-ha10-equipment-source]',
+      ),
+    ).toBeNull();
+    step.cleanup();
+  });
+
   it('renders both sources with one option each and confirms the class package with its content key and letter', async () => {
     const { step, apply, navigate } = stepWith(wizardAcolyteState());
     const view = interactiveElement(step.element);
@@ -277,7 +308,7 @@ describe('the recorded and completed states', () => {
       background_package: null,
     });
     const text = elementText(step.element);
-    expect(text).toContain('does not match any bundled background');
+    expect(text).toContain('does not match one installed background');
     expect(text).toContain('cannot complete');
     step.cleanup();
   });

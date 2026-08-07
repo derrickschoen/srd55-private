@@ -29,6 +29,7 @@ import {
   type SpellPickerFactory,
 } from '../../../src/ui/screens/level-up/planned-choice-steps';
 import { screen } from '../../../src/ui/screens/level-up/screen';
+import { createSpellPicker } from '../../../src/ui/screens/planner/spell-picker';
 import {
   elementText,
   installInteractiveDocument,
@@ -318,6 +319,7 @@ const eligible: EligibleSpell = {
   ritual: false,
   concentration: false,
   edition: '2024',
+  catalog_layer: 'external',
 };
 
 const pickerFactory: SpellPickerFactory = (options) => {
@@ -335,9 +337,44 @@ const pickerFactory: SpellPickerFactory = (options) => {
   };
 };
 
+describe('shared eligible spell picker provenance', () => {
+  it('renders a hostile external spell inert with the exact disclosed layer', async () => {
+    const hostile = '</strong><img data-ha10-spell-hostile src=x>';
+    const picker = createSpellPicker({
+      addressKey: 'hostile-spell',
+      label: 'Choose hostile spell',
+      value: null,
+      freeTextValue: false,
+      invalid: false,
+      disabled: false,
+      search: async () => [{ ...eligible, name: hostile }],
+      onSelect: () => undefined,
+    });
+    document.body.append(picker.element);
+
+    picker.focus();
+    await settle();
+    expect(elementText(picker.element)).toContain(hostile);
+    expect(
+      elementText(
+        interactiveElement(picker.element).querySelector(
+          'small',
+        )! as unknown as Node,
+      ),
+    ).toBe('L1 · Evocation · 2024 · Homebrew · external layer');
+    expect(
+      interactiveElement(picker.element).querySelector(
+        '[data-ha10-spell-hostile]',
+      ),
+    ).toBeNull();
+    picker.destroy();
+  });
+});
+
 function epicBoonCandidate(key: string, name: string): LevelUpFeatCandidate {
   const eligibility = { status: 'qualified', reasons: [] } as const;
   return {
+    catalog_layer: 'bundled',
     definition: {
       content_key: key as ContentKey,
       name,

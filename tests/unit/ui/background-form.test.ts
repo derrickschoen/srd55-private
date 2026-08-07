@@ -100,9 +100,9 @@ function stored(
 }
 
 const references: BackgroundAuthoringReferences = {
-  origin_feats: [{ content_key: '2024:feat:alert' as ContentKey, name: 'Alert', rules_edition: '2024' }],
-  weapons: [{ content_key: '2024:weapon:club' as ContentKey, name: hostile, rules_edition: '2024' }],
-  armors: [{ content_key: '2024:armor:leather-armor' as ContentKey, name: 'Leather Armor', rules_edition: '2024' }],
+  origin_feats: [{ content_key: '2024:feat:alert' as ContentKey, name: 'Alert', rules_edition: '2024', catalog_layer: 'bundled' }],
+  weapons: [{ content_key: '2024:weapon:club' as ContentKey, name: hostile, rules_edition: '2024', catalog_layer: 'external' }],
+  armors: [{ content_key: '2024:armor:leather-armor' as ContentKey, name: 'Leather Armor', rules_edition: '2024', catalog_layer: 'unknown' }],
 };
 
 function unused<T>(): Promise<T> {
@@ -282,6 +282,16 @@ describe('HA-9 background authoring form', () => {
       }).map((control) => `${control.tagName}#${control.getAttribute('id') ?? ''}`)).toEqual([]);
       expect(rendered.root.querySelectorAll('img')).toHaveLength(0);
       expect(rendered.root.querySelectorAll('[data-ha9-hostile]')).toHaveLength(0);
+      const optionLabels = rendered.root.querySelectorAll('option').map(
+        (option) => elementText(option as unknown as Node),
+      );
+      expect(optionLabels).toContain('Alert (2024) — SRD · bundled layer');
+      expect(optionLabels).toContain(
+        `${hostile} (2024) — Homebrew · external layer`,
+      );
+      expect(optionLabels).toContain(
+        'Leather Armor (2024) — Unknown catalog layer',
+      );
 
       form?.dispatchEvent(new Event('submit', { cancelable: true }));
       await settle();

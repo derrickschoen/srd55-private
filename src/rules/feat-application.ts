@@ -64,9 +64,7 @@ export function isBundledFeatContentKey(
 }
 
 export interface FeatApplicationInput {
-  readonly definition: FeatDefinitionForApplication & {
-    readonly content_key: BundledFeatContentKey & ContentKey;
-  };
+  readonly definition: FeatDefinitionForApplication;
   readonly character: ProjectedFeatCharacter;
   readonly config: JsonObject;
   readonly ability_increases: readonly LevelUpAbilityIncrease[];
@@ -546,15 +544,29 @@ function abilityEffects(
 }
 
 function checkedBenefits(
-  definition: FeatDefinitionForApplication & {
-    readonly content_key: BundledFeatContentKey & ContentKey;
-  },
+  definition: FeatDefinitionForApplication,
 ): {
   readonly coverage: CoveragePlan;
   readonly benefits: readonly SourceBenefit[];
 } {
-  const coverage = coverageFor(definition.content_key);
   const benefits = sourceBenefits(definition);
+  if (!isBundledFeatContentKey(definition.content_key)) {
+    return {
+      coverage: {
+        effect: definition.ability_points > 0 ? ['ability-score-increase'] : [],
+        grant_rule: [],
+        text: Object.fromEntries(
+          benefits.map((benefit) => [
+            benefit.benefit_key,
+            'homebrew_benefit_text_only' as const,
+          ]),
+        ),
+        undetermined: [],
+      },
+      benefits,
+    };
+  }
+  const coverage = coverageFor(definition.content_key);
   const known = new Set([
     ...coverage.effect,
     ...coverage.grant_rule,
@@ -573,9 +585,7 @@ function checkedBenefits(
 }
 
 export function featBenefitCoverage(
-  definition: FeatDefinitionForApplication & {
-    readonly content_key: BundledFeatContentKey & ContentKey;
-  },
+  definition: FeatDefinitionForApplication,
 ): readonly FeatBenefitCoverage[] {
   const { coverage, benefits } = checkedBenefits(definition);
   return benefits.map((benefit) => {
@@ -636,6 +646,9 @@ function expectedGrantRuleKinds(
 function checkedGrantRules(
   definition: FeatApplicationInput['definition'],
 ): FeatApplicationPlan['grant_rules'] {
+  if (!isBundledFeatContentKey(definition.content_key)) {
+    return definition.grant_rules;
+  }
   const expected = expectedGrantRuleKinds(definition.content_key);
   const actual = definition.grant_rules.map((rule) => rule.kind);
   if (
@@ -692,10 +705,9 @@ export function buildFeatApplicationPlan(
  * for an existing feat source after it has a durable source-instance address.
  */
 export function featSpellReplacementEntitlement(
-  definition: FeatDefinitionForApplication & {
-    readonly content_key: BundledFeatContentKey & ContentKey;
-  },
+  definition: FeatDefinitionForApplication,
 ): FeatSpellReplacementEntitlement | null {
+  if (!isBundledFeatContentKey(definition.content_key)) return null;
   const key: BundledFeatContentKey = definition.content_key;
   switch (key) {
     case '2024:feat:magic-initiate': {

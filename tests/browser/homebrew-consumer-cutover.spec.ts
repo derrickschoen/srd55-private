@@ -49,7 +49,7 @@ async function publishBackground(page: Page): Promise<void> {
   await page.getByRole('checkbox', { name: 'Dexterity', exact: true }).check();
   await page.getByRole('checkbox', { name: 'Constitution', exact: true }).check();
   await page.getByRole('combobox', { name: 'Installed Origin feat', exact: true })
-    .selectOption({ label: 'Alert (2024)' });
+    .selectOption({ label: 'Alert (2024) — SRD · bundled layer' });
   await page.getByRole('checkbox', { name: 'Athletics', exact: true }).check();
   await page.getByRole('checkbox', { name: 'Survival', exact: true }).check();
   await page.getByRole('textbox', { name: 'Equipment option A description', exact: true })
@@ -151,11 +151,31 @@ test('published origins and subclass cut over to ordinary consumers with catalog
     exact: true,
   }).check();
   await page.locator('[data-level-up-next]').click();
+  await expect(
+    page.getByText('HA10 Horizon Guard — Homebrew · external layer', {
+      exact: true,
+    }),
+  ).toBeVisible();
   await page.locator('[data-level-up-confirm]').click();
   await expect(page.getByRole('heading', { name: 'Fighter level 3 complete', exact: true }))
     .toBeFocused({ timeout: 45_000 });
+  await expect(
+    page.getByText(
+      'Subclass: HA10 Horizon Guard — Homebrew · external layer.',
+      { exact: true },
+    ),
+  ).toBeVisible();
 
-  await page.getByRole('link', { name: 'Open character sheet', exact: true }).click();
+  await page.goto('/');
+  await globalReady(page);
+  const characterCard = page.getByRole('article').filter({
+    has: page.getByRole('heading', { name: 'HA10 Cutover Hero', exact: true }),
+  });
+  await expect(
+    characterCard.getByText('Fighter 3 — SRD · bundled layer', { exact: true }),
+  ).toBeVisible();
+
+  await page.goto(`/characters/${String(characterId)}/sheet`);
   await expect(page.locator('[data-screen="character-sheet"]')).toBeVisible();
   for (const [kind, name] of [
     ['subclass', 'HA10 Horizon Guard'],

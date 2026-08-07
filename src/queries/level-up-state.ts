@@ -68,9 +68,8 @@ import {
 import {
   buildFeatApplicationPlan,
   evaluateFeatEligibility,
-  type BundledFeatContentKey,
 } from '../rules/feat-application';
-import { parseSrdFeatDefinitions } from '../rules/feats-srd';
+import { levelFeatDefinitionFromDatabase } from '../commands/level-feat-choice';
 import {
   readEligibleCharacterEffects,
 } from '../rules/eligible-character-effects';
@@ -243,9 +242,7 @@ function abilityIncreaseOptions(
 }
 
 function applicationsForFeat(
-  definition: FeatDefinitionForApplication & {
-    readonly content_key: BundledFeatContentKey & ContentKey;
-  },
+  definition: FeatDefinitionForApplication,
   projected: ProjectedFeatCharacter,
 ): readonly LevelUpFeatApplication[] {
   return featConfigs(definition).flatMap((config) =>
@@ -856,15 +853,14 @@ export class LevelUpStateQuery {
     occurrence: 'asi_level_feat' | 'epic_boon',
     choiceContext?: LevelUpPlannedChoiceContext,
   ): readonly LevelUpFeatCandidate[] {
-    const available = new Set(
-      this.db.all(
-        'SELECT content_key FROM feat_definitions ORDER BY id',
-        undefined,
-        (row) => sqlString(row, 'content_key'),
-      ),
-    );
-    return parseSrdFeatDefinitions()
-      .filter((definition) => available.has(definition.content_key))
+    return this.db.all(
+      'SELECT content_key FROM feat_definitions ORDER BY id',
+      undefined,
+      (row) => sqlString(row, 'content_key'),
+    )
+      .map((contentKey) =>
+        levelFeatDefinitionFromDatabase(this.db, contentKey)
+      )
       .filter(
         (definition) =>
           occurrence === 'asi_level_feat' ||
@@ -874,6 +870,7 @@ export class LevelUpStateQuery {
         const applications = applicationsForFeat(definition, projected);
         return {
           definition,
+          catalog_layer: definition.catalog_layer,
           eligibility: evaluateFeatEligibility(definition, projected),
           is_class_default:
             definition.content_key ===

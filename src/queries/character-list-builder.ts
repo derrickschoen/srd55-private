@@ -49,7 +49,11 @@ export class CharacterListBuilder {
           name: character.name,
           level: report.character.character_level,
           classes: report.classes.map(
-            (item) => `${item.name} ${item.class_level}`,
+            (item) => ({
+              name: item.name,
+              level: item.class_level,
+              catalog_layer: item.class_catalog_layer,
+            }),
           ),
           warning_count: duplicates + invalid,
         };

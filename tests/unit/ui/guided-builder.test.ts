@@ -132,12 +132,13 @@ function option(
   contentKey: string,
   name: string,
   hitDie: number | null,
+  catalogLayer: GuidedClassOption['catalog_layer'] = 'bundled',
 ): GuidedClassOption {
   return {
     content_key: contentKey,
     name,
     hit_die: hitDie,
-    catalog_layer: 'bundled',
+    catalog_layer: catalogLayer,
   };
 }
 
@@ -238,6 +239,29 @@ describe('guided class chooser', () => {
     expect(elementText(chooser.element)).toContain('SRD · bundled layer');
     expect(
       interactiveElement(chooser.element).querySelector('[data-ha10-class-hostile]'),
+    ).toBeNull();
+    chooser.cleanup();
+  });
+
+  it('renders a registry-orphaned hostile class inert with the exact unknown label', () => {
+    const hostile = '</span><img data-ha10-unknown-class src=x>';
+    const chooser = createClassChooser({
+      options: [option('2024:class:hostile', hostile, 10, 'unknown')],
+      createGuided: () => Promise.reject(new Error('not submitted')),
+      navigate: () => undefined,
+    });
+
+    const card = firstClassCard(chooser.element);
+    expect(elementText(card as unknown as Node)).toContain(hostile);
+    expect(
+      elementText(
+        interactiveElement(card as unknown as Node).querySelector(
+          '.catalog-layer-disclosure',
+        )! as unknown as Node,
+      ),
+    ).toBe('Unknown catalog layer');
+    expect(
+      interactiveElement(chooser.element).querySelector('[data-ha10-unknown-class]'),
     ).toBeNull();
     chooser.cleanup();
   });
@@ -372,6 +396,29 @@ describe('guided species step', () => {
     expect(elementText(step.element)).toContain('Homebrew · external layer');
     expect(
       interactiveElement(step.element).querySelector('[data-ha10-species-hostile]'),
+    ).toBeNull();
+    step.cleanup();
+  });
+
+  it('renders a registry-orphaned hostile species inert with the exact unknown label', () => {
+    const hostile = '</h3><img data-ha10-unknown-species src=x>';
+    const step = createSpeciesStep({
+      characterId: 7,
+      options: [originOption('expanded:species:unknown', hostile, false, 'unknown')],
+      applyOrigin: () => Promise.reject(new Error('not submitted')),
+      navigate: () => undefined,
+    });
+
+    expect(elementText(step.element)).toContain(hostile);
+    expect(
+      elementText(
+        interactiveElement(step.element).querySelector(
+          '.catalog-layer-disclosure',
+        )! as unknown as Node,
+      ),
+    ).toBe('Unknown catalog layer');
+    expect(
+      interactiveElement(step.element).querySelector('[data-ha10-unknown-species]'),
     ).toBeNull();
     step.cleanup();
   });

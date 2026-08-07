@@ -730,6 +730,10 @@ export function createLevelUpWizard(options: {
                 option.subclass_definition_id ===
                 selectedSubclassId,
             )?.name ?? `Subclass ${String(selectedSubclassId)}`,
+            catalog_layer: selected.subclass_choice.options.find(
+              (option) =>
+                option.subclass_definition_id === selectedSubclassId,
+            )?.catalog_layer ?? 'unknown',
           }
         : {
             kind: 'deferred' as const,

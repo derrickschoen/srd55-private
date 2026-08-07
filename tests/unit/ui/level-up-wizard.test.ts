@@ -211,6 +211,7 @@ function boonCandidate(options: {
     },
   };
   return {
+    catalog_layer: 'bundled',
     definition: {
       content_key: key as ContentKey,
       name: options.name ?? 'Boon of Fate',
@@ -1176,11 +1177,24 @@ describe('W-E review, atomic confirm, and complete', () => {
   it('W-SUBCLASS-DRAFT names a selected subclass on Review and Complete', async () => {
     const before = sheet({ totalLevel: 2, classLevel: 2, hp: 14 });
     const after = sheet({ totalLevel: 3, classLevel: 3, hp: 20 });
-    const selectedClass = classOption({
+    const baseClass = classOption({
       current: 2,
       subclass: true,
       steps: ['class', 'gains', 'subclass', 'review', 'complete'],
     });
+    const originalSubclass = baseClass.subclass_choice?.options[0];
+    if (originalSubclass === undefined) throw new Error('Subclass fixture missing.');
+    const hostile = '</dd><img data-ha10-review-subclass src=x>';
+    const selectedClass = {
+      ...baseClass,
+      subclass_choice: {
+        options: [{
+          ...originalSubclass,
+          name: hostile,
+          catalog_layer: 'external' as const,
+        }],
+      },
+    };
     const submit = vi.fn().mockResolvedValue({
       operation_uuid: 'level-up-operation',
       revision: 5,
@@ -1193,7 +1207,7 @@ describe('W-E review, atomic confirm, and complete', () => {
       submit,
       loadSheet: vi.fn().mockResolvedValue({
         ...after,
-        classes: [{ ...after.classes[0]!, subclass_name: 'Abjurer' }],
+        classes: [{ ...after.classes[0]!, subclass_name: hostile }],
       }),
       randomUuid: () => '61616161-6161-4161-8161-616161616161',
     });
@@ -1203,7 +1217,16 @@ describe('W-E review, atomic confirm, and complete', () => {
     chooseRadio(wizard.element, '31');
     click(wizard.element, LEVEL_UP_ATTR.next);
     await settle();
-    expect(elementText(wizard.element)).toContain('Subclass Abjurer');
+    expect(
+      interactiveElement(wizard.element)
+        .querySelectorAll('dd')
+        .map((entry) => elementText(entry as unknown as Node)),
+    ).toContain(`${hostile} — Homebrew · external layer`);
+    expect(
+      interactiveElement(wizard.element).querySelector(
+        '[data-ha10-review-subclass]',
+      ),
+    ).toBeNull();
     expect(elementText(wizard.element)).toContain('New class feature Scholar');
 
     click(wizard.element, LEVEL_UP_ATTR.confirm);
@@ -1213,7 +1236,16 @@ describe('W-E review, atomic confirm, and complete', () => {
       expect.objectContaining({ subclass_content_key: 'test:subclass:abjurer' }),
       '61616161-6161-4161-8161-616161616161',
     );
-    expect(elementText(wizard.element)).toContain('Subclass: Abjurer.');
+    expect(
+      interactiveElement(wizard.element)
+        .querySelectorAll('li')
+        .map((entry) => elementText(entry as unknown as Node)),
+    ).toContain(`Subclass: ${hostile} — Homebrew · external layer.`);
+    expect(
+      interactiveElement(wizard.element).querySelector(
+        '[data-ha10-review-subclass]',
+      ),
+    ).toBeNull();
     expect(elementText(wizard.element)).toContain('New class feature: Scholar.');
     wizard.cleanup();
   });

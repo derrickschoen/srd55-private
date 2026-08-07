@@ -16,7 +16,7 @@ import type {
   SubclassDefinitionRow,
 } from '../domain/models';
 import {
-  isBundledSourceContentKey,
+  bundledSourceContentKeys,
   type BundledSourceKind,
 } from '../catalog/bundled-source-membership';
 import {
@@ -69,7 +69,7 @@ export interface CatalogSpell extends SpellVersionRow {
 
 export interface CatalogSnapshot {
   readonly classes: Array<
-    ClassDefinitionRow & { readonly catalog_layer: 'bundled' }
+    ClassDefinitionRow & { readonly catalog_layer: CatalogLayerDisclosure }
   >;
   readonly subclasses: Array<
     SubclassDefinitionRow & { readonly catalog_layer: CatalogLayerDisclosure }
@@ -253,15 +253,23 @@ export class CatalogQueries {
   read(): CatalogSnapshot {
     return {
       classes: this.db.all(
-        `SELECT definition.*
+        `SELECT definition.*, identity.catalog_layer
          FROM class_definitions AS definition
+         LEFT JOIN catalog_content_identities AS identity
+           ON identity.content_kind = 'class'
+          AND identity.content_key = definition.content_key
          -- D133: class consumers remain bundled-only in v1.
          ORDER BY definition.name, definition.rules_edition, definition.id`,
         undefined,
-        decodeClass,
+        (row) => ({
+          ...decodeClass(row),
+          catalog_layer: catalogLayerDisclosure(
+            sqlNullableString(row, 'catalog_layer'),
+          ),
+        }),
       ).filter((definition) =>
-        isBundledSourceContentKey('class', definition.content_key, this.db)
-      ).map((definition) => ({ ...definition, catalog_layer: 'bundled' as const })),
+        bundledSourceContentKeys('class').includes(definition.content_key)
+      ),
       subclasses: this.db.all(
         `SELECT definition.*, identity.catalog_layer
          FROM subclass_definitions AS definition

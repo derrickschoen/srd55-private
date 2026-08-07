@@ -9,6 +9,7 @@ import type {
   PublishResult,
   StoredHomebrewDraft,
 } from '../../../authoring/contracts';
+import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
 import type { AuthoringDraftCharacterEffect } from '../../../authoring/effect-forms';
 import type { HomebrewDraftItemUuid } from '../../../authoring/ids';
 import {
@@ -207,7 +208,9 @@ function referenceOptions(
 ): void {
   for (const reference of references) {
     select.append(element('option', {
-      text: `${reference.name} (${reference.rules_edition})`,
+      text:
+        `${reference.name} (${reference.rules_edition}) — ` +
+        catalogLayerLabel(reference.catalog_layer),
       attributes: { value: reference.content_key },
     }));
   }

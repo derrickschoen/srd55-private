@@ -6,6 +6,7 @@ import {
   catalogGapLabel,
   characterCardRouteActions,
   classSummary,
+  renderClassSummary,
   completenessByCharacter,
   outstandingLabel,
   warningLabel,
@@ -330,14 +331,41 @@ describe('character list behavior', () => {
     expect(
       classSummary({
         ...summary(1, 'Sixfold'),
-        classes: ['Bard 1', 'Wizard 1'],
+        classes: [
+          { name: 'Bard', level: 1, catalog_layer: 'external' },
+          { name: 'Wizard', level: 1, catalog_layer: 'unknown' },
+        ],
       }),
-    ).toBe('Bard 1 / Wizard 1');
+    ).toBe(
+      'Bard 1 — Homebrew · external layer / Wizard 1 — Unknown catalog layer',
+    );
     expect(classSummary(summary(2, 'Empty'))).toBe(
       'No classes yet. Open the build to add one.',
     );
     expect(warningLabel(1)).toBe('1 warning');
     expect(warningLabel(0)).toBe('0 warnings');
+  });
+
+  it('renders a hostile class name inert with its exact external disclosure', () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const hostile = '</p><img data-ha10-character-list-hostile src=x>';
+      const row = renderClassSummary({
+        ...summary(1, 'Hostile holder'),
+        classes: [{ name: hostile, level: 7, catalog_layer: 'external' }],
+      });
+
+      expect(elementText(row as unknown as Node)).toBe(
+        `${hostile} 7 — Homebrew · external layer`,
+      );
+      expect(
+        interactiveElement(row).querySelector(
+          '[data-ha10-character-list-hostile]',
+        ),
+      ).toBeNull();
+    } finally {
+      restoreDocument();
+    }
   });
 
   it('labels outstanding work in words that no reader can mistake for a warning', () => {

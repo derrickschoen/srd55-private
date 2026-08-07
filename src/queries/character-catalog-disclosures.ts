@@ -1,4 +1,10 @@
-import { GUIDED_BACKGROUND_SOURCE_MARKER } from '../builder/guided-creation';
+import {
+  GUIDED_BACKGROUND_SOURCE_MARKER,
+  recordedEquipmentChoiceOption,
+  resolveEquipmentBackgroundSource,
+  resolveEquipmentClassSource,
+  type ResolvedEquipmentSource,
+} from '../builder/guided-creation';
 import {
   catalogLayerDisclosure,
   type CharacterCatalogDisclosure,
@@ -179,6 +185,108 @@ export function characterCatalogDisclosures(
     },
   );
   disclosures.push(...otherActiveSources);
+
+  const spells = db.all(
+    `SELECT DISTINCT version.content_key, version.display_name AS name,
+            identity.catalog_layer
+     FROM spell_versions AS version
+     LEFT JOIN catalog_content_identities AS identity
+       ON identity.content_kind = 'spell'
+      AND identity.content_key = version.content_key
+     WHERE version.id IN (
+       SELECT COALESCE(slot.fixed_spell_version_id, slot.current_spell_version_id)
+       FROM spell_selection_slots AS slot
+       WHERE slot.character_id = ?
+         AND COALESCE(slot.fixed_spell_version_id, slot.current_spell_version_id) IS NOT NULL
+       UNION
+       SELECT book.spell_version_id
+       FROM wizard_spellbook_entries AS book
+       WHERE book.character_id = ? AND book.spell_version_id IS NOT NULL
+       UNION
+       SELECT entry.spell_version_id
+       FROM spell_loadout_entries AS entry
+       JOIN spell_loadouts AS loadout ON loadout.id = entry.spell_loadout_id
+       WHERE loadout.character_id = ?
+     )
+     ORDER BY version.display_name, version.content_key`,
+    [characterId, characterId, characterId],
+    (row): CharacterCatalogDisclosure => ({
+      kind: 'spell',
+      name: sqlString(row, 'name'),
+      content_key: sqlString(row, 'content_key'),
+      catalog_layer: catalogLayerDisclosure(
+        sqlNullableString(row, 'catalog_layer'),
+      ),
+    }),
+  );
+  disclosures.push(...spells);
+
+  const equipmentSources: readonly {
+    readonly kind: 'class' | 'background';
+    readonly source: ResolvedEquipmentSource | null;
+  }[] = [
+    { kind: 'class', source: resolveEquipmentClassSource(db, characterId) },
+    {
+      kind: 'background',
+      source: resolveEquipmentBackgroundSource(db, characterId),
+    },
+  ];
+  for (const { kind, source } of equipmentSources) {
+    const option = recordedEquipmentChoiceOption(db, characterId, kind);
+    if (source === null || option === null) continue;
+    const ownerTable = kind === 'class'
+      ? 'class_definitions'
+      : 'background_templates';
+    const itemTable = kind === 'class'
+      ? 'class_equipment_items'
+      : 'background_equipment_items';
+    const ownerColumn = kind === 'class'
+      ? 'class_definition_id'
+      : 'background_template_id';
+    const equipment = db.all(
+      `SELECT item.item_kind,
+              COALESCE(weapon.name, armor.name) AS name,
+              COALESCE(weapon.content_key, armor.content_key) AS content_key,
+              identity.catalog_layer
+       FROM ${itemTable} AS item
+       JOIN ${ownerTable} AS owner ON owner.id = item.${ownerColumn}
+       LEFT JOIN weapon_templates AS weapon
+         ON item.item_kind = 'weapon' AND weapon.id = item.weapon_template_id
+       LEFT JOIN armor_templates AS armor
+         ON item.item_kind = 'armor' AND armor.id = item.armor_template_id
+       LEFT JOIN catalog_content_identities AS identity
+         ON identity.content_kind = item.item_kind
+        AND identity.content_key = COALESCE(weapon.content_key, armor.content_key)
+       WHERE owner.content_key = ? AND item.option = ?
+         AND item.item_kind IN ('weapon', 'armor')
+       ORDER BY item.item_kind, name, content_key`,
+      [source.content_key, option],
+      (row): CharacterCatalogDisclosure => {
+        const equipmentKind = sqlString(row, 'item_kind');
+        if (equipmentKind !== 'weapon' && equipmentKind !== 'armor') {
+          throw new Error(`Unsupported equipment catalog kind "${equipmentKind}".`);
+        }
+        return {
+          kind: equipmentKind,
+          name: sqlString(row, 'name'),
+          content_key: sqlString(row, 'content_key'),
+          catalog_layer: catalogLayerDisclosure(
+            sqlNullableString(row, 'catalog_layer'),
+          ),
+        };
+      },
+    );
+    const seen = new Set(
+      disclosures.map((entry) => `${entry.kind}:${entry.content_key ?? ''}`),
+    );
+    for (const entry of equipment) {
+      const key = `${entry.kind}:${entry.content_key ?? ''}`;
+      if (!seen.has(key)) {
+        disclosures.push(entry);
+        seen.add(key);
+      }
+    }
+  }
 
   return disclosures;
 }

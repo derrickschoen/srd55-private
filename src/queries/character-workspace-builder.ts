@@ -7,7 +7,7 @@ import {
   type RowCodec,
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
-import { isBundledSourceContentKey } from '../catalog/bundled-source-membership';
+import { bundledSourceContentKeys } from '../catalog/bundled-source-membership';
 import { catalogLayerDisclosure } from '../catalog/catalog-disclosure';
 import {
   abilities,
@@ -389,8 +389,12 @@ export class CharacterWorkspaceBuilder {
   private classOptions(classDefinitionId?: number): ClassOption[] {
     return classDefinitionId === undefined
       ? this.db.all(
-          `SELECT definition.id, definition.content_key, definition.name
+          `SELECT definition.id, definition.content_key, definition.name,
+                  identity.catalog_layer
            FROM class_definitions AS definition
+           LEFT JOIN catalog_content_identities AS identity
+             ON identity.content_kind = 'class'
+            AND identity.content_key = definition.content_key
            -- D133: planner class authoring/selection remains bundled-only.
            ORDER BY definition.name, definition.id`,
           undefined,
@@ -398,15 +402,18 @@ export class CharacterWorkspaceBuilder {
             id: sqlInteger(row, 'id'),
             content_key: sqlString(row, 'content_key'),
             name: sqlString(row, 'name'),
+            catalog_layer: catalogLayerDisclosure(
+              sqlNullableString(row, 'catalog_layer'),
+            ),
           }),
         )
           .filter((definition) =>
-            isBundledSourceContentKey('class', definition.content_key, this.db)
+            bundledSourceContentKeys('class').includes(definition.content_key)
           )
-          .map(({ id, name }) => ({
+          .map(({ id, name, catalog_layer }) => ({
             id,
             name,
-            catalog_layer: 'bundled' as const,
+            catalog_layer,
           }))
       : this.db.all(
           `SELECT subclass.id, subclass.name, identity.catalog_layer

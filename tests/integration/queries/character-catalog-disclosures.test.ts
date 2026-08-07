@@ -24,6 +24,9 @@ describe('character catalog provenance', () => {
       { kind: 'subclass' as const, contentKey: 'expanded:content.subclass:hostile', name: 'External Subclass', keyKind: 'asserted' as const },
       { kind: 'feat' as const, contentKey: 'expanded:content.feat:hostile', name: 'External Feat', keyKind: 'asserted' as const },
       { kind: 'background' as const, contentKey: 'expanded:content.background:hostile', name: 'External Background', keyKind: 'asserted' as const },
+      { kind: 'spell' as const, contentKey: 'expanded:content.spell:hostile', name: 'External Spell', keyKind: 'asserted' as const },
+      { kind: 'weapon' as const, contentKey: 'expanded:content.weapon:hostile', name: 'External Weapon', keyKind: 'asserted' as const },
+      { kind: 'armor' as const, contentKey: 'expanded:content.armor:hostile', name: 'External Armor', keyKind: 'asserted' as const },
     ];
     for (const identity of identities) registerFixtureContentIdentity(db, identity);
 
@@ -93,6 +96,70 @@ describe('character catalog provenance', () => {
                  'External Feat', '{}', 1, 'active')`,
       [characterId, featId],
     );
+    db.exec(
+      `INSERT INTO character_source_instances (
+         character_id, instance_uuid, source_type, source_definition_id,
+         display_name, config, acquired_at_character_level, state
+       ) VALUES (?, 'class-equipment-layer-reader', 'class', ?, 'Fighter',
+                 '{"equipment_choice":{"kind":"class","option":"a"}}',
+                 1, 'active')`,
+      [characterId, classId],
+    );
+    const spellIdentityId = db.exec(
+      `INSERT INTO spell_identities (content_key, canonical_name, normalized_name)
+       VALUES ('expanded:spell-identity:hostile', 'External Spell', 'externalspell')`,
+    ).lastInsertId;
+    const spellVersionId = db.exec(
+      `INSERT INTO spell_versions (
+         content_key, spell_identity_id, display_name, rules_edition,
+         level, school, is_active
+       ) VALUES (
+         'expanded:content.spell:hostile', ?,
+         '</strong><img data-ha10-spell-disclosure src=x>',
+         'expanded', 1, 'Evocation', 1
+       )`,
+      [spellIdentityId],
+    ).lastInsertId;
+    db.exec(
+      `INSERT INTO wizard_spellbook_entries (
+         character_id, spell_version_id, selection_eligibility
+       ) VALUES (?, ?, 'valid')`,
+      [characterId, spellVersionId],
+    );
+    const weaponId = db.exec(
+      `INSERT INTO weapon_templates (
+         content_key, rules_edition, name, srd_group, damage_kind, damage_dice,
+         damage_type, versatile_damage_kind, mastery_property
+       ) VALUES (
+         'expanded:content.weapon:hostile', 'expanded',
+         '</option><img data-ha10-weapon-disclosure src=x>',
+         'simple_melee', 'dice', '1d6', 'Bludgeoning', 'not_applicable', 'Sap'
+       )`,
+    ).lastInsertId;
+    const armorId = db.exec(
+      `INSERT INTO armor_templates (
+         content_key, rules_edition, name, category, armor_class, dex_bonus,
+         stealth_disadvantage
+       ) VALUES (
+         'expanded:content.armor:hostile', 'expanded',
+         '</li><img data-ha10-armor-disclosure src=x>',
+         'light', 12, 'full', 0
+       )`,
+    ).lastInsertId;
+    db.exec(
+      `INSERT INTO class_equipment_items (
+         class_definition_id, option, sort_order, quantity, item_name,
+         item_kind, weapon_template_id
+       ) VALUES (?, 'a', 1, 1, 'External Weapon', 'weapon', ?)`,
+      [classId, weaponId],
+    );
+    db.exec(
+      `INSERT INTO class_equipment_items (
+         class_definition_id, option, sort_order, quantity, item_name,
+         item_kind, armor_template_id
+       ) VALUES (?, 'a', 2, 1, 'External Armor', 'armor', ?)`,
+      [classId, armorId],
+    );
 
     expect(characterCatalogDisclosures(db, characterId)).toEqual([
       {
@@ -114,6 +181,19 @@ describe('character catalog provenance', () => {
       {
         kind: 'feat', name: 'External Feat',
         content_key: 'expanded:content.feat:hostile', catalog_layer: 'external',
+      },
+      {
+        kind: 'spell',
+        name: '</strong><img data-ha10-spell-disclosure src=x>',
+        content_key: 'expanded:content.spell:hostile', catalog_layer: 'external',
+      },
+      {
+        kind: 'armor', name: '</li><img data-ha10-armor-disclosure src=x>',
+        content_key: 'expanded:content.armor:hostile', catalog_layer: 'external',
+      },
+      {
+        kind: 'weapon', name: '</option><img data-ha10-weapon-disclosure src=x>',
+        content_key: 'expanded:content.weapon:hostile', catalog_layer: 'external',
       },
     ]);
   });

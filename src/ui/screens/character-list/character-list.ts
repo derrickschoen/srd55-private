@@ -25,6 +25,7 @@ import {
   type ShareControls,
 } from './share-controls';
 import { HOMEBREW_ROUTE } from '../homebrew/homebrew-library';
+import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
 
 export interface CharacterListQueries {
   listCharacters(): Promise<CharacterSummary[]>;
@@ -125,8 +126,18 @@ export async function completenessByCharacter(
 
 export function classSummary(character: CharacterSummary): string {
   return character.classes.length > 0
-    ? character.classes.join(' / ')
+    ? character.classes.map(
+        (entry) =>
+          `${entry.name} ${String(entry.level)} — ${catalogLayerLabel(entry.catalog_layer)}`,
+      ).join(' / ')
     : 'No classes yet. Open the build to add one.';
+}
+
+export function renderClassSummary(character: CharacterSummary): HTMLElement {
+  return element('p', {
+    className: 'class-summary',
+    text: classSummary(character),
+  });
 }
 
 function appTheme(): boolean {
@@ -468,10 +479,7 @@ function renderCards(
           ]),
           element('div', { className: 'card-badges' }, badges),
         ]),
-        element('p', {
-          className: 'class-summary',
-          text: classSummary(character),
-        }),
+        renderClassSummary(character),
         element('div', { className: 'card-actions' }, [
           ...routeActions,
           share,

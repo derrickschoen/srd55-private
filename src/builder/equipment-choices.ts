@@ -43,6 +43,7 @@ import {
   type EquipmentChoiceConfig,
   type EquipmentSourceKind,
 } from './contracts';
+import type { CatalogLayerDisclosure } from '../catalog/catalog-disclosure';
 
 /* ------------------------------------------------------------ RPC methods */
 
@@ -102,6 +103,7 @@ export interface GuidedEquipmentOfferedOption<Option extends string> {
 export interface GuidedEquipmentSourcePackage<Option extends string> {
   readonly content_key: string;
   readonly source_name: string;
+  readonly catalog_layer: CatalogLayerDisclosure;
   readonly offered: readonly GuidedEquipmentOfferedOption<Option>[];
   readonly chosen_option: Option | null;
 }

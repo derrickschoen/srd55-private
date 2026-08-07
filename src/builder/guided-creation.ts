@@ -75,9 +75,11 @@ import { skillFromLabel } from '../rules/skills';
 import { characterLevel } from '../rules/character-level';
 import {
   bundledSourceContentKeys,
-  isBundledSourceContentKey,
 } from '../catalog/bundled-source-membership';
-import { catalogLayerDisclosure } from '../catalog/catalog-disclosure';
+import {
+  catalogLayerDisclosure,
+  type CatalogLayerDisclosure,
+} from '../catalog/catalog-disclosure';
 import {
   backgroundEffectsFromTemplate,
   backgroundFromTemplate,
@@ -236,6 +238,7 @@ export function deriveBuildStep(evidence: GuidedStepEvidence): BuildStep {
 export interface ResolvedEquipmentSource {
   readonly content_key: string;
   readonly source_name: string;
+  readonly catalog_layer: CatalogLayerDisclosure;
   readonly source_instance_id: number | null;
 }
 
@@ -251,10 +254,13 @@ export function resolveEquipmentClassSource(
 ): ResolvedEquipmentSource | null {
   const definition = db.one(
     `SELECT definition.id AS definition_id, definition.content_key,
-            definition.name
+            definition.name, identity.catalog_layer
      FROM character_class_levels AS level
      INNER JOIN class_definitions AS definition
        ON definition.id = level.class_definition_id
+     LEFT JOIN catalog_content_identities AS identity
+       ON identity.content_kind = 'class'
+      AND identity.content_key = definition.content_key
      WHERE level.character_id = ?
      ORDER BY level.is_starting_class DESC, level.id
      LIMIT 1`,
@@ -263,6 +269,9 @@ export function resolveEquipmentClassSource(
       definition_id: sqlInteger(row, 'definition_id'),
       content_key: sqlString(row, 'content_key'),
       name: sqlString(row, 'name'),
+      catalog_layer: catalogLayerDisclosure(
+        sqlNullableString(row, 'catalog_layer'),
+      ),
     }),
   );
   if (definition === null) {
@@ -279,6 +288,7 @@ export function resolveEquipmentClassSource(
   return {
     content_key: definition.content_key,
     source_name: definition.name,
+    catalog_layer: definition.catalog_layer,
     source_instance_id: typeof instanceId === 'number' ? instanceId : null,
   };
 }
@@ -301,10 +311,13 @@ export function resolveEquipmentBackgroundSource(
 ): ResolvedEquipmentSource | null {
   const instance = db.one(
     `SELECT source.id AS instance_id, definition.content_key,
-            source.display_name
+            source.display_name, identity.catalog_layer
      FROM character_source_instances AS source
      INNER JOIN background_definitions AS definition
        ON definition.id = source.source_definition_id
+     LEFT JOIN catalog_content_identities AS identity
+       ON identity.content_kind = 'background'
+      AND identity.content_key = definition.content_key
      WHERE source.character_id = ?
        AND source.source_type = 'background'
        AND source.parent_source_instance_id IS NULL
@@ -316,6 +329,9 @@ export function resolveEquipmentBackgroundSource(
       instance_id: sqlInteger(row, 'instance_id'),
       content_key: sqlString(row, 'content_key'),
       display_name: sqlString(row, 'display_name'),
+      catalog_layer: catalogLayerDisclosure(
+        sqlNullableString(row, 'catalog_layer'),
+      ),
     }),
   );
   if (instance !== null) {
@@ -323,6 +339,7 @@ export function resolveEquipmentBackgroundSource(
       content_key: instance.content_key,
       source_name: instance.display_name,
       source_instance_id: instance.instance_id,
+      catalog_layer: instance.catalog_layer,
     };
   }
   const recordedName = db.scalar(
@@ -333,11 +350,19 @@ export function resolveEquipmentBackgroundSource(
     return null;
   }
   const templates = db.all(
-    'SELECT content_key, name FROM background_templates WHERE name = ?',
+    `SELECT template.content_key, template.name, identity.catalog_layer
+     FROM background_templates AS template
+     LEFT JOIN catalog_content_identities AS identity
+       ON identity.content_kind = 'background'
+      AND identity.content_key = template.content_key
+     WHERE template.name = ?`,
     [recordedName],
     (row) => ({
       content_key: sqlString(row, 'content_key'),
       name: sqlString(row, 'name'),
+      catalog_layer: catalogLayerDisclosure(
+        sqlNullableString(row, 'catalog_layer'),
+      ),
     }),
   );
   const template = templates[0];
@@ -348,6 +373,7 @@ export function resolveEquipmentBackgroundSource(
     content_key: template.content_key,
     source_name: template.name,
     source_instance_id: null,
+    catalog_layer: template.catalog_layer,
   };
 }
 
@@ -526,7 +552,8 @@ export class GuidedCreationRefusal extends Error {
  * server-side gate cannot drift apart.
  */
 function bundledClassKeys(db: DatabaseContext): readonly string[] {
-  return bundledSourceContentKeys('class', db);
+  void db;
+  return bundledSourceContentKeys('class');
 }
 
 interface BundledClassRow {
@@ -583,20 +610,29 @@ export function listGuidedClassOptions(
       `SELECT definition.id AS id,
               definition.content_key AS content_key,
               definition.name AS name,
-              traits.hit_die AS hit_die
+              traits.hit_die AS hit_die,
+              identity.catalog_layer AS catalog_layer
        FROM class_definitions AS definition
        LEFT JOIN class_sheet_traits AS traits
          ON traits.class_definition_id = definition.id
+       LEFT JOIN catalog_content_identities AS identity
+         ON identity.content_kind = 'class'
+        AND identity.content_key = definition.content_key
        WHERE definition.content_key IN (${placeholders})
        ORDER BY definition.name`,
       [...keys],
-      bundledClassRow,
+      (row) => ({
+        ...bundledClassRow(row),
+        catalog_layer: catalogLayerDisclosure(
+          sqlNullableString(row, 'catalog_layer'),
+        ),
+      }),
     )
-    .map(({ content_key, name, hit_die }) => ({
+    .map(({ content_key, name, hit_die, catalog_layer }) => ({
       content_key,
       name,
       hit_die,
-      catalog_layer: 'bundled' as const,
+      catalog_layer,
     }));
 }
 
@@ -629,7 +665,7 @@ function gateBundledClass(
       `No class exists for content key "${contentKey}".`,
     );
   }
-  if (!isBundledSourceContentKey('class', contentKey, db)) {
+  if (!bundledSourceContentKeys('class').includes(contentKey)) {
     throw new GuidedCreationRefusal(
       'class_not_bundled',
       `"${definition.name}" is not a bundled class; the guided builder does not guide homebrew classes.`,
@@ -789,7 +825,7 @@ export function listGuidedOriginOptions(
       .all(
         `SELECT template.content_key, template.name, identity.catalog_layer
          FROM background_templates AS template
-         JOIN catalog_content_identities AS identity
+         LEFT JOIN catalog_content_identities AS identity
            ON identity.content_kind = 'background'
           AND identity.content_key = template.content_key
          LEFT JOIN background_definitions AS definition
@@ -801,7 +837,7 @@ export function listGuidedOriginOptions(
         (row) => ({
           content_key: sqlString(row, 'content_key'),
           name: sqlString(row, 'name'),
-          catalog_layer: sqlString(row, 'catalog_layer'),
+          catalog_layer: sqlNullableString(row, 'catalog_layer'),
         }),
       )
       .map(({ content_key, name, catalog_layer }) => ({
@@ -815,7 +851,7 @@ export function listGuidedOriginOptions(
     .all(
       `SELECT template.content_key, template.name, identity.catalog_layer
        FROM species_templates AS template
-       JOIN catalog_content_identities AS identity
+       LEFT JOIN catalog_content_identities AS identity
          ON identity.content_kind = 'species'
         AND identity.content_key = template.content_key
        LEFT JOIN species_definitions AS definition
@@ -827,7 +863,7 @@ export function listGuidedOriginOptions(
       (row) => ({
         content_key: sqlString(row, 'content_key'),
         name: sqlString(row, 'name'),
-        catalog_layer: sqlString(row, 'catalog_layer'),
+        catalog_layer: sqlNullableString(row, 'catalog_layer'),
       }),
     )
     .map(({ content_key, name, catalog_layer }) => ({

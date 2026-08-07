@@ -119,6 +119,7 @@ function classPackage(
   return {
     content_key: source.content_key,
     source_name: source.source_name,
+    catalog_layer: source.catalog_layer,
     offered: offeredOptions(db, 'class', source.content_key, isClassOption),
     chosen_option: chosen !== null && isClassOption(chosen) ? chosen : null,
   };
@@ -133,6 +134,7 @@ function backgroundPackage(
   return {
     content_key: source.content_key,
     source_name: source.source_name,
+    catalog_layer: source.catalog_layer,
     offered: offeredOptions(
       db,
       'background',

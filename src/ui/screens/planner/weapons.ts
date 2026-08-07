@@ -22,6 +22,7 @@ import type {
   WeaponsPanel,
   WeaponTemplate,
 } from '../../../domain/read-models';
+import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
 import type { WeaponRange } from '../../../domain/weapon-range';
 import { freeTextSpan } from '../../free-text';
 import { renderAttackProfiles } from './attack-profiles';
@@ -126,7 +127,13 @@ export function blankWeapon(): WeaponFields {
  * promised.
  */
 export function weaponFromTemplate(template: WeaponTemplate): WeaponFields {
-  const { id: _id, content_key: _key, srd_group: group, ...profile } = template;
+  const {
+    id: _id,
+    content_key: _key,
+    srd_group: group,
+    catalog_layer: _layer,
+    ...profile
+  } = template;
   return {
     ...profile,
     notes: null,
@@ -862,7 +869,8 @@ function renderForm(
       }
       const entry = document.createElement('option');
       entry.value = String(template.id);
-      entry.textContent = template.name;
+      entry.textContent =
+        `${template.name} — ${catalogLayerLabel(template.catalog_layer)}`;
       group.append(entry);
     }
     picker.addEventListener('change', () => {

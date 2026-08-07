@@ -1,5 +1,6 @@
 import type { EligibleSpell } from '../../../domain/read-models';
 import { FREE_TEXT_MARKER } from '../../free-text';
+import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
 
 export interface EligibleSpellClient {
   eligibleSpells(
@@ -92,6 +93,7 @@ export function createSpellPicker(options: {
         `L${spell.level}`,
         spell.school,
         spell.edition,
+        catalogLayerLabel(spell.catalog_layer),
         ...(spell.ritual ? ['Ritual'] : []),
         ...(spell.concentration ? ['Concentration'] : []),
       ];

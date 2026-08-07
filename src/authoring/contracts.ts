@@ -25,6 +25,7 @@ import type {
   CatalogContentLayer,
   CatalogContentMatchDecision,
 } from '../catalog/content-registry';
+import type { CatalogLayerDisclosure } from '../catalog/catalog-disclosure';
 import type {
   AuthoringCharacterEffect,
   AuthoringDraftCharacterEffect,
@@ -422,6 +423,7 @@ export interface BackgroundAuthoringReferenceOption {
   readonly content_key: ContentKey;
   readonly name: string;
   readonly rules_edition: RulesEdition;
+  readonly catalog_layer: CatalogLayerDisclosure;
 }
 
 /** Installed catalog rows the background draft may reference by content key. */
