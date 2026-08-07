@@ -5,6 +5,40 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-06 — Barbed Court: Scandalous Echo keeps its first paragraph only
+
+Owner's ruling, verbatim:
+
+> Keep the first paragraph for scandalous echo only
+
+Effect: the shared-sharpening clause is cut. Level 11 is the second-target
+carry and nothing else. Under the taunt goad the feature reads:
+
+> When you goad a creature with Barbed Goad, you can expend 1 Focus Point to
+> carry the taunt to a second creature of your choice within 30 feet of the
+> goaded creature that can hear you. Until the start of your next turn, that
+> creature is also goaded by you.
+
+The trailing exposure clause in the draft's first paragraph ("the first attack
+roll made against it has Advantage") goes with it — the goad's effect is
+defined once at level 3 and Echo inherits it, per the rule-stated-once
+standard. The rework floated in this session (free sharpening at 11, a Focus
+refund when a goaded creature hits you) is declined by this ruling.
+
+Recorded, not corrected:
+
+- **Level 11 is now the thinnest slot in the kit** — one clause, 1 Focus, one
+  extra target. This is consistent with the owner's stated rationale that most
+  tables never reach level 12+ and the subclass must be competitive by level 6,
+  but it is a deliberate low point rather than an oversight.
+- The second goaded creature receives only the **baseline** taunt (its first
+  attack each turn against a creature other than you has Disadvantage); the
+  1-Focus sharpen still applies to the original target alone.
+- The incoming-damage exposure stands as measured: a second goaded creature at
+  Monk 11 is roughly **+18 damage per round aimed at the monk**, bought with
+  the player's own Focus. It is an opt-in tank risk, owner-ruled, sitting on
+  top of *Mirror Image*, Warding Image's +2 AC, *Shield*, and Topple's Prone.
+
 ## 2026-08-06 — Barbed Court: converted slots grant no new preparation, only upcasting
 
 Owner's ruling, verbatim:
