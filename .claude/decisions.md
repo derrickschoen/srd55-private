@@ -7,6 +7,68 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D223 — SUPERVISOR: third-caster slot ladders are DERIVED from the SRD table, never transcribed (2026-08-07)
+
+Answers the owner's question "am I violating the license by making a 1/3
+caster based on the table only found in the PHB?". VERIFIED IN THE SRD
+TEXT: SRD 5.2.1's multiclass spell-slot rule lists only full casters
+(Bard/Cleric/Druid/Sorcerer/Wizard) and half casters (Paladin/Ranger,
+round up) — docs/srd/full/srd-5.2.1.txt:1599-1603. There is NO third-caster
+fraction in the SRD, because EK/AT are not in the SRD. The Multiclass
+Spellcaster slot table itself IS in the SRD (line 1638ff) and is CC-BY.
+
+RULE: any third-caster progression this project ships is COMPUTED as
+`MulticlassSpellcasterTable[floor(subclass_class_level / 3)]` — our own
+stated fraction applied to a table we are licensed to reproduce. It is
+never transcribed from a PHB table. Verified this derivation reproduces
+the familiar ladder exactly (level 3 -> 2 first-level slots; 7 -> 3;
+10 -> 4/2; 13 -> 4/3). The committed artifact is therefore SRD data plus
+our rule.
+
+Prepared/known-spell counts are NOT derivable this way — they are a
+per-subclass design choice. Every project third-caster picks its own; do
+not reuse the numbers currently seeded for EK/AT.
+
+Not legal advice. The reasoning, for the record: mechanics and systems are
+excluded from copyright (17 USC 102(b)), and unoriginal number tables have
+thin-to-no protection (Feist), so the real exposure was always copied
+PROSE and NAMES — which is why D216 removes the names and why no EK/AT
+prose ever entered this repo. Deriving costs us nothing and removes the
+question entirely.
+
+## D222 — OWNER: a deliberately boring third-caster carries the test pins (2026-08-07)
+
+Owner: "Author the deliberately boring 1/3 caster to test with." The
+third-caster spell-slot coverage vacated by D216 moves onto a new,
+intentionally minimal owner-authored subclass built for testing, NOT onto
+the Barbed Court Monk. Its slot ladder derives per D223. Barbed Court Monk
+ships as CONTENT ONLY in the bundled-homebrew catalog, so revising its
+design never churns the slot-math pins. Supersedes D216's sentence routing
+that coverage to Barbed Court.
+
+## D221 — OWNER: seed-scope runs in parallel with the HA chain (2026-08-07)
+
+Owner chose parallel over queue-jumping or waiting. The bundled-homebrew
+catalog unit and the SRD-only retirement unit run in their own worktrees
+alongside HA-11/HA-12. Supervisor accepts the collision risk the owner was
+shown (both touch catalog seams) and owns the arbitration. Ordering
+constraint from the design pass still binds: the catalog unit merges
+BEFORE the retirement unit, so the boring third-caster (D222) is
+exercising every retained third-caster seam before EK/AT coverage is
+removed.
+
+## D220 — OWNER: rename Elven Accuracy, generalize Elemental Adept (2026-08-07)
+
+The two non-SRD feat mechanics found in shipping
+src/ui/screens/planner/dice.ts are not deleted — they are de-branded and
+generalized. (1) "Elven Accuracy" becomes "Triple Advantage". (2)
+"Elemental Adept" becomes a generic die-upgrade mechanic parameterized by
+a list of low die outcomes promoted to a higher outcome — owner's
+examples: "1s and 2s become 3s on a weapon attack", "1s become 2s on a d8
+spell attack". The generalized form is a dice-planner capability, not a
+named feat, and must be strictly more expressive than the mechanic it
+replaces. Existing dice-planner assertions convert as strict supersets.
+
 ## D219 — OWNER: shipped-catalog prose revisions publish a successor with lineage (2026-08-06)
 
 Owner asked "Do we have the successor with lineage built? If not, don't
