@@ -4,10 +4,12 @@ import { DatabaseContext } from '../../../src/db/database';
 import { BuildReportBuilder } from '../../../src/reports/build-report-builder';
 import { applicationSeed } from '../../../src/db/bootstrap';
 import { BUNDLED_HOMEBREW_CATALOG } from '../../../src/authoring/bundled-homebrew-catalog';
+import { CatalogAuthoringService } from '../../../src/authoring/draft-service';
 import {
   commitBundledHomebrewInstall,
   planBundledHomebrewInstall,
 } from '../../../src/authoring/bundled-homebrew-installer';
+import { slotsForCasterLevel } from '../../../src/rules/spell-slots';
 import { openTestDatabase } from '../../helpers/open-db';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import {
@@ -18,6 +20,72 @@ import {
   persistedReportTableHashes,
   type BuildReportFixture,
 } from './build-report-fixture';
+
+function publishStoredSlotDiscriminator(db: DatabaseContext): number {
+  const entry = BUNDLED_HOMEBREW_CATALOG.find(
+    (candidate) => candidate.catalog_key === 'spell-student',
+  );
+  const source = entry?.revisions.at(-1);
+  if (source?.kind !== 'subclass' || source.progression.mode !== 'override') {
+    throw new Error('Spell Student override fixture is missing.');
+  }
+
+  // D223 constrains shipped content, not a user's valid authored schedule. Keep
+  // the table monotone while making levels 7-8 intentionally differ from the
+  // derived third-caster fallback: stored 4/2 versus derived 3/0 at level 7.
+  const document = {
+    ...source,
+    name: 'Persistent Arcanist',
+    reference_text:
+      'A homebrew fighter subclass with an intentionally authored slot table.',
+    progression: {
+      ...source.progression,
+      rows: source.progression.rows.map((row) => {
+        if (row.class_level < 7) return row;
+        const slotCounts = [...row.slot_counts];
+        slotCounts[0] = Math.max(slotCounts[0] ?? 0, 4);
+        slotCounts[1] = Math.max(slotCounts[1] ?? 0, 2);
+        return {
+          ...row,
+          maximum_spell_level: Math.max(row.maximum_spell_level ?? 0, 2),
+          slot_counts: slotCounts,
+        };
+      }),
+    },
+  } as const;
+
+  let uuidSequence = 0;
+  const authoring = new CatalogAuthoringService(db, {
+    randomUuid: () => `r40-persisted-slot-${String(++uuidSequence)}`,
+    now: () => '2042-08-07T12:00:00.000Z',
+  });
+  const created = authoring.createDraft({ content_kind: 'subclass' });
+  const saved = authoring.saveDraft({
+    draft_uuid: created.draft_uuid,
+    expected_revision: created.revision,
+    document,
+  });
+  const preview = authoring.previewPublish({
+    draft_uuid: saved.draft_uuid,
+    expected_revision: saved.revision,
+  });
+  const published = authoring.commitPublish({
+    token: preview.token,
+    decisions: [],
+  });
+  if (published.outcome !== 'created') {
+    throw new Error('Persisted-slot discriminator was not newly published.');
+  }
+
+  const subclassId = db.scalar<number>(
+    'SELECT id FROM subclass_definitions WHERE content_key = ?',
+    [published.content_key],
+  );
+  if (subclassId === null) {
+    throw new Error('Persisted-slot discriminator definition is missing.');
+  }
+  return subclassId;
+}
 
 describe('deterministic read-only build report', () => {
   let connection: Database;
@@ -414,6 +482,60 @@ describe('deterministic read-only build report', () => {
         [fighterId],
       ),
     );
+
+    const discriminatingSubclassId = publishStoredSlotDiscriminator(db);
+    const discriminatingId = createCharacter(db, 'Stored table third caster', {
+      intelligence: 16,
+    });
+    addClassLevel(
+      db,
+      discriminatingId,
+      'Fighter',
+      7,
+      discriminatingSubclassId,
+    );
+    const storedSlots = db.scalar<string>(
+      `SELECT slots FROM subclass_progressions
+       WHERE subclass_definition_id = ? AND class_level = 7`,
+      [discriminatingSubclassId],
+    );
+    expect(storedSlots === null ? null : JSON.parse(storedSlots)).toEqual({
+      1: 4,
+      2: 2,
+    });
+    expect(slotsForCasterLevel(2)).toEqual({ 1: 3 });
+    const discriminatingBefore = persistedReportTableHashes(
+      db,
+      discriminatingId,
+    );
+    const discriminating = builder.build(discriminatingId);
+    expect(discriminating.classes).toEqual([
+      {
+        name: 'Fighter',
+        subclass: 'Persistent Arcanist',
+        class_catalog_layer: 'bundled',
+        subclass_catalog_layer: 'external',
+        class_level: 7,
+        spellcasting_ability: 'intelligence',
+        progression_type: 'third_down',
+        prepared_count: 2,
+        max_preparable_level: 2,
+      },
+    ]);
+    expect(
+      discriminating.caster,
+      'negative control: removing the persisted-table branch must fall back to derived level-2 caster slots {1: 3} and fail this assertion',
+    ).toEqual({
+      caster_level: 2,
+      slots: [
+        { level: 1, count: 4 },
+        { level: 2, count: 2 },
+      ],
+      pact_magic: null,
+    });
+    expect(
+      persistedReportTableHashes(db, discriminatingId),
+    ).toEqual(discriminatingBefore);
 
     const singleId = createCharacter(db, 'Single third caster', {
       intelligence: 16,
