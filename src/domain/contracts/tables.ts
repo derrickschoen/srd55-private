@@ -82,7 +82,7 @@ export type TableRole =
   | 'character_owned'
   /** The spell catalog. */
   | 'catalog_spell'
-  /** Recipient-local catalog identity and match-review registry state. */
+  /** Recipient-local catalog identity, lifecycle, and review registry state. */
   | 'catalog_registry'
   /** Durable incomplete authoring state; retained only by whole-DB images. */
   | 'catalog_draft'
@@ -525,6 +525,16 @@ export const TABLE_SCOPES = {
   // table and is the only portable container allowed to retain these rows.
   catalog_content_drafts: {
     role: 'catalog_draft',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
+  // D214: the archive membership promise belongs only to a whole database
+  // image. It is neither character-owned state nor portable catalog content.
+  catalog_content_archive_members: {
+    role: 'catalog_registry',
     snapshot: false,
     backupDirect: false,
     backup: false,
@@ -1296,6 +1306,7 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'background_template_effects',
   'background_templates',
   'catalog_content_aliases',
+  'catalog_content_archive_members',
   'catalog_content_drafts',
   'catalog_content_fingerprints',
   'catalog_content_identities',

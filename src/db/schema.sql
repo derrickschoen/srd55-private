@@ -168,6 +168,21 @@ CREATE TABLE `catalog_content_aliases` (
 );
 
 CREATE INDEX `catalog_content_aliases_resolution_index` ON `catalog_content_aliases` (`content_kind`,`alias_key`);
+CREATE TABLE `catalog_content_archive_members` (
+	`content_kind` VARCHAR NOT NULL,
+	`content_key` VARCHAR NOT NULL,
+	`character_id` integer NOT NULL,
+	`character_revision` integer NOT NULL,
+	`character_name` VARCHAR NOT NULL,
+	`archived_at` DATETIME NOT NULL,
+	PRIMARY KEY(`content_kind`, `content_key`, `character_id`),
+	FOREIGN KEY (`content_kind`,`content_key`) REFERENCES `catalog_content_identities`(`content_kind`,`content_key`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "catalog_content_archive_members_kind_check" CHECK(`content_kind` IN ('species', 'subclass', 'background')),
+	CONSTRAINT "catalog_content_archive_members_character_id_check" CHECK(typeof("catalog_content_archive_members"."character_id") = 'integer' AND "catalog_content_archive_members"."character_id" >= 1),
+	CONSTRAINT "catalog_content_archive_members_character_revision_check" CHECK(typeof("catalog_content_archive_members"."character_revision") = 'integer' AND "catalog_content_archive_members"."character_revision" >= 0),
+	CONSTRAINT "catalog_content_archive_members_archived_at_check" CHECK(typeof("catalog_content_archive_members"."archived_at") = 'text')
+);
+
 CREATE TABLE `catalog_content_drafts` (
 	`draft_uuid` VARCHAR PRIMARY KEY NOT NULL,
 	`content_kind` VARCHAR NOT NULL,

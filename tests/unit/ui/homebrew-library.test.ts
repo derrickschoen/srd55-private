@@ -741,7 +741,14 @@ describe('HA-6 homebrew library routing and tabs', () => {
               replacements: [{
                 content_kind: 'species', character_id: 17 as never,
                 character_revision: 4 as never, old_content_key: oldKey,
-                new_content_key: newKey, notices: [],
+                new_content_key: newKey,
+                notices: [{
+                  kind: 'retargeted_selection_invalid',
+                  table: 'spell_selection_slots', source_path: [],
+                  rule_key: 'changed-spell-choice', ordinal: 1,
+                  selected_value: 42, reason: 'selection_ineligible',
+                  detail: 'Selected spell is outside the replacement slot range.',
+                }],
               }],
             };
           },
@@ -768,6 +775,11 @@ describe('HA-6 homebrew library routing and tabs', () => {
         replacements: [{ token: 'replacement-token', decisions: [], choices: [] }],
       }]);
       expect(elementText(root as unknown as Node)).toContain('Character fixes applied');
+      expect(elementText(root as unknown as Node)).toContain(hostileCharacter);
+      expect(elementText(root as unknown as Node)).toContain(
+        'Spell selection “42” for “changed-spell-choice” became invalid: ' +
+        'Selected spell is outside the replacement slot range.',
+      );
       cleanup();
     } finally {
       restoreDocument();
@@ -796,6 +808,7 @@ describe('HA-6 homebrew library routing and tabs', () => {
           previewArchiveSet: async () => ({
             token: 'archive-token' as never, operation: 'archive', content_key: contentKey,
             content_kind: 'species', content_name: hostileCreation,
+            content_catalog_layer: 'external',
             rules_edition: 'expanded', archived_at: null, characters,
           }),
           commitArchiveSet: async (params) => {
@@ -810,6 +823,9 @@ describe('HA-6 homebrew library routing and tabs', () => {
       const deleteRoot = interactiveElement(deleteContext.root);
       expect(elementText(deleteRoot as unknown as Node)).toContain(hostileCreation);
       expect(elementText(deleteRoot as unknown as Node)).toContain(hostileCharacter);
+      expect(elementText(deleteRoot as unknown as Node)).toContain(
+        'Homebrew · external layer',
+      );
       expect(deleteRoot.querySelector('[data-ha11-creation]')).toBeNull();
       expect(deleteRoot.querySelector('[data-ha11-archive-character]')).toBeNull();
       expect(deleteRoot.querySelectorAll('button').map((button) => button.textContent))
@@ -831,7 +847,8 @@ describe('HA-6 homebrew library routing and tabs', () => {
         client: authoringClient({
           listArchivedSets: async () => [{
             content_key: contentKey, content_kind: 'species',
-            content_name: hostileCreation, rules_edition: 'expanded',
+            content_name: hostileCreation, content_catalog_layer: 'external',
+            rules_edition: 'expanded',
             archived_at: '2042-08-11T12:13:14.000Z', characters,
           }],
           previewRestoreSet: async (params) => {
@@ -839,6 +856,7 @@ describe('HA-6 homebrew library routing and tabs', () => {
             return {
               token: 'restore-token' as never, operation: 'restore', content_key: contentKey,
               content_kind: 'species', content_name: hostileCreation,
+              content_catalog_layer: 'external',
               rules_edition: 'expanded', archived_at: '2042-08-11T12:13:14.000Z',
               characters,
             };
@@ -853,6 +871,9 @@ describe('HA-6 homebrew library routing and tabs', () => {
         }),
       });
       const archiveRoot = interactiveElement(archiveContext.root);
+      expect(elementText(archiveRoot as unknown as Node)).toContain(
+        'Homebrew · external layer',
+      );
       const labels = archiveRoot.querySelectorAll('button').map((button) => button.textContent);
       expect(labels).toContain('Restore creation and all listed characters');
       expect(labels.some((label) => label?.includes('Restore character'))).toBe(false);

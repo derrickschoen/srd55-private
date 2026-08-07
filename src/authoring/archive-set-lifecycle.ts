@@ -2,11 +2,16 @@ import { canonicalJson } from '../commands/canonical-json';
 import { sha256 } from '../crypto/sha256';
 import {
   sqlInteger,
+  sqlNullableInteger,
   sqlNullableString,
   sqlString,
   type SqlRow,
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
+import {
+  catalogLayerDisclosure,
+  type CatalogLayerDisclosure,
+} from '../catalog/catalog-disclosure';
 import { isEnumValue, rulesEditions, type RulesEdition } from '../domain/enums';
 import type { CharacterId, CharacterRevision, ContentKey } from '../domain/ids';
 import type {
@@ -35,12 +40,22 @@ interface ContentLifecycleRow {
   readonly kind: AuthoredContentKind;
   readonly name: string;
   readonly edition: RulesEdition;
-  readonly layer: string;
+  readonly layer: CatalogLayerDisclosure;
   readonly archivedAt: string | null;
 }
 
 interface CharacterLifecycleRow extends ArchiveSetCharacter {
   readonly archived_at: string | null;
+}
+
+interface ArchiveManifestMemberRow {
+  readonly character_id: CharacterId;
+  readonly archived_character_revision: CharacterRevision;
+  readonly character_name: string;
+  readonly archived_at: string;
+  readonly current_character_revision: CharacterRevision | null;
+  readonly current_archived_at: string | null;
+  readonly character_exists: boolean;
 }
 
 interface ArchiveSetTokenFacts {
@@ -75,8 +90,26 @@ function contentRow(row: SqlRow): ContentLifecycleRow {
     kind: authoredKind(sqlString(row, 'content_kind')),
     name: sqlString(row, 'name'),
     edition: rulesEdition(sqlString(row, 'rules_edition')),
-    layer: sqlString(row, 'catalog_layer'),
+    layer: catalogLayerDisclosure(sqlString(row, 'catalog_layer')),
     archivedAt: sqlNullableString(row, 'archived_at'),
+  });
+}
+
+function archiveManifestMemberRow(row: SqlRow): ArchiveManifestMemberRow {
+  return Object.freeze({
+    character_id: sqlInteger(row, 'character_id') as CharacterId,
+    archived_character_revision: sqlInteger(
+      row,
+      'archived_character_revision',
+    ) as CharacterRevision,
+    character_name: sqlString(row, 'character_name'),
+    archived_at: sqlString(row, 'archived_at'),
+    current_character_revision: sqlNullableInteger(
+      row,
+      'current_character_revision',
+    ) as CharacterRevision | null,
+    current_archived_at: sqlNullableString(row, 'current_archived_at'),
+    character_exists: sqlInteger(row, 'character_exists') === 1,
   });
 }
 
@@ -192,16 +225,50 @@ export class HomebrewArchiveSetService {
     ));
   }
 
+  #archiveMembers(
+    content: ContentLifecycleRow,
+  ): readonly ArchiveManifestMemberRow[] {
+    return Object.freeze(this.db.all(
+      `SELECT member.character_id,
+              member.character_revision AS archived_character_revision,
+              member.character_name,
+              member.archived_at,
+              character.revision AS current_character_revision,
+              character.archived_at AS current_archived_at,
+              CASE WHEN character.id IS NULL THEN 0 ELSE 1 END AS character_exists
+       FROM catalog_content_archive_members AS member
+       LEFT JOIN characters AS character ON character.id = member.character_id
+       WHERE member.content_kind = ? AND member.content_key = ?
+       ORDER BY member.character_id`,
+      [content.kind, content.contentKey],
+      archiveManifestMemberRow,
+    ));
+  }
+
+  #publicArchiveMember(member: ArchiveManifestMemberRow): ArchiveSetCharacter {
+    return Object.freeze({
+      character_id: member.character_id,
+      character_revision: member.current_character_revision ??
+        member.archived_character_revision,
+      character_name: member.character_name,
+    });
+  }
+
   #plan(operation: 'archive' | 'restore', contentKey: ContentKey): ArchiveSetPlan {
     const content = this.#content(contentKey);
-    const characters = this.#characters(content);
+    const liveCharacters = operation === 'archive'
+      ? this.#characters(content)
+      : Object.freeze([]);
+    const archivedMembers = operation === 'restore'
+      ? this.#archiveMembers(content)
+      : Object.freeze([]);
     if (operation === 'archive') {
       if (content.archivedAt !== null) {
         throw new ArchiveSetLifecycleError('The creation is already archived.', {
           reason: 'invalid_reference',
         });
       }
-      if (characters.some((character) => character.archived_at !== null)) {
+      if (liveCharacters.some((character) => character.archived_at !== null)) {
         throw new ArchiveSetLifecycleError(
           'A listed character already belongs to another archived set.',
           { reason: 'archive_set_refused', refusal: 'already_archived_character' },
@@ -213,13 +280,35 @@ export class HomebrewArchiveSetService {
           reason: 'invalid_reference',
         });
       }
-      if (characters.some((character) => character.archived_at !== content.archivedAt)) {
+      const missing = archivedMembers.filter((member) => !member.character_exists);
+      if (missing.length > 0) {
+        const named = missing.map((member) =>
+          `"${member.character_name}" (character ${String(member.character_id)})`
+        ).join(', ');
+        throw new ArchiveSetLifecycleError(
+          `The archived set cannot be restored because ${named} no longer exists.`,
+          { reason: 'archive_set_refused', refusal: 'incomplete_archive_set' },
+        );
+      }
+      if (archivedMembers.some((member) =>
+        member.archived_at !== content.archivedAt ||
+        member.current_archived_at !== content.archivedAt
+      )) {
         throw new ArchiveSetLifecycleError(
           'The archived set is incomplete and cannot be partially restored.',
           { reason: 'archive_set_refused', refusal: 'incomplete_archive_set' },
         );
       }
     }
+    const characters: readonly CharacterLifecycleRow[] = operation === 'archive'
+      ? liveCharacters
+      : archivedMembers.map((member) => Object.freeze({
+          character_id: member.character_id,
+          character_revision: member.current_character_revision ??
+            member.archived_character_revision,
+          character_name: member.character_name,
+          archived_at: member.current_archived_at,
+        }));
     const facts: ArchiveSetTokenFacts = Object.freeze({
       operation,
       content_key: content.contentKey,
@@ -237,6 +326,7 @@ export class HomebrewArchiveSetService {
       content_key: content.contentKey,
       content_kind: content.kind,
       content_name: content.name,
+      content_catalog_layer: content.layer,
       rules_edition: content.edition,
       archived_at: content.archivedAt,
       characters: Object.freeze(characters.map(publicCharacter)),
@@ -265,9 +355,14 @@ export class HomebrewArchiveSetService {
         content_key: content.contentKey,
         content_kind: content.kind,
         content_name: content.name,
+        content_catalog_layer: content.layer,
         rules_edition: content.edition,
         archived_at: content.archivedAt,
-        characters: Object.freeze(this.#characters(content).map(publicCharacter)),
+        characters: Object.freeze(
+          this.#archiveMembers(content).map((member) =>
+            this.#publicArchiveMember(member)
+          ),
+        ),
       });
     }));
   }
@@ -286,12 +381,32 @@ export class HomebrewArchiveSetService {
         );
         if (identity.changes !== 1) throw new Error('Creation archive state changed.');
         for (const character of facts.characters) {
+          const plannedCharacter = preview.characters.find((entry) =>
+            entry.character_id === character.character_id
+          );
+          if (plannedCharacter === undefined) {
+            throw new Error('Character archive membership changed.');
+          }
           const updated = this.db.exec(
             `UPDATE characters SET archived_at = ?, updated_at = CURRENT_TIMESTAMP
              WHERE id = ? AND revision = ? AND archived_at IS NULL`,
             [archivedAt, character.character_id, character.character_revision],
           );
           if (updated.changes !== 1) throw new Error('Character archive state changed.');
+          this.db.exec(
+            `INSERT INTO catalog_content_archive_members (
+               content_kind, content_key, character_id, character_revision,
+               character_name, archived_at
+             ) VALUES (?, ?, ?, ?, ?, ?)`,
+            [
+              facts.content_kind,
+              facts.content_key,
+              character.character_id,
+              character.character_revision,
+              plannedCharacter.character_name,
+              archivedAt,
+            ],
+          );
         }
         return Object.freeze({
           content_key: facts.content_key,
@@ -326,6 +441,14 @@ export class HomebrewArchiveSetService {
             [character.character_id, character.character_revision, facts.archived_at],
           );
           if (updated.changes !== 1) throw new Error('Character archive state changed.');
+        }
+        const removedMembers = this.db.exec(
+          `DELETE FROM catalog_content_archive_members
+           WHERE content_kind = ? AND content_key = ? AND archived_at = ?`,
+          [facts.content_kind, facts.content_key, facts.archived_at],
+        );
+        if (removedMembers.changes !== facts.characters.length) {
+          throw new Error('Archive membership changed.');
         }
         return Object.freeze({
           content_key: facts.content_key,

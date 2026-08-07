@@ -8,8 +8,10 @@ import type {
   AuthoringLibrary,
   HomebrewDraftSummary,
   PublishedHomebrewSummary,
+  ReplacementNotice,
   StoredHomebrewDraft,
 } from '../../../authoring/contracts';
+import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
 import type { HomebrewDraftUuid } from '../../../authoring/ids';
 import type { GuidedClassOption } from '../../../builder/contracts';
 import { createQueriesClient } from '../../../queries/client';
@@ -90,6 +92,34 @@ function badge(text: string, tone: 'draft' | 'homebrew' | 'neutral'): HTMLElemen
     className: `homebrew-badge homebrew-badge-${tone}`,
     text,
   });
+}
+
+function replacementNoticeText(notice: ReplacementNotice): string {
+  switch (notice.kind) {
+    case 'retargeted_selection_invalid': {
+      const selection = (() => {
+        switch (notice.table) {
+          case 'spell_selection_slots': return 'Spell selection';
+          case 'wizard_spellbook_entries': return 'Spellbook selection';
+          case 'character_skill_grants': return 'Skill selection';
+          case 'character_skill_expertise_grants': return 'Expertise selection';
+        }
+      })();
+      const detail = notice.detail ?? (() => {
+        switch (notice.reason) {
+          case 'target_source_missing': return 'The replacement has no matching source.';
+          case 'target_rule_missing': return 'The replacement has no matching choice rule.';
+          case 'target_rule_changed': return 'The replacement changed the choice rule.';
+          case 'selection_ineligible': return 'The selected value is no longer eligible.';
+        }
+      })();
+      return `${selection} “${String(notice.selected_value)}” for “${notice.rule_key}” ` +
+        `became invalid: ${detail}`;
+    }
+    case 'retargeted_level_feat_invalid':
+      return `Feat selection ${String(notice.character_level_feat_choice_id)} became invalid ` +
+        'because the replacement has no matching source.';
+  }
 }
 
 function routedLink(
@@ -318,6 +348,25 @@ async function renderReplacementRoute(
             text: `${String(result.replacements.length)} character(s) now use the new version.`,
           }),
         );
+        for (const replacement of result.replacements) {
+          if (replacement.notices.length === 0) continue;
+          const planned = plan.replacements.find((entry) =>
+            entry.facts.character_id === replacement.character_id
+          );
+          const heading = element('h3');
+          heading.append(freeTextSpan(
+            planned?.character_name ?? `Character ${String(replacement.character_id)}`,
+          ));
+          review.append(element('article', {
+            className: 'homebrew-card homebrew-replacement-notices',
+          }, [
+            heading,
+            element('p', { text: 'Needs review after replacement:' }),
+            element('ul', {}, replacement.notices.map((notice) =>
+              element('li', { text: replacementNoticeText(notice) })
+            )),
+          ]));
+        }
         status.textContent = 'All listed characters were updated.';
       }).catch((error: unknown) => {
         apply.disabled = false;
@@ -367,7 +416,7 @@ async function renderDeleteRoute(
   }));
   view.main.append(element('section', { className: 'panel' }, [
     name,
-    badge('Homebrew', 'homebrew'),
+    badge(catalogLayerLabel(plan.content_catalog_layer), 'homebrew'),
     element('p', {
       text: 'Nothing is removed silently. This entire set moves to the restorable archive:',
     }),
@@ -418,7 +467,7 @@ async function renderArchiveRoute(
       }));
       list.append(element('article', { className: 'homebrew-card panel' }, [
         heading,
-        badge('Homebrew', 'homebrew'),
+        badge(catalogLayerLabel(set.content_catalog_layer), 'homebrew'),
         element('p', { text: `Archived ${set.archived_at}` }),
         element('h4', { text: 'Characters in this set' }),
         characterList(set.characters),

@@ -34,6 +34,7 @@ import { RpcClient, type RpcTransport } from '../../../src/rpc/client';
 import type { RpcRequest, RpcResponse } from '../../../src/rpc/protocol';
 import type { HandlerContext, RpcHandler } from '../../../src/worker/handler';
 import { handlers } from '../../../src/worker/handlers/authoring';
+import { handlers as queryHandlers } from '../../../src/worker/handlers/queries';
 import { createRpcRegistry, type RpcRegistry } from '../../../src/worker/registry';
 import { createRpcHarness, type RpcHarness } from '../../helpers/rpc-harness';
 import { createImportBackupControls } from '../../../src/ui/screens/character-list/import-backup-controls';
@@ -44,10 +45,20 @@ import {
 } from '../../fixtures/interactive-dom';
 import type { SubclassAuthoringDraft } from '../../../src/authoring/contracts';
 import { CharacterListBuilder } from '../../../src/queries/character-list-builder';
+import { createQueriesClient } from '../../../src/queries/client';
+import { parseRoute } from '../../../src/ui/router';
+import type { ScreenContext } from '../../../src/ui/screen';
+import {
+  homebrewReplacementPath,
+  renderHomebrewLibrary,
+} from '../../../src/ui/screens/homebrew/homebrew-library';
 
 let harness: RpcHarness | undefined;
 let client: RpcClient | undefined;
-const registry = createRpcRegistry({ authoring: { handlers } });
+const registry = createRpcRegistry({
+  authoring: { handlers },
+  queries: { handlers: queryHandlers },
+});
 
 afterEach(() => {
   harness?.close();
@@ -647,10 +658,7 @@ describe('catalog authoring RPC handlers', () => {
     );
     if (spellVersionId === null) throw new Error('Seeded Wizard spell missing.');
 
-    const retarget = async (
-      name: string,
-      targetContentKey: ContentKey,
-    ) => {
+    const selectedCharacter = (name: string) => {
       const character = createGuidedCharacter(
         rpc.context.db,
         { name, class_content_key: classOption.content_key },
@@ -673,6 +681,14 @@ describe('catalog authoring RPC handlers', () => {
         character_id: character.id,
         spell_version_id: spellVersionId,
       });
+      return character;
+    };
+
+    const retarget = async (
+      name: string,
+      targetContentKey: ContentKey,
+    ) => {
+      const character = selectedCharacter(name);
       const preview = await authoringClient.previewReplacement({
         old_content_key: old.content_key,
         new_content_key: targetContentKey,
@@ -748,6 +764,54 @@ describe('catalog authoring RPC handlers', () => {
       state: 'orphaned',
       source_state: 'tombstoned',
     });
+
+    const uiCharacter = selectedCharacter('Apply All Notice Hero');
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const root = document.createElement('div');
+      document.body.append(root);
+      const replacementPath = homebrewReplacementPath(
+        old.content_key,
+        incompatible.content_key,
+      );
+      const screenContext: ScreenContext = {
+        root,
+        route: parseRoute(new URL(`https://example.test${replacementPath}`)),
+        router: { navigate: () => undefined } as never,
+        rpc: client,
+        registerNavigationGuard: () => () => undefined,
+      };
+      const cleanup = await renderHomebrewLibrary(screenContext, {
+        client: authoringClient,
+      });
+      const interactiveRoot = interactiveElement(root);
+      interactiveRoot.querySelectorAll('button').find(
+        (button) => button.textContent === 'Apply to all listed characters',
+      )?.click();
+      for (let turn = 0; turn < 8; turn += 1) await Promise.resolve();
+
+      const rendered = elementText(root as unknown as Node);
+      expect(rendered).toContain('Character fixes applied');
+      expect(rendered).toContain('Apply All Notice Hero');
+      expect(rendered).toContain(
+        `Spell selection “${String(spellVersionId)}” for “retarget-spell-choice” ` +
+        'became invalid: ' +
+        'Selected spell is outside the slot level range.',
+      );
+      expect(rpc.context.db.oneRaw(
+        `SELECT selection_eligibility, selection_invalid_reason
+         FROM spell_selection_slots
+         WHERE character_id = ? AND rule_key = 'retarget-spell-choice'
+           AND state = 'active'`,
+        [uiCharacter.id],
+      )).toEqual({
+        selection_eligibility: 'invalid',
+        selection_invalid_reason: 'Selected spell is outside the slot level range.',
+      });
+      cleanup();
+    } finally {
+      restoreDocument();
+    }
   }, 20_000);
 
   it('HA11-ROUTE-SET composes CI-7 apply-to-all atomically through the public worker route', async () => {
@@ -1038,6 +1102,85 @@ describe('catalog authoring RPC handlers', () => {
       { id: second.id, archived_at: null },
       { id: unrelated.id, archived_at: null },
     ]);
+  }, 20_000);
+
+  it('HA11-ARCHIVE-MISSING-MEMBER refuses restore after public RPC deletion names the promised member', async () => {
+    const rpc = await open();
+    client = new RpcClient(new WorkerTransport(rpc.context));
+    const authoring = createAuthoringClient(client);
+    const queries = createQueriesClient(client);
+    const service = new CatalogAuthoringService(rpc.context.db, {
+      randomUuid: (() => {
+        let sequence = 0;
+        return () => `ha11-missing-member-${String(++sequence)}`;
+      })(),
+      now: () => '2042-08-12T13:14:15.000Z',
+    });
+    const target = publishSpecies(service, 'Manifest Species', 30);
+    const classOption = listGuidedClassOptions(rpc.context.db)[0];
+    if (classOption === undefined) throw new Error('Seeded class option missing.');
+    const first = createGuidedCharacter(
+      rpc.context.db,
+      { name: 'Manifest First', class_content_key: classOption.content_key },
+      new CharacterCommandIntegrity('ha11-manifest-first'),
+    );
+    const missing = createGuidedCharacter(
+      rpc.context.db,
+      { name: 'Manifest Missing', class_content_key: classOption.content_key },
+      new CharacterCommandIntegrity('ha11-manifest-missing'),
+    );
+    for (const character of [first, missing]) {
+      applyGuidedOrigin(rpc.context.db, {
+        character_id: character.id,
+        kind: 'species',
+        content_key: target.content_key,
+      });
+    }
+
+    const archive = await authoring.previewArchiveSet({
+      content_key: target.content_key,
+    });
+    const archived = await authoring.commitArchiveSet({ token: archive.token });
+    if (archived.archived_at === null) throw new Error('Archive timestamp missing.');
+    await expect(queries.deleteCharacter(missing.id)).resolves.toEqual({
+      id: missing.id,
+      deleted: true,
+    });
+
+    expect(await authoring.listArchivedSets()).toEqual([
+      expect.objectContaining({
+        content_key: target.content_key,
+        characters: [
+          expect.objectContaining({
+            character_id: first.id,
+            character_name: 'Manifest First',
+          }),
+          expect.objectContaining({
+            character_id: missing.id,
+            character_name: 'Manifest Missing',
+          }),
+        ],
+      }),
+    ]);
+    await expect(authoring.previewRestoreSet({
+      content_key: target.content_key,
+    })).rejects.toMatchObject({
+      message: expect.stringContaining(
+        `"Manifest Missing" (character ${String(missing.id)}) no longer exists`,
+      ),
+      data: {
+        reason: 'archive_set_refused',
+        refusal: 'incomplete_archive_set',
+      },
+    });
+    expect(rpc.context.db.oneRaw(
+      'SELECT id, archived_at FROM characters WHERE id = ?',
+      [first.id],
+    )).toEqual({ id: first.id, archived_at: archived.archived_at });
+    expect(rpc.context.db.scalar<string>(
+      'SELECT archived_at FROM catalog_content_identities WHERE content_key = ?',
+      [target.content_key],
+    )).toBe(archived.archived_at);
   }, 20_000);
 
   it('HA11-UNREFERENCED-DELETE archives an unreferenced published creation and no neighbour', async () => {

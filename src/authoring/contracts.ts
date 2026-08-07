@@ -433,6 +433,7 @@ export interface ArchiveSetPlan {
   readonly content_key: ContentKey;
   readonly content_kind: AuthoredContentKind;
   readonly content_name: string;
+  readonly content_catalog_layer: CatalogLayerDisclosure;
   readonly rules_edition: RulesEdition;
   readonly archived_at: string | null;
   readonly characters: readonly ArchiveSetCharacter[];
@@ -442,6 +443,7 @@ export interface ArchivedHomebrewSet {
   readonly content_key: ContentKey;
   readonly content_kind: AuthoredContentKind;
   readonly content_name: string;
+  readonly content_catalog_layer: CatalogLayerDisclosure;
   readonly rules_edition: RulesEdition;
   readonly archived_at: string;
   readonly characters: readonly ArchiveSetCharacter[];

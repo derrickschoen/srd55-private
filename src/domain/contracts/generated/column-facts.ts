@@ -102,6 +102,14 @@ export const COLUMN_FACTS = {
     content_key: { base: 'degraded', notNull: true },
     alias_kind: { base: 'degraded', notNull: true },
   },
+  catalog_content_archive_members: {
+    content_kind: { base: 'degraded', notNull: true },
+    content_key: { base: 'degraded', notNull: true },
+    character_id: { base: 'integer', notNull: true },
+    character_revision: { base: 'integer', notNull: true },
+    character_name: { base: 'degraded', notNull: true },
+    archived_at: { base: 'degraded', notNull: true },
+  },
   catalog_content_drafts: {
     draft_uuid: { base: 'degraded', notNull: true },
     content_kind: { base: 'degraded', notNull: true },

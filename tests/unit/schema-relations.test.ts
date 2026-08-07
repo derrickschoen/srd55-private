@@ -240,10 +240,10 @@ describe('declared relations match the foreign keys', () => {
     // `background_templates.default_origin_feat_content_key` edge into
     // `feat_definitions`. It is one single-column constraint, so it adds
     // exactly one constraint and one PRAGMA row.
-    // CI-7 adds two composite lineage edges from the superseded and successor
-    // keys to the same-kind identity: two constraints across four PRAGMA rows.
-    expect(constraintEdges(db)).toHaveLength(106);
-    expect(rowCount).toBe(126);
+    // CI-7 adds two composite lineage edges; D214 adds the archive manifest's
+    // composite owner edge. Those three constraints occupy six PRAGMA rows.
+    expect(constraintEdges(db)).toHaveLength(107);
+    expect(rowCount).toBe(128);
   });
 
   it('declares a relation for every foreign key, and a foreign key for every relation', () => {
