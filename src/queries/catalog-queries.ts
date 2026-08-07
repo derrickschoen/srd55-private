@@ -16,9 +16,13 @@ import type {
   SubclassDefinitionRow,
 } from '../domain/models';
 import {
-  isBundledSourceContentKey,
+  bundledSourceContentKeys,
   type BundledSourceKind,
 } from '../catalog/bundled-source-membership';
+import {
+  catalogLayerDisclosure,
+  type CatalogLayerDisclosure,
+} from '../catalog/catalog-disclosure';
 import {
   isEnumValue,
   materialCostKinds,
@@ -56,6 +60,7 @@ import {
  * discriminant used to.
  */
 export interface CatalogSpell extends SpellVersionRow {
+  readonly catalog_layer: CatalogLayerDisclosure;
   readonly lists: string[];
   readonly tags: string[];
   readonly upcastLevels: number[];
@@ -63,10 +68,17 @@ export interface CatalogSpell extends SpellVersionRow {
 }
 
 export interface CatalogSnapshot {
-  readonly classes: ClassDefinitionRow[];
-  readonly subclasses: SubclassDefinitionRow[];
+  readonly classes: Array<
+    ClassDefinitionRow & { readonly catalog_layer: CatalogLayerDisclosure }
+  >;
+  readonly subclasses: Array<
+    SubclassDefinitionRow & { readonly catalog_layer: CatalogLayerDisclosure }
+  >;
   readonly sources: Readonly<
-    Record<StandaloneSourceType, DefinitionRow[]>
+    Record<
+      StandaloneSourceType,
+      Array<DefinitionRow & { readonly catalog_layer: CatalogLayerDisclosure }>
+    >
   >;
   readonly spells: CatalogSpell[];
 }
@@ -187,7 +199,7 @@ function enumMember<T extends string>(
   return stored !== null && isEnumValue(vocabulary, stored) ? stored : null;
 }
 
-function decodeSpell(row: SqlRow): CatalogSpell {
+function decodeSpell(row: SqlRow): Omit<CatalogSpell, 'catalog_layer'> {
   return {
     id: sqlInteger(row, 'id'),
     content_key: sqlString(row, 'content_key'),
@@ -241,22 +253,38 @@ export class CatalogQueries {
   read(): CatalogSnapshot {
     return {
       classes: this.db.all(
-        `SELECT definition.*
+        `SELECT definition.*, identity.catalog_layer
          FROM class_definitions AS definition
-         -- CI-4a/HA-10 removes this temporary consumer boundary once class
-         -- aggregates can be applied completely rather than partially.
+         LEFT JOIN catalog_content_identities AS identity
+           ON identity.content_kind = 'class'
+          AND identity.content_key = definition.content_key
+         -- D133: class consumers remain bundled-only in v1.
          ORDER BY definition.name, definition.rules_edition, definition.id`,
         undefined,
-        decodeClass,
+        (row) => ({
+          ...decodeClass(row),
+          catalog_layer: catalogLayerDisclosure(
+            sqlNullableString(row, 'catalog_layer'),
+          ),
+        }),
       ).filter((definition) =>
-        isBundledSourceContentKey('class', definition.content_key, this.db)
+        bundledSourceContentKeys('class').includes(definition.content_key)
       ),
       subclasses: this.db.all(
-        `SELECT *
-         FROM subclass_definitions
-         ORDER BY class_definition_id, name, rules_edition, id`,
+        `SELECT definition.*, identity.catalog_layer
+         FROM subclass_definitions AS definition
+         LEFT JOIN catalog_content_identities AS identity
+           ON identity.content_kind = 'subclass'
+          AND identity.content_key = definition.content_key
+         ORDER BY definition.class_definition_id, definition.name,
+                  definition.rules_edition, definition.id`,
         undefined,
-        decodeSubclass,
+        (row) => ({
+          ...decodeSubclass(row),
+          catalog_layer: catalogLayerDisclosure(
+            sqlNullableString(row, 'catalog_layer'),
+          ),
+        }),
       ),
       sources: {
         feat: this.definitions('feat_definitions'),
@@ -264,7 +292,7 @@ export class CatalogQueries {
         background: this.definitions('background_definitions'),
       },
       spells: this.db.all(
-        `SELECT version.*,
+        `SELECT version.*, identity.catalog_layer,
                 (
                   SELECT group_concat(value, char(31))
                   FROM (
@@ -302,10 +330,18 @@ export class CatalogQueries {
                   )
                 ) AS cantrip_upgrade_levels
          FROM spell_versions AS version
+         LEFT JOIN catalog_content_identities AS identity
+           ON identity.content_kind = 'spell'
+          AND identity.content_key = version.content_key
          ORDER BY version.level, version.display_name,
                   version.rules_edition, version.id`,
         undefined,
-        decodeSpell,
+        (row) => ({
+          ...decodeSpell(row),
+          catalog_layer: catalogLayerDisclosure(
+            sqlNullableString(row, 'catalog_layer'),
+          ),
+        }),
       ),
     };
   }
@@ -315,21 +351,26 @@ export class CatalogQueries {
       | 'feat_definitions'
       | 'species_definitions'
       | 'background_definitions',
-  ): DefinitionRow[] {
+  ): Array<DefinitionRow & { readonly catalog_layer: CatalogLayerDisclosure }> {
     const kind: BundledSourceKind = table === 'feat_definitions'
       ? 'feat'
       : table === 'species_definitions'
         ? 'species'
         : 'background';
     return this.db.all(
-      `SELECT definition.*
+      `SELECT definition.*, identity.catalog_layer
        FROM ${table} AS definition
-       -- CI-4a/HA-10 removes this filter when aggregate consumers are cut over.
+       LEFT JOIN catalog_content_identities AS identity
+         ON identity.content_kind = '${kind}'
+        AND identity.content_key = definition.content_key
        ORDER BY definition.name, definition.rules_edition, definition.id`,
       undefined,
-      decodeDefinition,
-    ).filter((definition) =>
-      isBundledSourceContentKey(kind, definition.content_key, this.db)
+      (row) => ({
+        ...decodeDefinition(row),
+        catalog_layer: catalogLayerDisclosure(
+          sqlNullableString(row, 'catalog_layer'),
+        ),
+      }),
     );
   }
 }

@@ -411,6 +411,7 @@ describe('HA-7 species authoring form', () => {
         previewPublish: () => Promise.resolve(preview([{
           candidate_content_key: '2024:species:human' as ContentKey,
           candidate_name: 'Human',
+          candidate_catalog_layer: 'bundled',
           reason: 'srd-fallback',
           default_decision: 'match',
         }])),

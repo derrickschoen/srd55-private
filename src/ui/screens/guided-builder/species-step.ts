@@ -52,6 +52,7 @@ import {
 import { BUNDLED_ORIGIN_RULES_EDITION } from '../../../rules/origins-srd';
 import { RpcError } from '../../../rpc/protocol';
 import { clear, element, listen, type Cleanup } from '../../dom';
+import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
 import { characterListLink, guidedShell } from './guided-builder';
 
 /**
@@ -300,18 +301,20 @@ export function createSpeciesStep(deps: SpeciesStepDeps): SpeciesStep {
     'ul',
     {
       className: 'guided-species-options',
-      attributes: { 'aria-label': 'Bundled species' },
+      attributes: { 'aria-label': 'Catalog species' },
     },
     deps.options.map((option) => {
       // A container with an explicit apply button, NOT one giant clickable
       // card: the disclosures are flow content a `button` may not contain,
       // and applying is consequential enough to deserve a labelled control.
+      const disclosureId = `guided-species-${option.content_key.replace(/[^a-z0-9]+/giu, '-')}-catalog-layer`;
       const apply = element('button', {
         className: 'guided-species-apply',
         text: `Choose ${option.name}`,
         attributes: {
           type: 'button',
           'data-species-option': option.content_key,
+          'aria-describedby': disclosureId,
         },
       });
       cards.push(apply);
@@ -323,6 +326,11 @@ export function createSpeciesStep(deps: SpeciesStepDeps): SpeciesStep {
           element('h3', {
             className: 'guided-species-name',
             text: option.name,
+          }),
+          element('p', {
+            className: 'catalog-layer-disclosure',
+            text: catalogLayerLabel(option.catalog_layer),
+            attributes: { id: disclosureId },
           }),
           unmadeChoicesBlock(option),
           ...(LINEAGE_GATED_SPECIES_CONTENT_KEYS.has(option.content_key)
@@ -358,7 +366,7 @@ export function createSpeciesStep(deps: SpeciesStepDeps): SpeciesStep {
             element('p', {
               className: 'guided-empty-catalog',
               text:
-                'No bundled species are available in this database, so ' +
+                'No catalog species are available in this database, so ' +
                 'this step cannot offer one.',
             }),
           ]

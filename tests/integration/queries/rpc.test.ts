@@ -211,7 +211,12 @@ describe('typed query RPC integration', () => {
         id: fixture.characterId,
         name: 'R40 Golden',
         level: 8,
-        classes: ['Paladin 1', 'Ranger 1', 'Warlock 5', 'Wizard 1'],
+        classes: [
+          { name: 'Paladin', level: 1, catalog_layer: 'bundled' },
+          { name: 'Ranger', level: 1, catalog_layer: 'bundled' },
+          { name: 'Warlock', level: 5, catalog_layer: 'bundled' },
+          { name: 'Wizard', level: 1, catalog_layer: 'bundled' },
+        ],
         warning_count: 5,
       }],
     });
@@ -269,6 +274,7 @@ describe('typed query RPC integration', () => {
           ritual: false,
           concentration: false,
           edition: '2024',
+          catalog_layer: 'bundled',
         },
         {
           id: fixture.spellIds.mageHand,
@@ -278,6 +284,7 @@ describe('typed query RPC integration', () => {
           ritual: false,
           concentration: false,
           edition: '2024',
+          catalog_layer: 'external',
         },
       ],
     });

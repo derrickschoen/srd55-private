@@ -294,13 +294,17 @@ describe('character CRUD, catalog, save points, and operation history', () => {
     expect(catalog.classes.map((entry) => entry.name)).not.toContain('External Class');
     expect(catalog.sources.feat).toEqual([
       expect.objectContaining({
+        name: 'External Feat',
+        catalog_layer: 'external',
+      }),
+      expect.objectContaining({
         name: 'Query Feat',
+        catalog_layer: 'bundled',
         repeatable: true,
         prerequisites: { level: 4 },
         grant_rules: [],
       }),
     ]);
-    expect(catalog.sources.feat.map((entry) => entry.name)).not.toContain('External Feat');
     expect(catalog.spells).toEqual([
       expect.objectContaining({
         id: spellId,

@@ -67,6 +67,7 @@ function acolyteFighterState(): GuidedSkillsStepState {
         skill: 'insight',
         grant_key: 'background_skill',
         source_name: 'Acolyte',
+        source_catalog_layer: 'bundled',
         clearable: false,
       },
       {
@@ -74,6 +75,7 @@ function acolyteFighterState(): GuidedSkillsStepState {
         skill: 'religion',
         grant_key: 'background_skill',
         source_name: 'Acolyte',
+        source_catalog_layer: 'bundled',
         clearable: false,
       },
     ],
@@ -85,6 +87,7 @@ function acolyteFighterState(): GuidedSkillsStepState {
         ordinal: 1,
         class_definition_id: 5,
         class_name: 'Fighter',
+        class_catalog_layer: 'bundled',
         available: fighterPoolMinusHeld,
       },
       {
@@ -94,6 +97,7 @@ function acolyteFighterState(): GuidedSkillsStepState {
         ordinal: 2,
         class_definition_id: 5,
         class_name: 'Fighter',
+        class_catalog_layer: 'bundled',
         available: fighterPoolMinusHeld,
       },
     ],
@@ -102,6 +106,7 @@ function acolyteFighterState(): GuidedSkillsStepState {
         grant_id: 31,
         grant_key: 'species_skillful',
         source_name: 'Human',
+        source_catalog_layer: 'bundled',
         available: fighterPoolMinusHeld,
       },
     ],
@@ -160,6 +165,7 @@ describe('the already-granted display', () => {
           skill: 'athletics',
           grant_key: 'class_skill',
           source_name: 'Fighter 1',
+          source_catalog_layer: 'bundled',
           clearable: true,
         },
       ],
@@ -261,6 +267,7 @@ describe('the addressed fill', () => {
           grant_id: 31,
           grant_key: 'species_keen_senses',
           source_name: 'Elf',
+          source_catalog_layer: 'bundled',
           available: [],
         },
       ],
@@ -285,7 +292,10 @@ describe('the D102 skill-or-tool disclosure', () => {
   it('renders unmodelled tool-capable ordinals from result data', () => {
     const state: GuidedSkillsStepState = {
       ...acolyteFighterState(),
-      unmodelled_tool_alternative_sources: ['Skilled'],
+      unmodelled_tool_alternative_sources: [{
+        source_name: 'Skilled',
+        source_catalog_layer: 'bundled',
+      }],
     };
     const { step } = stepWith(state);
     const view = interactiveElement(step.element);

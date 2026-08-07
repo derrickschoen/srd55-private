@@ -155,6 +155,7 @@ it('returns exact DTOs, treats wildcard text literally, and follows the persiste
       ritual: false,
       concentration: false,
       edition: '2024',
+      catalog_layer: 'bundled',
     },
   ]);
   expect(test.search.search(test.characterId, test.slotId, '%')).toEqual([
@@ -166,6 +167,7 @@ it('returns exact DTOs, treats wildcard text literally, and follows the persiste
       ritual: true,
       concentration: true,
       edition: '2024',
+      catalog_layer: 'bundled',
     },
   ]);
 

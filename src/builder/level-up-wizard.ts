@@ -45,6 +45,7 @@ import type { JsonObject } from '../domain/models';
 import type { EligibleSpell } from '../domain/read-models';
 import type { GrantRuleObject } from '../grants/grant-rule';
 import type { CharacterSheet } from '../queries/character-sheet-builder';
+import type { CatalogLayerDisclosure } from '../catalog/catalog-disclosure';
 
 export type AbilityIncreaseAbilities = 'any' | readonly Ability[];
 
@@ -165,7 +166,8 @@ export type FeatTextGap =
   | 'light_weapon_attack_predicate_unmodelled'
   | 'epic_boon_benefit_text_only'
   | 'conditional_resistance_unmodelled'
-  | 'senses_unmodelled';
+  | 'senses_unmodelled'
+  | 'homebrew_benefit_text_only';
 
 export interface FeatTextBenefit {
   readonly benefit_key: string;
@@ -198,6 +200,7 @@ export interface FeatSpellReplacementEntitlement {
 export interface FeatDefinitionForApplication {
   readonly content_key: ContentKey;
   readonly name: string;
+  readonly catalog_layer: CatalogLayerDisclosure;
   readonly grouping: KnownFeatGrouping;
   readonly min_level: CharacterLevel | null;
   readonly ability_points: 0 | 1 | 2;
@@ -243,12 +246,14 @@ export type PlannedExpertiseChoice = LevelUpPlannedExpertiseChoice;
 export interface LevelUpPlannedSkillProjection {
   readonly locator: PlannedGrantLocator;
   readonly source_label: string;
+  readonly source_catalog_layer: CatalogLayerDisclosure;
   readonly available_skills: readonly Skill[];
 }
 
 export interface LevelUpPlannedExpertiseProjection {
   readonly locator: PlannedGrantLocator;
   readonly source_label: string;
+  readonly source_catalog_layer: CatalogLayerDisclosure;
   readonly available_skills: readonly Skill[];
 }
 
@@ -257,19 +262,23 @@ export type LevelUpPlannedSpellProjection =
       readonly kind: 'new_slot';
       readonly locator: PlannedGrantLocator;
       readonly source_label: string;
+      readonly source_catalog_layer: CatalogLayerDisclosure;
       readonly required: boolean;
     }
   | {
       readonly kind: 'spellbook_acquisition';
       readonly locator: PlannedGrantLocator;
       readonly source_label: string;
+      readonly source_catalog_layer: CatalogLayerDisclosure;
     }
   | {
       readonly kind: 'optional_swap';
       readonly locator: PlannedGrantLocator;
       readonly source_label: string;
+      readonly source_catalog_layer: CatalogLayerDisclosure;
       readonly current_spell_version_id: SpellVersionId;
       readonly current_spell_name: string;
+      readonly current_spell_catalog_layer: CatalogLayerDisclosure;
     };
 
 /** Logical LU-2 work only; no future durable child-row id crosses this seam. */
@@ -330,12 +339,14 @@ export interface LevelUpSubclassOption {
   readonly content_key: ContentKey;
   readonly name: string;
   readonly rules_edition: RulesEdition;
+  readonly catalog_layer: CatalogLayerDisclosure;
 }
 
 export interface LevelUpHeldClass {
   readonly class_definition_id: ClassDefinitionId;
   readonly content_key: ContentKey;
   readonly name: string;
+  readonly catalog_layer: CatalogLayerDisclosure;
   readonly rules_edition: RulesEdition;
   readonly current_level: ClassLevel;
   readonly hit_die: HitDieSize | null;
@@ -381,6 +392,7 @@ export type LevelUpProjectedHitPoints =
       readonly missing_hit_dice: readonly {
         readonly class_definition_id: ClassDefinitionId;
         readonly class_name: string;
+        readonly class_catalog_layer: CatalogLayerDisclosure;
       }[];
     };
 
@@ -406,6 +418,7 @@ export interface LevelUpFeatApplication {
 
 export interface LevelUpFeatCandidate {
   readonly definition: FeatDefinitionForApplication;
+  readonly catalog_layer: CatalogLayerDisclosure;
   readonly eligibility: FeatEligibilityResult;
   readonly is_class_default: boolean;
   readonly applications: readonly LevelUpFeatApplication[];

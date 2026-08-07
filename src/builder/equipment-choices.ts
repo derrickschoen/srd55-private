@@ -43,6 +43,7 @@ import {
   type EquipmentChoiceConfig,
   type EquipmentSourceKind,
 } from './contracts';
+import type { CatalogLayerDisclosure } from '../catalog/catalog-disclosure';
 
 /* ------------------------------------------------------------ RPC methods */
 
@@ -81,6 +82,7 @@ export const EQUIPMENT_STEP_ATTR = Object.freeze({
 /** One rendered package line: the printed name, count and classification. */
 export interface GuidedEquipmentItemLine {
   readonly item_name: string;
+  readonly catalog_layer: CatalogLayerDisclosure | null;
   readonly quantity: number;
   readonly item_kind: EquipmentItemKind;
 }
@@ -102,6 +104,7 @@ export interface GuidedEquipmentOfferedOption<Option extends string> {
 export interface GuidedEquipmentSourcePackage<Option extends string> {
   readonly content_key: string;
   readonly source_name: string;
+  readonly catalog_layer: CatalogLayerDisclosure;
   readonly offered: readonly GuidedEquipmentOfferedOption<Option>[];
   readonly chosen_option: Option | null;
 }

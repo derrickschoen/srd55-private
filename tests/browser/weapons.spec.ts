@@ -181,9 +181,14 @@ test('a weapon is added from a reference template, then edited without touching 
 
   // Chosen by OPTION TEXT — no id, no index. The picker exposes all 38 options
   // to the accessibility tree at once, which is why it is a <select>.
-  await form
-    .getByLabel('Start from a reference weapon')
-    .selectOption({ label: 'Longsword' });
+  const referenceWeapon = form.getByLabel('Start from a reference weapon');
+  await referenceWeapon.selectOption({ label: 'Longsword' });
+  expect(await referenceWeapon.evaluate((select) => {
+    const selected = (select as HTMLSelectElement).selectedOptions[0];
+    return selected?.parentElement instanceof HTMLOptGroupElement
+      ? selected.parentElement.label
+      : null;
+  })).toBe('Martial Melee — SRD · bundled layer');
 
   // Pre-fill: every field below now carries the template's value...
   await expect(form.getByLabel('Name', { exact: true })).toHaveValue(
@@ -364,10 +369,10 @@ test('a weapon can be removed, and the panel says nothing about the licensor', a
     ),
   );
   expect(groupLabels).toEqual([
-    'Simple Melee',
-    'Simple Ranged',
-    'Martial Melee',
-    'Martial Ranged',
+    'Simple Melee — SRD · bundled layer',
+    'Simple Ranged — SRD · bundled layer',
+    'Martial Melee — SRD · bundled layer',
+    'Martial Ranged — SRD · bundled layer',
   ]);
   for (const label of groupLabels) {
     expect(label).not.toMatch(/D&D|Dungeons|Wizards/);

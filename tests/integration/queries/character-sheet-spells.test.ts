@@ -315,6 +315,7 @@ describe('typed character spell section projection', () => {
     expect(echo).toEqual({
       spell_version_id: fixture.spellIds.echoWard,
       name: 'Echo Ward',
+      catalog_layer: 'external',
       level: { status: 'known', value: 1 },
       marker: 'prepared',
       reference: {

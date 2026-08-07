@@ -56,6 +56,11 @@ import {
   compareSpellEntries,
   compareWizardSpellbookEntries,
 } from './build-report-ordering';
+import {
+  catalogLayerDisclosure,
+  type CatalogLayerDisclosure,
+} from '../catalog/catalog-disclosure';
+import { characterCatalogDisclosures } from '../queries/character-catalog-disclosures';
 
 interface Character {
   readonly id: number;
@@ -80,6 +85,8 @@ interface ClassRow {
   readonly baseProgressionType: string;
   readonly subclassFraction: string | null;
   readonly subclassRounding: string | null;
+  readonly classCatalogLayer: ReturnType<typeof catalogLayerDisclosure>;
+  readonly subclassCatalogLayer: ReturnType<typeof catalogLayerDisclosure> | null;
 }
 
 interface ProgressionRow {
@@ -96,12 +103,15 @@ interface BuildClass {
   readonly progression_type: ProgressionType;
   readonly prepared_count: number;
   readonly max_preparable_level: number;
+  readonly class_catalog_layer: ReturnType<typeof catalogLayerDisclosure>;
+  readonly subclass_catalog_layer: ReturnType<typeof catalogLayerDisclosure> | null;
 }
 
 interface WizardSpellbookEntry {
   readonly spellbook_entry_id: number;
   readonly spell_version_id: number;
   readonly spell_name: string;
+  readonly spell_catalog_layer: CatalogLayerDisclosure;
   readonly level: number;
   readonly active: boolean;
   readonly prepared: boolean;
@@ -110,6 +120,7 @@ interface WizardSpellbookEntry {
 interface PreparedSpell {
   readonly spell_version_id: number;
   readonly spell_name: string;
+  readonly spell_catalog_layer: CatalogLayerDisclosure;
   readonly level: number;
 }
 
@@ -117,6 +128,7 @@ interface RitualOnlySpell {
   readonly spellbook_entry_id: number;
   readonly spell_version_id: number;
   readonly spell_name: string;
+  readonly spell_catalog_layer: CatalogLayerDisclosure;
   readonly level: number;
 }
 
@@ -206,6 +218,15 @@ function decodeClassRow(row: SqlRow): ClassRow {
     baseProgressionType: sqlString(row, 'progression_type'),
     subclassFraction: sqlNullableString(row, 'subclass_caster_fraction'),
     subclassRounding: sqlNullableString(row, 'subclass_caster_rounding'),
+    classCatalogLayer: catalogLayerDisclosure(
+      sqlNullableString(row, 'class_catalog_layer'),
+    ),
+    subclassCatalogLayer:
+      sqlNullableString(row, 'subclass_name') === null
+        ? null
+        : catalogLayerDisclosure(
+            sqlNullableString(row, 'subclass_catalog_layer'),
+          ),
   };
 }
 
@@ -343,6 +364,7 @@ interface ReportSlotRow {
   readonly source_definition_id: number | null;
   readonly source_config: string | null;
   readonly spell_name: string | null;
+  readonly spell_catalog_layer: CatalogLayerDisclosure | null;
   readonly spell_level: number | null;
   readonly spell_edition: RulesEdition | null;
   readonly spell_identity_id: number | null;
@@ -373,6 +395,9 @@ const reportSlotRow: RowCodec<ReportSlotRow> = (row) => ({
   source_definition_id: sqlNullableInteger(row, 'source_definition_id'),
   source_config: sqlNullableString(row, 'source_config'),
   spell_name: sqlNullableString(row, 'spell_name'),
+  spell_catalog_layer: catalogLayerDisclosure(
+    sqlNullableString(row, 'spell_catalog_layer'),
+  ),
   spell_level: sqlNullableInteger(row, 'spell_level'),
   spell_edition: sqlNullableString(row, 'spell_edition') as RulesEdition | null,
   spell_identity_id: sqlNullableInteger(row, 'spell_identity_id'),
@@ -474,6 +499,7 @@ export class BuildReportBuilder {
         pact_magic: pact,
       },
       classes,
+      catalog_sources: characterCatalogDisclosures(this.db, characterId),
       preparation_callout: preparationCallout(
         sharedSlots,
         pact,
@@ -508,12 +534,20 @@ export class BuildReportBuilder {
               class.progression_type, subclass.name AS subclass_name,
               subclass.spellcasting_ability AS subclass_spellcasting_ability,
               subclass.caster_fraction AS subclass_caster_fraction,
-              subclass.caster_rounding AS subclass_caster_rounding
+              subclass.caster_rounding AS subclass_caster_rounding,
+              class_identity.catalog_layer AS class_catalog_layer,
+              subclass_identity.catalog_layer AS subclass_catalog_layer
        FROM character_class_levels AS level
        INNER JOIN class_definitions AS class
          ON class.id = level.class_definition_id
+       LEFT JOIN catalog_content_identities AS class_identity
+         ON class_identity.content_kind = 'class'
+        AND class_identity.content_key = class.content_key
        LEFT JOIN subclass_definitions AS subclass
          ON subclass.id = level.subclass_definition_id
+       LEFT JOIN catalog_content_identities AS subclass_identity
+         ON subclass_identity.content_kind = 'subclass'
+        AND subclass_identity.content_key = subclass.content_key
        WHERE level.character_id = ?`,
       [characterId],
       decodeClassRow,
@@ -571,6 +605,8 @@ export class BuildReportBuilder {
         max_preparable_level:
           subclassProgression?.maxSpellLevel ??
           maxPreparableLevelForClass(contribution),
+        class_catalog_layer: row.classCatalogLayer,
+        subclass_catalog_layer: row.subclassCatalogLayer,
       });
     }
 
@@ -643,16 +679,22 @@ export class BuildReportBuilder {
       .all(
         `SELECT entry.id AS spellbook_entry_id, version.id AS spell_version_id,
                 version.display_name AS spell_name, version.level,
-                version.is_active
+                version.is_active, identity.catalog_layer
          FROM wizard_spellbook_entries AS entry
          INNER JOIN spell_versions AS version
            ON version.id = entry.spell_version_id
+         LEFT JOIN catalog_content_identities AS identity
+           ON identity.content_kind = 'spell'
+          AND identity.content_key = version.content_key
          WHERE entry.character_id = ?`,
         [characterId],
         (row): WizardSpellbookEntry => ({
           spellbook_entry_id: sqlInteger(row, 'spellbook_entry_id'),
           spell_version_id: sqlInteger(row, 'spell_version_id'),
           spell_name: sqlString(row, 'spell_name'),
+          spell_catalog_layer: catalogLayerDisclosure(
+            sqlNullableString(row, 'catalog_layer'),
+          ),
           level: sqlInteger(row, 'level'),
           active: sqlBoolean(row, 'is_active'),
           prepared: preparedVersionIds.has(
@@ -666,6 +708,7 @@ export class BuildReportBuilder {
         (route): PreparedSpell => ({
           spell_version_id: route.spell_version_id,
           spell_name: route.spell_name,
+          spell_catalog_layer: route.spell_catalog_layer,
           level: route.spell_level,
         }),
       )
@@ -682,6 +725,7 @@ export class BuildReportBuilder {
           spellbook_entry_id: route.spellbook_entry_id,
           spell_version_id: route.spell_version_id,
           spell_name: route.spell_name,
+          spell_catalog_layer: route.spell_catalog_layer,
           level: route.spell_level,
         };
       })
@@ -728,6 +772,7 @@ export class BuildReportBuilder {
               source.display_name AS source_name, source.source_type,
               source.source_definition_id, source.config AS source_config,
               selected.display_name AS spell_name,
+              selected_identity.catalog_layer AS spell_catalog_layer,
               selected.level AS spell_level,
               selected.rules_edition AS spell_edition,
               selected.spell_identity_id, selected.ritual,
@@ -740,6 +785,9 @@ export class BuildReportBuilder {
            slot.fixed_spell_version_id,
            slot.current_spell_version_id
          )
+       LEFT JOIN catalog_content_identities AS selected_identity
+         ON selected_identity.content_kind = 'spell'
+        AND selected_identity.content_key = selected.content_key
        WHERE slot.character_id = ?
          AND slot.state IN ('active', 'orphaned', 'kept_override')`,
       [character.id],
@@ -790,6 +838,8 @@ export class BuildReportBuilder {
           level_max: row.spell_level_max,
           spell_id: versionId,
           spell_name: row.spell_name,
+          spell_catalog_layer:
+            row.spell_name === null ? null : row.spell_catalog_layer,
           spell_level: row.spell_level,
           spell_edition: row.spell_edition,
           ability,

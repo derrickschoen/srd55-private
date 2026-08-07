@@ -9,20 +9,30 @@ import {
 } from '../../../builder/level-up-wizard';
 import type { CharacterSheet } from '../../../queries/character-sheet-builder';
 import { element, listen, type Cleanup } from '../../dom';
+import {
+  catalogLayerLabel,
+  type CatalogNamedDisclosure,
+  type CatalogLayerDisclosure,
+} from '../../../catalog/catalog-disclosure';
 
 export interface LevelUpDraftReview {
   readonly subclass:
-    | { readonly kind: 'selected'; readonly name: string }
+    | {
+        readonly kind: 'selected';
+        readonly name: string;
+        readonly catalog_layer: CatalogLayerDisclosure;
+      }
     | {
         readonly kind: 'deferred';
         readonly class_name: string;
+        readonly class_catalog_layer: CatalogLayerDisclosure;
         readonly target_level: number;
       }
     | null;
-  readonly feats: readonly string[];
+  readonly feats: readonly CatalogNamedDisclosure[];
   readonly skills: readonly string[];
   readonly expertise: readonly string[];
-  readonly spells: readonly string[];
+  readonly spells: readonly CatalogNamedDisclosure[];
   readonly new_class_features: LevelUpTargetFeatures;
 }
 
@@ -97,7 +107,8 @@ function deferredSubclassWarning(
     title: presentation.title,
     detail:
       `${draft.subclass.class_name} level ${String(draft.subclass.target_level)} ` +
-      'will be saved without a subclass selection.',
+      `(${catalogLayerLabel(draft.subclass.class_catalog_layer)}) will be ` +
+      'saved without a subclass selection.',
     remedy:
       `Choose a ${draft.subclass.class_name} subclass in the planner when one ` +
       'is available.',
@@ -137,6 +148,20 @@ function namedDraftRows(
   );
 }
 
+function catalogDraftRows(
+  label: string,
+  values: readonly CatalogNamedDisclosure[],
+): readonly HTMLDivElement[] {
+  return values.map((value) =>
+    element('div', { className: 'level-up-review-change' }, [
+      element('dt', { text: label }),
+      element('dd', {
+        text: `${value.name} — ${catalogLayerLabel(value.catalog_layer)}`,
+      }),
+    ]),
+  );
+}
+
 function draftRows(draft: LevelUpDraftReview): readonly HTMLDivElement[] {
   const subclass = draft.subclass === null
     ? []
@@ -145,7 +170,7 @@ function draftRows(draft: LevelUpDraftReview): readonly HTMLDivElement[] {
           element('dt', { text: 'Subclass' }),
           element('dd', {
             text: draft.subclass.kind === 'selected'
-              ? draft.subclass.name
+              ? `${draft.subclass.name} — ${catalogLayerLabel(draft.subclass.catalog_layer)}`
               : 'Decide later',
           }),
         ]),
@@ -160,10 +185,10 @@ function draftRows(draft: LevelUpDraftReview): readonly HTMLDivElement[] {
     : namedDraftRows('New class features', ['Unavailable from source data']);
   return [
     ...subclass,
-    ...namedDraftRows('Feat', draft.feats),
+    ...catalogDraftRows('Feat', draft.feats),
     ...namedDraftRows('Skill proficiency', draft.skills),
     ...namedDraftRows('Expertise', draft.expertise),
-    ...namedDraftRows('Spell', draft.spells),
+    ...catalogDraftRows('Spell', draft.spells),
     ...features,
   ];
 }

@@ -1,6 +1,7 @@
 import { abilities } from '../../../domain/enums';
 import type { BuildReportResult } from '../../../reports/build-report-builder';
 import { SRD_ATTRIBUTION_NOTICE } from '../../../rules/srd-attribution';
+import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
 
 function escapeHtml(value: unknown): string {
   return String(value)
@@ -110,6 +111,18 @@ export function renderBuildReport(report: BuildReportResult): string {
               </tr>`,
           )
           .join('');
+  const catalogSources = report.catalog_sources.length === 0
+    ? '<li class="empty-value">No applied catalog content is recorded.</li>'
+    : report.catalog_sources
+        .map(
+          (source) => `
+            <li data-catalog-kind="${escapeHtml(source.kind)}">
+              <strong>${escapeHtml(source.name)}</strong> ·
+              ${escapeHtml(titleCase(source.kind))} ·
+              ${escapeHtml(catalogLayerLabel(source.catalog_layer))}
+            </li>`,
+        )
+        .join('');
   const routes =
     report.access_routes.length === 0
       ? '<tr><td colspan="6" class="empty-value">No castable spell routes.</td></tr>'
@@ -123,9 +136,11 @@ export function renderBuildReport(report: BuildReportResult): string {
                     route.rules_edition === '2024'
                       ? ''
                       : ` · ${escapeHtml(route.rules_edition)}`
-                  }</span>
+                  } · ${escapeHtml(catalogLayerLabel(route.spell_catalog_layer))}</span>
                 </td>
-                <td>${escapeHtml(route.source_name)}</td>
+                <td>${escapeHtml(route.source_name)} · ${escapeHtml(
+                  catalogLayerLabel(route.source_catalog_layer),
+                )}</td>
                 <td>${routeAnnotation(route)}</td>
                 <td>${
                   route.spellcasting_ability === null
@@ -142,11 +157,15 @@ export function renderBuildReport(report: BuildReportResult): string {
       (entry) =>
         `${entry.spell_name}${
           entry.active ? '' : ' (unavailable — removed from catalog)'
-        }`,
+        } · ${catalogLayerLabel(entry.spell_catalog_layer)}`,
     );
-  const prepared = report.wizard.prepared.map((entry) => entry.spell_name);
+  const prepared = report.wizard.prepared.map(
+    (entry) =>
+      `${entry.spell_name} · ${catalogLayerLabel(entry.spell_catalog_layer)}`,
+  );
   const ritualOnly = report.wizard.ritual_only.map(
-    (entry) => entry.spell_name,
+    (entry) =>
+      `${entry.spell_name} · ${catalogLayerLabel(entry.spell_catalog_layer)}`,
   );
   const duplicateAssessments =
     report.duplicate_assessments.length === 0
@@ -248,6 +267,12 @@ export function renderBuildReport(report: BuildReportResult): string {
               </table>
             </div>
           </article>
+        </section>
+
+        <section class="report-panel" aria-labelledby="catalog-provenance-heading">
+          <h2 id="catalog-provenance-heading">Catalog provenance</h2>
+          <p class="report-muted">Publication layers come from the catalog identity registry; missing identities are shown as unknown.</p>
+          <ul class="catalog-provenance-list">${catalogSources}</ul>
         </section>
 
         <aside class="preparation-callout" data-testid="preparation-callout">

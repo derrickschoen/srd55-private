@@ -389,6 +389,7 @@ test('fresh-profile catalog import → create/use → export → reload durabili
     {
       id: spell.id,
       name: 'Journey Spell',
+      catalog_layer: 'external',
       level: 0,
       school: 'Evocation',
       ritual: false,

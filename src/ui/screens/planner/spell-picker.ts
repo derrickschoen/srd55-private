@@ -1,5 +1,7 @@
 import type { EligibleSpell } from '../../../domain/read-models';
 import { FREE_TEXT_MARKER } from '../../free-text';
+import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
+import type { CatalogLayerDisclosure } from '../../../catalog/catalog-disclosure';
 
 export interface EligibleSpellClient {
   eligibleSpells(
@@ -18,7 +20,9 @@ export interface SpellPicker {
 export function createSpellPicker(options: {
   addressKey: string;
   label: string;
+  contextDescriptionId: string | null;
   value: string | null;
+  valueCatalogLayer: CatalogLayerDisclosure | null;
   /** The current value is a share-link name of unverified origin. */
   freeTextValue: boolean;
   invalid: boolean;
@@ -54,7 +58,20 @@ export function createSpellPicker(options: {
   list.setAttribute('role', 'listbox');
   list.hidden = true;
   input.setAttribute('aria-controls', listId);
-  wrapper.append(input, list);
+  const currentLayer = document.createElement('span');
+  const currentLayerId = `spell-current-layer-${options.addressKey}`;
+  currentLayer.id = currentLayerId;
+  currentLayer.className = 'spell-picker-current-layer';
+  currentLayer.textContent = options.valueCatalogLayer === null
+    ? ''
+    : catalogLayerLabel(options.valueCatalogLayer);
+  input.setAttribute(
+    'aria-describedby',
+    options.contextDescriptionId === null
+      ? currentLayerId
+      : `${options.contextDescriptionId} ${currentLayerId}`,
+  );
+  wrapper.append(input, currentLayer, list);
 
   let choices: EligibleSpell[] = [];
   let active = 0;
@@ -88,22 +105,27 @@ export function createSpellPicker(options: {
         index === active ? 'spell-option is-active' : 'spell-option';
       choice.setAttribute('role', 'option');
       choice.setAttribute('aria-selected', String(index === active));
+      choice.setAttribute('aria-label', spell.name);
       const traits = [
         `L${spell.level}`,
         spell.school,
         spell.edition,
+        catalogLayerLabel(spell.catalog_layer),
         ...(spell.ritual ? ['Ritual'] : []),
         ...(spell.concentration ? ['Concentration'] : []),
       ];
       const name = document.createElement('strong');
       name.textContent = spell.name;
       const details = document.createElement('small');
+      details.id = `spell-option-${options.addressKey}-${index}-details`;
       details.textContent = traits.join(' · ');
+      choice.setAttribute('aria-describedby', details.id);
       choice.append(name, details);
       choice.addEventListener('mousedown', (event) => {
         event.preventDefault();
         acceptedValue = spell.name;
         input.value = spell.name;
+        currentLayer.textContent = catalogLayerLabel(spell.catalog_layer);
         close(false);
         options.onSelect(spell);
       });
@@ -166,6 +188,7 @@ export function createSpellPicker(options: {
         event.preventDefault();
         acceptedValue = spell.name;
         input.value = spell.name;
+        currentLayer.textContent = catalogLayerLabel(spell.catalog_layer);
         close(false);
         options.onSelect(spell);
       }

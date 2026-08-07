@@ -19,9 +19,11 @@ import {
   buildFeatApplicationPlan,
   decodeAbilityIncreaseAbilities,
   featSpellReplacementEntitlement,
-  isBundledFeatContentKey,
-  type BundledFeatContentKey,
 } from '../rules/feat-application';
+import {
+  catalogLayerDisclosure,
+  type CatalogLayerDisclosure,
+} from '../catalog/catalog-disclosure';
 import type {
   ActiveFeatInstance,
   FeatApplicationPlan,
@@ -92,21 +94,25 @@ function prerequisites(value: string | null): readonly FeatPrerequisite[] {
   });
 }
 
-function definitionFromDatabase(
+export function levelFeatDefinitionFromDatabase(
   db: DatabaseContext,
   contentKey: string,
 ): FeatDefinitionForApplication & {
   readonly id: number;
-  readonly content_key: BundledFeatContentKey & ContentKey;
+  readonly catalog_layer: CatalogLayerDisclosure;
 } {
-  if (!isBundledFeatContentKey(contentKey)) {
-    throw new TypeError('The level-up command accepts only bundled SRD feats.');
-  }
   const row = db.oneRaw(
-    `SELECT id, content_key, name, category, min_level, ability_points,
-            ability_increase_abilities, ability_increase_maximum, repeatable,
-            prerequisites, grant_rules, notes
-     FROM feat_definitions WHERE content_key = ?`,
+    `SELECT definition.id, definition.content_key, definition.name,
+            definition.category, definition.min_level,
+            definition.ability_points, definition.ability_increase_abilities,
+            definition.ability_increase_maximum, definition.repeatable,
+            definition.prerequisites, definition.grant_rules,
+            definition.notes, identity.catalog_layer
+     FROM feat_definitions AS definition
+     LEFT JOIN catalog_content_identities AS identity
+       ON identity.content_kind = 'feat'
+      AND identity.content_key = definition.content_key
+     WHERE definition.content_key = ?`,
     [contentKey],
   );
   if (row === null) {
@@ -133,7 +139,10 @@ function definitionFromDatabase(
       : sqlInteger(row, 'ability_increase_maximum');
   return {
     id: sqlInteger(row, 'id'),
-    content_key: contentKey as BundledFeatContentKey & ContentKey,
+    content_key: contentKey as ContentKey,
+    catalog_layer: catalogLayerDisclosure(
+      sqlNullableString(row, 'catalog_layer'),
+    ),
     name: sqlString(row, 'name'),
     grouping: row.category as KnownFeatGrouping,
     min_level: minimum as CharacterLevel | null,
@@ -255,7 +264,7 @@ function preparedLevelFeatSelection(
   db: DatabaseContext,
   input: ApplyLevelFeatSelectionInput,
 ) {
-  const definition = definitionFromDatabase(
+  const definition = levelFeatDefinitionFromDatabase(
     db,
     input.selection.feat_content_key,
   );
@@ -297,7 +306,7 @@ export function levelFeatSpellReplacementEntitlement(
   contentKey: string,
 ) {
   return featSpellReplacementEntitlement(
-    definitionFromDatabase(db, contentKey),
+    levelFeatDefinitionFromDatabase(db, contentKey),
   );
 }
 

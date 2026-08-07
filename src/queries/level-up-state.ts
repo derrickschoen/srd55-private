@@ -26,6 +26,7 @@ import {
   type ProjectedFeatCharacter,
 } from '../builder/level-up-wizard';
 import { isBundledSourceContentKey } from '../catalog/bundled-source-membership';
+import { catalogLayerDisclosure } from '../catalog/catalog-disclosure';
 import {
   sqlBoolean,
   sqlInteger,
@@ -67,9 +68,8 @@ import {
 import {
   buildFeatApplicationPlan,
   evaluateFeatEligibility,
-  type BundledFeatContentKey,
 } from '../rules/feat-application';
-import { parseSrdFeatDefinitions } from '../rules/feats-srd';
+import { levelFeatDefinitionFromDatabase } from '../commands/level-feat-choice';
 import {
   readEligibleCharacterEffects,
 } from '../rules/eligible-character-effects';
@@ -157,6 +157,9 @@ function subclassOption(
       sqlString(row, `${prefix}rules_edition`),
       'Subclass',
     ),
+    catalog_layer: catalogLayerDisclosure(
+      sqlNullableString(row, `${prefix}catalog_layer`),
+    ),
   };
 }
 
@@ -239,9 +242,7 @@ function abilityIncreaseOptions(
 }
 
 function applicationsForFeat(
-  definition: FeatDefinitionForApplication & {
-    readonly content_key: BundledFeatContentKey & ContentKey;
-  },
+  definition: FeatDefinitionForApplication,
   projected: ProjectedFeatCharacter,
 ): readonly LevelUpFeatApplication[] {
   return featConfigs(definition).flatMap((config) =>
@@ -354,7 +355,7 @@ export class LevelUpStateQuery {
         explanation: disabledOptions.some(
           (option) => option.reason === 'class_not_bundled',
         )
-          ? 'No held class is currently guideable; imported class application is deferred to CI-4a/HA-10.'
+          ? 'No held class is currently guideable; homebrew classes are outside the v1 guided flows (D133).'
           : 'Fixed HP cannot be derived for any held class until its missing hit die is repaired or catalogued.',
         class_options: disabledOptions,
         pending_epic_resolution: pendingEpicResolution,
@@ -421,17 +422,25 @@ export class LevelUpStateQuery {
       `SELECT level.class_definition_id, level.level,
               level.is_starting_class, definition.content_key,
               definition.name, definition.rules_edition, traits.hit_die,
+              class_identity.catalog_layer AS class_catalog_layer,
               subclass.id AS subclass_id,
               subclass.content_key AS subclass_content_key,
               subclass.name AS subclass_name,
-              subclass.rules_edition AS subclass_rules_edition
+              subclass.rules_edition AS subclass_rules_edition,
+              subclass_identity.catalog_layer AS subclass_catalog_layer
        FROM character_class_levels AS level
        JOIN class_definitions AS definition
          ON definition.id = level.class_definition_id
+       LEFT JOIN catalog_content_identities AS class_identity
+         ON class_identity.content_kind = 'class'
+        AND class_identity.content_key = definition.content_key
        LEFT JOIN class_sheet_traits AS traits
          ON traits.class_definition_id = definition.id
        LEFT JOIN subclass_definitions AS subclass
          ON subclass.id = level.subclass_definition_id
+       LEFT JOIN catalog_content_identities AS subclass_identity
+         ON subclass_identity.content_kind = 'subclass'
+        AND subclass_identity.content_key = subclass.content_key
        WHERE level.character_id = ?
        ORDER BY level.id`,
       [characterId],
@@ -440,6 +449,9 @@ export class LevelUpStateQuery {
           sqlInteger(row, 'class_definition_id') as ClassDefinitionId,
         content_key: sqlString(row, 'content_key') as ContentKey,
         name: sqlString(row, 'name'),
+        catalog_layer: catalogLayerDisclosure(
+          sqlNullableString(row, 'class_catalog_layer'),
+        ),
         rules_edition: rulesEdition(
           sqlString(row, 'rules_edition'),
           'Class',
@@ -457,10 +469,14 @@ export class LevelUpStateQuery {
 
   #subclassOptions(classDefinitionId: ClassDefinitionId): LevelUpSubclassOption[] {
     return this.db.all(
-      `SELECT id, content_key, name, rules_edition
-       FROM subclass_definitions
-       WHERE class_definition_id = ?
-       ORDER BY name, id`,
+      `SELECT subclass.id, subclass.content_key, subclass.name,
+              subclass.rules_edition, identity.catalog_layer
+       FROM subclass_definitions AS subclass
+       LEFT JOIN catalog_content_identities AS identity
+         ON identity.content_kind = 'subclass'
+        AND identity.content_key = subclass.content_key
+       WHERE subclass.class_definition_id = ?
+       ORDER BY subclass.name, subclass.id`,
       [classDefinitionId],
       (row): LevelUpSubclassOption => ({
         subclass_definition_id:
@@ -470,6 +486,9 @@ export class LevelUpStateQuery {
         rules_edition: rulesEdition(
           sqlString(row, 'rules_edition'),
           'Subclass',
+        ),
+        catalog_layer: catalogLayerDisclosure(
+          sqlNullableString(row, 'catalog_layer'),
         ),
       }),
     );
@@ -546,7 +565,7 @@ export class LevelUpStateQuery {
         guideability: 'disabled',
         reason,
         explanation:
-          'Imported classes remain held but cannot be guided until CI-4a/HA-10 completes aggregate application.',
+          'Homebrew classes remain held but are outside the v1 guided flows (D133).',
       };
     }
     if (selected.hit_die !== null) {
@@ -610,6 +629,7 @@ export class LevelUpStateQuery {
                 class_definition_id: selected.class_definition_id,
                 target_class_level: targetLevel,
                 class_name: selected.name,
+                class_catalog_layer: selected.catalog_layer,
               },
             ),
           };
@@ -619,6 +639,7 @@ export class LevelUpStateQuery {
       class_definition_id: selected.class_definition_id,
       target_class_level: targetLevel,
       class_name: selected.name,
+      class_catalog_layer: selected.catalog_layer,
     };
     const choiceQuery = new LevelUpPlannedChoicesQuery(this.db);
     const plannedChoices = choiceQuery.forSelectedClass(choiceContext);
@@ -676,6 +697,7 @@ export class LevelUpStateQuery {
                   ...choiceContext,
                   subclass_content_key: option.content_key,
                   subclass_name: option.name,
+                  subclass_catalog_layer: option.catalog_layer,
                 }),
               }),
             ),
@@ -716,6 +738,7 @@ export class LevelUpStateQuery {
       .map((entry) => ({
         class_definition_id: entry.class_definition_id,
         class_name: entry.name,
+        class_catalog_layer: entry.catalog_layer,
       }));
     if (missing.length > 0 || selected.hit_die === null) {
       return {
@@ -841,15 +864,14 @@ export class LevelUpStateQuery {
     occurrence: 'asi_level_feat' | 'epic_boon',
     choiceContext?: LevelUpPlannedChoiceContext,
   ): readonly LevelUpFeatCandidate[] {
-    const available = new Set(
-      this.db.all(
-        'SELECT content_key FROM feat_definitions ORDER BY id',
-        undefined,
-        (row) => sqlString(row, 'content_key'),
-      ),
-    );
-    return parseSrdFeatDefinitions()
-      .filter((definition) => available.has(definition.content_key))
+    return this.db.all(
+      'SELECT content_key FROM feat_definitions ORDER BY id',
+      undefined,
+      (row) => sqlString(row, 'content_key'),
+    )
+      .map((contentKey) =>
+        levelFeatDefinitionFromDatabase(this.db, contentKey)
+      )
       .filter(
         (definition) =>
           occurrence === 'asi_level_feat' ||
@@ -859,6 +881,7 @@ export class LevelUpStateQuery {
         const applications = applicationsForFeat(definition, projected);
         return {
           definition,
+          catalog_layer: definition.catalog_layer,
           eligibility: evaluateFeatEligibility(definition, projected),
           is_class_default:
             definition.content_key ===
@@ -871,6 +894,7 @@ export class LevelUpStateQuery {
                   .forSelectedFeat(
                     choiceContext,
                     definition.name,
+                    definition.catalog_layer,
                     application.selection,
                     application.plan,
                   ),

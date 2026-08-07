@@ -613,6 +613,7 @@ describe('HA-8 production-service form boundaries', () => {
     expect(reviewedPreview.review).toEqual([{
       candidate_content_key: targetKey,
       candidate_name: 'Refused Reviewed Timeline',
+      candidate_catalog_layer: 'external',
       reason: 'alias',
       default_decision: 'match',
     }]);

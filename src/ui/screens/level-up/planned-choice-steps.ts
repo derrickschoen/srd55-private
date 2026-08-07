@@ -15,6 +15,10 @@ import {
 } from '../../../builder/level-up-wizard';
 import type { Skill } from '../../../domain/enums';
 import type { EligibleSpell } from '../../../domain/read-models';
+import {
+  catalogLayerLabel,
+  type CatalogLayerDisclosure,
+} from '../../../catalog/catalog-disclosure';
 import { element, listen, type Cleanup } from '../../dom';
 import {
   createSpellPicker,
@@ -24,6 +28,7 @@ import {
 export interface PlannedSpellDraft {
   readonly choice: PlannedSpellChoice;
   readonly spell_name: string;
+  readonly spell_catalog_layer: CatalogLayerDisclosure;
 }
 
 export interface PlannedSubchoiceDraft {
@@ -104,12 +109,14 @@ function selectedSpell(
 
 function sourceIdentity(
   sourceLabel: string,
+  sourceCatalogLayer: CatalogLayerDisclosure,
   locator: PlannedGrantLocator,
 ): HTMLElement {
   return element('p', {
     className: 'level-up-planned-source',
     text:
-      `Granted by ${sourceLabel}. Rule ${locator.rule_key}, ` +
+      `Granted by ${sourceLabel} — ${catalogLayerLabel(sourceCatalogLayer)}. ` +
+      `Rule ${locator.rule_key}, ` +
       `choice ${String(locator.ordinal)}.`,
   });
 }
@@ -194,7 +201,11 @@ function plannedSelect(options: {
   return {
     element: element('article', { className: 'level-up-planned-choice' }, [
       element('label', {}, [element('span', { text: labelText }), select]),
-      sourceIdentity(projection.source_label, projection.locator),
+      sourceIdentity(
+        projection.source_label,
+        projection.source_catalog_layer,
+        projection.locator,
+      ),
       warning,
     ]),
     cleanup,
@@ -300,6 +311,7 @@ function plannedSpellChoice(
           mode: 'new',
         },
         spell_name: spell.name,
+        spell_catalog_layer: spell.catalog_layer,
       };
     case 'spellbook_acquisition':
       return {
@@ -309,6 +321,7 @@ function plannedSpellChoice(
           spell_version_id: spell.id,
         },
         spell_name: spell.name,
+        spell_catalog_layer: spell.catalog_layer,
       };
     case 'optional_swap':
       return {
@@ -319,6 +332,7 @@ function plannedSpellChoice(
           mode: 'replace',
         },
         spell_name: spell.name,
+        spell_catalog_layer: spell.catalog_layer,
       };
   }
 }
@@ -358,11 +372,22 @@ export function createPlannedSpellsStep(options: {
       'Continuing defers this owed choice; the generated durable choice remains unfilled and warned.',
     );
     unfilledSpellWarning.hidden = !owed || selected !== null;
+    const source = sourceIdentity(
+      projection.source_label,
+      projection.source_catalog_layer,
+      projection.locator,
+    );
+    const sourceId = `level-up-spell-source-${encodedKey}`;
+    source.id = sourceId;
+    source.setAttribute('id', sourceId);
     const picker = pickerFactory({
       addressKey: `level-up-${projection.kind}-${encodedKey}`,
-      label: `${spellChoiceLabel(projection)} from ${projection.source_label}`,
+      label:
+        `${spellChoiceLabel(projection)} from ${projection.source_label}`,
+      contextDescriptionId: sourceId,
       value:
         selected?.spell_name ?? null,
+      valueCatalogLayer: selected?.spell_catalog_layer ?? null,
       freeTextValue: false,
       invalid: false,
       disabled: projection.kind === 'optional_swap' && !replacing,
@@ -410,7 +435,9 @@ export function createPlannedSpellsStep(options: {
       modeControls.push(
         element('fieldset', { className: 'level-up-spell-swap-modes' }, [
           element('legend', {
-            text: `Current spell: ${projection.current_spell_name}`,
+            text:
+              `Current spell: ${projection.current_spell_name} — ` +
+              catalogLayerLabel(projection.current_spell_catalog_layer),
           }),
           element('label', {}, [
             keep,
@@ -439,7 +466,7 @@ export function createPlannedSpellsStep(options: {
       },
       [
         element('h3', { text: spellChoiceLabel(projection) }),
-        sourceIdentity(projection.source_label, projection.locator),
+        source,
         ...modeControls,
         picker.element,
         ...(owed ? [unfilledSpellWarning] : []),

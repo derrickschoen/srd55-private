@@ -797,6 +797,7 @@ describe('HA-5 subclass publisher', () => {
     expect(preview.review).toEqual([{
       candidate_content_key: first.result.content_key,
       candidate_name: 'Metadata Aegis',
+      candidate_catalog_layer: 'external',
       reason: 'metadata-conflict',
       default_decision: 'match',
     }]);
@@ -854,6 +855,7 @@ describe('HA-5 subclass publisher', () => {
     expect(preview.review).toEqual([{
       candidate_content_key: targetKey,
       candidate_name: 'Explicit Match Aegis',
+      candidate_catalog_layer: 'external',
       reason: 'alias',
       default_decision: 'match',
     }]);

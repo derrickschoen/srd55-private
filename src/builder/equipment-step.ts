@@ -20,6 +20,7 @@
  */
 
 import type { DatabaseContext } from '../db/database';
+import type { CatalogLayerDisclosure } from '../catalog/catalog-disclosure';
 import {
   backgroundEquipmentOptions,
   classEquipmentOptions,
@@ -119,6 +120,7 @@ function classPackage(
   return {
     content_key: source.content_key,
     source_name: source.source_name,
+    catalog_layer: source.catalog_layer,
     offered: offeredOptions(db, 'class', source.content_key, isClassOption),
     chosen_option: chosen !== null && isClassOption(chosen) ? chosen : null,
   };
@@ -133,6 +135,7 @@ function backgroundPackage(
   return {
     content_key: source.content_key,
     source_name: source.source_name,
+    catalog_layer: source.catalog_layer,
     offered: offeredOptions(
       db,
       'background',
@@ -192,9 +195,11 @@ export function guidedEquipmentStepState(
 export interface RecordedEquipmentPackage {
   readonly kind: 'class' | 'background';
   readonly source_name: string;
+  readonly source_catalog_layer: CatalogLayerDisclosure;
   readonly option: string;
   readonly contents: readonly {
     readonly item_name: string;
+    readonly catalog_layer: CatalogLayerDisclosure | null;
     readonly quantity: number;
   }[];
 }
@@ -230,9 +235,11 @@ export function recordedEquipmentPackages(
     packages.push({
       kind,
       source_name: source.source_name,
+      source_catalog_layer: source.catalog_layer,
       option: chosen,
       contents: displayableEquipmentLines(option?.lines ?? []).map((line) => ({
         item_name: line.item_name,
+        catalog_layer: line.catalog_layer,
         quantity: line.quantity,
       })),
     });

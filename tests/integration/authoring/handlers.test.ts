@@ -551,6 +551,7 @@ describe('catalog authoring RPC handlers', () => {
     expect(reviewedPreview.review).toEqual([{
       candidate_content_key: reviewedTarget.content_key,
       candidate_name: 'RPC Retarget Reviewed',
+      candidate_catalog_layer: 'external',
       reason: 'alias',
       default_decision: 'match',
     }]);

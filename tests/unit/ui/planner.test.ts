@@ -14,6 +14,7 @@ import { RpcError } from '../../../src/rpc/protocol';
 import {
   defaultGridFilters,
   filterAndSortSlots,
+  renderPlannerGrid,
 } from '../../../src/ui/screens/planner/planner-grid';
 import {
   catalogGapHeading,
@@ -32,9 +33,26 @@ import {
 } from '../../../src/ui/screens/planner/editors';
 import { CHARACTER_TEXT_LIMITS } from '../../../src/domain/character-limits';
 import {
+  elementText,
   installInteractiveDocument,
   interactiveElement,
 } from '../../fixtures/interactive-dom';
+import { handlers as queryHandlers } from '../../../src/worker/handlers/queries';
+import { createRpcHarness } from '../../helpers/rpc-harness';
+import { createBuildReportFixture } from '../../integration/reports/build-report-fixture';
+
+const NOOP_EDITOR_ACTIONS: PlannerEditorActions = {
+  updateFlavor: () => undefined,
+  updateAbility: () => undefined,
+  updateLegacy: () => undefined,
+  updateClass: () => undefined,
+  removeClass: () => undefined,
+  addClass: () => undefined,
+  updateSourceList: () => undefined,
+  updateClassOrder: () => undefined,
+  addSource: () => undefined,
+  removeSource: () => undefined,
+};
 
 const unexpectedUndo: PlannerCommandClient['undo'] = async () => {
   throw new Error('Unexpected test undo.');
@@ -59,6 +77,7 @@ function slot(
     level_max: 0,
     spell_id: 10,
     spell_name: 'Mage Hand',
+    spell_catalog_layer: 'bundled',
     spell_level: 0,
     spell_edition: '2024',
     ability: 'intelligence',
@@ -115,6 +134,7 @@ function workspace(
       },
       caster: { caster_level: 1, slots: [], pact_magic: null },
       classes: [],
+      catalog_sources: [],
       preparation_callout: 'Class levels set preparation limits.',
       access_routes: [],
       duplicate_assessments: [],
@@ -180,6 +200,151 @@ const emptyCompleteness: CompletenessResult = {
   items: [],
   catalog_gaps: [],
 };
+
+describe('planner catalog disclosure', () => {
+  it('returns a persisted external spell layer through the live workspace RPC', async () => {
+    const harness = await createRpcHarness(queryHandlers);
+    try {
+      const fixture = createBuildReportFixture(harness.context.db);
+      const response = await harness.call<
+        { character_id: number },
+        Workspace
+      >('queries.characters.workspace', {
+        character_id: fixture.characterId,
+      });
+
+      expect(response).toMatchObject({ ok: true });
+      if (!response.ok) {
+        throw new Error('The live workspace route refused the fixture.');
+      }
+      expect(
+        response.result.slots.find(
+          (entry) => entry.spell_id === fixture.spellIds.mageHand,
+        ),
+      ).toMatchObject({
+        spell_name: 'Mage Hand',
+        spell_catalog_layer: 'external',
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
+  it('renders a hostile persisted planner spell inert with its exact layer', () => {
+    const restoreDocument = installInteractiveDocument();
+    const windowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {
+        setTimeout: globalThis.setTimeout.bind(globalThis),
+        clearTimeout: globalThis.clearTimeout.bind(globalThis),
+      },
+    });
+    try {
+      const hostile = '</input><img data-ha10-planner-spell src=x>';
+      const base = workspace(0, 10, false);
+      const view = renderPlannerGrid({
+        workspace: {
+          ...base,
+          slots: [slot({ spell_name: hostile, spell_catalog_layer: 'external' })],
+        },
+        filters: { ...defaultGridFilters },
+        queries: { eligibleSpells: async () => [] },
+        disabled: false,
+        onFiltersChanged: () => undefined,
+        onSelect: () => undefined,
+        onClear: () => undefined,
+        onOverride: () => undefined,
+      });
+      const rendered = interactiveElement(view.element);
+
+      expect(rendered.querySelector('.spell-picker-input')?.value).toBe(hostile);
+      expect(rendered.querySelector('.spell-picker-current-layer')?.textContent)
+        .toBe('Homebrew · external layer');
+      expect(rendered.querySelector('[data-ha10-planner-spell]')).toBeNull();
+      view.destroy();
+    } finally {
+      restoreDocument();
+      if (windowDescriptor === undefined) {
+        Reflect.deleteProperty(globalThis, 'window');
+      } else {
+        Object.defineProperty(globalThis, 'window', windowDescriptor);
+      }
+    }
+  });
+
+  it('renders hostile external subclass and source names inert with exact layers', () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const hostileSubclass = '</option><img data-ha10-planner-subclass src=x>';
+      const hostileSource = '</option><img data-ha10-planner-source src=x>';
+      const hostileHeldClass = '</strong><img data-ha10-planner-class src=x>';
+      const base = workspace(0, 10, false);
+      const disclosed: Workspace = {
+        ...base,
+        classes: [{
+          id: 1,
+          class_definition_id: 1,
+          subclass_definition_id: null,
+          level: 1,
+          name: hostileHeldClass,
+          catalog_layer: 'external',
+          subclass_name: null,
+          subclass_catalog_layer: null,
+          subclasses: [{ id: 9, name: hostileSubclass, catalog_layer: 'external' }],
+        }],
+        available_classes: [{ id: 2, name: 'Fighter', catalog_layer: 'bundled' }],
+        source_catalog: {
+          ...base.source_catalog,
+          feat: [{
+            id: 7,
+            content_key: 'expanded:content.feat:hostile',
+            name: hostileSource,
+            catalog_layer: 'external',
+            repeatable: false,
+            configuration_kind: 'none',
+          }],
+        },
+        removable_sources: [{
+          id: 70,
+          parent_source_instance_id: null,
+          source_type: 'feat',
+          source_definition_id: 7,
+          display_name: hostileSource,
+        }],
+      };
+      const rendered = interactiveElement(renderEditors({
+        workspace: disclosed,
+        actions: NOOP_EDITOR_ACTIONS,
+        disabled: false,
+      }));
+
+      const optionText = rendered.querySelectorAll('option').map((entry) => entry.textContent);
+      expect(optionText).toContain(hostileSubclass);
+      expect(optionText).toContain('Fighter');
+      expect(optionText).toContain(hostileSource);
+      expect(
+        rendered.querySelectorAll('optgroup').map((group) =>
+          group.getAttribute('label')
+        ),
+      ).toEqual(expect.arrayContaining([
+        'SRD · bundled layer',
+        'Homebrew · external layer',
+      ]));
+      expect(elementText(rendered as unknown as Node)).toContain(
+        `${hostileSource} feat · Homebrew · external layer`,
+      );
+      expect(elementText(rendered as unknown as Node)).toContain(
+        `${hostileHeldClass} — Homebrew · external layer`,
+      );
+      expect(rendered.querySelector('[data-ha10-planner-subclass]')).toBeNull();
+      expect(rendered.querySelector('[data-ha10-planner-source]')).toBeNull();
+      expect(rendered.querySelector('[data-ha10-planner-class]')).toBeNull();
+    } finally {
+      restoreDocument();
+    }
+  });
+});
 
 describe('planner ability editor', () => {
   it('submits one complete Character details value and counts code points live', () => {

@@ -22,6 +22,7 @@ import type {
   WeaponsPanel,
   WeaponTemplate,
 } from '../../../domain/read-models';
+import { catalogSelectGroups } from '../../catalog-control-disclosure';
 import type { WeaponRange } from '../../../domain/weapon-range';
 import { freeTextSpan } from '../../free-text';
 import { renderAttackProfiles } from './attack-profiles';
@@ -126,7 +127,13 @@ export function blankWeapon(): WeaponFields {
  * promised.
  */
 export function weaponFromTemplate(template: WeaponTemplate): WeaponFields {
-  const { id: _id, content_key: _key, srd_group: group, ...profile } = template;
+  const {
+    id: _id,
+    content_key: _key,
+    srd_group: group,
+    catalog_layer: _layer,
+    ...profile
+  } = template;
   return {
     ...profile,
     notes: null,
@@ -851,20 +858,12 @@ function renderForm(
     custom.value = '';
     custom.textContent = 'Custom weapon (fill in yourself)';
     picker.append(custom);
-    const groups = new Map<SrdWeaponGroup, HTMLOptGroupElement>();
-    for (const template of options.panel.templates) {
-      let group = groups.get(template.srd_group);
-      if (group === undefined) {
-        group = document.createElement('optgroup');
-        group.label = GROUP_LABELS[template.srd_group];
-        groups.set(template.srd_group, group);
-        picker.append(group);
-      }
-      const entry = document.createElement('option');
-      entry.value = String(template.id);
-      entry.textContent = template.name;
-      group.append(entry);
-    }
+    picker.append(...catalogSelectGroups(options.panel.templates.map((template) => ({
+      value: String(template.id),
+      label: template.name,
+      catalogLayer: template.catalog_layer,
+      group: GROUP_LABELS[template.srd_group],
+    }))));
     picker.addEventListener('change', () => {
       const chosen = options.panel.templates.find(
         (template) => String(template.id) === picker.value,

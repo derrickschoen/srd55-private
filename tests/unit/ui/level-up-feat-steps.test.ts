@@ -63,12 +63,15 @@ function candidate(options: {
   readonly classDefault?: boolean;
   readonly abilityPoints?: 0 | 1 | 2;
   readonly applications?: readonly LevelUpFeatApplication[];
+  readonly catalogLayer?: LevelUpFeatCandidate['catalog_layer'];
 }): LevelUpFeatCandidate {
   const eligibility = options.eligibility ?? qualified;
   return {
+    catalog_layer: options.catalogLayer ?? 'bundled',
     definition: {
       content_key: options.key as ContentKey,
       name: options.name,
+      catalog_layer: options.catalogLayer ?? 'bundled',
       grouping: options.grouping ?? 'general',
       min_level: null,
       ability_points: options.abilityPoints ?? 0,
@@ -93,6 +96,35 @@ function candidate(options: {
 }
 
 describe('W-FEAT-17 feat candidate cards', () => {
+  it('renders a hostile external feat inert with the exact disclosed layer', () => {
+    const hostile = '</h3><img data-ha10-feat-hostile src=x>';
+    const view = createFeatStep({
+      step: 'feat',
+      candidates: [candidate({
+        key: 'expanded:content.feat:hostile',
+        name: hostile,
+        catalogLayer: 'external',
+      })],
+      draft: null,
+      allowDefer: false,
+      deferredWarning: levelUpWarningPresentation('epic_boon_deferred'),
+      onSelect: () => undefined,
+    });
+
+    const card = interactiveElement(view.element).querySelector(
+      '[data-level-up-feat-card="expanded:content.feat:hostile"]',
+    );
+    expect(elementText(card! as unknown as Node)).toContain(hostile);
+    expect(
+      interactiveElement(card! as unknown as Node).querySelectorAll('dd')
+        .map((entry) => elementText(entry as unknown as Node)),
+    ).toContain('Homebrew · external layer');
+    expect(
+      interactiveElement(view.element).querySelector('[data-ha10-feat-hostile]'),
+    ).toBeNull();
+    view.cleanup();
+  });
+
   it('renders one card per returned candidate and keeps refused cards descriptive but inert', () => {
     const candidates = [
       candidate({ key: '2024:feat:alert', name: 'Alert', grouping: 'origin' }),

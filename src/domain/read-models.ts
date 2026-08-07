@@ -2,6 +2,10 @@ import type { WeaponFields } from './command-contracts';
 import type { EquipmentEffectInput } from './equipment-effects';
 import type { AttunementSlot } from './attunement';
 import type { ContentKey } from './ids';
+import type {
+  CatalogLayerDisclosure,
+  CharacterCatalogDisclosure,
+} from '../catalog/catalog-disclosure';
 import type { AttackProfileResult } from '../rules/attack-profiles';
 import type { CharacterMasteryAllowance } from '../rules/weapon-mastery-lookup';
 import type {
@@ -53,6 +57,7 @@ export interface WeaponTemplate extends WeaponProfile {
   id: number;
   content_key: string;
   srd_group: SrdWeaponGroup;
+  catalog_layer: CatalogLayerDisclosure;
 }
 
 export interface CharacterWeapon extends WeaponFields {
@@ -97,6 +102,7 @@ export interface CharacterItem {
 export interface ItemDefinition {
   readonly content_key: ContentKey;
   readonly name: string;
+  readonly catalog_layer: CatalogLayerDisclosure;
   readonly description: string;
   readonly requires_attunement: boolean;
   readonly effects: readonly EquipmentEffectInput[];
@@ -117,8 +123,10 @@ export interface SpellRoute {
   spell_identity_id: number;
   spell_version_id: number;
   spell_name: string;
+  spell_catalog_layer: CatalogLayerDisclosure;
   spell_level: number;
   source_name: string;
+  source_catalog_layer: CatalogLayerDisclosure;
   slot_id: number | null;
   slot_key: string | null;
   casting_mode: CastingMode;
@@ -159,6 +167,7 @@ export interface WorkspaceSlot {
   level_max: number;
   spell_id: number | null;
   spell_name: string | null;
+  spell_catalog_layer: CatalogLayerDisclosure | null;
   placeholder?: boolean;
   spell_level: number | null;
   spell_edition: RulesEdition | null;
@@ -179,6 +188,7 @@ export interface WorkspaceSlot {
 export interface ClassOption {
   id: number;
   name: string;
+  catalog_layer: CatalogLayerDisclosure;
 }
 
 export interface CharacterClass {
@@ -187,7 +197,9 @@ export interface CharacterClass {
   subclass_definition_id: number | null;
   level: number;
   name: string;
+  catalog_layer: CatalogLayerDisclosure;
   subclass_name: string | null;
+  subclass_catalog_layer: CatalogLayerDisclosure | null;
   subclasses: ClassOption[];
 }
 
@@ -201,6 +213,7 @@ export interface SourceDefinition {
   id: number;
   content_key: string;
   name: string;
+  catalog_layer: CatalogLayerDisclosure;
   repeatable: boolean;
   configuration_kind:
     | 'magic_initiate'
@@ -277,7 +290,10 @@ export interface BuildReport {
     progression_type: ProgressionType;
     prepared_count: number;
     max_preparable_level: number;
+    class_catalog_layer: CatalogLayerDisclosure;
+    subclass_catalog_layer: CatalogLayerDisclosure | null;
   }>;
+  catalog_sources: readonly CharacterCatalogDisclosure[];
   preparation_callout: string;
   access_routes: SpellRoute[];
   duplicate_assessments: DuplicateAssessment[];
@@ -285,12 +301,18 @@ export interface BuildReport {
     spellbook: Array<{
       spellbook_entry_id: number;
       spell_name: string;
+      spell_catalog_layer: CatalogLayerDisclosure;
       active: boolean;
     }>;
-    prepared: Array<{ spell_version_id: number; spell_name: string }>;
+    prepared: Array<{
+      spell_version_id: number;
+      spell_name: string;
+      spell_catalog_layer: CatalogLayerDisclosure;
+    }>;
     ritual_only: Array<{
       spellbook_entry_id: number;
       spell_name: string;
+      spell_catalog_layer: CatalogLayerDisclosure;
     }>;
     explanation: string;
   };
@@ -345,12 +367,17 @@ export interface EligibleSpell {
   ritual: boolean;
   concentration: boolean;
   edition: RulesEdition;
+  catalog_layer: CatalogLayerDisclosure;
 }
 
 export interface CharacterSummary {
   id: number;
   name: string;
   level: number | null;
-  classes: string[];
+  classes: readonly {
+    readonly name: string;
+    readonly level: number;
+    readonly catalog_layer: CatalogLayerDisclosure;
+  }[];
   warning_count: number;
 }

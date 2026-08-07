@@ -101,6 +101,7 @@ const parentClasses: readonly GuidedClassOption[] = [{
   content_key: '2024:class:fighter' as ContentKey,
   name: 'Fighter',
   hit_die: 10,
+  catalog_layer: 'bundled',
 }];
 
 const library: AuthoringLibrary = {
@@ -591,8 +592,43 @@ describe('HA-6 homebrew library routing and tabs', () => {
       // a second label on the form element is a strict-mode ambiguity.
       expect(formMount?.getAttribute('aria-label')).toBe('Subclass authoring form');
       expect(root.querySelector('form')?.getAttribute('aria-label')).toBeNull();
-      expect(root.querySelectorAll('option').map((option) => option.textContent))
-        .toContain('Fighter');
+      const bundledParents = root.querySelectorAll('optgroup')
+        .find((group) => group.getAttribute('label') === 'SRD · bundled layer');
+      expect(bundledParents?.querySelectorAll('option').map(
+        (option) => option.textContent,
+      )).toContain('Fighter');
+      expect(bundledParents?.getAttribute('label')).toBe(
+        'SRD · bundled layer',
+      );
+      cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('keeps a hostile routed subclass parent choice inert beside its exact layer', async () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const hostileParent = '</option><img data-ha10-parent-class src=x>';
+      const screenContext = context(
+        'https://example.test/homebrew/drafts/draft-subclass',
+        [],
+      );
+      const cleanup = await renderHomebrewLibrary(screenContext, {
+        client: authoringClient({ readDraft: async () => subclassDraft() }),
+        parentClasses: [{ ...parentClasses[0]!, name: hostileParent }],
+      });
+      const root = interactiveElement(screenContext.root);
+
+      const bundledParents = root.querySelectorAll('optgroup')
+        .find((group) => group.getAttribute('label') === 'SRD · bundled layer');
+      expect(bundledParents?.querySelectorAll('option').map(
+        (option) => option.textContent,
+      )).toContain(hostileParent);
+      expect(bundledParents?.getAttribute('label')).toBe(
+        'SRD · bundled layer',
+      );
+      expect(root.querySelector('[data-ha10-parent-class]')).toBeNull();
       cleanup();
     } finally {
       restoreDocument();
@@ -613,7 +649,7 @@ describe('HA-6 homebrew library routing and tabs', () => {
           backgroundReferences: async () => {
             referenceCalls += 1;
             return {
-              origin_feats: [{ content_key: '2024:feat:alert' as ContentKey, name: 'Alert', rules_edition: '2024' }],
+              origin_feats: [{ content_key: '2024:feat:alert' as ContentKey, name: 'Alert', rules_edition: '2024', catalog_layer: 'bundled' }],
               weapons: [],
               armors: [],
             };
@@ -625,8 +661,14 @@ describe('HA-6 homebrew library routing and tabs', () => {
       expect(referenceCalls).toBe(1);
       expect(formMount?.getAttribute('aria-label')).toBe('Background authoring form');
       expect(root.querySelector('form')?.getAttribute('aria-label')).toBeNull();
-      expect(root.querySelectorAll('option').map((option) => option.textContent))
-        .toContain('Alert (2024)');
+      const bundledFeats = root.querySelectorAll('optgroup')
+        .find((group) => group.getAttribute('label') === 'SRD · bundled layer');
+      expect(bundledFeats?.querySelectorAll('option').map(
+        (option) => option.textContent,
+      )).toContain('Alert (2024)');
+      expect(bundledFeats?.getAttribute('label')).toBe(
+        'SRD · bundled layer',
+      );
       cleanup();
     } finally {
       restoreDocument();

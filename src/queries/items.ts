@@ -15,6 +15,7 @@ import type { AttunementSlot } from '../domain/attunement';
 import { readOwnedEffectsByOwner } from '../commands/equipment-effects';
 import { equipmentEffectInput, projectStoredEquipmentContentV1 } from '../catalog/equipment-content-projector-v1';
 import type { ContentKey } from '../domain/ids';
+import { catalogLayerDisclosure } from '../catalog/catalog-disclosure';
 
 export class ItemQueries {
   constructor(private readonly db: DatabaseContext) {}
@@ -56,18 +57,29 @@ export class ItemQueries {
       },
     );
     const definitionRoots = this.db.all(
-      `SELECT content_key FROM item_definitions ORDER BY name, id`,
+      `SELECT definition.content_key, identity.catalog_layer
+       FROM item_definitions AS definition
+       LEFT JOIN catalog_content_identities AS identity
+         ON identity.content_kind = 'item'
+        AND identity.content_key = definition.content_key
+       ORDER BY definition.name, definition.id`,
       [],
-      (row) => sqlString(row, 'content_key') as ContentKey,
+      (row) => ({
+        content_key: sqlString(row, 'content_key') as ContentKey,
+        catalog_layer: catalogLayerDisclosure(
+          sqlNullableString(row, 'catalog_layer'),
+        ),
+      }),
     );
-    const definitions: ItemDefinition[] = definitionRoots.map((contentKey) => {
+    const definitions: ItemDefinition[] = definitionRoots.map((root) => {
       const stored = projectStoredEquipmentContentV1(this.db, {
         kind: 'item',
-        contentKey,
+        contentKey: root.content_key,
       });
       return {
-        content_key: contentKey,
+        content_key: root.content_key,
         name: stored.aggregate.name,
+        catalog_layer: root.catalog_layer,
         description: stored.aggregate.description,
         requires_attunement: stored.aggregate.requires_attunement,
         effects: stored.aggregate.effects.map(equipmentEffectInput),

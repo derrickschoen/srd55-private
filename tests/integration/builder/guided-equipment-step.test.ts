@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   EQUIPMENT_RPC,
   type GuidedEquipmentStepState,
@@ -23,7 +23,13 @@ import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import type { DatabaseContext } from '../../../src/db/database';
 import { EquipmentGrantRefusal } from '../../../src/grants/equipment-grants';
 import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
+import { createEquipmentStep } from '../../../src/ui/screens/guided-builder/equipment-step';
 import { rpcRegistry } from '../../../src/worker/registry';
+import {
+  elementText,
+  installInteractiveDocument,
+  interactiveElement,
+} from '../../fixtures/interactive-dom';
 import {
   createRpcHarness,
   type RpcHarness,
@@ -48,8 +54,15 @@ import {
  * pass — the mutation-lands-in-nothing trap §6 names.
  */
 let harness: RpcHarness | undefined;
+let restoreDocument: (() => void) | undefined;
+
+beforeEach(() => {
+  restoreDocument = installInteractiveDocument();
+});
 
 afterEach(() => {
+  restoreDocument?.();
+  restoreDocument = undefined;
   harness?.close();
   harness = undefined;
 });
@@ -601,5 +614,75 @@ describe('the equipment RPC registry contract', () => {
     expect(
       guidedEquipmentStepState(db, characterId).class_package.chosen_option,
     ).toBe('a');
+  });
+
+  it('carries a hostile weapon layer through the live equipment RPC and renders it inert', async () => {
+    const active = await applicationDatabase();
+    const db = active.context.db;
+    const { characterId, contentKey } = createWithClass(
+      db,
+      'Fighter',
+      'Layered Equipment',
+    );
+    const hostile = '</li><img data-ha10-equipment-line src=x>';
+    db.exec(
+      `UPDATE class_equipment_items
+       SET item_name = ?
+       WHERE class_definition_id = (
+         SELECT id FROM class_definitions WHERE content_key = ?
+       ) AND option = 'a' AND item_kind = 'weapon'`,
+      [hostile, contentKey],
+    );
+    db.exec('PRAGMA foreign_keys = OFF');
+    db.exec(
+      `DELETE FROM catalog_content_identities
+       WHERE content_kind = 'weapon'
+         AND content_key IN (
+           SELECT weapon.content_key
+           FROM class_equipment_items AS item
+           JOIN weapon_templates AS weapon ON weapon.id = item.weapon_template_id
+           WHERE item.class_definition_id = (
+             SELECT id FROM class_definitions WHERE content_key = ?
+           ) AND item.option = 'a'
+         )`,
+      [contentKey],
+    );
+    db.exec('PRAGMA foreign_keys = ON');
+
+    const response = await rpcRegistry.dispatch(
+      {
+        id: 5,
+        method: EQUIPMENT_RPC.equipmentStep,
+        params: { character_id: characterId },
+      },
+      active.context,
+    );
+    if (!response.ok) throw new Error(response.error.message);
+    const state = response.result as GuidedEquipmentStepState;
+    const hostileLine = state.class_package.offered
+      .flatMap((option) => option.contents)
+      .find((line) => line.item_name === hostile);
+    expect(hostileLine).toMatchObject({ catalog_layer: 'unknown' });
+
+    const step = createEquipmentStep({
+      characterId,
+      state,
+      applyEquipment: () => Promise.reject(new Error('not submitted')),
+      navigate: () => undefined,
+    });
+    const renderedLine = interactiveElement(step.element)
+      .querySelectorAll('.guided-equipment-line')
+      .find((line) =>
+        elementText(line as unknown as Node).includes(hostile)
+      );
+    expect(elementText(renderedLine! as unknown as Node)).toBe(
+      `${hostile} — Unknown catalog layer`,
+    );
+    expect(
+      interactiveElement(step.element).querySelector(
+        '[data-ha10-equipment-line]',
+      ),
+    ).toBeNull();
+    step.cleanup();
   });
 });
