@@ -5,6 +5,70 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-07 — ki and Focus Points are one resource; the Psionic Fist doc brought to full OGL compliance
+
+Owner's rulings, verbatim:
+
+> Make sure to fulfill all section 15 requirements under the ogl for the psionic
+> fist monk
+
+> Treat ki and focus points as 2 different names for the same thing
+
+### Ki = Focus Points
+
+Recorded as a project-wide equivalence, not a per-document note: they are one
+resource renamed between rules revisions. `way-of-the-psionic-fist.md` continues
+to say *ki* in its rules text, because that is the name used by the revision it
+targets, and a new commentary subsection states the equivalence so a table on
+the newer revision can read every "ki point" as its own term with no other
+change. The pool equals Monk level, returns on a short rest, and funds the same
+competing options under either name.
+
+The equivalence was deliberately placed in the **declared non-Open-Game-Content
+commentary** rather than the rules text. Naming a rules term to state an
+equivalence is not reproduction of expression — a two-word term carries no
+copyright — and it is not a §7 claim of compatibility with a trademark, since it
+names a resource rather than a product. Keeping it out of the OGC portion means
+the licensed rules text never references a term from the CC-BY-only revision.
+
+Cross-document consequence: the Barbed Court's Focus-to-slot conversion and this
+subclass's ki-cost manifestation are the same mechanic in two vocabularies.
+
+### OGL compliance audit
+
+The document was audited clause by clause against the licence text rather than
+assumed compliant. **Three real gaps were found and fixed:**
+
+1. **§10 — the licence was not embedded.** The document pointed at
+   `OGL-1.0a.txt` in the same folder. §10 requires "a copy of this License with
+   every copy of the Open Game Content You Distribute", and a sibling file does
+   not travel with a document that is copied out of the repo. The full licence
+   text is now reproduced verbatim in the document.
+2. **§2 — no notice was affixed.** §2 requires a notice indicating the Open Game
+   Content may only be Used under the licence. Added at the head of the
+   document.
+3. **§8 — the declaration was incomplete.** It named the commentary sections but
+   did not exclude the embedded licence text, which the source documents state
+   expressly *"is not Open Game Content"*, and it did not positively identify
+   what *is* Open Game Content. The declaration now separates three categories:
+   the licence text, our commentary, and the rules content offered as OGC.
+
+**§6 — the Section 15 placeholder is filled.** OGL §6 requires title, copyright
+date and copyright holder's name for original Open Game Content. It was
+completed from the repository's own git identity (Derrick Schoen) rather than
+invented. **The owner must confirm this is the name they intend to publish
+under**; it is the one item in this entry that a session cannot verify for
+itself.
+
+Verified passing after the fixes, each checked against the source files rather
+than from memory: the §2 notice; the 3.5 and 5.1 copyright notices reproduced
+exactly as published, diffed against `srd-3.5/Legal.txt` and
+`srd-5.1/ogl-page.txt`; both OGL 1.0a notice variants ("Inc." and "LLC"); our
+own §6 entry; the §8 boundary; no Product Identity anywhere outside the required
+Section 15 notices; no trademark-compatibility claim; the full licence embedded
+verbatim with all fifteen sections and END OF LICENSE; and the Section 15 chain
+in cumulative source order.
+
 ## 2026-08-06 — CC-BY stays for non-OGL subclasses; the Psionic Fist ships OGL against SRD 5.1
 
 Owner's ruling, verbatim:
