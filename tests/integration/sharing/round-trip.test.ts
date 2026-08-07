@@ -1180,6 +1180,16 @@ describe('minimal character sharing', () => {
       casting_time: null,
       material_component_summary: null,
     });
+    expect(target.oneRaw(
+      `SELECT key_kind, catalog_layer, normalized_name
+       FROM catalog_content_identities
+       WHERE content_kind = 'spell' AND content_key = ?`,
+      [unknownKey],
+    )).toEqual({
+      key_kind: 'asserted',
+      catalog_layer: 'external',
+      normalized_name: 'starwardaegis',
+    });
 
     expect(
       new SpellAccessBuilder(target).buildForCharacter(
@@ -1199,6 +1209,12 @@ describe('minimal character sharing', () => {
     ]);
 
     const placeholderId = Number(placeholder?.id);
+    // Reproduce the persisted image written by the split-normalizer defect.
+    target.exec(
+      `UPDATE catalog_content_identities SET normalized_name = 'starward aegis'
+       WHERE content_kind = 'spell' AND content_key = ?`,
+      [unknownKey],
+    );
     const summary = new CatalogImporter(target).import({
       documents: [
         JSON.stringify([
@@ -1240,6 +1256,17 @@ describe('minimal character sharing', () => {
       is_active: 1,
       provenance: 'import',
     });
+    expect(target.allRaw(
+      `SELECT content_key, key_kind, catalog_layer, normalized_name
+       FROM catalog_content_identities
+       WHERE content_kind = 'spell' AND content_key = ?`,
+      [unknownKey],
+    )).toEqual([{
+      content_key: unknownKey,
+      key_kind: 'asserted',
+      catalog_layer: 'external',
+      normalized_name: 'starwardaegis',
+    }]);
     expect(
       new SpellAccessBuilder(target).buildForCharacter(
         imported.characterId,
@@ -1283,12 +1310,16 @@ describe('minimal character sharing', () => {
     ).toBe(spellName);
     expect(
       target.oneRaw(
-        `SELECT key_kind, catalog_layer
+        `SELECT key_kind, catalog_layer, normalized_name
          FROM catalog_content_identities
          WHERE content_kind = 'spell' AND content_key = ?`,
         [spellKey],
       ),
-    ).toEqual({ key_kind: 'asserted', catalog_layer: 'external' });
+    ).toEqual({
+      key_kind: 'asserted',
+      catalog_layer: 'external',
+      normalized_name: 'sharedloadoutname',
+    });
     expect(
       target.scalar(
         `SELECT count(*) FROM catalog_content_identities

@@ -740,6 +740,40 @@ export function registerAssertedPlaceholderContentIdentity(
   }
 }
 
+/**
+ * Repair only the pre-fix external spell identities created for unavailable
+ * share references. Real asserted content has a fingerprint and a
+ * non-placeholder root, so neither can satisfy this guard.
+ */
+export function repairAssertedPlaceholderContentIdentityName(
+  db: DatabaseContext,
+  input: {
+    readonly contentKey: ContentKey;
+    readonly normalizedName: string;
+  },
+): void {
+  db.transaction(() => {
+    db.exec(
+      `UPDATE catalog_content_identities
+       SET normalized_name = ?
+       WHERE content_kind = 'spell' AND content_key = ?
+         AND key_kind = 'asserted' AND catalog_layer = 'external'
+         AND normalized_name != ?
+         AND NOT EXISTS (
+           SELECT 1 FROM catalog_content_fingerprints AS fingerprint
+           WHERE fingerprint.content_kind = 'spell'
+             AND fingerprint.content_key = catalog_content_identities.content_key
+         )
+         AND EXISTS (
+           SELECT 1 FROM spell_versions AS spell
+           WHERE spell.content_key = catalog_content_identities.content_key
+             AND spell.provenance = 'placeholder'
+         )`,
+      [input.normalizedName, input.contentKey, input.normalizedName],
+    );
+  });
+}
+
 export function registerContentFingerprint(
   db: DatabaseContext,
   input: {

@@ -18,6 +18,7 @@ import {
   ContentIdentityKeyRefusal,
   projectContentGraphInDependencyOrder,
   registerAssertedContentIdentity,
+  repairAssertedPlaceholderContentIdentityName,
   rememberContentMatchDecision,
   rememberedContentMatchDecision,
   resolveContentAggregate,
@@ -1186,6 +1187,15 @@ function evaluate(
         }
       }
       try {
+        if (
+          resolution.kind === 'exact' &&
+          isExactAssertedPlaceholderUpgrade(db, projection, resolution)
+        ) {
+          repairAssertedPlaceholderContentIdentityName(db, {
+            contentKey: resolution.contentKey,
+            normalizedName: identity.envelope.normalizedName,
+          });
+        }
         if (resolution.kind === 'missing') {
           registerAssertedContentIdentity(db, {
             kind: projection.kind,
