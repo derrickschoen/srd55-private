@@ -7,6 +7,48 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D219 — OWNER: shipped-catalog prose revisions publish a successor with lineage (2026-08-06)
+
+Owner asked "Do we have the successor with lineage built? If not, don't
+build it." SUPERVISOR ANSWER, VERIFIED: yes — CI-7 (merged bb4ec32, mints
+0038 catalog_content_supersessions + 0039 cycle/rewrite/delete guards)
+built edit-as-new-version with recipient-local supersession lineage AND the
+reference-retarget command (previewReplacement/commitReplacement). So the
+ruling stands as the recommended option: a revised shipped-catalog entry
+publishes as a successor superseding the old version, recording lineage;
+existing characters keep the old version until explicitly retargeted.
+BUILD NOTHING NEW for this — reuse CI-7's machinery. If an implementer
+finds themselves adding lineage plumbing, that is a finding: stop and
+report it.
+
+## D218 — OWNER: full export carries non-SRD content, share links try to and warn when they can't (2026-08-06)
+
+Baseline is install-then-open: a share link naming content the recipient
+lacks refuses with a message saying what to import. On top of that:
+(1) The full JSON export MUST include non-SRD library data so an export is
+self-sufficient. Supervisor note: character backup already calls
+`exportPortableContentClosure` (src/backup/character-backup.ts:57) and
+library export goes through the same portable-content seam — VERIFY this
+already satisfies the ruling before building anything; if it does, the
+work is a pin, not a feature.
+(2) Share LINKS should make an effort to carry non-SRD content when it
+fits the link budget, and WARN AT EXPORT TIME when it does not fit, rather
+than silently emitting a link the recipient cannot open. Owner's words:
+"maybe we should make an effort to fit the content in if we can and
+[w]arn if we can't". A link that cannot carry its content is still a valid
+link under the install-then-open baseline — the warning is the contract,
+not a refusal.
+
+## D217 — OWNER: SRD-only retirement just deletes affected characters (2026-08-06)
+
+Owner: "Just delete. No one has used the site yet." The one-time retirement
+of the bundled Veteran, EK and AT deletes the
+characters attached to them outright — no detach-and-preserve, no
+auto-retarget, no abort-and-demand-backup. Supersedes the design pass's
+detach proposal (docs/design/2026-08-06-seed-scope-srd-only.md section E).
+D60 applies: zero real users. This licence is scoped to THIS retirement;
+it is not a general permission to delete characters.
+
 ## D216 — OWNER: EK and AT are dropped entirely (2026-08-06)
 
 Completes D215's SRD-only seed. The two legacy non-SRD subclasses leave the
