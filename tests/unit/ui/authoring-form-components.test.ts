@@ -224,6 +224,8 @@ describe('HA-6 shared authoring form controls', () => {
     try {
       const calls: string[] = [];
       const controls = interactiveElement(createOrderedCardControls({
+        collectionKey: 'aegis-collection',
+        itemKey: 'aegis-item',
         accessibleName: 'Aegis', position: 1, count: 2,
         onMoveUp: () => calls.push('up'),
         onMoveDown: () => calls.push('down'),
@@ -241,6 +243,45 @@ describe('HA-6 shared authoring form controls', () => {
       buttons[1]?.click();
       buttons[2]?.click();
       expect(calls).toEqual(['down', 'remove']);
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('matches a reordered item by collection and item key together', () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const host = document.createElement('div');
+      host.setAttribute('data-authoring-form-kind', 'test');
+      document.body.append(host);
+      const render = (moved = false): void => {
+        const duplicate = createOrderedCardControls({
+          collectionKey: 'other-collection', itemKey: 'shared-item',
+          accessibleName: 'Other item', position: 2, count: 2,
+          onMoveUp: () => undefined, onMoveDown: () => undefined, onRemove: () => undefined,
+        });
+        const intended = createOrderedCardControls({
+          collectionKey: 'intended-collection', itemKey: 'shared-item',
+          accessibleName: moved ? 'Moved intended item' : 'Intended item',
+          position: moved ? 1 : 2, count: 2,
+          onMoveUp: () => render(true), onMoveDown: () => undefined, onRemove: () => undefined,
+        });
+        host.replaceChildren(duplicate, intended);
+      };
+      render();
+
+      const moveUp = Array.from(host.querySelectorAll<HTMLButtonElement>(
+        '[data-authoring-order-action]',
+      ))
+        .find((candidate) =>
+          candidate.getAttribute('data-authoring-order-collection') === 'intended-collection' &&
+          candidate.getAttribute('data-authoring-order-action') === 'move-up');
+      moveUp?.click();
+
+      expect(document.activeElement?.getAttribute('data-authoring-order-collection'))
+        .toBe('intended-collection');
+      expect(document.activeElement?.getAttribute('aria-label'))
+        .toBe('Move down Moved intended item, item 1 of 2');
     } finally {
       restoreDocument();
     }

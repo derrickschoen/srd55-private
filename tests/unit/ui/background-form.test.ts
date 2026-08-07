@@ -327,6 +327,43 @@ describe('HA-9 background authoring form', () => {
     }
   });
 
+  it('focuses the connected add control after keyboard-removing the last collection item', () => {
+    const restore = installInteractiveDocument();
+    try {
+      const rendered = render(client(), stored({
+        ...documentFixture(), equipment_option_a: [], equipment_option_b: [], effects: [],
+      }), undefined, () => 'only-equipment-item');
+      const add = button(rendered.root, 'Add equipment to option A');
+      add.click();
+      input(
+        byId(rendered.root, 'input', 'background-equipment-a-only-equipment-item-printed-name'),
+        'Only rope',
+      );
+      const kind = byId(
+        rendered.root,
+        'select',
+        'background-equipment-a-only-equipment-item-kind',
+      );
+      kind.value = 'weapon';
+      kind.dispatchEvent(new Event('change'));
+      const remove = rendered.root.querySelectorAll('button').find((candidate) =>
+        candidate.getAttribute('aria-label') === 'Remove option A Only rope, item 1 of 1');
+      if (remove === undefined) throw new Error('Last-item removal control is missing.');
+
+      keyboardActivate(remove);
+
+      const liveAdd = button(rendered.root, 'Add equipment to option A');
+      expect(document.activeElement === liveAdd as unknown as Element).toBe(true);
+      expect(document.activeElement?.isConnected).toBe(true);
+      expect(rendered.root.querySelectorAll('.background-equipment-card')).toHaveLength(0);
+      expect(rendered.root.querySelector('.background-authoring-status')?.textContent)
+        .toBe('Removed option A Only rope.');
+      rendered.cleanup();
+    } finally {
+      restore();
+    }
+  });
+
   it('adds, changes, keyboard-reorders, and removes equipment and shared flat effects', async () => {
     const restore = installInteractiveDocument();
     try {
@@ -346,27 +383,38 @@ describe('HA-9 background authoring form', () => {
       input(byId(rendered.root, 'input', 'background-equipment-a-ha9-item-1-quantity'), '2');
       button(rendered.root, 'Add equipment to option A').click();
       const secondKind = byId(rendered.root, 'select', 'background-equipment-a-ha9-item-2-kind');
+      input(byId(rendered.root, 'input', 'background-equipment-a-ha9-item-2-printed-name'), 'Club');
       secondKind.value = 'weapon';
       secondKind.dispatchEvent(new Event('change'));
-      input(byId(rendered.root, 'input', 'background-equipment-a-ha9-item-2-printed-name'), 'Club');
       input(byId(rendered.root, 'input', 'background-equipment-a-ha9-item-2-quantity'), '1');
       const catalog = byId(rendered.root, 'select', 'background-equipment-a-ha9-item-2-catalog');
       catalog.value = '2024:weapon:club';
       catalog.dispatchEvent(new Event('change'));
       const moveUp = rendered.root.querySelectorAll('button').find((candidate) =>
-        candidate.getAttribute('aria-label') === 'Move up option A item 2, item 2 of 2');
+        candidate.getAttribute('aria-label') === 'Move up option A Club, item 2 of 2');
       if (moveUp === undefined) throw new Error('Equipment reorder is missing.');
       keyboardActivate(moveUp);
-      expect(document.activeElement).toBe(moveUp);
+      expect(document.activeElement?.isConnected).toBe(true);
+      expect(document.activeElement?.getAttribute('aria-label'))
+        .toBe('Move down option A Club, item 1 of 2');
+      expect(rendered.root.querySelector('.background-authoring-status')?.textContent)
+        .toBe('Moved option A Club to position 1 of 2.');
       const moveDown = rendered.root.querySelectorAll('button').find((candidate) =>
         candidate.getAttribute('aria-label') === 'Move down option A Club, item 1 of 2');
       if (moveDown === undefined) throw new Error('Equipment move-down control is missing.');
       keyboardActivate(moveDown);
-      expect(document.activeElement).toBe(moveDown);
+      expect(document.activeElement?.isConnected).toBe(true);
+      expect(document.activeElement?.getAttribute('aria-label'))
+        .toBe('Move up option A Club, item 2 of 2');
+      expect(rendered.root.querySelector('.background-authoring-status')?.textContent)
+        .toBe('Moved option A Club to position 2 of 2.');
       const removeRope = rendered.root.querySelectorAll('button').find((candidate) =>
         candidate.getAttribute('aria-label') === 'Remove option A Rope, item 1 of 2');
       if (removeRope === undefined) throw new Error('Equipment removal control is missing.');
       keyboardActivate(removeRope);
+      expect(document.activeElement?.isConnected).toBe(true);
+      expect(rendered.root.querySelector('.background-authoring-status')?.textContent)
+        .toBe('Removed option A Rope.');
 
       button(rendered.root, 'Add equipment to option B').click();
       const armorKind = byId(rendered.root, 'select', 'background-equipment-b-ha9-item-3-kind');

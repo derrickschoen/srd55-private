@@ -650,6 +650,11 @@ describe('HA-8 subclass timeline form', () => {
       featureMove.click();
       expect(root.querySelectorAll('.subclass-feature-card')[0]?.getAttribute('data-draft-item-uuid'))
         .toBe('feature-three-b');
+      expect(document.activeElement?.isConnected).toBe(true);
+      expect(document.activeElement?.getAttribute('aria-label'))
+        .toBe('Move down Second feature, item 1 of 2');
+      expect(root.querySelector('.subclass-authoring-status')?.textContent)
+        .toBe('Moved Second feature to position 1 of 2.');
 
       const effectMove = root.querySelectorAll('button').find((candidate) =>
         candidate.getAttribute('aria-label') === 'Move up Second tempo, item 2 of 2');
@@ -659,6 +664,11 @@ describe('HA-8 subclass timeline form', () => {
       effectMove.click();
       expect(root.querySelectorAll('.authoring-effect-card').slice(0, 2).map((card) =>
         card.getAttribute('data-draft-item-uuid'))).toEqual(['effect-three-b', 'effect-three-a']);
+      expect(document.activeElement?.isConnected).toBe(true);
+      expect(document.activeElement?.getAttribute('aria-label'))
+        .toBe('Move down Second tempo, item 1 of 2');
+      expect(root.querySelector('.subclass-authoring-status')?.textContent)
+        .toBe('Moved Second tempo to position 1 of 2.');
       cleanup();
     } finally {
       restoreDocument();

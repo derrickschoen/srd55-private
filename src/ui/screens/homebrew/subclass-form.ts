@@ -34,6 +34,7 @@ import {
   installDraftBeforeUnloadGuard,
   installDraftNavigationGuard,
   isFeatureEffectKind,
+  orderedCollectionAnchorAttributes,
   renderValidationSummary,
   type AuthoringEffectFieldValue,
 } from '../../authoring/form-components';
@@ -870,6 +871,8 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
           );
         }
         card.append(createOrderedCardControls({
+          collectionKey: `subclass-progression-${String(rowIndex)}-grants`,
+          itemKey: grant.draft_item_uuid,
           accessibleName: grant.rule_key || `spell grant ${String(grantIndex + 1)}`,
           position: grantIndex + 1,
           count: progression.rows[rowIndex]!.grants.length,
@@ -967,7 +970,12 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
         const addGrant = element('button', {
           className: 'button-secondary',
           text: 'Add spell grant',
-          attributes: { type: 'button' },
+          attributes: {
+            type: 'button',
+            ...orderedCollectionAnchorAttributes(
+              `subclass-progression-${String(rowIndex)}-grants`,
+            ),
+          },
         });
         addGrant.addEventListener('click', () => {
           const liveRow = liveOverride().rows[rowIndex]!;
@@ -1050,7 +1058,10 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
       const addFeature = element('button', {
         className: 'button-secondary',
         text: `Add feature at level ${String(level)}`,
-        attributes: { type: 'button' },
+        attributes: {
+          type: 'button',
+          ...orderedCollectionAnchorAttributes(`subclass-level-${String(level)}-features`),
+        },
       });
       addFeature.disabled = locked;
       addFeature.addEventListener('click', () => {
@@ -1187,7 +1198,12 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
         const addEffect = element('button', {
           className: 'button-secondary',
           text: 'Add effect',
-          attributes: { type: 'button' },
+          attributes: {
+            type: 'button',
+            ...orderedCollectionAnchorAttributes(authoringPathKey([
+              'features', featureIndex, 'effects',
+            ])),
+          },
         });
         addEffect.disabled = locked;
         addEffect.addEventListener('click', () => {
@@ -1198,6 +1214,8 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
           render();
         });
         const reorder = createOrderedCardControls({
+          collectionKey: `subclass-level-${String(level)}-features`,
+          itemKey: feature.draft_item_uuid,
           accessibleName: feature.name || `level ${String(level)} feature ${String(withinLevelIndex + 1)}`,
           position: withinLevelIndex + 1,
           count: levelFeatures.length,

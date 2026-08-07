@@ -29,6 +29,7 @@ import {
   createOrderedCardControls,
   installDraftBeforeUnloadGuard,
   installDraftNavigationGuard,
+  orderedCollectionAnchorAttributes,
   renderValidationSummary,
   type AuthoringEffectFieldValue,
 } from '../../authoring/form-components';
@@ -465,7 +466,10 @@ export function renderSpeciesForm(options: SpeciesFormOptions): Cleanup {
       const add = element('button', {
         className: 'button-secondary',
         text: 'Add trait',
-        attributes: { type: 'button' },
+        attributes: {
+          type: 'button',
+          ...orderedCollectionAnchorAttributes('species-traits'),
+        },
       });
       add.addEventListener('click', () => {
         const trait: SpeciesAuthoringDraftTrait = {
@@ -580,7 +584,12 @@ export function renderSpeciesForm(options: SpeciesFormOptions): Cleanup {
         const addEffect = element('button', {
           className: 'button-secondary',
           text: 'Add effect',
-          attributes: { type: 'button' },
+          attributes: {
+            type: 'button',
+            ...orderedCollectionAnchorAttributes(authoringPathKey([
+              'traits', traitIndex, 'effects',
+            ])),
+          },
         });
         addEffect.addEventListener('click', () => {
           const traits = document.traits.map((candidate, index) => index === traitIndex
@@ -593,6 +602,8 @@ export function renderSpeciesForm(options: SpeciesFormOptions): Cleanup {
           render();
         });
         card.append(effects, addEffect, createOrderedCardControls({
+          collectionKey: 'species-traits',
+          itemKey: trait.draft_item_uuid,
           accessibleName: trait.name || `trait ${String(traitIndex + 1)}`,
           position: traitIndex + 1,
           count: document.traits.length,
@@ -626,7 +637,10 @@ export function renderSpeciesForm(options: SpeciesFormOptions): Cleanup {
       const add = element('button', {
         className: 'button-secondary',
         text: 'Add grant',
-        attributes: { type: 'button' },
+        attributes: {
+          type: 'button',
+          ...orderedCollectionAnchorAttributes('species-grants'),
+        },
       });
       add.addEventListener('click', () => {
         update({
@@ -873,6 +887,8 @@ export function renderSpeciesForm(options: SpeciesFormOptions): Cleanup {
           card.append(...labelledControl('Number of skills to choose', count.id, count), choices);
         }
         card.append(createOrderedCardControls({
+          collectionKey: 'species-grants',
+          itemKey: grant.draft_item_uuid,
           accessibleName: grant.rule_key || `grant ${String(grantIndex + 1)}`,
           position: grantIndex + 1,
           count: document.grants.length,

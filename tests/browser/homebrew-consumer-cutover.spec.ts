@@ -118,14 +118,27 @@ test('published origins and subclass cut over to ordinary consumers with catalog
     has: page.getByRole('heading', { name: 'HA10 Starling', exact: true }),
   });
   await expect(speciesCard.getByText('Homebrew · external layer', { exact: true })).toBeVisible();
-  await speciesCard.getByRole('button', { name: 'Choose HA10 Starling', exact: true }).click();
+  const chooseSpecies = speciesCard.getByRole('button', {
+    name: 'Choose HA10 Starling',
+    exact: true,
+  });
+  await chooseSpecies.focus();
+  await chooseSpecies.press('Enter');
 
   const backgroundCard = page.getByRole('listitem').filter({
     has: page.getByRole('radio', { name: 'HA10 Wayfinder', exact: true }),
   });
   await expect(backgroundCard.getByText('Homebrew · external layer', { exact: true })).toBeVisible();
-  await backgroundCard.getByRole('radio', { name: 'HA10 Wayfinder', exact: true }).check();
-  await page.getByRole('button', { name: 'Apply background', exact: true }).click();
+  const chooseBackground = backgroundCard.getByRole('radio', {
+    name: 'HA10 Wayfinder',
+    exact: true,
+  });
+  await chooseBackground.focus();
+  await chooseBackground.press('Space');
+  await expect(chooseBackground).toBeChecked();
+  const applyBackground = page.getByRole('button', { name: 'Apply background', exact: true });
+  await applyBackground.focus();
+  await applyBackground.press('Enter');
 
   const characters = await page.evaluate(() => window.staticApp.inspectRows('characters'));
   const stored = characters.find((row) => row['name'] === 'HA10 Cutover Hero');
@@ -146,15 +159,17 @@ test('published origins and subclass cut over to ordinary consumers with catalog
     .toBeFocused({ timeout: 45_000 });
   await page.locator('[data-level-up-next]').click();
   await page.locator('[data-level-up-next]').click();
-  await page.getByRole('radio', {
+  const chooseSubclass = page.getByRole('radio', {
     name: 'HA10 Horizon Guard — Fighter, expanded rules',
     exact: true,
-  }).check();
-  await expect(page.getByRole('radio', {
-    name: 'HA10 Horizon Guard — Fighter, expanded rules',
-    exact: true,
-  })).toHaveAccessibleDescription('Homebrew · external layer');
-  await page.locator('[data-level-up-next]').click();
+  });
+  await chooseSubclass.focus();
+  await chooseSubclass.press('Space');
+  await expect(chooseSubclass).toBeChecked();
+  await expect(chooseSubclass).toHaveAccessibleDescription('Homebrew · external layer');
+  const reviewSubclass = page.locator('[data-level-up-next]');
+  await reviewSubclass.focus();
+  await reviewSubclass.press('Enter');
   await expect(
     page.getByText('HA10 Horizon Guard — Homebrew · external layer', {
       exact: true,

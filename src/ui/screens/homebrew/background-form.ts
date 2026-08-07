@@ -30,6 +30,7 @@ import {
   createOrderedCardControls,
   installDraftBeforeUnloadGuard,
   installDraftNavigationGuard,
+  orderedCollectionAnchorAttributes,
   renderValidationSummary,
   type AuthoringEffectFieldValue,
 } from '../../authoring/form-components';
@@ -507,10 +508,23 @@ export function renderBackgroundForm(options: BackgroundFormOptions): Cleanup {
         }
         kind.value = item.kind;
         kind.addEventListener('change', () => {
+          const liveItem = currentItems()[index];
+          if (liveItem === undefined) return;
           const nextKind = kind.value === 'weapon' || kind.value === 'armor' ? kind.value : 'gear';
           const changed: BackgroundAuthoringDraftEquipment = nextKind === 'gear'
-            ? { kind: nextKind, draft_item_uuid: item.draft_item_uuid, quantity: item.quantity, printed_name: item.printed_name }
-            : { kind: nextKind, draft_item_uuid: item.draft_item_uuid, quantity: item.quantity, printed_name: item.printed_name, content_key: null };
+            ? {
+                kind: nextKind,
+                draft_item_uuid: liveItem.draft_item_uuid,
+                quantity: liveItem.quantity,
+                printed_name: liveItem.printed_name,
+              }
+            : {
+                kind: nextKind,
+                draft_item_uuid: liveItem.draft_item_uuid,
+                quantity: liveItem.quantity,
+                printed_name: liveItem.printed_name,
+                content_key: null,
+              };
           replaceItems(currentItems().map((candidate, position) => position === index ? changed : candidate));
           render();
         });
@@ -556,6 +570,8 @@ export function renderBackgroundForm(options: BackgroundFormOptions): Cleanup {
           card.append(...labelledControl(`Catalog ${item.kind}`, catalog.id, catalog));
         }
         card.append(createOrderedCardControls({
+          collectionKey: `background-equipment-${option}`,
+          itemKey: item.draft_item_uuid,
           accessibleName: `option ${upper} ${item.printed_name || `item ${String(index + 1)}`}`,
           position: index + 1,
           count: items.length,
@@ -567,7 +583,10 @@ export function renderBackgroundForm(options: BackgroundFormOptions): Cleanup {
       }
       const add = element('button', {
         className: 'button-secondary', text: `Add equipment to option ${upper}`,
-        attributes: { type: 'button' },
+        attributes: {
+          type: 'button',
+          ...orderedCollectionAnchorAttributes(`background-equipment-${option}`),
+        },
       });
       add.addEventListener('click', () => {
         replaceItems([...currentItems(), {
@@ -617,7 +636,10 @@ export function renderBackgroundForm(options: BackgroundFormOptions): Cleanup {
       }));
     }
     const addEffect = element('button', {
-      className: 'button-secondary', text: 'Add effect', attributes: { type: 'button' },
+      className: 'button-secondary', text: 'Add effect', attributes: {
+        type: 'button',
+        ...orderedCollectionAnchorAttributes(authoringPathKey(['effects'])),
+      },
     });
     addEffect.addEventListener('click', () => {
       update({ ...document, effects: [...document.effects, emptyEffect('armor_class_bonus', itemUuid())] });
