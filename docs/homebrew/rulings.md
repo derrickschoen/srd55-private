@@ -5,6 +5,78 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-06 — licensing research: the SRD 5.1 route, the CC-BY question, Psionic Fist prior art, and MIT for two docs
+
+Owner's questions, verbatim:
+
+> Research Reddit and user forums about how people are handling making homebrew
+> from ogl sources and making it 5.5 compatible. Do we really need to publish a
+> subclass for 5.5 under the cc license?
+>
+> One way around would be to make the subclass for the 5e srd which I think was
+> ogl.
+>
+> Research if someone already converted psionic fist to a 5e kink subclass
+
+> My preference would be to publish the veteran and barbed court monk under the
+> mit license if it does not cause legal risk
+
+Findings written up in full in `ogl/LICENSING.md` §6–§9. Summary:
+
+- **The owner's 5.1 idea is correct and becomes Route D.** Wizards' own SRD page
+  states SRD 5.1 is released "under **both** the terms of OGL 1.0a and the
+  Creative Commons Attribution 4.0 International", while "all new SRD versions
+  will be released **exclusively** under Creative Commons". So a single OGL
+  document may lawfully combine 3.5 SRD and SRD 5.1 Open Game Content, one
+  licence, one Section 15 chain — no quarantine tension. **The catch is
+  decisive: SRD 5.1 is the 2014 rules.** Ki points not Focus Points, no Weapon
+  Mastery, no 2024 Monk. Route D yields a 2014-compatible subclass and cannot
+  be made 5.5-compatible, because every 2024 term lives only in the CC-BY-only
+  SRD 5.2.
+- **Mixing is the known trap, and the folder quarantine is the standard
+  answer.** Product Identity has no CC-BY equivalent, and CC-BY-4.0
+  §2(a)(5)(B) forbids imposing additional terms that restrict the licensed
+  rights. Community reading: treat the two as separate agreements over separate
+  material and there is no problem; put one work under both and it is a
+  quagmire. D176's physical split already implements this.
+- **CC-BY is not compelled for a 5.5 subclass** — only for documents that
+  reproduce SRD 5.2 expression. Original text referencing 2024 rules by name is
+  ours.
+- **No prior conversion of the Psionic Fist to a 5e subclass exists.** Searched
+  across homebrew hosts, wikis and forums. What exists is original psionic-monk
+  design (Way of the Psion, Way of the Fifth Essence, the Battlemind in
+  Re-Imagining Psionics, DMsGuild's Complete Psionics Handbook). The nearest
+  article — d20collective's "5 Psionic Prestige Classes WotC should adapt into
+  5e Subclasses" — was read in full and covers Illumine Soul, Illithid Slayer,
+  Zerth Cenobite, Psicrystal Imprinter and Ectopic Adept, at concept level, and
+  **does not include the Psionic Fist**. The niche is open.
+
+### MIT — measured, not estimated
+
+Both documents were diffed against `srd-5.2.1.txt` at n-gram level with the
+licence notice excluded. **Zero verbatim SRD sentences of 12 words or more in
+either.** Longest verbatim run: **10 words** in the Veteran ("you can use this
+feature a number of times equal"), **13 words** in the Barbed Court ("table
+shows how many spell slots you have to cast your level 1"). Both are 5e rules
+boilerplate — a limited-use clause and a spellcasting-block sentence.
+
+Conclusion: no meaningful protected SRD expression is present, CC-BY is not
+legally compelled for these two, and **MIT on our own text carries low risk**.
+Three caveats recorded: MIT is a software licence and needs a line defining what
+"the Software" means for a design document (CC0 is the conventional choice for
+prose); the SRD 5.2 notice should be kept regardless, because it is an
+attribution statement rather than a licence grant and D59's posture is
+"authorization, not copyright"; and the Barbed Court's 13-word run should be
+rephrased, which costs nothing and removes the only available argument.
+
+**Standing condition:** MIT holds only while these documents stay free of OGL
+content. The Barbed Court was cleared against the full 3.5 SRD on 2026-08-06. If
+either ever absorbs OGL material it moves to `ogl/` and MIT ceases to be
+available, per OGL §2.
+
+Not applied — the owner's preference is conditional on this assessment, and the
+relicensing itself awaits their ruling.
+
 ## 2026-08-06 — homebrew/ split by licence; OGL quarantine built; Barbed Court cleared against the 3.5 SRD
 
 Owner's rulings, verbatim:
