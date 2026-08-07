@@ -5,6 +5,80 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-06 — CC-BY stays for non-OGL subclasses; the Psionic Fist ships OGL against SRD 5.1
+
+Owner's ruling, verbatim:
+
+> Ok, keep the cc-by license for all subclasses not based on ogl material.
+>
+> We put the panic fist conversion under the ogl in the ogl folder and target
+> srd 5.1 and avoid any srd 5.2 only mechanics
+
+("panic fist" read as Psionic Fist.) This settles the MIT question in the entry
+below: **MIT is declined, CC-BY stands** for everything in `cc-by/`, including
+the Veteran and the Barbed Court. The measurement that MIT would have been
+low-risk is left on the record, unused.
+
+The conversion takes **Route D** from `ogl/LICENSING.md` §6.
+
+### Applied
+
+- `ogl/srd-5.1/` — SRD 5.1 fetched from Wizards' own server, **OGL edition**
+  (`media.wizards.com/2016/downloads/DND/SRD-OGL_V5.1.pdf`, 4,857,826 bytes,
+  SHA-256 `d3f94417…`). The CC edition was also retrieved and checksummed for
+  the record but deliberately **not** used: taking 5.1 under CC-BY would
+  reintroduce the mixing problem the quarantine exists to prevent, and only the
+  OGL edition carries the licence and Section 15 chain in the document.
+- `ogl/SECTION-15.md` — extended with the 5.1 chain, read verbatim from the
+  PDF's own licence page. Recorded oddity preserved rather than tidied: the 3.5
+  chain says "Wizards of the Coast, **Inc.**" and the 5.1 chain says "Wizards of
+  the Coast, **LLC**".
+- `ogl/way-of-the-psionic-fist.md` — the conversion. Monastic Tradition at
+  3/6/11/17: Psionic Powers (five powers known, manifested by spending ki equal
+  to the power's level, max power level 1st/2nd/3rd/4th), Psionic Fist at 6th,
+  Greater Psionic Fist at 11th, Perfect Manifestation at 17th. Carries its own
+  OGL §8 Open Game Content declaration and the full four-entry Section 15 chain.
+
+### Conversion decisions worth recording
+
+- **Power points became ki, not a second pool.** The Monk already owns a
+  Wisdom-flavoured personal resource; a parallel pool would be an imported-
+  chassis mismatch. The source's binding constraint was power-point scarcity,
+  and ki contention reproduces it — a 3rd-level power at Monk 11 costs three ki,
+  which is a Flurry, a Dodge and a Stunning Strike foregone.
+- **Three source clauses were dropped as 3.5 plumbing with no 5e referent:**
+  the Monk-ability stacking clause (a multiclass patch; a subclass never leaves
+  the Monk progression), the no-weapon-or-armour proficiency line, and the entry
+  requirements.
+- **The namesake was preserved.** The eponymous 3.5 *Psionic Fist* feat —
+  expend focus for extra unarmed damage — became the 6th-level feature, and
+  *Greater Psionic Fist* the 11th, so the subclass's name is earned by a
+  mechanic rather than only by flavour.
+
+### Verified against the source, not memory
+
+Every chassis value was read out of `srd-5.1/srd-5.1-ogl.txt`: *"Ki save DC = 8
++ your proficiency bonus + your Wisdom modifier"* quoted directly; Martial Arts
+die d4/d6/d8/d10 at 1/5/11/17; ki points equal to Monk level; Monastic Tradition
+at 3/6/11/17; and all fifteen powers confirmed present. A reading caveat is
+recorded in `srd-5.1/SOURCE.md`: the 5.1 PDF's two-column layout interleaves
+across the gutter and its spell headers use soft hyphens, so the Section 15
+chain reads as gibberish under `pdftotext -layout` and had to be re-extracted
+page-by-page. Spell levels must not be inferred from adjacent text on the
+spell-list pages.
+
+### Open
+
+- **Section 15's final entry is a placeholder.** OGL §6 requires title,
+  copyright date and copyright holder's name for original Open Game Content.
+  Guessing a legal name is not something this session will do; the owner must
+  set it before the document is distributed.
+- Componentless manifestation is the least-tested clause — it lets powers work
+  while Silenced, grappled or restrained. Faithful to the fiction, unpriced,
+  labeled amber with a stated fallback.
+- No playtest. Status is "ready for design review only", as with every other
+  draft.
+
 ## 2026-08-06 — licensing research: the SRD 5.1 route, the CC-BY question, Psionic Fist prior art, and MIT for two docs
 
 Owner's questions, verbatim:

@@ -19,11 +19,21 @@ System Reference Document Copyright 2000-2003, Wizards of the Coast, Inc.;
 Authors Jonathan Tweet, Monte Cook, Skip Williams, Rich Baker, Andy Collins,
 David Noonan, Rich Redman, Bruce R. Cordell, John D. Rateliff, Thomas Reid,
 James Wyatt, based on original material by E. Gary Gygax and Dave Arneson.
+
+Open Game License v 1.0a Copyright 2000, Wizards of the Coast, LLC.
+
+System Reference Document 5.1 Copyright 2016, Wizards of the Coast, Inc.;
+Authors Mike Mearls, Jeremy Crawford, Chris Perkins, Rodney Thompson, Peter
+Lee, James Wyatt, Robert J. Schwalb, Bruce R. Cordell, Chris Sims, and Steve
+Townshend, based on original material by E. Gary Gygax and Dave Arneson.
 ```
 
-Both entries are reproduced **exactly** as they appear in the 3.5 SRD's own
-`Legal.txt`, which is committed unmodified at `srd-3.5/Legal.txt` so the wording
-can be verified rather than trusted.
+All entries are reproduced **exactly** as published — the 3.5 pair from that
+SRD's own `Legal.txt`, committed unmodified at `srd-3.5/Legal.txt`; the 5.1 pair
+from the licence page of the OGL edition of SRD 5.1, committed at
+`srd-5.1/ogl-page.txt`. Both can be verified rather than trusted. Note that the
+two Wizards OGL entries differ — "Inc." in the 3.5 chain, "LLC" in the 5.1
+chain. That difference is in the sources and is preserved, not tidied.
 
 ## Adding to the chain
 
@@ -38,7 +48,8 @@ Template:
 <Document title> Copyright <year>, <copyright holder>; Author <author>.
 ```
 
-Nothing original has been added yet; the chain is source-only.
+One original entry exists in `way-of-the-psionic-fist.md`, with its copyright
+holder and author left as a placeholder the owner must set before distribution.
 
 ## What is Open Game Content in this folder
 
@@ -50,6 +61,10 @@ position:
   Content except the Product Identity the SRD's own legal file designates, and
   except the text of the licence itself, which that file states *"is not Open
   Game Content."*
+- `srd-5.1/srd-5.1-ogl.txt` and `srd-5.1/ogl-page.txt` are SRD 5.1 as
+  published, taken under the OGL rather than under its alternative CC-BY grant.
+- `way-of-the-psionic-fist.md` declares its own Open Game Content boundary in
+  the document, per §8.
 - `LICENSING.md`, `README.md` and this file are our own commentary, are **not**
   Open Game Content, and are not offered under the OGL. They quote the licence
   and the SRD's legal file for identification and analysis only.

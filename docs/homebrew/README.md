@@ -20,7 +20,7 @@ survive somebody copying a paragraph.
 | Folder | Licence | Rule |
 |---|---|---|
 | `cc-by/` | CC-BY-4.0 + the SRD 5.2 notice | Our own text, built from SRD 5.2.1. **No OGL content, ever.** |
-| `ogl/` | Open Game License 1.0a | 3.0/3.5 SRD source, and any conversion that reuses it. Carries the licence and the Section 15 chain. |
+| `ogl/` | Open Game License 1.0a | 3.0/3.5/5.1 SRD source, and any conversion that reuses it. Carries the licence and the Section 15 chain. Holds the Psionic Fist conversion, which targets **SRD 5.1 (2014 rules)** because 5.2 is CC-BY-only and cannot be taken under the OGL. |
 
 **Text never moves from `ogl/` to `cc-by/`.** Concepts may cross; sentences,
 feature names, tables and numbers may not. The reasoning, and the three routes

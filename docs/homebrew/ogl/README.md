@@ -27,10 +27,12 @@ the full reading.
 | `OGL-1.0a.txt` | The licence, verbatim. §10 requires a copy to travel with every copy of Open Game Content distributed. |
 | `SECTION-15.md` | The Copyright Notice chain for exactly what this folder holds, and how to extend it. |
 | `LICENSING.md` | Research note: what can and cannot be converted from an OGL prestige class into a CC-BY 5.2 subclass, and the three routes available. |
+| `way-of-the-psionic-fist.md` | The Psionic Fist converted to a 2014-rules Monastic Tradition, targeting SRD 5.1. |
+| `srd-5.1/` | SRD 5.1 taken under the OGL — see its `SOURCE.md`. |
 | `srd-3.5/` | The 3.5 SRD as published — see its `SOURCE.md` for provenance and checksums. |
 | `srd-3.0/` | The 3.0 SRD, **partial — 49 of ~205 files, no prestige classes**. See its `SOURCE.md` before relying on it. |
 
-No converted subclass lives here yet.
+One converted subclass lives here: `way-of-the-psionic-fist.md`.
 
 ## Before adding anything
 
