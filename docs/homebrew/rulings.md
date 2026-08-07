@@ -5,6 +5,39 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-07 — Barbed Court: bespoke *Shield* clause at level 3 — open item 2 of 9 CLOSED
+
+Owner's ruling, verbatim:
+
+> Bespoke shield at 3.
+
+Effect: option (b) as presented — a level-3 clause letting the monk cast
+*Shield* by spending Focus Points, no spell slot required. This honours the
+original directive ("lvl3->can cast the shield spell using a focus point")
+that the refresh-from-6 model had stranded.
+
+**Price: 2 Focus Points, stated as an assumption, not a ruling.** The option
+was presented and chosen at 2 Focus for consistency with the ×2 refresh rate.
+The original directive said "a focus point" (1), and the strongest comparator
+cuts that way too: the 2024 Shadow monk (non-SRD, distance marker only) casts
+*Darkness* — a 2nd-level spell — for **1** Focus Point at Monk 3, and the 2014
+Way of Shadow casts 2nd-level spells for 2 ki. Against that line, 2 Focus for
+a 1st-level *Shield* is conservative. One word from the owner moves it to 1;
+the doc will print 2 until then.
+
+Consequences recorded:
+
+- From Monk 6 the clause runs in parallel with the general refresh at the same
+  effective price (cast with slot + regain for 2 = 2 Focus). Not dead text:
+  the bespoke cast works when every slot is already expended and consumes no
+  slot, and it is the only Focus pathway at levels 3–5.
+- A no-slot cast is outside the One-Spell-with-a-Spell-Slot-per-Turn rule (the
+  SRD rule limits *expending slots*). *Shield* being a Reaction, the practical
+  effect is nil, but the reading is on the record.
+- F3 Dip Bait meter moves: a 3-level dip now buys Focus-funded *Shield* (pool
+  3 → one extra cast per short rest) on top of the existing dip haul. Modest,
+  noted for the outsider-reading tests.
+
 ## 2026-08-07 — Barbed Court: the slot refresh costs no action; rate closes at ×2 — open item 1 of 9 CLOSED
 
 Owner's ruling, verbatim:
