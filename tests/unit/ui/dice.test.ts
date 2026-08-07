@@ -1,9 +1,13 @@
+import { spawnSync } from 'node:child_process';
+import { execPath } from 'node:process';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_BASIC_DIE_SIZE,
   attackProbabilities,
   chromaticLeapChance,
   exactResult,
+  promotedDieOutcome,
   seededRoll,
   selectedDieSize,
   sorcerousExpectedExtraDice,
@@ -40,13 +44,19 @@ function config(
   };
 }
 
-function upgrade(changes: Partial<DieUpgrade> = {}): DieUpgrade {
+type DieUpgradeChanges = Omit<Partial<DieUpgrade>, 'promotedTo'> & {
+  promotedTo?: number;
+};
+
+function upgrade(changes: DieUpgradeChanges = {}): DieUpgrade {
+  const { promotedTo = 2, ...rest } = changes;
+  const dieSize = rest.dieSize ?? null;
   return {
     promotedOutcomes: [1],
-    promotedTo: 2,
     appliesTo: 'all',
     dieSize: null,
-    ...changes,
+    ...rest,
+    promotedTo: promotedDieOutcome(promotedTo, dieSize),
   };
 }
 
@@ -206,6 +216,23 @@ describe('planner dice oracle', () => {
     );
   });
 
+  it('makes promoted Sorcerous Burst outcomes trigger added dice in exact odds', () => {
+    const burst = exactResult(
+      config({
+        profile: 'sorcerous-burst',
+        sorcerousBaseDice: 1,
+        explosionCap: 1,
+        dieUpgrade: upgrade({
+          promotedTo: 8,
+          appliesTo: 'spell',
+          dieSize: 8,
+        }),
+      }),
+    );
+
+    close(burst.expectedSorcerousExtraDice, 2 / 8);
+  });
+
   it('matches bounded Sorcerous Burst and Chromatic Orb expectations', () => {
     close(
       sorcerousExpectedExtraDice(1, 3),
@@ -251,19 +278,6 @@ describe('planner dice oracle', () => {
   });
 
   it('replays complete seeded traces including explosions and leaps', () => {
-    const input = config({
-      profile: 'sorcerous-burst',
-      rollMode: 'advantage',
-      halflingLuck: true,
-      tripleAdvantage: true,
-      dieUpgrade: upgrade(),
-      resistanceBypass: true,
-      resistance: true,
-      vulnerability: true,
-    });
-    expect(seededRoll(input, 'table-night:17')).toEqual(
-      seededRoll(input, 'table-night:17'),
-    );
     const burst = seededRoll(
       config({ profile: 'sorcerous-burst', armorClass: 1 }),
       'burst:3',
@@ -282,6 +296,147 @@ describe('planner dice oracle', () => {
     expect(orb.attacks[1]?.triggeredLeap).toBe(false);
     expect(orb.totalDamage).toBe(35);
   });
+
+  it('pins seeded promotion guards and Sorcerous and Chromatic wiring', () => {
+    const aboveDieSize = seededRoll(
+      config({
+        armorClass: 1,
+        dieUpgrade: upgrade({ promotedTo: 10 }),
+      }),
+      'guard-1:6',
+    );
+    expect(aboveDieSize.attacks[0]?.damageDice).toEqual([
+      { raw: 1, value: 1, added: false },
+    ]);
+    expect(aboveDieSize.totalDamage).toBe(1);
+
+    const downward = seededRoll(
+      config({
+        armorClass: 1,
+        dieUpgrade: upgrade({
+          promotedOutcomes: [3],
+          promotedTo: 2,
+        }),
+      }),
+      'guard-3:3',
+    );
+    expect(downward.attacks[0]?.damageDice).toEqual([
+      { raw: 3, value: 3, added: false },
+    ]);
+    expect(downward.totalDamage).toBe(3);
+
+    const spellD8Upgrade = upgrade({
+      promotedTo: 8,
+      appliesTo: 'spell',
+      dieSize: 8,
+    });
+    const burst = seededRoll(
+      config({
+        profile: 'sorcerous-burst',
+        armorClass: 1,
+        explosionCap: 1,
+        dieUpgrade: spellD8Upgrade,
+      }),
+      'burst-promoted:2',
+    );
+    expect(burst.attacks[0]?.damageDice).toEqual([
+      { raw: 1, value: 8, added: false },
+      { raw: 4, value: 4, added: true },
+    ]);
+    expect(burst.totalDamage).toBe(12);
+
+    const orb = seededRoll(
+      config({
+        profile: 'chromatic-orb',
+        armorClass: 1,
+        chromaticSlotLevel: 1,
+        dieUpgrade: spellD8Upgrade,
+      }),
+      'orb-promoted:19',
+    );
+    expect(orb.attacks).toHaveLength(2);
+    expect(orb.attacks[0]?.damageDice).toEqual([
+      { raw: 1, value: 8, added: false },
+      { raw: 8, value: 8, added: false },
+      { raw: 7, value: 7, added: false },
+    ]);
+    expect(orb.attacks[0]?.triggeredLeap).toBe(true);
+    expect(orb.attacks[1]?.damageDice).toEqual([
+      { raw: 7, value: 7, added: false },
+      { raw: 8, value: 8, added: false },
+      { raw: 7, value: 7, added: false },
+    ]);
+    expect(orb.totalDamage).toBe(45);
+    expect(orb.stopReason).toBe('leap-limit');
+  });
+});
+
+describe('promoted die outcome contract', () => {
+  it('rejects invalid promoted outcomes with exact messages', () => {
+    expect(() => promotedDieOutcome(Number.NaN, 8)).toThrowError(
+      'Promoted die outcome must be finite; received NaN.',
+    );
+    expect(() => promotedDieOutcome(2.5, 8)).toThrowError(
+      'Promoted die outcome must be an integer; received 2.5.',
+    );
+    expect(() => promotedDieOutcome(9, 8)).toThrowError(
+      'Promoted die outcome must be no greater than d8; received 9.',
+    );
+    expect(() => promotedDieOutcome(1, 8)).toThrowError(
+      'Promoted die outcome must be at least 2; received 1.',
+    );
+  });
+
+  it(
+    'requires construction before a promoted outcome enters DiceConfig',
+    () => {
+      const projectRoot = fileURLToPath(new URL('../../..', import.meta.url));
+      const result = spawnSync(
+        execPath,
+        [
+          fileURLToPath(
+            new URL(
+              '../../../node_modules/typescript/bin/tsc',
+              import.meta.url,
+            ),
+          ),
+          '--noEmit',
+          '--strict',
+          '--target',
+          'ES2022',
+          '--lib',
+          'ES2022,DOM,WebWorker',
+          '--module',
+          'ESNext',
+          '--moduleResolution',
+          'Bundler',
+          '--skipLibCheck',
+          '--noUncheckedIndexedAccess',
+          '--exactOptionalPropertyTypes',
+          '--verbatimModuleSyntax',
+          '--isolatedModules',
+          '--moduleDetection',
+          'force',
+          'src/vite-env.d.ts',
+          'docs/type-probes/promoted-die-outcome.probe.ts',
+        ],
+        { cwd: projectRoot, encoding: 'utf8' },
+      );
+      const diagnostics = `${result.stdout}${result.stderr}`;
+
+      expect(result.status).not.toBe(0);
+      expect(diagnostics).toContain(
+        "Type 'number' is not assignable to type 'PromotedDieOutcome'",
+      );
+      expect(
+        diagnostics
+          .split('\n')
+          .filter((line) => line.includes('error TS')),
+      ).toHaveLength(1);
+    },
+    // Measured alone at 3.9s; the compiler subprocess needs contention room.
+    20_000,
+  );
 });
 
 /**

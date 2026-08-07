@@ -10,9 +10,43 @@ export type DamageProfile =
 
 export type DamageRollKind = 'weapon' | 'spell';
 
+declare const promotedDieOutcomeBrand: unique symbol;
+
+export type PromotedDieOutcome = number & {
+  readonly [promotedDieOutcomeBrand]: true;
+};
+
+export function promotedDieOutcome(
+  value: number,
+  dieSize: DieSize | null,
+): PromotedDieOutcome {
+  if (!Number.isFinite(value)) {
+    throw new Error(
+      `Promoted die outcome must be finite; received ${String(value)}.`,
+    );
+  }
+  if (!Number.isInteger(value)) {
+    throw new Error(
+      `Promoted die outcome must be an integer; received ${String(value)}.`,
+    );
+  }
+  if (value < 2) {
+    throw new Error(
+      `Promoted die outcome must be at least 2; received ${String(value)}.`,
+    );
+  }
+  const maximum = dieSize ?? 100;
+  if (value > maximum) {
+    throw new Error(
+      `Promoted die outcome must be no greater than d${String(maximum)}; received ${String(value)}.`,
+    );
+  }
+  return value as PromotedDieOutcome;
+}
+
 export interface DieUpgrade {
   promotedOutcomes: readonly number[];
-  promotedTo: number;
+  promotedTo: PromotedDieOutcome;
   appliesTo: DamageRollKind | 'all';
   dieSize: DieSize | null;
 }
@@ -291,10 +325,17 @@ function combination(n: number, k: number): number {
 export function sorcerousExpectedExtraDice(
   baseDice: number,
   cap: number,
+  dieUpgrade: DieUpgrade | null = null,
 ): number {
   if (baseDice <= 0 || cap <= 0) return 0;
-  const success = 1 / 8;
-  const failure = 7 / 8;
+  let triggeringFaces = 0;
+  for (let face = 1; face <= 8; face += 1) {
+    if (dieValue(face, 8, 'spell', dieUpgrade) === 8) {
+      triggeringFaces += 1;
+    }
+  }
+  const success = triggeringFaces / 8;
+  const failure = 1 - success;
   let expected = 0;
   let cumulativeBelow = 0;
   for (let k = 1; k <= cap; k += 1) {
@@ -317,7 +358,9 @@ export function sorcerousExpectedRawDamage(
   for (let face = 1; face <= 8; face += 1) {
     mean += dieValue(face, 8, 'spell', dieUpgrade) / 8;
   }
-  return (baseDice + sorcerousExpectedExtraDice(baseDice, cap)) * mean;
+  return (
+    baseDice + sorcerousExpectedExtraDice(baseDice, cap, dieUpgrade)
+  ) * mean;
 }
 
 function sorcerousDamage(
@@ -343,11 +386,17 @@ function sorcerousDamage(
         continue;
       }
       for (let face = 1; face <= 8; face += 1) {
-        const addsDie = face === 8 && state.extras < cap;
+        const value = dieValue(
+          face,
+          8,
+          'spell',
+          config.dieUpgrade,
+        );
+        const addsDie = value === 8 && state.extras < cap;
         const candidate: State = {
           remaining: state.remaining - 1 + (addsDie ? 1 : 0),
           extras: state.extras + (addsDie ? 1 : 0),
-          sum: state.sum + dieValue(face, 8, 'spell', config.dieUpgrade),
+          sum: state.sum + value,
           probability: state.probability / 8,
         };
         const key = `${candidate.remaining}:${candidate.extras}:${candidate.sum}`;
@@ -471,6 +520,7 @@ export function exactResult(config: DiceConfig): ExactResult {
         ? sorcerousExpectedExtraDice(
             config.sorcerousBaseDice,
             config.explosionCap,
+            config.dieUpgrade,
           )
         : 0,
   };
@@ -598,12 +648,13 @@ function sorcerousRoll(
   while (remaining > 0) {
     remaining -= 1;
     const raw = rollDie(random, 8);
+    const value = dieValue(raw, 8, 'spell', config.dieUpgrade);
     damageDice.push({
       raw,
-      value: dieValue(raw, 8, 'spell', config.dieUpgrade),
+      value,
       added: damageDice.length >= baseDice,
     });
-    if (raw === 8 && extras < config.explosionCap) {
+    if (value === 8 && extras < config.explosionCap) {
       extras += 1;
       remaining += 1;
     }
@@ -774,7 +825,7 @@ export function selectedDieSize(raw: string): DieSize {
 
 function selectedUpgradeOutcomes(
   raw: string,
-  promotedTo: number,
+  promotedTo: PromotedDieOutcome,
 ): readonly number[] {
   return [
     ...new Set(
@@ -1106,10 +1157,13 @@ export function renderDiceHelper(
       upgradeDieSize.value === 'any'
         ? null
         : selectedDieSize(upgradeDieSize.value);
-    const promotedTo = boundedInteger(
-      Number(upgradeTo.value),
-      2,
-      selectedUpgradeDieSize ?? 100,
+    const promotedTo = promotedDieOutcome(
+      boundedInteger(
+        Number(upgradeTo.value),
+        2,
+        selectedUpgradeDieSize ?? 100,
+      ),
+      selectedUpgradeDieSize,
     );
     config.dieUpgrade = dieUpgradeEnabled.checked
       ? {
