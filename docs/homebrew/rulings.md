@@ -5,6 +5,54 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-06 — Barbed Court: the goad triggers on a melee hit; 1 Focus buys the duel-binding effect
+
+Owner's ruling, verbatim:
+
+> Make goad on melee hit. 1 point to cast compelled duel
+
+Effect: Barbed Goad stops being a save-gated verbal taunt and becomes an
+on-hit rider. The 1-Focus "sharpen" option is replaced by the full
+duel-binding effect the owner has asked for twice.
+
+**Licensing, restated because the phrase recurs in owner instructions.**
+"Compelled Duel" is a non-SRD 2014 spell and is **absent from SRD 5.2.1**
+(grep-verified). Under D59/D191 it may be named as a distance marker only,
+never used as a source or mechanical template, and it will not appear in the
+subclass doc. The effect is expressed in original wording built from SRD
+primitives (Disadvantage, a Wisdom save, a distance clause, Concentration).
+
+Measured consequences, recorded not corrected:
+
+- **The goad becomes effectively automatic.** With a 65% hit chance the
+  probability that at least one melee attack connects in a turn is 95.7% at
+  Monk 3 (three attacks), 99.5% at Monk 6 (five) and 99.8% from Monk 11 (six).
+  The Wisdom save is gone, so nothing resists it.
+- **Warding Image's price defence is void.** The +2 AC was justified as
+  conditional, averaging about +1.2 AC at roughly 55–65% goad uptime. At ~99%
+  uptime it is a **flat, unconditional +2 AC from Monk 6**, against SRD *Shield
+  of Faith*, which charges a 1st-level slot, a Bonus Action and Concentration
+  for the same bonus. Likewise Court Ward's "while a creature is goaded by
+  you" gate on *Shield*-for-1-Focus is now nominal.
+- **The goad loses range and gains reliability.** A melee-hit trigger means the
+  monk can no longer taunt at a distance, and the "can hear and understand
+  you" clause becomes mechanically inert — deafened, mindless and
+  language-less creatures were the goad's only natural immunities and are
+  immune no longer unless the clause is deliberately kept.
+- **Three collisions the ruling creates**, put to the owner rather than
+  resolved in session:
+  1. The 1-Focus sharpen is superseded by the duel effect.
+  2. **Level 17's Unanswerable Challenge was the duel effect** — 3 Focus, one
+     minute, Disadvantage on attacks against others, 30-foot leash. Moving that
+     to a 1-Focus level-3 option leaves the capstone with no job.
+  3. If the goad fires on *every* melee hit rather than once per turn, a
+     six-attack turn can goad up to six creatures, which makes **Scandalous
+     Echo** — 1 Focus for one extra target at level 11 — pointless.
+- Retained by construction: *Shocking Grasp* is a melee spell attack, so it
+  still delivers the goad provided the clause reads "melee attack" rather than
+  "melee weapon attack." The earlier no-save *Shocking Grasp* delivery rider is
+  now redundant and folds away.
+
 ## 2026-08-06 — Barbed Court: Scandalous Echo keeps its first paragraph only
 
 Owner's ruling, verbatim:
