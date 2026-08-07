@@ -46,6 +46,29 @@ export interface OrderedCardControlsOptions {
   readonly onRemove: () => void;
 }
 
+const ORDERED_COLLECTION_ANCHOR = 'data-authoring-order-anchor-collection';
+
+/** Marks the add control or labelled heading that receives focus when a collection empties. */
+export function orderedCollectionAnchorAttributes(
+  collectionKey: string,
+): Readonly<Record<string, string>> {
+  return { [ORDERED_COLLECTION_ANCHOR]: collectionKey };
+}
+
+function orderedCollectionAnchor(
+  host: HTMLElement,
+  collectionKey: string,
+): HTMLElement | undefined {
+  return Array.from(host.querySelectorAll<HTMLElement>(`[${ORDERED_COLLECTION_ANCHOR}]`))
+    .find((candidate) => candidate.getAttribute(ORDERED_COLLECTION_ANCHOR) === collectionKey);
+}
+
+function makeProgrammaticallyFocusable(control: HTMLElement): void {
+  if (!['a', 'button', 'input', 'select', 'textarea'].includes(control.tagName.toLowerCase())) {
+    control.setAttribute('tabindex', '-1');
+  }
+}
+
 function authoringHost(control: HTMLElement): HTMLElement {
   let current: HTMLElement | null = control.parentElement;
   let formParent: HTMLElement | null = null;
@@ -66,7 +89,10 @@ export function createOrderedCardControls(
 ): HTMLDivElement {
   const controls = element('div', {
     className: 'authoring-card-controls',
-    attributes: { 'aria-label': `Reorder ${options.accessibleName}` },
+    attributes: {
+      'aria-label': `Reorder ${options.accessibleName}`,
+      'data-authoring-order-accessible-name': options.accessibleName,
+    },
   });
   const button = (
     label: string,
@@ -93,11 +119,11 @@ export function createOrderedCardControls(
       const available = Array.from(host.querySelectorAll<HTMLButtonElement>(
         '[data-authoring-order-action]',
       ));
-      const sameItem = available.filter((candidate) =>
-        candidate.getAttribute('data-authoring-order-item') === options.itemKey
-      );
       const sameCollection = available.filter((candidate) =>
         candidate.getAttribute('data-authoring-order-collection') === options.collectionKey
+      );
+      const sameItem = sameCollection.filter((candidate) =>
+        candidate.getAttribute('data-authoring-order-item') === options.itemKey
       );
       const requestedAction = label.toLowerCase().replace(' ', '-');
       const requested = sameItem.find((candidate) =>
@@ -112,7 +138,7 @@ export function createOrderedCardControls(
           )
         : sameItem.find((candidate) => !candidate.disabled);
       const liveAccessibleName = sameItem[0]?.parentElement
-        ?.getAttribute('aria-label')?.replace(/^Reorder /u, '') ?? options.accessibleName;
+        ?.getAttribute('data-authoring-order-accessible-name') ?? options.accessibleName;
       const status = Array.from(host.querySelectorAll<HTMLElement>('[role="status"]'))
         .find((candidate) => candidate.getAttribute('aria-live') !== null);
       if (status !== undefined) {
@@ -120,7 +146,14 @@ export function createOrderedCardControls(
           ? `Removed ${options.accessibleName}.`
           : `Moved ${liveAccessibleName} to position ${String(nextPosition ?? options.position)} of ${String(options.count)}.`;
       }
-      (requested ?? replacement)?.focus();
+      const emptyCollectionAnchor = label === 'Remove'
+        ? orderedCollectionAnchor(host, options.collectionKey)
+        : undefined;
+      const focusTarget = requested ?? replacement ?? emptyCollectionAnchor;
+      if (focusTarget !== undefined) {
+        makeProgrammaticallyFocusable(focusTarget);
+        focusTarget.focus();
+      }
     });
     return control;
   };

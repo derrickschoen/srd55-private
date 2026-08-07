@@ -41,6 +41,29 @@ async function expectAnnounced(page: Page, message: string): Promise<void> {
   await expect.poll(() => announcedMessages(page)).toContain(message);
 }
 
+test('announcement recorder ignores text that predates a live-region attribute', async ({ page }) => {
+  await installAnnouncementRecorder(page);
+  await page.goto('/');
+  await clearAnnouncements(page);
+  await page.evaluate(() => {
+    const region = document.createElement('div');
+    region.id = 'recorder-late-live-region';
+    region.textContent = 'Recorder must ignore this existing text.';
+    document.body.append(region);
+  });
+  await page.locator('#recorder-late-live-region').evaluate((region) => {
+    region.setAttribute('role', 'status');
+  });
+
+  await expect.poll(() => announcedMessages(page))
+    .not.toContain('Recorder must ignore this existing text.');
+
+  await page.locator('#recorder-late-live-region').evaluate((region) => {
+    region.textContent = 'Recorder observes this later mutation.';
+  });
+  await expectAnnounced(page, 'Recorder observes this later mutation.');
+});
+
 test('library tabs use their keyboard model and announce the route-loaded result', async ({ page }) => {
   // Measured alone at 10.5s; 20s is the standard contention guard.
   test.setTimeout(20_000);
@@ -181,6 +204,23 @@ test('background catalog, equipment, and effect controls work from real key even
     .evaluateAll((inputs) => inputs.map((input) => (input as HTMLInputElement).value)))
     .toEqual(['Club', 'Rope']);
   await expectAnnounced(page, 'Moved option A Club to position 1 of 2.');
+
+  await clearAnnouncements(page);
+  await pressEnter(page.getByRole('button', {
+    name: 'Remove option A Rope, item 2 of 2',
+    exact: true,
+  }));
+  const removeLastEquipment = page.getByRole('button', {
+    name: 'Remove option A Club, item 1 of 1',
+    exact: true,
+  });
+  await expect(removeLastEquipment).toBeFocused();
+  await clearAnnouncements(page);
+  await page.keyboard.press('Enter');
+  await expect(addEquipment).toBeFocused();
+  expect(await addEquipment.evaluate((control) => control.isConnected)).toBe(true);
+  await expect(page.locator('.background-equipment-card')).toHaveCount(0);
+  await expectAnnounced(page, 'Removed option A Club.');
 
   const addEffect = page.getByRole('button', { name: 'Add effect', exact: true });
   await pressEnter(addEffect);

@@ -17,8 +17,10 @@ export async function installAnnouncementRecorder(page: Page): Promise<void> {
         ? value
         : [];
     };
+    const snapshots = new WeakMap<Element, string>();
     const record = (region: Element): void => {
       const message = region.textContent?.trim() ?? '';
+      snapshots.set(region, message);
       if (message === '') return;
       const messages = read();
       if (messages.at(-1) === message) return;
@@ -29,9 +31,24 @@ export async function installAnnouncementRecorder(page: Page): Promise<void> {
     const observe = (): void => {
       const root = document.documentElement;
       if (root === null) return;
+      for (const region of Array.from(root.querySelectorAll(liveSelector))) {
+        snapshots.set(region, region.textContent?.trim() ?? '');
+      }
       new MutationObserver((records) => {
         const regions = new Set<Element>();
         for (const mutation of records) {
+          if (mutation.type === 'attributes') {
+            const target = mutation.target;
+            if (!(target instanceof Element)) continue;
+            // Making existing content live does not announce that content. Snapshot
+            // it now; only a later childList/characterData mutation may be recorded.
+            if (target.matches(liveSelector)) {
+              snapshots.set(target, target.textContent?.trim() ?? '');
+            } else {
+              snapshots.delete(target);
+            }
+            continue;
+          }
           const target = mutation.target instanceof Element
             ? mutation.target
             : mutation.target.parentElement;

@@ -327,6 +327,43 @@ describe('HA-9 background authoring form', () => {
     }
   });
 
+  it('focuses the connected add control after keyboard-removing the last collection item', () => {
+    const restore = installInteractiveDocument();
+    try {
+      const rendered = render(client(), stored({
+        ...documentFixture(), equipment_option_a: [], equipment_option_b: [], effects: [],
+      }), undefined, () => 'only-equipment-item');
+      const add = button(rendered.root, 'Add equipment to option A');
+      add.click();
+      input(
+        byId(rendered.root, 'input', 'background-equipment-a-only-equipment-item-printed-name'),
+        'Only rope',
+      );
+      const kind = byId(
+        rendered.root,
+        'select',
+        'background-equipment-a-only-equipment-item-kind',
+      );
+      kind.value = 'weapon';
+      kind.dispatchEvent(new Event('change'));
+      const remove = rendered.root.querySelectorAll('button').find((candidate) =>
+        candidate.getAttribute('aria-label') === 'Remove option A Only rope, item 1 of 1');
+      if (remove === undefined) throw new Error('Last-item removal control is missing.');
+
+      keyboardActivate(remove);
+
+      const liveAdd = button(rendered.root, 'Add equipment to option A');
+      expect(document.activeElement === liveAdd as unknown as Element).toBe(true);
+      expect(document.activeElement?.isConnected).toBe(true);
+      expect(rendered.root.querySelectorAll('.background-equipment-card')).toHaveLength(0);
+      expect(rendered.root.querySelector('.background-authoring-status')?.textContent)
+        .toBe('Removed option A Only rope.');
+      rendered.cleanup();
+    } finally {
+      restore();
+    }
+  });
+
   it('adds, changes, keyboard-reorders, and removes equipment and shared flat effects', async () => {
     const restore = installInteractiveDocument();
     try {

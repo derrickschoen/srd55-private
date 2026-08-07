@@ -30,6 +30,7 @@ import {
   createOrderedCardControls,
   installDraftBeforeUnloadGuard,
   installDraftNavigationGuard,
+  orderedCollectionAnchorAttributes,
   renderValidationSummary,
   type AuthoringEffectFieldValue,
 } from '../../authoring/form-components';
@@ -582,7 +583,10 @@ export function renderBackgroundForm(options: BackgroundFormOptions): Cleanup {
       }
       const add = element('button', {
         className: 'button-secondary', text: `Add equipment to option ${upper}`,
-        attributes: { type: 'button' },
+        attributes: {
+          type: 'button',
+          ...orderedCollectionAnchorAttributes(`background-equipment-${option}`),
+        },
       });
       add.addEventListener('click', () => {
         replaceItems([...currentItems(), {
@@ -632,7 +636,10 @@ export function renderBackgroundForm(options: BackgroundFormOptions): Cleanup {
       }));
     }
     const addEffect = element('button', {
-      className: 'button-secondary', text: 'Add effect', attributes: { type: 'button' },
+      className: 'button-secondary', text: 'Add effect', attributes: {
+        type: 'button',
+        ...orderedCollectionAnchorAttributes(authoringPathKey(['effects'])),
+      },
     });
     addEffect.addEventListener('click', () => {
       update({ ...document, effects: [...document.effects, emptyEffect('armor_class_bonus', itemUuid())] });
