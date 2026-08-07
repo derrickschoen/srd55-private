@@ -337,6 +337,9 @@ describe('HA-9 production-service form boundaries', () => {
     const firstEffectId = db.scalar<number>(
       `SELECT coalesce((SELECT seq FROM sqlite_sequence WHERE name = 'background_template_effects'), 0) + 1`,
     );
+    if (firstEquipmentId === null || firstEffectId === null) {
+      throw new Error('Background child row sequence fixture did not resolve.');
+    }
     const restore = installInteractiveDocument();
     try {
       const rendered = render(service, saved);

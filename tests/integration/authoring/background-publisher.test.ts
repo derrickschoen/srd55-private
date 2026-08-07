@@ -895,6 +895,9 @@ describe('HA-4 background publisher', () => {
       `SELECT coalesce((SELECT seq FROM sqlite_sequence
                         WHERE name = 'background_template_effects'), 0) + 1`,
     );
+    if (firstEquipmentId === null || firstEffectId === null) {
+      throw new Error('Background child row sequence fixture did not resolve.');
+    }
     db.exec(
       `CREATE TRIGGER ha4_refuse_draft_delete
        BEFORE DELETE ON catalog_content_drafts

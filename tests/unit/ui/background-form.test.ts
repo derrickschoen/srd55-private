@@ -179,7 +179,7 @@ function render(
     mount,
     draft,
     references,
-    randomUuid,
+    ...(randomUuid === undefined ? {} : { randomUuid }),
     confirmLeave: () => false,
     windowObject: new EventTarget() as unknown as Window,
   });
@@ -400,7 +400,9 @@ describe('HA-9 background authoring form', () => {
   it('preserves edits made during a late save and advances the stored revision for the next save', async () => {
     const restore = installInteractiveDocument();
     try {
-      let resolveFirst: ((value: StoredHomebrewDraft) => void) | null = null;
+      const saveControl: {
+        finish: ((value: StoredHomebrewDraft) => void) | null;
+      } = { finish: null };
       const expected: DraftRevision[] = [];
       const documents: BackgroundAuthoringDraft[] = [];
       const rendered = render(client({
@@ -408,15 +410,17 @@ describe('HA-9 background authoring form', () => {
           if (params.document.kind !== 'background') throw new Error('Expected background.');
           expected.push(params.expected_revision);
           documents.push(params.document);
-          if (expected.length === 1) return new Promise((resolve) => { resolveFirst = resolve; });
+          if (expected.length === 1) {
+            return new Promise((resolve) => { saveControl.finish = resolve; });
+          }
           return Promise.resolve(stored(params.document, 2 as DraftRevision));
         },
       }));
       input(byId(rendered.root, 'input', 'background-name'), 'First snapshot');
       button(rendered.root, 'Save draft').click();
       input(byId(rendered.root, 'input', 'background-name'), 'Newer local edit');
-      if (resolveFirst === null) throw new Error('Late save resolver is missing.');
-      resolveFirst(stored({ ...documentFixture(), name: 'First snapshot' }, 1 as DraftRevision));
+      if (saveControl.finish === null) throw new Error('Late save resolver is missing.');
+      saveControl.finish(stored({ ...documentFixture(), name: 'First snapshot' }, 1 as DraftRevision));
       await settle();
       expect(byId(rendered.root, 'input', 'background-name').value).toBe('Newer local edit');
       expect(rendered.root.querySelector('.background-authoring-status')?.textContent)
@@ -435,10 +439,15 @@ describe('HA-9 background authoring form', () => {
     const restore = installInteractiveDocument();
     try {
       for (const outcome of ['success', 'failure'] as const) {
-        let finish: ((value: PublishPreview) => void) | null = null;
-        let fail: ((reason: unknown) => void) | null = null;
+        const previewControl: {
+          finish: ((value: PublishPreview) => void) | null;
+          fail: ((reason: unknown) => void) | null;
+        } = { finish: null, fail: null };
         const rendered = render(client({
-          previewPublish: () => new Promise((resolve, reject) => { finish = resolve; fail = reject; }),
+          previewPublish: () => new Promise((resolve, reject) => {
+            previewControl.finish = resolve;
+            previewControl.fail = reject;
+          }),
         }));
         const previewForm = rendered.root.querySelector('form');
         previewForm?.dispatchEvent(new Event('submit', { cancelable: true }));
@@ -448,11 +457,11 @@ describe('HA-9 background authoring form', () => {
         strength.checked = false;
         strength.dispatchEvent(new Event('change'));
         if (outcome === 'success') {
-          if (finish === null) throw new Error('Preview resolver missing.');
-          finish(preview());
+          if (previewControl.finish === null) throw new Error('Preview resolver missing.');
+          previewControl.finish(preview());
         } else {
-          if (fail === null) throw new Error('Preview rejecter missing.');
-          fail(new Error('Preview failure.'));
+          if (previewControl.fail === null) throw new Error('Preview rejecter missing.');
+          previewControl.fail(new Error('Preview failure.'));
         }
         await settle();
         const attachedForm = rendered.root.querySelector('form');
@@ -472,11 +481,13 @@ describe('HA-9 background authoring form', () => {
     const restore = installInteractiveDocument();
     try {
       const router = new Router(routerWindow('https://example.test/homebrew/drafts/ha9-background-draft'));
-      let publishResolve: ((value: Awaited<ReturnType<AuthoringClient['commitPublish']>>) => void) | null = null;
+      const publishControl: {
+        finish: ((value: Awaited<ReturnType<AuthoringClient['commitPublish']>>) => void) | null;
+      } = { finish: null };
       const authoring = client({
         saveDraft: async (params) => stored(params.document as BackgroundAuthoringDraft, 1 as DraftRevision),
         previewPublish: async () => preview(),
-        commitPublish: () => new Promise((resolve) => { publishResolve = resolve; }),
+        commitPublish: () => new Promise((resolve) => { publishControl.finish = resolve; }),
       });
       const rendered = render(authoring, stored(), context(router));
       input(byId(rendered.root, 'input', 'background-name'), 'Dirty background');
@@ -491,8 +502,8 @@ describe('HA-9 background authoring form', () => {
       publish.click();
       input(byId(rendered.root, 'input', 'background-name'), 'Dirty while publishing');
       expect(router.navigate('/blocked-while-publishing')).toBe(false);
-      if (publishResolve === null) throw new Error('Publish resolver is missing.');
-      publishResolve({
+      if (publishControl.finish === null) throw new Error('Publish resolver is missing.');
+      publishControl.finish({
         outcome: 'created', content_key: '2024:content.background:dirty' as ContentKey,
         name: 'Dirty background', catalog_layer: 'external', previous_key_usage_count: 0,
       });
