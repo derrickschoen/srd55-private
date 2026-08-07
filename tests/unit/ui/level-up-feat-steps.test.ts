@@ -71,6 +71,7 @@ function candidate(options: {
     definition: {
       content_key: options.key as ContentKey,
       name: options.name,
+      catalog_layer: options.catalogLayer ?? 'bundled',
       grouping: options.grouping ?? 'general',
       min_level: null,
       ability_points: options.abilityPoints ?? 0,

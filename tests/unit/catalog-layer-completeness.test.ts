@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
@@ -7,42 +7,44 @@ import { describe, expect, it } from 'vitest';
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 
 /**
- * Read models and wire/UI contracts that can carry names rendered by a route.
- * Longhand is deliberate: widening this boundary is a visible review diff.
+ * Every TypeScript module under a catalog-facing source root participates.
+ * Adding a contract file therefore cannot require a guard allowlist edit.
  */
-const CONTRACT_SOURCES = [
-  'src/authoring/contracts.ts',
-  'src/builder/background-choices.ts',
-  'src/builder/contracts.ts',
-  'src/builder/equipment-choices.ts',
-  'src/builder/level-up-wizard.ts',
-  'src/catalog/catalog-disclosure.ts',
-  'src/catalog/content-adoption.ts',
-  'src/domain/read-models.ts',
-  'src/eligibility/eligible-spell-search.ts',
-  'src/queries/character-completeness.ts',
-  'src/queries/character-sheet-builder.ts',
-  'src/rules/equipment-package-display.ts',
-  'src/ui/screens/level-up/planned-choice-steps.ts',
-  'src/ui/screens/level-up/review-complete.ts',
+const CONTRACT_ROOTS = [
+  'src/access',
+  'src/authoring',
+  'src/builder',
+  'src/catalog',
+  'src/domain',
+  'src/eligibility',
+  'src/queries',
+  'src/ui',
 ] as const;
 
-const DISPLAY_FIELDS = new Set([
-  'candidate_name',
-  'class_name',
-  'display_name',
-  'feat_name',
-  'item_name',
-  'localName',
-  'name',
-  'printed_name',
-  'source_name',
-  'spell_name',
-  'subclass_name',
-]);
+function typescriptModules(directory: string): readonly string[] {
+  return readdirSync(join(repoRoot, directory), { withFileTypes: true })
+    .flatMap((entry) => {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) return typescriptModules(path);
+      return entry.isFile() && entry.name.endsWith('.ts') &&
+          !entry.name.endsWith('.d.ts')
+        ? [path]
+        : [];
+    });
+}
 
-const CATALOG_TYPE_NAME =
-  /(?:Armor|Background|Candidate|Catalog|Class|Definition|Equipment|Feat|Item|Origin|Review|Source|Species|Spell|Subclass|Weapon)/u;
+const CONTRACT_SOURCES = CONTRACT_ROOTS.flatMap(typescriptModules).sort();
+
+const program = ts.createProgram({
+  rootNames: CONTRACT_SOURCES.map((file) => join(repoRoot, file)),
+  options: {
+    module: ts.ModuleKind.NodeNext,
+    moduleResolution: ts.ModuleResolutionKind.NodeNext,
+    skipLibCheck: true,
+    target: ts.ScriptTarget.ESNext,
+  },
+});
+const checker = program.getTypeChecker();
 
 /**
  * Exact source/type/field exemptions. These are values authored or copied onto
@@ -50,39 +52,51 @@ const CATALOG_TYPE_NAME =
  * none claims to identify an installed catalog entry at the display boundary.
  */
 const EXEMPTIONS = new Map<string, string>([
-  ['src/authoring/contracts.ts::SpeciesAuthoringDraftTrait::name', 'Draft trait names are user-authored children, not installed catalog entries.'],
+  ['src/authoring/contracts.ts::BackgroundAuthoringDraft::default_origin_feat_display_name', 'This is editable draft text before publication, not an assertion about an installed feat.'],
   ['src/authoring/contracts.ts::BackgroundAuthoringDraftEquipment::printed_name', 'Draft equipment text is user-authored before any catalog publication exists.'],
-  ['src/authoring/contracts.ts::SubclassAuthoringDraftFeature::name', 'Draft feature names are user-authored children, not installed catalog entries.'],
-  ['src/authoring/contracts.ts::SpeciesContentTrait::name', 'A trait is content inside one catalog aggregate and has no independent layer.'],
-  ['src/authoring/contracts.ts::BackgroundContentEquipment::printed_name', 'A package line is content inside one background aggregate and has no independent layer.'],
-  ['src/authoring/contracts.ts::SubclassContentFeature::name', 'A feature is content inside one subclass aggregate and has no independent layer.'],
-  ['src/domain/read-models.ts::CharacterItem::name', 'Character items are editable character-owned values, not catalog references.'],
-  ['src/queries/character-sheet-builder.ts::SheetArmorRow::name', 'Sheet armor rows are editable character-owned copies under D69.'],
-  ['src/queries/character-sheet-builder.ts::SheetItemRow::name', 'Sheet item rows are editable character-owned values.'],
-  ['src/queries/character-sheet-builder.ts::SheetPrintedFeature::name', 'Feature headings are children of a separately disclosed catalog source.'],
-  ['src/builder/level-up-wizard.ts::FeatDefinitionForApplication::name', 'The enclosing LevelUpFeatCandidate carries the one authoritative layer for this definition.'],
+  ['src/authoring/contracts.ts::BackgroundContentEquipment::printed_name', 'An equipment line is child content of its disclosed background aggregate, not an independently installed entry.'],
+  ['src/authoring/contracts.ts::BackgroundContentAggregate::default_origin_feat_display_name', 'This preserves authored aggregate text; the separately linked feat content key controls installed identity.'],
+  ['src/authoring/contracts.ts::PublishDecision::clone_name', 'This is the requested name for content that does not exist until the publication command succeeds.'],
+  ['src/authoring/contracts.ts::ContentUsage::character_name', 'Character names are character-owned text, not catalog content.'],
+  ['src/access/spell-access-builder.ts::SpellAccessRoute::identity_name', 'The canonical identity name is mechanical deduplication input; spell_name is the rendered catalog value.'],
+  ['src/builder/background-choices.ts::BackgroundPrintedPairing::background_name', 'The pairing is nested under GuidedBackgroundOption, whose catalog layer owns and accompanies this printed text.'],
+  ['src/builder/armor-class-effects.ts::CharacterItemRow::name', 'Character item rows are editable character-owned values, not installed catalog references.'],
+  ['src/catalog/catalog-schema.ts::CatalogSubclassRecord::name', 'An uninstalled catalog document has no publication layer until the publisher registers it.'],
+  ['src/catalog/spell-fork.ts::ForkSpellResult::displayName', 'The command result repeats the submitted fork name; publication review carries the installed identity.'],
+  ['src/domain/command-contracts.ts::ItemFields::name', 'Item command fields are editable character-owned values, not installed catalog references.'],
+  ['src/domain/command-contracts.ts::SetHitPointRollCommand::class_name', 'This authenticated command locator is not rendered and does not claim a catalog identity.'],
+  ['src/domain/models.ts::DefinitionRow::name', 'Raw database row models are persistence inputs, not rendered route or UI contracts.'],
+  ['src/domain/models.ts::SpellIdentityRow::canonical_name', 'Canonical identity text is mechanical deduplication data, not a rendered catalog version name.'],
+  ['src/domain/models.ts::SpellIdentityRow::normalized_name', 'Normalized identity text is mechanical deduplication data, not a rendered catalog version name.'],
+  ['src/domain/models.ts::SpellVersionRow::display_name', 'Raw database row models are persistence inputs; consumer projections add catalog disclosure.'],
+  ['src/domain/models.ts::ClassDefinitionRow::name', 'Raw database row models are persistence inputs; consumer projections add catalog disclosure.'],
+  ['src/domain/models.ts::SubclassDefinitionRow::name', 'Raw database row models are persistence inputs; consumer projections add catalog disclosure.'],
+  ['src/domain/models.ts::CharacterSourceInstanceRow::display_name', 'A source instance row stores copied character data and may have no resolvable catalog identity.'],
+  ['src/domain/read-models.ts::CharacterItem::name', 'Character items are editable character-owned values, not installed catalog references.'],
+  ['src/domain/read-models.ts::DuplicateAssessment::spell_name', 'Duplicate assessment metadata belongs to a selected spell disclosed by the workspace slot.'],
+  ['src/domain/read-models.ts::OrderSource::class_name', 'OrderSource is mechanical option data; the enclosing workspace class entry carries the class disclosure.'],
+  ['src/domain/read-models.ts::OrderSource::order_name', 'Divine Order and Primal Order are closed rules labels, not installed catalog entries.'],
+  ['src/domain/read-models.ts::Workspace::configurable_sources.display_name', 'A configurable source can be an unlinked imported instance whose copied label has no asserted identity.'],
+  ['src/queries/background-equipment.ts::BackgroundEquipmentItem::item_name', 'This is printed child content within a background equipment package, not an independently installed item.'],
+  ['src/queries/background-equipment.ts::BackgroundEquipmentPackage::background_name', 'This internal equipment interpreter is not a route contract; guided background options carry the layer.'],
+  ['src/queries/character-completeness.ts::UnchosenOptionItem::order_name', 'Divine Order and Primal Order are closed rules labels, not installed catalog entries.'],
+  ['src/queries/character-completeness.ts::OrphanHitPointRollItem::class_name', 'An orphan roll deliberately has no resolvable class catalog identity to disclose.'],
   ['src/builder/level-up-wizard.ts::LevelUpPendingEpicResolution::deferred_choice.class_name', 'This authenticated command locator is not rendered; held-class cards carry the display disclosure.'],
-  ['src/domain/read-models.ts::SpellRoute::spell_name', 'Build-report catalog_sources separately discloses every selected spell represented by this mechanical route.'],
-  ['src/domain/read-models.ts::SpellRoute::source_name', 'Build-report catalog_sources separately discloses the catalog source; this field describes mechanics.'],
-  ['src/domain/read-models.ts::DuplicateAssessment::spell_name', 'The assessment is mechanical metadata for a selected spell disclosed by the workspace slot.'],
   ['src/domain/read-models.ts::RemovableSource::display_name', 'A removable source may be an unlinked imported instance, so its copied character label has no asserted catalog layer.'],
-  ['src/domain/read-models.ts::OrderSource::class_name', 'OrderSource is mechanical option data; the enclosing workspace class entry carries the class layer.'],
-  ['src/domain/read-models.ts::BuildReport::wizard.spellbook.spell_name', 'BuildReport.catalog_sources is the authoritative disclosure for these spellbook mechanics.'],
-  ['src/domain/read-models.ts::BuildReport::wizard.prepared.spell_name', 'BuildReport.catalog_sources is the authoritative disclosure for these prepared-spell mechanics.'],
-  ['src/domain/read-models.ts::BuildReport::wizard.ritual_only.spell_name', 'BuildReport.catalog_sources is the authoritative disclosure for these ritual mechanics.'],
-  ['src/domain/read-models.ts::Workspace::configurable_sources.display_name', 'A configurable source can be an unlinked imported instance; the label is character-owned copied data.'],
+  ['src/queries/character-sheet-builder.ts::SheetPrintedFeature::source_name', 'CharacterSheet.catalog_sources separately owns disclosure for the parent of copied feature text.'],
+  ['src/queries/character-sheet-builder.ts::SheetHitPointRoll::class_name', 'CharacterSheet.catalog_sources separately owns disclosure for held classes; this is a copied roll label.'],
+  ['src/queries/character-sheet-builder.ts::SheetClassLine::class_name', 'CharacterSheet.catalog_sources is the authoritative disclosure for this class summary line.'],
+  ['src/queries/character-sheet-builder.ts::SheetClassLine::subclass_name', 'CharacterSheet.catalog_sources is the authoritative disclosure for this subclass summary line.'],
+  ['src/queries/character-sheet-builder.ts::SheetProficiencies::weapon_proficiencies.class_name', 'CharacterSheet.catalog_sources discloses the class behind this mechanical proficiency grant.'],
+  ['src/queries/character-sheet-builder.ts::SheetProficiencies::classes.class_name', 'CharacterSheet.catalog_sources discloses the class behind this mechanical proficiency grant.'],
+  ['src/queries/character-sheet-builder.ts::CharacterSheet::martial_arts.class_name', 'CharacterSheet.catalog_sources discloses the class behind this mechanical value.'],
   ['src/queries/character-completeness.ts::UnfilledChoicesItem::source_name', 'Completeness narrates a source-instance obligation; linked catalog sources disclose in the workspace catalog list.'],
   ['src/queries/character-completeness.ts::UnchosenOptionItem::source_name', 'Completeness narrates a source-instance obligation; linked catalog sources disclose in the workspace catalog list.'],
-  ['src/queries/character-completeness.ts::OrphanHitPointRollItem::class_name', 'An orphan roll deliberately has no resolvable class catalog identity to disclose.'],
   ['src/queries/character-completeness.ts::UnfilledSkillGrantsItem::source_name', 'Completeness may describe an unlinked imported source instance, not an asserted catalog entry.'],
   ['src/queries/character-completeness.ts::ExpertiseGrantItem::source_name', 'Completeness may describe an unlinked imported source instance, not an asserted catalog entry.'],
-  ['src/queries/character-sheet-builder.ts::SheetPrintedFeature::source_name', 'CharacterSheet.catalog_sources separately discloses the parent source for copied printed feature text.'],
-  ['src/queries/character-sheet-builder.ts::SheetHitPointRoll::class_name', 'CharacterSheet.catalog_sources separately discloses held classes; this is a copied roll label.'],
-  ['src/queries/character-sheet-builder.ts::SheetClassLine::class_name', 'CharacterSheet.catalog_sources is the authoritative layer disclosure for the class summary line.'],
-  ['src/queries/character-sheet-builder.ts::SheetClassLine::subclass_name', 'CharacterSheet.catalog_sources is the authoritative layer disclosure for the subclass summary line.'],
-  ['src/queries/character-sheet-builder.ts::SheetProficiencies::weapon_proficiencies.class_name', 'CharacterSheet.catalog_sources separately discloses the class behind this mechanical grant.'],
-  ['src/queries/character-sheet-builder.ts::SheetProficiencies::classes.class_name', 'CharacterSheet.catalog_sources separately discloses the class behind this mechanical grant.'],
-  ['src/queries/character-sheet-builder.ts::CharacterSheet::martial_arts.class_name', 'CharacterSheet.catalog_sources separately discloses the class behind this mechanical value.'],
+  ['src/ui/screens/planner/agent-reference.ts::ReferenceOutstandingItem::order_name', 'Divine Order and Primal Order are closed rules labels, not installed catalog entries.'],
+  ['src/ui/screens/planner/agent-reference.ts::ReferenceOutstandingItem::class_name', 'This mirrors an orphan roll that deliberately has no resolvable class catalog identity.'],
+  ['src/ui/screens/planner/agent-reference.ts::WithheldText::character_name', 'Character names are character-owned free text withheld from machine-readable output, not catalog content.'],
 ]);
 
 interface DisplayOccurrence {
@@ -113,32 +127,62 @@ function containerProperties(
   if (!ts.isInterfaceDeclaration(node) && !ts.isTypeLiteralNode(node)) {
     return [];
   }
-  return node.members.flatMap((member) => {
-    if (!ts.isPropertySignature(member)) return [];
-    const name = propertyName(source, member);
-    return name === null ? [] : [name];
-  });
+  const type = ts.isInterfaceDeclaration(node)
+    ? checker.getDeclaredTypeOfSymbol(
+        checker.getSymbolAtLocation(node.name) ??
+          (() => { throw new Error(`Missing interface symbol in ${source.fileName}.`); })(),
+      )
+    : checker.getTypeAtLocation(node);
+  return checker.getPropertiesOfType(type).map(
+    (property) => property.name,
+  );
 }
 
 function expectedLayerFields(displayField: string): readonly string[] {
-  switch (displayField) {
-    case 'candidate_name':
-      return ['candidate_catalog_layer', 'catalog_layer'];
-    case 'class_name':
-      return ['class_catalog_layer', 'catalog_layer'];
-    case 'item_name':
-      return ['item_catalog_layer', 'catalog_layer'];
-    case 'localName':
-      return ['localCatalogLayer', 'catalog_layer'];
-    case 'source_name':
-      return ['source_catalog_layer', 'catalog_layer'];
-    case 'spell_name':
-      return ['spell_catalog_layer', 'catalog_layer'];
-    case 'subclass_name':
-      return ['subclass_catalog_layer', 'catalog_layer'];
-    default:
-      return ['catalog_layer'];
+  if (displayField === 'name') return ['catalog_layer'];
+  if (displayField.endsWith('_name')) {
+    return [
+      `${displayField.slice(0, -'_name'.length)}_catalog_layer`,
+      'catalog_layer',
+    ];
   }
+  if (displayField.endsWith('Name')) {
+    return [
+      `${displayField.slice(0, -'Name'.length)}CatalogLayer`,
+      'catalog_layer',
+    ];
+  }
+  return ['catalog_layer'];
+}
+
+/**
+ * Shape rule: every exported snake-case `*_name` is display-capable. A bare
+ * `name` or camel-case `*Name` is display-capable when its containing contract
+ * also has a catalog locator or a layer field. Bare spell/feat name arrays are
+ * rejected separately. Type-checker properties make imported `extends`
+ * members participate when deciding whether the containing shape is catalogued.
+ */
+function isCatalogDisplayField(
+  source: ts.SourceFile,
+  property: ts.PropertySignature,
+  name: string,
+): boolean {
+  if (isBareCatalogNameList(source, property, name)) return true;
+  if (name.endsWith('_name')) return true;
+  const fields = new Set(containerProperties(source, property.parent));
+  const hasCatalogLocator = fields.has('content_key') ||
+    fields.has('contentKey') ||
+    [...fields].some((field) =>
+      field.endsWith('_definition_id') || field.endsWith('_version_id') ||
+      field.endsWith('_source_id') || field.endsWith('_instance_id') ||
+      field.endsWith('DefinitionId') ||
+      field.endsWith('VersionId') || field.endsWith('SourceId')
+    );
+  const hasLayerPair = expectedLayerFields(name).some((field) =>
+    fields.has(field)
+  );
+  if (name !== 'name' && !name.endsWith('Name')) return false;
+  return hasCatalogLocator || hasLayerPair;
 }
 
 function isBareCatalogNameList(
@@ -152,12 +196,10 @@ function isBareCatalogNameList(
 }
 
 function occurrences(file: string): readonly DisplayOccurrence[] {
-  const source = ts.createSourceFile(
-    file,
-    readFileSync(join(repoRoot, file), 'utf8'),
-    ts.ScriptTarget.Latest,
-    true,
-  );
+  const source = program.getSourceFile(join(repoRoot, file));
+  if (source === undefined) {
+    throw new Error(`TypeScript did not load derived contract module ${file}.`);
+  }
   const found: DisplayOccurrence[] = [];
   for (const declaration of source.statements) {
     if (
@@ -180,10 +222,7 @@ function occurrences(file: string): readonly DisplayOccurrence[] {
         const name = propertyName(source, node);
         if (name !== null) {
           path.push(name);
-          const catalogDisplay =
-            isBareCatalogNameList(source, node, name) ||
-            DISPLAY_FIELDS.has(name) &&
-              (name !== 'name' || CATALOG_TYPE_NAME.test(declarationName));
+          const catalogDisplay = isCatalogDisplayField(source, node, name);
           if (catalogDisplay) {
             const parentFields = new Set(containerProperties(source, node.parent));
             const layered = isBareCatalogNameList(source, node, name)
@@ -211,6 +250,12 @@ describe('catalog display contracts disclose their publication layer', () => {
   const displays = CONTRACT_SOURCES.flatMap(occurrences);
 
   it('enumerates the live read-model and contract boundary non-vacuously', () => {
+    expect(CONTRACT_SOURCES.length).toBeGreaterThan(150);
+    expect(CONTRACT_SOURCES).toEqual(expect.arrayContaining([
+      'src/access/spell-access-builder.ts',
+      'src/builder/level-up-wizard.ts',
+      'src/queries/character-spell-section-builder.ts',
+    ]));
     expect(displays.length).toBeGreaterThan(30);
     expect(displays.map(({ key }) => key)).toContain(
       'src/domain/read-models.ts::ItemDefinition::name',
@@ -221,12 +266,22 @@ describe('catalog display contracts disclose their publication layer', () => {
     expect(displays.map(({ key }) => key)).toContain(
       'src/builder/contracts.ts::GuidedGrantedSkillDisplay::source_name',
     );
+    expect(displays.map(({ key }) => key)).toEqual(expect.arrayContaining([
+      'src/access/spell-access-builder.ts::SpellAccessRoute::spell_name',
+      'src/builder/level-up-wizard.ts::FeatDefinitionForApplication::name',
+      'src/builder/level-up-wizard.ts::LevelUpPlannedSpellProjection::current_spell_name',
+      'src/queries/character-spell-section-builder.ts::SheetSpellbookEntry::name',
+      // `class_definition_id` comes from an imported extended interface.
+      'src/queries/level-up-planned-choices.ts::LevelUpPlannedChoiceContext::class_name',
+    ]));
   });
 
   it('keeps every exemption exact, used, and justified', () => {
     const keys = new Set(displays.map(({ key }) => key));
+    expect(
+      [...EXEMPTIONS.keys()].filter((key) => !keys.has(key)),
+    ).toEqual([]);
     for (const [key, reason] of EXEMPTIONS) {
-      expect(keys, key).toContain(key);
       expect(reason.trim().length, key).toBeGreaterThan(20);
     }
   });

@@ -78,6 +78,10 @@ import {
   type WeaponDamage,
 } from '../../../domain/weapon-damage';
 import type { WeaponRange } from '../../../domain/weapon-range';
+import {
+  catalogLayerLabel,
+  type CatalogLayerDisclosure,
+} from '../../../catalog/catalog-disclosure';
 
 export const AGENT_REFERENCE_FORMAT =
   'dnd-multiclass-spells.planner-reference' as const;
@@ -388,6 +392,7 @@ export interface ReferenceSpellChoice {
   readonly spell_level_max: number;
   readonly selected: boolean;
   readonly spell_name: string | null;
+  readonly spell_catalog_layer: CatalogLayerDisclosure | null;
   readonly spell_name_withheld: boolean;
   readonly spell_level: number | null;
   readonly rules_edition: RulesEdition | Unrecognised | null;
@@ -406,9 +411,11 @@ export interface ReferenceSpellChoice {
 export interface ReferenceAccessRoute {
   readonly index: number;
   readonly spell_name: string | null;
+  readonly spell_catalog_layer: CatalogLayerDisclosure;
   readonly spell_name_withheld: boolean;
   readonly spell_level: number;
   readonly source_ref: number;
+  readonly source_catalog_layer: CatalogLayerDisclosure;
   readonly slot_id: number | null;
   readonly casting_mode: CastingMode | Unrecognised;
   readonly spellcasting_ability: Ability | Unrecognised | null;
@@ -419,6 +426,7 @@ export interface ReferenceAccessRoute {
 export interface ReferenceSpellbookEntry {
   readonly index: number;
   readonly spell_name: string | null;
+  readonly spell_catalog_layer: CatalogLayerDisclosure;
   readonly spell_name_withheld: boolean;
   readonly active: boolean;
 }
@@ -531,6 +539,7 @@ export interface ReferenceWeaponMastery {
   readonly selected_count: number;
   readonly by_class: readonly {
     readonly class_name: string;
+    readonly class_catalog_layer: CatalogLayerDisclosure;
     readonly class_level: number;
     readonly allowance_state: MasteryAllowance['state'];
     readonly count: number | null;
@@ -841,6 +850,7 @@ export function buildAgentReference(
       spell_level_max: slot.level_max,
       selected: slot.spell_id !== null,
       spell_name: withheld ? null : slot.spell_name,
+      spell_catalog_layer: slot.spell_catalog_layer,
       spell_name_withheld: withheld,
       spell_level: slot.spell_level,
       rules_edition: knownOrNull(rulesEditions, slot.spell_edition),
@@ -865,9 +875,11 @@ export function buildAgentReference(
       return {
         index,
         spell_name: withheld ? null : route.spell_name,
+        spell_catalog_layer: route.spell_catalog_layer,
         spell_name_withheld: withheld,
         spell_level: route.spell_level,
         source_ref: registry.register(route.source_name, null),
+        source_catalog_layer: route.source_catalog_layer,
         slot_id: route.slot_id,
         casting_mode: known(castingModes, route.casting_mode),
         spellcasting_ability: knownOrNull(
@@ -888,6 +900,7 @@ export function buildAgentReference(
       return {
         index,
         spell_name: withheld ? null : entry.spell_name,
+        spell_catalog_layer: entry.spell_catalog_layer,
         spell_name_withheld: withheld,
         active: entry.active,
       };
@@ -1024,6 +1037,10 @@ export function buildAgentReference(
     selected_count: workspace.weapons.selected_count,
     by_class: allowance.classes.map((entry) => ({
       class_name: entry.class_name,
+      class_catalog_layer:
+        workspace.classes.find(
+          (held) => held.class_definition_id === entry.class_definition_id,
+        )?.catalog_layer ?? 'unknown',
       class_level: entry.class_level,
       allowance_state: entry.allowance.state,
       count:
@@ -1532,6 +1549,7 @@ export function agentReferenceSections(
           'Bucket',
           'Slot spell levels',
           'Chosen spell',
+          'Spell catalog layer',
           'Spell level',
           'Rules edition',
           'Ability',
@@ -1560,6 +1578,7 @@ export function agentReferenceSections(
                     'not imported',
                 )
               : cell('none chosen'),
+          cell(choice.spell_catalog_layer ?? 'not applicable'),
           cell(optionalNumber(choice.spell_level)),
           cell(choice.rules_edition ?? 'not applicable'),
           cell(choice.spellcasting_ability ?? 'not applicable'),
@@ -1591,8 +1610,10 @@ export function agentReferenceSections(
           caption: 'Casting routes',
           columns: [
             'Spell',
+            'Spell catalog layer',
             'Spell level',
             'Source',
+            'Source catalog layer',
             'Slot id',
             'Casting mode',
             'Ability',
@@ -1607,8 +1628,10 @@ export function agentReferenceSections(
                     route.index,
                   ) ?? 'not imported',
                 ),
+            cell(route.spell_catalog_layer),
             cell(String(route.spell_level)),
             sourceCell(projection, route.source_ref),
+            cell(route.source_catalog_layer),
             cell(optionalNumber(route.slot_id)),
             cell(route.casting_mode),
             cell(route.spellcasting_ability ?? 'not applicable'),
@@ -1632,7 +1655,7 @@ export function agentReferenceSections(
       tables: [
         {
           caption: 'Spellbook entries',
-          columns: ['Spell', 'Prepared'],
+          columns: ['Spell', 'Spell catalog layer', 'Prepared'],
           rows: reference.wizard_spellbook.map((entry) => [
             entry.spell_name !== null
               ? cell(entry.spell_name)
@@ -1640,6 +1663,7 @@ export function agentReferenceSections(
                   projection.withheld.spellbook_spell_names.get(entry.index) ??
                     'not imported',
                 ),
+            cell(entry.spell_catalog_layer),
             cell(yesNo(entry.active)),
           ]),
         },
@@ -1697,7 +1721,11 @@ export function agentReferenceSections(
         caption: 'Weapon mastery allowance by class',
         columns: ['Class', 'Class level', 'Allowance', 'Count'],
         rows: reference.weapon_mastery.by_class.map((entry) => [
-          cell(entry.class_name),
+          cell(
+            `${entry.class_name} — ${catalogLayerLabel(
+              entry.class_catalog_layer,
+            )}`,
+          ),
           cell(String(entry.class_level)),
           cell(entry.allowance_state),
           // `content_missing` and `unsourced` print as words, never as 0. The

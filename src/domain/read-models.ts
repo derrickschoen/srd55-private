@@ -123,8 +123,10 @@ export interface SpellRoute {
   spell_identity_id: number;
   spell_version_id: number;
   spell_name: string;
+  spell_catalog_layer: CatalogLayerDisclosure;
   spell_level: number;
   source_name: string;
+  source_catalog_layer: CatalogLayerDisclosure;
   slot_id: number | null;
   slot_key: string | null;
   casting_mode: CastingMode;
@@ -299,12 +301,18 @@ export interface BuildReport {
     spellbook: Array<{
       spellbook_entry_id: number;
       spell_name: string;
+      spell_catalog_layer: CatalogLayerDisclosure;
       active: boolean;
     }>;
-    prepared: Array<{ spell_version_id: number; spell_name: string }>;
+    prepared: Array<{
+      spell_version_id: number;
+      spell_name: string;
+      spell_catalog_layer: CatalogLayerDisclosure;
+    }>;
     ritual_only: Array<{
       spellbook_entry_id: number;
       spell_name: string;
+      spell_catalog_layer: CatalogLayerDisclosure;
     }>;
     explanation: string;
   };

@@ -69,7 +69,7 @@ async function publishSubclass(page: Page): Promise<void> {
   await page.getByRole('textbox', { name: 'Name', exact: true }).fill('HA10 Horizon Guard');
   await page.getByRole('combobox', { name: 'Rules edition', exact: true }).selectOption('expanded');
   await page.getByRole('combobox', { name: 'Parent bundled class', exact: true })
-    .selectOption({ label: 'Fighter' });
+    .selectOption({ label: 'Fighter — SRD · bundled layer' });
   await page.getByRole('combobox', { name: 'Progression mode', exact: true })
     .selectOption('inherit_parent');
   await page.getByRole('combobox', { name: 'Timeline level', exact: true }).selectOption('3');

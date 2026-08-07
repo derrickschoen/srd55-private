@@ -389,6 +389,7 @@ function spell(
   return {
     spell_version_id: id as SpellVersionId,
     name,
+    catalog_layer: 'bundled',
     level: { status: 'known', value: 1 as SpellLevel },
     marker: 'known',
     reference: {
@@ -423,6 +424,7 @@ function classSpellGroup(
     kind: 'class',
     class_definition_id: id as ClassDefinitionId,
     class_name: name,
+    class_catalog_layer: 'bundled',
     statistics: [
       {
         status: 'computed',
@@ -478,6 +480,7 @@ describe('the character sheet is projected twice from one value', () => {
       kind: 'other_source',
       source_instance_id: 31 as SourceInstanceId,
       source_name: 'Magic Initiate',
+      source_catalog_layer: 'bundled',
       statistics: [
         {
           status: 'computed',
@@ -494,7 +497,10 @@ describe('the character sheet is projected twice from one value', () => {
     const oneClass = spellSectionOf(sheet({ spells: [wizard, otherSource] }));
     expect(oneClass.spell_groups.map((group) => group.heading)).toEqual([
       null,
-      [{ text: 'Magic Initiate', free_text: true }],
+      [
+        { text: 'Magic Initiate', free_text: true },
+        { text: ' — SRD · bundled layer' },
+      ],
     ]);
   });
 
@@ -513,6 +519,7 @@ describe('the character sheet is projected twice from one value', () => {
       kind: 'other_source',
       source_instance_id: 31 as SourceInstanceId,
       source_name: 'Magic Initiate',
+      source_catalog_layer: 'bundled',
       statistics: [
         {
           status: 'computed',
@@ -548,9 +555,15 @@ describe('the character sheet is projected twice from one value', () => {
       heading: group.heading === null ? null : textOf(group.heading),
       spells: group.rows.map((row) => textOf(row.label)),
     }))).toEqual([
-      { heading: 'Magic Initiate', spells: ['Resistance', 'Guidance'] },
-      { heading: 'Wizard', spells: ['Shield', 'Alarm', 'Fire Bolt'] },
-      { heading: 'Cleric', spells: ['Bless'] },
+      {
+        heading: 'Magic Initiate — SRD · bundled layer',
+        spells: ['Resistance', 'Guidance'],
+      },
+      {
+        heading: 'Wizard — SRD · bundled layer',
+        spells: ['Shield', 'Alarm', 'Fire Bolt'],
+      },
+      { heading: 'Cleric — SRD · bundled layer', spells: ['Bless'] },
     ]);
   });
 
@@ -577,7 +590,12 @@ describe('the character sheet is projected twice from one value', () => {
     expect([
       ...group.rows.map((row) => textOf(row.detail)),
       ...group.spellbook_rows.map((row) => textOf(row.detail)),
-    ]).toEqual(['Known', 'Known', 'Spellbook', 'Spellbook']);
+    ]).toEqual([
+      'Known · SRD · bundled layer',
+      'Known · SRD · bundled layer',
+      'Spellbook · SRD · bundled layer',
+      'Spellbook · SRD · bundled layer',
+    ]);
   });
 
   it('spellbook entries render distinctly and are never labeled Prepared or Known', () => {
@@ -590,9 +608,11 @@ describe('the character sheet is projected twice from one value', () => {
     });
 
     const group = spellSectionOf(sheet({ spells: [wizard] })).spell_groups[0]!;
-    expect(group.rows.map((row) => textOf(row.detail))).toEqual(['Prepared']);
+    expect(group.rows.map((row) => textOf(row.detail))).toEqual([
+      'Prepared · SRD · bundled layer',
+    ]);
     expect(group.spellbook_rows.map((row) => textOf(row.detail))).toEqual([
-      'Spellbook',
+      'Spellbook · SRD · bundled layer',
     ]);
     expect(group.spellbook_rows.map((row) => textOf(row.detail)).join(' '))
       .not.toMatch(/Prepared|Known/);
@@ -650,6 +670,7 @@ describe('the character sheet is projected twice from one value', () => {
       kind: 'other_source',
       source_instance_id: 31 as SourceInstanceId,
       source_name: 'Magic Initiate',
+      source_catalog_layer: 'bundled',
       statistics: [],
       spells: [
         spell(102, 'Resistance', {
@@ -696,6 +717,7 @@ describe('the character sheet is projected twice from one value', () => {
         {
           spell_version_id: spellbookEntry.spell_version_id,
           name: spellbookEntry.name,
+          catalog_layer: spellbookEntry.catalog_layer,
           level: spellbookEntry.level,
           reference: spellbookEntry.reference,
         },
@@ -752,6 +774,7 @@ describe('the character sheet is projected twice from one value', () => {
             {
               spell_version_id: 101,
               name: 'Complete Spell',
+              catalog_layer: 'bundled',
               level: 'Level 3',
               school: 'Chronomancy',
               edition_marker: '2014 rules',
@@ -877,6 +900,7 @@ describe('the character sheet is projected twice from one value', () => {
     const value = sheet({
       spells: [
         classSpellGroup(11, 'Homebrew Arcanist', [spell(101, 'Echo')], {
+          class_catalog_layer: 'external',
           statistics: [
             {
               status: 'computed',
@@ -900,11 +924,17 @@ describe('the character sheet is projected twice from one value', () => {
     expect(group.statistics.lines).toEqual([
       [
         { text: 'Homebrew Arcanist', free_text: true },
-        { text: ' (Intelligence) — Save DC 15 · Spell attack +7' },
+        {
+          text:
+            ' — Homebrew · external layer (Intelligence) — Save DC 15 · Spell attack +7',
+        },
       ],
       [
         { text: 'Homebrew Arcanist', free_text: true },
-        { text: ' (Wisdom) — Save DC 13 · Spell attack +5' },
+        {
+          text:
+            ' — Homebrew · external layer (Wisdom) — Save DC 13 · Spell attack +5',
+        },
       ],
     ]);
     expect(readableText(value).match(/Save DC 15/g)).toHaveLength(1);
@@ -967,6 +997,7 @@ describe('the character sheet is projected twice from one value', () => {
       kind: 'other_source',
       source_instance_id: 31 as SourceInstanceId,
       source_name: hostileSource,
+      source_catalog_layer: 'external',
       statistics: [
         {
           status: 'absent',
@@ -987,7 +1018,10 @@ describe('the character sheet is projected twice from one value', () => {
     const value = sheet({ spells: [source] });
     const group = spellSectionOf(value).spell_groups[0]!;
 
-    expect(group.heading).toEqual([{ text: hostileSource, free_text: true }]);
+    expect(group.heading).toEqual([
+      { text: hostileSource, free_text: true },
+      { text: ' — Homebrew · external layer' },
+    ]);
     expect(group.rows[0]?.label).toEqual([
       { text: hostileSpell, free_text: true },
     ]);

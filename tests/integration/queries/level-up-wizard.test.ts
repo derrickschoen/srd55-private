@@ -442,7 +442,9 @@ describe('level-up wizard state RPC', () => {
          repeatable, prerequisites, grant_rules, notes
        ) VALUES (
          'expanded:content.feat:breadth-probe', 'Breadth Probe', 'expanded',
-         'general', 0, 0, '[]', '[]', 'Breadth Probe. A homebrew benefit.'
+         'general', 0, 0, '[]',
+         '[{"kind":"skill_proficiency","rule_key":"breadth-probe-skill","count":1}]',
+         'Breadth Probe. A homebrew benefit.'
        )`,
     );
     const asiState = await client.levelUpState(fighterId);
@@ -490,7 +492,16 @@ describe('level-up wizard state RPC', () => {
       definition: expect.objectContaining({
         content_key: 'expanded:content.feat:breadth-probe',
         name: 'Breadth Probe',
+        catalog_layer: 'external',
       }),
+      applications: [expect.objectContaining({
+        planned_choices: expect.objectContaining({
+          skills: [expect.objectContaining({
+            source_label: 'Breadth Probe',
+            source_catalog_layer: 'external',
+          })],
+        }),
+      })],
     }));
     expect(
       occurrence?.candidates.filter((candidate) => candidate.is_class_default),

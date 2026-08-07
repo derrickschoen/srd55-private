@@ -136,9 +136,11 @@ export function renderBuildReport(report: BuildReportResult): string {
                     route.rules_edition === '2024'
                       ? ''
                       : ` · ${escapeHtml(route.rules_edition)}`
-                  }</span>
+                  } · ${escapeHtml(catalogLayerLabel(route.spell_catalog_layer))}</span>
                 </td>
-                <td>${escapeHtml(route.source_name)}</td>
+                <td>${escapeHtml(route.source_name)} · ${escapeHtml(
+                  catalogLayerLabel(route.source_catalog_layer),
+                )}</td>
                 <td>${routeAnnotation(route)}</td>
                 <td>${
                   route.spellcasting_ability === null
@@ -155,11 +157,15 @@ export function renderBuildReport(report: BuildReportResult): string {
       (entry) =>
         `${entry.spell_name}${
           entry.active ? '' : ' (unavailable — removed from catalog)'
-        }`,
+        } · ${catalogLayerLabel(entry.spell_catalog_layer)}`,
     );
-  const prepared = report.wizard.prepared.map((entry) => entry.spell_name);
+  const prepared = report.wizard.prepared.map(
+    (entry) =>
+      `${entry.spell_name} · ${catalogLayerLabel(entry.spell_catalog_layer)}`,
+  );
   const ritualOnly = report.wizard.ritual_only.map(
-    (entry) => entry.spell_name,
+    (entry) =>
+      `${entry.spell_name} · ${catalogLayerLabel(entry.spell_catalog_layer)}`,
   );
   const duplicateAssessments =
     report.duplicate_assessments.length === 0

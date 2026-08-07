@@ -78,8 +78,10 @@ function route(changes: Partial<SpellRoute> = {}): SpellRoute {
     spell_identity_id: 1,
     spell_version_id: 10,
     spell_name: 'Mage Hand',
+    spell_catalog_layer: 'bundled',
     spell_level: 0,
     source_name: 'Wizard 1',
+    source_catalog_layer: 'bundled',
     slot_id: 1,
     slot_key: 'wizard:cantrip:1',
     casting_mode: 'at_will',
@@ -158,14 +160,24 @@ function workspace(): Workspace {
       duplicate_assessments: [],
       wizard: {
         spellbook: [
-          { spellbook_entry_id: 1, spell_name: 'Mage Armor', active: true },
+          {
+            spellbook_entry_id: 1,
+            spell_name: 'Mage Armor',
+            spell_catalog_layer: 'bundled',
+            active: true,
+          },
           {
             spellbook_entry_id: 2,
             spell_name: HOSTILE_SPELL_NAME,
+            spell_catalog_layer: 'external',
             active: false,
           },
         ],
-        prepared: [{ spell_version_id: 10, spell_name: 'Mage Armor' }],
+        prepared: [{
+          spell_version_id: 10,
+          spell_name: 'Mage Armor',
+          spell_catalog_layer: 'bundled',
+        }],
         ritual_only: [],
         explanation: 'Wizard spellbook.',
       },
@@ -638,12 +650,14 @@ describe('planner build reference projection', () => {
       {
         index: 0,
         spell_name: 'Mage Armor',
+        spell_catalog_layer: 'bundled',
         spell_name_withheld: false,
         active: true,
       },
       {
         index: 1,
         spell_name: null,
+        spell_catalog_layer: 'external',
         spell_name_withheld: true,
         active: false,
       },
@@ -917,6 +931,43 @@ describe('planner build reference JSON block', () => {
 });
 
 describe('planner build reference text sections', () => {
+  it('discloses an external class beside its weapon-mastery allowance', () => {
+    const source = workspace();
+    source.classes = [{
+      id: 81,
+      class_definition_id: 17,
+      subclass_definition_id: null,
+      level: 5,
+      name: 'Homebrew Vanguard',
+      catalog_layer: 'external',
+      subclass_name: null,
+      subclass_catalog_layer: null,
+      subclasses: [],
+    }];
+    source.weapons.allowance = {
+      state: 'known',
+      count: 2,
+      classes: [{
+        class_definition_id: 17,
+        class_name: 'Homebrew Vanguard',
+        class_level: 5,
+        allowance: { state: 'known', count: 2 },
+      }],
+    };
+    const projection = buildAgentReference(source, completeness);
+
+    expect(projection.reference.weapon_mastery.by_class[0]).toMatchObject({
+      class_name: 'Homebrew Vanguard',
+      class_catalog_layer: 'external',
+    });
+    expect(
+      tableIn(
+        sectionById(agentReferenceSections(projection), 'weapons'),
+        'Weapon mastery allowance by class',
+      ).rows[0]?.[0]?.text,
+    ).toBe('Homebrew Vanguard — Homebrew · external layer');
+  });
+
   it('renders the same projection as readable rows', () => {
     const projection = buildAgentReference(workspace(), completeness);
     const sections = agentReferenceSections(projection);
@@ -1107,6 +1158,7 @@ describe('planner build reference — the two forms hold the same content', () =
       spell_level_max: 'Slot spell levels',
       selected: 'Chosen spell',
       spell_name: 'Chosen spell',
+      spell_catalog_layer: 'Spell catalog layer',
       spell_name_withheld: 'Chosen spell',
       spell_level: 'Spell level',
       rules_edition: 'Rules edition',
@@ -1147,9 +1199,11 @@ describe('planner build reference — the two forms hold the same content', () =
       // Row order is the index; a column repeating it would say nothing more.
       index: null,
       spell_name: 'Spell',
+      spell_catalog_layer: 'Spell catalog layer',
       spell_name_withheld: 'Spell',
       spell_level: 'Spell level',
       source_ref: 'Source',
+      source_catalog_layer: 'Source catalog layer',
       slot_id: 'Slot id',
       casting_mode: 'Casting mode',
       spellcasting_ability: 'Ability',
@@ -1166,6 +1220,7 @@ describe('planner build reference — the two forms hold the same content', () =
     const map: ColumnMap<ReferenceSpellbookEntry> = {
       index: null,
       spell_name: 'Spell',
+      spell_catalog_layer: 'Spell catalog layer',
       spell_name_withheld: 'Spell',
       active: 'Prepared',
     };

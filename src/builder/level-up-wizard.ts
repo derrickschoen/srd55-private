@@ -200,6 +200,7 @@ export interface FeatSpellReplacementEntitlement {
 export interface FeatDefinitionForApplication {
   readonly content_key: ContentKey;
   readonly name: string;
+  readonly catalog_layer: CatalogLayerDisclosure;
   readonly grouping: KnownFeatGrouping;
   readonly min_level: CharacterLevel | null;
   readonly ability_points: 0 | 1 | 2;
@@ -245,12 +246,14 @@ export type PlannedExpertiseChoice = LevelUpPlannedExpertiseChoice;
 export interface LevelUpPlannedSkillProjection {
   readonly locator: PlannedGrantLocator;
   readonly source_label: string;
+  readonly source_catalog_layer: CatalogLayerDisclosure;
   readonly available_skills: readonly Skill[];
 }
 
 export interface LevelUpPlannedExpertiseProjection {
   readonly locator: PlannedGrantLocator;
   readonly source_label: string;
+  readonly source_catalog_layer: CatalogLayerDisclosure;
   readonly available_skills: readonly Skill[];
 }
 
@@ -259,19 +262,23 @@ export type LevelUpPlannedSpellProjection =
       readonly kind: 'new_slot';
       readonly locator: PlannedGrantLocator;
       readonly source_label: string;
+      readonly source_catalog_layer: CatalogLayerDisclosure;
       readonly required: boolean;
     }
   | {
       readonly kind: 'spellbook_acquisition';
       readonly locator: PlannedGrantLocator;
       readonly source_label: string;
+      readonly source_catalog_layer: CatalogLayerDisclosure;
     }
   | {
       readonly kind: 'optional_swap';
       readonly locator: PlannedGrantLocator;
       readonly source_label: string;
+      readonly source_catalog_layer: CatalogLayerDisclosure;
       readonly current_spell_version_id: SpellVersionId;
       readonly current_spell_name: string;
+      readonly current_spell_catalog_layer: CatalogLayerDisclosure;
     };
 
 /** Logical LU-2 work only; no future durable child-row id crosses this seam. */

@@ -128,6 +128,7 @@ export type SpellAppendixDescription =
 export interface SpellAppendixCardContent {
   readonly spell_version_id: SheetSpellbookEntry['spell_version_id'];
   readonly name: string;
+  readonly catalog_layer: SheetSpellbookEntry['catalog_layer'];
   readonly level: string;
   readonly school: string;
   readonly edition_marker: string | null;
@@ -317,6 +318,7 @@ function spellAppendixCard(
   return {
     spell_version_id: spell.spell_version_id,
     name: spell.name,
+    catalog_layer: spell.catalog_layer,
     level: spellLevelText(spell),
     school: spell.reference.school,
     edition_marker: spellEditionMarker(spell.reference.edition),
@@ -513,9 +515,15 @@ function spellSection(spells: CharacterSpellSection): SheetSpellSection {
       const id = spellGroupId(group);
       const heading =
         group.kind === 'other_source'
-          ? [{ text: group.source_name, free_text: true as const }]
+          ? [
+              { text: group.source_name, free_text: true as const },
+              { text: ` — ${catalogLayerLabel(group.source_catalog_layer)}` },
+            ]
           : contributingClassGroups >= 2
-            ? [{ text: group.class_name, free_text: true as const }]
+            ? [
+                { text: group.class_name, free_text: true as const },
+                { text: ` — ${catalogLayerLabel(group.class_catalog_layer)}` },
+              ]
             : null;
       const mixedStatistics = group.statistics.length > 1;
       const sourceName =
@@ -531,9 +539,13 @@ function spellSection(spells: CharacterSpellSection): SheetSpellSection {
                   { text: sourceName, free_text: true as const },
                   {
                     text:
-                      statistic.status === 'computed'
+                      ` — ${catalogLayerLabel(
+                        group.kind === 'class'
+                          ? group.class_catalog_layer
+                          : group.source_catalog_layer,
+                      )}` + (statistic.status === 'computed'
                         ? ` (${abilityLabel(statistic)}) — ${spellStatisticText(statistic)}`
-                        : ` — ${spellStatisticText(statistic)}`,
+                        : ` — ${spellStatisticText(statistic)}`),
                   },
                 ]
               : [{ text: spellStatisticText(statistic) }],
@@ -543,7 +555,9 @@ function spellSection(spells: CharacterSpellSection): SheetSpellSection {
           id: `spell:${id}:${String(spell.spell_version_id)}`,
           label: [{ text: spell.name, free_text: true }],
           value: spellLevelText(spell),
-          detail: plain(spellMarkerText(spell)),
+          detail: plain(
+            `${spellMarkerText(spell)} · ${catalogLayerLabel(spell.catalog_layer)}`,
+          ),
         })),
         spellbook_rows:
           group.kind === 'class'
@@ -551,7 +565,9 @@ function spellSection(spells: CharacterSpellSection): SheetSpellSection {
                 id: `spellbook:${id}:${String(spell.spell_version_id)}`,
                 label: [{ text: spell.name, free_text: true }],
                 value: spellLevelText(spell),
-                detail: plain('Spellbook'),
+                detail: plain(
+                  `Spellbook · ${catalogLayerLabel(spell.catalog_layer)}`,
+                ),
               }))
             : [],
       };
@@ -2032,7 +2048,7 @@ function renderSpellAppendix(
       const cardHeading = document.createElement('h4');
       cardHeading.append(
         freeTextSpan(card.name),
-        ` — ${card.level} · ${card.school}`,
+        ` — ${card.level} · ${card.school} · ${catalogLayerLabel(card.catalog_layer)}`,
       );
       if (card.edition_marker !== null) {
         cardHeading.append(` · ${card.edition_marker}`);

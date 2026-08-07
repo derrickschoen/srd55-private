@@ -37,6 +37,9 @@ import {
   installInteractiveDocument,
   interactiveElement,
 } from '../../fixtures/interactive-dom';
+import { handlers as queryHandlers } from '../../../src/worker/handlers/queries';
+import { createRpcHarness } from '../../helpers/rpc-harness';
+import { createBuildReportFixture } from '../../integration/reports/build-report-fixture';
 
 const NOOP_EDITOR_ACTIONS: PlannerEditorActions = {
   updateFlavor: () => undefined,
@@ -199,6 +202,34 @@ const emptyCompleteness: CompletenessResult = {
 };
 
 describe('planner catalog disclosure', () => {
+  it('returns a persisted external spell layer through the live workspace RPC', async () => {
+    const harness = await createRpcHarness(queryHandlers);
+    try {
+      const fixture = createBuildReportFixture(harness.context.db);
+      const response = await harness.call<
+        { character_id: number },
+        Workspace
+      >('queries.characters.workspace', {
+        character_id: fixture.characterId,
+      });
+
+      expect(response).toMatchObject({ ok: true });
+      if (!response.ok) {
+        throw new Error('The live workspace route refused the fixture.');
+      }
+      expect(
+        response.result.slots.find(
+          (entry) => entry.spell_id === fixture.spellIds.mageHand,
+        ),
+      ).toMatchObject({
+        spell_name: 'Mage Hand',
+        spell_catalog_layer: 'external',
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
   it('renders a hostile persisted planner spell inert with its exact layer', () => {
     const restoreDocument = installInteractiveDocument();
     const windowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');

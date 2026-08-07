@@ -46,7 +46,9 @@ test('authors a subclass timeline and persists only threshold-eligible character
 
   await page.getByLabel('Name').fill('Threshold Cartographer');
   await page.getByLabel('Rules edition').selectOption('expanded');
-  await page.getByLabel('Parent bundled class').selectOption({ label: 'Fighter' });
+  await page.getByLabel('Parent bundled class').selectOption({
+    label: 'Fighter — SRD · bundled layer',
+  });
   await page.getByLabel('Progression mode').selectOption('override');
   await page.getByLabel('Spellcasting ability (optional)').selectOption('intelligence');
   await page.getByLabel('Caster contribution').selectOption('third_down');

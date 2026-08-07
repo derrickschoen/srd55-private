@@ -218,6 +218,7 @@ function boonCandidate(options: {
     definition: {
       content_key: key as ContentKey,
       name: options.name ?? 'Boon of Fate',
+      catalog_layer: options.catalogLayer ?? 'bundled',
       grouping: 'epic_boon',
       min_level: 19 as CharacterLevel,
       ability_points: 1,

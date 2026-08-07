@@ -25,6 +25,7 @@ import type { RpcClient } from '../../../src/rpc/client';
 import { parseRoute, type Router } from '../../../src/ui/router';
 import { createLevelUpWizard } from '../../../src/ui/screens/level-up/level-up-wizard';
 import {
+  createPlannedSkillsStep,
   plannedGrantLocatorKey,
   type SpellPickerFactory,
 } from '../../../src/ui/screens/level-up/planned-choice-steps';
@@ -89,11 +90,13 @@ const planned = (): LevelUpPlannedChoiceProjection => ({
   skills: [{
     locator: classLocator('scholar-skill', 1),
     source_label: 'Wizard — Scholar',
+    source_catalog_layer: 'bundled',
     available_skills: ['arcana', 'history'],
   }],
   expertise: [{
     locator: classLocator('class_expertise_2', 1),
     source_label: 'Wizard — Scholar',
+    source_catalog_layer: 'bundled',
     available_skills: ['arcana', 'history'],
   }],
   spells: [
@@ -101,19 +104,23 @@ const planned = (): LevelUpPlannedChoiceProjection => ({
       kind: 'new_slot',
       locator: classLocator('wizard-prepared', 5),
       source_label: 'Wizard',
+      source_catalog_layer: 'bundled',
       required: true,
     },
     {
       kind: 'spellbook_acquisition',
       locator: classLocator('wizard-spellbook', 7),
       source_label: 'Wizard spellbook',
+      source_catalog_layer: 'bundled',
     },
     {
       kind: 'optional_swap',
       locator: classLocator('wizard-prepared', 1),
       source_label: 'Wizard',
+      source_catalog_layer: 'bundled',
       current_spell_version_id: 41 as SpellVersionId,
       current_spell_name: 'Shield',
+      current_spell_catalog_layer: 'external',
     },
   ],
 });
@@ -403,6 +410,7 @@ function epicBoonCandidate(key: string, name: string): LevelUpFeatCandidate {
     definition: {
       content_key: key as ContentKey,
       name,
+      catalog_layer: 'bundled',
       grouping: 'epic_boon',
       min_level: 19 as CharacterLevel,
       ability_points: 1,
@@ -443,6 +451,32 @@ function epicBoonCandidate(key: string, name: string): LevelUpFeatCandidate {
 }
 
 describe('W-LU2-DRAFT planned Skills, Expertise, and Spells', () => {
+  it('renders an external selected feat layer on its later planned-choice card', () => {
+    const hostileFeatName = '</p><img data-ha10-feat-layer src=x>';
+    const step = createPlannedSkillsStep({
+      projections: [{
+        locator: sourceLocator(
+          { kind: 'selected_feat' },
+          'external-feat-skill',
+          1,
+        ),
+        source_label: hostileFeatName,
+        source_catalog_layer: 'external',
+        available_skills: ['arcana'],
+      }],
+      draft: { skills: [], expertise: [], spells: [] },
+      onSelect: vi.fn(),
+    });
+
+    expect(elementText(step.element)).toContain(
+      `Granted by ${hostileFeatName} — Homebrew · external layer.`,
+    );
+    expect(
+      interactiveElement(step.element).querySelector('[data-ha10-feat-layer]'),
+    ).toBeNull();
+    step.cleanup();
+  });
+
   it('W-DRAFT-FIDELITY carries named planned_subchoices through Review, Confirm, and Complete', async () => {
     const hostileSpell = '</dd><img data-ha10-level-spell src=x>';
     const hostilePickerFactory: SpellPickerFactory = (options) => {
@@ -894,7 +928,9 @@ describe('W-LU2-DRAFT planned Skills, Expertise, and Spells', () => {
     expect(
       spellCard(wizard.element, classLocator('wizard-prepared', 5))
         .querySelector('button')?.getAttribute('aria-label'),
-    ).toBe('New spell choice — Required from Wizard');
+    ).toBe(
+      'New spell choice — Required from Wizard — SRD · bundled layer',
+    );
     wizard.cleanup();
   });
 

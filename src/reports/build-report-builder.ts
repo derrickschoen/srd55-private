@@ -111,6 +111,7 @@ interface WizardSpellbookEntry {
   readonly spellbook_entry_id: number;
   readonly spell_version_id: number;
   readonly spell_name: string;
+  readonly spell_catalog_layer: CatalogLayerDisclosure;
   readonly level: number;
   readonly active: boolean;
   readonly prepared: boolean;
@@ -119,6 +120,7 @@ interface WizardSpellbookEntry {
 interface PreparedSpell {
   readonly spell_version_id: number;
   readonly spell_name: string;
+  readonly spell_catalog_layer: CatalogLayerDisclosure;
   readonly level: number;
 }
 
@@ -126,6 +128,7 @@ interface RitualOnlySpell {
   readonly spellbook_entry_id: number;
   readonly spell_version_id: number;
   readonly spell_name: string;
+  readonly spell_catalog_layer: CatalogLayerDisclosure;
   readonly level: number;
 }
 
@@ -676,16 +679,22 @@ export class BuildReportBuilder {
       .all(
         `SELECT entry.id AS spellbook_entry_id, version.id AS spell_version_id,
                 version.display_name AS spell_name, version.level,
-                version.is_active
+                version.is_active, identity.catalog_layer
          FROM wizard_spellbook_entries AS entry
          INNER JOIN spell_versions AS version
            ON version.id = entry.spell_version_id
+         LEFT JOIN catalog_content_identities AS identity
+           ON identity.content_kind = 'spell'
+          AND identity.content_key = version.content_key
          WHERE entry.character_id = ?`,
         [characterId],
         (row): WizardSpellbookEntry => ({
           spellbook_entry_id: sqlInteger(row, 'spellbook_entry_id'),
           spell_version_id: sqlInteger(row, 'spell_version_id'),
           spell_name: sqlString(row, 'spell_name'),
+          spell_catalog_layer: catalogLayerDisclosure(
+            sqlNullableString(row, 'catalog_layer'),
+          ),
           level: sqlInteger(row, 'level'),
           active: sqlBoolean(row, 'is_active'),
           prepared: preparedVersionIds.has(
@@ -699,6 +708,7 @@ export class BuildReportBuilder {
         (route): PreparedSpell => ({
           spell_version_id: route.spell_version_id,
           spell_name: route.spell_name,
+          spell_catalog_layer: route.spell_catalog_layer,
           level: route.spell_level,
         }),
       )
@@ -715,6 +725,7 @@ export class BuildReportBuilder {
           spellbook_entry_id: route.spellbook_entry_id,
           spell_version_id: route.spell_version_id,
           spell_name: route.spell_name,
+          spell_catalog_layer: route.spell_catalog_layer,
           level: route.spell_level,
         };
       })

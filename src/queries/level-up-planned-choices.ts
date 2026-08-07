@@ -9,7 +9,11 @@ import type {
 import type { LevelFeatSelection } from '../domain/command-contracts';
 import { levelUpSpellReplacementAllowed } from '../commands/level-up-spell-replacement';
 import type { DatabaseContext } from '../db/database';
-import { sqlInteger, sqlString } from '../db/codecs';
+import { sqlInteger, sqlNullableString, sqlString } from '../db/codecs';
+import {
+  catalogLayerDisclosure,
+  type CatalogLayerDisclosure,
+} from '../catalog/catalog-disclosure';
 import { skills } from '../domain/enums';
 import type {
   CharacterId,
@@ -33,6 +37,7 @@ import {
 export interface LevelUpPlannedChoiceContext
   extends LevelUpPlannedSpellPlanParams {
   readonly class_name: string;
+  readonly class_catalog_layer: CatalogLayerDisclosure;
 }
 
 const EMPTY_PROJECTION: LevelUpPlannedChoiceProjection = Object.freeze({
@@ -44,6 +49,7 @@ const EMPTY_PROJECTION: LevelUpPlannedChoiceProjection = Object.freeze({
 interface ExistingSource {
   readonly id: SourceInstanceId;
   readonly label: string;
+  readonly catalog_layer: CatalogLayerDisclosure;
 }
 
 function sourceLabel(source: PlannedGrantSource, fallback: string): string {
@@ -83,6 +89,7 @@ export class LevelUpPlannedChoicesQuery {
         context,
         source,
         context.class_name,
+        context.class_catalog_layer,
         classSource?.id ?? null,
       ),
     } satisfies LevelUpPlannedChoiceProjection;
@@ -96,6 +103,7 @@ export class LevelUpPlannedChoicesQuery {
         context,
         selectedSubclassSource,
         subclassSource?.label ?? `${context.class_name} subclass`,
+        subclassSource?.catalog_layer ?? 'unknown',
         subclassSource?.id ?? null,
       ),
     } satisfies LevelUpPlannedChoiceProjection;
@@ -115,6 +123,7 @@ export class LevelUpPlannedChoicesQuery {
           context,
           existingSource,
           entry.label,
+          entry.catalog_layer,
           entry.id,
         ),
       } satisfies LevelUpPlannedChoiceProjection;
@@ -126,6 +135,7 @@ export class LevelUpPlannedChoicesQuery {
     context: LevelUpPlannedChoiceContext & {
       readonly subclass_content_key: ContentKey;
       readonly subclass_name: string;
+      readonly subclass_catalog_layer: CatalogLayerDisclosure;
     },
   ): LevelUpPlannedChoiceProjection {
     const source: PlannedGrantSource = {
@@ -137,6 +147,7 @@ export class LevelUpPlannedChoicesQuery {
         context,
         source,
         context.subclass_name,
+        context.subclass_catalog_layer,
         this.#subclassSource(context),
       ),
     };
@@ -145,6 +156,7 @@ export class LevelUpPlannedChoicesQuery {
   forSelectedFeat(
     context: LevelUpPlannedChoiceContext,
     featName: string,
+    featCatalogLayer: CatalogLayerDisclosure,
     selection: LevelFeatSelection,
     plan: FeatApplicationPlan,
   ): LevelUpPlannedChoiceProjection {
@@ -163,6 +175,7 @@ export class LevelUpPlannedChoicesQuery {
             ordinal,
           },
           source_label: featName,
+          source_catalog_layer: featCatalogLayer,
           available_skills: available,
         });
       }
@@ -174,6 +187,7 @@ export class LevelUpPlannedChoicesQuery {
         { ...context, feat_choice: selection },
         source,
         featName,
+        featCatalogLayer,
         null,
       ),
     };
@@ -206,6 +220,7 @@ export class LevelUpPlannedChoicesQuery {
         ordinal: index + 1,
       },
       source_label: `${context.class_name} — ${entitlement.feature_name}`,
+      source_catalog_layer: context.class_catalog_layer,
       available_skills: available,
     }));
   }
@@ -214,12 +229,14 @@ export class LevelUpPlannedChoicesQuery {
     context: LevelUpPlannedChoiceContext,
     source: PlannedGrantSource,
     label: string,
+    sourceCatalogLayer: CatalogLayerDisclosure,
     durableSourceId: SourceInstanceId | null,
   ): readonly LevelUpPlannedSpellProjection[] {
     const plan = this.#spells.planSource(context, source);
     return plan.flatMap((grant) => this.#spellChoice(
       context.character_id,
       sourceLabel(source, label),
+      sourceCatalogLayer,
       durableSourceId,
       grant,
     ));
@@ -228,6 +245,7 @@ export class LevelUpPlannedChoicesQuery {
   #spellChoice(
     characterId: CharacterId,
     label: string,
+    sourceCatalogLayer: CatalogLayerDisclosure,
     durableSourceId: SourceInstanceId | null,
     grant: PlannedSpellGrant,
   ): readonly LevelUpPlannedSpellProjection[] {
@@ -250,6 +268,7 @@ export class LevelUpPlannedChoicesQuery {
             kind: 'spellbook_acquisition',
             locator: grant.locator,
             source_label: label,
+            source_catalog_layer: sourceCatalogLayer,
           }]
         : [];
     }
@@ -259,11 +278,14 @@ export class LevelUpPlannedChoicesQuery {
       : this.db.oneRaw(
           `SELECT COALESCE(slot.current_spell_version_id,
                            slot.fixed_spell_version_id) AS spell_version_id,
-                  version.display_name
+                  version.display_name, identity.catalog_layer
            FROM spell_selection_slots AS slot
            LEFT JOIN spell_versions AS version
              ON version.id = COALESCE(slot.current_spell_version_id,
                                       slot.fixed_spell_version_id)
+           LEFT JOIN catalog_content_identities AS identity
+             ON identity.content_kind = 'spell'
+            AND identity.content_key = version.content_key
            WHERE slot.character_id = ? AND slot.source_instance_id = ?
              AND slot.rule_key = ? AND slot.ordinal = ?
              AND slot.state IN ('active', 'kept_override')`,
@@ -279,6 +301,7 @@ export class LevelUpPlannedChoicesQuery {
         kind: 'new_slot',
         locator: grant.locator,
         source_label: label,
+        source_catalog_layer: sourceCatalogLayer,
         required: grant.required,
       }];
     }
@@ -297,8 +320,12 @@ export class LevelUpPlannedChoicesQuery {
       kind: 'optional_swap',
       locator: grant.locator,
       source_label: label,
+      source_catalog_layer: sourceCatalogLayer,
       current_spell_version_id: Number(row.spell_version_id) as SpellVersionId,
       current_spell_name: String(row.display_name),
+      current_spell_catalog_layer: catalogLayerDisclosure(
+        typeof row.catalog_layer === 'string' ? row.catalog_layer : null,
+      ),
     }];
   }
 
@@ -307,13 +334,22 @@ export class LevelUpPlannedChoicesQuery {
     classDefinitionId: ClassDefinitionId,
   ): ExistingSource | null {
     return this.db.one(
-      `SELECT id, display_name FROM character_source_instances
-       WHERE character_id = ? AND source_type = 'class'
-         AND source_definition_id = ? AND state = 'active'`,
+      `SELECT source.id, source.display_name, identity.catalog_layer
+       FROM character_source_instances AS source
+       JOIN class_definitions AS definition
+         ON definition.id = source.source_definition_id
+       LEFT JOIN catalog_content_identities AS identity
+         ON identity.content_kind = 'class'
+        AND identity.content_key = definition.content_key
+       WHERE source.character_id = ? AND source.source_type = 'class'
+         AND source.source_definition_id = ? AND source.state = 'active'`,
       [characterId, classDefinitionId],
       (row) => ({
         id: sqlInteger(row, 'id') as SourceInstanceId,
         label: sqlString(row, 'display_name'),
+        catalog_layer: catalogLayerDisclosure(
+          sqlNullableString(row, 'catalog_layer'),
+        ),
       }),
     );
   }
@@ -340,18 +376,26 @@ export class LevelUpPlannedChoicesQuery {
     classDefinitionId: ClassDefinitionId,
   ): ExistingSource | null {
     return this.db.one(
-      `SELECT source.id, source.display_name
+      `SELECT source.id, source.display_name, identity.catalog_layer
        FROM character_class_levels AS level
        JOIN character_source_instances AS source
          ON source.character_id = level.character_id
         AND source.source_type = 'subclass'
         AND source.source_definition_id = level.subclass_definition_id
         AND source.state = 'active'
+       JOIN subclass_definitions AS definition
+         ON definition.id = source.source_definition_id
+       LEFT JOIN catalog_content_identities AS identity
+         ON identity.content_kind = 'subclass'
+        AND identity.content_key = definition.content_key
        WHERE level.character_id = ? AND level.class_definition_id = ?`,
       [characterId, classDefinitionId],
       (row) => ({
         id: sqlInteger(row, 'id') as SourceInstanceId,
         label: sqlString(row, 'display_name'),
+        catalog_layer: catalogLayerDisclosure(
+          sqlNullableString(row, 'catalog_layer'),
+        ),
       }),
     );
   }
@@ -361,15 +405,33 @@ export class LevelUpPlannedChoicesQuery {
     selectedClassSourceId: SourceInstanceId | null,
   ): ExistingSource[] {
     return this.db.all(
-      `SELECT id, display_name FROM character_source_instances
-       WHERE character_id = ? AND state = 'active'
-         AND (? IS NULL OR id <> ?)
-         AND source_type NOT IN ('class', 'subclass')
-       ORDER BY id`,
+      `SELECT source.id, source.display_name, identity.catalog_layer
+       FROM character_source_instances AS source
+       LEFT JOIN feat_definitions AS feat
+         ON source.source_type = 'feat'
+        AND feat.id = source.source_definition_id
+       LEFT JOIN species_definitions AS species
+         ON source.source_type = 'species'
+        AND species.id = source.source_definition_id
+       LEFT JOIN background_definitions AS background
+         ON source.source_type = 'background'
+        AND background.id = source.source_definition_id
+       LEFT JOIN catalog_content_identities AS identity
+         ON identity.content_kind = source.source_type
+        AND identity.content_key = COALESCE(
+              feat.content_key, species.content_key, background.content_key
+            )
+       WHERE source.character_id = ? AND source.state = 'active'
+         AND (? IS NULL OR source.id <> ?)
+         AND source.source_type NOT IN ('class', 'subclass')
+       ORDER BY source.id`,
       [characterId, selectedClassSourceId, selectedClassSourceId],
       (row) => ({
         id: sqlInteger(row, 'id') as SourceInstanceId,
         label: sqlString(row, 'display_name'),
+        catalog_layer: catalogLayerDisclosure(
+          sqlNullableString(row, 'catalog_layer'),
+        ),
       }),
     );
   }

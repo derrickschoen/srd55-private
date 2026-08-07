@@ -383,8 +383,14 @@ describe('guided creation revision and history', () => {
 });
 
 describe('guided RPC registry contracts', () => {
-  it('registers and serves the seam-defined class-options RPC', async () => {
+  it('serves only bundled classes through the live class-options RPC when an external class is installed', async () => {
     const rpcHarness = await realApplicationDatabase();
+    const externalContentKey = '2024:test.homebrew:rpc-cartographer';
+    insertHomebrewClass(
+      rpcHarness,
+      externalContentKey,
+      'RPC Cartographer',
+    );
 
     expect(rpcRegistry.methods).toContain(GUIDED_RPC.classOptions);
     const response = await rpcRegistry.dispatch(
@@ -402,6 +408,9 @@ describe('guided RPC registry contracts', () => {
     }
     expect(classOptionKeysFromRpcResult(response.result)).toEqual(
       new Set(bundledClassContentKeys().classes),
+    );
+    expect(classOptionKeysFromRpcResult(response.result)).not.toContain(
+      externalContentKey,
     );
   });
 

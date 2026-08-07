@@ -629,6 +629,7 @@ export class LevelUpStateQuery {
                 class_definition_id: selected.class_definition_id,
                 target_class_level: targetLevel,
                 class_name: selected.name,
+                class_catalog_layer: selected.catalog_layer,
               },
             ),
           };
@@ -638,6 +639,7 @@ export class LevelUpStateQuery {
       class_definition_id: selected.class_definition_id,
       target_class_level: targetLevel,
       class_name: selected.name,
+      class_catalog_layer: selected.catalog_layer,
     };
     const choiceQuery = new LevelUpPlannedChoicesQuery(this.db);
     const plannedChoices = choiceQuery.forSelectedClass(choiceContext);
@@ -695,6 +697,7 @@ export class LevelUpStateQuery {
                   ...choiceContext,
                   subclass_content_key: option.content_key,
                   subclass_name: option.name,
+                  subclass_catalog_layer: option.catalog_layer,
                 }),
               }),
             ),
@@ -891,6 +894,7 @@ export class LevelUpStateQuery {
                   .forSelectedFeat(
                     choiceContext,
                     definition.name,
+                    definition.catalog_layer,
                     application.selection,
                     application.plan,
                   ),
