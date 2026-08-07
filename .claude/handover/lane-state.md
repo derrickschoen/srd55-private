@@ -23,7 +23,67 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-06-k (newest - read first)
+## RESTART POINT 2026-08-07-a (newest - read first)
+MAIN e121578 (mirror push pending). FLOORS: vitest 252/4,132 all-pass;
+PW 129 pool; build 0; migrations 0000-0039 FROZEN (next free mint 0040).
+THIRTY-NINE merges. Rulings through D224.
+
+MERGED SINCE 08-06-k:
+ - DICE-DEBRAND (e121578, 39th): D220. Elven Accuracy -> Triple
+   Advantage; Elemental Adept -> parameterized die-upgrade with
+   resistance bypass split out. Found a real wrong-number bug (Sorcerous
+   Burst triggered on the RAW face while displaying the promoted one),
+   a NaN-admitting contract (now a branded PromotedDieOutcome with a
+   negative COMPILE probe), and substring-matching "exact message" pins.
+
+ENVIRONMENT FINDING - ROUTE-READINESS TIMEOUTS UNDER LOAD (recurring,
+now 4+ lanes: ADF, HA-8, HA-10, DICE). Symptom: a spec waiting on
+`#status[data-ready="true"]` or `.homebrew-status` times out at 45-65s
+during a full pool run while several codex lanes are active; the same
+spec passes in isolation in 15-20s. It is NOT one spec - it has hit
+php-feature-parity-commands, php-feature-parity-catalog-backup,
+character-sheet, and homebrew-subclass-authoring. DO NOT adjudicate
+these as noise by re-running until green; the standing rule is complete
+all-pass counts. Current practice: re-run the failing spec in isolation,
+and if it passes, DISCLOSE the flake in the merge message with both
+counts rather than calling it noise. This deserves its own hardening
+unit under D213 - the boot/readiness signal is too slow or too fragile
+under contention.
+
+RULINGS 08-07: D220 (de-brand + generalize the two non-SRD dice
+mechanics), D221 (seed-scope runs in parallel; catalog unit merges
+BEFORE the retirement unit), D222 (a deliberately boring third-caster
+carries the test pins), D223 (third-caster ladders DERIVED from the SRD
+Multiclass Spellcaster table via floor(level/3), never transcribed -
+answers the owner's PHB-table licensing question with evidence), D224
+(D222's "content only" means NO TEST PINS, not "no mechanics" - a
+supervisor wording ambiguity that shipped Barbed Court as a non-caster).
+
+IN FLIGHT:
+ - HA-10 (wt/ha10): 3 review rounds + blocker + 2 gate-fix rounds. Now
+   has a DERIVED catalog-layer completeness guard (165 modules via the
+   TS checker) and a shared catalog-control-disclosure seam (optgroup
+   labels + aria-describedby; form controls keep clean selectable
+   names). Needs a full gate chain re-run.
+ - BHC (wt/bhc): 3 review rounds + blocker resolved. Needs vitest + PW.
+   Carries the ROOT FIX for a real production bug: bundled spell
+   registration used normalizeCatalogName (keeps separators) while
+   identity derivation strips them, so EVERY multiword bundled spell had
+   a mismatched fingerprint. Fixed at registration + a bundled-only D205
+   repair; a sibling defect in shared-spell placeholder registration
+   (character-share.ts) fixed too. An earlier attempt to paper over this
+   by substituting the REGISTERED name into live verification was caught
+   and reverted byte-clean - it would have made stored-name drift
+   invisible.
+
+QUEUE: HA-10 -> BHC -> SRD-ONLY (brief written, hard-gated on BHC) ->
+HA-11 (brief written) -> HA-12 -> D213 hardening (add the readiness
+fragility above).
+
+WORKTREES: wt/party (owner's - never prune), wt/ha10, wt/bhc. wt/dice
+prunable.
+
+## RESTART POINT 2026-08-06-k (superseded by 08-07-a)
 MAIN cd7b190 (mirror push pending this commit). FLOORS: vitest 252/4,126
 zero errors; PW 129 pool; build 0; migrations 0000-0039 FROZEN (next free
 mint 0040); backup v5. THIRTY-EIGHT merges. Rulings through D216.
