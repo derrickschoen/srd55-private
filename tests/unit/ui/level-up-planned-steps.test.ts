@@ -338,6 +338,9 @@ const pickerFactory: SpellPickerFactory = (options) => {
   button.setAttribute('aria-label', options.label);
   button.setAttribute('data-address-key', options.addressKey);
   button.addEventListener('click', () => options.onSelect(eligible));
+  if (options.contextDescriptionId !== null) {
+    button.setAttribute('aria-describedby', options.contextDescriptionId);
+  }
   return {
     element: button,
     focus: () => button.focus(),
@@ -351,6 +354,7 @@ describe('shared eligible spell picker provenance', () => {
     const picker = createSpellPicker({
       addressKey: 'selected-hostile-spell',
       label: 'Chosen hostile spell',
+      contextDescriptionId: null,
       value: hostile,
       valueCatalogLayer: 'external',
       freeTextValue: false,
@@ -374,6 +378,7 @@ describe('shared eligible spell picker provenance', () => {
     const picker = createSpellPicker({
       addressKey: 'hostile-spell',
       label: 'Choose hostile spell',
+      contextDescriptionId: null,
       value: null,
       valueCatalogLayer: null,
       freeTextValue: false,
@@ -929,7 +934,20 @@ describe('W-LU2-DRAFT planned Skills, Expertise, and Spells', () => {
       spellCard(wizard.element, classLocator('wizard-prepared', 5))
         .querySelector('button')?.getAttribute('aria-label'),
     ).toBe(
-      'New spell choice — Required from Wizard — SRD · bundled layer',
+      'New spell choice — Required from Wizard',
+    );
+    const describedBy = spellCard(
+      wizard.element,
+      classLocator('wizard-prepared', 5),
+    ).querySelector('button')?.getAttribute('aria-describedby');
+    expect(describedBy).not.toBeNull();
+    const description = spellCard(
+      wizard.element,
+      classLocator('wizard-prepared', 5),
+    ).querySelector('.level-up-planned-source');
+    expect(description?.getAttribute('id')).toBe(describedBy);
+    expect(description?.textContent).toContain(
+      'Granted by Wizard — SRD · bundled layer.',
     );
     wizard.cleanup();
   });

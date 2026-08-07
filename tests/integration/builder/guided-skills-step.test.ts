@@ -382,9 +382,15 @@ describe('the S-C exit: a Fighter with a skill-granting background still owes tw
       fillSkillGrant: () => Promise.reject(new Error('not submitted')),
       navigate: () => undefined,
     });
-    expect(elementText(step.element)).toContain(
-      `${hostile} skill 1 — Unknown catalog layer`,
-    );
+    const skillSelect = interactiveElement(step.element).querySelector('select');
+    expect(skillSelect?.getAttribute('aria-label')).toBe(`${hostile} skill 1`);
+    const describedBy = skillSelect?.getAttribute('aria-describedby');
+    expect(describedBy).not.toBeNull();
+    expect(
+      interactiveElement(step.element).querySelector(
+        `[id="${describedBy}"]`,
+      )?.textContent,
+    ).toBe('Unknown catalog layer');
     expect(
       interactiveElement(step.element).querySelector('[data-ha10-skill-source]'),
     ).toBeNull();

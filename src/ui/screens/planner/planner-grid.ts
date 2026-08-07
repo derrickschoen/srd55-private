@@ -345,6 +345,7 @@ export function renderPlannerGrid(options: {
       const picker = createSpellPicker({
         addressKey: `slot-${slot.id}`,
         label: `Spell selection for slot ${slot.id}`,
+        contextDescriptionId: null,
         value: slot.spell_name,
         valueCatalogLayer: slot.spell_catalog_layer,
         freeTextValue: slot.placeholder === true,

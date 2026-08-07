@@ -592,8 +592,14 @@ describe('HA-6 homebrew library routing and tabs', () => {
       // a second label on the form element is a strict-mode ambiguity.
       expect(formMount?.getAttribute('aria-label')).toBe('Subclass authoring form');
       expect(root.querySelector('form')?.getAttribute('aria-label')).toBeNull();
-      expect(root.querySelectorAll('option').map((option) => option.textContent))
-        .toContain('Fighter — SRD · bundled layer');
+      const bundledParents = root.querySelectorAll('optgroup')
+        .find((group) => group.getAttribute('label') === 'SRD · bundled layer');
+      expect(bundledParents?.querySelectorAll('option').map(
+        (option) => option.textContent,
+      )).toContain('Fighter');
+      expect(bundledParents?.getAttribute('label')).toBe(
+        'SRD · bundled layer',
+      );
       cleanup();
     } finally {
       restoreDocument();
@@ -614,8 +620,14 @@ describe('HA-6 homebrew library routing and tabs', () => {
       });
       const root = interactiveElement(screenContext.root);
 
-      expect(root.querySelectorAll('option').map((option) => option.textContent))
-        .toContain(`${hostileParent} — SRD · bundled layer`);
+      const bundledParents = root.querySelectorAll('optgroup')
+        .find((group) => group.getAttribute('label') === 'SRD · bundled layer');
+      expect(bundledParents?.querySelectorAll('option').map(
+        (option) => option.textContent,
+      )).toContain(hostileParent);
+      expect(bundledParents?.getAttribute('label')).toBe(
+        'SRD · bundled layer',
+      );
       expect(root.querySelector('[data-ha10-parent-class]')).toBeNull();
       cleanup();
     } finally {
@@ -649,8 +661,14 @@ describe('HA-6 homebrew library routing and tabs', () => {
       expect(referenceCalls).toBe(1);
       expect(formMount?.getAttribute('aria-label')).toBe('Background authoring form');
       expect(root.querySelector('form')?.getAttribute('aria-label')).toBeNull();
-      expect(root.querySelectorAll('option').map((option) => option.textContent))
-        .toContain('Alert (2024) — SRD · bundled layer');
+      const bundledFeats = root.querySelectorAll('optgroup')
+        .find((group) => group.getAttribute('label') === 'SRD · bundled layer');
+      expect(bundledFeats?.querySelectorAll('option').map(
+        (option) => option.textContent,
+      )).toContain('Alert (2024)');
+      expect(bundledFeats?.getAttribute('label')).toBe(
+        'SRD · bundled layer',
+      );
       cleanup();
     } finally {
       restoreDocument();

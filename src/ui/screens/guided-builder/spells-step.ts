@@ -27,6 +27,7 @@ export function createSpellsStep(options: {
     const picker = createSpellPicker({
       addressKey: `${choice.kind}-${String(choice.id)}`,
       label: choice.label,
+      contextDescriptionId: null,
       value: null,
       valueCatalogLayer: null,
       freeTextValue: false,

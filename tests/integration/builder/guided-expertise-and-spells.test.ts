@@ -205,9 +205,17 @@ describe('GF-2 guided Expertise and spell adoption', () => {
       fill: () => Promise.reject(new Error('not submitted')),
       navigate: () => undefined,
     });
-    expect(elementText(step.element)).toContain(
-      `${hostile} — Unknown catalog layer Expertise 1`,
+    const expertiseSelect = interactiveElement(step.element).querySelector('select');
+    expect(expertiseSelect?.getAttribute('aria-label')).toBe(
+      `${hostile} Expertise 1`,
     );
+    const describedBy = expertiseSelect?.getAttribute('aria-describedby');
+    expect(describedBy).not.toBeNull();
+    expect(
+      interactiveElement(step.element).querySelector(
+        `[id="${describedBy}"]`,
+      )?.textContent,
+    ).toBe('Unknown catalog layer');
     expect(
       interactiveElement(step.element).querySelector(
         '[data-ha10-expertise-source]',

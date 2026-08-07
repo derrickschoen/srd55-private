@@ -20,6 +20,7 @@ export interface SpellPicker {
 export function createSpellPicker(options: {
   addressKey: string;
   label: string;
+  contextDescriptionId: string | null;
   value: string | null;
   valueCatalogLayer: CatalogLayerDisclosure | null;
   /** The current value is a share-link name of unverified origin. */
@@ -64,7 +65,12 @@ export function createSpellPicker(options: {
   currentLayer.textContent = options.valueCatalogLayer === null
     ? ''
     : catalogLayerLabel(options.valueCatalogLayer);
-  input.setAttribute('aria-describedby', currentLayerId);
+  input.setAttribute(
+    'aria-describedby',
+    options.contextDescriptionId === null
+      ? currentLayerId
+      : `${options.contextDescriptionId} ${currentLayerId}`,
+  );
   wrapper.append(input, currentLayer, list);
 
   let choices: EligibleSpell[] = [];

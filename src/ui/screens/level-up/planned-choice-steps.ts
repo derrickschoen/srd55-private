@@ -372,11 +372,19 @@ export function createPlannedSpellsStep(options: {
       'Continuing defers this owed choice; the generated durable choice remains unfilled and warned.',
     );
     unfilledSpellWarning.hidden = !owed || selected !== null;
+    const source = sourceIdentity(
+      projection.source_label,
+      projection.source_catalog_layer,
+      projection.locator,
+    );
+    const sourceId = `level-up-spell-source-${encodedKey}`;
+    source.id = sourceId;
+    source.setAttribute('id', sourceId);
     const picker = pickerFactory({
       addressKey: `level-up-${projection.kind}-${encodedKey}`,
       label:
-        `${spellChoiceLabel(projection)} from ${projection.source_label} — ` +
-        catalogLayerLabel(projection.source_catalog_layer),
+        `${spellChoiceLabel(projection)} from ${projection.source_label}`,
+      contextDescriptionId: sourceId,
       value:
         selected?.spell_name ?? null,
       valueCatalogLayer: selected?.spell_catalog_layer ?? null,
@@ -458,11 +466,7 @@ export function createPlannedSpellsStep(options: {
       },
       [
         element('h3', { text: spellChoiceLabel(projection) }),
-        sourceIdentity(
-          projection.source_label,
-          projection.source_catalog_layer,
-          projection.locator,
-        ),
+        source,
         ...modeControls,
         picker.element,
         ...(owed ? [unfilledSpellWarning] : []),
