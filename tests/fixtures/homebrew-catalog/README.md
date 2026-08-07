@@ -84,7 +84,7 @@ An imported subclass's key is a **three-part imported key**
 by content key and by nothing else, and a share link carries one `subclassKey` —
 so the key is the only field that crosses all three boundaries. The grammar
 (`src/catalog/catalog-key.ts`) requires a dotted owner namespace in the middle,
-which every bundled key (`2024:subclass:ek`) fails by shape. A
+which every bundled key (`2024:subclass:champion`) fails by shape. A
 document therefore cannot name a seeded row even if it tries;
 `tests/integration/catalog/subclass-provenance.test.ts` follows one imported
 subclass through the database, a backup and a share link to prove it.

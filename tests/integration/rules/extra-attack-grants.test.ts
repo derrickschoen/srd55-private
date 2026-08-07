@@ -284,8 +284,8 @@ describe('the grants a character actually has, read from the database', () => {
     // content_key. A user's own 2024 Warlock feature called Thirsting Blade
     // would make a blind INSERT fail — and the seed runs in ONE transaction, so
     // the failure would take the armour catalog and every class's sheet content
-    // with it on every boot. `upsertThirdCaster` settled this policy: the
-    // holder wins.
+    // with it on every boot. Bundled content uses one policy here: the holder
+    // wins.
     db.exec("DELETE FROM named_features WHERE content_key = '2024:feature:thirsting-blade'");
     db.exec(
       `INSERT INTO named_features

@@ -15,7 +15,6 @@ import { CharacterCommandExecutor } from '../../../src/commands/character-comman
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { CharacterCompletenessQueries } from '../../../src/queries/character-completeness';
 import {
-  BUNDLED_SUBCLASS_OVERRIDE_SCHEDULE_CONTENT_KEYS,
   bundledClassContentKeys,
   hasBundledClassContent,
   seedClassProgressions,
@@ -35,6 +34,9 @@ import {
 } from '../../../src/catalog/content-registry';
 import { assertedExternalContentKey } from '../../../src/catalog/catalog-key';
 import { CatalogImporter } from '../../../src/catalog/catalog-importer';
+import {
+  RETIRED_BUNDLED_SUBCLASS_CONTENT_KEYS,
+} from '../../../src/catalog/retire-non-srd-bundled-subclasses-v1';
 
 const LONG_ROAD_SUBCLASS_DOCUMENT = readFileSync(
   fileURLToPath(
@@ -64,12 +66,10 @@ const SRD_CLASSES = [
 ] as const;
 
 const BUNDLED_SUBCLASSES = [
-  'AT',
   'Champion',
   'Circle of the Land',
   'College of Lore',
   'Draconic Sorcery',
-  'EK',
   'Evoker',
   'Fiend Patron',
   'Hunter',
@@ -77,7 +77,6 @@ const BUNDLED_SUBCLASSES = [
   'Oath of Devotion',
   'Path of the Berserker',
   'Thief',
-  'Veteran',
   'Warrior of the Open Hand',
 ] as const;
 
@@ -150,21 +149,30 @@ function subclassFixedRuleCount(lifecycle: DatabaseLifecycle): number {
     }, 0);
 }
 
+function retiredBundledRootCount(lifecycle: DatabaseLifecycle): number {
+  return Number(lifecycle.database.scalar(
+    `SELECT count(*) FROM subclass_definitions
+      WHERE content_key IN (${RETIRED_BUNDLED_SUBCLASS_CONTENT_KEYS.map(() => '?').join(', ')})`,
+    [...RETIRED_BUNDLED_SUBCLASS_CONTENT_KEYS],
+  ));
+}
+
 describe('application database bootstrap', () => {
   it('gives a brand new database the twelve SRD classes with full progressions', async () => {
     const { lifecycle } = await freshApplicationLifecycle();
 
     expect(classNames(lifecycle)).toEqual([...SRD_CLASSES]);
     expect(subclassNames(lifecycle)).toEqual([...BUNDLED_SUBCLASSES]);
+    expect(retiredBundledRootCount(lifecycle)).toBe(0);
     expect(
       lifecycle.database.scalar('SELECT count(*) FROM class_progressions'),
     ).toBe(SRD_CLASSES.length * 20);
     expect(
       lifecycle.database.scalar('SELECT count(*) FROM subclass_progressions'),
-    ).toBe(40);
+    ).toBe(0);
     expect(
       lifecycle.database.scalar('SELECT count(*) FROM subclass_features'),
-    ).toBe(70);
+    ).toBe(58);
     expect(subclassFixedRuleCount(lifecycle)).toBe(40);
     expect(
       lifecycle.database.scalar(
@@ -330,6 +338,8 @@ describe('application database bootstrap', () => {
       ),
     ).toBe(0);
     expect(classNames(lifecycle)).toEqual([...SRD_CLASSES]);
+    expect(subclassNames(lifecycle)).toEqual([...BUNDLED_SUBCLASSES]);
+    expect(retiredBundledRootCount(lifecycle)).toBe(0);
     expect(
       lifecycle.database.allRaw('SELECT name FROM characters'),
     ).toEqual([{ name: 'Returning User' }]);
@@ -350,6 +360,7 @@ describe('application database bootstrap', () => {
     expect(
       lifecycle.database.scalar('SELECT count(*) FROM class_progressions'),
     ).toBe(SRD_CLASSES.length * 20);
+    expect(retiredBundledRootCount(lifecycle)).toBe(0);
   });
 
   it('seeds a restored image that has no classes and does not duplicate one that has', async () => {
@@ -386,9 +397,9 @@ describe('application database bootstrap', () => {
     );
     lifecycle.database.exec('DELETE FROM class_progressions');
 
-    // All twelve class definitions and both override-schedule subclass
-    // definitions are still present, so a guard that only looked at roots
-    // would call this database healthy and leave every level lookup broken.
+    // All twelve class definitions are still present, so a guard that only
+    // looked at roots would call this database healthy and leave every level
+    // lookup broken.
     expect(
       lifecycle.database.scalar('SELECT count(*) FROM class_definitions'),
     ).toBe(SRD_CLASSES.length);
@@ -401,8 +412,9 @@ describe('application database bootstrap', () => {
     ).toBe(SRD_CLASSES.length * 20);
     expect(
       lifecycle.database.scalar('SELECT count(*) FROM subclass_progressions'),
-    ).toBe(40);
+    ).toBe(0);
     expect(classNames(lifecycle)).toEqual([...SRD_CLASSES]);
+    expect(retiredBundledRootCount(lifecycle)).toBe(0);
     expect(
       lifecycle.database.allRaw('SELECT name FROM characters'),
     ).toEqual([{ name: 'Survivor' }]);
@@ -478,7 +490,7 @@ describe('application database bootstrap', () => {
            AND feature.name = 'Frenzy'
        )`,
     );
-    expect(db.scalar('SELECT count(*) FROM subclass_features')).toBe(69);
+    expect(db.scalar('SELECT count(*) FROM subclass_features')).toBe(57);
     expect(hasBundledSrdSubclassContent(db)).toBe(false);
 
     lifecycle.reopen();
@@ -850,7 +862,7 @@ describe('application database bootstrap', () => {
     ).toBe(SRD_CLASSES.length);
     expect(
       lifecycle.database.scalar('SELECT count(*) FROM subclass_definitions'),
-    ).toBe(14);
+    ).toBe(11);
     expect(
       lifecycle.database.scalar(
         `SELECT count(*) FROM subclass_features
@@ -1031,14 +1043,6 @@ describe('bundled class content detection', () => {
     const keys = bundledClassContentKeys();
 
     expect(keys.classes).toHaveLength(SRD_CLASSES.length);
-    expect(keys.subclasses).toEqual([
-      '2024:subclass:ek',
-      '2024:subclass:at',
-    ]);
-    expect(BUNDLED_SUBCLASS_OVERRIDE_SCHEDULE_CONTENT_KEYS).toEqual([
-      '2024:subclass:ek',
-      '2024:subclass:at',
-    ]);
     expect(bundledSubclassDefinitionContentKeys()).toEqual([
       '2024:subclass:path-of-the-berserker',
       '2024:subclass:college-of-lore',
@@ -1052,9 +1056,6 @@ describe('bundled class content detection', () => {
       '2024:subclass:draconic-sorcery',
       '2024:subclass:fiend-patron',
       '2024:subclass:evoker',
-      '2024:subclass:ek',
-      '2024:subclass:at',
-      '2024:subclass:veteran',
     ]);
     expect(hasBundledClassContent(db)).toBe(true);
 
@@ -1070,17 +1071,11 @@ describe('bundled class content detection', () => {
     expect(hasBundledClassContent(db)).toBe(true);
 
     db.exec(
-      `DELETE FROM subclass_progressions
-       WHERE id = (SELECT min(id) FROM subclass_progressions)`,
+      `DELETE FROM subclass_definitions
+       WHERE content_key = '2024:subclass:champion'`,
     );
-    expect(hasBundledClassContent(db)).toBe(false);
-    seedClassProgressions(db);
     expect(hasBundledClassContent(db)).toBe(true);
-
-    db.exec('DELETE FROM subclass_definitions WHERE content_key = ?', [
-      keys.subclasses[0]!,
-    ]);
-    expect(hasBundledClassContent(db)).toBe(false);
+    expect(hasBundledSrdSubclassContent(db)).toBe(false);
 
     db.exec('DELETE FROM class_definitions');
     expect(hasBundledClassContent(db)).toBe(false);

@@ -431,6 +431,7 @@ function historicalLifecycleThrough0033(
     SCHEMA_AFTER_ASSERTED_CONTENT_KEYS,
     () => undefined,
     DATABASE_MIGRATIONS.slice(0, ASSERTED_CONTENT_KEYS_MIGRATION_COUNT),
+    [],
   );
 }
 
@@ -714,6 +715,7 @@ describe('database migration chain', () => {
       SCHEMA_AFTER_ASSERTED_CONTENT_KEYS,
       () => undefined,
       DATABASE_MIGRATIONS.slice(0, ASSERTED_CONTENT_KEYS_MIGRATION_COUNT),
+      [],
     );
     historical.open();
     try {
@@ -932,7 +934,7 @@ describe('database migration chain', () => {
       expect(db.scalar<number>(
         `SELECT count(*) FROM catalog_content_identities
          WHERE key_kind = 'bundled-stable' AND catalog_layer = 'bundled'`,
-      )).toBe(447);
+      )).toBe(444);
       expect(db.oneRaw(
         `SELECT identity.key_kind, identity.catalog_layer, root.name
          FROM catalog_content_identities AS identity

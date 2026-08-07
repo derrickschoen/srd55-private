@@ -163,7 +163,7 @@ attached to it.
 `contentKey` **must be an imported key** of the form
 `<edition>:<owner.namespace>:<name>` — three colon-separated parts whose middle
 segment contains a dot. Every bundled key puts a dotless record-kind literal
-there (`2024:subclass:ek`), so this shape is what stops a document
+there (`2024:subclass:champion`), so this shape is what stops a document
 overwriting bundled content, and it is what keeps the subclass identifiable as
 imported inside a backup or a share link.
 

@@ -857,9 +857,8 @@ describe('planner build reference JSON block', () => {
     expect(factFor('subclass')?.note).toBe(
       'Every class has at least one bundled subclass at its subclass level, ' +
         'and externally published subclasses for bundled parents are selectable ' +
-        'with their catalog layer disclosed. Fifteen subclasses are bundled, ' +
-        'including the owner-authored Veteran; external subclasses can add their ' +
-        'own progression and mechanics.',
+        'with their catalog layer disclosed. Twelve SRD subclasses are bundled; ' +
+        'external subclasses can add their own progression and mechanics.',
     );
 
     // WEAPONS. `partial` still, but for the opposite half of the reason it used
@@ -1121,9 +1120,8 @@ describe('planner build reference — the two forms hold the same content', () =
     expect(table.rows[subclass]?.[2]?.text).toBe(
       'Every class has at least one bundled subclass at its subclass level, ' +
         'and externally published subclasses for bundled parents are selectable ' +
-        'with their catalog layer disclosed. Fifteen subclasses are bundled, ' +
-        'including the owner-authored Veteran; external subclasses can add their ' +
-        'own progression and mechanics.',
+        'with their catalog layer disclosed. Twelve SRD subclasses are bundled; ' +
+        'external subclasses can add their own progression and mechanics.',
     );
     // Every state renders, so a row cannot go blank unnoticed.
     expect(

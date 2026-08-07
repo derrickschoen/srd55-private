@@ -33,6 +33,7 @@ import type {
 } from '../builder/level-up-wizard';
 import {
   featFeatureEvidenceForProjectedClasses,
+  projectedSubclassFeatureSource,
   type ProjectedBundledClass,
 } from '../rules/class-level-features-srd';
 import { resolveCharacterAbilities } from '../rules/ability-contributions';
@@ -186,14 +187,17 @@ function projectedClasses(
       throw new TypeError('A projected class level must be between 1 and 20.');
     }
     const storedSubclass = sqlNullableString(row, 'subclass_content_key');
+    const subclassContentKey = (
+      isAdvanced && targetSubclassContentKey !== null
+        ? targetSubclassContentKey
+        : storedSubclass
+    ) as ContentKey | null;
     return {
       class_name: sqlString(row, 'name'),
       class_level: level as CharacterLevel,
-      subclass_content_key: (
-        isAdvanced && targetSubclassContentKey !== null
-          ? targetSubclassContentKey
-          : storedSubclass
-      ) as ContentKey | null,
+      subclass: subclassContentKey === null
+        ? null
+        : projectedSubclassFeatureSource(db, subclassContentKey),
     };
   });
 }

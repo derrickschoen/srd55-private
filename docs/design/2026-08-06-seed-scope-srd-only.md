@@ -6,6 +6,13 @@ This is a PROPOSAL, not a ruling. `.claude/decisions.md` outranks it.
 Owner questions from section F were put to the owner; their answers become
 decisions and supersede anything here that conflicts.
 
+> **Executed status (2026-08-07):** D217 resolved the open character question
+> by deleting characters attached to retiring subclasses, not detaching them.
+> D222 moved every retained third-caster pin to the bundled-homebrew Spell
+> Student, not Barbed Court, and D223 requires its ladder to be derived from the
+> SRD multiclass table. The implementation follows those later rulings; the
+> conflicting steps and ledger entries below remain only as proposal history.
+
 # PLAN — SEED-SCOPE
 
 ## A. Sequencing

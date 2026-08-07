@@ -118,11 +118,11 @@ not-yet-acquired state; the sheet omits a zero row. It is not an unknown.
 | Bard | No fixed use-count column. `Bardic Die` is a die-size progression, not the number of uses. | Shared spell slots, straight-class rows L1–20 | Table: `docs/srd/source/class-level-tables.txt:37-61`; feature-text maximum is Charisma modifier, minimum one: `docs/srd/full/srd-5.2.1.txt:1949-2002` |
 | Cleric | **Channel Divinity:** L1 0; L2–5 2; L6–17 3; L18–20 4 | Shared spell slots, straight-class rows L1–20 | Column and values: `docs/srd/source/class-level-tables.txt:64-86`; prose confirms the table is the maximum source: `docs/srd/full/srd-5.2.1.txt:2266-2275` |
 | Druid | **Wild Shape:** L1 0; L2–5 2; L6–16 3; L17–20 4 | Shared spell slots, straight-class rows L1–20 | Column and values: `docs/srd/source/class-level-tables.txt:89-113`; prose: `docs/srd/full/srd-5.2.1.txt:2570-2585` |
-| Fighter | **Second Wind:** L1–3 2; L4–9 3; L10–20 4 | None from the base class; the seeded EK subclass has the existing third-caster path | Column and values: `docs/srd/source/class-level-tables.txt:116-138`; prose: `docs/srd/full/srd-5.2.1.txt:2915-2926` |
+| Fighter | **Second Wind:** L1–3 2; L4–9 3; L10–20 4 | None from the base class; the optional bundled-homebrew Spell Student exercises the third-caster path (D222/D223) | Column and values: `docs/srd/source/class-level-tables.txt:116-138`; prose: `docs/srd/full/srd-5.2.1.txt:2915-2926` |
 | Monk | **Focus Points:** L1 0; L2–20 equal the Monk level (2, 3, …, 20) | None | Column and values: `docs/srd/source/class-level-tables.txt:141-164`; prose defines the pool and recovery: `docs/srd/full/srd-5.2.1.txt:3052-3065` |
 | Paladin | **Channel Divinity:** L1–2 0; L3–10 2; L11–20 3 | Shared spell slots, straight-class rows L1–20 | Column and values: `docs/srd/source/class-level-tables.txt:167-190`; prose: `docs/srd/full/srd-5.2.1.txt:3267-3279` |
 | Ranger | **Favored Enemy:** L1–4 2; L5–8 3; L9–12 4; L13–16 5; L17–20 6 | Shared spell slots, straight-class rows L1–20 | Column and values: `docs/srd/source/class-level-tables.txt:193-216`; prose identifies these as slot-free Hunter's Mark casts: `docs/srd/full/srd-5.2.1.txt:3522-3530` |
-| Rogue | No expendable maximum column. `Sneak Attack` is a damage-dice progression, not a pool. | None from the base class; the seeded AT subclass has the existing third-caster path | `docs/srd/source/class-level-tables.txt:219-241` |
+| Rogue | No expendable maximum column. `Sneak Attack` is a damage-dice progression, not a pool. | None from the base class | `docs/srd/source/class-level-tables.txt:219-241` |
 | Sorcerer | **Sorcery Points:** L1 0; L2–20 equal the Sorcerer level (2, 3, …, 20) | Shared spell slots, straight-class rows L1–20 | Column and values: `docs/srd/source/class-level-tables.txt:244-273`; prose states the table value is the cap: `docs/srd/full/srd-5.2.1.txt:3952-3967` |
 | Warlock | No non-spell maximum column. | **Pact Magic:** L1 1 slot at level 1; L2 2@1; L3–4 2@2; L5–6 2@3; L7–8 2@4; L9–10 2@5; L11–16 3@5; L17–20 4@5 | `docs/srd/source/class-level-tables.txt:274-298`; Pact recovery and interpretation: `docs/srd/full/srd-5.2.1.txt:4289-4297` |
 | Wizard | No non-spell maximum column. | Shared spell slots, straight-class rows L1–20 | `docs/srd/source/class-level-tables.txt:299-324` |
@@ -570,9 +570,8 @@ Do not insert spell slots into `class_resources`.
    the per-class JSON slot maps. The latter produces plausible but wrong totals.
 3. Include seeded subclass caster contributions through their stored
    progression-type path; do not infer them from a class or subclass name in the
-   sheet. A sole EK or AT contribution is the negative
-   case that prevents the straight-class shortcut from swallowing third-caster
-   slots.
+   sheet. A sole optional Spell Student contribution is the negative case that
+   prevents the straight-class shortcut from swallowing third-caster slots.
 4. Resolve Pact Magic separately from exact `pact_slots`/the existing
    `pactMagic()` path. Pact slots remain their own row, labelled with both count
    and slot level. They may cast compatible spells, but their maxima do not merge
@@ -679,7 +678,7 @@ fail.
 | Two class-qualified Channel Divinity pools are not summed | Pure test with Cleric 6 / Paladin 3 expects separate 3 and 2 rows | Group only by `resource_kind`; the test observes one incorrect row and fails |
 | Known none, unknown catalog, missing ladder data, and missing formula data stay distinct | Integration sheet-builder test covers a bundled below-acquisition class, an imported class, deletion of Barbarian's current row/all Rage rows, and deletion/corruption of Bardic Inspiration | Infer expected kinds only from stored rows; a wholly deleted Rage ladder or formula becomes known none and the named test fails |
 | Multiclass shared slots use the combined table, not addition | Pure test: Wizard 3 / Cleric 2 resolves effective level 5 to `4,3,2` | Sum straight rows (`4,2` + `3`) and the named expected vector fails |
-| A sole subclass caster uses its progression contribution, not the base-class shortcut | Pure test: a level-3 Fighter with the EK subclass resolves its third-caster contribution to two level-1 slots | Read only `class_progressions.slots` for Fighter; the expected slot row disappears and fails |
+| A sole subclass caster uses its progression contribution, not the base-class shortcut | Integration test: a level-3 Fighter with the installed Spell Student subclass resolves its third-caster contribution to two level-1 slots | Read only `class_progressions.slots` for Fighter; the expected slot row disappears and fails |
 | Pact slots remain separate | Pure test: Wizard 2 / Warlock 3 expects shared first-level 3 plus two level-2 Pact slots | Merge Pact count into shared level 2; the two-row expectation fails |
 | Invalid/missing spell content is absent, never `{}`/zero | Builder integration test corrupts or deletes the exact progression row and asserts the absence detail and no boxes | Catch decoding failure and return `{}`; the expected absence row disappears and fails |
 | The visible row, structured fact, and marking treatment agree | Extend `tests/unit/ui/sheet-view.test.ts` with ladder, each formula kind, known-zero, each absence family, and the single three-feature disclosure | Render one fewer box, duplicate the disclosure, or add a structured maximum without a row; count/counterpart assertions fail |

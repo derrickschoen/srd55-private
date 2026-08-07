@@ -17,14 +17,14 @@ import {
  */
 describe('the imported content key grammar', () => {
   it('refuses every key shape the seeder mints, by shape and not by list', () => {
-    // `classContentKey`, the two subclass constants, and
+    // `classContentKey`, SRD subclass keys, and
     // `parseSrdNamedExtraAttackFeatures` — all in `src/rules/`. Every one puts a
     // RECORD-KIND LITERAL in the middle, and a literal has no dot in it.
     for (const bundled of [
       '2024:class:bard',
       '2024:class:fighter',
-      '2024:subclass:ek',
-      '2024:subclass:at',
+      '2024:subclass:champion',
+      '2024:subclass:thief',
       '2024:feature:thirsting-blade',
       '2024:feature:devouring-blade',
     ]) {

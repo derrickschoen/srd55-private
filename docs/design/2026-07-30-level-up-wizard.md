@@ -93,11 +93,11 @@ them. D100 adds no performance gate to this plan.
   (`src/builder/contracts.ts:62-75`). The guided class query obtains it through a
   left join (`src/builder/guided-creation.ts:512-546`). The level-up read model
   must preserve that absence too.
-- **Subclass choice is structurally available but bundled content is partial.**
+- **Subclass choice is structurally available.**
   Every seeded 2024 class subclasses at class level 3, exposed as
   `LEVEL_UP_SUBCLASS_LEVEL` (`src/builder/level-up.ts:74-84`), while the bundled
-  catalog contains only EK and AT
-  (`src/rules/class-progression-lookup.ts:180-195`). The command accepts no key
+  seed now contains exactly one SRD subclass for every class; optional catalog
+  installs can add more choices (D216/D222). The command accepts no key
   and resolves a supplied key only within the selected class
   (`src/commands/level-up-class.ts:144-169`).
 - **An applied level already regenerates spell grants, while guided selection
@@ -1387,7 +1387,7 @@ writer.
 | **LU-LEGACY-ASI** | delete a lookalike effect or leave a proven old command effect unattributed | exact legacy writer fingerprint migrates to ASI feat/choice provenance; each single-field mutation preserves the effect, creates unresolved choice and warns |
 | **LU-HP-FIXED** | add a roll/input or omit Constitution/minimum 1 | browser asserts no HP form controls; integration fixtures cover Fighter CON +2 and Wizard CON −5, showing fixed delta and floor 1, with zero roll rows |
 | **LU-SUBCLASS-SAVE** | block level 3 with no option/key | Wizard 2→3 with empty bundled options commits; Complete and sheet carry the same warning key |
-| **LU-SUBCLASS-APPLY** | attach another class's subclass | Fighter rejects AT and accepts EK; source/effects regenerate |
+| **LU-SUBCLASS-APPLY** | attach another class's subclass | Fighter rejects the SRD Thief and accepts the SRD Champion; the optional Spell Student additionally pins source/effect and planned-spell regeneration through the live route |
 | **LU-EPIC-DEFER** | lose or hide a deferred level-19 choice | level 19 commits a null choice row; reload/share/backup and sheet preserve the warning; later resolution clears it |
 | **LU-SPELL-PLANNED** | require a durable slot ID before commit or generate a second slot model | caster fixture searches and selects by logical source/rule/ordinal; commit maps it to exactly one generated `spell_selection_slots` row |
 | **LU-SPELL-ATOMIC** | commit the level and spell picks as separate revisions | induced second-selection failure leaves level, sources, every slot and history byte-equal; success creates one operation/history group |
