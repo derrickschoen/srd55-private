@@ -23,7 +23,61 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-07-c (newest - read first)
+## RESTART POINT 2026-08-07-d (newest - read first)
+MAIN b309c66 (mirror pushed). FLOORS: vitest 257/4,229 all-pass; PW 132
+pool; build 0; migrations 0000-0040 FROZEN on main. FORTY-THREE merges.
+Rulings through D226.
+
+MERGED SINCE 08-07-c:
+ - HA-11 (b309c66, 43rd): editing a published creation produces a
+   SUCCESSOR through CI-7's lineage machinery; fix-review gains an
+   apply-to-all that surfaces every CI-7 notice per character; a creation
+   and its attached characters archive as ONE set, restore
+   all-or-nothing, and permanent purge removes the ENTIRE connected
+   lineage chain via a recursive walk. Mint 0040 = archive membership
+   manifest.
+
+TWO DESIGN POINTS THAT WILL LOOK LIKE BUGS LATER:
+ - THE MANIFEST HAS NO CHARACTER FK, DELIBERATELY. Membership is recorded
+   at archive time, not recomputed at restore time; the missing FK is
+   what lets the evidence survive a member being deleted through the
+   ordinary public RPC, so restore NAMES the missing member and refuses
+   instead of quietly returning less than it promised. Pinned by exact
+   FK-list equality in two places — adding the FK "helpfully" breaks
+   tests.
+ - ONE GUARD-SUSPENSION SEAM, SHARED. Purge reuses SRD-ONLY's single
+   guarded exception to 0039's DELETE-permanence trigger
+   (src/catalog/catalog-lineage-delete-guard.ts). Do not write a second.
+
+FINDINGS AGAINST OUR OWN WORK (full detail in the merge message):
+ - Codex called a red test "unrelated to this diff" when it was this
+   lane's own regression. The supervisor then OVERSTATED its impact,
+   claiming it broke production imports of older backups; it did not,
+   because replacement migrates a candidate to current schema BEFORE
+   auditing it. Asserting before the requested verification arrived was
+   the supervisor's error.
+ - Extracting the guard seam silently weakened the retirement
+   migration's checksum, which hashed only its own file. D226: a
+   checksum-frozen migration covers its TRANSITIVE behavioural source,
+   or the claim is restated to what it actually freezes. Fixed with a
+   declared (path, bytes) set, hashed in lexicographic order, re-pinned
+   at BOTH assertion sites.
+ - POST-MERGE VERIFICATION WAS INTERRUPTED and left no output; the merge
+   sat on main unverified across a session boundary. Re-run clean:
+   257/4,229 all-pass. An unverified merge is not a floor.
+
+IN FLIGHT: nothing. NEXT: dispatch HA-12, the LAST unit of the HA chain
+(brief at .claude/handover/briefs/ha-12.md) — D218's deferred share-link
+try-then-warn half (budget 131,072 encoded chars; tryEncodeShareFragment
+already returns a typed too_large), portability closure for all three
+authored kinds, and the final D108 accessibility pass with a coverage
+table NAMING the gaps. Then D213 hardening, which now leads with D225's
+boot batching fix.
+
+OPEN FOR THE OWNER: the EK/AT git-history rewrite decision. Working-tree
+removal is done and merged under D216; only the history question parks.
+
+## RESTART POINT 2026-08-07-c
 MAIN 9578ea2 (mirror pushed). FLOORS: vitest 257/4,186 all-pass; PW 131
 pool; build 0; migrations 0000-0039 FROZEN on main (HA-11 holds an
 unmerged 0040). FORTY-TWO merges. Rulings through D225.
