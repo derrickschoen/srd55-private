@@ -5,6 +5,90 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-06 — Barbed Court: the school names are guidance, not a restriction; Misty Step kept
+
+Owner's ruling, verbatim:
+
+> Keep misty step. School names were guidelines
+
+Effect: "basically abjuration, enchantment and illusion spells" was flavour
+direction, not a rules gate. The player's Wizard-list choices are **not**
+school-restricted, and *Misty Step* (Conjuration) joins the granted Court
+Spells. This supersedes the school clause proposed in the chooseable-list
+entry below, and closes the *Misty Step* question and the Distance Checklist
+rule #1 amendment together.
+
+Findings recorded, not corrected:
+
+- **Scope.** Without the school gate the subclass is a Wisdom-based caster with
+  access to the entire Wizard list at its slot levels. No SRD third-caster has
+  unrestricted access to a full arcane list; the school restriction was the
+  only thing holding the design to a thematic slice. Combined with the Monk-17
+  conversion to 5th-level slots, a Barbed Court monk can prepare and cast
+  *Fireball*, *Counterspell*, *Wall of Force*, *Greater Invisibility*, *Haste*,
+  and *Fly* — none of which are in the stated theme and none of which the
+  earlier power-budget worksheet priced.
+- **Distance Checklist rule #1 is now formally void.** It read "the fixed list
+  is a bardic pressure, mockery, and social-control slice rather than a general
+  arcane list." The list is now a general arcane list by owner ruling. The rule
+  is rewritten to a flavour guideline in the doc rather than deleted, so the
+  record shows what changed and when.
+- The bard-list grant keeps its purpose: nine in-school spells remain
+  bard-but-not-wizard (*Bane*, *Command*, *Dissonant Whispers*, *Heroism*,
+  *Calm Emotions*, *Enthrall*, *Silence*, *Zone of Truth*, *Compulsion*) and
+  are reachable only through the granted Court Spells table.
+- The two free Wizard cantrip picks now carry no school caveat, so *Fire Bolt*
+  or *Ray of Frost* is an ordinary choice and the Unshaken Aim close-combat
+  clause is reliably live.
+
+## 2026-08-06 — Barbed Court: Faces of the Court kept; Vex replaced with Topple; Court Cantrips capped at one cantrip per turn
+
+Owner's ruling, verbatim:
+
+> Keep the mirror image. Replace vex with topple. Keep the court cantrips but
+> add that you can only cast one cantrip per turn.
+
+Effect on three open items, all now closed:
+
+- **Faces of the Court stays** — innate *Mirror Image* at Monk 3, PB free casts
+  per Long Rest, alongside the granted Court Spells row. The defence budget is
+  therefore *Mirror Image* + Warding Image (+2 AC) + *Shield*, owner-ruled.
+- **Court Forms menu is Nick / Slow / Topple.** The F5 Advantage-Faucet
+  objection to Vex is resolved by removal, not by a cap.
+- **Court Cantrips is capped at one cantrip per turn**, which removes the
+  stacking ceiling of two (Focus rider plus an Action cast or replaced attack).
+
+Measured consequences, recorded not corrected:
+
+- **Topple is not a downgrade from Vex; it is a sideways move that trades
+  self-accuracy for party accuracy and defence.** SRD Topple: on a hit, a
+  Constitution save (DC 8 + the ability modifier used for the attack roll +
+  Proficiency Bonus) or the target has the Prone condition — DC 17 at Monk 11,
+  DC 19 at Monk 17. With six attacks per turn (2 + Nick + Flurry 3) the target
+  is Prone about 90% of the time by end of turn. Prone grants Advantage to
+  **every** melee attacker rather than only the monk, imposes Disadvantage on
+  the prone creature's own attack rolls, and taxes half its movement to stand;
+  against it, ranged allies attack at Disadvantage. It also synergises with the
+  taunt: a goaded creature that comes for the monk arrives Prone, attacking at
+  Disadvantage into +2 AC and *Shield*. Benchmark: Warrior of the Open Hand's
+  Open Hand Technique offers Prone only on Flurry hits and only with a save;
+  Topple here applies to every attack.
+- **Slow is now the dead option.** Prone strictly exceeds a 10-foot,
+  non-stacking Speed reduction for a subclass whose goal is to keep the target
+  adjacent. The live menu is Nick (damage) versus Topple (control); Slow needs
+  a reason to exist or should be dropped.
+- **The cantrip cap brings Court Cantrips inside the guideline band.** Measured
+  against a full at-will turn including the Nick strike, one free cantrip
+  (*Chill Touch*) is worth 19% of the turn at Monk 3, 22% at 6, 22% at 11 and
+  26% at 17 — under the 25–33% band for a substantial rider at every tier
+  except the top, where it sits at the low end. The earlier +38% figure omitted
+  the Nick attack and allowed two cantrips. No move to level 6 is needed.
+- **Spellwoven Strike is now largely redundant** and is flagged, not changed:
+  with one cantrip per turn, spending Focus and taking the free rider strictly
+  beats giving up an attack for the same cantrip. Its only live use is a turn
+  on which no Focus is spent. As a level-6 feature it is thin; replacing it was
+  offered to the owner.
+
 ## 2026-08-06 — Barbed Court: spellcasting becomes a chooseable Wizard list plus granted Court Spells; Focus converts to spell slots at 13/17
 
 Owner's rulings, verbatim:
