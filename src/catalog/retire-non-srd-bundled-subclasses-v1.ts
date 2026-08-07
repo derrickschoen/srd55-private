@@ -20,6 +20,34 @@ function retiredBundledIdentity(alias = ''): string {
   `;
 }
 
+function retiredSubclassJsonReference(document: string): string {
+  return `EXISTS (
+    SELECT 1
+      FROM json_tree(${document}) AS reference
+      JOIN subclass_definitions AS subclass
+        ON reference.type = 'integer'
+       AND reference.atom = subclass.id
+      JOIN catalog_content_identities AS identity
+        ON identity.content_kind = 'subclass'
+       AND identity.content_key = subclass.content_key
+     WHERE ${retiredBundledIdentity('identity')}
+       AND (
+         reference.key = 'subclass_definition_id'
+         OR (
+           reference.key = 'source_definition_id'
+           AND EXISTS (
+             SELECT 1
+               FROM json_tree(${document}) AS discriminator
+              WHERE discriminator.parent = reference.parent
+                AND discriminator.key = 'source_type'
+                AND discriminator.type = 'text'
+                AND discriminator.atom = 'subclass'
+           )
+         )
+       )
+  )`;
+}
+
 /**
  * D217's one-time, narrowly scoped retirement. Character deletion is allowed
  * only here; ordinary catalog removal keeps its non-destructive contracts.
@@ -45,38 +73,35 @@ export function retireNonSrdBundledSubclassesV1(db: DatabaseContext): void {
   // D217 permits deleting characters that still hold a retiring subclass.
   // Its narrower companion is history on a surviving character: an inverse
   // or save point that would restore the retired definition can never succeed,
-  // so only those unusable entries are discarded. json_tree matches an exact
-  // numeric reference field, rather than treating arbitrary JSON text as an id.
+  // so only those unusable entries are discarded. json_tree matches either the
+  // class-level field or a polymorphic source row whose sibling discriminator
+  // says "subclass", rather than treating arbitrary JSON text as an id.
   db.exec(
     `DELETE FROM character_operations AS operation
-      WHERE EXISTS (
-        SELECT 1
-          FROM json_tree(operation.inverse_command) AS payload
-          JOIN subclass_definitions AS subclass
-            ON payload.type = 'integer'
-           AND payload.atom = subclass.id
-          JOIN catalog_content_identities AS identity
-            ON identity.content_kind = 'subclass'
-           AND identity.content_key = subclass.content_key
-         WHERE payload.key = 'subclass_definition_id'
-           AND ${retiredBundledIdentity('identity')}
-      )`,
+      WHERE ${retiredSubclassJsonReference('operation.inverse_command')}`,
     keys,
   );
   db.exec(
     `DELETE FROM character_save_points AS save_point
-      WHERE EXISTS (
-        SELECT 1
-          FROM json_tree(save_point.snapshot) AS payload
-          JOIN subclass_definitions AS subclass
-            ON payload.type = 'integer'
-           AND payload.atom = subclass.id
-          JOIN catalog_content_identities AS identity
-            ON identity.content_kind = 'subclass'
-           AND identity.content_key = subclass.content_key
-         WHERE payload.key = 'subclass_definition_id'
-           AND ${retiredBundledIdentity('identity')}
-      )`,
+      WHERE ${retiredSubclassJsonReference('save_point.snapshot')}`,
+    keys,
+  );
+
+  // A changed-away subclass source is tombstoned, not repointed: its identity
+  // is historical provenance for the retired definition. Repointing it would
+  // falsely claim Champion created those historical grants. Delete that source
+  // graph instead; source-owned rows follow their declared FK/trigger cleanup.
+  db.exec(
+    `DELETE FROM character_source_instances
+      WHERE source_type = 'subclass'
+        AND source_definition_id IN (
+          SELECT subclass.id
+            FROM subclass_definitions AS subclass
+            JOIN catalog_content_identities AS identity
+              ON identity.content_kind = 'subclass'
+             AND identity.content_key = subclass.content_key
+           WHERE ${retiredBundledIdentity('identity')}
+        )`,
     keys,
   );
 

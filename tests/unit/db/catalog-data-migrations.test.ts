@@ -59,7 +59,7 @@ describe('catalog data-migration registry', () => {
     }))).toEqual([{
       id: 'retire_non_srd_bundled_subclasses_v1',
       projectorScheme: 'content-v1',
-      checksum: '3fdeee928e80e1b64642a212abb15526732f8521fa3aa33bd45cd2f064e374f2',
+      checksum: '501bb363cd32f4f48a230b5771761670492bc20a975c38598601784e9d74b563',
     }]);
   });
 

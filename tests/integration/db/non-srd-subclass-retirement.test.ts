@@ -16,6 +16,7 @@ import { CharacterState } from '../../../src/character/character-state';
 import { CharacterCommandExecutor } from '../../../src/commands/character-command-executor';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { sha256 } from '../../../src/crypto/sha256';
+import { auditCandidateDatabase } from '../../../src/db/candidate-audit';
 import { applicationSeed, createApplicationLifecycle } from '../../../src/db/bootstrap';
 import { DatabaseContext } from '../../../src/db/database';
 import { DatabaseLifecycle } from '../../../src/db/database-lifecycle';
@@ -88,6 +89,42 @@ class FailAfterGuardSuspensionDatabase extends DatabaseContext {
         'DROP TRIGGER catalog_content_supersessions_refuse_delete_before_delete'
     ) {
       this.#guardWasDropped = true;
+    }
+    return result;
+  }
+}
+
+class GuardTransactionTrackingDatabase extends DatabaseContext {
+  #guardWasDropped = false;
+  #droppedAtDepth: number | null = null;
+  #recreatedAtDepth: number | null = null;
+
+  get droppedAtDepth(): number | null {
+    return this.#droppedAtDepth;
+  }
+
+  get recreatedAtDepth(): number | null {
+    return this.#recreatedAtDepth;
+  }
+
+  override exec(
+    sql: string,
+    bind?: Parameters<DatabaseContext['exec']>[1],
+  ): ReturnType<DatabaseContext['exec']> {
+    const result = super.exec(sql, bind);
+    if (
+      sql.trim() ===
+        'DROP TRIGGER catalog_content_supersessions_refuse_delete_before_delete'
+    ) {
+      this.#guardWasDropped = true;
+      this.#droppedAtDepth = this.transactionDepth;
+    } else if (
+      this.#guardWasDropped &&
+      sql.includes(
+        'CREATE TRIGGER catalog_content_supersessions_refuse_delete_before_delete',
+      )
+    ) {
+      this.#recreatedAtDepth = this.transactionDepth;
     }
     return result;
   }
@@ -251,52 +288,102 @@ describe('one-time non-SRD bundled subclass retirement', () => {
       "SELECT id FROM subclass_definitions WHERE content_key = '2024:subclass:ek'",
     ));
     const survivorId = old.database.exec(
-      "INSERT INTO characters (name) VALUES ('SRD Survivor')",
+      `INSERT INTO characters (name, notes)
+       VALUES ('SRD Survivor', 'Before safe history entry')`,
     ).lastInsertId;
     old.database.exec(
       `INSERT INTO character_class_levels (
          character_id, class_definition_id, subclass_definition_id,
          level, is_starting_class
-       ) VALUES (?, ?, ?, 3, 1)`,
-      [survivorId, fighterId, retiredEKId],
+       ) VALUES (?, ?, NULL, 3, 1)`,
+      [survivorId, fighterId],
     );
+    const survivorExecutor = new CharacterCommandExecutor(
+      old.database,
+      new CharacterCommandIntegrity('retirement-history-test-key'),
+    );
+    await survivorExecutor.execute({
+      character_id: survivorId as never,
+      operation_uuid: '11111111-1111-4111-8111-111111111111',
+      expected_revision: 0 as never,
+      command: {
+        type: 'update_class',
+        class_definition_id: fighterId as never,
+        subclass_definition_id: retiredEKId as never,
+      },
+    });
     const retiringSnapshot = new CharacterState(old.database).capture(survivorId);
-    old.database.exec(
-      `UPDATE character_class_levels
-          SET subclass_definition_id = ?
-        WHERE character_id = ? AND class_definition_id = ?`,
-      [championId, survivorId, fighterId],
-    );
-    old.database.exec(
-      `UPDATE characters
-          SET revision = 2, notes = 'After safe history entry'
-        WHERE id = ?`,
-      [survivorId],
-    );
+    await survivorExecutor.execute({
+      character_id: survivorId as never,
+      operation_uuid: '22222222-2222-4222-8222-222222222222',
+      expected_revision: 1 as never,
+      command: {
+        type: 'update_class',
+        class_definition_id: fighterId as never,
+        subclass_definition_id: championId as never,
+      },
+    });
     const championSnapshot = new CharacterState(old.database).capture(survivorId);
-    old.database.exec(
-      `INSERT INTO character_operations (
-         character_id, operation_uuid, expected_revision,
-         resulting_revision, inverse_command
-       ) VALUES
-         (?, 'survivor-retiring-inverse', 0, 1, ?),
-         (?, 'survivor-safe-inverse', 1, 2, ?)`,
-      [
-        survivorId,
-        JSON.stringify({
-          type: 'internal_snapshot_restore',
-          snapshot: retiringSnapshot,
-        }),
-        survivorId,
-        JSON.stringify({
-          type: 'internal_flavor_restore',
-          alignment: null,
-          appearance: null,
-          backstory: null,
-          notes: 'Before safe history entry',
-        }),
-      ],
-    );
+    await survivorExecutor.execute({
+      character_id: survivorId as never,
+      operation_uuid: '33333333-3333-4333-8333-333333333333',
+      expected_revision: 2 as never,
+      command: {
+        type: 'update_class',
+        class_definition_id: fighterId as never,
+        subclass_definition_id: championId as never,
+      },
+    });
+    await survivorExecutor.execute({
+      character_id: survivorId as never,
+      operation_uuid: '44444444-4444-4444-8444-444444444444',
+      expected_revision: 3 as never,
+      command: {
+        type: 'update_character_flavor',
+        alignment: null,
+        appearance: null,
+        backstory: null,
+        notes: 'After safe history entry',
+      },
+    });
+    expect(old.database.allRaw(
+      `SELECT source.state, subclass.content_key
+         FROM character_source_instances AS source
+         JOIN subclass_definitions AS subclass
+           ON subclass.id = source.source_definition_id
+        WHERE source.character_id = ? AND source.source_type = 'subclass'
+        ORDER BY subclass.content_key`,
+      [survivorId],
+    )).toEqual([
+      {
+        state: 'active',
+        content_key: '2024:subclass:champion',
+      },
+      {
+        state: 'tombstoned',
+        content_key: '2024:subclass:ek',
+      },
+    ]);
+    expect(old.database.scalar(
+      `SELECT count(*)
+         FROM json_tree((
+           SELECT inverse_command FROM character_operations
+            WHERE operation_uuid = '33333333-3333-4333-8333-333333333333'
+         )) AS reference
+        WHERE reference.key = 'subclass_definition_id'
+          AND reference.atom = ?`,
+      [retiredEKId],
+    )).toBe(0);
+    expect(old.database.scalar(
+      `SELECT count(*)
+         FROM json_tree((
+           SELECT inverse_command FROM character_operations
+            WHERE operation_uuid = '33333333-3333-4333-8333-333333333333'
+         )) AS reference
+        WHERE reference.key = 'source_definition_id'
+          AND reference.atom = ?`,
+      [retiredEKId],
+    )).toBe(1);
     old.database.exec(
       `INSERT INTO character_save_points (
          character_id, label, snapshot, schema_version
@@ -352,12 +439,15 @@ describe('one-time non-SRD bundled subclass retirement', () => {
       `SELECT operation_uuid FROM character_operations
         WHERE character_id = ? ORDER BY operation_uuid`,
       [survivorId],
-    )).toEqual([{ operation_uuid: 'survivor-safe-inverse' }]);
+    )).toEqual([
+      { operation_uuid: '11111111-1111-4111-8111-111111111111' },
+      { operation_uuid: '44444444-4444-4444-8444-444444444444' },
+    ]);
     expect(db.allRaw(
       `SELECT label FROM character_save_points
         WHERE character_id = ? ORDER BY label`,
       [survivorId],
-    )).toEqual([{ label: 'Champion snapshot' }]);
+    )).toEqual([]);
     for (const table of [
       'subclass_definitions',
       'catalog_content_identities',
@@ -401,16 +491,29 @@ describe('one-time non-SRD bundled subclass retirement', () => {
     expect(db.scalar('SELECT count(*) FROM class_definitions')).toBe(12);
     expect(db.connection.selectObject('PRAGMA foreign_key_check')).toBeUndefined();
     expect(lineageDeleteGuard(db)).toBe(guardBefore);
+    expect(db.allRaw(
+      `SELECT source.source_type, source.state, subclass.content_key
+         FROM character_source_instances AS source
+         JOIN subclass_definitions AS subclass
+           ON subclass.id = source.source_definition_id
+        WHERE source.character_id = ? AND source.source_type = 'subclass'`,
+      [survivorId],
+    )).toEqual([{
+      source_type: 'subclass',
+      state: 'active',
+      content_key: '2024:subclass:champion',
+    }]);
+    expect(() => auditCandidateDatabase(db.connection)).not.toThrow();
 
     const undo = await new CharacterCommandExecutor(
       db,
       new CharacterCommandIntegrity('retirement-history-test-key'),
     ).undo({
       character_id: survivorId as never,
-      operation_uuid: 'survivor-safe-inverse',
-      expected_revision: 2 as never,
+      operation_uuid: '44444444-4444-4444-8444-444444444444',
+      expected_revision: 4 as never,
     });
-    expect(undo).toMatchObject({ status: 'applied', revision: 3 });
+    expect(undo).toMatchObject({ status: 'applied', revision: 5 });
     expect(db.scalar('SELECT notes FROM characters WHERE id = ?', [survivorId]))
       .toBe('Before safe history entry');
 
@@ -440,6 +543,22 @@ describe('one-time non-SRD bundled subclass retirement', () => {
     );
     expect(lineageDeleteGuard(old.database)).toBe(guardBefore);
     expect(retirementMarker(old.database)).toBeNull();
+  }, 20_000);
+
+  it('recreates the exact 0039 delete guard before the migration transaction commits', () => {
+    const old = oldApplicationLifecycle();
+    const guardBefore = lineageDeleteGuard(old.database);
+    const tracked = new GuardTransactionTrackingDatabase(
+      old.database.connection,
+    );
+
+    runCatalogDataMigrations(tracked);
+
+    expect(tracked.droppedAtDepth).toBe(1);
+    expect(tracked.recreatedAtDepth).toBe(1);
+    expect(tracked.transactionDepth).toBe(0);
+    expect(lineageDeleteGuard(old.database)).toBe(guardBefore);
+    expect(retirementMarker(old.database)).not.toBeNull();
   }, 20_000);
 
   it('rolls the exact 0039 delete guard and marker back on a forced FK-check failure', () => {
