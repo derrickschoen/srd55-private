@@ -36,6 +36,36 @@ PROSE and NAMES — which is why D216 removes the names and why no EK/AT
 prose ever entered this repo. Deriving costs us nothing and removes the
 question entirely.
 
+## D225 — SUPERVISOR: boot readiness slowness is a PRODUCT defect, queued for D213 hardening (2026-08-07)
+
+The route-readiness timeouts recurring across four lanes are not a test
+problem. Diagnosis in docs/design/2026-08-07-boot-readiness-diagnosis.md:
+EVERY page load re-projects and re-verifies all 447 bundled aggregates
+(339 spells) — roughly 2,373 child/root queries, 339 nested savepoints,
+at least three SHA-256 passes per spell, and the spell descriptions
+parsed FOUR times per boot (initial load, cardinality check, manifest
+construction, source-vs-stored comparison). Seeder guards skip the
+WRITES; nothing skips the VERIFICATION.
+
+RULINGS:
+(1) This is user-facing slowness on a cheap device, not a CI artefact.
+    Raising a test timeout is NOT an acceptable response to it, and no
+    lane may do so citing this finding.
+(2) The readiness CONTRACTS stay honest as they are. Firing the stamp
+    before catalog reconciliation would either expose stale catalog
+    state or just move the same synchronous block behind the first
+    click. Do not "fix" this by stamping earlier.
+(3) First fix, when D213 hardening starts: batch the 339-spell stored
+    projection and reconciliation — load each root/child/fingerprint
+    table once, build keyed maps, derive each live/source identity once.
+    Medium cost, no migration, and it must NOT weaken the every-boot
+    integrity guarantee, which exists because stored bundled rows can
+    genuinely drift and boot is what detects that.
+(4) A persisted catalog-version plus mutation-dirty stamp is the
+    candidate for skipping the work entirely, and is a SEPARATE, later
+    decision — a build/schema signature alone is insufficient for
+    exactly the drift reason in (3).
+
 ## D224 — SUPERVISOR: D222's "content only" means NO TEST PINS, not "no mechanics" (2026-08-07)
 
 Amends D222's wording, which was mine and was ambiguous. BHC's review
