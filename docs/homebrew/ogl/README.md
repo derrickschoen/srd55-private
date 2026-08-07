@@ -28,7 +28,7 @@ the full reading.
 | `SECTION-15.md` | The Copyright Notice chain for exactly what this folder holds, and how to extend it. |
 | `LICENSING.md` | Research note: what can and cannot be converted from an OGL prestige class into a CC-BY 5.2 subclass, and the three routes available. |
 | `srd-3.5/` | The 3.5 SRD as published — see its `SOURCE.md` for provenance and checksums. |
-| `srd-3.0/` | The 3.0 SRD — see its `SOURCE.md`. |
+| `srd-3.0/` | The 3.0 SRD, **partial — 49 of ~205 files, no prestige classes**. See its `SOURCE.md` before relying on it. |
 
 No converted subclass lives here yet.
 
