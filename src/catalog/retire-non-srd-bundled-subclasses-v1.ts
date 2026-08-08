@@ -1,6 +1,14 @@
 import type { DatabaseContext } from '../db/database';
 import { withCatalogLineageDeleteGuardSuspended } from './catalog-lineage-delete-guard';
 
+/**
+ * D230 restatement (D226): the first two keys were substituted by the
+ * 2026-08-08 name scrub and never existed in any database, so this
+ * migration can no longer match pre-retirement rows for them; only the
+ * veteran retirement remains matchable. Harmless by D60/D216: no real
+ * deployment ever held those rows, and boot has seeded SRD-only since
+ * the retirement landed.
+ */
 export const RETIRED_BUNDLED_SUBCLASS_CONTENT_KEYS = Object.freeze([
   '2024:subclass:ek',
   '2024:subclass:at',

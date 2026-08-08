@@ -71,7 +71,7 @@ describe('catalog data-migration registry', () => {
         'src/catalog/retire-non-srd-bundled-subclasses-v1.ts',
         'src/catalog/catalog-lineage-delete-guard.ts',
       ],
-      checksum: 'dd0c26c46278a9bbc28cc448c0489adf5719dfd957de9594ed96ecad76ae795e',
+      checksum: 'e30bd134e9173b51f925e977e3ac8f1e274e14bdf9a3c956c04c9a58b7fde8a4',
     }]);
     expect(() =>
       validateCatalogDataMigrationRegistry(CATALOG_DATA_MIGRATIONS)

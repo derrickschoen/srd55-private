@@ -65,7 +65,7 @@ export const CATALOG_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
         }),
       ]),
       checksum:
-        'dd0c26c46278a9bbc28cc448c0489adf5719dfd957de9594ed96ecad76ae795e',
+        'e30bd134e9173b51f925e977e3ac8f1e274e14bdf9a3c956c04c9a58b7fde8a4',
       run: retireNonSrdBundledSubclassesV1,
     }),
   ]);
