@@ -5,6 +5,54 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-08 — Barbed Court: Guidance replaces True Strike; Slow replaces Hypnotic Pattern; Counterspell declined — Court Spells table FINAL, item 3 of 9 CLOSED
+
+Owner's rulings, verbatim:
+
+> swap true strike for guidance
+> swap hypnotic pattern for slow
+> counterspell is not very useful on a 1/3 caster
+
+The Court Spells table, final:
+
+| Monk level | Granted (always prepared) |
+|---:|---|
+| 3 | *Shield*, *Dissonant Whispers*, *Command* |
+| 6 | *Mirror Image*, *Misty Step*, *Silence* |
+| 11 | *Slow*, *Fear* |
+| 17 | *Compulsion* |
+
+Granted cantrips, final five: **Shocking Grasp, Chill Touch, Vicious Mockery,
+Mage Hand, Guidance.**
+
+Findings reported at ruling time:
+
+- **Slow is on the 2024 Bard list** (grep-verified in SRD 5.2.1), so the swap
+  stays inside the wizard/bard discipline. It is also the fix for the
+  self-antagonizing flaw flagged on the old row: *Slow* has no
+  ends-when-attacked clause, so it keeps working while the monk Flurries.
+  Measured synergy at 11: −2 AC on slowed enemies stacks with the +2 Unarmed
+  bonus arriving the same level — a +4 net swing (~+20 percentage points to
+  hit) against slowed targets, for the whole party's attacks too.
+- **Guidance (2024 text) is Cleric/Druid** — the one grant outside the
+  wizard/bard discipline, owner-ruled; and it is Concentration tied to a
+  single chosen skill per cast. On-theme as the court's whisper
+  (Persuasion/Intimidation/Deception d4). True Strike's departure retires the
+  "unarmed counts" clause with it; nothing else depended on it.
+- **Counterspell declined with the owner's reason recorded** — reaction
+  competition is the real cost on this chassis (the tank's Reaction is
+  *Shield*), and a third-caster's slot economy loses counter-bidding wars.
+- **Correction to a rationale given at presentation time:** the claim that
+  *Hypnotic Pattern* and *Fear* "both break on the damage you deal" was half
+  wrong — it is true of *Hypnotic Pattern* (attacking an affected creature
+  ends its effect) but *Fear* repeats its save only when the target ends a
+  turn out of line of sight. The swap decision was the owner's on other
+  grounds; the record is corrected here.
+- Concentration shape after the swaps: rows 3+6 unchanged (only *Silence*
+  concentrates); row 11 both concentrate but *Slow* is Flurry-proof; row 17
+  concentrates. The stance-switch asymmetry noted at presentation stands,
+  softened one notch.
+
 ## 2026-08-08 — Barbed Court: Focus-cast spells never upcast; Mage Hand gains Herald + Flourish (the slap)
 
 Owner's rulings, verbatim:
