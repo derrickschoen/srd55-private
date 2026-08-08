@@ -23,7 +23,68 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-08-a (newest - read first)
+## RESTART POINT 2026-08-08-b (newest - read first)
+MAIN 6a476851 (mirror pushed). FLOORS: vitest 258/4,236 all-pass; PW
+144 pool; build 0 with digest verification; migrations 0000-0040.
+FORTY-SEVEN merges. Rulings through D230.
+
+MERGED SINCE 08-08-a:
+ - 46th, wt/digest (0ff30280): D229 — healthy boot verifies ONE
+   rolled-up SHA-256 over the 444 bundled aggregates; mismatch falls
+   back to per-aggregate verification that NAMES the culprit. Warm
+   boot 3148->2325ms mean. The pin is BUILD-ENFORCED: a verify script
+   re-seeds a fresh DB through the production path and fails
+   `npm run build` on mismatch. Round 2 found cold boots paying a
+   238ms redundant digest pass before their inevitable fallback —
+   count-gated now, digest stamped post-repair. HA-10's completeness
+   guard caught both new digest contracts ACROSS LANES; catalog_layer
+   added. One evidenced budget correction: migrations mid-chain
+   rollback 5000->6700ms (green-main in-suite 3734/4186/4424ms,
+   isolated identical 2576=2573ms, ran 5467ms and passed on the final
+   gate).
+ - 47th, wt/a11ygaps (6a476851): the six named D108 gaps closed.
+   Round 1 caught a coverage OVERCLAIM: the custom item form, both
+   cancel-branch fallbacks, and restorePlannerFocus had zero coverage
+   under a "None gaps" table — now keyboard-proven with a negative
+   control. Product fixes: planner focus fallback chain and
+   announce-once status (a live region inserted with pre-set text is
+   SILENT to screen readers — status now inserts empty, mutates
+   after), guided step-heading focus, level-up announce-once,
+   planned-choice provenance via aria-describedby. Recorder hardened:
+   inserted-with-text regions snapshotted not recorded; vestigial
+   WeakMap removed. One journey budget set by the convention
+   (43.4 x 1.5 = 65s), correcting a "headroom"-chosen 110s.
+
+FINDINGS AGAINST THE SUPERVISOR, full length:
+ - Merge-gate full suites were launched TWICE while codex rounds were
+   active (once in the same worktree codex was editing, once while a
+   sibling lane ran its specs). Two runs tainted, two diagnosis cycles
+   burned on phantom timeouts. STANDING RULE: no full suite while ANY
+   codex round is active anywhere; check ps before launching.
+ - The 47th merge's mirror push was CHAINED in the same command that
+   read the post-merge verdict — acted before adjudicating, and that
+   run was red-by-one. The failure adjudicated as scheduling noise
+   (Monk-formula bootstrap test, green-run history 3478-4005ms vs 5000
+   budget; identical tree had passed 258/4,236 pre-merge) and a clean
+   rerun confirmed 258/4,236 — but the push order was a rule
+   violation, not a judgment call.
+
+SYSTEMIC for the next hardening unit: boot-heavy 5s-budget tests are
+UNIFORMLY thin (70-88% consumed on green runs; two have tipped in two
+days). Do ONE evidenced margin-audit pass over them by the x1.5
+convention with a measurement table — no more per-flake bumps.
+
+IN FLIGHT: nothing. NEXT: hardening dispatch in a fresh worktree off
+main (PW base 4850): mutation-suite expansion, planContentImport
+double-plan perf, the budget margin-audit pass. Owner walkthrough
+friction reports feed the queue whenever they arrive.
+
+STANDING FLAGS: wt/party owner-active, REBASE ONLY + name substitution
+at landing; stale old-history feat/*//wt/* branches local only;
+pre-rewrite bundle ~/dnd-prerewrite-backup — owner deletes when
+satisfied.
+
+## RESTART POINT 2026-08-08-a
 MAIN 7582560 (REWRITTEN HISTORY, mirror FORCE-pushed per D227/D230).
 Floors unchanged from 08-07-e: vitest 257/4,233 all-pass (verified in
 the rewritten clone), build 0, PW 137, migrations 0000-0040. 45 merges.
