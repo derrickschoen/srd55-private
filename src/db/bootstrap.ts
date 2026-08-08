@@ -26,6 +26,7 @@ import { reconcileLegacyLevelFeatChoices } from '../rules/legacy-level-feat-choi
 import { ensureBundledClassResources } from '../rules/class-resources-srd';
 import { reconcileBundledContentRegistryWithStoredProjectionsV1 } from '../catalog/bundled-content-registry-v1';
 import {
+  bundledContentCouldMatchBuildV1,
   bundledContentDigestMatchesBuildV1,
   bundledContentDigestMismatchesV1,
   bundledContentDigestPassV1,
@@ -99,12 +100,19 @@ export const applicationSeed: DatabaseSeed = (db) => {
   // the instance config, at grant generation — never at seed time.
   ensureBundledBackgroundDefinitions(db);
   ensureBundledFeatContent(db);
-  // The digest runs before the spell source parser/cardinality repair. A
-  // healthy database therefore does not parse four source extracts or query
-  // 339 registrations merely to prove that no root is missing. Any absence is
-  // itself a digest mismatch and enters the unchanged repair path below.
-  const digestPass = bundledContentDigestPassV1(db);
-  if (bundledContentDigestMatchesBuildV1(digestPass)) {
+  // A one-row aggregate-count gate runs before the digest and the spell source
+  // parser/cardinality repair. A healthy database therefore takes the digest
+  // without parsing four source extracts or querying 339 registrations. A
+  // trivially incomplete database skips canonicalization and enters the same
+  // repair path directly; equal-count substitutions and byte drift still take
+  // the digest and remain tamper-evident on every plausible healthy boot.
+  const digestPass = bundledContentCouldMatchBuildV1(db)
+    ? bundledContentDigestPassV1(db)
+    : undefined;
+  if (
+    digestPass !== undefined &&
+    bundledContentDigestMatchesBuildV1(digestPass)
+  ) {
     // These operate on stored relations and user rows respectively; neither is
     // an alternative bundled aggregate verification and both retain their
     // existing position behind the readiness boundary.
@@ -112,7 +120,7 @@ export const applicationSeed: DatabaseSeed = (db) => {
     reconcileLegacyLevelFeatChoices(db);
     return;
   }
-  if (!hasNoCurrentFingerprints(digestPass)) {
+  if (digestPass !== undefined && !hasNoCurrentFingerprints(digestPass)) {
     console.warn(
       'Bundled content digest mismatch; running named per-aggregate ' +
         `verification for ${namedDigestMismatch(digestPass)}.`,

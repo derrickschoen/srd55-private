@@ -86,6 +86,7 @@ afterEach(() => {
   while (lifecycles.length > 0) {
     lifecycles.pop()?.close();
   }
+  vi.restoreAllMocks();
 });
 
 function track(lifecycle: DatabaseLifecycle): DatabaseLifecycle {
@@ -751,6 +752,7 @@ describe('application database bootstrap', () => {
 
   it('yields a class name already claimed by user content instead of failing the boot', async () => {
     const { sqlite3, lifecycle } = await freshApplicationLifecycle();
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
     const homebrew = bareLifecycle(sqlite3);
     const homebrewWizardKey = assertedExternalContentKey(
@@ -852,6 +854,9 @@ describe('application database bootstrap', () => {
     // The bundle stays incomplete, so the guard keeps re-running the seed. It
     // must remain non-destructive on every one of those reruns.
     lifecycle.reopen();
+    expect(warned).not.toHaveBeenCalledWith(
+      expect.stringContaining('Bundled content digest mismatch'),
+    );
     expect(
       lifecycle.database.scalar(
         "SELECT count(*) FROM class_definitions WHERE name = 'Wizard'",

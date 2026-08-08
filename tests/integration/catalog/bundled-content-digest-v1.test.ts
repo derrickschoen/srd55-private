@@ -80,6 +80,7 @@ describe('D229 bundled content digest boot verification', () => {
 
     expect(bundledContentDigestMatchesBuildV1(corrupted)).toBe(false);
     expect(bundledContentDigestMismatchesV1(corrupted)).toEqual([{
+      catalog_layer: 'bundled',
       kind: 'spell',
       contentKey: ACID_ARROW_KEY,
       name: 'Acid Arrow',

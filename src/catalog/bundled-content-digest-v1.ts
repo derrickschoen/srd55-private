@@ -56,6 +56,7 @@ export interface BundledContentDigestPassV1 {
 }
 
 export interface BundledContentDigestMismatchV1 {
+  readonly catalog_layer: 'bundled';
   readonly kind: ContentKind;
   readonly contentKey: ContentKey;
   readonly name: string;
@@ -64,6 +65,23 @@ export interface BundledContentDigestMismatchV1 {
 
 const BUNDLED_IDENTITY_FILTER =
   "registry.key_kind = 'bundled-stable' AND registry.catalog_layer = 'bundled'";
+
+/**
+ * A digest cannot match the build when it does not even have the build's
+ * number of bundled aggregates. This one-row gate keeps fresh, quarantined,
+ * and permanently name-blocked databases out of the canonicalization pass;
+ * equal counts still take the digest so substitutions and byte drift remain
+ * tamper-evident on every plausible healthy boot.
+ */
+export function bundledContentCouldMatchBuildV1(
+  db: DatabaseContext,
+): boolean {
+  const aggregateCount = db.scalar<number>(
+    `SELECT count(*) FROM catalog_content_identities AS registry
+     WHERE ${BUNDLED_IDENTITY_FILTER}`,
+  );
+  return aggregateCount === EXPECTED_BUNDLED_AGGREGATE_DIGESTS_V1.length;
+}
 
 function owned(
   kind: ContentKind,
@@ -453,6 +471,7 @@ export function bundledContentDigestMismatchesV1(
     const digest = sha256(canonicalContentIdentityJson(aggregate));
     if (pinned === undefined) {
       mismatches.push({
+        catalog_layer: 'bundled',
         kind: aggregate.kind,
         contentKey: aggregate.contentKey,
         name: pass.names.get(locator) ?? aggregate.contentKey,
@@ -463,6 +482,7 @@ export function bundledContentDigestMismatchesV1(
     expected.delete(locator);
     if (digest !== pinned.digest) {
       mismatches.push({
+        catalog_layer: 'bundled',
         kind: aggregate.kind,
         contentKey: aggregate.contentKey,
         name: pinned.name,
@@ -475,6 +495,7 @@ export function bundledContentDigestMismatchesV1(
       throw new TypeError(`Pinned bundled digest has unknown kind '${pinned.kind}'.`);
     }
     mismatches.push({
+      catalog_layer: 'bundled',
       kind: pinned.kind,
       contentKey: pinned.contentKey as ContentKey,
       name: pinned.name,

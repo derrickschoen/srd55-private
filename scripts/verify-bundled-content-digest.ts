@@ -24,6 +24,7 @@ try {
 
   if (process.argv.includes('--print')) {
     const entries = pass.aggregates.map((aggregate) => ({
+      catalog_layer: 'bundled' as const,
       kind: aggregate.kind,
       contentKey: aggregate.contentKey,
       name: pass.names.get(`${aggregate.kind}\u0000${aggregate.contentKey}`) ??

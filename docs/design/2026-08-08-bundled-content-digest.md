@@ -6,6 +6,12 @@ definition is `DIGEST_SLICES_V1` in
 `src/catalog/bundled-content-digest-v1.ts`; this document explains that
 definition, but does not widen it.
 
+Before canonicalization, boot compares the bundled identity count with the
+build's pinned aggregate count. An unequal count cannot possibly match, so it
+goes directly to reconciliation and takes the digest only afterward. Equal
+counts still take the complete digest: the count gate cannot hide a substituted
+aggregate or any changed persisted byte.
+
 ## Covered aggregates and bytes
 
 The pass starts from every `catalog_content_identities` row whose
