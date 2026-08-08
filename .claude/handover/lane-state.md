@@ -23,7 +23,53 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-08-b (newest - read first)
+## RESTART POINT 2026-08-08-c (newest - read first)
+MAIN bf063f5a (mirror pushed AFTER the verdict this time). FLOORS:
+vitest 259/4,241 all-pass; PW 144 pool; build 0 with digest
+verification; migrations 0000-0040. FORTY-EIGHT merges (+ one budget
+follow-up merge). Rulings through D230. THE RECORDED QUEUES ARE EMPTY.
+
+MERGED SINCE 08-08-b — 48th, wt/hardening (a03d5b1d + follow-up
+bf063f5a): the D213 hardening unit.
+ - BUDGETS BY EVIDENCE: 15 boot-heavy tests re-budgeted at slowest
+   full-suite x1.5, each comment carrying its per-log measurements.
+   The audit went through THREE correction cycles, all supervisor- or
+   classifier-caused and all disclosed: (1) the brief's 13-file
+   measurement protocol underestimated full-suite scheduling; (2) the
+   corrected pass silently limited its cross-reference to the original
+   13-file inventory, missing five tests — one timed out post-merge
+   and correctly HELD the mirror; (3) the final pass classified all 69
+   extracted >3000ms tests. The convention is now uniformly applied;
+   any future tip should be a genuine anomaly, not a thin margin.
+ - PLANCONTENTIMPORT: one plan per library import (3->2 evaluate
+   passes). The transaction-internal re-plan remains the SOLE write
+   authority — the supplied plan only serves the pre-transaction
+   fast-fail, so no TOCTOU. Pinned by a legacy-reference test
+   reproducing the removed two-plan body byte-for-byte against a
+   frozen projection fixture + a production-seam runs-once spy.
+ - SIX MUTATION CONTROLS (script-file, exact-anchor, both-direction,
+   byte-exact restores) over the digest and share client. Two closed
+   REAL gaps: the digest fallback-name path had no detector, and the
+   share client's oversized-embed -> reference-only warning path had
+   never been driven through the production client.
+
+SUPERVISOR PROCESS LEDGER for the day, complete: two tainted
+merge-gate suites (rule: no full suite during ANY codex activity); one
+mirror push chained before its verdict (rule: read the verdict, THEN
+act — honored on every subsequent push, including the deliberate HOLD
+across the 48th merge's red post-merge); the D1 protocol and inventory
+errors above.
+
+IN FLIGHT: nothing. QUEUES EMPTY — the next tick asks the owner what
+v1 needs: walkthrough friction fixes, D228 local+ngrok serving setup,
+resuming the paused v2 track, or named v1 polish.
+
+PARKED FOR THE OWNER: delete ~/dnd-prerewrite-backup when satisfied
+with the D227/D230 rewrite; wt/party lands by REBASE + name
+substitution whenever they choose (never merge — old ancestry).
+Stale pre-rewrite feat/*//wt/* branches exist locally only.
+
+## RESTART POINT 2026-08-08-b
 MAIN 6a476851 (mirror pushed). FLOORS: vitest 258/4,236 all-pass; PW
 144 pool; build 0 with digest verification; migrations 0000-0040.
 FORTY-SEVEN merges. Rulings through D230.
