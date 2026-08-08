@@ -2888,6 +2888,8 @@ describe('database migration chain', () => {
     );
   });
 
+  // Green-main in-suite: 3734ms, 4186ms, 4424ms; isolated: 2576ms here,
+  // 2573ms on main. Convention: 4424ms x 1.5 = 6636ms, rounded to 6700ms.
   it('rolls a mid-chain failure back to the original signature and bytes', async () => {
     const targetSchema = `${schema}\n${FIRST_INDEX}\n${SECOND_INDEX}\n`;
     const registry = Object.freeze([
@@ -2932,7 +2934,7 @@ describe('database migration chain', () => {
     } finally {
       inspect.close();
     }
-  });
+  }, 6700);
 
   it('migrates once and performs no second migration after reopen', async () => {
     const targetSchema = `${schema}\n${FIRST_INDEX}\n`;
