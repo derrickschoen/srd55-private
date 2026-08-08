@@ -253,14 +253,28 @@ if (
 // independent fresh-database seed build, and must not pay that seed cost.
 if (process.argv[2] === undefined) {
   try {
-    execFileSync(
+    const output = execFileSync(
       resolve('node_modules/.bin/vite-node'),
       ['scripts/verify-bundled-content-digest.ts'],
-      { stdio: 'inherit' },
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
     );
-  } catch {
+    process.stdout.write(output);
+  } catch (error) {
+    const verifierStderr =
+      error !== null &&
+      typeof error === 'object' &&
+      'stderr' in error &&
+      typeof error.stderr === 'string'
+        ? error.stderr
+        : '';
+    if (verifierStderr.includes('Bundled content digest is stale:')) {
+      process.stderr.write(verifierStderr);
+      process.exit(1);
+    }
+    const detail = verifierStderr.trim() ||
+      (error instanceof Error ? `${error.name}: ${error.message}` : String(error));
     fail(
-      'bundled seed content does not match its reviewed build-time digest pin.',
+      `bundled content digest verification script failed:\n${detail}`,
     );
   }
 }

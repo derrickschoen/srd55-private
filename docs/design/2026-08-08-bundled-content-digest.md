@@ -46,9 +46,13 @@ allocation without dropping relation identity.
 The digest is intentionally stricter than a content-v1 fingerprint for root
 metadata: persisted columns such as provenance, seed version, and active state
 are included. It intentionally does not cover user-owned rows, historical or
-compatible fingerprints, timestamps, aliases/import provenance, or the dormant
-spell condition/damage/publication tables excluded by the spell projector.
-Those bytes are outside the claim "current bundled aggregate".
+compatible fingerprints, timestamps, or aliases/import provenance. It also
+excludes `spell_identities` row bytes (`canonical_name`, `normalized_name`, and
+`notes`) and `spell_identity_aliases`: spell identity supplies only its stable
+`content_key` for join remapping, and both tables remain outside content-v1
+scope. The dormant spell condition/damage/publication tables excluded by the
+spell projector are likewise not covered. Those bytes are outside the claim
+"current bundled aggregate".
 
 ## Canonical ordering
 
