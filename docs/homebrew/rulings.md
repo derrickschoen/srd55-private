@@ -5,6 +5,61 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-08 — Barbed Court: cantrip grant grows (Vicious Mockery, Mage Hand); level 17 gains direct Focus-casting at 1 point per spell level
+
+Owner's rulings, verbatim:
+
+> also give the viscous mockery, chill touch, shocking grasp and mage hand
+> cantrips. brainstorm something fun to do with mage hand.
+
+> level 17, when you spend focus points, you can cast a spell leveled up to the
+> number of points spent (that has a casting time of an action).
+
+### Cantrips
+
+Granted cantrips are now **Shocking Grasp, True Strike, Chill Touch, Vicious
+Mockery, Mage Hand** — five granted, plus the proposed two chosen Wizard
+cantrips (item 4, still open). All five verified present in SRD 5.2.1.
+*Vicious Mockery* is Bard-only, so its granted seat buys access, and it is the
+insult made rules text — d6 psychic plus Disadvantage on the target's next
+attack roll, a taunt-adjacent rider. The Court Cantrips one-cantrip-per-turn
+cap governs all of them unchanged.
+
+**Ambiguity flagged, read additively:** the owner's list omits True Strike,
+which an earlier ruling granted with the unarmed clause. "Also give" is read
+as adding to the grant, not replacing it; True Strike stays until the owner
+says otherwise. Seven cantrips at Monk 3 (five granted + two chosen) is more
+than a Wizard 3 knows; recorded against the front-load directive.
+
+### Level 17 — Focus-casting
+
+Spend X Focus Points → cast a prepared spell at level ≤ X, **Action casting
+time only**, no spell slot involved. This is the 2026-08-06 "Focus-cast
+high-level spells at 17" directive landing in concrete form, at rate **×1**.
+
+Measurements reported at ruling time:
+
+- **It closes the Compulsion dead window.** The granted 4th-level row becomes
+  castable at 17 for 4 Focus — the accepted 17→19 wait now applies only to
+  slot-casting it.
+- **It obsoletes the ×2 refresh for Action-time spells from 17** — direct
+  casting at 1/level is strictly cheaper than regain-at-2/level. The refresh
+  survives for Bonus Action spells (*Misty Step*) and ritual/long casts;
+  *Shield* was already covered at 1 Focus bespoke. Three price points now
+  coexist: 1/level to cast (Action, 17+), 2/level to refresh a slot (6+),
+  1 flat for *Shield* (3+).
+- **As written the spell level is uncapped** — pool 17 funds a 9th-level
+  upcast of a prepared spell (*Command* at 9th: eight extra targets; *Hold
+  Person* at 9th likewise). Preparation still caps at the native table plus
+  granted rows, so the exposure is upcasting only. **Recommended bound,
+  pending owner word: cap the cast level at 5** — the owner's own earlier
+  "For 17 raise the limit to 5th level" number, resurrected from the creation
+  model.
+- **Volume:** *Hypnotic Pattern* at 3 Focus ≈ five casts per short-rest
+  window; one Action per turn is the real per-round limiter (the
+  one-slot-per-turn rule does not apply — no slot is expended — but the
+  action economy binds harder anyway).
+
 ## 2026-08-07 — Barbed Court: stacking clause approved; bespoke *Shield* drops to 1 Focus Point
 
 Owner's ruling, verbatim:
