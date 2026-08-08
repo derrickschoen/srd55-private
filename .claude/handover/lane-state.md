@@ -23,7 +23,58 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-07-e (newest - read first)
+## RESTART POINT 2026-08-08-a (newest - read first)
+MAIN 7582560 (REWRITTEN HISTORY, mirror FORCE-pushed per D227/D230).
+Floors unchanged from 08-07-e: vitest 257/4,233 all-pass (verified in
+the rewritten clone), build 0, PW 137, migrations 0000-0040. 45 merges.
+Rulings through D230.
+
+THE D227/D230 HISTORY REWRITE IS DONE. Full scrub: both retired
+subclass full names (and every token form: spaced, hyphenated,
+underscored, camel-cased) replaced by their abbreviations in every
+historical blob, every commit message, and the current tree. Verified:
+pickaxe 0 hits for both patterns across all commits; HEAD grep 0; the
+SRD's own Warlock "Eldritch *" text untouched; message scan 0. The
+retirement migration's two scrubbed content keys never existed in any
+database — its targeting for those two is now INERT (veteran intact),
+restated in the file per D226, and its two-site checksum re-pinned
+(now a fresh value; the freeze proved itself by moving again when the
+restatement comment was added).
+
+HASH MAPPING (old -> new) for recorded anchors; entries below this
+point use OLD hashes and stay unedited per the append-only rule:
+ 3c19e26 -> 26cf7d6 (root)
+ b0af6f8 -> 3616531 (the commit that ADDED the table - see D230)
+ 9578ea2 -> 0185d86 (42nd, SRD-ONLY)
+ b309c66 -> 45fc1bd (43rd, HA-11)
+ 74f1722 -> b03b3fa (44th, HA-12 share)
+ 89421d6 -> 3071e5c (45th, HA-12 a11y)
+ c860cee -> bec2d99 (lane-state 08-07-e)
+ 08e88e0 -> bb4ad53 (D230)
+
+STANDING FLAGS:
+ - wt/party: owner-active, pre-rewrite ancestry, MORE name content at
+   its tip. Lands by REBASE ONLY + the same substitution. A merge
+   would drag the whole old ancestry back into main.
+ - wt/digest and wt/a11ygaps (in flight) also branched from
+   PRE-rewrite main 08e88e0: REBASE their commits onto rewritten main
+   at merge time, never merge.
+ - Stale local feat/* and old wt/* branches still reference old
+   history (local only; mirror is clean). Prune candidates, owner's
+   call.
+ - Pre-rewrite bundle at ~/dnd-prerewrite-backup/ — owner deletes it
+   when satisfied; until then it preserves what D227 destroyed.
+ - The supervisor authored the migration restatement comment; codex
+   sanity-checks it in the next review round (binding: never
+   self-review).
+
+IN FLIGHT: wt/digest (D229 rolled-up digest boot fix, port 4830) and
+wt/a11ygaps (six named D108 gaps + recorder hardening, port 4840),
+both dispatched 08-08. Owner may be WALKING THROUGH v1 — friction
+reports feed the D213 queue (remaining: mutation-suite expansion,
+planContentImport double-plan perf).
+
+## RESTART POINT 2026-08-07-e
 MAIN 89421d6 (mirror pushed). FLOORS: vitest 257/4,233 all-pass; PW 137
 (a11y-side pool; share-side pool saw 134 before the a11y spec landed);
 build 0; migrations 0000-0040 unchanged. FORTY-FIVE merges. Rulings
