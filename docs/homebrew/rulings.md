@@ -5,6 +5,29 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-08 — Barbed Court: Monk 11 grants +2 Wisdom (max 20)
+
+Owner's ruling, verbatim:
+
+> monk 11, give +2 wisdom up to max 20
+
+Effect: a flat +2 Wisdom increase at Monk 11, capped at 20. Recorded in the
+magic-item-compensation family alongside the +1/+2/+3 Unarmed ruling — the
+official shape it mirrors is a tome/manual-style item, not any existing
+subclass feature (no official subclass grants a mid-level ability score
+increase; the nearest class precedent is the 2014 Barbarian's level-20
++4 Str/Con, named here as a distance marker only).
+
+Measured effect at 11, assuming the typical Wis 16 → 18 (+1 modifier): +1
+Unarmored Defense AC, +1 ki/spell save DC, +1 spell attack, +1 Wisdom saves,
++1 Perception/Insight — a +1-to-everything-Wisdom package stacking with the
+same level's +2 Unarmed bonus and *Slow* row. Level 11 is now the subclass's
+second-heaviest level after 6, consistent with the front-load doctrine and
+recorded so the rewrite's power-budget worksheet prices it.
+
+Effective freed ASI: a Barbed Court monk can now cap Dexterity two ASIs
+earlier or take feats; the MAD-relief is the feature's real currency.
+
 ## 2026-08-08 — Barbed Court: Guidance replaces True Strike; Slow replaces Hypnotic Pattern; Counterspell declined — Court Spells table FINAL, item 3 of 9 CLOSED
 
 Owner's rulings, verbatim:
