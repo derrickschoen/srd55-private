@@ -5,6 +5,32 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-07 — Barbed Court: stacking clause approved; bespoke *Shield* drops to 1 Focus Point
+
+Owner's ruling, verbatim:
+
+> Put in the stacking clause.
+>
+> Drop the bespoke shield price
+
+Effects:
+
+1. The Unarmed Strike bonus carries the non-stacking clause: *"If a magic item
+   gives your Unarmed Strike a bonus to the same roll, use the higher bonus."*
+2. The bespoke level-3 *Shield* cast costs **1 Focus Point**, closing the open
+   price at the original directive's number ("using a focus point") and in
+   line with the comparators reported (2024 Shadow monk: 1 Focus for the
+   2nd-level *Darkness*; this project's Psionic Fist: ki equal to power
+   level). The 2-Focus assumption recorded in the item-2 entry is superseded.
+
+Consequence, recorded not corrected: from Monk 6 the bespoke cast (1 Focus, no
+slot) is now strictly cheaper than cast-with-slot-plus-refresh (2 Focus), so
+*Shield* effectively never consumes the shared economy — a Barbed Court monk
+can Reaction-*Shield* every round for 1 Focus, floor(pool) times per
+short-rest window. At Monk 6 that is up to 6 *Shield*s per window against the
+pool's competing uses; the once-per-round Reaction remains the only hard
+limiter. Consistent with the arcane-tank intent and the front-load directive.
+
 ## 2026-08-07 — Barbed Court: Unarmed Strikes gain +1/+2/+3 to attack and damage at Monk 6/11/17
 
 Owner's ruling, verbatim:
