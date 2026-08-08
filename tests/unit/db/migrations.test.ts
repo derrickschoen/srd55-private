@@ -2745,32 +2745,45 @@ describe('database migration chain', () => {
     lifecycle.close();
   });
 
-  it.each([
-    ['range_normal_feet', '100001'],
-    ['range_normal_feet', '-1'],
-    ['range_normal_feet', '1.5'],
-    ['range_long_feet', '100001'],
-    ['range_long_feet', '-1'],
-    ['range_long_feet', '1.5'],
-  ] as const)(
-    'refuses historical %s=%s and leaves the image byte-identical',
-    async (column, value) => {
-      const storage = await storageHolding(
-        `${DATABASE_MIGRATIONS[0]!.sql}
-         INSERT INTO characters (id, name) VALUES (1, 'Range preflight');
-         INSERT INTO character_weapons (id, character_id, name, ${column})
-         VALUES (37, 1, 'Outlier', ${value});`,
-      );
-      const before = await storage.exportFile();
-      const lifecycle = new DatabaseLifecycle(sqlite3, storage, schema);
+  const historicalRangeRefusals = [
+    // Full-suite ms by postswap-vitest.log/digest-vitest6.log/
+    // digest-postmerge.log/a11ygaps-vitest2.log/a11ygaps-postmerge.log/
+    // a11ygaps-postmerge2.log:
+    // 3802/3294/3343/3366/3353/3606; 3802 x 1.5 = 5703 -> 5800ms.
+    ['range_normal_feet', '100001', 5800],
+    // 3628/3603/3825/3742/4744/3558; 4744 x 1.5 = 7116 -> 7200ms.
+    ['range_normal_feet', '-1', 7200],
+    // 3966/3723/3637/3762/4058/3710; 4058 x 1.5 = 6087 -> 6100ms.
+    ['range_normal_feet', '1.5', 6100],
+    // 4002/3718/3679/3717/3667/3793; 4002 x 1.5 = 6003 -> 6100ms.
+    ['range_long_feet', '100001', 6100],
+    // 3609/3657/3552/3897/3780/3403; 3897 x 1.5 = 5845.5 -> 5900ms.
+    ['range_long_feet', '-1', 5900],
+    // 3384/3399/3521/3565/3589/3382; 3589 x 1.5 = 5383.5 -> 5400ms.
+    ['range_long_feet', '1.5', 5400],
+  ] as const;
+  for (const [column, value, timeoutMs] of historicalRangeRefusals) {
+    it(
+      `refuses historical ${column}=${value} and leaves the image byte-identical`,
+      async () => {
+        const storage = await storageHolding(
+          `${DATABASE_MIGRATIONS[0]!.sql}
+           INSERT INTO characters (id, name) VALUES (1, 'Range preflight');
+           INSERT INTO character_weapons (id, character_id, name, ${column})
+           VALUES (37, 1, 'Outlier', ${value});`,
+        );
+        const before = await storage.exportFile();
+        const lifecycle = new DatabaseLifecycle(sqlite3, storage, schema);
 
-      expect(() => lifecycle.open()).toThrow(
-        `character_weapons id 37 ${column}=${value}`,
-      );
+        expect(() => lifecycle.open()).toThrow(
+          `character_weapons id 37 ${column}=${value}`,
+        );
 
-      expect(await storage.exportFile()).toEqual(before);
-    },
-  );
+        expect(await storage.exportFile()).toEqual(before);
+      },
+      timeoutMs,
+    );
+  }
 
   it('does not execute migrations for a current image, after proving the probe is live', async () => {
     const targetSchema = `${schema}\n${FIRST_INDEX}\n`;
@@ -2955,6 +2968,10 @@ describe('database migration chain', () => {
     lifecycle.close();
   });
 
+  // Full-suite ms: postswap-vitest.log=2993, digest-vitest6.log=4432,
+  // digest-postmerge.log=4482, a11ygaps-vitest2.log=4421,
+  // a11ygaps-postmerge.log=4569, a11ygaps-postmerge2.log=4575.
+  // 4575 x 1.5 = 6862.5, rounded up to 6900ms.
   it('migrates a known-old import while quarantined and exports it stably', async () => {
     const targetSchema = `${schema}\n${FIRST_INDEX}\n`;
     const registry = Object.freeze([
@@ -3002,7 +3019,7 @@ describe('database migration chain', () => {
       ),
     ).toBe(1);
     lifecycle.close();
-  });
+  }, 6900);
 
   it('rejects a checksum mismatch before touching the image', () => {
     const shipped = DATABASE_MIGRATIONS[0]!;
