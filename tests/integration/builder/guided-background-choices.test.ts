@@ -603,6 +603,11 @@ describe('B3 guided background choices on a seeded application database', () => 
     }
   });
 
+  // Full-suite ms: postswap-vitest.log=2655, digest-vitest6.log=3156,
+  // digest-postmerge.log=3241, a11ygaps-vitest2.log=3495,
+  // a11ygaps-postmerge.log=3339, a11ygaps-postmerge2.log=3260,
+  // hardening-vitest.log=3159.
+  // 3495 x 1.5 = 5242.5, rounded up to 5300ms.
   it('B2-PROVENANCE exports and re-imports a real background-owned contribution without refusal or source loss', async () => {
     const sourceHarness = await applicationDatabase();
     const source = sourceHarness.context.db;
@@ -645,7 +650,7 @@ describe('B3 guided background choices on a seeded application database', () => 
           row.source_instance_id > 0,
       ),
     ).toBe(true);
-  });
+  }, 5300);
 
   it('reports unknown Origin feats and missing background definitions with the same reason but distinguishable messages', async () => {
     const harness = await applicationDatabase();

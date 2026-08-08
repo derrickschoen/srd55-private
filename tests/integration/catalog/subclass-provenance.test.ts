@@ -187,6 +187,11 @@ describe('an imported subclass stays distinguishable from a bundled one', () => 
     ]);
   });
 
+  // Full-suite ms: postswap-vitest.log=2736, digest-vitest6.log=2505,
+  // digest-postmerge.log=2492, a11ygaps-vitest2.log=2485,
+  // a11ygaps-postmerge.log=3390, a11ygaps-postmerge2.log=2524,
+  // hardening-vitest.log=2567.
+  // 3390 x 1.5 = 5085, rounded up to 5100ms.
   it('travels through a character backup with imported provenance and preserves a revised recipient copy through review', async () => {
     const source = await database();
     const characterId = walker(source, importSubclass(source));
@@ -264,7 +269,7 @@ describe('an imported subclass stays distinguishable from a bundled one', () => 
       key: SUBCLASS_KEY,
       description: REVISED_MARCHING_SONG,
     });
-  });
+  }, 5100);
 
   it('auto-adopts a fingerprint-verified manifest subclass into a bare recipient before resolving the character', async () => {
     const source = await database();
@@ -318,6 +323,11 @@ describe('an imported subclass stays distinguishable from a bundled one', () => 
     ).toBe(SUBCLASS_KEY);
   });
 
+  // Full-suite ms: postswap-vitest.log=4747, digest-vitest6.log=3954,
+  // digest-postmerge.log=4380, a11ygaps-vitest2.log=4044,
+  // a11ygaps-postmerge.log=4329, a11ygaps-postmerge2.log=4129,
+  // hardening-vitest.log=4116.
+  // 4747 x 1.5 = 7120.5, rounded up to 7200ms.
   it('travels through an embedded share and stays identifiable in the reference-only fallback', async () => {
     const source = await database();
     const shared = exportCharacterShare(
@@ -414,5 +424,5 @@ describe('an imported subclass stays distinguishable from a bundled one', () => 
         [committed.result.characterId],
       ),
     ).toBe(recipientSubclassId);
-  });
+  }, 7200);
 });
