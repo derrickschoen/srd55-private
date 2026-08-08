@@ -459,6 +459,11 @@ describe('deterministic read-only build report', () => {
     );
   });
 
+  // Full-suite ms: postswap-vitest.log=4029, digest-vitest6.log=4176,
+  // digest-postmerge.log=4132, a11ygaps-vitest2.log=4559,
+  // a11ygaps-postmerge.log=4233, a11ygaps-postmerge2.log=4204,
+  // hardening-vitest.log=4259.
+  // 4559 x 1.5 = 6838.5, rounded up to 6900ms.
   it('uses a lone third-caster subclass table and shared slots for multiple providers', () => {
     applicationSeed(db);
     const fighterId = classDefinitionId(db, 'Fighter');
@@ -598,7 +603,7 @@ describe('deterministic read-only build report', () => {
     expect(persistedReportTableHashes(db, multiclassId)).toEqual(
       multiclassBefore,
     );
-  });
+  }, 6900);
 
   it('renders exact Pact-only, shared-only, and martial preparation callouts', () => {
     const pactId = createCharacter(db, 'Pact only');

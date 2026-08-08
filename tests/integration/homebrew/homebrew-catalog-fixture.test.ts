@@ -65,6 +65,11 @@ async function importCatalog(
  * only honest way to show the two agree without committing scraped bytes.
  */
 describe('the homebrew catalog fixture imports through the existing path', () => {
+  // Full-suite ms: postswap-vitest.log=3342, digest-vitest6.log=3046,
+  // digest-postmerge.log=3617, a11ygaps-vitest2.log=3129,
+  // a11ygaps-postmerge.log=3137, a11ygaps-postmerge2.log=3112,
+  // hardening-vitest.log=3221.
+  // 3617 x 1.5 = 5425.5, rounded up to 5500ms.
   it('dry-runs to exactly the record count, then commits it, then is idempotent', async () => {
     const rpc = await open();
     const recordCount = (JSON.parse(TIER1) as unknown[]).length;
@@ -115,7 +120,7 @@ describe('the homebrew catalog fixture imports through the existing path', () =>
       memberships_created: 0,
       tags_created: 0,
     });
-  });
+  }, 5500);
 
   it('lands every field the fixture set, including the ones easy to drop', async () => {
     const rpc = await open();
