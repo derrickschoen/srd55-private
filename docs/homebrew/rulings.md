@@ -5,6 +5,50 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-08 — Barbed Court: Focus-cast spells never upcast; Mage Hand gains Herald + Flourish (the slap)
+
+Owner's rulings, verbatim:
+
+> put in a clarification that spells cast with focus do not upcast.
+>
+> A+B for mage hand, slap in the face is thematic and goading
+
+### No upcasting on Focus-cast spells
+
+Clarification adopted for **every** Focus-cast pathway: a spell cast by
+spending Focus Points is cast at its base level, never higher. Spending more
+points than the spell's level buys nothing. Consequences:
+
+- The uncapped-upcast exposure in the level-17 entry (9th-level *Command* for
+  17 Focus) **dies by construction**; the recommended level-5 cap is no longer
+  needed and is withdrawn. The feature's ceiling is the highest prepared
+  spell — 4th, via the granted *Compulsion* row.
+- The bespoke *Shield* is unaffected in practice (*Shield* has no higher-level
+  effect in SRD 5.2.1) but sits under the same rule for cleanliness.
+- **The distinction that remains upcastable, stated so the rewrite keeps it:**
+  slots regained by the ×2 refresh are ordinary spell slots — casting *with a
+  slot* upcasts normally. Focus buys volume at base level; slots buy height.
+  That split is now a deliberate piece of the design's grammar.
+
+### Mage Hand: options A + B adopted
+
+From the brainstorm: **Herald of the Court** (the hand can deliver your
+provocation — your goad's fiction may originate from it) and **Distracting
+Flourish** (once per turn, when your duel-bound target starts its turn within
+5 feet of the hand, it has Disadvantage on its first attack roll against
+anyone other than you before your next turn). Options C (potion cup-bearer),
+D (duplicate-emanation), E (Focus shove — rejected as Open Hand trespass) are
+not taken.
+
+Owner's flavor directive folded into both: **the slap in the face** is the
+canonical form — the Herald's provocation and the Flourish's distraction can
+each be the hand slapping the target. Rules-text care recorded: the slap
+deals no damage and makes no attack roll — SRD *Mage Hand* "can't attack" and
+the feature does not override that; the Disadvantage rider *is* the slap's
+mechanical weight, and the goad's own trigger (a melee hit by you) is
+unchanged — the hand's slap delivers fiction and the Flourish rider, not the
+goad trigger.
+
 ## 2026-08-08 — Barbed Court: cantrip grant grows (Vicious Mockery, Mage Hand); level 17 gains direct Focus-casting at 1 point per spell level
 
 Owner's rulings, verbatim:
