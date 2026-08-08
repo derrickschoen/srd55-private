@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   bundledContentDigestMatchesBuildV1,
   bundledContentDigestMismatchesV1,
@@ -16,7 +16,7 @@ describe('D229 bundled content digest boot verification', () => {
   let lifecycle: DatabaseLifecycle;
   let db: DatabaseContext;
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     const sqlite3 = await getSqlite3();
     lifecycle = createApplicationLifecycle(
       sqlite3,
@@ -26,8 +26,11 @@ describe('D229 bundled content digest boot verification', () => {
     db = lifecycle.database;
   });
 
-  afterEach(() => {
+  afterAll(() => {
     lifecycle.close();
+  });
+
+  afterEach(() => {
     vi.restoreAllMocks();
   });
 
