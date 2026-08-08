@@ -7,6 +7,36 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D230 — OWNER: D227's rewrite is a FULL SCRUB, docs included; the never-edit rule is lifted for exactly the substitution (2026-08-08)
+
+D227 was authorized on a WRONG SUPERVISOR PREMISE, disclosed in full
+before execution: the removal commit named there (b0af6f8) was in fact
+the commit that ADDED the transcribed table; the table lived in code
+for nearly the entire history until the SRD-ONLY retirement; and the
+two subclass full names were still present at HEAD in 18 documentation
+files, including this file's own D216 heading. A history rewrite
+cannot expunge what HEAD still carries, so the owner re-decided scope
+with the corrected facts.
+
+RULING: full scrub. The two full names are replaced by their
+abbreviations (EK, AT) everywhere — historical blobs, commit messages,
+and the CURRENT tree, this file included. The append-only/never-edit
+rule is lifted for EXACTLY that substitution and nothing else: no
+entry is removed, reworded, or renumbered; only the two name strings
+change form. The transcribed table data in historical code/test blobs
+is expunged by the same pass.
+
+wt/party: left untouched (owner is active in it). STANDING FLAG: it
+branched before the retirement, carries the names at its tip, and
+after the rewrite its work lands by REBASE onto rewritten main, NEVER
+by merge — a merge would drag the entire pre-rewrite ancestry back
+into main. Its docs get this same substitution before landing. Until
+it lands, the old history remains locally reachable through it; the
+mirror is fully clean after the force-push.
+
+The pre-rewrite bundle at ~/dnd-prerewrite-backup/ preserves what this
+destroys; the owner deletes it when satisfied.
+
 ## D229 — OWNER: boot verification moves to a rolled-up digest (2026-08-07)
 
 Ruling on D225's fix shape, chosen from three integrity/speed trades:
