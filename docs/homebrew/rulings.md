@@ -5,6 +5,46 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-08 — Barbed Court: cantrips 2 chosen (7 total); swap rule spells-per-level; duel escapes by the spell's own rules; chosen-spell COUNT must derive from licensed text between the PHB third-caster and the Paladin/Ranger
+
+Owner's rulings, verbatim (structured question round):
+
+> [Chosen spell counts] "We need to justify why we took each one. Like the
+> spell progression came from the srd multiclass spell table and not from the
+> phb. I want it somewhere no less the phb 1/3 caster and no more than the
+> paladin/ ranger"
+>
+> [Cantrip seats] Keep 2 chosen (7 total)
+>
+> [Swap rule] Spells per level, cantrips never
+>
+> [Duel escape] Spell's own rules, 1 minute
+
+Three closed:
+
+1. **Cantrips: 2 chosen + 5 granted = 7 total.** Recorded with the comparator
+   visible: more cantrips than any full caster; the one-cantrip-per-turn cap
+   is the combat governor.
+2. **Swap rule:** whenever you gain a Monk level, replace one chosen spell
+   with another Wizard spell you have slots for; cantrip picks permanent. SRD
+   prepared-caster pattern.
+3. **Duel escape (item 6 of 9 CLOSED):** the Focus-bought duel uses the
+   spell's printed escape hatches — ends if you attack someone else, if an
+   ally of yours attacks or targets the duelist, or on its successful Wisdom
+   save to move 30+ feet away; 1 minute; no concentration (owner-ruled
+   earlier).
+
+**One reopened with a requirement, not a number:** the chosen-spell count must
+be *derived*, the way the slot table was — from licensed text, bounded below
+by the PHB third-caster's pace (distance marker, never source) and above by
+the SRD Paladin/Ranger. SRD 5.2.1 columns extracted for the derivation:
+Paladin Prepared Spells 4/6/10/14 at levels 3/6/11/17, oath grants 2 per row
+(10 by 17); PHB EK known (bound only): 3/4/8/11. Candidate recipe presented
+to the owner: **Paladin-equivalence — a Barbed Court monk prepares chosen
+spells as a Paladin of the level with the same caster level (Paladin level =
+2 × ceil(Monk/3)), read from the SRD Paladin Prepared Spells column** →
+3/5/7/10. Decision pending.
+
 ## 2026-08-08 — Barbed Court: Monk 11 grants +2 Wisdom (max 20)
 
 Owner's ruling, verbatim:
