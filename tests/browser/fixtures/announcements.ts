@@ -56,9 +56,15 @@ export async function installAnnouncementRecorder(page: Page): Promise<void> {
           if (containing !== null && containing !== undefined) regions.add(containing);
           for (const node of Array.from(mutation.addedNodes)) {
             if (!(node instanceof Element)) continue;
-            if (node.matches(liveSelector)) regions.add(node);
+            // Connecting a live region whose text is already present does not
+            // announce that text. Snapshot inserted regions and wait for a
+            // later mutation, just as the attribute path above does when an
+            // existing node becomes live.
+            if (node.matches(liveSelector)) {
+              snapshots.set(node, node.textContent?.trim() ?? '');
+            }
             for (const region of Array.from(node.querySelectorAll(liveSelector))) {
-              regions.add(region);
+              snapshots.set(region, region.textContent?.trim() ?? '');
             }
           }
         }

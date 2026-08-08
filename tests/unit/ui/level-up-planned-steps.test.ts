@@ -910,23 +910,41 @@ describe('W-LU2-DRAFT planned Skills, Expertise, and Spells', () => {
     expect(
       interactiveElement(document.activeElement as unknown as Node).getAttribute('tabindex'),
     ).toBe('-1');
-    expect(
-      choiceByLocator(
-        wizard.element,
-        LEVEL_UP_ATTR.skillChoice,
-        classLocator('scholar-skill', 1),
-      ).getAttribute('aria-label'),
-    ).toBe('Wizard — Scholar skill choice, rule scholar-skill, ordinal 1');
+    const skill = choiceByLocator(
+      wizard.element,
+      LEVEL_UP_ATTR.skillChoice,
+      classLocator('scholar-skill', 1),
+    );
+    expect(skill.getAttribute('aria-label')).toBe(
+      'Wizard — Scholar skill choice, rule scholar-skill, ordinal 1',
+    );
+    const skillSource = interactiveElement(wizard.element)
+      .querySelectorAll('.level-up-planned-source')
+      .find((candidate) =>
+        candidate.getAttribute('id') === skill.getAttribute('aria-describedby')
+      );
+    expect(skillSource?.textContent).toContain(
+      'Granted by Wizard — Scholar — SRD · bundled layer.',
+    );
 
     click(wizard.element, LEVEL_UP_ATTR.next);
     expect(elementText(document.activeElement as unknown as Node)).toBe('Choose Expertise');
-    expect(
-      choiceByLocator(
-        wizard.element,
-        LEVEL_UP_ATTR.expertiseChoice,
-        classLocator('class_expertise_2', 1),
-      ).getAttribute('aria-label'),
-    ).toBe('Wizard — Scholar expertise choice, rule class_expertise_2, ordinal 1');
+    const expertise = choiceByLocator(
+      wizard.element,
+      LEVEL_UP_ATTR.expertiseChoice,
+      classLocator('class_expertise_2', 1),
+    );
+    expect(expertise.getAttribute('aria-label')).toBe(
+      'Wizard — Scholar expertise choice, rule class_expertise_2, ordinal 1',
+    );
+    const expertiseSource = interactiveElement(wizard.element)
+      .querySelectorAll('.level-up-planned-source')
+      .find((candidate) =>
+        candidate.getAttribute('id') === expertise.getAttribute('aria-describedby')
+      );
+    expect(expertiseSource?.textContent).toContain(
+      'Granted by Wizard — Scholar — SRD · bundled layer.',
+    );
 
     click(wizard.element, LEVEL_UP_ATTR.next);
     expect(elementText(document.activeElement as unknown as Node)).toBe('Choose spells');

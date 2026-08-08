@@ -884,10 +884,12 @@ function renderForm(
   const submit = document.createElement('button');
   submit.type = 'submit';
   submit.textContent = weaponId === null ? 'Add weapon' : 'Save weapon';
+  submit.dataset.focusKey = 'weapon-submit';
   const cancel = document.createElement('button');
   cancel.type = 'button';
   cancel.className = 'button-secondary';
   cancel.textContent = 'Cancel';
+  cancel.dataset.focusKey = 'weapon-cancel';
   cancel.addEventListener('click', () => options.onEditingChanged(null));
   controls.append(submit, cancel);
   fieldset.append(controls);

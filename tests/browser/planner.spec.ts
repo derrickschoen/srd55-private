@@ -3,6 +3,11 @@ import { readFileSync } from 'node:fs';
 import { DatabaseContext } from '../../src/db/database';
 import { createBuildReportFixture } from '../integration/reports/build-report-fixture';
 import { registerBrowserFixtureContentIdentity } from './fixtures/content-identity';
+import {
+  announcedMessages,
+  clearAnnouncements,
+  installAnnouncementRecorder,
+} from './fixtures/announcements';
 import { expect, test } from './fixtures/parallel-test';
 
 const schema = readFileSync(
@@ -465,6 +470,7 @@ test('the item picker copies catalog values and effects without a live definitio
   // remain comfortably above their combined worst-case allowance.
   test.setTimeout(90_000);
   const { bytes, characterId } = await catalogItemPlannerFixture();
+  await installAnnouncementRecorder(page);
   await page.goto('/');
   await expect(page.locator('#status')).toHaveAttribute('data-ready', 'true', {
     timeout: 40_000,
@@ -492,7 +498,12 @@ test('the item picker copies catalog values and effects without a live definitio
   await expect(itemDefinition).toHaveValue(
     'expanded:content.item:browser-giant-belt',
   );
-  await picker.getByRole('button', { name: 'Add catalog item' }).click();
+  await clearAnnouncements(page);
+  await itemDefinition.focus();
+  await page.keyboard.press('End');
+  const addCatalogItem = picker.getByRole('button', { name: 'Add catalog item' });
+  await addCatalogItem.focus();
+  await page.keyboard.press('Enter');
 
   await expect.poll(() => page.evaluate(async () => ({
     items: await window.staticApp.inspectRows('character_items'),
@@ -517,6 +528,8 @@ test('the item picker copies catalog values and effects without a live definitio
       Object.keys((await window.staticApp.inspectRows('character_items'))[0] ?? {}),
     ),
   ).not.toContain('item_definition_id');
+  await expect(addCatalogItem).toBeFocused();
+  await expect.poll(() => announcedMessages(page)).toContain('Autosaved');
 });
 
 test('the attunement replacement modal traps, cancels, and restores keyboard focus', async ({
@@ -601,6 +614,7 @@ test('planner parity flows persist override, clear, selection, acknowledgement, 
   // The four-worker pool measured this test at 19.9s; 50s gives all three
   // load-sensitive readiness waits at least 2.5x pool headroom.
   const { bytes, fixture } = await plannerFixture();
+  await installAnnouncementRecorder(page);
   await page.goto('/');
   await expect(page.locator('#status')).toHaveAttribute(
     'data-ready',
@@ -769,7 +783,16 @@ test('planner parity flows persist override, clear, selection, acknowledgement, 
     );
     return Number(row?.id);
   });
-  await picker.fill('Mage Hand');
+  await clearAnnouncements(page);
+  const pickerOptions = picker.locator('..').locator('[role="listbox"] [role="option"]');
+  await picker.focus();
+  await expect.poll(() =>
+    pickerOptions.allTextContents()
+  ).not.toEqual([]);
+  const initialSpellOptions = await pickerOptions.allTextContents();
+  await page.keyboard.type('Mage Hand');
+  await expect.poll(() => pickerOptions.allTextContents())
+    .not.toEqual(initialSpellOptions);
   const fixtureMageHandOption = page.getByRole('option', {
     name: 'Mage Hand',
     exact: true,
@@ -779,7 +802,13 @@ test('planner parity flows persist override, clear, selection, acknowledgement, 
   await expect(fixtureMageHandOption).toHaveAccessibleDescription(
     'L0 · Abjuration · 2024 · Homebrew · external layer',
   );
-  await fixtureMageHandOption.click();
+  const mageHandIndex = await pickerOptions.allTextContents()
+    .then((options) => options.findIndex((option) => option.startsWith('Mage Hand')));
+  expect(mageHandIndex).toBeGreaterThanOrEqual(0);
+  for (let index = 0; index < mageHandIndex; index += 1) {
+    await page.keyboard.press('ArrowDown');
+  }
+  await page.keyboard.press('Enter');
   await expect
     .poll(() =>
       page.evaluate(
@@ -799,6 +828,9 @@ test('planner parity flows persist override, clear, selection, acknowledgement, 
     ]);
   await expect(page.getByText('Level 8 · revision 4')).toBeVisible();
   await expect(page.locator('#planner-status')).toHaveText('Autosaved');
+  await expect(picker).toBeFocused();
+  await expect(picker).toHaveAccessibleDescription('Homebrew · external layer');
+  await expect.poll(() => announcedMessages(page)).toContain('Autosaved');
 
   const itemQuantity = page.getByLabel('Quantity for Healing Potion');
   await expect(itemQuantity).toHaveValue('2');

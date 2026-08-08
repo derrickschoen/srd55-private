@@ -1,6 +1,11 @@
 import type { Page } from '@playwright/test';
 import { readGuidedSeam } from './fixtures/guided-seam';
 import { readLevelUpSeam } from './fixtures/level-up-seam';
+import {
+  announcedMessages,
+  clearAnnouncements,
+  installAnnouncementRecorder,
+} from './fixtures/announcements';
 import { expect, test } from './fixtures/parallel-test';
 
 async function ready(page: import('@playwright/test').Page): Promise<void> {
@@ -202,11 +207,16 @@ test('W-ENTRY-BOTH every character card and the sheet use the exact primary Leve
 test('catalog, complete database, and character backup controls preserve durable state and show errors', async ({
   page,
 }) => {
+  await installAnnouncementRecorder(page);
   await resetHome(page);
   const characterId = await createThroughGuidedBuilder(page, 'Backup Hero');
   await page.goto('/');
   await ready(page);
-  await page.getByText('Import and backups').click();
+  const transferSummary = page.getByText('Import and backups', { exact: true });
+  await transferSummary.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('details.transfer-panel')).toHaveAttribute('open', '');
+  await expect(transferSummary).toBeFocused();
 
   const [databaseDownload] = await Promise.all([
     page.waitForEvent('download'),
@@ -282,10 +292,17 @@ test('catalog, complete database, and character backup controls preserve durable
     mimeType: 'application/json',
     buffer: Buffer.from('{not json'),
   });
-  await page.getByRole('button', { name: 'Import catalog' }).click();
+  await clearAnnouncements(page);
+  await page.getByRole('button', { name: 'Import catalog' }).focus();
+  await page.keyboard.press('Enter');
   await expect(page.getByRole('alert')).toContainText(
     'Invalid Tier 1 catalog document',
   );
+  await expect.poll(async () =>
+    (await announcedMessages(page)).some((message) =>
+      message.includes('Invalid Tier 1 catalog document')
+    )
+  ).toBe(true);
   expect(
     await page.evaluate(() =>
       window.staticApp.inspectRows('spell_versions', {
@@ -333,13 +350,18 @@ test('the advanced blank-character escape hatch remains reachable without becomi
     page.getByRole('button', { name: 'Create blank character' }),
   ).not.toBeVisible();
 
-  await page
-    .getByText('Advanced: create a blank character', { exact: true })
-    .click();
-  await page.getByLabel('Character name').fill('Blank Escape Hero');
-  await page
-    .getByRole('button', { name: 'Create blank character' })
-    .click();
+  const summary = page.getByText('Advanced: create a blank character', { exact: true });
+  await summary.focus();
+  await page.keyboard.press('Enter');
+  await expect(details).toHaveAttribute('open', '');
+  await expect(summary).toBeFocused();
+  await page.keyboard.press('Tab');
+  const name = page.getByLabel('Character name');
+  await expect(name).toBeFocused();
+  await page.keyboard.type('Blank Escape Hero');
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('button', { name: 'Create blank character' })).toBeFocused();
+  await page.keyboard.press('Enter');
 
   await expect(page).toHaveURL(/\/characters\/1$/);
   expect(
