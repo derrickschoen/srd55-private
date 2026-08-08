@@ -47,7 +47,7 @@ async function expectAnnouncementMatching(page: Page, pattern: RegExp): Promise<
   ).toBe(true);
 }
 
-test('announcement recorder snapshots populated regions on insertion and on becoming live', async ({ page }) => {
+test('announcement recorder ignores populated regions on insertion and on becoming live', async ({ page }) => {
   await installAnnouncementRecorder(page);
   await page.goto('/');
   await clearAnnouncements(page);
@@ -86,9 +86,9 @@ test('announcement recorder snapshots populated regions on insertion and on beco
 test('all three authoring routes focus, announce, and recover from publisher validation errors', async ({
   page,
 }) => {
-  // A restoration run measured 43.4s under machine contention; 110s preserves
-  // at least 2.5x headroom for the three load-sensitive form journeys.
-  test.setTimeout(110_000);
+  // A restoration run measured 43.4s under machine contention. The recorded
+  // x1.5 reserve is 43.4s x 1.5 = 65.1s, following the 65s guided precedent.
+  test.setTimeout(65_000);
   await reset(page);
 
   const forms = [

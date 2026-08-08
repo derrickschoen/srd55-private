@@ -401,11 +401,12 @@ test('B2-EDIT displays base before editing and keeps the resolved total separate
   );
 });
 
-test('the item editor authors an ability override that resolves on the sheet', async ({
+test('the custom item editor and weapon cancel preserve keyboard focus and announce saves', async ({
   page,
 }) => {
   // The four-worker pool measured this test at 15.1s; 40s gives both
   // load-sensitive readiness waits at least 2.5x pool headroom.
+  await installAnnouncementRecorder(page);
   await page.goto('/');
   await expect(page.locator('#status')).toHaveAttribute(
     'data-ready',
@@ -424,8 +425,13 @@ test('the item editor authors an ability override that resolves on the sheet', a
   );
 
   const items = page.locator('[data-testid="items-panel"]');
-  await items.getByRole('button', { name: 'Add item' }).click();
-  await items.getByLabel('Name').fill('Belt of Giant Strength');
+  const addItem = items.getByRole('button', { name: 'Add item', exact: true });
+  await clearAnnouncements(page);
+  await addItem.focus();
+  await page.keyboard.press('Enter');
+  const itemName = items.getByLabel('Name', { exact: true });
+  await expect(itemName).toBeFocused();
+  await page.keyboard.type('Belt of Giant Strength');
   await expect(items.getByLabel('Effect kind')).toHaveValue(
     'ability_override',
   );
@@ -433,7 +439,9 @@ test('the item editor authors an ability override that resolves on the sheet', a
   await items.getByLabel('Ability').selectOption('strength');
   await items.getByLabel('Set score to').fill('24');
   await items.getByLabel('Source label').fill('Belt of Giant Strength');
-  await items.getByRole('button', { name: 'Add item' }).click();
+  const submitItem = items.getByRole('button', { name: 'Add item', exact: true });
+  await submitItem.focus();
+  await page.keyboard.press('Enter');
 
   await expect
     .poll(() =>
@@ -453,6 +461,29 @@ test('the item editor authors an ability override that resolves on the sheet', a
         character_item_id: expect.any(Number),
       }),
     ]);
+  await expect(addItem).toBeFocused();
+  await expect.poll(() => announcedMessages(page)).toContain('Autosaved');
+
+  await addItem.focus();
+  await page.keyboard.press('Enter');
+  await expect(itemName).toBeFocused();
+  const cancelItem = items.getByRole('button', { name: 'Cancel', exact: true });
+  await cancelItem.focus();
+  await page.keyboard.press('Enter');
+  await expect(addItem).toBeFocused();
+
+  const weapons = page.getByTestId('weapons-panel');
+  const addWeapon = weapons.getByRole('button', {
+    name: 'Add weapon',
+    exact: true,
+  });
+  await addWeapon.focus();
+  await page.keyboard.press('Enter');
+  await expect(weapons.getByLabel('Start from a reference weapon')).toBeFocused();
+  const cancelWeapon = weapons.getByRole('button', { name: 'Cancel', exact: true });
+  await cancelWeapon.focus();
+  await page.keyboard.press('Enter');
+  await expect(addWeapon).toBeFocused();
 
   await page.getByRole('link', { name: 'Character sheet' }).click();
   const strength = page.locator('[data-sheet-id="ability:strength"]');

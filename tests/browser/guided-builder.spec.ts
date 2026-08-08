@@ -668,7 +668,7 @@ test('the guided Rogue expertise disclosure is keyboard-associated and keeps rou
   await page.getByRole('button', { name: 'Apply background' }).click();
 
   await expect(page.getByRole('heading', { name: 'Choose skills' })).toBeFocused();
-  while (await page.getByRole('heading', { name: 'Choose skills' }).isVisible().catch(() => false)) {
+  while (await page.getByRole('heading', { name: 'Choose skills' }).isVisible()) {
     const allChoices = page.locator('[data-skill-choice]');
     const choiceCount = await allChoices.count();
     const choice = allChoices.first();
