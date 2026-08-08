@@ -25,6 +25,30 @@ import { ensureBundledFeatContent } from '../rules/feats-srd';
 import { reconcileLegacyLevelFeatChoices } from '../rules/legacy-level-feat-choices';
 import { ensureBundledClassResources } from '../rules/class-resources-srd';
 import { reconcileBundledContentRegistryWithStoredProjectionsV1 } from '../catalog/bundled-content-registry-v1';
+import {
+  bundledContentDigestMatchesBuildV1,
+  bundledContentDigestMismatchesV1,
+  bundledContentDigestPassV1,
+  type BundledContentDigestPassV1,
+} from '../catalog/bundled-content-digest-v1';
+
+function hasNoCurrentFingerprints(pass: BundledContentDigestPassV1): boolean {
+  return pass.aggregates.every((aggregate) =>
+    aggregate.tables.every((table) =>
+      table.table !== 'catalog_content_fingerprints'
+    )
+  );
+}
+
+function namedDigestMismatch(pass: BundledContentDigestPassV1): string {
+  const mismatches = bundledContentDigestMismatchesV1(pass);
+  const named = mismatches.slice(0, 5).map((mismatch) =>
+    `${mismatch.kind} '${mismatch.name}' (${mismatch.contentKey})`
+  );
+  const remainder = mismatches.length - named.length;
+  return named.join(', ') +
+    (remainder > 0 ? `, and ${String(remainder)} more` : '');
+}
 
 /**
  * The bundled content every application database is expected to carry: the SRD
@@ -75,9 +99,28 @@ export const applicationSeed: DatabaseSeed = (db) => {
   // the instance config, at grant generation — never at seed time.
   ensureBundledBackgroundDefinitions(db);
   ensureBundledFeatContent(db);
-  // Install absent spell roots before the general projector pass. On a light
-  // boot the exact-cardinality guard writes nothing; present rows, including
-  // drifted rows, remain untouched for reconciliation to observe.
+  // The digest runs before the spell source parser/cardinality repair. A
+  // healthy database therefore does not parse four source extracts or query
+  // 339 registrations merely to prove that no root is missing. Any absence is
+  // itself a digest mismatch and enters the unchanged repair path below.
+  const digestPass = bundledContentDigestPassV1(db);
+  if (bundledContentDigestMatchesBuildV1(digestPass)) {
+    // These operate on stored relations and user rows respectively; neither is
+    // an alternative bundled aggregate verification and both retain their
+    // existing position behind the readiness boundary.
+    assertBundledSrdSubclassSpellReferences(db);
+    reconcileLegacyLevelFeatChoices(db);
+    return;
+  }
+  if (!hasNoCurrentFingerprints(digestPass)) {
+    console.warn(
+      'Bundled content digest mismatch; running named per-aggregate ' +
+        `verification for ${namedDigestMismatch(digestPass)}.`,
+    );
+  }
+  // Install absent spell roots before the general projector pass. Present
+  // roots, including drifted rows, remain untouched for reconciliation to
+  // observe and the source-wins verifier to name/repair.
   installMissingBundledSpellContent(db);
   // D84 runs only after every definition/template half and dependency catalog
   // is present, so all nine stored projectors observe the same graph runtime
@@ -113,6 +156,13 @@ export const applicationSeed: DatabaseSeed = (db) => {
       `${String(spells.updated)} updated, ${String(spells.refused)} refused; ` +
       `${String(registry.orphaned)} registry entries orphaned, ` +
       `${String(registry.refused)} refused.`,
+    );
+  }
+  const verifiedDigest = bundledContentDigestPassV1(db);
+  if (!bundledContentDigestMatchesBuildV1(verifiedDigest)) {
+    console.warn(
+      'Bundled content remains different from this build after named ' +
+        `verification: ${namedDigestMismatch(verifiedDigest)}.`,
     );
   }
 };

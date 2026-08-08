@@ -56,6 +56,7 @@
 // place and says so instead of passing.
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { basename, join, relative, resolve } from 'node:path';
 
 const FORBIDDEN = [
@@ -245,6 +246,23 @@ if (
     'PWA control failed: service-worker precache list does not exactly ' +
       'transcribe the emitted app shell.',
   );
+}
+
+// `npm run build` invokes this guard without a positional directory. Synthetic
+// scanner tests deliberately pass one; they test emitted-byte policy, not the
+// independent fresh-database seed build, and must not pay that seed cost.
+if (process.argv[2] === undefined) {
+  try {
+    execFileSync(
+      resolve('node_modules/.bin/vite-node'),
+      ['scripts/verify-bundled-content-digest.ts'],
+      { stdio: 'inherit' },
+    );
+  } catch {
+    fail(
+      'bundled seed content does not match its reviewed build-time digest pin.',
+    );
+  }
 }
 
 process.stdout.write(
