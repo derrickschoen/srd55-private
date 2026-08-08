@@ -211,6 +211,10 @@ async function render(context: ScreenContext): Promise<() => void> {
     document.title = 'Guided character builder';
   }
   context.root.replaceChildren(view);
+  const stepHeading = view.querySelector<HTMLElement>('h2') ??
+    view.querySelector<HTMLElement>('h1');
+  stepHeading?.setAttribute('tabindex', '-1');
+  stepHeading?.focus();
 
   const links = Array.from(
     context.root.querySelectorAll<HTMLAnchorElement>('a[data-router-link]'),

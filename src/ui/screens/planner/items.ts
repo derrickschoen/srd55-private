@@ -242,6 +242,7 @@ export function renderItems(options: ItemsPanelOptions): HTMLElement {
     legend.textContent = 'Add from catalog';
     const select = document.createElement('select');
     select.setAttribute('aria-label', 'Item definition');
+    select.dataset.focusKey = 'item-catalog-definition';
     select.append(...catalogSelectGroups(options.panel.definitions.map((definition) => ({
       value: definition.content_key,
       label: definition.name,
@@ -250,6 +251,7 @@ export function renderItems(options: ItemsPanelOptions): HTMLElement {
     const addDefinition = document.createElement('button');
     addDefinition.type = 'button';
     addDefinition.textContent = 'Add catalog item';
+    addDefinition.dataset.focusKey = 'item-catalog-add';
     addDefinition.disabled = options.disabled;
     addDefinition.addEventListener('click', () => {
       const definition = options.panel.definitions.find(
@@ -607,10 +609,12 @@ function renderItemForm(
   const submit = document.createElement('button');
   submit.type = 'submit';
   submit.textContent = editing === null ? 'Add item' : 'Save item';
+  submit.dataset.focusKey = 'item-submit';
   const cancel = document.createElement('button');
   cancel.type = 'button';
   cancel.className = 'button-secondary';
   cancel.textContent = 'Cancel';
+  cancel.dataset.focusKey = 'item-cancel';
   cancel.addEventListener('click', () => options.onEditingChanged(null));
   fieldset.append(submit, cancel);
   form.addEventListener('submit', (event) => {

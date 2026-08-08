@@ -155,6 +155,14 @@ function plannedSelect(options: {
     `${projection.source_label} ${options.kind} choice, rule ` +
     `${projection.locator.rule_key}, ordinal ` +
     `${String(projection.locator.ordinal)}`;
+  const source = sourceIdentity(
+    projection.source_label,
+    projection.source_catalog_layer,
+    projection.locator,
+  );
+  const sourceId =
+    `level-up-${options.kind}-source-${encodeURIComponent(plannedGrantLocatorKey(projection.locator))}`;
+  source.setAttribute('id', sourceId);
   const warning = unfilledWarning(
     options.kind === 'skill'
       ? 'skill_grant_unfilled'
@@ -167,6 +175,7 @@ function plannedSelect(options: {
     {
       attributes: {
         'aria-label': labelText,
+        'aria-describedby': sourceId,
         [options.kind === 'skill'
           ? LEVEL_UP_ATTR.skillChoice
           : LEVEL_UP_ATTR.expertiseChoice]: plannedGrantLocatorKey(
@@ -201,11 +210,7 @@ function plannedSelect(options: {
   return {
     element: element('article', { className: 'level-up-planned-choice' }, [
       element('label', {}, [element('span', { text: labelText }), select]),
-      sourceIdentity(
-        projection.source_label,
-        projection.source_catalog_layer,
-        projection.locator,
-      ),
+      source,
       warning,
     ]),
     cleanup,

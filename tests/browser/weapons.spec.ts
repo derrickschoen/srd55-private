@@ -1,4 +1,9 @@
 import type { Page } from '@playwright/test';
+import {
+  announcedMessages,
+  clearAnnouncements,
+  installAnnouncementRecorder,
+} from './fixtures/announcements';
 import { expect, test } from './fixtures/parallel-test';
 
 /**
@@ -154,7 +159,9 @@ async function levelClassTo(
 test('a weapon is added from a reference template, then edited without touching the template', async ({
   page,
 }) => {
+  await installAnnouncementRecorder(page);
   await openPlanner(page, 'Weapon Bearer');
+  await clearAnnouncements(page);
 
   const panel = page.getByTestId('weapons-panel');
   await expect(panel).toBeVisible();
@@ -175,14 +182,17 @@ test('a weapon is added from a reference template, then edited without touching 
     mastery_property: 'Sap',
   });
 
-  await page.getByRole('button', { name: 'Add weapon' }).click();
+  const addWeapon = page.getByRole('button', { name: 'Add weapon' });
+  await addWeapon.focus();
+  await page.keyboard.press('Enter');
   const form = page.getByTestId('weapon-form');
   await expect(form).toBeVisible();
 
   // Chosen by OPTION TEXT — no id, no index. The picker exposes all 38 options
   // to the accessibility tree at once, which is why it is a <select>.
   const referenceWeapon = form.getByLabel('Start from a reference weapon');
-  await referenceWeapon.selectOption({ label: 'Longsword' });
+  await expect(referenceWeapon).toBeFocused();
+  await page.keyboard.type('Longsword');
   expect(await referenceWeapon.evaluate((select) => {
     const selected = (select as HTMLSelectElement).selectedOptions[0];
     return selected?.parentElement instanceof HTMLOptGroupElement
@@ -209,7 +219,8 @@ test('a weapon is added from a reference template, then edited without touching 
   await form.getByLabel('Damage dice', { exact: true }).fill('1d10');
   await form.getByLabel('Reach').check();
   await form.getByLabel('Notes').fill('Reforged after the siege.');
-  await form.getByRole('button', { name: 'Add weapon' }).click();
+  await form.getByRole('button', { name: 'Add weapon' }).focus();
+  await page.keyboard.press('Enter');
 
   await expect.poll(() => weaponRows(page)).toEqual([
     expect.objectContaining({
@@ -223,6 +234,8 @@ test('a weapon is added from a reference template, then edited without touching 
       notes: 'Reforged after the siege.',
     }),
   ]);
+  await expect(addWeapon).toBeFocused();
+  await expect.poll(() => announcedMessages(page)).toContain('Autosaved');
 
   // THE CATALOG IS UNTOUCHED. Editing a weapon cannot reach the template,
   // because the weapon holds no reference to one.

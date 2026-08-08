@@ -500,6 +500,29 @@ interface PlannerViewState {
   weaponEditing: WeaponEditing;
   itemEditing: ItemEditing;
   attunementReplacementInvokerFocusKey: string | null;
+  renderedStatus: string | null;
+}
+
+function restorePlannerFocus(
+  root: HTMLElement,
+  focusKey: string,
+  view: PlannerViewState,
+): void {
+  restoreFocus(root, focusKey);
+  if (root.contains(document.activeElement)) return;
+  const fallback =
+    focusKey === 'weapon-add' && view.weaponEditing !== null
+      ? 'weapon-template'
+      : (focusKey === 'weapon-cancel' || focusKey === 'weapon-submit') &&
+          view.weaponEditing === null
+        ? 'weapon-add'
+        : focusKey === 'item-add' && view.itemEditing !== null
+          ? 'item-name'
+          : (focusKey === 'item-cancel' || focusKey === 'item-submit') &&
+              view.itemEditing === null
+            ? 'item-add'
+            : null;
+  if (fallback !== null) restoreFocus(root, fallback);
 }
 
 function renderPlanner(
@@ -545,8 +568,12 @@ function renderPlanner(
   const status = document.createElement('output');
   status.id = 'planner-status';
   status.setAttribute('role', 'status');
+  status.setAttribute('aria-live', 'polite');
   status.dataset.ready = 'true';
-  status.value = session.saving ? 'Saving…' : 'Autosaved';
+  const statusText = session.saving ? 'Saving…' : 'Autosaved';
+  const statusChanged = view.renderedStatus !== null &&
+    view.renderedStatus !== statusText;
+  status.value = statusChanged ? '' : statusText;
   const sheet = document.createElement('a');
   sheet.href = `/characters/${session.characterId}/sheet`;
   sheet.className = 'button-secondary';
@@ -627,7 +654,7 @@ function renderPlanner(
       session.attunementReplacement === null &&
       context.root.querySelector('.planner-shell') !== null
     ) {
-      restoreFocus(context.root, mutationFocusKey);
+      restorePlannerFocus(context.root, mutationFocusKey, view);
       if (replacingAttunedItem) {
         view.attunementReplacementInvokerFocusKey = null;
       }
@@ -954,8 +981,10 @@ function renderPlanner(
   );
   shell.append(layout);
   context.root.append(shell);
+  if (statusChanged) status.value = statusText;
+  view.renderedStatus = statusText;
   if (focusKey !== undefined) {
-    restoreFocus(context.root, focusKey);
+    restorePlannerFocus(context.root, focusKey, view);
   }
   const replacementDialog = context.root.querySelector<HTMLDialogElement>(
     '[data-testid="attunement-replace-modal"]',
@@ -1005,6 +1034,7 @@ export const screen = defineScreen({
       weaponEditing: null,
       itemEditing: null,
       attunementReplacementInvokerFocusKey: null,
+      renderedStatus: null,
     };
     let destroyGrid: (() => void) | undefined;
     let active = true;

@@ -319,7 +319,6 @@ export function renderReview(options: {
 export function appendSubmittingStatus(root: HTMLElement): HTMLElement {
   const status = element('p', {
     className: 'level-up-submitting',
-    text: 'Submitting this level-up operation…',
     attributes: {
       role: 'status',
       'aria-live': 'assertive',
@@ -328,6 +327,7 @@ export function appendSubmittingStatus(root: HTMLElement): HTMLElement {
   });
   root.setAttribute('aria-busy', 'true');
   root.append(status);
+  status.textContent = 'Submitting this level-up operation…';
   status.focus();
   for (const selector of ['button', 'input', 'select'] as const) {
     for (const control of Array.from(root.querySelectorAll<

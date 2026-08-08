@@ -17,10 +17,8 @@ export async function installAnnouncementRecorder(page: Page): Promise<void> {
         ? value
         : [];
     };
-    const snapshots = new WeakMap<Element, string>();
     const record = (region: Element): void => {
       const message = region.textContent?.trim() ?? '';
-      snapshots.set(region, message);
       if (message === '') return;
       const messages = read();
       if (messages.at(-1) === message) return;
@@ -31,22 +29,13 @@ export async function installAnnouncementRecorder(page: Page): Promise<void> {
     const observe = (): void => {
       const root = document.documentElement;
       if (root === null) return;
-      for (const region of Array.from(root.querySelectorAll(liveSelector))) {
-        snapshots.set(region, region.textContent?.trim() ?? '');
-      }
       new MutationObserver((records) => {
         const regions = new Set<Element>();
         for (const mutation of records) {
           if (mutation.type === 'attributes') {
-            const target = mutation.target;
-            if (!(target instanceof Element)) continue;
-            // Making existing content live does not announce that content. Snapshot
-            // it now; only a later childList/characterData mutation may be recorded.
-            if (target.matches(liveSelector)) {
-              snapshots.set(target, target.textContent?.trim() ?? '');
-            } else {
-              snapshots.delete(target);
-            }
+            // Making existing content live does not announce it. Excluding
+            // attribute-only records from `regions` waits for a later text or
+            // child mutation before recording that region.
             continue;
           }
           const target = mutation.target instanceof Element
@@ -54,13 +43,9 @@ export async function installAnnouncementRecorder(page: Page): Promise<void> {
             : mutation.target.parentElement;
           const containing = target?.closest(liveSelector);
           if (containing !== null && containing !== undefined) regions.add(containing);
-          for (const node of Array.from(mutation.addedNodes)) {
-            if (!(node instanceof Element)) continue;
-            if (node.matches(liveSelector)) regions.add(node);
-            for (const region of Array.from(node.querySelectorAll(liveSelector))) {
-              regions.add(region);
-            }
-          }
+          // A populated live region inserted under a non-live parent is not in
+          // `regions`, so its existing text is ignored. A later mutation targets
+          // the connected region and reaches the `containing` path above.
         }
         for (const region of regions) record(region);
       }).observe(root, {

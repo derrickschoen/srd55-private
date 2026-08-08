@@ -430,11 +430,14 @@ test('the empty-database front door chooses class first, persists once named, an
   expect(firstOptions).not.toContain('Religion');
   expect(firstOptions).toContain('Athletics');
 
-  await firstSelect.selectOption('athletics');
+  await firstSelect.focus();
+  await page.keyboard.type('Athletics');
   await choices
     .first()
     .locator(`[${persistedSeam.skillFillAttribute}]`)
-    .click();
+    .focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('heading', { name: 'Choose skills' })).toBeFocused();
   await expect(granted).toHaveCount(3);
   await expect(choices).toHaveCount(1);
 
@@ -452,10 +455,12 @@ test('the empty-database front door chooses class first, persists once named, an
     .first();
   await lastChoice
     .locator(`[${persistedSeam.skillSelectAttribute}]`)
-    .selectOption('perception');
+    .focus();
+  await page.keyboard.type('Perception');
   await lastChoice
     .locator(`[${persistedSeam.skillFillAttribute}]`)
-    .click();
+    .focus();
+  await page.keyboard.press('Enter');
 
   // GF-2: Acolyte's default Magic Initiate (Cleric) choices are part of the
   // guided journey, using the same search and durable assignment path as the
@@ -483,13 +488,30 @@ test('the empty-database front door chooses class first, persists once named, an
     if (search === undefined) {
       throw new Error(`No guided spell remains for ${label ?? 'choice'}.`);
     }
-    await picker.fill(search);
+    const pickerOptions = picker.locator('..').locator('[role="listbox"] [role="option"]');
+    await picker.focus();
+    await expect.poll(() =>
+      pickerOptions.allTextContents()
+    ).not.toEqual([]);
+    const initialSpellOptions = await pickerOptions.allTextContents();
+    await page.keyboard.type(search);
+    await expect.poll(() => pickerOptions.allTextContents())
+      .not.toEqual(initialSpellOptions);
     const option = page.getByRole('option', {
       name: new RegExp(`^${search}\\b`),
     });
     await expect(option).toBeVisible();
-    await option.click();
+    await expect(option).toHaveAccessibleDescription(/SRD · bundled layer/u);
+    const optionIndex = await pickerOptions.allTextContents()
+      .then((options) => options.findIndex((optionText) => optionText.startsWith(search)));
+    expect(optionIndex).toBeGreaterThanOrEqual(0);
+    for (let optionNumber = 0; optionNumber < optionIndex; optionNumber += 1) {
+      await page.keyboard.press('ArrowDown');
+    }
+    await page.keyboard.press('Enter');
     await expect(pickers).toHaveCount(count - 1);
+    const nextHeading = count === 1 ? 'Confirm starting equipment' : 'Choose level 1 spells';
+    await expect(page.getByRole('heading', { name: nextHeading })).toBeFocused();
   }
 
   // E-B: every class ordinal is filled and the REAL equipment step renders —
@@ -626,4 +648,51 @@ test('the empty-database front door chooses class first, persists once named, an
   ).toBeVisible();
   await expect(page.locator('[data-backup-hint]')).toHaveCount(0);
   await expectNoPlannerRouteAnchors(page);
+});
+
+test('the guided Rogue expertise disclosure is keyboard-associated and keeps route focus', async ({
+  page,
+}) => {
+  // Measured alone after implementation; 65s matches the guided route's
+  // established load-sensitive envelope.
+  test.setTimeout(65_000);
+  await resetHome(page);
+
+  await page.getByRole('link', { name: 'Create a character' }).click();
+  await page.getByRole('button', { name: /^Rogue\b/u }).click();
+  await page.getByLabel('Character name').fill('Keyboard Rogue');
+  await page.getByRole('button', { name: 'Create character' }).click();
+  await page.getByRole('button', { name: 'Set ability scores' }).click();
+  await page.getByRole('button', { name: 'Choose Dwarf' }).click();
+  await page.getByRole('radio', { name: 'Criminal' }).check();
+  await page.getByRole('button', { name: 'Apply background' }).click();
+
+  await expect(page.getByRole('heading', { name: 'Choose skills' })).toBeFocused();
+  while (await page.getByRole('heading', { name: 'Choose skills' }).isVisible()) {
+    const allChoices = page.locator('[data-skill-choice]');
+    const choiceCount = await allChoices.count();
+    const choice = allChoices.first();
+    const select = choice.locator('[data-skill-select]');
+    await expect(select).toHaveAccessibleDescription('SRD · bundled layer');
+    await select.focus();
+    await page.keyboard.press('ArrowDown');
+    await choice.locator('[data-skill-fill]').focus();
+    await page.keyboard.press('Enter');
+    await expect(allChoices).toHaveCount(choiceCount - 1);
+  }
+
+  const heading = page.getByRole('heading', { name: 'Choose Expertise' });
+  await expect(heading).toBeFocused();
+  const choices = page.locator('.guided-expertise-choice');
+  const count = await choices.count();
+  expect(count).toBeGreaterThan(0);
+  const first = choices.first();
+  const expertise = first.getByRole('combobox');
+  await expect(expertise).toHaveAccessibleDescription('SRD · bundled layer');
+  await expertise.focus();
+  await page.keyboard.press('ArrowDown');
+  await first.getByRole('button').focus();
+  await page.keyboard.press('Enter');
+  await expect(choices).toHaveCount(count - 1);
+  await expect(heading).toBeFocused();
 });

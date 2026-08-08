@@ -41,11 +41,23 @@ async function expectAnnounced(page: Page, message: string): Promise<void> {
   await expect.poll(() => announcedMessages(page)).toContain(message);
 }
 
-test('announcement recorder ignores text that predates a live-region attribute', async ({ page }) => {
+async function expectAnnouncementMatching(page: Page, pattern: RegExp): Promise<void> {
+  await expect.poll(async () =>
+    (await announcedMessages(page)).some((message) => pattern.test(message))
+  ).toBe(true);
+}
+
+test('announcement recorder ignores populated regions on insertion and on becoming live', async ({ page }) => {
   await installAnnouncementRecorder(page);
   await page.goto('/');
   await clearAnnouncements(page);
   await page.evaluate(() => {
+    const inserted = document.createElement('div');
+    inserted.id = 'recorder-inserted-live-region';
+    inserted.setAttribute('role', 'status');
+    inserted.textContent = 'Recorder must ignore this inserted text.';
+    document.body.append(inserted);
+
     const region = document.createElement('div');
     region.id = 'recorder-late-live-region';
     region.textContent = 'Recorder must ignore this existing text.';
@@ -56,12 +68,60 @@ test('announcement recorder ignores text that predates a live-region attribute',
   });
 
   await expect.poll(() => announcedMessages(page))
+    .not.toContain('Recorder must ignore this inserted text.');
+  await expect.poll(() => announcedMessages(page))
     .not.toContain('Recorder must ignore this existing text.');
+
+  await page.locator('#recorder-inserted-live-region').evaluate((region) => {
+    region.textContent = 'Recorder observes this inserted region later.';
+  });
+  await expectAnnounced(page, 'Recorder observes this inserted region later.');
 
   await page.locator('#recorder-late-live-region').evaluate((region) => {
     region.textContent = 'Recorder observes this later mutation.';
   });
   await expectAnnounced(page, 'Recorder observes this later mutation.');
+});
+
+test('all three authoring routes focus, announce, and recover from publisher validation errors', async ({
+  page,
+}) => {
+  // A restoration run measured 43.4s under machine contention. The recorded
+  // x1.5 reserve is 43.4s x 1.5 = 65.1s, following the 65s guided precedent.
+  test.setTimeout(65_000);
+  await reset(page);
+
+  const forms = [
+    { kind: 'species', create: 'New species', form: 'Species authoring form', name: 'Recovered Species' },
+    { kind: 'background', create: 'New background', form: 'Background authoring form', name: 'Recovered Background' },
+    { kind: 'subclass', create: 'New subclass', form: 'Subclass authoring form', name: 'Recovered Subclass' },
+  ] as const;
+
+  for (const form of forms) {
+    await page.goto(`/homebrew?tab=${form.kind}`);
+    await homebrewReady(page);
+    await pressEnter(page.getByRole('button', { name: form.create, exact: true }));
+    await expect(page.getByLabel(form.form, { exact: true })).toBeVisible();
+
+    const save = page.getByRole('button', { name: 'Save draft', exact: true });
+    await pressEnter(save);
+    await expectAnnounced(page, 'Saved revision 1.');
+
+    await clearAnnouncements(page);
+    await pressEnter(page.getByRole('button', { name: 'Preview publish', exact: true }));
+    const name = page.getByLabel('Name', { exact: true });
+    await expect(name).toBeFocused();
+    await expect(name).toHaveAttribute('aria-invalid', 'true');
+    await expect(page.getByRole('alert', { name: 'Fix these fields' })).toContainText(
+      'Must not be empty.',
+    );
+    await expectAnnouncementMatching(page, /^\d+ field issue\(s\) found\.$/u);
+
+    await page.keyboard.type(form.name);
+    await clearAnnouncements(page);
+    await pressEnter(save);
+    await expectAnnounced(page, 'Saved revision 2.');
+  }
 });
 
 test('library tabs use their keyboard model and announce the route-loaded result', async ({ page }) => {

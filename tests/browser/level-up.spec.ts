@@ -4,6 +4,11 @@ import {
 } from './fixtures/level-up-characters';
 import { readLevelUpSeam } from './fixtures/level-up-seam';
 import { expect, test } from './fixtures/parallel-test';
+import {
+  announcedMessages,
+  clearAnnouncements,
+  installAnnouncementRecorder,
+} from './fixtures/announcements';
 
 interface CreatedCharacter {
   readonly id: number;
@@ -69,12 +74,27 @@ async function selectPlannedSpell(
   spellName: string,
 ): Promise<void> {
   const input = page.getByRole('combobox', { name: accessibleName }).nth(index);
-  await input.fill(spellName);
+  const listOptions = input.locator('..').locator('[role="listbox"] [role="option"]');
+  await input.focus();
+  await expect.poll(() =>
+    listOptions.allTextContents()
+  ).not.toEqual([]);
+  const initialSpellOptions = await listOptions.allTextContents();
+  await page.keyboard.type(spellName);
+  await expect.poll(() => listOptions.allTextContents())
+    .not.toEqual(initialSpellOptions);
   const option = page.getByRole('option').filter({ hasText: spellName });
   // The four-worker pool measured the slowest caller at 17.4s; 45s gives this
   // worker-backed option wait at least 2.5x headroom under pool contention.
   await expect(option).toBeVisible({ timeout: 45_000 });
-  await option.click();
+  await expect(option).toHaveAccessibleDescription(/SRD · bundled layer/u);
+  const optionIndex = await listOptions.allTextContents()
+    .then((options) => options.findIndex((optionText) => optionText.startsWith(spellName)));
+  expect(optionIndex).toBeGreaterThanOrEqual(0);
+  for (let optionNumber = 0; optionNumber < optionIndex; optionNumber += 1) {
+    await page.keyboard.press('ArrowDown');
+  }
+  await page.keyboard.press('Enter');
   await expect(input).toHaveValue(spellName);
 }
 
@@ -220,7 +240,12 @@ async function openWizardPlannedReview(
   await expect(page.getByRole('heading', { name: 'Gains' })).toBeFocused();
   await page.locator('[data-level-up-next]').click();
   await expect(page.getByRole('heading', { name: 'Choose Expertise' })).toBeFocused();
-  await page.locator('[data-level-up-expertise-choice]').selectOption('arcana');
+  const expertise = page.locator('[data-level-up-expertise-choice]');
+  await expect(expertise).toHaveAccessibleDescription(
+    'Granted by Wizard — Scholar — SRD · bundled layer. Rule class_expertise_2, choice 1.',
+  );
+  await expertise.focus();
+  await page.keyboard.type('Arcana');
   await page.locator('[data-level-up-next]').click();
   await expect(page.getByRole('heading', { name: 'Choose spells' })).toBeFocused();
 
@@ -345,6 +370,7 @@ test('W-KEYBOARD Tab order, reverse travel, native choice keys, and moved focus 
     name: 'Alert: No ability increase',
   });
   await pressTabUntilFocused(page, zeroPointFeat, 10);
+  await expect(zeroPointFeat).toHaveAccessibleDescription(/SRD · bundled layer/u);
   await page.keyboard.press('Space');
   await expect(zeroPointFeat).toBeChecked();
   const featNext = page.getByRole('button', { name: 'Next' });
@@ -485,6 +511,7 @@ test('W-BROWSER-PLANNED-DRAFT carries planned_subchoices from UI through Review 
   // The four-worker parallel pool measured 17.4s including the post-commit
   // sheet; 45s preserves at least 2.5x headroom under pool contention.
   test.setTimeout(45_000);
+  await installAnnouncementRecorder(page);
   const character = await createCharacter(page, 'Planned Wizard', 'Wizard');
   await completeWizardLevelOneChoices(page, character.id);
   await openWizardPlannedReview(page, character);
@@ -498,7 +525,12 @@ test('W-BROWSER-PLANNED-DRAFT carries planned_subchoices from UI through Review 
   ]) {
     await expect(page.getByText(text, { exact: true })).toBeVisible();
   }
-  await page.locator('[data-level-up-confirm]').click();
+  await clearAnnouncements(page);
+  await page.locator('[data-level-up-confirm]').focus();
+  await page.keyboard.press('Enter');
+  await expect.poll(() => announcedMessages(page)).toContain(
+    'Submitting this level-up operation…',
+  );
   await expect(
     page.getByRole('heading', { name: 'Wizard level 2 complete' }),
   ).toBeFocused({ timeout: 45_000 });
