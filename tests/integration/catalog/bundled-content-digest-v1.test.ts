@@ -1,14 +1,19 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
+  bundledContentCouldMatchBuildV1,
   bundledContentDigestMatchesBuildV1,
   bundledContentDigestMismatchesV1,
   bundledContentDigestPassV1,
 } from '../../../src/catalog/bundled-content-digest-v1';
 import { EXPECTED_BUNDLED_CONTENT_DIGEST_V1 } from '../../../src/catalog/bundled-content-digest-v1.expected';
 import { createApplicationLifecycle } from '../../../src/db/bootstrap';
-import type { DatabaseContext } from '../../../src/db/database';
+import { DatabaseContext } from '../../../src/db/database';
 import type { DatabaseLifecycle } from '../../../src/db/database-lifecycle';
-import { getSqlite3, MemoryDatabaseStorage } from '../../helpers/open-db';
+import {
+  getSqlite3,
+  MemoryDatabaseStorage,
+  openTestDatabase,
+} from '../../helpers/open-db';
 
 const ACID_ARROW_KEY = '2024:acid-arrow';
 
@@ -65,6 +70,45 @@ describe('D229 bundled content digest boot verification', () => {
     expect(before.digest).toBe(EXPECTED_BUNDLED_CONTENT_DIGEST_V1);
     expect(after.digest).toBe(before.digest);
     expect(after.aggregates).toHaveLength(444);
+  });
+
+  it('count-gates canonicalization to databases with the complete aggregate cardinality', async () => {
+    expect(bundledContentCouldMatchBuildV1(db)).toBe(true);
+
+    const emptyConnection = await openTestDatabase();
+    try {
+      const empty = new DatabaseContext(emptyConnection);
+      expect(bundledContentCouldMatchBuildV1(empty)).toBe(false);
+    } finally {
+      emptyConnection.close();
+    }
+  });
+
+  it('falls back to the content key when a bundled identity has no root name', () => {
+    const contentKey = '2024:feat:nameless-digest-control';
+    db.exec(
+      `INSERT INTO catalog_content_identities (
+         content_key, content_kind, key_kind, catalog_layer, normalized_name
+       ) VALUES (?, 'feat', 'bundled-stable', 'bundled', 'nameless digest control')`,
+      [contentKey],
+    );
+    try {
+      const pass = bundledContentDigestPassV1(db);
+      expect(pass.names.get(`feat\u0000${contentKey}`)).toBe(contentKey);
+      expect(bundledContentDigestMismatchesV1(pass)).toContainEqual({
+        catalog_layer: 'bundled',
+        kind: 'feat',
+        contentKey,
+        name: contentKey,
+        reason: 'unexpected',
+      });
+    } finally {
+      db.exec(
+        `DELETE FROM catalog_content_identities
+         WHERE content_kind = 'feat' AND content_key = ?`,
+        [contentKey],
+      );
+    }
   });
 
   it('detects one corrupted aggregate and returns to the pinned digest after an exact restore', () => {
