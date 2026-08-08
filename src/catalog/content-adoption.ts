@@ -1345,6 +1345,8 @@ export type ContentImportCommitResult =
       readonly outcomes: readonly ContentImportEntryOutcome[];
     };
 
+export type ContentImportPlanner = typeof planContentImport;
+
 export function commitContentImport(
   db: DatabaseContext,
   input: {
@@ -1354,6 +1356,14 @@ export function commitContentImport(
     readonly spellActivityChanges?: readonly ContentImportSpellActivityChange[];
     /** Digest of enclosing writes that must remain identical through commit. */
     readonly operationIdentity?: string;
+    /**
+     * A plan already evaluated against the same pre-commit state. Commit still
+     * re-evaluates inside its write transaction, so a state change remains a
+     * stale plan; this only avoids repeating the rollback-only planning pass.
+     */
+    readonly precommitPlan?: ContentImportPlan;
+    /** Planner dependency retained so callers can count planning passes. */
+    readonly planner?: ContentImportPlanner;
     /** Enclosing character/document writes run here and share the transaction. */
     readonly afterInstall?: (db: DatabaseContext) => void;
   },
@@ -1361,7 +1371,7 @@ export function commitContentImport(
   const choices = input.choices ?? Object.freeze({});
   const spellActivityChanges = input.spellActivityChanges ?? Object.freeze([]);
   const operationIdentity = input.operationIdentity ?? null;
-  const freshPlan = planContentImport(
+  const freshPlan = input.precommitPlan ?? (input.planner ?? planContentImport)(
     db,
     input.nodes,
     choices,

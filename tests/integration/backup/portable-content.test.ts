@@ -1,9 +1,12 @@
+import { readFileSync } from 'node:fs';
 import type { Database } from '@sqlite.org/sqlite-wasm';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   BackgroundContentAggregate,
   SpeciesContentAggregate,
 } from '../../../src/authoring/contracts';
+import { canonicalJson } from '../../../src/commands/canonical-json';
+import { sha256 } from '../../../src/crypto/sha256';
 import {
   commitCharacterBackupImport,
   exportCharacterBackup,
@@ -11,16 +14,29 @@ import {
   planCharacterBackupImport,
 } from '../../../src/backup/character-backup';
 import {
+  commitLibraryImport,
   exportSelectedLibraryContent,
   exportWholeLibrary,
   importLibraryDocument,
+  planLibraryImport,
 } from '../../../src/backup/library-export';
 import {
   PRE_LINEAGE_CHARACTER_BACKUP_VERSION,
   PRE_FLAVOR_CHARACTER_BACKUP_VERSION,
   PREVIOUS_CHARACTER_BACKUP_VERSION,
 } from '../../../src/backup/backup-version';
+import {
+  libraryContentImportNodes,
+  restorePortableContentSupersessions,
+  type LibraryExportDocument,
+} from '../../../src/backup/portable-content';
 import { CatalogImporter } from '../../../src/catalog/catalog-importer';
+import {
+  commitContentImport,
+  planContentImport,
+  type ContentImportPlanner,
+  type ContentImportPlanToken,
+} from '../../../src/catalog/content-adoption';
 import {
   CONTENT_FINGERPRINT_SCHEME_V1,
   type ContentFingerprintDigest,
@@ -39,6 +55,10 @@ import {
 
 const opened: Database[] = [];
 const exportedAt = '2042-03-05T00:00:00.000Z';
+const legacyDoublePlanImportedState = readFileSync(
+  new URL('../../fixtures/library-import-double-plan-state.json', import.meta.url),
+  'utf8',
+).trim();
 
 async function database(): Promise<DatabaseContext> {
   const connection = await openTestDatabase();
@@ -220,6 +240,56 @@ function manifestEnumeration(document: {
   readonly content: readonly { readonly kind: string; readonly content_key: string }[];
 }): readonly string[] {
   return document.content.map((entry) => `${entry.kind}:${entry.content_key}`);
+}
+
+function importedLibraryStateProjection(db: DatabaseContext) {
+  return {
+    library: exportWholeLibrary(db, exportedAt),
+    supersessions: db.allRaw(
+      `SELECT content_kind, superseded_content_key, successor_content_key,
+              recorded_at
+       FROM catalog_content_supersessions
+       ORDER BY content_kind, superseded_content_key`,
+    ),
+  };
+}
+
+/** The exact two-plan implementation replaced by this hardening change. */
+function commitLibraryImportDoublePlanReference(
+  db: DatabaseContext,
+  document: LibraryExportDocument,
+  token: ContentImportPlanToken,
+) {
+  const nodes = libraryContentImportNodes(db, document);
+  const operationIdentity = sha256(canonicalJson(document));
+  const dryRun = planContentImport(
+    db,
+    nodes,
+    Object.freeze({}),
+    Object.freeze([]),
+    operationIdentity,
+  );
+  const targets = new Map<string, ContentKey>();
+  for (const [index, node] of nodes.entries()) {
+    const entry = document.content[index];
+    const outcome = dryRun.outcomes.find((candidate) => candidate.id === node.id);
+    if (
+      entry !== undefined && outcome !== undefined &&
+      outcome.kind !== 'refused' && outcome.kind !== 'review'
+    ) {
+      targets.set(`${entry.kind}\u0000${entry.content_key}`, outcome.contentKey);
+    }
+  }
+  return commitContentImport(db, {
+    nodes,
+    token,
+    operationIdentity,
+    afterInstall: (transaction) => restorePortableContentSupersessions(
+      transaction,
+      { content: document.content, supersessions: document.supersessions },
+      targets,
+    ),
+  });
 }
 
 function emptyHistoricalSpellDefinitions() {
@@ -428,6 +498,46 @@ describe('portable content manifests', () => {
       `SELECT content_kind, superseded_content_key, successor_content_key, recorded_at
        FROM catalog_content_supersessions`,
     )).toEqual(document.supersessions);
+  });
+
+  it('plans a lineage-bearing authored library commit once and preserves the legacy imported-state bytes', async () => {
+    const source = await database();
+    const fixture = seedClosureLibrary(source);
+    source.exec(
+      `INSERT INTO catalog_content_supersessions (
+         content_kind, superseded_content_key, successor_content_key, recorded_at
+       ) VALUES ('feat', ?, ?, 'CI7-SUPERSESSION-SENTINEL')`,
+      [fixture.featKey, fixture.unrelatedKey],
+    );
+    const document = exportWholeLibrary(source, exportedAt);
+    const legacyTarget = await database();
+    const legacyPreview = planLibraryImport(legacyTarget, document);
+    const legacyCommitted = commitLibraryImportDoublePlanReference(
+      legacyTarget,
+      document,
+      legacyPreview.token,
+    );
+    const legacyBytes = JSON.stringify(
+      importedLibraryStateProjection(legacyTarget),
+    );
+
+    const target = await database();
+    const preview = planLibraryImport(target, document);
+    const countedPlanner = vi.fn<ContentImportPlanner>(planContentImport);
+
+    const committed = commitLibraryImport(
+      target,
+      document,
+      preview.token,
+      Object.freeze({}),
+      countedPlanner,
+    );
+
+    expect(legacyCommitted.kind).toBe('committed');
+    expect(committed.kind).toBe('committed');
+    expect(countedPlanner).toHaveBeenCalledOnce();
+    expect(legacyBytes).toBe(legacyDoublePlanImportedState);
+    expect(JSON.stringify(importedLibraryStateProjection(target))).toBe(legacyBytes);
   });
 
   it('HA12-LIBRARY-V1-FROZEN imports the pre-lineage library shape without inventing edges', async () => {

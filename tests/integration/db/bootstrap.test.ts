@@ -364,6 +364,10 @@ describe('application database bootstrap', () => {
     expect(retiredBundledRootCount(lifecycle)).toBe(0);
   });
 
+  // Full-suite ms: postswap-vitest.log=3645, digest-vitest6.log=3559,
+  // digest-postmerge.log=3608, a11ygaps-vitest2.log=3677,
+  // a11ygaps-postmerge.log=3566, a11ygaps-postmerge2.log=3653.
+  // 3677 x 1.5 = 5515.5, rounded up to 5600ms.
   it('seeds a restored image that has no classes and does not duplicate one that has', async () => {
     const { sqlite3, lifecycle } = await freshApplicationLifecycle();
 
@@ -389,7 +393,7 @@ describe('application database bootstrap', () => {
     expect(
       lifecycle.database.scalar('SELECT count(*) FROM class_definitions'),
     ).toBe(SRD_CLASSES.length);
-  });
+  }, 5600);
 
   it('repairs a database whose definitions survived but whose progressions did not', async () => {
     const { lifecycle } = await freshApplicationLifecycle();
@@ -476,6 +480,10 @@ describe('application database bootstrap', () => {
     ).toBe('2024:class:bard');
   });
 
+  // Full-suite ms: postswap-vitest.log=3423, digest-vitest6.log=2783,
+  // digest-postmerge.log=2772, a11ygaps-vitest2.log=2875,
+  // a11ygaps-postmerge.log=2894, a11ygaps-postmerge2.log=2833.
+  // 3423 x 1.5 = 5134.5, rounded up to 5200ms.
   it('boot repair compares exact SRD subclass feature tuples and grant rules, not counts alone', async () => {
     const { lifecycle } = await freshApplicationLifecycle();
     const db = lifecycle.database;
@@ -558,7 +566,7 @@ describe('application database bootstrap', () => {
          WHERE content_key = '2024:subclass:life-domain'`,
       ),
     ).toBeNull();
-  });
+  }, 5200);
 
   it('repairs an owned Bard subclass in a replacement image without touching its imported sibling or reallocating the owned root', async () => {
     const { sqlite3, lifecycle: source } = await freshApplicationLifecycle();
@@ -681,6 +689,10 @@ describe('application database bootstrap', () => {
     // ample headroom over the loaded observation while still catching hangs.
   }, 30_000);
 
+  // Full-suite ms: postswap-vitest.log=3300, digest-vitest6.log=4694,
+  // digest-postmerge.log=4745, a11ygaps-vitest2.log=4786,
+  // a11ygaps-postmerge.log=4824, a11ygaps-postmerge2.log=4664.
+  // 4824 x 1.5 = 7236, rounded up to 7300ms.
   it('repairs an inherit-parent subclass from its authoritative ability when replacement-image class metadata is corrupt', async () => {
     const { sqlite3, lifecycle: source } = await freshApplicationLifecycle();
     const lifeDomainId = Number(
@@ -731,7 +743,7 @@ describe('application database bootstrap', () => {
       parent_ability: 'charisma',
     });
     expect(hasBundledSrdSubclassContent(target.database)).toBe(true);
-  });
+  }, 7300);
 
   it('rejects an unresolved SRD subclass spell key after the full application seed', async () => {
     const { lifecycle } = await freshApplicationLifecycle();
@@ -750,6 +762,10 @@ describe('application database bootstrap', () => {
     ).toThrow('2024:missing-subclass-spell');
   });
 
+  // Full-suite ms: postswap-vitest.log=3356, digest-vitest6.log=4516,
+  // digest-postmerge.log=4435, a11ygaps-vitest2.log=4478,
+  // a11ygaps-postmerge.log=4526, a11ygaps-postmerge2.log=4725.
+  // 4725 x 1.5 = 7087.5, rounded up to 7100ms.
   it('yields a class name already claimed by user content instead of failing the boot', async () => {
     const { sqlite3, lifecycle } = await freshApplicationLifecycle();
     const warned = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -878,7 +894,7 @@ describe('application database bootstrap', () => {
         [claimedChampionKey],
       ),
     ).toBe(1);
-  });
+  }, 7100);
 
   it('boots and stays resettable when the seed throws outright', async () => {
     const sqlite3 = await getSqlite3();
@@ -928,6 +944,10 @@ describe('application database bootstrap', () => {
     }).not.toThrow();
   });
 
+  // Full-suite green ms: postswap-vitest.log=3478, digest-vitest6.log=4005,
+  // digest-postmerge.log=3766, a11ygaps-vitest2.log=3618,
+  // a11ygaps-postmerge2.log=3748; a11ygaps-postmerge.log timed out at 5000ms.
+  // 4005 x 1.5 = 6007.5 (6008), rounded up to 6100ms.
   it('validates, audits, and reopens a Monk formula image after equipping a shield', async () => {
     const sqlite3 = await getSqlite3();
     const fixture = bareLifecycle(sqlite3);
@@ -1038,7 +1058,7 @@ describe('application database bootstrap', () => {
         [characterId, sourceId],
       ),
     ).toBe(1);
-  });
+  }, 6100);
 });
 
 describe('bundled class content detection', () => {

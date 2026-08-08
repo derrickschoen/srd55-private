@@ -7,6 +7,7 @@ import {
   planContentImport,
   type ContentImportChoices,
   type ContentImportCommitResult,
+  type ContentImportPlanner,
   type ContentImportPlanToken,
 } from '../catalog/content-adoption';
 import {
@@ -65,15 +66,17 @@ export function commitLibraryImport(
   document: unknown,
   token: ContentImportPlanToken,
   choices: ContentImportChoices = Object.freeze({}),
+  planner: ContentImportPlanner = planContentImport,
 ): ContentImportCommitResult {
   validateLibraryDocument(document);
   const nodes = libraryContentImportNodes(db, document);
-  const plan = planContentImport(
+  const operationIdentity = libraryImportOperationIdentity(document);
+  const plan = planner(
     db,
     nodes,
     choices,
     Object.freeze([]),
-    libraryImportOperationIdentity(document),
+    operationIdentity,
   );
   const targets = new Map<string, ContentKey>();
   for (const [index, node] of nodes.entries()) {
@@ -90,7 +93,9 @@ export function commitLibraryImport(
     nodes,
     token,
     choices,
-    operationIdentity: libraryImportOperationIdentity(document),
+    operationIdentity,
+    precommitPlan: plan,
+    planner,
     afterInstall: (transaction) => restorePortableContentSupersessions(
       transaction,
       { content: document.content, supersessions: document.supersessions ?? [] },
