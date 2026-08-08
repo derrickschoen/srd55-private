@@ -5,6 +5,41 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-08 — Barbed Court: chosen spells = the SRD Paladin Prepared Spells column at Monk level; slots = the third-caster multiclass derivation — item 4 of 9 CLOSED
+
+Owner's ruling, verbatim:
+
+> Just give from the paladin spells known table and the slots from the 1/3
+> multiclass table
+
+Interpretation stated: the SRD 5.2.1 Paladin **Prepared Spells column read at
+the monk's own level** (the plain reading of "just give from the paladin
+table"; the alternative — reading it at the caster-level equivalence
+2 × ⌈Monk/3⌉, yielding 3/5/7/10 — was on the table earlier and not chosen).
+Slots stay on the already-ruled derivation: caster level = ⌈Monk/3⌉ into the
+SRD Multiclass Spellcaster table.
+
+This supersedes: the 3/5/7/9 snap-to-cadence chosen counts, and the
+consensus-curve table presented 2026-08-08 (which was found to run 1–2 below
+the PHB third-caster from Monk 11 up, violating the owner's lower bound).
+
+Chosen prepared spells, Monk 3–20, straight from the Paladin column:
+4, 5, 6, 6, 7, 7, 9, 9, 10, 10, 11, 11, 12, 12, 14, 14, 15, 15.
+
+Bounds verified: ≥ the PHB third-caster column (3–13) at every level; equal
+to the Paladin rail by construction — the owner's "no more than the
+paladin/ranger" is satisfied at the boundary, deliberately.
+
+Measurement recorded, not corrected: with the nine granted Court Spells on
+top, total prepared at Monk 6/11/17 is 12/18/23 against a same-level Wizard's
+10/16/19 — the subclass now carries a larger prepared list than a full caster
+from Monk 6 onward, on third-caster slots. Front-load doctrine priced and on
+the record.
+
+Justification chain for the doc: both columns cite SRD 5.2.1 tables by name
+(Paladin Features; Multiclass Spellcaster) with one-line recipes; nothing
+PHB-derived remains in the progression.
+
 ## 2026-08-08 — Barbed Court: cantrips 2 chosen (7 total); swap rule spells-per-level; duel escapes by the spell's own rules; chosen-spell COUNT must derive from licensed text between the PHB third-caster and the Paladin/Ranger
 
 Owner's rulings, verbatim (structured question round):
