@@ -131,6 +131,7 @@ export interface GuidedConfiguredChoiceGrantDisclosure {
   readonly active_from_character_level: number | null;
   readonly spell_version_key: string | null;
   readonly spell_name: string | null;
+  readonly spell_catalog_layer: CatalogLayerDisclosure | null;
 }
 
 export interface GuidedConfiguredChoiceEffectDisclosure {
@@ -147,6 +148,7 @@ export interface GuidedReplaceableSpellChoiceState {
   readonly spell_level: 0;
   readonly initial_spell_version_key: string;
   readonly initial_spell_name: string;
+  readonly initial_spell_catalog_layer: CatalogLayerDisclosure;
   readonly selected_spell_version_key: string | null;
   readonly selected_spell: GuidedReplaceableSpellOption | null;
   readonly eligible_spells: readonly GuidedReplaceableSpellOption[];

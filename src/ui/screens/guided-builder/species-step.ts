@@ -98,7 +98,9 @@ function optionDisclosure(
     facts.push(element('li', {
       text: grant.spell_name === null
         ? `${grant.kind} at character level ${String(level)}.`
-        : `${grant.spell_name} at character level ${String(level)}.`,
+        : `${grant.spell_name} · ${catalogLayerLabel(
+            grant.spell_catalog_layer ?? 'unknown',
+          )} at character level ${String(level)}.`,
     }));
   }
   if (option.replaceable_spell_choice !== null) {
@@ -107,7 +109,9 @@ function optionDisclosure(
       text:
         `${replaceable.label}: choose a ${replaceable.spell_list} ` +
         `${replaceable.spell_level === 0 ? 'cantrip' : `level ${String(replaceable.spell_level)} spell`}; ` +
-        `initially ${replaceable.initial_spell_name}.`,
+        `initially ${replaceable.initial_spell_name} · ${catalogLayerLabel(
+          replaceable.initial_spell_catalog_layer,
+        )}.`,
     }));
   }
   return element('div', { className: 'guided-lineage-option-disclosure' }, [
@@ -308,7 +312,8 @@ function choiceEditor(
         contextDescriptionId: null,
         value: replaceable.selected_spell?.spell.name ??
           replaceable.initial_spell_name,
-        valueCatalogLayer: replaceable.selected_spell?.spell.catalog_layer ?? null,
+        valueCatalogLayer: replaceable.selected_spell?.spell.catalog_layer ??
+          replaceable.initial_spell_catalog_layer,
         freeTextValue: false,
         invalid: false,
         disabled: false,
@@ -327,7 +332,7 @@ function choiceEditor(
         element('p', {
           className: 'guided-lineage-spell-help',
           text:
-            `Choose one level ${String(replaceable.spell_level)} spell from the ${replaceable.spell_list} list. The sourced initial choice is ${replaceable.initial_spell_name}.`,
+            `Choose one level ${String(replaceable.spell_level)} spell from the ${replaceable.spell_list} list. The sourced initial choice is ${replaceable.initial_spell_name} · ${catalogLayerLabel(replaceable.initial_spell_catalog_layer)}.`,
         }),
         picker.element,
       );

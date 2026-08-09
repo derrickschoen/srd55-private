@@ -2,6 +2,7 @@ import type { DatabaseContext } from '../db/database';
 import { sqlInteger, sqlNullableString, sqlString } from '../db/codecs';
 import {
   catalogLayerDisclosure,
+  type CatalogNamedDisclosure,
   type CatalogLayerDisclosure,
 } from '../catalog/catalog-disclosure';
 import { recordedSourceContentKey } from '../catalog/recorded-source-provenance';
@@ -60,12 +61,25 @@ function isEligibleReplaceableSpell(
   ) ?? 0) === 1;
 }
 
-function spellDisplayName(db: DatabaseContext, contentKey: string): string {
-  return db.scalar<string>(
-    `SELECT display_name FROM spell_versions
-     WHERE content_key = ? AND is_active = 1`,
+function spellDisclosure(
+  db: DatabaseContext,
+  contentKey: string,
+): CatalogNamedDisclosure {
+  return db.one(
+    `SELECT version.display_name, identity.catalog_layer
+     FROM spell_versions AS version
+     LEFT JOIN catalog_content_identities AS identity
+       ON identity.content_kind = 'spell'
+      AND identity.content_key = version.content_key
+     WHERE version.content_key = ? AND version.is_active = 1`,
     [contentKey],
-  ) ?? contentKey;
+    (row) => ({
+      name: sqlString(row, 'display_name'),
+      catalog_layer: catalogLayerDisclosure(
+        sqlNullableString(row, 'catalog_layer'),
+      ),
+    }),
+  ) ?? { name: contentKey, catalog_layer: 'unknown' };
 }
 
 function replaceableEligibleSpells(
@@ -135,6 +149,9 @@ export function guidedConfiguredChoiceState(
     projected_trait_names: [...rule.projectedTraitNames],
     options: rule.options.map((option) => {
       const replaceable = option.replaceableSpellChoice;
+      const initialSpell = replaceable === null
+        ? null
+        : spellDisclosure(db, replaceable.initialSpellVersionKey);
       const selectedReplaceable = replaceable === null
         ? null
         : valueAtPath(config, replaceable.configKey);
@@ -156,14 +173,16 @@ export function guidedConfiguredChoiceState(
             typeof data['spell_version_key'] === 'string'
               ? data['spell_version_key']
               : null;
+          const spell = spellVersionKey === null
+            ? null
+            : spellDisclosure(db, spellVersionKey);
           return {
             rule_key: grant.ruleKey,
             kind: grant.kind,
             active_from_character_level: grant.activeFromCharacterLevel,
             spell_version_key: spellVersionKey,
-            spell_name: spellVersionKey === null
-              ? null
-              : spellDisplayName(db, spellVersionKey),
+            spell_name: spell?.name ?? null,
+            spell_catalog_layer: spell?.catalog_layer ?? null,
           };
         }),
         replaceable_spell_choice: replaceable === null
@@ -174,10 +193,10 @@ export function guidedConfiguredChoiceState(
               spell_list: replaceable.spellList,
               spell_level: replaceable.spellLevel,
               initial_spell_version_key: replaceable.initialSpellVersionKey,
-              initial_spell_name: spellDisplayName(
-                db,
+              initial_spell_name: initialSpell?.name ??
                 replaceable.initialSpellVersionKey,
-              ),
+              initial_spell_catalog_layer: initialSpell?.catalog_layer ??
+                'unknown',
               selected_spell_version_key:
                 typeof selectedReplaceable === 'string'
                   ? selectedReplaceable

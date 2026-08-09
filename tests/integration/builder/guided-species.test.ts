@@ -867,6 +867,39 @@ describe('configured species choice and honest projection', () => {
     expect(new CharacterState(db).capture(characterId)).toEqual(before);
   }
 
+  it('pins configured spell disclosure shapes with registry-resolved layers', async () => {
+    const rpcHarness = await applicationDatabase();
+    const elf = speciesNamed(rpcHarness.context.db, 'Elf');
+    const lineage = elf.configured_choices.find(
+      (choice) => choice.rule_key === 'elf-lineage',
+    );
+    const drow = lineage?.options.find((option) => option.value === 'Drow');
+    const highElf = lineage?.options.find(
+      (option) => option.value === 'High Elf',
+    );
+
+    expect(drow?.grants[0]).toEqual({
+      rule_key: 'elf-lineage-drow-dancing-lights',
+      kind: 'fixed_spell',
+      active_from_character_level: null,
+      spell_version_key: '2024:dancing-lights',
+      spell_name: 'Dancing Lights',
+      spell_catalog_layer: 'bundled',
+    });
+    expect(highElf?.replaceable_spell_choice).toEqual({
+      config_key: 'lineage.high_elf_cantrip',
+      label: 'High Elf cantrip',
+      spell_list: 'Wizard',
+      spell_level: 0,
+      initial_spell_version_key: '2024:prestidigitation',
+      initial_spell_name: 'Prestidigitation',
+      initial_spell_catalog_layer: 'bundled',
+      selected_spell_version_key: null,
+      selected_spell: null,
+      eligible_spells: [],
+    });
+  });
+
   it('refuses a choice when the character has no guided species source', async () => {
     const rpcHarness = await applicationDatabase();
     const db = rpcHarness.context.db;
@@ -949,11 +982,22 @@ describe('configured species choice and honest projection', () => {
           },
           unknown_sheet_fields: ['walking_speed_feet', 'darkvision_feet'],
           options: [
-            expect.objectContaining({ value: 'Drow', darkvision_feet: 120 }),
+            expect.objectContaining({
+              value: 'Drow',
+              darkvision_feet: 120,
+              grants: expect.arrayContaining([
+                expect.objectContaining({
+                  spell_name: 'Dancing Lights',
+                  spell_catalog_layer: 'bundled',
+                }),
+              ]),
+            }),
             expect.objectContaining({
               value: 'High Elf',
               replaceable_spell_choice: expect.objectContaining({
                 initial_spell_version_key: '2024:prestidigitation',
+                initial_spell_name: 'Prestidigitation',
+                initial_spell_catalog_layer: 'bundled',
                 selected_spell_version_key: null,
               }),
             }),

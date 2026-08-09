@@ -391,6 +391,7 @@ function elfConfiguredChoice(): GuidedConfiguredChoiceState {
     active_from_character_level: level,
     spell_version_key: `test:${spellName.toLocaleLowerCase().replaceAll(' ', '-')}`,
     spell_name: spellName,
+    spell_catalog_layer: 'bundled' as const,
   });
   return {
     rule_key: 'hostile-rule-key',
@@ -426,6 +427,7 @@ function elfConfiguredChoice(): GuidedConfiguredChoiceState {
           spell_level: 0,
           initial_spell_version_key: '2024:prestidigitation',
           initial_spell_name: 'Prestidigitation',
+          initial_spell_catalog_layer: 'bundled',
           selected_spell_version_key: null,
           selected_spell: null,
           eligible_spells: [],
@@ -550,11 +552,56 @@ describe('guided species step', () => {
     expect(text).toContain('Elven Lineage choice');
     expect(text).toContain('Drow');
     expect(text).toContain('Darkvision: 120 feet.');
-    expect(text).toContain('Dancing Lights at character level 1.');
+    expect(text).toContain(
+      'Dancing Lights · SRD · bundled layer at character level 1.',
+    );
     expect(text).toContain('High Elf Wizard cantrip');
-    expect(text).toContain('initially Prestidigitation');
+    expect(text).toContain(
+      'initially Prestidigitation · SRD · bundled layer',
+    );
     expect(text).toContain('Speed: +5 feet — Fleet of Foot.');
-    expect(text).toContain('Pass without Trace at character level 5.');
+    expect(text).toContain(
+      'Pass without Trace · SRD · bundled layer at character level 5.',
+    );
+    step.cleanup();
+  });
+
+  it('discloses the sourced initial spell layer beside the lineage picker', () => {
+    const choice = elfConfiguredChoice();
+    const step = createSpeciesStep({
+      ...speciesStepStubs,
+      characterId: 1,
+      options: [],
+      choiceState: {
+        kind: 'ready',
+        character_id: 1,
+        revision: 0,
+        resolution: {
+          kind: 'incomplete',
+          source_instance_id: 2,
+          source_name: 'Elf',
+          source_catalog_layer: 'bundled',
+          missing: ['replaceable_spell'],
+          choices: [{
+            ...choice,
+            selected_option: 'High Elf',
+            ability_choice: choice.ability_choice === null
+              ? null
+              : { ...choice.ability_choice, selected: 'intelligence' },
+          }],
+        },
+      },
+      applyOrigin: () => Promise.reject(new Error('not submitted')),
+      navigate: () => undefined,
+    });
+    const currentLayer = interactiveElement(step.element).querySelector(
+      '.spell-picker-current-layer',
+    );
+
+    expect(currentLayer).not.toBeNull();
+    expect(elementText(currentLayer! as unknown as Node)).toBe(
+      'SRD · bundled layer',
+    );
     step.cleanup();
   });
 
@@ -585,7 +632,9 @@ describe('guided species step', () => {
     };
 
     expect(cardText('Elf')).toMatch(/Elven Lineage choice.*Drow.*High Elf.*Wood Elf/is);
-    expect(cardText('Elf')).toContain('Dancing Lights at character level 1.');
+    expect(cardText('Elf')).toContain(
+      'Dancing Lights · SRD · bundled layer at character level 1.',
+    );
     expect(cardText('Elf')).toContain('Darkvision: 120 feet.');
     expect(cardText('Elf')).toContain('Speed: +5 feet — Fleet of Foot.');
     expect(cardText('Dwarf')).toContain(
