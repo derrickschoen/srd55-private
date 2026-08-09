@@ -53,6 +53,7 @@ describe('character list and workspace query builders', () => {
       {
         id: fixture.characterId,
         name: 'R40 Golden',
+        level_one_complete: false,
         level: 8,
         classes: [
           { name: 'Paladin', level: 1, catalog_layer: 'bundled' },

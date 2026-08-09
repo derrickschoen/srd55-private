@@ -997,6 +997,32 @@ describe('D118 and D119 route choices', () => {
     wizard.cleanup();
   });
 
+  it('routes an incomplete level 1 back to the guided build without rendering projected numbers', () => {
+    const state: LevelUpStateResult = {
+      kind: 'incomplete_level_one',
+      character: {
+        character_id: 7 as CharacterId,
+        name: 'Unallocated Paladin',
+        revision: 0 as CharacterRevision,
+        total_level: 1 as CharacterLevel,
+        warnings: [],
+      },
+    };
+    const wizard = createLevelUpWizard({ state, cancel: () => undefined });
+
+    expect(elementText(wizard.element)).toContain(
+      'Finish level 1 before leveling up',
+    );
+    const resume = interactiveElement(wizard.element).querySelector(
+      '[href="/characters/7/build/levels/1"]',
+    );
+    expect(resume).not.toBeNull();
+    expect(elementText(resume as unknown as Node)).toBe('Resume build');
+    expect(elementText(wizard.element)).not.toMatch(/current HP|projected|\b16\b/i);
+    expect(wizard.element.querySelector(`[${LEVEL_UP_ATTR.next}]`)).toBeNull();
+    wizard.cleanup();
+  });
+
   it.each([
     {
       label: 'no-guideable-class',

@@ -11,6 +11,7 @@ import {
   type LevelUpStateResult,
 } from '../../../src/builder/level-up-wizard';
 import { CharacterCrud } from '../../../src/queries/character-crud';
+import { LevelUpStateQuery } from '../../../src/queries/level-up-state';
 import { createQueriesClient } from '../../../src/queries/client';
 import {
   RpcClient,
@@ -240,13 +241,25 @@ describe('level-up wizard state RPC', () => {
     return new CharacterCrud(harness.context.db).create({ name }).id;
   }
 
-  function enterClass(characterId: number, name: string): number {
+  function enterClass(
+    characterId: number,
+    name: string,
+    abilitiesAllocated = true,
+  ): number {
     const id = classId(name);
     new UpdateClassCommand(
       harness.context.db,
       { type: 'update_class', class_definition_id: id },
       integrity,
     ).apply(characterId);
+    if (abilitiesAllocated) {
+      harness.context.db.exec(
+        `UPDATE characters
+         SET ability_allocation_method = 'manual'
+         WHERE id = ?`,
+        [characterId],
+      );
+    }
     return id;
   }
 
@@ -508,6 +521,56 @@ describe('level-up wizard state RPC', () => {
     });
 
     rpc.close();
+  });
+
+  it('refuses unallocated level 1 before deriving HP and becomes ready once the explicit signal is complete', async () => {
+    const characterId = createCharacter('Ability Gate Paladin');
+    enterClass(characterId, 'Paladin', false);
+    harness.context.db.exec(
+      'UPDATE characters SET constitution = 10 WHERE id = ?',
+      [characterId],
+    );
+
+    const incomplete = new LevelUpStateQuery(harness.context.db).build(characterId);
+    expect(incomplete).toEqual({
+      kind: 'incomplete_level_one',
+      character: expect.objectContaining({
+        character_id: characterId,
+        name: 'Ability Gate Paladin',
+        total_level: 1,
+      }),
+    });
+    expect(JSON.stringify(incomplete)).not.toMatch(
+      /current_maximum|projected_maximum|constitution_modifier/,
+    );
+
+    harness.context.db.exec(
+      `UPDATE characters
+       SET ability_allocation_method = 'manual'
+       WHERE id = ?`,
+      [characterId],
+    );
+    const completed = new LevelUpStateQuery(harness.context.db).build(characterId);
+    expect(completed).toMatchObject({
+      kind: 'ready',
+      character: { character_id: characterId, total_level: 1 },
+      class_options: [
+        {
+          guideability: 'guideable',
+          name: 'Paladin',
+          current_level: 1,
+          target_level: 2,
+          gains: {
+            hit_points: {
+              kind: 'known',
+              constitution_modifier: 0,
+              current_maximum: 10,
+              projected_maximum: { kind: 'known', value: 16 },
+            },
+          },
+        },
+      ],
+    });
   });
 
   // Measured alone at 3.9s; 20s retains contention headroom.

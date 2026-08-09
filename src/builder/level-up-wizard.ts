@@ -305,6 +305,7 @@ export type LevelUpPlannedEligibleSpellsResult =
 export const LEVEL_UP_STATE_KINDS = Object.freeze({
   notFound: 'not_found',
   noHeldClass: 'no_held_class',
+  incompleteLevelOne: 'incomplete_level_one',
   noGuideableClass: 'no_guideable_class',
   maximumLevel: 'maximum_level',
   ready: 'ready',
@@ -487,6 +488,12 @@ export type LevelUpStateResult =
       readonly character: LevelUpCharacterSummary;
     }
   | {
+      readonly kind: 'incomplete_level_one';
+      readonly character: LevelUpCharacterSummary & {
+        readonly total_level: CharacterLevel;
+      };
+    }
+  | {
       readonly kind: 'no_guideable_class';
       readonly character: LevelUpCharacterSummary & {
         readonly total_level: CharacterLevel;
@@ -538,6 +545,7 @@ export const LEVEL_UP_PANEL_ATTRIBUTE = 'data-level-up-panel';
 
 export const LEVEL_UP_PANEL = Object.freeze({
   notFound: 'not-found',
+  incompleteLevelOne: 'incomplete-level-one',
   maximumLevel: 'maximum-level',
   class: 'class',
   gains: 'gains',

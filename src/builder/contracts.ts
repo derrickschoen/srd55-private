@@ -379,6 +379,8 @@ export const GUIDED_RPC = Object.freeze({
   create: 'queries.characters.createGuided',
   applyOrigin: 'queries.characters.applyOrigin',
   buildState: 'queries.characters.buildState',
+  abilityDraft: 'queries.characters.abilityDraft',
+  saveAbilityDraft: 'queries.characters.saveAbilityDraft',
   allocateAbilities: 'queries.characters.allocateAbilities',
   /** The skills step's fill/clear command (S-B, §3.6), riding the executor. */
   fillSkillGrant: 'queries.characters.fillSkillGrant',
@@ -409,6 +411,21 @@ export type AbilityAllocationMethod =
   | 'manual';
 
 export type GuidedAbilityScores = Readonly<Record<Ability, number>>;
+
+/**
+ * In-progress ability input, persisted as per-character UI state in SQLite.
+ * It is deliberately separate from `ability_allocation_method`: this draft
+ * does not complete the step and therefore cannot make default scores look
+ * chosen. The allocation command remains the sole completion boundary.
+ */
+export interface GuidedAbilityDraft {
+  readonly method: AbilityAllocationMethod;
+  readonly scores: GuidedAbilityScores;
+}
+
+export interface GuidedSaveAbilityDraftParams extends GuidedAbilityDraft {
+  readonly character_id: number;
+}
 
 /**
  * `operation_uuid` and `expected_revision` are NOT optional. Every executor

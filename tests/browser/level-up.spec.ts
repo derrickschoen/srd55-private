@@ -57,13 +57,31 @@ async function createCharacter(
     if (selectedClass === undefined) {
       throw new Error(`Bundled ${requestedClass} was not found.`);
     }
-    return window.appRpc.call<
+    const created = await window.appRpc.call<
       { readonly name: string; readonly class_content_key: string },
       CreatedCharacter
     >('queries.characters.createGuided', {
       name: characterName,
       class_content_key: selectedClass.content_key,
     });
+    await window.appRpc.call('queries.characters.allocateAbilities', {
+      character_id: created.id,
+      method: 'manual',
+      scores: {
+        strength: 10,
+        dexterity: 10,
+        constitution: 10,
+        intelligence: 10,
+        wisdom: 10,
+        charisma: 10,
+      },
+      operation_uuid: crypto.randomUUID(),
+      expected_revision: created.revision,
+    });
+    return window.appRpc.call<
+      { readonly character_id: number },
+      CreatedCharacter
+    >('queries.characters.get', { character_id: created.id });
   }, { characterName: name, requestedClass: className });
 }
 
@@ -394,11 +412,7 @@ test('W-INCOMPLETE classless cards explain the advanced door while held-class wa
   await page.reload();
   await ready(page);
   const classlessSeam = await readLevelUpSeam(page, classlessId);
-  await page
-    .locator('.character-card')
-    .filter({ has: page.getByRole('heading', { name: 'Classless Entry' }) })
-    .getByRole('link', { name: 'Level Up' })
-    .click();
+  await page.goto(classlessSeam.path);
   await expect(page).toHaveURL(new URL(classlessSeam.path, page.url()).href);
   await expect(
     page.getByRole('heading', { name: 'This character has no held class' }),
@@ -447,7 +461,8 @@ test('W-DOUBLE-CONFIRM two rapid activations create one level, revision, history
   // wall-clock headroom under parallel-pool contention.
   test.setTimeout(35_000);
   const character = await createFighter(page, 'Atomic Confirm Fighter');
-  expect(character.revision).toBe(0);
+  expect(character.revision).toBe(1);
+  const operationCountBefore = (await rows(page, 'character_operations')).length;
   await openReadyReview(page, character);
 
   const confirm = page.locator('[data-level-up-confirm]');
@@ -467,7 +482,7 @@ test('W-DOUBLE-CONFIRM two rapid activations create one level, revision, history
 
   const characters = await rows(page, 'characters');
   expect(characters).toEqual([
-    expect.objectContaining({ id: character.id, revision: 1 }),
+    expect.objectContaining({ id: character.id, revision: character.revision + 1 }),
   ]);
   expect(await rows(page, 'character_class_levels')).toEqual([
     expect.objectContaining({
@@ -476,13 +491,14 @@ test('W-DOUBLE-CONFIRM two rapid activations create one level, revision, history
     }),
   ]);
   const operations = await rows(page, 'character_operations');
-  expect(operations).toHaveLength(1);
-  expect(operations[0]).toEqual(expect.objectContaining({
+  expect(operations).toHaveLength(operationCountBefore + 1);
+  const levelUpOperation = operations.at(-1);
+  expect(levelUpOperation).toEqual(expect.objectContaining({
     character_id: character.id,
-    expected_revision: 0,
-    resulting_revision: 1,
+    expected_revision: character.revision,
+    resulting_revision: character.revision + 1,
   }));
-  expect(String(operations[0]?.['operation_uuid'])).toMatch(
+  expect(String(levelUpOperation?.['operation_uuid'])).toMatch(
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu,
   );
   const history = await page.evaluate((characterId) =>
@@ -493,16 +509,12 @@ test('W-DOUBLE-CONFIRM two rapid activations create one level, revision, history
         readonly changes: readonly { readonly operation_uuid: string | null }[];
       }
     >('queries.history.read', { character_id: characterId }), character.id);
-  expect(history.operations).toHaveLength(1);
-  const historyOperation = history.operations[0];
-  if (historyOperation === undefined) {
-    throw new Error('Committed level up had no history operation.');
-  }
+  expect(history.operations).toHaveLength(operationCountBefore + 1);
   expect(new Set(
     history.changes.map((change) => change.operation_uuid).filter(
       (operationUuid): operationUuid is string => operationUuid !== null,
     ),
-  )).toEqual(new Set([historyOperation.operation_uuid]));
+  )).toEqual(new Set(history.operations.map((operation) => operation.operation_uuid)));
 });
 
 test('W-BROWSER-PLANNED-DRAFT carries planned_subchoices from UI through Review and Complete', async ({
@@ -651,11 +663,11 @@ test('W-STALE external edit after Preview keeps the draft and requires explicit 
   await openReadyReview(page, character);
   const externalOperation = '40404040-4040-4040-8040-404040404040';
 
-  await page.evaluate(async ({ characterId, operationUuid }) => {
+  await page.evaluate(async ({ characterId, operationUuid, expectedRevision }) => {
     await window.appRpc.call('commands.execute', {
       character_id: characterId,
       operation_uuid: operationUuid,
-      expected_revision: 0,
+      expected_revision: expectedRevision,
       command: {
         type: 'update_ability',
         ability: 'wisdom',
@@ -663,7 +675,11 @@ test('W-STALE external edit after Preview keeps the draft and requires explicit 
         reason: 'W-STALE external edit',
       },
     });
-  }, { characterId: character.id, operationUuid: externalOperation });
+  }, {
+    characterId: character.id,
+    operationUuid: externalOperation,
+    expectedRevision: character.revision,
+  });
 
   await page.locator('[data-level-up-confirm]').click();
   await expect(page.getByRole('alert')).toContainText('changed elsewhere');
@@ -678,12 +694,14 @@ test('W-STALE external edit after Preview keeps the draft and requires explicit 
     expect.objectContaining({
       id: character.id,
       wisdom: 11,
-      revision: 1,
+      revision: character.revision + 1,
     }),
   ]);
-  expect(await rows(page, 'character_operations')).toEqual([
-    expect.objectContaining({ operation_uuid: externalOperation }),
-  ]);
+  expect(await rows(page, 'character_operations')).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ operation_uuid: externalOperation }),
+    ]),
+  );
 
   await reload.click();
   await expect(
@@ -692,5 +710,5 @@ test('W-STALE external edit after Preview keeps the draft and requires explicit 
   expect(await rows(page, 'character_class_levels')).toEqual([
     expect.objectContaining({ character_id: character.id, level: 1 }),
   ]);
-  expect(await rows(page, 'character_operations')).toHaveLength(1);
+  expect(await rows(page, 'character_operations')).toHaveLength(2);
 });

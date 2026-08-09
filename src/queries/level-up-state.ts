@@ -99,6 +99,7 @@ interface CharacterRow {
   readonly name: string;
   readonly revision: CharacterRevision;
   readonly proficiency_bonus_override: number | null;
+  readonly abilities_allocated: boolean;
   readonly base_abilities: Readonly<Record<Ability, number>>;
 }
 
@@ -362,6 +363,15 @@ export class LevelUpStateQuery {
         pending_epic_resolution: pendingEpicResolution,
       };
     }
+    if (!character.abilities_allocated) {
+      return {
+        kind: 'incomplete_level_one',
+        character: {
+          ...summary,
+          total_level: characterLevel(total, 'Current total level'),
+        },
+      };
+    }
     const sheet = new CharacterSheetBuilder(this.db).build(character.id);
     const guideableOptions = guideableHeldClasses.map((entry) =>
       this.#classOption(
@@ -399,6 +409,7 @@ export class LevelUpStateQuery {
   #character(characterId: number): CharacterRow | null {
     return this.db.one(
       `SELECT id, name, revision, proficiency_bonus_override,
+              ability_allocation_method,
               strength, dexterity, constitution, intelligence, wisdom,
               charisma
        FROM characters WHERE id = ?`,
@@ -411,6 +422,8 @@ export class LevelUpStateQuery {
           row,
           'proficiency_bonus_override',
         ),
+        abilities_allocated:
+          sqlNullableString(row, 'ability_allocation_method') !== null,
         base_abilities: Object.fromEntries(
           abilities.map((ability) => [ability, sqlInteger(row, ability)]),
         ) as Record<Ability, number>,

@@ -66,6 +66,7 @@ function summary(id: number, name: string): CharacterSummary {
   return {
     id,
     name,
+    level_one_complete: false,
     level: null,
     classes: [],
     warning_count: 0,
@@ -245,8 +246,20 @@ describe('character share links', () => {
 });
 
 describe('character list behavior', () => {
-  it('puts the seam-generated primary Level Up action before the secondary workspace action on every card', () => {
-    expect(characterCardRouteActions(73)).toEqual([
+  it('routes incomplete cards back to the build and completed cards to level up', () => {
+    expect(characterCardRouteActions(73, false)).toEqual([
+      {
+        label: 'Resume build',
+        href: '/characters/73/build/levels/1',
+        className: 'button-primary',
+      },
+      {
+        label: 'Open workspace',
+        href: '/characters/73',
+        className: 'button-secondary',
+      },
+    ]);
+    expect(characterCardRouteActions(73, true)).toEqual([
       {
         label: 'Level Up',
         href: '/characters/73/level-up',

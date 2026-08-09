@@ -42,11 +42,13 @@ import {
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import {
+  abilities,
   abilityAllocationMethods,
   backgroundEquipmentOptions,
   classEquipmentOptions,
   isEnumValue,
   skills,
+  type Ability,
   type KnownAbilityAllocationMethod,
   type Skill,
 } from '../domain/enums';
@@ -70,7 +72,10 @@ import {
   resolveSkillGrants,
   unfilledSpeciesSkillGrants,
 } from '../grants/skill-grants';
-import { CharacterCrud } from '../queries/character-crud';
+import {
+  CharacterCrud,
+  CharacterNotFoundError,
+} from '../queries/character-crud';
 import { skillFromLabel } from '../rules/skills';
 import { characterLevel } from '../rules/character-level';
 import {
@@ -110,12 +115,14 @@ import {
   EQUIPMENT_CHOICE_CONFIG_KEY,
   grantsLineageSpells,
   GUIDED_LEVEL_ONE_STEP_ORDER,
+  hasExactKeys,
   hasWeakScores,
   SKILL_GRANT_KEYS,
   type AbilityAllocationMethod,
   type BuildStep,
   type EquipmentSourceKind,
   type GuidedAbilityWarning,
+  type GuidedAbilityDraft,
   type GuidedAllocateAbilitiesParams,
   type GuidedAllocateAbilitiesResult,
   type GuidedApplyOriginResult,
@@ -132,10 +139,103 @@ import {
   type GuidedSpellsStepState,
   type GuidedOriginOption,
   type GuidedOriginParams,
+  type GuidedSaveAbilityDraftParams,
   type GuidedRefusalReason,
   type GuidedSkillsStepState,
   type OriginKind,
 } from './contracts';
+
+/**
+ * Per-character UI state, stored through the same character_rule_overrides
+ * pattern as print-appendix preferences. It is not a completion signal and
+ * does not advance the character revision.
+ */
+export const GUIDED_ABILITY_DRAFT_RULE_KEY = 'guided_ability_draft_v1';
+
+function guidedAbilityDraft(value: unknown): GuidedAbilityDraft | null {
+  if (!hasExactKeys(value, ['method', 'scores'])) {
+    return null;
+  }
+  const method = value['method'];
+  const scores = value['scores'];
+  if (
+    !isEnumValue(abilityAllocationMethods, method) ||
+    !hasExactKeys(scores, abilities)
+  ) {
+    return null;
+  }
+  for (const ability of abilities) {
+    const score = scores[ability];
+    if (
+      typeof score !== 'number' ||
+      !Number.isSafeInteger(score) ||
+      score < 1 ||
+      score > 30
+    ) {
+      return null;
+    }
+  }
+  return {
+    method,
+    scores: Object.fromEntries(
+      abilities.map((ability) => [ability, scores[ability]]),
+    ) as Record<Ability, number>,
+  };
+}
+
+export function readGuidedAbilityDraft(
+  db: DatabaseContext,
+  characterId: number,
+): GuidedAbilityDraft | null {
+  const stored = db.scalar<string>(
+    `SELECT value
+     FROM character_rule_overrides
+     WHERE character_id = ? AND rule_key = ?`,
+    [characterId, GUIDED_ABILITY_DRAFT_RULE_KEY],
+  );
+  if (stored === null) {
+    return null;
+  }
+  try {
+    return guidedAbilityDraft(JSON.parse(stored));
+  } catch {
+    return null;
+  }
+}
+
+export function saveGuidedAbilityDraft(
+  db: DatabaseContext,
+  params: GuidedSaveAbilityDraftParams,
+): GuidedAbilityDraft {
+  const draft = guidedAbilityDraft({
+    method: params.method,
+    scores: params.scores,
+  });
+  if (draft === null) {
+    throw new TypeError('Ability draft must name a method and all six lawful scores.');
+  }
+  const character = db.oneRaw(
+    'SELECT ability_allocation_method FROM characters WHERE id = ?',
+    [params.character_id],
+  );
+  if (character === null) {
+    throw new CharacterNotFoundError(params.character_id);
+  }
+  if (character['ability_allocation_method'] !== null) {
+    throw new TypeError('Completed ability scores do not accept an in-progress draft.');
+  }
+  db.exec(
+    `INSERT INTO character_rule_overrides (
+       character_id, rule_key, value, note, created_at, updated_at
+     ) VALUES (?, ?, ?, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+     ON CONFLICT(character_id, rule_key) DO UPDATE SET
+       value = excluded.value,
+       note = NULL,
+       updated_at = CURRENT_TIMESTAMP`,
+    [params.character_id, GUIDED_ABILITY_DRAFT_RULE_KEY, JSON.stringify(draft)],
+  );
+  return draft;
+}
 
 /**
  * What the database can currently attest about a character's guided progress.
@@ -189,6 +289,21 @@ export interface GuidedStepEvidence {
   readonly expertiseFilled: boolean;
   readonly spellsFilled: boolean;
   readonly equipmentChosen: boolean;
+}
+
+export function isGuidedLevelOneComplete(
+  evidence: GuidedStepEvidence,
+): boolean {
+  return (
+    evidence.classChosen &&
+    evidence.abilitiesAllocated &&
+    evidence.speciesChosen &&
+    evidence.backgroundChosen &&
+    evidence.skillsFilled &&
+    evidence.expertiseFilled &&
+    evidence.spellsFilled &&
+    evidence.equipmentChosen
+  );
 }
 
 /**
@@ -1830,6 +1945,15 @@ export async function allocateGuidedAbilities(
       scores: params.scores,
     },
   });
+
+  // The atomic allocation above is the completion boundary. Its durable
+  // values supersede the UI-only draft, which must not reappear on a later
+  // rebuild or backup restore.
+  db.exec(
+    `DELETE FROM character_rule_overrides
+     WHERE character_id = ? AND rule_key = ?`,
+    [params.character_id, GUIDED_ABILITY_DRAFT_RULE_KEY],
+  );
 
   const warnings: GuidedAbilityWarning[] = [];
   if (params.method !== 'standard_array') {

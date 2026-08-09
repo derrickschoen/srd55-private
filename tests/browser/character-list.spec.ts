@@ -142,66 +142,120 @@ test('character shell creates, opens, confirms deletion, and persists every flow
   ).toEqual([]);
 });
 
-test('W-ENTRY-BOTH every character card and the sheet use the exact primary Level Up route', async ({
+test('U1 incomplete cards resume durable ability work while allocated level-up state remains ready', async ({
   page,
 }) => {
   await resetHome(page);
-  const characters = await page.evaluate(async () => {
+  const character = await page.evaluate(async () => {
     const classes = await window.appRpc.call<
       Record<string, never>,
       readonly { readonly content_key: string; readonly name: string }[]
     >('queries.characters.guidedClassOptions', {});
-    const fighter = classes.find((candidate) => candidate.name === 'Fighter');
-    if (fighter === undefined) throw new Error('Bundled Fighter was not found.');
-    const create = (name: string) => window.appRpc.call<
+    const paladin = classes.find((candidate) => candidate.name === 'Paladin');
+    if (paladin === undefined) throw new Error('Bundled Paladin was not found.');
+    return window.appRpc.call<
       { readonly name: string; readonly class_content_key: string },
       { readonly id: number; readonly name: string }
     >('queries.characters.createGuided', {
-      name,
-      class_content_key: fighter.content_key,
+      name: 'Guided Integrity Paladin',
+      class_content_key: paladin.content_key,
     });
-    return [await create('First Entry'), await create('Second Entry')];
   });
   await page.reload();
   await ready(page);
 
-  for (const character of characters) {
-    const seam = await readLevelUpSeam(page, character.id);
-    const card = page.locator('.character-card').filter({
-      has: page.getByRole('heading', { name: character.name }),
-    });
-    const actions = card.locator('.card-actions a');
-    await expect(actions).toHaveCount(2);
-    await expect(actions.nth(0)).toHaveText('Level Up');
-    await expect(actions.nth(0)).toHaveAttribute('href', seam.path);
-    await expect(actions.nth(0)).toHaveClass(/button-primary/);
-    await expect(actions.nth(1)).toHaveText('Open workspace');
-    await expect(actions.nth(1)).toHaveAttribute(
-      'href',
-      `/characters/${String(character.id)}`,
-    );
-    await expect(actions.nth(1)).toHaveClass(/button-secondary/);
+  const card = page.locator('.character-card').filter({
+    has: page.getByRole('heading', { name: character.name }),
+  });
+  const guidedSeam = await readGuidedSeam(page, character.id);
+  const levelUpSeam = await readLevelUpSeam(page, character.id);
+  if (guidedSeam.buildPath === null) {
+    throw new Error('The guided seam returned no persisted build path.');
   }
+  await expect(card.getByRole('link', { name: 'Resume build' })).toHaveAttribute(
+    'href',
+    guidedSeam.buildPath,
+  );
+  await expect(card.getByRole('link', { name: 'Level Up' })).toHaveCount(0);
 
-  const first = characters[0];
-  if (first === undefined) throw new Error('No entry character was created.');
-  const firstSeam = await readLevelUpSeam(page, first.id);
-  await page
-    .locator('.character-card')
-    .filter({ has: page.getByRole('heading', { name: first.name }) })
-    .getByRole('link', { name: 'Open workspace' })
-    .click();
+  await page.goto(levelUpSeam.path);
+  await expect(
+    page.getByRole('heading', { name: 'Finish level 1 before leveling up' }),
+  ).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Resume build' })).toHaveAttribute(
+    'href',
+    guidedSeam.buildPath,
+  );
+  await expect(page.locator('main.level-up-shell')).not.toContainText('16');
+  await page.getByRole('link', { name: 'Resume build' }).click();
+
+  await page.getByRole('radio', { name: 'Manual entry' }).check();
+  const scores = [
+    ['Strength', '8'],
+    ['Dexterity', '9'],
+    ['Constitution', '10'],
+    ['Intelligence', '11'],
+    ['Wisdom', '12'],
+    ['Charisma', '13'],
+  ] as const;
+  for (const [ability, score] of scores) {
+    await page.getByLabel(ability, { exact: true }).fill(score);
+  }
+  await expect.poll(async () => page.evaluate(() =>
+    window.staticApp.inspectRows('character_rule_overrides'),
+  )).toEqual([
+    expect.objectContaining({
+      rule_key: 'guided_ability_draft_v1',
+      value: JSON.stringify({
+        method: 'manual',
+        scores: {
+          strength: 8,
+          dexterity: 9,
+          constitution: 10,
+          intelligence: 11,
+          wisdom: 12,
+          charisma: 13,
+        },
+      }),
+    }),
+  ]);
+
+  await page.reload();
+  await expect(page.getByRole('radio', { name: 'Manual entry' })).toBeChecked();
+  for (const [ability, score] of scores) {
+    await expect(page.getByLabel(ability, { exact: true })).toHaveValue(score);
+  }
+  await page.getByRole('button', { name: 'Set ability scores' }).click();
+  await expect(page.getByRole('heading', { name: 'Choose a species' })).toBeVisible();
+  await expect.poll(async () => page.evaluate(() =>
+    window.staticApp.inspectRows('character_rule_overrides'),
+  )).toEqual([]);
+
+  await page.goto('/');
+  await ready(page);
+  const allocatedCard = page.locator('.character-card').filter({
+    has: page.getByRole('heading', { name: character.name }),
+  });
+  await expect(allocatedCard.getByRole('link', { name: 'Resume build' })).toHaveAttribute(
+    'href',
+    guidedSeam.buildPath,
+  );
+  await expect(allocatedCard.getByRole('link', { name: 'Level Up' })).toHaveCount(0);
+  await allocatedCard.getByRole('link', { name: 'Open workspace' }).click();
   await page.getByRole('link', { name: 'Character sheet' }).click();
   const sheetLinks = page.locator('.sheet-header a');
   await expect(sheetLinks).toHaveCount(3);
   await expect(sheetLinks.nth(1)).toHaveText('Level Up');
-  await expect(sheetLinks.nth(1)).toHaveAttribute('href', firstSeam.path);
+  await expect(sheetLinks.nth(1)).toHaveAttribute('href', levelUpSeam.path);
   await expect(sheetLinks.nth(1)).toHaveClass(/button-primary/);
   await expect(sheetLinks.nth(2)).toHaveText('Open planner');
   await expect(sheetLinks.nth(2)).toHaveClass(/button-secondary/);
   await sheetLinks.nth(1).click();
-  await expect(page).toHaveURL(new URL(firstSeam.path, page.url()).href);
+  await expect(page).toHaveURL(new URL(levelUpSeam.path, page.url()).href);
   await expect(page.locator('.level-up-route')).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: `Level up — ${character.name}` }),
+  ).toBeFocused();
 });
 
 test('catalog, complete database, and character backup controls preserve durable state and show errors', async ({

@@ -23,6 +23,7 @@ import {
   isOriginKind,
   type AbilityAllocationMethod,
   type GuidedAllocateAbilitiesParams,
+  type GuidedSaveAbilityDraftParams,
   type GuidedBuildStateParams,
   type GuidedFillExpertiseGrantParams,
   type GuidedAssignSpellParams,
@@ -56,6 +57,8 @@ import {
   listGuidedBackgroundChoiceOptions,
   listGuidedClassOptions,
   listGuidedOriginOptions,
+  readGuidedAbilityDraft,
+  saveGuidedAbilityDraft,
 } from '../../builder/guided-creation';
 import { SkillGrantRefusal } from '../../grants/skill-grants';
 import { SkillExpertiseGrantRefusal } from '../../grants/skill-expertise-grants';
@@ -230,6 +233,22 @@ function isGuidedAllocateAbilitiesParams(
   );
 }
 
+function isGuidedSaveAbilityDraftParams(
+  value: unknown,
+): value is GuidedSaveAbilityDraftParams {
+  if (!hasExactKeys(value, ['character_id', 'method', 'scores'])) {
+    return false;
+  }
+  const characterId = value['character_id'];
+  return (
+    typeof characterId === 'number' &&
+    Number.isSafeInteger(characterId) &&
+    characterId > 0 &&
+    isAllocationMethod(value['method']) &&
+    isGuidedAbilityScores(value['scores'])
+  );
+}
+
 /**
  * The one translation from a domain refusal to the wire, shared by every
  * guided mutation so `createGuided` and `applyOrigin` cannot drift on the
@@ -280,6 +299,17 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
     GUIDED_RPC.buildState,
     isGuidedBuildStateParams,
     (context, params) => guidedBuildState(context.db, params.character_id),
+  ),
+  defineRpcHandler(
+    GUIDED_RPC.abilityDraft,
+    isGuidedBuildStateParams,
+    (context, params) =>
+      readGuidedAbilityDraft(context.db, params.character_id),
+  ),
+  defineRpcHandler(
+    GUIDED_RPC.saveAbilityDraft,
+    isGuidedSaveAbilityDraftParams,
+    (context, params) => saveGuidedAbilityDraft(context.db, params),
   ),
   defineRpcHandler(
     GUIDED_RPC.classOptions,

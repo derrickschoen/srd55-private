@@ -1,4 +1,7 @@
-import { GUIDED_NEW_ROUTE } from '../../../builder/contracts';
+import {
+  GUIDED_NEW_ROUTE,
+  guidedBuildPath,
+} from '../../../builder/contracts';
 import { levelUpPath } from '../../../builder/level-up-wizard';
 import type { CharacterRow } from '../../../domain/models';
 import type { CharacterSummary } from '../../../domain/read-models';
@@ -85,20 +88,27 @@ export function outstandingLabel(count: number): string {
 }
 
 export interface CharacterCardRouteAction {
-  readonly label: 'Level Up' | 'Open workspace';
+  readonly label: 'Resume build' | 'Level Up' | 'Open workspace';
   readonly href: string;
   readonly className: 'button-primary' | 'button-secondary';
 }
 
 export function characterCardRouteActions(
   characterId: number,
+  levelOneComplete: boolean,
 ): readonly CharacterCardRouteAction[] {
   return [
-    {
-      label: 'Level Up',
-      href: levelUpPath(characterId),
-      className: 'button-primary',
-    },
+    levelOneComplete
+      ? {
+          label: 'Level Up',
+          href: levelUpPath(characterId),
+          className: 'button-primary',
+        }
+      : {
+          label: 'Resume build',
+          href: guidedBuildPath(characterId),
+          className: 'button-primary',
+        },
     {
       label: 'Open workspace',
       href: `/characters/${String(characterId)}`,
@@ -383,7 +393,10 @@ function renderCards(
 
   const grid = element('div', { className: 'character-grid' });
   for (const character of characters) {
-    const routeActions = characterCardRouteActions(character.id).map(
+    const routeActions = characterCardRouteActions(
+      character.id,
+      character.level_one_complete,
+    ).map(
       (action) => {
         const link = element('a', {
           className: action.className,

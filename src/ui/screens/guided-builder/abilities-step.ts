@@ -47,6 +47,7 @@ import {
   WEAK_SCORES_MIN_COUNT,
   WEAK_SCORES_MIN_SCORE,
   type AbilityAllocationMethod,
+  type GuidedAbilityDraft,
   type GuidedAbilityScores,
   type GuidedAllocateAbilitiesResult,
 } from '../../../builder/contracts';
@@ -88,6 +89,10 @@ export interface AbilitiesStepDeps {
   readonly characterId: number;
   /** The character's own row: BASE scores and the revision the command needs. */
   readonly character: CharacterRow;
+  readonly draft: GuidedAbilityDraft | null;
+  readonly saveDraft: (
+    draft: GuidedAbilityDraft,
+  ) => Promise<GuidedAbilityDraft>;
   readonly allocateAbilities: (
     method: AbilityAllocationMethod,
     scores: GuidedAbilityScores,
@@ -107,8 +112,9 @@ function sortedMultiset(values: readonly number[]): string {
 
 export function createAbilitiesStep(deps: AbilitiesStepDeps): AbilitiesStep {
   const cleanups: Cleanup[] = [];
-  let method: AbilityAllocationMethod = 'standard_array';
+  let method: AbilityAllocationMethod = deps.draft?.method ?? 'standard_array';
   let inFlight = false;
+  let draftSaveQueue: Promise<void> = Promise.resolve();
 
   /** The current entry per method, so switching back does not lose typing. */
   const entries: Record<AbilityAllocationMethod, Record<Ability, number>> = {
@@ -125,6 +131,9 @@ export function createAbilitiesStep(deps: AbilitiesStepDeps): AbilitiesStep {
       abilities.map((ability) => [ability, deps.character[ability]]),
     ) as Record<Ability, number>,
   };
+  if (deps.draft !== null) {
+    entries[deps.draft.method] = { ...deps.draft.scores };
+  }
 
   const errorMount = element('div', { className: 'guided-error-mount' });
   const setError = (message: string | null): void => {
@@ -138,6 +147,24 @@ export function createAbilitiesStep(deps: AbilitiesStepDeps): AbilitiesStep {
         }),
       );
     }
+  };
+
+  const persistDraft = (): void => {
+    const draft: GuidedAbilityDraft = {
+      method,
+      scores: { ...entries[method] },
+    };
+    draftSaveQueue = draftSaveQueue
+      .catch(() => undefined)
+      .then(() => deps.saveDraft(draft))
+      .then(() => undefined)
+      .catch((error: unknown) => {
+        setError(
+          `Ability draft could not be saved: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
   };
 
   /**
@@ -234,6 +261,7 @@ export function createAbilitiesStep(deps: AbilitiesStepDeps): AbilitiesStep {
           listen(select, 'change', () => {
             entries.standard_array[ability] = Number(select.value);
             renderWarnings();
+            persistDraft();
           }),
         );
         field = select;
@@ -261,6 +289,7 @@ export function createAbilitiesStep(deps: AbilitiesStepDeps): AbilitiesStep {
             }
             renderBudget();
             renderWarnings();
+            persistDraft();
           }),
         );
         field = input;
@@ -303,6 +332,7 @@ export function createAbilitiesStep(deps: AbilitiesStepDeps): AbilitiesStep {
             method = candidate;
             setError(null);
             renderScoreInputs();
+            persistDraft();
           }),
         );
         return element('label', { className: 'guided-ability-method' }, [
@@ -375,6 +405,7 @@ export function createAbilitiesStep(deps: AbilitiesStepDeps): AbilitiesStep {
     setError(null);
     submit.disabled = true;
     try {
+      await draftSaveQueue;
       await deps.allocateAbilities(
         method,
         { ...entries[method] },

@@ -112,6 +112,8 @@ describe('abilities step base-score inputs', () => {
     const step = createAbilitiesStep({
       characterId: row.id,
       character: row,
+      draft: null,
+      saveDraft: async (draft) => draft,
       allocateAbilities: () => Promise.reject(new Error('not submitted')),
       navigate: () => undefined,
     });
@@ -130,6 +132,62 @@ describe('abilities step base-score inputs', () => {
     }
     step.cleanup();
   });
+
+  it('restores the persisted method and six-score draft, then saves valid edits without allocating', async () => {
+    const saved: Array<{
+      readonly method: string;
+      readonly scores: GuidedAbilityScores;
+    }> = [];
+    const allocate = vi.fn(() => Promise.reject(new Error('not submitted')));
+    const step = createAbilitiesStep({
+      characterId: character().id,
+      character: character(),
+      draft: {
+        method: 'manual',
+        scores: {
+          strength: 8,
+          dexterity: 9,
+          constitution: 10,
+          intelligence: 11,
+          wisdom: 12,
+          charisma: 13,
+        },
+      },
+      saveDraft: async (draft) => {
+        saved.push(draft);
+        return draft;
+      },
+      allocateAbilities: allocate,
+      navigate: () => undefined,
+    });
+
+    const manual = interactiveElement(step.element).querySelector(
+      selector(ABILITY_STEP_ATTR.method, 'manual'),
+    ) as (InteractiveTestElement & { checked: boolean }) | null;
+    expect(manual?.checked).toBe(true);
+    expect(scoreInput(step.element, 'strength').getAttribute('value')).toBe('8');
+    expect(scoreInput(step.element, 'charisma').getAttribute('value')).toBe('13');
+
+    const strength = scoreInput(step.element, 'strength');
+    strength.value = '17';
+    strength.dispatchEvent(new Event('input'));
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+    expect(saved.at(-1)).toEqual({
+      method: 'manual',
+      scores: {
+        strength: 17,
+        dexterity: 9,
+        constitution: 10,
+        intelligence: 11,
+        wisdom: 12,
+        charisma: 13,
+      },
+    });
+    expect(allocate).not.toHaveBeenCalled();
+    step.cleanup();
+  });
 });
 
 describe('method-integrity refusals are not warnings', () => {
@@ -141,6 +199,8 @@ describe('method-integrity refusals are not warnings', () => {
     const step = createAbilitiesStep({
       characterId: character().id,
       character: character(),
+      draft: null,
+      saveDraft: async (draft) => draft,
       allocateAbilities: allocate,
       navigate: () => undefined,
     });
@@ -167,6 +227,8 @@ describe('method-integrity refusals are not warnings', () => {
     const step = createAbilitiesStep({
       characterId: character().id,
       character: character(),
+      draft: null,
+      saveDraft: async (draft) => draft,
       allocateAbilities: allocate,
       navigate: () => undefined,
     });
