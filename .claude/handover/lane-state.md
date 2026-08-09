@@ -23,7 +23,43 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-08-c (newest - read first)
+## RESTART POINT 2026-08-09-a (newest - read first)
+MAIN c6ff5145 (mirror pushed after verified verdicts). FLOORS: vitest
+259/4,241 all-pass; PW 144 pool + serving spec 1 via `npm run
+serve:check`; build 0 with digest verification; migrations 0000-0040.
+FIFTY merges. Rulings through D230.
+
+MERGED SINCE 08-08-c:
+ - 49th (888c89b5): wt/party SQUASH-LANDED — 43 owner ruling commits
+   (subjects in the squash message; full record in
+   docs/homebrew/rulings.md), the cc-by/ogl licensing reorganization,
+   D230 substitution over our prose. RULINGS RECORDED: the OGL 3.5 SRD
+   archives' licensed naming of the retired subclasses stays VERBATIM
+   (scrub governs OUR references, not licensed reproductions); the NUL
+   guard narrowly exempts docs/homebrew/ogl/**/*.zip. BARBED COURT
+   DEFERRAL: the owner's doc rewrite (Courtier's Slap corpus) outpaced
+   the bundled payload with a choice still pending, so the cc-by path
+   carries the approved revision and the rewrite waits on wt/party;
+   owner ruled the CI-7 sync happens WHEN THEY SAY, not before.
+ - 50th (c6ff5145): wt/serve — D228's serving path. `npm run serve`
+   builds (digest-gated, refuses stale), serves 127.0.0.1 with
+   realpath containment; docs/serving.md is the ngrok runbook with the
+   D60 flip warning. Proven empirically: text/javascript is mandatory
+   under nosniff; COOP/COEP unnecessary (sahpool VFS). THE OWNER CAN
+   NOW SHARE v1: tunnel start is their action.
+
+ALSO: 31 stale pre-rewrite branches pruned (owner ruling). Old history
+is now locally reachable ONLY via wt/party and the owner's bundle at
+~/dnd-prerewrite-backup — both retire on the owner's schedule.
+
+IN FLIGHT: the POLISH SWEEP (owner-selected next work) — review-only
+codex dispatch in wt/polish: explore the app as a user, read the
+guided-flow/sheet code, produce a prioritized findings list with
+reproduction steps, NO fixes; findings triage with the owner into
+units. Waiting on the owner separately: their walkthrough friction
+list (feeds the same queue) and the Barbed Court sync word.
+
+## RESTART POINT 2026-08-08-c
 MAIN bf063f5a (mirror pushed AFTER the verdict this time). FLOORS:
 vitest 259/4,241 all-pass; PW 144 pool; build 0 with digest
 verification; migrations 0000-0040. FORTY-EIGHT merges (+ one budget
