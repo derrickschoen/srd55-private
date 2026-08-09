@@ -37,6 +37,8 @@ import { createRpcHarness } from '../../helpers/rpc-harness';
  * The guards are the subject, and each test names the mutation it must
  * catch:
  *
+ *  - B1: clear the allocation method and direct command execution must refuse
+ *    before default scores can drive derived values.
  *  - L-STRAIGHT: remove the class-held guard and levelling a class the
  *    character never entered must stop failing — `UpdateClassCommand` has
  *    no such guard, so nothing else would catch it.
@@ -183,12 +185,31 @@ describe('level_up_class', () => {
     // Constitution 14 (+2), so the computed hit points move with a real
     // modifier rather than a zero that hides a dropped term.
     characterId = db.exec(
-      `INSERT INTO characters (name, constitution)
-       VALUES ('Level Up Hero', 14)`,
+      `INSERT INTO characters (
+         name, constitution, ability_allocation_method
+       ) VALUES ('Level Up Hero', 14, 'manual')`,
     ).lastInsertId;
   });
 
   afterEach(() => connection.close());
+
+  it('refuses an unallocated held character without changing any state (B1)', () => {
+    enterClass('Fighter');
+    db.exec(
+      'UPDATE characters SET ability_allocation_method = NULL WHERE id = ?',
+      [characterId],
+    );
+    const before = stateBytes();
+
+    const refusal = refusalOf({
+      class_definition_id: classId('Fighter'),
+      target_level: 2,
+    });
+
+    expect(refusal.data).toEqual({ reason: 'incomplete_level_one' });
+    expect(storedLevel('Fighter')).toBe(1);
+    expect(stateBytes()).toEqual(before);
+  });
 
   it('refuses a class the character does not have, by name (L-STRAIGHT)', () => {
     enterClass('Fighter');
@@ -1010,8 +1031,9 @@ describe('level_up_class', () => {
       db = harness.context.db;
       integrity = new CharacterCommandIntegrity('level-up-class-rpc-test-key');
       characterId = db.exec(
-        `INSERT INTO characters (name, constitution)
-         VALUES ('Level Up RPC Hero', 14)`,
+        `INSERT INTO characters (
+           name, constitution, ability_allocation_method
+         ) VALUES ('Level Up RPC Hero', 14, 'manual')`,
       ).lastInsertId;
       const catalog = BUNDLED_HOMEBREW_CATALOG.filter(
         (entry) => entry.catalog_key === 'spell-student',

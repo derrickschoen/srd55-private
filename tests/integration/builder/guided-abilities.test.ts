@@ -12,8 +12,11 @@ import {
 import {
   allocateGuidedAbilities,
   createGuidedCharacter,
+  GUIDED_ABILITY_DRAFT_RULE_KEY,
   guidedBuildState,
+  readGuidedAbilityDraft,
   readGuidedStepEvidence,
+  saveGuidedAbilityDraft,
 } from '../../../src/builder/guided-creation';
 import { CharacterState } from '../../../src/character/character-state';
 import { CharacterCommandExecutor } from '../../../src/commands/character-command-executor';
@@ -178,6 +181,55 @@ describe('B1-ALLOC: allocation uses an explicit persisted signal', () => {
         kind: 'ready',
         current_step: GUIDED_LEVEL_ONE_STEP_ORDER[1],
       });
+  });
+});
+
+describe('M3-DRAFT: in-progress ability input uses durable per-character UI state', () => {
+  it('round-trips the method and six scores without completing or revising the character, then clears on allocation', async () => {
+    harness = await createRpcHarness(guidedHandlers);
+    const characterId = await guidedCharacter(harness, 'Drafted Scores');
+    const scores: GuidedAbilityScores = {
+      strength: 8,
+      dexterity: 12,
+      constitution: 14,
+      intelligence: 16,
+      wisdom: 10,
+      charisma: 13,
+    };
+
+    expect(saveGuidedAbilityDraft(harness.context.db, {
+      character_id: characterId,
+      method: 'manual',
+      scores,
+    })).toEqual({ method: 'manual', scores });
+    expect(readGuidedAbilityDraft(harness.context.db, characterId)).toEqual({
+      method: 'manual',
+      scores,
+    });
+    expect(
+      harness.context.db.oneRaw(
+        'SELECT revision, ability_allocation_method FROM characters WHERE id = ?',
+        [characterId],
+      ),
+    ).toEqual({ revision: 0, ability_allocation_method: null });
+
+    await allocateThroughRpc(
+      harness,
+      characterId,
+      'manual',
+      scores,
+      '10000000-0000-4000-8000-000000000003',
+    );
+
+    expect(readGuidedAbilityDraft(harness.context.db, characterId)).toBeNull();
+    expect(
+      harness.context.db.scalar(
+        `SELECT count(*) FROM character_rule_overrides
+         WHERE character_id = ? AND rule_key = ?`,
+        [characterId, GUIDED_ABILITY_DRAFT_RULE_KEY],
+      ),
+    ).toBe(0);
+    expectPersistedAllocation(harness.context.db, characterId, 'manual', scores);
   });
 });
 

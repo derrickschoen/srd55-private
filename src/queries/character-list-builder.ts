@@ -1,7 +1,8 @@
+import { sqlInteger, sqlString } from '../db/codecs';
 import {
-  sqlInteger,
-  sqlString,
-} from '../db/codecs';
+  isGuidedLevelOneComplete,
+  readGuidedStepEvidence,
+} from '../builder/guided-creation';
 import type { DatabaseContext } from '../db/database';
 import type { CharacterSummary } from '../domain/read-models';
 import { BuildReportBuilder } from '../reports/build-report-builder';
@@ -48,6 +49,9 @@ export class CharacterListBuilder {
         return {
           id: character.id,
           name: character.name,
+          level_one_complete: isGuidedLevelOneComplete(
+            readGuidedStepEvidence(this.db, character.id),
+          ),
           level: report.character.character_level,
           classes: report.classes.map(
             (item) => ({

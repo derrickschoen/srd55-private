@@ -7,6 +7,7 @@ import {
 } from '../../../src/backup/character-backup';
 import {
   BackupValidationError,
+  assertBackupHeader,
   CHARACTER_BACKUP_FORMAT,
   CHARACTER_BACKUP_VERSION,
   PREVIOUS_CHARACTER_BACKUP_VERSION,
@@ -785,6 +786,38 @@ describe('portable character validation', () => {
     expect(() =>
       validateCharacterBackup({ ...document, format: 'other/character' }),
     ).toThrow('Unsupported character backup format "other/character".');
+    const undefinedFormat = {
+      ...document,
+      format: undefined,
+    } as unknown as CharacterBackupDocument;
+    expect(() => validateCharacterBackup(undefinedFormat)).toThrow(
+      'character backup format is missing.',
+    );
+    expect(() => validateCharacterBackup(undefinedFormat)).not.toThrow(
+      /undefined/,
+    );
+    expect(() => assertBackupHeader(
+      {
+        version: CHARACTER_BACKUP_VERSION,
+        exported_at: document.exported_at,
+      },
+      CHARACTER_BACKUP_FORMAT,
+      CHARACTER_BACKUP_VERSION,
+      'character backup',
+    )).toThrow(
+      'character backup format is missing.',
+    );
+    expect(() => assertBackupHeader(
+      {
+        version: CHARACTER_BACKUP_VERSION,
+        exported_at: document.exported_at,
+      },
+      CHARACTER_BACKUP_FORMAT,
+      CHARACTER_BACKUP_VERSION,
+      'character backup',
+    )).not.toThrow(
+      /undefined/,
+    );
     expect(() =>
       validateCharacterBackup({ ...document, version: 0 }),
     ).toThrow('Unsupported character backup version 0.');

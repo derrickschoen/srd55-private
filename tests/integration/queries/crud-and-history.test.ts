@@ -143,8 +143,8 @@ describe('character CRUD, catalog, save points, and operation history', () => {
 
   it('decodes persisted operations and changes into reversible history DTOs', async () => {
     const characterId = db.exec(
-      `INSERT INTO characters (name, wisdom)
-       VALUES ('History Hero', 13)`,
+      `INSERT INTO characters (name, wisdom, ability_allocation_method)
+       VALUES ('History Hero', 13, 'manual')`,
     ).lastInsertId;
     const executor = new CharacterCommandExecutor(
       db,

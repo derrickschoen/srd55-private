@@ -41,6 +41,7 @@ test('serves the seeded character list and editable workspace', async ({
     {
       id: workspaceImage.ids.character,
       name: 'R40 Golden',
+      level_one_complete: false,
       level: 8,
       classes: [
         { name: 'Paladin', level: 1, catalog_layer: 'bundled' },
@@ -120,6 +121,7 @@ test('builds the complete character list card contract in deterministic order', 
   expect(first).toEqual([{
     id: workspaceImage.ids.character,
     name: 'R40 Golden',
+    level_one_complete: false,
     level: 8,
     classes: [
       { name: 'Paladin', level: 1, catalog_layer: 'bundled' },

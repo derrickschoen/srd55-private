@@ -48,8 +48,8 @@ describe('character command factory and executor', () => {
   function character(name = 'X50 Character'): number {
     return db.exec(
       `INSERT INTO characters
-         (name, wisdom, created_at, updated_at)
-       VALUES (?, 13, '2000-01-01T00:00:00.000Z',
+         (name, wisdom, ability_allocation_method, created_at, updated_at)
+       VALUES (?, 13, 'manual', '2000-01-01T00:00:00.000Z',
          '2000-01-01T00:00:00.000Z')`,
       [name],
     ).lastInsertId;

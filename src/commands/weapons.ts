@@ -8,6 +8,7 @@ import type {
   UpdateWeaponCommand as UpdateWeaponPayload,
   WeaponFields,
 } from '../domain/command-contracts';
+import type { StoredCommandInverse } from './stored-inverses';
 import {
   damageType,
   isEnumValue,
@@ -73,7 +74,7 @@ import {
  */
 export interface ResolvesInverseAfterApply {
   readonly invertsAfterApply: true;
-  inverse(): CharacterCommandPayload;
+  inverse(): StoredCommandInverse;
 }
 
 export function resolvesInverseAfterApply(

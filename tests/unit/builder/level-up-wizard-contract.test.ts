@@ -40,6 +40,7 @@ describe('level-up wizard seam', () => {
     expect(LEVEL_UP_STATE_KINDS).toEqual({
       notFound: 'not_found',
       noHeldClass: 'no_held_class',
+      incompleteLevelOne: 'incomplete_level_one',
       noGuideableClass: 'no_guideable_class',
       maximumLevel: 'maximum_level',
       ready: 'ready',
@@ -68,6 +69,7 @@ describe('level-up wizard seam', () => {
   it('pins one panel per route state and step', () => {
     expect(LEVEL_UP_PANEL).toEqual({
       notFound: 'not-found',
+      incompleteLevelOne: 'incomplete-level-one',
       maximumLevel: 'maximum-level',
       class: 'class',
       gains: 'gains',

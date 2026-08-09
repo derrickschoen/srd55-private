@@ -37,8 +37,9 @@ let pendingSpellTransition: GuidedSpellTransition | null = null;
  * NO SESSION STORAGE, READ OR WRITTEN. D48 deleted the pre-class draft
  * outright: `/characters/new` persists nothing until the chooser's single
  * `createGuided` call, and the build route derives its step from character
- * state alone via `queries.characters.buildState`, so a reload asks the
- * database and nothing else.
+ * state alone via `queries.characters.buildState`. The abilities form's
+ * in-progress UI draft reuses character_rule_overrides in the same SQLite
+ * database; it never participates in step derivation or completion.
  */
 function matches(route: Route): boolean {
   return (
@@ -72,10 +73,19 @@ async function render(context: ScreenContext): Promise<() => void> {
       // The abilities step (B1). The character row supplies the BASE scores
       // the inputs prefill from (plan §3.5 — never a resolved total) and the
       // revision the atomic allocation command requires.
-      const character = await client.getCharacter(characterId);
+      const [character, draft] = await Promise.all([
+        client.getCharacter(characterId),
+        client.abilityDraft(characterId),
+      ]);
       const step = createAbilitiesStep({
         characterId,
         character,
+        draft,
+        saveDraft: (nextDraft) =>
+          client.saveAbilityDraft({
+            character_id: characterId,
+            ...nextDraft,
+          }),
         allocateAbilities: (method, scores, operationUuid) =>
           client.allocateAbilities({
             character_id: characterId,

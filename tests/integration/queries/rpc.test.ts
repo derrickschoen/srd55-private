@@ -210,6 +210,7 @@ describe('typed query RPC integration', () => {
       result: [{
         id: fixture.characterId,
         name: 'R40 Golden',
+        level_one_complete: false,
         level: 8,
         classes: [
           { name: 'Paladin', level: 1, catalog_layer: 'bundled' },
@@ -524,6 +525,7 @@ describe('typed query RPC integration', () => {
       {
         id: character.id,
         name: 'Q60 Client Hero',
+        level_one_complete: false,
         level: null,
         classes: [],
         warning_count: 0,

@@ -84,6 +84,9 @@ export function assertBackupHeader(
   label: string,
 ): void {
   if (value.format !== expectedFormat) {
+    if (value.format === undefined) {
+      throw new BackupValidationError(`${label} format is missing.`);
+    }
     throw new BackupValidationError(
       `Unsupported ${label} format ${JSON.stringify(value.format)}.`,
     );

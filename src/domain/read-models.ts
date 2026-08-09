@@ -373,6 +373,8 @@ export interface EligibleSpell {
 export interface CharacterSummary {
   id: number;
   name: string;
+  /** Every guided level-1 step is durably complete. */
+  level_one_complete: boolean;
   level: number | null;
   classes: readonly {
     readonly name: string;

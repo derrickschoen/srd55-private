@@ -5,6 +5,7 @@ import {
   type LevelUpStateResult,
   type LevelUpStep,
 } from '../../../builder/level-up-wizard';
+import { guidedBuildPath } from '../../../builder/contracts';
 import { element, listen, type Cleanup } from '../../dom';
 import { renderDisabledClassOption } from './class-gains-steps';
 
@@ -57,7 +58,7 @@ function terminalShell(
     attributes: { tabindex: '-1' },
   });
   panel.querySelector('h2')?.setAttribute('tabindex', '-1');
-  return element('main', { className: 'level-up-shell' }, [
+  return element('main', { className: 'level-up-route level-up-shell' }, [
     element('header', { className: 'level-up-header' }, [routeHeading]),
     panel,
   ]);
@@ -154,6 +155,24 @@ export function renderLevelUpTerminalState(
             'Advanced: open planner',
             `/characters/${String(state.character.character_id)}`,
           ),
+        ],
+      ),
+    );
+  }
+
+  if (state.kind === 'incomplete_level_one') {
+    return terminalShell(
+      `Level up — ${state.character.name}`,
+      terminalPanel(
+        LEVEL_UP_PANEL.incompleteLevelOne,
+        'Finish level 1 before leveling up',
+        'These ability scores have not been claimed through the guided build or a workspace edit, so ability-derived values such as hit points are unknown. Resume the level 1 build first.',
+        [
+          routerLink(
+            'Resume build',
+            guidedBuildPath(state.character.character_id),
+          ),
+          characterListLink(),
         ],
       ),
     );

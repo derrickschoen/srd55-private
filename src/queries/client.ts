@@ -2,6 +2,7 @@ import type { CharacterRow } from '../domain/models';
 import {
   EQUIPMENT_RPC,
   GUIDED_RPC,
+  type GuidedAbilityDraft,
   type GuidedAllocateAbilitiesParams,
   type GuidedAllocateAbilitiesResult,
   type GuidedApplyEquipmentParams,
@@ -21,6 +22,7 @@ import {
   type GuidedOriginOption,
   type GuidedOriginOptionsParams,
   type GuidedOriginParams,
+  type GuidedSaveAbilityDraftParams,
   type GuidedSkillsStepState,
   type OriginKind,
 } from '../builder/contracts';
@@ -100,6 +102,10 @@ export interface QueriesClient extends CatalogClient {
   ): Promise<PrintAppendixPreferences>;
   operationHistory(characterId: number): Promise<OperationHistory>;
   buildState(characterId: number): Promise<GuidedBuildStateResult>;
+  abilityDraft(characterId: number): Promise<GuidedAbilityDraft | null>;
+  saveAbilityDraft(
+    params: GuidedSaveAbilityDraftParams,
+  ): Promise<GuidedAbilityDraft>;
   guidedClassOptions(): Promise<readonly GuidedClassOption[]>;
   createGuided(
     name: string,
@@ -260,6 +266,16 @@ export function createQueriesClient(rpc: RpcClient): QueriesClient {
       rpc.call<GuidedBuildStateParams, GuidedBuildStateResult>(
         GUIDED_RPC.buildState,
         characterParams(characterId),
+      ),
+    abilityDraft: (characterId: number) =>
+      rpc.call<GuidedBuildStateParams, GuidedAbilityDraft | null>(
+        GUIDED_RPC.abilityDraft,
+        characterParams(characterId),
+      ),
+    saveAbilityDraft: (params: GuidedSaveAbilityDraftParams) =>
+      rpc.call<GuidedSaveAbilityDraftParams, GuidedAbilityDraft>(
+        GUIDED_RPC.saveAbilityDraft,
+        params,
       ),
     guidedClassOptions: () =>
       rpc.call<Record<string, never>, readonly GuidedClassOption[]>(

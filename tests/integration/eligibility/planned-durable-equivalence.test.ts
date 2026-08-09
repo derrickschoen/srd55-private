@@ -15,6 +15,7 @@ import { LevelUpPlannedEligibleSpells } from '../../../src/queries/level-up-plan
 import { openTestDatabase } from '../../helpers/open-db';
 import { LevelUpClassCommand, LevelUpRefusal } from '../../../src/commands/level-up-class';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
+import { AllocateAbilitiesCommand } from '../../../src/commands/allocate-abilities';
 import { CharacterState } from '../../../src/character/character-state';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 
@@ -35,6 +36,18 @@ describe('planned and durable spell eligibility', () => {
     const characterId = db.exec(
       "INSERT INTO characters (name) VALUES ('Equivalence Wizard')",
     ).lastInsertId;
+    new AllocateAbilitiesCommand(db, {
+      type: 'allocate_abilities',
+      method: 'manual',
+      scores: {
+        strength: 10,
+        dexterity: 10,
+        constitution: 10,
+        intelligence: 10,
+        wisdom: 10,
+        charisma: 10,
+      },
+    }).apply(characterId);
     registerFixtureContentIdentity(db, {
       kind: 'class', contentKey: 'class:equivalence-wizard',
       name: 'Equivalence Wizard', keyKind: 'bundled-stable',

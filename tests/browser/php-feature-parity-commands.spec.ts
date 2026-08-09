@@ -407,10 +407,24 @@ test('returns the exact mutation envelope, inverse, operation, and reversible au
   // Measured at 15.3s alone on Chromium; this ceiling is for concurrent-lane contention.
   test.setTimeout(60_000);
   await install(page, workspaceImage);
+  await rpc(page, 'queries.characters.allocateAbilities', {
+    character_id: workspaceImage.ids.character,
+    method: 'manual',
+    scores: {
+      strength: 10,
+      dexterity: 10,
+      constitution: 10,
+      intelligence: 16,
+      wisdom: 14,
+      charisma: 18,
+    },
+    operation_uuid: operation(120),
+    expected_revision: 0,
+  });
   const result = await execute(
     page,
     workspaceImage.ids.character,
-    0,
+    1,
     {
       type: 'update_ability',
       ability: 'wisdom',
@@ -421,7 +435,7 @@ test('returns the exact mutation envelope, inverse, operation, and reversible au
   );
   expect(result).toEqual({
     operation_uuid: operation(12),
-    revision: 1,
+    revision: 2,
     idempotent_replay: false,
   });
   expect(
@@ -430,8 +444,8 @@ test('returns the exact mutation envelope, inverse, operation, and reversible au
     ),
   ).toMatchObject({
     character_id: workspaceImage.ids.character,
-    expected_revision: 0,
-    resulting_revision: 1,
+    expected_revision: 1,
+    resulting_revision: 2,
     inverse_command: JSON.stringify({
       type: 'update_ability',
       ability: 'wisdom',
@@ -443,7 +457,7 @@ test('returns the exact mutation envelope, inverse, operation, and reversible au
       (row) => row.operation_uuid === operation(12),
     ),
   ).toMatchObject({
-    sequence: 1,
+    sequence: 2,
     reason: 'Mutation contract.',
     action_type: 'update_ability',
     reversible: 1,
@@ -452,7 +466,55 @@ test('returns the exact mutation envelope, inverse, operation, and reversible au
     (await rows(page, 'characters')).find(
       (row) => row.id === workspaceImage.ids.character,
     ),
-  ).toMatchObject({ wisdom: 16, revision: 1 });
+  ).toMatchObject({
+    wisdom: 16,
+    ability_allocation_method: 'manual',
+    revision: 2,
+  });
+});
+
+test('first workspace edit stores a snapshot inverse whose undo restores an unclaimed allocation', async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  await install(page, workspaceImage);
+  const changed = await execute(
+    page,
+    workspaceImage.ids.character,
+    0,
+    {
+      type: 'update_ability',
+      ability: 'wisdom',
+      score: 16,
+    },
+    121,
+  );
+  const storedInverse = JSON.parse(String(
+    (await rows(page, 'character_operations')).find(
+      (row) => row.operation_uuid === changed.operation_uuid,
+    )?.inverse_command,
+  )) as Record<string, unknown>;
+  expect(Object.keys(storedInverse).sort()).toEqual(['snapshot', 'type']);
+  expect(storedInverse).toMatchObject({
+    type: 'internal_snapshot_restore',
+    snapshot: expect.any(Object),
+  });
+
+  await undo(
+    page,
+    workspaceImage.ids.character,
+    1,
+    changed.operation_uuid,
+  );
+  expect(
+    (await rows(page, 'characters')).find(
+      (row) => row.id === workspaceImage.ids.character,
+    ),
+  ).toMatchObject({
+    wisdom: 14,
+    ability_allocation_method: null,
+    revision: 2,
+  });
 });
 
 test('adding a class level generates new slots without disturbing existing slots', async ({
