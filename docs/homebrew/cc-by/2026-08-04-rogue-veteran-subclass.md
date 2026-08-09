@@ -63,10 +63,10 @@ damage die that shows a 2. You must use the new roll.
 
 ### Level 3: Sure Strike
 
-Once per round, on your turn, when you miss a creature with an attack using
-a Finesse or Ranged weapon, you can deal your Sneak Attack damage to that
-target as if the attack had hit, provided all Sneak Attack requirements are
-met.
+At the end of your turn, if you dealt no Sneak Attack damage this turn, you
+can take a Bonus Action to drive a missed blow home: deal your Sneak Attack
+damage to one creature you missed this turn with an attack using a Finesse
+or Ranged weapon.
 
 You must be able to see the target, and the attack must not have been made
 with disadvantage. You must also satisfy all normal conditions for Sneak
@@ -75,6 +75,11 @@ turn).
 
 The damage dealt by this feature has the same type as the weapon's normal
 damage.
+
+*(Revised by owner ruling 2026-08-09: the free once-per-round rider became
+an end-of-turn Bonus Action, putting the guaranteed floor in competition
+with Steady Aim and Cunning Action. Simmed effect ≈ −2 DPR against a dummy;
+the binding cost is the Bonus Action at real tables.)*
 
 ### Level 9: Veteran's Strike
 

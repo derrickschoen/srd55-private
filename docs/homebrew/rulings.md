@@ -5,6 +5,28 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-09 — VETERAN: Sure Strike becomes an end-of-turn Bonus Action
+
+Owner's ruling, verbatim:
+
+> Make sure strike a bonus action to spend unused sneak attack at the end of
+> your turn
+
+Effect: Sure Strike's guaranteed Sneak Attack on a miss now costs the
+Bonus Action, taken at the end of the turn, full dice (the half-dice
+variant floated earlier the same day is superseded unadopted). Applied to
+the Veteran doc's §3 feature text with a dated revision note.
+
+Measured (vex/nick canonical build, dummy): 61/105 → **59/103** — about −2
+DPR, because the Vex chain supplies advantage and the held Bonus Action is
+otherwise idle against a dummy. The recorded intent of the cost is
+action-economy pressure at live tables: the floor now competes with Steady
+Aim and Cunning Action for the same Bonus Action, which the sim cannot
+price. Context also recorded: the Veteran's sim baseline moved to
+shortsword (Vex) + scimitar (Nick) dual-wield by owner directive — 61/105
+burst, identical sustained, the only build on the board whose 40-round
+number equals its 4-round number.
+
 ## 2026-08-09 — Barbed Court: Fire Shield grafted at 17; one free 4th-level cast per day at 17
 
 Owner's ruling, verbatim:
