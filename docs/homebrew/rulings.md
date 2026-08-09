@@ -5,6 +5,44 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-09 — Barbed Court: hands rider is flat Wisdom psychic (doubling at 17); bespoke Shield DELETED; Flourish folds into the duel — trackers cut to two
+
+Owner's rulings, verbatim (answering three numbered questions):
+
+> 1yes to both
+>
+> 2 yes
+>
+> 3 yes
+
+Effects:
+
+1. **Invisible hands, final shape.** Bonus Action, 4 Focus Points, 15-foot
+   emanation, Concentration (owner-ruled), up to 10 minutes. While the hands
+   are manifested: your attacks deal **+ your Wisdom modifier Psychic
+   damage** on a hit against creatures in the emanation — **doubled (2 ×
+   Wis) from Monk 17** — and the bundled Advantage state stands as simmed.
+   No dice, no per-turn counter; the only tracking is Concentration and the
+   pool. This supersedes the Martial-Arts-dice scaling menu and all five
+   simulated nerf packages (P1 explicitly rejected as too complicated).
+   Measured in the fights-back environment (two enemies, concentration
+   saves, party present): **~71 DPR at 11, ~89 at 17** — 1.3×/1.4× the
+   optimized Vengeance Paladin (54/64), inside the owner's target band, and
+   the flat-Wisdom scaling weakness is carried by the ladder, the d12 step
+   and the ×2 at 17.
+2. **The bespoke 1-Focus Shield cast is deleted.** Rationale on record: the
+   pool reaches 17 and a 1-Focus Reaction +5 AC becomes effectively at-will,
+   deleting the rationing job of the slot economy. *Shield* remains on the
+   granted Court Spells row, castable with real slots only (the ×2 refresh
+   applies). Supersedes the bespoke-Shield rulings of 2026-08-07.
+3. **Distracting Flourish is no longer a once-per-turn tracked effect** —
+   folded into the duel as passive text (while your duel target is within 5
+   feet of your Mage Hand, it has Disadvantage on attack rolls against
+   creatures other than you). The goad, when its post-redesign numbers are
+   finally ruled (open backlog), is directed to be a **passive on-hit
+   rider, not a counted trigger**. Subclass per-turn trackers drop from
+   four to **two**: the Courtier's Slap and the one-cantrip-per-turn cap.
+
 ## 2026-08-09 — Barbed Court: the invisible-hands emanation REQUIRES CONCENTRATION — owner-ruled, no longer an assumption
 
 Owner's ruling, verbatim:
