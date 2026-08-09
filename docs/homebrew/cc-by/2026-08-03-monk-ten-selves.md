@@ -37,18 +37,24 @@ D191. They are part of the subclass's power budget, not flavor beside it.
 **Cantrip known.** At Monk level 3, you know *Minor Illusion*. No additional
 fixed cantrip is granted later.
 
+Sibling overlap, disclosed (owner ruling 2026-08-05): the Warrior of the
+Barbed Court gains innate *Mirror Image* casts as a level-3 defensive
+feature. The engine relationship below — duplicates as reroll fuel and
+Focus-preserved defense — remains unique to the Ten Selves; the Barbed
+Court's images carry no feature interaction.
+
 All eleven named spells are present in SRD 5.2.1:
-[*Color Spray*](../srd/full/srd-5.2.1.txt#L7146),
-[*Disguise Self*](../srd/full/srd-5.2.1.txt#L7665),
-[*Silent Image*](../srd/full/srd-5.2.1.txt#L10328),
-[*Invisibility*](../srd/full/srd-5.2.1.txt#L9031),
-[*Mirror Image*](../srd/full/srd-5.2.1.txt#L9501),
-[*Phantasmal Force*](../srd/full/srd-5.2.1.txt#L9602),
-[*Hypnotic Pattern*](../srd/full/srd-5.2.1.txt#L8867),
-[*Major Image*](../srd/full/srd-5.2.1.txt#L9348),
-[*Greater Invisibility*](../srd/full/srd-5.2.1.txt#L8647),
-[*Hallucinatory Terrain*](../srd/full/srd-5.2.1.txt#L8742), and
-[*Minor Illusion*](../srd/full/srd-5.2.1.txt#L9434).
+[*Color Spray*](../../srd/full/srd-5.2.1.txt#L7146),
+[*Disguise Self*](../../srd/full/srd-5.2.1.txt#L7665),
+[*Silent Image*](../../srd/full/srd-5.2.1.txt#L10328),
+[*Invisibility*](../../srd/full/srd-5.2.1.txt#L9031),
+[*Mirror Image*](../../srd/full/srd-5.2.1.txt#L9501),
+[*Phantasmal Force*](../../srd/full/srd-5.2.1.txt#L9602),
+[*Hypnotic Pattern*](../../srd/full/srd-5.2.1.txt#L8867),
+[*Major Image*](../../srd/full/srd-5.2.1.txt#L9348),
+[*Greater Invisibility*](../../srd/full/srd-5.2.1.txt#L8647),
+[*Hallucinatory Terrain*](../../srd/full/srd-5.2.1.txt#L8742), and
+[*Minor Illusion*](../../srd/full/srd-5.2.1.txt#L9434).
 
 ### Monk third-caster spell slots
 
@@ -92,8 +98,8 @@ Proficiency Bonus.
 ## 3. Subclass Features
 
 The substantive feature schedule is 3, 6, 11, and 17, matching the SRD Monk
-and Warrior of the Open Hand schedule ([SRD Monk table](../srd/full/srd-5.2.1.txt#L3022)
-and [Open Hand](../srd/full/srd-5.2.1.txt#L3130)). Spellcasting is compact
+and Warrior of the Open Hand schedule ([SRD Monk table](../../srd/full/srd-5.2.1.txt#L3022)
+and [Open Hand](../../srd/full/srd-5.2.1.txt#L3130)). Spellcasting is compact
 support beside the level-3 engine.
 
 ### Level 3: Rehearsed Self

@@ -36,9 +36,9 @@ capable in almost any situation.
 ## 2. Schedule and Feature-Count Posture
 
 The Rogue subclass schedule is **3 / 9 / 13 / 17**
-([Rogue table](../srd/full/srd-5.2.1.txt#L3710-L3753)). This kit carries
+([Rogue table](../../srd/full/srd-5.2.1.txt#L3710-L3753)). This kit carries
 **four blocks at 3, two at 9, three at 13, and three at 17** against the SRD
-Thief's 2/1/1/1 ([Thief](../srd/full/srd-5.2.1.txt#L3827-L3885)). The count
+Thief's 2/1/1/1 ([Thief](../../srd/full/srd-5.2.1.txt#L3827-L3885)). The count
 is far above the sibling and is owner-frozen; the worksheet below prices the
 whole kit rather than pretending the blocks are ribbons. One block (Too Old
 for This) is a pure drawback, which the guidelines do not price as budget
@@ -144,7 +144,7 @@ You gain blindsight out to a range of 10 feet.
 2. **Fighting Style mapping.** SRD 5.2.1 expresses the Fighter's options as
    Fighting Style *feats* — Archery, Defense, Great Weapon Fighting,
    Two-Weapon Fighting — each with prerequisite "Fighting Style Feature"
-   ([Fighting Style Feats](../srd/full/srd-5.2.1.txt#L5289-L5323)). This
+   ([Fighting Style Feats](../../srd/full/srd-5.2.1.txt#L5289-L5323)). This
    feature is read as granting one Fighting Style feat of your choice and
    satisfying that prerequisite. Archery (+2 to ranged attack rolls) is the
    standout pick for this kit's crit range.
@@ -236,7 +236,7 @@ as exceeding the recorded benchmark, pending the owner's build card.**
 
 **Champion shape (disclosure, not distance).** Critical Instincts and
 Heightened Lethality reuse the SRD Champion's 19–20 → 18–20 ladder
-([Champion](../srd/full/srd-5.2.1.txt#L2968-L2985)) on a later schedule
+([Champion](../../srd/full/srd-5.2.1.txt#L2968-L2985)) on a later schedule
 (13/17 vs. the Champion's 3/15) and on all weapon attacks. Disclosed
 mechanical ancestry.
 
@@ -249,7 +249,7 @@ mechanical ancestry.
   on-turn-only Sneak Attack drawback (nearly free to a dip that barely
   Sneak Attacks). **F3 amber-high; three outsider builds required.**
 - **Great Weapon Fighting feat + Deuces** touch the same dice: GWF treats
-  1s and 2s as 3 ([GWF](../srd/full/srd-5.2.1.txt#L5308-L5320)); a die that
+  1s and 2s as 3 ([GWF](../../srd/full/srd-5.2.1.txt#L5308-L5320)); a die that
   is already treated as 3 shows no 2 to reroll, so the pair needs an
   adjudication order. Flagged for the app's rules engine and for play.
 - **Crit + Deuces order**: a critical doubles the dice rolled; each rolled

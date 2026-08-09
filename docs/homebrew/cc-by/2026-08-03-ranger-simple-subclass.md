@@ -24,11 +24,11 @@ weapon attacks and movement. The mark remains the kit's only tracked state.
 
 The Ranger subclass schedule is **3 / 7 / 11 / 15**. The SRD Hunter has two
 named features at level 3 and one at each later slot
-([Ranger table and base features](../srd/full/srd-5.2.1.txt#L3488-L3593),
-[Hunter](../srd/full/srd-5.2.1.txt#L3649-L3711)). Pursuer uses the same
+([Ranger table and base features](../../srd/full/srd-5.2.1.txt#L3488-L3593),
+[Hunter](../../srd/full/srd-5.2.1.txt#L3649-L3711)). Pursuer uses the same
 five-feature cadence. Its five operative feature texts total about **189 rules
 words**, below the Champion structural model's 199 rules words across six
-features ([Champion](../srd/full/srd-5.2.1.txt#L2968-L3016)).
+features ([Champion](../../srd/full/srd-5.2.1.txt#L2968-L3016)).
 
 Guideline 01 rates Ranger subclass dependence **Medium** and assigns it a
 core-mark interaction, bounded combat rider, and player-initiated exploration
@@ -92,8 +92,8 @@ The SRD spell uses a Bonus Action to cast, requires Concentration, deals 1d6
 extra Force damage whenever the caster hits the marked target with an attack
 roll, grants Advantage on checks to find it, and normally uses a Bonus Action to
 move the mark after the target reaches 0 Hit Points
-([spell opening](../srd/full/srd-5.2.1.txt#L8917-L8934),
-[transfer and upcast duration](../srd/full/srd-5.2.1.txt#L8857-L8865)). The
+([spell opening](../../srd/full/srd-5.2.1.txt#L8917-L8934),
+[transfer and upcast duration](../../srd/full/srd-5.2.1.txt#L8857-L8865)). The
 Ranger base class then changes that engine at levels 1, 13, 17, and 20. Pursuer
 interacts with each as follows.
 
