@@ -53,10 +53,24 @@ You gain proficiency in one skill of your choice.
 
 ### Level 3: Old Training
 
-You adopt a Fighting Style: choose **Archery** or **Two-Weapon Fighting**.
-*(Added by owner ruling 2026-08-09. The level-13 Fighting Style feature is
-unchanged and now effectively grants a second style; you still can't take
-the same option twice.)*
+You gain the **Two-Weapon Fighting** fighting style.
+*(Added by owner ruling 2026-08-09; Archery was included at first and
+removed the same day to keep the ranged build nearer its ranged peers. The
+level-13 Fighting Style feature is unchanged; you still can't take the same
+option twice.)*
+
+### Level 3: Veteran's Reserve
+
+You have a pool of bonus Sneak Attack dice equal to your Rogue level. When
+you deal Sneak Attack damage, you can spend dice from the pool equal to
+**half your Rogue level (round down)**, adding that many d6s to the damage.
+These bonus dice are not doubled by Veteran's Strike. You regain all spent
+dice when you finish a Short or Long Rest.
+
+*(Owner ruling 2026-08-09; intent recorded verbatim: "2 boosted hits per
+combat, a genuine decision." At Rogue 11 the pool of 11 funds two +5d6
+activations per rest. Assumption, flagged: the bonus dice double on a
+critical hit like all damage dice.)*
 
 ### Level 3: Too Old for This
 
