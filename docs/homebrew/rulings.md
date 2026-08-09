@@ -5,6 +5,29 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-09 — Barbed Court: identity paragraph APPROVED — queue item 9 CLOSED
+
+Owner's ruling, verbatim:
+
+> That will work
+
+The approved identity paragraph, to open §1 of the rewrite verbatim:
+
+> **Warrior of the Barbed Court** — Somewhere between a duelist's salon and
+> a haunted etiquette lesson lies the Barbed Court, a monastic tradition
+> that treats the insult as a martial form. Its monks fight surrounded by an
+> invisible retinue — spectral hands that slap, beckon, and humiliate — and
+> every technique is a provocation: the goad that makes ignoring you
+> unbearable, the duel that binds an enemy's pride to your fists, the barbed
+> word that lands harder than the blow. A Barbed Court monk wins by being
+> *impossible to disregard* — enemies who attack you meet mirror-images,
+> warded air, and a wall of unseen palms; enemies who dare attack anyone
+> else are slapped back into line. Wisdom drives everything: the eye that
+> reads an opponent's vanity is the same eye that guides the striking hand.
+
+Licence note recorded: the duel is described as "binds an enemy's pride" —
+no non-SRD spell name appears; all vocabulary is the project's own.
+
 ## 2026-08-09 — Barbed Court: Spellwoven Strike CUT; Court Cantrips (cantrip-on-Focus-spend) is the weaving mechanic — queue item 8 CLOSED
 
 Owner's ruling, verbatim:
