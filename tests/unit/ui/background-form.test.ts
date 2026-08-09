@@ -134,13 +134,13 @@ function client(overrides: Partial<AuthoringClient> = {}): AuthoringClient {
   };
 }
 
-function context(router?: Router): ScreenContext {
+function context(router?: Router, navigated: string[] = []): ScreenContext {
   const root = document.createElement('div');
   document.body.append(root);
   return {
     root,
     route: router?.current ?? parseRoute(new URL('https://example.test/homebrew/drafts/ha9-background-draft')),
-    router: router ?? ({ navigate: () => undefined } as unknown as Router),
+    router: router ?? ({ navigate: (target: string) => navigated.push(target) } as unknown as Router),
     rpc: null as never,
     registerNavigationGuard: router === undefined
       ? () => () => undefined
@@ -263,6 +263,7 @@ describe('HA-9 background authoring form', () => {
     const restore = installInteractiveDocument();
     try {
       const calls: string[] = [];
+      const navigated: string[] = [];
       const rendered = render(client({
         previewPublish: async () => { calls.push('preview'); return preview(); },
         commitPublish: async () => {
@@ -272,7 +273,7 @@ describe('HA-9 background authoring form', () => {
             name: hostile, catalog_layer: 'external', previous_key_usage_count: 0,
           };
         },
-      }));
+      }), stored(), context(undefined, navigated));
       const form = rendered.root.querySelector('form');
       expect(rendered.root.getAttribute('aria-label')).toBe('Background authoring form');
       expect(form?.getAttribute('aria-label')).toBeNull();
@@ -319,7 +320,19 @@ describe('HA-9 background authoring form', () => {
       button(rendered.root, 'Publish background').click();
       await settle();
       expect(calls).toEqual(['preview', 'commit']);
-      expect(elementText(rendered.root as unknown as Node)).toContain('Background published');
+      const publishedUrl = new URL(navigated[0] ?? '', 'https://example.test');
+      expect([...publishedUrl.searchParams.keys()]).toEqual([
+        'tab', 'publishOutcome', 'publishedKey', 'publishedName',
+        'publishedLayer', 'previousUsageCount',
+      ]);
+      expect(Object.fromEntries(publishedUrl.searchParams)).toEqual({
+        tab: 'background',
+        publishOutcome: 'created',
+        publishedKey: '2024:content.background:ward',
+        publishedName: hostile,
+        publishedLayer: 'external',
+        previousUsageCount: '0',
+      });
       expect(rendered.root.querySelectorAll('img')).toHaveLength(0);
       rendered.cleanup();
     } finally {
@@ -594,6 +607,7 @@ describe('HA-9 background authoring form', () => {
   it('opens the shared focus-trapped adoption dialog for a reviewed background publish', async () => {
     const restore = installInteractiveDocument();
     try {
+      const navigated: string[] = [];
       const reviewed: PublishPreview = {
         ...preview(),
         review: [{
@@ -613,7 +627,7 @@ describe('HA-9 background authoring form', () => {
           catalog_layer: 'external',
           previous_key_usage_count: 0,
         }),
-      }));
+      }), stored(), context(undefined, navigated));
       rendered.root.querySelector('form')?.dispatchEvent(new Event('submit', { cancelable: true }));
       await settle();
       button(rendered.root, 'Publish background').click();
@@ -628,7 +642,15 @@ describe('HA-9 background authoring form', () => {
       expect(modal.querySelectorAll('img')).toHaveLength(0);
       button(modal, 'Publish with these choices').click();
       await settle();
-      expect(elementText(rendered.root as unknown as Node)).toContain('Matched existing content');
+      const publishedUrl = new URL(navigated[0] ?? '', 'https://example.test');
+      expect(Object.fromEntries(publishedUrl.searchParams)).toEqual({
+        tab: 'background',
+        publishOutcome: 'matched_existing',
+        publishedKey: '2024:alternate:background',
+        publishedName: hostile,
+        publishedLayer: 'external',
+        previousUsageCount: '0',
+      });
       rendered.cleanup();
     } finally {
       restore();
