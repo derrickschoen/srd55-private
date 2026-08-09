@@ -58,7 +58,7 @@ function terminalShell(
     attributes: { tabindex: '-1' },
   });
   panel.querySelector('h2')?.setAttribute('tabindex', '-1');
-  return element('main', { className: 'level-up-shell' }, [
+  return element('main', { className: 'level-up-route level-up-shell' }, [
     element('header', { className: 'level-up-header' }, [routeHeading]),
     panel,
   ]);

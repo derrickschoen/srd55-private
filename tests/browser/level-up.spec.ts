@@ -543,6 +543,15 @@ test('U1 direct level-up refuses untouched defaults, then one workspace edit ena
   ]);
   expect(await rows(page, 'character_operations')).toHaveLength(0);
 
+  const seam = await readLevelUpSeam(page, character.id);
+  await page.goto(seam.path);
+  const route = page.locator('.level-up-route');
+  await expect(route).toBeVisible();
+  await expect(route.getByRole('heading', {
+    name: 'Finish level 1 before leveling up',
+  })).toBeVisible();
+  await route.getByRole('link', { name: 'All characters' }).click();
+
   await page.reload();
   await ready(page);
   const card = page.locator('.character-card').filter({
