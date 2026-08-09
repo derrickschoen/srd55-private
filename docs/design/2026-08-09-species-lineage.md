@@ -590,10 +590,28 @@ it does not default character state.
 > `sources` declaration freezes the migration implementation, lineage seed,
 > configured-choice and material-rule parsers, source-rule reader,
 > planner/generator, stored v2 species projector, identity kernel, and
-> fingerprint reconciler. A change to any of those declared behavioral sources
-> moves the checksum. This is the D226 restatement option: the claim is bounded
-> to that explicit source set, not the full transitive database/runtime graph;
-> general transaction, codec, and database infrastructure remains outside it.
+> fingerprint reconciler. The generator boundary includes its skill-grant,
+> skill-expertise, spell-selection eligibility/constraint, and character-level
+> runtime dependencies: they decide projections, valid selections, or whether a
+> material rule is active for this migration's row set. A change to any declared
+> behavioral source moves the checksum.
+>
+> This is the D226 restatement option: the freeze covers migration-specific row
+> selection, seed/rule interpretation, gate calculation, grant planning and
+> materialization, and content-v2 identity/reconciliation. It excludes the
+> generic catalog-migration registry/transaction runner, database adapters and
+> SQL codecs, the SHA-256 primitive, type-only/domain declarations, and UI/RPC/
+> boot callers. Those modules provide execution, validation, hashing, types, or
+> scheduling; they do not decide this migration's rows or their reconciled
+> semantics. If an excluded infrastructure module begins making such a
+> decision, it becomes an in-boundary behavioral source and must be declared.
+>
+> **D231 delivery note — 2026-08-09.** U2-A leaves today's species card honest
+> but minimal: an unchosen Elf still names “an Elven Lineage” in the card's
+> required-choices completeness copy, while a plain species says it has no
+> further choice. The old flat-rule “lineage spells arrive…” copy no longer
+> matches the configured-choice seed. U2-C restores the richer lineage
+> disclosure alongside the real lineage controls.
 
 ## 8. Implementation dispatch
 

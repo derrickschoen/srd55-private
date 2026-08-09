@@ -16,8 +16,13 @@ import lineageSeedSource from '../rules/origin-definitions-srd.ts?raw';
 import configuredChoiceSource from '../grants/configured-choice-rule.ts?raw';
 import grantRuleSource from '../grants/grant-rule.ts?raw';
 import sourceRuleReaderSource from '../grants/source-rule-reader.ts?raw';
+import characterLevelSource from '../rules/character-level.ts?raw';
 import slotGeneratorSource from '../grants/grant-rule-slot-generator.ts?raw';
 import grantPlannerSource from '../grants/grant-rule-planner.ts?raw';
+import skillGrantsSource from '../grants/skill-grants.ts?raw';
+import skillExpertiseGrantsSource from '../grants/skill-expertise-grants.ts?raw';
+import spellEligibilitySource from '../eligibility/spell-selection-eligibility.ts?raw';
+import spellConstraintSource from '../eligibility/spell-selection-constraint.ts?raw';
 import storedProjectorSource from './stored-authored-content-projector-v1.ts?raw';
 import contentIdentitySource from './content-identity.ts?raw';
 import contentRegistrySource from './content-registry.ts?raw';
@@ -26,11 +31,12 @@ import { reconcileSpeciesLineageContentV2 } from './reconcile-species-lineage-co
 /**
  * One append-only semantic catalog migration.
  *
- * `sources` explicitly lists the committed TypeScript modules whose behaviour
- * the migration owns: its implementation and any bespoke extracted seam it
- * invokes. General runtime infrastructure and type-only imports stay outside
- * this boundary. Each module is imported with Vite's `?raw` suffix; emitted
- * JavaScript function source is not a stable persistence checksum.
+ * `sources` explicitly lists the committed TypeScript modules whose
+ * migration-specific behaviour determines its reconciled rows, including
+ * decision-bearing runtime dependencies. Generic runtime infrastructure and
+ * type-only imports stay outside this boundary. Each module is imported with
+ * Vite's `?raw` suffix; emitted JavaScript function source is not a stable
+ * persistence checksum.
  */
 export interface CatalogDataMigrationSource {
   readonly path: string;
@@ -105,12 +111,32 @@ export const CATALOG_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
           bytes: sourceRuleReaderSource,
         }),
         Object.freeze({
+          path: 'src/rules/character-level.ts',
+          bytes: characterLevelSource,
+        }),
+        Object.freeze({
           path: 'src/grants/grant-rule-slot-generator.ts',
           bytes: slotGeneratorSource,
         }),
         Object.freeze({
           path: 'src/grants/grant-rule-planner.ts',
           bytes: grantPlannerSource,
+        }),
+        Object.freeze({
+          path: 'src/grants/skill-grants.ts',
+          bytes: skillGrantsSource,
+        }),
+        Object.freeze({
+          path: 'src/grants/skill-expertise-grants.ts',
+          bytes: skillExpertiseGrantsSource,
+        }),
+        Object.freeze({
+          path: 'src/eligibility/spell-selection-eligibility.ts',
+          bytes: spellEligibilitySource,
+        }),
+        Object.freeze({
+          path: 'src/eligibility/spell-selection-constraint.ts',
+          bytes: spellConstraintSource,
         }),
         Object.freeze({
           path: 'src/catalog/stored-authored-content-projector-v1.ts',
@@ -126,7 +152,7 @@ export const CATALOG_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
         }),
       ]),
       checksum:
-        'a3c32d87b9f948333f0b487f16aff2776b72cec9511b05447d852277bdf2ce8b',
+        '7f5711171c9f262bf89a8f8b1b5a53e9c317b5f0883f53633a4fa1b60d683e9d',
       run: reconcileSpeciesLineageContentV2,
     }),
   ]);

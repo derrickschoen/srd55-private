@@ -81,13 +81,18 @@ describe('catalog data-migration registry', () => {
         'src/grants/configured-choice-rule.ts',
         'src/grants/grant-rule.ts',
         'src/grants/source-rule-reader.ts',
+        'src/rules/character-level.ts',
         'src/grants/grant-rule-slot-generator.ts',
         'src/grants/grant-rule-planner.ts',
+        'src/grants/skill-grants.ts',
+        'src/grants/skill-expertise-grants.ts',
+        'src/eligibility/spell-selection-eligibility.ts',
+        'src/eligibility/spell-selection-constraint.ts',
         'src/catalog/stored-authored-content-projector-v1.ts',
         'src/catalog/content-identity.ts',
         'src/catalog/content-registry.ts',
       ],
-      checksum: 'a3c32d87b9f948333f0b487f16aff2776b72cec9511b05447d852277bdf2ce8b',
+      checksum: '7f5711171c9f262bf89a8f8b1b5a53e9c317b5f0883f53633a4fa1b60d683e9d',
     }]);
     expect(() =>
       validateCatalogDataMigrationRegistry(CATALOG_DATA_MIGRATIONS)

@@ -460,11 +460,10 @@ describe('guided species step', () => {
     step.cleanup();
   });
 
-  it('says Elf and Gnome lineage spells arrive when their unchosen lineage does', () => {
+  it('distinguishes an Elf with an unchosen lineage from a plain species', () => {
     const options = [
       originOption(lineageKeyEndingIn(':species:elf'), 'Elf', true),
-      originOption(lineageKeyEndingIn(':species:gnome'), 'Gnome', true),
-      originOption(lineageKeyEndingIn(':species:tiefling'), 'Tiefling', true),
+      originOption('2024:species:dwarf', 'Dwarf', false),
     ];
     const step = createSpeciesStep({
       characterId: 1,
@@ -487,14 +486,12 @@ describe('guided species step', () => {
     };
 
     expect(cardText('Elf')).toMatch(
-      /lineage spells.*arrive.*choose.*lineage/i,
+      /required choices this step cannot make yet.*an Elven Lineage/is,
     );
-    expect(cardText('Gnome')).toMatch(
-      /lineage spells.*arrive.*choose.*lineage/i,
+    expect(cardText('Dwarf')).toContain(
+      'The SRD offers no further choice for this species.',
     );
-    expect(cardText('Tiefling')).not.toMatch(
-      /lineage spells.*arrive.*choose.*lineage/i,
-    );
+    expect(cardText('Dwarf')).not.toMatch(/lineage/i);
     step.cleanup();
   });
 
