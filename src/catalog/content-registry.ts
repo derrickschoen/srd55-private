@@ -819,9 +819,10 @@ export function registerContentFingerprint(
 }
 
 /**
- * Move one aggregate's content-v1 fingerprint without changing its stable key.
- * Seeders and the bundled reconciliation pass share this seam so replacement
- * writes cannot update live content while leaving registry history behind.
+ * Compatibility entry point for content-v1 callers. Current-row ownership is
+ * scheme-less, so this must share the general reconciler: a later-scheme
+ * current row is superseded before v1 is installed, never ignored and joined
+ * by a second current row.
  */
 export function reconcileCurrentContentFingerprintV1(
   db: DatabaseContext,
@@ -831,85 +832,7 @@ export function reconcileCurrentContentFingerprintV1(
     readonly identity: DerivedContentIdentityV1<ContentKind, unknown>;
   },
 ): 'registered' | 'unchanged' | 'moved' {
-  const current = db.oneRaw(
-    `SELECT fingerprint_digest, canonical_json
-     FROM catalog_content_fingerprints
-     WHERE content_kind = ? AND content_key = ?
-       AND fingerprint_scheme = ? AND fingerprint_role = 'current'`,
-    [input.kind, input.contentKey, CONTENT_FINGERPRINT_SCHEME_V1],
-  );
-  const currentDigest = current === null
-    ? null
-    : sqlString(current, 'fingerprint_digest');
-  const currentCanonical = current === null
-    ? null
-    : sqlString(current, 'canonical_json');
-  if (
-    currentDigest !== null && currentCanonical !== null &&
-    sha256(currentCanonical) !== currentDigest
-  ) {
-    throw new ContentIdentityCollision();
-  }
-  if (currentDigest === input.identity.digest) {
-    if (currentCanonical !== input.identity.canonicalJson) {
-      throw new ContentIdentityCollision();
-    }
-    return 'unchanged';
-  }
-
-  if (current !== null) {
-    db.exec(
-      `UPDATE catalog_content_fingerprints
-       SET fingerprint_role = 'bundled-historical'
-       WHERE content_kind = ? AND content_key = ?
-         AND fingerprint_scheme = ? AND fingerprint_role = 'current'`,
-      [input.kind, input.contentKey, CONTENT_FINGERPRINT_SCHEME_V1],
-    );
-  }
-
-  const prior = db.oneRaw(
-    `SELECT canonical_json
-     FROM catalog_content_fingerprints
-     WHERE content_kind = ? AND content_key = ?
-       AND fingerprint_scheme = ? AND fingerprint_digest = ?`,
-    [
-      input.kind,
-      input.contentKey,
-      CONTENT_FINGERPRINT_SCHEME_V1,
-      input.identity.digest,
-    ],
-  );
-  if (prior !== null) {
-    const priorCanonical = sqlString(prior, 'canonical_json');
-    if (
-      sha256(priorCanonical) !== input.identity.digest ||
-      priorCanonical !== input.identity.canonicalJson
-    ) {
-      throw new ContentIdentityCollision();
-    }
-    db.exec(
-      `UPDATE catalog_content_fingerprints
-       SET fingerprint_role = 'current'
-       WHERE content_kind = ? AND content_key = ?
-         AND fingerprint_scheme = ? AND fingerprint_digest = ?`,
-      [
-        input.kind,
-        input.contentKey,
-        CONTENT_FINGERPRINT_SCHEME_V1,
-        input.identity.digest,
-      ],
-    );
-  } else {
-    registerContentFingerprint(db, {
-      kind: input.kind,
-      contentKey: input.contentKey,
-      scheme: CONTENT_FINGERPRINT_SCHEME_V1,
-      digest: input.identity.digest,
-      canonicalJson: input.identity.canonicalJson,
-      role: 'current',
-    });
-  }
-  return current === null ? 'registered' : 'moved';
+  return reconcileCurrentContentFingerprint(db, input);
 }
 
 export class ContentFingerprintPromotionRefusal extends Error {
