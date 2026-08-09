@@ -465,6 +465,7 @@
   .guided-skill-fill,
   .guided-skill-clear,
   .guided-expertise-choice button,
+  .guided-spell-change,
   .guided-equipment-choose {
     min-height: 2.4rem;
     border: 1px solid var(--accent, #333);
@@ -502,8 +503,38 @@
     max-width: 100%;
   }
 
-  .guided-panel .spell-picker + .spell-picker {
+  .guided-spell-choice + .guided-spell-choice {
     margin-top: 0.75rem;
+  }
+
+  .guided-spell-choice-label {
+    display: block;
+    margin-bottom: 0.3rem;
+    font-size: 0.9rem;
+    font-weight: 650;
+  }
+
+  .guided-spell-summary {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) max-content;
+    align-items: center;
+    gap: 0.3rem 0.75rem;
+    padding: 0.65rem 0;
+    border-bottom: 1px solid var(--border, #c9c9c9);
+  }
+
+  .guided-spell-summary .catalog-layer-disclosure {
+    grid-column: 1;
+  }
+
+  .guided-spell-change {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    min-height: 2.4rem;
+  }
+
+  .guided-spell-status:empty {
+    margin: 0;
   }
 
   .guided-panel .spell-options {

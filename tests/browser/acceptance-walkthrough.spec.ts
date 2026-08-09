@@ -195,9 +195,9 @@ test('an unassisted sitting creates a caster through the current guided level 1 
     const picker = pickers.first();
     const label = await picker.getAttribute('aria-label');
     const search =
-      label?.includes('cantrips') === true
+      label?.includes('cantrip') === true
         ? cantrips.shift()
-        : label?.startsWith('Wizard spellbook') === true
+        : label?.includes('spellbook') === true
           ? spellbookSpells.shift()
           : preparedSpells.shift();
     if (search === undefined) {

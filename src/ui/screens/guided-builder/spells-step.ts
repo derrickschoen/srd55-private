@@ -5,9 +5,18 @@ import {
   type GuidedSpellsStepState,
 } from '../../../builder/contracts';
 import type { EligibleSpell } from '../../../domain/read-models';
-import { element, type Cleanup } from '../../dom';
-import { createSpellPicker } from '../planner/spell-picker';
+import { catalogControlDescription } from '../../catalog-control-disclosure';
+import { clear, element, listen, type Cleanup } from '../../dom';
+import {
+  createSpellPicker,
+  spellPickerControlId,
+} from '../planner/spell-picker';
 import { characterListLink, guidedShell } from './guided-builder';
+
+export interface GuidedSpellTransition {
+  readonly focusKey: string;
+  readonly announcement: string;
+}
 
 export function createSpellsStep(options: {
   readonly characterId: number;
@@ -21,26 +30,100 @@ export function createSpellsStep(options: {
     spell: EligibleSpell,
     operationUuid: string,
   ) => Promise<unknown>;
-  readonly navigate: (path: string) => void;
+  readonly navigate: (
+    path: string,
+    transition?: GuidedSpellTransition,
+  ) => void;
 }): { readonly element: HTMLElement; readonly cleanup: Cleanup } {
-  const pickers = options.state.choices.map((choice) => {
-    const picker = createSpellPicker({
-      addressKey: `${choice.kind}-${String(choice.id)}`,
-      label: choice.label,
-      contextDescriptionId: null,
-      value: null,
-      valueCatalogLayer: null,
-      freeTextValue: false,
-      invalid: false,
-      disabled: false,
-      search: async (query) => [...(await options.search(choice, query))],
-      onSelect: (spell) => {
-        void options
-          .assign(choice, spell, crypto.randomUUID())
-          .then(() => options.navigate(guidedBuildPath(options.characterId)));
+  const cleanups: Cleanup[] = [];
+  const pickers: ReturnType<typeof createSpellPicker>[] = [];
+  const status = element('p', {
+    className: 'guided-spell-status',
+    attributes: { role: 'status', 'aria-live': 'polite' },
+  });
+  const announce = (message: string): void => {
+    clear(status);
+    status.textContent = message;
+  };
+  const rows = options.state.choices.map((choice) => {
+    const addressKey = `${choice.kind}-${String(choice.id)}`;
+    const focusKey = `guided-spell-change-${addressKey}`;
+    const row = element('div', { className: 'guided-spell-choice' });
+    const renderPicker = (focus: boolean): void => {
+      const picker = createSpellPicker({
+        addressKey,
+        label: choice.label,
+        contextDescriptionId: null,
+        value: null,
+        valueCatalogLayer: null,
+        freeTextValue: false,
+        invalid: false,
+        disabled: false,
+        search: async (query) => [...(await options.search(choice, query))],
+        onSelect: (spell) => {
+          void options
+            .assign(choice, spell, crypto.randomUUID())
+            .then(() => {
+              const announcement =
+                `${spell.name} selected for ${choice.label}.`;
+              announce(announcement);
+              options.navigate(
+                guidedBuildPath(options.characterId),
+                { focusKey, announcement },
+              );
+            });
+        },
+      });
+      pickers.push(picker);
+      row.replaceChildren(
+        element('label', {
+          className: 'guided-spell-choice-label',
+          text: choice.label,
+          attributes: { for: spellPickerControlId(addressKey) },
+        }),
+        picker.element,
+      );
+      if (focus) picker.focus();
+    };
+
+    if (
+      choice.selected_spell_name === null ||
+      choice.selected_spell_catalog_layer === null
+    ) {
+      renderPicker(false);
+      return row;
+    }
+
+    const change = element('button', {
+      className: 'guided-spell-change',
+      text: `Change ${choice.label}`,
+      attributes: {
+        type: 'button',
+        'data-focus-key': focusKey,
       },
     });
-    return picker;
+    const disclosure = catalogControlDescription(
+      change,
+      `guided-spell-${addressKey}-catalog-layer`,
+      choice.selected_spell_catalog_layer,
+    );
+    const summary = element('div', { className: 'guided-spell-summary' }, [
+      element('span', {
+        text: `${choice.selected_spell_name} — ${choice.label}`,
+      }),
+      disclosure,
+      change,
+    ]);
+    cleanups.push(
+      listen(change, 'click', () => {
+        announce(
+          `Choose a replacement for ${choice.selected_spell_name} in ${choice.label}.`,
+        );
+        renderPicker(true);
+      }),
+    );
+    row.append(summary);
+    return row;
   });
   const panel = element(
     'section',
@@ -58,12 +141,16 @@ export function createSpellsStep(options: {
           'class and feat rules. Search results use the same eligibility ' +
           'constraints as the planner.',
       }),
-      ...pickers.map((picker) => picker.element),
+      ...rows,
+      status,
       characterListLink(),
     ],
   );
   return {
     element: guidedShell('spells', panel),
-    cleanup: () => pickers.forEach((picker) => picker.destroy()),
+    cleanup: () => {
+      pickers.forEach((picker) => picker.destroy());
+      cleanups.forEach((cleanup) => cleanup());
+    },
   };
 }

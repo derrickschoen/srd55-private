@@ -260,6 +260,22 @@ describe('the S-C exit: a Fighter with a skill-granting background still owes tw
     expect(state.species_choices).toMatchObject([
       { grant_key: SKILL_GRANT_KEYS.speciesSkillful },
     ]);
+    const renderedStep = createSkillsStep({
+      characterId,
+      state,
+      fillSkillGrant: () => Promise.reject(new Error('not submitted')),
+      navigate: () => undefined,
+    });
+    expect(
+      interactiveElement(renderedStep.element)
+        .querySelectorAll('.guided-skill-choice-label')
+        .map((label) => elementText(label.children[0] as unknown as Node)),
+    ).toEqual([
+      'Human Skillful skill',
+      'Fighter skill 1',
+      'Fighter skill 2',
+    ]);
+    renderedStep.cleanup();
 
     // Fill ONE ordinal: still outstanding — a partial fill silences nothing.
     await fillThroughRpc(
