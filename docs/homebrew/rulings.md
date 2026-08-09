@@ -5,6 +5,32 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-10 — Collaborative audit (Opus + Sol): sim rebuilt after ~20 accepted findings; corrected boards on the record
+
+At the owner's direction, two independent model sessions audited every sim
+build; findings were adjudicated and the sim rebuilt (`sim4.py`). Accepted,
+highest-impact: 2024 Vow of Enmity and Bonus-Action Divine Smite conflict in
+round 1 (both auditors independently); **the flagship CME build was illegal**
+(Sorc 3/Lore 8 lacks Magical Secrets — rebuilt as Sorc 3/Wizard 8, which
+also removed the Quickened-Metamagic stacking that spell's own text
+forbids); Bladelock's Devouring Blade needs Warlock 12; the ranged Thief
+stacked two Bonus Actions; GWM is once per turn; **monk Flurry is three
+strikes from level 10** (Heightened Focus — the Barbed Court was ~9 DPR
+under-reported); Thief's Reflexes doubles round 1 at Rogue 17. Rejected
+with reasons: the 2014 GWF-reroll claim (2024 is treat-1-2-as-3), deleting
+the monk's Graze (Court Forms is the explicit grant), and "monks have no
+slots" (this subclass is a third-caster).
+
+Corrected burst boards (L3/6/11/17, AC 14/16/18/18; day within 1 except
+paladin): **Barbed Court 16.2/40.9/90.5/138.5** (fights-back env);
+**Veteran melee 25.1/32.8/64.5/108.9, ranged 54.8/93.5 at 11/17**; Paladin
+19.5/31.2/52.2/60.8 (day 46.3/53.3); Thief 18.4/23.7/37.2/64.2; Champion
+10.8/26.7/43.8/52.3; Bladelock ≤41.1/64.5; legal CME nova 129/265; Valor
+90/225. Ratio note, recorded plainly: the homebrew ratios ROSE (Veteran
+1.05×/1.24×/1.79×; monk 1.31×/1.73×/2.28×) chiefly because the corrected
+paladin fell and the monk gained a missed base-class feature — not from any
+homebrew change. Publication review (Phase C) is running on both docs.
+
 ## 2026-08-10 — VETERAN: the table becomes two one-line formulas — Deeper Cuts (+1 die) and Veteran's Strike (dice = Rogue level at 9)
 
 Owner's ruling, verbatim:
