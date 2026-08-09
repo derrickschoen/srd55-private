@@ -5,6 +5,69 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-08 — Barbed Court: the Mage Hand slap becomes a level-3 attack rider (Nick-style, 1d4 + spellcasting modifier)
+
+Owner's ruling, verbatim:
+
+> I like the theme of the mage hand slapping the target. Make it so that at
+> lvl3 you can make an unarmed off hand strike within 5 feet to have the mage
+> hand slap the target. Make it deal 1d4 + spellcasting modifier and give it
+> the same mechanic and the nick property to free up the monk bonus action.
+> Make sure it is worded so it will still work with bonus action attack for
+> the monk as well
+
+Effect: a level-3 feature rides on the granted *Mage Hand* — once per turn,
+when the monk takes the Attack action and makes an Unarmed Strike, the hand
+can slap a creature within 5 feet of it **as part of the Attack action**
+(the Nick mechanic), dealing 1d4 + spellcasting modifier. Explicitly does not
+consume the Bonus Action and does not count as the Light property's extra
+attack, so the Martial Arts Bonus Action strike and Flurry of Blows stack on
+top unchanged.
+
+Working wording for the rewrite (not yet owner-approved verbatim):
+
+> **Courtier's Slap.** While your Mage Hand is manifested, once on each of
+> your turns when you take the Attack action and make an Unarmed Strike, you
+> can also have the hand slap one creature within 5 feet of it as part of
+> that action. Make a melee spell attack; on a hit, the target takes 1d4 +
+> your Wisdom modifier Force damage. This attack doesn't require your Bonus
+> Action and doesn't count as the extra attack of a weapon's Light property.
+
+Two interpretations stated as assumptions, flagged for one-word override:
+
+1. **Attack roll: melee spell attack (Wisdom), not a true Unarmed Strike.**
+   The owner's "unarmed off hand strike" is read as the monk's triggering
+   motion; "1d4 + spellcasting modifier" puts the slap in the casting half of
+   the kit. The alternative — a genuine Unarmed Strike through the hand —
+   would pull in Stunning Strike, the +1/+2/+3 ladder and grapple riders;
+   heavier than the words suggest.
+2. **Damage type: Force** (the spectral standard). Psychic (the humiliation
+   reading, matching Vicious Mockery) is the one-word alternative.
+
+Measurements recorded:
+
+- +1d4+Wis once/turn ≈ **+4 DPR at Monk 3** (5.5 avg at ~70%). A Barbed
+  Court 3 now swings three times per round baseline (Attack + slap + Bonus
+  Action strike), four with Flurry — attack counts a Fighter reaches at 11.
+  Front-load doctrine priced; F3 Dip Bait meter moves again (three levels of
+  Monk now buy a permanent once-per-turn extra attack rider on a cantrip).
+- Practical governor: the hand must already be manifested and must be
+  *positioned* — the move-the-hand action cost from the backlog is now
+  load-bearing and needs an answer at rewrite time.
+
+Follow-up ruling, same sitting, verbatim:
+
+> Also extend the duration of mage hand to 8hours
+
+Applied: for a Barbed Court monk, *Mage Hand* lasts **8 hours** instead of 1
+minute. The hand becomes an all-day courtier — cast once after a Long Rest,
+not per fight — which deletes the Action-to-cast governor above; the 30-foot
+leash and the recast-vanishes clause remain SRD-standard, and positioning
+(the move cost) is now the slap's only practical limiter. Nearest official
+shape: extended-duration signature cantrips on subclasses are precedented in
+non-SRD material (distance markers only); the mechanic is a plain duration
+override in our own text, no licensing exposure.
+
 ## 2026-08-08 — Barbed Court: Conjure Minor Elementals joins the Monk-11 row, Focus-castable for 4
 
 Owner's rulings, verbatim:
