@@ -14,9 +14,10 @@
  * THE REFUSALS LIVE HERE, IN THE COMMAND — not in a screen. A control
  * scoped to "the screen has no class picker" passes while proving nothing
  * (§8, L-STRAIGHT); the guard that counts is the one every caller hits.
- * They are THREE, not the plan's four: `subclass_required` was struck by
- * D70 — see the seam's note — so level 3 proceeds with the choice owed,
- * never refused.
+ * `subclass_required` was struck by D70 — see the seam's note — so level 3
+ * proceeds with the choice owed, never refused. B1's allocation gate is also
+ * here: the friendly query terminal is not a security boundary for callers
+ * of the generic command RPC.
  * Refusals are raised BEFORE the transaction opens, the E-B precedent: a
  * structured, named refusal, never a greyed-out button and never a raw
  * constraint violation.
@@ -177,7 +178,7 @@ export class LevelUpClassCommand {
       throw new TypeError('Unknown class.');
     }
 
-    // ---- The guards, BEFORE the transaction (§8b; three since D70). -------
+    // ---- The guards, BEFORE the transaction (§8b). ------------------------
 
     // L-STRAIGHT: the levelling path refuses a class the character does not
     // already have. Entry is `update_class`'s job; levelling a class that
@@ -200,6 +201,21 @@ export class LevelUpClassCommand {
       refuse(
         LEVEL_UP_REFUSAL_REASONS.classNotHeld,
         `This character has no ${definition.name} levels to advance.`,
+      );
+    }
+
+    // B1: every command caller, including `commands.execute`, must cross the
+    // same allocation boundary as the friendly query surface. The six score
+    // columns default to 10, so reading them cannot distinguish a choice from
+    // untouched schema defaults; only the explicit method can.
+    const allocationMethod = this.db.scalar<string>(
+      'SELECT ability_allocation_method FROM characters WHERE id = ?',
+      [characterId],
+    );
+    if (allocationMethod === null) {
+      refuse(
+        LEVEL_UP_REFUSAL_REASONS.incompleteLevelOne,
+        'Ability scores must be completed before leveling up.',
       );
     }
 

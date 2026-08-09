@@ -54,8 +54,8 @@ type DatabaseRows = Readonly<Record<string, readonly Record<string, unknown>[]>>
  *   boundary assertion fail in "keeps the write-capable rollback...".
  * - W-COMMAND-ATOMIC `force-late-spell-refusal` makes the full database-row
  *   equality assertion fail in "keeps a late invalid locator atomic...".
- * - W-REFUSALS `strip-refusal-data-in-worker` makes the exact three-reason
- *   assertion fail in "preserves all three LU-1 refusal keys...".
+ * - W-REFUSALS `strip-refusal-data-in-worker` makes the exact four-reason
+ *   assertion fail in "preserves all four LU-1 refusal keys...".
  * - W-PLANNED-SPELL `resolve-locator-as-row-id` makes Preview/commit sheet
  *   parity fail in "rolls back every database row...".
  * - W-ACCEPTANCE-ORACLE `change-wizard-2-oracle-name` makes the exact planned
@@ -140,7 +140,8 @@ describe('level-up rollback preview RPC', () => {
     db.exec(
       `UPDATE characters
        SET strength = 15, dexterity = 14, constitution = 15,
-           intelligence = 13, wisdom = 10, charisma = 8
+           intelligence = 13, wisdom = 10, charisma = 8,
+           ability_allocation_method = 'manual'
        WHERE id = ?`,
       [characterId],
     );
@@ -430,7 +431,7 @@ describe('level-up rollback preview RPC', () => {
     });
   });
 
-  it('preserves all three LU-1 refusal keys as worker data', async () => {
+  it('preserves all four LU-1 refusal keys as worker data', async () => {
     const db = harness.context.db;
     const wizardId = classId('Wizard');
     const classless = new CharacterCrud(db).create({ name: 'Classless' }).id;
@@ -451,6 +452,11 @@ describe('level-up rollback preview RPC', () => {
       { type: 'update_class', class_definition_id: wizardId },
       new CharacterCommandIntegrity('refusal-fixture-key'),
     ).apply(wizard);
+    db.exec(
+      `UPDATE characters SET ability_allocation_method = 'manual'
+       WHERE id = ?`,
+      [wizard],
+    );
     const nonadjacent = await dispatch('commands.execute', {
       character_id: wizard,
       operation_uuid: crypto.randomUUID(),
@@ -469,6 +475,11 @@ describe('level-up rollback preview RPC', () => {
       { type: 'update_class', class_definition_id: fighterId },
       new CharacterCommandIntegrity('refusal-fixture-key'),
     ).apply(fighter);
+    db.exec(
+      `UPDATE characters SET ability_allocation_method = 'manual'
+       WHERE id = ?`,
+      [fighter],
+    );
     raiseClassLevelForTest(db, fighter, fighterId, 3);
     const missingFeat = await dispatch('commands.execute', {
       character_id: fighter,
@@ -481,15 +492,38 @@ describe('level-up rollback preview RPC', () => {
       },
     });
 
+    const unallocated = new CharacterCrud(db).create({
+      name: 'Unallocated Fighter',
+    }).id;
+    new UpdateClassCommand(
+      db,
+      { type: 'update_class', class_definition_id: fighterId },
+      new CharacterCommandIntegrity('refusal-fixture-key'),
+    ).apply(unallocated);
+    const beforeUnallocated = databaseRows();
+    const incomplete = await dispatch('commands.execute', {
+      character_id: unallocated,
+      operation_uuid: crypto.randomUUID(),
+      expected_revision: 0,
+      command: {
+        type: 'level_up_class',
+        class_definition_id: fighterId,
+        target_level: 2,
+      },
+    });
+
     expect([
       errorOf(classNotHeld).data,
       errorOf(nonadjacent).data,
       errorOf(missingFeat).data,
+      errorOf(incomplete).data,
     ]).toEqual([
       { reason: 'class_not_held' },
       { reason: 'level_not_adjacent' },
       { reason: 'ability_increase_required' },
+      { reason: 'incomplete_level_one' },
     ]);
+    expect(databaseRows()).toEqual(beforeUnallocated);
   });
 
   it('keeps a late invalid locator atomic through both preview and executor paths', async () => {

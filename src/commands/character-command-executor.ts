@@ -649,6 +649,9 @@ export class CharacterCommandExecutor {
     before: CharacterStateSnapshot,
   ): Promise<StoredCommandInverse> {
     switch (payload.type) {
+      // Provisional only: `UpdateAbilityCommand.invertsAfterApply` replaces
+      // this with a snapshot when the first workspace edit also changes the
+      // allocation signal, or with this precise payload for later edits.
       case 'update_ability':
         return {
           type: 'update_ability',
@@ -738,10 +741,9 @@ export class CharacterCommandExecutor {
       // `allocate_abilities` is PINNED to a snapshot inverse (plan §3.1): root
       // columns come back only through a snapshot whose projection includes
       // them, and `ability_allocation_method` is in `CHARACTER_STATE_COLUMNS`,
-      // so undo restores the allocation signal WITH the six scores. Six
-      // `update_ability` inverses would restore the numbers and leave the
-      // signal standing — a character that reads as allocated to scores nobody
-      // allocated.
+      // so undo restores the allocation signal WITH the six scores.
+      // A first `update_ability` now resolves the same issue after apply with
+      // a snapshot inverse; later edits keep their precise one-field inverse.
       // `level_up_class` is PINNED to a snapshot inverse (level-up plan
       // §8b): the write moves the level row, feat occurrence/effect rows,
       // grants and source instances together, and a field-by-field inverse

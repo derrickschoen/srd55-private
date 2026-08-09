@@ -37,7 +37,7 @@ export type { LevelUpAbilityIncrease, LevelUpClassCommand };
 export const LEVEL_UP_CLASS_COMMAND_TYPE = 'level_up_class' as const;
 
 /**
- * THE COMMAND-LAYER REFUSALS — THREE, NOT §8b's FOUR — named in the seam,
+ * THE COMMAND-LAYER REFUSALS — named in the seam,
  * never invented per dispatch, and raised by the COMMAND before its
  * transaction (the E-B precedent: a structured refusal, not a greyed-out
  * button):
@@ -49,6 +49,9 @@ export const LEVEL_UP_CLASS_COMMAND_TYPE = 'level_up_class' as const;
  *    the seeded data, per class — with no increase list.
  *  - `level_not_adjacent` (L-ADJACENT): a target level that is not exactly
  *    the class's current level plus one.
+ *  - `incomplete_level_one` (B1): ability-derived level-up values are never
+ *    computed from the six schema defaults before a player has claimed the
+ *    scores through allocation or a deliberate workspace edit.
  *
  * `subclass_required` IS DELIBERATELY ABSENT — struck by D70. An unpicked
  * subclass remains a SAVEABLE state that WARNS: level 3 proceeds, the command
@@ -59,6 +62,7 @@ export const LEVEL_UP_REFUSAL_REASONS = Object.freeze({
   classNotHeld: 'class_not_held',
   abilityIncreaseRequired: 'ability_increase_required',
   levelNotAdjacent: 'level_not_adjacent',
+  incompleteLevelOne: 'incomplete_level_one',
   plannedSubchoiceRefused: 'planned_subchoice_refused',
 } as const);
 

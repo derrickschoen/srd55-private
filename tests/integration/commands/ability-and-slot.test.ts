@@ -1,6 +1,7 @@
 import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterAll, describe, expect, it } from 'vitest';
 import { CharacterState } from '../../../src/character/character-state';
+import { CharacterCommandExecutor } from '../../../src/commands/character-command-executor';
 import { UpdateAbilityCommand } from '../../../src/commands/update-ability';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { ClearSlotCommand } from '../../../src/commands/set-slot/clear';
@@ -88,8 +89,10 @@ async function fixture(): Promise<Fixture> {
   openDatabases.push(connection);
   const db = new DatabaseContext(connection);
   const characterId = db.exec(
-    `INSERT INTO characters (name, wisdom, allow_legacy, created_at, updated_at)
-     VALUES ('Command Character', 13, 1, ?, ?)`,
+    `INSERT INTO characters (
+       name, wisdom, allow_legacy, ability_allocation_method,
+       created_at, updated_at
+     ) VALUES ('Command Character', 13, 1, 'point_buy', ?, ?)`,
     [oldTimestamp, oldTimestamp],
   ).lastInsertId;
   const otherCharacterId = db.exec(
@@ -205,20 +208,25 @@ describe('update_ability command', () => {
 
     expect(
       test.db.oneRaw(
-        `SELECT wisdom, intelligence, updated_at
+        `SELECT wisdom, intelligence, ability_allocation_method, updated_at
          FROM characters WHERE id = ?`,
         [test.characterId],
       ),
     ).toEqual({
       wisdom: 18,
       intelligence: 10,
+      ability_allocation_method: 'point_buy',
       updated_at: changedTimestamp,
     });
-    expect(command.inverse()).toEqual({
+    const inversePayload = command.inverse();
+    expect(inversePayload).toEqual({
       type: 'update_ability',
       ability: 'wisdom',
       score: 13,
     });
+    if (inversePayload.type !== 'update_ability') {
+      throw new Error('An already-allocated ability edit must use a precise inverse.');
+    }
     expect(state.diff(before, after)).toEqual([
       {
         entity_type: 'character',
@@ -230,16 +238,21 @@ describe('update_ability command', () => {
 
     const inverse = new UpdateAbilityCommand(
       test.db,
-      command.inverse(),
+      inversePayload,
       clock(restoredTimestamp),
     );
     inverse.apply(test.characterId);
     expect(
       test.db.oneRaw(
-        'SELECT wisdom, updated_at FROM characters WHERE id = ?',
+        `SELECT wisdom, ability_allocation_method, updated_at
+         FROM characters WHERE id = ?`,
         [test.characterId],
       ),
-    ).toEqual({ wisdom: 13, updated_at: restoredTimestamp });
+    ).toEqual({
+      wisdom: 13,
+      ability_allocation_method: 'point_buy',
+      updated_at: restoredTimestamp,
+    });
 
     const persistedBeforeRejection = test.db.oneRaw(
       'SELECT * FROM characters WHERE id = ?',
@@ -260,6 +273,64 @@ describe('update_ability command', () => {
         test.characterId,
       ]),
     ).toEqual(persistedBeforeRejection);
+  });
+
+  it('claims untouched scores as manual on the first workspace edit and undo restores NULL with the score', async () => {
+    const test = await fixture();
+    test.db.exec(
+      'UPDATE characters SET ability_allocation_method = NULL WHERE id = ?',
+      [test.characterId],
+    );
+    const executor = new CharacterCommandExecutor(test.db, test.integrity);
+
+    const result = await executor.execute({
+      character_id: test.characterId,
+      operation_uuid: crypto.randomUUID(),
+      expected_revision: 0,
+      command: {
+        type: 'update_ability',
+        ability: 'wisdom',
+        score: 18,
+      },
+    });
+
+    expect(result.inverse).toMatchObject({
+      type: 'internal_snapshot_restore',
+    });
+    expect(
+      test.db.oneRaw(
+        `SELECT wisdom, ability_allocation_method, revision
+         FROM characters WHERE id = ?`,
+        [test.characterId],
+      ),
+    ).toEqual({
+      wisdom: 18,
+      ability_allocation_method: 'manual',
+      revision: 1,
+    });
+    expect(
+      test.db.scalar(
+        'SELECT count(*) FROM character_operations WHERE character_id = ?',
+        [test.characterId],
+      ),
+    ).toBe(1);
+
+    await executor.undo({
+      character_id: test.characterId,
+      operation_uuid: result.operation_uuid,
+      expected_revision: 1,
+    });
+    expect(
+      test.db.oneRaw(
+        `SELECT wisdom, ability_allocation_method, revision
+         FROM characters WHERE id = ?`,
+        [test.characterId],
+      ),
+    ).toEqual({
+      wisdom: 13,
+      ability_allocation_method: null,
+      revision: 2,
+    });
   });
 });
 

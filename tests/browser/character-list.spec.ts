@@ -182,6 +182,9 @@ test('U1 incomplete cards resume durable ability work while allocated level-up s
   await expect(
     page.getByRole('heading', { name: 'Finish level 1 before leveling up' }),
   ).toBeVisible();
+  await expect(page.locator('main.level-up-shell')).toContainText(
+    'These ability scores have not been claimed through the guided build or a workspace edit',
+  );
   await expect(page.getByRole('link', { name: 'Resume build' })).toHaveAttribute(
     'href',
     guidedSeam.buildPath,

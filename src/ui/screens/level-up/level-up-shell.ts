@@ -166,7 +166,7 @@ export function renderLevelUpTerminalState(
       terminalPanel(
         LEVEL_UP_PANEL.incompleteLevelOne,
         'Finish level 1 before leveling up',
-        'Ability scores have not been completed, so ability-derived values such as hit points are unknown. Resume the level 1 build first.',
+        'These ability scores have not been claimed through the guided build or a workspace edit, so ability-derived values such as hit points are unknown. Resume the level 1 build first.',
         [
           routerLink(
             'Resume build',

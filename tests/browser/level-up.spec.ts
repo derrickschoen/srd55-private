@@ -411,6 +411,15 @@ test('W-INCOMPLETE classless cards explain the advanced door while held-class wa
   });
   await page.reload();
   await ready(page);
+  const classlessCard = page.locator('.character-card').filter({
+    has: page.getByRole('heading', { name: 'Classless Entry' }),
+  });
+  await expect(
+    classlessCard.getByRole('link', { name: 'Resume build' }),
+  ).toHaveAttribute('href', `/characters/${String(classlessId)}/build/levels/1`);
+  await expect(
+    classlessCard.getByRole('link', { name: 'Level Up' }),
+  ).toHaveCount(0);
   const classlessSeam = await readLevelUpSeam(page, classlessId);
   await page.goto(classlessSeam.path);
   await expect(page).toHaveURL(new URL(classlessSeam.path, page.url()).href);
@@ -452,6 +461,122 @@ test('W-INCOMPLETE classless cards explain the advanced door while held-class wa
   expect(
     await page.locator('[data-level-up-warning] strong').allTextContents(),
   ).toEqual(expect.arrayContaining(classWarnings));
+});
+
+test('U1 direct level-up refuses untouched defaults, then one workspace edit enables the wizard', async ({
+  page,
+}) => {
+  // Measured at 12.4s on the required single-worker port-4880 run; 35s keeps
+  // the file's established contention headroom without masking boot cost.
+  test.setTimeout(35_000);
+  await page.goto('/');
+  await ready(page);
+  const character = await page.evaluate(async () => {
+    await window.staticApp.reset();
+    const classes = await window.appRpc.call<
+      Record<string, never>,
+      readonly { readonly content_key: string; readonly name: string }[]
+    >('queries.characters.guidedClassOptions', {});
+    const fighter = classes.find((candidate) => candidate.name === 'Fighter');
+    if (fighter === undefined) throw new Error('Bundled Fighter was not found.');
+    const created = await window.appRpc.call<
+      { readonly name: string; readonly class_content_key: string },
+      CreatedCharacter
+    >('queries.characters.createGuided', {
+      name: 'Workspace Claimed Fighter',
+      class_content_key: fighter.content_key,
+    });
+    const definitions = await window.staticApp.inspectRows(
+      'class_definitions',
+      { name: 'Fighter' },
+    );
+    return {
+      ...created,
+      classDefinitionId: Number(definitions[0]?.['id']),
+    };
+  });
+  expect(Number.isSafeInteger(character.classDefinitionId)).toBe(true);
+
+  const refusal = await page.evaluate(async ({ id, classDefinitionId }) => {
+    try {
+      await window.appRpc.call('commands.execute', {
+        character_id: id,
+        operation_uuid: crypto.randomUUID(),
+        expected_revision: 0,
+        command: {
+          type: 'level_up_class',
+          class_definition_id: classDefinitionId,
+          target_level: 2,
+        },
+      });
+    } catch (error) {
+      return error !== null && typeof error === 'object'
+        ? (error as { data?: unknown }).data
+        : null;
+    }
+    return null;
+  }, character);
+  expect(refusal).toEqual({ reason: 'incomplete_level_one' });
+  expect(await rows(page, 'characters')).toEqual([
+    expect.objectContaining({
+      id: character.id,
+      strength: 10,
+      ability_allocation_method: null,
+      revision: 0,
+    }),
+  ]);
+  expect(await rows(page, 'character_class_levels')).toEqual([
+    expect.objectContaining({
+      character_id: character.id,
+      class_definition_id: character.classDefinitionId,
+      level: 1,
+    }),
+  ]);
+  expect(await rows(page, 'character_operations')).toHaveLength(0);
+
+  await page.reload();
+  await ready(page);
+  const card = page.locator('.character-card').filter({
+    has: page.getByRole('heading', { name: character.name }),
+  });
+  await card.getByRole('link', { name: 'Open workspace' }).click();
+  await expect(page.locator('#planner-status')).toHaveAttribute(
+    'data-ready',
+    'true',
+    { timeout: 35_000 },
+  );
+  const strength = page.locator('[data-focus-key="ability-strength"]');
+  await strength.fill('12');
+  await strength.press('Enter');
+  await expect.poll(() => rows(page, 'characters')).toEqual([
+    expect.objectContaining({
+      id: character.id,
+      strength: 12,
+      ability_allocation_method: 'manual',
+      revision: 1,
+    }),
+  ]);
+
+  await openReadyReview(page, { ...character, revision: 1 });
+  await page.locator('[data-level-up-confirm]').click();
+  await expect(
+    page.getByRole('heading', { name: 'Fighter level 2 complete' }),
+  ).toBeFocused({ timeout: 35_000 });
+  expect(await rows(page, 'character_class_levels')).toEqual([
+    expect.objectContaining({
+      character_id: character.id,
+      class_definition_id: character.classDefinitionId,
+      level: 2,
+    }),
+  ]);
+  expect(await rows(page, 'characters')).toEqual([
+    expect.objectContaining({
+      id: character.id,
+      ability_allocation_method: 'manual',
+      revision: 2,
+    }),
+  ]);
+  expect(await rows(page, 'character_operations')).toHaveLength(2);
 });
 
 test('W-DOUBLE-CONFIRM two rapid activations create one level, revision, history operation, and UUID', async ({
@@ -697,7 +822,9 @@ test('W-STALE external edit after Preview keeps the draft and requires explicit 
       revision: character.revision + 1,
     }),
   ]);
-  expect(await rows(page, 'character_operations')).toEqual(
+  const operationsAfterExternalEdit = await rows(page, 'character_operations');
+  expect(operationsAfterExternalEdit).toHaveLength(2);
+  expect(operationsAfterExternalEdit).toEqual(
     expect.arrayContaining([
       expect.objectContaining({ operation_uuid: externalOperation }),
     ]),

@@ -20,9 +20,8 @@ const systemClock: CommandClock = () => new Date().toISOString();
  * makes the signal truthful.
  *
  * WHAT THIS COMMAND DOES NOT DO: it never runs on an `update_ability` edit.
- * The method records HOW allocation happened; a later hand edit of one score
- * does not flip it to `'manual'` (pinned by the plan, said out loud there so
- * nobody wires the editor to do it).
+ * A later hand edit preserves an existing method; only the first deliberate
+ * workspace edit of an unallocated character claims the scores as `manual`.
  *
  * ITS INVERSE IS A SNAPSHOT INVERSE — see `prepareInverse` in
  * `character-command-executor.ts`. Root columns are restored only through a
