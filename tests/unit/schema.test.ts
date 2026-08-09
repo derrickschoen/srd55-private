@@ -1014,8 +1014,8 @@ const expectedNamedIndexes: Record<string, string> = {
     'catalog_content_identities:content_kind,normalized_name',
   catalog_content_identities_archive_list_index:
     'catalog_content_identities:archived_at,content_kind,normalized_name,content_key',
-  catalog_content_fingerprints_current_scheme_unique:
-    'catalog_content_fingerprints:content_key,fingerprint_scheme:unique',
+  catalog_content_fingerprints_current_unique:
+    'catalog_content_fingerprints:content_key:unique',
   catalog_content_fingerprints_resolution_index:
     'catalog_content_fingerprints:content_kind,fingerprint_scheme,fingerprint_digest',
   catalog_content_aliases_resolution_index:
@@ -1268,7 +1268,7 @@ const expectedNamedIndexes: Record<string, string> = {
 
 const expectedUniqueGroups: Record<string, string[]> = {
   catalog_content_identities: ['content_kind,content_key'],
-  catalog_content_fingerprints: ['content_key,fingerprint_scheme'],
+  catalog_content_fingerprints: ['content_key'],
   background_definitions: ['content_key'],
   change_log: ['character_id,sequence'],
   character_class_levels: [

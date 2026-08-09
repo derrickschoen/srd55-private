@@ -5,6 +5,7 @@ import { sha256 } from '../crypto/sha256';
 import {
   CONTENT_FINGERPRINT_SCHEME_V1,
   contentFingerprintSchemeRegistry,
+  deriveContentIdentityForScheme,
   deriveContentIdentityV1,
   parseDerivedContentKeyV1,
   type CanonicalContentIdentityJson,
@@ -512,12 +513,16 @@ export function resolveContentAggregate<K extends ContentKind, P>(
     readonly compatibleFingerprints?: readonly ContentFingerprintCandidate[];
     readonly metadataConflict?: boolean;
     readonly assertedKey?: ContentKey;
+    readonly fingerprintScheme?: ContentFingerprintScheme;
   },
 ): {
   readonly identity: DerivedContentIdentityV1<K, P>;
   readonly resolution: ContentResolution;
 } {
-  const identity = deriveContentIdentityV1(input);
+  const identity = deriveContentIdentityForScheme(
+    input.fingerprintScheme ?? CONTENT_FINGERPRINT_SCHEME_V1,
+    input,
+  );
   const fingerprints: readonly ContentFingerprintCandidate[] = Object.freeze([
     {
       scheme: identity.envelope.scheme,
@@ -625,6 +630,7 @@ export function registerAssertedContentIdentity<K extends ContentKind, P>(
     readonly name: string;
     readonly payload: P;
     readonly assertedKey: ContentKey;
+    readonly fingerprintScheme?: ContentFingerprintScheme;
   },
 ): DerivedContentIdentityV1<K, P> {
   if (!isAssertedExternalContentKey(input.assertedKey)) {
@@ -644,7 +650,10 @@ export function registerAssertedContentIdentity<K extends ContentKind, P>(
   if (expected !== input.assertedKey) {
     throw new ContentIdentityKeyRefusal('name_key_mismatch');
   }
-  const identity = deriveContentIdentityV1(input);
+  const identity = deriveContentIdentityForScheme(
+    input.fingerprintScheme ?? CONTENT_FINGERPRINT_SCHEME_V1,
+    input,
+  );
   try {
     db.exec(
       `INSERT INTO catalog_content_identities (
@@ -899,6 +908,122 @@ export function reconcileCurrentContentFingerprintV1(
       canonicalJson: input.identity.canonicalJson,
       role: 'current',
     });
+  }
+  return current === null ? 'registered' : 'moved';
+}
+
+export class ContentFingerprintPromotionRefusal extends Error {
+  constructor() {
+    super('A prior external fingerprint has no lossless adjacent projection.');
+    this.name = 'ContentFingerprintPromotionRefusal';
+  }
+}
+
+/**
+ * Promote one fingerprint across registered schemes while preserving the
+ * scheme-less single-current-row contract used by portable export.
+ */
+export function reconcileCurrentContentFingerprint(
+  db: DatabaseContext,
+  input: {
+    readonly kind: ContentKind;
+    readonly contentKey: ContentKey;
+    readonly identity: DerivedContentIdentityV1<ContentKind, unknown>;
+    readonly externalPriorIsCompatible?: boolean;
+  },
+): 'registered' | 'unchanged' | 'moved' {
+  if (!Object.hasOwn(contentFingerprintSchemeRegistry, input.identity.envelope.scheme)) {
+    throw new TypeError('Cannot promote an unregistered fingerprint scheme.');
+  }
+  const currentRows = db.allRaw(
+    `SELECT fingerprint_scheme, fingerprint_digest, canonical_json
+     FROM catalog_content_fingerprints
+     WHERE content_kind = ? AND content_key = ? AND fingerprint_role = 'current'
+     ORDER BY fingerprint_scheme`,
+    [input.kind, input.contentKey],
+  );
+  if (currentRows.length > 1) throw new ContentIdentityCollision();
+  const current = currentRows[0] ?? null;
+  if (current !== null) {
+    const digest = sqlString(current, 'fingerprint_digest');
+    const canonical = sqlString(current, 'canonical_json');
+    if (sha256(canonical) !== digest) throw new ContentIdentityCollision();
+    if (
+      current.fingerprint_scheme === input.identity.envelope.scheme &&
+      digest === input.identity.digest
+    ) {
+      if (canonical !== input.identity.canonicalJson) {
+        throw new ContentIdentityCollision();
+      }
+      return 'unchanged';
+    }
+  }
+
+  const layer = db.scalar<string>(
+    `SELECT catalog_layer FROM catalog_content_identities
+     WHERE content_kind = ? AND content_key = ?`,
+    [input.kind, input.contentKey],
+  );
+  if (layer === null) throw new ContentIdentityCollision();
+  if (
+    current !== null &&
+    layer === 'external' &&
+    input.externalPriorIsCompatible !== true
+  ) {
+    throw new ContentFingerprintPromotionRefusal();
+  }
+
+  if (current !== null) {
+    db.exec(
+      `UPDATE catalog_content_fingerprints
+       SET fingerprint_role = ?
+       WHERE content_kind = ? AND content_key = ? AND fingerprint_role = 'current'`,
+      [
+        layer === 'bundled' ? 'bundled-historical' : 'compatible',
+        input.kind,
+        input.contentKey,
+      ],
+    );
+  }
+  const prior = db.oneRaw(
+    `SELECT canonical_json FROM catalog_content_fingerprints
+     WHERE content_kind = ? AND content_key = ? AND fingerprint_scheme = ?
+       AND fingerprint_digest = ?`,
+    [
+      input.kind,
+      input.contentKey,
+      input.identity.envelope.scheme,
+      input.identity.digest,
+    ],
+  );
+  if (prior === null) {
+    registerContentFingerprint(db, {
+      kind: input.kind,
+      contentKey: input.contentKey,
+      scheme: input.identity.envelope.scheme,
+      digest: input.identity.digest,
+      canonicalJson: input.identity.canonicalJson,
+      role: 'current',
+    });
+  } else {
+    const canonical = sqlString(prior, 'canonical_json');
+    if (
+      canonical !== input.identity.canonicalJson ||
+      sha256(canonical) !== input.identity.digest
+    ) {
+      throw new ContentIdentityCollision();
+    }
+    db.exec(
+      `UPDATE catalog_content_fingerprints SET fingerprint_role = 'current'
+       WHERE content_kind = ? AND content_key = ? AND fingerprint_scheme = ?
+         AND fingerprint_digest = ?`,
+      [
+        input.kind,
+        input.contentKey,
+        input.identity.envelope.scheme,
+        input.identity.digest,
+      ],
+    );
   }
   return current === null ? 'registered' : 'moved';
 }

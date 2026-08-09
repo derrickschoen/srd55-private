@@ -1593,11 +1593,12 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     rejects: [
       [
         'an unregistered projector scheme',
-        catalogDataMigration({ scheme: 'content-v2' }),
+        catalogDataMigration({ scheme: 'content-v3' }),
       ],
     ],
     accepts: [
       ['the frozen content-v1 projector scheme', catalogDataMigration({})],
+      ['the registered content-v2 projector scheme', catalogDataMigration({ scheme: 'content-v2' })],
     ],
   },
   {

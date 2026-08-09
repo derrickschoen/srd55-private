@@ -1586,6 +1586,105 @@ describe('database migration chain', () => {
     lifecycle.close();
   });
 
+  it('U2-A 0041 preserves v1 catalog rows, admits v2, and enforces one current scheme', async () => {
+    const beforeContentV2 = DATABASE_MIGRATIONS
+      .slice(0, DATABASE_MIGRATIONS.findIndex(
+        (entry) => entry.id === '0041_content_v2',
+      ))
+      .map((entry) => entry.sql)
+      .join('\n');
+    const digest = sha256('abc');
+    const storage = await storageHolding(`${beforeContentV2}
+      INSERT INTO catalog_content_identities (
+        content_key, content_kind, key_kind, catalog_layer, normalized_name
+      ) VALUES (
+        '2024:migration.fixture:content-v2', 'species', 'asserted',
+        'external', 'contentv2'
+      );
+      INSERT INTO catalog_data_migrations (id, scheme, checksum)
+      VALUES (
+        'retire_non_srd_bundled_subclasses_v1', 'content-v1',
+        'e30bd134e9173b51f925e977e3ac8f1e274e14bdf9a3c956c04c9a58b7fde8a4'
+      );
+      INSERT INTO catalog_content_fingerprints (
+        content_kind, fingerprint_scheme, fingerprint_digest, canonical_json,
+        content_key, fingerprint_role
+      ) VALUES (
+        'species', 'content-v1', '${digest}', 'abc',
+        '2024:migration.fixture:content-v2', 'current'
+      );
+      INSERT INTO catalog_content_match_decisions (
+        content_kind, incoming_fingerprint_scheme,
+        incoming_fingerprint_digest, decision, target_content_key
+      ) VALUES (
+        'species', 'content-v1', '${digest}', 'match',
+        '2024:migration.fixture:content-v2'
+      );`);
+    const lifecycle = new DatabaseLifecycle(
+      sqlite3,
+      storage,
+      schema,
+      () => undefined,
+      DATABASE_MIGRATIONS,
+    );
+    lifecycle.open();
+    expect(lifecycle.database.allRaw(
+      `SELECT id, scheme, checksum FROM catalog_data_migrations`,
+    )).toContainEqual({
+      id: 'retire_non_srd_bundled_subclasses_v1',
+      scheme: 'content-v1',
+      checksum: 'e30bd134e9173b51f925e977e3ac8f1e274e14bdf9a3c956c04c9a58b7fde8a4',
+    });
+    expect(lifecycle.database.allRaw(
+      `SELECT fingerprint_scheme, fingerprint_digest, canonical_json,
+              fingerprint_role
+       FROM catalog_content_fingerprints`,
+    )).toEqual([{
+      fingerprint_scheme: 'content-v1',
+      fingerprint_digest: digest,
+      canonical_json: 'abc',
+      fingerprint_role: 'current',
+    }]);
+    expect(lifecycle.database.allRaw(
+      `SELECT incoming_fingerprint_scheme, incoming_fingerprint_digest,
+              decision, target_content_key
+       FROM catalog_content_match_decisions`,
+    )).toEqual([{
+      incoming_fingerprint_scheme: 'content-v1',
+      incoming_fingerprint_digest: digest,
+      decision: 'match',
+      target_content_key: '2024:migration.fixture:content-v2',
+    }]);
+
+    lifecycle.database.exec(
+      `INSERT INTO catalog_content_fingerprints (
+         content_kind, fingerprint_scheme, fingerprint_digest, canonical_json,
+         content_key, fingerprint_role
+       ) VALUES ('species', 'content-v2', ?, 'abc',
+                 '2024:migration.fixture:content-v2', 'compatible')`,
+      [digest],
+    );
+    expect(() => lifecycle.database.exec(
+      `UPDATE catalog_content_fingerprints SET fingerprint_role = 'current'
+       WHERE content_key = '2024:migration.fixture:content-v2'
+         AND fingerprint_scheme = 'content-v2'`,
+    )).toThrow();
+    lifecycle.database.exec(
+      `INSERT INTO catalog_content_match_decisions (
+         content_kind, incoming_fingerprint_scheme,
+         incoming_fingerprint_digest, decision, target_content_key
+       ) VALUES ('species', 'content-v2', ?, 'clone',
+                 '2024:migration.fixture:content-v2')`,
+      [sha256('v2 decision')],
+    );
+    lifecycle.database.exec(
+      `INSERT INTO catalog_data_migrations (id, scheme, checksum)
+       VALUES ('new_data_pass', 'content-v2', ?)`,
+      [sha256('v2 data migration')],
+    );
+    lifecycle.close();
+  });
+
   it('Q4 rejects General background keys and reverse category mutation', () => {
     const database = new sqlite3.oo1.DB(':memory:', 'c');
     try {

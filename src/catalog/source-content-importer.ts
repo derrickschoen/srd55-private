@@ -9,7 +9,10 @@ import type {
   SpeciesContentAggregate,
 } from '../authoring/contracts';
 import type { ContentKey } from '../domain/ids';
-import { CONTENT_FINGERPRINT_SCHEME_V1 } from './content-identity';
+import {
+  CONTENT_FINGERPRINT_SCHEME_V2,
+  isContentFingerprintScheme,
+} from './content-identity';
 import { assertedExternalContentKey } from './catalog-key';
 import { effectColumns } from './equipment-importer';
 import type {
@@ -25,6 +28,7 @@ import {
 } from './source-content-projector-v1';
 import {
   projectAuthoredContentAggregateV1,
+  projectSpeciesContentAggregateV2,
 } from './stored-authored-content-projector-v1';
 import {
   contentFingerprintReferenceKey,
@@ -35,6 +39,12 @@ import {
   type ContentImportProjection,
 } from './content-adoption';
 import { projectStoredContentV1 } from './stored-content-projector-v1';
+import { projectStoredContentV2 } from './stored-content-projector-v2';
+import type {
+  PortableConfiguredChoiceRuleV2,
+  PortableSourceRuleV2,
+  SpeciesProjectorAggregateV2,
+} from './authored-content-projector-contract-v2';
 
 export interface SourceContentImportCounters {
   readonly classes_matched: number;
@@ -93,7 +103,7 @@ function isReference(value: unknown): value is ContentFingerprintReference {
   return value !== null && typeof value === 'object' && !Array.isArray(value) &&
     'kind' in value && 'scheme' in value && 'digest' in value &&
     typeof value.kind === 'string' &&
-    value.scheme === CONTENT_FINGERPRINT_SCHEME_V1 &&
+    isContentFingerprintScheme(value.scheme) &&
     typeof value.digest === 'string';
 }
 
@@ -136,6 +146,43 @@ export function portableStoredGrantRules(
   grants: readonly AuthoringGrant[],
 ): string {
   return storedGrants(db, grants);
+}
+
+function storedConfiguredChoiceV2(
+  db: DatabaseContext,
+  rule: PortableConfiguredChoiceRuleV2,
+): Readonly<Record<string, unknown>> {
+  return {
+    ...rule,
+    options: rule.options.map((option) => ({
+      ...option,
+      grants: option.grants.map((grant) => storedGrant(db, grant)),
+      replaceable_spell_choice: option.replaceable_spell_choice === null
+        ? null
+        : {
+            config_key: option.replaceable_spell_choice.config_key,
+            label: option.replaceable_spell_choice.label,
+            required: true,
+            spell_list: option.replaceable_spell_choice.spell_list,
+            spell_level: 0,
+            initial_spell_version_key: referenceKey(
+              db,
+              option.replaceable_spell_choice.initial_spell,
+            ),
+            display_on_sheet: true,
+          },
+    })),
+  };
+}
+
+export function portableStoredSourceRulesV2(
+  db: DatabaseContext,
+  rules: readonly PortableSourceRuleV2[],
+): string {
+  return JSON.stringify(rules.map((rule) =>
+    rule.kind === 'configured_choice'
+      ? storedConfiguredChoiceV2(db, rule)
+      : storedGrant(db, rule)));
 }
 
 function insertEffects(
@@ -221,6 +268,62 @@ function insertSpecies(db: DatabaseContext, aggregate: SpeciesContentAggregate, 
       [templateId, traitIndex + 1, trait.name, trait.description, now, now],
     ).lastInsertId;
     insertEffects(db, 'species_template_trait_effects', 'species_template_trait_id', traitId, trait.effects);
+  }
+}
+
+function insertSpeciesV2(
+  db: DatabaseContext,
+  aggregate: SpeciesProjectorAggregateV2,
+  contentKey: ContentKey,
+): void {
+  if ('definition_state' in aggregate) {
+    throw new TypeError('A template-only species cannot be installed as a definition.');
+  }
+  const now = timestamp();
+  db.exec(
+    `INSERT INTO species_definitions
+       (content_key, name, rules_edition, repeatable, grant_rules, notes, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      contentKey,
+      aggregate.name,
+      aggregate.rules_edition,
+      aggregate.repeatable,
+      portableStoredSourceRulesV2(db, aggregate.source_rules ?? []),
+      aggregate.reference_text,
+      now,
+      now,
+    ],
+  );
+  const templateId = db.exec(
+    `INSERT INTO species_templates
+       (content_key, rules_edition, name, creature_type, size, alternate_size,
+        base_speed_feet, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [contentKey, aggregate.rules_edition, aggregate.name, aggregate.creature_type,
+      aggregate.primary_size, aggregate.alternate_size,
+      aggregate.walking_speed_feet, now, now],
+  ).lastInsertId;
+  for (const [traitIndex, trait] of aggregate.traits.entries()) {
+    const traitId = db.exec(
+      `INSERT INTO species_template_traits
+         (species_template_id, sort_order, name, description, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [templateId, traitIndex + 1, trait.name, trait.description, now, now],
+    ).lastInsertId;
+    const effects = trait.effects.map((effect): AuthoringCharacterEffect => {
+      if (effect.kind === 'damage_resistance' && effect.damage_type === null) {
+        throw new TypeError('Portable v2 species resistance effects must name a damage type.');
+      }
+      return effect as AuthoringCharacterEffect;
+    });
+    insertEffects(
+      db,
+      'species_template_trait_effects',
+      'species_template_trait_id',
+      traitId,
+      effects,
+    );
   }
 }
 
@@ -382,6 +485,62 @@ export function portableSourceContentImportNode(
     projection: build(aggregate.name, assertedKey, new Map()),
     reproject: (input: Parameters<NonNullable<ContentImportNode['reproject']>>[0]) =>
       build(input.name, input.assertedKey, input.dependencies),
+  });
+}
+
+export function portableSpeciesContentImportNodeV2(
+  db: DatabaseContext,
+  aggregate: SpeciesProjectorAggregateV2,
+  assertedKey: ContentKey,
+): ContentImportNode<'species'> {
+  const counters = emptySourceCounters();
+  const build = (
+    name: string,
+    nextKey: ContentKey,
+    dependencies: ReadonlyMap<string, ContentImportDependencyTarget>,
+  ): ContentImportProjection<'species'> => {
+    const remapped = remapProjectionFingerprintReferences(
+      { ...aggregate, name },
+      dependencies,
+    ) as SpeciesProjectorAggregateV2;
+    const projected = projectSpeciesContentAggregateV2(remapped);
+    return {
+      kind: 'species',
+      fingerprintScheme: CONTENT_FINGERPRINT_SCHEME_V2,
+      edition: remapped.rules_edition,
+      name: remapped.name,
+      assertedKey: nextKey,
+      payload: projected.payload,
+      metadataConflict: rootMetadataConflict(
+        db,
+        'species',
+        nextKey,
+        remapped.name,
+        remapped.rules_edition,
+      ),
+      projectStored: (database, contentKey) => {
+        const stored = projectStoredContentV2(database, 'species', contentKey);
+        return { ...stored, kind: 'species' as const };
+      },
+      install: (database, contentKey, _projection, phase) => {
+        if (
+          database.scalar<number>(
+            'SELECT 1 FROM species_definitions WHERE content_key = ?',
+            [contentKey],
+          ) !== 1
+        ) {
+          insertSpeciesV2(database, remapped, contentKey);
+          if (phase === 'commit') counters.species_created += 1;
+        }
+      },
+    };
+  };
+  return Object.freeze({
+    id: `portable:species:${assertedKey}`,
+    projection: build(aggregate.name, assertedKey, new Map()),
+    reproject: (
+      input: Parameters<NonNullable<ContentImportNode['reproject']>>[0],
+    ) => build(input.name, input.assertedKey, input.dependencies),
   });
 }
 

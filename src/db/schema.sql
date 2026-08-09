@@ -212,14 +212,14 @@ CREATE TABLE `catalog_content_fingerprints` (
 	PRIMARY KEY(`content_kind`, `fingerprint_scheme`, `fingerprint_digest`, `content_key`),
 	FOREIGN KEY (`content_kind`,`content_key`) REFERENCES `catalog_content_identities`(`content_kind`,`content_key`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "catalog_content_fingerprints_content_kind_check" CHECK(`content_kind` IN ('class', 'subclass', 'feat', 'species', 'background', 'spell', 'weapon', 'armor', 'item')),
-	CONSTRAINT "catalog_content_fingerprints_scheme_check" CHECK("catalog_content_fingerprints"."fingerprint_scheme" IN ('content-v1')),
+	CONSTRAINT "catalog_content_fingerprints_scheme_check" CHECK("catalog_content_fingerprints"."fingerprint_scheme" IN ('content-v1', 'content-v2')),
 	CONSTRAINT "catalog_content_fingerprints_digest_check" CHECK(length("catalog_content_fingerprints"."fingerprint_digest") = 64
         AND "catalog_content_fingerprints"."fingerprint_digest" NOT GLOB '*[^0-9a-f]*'),
 	CONSTRAINT "catalog_content_fingerprints_role_check" CHECK("catalog_content_fingerprints"."fingerprint_role"
         IN ('current', 'compatible', 'bundled-historical'))
 );
 
-CREATE UNIQUE INDEX `catalog_content_fingerprints_current_scheme_unique` ON `catalog_content_fingerprints` (`content_key`,`fingerprint_scheme`) WHERE "catalog_content_fingerprints"."fingerprint_role" = 'current';
+CREATE UNIQUE INDEX `catalog_content_fingerprints_current_unique` ON `catalog_content_fingerprints` (`content_key`) WHERE "catalog_content_fingerprints"."fingerprint_role" = 'current';
 CREATE INDEX `catalog_content_fingerprints_resolution_index` ON `catalog_content_fingerprints` (`content_kind`,`fingerprint_scheme`,`fingerprint_digest`);
 CREATE TABLE `catalog_content_identities` (
 	`content_key` VARCHAR PRIMARY KEY NOT NULL,
@@ -321,7 +321,7 @@ CREATE TABLE `catalog_content_match_decisions` (
 	PRIMARY KEY(`content_kind`, `incoming_fingerprint_scheme`, `incoming_fingerprint_digest`),
 	FOREIGN KEY (`content_kind`,`target_content_key`) REFERENCES `catalog_content_identities`(`content_kind`,`content_key`) ON UPDATE no action ON DELETE restrict,
 	CONSTRAINT "catalog_content_match_decisions_content_kind_check" CHECK(`content_kind` IN ('class', 'subclass', 'feat', 'species', 'background', 'spell', 'weapon', 'armor', 'item')),
-	CONSTRAINT "catalog_content_match_decisions_scheme_check" CHECK("catalog_content_match_decisions"."incoming_fingerprint_scheme" IN ('content-v1')),
+	CONSTRAINT "catalog_content_match_decisions_scheme_check" CHECK("catalog_content_match_decisions"."incoming_fingerprint_scheme" IN ('content-v1', 'content-v2')),
 	CONSTRAINT "catalog_content_match_decisions_digest_check" CHECK(length("catalog_content_match_decisions"."incoming_fingerprint_digest") = 64
         AND "catalog_content_match_decisions"."incoming_fingerprint_digest" NOT GLOB '*[^0-9a-f]*'),
 	CONSTRAINT "catalog_content_match_decisions_decision_check" CHECK("catalog_content_match_decisions"."decision" IN ('match', 'clone'))
@@ -346,7 +346,7 @@ CREATE TABLE `catalog_data_migrations` (
 	`checksum` VARCHAR NOT NULL,
 	`applied_at` DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	CONSTRAINT "catalog_data_migrations_id_check" CHECK(length("catalog_data_migrations"."id") > 0),
-	CONSTRAINT "catalog_data_migrations_scheme_check" CHECK("catalog_data_migrations"."scheme" IN ('content-v1')),
+	CONSTRAINT "catalog_data_migrations_scheme_check" CHECK("catalog_data_migrations"."scheme" IN ('content-v1', 'content-v2')),
 	CONSTRAINT "catalog_data_migrations_checksum_check" CHECK(length("catalog_data_migrations"."checksum") = 64
         AND "catalog_data_migrations"."checksum" NOT GLOB '*[^0-9a-f]*')
 );

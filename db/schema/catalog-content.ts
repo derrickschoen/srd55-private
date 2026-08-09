@@ -58,7 +58,7 @@ export const catalog_data_migrations = sqliteTable(
     ),
     check(
       'catalog_data_migrations_scheme_check',
-      sql`${table.scheme} IN ('content-v1')`,
+      sql`${table.scheme} IN ('content-v1', 'content-v2')`,
     ),
     check(
       'catalog_data_migrations_checksum_check',
@@ -288,7 +288,7 @@ export const catalog_content_fingerprints = sqliteTable(
     }).onDelete('cascade'),
     check(
       'catalog_content_fingerprints_scheme_check',
-      sql`${table.fingerprint_scheme} IN ('content-v1')`,
+      sql`${table.fingerprint_scheme} IN ('content-v1', 'content-v2')`,
     ),
     check(
       'catalog_content_fingerprints_digest_check',
@@ -309,8 +309,8 @@ export const catalog_content_fingerprints = sqliteTable(
         table.content_key,
       ],
     }),
-    uniqueIndex('catalog_content_fingerprints_current_scheme_unique')
-      .on(table.content_key, table.fingerprint_scheme)
+    uniqueIndex('catalog_content_fingerprints_current_unique')
+      .on(table.content_key)
       .where(sql`${table.fingerprint_role} = 'current'`),
     index('catalog_content_fingerprints_resolution_index').on(
       table.content_kind,
@@ -388,7 +388,7 @@ export const catalog_content_match_decisions = sqliteTable(
     }).onDelete('restrict'),
     check(
       'catalog_content_match_decisions_scheme_check',
-      sql`${table.incoming_fingerprint_scheme} IN ('content-v1')`,
+      sql`${table.incoming_fingerprint_scheme} IN ('content-v1', 'content-v2')`,
     ),
     check(
       'catalog_content_match_decisions_digest_check',

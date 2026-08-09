@@ -24,8 +24,11 @@ import {
 } from '../catalog/catalog-key';
 import {
   CONTENT_FINGERPRINT_SCHEME_V1,
+  CONTENT_FINGERPRINT_SCHEME_V2,
   contentKinds,
+  deriveContentIdentityForScheme,
   deriveContentIdentityV1,
+  isContentFingerprintScheme,
   type ContentFingerprintDigest,
   type ContentFingerprintScheme,
   type ContentKind,
@@ -50,6 +53,7 @@ import {
 } from '../catalog/source-content-projector-v1';
 import {
   portableSourceContentImportNode,
+  portableSpeciesContentImportNodeV2,
   portableStoredGrantRules,
   type SourceAggregate,
 } from '../catalog/source-content-importer';
@@ -59,11 +63,14 @@ import {
 } from '../catalog/spell-content-projector-v1';
 import {
   projectAuthoredContentAggregateV1,
+  projectSpeciesContentAggregateV2,
 } from '../catalog/stored-authored-content-projector-v1';
 import {
   projectStoredContentV1,
   projectStoredPortableContentV1,
 } from '../catalog/stored-content-projector-v1';
+import { projectStoredPortableContentV2 } from '../catalog/stored-content-projector-v2';
+import type { SpeciesProjectorAggregateV2 } from '../catalog/authored-content-projector-contract-v2';
 import type { DatabaseContext } from '../db/database';
 import type { CatalogContentKeyKind } from '../../db/schema/catalog-content';
 import type { ContentKey } from '../domain/ids';
@@ -81,6 +88,7 @@ export const PORTABLE_CONTENT_LIMITS = Object.freeze({
 
 export type PortableContentAggregateValue =
   | SourceAggregate
+  | SpeciesProjectorAggregateV2
   | SubclassContentAggregate
   | EquipmentContentAggregate
   | SpellContentAggregateV1;
@@ -246,7 +254,10 @@ function jsonDepth(
   ancestors.delete(value);
 }
 
-function aggregateTopLevelKeys(kind: ContentKind): readonly string[] {
+function aggregateTopLevelKeys(
+  kind: ContentKind,
+  scheme: ContentFingerprintScheme = CONTENT_FINGERPRINT_SCHEME_V1,
+): readonly string[] {
   switch (kind) {
     case 'class':
       return [
@@ -269,7 +280,8 @@ function aggregateTopLevelKeys(kind: ContentKind): readonly string[] {
     case 'species':
       return [
         'kind', 'name', 'rules_edition', 'reference_text', 'repeatable',
-        'grants', 'creature_type', 'primary_size', 'alternate_size',
+        scheme === CONTENT_FINGERPRINT_SCHEME_V2 ? 'source_rules' : 'grants',
+        'creature_type', 'primary_size', 'alternate_size',
         'walking_speed_feet', 'traits',
       ];
     case 'background':
@@ -322,9 +334,10 @@ function aggregateTopLevelKeys(kind: ContentKind): readonly string[] {
 function projectPortableAggregate(
   kind: ContentKind,
   aggregate: PortableContentAggregateValue,
+  scheme: ContentFingerprintScheme = CONTENT_FINGERPRINT_SCHEME_V1,
 ): { readonly edition: string; readonly name: string; readonly payload: unknown } {
   const object = backupRecord(aggregate, `Portable ${kind} aggregate`);
-  exactKeys(object, aggregateTopLevelKeys(kind), `Portable ${kind} aggregate`);
+  exactKeys(object, aggregateTopLevelKeys(kind, scheme), `Portable ${kind} aggregate`);
   if (object.kind !== kind) {
     throw new BackupValidationError(`Portable ${kind} aggregate kind disagrees with its envelope.`);
   }
@@ -346,6 +359,15 @@ function projectPortableAggregate(
       };
     }
     case 'species': {
+      if (scheme === CONTENT_FINGERPRINT_SCHEME_V2) {
+        const value = object as unknown as SpeciesProjectorAggregateV2;
+        const projected = projectSpeciesContentAggregateV2(value);
+        return {
+          edition: value.rules_edition,
+          name: value.name,
+          payload: projected.payload,
+        };
+      }
       const record = parseSourceCatalogRecord('species', { kind, aggregate: object });
       return {
         edition: record.aggregate.rules_edition,
@@ -465,7 +487,17 @@ export function portableContentKeyForExport(
       `Portable content root '${contentKey}' has an unsupported catalog layer.`,
     );
   }
-  const projected = projectStoredPortableContentV1(db, kind, contentKey);
+  const scheme = db.scalar<string>(
+    `SELECT fingerprint_scheme FROM catalog_content_fingerprints
+     WHERE content_kind = ? AND content_key = ? AND fingerprint_role = 'current'`,
+    [kind, contentKey],
+  );
+  if (!isContentFingerprintScheme(scheme)) {
+    throw new BackupValidationError(`Portable content root '${contentKey}' has no supported current fingerprint.`);
+  }
+  const projected = scheme === CONTENT_FINGERPRINT_SCHEME_V1
+    ? projectStoredPortableContentV1(db, kind, contentKey)
+    : projectStoredPortableContentV2(db, kind, contentKey);
   return portableAssertedKey(
     kind,
     contentKey,
@@ -487,21 +519,26 @@ function localPortableEntry(
   if (registry === null || registry.catalog_layer !== 'external') {
     throw new BackupValidationError(`Portable content root '${contentKey}' is not external ${kind} content.`);
   }
-  const projected = projectStoredPortableContentV1(db, kind, contentKey);
-  const identity = deriveContentIdentityV1({
-    kind,
-    edition: projected.aggregate.rules_edition,
-    name: projected.aggregate.name,
-    payload: projected.payload,
-  });
   const stored = db.oneRaw(
     `SELECT fingerprint_scheme, fingerprint_digest, canonical_json
      FROM catalog_content_fingerprints
      WHERE content_kind = ? AND content_key = ? AND fingerprint_role = 'current'`,
     [kind, contentKey],
   );
+  if (stored === null || !isContentFingerprintScheme(stored.fingerprint_scheme)) {
+    throw new BackupValidationError(`Stored ${kind} '${contentKey}' has no supported current fingerprint.`);
+  }
+  const scheme = stored.fingerprint_scheme;
+  const projected = scheme === CONTENT_FINGERPRINT_SCHEME_V1
+    ? projectStoredPortableContentV1(db, kind, contentKey)
+    : projectStoredPortableContentV2(db, kind, contentKey);
+  const identity = deriveContentIdentityForScheme(scheme, {
+    kind,
+    edition: projected.aggregate.rules_edition,
+    name: projected.aggregate.name,
+    payload: projected.payload,
+  });
   if (
-    stored === null ||
     stored.fingerprint_scheme !== identity.envelope.scheme ||
     stored.fingerprint_digest !== identity.digest ||
     stored.canonical_json !== identity.canonicalJson
@@ -689,8 +726,16 @@ export function exportPortableContentClosure(
             spell_version_key: local.portableContentKey,
           } as PortableContentAggregateValue;
         }
-        const projected = projectPortableAggregate(local.kind, aggregate);
-        const identity = deriveContentIdentityV1({
+        const current = db.scalar<string>(
+          `SELECT fingerprint_scheme FROM catalog_content_fingerprints
+           WHERE content_kind = ? AND content_key = ? AND fingerprint_role = 'current'`,
+          [local.kind, local.localContentKey],
+        );
+        if (!isContentFingerprintScheme(current)) {
+          throw new BackupValidationError('Portable source has no supported current scheme.');
+        }
+        const projected = projectPortableAggregate(local.kind, aggregate, current);
+        const identity = deriveContentIdentityForScheme(current, {
           kind: local.kind,
           ...projected,
         });
@@ -839,7 +884,7 @@ function validatedEntry(input: unknown, index: number): PortableContentAggregate
   if (value.key_kind !== 'asserted') {
     throw new BackupValidationError(`Portable content[${String(index)}].key_kind must be asserted.`);
   }
-  if (value.fingerprint_scheme !== CONTENT_FINGERPRINT_SCHEME_V1) {
+  if (!isContentFingerprintScheme(value.fingerprint_scheme)) {
     throw new BackupValidationError(`Portable content[${String(index)}] uses an unsupported fingerprint scheme.`);
   }
   if (typeof value.fingerprint_digest !== 'string' || !/^[0-9a-f]{64}$/u.test(value.fingerprint_digest)) {
@@ -850,7 +895,8 @@ function validatedEntry(input: unknown, index: number): PortableContentAggregate
   }
   jsonDepth(value.aggregate);
   const aggregate = value.aggregate as PortableContentAggregateValue;
-  const projected = projectPortableAggregate(kind, aggregate);
+  const scheme = value.fingerprint_scheme;
+  const projected = projectPortableAggregate(kind, aggregate, scheme);
   let expectedKey: ContentKey;
   try {
     expectedKey = assertedExternalContentKeyFromDeclared(
@@ -869,7 +915,7 @@ function validatedEntry(input: unknown, index: number): PortableContentAggregate
       `Portable content[${String(index)}].content_key does not match its aggregate kind, edition, and name.`,
     );
   }
-  const identity = deriveContentIdentityV1({ kind, ...projected });
+  const identity = deriveContentIdentityForScheme(scheme, { kind, ...projected });
   if (identity.digest !== value.fingerprint_digest) {
     throw new BackupValidationError(`Portable content[${String(index)}] fingerprint does not match its aggregate.`);
   }
@@ -880,7 +926,7 @@ function validatedEntry(input: unknown, index: number): PortableContentAggregate
     kind,
     content_key: value.content_key,
     key_kind: 'asserted',
-    fingerprint_scheme: CONTENT_FINGERPRINT_SCHEME_V1,
+    fingerprint_scheme: scheme,
     fingerprint_digest: value.fingerprint_digest as ContentFingerprintDigest,
     aggregate,
     ...(spellIdentity === undefined ? {} : { spell_identity: spellIdentity }),
@@ -1308,7 +1354,33 @@ function portableNode(
   entry: PortableContentAggregate,
   allowReferenceKey = false,
 ): ContentImportNode {
-  const projected = projectPortableAggregate(entry.kind, entry.aggregate);
+  const withScheme = (node: ContentImportNode): ContentImportNode => {
+    if (entry.fingerprint_scheme === CONTENT_FINGERPRINT_SCHEME_V1) {
+      return node;
+    }
+    const stamp = (
+      projection: ContentImportProjection,
+    ): ContentImportProjection => ({
+      ...projection,
+      fingerprintScheme: entry.fingerprint_scheme,
+    });
+    return Object.freeze({
+      ...node,
+      projection: stamp(node.projection),
+      ...(node.reproject === undefined
+        ? {}
+        : {
+            reproject: (
+              input: Parameters<NonNullable<ContentImportNode['reproject']>>[0],
+            ) => stamp(node.reproject!(input)),
+          }),
+    });
+  };
+  const projected = projectPortableAggregate(
+    entry.kind,
+    entry.aggregate,
+    entry.fingerprint_scheme,
+  );
   const assertedKey = entry.content_key as ContentKey;
   if (!allowReferenceKey && !isAssertedExternalContentKey(assertedKey)) {
     throw new BackupValidationError(`Portable asserted key '${entry.content_key}' is invalid.`);
@@ -1316,20 +1388,31 @@ function portableNode(
   switch (entry.kind) {
     case 'class':
     case 'feat':
-    case 'species':
     case 'background':
-      return portableSourceContentImportNode(
+      return withScheme(portableSourceContentImportNode(
         db,
         entry.aggregate as SourceAggregate,
         assertedKey,
-      );
+      ));
+    case 'species':
+      return withScheme(entry.fingerprint_scheme === CONTENT_FINGERPRINT_SCHEME_V2
+        ? portableSpeciesContentImportNodeV2(
+            db,
+            entry.aggregate as SpeciesProjectorAggregateV2,
+            assertedKey,
+          )
+        : portableSourceContentImportNode(
+            db,
+            entry.aggregate as SourceAggregate,
+            assertedKey,
+          ));
     case 'weapon':
     case 'armor':
     case 'item':
-      return portableEquipmentContentImportNode(
+      return withScheme(portableEquipmentContentImportNode(
         entry.aggregate as EquipmentContentAggregate,
         assertedKey,
-      );
+      ));
     case 'subclass':
     case 'spell': {
       const spellIdentity = entry.kind === 'spell'
@@ -1350,7 +1433,11 @@ function portableNode(
             ...(entry.kind === 'spell' ? { spell_version_key: nextKey } : {}) },
           dependencies,
         ) as SubclassContentAggregate | SpellContentAggregateV1;
-        const current = projectPortableAggregate(entry.kind, aggregate);
+        const current = projectPortableAggregate(
+          entry.kind,
+          aggregate,
+          entry.fingerprint_scheme,
+        );
         const localSubclass = entry.kind === 'subclass'
           ? db.oneRaw(
               'SELECT name, rules_edition FROM subclass_definitions WHERE content_key = ?',
@@ -1384,13 +1471,13 @@ function portableNode(
           },
         };
       };
-      return Object.freeze({
+      return withScheme(Object.freeze({
         id: `portable:${entry.kind}:${entry.content_key}`,
         projection: build(projected.name, assertedKey, new Map()),
         reproject: (
           input: Parameters<NonNullable<ContentImportNode['reproject']>>[0],
         ) => build(input.name, input.assertedKey, input.dependencies),
-      });
+      }));
     }
   }
 }

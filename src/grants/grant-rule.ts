@@ -36,6 +36,7 @@ export const GRANT_RULE_FIELD_CONFIG_CONSUMPTION = Object.freeze({
   with_slots: 'never',
   free_cast: 'never',
   active_from_class_level: 'never',
+  active_from_character_level: 'never',
   active_if_config: 'when_present',
   distinct_config_by: 'when_present',
   level_min: 'never',
@@ -470,6 +471,7 @@ export class GrantRule {
     readonly withSlots: boolean,
     readonly freeCast: FreeCast | null,
     readonly activeFromClassLevel: number | null,
+    readonly activeFromCharacterLevel: number | null,
     readonly activeIfConfig: ActiveIfConfig | null,
     readonly distinctConfigBy: string | null,
     private readonly data: GrantRuleObject,
@@ -549,6 +551,29 @@ export class GrantRule {
       ruleKey,
       false,
     );
+    const activeFromCharacterLevel = positiveInteger(
+      input,
+      'active_from_character_level',
+      null,
+      ruleKey,
+      false,
+    );
+    if (
+      activeFromCharacterLevel !== null &&
+      activeFromCharacterLevel > 20
+    ) {
+      throw new RangeError(
+        `Grant rule '${ruleKey}' field 'active_from_character_level' must be between 1 and 20.`,
+      );
+    }
+    if (
+      activeFromClassLevel !== null &&
+      activeFromCharacterLevel !== null
+    ) {
+      throw new TypeError(
+        `Grant rule '${ruleKey}' must not define both active_from_class_level and active_from_character_level.`,
+      );
+    }
     const activeIfConfig = parseActiveIfConfig(input, ruleKey);
     const distinctConfigBy = optionalNonEmptyString(
       input,
@@ -583,6 +608,9 @@ export class GrantRule {
     if (activeFromClassLevel !== null) {
       normalized.active_from_class_level = activeFromClassLevel;
     }
+    if (activeFromCharacterLevel !== null) {
+      normalized.active_from_character_level = activeFromCharacterLevel;
+    }
     if (activeIfConfig !== null) {
       normalized.active_if_config = activeIfConfig;
     }
@@ -607,6 +635,7 @@ export class GrantRule {
       withSlots,
       freeCast,
       activeFromClassLevel,
+      activeFromCharacterLevel,
       activeIfConfig,
       distinctConfigBy,
       cloneObject(normalized),

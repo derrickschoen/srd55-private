@@ -73,6 +73,7 @@ import {
 import { weaponRangeKinds } from '../weapon-range';
 import {
   CONTENT_FINGERPRINT_SCHEME_V1,
+  CONTENT_FINGERPRINT_SCHEME_V2,
   contentKinds,
 } from '../../catalog/content-identity';
 import {
@@ -400,9 +401,10 @@ const contentKindEnum = z.enum(contentKinds);
 const authoredContentKindEnum = z.enum(authoredContentKinds);
 const contentKeyKindEnum = z.enum(catalogContentKeyKinds);
 const contentLayerEnum = z.enum(catalogContentLayers);
-const contentFingerprintSchemeEnum = z.literal(
-  CONTENT_FINGERPRINT_SCHEME_V1,
-);
+const contentFingerprintSchemeEnum = z.union([
+  z.literal(CONTENT_FINGERPRINT_SCHEME_V1),
+  z.literal(CONTENT_FINGERPRINT_SCHEME_V2),
+]);
 const contentFingerprintRoleEnum = z.enum(catalogContentFingerprintRoles);
 const contentAliasKindEnum = z.enum(catalogContentAliasKinds);
 const contentMatchDecisionEnum = z.enum(catalogContentMatchDecisions);

@@ -2,6 +2,7 @@ import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   ContentIdentityCollision,
+  ContentFingerprintPromotionRefusal,
   forgetContentMatchDecision,
   projectContentGraphInDependencyOrder,
   registerBundledStableContentIdentity,
@@ -9,6 +10,7 @@ import {
   registerContentFingerprint,
   registerDerivedContentIdentity,
   registerAssertedContentIdentity,
+  reconcileCurrentContentFingerprint,
   rememberContentMatchDecision,
   rememberedContentMatchDecision,
   resolveContentAggregate,
@@ -16,6 +18,8 @@ import {
 } from '../../../src/catalog/content-registry';
 import {
   CONTENT_FINGERPRINT_SCHEME_V1,
+  CONTENT_FINGERPRINT_SCHEME_V2,
+  deriveContentIdentityV2,
   type CanonicalContentIdentityJson,
   type ContentFingerprintDigest,
 } from '../../../src/catalog/content-identity';
@@ -86,6 +90,83 @@ function addAbcFingerprint(
 }
 
 describe('catalog content registry resolution', () => {
+  it('refuses an unproved external promotion and preserves compatible v1 after proof', () => {
+    const key = '2024:example.test:promoted-feat' as ContentKey;
+    registerAssertedContentIdentity(db, {
+      kind: 'feat',
+      edition: '2024',
+      name: 'Promoted Feat',
+      payload: { version: 1 },
+      assertedKey: key,
+    });
+    const v2 = deriveContentIdentityV2({
+      kind: 'feat',
+      edition: '2024',
+      name: 'Promoted Feat',
+      payload: { version: 1 },
+    });
+    const before = db.allRaw(
+      `SELECT fingerprint_scheme, fingerprint_digest, fingerprint_role
+       FROM catalog_content_fingerprints WHERE content_key = ?`,
+      [key],
+    );
+
+    expect(() => reconcileCurrentContentFingerprint(db, {
+      kind: 'feat',
+      contentKey: key,
+      identity: v2,
+    })).toThrow(ContentFingerprintPromotionRefusal);
+    expect(db.allRaw(
+      `SELECT fingerprint_scheme, fingerprint_digest, fingerprint_role
+       FROM catalog_content_fingerprints WHERE content_key = ?`,
+      [key],
+    )).toEqual(before);
+
+    expect(reconcileCurrentContentFingerprint(db, {
+      kind: 'feat',
+      contentKey: key,
+      identity: v2,
+      externalPriorIsCompatible: true,
+    })).toBe('moved');
+    expect(db.allRaw(
+      `SELECT fingerprint_scheme, fingerprint_role
+       FROM catalog_content_fingerprints WHERE content_key = ?
+       ORDER BY fingerprint_scheme`,
+      [key],
+    )).toEqual([
+      { fingerprint_scheme: 'content-v1', fingerprint_role: 'compatible' },
+      { fingerprint_scheme: 'content-v2', fingerprint_role: 'current' },
+    ]);
+  });
+
+  it('permits v2 history but refuses two current schemes for one content key', () => {
+    const key = bundled('2024:feat:cross-scheme');
+    registerContentFingerprint(db, {
+      kind: 'feat',
+      contentKey: key,
+      scheme: CONTENT_FINGERPRINT_SCHEME_V1,
+      digest: ABC_DIGEST as ContentFingerprintDigest,
+      canonicalJson: ABC_CANONICAL,
+      role: 'current',
+    });
+    expect(() => registerContentFingerprint(db, {
+      kind: 'feat',
+      contentKey: key,
+      scheme: CONTENT_FINGERPRINT_SCHEME_V2,
+      digest: ABC_DIGEST as ContentFingerprintDigest,
+      canonicalJson: ABC_CANONICAL,
+      role: 'current',
+    })).toThrow();
+    expect(() => registerContentFingerprint(db, {
+      kind: 'feat',
+      contentKey: key,
+      scheme: CONTENT_FINGERPRINT_SCHEME_V2,
+      digest: ABC_DIGEST as ContentFingerprintDigest,
+      canonicalJson: ABC_CANONICAL,
+      role: 'compatible',
+    })).not.toThrow();
+  });
+
   it('keeps the asserted-key SQL CHECK exactly aligned with the shared normalizer grammar', () => {
     const emitted = [
       assertedExternalContentKey('item', '2024', 'Clockwork Ægis'),
@@ -490,7 +571,7 @@ describe('catalog registry controls', () => {
         sql: `INSERT INTO catalog_content_fingerprints
           (content_kind, fingerprint_scheme, fingerprint_digest,
            canonical_json, content_key, fingerprint_role)
-          VALUES ('feat', 'content-v2', '${ABC_DIGEST}', 'abc',
+          VALUES ('feat', 'content-v3', '${ABC_DIGEST}', 'abc',
                   '${target}', 'compatible')`,
       },
       {
@@ -534,7 +615,7 @@ describe('catalog registry controls', () => {
         sql: `INSERT INTO catalog_content_match_decisions
           (content_kind, incoming_fingerprint_scheme,
            incoming_fingerprint_digest, decision, target_content_key)
-          VALUES ('feat', 'content-v2', '${ABC_DIGEST}', 'match',
+          VALUES ('feat', 'content-v3', '${ABC_DIGEST}', 'match',
                   '${target}')`,
       },
       {

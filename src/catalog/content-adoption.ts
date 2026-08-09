@@ -6,13 +6,15 @@ import { assertedExternalContentKeyFromDeclared } from './catalog-key';
 import {
   CONTENT_FINGERPRINT_SCHEME_V1,
   contentKinds,
-  deriveContentIdentityV1,
+  deriveContentIdentityForScheme,
+  isContentFingerprintScheme,
   parseDerivedContentKeyV1,
   type ContentFingerprintDigest,
   type ContentFingerprintScheme,
   type ContentKind,
 } from './content-identity';
 import { projectStoredContentV1 } from './stored-content-projector-v1';
+import { projectStoredContentV2 } from './stored-content-projector-v2';
 import {
   catalogLayerDisclosure,
   type CatalogLayerDisclosure,
@@ -48,6 +50,8 @@ export interface ContentImportProjection<K extends ContentKind = ContentKind> {
   readonly name: string;
   readonly assertedKey: ContentKey;
   readonly payload: unknown;
+  /** Omitted by every frozen v1 node; content-v2 nodes opt in explicitly. */
+  readonly fingerprintScheme?: ContentFingerprintScheme;
   readonly declaredAlias?: ContentKey;
   readonly metadataConflict?: boolean;
   readonly conflictDetails?: readonly ContentImportConflictDetail[];
@@ -185,7 +189,7 @@ export interface ContentImportSpellActivityChange {
 interface EvaluatedEntry {
   readonly node: ContentImportNode;
   readonly projection: ContentImportProjection;
-  readonly identity: ReturnType<typeof deriveContentIdentityV1>;
+  readonly identity: ReturnType<typeof deriveContentIdentityForScheme>;
   readonly resolution: ContentResolution;
   readonly outcome: ContentImportEntryOutcome;
   readonly reviewedDecision?: CatalogContentMatchDecision;
@@ -229,6 +233,9 @@ function inputHash(nodes: readonly ContentImportNode[]): string {
     name: node.projection.name,
     assertedKey: node.projection.assertedKey,
     payload: node.projection.payload,
+    ...(node.projection.fingerprintScheme === undefined
+      ? {}
+      : { fingerprintScheme: node.projection.fingerprintScheme }),
     declaredAlias: node.projection.declaredAlias ?? null,
     metadataConflict: node.projection.metadataConflict ?? false,
     conflictDetails: node.projection.conflictDetails ?? [],
@@ -236,9 +243,27 @@ function inputHash(nodes: readonly ContentImportNode[]): string {
   }))));
 }
 
+function projectionFingerprintScheme(
+  projection: Pick<ContentImportProjection, 'fingerprintScheme'>,
+): ContentFingerprintScheme {
+  return projection.fingerprintScheme ?? CONTENT_FINGERPRINT_SCHEME_V1;
+}
+
+function deriveProjectionIdentity(
+  projection: Pick<
+    ContentImportProjection,
+    'kind' | 'edition' | 'name' | 'payload' | 'fingerprintScheme'
+  >,
+) {
+  return deriveContentIdentityForScheme(
+    projectionFingerprintScheme(projection),
+    projection,
+  );
+}
+
 function incomingDecisionFingerprint(
   projection: ContentImportProjection,
-  identity: ReturnType<typeof deriveContentIdentityV1>,
+  identity: ReturnType<typeof deriveContentIdentityForScheme>,
 ): {
   readonly scheme: ContentFingerprintScheme;
   readonly digest: ContentFingerprintDigest;
@@ -309,7 +334,7 @@ function isProjectionFingerprintReference(
   const candidate = value as Record<string, unknown>;
   return typeof candidate.kind === 'string' &&
     (contentKinds as readonly string[]).includes(candidate.kind) &&
-    candidate.scheme === CONTENT_FINGERPRINT_SCHEME_V1 &&
+    isContentFingerprintScheme(candidate.scheme) &&
     typeof candidate.digest === 'string' &&
     /^[0-9a-f]{64}$/.test(candidate.digest);
 }
@@ -396,12 +421,7 @@ function deriveDependencyGraph(
 ): DerivedDependencyGraph {
   const incomingByFingerprint = new Map<string, string[]>();
   for (const node of nodes) {
-    const identity = deriveContentIdentityV1({
-      kind: node.projection.kind,
-      edition: node.projection.edition,
-      name: node.projection.name,
-      payload: node.projection.payload,
-    });
+    const identity = deriveProjectionIdentity(node.projection);
     const key = contentFingerprintReferenceKey({
       kind: node.projection.kind,
       scheme: identity.envelope.scheme,
@@ -449,8 +469,10 @@ function deriveDependencyGraph(
         continue;
       }
       try {
-        const stored = projectStoredContentV1(db, reference.kind, contentKey);
-        const liveIdentity = deriveContentIdentityV1({
+        const stored = reference.scheme === CONTENT_FINGERPRINT_SCHEME_V1
+          ? projectStoredContentV1(db, reference.kind, contentKey)
+          : projectStoredContentV2(db, reference.kind, contentKey);
+        const liveIdentity = deriveContentIdentityForScheme(reference.scheme, {
           kind: stored.kind,
           edition: stored.edition,
           name: stored.name,
@@ -459,7 +481,7 @@ function deriveDependencyGraph(
         targets.set(referenceKey, Object.freeze({
           contentKey,
           kind: reference.kind,
-          scheme: liveIdentity.envelope.scheme,
+          scheme: reference.scheme,
           digest: liveIdentity.digest,
         }));
         reviewEdges.add(`${reference.kind}:${contentKey}`);
@@ -594,12 +616,13 @@ function currentFingerprintDigest(
   db: DatabaseContext,
   kind: ContentKind,
   contentKey: ContentKey,
+  scheme: ContentFingerprintScheme,
 ): string {
   return db.scalar<string>(
     `SELECT fingerprint_digest FROM catalog_content_fingerprints
      WHERE content_kind = ? AND content_key = ?
        AND fingerprint_scheme = ? AND fingerprint_role = 'current'`,
-    [kind, contentKey, CONTENT_FINGERPRINT_SCHEME_V1],
+    [kind, contentKey, scheme],
   ) ?? 'not recorded';
 }
 
@@ -615,7 +638,12 @@ function reviewConflictDetails(
     details.push({
       field: 'Rules identity',
       incomingValue: incomingDigest ?? 'not supplied by reference',
-      localValue: currentFingerprintDigest(db, projection.kind, targetContentKey),
+      localValue: currentFingerprintDigest(
+        db,
+        projection.kind,
+        targetContentKey,
+        projectionFingerprintScheme(projection),
+      ),
     });
   }
   return Object.freeze(details.map((detail) => Object.freeze({ ...detail })));
@@ -662,12 +690,15 @@ function withLiveTargetSnapshot(
     if (stored.kind !== entry.projection.kind) {
       throw new TypeError('Stored target kind does not match its adoption node.');
     }
-    const identity = deriveContentIdentityV1({
+    const identity = deriveContentIdentityForScheme(
+      projectionFingerprintScheme(entry.projection),
+      {
       kind: stored.kind,
       edition: stored.edition,
       name: stored.name,
       payload: stored.payload,
-    });
+      },
+    );
     const registeredCanonical = db.scalar<string>(
       `SELECT canonical_json FROM catalog_content_fingerprints
        WHERE content_kind = ? AND content_key = ?
@@ -675,7 +706,7 @@ function withLiveTargetSnapshot(
       [
         entry.projection.kind,
         entry.targetContentKey,
-        CONTENT_FINGERPRINT_SCHEME_V1,
+        identity.envelope.scheme,
       ],
     );
     if (
@@ -741,7 +772,7 @@ function dependencyTarget(
   return Object.freeze({
     contentKey,
     kind: entry.projection.kind,
-    scheme: CONTENT_FINGERPRINT_SCHEME_V1,
+    scheme: entry.identity.envelope.scheme,
     digest: entry.targetDigest ?? entry.identity.digest,
   });
 }
@@ -886,12 +917,9 @@ function evaluate(
         break;
       }
       const dependencyNode = nodesById.get(dependency)!;
-      const sourceIdentity = deriveContentIdentityV1({
-        kind: dependencyNode.projection.kind,
-        edition: dependencyNode.projection.edition,
-        name: dependencyNode.projection.name,
-        payload: dependencyNode.projection.payload,
-      });
+      const sourceIdentity = deriveProjectionIdentity(
+        dependencyNode.projection,
+      );
       dependencyMap.set(contentFingerprintReferenceKey({
         kind: target.kind,
         scheme: sourceIdentity.envelope.scheme,
@@ -904,12 +932,7 @@ function evaluate(
     if (graph.unresolvedNodes.has(node.id)) blocked = true;
     if (blocked) {
       const projection = node.projection;
-      const identity = deriveContentIdentityV1({
-        kind: projection.kind,
-        edition: projection.edition,
-        name: projection.name,
-        payload: projection.payload,
-      });
+      const identity = deriveProjectionIdentity(projection);
       const incomingFingerprint = incomingDecisionFingerprint(projection, identity);
       const entry: EvaluatedEntry = {
         node,
@@ -940,12 +963,7 @@ function evaluate(
       assertedKey: node.projection.assertedKey,
       dependencies: dependencyMap,
     }) ?? node.projection;
-    const incomingIdentity = deriveContentIdentityV1({
-      kind: incomingProjection.kind,
-      edition: incomingProjection.edition,
-      name: incomingProjection.name,
-      payload: incomingProjection.payload,
-    });
+    const incomingIdentity = deriveProjectionIdentity(incomingProjection);
     const incomingFingerprint = incomingDecisionFingerprint(
       incomingProjection,
       incomingIdentity,
@@ -953,12 +971,7 @@ function evaluate(
     const projected = projectNode(node, choice, dependencyMap);
     if ('id' in projected && projected.kind === 'refused') {
       const projection = node.projection;
-      const identity = deriveContentIdentityV1({
-        kind: projection.kind,
-        edition: projection.edition,
-        name: projection.name,
-        payload: projection.payload,
-      });
+      const identity = deriveProjectionIdentity(projection);
       const entry: EvaluatedEntry = {
         node,
         projection,
@@ -975,12 +988,7 @@ function evaluate(
     const projection = projected as ContentImportProjection;
     let resolved: ReturnType<typeof resolveContentAggregate>;
     try {
-      const identity = deriveContentIdentityV1({
-        kind: projection.kind,
-        edition: projection.edition,
-        name: projection.name,
-        payload: projection.payload,
-      });
+      const identity = deriveProjectionIdentity(projection);
       resolved = projection.referenceOnly === undefined
         ? resolveContentAggregate(db, {
             kind: projection.kind,
@@ -988,6 +996,7 @@ function evaluate(
             name: projection.name,
             payload: projection.payload,
             assertedKey: projection.assertedKey,
+            fingerprintScheme: projectionFingerprintScheme(projection),
             ...(projection.declaredAlias === undefined
               ? {}
               : { declaredAlias: projection.declaredAlias }),
@@ -1001,12 +1010,7 @@ function evaluate(
             }),
           });
     } catch (error) {
-      const identity = deriveContentIdentityV1({
-        kind: projection.kind,
-        edition: projection.edition,
-        name: projection.name,
-        payload: projection.payload,
-      });
+      const identity = deriveProjectionIdentity(projection);
       const entry: EvaluatedEntry = {
         node,
         projection,
@@ -1227,6 +1231,7 @@ function evaluate(
             name: projection.name,
             payload: projection.payload,
             assertedKey: projection.assertedKey,
+            fingerprintScheme: projectionFingerprintScheme(projection),
           });
         }
         const installedKey = resolution.kind === 'missing'

@@ -18,12 +18,14 @@ import {
   CONTENT_FINGERPRINT_SCHEME_V1,
   contentKinds,
   deriveContentIdentityV1FromNormalizedName,
+  deriveContentIdentityV2FromNormalizedName,
   type ContentKind,
   type DerivedContentIdentityV1,
   type NormalizedContentName,
 } from './content-identity';
 import {
   ContentIdentityCollision,
+  reconcileCurrentContentFingerprint,
   reconcileCurrentContentFingerprintV1,
 } from './content-registry';
 import { projectStoredEquipmentContentV1 } from './equipment-content-projector-v1';
@@ -34,6 +36,7 @@ import {
 } from './source-content-projector-v1';
 import {
   projectStoredAuthoredContentV1,
+  projectStoredSpeciesContentV2,
   storedAuthoredRegistryReferencesV1,
 } from './stored-authored-content-projector-v1';
 
@@ -318,7 +321,6 @@ function projectBundledIdentityV1(
       projection = projectStoredClassContentV1(db, entry.contentKey, references);
       break;
     case 'subclass':
-    case 'species':
     case 'background':
       projection = projectStoredAuthoredContentV1(db, {
         kind: entry.kind,
@@ -326,6 +328,25 @@ function projectBundledIdentityV1(
         references,
       });
       break;
+    case 'species': {
+      const grantRules = db.scalar<string>(
+        'SELECT grant_rules FROM species_definitions WHERE content_key = ?',
+        [entry.contentKey],
+      );
+      const hasConfiguredChoice = grantRules !== null &&
+        JSON.parse(grantRules).some((rule: unknown) =>
+          rule !== null && typeof rule === 'object' &&
+          !Array.isArray(rule) &&
+          (rule as Readonly<Record<string, unknown>>).kind === 'configured_choice');
+      projection = hasConfiguredChoice
+        ? projectStoredSpeciesContentV2(db, entry.contentKey, references)
+        : projectStoredAuthoredContentV1(db, {
+            kind: 'species',
+            contentKey: entry.contentKey,
+            references,
+          });
+      break;
+    }
     case 'feat':
       projection = projectStoredFeatContentV1(db, entry.contentKey, references);
       break;
@@ -361,12 +382,16 @@ function projectBundledIdentityV1(
       `Bundled ${entry.kind} '${entry.contentKey}' has no authoritative normalized name.`,
     );
   }
-  return deriveContentIdentityV1FromNormalizedName({
+  const input = {
     kind: projection.kind,
     edition: projection.aggregate.rules_edition,
     normalizedName: normalizedName as NormalizedContentName,
     payload: projection.payload,
-  });
+  };
+  return entry.kind === 'species' &&
+      'source_rules' in projection.aggregate
+    ? deriveContentIdentityV2FromNormalizedName(input)
+    : deriveContentIdentityV1FromNormalizedName(input);
 }
 
 /**
@@ -401,11 +426,17 @@ export function reconcileBundledContentRegistryWithStoredProjectionsV1(
           }
           ensureBundledRegistryRoot(db, entry);
           const identity = projectBundledIdentityV1(db, entry);
-          const fingerprint = reconcileCurrentContentFingerprintV1(db, {
-            kind: entry.kind,
-            contentKey: entry.contentKey,
-            identity,
-          });
+          const fingerprint = identity.envelope.scheme === CONTENT_FINGERPRINT_SCHEME_V1
+            ? reconcileCurrentContentFingerprintV1(db, {
+                kind: entry.kind,
+                contentKey: entry.contentKey,
+                identity,
+              })
+            : reconcileCurrentContentFingerprint(db, {
+                kind: entry.kind,
+                contentKey: entry.contentKey,
+                identity,
+              });
           return Object.freeze({ fingerprint, identity });
         });
         if (result === 'orphaned') {
