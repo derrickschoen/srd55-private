@@ -203,8 +203,17 @@ function sheet(level: number): CharacterSheet {
     total_level: level,
     proficiency_bonus: number('proficiency_bonus', 'Proficiency bonus', 2),
     ability_scores: [],
-    hit_points: number('hit_points', 'Hit point maximum', level === 1 ? 9 : 15),
+    class_hit_points_subtotal: number(
+      'class_hit_points_subtotal',
+      'Class hit points subtotal',
+      level === 1 ? 9 : 15,
+    ),
     species_hit_points: null,
+    hit_point_maximum: number(
+      'hit_point_maximum',
+      'Hit point maximum',
+      level === 1 ? 9 : 15,
+    ),
     armor_class: {
       ...number('armor_class', 'Armor Class', 10),
       winner: { label: 'Unarmored', source: 'manual', expression: '10 + DEX', total: 10 },

@@ -807,7 +807,14 @@ test('the sheet prints the derived numbers, and prints what it lacks', async ({
   //   initiative = Dexterity modifier +2;
   //   passive Perception 10 + (Wisdom +0 + proficiency 3) = 13.
   await expect(figure('proficiency_bonus')).toHaveText('+3');
-  await expect(figure('hit_points')).toHaveText('57');
+  await expect(figure('hit_point_maximum')).toHaveText('57');
+  await expect(figure('class_hit_points_subtotal')).toHaveText('57');
+  await expect(
+    page.locator('[data-sheet-id="hit_point_maximum"] dt'),
+  ).toHaveText('Hit point maximum');
+  await expect(
+    page.locator('[data-sheet-id="class_hit_points_subtotal"] dt'),
+  ).toHaveText('Class hit points subtotal');
   await expect(figure('armor_class')).toHaveText('17');
   await expect(figure('initiative')).toHaveText('+2');
   await expect(figure('passive_perception')).toHaveText('13');
@@ -1061,7 +1068,7 @@ test('print media keeps the sheet and warnings, adds paper fields, and ends with
     page.getByRole('button', { name: 'Print character sheet' }),
   ).toBeHidden();
   await expect(page.locator('.site-footer')).toBeHidden();
-  await expect(page.locator('[data-sheet-value="hit_points"]')).toBeVisible();
+  await expect(page.locator('[data-sheet-value="hit_point_maximum"]')).toBeVisible();
   expect(
     (
       await sheet.locator('.sheet-numbers').first().evaluate(
@@ -1797,7 +1804,9 @@ test('the structured block says exactly what the page says, and hides nothing', 
     (await page.locator('#character-sheet-facts').textContent()) ?? '',
   ) as Record<string, unknown>;
   expect(facts.proficiency_bonus).toBe(3);
+  expect(facts.class_hit_points_subtotal).toBe(57);
   expect(facts.hit_point_maximum).toBe(57);
+  expect(facts).not.toHaveProperty('hit_points');
   expect(facts.armor_class).toBe(17);
   expect(facts.passive_perception).toBe(13);
   expect(facts.resources).toEqual([

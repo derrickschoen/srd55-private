@@ -277,7 +277,11 @@ function sheet(options: {
     total_level: options.totalLevel,
     proficiency_bonus: number('proficiency_bonus', 'Proficiency bonus', 2),
     ability_scores: [],
-    hit_points: number('hit_points', 'Hit point maximum', options.hp),
+    class_hit_points_subtotal: number(
+      'class_hit_points_subtotal',
+      'Class hit points subtotal',
+      options.hp,
+    ),
     species_hit_points: options.speciesHp === undefined
       ? null
       : number(
@@ -285,6 +289,11 @@ function sheet(options: {
           'Species hit points',
           options.speciesHp,
         ),
+    hit_point_maximum: number(
+      'hit_point_maximum',
+      'Hit point maximum',
+      options.hp + (options.speciesHp ?? 0),
+    ),
     armor_class: {
       ...number('armor_class', 'Armor Class', 10),
       winner: {

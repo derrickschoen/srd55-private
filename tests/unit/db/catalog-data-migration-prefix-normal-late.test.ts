@@ -76,8 +76,9 @@ describe('late schema-prefix catalog data migrations', () => {
       expect(await lifecycle.exportBytes()).toEqual(firstOpenBytes);
     }
     lifecycle.close();
-  // Measured at ~44s alone on 2026-08-03; grows with every migration.
-  }, 120_000);
+  // Green full-suite logs: 116544, 116128, 118497, 115166, 118239, 117369,
+  // 117344ms; 118497 x 1.5 = 177745.5, rounded up to 177800ms.
+  }, 177_800);
 
   it('persists every restored prefix after candidate migration and not before', async () => {
     const storage = new MemoryDatabaseStorage(sqlite3);

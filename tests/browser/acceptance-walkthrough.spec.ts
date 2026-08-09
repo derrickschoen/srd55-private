@@ -33,8 +33,15 @@ async function expectLevelTwoAcceptanceSheet(page: Page): Promise<void> {
   await expect(page.locator('[data-sheet-id="total_level"] .sheet-figure')).toHaveText('2');
   await expect(page.locator('[data-sheet-id="class:Wizard"] .sheet-figure')).toHaveText('2');
   await expect(
-    page.locator('[data-sheet-value="hit_points_with_species"]'),
+    page.locator('[data-sheet-value="hit_point_maximum"]'),
   ).toHaveText('16');
+  const facts = JSON.parse(
+    (await page.locator('#character-sheet-facts').textContent()) ?? '',
+  ) as Record<string, unknown>;
+  expect(facts.class_hit_points_subtotal).toBe(14);
+  expect(facts.species_hit_points).toBe(2);
+  expect(facts.hit_point_maximum).toBe(16);
+  expect(facts).not.toHaveProperty('hit_points');
   await expect(page.locator('[data-sheet-value="proficiency_bonus"]')).toHaveText('+2');
   const arcana = page.locator('[data-sheet-id="skill:arcana"]');
   await expect(arcana).toContainText('Arcana (Expertise)');
@@ -258,7 +265,9 @@ test('an unassisted sitting creates a caster through the current guided level 1 
 
   const numericIds = [
     'armor_class',
-    'hit_points',
+    'hit_point_maximum',
+    'class_hit_points_subtotal',
+    'species_hit_points',
     'initiative',
     'proficiency_bonus',
   ] as const;
@@ -294,8 +303,15 @@ test('an unassisted sitting creates a caster through the current guided level 1 
     return { id, revision };
   }, CHARACTER_NAME);
   await expect(
-    page.locator('[data-sheet-value="hit_points_with_species"]'),
+    page.locator('[data-sheet-value="hit_point_maximum"]'),
   ).toHaveText('9');
+  const levelOneFacts = JSON.parse(
+    (await page.locator('#character-sheet-facts').textContent()) ?? '',
+  ) as Record<string, unknown>;
+  expect(levelOneFacts.class_hit_points_subtotal).toBe(8);
+  expect(levelOneFacts.species_hit_points).toBe(1);
+  expect(levelOneFacts.hit_point_maximum).toBe(9);
+  expect(levelOneFacts).not.toHaveProperty('hit_points');
 
   await page.getByRole('link', { name: 'Level Up' }).click();
   const levelUpUrl = new URL(

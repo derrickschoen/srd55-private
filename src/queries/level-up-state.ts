@@ -40,6 +40,7 @@ import type {
   LevelFeatSelection,
   LevelUpAbilityIncrease,
 } from '../domain/command-contracts';
+import type { EquipmentEffectInput } from '../domain/equipment-effects';
 import {
   abilities,
   characterLevels,
@@ -266,6 +267,28 @@ function applicationsForFeat(
       };
     }),
   );
+}
+
+function effectCanChangeHitPointMaximum(
+  effect: EquipmentEffectInput,
+): boolean {
+  switch (effect.effect_kind) {
+    case 'hp_modifier':
+      return true;
+    case 'ability_increase':
+    case 'ability_override':
+      return effect.ability === 'constitution';
+    case 'damage_resistance':
+    case 'speed':
+    case 'armor_class_bonus':
+    case 'armor_class_formula':
+    case 'attack_ability_override':
+    case 'weapon_attack_bonus':
+    case 'weapon_damage_bonus':
+      return false;
+  }
+  const unhandled: never = effect;
+  return unhandled;
 }
 
 /** Mint-free route read model over the merged LU-0/LU-1 services. */
@@ -658,6 +681,36 @@ export class LevelUpStateQuery {
     };
     const choiceQuery = new LevelUpPlannedChoicesQuery(this.db);
     const plannedChoices = choiceQuery.forSelectedClass(choiceContext);
+    const subclassOptions = owesSubclass
+      ? this.#subclassOptions(selected.class_definition_id).map(
+          (option) => ({
+            ...option,
+            planned_choices: choiceQuery.forSelectedSubclass({
+              ...choiceContext,
+              subclass_content_key: option.content_key,
+              subclass_name: option.name,
+              subclass_catalog_layer: option.catalog_layer,
+            }),
+          }),
+        )
+      : [];
+    const hitPointPendingChoices = [
+      ...(subclassOptions.some((option) =>
+        this.#subclassCanChangeHitPointMaximum(option, targetLevel)
+      )
+        ? ['subclass' as const]
+        : []),
+      ...(featOccurrence !== null &&
+      featOccurrence.candidates.some((candidate) =>
+        candidate.applications.some(
+          (application) =>
+            application.plan.eligibility.status === 'qualified' &&
+            application.plan.effects.some(effectCanChangeHitPointMaximum),
+        )
+      )
+        ? ['level_feat' as const]
+        : []),
+    ];
     const steps = [
       'class' as const,
       'gains' as const,
@@ -692,10 +745,7 @@ export class LevelUpStateQuery {
           currentTotal,
           targetTotal,
           sheet,
-          [
-            ...(owesSubclass ? ['subclass' as const] : []),
-            ...(occurrenceKind === null ? [] : ['level_feat' as const]),
-          ],
+          hitPointPendingChoices,
         ),
         proficiency_bonus_change: currentBonus === projectedBonus
           ? null
@@ -705,17 +755,7 @@ export class LevelUpStateQuery {
       applicable_steps: steps,
       subclass_choice: owesSubclass
         ? {
-            options: this.#subclassOptions(selected.class_definition_id).map(
-              (option) => ({
-                ...option,
-                planned_choices: choiceQuery.forSelectedSubclass({
-                  ...choiceContext,
-                  subclass_content_key: option.content_key,
-                  subclass_name: option.name,
-                  subclass_catalog_layer: option.catalog_layer,
-                }),
-              }),
-            ),
+            options: subclassOptions,
           }
         : null,
       feat_occurrence: featOccurrence,
@@ -737,6 +777,31 @@ export class LevelUpStateQuery {
     return row === undefined
       ? { kind: 'unavailable' }
       : { kind: 'sourced', feature_names: row.feature_names };
+  }
+
+  #subclassCanChangeHitPointMaximum(
+    option: LevelUpSubclassOption,
+    targetLevel: ClassLevel,
+  ): boolean {
+    return this.db.one(
+      `SELECT EXISTS (
+         SELECT 1
+         FROM subclass_features AS feature
+         JOIN subclass_feature_effects AS effect
+           ON effect.subclass_feature_id = feature.id
+         WHERE feature.subclass_definition_id = ?
+           AND feature.class_level <= ?
+           AND (
+             effect.effect_kind = 'hp_modifier'
+             OR (
+               effect.effect_kind = 'ability_increase'
+               AND effect.ability = 'constitution'
+             )
+           )
+       ) AS can_change_hit_points`,
+      [option.subclass_definition_id, targetLevel],
+      (row) => sqlBoolean(row, 'can_change_hit_points'),
+    ) ?? false;
   }
 
   #projectedHitPoints(
@@ -799,8 +864,14 @@ export class LevelUpStateQuery {
         missing_hit_dice: [],
       };
     }
-    const speciesCurrent = speciesValue ?? 0;
-    const currentMaximum = sheet.hit_points.value + speciesCurrent;
+    const currentMaximum = sheet.hit_point_maximum.value;
+    if (currentMaximum === null) {
+      return {
+        kind: 'unknown',
+        reason: 'undetermined_level_scaled_effect',
+        missing_hit_dice: [],
+      };
+    }
     return {
       kind: 'known',
       hit_die: selected.hit_die,

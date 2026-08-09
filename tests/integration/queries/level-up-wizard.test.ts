@@ -387,6 +387,45 @@ describe('level-up wizard state RPC', () => {
       name: option.name,
       rules_edition: option.rules_edition,
     }))).toEqual(EXPECTED_SUBCLASS_VARIANTS[4].options);
+    expect(fighterSubclassOption.gains.hit_points).toMatchObject({
+      kind: 'known',
+      projected_maximum: { kind: 'known', value: 28 },
+    });
+
+    const championFeatureId = Number(
+      harness.context.db.scalar(
+        `SELECT feature.id
+         FROM subclass_features AS feature
+         JOIN subclass_definitions AS subclass
+           ON subclass.id = feature.subclass_definition_id
+         WHERE subclass.content_key = '2024:subclass:champion'
+           AND feature.class_level <= 3
+         ORDER BY feature.class_level, feature.sort_order
+         LIMIT 1`,
+      ),
+    );
+    harness.context.db.exec(
+      `INSERT INTO subclass_feature_effects (
+         subclass_feature_id, sort_order, effect_kind,
+         hit_points_flat, label
+       ) VALUES (?, 99, 'hp_modifier', 1, 'Review HP control')`,
+      [championFeatureId],
+    );
+    const hpChangingSubclassState = await client.levelUpState(fighterId);
+    if (hpChangingSubclassState.kind !== 'ready') {
+      throw new Error('HP-changing Fighter subclass state was not ready.');
+    }
+    const hpChangingSubclassOption = hpChangingSubclassState.class_options[0];
+    if (hpChangingSubclassOption?.guideability !== 'guideable') {
+      throw new Error('HP-changing Fighter subclass option was not guideable.');
+    }
+    expect(hpChangingSubclassOption.gains.hit_points).toMatchObject({
+      kind: 'known',
+      projected_maximum: {
+        kind: 'pending_choice',
+        choices: ['subclass'],
+      },
+    });
 
     for (const expected of EXPECTED_SUBCLASS_VARIANTS) {
       if (expected.class_name === 'Fighter') continue;

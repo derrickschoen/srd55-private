@@ -228,7 +228,7 @@ describe('the derived character sheet', () => {
     // Wizard 3:
     //   levels 1-3 = 3 x (4 fixed + 1 Con) = 15
     // Total 11 + 28 + 15 = 54.
-    expect(builder.build(characterId).hit_points.value).toBe(54);
+    expect(builder.build(characterId).class_hit_points_subtotal.value).toBe(54);
 
     // One roll on each class, at the same class level, showing the same face —
     // and contributing differently, because it replaces a different fixed
@@ -240,7 +240,7 @@ describe('the derived character sheet', () => {
        VALUES (?, 'Fighter', 2, 9), (?, 'Wizard', 2, 9)`,
       [characterId, characterId],
     );
-    expect(builder.build(characterId).hit_points.value).toBe(54 + 3 + 5);
+    expect(builder.build(characterId).class_hit_points_subtotal.value).toBe(54 + 3 + 5);
   });
 
   it('B2-HP sends a Constitution contribution through CharacterSheetBuilder hit-point math', () => {
@@ -283,7 +283,7 @@ describe('the derived character sheet', () => {
         (ability) => ability.ability === 'constitution',
       )?.score,
     ).toBe(15);
-    expect(sheet.hit_points.value).toBe(62);
+    expect(sheet.class_hit_points_subtotal.value).toBe(62);
   });
 
   it('ignores a roll filed under a class the character does not have, and says so', () => {
@@ -295,7 +295,7 @@ describe('the derived character sheet', () => {
     );
     const sheet = builder.build(characterId);
     // Unchanged from the no-rolls total above: the roll matches no class.
-    expect(sheet.hit_points.value).toBe(54);
+    expect(sheet.class_hit_points_subtotal.value).toBe(54);
     expect(
       sheet.hit_point_rolls.find((roll) => roll.class_name === 'Barbarian')
         ?.applies,
@@ -542,7 +542,7 @@ describe('the derived character sheet', () => {
     // Base 12 plus the attuned-required, non-required-unattuned and NULL-owned
     // +1 effects. The required-and-unattuned Cloak's +4 is absent.
     expect(unattuned.armor_class.value).toBe(15);
-    expect(unattuned.hit_points.value).toBe(54);
+    expect(unattuned.class_hit_points_subtotal.value).toBe(54);
     expect(unattuned.species_hit_points).toBeNull();
     expect(unattuned.walking_speed_feet).toBe(30);
     expect(unattuned.damage_resistances).toEqual([]);
@@ -590,7 +590,7 @@ describe('the derived character sheet', () => {
     ]);
     // Constitution 13 + 2 = 15, moving its modifier from +1 to +2 across all
     // eight levels: 54 + 8 = 62.
-    expect(attuned.hit_points.value).toBe(62);
+    expect(attuned.class_hit_points_subtotal.value).toBe(62);
     expect(attuned.species_hit_points?.value).toBe(5);
     expect(attuned.walking_speed_feet).toBe(35);
     expect(attuned.damage_resistances).toEqual(['Fire']);
@@ -802,7 +802,7 @@ describe('the derived character sheet', () => {
     expect(after.skills).toHaveLength(18);
   });
 
-  it('reports the species hit points as a SEPARATE number, never folded in', () => {
+  it('keeps species hit points separate while naming their sum as the maximum', () => {
     db.exec(
       `INSERT INTO character_species (character_id, name, base_speed_feet)
        VALUES (?, 'Dwarf', 25)`,
@@ -833,12 +833,12 @@ describe('the derived character sheet', () => {
       [characterId],
     );
     const sheet = builder.build(characterId);
-    // The class total is unchanged — this is the seam that had no caller at
-    // all before this sheet existed, and a page printing `hit_points` alone
-    // would show a Dwarf short by their level.
-    expect(sheet.hit_points.value).toBe(54);
+    // The class subtotal is unchanged, while the maximum includes Dwarven
+    // Toughness. Neither field can pass the other's number off under its name.
+    expect(sheet.class_hit_points_subtotal.value).toBe(54);
     // 0 flat + 1 per level x total level 8 = 8.
     expect(sheet.species_hit_points?.value).toBe(8);
+    expect(sheet.hit_point_maximum.value).toBe(62);
     // Base 25 + 5 = 30.
     expect(sheet.walking_speed_feet).toBe(30);
     // NAMED, not counted. The old sheet could only report how MANY resistances
@@ -1024,7 +1024,7 @@ describe('the derived character sheet', () => {
     // the same 54 as when it was flagged. The point is that a character
     // imported in this state gets a stated approximation rather than an error
     // page.
-    expect(sheet.hit_points.value).toBe(54);
+    expect(sheet.class_hit_points_subtotal.value).toBe(54);
   });
 
   it('says a degraded starting class ONCE, not once per derivation', () => {
@@ -1128,7 +1128,7 @@ describe('the derived character sheet', () => {
     // The number is still produced, because a sheet with no hit point maximum
     // is worse than one carrying a flagged estimate. Base 54, plus three levels
     // of an assumed d8: 3 x (5 fixed + 1 Con) = 18 → 72.
-    expect(sheet.hit_points.value).toBe(72);
+    expect(sheet.class_hit_points_subtotal.value).toBe(72);
   });
 
   it('flags a recorded roll no die of that class could have shown', () => {
@@ -1149,8 +1149,8 @@ describe('the derived character sheet', () => {
     // COUNTED IN FULL. Base 54; the Wizard's level 2 was 4 fixed + 1 Con = 5
     // and becomes 11 + 1 = 12, so +7 → 61. Clamping to the d6 would have left
     // it at 54 and quietly discarded what the player typed.
-    expect(sheet.hit_points.value).toBe(61);
-    expect(sheet.hit_points.value).not.toBe(54);
+    expect(sheet.class_hit_points_subtotal.value).toBe(61);
+    expect(sheet.class_hit_points_subtotal.value).not.toBe(54);
 
     // A 6 is the largest a d6 can show and must not be flagged — otherwise the
     // assertion above would still hold with the comparison written `>=`.

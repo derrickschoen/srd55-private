@@ -1015,27 +1015,11 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
 
   const core: SheetRow[] = [
     numberRow(sheet.proficiency_bonus, true),
-    numberRow(sheet.hit_points, false),
+    numberRow(sheet.hit_point_maximum, false),
+    numberRow(sheet.class_hit_points_subtotal, false),
   ];
-  if (
-    sheet.species_hit_points !== null &&
-    sheet.hit_points.value !== null &&
-    sheet.species_hit_points.value !== null
-  ) {
+  if (sheet.species_hit_points !== null) {
     core.push(numberRow(sheet.species_hit_points, true));
-    // THE SEAM THAT HAD NO CALLER BEFORE THIS SHEET. `hitPointMaximum` does not
-    // include the species contribution and `effectHitPoints` returns it
-    // separately by design, so a page printing only the first shows a Dwarf
-    // short by their level. Both are printed, and so is their sum.
-    core.push({
-      id: 'hit_points_with_species',
-      label: plain('Hit points including the species contribution'),
-      value: String(sheet.hit_points.value + sheet.species_hit_points.value),
-      detail: plain(
-        'The two above come from different sources and are shown apart; this ' +
-          'is their sum.',
-      ),
-    });
   }
   core.push(numberRow(sheet.armor_class, false));
   core.push(...armorClassRows(sheet));
@@ -1477,8 +1461,9 @@ export function sheetFacts(sheet: CharacterSheet): Record<string, unknown> {
         outcome: override.outcome,
       })),
     })),
-    hit_point_maximum: sheet.hit_points.value,
+    class_hit_points_subtotal: sheet.class_hit_points_subtotal.value,
     species_hit_points: sheet.species_hit_points?.value ?? 0,
+    hit_point_maximum: sheet.hit_point_maximum.value,
     armor_class: sheet.armor_class.value,
     armor_class_resolution: {
       winner: {
@@ -2156,7 +2141,7 @@ export function setSheetPrintContent(
   }
 
   const hitPointValue = shell.querySelector<HTMLElement>(
-    '[data-sheet-id="hit_points"] dd',
+    '[data-sheet-id="hit_point_maximum"] dd',
   );
   if (hitPointValue === null) {
     throw new Error('The printable sheet requires its hit point maximum row.');

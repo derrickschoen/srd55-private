@@ -23,6 +23,7 @@ import {
   type RpcHarness,
 } from '../../helpers/rpc-harness';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
+import { characterCatalogDisclosures } from '../../../src/queries/character-catalog-disclosures';
 
 let harness: RpcHarness | undefined;
 
@@ -564,7 +565,8 @@ describe('guided lineage spell grants', () => {
     expect(elfSources).toHaveLength(1);
     expect(elfSources[0]).toMatchObject({
       display_name: 'Elf',
-      config: '{"class_level":1}',
+      config:
+        '{"class_level":1,"source_content_key":"2024:species:elf"}',
     });
     expect(Number.isSafeInteger(elfSources[0]?.['id'])).toBe(true);
     expect(speciesSpellSlotCount(db, characterId)).toBe(0);
@@ -592,10 +594,21 @@ describe('guided lineage spell grants', () => {
     expect(dwarfSources).toHaveLength(1);
     expect(dwarfSources[0]).toMatchObject({
       display_name: 'Dwarf',
-      config: '{"class_level":1}',
+      config:
+        '{"class_level":1,"source_content_key":"2024:species:dwarf"}',
     });
     expect(Number.isSafeInteger(dwarfSources[0]?.['id'])).toBe(true);
     expect(speciesSpellSlotCount(db, characterId)).toBe(0);
+    expect(
+      characterCatalogDisclosures(db, characterId).find(
+        (disclosure) => disclosure.kind === 'species',
+      ),
+    ).toEqual({
+      kind: 'species',
+      name: 'Dwarf',
+      content_key: '2024:species:dwarf',
+      catalog_layer: 'bundled',
+    });
     expect(
       new SpellAccessBuilder(db)
         .buildForCharacter(characterId)
@@ -719,7 +732,10 @@ describe('guided lineage spell grants', () => {
       expect(sources).toHaveLength(1);
       expect(sources[0]).toMatchObject({
         display_name: speciesName,
-        config: '{"class_level":1}',
+        config: JSON.stringify({
+          class_level: 1,
+          source_content_key: species.content_key,
+        }),
       });
       expect(Number.isSafeInteger(sources[0]?.['id'])).toBe(true);
       expect(speciesSpellSlotCount(db, characterId)).toBe(0);
