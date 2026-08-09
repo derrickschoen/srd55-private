@@ -5,6 +5,44 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-09 — Barbed Court: CME becomes an original "invisible slapping hands" feature — BA cast, Focus cost, Martial Arts dice; scaling menu simulated, choice pending
+
+Owner's directive, verbatim:
+
+> Give monk an invisible slapping hand flavor copy of cme with a bonus action
+> to cast and focus point cost and martial arts damage dice. Brainstorm
+> possible scaling techniques and sum them
+
+Effect: the Monk-11 *Conjure Minor Elementals* grant is superseded by an
+**original feature** — a 15-foot emanation of invisible slapping courtier
+hands, cast as a **Bonus Action** for Focus Points, adding **Martial Arts
+dice** to each hit instead of the spell's 2d8. Design gains recorded: no
+spell-list borrowing, no upcast question (the dice are the feature's own),
+concentration assumed retained (flagged below), and the flavor unifies the
+kit — every damage source in the subclass is now a hand.
+
+Simulation basis (1000×4-round combats, dummy target, elf/Nick/IS-advantage
+loop, AC 15/18/21): **each Martial Arts die of rider ≈ +34 DPR at AC 18.**
+Menu as simmed: 1 die → 105; 2 dice → 139; 3 dice → 172 (parity with the
+optimized Draconic 3/Lore 8 at 179); 4 dice → 206 (exceeds it).
+
+Open sub-choices for the owner:
+
+1. **Rider size / scaling technique** (brainstormed): flat 2 dice growing
+   with the MA die (2d10→2d12); dice = Focus spent at cast; 2 dice at 11
+   rising to 3 at 17; rider once per turn instead of every hit (~+11 DPR per
+   2 dice — the taming knob); flat Wis modifier instead of dice.
+2. **Focus cost** (4 assumed, matching the superseded CME cast).
+3. **Whether the Innate-Sorcery-like Advantage state stays bundled** with
+   the cast (simulated bundled, per the owner's prior variant request).
+4. Concentration: assumed yes (10 minutes, like the spell it copies).
+
+Comparator context from the same sim run: straight-class Valor Bard 11
+(Magical Secrets CME@6 + Scorching Ray volleys, no advantage engine) is
+89–94 DPR at AC 18 — the famous 334-DPR figure requires the pre-errata +2d8
+upcast plus a Fighter dip. A Grappler-feat correction to the original kit
+(unconditional Advantage via grapple, no new feature) already reaches 138.
+
 ## 2026-08-08 — Barbed Court: Innate Sorcery moves to Monk 3; the slap is an Unarmed Strike at 5 feet and a ranged weapon attack beyond
 
 Owner's ruling, verbatim:
