@@ -16,7 +16,6 @@ import { DatabaseContext } from '../../../src/db/database';
 import { RpcError } from '../../../src/rpc/protocol';
 import { parseRoute, Router } from '../../../src/ui/router';
 import type { ScreenContext } from '../../../src/ui/screen';
-import { homebrewReplacementPath } from '../../../src/ui/screens/homebrew/homebrew-routes';
 import {
   isStoredSpeciesDraft,
   renderSpeciesForm,
@@ -402,10 +401,9 @@ describe('HA-7 species authoring form', () => {
       button(root, 'Publish species').click();
       await settle();
       expect(calls).toEqual(['preview', 'commit:0']);
-      expect(elementText(root as unknown as Node)).toContain('Species published');
-      expect(elementText(root as unknown as Node)).toContain('Homebrew');
-      root.querySelector('a')?.click();
-      expect(navigated).toEqual(['/homebrew']);
+      expect(navigated).toEqual([
+        '/homebrew?publishOutcome=created&publishedKey=expanded%3Aspecies%3Aclockwork-voyager&publishedName=Clockwork+Voyager&publishedLayer=external&previousUsageCount=0',
+      ]);
       cleanup();
     } finally {
       restoreDocument();
@@ -435,7 +433,8 @@ describe('HA-7 species authoring form', () => {
           };
         },
       });
-      const screenContext = context();
+      const navigated: string[] = [];
+      const screenContext = context(navigated);
       const mount = document.createElement('div');
       screenContext.root.append(mount);
       const draft = stored();
@@ -472,8 +471,9 @@ describe('HA-7 species authoring form', () => {
         decision: 'clone',
         clone_name: 'Private Human',
       }]);
-      expect(elementText(root as unknown as Node)).toContain('Species published');
-      expect(elementText(root as unknown as Node)).toContain('Homebrew');
+      expect(navigated).toEqual([
+        '/homebrew?publishOutcome=created&publishedKey=expanded%3Aspecies%3Aprivate-human&publishedName=Private+Human&publishedLayer=external&previousUsageCount=0',
+      ]);
       cleanup();
     } finally {
       restoreDocument();
@@ -509,12 +509,9 @@ describe('HA-7 species authoring form', () => {
       await settle();
       button(root, 'Publish species').click();
       await settle();
-      const fix = root.querySelectorAll('a').find(
-        (link) => link.textContent === 'Review character fixes',
-      );
-      expect(fix?.getAttribute('href')).toBe(homebrewReplacementPath(oldKey, newKey));
-      fix?.click();
-      expect(navigated).toEqual([homebrewReplacementPath(oldKey, newKey)]);
+      expect(navigated).toEqual([
+        '/homebrew?publishOutcome=created&publishedKey=expanded%3Acontent.species%3Aversion-new&publishedName=Clockwork+Voyager&publishedLayer=external&previousUsageCount=2&previousKey=expanded%3Acontent.species%3Aversion-old',
+      ]);
       cleanup();
     } finally {
       restoreDocument();
@@ -783,7 +780,8 @@ describe('HA-7 species authoring form', () => {
       await settle();
       button(root, 'Publish species').click();
       await settle();
-      expect(elementText(root as unknown as Node)).toContain('Species published');
+      expect(router.current.path).toBe('/homebrew');
+      expect(router.current.query.get('publishedName')).toBe('Router Guard Species');
       expect(router.navigate('/clean-after-publish')).toBe(true);
 
       cleanup();
