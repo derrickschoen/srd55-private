@@ -51,6 +51,13 @@ the round math, not as license for the rest.
 
 You gain proficiency in one skill of your choice.
 
+### Level 3: Old Training
+
+You adopt a Fighting Style: choose **Archery** or **Two-Weapon Fighting**.
+*(Added by owner ruling 2026-08-09. The level-13 Fighting Style feature is
+unchanged and now effectively grants a second style; you still can't take
+the same option twice.)*
+
 ### Level 3: Too Old for This
 
 You can only deal Sneak Attack damage on your turn. You cannot apply Sneak

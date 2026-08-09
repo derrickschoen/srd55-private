@@ -5,6 +5,42 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-09 — VETERAN: Fighting Style (Archery or TWF) at level 3; Sure Strike v5 simmed with perfect information
+
+Owner's rulings, verbatim:
+
+> Sim out using sure strike pb times per short/long rest to add +5 to an
+> attack roll.
+>
+> What can we do to bump up the lvl3 veteran without making it a must have
+> 3 level dip for fighters?
+
+> Give the choice of archery and twf at 3 and change the sim so that the
+> player knows if sure strike will change a miss to a hit and can decide
+> after rolling the dice
+
+Effects:
+
+1. **New level-3 feature, "Old Training"**: choose the Archery or
+   Two-Weapon Fighting style. Applied to the Veteran doc. Dip audit
+   recorded: near-zero marginal value to a Fighter (styles are their own
+   chassis; GWM builds can use neither option), which was the constraint
+   the owner named.
+2. **Sure Strike v5 modeled with perfect information**: the player sees the
+   roll, spends a use only when +5 converts a miss AND the Sneak Attack is
+   at stake — never on a bare off-hand hit. Simmed against v4 with Old
+   Training included (TWF, melee canonical): L6 25.7→27.1 burst, L11
+   63.3→65.5; day figures within half a point of burst throughout. v5 is
+   +1.5–2.5 DPR over the half-dice floor and replaces the guaranteed floor
+   with miss-insurance (true whiffs now deal zero). **Choice between v4
+   and v5 not yet ruled** — the doc still carries v4 (half dice,
+   SA-exclusive).
+3. Levels 11 sits at 63–66 = 1.17–1.22× the optimized Vengeance Paladin
+   after Old Training — above the 1.1× line the owner set earlier the same
+   day; recorded, not corrected, as the owner's chosen trade for the
+   level-3 bump. The early-only alternative (+1d6 SA absorbed at 9) was
+   presented and not taken.
+
 ## 2026-08-09 — VETERAN: Sure Strike second revision — half dice, no action, exclusive with Sneak Attack
 
 Owner's ruling, verbatim:
