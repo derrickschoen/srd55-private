@@ -5,6 +5,21 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-09 — Barbed Court: the invisible-hands emanation REQUIRES CONCENTRATION — owner-ruled, no longer an assumption
+
+Owner's ruling, verbatim:
+
+> Make sure the barbed court cme requires concentration
+
+Effect: the invisible-slapping-hands feature carries Concentration for its
+full duration, closing the open assumption in the entry below. Consequence
+already on the record and now load-bearing: the monk concentrates with an
+unproficient Constitution save while tanking by design — the feature's
+realistic uptime in melee is 2–4 rounds per cast, and every dummy-only sim
+figure for the hands is therefore an upper bound. The concentration slot also
+remains the kit's scarcest resource: the hands compete with Slow, Fear,
+Silence and every other concentration spell in the doc.
+
 ## 2026-08-09 — Barbed Court: CME becomes an original "invisible slapping hands" feature — BA cast, Focus cost, Martial Arts dice; scaling menu simulated, choice pending
 
 Owner's directive, verbatim:
