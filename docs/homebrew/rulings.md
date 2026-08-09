@@ -5,6 +5,61 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-09 — Barbed Court: spell list pivots to BARD — Cleric-verbatim preparation plus a Short-Rest swap, rituals, full list allowed, rows slimmed
+
+Owner's rulings, verbatim:
+
+> I'm wondering what if we change the spell list to the bard spell list and
+> change it to a prepared cast or like a cleric so they could swap out the
+> spells in ten minutes like cleric can and use the barred spell list and be
+> able to cast rituals. Um, I'm thinking also we'll wanna put a few key
+> wizard spells in the subclass known spells list like shield, and maybe
+> some others I'm not sure. Brainstorm that one, work it through, and
+> highlight spells were missing. I did... I realize now that Misty Step
+> isn't that useful on a month because they already have kind of step at
+> the wind and everything.
+
+> Cleric verbatim. Add short rest.
+>
+> I don't know anything about fire shield
+>
+> Allow all bard spells
+>
+> 4) yes
+
+Effects, closing the pivot (Fire Shield still open, explained separately):
+
+1. **Chosen spells come from the BARD list** (was Wizard). Grep-verified
+   against SRD 5.2.1 spell headers: the kit's enchantment/illusion identity
+   is bard-native (*Mirror Image, Dissonant Whispers, Command, Silence,
+   Slow, Fear, Hold Person, Hypnotic Pattern, Compulsion, Suggestion,
+   Greater Invisibility, Mislead, Dispel Magic*).
+2. **Preparation is the 2024 Cleric pattern verbatim** — change your
+   prepared list when you finish a Long Rest — **plus a bespoke Short-Rest
+   clause: swap one prepared spell when you finish a Short Rest.** The
+   one-per-level swap rule is superseded. Recorded: the Short-Rest swap
+   exceeds any official caster's flexibility; owner-chosen, on a
+   short-rest-driven chassis.
+3. **Ritual casting granted** — Bard-list rituals castable as rituals when
+   prepared (*Detect Magic, Identify, Comprehend Languages, Tiny Hut* et
+   al.): the exploration/social pillar at zero slot cost.
+4. **The full bard list is allowed, healing included** (*Cure Wounds,
+   Healing Word* at third-caster pace) — chosen with eyes open, not
+   inherited.
+5. **Misty Step is dropped** (owner: redundant with Step of the Wind; it is
+   also not on the bard list). Its 6th-row seat goes to **Hold Person**.
+6. **Rows and cantrips, final**: granted cantrips six — Shocking Grasp,
+   Chill Touch, **Ray of Frost** (grafted so the pinned Slow+RoF lockdown
+   survives the list change), Vicious Mockery, Mage Hand, Guidance — plus
+   two chosen Bard cantrips. Court Spells rows: 3rd *Shield* (the Wizard
+   graft), *Dissonant Whispers*; 6th *Mirror Image*, *Hold Person*; 11th
+   *Slow*, *Fear*; 17th *Compulsion*. Bard-native seats are
+   certainty-not-access (always prepared, not counted against the Paladin
+   column); *Shield* is the lone off-list spell graft so far.
+7. DPR impact of the pivot: zero — Shield, Ray of Frost and the loop
+   survive via grants; the fights-back sim stands (78.8 at 11, 115.0 at
+   17, vs Vengeance Paladin 54/64).
+
 ## 2026-08-09 — Barbed Court: goad and duel CONSOLIDATED into one feature — the last open mechanic closes
 
 Owner's ruling, verbatim:
