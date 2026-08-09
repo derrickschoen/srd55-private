@@ -59,19 +59,9 @@ removed the same day to keep the ranged build nearer its ranged peers. The
 level-13 Fighting Style feature is unchanged; you still can't take the same
 option twice.)*
 
-### Level 3: Veteran's Sneak Attack
+### Level 3: Deeper Cuts
 
-Your Sneak Attack dice come from the Veteran's Sneak Attack table instead
-of the Rogue table:
-
-| Rogue level | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Sneak Attack | 3d6 | 3d6 | 4d6 | 4d6 | 5d6 | 5d6 | 6d6 | 8d6 | 10d6 | 11d6 | 12d6 | 13d6 | 14d6 | 15d6 | 16d6 | 17d6 | 18d6 | 19d6 |
-
-*(Owner rulings 2026-08-09/10: this single table replaces both the Deeper
-Cuts experiment and the original Veteran's Strike doubling — the non-linear
-ramp lives in the column itself: +1 die every other level to 9, the
-veteran's experience compounding at 10–11, +1 per level after.)*
+Your Sneak Attack deals one extra die of damage.
 
 ### Level 3: Old Reserves
 
@@ -111,13 +101,16 @@ build: 59.7/103.0 burst, 59.5/103.6 sustained — the floor drops from 45 to
 23 (11th) / 68 to 34 (17th) on whiffed rounds, ~6% of rounds under the Vex
 chain.)*
 
-### Level 9: Veteran's Strike — SUPERSEDED
+### Level 9: Veteran's Strike
 
-*(Owner ruling 2026-08-10: the doubling is retired; the Veteran's Sneak
-Attack table at level 3 now carries the entire damage progression, with its
-ramp landing at levels 10–11. Level 9's remaining feature is Extensive
-Experience below. The original clause that Bonus Action features never
-increase Sneak Attack's opportunity cost remains true globally.)*
+Your Sneak Attack dice equal your Rogue level (9d6 at 9th level, 20d6 at
+20th). This replaces Deeper Cuts.
+
+*(Owner ruling 2026-08-10, replacing the original doubling: two one-line
+formulas — standard dice +1 until 8, level dice from 9 — track the tuned
+Monte Carlo curve within one die at every level and land 1.01× the
+optimized Vengeance Paladin at 6, 1.20× at 11, 1.71× at 17. Bonus Action
+features still never increase Sneak Attack's opportunity cost.)*
 
 ### Level 9: Extensive Experience
 
