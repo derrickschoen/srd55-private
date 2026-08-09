@@ -7,6 +7,27 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D231 — OWNER: U2 lineage rulings — mint content-v2; no step-advance gating; High Elf cantrip swap IS modeled (2026-08-09)
+
+Three rulings on the species-lineage design
+(docs/design/2026-08-09-species-lineage.md) plus one amendment:
+ - MINT APPROVED: content-v2 fingerprint scheme (three CHECK
+   constraints widen, current-fingerprint unique index reworked).
+   Lineage choice definitions are identity-bearing per the design.
+ - NO STEP-ADVANCE GATING: the species step advances with lineage
+   unchosen; the sheet says UNKNOWN and the completeness item nags —
+   overriding the design's blocking choice, consistent with how the
+   optional species skill behaves.
+ - SCOPE AMENDED mid-ruling by the owner: the HIGH ELF CANTRIP SWAP
+   IS MODELED — the chosen wizard-list cantrip is a real recorded,
+   replaceable choice DISPLAYED ON THE SHEET. The Long-Rest swap
+   timing itself stays prose. Forest Gnome free-casts and Rock Gnome
+   device remain prose-only as accepted.
+SUPERVISOR REQUIREMENT carried into implementation: the design's
+one-time reconciliation pass registers as a checksum-frozen
+catalog-data migration with its D226 transitive source declared, or
+its claim is restated — decided in U2-A, not discovered mid-gate.
+
 ## D230 — OWNER: D227's rewrite is a FULL SCRUB, docs included; the never-edit rule is lifted for exactly the substitution (2026-08-08)
 
 D227 was authorized on a WRONG SUPERVISOR PREMISE, disclosed in full
