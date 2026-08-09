@@ -5,6 +5,43 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-08 — Barbed Court: the slap teleports the hand, deals Psychic, reaches 10 feet — Courtier's Slap wording settles
+
+Owner's rulings, verbatim:
+
+> Fix the movement problem by teleporting the hand where it needs to be to
+> slap .
+>
+> Psychic damage .
+>
+> 10 foot range
+
+Effects, closing the slap's three opens:
+
+1. **Teleport, not movement.** The hand relocates as part of the slap itself;
+   the Magic-action move cost stops being load-bearing (it remains the SRD
+   cost for out-of-combat hand use). The proposed free-move rider is
+   withdrawn — the teleport is strictly cleaner.
+2. **Psychic damage** — the humiliation reading; the slap wounds pride, not
+   flesh. Matches Vicious Mockery's type. Trade-off on record: Psychic is the
+   type mindless and construct-type creatures most often resist or ignore —
+   the slap will blank on some monsters, which fits the fiction (you cannot
+   humiliate a zombie) and is accepted.
+3. **10-foot range, measured from the monk** — the target must be within 10
+   feet of you; the hand teleports to it. The old within-5-feet-of-the-hand
+   positioning requirement is superseded.
+
+Working wording, assembled (melee-spell-attack assumption still standing):
+
+> **Courtier's Slap.** While your Mage Hand is manifested, once on each of
+> your turns when you take the Attack action and make an Unarmed Strike, you
+> can also have the hand slap one creature within 10 feet of you as part of
+> that action. The hand teleports to an unoccupied space within 5 feet of the
+> target, and you make a melee spell attack against it. On a hit, the target
+> takes Psychic damage equal to one roll of your Martial Arts die + your
+> Wisdom modifier. This attack doesn't require your Bonus Action and doesn't
+> count as the extra attack of a weapon's Light property.
+
 ## 2026-08-08 — Barbed Court: the Mage Hand slap becomes a level-3 attack rider (Nick-style, 1d4 + spellcasting modifier)
 
 Owner's ruling, verbatim:
