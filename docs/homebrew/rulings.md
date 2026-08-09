@@ -57,6 +57,18 @@ Measurements recorded:
 
 Follow-up ruling, same sitting, verbatim:
 
+> Actually, the mage hand deals martial arts die damage
+
+Applied, superseding the 1d4: the slap deals **your Martial Arts die + your
+spellcasting modifier** — d6 at Monk 3 scaling to d12 at 17, the monk's own
+native-engine attachment. Working wording's damage clause becomes "the target
+takes damage equal to one roll of your Martial Arts die + your Wisdom
+modifier." Measured: ~+4.6 DPR at Monk 3 rising to ~+8 at 17; the slap now
+scales without further text, which is the SRD Monk pattern (features ride the
+Martial Arts die rather than printing their own dice).
+
+Follow-up ruling, same sitting, verbatim:
+
 > Also extend the duration of mage hand to 8hours
 
 Applied: for a Barbed Court monk, *Mage Hand* lasts **8 hours** instead of 1
