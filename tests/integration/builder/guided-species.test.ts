@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { SpellAccessBuilder } from '../../../src/access/spell-access-builder';
@@ -651,11 +651,20 @@ describe('guided lineage spell grants', () => {
         '{"source_content_key":"2024:species:dwarf"}',
     });
     expect(Number.isSafeInteger(dwarfSources[0]?.['id'])).toBe(true);
+    // U4's recorded-template-key path must retain the known layer even when
+    // the optional live definition link is absent.
+    db.exec(
+      `UPDATE character_source_instances
+       SET source_definition_id = NULL
+       WHERE id = ?`,
+      [dwarfSources[0]?.['id']],
+    );
     expect(guidedSpeciesChoiceState(db, characterId)).toMatchObject({
       kind: 'ready',
       resolution: {
         kind: 'complete',
         source_name: 'Dwarf',
+        source_catalog_layer: 'bundled',
         choices: [],
       },
     });
@@ -922,6 +931,7 @@ describe('configured species choice and honest projection', () => {
       resolution: {
         kind: 'incomplete',
         source_name: 'Elf',
+        source_catalog_layer: 'bundled',
         missing: ['option', 'spellcasting_ability'],
         choices: [{
           rule_key: 'elf-lineage',
@@ -966,6 +976,7 @@ describe('configured species choice and honest projection', () => {
       expect.objectContaining({
         kind: 'required_source_choice',
         title: 'Elf — Elven Lineage not chosen',
+        source_catalog_layer: 'bundled',
         missing: ['option', 'spellcasting_ability'],
       }),
     ]));
@@ -1576,22 +1587,14 @@ describe('configured species choice and honest projection', () => {
       '../../../src/commands/choose-species-lineage.ts',
       '../../../src/grants/character-level-source-reconciliation.ts',
     ].map((relativePath) => fileURLToPath(new URL(relativePath, import.meta.url)));
-    const grep = spawnSync(
-      'rg',
-      [
-        '--line-number',
-        '--with-filename',
-        '--regexp',
-        String.raw`\b(?:Elf|Drow|Gnome|Tiefling)\b`,
-        ...productionFiles,
-      ],
-      { encoding: 'utf8' },
+    const bundledSpeciesName = /\b(?:Elf|Drow|Gnome|Tiefling)\b/gu;
+    const matches = productionFiles.flatMap((file) =>
+      [...readFileSync(file, 'utf8').matchAll(bundledSpeciesName)].map(
+        (match) => ({ file, match: match[0], index: match.index }),
+      )
     );
 
-    expect(grep.error).toBeUndefined();
-    expect(grep.stderr).toBe('');
-    expect(grep.stdout).toBe('');
-    expect(grep.status).toBe(1);
+    expect(matches).toEqual([]);
   });
 
   it('refuses invalid option, crossed ability, stale revision, and extra RPC keys without changing state', async () => {

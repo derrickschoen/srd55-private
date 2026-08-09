@@ -211,12 +211,14 @@ export type SpeciesChoiceResolution =
       readonly kind: 'complete';
       readonly source_instance_id: number;
       readonly source_name: string;
+      readonly source_catalog_layer: CatalogLayerDisclosure;
       readonly choices: readonly GuidedConfiguredChoiceState[];
     }
   | {
       readonly kind: 'incomplete';
       readonly source_instance_id: number;
       readonly source_name: string;
+      readonly source_catalog_layer: CatalogLayerDisclosure;
       readonly missing: readonly (
         | 'option'
         | 'spellcasting_ability'
@@ -227,6 +229,7 @@ export type SpeciesChoiceResolution =
   | {
       readonly kind: 'unresolvable';
       readonly source_name: string;
+      readonly source_catalog_layer: CatalogLayerDisclosure;
       readonly reason: string;
     };
 

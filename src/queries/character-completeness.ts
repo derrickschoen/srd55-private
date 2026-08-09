@@ -16,6 +16,7 @@ import { EligibleSpellSearch } from '../eligibility/eligible-spell-search';
 import { CharacterNotFoundError } from './character-crud';
 import { orderSources } from './order-sources';
 import { resolveSpeciesChoice } from '../builder/species-choice';
+import type { CatalogLayerDisclosure } from '../catalog/catalog-disclosure';
 
 export interface UnfilledChoicesItem {
   readonly kind: 'unfilled_choices';
@@ -49,6 +50,7 @@ export interface RequiredSourceChoiceItem {
   readonly remedy: string;
   readonly source_instance_id: number;
   readonly source_name: string;
+  readonly source_catalog_layer: CatalogLayerDisclosure;
   readonly choice_label: string;
   readonly missing: readonly (
     | 'option'
@@ -603,6 +605,7 @@ export function requiredSourceChoiceItems(
       remedy: 'Return to the guided Species step to review this required choice.',
       source_instance_id: resolution.source_instance_id,
       source_name: resolution.source_name,
+      source_catalog_layer: resolution.source_catalog_layer,
       choice_label: choice.label,
       missing: [...resolution.missing],
     };
