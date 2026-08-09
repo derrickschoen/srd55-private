@@ -5,6 +5,41 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-09 — Barbed Court: Spellwoven Strike CUT; Court Cantrips (cantrip-on-Focus-spend) is the weaving mechanic — queue item 8 CLOSED
+
+Owner's ruling, verbatim:
+
+> I want to be able to combine the slow mastery with ray of frost. The one
+> per turn was when I allowed casting a cantrip when spending focus.
+>
+> Maybe cantrip when focus is spent ( only once per turn this way) instead
+> of copying the valor bard is better.
+
+Effects:
+
+1. **Spellwoven Strike (cantrip-replaces-an-attack) is cut**, and the
+   Valor-style inversion (strike-rides-on-cantrip) is declined. Level 6
+   holds five grants.
+2. **Court Cantrips is the surviving mechanism, clarified**: level 3 —
+   when you spend one or more Focus Points, you can cast one cantrip you
+   know (Action casting time) as part of that expenditure, no action
+   required; **once per turn**. The owner clarifies the one-cantrip-per-turn
+   cap was always this feature's own limit, not a global rule — normal
+   Action-cast cantrips follow ordinary rules. The historic reading in
+   earlier entries is corrected by this one.
+3. **Design intent pinned, in the owner's words: the Slow + Ray of Frost
+   stack.** Flurry (1 Focus) triggers a free Ray of Frost; an unarmed hit
+   carrying the Slow mastery is −10 ft Speed and Ray of Frost is −10 more —
+   a 30-Speed enemy drops to 10 inside the 15-foot emanation, which is what
+   the Slow mastery kept its seat for. Ray of Frost is a chosen-cantrip
+   seat, not granted; the doc will note the combo in design notes.
+
+Measured: the free cantrip on Focus-spend rounds adds ~+6 DPR at 6, ~+9 at
+11, ~+13 at 17 (Ray of Frost line, with the hands' Wisdom-psychic rider
+applying to its hit), buying back most of the Nick trim — the loop lands
+≈66–70 at 11, comfortably inside the owner's band. No new trackers: the
+once-per-turn cap was already one of the two counted flags.
+
 ## 2026-08-09 — Barbed Court: Court Forms mastery set is Slow/Topple/Push/Sap/Graze — Nick out (the slap already IS the Nick mechanic); queue item 7 CLOSED
 
 Owner's ruling, verbatim:
