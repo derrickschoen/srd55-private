@@ -5,6 +5,24 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-09 — Barbed Court: level 17 is COMPLETE — no named capstone; original queue item 5 CLOSED
+
+Owner's ruling, verbatim:
+
+> 17 is done
+
+Effect: Monk 17 ships as the four accumulated payoffs — the hands rider
+doubling to 2 × Wisdom psychic, Focus-casting at 1 point per spell level
+(never upcast), the +3 Unarmed ladder step beside the d12 Martial Arts die,
+and the granted *Compulsion* row. No named capstone is added; the 2026-08-06
+candidates (Court of One, Unbreakable, Perfect Provocation) are retired
+unbuilt, and the Focus-recovery loop presented as option (b) is declined.
+
+Context recorded: 17's package measures 89 DPR in the fights-back
+environment (1.4× the optimized Vengeance Paladin), 11→17 growth +25%, and
+the freshly-cut complexity budget (two per-turn trackers) stays intact —
+every capstone candidate would have added tracking back.
+
 ## 2026-08-09 — Barbed Court: hands rider is flat Wisdom psychic (doubling at 17); bespoke Shield DELETED; Flourish folds into the duel — trackers cut to two
 
 Owner's rulings, verbatim (answering three numbered questions):
