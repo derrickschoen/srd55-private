@@ -5,6 +5,47 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-10 — VETERAN FINAL: custom Sneak Attack table replaces the doubling; Old Reserves is a Pact-Magic-shaped once-per-rest boost
+
+Owner's rulings, verbatim (the simplification arc, in order):
+
+> I don't want to take anything away or change it too much at 9. / The
+> original intention was to keep this on the simpler side of rogue
+> subclasses like the champion is for fighters
+
+> Keep deep cuts simple and put the replacement text in the lvl 9 feature.
+> ... Maybe just publish a new sneak attack table that ramps up more at
+> higher levels as well as a small pool the refreshes on a long/short rest
+> 1/2 rogue level rounded down. Play around with the tuning on the sneak
+> attack dice increase curve to get the non linear increase we want
+
+> I was thinking instead of a pool of dice, it is a pool of damageboosts
+> (rouge-lvl/2 d6s each) x times per day. You choose when to apply
+
+> Similar to warlock spell slots
+
+> Revharge on short/long rest recharge
+
+Final engine, applied to the doc:
+
+1. **Veteran's Sneak Attack (3)** — a published table replacing the Rogue
+   column: 3/3/4/4/5/5/6/**8/10**/11/12/13/14/15/16/17/18/19 (levels
+   3–20). Curve C2, chosen from four simmed candidates: +1 die every other
+   level to 9, the compounding ramp at 10–11, +1 per level after. This
+   single table absorbs Deeper Cuts and retires Veteran's Strike (marked
+   superseded in the doc; level 9 keeps Extensive Experience).
+2. **Old Reserves (3)** — once per Short or Long Rest, add ⌊Rogue level/2⌋
+   d6 to one Sneak Attack; dice double on crits (owner: "for fun");
+   Pact-Magic cadence at the owner's naming. Boost-count tuning simmed
+   (1/SR, 2/SR, 2–4/LR): 1/SR is the only shape inside the band.
+3. Sure Strike stays v4 (half dice, no action, exclusive) — the simpler
+   fork, resolving that open.
+
+Measured, final kit (burst/day identical): **L6 32.8 (1.02× paladin — the
+owner's 0.9–1.05 band), L11 60.2 (1.12×), L17 103 (1.62×, wish-tier
+waiver)**. Tracked resources in the whole subclass: Old Reserves' one use
+and Veteran Reflexes' PB — the Champion-of-rogues brief, met.
+
 ## 2026-08-09 — VETERAN: reserve dice double on crits (owner-ruled); reserve-as-engine formula grid simmed, pick pending
 
 Owner's rulings, verbatim:

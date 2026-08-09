@@ -59,18 +59,29 @@ removed the same day to keep the ranged build nearer its ranged peers. The
 level-13 Fighting Style feature is unchanged; you still can't take the same
 option twice.)*
 
-### Level 3: Veteran's Reserve
+### Level 3: Veteran's Sneak Attack
 
-You have a pool of bonus Sneak Attack dice equal to your Rogue level. When
-you deal Sneak Attack damage, you can spend dice from the pool equal to
-**half your Rogue level (round down)**, adding that many d6s to the damage.
-These bonus dice are not doubled by Veteran's Strike. You regain all spent
-dice when you finish a Short or Long Rest.
+Your Sneak Attack dice come from the Veteran's Sneak Attack table instead
+of the Rogue table:
 
-*(Owner ruling 2026-08-09; intent recorded verbatim: "2 boosted hits per
-combat, a genuine decision." At Rogue 11 the pool of 11 funds two +5d6
-activations per rest. Assumption, flagged: the bonus dice double on a
-critical hit like all damage dice.)*
+| Rogue level | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Sneak Attack | 3d6 | 3d6 | 4d6 | 4d6 | 5d6 | 5d6 | 6d6 | 8d6 | 10d6 | 11d6 | 12d6 | 13d6 | 14d6 | 15d6 | 16d6 | 17d6 | 18d6 | 19d6 |
+
+*(Owner rulings 2026-08-09/10: this single table replaces both the Deeper
+Cuts experiment and the original Veteran's Strike doubling — the non-linear
+ramp lives in the column itself: +1 die every other level to 9, the
+veteran's experience compounding at 10–11, +1 per level after.)*
+
+### Level 3: Old Reserves
+
+When you deal Sneak Attack damage, you can draw on your reserves: add a
+number of d6s to the damage equal to half your Rogue level (round down).
+These dice are doubled by a critical hit. Once you use this feature, you
+can't use it again until you finish a Short or Long Rest.
+
+*(Owner-shaped like Pact Magic: few, full-power, recharging on a Short or
+Long Rest.)*
 
 ### Level 3: Too Old for This
 
@@ -100,18 +111,13 @@ build: 59.7/103.0 burst, 59.5/103.6 sustained — the floor drops from 45 to
 23 (11th) / 68 to 34 (17th) on whiffed rounds, ~6% of rounds under the Vex
 chain.)*
 
-### Level 9: Veteran's Strike
+### Level 9: Veteran's Strike — SUPERSEDED
 
-Your Sneak Attack damage dice are doubled.
-
-For example, if your Sneak Attack is normally 5d6, it becomes 10d6.
-
-This applies to your Sneak Attack dice pool in all cases, with no
-exceptions.
-
-Using Cunning Action or any other bonus action feature does not increase the
-opportunity cost of Sneak Attack; you still only expend Sneak Attack once
-per turn as normal.
+*(Owner ruling 2026-08-10: the doubling is retired; the Veteran's Sneak
+Attack table at level 3 now carries the entire damage progression, with its
+ramp landing at levels 10–11. Level 9's remaining feature is Extensive
+Experience below. The original clause that Bonus Action features never
+increase Sneak Attack's opportunity cost remains true globally.)*
 
 ### Level 9: Extensive Experience
 
