@@ -23,7 +23,67 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-09-a (newest - read first)
+## RESTART POINT 2026-08-09-b (newest - read first)
+MAIN c88e970a (mirror pushed after verified verdicts). FLOORS: vitest
+259/4,249 all-pass; PW 148 pool; build 0; migrations 0000-0040 (a
+content-v2 MINT is in flight in wt/u2a). FIFTY-THREE merges. Rulings
+through D231.
+
+MERGED SINCE 08-09-a — wave 1 of the owner-triaged polish units:
+ - 51st, wt/u3 (08b1f497): publishing homebrew navigates (history
+   REPLACE) to a durable library result route, all three kinds;
+   deleted-draft URLs recover to Drafts with a notice; back-history
+   proven E2E; strict param allowlist, textContent rendering.
+ - 52nd, wt/u5 (124e6fc6): the guided spell step is legible — visible
+   source/slot labels, filled choices persist as summary rows with
+   Change controls (ordinals are write-once, stable under any fill
+   order); the optional species skill renders ABOVE gating class
+   choices so top-to-bottom completion reaches it.
+ - 53rd, wt/u1 (01748cce): level-up can no longer fabricate HP — the
+   allocation gate holds at the query terminal AND the command
+   refusal (direct RPC included), 3-layer pins; cards derive
+   level_one_complete from all eight guided signals and offer Resume
+   build; first workspace ability edit claims method='manual' with an
+   undo that restores NULL (snapshot-inverse envelope now a pinned
+   contract); mid-step ability drafts survive reload via
+   character_rule_overrides.
+
+FINDINGS THAT MATTERED (full detail in merge messages):
+ - U1's review caught the gate BYPASSABLE at the command layer and a
+   FALSE-BLOCK for workspace-entered scores — both fixed pre-merge.
+ - U5's retained summaries broke every positional walker over guided
+   choices (helpers now select by discriminant); its copy rewrite
+   broke a unit copy pin — LESSON-4 SCOPE now explicitly includes
+   unit-test copy pins and element-duplication (U3's badge).
+ - The margin audit had exempted explicitly-guarded budgets; the
+   prefix-normal-late test runs 115-118.5s against 120s (97-99%) on
+   every green run and tipped once post-merge — evidenced re-budget
+   to 177800ms rides in the U4 dispatch.
+
+RESIDUALS, by design, disclosed: a deliberately-skipped optional
+species choice keeps the card/step disconnect; a complete card can
+show Level Up beside an "unfinished choice" badge (same optional
+choice); M3 drafts ride backups like all rule-overrides.
+
+IN FLIGHT (wave 2, both dispatched 08-09 ~15:15):
+ - wt/u4 port 4910: B5 hit_point_maximum label + JSON key truth
+   (wire-adjacent), M4 pending-HP only when the owed choice can
+   affect HP, N1 grant-less bundled species provenance, + the
+   prefix-normal-late budget rider.
+ - wt/u2a port 4920: species-lineage unit A — configured_choice
+   union + closed parser, content-v2 scheme + THE MINT (three CHECKs
+   widen, current-fingerprint index reworked; full census + scan
+   --mint), 23 rules become data, High Elf cantrip choice shape.
+   The lane AMENDS the design doc for D231 first (no step gating;
+   High Elf swap modeled; D226-registered reconciliation).
+   Design doc committed to main at c88e970a. Units B+D (indivisible),
+   C, E follow sequentially per the design's split.
+
+QUEUED AFTER WAVE 2: U2-B+D, U2-C, U2-E. WAITING ON OWNER: Barbed
+Court sync word; walkthrough friction list; bundle deletion;
+wt/party retirement.
+
+## RESTART POINT 2026-08-09-a
 MAIN c6ff5145 (mirror pushed after verified verdicts). FLOORS: vitest
 259/4,241 all-pass; PW 144 pool + serving spec 1 via `npm run
 serve:check`; build 0 with digest verification; migrations 0000-0040.
