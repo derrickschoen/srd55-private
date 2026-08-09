@@ -67,6 +67,31 @@ Working wording:
 > within 10 feet of you. For those strikes, use your Wisdom modifier in place
 > of Dexterity for the attack and damage rolls.
 
+Follow-up ruling, same sitting, verbatim:
+
+> All unarmed strikes wisdom
+
+Applied, superseding the own-body-stays-Dex line: **every Unarmed Strike a
+Barbed Court monk makes can use Wisdom in place of Strength or Dexterity for
+attack and damage rolls** — hand-delivered or not, from Monk 3. Written
+permissively (may use), the SRD Martial Arts pattern, so no build is ever
+worsened. Monk weapons stay on Dex, sharpening the unarmed identity the +X
+ladder already chose.
+
+Consequences recorded:
+
+- **The subclass becomes single-ability.** Wisdom now carries attack, damage,
+  save DC, spell attack, the slap, half of Unarmored Defense, and Perception
+  — with the +2 Wisdom grant at 11 raising all of it at once (+1 to hit and
+  damage on every strike stacks with the +2 item-ladder bonus arriving the
+  same level). Dexterity remains for AC's other half, initiative, and saves.
+- **F3 Dip Bait, now the loudest line on the meter:** a three-level dip
+  hands any Wisdom caster Wis-based Martial Arts attacks plus the slap plus
+  the spell kit — a Cleric or Druid 17 / Monk 3 punches at full attack stat.
+  Recorded for the outsider-reading tests, not corrected.
+
+## 2026-08-08 — Barbed Court: the slap conjures its own hand — no Mage Hand precondition; intent pinned to TWF style + Nick
+
 ## 2026-08-08 — Barbed Court: the slap conjures its own hand — no Mage Hand precondition; intent pinned to TWF style + Nick
 
 Owner's ruling, verbatim:
