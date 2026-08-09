@@ -344,7 +344,7 @@ describe('level-up rollback preview RPC', () => {
     const beforeSheet = new CharacterSheetBuilder(harness.context.db).build(
       fixture.characterId,
     );
-    expect(beforeSheet.hit_points.value).toBe(8);
+    expect(beforeSheet.class_hit_points_subtotal.value).toBe(8);
     expect(beforeSheet.species_hit_points?.value).toBe(1);
 
     const previewResponse = await dispatch(LEVEL_UP_RPC.preview, {
@@ -356,7 +356,7 @@ describe('level-up rollback preview RPC', () => {
     expect(databaseRows()).toEqual(beforeRows);
     expect(preview.before).toEqual(beforeSheet);
     expect(preview.after.total_level).toBe(2);
-    expect(preview.after.hit_points.value).toBe(14);
+    expect(preview.after.class_hit_points_subtotal.value).toBe(14);
     expect(preview.after.species_hit_points?.value).toBe(2);
     expect(preview.command_fingerprint).toContain('level_up_class');
 

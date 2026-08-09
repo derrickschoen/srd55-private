@@ -1412,6 +1412,11 @@ function deleteSourceInstanceTree(
  * instance config — and THROWS if it is absent, which would fail the whole
  * apply. Guided creation is class-first at level 1, so 1 is exact here; the
  * level-up unit inherits the duty of maintaining it.
+ * `config.source_content_key` records which installed template this copy came
+ * from. It does not assert a catalog layer: the disclosure query verifies the
+ * key and copied name against the template, then reads the layer from the
+ * identity registry. Definition-less bundled species would otherwise lose
+ * provenance even though this apply path selected their exact content key.
  *
  * NO DEFINITION IS A QUIET NO-OP, and that is correct rather than lenient:
  * only four species have definitions — the three lineage species, plus HUMAN
@@ -1464,7 +1469,10 @@ function replaceGuidedLineageGrants(
       crypto.randomUUID(),
       definitionId,
       template.name,
-      JSON.stringify({ class_level: 1 }),
+      JSON.stringify({
+        class_level: 1,
+        source_content_key: template.content_key,
+      }),
       GUIDED_SPECIES_SOURCE_MARKER,
       timestamp,
       timestamp,

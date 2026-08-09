@@ -249,14 +249,14 @@ describe('level_up_class', () => {
     enterClass('Fighter');
     const builder = new CharacterSheetBuilder(db);
     // Fighter 1, Constitution 14 (+2): 10 + 2 = 12.
-    expect(builder.build(characterId).hit_points.value).toBe(12);
+    expect(builder.build(characterId).class_hit_points_subtotal.value).toBe(12);
 
     levelUp({ class_definition_id: classId('Fighter'), target_level: 2 });
 
     expect(storedLevel('Fighter')).toBe(2);
     // Level 2 adds the d10's fixed value (10 / 2 + 1 = 6) plus 2 — the D77
     // number, computed live: 12 + 8 = 20.
-    expect(builder.build(characterId).hit_points.value).toBe(20);
+    expect(builder.build(characterId).class_hit_points_subtotal.value).toBe(20);
     // NOTHING per level was recorded. A row here would be the voided D66
     // machinery coming back.
     expect(

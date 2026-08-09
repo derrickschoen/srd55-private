@@ -18,17 +18,54 @@ describe('character catalog provenance', () => {
 
   afterEach(() => connection.close());
 
+  it('reports a pre-key species source as unknown', () => {
+    const characterId = db.exec(
+      `INSERT INTO characters (name) VALUES ('Pre-key Species')`,
+    ).lastInsertId;
+    db.exec(
+      `INSERT INTO character_species (character_id, name)
+       VALUES (?, 'Legacy Species')`,
+      [characterId],
+    );
+    db.exec(
+      `INSERT INTO character_source_instances (
+         character_id, instance_uuid, source_type, source_definition_id,
+         display_name, config, acquired_at_character_level, state, notes
+       ) VALUES (?, 'pre-key-species', 'species', NULL,
+                 'Legacy Species', '{"class_level":1}', 1, 'active', ?)`,
+      [characterId, GUIDED_SPECIES_SOURCE_MARKER],
+    );
+
+    expect(characterCatalogDisclosures(db, characterId)).toEqual([
+      {
+        kind: 'species',
+        name: 'Legacy Species',
+        content_key: null,
+        catalog_layer: 'unknown',
+      },
+    ]);
+  });
+
   it('reads every applied layer from the registry and says unknown when no identity is available', () => {
     const identities = [
       { kind: 'class' as const, contentKey: '2024:class:fighter', name: 'Fighter', keyKind: 'bundled-stable' as const },
       { kind: 'subclass' as const, contentKey: 'expanded:content.subclass:hostile', name: 'External Subclass', keyKind: 'asserted' as const },
       { kind: 'feat' as const, contentKey: 'expanded:content.feat:hostile', name: 'External Feat', keyKind: 'asserted' as const },
       { kind: 'background' as const, contentKey: 'expanded:content.background:hostile', name: 'External Background', keyKind: 'asserted' as const },
+      { kind: 'species' as const, contentKey: '2024:species:dwarf', name: 'Dwarf', keyKind: 'bundled-stable' as const },
       { kind: 'spell' as const, contentKey: 'expanded:content.spell:hostile', name: 'External Spell', keyKind: 'asserted' as const },
       { kind: 'weapon' as const, contentKey: 'expanded:content.weapon:hostile', name: 'External Weapon', keyKind: 'asserted' as const },
       { kind: 'armor' as const, contentKey: 'expanded:content.armor:hostile', name: 'External Armor', keyKind: 'asserted' as const },
     ];
     for (const identity of identities) registerFixtureContentIdentity(db, identity);
+    db.exec(
+      `INSERT INTO species_templates (
+         content_key, rules_edition, name, creature_type, size,
+         base_speed_feet
+       ) VALUES (
+         '2024:species:dwarf', '2024', 'Dwarf', 'Humanoid', 'Medium', 30
+       )`,
+    );
 
     const classId = db.exec(
       `INSERT INTO class_definitions (
@@ -72,7 +109,9 @@ describe('character catalog provenance', () => {
          character_id, instance_uuid, source_type, source_definition_id,
          display_name, config, acquired_at_character_level, state, notes
        ) VALUES (?, 'species-layer-reader', 'species', NULL,
-                 'Unregistered Species', '{}', 1, 'active', ?)`,
+                 'Unregistered Species',
+                 '{"source_content_key":"2024:species:dwarf"}',
+                 1, 'active', ?)`,
       [characterId, GUIDED_SPECIES_SOURCE_MARKER],
     );
     db.exec(

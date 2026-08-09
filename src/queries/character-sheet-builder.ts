@@ -354,9 +354,12 @@ export interface CharacterSheet {
   readonly total_level: number | null;
   readonly proficiency_bonus: UndeterminedSheetNumber;
   readonly ability_scores: readonly SheetAbilityScore[];
-  readonly hit_points: SheetNumber;
+  /** Hit points contributed by class levels and Constitution only. */
+  readonly class_hit_points_subtotal: SheetNumber;
   /** The species contribution, separately, and `null` when there is none. */
   readonly species_hit_points: UndeterminedSheetNumber | null;
+  /** The actual maximum: class subtotal plus every species HP contribution. */
+  readonly hit_point_maximum: UndeterminedSheetNumber;
   readonly armor_class: SheetArmorClass;
   readonly initiative: SheetNumber;
   readonly passive_perception: UndeterminedSheetNumber;
@@ -837,9 +840,9 @@ export class CharacterSheetBuilder {
           }),
         ),
       })),
-      hit_points: {
-        id: 'hit_points',
-        label: 'Hit point maximum',
+      class_hit_points_subtotal: {
+        id: 'class_hit_points_subtotal',
+        label: 'Class hit points subtotal',
         value: hitPoints.maximum,
         formula:
           'The starting class contributes its full hit die at level 1; every ' +
@@ -860,6 +863,17 @@ export class CharacterSheetBuilder {
                   : 'A species trait adds these on top of the class total. Shown ' +
                     'apart because the two come from different sources.',
             },
+      hit_point_maximum: {
+        id: 'hit_point_maximum',
+        label: 'Hit point maximum',
+        value: speciesHp === null ? null : hitPoints.maximum + speciesHp,
+        formula:
+          speciesHp === null
+            ? 'Undetermined because a level-scaled species contribution is undetermined.'
+            : hasSpeciesHitPoints
+              ? 'The class hit points subtotal plus the separately shown species contribution.'
+              : 'The class hit points subtotal; this character has no separate species hit point contribution.',
+      },
       armor_class: {
         id: 'armor_class',
         label: 'Armor Class',

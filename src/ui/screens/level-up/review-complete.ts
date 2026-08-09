@@ -52,10 +52,7 @@ function valueChange(
 }
 
 function finalHitPointMaximum(sheet: CharacterSheet): number | null {
-  if (sheet.hit_points.value === null) return null;
-  if (sheet.species_hit_points === null) return sheet.hit_points.value;
-  if (sheet.species_hit_points.value === null) return null;
-  return sheet.hit_points.value + sheet.species_hit_points.value;
+  return sheet.hit_point_maximum.value;
 }
 
 function classChanges(
