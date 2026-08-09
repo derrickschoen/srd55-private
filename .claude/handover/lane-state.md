@@ -23,7 +23,47 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-09-b (newest - read first)
+## RESTART POINT 2026-08-09-c (newest - read first)
+MAIN d395a8f3 (mirror pushed after verified verdicts). FLOORS: vitest
+262/4,266 all-pass; PW 148 pool; build 0 with digest verification
+(digest 3a68eebb); migrations 0000-0041 — MINT 0041 (content-v2) IS
+FROZEN ON MAIN. FIFTY-FIVE merges. Rulings through D231.
+
+MERGED SINCE 08-09-b — wave 2:
+ - 54th, wt/u4 (3c2446c4): sheet honesty. hit_point_maximum (field
+   AND JSON key) now carries the true maximum with the class subtotal
+   honestly renamed (54+8=62 pinned); known HP is no longer withheld
+   behind choices that cannot change it (feat path compile-closed,
+   subclass path CENSUS-PINNED against the live schema CHECK — fails
+   toward honest pending); grant-less bundled species disclose their
+   recorded template key (forged + absent keys resolve honest-unknown);
+   prefix-normal-late re-budgeted 120s->177.8s by evidence.
+ - 55th, wt/u2a (d395a8f3): species-lineage unit A. configured_choice
+   union + closed parser; content-v2 scheme + mint 0041 (byte-
+   preservation pinned, census green, lockstep OK); 23 lineage rules
+   became configured data incl. D231's modeled High Elf replaceable
+   cantrip; D226 freeze EXTENDED to 15 declared behavioral sources
+   after review; THE MINT'S INDEX CAUGHT A REAL BUG — the v1
+   fingerprint reconciler would have crashed the homebrew-yield flow
+   by inserting a second current row; it now demotes-then-installs
+   scheme-agnostically. Design doc on main carries dated D231
+   amendments.
+
+IN FLIGHT: U2-B+D (wt/u2bd, port 4930, dispatched ~17:25) — the
+INDIVISIBLE pair: lineage choice resolver + atomic choice command (B)
+with honest UNKNOWN projection + level-up spell reconciliation + High
+Elf chosen-cantrip sheet display (D). QUEUED: U2-C (builder UI + D56
+disclosure deletion), U2-E (portability closure).
+
+PROCESS NOTES this wave: a heavy sol review digest running beside a
+PW pool tipped 4 thin budgets (isolated 4/4) — the quiet-machine rule
+now covers sol agents too; U2-A's three integration diagnoses each
+distinguished fixture-vs-production before touching a test.
+
+WAITING ON OWNER: Barbed Court sync word; walkthrough friction list;
+bundle deletion; wt/party retirement.
+
+## RESTART POINT 2026-08-09-b
 MAIN c88e970a (mirror pushed after verified verdicts). FLOORS: vitest
 259/4,249 all-pass; PW 148 pool; build 0; migrations 0000-0040 (a
 content-v2 MINT is in flight in wt/u2a). FIFTY-THREE merges. Rulings
