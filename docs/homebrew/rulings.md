@@ -5,6 +5,37 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-08 — Barbed Court: Conjure Minor Elementals joins the Monk-11 row, Focus-castable for 4
+
+Owner's rulings, verbatim:
+
+> Level 11 , cast cme for an amount of focus points . How many makes sense?
+
+> Make it 4
+
+Effect: *Conjure Minor Elementals* (SRD 5.2.1, 4th level, Wizard list — the
++2d8-per-hit emanation) is granted at Monk 11 as a third seat on that Court
+Spells row (rows now 3/3/3/1, ten granted spells) and castable by spending
+**4 Focus Points** — no slot, no preparation requirement, base level, no
+upcast per the standing no-upcast rule.
+
+The price is the ×1 mature rate (1 Focus per spell level), six levels before
+the general Focus-casting feature would offer it at 17; the recommended ×2
+early-access rate (8) was declined. Measured consequences, recorded not
+corrected:
+
+- Pool 11 at Monk 11 → **two casts per short-rest window** are affordable
+  (8 of 11 Focus), with the second strictly better than spending the same 4
+  Focus on Flurries (+2d8 across 3–4 attacks ≈ +19–25 DPR vs ~16 from four
+  Flurry rounds). CME becomes the pool's dominant use at 11.
+- The 17 feature no longer discounts it — 4 Focus at 11 and 4 at 17 read as
+  one flat price; the graduate-at-17 ladder is gone by choice.
+- The working balancers on record: Concentration on a no-Con-save-proficiency
+  chassis that tanks by design (realistic uptime 2–4 rounds/cast in melee,
+  not 10 minutes), the Action to cast, the 15-foot emanation forcing melee
+  range, and the one-Action-per-turn economy. The playtest question is
+  whether those hold at two casts a window; amber until tested.
+
 ## 2026-08-08 — Barbed Court: chosen spells = the SRD Paladin Prepared Spells column at Monk level; slots = the third-caster multiclass derivation — item 4 of 9 CLOSED
 
 Owner's ruling, verbatim:
