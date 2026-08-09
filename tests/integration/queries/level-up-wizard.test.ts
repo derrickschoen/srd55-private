@@ -11,7 +11,11 @@ import {
   type LevelUpStateResult,
 } from '../../../src/builder/level-up-wizard';
 import { CharacterCrud } from '../../../src/queries/character-crud';
-import { LevelUpStateQuery } from '../../../src/queries/level-up-state';
+import {
+  LevelUpStateQuery,
+  SUBCLASS_HIT_POINT_EFFECT_KINDS,
+  SUBCLASS_NON_HIT_POINT_EFFECT_KINDS,
+} from '../../../src/queries/level-up-state';
 import { createQueriesClient } from '../../../src/queries/client';
 import {
   RpcClient,
@@ -240,6 +244,31 @@ describe('level-up wizard state RPC', () => {
   function createCharacter(name: string): number {
     return new CharacterCrud(harness.context.db).create({ name }).id;
   }
+
+  it('classifies every schema-allowed subclass effect kind for HP inspection', () => {
+    const createSql = String(
+      harness.context.db.scalar(
+        `SELECT sql
+         FROM sqlite_schema
+         WHERE type = 'table' AND name = 'subclass_feature_effects'`,
+      ),
+    );
+    const kindCheck = createSql.match(
+      /CONSTRAINT "subclass_feature_effects_kind_check" CHECK\(`effect_kind` IN \(([^)]+)\)\)/u,
+    );
+    expect(kindCheck, createSql).not.toBeNull();
+    const schemaKinds = Array.from(
+      kindCheck?.[1]?.matchAll(/'([^']+)'/gu) ?? [],
+      (match) => match[1],
+    ).sort();
+    const inspectedKinds = [
+      ...SUBCLASS_HIT_POINT_EFFECT_KINDS,
+      ...SUBCLASS_NON_HIT_POINT_EFFECT_KINDS,
+    ].sort();
+
+    expect(new Set(inspectedKinds).size).toBe(inspectedKinds.length);
+    expect(schemaKinds).toEqual(inspectedKinds);
+  });
 
   function enterClass(
     characterId: number,

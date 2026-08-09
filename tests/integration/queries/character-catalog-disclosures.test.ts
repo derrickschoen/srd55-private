@@ -18,6 +18,34 @@ describe('character catalog provenance', () => {
 
   afterEach(() => connection.close());
 
+  it('reports a pre-key species source as unknown', () => {
+    const characterId = db.exec(
+      `INSERT INTO characters (name) VALUES ('Pre-key Species')`,
+    ).lastInsertId;
+    db.exec(
+      `INSERT INTO character_species (character_id, name)
+       VALUES (?, 'Legacy Species')`,
+      [characterId],
+    );
+    db.exec(
+      `INSERT INTO character_source_instances (
+         character_id, instance_uuid, source_type, source_definition_id,
+         display_name, config, acquired_at_character_level, state, notes
+       ) VALUES (?, 'pre-key-species', 'species', NULL,
+                 'Legacy Species', '{"class_level":1}', 1, 'active', ?)`,
+      [characterId, GUIDED_SPECIES_SOURCE_MARKER],
+    );
+
+    expect(characterCatalogDisclosures(db, characterId)).toEqual([
+      {
+        kind: 'species',
+        name: 'Legacy Species',
+        content_key: null,
+        catalog_layer: 'unknown',
+      },
+    ]);
+  });
+
   it('reads every applied layer from the registry and says unknown when no identity is available', () => {
     const identities = [
       { kind: 'class' as const, contentKey: '2024:class:fighter', name: 'Fighter', keyKind: 'bundled-stable' as const },

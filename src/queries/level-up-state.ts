@@ -48,6 +48,7 @@ import {
   rulesEditions,
   type Ability,
   type CharacterLevel,
+  type FeatureTemplateEffectKind,
   type HitDieSize,
   type RulesEdition,
 } from '../domain/enums';
@@ -107,6 +108,22 @@ interface CharacterRow {
 interface HeldClassRow extends LevelUpHeldClass {
   readonly is_starting_class: boolean;
 }
+
+export const SUBCLASS_HIT_POINT_EFFECT_KINDS = [
+  'hp_modifier',
+  'ability_increase',
+] as const satisfies readonly FeatureTemplateEffectKind[];
+
+export const SUBCLASS_NON_HIT_POINT_EFFECT_KINDS = [
+  'damage_resistance',
+  'speed',
+  'armor_class_bonus',
+  'armor_class_formula',
+  'attack_ability_override',
+  'weapon_attack_bonus',
+  'weapon_damage_bonus',
+  'extra_attack',
+] as const satisfies readonly FeatureTemplateEffectKind[];
 
 function rulesEdition(value: string, label: string): RulesEdition {
   if (!isEnumValue(rulesEditions, value)) {
@@ -783,6 +800,8 @@ export class LevelUpStateQuery {
     option: LevelUpSubclassOption,
     targetLevel: ClassLevel,
   ): boolean {
+    const [hitPointModifierKind, abilityIncreaseKind] =
+      SUBCLASS_HIT_POINT_EFFECT_KINDS;
     return this.db.one(
       `SELECT EXISTS (
          SELECT 1
@@ -792,14 +811,19 @@ export class LevelUpStateQuery {
          WHERE feature.subclass_definition_id = ?
            AND feature.class_level <= ?
            AND (
-             effect.effect_kind = 'hp_modifier'
+             effect.effect_kind = ?
              OR (
-               effect.effect_kind = 'ability_increase'
+               effect.effect_kind = ?
                AND effect.ability = 'constitution'
              )
            )
        ) AS can_change_hit_points`,
-      [option.subclass_definition_id, targetLevel],
+      [
+        option.subclass_definition_id,
+        targetLevel,
+        hitPointModifierKind,
+        abilityIncreaseKind,
+      ],
       (row) => sqlBoolean(row, 'can_change_hit_points'),
     ) ?? false;
   }

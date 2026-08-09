@@ -1122,7 +1122,7 @@ describe('the character sheet is projected twice from one value', () => {
     );
     // The maximum is prominent while both source-separated terms remain
     // visible and independently labelled.
-    expect(row(value, 'species_hit_points').value).toBe('+8');
+    expect(row(value, 'hit_point_maximum').value).toBe('62');
   });
 
   it('names Expertise on the skill face instead of leaving it only in the arithmetic', () => {
