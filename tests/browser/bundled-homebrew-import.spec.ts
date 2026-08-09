@@ -132,6 +132,24 @@ test('imports bundled homebrew through publish, applies derived third-caster slo
     ) {
       throw new Error('The imported Spell Student character inputs were not persisted.');
     }
+    await window.appRpc.call('queries.characters.allocateAbilities', {
+      character_id: characterId,
+      method: 'manual',
+      scores: {
+        strength: 10,
+        dexterity: 10,
+        constitution: 10,
+        intelligence: 10,
+        wisdom: 10,
+        charisma: 10,
+      },
+      operation_uuid: crypto.randomUUID(),
+      expected_revision: revision,
+    });
+    const allocated = await window.appRpc.call<
+      { readonly character_id: number },
+      CharacterRow
+    >('queries.characters.get', { character_id: characterId });
     const afterTwo = await window.appRpc.call<
       {
         readonly character_id: number;
@@ -147,7 +165,7 @@ test('imports bundled homebrew through publish, applies derived third-caster slo
     >('commands.execute', {
       character_id: characterId,
       operation_uuid: crypto.randomUUID(),
-      expected_revision: revision,
+      expected_revision: allocated.revision,
       command: {
         type: 'level_up_class',
         class_definition_id: classId,

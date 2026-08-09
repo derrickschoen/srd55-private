@@ -127,10 +127,28 @@ test('authors a subclass timeline and persists only threshold-eligible character
       name: 'Threshold Journey Hero',
       class_content_key: fighter.content_key,
     });
+    await window.appRpc.call('queries.characters.allocateAbilities', {
+      character_id: character.id,
+      method: 'manual',
+      scores: {
+        strength: 10,
+        dexterity: 10,
+        constitution: 10,
+        intelligence: 10,
+        wisdom: 10,
+        charisma: 10,
+      },
+      operation_uuid: crypto.randomUUID(),
+      expected_revision: character.revision,
+    });
+    const allocated = await window.appRpc.call<
+      { readonly character_id: number },
+      CharacterRow
+    >('queries.characters.get', { character_id: character.id });
     await window.appRpc.call('commands.execute', {
       character_id: character.id,
       operation_uuid: crypto.randomUUID(),
-      expected_revision: character.revision,
+      expected_revision: allocated.revision,
       command: {
         type: 'level_up_class',
         class_definition_id: fighterId,

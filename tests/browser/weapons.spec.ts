@@ -90,6 +90,33 @@ async function levelClassTo(
       if (!Number.isFinite(classId)) {
         throw new Error(`No class definition named ${name}.`);
       }
+      const characters = await window.staticApp.inspectRows('characters', {
+        id: 1,
+      });
+      const character = characters[0];
+      if (character === undefined) {
+        throw new Error('The weapon fixture character was not persisted.');
+      }
+      if (character['ability_allocation_method'] === null) {
+        const scores = {
+          strength: Number(character['strength']),
+          dexterity: Number(character['dexterity']),
+          constitution: Number(character['constitution']),
+          intelligence: Number(character['intelligence']),
+          wisdom: Number(character['wisdom']),
+          charisma: Number(character['charisma']),
+        };
+        if (!Object.values(scores).every(Number.isSafeInteger)) {
+          throw new Error('The weapon fixture ability scores were invalid.');
+        }
+        await window.appRpc.call('queries.characters.allocateAbilities', {
+          character_id: 1,
+          method: 'manual',
+          scores,
+          operation_uuid: crypto.randomUUID(),
+          expected_revision: Number(character['revision']),
+        });
+      }
       const currentLevel = async (): Promise<number> => {
         const levels = await window.staticApp.inspectRows(
           'character_class_levels',
