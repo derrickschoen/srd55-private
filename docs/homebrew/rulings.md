@@ -5,6 +5,44 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-09 — VETERAN: Veteran's Reserve adopted (pool reading); Archery removed from Old Training; ranged Champion added to the board
+
+Owner's rulings, verbatim:
+
+> Add rogue level/2 (round down) extra sneak attack dice (rogue level times
+> per short/long rest)
+
+> Because these are bonus dice, they don't double like the dice on the
+> rogue table
+
+> Intention: 2 boosted hits per combat, a genuine decision
+>
+> Looks like we should remove the archery fighting style from 3 to keep
+> pace with the warlock better.
+>
+> Add a dex based ranged optimized champion fighter to the ranged group
+
+Effects:
+
+1. **Veteran's Reserve (level 3)**: a pool of bonus Sneak Attack dice equal
+   to Rogue level per Short/Long Rest, spent ⌊level/2⌋ at a time when
+   dealing Sneak Attack, never doubled by Veteran's Strike. The owner chose
+   the **pool reading** over the always-on "uses" reading after both were
+   simmed (pool: ≈2 activations per combat; uses: never binds in 4-round
+   fights). Crit-doubling of the bonus dice assumed standard, flagged.
+   Level-3 placement is the session's reading of the bump-3-9 context,
+   flagged. Dip audit: a 3-level dip gets three +1d6 activations — trivial.
+2. **Old Training loses Archery** — TWF only. Ranged veteran drops 26/64 →
+   24/60 (dual hand crossbows, no style).
+3. Measured after both changes (burst/day ≈ identical): melee veteran
+   25.7→**32.2 / 73.2** with reserve at 6/11; ranged **30.3 / 70.2**.
+4. **Ranged group finding**: the Dex ranged Champion (longbow, Archery,
+   Action Surge, crit 19–20) lands at **16 / 26** — statistically identical
+   to the EB warlock (17/26). The 2024 ranged-martial baseline is ~26 at 11
+   now that Sharpshooter's −5/+10 is gone; the ranged Veteran sits 2.3–2.7×
+   above that cluster even after the Archery removal, with the SRD Thief
+   (36.5) in between.
+
 ## 2026-08-09 — VETERAN: Fighting Style (Archery or TWF) at level 3; Sure Strike v5 simmed with perfect information
 
 Owner's rulings, verbatim:
