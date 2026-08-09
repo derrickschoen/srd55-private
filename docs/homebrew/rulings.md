@@ -42,11 +42,30 @@ Measurements recorded, not corrected:
   8-hour duration makes that once a day) and repositioning it beyond the
   slap remains a Magic action.
 
+Follow-up ruling, same sitting, verbatim:
+
+> Make it 10 feet instead of 30. Replace unarmed strike to hit and damage
+> bonus with wisdom instead of dexterity
+
+Applied: hand-delivered Unarmed Strikes reach creatures within **10 feet of
+the monk** (matching the slap's range), and use **Wisdom** in place of
+Dexterity for both the attack roll and the damage bonus. The monk's own-body
+strikes stay Dex as normal. The 30-foot punching-from-safety posture in the
+measurement above is superseded — at 10 feet the monk stands one step off
+the front line, not outside it.
+
+Distance-marker note updated: with 10 feet and Wisdom-based delivered
+strikes, this now closely parallels a known non-SRD monk subclass's
+spectral-arms mechanic. The mechanic is unprotectable as a system and the
+identity, resource, and chassis differ; recorded as an F12 proximity
+observation, not a licensing exposure.
+
 Working wording:
 
 > While your Mage Hand is present, when you take the Attack action, any of
 > your Unarmed Strikes can be delivered by the hand, targeting creatures
-> within 5 feet of it.
+> within 10 feet of you. For those strikes, use your Wisdom modifier in place
+> of Dexterity for the attack and damage rolls.
 
 ## 2026-08-08 — Barbed Court: the slap conjures its own hand — no Mage Hand precondition; intent pinned to TWF style + Nick
 
