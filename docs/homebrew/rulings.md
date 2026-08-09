@@ -5,6 +5,28 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-10 — VETERAN: the table becomes two one-line formulas — Deeper Cuts (+1 die) and Veteran's Strike (dice = Rogue level at 9)
+
+Owner's ruling, verbatim:
+
+> So how close would it be to the Monte Carlo list to have lvl3 +1 die and
+> lvl 9 replace with + rogue level ?
+>
+> I think the extra die over Monte Carlo is fine
+
+Effect, superseding the C2 published table from earlier the same day: the
+engine is now **Deeper Cuts (3rd: your Sneak Attack deals one extra die)**
+and **Veteran's Strike (9th: your Sneak Attack dice equal your Rogue level;
+replaces Deeper Cuts)** — the replacement text living in the level-9
+feature exactly as the owner first asked. Old Reserves and everything else
+stand.
+
+Measured against the tuned curve: 25.0/32.5/64.5/109.0 at L3/6/11/17 vs the
+table's 24.9/32.7/60.9/103.6 — identical through 8, one extra die from 11
+(+3.6/+5.4 DPR, owner-accepted), and the ramp fires at 9 (9d6, a +4-dice
+jump, ≈1.05× the level-9 paladin) instead of 10–11. Band at 6: 1.01×.
+The name Veteran's Strike returns to the doc with its new text.
+
 ## 2026-08-10 — VETERAN FINAL: custom Sneak Attack table replaces the doubling; Old Reserves is a Pact-Magic-shaped once-per-rest boost
 
 Owner's rulings, verbatim (the simplification arc, in order):
