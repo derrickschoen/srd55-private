@@ -435,7 +435,7 @@ describe('the derived character sheet', () => {
     // The warning has always said the speed is reduced by 10 feet. AC-3 makes
     // the printed number agree: Human 30 becomes 20 while the requirement is
     // unmet.
-    expect(sheet.walking_speed_feet).toBe(20);
+    expect(sheet.walking_speed).toMatchObject({ kind: 'known', value: 20 });
   });
 
   it('gates every mechanical effect reader through item attunement', () => {
@@ -544,7 +544,7 @@ describe('the derived character sheet', () => {
     expect(unattuned.armor_class.value).toBe(15);
     expect(unattuned.class_hit_points_subtotal.value).toBe(54);
     expect(unattuned.species_hit_points).toBeNull();
-    expect(unattuned.walking_speed_feet).toBe(30);
+    expect(unattuned.walking_speed).toMatchObject({ kind: 'known', value: 30 });
     expect(unattuned.damage_resistances).toEqual([]);
     expect(unattuned.items).toEqual([
       {
@@ -592,7 +592,7 @@ describe('the derived character sheet', () => {
     // eight levels: 54 + 8 = 62.
     expect(attuned.class_hit_points_subtotal.value).toBe(62);
     expect(attuned.species_hit_points?.value).toBe(5);
-    expect(attuned.walking_speed_feet).toBe(35);
+    expect(attuned.walking_speed).toMatchObject({ kind: 'known', value: 35 });
     expect(attuned.damage_resistances).toEqual(['Fire']);
     expect(
       characterEffects(db, characterId).map((effect) => effect.label),
@@ -840,7 +840,7 @@ describe('the derived character sheet', () => {
     expect(sheet.species_hit_points?.value).toBe(8);
     expect(sheet.hit_point_maximum.value).toBe(62);
     // Base 25 + 5 = 30.
-    expect(sheet.walking_speed_feet).toBe(30);
+    expect(sheet.walking_speed).toMatchObject({ kind: 'known', value: 30 });
     // NAMED, not counted. The old sheet could only report how MANY resistances
     // were waiting on a decision, because an effect had no identity of its own.
     expect(sheet.damage_resistances).toEqual([]);
@@ -852,7 +852,10 @@ describe('the derived character sheet', () => {
       `INSERT INTO character_species (character_id, name) VALUES (?, 'Human')`,
       [characterId],
     );
-    expect(builder.build(characterId).walking_speed_feet).toBeNull();
+    expect(builder.build(characterId).walking_speed).toEqual({
+      kind: 'unknown',
+      detail: 'UNKNOWN because this character has no species speed entered',
+    });
   });
 
   it('names application-wide gaps without adding language/tool noise', () => {

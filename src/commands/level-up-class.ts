@@ -63,6 +63,9 @@ import { levelUpSpellReplacementAllowed } from './level-up-spell-replacement';
 import { syncClassSourceState } from './update-class';
 import type { CharacterCommandIntegrity } from './integrity';
 import { applyLevelFeatSelection } from './level-feat-choice';
+import {
+  reconcileCharacterLevelDependentSources,
+} from '../grants/character-level-source-reconciliation';
 
 /**
  * The named refusal, carrying the seam's `LevelUpRefusalData` so a surface
@@ -352,6 +355,11 @@ export class LevelUpClassCommand {
         subclassId,
         targetLevel,
         otherLevels === null ? 1 : otherLevels + 1,
+      );
+      reconcileCharacterLevelDependentSources(
+        this.db,
+        characterId,
+        this.#generator,
       );
 
       this.applyPlannedSubchoices(

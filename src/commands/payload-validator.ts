@@ -43,6 +43,7 @@ const commandTypes = [
   'update_character_rules',
   'update_character_flavor',
   'update_source_config',
+  'choose_species_lineage',
   'add_source',
   'remove_source',
   'acknowledge_warning',
@@ -873,6 +874,23 @@ function validateLevelUpClass(record: UnknownRecord): void {
   }
 }
 
+function validateChooseSpeciesLineage(record: UnknownRecord): void {
+  rejectUnknown(record, [
+    'type',
+    'chosen_option',
+    'spellcasting_ability',
+    'replaceable_spell_version_key',
+    'reason',
+  ]);
+  nonEmptyString(record, 'chosen_option', 255);
+  if (!isEnumValue(abilities, record.spellcasting_ability)) {
+    invalid('Unknown spellcasting ability.');
+  }
+  if (hasOwn(record, 'replaceable_spell_version_key')) {
+    nonEmptyString(record, 'replaceable_spell_version_key', 255);
+  }
+}
+
 function validateResolveLevelFeatChoice(record: UnknownRecord): void {
   rejectUnknown(record, [
     'type',
@@ -1574,6 +1592,9 @@ function validateByType(
       return record;
     case 'update_source_config':
       validateUpdateSourceConfig(record);
+      return record;
+    case 'choose_species_lineage':
+      validateChooseSpeciesLineage(record);
       return record;
     case 'add_source':
       validateAddSource(record);

@@ -22,6 +22,7 @@ import { UpdateCharacterRulesCommand } from './update-character-rules';
 import { UpdateCharacterFlavorCommand } from './update-character-flavor';
 import { UpdateClassCommand } from './update-class';
 import { UpdateSourceConfigCommand } from './update-source-config';
+import { ChooseSpeciesLineageCommand } from './choose-species-lineage';
 import {
   SetArmorCommand,
   SetHitPointRollCommand,
@@ -119,6 +120,12 @@ export class CharacterCommandFactory {
         return new UpdateCharacterFlavorCommand(this.db, payload);
       case 'update_source_config':
         return new UpdateSourceConfigCommand(
+          this.db,
+          payload,
+          this.integrity,
+        );
+      case 'choose_species_lineage':
+        return new ChooseSpeciesLineageCommand(
           this.db,
           payload,
           this.integrity,

@@ -14,9 +14,18 @@ import {
   listGuidedOriginOptions,
 } from '../../../src/builder/guided-creation';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
+import { CharacterCommandExecutor } from '../../../src/commands/character-command-executor';
+import { ChooseSpeciesLineageCommand } from '../../../src/commands/choose-species-lineage';
+import { AllocateAbilitiesCommand } from '../../../src/commands/allocate-abilities';
 import { applicationSeed } from '../../../src/db/bootstrap';
 import type { DatabaseContext } from '../../../src/db/database';
+import type { Ability } from '../../../src/domain/enums';
 import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
+import { CharacterCompletenessQueries } from '../../../src/queries/character-completeness';
+import { CharacterState } from '../../../src/character/character-state';
+import { GrantRuleSlotGenerator } from '../../../src/grants/grant-rule-slot-generator';
+import { sheetFacts } from '../../../src/ui/screens/sheet/sheet-view';
+import { guidedSpeciesChoiceState } from '../../../src/builder/species-choice';
 import { rpcRegistry } from '../../../src/worker/registry';
 import {
   createRpcHarness,
@@ -78,13 +87,39 @@ function createClassedCharacter(db: DatabaseContext, name: string): number {
     },
     new CharacterCommandIntegrity('guided-species-test-key'),
   ).id;
-  db.exec(
-    `UPDATE characters
-     SET ability_allocation_method = 'standard_array'
-     WHERE id = ?`,
-    [characterId],
-  );
+  new AllocateAbilitiesCommand(db, {
+    type: 'allocate_abilities',
+    method: 'standard_array',
+    scores: {
+      strength: 15,
+      dexterity: 14,
+      constitution: 13,
+      intelligence: 12,
+      wisdom: 10,
+      charisma: 8,
+    },
+  }).apply(characterId);
   return characterId;
+}
+
+function lineageFootprint(db: DatabaseContext, characterId: number) {
+  return {
+    source: guidedSpeciesSources(db, characterId),
+    effects: db.allRaw(
+      `SELECT * FROM character_effects
+       WHERE character_id = ? AND template_ref LIKE 'configured_choice:%'
+       ORDER BY id`,
+      [characterId],
+    ),
+    slots: db.allRaw(
+      `SELECT slot.* FROM spell_selection_slots AS slot
+       JOIN character_source_instances AS source
+         ON source.id = slot.source_instance_id
+       WHERE source.character_id = ? AND source.notes = 'guided:species-apply'
+       ORDER BY slot.id`,
+      [characterId],
+    ),
+  };
 }
 
 function guidedSpeciesSources(db: DatabaseContext, characterId: number) {
@@ -257,7 +292,11 @@ describe('guided species application', () => {
       character_id: characterId,
       current_step: seamStep(3),
     } satisfies GuidedApplyOriginResult);
-    expect(sheet.walking_speed_feet).toBe(41);
+    expect(sheet.walking_speed).toEqual({
+      kind: 'known',
+      value: 41,
+      detail: 'The species base speed plus every standing bonus.',
+    });
     expect(sheet.damage_resistances).toEqual(['Fire']);
     expect(
       db.allRaw(
@@ -573,7 +612,7 @@ describe('guided lineage spell grants', () => {
     expect(elfSources[0]).toMatchObject({
       display_name: 'Elf',
       config:
-        '{"class_level":1,"source_content_key":"2024:species:elf"}',
+        '{"source_content_key":"2024:species:elf"}',
     });
     expect(Number.isSafeInteger(elfSources[0]?.['id'])).toBe(true);
     expect(speciesSpellSlotCount(db, characterId)).toBe(0);
@@ -602,9 +641,17 @@ describe('guided lineage spell grants', () => {
     expect(dwarfSources[0]).toMatchObject({
       display_name: 'Dwarf',
       config:
-        '{"class_level":1,"source_content_key":"2024:species:dwarf"}',
+        '{"source_content_key":"2024:species:dwarf"}',
     });
     expect(Number.isSafeInteger(dwarfSources[0]?.['id'])).toBe(true);
+    expect(guidedSpeciesChoiceState(db, characterId)).toMatchObject({
+      kind: 'ready',
+      resolution: {
+        kind: 'complete',
+        source_name: 'Dwarf',
+        choices: [],
+      },
+    });
     expect(speciesSpellSlotCount(db, characterId)).toBe(0);
     expect(
       characterCatalogDisclosures(db, characterId).find(
@@ -740,7 +787,6 @@ describe('guided lineage spell grants', () => {
       expect(sources[0]).toMatchObject({
         display_name: speciesName,
         config: JSON.stringify({
-          class_level: 1,
           source_content_key: species.content_key,
         }),
       });
@@ -753,6 +799,520 @@ describe('guided lineage spell grants', () => {
       ).toEqual([]);
     },
   );
+});
+
+describe('configured species choice and honest projection', () => {
+  const operation = (suffix: string) =>
+    `00000000-0000-4000-8000-${suffix.padStart(12, '0')}`;
+
+  async function choose(
+    db: DatabaseContext,
+    characterId: number,
+    option: string,
+    ability: Ability,
+    expectedRevision: number,
+    suffix: string,
+    replaceableSpellVersionKey?: string,
+  ) {
+    return new CharacterCommandExecutor(
+      db,
+      new CharacterCommandIntegrity('guided-lineage-command-test-key'),
+    ).execute({
+      character_id: characterId,
+      operation_uuid: operation(suffix),
+      expected_revision: expectedRevision,
+      command: {
+        type: 'choose_species_lineage',
+        chosen_option: option,
+        spellcasting_ability: ability,
+        ...(replaceableSpellVersionKey === undefined
+          ? {}
+          : { replaceable_spell_version_key: replaceableSpellVersionKey }),
+      },
+    });
+  }
+
+  it('exposes the pending Elven Lineage without gating advancement and projects literal UNKNOWN facts', async () => {
+    const rpcHarness = await applicationDatabase();
+    const db = rpcHarness.context.db;
+    const characterId = createClassedCharacter(db, 'Pending Elven Lineage');
+    const elf = speciesNamed(db, 'Elf');
+
+    const applied = applyGuidedOrigin(db, {
+      character_id: characterId,
+      kind: 'species',
+      content_key: elf.content_key,
+    });
+    const state = guidedSpeciesChoiceState(db, characterId);
+    const sheet = new CharacterSheetBuilder(db).build(characterId);
+    const facts = sheetFacts(sheet);
+    const completeness = new CharacterCompletenessQueries(db).build(characterId);
+
+    expect(applied.current_step).toBe('background');
+    expect(state).toMatchObject({
+      kind: 'ready',
+      character_id: characterId,
+      resolution: {
+        kind: 'incomplete',
+        source_name: 'Elf',
+        missing: ['option', 'spellcasting_ability'],
+        choices: [{
+          rule_key: 'elf-lineage',
+          label: 'Elven Lineage',
+          selected_option: null,
+          ability_choice: {
+            options: ['intelligence', 'wisdom', 'charisma'],
+            selected: null,
+          },
+          unknown_sheet_fields: ['walking_speed_feet', 'darkvision_feet'],
+          options: [
+            expect.objectContaining({ value: 'Drow', darkvision_feet: 120 }),
+            expect.objectContaining({
+              value: 'High Elf',
+              replaceable_spell_choice: expect.objectContaining({
+                initial_spell_version_key: '2024:prestidigitation',
+                selected_spell_version_key: null,
+              }),
+            }),
+            expect.objectContaining({
+              value: 'Wood Elf',
+              effects: [expect.objectContaining({ speed_bonus_feet: 5 })],
+            }),
+          ],
+        }],
+      },
+    });
+    expect(sheet.walking_speed).toEqual({
+      kind: 'unknown',
+      detail: 'UNKNOWN until Elven Lineage is chosen',
+    });
+    expect(sheet.lineage_darkvision).toEqual({
+      kind: 'unknown',
+      detail: 'UNKNOWN until Elven Lineage is chosen',
+    });
+    expect(facts['walking_speed_feet']).toBeNull();
+    expect(facts['lineage_darkvision_feet']).toBeNull();
+    expect(sheet.printed_features.map((feature) => feature.name)).not.toContain(
+      'Darkvision',
+    );
+    expect(completeness.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'required_source_choice',
+        title: 'Elf — Elven Lineage not chosen',
+        missing: ['option', 'spellcasting_ability'],
+      }),
+    ]));
+    expect(sheet.gaps).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'required_source_choice',
+        title: 'Elf — Elven Lineage not chosen',
+      }),
+    ]));
+  });
+
+  it.each([
+    ['Drow', 'charisma', 30, 120, '11'],
+    ['High Elf', 'intelligence', 30, 60, '12'],
+    ['Wood Elf', 'wisdom', 35, 60, '13'],
+  ] as const)(
+    'records %s with its ability and projects exact speed and Darkvision',
+    async (option, ability, speed, darkvision, operationSuffix) => {
+      const rpcHarness = await applicationDatabase();
+      const db = rpcHarness.context.db;
+      const characterId = createClassedCharacter(db, `${option} Projection`);
+      const elf = speciesNamed(db, 'Elf');
+      applyGuidedOrigin(db, {
+        character_id: characterId,
+        kind: 'species',
+        content_key: elf.content_key,
+      });
+
+      await choose(db, characterId, option, ability, 0, operationSuffix);
+      const sheet = new CharacterSheetBuilder(db).build(characterId);
+      const config = JSON.parse(String(guidedSpeciesSources(db, characterId)[0]?.['config']));
+
+      expect(config).toEqual({
+        source_content_key: '2024:species:elf',
+        lineage: {
+          chosen_option: option,
+          ...(option === 'High Elf'
+            ? { high_elf_cantrip: '2024:prestidigitation' }
+            : {}),
+        },
+        spellcasting_ability: ability,
+      });
+      expect(sheet.walking_speed).toMatchObject({ kind: 'known', value: speed });
+      expect(sheet.lineage_darkvision).toMatchObject({
+        kind: 'known',
+        value: darkvision,
+      });
+      expect(
+        new CharacterCompletenessQueries(db).build(characterId).items.some(
+          (item) => item.kind === 'required_source_choice',
+        ),
+      ).toBe(false);
+      if (option === 'High Elf') {
+        expect(
+          sheet.spells.flatMap((group) => group.spells.map((spell) => spell.name)),
+        ).toContain('Prestidigitation');
+      }
+    },
+  );
+
+  it('replaces the High Elf cantrip through the same command and displays the chosen spell on the sheet', async () => {
+    const rpcHarness = await applicationDatabase();
+    const db = rpcHarness.context.db;
+    const characterId = createClassedCharacter(db, 'Replaceable High Elf');
+    applyGuidedOrigin(db, {
+      character_id: characterId,
+      kind: 'species',
+      content_key: speciesNamed(db, 'Elf').content_key,
+    });
+    await choose(db, characterId, 'High Elf', 'intelligence', 0, '101');
+    await choose(
+      db,
+      characterId,
+      'High Elf',
+      'intelligence',
+      1,
+      '102',
+      '2024:minor-illusion',
+    );
+
+    const sheet = new CharacterSheetBuilder(db).build(characterId);
+    const names = sheet.spells.flatMap((group) =>
+      group.spells.map((spell) => spell.name));
+    expect(names).toContain('Minor Illusion');
+    expect(names).not.toContain('Prestidigitation');
+    expect(guidedSpeciesChoiceState(db, characterId)).toMatchObject({
+      resolution: {
+        kind: 'complete',
+        choices: [{
+          options: expect.arrayContaining([
+            expect.objectContaining({
+              value: 'High Elf',
+              replaceable_spell_choice: expect.objectContaining({
+                selected_spell_version_key: '2024:minor-illusion',
+              }),
+            }),
+          ]),
+        }],
+      },
+    });
+  });
+
+  it('rolls back a late effect failure and undo/redo restores the complete lineage footprint', async () => {
+    const rpcHarness = await applicationDatabase();
+    const db = rpcHarness.context.db;
+    const characterId = createClassedCharacter(db, 'Atomic Lineage');
+    applyGuidedOrigin(db, {
+      character_id: characterId,
+      kind: 'species',
+      content_key: speciesNamed(db, 'Elf').content_key,
+    });
+    const before = lineageFootprint(db, characterId);
+    const applied = await choose(db, characterId, 'Drow', 'charisma', 0, '201');
+    const after = lineageFootprint(db, characterId);
+
+    db.exec(
+      `CREATE TRIGGER fail_configured_choice_effect
+       BEFORE INSERT ON character_effects
+       WHEN NEW.template_ref LIKE 'configured_choice:%'
+       BEGIN
+         SELECT RAISE(ABORT, 'injected configured choice effect failure');
+       END`,
+    );
+    await expect(
+      choose(db, characterId, 'Wood Elf', 'wisdom', 1, '202'),
+    ).rejects.toThrow('injected configured choice effect failure');
+    expect(lineageFootprint(db, characterId)).toEqual(after);
+    db.exec('DROP TRIGGER fail_configured_choice_effect');
+
+    const executor = new CharacterCommandExecutor(
+      db,
+      new CharacterCommandIntegrity('guided-lineage-command-test-key'),
+    );
+    const undone = await executor.undo({
+      character_id: characterId,
+      operation_uuid: applied.operation_uuid,
+      expected_revision: 1,
+    });
+    expect(undone.status).toBe('applied');
+    expect(lineageFootprint(db, characterId)).toEqual(before);
+    if (undone.status !== 'applied') throw new Error('Lineage undo was refused.');
+    const redone = await executor.undo({
+      character_id: characterId,
+      operation_uuid: undone.operation_uuid,
+      expected_revision: 2,
+    });
+    expect(redone.status).toBe('applied');
+    expect(lineageFootprint(db, characterId)).toEqual(after);
+  });
+
+  it('rolls config and effects back when the existing generator pipeline fails', async () => {
+    const rpcHarness = await applicationDatabase();
+    const db = rpcHarness.context.db;
+    const characterId = createClassedCharacter(db, 'Generator Rollback');
+    applyGuidedOrigin(db, {
+      character_id: characterId,
+      kind: 'species',
+      content_key: speciesNamed(db, 'Elf').content_key,
+    });
+    const before = lineageFootprint(db, characterId);
+    class FailingGenerator extends GrantRuleSlotGenerator {
+      override generateForSource(): never {
+        throw new Error('injected configured choice generator failure');
+      }
+    }
+    const command = new ChooseSpeciesLineageCommand(
+      db,
+      {
+        type: 'choose_species_lineage',
+        chosen_option: 'Wood Elf',
+        spellcasting_ability: 'wisdom',
+      },
+      new CharacterCommandIntegrity('guided-lineage-command-test-key'),
+      undefined,
+      new FailingGenerator(db),
+    );
+    expect(() => command.apply(characterId)).toThrow(
+      'injected configured choice generator failure',
+    );
+    expect(lineageFootprint(db, characterId)).toEqual(before);
+  });
+
+  it('switches Drow to Wood Elf and repeated generation creates no duplicate slot or effect', async () => {
+    const rpcHarness = await applicationDatabase();
+    const db = rpcHarness.context.db;
+    const characterId = createClassedCharacter(db, 'Lineage Switch');
+    applyGuidedOrigin(db, {
+      character_id: characterId,
+      kind: 'species',
+      content_key: speciesNamed(db, 'Elf').content_key,
+    });
+    await choose(db, characterId, 'Drow', 'charisma', 0, '251');
+    await choose(db, characterId, 'Wood Elf', 'wisdom', 1, '252');
+    await choose(db, characterId, 'Wood Elf', 'wisdom', 2, '253');
+
+    const active = new SpellAccessBuilder(db).buildForCharacter(characterId)
+      .filter((route) => route.source_name === 'Elf')
+      .map((route) => route.spell_name);
+    expect(active).toEqual(['Druidcraft']);
+    expect(
+      db.allRaw(
+        `SELECT slot.rule_key, slot.state FROM spell_selection_slots AS slot
+         JOIN character_source_instances AS source
+           ON source.id = slot.source_instance_id
+         WHERE source.character_id = ? AND source.notes = 'guided:species-apply'
+         ORDER BY rule_key`,
+        [characterId],
+      ),
+    ).toEqual([
+      { rule_key: 'elf-lineage-drow-dancing-lights', state: 'orphaned' },
+      { rule_key: 'elf-lineage-wood-elf-druidcraft', state: 'active' },
+    ]);
+    expect(
+      db.allRaw(
+        `SELECT effect_kind, speed_bonus_feet, template_ref
+         FROM character_effects
+         WHERE character_id = ? AND template_ref LIKE 'configured_choice:%'`,
+        [characterId],
+      ),
+    ).toEqual([{
+      effect_kind: 'speed',
+      speed_bonus_feet: 5,
+      template_ref: 'configured_choice:elf-lineage:Wood Elf:0',
+    }]);
+  });
+
+  it('projects Tiefling resistance as UNKNOWN until the selected legacy effect exists', async () => {
+    const rpcHarness = await applicationDatabase();
+    const db = rpcHarness.context.db;
+    const characterId = createClassedCharacter(db, 'Tiefling Resistance');
+    applyGuidedOrigin(db, {
+      character_id: characterId,
+      kind: 'species',
+      content_key: speciesNamed(db, 'Tiefling').content_key,
+    });
+    expect(new CharacterSheetBuilder(db).build(characterId).lineage_damage_resistance)
+      .toEqual({
+        kind: 'unknown',
+        detail: 'UNKNOWN until Fiendish Legacy is chosen',
+      });
+
+    await choose(db, characterId, 'Infernal', 'charisma', 0, '301');
+    const chosen = new CharacterSheetBuilder(db).build(characterId);
+    expect(chosen.lineage_damage_resistance).toEqual({
+      kind: 'known',
+      values: ['Fire'],
+    });
+    expect(chosen.damage_resistances).toEqual(['Fire']);
+  });
+
+  it('reconciles level-3 lineage spells on real level-up and its snapshot inverse', async () => {
+    const rpcHarness = await applicationDatabase();
+    const db = rpcHarness.context.db;
+    const characterId = createClassedCharacter(db, 'Drow Level Arrival');
+    applyGuidedOrigin(db, {
+      character_id: characterId,
+      kind: 'species',
+      content_key: speciesNamed(db, 'Elf').content_key,
+    });
+    await choose(db, characterId, 'Drow', 'charisma', 0, '401');
+    const classId = Number(db.scalar(
+      'SELECT class_definition_id FROM character_class_levels WHERE character_id = ?',
+      [characterId],
+    ));
+    const executor = new CharacterCommandExecutor(
+      db,
+      new CharacterCommandIntegrity('guided-lineage-command-test-key'),
+    );
+    const spellNames = () => new SpellAccessBuilder(db)
+      .buildForCharacter(characterId)
+      .filter((route) => route.source_name === 'Elf')
+      .map((route) => route.spell_name)
+      .sort();
+
+    expect(spellNames()).toEqual(['Dancing Lights']);
+    await executor.execute({
+      character_id: characterId,
+      operation_uuid: operation('402'),
+      expected_revision: 1,
+      command: {
+        type: 'level_up_class',
+        class_definition_id: classId,
+        target_level: 2,
+      },
+    });
+    expect(spellNames()).toEqual(['Dancing Lights']);
+    await executor.execute({
+      character_id: characterId,
+      operation_uuid: operation('403'),
+      expected_revision: 2,
+      command: {
+        type: 'level_up_class',
+        class_definition_id: classId,
+        target_level: 3,
+      },
+    });
+    expect(spellNames()).toEqual(['Dancing Lights', 'Faerie Fire']);
+    await executor.execute({
+      character_id: characterId,
+      operation_uuid: operation('404'),
+      expected_revision: 3,
+      command: {
+        type: 'level_up_class',
+        class_definition_id: classId,
+        target_level: 4,
+        feat_choice: {
+          kind: 'feat',
+          feat_content_key: '2024:feat:ability-score-improvement',
+          config: {},
+          ability_increases: [{ ability: 'strength', amount: 2 }],
+        },
+      },
+    });
+    const fifth = await executor.execute({
+      character_id: characterId,
+      operation_uuid: operation('405'),
+      expected_revision: 4,
+      command: {
+        type: 'level_up_class',
+        class_definition_id: classId,
+        target_level: 5,
+      },
+    });
+    expect(spellNames()).toEqual(['Dancing Lights', 'Darkness', 'Faerie Fire']);
+    const undo = await executor.undo({
+      character_id: characterId,
+      operation_uuid: fifth.operation_uuid,
+      expected_revision: 5,
+    });
+    expect(undo.status).toBe('applied');
+    expect(spellNames()).toEqual(['Dancing Lights', 'Faerie Fire']);
+  });
+
+  it('refuses invalid option, crossed ability, stale revision, and extra RPC keys without changing state', async () => {
+    const rpcHarness = await applicationDatabase();
+    const db = rpcHarness.context.db;
+    const characterId = createClassedCharacter(db, 'Lineage Refusals');
+    applyGuidedOrigin(db, {
+      character_id: characterId,
+      kind: 'species',
+      content_key: speciesNamed(db, 'Elf').content_key,
+    });
+    const before = new CharacterState(db).capture(characterId);
+    await expect(choose(db, characterId, 'Moon Elf', 'wisdom', 0, '501'))
+      .rejects.toMatchObject({ reason: 'invalid_option' });
+    await expect(choose(db, characterId, 'Drow', 'strength', 0, '502'))
+      .rejects.toMatchObject({ reason: 'invalid_spellcasting_ability' });
+    await expect(choose(db, characterId, 'Drow', 'charisma', 1, '503'))
+      .rejects.toThrow();
+    expect(new CharacterState(db).capture(characterId)).toEqual(before);
+
+    const response = await rpcRegistry.dispatch({
+      id: 88,
+      method: GUIDED_RPC.chooseSpeciesLineage,
+      params: {
+        character_id: characterId,
+        chosen_option: 'Drow',
+        spellcasting_ability: 'charisma',
+        operation_uuid: operation('504'),
+        expected_revision: 0,
+        extra: true,
+      },
+    }, rpcHarness.context);
+    expect(response).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_params' },
+    });
+    expect(new CharacterState(db).capture(characterId)).toEqual(before);
+
+    const sourceId = Number(guidedSpeciesSources(db, characterId)[0]?.['id']);
+    const storeConfig = (config: Record<string, unknown>) => db.exec(
+      'UPDATE character_source_instances SET config = ? WHERE id = ?',
+      [JSON.stringify(config), sourceId],
+    );
+    storeConfig({
+      source_content_key: '2024:species:elf',
+      lineage: { chosen_option: 'Moon Elf' },
+      spellcasting_ability: 'wisdom',
+    });
+    expect(guidedSpeciesChoiceState(db, characterId)).toMatchObject({
+      kind: 'ready',
+      resolution: { kind: 'incomplete', missing: ['option'] },
+    });
+    expect(new CharacterSheetBuilder(db).build(characterId)).toMatchObject({
+      walking_speed: { kind: 'unknown' },
+      lineage_darkvision: { kind: 'unknown' },
+    });
+
+    storeConfig({
+      source_content_key: '2024:species:elf',
+      lineage: { chosen_option: 'Drow' },
+      spellcasting_ability: 'strength',
+    });
+    expect(guidedSpeciesChoiceState(db, characterId)).toMatchObject({
+      kind: 'ready',
+      resolution: {
+        kind: 'incomplete',
+        missing: ['spellcasting_ability'],
+      },
+    });
+
+    storeConfig({
+      source_content_key: '2024:species:elf',
+      lineage: {
+        chosen_option: 'High Elf',
+        high_elf_cantrip: '2024:fireball',
+      },
+      spellcasting_ability: 'intelligence',
+    });
+    expect(guidedSpeciesChoiceState(db, characterId)).toMatchObject({
+      kind: 'ready',
+      resolution: { kind: 'incomplete', missing: ['replaceable_spell'] },
+    });
+  });
 });
 
 describe('bundled species definition seed', () => {

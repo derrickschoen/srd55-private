@@ -218,7 +218,13 @@ function sheet(changes: Partial<CharacterSheet> = {}): CharacterSheet {
     resources: [],
     spells: [],
     martial_arts: [],
-    walking_speed_feet: 30,
+    walking_speed: {
+      kind: 'known',
+      value: 30,
+      detail: 'The species base speed plus every standing bonus.',
+    },
+    lineage_darkvision: null,
+    lineage_damage_resistance: null,
     damage_resistances: ['Poison'],
     // A LIST OF LABELS, not a count. The old sheet could only say "plus 1
     // whose type this application does not record"; naming the grant is what
@@ -1267,6 +1273,10 @@ describe('the character sheet is projected twice from one value', () => {
         (parsed.martial_arts_dice as unknown[]).length === 0 ||
         [...ids].some((id) => id.startsWith('martial_arts_die:')),
       walking_speed_feet: () => ids.has('walking_speed_feet'),
+      lineage_darkvision_feet: () =>
+        parsed.lineage_darkvision_feet === null || ids.has('lineage_darkvision'),
+      lineage_damage_resistance: () =>
+        parsed.lineage_damage_resistance === null || ids.has('damage_resistances'),
       damage_resistances: () => ids.has('damage_resistances'),
       unchosen_damage_resistances: () =>
         readable.includes('plus one from Fiendish Legacy whose type is not yet chosen'),
@@ -1643,12 +1653,65 @@ describe('the character sheet is projected twice from one value', () => {
   });
 
   it('says the speed is not recorded rather than printing nothing', () => {
-    const value = sheet({ walking_speed_feet: null });
-    expect(row(value, 'walking_speed_feet').value).toBeNull();
+    const value = sheet({
+      walking_speed: {
+        kind: 'unknown',
+        detail: 'UNKNOWN because this character has no species speed entered',
+      },
+    });
+    expect(row(value, 'walking_speed_feet').value).toBe('UNKNOWN');
     expect(textOf(row(value, 'walking_speed_feet').detail)).toContain(
       'no species speed entered',
     );
     expect(sheetFacts(value).walking_speed_feet).toBeNull();
+  });
+
+  it('prints each lineage-dependent UNKNOWN once and preserves known resistance beside it', () => {
+    const value = sheet({
+      walking_speed: {
+        kind: 'unknown',
+        detail: 'UNKNOWN until Elven Lineage is chosen',
+      },
+      lineage_darkvision: {
+        kind: 'unknown',
+        detail: 'UNKNOWN until Elven Lineage is chosen',
+      },
+      lineage_damage_resistance: {
+        kind: 'unknown',
+        detail: 'UNKNOWN until Fiendish Legacy is chosen',
+      },
+      damage_resistances: ['Cold'],
+      unchosen_damage_resistances: [],
+    });
+    const rows = rowsOf(value);
+    expect(rows.filter((entry) => entry.id === 'walking_speed_feet')).toHaveLength(1);
+    expect(rows.filter((entry) => entry.id === 'lineage_darkvision')).toHaveLength(1);
+    expect(rows.filter((entry) => entry.id === 'damage_resistances')).toHaveLength(1);
+    expect(row(value, 'walking_speed_feet').value).toBe('UNKNOWN');
+    expect(row(value, 'lineage_darkvision').value).toBe('UNKNOWN');
+    expect(textOf(row(value, 'damage_resistances').detail)).toBe(
+      'Cold, UNKNOWN (UNKNOWN until Fiendish Legacy is chosen).',
+    );
+    expect(sheetFacts(value)).toMatchObject({
+      walking_speed_feet: null,
+      lineage_darkvision_feet: null,
+      lineage_damage_resistance: 'unknown',
+      damage_resistances: ['Cold'],
+    });
+  });
+
+  it('prints a chosen lineage Darkvision value once in both projections', () => {
+    const value = sheet({
+      lineage_darkvision: {
+        kind: 'known',
+        value: 120,
+        detail: 'From the chosen Drow option.',
+      },
+    });
+    expect(rowsOf(value).filter((entry) => entry.id === 'lineage_darkvision'))
+      .toHaveLength(1);
+    expect(row(value, 'lineage_darkvision').value).toBe('120 feet');
+    expect(sheetFacts(value).lineage_darkvision_feet).toBe(120);
   });
 
   /**

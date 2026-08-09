@@ -58,6 +58,7 @@ export interface EligibleCharacterEffect {
   readonly ability_2: Ability | null;
   readonly allows_shield: boolean | null;
   readonly source_instance_id: number | null;
+  readonly template_ref: string | null;
   readonly source_type: DomainSourceType | null;
   readonly character_item_id: number | null;
   readonly character_weapon_id: number | null;
@@ -136,7 +137,7 @@ export function readEligibleCharacterEffects(
             effect.hit_points_per_level, effect.speed_bonus_feet,
             effect.ability, effect.amount, effect.maximum, effect.base,
             effect.ability_1, effect.ability_2, effect.allows_shield,
-            effect.source_instance_id, source.source_type,
+            effect.source_instance_id, effect.template_ref, source.source_type,
             effect.character_item_id, effect.character_weapon_id,
             effect.weapon_scope, effect.label
      ${ELIGIBLE_EFFECT_SQL}
@@ -161,6 +162,7 @@ export function readEligibleCharacterEffects(
           ? null
           : sqlBoolean(row, 'allows_shield'),
       source_instance_id: sqlNullableInteger(row, 'source_instance_id'),
+      template_ref: sqlNullableString(row, 'template_ref'),
       source_type: nullableSourceType(row),
       character_item_id: sqlNullableInteger(row, 'character_item_id'),
       character_weapon_id: sqlNullableInteger(row, 'character_weapon_id'),

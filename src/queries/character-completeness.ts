@@ -15,6 +15,7 @@ import { resolveSkillExpertiseGrants } from '../grants/skill-expertise-grants';
 import { EligibleSpellSearch } from '../eligibility/eligible-spell-search';
 import { CharacterNotFoundError } from './character-crud';
 import { orderSources } from './order-sources';
+import { resolveSpeciesChoice } from '../builder/species-choice';
 
 export interface UnfilledChoicesItem {
   readonly kind: 'unfilled_choices';
@@ -39,6 +40,21 @@ export interface UnchosenOptionItem {
   readonly source_name: string;
   readonly order_name: string;
   readonly options: readonly string[];
+}
+
+export interface RequiredSourceChoiceItem {
+  readonly kind: 'required_source_choice';
+  readonly title: string;
+  readonly detail: string;
+  readonly remedy: string;
+  readonly source_instance_id: number;
+  readonly source_name: string;
+  readonly choice_label: string;
+  readonly missing: readonly (
+    | 'option'
+    | 'spellcasting_ability'
+    | 'replaceable_spell'
+  )[];
 }
 
 /**
@@ -147,6 +163,7 @@ export interface CatalogGapItem {
 export type CompletenessItem =
   | UnfilledChoicesItem
   | UnchosenOptionItem
+  | RequiredSourceChoiceItem
   | NoClassItem
   | OrphanHitPointRollItem
   | UnfilledSkillGrantsItem
@@ -559,6 +576,46 @@ export const unchosenOrder: CompletenessCheck = {
   },
 };
 
+export function requiredSourceChoiceItems(
+  db: DatabaseContext,
+  characterId: number,
+): readonly RequiredSourceChoiceItem[] {
+  const resolution = resolveSpeciesChoice(db, characterId);
+  if (resolution.kind !== 'incomplete') return [];
+  const missingOption = resolution.missing.includes('option');
+  const missingAbility = resolution.missing.includes('spellcasting_ability');
+  const missingSpell = resolution.missing.includes('replaceable_spell');
+  return resolution.choices.map((choice): RequiredSourceChoiceItem => {
+    const missingWords = [
+      ...(missingOption ? [choice.label] : []),
+      ...(missingAbility ? ['its spellcasting ability'] : []),
+      ...(missingSpell ? ['its replaceable spell'] : []),
+    ];
+    return {
+      kind: 'required_source_choice',
+      title: missingOption
+        ? `${resolution.source_name} — ${choice.label} not chosen`
+        : `${resolution.source_name} — ${choice.label} is incomplete`,
+      detail:
+        `${missingWords.join(' and ')} ${missingWords.length === 1 ? 'is' : 'are'} ` +
+        'still unchosen. Lineage-dependent sheet facts remain UNKNOWN until ' +
+        'the required choice is recorded.',
+      remedy: 'Return to the guided Species step to review this required choice.',
+      source_instance_id: resolution.source_instance_id,
+      source_name: resolution.source_name,
+      choice_label: choice.label,
+      missing: [...resolution.missing],
+    };
+  });
+}
+
+export const requiredSourceChoices: CompletenessCheck = {
+  id: 'required_source_choice',
+  run(context) {
+    return requiredSourceChoiceItems(context.db, context.characterId);
+  },
+};
+
 export const noClass: CompletenessCheck = {
   id: 'no_class',
   run(context) {
@@ -831,6 +888,7 @@ export const expertiseGrantWarnings: CompletenessCheck = {
 };
 
 export const completenessChecks: readonly CompletenessCheck[] = Object.freeze([
+  requiredSourceChoices,
   unfilledChoices,
   unchosenOrder,
   noClass,
@@ -841,8 +899,9 @@ export const completenessChecks: readonly CompletenessCheck[] = Object.freeze([
 
 const kindRank: Readonly<Record<CompletenessItem['kind'], number>> = {
   no_class: 0,
-  unchosen_option: 1,
-  unfilled_choices: 2,
+  required_source_choice: 1,
+  unchosen_option: 2,
+  unfilled_choices: 3,
   // A LEVEL WITH NO RECORDED ROLL IS DELIBERATELY NOT HERE. Not rolling is a
   // legitimate steady state, not an unfinished decision: no roll means "use the
   // printed fixed value", which is a complete answer. Reporting it would nag
@@ -850,12 +909,12 @@ const kindRank: Readonly<Record<CompletenessItem['kind'], number>> = {
   // reasoning that made the roll an absent ROW rather than a nullable column.
   // The sheet still states which levels use the fixed value, beside the number
   // it changed.
-  orphan_hit_point_roll: 3,
+  orphan_hit_point_roll: 4,
   // Sorts among the other per-source items by source name, after that
   // source's spell choices: a class's skill choices sit beside its cantrips
   // rather than in a global bucket at the bottom.
-  unfilled_skill_grants: 4,
-  expertise_grant: 5,
+  unfilled_skill_grants: 5,
+  expertise_grant: 6,
 };
 
 function sortKey(item: CompletenessItem): readonly [string, number, string] {
@@ -867,6 +926,13 @@ function sortKey(item: CompletenessItem): readonly [string, number, string] {
   }
   if (item.kind === 'unchosen_option') {
     return [item.source_name, kindRank.unchosen_option, item.order_name];
+  }
+  if (item.kind === 'required_source_choice') {
+    return [
+      item.source_name,
+      kindRank.required_source_choice,
+      item.choice_label,
+    ];
   }
   if (item.kind === 'unfilled_skill_grants') {
     return [item.source_name, kindRank.unfilled_skill_grants, item.grant_key];

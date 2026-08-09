@@ -441,6 +441,12 @@ export type ReferenceOutstandingItem =
       readonly missing: number;
     }
   | {
+      readonly kind: 'required_source_choice';
+      readonly source_ref: number;
+      readonly choice_label: string;
+      readonly missing: readonly string[];
+    }
+  | {
       readonly kind: 'unchosen_option';
       readonly source_ref: number;
       readonly order_name: string;
@@ -820,7 +826,11 @@ export function buildAgentReference(
     registry.register(route.source_name, null);
   }
   for (const item of completeness?.items ?? []) {
-    if (item.kind === 'unfilled_choices' || item.kind === 'unchosen_option') {
+    if (
+      item.kind === 'unfilled_choices' ||
+      item.kind === 'unchosen_option' ||
+      item.kind === 'required_source_choice'
+    ) {
       registry.register(item.source_name, null);
     }
   }
@@ -915,6 +925,14 @@ export function buildAgentReference(
           source_ref: registry.register(item.source_name, null),
           order_name: item.order_name,
           options: [...item.options],
+        };
+      }
+      if (item.kind === 'required_source_choice') {
+        return {
+          kind: 'required_source_choice',
+          source_ref: registry.register(item.source_name, null),
+          choice_label: item.choice_label,
+          missing: [...item.missing],
         };
       }
       if (item.kind === 'orphan_hit_point_roll') {
@@ -1768,6 +1786,15 @@ export function agentReferenceSections(
                 `${item.order_name} not chosen; options are ${item.options.join(
                   ' or ',
                 )}`,
+              ),
+            ];
+          }
+          if (item.kind === 'required_source_choice') {
+            return [
+              cell('required_source_choice'),
+              sourceCell(projection, item.source_ref),
+              cell(
+                `${item.choice_label} is incomplete; missing ${item.missing.join(', ')}`,
               ),
             ];
           }

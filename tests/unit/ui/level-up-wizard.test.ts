@@ -315,7 +315,12 @@ function sheet(options: {
     resources: [],
     spells: [],
     martial_arts: [],
-    walking_speed_feet: 30,
+    walking_speed: {
+      kind: 'known', value: 30,
+      detail: 'The species base speed plus every standing bonus.',
+    },
+    lineage_darkvision: null,
+    lineage_damage_resistance: null,
     damage_resistances: [],
     unchosen_damage_resistances: [],
     classes: [{

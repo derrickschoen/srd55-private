@@ -123,6 +123,13 @@ export type UpdateSourceConfigCommand =
       chosen_list?: never;
     });
 
+export interface ChooseSpeciesLineageCommand extends CommandBase {
+  readonly type: 'choose_species_lineage';
+  readonly chosen_option: string;
+  readonly spellcasting_ability: Ability;
+  readonly replaceable_spell_version_key?: string;
+}
+
 export interface AddSourceCommand extends CommandBase {
   type: 'add_source';
   source_type: AddableSourceType;
@@ -488,6 +495,7 @@ export type CharacterCommandPayload =
   | UpdateCharacterRulesCommand
   | UpdateCharacterFlavorCommand
   | UpdateSourceConfigCommand
+  | ChooseSpeciesLineageCommand
   | AddSourceCommand
   | RemoveSourceCommand
   | AcknowledgeWarningCommand

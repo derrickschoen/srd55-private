@@ -1396,22 +1396,11 @@ function deleteSourceInstanceTree(
  * turns the definition's rules into spell-selection slots exactly as it does
  * for classes.
  *
- * WHAT ARRIVES TODAY, HONESTLY: only the rules that are unconditional — the
- * Tiefling's Thaumaturgy. Every other lineage spell is gated on the lineage
- * choice (`active_if_config` on the seeded rules), which nothing can record
- * yet: the seam's `applyOrigin` params carry no lineage, and the species
- * screen lists that choice as unmade. Granting a Drow's spells to an Elf who
- * never chose Drow would be a guess wearing a fact's clothes (D33), so the
- * dormant rules wait for the unit that records the choice, and the moment a
- * source config carries it the generator fires them with no further change
- * here.
- *
- * `config.class_level` IS REQUIRED, NOT DECORATION: the seeded level-3/5
- * rules are gated `active_from_class_level`, and for a non-class source
- * `SourceRuleReader.classLevelForSource` reads `class_level` from the
- * instance config — and THROWS if it is absent, which would fail the whole
- * apply. Guided creation is class-first at level 1, so 1 is exact here; the
- * level-up unit inherits the duty of maintaining it.
+ * WHAT ARRIVES TODAY, HONESTLY: ordinary unconditional grants plus empty
+ * configured-choice material. The lineage command later records the option
+ * and ability atomically, then asks the same generator to expand that selected
+ * option. Character-level gates read the character's total level at runtime;
+ * no copied `class_level` is placed in a species config (D56/D231).
  * `config.source_content_key` records which installed template this copy came
  * from. It does not assert a catalog layer: the disclosure query verifies the
  * key and copied name against the template, then reads the layer from the
@@ -1470,7 +1459,6 @@ function replaceGuidedLineageGrants(
       definitionId,
       template.name,
       JSON.stringify({
-        class_level: 1,
         source_content_key: template.content_key,
       }),
       GUIDED_SPECIES_SOURCE_MARKER,
@@ -1767,10 +1755,10 @@ export function applyGuidedBackgroundChoices(
       ],
     );
 
-    // The owning instance. `class_level` for the reason the species bridge
-    // records at length; the feat choice lives in config because that is the
-    // path the seeded grant_source rule reads (`definition_key_config`), and
-    // the config vocabulary is `add_source`'s existing one.
+    // The owning instance. This background's ordinary material rules still
+    // use the existing non-class `class_level` config gate. The feat choice
+    // lives in config because that is the path the seeded grant_source rule
+    // reads (`definition_key_config`).
     const config: Record<string, unknown> = {
       class_level: 1,
       [ORIGIN_FEAT_KEY_CONFIG]: params.origin_feat_content_key,
