@@ -15,13 +15,14 @@
  * instance against. Two review rounds of the guided-builder plan died on that
  * distinction, so it is restated here where the first writer lives.
  *
- * FOUR SPECIES ARE SEEDED, AND THE FOURTH IS THE RULE'S OWN TEST. The seam
- * (`src/builder/contracts.ts`, `LINEAGE_SPELL_SPECIES_CONTENT_KEYS`) pins Elf,
- * Gnome and Tiefling as the bundled species whose lineage grants spells. The
- * rule stands: a definition row carrying an empty rule list and anchoring
- * nothing would make `add_source` succeed while granting nothing — a row that
- * exists only to look complete. When a species gains a real reason, it gains
- * a row — and HUMAN gained one (skills-with-provenance plan §3.4/§3.6):
+ * FOUR SPECIES ARE SEEDED, AND THE FOURTH IS THE RULE'S OWN TEST. The stored
+ * configured-choice rules below are the census of bundled species whose
+ * lineages grant spells; consumers parse those rows rather than maintaining a
+ * parallel species-key set. The rule stands: a definition row carrying an
+ * empty rule list and anchoring nothing would make `add_source` succeed while
+ * granting nothing — a row that exists only to look complete. When a species
+ * gains a real reason, it gains a row — and HUMAN gained one
+ * (skills-with-provenance plan §3.4/§3.6):
  * Skillful is a structured skill grant now, the grant requires a species
  * SOURCE INSTANCE to hang on, and the source requires this definition row.
  * Human's `grant_rules` is honestly empty — Skillful is not a spell rule; the

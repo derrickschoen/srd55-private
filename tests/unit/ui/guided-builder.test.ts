@@ -976,8 +976,11 @@ describe('retired lineage disclosure census', () => {
     ];
     const retired = [
       `grants_${'lineage'}_spells`,
+      `grants${'LineageSpells'}`,
+      `LINEAGE_${'SPELL'}_SPECIES_CONTENT_KEYS`,
       `LINEAGE_${'GATED'}_SPECIES_CONTENT_KEYS`,
       `LINEAGE_${'GATED'}_SPELLS_DISCLOSURE`,
+      `ruleIs${'LineageGated'}`,
       `Its ${'lineage spells'} arrive only when you choose a lineage`,
       `applying this species grants no ${'spells today'}`,
       `Required choices this step cannot make ${'yet'}`,

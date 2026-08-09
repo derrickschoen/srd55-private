@@ -46,6 +46,13 @@ import {
   speciesRuleSemanticCountFromJson,
 } from '../../helpers/species-rule-census';
 import { raiseClassLevelForTest } from '../../helpers/class-levels';
+import {
+  createSpeciesStep,
+} from '../../../src/ui/screens/guided-builder/species-step';
+import {
+  elementText,
+  installInteractiveDocument,
+} from '../../fixtures/interactive-dom';
 
 let harness: RpcHarness | undefined;
 
@@ -1087,6 +1094,111 @@ describe('configured species choice and honest projection', () => {
       }
     },
   );
+
+  it('derives the Wood Elf speed RPC state and disclosure from stored grant rules', async () => {
+    const rpcHarness = await applicationDatabase();
+    const db = rpcHarness.context.db;
+    const characterId = createClassedCharacter(db, 'Stored Wood Elf Speed');
+    const elf = speciesNamed(db, 'Elf');
+    applyGuidedOrigin(db, {
+      character_id: characterId,
+      kind: 'species',
+      content_key: elf.content_key,
+    });
+
+    const storedGrantRules = db.scalar<string>(
+      `SELECT grant_rules FROM species_definitions WHERE content_key = ?`,
+      [elf.content_key],
+    );
+    if (typeof storedGrantRules !== 'string') {
+      throw new Error('The stored Elf definition has no grant rules.');
+    }
+    const mutatedGrantRules = JSON.parse(storedGrantRules) as Array<{
+      options?: Array<{
+        value?: unknown;
+        effects?: Array<Record<string, unknown>>;
+      }>;
+    }>;
+    const woodElf = mutatedGrantRules
+      .flatMap((rule) => rule.options ?? [])
+      .find((option) => option.value === 'Wood Elf');
+    const speed = woodElf?.effects?.find((effect) => effect['kind'] === 'speed');
+    if (speed === undefined || speed['speed_bonus_feet'] !== 5) {
+      throw new Error('The stored Wood Elf +5 speed effect is missing.');
+    }
+    speed['speed_bonus_feet'] = 4;
+
+    const state = async (): Promise<GuidedSpeciesChoiceStateResult> => {
+      const response = await rpcRegistry.dispatch({
+        id: 93,
+        method: GUIDED_RPC.speciesChoiceState,
+        params: { character_id: characterId },
+      }, rpcHarness.context);
+      expect(response).toMatchObject({ ok: true });
+      if (!response.ok) {
+        throw new Error('The species-choice state RPC refused.');
+      }
+      return response.result as GuidedSpeciesChoiceStateResult;
+    };
+    const expectSpeed = (
+      rpcState: GuidedSpeciesChoiceStateResult,
+      amount: number,
+    ): void => {
+      expect(rpcState).toMatchObject({
+        kind: 'ready',
+        resolution: {
+          choices: [{
+            options: expect.arrayContaining([
+              expect.objectContaining({
+                value: 'Wood Elf',
+                effects: expect.arrayContaining([
+                  expect.objectContaining({
+                    kind: 'speed',
+                    label: 'Wood Elf Speed',
+                    speed_bonus_feet: amount,
+                  }),
+                ]),
+              }),
+            ]),
+          }],
+        },
+      });
+
+      const restoreDocument = installInteractiveDocument();
+      const step = createSpeciesStep({
+        characterId,
+        options: [],
+        choiceState: rpcState,
+        applyOrigin: () => Promise.reject(new Error('not submitted')),
+        chooseLineage: () => Promise.reject(new Error('not submitted')),
+        navigate: () => undefined,
+      });
+      try {
+        const disclosure = elementText(step.element);
+        expect(disclosure).toContain(
+          `Speed: +${String(amount)} feet — Wood Elf Speed.`,
+        );
+        expect(disclosure).not.toContain(
+          `Speed: +${String(amount === 4 ? 5 : 4)} feet — Wood Elf Speed.`,
+        );
+      } finally {
+        step.cleanup();
+        restoreDocument();
+      }
+    };
+
+    db.exec(
+      `UPDATE species_definitions SET grant_rules = ? WHERE content_key = ?`,
+      [JSON.stringify(mutatedGrantRules), elf.content_key],
+    );
+    expectSpeed(await state(), 4);
+
+    db.exec(
+      `UPDATE species_definitions SET grant_rules = ? WHERE content_key = ?`,
+      [storedGrantRules, elf.content_key],
+    );
+    expectSpeed(await state(), 5);
+  });
 
   it('replaces the High Elf cantrip through the same command and displays the chosen spell on the sheet', async () => {
     const rpcHarness = await applicationDatabase();
