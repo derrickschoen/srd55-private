@@ -5,6 +5,38 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-09 — Barbed Court: Fire Shield grafted at 17; one free 4th-level cast per day at 17
+
+Owner's ruling, verbatim:
+
+> Graft at 17 and give 1 level 4 free cast per day at 17
+
+Effects: *Fire Shield* (Wizard 4th, no concentration, 2d8 retaliation on
+melee hits taken, 10 minutes) joins the 17th-level Court Spells row beside
+*Compulsion* — castable the level it arrives via Focus-casting, no dead
+window. And at 17, **once per Long Rest, the monk casts one prepared spell
+of level 4 without expending a spell slot or Focus Points** (base level —
+the no-upcast rule stands). Coverage noted: the free cast reaches any
+prepared 4th-level bard spell, including *Dimension Door*, *Greater
+Invisibility* and *Polymorph* — recorded, not fenced.
+
+Measured: Fire Shield adds ~+11 DPR of enemy-turn retaliation while up in
+the fights-back environment (uncounted in the headline 115); the free cast
+is tempo, not DPR. The 17 package final: hands ×2, Focus-casting, +3
+ladder, *Compulsion* + *Fire Shield* row, one free 4th/day.
+
+Follow-up ruling, same sitting, verbatim:
+
+> Deflator fire shield for psychic dmg
+
+Read as "reflavor": for a Barbed Court monk the grafted spell's retaliation
+damage is **Psychic** in both modes — the court's rebuke stings the mind of
+anyone who dares strike its monk — while the warm/chill resistance choice
+is unchanged. Same trade already accepted for the slap: psychic blanks on
+the mindless (you cannot humiliate a zombie), bites slightly harder on
+everything else. The doc will print it as the row's variant text, styled
+"the Rebuking Shield."
+
 ## 2026-08-09 — Barbed Court: spell list pivots to BARD — Cleric-verbatim preparation plus a Short-Rest swap, rituals, full list allowed, rows slimmed
 
 Owner's rulings, verbatim:
