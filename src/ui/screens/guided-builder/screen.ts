@@ -23,7 +23,7 @@ import { createSpellsStep } from './spells-step';
 import type { GuidedSpellTransition } from './spells-step';
 import './styles.css';
 
-let pendingSpellTransition: GuidedSpellTransition | null = null;
+let pendingGuidedTransition: GuidedSpellTransition | null = null;
 
 /**
  * THE GUIDED-BUILDER SCREEN (dispatches A1 + A3).
@@ -69,6 +69,16 @@ async function render(context: ScreenContext): Promise<() => void> {
   } else {
     const client = createQueriesClient(context.rpc);
     const state = await client.buildState(characterId);
+    const speciesRequested = context.route.query.get('step') === 'species';
+    const speciesChoiceState =
+      state.kind === 'ready' &&
+      (state.current_step === 'species' || speciesRequested)
+        ? await client.speciesChoiceState(characterId)
+        : null;
+    const canEditRecordedSpecies =
+      speciesRequested &&
+      speciesChoiceState?.kind === 'ready' &&
+      speciesChoiceState.resolution.kind !== 'no_species';
     if (state.kind === 'ready' && state.current_step === 'abilities') {
       // The abilities step (B1). The character row supplies the BASE scores
       // the inputs prefill from (plan §3.5 — never a resolved total) and the
@@ -98,15 +108,42 @@ async function render(context: ScreenContext): Promise<() => void> {
       });
       view = step.element;
       cleanups.push(step.cleanup);
-    } else if (state.kind === 'ready' && state.current_step === 'species') {
+    } else if (
+      state.kind === 'ready' &&
+      (state.current_step === 'species' || canEditRecordedSpecies)
+    ) {
       // The live post-class steps (A4 species, A5 background). Every other
       // derived step still renders one of the pinned pure panels.
       const step = createSpeciesStep({
         characterId,
-        options: await client.originOptions('species'),
+        options: state.current_step === 'species'
+          ? await client.originOptions('species')
+          : [],
+        choiceState: speciesChoiceState,
         applyOrigin: (contentKey) =>
           client.applyOrigin(characterId, 'species', contentKey),
-        navigate: (path) => context.router.navigate(path),
+        chooseLineage: (
+          chosenOption,
+          spellcastingAbility,
+          replaceableSpellVersionKey,
+          operationUuid,
+          expectedRevision,
+        ) => client.chooseSpeciesLineage({
+          character_id: characterId,
+          chosen_option: chosenOption,
+          spellcasting_ability: spellcastingAbility,
+          ...(replaceableSpellVersionKey === undefined
+            ? {}
+            : { replaceable_spell_version_key: replaceableSpellVersionKey }),
+          operation_uuid: operationUuid,
+          expected_revision: expectedRevision,
+        }),
+        navigate: (path, transition) => {
+          pendingGuidedTransition = transition ?? null;
+          if (!context.router.navigate(path)) {
+            pendingGuidedTransition = null;
+          }
+        },
       });
       view = step.element;
       cleanups.push(step.cleanup);
@@ -202,9 +239,9 @@ async function render(context: ScreenContext): Promise<() => void> {
             expected_revision: spellsState.revision,
           }),
         navigate: (path, transition) => {
-          pendingSpellTransition = transition ?? null;
+          pendingGuidedTransition = transition ?? null;
           if (!context.router.navigate(path)) {
-            pendingSpellTransition = null;
+            pendingGuidedTransition = null;
           }
         },
       });
@@ -229,20 +266,20 @@ async function render(context: ScreenContext): Promise<() => void> {
     document.title = 'Guided character builder';
   }
   context.root.replaceChildren(view);
-  const spellTransition = pendingSpellTransition;
-  pendingSpellTransition = null;
+  const guidedTransition = pendingGuidedTransition;
+  pendingGuidedTransition = null;
   const stepHeading = view.querySelector<HTMLElement>('h2') ??
     view.querySelector<HTMLElement>('h1');
   stepHeading?.setAttribute('tabindex', '-1');
-  const transitionFocus = spellTransition === null
+  const transitionFocus = guidedTransition === null
     ? null
     : view.querySelector<HTMLElement>(
-        `[data-focus-key="${CSS.escape(spellTransition.focusKey)}"]`,
+        `[data-focus-key="${CSS.escape(guidedTransition.focusKey)}"]`,
       );
   (transitionFocus ?? stepHeading)?.focus();
-  const spellStatus = view.querySelector<HTMLElement>('.guided-spell-status');
-  if (spellStatus !== null && spellTransition !== null) {
-    spellStatus.textContent = spellTransition.announcement;
+  const guidedStatus = view.querySelector<HTMLElement>('[data-guided-status]');
+  if (guidedStatus !== null && guidedTransition !== null) {
+    guidedStatus.textContent = guidedTransition.announcement;
   }
 
   const links = Array.from(

@@ -530,7 +530,7 @@ describe('class, feat, species and background catalog import', () => {
       content_key: speciesKey,
       name: 'Marsh Kin',
       catalog_layer: 'external',
-      grants_lineage_spells: false,
+      configured_choices: [],
     }]);
     expect(listGuidedBackgroundChoiceOptions(db).origin_feats).toEqual([]);
 
@@ -700,7 +700,7 @@ describe('class, feat, species and background catalog import', () => {
       content_key: contentKey,
       name: 'Fen Guard',
       catalog_layer: 'external',
-      grants_lineage_spells: false,
+      configured_choices: [],
     }]);
   });
 

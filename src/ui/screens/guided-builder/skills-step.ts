@@ -416,7 +416,7 @@ export function createSkillsStep(deps: SkillsStepDeps): SkillsStep {
   );
 
   return {
-    element: guidedShell('skills', panel),
+    element: guidedShell('skills', panel, deps.characterId),
     cleanup: () => {
       for (const cleanup of cleanups) {
         cleanup();

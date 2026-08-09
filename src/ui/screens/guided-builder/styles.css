@@ -200,6 +200,75 @@
   font-size: 0.85rem;
 }
 
+.guided-species-configured-choice {
+  border-top: 1px solid rgba(127, 127, 127, 0.35);
+  padding-top: 0.5rem;
+}
+
+.guided-species-configured-choice > h4,
+.guided-lineage-option-disclosure h4 {
+  margin: 0;
+}
+
+.guided-lineage-option-disclosure {
+  margin-top: 0.45rem;
+}
+
+.guided-lineage-option-disclosure ul {
+  margin: 0.25rem 0 0;
+  padding-left: 1.2rem;
+  font-size: 0.85rem;
+}
+
+.guided-lineage-options {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1rem 0;
+  border: 0;
+  padding: 0;
+}
+
+.guided-lineage-option,
+.guided-species-choice-summary {
+  border: 1px solid var(--border, #c9c9c9);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+}
+
+.guided-lineage-option > label {
+  margin-left: 0.4rem;
+  font-weight: 650;
+}
+
+.guided-lineage-ability {
+  display: block;
+  width: min(100%, 24rem);
+  margin: 0.35rem 0 1rem;
+  padding: 0.45rem 0.55rem;
+  font: inherit;
+}
+
+.guided-lineage-spell {
+  margin-bottom: 1rem;
+}
+
+.guided-lineage-spell-help,
+.guided-status {
+  font-size: 0.9rem;
+}
+
+.guided-species-change {
+  min-height: 2.4rem;
+  border: 1px solid var(--accent, #333);
+  border-radius: 0.45rem;
+  padding: 0.5rem 0.9rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
 /* The abilities step (B1). Warnings are STATUS TEXT (D49): styled to be
    seen, never wired to any control state — the submit button stays live. */
 .guided-ability-methods {
@@ -632,6 +701,7 @@
   .guided-submit,
   .guided-ability-submit,
   .guided-species-apply,
+  .guided-species-change,
   .guided-background-submit,
   .guided-skill-fill,
   .guided-expertise-choice button,

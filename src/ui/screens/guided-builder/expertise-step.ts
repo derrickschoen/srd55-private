@@ -95,7 +95,7 @@ export function createExpertiseStep(options: {
     ],
   );
   return {
-    element: guidedShell('expertise', panel),
+    element: guidedShell('expertise', panel, options.characterId),
     cleanup: () => cleanups.forEach((cleanup) => cleanup()),
   };
 }

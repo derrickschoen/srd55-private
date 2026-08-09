@@ -6,7 +6,10 @@ import {
 } from '../catalog/catalog-disclosure';
 import { recordedSourceContentKey } from '../catalog/recorded-source-provenance';
 import { isEnumValue, abilities, type Ability } from '../domain/enums';
+import type { EligibleSpell } from '../domain/read-models';
 import { GUIDED_SPECIES_SOURCE_MARKER } from '../domain/source-markers';
+import { EligibleSpellSearch } from '../eligibility/eligible-spell-search';
+import { spellSelectionConstraint } from '../eligibility/spell-selection-constraint';
 import {
   ConfiguredChoiceRule,
   parseSourceGrantRules,
@@ -14,6 +17,7 @@ import {
 import { decodeGrantJson, valueAtPath } from '../grants/source-rule-reader';
 import type {
   GuidedConfiguredChoiceState,
+  GuidedReplaceableSpellOption,
   GuidedSpeciesChoiceStateResult,
   SpeciesChoiceResolution,
 } from './contracts';
@@ -56,9 +60,59 @@ function isEligibleReplaceableSpell(
   ) ?? 0) === 1;
 }
 
-function choiceState(
+function spellDisplayName(db: DatabaseContext, contentKey: string): string {
+  return db.scalar<string>(
+    `SELECT display_name FROM spell_versions
+     WHERE content_key = ? AND is_active = 1`,
+    [contentKey],
+  ) ?? contentKey;
+}
+
+function replaceableEligibleSpells(
+  db: DatabaseContext,
+  characterId: number | null,
+  spellList: string,
+  spellLevel: number,
+): readonly EligibleSpell[] {
+  if (characterId === null) return [];
+  return new EligibleSpellSearch(db).searchConstraint(
+    characterId,
+    spellSelectionConstraint({
+      spell_level_min: spellLevel,
+      spell_level_max: spellLevel,
+      allowed_spell_lists: [spellList],
+    }),
+    '',
+  );
+}
+
+function replaceableSpellOptions(
+  db: DatabaseContext,
+  characterId: number | null,
+  spellList: string,
+  spellLevel: number,
+): readonly GuidedReplaceableSpellOption[] {
+  return replaceableEligibleSpells(
+    db,
+    characterId,
+    spellList,
+    spellLevel,
+  ).map((spell) => ({
+    content_key: db.scalar<string>(
+      'SELECT content_key FROM spell_versions WHERE id = ?',
+      [spell.id],
+    ) ?? (() => {
+      throw new Error(`Eligible spell ${String(spell.id)} has no content key.`);
+    })(),
+    spell,
+  }));
+}
+
+export function guidedConfiguredChoiceState(
+  db: DatabaseContext,
   rule: ConfiguredChoiceRule,
   config: unknown,
+  characterId: number | null,
 ): GuidedConfiguredChoiceState {
   const selectedOption = valueAtPath(config, rule.configKey);
   const selected = typeof selectedOption === 'string' ? selectedOption : null;
@@ -98,14 +152,18 @@ function choiceState(
         })),
         grants: option.grants.map((grant) => {
           const data = grant.toObject() as Record<string, unknown>;
+          const spellVersionKey =
+            typeof data['spell_version_key'] === 'string'
+              ? data['spell_version_key']
+              : null;
           return {
             rule_key: grant.ruleKey,
             kind: grant.kind,
             active_from_character_level: grant.activeFromCharacterLevel,
-            spell_version_key:
-              typeof data['spell_version_key'] === 'string'
-                ? data['spell_version_key']
-                : null,
+            spell_version_key: spellVersionKey,
+            spell_name: spellVersionKey === null
+              ? null
+              : spellDisplayName(db, spellVersionKey),
           };
         }),
         replaceable_spell_choice: replaceable === null
@@ -116,10 +174,40 @@ function choiceState(
               spell_list: replaceable.spellList,
               spell_level: replaceable.spellLevel,
               initial_spell_version_key: replaceable.initialSpellVersionKey,
+              initial_spell_name: spellDisplayName(
+                db,
+                replaceable.initialSpellVersionKey,
+              ),
               selected_spell_version_key:
                 typeof selectedReplaceable === 'string'
                   ? selectedReplaceable
                   : null,
+              selected_spell: (() => {
+                if (
+                  characterId === null ||
+                  typeof selectedReplaceable !== 'string'
+                ) return null;
+                const selectedId = db.scalar<number>(
+                  `SELECT id FROM spell_versions
+                   WHERE content_key = ? AND is_active = 1`,
+                  [selectedReplaceable],
+                );
+                if (selectedId === null) return null;
+                return replaceableSpellOptions(
+                  db,
+                  characterId,
+                  replaceable.spellList,
+                  replaceable.spellLevel,
+                ).find((candidate) =>
+                  candidate.spell.id === Number(selectedId)
+                ) ?? null;
+              })(),
+              eligible_spells: replaceableSpellOptions(
+                db,
+                characterId,
+                replaceable.spellList,
+                replaceable.spellLevel,
+              ),
             },
       };
     }),
@@ -223,7 +311,9 @@ export function resolveSpeciesChoice(
     }
     const decoded = decodeGrantJson(source.config);
     const config = record(decoded) ?? {};
-    const choices = configured.map((rule) => choiceState(rule, config));
+    const choices = configured.map((rule) =>
+      guidedConfiguredChoiceState(db, rule, config, characterId)
+    );
     const missing = new Set<
       'option' | 'spellcasting_ability' | 'replaceable_spell'
     >();
@@ -296,13 +386,15 @@ export function guidedSpeciesChoiceState(
   db: DatabaseContext,
   characterId: number,
 ): GuidedSpeciesChoiceStateResult {
-  const exists = Number(
-    db.scalar('SELECT count(*) FROM characters WHERE id = ?', [characterId]) ?? 0,
-  ) === 1;
-  return exists
+  const revision = db.scalar<number>(
+    'SELECT revision FROM characters WHERE id = ?',
+    [characterId],
+  );
+  return revision !== null
     ? {
         kind: 'ready',
         character_id: characterId,
+        revision: Number(revision),
         resolution: resolveSpeciesChoice(db, characterId),
       }
     : { kind: 'not_found' };

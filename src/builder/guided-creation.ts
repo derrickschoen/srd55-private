@@ -109,11 +109,15 @@ import {
   type GuidedBackgroundChoiceOptions,
 } from './background-choices';
 import { GrantRule } from '../grants/grant-rule';
+import {
+  ConfiguredChoiceRule,
+  parseSourceGrantRules,
+} from '../grants/configured-choice-rule';
 import { SourceRuleReader } from '../grants/source-rule-reader';
+import { guidedConfiguredChoiceState } from './species-choice';
 import {
   countAbilitiesAtLeastPlusTwo,
   EQUIPMENT_CHOICE_CONFIG_KEY,
-  grantsLineageSpells,
   GUIDED_LEVEL_ONE_STEP_ORDER,
   hasExactKeys,
   hasWeakScores,
@@ -921,14 +925,6 @@ const speciesTemplateTraitEffectRow: RowCodec<SpeciesTemplateTraitEffectRow> = (
  * definition/template aggregates. Requiring both external halves keeps the
  * application source and catalogue definition on one identity.
  *
- * `grants_lineage_spells` comes from the seam's pinned literal set, NEVER from
- * trait text — sniffing text is how two agents invent two different lists.
- *
- * `kind: 'background'` (A5) reads `background_templates` the same way. Its
- * `grants_lineage_spells` is a LITERAL `false`, pinned by the seam — "the
- * seam's set is species-only; backgrounds are always false" — not a lookup
- * that happens to miss.
- *
  * HA-4 gives backgrounds the same complete-two-half rule as species.
  */
 export function listGuidedOriginOptions(
@@ -960,12 +956,13 @@ export function listGuidedOriginOptions(
         content_key,
         name,
         catalog_layer: catalogLayerDisclosure(catalog_layer),
-        grants_lineage_spells: false,
+        configured_choices: [],
       }));
   }
   return db
     .all(
-      `SELECT template.content_key, template.name, identity.catalog_layer
+      `SELECT template.content_key, template.name, identity.catalog_layer,
+              definition.grant_rules
        FROM species_templates AS template
        LEFT JOIN catalog_content_identities AS identity
          ON identity.content_kind = 'species'
@@ -981,14 +978,26 @@ export function listGuidedOriginOptions(
         content_key: sqlString(row, 'content_key'),
         name: sqlString(row, 'name'),
         catalog_layer: sqlNullableString(row, 'catalog_layer'),
+        grant_rules: sqlNullableString(row, 'grant_rules'),
       }),
     )
-    .map(({ content_key, name, catalog_layer }) => ({
-      content_key,
-      name,
-      catalog_layer: catalogLayerDisclosure(catalog_layer),
-      grants_lineage_spells: grantsLineageSpells(content_key),
-    }));
+    .map(({ content_key, name, catalog_layer, grant_rules }) => {
+      const parsed: unknown = grant_rules === null
+        ? []
+        : JSON.parse(grant_rules);
+      const configured = parseSourceGrantRules(parsed).filter(
+        (rule): rule is ConfiguredChoiceRule =>
+          rule instanceof ConfiguredChoiceRule,
+      );
+      return {
+        content_key,
+        name,
+        catalog_layer: catalogLayerDisclosure(catalog_layer),
+        configured_choices: configured.map((rule) =>
+          guidedConfiguredChoiceState(db, rule, {}, null)
+        ),
+      };
+    });
 }
 
 /**

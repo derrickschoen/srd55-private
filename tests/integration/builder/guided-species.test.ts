@@ -5,7 +5,6 @@ import { SpellAccessBuilder } from '../../../src/access/spell-access-builder';
 import {
   GUIDED_LEVEL_ONE_STEP_ORDER,
   GUIDED_RPC,
-  LINEAGE_SPELL_SPECIES_CONTENT_KEYS,
   type GuidedApplyOriginResult,
   type GuidedOriginOption,
   type GuidedSpeciesChoiceStateResult,
@@ -1815,7 +1814,7 @@ describe('bundled species definition seed', () => {
 });
 
 describe('guided species RPC contracts', () => {
-  it('classifies every origin option from the seam lineage key set', async () => {
+  it('returns the configured-choice census from stored species data', async () => {
     const rpcHarness = await applicationDatabase();
     const response = await rpcRegistry.dispatch(
       {
@@ -1831,18 +1830,20 @@ describe('guided species RPC contracts', () => {
       throw new Error('The guided species-options RPC did not return a list.');
     }
     const options = response.result as readonly GuidedOriginOption[];
-    for (const option of options) {
-      expect(option.grants_lineage_spells).toBe(
-        LINEAGE_SPELL_SPECIES_CONTENT_KEYS.has(option.content_key),
-      );
-    }
     expect(
-      new Set(
+      Object.fromEntries(
         options
-          .filter((option) => option.grants_lineage_spells)
-          .map((option) => option.content_key),
+          .filter((option) => option.configured_choices.length > 0)
+          .map((option) => [
+            option.content_key,
+            option.configured_choices.map((choice) => choice.label),
+          ]),
       ),
-    ).toEqual(LINEAGE_SPELL_SPECIES_CONTENT_KEYS);
+    ).toEqual({
+      '2024:species:elf': ['Elven Lineage'],
+      '2024:species:gnome': ['Gnomish Lineage'],
+      '2024:species:tiefling': ['Fiendish Legacy'],
+    });
   });
 
   it('applies a species and returns the seam-ordered background step through the real RPC', async () => {

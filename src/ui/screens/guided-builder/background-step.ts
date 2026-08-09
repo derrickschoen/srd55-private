@@ -688,7 +688,7 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
   renderSuggestion();
 
   return {
-    element: guidedShell('background', panel),
+    element: guidedShell('background', panel, deps.characterId),
     cleanup: () => {
       for (const cleanup of cleanups) {
         cleanup();
