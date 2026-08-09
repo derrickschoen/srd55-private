@@ -5,6 +5,43 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-08 — Barbed Court: Innate Sorcery moves to Monk 3; the slap is an Unarmed Strike at 5 feet and a ranged weapon attack beyond
+
+Owner's ruling, verbatim:
+
+> Make it lvl 3 and treat the mage hand slap like an unarmed strike at 5ft
+> and a ranged weapon at farther distance
+
+Effects:
+
+1. **Innate Sorcery lands at Monk 3**, not 11 (the level-11 assumption in the
+   entry below is overridden; the 2-Focus cost assumption stands, still
+   flagged).
+2. **The slap's classification is distance-split**, superseding the
+   melee-spell-attack assumption: against a target within 5 feet it is an
+   **Unarmed Strike** — so Wisdom applies via all-strikes-Wisdom, the
+   +1/+2/+3 ladder applies, Stunning Strike can ride it, and it triggers the
+   goad's melee-hit clause; against a target farther away (out to the 10-foot
+   range) it is a **ranged weapon attack** — no Stunning Strike, no goad
+   trigger, and subject to the SRD's ranged-attacks-in-close-combat
+   Disadvantage until Unshaken Aim removes that at Monk 6, which quietly
+   gives that feature its first real job. Damage stays Martial Arts die +
+   Wisdom, Psychic, both modes. Attack stat in ranged mode recorded as
+   Wisdom for consistency with the delivered-strikes ruling (flagged — RAW
+   ranged weapon attacks would ask for Dexterity).
+3. Implicitly resolved: the Innate Sorcery Advantage question from the entry
+   below — the slap is now a weapon-family attack, not a spell attack, so
+   the Advantage never touches it. No owner word needed.
+
+Level-3 census after this ruling, recorded because the number is the
+finding: spellcasting (4 chosen + 3 granted spells + 7 cantrips), bespoke
+*Shield* at 1 Focus, the goad, Faces of the Court (free *Mirror Image*),
+Courtier's Slap, hand-delivered Wisdom strikes at 10 feet, all-strikes
+Wisdom, the 8-hour Mage Hand, Herald + Flourish, and Focus-costed Innate
+Sorcery — **eleven distinct grants at the subclass's entry level.** The
+front-load doctrine covers the intent; the count is on the record for the
+outsider-reading and dip tests.
+
 ## 2026-08-08 — Barbed Court: +2 Wisdom REMOVED; Innate Sorcery granted instead — no action, Focus-costed
 
 Owner's ruling, verbatim:
