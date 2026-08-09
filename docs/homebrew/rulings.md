@@ -5,6 +5,44 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-09 — Barbed Court: goad and duel CONSOLIDATED into one feature — the last open mechanic closes
+
+Owner's ruling, verbatim:
+
+> Seems like the goad and the duel do the same thing. Consolidate
+
+Effect: the free goad rider proposed at presentation is not adopted; the
+goad and the duel become **one feature**, carrying the duel's fully-ruled
+mechanics (melee-hit trigger, 1 Focus Point, the spell-effect bind, no
+concentration, 1 minute, the spell's own escape rules) and the goad's ruled
+fiction (the insult — spoken, or a slap, sneer, or gesture, player's
+choice) and its name. Working wording for the rewrite:
+
+> **Barbed Goad.** When you hit a creature with a melee attack, you can
+> spend 1 Focus Point to goad it into a duel — an insult spoken aloud or
+> delivered as a slap, sneer, or gesture. For 1 minute, the target has
+> Disadvantage on attack rolls against creatures other than you, and must
+> succeed on a Wisdom saving throw against your ki save DC to move more
+> than 30 feet away from you. The effect ends early if you attack a
+> different creature, if one of your allies damages the target or targets
+> it with a harmful spell, or on the target's successful save to withdraw.
+> *Goading a second creature does not end an existing goad, and attacking a
+> creature you have goaded does not end your goads on others.*
+
+The italicized concurrency clause is the one drafting decision the
+consolidation forces, flagged: under the inherited escape rules alone,
+attacking duel-target A would end the bind on B, making multi-enemy
+tanking impossible — the role the free goad used to cover. The clause
+restores it at 1 Focus per enemy. Recommended; one word removes it.
+
+Identity paragraph unaffected: "the goad that makes ignoring you
+unbearable, the duel that binds an enemy's pride" reads as one feature's
+fiction — the goad is how the duel begins.
+
+**With this, every open item on the Barbed Court is closed.** The original
+nine-item queue, the five follow-up items, and the goad's numbers are all
+ruled. The doc rewrite is unblocked.
+
 ## 2026-08-09 — Barbed Court: identity paragraph APPROVED — queue item 9 CLOSED
 
 Owner's ruling, verbatim:
