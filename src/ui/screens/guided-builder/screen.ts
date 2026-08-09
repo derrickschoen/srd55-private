@@ -20,7 +20,10 @@ import { renderGuidedBuildState } from './guided-builder';
 import { createSkillsStep } from './skills-step';
 import { createSpeciesStep } from './species-step';
 import { createSpellsStep } from './spells-step';
+import type { GuidedSpellTransition } from './spells-step';
 import './styles.css';
+
+let pendingSpellTransition: GuidedSpellTransition | null = null;
 
 /**
  * THE GUIDED-BUILDER SCREEN (dispatches A1 + A3).
@@ -198,7 +201,12 @@ async function render(context: ScreenContext): Promise<() => void> {
             operation_uuid: operationUuid,
             expected_revision: spellsState.revision,
           }),
-        navigate: (path) => context.router.navigate(path),
+        navigate: (path, transition) => {
+          pendingSpellTransition = transition ?? null;
+          if (!context.router.navigate(path)) {
+            pendingSpellTransition = null;
+          }
+        },
       });
       view = step.element;
       cleanups.push(step.cleanup);
@@ -221,10 +229,21 @@ async function render(context: ScreenContext): Promise<() => void> {
     document.title = 'Guided character builder';
   }
   context.root.replaceChildren(view);
+  const spellTransition = pendingSpellTransition;
+  pendingSpellTransition = null;
   const stepHeading = view.querySelector<HTMLElement>('h2') ??
     view.querySelector<HTMLElement>('h1');
   stepHeading?.setAttribute('tabindex', '-1');
-  stepHeading?.focus();
+  const transitionFocus = spellTransition === null
+    ? null
+    : view.querySelector<HTMLElement>(
+        `[data-focus-key="${CSS.escape(spellTransition.focusKey)}"]`,
+      );
+  (transitionFocus ?? stepHeading)?.focus();
+  const spellStatus = view.querySelector<HTMLElement>('.guided-spell-status');
+  if (spellStatus !== null && spellTransition !== null) {
+    spellStatus.textContent = spellTransition.announcement;
+  }
 
   const links = Array.from(
     context.root.querySelectorAll<HTMLAnchorElement>('a[data-router-link]'),

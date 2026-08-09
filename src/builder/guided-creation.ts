@@ -2245,46 +2245,179 @@ export function guidedSpellsStepState(
   const revision = Number(
     db.scalar('SELECT revision FROM characters WHERE id = ?', [characterId]),
   );
-  const slots = db.all(
-    `SELECT slot.id, COALESCE(slot.label, slot.rule_key) AS label
+  const slotRows = db.all(
+    `SELECT slot.id, slot.source_instance_id,
+            CASE source.source_type
+              WHEN 'class' THEN class.name
+              ELSE source.display_name
+            END AS source_name,
+            slot.rule_key, slot.ordinal, slot.bucket,
+            selected.display_name AS selected_spell_name,
+            identity.catalog_layer AS selected_spell_catalog_layer
      FROM spell_selection_slots AS slot
      INNER JOIN character_source_instances AS source
        ON source.id = slot.source_instance_id
       AND source.character_id = slot.character_id
+     LEFT JOIN class_definitions AS class
+       ON source.source_type = 'class'
+      AND class.id = source.source_definition_id
+     LEFT JOIN spell_versions AS selected
+       ON selected.id = slot.current_spell_version_id
+     LEFT JOIN catalog_content_identities AS identity
+       ON identity.content_kind = 'spell'
+      AND identity.content_key = selected.content_key
      WHERE slot.character_id = ? AND source.state = 'active'
        AND slot.state = 'active' AND slot.is_locked = 0
        AND slot.fixed_spell_version_id IS NULL
-       AND slot.current_spell_version_id IS NULL
      ORDER BY source.id, slot.sort_order, slot.ordinal`,
     [characterId],
     (row) => ({
-      kind: 'slot_selection' as const,
       id: sqlInteger(row, 'id'),
-      label: sqlString(row, 'label'),
+      sourceInstanceId: sqlInteger(row, 'source_instance_id'),
+      sourceName: sqlString(row, 'source_name'),
+      ruleKey: sqlString(row, 'rule_key'),
+      ordinal: sqlInteger(row, 'ordinal'),
+      bucket: sqlString(row, 'bucket'),
+      selectedSpellName: sqlNullableString(row, 'selected_spell_name'),
+      selectedSpellCatalogLayer: sqlNullableString(
+        row,
+        'selected_spell_catalog_layer',
+      ),
     }),
   );
-  const acquisitions = db.all(
-    `SELECT entry.id,
-            'Wizard spellbook spell ' || entry.ordinal AS label
+  const slotTotals = new Map<string, number>();
+  for (const row of slotRows) {
+    const group = `${String(row.sourceInstanceId)}\u0000${row.ruleKey}`;
+    slotTotals.set(group, (slotTotals.get(group) ?? 0) + 1);
+  }
+  const slots = slotRows.map((row) => {
+    const group = `${String(row.sourceInstanceId)}\u0000${row.ruleKey}`;
+    const total = slotTotals.get(group);
+    if (total === undefined) {
+      throw new Error('A guided spell slot has no ordinal group.');
+    }
+    return {
+      kind: 'slot_selection' as const,
+      id: row.id,
+      label: guidedSpellChoiceLabel(
+        row.sourceName,
+        guidedSpellBucketLabel(row.bucket),
+        row.ordinal,
+        total,
+      ),
+      selected_spell_name: row.selectedSpellName,
+      selected_spell_catalog_layer:
+        row.selectedSpellName === null
+          ? null
+          : catalogLayerDisclosure(row.selectedSpellCatalogLayer),
+    };
+  });
+  const acquisitionRows = db.all(
+    `SELECT entry.id, entry.source_instance_id,
+            CASE source.source_type
+              WHEN 'class' THEN class.name
+              ELSE source.display_name
+            END AS source_name,
+            entry.rule_key, entry.ordinal,
+            selected.display_name AS selected_spell_name,
+            identity.catalog_layer AS selected_spell_catalog_layer
      FROM wizard_spellbook_entries AS entry
      INNER JOIN character_source_instances AS source
        ON source.id = entry.source_instance_id
       AND source.character_id = entry.character_id
+     LEFT JOIN class_definitions AS class
+       ON source.source_type = 'class'
+      AND class.id = source.source_definition_id
+     LEFT JOIN spell_versions AS selected
+       ON selected.id = entry.spell_version_id
+     LEFT JOIN catalog_content_identities AS identity
+       ON identity.content_kind = 'spell'
+      AND identity.content_key = selected.content_key
      WHERE entry.character_id = ? AND source.state = 'active'
-       AND entry.state = 'active' AND entry.spell_version_id IS NULL
+       AND entry.state = 'active'
      ORDER BY source.id, entry.ordinal`,
     [characterId],
     (row) => ({
-      kind: 'spellbook_acquisition' as const,
       id: sqlInteger(row, 'id'),
-      label: sqlString(row, 'label'),
+      sourceInstanceId: sqlInteger(row, 'source_instance_id'),
+      sourceName: sqlString(row, 'source_name'),
+      ruleKey: sqlString(row, 'rule_key'),
+      ordinal: sqlInteger(row, 'ordinal'),
+      selectedSpellName: sqlNullableString(row, 'selected_spell_name'),
+      selectedSpellCatalogLayer: sqlNullableString(
+        row,
+        'selected_spell_catalog_layer',
+      ),
     }),
   );
+  const acquisitionTotals = new Map<string, number>();
+  for (const row of acquisitionRows) {
+    const group = `${String(row.sourceInstanceId)}\u0000${row.ruleKey}`;
+    acquisitionTotals.set(group, (acquisitionTotals.get(group) ?? 0) + 1);
+  }
+  const acquisitions = acquisitionRows.map((row) => {
+    const group = `${String(row.sourceInstanceId)}\u0000${row.ruleKey}`;
+    const total = acquisitionTotals.get(group);
+    if (total === undefined) {
+      throw new Error('A guided spellbook choice has no ordinal group.');
+    }
+    return {
+      kind: 'spellbook_acquisition' as const,
+      id: row.id,
+      label: guidedSpellChoiceLabel(
+        row.sourceName,
+        'spellbook spell',
+        row.ordinal,
+        total,
+      ),
+      selected_spell_name: row.selectedSpellName,
+      selected_spell_catalog_layer:
+        row.selectedSpellName === null
+          ? null
+          : catalogLayerDisclosure(row.selectedSpellCatalogLayer),
+    };
+  });
   return {
     character_id: characterId,
     revision,
     choices: [...slots, ...acquisitions],
   };
+}
+
+function guidedSpellSourceLabel(sourceName: string): string {
+  const magicInitiatePrefix = 'Magic Initiate: ';
+  return sourceName.startsWith(magicInitiatePrefix)
+    ? `Magic Initiate — ${sourceName.slice(magicInitiatePrefix.length)}`
+    : sourceName;
+}
+
+function guidedSpellBucketLabel(bucket: string): string {
+  switch (bucket) {
+    case 'cantrip_known':
+      return 'cantrip';
+    case 'prepared':
+      return 'prepared spell';
+    case 'known':
+      return 'known spell';
+    case 'spellbook':
+      return 'spellbook spell';
+    case 'automatic':
+      return 'automatic spell';
+    default:
+      throw new Error(`Unknown guided spell bucket '${bucket}'.`);
+  }
+}
+
+function guidedSpellChoiceLabel(
+  sourceName: string,
+  choiceKind: string,
+  ordinal: number,
+  total: number,
+): string {
+  return (
+    `${guidedSpellSourceLabel(sourceName)} ${choiceKind} ` +
+    `${String(ordinal)} of ${String(total)}`
+  );
 }
 
 export function assignGuidedSpell(

@@ -227,7 +227,7 @@ describe('the addressed fill', () => {
       view.querySelector(selector(SKILL_STEP_ATTR.choice, '31')),
     ).not.toBeNull();
     expect(elementText(step.element)).toContain(
-      'It does not hold this step up',
+      'Skipping it does not hold this step up.',
     );
     step.cleanup();
   });

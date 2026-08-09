@@ -1037,7 +1037,10 @@ export interface GuidedFillExpertiseGrantParams {
 export interface GuidedSpellChoice {
   readonly kind: 'slot_selection' | 'spellbook_acquisition';
   readonly id: number;
+  /** Visible source-and-ordinal label; never an internal rule key. */
   readonly label: string;
+  readonly selected_spell_name: string | null;
+  readonly selected_spell_catalog_layer: CatalogLayerDisclosure | null;
 }
 
 export interface GuidedSpellsStepState {

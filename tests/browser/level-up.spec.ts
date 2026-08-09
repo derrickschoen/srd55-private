@@ -129,11 +129,17 @@ async function completeWizardLevelOneChoices(
           readonly revision: number;
           readonly class_choices: readonly {
             readonly grant_id: number;
+            readonly grant_key: string;
+            readonly class_name: string | null;
             readonly available: readonly string[];
           }[];
         }
       >('queries.characters.skillsStep', { character_id: id });
-      const choice = step.class_choices[0];
+      const choice = step.class_choices.find(
+        (candidate) =>
+          candidate.grant_key === 'class_skill' &&
+          candidate.class_name === 'Wizard',
+      );
       if (choice === undefined) break;
       const preferred = ['arcana', 'history'][skillIndex];
       const skill = preferred !== undefined && choice.available.includes(preferred)
@@ -158,10 +164,13 @@ async function completeWizardLevelOneChoices(
           readonly choices: readonly {
             readonly kind: 'slot_selection' | 'spellbook_acquisition';
             readonly id: number;
+            readonly selected_spell_name: string | null;
           }[];
         }
       >('queries.characters.spellsStep', { character_id: id });
-      const choice = step.choices[0];
+      const choice = step.choices.find(
+        (candidate) => candidate.selected_spell_name === null,
+      );
       if (choice === undefined) break;
       const address = { kind: choice.kind, id: choice.id };
       const eligible = await window.appRpc.call<

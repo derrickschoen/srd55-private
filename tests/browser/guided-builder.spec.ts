@@ -1,6 +1,11 @@
 import type { Locator, Page } from '@playwright/test';
 import { expect, test } from './fixtures/parallel-test';
 import { readGuidedSeam } from './fixtures/guided-seam';
+import {
+  announcedMessages,
+  clearAnnouncements,
+  installAnnouncementRecorder,
+} from './fixtures/announcements';
 
 async function ready(page: Page): Promise<void> {
   // The four-worker pool measured this file's slowest caller at 25.2s; 65s
@@ -142,6 +147,97 @@ test('a phone-width guided journey keeps the first level 1 screens and controls 
     page.getByRole('heading', { name: 'Choose a background' }),
   ).toBeVisible();
   await expectPhoneWidth(page);
+});
+
+test('Elf Wizard skills finish top to bottom and spell choices stay labelled and visible', async ({
+  page,
+}) => {
+  // Measured alone at 11.9s on Chromium; this load-sensitive journey keeps a
+  // 20s hang guard without changing shared Playwright configuration.
+  test.setTimeout(20_000);
+  await installAnnouncementRecorder(page);
+  await resetHome(page);
+
+  await page.getByRole('link', { name: 'Create a character' }).click();
+  await page.getByRole('button', { name: /^Wizard\b/u }).click();
+  await page.getByLabel('Character name').fill('Visible Choice Wizard');
+  await page.getByRole('button', { name: 'Create character' }).click();
+  await page.getByRole('button', { name: 'Set ability scores' }).click();
+  await page.getByRole('button', { name: 'Choose Elf' }).click();
+
+  await page.getByRole('radio', { name: 'Sage' }).check();
+  await page.getByLabel('Magic Initiate spell list').selectOption('Cleric');
+  await page.getByRole('button', { name: 'Apply background' }).click();
+
+  const skillLabels = page.locator('.guided-skill-choice-label span');
+  await expect(skillLabels).toHaveText([
+    'Elf Keen Senses skill',
+    'Wizard skill 1',
+    'Wizard skill 2',
+  ]);
+  await page
+    .getByLabel('Elf Keen Senses skill')
+    .selectOption({ label: 'Perception' });
+  await page
+    .getByRole('button', { name: 'Choose Elf Keen Senses skill' })
+    .click();
+  await expect(page.getByLabel('Elf Keen Senses skill')).toHaveCount(0);
+  await page
+    .getByLabel('Wizard skill 1')
+    .selectOption({ label: 'Investigation' });
+  await page
+    .getByRole('button', { name: 'Choose Wizard skill 1' })
+    .click();
+  await expect(page.getByLabel('Wizard skill 1')).toHaveCount(0);
+  await page
+    .getByLabel('Wizard skill 2')
+    .selectOption({ label: 'Medicine' });
+  await page
+    .getByRole('button', { name: 'Choose Wizard skill 2' })
+    .click();
+
+  await expect(
+    page.getByRole('heading', { name: 'Choose level 1 spells' }),
+  ).toBeVisible();
+  const pickers = page.getByRole('combobox');
+  await expect(pickers).toHaveCount(16);
+  await expect(page.getByText('Wizard cantrip 2 of 3', { exact: true }))
+    .toBeVisible();
+  await expect(
+    page.getByText('Magic Initiate — Cleric cantrip 1 of 2', { exact: true }),
+  ).toBeVisible();
+  const pickerNames = await pickers.evaluateAll((controls) =>
+    controls.map((control) => control.getAttribute('aria-label')),
+  );
+  expect(pickerNames).not.toContain('wizard-cantrips');
+  expect(pickerNames).not.toContain('wizard-prepared');
+  expect(pickerNames).not.toContain('magic-initiate-cantrips');
+
+  await clearAnnouncements(page);
+  const firstPicker = page.getByRole('combobox', {
+    name: 'Wizard cantrip 1 of 3',
+  });
+  await firstPicker.fill('Mage Hand');
+  await page.getByRole('option', { name: /^Mage Hand\b/u }).click();
+
+  const summary = page.locator('.guided-spell-summary').filter({
+    hasText: 'Mage Hand — Wizard cantrip 1 of 3',
+  });
+  await expect(summary).toBeVisible();
+  await expect(pickers).toHaveCount(15);
+  const change = summary.getByRole('button', { name: 'Change' });
+  await expect(change).toBeFocused();
+  await expect.poll(() => announcedMessages(page)).toContain(
+    'Mage Hand selected for Wizard cantrip 1 of 3.',
+  );
+
+  await clearAnnouncements(page);
+  await change.click();
+  await expect(firstPicker).toBeVisible();
+  await expect(firstPicker).toBeFocused();
+  await expect.poll(() => announcedMessages(page)).toContain(
+    'Choose a replacement for Mage Hand in Wizard cantrip 1 of 3.',
+  );
 });
 
 test('the empty-database front door chooses class first, persists once named, and survives reload without a planner escape', async ({
@@ -482,7 +578,7 @@ test('the empty-database front door chooses class first, persists once named, an
     const picker = pickers.first();
     const label = await picker.getAttribute('aria-label');
     const search =
-      label?.includes('cantrips') === true
+      label?.includes('cantrip') === true
         ? cantrips.shift()
         : levelOne.shift();
     if (search === undefined) {
@@ -510,8 +606,17 @@ test('the empty-database front door chooses class first, persists once named, an
     }
     await page.keyboard.press('Enter');
     await expect(pickers).toHaveCount(count - 1);
-    const nextHeading = count === 1 ? 'Confirm starting equipment' : 'Choose level 1 spells';
-    await expect(page.getByRole('heading', { name: nextHeading })).toBeFocused();
+    if (count === 1) {
+      await expect(
+        page.getByRole('heading', { name: 'Confirm starting equipment' }),
+      ).toBeFocused();
+    } else {
+      await expect(
+        page.locator('.guided-spell-summary')
+          .filter({ hasText: search })
+          .getByRole('button', { name: 'Change' }),
+      ).toBeFocused();
+    }
   }
 
   // E-B: every class ordinal is filled and the REAL equipment step renders —

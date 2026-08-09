@@ -356,9 +356,9 @@ export function createSkillsStep(deps: SkillsStepDeps): SkillsStep {
       element('h3', { text: 'Species skill choice' }),
       element('p', {
         text:
-          'Your species grants a skill choice of its own. It does not hold ' +
-          'this step up — if you skip it, it stays listed as outstanding in ' +
-          'the planner.',
+          'Your species grants an optional skill choice of its own. Decide ' +
+          'whether to make it before the required class choices below. ' +
+          'Skipping it does not hold this step up.',
       }),
       ...deps.state.species_choices.map((grant) =>
         choiceForm({
@@ -407,8 +407,8 @@ export function createSkillsStep(deps: SkillsStepDeps): SkillsStep {
           'recorded against exactly that source.',
       }),
       ...grantedSection(),
-      ...classSection(),
       ...speciesSection(),
+      ...classSection(),
       ...disclosures(),
       errorMount,
       characterListLink(),

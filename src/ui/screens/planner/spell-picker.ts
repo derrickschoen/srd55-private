@@ -17,6 +17,10 @@ export interface SpellPicker {
   destroy(): void;
 }
 
+export function spellPickerControlId(addressKey: string): string {
+  return `spell-search-${addressKey}`;
+}
+
 export function createSpellPicker(options: {
   addressKey: string;
   label: string;
@@ -35,6 +39,7 @@ export function createSpellPicker(options: {
   const input = document.createElement('input');
   input.type = 'text';
   input.className = 'planner-input spell-picker-input';
+  input.id = spellPickerControlId(options.addressKey);
   input.value = options.value ?? '';
   input.placeholder = 'Search eligible spells…';
   input.autocomplete = 'off';
@@ -209,8 +214,8 @@ export function createSpellPicker(options: {
     destroy: () => {
       destroyed = true;
       requestSequence += 1;
-      window.clearTimeout(debounce);
-      window.clearTimeout(blurTimer);
+      globalThis.clearTimeout(debounce);
+      globalThis.clearTimeout(blurTimer);
     },
   };
 }

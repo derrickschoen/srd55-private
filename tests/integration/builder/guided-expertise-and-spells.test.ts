@@ -21,6 +21,7 @@ import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import type { DatabaseContext } from '../../../src/db/database';
 import type { Skill } from '../../../src/domain/enums';
 import { createExpertiseStep } from '../../../src/ui/screens/guided-builder/expertise-step';
+import { createSpellsStep } from '../../../src/ui/screens/guided-builder/spells-step';
 import { rpcRegistry } from '../../../src/worker/registry';
 import {
   elementText,
@@ -263,10 +264,28 @@ describe('GF-2 guided Expertise and spell adoption', () => {
     });
     const owed = guidedSpellsStepState(db, characterId).choices.length;
     expect(owed).toBeGreaterThan(0);
+    expect(guidedSpellsStepState(db, characterId).choices.map((choice) => choice.label))
+      .toEqual([
+        'Wizard cantrip 1 of 3',
+        'Wizard prepared spell 1 of 4',
+        'Wizard cantrip 2 of 3',
+        'Wizard prepared spell 2 of 4',
+        'Wizard cantrip 3 of 3',
+        'Wizard prepared spell 3 of 4',
+        'Wizard prepared spell 4 of 4',
+        'Wizard spellbook spell 1 of 6',
+        'Wizard spellbook spell 2 of 6',
+        'Wizard spellbook spell 3 of 6',
+        'Wizard spellbook spell 4 of 6',
+        'Wizard spellbook spell 5 of 6',
+        'Wizard spellbook spell 6 of 6',
+      ]);
 
     while (true) {
       const state = guidedSpellsStepState(db, characterId);
-      const choice = state.choices[0];
+      const choice = state.choices.find(
+        (candidate) => candidate.selected_spell_name === null,
+      );
       if (choice === undefined) break;
       const eligible = guidedEligibleSpells(db, {
         character_id: characterId,
@@ -286,7 +305,38 @@ describe('GF-2 guided Expertise and spell adoption', () => {
       });
     }
 
-    expect(guidedSpellsStepState(db, characterId).choices).toEqual([]);
+    const filledState = guidedSpellsStepState(db, characterId);
+    expect(filledState.choices).toHaveLength(owed);
+    expect(
+      filledState.choices.every(
+        (choice) =>
+          choice.selected_spell_name !== null &&
+          choice.selected_spell_catalog_layer !== null,
+      ),
+    ).toBe(true);
+    const step = createSpellsStep({
+      characterId,
+      state: filledState,
+      search: () => Promise.resolve([]),
+      assign: () => Promise.reject(new Error('not submitted')),
+      navigate: () => undefined,
+    });
+    const rendered = interactiveElement(step.element);
+    expect(rendered.querySelectorAll('.guided-spell-summary')).toHaveLength(owed);
+    expect(elementText(rendered as unknown as Node)).toContain(
+      `${filledState.choices[0]?.selected_spell_name ?? ''} — Wizard cantrip 1 of 3`,
+    );
+    const firstChange = rendered.querySelector('.guided-spell-change');
+    firstChange?.click();
+    const replacement = rendered.querySelector('.spell-picker-input');
+    expect(replacement?.getAttribute('aria-label')).toBe(
+      'Wizard cantrip 1 of 3',
+    );
+    expect(document.activeElement).toBe(replacement);
+    expect(elementText(rendered as unknown as Node)).toContain(
+      'Choose a replacement for',
+    );
+    step.cleanup();
     const recorded = Number(
       db.scalar(
         `SELECT

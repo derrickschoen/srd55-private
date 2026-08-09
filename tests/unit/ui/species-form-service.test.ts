@@ -520,13 +520,14 @@ describe('HA-7 service-driven refusal and terminal paths', () => {
       button(root, 'Publish species').click();
       await settle();
 
-      expect(elementText(root as unknown as Node)).toContain('Matched existing content');
-      expect(root.querySelector('.species-publish-result')?.getAttribute('role')).toBe('status');
-      const library = root.querySelectorAll('a').find((candidate) =>
-        candidate.textContent === 'View species library');
-      expect(library?.isConnected).toBe(true);
-      library?.click();
-      expect(navigated).toEqual(['/homebrew']);
+      const publishedUrl = new URL(navigated[0] ?? '', 'https://example.test');
+      expect(Object.fromEntries(publishedUrl.searchParams)).toEqual({
+        publishOutcome: 'matched_existing',
+        publishedKey: 'expanded:content.species:matched-existing-species',
+        publishedName: 'Matched Existing Species',
+        publishedLayer: 'external',
+        previousUsageCount: '0',
+      });
       cleanup();
     } finally {
       restoreDocument();

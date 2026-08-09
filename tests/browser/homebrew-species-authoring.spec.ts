@@ -67,7 +67,8 @@ test('authors, previews, publishes, lists, and applies a homebrew species', asyn
   await expect(page.getByLabel('Grant preview')).toContainText('clockwork-lore');
   await page.getByRole('button', { name: 'Publish species' }).click();
   await expect(page.getByRole('heading', { name: 'Species published' })).toBeVisible();
-  await expect(page.getByText('Homebrew', { exact: true })).toBeVisible();
+  const publishedNotice = page.getByRole('region', { name: 'Species published' });
+  await expect(publishedNotice.getByText('Homebrew', { exact: true })).toBeVisible();
 
   await page.getByRole('link', { name: 'View species library' }).click();
   const published = page.locator('.homebrew-card').filter({

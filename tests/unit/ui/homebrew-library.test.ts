@@ -17,6 +17,7 @@ import {
   HOMEBREW_ARCHIVE_ROUTE,
   homebrewDeletePath,
   homebrewDraftPath,
+  homebrewMissingDraftPath,
   homebrewReplacementPath,
   homebrewTabPath,
   renderHomebrewLibrary,
@@ -221,6 +222,9 @@ describe('HA-6 homebrew library routing and tabs', () => {
       '/homebrew/replacements/old%2Fkey/new%20key',
     );
     expect(homebrewDeletePath('old/key')).toBe('/homebrew/delete/old%2Fkey');
+    expect(homebrewMissingDraftPath()).toBe(
+      '/homebrew?tab=drafts&notice=draft-no-longer-exists',
+    );
     expect(homebrewScreen.matches(parseRoute(new URL('https://example.test/homebrew'))))
       .toBe(true);
     expect(homebrewScreen.matches(parseRoute(
@@ -238,6 +242,87 @@ describe('HA-6 homebrew library routing and tabs', () => {
     expect(homebrewScreen.matches(parseRoute(
       new URL('https://example.test/homebrew/replacements/old/new'),
     ))).toBe(true);
+  });
+
+  it('renders a durable publish result in the selected library with its fix action and live message', async () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const navigated: string[] = [];
+      const screenContext = context(
+        'https://example.test/homebrew?publishOutcome=created&publishedKey=expanded%3Acontent.species%3Anew&publishedName=Route+Species&publishedLayer=external&previousUsageCount=2&previousKey=expanded%3Acontent.species%3Aold',
+        navigated,
+      );
+      const cleanup = await renderHomebrewLibrary(screenContext, {
+        client: authoringClient(),
+      });
+      const root = interactiveElement(screenContext.root);
+      expect(root.querySelector('.homebrew-status')?.textContent).toBe(
+        'Species published: Route Species. Homebrew library loaded.',
+      );
+      expect(root.querySelector('.species-publish-result')?.querySelector('h2')?.textContent)
+        .toBe('Species published');
+      expect(elementText(root as unknown as Node)).toContain('Route Species');
+      expect(elementText(root as unknown as Node)).not.toContain('Untitled draft');
+      expect(elementText(root as unknown as Node)).not.toContain('Saved revision 0');
+      const review = root.querySelectorAll('a').find(
+        (link) => link.textContent === 'Review character fixes',
+      );
+      expect(review?.getAttribute('href')).toBe(
+        '/homebrew/replacements/expanded%3Acontent.species%3Aold/expanded%3Acontent.species%3Anew',
+      );
+      expect(root.querySelectorAll('a').find(
+        (link) => link.textContent === 'View species library',
+      )?.getAttribute('href')).toBe('/homebrew');
+      cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('replaces a missing draft URL with the Drafts library and renders its recovery notice', async () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const navigated: string[] = [];
+      const missingContext = context(
+        'https://example.test/homebrew/drafts/deleted-draft',
+        navigated,
+      );
+      const missingCleanup = await renderHomebrewLibrary(missingContext, {
+        client: authoringClient({
+          readDraft: () => Promise.reject(new RpcError(
+            'handler_error',
+            'Draft "deleted-draft" was not found.',
+            { reason: 'draft_not_found' },
+          )),
+        }),
+      });
+      expect(navigated).toEqual([
+        '/homebrew?tab=drafts&notice=draft-no-longer-exists',
+      ]);
+      missingCleanup();
+
+      const noticeContext = context(
+        'https://example.test/homebrew?tab=drafts&notice=draft-no-longer-exists',
+        navigated,
+      );
+      const noticeCleanup = await renderHomebrewLibrary(noticeContext, {
+        client: authoringClient(),
+      });
+      const root = interactiveElement(noticeContext.root);
+      expect(root.querySelector('.homebrew-status')?.textContent).toBe(
+        'Draft no longer exists. Homebrew library loaded.',
+      );
+      expect(root.querySelector('.homebrew-missing-draft-notice')?.querySelector('h2')?.textContent)
+        .toBe('Draft no longer exists');
+      expect(root.querySelector('.homebrew-tab-panel')?.querySelector('h2')?.textContent)
+        .toBe('Drafts');
+      expect(root.querySelectorAll('a').find(
+        (link) => link.textContent === 'View current drafts',
+      )?.getAttribute('href')).toBe('/homebrew?tab=drafts');
+      noticeCleanup();
+    } finally {
+      restoreDocument();
+    }
   });
 
   it('renders labelled keyboard tabs, truthful badges, hostile names as inert text, and new/copy draft navigation', async () => {
