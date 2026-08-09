@@ -750,6 +750,7 @@ export class CharacterCommandExecutor {
       // cannot express that set.
       case 'allocate_abilities':
       case 'update_source_config':
+      case 'choose_species_lineage':
       case 'add_source':
       case 'remove_source':
       case 'update_class':

@@ -13,6 +13,9 @@ import {
 import type { DatabaseContext } from '../db/database';
 import { characterLevel } from '../rules/character-level';
 import {
+  reconcileCharacterLevelDependentSources,
+} from '../grants/character-level-source-reconciliation';
+import {
   clearGeneratedFeatureEffects,
   syncAutomaticClassEffects,
   syncAutomaticSubclassEffects,
@@ -388,6 +391,11 @@ export class UpdateClassCommand {
         // are acquired at the next level after the other-class total.
         otherLevels === null ? 1 : otherLevels + 1,
       );
+      reconcileCharacterLevelDependentSources(
+        this.db,
+        characterId,
+        this.#generator,
+      );
       this.#before = before;
       this.#characterId = characterId;
     });
@@ -435,6 +443,11 @@ export class UpdateClassCommand {
       `DELETE FROM character_class_levels
        WHERE character_id = ? AND class_definition_id = ?`,
       [characterId, classId],
+    );
+    reconcileCharacterLevelDependentSources(
+      this.db,
+      characterId,
+      this.#generator,
     );
   }
 }

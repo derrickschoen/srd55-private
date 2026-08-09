@@ -9,6 +9,7 @@ import { CharacterCommandExecutor } from '../../../src/commands/character-comman
 import type { CharacterArchivedRefusal } from '../../../src/commands/character-command-preflight';
 import { CharacterCommandFactory } from '../../../src/commands/character-command-factory';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
+import { ChooseSpeciesLineageCommand } from '../../../src/commands/choose-species-lineage';
 import { RemoveSourceCommand } from '../../../src/commands/remove-source';
 import { ClearSlotCommand } from '../../../src/commands/set-slot/clear';
 import { KeepOverrideSlotCommand } from '../../../src/commands/set-slot/keep-override';
@@ -122,6 +123,14 @@ describe('character command factory and executor', () => {
       ],
       [
         {
+          type: 'choose_species_lineage',
+          chosen_option: 'High Elf',
+          spellcasting_ability: 'intelligence',
+        },
+        ChooseSpeciesLineageCommand,
+      ],
+      [
+        {
           type: 'add_source',
           source_type: 'feat',
           source_definition_id: 1,
@@ -148,7 +157,7 @@ describe('character command factory and executor', () => {
       ],
     ];
 
-    expect(variants).toHaveLength(13);
+    expect(variants).toHaveLength(14);
     for (const [payload, expected] of variants) {
       expect(await factory.make(characterId, payload)).toBeInstanceOf(expected);
     }

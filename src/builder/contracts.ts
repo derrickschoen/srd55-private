@@ -154,6 +154,109 @@ export interface GuidedOriginOptionsParams {
   readonly kind: OriginKind;
 }
 
+export interface GuidedSpeciesChoiceStateParams {
+  readonly character_id: number;
+}
+
+export interface GuidedConfiguredChoiceGrantDisclosure {
+  readonly rule_key: string;
+  readonly kind: string;
+  readonly active_from_character_level: number | null;
+  readonly spell_version_key: string | null;
+}
+
+export interface GuidedConfiguredChoiceEffectDisclosure {
+  readonly kind: 'speed' | 'damage_resistance';
+  readonly label: string;
+  readonly speed_bonus_feet: number | null;
+  readonly damage_type: string | null;
+}
+
+export interface GuidedReplaceableSpellChoiceState {
+  readonly config_key: string;
+  readonly label: string;
+  readonly spell_list: string;
+  readonly spell_level: 0;
+  readonly initial_spell_version_key: string;
+  readonly selected_spell_version_key: string | null;
+}
+
+export interface GuidedConfiguredChoiceOptionState {
+  readonly value: string;
+  readonly label: string;
+  readonly darkvision_feet: number | null;
+  readonly effects: readonly GuidedConfiguredChoiceEffectDisclosure[];
+  readonly grants: readonly GuidedConfiguredChoiceGrantDisclosure[];
+  readonly replaceable_spell_choice: GuidedReplaceableSpellChoiceState | null;
+}
+
+export interface GuidedConfiguredChoiceState {
+  readonly rule_key: string;
+  readonly label: string;
+  readonly config_key: string;
+  readonly selected_option: string | null;
+  readonly ability_choice: null | {
+    readonly config_key: string;
+    readonly options: readonly Ability[];
+    readonly selected: Ability | null;
+  };
+  readonly unknown_sheet_fields: readonly string[];
+  readonly projected_trait_names: readonly string[];
+  readonly options: readonly GuidedConfiguredChoiceOptionState[];
+}
+
+export type SpeciesChoiceResolution =
+  | { readonly kind: 'no_species' }
+  | {
+      readonly kind: 'complete';
+      readonly source_instance_id: number;
+      readonly source_name: string;
+      readonly source_catalog_layer: CatalogLayerDisclosure;
+      readonly choices: readonly GuidedConfiguredChoiceState[];
+    }
+  | {
+      readonly kind: 'incomplete';
+      readonly source_instance_id: number;
+      readonly source_name: string;
+      readonly source_catalog_layer: CatalogLayerDisclosure;
+      readonly missing: readonly (
+        | 'option'
+        | 'spellcasting_ability'
+        | 'replaceable_spell'
+      )[];
+      readonly choices: readonly GuidedConfiguredChoiceState[];
+    }
+  | {
+      readonly kind: 'unresolvable';
+      readonly source_name: string;
+      readonly source_catalog_layer: CatalogLayerDisclosure;
+      readonly reason: string;
+    };
+
+export type GuidedSpeciesChoiceStateResult =
+  | { readonly kind: 'not_found' }
+  | {
+      readonly kind: 'ready';
+      readonly character_id: number;
+      readonly resolution: SpeciesChoiceResolution;
+    };
+
+export interface GuidedChooseSpeciesLineageParams {
+  readonly character_id: number;
+  readonly chosen_option: string;
+  readonly spellcasting_ability: Ability;
+  readonly replaceable_spell_version_key?: string;
+  readonly operation_uuid: string;
+  readonly expected_revision: number;
+}
+
+export interface GuidedChooseSpeciesLineageResult {
+  readonly character_id: number;
+  readonly current_step: BuildStep;
+  readonly revision: number;
+  readonly resolution: SpeciesChoiceResolution;
+}
+
 /* ---------------------------------------------------------------- results */
 
 /**
@@ -391,6 +494,8 @@ export const GUIDED_RPC = Object.freeze({
   spellsStep: 'queries.characters.spellsStep',
   guidedEligibleSpells: 'queries.characters.guidedEligibleSpells',
   assignSpell: 'queries.characters.assignGuidedSpell',
+  speciesChoiceState: 'queries.characters.speciesChoiceState',
+  chooseSpeciesLineage: 'queries.characters.chooseSpeciesLineage',
 } as const);
 
 /* --------------------------------------------------------------- abilities */

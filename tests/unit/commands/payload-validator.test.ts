@@ -24,7 +24,7 @@ function expectInvalid(payload: unknown, message: string): void {
 }
 
 describe('character command payload validation', () => {
-  it('accepts all nine command variants, every mode, and preserves allowed fields', () => {
+  it('accepts the public command variants, every mode, and preserves allowed fields', () => {
     const commands: Array<Record<string, unknown>> = [
       {
         type: 'update_ability',
@@ -68,6 +68,13 @@ describe('character command payload validation', () => {
         type: 'update_source_config',
         source_instance_id: 3,
         chosen_option: 'Thaumaturge',
+      },
+      {
+        type: 'choose_species_lineage',
+        chosen_option: 'High Elf',
+        spellcasting_ability: 'intelligence',
+        replaceable_spell_version_key: '2024:minor-illusion',
+        reason: 'One atomic lineage choice.',
       },
       {
         type: 'add_source',
@@ -359,6 +366,23 @@ describe('character command payload validation', () => {
       [
         { type: 'update_character_rules', allow_legacy: 0 },
         'allow_legacy must be a boolean.',
+      ],
+      [
+        {
+          type: 'choose_species_lineage',
+          chosen_option: 'High Elf',
+          spellcasting_ability: 'intelligence',
+          extra: true,
+        },
+        'Unknown command field: extra.',
+      ],
+      [
+        {
+          type: 'choose_species_lineage',
+          chosen_option: 'High Elf',
+          spellcasting_ability: 'luck',
+        },
+        'Unknown spellcasting ability.',
       ],
       [
         {

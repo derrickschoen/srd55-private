@@ -1,4 +1,11 @@
 import type { Locator, Page } from '@playwright/test';
+import {
+  GUIDED_RPC,
+  type GuidedChooseSpeciesLineageParams,
+  type GuidedChooseSpeciesLineageResult,
+  type GuidedSpeciesChoiceStateParams,
+  type GuidedSpeciesChoiceStateResult,
+} from '../../src/builder/contracts';
 import { expect, test } from './fixtures/parallel-test';
 import { readGuidedSeam } from './fixtures/guided-seam';
 import {
@@ -147,6 +154,132 @@ test('a phone-width guided journey keeps the first level 1 screens and controls 
     page.getByRole('heading', { name: 'Choose a background' }),
   ).toBeVisible();
   await expectPhoneWidth(page);
+});
+
+test('an unchosen Elf lineage stays non-gating while the sheet changes from UNKNOWN to its chosen High Elf cantrip', async ({
+  page,
+}) => {
+  // Measured alone at 15.8s on Chromium; the required x1.5 reserve is 23.7s,
+  // rounded to 100ms.
+  test.setTimeout(23_700);
+  await resetHome(page);
+
+  await page.getByRole('link', { name: 'Create a character' }).click();
+  await page.getByRole('button', { name: /^Wizard\b/u }).click();
+  await page.getByLabel('Character name').fill('Truthful Lineage Wizard');
+  await page.getByRole('button', { name: 'Create character' }).click();
+  await page.getByRole('button', { name: 'Set ability scores' }).click();
+  await page.getByRole('button', { name: 'Choose Elf' }).click();
+
+  const character = (
+    await page.evaluate(() => window.staticApp.inspectRows('characters'))
+  ).find((row) => row['name'] === 'Truthful Lineage Wizard');
+  const characterId = Number(character?.['id']);
+  const revision = Number(character?.['revision']);
+  expect(Number.isSafeInteger(characterId)).toBe(true);
+  expect(Number.isSafeInteger(revision)).toBe(true);
+  await expect(
+    page.getByRole('heading', { name: 'Choose a background' }),
+  ).toBeVisible();
+
+  const pending = await page.evaluate(
+    ({ method, params }) =>
+      window.appRpc.call<
+        GuidedSpeciesChoiceStateParams,
+        GuidedSpeciesChoiceStateResult
+      >(method, params),
+    {
+      method: GUIDED_RPC.speciesChoiceState,
+      params: { character_id: characterId },
+    },
+  );
+  expect(pending).toMatchObject({
+    kind: 'ready',
+    resolution: {
+      kind: 'incomplete',
+      source_name: 'Elf',
+      missing: ['option', 'spellcasting_ability'],
+      choices: [{
+        label: 'Elven Lineage',
+        ability_choice: {
+          options: ['intelligence', 'wisdom', 'charisma'],
+          selected: null,
+        },
+        options: [
+          { label: 'Drow', darkvision_feet: 120 },
+          {
+            label: 'High Elf',
+            darkvision_feet: 60,
+            replaceable_spell_choice: {
+              initial_spell_version_key: '2024:prestidigitation',
+            },
+          },
+          { label: 'Wood Elf', darkvision_feet: 60 },
+        ],
+      }],
+    },
+  });
+
+  await page.goto(`/characters/${String(characterId)}/sheet`);
+  await expect(page.locator('[data-screen="character-sheet"]')).toBeVisible();
+  await expect(page.getByText('Walking speed', { exact: true })).toHaveCount(1);
+  await expect(page.getByText('Darkvision', { exact: true })).toHaveCount(1);
+  await expect(page.locator('[data-sheet-value="walking_speed_feet"]'))
+    .toHaveText('UNKNOWN');
+  await expect(page.locator('[data-sheet-value="lineage_darkvision"]'))
+    .toHaveText('UNKNOWN');
+  await expect(
+    page.getByText('Elf — Elven Lineage not chosen', { exact: true }),
+  ).toHaveCount(1);
+  const displayedCantrip = page
+    .locator('.sheet-spells dt')
+    .filter({ hasText: /^Prestidigitation$/u });
+  await expect(displayedCantrip).toHaveCount(0);
+
+  const chosen = await page.evaluate(
+    ({ method, params }) =>
+      window.appRpc.call<
+        GuidedChooseSpeciesLineageParams,
+        GuidedChooseSpeciesLineageResult
+      >(method, params),
+    {
+      method: GUIDED_RPC.chooseSpeciesLineage,
+      params: {
+        character_id: characterId,
+        chosen_option: 'High Elf',
+        spellcasting_ability: 'intelligence',
+        operation_uuid: '6b617bd0-9773-4baf-b5c3-032e79cd4141',
+        expected_revision: revision,
+      } satisfies GuidedChooseSpeciesLineageParams,
+    },
+  );
+  expect(chosen).toMatchObject({
+    character_id: characterId,
+    current_step: 'background',
+    revision: revision + 1,
+    resolution: { kind: 'complete' },
+  });
+
+  await page.reload();
+  await expect(page.locator('[data-screen="character-sheet"]')).toBeVisible();
+  await expect(page.getByText('Walking speed', { exact: true })).toHaveCount(1);
+  await expect(page.getByText('Darkvision', { exact: true })).toHaveCount(1);
+  await expect(page.locator('[data-sheet-value="walking_speed_feet"]'))
+    .toHaveText('30 feet');
+  await expect(page.locator('[data-sheet-value="lineage_darkvision"]'))
+    .toHaveText('60 feet');
+  await expect(displayedCantrip).toHaveCount(1);
+  await expect(
+    page.getByText('Elf — Elven Lineage not chosen', { exact: true }),
+  ).toHaveCount(0);
+
+  const facts = JSON.parse(
+    (await page.locator('#character-sheet-facts').textContent()) ?? '{}',
+  ) as Record<string, unknown>;
+  expect(facts).toMatchObject({
+    walking_speed_feet: 30,
+    lineage_darkvision_feet: 60,
+  });
 });
 
 test('Elf Wizard skills finish top to bottom and spell choices stay labelled and visible', async ({

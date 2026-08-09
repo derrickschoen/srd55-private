@@ -9,28 +9,10 @@ import {
   catalogLayerDisclosure,
   type CharacterCatalogDisclosure,
 } from '../catalog/catalog-disclosure';
+import { recordedSourceContentKey } from '../catalog/recorded-source-provenance';
 import { sqlInteger, sqlNullableString, sqlString } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import { GUIDED_SPECIES_SOURCE_MARKER } from '../domain/source-markers';
-
-function recordedSourceContentKey(config: string | null): string | null {
-  if (config === null || config === '') return null;
-  try {
-    const decoded: unknown = JSON.parse(config);
-    if (
-      decoded === null ||
-      typeof decoded !== 'object' ||
-      Array.isArray(decoded) ||
-      !Object.hasOwn(decoded, 'source_content_key')
-    ) {
-      return null;
-    }
-    const value = Reflect.get(decoded, 'source_content_key');
-    return typeof value === 'string' && value !== '' ? value : null;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Catalog provenance for content actually applied to one character.

@@ -8,6 +8,8 @@ import {
   type GuidedApplyEquipmentParams,
   type GuidedBuildStateParams,
   type GuidedBuildStateResult,
+  type GuidedChooseSpeciesLineageParams,
+  type GuidedChooseSpeciesLineageResult,
   type GuidedClassOption,
   type GuidedCreateParams,
   type GuidedEquipmentStepState,
@@ -24,6 +26,7 @@ import {
   type GuidedOriginParams,
   type GuidedSaveAbilityDraftParams,
   type GuidedSkillsStepState,
+  type GuidedSpeciesChoiceStateResult,
   type OriginKind,
 } from '../builder/contracts';
 import {
@@ -102,6 +105,12 @@ export interface QueriesClient extends CatalogClient {
   ): Promise<PrintAppendixPreferences>;
   operationHistory(characterId: number): Promise<OperationHistory>;
   buildState(characterId: number): Promise<GuidedBuildStateResult>;
+  speciesChoiceState(
+    characterId: number,
+  ): Promise<GuidedSpeciesChoiceStateResult>;
+  chooseSpeciesLineage(
+    params: GuidedChooseSpeciesLineageParams,
+  ): Promise<GuidedChooseSpeciesLineageResult>;
   abilityDraft(characterId: number): Promise<GuidedAbilityDraft | null>;
   saveAbilityDraft(
     params: GuidedSaveAbilityDraftParams,
@@ -267,6 +276,16 @@ export function createQueriesClient(rpc: RpcClient): QueriesClient {
         GUIDED_RPC.buildState,
         characterParams(characterId),
       ),
+    speciesChoiceState: (characterId: number) =>
+      rpc.call<GuidedBuildStateParams, GuidedSpeciesChoiceStateResult>(
+        GUIDED_RPC.speciesChoiceState,
+        characterParams(characterId),
+      ),
+    chooseSpeciesLineage: (params: GuidedChooseSpeciesLineageParams) =>
+      rpc.call<
+        GuidedChooseSpeciesLineageParams,
+        GuidedChooseSpeciesLineageResult
+      >(GUIDED_RPC.chooseSpeciesLineage, params),
     abilityDraft: (characterId: number) =>
       rpc.call<GuidedBuildStateParams, GuidedAbilityDraft | null>(
         GUIDED_RPC.abilityDraft,

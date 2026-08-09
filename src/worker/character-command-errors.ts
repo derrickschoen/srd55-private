@@ -5,6 +5,7 @@ import {
 } from '../commands/payload-validator';
 import { RevisionConflict } from '../commands/revision-conflict';
 import { CharacterArchivedRefusal } from '../commands/character-command-preflight';
+import { SpeciesLineageRefusal } from '../commands/choose-species-lineage';
 import { RpcError } from '../rpc/protocol';
 
 /** One structured transport mapping shared by Confirm and rollback Preview. */
@@ -53,6 +54,11 @@ export function characterCommandRpcError(error: unknown): RpcError | null {
         rule_key: data.locator.rule_key,
         ordinal: data.locator.ordinal,
       },
+    });
+  }
+  if (error instanceof SpeciesLineageRefusal) {
+    return new RpcError('handler_error', error.message, {
+      reason: error.reason,
     });
   }
   if (

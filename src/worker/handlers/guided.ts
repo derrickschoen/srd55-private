@@ -29,6 +29,7 @@ import {
   type GuidedAssignSpellParams,
   type GuidedEligibleSpellsParams,
   type GuidedOriginOptionsParams,
+  type GuidedChooseSpeciesLineageParams,
 } from '../../builder/contracts';
 import {
   BACKGROUND_RPC,
@@ -63,6 +64,7 @@ import {
 import { SkillGrantRefusal } from '../../grants/skill-grants';
 import { SkillExpertiseGrantRefusal } from '../../grants/skill-expertise-grants';
 import { CharacterCommandIntegrity } from '../../commands/integrity';
+import { CharacterCommandExecutor } from '../../commands/character-command-executor';
 import { RevisionConflict } from '../../commands/revision-conflict';
 import { abilities, skills } from '../../domain/enums';
 import { RpcError } from '../../rpc/protocol';
@@ -72,6 +74,11 @@ import {
   type RpcHandler,
 } from '../handler';
 import { COMMAND_INTEGRITY_KEY } from './commands';
+import {
+  guidedSpeciesChoiceState,
+  resolveSpeciesChoice,
+} from '../../builder/species-choice';
+import { characterCommandRpcError } from '../character-command-errors';
 
 /**
  * Not in the seam because the seam pins only what BOTH agents must agree on;
@@ -98,6 +105,45 @@ function isGuidedOriginOptionsParams(
   value: unknown,
 ): value is GuidedOriginOptionsParams {
   return hasExactKeys(value, ['kind']) && isOriginKind(value['kind']);
+}
+
+function isGuidedChooseSpeciesLineageParams(
+  value: unknown,
+): value is GuidedChooseSpeciesLineageParams {
+  const required = [
+    'character_id',
+    'chosen_option',
+    'spellcasting_ability',
+    'operation_uuid',
+    'expected_revision',
+  ] as const;
+  const keys = value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? Object.keys(value)
+    : [];
+  const allowed = new Set([...required, 'replaceable_spell_version_key']);
+  if (
+    keys.some((key) => !allowed.has(key as (typeof required)[number])) ||
+    required.some((key) => !keys.includes(key))
+  ) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  return (
+    isPositiveInteger(candidate['character_id']) &&
+    typeof candidate['chosen_option'] === 'string' &&
+    candidate['chosen_option'].trim() !== '' &&
+    abilities.includes(candidate['spellcasting_ability'] as never) &&
+    (candidate['replaceable_spell_version_key'] === undefined ||
+      (typeof candidate['replaceable_spell_version_key'] === 'string' &&
+        candidate['replaceable_spell_version_key'].trim() !== '')) &&
+    typeof candidate['operation_uuid'] === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      candidate['operation_uuid'],
+    ) &&
+    typeof candidate['expected_revision'] === 'number' &&
+    Number.isSafeInteger(candidate['expected_revision']) &&
+    candidate['expected_revision'] >= 0
+  );
 }
 
 function isPositiveInteger(value: unknown): boolean {
@@ -299,6 +345,53 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
     GUIDED_RPC.buildState,
     isGuidedBuildStateParams,
     (context, params) => guidedBuildState(context.db, params.character_id),
+  ),
+  defineRpcHandler(
+    GUIDED_RPC.speciesChoiceState,
+    isGuidedBuildStateParams,
+    (context, params) =>
+      guidedSpeciesChoiceState(context.db, params.character_id),
+  ),
+  defineRpcHandler(
+    GUIDED_RPC.chooseSpeciesLineage,
+    isGuidedChooseSpeciesLineageParams,
+    async (context, params) => {
+      try {
+        const result = await new CharacterCommandExecutor(
+          context.db,
+          new CharacterCommandIntegrity(COMMAND_INTEGRITY_KEY),
+        ).execute({
+          character_id: params.character_id,
+          operation_uuid: params.operation_uuid,
+          expected_revision: params.expected_revision,
+          command: {
+            type: 'choose_species_lineage',
+            chosen_option: params.chosen_option,
+            spellcasting_ability: params.spellcasting_ability,
+            ...(params.replaceable_spell_version_key === undefined
+              ? {}
+              : {
+                  replaceable_spell_version_key:
+                    params.replaceable_spell_version_key,
+                }),
+          },
+        });
+        const state = guidedBuildState(context.db, params.character_id);
+        if (state.kind !== 'ready') {
+          throw new Error('The character disappeared after choosing a lineage.');
+        }
+        return {
+          character_id: params.character_id,
+          current_step: state.current_step,
+          revision: result.revision,
+          resolution: resolveSpeciesChoice(context.db, params.character_id),
+        };
+      } catch (error) {
+        const translated = characterCommandRpcError(error);
+        if (translated !== null) throw translated;
+        throw error;
+      }
+    },
   ),
   defineRpcHandler(
     GUIDED_RPC.abilityDraft,

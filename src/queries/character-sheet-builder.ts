@@ -70,6 +70,8 @@ import {
   type EligibleCharacterEffect,
 } from '../rules/eligible-character-effects';
 import { characterLevel } from '../rules/character-level';
+import { resolveSpeciesChoice } from '../builder/species-choice';
+import { requiredSourceChoiceItems } from './character-completeness';
 import {
   characterProficiencies,
   type ProficiencyWeapon,
@@ -317,10 +319,20 @@ export interface SheetGap {
     | 'expertise_proficiency_removed'
     | 'languages_and_tools_not_modelled'
     | 'weapon_reach_not_recorded'
-    | 'gear_not_itemised';
+    | 'gear_not_itemised'
+    | 'required_source_choice';
   readonly title: string;
   readonly detail: string;
 }
+
+export type SheetKnownOrUnknownNumber =
+  | { readonly kind: 'known'; readonly value: number; readonly detail: string }
+  | { readonly kind: 'unknown'; readonly detail: string };
+
+export type SheetLineageDamageResistance =
+  | null
+  | { readonly kind: 'unknown'; readonly detail: string }
+  | { readonly kind: 'known'; readonly values: readonly string[] };
 
 /**
  * One recorded starting-equipment package, for the D33/D65 line: the sheet
@@ -373,7 +385,9 @@ export interface CharacterSheet {
     readonly class_level: number;
     readonly die: number;
   }[];
-  readonly walking_speed_feet: number | null;
+  readonly walking_speed: SheetKnownOrUnknownNumber;
+  readonly lineage_darkvision: SheetKnownOrUnknownNumber | null;
+  readonly lineage_damage_resistance: SheetLineageDamageResistance;
   readonly damage_resistances: readonly string[];
   /**
    * The LABELS of resistances whose TYPE the character has yet to choose.
@@ -713,7 +727,18 @@ export class CharacterSheetBuilder {
     const content = this.#content.forCharacter(characterId);
     const classes = this.#classes(characterId, content);
     const rolls = this.#rolls(characterId);
-    const printedFeatures = this.#printedFeatures(characterId);
+    const speciesChoice = resolveSpeciesChoice(this.db, characterId);
+    const choiceStates =
+      speciesChoice.kind === 'complete' || speciesChoice.kind === 'incomplete'
+        ? speciesChoice.choices
+        : [];
+    const projectedTraitNames = new Set(
+      choiceStates.flatMap((choice) => choice.projected_trait_names),
+    );
+    const printedFeatures = this.#printedFeatures(
+      characterId,
+      projectedTraitNames,
+    );
     const proficientSkills = this.#skillProficiencies(characterId);
     const expertiseSkills = new Set(
       activeExpertiseSkills(this.db, characterId),
@@ -808,6 +833,81 @@ export class CharacterSheetBuilder {
       // species records no speed", and only the first should read as absent.
       (row) => ({ feet: sqlNullableInteger(row, 'base_speed_feet') }),
     );
+    const choiceForField = (field: string) =>
+      choiceStates.find((choice) => choice.unknown_sheet_fields.includes(field));
+    const selectedOptionFor = (field: string) => {
+      const choice = choiceForField(field);
+      if (choice === undefined) return null;
+      return choice.options.find(
+        (option) => option.value === choice.selected_option,
+      ) ?? null;
+    };
+    const walkingChoice = choiceForField('walking_speed_feet');
+    const walkingOption = selectedOptionFor('walking_speed_feet');
+    const walkingSpeed: SheetKnownOrUnknownNumber =
+      walkingChoice !== undefined && walkingOption === null
+        ? {
+            kind: 'unknown',
+            detail: `UNKNOWN until ${walkingChoice.label} is chosen`,
+          }
+        : baseSpeed === null || baseSpeed.feet === null
+          ? {
+              kind: 'unknown',
+              detail: 'UNKNOWN because this character has no species speed entered',
+            }
+          : {
+              kind: 'known',
+              value: walkingSpeedFeet(
+                baseSpeed.feet,
+                effectRows,
+                ac.speed_penalty_feet,
+              ),
+              detail: 'The species base speed plus every standing bonus.',
+            };
+    const darkvisionChoice = choiceForField('darkvision_feet');
+    const darkvisionOption = selectedOptionFor('darkvision_feet');
+    const lineageDarkvision: SheetKnownOrUnknownNumber | null =
+      darkvisionChoice === undefined
+        ? null
+        : darkvisionOption === null
+          ? {
+              kind: 'unknown',
+              detail: `UNKNOWN until ${darkvisionChoice.label} is chosen`,
+            }
+          : darkvisionOption.darkvision_feet === null
+            ? {
+                kind: 'unknown',
+                detail: `UNKNOWN because ${darkvisionOption.label} has no recorded Darkvision range`,
+              }
+            : {
+                kind: 'known',
+                value: darkvisionOption.darkvision_feet,
+                detail: `From the chosen ${darkvisionOption.label} option.`,
+              };
+    const resistanceChoice = choiceForField('damage_resistances');
+    const resistanceOption = selectedOptionFor('damage_resistances');
+    const choiceSourceId =
+      speciesChoice.kind === 'complete' || speciesChoice.kind === 'incomplete'
+        ? speciesChoice.source_instance_id
+        : null;
+    const lineageDamageResistance: SheetLineageDamageResistance =
+      resistanceChoice === undefined
+        ? null
+        : resistanceOption === null
+          ? {
+              kind: 'unknown',
+              detail: `UNKNOWN until ${resistanceChoice.label} is chosen`,
+            }
+          : {
+              kind: 'known',
+              values: eligibleEffectRows.flatMap((effect) =>
+                effect.source_instance_id === choiceSourceId &&
+                effect.template_ref?.startsWith('configured_choice:') === true &&
+                effect.effect_kind === 'damage_resistance' &&
+                effect.damage_type !== null
+                  ? [effect.damage_type]
+                  : []),
+            };
 
     return {
       character_id: characterId,
@@ -963,14 +1063,9 @@ export class CharacterSheetBuilder {
       resources,
       spells,
       martial_arts: martialArtsDice(content).map((die) => ({ ...die })),
-      walking_speed_feet:
-        baseSpeed === null
-          ? null
-          : walkingSpeedFeet(
-              baseSpeed.feet,
-              effectRows,
-              ac.speed_penalty_feet,
-            ),
+      walking_speed: walkingSpeed,
+      lineage_darkvision: lineageDarkvision,
+      lineage_damage_resistance: lineageDamageResistance,
       damage_resistances: effects.damageResistances,
       unchosen_damage_resistances: effects.unchosenDamageResistances,
       proficiencies: {
@@ -1043,6 +1138,11 @@ export class CharacterSheetBuilder {
       gaps: [
         ...sheetGaps(printedFeatures.has_language_or_tool_grant_text),
         ...expertiseGaps(this.db, characterId),
+        ...requiredSourceChoiceItems(this.db, characterId).map((item) => ({
+          kind: item.kind,
+          title: item.title,
+          detail: item.detail,
+        })),
       ],
     };
   }
@@ -1324,7 +1424,10 @@ export class CharacterSheetBuilder {
     );
   }
 
-  #printedFeatures(characterId: number): {
+  #printedFeatures(
+    characterId: number,
+    projectedTraitNames: ReadonlySet<string>,
+  ): {
     readonly features: readonly SheetPrintedFeature[];
     readonly has_language_or_tool_grant_text: boolean;
   } {
@@ -1384,6 +1487,7 @@ export class CharacterSheetBuilder {
       }),
     );
     for (const trait of speciesTraits) {
+      if (projectedTraitNames.has(trait.trait_name)) continue;
       features.push({
         source: 'species_trait',
         source_name: trait.species_name,

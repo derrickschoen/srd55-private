@@ -1187,15 +1187,22 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
     id: 'walking_speed_feet',
     label: plain('Walking speed'),
     value:
-      sheet.walking_speed_feet === null
-        ? null
-        : `${String(sheet.walking_speed_feet)} feet`,
-    detail: plain(
-      sheet.walking_speed_feet === null
-        ? 'Not recorded: this character has no species speed entered.'
-        : 'The species base speed plus every standing bonus.',
-    ),
+      sheet.walking_speed.kind === 'unknown'
+        ? 'UNKNOWN'
+        : `${String(sheet.walking_speed.value)} feet`,
+    detail: plain(sheet.walking_speed.detail),
   });
+  if (sheet.lineage_darkvision !== null) {
+    combat.push({
+      id: 'lineage_darkvision',
+      label: plain('Darkvision'),
+      value:
+        sheet.lineage_darkvision.kind === 'unknown'
+          ? 'UNKNOWN'
+          : `${String(sheet.lineage_darkvision.value)} feet`,
+      detail: plain(sheet.lineage_darkvision.detail),
+    });
+  }
   // THE UNCHOSEN HALF NAMES ITSELF NOW. It used to read "plus 2 whose type this
   // application does not record" — a count, because an effect lived on a trait
   // row and two anonymous resistances were indistinguishable. Each is a row
@@ -1208,9 +1215,14 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
     value: null,
     detail: plain(
       `${
-        sheet.damage_resistances.length === 0
+        sheet.damage_resistances.length === 0 &&
+        sheet.lineage_damage_resistance?.kind !== 'unknown'
           ? 'None chosen'
           : sheet.damage_resistances.join(', ')
+      }${
+        sheet.lineage_damage_resistance?.kind === 'unknown'
+          ? `${sheet.damage_resistances.length === 0 ? '' : ', '}UNKNOWN (${sheet.lineage_damage_resistance.detail})`
+          : ''
       }${
         sheet.unchosen_damage_resistances.length === 0
           ? '.'
@@ -1519,7 +1531,20 @@ export function sheetFacts(sheet: CharacterSheet): Record<string, unknown> {
       class_level: die.class_level,
       die: die.die,
     })),
-    walking_speed_feet: sheet.walking_speed_feet,
+    walking_speed_feet:
+      sheet.walking_speed.kind === 'known'
+        ? sheet.walking_speed.value
+        : null,
+    lineage_darkvision_feet:
+      sheet.lineage_darkvision?.kind === 'known'
+        ? sheet.lineage_darkvision.value
+        : null,
+    lineage_damage_resistance:
+      sheet.lineage_damage_resistance === null
+        ? null
+        : sheet.lineage_damage_resistance.kind === 'unknown'
+          ? 'unknown'
+          : [...sheet.lineage_damage_resistance.values],
     damage_resistances: [...sheet.damage_resistances],
     unchosen_damage_resistances: [...sheet.unchosen_damage_resistances],
     classes: sheet.classes.map((entry) => ({

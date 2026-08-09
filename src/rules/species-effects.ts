@@ -224,6 +224,16 @@ export function effectHitPoints(
  * Speed is not a slower character; it is a number no sheet can print.
  */
 export function walkingSpeedFeet(
+  baseSpeedFeet: number,
+  effects: readonly EffectRow[],
+  armorStrengthPenaltyFeet?: 0 | 10,
+): number;
+export function walkingSpeedFeet(
+  baseSpeedFeet: number | null,
+  effects: readonly EffectRow[],
+  armorStrengthPenaltyFeet?: 0 | 10,
+): number | null;
+export function walkingSpeedFeet(
   baseSpeedFeet: number | null,
   effects: readonly EffectRow[],
   armorStrengthPenaltyFeet: 0 | 10 = 0,
