@@ -5,6 +5,44 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-09 — Barbed Court: Court Forms mastery set is Slow/Topple/Push/Sap/Graze — Nick out (the slap already IS the Nick mechanic); queue item 7 CLOSED
+
+Owner's ruling, verbatim:
+
+> Did we add a nick like mechanic for the level 6 slap?
+>
+> I like slow and topple and push and sap and graze
+
+Answer given: the Courtier's Slap (level 3) is the Nick-like mechanic by the
+owner's own pinned intent — once per turn, part of the Attack action, Bonus
+Action free. Consequence adopted with the ruling: **Nick leaves the mastery
+set**, ending the double-dip of two free-extra-attack mechanics; the attack
+loop is honestly 5 (2 Attack + slap + 2 Flurry).
+
+Court Forms, final: Unarmed Strikes have Light and Finesse and ONE of
+**Slow, Topple, Push, Sap, Graze**, chosen at the end of a Short or Long
+Rest. All five are passive on-hit riders — zero per-turn tracking, matching
+the two-tracker budget.
+
+Measurements and notes recorded, not corrected:
+
+- **Graze on unarmed is the biggest deviation** — SRD Graze lives on Heavy
+  weapons only; here it grants Wis-mod damage on a *miss* (~+7 DPR at five
+  attacks), the smoothing pick and the Veteran's Sure Strike in miniature.
+- **Slow keeps its two flags**: outclassed next to Topple for the party and
+  name-colliding with the granted *Slow* spell at 11 ("I hit him with Slow"
+  is ambiguous at the table). Owner keeps it with eyes open; the rewrite
+  will phrase around the collision (e.g. "the Slow mastery property").
+- **Topple remains partly redundant** while the hands' bundled Advantage
+  runs; it is the multi-ally pick (prone feeds the party's melee), not the
+  monk's own.
+- **Push on a taunt-tank** is geometry, not damage — the 15-foot emanation
+  mostly retains pushed targets; the fun is ledges and ally-threat lines.
+- Losing Nick trims roughly −11 DPR from the flat-Wis-rider loop (≈60 at
+  11, ≈77 at 17 before mastery effects; Graze buys back ~+7). The kit sits
+  ~1.1–1.25× the optimized Vengeance Paladin — the leanest it has measured,
+  at the floor of the owner's band; flagged for a re-sim after the rewrite.
+
 ## 2026-08-09 — Barbed Court: level 17 is COMPLETE — no named capstone; original queue item 5 CLOSED
 
 Owner's ruling, verbatim:
