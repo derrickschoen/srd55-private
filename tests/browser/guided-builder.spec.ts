@@ -201,13 +201,19 @@ test('an unchosen Elf lineage stays non-gating while the sheet changes from UNKN
   await expect(page.getByText('Darkvision: 120 feet.', { exact: true }))
     .toBeVisible();
   await expect(
-    page.getByText('Dancing Lights at character level 1.', { exact: true }),
+    page.getByText(
+      'Dancing Lights · SRD · bundled layer at character level 1.',
+      { exact: true },
+    ),
   ).toBeVisible();
   await expect(
     page.getByText('Speed: +5 feet — Wood Elf Speed.', { exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByText('Pass without Trace at character level 5.', { exact: true }),
+    page.getByText(
+      'Pass without Trace · SRD · bundled layer at character level 5.',
+      { exact: true },
+    ),
   ).toBeVisible();
 
   await page.getByRole('link', { name: 'Continue guided build' }).click();
