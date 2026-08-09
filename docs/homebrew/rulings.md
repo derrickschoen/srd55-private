@@ -5,6 +5,45 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-08 — Barbed Court: +2 Wisdom REMOVED; Innate Sorcery granted instead — no action, Focus-costed
+
+Owner's ruling, verbatim:
+
+> Remover the +2 Wis
+>
+> Give innate sorcery , no ba, cost focus
+
+Effects:
+
+1. **The Monk-11 +2 Wisdom grant (ruled earlier today) is removed.** Its
+   entry below stands as history; this supersedes it. The freed-ASI and
+   single-ability measurements tied to it are void — Wisdom now advances
+   only by normal ASIs, though all-strikes-Wisdom still makes it the one
+   stat that matters.
+2. **Innate Sorcery, adapted** — SRD 5.2.1 Sorcerer level-1 feature
+   (licensed, citable): 1 minute of +1 spell save DC and Advantage on the
+   attack rolls of your spells. Our changes, per the ruling: **no action to
+   activate** (the SRD's Bonus Action is waived — the monk's Bonus Action is
+   busy, same rationale as the free slot refresh) and **it costs Focus
+   Points instead of twice per Long Rest**.
+
+Assumptions stated, flagged for one-word override:
+
+- **Level: Monk 11**, reading the two lines as a swap in the same slot the
+  +2 Wisdom vacated.
+- **Cost: 2 Focus Points** per activation. At pool 11 that is ~5 activations
+  per short-rest window — every fight covered for one Flurry's opportunity
+  cost. At 1 Focus it would be effectively always-on (Patient Defense
+  pricing); the Sorcerer's own budget is 2 free uses per Long Rest.
+- **Scope: "your Monk spells"** replaces "Sorcerer spells". RAW this covers
+  Shocking Grasp and Chill Touch attack rolls and every Court save DC — but
+  **not the Courtier's Slap**, which is a feature's melee spell attack, not
+  a spell. Whether the slap rides the Advantage needs an owner word; the
+  fiction argues yes, the wording as adapted says no.
+
+Level-11 package after this ruling: +2 Unarmed item-ladder bonus, the
+Slow/Fear/CME row, CME Focus-cast at 4, and Focus-costed Innate Sorcery.
+
 ## 2026-08-08 — Barbed Court: Unarmed Strikes can be delivered through a standing Mage Hand at its range, Extra Attack included
 
 Owner's ruling, verbatim:
