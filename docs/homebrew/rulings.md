@@ -5,6 +5,49 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-08 — Barbed Court: Unarmed Strikes can be delivered through a standing Mage Hand at its range, Extra Attack included
+
+Owner's ruling, verbatim:
+
+> Also, can take the action to unarmed strike with an existing mage hand up
+> to its range. Works with extra attack
+
+Effect: while the monk's *Mage Hand* is present, the Attack action's Unarmed
+Strikes — both of them once Extra Attack arrives at 5 — can originate from
+the hand's space, targeting creatures within 5 feet of it, with the hand up
+to its normal 30 feet away. This is the 8-hour hand's combat payoff: the slap
+no longer needs it, but remote striking does.
+
+Assumptions stated, flagged for override:
+
+1. **These are true Unarmed Strikes** — Dexterity to hit, Martial Arts die +
+   Dex, Bludgeoning — merely delivered from the hand's space. Everything that
+   rides an Unarmed Strike travels with them: **Stunning Strike, the
+   +1/+2/+3 bonus, Court Forms masteries (Topple/Nick), and the goad's
+   melee-hit trigger all now work at 30 feet.**
+2. **Attack action only**, per the owner's words — Bonus Action strikes and
+   Flurry of Blows still originate from the monk's own body unless ruled
+   otherwise.
+
+Measurements recorded, not corrected:
+
+- The nearest official shape (distance marker only) reaches 10 feet and
+  costs its subclass a Bonus Action set-up; this reaches 30 with none. A
+  melee kit that punches from total safety — no opportunity attacks reach a
+  hand, and the close-combat ranged-Disadvantage rule is irrelevant to melee
+  attacks — is a genuinely new posture for the taunt-tank: it can goad and
+  Stun from outside every enemy's reach while its body holds the front line
+  somewhere else.
+- Action-economy note: the hand must pre-exist (the cantrip's Action cast,
+  8-hour duration makes that once a day) and repositioning it beyond the
+  slap remains a Magic action.
+
+Working wording:
+
+> While your Mage Hand is present, when you take the Attack action, any of
+> your Unarmed Strikes can be delivered by the hand, targeting creatures
+> within 5 feet of it.
+
 ## 2026-08-08 — Barbed Court: the slap conjures its own hand — no Mage Hand precondition; intent pinned to TWF style + Nick
 
 Owner's ruling, verbatim:
