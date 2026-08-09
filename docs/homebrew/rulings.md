@@ -5,6 +5,43 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-08 — Barbed Court: the slap conjures its own hand — no Mage Hand precondition; intent pinned to TWF style + Nick
+
+Owner's ruling, verbatim:
+
+> Maybe just generate a mage hand independently of if one is out or not.
+>
+> The intent is to copy the mechanics of the 2 weapon fighting style and the
+> nick mastery
+
+Effect: the slap no longer requires the *Mage Hand* cantrip to be active —
+a momentary spectral hand appears as part of the attack and vanishes after.
+The manifested-precondition and the teleport clause are superseded (the
+teleport survives conceptually as "the hand appears at the target"). The
+8-hour *Mage Hand* duration ruling stands separately as cantrip utility.
+
+**Design intent pinned for reviewers, in the owner's terms:** the slap is the
+Two-Weapon Fighting *style* plus the Nick mastery, translated — an off-hand
+attack (the spectral hand), made as part of the Attack action once per turn
+(Nick), adding the ability modifier to its damage (the TWF Fighting Style's
+upgrade over base TWF). Wisdom in the modifier seat and the Martial Arts die
+in the damage seat are the subclass's substitutions.
+
+Wording care kept from the drafting: the slap is not *casting* Mage Hand, so
+it never dismisses a standing Mage Hand (recasting the spell is what does
+that under SRD rules).
+
+Working wording, final shape:
+
+> **Courtier's Slap.** Once on each of your turns when you take the Attack
+> action and make an Unarmed Strike, you can also have a spectral hand appear
+> and slap one creature within 10 feet of you as part of that action. Make a
+> melee spell attack against the target; on a hit, it takes Psychic damage
+> equal to one roll of your Martial Arts die + your Wisdom modifier. The hand
+> then vanishes. This attack works whether or not your Mage Hand is present,
+> doesn't require your Bonus Action, and doesn't count as the extra attack of
+> a weapon's Light property.
+
 ## 2026-08-08 — Barbed Court: the slap teleports the hand, deals Psychic, reaches 10 feet — Courtier's Slap wording settles
 
 Owner's rulings, verbatim:
