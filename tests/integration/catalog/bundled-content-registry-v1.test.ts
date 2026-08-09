@@ -199,7 +199,7 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
 
   afterEach(() => lifecycle.close());
 
-  it('registers every real-boot bundled aggregate under its stable key with one current v1 fingerprint', () => {
+  it('registers every real-boot bundled aggregate under its stable key with one current fingerprint', () => {
     const expectedEnumeration = bundledContentManifestV1().map((entry) => ({
       content_kind: entry.kind,
       content_key: entry.contentKey,
@@ -221,8 +221,7 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
        INNER JOIN catalog_content_identities AS identity
          ON identity.content_kind = fingerprint.content_kind
         AND identity.content_key = fingerprint.content_key
-       WHERE fingerprint.fingerprint_scheme = 'content-v1'
-         AND fingerprint.fingerprint_role = 'current'
+       WHERE fingerprint.fingerprint_role = 'current'
          AND identity.key_kind = 'bundled-stable'
          AND identity.catalog_layer = 'bundled'
        ORDER BY CASE fingerprint.content_kind
@@ -235,6 +234,19 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
 
     expect(registryEnumeration).toEqual(expectedEnumeration);
     expect(currentEnumeration).toEqual(expectedEnumeration);
+    expect(db.allRaw(
+      `SELECT content_key, fingerprint_scheme
+       FROM catalog_content_fingerprints
+       WHERE content_kind = 'species' AND fingerprint_role = 'current'
+         AND content_key IN (
+           '2024:species:elf', '2024:species:gnome', '2024:species:tiefling'
+         )
+       ORDER BY content_key`,
+    )).toEqual([
+      { content_key: '2024:species:elf', fingerprint_scheme: 'content-v2' },
+      { content_key: '2024:species:gnome', fingerprint_scheme: 'content-v2' },
+      { content_key: '2024:species:tiefling', fingerprint_scheme: 'content-v2' },
+    ]);
     for (const anchor of INDEPENDENT_ROOT_ANCHORS) {
       expect(registryEnumeration).toContainEqual({
         content_kind: anchor.content_kind,

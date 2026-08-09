@@ -41,6 +41,7 @@ import backgroundDefaultOriginFeatKey from '../../drizzle/0037_background_defaul
 import catalogContentSupersessions from '../../drizzle/0038_catalog_content_supersessions.sql?raw';
 import catalogContentSupersessionGuards from '../../drizzle/0039_catalog_content_supersession_guards.sql?raw';
 import catalogContentArchiveMembers from '../../drizzle/0040_catalog_content_archive_members.sql?raw';
+import contentV2 from '../../drizzle/0041_content_v2.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -467,6 +468,16 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       'ad932395613511dba695db38a213d2dcf7269cb415353c40fae4c694c0007258',
     resultSchemaChecksum:
       '08178919ea2115feb15574dcf748226b88a44f99d409e95dcccb623904a05727',
+  }),
+  // U2-A / D231: admit the content-v2 identity scheme and make "current"
+  // unique per content key across every scheme, matching scheme-less export.
+  Object.freeze({
+    id: '0041_content_v2',
+    sql: contentV2,
+    checksum:
+      '660525ab7c4248d5448ed3bf14d3723b66f57a8dd45b7986f4280341f25bd204',
+    resultSchemaChecksum:
+      'b2a3e3ae292168f7c5766dde6db26668ea2e2336a0a62879d2b7811ac61a2b08',
   }),
 ]);
 

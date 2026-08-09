@@ -35,7 +35,7 @@ export type CanonicalOpenPassthroughValue = Brand<
   'CanonicalOpenPassthroughValueV1'
 >;
 export type ContentFingerprintScheme = Brand<
-  'content-v1',
+  'content-v1' | 'content-v2',
   'ContentFingerprintScheme'
 >;
 export type ContentFingerprintDigest = Brand<
@@ -63,11 +63,13 @@ export type ContentKind = (typeof contentKinds)[number];
 
 export const CONTENT_FINGERPRINT_SCHEME_V1 =
   'content-v1' as ContentFingerprintScheme;
+export const CONTENT_FINGERPRINT_SCHEME_V2 =
+  'content-v2' as ContentFingerprintScheme;
 
 export interface ContentFingerprintSchemeDefinition {
   readonly scheme: ContentFingerprintScheme;
-  readonly keySegment: 'content.v1';
-  readonly predecessor: null;
+  readonly keySegment: 'content.v1' | 'content.v2';
+  readonly predecessor: ContentFingerprintScheme | null;
 }
 
 export const contentFingerprintSchemeRegistry = Object.freeze({
@@ -76,18 +78,76 @@ export const contentFingerprintSchemeRegistry = Object.freeze({
     keySegment: 'content.v1',
     predecessor: null,
   }),
+  'content-v2': Object.freeze({
+    scheme: CONTENT_FINGERPRINT_SCHEME_V2,
+    keySegment: 'content.v2',
+    predecessor: CONTENT_FINGERPRINT_SCHEME_V1,
+  }),
 }) satisfies Readonly<
-  Record<'content-v1', ContentFingerprintSchemeDefinition>
+  Record<'content-v1' | 'content-v2', ContentFingerprintSchemeDefinition>
 >;
+
+export function isContentFingerprintScheme(
+  value: unknown,
+): value is ContentFingerprintScheme {
+  return typeof value === 'string' &&
+    Object.hasOwn(contentFingerprintSchemeRegistry, value);
+}
+
+export function deriveContentIdentityForScheme<K extends ContentKind, P>(
+  scheme: ContentFingerprintScheme,
+  input: {
+    readonly kind: K;
+    readonly edition: string;
+    readonly name: string;
+    readonly payload: P;
+  },
+): DerivedContentIdentityV1<K, P> {
+  switch (scheme) {
+    case CONTENT_FINGERPRINT_SCHEME_V1:
+      return deriveContentIdentityV1(input);
+    case CONTENT_FINGERPRINT_SCHEME_V2:
+      return deriveContentIdentityV2(input);
+  }
+  throw new TypeError(`Unsupported content fingerprint scheme '${String(scheme)}'.`);
+}
 
 /**
  * Content-v1 has no predecessor. A future scheme adds only its adjacent,
  * lossless compatibility projector here; it must not alter the v1 entry above.
  */
 export const adjacentContentFingerprintCompatibilityRegistry = Object.freeze(
-  {},
+  {
+    'content-v2': (value: unknown): unknown => {
+      if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+        throw new TypeError('A content-v1 envelope must be an object.');
+      }
+      const envelope = value as Readonly<Record<string, unknown>>;
+      if (envelope.scheme !== CONTENT_FINGERPRINT_SCHEME_V1) {
+        throw new TypeError('Only content-v1 can project adjacently to content-v2.');
+      }
+      if (
+        envelope.kind !== 'species' ||
+        envelope.payload === null ||
+        typeof envelope.payload !== 'object' ||
+        Array.isArray(envelope.payload)
+      ) {
+        return Object.freeze({ ...envelope, scheme: CONTENT_FINGERPRINT_SCHEME_V2 });
+      }
+      const payload = envelope.payload as Readonly<Record<string, unknown>>;
+      const { grants, ...speciesPayload } = payload;
+      return Object.freeze({
+        ...envelope,
+        scheme: CONTENT_FINGERPRINT_SCHEME_V2,
+        payload: Object.freeze({
+          ...speciesPayload,
+          source_rules: grants ?? [],
+        }),
+      });
+    },
+  },
 ) satisfies Readonly<
-  Partial<Record<'content-v1', (value: unknown) => unknown>>
+  Partial<Record<'content-v1' | 'content-v2', (value: unknown) => unknown>>
 >;
 
 export const contentIdentityCollectionKind: unique symbol = Symbol(
@@ -115,6 +175,11 @@ export interface ContentIdentityEnvelopeV1<K extends ContentKind, P> {
   readonly normalizedName: NormalizedContentName;
   readonly payload: P;
 }
+
+export type ContentIdentityEnvelopeV2<K extends ContentKind, P> =
+  Omit<ContentIdentityEnvelopeV1<K, P>, 'scheme'> & {
+    readonly scheme: ContentFingerprintScheme;
+  };
 
 export interface DerivedContentIdentityV1<K extends ContentKind, P> {
   readonly envelope: ContentIdentityEnvelopeV1<K, P>;
@@ -364,6 +429,47 @@ export function deriveContentIdentityV1FromNormalizedName<
     digest,
     derivedKey,
   });
+}
+
+export function deriveContentIdentityV2<K extends ContentKind, P>(input: {
+  readonly kind: K;
+  readonly edition: string;
+  readonly name: string;
+  readonly payload: P;
+}): DerivedContentIdentityV1<K, P> {
+  return deriveContentIdentityV2FromNormalizedName({
+    kind: input.kind,
+    edition: input.edition,
+    normalizedName: normalizeContentIdentityName(input.name),
+    payload: input.payload,
+  });
+}
+
+export function deriveContentIdentityV2FromNormalizedName<
+  K extends ContentKind,
+  P,
+>(input: {
+  readonly kind: K;
+  readonly edition: string;
+  readonly normalizedName: NormalizedContentName;
+  readonly payload: P;
+}): DerivedContentIdentityV1<K, P> {
+  if (!isCatalogKeyComponent(input.edition)) {
+    throw new TypeError(
+      `Content identity edition '${input.edition}' must be a valid catalog key component.`,
+    );
+  }
+  const envelope = Object.freeze({
+    scheme: CONTENT_FINGERPRINT_SCHEME_V2,
+    kind: input.kind,
+    edition: input.edition,
+    normalizedName: input.normalizedName,
+    payload: input.payload,
+  });
+  const canonicalJson = canonicalContentIdentityJson(envelope);
+  const digest = sha256(canonicalJson) as ContentFingerprintDigest;
+  const derivedKey = `${input.edition}:content.v2:${digest}` as DerivedContentKey;
+  return Object.freeze({ envelope, canonicalJson, digest, derivedKey });
 }
 
 export function parseDerivedContentKeyV1(

@@ -22,8 +22,15 @@ import {
   createRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
-import { registerFixtureContentIdentity } from '../../helpers/content-identity';
+import {
+  registerAssertedFixtureContentIdentity,
+  registerFixtureContentIdentity,
+} from '../../helpers/content-identity';
 import { characterCatalogDisclosures } from '../../../src/queries/character-catalog-disclosures';
+import {
+  speciesRuleSemanticCount,
+  speciesRuleSemanticCountFromJson,
+} from '../../helpers/species-rule-census';
 
 let harness: RpcHarness | undefined;
 
@@ -768,17 +775,48 @@ describe('bundled species definition seed', () => {
          ORDER BY content_key`,
       ),
     ).toEqual(before);
-    // The three lineage species, plus Human — whose definition row exists so
-    // the guided apply can mint the species source instance the Skillful
-    // skill grant hangs on (skills-with-provenance §3.4, dispatch S-B). Its
-    // empty grant_rules keep the summed rule count below unchanged.
-    expect(before).toHaveLength(LINEAGE_SPELL_SPECIES_CONTENT_KEYS.size + 1);
-    expect(
-      db.scalar(
-        `SELECT sum(json_array_length(grant_rules))
-         FROM species_definitions`,
-      ),
-    ).toBe(23);
+    const census = before.map((row) => ({
+      content_key: row['content_key'],
+      name: row['name'],
+      top_level_rules: JSON.parse(String(row['grant_rules'])).length,
+      semantic_rules: speciesRuleSemanticCountFromJson(row['grant_rules']),
+    }));
+    expect(census).toEqual([
+      {
+        content_key: '2024:species:elf',
+        name: 'Elf',
+        top_level_rules: 1,
+        semantic_rules: 9,
+      },
+      {
+        content_key: '2024:species:gnome',
+        name: 'Gnome',
+        top_level_rules: 1,
+        semantic_rules: 4,
+      },
+      {
+        content_key: '2024:species:human',
+        name: 'Human',
+        top_level_rules: 0,
+        semantic_rules: 0,
+      },
+      {
+        content_key: '2024:species:tiefling',
+        name: 'Tiefling',
+        top_level_rules: 2,
+        semantic_rules: 10,
+      },
+    ]);
+    expect(census.reduce((total, row) => total + row.semantic_rules, 0)).toBe(23);
+
+    // Negative control: removing one nested Drow grant must make the fidelity
+    // census fall. Counting only definition rows or top-level descriptors
+    // would leave this mutation invisible.
+    const elf = before.find((row) => row['content_key'] === '2024:species:elf');
+    if (elf === undefined) throw new Error('The Elf definition is missing.');
+    const withoutOneDrowGrant = JSON.parse(String(elf['grant_rules']));
+    withoutOneDrowGrant[0].options[0].grants.pop();
+    expect(speciesRuleSemanticCount(withoutOneDrowGrant)).toBe(8);
   });
 
   it('yields the bundled name-and-edition slot to a homebrew definition', async () => {
@@ -797,18 +835,17 @@ describe('bundled species definition seed', () => {
     db.exec('DELETE FROM species_definitions WHERE content_key = ?', [
       elf.content_key,
     ]);
-    registerFixtureContentIdentity(db, {
+    const homebrewContentKey = registerAssertedFixtureContentIdentity(db, {
       kind: 'species',
-      contentKey: 'homebrew:species:elf',
+      edition: String(bundledSlot['rules_edition']),
       name: String(bundledSlot['name']),
-      keyKind: 'bundled-stable',
     });
     db.exec(
       `INSERT INTO species_definitions (
          content_key, name, rules_edition, repeatable, grant_rules, notes
-       ) VALUES ('homebrew:species:elf', ?, ?, 1, '[]',
+       ) VALUES (?, ?, ?, 1, '[]',
                  'homebrew must survive boot')`,
-      [bundledSlot['name'], bundledSlot['rules_edition']],
+      [homebrewContentKey, bundledSlot['name'], bundledSlot['rules_edition']],
     );
 
     applicationSeed(db);
@@ -822,7 +859,7 @@ describe('bundled species definition seed', () => {
       ),
     ).toEqual([
       {
-        content_key: 'homebrew:species:elf',
+        content_key: homebrewContentKey,
         repeatable: 1,
         grant_rules: '[]',
         notes: 'homebrew must survive boot',
@@ -834,6 +871,21 @@ describe('bundled species definition seed', () => {
         [elf.content_key],
       ),
     ).toBe(0);
+    expect(db.scalar(
+      `SELECT catalog_layer FROM catalog_content_identities
+       WHERE content_key = ?`,
+      [homebrewContentKey],
+    )).toBe('external');
+    expect(db.allRaw(
+      `SELECT fingerprint_scheme, fingerprint_role
+       FROM catalog_content_fingerprints
+       WHERE content_kind = 'species' AND content_key = ?
+       ORDER BY fingerprint_scheme`,
+      [elf.content_key],
+    )).toEqual([
+      { fingerprint_scheme: 'content-v1', fingerprint_role: 'current' },
+      { fingerprint_scheme: 'content-v2', fingerprint_role: 'bundled-historical' },
+    ]);
   });
 });
 

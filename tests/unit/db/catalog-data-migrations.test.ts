@@ -72,6 +72,27 @@ describe('catalog data-migration registry', () => {
         'src/catalog/catalog-lineage-delete-guard.ts',
       ],
       checksum: 'e30bd134e9173b51f925e977e3ac8f1e274e14bdf9a3c956c04c9a58b7fde8a4',
+    }, {
+      id: 'reconcile_species_lineage_content_v2',
+      projectorScheme: 'content-v2',
+      sources: [
+        'src/catalog/reconcile-species-lineage-content-v2.ts',
+        'src/rules/origin-definitions-srd.ts',
+        'src/grants/configured-choice-rule.ts',
+        'src/grants/grant-rule.ts',
+        'src/grants/source-rule-reader.ts',
+        'src/rules/character-level.ts',
+        'src/grants/grant-rule-slot-generator.ts',
+        'src/grants/grant-rule-planner.ts',
+        'src/grants/skill-grants.ts',
+        'src/grants/skill-expertise-grants.ts',
+        'src/eligibility/spell-selection-eligibility.ts',
+        'src/eligibility/spell-selection-constraint.ts',
+        'src/catalog/stored-authored-content-projector-v1.ts',
+        'src/catalog/content-identity.ts',
+        'src/catalog/content-registry.ts',
+      ],
+      checksum: '1be37503493c1dab4257b3afae004267c1dc1c793802a397b17ae840e9d239e4',
     }]);
     expect(() =>
       validateCatalogDataMigrationRegistry(CATALOG_DATA_MIGRATIONS)

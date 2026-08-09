@@ -13,6 +13,11 @@ import {
   type DomainSourceType,
 } from '../domain/enums';
 import { GrantRule } from './grant-rule';
+import {
+  ConfiguredChoiceRule,
+  parseSourceGrantRules,
+} from './configured-choice-rule';
+import { characterLevel } from '../rules/character-level';
 
 type JsonContainer = Record<string, unknown> | unknown[];
 
@@ -205,9 +210,13 @@ export class SourceRuleReader {
         `Grant rules for source instance ${source.id} must be a list.`,
       );
     }
-    return rules.map((rule) =>
-      parseRule(rule, 'Grant rules must be objects.'),
-    );
+    const config = decodeGrantJson(source.config);
+    return parseSourceGrantRules(rules).flatMap((rule) => {
+      if (!(rule instanceof ConfiguredChoiceRule)) return [rule];
+      const selected = valueAtPath(config, rule.configKey);
+      const option = rule.options.find((candidate) => candidate.value === selected);
+      return option === undefined ? [] : [...option.grants];
+    });
   }
 
   classLevelForSource(source: GrantSourceInstance): number {
@@ -255,6 +264,12 @@ export class SourceRuleReader {
       this.classLevelForSource(source) < rule.activeFromClassLevel
     ) {
       return false;
+    }
+    if (rule.activeFromCharacterLevel !== null) {
+      const level = characterLevel(this.db, source.characterId);
+      if (level === null || level < rule.activeFromCharacterLevel) {
+        return false;
+      }
     }
     if (rule.activeIfConfig === null) {
       return true;

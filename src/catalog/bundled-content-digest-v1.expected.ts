@@ -14,7 +14,7 @@ export interface ExpectedBundledAggregateDigestV1 {
  * changed aggregate(s) against their seed source, then update this pin.
  */
 export const EXPECTED_BUNDLED_CONTENT_DIGEST_V1 =
-  '05f30509ac402849d630a3f553f36a05d2e33fd9b1a09b6a7c7cb7e2fd68294f' as const;
+  '3a68eebb5755cd018bf357d947b562b5ae47b27e2ae643cc6817c9885d4b8080' as const;
 
 export const EXPECTED_BUNDLED_AGGREGATE_DIGESTS_V1 = Object.freeze([
   Object.freeze({"catalog_layer":"bundled","kind":"weapon","contentKey":"2024:weapon:battleaxe","name":"Battleaxe","digest":"749cd0ee7ef968dfd554a92e7b26637a15791a37c990652f70c0177422d925f9"}),
@@ -450,13 +450,13 @@ export const EXPECTED_BUNDLED_AGGREGATE_DIGESTS_V1 = Object.freeze([
   Object.freeze({"catalog_layer":"bundled","kind":"subclass","contentKey":"2024:subclass:warrior-of-the-open-hand","name":"Warrior of the Open Hand","digest":"d9847d539412cfa50efda448f1ad345c54c1e03cbf3f05ee2a818e957586fcbb"}),
   Object.freeze({"catalog_layer":"bundled","kind":"species","contentKey":"2024:species:dragonborn","name":"Dragonborn","digest":"ba18c343ddce6dc2896a15fc51d551edafbd40e87b9997a5c52799465dc27c63"}),
   Object.freeze({"catalog_layer":"bundled","kind":"species","contentKey":"2024:species:dwarf","name":"Dwarf","digest":"ae6132b5e72de583b0cc95fc0cf147040eb3d56be498b13aa9014da6433dbc54"}),
-  Object.freeze({"catalog_layer":"bundled","kind":"species","contentKey":"2024:species:elf","name":"Elf","digest":"054a0f4c127ff2621cac769afe85d0dc19ee89d1856f830ae6196720003fdfe5"}),
-  Object.freeze({"catalog_layer":"bundled","kind":"species","contentKey":"2024:species:gnome","name":"Gnome","digest":"2f97086a57488df8c2975990d02e6671bc477242b0ca3ac871fb97e814996f7c"}),
+  Object.freeze({"catalog_layer":"bundled","kind":"species","contentKey":"2024:species:elf","name":"Elf","digest":"2e5e1b1e65c9ad91f10d1af6ba121892435147e3df705ce7c33d83200ca28985"}),
+  Object.freeze({"catalog_layer":"bundled","kind":"species","contentKey":"2024:species:gnome","name":"Gnome","digest":"8e5728a725f9145d552d7eecaec17aa91c3160e2e9e404091bebfd1c3270db0c"}),
   Object.freeze({"catalog_layer":"bundled","kind":"species","contentKey":"2024:species:goliath","name":"Goliath","digest":"78e5ccabc793046fa6e0da1a81e372ce6d4ac9f6f99a778810fc4fefca7b965e"}),
   Object.freeze({"catalog_layer":"bundled","kind":"species","contentKey":"2024:species:halfling","name":"Halfling","digest":"cdf7156f99d3b904086ff6b4301068496ae4ead31fb7368b6584e2887acfdef0"}),
   Object.freeze({"catalog_layer":"bundled","kind":"species","contentKey":"2024:species:human","name":"Human","digest":"34d9c0c4173836c329ce8cd1fd6e7a3a2a6205ef943732fa7e5f4e20e30df2f1"}),
   Object.freeze({"catalog_layer":"bundled","kind":"species","contentKey":"2024:species:orc","name":"Orc","digest":"33685f30c413804095c14ded1ca62e490a70c276b798fd06a2921990b810e8a5"}),
-  Object.freeze({"catalog_layer":"bundled","kind":"species","contentKey":"2024:species:tiefling","name":"Tiefling","digest":"2321f0d3c3c1ba41c8a34e3ef96f4131bae340654ada22466884c6a1236eec35"}),
+  Object.freeze({"catalog_layer":"bundled","kind":"species","contentKey":"2024:species:tiefling","name":"Tiefling","digest":"daac68df9b597b4d4d2f01c1593eb32cf8f715e33b1a87b5c7b4b2bbda9494e5"}),
   Object.freeze({"catalog_layer":"bundled","kind":"background","contentKey":"2024:background:acolyte","name":"Acolyte","digest":"273579615b703818e44b3010b39592b00e7a070e203aa361eab4b4ef2acc7944"}),
   Object.freeze({"catalog_layer":"bundled","kind":"background","contentKey":"2024:background:criminal","name":"Criminal","digest":"798471f3d276d925b446a656a9405483c7e0bdb080ef72ef3c42653e5987732e"}),
   Object.freeze({"catalog_layer":"bundled","kind":"background","contentKey":"2024:background:sage","name":"Sage","digest":"c7677b5b67d78d814ad030bbc98c48ac3c99b1574503fe2af9643eae20e17f84"}),

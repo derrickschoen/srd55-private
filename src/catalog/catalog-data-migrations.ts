@@ -3,6 +3,7 @@ import { sha256 } from '../crypto/sha256';
 import {
   contentFingerprintSchemeRegistry,
   CONTENT_FINGERPRINT_SCHEME_V1,
+  CONTENT_FINGERPRINT_SCHEME_V2,
   type ContentFingerprintScheme,
 } from './content-identity';
 import lineageDeleteGuardSource from './catalog-lineage-delete-guard.ts?raw';
@@ -10,15 +11,32 @@ import retirementSource from './retire-non-srd-bundled-subclasses-v1.ts?raw';
 import {
   retireNonSrdBundledSubclassesV1,
 } from './retire-non-srd-bundled-subclasses-v1';
+import lineageMigrationSource from './reconcile-species-lineage-content-v2.ts?raw';
+import lineageSeedSource from '../rules/origin-definitions-srd.ts?raw';
+import configuredChoiceSource from '../grants/configured-choice-rule.ts?raw';
+import grantRuleSource from '../grants/grant-rule.ts?raw';
+import sourceRuleReaderSource from '../grants/source-rule-reader.ts?raw';
+import characterLevelSource from '../rules/character-level.ts?raw';
+import slotGeneratorSource from '../grants/grant-rule-slot-generator.ts?raw';
+import grantPlannerSource from '../grants/grant-rule-planner.ts?raw';
+import skillGrantsSource from '../grants/skill-grants.ts?raw';
+import skillExpertiseGrantsSource from '../grants/skill-expertise-grants.ts?raw';
+import spellEligibilitySource from '../eligibility/spell-selection-eligibility.ts?raw';
+import spellConstraintSource from '../eligibility/spell-selection-constraint.ts?raw';
+import storedProjectorSource from './stored-authored-content-projector-v1.ts?raw';
+import contentIdentitySource from './content-identity.ts?raw';
+import contentRegistrySource from './content-registry.ts?raw';
+import { reconcileSpeciesLineageContentV2 } from './reconcile-species-lineage-content-v2';
 
 /**
  * One append-only semantic catalog migration.
  *
- * `sources` explicitly lists the committed TypeScript modules whose behaviour
- * the migration owns: its implementation and any bespoke extracted seam it
- * invokes. General runtime infrastructure and type-only imports stay outside
- * this boundary. Each module is imported with Vite's `?raw` suffix; emitted
- * JavaScript function source is not a stable persistence checksum.
+ * `sources` explicitly lists the committed TypeScript modules whose
+ * migration-specific behaviour determines its reconciled rows, including
+ * decision-bearing runtime dependencies. Generic runtime infrastructure and
+ * type-only imports stay outside this boundary. Each module is imported with
+ * Vite's `?raw` suffix; emitted JavaScript function source is not a stable
+ * persistence checksum.
  */
 export interface CatalogDataMigrationSource {
   readonly path: string;
@@ -67,6 +85,75 @@ export const CATALOG_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
       checksum:
         'e30bd134e9173b51f925e977e3ac8f1e274e14bdf9a3c956c04c9a58b7fde8a4',
       run: retireNonSrdBundledSubclassesV1,
+    }),
+    Object.freeze({
+      id: 'reconcile_species_lineage_content_v2',
+      projectorScheme: CONTENT_FINGERPRINT_SCHEME_V2,
+      sources: Object.freeze([
+        Object.freeze({
+          path: 'src/catalog/reconcile-species-lineage-content-v2.ts',
+          bytes: lineageMigrationSource,
+        }),
+        Object.freeze({
+          path: 'src/rules/origin-definitions-srd.ts',
+          bytes: lineageSeedSource,
+        }),
+        Object.freeze({
+          path: 'src/grants/configured-choice-rule.ts',
+          bytes: configuredChoiceSource,
+        }),
+        Object.freeze({
+          path: 'src/grants/grant-rule.ts',
+          bytes: grantRuleSource,
+        }),
+        Object.freeze({
+          path: 'src/grants/source-rule-reader.ts',
+          bytes: sourceRuleReaderSource,
+        }),
+        Object.freeze({
+          path: 'src/rules/character-level.ts',
+          bytes: characterLevelSource,
+        }),
+        Object.freeze({
+          path: 'src/grants/grant-rule-slot-generator.ts',
+          bytes: slotGeneratorSource,
+        }),
+        Object.freeze({
+          path: 'src/grants/grant-rule-planner.ts',
+          bytes: grantPlannerSource,
+        }),
+        Object.freeze({
+          path: 'src/grants/skill-grants.ts',
+          bytes: skillGrantsSource,
+        }),
+        Object.freeze({
+          path: 'src/grants/skill-expertise-grants.ts',
+          bytes: skillExpertiseGrantsSource,
+        }),
+        Object.freeze({
+          path: 'src/eligibility/spell-selection-eligibility.ts',
+          bytes: spellEligibilitySource,
+        }),
+        Object.freeze({
+          path: 'src/eligibility/spell-selection-constraint.ts',
+          bytes: spellConstraintSource,
+        }),
+        Object.freeze({
+          path: 'src/catalog/stored-authored-content-projector-v1.ts',
+          bytes: storedProjectorSource,
+        }),
+        Object.freeze({
+          path: 'src/catalog/content-identity.ts',
+          bytes: contentIdentitySource,
+        }),
+        Object.freeze({
+          path: 'src/catalog/content-registry.ts',
+          bytes: contentRegistrySource,
+        }),
+      ]),
+      checksum:
+        '1be37503493c1dab4257b3afae004267c1dc1c793802a397b17ae840e9d239e4',
+      run: reconcileSpeciesLineageContentV2,
     }),
   ]);
 

@@ -17,7 +17,12 @@ import type {
   ClassLevel,
   SourceInstanceId,
 } from '../domain/ids';
-import { isEnumValue, skills, type Skill } from '../domain/enums';
+import {
+  isEnumValue,
+  skills,
+  type CharacterLevel,
+  type Skill,
+} from '../domain/enums';
 import type { JsonObject } from '../domain/models';
 import { GrantRule } from './grant-rule';
 import {
@@ -42,6 +47,7 @@ import {
   valueAtPath,
   type GrantSourceInstance,
 } from './source-rule-reader';
+import { characterLevel } from '../rules/character-level';
 
 type Attributes = Record<string, SqlValue>;
 type JsonContainer = Record<string, unknown> | unknown[];
@@ -219,6 +225,10 @@ export class GrantRuleSlotGenerator {
         configured_rules: activeRules.map((rule) => rule.toObject()),
         config: normalizedConfig as JsonObject,
         effective_class_level: effectiveClassLevel,
+        effective_character_level: characterLevel(
+          this.db,
+          source.characterId,
+        ) as CharacterLevel | null,
       });
       const ruleByKey = new Map(
         activeRules.map((rule) => [rule.ruleKey, rule]),

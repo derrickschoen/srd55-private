@@ -21,6 +21,7 @@ import {
   persistedReportTableHashes,
   type BuildReportFixture,
 } from '../reports/build-report-fixture';
+import { speciesRuleSemanticCountFromJson } from '../../helpers/species-rule-census';
 
 async function openBrowserFixtureLifecycle() {
   const fixtureImage = await workspaceFixtureImage();
@@ -427,19 +428,62 @@ describe('character list and workspace query builders', () => {
         species: workspace.source_catalog.species.length,
         backgrounds: workspace.source_catalog.background.length,
       }).toEqual({ classes: 12, feats: 17, species: 5, backgrounds: 5 });
+      const reshapedSpeciesKeys = new Set([
+        '2024:species:elf',
+        '2024:species:gnome',
+        '2024:species:tiefling',
+      ]);
+      const reshapedSpecies = (entries: readonly {
+        readonly content_key: string;
+        readonly name: string;
+      }[]) => entries
+        .filter((entry) => reshapedSpeciesKeys.has(entry.content_key))
+        .map(({ content_key, name }) => ({ content_key, name }));
+      const expectedReshapedSpecies = [
+        { content_key: '2024:species:elf', name: 'Elf' },
+        { content_key: '2024:species:gnome', name: 'Gnome' },
+        { content_key: '2024:species:tiefling', name: 'Tiefling' },
+      ];
+      expect(reshapedSpecies(catalog.sources.species)).toEqual(
+        expectedReshapedSpecies,
+      );
+      expect(reshapedSpecies(workspace.source_catalog.species)).toEqual(
+        expectedReshapedSpecies,
+      );
       expect(lifecycle.database.allRaw(
         `SELECT identities.content_kind, identities.content_key
          FROM catalog_content_identities AS identities
          LEFT JOIN catalog_content_fingerprints AS fingerprints
            ON fingerprints.content_kind = identities.content_kind
           AND fingerprints.content_key = identities.content_key
-          AND fingerprints.fingerprint_scheme = 'content-v1'
           AND fingerprints.fingerprint_role = 'current'
          WHERE identities.key_kind = 'bundled-stable'
            AND identities.catalog_layer = 'bundled'
            AND fingerprints.content_key IS NULL
          ORDER BY identities.content_kind, identities.content_key`,
       )).toEqual([]);
+      expect(lifecycle.database.allRaw(
+        `SELECT content_key, fingerprint_scheme
+         FROM catalog_content_fingerprints
+         WHERE content_kind = 'species' AND fingerprint_role = 'current'
+           AND content_key IN (
+             '2024:species:elf', '2024:species:gnome',
+             '2024:species:tiefling'
+           )
+         ORDER BY content_key`,
+      )).toEqual([
+        { content_key: '2024:species:elf', fingerprint_scheme: 'content-v2' },
+        { content_key: '2024:species:gnome', fingerprint_scheme: 'content-v2' },
+        { content_key: '2024:species:tiefling', fingerprint_scheme: 'content-v2' },
+      ]);
+      expect(lifecycle.database.oneRaw(
+        `SELECT scheme FROM catalog_data_migrations
+         WHERE id = 'reconcile_species_lineage_content_v2'`,
+      )).toEqual({ scheme: 'content-v2' });
+      expect(speciesRuleSemanticCountFromJson(lifecycle.database.scalar(
+        `SELECT grant_rules FROM species_definitions
+         WHERE content_key = '2024:species:elf'`,
+      ))).toBe(9);
     } finally {
       lifecycle.close();
     }

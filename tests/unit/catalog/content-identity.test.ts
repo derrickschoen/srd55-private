@@ -212,8 +212,8 @@ describe('canonical content identity values', () => {
   });
 });
 
-describe('the content-v1 scheme and derived key grammar', () => {
-  it('pins the closed v1 registry shape and empty predecessor registry', () => {
+describe('the content fingerprint schemes and derived key grammar', () => {
+  it('keeps v1 frozen while registering only its adjacent v2 successor', () => {
     expect(CONTENT_FINGERPRINT_SCHEME_V1).toBe('content-v1');
     expect(contentFingerprintSchemeRegistry).toEqual({
       'content-v1': {
@@ -221,8 +221,18 @@ describe('the content-v1 scheme and derived key grammar', () => {
         predecessor: null,
         scheme: 'content-v1',
       },
+      'content-v2': {
+        keySegment: 'content.v2',
+        predecessor: 'content-v1',
+        scheme: 'content-v2',
+      },
     });
-    expect(adjacentContentFingerprintCompatibilityRegistry).toEqual({});
+    expect(Object.keys(adjacentContentFingerprintCompatibilityRegistry)).toEqual([
+      'content-v2',
+    ]);
+    expect(
+      adjacentContentFingerprintCompatibilityRegistry['content-v2'],
+    ).toBeTypeOf('function');
   });
 
   it('derives and parses a key accepted by the existing KEY_COMPONENT grammar', () => {

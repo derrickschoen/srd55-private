@@ -45,6 +45,10 @@ import {
 import type { ContentKey } from '../domain/ids';
 import type { JsonObject, JsonValue } from '../domain/models';
 import { GrantRule } from '../grants/grant-rule';
+import {
+  ConfiguredChoiceRule,
+  parseSourceGrantRules,
+} from '../grants/configured-choice-rule';
 import type {
   AuthoredContentReferenceV1,
   AuthoredProjectorAggregate,
@@ -63,12 +67,22 @@ import type {
   SpeciesTwoHalfProjectorAggregateV1,
   SubclassProjectorPayloadV1,
 } from './authored-content-projector-contract-v1';
+import type {
+  CanonicalConfiguredChoiceRuleV2,
+  CanonicalSourceRuleV2,
+  PortableConfiguredChoiceRuleV2,
+  PortableSourceRuleV2,
+  SpeciesProjectorContractV2,
+  SpeciesProjectorPayloadV2,
+  SpeciesProjectorAggregateV2,
+} from './authored-content-projector-contract-v2';
 import {
   canonicalOpenPassthroughValue,
   canonicalRuleText,
   CONTENT_FINGERPRINT_SCHEME_V1,
   contentIdentitySequence,
   contentIdentitySet,
+  isContentFingerprintScheme,
   type ContentIdentitySequence,
   type ContentFingerprintDigest,
   type ContentKind,
@@ -545,8 +559,16 @@ function authoringGrants(
   references: StoredAuthoredReferenceResolverV1,
   label: string,
 ): readonly AuthoringGrant[] {
-  return jsonArray(text, label).map((value, index): AuthoringGrant => {
-    const ruleLabel = `${label}[${index}]`;
+  return jsonArray(text, label).map((value, index): AuthoringGrant =>
+    authoringGrant(db, value, references, `${label}[${index}]`));
+}
+
+function authoringGrant(
+  db: DatabaseContext,
+  value: unknown,
+  references: StoredAuthoredReferenceResolverV1,
+  ruleLabel: string,
+): AuthoringGrant {
     let rule: GrantRule;
     try {
       rule = GrantRule.fromObject(value);
@@ -571,7 +593,6 @@ function authoringGrants(
     }
     for (const field of PORTABLE_REFERENCE_FIELDS) delete object[field];
     return object as AuthoringGrant;
-  });
 }
 
 function canonicalGrant(grant: AuthoringGrant): CanonicalAuthoringGrantV1 {
@@ -629,6 +650,276 @@ export function projectStoredGrantRulesV1(
     grants,
     canonical: contentIdentitySequence(grants.map(canonicalGrant)),
   };
+}
+
+function portableConfiguredChoiceV2(
+  db: DatabaseContext,
+  rule: ConfiguredChoiceRule,
+  references: StoredAuthoredReferenceResolverV1,
+  label: string,
+): PortableConfiguredChoiceRuleV2 {
+  const stored = rule.toObject();
+  return Object.freeze({
+    kind: 'configured_choice',
+    rule_key: rule.ruleKey,
+    label: rule.label,
+    config_key: rule.configKey,
+    required: true,
+    ability_choice: rule.abilityChoice === null
+      ? null
+      : Object.freeze({
+          config_key: rule.abilityChoice.configKey,
+          options: Object.freeze([...rule.abilityChoice.options]),
+        }),
+    unknown_sheet_fields: Object.freeze([...rule.unknownSheetFields]),
+    projected_trait_names: Object.freeze([...rule.projectedTraitNames]),
+    options: Object.freeze(stored.options.map((option, optionIndex) => {
+      const optionLabel = `${label}.options[${String(optionIndex)}]`;
+      const replacement = option.replaceable_spell_choice;
+      return Object.freeze({
+        value: option.value,
+        label: option.label,
+        sheet: Object.freeze({ ...option.sheet }),
+        effects: Object.freeze(option.effects.map((effect) => Object.freeze({ ...effect }))),
+        grants: Object.freeze(option.grants.map((grant, grantIndex) =>
+          authoringGrant(
+            db,
+            grant,
+            references,
+            `${optionLabel}.grants[${String(grantIndex)}]`,
+          ))),
+        replaceable_spell_choice: replacement === null
+          ? null
+          : Object.freeze({
+              config_key: replacement.config_key,
+              label: replacement.label,
+              required: true,
+              spell_list: replacement.spell_list,
+              spell_level: 0,
+              initial_spell: references.spell(
+                replacement.initial_spell_version_key as ContentKey,
+              ),
+              display_on_sheet: true,
+            }),
+      });
+    })),
+  });
+}
+
+function canonicalConfiguredChoiceV2(
+  rule: PortableConfiguredChoiceRuleV2,
+): CanonicalConfiguredChoiceRuleV2 {
+  return {
+    ...rule,
+    label: canonicalRuleText(rule.label),
+    options: contentIdentitySequence(rule.options.map((option) => ({
+      ...option,
+      label: canonicalRuleText(option.label),
+      effects: contentIdentitySequence(option.effects.map((effect) =>
+        effect.kind === 'damage_resistance'
+          ? {
+              ...effect,
+              label: canonicalRuleText(effect.label),
+              damage_type: canonicalOpenPassthroughValue(effect.damage_type),
+            }
+          : { ...effect, label: canonicalRuleText(effect.label) })),
+      grants: contentIdentitySequence(option.grants.map(canonicalGrant)),
+      replaceable_spell_choice: option.replaceable_spell_choice === null
+        ? null
+        : {
+            ...option.replaceable_spell_choice,
+            label: canonicalRuleText(option.replaceable_spell_choice.label),
+          },
+    }))),
+  };
+}
+
+function exactPortableKeys(
+  value: Readonly<Record<string, unknown>>,
+  expected: readonly string[],
+  label: string,
+): void {
+  const actual = Object.keys(value).sort();
+  const sortedExpected = [...expected].sort();
+  if (
+    actual.length !== sortedExpected.length ||
+    actual.some((key, index) => key !== sortedExpected[index])
+  ) {
+    return projectionError(
+      `${label} must contain exactly ${sortedExpected.join(', ')}.`,
+    );
+  }
+}
+
+function validatedPortableReferenceV2(
+  value: unknown,
+  expectedKind: ContentKind,
+  label: string,
+): ContentFingerprintReference {
+  const reference = jsonObject(value, label);
+  exactPortableKeys(reference, ['kind', 'scheme', 'digest'], label);
+  if (
+    reference.kind !== expectedKind ||
+    !isContentFingerprintScheme(reference.scheme) ||
+    typeof reference.digest !== 'string' ||
+    !/^[0-9a-f]{64}$/u.test(reference.digest)
+  ) {
+    return projectionError(`${label} is not a valid ${expectedKind} fingerprint.`);
+  }
+  return value as ContentFingerprintReference;
+}
+
+function validatedPortableGrantV2(
+  value: unknown,
+  label: string,
+): AuthoringGrant {
+  const input = jsonObject(value, label);
+  const transformed: Record<string, unknown> = { ...input };
+  if (Object.hasOwn(input, 'spell')) {
+    validatedPortableReferenceV2(input.spell, 'spell', `${label}.spell`);
+    if (
+      Object.hasOwn(input, 'spell_version_id') ||
+      Object.hasOwn(input, 'spell_version_key')
+    ) {
+      return projectionError(`${label} carries both portable and local spell locators.`);
+    }
+    transformed.spell_version_key = 'portable:fingerprint-reference';
+    delete transformed.spell;
+  }
+  if (Object.hasOwn(input, 'source_definition')) {
+    const sourceType = input.source_type;
+    if (
+      typeof sourceType !== 'string' ||
+      !isEnumValue(
+        ['class', 'subclass', 'feat', 'species', 'background'] as const,
+        sourceType,
+      )
+    ) {
+      return projectionError(`${label}.source_type cannot own a portable reference.`);
+    }
+    validatedPortableReferenceV2(
+      input.source_definition,
+      sourceType,
+      `${label}.source_definition`,
+    );
+    if (
+      Object.hasOwn(input, 'source_definition_id') ||
+      Object.hasOwn(input, 'source_definition_key')
+    ) {
+      return projectionError(`${label} carries both portable and local source locators.`);
+    }
+    transformed.source_definition_key = 'portable:fingerprint-reference';
+    delete transformed.source_definition;
+  }
+  try {
+    GrantRule.fromObject(transformed);
+  } catch (error) {
+    return projectionError(`${label} is invalid.`, { cause: error });
+  }
+  return value as AuthoringGrant;
+}
+
+function validatedPortableConfiguredChoiceV2(
+  value: unknown,
+  label: string,
+): PortableConfiguredChoiceRuleV2 {
+  const input = jsonObject(value, label);
+  const options = input.options;
+  if (!Array.isArray(options)) {
+    return projectionError(`${label}.options must be a list.`);
+  }
+  const transformed = {
+    ...input,
+    options: options.map((optionValue, optionIndex) => {
+      const optionLabel = `${label}.options[${String(optionIndex)}]`;
+      const option = jsonObject(optionValue, optionLabel);
+      const grants = option.grants;
+      if (!Array.isArray(grants)) {
+        return projectionError(`${optionLabel}.grants must be a list.`);
+      }
+      const replacement = option.replaceable_spell_choice;
+      return {
+        ...option,
+        grants: grants.map((grant, grantIndex) => {
+          validatedPortableGrantV2(
+            grant,
+            `${optionLabel}.grants[${String(grantIndex)}]`,
+          );
+          const portableGrant = jsonObject(grant, optionLabel);
+          const storedGrant: Record<string, unknown> = { ...portableGrant };
+          if (Object.hasOwn(storedGrant, 'spell')) {
+            storedGrant.spell_version_key = 'portable:fingerprint-reference';
+            delete storedGrant.spell;
+          }
+          if (Object.hasOwn(storedGrant, 'source_definition')) {
+            storedGrant.source_definition_key = 'portable:fingerprint-reference';
+            delete storedGrant.source_definition;
+          }
+          return storedGrant;
+        }),
+        replaceable_spell_choice: replacement === null
+          ? null
+          : (() => {
+              const replacementRecord = jsonObject(
+                replacement,
+                `${optionLabel}.replaceable_spell_choice`,
+              );
+              validatedPortableReferenceV2(
+                replacementRecord.initial_spell,
+                'spell',
+                `${optionLabel}.replaceable_spell_choice.initial_spell`,
+              );
+              const {
+                initial_spell: _initialSpell,
+                ...storedReplacement
+              } = replacementRecord;
+              return {
+                ...storedReplacement,
+                initial_spell_version_key: 'portable:fingerprint-reference',
+              };
+            })(),
+      };
+    }),
+  };
+  try {
+    ConfiguredChoiceRule.fromObject(transformed);
+  } catch (error) {
+    return projectionError(`${label} is invalid.`, { cause: error });
+  }
+  return value as PortableConfiguredChoiceRuleV2;
+}
+
+export function projectStoredSourceRulesV2(
+  db: DatabaseContext,
+  text: string | null,
+  references: StoredAuthoredReferenceResolverV1,
+  label: string,
+): {
+  readonly sourceRules: readonly PortableSourceRuleV2[];
+  readonly canonical: ContentIdentitySequence<CanonicalSourceRuleV2>;
+} {
+  const sourceRules = parseSourceGrantRules(jsonArray(text, label)).map(
+    (rule, index): PortableSourceRuleV2 => rule instanceof ConfiguredChoiceRule
+      ? portableConfiguredChoiceV2(
+          db,
+          rule,
+          references,
+          `${label}[${String(index)}]`,
+        )
+      : authoringGrant(
+          db,
+          rule.toObject(),
+          references,
+          `${label}[${String(index)}]`,
+        ),
+  );
+  return Object.freeze({
+    sourceRules: Object.freeze(sourceRules),
+    canonical: contentIdentitySequence(sourceRules.map((rule) =>
+      rule.kind === 'configured_choice'
+        ? canonicalConfiguredChoiceV2(rule)
+        : canonicalGrant(rule))),
+  });
 }
 
 function canonicalCharacterEffect(
@@ -1119,6 +1410,162 @@ function readSpecies(
         'content_key', 'name', 'rules_edition', 'creature_type', 'size',
         'alternate_size', 'base_speed_feet',
       ], 'template_'),
+  });
+}
+
+function readSpeciesV2(
+  db: DatabaseContext,
+  contentKey: ContentKey,
+  references: StoredAuthoredReferenceResolverV1,
+): SpeciesProjectorAggregateV2 {
+  const definitionRaw = db.oneRaw(
+    'SELECT * FROM species_definitions WHERE content_key = ?',
+    [contentKey],
+  );
+  if (definitionRaw === null) {
+    return readSpecies(db, contentKey, references) as SpeciesProjectorAggregateV2;
+  }
+  const templateRaw = db.oneRaw(
+    'SELECT * FROM species_templates WHERE content_key = ?',
+    [contentKey],
+  );
+  if (templateRaw === null) {
+    return projectionError(`species '${contentKey}' is incomplete or missing.`);
+  }
+  const root = db.one(
+    `SELECT definition.name AS definition_name,
+            definition.rules_edition AS definition_edition,
+            definition.repeatable, definition.grant_rules, definition.notes,
+            template.id AS template_id, template.name AS template_name,
+            template.rules_edition AS template_edition,
+            template.creature_type, template.size, template.alternate_size,
+            template.base_speed_feet
+     FROM species_definitions AS definition
+     JOIN species_templates AS template
+       ON template.content_key = definition.content_key
+     WHERE definition.content_key = ?`,
+    [contentKey],
+    (row) => ({
+      name: sqlString(row, 'definition_name'),
+      edition: sqlString(row, 'definition_edition'),
+      repeatable: sqlBoolean(row, 'repeatable'),
+      grant_rules: sqlNullableString(row, 'grant_rules'),
+      notes: sqlNullableString(row, 'notes'),
+      template_id: sqlInteger(row, 'template_id'),
+      template_name: sqlString(row, 'template_name'),
+      template_edition: sqlString(row, 'template_edition'),
+      creature_type: sqlCreatureType(row, 'creature_type'),
+      size: sqlCreatureSize(row, 'size'),
+      alternate_size: row.alternate_size === null
+        ? null
+        : sqlCreatureSize(row, 'alternate_size'),
+      base_speed_feet: sqlInteger(row, 'base_speed_feet'),
+    }),
+  );
+  if (root === null) return projectionError(`species '${contentKey}' is incomplete or missing.`);
+  if (root.name !== root.template_name || root.edition !== root.template_edition) {
+    return projectionError(`species '${contentKey}' definition/template metadata disagree.`);
+  }
+  const projectedRules = projectStoredSourceRulesV2(
+    db,
+    root.grant_rules,
+    references,
+    'species grant_rules',
+  );
+  return attachStoredFields({
+    kind: 'species',
+    name: nonEmpty(root.name, 'species name'),
+    rules_edition: rulesEdition(root.edition),
+    reference_text: root.notes ?? '',
+    repeatable: root.repeatable,
+    creature_type: root.creature_type,
+    primary_size: root.size,
+    alternate_size: root.alternate_size,
+    walking_speed_feet: root.base_speed_feet,
+    traits: readSpeciesTraits(db, root.template_id),
+    source_rules: projectedRules.sourceRules,
+  }, {
+    ...storedSemanticFields(definitionRaw, [
+      'content_key', 'name', 'rules_edition', 'repeatable', 'grant_rules',
+      'notes', 'category', 'prerequisites',
+    ], 'definition_'),
+    ...storedSemanticFields(templateRaw, [
+      'content_key', 'name', 'rules_edition', 'creature_type', 'size',
+      'alternate_size', 'base_speed_feet',
+    ], 'template_'),
+  }) as SpeciesProjectorAggregateV2;
+}
+
+export function projectStoredSpeciesContentV2(
+  db: DatabaseContext,
+  contentKey: ContentKey,
+  references: StoredAuthoredReferenceResolverV1,
+): SpeciesProjectorContractV2 {
+  const aggregate = readSpeciesV2(db, contentKey, references);
+  return projectSpeciesContentAggregateV2(aggregate);
+}
+
+export function projectSpeciesContentAggregateV2(
+  aggregate: SpeciesProjectorAggregateV2,
+): SpeciesProjectorContractV2 {
+  if ('definition_state' in aggregate) {
+    const projected = projectAuthoredContentAggregateV1(
+      aggregate as SpeciesProjectorAggregateV1,
+    );
+    return projected as unknown as SpeciesProjectorContractV2;
+  }
+  if (!Array.isArray(aggregate.source_rules)) {
+    return projectionError('species source_rules must be a list.');
+  }
+  const sourceRules = aggregate.source_rules.map((rule, index) => {
+    const label = `species source_rules[${String(index)}]`;
+    const record = jsonObject(rule, label);
+    return record.kind === 'configured_choice'
+      ? validatedPortableConfiguredChoiceV2(rule, label)
+      : validatedPortableGrantV2(rule, label);
+  });
+  const canonicalRules = sourceRules.map((rule) =>
+    rule.kind === 'configured_choice'
+      ? canonicalConfiguredChoiceV2(rule)
+      : canonicalGrant(rule));
+  const payload: SpeciesProjectorPayloadV2 = {
+    reference_text: canonicalRuleText(aggregate.reference_text),
+    repeatable: aggregate.repeatable,
+    source_rules: contentIdentitySequence(canonicalRules),
+    creature_type: canonicalOpenPassthroughValue(aggregate.creature_type),
+    primary_size: canonicalOpenPassthroughValue(aggregate.primary_size),
+    alternate_size: aggregate.alternate_size === null
+      ? null
+      : canonicalOpenPassthroughValue(aggregate.alternate_size),
+    walking_speed_feet: aggregate.walking_speed_feet,
+    traits: contentIdentitySequence(aggregate.traits.map((trait) => ({
+      name: trait.name,
+      description: canonicalRuleText(trait.description),
+      effects: contentIdentitySequence(trait.effects.map(canonicalSpeciesCharacterEffect)),
+    }))),
+  };
+  const materialGrants = sourceRules.flatMap((rule) =>
+    rule.kind === 'configured_choice'
+      ? rule.options.flatMap((option) => option.grants)
+      : [rule]);
+  const replacementReferences = sourceRules.flatMap((rule) =>
+    rule.kind === 'configured_choice'
+      ? rule.options.flatMap((option) =>
+          option.replaceable_spell_choice === null
+            ? []
+            : [{
+                role: 'grant.fixed_spell' as const,
+                reference: option.replaceable_spell_choice.initial_spell,
+              }])
+      : []);
+  return Object.freeze({
+    kind: 'species',
+    aggregate,
+    payload,
+    references: Object.freeze([
+      ...grantReferences(materialGrants),
+      ...replacementReferences,
+    ]),
   });
 }
 

@@ -38,29 +38,17 @@
  * D59 that extract is the licensing surface: SRD 5.2.1 under CC-BY is
  * authorized to ship, and nothing here is taken from anywhere else.
  *
- * WHAT IS CONDITIONAL AND WHAT IS NOT. Every lineage benefit hangs on a
- * choice the source itself demands — "Choose a lineage from the Elven
- * Lineages table" — and that choice is a cardinality nothing in this
- * application models yet. Those rules are therefore gated with
- * `active_if_config` on {@link LINEAGE_CHOICE_CONFIG_KEY}: they are the
- * DESCRIPTION of the rules, dormant until something records the choice, and
- * they fire the moment a source instance's config carries it. Exactly one
- * spell in the three species is unconditional — the Tiefling's Thaumaturgy,
- * which `Otherworldly Presence` grants to every Tiefling regardless of
- * legacy — and it is the one spell the guided builder can honestly deliver
- * today (D33: granting a lineage's spells without the lineage would be a
- * guess wearing a fact's clothes).
+ * WHAT IS CONDITIONAL AND WHAT IS NOT. Every lineage benefit hangs inside one
+ * closed `configured_choice` descriptor. `SourceRuleReader` expands only the
+ * option named at {@link LINEAGE_CHOICE_CONFIG_KEY}; an absent choice expands
+ * no nested material grant. Exactly one spell in the three species remains a
+ * root rule: Tiefling's unconditional Thaumaturgy.
  *
  * TWO LIMITS OF THE RULE VOCABULARY, STATED RATHER THAN PAPERED OVER:
  *
- *  - The level-3 and level-5 spells are gated `active_from_class_level`,
- *    which for a non-class source reads `class_level` from the INSTANCE
- *    CONFIG (`src/grants/source-rule-reader.ts`, `classLevelForSource`) — and
- *    THROWS if the config lacks it. The SRD gates these on CHARACTER level;
- *    `class_level` is the machinery's only affordance, exact at creation
- *    (one class, level 1) and the level-up unit's to maintain. Every writer
- *    of a species source instance must therefore include `class_level` in
- *    its config, and the guided builder does.
+ *  - The level-3 and level-5 spells use `active_from_character_level`, read
+ *    from the character's actual total class levels. No species config value
+ *    pretends to be character level.
  *  - The Forest Gnome's Speak with Animals allows "a number of times equal
  *    to your Proficiency Bonus" of slot-free casts. `free_cast.uses` is a
  *    fixed positive integer; a literal 2 would be right at level 1 and
@@ -78,6 +66,7 @@ import {
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import { GrantRule } from '../grants/grant-rule';
+import { parseSourceGrantRules } from '../grants/configured-choice-rule';
 import { BUNDLED_ORIGIN_RULES_EDITION } from './origins-srd';
 
 type GrantRuleSeed = Readonly<Record<string, unknown>>;
@@ -201,10 +190,6 @@ function lineageCantripRule(
     spell_version_key: spellKey(spell),
     bucket: 'cantrip_known',
     with_slots: false,
-    active_if_config: {
-      key: LINEAGE_CHOICE_CONFIG_KEY,
-      equals: option,
-    },
   };
 }
 
@@ -233,30 +218,92 @@ function lineageLeveledRule(
       recovery: 'long_rest',
       pool_scope: 'per_spell',
     },
-    active_from_class_level: characterLevel,
-    active_if_config: {
-      key: LINEAGE_CHOICE_CONFIG_KEY,
-      equals: option,
-    },
+    active_from_character_level: characterLevel,
   };
 }
 
-function lineageRules(
+function materialRulesForLineage(
   speciesSlug: string,
-  lineages: readonly LineageOption[],
+  lineage: LineageOption,
 ): GrantRuleSeed[] {
   const rules: GrantRuleSeed[] = [];
-  for (const lineage of lineages) {
-    for (const cantrip of lineage.cantrips) {
+  for (const cantrip of lineage.cantrips) {
+    if (!(speciesSlug === 'elf' && lineage.option === 'High Elf')) {
       rules.push(lineageCantripRule(speciesSlug, lineage.option, cantrip));
     }
-    for (const [characterLevel, spell] of lineage.leveled) {
-      rules.push(
-        lineageLeveledRule(speciesSlug, lineage.option, characterLevel, spell),
-      );
-    }
+  }
+  for (const [characterLevel, spell] of lineage.leveled) {
+    rules.push(
+      lineageLeveledRule(speciesSlug, lineage.option, characterLevel, spell),
+    );
   }
   return rules;
+}
+
+function configuredChoiceRule(
+  speciesSlug: 'elf' | 'gnome' | 'tiefling',
+  label: string,
+  lineages: readonly LineageOption[],
+): GrantRuleSeed {
+  const unknownSheetFields = speciesSlug === 'elf'
+    ? ['walking_speed_feet', 'darkvision_feet']
+    : speciesSlug === 'tiefling'
+      ? ['damage_resistances']
+      : [];
+  return {
+    kind: 'configured_choice',
+    rule_key: `${speciesSlug}-lineage`,
+    label,
+    config_key: LINEAGE_CHOICE_CONFIG_KEY,
+    required: true,
+    ability_choice: {
+      config_key: 'spellcasting_ability',
+      options: ['intelligence', 'wisdom', 'charisma'],
+    },
+    unknown_sheet_fields: unknownSheetFields,
+    projected_trait_names: speciesSlug === 'elf' ? ['Darkvision'] : [],
+    options: lineages.map((lineage) => {
+      const effects = speciesSlug === 'elf' && lineage.option === 'Wood Elf'
+        ? [{ kind: 'speed', label: 'Wood Elf Speed', speed_bonus_feet: 5 }]
+        : speciesSlug === 'tiefling'
+          ? [{
+              kind: 'damage_resistance',
+              label: `${lineage.option} Legacy`,
+              damage_type: lineage.option === 'Abyssal'
+                ? 'Poison'
+                : lineage.option === 'Chthonic'
+                  ? 'Necrotic'
+                  : 'Fire',
+            }]
+          : [];
+      return {
+        value: lineage.option,
+        label: lineage.option,
+        sheet: speciesSlug === 'elf'
+          ? { darkvision_feet: lineage.option === 'Drow' ? 120 : 60 }
+          : {},
+        effects,
+        grants: [
+          ...materialRulesForLineage(speciesSlug, lineage),
+          ...(speciesSlug === 'gnome' && lineage.option === 'Forest Gnome'
+            ? [forestGnomeSpeakWithAnimalsRule()]
+            : []),
+        ],
+        replaceable_spell_choice:
+          speciesSlug === 'elf' && lineage.option === 'High Elf'
+            ? {
+                config_key: 'lineage.high_elf_cantrip',
+                label: 'High Elf cantrip',
+                required: true,
+                spell_list: 'Wizard',
+                spell_level: 0,
+                initial_spell_version_key: spellKey('Prestidigitation'),
+                display_on_sheet: true,
+              }
+            : null,
+      };
+    }),
+  };
 }
 
 /**
@@ -272,10 +319,6 @@ function forestGnomeSpeakWithAnimalsRule(): GrantRuleSeed {
     bucket: 'prepared',
     always_prepared: true,
     with_slots: true,
-    active_if_config: {
-      key: LINEAGE_CHOICE_CONFIG_KEY,
-      equals: 'Forest Gnome',
-    },
   };
 }
 
@@ -301,7 +344,7 @@ export interface BundledSpeciesDefinition {
 }
 
 /**
- * The three definitions, every rule VALIDATED through `GrantRule.fromObject`
+ * The definitions, every source rule validated through the closed union parser
  * before it can be seeded — a typo'd kind or a malformed gate throws at boot
  * instead of sitting in the database until `SourceRuleReader` trips on it in
  * the middle of someone's species application.
@@ -311,22 +354,19 @@ export function bundledSpeciesDefinitions(): readonly BundledSpeciesDefinition[]
     {
       content_key: `${BUNDLED_ORIGIN_RULES_EDITION}:species:elf`,
       name: 'Elf',
-      grant_rules: lineageRules('elf', ELVEN_LINEAGES),
+      grant_rules: [configuredChoiceRule('elf', 'Elven Lineage', ELVEN_LINEAGES)],
     },
     {
       content_key: `${BUNDLED_ORIGIN_RULES_EDITION}:species:gnome`,
       name: 'Gnome',
-      grant_rules: [
-        ...lineageRules('gnome', GNOMISH_LINEAGES),
-        forestGnomeSpeakWithAnimalsRule(),
-      ],
+      grant_rules: [configuredChoiceRule('gnome', 'Gnomish Lineage', GNOMISH_LINEAGES)],
     },
     {
       content_key: `${BUNDLED_ORIGIN_RULES_EDITION}:species:tiefling`,
       name: 'Tiefling',
       grant_rules: [
         otherworldlyPresenceRule(),
-        ...lineageRules('tiefling', FIENDISH_LEGACIES),
+        configuredChoiceRule('tiefling', 'Fiendish Legacy', FIENDISH_LEGACIES),
       ],
     },
     {
@@ -343,9 +383,7 @@ export function bundledSpeciesDefinitions(): readonly BundledSpeciesDefinition[]
     },
   ];
   for (const definition of definitions) {
-    for (const rule of definition.grant_rules) {
-      GrantRule.fromObject(rule);
-    }
+    parseSourceGrantRules(definition.grant_rules);
   }
   return definitions;
 }

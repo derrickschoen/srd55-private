@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { sha256 } from '../../../src/crypto/sha256';
 import {
   COLUMN_REFINEMENTS,
   NARROWED_REFINEMENTS,
@@ -130,6 +131,29 @@ function catalogContentSupersessionRow(): Record<string, unknown> {
     superseded_content_key: '2024:test.owner:armadillo-v1',
     successor_content_key: '2024:test.owner:armadillo-v2',
     recorded_at: '2026-08-06T10:01:00.000Z',
+  };
+}
+
+function catalogContentFingerprintRow(): Record<string, unknown> {
+  const canonicalJson = '{"scheme":"content-v2"}';
+  return {
+    content_kind: 'species',
+    fingerprint_scheme: 'content-v2',
+    fingerprint_digest: sha256(canonicalJson),
+    canonical_json: canonicalJson,
+    content_key: '2024:species:elf',
+    fingerprint_role: 'current',
+  };
+}
+
+function catalogContentMatchDecisionRow(): Record<string, unknown> {
+  return {
+    content_kind: 'species',
+    incoming_fingerprint_scheme: 'content-v2',
+    incoming_fingerprint_digest: 'c'.repeat(64),
+    decision: 'match',
+    target_content_key: '2024:species:elf',
+    reviewed_at: '2026-08-09T10:01:00.000Z',
   };
 }
 
@@ -382,6 +406,29 @@ describe('per-table row contracts', () => {
         'Catalog supersession',
       ),
     ).toContain('Catalog supersession.content_kind:');
+  });
+
+  it('admits content-v2 and refuses content-v3 in both scheme-bearing row contracts', () => {
+    const cases = [
+      [
+        'catalog_content_fingerprints',
+        catalogContentFingerprintRow(),
+        'fingerprint_scheme',
+      ],
+      [
+        'catalog_content_match_decisions',
+        catalogContentMatchDecisionRow(),
+        'incoming_fingerprint_scheme',
+      ],
+    ] as const;
+    for (const [table, row, field] of cases) {
+      const label = `Content-v2 ${table}`;
+      expect(rowContractError(table, row, label), table).toBeNull();
+      expect(
+        rowContractError(table, { ...row, [field]: 'content-v3' }, label),
+        table,
+      ).toContain(`${label}.${field}:`);
+    }
   });
 
   it('refuses an unknown column, which would become an INSERT identifier', () => {

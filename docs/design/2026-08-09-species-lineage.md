@@ -11,6 +11,14 @@ spellcasting-ability choice are real character state), D64 (all-10s is valid, so
 an ability must never be inferred from score strength), and D70 (an unmade
 choice is saveable, named, and never silently completed).
 
+> **D231 amendment — 2026-08-09.** D231 is newer and binding: lineage does
+> not gate advancement from the species step, the High Elf cantrip is a
+> modeled replaceable wizard-list choice whose selected spell is data and is
+> shown on the sheet, and the one-time reconciliation is registered as a
+> checksum-frozen catalog-data migration with its explicit behavioral source
+> boundary declared under D226. The dated notes below amend the affected sections
+> visibly; the original design history is not being silently replaced.
+
 ## 1. Problem and reproduced finding
 
 B3 is reproducible from `artifacts/polish-sweep/` without inference:
@@ -43,7 +51,7 @@ exactly D33's forbidden outcome.
 | New character schema? | **No.** `character_source_instances.config` already exists (`db/schema/character.ts:219-267`) and share wire v1 already carries a source's JSON config (`src/sharing/wire-schemas/v1.ts:154-163`). |
 | New catalog schema? | **One constraint/index migration, no new column/table.** The descriptor stays in `species_definitions.grant_rules` (`db/schema/catalog-sources.ts:99-125`), but the three v1-only scheme CHECKs must admit v2 and “current” must become unique per content key across schemes (`db/schema/catalog-content.ts:44-68`, `:258-320`, `:360-409`). Character tables are untouched. |
 | Any mint? | **One content-identity mint, no character/share mint.** `content-v1` is frozen (`src/catalog/content-identity.ts:6-25`; `src/catalog/authored-content-projector-contract-v1.ts:149-179`), so U2 adds `content-v2` and leaves every v1 vector byte-identical. The existing source-config JSON field and v18 `portableContent` JSON position carry the character/config and v2 aggregate without a new character column or share tuple/version (`src/sharing/wire-schemas/v18.ts:12-29`). |
-| New top-level builder step? | **No.** Lineage is the second panel of the existing species step. The step remains incomplete until every required configured choice and its required ability are valid. |
+| New top-level builder step? | **No.** Lineage is edited inside the existing species step, but D231 says it does not gate step advancement. An unchosen lineage remains named incomplete character state and produces `UNKNOWN` sheet facts. |
 | How are spells granted? | The selected option's nested ordinary grant rules are expanded by `SourceRuleReader`; `GrantRuleSlotGenerator` remains the only materializer. |
 | What is shown before selection? | `UNKNOWN` on the face of the sheet for every field the descriptor marks lineage-dependent, plus one named completeness item. No 30-foot or 60-foot fallback. |
 | Existing Elf with no lineage? | It remains saved, becomes species-incomplete, and projects the dependent values as unknown. No default lineage and no inferred ability are backfilled. |
@@ -79,6 +87,25 @@ The exact keys are deliberate:
   Bundled choices are validated against their definition; imported/homebrew
   option strings remain passthrough data. The ability is closed to
   Intelligence, Wisdom, or Charisma for these three bundled descriptors.
+
+High Elf adds one more source-owned config value:
+
+```json
+{
+  "lineage": {
+    "chosen_option": "High Elf",
+    "high_elf_cantrip": "2024:prestidigitation"
+  },
+  "spellcasting_ability": "intelligence"
+}
+```
+
+> **D231 amendment — 2026-08-09.** `lineage.high_elf_cantrip` records the
+> selected spell by stable content key, not name or row id. It is absent when
+> High Elf is not selected. The configured-choice option declares the allowed
+> Wizard list, cantrip level, sourced initial Prestidigitation reference, and
+> sheet-display requirement. Long-Rest replacement timing remains rule prose;
+> no rest/session state is introduced.
 
 The writer preserves unrelated config keys. New species apply stops creating
 `class_level`; the choice writer also removes that one obsolete key as explicit
@@ -122,8 +149,25 @@ interface ConfiguredChoiceOption {
   }>;
   readonly effects: readonly CharacterEffectSeed[];
   readonly grants: readonly GrantRuleObject[];
+  readonly replaceable_spell_choice: null | {
+    readonly config_key: string; // 'lineage.high_elf_cantrip'
+    readonly label: string;
+    readonly required: true;
+    readonly spell_list: string; // 'Wizard'
+    readonly spell_level: 0;
+    readonly initial_spell_version_key: string;
+    readonly display_on_sheet: true;
+  };
 }
 ```
+
+> **D231 amendment — 2026-08-09.** The replaceable spell choice is nested in
+> the selected `ConfiguredChoiceOption`, rather than being a second root rule
+> kind. That makes its availability identity-bearing with High Elf, avoids a
+> duplicate activation gate, and keeps `GrantRule.fromObject` closed. The
+> configured-choice parser owns this closed nested shape; content-v2 replaces
+> `initial_spell_version_key` with a spell fingerprint reference before
+> canonicalization, exactly as it does for nested fixed-spell grants.
 
 This is DATA because the complete option set, its displayed labels, dependent
 sheet fields, mechanical effects, and material grant rules live in the stored
@@ -217,7 +261,7 @@ conditional.
 | Species / option | Unknown until chosen | Option effects / projection | Nested grants |
 |---|---|---|---|
 | Elf / Drow | walking speed, Darkvision | Darkvision 120; no speed effect (base remains 30) | Dancing Lights at 1; Faerie Fire at total level 3; Darkness at 5 |
-| Elf / High Elf | walking speed, Darkvision | Darkvision 60; no speed effect | Prestidigitation at 1; Detect Magic at 3; Misty Step at 5 |
+| Elf / High Elf | walking speed, Darkvision | Darkvision 60; no speed effect; required replaceable Wizard cantrip choice initially sourced as Prestidigitation and displayed on the sheet | Detect Magic at 3; Misty Step at 5 |
 | Elf / Wood Elf | walking speed, Darkvision | Darkvision 60; `speed` effect +5 | Druidcraft at 1; Longstrider at 3; Pass without Trace at 5 |
 | Gnome / Forest Gnome | no numeric sheet field | no added numeric effect | Minor Illusion and always-prepared Speak with Animals at 1 |
 | Gnome / Rock Gnome | no numeric sheet field | no added numeric effect | Mending and Prestidigitation at 1 |
@@ -250,10 +294,14 @@ mechanical field keys are closed; option names and user-facing labels are data.
 
 ### 3.4 Explicitly retained limits
 
-- High Elf's Long Rest cantrip replacement remains printed rule text in this
-  unit. U2 grants the sourced initial Prestidigitation and does not invent
-  session/rest state. A later replaceable-fixed-slot unit may model the
-  replacement cadence.
+- High Elf's selected wizard-list cantrip is modeled and displayed. Only the
+  Long-Rest timing remains printed rule text: U2 records a replaceable selected
+  spell and the sourced initial Prestidigitation without inventing session/rest
+  state or enforcing when replacement occurs.
+
+> **D231 amendment — 2026-08-09.** This replaces the original deferral of the
+> High Elf cantrip swap. The persistent choice and replacement capability are
+> in U2; only rest-cadence enforcement remains prose.
 - Forest Gnome's proficiency-bonus number of slot-free Speak with Animals casts
   cannot be represented by today's fixed `free_cast.uses` shape. U2 continues
   to grant the spell as always prepared and castable with slots, without
@@ -280,16 +328,20 @@ The existing species route (`src/ui/screens/guided-builder/screen.ts:88-99`)
 renders one of two panels from one species-step state read:
 
 1. With no copied species, show the current species cards and apply the choice.
-2. With a species that declares a required configured choice and lacks a valid
-   answer, show its lineage options and casting-ability select in the same
-   species step. Save/reload/share at this point is valid.
-3. With no required configured choice, or with all required fields valid, the
-   next derived step is background.
+2. Applying a species advances to background whether or not its configured
+   lineage choice is valid. Save/reload/share with the answer absent is valid.
+3. Navigating back to species shows the lineage options, casting-ability
+   select, and any option-specific replaceable spell choice in that same step.
 
 Explicitly navigating back to an already-complete species step shows the current
 option and ability selected and permits replacement through the same command;
 automatic routing still advances to background. This is the surface used by the
 Drow → Wood reconciliation pin—replacement is not a hidden test-only API.
+
+> **D231 amendment — 2026-08-09.** Species copied-row existence remains the
+> guided step-advance predicate. `SpeciesChoiceResolution` below feeds the
+> named completeness item and honest projection, never routing. An unchosen
+> lineage therefore advances, nags, and projects dependent facts as `UNKNOWN`.
 
 The lineage and ability submit is one atomic command. Its input carries
 `character_id`, the option value, the ability, `operation_uuid`, and
@@ -318,16 +370,18 @@ type SpeciesChoiceResolution =
   | { readonly kind: 'unresolvable'; readonly reason: string };
 ```
 
-`speciesComplete` is true only for `complete`. A species definition with no
+`speciesComplete` is true only for `complete`, but it is a character
+completeness fact rather than the guided step-advance gate. A species definition with no
 configured choice remains complete when its copied row exists. A required
 choice is incomplete when its option is absent, unknown, its ability is absent,
 or its ability is outside the descriptor's allowed set. Malformed bundled data
 fails the seed; malformed imported data is `unresolvable`, never treated as no
 choice required.
 
-The guided step, sheet projection, and character completeness query all consume
-this same resolver. This prevents a repeat of B3, where three surfaces each
-invented what “species chosen” meant.
+The guided species editor, sheet projection, and character completeness query
+all consume this same resolver. Guided routing deliberately does not: under
+D231 it advances on copied-row existence. This prevents a repeat of B3 without
+turning a named missing answer into a blocker.
 
 The existing literal disclosure machinery is then deleted, not preserved:
 
@@ -531,6 +585,34 @@ to refuse character compatibility machinery, not as a reason to conceal the
 missing choice. The lossless v1→v2 projector protects frozen content identity;
 it does not default character state.
 
+> **D231/D226 amendment — 2026-08-09.** Step 3 is a registered
+> checksum-frozen catalog-data migration, not an unregistered boot pass. Its
+> `sources` declaration freezes the migration implementation, lineage seed,
+> configured-choice and material-rule parsers, source-rule reader,
+> planner/generator, stored v2 species projector, identity kernel, and
+> fingerprint reconciler. The generator boundary includes its skill-grant,
+> skill-expertise, spell-selection eligibility/constraint, and character-level
+> runtime dependencies: they decide projections, valid selections, or whether a
+> material rule is active for this migration's row set. A change to any declared
+> behavioral source moves the checksum.
+>
+> This is the D226 restatement option: the freeze covers migration-specific row
+> selection, seed/rule interpretation, gate calculation, grant planning and
+> materialization, and content-v2 identity/reconciliation. It excludes the
+> generic catalog-migration registry/transaction runner, database adapters and
+> SQL codecs, the SHA-256 primitive, type-only/domain declarations, and UI/RPC/
+> boot callers. Those modules provide execution, validation, hashing, types, or
+> scheduling; they do not decide this migration's rows or their reconciled
+> semantics. If an excluded infrastructure module begins making such a
+> decision, it becomes an in-boundary behavioral source and must be declared.
+>
+> **D231 delivery note — 2026-08-09.** U2-A leaves today's species card honest
+> but minimal: an unchosen Elf still names “an Elven Lineage” in the card's
+> required-choices completeness copy, while a plain species says it has no
+> further choice. The old flat-rule “lineage spells arrive…” copy no longer
+> matches the configured-choice seed. U2-C restores the richer lineage
+> disclosure alongside the real lineage controls.
+
 ## 8. Implementation dispatch
 
 1. **U2-A — data contract, content-v2, schema, and seed.** Add the
@@ -538,8 +620,9 @@ it does not default character state.
    the per-scheme current index through the next Drizzle migration; mint the
    scheme/adjacent projector and exhaustive scheme-dispatched registry/portable
    validation while freezing v1; replace flat gated bundled lineage rules with
-   the three descriptors; add `active_from_character_level`; register/reconcile
-   bundled v2 versions.
+   the three descriptors including High Elf's nested replaceable wizard-cantrip
+   choice; add `active_from_character_level`; register/reconcile bundled v2
+   versions through the D226-frozen catalog-data migration.
 2. **U2-B — shared resolution and command.** Add one resolver, species-step
    state/RPC, the revisioned atomic choice command, and generic configured-choice
    effect reconciliation.
@@ -581,11 +664,13 @@ without a way to choose, is not a valid intermediate release.
 
 **Flow/completion pins**
 
-- Apply Elf: the row and source exist, `current_step` is still `species`, config
-  contains no guessed choice, and reload returns the lineage panel.
+- Apply Elf: the row and source exist, `current_step` advances to `background`,
+  config contains no guessed choice, the named completeness item remains, and
+  navigating back/reloading species returns the lineage panel.
 - Select each Elf option table-driven with each allowed ability: config is
-  exact, `current_step` advances to `background`, and the spell routes report
-  the selected ability.
+  exact, `current_step` remains `background`, and the spell routes report the
+  selected ability. High Elf also records and displays its replaceable selected
+  Wizard cantrip, initially Prestidigitation.
 - Gnome and Tiefling use the same state/RPC/command path; no species-name branch
   is present (a structural grep/ast-grep control).
 - Dwarf (no descriptor) remains complete on copied-row existence, proving the
@@ -657,8 +742,8 @@ These are ruling-driven replacements, not deletions to reach green:
   ability, reconciliation, and shared Gnome/Tiefling coverage. Keep source
   ownership, replacement, atomicity, and idempotence tests.
 - `tests/integration/builder/guided-build-state.test.ts:79-102`: retain the
-  descriptor-free copied-species control and add a lineage source whose copied
-  row alone does not advance.
+  copied-species step-advance predicate for descriptor-free and lineage species;
+  add the latter's independent named-completeness and `UNKNOWN` controls.
 - `tests/unit/rules/origins-srd.test.ts:144-152`, `:218-258`, `:324-361`, and
   `:410-431`: the prose parser pins stay; add descriptor-to-prose linkage and
   move Tiefling's unresolved resistance expectation to selected-option data.
@@ -668,10 +753,9 @@ These are ruling-driven replacements, not deletions to reach green:
   `tests/unit/ui/sheet-view.test.ts:1637-1642`: replace nullable generic speed
   assertions with the known/unknown union and stale-base negative control.
 - `tests/unit/ui/equipment-step.test.ts:300` and
-  `tests/browser/acceptance-walkthrough.spec.ts:233`: keep the completion copy,
-  but ensure any lineage species used by a fixture has actually completed its
-  choice first. Add one browser journey that stops at species after applying
-  Elf and advances only after option plus ability.
+  `tests/browser/acceptance-walkthrough.spec.ts:233`: keep the completion copy.
+  A lineage fixture may advance with the choice absent, but its completeness
+  item and `UNKNOWN` projections remain until the choice is recorded.
 - Source projection/import, backup, sharing codec, and column-portability suites
   do **not** gain a new table/tuple expectation. They gain semantic config and
   content-closure round trips.

@@ -12,6 +12,7 @@ import type {
   GrantRuleKey,
   SpellVersionId,
 } from '../domain/ids';
+import type { CharacterLevel } from '../domain/enums';
 import type { JsonObject } from '../domain/models';
 import { GrantRule, type GrantRuleObject } from './grant-rule';
 
@@ -41,6 +42,7 @@ export interface GrantRulePlanInput {
   readonly configured_rules: readonly GrantRuleObject[];
   readonly config: JsonObject;
   readonly effective_class_level: ClassLevel | null;
+  readonly effective_character_level?: CharacterLevel | null;
 }
 
 function valueAtPath(value: unknown, path: string): unknown {
@@ -156,6 +158,13 @@ export class GrantRulePlanner {
         rule.activeFromClassLevel !== null &&
         (input.effective_class_level === null ||
           input.effective_class_level < rule.activeFromClassLevel)
+      ) {
+        continue;
+      }
+      if (
+        rule.activeFromCharacterLevel !== null &&
+        (input.effective_character_level == null ||
+          input.effective_character_level < rule.activeFromCharacterLevel)
       ) {
         continue;
       }
