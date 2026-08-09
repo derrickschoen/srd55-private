@@ -1,15 +1,14 @@
 # Monastic Tradition: Warrior of the Barbed Court
 
-Target rules: SRD 5.2.1 (D&D 2024). Licence: CC-BY-4.0; attribution notice in
-§8. This document is the full rewrite of 2026-08-09, incorporating every
-owner ruling recorded in `../rulings.md` from 2026-08-05 through 2026-08-09.
-Where this document and the guidelines disagree, a measurement decides;
-where it and `rulings.md` disagree, the rulings file wins.
+Target rules: SRD 5.2.1 (D&D 2024). Licence: CC-BY-4.0; attribution notice
+in §8. First publication draft (2026-08-10), incorporating every owner
+ruling through 2026-08-10 and two independent publication reviews.
 
-Terminology: *ki* and *Focus Points* are two names for one resource
-(project-wide ruling, 2026-08-07). This document says Focus Points. "Ki save
-DC" and "Focus save DC" are likewise one number: 8 + your proficiency bonus
-+ your Wisdom modifier.
+Terminology: your **Focus save DC** = 8 + your Proficiency Bonus + your
+Wisdom modifier. Your Focus Point pool is your Monk level (base class rule,
+restated here because this subclass spends it constantly). *Barbed Court
+spells* means the spells and cantrips you know or have prepared through
+this subclass's Spellcasting feature.
 
 ## 1. Identity
 
@@ -25,26 +24,41 @@ warded air, and a wall of unseen palms; enemies who dare attack anyone else
 are slapped back into line. Wisdom drives everything: the eye that reads an
 opponent's vanity is the same eye that guides the striking hand.
 
+## Features by level (index)
+
+| Monk level | Features |
+|---|---|
+| 3 | Barbed Court Spellcasting · Court Cantrips · Barbed Goad · Faces of the Court · Court Forms · Wisdom-Guided Strikes · Courtier's Slap · The Standing Hand · Innate Sorcery of the Court |
+| 6 | Court Spells row · Focus Refresh · Warding Image · Unshaken Aim · Barbed Fists +1 |
+| 11 | Court Spells row · Hands of the Barbed Court · Barbed Fists +2 |
+| 17 | Court Spells row · Focus-Casting · A Gift of the Court · The Rebuking Shield · Hands ×2 · Barbed Fists +3 |
+
 ## 2. Barbed Court Spellcasting (Monk 3)
 
 You have learned to cast spells through the discipline of the Court.
-**Wisdom is your spellcasting ability** for these spells.
+**Wisdom is your spellcasting ability** for Barbed Court spells. Your spell
+save DC is your Focus save DC; your **spell attack modifier** is your
+Wisdom modifier + your Proficiency Bonus.
 
 **Spell list.** Your spells come from the **Bard spell list**, plus the
-spells granted by the Court Spells table below.
+grafted spells named below.
 
-**Preparation.** The Chosen Spells column of the table below shows how many
-Bard spells you can have prepared. Whenever you finish a **Long Rest**, you
-can change your list of prepared spells (the SRD Cleric pattern, verbatim).
-In addition, whenever you finish a **Short Rest**, you can replace **one**
-prepared spell with another Bard spell for which you have spell slots.
+**Preparation.** The Chosen Spells column below shows how many spells you
+can have prepared; you can prepare any Bard-list spell **of a level for
+which you have spell slots** (and, from Monk 17, spells of level 4).
+Whenever you finish a **Long Rest**, you can change your list of prepared
+spells. Whenever you finish a **Short Rest**, you can replace one prepared
+spell.
 
 **Ritual casting.** You can cast a prepared spell as a Ritual if it has the
 Ritual tag.
 
 **Cantrips.** You know **Shocking Grasp, Chill Touch, Ray of Frost, Vicious
 Mockery, Mage Hand,** and **Guidance**, plus **two** Bard cantrips of your
-choice. Chosen cantrip picks are permanent.
+choice. Chosen cantrip picks are permanent. Of the granted six, *Mage Hand*
+and *Vicious Mockery* are Bard-native; **Guidance, Shocking Grasp, Chill
+Touch and Ray of Frost are deliberate grafts** from outside the Bard list,
+as are *Shield* and *Fire Shield* below.
 
 **Court Spells (always prepared, not counted against Chosen Spells):**
 
@@ -54,10 +68,6 @@ choice. Chosen cantrip picks are permanent.
 | 6 | *Mirror Image*, *Hold Person* |
 | 11 | *Slow*, *Fear* |
 | 17 | *Compulsion*, *Fire Shield* (see the Rebuking Shield, §3) |
-
-*Shield*, *Ray of Frost* and *Fire Shield* are deliberate grafts from
-outside the Bard list; every other granted spell is Bard-native and its
-seat buys always-prepared certainty rather than access.
 
 ### Spellcasting table, Monk 3–20
 
@@ -89,16 +99,18 @@ seat buys always-prepared certainty rather than access.
 > slots exist at Monk 3.) **Chosen Spells:** the *Paladin Features* table's
 > Prepared Spells column, read at your Monk level. No non-SRD table was
 > consulted; both recipes reproduce every cell from licensed text alone.
-> Owner rulings 2026-08-07/08.
 
 ### The Focus-magic clauses
 
-- **Court Cantrips (Monk 3).** When you spend one or more Focus Points, you
-  can cast one cantrip you know that has a casting time of an Action as
-  part of that expenditure (no action required). Once per turn.
+- **Court Cantrips (Monk 3).** When you spend one or more Focus Points —
+  for any feature, this subclass's or the Monk's — you can cast one cantrip
+  you know that has a casting time of an Action as part of that expenditure
+  (no action required). Once per turn.
 - **Focus Refresh (Monk 6).** You can spend Focus Points to regain one of
   your expended spell slots (no action required). The cost is 2 Focus
-  Points per level of the slot regained.
+  Points per level of the slot regained. *(Deliberately uncapped: the
+  design accepts a rich short-rest slot economy as this subclass's engine;
+  see §5.)*
 - **Focus-Casting (Monk 17).** You can cast any spell you have prepared
   that has a casting time of an Action by spending Focus Points equal to
   the spell's level instead of a spell slot.
@@ -107,37 +119,49 @@ seat buys always-prepared certainty rather than access.
 - **No Focus-cast spell is ever upcast.** A spell cast by spending Focus
   Points is cast at its base level; excess points buy nothing. Slots
   regained by Focus Refresh are ordinary slots and upcast normally. *Focus
-  buys volume at base level; slots buy height.*
+  buys volume at base level; slots buy height.* (The SRD's
+  one-spell-slot-per-turn rule constrains only slots; Focus-cast spells and
+  the free Court Cantrip don't expend slots — deliberate.)
 
 ## 3. Subclass Features
 
 ### Level 3: Barbed Goad
 
 When you hit a creature with a melee attack, you can spend 1 Focus Point to
-goad it into a duel — an insult spoken aloud or delivered as a slap, sneer,
-or gesture. For 1 minute, the target has Disadvantage on attack rolls
-against creatures other than you, and must succeed on a Wisdom saving throw
-against your Focus save DC to move more than 30 feet away from you. The
-effect ends early if you attack a different creature, if one of your allies
-damages the target or targets it with a harmful spell, or on the target's
-successful save to withdraw. Goading a second creature does not end an
-existing goad, and attacking a creature you have goaded does not end your
-goads on others. While a goaded creature is within 5 feet of your Mage
-Hand, it also has Disadvantage on attack rolls against creatures other
-than you from the hand's distracting presence.
+goad it into a duel — an insult spoken aloud, or delivered as a slap,
+sneer, or gesture. For 1 minute, the goaded creature has Disadvantage on
+attack rolls against creatures other than you. When it tries to move more
+than 30 feet away from you, it must first succeed on a Wisdom saving throw
+against your Focus save DC; **on a failed save, it can't willingly move
+more than 30 feet away from you until the start of its next turn.**
+
+The effect ends early on the goaded creature if you attack a creature you
+have not goaded, if one of your allies damages it or targets it with a
+harmful spell, or when it succeeds on the withdrawal save above. You can
+goad more than one creature; goading a second creature does not end an
+existing goad. There is no save to resist the goad itself — the bind lands
+on the hit (a deliberate design choice; the escape hatches above are the
+counterplay).
 
 ### Level 3: Faces of the Court
 
-You can cast *Mirror Image* without expending a spell slot a number of
-times equal to your Proficiency Bonus, regaining all uses when you finish a
-Long Rest.
+You can cast *Mirror Image* without expending a spell slot, using Wisdom as
+the spellcasting ability, a number of times equal to your Proficiency
+Bonus. You regain all uses when you finish a Long Rest.
 
 ### Level 3: Court Forms
 
-Your Unarmed Strikes have the Light and Finesse properties, and one weapon
-mastery property of your choice from **Slow, Topple, Push, Sap,** or
-**Graze**. You can change the chosen property when you finish a Short or
-Long Rest.
+Your Unarmed Strikes have the Light and Finesse properties, and you can use
+one weapon mastery property of your choice from **Slow, Topple, Push, Sap,**
+or **Graze** with your Unarmed Strikes — even though you lack the Weapon
+Mastery feature, and treating your Unarmed Strike as the weapon for the
+property's rules. You can change the chosen property when you finish a
+Short or Long Rest.
+
+*(Knock-ons, stated: Graze on an Unarmed Strike deals Bludgeoning damage
+equal to your Wisdom modifier and is not increased by Barbed Fists; Topple's
+save DC equals your Focus save DC. Granting mastery properties to Unarmed
+Strikes is this document's largest deliberate deviation from SRD rules.)*
 
 ### Level 3: Wisdom-Guided Strikes
 
@@ -148,34 +172,42 @@ attack and damage rolls of your Unarmed Strikes.
 
 Once on each of your turns when you take the Attack action and make an
 Unarmed Strike, you can also have a spectral hand appear and slap one
-creature within 10 feet of you as part of that action. Make a melee spell
-attack against the target; on a hit, it takes Psychic damage equal to one
-roll of your Martial Arts die + your Wisdom modifier. The hand then
-vanishes. Against a target within 5 feet of you the slap counts as an
-Unarmed Strike; against a farther target it counts as a ranged weapon
-attack. This attack works whether or not your Mage Hand is present, doesn't
-require your Bonus Action, and doesn't count as the extra attack of a
-weapon's Light property.
+creature within 10 feet of you as part of that action, then vanish. **The
+slap is an Unarmed Strike if the target is within 5 feet of you** (so
+Wisdom-Guided Strikes, Barbed Fists, your mastery property, Stunning
+Strike, and the goad's melee trigger all apply); **against a farther target
+it is a ranged weapon attack** that uses your Wisdom modifier for the
+attack and damage rolls (a deliberate deviation — declared, not implied)
+and gains none of those riders. In either mode, on a hit the target takes
+Psychic damage equal to one roll of your Martial Arts die + your Wisdom
+modifier. The slap works whether or not your Mage Hand is present, and
+doesn't consume your Bonus Action or count against your Bonus Action
+Unarmed Strikes.
 
 ### Level 3: The Standing Hand
 
-When you cast *Mage Hand*, its duration is 8 hours, and the hand can
-deliver your goad's fiction anywhere it reaches (the Herald). While your
-Mage Hand is present, when you take the Attack action, any of your Unarmed
-Strikes can be delivered by the hand, targeting creatures within 10 feet of
-you.
+When you cast *Mage Hand*, its duration is 8 hours, and the hand can carry
+your goad's insult — the slap, sneer, or gesture can visibly come from the
+hand anywhere it reaches (fiction only; the goad's trigger and range are
+unchanged). While your Mage Hand is present, **the Unarmed Strikes you make
+as part of the Attack action have a reach of 10 feet**, delivered by the
+hand. (Bonus Action strikes and Flurry of Blows keep their normal reach.)
 
 ### Level 3: Innate Sorcery of the Court
 
 You can spend 2 Focus Points (no action required) to unleash the Court's
-simmering magic for 1 minute: the spell save DC of your Monk spells
-increases by 1, and you have Advantage on the attack rolls of Monk spells
-you cast. (Adapted from the SRD Sorcerer feature; the activation action and
-use limit are replaced by the Focus cost.)
+simmering magic for 1 minute: the spell save DC of your Barbed Court spells
+increases by 1, and you have Advantage on the attack rolls of Barbed Court
+spells you cast. The effect doesn't stack with itself; activating it again
+restarts the duration. It does not apply to the Courtier's Slap, which is
+not a spell.
 
 ### Level 6: Warding Image
 
 An illusory after-image attends you: you gain a +2 bonus to Armor Class.
+(It stacks with Unarmored Defense and with the *Shield* spell; it is an
+illusion in fiction but its bonus is not suppressed by *see invisibility*
+or similar — it works until the doc says otherwise.)
 
 ### Level 6: Unshaken Aim
 
@@ -209,16 +241,14 @@ is **Psychic** in either mode (the resistance choice is unchanged), and the
 flames or frost are visible only as a shimmer of affronted dignity.
 
 *(The rest of level 17 lives in §2: Focus-Casting, A Gift of the Court, the
-Compulsion and Fire Shield rows, and the Hands' damage doubling.)*
+*Compulsion* and *Fire Shield* rows, and the Hands' damage doubling.)*
 
 ## 4. Resource and Tracking Summary
 
 | Per turn (the only two counters) | Per Short Rest | Per Long Rest |
 |---|---|---|
 | Courtier's Slap (once/turn) | Focus pool (= Monk level) — funds the goad, Flurry, Court Cantrips trigger, Refresh, Innate Sorcery, the Hands, Focus-Casting | Faces of the Court (PB uses) |
-| Court Cantrips (one free cantrip/turn) | Mastery property swap | Spell preparation (full swap) |
-| | One prepared-spell swap | A Gift of the Court (1 use) |
-| | | Spell slots |
+| Court Cantrips (one free cantrip/turn) | Mastery property swap · one prepared-spell swap | Full spell re-preparation · A Gift of the Court · spell slots |
 
 Everything else is passive or a lingering condition that expires on its
 own. Design rule, owner-set: the subclass never exceeds two per-turn
@@ -226,73 +256,72 @@ counters.
 
 ## 5. Power-Budget Worksheet
 
-All figures from the 2026-08-09 Monte Carlo (2,000 fights × 4 rounds, pure
-2024 rules, no Elven Accuracy): two enemies (2 attacks each, +8, 2d6+4),
-one goad-bound to the monk, one defecting to the party's fighter 50% of
-rounds; cleric, wizard and fighter present as targets; monk AC 18;
-Concentration checked on every hit taken (Con save +2 vs DC 10); *Shield*
-slot-cast up to twice as a Reaction; enemy AC 18.
+All figures from the corrected Monte Carlo of 2026-08-10 (post-audit:
+thousands of 4-round combats per point; two enemies — one goad-bound to the
+monk, one defecting to the party's fighter half the time; party present;
+monk base AC 18 with Warding Image; Concentration checked on every hit
+taken; *Shield* slot-cast as a Reaction; enemy AC 14/16/18/18 at levels
+3/6/11/17). The run includes the Monk base class's three-strike Flurry from
+level 10 (Heightened Focus), which an earlier draft of this worksheet
+missed.
 
-| Build | L11 DPR | L17 DPR |
-|---|---:|---:|
-| **Barbed Court, final kit** | **78.8** | **115.0** |
-| Optimized Dex Vengeance Paladin (Vow, Nick, smite/round) | 54 | 64 |
-| Veteran rogue (this project; Steady Aim, doubled SA) | 59 | 97 |
-| Straight Champion Fighter (GWM, Graze, Action Surge) | 49 | 60 |
-| Warrior of the Mystic Arts (Arcana Unleashed), same env | 30 | 41 |
-| Way of the Arcane Hand (2024 conversion, Haste-upcast), same env | 36 | 52 |
-| Straight Valor Bard (CME rider volleys; dummy figures) | 89 | 225 |
-| Draconic 3 / Lore 8+ CME-ray multiclass (dummy figures) | 155 | 306 |
-
-Feature contribution at AC 18 (DPR lost when removed):
-
-| | L11 | L17 |
-|---|---:|---:|
-| Hands of the Barbed Court | −22.0 | −43.1 |
-| Advantage (the hands' second clause) | −16.5 | −22.6 |
-| Courtier's Slap | −15.6 | −23.7 |
-| Barbed Fists ladder | −11.1 | −18.9 |
-| Court Cantrips (*Ray of Frost* line) | −13.1 | −20.6 |
-| Graze mastery | −1.0 | −0.5 |
+| Build | L3 | L6 | L11 | L17 |
+|---|---:|---:|---:|---:|
+| **Barbed Court, this kit** | **16.2** | **40.9** | **90.5** | **138.5** |
+| Optimized Dex Vengeance Paladin (melee ref.) | 19.5 | 31.2 | 52.2 | 60.8 |
+| Veteran rogue (this project) | 25.1 | 32.8 | 64.5 | 108.9 |
+| SRD Thief | 18.4 | 23.7 | 37.2 | 64.2 |
+| Champion Fighter, greatsword | 10.8 | 26.7 | 43.8 | 52.3 |
+| Fiend Warlock (best of EB/volleys/blade) | 12.9 | 25.1 | 41.1 | 64.5 |
+| Legal CME-nova caster (third-party-free build, dummy target) | — | — | 129 | 265 |
 
 Recorded caveats, both directions:
 
 1. **The sim undercounts the tank.** The goad's redirect value, the duel's
-   damage prevention, *Fire Shield*'s ~+11 enemy-turn retaliation, healing,
-   and every defensive spell score at or near zero here. The Barbed Court's
+   damage prevention, *Fire Shield*'s enemy-turn retaliation, healing, and
+   every defensive spell score at or near zero here. The Barbed Court's
    party value exceeds its DPR column by design.
-2. **The sim overcounts uptime.** The dummy pair swings four attacks a
-   round; harder encounters break Concentration faster, and the hands are
-   44–56% of the kit's damage.
-3. **Growth**: 11→17 is +46% — between the Paladin's +16% and the Veteran's
-   +64%, far under the caster exponential (+89–145%), by deliberate
-   doctrine: the average holds near 1.5–1.8× the best-optimized martial and
-   the caster race is not entered. The two full-caster rows are dummy-only
-   figures and would drop under return fire (both concentrate on their
-   riders); they are ceilings, not peers.
+2. **The sim overcounts uptime.** Harder encounters break Concentration
+   faster, and the Hands (rider + Advantage together) are the largest
+   single block of the kit's damage — roughly a third at 11 and 17 by
+   marginal-removal tests on the pre-correction run (non-additive marginals;
+   re-derivation pending).
+3. **Ratios, stated plainly**: 0.83× / 1.31× / 1.73× / 2.28× the optimized
+   Paladin, and 0.65× / 1.25× / 1.40× / 1.27× this project's own Veteran.
+   Growth 11→17 is +53%. Both ratios rose in the 2026-08-10 audit chiefly
+   because the corrected Paladin fell and the monk gained the missed
+   base-class Flurry strike — an owner review of the 11/17 ratios is on
+   record as welcome, not required.
+4. **The caster race is not entered**: 90.5/129 = 0.70× at 11 and
+   138.5/265 = 0.52× at 17 against the strongest legal nova build measured.
+5. Levels 3–5 are the kit's weakest window (0.83× the paladin) — the Hands
+   don't exist yet; the front-load doctrine begins at 6.
 
 ## 6. Failure-Taxonomy Pass
 
+(The F-codes are this project's internal checklist of common homebrew
+failure modes; verdicts are design review, not playtest.)
+
 | Check | Verdict |
 |---|---|
-| F3 Dip Bait | **Amber-high, owner-accepted.** Three Monk levels buy Wisdom-based Martial Arts, the slap, six cantrips + two chosen, four prepared Bard spells with Cleric-pattern re-preparation, rituals, the goad, and PB free *Mirror Image* casts. Every later engine (Hands, Refresh, ladder, Focus-Casting) is 6+ locked. Recorded for outsider-reading tests; the front-load doctrine is the owner's stated intent. |
-| F5 Advantage Faucet | Green post-consolidation: the kit's one Advantage source is the Hands (11+, Focus-priced, Concentration-fragile). Innate Sorcery affects spell attacks only; Topple mastery grants prone, not stacking advantage. |
+| F3 Dip Bait | **Amber-high, owner-accepted.** Three Monk levels buy Wisdom-based Martial Arts, the slap, six cantrips + two chosen, four prepared Bard spells with full re-preparation, rituals, the goad, and PB free *Mirror Image* casts. Every later engine (Hands, Refresh, ladder, Focus-Casting) is 6+ locked. |
+| F5 Advantage Faucet | Green post-consolidation: the kit's one Advantage source is the Hands (11+, Focus-priced, Concentration-fragile). |
 | F6 Action Congestion | Green: two per-turn counters by rule; the Bonus Action holds exactly Flurry-vs-Hands-manifest-vs-Step-of-the-Wind. |
-| F8 Stacking Blindness | Warding Image +2 stacks with *Shield* (slot-cast) to AC ~25 for a round; recorded. The Hands' Advantage does not stack with anything (Advantage doesn't). |
-| F12 Niche Trespass | Two proximity notes, both mechanically unprotectable and differently-chassised: the 10-foot Wisdom-delivered strikes parallel a known non-SRD spectral-arms monk; the goad parallels a known non-SRD barbarian taunt rider. Named as distance markers only. |
-| F14 Bounced Flavor Cheque | The psychic slap and Rebuking Shield blank on mindless creatures — accepted as fiction-true ("you cannot humiliate a zombie"). *Compulsion* row prepared at 17, castable the same level via Focus-Casting: no dead window survives. |
+| F8 Stacking Blindness | Unarmored Defense 16 + Warding Image = AC 18; + *Shield* = 23 for a round. The Hands' Advantage does not stack with anything (Advantage doesn't). |
+| F12 Niche Trespass | Two proximity notes, both mechanically unprotectable and differently-chassised: the 10-foot Wisdom-delivered strikes parallel a known non-SRD spectral-arms monk; the goad parallels a known non-SRD taunt rider. Unnamed by policy. |
+| F14 Bounced Flavor Cheque | The psychic slap and Rebuking Shield blank on mindless creatures — accepted ("you cannot humiliate a zombie"). **Dead windows, owner-accepted (ruling 2026-08-07)**: *Hold Person* is granted at 6 but 2nd-level slots arrive at 7; *Slow*/*Fear* at 11 vs 3rd-level slots at 13; *Compulsion*/*Fire Shield* at 17 are covered the same level by Focus-Casting. The early grants are a promise printed with the wait visible. |
 
-## 7. Distance Markers (non-SRD, named only, never sourced)
+## 7. Distance Notes (non-SRD, unnamed by policy)
 
-The 2024 revision's monk subclasses, the Arcana Unleashed Mystic Arts monk,
-the Dungeon Dudes' Arcane Hand, a spectral-arms monk tradition, a
-taunt-rider barbarian, and the *Compelled Duel* spell are all distance
-markers for this design: comparisons were made by measurement (see §5), and
-no text, table, or numeric progression from any of them appears here. The
-duel effect was rebuilt from its behavior as a non-spell feature; the
+The 2024 revision's monk subclasses, a recent official arcane-monk release,
+a well-known creator-published arcane-hand monk, a spectral-arms monk
+tradition, a taunt-rider barbarian, and a paladin dueling-bind spell are
+all distance markers for this design: comparisons were made by measurement,
+and no text, table, or numeric progression from any of them appears here.
+The duel effect was rebuilt from behavior as a non-spell feature; the
 spellcasting tables derive from SRD 5.2.1 alone (§2 design note).
 
-## 8. Clean-Room Sources and Licence
+## 8. Sources and Licence
 
 This work includes material from the System Reference Document 5.2.1
 ("SRD 5.2.1") by Wizards of the Coast LLC, available at
@@ -303,6 +332,5 @@ https://creativecommons.org/licenses/by/4.0/legalcode.
 This document is likewise released under **CC-BY-4.0**. Attribute as:
 "Warrior of the Barbed Court, © 2026 Derrick Schoen, CC-BY-4.0."
 
-Sources consulted: SRD 5.2.1 only, plus this project's own rulings record
-(`../rulings.md`) and simulation logs. No other game text was open during
-drafting.
+Sources: SRD 5.2.1 only, plus this project's own rulings record and
+simulation logs. No other game text was open during drafting.

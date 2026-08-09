@@ -5,6 +5,41 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-10 — Publication review loop (Opus + Sol) adjudicated; both docs rewritten as first publication drafts
+
+Two independent publication reviews returned ~45 findings; adjudicated and
+applied in one rewrite pass per doc. Accepted, highest-impact: the
+Courtier's Slap's two contradictory attack classifications (superseded text
+removed; classification-led wording, Wisdom declared in ranged mode); the
+Barbed Goad's missing failure consequence (the *Compelled Duel*-pattern
+"can't willingly move away" clause, dropped at ruling time, restored) plus
+save timing, a narrowed end condition ("a creature you have not goaded"),
+and deletion of the dead folded-Flourish clause; Court Forms' mastery
+unlock sentence (RAW, properties need an unlocking feature and a weapon)
+with Graze/Topple knock-ons printed; the max-prepared-level bound plus the
+Monk-17 level-4 clause that A Gift of the Court needs; the false
+Bard-graft sentence (four cantrip grafts, not one); stale worksheets
+rebuilt from the corrected board in both docs; third-party product and
+creator names stripped to unnamed markers; the Veteran's §5.1 table
+rebuilt to the Deeper-Cuts/level-dice engine (3/9/13/17 → 3d6/9d6/13d6/
+17d6); Old Reserves acknowledged as the second tracked resource; SRD 5.2 →
+5.2.1 attribution fixed with the CC-BY line added; internal jargon keyed
+or cut; feature index added to the monk doc.
+
+Rejected with reasons, on the record: the claim that SRD 5.2.1 lacks the
+one-spell-slot-per-turn rule (it is present — grep-verified in this
+session on 2026-08-07: "On a turn, you can expend only one spell slot to
+cast a spell"); dropping the ki-equivalence entirely (the terminology
+paragraph was trimmed instead — the equivalence remains recorded here and
+in the OGL doc's commentary); renaming Innate Sorcery of the Court (the
+suffix distinguishes it; the term "Barbed Court spells" was defined
+instead); splitting each doc into publish + dossier files (the
+transparency-appendix pattern with an F-code key was chosen — a later
+owner call can still split). Focus Refresh's uncapped economy is now a
+*stated* design decision in the doc rather than an omission.
+
+Both files committed as first publication drafts.
+
 ## 2026-08-10 — Collaborative audit (Opus + Sol): sim rebuilt after ~20 accepted findings; corrected boards on the record
 
 At the owner's direction, two independent model sessions audited every sim
