@@ -146,9 +146,9 @@ function sheet(changes: Partial<CharacterSheet> = {}): CharacterSheet {
         override_terms: [],
       },
     ],
-    hit_points: {
-      id: 'hit_points',
-      label: 'Hit point maximum',
+    class_hit_points_subtotal: {
+      id: 'class_hit_points_subtotal',
+      label: 'Class hit points subtotal',
       value: 54,
       formula: 'Per class, per level.',
     },
@@ -157,6 +157,12 @@ function sheet(changes: Partial<CharacterSheet> = {}): CharacterSheet {
       label: 'Species hit points',
       value: 8,
       formula: 'A species trait adds these.',
+    },
+    hit_point_maximum: {
+      id: 'hit_point_maximum',
+      label: 'Hit point maximum',
+      value: 62,
+      formula: 'The class subtotal plus the species contribution.',
     },
     armor_class: {
       id: 'armor_class',
@@ -1095,8 +1101,10 @@ describe('the character sheet is projected twice from one value', () => {
     const value = sheet();
     const parsed = sheetFacts(value);
 
-    expect(row(value, 'hit_points').value).toBe('54');
-    expect(parsed.hit_point_maximum).toBe(54);
+    expect(row(value, 'hit_point_maximum').value).toBe('62');
+    expect(parsed.hit_point_maximum).toBe(62);
+    expect(row(value, 'class_hit_points_subtotal').value).toBe('54');
+    expect(parsed.class_hit_points_subtotal).toBe(54);
     expect(row(value, 'armor_class').value).toBe('17');
     expect(parsed.armor_class).toBe(17);
     expect(row(value, 'proficiency_bonus').value).toBe('+3');
@@ -1112,9 +1120,9 @@ describe('the character sheet is projected twice from one value', () => {
     expect(textOf(row(value, 'skill:stealth').label)).toBe(
       'Stealth (proficient)',
     );
-    // The species contribution is printed apart AND summed, because a page
-    // showing only the class total would have a Dwarf short by their level.
-    expect(row(value, 'hit_points_with_species').value).toBe('62');
+    // The maximum is prominent while both source-separated terms remain
+    // visible and independently labelled.
+    expect(row(value, 'hit_point_maximum').value).toBe('62');
   });
 
   it('names Expertise on the skill face instead of leaving it only in the arithmetic', () => {
@@ -1239,8 +1247,9 @@ describe('the character sheet is projected twice from one value', () => {
       total_level: () => ids.has('total_level'),
       proficiency_bonus: () => ids.has('proficiency_bonus'),
       ability_modifiers: () => ids.has('ability:strength'),
-      hit_point_maximum: () => ids.has('hit_points'),
+      class_hit_points_subtotal: () => ids.has('class_hit_points_subtotal'),
       species_hit_points: () => ids.has('species_hit_points'),
+      hit_point_maximum: () => ids.has('hit_point_maximum'),
       armor_class: () => ids.has('armor_class'),
       armor_class_resolution: () => ids.has('armor_class:base'),
       initiative: () => ids.has('initiative'),

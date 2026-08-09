@@ -11,7 +11,11 @@ import {
   type LevelUpStateResult,
 } from '../../../src/builder/level-up-wizard';
 import { CharacterCrud } from '../../../src/queries/character-crud';
-import { LevelUpStateQuery } from '../../../src/queries/level-up-state';
+import {
+  LevelUpStateQuery,
+  SUBCLASS_HIT_POINT_EFFECT_KINDS,
+  SUBCLASS_NON_HIT_POINT_EFFECT_KINDS,
+} from '../../../src/queries/level-up-state';
 import { createQueriesClient } from '../../../src/queries/client';
 import {
   RpcClient,
@@ -241,6 +245,31 @@ describe('level-up wizard state RPC', () => {
     return new CharacterCrud(harness.context.db).create({ name }).id;
   }
 
+  it('classifies every schema-allowed subclass effect kind for HP inspection', () => {
+    const createSql = String(
+      harness.context.db.scalar(
+        `SELECT sql
+         FROM sqlite_schema
+         WHERE type = 'table' AND name = 'subclass_feature_effects'`,
+      ),
+    );
+    const kindCheck = createSql.match(
+      /CONSTRAINT "subclass_feature_effects_kind_check" CHECK\(`effect_kind` IN \(([^)]+)\)\)/u,
+    );
+    expect(kindCheck, createSql).not.toBeNull();
+    const schemaKinds = Array.from(
+      kindCheck?.[1]?.matchAll(/'([^']+)'/gu) ?? [],
+      (match) => match[1],
+    ).sort();
+    const inspectedKinds = [
+      ...SUBCLASS_HIT_POINT_EFFECT_KINDS,
+      ...SUBCLASS_NON_HIT_POINT_EFFECT_KINDS,
+    ].sort();
+
+    expect(new Set(inspectedKinds).size).toBe(inspectedKinds.length);
+    expect(schemaKinds).toEqual(inspectedKinds);
+  });
+
   function enterClass(
     characterId: number,
     name: string,
@@ -387,6 +416,45 @@ describe('level-up wizard state RPC', () => {
       name: option.name,
       rules_edition: option.rules_edition,
     }))).toEqual(EXPECTED_SUBCLASS_VARIANTS[4].options);
+    expect(fighterSubclassOption.gains.hit_points).toMatchObject({
+      kind: 'known',
+      projected_maximum: { kind: 'known', value: 28 },
+    });
+
+    const championFeatureId = Number(
+      harness.context.db.scalar(
+        `SELECT feature.id
+         FROM subclass_features AS feature
+         JOIN subclass_definitions AS subclass
+           ON subclass.id = feature.subclass_definition_id
+         WHERE subclass.content_key = '2024:subclass:champion'
+           AND feature.class_level <= 3
+         ORDER BY feature.class_level, feature.sort_order
+         LIMIT 1`,
+      ),
+    );
+    harness.context.db.exec(
+      `INSERT INTO subclass_feature_effects (
+         subclass_feature_id, sort_order, effect_kind,
+         hit_points_flat, label
+       ) VALUES (?, 99, 'hp_modifier', 1, 'Review HP control')`,
+      [championFeatureId],
+    );
+    const hpChangingSubclassState = await client.levelUpState(fighterId);
+    if (hpChangingSubclassState.kind !== 'ready') {
+      throw new Error('HP-changing Fighter subclass state was not ready.');
+    }
+    const hpChangingSubclassOption = hpChangingSubclassState.class_options[0];
+    if (hpChangingSubclassOption?.guideability !== 'guideable') {
+      throw new Error('HP-changing Fighter subclass option was not guideable.');
+    }
+    expect(hpChangingSubclassOption.gains.hit_points).toMatchObject({
+      kind: 'known',
+      projected_maximum: {
+        kind: 'pending_choice',
+        choices: ['subclass'],
+      },
+    });
 
     for (const expected of EXPECTED_SUBCLASS_VARIANTS) {
       if (expected.class_name === 'Fighter') continue;

@@ -13,6 +13,25 @@ import { sqlInteger, sqlNullableString, sqlString } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import { GUIDED_SPECIES_SOURCE_MARKER } from '../domain/source-markers';
 
+function recordedSourceContentKey(config: string | null): string | null {
+  if (config === null || config === '') return null;
+  try {
+    const decoded: unknown = JSON.parse(config);
+    if (
+      decoded === null ||
+      typeof decoded !== 'object' ||
+      Array.isArray(decoded) ||
+      !Object.hasOwn(decoded, 'source_content_key')
+    ) {
+      return null;
+    }
+    const value = Reflect.get(decoded, 'source_content_key');
+    return typeof value === 'string' && value !== '' ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Catalog provenance for content actually applied to one character.
  *
@@ -80,10 +99,12 @@ export function characterCatalogDisclosures(
     }
   }
 
-  const species = db.one(
+  const speciesCopy = db.one(
     `SELECT copied.name,
             definition.content_key,
-            identity.catalog_layer
+            identity.catalog_layer,
+            source.display_name AS source_display_name,
+            source.config AS source_config
      FROM character_species AS copied
      LEFT JOIN character_source_instances AS source
        ON source.character_id = copied.character_id
@@ -97,16 +118,60 @@ export function characterCatalogDisclosures(
       AND identity.content_key = definition.content_key
      WHERE copied.character_id = ?`,
     [GUIDED_SPECIES_SOURCE_MARKER, characterId],
-    (row): CharacterCatalogDisclosure => ({
-      kind: 'species',
+    (row) => ({
       name: sqlString(row, 'name'),
       content_key: sqlNullableString(row, 'content_key'),
       catalog_layer: catalogLayerDisclosure(
         sqlNullableString(row, 'catalog_layer'),
       ),
+      source_display_name: sqlNullableString(row, 'source_display_name'),
+      source_config: sqlNullableString(row, 'source_config'),
     }),
   );
-  if (species !== null) disclosures.push(species);
+  if (speciesCopy !== null) {
+    if (speciesCopy.content_key !== null) {
+      disclosures.push({
+        kind: 'species',
+        name: speciesCopy.name,
+        content_key: speciesCopy.content_key,
+        catalog_layer: speciesCopy.catalog_layer,
+      });
+    } else {
+      const recordedContentKey = recordedSourceContentKey(
+        speciesCopy.source_config,
+      );
+      const templateIdentity =
+        recordedContentKey === null ||
+        speciesCopy.source_display_name === null ||
+        speciesCopy.source_display_name !== speciesCopy.name
+          ? null
+          : db.one(
+              `SELECT template.content_key, identity.catalog_layer
+               FROM species_templates AS template
+               JOIN catalog_content_identities AS identity
+                 ON identity.content_kind = 'species'
+                AND identity.content_key = template.content_key
+               WHERE template.content_key = ?
+                 AND template.name = ?`,
+              [
+                recordedContentKey,
+                speciesCopy.source_display_name,
+              ],
+              (row) => ({
+                content_key: sqlString(row, 'content_key'),
+                catalog_layer: catalogLayerDisclosure(
+                  sqlNullableString(row, 'catalog_layer'),
+                ),
+              }),
+            );
+      disclosures.push({
+        kind: 'species',
+        name: speciesCopy.name,
+        content_key: templateIdentity?.content_key ?? null,
+        catalog_layer: templateIdentity?.catalog_layer ?? 'unknown',
+      });
+    }
+  }
 
   const background = db.one(
     `SELECT copied.name,
