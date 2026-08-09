@@ -66,7 +66,7 @@ function catalogSubclass(key: string): SubclassAuthoringDraft {
 
 describe('bundled homebrew catalog payload', () => {
   it('matches Veteran identity and feature prose independently from the authoritative markdown', () => {
-    const source = markdown('docs/homebrew/2026-08-04-rogue-veteran-subclass.md');
+    const source = markdown('docs/homebrew/cc-by/2026-08-04-rogue-veteran-subclass.md');
     const identity = section(source, "Owner's text, verbatim:", '## 2. Schedule');
     const features = featureProse(source, '## 3. Subclass Features (owner rules text, verbatim)', '## 4. Wording Notes');
     const veteran = catalogSubclass('veteran');
@@ -77,7 +77,7 @@ describe('bundled homebrew catalog payload', () => {
   });
 
   it('matches Barbed Court prose and publishes its complete Wisdom third-caster grants', () => {
-    const source = markdown('docs/homebrew/2026-08-03-monk-barbed-court.md');
+    const source = markdown('docs/homebrew/cc-by/2026-08-03-monk-barbed-court.md');
     const identity = section(source, 'OWNER-APPROVAL: Identity paragraph and ancestry disclosure.', '## 2. Level 3: Barbed Court Spellcasting');
     const features = featureProse(source, '## 3. Subclass Features', '## 4. Power-Budget Worksheet');
     const spellcasting = ['Cantrips', 'Prepared Spells', 'Spell Slots', 'Spellcasting Ability']

@@ -49,6 +49,13 @@ const BINARY_EXEMPT: readonly string[] = [
   'public/icons/app-icon-512.png',
 ];
 
+function isBinaryExempt(path: string): boolean {
+  // The guard protects text sources from silent grep failures; licensed OGL
+  // binary archives are outside that scope, narrowly limited to this zip tree.
+  return BINARY_EXEMPT.includes(path)
+    || (path.startsWith('docs/homebrew/ogl/') && path.endsWith('.zip'));
+}
+
 function trackedFiles(): string[] {
   return execFileSync('git', ['ls-files', '-z'], {
     cwd: repoRoot,
@@ -91,7 +98,7 @@ describe('tracked source is greppable', () => {
 
   it('contains no literal NUL byte anywhere', () => {
     const offenders = files
-      .filter((file) => !BINARY_EXEMPT.includes(file))
+      .filter((file) => !isBinaryExempt(file))
       .filter((file) => statSync(join(repoRoot, file)).isFile())
       .flatMap((file) => {
         const lines = nulLines(readFileSync(join(repoRoot, file)));

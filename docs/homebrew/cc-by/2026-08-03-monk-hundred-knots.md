@@ -36,19 +36,19 @@ D191. They are part of the subclass's power budget, not flavor beside it.
 At Monk level 10, you also know *Guidance*.
 
 All thirteen named spells are present in SRD 5.2.1:
-[*Ensnaring Strike*](../srd/full/srd-5.2.1.txt#L7966),
-[*Entangle*](../srd/full/srd-5.2.1.txt#L7988),
-[*Hunter's Mark*](../srd/full/srd-5.2.1.txt#L8917),
-[*Speak with Animals*](../srd/full/srd-5.2.1.txt#L10434),
-[*Pass without Trace*](../srd/full/srd-5.2.1.txt#L9591),
-[*Spike Growth*](../srd/full/srd-5.2.1.txt#L10462),
-[*Plant Growth*](../srd/full/srd-5.2.1.txt#L9751),
-[*Wind Wall*](../srd/full/srd-5.2.1.txt#L11147),
-[*Dominate Beast*](../srd/full/srd-5.2.1.txt#L7753),
-[*Locate Creature*](../srd/full/srd-5.2.1.txt#L9152),
-[*Druidcraft*](../srd/full/srd-5.2.1.txt#L7849),
-[*Produce Flame*](../srd/full/srd-5.2.1.txt#L9935), and
-[*Guidance*](../srd/full/srd-5.2.1.txt#L8696).
+[*Ensnaring Strike*](../../srd/full/srd-5.2.1.txt#L7966),
+[*Entangle*](../../srd/full/srd-5.2.1.txt#L7988),
+[*Hunter's Mark*](../../srd/full/srd-5.2.1.txt#L8917),
+[*Speak with Animals*](../../srd/full/srd-5.2.1.txt#L10434),
+[*Pass without Trace*](../../srd/full/srd-5.2.1.txt#L9591),
+[*Spike Growth*](../../srd/full/srd-5.2.1.txt#L10462),
+[*Plant Growth*](../../srd/full/srd-5.2.1.txt#L9751),
+[*Wind Wall*](../../srd/full/srd-5.2.1.txt#L11147),
+[*Dominate Beast*](../../srd/full/srd-5.2.1.txt#L7753),
+[*Locate Creature*](../../srd/full/srd-5.2.1.txt#L9152),
+[*Druidcraft*](../../srd/full/srd-5.2.1.txt#L7849),
+[*Produce Flame*](../../srd/full/srd-5.2.1.txt#L9935), and
+[*Guidance*](../../srd/full/srd-5.2.1.txt#L8696).
 
 The binding exclusions remain: *Thorn Whip* and *Grasping Vine* are absent from
 SRD 5.2.1 and do not appear in this subclass.
@@ -95,8 +95,8 @@ Proficiency Bonus.
 ## 3. Subclass Features
 
 The substantive feature schedule is 3, 6, 11, and 17, matching the SRD Monk
-and Warrior of the Open Hand schedule ([SRD Monk table](../srd/full/srd-5.2.1.txt#L3022)
-and [Open Hand](../srd/full/srd-5.2.1.txt#L3130)). Spellcasting is compact
+and Warrior of the Open Hand schedule ([SRD Monk table](../../srd/full/srd-5.2.1.txt#L3022)
+and [Open Hand](../../srd/full/srd-5.2.1.txt#L3130)). Spellcasting is compact
 support beside the level-3 engine.
 
 ### Level 3: Verdant Bindings

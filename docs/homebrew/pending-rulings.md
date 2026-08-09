@@ -43,15 +43,19 @@ public: CC0 for our original text, SRD notice retained.
 
 ## monk-barbed-court.md — Warrior of the Barbed Court (bard-list goad)
 
-- Identity paragraph / ancestry wording.
-- Scandalous Echo (11): 30-ft second-target carry, Focus costs — full text
-  awaiting approval.
-- Unanswerable Challenge (17): 3 Focus, 1 minute, repeat saves —
-  "provisional, control-duration amber" vs Quivering Palm.
-- F8 risk the doc flags itself: Vicious Mockery's Disadvantage may stack
-  with the Martial-Arts-die subtraction — does the stack overperform?
-- All playtest gaps unrun (acquisition, mid-tier, 11/17, harmed-seat,
-  table-speed).
+Rulings 2026-08-05 (`rulings.md`) settled nearly everything: exposure goad
+adopted (Advantage against the goaded target, **monk included** — F5
+amber-high, labeled); Faces of the Court at 3 (innate *Mirror Image*, PB
+free casts/LR, name approved); Spellwoven Flurry approved; Scandalous Echo
+structure approved (effect inherits exposure); Unanswerable Challenge
+converted to Disadvantage for table speed; ancestry line approved.
+Still open:
+
+- **Redrafted identity paragraph** (rewritten for the exposure goad; prior
+  approval covered the choice-pressure form) — one re-read.
+- All playtest gaps unrun, now led by the F5 stack tests (full party with a
+  rogue seat, VM-in-Flurry self-loop), plus Faces dip builds, harmed-seat,
+  table-speed.
 
 ## monk-ten-selves.md — Warrior of the Ten Selves (illusion/duplicates)
 
