@@ -159,7 +159,9 @@ test('a phone-width guided journey keeps the first level 1 screens and controls 
 test('an unchosen Elf lineage stays non-gating while the sheet changes from UNKNOWN to its chosen High Elf cantrip', async ({
   page,
 }) => {
-  test.setTimeout(45_000);
+  // Measured alone at 15.8s on Chromium; the required x1.5 reserve is 23.7s,
+  // rounded to 100ms.
+  test.setTimeout(23_700);
   await resetHome(page);
 
   await page.getByRole('link', { name: 'Create a character' }).click();

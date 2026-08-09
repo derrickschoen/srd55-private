@@ -1,3 +1,5 @@
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { SpellAccessBuilder } from '../../../src/access/spell-access-builder';
 import {
@@ -6,6 +8,7 @@ import {
   LINEAGE_SPELL_SPECIES_CONTENT_KEYS,
   type GuidedApplyOriginResult,
   type GuidedOriginOption,
+  type GuidedSpeciesChoiceStateResult,
 } from '../../../src/builder/contracts';
 import {
   applyGuidedOrigin,
@@ -15,7 +18,10 @@ import {
 } from '../../../src/builder/guided-creation';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { CharacterCommandExecutor } from '../../../src/commands/character-command-executor';
-import { ChooseSpeciesLineageCommand } from '../../../src/commands/choose-species-lineage';
+import {
+  ChooseSpeciesLineageCommand,
+  type SpeciesLineageRefusalReason,
+} from '../../../src/commands/choose-species-lineage';
 import { AllocateAbilitiesCommand } from '../../../src/commands/allocate-abilities';
 import { applicationSeed } from '../../../src/db/bootstrap';
 import type { DatabaseContext } from '../../../src/db/database';
@@ -40,6 +46,7 @@ import {
   speciesRuleSemanticCount,
   speciesRuleSemanticCountFromJson,
 } from '../../helpers/species-rule-census';
+import { raiseClassLevelForTest } from '../../helpers/class-levels';
 
 let harness: RpcHarness | undefined;
 
@@ -832,6 +839,66 @@ describe('configured species choice and honest projection', () => {
     });
   }
 
+  async function expectChoiceRefusal(
+    db: DatabaseContext,
+    characterId: number,
+    reason: SpeciesLineageRefusalReason,
+    suffix: string,
+  ): Promise<void> {
+    const before = new CharacterState(db).capture(characterId);
+    await expect(
+      choose(db, characterId, 'Drow', 'charisma', 0, suffix),
+    ).rejects.toMatchObject({ reason });
+    expect(new CharacterState(db).capture(characterId)).toEqual(before);
+  }
+
+  it('refuses a choice when the character has no guided species source', async () => {
+    const rpcHarness = await applicationDatabase();
+    const db = rpcHarness.context.db;
+    const characterId = createClassedCharacter(db, 'Missing Species Source');
+
+    await expectChoiceRefusal(
+      db,
+      characterId,
+      'guided_species_source_missing',
+      '1',
+    );
+  });
+
+  it('refuses a descriptor-free species through the real lineage command', async () => {
+    const rpcHarness = await applicationDatabase();
+    const db = rpcHarness.context.db;
+    const characterId = createClassedCharacter(db, 'No Configured Choice');
+    applyGuidedOrigin(db, {
+      character_id: characterId,
+      kind: 'species',
+      content_key: speciesNamed(db, 'Dwarf').content_key,
+    });
+
+    await expectChoiceRefusal(
+      db,
+      characterId,
+      'configured_choice_unavailable',
+      '2',
+    );
+  });
+
+  it('refuses a guided marker attached to a non-species source', async () => {
+    const rpcHarness = await applicationDatabase();
+    const db = rpcHarness.context.db;
+    const characterId = createClassedCharacter(db, 'Wrong Source Kind');
+    expect(
+      db.exec(
+        `UPDATE character_source_instances
+         SET notes = 'guided:species-apply'
+         WHERE character_id = ? AND source_type = 'class' AND state = 'active'`,
+        [characterId],
+      ).changes,
+    ).toBe(1);
+
+    await expectChoiceRefusal(db, characterId, 'wrong_source_kind', '3');
+  });
+
   it('exposes the pending Elven Lineage without gating advancement and projects literal UNKNOWN facts', async () => {
     const rpcHarness = await applicationDatabase();
     const db = rpcHarness.context.db;
@@ -908,6 +975,58 @@ describe('configured species choice and honest projection', () => {
         title: 'Elf — Elven Lineage not chosen',
       }),
     ]));
+  });
+
+  it('retains every printed Dwarf trait, including its Darkvision prose', async () => {
+    const rpcHarness = await applicationDatabase();
+    const db = rpcHarness.context.db;
+    const characterId = createClassedCharacter(db, 'Printed Dwarf Traits');
+    applyGuidedOrigin(db, {
+      character_id: characterId,
+      kind: 'species',
+      content_key: speciesNamed(db, 'Dwarf').content_key,
+    });
+
+    const traits = new CharacterSheetBuilder(db).build(characterId)
+      .printed_features.filter((feature) => feature.source === 'species_trait');
+    // Hand-pinned from the SRD extract: every descriptor-free trait remains
+    // printable, so name-based suppression cannot eat Dwarf's Darkvision.
+    expect(traits).toEqual([
+      {
+        source: 'species_trait',
+        source_name: 'Dwarf',
+        name: 'Darkvision',
+        text: 'You have Darkvision with a range of 120 feet.',
+      },
+      {
+        source: 'species_trait',
+        source_name: 'Dwarf',
+        name: 'Dwarven Resilience',
+        text:
+          'You have Resistance to Poison damage. You also have Advantage on ' +
+          'saving throws you make to avoid or end the Poisoned condition.',
+      },
+      {
+        source: 'species_trait',
+        source_name: 'Dwarf',
+        name: 'Dwarven Toughness',
+        text:
+          'Your Hit Point maximum increases by 1, and it increases by 1 again ' +
+          'whenever you gain a level.',
+      },
+      {
+        source: 'species_trait',
+        source_name: 'Dwarf',
+        name: 'Stonecunning',
+        text:
+          'As a Bonus Action, you gain Tremorsense with a range of 60 feet for ' +
+          '10 minutes. You must be on a stone surface or touching a stone ' +
+          'surface to use this Tremorsense. The stone can be natural or worked. ' +
+          'You can use this Bonus Action a number of times equal to your ' +
+          'Proficiency Bonus, and you regain all expended uses when you finish ' +
+          'a Long Rest.',
+      },
+    ]);
   });
 
   it.each([
@@ -1149,6 +1268,162 @@ describe('configured species choice and honest projection', () => {
     expect(chosen.damage_resistances).toEqual(['Fire']);
   });
 
+  it.each([
+    {
+      species: 'Gnome',
+      label: 'Gnomish Lineage',
+      option: 'Forest Gnome',
+      options: ['Forest Gnome', 'Rock Gnome'],
+      ability: 'intelligence' as const,
+      spells: ['Minor Illusion', 'Speak with Animals'],
+      resistance: null,
+      suffix: '351',
+    },
+    {
+      species: 'Gnome',
+      label: 'Gnomish Lineage',
+      option: 'Rock Gnome',
+      options: ['Forest Gnome', 'Rock Gnome'],
+      ability: 'wisdom' as const,
+      spells: ['Mending', 'Prestidigitation'],
+      resistance: null,
+      suffix: '352',
+    },
+    {
+      species: 'Tiefling',
+      label: 'Fiendish Legacy',
+      option: 'Abyssal',
+      options: ['Abyssal', 'Chthonic', 'Infernal'],
+      ability: 'charisma' as const,
+      spells: ['Poison Spray', 'Thaumaturgy'],
+      resistance: 'Poison',
+      suffix: '353',
+    },
+    {
+      species: 'Tiefling',
+      label: 'Fiendish Legacy',
+      option: 'Chthonic',
+      options: ['Abyssal', 'Chthonic', 'Infernal'],
+      ability: 'intelligence' as const,
+      spells: ['Chill Touch', 'Thaumaturgy'],
+      resistance: 'Necrotic',
+      suffix: '354',
+    },
+    {
+      species: 'Tiefling',
+      label: 'Fiendish Legacy',
+      option: 'Infernal',
+      options: ['Abyssal', 'Chthonic', 'Infernal'],
+      ability: 'wisdom' as const,
+      spells: ['Fire Bolt', 'Thaumaturgy'],
+      resistance: 'Fire',
+      suffix: '355',
+    },
+  ])(
+    'routes $species — $option through the shared state RPC and choice command',
+    async ({
+      species,
+      label,
+      option,
+      options,
+      ability,
+      spells,
+      resistance,
+      suffix,
+    }) => {
+      const rpcHarness = await applicationDatabase();
+      const db = rpcHarness.context.db;
+      const characterId = createClassedCharacter(db, `${option} Shared Path`);
+      const speciesOption = speciesNamed(db, species);
+      applyGuidedOrigin(db, {
+        character_id: characterId,
+        kind: 'species',
+        content_key: speciesOption.content_key,
+      });
+
+      const stateResponse = await rpcRegistry.dispatch({
+        id: 91,
+        method: GUIDED_RPC.speciesChoiceState,
+        params: { character_id: characterId },
+      }, rpcHarness.context);
+      expect(stateResponse).toMatchObject({ ok: true });
+      if (!stateResponse.ok) {
+        throw new Error('The shared species-choice state RPC refused.');
+      }
+      const state = stateResponse.result as GuidedSpeciesChoiceStateResult;
+      expect(state).toMatchObject({
+        kind: 'ready',
+        resolution: {
+          kind: 'incomplete',
+          source_name: species,
+          choices: [{ label }],
+        },
+      });
+      if (
+        state.kind !== 'ready' ||
+        (state.resolution.kind !== 'incomplete' &&
+          state.resolution.kind !== 'complete')
+      ) {
+        throw new Error('The shared resolver returned no configured choices.');
+      }
+      expect(
+        state.resolution.choices[0]?.options.map((candidate) => candidate.value),
+      ).toEqual(options);
+
+      const choiceResponse = await rpcRegistry.dispatch({
+        id: 92,
+        method: GUIDED_RPC.chooseSpeciesLineage,
+        params: {
+          character_id: characterId,
+          chosen_option: option,
+          spellcasting_ability: ability,
+          operation_uuid: operation(suffix),
+          expected_revision: 0,
+        },
+      }, rpcHarness.context);
+      expect(choiceResponse).toMatchObject({
+        ok: true,
+        result: {
+          character_id: characterId,
+          current_step: 'background',
+          revision: 1,
+          resolution: { kind: 'complete' },
+        },
+      });
+
+      expect(
+        JSON.parse(String(guidedSpeciesSources(db, characterId)[0]?.['config'])),
+      ).toEqual({
+        source_content_key: speciesOption.content_key,
+        lineage: { chosen_option: option },
+        spellcasting_ability: ability,
+      });
+      const routes = new SpellAccessBuilder(db)
+        .buildForCharacter(characterId)
+        .filter((route) => route.source_name === species);
+      expect(routes.map((route) => route.spell_name).sort()).toEqual(spells);
+      expect(new Set(routes.map((route) => route.spellcasting_ability))).toEqual(
+        new Set([ability]),
+      );
+      expect(
+        new CharacterSheetBuilder(db).build(characterId)
+          .lineage_damage_resistance,
+      ).toEqual(
+        resistance === null
+          ? null
+          : { kind: 'known', values: [resistance] },
+      );
+      expect(
+        db.allRaw(
+          `SELECT DISTINCT action_type
+           FROM change_log
+           WHERE character_id = ? AND operation_uuid = ?`,
+          [characterId, operation(suffix)],
+        ),
+      ).toEqual([{ action_type: 'choose_species_lineage' }]);
+    },
+  );
+
   it('reconciles level-3 lineage spells on real level-up and its snapshot inverse', async () => {
     const rpcHarness = await applicationDatabase();
     const db = rpcHarness.context.db;
@@ -1230,6 +1505,93 @@ describe('configured species choice and honest projection', () => {
     });
     expect(undo.status).toBe('applied');
     expect(spellNames()).toEqual(['Dancing Lights', 'Faerie Fire']);
+  });
+
+  it('retracts the level-5 Drow spell when real class removal lowers total level to 4', async () => {
+    const rpcHarness = await applicationDatabase();
+    const db = rpcHarness.context.db;
+    const characterId = createClassedCharacter(db, 'Drow Class Removal');
+    const primaryClassId = Number(db.scalar(
+      'SELECT class_definition_id FROM character_class_levels WHERE character_id = ?',
+      [characterId],
+    ));
+    raiseClassLevelForTest(db, characterId, primaryClassId, 4);
+    applyGuidedOrigin(db, {
+      character_id: characterId,
+      kind: 'species',
+      content_key: speciesNamed(db, 'Elf').content_key,
+    });
+    await choose(db, characterId, 'Drow', 'charisma', 0, '451');
+
+    const removedClassId = Number(db.scalar(
+      `SELECT id FROM class_definitions
+       WHERE id <> ? ORDER BY id LIMIT 1`,
+      [primaryClassId],
+    ));
+    const executor = new CharacterCommandExecutor(
+      db,
+      new CharacterCommandIntegrity('guided-lineage-command-test-key'),
+    );
+    const spellNames = () => new SpellAccessBuilder(db)
+      .buildForCharacter(characterId)
+      .filter((route) => route.source_name === 'Elf')
+      .map((route) => route.spell_name)
+      .sort();
+
+    await executor.execute({
+      character_id: characterId,
+      operation_uuid: operation('452'),
+      expected_revision: 1,
+      command: {
+        type: 'update_class',
+        class_definition_id: removedClassId,
+      },
+    });
+    expect(Number(db.scalar(
+      'SELECT SUM(level) FROM character_class_levels WHERE character_id = ?',
+      [characterId],
+    ))).toBe(5);
+    expect(spellNames()).toEqual(['Dancing Lights', 'Darkness', 'Faerie Fire']);
+
+    await executor.execute({
+      character_id: characterId,
+      operation_uuid: operation('453'),
+      expected_revision: 2,
+      command: {
+        type: 'update_class',
+        class_definition_id: removedClassId,
+        remove: true,
+      },
+    });
+    expect(Number(db.scalar(
+      'SELECT SUM(level) FROM character_class_levels WHERE character_id = ?',
+      [characterId],
+    ))).toBe(4);
+    expect(spellNames()).toEqual(['Dancing Lights', 'Faerie Fire']);
+  });
+
+  it('contains no bundled species-name branch in resolver, command, or reconciliation paths', () => {
+    const productionFiles = [
+      '../../../src/builder/species-choice.ts',
+      '../../../src/commands/choose-species-lineage.ts',
+      '../../../src/grants/character-level-source-reconciliation.ts',
+    ].map((relativePath) => fileURLToPath(new URL(relativePath, import.meta.url)));
+    const grep = spawnSync(
+      'rg',
+      [
+        '--line-number',
+        '--with-filename',
+        '--regexp',
+        String.raw`\b(?:Elf|Drow|Gnome|Tiefling)\b`,
+        ...productionFiles,
+      ],
+      { encoding: 'utf8' },
+    );
+
+    expect(grep.error).toBeUndefined();
+    expect(grep.stderr).toBe('');
+    expect(grep.stdout).toBe('');
+    expect(grep.status).toBe(1);
   });
 
   it('refuses invalid option, crossed ability, stale revision, and extra RPC keys without changing state', async () => {
