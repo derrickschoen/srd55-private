@@ -15,6 +15,7 @@ import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
 import type { HomebrewDraftUuid } from '../../../authoring/ids';
 import type { GuidedClassOption } from '../../../builder/contracts';
 import { createQueriesClient } from '../../../queries/client';
+import { RpcError } from '../../../rpc/protocol';
 import type { ScreenContext } from '../../screen';
 import { clear, element, listen, type Cleanup } from '../../dom';
 import { freeTextSpan } from '../../free-text';
@@ -37,8 +38,10 @@ import {
 } from './background-form';
 import {
   HOMEBREW_ARCHIVE_ROUTE,
+  HOMEBREW_MISSING_DRAFT_NOTICE,
   HOMEBREW_ROUTE,
   homebrewDeletePath,
+  homebrewMissingDraftPath,
   homebrewReplacementPath,
 } from './homebrew-routes';
 
@@ -46,6 +49,8 @@ export {
   HOMEBREW_ARCHIVE_ROUTE,
   HOMEBREW_ROUTE,
   homebrewDeletePath,
+  homebrewMissingDraftPath,
+  homebrewPublishedPath,
   homebrewReplacementPath,
 } from './homebrew-routes';
 
@@ -79,6 +84,51 @@ export function homebrewDraftPath(draftUuid: HomebrewDraftUuid): string {
 
 export function selectedHomebrewTab(value: string | null): HomebrewLibraryTab {
   return HOMEBREW_LIBRARY_TABS.find((tab) => tab.id === value)?.id ?? 'species';
+}
+
+interface PublishedRouteResult {
+  readonly outcome: 'created' | 'matched_existing';
+  readonly contentKey: string;
+  readonly name: string;
+  readonly catalogLayer: 'bundled' | 'external';
+  readonly previousUsageCount: number;
+  readonly previousKey: string | null;
+}
+
+function publishedRouteResult(query: URLSearchParams): PublishedRouteResult | null {
+  const outcome = query.get('publishOutcome');
+  const contentKey = query.get('publishedKey');
+  const name = query.get('publishedName');
+  const catalogLayer = query.get('publishedLayer');
+  const usageText = query.get('previousUsageCount');
+  if (
+    (outcome !== 'created' && outcome !== 'matched_existing') ||
+    contentKey === null ||
+    name === null ||
+    (catalogLayer !== 'bundled' && catalogLayer !== 'external') ||
+    usageText === null ||
+    !/^\d+$/u.test(usageText)
+  ) {
+    return null;
+  }
+  const previousUsageCount = Number(usageText);
+  if (!Number.isSafeInteger(previousUsageCount)) return null;
+  return {
+    outcome,
+    contentKey,
+    name,
+    catalogLayer,
+    previousUsageCount,
+    previousKey: query.get('previousKey'),
+  };
+}
+
+function draftNotFound(error: unknown): boolean {
+  if (!(error instanceof RpcError)) return false;
+  if (typeof error.data !== 'object' || error.data === null || Array.isArray(error.data)) {
+    return false;
+  }
+  return Reflect.get(error.data, 'reason') === 'draft_not_found';
 }
 
 export interface HomebrewLibraryRenderOptions {
@@ -624,6 +674,92 @@ function draftHeading(draft: StoredHomebrewDraft): HTMLElement {
   ]);
 }
 
+function publishedResultNotice(
+  context: ScreenContext,
+  cleanups: Cleanup[],
+  contentKind: AuthoredContentKind,
+  result: PublishedRouteResult,
+): { readonly root: HTMLElement; readonly heading: HTMLElement; readonly announcement: string } {
+  const headingText = result.outcome === 'created'
+    ? `${KIND_LABELS[contentKind]} published`
+    : 'Matched existing content';
+  const heading = element('h2', {
+    text: headingText,
+    attributes: { id: 'homebrew-publish-result-heading', tabindex: '-1' },
+  });
+  const name = element('p');
+  name.append(freeTextSpan(result.name));
+  const actions: HTMLElement[] = [routedLink(
+    context,
+    cleanups,
+    `View ${KIND_LABELS[contentKind].toLowerCase()} library`,
+    homebrewTabPath(contentKind),
+    'button-primary',
+  )];
+  if (
+    result.previousKey !== null &&
+    result.previousKey !== result.contentKey &&
+    result.previousUsageCount > 0
+  ) {
+    actions.push(routedLink(
+      context,
+      cleanups,
+      'Review character fixes',
+      homebrewReplacementPath(result.previousKey, result.contentKey),
+      'button-secondary',
+    ));
+  }
+  return {
+    root: element('section', {
+      className: `${contentKind}-publish-result panel`,
+      attributes: { 'aria-labelledby': 'homebrew-publish-result-heading' },
+    }, [
+      heading,
+      name,
+      badge(result.catalogLayer === 'external' ? 'Homebrew' : 'SRD',
+        result.catalogLayer === 'external' ? 'homebrew' : 'neutral'),
+      element('p', {
+        text: result.previousUsageCount === 0
+          ? 'No characters use a previous version.'
+          : `${String(result.previousUsageCount)} character(s) still use the previous version.`,
+      }),
+      element('div', { className: 'homebrew-card-actions' }, actions),
+    ]),
+    heading,
+    announcement: `${headingText}: ${result.name}. Homebrew library loaded.`,
+  };
+}
+
+function missingDraftNotice(
+  context: ScreenContext,
+  cleanups: Cleanup[],
+): { readonly root: HTMLElement; readonly heading: HTMLElement; readonly announcement: string } {
+  const heading = element('h2', {
+    text: 'Draft no longer exists',
+    attributes: { id: 'homebrew-missing-draft-heading', tabindex: '-1' },
+  });
+  return {
+    root: element('section', {
+      className: 'homebrew-missing-draft-notice panel',
+      attributes: { 'aria-labelledby': 'homebrew-missing-draft-heading' },
+    }, [
+      heading,
+      element('p', {
+        text: 'That draft was published or deleted. It is no longer available to edit.',
+      }),
+      routedLink(
+        context,
+        cleanups,
+        'View current drafts',
+        homebrewTabPath('drafts'),
+        'button-primary',
+      ),
+    ]),
+    heading,
+    announcement: 'Draft no longer exists. Homebrew library loaded.',
+  };
+}
+
 async function renderDraftRoute(
   context: ScreenContext,
   client: AuthoringClient,
@@ -731,7 +867,12 @@ export async function renderHomebrewLibrary(
     ? context.route.segments[2] as HomebrewDraftUuid
     : null;
   if (draftUuid !== null) {
-    await renderDraftRoute(context, client, draftUuid, cleanups, options.parentClasses);
+    try {
+      await renderDraftRoute(context, client, draftUuid, cleanups, options.parentClasses);
+    } catch (error) {
+      if (!draftNotFound(error)) throw error;
+      context.router.navigate(homebrewMissingDraftPath(), { replace: true });
+    }
     return () => {
       active = false;
       for (const dialog of dialogs.splice(0)) dialog.cleanup();
@@ -740,6 +881,14 @@ export async function renderHomebrewLibrary(
   }
 
   const selected = selectedHomebrewTab(context.route.query.get('tab'));
+  const selectedContentKind: AuthoredContentKind | null = selected === 'drafts'
+    ? null
+    : selected;
+  const publishResult = selectedContentKind === null
+    ? null
+    : publishedRouteResult(context.route.query);
+  const showMissingDraftNotice = selected === 'drafts' &&
+    context.route.query.get('notice') === HOMEBREW_MISSING_DRAFT_NOTICE;
   const view = shell(context, cleanups);
   const status = element('p', {
     className: 'homebrew-status',
@@ -754,7 +903,8 @@ export async function renderHomebrewLibrary(
       'aria-busy': 'true',
     },
   });
-  view.main.append(tabList(context, selected, cleanups), status, panel);
+  const noticeMount = element('div', { className: 'homebrew-route-notice' });
+  view.main.append(tabList(context, selected, cleanups), status, noticeMount, panel);
 
   const confirmDiscard = options.confirmDiscard ?? ((draft) =>
     window.confirm(`Discard ${draft.name || 'this untitled draft'}? This cannot be undone.`));
@@ -762,6 +912,25 @@ export async function renderHomebrewLibrary(
     if (!active) return;
     for (const cleanup of cardCleanups.splice(0)) cleanup();
     clear(panel);
+    clear(noticeMount);
+    let routeAnnouncement = 'Homebrew library loaded.';
+    let routeHeading: HTMLElement | null = null;
+    if (publishResult !== null && selectedContentKind !== null) {
+      const notice = publishedResultNotice(
+        context,
+        cardCleanups,
+        selectedContentKind,
+        publishResult,
+      );
+      noticeMount.append(notice.root);
+      routeAnnouncement = notice.announcement;
+      routeHeading = notice.heading;
+    } else if (showMissingDraftNotice) {
+      const notice = missingDraftNotice(context, cardCleanups);
+      noticeMount.append(notice.root);
+      routeAnnouncement = notice.announcement;
+      routeHeading = notice.heading;
+    }
     if (selected === 'drafts') {
       panel.append(element('h2', { text: 'Drafts' }));
       if (library.drafts.length === 0) {
@@ -803,8 +972,14 @@ export async function renderHomebrewLibrary(
       }
     }
     panel.setAttribute('aria-busy', 'false');
-    status.textContent = 'Homebrew library loaded.';
+    status.textContent = routeAnnouncement;
     status.setAttribute('role', 'status');
+    if (routeHeading !== null) {
+      const heading = routeHeading;
+      setTimeout(() => {
+        if (heading.isConnected) heading.focus();
+      }, 0);
+    }
   };
   const reload = async (): Promise<void> => {
     panel.setAttribute('aria-busy', 'true');

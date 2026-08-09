@@ -337,7 +337,8 @@ describe('HA-8 subclass timeline form', () => {
           };
         },
       });
-      const screenContext = context();
+      const navigated: string[] = [];
+      const screenContext = context(navigated);
       const mount = document.createElement('div');
       screenContext.root.append(mount);
       const draft = stored(empty);
@@ -435,7 +436,9 @@ describe('HA-8 subclass timeline form', () => {
       button(root, 'Publish subclass').click();
       await settle();
       expect(calls).toEqual(['preview', 'commit']);
-      expect(elementText(root as unknown as Node)).toContain('Subclass published');
+      expect(navigated).toEqual([
+        '/homebrew?tab=subclass&publishOutcome=created&publishedKey=expanded%3Asubclass%3Atimeline-ward&publishedName=Timeline+Ward&publishedLayer=external&previousUsageCount=0',
+      ]);
       cleanup();
     } finally {
       restoreDocument();
@@ -802,7 +805,8 @@ describe('HA-8 subclass timeline form', () => {
       await settle();
       button(root, 'Publish subclass').click();
       await settle();
-      expect(elementText(root as unknown as Node)).toContain('Subclass published');
+      expect(router.current.path).toBe('/homebrew');
+      expect(router.current.query.get('publishedName')).toBe('Router Timeline');
       expect(router.navigate('/clean-after-publish')).toBe(true);
 
       cleanup();

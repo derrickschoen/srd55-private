@@ -46,7 +46,7 @@ import {
 import { clear, element, type Cleanup } from '../../dom';
 import { freeTextSpan } from '../../free-text';
 import type { ScreenContext } from '../../screen';
-import { homebrewReplacementPath } from './homebrew-routes';
+import { homebrewPublishedPath } from './homebrew-routes';
 
 type StoredBackgroundDraft = StoredHomebrewDraft & {
   readonly content_kind: 'background';
@@ -245,59 +245,11 @@ export function renderBackgroundForm(options: BackgroundFormOptions): Cleanup {
 
   const renderPublished = (result: PublishResult): void => {
     edits.publish();
-    clear(options.mount);
-    const heading = element('h2', {
-      text: result.outcome === 'created' ? 'Background published' : 'Matched existing content',
-      attributes: { tabindex: '-1' },
-    });
-    const name = element('p');
-    name.append(freeTextSpan(result.name));
-    const library = element('a', {
-      className: 'button-primary',
-      text: 'View background library',
-      attributes: { href: '/homebrew?tab=background' },
-    });
-    library.addEventListener('click', (event) => {
-      event.preventDefault();
-      options.context.router.navigate('/homebrew?tab=background');
-    });
-    const actions: HTMLElement[] = [library];
-    if (
-      options.draft.base_content_key !== null &&
-      options.draft.base_content_key !== result.content_key &&
-      result.previous_key_usage_count > 0
-    ) {
-      const fixPath = homebrewReplacementPath(
-        options.draft.base_content_key,
-        result.content_key,
-      );
-      const fix = element('a', {
-        className: 'button-secondary', text: 'Review character fixes',
-        attributes: { href: fixPath },
-      });
-      fix.addEventListener('click', (event) => {
-        event.preventDefault();
-        options.context.router.navigate(fixPath);
-      });
-      actions.push(fix);
-    }
-    options.mount.append(element('section', {
-      className: 'background-publish-result', attributes: { role: 'status' },
-    }, [
-      heading,
-      name,
-      element('span', {
-        className: `homebrew-badge ${result.catalog_layer === 'external' ? 'homebrew-badge-homebrew' : 'homebrew-badge-neutral'}`,
-        text: result.catalog_layer === 'external' ? 'Homebrew' : 'SRD',
-      }),
-      element('p', {
-        text: result.previous_key_usage_count === 0
-          ? 'No characters use a previous version.'
-          : `${String(result.previous_key_usage_count)} character(s) still use the previous version.`,
-      }),
-      element('div', { className: 'homebrew-card-actions' }, actions),
-    ]));
-    setTimeout(() => { if (heading.isConnected) heading.focus(); }, 0);
+    options.context.router.navigate(homebrewPublishedPath(
+      'background',
+      result,
+      options.draft.base_content_key,
+    ), { replace: true });
   };
 
   const discardStalePreview = (): void => {
