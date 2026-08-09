@@ -7,6 +7,8 @@
   "scripts": {
     "dev": "vite --configLoader runner",
     "build": "tsc -b && vite build --configLoader runner && node tools/assert-dist-clean.mjs",
+    "serve": "node tools/serve.mjs",
+    "serve:check": "playwright test --config=tests/serving/playwright.config.ts",
     "typecheck": "tsc -b",
     "test": "vitest run --configLoader runner",
     "test:unit": "vitest run --configLoader runner tests/unit",
