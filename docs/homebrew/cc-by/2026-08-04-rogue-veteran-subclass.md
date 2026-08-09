@@ -63,23 +63,21 @@ damage die that shows a 2. You must use the new roll.
 
 ### Level 3: Sure Strike
 
-At the end of your turn, if you dealt no Sneak Attack damage this turn, you
-can take a Bonus Action to drive a missed blow home: deal your Sneak Attack
-damage to one creature you missed this turn with an attack using a Finesse
-or Ranged weapon.
+Once per turn, when you miss a creature with an attack using a Finesse or
+Ranged weapon, you can choose to expend your Sneak Attack for the turn (no
+action required): the target takes damage equal to **half your Sneak Attack
+dice, rounded up**, of the weapon's damage type.
 
 You must be able to see the target, and the attack must not have been made
-with disadvantage. You must also satisfy all normal conditions for Sneak
-Attack (including that you have not already dealt Sneak Attack damage this
-turn).
+with disadvantage. On any turn you can deal Sneak Attack damage or use Sure
+Strike, **but never both** — using either expends the turn's Sneak Attack.
 
-The damage dealt by this feature has the same type as the weapon's normal
-damage.
-
-*(Revised by owner ruling 2026-08-09: the free once-per-round rider became
-an end-of-turn Bonus Action, putting the guaranteed floor in competition
-with Steady Aim and Cunning Action. Simmed effect ≈ −2 DPR against a dummy;
-the binding cost is the Bonus Action at real tables.)*
+*(Revised by owner rulings 2026-08-09, second revision: the guaranteed
+floor costs no action and is the player's choice, but pays half dice and
+fully expends the turn's Sneak Attack. Simmed on the vex/nick canonical
+build: 59.7/103.0 burst, 59.5/103.6 sustained — the floor drops from 45 to
+23 (11th) / 68 to 34 (17th) on whiffed rounds, ~6% of rounds under the Vex
+chain.)*
 
 ### Level 9: Veteran's Strike
 

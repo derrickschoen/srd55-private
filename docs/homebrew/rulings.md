@@ -5,6 +5,29 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-09 — VETERAN: Sure Strike second revision — half dice, no action, exclusive with Sneak Attack
+
+Owner's ruling, verbatim:
+
+> Rewrite sure strike so that it costs you all of your sneak attack pool to
+> do half sneak attack dice rounded up. Prevent using sure strike and sneak
+> attack in the same turn. No ba, player chooses if to use it.
+>
+> Player gets 1 sneak attack or sure strike per turn
+
+Effect, superseding the Bonus-Action version ruled earlier today: Sure
+Strike costs no action and is the player's choice on a miss, deals **half
+Sneak Attack dice rounded up** (6d6 at 11, 9d6 at 17), and **fully expends
+the turn's Sneak Attack** — one Sneak Attack or one Sure Strike per turn,
+never both. Applied to the Veteran doc §3.
+
+Measured (vex/nick canonical build): **59.7 / 103.0 burst; 59.5 / 103.6
+sustained** — within noise of every prior variant, because the Vex chain
+holds the whiff rate near 6%. What the revision actually buys is shape,
+not a number: the floor halves on bad rounds, the Bonus Action is freed
+back to Steady Aim and Cunning Action, and the exclusivity rule is one
+clean sentence with no tracking.
+
 ## 2026-08-09 — VETERAN: Sure Strike becomes an end-of-turn Bonus Action
 
 Owner's ruling, verbatim:
