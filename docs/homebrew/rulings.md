@@ -5,6 +5,40 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-09 — VETERAN: reserve dice double on crits (owner-ruled); reserve-as-engine formula grid simmed, pick pending
+
+Owner's rulings, verbatim:
+
+> Sim it with different formulas on reserve dice replacing the doubled sneak
+> attack dice table at 9. I don't want the rogue too far ahead of the
+> paladin melee or warlock ranged at 3 and 6. Rogue can be more powerful at
+> 11 and 17 because no spells
+
+> Reserve dice should double on a crit for fun
+
+Crit ruling applied (the sims already modeled it; the flag closes). The
+formula grid, melee burst DPR at L3/6/11/17 against the references (melee
+Paladin 12.9/32.2/53.8/63.8; ranged Fiend v2 14.5/22.0/37.2/47.0):
+
+| Formula | L3 | L6 | L11 | L17 |
+|---|---:|---:|---:|---:|
+| current live (double@9 + reserve) | 23.2 | 31.8 | 73.8 | 122.8 |
+| F1 pool L spend L/2, no doubling | 23.0 | 32.0 | 49.2 | 79.8 |
+| F3 reserve from 9 only | 19.7 | 25.6 | 49.7 | 80.5 |
+| F5 pool 2L from 9 | 19.8 | 25.4 | 58.2 | 99.0 |
+| **F6 SA ×1.5 @9 + reserve from 9** | **20.0** | **25.3** | **62.2** | **98.3** |
+
+Finding recorded: no single linear formula satisfies all three constraints
+at once (behind at 6, ahead at 11, two-activation decision) — F1/F3 fall
+behind the paladin at 11; F5 hits the curve but its pool funds four
+activations in a 4-round fight, dissolving the owner's "genuine decision."
+**F6 threads it**: Veteran's Strike becomes ×1.5 (9d6 at 11, 13d6 at 17)
+and the reserve (pool = level, spend ⌊level/2⌋, crit-doubling) starts at 9 —
+behind the paladin at 6 (0.79×), ahead at 11 (1.16×) with the two-hit
+decision intact, 1.54× at 17. The L3 lead over the paladin (1.55×) is the
+rogue chassis itself (Sneak Attack + Steady Aim), not subclass text.
+Formula choice pending.
+
 ## 2026-08-09 — VETERAN: Veteran's Reserve adopted (pool reading); Archery removed from Old Training; ranged Champion added to the board
 
 Owner's rulings, verbatim:
