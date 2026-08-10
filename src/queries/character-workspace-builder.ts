@@ -359,6 +359,7 @@ export class CharacterWorkspaceBuilder {
     return this.db.all(
       `SELECT level.id, level.class_definition_id,
               level.subclass_definition_id, level.level,
+              level.is_starting_class,
               class.name, class_identity.catalog_layer,
               subclass.name AS subclass_name,
               subclass_identity.catalog_layer AS subclass_catalog_layer
@@ -374,7 +375,7 @@ export class CharacterWorkspaceBuilder {
          ON subclass_identity.content_kind = 'subclass'
         AND subclass_identity.content_key = subclass.content_key
        WHERE level.character_id = ?
-       ORDER BY class.name, level.id`,
+       ORDER BY level.is_starting_class DESC, level.id`,
       [characterId],
       (row): CharacterClass => {
         const classDefinitionId = sqlInteger(
@@ -389,6 +390,7 @@ export class CharacterWorkspaceBuilder {
             'subclass_definition_id',
           ),
           level: sqlInteger(row, 'level'),
+          is_starting_class: sqlBoolean(row, 'is_starting_class'),
           name: sqlString(row, 'name'),
           catalog_layer: catalogLayerDisclosure(
             sqlNullableString(row, 'catalog_layer'),

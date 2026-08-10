@@ -199,11 +199,14 @@ test('builds the complete workspace editing contract for the seeded character', 
     access_routes: 9,
     warning_count: 4,
   });
-  expect(workspace.classes.map((item: any) => item.name)).toEqual([
-    'Paladin',
-    'Ranger',
-    'Warlock',
-    'Wizard',
+  expect(workspace.classes.map((item: Row) => ({
+    name: item.name,
+    is_starting_class: item.is_starting_class,
+  }))).toEqual([
+    { name: 'Wizard', is_starting_class: false },
+    { name: 'Paladin', is_starting_class: false },
+    { name: 'Ranger', is_starting_class: false },
+    { name: 'Warlock', is_starting_class: false },
   ]);
   expect(workspace.available_classes.map((item: any) => item.name)).toEqual([
     'Barbarian',

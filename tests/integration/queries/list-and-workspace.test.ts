@@ -227,6 +227,7 @@ describe('character list and workspace query builders', () => {
       class_definition_id: wizardId,
       subclass_definition_id: subclassId,
       level: 1,
+      is_starting_class: false,
       name: 'Wizard',
       catalog_layer: 'bundled',
       subclass_name: 'Abjurer',

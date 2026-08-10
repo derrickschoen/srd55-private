@@ -216,6 +216,7 @@ describe('planner catalog disclosure', () => {
               class_definition_id: 1,
               subclass_definition_id: null,
               level: 1,
+              is_starting_class: true,
               name: 'Cleric',
               catalog_layer: 'bundled',
               subclass_name: null,
@@ -228,6 +229,7 @@ describe('planner catalog disclosure', () => {
               class_definition_id: 2,
               subclass_definition_id: null,
               level: 1,
+              is_starting_class: false,
               name: 'Wizard',
               catalog_layer: 'bundled',
               subclass_name: null,
@@ -253,6 +255,20 @@ describe('planner catalog disclosure', () => {
 
       const warnings = rendered.querySelectorAll(
         '[data-warning-kind="multiclass_primary_ability_unmet"]',
+      );
+      const classRows =
+        rendered.querySelector('.class-list')?.querySelectorAll('article') ??
+        [];
+      expect(
+        classRows.map((row) =>
+          row.querySelector('.class-entry-badge')?.textContent
+        ),
+      ).toEqual(['Starting class', 'Multiclass entry']);
+      expect(elementText(classRows[0] as unknown as Node)).not.toContain(
+        'Multiclass entry',
+      );
+      expect(elementText(classRows[1] as unknown as Node)).not.toContain(
+        'Starting class',
       );
       expect(warnings).toHaveLength(1);
       const warningText = elementText(warnings[0] as unknown as Node);
@@ -357,6 +373,7 @@ describe('planner catalog disclosure', () => {
           class_definition_id: 1,
           subclass_definition_id: null,
           level: 1,
+          is_starting_class: false,
           name: hostileHeldClass,
           catalog_layer: 'external',
           subclass_name: null,

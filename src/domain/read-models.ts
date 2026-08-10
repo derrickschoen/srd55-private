@@ -197,6 +197,7 @@ export interface CharacterClass {
   class_definition_id: number;
   subclass_definition_id: number | null;
   level: number;
+  is_starting_class: boolean;
   name: string;
   catalog_layer: CatalogLayerDisclosure;
   subclass_name: string | null;

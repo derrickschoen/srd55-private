@@ -526,6 +526,9 @@ function renderClasses(
   disabled: boolean,
 ): HTMLElement {
   const [section, heading] = panel('Classes');
+  section.id = 'planner-classes';
+  heading.id = 'planner-classes-heading';
+  heading.tabIndex = -1;
   const autosave = document.createElement('small');
   autosave.textContent = 'Autosaves on change';
   heading.append(autosave);
@@ -535,6 +538,11 @@ function renderClasses(
     const row = document.createElement('article');
     const name = document.createElement('strong');
     name.textContent = `${entry.name} — ${catalogLayerLabel(entry.catalog_layer)}`;
+    const entryKind = document.createElement('span');
+    entryKind.className = 'badge class-entry-badge';
+    entryKind.textContent = entry.is_starting_class
+      ? 'Starting class'
+      : 'Multiclass entry';
     // NOT AN INPUT ANY MORE (level-up plan §3): the numeric level control was
     // the second writer §0 names — it could move a level to any number
     // without a hit-point row ever being written. The level is read-only
@@ -571,6 +579,7 @@ function renderClasses(
     remove.addEventListener('click', () => actions.removeClass(entry));
     row.append(
       name,
+      entryKind,
       field('Level', level),
       field('Subclass', subclass),
       remove,

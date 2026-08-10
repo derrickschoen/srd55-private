@@ -1044,6 +1044,11 @@ export const screen = defineScreen({
       destroyGrid = renderPlanner(context, session, view, rerender);
     };
     rerender();
+    if (context.route.query.get('panel') === 'classes') {
+      context.root
+        .querySelector<HTMLElement>('#planner-classes-heading')
+        ?.focus();
+    }
     const keyboard = (event: KeyboardEvent): void => {
       if (
         !(event.ctrlKey || event.metaKey) ||
