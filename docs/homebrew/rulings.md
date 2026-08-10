@@ -20,8 +20,12 @@ Owner's rulings, verbatim:
 > roll as well as what it was before
 
 Final shape, applied to both docs: at 17, **rolling Initiative lets the
-monk manifest the Hands of the Barbed Court as a free action** (normal 4
-Focus; the Bonus-Action path remains), and **any manifestation can spend
+monk manifest the Hands of the Barbed Court as a Reaction** (owner
+follow-up, verbatim: "change to ' When you roll Initiative, you can
+manifest the Hands of the Barbed Court as a reaction'" — a real cost: the
+Reaction is spent until the monk's first turn, so no *Shield* or
+opportunity attack before then; normal 4 Focus; the Bonus-Action path
+remains), and **any manifestation can spend
 +3 Focus to raise the Rebuking Shield** — 2d8 Psychic retaliation on melee
 hits taken, immunity to Charmed, Frightened, and Psychic damage, no
 fire/cold resistance, riding the manifestation's duration and ending with
