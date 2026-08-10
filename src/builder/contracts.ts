@@ -21,10 +21,6 @@ import type {
   SkillGrantState,
 } from '../domain/enums';
 import type { EligibleSpell } from '../domain/read-models';
-// From the EXTRACT-FREE module, never `origins-srd` (which imports the SRD
-// text via Vite's `?raw`): the seam is loaded by node-side test processes
-// through the command layer, and a `?raw` in its closure breaks their
-// transpilers — Playwright's whole suite failed collection on exactly this.
 import { BUNDLED_ORIGIN_RULES_EDITION } from '../rules/origin-rules-edition';
 import type { CatalogLayerDisclosure } from '../catalog/catalog-disclosure';
 
@@ -86,37 +82,8 @@ export interface GuidedOriginOption {
   readonly content_key: string;
   readonly name: string;
   readonly catalog_layer: CatalogLayerDisclosure;
-  readonly grants_lineage_spells: boolean;
-}
-
-/**
- * The bundled species whose lineage grants spells.
- *
- * A LITERAL SET, NOT AN INFERENCE. No template table records this: the spell
- * markers were deliberately retired from the trait effects (see
- * `src/rules/origins-srd.ts`, the `effectKinds` discussion), and the only
- * remaining evidence would be trait-name text. Sniffing that text would let the
- * production agent and the test agent each invent their own list and disagree
- * — on the exact D33 disclosure the plan legislates.
- *
- * These are the three whose markers were retired: "Elven Lineage", "Gnomish
- * Lineage" and "Otherworldly Presence".
- *
- * This set is reviewed by eye, once. The `A4-LINEAGE` control proves the
- * disclosure RENDERS; it does not prove this classification is correct, and the
- * plan says so rather than pretending otherwise.
- */
-export const LINEAGE_SPELL_SPECIES_CONTENT_KEYS: ReadonlySet<string> =
-  Object.freeze(
-    new Set([
-      `${BUNDLED_ORIGIN_RULES_EDITION}:species:elf`,
-      `${BUNDLED_ORIGIN_RULES_EDITION}:species:gnome`,
-      `${BUNDLED_ORIGIN_RULES_EDITION}:species:tiefling`,
-    ]),
-  ) as ReadonlySet<string>;
-
-export function grantsLineageSpells(contentKey: string): boolean {
-  return LINEAGE_SPELL_SPECIES_CONTENT_KEYS.has(contentKey);
+  /** Configured choices are parsed from this option's stored definition. */
+  readonly configured_choices: readonly GuidedConfiguredChoiceState[];
 }
 
 /* ----------------------------------------------------------------- params */
@@ -163,6 +130,8 @@ export interface GuidedConfiguredChoiceGrantDisclosure {
   readonly kind: string;
   readonly active_from_character_level: number | null;
   readonly spell_version_key: string | null;
+  readonly spell_name: string | null;
+  readonly spell_catalog_layer: CatalogLayerDisclosure | null;
 }
 
 export interface GuidedConfiguredChoiceEffectDisclosure {
@@ -178,7 +147,16 @@ export interface GuidedReplaceableSpellChoiceState {
   readonly spell_list: string;
   readonly spell_level: 0;
   readonly initial_spell_version_key: string;
+  readonly initial_spell_name: string;
+  readonly initial_spell_catalog_layer: CatalogLayerDisclosure;
   readonly selected_spell_version_key: string | null;
+  readonly selected_spell: GuidedReplaceableSpellOption | null;
+  readonly eligible_spells: readonly GuidedReplaceableSpellOption[];
+}
+
+export interface GuidedReplaceableSpellOption {
+  readonly content_key: string;
+  readonly spell: EligibleSpell;
 }
 
 export interface GuidedConfiguredChoiceOptionState {
@@ -238,6 +216,7 @@ export type GuidedSpeciesChoiceStateResult =
   | {
       readonly kind: 'ready';
       readonly character_id: number;
+      readonly revision: number;
       readonly resolution: SpeciesChoiceResolution;
     };
 
@@ -472,6 +451,11 @@ export const GUIDED_PANEL_ATTRIBUTE = 'data-panel';
  */
 export function guidedBuildPath(characterId: number): string {
   return `/characters/${characterId}/build/levels/1`;
+}
+
+/** Opens the existing species step as an editor without changing progression. */
+export function guidedSpeciesChoicePath(characterId: number): string {
+  return `${guidedBuildPath(characterId)}?step=species`;
 }
 
 /* ------------------------------------------------------------ RPC methods */
@@ -1063,8 +1047,7 @@ export const SKILL_STEP_ATTR = Object.freeze({
 /**
  * §3.7's Expertise disclosure population: the classes whose LEVEL-ONE kit
  * includes Expertise — the Rogue, per D54's level-1 bar (the Bard takes it at
- * level 2, outside the bar). A PINNED LITERAL on the
- * `LINEAGE_SPELL_SPECIES_CONTENT_KEYS` precedent: no table records which
+ * level 2, outside the bar). A PINNED LITERAL: no table records which
  * classes take Expertise or when, and sniffing feature prose would let two
  * agents invent two lists. Reviewed by eye against
  * `docs/srd/source/`'s Rogue and Bard core traits.

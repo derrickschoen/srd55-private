@@ -293,13 +293,13 @@ describe('guided background application', () => {
 });
 
 describe('guided background catalogue and gate', () => {
-  it('reports grants_lineage_spells false for every background', async () => {
+  it('reports no configured species choices for every background', async () => {
     const rpcHarness = await applicationDatabase();
     const options = backgrounds(rpcHarness);
 
     expect(options.length).toBeGreaterThan(0);
     for (const option of options) {
-      expect(option.grants_lineage_spells).toBe(false);
+      expect(option.configured_choices).toEqual([]);
     }
   });
 

@@ -4,7 +4,10 @@ import type {
   CompletenessResult,
   UnfilledSkillGrantsItem,
 } from '../../../queries/character-completeness';
-import { SKILL_GRANT_KEYS } from '../../../builder/contracts';
+import {
+  guidedSpeciesChoicePath,
+  SKILL_GRANT_KEYS,
+} from '../../../builder/contracts';
 import type { Skill } from '../../../domain/enums';
 import { SKILL_LABELS } from '../../../rules/skills';
 
@@ -88,6 +91,7 @@ function entry(
   item: CompletenessItem | CatalogGapItem,
   actions: PlannerCompletenessActions,
   disabled: boolean,
+  characterId: number,
 ): HTMLElement {
   const listItem = document.createElement('li');
   const heading = document.createElement('h3');
@@ -96,7 +100,15 @@ function entry(
   detail.textContent = item.detail;
   const remedy = document.createElement('p');
   remedy.className = 'outstanding-remedy';
-  remedy.textContent = item.remedy;
+  if (item.kind === 'required_source_choice') {
+    const link = document.createElement('a');
+    link.setAttribute('href', guidedSpeciesChoicePath(characterId));
+    link.dataset.routerLink = 'true';
+    link.textContent = item.remedy;
+    remedy.append(link);
+  } else {
+    remedy.textContent = item.remedy;
+  }
   listItem.append(heading, detail, remedy);
   if (item.kind === 'unfilled_skill_grants') {
     listItem.append(skillGrantControls(item, actions, disabled));
@@ -142,7 +154,7 @@ export function renderCompleteness(
     const list = document.createElement('ol');
     list.className = 'outstanding-list';
     for (const item of result.items) {
-      list.append(entry(item, actions, disabled));
+      list.append(entry(item, actions, disabled, result.character_id));
     }
     section.append(list);
   }
@@ -156,7 +168,7 @@ export function renderCompleteness(
     const list = document.createElement('ol');
     list.className = 'outstanding-list';
     for (const gap of result.catalog_gaps) {
-      list.append(entry(gap, actions, disabled));
+      list.append(entry(gap, actions, disabled, result.character_id));
     }
     section.append(gapHeading, explanation, list);
   }

@@ -38,8 +38,12 @@ export function createSpellsStep(options: {
   const cleanups: Cleanup[] = [];
   const pickers: ReturnType<typeof createSpellPicker>[] = [];
   const status = element('p', {
-    className: 'guided-spell-status',
-    attributes: { role: 'status', 'aria-live': 'polite' },
+    className: 'guided-status guided-spell-status',
+    attributes: {
+      role: 'status',
+      'aria-live': 'polite',
+      'data-guided-status': '',
+    },
   });
   const announce = (message: string): void => {
     clear(status);
@@ -147,7 +151,7 @@ export function createSpellsStep(options: {
     ],
   );
   return {
-    element: guidedShell('spells', panel),
+    element: guidedShell('spells', panel, options.characterId),
     cleanup: () => {
       pickers.forEach((picker) => picker.destroy());
       cleanups.forEach((cleanup) => cleanup());

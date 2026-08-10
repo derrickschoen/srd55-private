@@ -19,6 +19,7 @@ import {
 import {
   catalogGapHeading,
   outstandingHeading,
+  renderCompleteness,
 } from '../../../src/ui/screens/planner/completeness';
 import {
   PlannerSession,
@@ -954,6 +955,41 @@ describe('planner persisted workflow', () => {
 });
 
 describe('completeness panel wording', () => {
+  it('routes a required source choice to the guided Species editor', () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const result: CompletenessResult = {
+        ...emptyCompleteness,
+        outstanding_count: 1,
+        items: [{
+          kind: 'required_source_choice',
+          title: 'Elf — Elven Lineage not chosen',
+          detail: 'The configured choice remains open.',
+          remedy: 'Return to the guided Species step to review this required choice.',
+          source_instance_id: 4,
+          source_name: 'Elf',
+          source_catalog_layer: 'bundled',
+          choice_label: 'Elven Lineage',
+          missing: ['option', 'spellcasting_ability'],
+        }],
+      };
+      const panel = interactiveElement(renderCompleteness(
+        result,
+        { fillSkillGrant: () => undefined },
+        false,
+      ));
+      const link = panel.querySelector('a');
+      expect(link?.getAttribute('href')).toBe(
+        '/characters/7/build/levels/1?step=species',
+      );
+      expect(elementText(link as unknown as Node)).toBe(
+        'Return to the guided Species step to review this required choice.',
+      );
+    } finally {
+      restoreDocument();
+    }
+  });
+
   it('states the count in words and stays free of warning vocabulary', () => {
     expect(outstandingHeading(null)).toBe(
       'Not chosen yet — unavailable for this character.',

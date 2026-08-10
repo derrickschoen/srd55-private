@@ -1,94 +1,34 @@
-/**
- * THE SPECIES STEP — dispatch A4, the first post-class step that does
- * something.
- *
- * Shape and rules, all from the plan (§3.4, §4, §5, §8) and the law:
- *
- * - Choosing a species APPLIES it: the worker copies the template's printed
- *   traits, speed and effects onto the character in one transaction, and the
- *   sheet immediately reads them back. This screen never writes selection
- *   metadata and calls nothing but the seam's `applyOrigin` method.
- * - D33, the part people get wrong (§3.4): the step advances once the
- *   `character_species` row exists, but several bundled species REQUIRE
- *   choices this application cannot model — there is no table for a lineage
- *   or an Origin feat. Every card names the choices applying it will NOT
- *   make, so a species never arrives looking finished while its lineage was
- *   never chosen. The lists live in {@link SPECIES_UNMADE_CHOICES}, a pinned
- *   literal reviewed by eye — never inferred from trait text. The SKILL
- *   choices (Elf Keen Senses, Human Skillful) left these lists when
- *   skills-with-provenance made them tracked grants: applying the species
- *   mints the grant, and the guided SKILLS step makes it choosable.
- * - Lineage spells (D56, granted by A6): applying a species now also runs the
- *   grant machinery over its seeded definition, so the spells a species
- *   grants unconditionally (the Tiefling's Thaumaturgy) actually arrive. The
- *   old "not granted yet" disclosure is DELETED rather than reworded — it
- *   existed only while the machinery was missing. What remains unmade is the
- *   LINEAGE CHOICE itself, which {@link SPECIES_UNMADE_CHOICES} already
- *   names; the spells that hang on it stay off the character until a unit
- *   records that choice, and the screen must never imply otherwise. For the
- *   species whose EVERY spell hangs on that choice (Elf and Gnome today), a
- *   card-scoped disclosure states the causal fact an empty spell list needs
- *   explained: choosing the lineage is what brings the spells. The gated set
- *   is DERIVED from the seed data ({@link LINEAGE_GATED_SPECIES_CONTENT_KEYS})
- *   rather than hand-typed, so it cannot go stale against the rules; the
- *   Tiefling, whose Thaumaturgy genuinely arrives, is excluded by the same
- *   derivation — showing the disclosure there would be the mirror-image lie.
- * - §5's trap: nothing here links into the planner grid. Success re-navigates
- *   to the build route, which re-derives the step from the database.
- * - Re-applying replaces (§8): the worker owns that semantic; this screen just
- *   shows the options whenever the derived step is `species`.
- */
-
 import {
   guidedBuildPath,
+  guidedSpeciesChoicePath,
   GUIDED_PANEL_ATTRIBUTE,
+  type GuidedChooseSpeciesLineageResult,
+  type GuidedConfiguredChoiceOptionState,
+  type GuidedConfiguredChoiceState,
   type GuidedOriginOption,
+  type GuidedSpeciesChoiceStateResult,
 } from '../../../builder/contracts';
 import type { GuidedApplyOriginResult } from '../../../builder/guided-creation';
-import {
-  bundledSpeciesDefinitions,
-  LINEAGE_CHOICE_CONFIG_KEY,
-} from '../../../rules/origin-definitions-srd';
-import { BUNDLED_ORIGIN_RULES_EDITION } from '../../../rules/origins-srd';
+import type { Ability } from '../../../domain/enums';
+import { BUNDLED_ORIGIN_RULES_EDITION } from '../../../rules/origin-rules-edition';
 import { RpcError } from '../../../rpc/protocol';
 import { clear, element, listen, type Cleanup } from '../../dom';
 import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
+import {
+  createSpellPicker,
+  spellPickerControlId,
+  type SpellPicker,
+} from '../planner/spell-picker';
 import { characterListLink, guidedShell } from './guided-builder';
+import type { GuidedSpellTransition } from './spells-step';
 
-/**
- * The seam pins no locator for this panel — the same gap the class chooser
- * found and reported. This value is the implementer's, offered for
- * ratification the way A1's and A3's panel values were.
- */
 export const SPECIES_STEP_PANEL = 'species-step';
 
 function speciesKey(slug: string): string {
   return `${BUNDLED_ORIGIN_RULES_EDITION}:species:${slug}`;
 }
 
-/**
- * THE REQUIRED CHOICES THIS STEP CANNOT MAKE, per bundled species.
- *
- * A PINNED LITERAL, NOT AN INFERENCE — the same rule the seam applies to
- * `LINEAGE_SPELL_SPECIES_CONTENT_KEYS`, for the same reason: no table records
- * these choices, and sniffing trait text would let two agents invent two
- * different lists. Transcribed from the SRD 5.2.1 species descriptions
- * (`docs/srd/source/species-descriptions.txt`), reviewed by eye:
- *
- * - Dragonborn: Draconic Ancestry ("Choose the kind of dragon…").
- * - Elf: Elven Lineage + its spellcasting ability; Keen Senses skill.
- * - Gnome: Gnomish Lineage + its spellcasting ability.
- * - Goliath: Giant Ancestry benefit (one of six).
- * - Human: size ("Medium … or Small …, chosen when you select this
- *   species" — the copy records the first printed size, Medium); Skillful
- *   skill; Versatile Origin feat.
- * - Tiefling: size (same clause as Human); Fiendish Legacy + its spellcasting
- *   ability.
- * - Dwarf, Halfling, Orc: the SRD text offers no choice.
- *
- * When the species-choice model is built, entries here are DELETED rather than
- * reworded — they exist only while the choices are unmakeable (plan §3.4).
- */
+/** Choices not represented by configured-choice data remain disclosed here. */
 export const SPECIES_UNMADE_CHOICES: ReadonlyMap<string, readonly string[]> =
   new Map([
     [
@@ -97,31 +37,7 @@ export const SPECIES_UNMADE_CHOICES: ReadonlyMap<string, readonly string[]> =
         'a Draconic Ancestry — the kind of dragon, which sets the Breath Weapon and Damage Resistance damage type',
       ],
     ],
-    // The Keen Senses skill entry is DELETED, not reworded (plan §3.4 rule;
-    // skills-with-provenance S-B/S-C): the choice is now a tracked grant the
-    // guided skills step makes choosable, so applying Elf no longer leaves it
-    // unmakeable.
-    [
-      speciesKey('elf'),
-      [
-        'an Elven Lineage (Drow, High Elf, or Wood Elf)',
-        'a spellcasting ability for its spells (Intelligence, Wisdom, or Charisma)',
-      ],
-    ],
-    [
-      speciesKey('gnome'),
-      [
-        'a Gnomish Lineage (Forest Gnome or Rock Gnome)',
-        'a spellcasting ability for its spells (Intelligence, Wisdom, or Charisma)',
-      ],
-    ],
-    [
-      speciesKey('goliath'),
-      ['a Giant Ancestry benefit (one of six)'],
-    ],
-    // The Skillful skill entry is DELETED for the same reason as Elf's Keen
-    // Senses above: S-B made it a tracked grant and the skills step makes it
-    // choosable.
+    [speciesKey('goliath'), ['a Giant Ancestry benefit (one of six)']],
     [
       speciesKey('human'),
       [
@@ -131,68 +47,10 @@ export const SPECIES_UNMADE_CHOICES: ReadonlyMap<string, readonly string[]> =
     ],
     [
       speciesKey('tiefling'),
-      [
-        'a size (Small or Medium — the copy records Medium)',
-        'a Fiendish Legacy (Abyssal, Chthonic, or Infernal)',
-        'a spellcasting ability for its spells (Intelligence, Wisdom, or Charisma)',
-      ],
+      ['a size (Small or Medium — the copy records Medium)'],
     ],
   ]);
 
-/**
- * True when the rule is inert until the lineage choice is recorded — its
- * `active_if_config` gate reads {@link LINEAGE_CHOICE_CONFIG_KEY}. The seed
- * type is a plain record, so the gate is narrowed structurally.
- */
-function ruleIsLineageGated(rule: Readonly<Record<string, unknown>>): boolean {
-  const gate: unknown = rule['active_if_config'];
-  if (typeof gate !== 'object' || gate === null || Array.isArray(gate)) {
-    return false;
-  }
-  return (
-    (gate as Readonly<Record<string, unknown>>)['key'] ===
-    LINEAGE_CHOICE_CONFIG_KEY
-  );
-}
-
-/**
- * The species whose spell grants are ALL gated behind the unmade lineage
- * choice — Elf and Gnome today. DERIVED from the seed data rather than
- * hand-typed: a second hand-maintained species list is a second thing to go
- * stale, and the seed already knows which rules hang on the choice. A species
- * qualifies iff it has at least one grant rule AND every rule carries the
- * lineage-choice gate; the empty-rule-list case is guarded explicitly because
- * `.every()` on an empty array is vacuously true, and a species granting
- * nothing has no gated spells to disclose. The Tiefling falls out naturally:
- * its Thaumaturgy rule has no gate, so its spell list is not empty and the
- * disclosure would be a lie there.
- */
-export const LINEAGE_GATED_SPECIES_CONTENT_KEYS: ReadonlySet<string> = new Set(
-  bundledSpeciesDefinitions()
-    .filter(
-      (definition) =>
-        definition.grant_rules.length > 0 &&
-        definition.grant_rules.every(ruleIsLineageGated),
-    )
-    .map((definition) => definition.content_key),
-);
-
-/**
- * D33/D56 disclosure for the species above: the causal sentence an empty
- * spell list needs. "You have not chosen a lineage" and "choosing one is what
- * would bring you spells" are different sentences; only the second explains
- * why applying the species granted nothing.
- */
-export const LINEAGE_GATED_SPELLS_DISCLOSURE =
-  'Its lineage spells arrive only when you choose a lineage — choosing one ' +
-  'is what brings them, and this step cannot record that choice, so ' +
-  'applying this species grants no spells today.';
-
-/**
- * The worker refuses `unknown_origin` as `handler_error` with structured
- * `data.reason` (seam, `GuidedRefusalData`). Anything else is not a refusal
- * and falls through to the raw message.
- */
 export function applyOriginRefusalMessage(error: unknown): string | null {
   if (!(error instanceof RpcError) || error.code !== 'handler_error') {
     return null;
@@ -201,23 +59,117 @@ export function applyOriginRefusalMessage(error: unknown): string | null {
   if (typeof data !== 'object' || data === null || Array.isArray(data)) {
     return null;
   }
-  const reason = (data as Record<string, unknown>)['reason'];
-  if (reason === 'unknown_origin') {
-    return (
-      'That species is not available in this database, so nothing was ' +
-      'applied. Reload the page to refresh the species list.'
-    );
+  return (data as Record<string, unknown>)['reason'] === 'unknown_origin'
+    ? 'That species is not available in this database, so nothing was applied. Reload the page to refresh the species list.'
+    : null;
+}
+
+function abilityLabel(ability: Ability): string {
+  return `${ability.charAt(0).toUpperCase()}${ability.slice(1)}`;
+}
+
+function optionDisclosure(
+  choice: GuidedConfiguredChoiceState,
+  option: GuidedConfiguredChoiceOptionState,
+): HTMLElement {
+  const facts: HTMLElement[] = [];
+  if (choice.unknown_sheet_fields.includes('walking_speed_feet')) {
+    const speed = option.effects.find((effect) => effect.kind === 'speed');
+    facts.push(element('li', {
+      text: speed?.speed_bonus_feet === null || speed === undefined
+        ? 'Speed: no lineage adjustment.'
+        : `Speed: +${String(speed.speed_bonus_feet)} feet — ${speed.label}.`,
+    }));
   }
-  return null;
+  if (option.darkvision_feet !== null) {
+    facts.push(element('li', {
+      text: `Darkvision: ${String(option.darkvision_feet)} feet.`,
+    }));
+  }
+  for (const effect of option.effects) {
+    if (effect.kind === 'damage_resistance' && effect.damage_type !== null) {
+      facts.push(element('li', {
+        text: `Damage resistance: ${effect.damage_type} — ${effect.label}.`,
+      }));
+    }
+  }
+  for (const grant of option.grants) {
+    const level = grant.active_from_character_level ?? 1;
+    facts.push(element('li', {
+      text: grant.spell_name === null
+        ? `${grant.kind} at character level ${String(level)}.`
+        : `${grant.spell_name} · ${catalogLayerLabel(
+            grant.spell_catalog_layer ?? 'unknown',
+          )} at character level ${String(level)}.`,
+    }));
+  }
+  if (option.replaceable_spell_choice !== null) {
+    const replaceable = option.replaceable_spell_choice;
+    facts.push(element('li', {
+      text:
+        `${replaceable.label}: choose a ${replaceable.spell_list} ` +
+        `${replaceable.spell_level === 0 ? 'cantrip' : `level ${String(replaceable.spell_level)} spell`}; ` +
+        `initially ${replaceable.initial_spell_name} · ${catalogLayerLabel(
+          replaceable.initial_spell_catalog_layer,
+        )}.`,
+    }));
+  }
+  return element('div', { className: 'guided-lineage-option-disclosure' }, [
+    element('h4', { text: option.label }),
+    element('ul', {}, facts),
+  ]);
+}
+
+function configuredChoiceDisclosure(
+  choice: GuidedConfiguredChoiceState,
+): HTMLElement {
+  return element('section', { className: 'guided-species-configured-choice' }, [
+    element('h4', { text: `${choice.label} choice` }),
+    element('p', {
+      text:
+        `Choose ${choice.label} and ` +
+        `${choice.ability_choice === null ? 'record its option' : 'its spellcasting ability'}; ` +
+        'the option data grants:',
+    }),
+    ...choice.options.map((option) => optionDisclosure(choice, option)),
+  ]);
+}
+
+function unmadeChoicesBlock(option: GuidedOriginOption): HTMLElement {
+  const choices = SPECIES_UNMADE_CHOICES.get(option.content_key) ?? [];
+  if (choices.length === 0 && option.configured_choices.length === 0) {
+    return element('p', {
+      className: 'guided-species-choices-none',
+      text: 'The SRD offers no further choice for this species.',
+    });
+  }
+  if (choices.length === 0) {
+    return element('div', { className: 'guided-species-configured-choices' },
+      option.configured_choices.map(configuredChoiceDisclosure));
+  }
+  return element('div', { className: 'guided-species-choices' }, [
+    element('p', {
+      text:
+        'Other required choices this step does not model yet — applying this species records none of them:',
+    }),
+    element('ul', {}, choices.map((choice) => element('li', { text: choice }))),
+    ...option.configured_choices.map(configuredChoiceDisclosure),
+  ]);
 }
 
 export interface SpeciesStepDeps {
   readonly characterId: number;
   readonly options: readonly GuidedOriginOption[];
-  readonly applyOrigin: (
-    contentKey: string,
-  ) => Promise<GuidedApplyOriginResult>;
-  readonly navigate: (path: string) => void;
+  readonly choiceState: GuidedSpeciesChoiceStateResult | null;
+  readonly applyOrigin: (contentKey: string) => Promise<GuidedApplyOriginResult>;
+  readonly chooseLineage: (
+    chosenOption: string,
+    spellcastingAbility: Ability,
+    replaceableSpellVersionKey: string | undefined,
+    operationUuid: string,
+    expectedRevision: number,
+  ) => Promise<GuidedChooseSpeciesLineageResult>;
+  readonly navigate: (path: string, transition?: GuidedSpellTransition) => void;
 }
 
 export interface SpeciesStep {
@@ -225,163 +177,365 @@ export interface SpeciesStep {
   readonly cleanup: Cleanup;
 }
 
-function unmadeChoicesBlock(option: GuidedOriginOption): HTMLElement {
-  const choices = SPECIES_UNMADE_CHOICES.get(option.content_key) ?? [];
-  if (choices.length === 0) {
-    return element('p', {
-      className: 'guided-species-choices-none',
-      text: 'The SRD offers no further choice for this species.',
+function speciesCards(
+  deps: SpeciesStepDeps,
+  cleanups: Cleanup[],
+): HTMLElement {
+  const cards: HTMLButtonElement[] = [];
+  let inFlight = false;
+  const errorMount = element('div', { className: 'guided-error-mount' });
+  const setError = (message: string | null): void => {
+    clear(errorMount);
+    if (message !== null) {
+      errorMount.append(element('p', {
+        className: 'guided-error',
+        text: message,
+        attributes: { role: 'alert' },
+      }));
+    }
+  };
+  const list = element('ul', {
+    className: 'guided-species-options',
+    attributes: { 'aria-label': 'Catalog species' },
+  }, deps.options.map((option) => {
+    const disclosureId = `guided-species-${option.content_key.replace(/[^a-z0-9]+/giu, '-')}-catalog-layer`;
+    const apply = element('button', {
+      className: 'guided-species-apply',
+      text: `Choose ${option.name}`,
+      attributes: {
+        type: 'button',
+        'data-species-option': option.content_key,
+        'aria-describedby': disclosureId,
+      },
     });
-  }
-  return element('div', { className: 'guided-species-choices' }, [
+    cards.push(apply);
+    cleanups.push(listen(apply, 'click', () => {
+      if (inFlight) return;
+      inFlight = true;
+      setError(null);
+      cards.forEach((card) => { card.disabled = true; });
+      void deps.applyOrigin(option.content_key)
+        .then(() => deps.navigate(guidedBuildPath(deps.characterId)))
+        .catch((error: unknown) => {
+          setError(applyOriginRefusalMessage(error) ??
+            (error instanceof Error ? error.message : String(error)));
+          inFlight = false;
+          cards.forEach((card) => { card.disabled = false; });
+        });
+    }));
+    return element('li', { className: 'guided-species-card' }, [
+      element('h3', { className: 'guided-species-name', text: option.name }),
+      element('p', {
+        className: 'catalog-layer-disclosure',
+        text: catalogLayerLabel(option.catalog_layer),
+        attributes: { id: disclosureId },
+      }),
+      unmadeChoicesBlock(option),
+      apply,
+    ]);
+  }));
+  return element('section', {
+    className: 'guided-panel',
+    attributes: { [GUIDED_PANEL_ATTRIBUTE]: SPECIES_STEP_PANEL },
+  }, [
+    element('h2', { text: 'Choose a species' }),
     element('p', {
       text:
-        'Required choices this step cannot make yet — applying this ' +
-        'species records none of them:',
+        'Applying a species copies its printed traits, speed and effects onto the character. Any configured lineage remains saveable and can be completed by returning to this Species step.',
     }),
-    element(
-      'ul',
-      {},
-      choices.map((choice) => element('li', { text: choice })),
-    ),
+    ...(deps.options.length === 0
+      ? [element('p', {
+          className: 'guided-empty-catalog',
+          text: 'No catalog species are available in this database, so this step cannot offer one.',
+        })]
+      : [list]),
+    errorMount,
+    characterListLink(),
+  ]);
+}
+
+function choiceEditor(
+  deps: SpeciesStepDeps,
+  choice: GuidedConfiguredChoiceState,
+  revision: number,
+  initiallyEditing: boolean,
+  cleanups: Cleanup[],
+): HTMLElement {
+  const container = element('section', { className: 'guided-lineage-editor' });
+  const status = element('p', {
+    className: 'guided-status guided-species-status',
+    attributes: { role: 'status', 'aria-live': 'polite', 'data-guided-status': '' },
+  });
+  const focusKey = `guided-species-change-${choice.rule_key}`;
+  const selectedChoice = () => choice.options.find(
+    (option) => option.value === choice.selected_option,
+  ) ?? null;
+  let picker: SpellPicker | null = null;
+
+  const announce = (message: string): void => {
+    clear(status);
+    status.textContent = message;
+  };
+
+  const renderForm = (focus: boolean): void => {
+    picker?.destroy();
+    picker = null;
+    let selectedOption = selectedChoice();
+    let selectedAbility = choice.ability_choice?.selected ?? null;
+    let replaceableKey = selectedOption?.replaceable_spell_choice
+      ?.selected_spell_version_key ?? undefined;
+    let inFlight = false;
+    const errorMount = element('div', { className: 'guided-error-mount' });
+    const form = element('form', { className: 'guided-lineage-form' });
+    const optionFieldset = element('fieldset', { className: 'guided-lineage-options' }, [
+      element('legend', { text: choice.label }),
+    ]);
+    const replaceableMount = element('div', { className: 'guided-lineage-spell' });
+    const renderReplaceable = (): void => {
+      picker?.destroy();
+      picker = null;
+      clear(replaceableMount);
+      const replaceable = selectedOption?.replaceable_spell_choice ?? null;
+      if (replaceable === null) {
+        replaceableKey = undefined;
+        return;
+      }
+      const addressKey = `species-${choice.rule_key}`;
+      const visibleLabel = element('label', {
+        className: 'guided-spell-choice-label',
+        text: replaceable.label,
+        attributes: { for: spellPickerControlId(addressKey) },
+      });
+      picker = createSpellPicker({
+        addressKey,
+        label: replaceable.label,
+        contextDescriptionId: null,
+        value: replaceable.selected_spell?.spell.name ??
+          replaceable.initial_spell_name,
+        valueCatalogLayer: replaceable.selected_spell?.spell.catalog_layer ??
+          replaceable.initial_spell_catalog_layer,
+        freeTextValue: false,
+        invalid: false,
+        disabled: false,
+        search: async (query) => replaceable.eligible_spells
+          .map((candidate) => candidate.spell)
+          .filter((spell) => spell.name.toLocaleLowerCase()
+            .includes(query.toLocaleLowerCase())),
+        onSelect: (spell) => {
+          replaceableKey = replaceable.eligible_spells.find(
+            (candidate) => candidate.spell.id === spell.id,
+          )?.content_key;
+        },
+      });
+      replaceableMount.append(
+        visibleLabel,
+        element('p', {
+          className: 'guided-lineage-spell-help',
+          text:
+            `Choose one level ${String(replaceable.spell_level)} spell from the ${replaceable.spell_list} list. The sourced initial choice is ${replaceable.initial_spell_name} · ${catalogLayerLabel(replaceable.initial_spell_catalog_layer)}.`,
+        }),
+        picker.element,
+      );
+    };
+    for (const option of choice.options) {
+      const id = `guided-lineage-${choice.rule_key}-${option.value.replace(/[^a-z0-9]+/giu, '-')}`;
+      const radio = element('input', {
+        attributes: {
+          id,
+          type: 'radio',
+          name: `configured-choice-${choice.rule_key}`,
+          value: option.value,
+        },
+      });
+      radio.checked = selectedOption?.value === option.value;
+      cleanups.push(listen(radio, 'change', () => {
+        if (!radio.checked) return;
+        selectedOption = option;
+        replaceableKey = option.replaceable_spell_choice
+          ?.selected_spell_version_key ?? undefined;
+        renderReplaceable();
+      }));
+      optionFieldset.append(element('div', { className: 'guided-lineage-option' }, [
+        element('label', { text: option.label, attributes: { for: id } }),
+        radio,
+        optionDisclosure(choice, option),
+      ]));
+    }
+    const abilitySelect = element('select', {
+      className: 'guided-lineage-ability',
+      attributes: { id: `guided-lineage-ability-${choice.rule_key}` },
+    });
+    abilitySelect.append(element('option', { text: 'Choose an ability', attributes: { value: '' } }));
+    for (const ability of choice.ability_choice?.options ?? []) {
+      const option = element('option', {
+        text: abilityLabel(ability),
+        attributes: { value: ability },
+      });
+      option.selected = selectedAbility === ability;
+      abilitySelect.append(option);
+    }
+    cleanups.push(listen(abilitySelect, 'change', () => {
+      selectedAbility = (choice.ability_choice?.options ?? []).find(
+        (ability) => ability === abilitySelect.value,
+      ) ?? null;
+    }));
+    const submit = element('button', {
+      className: 'guided-species-apply',
+      text: `Save ${choice.label}`,
+      attributes: { type: 'submit' },
+    });
+    cleanups.push(listen(form, 'submit', (event) => {
+      event.preventDefault();
+      if (inFlight) return;
+      clear(errorMount);
+      if (selectedOption === null || selectedAbility === null) {
+        errorMount.append(element('p', {
+          className: 'guided-error',
+          text: `Choose ${choice.label} and its spellcasting ability.`,
+          attributes: { role: 'alert' },
+        }));
+        return;
+      }
+      inFlight = true;
+      submit.disabled = true;
+      void deps.chooseLineage(
+        selectedOption.value,
+        selectedAbility,
+        replaceableKey,
+        crypto.randomUUID(),
+        revision,
+      ).then(() => {
+        const announcement = `${selectedOption?.label ?? choice.label} selected for ${choice.label}.`;
+        deps.navigate(guidedSpeciesChoicePath(deps.characterId), {
+          focusKey,
+          announcement,
+        });
+      }).catch((error: unknown) => {
+        errorMount.append(element('p', {
+          className: 'guided-error',
+          text: error instanceof Error ? error.message : String(error),
+          attributes: { role: 'alert' },
+        }));
+        inFlight = false;
+        submit.disabled = false;
+      });
+    }));
+    renderReplaceable();
+    form.append(
+      optionFieldset,
+      ...(choice.ability_choice === null
+        ? []
+        : [
+            element('label', {
+              className: 'guided-spell-choice-label',
+              text: `${choice.label} spellcasting ability`,
+              attributes: { for: `guided-lineage-ability-${choice.rule_key}` },
+            }),
+            abilitySelect,
+          ]),
+      replaceableMount,
+      errorMount,
+      submit,
+    );
+    container.replaceChildren(form, status);
+    if (focus) {
+      optionFieldset.querySelector<HTMLInputElement>('input')?.focus();
+    }
+  };
+
+  const renderSummary = (): void => {
+    const option = selectedChoice();
+    const replaceable = option?.replaceable_spell_choice;
+    const change = element('button', {
+      className: 'guided-species-change',
+      text: `Change ${choice.label}`,
+      attributes: { type: 'button', 'data-focus-key': focusKey },
+    });
+    cleanups.push(listen(change, 'click', () => {
+      announce(`Choose a replacement for ${option?.label ?? choice.label}.`);
+      renderForm(true);
+    }));
+    container.replaceChildren(
+      element('div', { className: 'guided-species-choice-summary' }, [
+        element('h3', { text: choice.label }),
+        element('p', {
+          text:
+            `${option?.label ?? 'Unknown option'} — ` +
+            `${choice.ability_choice?.selected === null || choice.ability_choice === null
+              ? 'no spellcasting ability'
+              : abilityLabel(choice.ability_choice.selected)}`,
+        }),
+        ...(replaceable === null ||
+        replaceable === undefined ||
+        replaceable.selected_spell === null
+          ? []
+          : [element('p', {
+              text: `${replaceable.label}: ${replaceable.selected_spell.spell.name}`,
+            })]),
+        change,
+      ]),
+      status,
+    );
+  };
+
+  if (initiallyEditing) renderForm(false);
+  else renderSummary();
+  cleanups.push(() => picker?.destroy());
+  return container;
+}
+
+function configuredChoicePanel(
+  deps: SpeciesStepDeps,
+  cleanups: Cleanup[],
+): HTMLElement | null {
+  if (deps.choiceState?.kind !== 'ready') return null;
+  const resolution = deps.choiceState.resolution;
+  if (resolution.kind === 'no_species') return null;
+  if (resolution.kind === 'unresolvable') {
+    return element('section', {
+      className: 'guided-panel',
+      attributes: { [GUIDED_PANEL_ATTRIBUTE]: SPECIES_STEP_PANEL },
+    }, [
+      element('h2', { text: 'Review species choices' }),
+      element('p', { className: 'guided-error', text: resolution.reason }),
+      characterListLink(),
+    ]);
+  }
+  const continueBuild = element('p', { className: 'guided-nav' }, [
+    element('a', {
+      text: 'Continue guided build',
+      attributes: {
+        href: guidedBuildPath(deps.characterId),
+        'data-router-link': '',
+      },
+    }),
+  ]);
+  return element('section', {
+    className: 'guided-panel',
+    attributes: { [GUIDED_PANEL_ATTRIBUTE]: SPECIES_STEP_PANEL },
+  }, [
+    element('h2', { text: `Review ${resolution.source_name} choices` }),
+    element('p', {
+      text:
+        'This choice does not gate the guided journey. Record it here so its configured grants and sheet facts become known.',
+    }),
+    ...resolution.choices.map((choice) => choiceEditor(
+      deps,
+      choice,
+      deps.choiceState?.kind === 'ready' ? deps.choiceState.revision : 0,
+      resolution.kind === 'incomplete',
+      cleanups,
+    )),
+    continueBuild,
+    characterListLink(),
   ]);
 }
 
 export function createSpeciesStep(deps: SpeciesStepDeps): SpeciesStep {
   const cleanups: Cleanup[] = [];
-  const cards: HTMLButtonElement[] = [];
-  let inFlight = false;
-
-  /** Errors exist only while there is one to show, mirroring the chooser. */
-  const errorMount = element('div', { className: 'guided-error-mount' });
-  const setError = (message: string | null): void => {
-    clear(errorMount);
-    if (message !== null) {
-      errorMount.append(
-        element('p', {
-          className: 'guided-error',
-          text: message,
-          attributes: { role: 'alert' },
-        }),
-      );
-    }
-  };
-
-  const setCardsDisabled = (disabled: boolean): void => {
-    for (const card of cards) {
-      card.disabled = disabled;
-    }
-  };
-
-  const applySpecies = async (option: GuidedOriginOption): Promise<void> => {
-    if (inFlight) {
-      return;
-    }
-    // The same UI-only double-submit guard as creation (plan §3.3): disable
-    // before the await, re-enable only on failure.
-    inFlight = true;
-    setError(null);
-    setCardsDisabled(true);
-    try {
-      await deps.applyOrigin(option.content_key);
-      // The species is now applied; the build route re-derives the step from
-      // the database and renders whatever comes next.
-      deps.navigate(guidedBuildPath(deps.characterId));
-    } catch (error) {
-      setError(
-        applyOriginRefusalMessage(error) ??
-          (error instanceof Error ? error.message : String(error)),
-      );
-      inFlight = false;
-      setCardsDisabled(false);
-    }
-  };
-
-  const cardList = element(
-    'ul',
-    {
-      className: 'guided-species-options',
-      attributes: { 'aria-label': 'Catalog species' },
-    },
-    deps.options.map((option) => {
-      // A container with an explicit apply button, NOT one giant clickable
-      // card: the disclosures are flow content a `button` may not contain,
-      // and applying is consequential enough to deserve a labelled control.
-      const disclosureId = `guided-species-${option.content_key.replace(/[^a-z0-9]+/giu, '-')}-catalog-layer`;
-      const apply = element('button', {
-        className: 'guided-species-apply',
-        text: `Choose ${option.name}`,
-        attributes: {
-          type: 'button',
-          'data-species-option': option.content_key,
-          'aria-describedby': disclosureId,
-        },
-      });
-      cards.push(apply);
-      cleanups.push(listen(apply, 'click', () => void applySpecies(option)));
-      return element(
-        'li',
-        { className: 'guided-species-card' },
-        [
-          element('h3', {
-            className: 'guided-species-name',
-            text: option.name,
-          }),
-          element('p', {
-            className: 'catalog-layer-disclosure',
-            text: catalogLayerLabel(option.catalog_layer),
-            attributes: { id: disclosureId },
-          }),
-          unmadeChoicesBlock(option),
-          ...(LINEAGE_GATED_SPECIES_CONTENT_KEYS.has(option.content_key)
-            ? [
-                element('p', {
-                  className: 'guided-species-lineage-gated',
-                  text: LINEAGE_GATED_SPELLS_DISCLOSURE,
-                }),
-              ]
-            : []),
-          apply,
-        ],
-      );
-    }),
-  );
-
-  const panel = element(
-    'section',
-    {
-      className: 'guided-panel',
-      attributes: { [GUIDED_PANEL_ATTRIBUTE]: SPECIES_STEP_PANEL },
-    },
-    [
-      element('h2', { text: 'Choose a species' }),
-      element('p', {
-        text:
-          'Applying a species copies its printed traits, speed and effects ' +
-          'onto the character, and they appear on the sheet immediately. ' +
-          'Choosing again later replaces the earlier species.',
-      }),
-      ...(deps.options.length === 0
-        ? [
-            element('p', {
-              className: 'guided-empty-catalog',
-              text:
-                'No catalog species are available in this database, so ' +
-                'this step cannot offer one.',
-            }),
-          ]
-        : [cardList]),
-      errorMount,
-      characterListLink(),
-    ],
-  );
-
+  const panel = configuredChoicePanel(deps, cleanups) ?? speciesCards(deps, cleanups);
   return {
-    element: guidedShell('species', panel),
-    cleanup: () => {
-      for (const cleanup of cleanups) {
-        cleanup();
-      }
-    },
+    element: guidedShell('species', panel, deps.characterId),
+    cleanup: () => cleanups.forEach((cleanup) => cleanup()),
   };
 }

@@ -5,7 +5,6 @@ import { SpellAccessBuilder } from '../../../src/access/spell-access-builder';
 import {
   GUIDED_LEVEL_ONE_STEP_ORDER,
   GUIDED_RPC,
-  LINEAGE_SPELL_SPECIES_CONTENT_KEYS,
   type GuidedApplyOriginResult,
   type GuidedOriginOption,
   type GuidedSpeciesChoiceStateResult,
@@ -47,6 +46,13 @@ import {
   speciesRuleSemanticCountFromJson,
 } from '../../helpers/species-rule-census';
 import { raiseClassLevelForTest } from '../../helpers/class-levels';
+import {
+  createSpeciesStep,
+} from '../../../src/ui/screens/guided-builder/species-step';
+import {
+  elementText,
+  installInteractiveDocument,
+} from '../../fixtures/interactive-dom';
 
 let harness: RpcHarness | undefined;
 
@@ -861,6 +867,39 @@ describe('configured species choice and honest projection', () => {
     expect(new CharacterState(db).capture(characterId)).toEqual(before);
   }
 
+  it('pins configured spell disclosure shapes with registry-resolved layers', async () => {
+    const rpcHarness = await applicationDatabase();
+    const elf = speciesNamed(rpcHarness.context.db, 'Elf');
+    const lineage = elf.configured_choices.find(
+      (choice) => choice.rule_key === 'elf-lineage',
+    );
+    const drow = lineage?.options.find((option) => option.value === 'Drow');
+    const highElf = lineage?.options.find(
+      (option) => option.value === 'High Elf',
+    );
+
+    expect(drow?.grants[0]).toEqual({
+      rule_key: 'elf-lineage-drow-dancing-lights',
+      kind: 'fixed_spell',
+      active_from_character_level: null,
+      spell_version_key: '2024:dancing-lights',
+      spell_name: 'Dancing Lights',
+      spell_catalog_layer: 'bundled',
+    });
+    expect(highElf?.replaceable_spell_choice).toEqual({
+      config_key: 'lineage.high_elf_cantrip',
+      label: 'High Elf cantrip',
+      spell_list: 'Wizard',
+      spell_level: 0,
+      initial_spell_version_key: '2024:prestidigitation',
+      initial_spell_name: 'Prestidigitation',
+      initial_spell_catalog_layer: 'bundled',
+      selected_spell_version_key: null,
+      selected_spell: null,
+      eligible_spells: [],
+    });
+  });
+
   it('refuses a choice when the character has no guided species source', async () => {
     const rpcHarness = await applicationDatabase();
     const db = rpcHarness.context.db;
@@ -943,11 +982,22 @@ describe('configured species choice and honest projection', () => {
           },
           unknown_sheet_fields: ['walking_speed_feet', 'darkvision_feet'],
           options: [
-            expect.objectContaining({ value: 'Drow', darkvision_feet: 120 }),
+            expect.objectContaining({
+              value: 'Drow',
+              darkvision_feet: 120,
+              grants: expect.arrayContaining([
+                expect.objectContaining({
+                  spell_name: 'Dancing Lights',
+                  spell_catalog_layer: 'bundled',
+                }),
+              ]),
+            }),
             expect.objectContaining({
               value: 'High Elf',
               replaceable_spell_choice: expect.objectContaining({
                 initial_spell_version_key: '2024:prestidigitation',
+                initial_spell_name: 'Prestidigitation',
+                initial_spell_catalog_layer: 'bundled',
                 selected_spell_version_key: null,
               }),
             }),
@@ -1088,6 +1138,111 @@ describe('configured species choice and honest projection', () => {
       }
     },
   );
+
+  it('derives the Wood Elf speed RPC state and disclosure from stored grant rules', async () => {
+    const rpcHarness = await applicationDatabase();
+    const db = rpcHarness.context.db;
+    const characterId = createClassedCharacter(db, 'Stored Wood Elf Speed');
+    const elf = speciesNamed(db, 'Elf');
+    applyGuidedOrigin(db, {
+      character_id: characterId,
+      kind: 'species',
+      content_key: elf.content_key,
+    });
+
+    const storedGrantRules = db.scalar<string>(
+      `SELECT grant_rules FROM species_definitions WHERE content_key = ?`,
+      [elf.content_key],
+    );
+    if (typeof storedGrantRules !== 'string') {
+      throw new Error('The stored Elf definition has no grant rules.');
+    }
+    const mutatedGrantRules = JSON.parse(storedGrantRules) as Array<{
+      options?: Array<{
+        value?: unknown;
+        effects?: Array<Record<string, unknown>>;
+      }>;
+    }>;
+    const woodElf = mutatedGrantRules
+      .flatMap((rule) => rule.options ?? [])
+      .find((option) => option.value === 'Wood Elf');
+    const speed = woodElf?.effects?.find((effect) => effect['kind'] === 'speed');
+    if (speed === undefined || speed['speed_bonus_feet'] !== 5) {
+      throw new Error('The stored Wood Elf +5 speed effect is missing.');
+    }
+    speed['speed_bonus_feet'] = 4;
+
+    const state = async (): Promise<GuidedSpeciesChoiceStateResult> => {
+      const response = await rpcRegistry.dispatch({
+        id: 93,
+        method: GUIDED_RPC.speciesChoiceState,
+        params: { character_id: characterId },
+      }, rpcHarness.context);
+      expect(response).toMatchObject({ ok: true });
+      if (!response.ok) {
+        throw new Error('The species-choice state RPC refused.');
+      }
+      return response.result as GuidedSpeciesChoiceStateResult;
+    };
+    const expectSpeed = (
+      rpcState: GuidedSpeciesChoiceStateResult,
+      amount: number,
+    ): void => {
+      expect(rpcState).toMatchObject({
+        kind: 'ready',
+        resolution: {
+          choices: [{
+            options: expect.arrayContaining([
+              expect.objectContaining({
+                value: 'Wood Elf',
+                effects: expect.arrayContaining([
+                  expect.objectContaining({
+                    kind: 'speed',
+                    label: 'Wood Elf Speed',
+                    speed_bonus_feet: amount,
+                  }),
+                ]),
+              }),
+            ]),
+          }],
+        },
+      });
+
+      const restoreDocument = installInteractiveDocument();
+      const step = createSpeciesStep({
+        characterId,
+        options: [],
+        choiceState: rpcState,
+        applyOrigin: () => Promise.reject(new Error('not submitted')),
+        chooseLineage: () => Promise.reject(new Error('not submitted')),
+        navigate: () => undefined,
+      });
+      try {
+        const disclosure = elementText(step.element);
+        expect(disclosure).toContain(
+          `Speed: +${String(amount)} feet — Wood Elf Speed.`,
+        );
+        expect(disclosure).not.toContain(
+          `Speed: +${String(amount === 4 ? 5 : 4)} feet — Wood Elf Speed.`,
+        );
+      } finally {
+        step.cleanup();
+        restoreDocument();
+      }
+    };
+
+    db.exec(
+      `UPDATE species_definitions SET grant_rules = ? WHERE content_key = ?`,
+      [JSON.stringify(mutatedGrantRules), elf.content_key],
+    );
+    expectSpeed(await state(), 4);
+
+    db.exec(
+      `UPDATE species_definitions SET grant_rules = ? WHERE content_key = ?`,
+      [storedGrantRules, elf.content_key],
+    );
+    expectSpeed(await state(), 5);
+  });
 
   it('replaces the High Elf cantrip through the same command and displays the chosen spell on the sheet', async () => {
     const rpcHarness = await applicationDatabase();
@@ -1815,7 +1970,7 @@ describe('bundled species definition seed', () => {
 });
 
 describe('guided species RPC contracts', () => {
-  it('classifies every origin option from the seam lineage key set', async () => {
+  it('returns the configured-choice census from stored species data', async () => {
     const rpcHarness = await applicationDatabase();
     const response = await rpcRegistry.dispatch(
       {
@@ -1831,18 +1986,20 @@ describe('guided species RPC contracts', () => {
       throw new Error('The guided species-options RPC did not return a list.');
     }
     const options = response.result as readonly GuidedOriginOption[];
-    for (const option of options) {
-      expect(option.grants_lineage_spells).toBe(
-        LINEAGE_SPELL_SPECIES_CONTENT_KEYS.has(option.content_key),
-      );
-    }
     expect(
-      new Set(
+      Object.fromEntries(
         options
-          .filter((option) => option.grants_lineage_spells)
-          .map((option) => option.content_key),
+          .filter((option) => option.configured_choices.length > 0)
+          .map((option) => [
+            option.content_key,
+            option.configured_choices.map((choice) => choice.label),
+          ]),
       ),
-    ).toEqual(LINEAGE_SPELL_SPECIES_CONTENT_KEYS);
+    ).toEqual({
+      '2024:species:elf': ['Elven Lineage'],
+      '2024:species:gnome': ['Gnomish Lineage'],
+      '2024:species:tiefling': ['Fiendish Legacy'],
+    });
   });
 
   it('applies a species and returns the seam-ordered background step through the real RPC', async () => {

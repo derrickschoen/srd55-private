@@ -16,12 +16,14 @@ import {
   GUIDED_PANEL,
   GUIDED_PANEL_ATTRIBUTE,
   GUIDED_RPC,
-  LINEAGE_SPELL_SPECIES_CONTENT_KEYS,
   guidedBuildPath,
+  guidedSpeciesChoicePath,
   matchesGuidedBuildRoute,
   type GuidedBuildStateResult,
   type GuidedClassOption,
+  type GuidedConfiguredChoiceState,
   type GuidedOriginOption,
+  type GuidedSpeciesChoiceStateResult,
 } from '../../../src/builder/contracts';
 import type { CharacterRow } from '../../../src/domain/models';
 import { RpcError } from '../../../src/rpc/protocol';
@@ -39,7 +41,10 @@ import {
   renderGuidedBuildState,
 } from '../../../src/ui/screens/guided-builder/guided-builder';
 import { screen } from '../../../src/ui/screens/guided-builder/screen';
-import { createSpeciesStep } from '../../../src/ui/screens/guided-builder/species-step';
+import {
+  createSpeciesStep,
+  SPECIES_UNMADE_CHOICES,
+} from '../../../src/ui/screens/guided-builder/species-step';
 import { screen as plannerScreen } from '../../../src/ui/screens/planner/screen';
 import { rpcRegistry } from '../../../src/worker/registry';
 import {
@@ -124,6 +129,9 @@ describe('guided-builder route matching', () => {
 
       expect(matchesGuidedBuildRoute(parsed.segments)).toBe(characterId);
       expect(chooserGuidedBuildPath(characterId)).toBe(path);
+      const speciesEditor = route(guidedSpeciesChoicePath(characterId));
+      expect(matchesGuidedBuildRoute(speciesEditor.segments)).toBe(characterId);
+      expect(speciesEditor.query.get('step')).toBe('species');
     }
   });
 });
@@ -361,33 +369,122 @@ describe('guided-builder panels', () => {
 function originOption(
   contentKey: string,
   name: string,
-  grantsLineageSpells: boolean,
+  configuredChoices: readonly GuidedConfiguredChoiceState[] = [],
   catalogLayer: GuidedOriginOption['catalog_layer'] = 'bundled',
 ): GuidedOriginOption {
   return {
     content_key: contentKey,
     name,
     catalog_layer: catalogLayer,
-    grants_lineage_spells: grantsLineageSpells,
+    configured_choices: configuredChoices,
   };
 }
 
-function lineageKeyEndingIn(suffix: string): string {
-  const key = [...LINEAGE_SPELL_SPECIES_CONTENT_KEYS].find((candidate) =>
-    candidate.endsWith(suffix),
-  );
-  if (key === undefined) {
-    throw new Error(`The seam lineage set has no key ending in ${suffix}.`);
-  }
-  return key;
+function elfConfiguredChoice(): GuidedConfiguredChoiceState {
+  const grant = (
+    ruleKey: string,
+    spellName: string,
+    level: number,
+  ) => ({
+    rule_key: ruleKey,
+    kind: 'fixed_spell',
+    active_from_character_level: level,
+    spell_version_key: `test:${spellName.toLocaleLowerCase().replaceAll(' ', '-')}`,
+    spell_name: spellName,
+    spell_catalog_layer: 'bundled' as const,
+  });
+  return {
+    rule_key: 'hostile-rule-key',
+    label: 'Elven Lineage',
+    config_key: 'lineage.chosen_option',
+    selected_option: null,
+    ability_choice: {
+      config_key: 'spellcasting_ability',
+      options: ['intelligence', 'wisdom', 'charisma'],
+      selected: null,
+    },
+    unknown_sheet_fields: ['walking_speed_feet', 'darkvision_feet'],
+    projected_trait_names: ['Darkvision'],
+    options: [
+      {
+        value: 'Drow',
+        label: 'Drow',
+        darkvision_feet: 120,
+        effects: [],
+        grants: [grant('drow-l1', 'Dancing Lights', 1)],
+        replaceable_spell_choice: null,
+      },
+      {
+        value: 'High Elf',
+        label: 'High Elf',
+        darkvision_feet: 60,
+        effects: [],
+        grants: [grant('high-l3', 'Detect Magic', 3)],
+        replaceable_spell_choice: {
+          config_key: 'lineage.high_elf_cantrip',
+          label: 'High Elf Wizard cantrip',
+          spell_list: 'Wizard',
+          spell_level: 0,
+          initial_spell_version_key: '2024:prestidigitation',
+          initial_spell_name: 'Prestidigitation',
+          initial_spell_catalog_layer: 'bundled',
+          selected_spell_version_key: null,
+          selected_spell: null,
+          eligible_spells: [],
+        },
+      },
+      {
+        value: 'Wood Elf',
+        label: 'Wood Elf',
+        darkvision_feet: 60,
+        effects: [{
+          kind: 'speed',
+          label: 'Fleet of Foot',
+          speed_bonus_feet: 5,
+          damage_type: null,
+        }],
+        grants: [grant('wood-l5', 'Pass without Trace', 5)],
+        replaceable_spell_choice: null,
+      },
+    ],
+  };
 }
 
+const speciesStepStubs = {
+  choiceState: null as GuidedSpeciesChoiceStateResult | null,
+  chooseLineage: () => Promise.reject(new Error('not submitted')),
+};
+
 describe('guided species step', () => {
+  it('census-pins only the still-unmodelled species choices', () => {
+    expect([...SPECIES_UNMADE_CHOICES]).toEqual([
+      [
+        '2024:species:dragonborn',
+        [
+          'a Draconic Ancestry — the kind of dragon, which sets the Breath Weapon and Damage Resistance damage type',
+        ],
+      ],
+      ['2024:species:goliath', ['a Giant Ancestry benefit (one of six)']],
+      [
+        '2024:species:human',
+        [
+          'a size (Small or Medium — the copy records Medium)',
+          'a Versatile Origin feat',
+        ],
+      ],
+      [
+        '2024:species:tiefling',
+        ['a size (Small or Medium — the copy records Medium)'],
+      ],
+    ]);
+  });
+
   it('renders a hostile external species inert with its catalog layer disclosed', () => {
     const hostile = '</h3><img data-ha10-species-hostile src=x>';
     const step = createSpeciesStep({
+      ...speciesStepStubs,
       characterId: 1,
-      options: [originOption('expanded:species:hostile', hostile, false, 'external')],
+      options: [originOption('expanded:species:hostile', hostile, [], 'external')],
       applyOrigin: () => Promise.reject(new Error('not submitted')),
       navigate: () => undefined,
     });
@@ -403,8 +500,9 @@ describe('guided species step', () => {
   it('renders a registry-orphaned hostile species inert with the exact unknown label', () => {
     const hostile = '</h3><img data-ha10-unknown-species src=x>';
     const step = createSpeciesStep({
+      ...speciesStepStubs,
       characterId: 7,
-      options: [originOption('expanded:species:unknown', hostile, false, 'unknown')],
+      options: [originOption('expanded:species:unknown', hostile, [], 'unknown')],
       applyOrigin: () => Promise.reject(new Error('not submitted')),
       navigate: () => undefined,
     });
@@ -425,6 +523,7 @@ describe('guided species step', () => {
 
   it('does not retain the deleted abilities-skipped disclosure', () => {
     const step = createSpeciesStep({
+      ...speciesStepStubs,
       characterId: 1,
       options: [],
       applyOrigin: () => Promise.reject(new Error('not submitted')),
@@ -436,36 +535,83 @@ describe('guided species step', () => {
     step.cleanup();
   });
 
-  it('names every unmade Elf choice required by the plan', () => {
-    const elfKey = lineageKeyEndingIn(':species:elf');
+  it('renders every configured Elf option and its grants from option data', () => {
     const step = createSpeciesStep({
+      ...speciesStepStubs,
       characterId: 1,
-      options: [originOption(elfKey, 'Elf', true)],
+      options: [originOption(
+        '2024:species:elf',
+        'Elf',
+        [elfConfiguredChoice()],
+      )],
       applyOrigin: () => Promise.reject(new Error('not submitted')),
       navigate: () => undefined,
     });
     const text = elementText(step.element);
 
+    expect(text).toContain('Elven Lineage choice');
+    expect(text).toContain('Drow');
+    expect(text).toContain('Darkvision: 120 feet.');
     expect(text).toContain(
-      'Required choices this step cannot make yet — applying this species records none of them:',
+      'Dancing Lights · SRD · bundled layer at character level 1.',
     );
-    expect(text).toContain('an Elven Lineage (Drow, High Elf, or Wood Elf)');
+    expect(text).toContain('High Elf Wizard cantrip');
     expect(text).toContain(
-      'a spellcasting ability for its spells (Intelligence, Wisdom, or Charisma)',
+      'initially Prestidigitation · SRD · bundled layer',
     );
-    // The Keen Senses entry is DELETED, not reworded (skills-with-provenance
-    // S-C): the choice is a tracked grant the skills step makes choosable, so
-    // disclosing it as unmakeable here would be false.
-    expect(text).not.toContain('a Keen Senses skill');
+    expect(text).toContain('Speed: +5 feet — Fleet of Foot.');
+    expect(text).toContain(
+      'Pass without Trace · SRD · bundled layer at character level 5.',
+    );
+    step.cleanup();
+  });
+
+  it('discloses the sourced initial spell layer beside the lineage picker', () => {
+    const choice = elfConfiguredChoice();
+    const step = createSpeciesStep({
+      ...speciesStepStubs,
+      characterId: 1,
+      options: [],
+      choiceState: {
+        kind: 'ready',
+        character_id: 1,
+        revision: 0,
+        resolution: {
+          kind: 'incomplete',
+          source_instance_id: 2,
+          source_name: 'Elf',
+          source_catalog_layer: 'bundled',
+          missing: ['replaceable_spell'],
+          choices: [{
+            ...choice,
+            selected_option: 'High Elf',
+            ability_choice: choice.ability_choice === null
+              ? null
+              : { ...choice.ability_choice, selected: 'intelligence' },
+          }],
+        },
+      },
+      applyOrigin: () => Promise.reject(new Error('not submitted')),
+      navigate: () => undefined,
+    });
+    const currentLayer = interactiveElement(step.element).querySelector(
+      '.spell-picker-current-layer',
+    );
+
+    expect(currentLayer).not.toBeNull();
+    expect(elementText(currentLayer! as unknown as Node)).toBe(
+      'SRD · bundled layer',
+    );
     step.cleanup();
   });
 
   it('distinguishes an Elf with an unchosen lineage from a plain species', () => {
     const options = [
-      originOption(lineageKeyEndingIn(':species:elf'), 'Elf', true),
-      originOption('2024:species:dwarf', 'Dwarf', false),
+      originOption('2024:species:elf', 'Elf', [elfConfiguredChoice()]),
+      originOption('2024:species:dwarf', 'Dwarf'),
     ];
     const step = createSpeciesStep({
+      ...speciesStepStubs,
       characterId: 1,
       options,
       applyOrigin: () => Promise.reject(new Error('not submitted')),
@@ -485,9 +631,12 @@ describe('guided species step', () => {
       return elementText(card as unknown as Node);
     };
 
-    expect(cardText('Elf')).toMatch(
-      /required choices this step cannot make yet.*an Elven Lineage/is,
+    expect(cardText('Elf')).toMatch(/Elven Lineage choice.*Drow.*High Elf.*Wood Elf/is);
+    expect(cardText('Elf')).toContain(
+      'Dancing Lights · SRD · bundled layer at character level 1.',
     );
+    expect(cardText('Elf')).toContain('Darkvision: 120 feet.');
+    expect(cardText('Elf')).toContain('Speed: +5 feet — Fleet of Foot.');
     expect(cardText('Dwarf')).toContain(
       'The SRD offers no further choice for this species.',
     );
@@ -497,12 +646,13 @@ describe('guided species step', () => {
 
   it('renders the seam species panel without any link into the planner', () => {
     const step = createSpeciesStep({
+      ...speciesStepStubs,
       characterId: 1,
       options: [
         originOption(
-          lineageKeyEndingIn(':species:elf'),
+          '2024:species:elf',
           'Elf',
-          true,
+          [elfConfiguredChoice()],
         ),
       ],
       applyOrigin: () => Promise.reject(new Error('not submitted')),
@@ -863,5 +1013,34 @@ describe('D48 guided-flow browser-storage ban', () => {
       const contents = readFileSync(source, 'utf8');
       expect(contents).not.toMatch(/(?:local|session)Storage/);
     }
+  });
+});
+
+describe('retired lineage disclosure census', () => {
+  it('has zero retired lineage-disclosure literals across production and test code', () => {
+    const projectRoot = fileURLToPath(new URL('../../../', import.meta.url));
+    const files = [
+      ...typescriptFilesUnder(join(projectRoot, 'src')),
+      ...typescriptFilesUnder(join(projectRoot, 'tests')),
+    ];
+    const retired = [
+      `grants_${'lineage'}_spells`,
+      `grants${'LineageSpells'}`,
+      `LINEAGE_${'SPELL'}_SPECIES_CONTENT_KEYS`,
+      `LINEAGE_${'GATED'}_SPECIES_CONTENT_KEYS`,
+      `LINEAGE_${'GATED'}_SPELLS_DISCLOSURE`,
+      `ruleIs${'LineageGated'}`,
+      `Its ${'lineage spells'} arrive only when you choose a lineage`,
+      `applying this species grants no ${'spells today'}`,
+      `Required choices this step cannot make ${'yet'}`,
+    ];
+    const matches = files.flatMap((file) => {
+      const source = readFileSync(file, 'utf8');
+      return retired
+        .filter((literal) => source.includes(literal))
+        .map((literal) => ({ file, literal }));
+    });
+
+    expect(matches).toEqual([]);
   });
 });

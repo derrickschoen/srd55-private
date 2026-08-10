@@ -381,7 +381,7 @@ export function createEquipmentStep(deps: EquipmentStepDeps): EquipmentStep {
   );
 
   return {
-    element: guidedShell('equipment', panel),
+    element: guidedShell('equipment', panel, deps.characterId),
     cleanup: () => {
       for (const cleanup of cleanups) {
         cleanup();

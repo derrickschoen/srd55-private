@@ -453,7 +453,7 @@ export function createAbilitiesStep(deps: AbilitiesStepDeps): AbilitiesStep {
   renderScoreInputs();
 
   return {
-    element: guidedShell('abilities', panel),
+    element: guidedShell('abilities', panel, deps.characterId),
     cleanup: () => {
       for (const cleanup of cleanups) {
         cleanup();

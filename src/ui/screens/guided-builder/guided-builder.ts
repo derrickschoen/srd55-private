@@ -21,6 +21,7 @@
 import {
   GUIDED_LEVEL_ONE_STEP_ORDER,
   GUIDED_NEW_ROUTE,
+  guidedSpeciesChoicePath,
   type BuildStep,
   type GuidedBuildStateResult,
 } from '../../../builder/contracts';
@@ -41,16 +42,33 @@ const STEP_LABELS: Readonly<Record<BuildStep, string>> = {
  * D55's order, rendered straight from the seam constant — the "step order
  * begins with class" exit criterion is true here by construction, not by copy.
  */
-function stepList(currentStep: BuildStep): HTMLOListElement {
+function stepList(
+  currentStep: BuildStep,
+  characterId?: number,
+): HTMLOListElement {
+  const currentIndex = GUIDED_LEVEL_ONE_STEP_ORDER.indexOf(currentStep);
+  const speciesIndex = GUIDED_LEVEL_ONE_STEP_ORDER.indexOf('species');
   return element(
     'ol',
     {
       className: 'guided-steps',
       attributes: { 'aria-label': 'Level 1 build steps' },
     },
-    GUIDED_LEVEL_ONE_STEP_ORDER.map((step) =>
-      element('li', {
-        text: STEP_LABELS[step],
+    GUIDED_LEVEL_ONE_STEP_ORDER.map((step) => {
+      const speciesLink =
+        step === 'species' &&
+        characterId !== undefined &&
+        currentIndex > speciesIndex
+          ? element('a', {
+              text: STEP_LABELS[step],
+              attributes: {
+                href: guidedSpeciesChoicePath(characterId),
+                'data-router-link': '',
+              },
+            })
+          : null;
+      return element('li', {
+        ...(speciesLink === null ? { text: STEP_LABELS[step] } : {}),
         className:
           step === currentStep
             ? 'guided-step guided-step-current'
@@ -59,8 +77,8 @@ function stepList(currentStep: BuildStep): HTMLOListElement {
           step === currentStep
             ? { 'data-step': step, 'aria-current': 'step' }
             : { 'data-step': step },
-      }),
-    ),
+      }, speciesLink === null ? [] : [speciesLink]);
+    }),
   );
 }
 
@@ -77,12 +95,13 @@ export function characterListLink(): HTMLParagraphElement {
 export function guidedShell(
   currentStep: BuildStep,
   panel: HTMLElement,
+  characterId?: number,
 ): HTMLElement {
   return element('main', { className: 'guided-shell' }, [
     element('header', { className: 'guided-header' }, [
       element('h1', { text: 'Guided character builder' }),
     ]),
-    stepList(currentStep),
+    stepList(currentStep, characterId),
     panel,
   ]);
 }

@@ -386,7 +386,7 @@ describe('HA-3 species publisher', () => {
       content_key: expectedKey,
       name: 'Clockwork Voyager',
       catalog_layer: 'external',
-      grants_lineage_spells: false,
+      configured_choices: [],
     });
     applyGuidedOrigin(source, {
       character_id: character.id as CharacterId,
