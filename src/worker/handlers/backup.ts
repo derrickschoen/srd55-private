@@ -9,6 +9,11 @@ import {
   importDatabaseBackup,
 } from '../../backup/database-backup';
 import {
+  commitLibraryImport,
+  importLibraryDocument,
+  planLibraryImport,
+} from '../../backup/library-export';
+import {
   defineRpcHandler,
   isEmptyParams,
   isRecord,
@@ -50,6 +55,27 @@ function isExportCharacterParams(
   );
 }
 
+function isPlanLibraryParams(params: unknown): params is {
+  readonly document: unknown;
+  readonly choices: import('../../catalog/content-adoption').ContentImportChoices;
+} {
+  return isRecord(params) && Object.keys(params).length === 2 &&
+    Object.hasOwn(params, 'document') && Object.hasOwn(params, 'choices') &&
+    isContentImportChoices(params.choices);
+}
+
+function isCommitLibraryParams(params: unknown): params is {
+  readonly document: unknown;
+  readonly token: import('../../catalog/content-adoption').ContentImportPlanToken;
+  readonly choices: import('../../catalog/content-adoption').ContentImportChoices;
+} {
+  return isRecord(params) && Object.keys(params).length === 3 &&
+    Object.hasOwn(params, 'document') && Object.hasOwn(params, 'token') &&
+    Object.hasOwn(params, 'choices') &&
+    typeof params.token === 'string' && /^[0-9a-f]{64}$/u.test(params.token) &&
+    isContentImportChoices(params.choices);
+}
+
 function isPlanCharacterParams(params: unknown): params is {
   readonly document: unknown;
   readonly choices: import('../../catalog/content-adoption').ContentImportChoices;
@@ -84,6 +110,30 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
       await importDatabaseBackup(context.lifecycle, params.backup);
       return { imported: true as const };
     },
+  ),
+  // Transport-only adapters: validation, planning, and installation remain in
+  // the library import service shared by backups and portability tests.
+  defineRpcHandler(
+    'backup.importLibrary',
+    (params): params is { readonly document: unknown } =>
+      isSingleValueParams(params, 'document'),
+    (context, params) => importLibraryDocument(context.db, params.document),
+  ),
+  defineRpcHandler(
+    'backup.planLibraryImport',
+    isPlanLibraryParams,
+    (context, params) =>
+      planLibraryImport(context.db, params.document, params.choices),
+  ),
+  defineRpcHandler(
+    'backup.commitLibraryImport',
+    isCommitLibraryParams,
+    (context, params) => commitLibraryImport(
+      context.db,
+      params.document,
+      params.token,
+      params.choices,
+    ),
   ),
   defineRpcHandler(
     'backup.exportCharacter',

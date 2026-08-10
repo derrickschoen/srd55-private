@@ -7,6 +7,8 @@ import type { HandlerContext } from '../../../src/worker/handler';
 import { handlers as backupHandlers } from '../../../src/worker/handlers/backup';
 import { createRpcRegistry } from '../../../src/worker/registry';
 import { createRpcHarness, type RpcHarness } from '../../helpers/rpc-harness';
+import { portableElfLibraryDocument } from '../../helpers/species-lineage-portability';
+import type { LibraryExportDocument } from '../../../src/backup/portable-content';
 
 const registry = createRpcRegistry({ backup: { handlers: backupHandlers } });
 const harnesses: RpcHarness[] = [];
@@ -108,4 +110,66 @@ describe('character backup adoption RPC', () => {
     });
     expect(harness.context.db.scalar<number>('SELECT count(*) FROM characters')).toBe(2);
   });
+});
+
+describe('library adoption RPC', () => {
+  // Measured alone at 2.0s; 2.0 x 1.5 = 3.0s. The 20s guard follows the
+  // repository convention for boot-heavy integration tests over 1.5s.
+  it('imports v1 directly and keeps v2 key collisions on preview and commit', async () => {
+    const harness = await createRpcHarness([]);
+    harnesses.push(harness);
+    const rpc = new RpcClient(new WorkerTransport(harness.context));
+    clients.push(rpc);
+    const client = createBackupClient(rpc);
+    const current = portableElfLibraryDocument(harness.context.db);
+    const { supersessions: _supersessions, ...withoutSupersessions } = current;
+    const legacy: LibraryExportDocument = {
+      ...withoutSupersessions,
+      version: 1,
+    };
+
+    expect(registry.methods).toEqual(expect.arrayContaining([
+      'backup.importLibrary',
+      'backup.planLibraryImport',
+      'backup.commitLibraryImport',
+    ]));
+    await expect(rpc.call('backup.importLibrary', {
+      document: legacy,
+      extra: true,
+    })).rejects.toThrow('Invalid params for RPC method "backup.importLibrary".');
+    await expect(rpc.call('backup.planLibraryImport', {
+      document: legacy,
+      choices: {},
+      extra: true,
+    })).rejects.toThrow('Invalid params for RPC method "backup.planLibraryImport".');
+    await expect(rpc.call('backup.commitLibraryImport', {
+      document: legacy,
+      token: 'a'.repeat(64),
+    })).rejects.toThrow('Invalid params for RPC method "backup.commitLibraryImport".');
+    await expect(client.importLibrary(legacy)).resolves.toMatchObject({
+      outcomes: [expect.objectContaining({ kind: 'create' })],
+    });
+
+    const collision = portableElfLibraryDocument(harness.context.db, {
+      oversized: true,
+    });
+    const plan = await client.planLibraryImport(collision, {});
+    expect(plan.reviews).toEqual([
+      expect.objectContaining({
+        kind: 'species',
+        incomingName: 'Portable Elf',
+        localName: 'Portable Elf',
+        localCatalogLayer: 'external',
+        matchClass: 'key-collision',
+      }),
+    ]);
+    const reviewId = plan.reviews[0]?.id;
+    if (reviewId === undefined) throw new Error('Expected a library collision.');
+    await expect(client.commitLibraryImport(collision, plan.token, {
+      [reviewId]: { decision: 'match' },
+    })).resolves.toMatchObject({
+      kind: 'committed',
+      outcomes: [expect.objectContaining({ kind: 'review' })],
+    });
+  }, 20_000);
 });

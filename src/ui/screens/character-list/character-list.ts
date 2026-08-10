@@ -569,6 +569,9 @@ export async function renderCharacterList(
         },
       });
       shell.transfer.replaceChildren(transferControls.element);
+      if (context.route.query.get('import') === 'library') {
+        transferControls.focusLibraryImport();
+      }
     } else {
       transferControls.updateCharacters(characters);
     }
