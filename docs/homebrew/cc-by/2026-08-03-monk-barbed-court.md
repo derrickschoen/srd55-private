@@ -31,7 +31,7 @@ opponent's vanity is the same eye that guides the striking hand.
 | 3 | Barbed Court Spellcasting · Court Cantrips · Barbed Goad · Faces of the Court · Wisdom-Guided Strikes · Courtier's Slap · The Standing Hand · Innate Sorcery of the Court |
 | 6 | Court Spells row · Focus Refresh · Warding Image · Unshaken Aim · Barbed Fists +1 |
 | 11 | Court Spells row · Hands of the Barbed Court · Barbed Fists +2 |
-| 17 | Court Spells row · Focus-Casting · A Gift of the Court · The Rebuking Shield · Hands ×2 · Barbed Fists +3 |
+| 17 | Court Spells row · Focus-Casting · A Gift of the Court · The Rebuking Shield · Hands ×2 + Advantage · Barbed Fists +3 |
 
 ## 2. Barbed Court Spellcasting (Monk 3)
 
@@ -215,15 +215,13 @@ your Unarmed Strike a bonus to the same roll, use the higher bonus.
 
 As a Bonus Action, you can spend 4 Focus Points to manifest the full court
 — a 15-foot Emanation of invisible slapping hands — for up to 10 minutes.
-The effect requires Concentration. While the court is manifested:
+The effect requires Concentration. While the court is manifested, when you
+hit a creature in the Emanation with an attack, the hands add **Psychic
+damage equal to your Wisdom modifier** to the hit.
 
-- When you hit a creature in the Emanation with an attack, the hands add
-  **Psychic damage equal to your Wisdom modifier** to the hit.
-- You have **Advantage on your attack rolls** against creatures in the
-  Emanation.
-
-At level 17, the hands' extra damage increases to **twice your Wisdom
-modifier**.
+At level 17 the court matures: the hands' extra damage increases to **twice
+your Wisdom modifier**, and the court guides your aim — you have
+**Advantage on your attack rolls** against creatures in the Emanation.
 
 ### Level 17: The Rebuking Shield
 
@@ -258,7 +256,7 @@ missed.
 
 | Build | L3 | L6 | L11 | L17 |
 |---|---:|---:|---:|---:|
-| **Barbed Court, this kit** | **13.7** | **37.9** | **89.7** | **138.1** |
+| **Barbed Court, this kit** | **13.7** | **37.9** | **68.8** | **137.7** |
 | Optimized Dex Vengeance Paladin (melee ref.) | 19.5 | 31.2 | 52.2 | 60.8 |
 | Veteran rogue (this project) | 25.1 | 32.8 | 64.5 | 108.9 |
 | SRD Thief | 18.4 | 23.7 | 37.2 | 64.2 |
@@ -277,14 +275,15 @@ Recorded caveats, both directions:
    single block of the kit's damage — roughly a third at 11 and 17 by
    marginal-removal tests on the pre-correction run (non-additive marginals;
    re-derivation pending).
-3. **Ratios, stated plainly**: 0.70× / 1.21× / 1.72× / 2.27× the optimized
-   Paladin, and 0.55× / 1.16× / 1.39× / 1.27× this project's own Veteran.
-   Growth 11→17 is +54%. The attack loop is 4/5/6/6 swings at 3/6/11/17
-   (Attack action + slap + Flurry; three-strike Flurry from 10) — the
-   explicit-Nick seventh swing was deleted by owner ruling 2026-08-10 on
-   the record that it duplicated the slap's own design ancestry.
-4. **The caster race is not entered**: 89.7/129 = 0.70× at 11 and
-   138.1/265 = 0.52× at 17 against the strongest legal nova build measured.
+3. **Ratios, stated plainly**: 0.70× / 1.21× / 1.32× / 2.26× the optimized
+   Paladin, and 0.55× / 1.16× / 1.07× / 1.26× this project's own Veteran.
+   Growth 11→17 is +100% — the Hands' Advantage clause was moved to 17 by
+   owner ruling 2026-08-10, making 17 the kit's one great spike (damage
+   doubles and the aim-guidance arrives together). The attack loop is
+   4/5/6/6 swings at 3/6/11/17 (Attack action + slap + Flurry;
+   three-strike Flurry from 10).
+4. **The caster race is not entered**: 68.8/129 = 0.53× at 11 and
+   137.7/265 = 0.52× at 17 against the strongest legal nova build measured.
 5. Levels 3–5 are the kit's weakest window (0.70× the paladin) — the Hands
    don't exist yet; the front-load doctrine begins at 6.
 
@@ -296,7 +295,7 @@ failure modes; verdicts are design review, not playtest.)
 | Check | Verdict |
 |---|---|
 | F3 Dip Bait | **Amber-high, owner-accepted.** Three Monk levels buy Wisdom-based Martial Arts, the slap, six cantrips + two chosen, four prepared Bard spells with full re-preparation, rituals, the goad, and PB free *Mirror Image* casts. Every later engine (Hands, Refresh, ladder, Focus-Casting) is 6+ locked. |
-| F5 Advantage Faucet | Green post-consolidation: the kit's one Advantage source is the Hands (11+, Focus-priced, Concentration-fragile). |
+| F5 Advantage Faucet | Green: the kit's one Advantage source is the Hands' level-17 clause (Focus-priced, Concentration-fragile); levels 3–16 grant none. |
 | F6 Action Congestion | Green: two per-turn counters by rule; the Bonus Action holds exactly Flurry-vs-Hands-manifest-vs-Step-of-the-Wind. |
 | F8 Stacking Blindness | Unarmored Defense 16 + Warding Image = AC 18; + *Shield* = 23 for a round. The Hands' Advantage does not stack with anything (Advantage doesn't). |
 | F12 Niche Trespass | Two proximity notes, both mechanically unprotectable and differently-chassised: the 10-foot Wisdom-delivered strikes parallel a known non-SRD spectral-arms monk; the goad parallels a known non-SRD taunt rider. Unnamed by policy. |
