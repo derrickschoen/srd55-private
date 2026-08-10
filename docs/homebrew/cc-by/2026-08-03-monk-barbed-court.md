@@ -334,8 +334,11 @@ subclass is **deliberately tuned above the power of official subclasses**
 to compensate for the class-level deficiencies that episode describes: it
 is, knowingly, a class fix wearing a subclass's clothes. If your table
 already plays with Monk class buffs, tone this subclass down accordingly.
-(No written companion to the episode could be located as of August 2026;
-the reference is to the episode itself.)
+(In the episode Will mentions writing up his class changes; as of August
+2026 no public write-up could be located — if published, it has likely
+gone to his Patreon, https://www.patreon.com/dndshorts, behind the
+paywall. The reference here is to the episode itself:
+https://www.youtube.com/watch?v=09dqKpEk4gY.)
 
 ## 8. Sources and Licence
 
