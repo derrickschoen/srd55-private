@@ -278,21 +278,102 @@ describe('D82 two-phase content adoption controls', () => {
       nodes: [first],
       token: firstPlan.token,
     }).kind).toBe('committed');
+    const firstSibling = node(
+      'first-sibling-collision',
+      'Sibling Relic',
+      { rule: 'first' },
+    );
+    const firstSiblingPlan = planContentImport(db, [firstSibling]);
+    expect(commitContentImport(db, {
+      nodes: [firstSibling],
+      token: firstSiblingPlan.token,
+    }).kind).toBe('committed');
 
     const second = node('second-collision', 'Shared Relic', { rule: 'second' });
-    const collision = planContentImport(db, [second]);
+    const secondSibling = node(
+      'second-sibling-collision',
+      'Sibling Relic',
+      { rule: 'second' },
+    );
+    const incoming = [second, secondSibling];
+    const collision = planContentImport(db, incoming);
     expect(collision.reviews).toEqual([
       expect.objectContaining({
         id: 'second-collision',
         localName: 'Shared Relic',
         matchClass: 'key-collision',
+        defaultChoice: null,
+        selectedChoice: null,
         conflictDetails: [expect.objectContaining({ field: 'Rules identity' })],
       }),
+      expect.objectContaining({
+        id: 'second-sibling-collision',
+        localName: 'Sibling Relic',
+        matchClass: 'key-collision',
+        defaultChoice: null,
+        selectedChoice: null,
+      }),
     ]);
-    expect(collision.outcomes[0]).toEqual(expect.objectContaining({
+    expect(collision.outcomes).toEqual([expect.objectContaining({
       kind: 'review',
       matchClass: 'key-collision',
+    }), expect.objectContaining({
+      kind: 'review',
+      matchClass: 'key-collision',
+    })]);
+    expect(commitContentImport(db, {
+      nodes: incoming,
+      token: collision.token,
+    })).toEqual(expect.objectContaining({
+      kind: 'refused',
+      reason: 'entry_refused',
     }));
+
+    const partialChoices: ContentImportChoices = {
+      'second-collision': { decision: 'match' },
+    };
+    const partiallyResolved = planContentImport(db, incoming, partialChoices);
+    expect(partiallyResolved.token).toBe(collision.token);
+    expect(commitContentImport(db, {
+      nodes: incoming,
+      token: collision.token,
+      choices: partialChoices,
+    })).toEqual(expect.objectContaining({
+      kind: 'refused',
+      reason: 'entry_refused',
+    }));
+
+    const clonePlan = planContentImport(db, incoming, {
+      'second-collision': {
+        decision: 'clone',
+        cloneName: 'Shared Relic Copy',
+      },
+    });
+    expect(clonePlan.token).not.toBe(collision.token);
+
+    const choices: ContentImportChoices = {
+      ...partialChoices,
+      'second-sibling-collision': { decision: 'match' },
+    };
+    const resolved = planContentImport(db, incoming, choices);
+    expect(resolved.reviews.map((review) => review.selectedChoice)).toEqual([
+      'match',
+      'match',
+    ]);
+    expect(resolved.token).toBe(collision.token);
+    const committed = commitContentImport(db, {
+      nodes: incoming,
+      token: collision.token,
+      choices,
+    });
+    expect(committed).toEqual(expect.objectContaining({
+      kind: 'committed',
+      outcomes: [
+        expect.objectContaining({ id: 'second-collision', kind: 'review' }),
+        expect.objectContaining({ id: 'second-sibling-collision', kind: 'review' }),
+      ],
+    }));
+    expect(db.scalar<number>('SELECT count(*) FROM item_definitions')).toBe(2);
   });
 
   it('CI-CLONE-DERIVED uses the renamed stable slug and remembers the clone target', () => {

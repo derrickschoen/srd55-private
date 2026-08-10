@@ -764,6 +764,15 @@ function canonicalChoices(
   }));
 }
 
+function canonicalReviewsForToken(
+  reviews: readonly ContentImportReviewRow[],
+): readonly Omit<ContentImportReviewRow, 'selectedChoice'>[] {
+  return Object.freeze(reviews.map((review) => {
+    const { selectedChoice: _selectedChoice, ...reviewFacts } = review;
+    return Object.freeze(reviewFacts);
+  }));
+}
+
 function dependencyTarget(
   entry: EvaluatedEntry,
 ): ContentImportDependencyTarget | null {
@@ -854,7 +863,10 @@ function planToken(input: {
   readonly outcomes: readonly ContentImportEntryOutcome[];
   readonly reviews: readonly ContentImportReviewRow[];
 }): ContentImportPlanToken {
-  return sha256(canonicalJson(input)) as ContentImportPlanToken;
+  return sha256(canonicalJson({
+    ...input,
+    reviews: canonicalReviewsForToken(input.reviews),
+  })) as ContentImportPlanToken;
 }
 
 function evaluate(
