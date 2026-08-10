@@ -483,10 +483,55 @@ describe('deterministic read-only build report', () => {
       db.scalar(
         `SELECT id FROM subclass_definitions
          WHERE class_definition_id = ?
-           AND content_key = '2024:content.subclass:spell-student'`,
+           AND content_key = '2024:content.subclass:spell-student-bundled-revision-2'`,
         [fighterId],
       ),
     );
+    expect(db.oneRaw(
+      `SELECT subclass.content_key, subclass.name, progression.class_level,
+         progression.cantrips_known, progression.prepared_count,
+         progression.max_spell_level, progression.slots,
+         progression.grant_rules
+       FROM subclass_definitions AS subclass
+       INNER JOIN subclass_progressions AS progression
+         ON progression.subclass_definition_id = subclass.id
+       WHERE subclass.content_key = '2024:content.subclass:spell-student'
+         AND progression.class_level = 7`,
+    )).toEqual({
+      content_key: '2024:content.subclass:spell-student',
+      name: 'Spell Student',
+      class_level: 7,
+      cantrips_known: 1,
+      prepared_count: 2,
+      max_spell_level: 1,
+      slots: JSON.stringify({ 1: 3 }),
+      grant_rules: JSON.stringify([
+        {
+          kind: 'choice_from_list',
+          rule_key: 'spell-student-cantrips',
+          list: 'Wizard',
+          count: 1,
+          bucket: 'known',
+          level_min: 0,
+          level_max: 0,
+          always_prepared: false,
+          with_slots: true,
+          free_cast: null,
+        },
+        {
+          kind: 'choice_from_list',
+          rule_key: 'spell-student-spells',
+          list: 'Wizard',
+          count: 2,
+          bucket: 'known',
+          level_min: 0,
+          level_max: 1,
+          always_prepared: false,
+          with_slots: true,
+          free_cast: null,
+        },
+      ]),
+    });
 
     const discriminatingSubclassId = publishStoredSlotDiscriminator(db);
     const discriminatingId = createCharacter(db, 'Stored table third caster', {
@@ -551,7 +596,7 @@ describe('deterministic read-only build report', () => {
     expect(single.classes).toEqual([
       {
         name: 'Fighter',
-        subclass: 'Spell Student',
+        subclass: 'Spell Student (Bundled revision 2)',
         class_catalog_layer: 'bundled',
         subclass_catalog_layer: 'external',
         class_level: 7,
@@ -587,7 +632,11 @@ describe('deterministic read-only build report', () => {
         [multiclassId],
       ),
     ).toEqual([
-      { name: 'Fighter', level: 7, subclass: 'Spell Student' },
+      {
+        name: 'Fighter',
+        level: 7,
+        subclass: 'Spell Student (Bundled revision 2)',
+      },
       { name: 'Wizard', level: 3, subclass: null },
     ]);
     const multiclassBefore = persistedReportTableHashes(db, multiclassId);
