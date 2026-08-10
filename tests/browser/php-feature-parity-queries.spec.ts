@@ -157,6 +157,7 @@ test('builds the complete workspace editing contract for the seeded character', 
     'revision',
     'report',
     'classes',
+    'starting_class_resolution',
     'available_classes',
     'allow_legacy',
     'flavor',
@@ -171,6 +172,12 @@ test('builds the complete workspace editing contract for the seeded character', 
     'items',
     'save_points',
   ]);
+  expect(workspace.starting_class_resolution).toEqual({
+    class_level_id: workspace.classes[0].id,
+    warnings: [
+      expect.objectContaining({ code: 'no_starting_class' }),
+    ],
+  });
   expect(workspace.revision).toBe(0);
   expect(workspace.allow_legacy).toBe(false);
   expect(workspace.flavor).toEqual({
