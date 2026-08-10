@@ -942,6 +942,7 @@ describe('planner build reference text sections', () => {
       subclass_name: null,
       subclass_catalog_layer: null,
       subclasses: [],
+      multiclass_prerequisite_warning: null,
     }];
     source.weapons.allowance = {
       state: 'known',

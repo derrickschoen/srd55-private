@@ -93,7 +93,7 @@ function checkedAttributes(checked: boolean): Readonly<Record<string, string>> {
   return checked ? { checked: '' } : {};
 }
 
-function warningList(
+export function renderLevelUpWarnings(
   warnings: readonly LevelUpPermanentWarning[],
 ): HTMLElement | null {
   if (warnings.length === 0) {
@@ -103,10 +103,10 @@ function warningList(
     'aside',
     {
       className: 'level-up-warnings',
-      attributes: { 'aria-label': 'Outstanding character choices' },
+      attributes: { 'aria-label': 'Character warnings' },
     },
     [
-      element('h3', { text: 'Outstanding choices remain' }),
+      element('h3', { text: 'Character warnings' }),
       element(
         'ul',
         {},
@@ -122,6 +122,32 @@ function warningList(
   );
 }
 
+function prerequisiteWarning(
+  option: LevelUpGuideableClassOption | LevelUpDisabledClassOption,
+): HTMLElement | null {
+  const warning = option.multiclass_prerequisite_warning;
+  if (warning === null) return null;
+  return element(
+    'aside',
+    {
+      className: 'level-up-class-prerequisite-warning',
+      attributes: {
+        role: 'alert',
+        [LEVEL_UP_ATTR.warning]: warning.kind,
+      },
+    },
+    [
+      element('strong', {
+        text: `${warning.title} — ${catalogLayerLabel(
+          warning.class_catalog_layer,
+        )}`,
+      }),
+      element('p', { text: warning.detail }),
+      element('p', { text: warning.remedy }),
+    ],
+  );
+}
+
 export function renderDisabledClassOption(
   option: LevelUpDisabledClassOption,
   index: number,
@@ -129,6 +155,7 @@ export function renderDisabledClassOption(
 ): HTMLElement {
   const headingId = `${idPrefix}-${String(index)}-heading`;
   const explanationId = `${idPrefix}-${String(index)}-explanation`;
+  const warning = prerequisiteWarning(option);
   return element(
     'article',
     {
@@ -151,6 +178,7 @@ export function renderDisabledClassOption(
         text: option.explanation,
         attributes: { id: explanationId },
       }),
+      ...(warning === null ? [] : [warning]),
     ],
   );
 }
@@ -201,6 +229,7 @@ export function createClassStep(options: {
       disclosureId,
       classOption.catalog_layer,
     );
+    const warning = prerequisiteWarning(classOption);
     return element('label', { className: 'level-up-class-card' }, [
       radio,
       element('span', {
@@ -214,6 +243,7 @@ export function createClassStep(options: {
         attributes: { id: detailId },
       }),
       disclosure,
+      ...(warning === null ? [] : [warning]),
     ]);
   });
 
@@ -229,7 +259,13 @@ export function createClassStep(options: {
   if (epicChoice !== null) {
     cleanups.push(epicChoice.cleanup);
   }
-  const warnings = warningList(options.state.character.warnings);
+  const warnings = renderLevelUpWarnings(
+    options.state.character.warnings.filter(
+      (warning) =>
+        warning.kind !== 'multiclass_primary_ability_unmet' &&
+        warning.kind !== 'multiclass_primary_ability_unprovable',
+    ),
+  );
 
   return {
     element: element(
@@ -424,7 +460,7 @@ export function createSubclassStep(options: {
       if (later.checked) options.onSelect({ kind: 'decide_later' });
     }),
   );
-  const subclassWarnings = warningList(
+  const subclassWarnings = renderLevelUpWarnings(
     options.warnings.filter((warning) => warning.kind === 'subclass_unselected'),
   );
 

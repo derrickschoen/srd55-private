@@ -140,6 +140,7 @@ function classOption(
     target_level: 2 as ClassLevel,
     hit_die: 6,
     current_subclass: null,
+    multiclass_prerequisite_warning: null,
     gains: {
       current_class_level: 1 as ClassLevel,
       target_class_level: 2 as ClassLevel,

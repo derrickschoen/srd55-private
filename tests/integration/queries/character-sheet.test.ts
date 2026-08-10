@@ -365,8 +365,11 @@ describe('the derived character sheet', () => {
     // have produced 14 — the same modifier SUBTRACTED — which is the bug the
     // three-member vocabulary exists to prevent.
     expect(sheet.armor_class.value).toBe(16);
-    // Strength 15 clears the requirement of 13, so still no warning.
-    expect(sheet.warnings.map((warning) => warning.code)).toEqual([]);
+    // Strength 15 clears the armour requirement of 13. The independent D96
+    // warning remains because this Fighter 5 / Wizard 3 has Intelligence 12.
+    expect(sheet.warnings.map((warning) => warning.code)).toEqual([
+      'multiclass_primary_ability_unmet',
+    ]);
   });
 
   it('keeps non-proficient armour AC and the armor_not_trained warning together', () => {

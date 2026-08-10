@@ -72,6 +72,8 @@ import {
 import { characterLevel } from '../rules/character-level';
 import { resolveSpeciesChoice } from '../builder/species-choice';
 import { requiredSourceChoiceItems } from './character-completeness';
+import { MulticlassPrimaryAbilityQueries } from './multiclass-primary-ability';
+import { catalogLayerLabel } from '../catalog/catalog-disclosure';
 import {
   characterProficiencies,
   type ProficiencyWeapon,
@@ -726,6 +728,9 @@ export class CharacterSheetBuilder {
     const scores = AbilityScores.fromArray(resolvedTotals(resolvedAbilities));
     const content = this.#content.forCharacter(characterId);
     const classes = this.#classes(characterId, content);
+    const multiclassPrerequisites = new MulticlassPrimaryAbilityQueries(
+      this.db,
+    ).build(characterId);
     const rolls = this.#rolls(characterId);
     const speciesChoice = resolveSpeciesChoice(this.db, characterId);
     const choiceStates =
@@ -1134,6 +1139,17 @@ export class CharacterSheetBuilder {
         ...ac.warnings,
         ...saves.warnings,
         ...proficiencies.warnings,
+        ...multiclassPrerequisites.flatMap((assessment): SheetWarning[] =>
+          assessment.warning === null
+            ? []
+            : [{
+                code: assessment.warning.kind,
+                message:
+                  `${assessment.warning.title} — ${catalogLayerLabel(
+                    assessment.warning.class_catalog_layer,
+                  )}. ${assessment.warning.detail} ${assessment.warning.remedy}`,
+              }]
+        ),
       ]),
       gaps: [
         ...sheetGaps(printedFeatures.has_language_or_tool_grant_text),
