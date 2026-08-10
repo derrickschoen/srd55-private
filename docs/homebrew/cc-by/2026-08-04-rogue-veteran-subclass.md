@@ -198,18 +198,21 @@ Burst DPR over 4-round combats; "day" figures (four combats, Short Rests
 between) are within one point for every row except the Paladin, whose
 Long-Rest smites dilute.
 
+All builds carry **+1/+2/+3 magic weapons at levels 6/11/17** (owner
+ruling 2026-08-10).
+
 | Build | L3 | L6 | L11 | L17 |
 |---|---:|---:|---:|---:|
-| **Veteran, melee (dual-wield Vex/Nick)** | **25.1** | **32.8** | **64.5** | **108.9** |
-| **Veteran, ranged (hand crossbows)** | 19.6 | 26.0 | 54.8 | 93.5 |
-| Optimized Vengeance Paladin (melee ref.) | 19.5 | 31.2 | 52.2 | 60.8 |
-| SRD Thief, melee (incl. off-turn Sneak Attacks) | 18.4 | 23.7 | 37.2 | 64.2 |
-| Champion Fighter, greatsword | 10.8 | 26.7 | 43.8 | 52.3 |
-| Fiend Warlock, ranged (volleys) | 10.9 | 19.2 | 33.7 | 45.6 |
+| **Veteran, melee (dual-wield Vex/Nick)** | **24.9** | **35.2** | **70.0** | **115.9** |
+| Optimized Vengeance Paladin (melee ref.) | 19.5 | 34.7 | 60.5 | 72.3 |
+| Champion Fighter, greatsword | 11.8 | 32.6 | 58.4 | 74.6 |
+| SRD Thief, melee (incl. off-turn Sneak Attacks) | 18.4 | 26.4 | 43.3 | 75.6 |
+| Barbed Court monk (this project; its ladder = its item) | 13.7 | 37.9 | 68.8 | 137.7 |
 
-Ratios to the optimized Paladin: **1.29× / 1.05× / 1.24× / 1.79×** — at the
-owner's stated targets (≈1× at 6, ahead at 11, well ahead at 17 under the
-"few tables reach 17, and wizards are casting *Wish*" waiver). The level-3
+Ratios to the optimized Paladin (equal-items basis): **1.28× / 1.01× /
+1.16× / 1.60×** — at the owner's stated targets (≈1× at 6, ahead at 11,
+well ahead at 17 under the "few tables reach 17, and wizards are casting
+*Wish*" waiver). The level-3
 lead is the Rogue chassis itself (Sneak Attack + Steady Aim); a stock Thief
 shows a similar spread. Against its own base class the premium is +38% at 6
 and +73% at 11. The 40-round no-rest stress test shows the Veteran flat
