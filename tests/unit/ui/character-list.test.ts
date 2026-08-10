@@ -481,6 +481,7 @@ describe('catalog and backup entry points', () => {
       characters: [summary(7, 'Backup Hero')],
     };
     const saved: SavedFile[] = [];
+    const confirmations: string[] = [];
     let confirmation = true;
     const zeroKinds = {
       class: 0,
@@ -556,7 +557,7 @@ describe('catalog and backup entry points', () => {
             version: 1,
             exported_at: '2026-07-23T00:00:00.000Z',
             source_character_id: characterId,
-            character: { id: characterId, name: 'Backup Hero' },
+            character: { id: characterId, name: 'Backup Hero', strength: 10 },
             tables: {},
             references: {},
           }) as never,
@@ -574,13 +575,17 @@ describe('catalog and backup entry points', () => {
           };
         },
       },
-      confirm: () => confirmation,
+      confirm: (message) => {
+        confirmations.push(message);
+        return confirmation;
+      },
       save: (file) => saved.push(file),
       now: () => '2026-07-23T12:00:00.000Z',
     };
     return {
       persisted,
       saved,
+      confirmations,
       value,
       setConfirmation: (next: boolean) => {
         confirmation = next;
@@ -1128,6 +1133,179 @@ describe('catalog and backup entry points', () => {
         '[data-testid="content-adoption-modal"]',
       )).toBeNull();
       expect(persistedChanges).toBe(1);
+      controls.cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('creates another copy only after accepting the structural duplicate notice', async () => {
+    const fixture = services();
+    let persisted!: () => void;
+    const persistedSignal = new Promise<void>((resolve) => {
+      persisted = resolve;
+    });
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const controls = createImportBackupControls({
+        rpc: null as never,
+        characters: [summary(7, 'Backup Hero')],
+        onPersistedChange: persisted,
+        services: fixture.value,
+      });
+      const root = interactiveElement(controls.element);
+      const characterInput = root.querySelectorAll('input')[2];
+      if (characterInput === undefined) throw new Error('Character input missing.');
+      Object.defineProperty(characterInput, 'files', {
+        configurable: true,
+        value: [readableFile('hero.json', JSON.stringify({
+          source_character_id: 41,
+          character: { id: 41, name: 'Backup Hero', strength: 10 },
+        }))],
+      });
+      const importButton = root.querySelectorAll('button').find((button) =>
+        button.textContent === 'Import character backup',
+      );
+      if (importButton === undefined) throw new Error('Character import button missing.');
+      importButton.click();
+      await persistedSignal;
+      for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+
+      expect(fixture.confirmations).toEqual([
+        'This backup appears to have been imported already: a character with the same core saved details as “Backup Hero” is here. ' +
+          'It could be a separate identical character. Create another copy?',
+      ]);
+      expect(fixture.persisted.characters).toHaveLength(2);
+      expect(elementText(controls.element)).toContain('Character imported as #8.');
+      controls.cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('DUPLICATE-CANCEL refuses the copy before commit and leaves the count unchanged', async () => {
+    const fixture = services();
+    fixture.setConfirmation(false);
+    let persistedChanges = 0;
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const controls = createImportBackupControls({
+        rpc: null as never,
+        characters: [summary(7, 'Backup Hero')],
+        onPersistedChange: () => {
+          persistedChanges += 1;
+        },
+        services: fixture.value,
+      });
+      const root = interactiveElement(controls.element);
+      const characterInput = root.querySelectorAll('input')[2];
+      if (characterInput === undefined) throw new Error('Character input missing.');
+      Object.defineProperty(characterInput, 'files', {
+        configurable: true,
+        value: [readableFile('hero.json', JSON.stringify({
+          source_character_id: 99,
+          character: { id: 99, name: 'Backup Hero', strength: 10 },
+        }))],
+      });
+      const importButton = root.querySelectorAll('button').find((button) =>
+        button.textContent === 'Import character backup',
+      );
+      if (importButton === undefined) throw new Error('Character import button missing.');
+      importButton.click();
+      for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+
+      expect(fixture.persisted.characters).toHaveLength(1);
+      expect(persistedChanges).toBe(0);
+      expect(elementText(controls.element)).toContain(
+        'Character import cancelled. Nothing was changed.',
+      );
+      controls.cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('does not mistake a matching name with different structural details for a prior import', async () => {
+    const fixture = services();
+    fixture.setConfirmation(false);
+    let persisted!: () => void;
+    const persistedSignal = new Promise<void>((resolve) => {
+      persisted = resolve;
+    });
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const controls = createImportBackupControls({
+        rpc: null as never,
+        characters: [summary(7, 'Backup Hero')],
+        onPersistedChange: persisted,
+        services: fixture.value,
+      });
+      const root = interactiveElement(controls.element);
+      const characterInput = root.querySelectorAll('input')[2];
+      if (characterInput === undefined) throw new Error('Character input missing.');
+      Object.defineProperty(characterInput, 'files', {
+        configurable: true,
+        value: [readableFile('hero.json', JSON.stringify({
+          source_character_id: 52,
+          character: { id: 52, name: 'Backup Hero', strength: 12 },
+        }))],
+      });
+      const importButton = root.querySelectorAll('button').find((button) =>
+        button.textContent === 'Import character backup',
+      );
+      if (importButton === undefined) throw new Error('Character import button missing.');
+      importButton.click();
+      await persistedSignal;
+
+      expect(fixture.confirmations).toEqual([]);
+      expect(fixture.persisted.characters).toHaveLength(2);
+      controls.cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('does not let an unexportable local character block an otherwise valid import', async () => {
+    const fixture = services();
+    let persisted!: () => void;
+    const persistedSignal = new Promise<void>((resolve) => {
+      persisted = resolve;
+    });
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const controls = createImportBackupControls({
+        rpc: null as never,
+        characters: [summary(7, 'Broken Local Character')],
+        onPersistedChange: persisted,
+        services: {
+          ...fixture.value,
+          backup: {
+            ...fixture.value.backup,
+            exportCharacter: async () => {
+              throw new Error('Stored local character cannot be exported.');
+            },
+          },
+        },
+      });
+      const root = interactiveElement(controls.element);
+      const characterInput = root.querySelectorAll('input')[2];
+      if (characterInput === undefined) throw new Error('Character input missing.');
+      Object.defineProperty(characterInput, 'files', {
+        configurable: true,
+        value: [readableFile('hero.json', JSON.stringify({
+          source_character_id: 61,
+          character: { id: 61, name: 'Importable Hero', strength: 10 },
+        }))],
+      });
+      const importButton = root.querySelectorAll('button').find((button) =>
+        button.textContent === 'Import character backup',
+      );
+      if (importButton === undefined) throw new Error('Character import button missing.');
+      importButton.click();
+      await persistedSignal;
+
+      expect(fixture.confirmations).toEqual([]);
+      expect(fixture.persisted.characters).toHaveLength(2);
       controls.cleanup();
     } finally {
       restoreDocument();

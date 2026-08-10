@@ -264,6 +264,9 @@ test('U1 incomplete cards resume durable ability work while allocated level-up s
 test('catalog, complete database, and character backup controls preserve durable state and show errors', async ({
   page,
 }) => {
+  // Measured alone at 25.6s on PLAYWRIGHT_PORT=5070 after the W6 duplicate and
+  // malformed-input assertions. 25.6s × 1.5 = 38.4s.
+  test.setTimeout(38_400);
   await installAnnouncementRecorder(page);
   await resetHome(page);
   const characterId = await createThroughGuidedBuilder(page, 'Backup Hero');
@@ -302,6 +305,13 @@ test('catalog, complete database, and character backup controls preserve durable
     page.getByRole('button', { name: 'Download character backup' }).click(),
   ]);
   const characterBytes = await downloadBytes(characterDownload);
+
+  // Start with a distinct empty profile: the first import has no local
+  // structural match, while every subsequent import of these same production
+  // bytes does.
+  await resetHome(page);
+  const resetTransferSummary = page.getByText('Import and backups', { exact: true });
+  await resetTransferSummary.click();
   await page.getByLabel('Import complete character JSON').setInputFiles({
     name: 'backup-hero.json',
     mimeType: 'application/json',
@@ -309,17 +319,83 @@ test('catalog, complete database, and character backup controls preserve durable
   });
   await page.getByRole('button', { name: 'Import character backup' }).click();
   await expect(page.locator('.transfer-status')).toContainText(
-    'Character imported as #2.',
+    'Character imported as #1.',
   );
   expect(
     await page.evaluate(() => window.staticApp.inspectRows('characters')),
   ).toEqual([
-    expect.objectContaining({ id: characterId, name: 'Backup Hero' }),
-    expect.objectContaining({
-      id: characterId + 1,
-      name: 'Backup Hero',
-    }),
+    expect.objectContaining({ id: 1, name: 'Backup Hero' }),
   ]);
+
+  await page.getByLabel('Import complete character JSON').setInputFiles({
+    name: 'backup-hero.json',
+    mimeType: 'application/json',
+    buffer: characterBytes,
+  });
+  const cancelledDuplicate = page.waitForEvent('dialog');
+  await page.getByRole('button', { name: 'Import character backup' }).click();
+  const cancelDialog = await cancelledDuplicate;
+  expect(cancelDialog.message()).toContain(
+    'This backup appears to have been imported already',
+  );
+  expect(cancelDialog.message()).toContain('Create another copy?');
+  await cancelDialog.dismiss();
+  await expect(page.locator('.transfer-status')).toContainText(
+    'Character import cancelled. Nothing was changed.',
+  );
+  expect(
+    await page.evaluate(() => window.staticApp.inspectRows('characters')),
+  ).toHaveLength(1);
+
+  const acceptedDuplicate = page.waitForEvent('dialog');
+  await page.getByRole('button', { name: 'Import character backup' }).click();
+  const acceptDialog = await acceptedDuplicate;
+  expect(acceptDialog.message()).toContain(
+    'It could be a separate identical character.',
+  );
+  await acceptDialog.accept();
+  await expect(page.locator('.transfer-status')).toContainText(
+    'Character imported as #2.',
+  );
+  expect(
+    await page.evaluate(() => window.staticApp.inspectRows('characters')),
+  ).toHaveLength(2);
+
+  const shareInput = page.getByRole('textbox', {
+    name: 'Character share link',
+    exact: true,
+  });
+  await shareInput.fill('#%%%');
+  await page.getByRole('button', { name: 'Preview link' }).click();
+  await expect(page.locator('.share-status')).toContainText(
+    'This share link is damaged or incomplete — try copying it again.',
+  );
+  await expect(page.locator('.share-status .transfer-technical-detail'))
+    .toContainText('fragment is not valid base64url');
+
+  await shareInput.fill('#bm90LWd6aXA');
+  await page.getByRole('button', { name: 'Preview link' }).click();
+  await expect(page.locator('.share-status')).toContainText(
+    'This share link is damaged or incomplete — try copying it again.',
+  );
+  await expect(page.locator('.share-status .transfer-technical-detail'))
+    .toContainText('fragment is not valid gzip data');
+
+  await page.getByLabel('Restore complete database').setInputFiles({
+    name: 'garbage.sqlite3',
+    mimeType: 'application/vnd.sqlite3',
+    buffer: Buffer.from('not an sqlite database'),
+  });
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: 'Restore database backup' }).click();
+  await expect(page.locator('.transfer-status')).toContainText(
+    "This file isn't an SRD-55 backup.",
+  );
+  await expect(page.locator('.transfer-status .transfer-technical-detail'))
+    .toContainText('SQLITE_NOTADB');
+  expect(
+    await page.evaluate(() => window.staticApp.inspectRows('characters')),
+  ).toHaveLength(2);
 
   await page.getByLabel('Catalog JSON').setInputFiles({
     name: 'catalog.json',
@@ -352,7 +428,7 @@ test('catalog, complete database, and character backup controls preserve durable
   await clearAnnouncements(page);
   await page.getByRole('button', { name: 'Import catalog' }).focus();
   await page.keyboard.press('Enter');
-  await expect(page.getByRole('alert')).toContainText(
+  await expect(page.locator('.transfer-status[role="alert"]')).toContainText(
     'Invalid Tier 1 catalog document',
   );
   await expect.poll(async () =>
