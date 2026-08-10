@@ -18,9 +18,15 @@ export interface GuidedSpellTransition {
   readonly announcement: string;
 }
 
+export interface GuidedSpellRepairAddress {
+  readonly kind: GuidedSpellsStepState['choices'][number]['kind'];
+  readonly id: number;
+}
+
 export function createSpellsStep(options: {
   readonly characterId: number;
   readonly state: GuidedSpellsStepState;
+  readonly repairAddress?: GuidedSpellRepairAddress;
   readonly search: (
     address: GuidedSpellsStepState['choices'][number],
     query: string,
@@ -52,7 +58,13 @@ export function createSpellsStep(options: {
   const rows = options.state.choices.map((choice) => {
     const addressKey = `${choice.kind}-${String(choice.id)}`;
     const focusKey = `guided-spell-change-${addressKey}`;
-    const row = element('div', { className: 'guided-spell-choice' });
+    const repairsThisChoice =
+      options.repairAddress?.kind === choice.kind &&
+      options.repairAddress.id === choice.id;
+    const row = element('div', {
+      className: 'guided-spell-choice',
+      attributes: repairsThisChoice ? { 'data-repair-target': '' } : {},
+    });
     const renderPicker = (focus: boolean): void => {
       const picker = createSpellPicker({
         addressKey,
@@ -90,7 +102,7 @@ export function createSpellsStep(options: {
       if (focus) picker.focus();
     };
 
-    if (
+    if (repairsThisChoice ||
       choice.selected_spell_name === null ||
       choice.selected_spell_catalog_layer === null
     ) {

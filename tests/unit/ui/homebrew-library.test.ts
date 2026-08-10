@@ -3,6 +3,7 @@ import type { AuthoringClient } from '../../../src/authoring/client';
 import type {
   AuthoringLibrary,
   DraftRevision,
+  ReplacementNotice,
   ReplacementSetPlan,
   StoredHomebrewDraft,
 } from '../../../src/authoring/contracts';
@@ -792,6 +793,37 @@ describe('HA-6 homebrew library routing and tabs', () => {
       const oldKey = 'expanded:content.species:old' as ContentKey;
       const newKey = 'expanded:content.species:new' as ContentKey;
       const hostileCharacter = '<img data-ha11-character src=x> Fix Hero';
+      const repairPath = '/characters/17/build/levels/1?step=spells&repair=slot_selection-43';
+      const invalidation: ReplacementNotice = {
+        kind: 'retargeted_selection_invalid',
+        table: 'spell_selection_slots', source_path: [],
+        rule_key: 'changed-spell-choice', ordinal: 1,
+        selected_value: 42,
+        selected: {
+          kind: 'spell', display_name: 'Magic Missile', catalog_layer: 'bundled',
+        },
+        reason: 'selection_ineligible',
+        detail: 'Selected spell is outside the slot level range.',
+        consequence: 'the replacement allows only level 0 spells',
+        repair: {
+          kind: 'guided_spell_choice', href: repairPath, label: 'Repair selection',
+        },
+      };
+      const unknownInvalidation: ReplacementNotice = {
+        kind: 'retargeted_selection_invalid',
+        table: 'wizard_spellbook_entries', source_path: [],
+        rule_key: 'deleted-spell-choice', ordinal: 1,
+        selected_value: 999,
+        selected: {
+          kind: 'spell_unknown', display_name: null, catalog_layer: 'unknown',
+        },
+        reason: 'target_rule_missing', detail: null,
+        consequence: 'the replacement has no matching choice rule',
+        repair: {
+          kind: 'guided_character', href: '/characters/17/build/levels/1',
+          label: 'Review character',
+        },
+      };
       const plan: ReplacementSetPlan = {
         old_content_key: oldKey,
         new_content_key: newKey,
@@ -809,14 +841,16 @@ describe('HA-6 homebrew library routing and tabs', () => {
             before: '<b data-ha11-before>Old</b>',
             after: '<i data-ha11-after>New</i>',
           }],
+          notices: [invalidation, unknownInvalidation],
           required_choices: [], review: [],
           replaces: ['root_fields', 'traits', 'effects', 'grants', 'filled_choices'],
         }],
       };
       const commits: unknown[] = [];
+      const navigated: string[] = [];
       const screenContext = context(
         `https://example.test${homebrewReplacementPath(oldKey, newKey)}`,
-        [],
+        navigated,
       );
       const cleanup = await renderHomebrewLibrary(screenContext, {
         client: authoringClient({
@@ -829,13 +863,7 @@ describe('HA-6 homebrew library routing and tabs', () => {
                 content_kind: 'species', character_id: 17 as never,
                 character_revision: 4 as never, old_content_key: oldKey,
                 new_content_key: newKey,
-                notices: [{
-                  kind: 'retargeted_selection_invalid',
-                  table: 'spell_selection_slots', source_path: [],
-                  rule_key: 'changed-spell-choice', ordinal: 1,
-                  selected_value: 42, reason: 'selection_ineligible',
-                  detail: 'Selected spell is outside the replacement slot range.',
-                }],
+                notices: [invalidation, unknownInvalidation],
               }],
             };
           },
@@ -849,6 +877,20 @@ describe('HA-6 homebrew library routing and tabs', () => {
       expect(elementText(root as unknown as Node)).toContain(
         'After: <i data-ha11-after>New</i>',
       );
+      expect(elementText(root as unknown as Node)).toContain(
+        'Selections that will become invalid',
+      );
+      const consequence =
+        'Magic Missile — SRD · bundled layer in changed-spell-choice became ' +
+        'invalid because the replacement allows only level 0 spells.';
+      expect(elementText(root as unknown as Node)).toContain(consequence);
+      expect(elementText(root as unknown as Node)).toContain(
+        'UNKNOWN spell name — Unknown catalog layer in deleted-spell-choice ' +
+        'became invalid because the replacement has no matching choice rule.',
+      );
+      expect(elementText(root as unknown as Node)).not.toContain('999');
+      expect(root.querySelectorAll('a').map((link) => link.textContent))
+        .not.toContain('Repair selection');
       expect(root.querySelector('[data-ha11-character]')).toBeNull();
       expect(root.querySelector('[data-ha11-before]')).toBeNull();
       expect(root.querySelector('[data-ha11-after]')).toBeNull();
@@ -863,10 +905,13 @@ describe('HA-6 homebrew library routing and tabs', () => {
       }]);
       expect(elementText(root as unknown as Node)).toContain('Character fixes applied');
       expect(elementText(root as unknown as Node)).toContain(hostileCharacter);
-      expect(elementText(root as unknown as Node)).toContain(
-        'Spell selection “42” for “changed-spell-choice” became invalid: ' +
-        'Selected spell is outside the replacement slot range.',
+      expect(elementText(root as unknown as Node)).toContain(consequence);
+      const repair = root.querySelectorAll('a').find(
+        (link) => link.textContent === 'Repair selection',
       );
+      expect(repair?.getAttribute('href')).toBe(repairPath);
+      repair?.click();
+      expect(navigated).toEqual([repairPath]);
       cleanup();
     } finally {
       restoreDocument();

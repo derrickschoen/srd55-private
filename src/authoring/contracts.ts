@@ -607,6 +607,7 @@ interface ReplacementPlanBase<K extends AuthoredContentKind> {
   readonly facts: ReplacementTokenFacts & { readonly content_kind: K };
   readonly character_name: string;
   readonly changes: readonly ReplacementChange[];
+  readonly notices: readonly ReplacementNotice[];
   readonly required_choices: readonly ReplacementChoiceRequirement[];
   readonly review: readonly ReplacementReviewItem[];
 }
@@ -666,6 +667,28 @@ export interface ReplacementDecision {
   readonly decision: Extract<CatalogContentMatchDecision, 'match'>;
 }
 
+export type ReplacementSelectionDisclosure =
+  | {
+      readonly kind: 'spell';
+      readonly display_name: string;
+      readonly catalog_layer: CatalogLayerDisclosure;
+    }
+  | {
+      readonly kind: 'spell_unknown';
+      readonly display_name: null;
+      readonly catalog_layer: 'unknown';
+    }
+  | {
+      readonly kind: 'skill';
+      readonly skill: Skill;
+    };
+
+export interface ReplacementRepairRoute {
+  readonly kind: 'guided_character' | 'guided_spell_choice';
+  readonly href: string;
+  readonly label: string;
+}
+
 export type ReplacementNotice =
   | {
       readonly kind: 'retargeted_selection_invalid';
@@ -677,19 +700,24 @@ export type ReplacementNotice =
       readonly source_path: readonly string[];
       readonly rule_key: string;
       readonly ordinal: number;
+      /** Historical machine value; never render a numeric spell id as identity. */
       readonly selected_value: number | Skill;
+      readonly selected: ReplacementSelectionDisclosure;
       readonly reason:
         | 'target_source_missing'
         | 'target_rule_missing'
         | 'target_rule_changed'
         | 'selection_ineligible';
       readonly detail: string | null;
+      readonly consequence: string;
+      readonly repair: ReplacementRepairRoute;
     }
   | {
       readonly kind: 'retargeted_level_feat_invalid';
       readonly source_path: readonly string[];
       readonly character_level_feat_choice_id: number;
       readonly reason: 'target_source_missing';
+      readonly repair: ReplacementRepairRoute;
     };
 
 export interface ReplacementResult {

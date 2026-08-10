@@ -25,6 +25,7 @@ import {
   type ContentImportPlan,
 } from '../catalog/content-adoption';
 import { resolveContentReference } from '../catalog/content-registry';
+import { spellCatalogDisclosure } from '../catalog/spell-catalog-disclosure';
 import { localContentReferenceImportNode } from '../backup/portable-content';
 import {
   applyGuidedBackgroundChoices,
@@ -47,10 +48,14 @@ import {
   fillSkillExpertiseGrant,
   SkillExpertiseGrantRefusal,
 } from '../grants/skill-expertise-grants';
-import { SpellSelectionEligibility } from '../eligibility/spell-selection-eligibility';
+import {
+  eligibilityInvalidReasons,
+  SpellSelectionEligibility,
+} from '../eligibility/spell-selection-eligibility';
 import { syncSubclassSources } from '../commands/update-class';
 import {
   EQUIPMENT_CHOICE_CONFIG_KEY,
+  guidedBuildPath,
   SKILL_GRANT_KEYS,
 } from '../builder/contracts';
 import type {
@@ -322,6 +327,7 @@ function planShape(
   facts: ReplacementTokenFacts,
   characterName: string,
   plan: ContentImportPlan,
+  notices: readonly ReplacementNotice[],
 ): ReplacementPlan {
   const outcome = nonRefusedOutcome(plan);
   const oldName = targetName(db, facts.content_kind, facts.old_content_key);
@@ -336,6 +342,7 @@ function planShape(
       before: oldName,
       after: newName,
     })]),
+    notices,
     required_choices: Object.freeze([]),
     review: Object.freeze(plan.reviews.map((row) => Object.freeze({
       candidate_content_key: row.targetContentKey,
@@ -423,7 +430,13 @@ export function previewReferenceRetarget(
       });
     }
   }
-  return planShape(db, facts, reference.characterName, plan);
+  const notices = evaluateRetargetCharacter(
+    db,
+    facts,
+    outcome.contentKey,
+    'preview',
+  ).notices;
+  return planShape(db, facts, reference.characterName, plan, notices);
 }
 
 function matchChoices(
@@ -768,12 +781,116 @@ function targetSourceMap(
   );
 }
 
-function invalidSelectionNotice(
+function selectionDisclosure(
+  db: DatabaseContext,
+  table: Extract<ReplacementNotice, { kind: 'retargeted_selection_invalid' }>['table'],
+  selectedValue: number | Skill,
+): Extract<ReplacementNotice, { kind: 'retargeted_selection_invalid' }>['selected'] {
+  if (
+    table === 'spell_selection_slots' ||
+    table === 'wizard_spellbook_entries'
+  ) {
+    if (typeof selectedValue !== 'number') {
+      throw new Error('A spell replacement notice has no spell version id.');
+    }
+    const disclosure = spellCatalogDisclosure(db, {
+      kind: 'version_id',
+      spell_version_id: selectedValue,
+    });
+    return disclosure === null
+      ? Object.freeze({
+          kind: 'spell_unknown' as const,
+          display_name: null,
+          catalog_layer: 'unknown' as const,
+        })
+      : Object.freeze({
+          kind: 'spell' as const,
+          display_name: disclosure.name,
+          catalog_layer: disclosure.catalog_layer,
+        });
+  }
+  if (typeof selectedValue !== 'string') {
+    throw new Error('A skill replacement notice has no skill value.');
+  }
+  return Object.freeze({ kind: 'skill' as const, skill: selectedValue });
+}
+
+function replacementConsequence(
+  db: DatabaseContext,
+  table: Extract<ReplacementNotice, { kind: 'retargeted_selection_invalid' }>['table'],
+  reason: Extract<ReplacementNotice, { kind: 'retargeted_selection_invalid' }>['reason'],
+  detail: string | null,
+  targetChoiceId: number | null,
+): string {
+  if (
+    reason === 'selection_ineligible' &&
+    detail === eligibilityInvalidReasons.level &&
+    targetChoiceId !== null &&
+    (table === 'spell_selection_slots' || table === 'wizard_spellbook_entries')
+  ) {
+    const levels = db.one(
+      `SELECT spell_level_min, spell_level_max FROM ${table} WHERE id = ?`,
+      [targetChoiceId],
+      (row) => ({
+        minimum: sqlInteger(row, 'spell_level_min'),
+        maximum: sqlInteger(row, 'spell_level_max'),
+      }),
+    );
+    if (levels !== null) {
+      return levels.minimum === levels.maximum
+        ? `the replacement allows only level ${String(levels.minimum)} spells`
+        : `the replacement allows only spell levels ${String(levels.minimum)}–${String(levels.maximum)}`;
+    }
+  }
+  switch (reason) {
+    case 'target_source_missing':
+      return 'the replacement has no matching source';
+    case 'target_rule_missing':
+      return 'the replacement has no matching choice rule';
+    case 'target_rule_changed':
+      return 'the replacement changed the choice rule';
+    case 'selection_ineligible':
+      return detail === null
+        ? 'the replacement no longer allows this selection'
+        : `the replacement no longer allows this selection (${detail})`;
+  }
+}
+
+function replacementRepairRoute(
+  facts: ReplacementTokenFacts,
+  table: Extract<ReplacementNotice, { kind: 'retargeted_selection_invalid' }>['table'],
+  targetChoiceId: number | null,
+): Extract<ReplacementNotice, { kind: 'retargeted_selection_invalid' }>['repair'] {
+  const base = guidedBuildPath(facts.character_id);
+  if (
+    targetChoiceId !== null &&
+    (table === 'spell_selection_slots' || table === 'wizard_spellbook_entries')
+  ) {
+    const addressKind = table === 'spell_selection_slots'
+      ? 'slot_selection'
+      : 'spellbook_acquisition';
+    return Object.freeze({
+      kind: 'guided_spell_choice' as const,
+      href: `${base}?step=spells&repair=${addressKind}-${String(targetChoiceId)}`,
+      label: 'Repair selection',
+    });
+  }
+  return Object.freeze({
+    kind: 'guided_character' as const,
+    href: base,
+    label: 'Review character',
+  });
+}
+
+function buildInvalidSelectionNotice(
+  db: DatabaseContext,
+  facts: ReplacementTokenFacts,
   table: Extract<ReplacementNotice, { kind: 'retargeted_selection_invalid' }>['table'],
   selection: RetargetSpellSelection | RetargetSkillSelection,
   selectedValue: number | Skill,
   reason: Extract<ReplacementNotice, { kind: 'retargeted_selection_invalid' }>['reason'],
   detail: string | null = null,
+  targetChoiceId: number | null = null,
 ): ReplacementNotice {
   return Object.freeze({
     kind: 'retargeted_selection_invalid',
@@ -782,8 +899,17 @@ function invalidSelectionNotice(
     rule_key: selection.ruleKey,
     ordinal: selection.ordinal,
     selected_value: selectedValue,
+    selected: selectionDisclosure(db, table, selectedValue),
     reason,
     detail,
+    consequence: replacementConsequence(
+      db,
+      table,
+      reason,
+      detail,
+      targetChoiceId,
+    ),
+    repair: replacementRepairRoute(facts, table, targetChoiceId),
   });
 }
 
@@ -794,6 +920,23 @@ function remapRetargetState(
   newRootId: number,
 ): readonly ReplacementNotice[] {
   const notices: ReplacementNotice[] = [];
+  const invalidSelectionNotice = (
+    table: Extract<ReplacementNotice, { kind: 'retargeted_selection_invalid' }>['table'],
+    selection: RetargetSpellSelection | RetargetSkillSelection,
+    selectedValue: number | Skill,
+    reason: Extract<ReplacementNotice, { kind: 'retargeted_selection_invalid' }>['reason'],
+    detail: string | null = null,
+    targetChoiceId: number | null = null,
+  ): ReplacementNotice => buildInvalidSelectionNotice(
+    db,
+    facts,
+    table,
+    selection,
+    selectedValue,
+    reason,
+    detail,
+    targetChoiceId,
+  );
   const targets = targetSourceMap(db, newRootId);
   const targetFor = (path: readonly string[]): number | null =>
     targets.get(pathKey(path)) ?? null;
@@ -890,7 +1033,7 @@ function remapRetargetState(
     if (evaluation?.status === 'invalid') {
       notices.push(invalidSelectionNotice(
         'spell_selection_slots', selection, selection.spellVersionId,
-        'selection_ineligible', evaluation.reason,
+        'selection_ineligible', evaluation.reason, target.id,
       ));
     }
   }
@@ -935,7 +1078,7 @@ function remapRetargetState(
     if (evaluation?.status === 'invalid') {
       notices.push(invalidSelectionNotice(
         'wizard_spellbook_entries', selection, selection.spellVersionId,
-        'selection_ineligible', evaluation.reason,
+        'selection_ineligible', evaluation.reason, targetId,
       ));
     }
   }
@@ -1041,6 +1184,11 @@ function remapRetargetState(
         source_path: choice.path,
         character_level_feat_choice_id: choice.id,
         reason: 'target_source_missing',
+        repair: Object.freeze({
+          kind: 'guided_character' as const,
+          href: guidedBuildPath(facts.character_id),
+          label: 'Review character',
+        }),
       }));
       continue;
     }
@@ -1244,6 +1392,46 @@ function retargetCharacter(
   return Object.freeze({ revision: nextRevision, notices });
 }
 
+type RetargetCharacterResult = ReturnType<typeof retargetCharacter>;
+
+class RetargetPreviewRollback extends Error {
+  constructor(readonly result: RetargetCharacterResult) {
+    super('Reference retarget preview rollback.');
+  }
+}
+
+/**
+ * Preview and commit execute the same replacement/remapping function. Preview's
+ * only distinction is the outer rollback sentinel, so its invalidation result
+ * cannot become a parallel predictor that drifts from the committed behavior.
+ */
+function evaluateRetargetCharacter(
+  db: DatabaseContext,
+  facts: ReplacementTokenFacts,
+  targetContentKey: ContentKey,
+  mode: 'preview' | 'commit',
+): RetargetCharacterResult {
+  if (mode === 'commit') {
+    return retargetCharacter(db, facts, targetContentKey);
+  }
+  try {
+    db.transaction(() => {
+      throw new RetargetPreviewRollback(
+        retargetCharacter(db, facts, targetContentKey),
+      );
+    });
+  } catch (error) {
+    if (error instanceof RetargetPreviewRollback) return error.result;
+    if (error instanceof ReferenceRetargetError) throw error;
+    throw new ReferenceRetargetError(
+      'The replacement simulation was refused.',
+      { reason: 'replacement_refused', refusal: 'commit_failed' },
+      { cause: error },
+    );
+  }
+  throw new Error('Reference retarget preview failed to roll back.');
+}
+
 export function commitReferenceRetarget(
   db: DatabaseContext,
   input: {
@@ -1284,7 +1472,12 @@ export function commitReferenceRetarget(
     choices,
     operationIdentity: operationIdentity(facts),
     afterInstall: (transaction) => {
-      const retargeted = retargetCharacter(transaction, facts, outcome.contentKey);
+      const retargeted = evaluateRetargetCharacter(
+        transaction,
+        facts,
+        outcome.contentKey,
+        'commit',
+      );
       revision = retargeted.revision;
       notices = retargeted.notices;
     },

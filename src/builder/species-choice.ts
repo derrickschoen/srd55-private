@@ -5,6 +5,7 @@ import {
   type CatalogNamedDisclosure,
   type CatalogLayerDisclosure,
 } from '../catalog/catalog-disclosure';
+import { spellCatalogDisclosure } from '../catalog/spell-catalog-disclosure';
 import { recordedSourceContentKey } from '../catalog/recorded-source-provenance';
 import { isEnumValue, abilities, type Ability } from '../domain/enums';
 import type { EligibleSpell } from '../domain/read-models';
@@ -65,21 +66,11 @@ function spellDisclosure(
   db: DatabaseContext,
   contentKey: string,
 ): CatalogNamedDisclosure {
-  return db.one(
-    `SELECT version.display_name, identity.catalog_layer
-     FROM spell_versions AS version
-     LEFT JOIN catalog_content_identities AS identity
-       ON identity.content_kind = 'spell'
-      AND identity.content_key = version.content_key
-     WHERE version.content_key = ? AND version.is_active = 1`,
-    [contentKey],
-    (row) => ({
-      name: sqlString(row, 'display_name'),
-      catalog_layer: catalogLayerDisclosure(
-        sqlNullableString(row, 'catalog_layer'),
-      ),
-    }),
-  ) ?? { name: contentKey, catalog_layer: 'unknown' };
+  return spellCatalogDisclosure(db, {
+    kind: 'content_key',
+    content_key: contentKey,
+    active_only: true,
+  }) ?? { name: 'UNKNOWN spell name', catalog_layer: 'unknown' };
 }
 
 function replaceableEligibleSpells(
