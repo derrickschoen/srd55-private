@@ -14,10 +14,12 @@ import {
   parseSourceGrantRules,
 } from '../grants/configured-choice-rule';
 import {
-  ConfiguredChoiceMaterialReader,
   replaceableSpellRuleKey,
 } from '../grants/configured-choice-material-reader';
 import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
+import {
+  configuredChoiceSlotGenerator,
+} from '../grants/character-level-source-reconciliation';
 import type { CharacterCommandIntegrity } from './integrity';
 import type { StoredCharacterSnapshotInverse } from './stored-inverses';
 
@@ -117,11 +119,7 @@ export class ChooseSpeciesLineageCommand {
     generator?: GrantRuleSlotGenerator,
   ) {
     this.#state = state ?? new CharacterState(db);
-    this.#generator = generator ?? new GrantRuleSlotGenerator(
-      db,
-      undefined,
-      new ConfiguredChoiceMaterialReader(db),
-    );
+    this.#generator = generator ?? configuredChoiceSlotGenerator(db);
   }
 
   apply(characterId: number): void {

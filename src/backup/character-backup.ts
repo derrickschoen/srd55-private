@@ -82,6 +82,9 @@ import { fillHistoricalRowColumns } from '../domain/contracts/historical-row-col
 import { rebuildSkillProjection } from '../grants/skill-grants';
 import { reconcileCharacterSkillExpertise } from '../grants/skill-expertise-grants';
 import {
+  reconcileCharacterLevelDependentSources,
+} from '../grants/character-level-source-reconciliation';
+import {
   rowContractError,
   type RowContractTable,
 } from '../domain/contracts/rows';
@@ -4002,6 +4005,10 @@ export function importCharacterBackup(
     ) {
       reconcileCharacterSkillExpertise(transaction, characterId);
     }
+    // Slot rows are portable evidence, but character-level gates are derived
+    // from the restored levels and configured source. Reconcile after both
+    // halves exist so an incomplete pre-export state cannot remain stale.
+    reconcileCharacterLevelDependentSources(transaction, characterId);
     const snapshots = portableSnapshots(
       transaction,
       validated.snapshots,

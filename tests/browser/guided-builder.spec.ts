@@ -150,10 +150,12 @@ test('a phone-width guided journey keeps the first level 1 screens and controls 
 });
 
 test('an unchosen Elf lineage stays non-gating while the sheet changes from UNKNOWN to its chosen High Elf cantrip', async ({
+  browser,
   page,
 }) => {
-  // Measured alone at 24.0s on Chromium; 24.0 × 1.5 = 36.0s.
-  test.setTimeout(36_000);
+  // Measured alone at 35.7s on Chromium after adding the recipient journey;
+  // 35.7 × 1.5 = 53.55s.
+  test.setTimeout(53_550);
   await installAnnouncementRecorder(page);
   await resetHome(page);
 
@@ -288,6 +290,80 @@ test('an unchosen Elf lineage stays non-gating while the sheet changes from UNKN
     walking_speed_feet: 30,
     lineage_darkvision_feet: 60,
   });
+
+  await page.goto('/');
+  await ready(page);
+  await page.getByRole('button', {
+    name: 'Share Truthful Lineage Wizard by link',
+  }).click();
+  await expect(page.getByRole('button', { name: 'Create share link' }))
+    .toHaveCount(1);
+  await page.getByRole('button', { name: 'Create share link' }).click();
+  const output = page.getByLabel('Generated character share link');
+  await expect(output).toHaveCount(1);
+  await expect(output).toBeVisible();
+  const link = await output.inputValue();
+
+  const freshProfile = await browser.newContext();
+  try {
+    const recipient = await freshProfile.newPage();
+    await recipient.goto(link);
+    await ready(recipient);
+    const add = recipient.getByRole('button', {
+      name: 'Add to my characters',
+    });
+    await expect(add).toHaveCount(1);
+    await add.click();
+    await expect(recipient.locator('.share-status')).toContainText(
+      'Character added as #1.',
+    );
+    const restored = await recipient.evaluate(async () => {
+      const sources = (await window.staticApp.inspectRows(
+        'character_source_instances',
+        { character_id: 1 },
+      )).filter((row) => row['source_type'] === 'species');
+      const slots = (await window.staticApp.inspectRows(
+        'spell_selection_slots',
+        { character_id: 1 },
+      )).filter((row) => Number(row['source_instance_id']) ===
+        Number(sources[0]?.['id']));
+      const versions = await window.staticApp.inspectRows('spell_versions');
+      const spellName = (id: unknown) => versions.find(
+        (row) => Number(row['id']) === Number(id),
+      )?.['display_name'];
+      return {
+        config: JSON.parse(String(sources[0]?.['config'])),
+        slots: slots.map((row) => ({
+          rule_key: row['rule_key'],
+          ordinal: row['ordinal'],
+          state: row['state'],
+          spell_name: spellName(row['current_spell_version_id']),
+        })),
+      };
+    });
+    expect(restored).toEqual({
+      config: {
+        source_content_key: '2024:species:elf',
+        lineage: {
+          chosen_option: 'High Elf',
+          high_elf_cantrip: '2024:mage-hand',
+        },
+        spellcasting_ability: 'intelligence',
+      },
+      slots: [{
+        rule_key: 'elf-lineage:replaceable_spell',
+        ordinal: 1,
+        state: 'active',
+        spell_name: 'Mage Hand',
+      }],
+    });
+    await recipient.goto('/characters/1/sheet');
+    await expect(recipient.locator('.sheet-spells dt').filter({
+      hasText: /^Mage Hand$/u,
+    })).toHaveCount(1);
+  } finally {
+    await freshProfile.close();
+  }
 });
 
 test('Elf Wizard skills finish top to bottom and spell choices stay labelled and visible', async ({

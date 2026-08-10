@@ -1,5 +1,8 @@
 import type { DatabaseLifecycle } from '../db/database-lifecycle';
 import {
+  reconcileAllCharacterLevelDependentSources,
+} from '../grants/character-level-source-reconciliation';
+import {
   assertBackupHeader,
   assertExactKeys,
   backupRecord,
@@ -92,5 +95,10 @@ export async function importDatabaseBackup(
   input: unknown,
 ): Promise<void> {
   validateDatabaseBackup(input);
-  await lifecycle.replace(input.sqlite.slice());
+  // The callback lives inside DatabaseLifecycle's replacement recovery
+  // boundary: a reconciliation failure restores the prior image atomically.
+  await lifecycle.replace(
+    input.sqlite.slice(),
+    reconcileAllCharacterLevelDependentSources,
+  );
 }

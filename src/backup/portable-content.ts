@@ -1525,13 +1525,22 @@ export function localContentReferenceImportNode(
     readonly allowRememberedDecision?: boolean;
   },
 ): ContentImportNode {
-  const stored = projectStoredPortableContentV1(
-    db,
-    input.kind,
-    input.localContentKey,
+  const scheme = db.scalar<string>(
+    `SELECT fingerprint_scheme FROM catalog_content_fingerprints
+     WHERE content_kind = ? AND content_key = ?
+       AND fingerprint_role = 'current'`,
+    [input.kind, input.localContentKey],
   );
+  if (!isContentFingerprintScheme(scheme)) {
+    throw new BackupValidationError(
+      `Stored ${input.kind} '${input.localContentKey}' has no supported current fingerprint.`,
+    );
+  }
+  const stored = scheme === CONTENT_FINGERPRINT_SCHEME_V1
+    ? projectStoredPortableContentV1(db, input.kind, input.localContentKey)
+    : projectStoredPortableContentV2(db, input.kind, input.localContentKey);
   const aggregate = stored.aggregate as PortableContentAggregateValue;
-  const identity = deriveContentIdentityV1({
+  const identity = deriveContentIdentityForScheme(scheme, {
     kind: input.kind,
     edition: aggregate.rules_edition,
     name: aggregate.name,
@@ -1541,7 +1550,7 @@ export function localContentReferenceImportNode(
     kind: input.kind,
     content_key: input.incomingContentKey,
     key_kind: 'asserted',
-    fingerprint_scheme: identity.envelope.scheme,
+    fingerprint_scheme: scheme,
     fingerprint_digest: identity.digest,
     aggregate,
     ...(input.kind === 'spell'

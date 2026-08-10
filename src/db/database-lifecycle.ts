@@ -327,14 +327,19 @@ export class DatabaseLifecycle {
     }
   }
 
-  async replace(bytes: Uint8Array): Promise<DatabaseContext> {
+  async replace(
+    bytes: Uint8Array,
+    afterReplace: (db: DatabaseContext) => void = () => undefined,
+  ): Promise<DatabaseContext> {
     const candidate = this.#validatedCandidateBytes(bytes);
     const previous = await this.exportBytes();
 
     this.close();
     try {
       await this.storage.replaceFile(candidate);
-      return this.open();
+      const replacement = this.open();
+      afterReplace(replacement);
+      return replacement;
     } catch (replacementError) {
       this.close();
       try {
