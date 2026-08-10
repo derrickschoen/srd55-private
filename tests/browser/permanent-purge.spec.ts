@@ -169,8 +169,71 @@ test('publishes, versions, archives, restores, and permanently purges a whole li
   const purge = page.getByRole('button', {
     name: 'Permanently purge Purge Journey Species Revised and its entire version lineage',
   });
+  const beforeCancel = await page.evaluate(async ({ keys, id }) => ({
+    lineage: (await window.staticApp.inspectRows('catalog_content_identities'))
+      .filter((row) => keys.includes(String(row['content_key'])))
+      .map((row) => String(row['content_key'])).sort(),
+    character: (await window.staticApp.inspectRows('characters'))
+      .filter((row) => row['id'] === id),
+    edges: (await window.staticApp.inspectRows('catalog_content_supersessions'))
+      .filter((row) =>
+        keys.includes(String(row['superseded_content_key'])) ||
+        keys.includes(String(row['successor_content_key']))
+      ),
+  }), { keys: lineageKeys, id: characterId });
+  await purge.click();
+  const confirmation = page.getByRole('dialog', {
+    name: 'Permanently purge “Purge Journey Species Revised”?',
+  });
+  await expect(confirmation).toBeVisible();
+  await expect(confirmation).toContainText('2 revisions in this lineage');
+  await expect(confirmation.getByText('Purge Journey Hero', { exact: true })).toBeVisible();
+  const cancelPurge = confirmation.getByRole('button', {
+    name: 'Cancel — keep everything',
+  });
+  const confirmPurge = confirmation.getByRole('button', {
+    name: 'Permanently purge named victims',
+  });
+  await expect(cancelPurge).toBeFocused();
+  await cancelPurge.press('Shift+Tab');
+  await expect(confirmPurge).toBeFocused();
+  await confirmPurge.press('Tab');
+  await expect(cancelPurge).toBeFocused();
+  await cancelPurge.click();
+  await expect(confirmation).toHaveCount(0);
+  await expect(purge).toBeFocused();
+  expect(await page.evaluate(async ({ keys, id }) => ({
+    lineage: (await window.staticApp.inspectRows('catalog_content_identities'))
+      .filter((row) => keys.includes(String(row['content_key'])))
+      .map((row) => String(row['content_key'])).sort(),
+    character: (await window.staticApp.inspectRows('characters'))
+      .filter((row) => row['id'] === id),
+    edges: (await window.staticApp.inspectRows('catalog_content_supersessions'))
+      .filter((row) =>
+        keys.includes(String(row['superseded_content_key'])) ||
+        keys.includes(String(row['successor_content_key']))
+      ),
+  }), { keys: lineageKeys, id: characterId })).toEqual(beforeCancel);
+  await expect.poll(() => announcedMessages(page)).toEqual(expect.arrayContaining([
+    'Permanent purge confirmation opened for Purge Journey Species Revised. Nothing has been deleted.',
+    'Permanent purge cancelled. Nothing was deleted.',
+  ]));
+
+  await clearAnnouncements(page);
   await purge.focus();
   await purge.press('Enter');
+  await expect(cancelPurge).toBeFocused();
+  expect(await page.evaluate(async (keys) =>
+    (await window.staticApp.inspectRows('catalog_content_identities'))
+      .filter((row) => keys.includes(String(row['content_key']))).length,
+  lineageKeys)).toBe(2);
+  await page.keyboard.press('Escape');
+  await expect(confirmation).toHaveCount(0);
+  await expect(purge).toBeFocused();
+
+  await purge.click();
+  await expect(cancelPurge).toBeFocused();
+  await confirmPurge.click();
   await expect(page.getByText('The archive is empty.')).toBeVisible();
   await expect.poll(() => announcedMessages(page)).toEqual(expect.arrayContaining([
     'Permanently purging the complete version lineage…',

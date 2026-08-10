@@ -194,9 +194,10 @@ function context(
   };
 }
 
-function keydown(key: string): KeyboardEvent {
+function keydown(key: string, shiftKey = false): KeyboardEvent {
   const event = new Event('keydown', { cancelable: true }) as KeyboardEvent;
   Object.defineProperty(event, 'key', { value: key });
+  Object.defineProperty(event, 'shiftKey', { value: shiftKey });
   return event;
 }
 
@@ -937,6 +938,8 @@ describe('HA-6 homebrew library routing and tabs', () => {
             content_name: hostileCreation, content_catalog_layer: 'external',
             rules_edition: 'expanded',
             archived_at: '2042-08-11T12:13:14.000Z', characters,
+            lineage_revision_count: 3,
+            purge_characters: characters,
           }],
           previewRestoreSet: async (params) => {
             restoreCalls.push(['preview', params]);
@@ -987,9 +990,55 @@ describe('HA-6 homebrew library routing and tabs', () => {
       ]);
       expect(archiveRoot.querySelector('.homebrew-status')?.textContent)
         .toBe('Creation and all listed characters restored.');
-      archiveRoot.querySelectorAll('button').find(
+      const purge = archiveRoot.querySelectorAll('button').find(
         (button) => button.textContent === 'Permanently purge entire lineage',
-      )?.click();
+      );
+      if (purge === undefined) throw new Error('Permanent purge trigger missing.');
+      purge.focus();
+      purge.click();
+      const purgeDialogNode = archiveRoot.querySelector(
+        '[data-testid="homebrew-purge-confirmation"]',
+      );
+      if (purgeDialogNode === null) throw new Error('Permanent purge dialog missing.');
+      const purgeDialog = interactiveElement(
+        purgeDialogNode as unknown as HTMLElement,
+      );
+      expect(purgeCalls).toEqual([]);
+      expect(elementText(purgeDialogNode as unknown as Node)).toContain(hostileCreation);
+      expect(elementText(purgeDialogNode as unknown as Node)).toContain(
+        '3 revisions in this lineage',
+      );
+      expect(elementText(purgeDialogNode as unknown as Node)).toContain(hostileCharacter);
+      expect(purgeDialogNode.querySelector('[data-ha11-creation]')).toBeNull();
+      expect(purgeDialogNode.querySelector('[data-ha11-archive-character]')).toBeNull();
+      const cancel = purgeDialog.querySelectorAll('button').find(
+        (button) => button.textContent === 'Cancel — keep everything',
+      );
+      const confirm = purgeDialog.querySelectorAll('button').find(
+        (button) => button.textContent === 'Permanently purge named victims',
+      );
+      if (cancel === undefined || confirm === undefined) {
+        throw new Error('Permanent purge dialog controls missing.');
+      }
+      expect(document.activeElement).toBe(cancel);
+      purgeDialog.dispatchEvent(keydown('Tab', true));
+      expect(document.activeElement).toBe(confirm);
+      purgeDialog.dispatchEvent(keydown('Tab'));
+      expect(document.activeElement).toBe(cancel);
+      purgeDialog.dispatchEvent(keydown('Escape'));
+      expect(purgeCalls).toEqual([]);
+      expect(purgeDialog.isConnected).toBe(false);
+      expect(document.activeElement).toBe(purge);
+      expect(archiveRoot.querySelector('.homebrew-status')?.textContent)
+        .toBe('Permanent purge cancelled. Nothing was deleted.');
+
+      purge.click();
+      const confirmation = archiveRoot
+        .querySelector('[data-testid="homebrew-purge-confirmation"]')
+        ?.querySelectorAll('button')
+        .find((button) => button.textContent === 'Permanently purge named victims');
+      if (confirmation === undefined) throw new Error('Purge confirmation missing.');
+      confirmation.click();
       await settle();
       expect(purgeCalls).toEqual([{
         content_kind: 'species',

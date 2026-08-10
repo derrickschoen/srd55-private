@@ -448,6 +448,8 @@ export interface ArchivedHomebrewSet {
   readonly rules_edition: RulesEdition;
   readonly archived_at: string;
   readonly characters: readonly ArchiveSetCharacter[];
+  readonly lineage_revision_count: number;
+  readonly purge_characters: readonly ArchiveSetCharacter[];
 }
 
 export interface ArchiveSetResult {
