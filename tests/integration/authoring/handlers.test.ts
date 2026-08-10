@@ -1449,6 +1449,8 @@ describe('catalog authoring RPC handlers', () => {
     ].sort((left, right) => left.content_key.localeCompare(right.content_key)));
   });
 
+  // Measured alone at 1.763s on 2026-08-10; the existing 20s budget keeps
+  // contention from turning this database-heavy lineage proof into noise.
   it('HA11-PERMANENT-PURGE purges a middle version whole while every named destructive-path control survives', async () => {
     const rpc = await open();
     client = new RpcClient(new WorkerTransport(rpc.context));
@@ -1554,6 +1556,27 @@ describe('catalog authoring RPC handlers', () => {
     expect(archive.characters.map((entry) => entry.character_id))
       .toEqual([middleCharacter.id]);
     await authoring.commitArchiveSet({ token: archive.token });
+
+    expect(await authoring.listArchivedSets()).toEqual([
+      expect.objectContaining({
+        content_key: middle.content_key,
+        lineage_revision_count: 3,
+        purge_characters: [
+          expect.objectContaining({
+            character_id: firstCharacter.id,
+            character_name: 'Purge First Character',
+          }),
+          expect.objectContaining({
+            character_id: middleCharacter.id,
+            character_name: 'Purge Middle Character',
+          }),
+          expect.objectContaining({
+            character_id: lastCharacter.id,
+            character_name: 'Purge Last Character',
+          }),
+        ],
+      }),
+    ]);
 
     const purged = await authoring.purgeArchivedSet({
       content_kind: 'species',

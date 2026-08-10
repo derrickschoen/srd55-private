@@ -291,6 +291,85 @@ export class HomebrewArchiveSetService {
     });
   }
 
+  #lineageRevisionCount(content: ContentLifecycleRow): number {
+    const count = this.db.scalar<number>(
+      `WITH RECURSIVE lineage(content_key) AS (
+         VALUES (?)
+         UNION
+         SELECT edge.superseded_content_key
+           FROM catalog_content_supersessions AS edge
+           JOIN lineage ON lineage.content_key = edge.successor_content_key
+          WHERE edge.content_kind = ?
+         UNION
+         SELECT edge.successor_content_key
+           FROM catalog_content_supersessions AS edge
+           JOIN lineage ON lineage.content_key = edge.superseded_content_key
+          WHERE edge.content_kind = ?
+       )
+       SELECT count(*) FROM lineage`,
+      [content.contentKey, content.kind, content.kind],
+    );
+    if (count === null || !Number.isSafeInteger(count) || count < 1) {
+      throw new TypeError('Archived content lineage has an invalid revision count.');
+    }
+    return count;
+  }
+
+  #purgeCharacters(
+    content: ContentLifecycleRow,
+  ): readonly ArchiveSetCharacter[] {
+    const definitionTable = content.kind === 'species'
+      ? 'species_definitions'
+      : content.kind === 'background'
+      ? 'background_definitions'
+      : 'subclass_definitions';
+    const subclassAttachment = content.kind === 'subclass'
+      ? `UNION
+         SELECT level.character_id
+           FROM character_class_levels AS level
+           JOIN subclass_definitions AS definition
+             ON definition.id = level.subclass_definition_id
+           JOIN lineage ON lineage.content_key = definition.content_key`
+      : '';
+    return Object.freeze(this.db.all(
+      `WITH RECURSIVE lineage(content_key) AS (
+         VALUES (?)
+         UNION
+         SELECT edge.superseded_content_key
+           FROM catalog_content_supersessions AS edge
+           JOIN lineage ON lineage.content_key = edge.successor_content_key
+          WHERE edge.content_kind = ?
+         UNION
+         SELECT edge.successor_content_key
+           FROM catalog_content_supersessions AS edge
+           JOIN lineage ON lineage.content_key = edge.superseded_content_key
+          WHERE edge.content_kind = ?
+       )
+       SELECT character.id AS character_id,
+              character.revision AS character_revision,
+              character.name AS character_name,
+              character.archived_at AS character_archived_at
+         FROM characters AS character
+        WHERE character.id IN (
+          SELECT source.character_id
+            FROM character_source_instances AS source
+            JOIN ${definitionTable} AS definition
+              ON definition.id = source.source_definition_id
+            JOIN lineage ON lineage.content_key = definition.content_key
+           WHERE source.source_type = ?
+          ${subclassAttachment}
+          UNION
+          SELECT member.character_id
+            FROM catalog_content_archive_members AS member
+            JOIN lineage ON lineage.content_key = member.content_key
+           WHERE member.content_kind = ?
+        )
+        ORDER BY character.id`,
+      [content.contentKey, content.kind, content.kind, content.kind, content.kind],
+      characterRow,
+    ).map(publicCharacter));
+  }
+
   #plan(
     operation: 'archive' | 'restore',
     contentKey: ContentKey,
@@ -420,6 +499,8 @@ export class HomebrewArchiveSetService {
             this.#publicArchiveMember(member)
           ),
         ),
+        lineage_revision_count: this.#lineageRevisionCount(content),
+        purge_characters: this.#purgeCharacters(content),
       });
     }));
   }
@@ -606,48 +687,10 @@ export class HomebrewArchiveSetService {
             return row.content_key as ContentKey;
           }),
         );
-        const definitionTable = contentKind === 'species'
-          ? 'species_definitions'
-          : contentKind === 'background'
-          ? 'background_definitions'
-          : 'subclass_definitions';
-        const subclassAttachment = contentKind === 'subclass'
-          ? `UNION
-             SELECT level.character_id
-               FROM character_class_levels AS level
-               JOIN subclass_definitions AS definition
-                 ON definition.id = level.subclass_definition_id
-               JOIN ha11_catalog_lineage_purge_scope AS scope
-                 ON scope.content_key = definition.content_key`
-          : '';
         const purgedCharacterIds = Object.freeze(
-          this.db.allRaw(
-            `SELECT character.id
-               FROM characters AS character
-              WHERE character.id IN (
-                SELECT source.character_id
-                  FROM character_source_instances AS source
-                  JOIN ${definitionTable} AS definition
-                    ON definition.id = source.source_definition_id
-                  JOIN ha11_catalog_lineage_purge_scope AS scope
-                    ON scope.content_key = definition.content_key
-                 WHERE source.source_type = ?
-                ${subclassAttachment}
-                UNION
-                SELECT member.character_id
-                  FROM catalog_content_archive_members AS member
-                  JOIN ha11_catalog_lineage_purge_scope AS scope
-                    ON scope.content_key = member.content_key
-                 WHERE member.content_kind = ?
-              )
-              ORDER BY character.id`,
-            [contentKind, contentKind],
-          ).map((row) => {
-            if (typeof row.id !== 'number' || !Number.isSafeInteger(row.id)) {
-              throw new TypeError('Purge scope contains an invalid character id.');
-            }
-            return row.id as CharacterId;
-          }),
+          this.#purgeCharacters(this.#content(contentKey)).map((character) =>
+            character.character_id
+          ),
         );
 
         this.db.exec(
