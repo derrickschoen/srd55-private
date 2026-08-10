@@ -53,6 +53,7 @@ import type {
   SubclassContentAggregate,
 } from './contracts';
 import { catalogLayerDisclosure } from '../catalog/catalog-disclosure';
+import { selectableCatalogContentSql } from '../queries/selectable-catalog-content';
 import type {
   AuthoringCharacterEffect,
   AuthoringDraftCharacterEffect,
@@ -694,19 +695,17 @@ export class CatalogAuthoringService {
   backgroundReferences(): BackgroundAuthoringReferences {
     const references = (
       table: 'feat_definitions' | 'weapon_templates' | 'armor_templates',
-      where = '',
+      kind: 'feat' | 'weapon' | 'armor',
+      extraPredicate?: string,
     ) => this.db.all(
       `SELECT definition.content_key, definition.name, definition.rules_edition,
               identity.catalog_layer
        FROM ${table} AS definition
        LEFT JOIN catalog_content_identities AS identity
-         ON identity.content_kind = CASE
-              WHEN '${table}' = 'feat_definitions' THEN 'feat'
-              WHEN '${table}' = 'weapon_templates' THEN 'weapon'
-              ELSE 'armor'
-            END
+         ON identity.content_kind = '${kind}'
         AND identity.content_key = definition.content_key
-       ${where.replaceAll('category', 'definition.category')}
+       WHERE ${selectableCatalogContentSql(kind, 'definition.content_key')}
+       ${extraPredicate === undefined ? '' : `AND ${extraPredicate}`}
        ORDER BY definition.name, definition.rules_edition,
                 definition.content_key`,
       undefined,
@@ -720,9 +719,13 @@ export class CatalogAuthoringService {
       }),
     );
     return Object.freeze({
-      origin_feats: Object.freeze(references('feat_definitions', "WHERE category = 'origin'")),
-      weapons: Object.freeze(references('weapon_templates')),
-      armors: Object.freeze(references('armor_templates')),
+      origin_feats: Object.freeze(references(
+        'feat_definitions',
+        'feat',
+        "definition.category = 'origin'",
+      )),
+      weapons: Object.freeze(references('weapon_templates', 'weapon')),
+      armors: Object.freeze(references('armor_templates', 'armor')),
     });
   }
 

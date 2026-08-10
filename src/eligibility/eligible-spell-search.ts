@@ -21,6 +21,7 @@ import {
   spellSelectionConstraint,
   type SpellSelectionConstraint,
 } from './spell-selection-constraint';
+import { selectableCatalogContentSql } from '../queries/selectable-catalog-content';
 
 export interface EligibleSpell {
   id: number;
@@ -226,6 +227,7 @@ export class EligibleSpellSearch {
     const clauses = [
       'version.is_active = 1',
       'version.level BETWEEN ? AND ?',
+      selectableCatalogContentSql('spell', 'version.content_key'),
     ];
     const bindings: Array<string | number> = [
       constraint.spell_level_min,

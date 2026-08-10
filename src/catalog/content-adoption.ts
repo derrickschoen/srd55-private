@@ -134,8 +134,8 @@ export interface ContentImportReviewRow {
   readonly targetContentKey: ContentKey;
   readonly incomingFingerprint: ContentFingerprintDigest | null;
   readonly matchClass: ContentImportMatchClass;
-  readonly defaultChoice: 'match';
-  readonly selectedChoice: CatalogContentMatchDecision;
+  readonly defaultChoice: 'match' | null;
+  readonly selectedChoice: CatalogContentMatchDecision | null;
   readonly cloneName: string;
   readonly dependencies: readonly string[];
   readonly conflictDetails: readonly ContentImportConflictDetail[];
@@ -953,11 +953,12 @@ function evaluate(
       continue;
     }
 
-    const requestedChoice = choices[id] ?? { decision: 'match' as const };
-    const choice = requestedChoice.decision === 'clone' &&
-        requestedChoice.cloneName === undefined
-      ? { ...requestedChoice, cloneName: availableCloneName(db, node.projection) }
-      : requestedChoice;
+    const requestedChoice = choices[id];
+    const effectiveChoice = requestedChoice ?? { decision: 'match' as const };
+    const choice = effectiveChoice.decision === 'clone' &&
+        effectiveChoice.cloneName === undefined
+      ? { ...effectiveChoice, cloneName: availableCloneName(db, node.projection) }
+      : effectiveChoice;
     const incomingProjection = node.reproject?.({
       name: node.projection.name,
       assertedKey: node.projection.assertedKey,
@@ -1115,6 +1116,8 @@ function evaluate(
       reviewClass !== null &&
       choice.decision === 'match'
     ) {
+      const defaultChoice = reviewClass === 'key-collision' ? null : 'match';
+      const selectedChoice = requestedChoice?.decision ?? defaultChoice;
       const outcome: ContentImportEntryOutcome = Object.freeze({
         id,
         kind: 'review',
@@ -1127,7 +1130,9 @@ function evaluate(
         identity,
         resolution,
         outcome,
-        reviewedDecision: 'match',
+        ...(selectedChoice === null
+          ? {}
+          : { reviewedDecision: selectedChoice }),
         incomingDigest: incomingFingerprint.digest,
         incomingScheme: incomingFingerprint.scheme,
         targetContentKey: resolution.contentKey,
@@ -1150,8 +1155,8 @@ function evaluate(
         targetContentKey: resolution.contentKey,
         incomingFingerprint: incomingFingerprint.evidenceDigest,
         matchClass: reviewClass,
-        defaultChoice: 'match',
-        selectedChoice: 'match',
+        defaultChoice,
+        selectedChoice,
         cloneName: availableCloneName(db, incomingProjection),
         dependencies: graph.reviewEdgesByNode.get(node.id) ?? Object.freeze([]),
         conflictDetails: reviewConflictDetails(
@@ -1386,7 +1391,10 @@ export function commitContentImport(
   if (freshPlan.token !== input.token) {
     return Object.freeze({ kind: 'stale-plan', freshPlan });
   }
-  if (freshPlan.outcomes.some((outcome) => outcome.kind === 'refused')) {
+  if (
+    freshPlan.outcomes.some((outcome) => outcome.kind === 'refused') ||
+    freshPlan.reviews.some((review) => review.selectedChoice === null)
+  ) {
     return Object.freeze({
       kind: 'refused',
       reason: 'entry_refused',

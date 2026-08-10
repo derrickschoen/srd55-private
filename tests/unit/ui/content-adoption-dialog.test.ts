@@ -413,6 +413,28 @@ describe('the D82 content-adoption dialog', () => {
       expect(text).toContain(
         'The incoming alias points to differently named local content with different rules.',
       );
+      expect(text).toContain(
+        'Match — Discards the incoming rules; existing characters keep the local entry.',
+      );
+      expect(text).toContain(
+        'Clone — Installs the incoming rules under a new name; existing characters stay on the local entry.',
+      );
+      const distinctRow = dialog.querySelectorAll('.content-adoption-row').find(
+        (row) => row.getAttribute('data-content-id') ===
+          'portable:item:same-name-distinct',
+      );
+      const compatibleRow = dialog.querySelectorAll('.content-adoption-row').find(
+        (row) => row.getAttribute('data-content-id') ===
+          'portable:item:compatible',
+      );
+      if (distinctRow === undefined || compatibleRow === undefined) {
+        throw new Error('Expected adoption review rows are missing.');
+      }
+      expect(distinctRow.querySelectorAll('input').slice(0, 2).map((input) =>
+        input.getAttribute('checked')
+      )).toEqual([null, null]);
+      expect(compatibleRow.querySelectorAll('input')[0]?.getAttribute('checked'))
+        .toBe('');
       const commitButton = dialog.querySelectorAll('button')
         .find((button) => button.textContent === 'Import with these choices');
       expect(commitButton?.disabled).toBe(true);
@@ -477,7 +499,7 @@ describe('the D82 content-adoption dialog', () => {
     }
   });
 
-  it('lists every review with Match selected and replans before clone commit', async () => {
+  it('keeps lossless review rows on Match and replans before clone commit', async () => {
     const connection = await openTestDatabase();
     connections.push(connection);
     const db = new DatabaseContext(connection);
@@ -543,6 +565,145 @@ describe('the D82 content-adoption dialog', () => {
       commitButton.click();
       await rendered.whenSettled();
       expect(commits).toEqual(replans);
+      rendered.cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('requires an explicit choice for same-name distinct rules before commit', async () => {
+    const connection = await openTestDatabase();
+    connections.push(connection);
+    const db = new DatabaseContext(connection);
+    commitNewItem(db, itemNode(
+      'installed-collision',
+      'Collision Relic',
+      { rule: 'local' },
+    ));
+    const incoming = itemNode(
+      'incoming-collision',
+      'Collision Relic',
+      { rule: 'incoming' },
+    );
+    const initial = planContentImport(db, [incoming]);
+
+    expect(initial.reviews).toEqual([
+      expect.objectContaining({
+        id: 'portable:item:incoming-collision',
+        matchClass: 'key-collision',
+        defaultChoice: null,
+        selectedChoice: null,
+      }),
+    ]);
+    expect(commitContentImport(db, {
+      nodes: [incoming],
+      token: initial.token,
+    })).toEqual(expect.objectContaining({
+      kind: 'refused',
+      reason: 'entry_refused',
+    }));
+
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const replans: ContentImportChoices[] = [];
+      const rendered = createContentAdoptionDialog({
+        mount: document.body,
+        plan: initial,
+        replan: async (choices) => {
+          replans.push(choices);
+          return planContentImport(db, [incoming], choices);
+        },
+        commit: async (submitted, choices) => commitContentImport(db, {
+          nodes: [incoming],
+          token: submitted.token,
+          choices,
+        }),
+        onCommitted: () => undefined,
+      });
+      const dialog = interactiveElement(rendered.element);
+      const inputs = dialog.querySelectorAll('input');
+      const commitButton = dialog.querySelectorAll('button').find((button) =>
+        button.textContent === 'Import with these choices'
+      );
+      if (commitButton === undefined) throw new Error('Commit button is missing.');
+
+      expect(inputs.slice(0, 2).map((input) => input.getAttribute('checked')))
+        .toEqual([null, null]);
+      expect(commitButton.disabled).toBe(true);
+      inputs[0]?.dispatchEvent(new Event('change'));
+      await rendered.whenSettled();
+
+      expect(replans).toEqual([{
+        'portable:item:incoming-collision': {
+          decision: 'match',
+        },
+      }]);
+      expect(commitButton.disabled).toBe(false);
+      rendered.cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('drops an implicit Match when a stale refresh becomes a key collision', async () => {
+    const connection = await openTestDatabase();
+    connections.push(connection);
+    const db = new DatabaseContext(connection);
+    const alias = '2014:item:stale-review' as ContentKey;
+    bundledItem(
+      db,
+      '2024:item:stale-review' as ContentKey,
+      'Stale Review Relic',
+      { rule: 'local' },
+    );
+    registerContentAlias(db, {
+      kind: 'item',
+      aliasKey: alias,
+      contentKey: '2024:item:stale-review' as ContentKey,
+      aliasKind: 'declared-legacy',
+    });
+    const lossless = itemNode(
+      'stale-review',
+      'Stale Review Relic',
+      { rule: 'local' },
+      { declaredAlias: alias },
+    );
+    const distinct = itemNode(
+      'stale-review',
+      'Stale Review Relic',
+      { rule: 'incoming' },
+      { declaredAlias: alias },
+    );
+    const initial = planContentImport(db, [lossless]);
+    const freshPlan = planContentImport(db, [distinct]);
+
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const rendered = createContentAdoptionDialog({
+        mount: document.body,
+        plan: initial,
+        replan: async () => freshPlan,
+        commit: async () => ({ kind: 'stale-plan', freshPlan }),
+        onCommitted: () => undefined,
+      });
+      const dialog = interactiveElement(rendered.element);
+      const commitButton = dialog.querySelectorAll('button').find((button) =>
+        button.textContent === 'Import with these choices'
+      );
+      if (commitButton === undefined) throw new Error('Commit button is missing.');
+      expect(dialog.querySelectorAll('input')[0]?.getAttribute('checked')).toBe('');
+      expect(commitButton.disabled).toBe(false);
+
+      commitButton.click();
+      await rendered.whenSettled();
+
+      expect(dialog.querySelectorAll('input').slice(0, 2).map((input) =>
+        input.getAttribute('checked')
+      )).toEqual([null, null]);
+      expect(commitButton.disabled).toBe(true);
+      expect(elementText(dialog as unknown as Node)).toContain(
+        'The catalog changed. Review the refreshed plan before committing.',
+      );
       rendered.cleanup();
     } finally {
       restoreDocument();

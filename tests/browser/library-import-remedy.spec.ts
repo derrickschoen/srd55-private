@@ -164,8 +164,9 @@ test('v17 refusal links through library adoption to the exact restored choice', 
   browser,
   page,
 }) => {
-  // Measured alone at 25.6s on Chromium; 25.6 x 1.5 = 38.4s.
-  test.setTimeout(40_000);
+  // Measured alone at 27.1s on 2026-08-10 after adding the two required
+  // explicit collision choices. 27.1 x 1.5 = 40.65s, rounded up to 100ms.
+  test.setTimeout(40_700);
   await page.goto('/?import=library');
   await ready(page);
   const fixture = await buildRecipientFixture(page);
@@ -267,9 +268,17 @@ test('v17 refusal links through library adoption to the exact restored choice', 
     await expect(libraryReview).toContainText(
       'local: Oversized Portable Elf — Homebrew · external layer',
     );
-    await libraryReview.getByRole('button', {
+    const libraryCommit = libraryReview.getByRole('button', {
       name: 'Import with these choices',
-    }).click();
+    });
+    const libraryMatch = libraryReview.getByRole('radio', {
+      name: /Match — Discards the incoming rules; existing characters keep the local entry\./,
+    });
+    await expect(libraryMatch).not.toBeChecked();
+    await expect(libraryCommit).toBeDisabled();
+    await libraryMatch.check();
+    await expect(libraryCommit).toBeEnabled();
+    await libraryCommit.click();
     await expect(recipient.locator('.transfer-status')).toHaveText(
       'Library imported: 0 published, 1 matched existing.',
     );
@@ -290,9 +299,17 @@ test('v17 refusal links through library adoption to the exact restored choice', 
     await expect(shareReview).toContainText(
       'local: Oversized Portable Elf — Homebrew · external layer',
     );
-    await shareReview.getByRole('button', {
+    const shareCommit = shareReview.getByRole('button', {
       name: 'Import with these choices',
-    }).click();
+    });
+    const shareMatch = shareReview.getByRole('radio', {
+      name: /Match — Discards the incoming rules; existing characters keep the local entry\./,
+    });
+    await expect(shareMatch).not.toBeChecked();
+    await expect(shareCommit).toBeDisabled();
+    await shareMatch.check();
+    await expect(shareCommit).toBeEnabled();
+    await shareCommit.click();
     await expect(recipient.locator('.share-status')).toContainText(
       'Character added as #1.',
     );

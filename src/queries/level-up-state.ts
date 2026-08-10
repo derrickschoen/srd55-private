@@ -101,7 +101,7 @@ import {
   multiclassAssessmentForClass,
   type MulticlassPrimaryAbilityAssessment,
 } from './multiclass-primary-ability';
-import { SELECTABLE_SUBCLASS_SQL } from './selectable-subclasses';
+import { selectableCatalogContentSql } from './selectable-catalog-content';
 
 interface CharacterRow {
   readonly id: CharacterId;
@@ -555,7 +555,7 @@ export class LevelUpStateQuery {
         AND identity.content_key = subclass.content_key
        WHERE subclass.class_definition_id = ?
          AND identity.archived_at IS NULL
-         AND ${SELECTABLE_SUBCLASS_SQL}
+         AND ${selectableCatalogContentSql('subclass', 'subclass.content_key')}
        ORDER BY subclass.name, subclass.id`,
       [classDefinitionId],
       (row): LevelUpSubclassOption => ({
@@ -1048,7 +1048,10 @@ export class LevelUpStateQuery {
     choiceContext?: LevelUpPlannedChoiceContext,
   ): readonly LevelUpFeatCandidate[] {
     return this.db.all(
-      'SELECT content_key FROM feat_definitions ORDER BY id',
+      `SELECT definition.content_key
+       FROM feat_definitions AS definition
+       WHERE ${selectableCatalogContentSql('feat', 'definition.content_key')}
+       ORDER BY definition.id`,
       undefined,
       (row) => sqlString(row, 'content_key'),
     )

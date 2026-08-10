@@ -16,6 +16,7 @@ import { readOwnedEffectsByOwner } from '../commands/equipment-effects';
 import { equipmentEffectInput, projectStoredEquipmentContentV1 } from '../catalog/equipment-content-projector-v1';
 import type { ContentKey } from '../domain/ids';
 import { catalogLayerDisclosure } from '../catalog/catalog-disclosure';
+import { selectableCatalogContentSql } from './selectable-catalog-content';
 
 export class ItemQueries {
   constructor(private readonly db: DatabaseContext) {}
@@ -62,6 +63,7 @@ export class ItemQueries {
        LEFT JOIN catalog_content_identities AS identity
          ON identity.content_kind = 'item'
         AND identity.content_key = definition.content_key
+       WHERE ${selectableCatalogContentSql('item', 'definition.content_key')}
        ORDER BY definition.name, definition.id`,
       [],
       (row) => ({

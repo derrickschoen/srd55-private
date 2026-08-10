@@ -237,17 +237,23 @@ describe('an imported subclass stays distinguishable from a bundled one', () => 
         kind: 'subclass',
         targetContentKey: SUBCLASS_KEY,
         matchClass: 'key-collision',
-        defaultChoice: 'match',
+        defaultChoice: null,
+        selectedChoice: null,
       }),
+    ]);
+    const choices = Object.fromEntries(plan.reviews.map((review) => [
+      review.id,
+      { decision: 'match' as const },
+    ]));
+    const selectedPlan = planCharacterBackupImport(recipient, document, choices);
+    expect(selectedPlan.reviews).toEqual([
+      expect.objectContaining({ selectedChoice: 'match' }),
     ]);
     const committed = commitCharacterBackupImport(
       recipient,
       document,
-      plan.token,
-      Object.fromEntries(plan.reviews.map((review) => [
-        review.id,
-        { decision: 'match' as const },
-      ])),
+      selectedPlan.token,
+      choices,
     );
     expect(committed.kind).toBe('committed');
     if (committed.kind !== 'committed') throw new Error('Expected commit.');
@@ -396,7 +402,8 @@ describe('an imported subclass stays distinguishable from a bundled one', () => 
         targetContentKey: SUBCLASS_KEY,
         incomingFingerprint: null,
         matchClass: 'key-collision',
-        defaultChoice: 'match',
+        defaultChoice: null,
+        selectedChoice: null,
       }),
     ]);
     expect(recipient.scalar<string>(
@@ -409,10 +416,18 @@ describe('an imported subclass stays distinguishable from a bundled one', () => 
       review.id,
       { decision: 'match' as const },
     ]));
+    const selectedPreview = previewCharacterShare(
+      recipient,
+      referenceOnly,
+      choices,
+    );
+    expect(selectedPreview.adoptionPlan.reviews).toEqual([
+      expect.objectContaining({ selectedChoice: 'match' }),
+    ]);
     const committed = commitCharacterShareImport(
       recipient,
       referenceOnly,
-      preview.adoptionPlan.token,
+      selectedPreview.adoptionPlan.token,
       choices,
     );
     expect(committed.kind).toBe('committed');
