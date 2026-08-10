@@ -5,6 +5,41 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-10 — Barbed Court: mastery menu OUT, explicit Nick IN; slap gains a 10-ft slow; off-list spells enter only when owner-named
+
+Owner's rulings, verbatim:
+
+> Remove weapon masteries from the barbed court monk.
+>
+> Allow barbed court to have spells that are not on the bard list if I have
+> named them
+
+Question round answers, verbatim: Court Forms — "Make explicit text that
+the subclass grants the nick property to unarmed strikes even though it is
+not usually possible"; lockdown combo — "Move it onto the slap"; named
+spells — "Spells not on the bard list are provided as spells known by the
+subclass like with a paladin".
+
+Effects, applied to the doc:
+
+1. **Court Forms final**: Light + Finesse + explicit **Nick** on Unarmed
+   Strikes (override text; the extra Attack-action strike adds no ability
+   modifier per RAW, Barbed Fists applies). The swappable five-mastery menu
+   is gone — no choice tracking remains.
+2. **Courtier's Slap** now also reduces the target's Speed by 10 feet until
+   the start of the monk's next turn (both modes) — the slap that stops you
+   mid-stride; restores the Ray-of-Frost speed-stack (−20) from level 3.
+3. **Standing spell-list rule codified**: off-Bard-list spells enter only
+   as granted always-prepared spells or granted cantrips (Paladin-oath
+   pattern), and only when owner-named. Current named set unchanged.
+
+Measured and stated plainly: **the pair is a net buff.** Final fights-back
+board 16.0 / 41.7 / **101.6** / **157.1** at L3/6/11/17 — the explicit Nick
+(a seventh swing) is worth more than the whole removed mastery menu
+(+12/+19 over the mastery-less midpoint, above the pre-removal 90.5/138.5).
+Ratios: 0.82× / 1.34× / **1.95× / 2.58×** the corrected optimized Paladin.
+Owner-ruled with the numbers shown; worksheet updated.
+
 ## 2026-08-10 — Publication review loop (Opus + Sol) adjudicated; both docs rewritten as first publication drafts
 
 Two independent publication reviews returned ~45 findings; adjudicated and
