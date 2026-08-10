@@ -357,10 +357,35 @@ export interface LevelUpHeldClass {
     MulticlassPrimaryAbilityWarning | null;
 }
 
+export type LevelUpTargetFeature =
+  | {
+      readonly kind: 'class_feature';
+      readonly name: string;
+      readonly catalog_layer: CatalogLayerDisclosure;
+    }
+  | {
+      readonly kind: 'subclass_feature';
+      readonly name: string;
+      readonly catalog_layer: CatalogLayerDisclosure;
+      readonly rules_text:
+        | { readonly kind: 'stored'; readonly text: string }
+        | { readonly kind: 'not_stored' };
+    }
+  | {
+      readonly kind: 'subclass_feature_unknown';
+      readonly reason: 'no_stored_feature';
+      readonly subclass_name: string;
+      readonly subclass_catalog_layer: CatalogLayerDisclosure;
+    }
+  | {
+      readonly kind: 'subclass_feature_unknown';
+      readonly reason: 'subclass_not_selected';
+    };
+
 export type LevelUpTargetFeatures =
   | {
       readonly kind: 'sourced';
-      readonly feature_names: readonly string[];
+      readonly features: readonly LevelUpTargetFeature[];
     }
   | { readonly kind: 'unavailable' };
 

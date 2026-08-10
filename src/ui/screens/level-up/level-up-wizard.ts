@@ -225,7 +225,7 @@ function createTerminalEpicResolutionWizard(options: {
       skills: [],
       expertise: [],
       spells: [],
-      new_class_features: { kind: 'sourced', feature_names: [] },
+      new_class_features: { kind: 'sourced', features: [] },
     };
   };
 
@@ -693,7 +693,7 @@ export function createLevelUpWizard(options: {
         skills: [],
         expertise: [],
         spells: [],
-        new_class_features: { kind: 'sourced', feature_names: [] },
+        new_class_features: { kind: 'sourced', features: [] },
       };
     }
     const selected = selectedClass();

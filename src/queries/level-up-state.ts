@@ -22,6 +22,7 @@ import {
   type LevelUpProjectedHitPoints,
   type LevelUpStateResult,
   type LevelUpSubclassOption,
+  type LevelUpTargetFeature,
   type LevelUpTargetFeatures,
   type ProjectedFeatCharacter,
 } from '../builder/level-up-wizard';
@@ -672,7 +673,7 @@ export class LevelUpStateQuery {
       selected.current_level + 1,
       'Target class level',
     );
-    const targetFeatures = this.#targetFeatures(selected.name, targetLevel);
+    const targetFeatures = this.#targetFeatures(selected, targetLevel);
     const entitlements = targetFeatures.kind === 'sourced'
       ? classLevelFeaturesForClassName(selected.name)?.levels.find(
           (entry) => entry.class_level === targetLevel,
@@ -805,19 +806,62 @@ export class LevelUpStateQuery {
   }
 
   #targetFeatures(
-    className: string,
+    selected: HeldClassRow,
     targetLevel: ClassLevel,
   ): LevelUpTargetFeatures {
-    const sourced = classLevelFeaturesForClassName(className);
+    const sourced = classLevelFeaturesForClassName(selected.name);
     if (sourced === null) {
       return { kind: 'unavailable' };
     }
     const row = sourced.levels.find(
       (entry) => entry.class_level === targetLevel,
     );
-    return row === undefined
-      ? { kind: 'unavailable' }
-      : { kind: 'sourced', feature_names: row.feature_names };
+    if (row === undefined) {
+      return { kind: 'unavailable' };
+    }
+    const currentSubclass = selected.current_subclass;
+    const features = row.feature_names.flatMap((name): LevelUpTargetFeature[] => {
+      if (name !== 'Subclass feature') {
+        return [{
+          kind: 'class_feature',
+          name,
+          catalog_layer: selected.catalog_layer,
+        }];
+      }
+      if (currentSubclass === null) {
+        return [{
+          kind: 'subclass_feature_unknown',
+          reason: 'subclass_not_selected',
+        }];
+      }
+      const subclassFeatures = this.db.all(
+        `SELECT name, description
+         FROM subclass_features
+         WHERE subclass_definition_id = ? AND class_level = ?
+         ORDER BY sort_order`,
+        [currentSubclass.subclass_definition_id, targetLevel],
+        (featureRow): LevelUpTargetFeature => {
+          const description = sqlString(featureRow, 'description');
+          return {
+            kind: 'subclass_feature',
+            name: sqlString(featureRow, 'name'),
+            catalog_layer: currentSubclass.catalog_layer,
+            rules_text: description.length === 0
+              ? { kind: 'not_stored' }
+              : { kind: 'stored', text: description },
+          };
+        },
+      );
+      return subclassFeatures.length === 0
+        ? [{
+            kind: 'subclass_feature_unknown',
+            reason: 'no_stored_feature',
+            subclass_name: currentSubclass.name,
+            subclass_catalog_layer: currentSubclass.catalog_layer,
+          }]
+        : subclassFeatures;
+    });
+    return { kind: 'sourced', features };
   }
 
   #subclassCanChangeHitPointMaximum(
