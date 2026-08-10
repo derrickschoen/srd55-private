@@ -322,6 +322,21 @@ and no text, table, or numeric progression from any of them appears here.
 The duel effect was rebuilt from behavior as a non-spell feature; the
 spellcasting tables derive from SRD 5.2.1 alone (§2 design note).
 
+
+## Designer's Note — why this subclass runs hot
+
+The Monk class trails the strongest classes at most tables — a gap
+discussed at length by Colby of *d4: D&D Deep Dive* and Will of *DnD
+Shorts* in **"How to Fix Rogues and Monks in D&D"** (d4 episode 287, June
+2026: https://www.youtube.com/watch?v=09dqKpEk4gY — also at
+https://dndoptimized.buzzsprout.com/1193507/episodes/19420775). This
+subclass is **deliberately tuned above the power of official subclasses**
+to compensate for the class-level deficiencies that episode describes: it
+is, knowingly, a class fix wearing a subclass's clothes. If your table
+already plays with Monk class buffs, tone this subclass down accordingly.
+(No written companion to the episode could be located as of August 2026;
+the reference is to the episode itself.)
+
 ## 8. Sources and Licence
 
 This work includes material from the System Reference Document 5.2.1

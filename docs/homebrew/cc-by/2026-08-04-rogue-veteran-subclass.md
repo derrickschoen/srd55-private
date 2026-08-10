@@ -269,6 +269,21 @@ conversation exposes the harmed seats; it does not balance the kit.
 4. **No non-SRD work was consulted.** The kit is owner-authored; this
    document adds only SRD-anchored analysis.
 
+
+## Designer's Note — why this subclass runs hot
+
+The Rogue class trails the strongest classes at most tables — a gap
+discussed at length by Colby of *d4: D&D Deep Dive* and Will of *DnD
+Shorts* in **"How to Fix Rogues and Monks in D&D"** (d4 episode 287, June
+2026: https://www.youtube.com/watch?v=09dqKpEk4gY — also at
+https://dndoptimized.buzzsprout.com/1193507/episodes/19420775). This
+subclass is **deliberately tuned above the power of official subclasses**
+to compensate for the class-level deficiencies that episode describes: it
+is, knowingly, a class fix wearing a subclass's clothes. If your table
+already plays with Rogue class buffs, tone this subclass down accordingly.
+(No written companion to the episode could be located as of August 2026;
+the reference is to the episode itself.)
+
 ## 9. Sources and License
 
 Sources: the owner's rulings record, this project's design guidelines, and
