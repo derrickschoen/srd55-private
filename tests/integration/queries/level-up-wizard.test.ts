@@ -41,6 +41,7 @@ import {
 } from '../../../src/authoring/bundled-homebrew-installer';
 import { CharacterWorkspaceBuilder } from '../../../src/queries/character-workspace-builder';
 import { withCatalogLineageDeleteGuardSuspended } from '../../../src/catalog/catalog-lineage-delete-guard';
+import { applicationSeed } from '../../../src/db/bootstrap';
 
 const EXPECTED_SUBCLASS_VARIANTS = [
   {
@@ -271,6 +272,165 @@ describe('level-up wizard state RPC', () => {
     expect(new Set(inspectedKinds).size).toBe(inspectedKinds.length);
     expect(schemaKinds).toEqual(inspectedKinds);
   });
+
+  // Measured alone with the production bundled-homebrew publisher at 3.6s;
+  // 20s retains more than the required 1.5x contention headroom.
+  it('names stored subclass arrivals, discloses their layer and text state, and reports then repairs a missing promised row', () => {
+    const targetFeatures = (
+      characterId: number,
+      definitionId: number,
+    ) => {
+      const state = new LevelUpStateQuery(harness.context.db).build(characterId);
+      if (state.kind !== 'ready') {
+        throw new Error('Subclass gains fixture did not return ready state.');
+      }
+      const option = state.class_options.find(
+        (candidate) => candidate.class_definition_id === definitionId,
+      );
+      if (option?.guideability !== 'guideable') {
+        throw new Error('Subclass gains fixture was not guideable.');
+      }
+      return option.gains.target_features;
+    };
+    const chooseSubclass = (
+      characterId: number,
+      definitionId: number,
+      contentKey: string,
+    ) => {
+      raiseClassLevelForTest(
+        harness.context.db,
+        characterId,
+        definitionId,
+        2,
+      );
+      new LevelUpClassCommand(
+        harness.context.db,
+        {
+          type: 'level_up_class',
+          class_definition_id: definitionId,
+          target_level: 3,
+          subclass_content_key: contentKey,
+        },
+        integrity,
+      ).apply(characterId);
+    };
+
+    const wizardCharacterId = createCharacter('Stored Evoker Arrivals');
+    const wizardDefinitionId = enterClass(wizardCharacterId, 'Wizard');
+    chooseSubclass(
+      wizardCharacterId,
+      wizardDefinitionId,
+      '2024:subclass:evoker',
+    );
+    const evokerSubclassId = Number(
+      harness.context.db.scalar(
+        `SELECT id FROM subclass_definitions
+         WHERE content_key = '2024:subclass:evoker'`,
+      ),
+    );
+    for (const [currentLevel, expectedName] of [
+      [5, 'Sculpt Spells'],
+      [9, 'Empowered Evocation'],
+      [13, 'Overchannel'],
+    ] as const) {
+      raiseClassLevelForTest(
+        harness.context.db,
+        wizardCharacterId,
+        wizardDefinitionId,
+        currentLevel,
+      );
+      expect(targetFeatures(wizardCharacterId, wizardDefinitionId)).toEqual({
+        kind: 'sourced',
+        features: [{
+          kind: 'subclass_feature',
+          name: expectedName,
+          catalog_layer: 'bundled',
+          rules_text: { kind: 'not_stored' },
+        }],
+      });
+    }
+
+    raiseClassLevelForTest(
+      harness.context.db,
+      wizardCharacterId,
+      wizardDefinitionId,
+      5,
+    );
+    harness.context.db.exec(
+      `DELETE FROM subclass_features
+       WHERE subclass_definition_id = ? AND class_level = 6`,
+      [evokerSubclassId],
+    );
+    expect(targetFeatures(wizardCharacterId, wizardDefinitionId)).toEqual({
+      kind: 'sourced',
+      features: [{
+        kind: 'subclass_feature_unknown',
+        reason: 'no_stored_feature',
+        subclass_name: 'Evoker',
+        subclass_catalog_layer: 'bundled',
+      }],
+    });
+    applicationSeed(harness.context.db);
+    expect(targetFeatures(wizardCharacterId, wizardDefinitionId)).toEqual({
+      kind: 'sourced',
+      features: [{
+        kind: 'subclass_feature',
+        name: 'Sculpt Spells',
+        catalog_layer: 'bundled',
+        rules_text: { kind: 'not_stored' },
+      }],
+    });
+
+    const installPlan = planBundledHomebrewInstall(harness.context.db);
+    expect(
+      commitBundledHomebrewInstall(harness.context.db, installPlan.token),
+    ).toMatchObject({ kind: 'committed' });
+    const veteranKey = String(
+      harness.context.db.scalar(
+        `SELECT content_key FROM subclass_definitions
+         WHERE name = 'Veteran'`,
+      ),
+    );
+    const rogueCharacterId = createCharacter('Published Veteran Arrival');
+    const rogueDefinitionId = enterClass(rogueCharacterId, 'Rogue');
+    chooseSubclass(rogueCharacterId, rogueDefinitionId, veteranKey);
+    raiseClassLevelForTest(
+      harness.context.db,
+      rogueCharacterId,
+      rogueDefinitionId,
+      8,
+    );
+    const veteranFeatures = targetFeatures(
+      rogueCharacterId,
+      rogueDefinitionId,
+    );
+    expect(veteranFeatures).toMatchObject({
+      kind: 'sourced',
+      features: expect.arrayContaining([
+        {
+          kind: 'subclass_feature',
+          name: "Veteran's Strike",
+          catalog_layer: 'external',
+          rules_text: {
+            kind: 'stored',
+            text: expect.stringContaining('Sneak Attack damage dice are doubled'),
+          },
+        },
+        {
+          kind: 'subclass_feature',
+          name: 'Extensive Experience',
+          catalog_layer: 'external',
+          rules_text: {
+            kind: 'stored',
+            text: expect.stringContaining('proficiency in two skills'),
+          },
+        },
+      ]),
+    });
+    expect(JSON.stringify(veteranFeatures)).not.toContain(
+      '"name":"Subclass feature"',
+    );
+  }, 20_000);
 
   function enterClass(
     characterId: number,
@@ -524,7 +684,11 @@ describe('level-up wizard state RPC', () => {
         gains: {
           target_features: {
             kind: 'sourced',
-            feature_names: ['Ability Score Improvement'],
+            features: [{
+              kind: 'class_feature',
+              name: 'Ability Score Improvement',
+              catalog_layer: 'bundled',
+            }],
           },
         },
         feat_occurrence: {

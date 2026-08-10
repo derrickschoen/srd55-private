@@ -127,7 +127,11 @@ function classOption(options: {
       proficiency_bonus_change: null,
       target_features: {
         kind: 'sourced',
-        feature_names: ['Scholar'],
+        features: [{
+          kind: 'class_feature',
+          name: 'Scholar',
+          catalog_layer: 'bundled',
+        }],
       },
     },
     applicable_steps: options.steps ?? ['class', 'gains', 'review', 'complete'],
@@ -590,7 +594,18 @@ describe('W-HP-UNKNOWN projected Gains', () => {
         proficiency_bonus_change: { current: 5, projected: 11 },
         target_features: {
           kind: 'sourced',
-          feature_names: ['Sentinel feature alpha', 'Sentinel feature omega'],
+          features: [
+            {
+              kind: 'class_feature',
+              name: 'Sentinel feature alpha',
+              catalog_layer: 'bundled',
+            },
+            {
+              kind: 'class_feature',
+              name: 'Sentinel feature omega',
+              catalog_layer: 'bundled',
+            },
+          ],
         },
       },
     } satisfies LevelUpGuideableClassOption;
@@ -626,7 +641,74 @@ describe('W-HP-UNKNOWN projected Gains', () => {
       interactiveElement(view)
         .querySelectorAll('li')
         .map((item) => elementText(item as unknown as Node)),
-    ).toEqual(['Sentinel feature alpha', 'Sentinel feature omega']);
+    ).toEqual([
+      'Sentinel feature alpha — SRD · bundled layer',
+      'Sentinel feature omega — SRD · bundled layer',
+    ]);
+  });
+});
+
+describe('S2-3 named subclass gains', () => {
+  it('renders stored and declared-absent subclass text with catalog layers instead of the generic placeholder', () => {
+    const base = classOption({ current: 5 });
+    const view = renderGainsStep({
+      ...base,
+      gains: {
+        ...base.gains,
+        target_features: {
+          kind: 'sourced',
+          features: [
+            {
+              kind: 'subclass_feature',
+              name: 'Threshold Ward',
+              catalog_layer: 'external',
+              rules_text: {
+                kind: 'stored',
+                text: 'The stored ward rules are shown without invention.',
+              },
+            },
+            {
+              kind: 'subclass_feature',
+              name: 'Sculpt Spells',
+              catalog_layer: 'bundled',
+              rules_text: { kind: 'not_stored' },
+            },
+          ],
+        },
+      },
+    });
+    const items = interactiveElement(view).querySelectorAll('li').map(
+      (item) => elementText(item as unknown as Node),
+    );
+
+    expect(items).toEqual([
+      ' Threshold Ward — Homebrew · external layer The stored ward rules are shown without invention.',
+      ' Sculpt Spells — SRD · bundled layer Feature identity recorded; rules text not stored.',
+    ]);
+    expect(items).not.toContain('Subclass feature');
+  });
+
+  it('renders an explicit layered unknown when the selected subclass has no promised row', () => {
+    const base = classOption({ current: 5 });
+    const view = renderGainsStep({
+      ...base,
+      gains: {
+        ...base.gains,
+        target_features: {
+          kind: 'sourced',
+          features: [{
+            kind: 'subclass_feature_unknown',
+            reason: 'no_stored_feature',
+            subclass_name: 'Unfinished Tradition',
+            subclass_catalog_layer: 'external',
+          }],
+        },
+      },
+    });
+
+    expect(elementText(view)).toContain(
+      'Subclass feature unknown — Unfinished Tradition — Homebrew · external layer. No stored feature row exists at this class level.',
+    );
   });
 });
 
@@ -1407,7 +1489,9 @@ describe('W-E review, atomic confirm, and complete', () => {
         '[data-ha10-review-subclass]',
       ),
     ).toBeNull();
-    expect(elementText(wizard.element)).toContain('New class feature: Scholar.');
+    expect(elementText(wizard.element)).toContain(
+      'New class feature: Scholar — SRD · bundled layer.',
+    );
     wizard.cleanup();
   });
 

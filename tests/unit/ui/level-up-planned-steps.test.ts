@@ -157,7 +157,14 @@ function classOption(
         projected_maximum: { kind: 'known', value: 15 },
       },
       proficiency_bonus_change: null,
-      target_features: { kind: 'sourced', feature_names: ['Scholar'] },
+      target_features: {
+        kind: 'sourced',
+        features: [{
+          kind: 'class_feature',
+          name: 'Scholar',
+          catalog_layer: 'bundled',
+        }],
+      },
     },
     applicable_steps: [
       'class',
@@ -599,7 +606,7 @@ describe('W-LU2-DRAFT planned Skills, Expertise, and Spells', () => {
       'Skill proficiency: Arcana — Wizard — Scholar.',
       'Expertise: History — Wizard — Scholar.',
       `Spell: ${hostileSpell} — Wizard — Homebrew · external layer.`,
-      'New class feature: Scholar.',
+      'New class feature: Scholar — SRD · bundled layer.',
     ]) {
       expect(elementText(wizard.element)).toContain(text);
     }
