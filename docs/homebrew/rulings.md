@@ -5,6 +5,44 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-10 — Barbed Court 17 simplified: Rebuking Shield is a once-per-rest feature; the 4th-level machinery deleted; Blur grafted
+
+Owner's rulings, verbatim:
+
+> For the barbed court, as a 17 level feature, just give the psychic hand
+> based fire shield once per short/long rest. No concentration, does not
+> count as casting a leveled spell because it is a subclass feature.
+>
+> Remove all of the more complicated wording we used to try to justify
+> casting a lvl 4 spell early and don't grant any extra prepared 4th level
+> spells.
+>
+> I like this simplification better .
+>
+> Also, if "blur" is in the srd, add it to the prepared list.
+
+Effects, applied to both the design doc and the player doc:
+
+1. **The Rebuking Shield is now a self-contained level-17 feature**: Bonus
+   Action (drafting assumption, flagged — the spell's own casting time is
+   an Action; one word changes it), 10 minutes, the *Fire Shield* effect
+   with Psychic retaliation, explicitly not spellcasting (no slot, no
+   components, uncounterspellable, not a leveled-spell cast), once per
+   Short or Long Rest. *Fire Shield* leaves the Court Spells table.
+2. **The 4th-level apparatus is deleted**: the "from Monk 17, prepare
+   level 4" clause and A Gift of the Court are both removed. Chosen
+   preparation caps at slot levels (3rd); *Compulsion* remains the sole
+   4th-level grant — always prepared by its row, castable at 17 via
+   Focus-Casting at base level, no special wording required.
+3. **Blur grafted** (SRD 5.2.1 ✓, Sorcerer/Wizard — off-list, entering as
+   a grant per the standing owner-named rule): added to the Monk-6 Court
+   Spells row beside *Mirror Image* and *Hold Person*.
+
+DPR impact: none measurable (the Gift was tempo; the Shield's ~+11
+enemy-turn retaliation was already uncounted; Blur is defense). The level
+17 package reads: *Compulsion* row, Focus-Casting, Rebuking Shield 1/rest,
+Hands ×2 + Advantage, Barbed Fists +3.
+
 ## 2026-08-10 — Equal-items basis: every sim comparator carries +1/+2/+3 weapons at 6/11/17
 
 Owner's ruling, verbatim:

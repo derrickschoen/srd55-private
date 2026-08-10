@@ -34,8 +34,7 @@ when you finish a Long Rest.³
 
 **Prepared Spells.** Choose spells from the **Bard spell list**. The
 Chosen Spells column shows how many you can have prepared; they must be of
-a level for which you have spell slots (from Monk level 17, you can also
-prepare level 4 spells). Whenever you finish a **Long Rest**, you can
+a level for which you have spell slots. Whenever you finish a **Long Rest**, you can
 change your list of prepared spells.⁴ Whenever you finish a **Short
 Rest**, you can replace one prepared spell.
 
@@ -55,9 +54,9 @@ modifier is your Wisdom modifier + your Proficiency Bonus.
 | Monk level | Spells |
 |---:|---|
 | 3 | *Shield*, *Dissonant Whispers* |
-| 6 | *Mirror Image*, *Hold Person* |
+| 6 | *Mirror Image*, *Blur*, *Hold Person* |
 | 11 | *Slow*, *Fear* |
-| 17 | *Compulsion*, *Fire Shield* |
+| 17 | *Compulsion* |
 
 ### Barbed Court Spellcasting
 
@@ -192,16 +191,16 @@ Action by spending Focus Points equal to the spell's level instead of a
 spell slot. A spell cast by spending Focus Points is always cast at its
 base level.
 
-## Level 17: A Gift of the Court
-
-Once per Long Rest, you can cast one prepared spell of level 4 without
-expending a spell slot or Focus Points.
-
 ## Level 17: The Rebuking Shield
 
-When you cast *Fire Shield*,⁷ its retaliation damage is Psychic in either
-mode (the resistance choice is unchanged), and its flames or frost are
-visible only as a shimmer of affronted dignity.
+As a Bonus Action, you can raise the court's rebuke around yourself: for
+10 minutes you gain the effect of the *Fire Shield* spell⁷ (your choice of
+warm or chill), except that its retaliation damage is Psychic, and its
+flames or frost are visible only as a shimmer of affronted dignity. This
+is a subclass feature, not spellcasting — it uses no spell slot, has no
+components, can't be counterspelled, and doesn't count as casting a
+leveled spell. Once you use this feature, you can't use it again until you
+finish a Short or Long Rest.
 
 ---
 
@@ -230,17 +229,18 @@ preparation rule follows the SRD Cleric's pattern verbatim; the
 one-spell swap on a Short Rest is this subclass's addition.
 
 ⁵ The always-prepared Court Spells follow the SRD Paladin oath-spells
-pattern. Every named spell is an SRD 5.2.1 spell, unmodified except where
-footnoted. *Shield* and *Fire Shield* are granted from outside the Bard
-list.
+pattern. Every named spell is an SRD 5.2.1 spell, unmodified. *Shield* and
+*Blur* are granted from outside the Bard list (both Sorcerer/Wizard
+spells in the SRD).
 
 ⁶ Adapted from the SRD 5.2.1 Sorcerer feature *Innate Sorcery*: the
 benefits (+1 save DC, Advantage on the spells' attack rolls, 1 minute)
 are the SRD's; the Bonus Action activation and twice-per-Long-Rest limit
 are replaced by the Focus Point cost.
 
-⁷ *Fire Shield* is the SRD 5.2.1 spell, unmodified except that this
-feature changes its retaliation damage type to Psychic.
+⁷ The Rebuking Shield grants the effect of the SRD 5.2.1 spell *Fire
+Shield*, unmodified except for the Psychic damage type; the effect is
+delivered as a subclass feature rather than a casting of the spell.
 
 ---
 

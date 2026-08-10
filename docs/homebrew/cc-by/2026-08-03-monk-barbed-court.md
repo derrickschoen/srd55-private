@@ -31,7 +31,7 @@ opponent's vanity is the same eye that guides the striking hand.
 | 3 | Barbed Court Spellcasting · Court Cantrips · Barbed Goad · Faces of the Court · Wisdom-Guided Strikes · Courtier's Slap · The Standing Hand · Innate Sorcery of the Court |
 | 6 | Court Spells row · Focus Refresh · Warding Image · Unshaken Aim · Barbed Fists +1 |
 | 11 | Court Spells row · Hands of the Barbed Court · Barbed Fists +2 |
-| 17 | Court Spells row · Focus-Casting · A Gift of the Court · The Rebuking Shield · Hands ×2 + Advantage · Barbed Fists +3 |
+| 17 | Court Spells row · Focus-Casting · The Rebuking Shield (1/rest) · Hands ×2 + Advantage · Barbed Fists +3 |
 
 ## 2. Barbed Court Spellcasting (Monk 3)
 
@@ -48,7 +48,7 @@ owner; they are never silently chooseable.)
 
 **Preparation.** The Chosen Spells column below shows how many spells you
 can have prepared; you can prepare any Bard-list spell **of a level for
-which you have spell slots** (and, from Monk 17, spells of level 4).
+which you have spell slots**.
 Whenever you finish a **Long Rest**, you can change your list of prepared
 spells. Whenever you finish a **Short Rest**, you can replace one prepared
 spell.
@@ -61,16 +61,16 @@ Mockery, Mage Hand,** and **Guidance**, plus **two** Bard cantrips of your
 choice. Chosen cantrip picks are permanent. Of the granted six, *Mage Hand*
 and *Vicious Mockery* are Bard-native; **Guidance, Shocking Grasp, Chill
 Touch and Ray of Frost are deliberate grafts** from outside the Bard list,
-as are *Shield* and *Fire Shield* below.
+as are *Shield* and *Blur* below.
 
 **Court Spells (always prepared, not counted against Chosen Spells):**
 
 | Monk level | Court Spells |
 |---:|---|
 | 3 | *Shield*, *Dissonant Whispers* |
-| 6 | *Mirror Image*, *Hold Person* |
+| 6 | *Mirror Image*, *Blur*, *Hold Person* |
 | 11 | *Slow*, *Fear* |
-| 17 | *Compulsion*, *Fire Shield* (see the Rebuking Shield, §3) |
+| 17 | *Compulsion* |
 
 ### Spellcasting table, Monk 3–20
 
@@ -117,8 +117,6 @@ as are *Shield* and *Fire Shield* below.
 - **Focus-Casting (Monk 17).** You can cast any spell you have prepared
   that has a casting time of an Action by spending Focus Points equal to
   the spell's level instead of a spell slot.
-- **A Gift of the Court (Monk 17).** Once per Long Rest, you can cast one
-  prepared spell of level 4 without expending a spell slot or Focus Points.
 - **No Focus-cast spell is ever upcast.** A spell cast by spending Focus
   Points is cast at its base level; excess points buy nothing. Slots
   regained by Focus Refresh are ordinary slots and upcast normally. *Focus
@@ -225,19 +223,24 @@ your Wisdom modifier**, and the court guides your aim — you have
 
 ### Level 17: The Rebuking Shield
 
-Your *Fire Shield* is the court's rebuke: the retaliation damage it deals
-is **Psychic** in either mode (the resistance choice is unchanged), and the
-flames or frost are visible only as a shimmer of affronted dignity.
+As a Bonus Action, you can raise the court's rebuke around yourself: for 10
+minutes you gain the effect of the *Fire Shield* spell (your choice of warm
+or chill), except that its retaliation damage is **Psychic**, and the
+flames or frost are visible only as a shimmer of affronted dignity. This is
+a subclass feature, not spellcasting — it uses no spell slot, has no
+components, can't be counterspelled, and doesn't count as casting a leveled
+spell. Once you use this feature, you can't use it again until you finish a
+Short or Long Rest.
 
-*(The rest of level 17 lives in §2: Focus-Casting, A Gift of the Court, the
-*Compulsion* and *Fire Shield* rows, and the Hands' damage doubling.)*
+*(The rest of level 17 lives in §2: Focus-Casting, the *Compulsion* row,
+and the Hands' maturation.)*
 
 ## 4. Resource and Tracking Summary
 
 | Per turn (the only two counters) | Per Short Rest | Per Long Rest |
 |---|---|---|
 | Courtier's Slap (once/turn) | Focus pool (= Monk level) — funds the goad, Flurry, Court Cantrips trigger, Refresh, Innate Sorcery, the Hands, Focus-Casting | Faces of the Court (PB uses) |
-| Court Cantrips (one free cantrip/turn) | One prepared-spell swap | Full spell re-preparation · A Gift of the Court · spell slots |
+| Court Cantrips (one free cantrip/turn) | One prepared-spell swap · The Rebuking Shield (1 use) | Full spell re-preparation · spell slots |
 
 Everything else is passive or a lingering condition that expires on its
 own. Design rule, owner-set: the subclass never exceeds two per-turn
@@ -302,7 +305,7 @@ failure modes; verdicts are design review, not playtest.)
 | F6 Action Congestion | Green: two per-turn counters by rule; the Bonus Action holds exactly Flurry-vs-Hands-manifest-vs-Step-of-the-Wind. |
 | F8 Stacking Blindness | Unarmored Defense 16 + Warding Image = AC 18; + *Shield* = 23 for a round. The Hands' Advantage does not stack with anything (Advantage doesn't). |
 | F12 Niche Trespass | Two proximity notes, both mechanically unprotectable and differently-chassised: the 10-foot Wisdom-delivered strikes parallel a known non-SRD spectral-arms monk; the goad parallels a known non-SRD taunt rider. Unnamed by policy. |
-| F14 Bounced Flavor Cheque | The psychic slap and Rebuking Shield blank on mindless creatures — accepted ("you cannot humiliate a zombie"). **Dead windows, owner-accepted (ruling 2026-08-07)**: *Hold Person* is granted at 6 but 2nd-level slots arrive at 7; *Slow*/*Fear* at 11 vs 3rd-level slots at 13; *Compulsion*/*Fire Shield* at 17 are covered the same level by Focus-Casting. The early grants are a promise printed with the wait visible. |
+| F14 Bounced Flavor Cheque | The psychic slap and Rebuking Shield blank on mindless creatures — accepted ("you cannot humiliate a zombie"). **Dead windows, owner-accepted (ruling 2026-08-07)**: *Hold Person* is granted at 6 but 2nd-level slots arrive at 7; *Slow*/*Fear* at 11 vs 3rd-level slots at 13; *Compulsion* at 17 is covered the same level by Focus-Casting. The early grants are a promise printed with the wait visible. |
 
 ## 7. Distance Notes (non-SRD, unnamed by policy)
 
