@@ -20,10 +20,26 @@ import { renderGuidedBuildState } from './guided-builder';
 import { createSkillsStep } from './skills-step';
 import { createSpeciesStep } from './species-step';
 import { createSpellsStep } from './spells-step';
-import type { GuidedSpellTransition } from './spells-step';
+import type {
+  GuidedSpellRepairAddress,
+  GuidedSpellTransition,
+} from './spells-step';
 import './styles.css';
 
 let pendingGuidedTransition: GuidedSpellTransition | null = null;
+
+function guidedSpellRepairAddress(value: string | null): GuidedSpellRepairAddress | null {
+  const match = /^(slot_selection|spellbook_acquisition)-([1-9][0-9]*)$/u.exec(
+    value ?? '',
+  );
+  if (match === null) return null;
+  const id = Number(match[2]);
+  if (!Number.isSafeInteger(id)) return null;
+  return {
+    kind: match[1] === 'slot_selection' ? 'slot_selection' : 'spellbook_acquisition',
+    id,
+  };
+}
 
 /**
  * THE GUIDED-BUILDER SCREEN (dispatches A1 + A3).
@@ -69,6 +85,9 @@ async function render(context: ScreenContext): Promise<() => void> {
   } else {
     const client = createQueriesClient(context.rpc);
     const state = await client.buildState(characterId);
+    const spellRepairAddress = context.route.query.get('step') === 'spells'
+      ? guidedSpellRepairAddress(context.route.query.get('repair'))
+      : null;
     const speciesRequested = context.route.query.get('step') === 'species';
     const speciesChoiceState =
       state.kind === 'ready' &&
@@ -219,11 +238,15 @@ async function render(context: ScreenContext): Promise<() => void> {
       });
       view = step.element;
       cleanups.push(step.cleanup);
-    } else if (state.kind === 'ready' && state.current_step === 'spells') {
+    } else if (
+      state.kind === 'ready' &&
+      (state.current_step === 'spells' || spellRepairAddress !== null)
+    ) {
       const spellsState = await client.spellsStep(characterId);
       const step = createSpellsStep({
         characterId,
         state: spellsState,
+        ...(spellRepairAddress === null ? {} : { repairAddress: spellRepairAddress }),
         search: (address, query) =>
           client.guidedEligibleSpells({
             character_id: characterId,
@@ -276,7 +299,10 @@ async function render(context: ScreenContext): Promise<() => void> {
     : view.querySelector<HTMLElement>(
         `[data-focus-key="${CSS.escape(guidedTransition.focusKey)}"]`,
       );
-  (transitionFocus ?? stepHeading)?.focus();
+  const repairFocus = view.querySelector<HTMLElement>(
+    '[data-repair-target] input, [data-repair-target] select, [data-repair-target] button',
+  );
+  (repairFocus ?? transitionFocus ?? stepHeading)?.focus();
   const guidedStatus = view.querySelector<HTMLElement>('[data-guided-status]');
   if (guidedStatus !== null && guidedTransition !== null) {
     guidedStatus.textContent = guidedTransition.announcement;

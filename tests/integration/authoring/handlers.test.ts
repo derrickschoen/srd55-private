@@ -755,8 +755,8 @@ describe('catalog authoring RPC handlers', () => {
        JOIN spell_list_memberships AS membership
          ON membership.spell_version_id = version.id
        WHERE membership.spell_list_key = 'Wizard'
-         AND version.level = 1 AND version.is_active = 1
-       ORDER BY version.id LIMIT 1`,
+         AND version.display_name = 'Magic Missile'
+         AND version.level = 1 AND version.is_active = 1`,
     );
     if (spellVersionId === null) throw new Error('Seeded Wizard spell missing.');
 
@@ -789,13 +789,33 @@ describe('catalog authoring RPC handlers', () => {
     const retarget = async (
       name: string,
       targetContentKey: ContentKey,
+      provePreviewPure = false,
     ) => {
       const character = selectedCharacter(name);
+      const databaseRows = (): Readonly<Record<string, readonly Record<string, unknown>[]>> => {
+        const tableNames = rpc.context.db.allRaw(
+          `SELECT name FROM sqlite_schema
+           WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+           ORDER BY name`,
+        ).map((row) => String(row.name));
+        const snapshot: Record<string, readonly Record<string, unknown>[]> = {};
+        for (const tableName of [...tableNames, 'sqlite_sequence']) {
+          if (!/^[a-zA-Z0-9_]+$/u.test(tableName)) {
+            throw new Error(`Unsafe fixture table name ${tableName}.`);
+          }
+          snapshot[tableName] = rpc.context.db.allRaw(
+            `SELECT * FROM "${tableName}" ORDER BY rowid`,
+          );
+        }
+        return snapshot;
+      };
+      const beforePreview = provePreviewPure ? databaseRows() : null;
       const preview = await authoringClient.previewReplacement({
         old_content_key: old.content_key,
         new_content_key: targetContentKey,
         character_id: character.id as CharacterId,
       });
+      if (beforePreview !== null) expect(databaseRows()).toEqual(beforePreview);
       const result = await authoringClient.commitReplacement({
         token: preview.token,
         decisions: preview.review.map((review) => ({
@@ -804,13 +824,14 @@ describe('catalog authoring RPC handlers', () => {
         })),
         choices: [],
       });
-      return { character, result };
+      return { character, preview, result };
     };
 
     const preserved = await retarget(
       'Compatible Spell Hero',
       compatible.content_key,
     );
+    expect(preserved.preview.notices).toEqual([]);
     expect(preserved.result.notices).toEqual([]);
     expect(rpc.context.db.oneRaw(
       `SELECT slot.current_spell_version_id, slot.selection_eligibility
@@ -828,19 +849,19 @@ describe('catalog authoring RPC handlers', () => {
     const degraded = await retarget(
       'Incompatible Spell Hero',
       incompatible.content_key,
+      true,
     );
-    expect(degraded.result.notices).toEqual([{
-      kind: 'retargeted_selection_invalid',
-      table: 'spell_selection_slots',
-      source_path: [],
-      rule_key: 'retarget-spell-choice',
-      ordinal: 1,
-      selected_value: spellVersionId,
-      reason: 'selection_ineligible',
-      detail: 'Selected spell is outside the slot level range.',
-    }]);
-    expect(rpc.context.db.oneRaw(
-      `SELECT slot.current_spell_version_id, slot.selection_eligibility,
+    expect(Object.keys(degraded.preview).sort()).toEqual([
+      'changes', 'character_name', 'facts', 'kind', 'notices', 'replaces',
+      'required_choices', 'review', 'token',
+    ]);
+    expect(degraded.preview.notices).toEqual(degraded.result.notices);
+    expect(Object.keys(degraded.preview.notices[0] ?? {}).sort()).toEqual([
+      'consequence', 'detail', 'kind', 'ordinal', 'reason', 'repair',
+      'rule_key', 'selected', 'selected_value', 'source_path', 'table',
+    ]);
+    const degradedSlot = rpc.context.db.oneRaw(
+      `SELECT slot.id, slot.current_spell_version_id, slot.selection_eligibility,
               slot.selection_invalid_reason
        FROM spell_selection_slots AS slot
        JOIN character_source_instances AS source
@@ -848,7 +869,29 @@ describe('catalog authoring RPC handlers', () => {
        WHERE slot.character_id = ? AND slot.rule_key = 'retarget-spell-choice'
          AND slot.state = 'active' AND source.state = 'active'`,
       [degraded.character.id],
-    )).toEqual({
+    );
+    if (degradedSlot === null) throw new Error('Retargeted spell slot is missing.');
+    expect(degraded.result.notices).toEqual([{
+      kind: 'retargeted_selection_invalid',
+      table: 'spell_selection_slots',
+      source_path: [],
+      rule_key: 'retarget-spell-choice',
+      ordinal: 1,
+      selected_value: spellVersionId,
+      selected: {
+        kind: 'spell', display_name: 'Magic Missile', catalog_layer: 'bundled',
+      },
+      reason: 'selection_ineligible',
+      detail: 'Selected spell is outside the slot level range.',
+      consequence: 'the replacement allows only level 0 spells',
+      repair: {
+        kind: 'guided_spell_choice',
+        href: `/characters/${String(degraded.character.id)}/build/levels/1` +
+          `?step=spells&repair=slot_selection-${String(degradedSlot['id'])}`,
+        label: 'Repair selection',
+      },
+    }]);
+    expect(degradedSlot).toMatchObject({
       current_spell_version_id: spellVersionId,
       selection_eligibility: 'invalid',
       selection_invalid_reason: 'Selected spell is outside the slot level range.',
@@ -887,6 +930,13 @@ describe('catalog authoring RPC handlers', () => {
         client: authoringClient,
       });
       const interactiveRoot = interactiveElement(root);
+      const consequence =
+        'Magic Missile — SRD · bundled layer in retarget-spell-choice became ' +
+        'invalid because the replacement allows only level 0 spells.';
+      expect(elementText(root as unknown as Node)).toContain(
+        'Selections that will become invalid',
+      );
+      expect(elementText(root as unknown as Node)).toContain(consequence);
       interactiveRoot.querySelectorAll('button').find(
         (button) => button.textContent === 'Apply to all listed characters',
       )?.click();
@@ -895,11 +945,10 @@ describe('catalog authoring RPC handlers', () => {
       const rendered = elementText(root as unknown as Node);
       expect(rendered).toContain('Character fixes applied');
       expect(rendered).toContain('Apply All Notice Hero');
-      expect(rendered).toContain(
-        `Spell selection “${String(spellVersionId)}” for “retarget-spell-choice” ` +
-        'became invalid: ' +
-        'Selected spell is outside the slot level range.',
-      );
+      expect(rendered).toContain(consequence);
+      expect(rendered).not.toContain(String(spellVersionId));
+      expect(interactiveRoot.querySelectorAll('a').map((link) => link.textContent))
+        .toContain('Repair selection');
       expect(rpc.context.db.oneRaw(
         `SELECT selection_eligibility, selection_invalid_reason
          FROM spell_selection_slots
