@@ -28,7 +28,7 @@ opponent's vanity is the same eye that guides the striking hand.
 
 | Monk level | Features |
 |---|---|
-| 3 | Barbed Court Spellcasting · Court Cantrips · Barbed Goad · Faces of the Court · Court Forms · Wisdom-Guided Strikes · Courtier's Slap · The Standing Hand · Innate Sorcery of the Court |
+| 3 | Barbed Court Spellcasting · Court Cantrips · Barbed Goad · Faces of the Court · Wisdom-Guided Strikes · Courtier's Slap · The Standing Hand · Innate Sorcery of the Court |
 | 6 | Court Spells row · Focus Refresh · Warding Image · Unshaken Aim · Barbed Fists +1 |
 | 11 | Court Spells row · Hands of the Barbed Court · Barbed Fists +2 |
 | 17 | Court Spells row · Focus-Casting · A Gift of the Court · The Rebuking Shield · Hands ×2 · Barbed Fists +3 |
@@ -152,22 +152,6 @@ You can cast *Mirror Image* without expending a spell slot, using Wisdom as
 the spellcasting ability, a number of times equal to your Proficiency
 Bonus. You regain all uses when you finish a Long Rest.
 
-### Level 3: Court Forms
-
-Your Unarmed Strikes have the Light and Finesse properties and the **Nick**
-mastery property — granted explicitly even though Unarmed Strikes are not
-weapons and Monks lack the Weapon Mastery feature; treat your Unarmed
-Strike as the weapon for these properties' rules. In practice: **once on
-each of your turns when you take the Attack action, you can make one extra
-Unarmed Strike as part of that action** (the Light property's extra attack,
-made via Nick). That extra strike doesn't add your ability modifier to its
-damage (no feature of this subclass changes that), though Barbed Fists
-applies.
-
-*(Granting weapon properties to Unarmed Strikes is this document's largest
-deliberate deviation from SRD rules; owner ruling 2026-08-10 removed the
-earlier swappable mastery choice and fixed Nick explicitly.)*
-
 ### Level 3: Wisdom-Guided Strikes
 
 You can use your Wisdom modifier in place of Strength or Dexterity for the
@@ -187,8 +171,9 @@ riders. In either mode, on a hit the target takes Psychic damage equal to
 one roll of your Martial Arts die + your Wisdom modifier, **and its Speed
 is reduced by 10 feet until the start of your next turn** — a slap that
 stops you mid-stride. The slap works whether or not your Mage Hand is
-present, doesn't consume your Bonus Action, and doesn't count as the Light
-property's extra attack (it stacks with Court Forms' Nick strike).
+present and doesn't consume your Bonus Action. (Design ancestry, pinned by
+owner ruling: the slap IS this kit's version of the two-weapon
+fighting-style-plus-Nick extra attack, delivered as a spectral hand.)
 
 ### Level 3: The Standing Hand
 
@@ -273,7 +258,7 @@ missed.
 
 | Build | L3 | L6 | L11 | L17 |
 |---|---:|---:|---:|---:|
-| **Barbed Court, this kit** | **16.0** | **41.7** | **101.6** | **157.1** |
+| **Barbed Court, this kit** | **13.7** | **37.9** | **89.7** | **138.1** |
 | Optimized Dex Vengeance Paladin (melee ref.) | 19.5 | 31.2 | 52.2 | 60.8 |
 | Veteran rogue (this project) | 25.1 | 32.8 | 64.5 | 108.9 |
 | SRD Thief | 18.4 | 23.7 | 37.2 | 64.2 |
@@ -292,14 +277,15 @@ Recorded caveats, both directions:
    single block of the kit's damage — roughly a third at 11 and 17 by
    marginal-removal tests on the pre-correction run (non-additive marginals;
    re-derivation pending).
-3. **Ratios, stated plainly**: 0.82× / 1.34× / 1.95× / 2.58× the optimized
-   Paladin, and 0.64× / 1.27× / 1.58× / 1.44× this project's own Veteran.
-   Growth 11→17 is +55%. These rose across the 2026-08-10 audits and the
-   explicit-Nick ruling (the seventh swing is worth more than the removed
-   mastery menu was) — each step owner-ruled with the numbers shown.
-4. **The caster race is not entered**: 101.6/129 = 0.79× at 11 and
-   157.1/265 = 0.59× at 17 against the strongest legal nova build measured.
-5. Levels 3–5 are the kit's weakest window (0.82× the paladin) — the Hands
+3. **Ratios, stated plainly**: 0.70× / 1.21× / 1.72× / 2.27× the optimized
+   Paladin, and 0.55× / 1.16× / 1.39× / 1.27× this project's own Veteran.
+   Growth 11→17 is +54%. The attack loop is 4/5/6/6 swings at 3/6/11/17
+   (Attack action + slap + Flurry; three-strike Flurry from 10) — the
+   explicit-Nick seventh swing was deleted by owner ruling 2026-08-10 on
+   the record that it duplicated the slap's own design ancestry.
+4. **The caster race is not entered**: 89.7/129 = 0.70× at 11 and
+   138.1/265 = 0.52× at 17 against the strongest legal nova build measured.
+5. Levels 3–5 are the kit's weakest window (0.70× the paladin) — the Hands
    don't exist yet; the front-load doctrine begins at 6.
 
 ## 6. Failure-Taxonomy Pass

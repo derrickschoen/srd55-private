@@ -5,6 +5,29 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-10 — Barbed Court: the explicit-Nick extra strike is DELETED — it was a misunderstanding; the slap IS the Nick mechanic; Court Forms removed entirely
+
+Owner's ruling, verbatim:
+
+> Delete the extra unarmed strike because I thought I was describing
+> courtiers slap.
+
+Effect: the explicit-Nick grant from earlier today is deleted — the owner's
+"grant the nick property" answer was describing the Courtier's Slap, which
+has carried the TWF-style-plus-Nick design ancestry since its 2026-08-08
+pinning. With Nick gone, Court Forms held only the inert Light and Finesse
+properties, so **the feature is removed entirely**; the slap's text now
+carries the ancestry note in its place. Level 3 holds eight features.
+
+The attack loop, final: **4 / 5 / 6 / 6 swings at Monk 3/6/11/17** (Attack
+action + slap + Flurry, with the base class's three-strike Flurry from 10).
+Board updated: **13.7 / 37.9 / 89.7 / 138.1** — 0.70× / 1.21× / 1.72× /
+2.27× the corrected optimized Paladin; the accidental buff from the
+explicit-Nick reading is fully reversed, landing slightly below the
+pre-mastery-removal numbers (the swappable menu's ~1 DPR is also gone).
+The slap's new 10-ft slow and the owner-named spell rule from the same
+sitting stand unchanged.
+
 ## 2026-08-10 — Barbed Court: mastery menu OUT, explicit Nick IN; slap gains a 10-ft slow; off-list spells enter only when owner-named
 
 Owner's rulings, verbatim:
