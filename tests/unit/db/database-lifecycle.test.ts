@@ -163,4 +163,26 @@ describe('database lifecycle', () => {
     ).toEqual([{ id: 1, name: 'State before failed replacement' }]);
     expect(lifecycle.database.scalar('PRAGMA foreign_keys')).toBe(1);
   });
+
+  it('restores the prior image when post-replacement reconciliation fails', async () => {
+    lifecycle.database.exec(
+      "INSERT INTO characters (name) VALUES ('Candidate character')",
+    );
+    const candidate = await lifecycle.exportBytes();
+    lifecycle.database.exec(
+      "UPDATE characters SET name = 'Protected live character' WHERE id = 1",
+    );
+
+    await expect(lifecycle.replace(candidate, (replacement) => {
+      replacement.exec(
+        "UPDATE characters SET name = 'Partially reconciled' WHERE id = 1",
+      );
+      throw new Error('Injected reconciliation failure.');
+    })).rejects.toThrow('Injected reconciliation failure.');
+
+    expect(
+      lifecycle.database.allRaw('SELECT id, name FROM characters'),
+    ).toEqual([{ id: 1, name: 'Protected live character' }]);
+    expect(lifecycle.database.scalar('PRAGMA foreign_keys')).toBe(1);
+  });
 });

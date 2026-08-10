@@ -53,6 +53,13 @@ import {
   fillSkillGrant,
   unfilledSpeciesSkillGrants,
 } from '../../../src/grants/skill-grants';
+import {
+  createLevelFiveHighElf,
+  EXPECTED_LEVEL_FIVE_HIGH_ELF,
+  lineagePortabilityProjection,
+  portableElfLibraryDocument,
+  PORTABLE_ELF_KEY,
+} from '../../helpers/species-lineage-portability';
 import { openTestDatabase } from '../../helpers/open-db';
 
 const opened: Database[] = [];
@@ -1325,6 +1332,47 @@ describe('HA-3 species publisher', () => {
       { key: published.result.content_key, superseded_by: null },
     ]));
   });
+
+  it('retargets the exact level-5 High Elf configured and gated slots to a new species key', async () => {
+    const db = await database(true);
+    const authoring = service(db);
+    const targetKey =
+      '2024:example.test.species:retargeted-portable-elf' as ContentKey;
+    importLibraryDocument(db, portableElfLibraryDocument(db));
+    importLibraryDocument(db, portableElfLibraryDocument(db, {
+      contentKey: targetKey,
+      name: 'Retargeted Portable Elf',
+    }));
+    const characterId = await createLevelFiveHighElf(db, PORTABLE_ELF_KEY);
+
+    const preview = authoring.previewReplacement({
+      old_content_key: PORTABLE_ELF_KEY,
+      new_content_key: targetKey,
+      character_id: characterId as CharacterId,
+    });
+    const result = authoring.commitReplacement({
+      token: preview.token,
+      decisions: preview.review.map((candidate) => ({
+        candidate_content_key: candidate.candidate_content_key,
+        decision: 'match' as const,
+      })),
+      choices: [],
+    });
+
+    expect(result).toMatchObject({
+      content_kind: 'species',
+      character_id: characterId,
+      old_content_key: PORTABLE_ELF_KEY,
+      new_content_key: targetKey,
+    });
+    expect(lineagePortabilityProjection(db, characterId)).toEqual({
+      ...EXPECTED_LEVEL_FIVE_HIGH_ELF,
+      config: {
+        ...EXPECTED_LEVEL_FIVE_HIGH_ELF.config,
+        source_content_key: targetKey,
+      },
+    });
+  }, 20_000);
 
   it('CI7-VERSION-ATOMIC rolls the new aggregate and lineage back together', async () => {
     const db = await database();

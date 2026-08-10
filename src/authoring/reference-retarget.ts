@@ -38,6 +38,10 @@ import {
   ORIGIN_FEAT_KEY_CONFIG,
 } from '../rules/background-definitions-srd';
 import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
+import {
+  configuredChoiceSlotGenerator,
+  reconcileCharacterLevelDependentSource,
+} from '../grants/character-level-source-reconciliation';
 import { fillSkillGrant, SkillGrantRefusal } from '../grants/skill-grants';
 import {
   fillSkillExpertiseGrant,
@@ -1093,11 +1097,24 @@ function retargetCharacter(
       }
       newRootId = newSourceId;
       if (retargetState.rootConfig !== null) {
+        const restoredConfig = parseJson<JsonObject>(
+          retargetState.rootConfig,
+          'Retargeted species config',
+        );
         db.exec(
           `UPDATE character_source_instances SET config = ? WHERE id = ?`,
-          [retargetState.rootConfig, newRootId],
+          [JSON.stringify({
+            ...restoredConfig,
+            source_content_key: targetContentKey,
+          }), newRootId],
         );
-        new GrantRuleSlotGenerator(db).generateForSource(newRootId);
+        const generator = configuredChoiceSlotGenerator(db);
+        generator.generateForSource(newRootId);
+        reconcileCharacterLevelDependentSource(
+          db,
+          newRootId,
+          generator,
+        );
       }
       break;
     }
@@ -1195,9 +1212,10 @@ function retargetCharacter(
            AND subclass_definition_id = ?`,
         [target.id, facts.character_id, level.classId, level.oldSubclassId],
       );
+      const generator = configuredChoiceSlotGenerator(db);
       syncSubclassSources(
         db,
-        new GrantRuleSlotGenerator(db),
+        generator,
         facts.character_id,
         level.classId,
         target.id,
@@ -1211,6 +1229,7 @@ function retargetCharacter(
       );
       if (newSourceId === null) throw new Error('Replacement subclass source is missing.');
       newRootId = newSourceId;
+      reconcileCharacterLevelDependentSource(db, newRootId, generator);
       break;
     }
   }

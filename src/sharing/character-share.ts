@@ -41,7 +41,10 @@ import {
   SOURCE_DEFINITION_TABLE,
   type AnyTableName,
 } from '../domain/contracts/tables';
-import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
+import {
+  configuredChoiceSlotGenerator,
+  reconcileCharacterLevelDependentSources,
+} from '../grants/character-level-source-reconciliation';
 import { rebuildSkillProjection } from '../grants/skill-grants';
 import { reconcileCharacterSkillExpertise } from '../grants/skill-expertise-grants';
 import { SpellSelectionEligibility } from '../eligibility/spell-selection-eligibility';
@@ -1990,7 +1993,7 @@ function insertCharacterShare(
         now,
       ],
     ).lastInsertId;
-    const generator = new GrantRuleSlotGenerator(db);
+    const generator = configuredChoiceSlotGenerator(db);
     const rootsByRef = new Map<number, number[]>();
     const classLevelIdsByRef = new Map<number, number>();
 
@@ -2870,6 +2873,10 @@ function insertCharacterShare(
       rebuildSkillProjection(db, characterId);
     }
     reconcileCharacterSkillExpertise(db, characterId);
+    // Every class row and document selection is now present. Re-running the
+    // shared character-level seam makes the imported source agree with its
+    // chosen material and total level before the transaction can commit.
+    reconcileCharacterLevelDependentSources(db, characterId, generator);
     return { characterId };
   });
 }
