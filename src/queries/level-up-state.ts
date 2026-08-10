@@ -100,6 +100,7 @@ import {
   multiclassAssessmentForClass,
   type MulticlassPrimaryAbilityAssessment,
 } from './multiclass-primary-ability';
+import { SELECTABLE_SUBCLASS_SQL } from './selectable-subclasses';
 
 interface CharacterRow {
   readonly id: CharacterId;
@@ -553,6 +554,7 @@ export class LevelUpStateQuery {
         AND identity.content_key = subclass.content_key
        WHERE subclass.class_definition_id = ?
          AND identity.archived_at IS NULL
+         AND ${SELECTABLE_SUBCLASS_SQL}
        ORDER BY subclass.name, subclass.id`,
       [classDefinitionId],
       (row): LevelUpSubclassOption => ({

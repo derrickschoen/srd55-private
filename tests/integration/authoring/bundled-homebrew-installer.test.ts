@@ -23,6 +23,7 @@ import {
 } from '../../../src/catalog/stored-authored-content-projector-v1';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { canonicalJson } from '../../../src/commands/canonical-json';
+import { LevelUpClassCommand } from '../../../src/commands/level-up-class';
 import { UpdateClassCommand } from '../../../src/commands/update-class';
 import { raiseClassLevelForTest } from '../../helpers/class-levels';
 import { BuildReportBuilder } from '../../../src/reports/build-report-builder';
@@ -382,6 +383,41 @@ describe('bundled authored-kind installer', () => {
       current_spell_version_id: mageHandId,
       spell_level_min: 0,
       spell_level_max: 1,
+    });
+    db.exec(
+      `UPDATE characters SET ability_allocation_method = 'manual' WHERE id = ?`,
+      [oldCharacterId],
+    );
+    const oldClassId = db.scalar<number>(
+      `SELECT class_definition_id FROM subclass_definitions WHERE content_key = ?`,
+      [oldKey.contentKey],
+    );
+    if (oldClassId === null) throw new Error('Spell Student v1 parent is missing.');
+    new LevelUpClassCommand(
+      db,
+      {
+        type: 'level_up_class',
+        class_definition_id: Number(oldClassId),
+        target_level: 4,
+        feat_choice: {
+          kind: 'feat',
+          feat_content_key: '2024:feat:ability-score-improvement',
+          config: {},
+          ability_increases: [{ ability: 'strength', amount: 2 }],
+        },
+      },
+      new CharacterCommandIntegrity('bundled-superseded-subclass-level-up'),
+    ).apply(oldCharacterId);
+    expect(db.oneRaw(
+      `SELECT level, subclass.content_key AS subclass_content_key
+       FROM character_class_levels AS level
+       JOIN subclass_definitions AS subclass
+         ON subclass.id = level.subclass_definition_id
+       WHERE level.character_id = ?`,
+      [oldCharacterId],
+    )).toEqual({
+      level: 4,
+      subclass_content_key: oldKey.contentKey,
     });
 
     const newCharacterId = applySubclass(db, newKey.contentKey, 3);

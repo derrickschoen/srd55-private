@@ -39,6 +39,8 @@ import {
   commitBundledHomebrewInstall,
   planBundledHomebrewInstall,
 } from '../../../src/authoring/bundled-homebrew-installer';
+import { CharacterWorkspaceBuilder } from '../../../src/queries/character-workspace-builder';
+import { withCatalogLineageDeleteGuardSuspended } from '../../../src/catalog/catalog-lineage-delete-guard';
 
 const EXPECTED_SUBCLASS_VARIANTS = [
   {
@@ -642,7 +644,7 @@ describe('level-up wizard state RPC', () => {
   });
 
   // Measured alone at 3.9s; 20s retains contention headroom.
-  it('adds the three external catalog subclasses to their SRD parent choices only after explicit import', async () => {
+  it('offers only current external subclass revisions and makes the lineage row the selection boundary', async () => {
     const plan = planBundledHomebrewInstall(harness.context.db);
     expect(commitBundledHomebrewInstall(harness.context.db, plan.token)).toMatchObject({
       kind: 'committed',
@@ -650,9 +652,11 @@ describe('level-up wizard state RPC', () => {
     });
     const rpc = new RpcClient(new RegistryTransport());
     const client = createQueriesClient(rpc);
+    let fighterCharacterId: number | null = null;
+    let fighterDefinitionId: number | null = null;
 
     for (const [className, expectedNames] of [
-      ['Fighter', ['Champion', 'Spell Student']],
+      ['Fighter', ['Champion', 'Spell Student (Bundled revision 2)']],
       ['Monk', ['Warrior of the Barbed Court', 'Warrior of the Open Hand']],
       ['Rogue', ['Thief', 'Veteran']],
     ] as const) {
@@ -673,7 +677,79 @@ describe('level-up wizard state RPC', () => {
         held.subclass_choice?.options.map((option) => option.name),
         className,
       ).toEqual(expectedNames);
+      if (className === 'Fighter') {
+        fighterCharacterId = characterId;
+        fighterDefinitionId = definitionId;
+      }
     }
+
+    if (fighterCharacterId === null || fighterDefinitionId === null) {
+      throw new Error('Fighter choice fixture was not created.');
+    }
+    const offeredFighterSubclasses = async () => {
+      const state = await client.levelUpState(fighterCharacterId);
+      if (state.kind !== 'ready') throw new Error('Fighter choice state was not ready.');
+      const option = state.class_options.find(
+        (candidate) => candidate.class_definition_id === fighterDefinitionId,
+      );
+      if (option?.guideability !== 'guideable') {
+        throw new Error('Fighter choice state was not guideable.');
+      }
+      const levelUp = option.subclass_choice?.options.map((subclass) => subclass.name);
+      const planner = new CharacterWorkspaceBuilder(harness.context.db)
+        .build(fighterCharacterId)
+        .classes.find((candidate) =>
+          candidate.class_definition_id === fighterDefinitionId
+        )?.subclasses.map((subclass) => subclass.name);
+      return { levelUp, planner };
+    };
+    const currentChoices = [
+      'Champion',
+      'Spell Student (Bundled revision 2)',
+    ];
+    await expect(offeredFighterSubclasses()).resolves.toEqual({
+      levelUp: currentChoices,
+      planner: currentChoices,
+    });
+
+    const supersession = harness.context.db.oneRaw(
+      `SELECT superseded_content_key, successor_content_key, recorded_at
+       FROM catalog_content_supersessions
+       WHERE content_kind = 'subclass'
+         AND superseded_content_key = '2024:content.subclass:spell-student'`,
+    );
+    if (supersession === null) throw new Error('Spell Student supersession is missing.');
+    harness.context.db.transaction((transaction) => {
+      withCatalogLineageDeleteGuardSuspended(transaction, () => {
+        transaction.exec(
+          `DELETE FROM catalog_content_supersessions
+           WHERE content_kind = 'subclass'
+             AND superseded_content_key = ?`,
+          [String(supersession.superseded_content_key)],
+        );
+      });
+    }, 'EXCLUSIVE');
+    try {
+      await expect(offeredFighterSubclasses()).resolves.toEqual({
+        levelUp: ['Champion', 'Spell Student', 'Spell Student (Bundled revision 2)'],
+        planner: ['Champion', 'Spell Student', 'Spell Student (Bundled revision 2)'],
+      });
+    } finally {
+      harness.context.db.exec(
+        `INSERT INTO catalog_content_supersessions (
+           content_kind, superseded_content_key, successor_content_key, recorded_at
+         ) VALUES ('subclass', ?, ?, ?)`,
+        [
+          String(supersession.superseded_content_key),
+          String(supersession.successor_content_key),
+          String(supersession.recorded_at),
+        ],
+      );
+    }
+    await expect(offeredFighterSubclasses()).resolves.toEqual({
+      levelUp: currentChoices,
+      planner: currentChoices,
+    });
 
     rpc.close();
   }, 20_000);
