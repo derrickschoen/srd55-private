@@ -5,6 +5,27 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-10 — Barbed Court: the Hands' Advantage clause moves to 17
+
+Owner's ruling, verbatim:
+
+> Move the hands advantage to 17
+
+Effect: lever B from the tone-down menu. At Monk 11, Hands of the Barbed
+Court is the damage rider alone (+Wis psychic per hit in the Emanation);
+at 17 the court matures — damage doubles to 2×Wis **and** the Advantage
+clause arrives, in one upgrade. Applied to the doc, index, F5 line and
+worksheet.
+
+Measured: L11 89.7 → **68.8** (1.72× → **1.32×** the optimized Paladin;
+1.07× this project's Veteran), L17 unchanged at 137.7 (2.26×). Growth
+11→17 becomes **+100%** — the kit's one great spike, by design. The
+Advantage clause alone was worth ~21 DPR at 11, the single largest dial in
+the kit.
+
+Open from the same directive: the level-6 "a bit" trim — lever A (Barbed
+Fists starts at 11) would take 6 from 1.21× to 1.04×; unruled.
+
 ## 2026-08-10 — Barbed Court: the explicit-Nick extra strike is DELETED — it was a misunderstanding; the slap IS the Nick mechanic; Court Forms removed entirely
 
 Owner's ruling, verbatim:
