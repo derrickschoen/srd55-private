@@ -85,6 +85,8 @@ function classOption(options: {
   readonly hp?: LevelUpGuideableClassOption['gains']['hit_points'];
   readonly subclass?: boolean;
   readonly featOccurrence?: LevelUpFeatOccurrence | null;
+  readonly prerequisiteWarning?:
+    LevelUpGuideableClassOption['multiclass_prerequisite_warning'];
 } = {}): LevelUpGuideableClassOption {
   const current = options.current ?? 1;
   return {
@@ -98,6 +100,8 @@ function classOption(options: {
     target_level: (current + 1) as ClassLevel,
     hit_die: 6,
     current_subclass: null,
+    multiclass_prerequisite_warning:
+      options.prerequisiteWarning ?? null,
     gains: {
       current_class_level: current as ClassLevel,
       target_class_level: (current + 1) as ClassLevel,
@@ -956,6 +960,7 @@ describe('D118 and D119 route choices', () => {
           current_level: 2 as ClassLevel,
           hit_die: null,
           current_subclass: null,
+          multiclass_prerequisite_warning: null,
           reason: 'missing_hit_die',
           explanation: 'Fixed HP cannot be derived until the hit die is catalogued.',
         },
@@ -996,6 +1001,7 @@ describe('D118 and D119 route choices', () => {
           current_level: 2 as ClassLevel,
           hit_die: null,
           current_subclass: null,
+          multiclass_prerequisite_warning: null,
           reason: 'missing_hit_die',
           explanation: 'Fixed HP cannot be derived.',
         },
@@ -1060,6 +1066,7 @@ describe('D118 and D119 route choices', () => {
           current_level: 19 as ClassLevel,
           hit_die: null,
           current_subclass: null,
+          multiclass_prerequisite_warning: null,
           reason: 'missing_hit_die',
           explanation: 'Fixed HP cannot be derived.',
         }],
@@ -1212,6 +1219,53 @@ describe('static route states', () => {
 });
 
 describe('in-memory draft loss', () => {
+  it('keeps a held-class prerequisite warning visible without disabling advancement', () => {
+    const prerequisiteWarning = {
+      kind: 'multiclass_primary_ability_unmet' as const,
+      class_definition_id: 11,
+      class_name: 'Wizard',
+      class_catalog_layer: 'bundled' as const,
+      title: 'Wizard multiclass ability minimum not met',
+      detail:
+        'Wizard requires Intelligence 13 to multiclass; its current score is Intelligence 10.',
+      remedy:
+        'Multiclassing remains allowed. Raise the named score to clear this permanent warning.',
+    };
+    const wizard = createLevelUpWizard({
+      state: ready({
+        classes: [
+          classOption({ prerequisiteWarning }),
+          classOption({ id: 12, name: 'Cleric' }),
+        ],
+        warnings: [prerequisiteWarning],
+      }),
+      cancel: () => undefined,
+    });
+    const firstStepWarning = interactiveElement(wizard.element).querySelector(
+      `[${LEVEL_UP_ATTR.warning}="multiclass_primary_ability_unmet"]`,
+    );
+    expect(firstStepWarning).not.toBeNull();
+    expect(elementText(firstStepWarning as unknown as Node)).toContain(
+      'Wizard multiclass ability minimum not met — SRD · bundled layer',
+    );
+    expect(elementText(firstStepWarning as unknown as Node)).toContain(
+      'Wizard requires Intelligence 13 to multiclass; its current score is Intelligence 10.',
+    );
+    expect(
+      interactiveElement(wizard.element).querySelectorAll(
+        `[${LEVEL_UP_ATTR.warning}="multiclass_primary_ability_unmet"]`,
+      ),
+    ).toHaveLength(1);
+
+    chooseRadio(wizard.element, '11');
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    expect(elementText(wizard.element)).toContain('Character warnings');
+    expect(elementText(wizard.element)).toContain(
+      'Multiclassing remains allowed. Raise the named score to clear this permanent warning.',
+    );
+    wizard.cleanup();
+  });
+
   it('Cancel invokes navigation without a write and a new controller starts fresh', () => {
     const cancel = vi.fn();
     const state = ready({

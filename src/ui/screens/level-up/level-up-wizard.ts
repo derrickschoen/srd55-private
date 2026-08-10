@@ -28,6 +28,7 @@ import {
   createPendingEpicPathChoice,
   createSubclassStep,
   renderGainsStep,
+  renderLevelUpWarnings,
   type PendingEpicPath,
   type SubclassDraft,
 } from './class-gains-steps';
@@ -1316,6 +1317,25 @@ export function createLevelUpWizard(options: {
   const render = (initial: boolean): void => {
     frame?.cleanup();
     const panel = renderPanel();
+    const multiclassWarnings = state.character.warnings.filter(
+      (entry) =>
+        entry.kind === 'multiclass_primary_ability_unmet' ||
+        entry.kind === 'multiclass_primary_ability_unprovable',
+    );
+    const alreadyShowsMulticlassWarning = multiclassWarnings.some(
+      (entry) =>
+        panel.element.querySelector(
+          `[${LEVEL_UP_ATTR.warning}="${entry.kind}"]`,
+        ) !== null,
+    );
+    const permanentWarnings = renderLevelUpWarnings(multiclassWarnings);
+    if (
+      currentStep !== 'class' &&
+      !alreadyShowsMulticlassWarning &&
+      permanentWarnings !== null
+    ) {
+      panel.element.append(permanentWarnings);
+    }
     const warning = deferredEpicWarning();
     if (
       currentStep !== 'class' &&

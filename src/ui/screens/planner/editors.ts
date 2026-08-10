@@ -575,6 +575,24 @@ function renderClasses(
       field('Subclass', subclass),
       remove,
     );
+    const prerequisiteWarning = entry.multiclass_prerequisite_warning;
+    if (prerequisiteWarning !== null) {
+      const warning = document.createElement('aside');
+      warning.className = 'class-prerequisite-warning';
+      warning.dataset.warningKind = prerequisiteWarning.kind;
+      warning.setAttribute('role', 'alert');
+      const warningTitle = document.createElement('strong');
+      warningTitle.textContent =
+        `${prerequisiteWarning.title} — ${catalogLayerLabel(
+          prerequisiteWarning.class_catalog_layer,
+        )}`;
+      const detail = document.createElement('p');
+      detail.textContent = prerequisiteWarning.detail;
+      const remedy = document.createElement('p');
+      remedy.textContent = prerequisiteWarning.remedy;
+      warning.append(warningTitle, detail, remedy);
+      row.append(warning);
+    }
     classes.append(row);
   }
   if (workspace.classes.length === 0) {

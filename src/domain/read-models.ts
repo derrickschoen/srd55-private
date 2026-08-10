@@ -2,6 +2,7 @@ import type { WeaponFields } from './command-contracts';
 import type { EquipmentEffectInput } from './equipment-effects';
 import type { AttunementSlot } from './attunement';
 import type { ContentKey } from './ids';
+import type { MulticlassPrimaryAbilityWarning } from './primary-ability';
 import type {
   CatalogLayerDisclosure,
   CharacterCatalogDisclosure,
@@ -201,6 +202,8 @@ export interface CharacterClass {
   subclass_name: string | null;
   subclass_catalog_layer: CatalogLayerDisclosure | null;
   subclasses: ClassOption[];
+  readonly multiclass_prerequisite_warning:
+    MulticlassPrimaryAbilityWarning | null;
 }
 
 export interface SavePoint {
