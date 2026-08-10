@@ -36,6 +36,7 @@ import {
   isStoredBackgroundDraft,
   renderBackgroundForm,
 } from './background-form';
+import { createPermanentPurgeDialog } from './permanent-purge-dialog';
 import {
   HOMEBREW_ARCHIVE_ROUTE,
   HOMEBREW_MISSING_DRAFT_NOTICE,
@@ -493,7 +494,10 @@ async function renderArchiveRoute(
   const render = async (announcement = 'Archive loaded.'): Promise<void> => {
     const sets = await client.listArchivedSets();
     clear(list);
-    list.append(element('h2', { text: 'Archive' }));
+    list.append(element('h2', {
+      text: 'Archive',
+      attributes: { id: 'homebrew-archive-heading', tabindex: '-1' },
+    }));
     if (sets.length === 0) list.append(element('p', { text: 'The archive is empty.' }));
     for (const set of sets) {
       const heading = element('h3');
@@ -524,18 +528,41 @@ async function renderArchiveRoute(
         },
       });
       cleanups.push(listen(purge, 'click', () => {
-        purge.disabled = true;
-        restore.disabled = true;
-        status.textContent = 'Permanently purging the complete version lineage…';
-        void client.purgeArchivedSet({
-          content_kind: set.content_kind,
-          content_key: set.content_key,
-        }).then(() => render('Entire version lineage permanently purged.')).catch((error: unknown) => {
-          purge.disabled = false;
-          restore.disabled = false;
-          status.textContent = error instanceof Error ? error.message : String(error);
-          status.setAttribute('role', 'alert');
+        status.textContent = `Permanent purge confirmation opened for ${set.content_name}. ` +
+          'Nothing has been deleted.';
+        const dialog = createPermanentPurgeDialog({
+          mount: context.root,
+          archivedSet: set,
+          restoreFocus: () => {
+            if (purge.isConnected) {
+              purge.focus();
+              return;
+            }
+            list.querySelector<HTMLElement>('#homebrew-archive-heading')?.focus();
+          },
+          onCancel: () => {
+            status.textContent = 'Permanent purge cancelled. Nothing was deleted.';
+          },
+          onConfirm: async () => {
+            purge.disabled = true;
+            restore.disabled = true;
+            status.textContent = 'Permanently purging the complete version lineage…';
+            try {
+              await client.purgeArchivedSet({
+                content_kind: set.content_kind,
+                content_key: set.content_key,
+              });
+              await render('Entire version lineage permanently purged.');
+            } catch (error) {
+              purge.disabled = false;
+              restore.disabled = false;
+              status.textContent = error instanceof Error ? error.message : String(error);
+              status.setAttribute('role', 'alert');
+              throw error;
+            }
+          },
         });
+        cleanups.push(dialog.cleanup);
       }));
       list.append(element('article', { className: 'homebrew-card panel' }, [
         heading,
