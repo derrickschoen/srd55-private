@@ -43,6 +43,11 @@ import { SavePointQueries } from './save-points';
 import { WeaponQueries } from './weapons';
 import { ItemQueries } from './items';
 import { jsonRecord, type JsonRecord } from './source-config';
+import {
+  MulticlassPrimaryAbilityQueries,
+  multiclassAssessmentForClass,
+  type MulticlassPrimaryAbilityAssessment,
+} from './multiclass-primary-ability';
 
 interface SlotWithOrder extends WorkspaceSlot {
   readonly sort_order: number;
@@ -274,7 +279,10 @@ export class CharacterWorkspaceBuilder {
     return {
       revision: character.revision,
       report: workspaceReport,
-      classes: this.classes(characterId),
+      classes: this.classes(
+        characterId,
+        new MulticlassPrimaryAbilityQueries(this.db).build(characterId),
+      ),
       available_classes: this.classOptions(),
       allow_legacy: character.allow_legacy,
       flavor: {
@@ -342,7 +350,11 @@ export class CharacterWorkspaceBuilder {
     };
   }
 
-  private classes(characterId: number): CharacterClass[] {
+  private classes(
+    characterId: number,
+    prerequisiteAssessments:
+      readonly MulticlassPrimaryAbilityAssessment[],
+  ): CharacterClass[] {
     return this.db.all(
       `SELECT level.id, level.class_definition_id,
               level.subclass_definition_id, level.level,
@@ -388,6 +400,10 @@ export class CharacterWorkspaceBuilder {
                   sqlNullableString(row, 'subclass_catalog_layer'),
                 ),
           subclasses: this.classOptions(classDefinitionId),
+          multiclass_prerequisite_warning: multiclassAssessmentForClass(
+            prerequisiteAssessments,
+            classDefinitionId,
+          ).warning,
         };
       },
     );

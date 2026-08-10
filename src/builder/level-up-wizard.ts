@@ -42,6 +42,7 @@ import type {
 } from '../domain/ids';
 import type { EquipmentEffectInput } from '../domain/equipment-effects';
 import type { JsonObject } from '../domain/models';
+import type { MulticlassPrimaryAbilityWarning } from '../domain/primary-ability';
 import type { EligibleSpell } from '../domain/read-models';
 import type { GrantRuleObject } from '../grants/grant-rule';
 import type { CharacterSheet } from '../queries/character-sheet-builder';
@@ -352,6 +353,8 @@ export interface LevelUpHeldClass {
   readonly current_level: ClassLevel;
   readonly hit_die: HitDieSize | null;
   readonly current_subclass: LevelUpSubclassOption | null;
+  readonly multiclass_prerequisite_warning:
+    MulticlassPrimaryAbilityWarning | null;
 }
 
 export type LevelUpTargetFeatures =

@@ -95,6 +95,11 @@ import {
   LevelUpPlannedChoicesQuery,
   type LevelUpPlannedChoiceContext,
 } from './level-up-planned-choices';
+import {
+  MulticlassPrimaryAbilityQueries,
+  multiclassAssessmentForClass,
+  type MulticlassPrimaryAbilityAssessment,
+} from './multiclass-primary-ability';
 
 interface CharacterRow {
   readonly id: CharacterId;
@@ -321,7 +326,10 @@ export class LevelUpStateQuery {
       };
     }
 
-    const held = this.#heldClasses(character.id);
+    const prerequisiteAssessments = new MulticlassPrimaryAbilityQueries(
+      this.db,
+    ).build(character.id);
+    const held = this.#heldClasses(character.id, prerequisiteAssessments);
     const warnings = new CharacterCompletenessQueries(this.db)
       .build(character.id);
     const total = held.length === 0
@@ -332,7 +340,13 @@ export class LevelUpStateQuery {
       name: character.name,
       revision: character.revision,
       total_level: total,
-      warnings: [...warnings.items, ...warnings.catalog_gaps],
+      warnings: [
+        ...warnings.items,
+        ...warnings.catalog_gaps,
+        ...prerequisiteAssessments.flatMap((assessment) =>
+          assessment.warning === null ? [] : [assessment.warning]
+        ),
+      ],
     };
 
     if (held.length === 0) {
@@ -471,7 +485,11 @@ export class LevelUpStateQuery {
     );
   }
 
-  #heldClasses(characterId: CharacterId): HeldClassRow[] {
+  #heldClasses(
+    characterId: CharacterId,
+    prerequisiteAssessments:
+      readonly MulticlassPrimaryAbilityAssessment[],
+  ): HeldClassRow[] {
     return this.db.all(
       `SELECT level.class_definition_id, level.level,
               level.is_starting_class, definition.content_key,
@@ -517,6 +535,10 @@ export class LevelUpStateQuery {
         hit_die: hitDieOrAbsent(sqlNullableInteger(row, 'hit_die')),
         current_subclass: subclassOption(row, 'subclass_'),
         is_starting_class: sqlBoolean(row, 'is_starting_class'),
+        multiclass_prerequisite_warning: multiclassAssessmentForClass(
+          prerequisiteAssessments,
+          sqlInteger(row, 'class_definition_id'),
+        ).warning,
       }),
     );
   }

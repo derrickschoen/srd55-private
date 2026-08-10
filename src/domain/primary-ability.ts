@@ -43,6 +43,24 @@ export interface PrimaryAbilityScore {
   readonly score: number | null;
 }
 
+/**
+ * One permanent D96/D33 warning derived from a held class's stored expression.
+ *
+ * The class id is the stable join key used by planner and level-up rows. The
+ * prose remains in the shared query result so those surfaces and the sheet do
+ * not each invent their own account of the same prerequisite.
+ */
+export interface MulticlassPrimaryAbilityWarning {
+  readonly kind:
+    | 'multiclass_primary_ability_unmet'
+    | 'multiclass_primary_ability_unprovable';
+  readonly class_definition_id: number;
+  readonly class_name: string;
+  readonly title: string;
+  readonly detail: string;
+  readonly remedy: string;
+}
+
 export type MulticlassPrimaryAbilityResult =
   | {
       readonly status: 'met';

@@ -203,6 +203,74 @@ const emptyCompleteness: CompletenessResult = {
 };
 
 describe('planner catalog disclosure', () => {
+  it('renders a permanent named prerequisite warning only on the failing class row', () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const base = workspace(0, 10, false);
+      const rendered = interactiveElement(renderEditors({
+        workspace: {
+          ...base,
+          classes: [
+            {
+              id: 1,
+              class_definition_id: 1,
+              subclass_definition_id: null,
+              level: 1,
+              name: 'Cleric',
+              catalog_layer: 'bundled',
+              subclass_name: null,
+              subclass_catalog_layer: null,
+              subclasses: [],
+              multiclass_prerequisite_warning: null,
+            },
+            {
+              id: 2,
+              class_definition_id: 2,
+              subclass_definition_id: null,
+              level: 1,
+              name: 'Wizard',
+              catalog_layer: 'bundled',
+              subclass_name: null,
+              subclass_catalog_layer: null,
+              subclasses: [],
+              multiclass_prerequisite_warning: {
+                kind: 'multiclass_primary_ability_unmet',
+                class_definition_id: 2,
+                class_name: 'Wizard',
+                title: 'Wizard multiclass ability minimum not met',
+                detail:
+                  'Wizard requires Intelligence 13 to multiclass; its current score is Intelligence 10.',
+                remedy:
+                  'Multiclassing remains allowed. Raise the named score to clear this permanent warning.',
+              },
+            },
+          ],
+        },
+        actions: NOOP_EDITOR_ACTIONS,
+        disabled: false,
+      }));
+
+      const warnings = rendered.querySelectorAll(
+        '[data-warning-kind="multiclass_primary_ability_unmet"]',
+      );
+      expect(warnings).toHaveLength(1);
+      const warningText = elementText(warnings[0] as unknown as Node);
+      expect(warningText).toContain(
+        'Wizard multiclass ability minimum not met',
+      );
+      expect(warningText).toContain(
+        'Wizard requires Intelligence 13 to multiclass; its current score is Intelligence 10.',
+      );
+      expect(warningText).toContain(
+        'Multiclassing remains allowed. Raise the named score to clear this permanent warning.',
+      );
+      expect(warningText).not.toContain('Cleric');
+      expect(rendered.querySelector('[aria-label="Remove Wizard"]')).not.toBeNull();
+    } finally {
+      restoreDocument();
+    }
+  });
+
   it('returns a persisted external spell layer through the live workspace RPC', async () => {
     const harness = await createRpcHarness(queryHandlers);
     try {
@@ -293,6 +361,7 @@ describe('planner catalog disclosure', () => {
           subclass_name: null,
           subclass_catalog_layer: null,
           subclasses: [{ id: 9, name: hostileSubclass, catalog_layer: 'external' }],
+          multiclass_prerequisite_warning: null,
         }],
         available_classes: [{ id: 2, name: 'Fighter', catalog_layer: 'bundled' }],
         source_catalog: {

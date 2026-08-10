@@ -366,7 +366,11 @@ export interface SheetWarning {
     /** A grant qualified by words this application does not evaluate. */
     | 'weapon_proficiency_qualifier_unread'
     /** Armour recorded that no class of this character's trains them in. */
-    | 'armor_not_trained';
+    | 'armor_not_trained'
+    /** D96: a held class's sourced multiclass ability minimum is unmet. */
+    | 'multiclass_primary_ability_unmet'
+    /** D33: a held class's stored multiclass expression cannot be judged. */
+    | 'multiclass_primary_ability_unprovable';
   readonly message: string;
 }
 

@@ -96,10 +96,24 @@
   grid-template-columns: auto 1fr;
 }
 
-.level-up-class-card:has(input) span:last-child {
+.level-up-class-card:has(input) .catalog-layer-disclosure {
   grid-column: 2;
   font-size: 0.9rem;
   opacity: 0.8;
+}
+
+.level-up-class-prerequisite-warning {
+  grid-column: 1 / -1;
+  width: 100%;
+  padding: 0.65rem;
+  border: 1px solid #b36b00;
+  border-radius: 0.35rem;
+  background: #fff4d6;
+  color: #5f3800;
+}
+
+.level-up-class-prerequisite-warning p {
+  margin: 0.3rem 0 0;
 }
 
 .level-up-class-disabled {
