@@ -31,7 +31,7 @@ opponent's vanity is the same eye that guides the striking hand.
 | 3 | Barbed Court Spellcasting · Court Cantrips · Barbed Goad · Faces of the Court · Wisdom-Guided Strikes · Courtier's Slap · The Standing Hand · Innate Sorcery of the Court |
 | 6 | Court Spells row · Focus Refresh · Warding Image · Unshaken Aim · Barbed Fists +1 |
 | 11 | Court Spells row · Hands of the Barbed Court · Barbed Fists +2 |
-| 17 | Court Spells row · Focus-Casting · The Rebuking Shield (1/rest) · Hands ×2 + Advantage · Barbed Fists +3 |
+| 17 | Court Spells row · Focus-Casting · The Rebuking Shield (initiative manifest + 3-point upgrade) · Hands ×2 + Advantage · Barbed Fists +3 |
 
 ## 2. Barbed Court Spellcasting (Monk 3)
 
@@ -223,24 +223,29 @@ your Wisdom modifier**, and the court guides your aim — you have
 
 ### Level 17: The Rebuking Shield
 
-As a Bonus Action, you can raise the court's rebuke around yourself: for 10
-minutes you gain the effect of the *Fire Shield* spell (your choice of warm
-or chill), except that its retaliation damage is **Psychic**, and the
-flames or frost are visible only as a shimmer of affronted dignity. This is
-a subclass feature, not spellcasting — it uses no spell slot, has no
-components, can't be counterspelled, and doesn't count as casting a leveled
-spell. Once you use this feature, you can't use it again until you finish a
-Short or Long Rest.
+When you roll Initiative, you can manifest the **Hands of the Barbed
+Court** as a free action (spending its normal 4 Focus Points; the
+Bonus-Action manifestation remains available as before).
 
-*(The rest of level 17 lives in §2: Focus-Casting, the *Compulsion* row,
-and the Hands' maturation.)*
+Whenever you manifest the Hands — at Initiative or as a Bonus Action — you
+can spend **3 additional Focus Points** to raise the Rebuking Shield: for
+as long as the court remains manifested, a creature that hits you with a
+melee attack takes **2d8 Psychic damage**, and you are **immune to the
+Charmed and Frightened conditions and to Psychic damage**. The shield is
+visible only as a shimmer of affronted dignity. This is a subclass
+feature, not spellcasting — no spell slot, no components, and it can't be
+counterspelled. The shield ends when the manifestation ends (including if
+your Concentration on it is broken).
+
+*(The rest of level 17 lives in §2 and §3: Focus-Casting, the *Compulsion*
+row, and the Hands' maturation.)*
 
 ## 4. Resource and Tracking Summary
 
 | Per turn (the only two counters) | Per Short Rest | Per Long Rest |
 |---|---|---|
 | Courtier's Slap (once/turn) | Focus pool (= Monk level) — funds the goad, Flurry, Court Cantrips trigger, Refresh, Innate Sorcery, the Hands, Focus-Casting | Faces of the Court (PB uses) |
-| Court Cantrips (one free cantrip/turn) | One prepared-spell swap · The Rebuking Shield (1 use) | Full spell re-preparation · spell slots |
+| Court Cantrips (one free cantrip/turn) | One prepared-spell swap | Full spell re-preparation · spell slots |
 
 Everything else is passive or a lingering condition that expires on its
 own. Design rule, owner-set: the subclass never exceeds two per-turn
