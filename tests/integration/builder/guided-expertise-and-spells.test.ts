@@ -314,6 +314,27 @@ describe('GF-2 guided Expertise and spell adoption', () => {
           choice.selected_spell_catalog_layer !== null,
       ),
     ).toBe(true);
+    const repairChoice = filledState.choices[1];
+    if (repairChoice === undefined) throw new Error('Repair choice is missing.');
+    const repairStep = createSpellsStep({
+      characterId,
+      state: filledState,
+      repairAddress: { kind: repairChoice.kind, id: repairChoice.id },
+      search: () => Promise.resolve([]),
+      assign: () => Promise.reject(new Error('not submitted')),
+      navigate: () => undefined,
+    });
+    const repairRendered = interactiveElement(repairStep.element);
+    expect(repairRendered.querySelectorAll('[data-repair-target]')).toHaveLength(1);
+    expect(repairRendered.querySelectorAll('.guided-spell-summary')).toHaveLength(owed - 1);
+    const repairTarget = repairRendered.querySelector('[data-repair-target]');
+    expect(
+      repairTarget?.querySelector('.spell-picker-input')?.getAttribute('aria-label'),
+    ).toBe(repairChoice.label);
+    expect(elementText(repairRendered as unknown as Node)).toContain(
+      `${filledState.choices[0]?.selected_spell_name ?? ''} — Wizard cantrip 1 of 3`,
+    );
+    repairStep.cleanup();
     const step = createSpellsStep({
       characterId,
       state: filledState,

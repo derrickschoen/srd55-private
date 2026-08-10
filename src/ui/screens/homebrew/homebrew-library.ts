@@ -148,29 +148,44 @@ function badge(text: string, tone: 'draft' | 'homebrew' | 'neutral'): HTMLElemen
 function replacementNoticeText(notice: ReplacementNotice): string {
   switch (notice.kind) {
     case 'retargeted_selection_invalid': {
-      const selection = (() => {
-        switch (notice.table) {
-          case 'spell_selection_slots': return 'Spell selection';
-          case 'wizard_spellbook_entries': return 'Spellbook selection';
-          case 'character_skill_grants': return 'Skill selection';
-          case 'character_skill_expertise_grants': return 'Expertise selection';
+      const selected = (() => {
+        switch (notice.selected.kind) {
+          case 'spell':
+            return `${notice.selected.display_name} — ${catalogLayerLabel(
+              notice.selected.catalog_layer,
+            )}`;
+          case 'spell_unknown':
+            return 'UNKNOWN spell name — Unknown catalog layer';
+          case 'skill':
+            return notice.selected.skill;
         }
       })();
-      const detail = notice.detail ?? (() => {
-        switch (notice.reason) {
-          case 'target_source_missing': return 'The replacement has no matching source.';
-          case 'target_rule_missing': return 'The replacement has no matching choice rule.';
-          case 'target_rule_changed': return 'The replacement changed the choice rule.';
-          case 'selection_ineligible': return 'The selected value is no longer eligible.';
-        }
-      })();
-      return `${selection} “${String(notice.selected_value)}” for “${notice.rule_key}” ` +
-        `became invalid: ${detail}`;
+      return `${selected} in ${notice.rule_key} became invalid because ` +
+        `${notice.consequence}.`;
     }
     case 'retargeted_level_feat_invalid':
-      return `Feat selection ${String(notice.character_level_feat_choice_id)} became invalid ` +
+      return 'A feat selection became invalid ' +
         'because the replacement has no matching source.';
   }
+}
+
+function replacementNoticeItem(
+  context: ScreenContext,
+  cleanups: Cleanup[],
+  notice: ReplacementNotice,
+  includeRepair: boolean,
+): HTMLLIElement {
+  const item = element('li');
+  item.append(element('span', { text: replacementNoticeText(notice) }));
+  if (includeRepair) {
+    item.append(' ', routedLink(
+      context,
+      cleanups,
+      notice.repair.label,
+      notice.repair.href,
+    ));
+  }
+  return item;
 }
 
 function routedLink(
@@ -367,7 +382,19 @@ async function renderReplacementRoute(
         element('dd', { text: `After: ${String(change.after)}` }),
       );
     }
-    review.append(element('article', { className: 'homebrew-card' }, [name, changes]));
+    const consequences = replacement.notices.length === 0
+      ? []
+      : [
+          element('h4', { text: 'Selections that will become invalid' }),
+          element('ul', {}, replacement.notices.map((notice) =>
+            replacementNoticeItem(context, cleanups, notice, false)
+          )),
+        ];
+    review.append(element('article', { className: 'homebrew-card' }, [
+      name,
+      changes,
+      ...consequences,
+    ]));
   }
   if (plan.replacements.length === 0) {
     review.append(element('p', { text: 'No characters use the previous version.' }));
@@ -414,7 +441,7 @@ async function renderReplacementRoute(
             heading,
             element('p', { text: 'Needs review after replacement:' }),
             element('ul', {}, replacement.notices.map((notice) =>
-              element('li', { text: replacementNoticeText(notice) })
+              replacementNoticeItem(context, cleanups, notice, true)
             )),
           ]));
         }
