@@ -5,6 +5,40 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-10 — Rebuking Shield final: initiative-triggered Hands manifestation with a 3-point shield upgrade; fire/cold resistance dropped
+
+Owner's rulings, verbatim:
+
+> Rebuking shield should give immunity to charm and fear and psychic
+> damage. / Make it a free action when you roll initiative, and spend x
+> focus points. Walk me through what would be a good number
+
+> Drop the fire \\cold resistant part.
+>
+> Make it activate the hands as well as a 3 point option to upgrade to the
+> hands shield. This also upgrades the hands to a free action on initiative
+> roll as well as what it was before
+
+Final shape, applied to both docs: at 17, **rolling Initiative lets the
+monk manifest the Hands of the Barbed Court as a free action** (normal 4
+Focus; the Bonus-Action path remains), and **any manifestation can spend
++3 Focus to raise the Rebuking Shield** — 2d8 Psychic retaliation on melee
+hits taken, immunity to Charmed, Frightened, and Psychic damage, no
+fire/cold resistance, riding the manifestation's duration and ending with
+Concentration. Not spellcasting (no slot, no components,
+uncounterspellable). The earlier once-per-rest cap is gone — the
+initiative trigger and the pool are the limiters (full opening loadout:
+4+3 shield-hands + 1 goad = 8 of 17, four Flurries fit, one Focus-cast
+spare).
+
+Pricing walkthrough given at 2–6; the owner's +3 upgrade lands the combined
+manifestation at 7 — between the recommended 4-per-piece parity and the
+tension point. Measured: the freed round-1 Bonus Action is worth ~+4 at 17
+(137.7 → **141.9**); the immunities and retaliation remain uncounted
+tank value. Concentration-linkage recorded as the shield's real cost: one
+failed save now drops rider, Advantage, retaliation and immunities
+together.
+
 ## 2026-08-10 — Barbed Court 17 simplified: Rebuking Shield is a once-per-rest feature; the 4th-level machinery deleted; Blur grafted
 
 Owner's rulings, verbatim:

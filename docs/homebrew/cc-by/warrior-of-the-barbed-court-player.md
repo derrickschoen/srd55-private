@@ -193,14 +193,19 @@ base level.
 
 ## Level 17: The Rebuking Shield
 
-As a Bonus Action, you can raise the court's rebuke around yourself: for
-10 minutes you gain the effect of the *Fire Shield* spell⁷ (your choice of
-warm or chill), except that its retaliation damage is Psychic, and its
-flames or frost are visible only as a shimmer of affronted dignity. This
-is a subclass feature, not spellcasting — it uses no spell slot, has no
-components, can't be counterspelled, and doesn't count as casting a
-leveled spell. Once you use this feature, you can't use it again until you
-finish a Short or Long Rest.
+When you roll Initiative, you can manifest the Hands of the Barbed Court
+as a free action (spending its normal 4 Focus Points; manifesting as a
+Bonus Action remains available).
+
+Whenever you manifest the Hands — at Initiative or as a Bonus Action — you
+can spend 3 additional Focus Points to raise the Rebuking Shield: for as
+long as the court remains manifested, a creature that hits you with a
+melee attack takes 2d8 Psychic damage,⁷ and you are immune to the Charmed
+and Frightened conditions and to Psychic damage. The shield is visible
+only as a shimmer of affronted dignity. This is a subclass feature, not
+spellcasting — no spell slot, no components, and it can't be
+counterspelled. The shield ends when the manifestation ends (including if
+your Concentration is broken).
 
 ---
 
@@ -238,9 +243,10 @@ benefits (+1 save DC, Advantage on the spells' attack rolls, 1 minute)
 are the SRD's; the Bonus Action activation and twice-per-Long-Rest limit
 are replaced by the Focus Point cost.
 
-⁷ The Rebuking Shield grants the effect of the SRD 5.2.1 spell *Fire
-Shield*, unmodified except for the Psychic damage type; the effect is
-delivered as a subclass feature rather than a casting of the spell.
+⁷ The Rebuking Shield's retaliation clause adapts the SRD 5.2.1 spell
+*Fire Shield*'s 2d8-on-melee-hit mechanic, with the damage type changed to
+Psychic, the resistance clause removed, and the effect delivered as a
+subclass feature rather than a casting of the spell.
 
 ---
 
