@@ -41,7 +41,10 @@ save DC is your Focus save DC; your **spell attack modifier** is your
 Wisdom modifier + your Proficiency Bonus.
 
 **Spell list.** Your spells come from the **Bard spell list**, plus the
-grafted spells named below.
+grafted spells named below. (Standing rule, owner-set: spells from outside
+the Bard list enter this subclass only as granted always-prepared spells or
+granted cantrips — the Paladin-oath pattern — and only when named by the
+owner; they are never silently chooseable.)
 
 **Preparation.** The Chosen Spells column below shows how many spells you
 can have prepared; you can prepare any Bard-list spell **of a level for
@@ -151,17 +154,19 @@ Bonus. You regain all uses when you finish a Long Rest.
 
 ### Level 3: Court Forms
 
-Your Unarmed Strikes have the Light and Finesse properties, and you can use
-one weapon mastery property of your choice from **Slow, Topple, Push, Sap,**
-or **Graze** with your Unarmed Strikes — even though you lack the Weapon
-Mastery feature, and treating your Unarmed Strike as the weapon for the
-property's rules. You can change the chosen property when you finish a
-Short or Long Rest.
+Your Unarmed Strikes have the Light and Finesse properties and the **Nick**
+mastery property — granted explicitly even though Unarmed Strikes are not
+weapons and Monks lack the Weapon Mastery feature; treat your Unarmed
+Strike as the weapon for these properties' rules. In practice: **once on
+each of your turns when you take the Attack action, you can make one extra
+Unarmed Strike as part of that action** (the Light property's extra attack,
+made via Nick). That extra strike doesn't add your ability modifier to its
+damage (no feature of this subclass changes that), though Barbed Fists
+applies.
 
-*(Knock-ons, stated: Graze on an Unarmed Strike deals Bludgeoning damage
-equal to your Wisdom modifier and is not increased by Barbed Fists; Topple's
-save DC equals your Focus save DC. Granting mastery properties to Unarmed
-Strikes is this document's largest deliberate deviation from SRD rules.)*
+*(Granting weapon properties to Unarmed Strikes is this document's largest
+deliberate deviation from SRD rules; owner ruling 2026-08-10 removed the
+earlier swappable mastery choice and fixed Nick explicitly.)*
 
 ### Level 3: Wisdom-Guided Strikes
 
@@ -174,15 +179,16 @@ Once on each of your turns when you take the Attack action and make an
 Unarmed Strike, you can also have a spectral hand appear and slap one
 creature within 10 feet of you as part of that action, then vanish. **The
 slap is an Unarmed Strike if the target is within 5 feet of you** (so
-Wisdom-Guided Strikes, Barbed Fists, your mastery property, Stunning
-Strike, and the goad's melee trigger all apply); **against a farther target
-it is a ranged weapon attack** that uses your Wisdom modifier for the
-attack and damage rolls (a deliberate deviation — declared, not implied)
-and gains none of those riders. In either mode, on a hit the target takes
-Psychic damage equal to one roll of your Martial Arts die + your Wisdom
-modifier. The slap works whether or not your Mage Hand is present, and
-doesn't consume your Bonus Action or count against your Bonus Action
-Unarmed Strikes.
+Wisdom-Guided Strikes, Barbed Fists, Stunning Strike, and the goad's melee
+trigger all apply); **against a farther target it is a ranged weapon
+attack** that uses your Wisdom modifier for the attack and damage rolls (a
+deliberate deviation — declared, not implied) and gains none of those
+riders. In either mode, on a hit the target takes Psychic damage equal to
+one roll of your Martial Arts die + your Wisdom modifier, **and its Speed
+is reduced by 10 feet until the start of your next turn** — a slap that
+stops you mid-stride. The slap works whether or not your Mage Hand is
+present, doesn't consume your Bonus Action, and doesn't count as the Light
+property's extra attack (it stacks with Court Forms' Nick strike).
 
 ### Level 3: The Standing Hand
 
@@ -248,7 +254,7 @@ flames or frost are visible only as a shimmer of affronted dignity.
 | Per turn (the only two counters) | Per Short Rest | Per Long Rest |
 |---|---|---|
 | Courtier's Slap (once/turn) | Focus pool (= Monk level) — funds the goad, Flurry, Court Cantrips trigger, Refresh, Innate Sorcery, the Hands, Focus-Casting | Faces of the Court (PB uses) |
-| Court Cantrips (one free cantrip/turn) | Mastery property swap · one prepared-spell swap | Full spell re-preparation · A Gift of the Court · spell slots |
+| Court Cantrips (one free cantrip/turn) | One prepared-spell swap | Full spell re-preparation · A Gift of the Court · spell slots |
 
 Everything else is passive or a lingering condition that expires on its
 own. Design rule, owner-set: the subclass never exceeds two per-turn
@@ -267,7 +273,7 @@ missed.
 
 | Build | L3 | L6 | L11 | L17 |
 |---|---:|---:|---:|---:|
-| **Barbed Court, this kit** | **16.2** | **40.9** | **90.5** | **138.5** |
+| **Barbed Court, this kit** | **16.0** | **41.7** | **101.6** | **157.1** |
 | Optimized Dex Vengeance Paladin (melee ref.) | 19.5 | 31.2 | 52.2 | 60.8 |
 | Veteran rogue (this project) | 25.1 | 32.8 | 64.5 | 108.9 |
 | SRD Thief | 18.4 | 23.7 | 37.2 | 64.2 |
@@ -286,15 +292,14 @@ Recorded caveats, both directions:
    single block of the kit's damage — roughly a third at 11 and 17 by
    marginal-removal tests on the pre-correction run (non-additive marginals;
    re-derivation pending).
-3. **Ratios, stated plainly**: 0.83× / 1.31× / 1.73× / 2.28× the optimized
-   Paladin, and 0.65× / 1.25× / 1.40× / 1.27× this project's own Veteran.
-   Growth 11→17 is +53%. Both ratios rose in the 2026-08-10 audit chiefly
-   because the corrected Paladin fell and the monk gained the missed
-   base-class Flurry strike — an owner review of the 11/17 ratios is on
-   record as welcome, not required.
-4. **The caster race is not entered**: 90.5/129 = 0.70× at 11 and
-   138.5/265 = 0.52× at 17 against the strongest legal nova build measured.
-5. Levels 3–5 are the kit's weakest window (0.83× the paladin) — the Hands
+3. **Ratios, stated plainly**: 0.82× / 1.34× / 1.95× / 2.58× the optimized
+   Paladin, and 0.64× / 1.27× / 1.58× / 1.44× this project's own Veteran.
+   Growth 11→17 is +55%. These rose across the 2026-08-10 audits and the
+   explicit-Nick ruling (the seventh swing is worth more than the removed
+   mastery menu was) — each step owner-ruled with the numbers shown.
+4. **The caster race is not entered**: 101.6/129 = 0.79× at 11 and
+   157.1/265 = 0.59× at 17 against the strongest legal nova build measured.
+5. Levels 3–5 are the kit's weakest window (0.82× the paladin) — the Hands
    don't exist yet; the front-load doctrine begins at 6.
 
 ## 6. Failure-Taxonomy Pass
