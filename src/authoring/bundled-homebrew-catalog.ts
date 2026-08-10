@@ -81,6 +81,7 @@ function spellStudentChoiceGrant(
   kind: 'cantrips' | 'spells',
   count: number,
   maximumSpellLevel: number,
+  minimumSpellLevel?: number,
 ): NonNullable<SubclassAuthoringDraftProgressionRow['grants']>[number] {
   return Object.freeze({
     kind: 'choice_from_list' as const,
@@ -90,6 +91,9 @@ function spellStudentChoiceGrant(
     rule_key: `spell-student-${kind}`,
     list: 'Wizard',
     count,
+    ...(minimumSpellLevel === undefined
+      ? {}
+      : { minimum_spell_level: minimumSpellLevel }),
     maximum_spell_level: maximumSpellLevel,
   });
 }
@@ -225,44 +229,69 @@ const barbedCourt: SubclassAuthoringDraft = Object.freeze<SubclassAuthoringDraft
   })),
 });
 
-const spellStudent: SubclassAuthoringDraft = Object.freeze<SubclassAuthoringDraft>({
-  kind: 'subclass',
-  document_version: 1,
-  name: 'Spell Student',
-  rules_edition: '2024',
-  reference_text: 'A Spell Student learns a small amount of practical magic alongside martial training.',
-  parent_class_content_key: '2024:class:fighter' as ContentKey,
-  progression: {
-    mode: 'override',
-    spellcasting_ability: 'intelligence',
-    caster_contribution: 'third_down',
-    rows: thirdCasterRows({
-      cantripsKnown: (level) => level < 3 ? 0 : level < 11 ? 1 : 2,
-      // Owner-authored choice: one spell at 3, then one more every four levels.
-      spellsKnown: (level) => level < 3 ? 0 : 1 + Math.floor((level - 3) / 4),
-      grants: (level) => {
-        if (level < 3) return [];
-        const cantrips = level < 11 ? 1 : 2;
-        const spells = 1 + Math.floor((level - 3) / 4);
-        const spellLevel = maximumSpellLevel(deriveThirdCasterSlotCounts(level));
-        return [
-          spellStudentChoiceGrant(level, 'cantrips', cantrips, 0),
-          spellStudentChoiceGrant(level, 'spells', spells, spellLevel),
-        ];
-      },
-    }),
-  },
-  features: [{
-    draft_item_uuid: itemUuid('bundled-spell-student-feature-1'),
-    class_level: 3,
-    name: 'Basic Spellcasting',
-    description: 'You learn a limited selection of spells and cast them using Intelligence.',
-    effects: Object.freeze([]),
-  }],
-});
+function spellStudentRevision(
+  explicitSpellLevels: boolean,
+): SubclassAuthoringDraft {
+  return Object.freeze<SubclassAuthoringDraft>({
+    kind: 'subclass',
+    document_version: 1,
+    name: 'Spell Student',
+    rules_edition: '2024',
+    reference_text: 'A Spell Student learns a small amount of practical magic alongside martial training.',
+    parent_class_content_key: '2024:class:fighter' as ContentKey,
+    progression: {
+      mode: 'override',
+      spellcasting_ability: 'intelligence',
+      caster_contribution: 'third_down',
+      rows: thirdCasterRows({
+        cantripsKnown: (level) => level < 3 ? 0 : level < 11 ? 1 : 2,
+        // Owner-authored choice: one spell at 3, then one more every four levels.
+        spellsKnown: (level) => level < 3 ? 0 : 1 + Math.floor((level - 3) / 4),
+        grants: (level) => {
+          if (level < 3) return [];
+          const cantrips = level < 11 ? 1 : 2;
+          const spells = 1 + Math.floor((level - 3) / 4);
+          const spellLevel = maximumSpellLevel(deriveThirdCasterSlotCounts(level));
+          return [
+            spellStudentChoiceGrant(
+              level,
+              'cantrips',
+              cantrips,
+              0,
+              explicitSpellLevels ? 0 : undefined,
+            ),
+            spellStudentChoiceGrant(
+              level,
+              'spells',
+              spells,
+              spellLevel,
+              explicitSpellLevels ? 1 : undefined,
+            ),
+          ];
+        },
+      }),
+    },
+    features: [{
+      draft_item_uuid: itemUuid('bundled-spell-student-feature-1'),
+      class_level: 3,
+      name: 'Basic Spellcasting',
+      description: 'You learn a limited selection of spells and cast them using Intelligence.',
+      effects: Object.freeze([]),
+    }],
+  });
+}
+
+// The first revision remains byte-exact registry history. The second fixes the
+// declared one-cantrip-plus-one-leveled-spell progression without rewriting an
+// already-installed user's immutable content.
+const spellStudentV1 = spellStudentRevision(false);
+const spellStudentV2 = spellStudentRevision(true);
 
 export const BUNDLED_HOMEBREW_CATALOG = Object.freeze([
   Object.freeze({ catalog_key: 'veteran', revisions: Object.freeze([veteran] as const) }),
   Object.freeze({ catalog_key: 'warrior-of-the-barbed-court', revisions: Object.freeze([barbedCourt] as const) }),
-  Object.freeze({ catalog_key: 'spell-student', revisions: Object.freeze([spellStudent] as const) }),
+  Object.freeze({
+    catalog_key: 'spell-student',
+    revisions: Object.freeze([spellStudentV1, spellStudentV2] as const),
+  }),
 ] as const satisfies readonly BundledHomebrewCatalogEntry<SubclassAuthoringDraft>[]);

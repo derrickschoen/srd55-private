@@ -1024,7 +1024,7 @@ describe('level_up_class', () => {
     ).toBe(offered.id);
   });
 
-  // Measured alone at 2.2s; 20s retains contention headroom.
+  // Measured alone at 2.59s; 20s retains contention headroom.
   it('resolves published Spell Student by logical locator before its source row exists', async () => {
     const harness = await createRpcHarness([]);
     try {
@@ -1045,7 +1045,7 @@ describe('level_up_class', () => {
         kind: 'committed',
         outcomes: [{
           kind: 'create',
-          contentKey: '2024:content.subclass:spell-student',
+          contentKey: '2024:content.subclass:spell-student-bundled-revision-2',
         }],
       });
       enterClass('Fighter');
@@ -1065,7 +1065,7 @@ describe('level_up_class', () => {
             expected_revision: 0,
             class_definition_id: classId('Fighter'),
             target_class_level: 3,
-            subclass_content_key: '2024:content.subclass:spell-student',
+            subclass_content_key: '2024:content.subclass:spell-student-bundled-revision-2',
             locator,
             query: '',
           },
@@ -1087,7 +1087,7 @@ describe('level_up_class', () => {
       levelUp({
         class_definition_id: classId('Fighter'),
         target_level: 3,
-        subclass_content_key: '2024:content.subclass:spell-student',
+        subclass_content_key: '2024:content.subclass:spell-student-bundled-revision-2',
         planned_subchoices: {
           skills: [],
           expertise: [],
@@ -1108,7 +1108,7 @@ describe('level_up_class', () => {
            JOIN subclass_definitions AS subclass
              ON subclass.id = source.source_definition_id
            WHERE source.character_id = ? AND source.source_type = 'subclass'
-             AND subclass.content_key = '2024:content.subclass:spell-student'
+             AND subclass.content_key = '2024:content.subclass:spell-student-bundled-revision-2'
              AND slot.rule_key = 'spell-student-cantrips'
              AND slot.ordinal = 1`,
           [characterId],

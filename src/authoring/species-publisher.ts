@@ -278,15 +278,23 @@ export function resolvedAuthoringGrant(
       if (draft.count === null) {
         authoringIssue(issues, [...path, 'count'], 'required', 'Choice count is required.');
       }
-      if (!ruleKeyReady || !listReady || draft.count === null) return null;
+      const minimum = draft.minimum_spell_level ?? 0;
+      const maximum = draft.maximum_spell_level ?? 9;
+      if (minimum > maximum) {
+        authoringIssue(issues, [...path, 'maximum_spell_level'], 'out_of_range', 'Maximum spell level must not be below the minimum.');
+      }
+      if (
+        !ruleKeyReady || !listReady || draft.count === null ||
+        minimum > maximum
+      ) return null;
       return {
         kind: draft.kind,
         rule_key: draft.rule_key,
         list: draft.list,
         count: draft.count,
         bucket: 'known',
-        level_min: 0,
-        level_max: draft.maximum_spell_level ?? 9,
+        level_min: minimum,
+        level_max: maximum,
         always_prepared: false,
         with_slots: true,
         free_cast: null,

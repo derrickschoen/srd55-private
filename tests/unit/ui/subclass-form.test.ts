@@ -489,6 +489,77 @@ describe('HA-8 subclass timeline form', () => {
     }
   });
 
+  it('exposes and saves a labelled minimum spell level for list choices', async () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const progressionRows = [...rows()];
+      progressionRows[2] = {
+        ...progressionRows[2]!,
+        grants: [{
+          kind: 'choice_from_list',
+          draft_item_uuid: itemUuid('leveled-list'),
+          rule_key: 'leveled-list',
+          list: 'Wizard',
+          count: 1,
+          minimum_spell_level: 1,
+          maximum_spell_level: 2,
+        }],
+      };
+      const authoredDocument: SubclassAuthoringDraft = {
+        ...richDocument(),
+        progression: {
+          mode: 'override',
+          spellcasting_ability: 'intelligence',
+          caster_contribution: 'third_down',
+          rows: progressionRows,
+        },
+      };
+      const savedDocuments: SubclassAuthoringDraft[] = [];
+      const screenContext = context();
+      const mount = document.createElement('div');
+      screenContext.root.append(mount);
+      const draft = stored(authoredDocument);
+      if (!isStoredSubclassDraft(draft)) throw new Error('Subclass fixture did not narrow.');
+      const cleanup = renderSubclassForm({
+        context: screenContext,
+        client: client({
+          saveDraft: async (params) => {
+            if (params.document.kind !== 'subclass') throw new Error('Expected subclass.');
+            savedDocuments.push(params.document);
+            return { ...stored(params.document), revision: 1 as DraftRevision };
+          },
+        }),
+        mount,
+        draft,
+        parentClasses: parents,
+        windowObject: new EventTarget() as unknown as Window,
+      });
+      const root = interactiveElement(mount);
+      const minimum = control(
+        root,
+        'input',
+        'subclass-progression-3-grant-leveled-list-minimum',
+      );
+      expect(elementText(root as unknown as Node))
+        .toContain('Minimum spell level (optional)');
+      expect(minimum.value).toBe('1');
+      input(minimum, '2');
+      button(root, 'Save draft').click();
+      await settle();
+      const saved = savedDocuments[0];
+      if (saved?.progression.mode !== 'override') {
+        throw new Error('Dense progression was not saved.');
+      }
+      expect(saved.progression.rows[2]?.grants[0]).toMatchObject({
+        minimum_spell_level: 2,
+        maximum_spell_level: 2,
+      });
+      cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
   it('creates level groups, moves a feature between levels, and reorders same-level features', async () => {
     const restoreDocument = installInteractiveDocument();
     try {

@@ -150,7 +150,7 @@ describe('character sheet resource projection', () => {
     expect(computed(after, 'lay_on_hands')[0]?.maximum).toBe(25);
   });
 
-  // Measured alone at 2.2s; 20s retains contention headroom.
+  // Measured alone at 2.78s; 20s retains contention headroom.
   it('combines shared slots, guards a sole published subclass caster, and keeps Pact slots separate', async () => {
     const harness = await createRpcHarness([]);
     try {
@@ -200,11 +200,11 @@ describe('character sheet resource projection', () => {
         kind: 'committed',
         outcomes: [{
           kind: 'create',
-          contentKey: '2024:content.subclass:spell-student',
+          contentKey: '2024:content.subclass:spell-student-bundled-revision-2',
         }],
       });
       const subclass = character('Subclass caster', [
-        { name: 'Fighter', level: 3, subclass: 'Spell Student' },
+        { name: 'Fighter', level: 3, subclass: 'Spell Student (Bundled revision 2)' },
       ]);
       const response = await rpcRegistry.dispatch(
         {

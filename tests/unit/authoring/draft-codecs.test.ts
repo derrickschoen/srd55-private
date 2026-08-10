@@ -99,6 +99,33 @@ describe('per-kind durable draft codecs', () => {
     });
   });
 
+  it('round-trips the optional list-choice minimum without filling it into older drafts', () => {
+    const oldGrant = {
+      kind: 'choice_from_list' as const,
+      draft_item_uuid: item('list-old'),
+      rule_key: 'list-old',
+      list: 'Wizard',
+      count: 1,
+      maximum_spell_level: 1,
+    };
+    const currentGrant = {
+      ...oldGrant,
+      draft_item_uuid: item('list-current'),
+      rule_key: 'list-current',
+      minimum_spell_level: 1,
+    };
+    const draft = { ...speciesDraft(), grants: [oldGrant, currentGrant] };
+    const encoded = encodeCurrentDraft('species', draft);
+
+    expect(JSON.parse(encoded.json)).toEqual(draft);
+    expect(decodeStoredDraft('species', encoded.version, encoded.json)).toMatchObject({
+      status: 'ready',
+      document: draft,
+    });
+    expect(Object.hasOwn(draft.grants[0]!, 'minimum_spell_level')).toBe(false);
+    expect(draft.grants[1]).toMatchObject({ minimum_spell_level: 1 });
+  });
+
   it('refuses unknown root and nested fields with exact structured paths', () => {
     const root = { ...speciesDraft(), future_field: true };
     expect(codecError(() => encodeCurrentDraft('species', root)).issues).toContainEqual({
@@ -116,6 +143,26 @@ describe('per-kind durable draft codecs', () => {
       code: 'unknown_field',
       message: 'Unknown field "guessed_rows".',
     });
+
+    const nestedGrant = {
+      ...speciesDraft(),
+      grants: [{
+        kind: 'choice_from_list',
+        draft_item_uuid: item('list-unknown'),
+        rule_key: 'list-unknown',
+        list: 'Wizard',
+        count: 1,
+        minimum_spell_level: 1,
+        maximum_spell_level: 2,
+        future_list_field: true,
+      }],
+    };
+    expect(codecError(() => encodeCurrentDraft('species', nestedGrant)).issues)
+      .toContainEqual({
+        path: ['grants', 0, 'future_list_field'],
+        code: 'unknown_field',
+        message: 'Unknown field "future_list_field".',
+      });
   });
 
   it('refuses class documents even when sent through a supported-kind codec', () => {

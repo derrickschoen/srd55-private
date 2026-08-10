@@ -585,7 +585,7 @@ describe('persisted spell access routes', () => {
     expect(persistedAccessState(characterId)).toEqual(before);
   });
 
-  // Measured alone at 2.1s; 20s retains contention headroom.
+  // Measured alone at 2.47s; 20s retains contention headroom.
   it('resolves the published Spell Student ability and proficiency override', async () => {
     const harness = await createRpcHarness([]);
     try {
@@ -601,7 +601,7 @@ describe('persisted spell access routes', () => {
         kind: 'committed',
         outcomes: [{
           kind: 'create',
-          contentKey: '2024:content.subclass:spell-student',
+          contentKey: '2024:content.subclass:spell-student-bundled-revision-2',
         }],
       });
       const characterId = character(
@@ -616,7 +616,7 @@ describe('persisted spell access routes', () => {
       classLevel(characterId, fighterId, 3);
       const subclassId = Number(db.scalar(
         `SELECT id FROM subclass_definitions
-          WHERE content_key = '2024:content.subclass:spell-student'`,
+          WHERE content_key = '2024:content.subclass:spell-student-bundled-revision-2'`,
       ));
       const sourceId = source(
         characterId,

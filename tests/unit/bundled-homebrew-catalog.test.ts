@@ -181,5 +181,25 @@ describe('bundled homebrew catalog payload', () => {
     expect(spellStudent.progression.rows.map((row) => row.prepared_or_known_count)).toEqual([
       0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5,
     ]);
+    expect(spellStudent.progression.rows.slice(2).map((row) => row.grants.map((grant) => ({
+      rule_key: grant.rule_key,
+      minimum_spell_level: grant.kind === 'choice_from_list'
+        ? grant.minimum_spell_level
+        : null,
+      maximum_spell_level: grant.kind === 'choice_from_list'
+        ? grant.maximum_spell_level
+        : null,
+    })))).toEqual(spellStudent.progression.rows.slice(2).map((row) => [
+      {
+        rule_key: 'spell-student-cantrips',
+        minimum_spell_level: 0,
+        maximum_spell_level: 0,
+      },
+      {
+        rule_key: 'spell-student-spells',
+        minimum_spell_level: 1,
+        maximum_spell_level: row.maximum_spell_level,
+      },
+    ]));
   });
 });

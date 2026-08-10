@@ -54,6 +54,7 @@ interface RevisionIdentity {
 interface EntryTarget {
   readonly baseContentKey: ContentKey | null;
   readonly outcome: Exclude<BundledHomebrewEntrySummary['outcome'], 'refused'>;
+  readonly nextRevisionIndex: number;
 }
 
 class PreviewRollback extends Error {
@@ -187,18 +188,33 @@ function entryTarget(
   );
   const head = lineageHead(db, latest.aggregate.kind, stableKey);
   if (head === null) {
-    return Object.freeze({ baseContentKey: null, outcome: 'create' });
+    return Object.freeze({
+      baseContentKey: null,
+      outcome: 'create',
+      nextRevisionIndex: 0,
+    });
   }
   const headDigest = currentDigest(db, latest.aggregate.kind, head);
-  if (!identities.some((identity) => identity.digest === headDigest)) {
+  const installedRevisionIndex = identities.findIndex(
+    (identity) => identity.digest === headDigest,
+  );
+  if (installedRevisionIndex < 0) {
     throw new TypeError(
       `Installed content at "${stableKey}" is not a registered revision of bundled entry "${entry.catalog_key}".`,
     );
   }
-  if (headDigest === latest.digest) {
-    return Object.freeze({ baseContentKey: head, outcome: 'matched_existing' });
+  if (installedRevisionIndex === identities.length - 1) {
+    return Object.freeze({
+      baseContentKey: head,
+      outcome: 'matched_existing',
+      nextRevisionIndex: installedRevisionIndex,
+    });
   }
-  return Object.freeze({ baseContentKey: head, outcome: 'successor' });
+  return Object.freeze({
+    baseContentKey: head,
+    outcome: 'successor',
+    nextRevisionIndex: installedRevisionIndex + 1,
+  });
 }
 
 function deterministicUuids(entry: BundledHomebrewCatalogEntry): () => string {
@@ -224,23 +240,36 @@ function installEntry(
   const authoring = new CatalogAuthoringService(db, {
     randomUuid: deterministicUuids(entry),
   });
-  const created = authoring.createDraft({
-    content_kind: latest.document.kind,
-    ...(target.baseContentKey === null ? {} : { base_content_key: target.baseContentKey }),
-  });
-  const saved = authoring.saveDraft({
-    draft_uuid: created.draft_uuid,
-    expected_revision: created.revision,
-    document: latest.publicationDocument,
-  });
-  const preview = authoring.previewPublish({
-    draft_uuid: saved.draft_uuid,
-    expected_revision: saved.revision,
-  });
-  if (preview.review.length !== 0) {
-    throw new TypeError(`Bundled entry "${entry.catalog_key}" unexpectedly requires adoption review.`);
+  let baseContentKey = target.baseContentKey;
+  let result: PublishResult | null = null;
+  for (
+    let revisionIndex = target.nextRevisionIndex;
+    revisionIndex < identities.length;
+    revisionIndex += 1
+  ) {
+    const revision = identities[revisionIndex]!;
+    const created = authoring.createDraft({
+      content_kind: revision.document.kind,
+      ...(baseContentKey === null ? {} : { base_content_key: baseContentKey }),
+    });
+    const saved = authoring.saveDraft({
+      draft_uuid: created.draft_uuid,
+      expected_revision: created.revision,
+      document: revision.publicationDocument,
+    });
+    const preview = authoring.previewPublish({
+      draft_uuid: saved.draft_uuid,
+      expected_revision: saved.revision,
+    });
+    if (preview.review.length !== 0) {
+      throw new TypeError(`Bundled entry "${entry.catalog_key}" unexpectedly requires adoption review.`);
+    }
+    result = authoring.commitPublish({ token: preview.token, decisions: [] });
+    baseContentKey = result.content_key;
   }
-  const result = authoring.commitPublish({ token: preview.token, decisions: [] });
+  if (result === null) {
+    throw new TypeError(`Bundled entry "${entry.catalog_key}" installed no revision.`);
+  }
   if (target.outcome === 'matched_existing' && result.outcome !== 'matched_existing') {
     throw new TypeError(`Bundled entry "${entry.catalog_key}" failed its idempotent match.`);
   }

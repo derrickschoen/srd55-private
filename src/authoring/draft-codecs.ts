@@ -115,6 +115,10 @@ const listGrant = z.strictObject({
   rule_key: ruleKey,
   list: shortText,
   count: nullableInteger(1, AUTHORING_LIST_LIMITS.grants),
+  minimum_spell_level: nullableInteger(
+    AUTHORING_NUMERIC_LIMITS.minimumSpellLevel,
+    AUTHORING_NUMERIC_LIMITS.maximumSpellLevel,
+  ).optional(),
   maximum_spell_level: nullableInteger(
     AUTHORING_NUMERIC_LIMITS.minimumSpellLevel,
     AUTHORING_NUMERIC_LIMITS.maximumSpellLevel,
