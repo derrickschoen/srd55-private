@@ -7,7 +7,10 @@ import {
 } from '../../../builder/level-up-wizard';
 import { guidedBuildPath } from '../../../builder/contracts';
 import { element, listen, type Cleanup } from '../../dom';
-import { renderDisabledClassOption } from './class-gains-steps';
+import {
+  plannerClassesPath,
+  renderDisabledClassOption,
+} from './class-gains-steps';
 
 const STEP_LABELS: Readonly<Record<LevelUpStep, string>> = Object.freeze({
   class: 'Class',
@@ -152,8 +155,8 @@ export function renderLevelUpTerminalState(
         [
           characterListLink(),
           routerLink(
-            'Advanced: open planner',
-            `/characters/${String(state.character.character_id)}`,
+            'Take a level in a new class',
+            plannerClassesPath(state.character.character_id),
           ),
         ],
       ),

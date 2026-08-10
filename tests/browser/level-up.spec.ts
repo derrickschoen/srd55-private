@@ -360,7 +360,7 @@ test('W-KEYBOARD Tab order, reverse travel, native choice keys, and moved focus 
   await expect(routeHeading).toBeFocused({ timeout: 35_000 });
   const classChoice = page.getByRole('radio', { name: /Fighter 3 → 4/ });
   const advancedPlanner = page.getByRole('link', {
-    name: 'Advanced: open planner',
+    name: 'Take a level in a new class',
   });
   const cancel = page.getByRole('button', { name: 'Cancel' });
   const next = page.getByRole('button', { name: 'Next' });
@@ -436,8 +436,11 @@ test('W-INCOMPLETE classless cards explain the advanced door while held-class wa
     page.getByRole('heading', { name: 'This character has no held class' }),
   ).toBeVisible();
   await expect(page.getByRole('link', {
-    name: 'Advanced: open planner',
-  })).toHaveAttribute('href', `/characters/${String(classlessId)}`);
+    name: 'Take a level in a new class',
+  })).toHaveAttribute(
+    'href',
+    `/characters/${String(classlessId)}?panel=classes`,
+  );
   await expect(page.locator('[data-level-up-confirm]')).toHaveCount(0);
 
   const held = await createFighter(page, 'Unfinished Fighter');
@@ -470,6 +473,139 @@ test('W-INCOMPLETE classless cards explain the advanced door while held-class wa
   expect(
     await page.locator('[data-level-up-warning] strong').allTextContents(),
   ).toEqual(expect.arrayContaining(classWarnings));
+});
+
+test('starting-class provenance stays first and level up names the new-class path into the Classes panel', async ({
+  page,
+}) => {
+  // Measured at 13.3s alone on the required single-worker port-5000 run;
+  // 20s is the requested 1.5x ceiling, rounded up.
+  test.setTimeout(20_000);
+  const character = await createCharacter(
+    page,
+    'Wizard First Multiclass',
+    'Wizard',
+  );
+  await page.goto(`/characters/${String(character.id)}`);
+  await expect(page.locator('#planner-status')).toHaveAttribute(
+    'data-ready',
+    'true',
+    { timeout: 35_000 },
+  );
+
+  await page.getByRole('combobox', { name: 'Class to add' }).selectOption({
+    label: 'Cleric',
+  });
+  await page.getByRole('button', { name: 'Add class' }).click();
+
+  const expectedClasses = [
+    { name: 'Wizard', is_starting_class: true },
+    { name: 'Cleric', is_starting_class: false },
+  ];
+  await expect.poll(() => page.evaluate(async (characterId) => {
+    const workspace = await window.appRpc.call<
+      { readonly character_id: number },
+      {
+        readonly classes: readonly {
+          readonly name: string;
+          readonly is_starting_class: boolean;
+        }[];
+      }
+    >('queries.characters.workspace', { character_id: characterId });
+    return workspace.classes.map((entry) => ({
+      name: entry.name,
+      is_starting_class: entry.is_starting_class,
+    }));
+  }, character.id)).toEqual(expectedClasses);
+
+  const classRows = page.locator('#planner-classes .class-list article');
+  await expect(classRows).toHaveCount(2);
+  await expect(classRows.nth(0).locator(':scope > strong')).toContainText(
+    'Wizard',
+  );
+  await expect(classRows.nth(0).locator('.class-entry-badge')).toHaveText(
+    'Starting class',
+  );
+  await expect(classRows.nth(0)).not.toContainText('Multiclass entry');
+  await expect(classRows.nth(1).locator(':scope > strong')).toContainText(
+    'Cleric',
+  );
+  await expect(classRows.nth(1).locator('.class-entry-badge')).toHaveText(
+    'Multiclass entry',
+  );
+  await expect(classRows.nth(1)).not.toContainText('Starting class');
+
+  const seam = await readLevelUpSeam(page, character.id);
+  await page.goto(seam.path);
+  const newClassLink = page.getByRole('link', {
+    name: 'Take a level in a new class',
+  });
+  await expect(newClassLink).toBeVisible();
+  await expect(
+    page.getByRole('link', { name: 'Advanced: open planner' }),
+  ).toHaveCount(0);
+  await newClassLink.click();
+
+  await expect(page).toHaveURL(
+    new RegExp(
+      `/characters/${String(character.id)}\\?panel=classes$`,
+      'u',
+    ),
+  );
+  await expect(page.locator('#planner-status')).toHaveAttribute(
+    'data-ready',
+    'true',
+    { timeout: 35_000 },
+  );
+  await expect(page.locator('#planner-classes-heading')).toBeFocused();
+
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: 'Remove Wizard' }).click();
+
+  await expect(classRows).toHaveCount(1);
+  await expect(classRows.nth(0).locator(':scope > strong')).toContainText(
+    'Cleric',
+  );
+  await expect(classRows.nth(0).locator('.class-entry-badge')).toHaveText(
+    'Starting class',
+  );
+  await expect(
+    page.locator('[data-warning-code="no_starting_class"]'),
+  ).toContainText('No class is marked as this character\'s starting class');
+  await expect.poll(() => page.evaluate(async (characterId) => {
+    const workspace = await window.appRpc.call<
+      { readonly character_id: number },
+      {
+        readonly classes: readonly {
+          readonly id: number;
+          readonly name: string;
+          readonly is_starting_class: boolean;
+        }[];
+        readonly starting_class_resolution: {
+          readonly class_level_id: number | null;
+          readonly warnings: readonly { readonly code: string }[];
+        };
+      }
+    >('queries.characters.workspace', { character_id: characterId });
+    return {
+      classes: workspace.classes,
+      resolutionMatchesSurvivor:
+        workspace.starting_class_resolution.class_level_id ===
+        workspace.classes[0]?.id,
+      warningCodes: workspace.starting_class_resolution.warnings.map(
+        (warning) => warning.code,
+      ),
+    };
+  }, character.id)).toEqual({
+    classes: [
+      expect.objectContaining({
+        name: 'Cleric',
+        is_starting_class: false,
+      }),
+    ],
+    resolutionMatchesSurvivor: true,
+    warningCodes: ['no_starting_class'],
+  });
 });
 
 test('U1 direct level-up refuses untouched defaults, then one workspace edit enables the wizard', async ({

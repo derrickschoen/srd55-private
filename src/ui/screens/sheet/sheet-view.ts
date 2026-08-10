@@ -1093,7 +1093,7 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
         { text: 'Granted by — ' },
         { text: entry.class_name, free_text: true },
       ],
-      value: entry.via === 'initial' ? 'Full' : 'Multiclass entry',
+      value: entry.via === 'initial' ? 'Starting class' : 'Multiclass entry',
       detail: plain(
         entry.via === 'initial'
           ? 'The starting class, so it grants everything its Core Traits table ' +

@@ -189,6 +189,7 @@ function workspace(): Workspace {
       },
     },
     classes: [],
+    starting_class_resolution: { class_level_id: null, warnings: [] },
     available_classes: [],
     allow_legacy: false,
     flavor: {
@@ -937,6 +938,7 @@ describe('planner build reference text sections', () => {
       class_definition_id: 17,
       subclass_definition_id: null,
       level: 5,
+      is_starting_class: true,
       name: 'Homebrew Vanguard',
       catalog_layer: 'external',
       subclass_name: null,

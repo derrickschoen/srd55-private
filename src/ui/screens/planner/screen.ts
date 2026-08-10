@@ -968,6 +968,7 @@ function renderPlanner(
     primary,
     renderWarnings({
       report: workspace.report,
+      startingClassResolution: workspace.starting_class_resolution,
       disabled: session.saving,
       acknowledge: (fingerprint, note) =>
         void mutate(() =>
@@ -1044,6 +1045,11 @@ export const screen = defineScreen({
       destroyGrid = renderPlanner(context, session, view, rerender);
     };
     rerender();
+    if (context.route.query.get('panel') === 'classes') {
+      context.root
+        .querySelector<HTMLElement>('#planner-classes-heading')
+        ?.focus();
+    }
     const keyboard = (event: KeyboardEvent): void => {
       if (
         !(event.ctrlKey || event.metaKey) ||

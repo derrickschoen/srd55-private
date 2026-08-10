@@ -27,6 +27,10 @@ export interface LevelUpStepView {
   readonly cleanup: Cleanup;
 }
 
+export function plannerClassesPath(characterId: number): string {
+  return `/characters/${String(characterId)}?panel=classes`;
+}
+
 export function createPendingEpicPathChoice(options: {
   readonly pending: LevelUpPendingEpicResolution;
   readonly selectedPath: PendingEpicPath | null;
@@ -288,9 +292,11 @@ export function createClassStep(options: {
         ...(warnings === null ? [] : [warnings]),
         element('p', { className: 'level-up-advanced-link' }, [
           element('a', {
-            text: 'Advanced: open planner',
+            text: 'Take a level in a new class',
             attributes: {
-              href: `/characters/${String(options.state.character.character_id)}`,
+              href: plannerClassesPath(
+                options.state.character.character_id,
+              ),
               'data-router-link': '',
             },
           }),

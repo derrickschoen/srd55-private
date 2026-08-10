@@ -374,6 +374,10 @@ export interface SheetWarning {
   readonly message: string;
 }
 
+export type StartingClassWarning = SheetWarning & {
+  readonly code: 'no_starting_class' | 'several_starting_classes';
+};
+
 export interface HitPointResult {
   readonly maximum: number;
   readonly warnings: readonly SheetWarning[];
@@ -611,7 +615,7 @@ export function startingClass<T extends StartingClassCandidate>(
   classes: readonly T[],
 ): {
   readonly chosen: T | null;
-  readonly warnings: readonly SheetWarning[];
+  readonly warnings: readonly StartingClassWarning[];
 } {
   const flagged = classes.filter((entry) => entry.is_starting_class);
   if (flagged.length === 1) {

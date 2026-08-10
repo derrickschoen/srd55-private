@@ -1271,7 +1271,8 @@ describe('static route states', () => {
     });
     const text = elementText(wizard.element);
     expect(text).toContain('This character has no held class');
-    expect(text).toContain('Advanced: open planner');
+    expect(text).toContain('Take a level in a new class');
+    expect(text).not.toContain('Advanced: open planner');
     expect(text).toContain('All characters');
     expect(wizard.element.querySelector('button')).toBeNull();
     wizard.cleanup();

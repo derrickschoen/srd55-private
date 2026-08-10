@@ -342,7 +342,12 @@ textarea:disabled {
 }
 
 .class-list article {
-  grid-template-columns: minmax(7rem, 1fr) 6rem minmax(9rem, 1fr) auto;
+  grid-template-columns: minmax(7rem, 1fr) auto 6rem minmax(9rem, 1fr) auto;
+}
+
+.class-entry-badge {
+  align-self: center;
+  white-space: nowrap;
 }
 
 .class-prerequisite-warning {

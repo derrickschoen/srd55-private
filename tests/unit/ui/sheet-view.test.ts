@@ -1719,12 +1719,12 @@ describe('the character sheet is projected twice from one value', () => {
    *
    * EVERY ASSERTION BELOW READS A `value` OR A `detail`, and that is the point.
    * A review mutated this section — labelling a NOT-proficient weapon
-   * "Proficient", emptying the armour list, swapping "Full" for "Multiclass
-   * entry" and dropping every qualifier — and the whole vitest and Playwright
-   * suites stayed green, because the only assertions this file had for the
-   * section were that the row IDs exist. An id is not a fact about a character;
-   * a Wizard reading "Proficient" beside their Greatsword is the exact D28 §1
-   * failure the section was built to prevent.
+   * "Proficient", emptying the armour list, swapping "Starting class" for
+   * "Multiclass entry" and dropping every qualifier — and the whole vitest and
+   * Playwright suites stayed green, because the only assertions this file had
+   * for the section were that the row IDs exist. An id is not a fact about a
+   * character; a Wizard reading "Proficient" beside their Greatsword is the
+   * exact D28 §1 failure the section was built to prevent.
    *
    * THE FOUR VERDICTS ARE EXERCISED SEPARATELY, because the fixture's single
    * weapon is `proficient` and three of the four arms of both `weaponVerdictValue`
@@ -1841,7 +1841,9 @@ describe('the character sheet is projected twice from one value', () => {
           ],
         },
       });
-      expect(row(value, 'proficiency_source:Fighter').value).toBe('Full');
+      expect(row(value, 'proficiency_source:Fighter').value).toBe(
+        'Starting class',
+      );
       expect(row(value, 'proficiency_source:Wizard').value).toBe(
         'Multiclass entry',
       );

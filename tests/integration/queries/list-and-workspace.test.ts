@@ -131,6 +131,29 @@ describe('character list and workspace query builders', () => {
     });
   });
 
+  it('pins a deterministic starting-class resolution for writer-unreachable multiple flags', () => {
+    // Command writers cannot create multiple starting-class flags. Raw SQL is
+    // deliberate corruption here so the tolerant query boundary stays pinned.
+    db.exec(
+      `UPDATE character_class_levels
+       SET is_starting_class = 1
+       WHERE character_id = ?`,
+      [fixture.characterId],
+    );
+
+    const workspace = new CharacterWorkspaceBuilder(db).build(
+      fixture.characterId,
+    );
+
+    expect(workspace.classes.length).toBeGreaterThan(1);
+    expect(workspace.starting_class_resolution).toEqual({
+      class_level_id: workspace.classes[0]?.id,
+      warnings: [
+        expect.objectContaining({ code: 'several_starting_classes' }),
+      ],
+    });
+  });
+
   it('cuts planner catalogs over to external content while keeping the class picker bundled-only', () => {
     const wizardId = Number(
       db.scalar(
@@ -227,6 +250,7 @@ describe('character list and workspace query builders', () => {
       class_definition_id: wizardId,
       subclass_definition_id: subclassId,
       level: 1,
+      is_starting_class: false,
       name: 'Wizard',
       catalog_layer: 'bundled',
       subclass_name: 'Abjurer',
