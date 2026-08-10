@@ -194,7 +194,7 @@ base level.
 ## Level 17: The Rebuking Shield
 
 When you roll Initiative, you can manifest the Hands of the Barbed Court
-as a free action (spending its normal 4 Focus Points; manifesting as a
+as a Reaction (spending its normal 4 Focus Points; manifesting as a
 Bonus Action remains available).
 
 Whenever you manifest the Hands — at Initiative or as a Bonus Action — you

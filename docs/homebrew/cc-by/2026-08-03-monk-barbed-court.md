@@ -224,7 +224,7 @@ your Wisdom modifier**, and the court guides your aim — you have
 ### Level 17: The Rebuking Shield
 
 When you roll Initiative, you can manifest the **Hands of the Barbed
-Court** as a free action (spending its normal 4 Focus Points; the
+Court** as a Reaction (spending its normal 4 Focus Points; the
 Bonus-Action manifestation remains available as before).
 
 Whenever you manifest the Hands — at Initiative or as a Bonus Action — you
