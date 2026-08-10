@@ -19,11 +19,17 @@ import type { CharacterSummary } from '../../../domain/read-models';
 import type { RpcClient } from '../../../rpc/client';
 import { encodePartyDocument } from '../../../party/storage/document-bytes';
 import { element, listen, type Cleanup } from '../../dom';
-import type { ContentImportPlan } from '../../../catalog/content-adoption';
+import type {
+  ContentImportEntryOutcome,
+  ContentImportPlan,
+} from '../../../catalog/content-adoption';
 import { createContentAdoptionDialog } from '../../content-adoption-dialog';
 import type { BundledHomebrewClient } from '../../../authoring/client';
 import { createAuthoringClient } from '../../../authoring/client';
 import type { BundledHomebrewInstallPlan } from '../../../authoring/bundled-homebrew-installer';
+import { LIBRARY_EXPORT_FORMAT } from '../../../backup/portable-content';
+
+export const LIBRARY_IMPORT_ROUTE = '/?import=library';
 
 export interface ReadableFile {
   readonly name: string;
@@ -48,7 +54,10 @@ export interface ImportBackupServices {
     | 'exportCharacter'
     | 'planCharacterImport'
     | 'commitCharacterImport'
-  >;
+  > & Partial<Pick<
+    BackupClient,
+    'importLibrary' | 'planLibraryImport' | 'commitLibraryImport'
+  >>;
   readonly authoring?: Pick<
     BundledHomebrewClient,
     'previewBundledHomebrew' | 'installBundledHomebrew'
@@ -68,6 +77,7 @@ export interface ImportBackupControlsOptions {
 export interface ImportBackupControls {
   readonly element: HTMLElement;
   updateCharacters(characters: readonly CharacterSummary[]): void;
+  focusLibraryImport(): void;
   readonly cleanup: Cleanup;
 }
 
@@ -128,9 +138,38 @@ export class ImportBackupController {
       throw new TypeError('Choose at least one catalog JSON file.');
     }
     const documents = await Promise.all(files.map((file) => file.text()));
+    if (documents.some(isLibraryExportText)) {
+      throw new TypeError(
+        'This file is a library export. Use the Library JSON importer.',
+      );
+    }
     return {
       documents,
       result: await this.services.catalog.importCatalog(documents),
+    };
+  }
+
+  async prepareLibraryImport(file: ReadableFile): Promise<{
+    readonly document: unknown;
+    readonly plan: Awaited<ReturnType<BackupClient['planLibraryImport']>>;
+  }> {
+    if (this.services.backup.planLibraryImport === undefined) {
+      throw new TypeError('Library import services are unavailable.');
+    }
+    let document: unknown;
+    try {
+      document = JSON.parse(await file.text());
+    } catch {
+      throw new TypeError('Library export must contain valid JSON.');
+    }
+    if (Array.isArray(document)) {
+      throw new TypeError(
+        'This file is a catalog document. Use the Catalog JSON importer.',
+      );
+    }
+    return {
+      document,
+      plan: await this.services.backup.planLibraryImport(document, {}),
     };
   }
 
@@ -198,6 +237,17 @@ export class ImportBackupController {
   }
 }
 
+function isLibraryExportText(text: string): boolean {
+  try {
+    const value: unknown = JSON.parse(text);
+    return value !== null && typeof value === 'object' &&
+      !Array.isArray(value) &&
+      Reflect.get(value, 'format') === LIBRARY_EXPORT_FORMAT;
+  } catch {
+    return false;
+  }
+}
+
 export function isContentImportPlan(
   value: CatalogImportResult,
 ): value is ContentImportPlan {
@@ -261,6 +311,17 @@ export function catalogSummary(summary: CatalogImportSummary): string {
   return parts.join(', ');
 }
 
+export function librarySummary(
+  outcomes: readonly ContentImportEntryOutcome[],
+): string {
+  const created = outcomes.filter((outcome) => outcome.kind === 'create').length;
+  const matched = outcomes.filter((outcome) =>
+    outcome.kind === 'match' || outcome.kind === 'remembered-match' ||
+    outcome.kind === 'remembered-clone' || outcome.kind === 'review'
+  ).length;
+  return `${String(created)} published, ${String(matched)} matched existing`;
+}
+
 function files(input: HTMLInputElement): File[] {
   return input.files === null ? [] : Array.from(input.files);
 }
@@ -283,6 +344,12 @@ export function createImportBackupControls(
       type: 'file',
       accept: 'application/json,.json',
       multiple: '',
+    },
+  });
+  const libraryInput = element('input', {
+    attributes: {
+      type: 'file',
+      accept: 'application/json,.json',
     },
   });
   const databaseInput = element('input', {
@@ -373,6 +440,61 @@ export function createImportBackupControls(
         });
         adoptionCleanup = rendered.cleanup;
         return 'Review each matching catalog entry before importing.';
+      });
+    }),
+  );
+
+  const libraryButton = element('button', {
+    text: 'Import library',
+    attributes: { type: 'button' },
+  });
+  cleanups.push(
+    listen(libraryButton, 'click', () => {
+      void run(libraryButton, async () => {
+        const [file] = files(libraryInput);
+        if (file === undefined) {
+          throw new TypeError('Choose a library JSON export.');
+        }
+        const prepared = await controller.prepareLibraryImport(file);
+        const directImport = services.backup.importLibrary;
+        const replan = services.backup.planLibraryImport;
+        const commit = services.backup.commitLibraryImport;
+        if (
+          directImport === undefined || replan === undefined ||
+          commit === undefined
+        ) {
+          throw new TypeError('Library import services are unavailable.');
+        }
+        const hasRefusal = prepared.plan.outcomes.some(
+          (outcome) => outcome.kind === 'refused',
+        );
+        if (prepared.plan.reviews.length === 0 && !hasRefusal) {
+          const result = await directImport(prepared.document);
+          await options.onPersistedChange();
+          libraryInput.value = '';
+          return `Library imported: ${librarySummary(result.outcomes)}.`;
+        }
+        adoptionCleanup?.();
+        const rendered = createContentAdoptionDialog({
+          mount: root,
+          plan: prepared.plan,
+          replan: (choices) => replan(prepared.document, choices),
+          commit: (plan, choices) => commit(
+            prepared.document,
+            plan.token,
+            choices,
+          ),
+          onCommitted: async (result) => {
+            await options.onPersistedChange();
+            libraryInput.value = '';
+            announce(`Library imported: ${librarySummary(result.outcomes)}.`);
+          },
+          onCancel: () => announce('Library import cancelled.'),
+        });
+        adoptionCleanup = rendered.cleanup;
+        return prepared.plan.reviews.length === 0
+          ? 'Review the refused library import before continuing.'
+          : 'Review each colliding library entry before importing.';
       });
     }),
   );
@@ -597,6 +719,7 @@ export function createImportBackupControls(
         ]),
         characterExportButton,
       ]),
+      control('Library JSON', libraryInput, libraryButton),
     ]),
     status,
   ]);
@@ -674,6 +797,11 @@ export function createImportBackupControls(
   return {
     element: root,
     updateCharacters,
+    focusLibraryImport: () => {
+      root.open = true;
+      root.scrollIntoView?.({ block: 'start' });
+      libraryInput.focus();
+    },
     cleanup: () => {
       adoptionCleanup?.();
       for (const cleanup of cleanups.splice(0)) {

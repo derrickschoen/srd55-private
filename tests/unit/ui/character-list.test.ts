@@ -243,6 +243,57 @@ describe('character share links', () => {
       restoreDocument();
     }
   });
+
+  it('links a missing-content refusal to the real library importer route', async () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const controls = createShareControls({
+        rpc: null as never,
+        onPersistedChange: () => undefined,
+        client: {
+          exportDebug: async () => [] as never,
+          createFragment: async () => 'fragment',
+          createFragmentResult: async () => ({ kind: 'encoded', fragment: 'fragment' }),
+          preview: async () => Promise.reject({
+            data: {
+              issues: [{
+                code: 'missing_source',
+                summary: "your catalog has no species '2024:missing-elf'.",
+                remedy: "Import species '2024:missing-elf', then open the link again.",
+              }],
+            },
+          }),
+          importCharacter: async () => ({}) as never,
+          commitCharacter: async () => ({}) as never,
+        },
+        browser: { baseUrl: 'https://example.test/' },
+      });
+      document.body.append(controls.element);
+      const root = interactiveElement(controls.element);
+      const input = root.querySelectorAll('input').find((candidate) =>
+        candidate.getAttribute('aria-label') === 'Character share link'
+      );
+      const preview = root.querySelectorAll('button').find((button) =>
+        button.textContent === 'Preview link'
+      );
+      if (input === undefined || preview === undefined) {
+        throw new Error('Share preview controls are incomplete.');
+      }
+      input.value = '#reference-only';
+      preview.click();
+      for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+
+      const remedy = root.querySelector('.share-issue-remedy');
+      expect(remedy?.tagName.toLowerCase()).toBe('a');
+      expect(remedy?.getAttribute('href')).toBe('/?import=library');
+      expect(remedy?.textContent).toBe(
+        "Import species '2024:missing-elf', then open the link again.",
+      );
+      controls.cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
 });
 
 describe('character list behavior', () => {
@@ -569,6 +620,60 @@ describe('catalog and backup entry points', () => {
     } finally {
       restoreDocument();
     }
+  });
+
+  it('opens and focuses the library control when the importer route requests it', () => {
+    const fixture = services();
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const controls = createImportBackupControls({
+        rpc: null as never,
+        characters: [],
+        onPersistedChange: () => undefined,
+        services: fixture.value,
+      });
+      document.body.append(controls.element);
+      controls.focusLibraryImport();
+
+      expect((controls.element as HTMLDetailsElement).open).toBe(true);
+      const libraryLabel = interactiveElement(controls.element)
+        .querySelectorAll('label').find((label) =>
+          elementText(label as unknown as Node).includes('Library JSON')
+        );
+      expect(document.activeElement).toBe(
+        libraryLabel?.querySelector('input'),
+      );
+      controls.cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('directs library and catalog documents to their honest importers both ways', async () => {
+    const fixture = services();
+    const controller = new ImportBackupController({
+      ...fixture.value,
+      backup: {
+        ...fixture.value.backup,
+        planLibraryImport: async () => ({}) as never,
+      },
+    });
+    const library = JSON.stringify({
+      format: 'dnd-multiclass-spells/library',
+      version: 2,
+    });
+
+    await expect(controller.prepareCatalogImport([
+      readableFile('library.json', library),
+    ])).rejects.toThrow(
+      'This file is a library export. Use the Library JSON importer.',
+    );
+    await expect(controller.prepareLibraryImport(
+      readableFile('catalog.json', '[{"kind":"spell"}]'),
+    )).rejects.toThrow(
+      'This file is a catalog document. Use the Catalog JSON importer.',
+    );
+    expect(fixture.persisted.catalogDocuments).toEqual([]);
   });
 
   it('imports catalog JSON and reports the persisted import summary', async () => {

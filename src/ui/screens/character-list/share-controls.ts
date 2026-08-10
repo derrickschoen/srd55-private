@@ -8,6 +8,7 @@ import {
 import type { SharePreview } from '../../../sharing/character-share';
 import type { ContentImportPlan } from '../../../catalog/content-adoption';
 import { createContentAdoptionDialog } from '../../content-adoption-dialog';
+import { LIBRARY_IMPORT_ROUTE } from './import-backup-controls';
 import { contentImportLabel } from '../../../sharing/import-issues';
 import { element, listen, type Cleanup } from '../../dom';
 
@@ -38,6 +39,7 @@ function errorMessage(error: unknown): string {
 }
 
 interface DisplayIssue {
+  readonly code?: string;
   readonly summary: string;
   readonly remedy: string;
 }
@@ -66,6 +68,9 @@ function compatibilityIssues(error: unknown): readonly DisplayIssue[] {
     typeof (entry as DisplayIssue).remedy === 'string'
       ? [
           {
+            ...(typeof Reflect.get(entry, 'code') === 'string'
+              ? { code: Reflect.get(entry, 'code') as string }
+              : {}),
             summary: (entry as DisplayIssue).summary,
             remedy: (entry as DisplayIssue).remedy,
           },
@@ -284,9 +289,16 @@ export function createShareControls(
       // textContent, never innerHTML: content keys and names originate in a
       // share link a stranger may have crafted.
       what.textContent = issue.summary;
-      const how = document.createElement('span');
+      const linksToLibraryImport = issue.code === 'missing_class' ||
+        issue.code === 'missing_subclass' || issue.code === 'missing_source';
+      const how = linksToLibraryImport
+        ? document.createElement('a')
+        : document.createElement('span');
       how.className = 'share-issue-remedy';
       how.textContent = issue.remedy;
+      if (linksToLibraryImport) {
+        how.setAttribute('href', LIBRARY_IMPORT_ROUTE);
+      }
       item.append(what, ' ', how);
       list.append(item);
     }
