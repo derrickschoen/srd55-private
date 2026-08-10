@@ -16,6 +16,7 @@ import type {
   ContentImportPlan,
   ContentImportPlanToken,
 } from '../catalog/content-adoption';
+import { externalContentDisclosure } from '../catalog/content-adoption';
 import { projectAuthoredContentAggregateV1 } from '../catalog/stored-authored-content-projector-v1';
 import {
   type AuthoredContentKind,
@@ -348,6 +349,13 @@ export function planBundledHomebrewInstall(
       graphHash,
       targetHash,
       spellActivityChanges: Object.freeze([]),
+      incomingContent: Object.freeze(simulated.entries.map((entry) =>
+        externalContentDisclosure({
+          id: `${entry.kind}:bundled:${entry.catalog_key}`,
+          kind: entry.kind,
+          name: entry.name,
+        })
+      )),
       reviews: Object.freeze([]),
       outcomes: plannedOutcomes,
       entries: simulated.entries,
@@ -369,6 +377,11 @@ export function planBundledHomebrewInstall(
       graphHash: sha256(message),
       targetHash: sha256(message),
       spellActivityChanges: Object.freeze([]),
+      incomingContent: Object.freeze([externalContentDisclosure({
+        id: `${kind}:bundled:${catalogKey}`,
+        kind,
+        name: entry?.revisions.at(-1)?.name ?? 'UNKNOWN',
+      })]),
       reviews: Object.freeze([]),
       outcomes: Object.freeze([refused]),
       entries: Object.freeze([{
