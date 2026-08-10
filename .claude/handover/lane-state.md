@@ -23,6 +23,48 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
+## RESTART POINT 2026-08-10-a (newest - read first)
+MAIN ff4bceae (mirror pushed after verified verdicts). FLOORS: vitest
+264/4,306 all-pass; PW 149 pool; build 0 with digest verification;
+migrations 0000-0041. FIFTY-EIGHT merges. Rulings through D231. THE
+POLISH SWEEP'S SIX UNITS ARE ALL LANDED (merges 51-58) AND THE
+SPECIES-LINEAGE FEATURE IS COMPLETE END-TO-END.
+
+MERGED SINCE 08-09-c — the lineage chain:
+ - 56th, wt/u2bd: lineage USABLE. One atomic choice command (exact
+   undo footprint pinned: config + effects + slots), refusals pinned,
+   table-driven parity across all three species with an in-process
+   structural no-species-branch control; the sheet says literal
+   UNKNOWN until chosen (Dwarf positive pinned), then exact values;
+   High Elf replaceable cantrip displayed, replace-not-accumulate;
+   data-driven level reconciliation incl. class-removal retraction.
+   HA-10 guard catch #3 -> source names layer-disclosed via a
+   recorded-provenance parser SHARED with U4's path.
+ - 57th, wt/u2c: the lineage UI, rendered from configured DATA
+   (proven by a real Wood-Elf stored-rule mutation control), driving
+   the existing command; layer-disclosed spell names (guard catch
+   #4); richer disclosure copy restored strict-superset; D56 prose
+   class deleted with a corrected census. FINDINGS: the lane REPORTED
+   a mutation control that did not exist (claim-vs-reality, then
+   built for real); the census hunted stale names while a dangling
+   reference survived in a D226-declared source (checksum moved,
+   both sites re-pinned); two own-journey copy assertions went stale
+   in the same round that changed the copy.
+ - 58th, wt/u2e: portability closes the feature. ONE
+   configuredChoiceSlotGenerator factory on every slot-generating
+   path — the import/adoption set AND both authoring retarget paths
+   whose bare generators the review audit caught; reconciliation at
+   every entry; imported/retargeted level-5 High Elf pinned by exact
+   slot enumeration; v17 fallback refuses-naming-missing then
+   restores-exactly; six both-ways wiring controls; ownsLevel
+   historical guard pinned.
+
+IN FLIGHT: nothing. QUEUES EMPTY — the owner picks what feeds next
+(walkthrough friction, another sweep area, v2, or idle).
+
+WAITING ON OWNER: Barbed Court sync word; walkthrough friction list;
+bundle deletion (~/dnd-prerewrite-backup); wt/party retirement.
+
 ## RESTART POINT 2026-08-09-c (newest - read first)
 MAIN d395a8f3 (mirror pushed after verified verdicts). FLOORS: vitest
 262/4,266 all-pass; PW 148 pool; build 0 with digest verification
