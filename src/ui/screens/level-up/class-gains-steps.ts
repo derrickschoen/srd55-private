@@ -7,6 +7,7 @@ import {
   type LevelUpPendingEpicResolution,
   type LevelUpPermanentWarning,
   type LevelUpStateResult,
+  type LevelUpTargetFeature,
 } from '../../../builder/level-up-wizard';
 import type {
   ClassDefinitionId,
@@ -304,6 +305,42 @@ function signed(value: number): string {
   return value >= 0 ? `+${String(value)}` : String(value);
 }
 
+function targetFeatureItem(feature: LevelUpTargetFeature): HTMLLIElement {
+  switch (feature.kind) {
+    case 'class_feature':
+      return element('li', {
+        text: `${feature.name} — ${catalogLayerLabel(feature.catalog_layer)}`,
+      });
+    case 'subclass_feature':
+      return element('li', {}, [
+        element('strong', {
+          text: `${feature.name} — ${catalogLayerLabel(feature.catalog_layer)}`,
+        }),
+        element('p', {
+          text: feature.rules_text.kind === 'stored'
+            ? feature.rules_text.text
+            : 'Feature identity recorded; rules text not stored.',
+        }),
+      ]);
+    case 'subclass_feature_unknown':
+      switch (feature.reason) {
+        case 'no_stored_feature':
+          return element('li', {
+            text:
+              `Subclass feature unknown — ${feature.subclass_name} — ` +
+              `${catalogLayerLabel(feature.subclass_catalog_layer)}. ` +
+              'No stored feature row exists at this class level.',
+          });
+        case 'subclass_not_selected':
+          return element('li', {
+            text: 'Subclass feature unknown until a subclass is selected.',
+          });
+      }
+  }
+  const unhandled: never = feature;
+  return unhandled;
+}
+
 export function renderGainsStep(
   selectedClass: LevelUpGuideableClassOption,
 ): HTMLElement {
@@ -364,14 +401,12 @@ export function renderGainsStep(
       });
   const features = gains.target_features.kind === 'unavailable'
     ? element('p', { text: 'Target-level feature names are unavailable.' })
-    : gains.target_features.feature_names.length === 0
+    : gains.target_features.features.length === 0
       ? element('p', { text: 'No target-level features are listed.' })
       : element(
           'ul',
           {},
-          gains.target_features.feature_names.map((name) =>
-            element('li', { text: name }),
-          ),
+          gains.target_features.features.map(targetFeatureItem),
         );
 
   return element(

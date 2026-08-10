@@ -5,6 +5,7 @@ import {
   levelUpWarningPresentation,
   type LevelUpPermanentWarning,
   type LevelUpPreviewResult,
+  type LevelUpTargetFeature,
   type LevelUpTargetFeatures,
 } from '../../../builder/level-up-wizard';
 import type { CharacterSheet } from '../../../queries/character-sheet-builder';
@@ -159,6 +160,23 @@ function catalogDraftRows(
   );
 }
 
+function targetFeatureSummary(feature: LevelUpTargetFeature): string {
+  switch (feature.kind) {
+    case 'class_feature':
+    case 'subclass_feature':
+      return `${feature.name} — ${catalogLayerLabel(feature.catalog_layer)}`;
+    case 'subclass_feature_unknown':
+      switch (feature.reason) {
+        case 'no_stored_feature':
+          return `Unknown subclass feature for ${feature.subclass_name} — ${catalogLayerLabel(feature.subclass_catalog_layer)}; no stored feature row exists`;
+        case 'subclass_not_selected':
+          return 'Unknown subclass feature until a subclass is selected';
+      }
+  }
+  const unhandled: never = feature;
+  return unhandled;
+}
+
 function draftRows(draft: LevelUpDraftReview): readonly HTMLDivElement[] {
   const subclass = draft.subclass === null
     ? []
@@ -173,11 +191,11 @@ function draftRows(draft: LevelUpDraftReview): readonly HTMLDivElement[] {
         ]),
       ];
   const features = draft.new_class_features.kind === 'sourced'
-    ? draft.new_class_features.feature_names.length === 0
+    ? draft.new_class_features.features.length === 0
       ? namedDraftRows('New class features', ['None returned for this level'])
       : namedDraftRows(
           'New class feature',
-          draft.new_class_features.feature_names,
+          draft.new_class_features.features.map(targetFeatureSummary),
         )
     : namedDraftRows('New class features', ['Unavailable from source data']);
   return [
