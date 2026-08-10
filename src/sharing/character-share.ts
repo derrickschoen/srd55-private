@@ -1862,35 +1862,54 @@ function assertImportableWithoutMutation(
   targets: ReadonlyMap<string, ContentKey>,
   choices: ContentImportChoices,
 ): void {
+  // A preview must prove the character can be inserted, but an unresolved
+  // key collision has deliberately supplied no user decision. Simulate the
+  // existing-local branch only inside this rollback transaction; the returned
+  // plan remains undecided and commitContentImport still refuses it.
+  const unresolvedChoices = Object.fromEntries(
+    plan.reviews
+      .filter((review) => review.selectedChoice === null)
+      .map((review) => [review.id, { decision: 'match' as const }]),
+  );
+  const simulationChoices: ContentImportChoices = Object.freeze({
+    ...choices,
+    ...unresolvedChoices,
+  });
+  const simulation = Object.keys(unresolvedChoices).length === 0
+    ? { prepared, plan, targets, choices }
+    : {
+        ...shareImportPlan(db, document, simulationChoices),
+        choices: simulationChoices,
+      };
   try {
     db.transaction(() => {
-      const createsClone = Object.values(choices).some(
+      const createsClone = Object.values(simulation.choices).some(
         (choice) => choice.decision === 'clone',
       );
-      if (!createsClone && prepared.nodes.length === 0) {
+      if (!createsClone && simulation.prepared.nodes.length === 0) {
         throwCompatibilityIssues(
-          assessImportCompatibility(db, document, targets),
+          assessImportCompatibility(db, document, simulation.targets),
         );
-        insertCharacterShare(db, document, targets);
+        insertCharacterShare(db, document, simulation.targets);
         throw PREVIEW_ROLLBACK;
       }
       const result = commitContentImport(db, {
-        nodes: prepared.nodes,
-        token: plan.token,
-        choices,
+        nodes: simulation.prepared.nodes,
+        token: simulation.plan.token,
+        choices: simulation.choices,
         operationIdentity: shareOperationIdentity(document),
         afterInstall: (database) => {
           if (document.portableContent !== undefined) {
             restorePortableContentSupersessions(
               database,
               document.portableContent,
-              targets,
+              simulation.targets,
             );
           }
           throwCompatibilityIssues(
-            assessImportCompatibility(database, document, targets),
+            assessImportCompatibility(database, document, simulation.targets),
           );
-          insertCharacterShare(database, document, targets);
+          insertCharacterShare(database, document, simulation.targets);
         },
       });
       if (result.kind !== 'committed') {

@@ -49,7 +49,7 @@ import {
   multiclassAssessmentForClass,
   type MulticlassPrimaryAbilityAssessment,
 } from './multiclass-primary-ability';
-import { SELECTABLE_SUBCLASS_SQL } from './selectable-subclasses';
+import { selectableCatalogContentSql } from './selectable-catalog-content';
 
 interface SlotWithOrder extends WorkspaceSlot {
   readonly sort_order: number;
@@ -436,6 +436,7 @@ export class CharacterWorkspaceBuilder {
              ON identity.content_kind = 'class'
             AND identity.content_key = definition.content_key
            -- D133: planner class authoring/selection remains bundled-only.
+           WHERE ${selectableCatalogContentSql('class', 'definition.content_key')}
            ORDER BY definition.name, definition.id`,
           undefined,
           (row) => ({
@@ -462,7 +463,7 @@ export class CharacterWorkspaceBuilder {
              ON identity.content_kind = 'subclass'
             AND identity.content_key = subclass.content_key
            WHERE subclass.class_definition_id = ?
-             AND ${SELECTABLE_SUBCLASS_SQL}
+             AND ${selectableCatalogContentSql('subclass', 'subclass.content_key')}
            ORDER BY subclass.name, subclass.id`,
           [classDefinitionId],
           (row) => ({
@@ -638,6 +639,7 @@ export class CharacterWorkspaceBuilder {
        LEFT JOIN catalog_content_identities AS identity
          ON identity.content_kind = '${sourceType}'
         AND identity.content_key = definition.content_key
+       WHERE ${selectableCatalogContentSql(sourceType, 'definition.content_key')}
        ORDER BY definition.name, definition.id`,
       undefined,
       (row): SourceDefinition => ({

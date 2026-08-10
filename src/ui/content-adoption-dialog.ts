@@ -203,9 +203,6 @@ export function createContentAdoptionDialog(
 
   const rows = new Map(options.plan.reviews.map((row) => [row.id, row]));
   const choices: Record<string, { decision: 'match' | 'clone'; cloneName?: string }> = {};
-  for (const row of options.plan.reviews) {
-    choices[row.id] = { decision: 'match', cloneName: row.cloneName };
-  }
   let plan = options.plan;
   let generation = 0;
   let disposed = false;
@@ -239,9 +236,12 @@ export function createContentAdoptionDialog(
     text: 'Import with these choices',
     attributes: { type: 'button' },
   });
-  commit.disabled = options.plan.outcomes.some(
-    (outcome) => outcome.kind === 'refused',
-  );
+  const planBlocksCommit = (candidate: ContentImportPlan): boolean =>
+    candidate.outcomes.some((outcome) => outcome.kind === 'refused') ||
+    candidate.reviews.some((review) =>
+      review.defaultChoice === null && choices[review.id] === undefined
+    );
+  commit.disabled = planBlocksCommit(options.plan);
   const actions = element('div', { className: 'content-adoption-actions' }, [
     cancel,
     commit,
@@ -280,9 +280,7 @@ export function createContentAdoptionDialog(
         ? 'One or more choices still need attention.'
         : 'Choices checked against the current catalog.';
       renderRows();
-      commit.disabled = refreshed.outcomes.some((outcome) =>
-        outcome.kind === 'refused' || outcome.kind === 'review' && choices[outcome.id] === undefined,
-      );
+      commit.disabled = planBlocksCommit(refreshed);
     } catch (error) {
       if (disposed || requested !== generation) return;
       status.textContent = error instanceof Error ? error.message : String(error);
@@ -294,11 +292,9 @@ export function createContentAdoptionDialog(
     clear(list);
     const rowControls: HTMLElement[] = [];
     for (const row of rows.values()) {
-      const selected = choices[row.id] ?? {
-        decision: 'match' as const,
-        cloneName: row.cloneName,
-      };
-      choices[row.id] = selected;
+      const selected = choices[row.id] ?? (row.defaultChoice === null
+        ? undefined
+        : { decision: row.defaultChoice, cloneName: row.cloneName });
       const fieldset = element('fieldset', {
         className: 'content-adoption-row',
         attributes: { 'data-content-id': row.id },
@@ -341,7 +337,7 @@ export function createContentAdoptionDialog(
           type: 'radio',
           name: `content-adoption-${row.id}`,
           value: 'match',
-          ...(selected.decision === 'match' ? { checked: '' } : {}),
+          ...(selected?.decision === 'match' ? { checked: '' } : {}),
         },
       });
       const clone = element('input', {
@@ -350,28 +346,34 @@ export function createContentAdoptionDialog(
           type: 'radio',
           name: `content-adoption-${row.id}`,
           value: 'clone',
-          ...(selected.decision === 'clone' ? { checked: '' } : {}),
+          ...(selected?.decision === 'clone' ? { checked: '' } : {}),
         },
       });
       const cloneName = element('input', {
         attributes: {
           id: cloneNameId,
           type: 'text',
-          value: selected.cloneName ?? row.cloneName,
-          ...(selected.decision === 'match' ? { disabled: '' } : {}),
+          value: selected?.cloneName ?? row.cloneName,
+          ...(selected?.decision === 'clone' ? {} : { disabled: '' }),
         },
       });
-      cloneName.disabled = selected.decision === 'match';
+      cloneName.disabled = selected?.decision !== 'clone';
       fieldset.append(
         match,
-        element('label', { text: 'Match', attributes: { for: matchId } }),
+        element('label', {
+          text: 'Match — Discards the incoming rules; existing characters keep the local entry.',
+          attributes: { for: matchId },
+        }),
         clone,
-        element('label', { text: 'Clone instead', attributes: { for: cloneId } }),
+        element('label', {
+          text: 'Clone — Installs the incoming rules under a new name; existing characters stay on the local entry.',
+          attributes: { for: cloneId },
+        }),
         element('label', { text: 'Private copy name', attributes: { for: cloneNameId } }),
         cloneName,
       );
       match.addEventListener('change', () => {
-        choices[row.id] = { decision: 'match', cloneName: cloneName.value };
+        choices[row.id] = { decision: 'match' };
         latestOperation = refresh();
       });
       clone.addEventListener('change', () => {
@@ -410,9 +412,7 @@ export function createContentAdoptionDialog(
         for (const row of result.freshPlan.reviews) rows.set(row.id, row);
         status.textContent = 'The catalog changed. Review the refreshed plan before committing.';
         renderRows();
-        commit.disabled = result.freshPlan.outcomes.some((outcome) =>
-          outcome.kind === 'refused',
-        );
+        commit.disabled = planBlocksCommit(result.freshPlan);
         return;
       }
       if (result.kind === 'refused') {

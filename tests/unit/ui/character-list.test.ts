@@ -231,12 +231,7 @@ describe('character share links', () => {
       expect(submitted).toEqual([{
         fragment: 'fragment',
         token,
-        choices: {
-          'spell:share:fallback': {
-            decision: 'match',
-            cloneName: 'Fireball (Private copy)',
-          },
-        },
+        choices: {},
       }]);
       controls.cleanup();
     } finally {
@@ -1078,12 +1073,7 @@ describe('catalog and backup entry points', () => {
       expect(commits).toEqual([{
         documents: ['[{"name":"Fireball"}]'],
         token: reviewPlan.token,
-        choices: {
-          'spell:external-fireball': {
-            decision: 'match',
-            cloneName: 'Fireball (Private copy)',
-          },
-        },
+        choices: {},
       }]);
       expect(persistedChanges).toBe(1);
       expect(root.querySelectorAll('button').some((button) =>

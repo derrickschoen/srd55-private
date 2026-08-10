@@ -85,6 +85,7 @@ import {
   catalogLayerDisclosure,
   type CatalogLayerDisclosure,
 } from '../catalog/catalog-disclosure';
+import { selectableCatalogContentSql } from '../queries/selectable-catalog-content';
 import {
   backgroundEffectsFromTemplate,
   backgroundFromTemplate,
@@ -738,6 +739,7 @@ export function listGuidedClassOptions(
          ON identity.content_kind = 'class'
         AND identity.content_key = definition.content_key
        WHERE definition.content_key IN (${placeholders})
+         AND ${selectableCatalogContentSql('class', 'definition.content_key')}
        ORDER BY definition.name`,
       [...keys],
       (row) => ({
@@ -942,6 +944,7 @@ export function listGuidedOriginOptions(
          LEFT JOIN background_definitions AS definition
            ON definition.content_key = template.content_key
          WHERE identity.archived_at IS NULL
+           AND ${selectableCatalogContentSql('background', 'template.content_key')}
            AND (identity.catalog_layer = 'bundled'
              OR definition.content_key IS NOT NULL)
          ORDER BY template.name, template.content_key`,
@@ -970,6 +973,7 @@ export function listGuidedOriginOptions(
        LEFT JOIN species_definitions AS definition
          ON definition.content_key = template.content_key
        WHERE identity.archived_at IS NULL
+         AND ${selectableCatalogContentSql('species', 'template.content_key')}
          AND (identity.catalog_layer = 'bundled'
            OR definition.content_key IS NOT NULL)
        ORDER BY template.name, template.content_key`,
@@ -1547,6 +1551,7 @@ export function listGuidedBackgroundChoiceOptions(
        LEFT JOIN background_definitions AS definition
          ON definition.content_key = template.content_key
        WHERE identity.archived_at IS NULL
+         AND ${selectableCatalogContentSql('background', 'template.content_key')}
          AND (identity.catalog_layer IS NULL
            OR identity.catalog_layer = 'bundled'
            OR definition.content_key IS NOT NULL)
@@ -1583,6 +1588,7 @@ export function listGuidedBackgroundChoiceOptions(
        ON identity.content_kind = 'feat'
       AND identity.content_key = feat.content_key
      WHERE feat.category = 'origin'
+       AND ${selectableCatalogContentSql('feat', 'feat.content_key')}
      ORDER BY feat.name, feat.content_key`,
     undefined,
     (row) => ({

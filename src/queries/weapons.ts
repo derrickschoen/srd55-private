@@ -41,6 +41,7 @@ import { SheetContentLookup } from '../rules/sheet-content-lookup';
 import { WeaponMasteryLookup } from '../rules/weapon-mastery-lookup';
 import { ClassProficiencyLookup } from './class-proficiency-lookup';
 import { catalogLayerDisclosure } from '../catalog/catalog-disclosure';
+import { selectableCatalogContentSql } from './selectable-catalog-content';
 
 /**
  * The three things the attack derivation needs that are NOT weapon rows.
@@ -206,6 +207,7 @@ export class WeaponQueries {
        LEFT JOIN catalog_content_identities AS identity
          ON identity.content_kind = 'weapon'
         AND identity.content_key = template.content_key
+       WHERE ${selectableCatalogContentSql('weapon', 'template.content_key')}
        ORDER BY CASE srd_group
                   WHEN 'simple_melee' THEN 1
                   WHEN 'simple_ranged' THEN 2
