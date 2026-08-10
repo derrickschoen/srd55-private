@@ -676,7 +676,7 @@ test('W-BROWSER-PLANNED-DRAFT carries planned_subchoices from UI through Review 
     'Chromatic Orb — Wizard — SRD · bundled layer',
     'Comprehend Languages — Wizard — SRD · bundled layer',
     'Arcana — Wizard — Scholar',
-    'Scholar',
+    'Scholar — SRD · bundled layer',
   ]) {
     await expect(page.getByText(text, { exact: true })).toBeVisible();
   }
