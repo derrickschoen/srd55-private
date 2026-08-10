@@ -23,6 +23,47 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
+## RESTART POINT 2026-08-10-b (newest - read first)
+MAIN d136da85 (mirror pushed after verified verdicts). FLOORS: vitest
+265/4,323 all-pass; PW 152 pool; build 0 with digest verification;
+migrations 0000-0041. SIXTY-TWO merges. Rulings through D231. SWEEP 2
+(multiclass + higher tiers) IS FULLY LANDED.
+
+SWEEP-2 RECORD — the namesake VERIFIED: multiclass spell-slot math
+against the SRD table, caster-level derivation, Pact Magic separation,
+per-class casting abilities, Extra Attack, ASI levels, the level-20
+cap, and high-tier undo/reload all checked out SRD-CORRECT on the
+walked combinations. Five findings found; five fixed:
+ - 59th, wt/v1: multiclass prerequisites SPEAK — the evaluator that
+   had ZERO production callers is wired through one query seam into
+   planner, level-up, and sheet; D96 permanent non-blocking warnings,
+   both directions, OR-expressions, honest cannot-be-verified;
+   effective-score pipeline shared with the sheet; HA-10 guard catch
+   FIVE (class names layer-disclosed).
+ - 60th, wt/v2: authoring choice_from_list gains minimum-spell-level
+   (closed parser, inverted-range refusal); the bundled Spell Student
+   fixed as a v2 REVISION through CI-7's existing machinery (D219:
+   zero new plumbing) — historical characters keep recorded state,
+   new characters enforce L0-0/L1-1. The revision exposed a latent
+   gap: superseded revisions were OFFERED as fresh choices — fixed
+   with one shared query-seam filter, supersession-row-driven, pinned
+   both ways.
+ - 61st, wt/v3: higher-tier subclass gains have NAMES — stored
+   feature rows resolved data-driven, compiler-enforced exhaustive
+   rendering, explicit layered unknowns distinguishing not-selected
+   from no-stored-row with honest cause text; never fabricates.
+ - 62nd, wt/v4: planner shows starting-class provenance in ENTRY
+   order with badges derived from the sheet's guarded startingClass()
+   resolution (review caught the raw-flag path mis-badging the
+   legitimately-reachable removed-starting-class case); degenerate
+   states warn; vocabulary unified on 'Starting class'; level-up
+   names the multiclass path explicitly.
+
+IN FLIGHT: nothing. QUEUES EMPTY — the owner picks what feeds next.
+
+WAITING ON OWNER: Barbed Court sync word; walkthrough friction list;
+bundle deletion (~/dnd-prerewrite-backup); wt/party retirement.
+
 ## RESTART POINT 2026-08-10-a (newest - read first)
 MAIN ff4bceae (mirror pushed after verified verdicts). FLOORS: vitest
 264/4,306 all-pass; PW 149 pool; build 0 with digest verification;
