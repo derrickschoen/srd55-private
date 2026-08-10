@@ -237,6 +237,7 @@ describe('planner catalog disclosure', () => {
                 kind: 'multiclass_primary_ability_unmet',
                 class_definition_id: 2,
                 class_name: 'Wizard',
+                class_catalog_layer: 'bundled',
                 title: 'Wizard multiclass ability minimum not met',
                 detail:
                   'Wizard requires Intelligence 13 to multiclass; its current score is Intelligence 10.',
@@ -256,7 +257,7 @@ describe('planner catalog disclosure', () => {
       expect(warnings).toHaveLength(1);
       const warningText = elementText(warnings[0] as unknown as Node);
       expect(warningText).toContain(
-        'Wizard multiclass ability minimum not met',
+        'Wizard multiclass ability minimum not met — SRD · bundled layer',
       );
       expect(warningText).toContain(
         'Wizard requires Intelligence 13 to multiclass; its current score is Intelligence 10.',

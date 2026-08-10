@@ -3,6 +3,7 @@ import {
   isEnumValue,
   type Ability,
 } from './enums';
+import type { CatalogLayerDisclosure } from '../catalog/catalog-disclosure';
 
 /**
  * A class's sourced Primary Ability row.
@@ -56,6 +57,7 @@ export interface MulticlassPrimaryAbilityWarning {
     | 'multiclass_primary_ability_unprovable';
   readonly class_definition_id: number;
   readonly class_name: string;
+  readonly class_catalog_layer: CatalogLayerDisclosure;
   readonly title: string;
   readonly detail: string;
   readonly remedy: string;

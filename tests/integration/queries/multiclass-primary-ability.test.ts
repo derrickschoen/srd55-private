@@ -105,6 +105,7 @@ describe('shared multiclass primary-ability query seam', () => {
     ).toMatchObject({
       kind: 'multiclass_primary_ability_unmet',
       class_name: 'Wizard',
+      class_catalog_layer: 'bundled',
       detail:
         'Wizard requires Intelligence 13 to multiclass; its current score is Intelligence 10.',
     });
@@ -122,19 +123,21 @@ describe('shared multiclass primary-ability query seam', () => {
       multiclass_prerequisite_warning: {
         kind: 'multiclass_primary_ability_unmet',
         class_name: 'Wizard',
+        class_catalog_layer: 'bundled',
       },
     });
     expect(levelUp.character.warnings).toContainEqual(
       expect.objectContaining({
         kind: 'multiclass_primary_ability_unmet',
         class_name: 'Wizard',
+        class_catalog_layer: 'bundled',
       }),
     );
 
     expect(new CharacterSheetBuilder(db).build(characterId).warnings).toContainEqual({
       code: 'multiclass_primary_ability_unmet',
       message:
-        'Wizard requires Intelligence 13 to multiclass; its current score is Intelligence 10. Multiclassing remains allowed. Raise the named score to clear this permanent warning.',
+        'Wizard multiclass ability minimum not met — SRD · bundled layer. Wizard requires Intelligence 13 to multiclass; its current score is Intelligence 10. Multiclassing remains allowed. Raise the named score to clear this permanent warning.',
     });
   });
 
@@ -231,6 +234,7 @@ describe('shared multiclass primary-ability query seam', () => {
     ).toMatchObject({
       status: 'unmet',
       warning: {
+        class_catalog_layer: 'external',
         detail:
           'Chronomancer requires Charisma 13 to multiclass; its current score is Charisma 10.',
       },

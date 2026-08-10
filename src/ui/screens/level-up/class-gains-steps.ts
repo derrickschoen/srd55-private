@@ -137,7 +137,11 @@ function prerequisiteWarning(
       },
     },
     [
-      element('strong', { text: warning.title }),
+      element('strong', {
+        text: `${warning.title} — ${catalogLayerLabel(
+          warning.class_catalog_layer,
+        )}`,
+      }),
       element('p', { text: warning.detail }),
       element('p', { text: warning.remedy }),
     ],

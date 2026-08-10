@@ -1224,6 +1224,7 @@ describe('in-memory draft loss', () => {
       kind: 'multiclass_primary_ability_unmet' as const,
       class_definition_id: 11,
       class_name: 'Wizard',
+      class_catalog_layer: 'bundled' as const,
       title: 'Wizard multiclass ability minimum not met',
       detail:
         'Wizard requires Intelligence 13 to multiclass; its current score is Intelligence 10.',
@@ -1244,6 +1245,9 @@ describe('in-memory draft loss', () => {
       `[${LEVEL_UP_ATTR.warning}="multiclass_primary_ability_unmet"]`,
     );
     expect(firstStepWarning).not.toBeNull();
+    expect(elementText(firstStepWarning as unknown as Node)).toContain(
+      'Wizard multiclass ability minimum not met — SRD · bundled layer',
+    );
     expect(elementText(firstStepWarning as unknown as Node)).toContain(
       'Wizard requires Intelligence 13 to multiclass; its current score is Intelligence 10.',
     );

@@ -235,6 +235,7 @@ describe('character list and workspace query builders', () => {
         kind: 'multiclass_primary_ability_unprovable',
         class_definition_id: wizardId,
         class_name: 'Wizard',
+        class_catalog_layer: 'bundled',
         title: 'Wizard multiclass ability minimum cannot be verified',
         detail:
           'Wizard has no stored primary-ability expression, so its multiclass minimum cannot be judged.',

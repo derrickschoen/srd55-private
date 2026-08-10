@@ -1,5 +1,9 @@
 import { sqlInteger, sqlNullableString, sqlString } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
+import {
+  catalogLayerDisclosure,
+  type CatalogLayerDisclosure,
+} from '../catalog/catalog-disclosure';
 import { abilities, type Ability } from '../domain/enums';
 import type { ClassDefinitionId } from '../domain/ids';
 import {
@@ -23,6 +27,7 @@ interface CharacterAbilityRow {
 interface HeldClassPrerequisiteRow {
   readonly class_definition_id: ClassDefinitionId;
   readonly class_name: string;
+  readonly class_catalog_layer: CatalogLayerDisclosure;
   readonly stored_expression: string | null;
 }
 
@@ -104,6 +109,7 @@ function unmetWarning(
     kind: 'multiclass_primary_ability_unmet',
     class_definition_id: row.class_definition_id,
     class_name: row.class_name,
+    class_catalog_layer: row.class_catalog_layer,
     title: `${row.class_name} multiclass ability minimum not met`,
     detail:
       `${row.class_name} requires ${expressionRequirement(evaluation.expression)} ` +
@@ -132,6 +138,7 @@ function unprovableWarning(
     kind: 'multiclass_primary_ability_unprovable',
     class_definition_id: row.class_definition_id,
     class_name: row.class_name,
+    class_catalog_layer: row.class_catalog_layer,
     title: `${row.class_name} multiclass ability minimum cannot be verified`,
     detail: `${row.class_name} ${reason}, so its multiclass minimum cannot be judged.`,
     remedy:
@@ -168,10 +175,14 @@ export class MulticlassPrimaryAbilityQueries {
     const held = this.db.all(
       `SELECT definition.id AS class_definition_id,
               definition.name AS class_name,
+              identity.catalog_layer AS class_catalog_layer,
               definition.primary_ability_expression AS stored_expression
        FROM character_class_levels AS level
        JOIN class_definitions AS definition
          ON definition.id = level.class_definition_id
+       LEFT JOIN catalog_content_identities AS identity
+         ON identity.content_kind = 'class'
+        AND identity.content_key = definition.content_key
        WHERE level.character_id = ?
        ORDER BY definition.name, level.id`,
       [characterId],
@@ -179,6 +190,9 @@ export class MulticlassPrimaryAbilityQueries {
         class_definition_id:
           sqlInteger(row, 'class_definition_id') as ClassDefinitionId,
         class_name: sqlString(row, 'class_name'),
+        class_catalog_layer: catalogLayerDisclosure(
+          sqlNullableString(row, 'class_catalog_layer'),
+        ),
         stored_expression: sqlNullableString(row, 'stored_expression'),
       }),
     );

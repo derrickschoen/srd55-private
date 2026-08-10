@@ -73,6 +73,7 @@ import { characterLevel } from '../rules/character-level';
 import { resolveSpeciesChoice } from '../builder/species-choice';
 import { requiredSourceChoiceItems } from './character-completeness';
 import { MulticlassPrimaryAbilityQueries } from './multiclass-primary-ability';
+import { catalogLayerLabel } from '../catalog/catalog-disclosure';
 import {
   characterProficiencies,
   type ProficiencyWeapon,
@@ -1144,7 +1145,9 @@ export class CharacterSheetBuilder {
             : [{
                 code: assessment.warning.kind,
                 message:
-                  `${assessment.warning.detail} ${assessment.warning.remedy}`,
+                  `${assessment.warning.title} — ${catalogLayerLabel(
+                    assessment.warning.class_catalog_layer,
+                  )}. ${assessment.warning.detail} ${assessment.warning.remedy}`,
               }]
         ),
       ]),

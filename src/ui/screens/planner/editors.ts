@@ -582,7 +582,10 @@ function renderClasses(
       warning.dataset.warningKind = prerequisiteWarning.kind;
       warning.setAttribute('role', 'alert');
       const warningTitle = document.createElement('strong');
-      warningTitle.textContent = prerequisiteWarning.title;
+      warningTitle.textContent =
+        `${prerequisiteWarning.title} — ${catalogLayerLabel(
+          prerequisiteWarning.class_catalog_layer,
+        )}`;
       const detail = document.createElement('p');
       detail.textContent = prerequisiteWarning.detail;
       const remedy = document.createElement('p');

@@ -10,6 +10,7 @@ const WARNING_DETAIL =
   'Wizard requires Intelligence 13 to multiclass; its current score is Intelligence 10.';
 const WARNING_REMEDY =
   'Multiclassing remains allowed. Raise the named score to clear this permanent warning.';
+const WARNING_LAYER = 'SRD · bundled layer';
 
 async function ready(page: Page): Promise<void> {
   await expect(page.locator('#status')).toHaveAttribute('data-ready', 'true', {
@@ -86,6 +87,7 @@ test('D96 warns without blocking on planner, level-up, and sheet, then clears at
   await expect(plannerWarning).toHaveCount(1);
   await expect(plannerWarning).toContainText(WARNING_DETAIL);
   await expect(plannerWarning).toContainText(WARNING_REMEDY);
+  await expect(plannerWarning).toContainText(WARNING_LAYER);
   await expect(page.getByLabel('Remove Wizard')).toBeEnabled();
 
   await page.goto(`/characters/${String(character.id)}/level-up`);
@@ -101,6 +103,7 @@ test('D96 warns without blocking on planner, level-up, and sheet, then clears at
       '[data-level-up-warning="multiclass_primary_ability_unmet"]',
     ),
   ).toContainText(WARNING_DETAIL);
+  await expect(wizardCard).toContainText(WARNING_LAYER);
   await expect(
     clericCard.locator(
       '[data-level-up-warning="multiclass_primary_ability_unmet"]',
@@ -114,6 +117,7 @@ test('D96 warns without blocking on planner, level-up, and sheet, then clears at
   );
   await expect(sheetWarning).toContainText(WARNING_DETAIL, { timeout: 45_000 });
   await expect(sheetWarning).toContainText(WARNING_REMEDY);
+  await expect(sheetWarning).toContainText(WARNING_LAYER);
 
   await page.goto(`/characters/${String(character.id)}`);
   await expect(page.locator('#planner-status')).toHaveAttribute(
