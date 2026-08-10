@@ -5,6 +5,28 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-10 — Equal-items basis: every sim comparator carries +1/+2/+3 weapons at 6/11/17
+
+Owner's ruling, verbatim:
+
+> Give every sim build +1 weapons at 6, +2 At 11, +3 at 17
+
+Effect: the comparison boards now assume magic weapons for every martial
+comparator on the DMG rarity ladder. The Barbed Court's numbers are
+unchanged — Barbed Fists is its item-equivalent and its own non-stacking
+clause applies; the ladder finally does exactly the parity job it was
+commissioned for. Equal-items board (burst, L3/6/11/17): Barbed Court
+13.7/37.9/68.8/137.7; Veteran melee 24.9/35.2/70.0/115.9; Paladin
+19.5/34.7/60.5/72.3; Champion 11.8/32.6/58.4/74.6; Thief
+18.4/26.4/43.3/75.6.
+
+Consequences recorded: monk ratios collapse to **0.70×/1.09×/1.14×/1.90×**
+the Paladin and 0.98× the Veteran at 11 — the earlier "hot" readings were
+substantially an itemless-comparator artifact. Veteran ratios hold at
+1.01×/1.16×/1.60× (its band survives the fair basis). **The pending
+level-6 trim (lever A) is recommended withdrawn** — 1.09× at 6 on the fair
+basis needs no toning. Both docs' worksheets updated to this basis.
+
 ## 2026-08-10 — Barbed Court: the Hands' Advantage clause moves to 17
 
 Owner's ruling, verbatim:

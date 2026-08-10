@@ -254,14 +254,17 @@ taken; *Shield* slot-cast as a Reaction; enemy AC 14/16/18/18 at levels
 level 10 (Heightened Focus), which an earlier draft of this worksheet
 missed.
 
+All martial comparators carry **+1/+2/+3 magic weapons at levels 6/11/17**
+(owner ruling 2026-08-10); the Barbed Court's Barbed Fists ladder is its
+item-equivalent and doesn't stack, so its own numbers are unchanged.
+
 | Build | L3 | L6 | L11 | L17 |
 |---|---:|---:|---:|---:|
 | **Barbed Court, this kit** | **13.7** | **37.9** | **68.8** | **137.7** |
-| Optimized Dex Vengeance Paladin (melee ref.) | 19.5 | 31.2 | 52.2 | 60.8 |
-| Veteran rogue (this project) | 25.1 | 32.8 | 64.5 | 108.9 |
-| SRD Thief | 18.4 | 23.7 | 37.2 | 64.2 |
-| Champion Fighter, greatsword | 10.8 | 26.7 | 43.8 | 52.3 |
-| Fiend Warlock (best of EB/volleys/blade) | 12.9 | 25.1 | 41.1 | 64.5 |
+| Veteran rogue (this project) | 24.9 | 35.2 | 70.0 | 115.9 |
+| Optimized Dex Vengeance Paladin (melee ref.) | 19.5 | 34.7 | 60.5 | 72.3 |
+| Champion Fighter, greatsword | 11.8 | 32.6 | 58.4 | 74.6 |
+| SRD Thief | 18.4 | 26.4 | 43.3 | 75.6 |
 | Legal CME-nova caster (third-party-free build, dummy target) | — | — | 129 | 265 |
 
 Recorded caveats, both directions:
@@ -275,13 +278,13 @@ Recorded caveats, both directions:
    single block of the kit's damage — roughly a third at 11 and 17 by
    marginal-removal tests on the pre-correction run (non-additive marginals;
    re-derivation pending).
-3. **Ratios, stated plainly**: 0.70× / 1.21× / 1.32× / 2.26× the optimized
-   Paladin, and 0.55× / 1.16× / 1.07× / 1.26× this project's own Veteran.
-   Growth 11→17 is +100% — the Hands' Advantage clause was moved to 17 by
-   owner ruling 2026-08-10, making 17 the kit's one great spike (damage
-   doubles and the aim-guidance arrives together). The attack loop is
-   4/5/6/6 swings at 3/6/11/17 (Attack action + slap + Flurry;
-   three-strike Flurry from 10).
+3. **Ratios, stated plainly (equal-items basis)**: 0.70× / 1.09× / 1.14× /
+   1.90× the optimized Paladin, and 0.55× / 1.08× / 0.98× / 1.19× this
+   project's own Veteran. Growth 11→17 is +100% — the Hands' Advantage
+   clause was moved to 17 by owner ruling 2026-08-10, making 17 the kit's
+   one great spike (damage doubles and the aim-guidance arrives together).
+   The attack loop is 4/5/6/6 swings at 3/6/11/17 (Attack action + slap +
+   Flurry; three-strike Flurry from 10).
 4. **The caster race is not entered**: 68.8/129 = 0.53× at 11 and
    137.7/265 = 0.52× at 17 against the strongest legal nova build measured.
 5. Levels 3–5 are the kit's weakest window (0.70× the paladin) — the Hands
