@@ -85,6 +85,19 @@ export function configuredChoiceSlotGenerator(
   );
 }
 
+/** Reconcile one active source when its own rules depend on character level. */
+export function reconcileCharacterLevelDependentSource(
+  db: DatabaseContext,
+  sourceId: number,
+  generator: GrantRuleSlotGenerator,
+): void {
+  const reader = new SourceRuleReader(db);
+  const source = reader.findSource(sourceId);
+  if (source !== null && dependsOnCharacterLevel(db, reader, source)) {
+    generator.generateForSource(sourceId);
+  }
+}
+
 /** Reconcile every active source whose own data depends on total character level. */
 export function reconcileCharacterLevelDependentSources(
   db: DatabaseContext,

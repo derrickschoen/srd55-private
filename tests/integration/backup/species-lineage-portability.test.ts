@@ -106,6 +106,46 @@ describe('lineage portability through fresh databases', () => {
     ).toEqual(EXPECTED_LEVEL_FIVE_HIGH_ELF);
   }, 20_000);
 
+  // Historical snapshots can carry a class source from before the separate
+  // class-level relation was recorded. The import boundary preserves that
+  // readable state; reconciliation must neither throw nor infer a level.
+  it('imports a historical class source without its level relation or invented gated slots', async () => {
+    const source = await sourceFixture();
+    const backup = exportCharacterBackup(
+      source.lifecycle.database,
+      source.characterId,
+      '2042-08-09T00:00:00.000Z',
+    );
+    const historical = {
+      ...backup,
+      tables: {
+        ...backup.tables,
+        character_class_levels: [],
+        character_level_feat_choices: [],
+        spell_selection_slots: [],
+      },
+    };
+
+    const target = await lifecycle();
+    const imported = importCharacterBackup(target.database, historical);
+    expect(target.database.allRaw(
+      `SELECT slot.rule_key
+       FROM spell_selection_slots AS slot
+       JOIN character_source_instances AS source
+         ON source.id = slot.source_instance_id
+       WHERE source.character_id = ?
+         AND source.source_type IN ('class', 'subclass')
+       ORDER BY slot.rule_key`,
+      [imported.characterId],
+    )).toEqual([]);
+    expect(lineagePortabilityProjection(
+      target.database,
+      imported.characterId,
+    ).slots.map((slot) => slot['rule_key'])).toEqual([
+      'elf-lineage:replaceable_spell',
+    ]);
+  }, 20_000);
+
   // Measured alone at 1.8s; 1.8 × 1.5 = 2.7s. The 20s guard follows the
   // repository convention for boot-heavy integration tests over 1.5s.
   it('round-trips library v2 before the same production writers recreate the exact choice', async () => {

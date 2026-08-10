@@ -208,6 +208,7 @@ export function lineagePortabilityProjection(
          ON fixed.id = slot.fixed_spell_version_id
        WHERE source.character_id = ? AND source.source_type = 'species'
          AND source.source_definition_id IS NOT NULL
+         AND source.state = 'active'
        ORDER BY slot.rule_key, slot.ordinal`,
       [characterId],
     ),
