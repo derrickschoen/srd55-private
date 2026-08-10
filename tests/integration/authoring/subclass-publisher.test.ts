@@ -37,6 +37,8 @@ import { SourceRuleReader } from '../../../src/grants/source-rule-reader';
 import { BuildReportBuilder } from '../../../src/reports/build-report-builder';
 import { SavePointQueries } from '../../../src/queries/save-points';
 import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
+import { SpellSelectionService } from '../../../src/eligibility/spell-selection-service';
+import { eligibilityInvalidReasons } from '../../../src/eligibility/spell-selection-eligibility';
 import { SheetContentLookup } from '../../../src/rules/sheet-content-lookup';
 import { attacksPerAction } from '../../../src/rules/sheet';
 import { raiseClassLevelForTest } from '../../helpers/class-levels';
@@ -592,6 +594,119 @@ describe('HA-5 subclass publisher', () => {
         [3, 0, 0, 0, 0, 0, 0, 0, 0],
         [4, 2, 0, 0, 0, 0, 0, 0, 0],
       ]);
+  });
+
+  it('publishes list-choice minimums while omitted historical fields retain level zero', async () => {
+    const db = await database();
+    const authoring = service(db);
+    const rows = thirdCasterRows();
+    rows[2] = {
+      ...rows[2]!,
+      grants: [{
+        kind: 'choice_from_list',
+        draft_item_uuid: itemUuid('legacy-list-choice'),
+        rule_key: 'legacy-list-choice',
+        list: 'Wizard',
+        count: 1,
+        maximum_spell_level: 1,
+      }, {
+        kind: 'choice_from_list',
+        draft_item_uuid: itemUuid('leveled-list-choice'),
+        rule_key: 'leveled-list-choice',
+        list: 'Wizard',
+        count: 1,
+        minimum_spell_level: 1,
+        maximum_spell_level: 1,
+      }],
+    };
+    const published = publish(authoring, savedSubclass(
+      authoring,
+      'List Choice Minimums',
+      (document) => ({
+        ...document,
+        progression: {
+          mode: 'override',
+          spellcasting_ability: 'intelligence',
+          caster_contribution: 'third_down',
+          rows,
+        },
+      }),
+    ));
+    if (published.result.outcome === 'matched_existing') {
+      throw new Error('Expected a newly published subclass.');
+    }
+    const character = characterWithSubclass(db, published.result.content_key, 3);
+    const slots = db.allRaw(
+      `SELECT id, rule_key, spell_level_min, spell_level_max
+       FROM spell_selection_slots
+       WHERE character_id = ? AND rule_key IN (?, ?)
+       ORDER BY rule_key`,
+      [character.characterId, 'legacy-list-choice', 'leveled-list-choice'],
+    );
+    expect(slots).toEqual([{
+      id: expect.any(Number),
+      rule_key: 'legacy-list-choice',
+      spell_level_min: 0,
+      spell_level_max: 1,
+    }, {
+      id: expect.any(Number),
+      rule_key: 'leveled-list-choice',
+      spell_level_min: 1,
+      spell_level_max: 1,
+    }]);
+
+    const mageHand = db.scalar<number>(
+      "SELECT id FROM spell_versions WHERE display_name = 'Mage Hand' AND rules_edition = '2024'",
+    );
+    const shield = db.scalar<number>(
+      "SELECT id FROM spell_versions WHERE display_name = 'Shield' AND rules_edition = '2024'",
+    );
+    if (mageHand === null || shield === null) throw new Error('Seeded spell fixtures are missing.');
+    const selection = new SpellSelectionService(db);
+    selection.select(Number(slots[0]!.id), mageHand);
+    expect(() => selection.select(Number(slots[1]!.id), mageHand))
+      .toThrow(eligibilityInvalidReasons.level);
+    selection.select(Number(slots[1]!.id), shield);
+  });
+
+  it('refuses an inverted list-choice level window at the shared publication boundary', async () => {
+    const db = await database();
+    const authoring = service(db);
+    const rows = thirdCasterRows();
+    rows[2] = {
+      ...rows[2]!,
+      grants: [{
+        kind: 'choice_from_list',
+        draft_item_uuid: itemUuid('inverted-list-choice'),
+        rule_key: 'inverted-list-choice',
+        list: 'Wizard',
+        count: 1,
+        minimum_spell_level: 2,
+        maximum_spell_level: 1,
+      }],
+    };
+    const draft = savedSubclass(authoring, 'Inverted List Choice', (document) => ({
+      ...document,
+      progression: {
+        mode: 'override',
+        spellcasting_ability: 'intelligence',
+        caster_contribution: 'third_down',
+        rows,
+      },
+    }));
+
+    const error = authoringError(() => authoring.previewPublish({
+      draft_uuid: draft.draft_uuid,
+      expected_revision: draft.revision,
+    }));
+    expect(error.data).toMatchObject({
+      reason: 'validation_failed',
+      issues: [expect.objectContaining({
+        path: ['progression', 'rows', 2, 'grants', 0, 'maximum_spell_level'],
+        code: 'out_of_range',
+        message: 'Maximum spell level must not be below the minimum.',
+      })],
+    });
   });
 
   it('materializes the typed 20-level override and reports level 7 slots as 4/2', async () => {

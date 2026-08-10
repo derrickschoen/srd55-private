@@ -22,16 +22,23 @@ import {
   storedAuthoredRegistryReferencesV1,
 } from '../../../src/catalog/stored-authored-content-projector-v1';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
+import { canonicalJson } from '../../../src/commands/canonical-json';
+import { LevelUpClassCommand } from '../../../src/commands/level-up-class';
 import { UpdateClassCommand } from '../../../src/commands/update-class';
 import { raiseClassLevelForTest } from '../../helpers/class-levels';
 import { BuildReportBuilder } from '../../../src/reports/build-report-builder';
 import { SpellAccessBuilder } from '../../../src/access/spell-access-builder';
 import { CatalogImporter } from '../../../src/catalog/catalog-importer';
 import {
+  CONTENT_FINGERPRINT_SCHEME_V2,
   CONTENT_FINGERPRINT_SCHEME_V1,
+  deriveContentIdentityV2,
   type ContentFingerprintDigest,
 } from '../../../src/catalog/content-identity';
 import { featProjectorV1Vector } from '../../unit/catalog/fixtures/source-projector-v1-vectors';
+import { SpellSelectionService } from '../../../src/eligibility/spell-selection-service';
+import { eligibilityInvalidReasons } from '../../../src/eligibility/spell-selection-eligibility';
+import { sha256 } from '../../../src/crypto/sha256';
 
 const connections: Database[] = [];
 
@@ -52,6 +59,13 @@ function spellStudent(): SubclassAuthoringDraft {
     entry.catalog_key === 'spell-student')?.revisions[0];
   if (document?.kind !== 'subclass') throw new Error('Spell Student fixture is missing.');
   return document;
+}
+
+function spellStudentEntry(): BundledHomebrewCatalogEntry<SubclassAuthoringDraft> {
+  const entry = BUNDLED_HOMEBREW_CATALOG.find((candidate) =>
+    candidate.catalog_key === 'spell-student');
+  if (entry === undefined) throw new Error('Spell Student catalog entry is missing.');
+  return entry;
 }
 
 function installPortableOrigins(db: DatabaseContext): {
@@ -186,12 +200,25 @@ function applySubclass(db: DatabaseContext, contentKey: ContentKey, level: numbe
 
 describe('bundled authored-kind installer', () => {
   it('publishes all three entries atomically through drafts and is an exact-fingerprint no-op on repeat', async () => {
-    // Measured alone at 3.58s; 20s retains contention headroom.
+    // Measured alone at 4.62s; 20s retains contention headroom.
     const db = await database();
     const beforeRoots = db.scalar<number>(
       "SELECT count(*) FROM catalog_content_identities WHERE catalog_layer = 'external'",
     );
     const firstPlan = planBundledHomebrewInstall(db);
+    const previousCatalog = BUNDLED_HOMEBREW_CATALOG.map((entry) =>
+      entry.catalog_key === 'spell-student'
+        ? Object.freeze({
+            ...entry,
+            revisions: Object.freeze([entry.revisions[0]] as const),
+          })
+        : entry);
+    expect(sha256(canonicalJson(previousCatalog))).toBe(
+      '8d36536109be8768e2c274958b1ee9eb70a74cb37a988c7f27e88eebb0d8d84a',
+    );
+    expect(firstPlan.inputHash).toBe(
+      '50209f767a55af8331a6ea0397f9ca28023ef1fbd173a5d1045c6277277cf3f4',
+    );
 
     expect(firstPlan.entries.map((entry) => [entry.name, entry.outcome, entry.error])).toEqual([
       ['Veteran', 'create', null],
@@ -203,7 +230,14 @@ describe('bundled authored-kind installer', () => {
       outcomes: [{ kind: 'create' }, { kind: 'create' }, { kind: 'create' }],
     });
     expect(db.scalar<number>("SELECT count(*) FROM catalog_content_identities WHERE catalog_layer = 'external'"))
-      .toBe((beforeRoots ?? 0) + 3);
+      .toBe((beforeRoots ?? 0) + 4);
+    expect(db.allRaw(
+      `SELECT superseded_content_key, successor_content_key
+       FROM catalog_content_supersessions WHERE content_kind = 'subclass'`,
+    )).toEqual([{
+      superseded_content_key: '2024:content.subclass:spell-student',
+      successor_content_key: '2024:content.subclass:spell-student-bundled-revision-2',
+    }]);
     expect(db.scalar<number>('SELECT count(*) FROM catalog_content_drafts')).toBe(0);
 
     const rootsAfterFirst = db.scalar<number>('SELECT count(*) FROM catalog_content_identities');
@@ -216,7 +250,7 @@ describe('bundled authored-kind installer', () => {
       outcomes: [{ kind: 'match' }, { kind: 'match' }, { kind: 'match' }],
     });
     expect(db.scalar<number>('SELECT count(*) FROM catalog_content_identities')).toBe(rootsAfterFirst);
-    expect(db.scalar<number>('SELECT count(*) FROM catalog_content_supersessions')).toBe(0);
+    expect(db.scalar<number>('SELECT count(*) FROM catalog_content_supersessions')).toBe(1);
     expect(db.scalar<number>('SELECT count(*) FROM catalog_content_drafts')).toBe(0);
   }, 20_000);
 
@@ -281,14 +315,15 @@ describe('bundled authored-kind installer', () => {
       .toEqual([{ level: 1, count: 3 }]);
   }, 20_000);
 
-  it('publishes registered changed bytes as a CI-7 successor and leaves the previous root in place', async () => {
-    // Measured alone at 2.02s; 20s retains contention headroom.
+  it('supersedes Spell Student v1 without retargeting its user and pins both identity schemes', async () => {
+    // Measured alone at 2.27s; 20s retains contention headroom.
     const db = await database();
-    const first = spellStudent();
-    const revised: SubclassAuthoringDraft = {
-      ...first,
-      reference_text: `${first.reference_text} The lessons are carefully recorded.`,
-    };
+    const entry = spellStudentEntry();
+    const first = entry.revisions[0];
+    const revised = entry.revisions[1];
+    if (first === undefined || revised === undefined) {
+      throw new Error('Spell Student requires reviewed v1 and v2 revisions.');
+    }
     const v1 = Object.freeze([Object.freeze({
       catalog_key: 'spell-student',
       revisions: Object.freeze([first] as const),
@@ -302,6 +337,23 @@ describe('bundled authored-kind installer', () => {
     if (initialCommit.kind !== 'committed') throw new Error('Initial catalog install failed.');
     const oldKey = initialCommit.outcomes[0];
     if (oldKey?.kind !== 'create') throw new Error('Initial catalog root was not created.');
+    const oldCharacterId = applySubclass(db, oldKey.contentKey, 3);
+    const oldSpellsSlot = db.oneRaw(
+      `SELECT id, spell_level_min, spell_level_max
+       FROM spell_selection_slots
+       WHERE character_id = ? AND rule_key = 'spell-student-spells'`,
+      [oldCharacterId],
+    );
+    expect(oldSpellsSlot).toMatchObject({ spell_level_min: 0, spell_level_max: 1 });
+    if (oldSpellsSlot === null) throw new Error('Spell Student v1 spell slot is missing.');
+    const mageHandId = db.scalar<number>(
+      "SELECT id FROM spell_versions WHERE display_name = 'Mage Hand' AND rules_edition = '2024'",
+    );
+    const shieldId = db.scalar<number>(
+      "SELECT id FROM spell_versions WHERE display_name = 'Shield' AND rules_edition = '2024'",
+    );
+    if (mageHandId === null || shieldId === null) throw new Error('Seeded spell fixtures are missing.');
+    new SpellSelectionService(db).select(Number(oldSpellsSlot.id), mageHandId);
 
     const successorPlan = planBundledHomebrewInstall(db, v2);
     expect(successorPlan.entries).toEqual([
@@ -323,6 +375,118 @@ describe('bundled authored-kind installer', () => {
     expect(db.scalar<number>(
       `SELECT count(*) FROM subclass_definitions WHERE name LIKE 'Spell Student%'`,
     )).toBe(2);
+    expect(db.oneRaw(
+      `SELECT slot.current_spell_version_id, slot.spell_level_min, slot.spell_level_max
+       FROM spell_selection_slots AS slot WHERE slot.id = ?`,
+      [oldSpellsSlot.id],
+    )).toEqual({
+      current_spell_version_id: mageHandId,
+      spell_level_min: 0,
+      spell_level_max: 1,
+    });
+    db.exec(
+      `UPDATE characters SET ability_allocation_method = 'manual' WHERE id = ?`,
+      [oldCharacterId],
+    );
+    const oldClassId = db.scalar<number>(
+      `SELECT class_definition_id FROM subclass_definitions WHERE content_key = ?`,
+      [oldKey.contentKey],
+    );
+    if (oldClassId === null) throw new Error('Spell Student v1 parent is missing.');
+    new LevelUpClassCommand(
+      db,
+      {
+        type: 'level_up_class',
+        class_definition_id: Number(oldClassId),
+        target_level: 4,
+        feat_choice: {
+          kind: 'feat',
+          feat_content_key: '2024:feat:ability-score-improvement',
+          config: {},
+          ability_increases: [{ ability: 'strength', amount: 2 }],
+        },
+      },
+      new CharacterCommandIntegrity('bundled-superseded-subclass-level-up'),
+    ).apply(oldCharacterId);
+    expect(db.oneRaw(
+      `SELECT level, subclass.content_key AS subclass_content_key
+       FROM character_class_levels AS level
+       JOIN subclass_definitions AS subclass
+         ON subclass.id = level.subclass_definition_id
+       WHERE level.character_id = ?`,
+      [oldCharacterId],
+    )).toEqual({
+      level: 4,
+      subclass_content_key: oldKey.contentKey,
+    });
+
+    const newCharacterId = applySubclass(db, newKey.contentKey, 3);
+    const correctedSlots = db.allRaw(
+      `SELECT id, rule_key, spell_level_min, spell_level_max
+       FROM spell_selection_slots
+       WHERE character_id = ? AND rule_key LIKE 'spell-student-%'
+       ORDER BY rule_key`,
+      [newCharacterId],
+    );
+    expect(correctedSlots).toEqual([{
+      id: expect.any(Number),
+      rule_key: 'spell-student-cantrips',
+      spell_level_min: 0,
+      spell_level_max: 0,
+    }, {
+      id: expect.any(Number),
+      rule_key: 'spell-student-spells',
+      spell_level_min: 1,
+      spell_level_max: 1,
+    }]);
+    const selection = new SpellSelectionService(db);
+    selection.select(Number(correctedSlots[0]!.id), mageHandId);
+    expect(() => selection.select(Number(correctedSlots[0]!.id), shieldId))
+      .toThrow(eligibilityInvalidReasons.level);
+    expect(() => selection.select(Number(correctedSlots[1]!.id), mageHandId))
+      .toThrow(eligibilityInvalidReasons.level);
+    selection.select(Number(correctedSlots[1]!.id), shieldId);
+
+    const fingerprints = db.allRaw(
+      `SELECT content_key, fingerprint_scheme, fingerprint_digest, fingerprint_role
+       FROM catalog_content_fingerprints
+       WHERE content_kind = 'subclass'
+         AND content_key LIKE '2024:content.subclass:spell-student%'
+       ORDER BY content_key`,
+    );
+    expect(fingerprints).toEqual([{
+      content_key: oldKey.contentKey,
+      fingerprint_scheme: CONTENT_FINGERPRINT_SCHEME_V1,
+      fingerprint_digest: '1eca3febf290f1bb99d1571828ce1d30963e7cb619a1e4af5efce94f5a4236a9',
+      fingerprint_role: 'current',
+    }, {
+      content_key: newKey.contentKey,
+      fingerprint_scheme: CONTENT_FINGERPRINT_SCHEME_V1,
+      fingerprint_digest: 'e8cf1b0c1f39a06acd0df650b41f13856a1dc359c015d3616209e2a3e9644e8f',
+      fingerprint_role: 'current',
+    }]);
+    expect([oldKey.contentKey, newKey.contentKey].map((contentKey) => {
+      const projection = projectStoredAuthoredContentV1(db, {
+        kind: 'subclass',
+        contentKey,
+        references: storedAuthoredRegistryReferencesV1(db),
+      });
+      return {
+        scheme: CONTENT_FINGERPRINT_SCHEME_V2,
+        digest: deriveContentIdentityV2({
+          kind: projection.kind,
+          edition: projection.aggregate.rules_edition,
+          name: projection.aggregate.name,
+          payload: projection.payload,
+        }).digest,
+      };
+    })).toEqual([{
+      scheme: CONTENT_FINGERPRINT_SCHEME_V2,
+      digest: 'ef0d5a588129272fc485ab263296c12ebbd48b7c04fe5e4928015cee1bbad1db',
+    }, {
+      scheme: CONTENT_FINGERPRINT_SCHEME_V2,
+      digest: 'de2a49b86876c71019e9261d94ca47179c120014dac828c6cb1d9b4e4606c4d7',
+    }]);
     const repeated = planBundledHomebrewInstall(db, v2);
     expect(repeated.entries[0]?.outcome).toBe('matched_existing');
     expect(commitBundledHomebrewInstall(db, repeated.token, v2)).toMatchObject({

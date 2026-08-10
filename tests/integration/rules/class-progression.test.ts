@@ -137,7 +137,7 @@ function expectedSpellStudentGrantRules(
       list: 'Wizard',
       count: spellsKnown,
       bucket: 'known',
-      level_min: 0,
+      level_min: 1,
       level_max: maximumSpellLevel,
       always_prepared: false,
       with_slots: true,
@@ -543,6 +543,7 @@ describe('persisted class progression catalog', () => {
     }
   });
 
+  // Measured alone at 1.75s; 20s retains contention headroom.
   it('persists every Spell Student third-caster count and SRD-derived slot row through the publish route', () => {
     const catalog = BUNDLED_HOMEBREW_CATALOG.filter(
       (entry) => entry.catalog_key === 'spell-student',
@@ -550,7 +551,10 @@ describe('persisted class progression catalog', () => {
     const plan = planBundledHomebrewInstall(db, catalog);
     expect(commitBundledHomebrewInstall(db, plan.token, catalog)).toMatchObject({
       kind: 'committed',
-      outcomes: [{ kind: 'create', contentKey: '2024:content.subclass:spell-student' }],
+      outcomes: [{
+        kind: 'create',
+        contentKey: '2024:content.subclass:spell-student-bundled-revision-2',
+      }],
     });
     expect(
       db.allRaw(`
@@ -561,7 +565,7 @@ describe('persisted class progression catalog', () => {
         FROM subclass_progressions progression
         JOIN subclass_definitions subclass
           ON subclass.id = progression.subclass_definition_id
-        WHERE subclass.content_key = '2024:content.subclass:spell-student'
+        WHERE subclass.content_key = '2024:content.subclass:spell-student-bundled-revision-2'
         ORDER BY progression.class_level
       `).map((row) => ({
         ...row,
@@ -571,7 +575,7 @@ describe('persisted class progression catalog', () => {
     ).toEqual(
       SPELL_STUDENT_LEVELS.map(
         ([classLevel, cantripsKnown, preparedCount, maximumSpellLevel, slots]) => ({
-          name: 'Spell Student',
+          name: 'Spell Student (Bundled revision 2)',
           class_level: classLevel,
           cantrips_known: cantripsKnown,
           prepared_count: preparedCount,

@@ -431,6 +431,10 @@ export class CatalogAuthoringService {
           ...common,
           list: stringValue(grant.list, `grant ${grant.rule_key}.list`),
           count: nullableIntegerValue(grant.count, `grant ${grant.rule_key}.count`),
+          minimum_spell_level: nullableIntegerValue(
+            grant.level_min,
+            `grant ${grant.rule_key}.minimum_spell_level`,
+          ),
           maximum_spell_level: nullableIntegerValue(
             grant.level_max,
             `grant ${grant.rule_key}.maximum_spell_level`,

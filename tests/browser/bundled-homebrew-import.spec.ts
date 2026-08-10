@@ -77,9 +77,8 @@ function publishedCard(page: Page, name: string) {
 test('imports bundled homebrew through publish, applies derived third-caster slots, and repeats as a no-op', async ({
   page,
 }) => {
-  // The slower measured precedent is HA-9 at 18.2s. Its required x1.5
-  // reserve is 27.3s. This journey adds a second import and a route reload;
-  // 60s leaves 32.7s beyond the reserved precedent for those operations.
+  // Measured alone at 23.5s after adding both picker controls; 60s retains
+  // more than the required x1.5 contention headroom.
   test.setTimeout(60_000);
   await page.goto('/');
   await globalReady(page);
@@ -95,7 +94,12 @@ test('imports bundled homebrew through publish, applies derived third-caster slo
   await page.getByRole('link', { name: 'Homebrew library', exact: true }).click();
   await page.getByRole('tab', { name: 'Subclasses', exact: true }).click();
   await homebrewReady(page);
-  for (const name of ['Veteran', 'Warrior of the Barbed Court', 'Spell Student']) {
+  for (const name of [
+    'Veteran',
+    'Warrior of the Barbed Court',
+    'Spell Student',
+    'Spell Student (Bundled revision 2)',
+  ]) {
     const card = publishedCard(page, name);
     await expect(card).toBeVisible();
     await expect(card.getByText('Homebrew', { exact: true })).toBeVisible();
@@ -119,7 +123,7 @@ test('imports bundled homebrew through publish, applies derived third-caster slo
     const classes = await window.staticApp.inspectRows('class_definitions', { name: 'Fighter' });
     const subclasses = await window.staticApp.inspectRows(
       'subclass_definitions',
-      { name: 'Spell Student' },
+      { name: 'Spell Student (Bundled revision 2)' },
     );
     const classId = Number(classes[0]?.['id']);
     const subclassId = Number(subclasses[0]?.['id']);
@@ -190,7 +194,11 @@ test('imports bundled homebrew through publish, applies derived third-caster slo
     const classRows = await window.staticApp.inspectRows('character_class_levels', {
       character_id: characterId,
     });
-    return { characterId, subclassId, report, classRows };
+    const choiceSlots = (await window.staticApp.inspectRows('spell_selection_slots', {
+      character_id: characterId,
+    })).filter((slot) => String(slot.rule_key).startsWith('spell-student-'))
+      .sort((left, right) => String(left.rule_key).localeCompare(String(right.rule_key)));
+    return { characterId, subclassId, report, classRows, choiceSlots };
   });
 
   expect(persisted.classRows).toEqual([
@@ -204,6 +212,61 @@ test('imports bundled homebrew through publish, applies derived third-caster slo
     caster_level: 1,
     slots: [{ level: 1, count: 2 }],
   });
+  expect(persisted.choiceSlots).toEqual([expect.objectContaining({
+    rule_key: 'spell-student-cantrips',
+    spell_level_min: 0,
+    spell_level_max: 0,
+  }), expect.objectContaining({
+    rule_key: 'spell-student-spells',
+    spell_level_min: 1,
+    spell_level_max: 1,
+  })]);
+
+  await page.goto(`/characters/${String(persisted.characterId)}`);
+  await expect(page.getByRole('heading', { name: 'Bundled Spell Student', exact: true }))
+    .toBeVisible();
+  const cantripSlotId = Number(persisted.choiceSlots[0]?.['id']);
+  const leveledSlotId = Number(persisted.choiceSlots[1]?.['id']);
+  const cantripRow = page.locator(`tr[data-slot-id="${String(cantripSlotId)}"]`);
+  const leveledRow = page.locator(`tr[data-slot-id="${String(leveledSlotId)}"]`);
+  await expect(cantripRow).toContainText('L0–0');
+  await expect(leveledRow).toContainText('L1–1');
+
+  const cantripPicker = cantripRow.getByLabel(`Spell selection for slot ${String(cantripSlotId)}`);
+  await cantripPicker.fill('Shield');
+  await expect(cantripRow.getByText('No eligible spells match this search.', { exact: true }))
+    .toBeVisible();
+  await expect(cantripRow.getByRole('option', { name: 'Shield', exact: true })).toHaveCount(0);
+  await cantripPicker.fill('Mage Hand');
+  await cantripRow.getByRole('option', { name: 'Mage Hand', exact: true }).click();
+
+  const leveledPicker = leveledRow.getByLabel(`Spell selection for slot ${String(leveledSlotId)}`);
+  await leveledPicker.fill('Mage Hand');
+  await expect(leveledRow.getByText('No eligible spells match this search.', { exact: true }))
+    .toBeVisible();
+  await expect(leveledRow.getByRole('option', { name: 'Mage Hand', exact: true })).toHaveCount(0);
+  await leveledPicker.fill('Shield');
+  await leveledRow.getByRole('option', { name: 'Shield', exact: true }).click();
+  await expect.poll(() => page.evaluate((ids) =>
+    window.staticApp.inspectRows('spell_selection_slots').then((slots) => slots
+      .filter((slot) => ids.includes(Number(slot.id)))
+      .sort((left, right) => String(left.rule_key).localeCompare(String(right.rule_key)))
+      .map((slot) => ({
+        rule_key: slot.rule_key,
+        spell_level_min: slot.spell_level_min,
+        spell_level_max: slot.spell_level_max,
+        selection_eligibility: slot.selection_eligibility,
+      }))), [cantripSlotId, leveledSlotId])).toEqual([{
+        rule_key: 'spell-student-cantrips',
+        spell_level_min: 0,
+        spell_level_max: 0,
+        selection_eligibility: 'valid',
+      }, {
+        rule_key: 'spell-student-spells',
+        spell_level_min: 1,
+        spell_level_max: 1,
+        selection_eligibility: 'valid',
+      }]);
 
   await page.goto('/');
   await globalReady(page);
@@ -217,7 +280,12 @@ test('imports bundled homebrew through publish, applies derived third-caster slo
   await homebrewReady(page);
   await page.reload();
   await homebrewReady(page);
-  for (const name of ['Veteran', 'Warrior of the Barbed Court', 'Spell Student']) {
+  for (const name of [
+    'Veteran',
+    'Warrior of the Barbed Court',
+    'Spell Student',
+    'Spell Student (Bundled revision 2)',
+  ]) {
     await expect(publishedCard(page, name)).toBeVisible();
   }
   expect(await page.evaluate((characterId) => window.staticApp.inspectRows(

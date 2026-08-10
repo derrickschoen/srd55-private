@@ -91,6 +91,7 @@ export type AuthoringDraftGrant =
       readonly rule_key: string;
       readonly list: string;
       readonly count: number | null;
+      readonly minimum_spell_level?: number | null;
       readonly maximum_spell_level: number | null;
     }
   | {

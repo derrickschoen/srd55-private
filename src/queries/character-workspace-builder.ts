@@ -48,6 +48,7 @@ import {
   multiclassAssessmentForClass,
   type MulticlassPrimaryAbilityAssessment,
 } from './multiclass-primary-ability';
+import { SELECTABLE_SUBCLASS_SQL } from './selectable-subclasses';
 
 interface SlotWithOrder extends WorkspaceSlot {
   readonly sort_order: number;
@@ -445,6 +446,7 @@ export class CharacterWorkspaceBuilder {
              ON identity.content_kind = 'subclass'
             AND identity.content_key = subclass.content_key
            WHERE subclass.class_definition_id = ?
+             AND ${SELECTABLE_SUBCLASS_SQL}
            ORDER BY subclass.name, subclass.id`,
           [classDefinitionId],
           (row) => ({

@@ -423,7 +423,7 @@ describe('catalog authoring RPC handlers', () => {
   });
 
   it('previews and atomically installs bundled homebrew through the public RPC surface', async () => {
-    // Measured alone at 1.94s; 20s retains contention headroom.
+    // Measured alone at 3.11s; 20s retains contention headroom.
     const rpc = await open();
     client = new RpcClient(new WorkerTransport(rpc.context));
     const authoring = createAuthoringClient(client);
@@ -443,11 +443,17 @@ describe('catalog authoring RPC handlers', () => {
       ],
     });
     expect((await authoring.list()).published
-      .filter((entry) => ['Veteran', 'Warrior of the Barbed Court', 'Spell Student']
+      .filter((entry) => [
+        'Veteran',
+        'Warrior of the Barbed Court',
+        'Spell Student',
+        'Spell Student (Bundled revision 2)',
+      ]
         .includes(entry.name))
       .map((entry) => ({ name: entry.name, catalog_layer: entry.catalog_layer })))
       .toEqual([
         { name: 'Spell Student', catalog_layer: 'external' },
+        { name: 'Spell Student (Bundled revision 2)', catalog_layer: 'external' },
         { name: 'Veteran', catalog_layer: 'external' },
         { name: 'Warrior of the Barbed Court', catalog_layer: 'external' },
       ]);

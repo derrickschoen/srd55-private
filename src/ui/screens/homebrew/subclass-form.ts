@@ -196,6 +196,7 @@ function emptyGrant(
         rule_key: '',
         list: '',
         count: null,
+        minimum_spell_level: null,
         maximum_spell_level: null,
       };
     case 'choice_from_query':
@@ -754,6 +755,17 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
           });
           count.value = grant.count === null ? '' : String(grant.count);
           count.addEventListener('input', () => changeGrant('count', nullableInteger(count.value)));
+          const minimum = element('input', {
+            attributes: {
+              id: `${prefix}-minimum`, type: 'number', min: '0', max: '9', step: '1',
+              ...pathAttribute(['progression', 'rows', rowIndex, 'grants', grantIndex, 'minimum_spell_level']),
+            },
+          });
+          minimum.value = grant.minimum_spell_level == null
+            ? ''
+            : String(grant.minimum_spell_level);
+          minimum.addEventListener('input', () =>
+            changeGrant('minimum_spell_level', nullableInteger(minimum.value)));
           const maximum = element('input', {
             attributes: {
               id: `${prefix}-maximum`, type: 'number', min: '0', max: '9', step: '1',
@@ -765,6 +777,7 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
           card.append(
             ...labelledControl('Spell list', list.id, list),
             ...labelledControl('Number of spells', count.id, count),
+            ...labelledControl('Minimum spell level (optional)', minimum.id, minimum),
             ...labelledControl('Maximum spell level (optional)', maximum.id, maximum),
           );
         } else {

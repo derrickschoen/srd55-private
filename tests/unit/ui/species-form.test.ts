@@ -71,6 +71,7 @@ function speciesDocument(): SpeciesAuthoringDraft {
         rule_key: 'arcane-list',
         list: 'Wizard',
         count: 1,
+        minimum_spell_level: 1,
         maximum_spell_level: 1,
       },
       {
@@ -662,6 +663,10 @@ describe('HA-7 species authoring form', () => {
         .toEqual(roundTripDocument.grants.map((grant) => grant.draft_item_uuid));
       expect(grantCards.map((card) => card.querySelectorAll('select')[0]?.value))
         .toEqual(['fixed_spell', 'choice_from_list', 'choice_from_query', 'skill_proficiency']);
+      expect(elementText(root as unknown as Node))
+        .toContain('Minimum spell level (optional)');
+      expect(byId(root, 'input', 'species-grant-grant-list-minimum-level').value)
+        .toBe('1');
       expect(byId(root, 'textarea', 'species-grant-grant-query-schools').value)
         .toBe('Chronomancy');
       expect(byId(root, 'input', 'species-grant-grant-skill-skill-arcana').checked)
