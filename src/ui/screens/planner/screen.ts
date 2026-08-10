@@ -968,6 +968,7 @@ function renderPlanner(
     primary,
     renderWarnings({
       report: workspace.report,
+      startingClassResolution: workspace.starting_class_resolution,
       disabled: session.saving,
       acknowledge: (fingerprint, note) =>
         void mutate(() =>

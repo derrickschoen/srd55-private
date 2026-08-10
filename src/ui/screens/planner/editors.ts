@@ -540,9 +540,10 @@ function renderClasses(
     name.textContent = `${entry.name} — ${catalogLayerLabel(entry.catalog_layer)}`;
     const entryKind = document.createElement('span');
     entryKind.className = 'badge class-entry-badge';
-    entryKind.textContent = entry.is_starting_class
-      ? 'Starting class'
-      : 'Multiclass entry';
+    entryKind.textContent =
+      entry.id === workspace.starting_class_resolution.class_level_id
+        ? 'Starting class'
+        : 'Multiclass entry';
     // NOT AN INPUT ANY MORE (level-up plan §3): the numeric level control was
     // the second writer §0 names — it could move a level to any number
     // without a hit-point row ever being written. The level is read-only

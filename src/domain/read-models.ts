@@ -8,6 +8,7 @@ import type {
   CharacterCatalogDisclosure,
 } from '../catalog/catalog-disclosure';
 import type { AttackProfileResult } from '../rules/attack-profiles';
+import type { StartingClassWarning } from '../rules/sheet';
 import type { CharacterMasteryAllowance } from '../rules/weapon-mastery-lookup';
 import type {
   Ability,
@@ -335,6 +336,10 @@ export interface Workspace {
   revision: number;
   report: WorkspaceBuildReport;
   classes: CharacterClass[];
+  starting_class_resolution: {
+    readonly class_level_id: number | null;
+    readonly warnings: readonly StartingClassWarning[];
+  };
   available_classes: ClassOption[];
   allow_legacy: boolean;
   flavor: {

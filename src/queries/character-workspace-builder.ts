@@ -37,6 +37,7 @@ import {
   type BuildReportResult,
 } from '../reports/build-report-builder';
 import { AbilityScores } from '../rules/ability-scores';
+import { startingClass } from '../rules/sheet';
 import { CharacterNotFoundError } from './character-crud';
 import { orderSources } from './order-sources';
 import { SavePointQueries } from './save-points';
@@ -276,14 +277,27 @@ export class CharacterWorkspaceBuilder {
         warning_count: warningAssessments.length + invalid.length,
       },
     } as WorkspaceBuildReport;
+    const classes = this.classes(
+      characterId,
+      new MulticlassPrimaryAbilityQueries(this.db).build(characterId),
+    );
+    const startingClassResolution = startingClass(
+      classes.map((entry) => ({
+        class_level: entry,
+        class_name: entry.name,
+        is_starting_class: entry.is_starting_class,
+      })),
+    );
 
     return {
       revision: character.revision,
       report: workspaceReport,
-      classes: this.classes(
-        characterId,
-        new MulticlassPrimaryAbilityQueries(this.db).build(characterId),
-      ),
+      classes,
+      starting_class_resolution: {
+        class_level_id:
+          startingClassResolution.chosen?.class_level.id ?? null,
+        warnings: startingClassResolution.warnings,
+      },
       available_classes: this.classOptions(),
       allow_legacy: character.allow_legacy,
       flavor: {

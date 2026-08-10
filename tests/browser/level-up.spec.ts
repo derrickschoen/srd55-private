@@ -558,6 +558,54 @@ test('starting-class provenance stays first and level up names the new-class pat
     { timeout: 35_000 },
   );
   await expect(page.locator('#planner-classes-heading')).toBeFocused();
+
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: 'Remove Wizard' }).click();
+
+  await expect(classRows).toHaveCount(1);
+  await expect(classRows.nth(0).locator(':scope > strong')).toContainText(
+    'Cleric',
+  );
+  await expect(classRows.nth(0).locator('.class-entry-badge')).toHaveText(
+    'Starting class',
+  );
+  await expect(
+    page.locator('[data-warning-code="no_starting_class"]'),
+  ).toContainText('No class is marked as this character\'s starting class');
+  await expect.poll(() => page.evaluate(async (characterId) => {
+    const workspace = await window.appRpc.call<
+      { readonly character_id: number },
+      {
+        readonly classes: readonly {
+          readonly id: number;
+          readonly name: string;
+          readonly is_starting_class: boolean;
+        }[];
+        readonly starting_class_resolution: {
+          readonly class_level_id: number | null;
+          readonly warnings: readonly { readonly code: string }[];
+        };
+      }
+    >('queries.characters.workspace', { character_id: characterId });
+    return {
+      classes: workspace.classes,
+      resolutionMatchesSurvivor:
+        workspace.starting_class_resolution.class_level_id ===
+        workspace.classes[0]?.id,
+      warningCodes: workspace.starting_class_resolution.warnings.map(
+        (warning) => warning.code,
+      ),
+    };
+  }, character.id)).toEqual({
+    classes: [
+      expect.objectContaining({
+        name: 'Cleric',
+        is_starting_class: false,
+      }),
+    ],
+    resolutionMatchesSurvivor: true,
+    warningCodes: ['no_starting_class'],
+  });
 });
 
 test('U1 direct level-up refuses untouched defaults, then one workspace edit enables the wizard', async ({

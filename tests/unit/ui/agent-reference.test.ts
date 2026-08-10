@@ -189,6 +189,7 @@ function workspace(): Workspace {
       },
     },
     classes: [],
+    starting_class_resolution: { class_level_id: null, warnings: [] },
     available_classes: [],
     allow_legacy: false,
     flavor: {

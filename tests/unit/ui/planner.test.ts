@@ -32,6 +32,7 @@ import {
   renderEditors,
   type PlannerEditorActions,
 } from '../../../src/ui/screens/planner/editors';
+import { renderWarnings } from '../../../src/ui/screens/planner/warnings';
 import { CHARACTER_TEXT_LIMITS } from '../../../src/domain/character-limits';
 import {
   elementText,
@@ -148,6 +149,7 @@ function workspace(
       },
     },
     classes: [],
+    starting_class_resolution: { class_level_id: null, warnings: [] },
     available_classes: [],
     allow_legacy: allowLegacy,
     flavor: {
@@ -210,6 +212,7 @@ describe('planner catalog disclosure', () => {
       const rendered = interactiveElement(renderEditors({
         workspace: {
           ...base,
+          starting_class_resolution: { class_level_id: 1, warnings: [] },
           classes: [
             {
               id: 1,
@@ -283,6 +286,43 @@ describe('planner catalog disclosure', () => {
       );
       expect(warningText).not.toContain('Cleric');
       expect(rendered.querySelector('[aria-label="Remove Wizard"]')).not.toBeNull();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('renders both starting-class degradation warnings in the live report', () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const base = workspace(0, 10, false);
+      for (const warning of [
+        {
+          code: 'no_starting_class' as const,
+          message: 'No class is marked; Cleric has been used.',
+          heading: 'No starting class',
+        },
+        {
+          code: 'several_starting_classes' as const,
+          message: 'Two classes are marked; Cleric has been used.',
+          heading: 'Several starting classes',
+        },
+      ]) {
+        const rendered = interactiveElement(renderWarnings({
+          report: base.report,
+          startingClassResolution: {
+            class_level_id: 1,
+            warnings: [{ code: warning.code, message: warning.message }],
+          },
+          disabled: false,
+          acknowledge: () => undefined,
+        }));
+        const card = rendered.querySelector(
+          `[data-warning-code="${warning.code}"]`,
+        );
+        expect(card).not.toBeNull();
+        expect(elementText(card as unknown as Node)).toContain(warning.heading);
+        expect(elementText(card as unknown as Node)).toContain(warning.message);
+      }
     } finally {
       restoreDocument();
     }

@@ -1,5 +1,6 @@
 import type {
   DuplicateAssessment,
+  Workspace,
   WorkspaceBuildReport,
 } from '../../../domain/read-models';
 
@@ -80,6 +81,7 @@ function warningArticle(
 
 export function renderWarnings(options: {
   report: WorkspaceBuildReport;
+  startingClassResolution: Workspace['starting_class_resolution'];
   disabled: boolean;
   acknowledge(fingerprint: string, note: string): void;
 }): HTMLElement {
@@ -145,6 +147,36 @@ export function renderWarnings(options: {
   callout.textContent = `Why this matters: ${options.report.preparation_callout}`;
   ceilings.append(ceilingHeading, classList, callout);
   aside.append(ceilings);
+
+  const classWarningSection = document.createElement('section');
+  classWarningSection.className = 'planner-panel';
+  const classWarningHeading = document.createElement('h2');
+  const classWarnings = options.startingClassResolution.warnings;
+  classWarningHeading.textContent =
+    `Class warnings · ${String(classWarnings.length)}`;
+  classWarningSection.append(classWarningHeading);
+  if (classWarnings.length === 0) {
+    const none = document.createElement('p');
+    none.className = 'muted';
+    none.textContent = 'No starting-class warnings.';
+    classWarningSection.append(none);
+  } else {
+    for (const warning of classWarnings) {
+      const article = document.createElement('article');
+      article.className = 'warning-card';
+      article.setAttribute('role', 'alert');
+      article.dataset.warningCode = warning.code;
+      const heading = document.createElement('h3');
+      heading.textContent = warning.code === 'no_starting_class'
+        ? '⚠ No starting class'
+        : '⚠ Several starting classes';
+      const message = document.createElement('p');
+      message.textContent = warning.message;
+      article.append(heading, message);
+      classWarningSection.append(article);
+    }
+  }
+  aside.append(classWarningSection);
 
   const warningSection = document.createElement('section');
   warningSection.className = 'planner-panel';
