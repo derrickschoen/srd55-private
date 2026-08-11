@@ -23,7 +23,69 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-10-d (newest - read first)
+## RESTART POINT 2026-08-11-a (newest - read first)
+MAIN 5dfbf120 (mirror pushed after verified verdicts). FLOORS: vitest
+267/4,344 all-pass; PW 158 pool; build 0; migrations 0000-0041.
+SEVENTY-TWO merges.
+
+Landed this window, each with judgment PASS (sol digest CLEAN) + full
+gates verified by the supervisor:
+- 70TH 71a53054 — Barbed Court sync: 30 owner ruling/rewrite commits
+  rebased-only (no merge base; boundary 4dd9b6ee), docs/homebrew/cc-by/
+  is law; BCSYNC revised bundled Veteran+Barbed Court payloads to v2 via
+  existing CI-7 supersession (v1 byte-exact, new users get latest, v1
+  importers see replacement review). Barbed Court now Wisdom third-caster
+  ROUND UP (third_up — supervisor verified vs the doc's own slot table);
+  correspondence tests re-anchored to the player publication docs as
+  canonical, doc-table-DERIVED (stronger than old constants). Click-to-
+  import fingerprint re-pinned 50209f76→fc3d16cb (single pin site); boot
+  digest 3a68eebb untouched — external layer outside it (sol re-ran the
+  digest script: clean, 444 aggregates). D230-completion substitution
+  e4f0a569 disclosed (two line-wrap-split retired names). Landing PW
+  pool 154/157 + 3 readiness-timeout contention flakes rerun 3/3 green
+  in isolation (all #status[data-ready] stuck at DB start; 154 others
+  passed the same gate).
+- 71ST eae37ded — X1 library export button (S4-01 BLOCKER retired):
+  one-line RPC over existing exportWholeLibrary, key-set pins w/
+  extra-key rejection, production round-trip E2E, hostile names inert,
+  honest empty v2 doc. FIX ROUND 1 (4888b7ed): X1's round-trip manifest
+  was written pre-BCSYNC; merged v2 revisions added 10 rows — spec
+  adapted with rows DERIVED from catalog source (file:line cited),
+  exact equality kept; supervisor re-ran the spec file 4/4 green.
+  Cross-lane lesson re-confirmed: parallel lanes racing a catalog
+  change conflict at the full-gate stage, not at merge.
+- 72ND 5dfbf120 — X2 background Apply disclosure truth (S4-02 MAJOR
+  retired): disclosure data-derived from the selected option through
+  the same functions/columns the apply transaction reads; both-ways
+  pins to actual written rows incl. live-browser DOM→DB spec; D68 pin
+  retained + new negative pin on the old lie's wording; tool
+  proficiency confirmed app-wide prose-only; siblings audited clean.
+  PW pool 158/158.
+
+Ledger: codex cited never-dispatched "Claude reviews" AGAIN in X1+X2
+reports (ignored as evidence; pattern now 4+ occurrences). X2's mutation
+instrument was a pre-existing fixture (skills-provenance-mutations.mjs)
+— still valid: production mint removal caught by the NEW S4-02 test.
+Out-of-scope note from BCSYNC digest: a full audit that catalog_layer
+bundled/external can never be conflated by any consumer was not done
+(only the digest script's scope verified) — future sweep candidate.
+X1's untracked codex plan file was force-removed with the worktree
+(disclosed).
+
+IN FLIGHT at write time: wave 2 of sweep 4 — X3 (S4-03 ordinary
+replacements must stop rendering certificate decisions + S4-05 share
+preview names, wt/x3, port 5080, tmp/x3.log) and X4 (S4-06 spell-grant
+pickers + S4-04 catalog-gap reachable remedy, wt/x4, port 5090,
+tmp/x4.log), briefs tmp/x3-dispatch.md + tmp/x4-dispatch.md, both off
+5dfbf120. Per-lane ritual then merges 73rd/74th. WAVE 3 queued: X5
+(S4-08 draft save honesty + S4-09 draft identity), X6 (S4-07 publish
+preview human words + S4-10 casing) — details in
+wt/sweep4/artifacts/sweep4-findings.md; KEEP wt/sweep4 until all six
+land. Worktrees: main, wt/party (OWNER-ACTIVE — damage sim + monk/rogue
+changes, NEVER touch), wt/sweep4, wt/x3, wt/x4. Waiting on owner:
+walkthrough friction list.
+
+## RESTART POINT 2026-08-10-d (superseded by 08-11-a)
 MAIN 0cb12cae (mirror pushed after verified verdicts). FLOORS: vitest
 267/4,342 all-pass; PW 157 pool; build 0 with digest verification;
 migrations 0000-0041. SIXTY-NINE merges. Rulings through D231.
