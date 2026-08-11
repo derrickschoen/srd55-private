@@ -232,6 +232,7 @@ describe('typed character spell section projection', () => {
     expect(spellbookNames(wizard)).toEqual([
       'Chromatic Orb',
       'Comprehend Languages',
+      'Ritual Capability Only',
     ]);
     expect(wizard.spellbook).toEqual([
       expect.objectContaining({
@@ -242,6 +243,11 @@ describe('typed character spell section projection', () => {
       expect.objectContaining({
         spell_version_id: fixture.spellIds.comprehendLanguages,
         name: 'Comprehend Languages',
+        level: { status: 'known', value: 1 },
+      }),
+      expect.objectContaining({
+        spell_version_id: fixture.spellIds.ritualOnly,
+        name: 'Ritual Capability Only',
         level: { status: 'known', value: 1 },
       }),
     ]);
@@ -474,10 +480,9 @@ describe('SS-4 surviving spell access and report coverage', () => {
       'Detect Magic',
     ]);
     for (const phrase of [
-      '“In my book” marks only the spells that Ritual Adept can expose',
-      'does not constrain Wizard preparation',
-      'not the same as labeling a spell known or prepared',
-      'whole Wizard spell list',
+      '“In my book” marks the Wizard spells recorded',
+      'preparation choices are drawn from those entries',
+      'fixed always-prepared grants do not consume spellbook or preparation capacity',
       'both in the book and as prepared',
       'ritual-only access',
       'that route is not a selection',

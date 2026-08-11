@@ -10,6 +10,7 @@ import type {
 } from '../domain/command-contracts';
 import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
 import type { StoredCharacterSnapshotInverse } from './stored-inverses';
+import { deleteSourceTreeEffects } from '../rules/source-effect-retcon';
 
 export class RemoveSourceCommand {
   readonly actionType = 'remove_source';
@@ -56,6 +57,7 @@ export class RemoveSourceCommand {
         [new Date().toISOString(), sourceId],
       );
       this.#generator.generateForSource(sourceId);
+      deleteSourceTreeEffects(this.db, sourceId);
     });
   }
 

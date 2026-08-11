@@ -12,6 +12,7 @@ import { CharacterListBuilder } from '../../../src/queries/character-list-builde
 import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
 import { openTestDatabase } from '../../helpers/open-db';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
+import { assignSpellSelection } from '../../../src/eligibility/spell-selection-assignment';
 import {
   addClassLevel,
   classDefinitionId,
@@ -121,6 +122,83 @@ function unfilled(
 }
 
 describe('completeness detection', () => {
+  it('surfaces six initial Wizard book entries and preserves an out-of-book preparation with addressed repairs', async () => {
+    const db = await context();
+    const characterId = createCharacter(db, 'Spellbook Repair');
+    new AddSourceCommand(
+      db,
+      {
+        type: 'add_source',
+        source_type: 'class',
+        source_definition_id: classDefinitionId(db, 'Wizard'),
+        config: { level: 1 },
+      },
+      new CharacterCommandIntegrity('completeness-fixture'),
+    ).apply(characterId);
+    const inBookId = listSpell(db, 'In Book Ward', 1, 'Wizard');
+    const outOfBookId = listSpell(db, 'Out of Book Ward', 1, 'Wizard');
+    const acquisitions = db.allRaw(
+      `SELECT id FROM wizard_spellbook_entries
+       WHERE character_id = ? ORDER BY ordinal`,
+      [characterId],
+    );
+    expect(acquisitions).toHaveLength(6);
+    assignSpellSelection(db, {
+      address: {
+        kind: 'spellbook_acquisition',
+        id: Number(acquisitions[0]?.id),
+      },
+      character_id: characterId,
+      spell_version_id: inBookId,
+    });
+    const preparedSlotId = Number(
+      db.scalar(
+        `SELECT id FROM spell_selection_slots
+         WHERE character_id = ? AND rule_key = 'wizard-prepared'
+         ORDER BY ordinal LIMIT 1`,
+        [characterId],
+      ),
+    );
+    db.exec(
+      `UPDATE spell_selection_slots
+       SET current_spell_version_id = ?, selection_eligibility = 'invalid',
+           selection_invalid_reason = ?
+       WHERE id = ?`,
+      [
+        outOfBookId,
+        'Selected Wizard preparation is not in this character’s active spellbook.',
+        preparedSlotId,
+      ],
+    );
+
+    const items = new CharacterCompletenessQueries(db).build(characterId).items
+      .filter((item) => item.kind.startsWith('wizard_'));
+    expect(items).toEqual([
+      {
+        kind: 'wizard_spellbook_incomplete',
+        title: 'Wizard 1 — 1 of 6 spellbook spells chosen',
+        detail:
+          'This Wizard has 5 empty spellbook entries. Preparation is limited to filled entries, so complete the spellbook before choosing the prepared list.',
+        remedy: 'Choose the missing spellbook spells.',
+        source_name: 'Wizard 1',
+        chosen: 1,
+        required: 6,
+        missing: 5,
+        acquisition_id: Number(acquisitions[1]?.id),
+      },
+      {
+        kind: 'wizard_preparation_out_of_book',
+        title: 'Wizard 1 — Out of Book Ward is prepared but not in the spellbook',
+        detail:
+          'The selection is preserved, but it is invalid and grants no Wizard preparation access until it is replaced with a spell in the active spellbook.',
+        remedy: 'Choose an in-book replacement.',
+        source_name: 'Wizard 1',
+        spell_name: 'Out of Book Ward',
+        slot_id: preparedSlotId,
+      },
+    ]);
+  });
+
   it('reports fillable groups, suppresses unfillable ones, and never counts a catalog gap as outstanding', async () => {
     const db = await context();
     const definitionId = seedMagicInitiate(db);

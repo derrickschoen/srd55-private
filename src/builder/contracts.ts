@@ -458,6 +458,14 @@ export function guidedSpeciesChoicePath(characterId: number): string {
   return `${guidedBuildPath(characterId)}?step=species`;
 }
 
+export function guidedSpellRepairPath(
+  characterId: number,
+  kind: 'slot_selection' | 'spellbook_acquisition',
+  id: number,
+): string {
+  return `${guidedBuildPath(characterId)}?step=spells&repair=${kind}-${String(id)}`;
+}
+
 /* ------------------------------------------------------------ RPC methods */
 
 export const GUIDED_RPC = Object.freeze({

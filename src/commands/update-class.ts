@@ -26,6 +26,7 @@ import type {
 import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
 import type { CharacterCommandIntegrity } from './integrity';
 import type { StoredCharacterSnapshotInverse } from './stored-inverses';
+import { deleteSourceTreeEffects } from '../rules/source-effect-retcon';
 
 /**
  * Both rows below were declared with `unknown` fields: honest about the column
@@ -199,6 +200,7 @@ export function syncSubclassSources(
     );
     clearGeneratedFeatureEffects(db, characterId, sourceId);
     generator.generateForSource(sourceId);
+    deleteSourceTreeEffects(db, sourceId);
   }
   if (subclassId === null) {
     return;
@@ -438,6 +440,7 @@ export class UpdateClassCommand {
         [timestamp, sourceId],
       );
       this.#generator.generateForSource(sourceId);
+      deleteSourceTreeEffects(this.db, sourceId);
     }
     this.db.exec(
       `DELETE FROM character_class_levels

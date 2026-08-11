@@ -807,14 +807,15 @@ test('W-BROWSER-PLANNED-DRAFT carries planned_subchoices from UI through Review 
   await completeWizardLevelOneChoices(page, character.id);
   await openWizardPlannedReview(page, character);
 
-  for (const text of [
-    'Thunderwave — Wizard — SRD · bundled layer',
-    'Chromatic Orb — Wizard — SRD · bundled layer',
-    'Comprehend Languages — Wizard — SRD · bundled layer',
-    'Arcana — Wizard — Scholar',
-    'Scholar — SRD · bundled layer',
-  ]) {
-    await expect(page.getByText(text, { exact: true })).toBeVisible();
+  for (const [text, count] of [
+    ['Thunderwave — Wizard — SRD · bundled layer', 2],
+    ['Comprehend Languages — Wizard — SRD · bundled layer', 1],
+    ['Arcana — Wizard — Scholar', 1],
+    ['Scholar — SRD · bundled layer', 1],
+  ] as const) {
+    const fact = page.getByText(text, { exact: true });
+    await expect(fact).toHaveCount(count);
+    await expect(fact.first()).toBeVisible();
   }
   await clearAnnouncements(page);
   await page.locator('[data-level-up-confirm]').focus();
@@ -826,13 +827,19 @@ test('W-BROWSER-PLANNED-DRAFT carries planned_subchoices from UI through Review 
     page.getByRole('heading', { name: 'Wizard level 2 complete' }),
   ).toBeFocused({ timeout: 45_000 });
   await expect(page.locator('.level-up-route')).toHaveAttribute('aria-busy', 'false');
-  for (const name of ACCEPTANCE_WIZARD_2_CHOICES.spells.map(
+  for (const name of new Set(ACCEPTANCE_WIZARD_2_CHOICES.spells.map(
     (choice) => choice.spell_name,
-  )) {
-    await expect(page.getByText(
+  ))) {
+    const completedFact = page.getByText(
       `Spell: ${name} — Wizard — SRD · bundled layer.`,
       { exact: true },
-    )).toBeVisible();
+    );
+    await expect(completedFact).toHaveCount(
+      ACCEPTANCE_WIZARD_2_CHOICES.spells.filter(
+        (choice) => choice.spell_name === name,
+      ).length,
+    );
+    await expect(completedFact.first()).toBeVisible();
   }
 
   expect(await rows(page, 'character_class_levels')).toEqual([
@@ -867,7 +874,13 @@ test('W-BROWSER-PLANNED-DRAFT carries planned_subchoices from UI through Review 
     exact: true,
   }).locator('..');
   for (const choice of ACCEPTANCE_WIZARD_2_CHOICES.spells) {
-    const bucket = choice.kind === 'spellbook_acquisition'
+    const preparedTwin = choice.kind === 'spellbook_acquisition' &&
+      ACCEPTANCE_WIZARD_2_CHOICES.spells.some(
+        (candidate) =>
+          candidate.kind === 'slot_selection' &&
+          candidate.spell_name === choice.spell_name,
+      );
+    const bucket = choice.kind === 'spellbook_acquisition' && !preparedTwin
       ? spellSection.locator('[data-sheet-id^="spellbook:class:"]', {
           hasText: choice.spell_name,
         })
@@ -875,7 +888,7 @@ test('W-BROWSER-PLANNED-DRAFT carries planned_subchoices from UI through Review 
           hasText: choice.spell_name,
         });
     await expect(bucket).toContainText(
-      `${choice.spell_name}Level 1${choice.kind === 'spellbook_acquisition' ? 'Spellbook' : 'Prepared'}`,
+      `${choice.spell_name}Level 1${choice.kind === 'spellbook_acquisition' && !preparedTwin ? 'Spellbook' : 'Prepared'}`,
     );
   }
 });

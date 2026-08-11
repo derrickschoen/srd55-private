@@ -8,6 +8,11 @@ import {
 import type { DatabaseContext } from '../db/database';
 import type { SpellSelectionConstraint } from './spell-selection-constraint';
 import { SpellSelectionEligibility } from './spell-selection-eligibility';
+import {
+  effectiveSelectionCollectionForSlot,
+  evaluateSelectionCollectionConstraint,
+  refreshWizardPreparationEligibility,
+} from './spell-selection-collection';
 
 export type SpellSelectionAddress =
   | { readonly kind: 'slot_selection'; readonly id: number }
@@ -162,12 +167,22 @@ export function assignSpellSelection(
     throw new Error(`Spell selection slot ${input.address.id} is locked.`);
   }
 
-  const eligibility = (
-    input.eligibility ?? new SpellSelectionEligibility(db)
-  ).evaluateConstraint(
+  const constraint = input.address.kind === 'slot_selection'
+    ? {
+        ...selection.constraint,
+        selection_collection: effectiveSelectionCollectionForSlot(
+          db,
+          input.character_id,
+          input.address.id,
+        ),
+      }
+    : selection.constraint;
+  const eligibility = evaluateSelectionCollectionConstraint(
+    db,
     selection.character_id,
-    selection.constraint,
+    constraint,
     input.spell_version_id,
+    input.eligibility ?? new SpellSelectionEligibility(db),
   );
   if (eligibility.status !== 'valid') {
     throw new Error(
@@ -239,4 +254,5 @@ export function assignSpellSelection(
       input.character_id,
     ],
   );
+  refreshWizardPreparationEligibility(db, input.character_id, now);
 }
