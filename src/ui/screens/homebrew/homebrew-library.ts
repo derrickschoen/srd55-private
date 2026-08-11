@@ -223,7 +223,7 @@ function shell(
           routedLink(context, cleanups, '← Characters', '/'),
           element('h1', { text: 'Homebrew library' }),
           element('p', {
-            text: 'Draft locally, then publish an immutable catalog entry.',
+            text: 'Draft locally, then publish reusable homebrew for your characters.',
           }),
         ]),
         routedLink(
@@ -327,7 +327,7 @@ function publishedCard(
         badge(item.rules_edition, 'neutral'),
       ]),
     ]),
-    element('p', { text: `${KIND_LABELS[item.content_kind]} · immutable published version` }),
+    element('p', { text: `${KIND_LABELS[item.content_kind]} · published homebrew version` }),
     element('div', { className: 'homebrew-card-actions' }, [
       ...(item.superseded_by === null ? [edit] : []),
       remove,

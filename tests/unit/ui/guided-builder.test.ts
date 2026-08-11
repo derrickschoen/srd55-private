@@ -710,6 +710,35 @@ describe('guided background step', () => {
     ],
   };
 
+  it('renders authored lowercase ability storage with bundled-card casing parity', () => {
+    const bundled = backgroundChoices.backgrounds[0]!;
+    const authored = {
+      ...bundled,
+      content_key: 'expanded:content.background:authored-honesty',
+      name: 'Authored Honesty',
+      catalog_layer: 'external' as const,
+      pairing: {
+        ...bundled.pairing,
+        background_name: 'Authored Honesty',
+        printed_abilities: ['intelligence', 'wisdom', 'charisma'] as const,
+      },
+    };
+    const step = createBackgroundStep({
+      characterId: 1,
+      options: { ...backgroundChoices, backgrounds: [bundled, authored] },
+      applyBackground: () => Promise.reject(new Error('not submitted')),
+      navigate: () => undefined,
+    });
+    const printedCards = elementsByTagName(step.element, 'p')
+      .filter((candidate) => candidate.className === 'guided-background-printed')
+      .map((candidate) => elementText(candidate as unknown as Node));
+    expect(printedCards).toEqual([
+      'Printed defaults: Intelligence, Wisdom, Charisma; Magic Initiate (Cleric).',
+      'Printed defaults: Intelligence, Wisdom, Charisma; Magic Initiate (Cleric).',
+    ]);
+    step.cleanup();
+  });
+
   it('renders hostile external background disclosure data inert with its catalog layer disclosed', () => {
     const hostile = '</span><img data-ha10-background-hostile src=x>';
     const hostileEffect = '</li><img data-ha10-effect-hostile src=x>';

@@ -10,6 +10,7 @@ import {
   AuthoringServiceError,
   CatalogAuthoringService,
 } from '../../../src/authoring/draft-service';
+import { HomebrewArchiveSetService } from '../../../src/authoring/archive-set-lifecycle';
 import type { HomebrewDraftItemUuid } from '../../../src/authoring/ids';
 import { authoringFingerprintReference } from '../../../src/authoring/species-publisher';
 import {
@@ -18,6 +19,11 @@ import {
   planCharacterBackupImport,
 } from '../../../src/backup/character-backup';
 import { assertedExternalContentKey } from '../../../src/catalog/catalog-key';
+import {
+  CatalogSupersessionRefusal,
+  recordSupersession,
+  SUPERSESSION_SUCCESSOR_LAYER_REFUSAL,
+} from '../../../src/catalog/authoring-lifecycle';
 import {
   commitContentImport,
   planContentImport,
@@ -1427,6 +1433,243 @@ describe('HA-5 subclass publisher', () => {
       template_ref: null,
       state: 'active',
     });
+  });
+
+  it('LAYERFIX blocks external-to-bundled lineage and purges only the external creation', async () => {
+    const db = await database();
+    const authoring = service(db);
+    const bundledKey = '2024:subclass:layer-boundary-bundle' as ContentKey;
+    const installedFixtureKey =
+      'expanded:seed.bundle:layer-boundary-bundle' as ContentKey;
+    const bundledDraft = savedSubclass(authoring, 'Layer Boundary Bundle');
+    const bundledPreview = authoring.previewPublish({
+      draft_uuid: bundledDraft.draft_uuid,
+      expected_revision: bundledDraft.revision,
+    });
+    if (bundledPreview.aggregate.kind !== 'subclass') {
+      throw new Error('Subclass aggregate required.');
+    }
+    const bundledNode = portableSubclassContentImportNode(
+      db,
+      bundledPreview.aggregate,
+      installedFixtureKey,
+    );
+    const bundledPlan = planContentImport(db, [bundledNode]);
+    expect(commitContentImport(db, {
+      nodes: [bundledNode],
+      token: bundledPlan.token,
+    }).kind).toBe('committed');
+    // This fixture uses the production aggregate installer, then models the
+    // seed registry's bundled-stable key/classification at the identity
+    // boundary. The real seed subclasses cannot round-trip through HA-5 because
+    // their licensed mechanical extracts intentionally have empty prose.
+    db.exec('PRAGMA foreign_keys = OFF');
+    db.exec('PRAGMA ignore_check_constraints = ON');
+    db.exec(
+      `UPDATE catalog_content_identities
+          SET content_key = ?, catalog_layer = 'bundled',
+              key_kind = 'bundled-stable'
+        WHERE content_kind = 'subclass' AND content_key = ?`,
+      [bundledKey, installedFixtureKey],
+    );
+    for (const table of ['catalog_content_fingerprints', 'subclass_definitions']) {
+      db.exec(
+        `UPDATE ${table} SET content_key = ? WHERE content_key = ?`,
+        [bundledKey, installedFixtureKey],
+      );
+    }
+    db.exec('PRAGMA ignore_check_constraints = OFF');
+    db.exec('PRAGMA foreign_keys = ON');
+    expect(db.connection.selectObject('PRAGMA foreign_key_check')).toBeUndefined();
+    const external = publish(
+      authoring,
+      savedSubclass(authoring, 'Layer Boundary Aegis'),
+    );
+    const versionDraft = authoring.createDraft({
+      content_kind: 'subclass',
+      base_content_key: external.result.content_key,
+    });
+    if (versionDraft.document.kind !== 'subclass') {
+      throw new Error('Subclass drafts required.');
+    }
+    const matchingDraft = authoring.saveDraft({
+      draft_uuid: versionDraft.draft_uuid,
+      expected_revision: versionDraft.revision,
+      document: bundledDraft.document,
+    });
+    const matchPreview = authoring.previewPublish({
+      draft_uuid: matchingDraft.draft_uuid,
+      expected_revision: matchingDraft.revision,
+    });
+    expect(matchPreview.review).toEqual([expect.objectContaining({
+      candidate_content_key: bundledKey,
+      candidate_catalog_layer: 'bundled',
+      reason: 'srd-fallback',
+      default_decision: 'match',
+    })]);
+    expect(authoring.commitPublish({
+      token: matchPreview.token,
+      decisions: [{
+        candidate_content_key: bundledKey,
+        decision: 'match',
+      }],
+    })).toMatchObject({
+      outcome: 'matched_existing',
+      content_key: bundledKey,
+      catalog_layer: 'bundled',
+    });
+    expect(db.scalar<number>(
+      `SELECT count(*) FROM catalog_content_supersessions
+       WHERE content_kind = 'subclass'
+         AND superseded_content_key = ?`,
+      [external.result.content_key],
+    )).toBe(0);
+
+    expect(() => recordSupersession(
+      db,
+      'subclass',
+      external.result.content_key,
+      bundledKey,
+    )).toThrow(CatalogSupersessionRefusal);
+    try {
+      recordSupersession(db, 'subclass', external.result.content_key, bundledKey);
+    } catch (error) {
+      expect(error).toMatchObject({
+        name: 'CatalogSupersessionRefusal',
+        message: SUPERSESSION_SUCCESSOR_LAYER_REFUSAL,
+        reason: 'successor_not_external',
+      });
+    }
+
+    registerContentAlias(db, {
+      kind: 'subclass',
+      aliasKey: 'expanded:legacy.owner:layer-boundary-champion' as ContentKey,
+      contentKey: bundledKey,
+      aliasKind: 'declared-legacy',
+    });
+    const bundledCharacter = characterWithSubclass(db, bundledKey, 3);
+    const bundledRowsBefore = Object.freeze({
+      identity: db.allRaw(
+        'SELECT * FROM catalog_content_identities WHERE content_key = ?',
+        [bundledKey],
+      ),
+      definition: db.allRaw(
+        'SELECT * FROM subclass_definitions WHERE content_key = ?',
+        [bundledKey],
+      ),
+      fingerprints: db.allRaw(
+        `SELECT * FROM catalog_content_fingerprints
+         WHERE content_kind = 'subclass' AND content_key = ?
+         ORDER BY fingerprint_scheme, fingerprint_role`,
+        [bundledKey],
+      ),
+      aliases: db.allRaw(
+        `SELECT * FROM catalog_content_aliases
+         WHERE content_kind = 'subclass' AND content_key = ?
+         ORDER BY alias_key`,
+        [bundledKey],
+      ),
+      character: db.allRaw(
+        'SELECT * FROM characters WHERE id = ?',
+        [bundledCharacter.characterId],
+      ),
+      attachment: db.allRaw(
+        `SELECT * FROM character_class_levels
+         WHERE character_id = ? AND subclass_definition_id = ?`,
+        [bundledCharacter.characterId, bundledCharacter.subclassId],
+      ),
+    });
+    expect(bundledRowsBefore.identity).toHaveLength(1);
+    expect(bundledRowsBefore.definition).toHaveLength(1);
+    expect(bundledRowsBefore.fingerprints.length).toBeGreaterThan(0);
+    expect(bundledRowsBefore.aliases).toHaveLength(1);
+    expect(bundledRowsBefore.character).toHaveLength(1);
+    expect(bundledRowsBefore.attachment).toHaveLength(1);
+
+    // Simulate a database created before the writer invariant existed. The
+    // purge boundary must remain safe independently of the production writer.
+    db.exec(
+      `INSERT INTO catalog_content_supersessions (
+         content_kind, superseded_content_key, successor_content_key
+       ) VALUES ('subclass', ?, ?)`,
+      [external.result.content_key, bundledKey],
+    );
+    const lifecycle = new HomebrewArchiveSetService(
+      db,
+      () => '2042-08-15T16:17:18.000Z',
+      () => 'layerfix-archive-event',
+    );
+    const archive = lifecycle.previewArchive(external.result.content_key);
+    expect(archive.characters).toEqual([]);
+    lifecycle.commitArchive(archive.token);
+    expect(lifecycle.listArchived()).toEqual([
+      expect.objectContaining({
+        content_key: external.result.content_key,
+        lineage_revision_count: 1,
+        purge_characters: [],
+      }),
+    ]);
+
+    expect(lifecycle.purgeArchived(
+      'subclass',
+      external.result.content_key,
+    )).toEqual({
+      requested_content_key: external.result.content_key,
+      content_kind: 'subclass',
+      purged_content_keys: [external.result.content_key],
+      purged_character_ids: [],
+    });
+    expect(db.scalar<number>(
+      'SELECT count(*) FROM catalog_content_identities WHERE content_key = ?',
+      [external.result.content_key],
+    )).toBe(0);
+    expect(db.scalar<number>(
+      'SELECT count(*) FROM subclass_definitions WHERE content_key = ?',
+      [external.result.content_key],
+    )).toBe(0);
+    expect(db.scalar<number>(
+      `SELECT count(*) FROM catalog_content_fingerprints
+       WHERE content_kind = 'subclass' AND content_key = ?`,
+      [external.result.content_key],
+    )).toBe(0);
+    expect(db.scalar<number>(
+      `SELECT count(*) FROM catalog_content_supersessions
+       WHERE content_kind = 'subclass' AND (
+         superseded_content_key = ? OR successor_content_key = ?
+       )`,
+      [external.result.content_key, external.result.content_key],
+    )).toBe(0);
+    expect({
+      identity: db.allRaw(
+        'SELECT * FROM catalog_content_identities WHERE content_key = ?',
+        [bundledKey],
+      ),
+      definition: db.allRaw(
+        'SELECT * FROM subclass_definitions WHERE content_key = ?',
+        [bundledKey],
+      ),
+      fingerprints: db.allRaw(
+        `SELECT * FROM catalog_content_fingerprints
+         WHERE content_kind = 'subclass' AND content_key = ?
+         ORDER BY fingerprint_scheme, fingerprint_role`,
+        [bundledKey],
+      ),
+      aliases: db.allRaw(
+        `SELECT * FROM catalog_content_aliases
+         WHERE content_kind = 'subclass' AND content_key = ?
+         ORDER BY alias_key`,
+        [bundledKey],
+      ),
+      character: db.allRaw(
+        'SELECT * FROM characters WHERE id = ?',
+        [bundledCharacter.characterId],
+      ),
+      attachment: db.allRaw(
+        `SELECT * FROM character_class_levels
+         WHERE character_id = ? AND subclass_definition_id = ?`,
+        [bundledCharacter.characterId, bundledCharacter.subclassId],
+      ),
+    }).toEqual(bundledRowsBefore);
   });
 
   it('rolls subclass installation and lineage back atomically', async () => {
