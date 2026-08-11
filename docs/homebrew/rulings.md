@@ -5,6 +5,34 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-11 — Domination second batch: Foreseen strikes at 3; the smite rider comes back out
+
+Owner's rulings, verbatim (same session, after the redesign below):
+
+> Lvl 3 , spellcasting mod times per day, turn a miss into a hit
+
+> And take out the bonus d8 from smite, too complicated
+
+Effects:
+
+1. **Foretold Authority loses the +1d8 smite-vs-controlled rider** (from
+   the redesign entry below) — removed as too complicated. The +1 spell
+   attack / save DC window stays.
+2. **Foretold Authority gains Foreseen strikes**: a number of times per
+   Long Rest equal to the paladin's spellcasting (Charisma) modifier,
+   turn a missed attack roll into a hit. Drafting assumptions, flagged
+   in the doc: declared after seeing the miss; the converted hit is not
+   a critical hit; minimum one use.
+
+Sim, final level-3 kit (dealt/round, burst, vs Vengeance
+19.4/34.7/60.2/72.1): smite-only **20.5**/32.9/56.6/71.3 —
+**106%/95%/94%/99% of Vengeance**; the goal of closing the 3–9 gap is
+met and slightly exceeded at 3 in burst. Day mode (3 conversions across
+16 rounds) trails at 82–84%: 11.8/23.8/45.3/60.9. The sim's directional
+invariant was rewritten to encode the deliberate L3-burst flip
+(Domination > Vengeance) and the day-mode ordering (Vengeance ahead
+everywhere), citing this ruling.
+
 ## 2026-08-11 — Oath of Domination redesign: Voice to 7 (smite-triggered), new level-3 authority engine, smite rider
 
 Owner's ruling, verbatim (after a sim brainstorm on closing the dealt gap
