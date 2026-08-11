@@ -178,7 +178,7 @@ test('publishes, versions, archives, restores, and permanently purges a whole li
   await expect(page.getByRole('heading', { name: 'Archive' })).toBeVisible();
   await clearAnnouncements(page);
   const purge = page.getByRole('button', {
-    name: 'Permanently purge Purge Journey Species Revised and its entire version lineage',
+    name: 'Permanently purge all versions of Purge Journey Species Revised',
   });
   const beforeCancel = await page.evaluate(async ({ keys, id }) => ({
     lineage: (await window.staticApp.inspectRows('catalog_content_identities'))
@@ -197,7 +197,7 @@ test('publishes, versions, archives, restores, and permanently purges a whole li
     name: 'Permanently purge “Purge Journey Species Revised”?',
   });
   await expect(confirmation).toBeVisible();
-  await expect(confirmation).toContainText('2 revisions in this lineage');
+  await expect(confirmation).toContainText('2 related versions');
   await expect(confirmation.getByText('Purge Journey Hero', { exact: true })).toBeVisible();
   const cancelPurge = confirmation.getByRole('button', {
     name: 'Cancel — keep everything',
@@ -247,8 +247,8 @@ test('publishes, versions, archives, restores, and permanently purges a whole li
   await confirmPurge.click();
   await expect(page.getByText('The archive is empty.')).toBeVisible();
   await expect.poll(() => announcedMessages(page)).toEqual(expect.arrayContaining([
-    'Permanently purging the complete version lineage…',
-    'Entire version lineage permanently purged.',
+    'Permanently purging all versions…',
+    'All versions permanently purged.',
   ]));
 
   expect(await page.evaluate(async ({ keys, id }) => ({

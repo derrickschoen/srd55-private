@@ -799,6 +799,14 @@ export function createImportBackupControls(
     attributes: { type: 'button' },
   });
   forgetReceipt.disabled = true;
+  const rememberedTargetLabel = (contentKey: string): string => {
+    const tail = contentKey.split(':').at(-1) ?? '';
+    const readable = tail.replace(/[._-]+/gu, ' ').trim();
+    const compact = readable.replaceAll(' ', '');
+    return readable === '' || /^[a-f0-9]{32,}$/iu.test(compact)
+      ? 'library entry'
+      : `“${readable}”`;
+  };
   const refreshReceipts = async (): Promise<void> => {
     receiptSelect.disabled = true;
     forgetReceipt.disabled = true;
@@ -806,9 +814,11 @@ export function createImportBackupControls(
       return;
     }
     const receipts = await services.catalog.listMatchDecisions();
-    receiptSelect.replaceChildren(...receipts.map((receipt) => element('option', {
-      text: `${receipt.kind}: ${receipt.decision} → ${receipt.targetContentKey} ` +
-        `(${receipt.scheme} ${receipt.digest.slice(0, 12)}…, reviewed ${receipt.reviewedAt})`,
+    receiptSelect.replaceChildren(...receipts.map((receipt, index) => element('option', {
+      text: `${receipt.kind} choice ${String(index + 1)}: ` +
+        `${receipt.decision === 'match' ? 'use' : 'keep a private copy for'} ` +
+        `${rememberedTargetLabel(receipt.targetContentKey)} ` +
+        `(reviewed ${receipt.reviewedAt})`,
       attributes: {
         value: JSON.stringify({
           kind: receipt.kind,

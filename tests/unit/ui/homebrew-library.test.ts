@@ -1221,9 +1221,9 @@ describe('HA-6 homebrew library routing and tabs', () => {
       );
       const labels = archiveRoot.querySelectorAll('button').map((button) => button.textContent);
       expect(labels).toContain('Restore creation and all listed characters');
-      expect(labels).toContain('Permanently purge entire lineage');
+      expect(labels).toContain('Permanently purge all versions');
       expect(elementText(archiveRoot as unknown as Node)).toContain(
-        'every predecessor and successor version',
+        'every earlier and later version',
       );
       expect(labels.some((label) => label?.includes('Restore character'))).toBe(false);
       archiveRoot.querySelectorAll('button').find(
@@ -1237,7 +1237,7 @@ describe('HA-6 homebrew library routing and tabs', () => {
       expect(archiveRoot.querySelector('.homebrew-status')?.textContent)
         .toBe('Creation and all listed characters restored.');
       const purge = archiveRoot.querySelectorAll('button').find(
-        (button) => button.textContent === 'Permanently purge entire lineage',
+        (button) => button.textContent === 'Permanently purge all versions',
       );
       if (purge === undefined) throw new Error('Permanent purge trigger missing.');
       purge.focus();
@@ -1252,7 +1252,7 @@ describe('HA-6 homebrew library routing and tabs', () => {
       expect(purgeCalls).toEqual([]);
       expect(elementText(purgeDialogNode as unknown as Node)).toContain(hostileCreation);
       expect(elementText(purgeDialogNode as unknown as Node)).toContain(
-        '3 revisions in this lineage',
+        '3 related versions',
       );
       expect(elementText(purgeDialogNode as unknown as Node)).toContain(hostileCharacter);
       expect(purgeDialogNode.querySelector('[data-ha11-creation]')).toBeNull();
@@ -1291,7 +1291,7 @@ describe('HA-6 homebrew library routing and tabs', () => {
         content_key: contentKey,
       }]);
       expect(archiveRoot.querySelector('.homebrew-status')?.textContent)
-        .toBe('Entire version lineage permanently purged.');
+        .toBe('All versions permanently purged.');
       archiveCleanup();
     } finally {
       restoreDocument();

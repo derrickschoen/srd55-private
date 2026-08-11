@@ -14,6 +14,7 @@ import {
   deriveContentIdentityV1,
 } from '../../../src/catalog/content-identity';
 import {
+  certifyInstalledTargetReference,
   registerBundledStableContentIdentity,
   registerContentAlias,
   registerDerivedContentIdentity,
@@ -231,6 +232,22 @@ describe('the D82 content-adoption dialog', () => {
     commitNewItem(db, exact);
     commitNewItem(db, metadata);
     commitNewItem(db, sameNameStored);
+    const installedTarget = itemNode(
+      'installed-target-stored',
+      'Installed Relic',
+      { rule: 'installed' },
+    );
+    commitNewItem(db, installedTarget);
+    const installedIdentity = deriveContentIdentityV1(installedTarget.projection);
+    const installedCertificate = certifyInstalledTargetReference(db, {
+      kind: 'item',
+      contentKey: installedTarget.projection.assertedKey,
+      fingerprint: {
+        scheme: installedIdentity.envelope.scheme,
+        digest: installedIdentity.digest,
+        canonicalJson: installedIdentity.canonicalJson,
+      },
+    });
     const unevidencedStored = itemNode(
       'unevidenced-stored',
       'Unevidenced Relic',
@@ -301,6 +318,13 @@ describe('the D82 content-adoption dialog', () => {
           localValue: 'Local Guide',
         }],
       }),
+      itemNode('installed-target', 'Installed Relic', { rule: 'installed' }, {
+        referenceOnly: {
+          source: 'installed-target',
+          contentKey: installedTarget.projection.assertedKey,
+          certificate: installedCertificate,
+        },
+      }),
       itemNode('same-name-distinct', 'shared-relic', { rule: 'incoming' }),
       itemNode('unevidenced', 'Unevidenced Relic', { rule: 'not-evidence' }, {
         referenceOnly: {
@@ -322,7 +346,7 @@ describe('the D82 content-adoption dialog', () => {
     const previewPlan = portableImportPlan(planContentImport(db, nodes));
     expect(previewPlan.preview.new_by_kind.item).toBe(1);
     expect(previewPlan.preview.matched_by_kind.item).toBe(1);
-    expect(previewPlan.preview.review_required_by_kind.item).toBe(7);
+    expect(previewPlan.preview.review_required_by_kind.item).toBe(8);
     expect(previewPlan.preview.refused_by_kind.item).toBe(1);
     expect(Object.fromEntries(previewPlan.outcomes.map((outcome) => [
       outcome.id,
@@ -332,6 +356,7 @@ describe('the D82 content-adoption dialog', () => {
       'portable:item:exact': 'match',
       'portable:item:alias': 'review',
       'portable:item:compatible': 'review',
+      'portable:item:installed-target': 'review',
       'portable:item:same-name-distinct': 'review',
       'portable:item:unevidenced': 'review',
       'portable:item:refused': 'refused',
@@ -344,6 +369,7 @@ describe('the D82 content-adoption dialog', () => {
       'portable:item:compatible': 'compatible-fingerprint',
       'portable:item:srd': 'srd-fallback',
       'portable:item:metadata-review': 'metadata-conflict',
+      'portable:item:installed-target': 'installed-target',
       'portable:item:same-name-distinct': 'key-collision',
       'portable:item:unevidenced': 'key-collision',
       'portable:item:alias-distinct': 'key-collision',
@@ -375,7 +401,7 @@ describe('the D82 content-adoption dialog', () => {
       });
       const text = elementText(rendered.element);
 
-      expect(text).toContain('item: 1 new, 1 matched, 7 needs review, 1 refused');
+      expect(text).toContain('item: 1 new, 1 matched, 8 needs review, 1 refused');
       expect(text).toContain('4 conflicts must be reviewed below.');
       const dialog = interactiveElement(rendered.element);
       expect(dialog.isConnected).toBe(true);
@@ -390,14 +416,16 @@ describe('the D82 content-adoption dialog', () => {
         ]),
       );
       expect(renderedReasons).toEqual({
-        'portable:item:alias': 'Alias',
-        'portable:item:compatible': 'Compatible fingerprint',
-        'portable:item:srd': 'SRD fingerprint fallback',
-        'portable:item:metadata-review': 'Metadata conflict',
+        'portable:item:alias': 'Known alternate name',
+        'portable:item:compatible': 'Matches a version of library content',
+        'portable:item:srd': 'Matches a version of built-in content',
+        'portable:item:metadata-review': 'Same rules, different details',
+        'portable:item:installed-target': 'Already in your library',
         'portable:item:same-name-distinct': 'Same name, distinct rules content',
-        'portable:item:unevidenced': 'Reference supplied no rules evidence',
-        'portable:item:alias-distinct': 'Alias points to distinct rules content',
+        'portable:item:unevidenced': 'Shared reference has no rules to compare',
+        'portable:item:alias-distinct': 'Alternate name points to different rules',
       });
+      expect(text).not.toMatch(/certif|fingerprint|codec/i);
       expect(text).toContain(
         'Source book — incoming: Incoming Guide; local: Local Guide',
       );
@@ -541,7 +569,7 @@ describe('the D82 content-adoption dialog', () => {
       const dialog = interactiveElement(rendered.element);
 
       expect(dialog.getAttribute('aria-modal')).toBe('true');
-      expect(elementText(rendered.element)).toContain('Match reason: Alias');
+      expect(elementText(rendered.element)).toContain('Match reason: Known alternate name');
       const inputs = dialog.querySelectorAll('input');
       expect(inputs[0]?.getAttribute('value')).toBe('match');
       expect(inputs[0]?.getAttribute('checked')).toBe('');

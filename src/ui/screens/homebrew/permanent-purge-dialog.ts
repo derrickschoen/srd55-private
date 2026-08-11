@@ -48,7 +48,7 @@ export function createPermanentPurgeDialog(
   });
   const revisionCount = options.archivedSet.lineage_revision_count;
   const revisions = element('p', {
-    text: `${String(revisionCount)} ${revisionCount === 1 ? 'revision' : 'revisions'} in this lineage`,
+    text: `${String(revisionCount)} related ${revisionCount === 1 ? 'version' : 'versions'}`,
   });
   const characterCount = options.archivedSet.purge_characters.length;
   const cancel = element('button', {
@@ -67,7 +67,7 @@ export function createPermanentPurgeDialog(
   dialog.append(
     heading,
     explanation,
-    element('h3', { text: 'Lineage revisions' }),
+    element('h3', { text: 'Versions to delete' }),
     revisions,
     element('h3', {
       text: `Attached characters (${String(characterCount)})`,

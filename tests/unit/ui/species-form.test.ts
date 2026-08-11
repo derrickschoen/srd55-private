@@ -483,7 +483,7 @@ describe('HA-7 species authoring form', () => {
       expect(dialog).not.toBeNull();
       expect(dialog?.isConnected).toBe(true);
       expect(dialog?.open).toBe(true);
-      expect(elementText(dialog as unknown as Node)).toContain('SRD fingerprint fallback');
+      expect(elementText(dialog as unknown as Node)).toContain('Matches a version of built-in content');
       const dialogRoot = interactiveElement(dialog as unknown as Element);
       const clone = byId(dialogRoot, 'input', 'publish-adoption-1-clone');
       clone.checked = true;

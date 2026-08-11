@@ -118,7 +118,7 @@ test('authors a subclass timeline, preserves threshold effects, and previews its
   await expect(publishedCard.getByRole('heading', {
     name: HOSTILE_SUBCLASS_NAME,
   })).toBeVisible();
-  await expect(publishedCard).toContainText('Subclass · immutable published version');
+  await expect(publishedCard).toContainText('Subclass · read-only published version');
 
   const journey = await page.evaluate(async (subclassName) => {
     const classes = await window.staticApp.inspectRows('class_definitions', { name: 'Fighter' });
