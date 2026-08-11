@@ -322,16 +322,25 @@ describe('W-FEAT-COVERAGE application plan presentation', () => {
     expect(text).toContain('Applied effects');
     expect(text).toContain('Sentinel applied effect');
     expect(text).toContain('Wisdom +1, maximum 20');
-    expect(text).toContain('Grant-rule benefits');
-    expect(text).toContain('skilled-sentinel');
-    expect(text).toContain('Allows Tool Instead true');
+    expect(text).toContain('Choices and proficiencies');
+    expect(text).toContain('Stable grant label: skilled-sentinel');
+    expect(text).toContain('Choose 3 skill proficiencies');
+    expect(text).toContain('a tool proficiency may be chosen instead');
     expect(text).toContain('Sourced text benefits');
     expect(text).toContain('You gain proficiency in any combination of three skills or tools of your choice.');
     expect(text).toContain('Tool Alternative Unmodelled');
     expect(text).toContain('Undetermined numbers');
     expect(text).toContain('Initiative (initiative) cannot be determined exactly.');
     expect(view.element.querySelector('select')).toBeNull();
-    expect(text).not.toContain('Choose three skills');
+    for (const codecPhrase of [
+      'Returned configurations',
+      'Grant-rule benefits',
+      'Kind choice_from_list',
+      'Rule Key',
+      'Allows Tool Instead',
+    ]) {
+      expect(text).not.toContain(codecPhrase);
+    }
     view.cleanup();
   });
 });
@@ -378,11 +387,11 @@ describe('W-COLOR-SIGNAL eligibility presentation', () => {
     expect(text).toContain('returned scores: 12, 11');
     expect(text).toContain('Required feature is missing: Spellcasting');
     expect(text).toContain('nonrepeatable feat has already been taken');
-    expect(text).toContain('No unused Chosen List configuration remains');
+    expect(text).toContain('No unused Chosen List choice remains');
     expect(text).toContain('Chosen List “Wizard” has already been used');
     expect(text).toContain('Wisdom cannot be verified');
     expect(text).toContain('Required feature cannot be verified: Fighting Style');
-    expect(text).toContain('Prior Chosen List configurations cannot be verified');
+    expect(text).toContain('Prior Chosen List choices cannot be verified');
     expect(card?.querySelector('input')).toBeNull();
     view.cleanup();
   });

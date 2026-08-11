@@ -524,6 +524,55 @@ test('the attack profiles derive from the weapon, the class and nothing stored',
   expect(body).not.toMatch(/D&D|Dungeons|Wizards/);
 });
 
+test('a Fighter 5 Shortbow opens on the Dexterity numbers and keeps the manual override', async ({
+  page,
+}) => {
+  // Measured alone on PLAYWRIGHT_PORT=5040 at 13.471s. The required x1.5
+  // reserve is 20.2065s, rounded up to 20.3s.
+  test.setTimeout(20_300);
+  await openPlanner(page, 'Shortbow Wielder');
+  await addFighterLevel(page);
+  await page.evaluate(async () => {
+    const [character] = await window.staticApp.inspectRows('characters', { id: 1 });
+    await window.appRpc.call('queries.characters.allocateAbilities', {
+      character_id: 1,
+      method: 'manual',
+      scores: {
+        strength: 18,
+        dexterity: 14,
+        constitution: Number(character?.['constitution']),
+        intelligence: Number(character?.['intelligence']),
+        wisdom: Number(character?.['wisdom']),
+        charisma: Number(character?.['charisma']),
+      },
+      operation_uuid: crypto.randomUUID(),
+      expected_revision: Number(character?.['revision']),
+    });
+  });
+  await levelClassTo(page, 'Fighter', 5);
+
+  await page.getByRole('button', { name: 'Add weapon' }).click();
+  const form = page.getByTestId('weapon-form');
+  await form
+    .getByLabel('Start from a reference weapon')
+    .selectOption({ label: 'Shortbow' });
+  await form.getByRole('button', { name: 'Add weapon' }).click();
+
+  const numbers = page.getByTestId('attack-profile-numbers').first();
+  await expect(numbers).toHaveText(
+    'To hit: +5 (Dexterity) · Damage: 1d6 +2 Piercing',
+    { timeout: 20_300 },
+  );
+  const ability = page.getByRole('combobox', {
+    name: 'Ability for Attack with Shortbow',
+  });
+  await expect(ability).toHaveValue('dexterity');
+  await ability.selectOption('strength');
+  await expect(numbers).toHaveText(
+    'To hit: +7 (Strength) · Damage: 1d6 +4 Piercing',
+  );
+});
+
 /**
  * THE ONE NUMBER D28 §1 IS ABOUT, ON A REAL SCREEN, ON BOTH SCREENS.
  *

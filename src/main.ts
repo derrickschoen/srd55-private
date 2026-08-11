@@ -9,6 +9,11 @@ import {
   bootDatabaseWorkerWithRetry,
   databaseBootFailureMessage,
 } from './db/database-worker-boot';
+import {
+  databaseBootStageLabel,
+  isDatabaseBootProgress,
+  type DatabaseBootProgress,
+} from './db/database-boot-progress';
 import type { SystemInfo } from './worker/handlers/system';
 import { Application } from './ui/app';
 import { Router } from './ui/router';
@@ -98,7 +103,20 @@ class DatabaseWorkerTransport implements RpcTransport {
     (event: MessageEvent<RpcResponse>) => void
   >();
   readonly #errorListeners = new Set<(event: ErrorEvent) => void>();
+  readonly #progressListeners = new Set<
+    (progress: DatabaseBootProgress) => void
+  >();
   #worker: Worker | undefined;
+
+  readonly #onWorkerMessage = (event: MessageEvent<unknown>): void => {
+    if (isDatabaseBootProgress(event.data)) {
+      for (const listener of this.#progressListeners) listener(event.data);
+      return;
+    }
+    for (const listener of this.#messageListeners) {
+      listener(event as MessageEvent<RpcResponse>);
+    }
+  };
 
   activate(): void {
     if (this.#worker !== undefined) {
@@ -107,9 +125,7 @@ class DatabaseWorkerTransport implements RpcTransport {
     const worker = new Worker(new URL('./db/worker.ts', import.meta.url), {
       type: 'module',
     });
-    for (const listener of this.#messageListeners) {
-      worker.addEventListener('message', listener);
-    }
+    worker.addEventListener('message', this.#onWorkerMessage);
     for (const listener of this.#errorListeners) {
       worker.addEventListener('error', listener);
     }
@@ -134,7 +150,6 @@ class DatabaseWorkerTransport implements RpcTransport {
         event: MessageEvent<RpcResponse>,
       ) => void;
       this.#messageListeners.add(messageListener);
-      this.#worker?.addEventListener('message', messageListener);
       return;
     }
     const errorListener = listener as (event: ErrorEvent) => void;
@@ -153,7 +168,6 @@ class DatabaseWorkerTransport implements RpcTransport {
         event: MessageEvent<RpcResponse>,
       ) => void;
       this.#messageListeners.delete(messageListener);
-      this.#worker?.removeEventListener('message', messageListener);
       return;
     }
     const errorListener = listener as (event: ErrorEvent) => void;
@@ -169,6 +183,14 @@ class DatabaseWorkerTransport implements RpcTransport {
   restart(): void {
     this.terminate();
     this.activate();
+  }
+
+  addProgressListener(listener: (progress: DatabaseBootProgress) => void): void {
+    this.#progressListeners.add(listener);
+  }
+
+  removeProgressListener(listener: (progress: DatabaseBootProgress) => void): void {
+    this.#progressListeners.delete(listener);
   }
 }
 
@@ -333,8 +355,13 @@ const startDatabaseBoot = (): void => {
   // is never persisted and never changes whether the notice is rendered.
   databaseBootStarted = true;
   const bootStatus = showDatabaseBootStatus('Starting local database…');
+  const reportProgress = (progress: DatabaseBootProgress): void => {
+    bootStatus.value = databaseBootStageLabel(progress.stage);
+  };
+  databaseWorkerTransport.addProgressListener(reportProgress);
   void bootDatabaseWorkerWithRetry(databaseWorkerTransport, system.info)
     .then(() => {
+      databaseWorkerTransport.removeProgressListener(reportProgress);
       databaseReady = true;
       if (application === undefined) {
         startApplication();
@@ -343,6 +370,7 @@ const startDatabaseBoot = (): void => {
       }
     })
     .catch((error: unknown) => {
+      databaseWorkerTransport.removeProgressListener(reportProgress);
       bootStatus.value = `Failed: ${databaseBootFailureMessage(error)}`;
       bootStatus.dataset.ready = 'false';
       root.setAttribute('aria-busy', 'false');

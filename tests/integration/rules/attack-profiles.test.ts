@@ -262,6 +262,46 @@ describe('the weapons panel derives attacks without storing them', () => {
     ]);
   });
 
+  it('opens a seeded Shortbow profile on Dexterity at Fighter 5', () => {
+    db.exec(
+      `INSERT INTO character_weapons (
+         character_id, name, proficiency_category, attack_kind,
+         damage_kind, damage_dice, damage_type, versatile_damage_kind,
+         finesse, heavy, light, loading, reach, thrown, two_handed,
+         ammunition, ammunition_kind, range_kind, range_near_feet,
+         range_far_feet, mastery_property, other_properties
+       )
+       SELECT ?, name, 'simple', 'ranged',
+              damage_kind, damage_dice, damage_type, versatile_damage_kind,
+              finesse, heavy, light, loading, reach, thrown, two_handed,
+              ammunition, ammunition_kind, range_kind, range_near_feet,
+              range_far_feet, mastery_property, other_properties
+       FROM weapon_templates
+       WHERE content_key = '2024:weapon:shortbow'`,
+      [characterId],
+    );
+
+    const shortbow = panel().attacks.weapons.find(
+      (weapon) => weapon.weapon_name === 'Shortbow',
+    );
+    const profile = shortbow?.profiles[0];
+    expect(profile?.kind).toBe('normal');
+    expect(
+      profile?.abilities.state === 'unavailable'
+        ? []
+        : profile?.abilities.options.map((option) => [
+            option.ability,
+            option.attack_bonus,
+            option.damage_modifier,
+          ]),
+    ).toEqual([
+      // Dexterity 14 -> +2, plus Fighter 5 proficiency +3: +5 / 1d6 +2.
+      ['dexterity', 5, 2],
+      // The existing manual override remains available after the correct row.
+      ['strength', 7, 4],
+    ]);
+  });
+
   it('consumes eligible +1 weapon and ability-override effects from the database', () => {
     const weaponId = Number(
       db.scalar(

@@ -50,6 +50,7 @@ import {
   type MulticlassPrimaryAbilityAssessment,
 } from './multiclass-primary-ability';
 import { selectableCatalogContentSql } from './selectable-catalog-content';
+import { characterSourceCatalogResolution } from '../catalog/recorded-source-provenance';
 
 interface SlotWithOrder extends WorkspaceSlot {
   readonly sort_order: number;
@@ -615,10 +616,13 @@ export class CharacterWorkspaceBuilder {
        ORDER BY source.id`,
       [characterId],
       (row) => {
+        const id = sqlInteger(row, 'id');
         const config = jsonRecord(sqlNullableString(row, 'config'));
         return {
-          id: sqlInteger(row, 'id'),
+          id,
           display_name: sqlString(row, 'display_name'),
+          catalog_layer: characterSourceCatalogResolution(this.db, id)
+            .catalog_layer,
           chosen_list: String(config.chosen_list ?? ''),
           spellcasting_ability: String(
             config.spellcasting_ability ?? '',
@@ -668,22 +672,27 @@ export class CharacterWorkspaceBuilder {
          AND state = 'active'
        ORDER BY source_type, display_name, id`,
       [characterId],
-      (row): RemovableSource => ({
-        id: sqlInteger(row, 'id'),
-        parent_source_instance_id: sqlNullableInteger(
-          row,
-          'parent_source_instance_id',
-        ),
-        source_type: sqlString(
-          row,
-          'source_type',
-        ) as StandaloneSourceType,
-        source_definition_id: sqlNullableInteger(
-          row,
-          'source_definition_id',
-        ),
-        display_name: sqlString(row, 'display_name'),
-      }),
+      (row): RemovableSource => {
+        const id = sqlInteger(row, 'id');
+        return {
+          id,
+          parent_source_instance_id: sqlNullableInteger(
+            row,
+            'parent_source_instance_id',
+          ),
+          source_type: sqlString(
+            row,
+            'source_type',
+          ) as StandaloneSourceType,
+          source_definition_id: sqlNullableInteger(
+            row,
+            'source_definition_id',
+          ),
+          display_name: sqlString(row, 'display_name'),
+          catalog_layer: characterSourceCatalogResolution(this.db, id)
+            .catalog_layer,
+        };
+      },
     );
   }
 }

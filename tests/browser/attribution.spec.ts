@@ -69,7 +69,7 @@ test('a footer click made before the database opens is routed, not reloaded', as
     // Proof that the click below lands before the boot gate fires: #app still
     // carries the served pre-boot shell, which the application replaces the
     // moment it starts.
-    await expect(page.locator('#status')).toHaveText('Starting local database…');
+    await expect(page.locator('#status')).toHaveText('Loading database engine…');
     await expect(page.locator('#app')).toHaveAttribute('aria-busy', 'true');
     await expect(attributionLink(page)).toBeVisible();
 

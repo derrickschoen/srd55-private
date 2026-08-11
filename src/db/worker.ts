@@ -20,12 +20,21 @@ import {
   degradedRejection,
   type DatabaseBoot,
 } from '../worker/boot';
+import {
+  databaseBootProgress,
+  type DatabaseBootStage,
+} from './database-boot-progress';
 
 const scope = self as DedicatedWorkerGlobalScope;
 const filename = '/dnd-multiclass-spells.sqlite3';
 
 async function initialize(): Promise<DatabaseBoot> {
+  const report = (stage: DatabaseBootStage): void => {
+    scope.postMessage(databaseBootProgress(stage));
+  };
+  report('loading_engine');
   const sqlite3 = await sqlite3InitModule();
+  report('opening_storage');
   const pool = await sqlite3.installOpfsSAHPoolVfs({
     initialCapacity: 6,
     name: 'dnd-multiclass-spells-sahpool',
@@ -34,10 +43,12 @@ async function initialize(): Promise<DatabaseBoot> {
   const lifecycle = createApplicationLifecycle(
     sqlite3,
     createSahPoolStorage(pool, filename),
+    report,
   );
   // A failed open resolves to a degraded boot rather than rejecting, so the
   // recovery methods stay reachable. Failures BEFORE this point (wasm init,
   // VFS install) still reject: there is no database to recover from.
+  report('checking_structure');
   return bootDatabase(lifecycle);
 }
 

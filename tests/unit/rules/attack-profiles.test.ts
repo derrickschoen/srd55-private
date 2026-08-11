@@ -135,6 +135,7 @@ const LONGSWORD: AttackProfileWeapon = {
   damage: { kind: 'dice', dice: '1d8' },
   damage_type: 'Slashing',
   versatile_damage: { kind: 'dice', dice: '1d10' },
+  attack_kind: null,
   proficiency: PROFICIENT,
 };
 
@@ -428,6 +429,7 @@ describe('the plain weapon attack', () => {
             damage: { kind: 'not_recorded' },
             damage_type: null,
             versatile_damage: { kind: 'not_applicable' },
+            attack_kind: null,
             proficiency: PROFICIENT,
           },
         ],
@@ -537,6 +539,7 @@ describe('True Strike', () => {
           damage: { kind: 'dice', dice: '1d4' },
           damage_type: 'Piercing',
           versatile_damage: { kind: 'not_applicable' },
+          attack_kind: null,
           proficiency: PROFICIENT,
         },
       ],
@@ -616,6 +619,7 @@ describe('True Strike', () => {
       damage: { kind: 'dice', dice: '1d4' },
       damage_type: 'Piercing',
       versatile_damage: { kind: 'not_applicable' },
+      attack_kind: null,
       proficiency: PROFICIENT,
     };
     const result = build({
