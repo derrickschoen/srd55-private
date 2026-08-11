@@ -172,6 +172,31 @@ function classSeeds(): Readonly<Record<string, ClassSeed>> {
 
 export const BUNDLED_RULES_EDITION = '2024';
 
+/**
+ * The base Rogue Sneak Attack term, stored in migration-0042's general typed
+ * contribution table. Its class-qualified source is the multiclass guard: the
+ * expression can read Rogue levels only, never total character level.
+ */
+export const ROGUE_SNEAK_ATTACK_CONTRIBUTION = Object.freeze({
+  contribution_key: 'sneak-attack',
+  label: 'Sneak Attack',
+  target_kind: 'feature_dice_count',
+  target_key: 'sneak_attack',
+  op: 'add',
+  active_from_level: 1,
+  active_to_level: 20,
+  value_json: JSON.stringify({
+    kind: 'scale',
+    source: {
+      kind: 'class_level',
+      class_content_key: '2024:class:rogue',
+    },
+    divide: 2,
+    round: 'ceiling',
+  }),
+  supersedes_ref: null,
+});
+
 /** Every bundled progression table covers character levels 1 through 20. */
 const PROGRESSION_LEVELS = 20;
 
@@ -232,8 +257,48 @@ export function hasBundledClassContent(db: DatabaseContext): boolean {
          AND progression.class_level BETWEEN 1 AND ${PROGRESSION_LEVELS}`,
       keys.classes,
     ) ===
-      keys.classes.length * PROGRESSION_LEVELS
+      keys.classes.length * PROGRESSION_LEVELS &&
+    hasBundledClassFeatureValueContributions(db, keys.classes)
   );
+}
+
+/** Exact manifest check: one Rogue row, and no unclaimed bundled-class rows. */
+function hasBundledClassFeatureValueContributions(
+  db: DatabaseContext,
+  classKeys: readonly string[],
+): boolean {
+  const keySlots = placeholders(classKeys.length);
+  const total = countRows(
+    db,
+    `SELECT count(*)
+       FROM class_feature_value_contributions AS contribution
+       JOIN class_definitions AS definition
+         ON definition.id = contribution.class_definition_id
+      WHERE definition.content_key IN (${keySlots})`,
+    classKeys,
+  );
+  if (total !== 1) {
+    return false;
+  }
+  const row = db.oneRaw(
+    `SELECT contribution_key, label, target_kind, target_key, op,
+            active_from_level, active_to_level, value_json, supersedes_ref
+       FROM class_feature_value_contributions AS contribution
+       JOIN class_definitions AS definition
+         ON definition.id = contribution.class_definition_id
+      WHERE definition.content_key = ?`,
+    [classContentKey('Rogue')],
+  );
+  return row !== null &&
+    row.contribution_key === ROGUE_SNEAK_ATTACK_CONTRIBUTION.contribution_key &&
+    row.label === ROGUE_SNEAK_ATTACK_CONTRIBUTION.label &&
+    row.target_kind === ROGUE_SNEAK_ATTACK_CONTRIBUTION.target_kind &&
+    row.target_key === ROGUE_SNEAK_ATTACK_CONTRIBUTION.target_key &&
+    row.op === ROGUE_SNEAK_ATTACK_CONTRIBUTION.op &&
+    row.active_from_level === ROGUE_SNEAK_ATTACK_CONTRIBUTION.active_from_level &&
+    row.active_to_level === ROGUE_SNEAK_ATTACK_CONTRIBUTION.active_to_level &&
+    row.value_json === ROGUE_SNEAK_ATTACK_CONTRIBUTION.value_json &&
+    row.supersedes_ref === null;
 }
 
 /**
@@ -508,6 +573,37 @@ export function seedClassProgressions(db: DatabaseContext): void {
       const classId = upsertClass(db, name, seed, timestamp);
       if (classId === null) {
         continue;
+      }
+      // Base classes are bundled-only (D133), so this owner-specific child set
+      // is source-replaced exactly like the progression rows it accompanies.
+      // Replacing the set repairs deletion, key drift, and unexpected extras.
+      db.exec(
+        'DELETE FROM class_feature_value_contributions WHERE class_definition_id = ?',
+        [classId],
+      );
+      if (name === 'Rogue') {
+        const contribution = ROGUE_SNEAK_ATTACK_CONTRIBUTION;
+        db.exec(
+          `INSERT INTO class_feature_value_contributions (
+             class_definition_id, contribution_key, label, target_kind,
+             target_key, op, active_from_level, active_to_level, value_json,
+             supersedes_ref, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            classId,
+            contribution.contribution_key,
+            contribution.label,
+            contribution.target_kind,
+            contribution.target_key,
+            contribution.op,
+            contribution.active_from_level,
+            contribution.active_to_level,
+            contribution.value_json,
+            contribution.supersedes_ref,
+            timestamp,
+            timestamp,
+          ],
+        );
       }
       for (let classLevel = 1; classLevel <= PROGRESSION_LEVELS; classLevel++) {
         const contribution = new CasterContribution(

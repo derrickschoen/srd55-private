@@ -51,6 +51,7 @@ export const RECORDED_SCHEMA_PREFIX_IDS = [
   '0039_catalog_content_supersession_guards',
   '0040_catalog_content_archive_members',
   '0041_content_v2',
+  '0042_feature_value_contributions',
 ] as const;
 
 export const PREFIX_MIGRATION_ID = 'test_catalog_prefix_probe';

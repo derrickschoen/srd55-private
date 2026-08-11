@@ -187,6 +187,16 @@ export type SubclassFeatureEffectId = Brand<
 >;
 export type NamedFeatureEffectId = Brand<number, 'NamedFeatureEffectId'>;
 export type ClassFeatureEffectId = Brand<number, 'ClassFeatureEffectId'>;
+/** One typed feature-value contribution owned directly by a class. */
+export type ClassFeatureValueContributionId = Brand<
+  number,
+  'ClassFeatureValueContributionId'
+>;
+/** One typed feature-value contribution owned by a subclass feature. */
+export type SubclassFeatureValueContributionId = Brand<
+  number,
+  'SubclassFeatureValueContributionId'
+>;
 /** One sourced absolute class-resource maximum row (D91). */
 export type ClassResourceId = Brand<number, 'ClassResourceId'>;
 /** One sourced base-class resource formula row (D120). */

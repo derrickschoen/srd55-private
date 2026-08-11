@@ -13,6 +13,7 @@ import { registerBundledStableContentIdentity } from '../../../src/catalog/conte
 import { CONTENT_FINGERPRINT_SCHEME_V1, type ContentFingerprintDigest } from '../../../src/catalog/content-identity';
 import { DatabaseContext } from '../../../src/db/database';
 import type { ContentKey } from '../../../src/domain/ids';
+import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
 import {
   classProjectorV1Vector,
   featProjectorV1Vector,
@@ -56,7 +57,11 @@ beforeEach(async () => {
 afterEach(() => connection.close());
 
 function identityForStoredClass() {
-  const projection = projectStoredClassContentV1(db, CLASS_KEY, references);
+  return identityForStoredClassKey(CLASS_KEY);
+}
+
+function identityForStoredClassKey(contentKey: ContentKey) {
+  const projection = projectStoredClassContentV1(db, contentKey, references);
   return deriveContentIdentityV1({
     kind: projection.kind,
     edition: projection.aggregate.rules_edition,
@@ -88,6 +93,55 @@ describe('stored class and feat content-v1 projection', () => {
     expect(identity.canonicalJson).toBe(classProjectorV1Vector.canonicalJson);
     expect(identity.digest).toBe(classProjectorV1Vector.sha256);
     expect(identity.derivedKey).toBe(classProjectorV1Vector.derivedKey);
+  });
+
+  it('projects the Rogue contribution inside effects while historical class bytes remain identical', () => {
+    db.exec(
+      `INSERT INTO class_definitions (
+         content_key, name, rules_edition, progression_type,
+         supports_ritual_casting
+       ) VALUES (?, 'Wayfarer', 'expanded', 'none', 0)`,
+      [CLASS_KEY],
+    );
+    seedClassProgressions(db);
+    const rogueKey = '2024:class:rogue' as ContentKey;
+    const historicalBefore = identityForStoredClass().canonicalJson;
+    const rogueBefore = identityForStoredClassKey(rogueKey);
+
+    db.exec(
+      `UPDATE class_feature_value_contributions
+       SET value_json = ?
+       WHERE class_definition_id = (
+         SELECT id FROM class_definitions WHERE content_key = ?
+       ) AND contribution_key = 'sneak-attack'`,
+      [JSON.stringify({
+        round: 'ceiling',
+        divide: 2,
+        source: {
+          class_content_key: '2024:class:rogue',
+          kind: 'class_level',
+        },
+        kind: 'scale',
+      }, null, 2), rogueKey],
+    );
+    const rogueReserialized = identityForStoredClassKey(rogueKey);
+    expect(rogueReserialized.canonicalJson).toBe(rogueBefore.canonicalJson);
+    expect(rogueReserialized.derivedKey).toBe(rogueBefore.derivedKey);
+
+    db.exec(
+      `UPDATE class_feature_value_contributions
+       SET value_json = ?
+       WHERE class_definition_id = (
+         SELECT id FROM class_definitions WHERE content_key = ?
+       ) AND contribution_key = 'sneak-attack'`,
+      [JSON.stringify({ kind: 'const', amount: 2 }), rogueKey],
+    );
+
+    const rogueAfter = identityForStoredClassKey(rogueKey);
+    expect(rogueAfter.canonicalJson).not.toBe(rogueBefore.canonicalJson);
+    expect(rogueAfter.derivedKey).not.toBe(rogueBefore.derivedKey);
+    expect(identityForStoredClass().canonicalJson).toBe(historicalBefore);
+    expect(historicalBefore).toBe(classProjectorV1Vector.canonicalJson);
   });
 
   it('reproduces the hand-pinned feat vector from a real stored aggregate', () => {

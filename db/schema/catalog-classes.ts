@@ -8,12 +8,14 @@ import {
 import { sql } from 'drizzle-orm';
 import type {
   ClassFeatureEffectId,
+  ClassFeatureValueContributionId,
   ClassDefinitionId,
   ContentKey,
   NamedFeatureEffectId,
   NamedFeatureId,
   SubclassDefinitionId,
   SubclassFeatureEffectId,
+  SubclassFeatureValueContributionId,
   SubclassFeatureId,
 } from '../../src/domain/ids';
 import type {
@@ -43,6 +45,7 @@ import {
   varchar,
 } from './columns';
 import { catalog_content_identities } from './catalog-content';
+import { FEATURE_VALUE_CONTRIBUTION_LIMITS } from '../../src/domain/contracts/feature-value-storage-limits';
 
 export function featureEffectColumns<
   K extends string = FeatureTemplateEffectKind,
@@ -734,5 +737,135 @@ export const class_feature_effects = sqliteTable(
       table.name,
       table.class_level,
     ),
+  ],
+);
+
+const featureValueTargetKinds = [
+  'feature_dice_count',
+  'resource_maximum',
+] as const;
+type FeatureValueTargetKind = (typeof featureValueTargetKinds)[number];
+
+const featureValueOperations = ['add'] as const;
+type FeatureValueOperation = (typeof featureValueOperations)[number];
+
+function featureValueContributionColumns() {
+  return {
+    contribution_key: varchar()('contribution_key').notNull(),
+    label: varchar()('label').notNull(),
+    target_kind:
+      varchar<FeatureValueTargetKind>()('target_kind').notNull(),
+    target_key: varchar()('target_key').notNull(),
+    op: varchar<FeatureValueOperation>()('op').notNull(),
+    active_from_level: integer('active_from_level').notNull(),
+    active_to_level: integer('active_to_level').notNull(),
+    value_json: sqlText()('value_json').notNull(),
+    /** Canonical JSON: {"content_key": string, "contribution_key": string}. */
+    supersedes_ref: sqlText()('supersedes_ref'),
+    created_at: datetime()('created_at'),
+    updated_at: datetime()('updated_at'),
+  };
+}
+
+/**
+ * Correlated storage rules shared by both owner-specific tables.
+ *
+ * The target discriminator is checked kind-first: tranche 1 has one closed
+ * engine mechanic (`sneak_attack`), while resource keys are stable authored
+ * identifiers and therefore pass through as bounded non-empty text.
+ */
+function featureValueContributionChecks(prefix: string) {
+  return [
+    check(
+      `${prefix}_contribution_key_check`,
+      sql`typeof(contribution_key) = 'text' AND length(contribution_key) BETWEEN 1 AND ${sql.raw(String(FEATURE_VALUE_CONTRIBUTION_LIMITS.keyCodePoints))}`,
+    ),
+    check(
+      `${prefix}_label_check`,
+      sql`typeof(label) = 'text' AND length(label) BETWEEN 1 AND ${sql.raw(String(FEATURE_VALUE_CONTRIBUTION_LIMITS.keyCodePoints))}`,
+    ),
+    check(
+      `${prefix}_target_kind_check`,
+      oneOf('target_kind', featureValueTargetKinds),
+    ),
+    check(`${prefix}_op_check`, oneOf('op', featureValueOperations)),
+    check(
+      `${prefix}_target_payload_check`,
+      sql`(
+        target_kind IS 'feature_dice_count'
+        AND target_key IS 'sneak_attack'
+        AND op IS 'add'
+      ) OR (
+        target_kind IS 'resource_maximum'
+        AND typeof(target_key) = 'text'
+        AND length(target_key) BETWEEN 1 AND ${sql.raw(String(FEATURE_VALUE_CONTRIBUTION_LIMITS.keyCodePoints))}
+        AND op IS 'add'
+      )`,
+    ),
+    check(
+      `${prefix}_active_level_band_check`,
+      sql`typeof(active_from_level) = 'integer'
+        AND typeof(active_to_level) = 'integer'
+        AND active_from_level BETWEEN 1 AND 20
+        AND active_to_level BETWEEN active_from_level AND 20`,
+    ),
+    check(
+      `${prefix}_value_json_check`,
+      sql`json_valid(value_json)
+        AND json_type(value_json) IS 'object'
+        AND length(CAST(value_json AS BLOB)) BETWEEN 1 AND ${sql.raw(String(FEATURE_VALUE_CONTRIBUTION_LIMITS.valueJsonBytes))}`,
+    ),
+    check(
+      `${prefix}_supersedes_ref_check`,
+      sql`supersedes_ref IS NULL OR (
+        json_valid(supersedes_ref)
+        AND json_type(supersedes_ref) IS 'object'
+        AND length(CAST(supersedes_ref AS BLOB)) BETWEEN 1 AND ${sql.raw(String(FEATURE_VALUE_CONTRIBUTION_LIMITS.supersedesJsonBytes))}
+      )`,
+    ),
+  ];
+}
+
+/** A typed value contribution sourced by a base class definition. */
+export const class_feature_value_contributions = sqliteTable(
+  'class_feature_value_contributions',
+  {
+    id: integer('id')
+      .primaryKey({ autoIncrement: true })
+      .notNull()
+      .$type<ClassFeatureValueContributionId>(),
+    class_definition_id: integer('class_definition_id')
+      .notNull()
+      .$type<ClassDefinitionId>()
+      .references(() => class_definitions.id, { onDelete: 'cascade' }),
+    ...featureValueContributionColumns(),
+  },
+  (table) => [
+    ...featureValueContributionChecks('class_feature_value_contributions'),
+    uniqueIndex(
+      'class_feature_value_contributions_owner_key_unique',
+    ).on(table.class_definition_id, table.contribution_key),
+  ],
+);
+
+/** A typed value contribution sourced by one printed subclass feature. */
+export const subclass_feature_value_contributions = sqliteTable(
+  'subclass_feature_value_contributions',
+  {
+    id: integer('id')
+      .primaryKey({ autoIncrement: true })
+      .notNull()
+      .$type<SubclassFeatureValueContributionId>(),
+    subclass_feature_id: integer('subclass_feature_id')
+      .notNull()
+      .$type<SubclassFeatureId>()
+      .references(() => subclass_features.id, { onDelete: 'cascade' }),
+    ...featureValueContributionColumns(),
+  },
+  (table) => [
+    ...featureValueContributionChecks('subclass_feature_value_contributions'),
+    uniqueIndex(
+      'subclass_feature_value_contributions_owner_key_unique',
+    ).on(table.subclass_feature_id, table.contribution_key),
   ],
 );

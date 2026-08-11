@@ -42,6 +42,7 @@ import catalogContentSupersessions from '../../drizzle/0038_catalog_content_supe
 import catalogContentSupersessionGuards from '../../drizzle/0039_catalog_content_supersession_guards.sql?raw';
 import catalogContentArchiveMembers from '../../drizzle/0040_catalog_content_archive_members.sql?raw';
 import contentV2 from '../../drizzle/0041_content_v2.sql?raw';
+import featureValueContributions from '../../drizzle/0042_feature_value_contributions.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -478,6 +479,17 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       '660525ab7c4248d5448ed3bf14d3723b66f57a8dd45b7986f4280341f25bd204',
     resultSchemaChecksum:
       'b2a3e3ae292168f7c5766dde6db26668ea2e2336a0a62879d2b7811ac61a2b08',
+  }),
+  // Typed-effect tranche E2: the two owner-specific feature-value child
+  // tables. The SQL artifact's D226 header names its generation-time helper
+  // closure, including oneOf; replay itself depends only on frozen SQL bytes.
+  Object.freeze({
+    id: '0042_feature_value_contributions',
+    sql: featureValueContributions,
+    checksum:
+      'e780e723ee13f4299460a79fbb40b1a74402532c54ec3dcb8c3cd04082eafd5b',
+    resultSchemaChecksum:
+      '1b4c7dd8c3866a6ebbc418111d707398bacfb26d06e0bd3229b6c30b3dad7c3c',
   }),
 ]);
 
