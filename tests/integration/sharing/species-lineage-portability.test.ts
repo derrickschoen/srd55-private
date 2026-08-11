@@ -95,12 +95,38 @@ describe('lineage-chosen character sharing', () => {
     });
 
     const encoded = await clientFor(exported).createFragmentResult(sourceId);
-    expect(encoded).toEqual({ kind: 'encoded', fragment: expect.any(String) });
+    expect(encoded).toEqual({
+      kind: 'encoded',
+      fragment: expect.any(String),
+      embeddedContent: [{
+        id: `portable:species:${PORTABLE_ELF_KEY}`,
+        kind: 'species',
+        name: 'Portable Elf',
+        catalog_layer: 'external',
+      }],
+    });
     if (encoded.kind !== 'encoded') throw new Error('Expected a v18 fragment.');
     const decoded = await decodeShareFragment(encoded.fragment);
     expect(shareDocumentToPositional(decoded)[1]).toBe(18);
 
     const target = await database();
+    const preview = previewCharacterShare(target, decoded);
+    expect(Object.keys(preview.adoptionPlan).sort()).toEqual([
+      'graphHash',
+      'incomingContent',
+      'inputHash',
+      'outcomes',
+      'reviews',
+      'spellActivityChanges',
+      'targetHash',
+      'token',
+    ]);
+    expect(preview.adoptionPlan.incomingContent).toEqual([{
+      id: `portable:species:${PORTABLE_ELF_KEY}`,
+      kind: 'species',
+      name: 'Portable Elf',
+      catalog_layer: 'external',
+    }]);
     const imported = importCharacterShare(target, decoded);
     expect(importedSpeciesSemanticCensus(target, PORTABLE_ELF_KEY)).toBe(9);
     expect(lineagePortabilityProjection(target, imported.characterId)).toEqual(
@@ -132,6 +158,7 @@ describe('lineage-chosen character sharing', () => {
     expect(encoded).toEqual({
       kind: 'encoded',
       fragment: expect.any(String),
+      embeddedContent: [],
       omittedContent: [{
         kind: 'species',
         contentKey: OVERSIZED_PORTABLE_ELF_KEY,

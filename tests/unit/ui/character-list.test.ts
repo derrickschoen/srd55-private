@@ -113,7 +113,9 @@ describe('character share links', () => {
         client: {
           exportDebug: async () => [] as never,
           createFragment: async () => 'fragment',
-          createFragmentResult: async () => ({ kind: 'encoded', fragment: 'fragment' }),
+          createFragmentResult: async () => ({
+            kind: 'encoded', fragment: 'fragment', embeddedContent: [],
+          }),
           preview: async () => ({}) as never,
           importCharacter: async () => ({}) as never,
           commitCharacter: async () => ({}) as never,
@@ -133,6 +135,120 @@ describe('character share links', () => {
     }
   });
 
+  it('names untrusted embedded aggregates before the clean direct commit', async () => {
+    const hostile = '<img data-share-disclosure-hostile src=x onerror=alert(1)>';
+    const token = '1'.repeat(64) as ContentImportPlanToken;
+    const plan: ContentImportPlan = {
+      token,
+      inputHash: '2'.repeat(64),
+      graphHash: '3'.repeat(64),
+      targetHash: '4'.repeat(64),
+      spellActivityChanges: [],
+      incomingContent: [{
+        id: 'portable:species:hostile',
+        kind: 'species',
+        name: hostile,
+        catalog_layer: 'external',
+      }, {
+        id: 'portable:feat:unknown',
+        kind: 'feat',
+        name: 'UNKNOWN',
+        catalog_layer: 'external',
+      }],
+      reviews: [],
+      outcomes: [{
+        id: 'portable:species:hostile',
+        kind: 'create',
+        contentKey: '2024:species:hostile' as ContentKey,
+      }, {
+        id: 'portable:feat:unknown',
+        kind: 'create',
+        contentKey: '2024:feat:unknown' as ContentKey,
+      }],
+    };
+    const commits: unknown[] = [];
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const controls = createShareControls({
+        rpc: null as never,
+        onPersistedChange: () => undefined,
+        client: {
+          exportDebug: async () => [] as never,
+          createFragment: async () => 'fragment',
+          createFragmentResult: async () => ({
+            kind: 'encoded', fragment: 'fragment', embeddedContent: [],
+          }),
+          preview: async () => ({
+            name: 'Hostile Share',
+            classes: [],
+            sourceCount: 0,
+            selectionCount: 0,
+            spellbookCount: 0,
+            placeholderCount: 0,
+            weaponCount: 0,
+            armorCount: 0,
+            hitPointRollCount: 0,
+            skillProficiencyCount: 0,
+            includesAcknowledgements: false,
+            includesLoadouts: false,
+            includesWrittenText: false,
+            adoptionPlan: plan,
+          }),
+          importCharacter: async () => ({ characterId: 1 }),
+          commitCharacter: async (fragment, submittedToken, choices) => {
+            commits.push({ fragment, token: submittedToken, choices });
+            return {
+              kind: 'committed',
+              outcomes: plan.outcomes,
+              result: { characterId: 9 },
+            };
+          },
+        },
+        browser: { baseUrl: 'https://example.test/' },
+      });
+      document.body.append(controls.element);
+      const root = interactiveElement(controls.element);
+      const input = root.querySelectorAll('input').find((candidate) =>
+        candidate.getAttribute('aria-label') === 'Character share link'
+      );
+      const preview = root.querySelectorAll('button').find((button) =>
+        button.textContent === 'Preview link'
+      );
+      const add = root.querySelectorAll('button').find((button) =>
+        button.textContent === 'Add to my characters'
+      );
+      if (input === undefined || preview === undefined || add === undefined) {
+        throw new Error('Share controls are incomplete.');
+      }
+      input.value = '#fragment';
+      preview.click();
+      for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+
+      const disclosure = root.querySelector('[aria-label="Embedded external content"]');
+      if (disclosure === null) throw new Error('Embedded-content disclosure missing.');
+      expect(disclosure.hidden).toBe(false);
+      expect(disclosure.querySelectorAll('li').map((item) =>
+        elementText(item as unknown as Node).replace(/\s+/gu, ' ').trim()
+      )).toEqual([
+        `${hostile} — species — Homebrew · external layer`,
+        'UNKNOWN — feat — Homebrew · external layer',
+      ]);
+      expect(disclosure.querySelector('[data-share-disclosure-hostile]')).toBeNull();
+      expect(elementText(disclosure as unknown as Node)).toContain(
+        'This external content will be installed with the character:',
+      );
+      expect(root.querySelector('[data-testid="content-adoption-modal"]')).toBeNull();
+
+      add.click();
+      for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+      expect(commits).toEqual([{ fragment: 'fragment', token, choices: {} }]);
+      expect(root.querySelector('[data-testid="content-adoption-modal"]')).toBeNull();
+      controls.cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
   it('CI-SHARE-REFERENCE opens the common adoption dialog for a fallback match', async () => {
     const token = 'a'.repeat(64) as ContentImportPlanToken;
     const plan: ContentImportPlan = {
@@ -141,6 +257,7 @@ describe('character share links', () => {
       graphHash: 'c'.repeat(64),
       targetHash: 'd'.repeat(64),
       spellActivityChanges: [],
+      incomingContent: [],
       outcomes: [{
         id: 'spell:share:fallback',
         kind: 'review',
@@ -172,7 +289,9 @@ describe('character share links', () => {
         client: {
           exportDebug: async () => [] as never,
           createFragment: async () => 'fragment',
-          createFragmentResult: async () => ({ kind: 'encoded', fragment: 'fragment' }),
+          createFragmentResult: async () => ({
+            kind: 'encoded', fragment: 'fragment', embeddedContent: [],
+          }),
           preview: async () => ({
             name: 'Shared Mage',
             classes: [],
@@ -248,7 +367,9 @@ describe('character share links', () => {
         client: {
           exportDebug: async () => [] as never,
           createFragment: async () => 'fragment',
-          createFragmentResult: async () => ({ kind: 'encoded', fragment: 'fragment' }),
+          createFragmentResult: async () => ({
+            kind: 'encoded', fragment: 'fragment', embeddedContent: [],
+          }),
           preview: async () => Promise.reject({
             data: {
               issues: [{
@@ -500,6 +621,7 @@ describe('catalog and backup entry points', () => {
       graphHash: 'graph',
       targetHash: 'target',
       spellActivityChanges: [],
+      incomingContent: [],
       reviews: [],
       outcomes: [],
       preview: {
@@ -855,6 +977,7 @@ describe('catalog and backup entry points', () => {
       graphHash: 'graph',
       targetHash: 'target',
       spellActivityChanges: [],
+      incomingContent: [],
       reviews: [],
       outcomes: [
         { id: 'subclass:bundled:veteran', kind: 'create', contentKey: '2024:content.subclass:veteran' as ContentKey },
@@ -999,6 +1122,7 @@ describe('catalog and backup entry points', () => {
       graphHash: 'graph',
       targetHash: 'target',
       spellActivityChanges: [],
+      incomingContent: [],
       reviews: [{
         id: 'spell:external-fireball',
         kind: 'spell',
@@ -1320,6 +1444,7 @@ describe('catalog and backup entry points', () => {
       graphHash: 'graph',
       targetHash: 'target',
       spellActivityChanges: [],
+      incomingContent: [],
       reviews: [{
         id: 'portable:item:reviewed',
         kind: 'item',

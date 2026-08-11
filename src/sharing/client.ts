@@ -7,8 +7,10 @@ import type {
 } from './character-share';
 import type {
   ContentImportChoices,
+  ContentImportDisclosure,
   ContentImportPlanToken,
 } from '../catalog/content-adoption';
+import { externalContentDisclosure } from '../catalog/content-adoption';
 import {
   encodeShareFragment,
   tryEncodeShareFragment,
@@ -24,11 +26,12 @@ export interface OmittedShareContent {
 }
 
 export type ShareFragmentResult =
-  | ShareEncodeResult
+  | Exclude<ShareEncodeResult, { readonly kind: 'encoded' }>
   | {
       readonly kind: 'encoded';
       readonly fragment: string;
-      readonly omittedContent: readonly OmittedShareContent[];
+      readonly embeddedContent: readonly ContentImportDisclosure[];
+      readonly omittedContent?: readonly OmittedShareContent[];
     };
 
 export interface ShareClient {
@@ -87,14 +90,23 @@ export function createShareClient(rpc: RpcClient): ShareClient {
     ) => {
       const document = await exportDebug(characterId, options);
       if (document.portableContent === undefined) {
-        return tryEncodeReferenceOnlyShareFragment(document);
+        const encoded = await tryEncodeReferenceOnlyShareFragment(document);
+        return encoded.kind === 'encoded'
+          ? Object.freeze({ ...encoded, embeddedContent: Object.freeze([]) })
+          : encoded;
       }
       const embedded = await tryEncodeShareFragment(document);
-      if (embedded.kind === 'encoded') return embedded;
+      if (embedded.kind === 'encoded') {
+        return Object.freeze({
+          ...embedded,
+          embeddedContent: embeddedPortableDisclosures(document),
+        });
+      }
       const fallback = await tryEncodeReferenceOnlyShareFragment(document);
       if (fallback.kind === 'too_large') return fallback;
       return Object.freeze({
         ...fallback,
+        embeddedContent: Object.freeze([]),
         omittedContent: omittedPortableReferences(document),
       });
     },
@@ -121,6 +133,18 @@ export function createShareClient(rpc: RpcClient): ShareClient {
       ShareImportCommitResult
     >('share.importCharacter', { fragment, token, choices }),
   });
+}
+
+function embeddedPortableDisclosures(
+  document: CharacterShareDocument,
+): readonly ContentImportDisclosure[] {
+  return Object.freeze((document.portableContent?.content ?? []).map((entry) =>
+    externalContentDisclosure({
+      id: `portable:${entry.kind}:${entry.content_key}`,
+      kind: entry.kind,
+      name: entry.aggregate.name,
+    })
+  ));
 }
 
 function omittedPortableReferences(
