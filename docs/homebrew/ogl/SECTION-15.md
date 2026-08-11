@@ -48,8 +48,11 @@ Template:
 <Document title> Copyright <year>, <copyright holder>; Author <author>.
 ```
 
-One original entry exists in `way-of-the-psionic-fist.md`, with its copyright
-holder and author left as a placeholder the owner must set before distribution.
+No original entry exists yet. `way-of-the-psionic-fist.md` once carried one
+filled from the repository's git identity; the owner ruled 2026-08-11 that no
+personal name goes on any homebrew work, so it was removed. The §6 obligation
+attaches at distribution: whoever distributes that document must append its
+entry then, under a holder that is not the owner's personal name.
 
 ## What is Open Game Content in this folder
 
