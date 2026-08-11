@@ -774,6 +774,10 @@ describe('HA-7 species authoring form', () => {
       expect(router.navigate('/blocked-after-edit')).toBe(false);
       button(root, 'Save draft').click();
       await settle();
+      expect(root.querySelector('.species-authoring-status')?.textContent)
+        .toBe('Draft not saved. Storage unavailable.');
+      expect(root.querySelector('.species-authoring-status')?.getAttribute('role'))
+        .toBe('alert');
       expect(button(root, 'Save draft').disabled).toBe(false);
       expect(button(root, 'Preview publish').disabled).toBe(false);
       expect(router.navigate('/blocked-after-failed-save')).toBe(false);
@@ -817,6 +821,51 @@ describe('HA-7 species authoring form', () => {
 
       cleanup();
       router.stop();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('ends a validation refusal with human copy and focus on walking speed', async () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const draft = stored();
+      if (!isStoredSpeciesDraft(draft)) throw new Error('Species fixture did not narrow.');
+      const mount = document.createElement('div');
+      const cleanup = renderSpeciesForm({
+        context: context(),
+        client: client({
+          saveDraft: () => Promise.reject(new RpcError(
+            'handler_error',
+            'Draft validation failed.',
+            {
+              reason: 'validation_failed',
+              issues: [{
+                path: ['walking_speed_feet'],
+                code: 'out_of_range',
+                message: 'Walking speed must be at least 1 foot.',
+              }],
+            },
+          )),
+        }),
+        mount,
+        draft,
+      });
+      const root = interactiveElement(mount);
+      const walkingSpeed = byId(root, 'input', 'species-walking-speed');
+
+      button(root, 'Save draft').click();
+      await settle();
+
+      expect(root.querySelector('.species-authoring-status')?.textContent)
+        .toBe('Draft not saved.');
+      expect(elementText(root as unknown as Node))
+        .toContain('Walking speed must be at least 1 foot.');
+      expect(document.activeElement).toBe(walkingSpeed);
+      expect(elementText(root as unknown as Node)).not.toMatch(
+        /saving draft|code points|too small|expected number/iu,
+      );
+      cleanup();
     } finally {
       restoreDocument();
     }

@@ -171,6 +171,99 @@ describe('per-kind durable draft codecs', () => {
       .toContainEqual(expect.objectContaining({ path: ['kind'] }));
   });
 
+  it('uses one human vocabulary for text and numeric refusals across all draft kinds', () => {
+    const longName = '🐉'.repeat(121);
+    for (const draft of [speciesDraft(), backgroundDraft(), subclassDraft()] as const) {
+      const issue = codecError(() => encodeCurrentDraft(draft.kind, {
+        ...draft,
+        name: longName,
+      })).issues[0];
+      expect(issue).toEqual({
+        path: ['name'],
+        code: 'too_long',
+        message: 'Name must be 120 characters or fewer.',
+      });
+    }
+
+    expect(codecError(() => encodeCurrentDraft('species', {
+      ...speciesDraft(),
+      walking_speed_feet: -99,
+    })).issues).toContainEqual({
+      path: ['walking_speed_feet'],
+      code: 'out_of_range',
+      message: 'Walking speed must be at least 1 foot.',
+    });
+  });
+
+  it('never exposes validation-library vocabulary for text, lists, numbers, or types', () => {
+    const cases: readonly {
+      readonly kind: HomebrewDraft['kind'];
+      readonly document: unknown;
+    }[] = [
+      {
+        kind: 'species',
+        document: {
+          ...speciesDraft(),
+          name: '🐉'.repeat(121),
+          walking_speed_feet: -99,
+          traits: Array.from({ length: 101 }, (_unused, index) => ({
+            draft_item_uuid: item(`trait-${String(index)}`),
+            name: '',
+            description: '',
+            effects: [],
+          })),
+          grants: [{
+            kind: 'fixed_spell',
+            draft_item_uuid: item('long-spell-key'),
+            rule_key: 'long-spell-key',
+            spell_content_key: 'x'.repeat(201),
+            always_prepared: false,
+          }],
+        },
+      },
+      {
+        kind: 'background',
+        document: {
+          ...backgroundDraft(),
+          rules_edition: 'tomorrow',
+          suggested_abilities: ['strength', 'dexterity', 'constitution', 'wisdom'],
+          equipment_option_a: [{
+            kind: 'gear',
+            draft_item_uuid: item('gear-one'),
+            quantity: 0,
+            printed_name: 'x'.repeat(121),
+          }],
+        },
+      },
+      {
+        kind: 'subclass',
+        document: {
+          ...subclassDraft(),
+          progression: {
+            mode: 'override',
+            spellcasting_ability: null,
+            caster_contribution: 'full',
+            rows: [{
+              class_level: 1,
+              cantrips_known: 0,
+              prepared_or_known_count: 0,
+              maximum_spell_level: 0,
+              slot_counts: [-1],
+              grants: [],
+            }],
+          },
+        },
+      },
+    ];
+
+    const messages = cases.flatMap(({ kind, document }) =>
+      codecError(() => encodeCurrentDraft(kind, document)).issues.map((issue) => issue.message));
+    expect(messages.length).toBeGreaterThanOrEqual(7);
+    for (const message of messages) {
+      expect(message).not.toMatch(/code points|too small|too big|expected (?:number|string|array)|invalid input/iu);
+    }
+  });
+
   it('requires draft item UUIDs to be unique across the whole document', () => {
     const duplicate = item('duplicate-item');
     const draft: SpeciesAuthoringDraft = {

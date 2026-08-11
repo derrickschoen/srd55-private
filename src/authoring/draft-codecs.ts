@@ -71,7 +71,7 @@ export interface DraftDocumentVersionRegistry<K extends AuthoredContentKind> {
 
 const codePointText = (maximum: number) =>
   z.string().refine((value) => [...value].length <= maximum, {
-    message: `must contain at most ${String(maximum)} code points`,
+    message: 'text_limit_exceeded',
   });
 
 const nonEmptyText = (maximum: number) =>
@@ -408,6 +408,169 @@ function zodPath(path: readonly PropertyKey[]): (string | number)[] {
   );
 }
 
+const FIELD_LABELS: Readonly<Record<string, string>> = Object.freeze({
+  kind: 'Content kind',
+  document_version: 'Document version',
+  name: 'Name',
+  rules_edition: 'Rules edition',
+  reference_text: 'Reference text',
+  creature_type: 'Creature type',
+  primary_size: 'Primary size',
+  alternate_size: 'Alternate size',
+  walking_speed_feet: 'Walking speed',
+  traits: 'Traits',
+  features: 'Features',
+  grants: 'Grants',
+  draft_item_uuid: 'Draft item identifier',
+  description: 'Description',
+  effects: 'Effects',
+  rule_key: 'Stable grant label',
+  spell_content_key: 'Spell',
+  always_prepared: 'Always prepared',
+  list: 'Spell list',
+  count: 'Count',
+  minimum_spell_level: 'Minimum spell level',
+  maximum_spell_level: 'Maximum spell level',
+  schools: 'Spell schools',
+  tags: 'Tags',
+  skills: 'Skills',
+  label: 'Label',
+  notes: 'Notes',
+  damage_type: 'Damage type',
+  hit_points_flat: 'Hit point adjustment',
+  hit_points_per_level: 'Hit points per level',
+  speed_bonus_feet: 'Speed adjustment',
+  ability: 'Ability',
+  amount: 'Amount',
+  maximum: 'Maximum',
+  base: 'Base Armor Class',
+  ability_1: 'First ability',
+  ability_2: 'Second ability',
+  allows_shield: 'Shield allowance',
+  weapon_scope: 'Weapon scope',
+  attack_count: 'Attack count',
+  suggested_abilities: 'Suggested abilities',
+  default_origin_feat_content_key: 'Installed Origin feat',
+  default_origin_feat_display_name: 'Origin feat name',
+  skill_proficiencies: 'Skill proficiencies',
+  tool_reference_text: 'Tool reference text',
+  equipment_option_a_description: 'Equipment option A description',
+  equipment_option_b_description: 'Equipment option B description',
+  equipment_option_a: 'Equipment option A',
+  equipment_option_b: 'Equipment option B',
+  quantity: 'Quantity',
+  printed_name: 'Printed name',
+  content_key: 'Installed content',
+  parent_class_content_key: 'Parent class',
+  progression: 'Progression',
+  mode: 'Progression mode',
+  spellcasting_ability: 'Spellcasting ability',
+  caster_fraction: 'Caster fraction',
+  caster_rounding: 'Caster rounding',
+  caster_contribution: 'Caster contribution',
+  rows: 'Progression rows',
+  class_level: 'Class level',
+  cantrips_known: 'Cantrips known',
+  prepared_or_known_count: 'Prepared or known spell count',
+  slot_counts: 'Spell slots',
+});
+
+const TEXT_MAXIMUMS: Readonly<Record<string, number>> = Object.freeze({
+  name: AUTHORING_TEXT_LIMITS.name,
+  reference_text: AUTHORING_TEXT_LIMITS.referenceText,
+  creature_type: AUTHORING_TEXT_LIMITS.openVocabulary,
+  primary_size: AUTHORING_TEXT_LIMITS.openVocabulary,
+  alternate_size: AUTHORING_TEXT_LIMITS.openVocabulary,
+  draft_item_uuid: AUTHORING_TEXT_LIMITS.shortLabel,
+  description: AUTHORING_TEXT_LIMITS.description,
+  rule_key: AUTHORING_TEXT_LIMITS.ruleKey,
+  spell_content_key: AUTHORING_TEXT_LIMITS.contentKey,
+  list: AUTHORING_TEXT_LIMITS.shortLabel,
+  label: AUTHORING_TEXT_LIMITS.shortLabel,
+  notes: AUTHORING_TEXT_LIMITS.description,
+  damage_type: AUTHORING_TEXT_LIMITS.openVocabulary,
+  default_origin_feat_content_key: AUTHORING_TEXT_LIMITS.contentKey,
+  default_origin_feat_display_name: AUTHORING_TEXT_LIMITS.shortLabel,
+  tool_reference_text: AUTHORING_TEXT_LIMITS.toolReference,
+  equipment_option_a_description: AUTHORING_TEXT_LIMITS.equipmentDescription,
+  equipment_option_b_description: AUTHORING_TEXT_LIMITS.equipmentDescription,
+  printed_name: AUTHORING_TEXT_LIMITS.shortLabel,
+  content_key: AUTHORING_TEXT_LIMITS.contentKey,
+  parent_class_content_key: AUTHORING_TEXT_LIMITS.contentKey,
+  tags: AUTHORING_TEXT_LIMITS.queryTag,
+  schools: AUTHORING_TEXT_LIMITS.openVocabulary,
+});
+
+function fieldKey(path: readonly (string | number)[]): string | null {
+  for (let index = path.length - 1; index >= 0; index -= 1) {
+    const part = path[index];
+    if (typeof part === 'string') return part;
+  }
+  return null;
+}
+
+function fieldLabel(path: readonly (string | number)[]): string {
+  const key = fieldKey(path);
+  return key === null ? 'Draft' : FIELD_LABELS[key] ?? 'Field';
+}
+
+function textMaximum(path: readonly (string | number)[]): number | null {
+  const key = fieldKey(path);
+  return key === null ? null : TEXT_MAXIMUMS[key] ?? null;
+}
+
+function numericBound(
+  value: number | bigint,
+  path: readonly (string | number)[],
+): string {
+  const printed = String(value);
+  const key = fieldKey(path);
+  if (key !== 'walking_speed_feet' && key !== 'speed_bonus_feet') return printed;
+  return `${printed} ${value === 1 ? 'foot' : 'feet'}`;
+}
+
+function humanIssueMessage(
+  issue: z.core.$ZodIssue,
+  input: unknown,
+): string {
+  const path = zodPath(issue.path);
+  const label = fieldLabel(path);
+  const value = valueAtPath(input, path);
+  switch (issue.code) {
+    case 'too_big':
+      if (Array.isArray(value)) {
+        return `${label} must contain ${String(issue.maximum)} items or fewer.`;
+      }
+      if (typeof value === 'string') {
+        return `${label} must be ${String(issue.maximum)} characters or fewer.`;
+      }
+      return `${label} must be at most ${numericBound(issue.maximum, path)}.`;
+    case 'too_small':
+      if (typeof value === 'string') return `${label} is required.`;
+      return `${label} must be at least ${numericBound(issue.minimum, path)}.`;
+    case 'custom': {
+      if (typeof value === 'string') {
+        const maximum = textMaximum(path);
+        if (maximum !== null && [...value].length > maximum) {
+          return `${label} must be ${String(maximum)} characters or fewer.`;
+        }
+        if (value.length === 0) return `${label} is required.`;
+      }
+      return `${label} has an invalid value.`;
+    }
+    case 'invalid_type':
+    case 'invalid_union':
+    case 'invalid_value':
+    case 'invalid_format':
+    case 'not_multiple_of':
+    case 'invalid_key':
+    case 'invalid_element':
+      return `${label} has an invalid value.`;
+    case 'unrecognized_keys':
+      return `${label} contains an unknown field.`;
+  }
+}
+
 function issueCode(issue: z.core.$ZodIssue, input: unknown): AuthoringValidationIssueCode {
   switch (issue.code) {
     case 'unrecognized_keys':
@@ -426,8 +589,18 @@ function issueCode(issue: z.core.$ZodIssue, input: unknown): AuthoringValidation
     case 'invalid_value':
     case 'invalid_format':
     case 'not_multiple_of':
-    case 'custom':
+    case 'invalid_key':
+    case 'invalid_element':
       return 'invalid_value';
+    case 'custom': {
+      const value = valueAtPath(input, zodPath(issue.path));
+      if (typeof value === 'string') {
+        if (value.length === 0) return 'required';
+        const maximum = textMaximum(zodPath(issue.path));
+        if (maximum !== null && [...value].length > maximum) return 'too_long';
+      }
+      return 'invalid_value';
+    }
   }
   return 'invalid_value';
 }
@@ -449,7 +622,7 @@ function issuesFromZod(error: z.ZodError, input: unknown): AuthoringValidationIs
     issues.push({
       path: zodPath(issue.path),
       code: issueCode(issue, input),
-      message: issue.message,
+      message: humanIssueMessage(issue, input),
     });
     if (issues.length >= AUTHORING_LIST_LIMITS.validationIssues) return issues;
   }
