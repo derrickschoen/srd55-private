@@ -14,7 +14,7 @@ export interface ExpectedBundledAggregateDigestV1 {
  * changed aggregate(s) against their seed source, then update this pin.
  */
 export const EXPECTED_BUNDLED_CONTENT_DIGEST_V1 =
-  '3a68eebb5755cd018bf357d947b562b5ae47b27e2ae643cc6817c9885d4b8080' as const;
+  '05d1c958c77ad6e48cd75ac4047cbc0eb25d1f3c4926bb5303aa91019a6c7274' as const;
 
 export const EXPECTED_BUNDLED_AGGREGATE_DIGESTS_V1 = Object.freeze([
   Object.freeze({"catalog_layer":"bundled","kind":"weapon","contentKey":"2024:weapon:battleaxe","name":"Battleaxe","digest":"749cd0ee7ef968dfd554a92e7b26637a15791a37c990652f70c0177422d925f9"}),
@@ -415,7 +415,7 @@ export const EXPECTED_BUNDLED_AGGREGATE_DIGESTS_V1 = Object.freeze([
   Object.freeze({"catalog_layer":"bundled","kind":"class","contentKey":"2024:class:monk","name":"Monk","digest":"0bd4a04ae86815989e254a7a9df1d4cda5424c48d3a4af536e0ea45c84e60c06"}),
   Object.freeze({"catalog_layer":"bundled","kind":"class","contentKey":"2024:class:paladin","name":"Paladin","digest":"02e6e73237742ef4e13321c8b001bc976bb61d9b9c3ed65eac9819fe5bf43f16"}),
   Object.freeze({"catalog_layer":"bundled","kind":"class","contentKey":"2024:class:ranger","name":"Ranger","digest":"2f6d2ca49ad84adb7afd513aabc2809a077e0dd85130158bc2470478c2db54a0"}),
-  Object.freeze({"catalog_layer":"bundled","kind":"class","contentKey":"2024:class:rogue","name":"Rogue","digest":"9e4baa64368dca11337e5502a5d69779d20d18bee0b8dc62ff44b42dfdf3f461"}),
+  Object.freeze({"catalog_layer":"bundled","kind":"class","contentKey":"2024:class:rogue","name":"Rogue","digest":"cdb7865e15ba861379c70e99c313465f77a6bdfcacfbd136c9545006da9350b1"}),
   Object.freeze({"catalog_layer":"bundled","kind":"class","contentKey":"2024:class:sorcerer","name":"Sorcerer","digest":"f0f8c70a65424117da0cd149f41ab40a6efcc7d838fa76b6bf9f3e80a94e79d7"}),
   Object.freeze({"catalog_layer":"bundled","kind":"class","contentKey":"2024:class:warlock","name":"Warlock","digest":"f065b5649cea1d18b531dfe11c5e845bc351d59a853ac5c2e9205ef2b8b77ceb"}),
   Object.freeze({"catalog_layer":"bundled","kind":"class","contentKey":"2024:class:wizard","name":"Wizard","digest":"3a1a07ad6ed071aa2fbdd5895450b918105de6048965246592b33ec576759f1a"}),
@@ -446,7 +446,7 @@ export const EXPECTED_BUNDLED_AGGREGATE_DIGESTS_V1 = Object.freeze([
   Object.freeze({"catalog_layer":"bundled","kind":"subclass","contentKey":"2024:subclass:life-domain","name":"Life Domain","digest":"c95bf1b61799480c4ce59aba29797da533d6bfadc7a4002991b8d28645dc3da6"}),
   Object.freeze({"catalog_layer":"bundled","kind":"subclass","contentKey":"2024:subclass:oath-of-devotion","name":"Oath of Devotion","digest":"d4218c4d5897e1dbf58920d986b1050c6f64f7d2507eaddb3580040cc65252e3"}),
   Object.freeze({"catalog_layer":"bundled","kind":"subclass","contentKey":"2024:subclass:path-of-the-berserker","name":"Path of the Berserker","digest":"05f5c7277d1d29780fd5b8467f4cf7c51c88dde54d728f598348af69edec0c6d"}),
-  Object.freeze({"catalog_layer":"bundled","kind":"subclass","contentKey":"2024:subclass:thief","name":"Thief","digest":"5810562e2ef2372dadc87979fe05c57dfd5a5b7072a9415b4958edf5414455c5"}),
+  Object.freeze({"catalog_layer":"bundled","kind":"subclass","contentKey":"2024:subclass:thief","name":"Thief","digest":"f66e5ab73a8aa63da79f5d46579bd6f13f1704afd70dcec5d64ec4e07c4607ea"}),
   Object.freeze({"catalog_layer":"bundled","kind":"subclass","contentKey":"2024:subclass:warrior-of-the-open-hand","name":"Warrior of the Open Hand","digest":"d9847d539412cfa50efda448f1ad345c54c1e03cbf3f05ee2a818e957586fcbb"}),
   Object.freeze({"catalog_layer":"bundled","kind":"species","contentKey":"2024:species:dragonborn","name":"Dragonborn","digest":"ba18c343ddce6dc2896a15fc51d551edafbd40e87b9997a5c52799465dc27c63"}),
   Object.freeze({"catalog_layer":"bundled","kind":"species","contentKey":"2024:species:dwarf","name":"Dwarf","digest":"ae6132b5e72de583b0cc95fc0cf147040eb3d56be498b13aa9014da6433dbc54"}),

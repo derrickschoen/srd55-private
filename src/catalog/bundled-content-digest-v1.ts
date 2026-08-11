@@ -187,6 +187,12 @@ const DIGEST_SLICES_V1: readonly DigestSliceV1[] = Object.freeze([
   owned('class', 'class_resources', 'class_definitions', 'class_definition_id'),
   owned('class', 'class_resource_formulas', 'class_definitions', 'class_definition_id'),
   owned('class', 'class_feature_effects', 'class_definitions', 'class_definition_id'),
+  owned(
+    'class',
+    'class_feature_value_contributions',
+    'class_definitions',
+    'class_definition_id',
+  ),
   owned('class', 'class_equipment_items', 'class_definitions', 'class_definition_id', {
     omit: ['weapon_template_id', 'armor_template_id'],
     extraSelect:
@@ -222,6 +228,21 @@ const DIGEST_SLICES_V1: readonly DigestSliceV1[] = Object.freeze([
   }),
   owned('subclass', 'subclass_progressions', 'subclass_definitions', 'subclass_definition_id'),
   owned('subclass', 'subclass_features', 'subclass_definitions', 'subclass_definition_id'),
+  Object.freeze({
+    kind: 'subclass',
+    table: 'subclass_feature_value_contributions',
+    sql:
+      'SELECT root.content_key AS digest_owner_key, child.*, ' +
+      'feature.class_level AS digest_parent_class_level, ' +
+      'feature.sort_order AS digest_parent_sort_order, ' +
+      'feature.name AS digest_parent_name ' +
+      'FROM subclass_feature_value_contributions AS child ' +
+      'JOIN subclass_features AS feature ON feature.id = child.subclass_feature_id ' +
+      'JOIN subclass_definitions AS root ON root.id = feature.subclass_definition_id ' +
+      "JOIN catalog_content_identities AS registry ON registry.content_kind = 'subclass' " +
+      `AND registry.content_key = root.content_key WHERE ${BUNDLED_IDENTITY_FILTER}`,
+    omit: Object.freeze(['subclass_feature_id']),
+  }),
   Object.freeze({
     kind: 'subclass',
     table: 'subclass_feature_effects',

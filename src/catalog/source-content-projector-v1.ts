@@ -8,6 +8,10 @@ import {
   type SqlRow,
 } from '../db/codecs';
 import { rowContractError } from '../domain/contracts/rows';
+import {
+  decodeStoredSupersedesReference,
+  decodeStoredValueExpression,
+} from '../domain/contracts/row-rules';
 import type { RulesEdition } from '../domain/enums';
 import {
   abilities,
@@ -92,6 +96,8 @@ export interface ClassContentAggregateV1 {
   readonly resources: readonly CanonicalClassRowV1[];
   readonly resource_formulas: readonly CanonicalClassRowV1[];
   readonly feature_effects: readonly CanonicalClassRowV1[];
+  /** New arms join feature_effects; this source-only field emits no sibling key. */
+  readonly feature_value_contributions?: readonly CanonicalClassRowV1[];
   readonly named_features: readonly CanonicalClassRowV1[];
   /** Stored-only, default-included future root columns; never accepted from documents. */
   readonly stored_fields?: CanonicalClassRowV1;
@@ -323,7 +329,13 @@ export function projectClassContentV1(
     equipment_items: contentIdentitySequence(aggregate.equipment_items),
     resources: contentIdentitySet(aggregate.resources),
     resource_formulas: contentIdentitySet(aggregate.resource_formulas),
-    feature_effects: contentIdentitySet(aggregate.feature_effects),
+    // Contributions are a new discriminated arm INSIDE the existing effects
+    // collection. An aggregate with no contribution therefore emits the exact
+    // historical payload bytes: no new sibling property and no changed effect.
+    feature_effects: contentIdentitySet([
+      ...aggregate.feature_effects,
+      ...(aggregate.feature_value_contributions ?? []),
+    ]),
     named_features: contentIdentitySet(aggregate.named_features.map((feature) => {
       const effects = feature.effects;
       if (!Array.isArray(effects)) {
@@ -415,6 +427,7 @@ type SourceAggregateTable =
   | 'class_resources'
   | 'class_resource_formulas'
   | 'class_feature_effects'
+  | 'class_feature_value_contributions'
   | 'named_features'
   | 'named_feature_effects'
   | 'feat_definitions';
@@ -424,17 +437,26 @@ function validatedRow(
   row: SqlRow,
   label: string,
 ): SqlRow {
-  // feat_definitions is the only table in this graph that is also a portable
-  // row-contract table. Validate its complete current contract while leaving
-  // unforeseen columns for default inclusion below. Every class field is
-  // decoded below; SQLite's CHECKs remain authoritative for its closed sets.
-  if (table === 'feat_definitions') {
-    const currentColumns = [
-      'id', 'content_key', 'name', 'rules_edition', 'category', 'min_level',
-      'ability_points', 'ability_increase_abilities',
-      'ability_increase_maximum', 'repeatable', 'prerequisites', 'grant_rules',
-      'notes', 'created_at', 'updated_at',
-    ];
+  // These are the tables in this graph with a complete native row contract.
+  // Validate current columns before canonicalizing them; unforeseen future
+  // columns still default-include through storedSemanticRow below.
+  if (
+    table === 'feat_definitions' ||
+    table === 'class_feature_value_contributions'
+  ) {
+    const currentColumns = table === 'feat_definitions'
+      ? [
+          'id', 'content_key', 'name', 'rules_edition', 'category', 'min_level',
+          'ability_points', 'ability_increase_abilities',
+          'ability_increase_maximum', 'repeatable', 'prerequisites',
+          'grant_rules', 'notes', 'created_at', 'updated_at',
+        ]
+      : [
+          'id', 'class_definition_id', 'contribution_key', 'label',
+          'target_kind', 'target_key', 'op', 'active_from_level',
+          'active_to_level', 'value_json', 'supersedes_ref', 'created_at',
+          'updated_at',
+        ];
     const currentRow = Object.fromEntries(
       currentColumns.map((column) => [column, row[column]]),
     );
@@ -735,6 +757,31 @@ function classAggregate(
       }) as unknown as JsonValue },
     ));
 
+  const valueContributions = allOwned(
+    db,
+    'class_feature_value_contributions',
+    'class_definition_id',
+    id,
+    'contribution_key',
+  ).map((row): CanonicalClassRowV1 => storedSemanticRow(
+    row,
+    ['class_definition_id'],
+    ['value_json', 'supersedes_ref'],
+    new Set(),
+    new Set(),
+    {
+      kind: 'feature_value_contribution',
+      value: decodeStoredValueExpression(
+        row.value_json,
+        'class feature-value contribution value_json',
+      ) as JsonValue,
+      supersedes_ref: decodeStoredSupersedesReference(
+        row.supersedes_ref,
+        'class feature-value contribution supersedes_ref',
+      ) as JsonValue | null,
+    },
+  ));
+
   const namedFeatures = allOwned(db, 'named_features', 'class_definition_id', id, 'class_level, name')
     .map((row): CanonicalClassRowV1 => {
       const namedId = sqlInteger(row, 'id');
@@ -797,6 +844,7 @@ function classAggregate(
     resource_formulas: formulas,
     feature_effects: allOwned(db, 'class_feature_effects', 'class_definition_id', id, 'class_level, name')
       .map((row) => genericEffectRow(row, 'class_definition_id')),
+    feature_value_contributions: valueContributions,
     named_features: namedFeatures,
     ...(rootFields === undefined ? {} : { stored_fields: rootFields }),
   };

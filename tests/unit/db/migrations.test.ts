@@ -86,6 +86,7 @@ const CI4B_NEGATIVE_ID_CENSUS_TABLES = [
   'class_armor_training',
   'class_extra_attack_grants',
   'class_feature_effects',
+  'class_feature_value_contributions',
   'class_martial_arts_dice',
   'class_progressions',
   'class_resource_formulas',
@@ -112,6 +113,7 @@ const CI4B_NEGATIVE_ID_CENSUS_TABLES = [
   'spell_version_tags',
   'spell_version_upcast_levels',
   'subclass_definitions',
+  'subclass_feature_value_contributions',
   'class_definitions',
   'feat_definitions',
   'species_definitions',
@@ -1683,6 +1685,109 @@ describe('database migration chain', () => {
       [sha256('v2 data migration')],
     );
     lifecycle.close();
+  });
+
+  it('0042 preserves owners and adds both cascading contribution tables', async () => {
+    const beforeFeatureValues = DATABASE_MIGRATIONS
+      .slice(0, DATABASE_MIGRATIONS.findIndex(
+        (entry) => entry.id === '0042_feature_value_contributions',
+      ))
+      .map((entry) => entry.sql)
+      .join('\n');
+    const storage = await storageHolding(`${beforeFeatureValues}
+      INSERT INTO catalog_content_identities (
+        content_key, content_kind, key_kind, catalog_layer, normalized_name
+      ) VALUES
+        ('expanded:migration.fixture:class', 'class', 'asserted', 'external',
+         'migration class'),
+        ('expanded:migration.fixture:subclass', 'subclass', 'asserted',
+         'external', 'migration subclass');
+      INSERT INTO class_definitions (
+        id, content_key, name, rules_edition, progression_type
+      ) VALUES (
+        901, 'expanded:migration.fixture:class', 'Migration Class',
+        'expanded', 'none'
+      );
+      INSERT INTO subclass_definitions (
+        id, content_key, class_definition_id, name, rules_edition
+      ) VALUES (
+        902, 'expanded:migration.fixture:subclass', 901,
+        'Migration Subclass', 'expanded'
+      );
+      INSERT INTO subclass_features (
+        id, subclass_definition_id, class_level, sort_order, name, description
+      ) VALUES (903, 902, 3, 1, 'Migration Feature', 'Preserved feature.');`);
+    const lifecycle = new DatabaseLifecycle(
+      sqlite3,
+      storage,
+      schema,
+      () => undefined,
+      DATABASE_MIGRATIONS,
+    );
+    lifecycle.open();
+    try {
+      const migrated = lifecycle.database;
+      expect(migrated.scalar<number>(
+        `SELECT count(*) FROM sqlite_schema
+         WHERE type = 'table' AND name IN (
+           'class_feature_value_contributions',
+           'subclass_feature_value_contributions'
+         )`,
+      )).toBe(2);
+      expect(migrated.scalar<string>(
+        'SELECT description FROM subclass_features WHERE id = 903',
+      )).toBe('Preserved feature.');
+      const valueJson = JSON.stringify({
+        kind: 'scale',
+        source: {
+          kind: 'class_level',
+          class_content_key: 'expanded:migration.fixture:class',
+        },
+        divide: 2,
+        round: 'ceiling',
+      });
+      migrated.exec(
+        `INSERT INTO class_feature_value_contributions (
+           class_definition_id, contribution_key, label, target_kind,
+           target_key, op, active_from_level, active_to_level, value_json
+         ) VALUES (901, 'base', 'Base dice', 'feature_dice_count',
+                   'sneak_attack', 'add', 1, 20, ?)`,
+        [valueJson],
+      );
+      migrated.exec(
+        `INSERT INTO subclass_feature_value_contributions (
+           subclass_feature_id, contribution_key, label, target_kind,
+           target_key, op, active_from_level, active_to_level, value_json,
+           supersedes_ref
+         ) VALUES (903, 'upgrade', 'Upgrade dice', 'feature_dice_count',
+                   'sneak_attack', 'add', 3, 20, ?, ?)`,
+        [
+          JSON.stringify({ kind: 'const', amount: 1 }),
+          JSON.stringify({
+            content_key: 'expanded:migration.fixture:class',
+            contribution_key: 'base',
+          }),
+        ],
+      );
+      expect(migrated.scalar<number>(
+        `SELECT (
+           SELECT count(*) FROM class_feature_value_contributions
+         ) + (
+           SELECT count(*) FROM subclass_feature_value_contributions
+         )`,
+      )).toBe(2);
+
+      migrated.exec('DELETE FROM class_definitions WHERE id = 901');
+      expect(migrated.scalar<number>(
+        `SELECT (
+           SELECT count(*) FROM class_feature_value_contributions
+         ) + (
+           SELECT count(*) FROM subclass_feature_value_contributions
+         )`,
+      )).toBe(0);
+    } finally {
+      lifecycle.close();
+    }
   });
 
   it('Q4 rejects General background keys and reverse category mutation', () => {

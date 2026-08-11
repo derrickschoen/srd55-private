@@ -779,6 +779,22 @@ export const TABLE_SCOPES = {
     share: false,
     backupReference: false,
   },
+  class_feature_value_contributions: {
+    role: 'catalog_class',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
+  subclass_feature_value_contributions: {
+    role: 'catalog_class',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
 
   /**
    * `backupReference: false`, and this is the classification the design flagged
@@ -1340,6 +1356,7 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'class_definitions',
   'class_extra_attack_grants',
   'class_feature_effects',
+  'class_feature_value_contributions',
   'class_martial_arts_dice',
   'class_progressions',
   'class_resource_formulas',
@@ -1377,6 +1394,7 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'spell_versions',
   'subclass_definitions',
   'subclass_feature_effects',
+  'subclass_feature_value_contributions',
   'subclass_features',
   'subclass_progressions',
   'warning_acknowledgements',

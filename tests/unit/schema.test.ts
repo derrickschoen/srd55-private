@@ -653,6 +653,16 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
     ],
     numeric: ['created_at', 'updated_at'],
   },
+  class_feature_value_contributions: {
+    integer: [
+      'id', 'class_definition_id', 'active_from_level', 'active_to_level',
+    ],
+    text: [
+      'contribution_key', 'label', 'target_kind', 'target_key', 'op',
+      'value_json', 'supersedes_ref',
+    ],
+    numeric: ['created_at', 'updated_at'],
+  },
   named_feature_effects: {
     integer: [
       'id', 'named_feature_id', 'sort_order', 'hit_points_flat',
@@ -674,6 +684,16 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
     text: [
       'effect_kind', 'damage_type', 'ability', 'ability_1', 'ability_2',
       'weapon_scope', 'label', 'notes',
+    ],
+    numeric: ['created_at', 'updated_at'],
+  },
+  subclass_feature_value_contributions: {
+    integer: [
+      'id', 'subclass_feature_id', 'active_from_level', 'active_to_level',
+    ],
+    text: [
+      'contribution_key', 'label', 'target_kind', 'target_key', 'op',
+      'value_json', 'supersedes_ref',
     ],
     numeric: ['created_at', 'updated_at'],
   },
@@ -928,11 +948,19 @@ const expectedNotNull: Record<string, string[]> = {
   class_feature_effects: [
     'id', 'class_definition_id', 'class_level', 'name', 'effect_kind',
   ],
+  class_feature_value_contributions: [
+    'id', 'class_definition_id', 'contribution_key', 'label', 'target_kind',
+    'target_key', 'op', 'active_from_level', 'active_to_level', 'value_json',
+  ],
   named_feature_effects: [
     'id', 'named_feature_id', 'sort_order', 'effect_kind',
   ],
   subclass_feature_effects: [
     'id', 'subclass_feature_id', 'sort_order', 'effect_kind', 'label',
+  ],
+  subclass_feature_value_contributions: [
+    'id', 'subclass_feature_id', 'contribution_key', 'label', 'target_kind',
+    'target_key', 'op', 'active_from_level', 'active_to_level', 'value_json',
   ],
 
   // --- THE TABLES INHERITED FROM THE ORIGINAL MIGRATIONS -------------------
@@ -1065,12 +1093,16 @@ const expectedNamedIndexes: Record<string, string> = {
     'named_feature_effects:named_feature_id,sort_order:unique',
   class_feature_effects_class_name_level_unique:
     'class_feature_effects:class_definition_id,name,class_level:unique',
+  class_feature_value_contributions_owner_key_unique:
+    'class_feature_value_contributions:class_definition_id,contribution_key:unique',
   subclass_features_subclass_sort_unique:
     'subclass_features:subclass_definition_id,sort_order:unique',
   subclass_features_subclass_level_name_unique:
     'subclass_features:subclass_definition_id,class_level,name:unique',
   subclass_feature_effects_feature_sort_unique:
     'subclass_feature_effects:subclass_feature_id,sort_order:unique',
+  subclass_feature_value_contributions_owner_key_unique:
+    'subclass_feature_value_contributions:subclass_feature_id,contribution_key:unique',
   background_templates_content_key_unique:
     'background_templates:content_key:unique',
   background_templates_name_rules_edition_index:
@@ -1333,11 +1365,17 @@ const expectedUniqueGroups: Record<string, string[]> = {
   named_features: ['class_definition_id,name,rules_edition', 'content_key'],
   named_feature_effects: ['named_feature_id,sort_order'],
   class_feature_effects: ['class_definition_id,name,class_level'],
+  class_feature_value_contributions: [
+    'class_definition_id,contribution_key',
+  ],
   subclass_features: [
     'subclass_definition_id,class_level,name',
     'subclass_definition_id,sort_order',
   ],
   subclass_feature_effects: ['subclass_feature_id,sort_order'],
+  subclass_feature_value_contributions: [
+    'subclass_feature_id,contribution_key',
+  ],
   feat_definitions: ['content_key'],
   species_definitions: ['content_key'],
   spell_identities: ['content_key'],
@@ -1667,6 +1705,12 @@ const expectedForeignKeys: Record<string, string[]> = {
   named_features: ['class_definition_id->class_definitions.id|CASCADE'],
   named_feature_effects: ['named_feature_id->named_features.id|CASCADE'],
   class_feature_effects: ['class_definition_id->class_definitions.id|CASCADE'],
+  class_feature_value_contributions: [
+    'class_definition_id->class_definitions.id|CASCADE',
+  ],
+  subclass_feature_value_contributions: [
+    'subclass_feature_id->subclass_features.id|CASCADE',
+  ],
   species_template_traits: [
     'species_template_id->species_templates.id|CASCADE',
   ],

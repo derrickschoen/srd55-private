@@ -250,6 +250,41 @@ describe('SRD class level-table progression', () => {
     },
   );
 
+  it('persists one Rogue-owned Sneak Attack contribution and no contribution for another class', () => {
+    const rows = db.allRaw(
+      `SELECT class.content_key, contribution.contribution_key,
+         contribution.label, contribution.target_kind,
+         contribution.target_key, contribution.op,
+         contribution.active_from_level, contribution.active_to_level,
+         contribution.value_json, contribution.supersedes_ref
+       FROM class_feature_value_contributions AS contribution
+       JOIN class_definitions AS class
+         ON class.id = contribution.class_definition_id
+       ORDER BY class.content_key, contribution.contribution_key`,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      content_key: '2024:class:rogue',
+      contribution_key: 'sneak-attack',
+      label: 'Sneak Attack',
+      target_kind: 'feature_dice_count',
+      target_key: 'sneak_attack',
+      op: 'add',
+      active_from_level: 1,
+      active_to_level: 20,
+      supersedes_ref: null,
+    });
+    expect(JSON.parse(String(rows[0]?.value_json))).toEqual({
+      kind: 'scale',
+      source: {
+        kind: 'class_level',
+        class_content_key: '2024:class:rogue',
+      },
+      divide: 2,
+      round: 'ceiling',
+    });
+  });
+
   it('has no trailing mid-word hyphens, with the old extract as a failing control', () => {
     expect(() => assertNoTrailingMidwordHyphen(source)).not.toThrow();
     expect(() =>

@@ -696,6 +696,57 @@ const classFeatureEffect =
     });
   };
 
+const STORED_SCALE_EXPRESSION = JSON.stringify({
+  kind: 'scale',
+  source: { kind: 'class_level', class_content_key: '2024:class:rogue' },
+  divide: 2,
+  round: 'ceiling',
+});
+
+function featureValueContribution(
+  table:
+    | 'class_feature_value_contributions'
+    | 'subclass_feature_value_contributions',
+  values: Values,
+): Write {
+  return (db) => {
+    let ownerColumn: string;
+    let ownerId: number;
+    if (table === 'class_feature_value_contributions') {
+      ownerColumn = 'class_definition_id';
+      ownerId = newClass(db);
+    } else {
+      ownerColumn = 'subclass_feature_id';
+      ownerId = insert(db, 'subclass_features', {
+        subclass_definition_id: newSubclass(db, newClass(db)),
+        class_level: 3,
+        sort_order: 1,
+        name: uid('Feature'),
+        description: 'Printed feature text.',
+      });
+    }
+    insert(db, table, {
+      [ownerColumn]: ownerId,
+      contribution_key: uid('contribution'),
+      label: 'Sneak Attack',
+      target_kind: 'feature_dice_count',
+      target_key: 'sneak_attack',
+      op: 'add',
+      active_from_level: 1,
+      active_to_level: 20,
+      value_json: STORED_SCALE_EXPRESSION,
+      supersedes_ref: null,
+      ...values,
+    });
+  };
+}
+
+const classFeatureValueContribution = (values: Values): Write =>
+  featureValueContribution('class_feature_value_contributions', values);
+
+const subclassFeatureValueContribution = (values: Values): Write =>
+  featureValueContribution('subclass_feature_value_contributions', values);
+
 // --- edit writers ----------------------------------------------------------
 // Each inserts a row that is legal on every constraint, then changes it. The
 // insert MUST succeed for the case to mean anything: if a fixture's starting
@@ -1163,6 +1214,97 @@ interface ConstraintCase {
   readonly rejects: ReadonlyArray<readonly [string, Write]>;
   /** Legitimate writes that MUST get through — the over-strictness guard. */
   readonly accepts: ReadonlyArray<readonly [string, Write]>;
+}
+
+/** Independent SQL behaviour oracle for migration 0042's shared CHECK shape. */
+function featureValueContributionConstraintCases(
+  table: string,
+  contribution: (values: Values) => Write,
+): readonly ConstraintCase[] {
+  return [
+    {
+      constraint: `${table}_contribution_key_check`,
+      rejects: [
+        ['an empty stable key', contribution({ contribution_key: '' })],
+        ['a key beyond the storage bound', contribution({ contribution_key: 'k'.repeat(201) })],
+      ],
+      accepts: [
+        ['an ASCII stable key at the storage bound', contribution({ contribution_key: 'k'.repeat(200) })],
+        ['a Unicode stable key at the code-point bound', contribution({ contribution_key: '🗝'.repeat(200) })],
+      ],
+    },
+    {
+      constraint: `${table}_label_check`,
+      rejects: [
+        ['an empty label', contribution({ label: '' })],
+        ['a label beyond the storage bound', contribution({ label: 'l'.repeat(201) })],
+      ],
+      accepts: [
+        ['an ASCII label at the storage bound', contribution({ label: 'l'.repeat(200) })],
+        ['a Unicode label at the code-point bound', contribution({ label: '🗝'.repeat(200) })],
+      ],
+    },
+    {
+      constraint: `${table}_target_kind_check`,
+      rejects: [['an unknown target kind', contribution({ target_kind: 'spell_damage' })]],
+      accepts: [['a resource maximum target', contribution({ target_kind: 'resource_maximum', target_key: 'focus_points' })]],
+    },
+    {
+      constraint: `${table}_op_check`,
+      rejects: [['a replacement operation', contribution({ op: 'replace' })]],
+      accepts: [['the additive operation', contribution({ op: 'add' })]],
+    },
+    {
+      constraint: `${table}_target_payload_check`,
+      rejects: [
+        ['an unknown feature dice target', contribution({ target_key: 'superiority_dice' })],
+        ['an empty resource key', contribution({ target_kind: 'resource_maximum', target_key: '' })],
+        ['a resource key beyond the storage bound', contribution({ target_kind: 'resource_maximum', target_key: 'r'.repeat(201) })],
+      ],
+      accepts: [
+        ['Sneak Attack dice', contribution({})],
+        ['a bounded resource key', contribution({ target_kind: 'resource_maximum', target_key: 'r'.repeat(200) })],
+        ['a Unicode resource key at the code-point bound', contribution({ target_kind: 'resource_maximum', target_key: '🗝'.repeat(200) })],
+      ],
+    },
+    {
+      constraint: `${table}_active_level_band_check`,
+      rejects: [
+        ['level zero', contribution({ active_from_level: 0 })],
+        ['level twenty-one', contribution({ active_to_level: 21 })],
+        ['a reversed band', contribution({ active_from_level: 10, active_to_level: 9 })],
+        ['a fractional boundary', contribution({ active_from_level: 1.5 })],
+      ],
+      accepts: [
+        ['the whole class-level range', contribution({ active_from_level: 1, active_to_level: 20 })],
+        ['a one-level band', contribution({ active_from_level: 7, active_to_level: 7 })],
+      ],
+    },
+    {
+      constraint: `${table}_value_json_check`,
+      rejects: [
+        ['malformed JSON', contribution({ value_json: '{' })],
+        ['a JSON array', contribution({ value_json: '[]' })],
+        ['an object beyond the byte bound', contribution({ value_json: JSON.stringify({ padding: 'x'.repeat(4090) }) })],
+      ],
+      accepts: [
+        ['a stored scale expression', contribution({})],
+        ['an object exactly at the byte bound', contribution({ value_json: JSON.stringify({ padding: 'x'.repeat(4082) }) })],
+      ],
+    },
+    {
+      constraint: `${table}_supersedes_ref_check`,
+      rejects: [
+        ['malformed JSON', contribution({ supersedes_ref: '{' })],
+        ['a JSON array', contribution({ supersedes_ref: '[]' })],
+        ['an object beyond the byte bound', contribution({ supersedes_ref: JSON.stringify({ padding: 'x'.repeat(506) }) })],
+      ],
+      accepts: [
+        ['no superseded contribution', contribution({ supersedes_ref: null })],
+        ['a qualified contribution reference', contribution({ supersedes_ref: JSON.stringify({ content_key: '2024:class:rogue', contribution_key: 'sneak-attack' }) })],
+      ],
+    },
+  ];
 }
 
 /**
@@ -3509,6 +3651,14 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
       ['level 20', classFeatureEffect({ class_level: 20, effect_kind: 'armor_class_bonus', amount: 1 })],
     ],
   },
+  ...featureValueContributionConstraintCases(
+    'class_feature_value_contributions',
+    classFeatureValueContribution,
+  ),
+  ...featureValueContributionConstraintCases(
+    'subclass_feature_value_contributions',
+    subclassFeatureValueContribution,
+  ),
   // --- the four stored sheet inputs ---------------------------------------
   {
     constraint: 'character_armor_slot_check',
