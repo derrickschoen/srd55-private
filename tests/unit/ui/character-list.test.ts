@@ -377,7 +377,7 @@ describe('character share links', () => {
       const dialog = root.querySelector('[data-testid="content-adoption-modal"]');
       expect(dialog).not.toBeNull();
       expect(elementText(dialog as unknown as Node)).toContain(
-        'SRD fingerprint fallback',
+        'Matches a version of built-in content',
       );
       const commit = dialog?.querySelectorAll('button').find((button) =>
         button.textContent === 'Import with these choices',
@@ -1605,14 +1605,24 @@ describe('catalog and backup entry points', () => {
   it('CI-8 forgets the selected remembered choice and refreshes its management list', async () => {
     const fixture = services();
     const forgotten: unknown[] = [];
-    let receipts = [{
-      kind: 'item' as const,
-      scheme: 'content-v1' as never,
-      digest: 'a'.repeat(64) as ContentFingerprintDigest,
-      decision: 'match' as const,
-      targetContentKey: '2024:item:remembered' as ContentKey,
-      reviewedAt: '2026-08-06T00:00:00.000Z',
-    }];
+    let receipts = [
+      {
+        kind: 'item' as const,
+        scheme: 'content-v1' as never,
+        digest: 'a'.repeat(64) as ContentFingerprintDigest,
+        decision: 'match' as const,
+        targetContentKey: '2024:item:remembered-a' as ContentKey,
+        reviewedAt: '2026-08-06T00:00:00.000Z',
+      },
+      {
+        kind: 'item' as const,
+        scheme: 'content-v1' as never,
+        digest: 'b'.repeat(64) as ContentFingerprintDigest,
+        decision: 'match' as const,
+        targetContentKey: '2024:item:remembered-b' as ContentKey,
+        reviewedAt: '2026-08-06T00:00:00.000Z',
+      },
+    ];
     const restoreDocument = installInteractiveDocument();
     try {
       const controls = createImportBackupControls({
@@ -1642,11 +1652,14 @@ describe('catalog and backup entry points', () => {
         '[aria-label="Remembered catalog match choice"]',
       );
       if (receiptSelect === null) throw new Error('Receipt select missing.');
-      expect(receiptSelect.querySelector('option')?.textContent).toContain(
-        'content-v1 aaaaaaaaaaaa…',
-      );
-      receiptSelect.value =
-        receiptSelect.querySelector('option')?.getAttribute('value') ?? '';
+      const receiptOptions = receiptSelect.querySelectorAll('option');
+      expect(receiptOptions.map((option) => option.textContent)).toEqual([
+        'item choice 1: use “remembered a” (reviewed 2026-08-06T00:00:00.000Z)',
+        'item choice 2: use “remembered b” (reviewed 2026-08-06T00:00:00.000Z)',
+      ]);
+      expect(receiptOptions.map((option) => option.textContent).join(' '))
+        .not.toMatch(/content-v1|aaaaaaaaaaaa|bbbbbbbbbbbb/i);
+      receiptSelect.value = receiptOptions[1]?.getAttribute('value') ?? '';
       expect(forget.disabled).toBe(false);
       forget.click();
       for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
@@ -1654,7 +1667,7 @@ describe('catalog and backup entry points', () => {
       expect(forgotten).toEqual([{
         kind: 'item',
         scheme: 'content-v1',
-        digest: 'a'.repeat(64),
+        digest: 'b'.repeat(64),
       }]);
       expect(forget.disabled).toBe(true);
       expect(elementText(controls.element)).toContain(

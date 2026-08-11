@@ -494,7 +494,7 @@ test('v17 refusal links through library adoption to the exact restored choice', 
       '[data-testid="content-adoption-modal"]',
     );
     await expect(shareReview).toContainText(
-      'Reference supplied no rules evidence',
+      'Shared reference has no rules to compare',
     );
     await expect(shareReview).toContainText(
       'local: Oversized Portable Elf — Homebrew · external layer',

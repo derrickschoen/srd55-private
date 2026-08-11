@@ -60,18 +60,18 @@ function sameIdentityName(review: ContentImportReviewRow): boolean {
 
 function reasonLabel(review: ContentImportReviewRow): string {
   if (review.incomingFingerprint === null) {
-    return 'Reference supplied no rules evidence';
+    return 'Shared reference has no rules to compare';
   }
   switch (review.matchClass) {
-    case 'alias': return 'Alias';
-    case 'compatible-fingerprint': return 'Compatible fingerprint';
-    case 'srd-fallback': return 'SRD fingerprint fallback';
-    case 'metadata-conflict': return 'Metadata conflict';
-    case 'installed-target': return 'Certified installed target';
+    case 'alias': return 'Known alternate name';
+    case 'compatible-fingerprint': return 'Matches a version of library content';
+    case 'srd-fallback': return 'Matches a version of built-in content';
+    case 'metadata-conflict': return 'Same rules, different details';
+    case 'installed-target': return 'Already in your library';
     case 'key-collision':
       return sameIdentityName(review)
         ? 'Same name, distinct rules content'
-        : 'Alias points to distinct rules content';
+        : 'Alternate name points to different rules';
   }
 }
 
@@ -450,10 +450,10 @@ export function createContentAdoptionDialog(
 
 function publishReasonLabel(reason: PublishPreview['review'][number]['reason']): string {
   switch (reason) {
-    case 'alias': return 'Alias';
-    case 'compatible-fingerprint': return 'Compatible fingerprint';
-    case 'srd-fallback': return 'SRD fingerprint fallback';
-    case 'metadata-conflict': return 'Metadata conflict';
+    case 'alias': return 'Known alternate name';
+    case 'compatible-fingerprint': return 'Matches a version of library content';
+    case 'srd-fallback': return 'Matches a version of built-in content';
+    case 'metadata-conflict': return 'Same rules, different details';
   }
 }
 

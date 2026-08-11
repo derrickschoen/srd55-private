@@ -182,10 +182,10 @@ const mutations = {
       'src/ui/content-adoption-dialog.ts',
       `      return sameIdentityName(review)
         ? 'Same name, distinct rules content'
-        : 'Alias points to distinct rules content';`,
+        : 'Alternate name points to different rules';`,
       `      return sameIdentityName(review)
         ? 'Collision' // CI8_MUTANT hide same-name distinction
-        : 'Alias points to distinct rules content';`,
+        : 'Alternate name points to different rules';`,
     )],
   },
   'ui-unevidenced-reason': {
@@ -193,7 +193,7 @@ const mutations = {
     testName: 'CI-8 discloses real planner counts, every match reason, and both collision labels',
     changes: [edit(
       'src/ui/content-adoption-dialog.ts',
-      "  if (review.incomingFingerprint === null) {\n    return 'Reference supplied no rules evidence';\n  }",
+      "  if (review.incomingFingerprint === null) {\n    return 'Shared reference has no rules to compare';\n  }",
       "  if (review.incomingFingerprint === null) {\n    return 'Same name, distinct rules content'; // CI8_MUTANT hide absent evidence\n  }",
     )],
   },
@@ -243,9 +243,13 @@ const mutations = {
     testName: 'CI-8 forgets the selected remembered choice and refreshes its management list',
     changes: [edit(
       'src/ui/screens/character-list/import-backup-controls.ts',
-      `      text: \`${String('${receipt.kind}')}\: \${receipt.decision} → \${receipt.targetContentKey} \` +
-        \`(\${receipt.scheme} \${receipt.digest.slice(0, 12)}…, reviewed \${receipt.reviewedAt})\`,`,
-      `      text: \`${String('${receipt.kind}')}\: \${receipt.decision} → \${receipt.targetContentKey}\`, // CI8_MUTANT hide receipt identity`,
+      `      text: \`${String('${receipt.kind}')} choice \${String(index + 1)}: \` +
+        \`\${receipt.decision === 'match' ? 'use' : 'keep a private copy for'} \` +
+        \`\${rememberedTargetLabel(receipt.targetContentKey)} \` +
+        \`(reviewed \${receipt.reviewedAt})\`,`,
+      `      text: \`${String('${receipt.kind}')} choice \${String(index + 1)}: \` +
+        \`\${receipt.decision === 'match' ? 'use' : 'keep a private copy for'} \` +
+        \`\${rememberedTargetLabel(receipt.targetContentKey)}\`, // CI8_MUTANT hide receipt review date`,
     )],
   },
   'ui-complete-backup-wording': {

@@ -682,10 +682,10 @@ async function renderArchiveRoute(
       }));
       const purge = element('button', {
         className: 'button-danger',
-        text: 'Permanently purge entire lineage',
+        text: 'Permanently purge all versions',
         attributes: {
           type: 'button',
-          'aria-label': `Permanently purge ${set.content_name} and its entire version lineage`,
+          'aria-label': `Permanently purge all versions of ${set.content_name}`,
         },
       });
       cleanups.push(listen(purge, 'click', () => {
@@ -707,13 +707,13 @@ async function renderArchiveRoute(
           onConfirm: async () => {
             purge.disabled = true;
             restore.disabled = true;
-            status.textContent = 'Permanently purging the complete version lineage…';
+            status.textContent = 'Permanently purging all versions…';
             try {
               await client.purgeArchivedSet({
                 content_kind: set.content_kind,
                 content_key: set.content_key,
               });
-              await render('Entire version lineage permanently purged.');
+              await render('All versions permanently purged.');
             } catch (error) {
               purge.disabled = false;
               restore.disabled = false;
@@ -733,7 +733,7 @@ async function renderArchiveRoute(
         characterList(set.characters),
         restore,
         element('p', {
-          text: 'Permanent purge removes every predecessor and successor version and all characters attached to that lineage.',
+          text: 'Permanent purge removes this version, every earlier and later version, and all attached characters.',
         }),
         purge,
       ]));
