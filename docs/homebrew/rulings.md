@@ -5,6 +5,37 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-11 — Level 7 aura final: Blindsight + ally OA immunity; save-Disadvantage moves to the capstone
+
+Owner's decisions (a same-day revision of the save-Disadvantage entry
+below, reached through a compare-and-decide pass on Blindsight):
+
+> [L7:] Paladin gets blindsight. Allies get immune from opportunity
+> attacks
+
+and: the full save-Disadvantage aura **moves into Dominion Foretold at
+20** — the altitude where the 2024 game itself puts that effect (Elder
+Champion). Applied shape:
+
+1. **Aura of Certainty (7), final**: the paladin has Blindsight with a
+   range equal to the Aura of Protection's radius (10 ft, 30 at 18;
+   self only — owner-selected); allies' movement doesn't provoke
+   Opportunity Attacks while they're in the aura; the one-way
+   comprehension ribbon stays (drafting choice, flagged). The
+   always-on save-Disadvantage from the earlier same-day ruling is
+   removed.
+2. **Dominion Foretold (20) gains Inevitable Word**: while active,
+   enemies in the aura have Disadvantage on saving throws against the
+   paladin's spells and Channel Divinity options.
+
+Notes recorded: the ally clause partially overlaps Foreseen Formation
+at 15 (its movement already doesn't provoke; its payload remains the
+off-turn movement itself); Blindsight and ally OA immunity are worth
+~0 in the single-character sim (no vision denial, no allies modeled) —
+their value is table-side; control-posture prevented at 11/17 returns
+to 11.0/19.5 with the save amplifier now capstone-gated. The F5 amber
+and the F12 amber-high from the previous aura clear.
+
 ## 2026-08-11 — Level 7 aura: enemies save at Disadvantage against the paladin's magic
 
 Owner floated two candidates mid-conformance-pass, verbatim:
