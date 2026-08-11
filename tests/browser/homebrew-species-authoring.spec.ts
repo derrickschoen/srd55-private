@@ -21,7 +21,8 @@ async function resetHome(page: Page): Promise<void> {
 test('authors, previews, publishes, lists, and applies a homebrew species', async ({
   page,
 }) => {
-  // Measured on PLAYWRIGHT_PORT=5090 in the affected five-spec round at 15.7s.
+  // Measured alone on PLAYWRIGHT_PORT=5040 with the level-five grant preview
+  // at 15.7s.
   // The required x1.5 reserve is 23.55s, rounded up to 100ms.
   test.setTimeout(23_600);
   await resetHome(page);
@@ -56,12 +57,26 @@ test('authors, previews, publishes, lists, and applies a homebrew species', asyn
   await grant.getByLabel('Arcana', { exact: true }).check();
   await grant.getByLabel('History', { exact: true }).check();
 
+  await page.getByRole('button', { name: 'Add grant' }).click();
+  const spellChoice = page.locator('.species-grant-card').nth(1);
+  await spellChoice.getByLabel('Grant kind').selectOption('choice_from_list');
+  const configuredSpellChoice = page.locator('.species-grant-card').nth(1);
+  await configuredSpellChoice.getByLabel('Spell list').selectOption('Wizard');
+  await configuredSpellChoice.getByLabel('Stable grant label').fill('wizard-level-five');
+  await configuredSpellChoice.getByLabel('Number of spells').fill('1');
+  await configuredSpellChoice.getByLabel('Minimum spell level (optional)').fill('5');
+  await configuredSpellChoice.getByLabel('Maximum spell level (optional)').fill('5');
+
   await page.getByRole('button', { name: 'Save draft' }).click();
   await expect(page.locator('.species-authoring-status')).toContainText('Saved revision 1.');
   await page.getByRole('button', { name: 'Preview publish' }).click();
   await expect(page.getByRole('heading', { name: 'Publish preview' })).toBeVisible();
   await expect(page.getByLabel('Trait preview')).toContainText('Void Ward');
-  await expect(page.getByLabel('Grant preview')).toContainText('clockwork-lore');
+  await expect(page.getByLabel('Grant preview')).toContainText(
+    'Choose 1 Wizard spell of level 5; the spell is known and uses spell slots.',
+  );
+  await expect(page.locator('.species-publish-preview code')).toHaveCount(0);
+  await expect(page.getByLabel('Grant preview')).not.toContainText('rule_key');
   await page.getByRole('button', { name: 'Publish species' }).click();
   await expect(page.getByRole('heading', { name: 'Species published' })).toBeVisible();
   const publishedNotice = page.getByRole('region', { name: 'Species published' });

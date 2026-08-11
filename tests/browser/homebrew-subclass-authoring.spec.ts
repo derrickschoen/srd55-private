@@ -32,11 +32,9 @@ test('authors a subclass timeline, preserves threshold effects, and previews its
   browser,
   page,
 }) => {
-  // Measured alone on PLAYWRIGHT_PORT=5080 at 20.6s after adding the recipient
-  // hostile-name preview (x1.5 = 30.9s); the picker-round measurement on 5090
-  // was 15.4s (x1.5 = 23.1s). The merged spec carries both additions, so the
-  // larger reserve governs.
-  test.setTimeout(30_900);
+  // Measured alone on PLAYWRIGHT_PORT=5040 at 21.9s with the human grant and
+  // effect preview pins. 21.9s × 1.5 = 32.85s, rounded up to 100ms.
+  test.setTimeout(32_900);
   await page.goto('/');
   await ready(page);
   await page.evaluate(() => window.staticApp.reset());
@@ -109,6 +107,13 @@ test('authors a subclass timeline, preserves threshold effects, and previews its
   await expect(page.getByRole('heading', { name: 'Publish preview' })).toBeVisible();
   await expect(page.getByLabel('Subclass feature preview')).toContainText('Threshold Ward');
   await expect(page.getByLabel('Subclass feature preview')).toContainText('Later Ward');
+  await expect(page.getByLabel('Progression boundary preview')).toContainText(
+    'Gain Light · SRD · bundled layer; the spell is prepared and uses spell slots.',
+  );
+  await expect(page.getByLabel('Subclass feature preview')).toContainText(
+    'Threshold armor: +2 Armor Class.',
+  );
+  await expect(page.locator('.subclass-publish-preview code')).toHaveCount(0);
   await page.getByRole('button', { name: 'Publish subclass' }).click();
   await expect(page.getByRole('heading', { name: 'Subclass published' })).toBeVisible();
   await page.getByRole('link', { name: 'View subclass library' }).click();
@@ -118,7 +123,7 @@ test('authors a subclass timeline, preserves threshold effects, and previews its
   await expect(publishedCard.getByRole('heading', {
     name: HOSTILE_SUBCLASS_NAME,
   })).toBeVisible();
-  await expect(publishedCard).toContainText('Subclass · immutable published version');
+  await expect(publishedCard).toContainText('Subclass · published homebrew version');
 
   const journey = await page.evaluate(async (subclassName) => {
     const classes = await window.staticApp.inspectRows('class_definitions', { name: 'Fighter' });

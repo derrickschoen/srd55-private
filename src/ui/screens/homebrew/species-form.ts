@@ -44,8 +44,14 @@ import {
 } from '../../content-adoption-dialog';
 import { clear, element, type Cleanup } from '../../dom';
 import { freeTextSpan } from '../../free-text';
+import { rulesEditionLabel } from '../../human-labels';
 import type { ScreenContext } from '../../screen';
 import { homebrewPublishedPath } from './homebrew-routes';
+import {
+  renderPublishPreviewEffect,
+  renderPublishPreviewGrant,
+  spellCatalogNameForGrant,
+} from './publish-preview-renderer';
 import {
   showDraftSaveFailure,
   showDraftSaveProgress,
@@ -210,7 +216,11 @@ function validationIssues(error: unknown): readonly AuthoringValidationIssue[] |
   return valid ? issues as unknown as readonly AuthoringValidationIssue[] : null;
 }
 
-function previewList(preview: PublishPreview): HTMLElement {
+function previewList(
+  preview: PublishPreview,
+  draft: SpeciesAuthoringDraft,
+  spellGrantReferences: SpellGrantAuthoringReferences,
+): HTMLElement {
   const aggregate = preview.aggregate;
   if (aggregate.kind !== 'species') {
     throw new TypeError('The species form received a non-species publish preview.');
@@ -236,7 +246,7 @@ function previewList(preview: PublishPreview): HTMLElement {
       : [' or ', freeTextSpan(aggregate.alternate_size)]),
   );
   root.append(name, creature, size, element('p', {
-    text: `Rules edition: ${aggregate.rules_edition}; walking speed: ${String(aggregate.walking_speed_feet)} feet.`,
+    text: `Rules edition: ${rulesEditionLabel(aggregate.rules_edition)}; walking speed: ${String(aggregate.walking_speed_feet)} feet.`,
   }));
   const traits = element('ol', { attributes: { 'aria-label': 'Trait preview' } });
   for (const trait of aggregate.traits) {
@@ -247,10 +257,7 @@ function previewList(preview: PublishPreview): HTMLElement {
     description.append(freeTextSpan(trait.description));
     const effects = element('ul');
     for (const effect of trait.effects) {
-      const effectItem = element('li');
-      effectItem.append(`${titleCase(effect.kind)} — `, freeTextSpan(effect.label));
-      effectItem.append(element('code', { text: JSON.stringify(effect) }));
-      effects.append(effectItem);
+      effects.append(renderPublishPreviewEffect(effect));
     }
     item.append(heading, description, effects);
     traits.append(item);
@@ -258,10 +265,10 @@ function previewList(preview: PublishPreview): HTMLElement {
   root.append(traits);
   const grants = element('ul', { attributes: { 'aria-label': 'Grant preview' } });
   for (const grant of aggregate.grants) {
-    const item = element('li');
-    item.append(`${titleCase(grant.kind)} — `, freeTextSpan(grant.rule_key));
-    item.append(element('code', { text: JSON.stringify(grant) }));
-    grants.append(item);
+    grants.append(renderPublishPreviewGrant(grant, {
+      catalogNameForGrant: (candidate) =>
+        spellCatalogNameForGrant(candidate, draft.grants, spellGrantReferences),
+    }));
   }
   if (aggregate.grants.length === 0) {
     grants.append(element('li', { text: 'No structured grants.' }));
@@ -338,7 +345,10 @@ export function renderSpeciesForm(options: SpeciesFormOptions): Cleanup {
     });
     edition.append(element('option', { text: 'Choose…', attributes: { value: '' } }));
     for (const value of rulesEditions) {
-      edition.append(element('option', { text: value, attributes: { value } }));
+      edition.append(element('option', {
+        text: rulesEditionLabel(value),
+        attributes: { value },
+      }));
     }
     edition.value = document.rules_edition ?? '';
     edition.addEventListener('change', () => {
@@ -969,7 +979,11 @@ export function renderSpeciesForm(options: SpeciesFormOptions): Cleanup {
         if (disposed) return;
         clear(validationMount);
         options.mount.querySelector('.species-publish-preview')?.remove();
-        const previewElement = previewList(publishPreview);
+        const previewElement = previewList(
+          publishPreview,
+          document,
+          options.spellGrantReferences,
+        );
         const publish = element('button', {
           className: 'button-primary', text: 'Publish species', attributes: {
             type: 'button',
