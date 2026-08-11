@@ -698,7 +698,12 @@ test('whole-library download restores authored and imported content into a fresh
     { kind: 'subclass', name: 'Spell Student' },
     { kind: 'subclass', name: 'Spell Student (Bundled revision 2)' },
     { kind: 'subclass', name: 'Veteran' },
+    { kind: 'subclass', name: 'Veteran (Bundled revision 2)' },
     { kind: 'subclass', name: 'Warrior of the Barbed Court' },
+    {
+      kind: 'subclass',
+      name: 'Warrior of the Barbed Court (Bundled revision 2)',
+    },
   ];
   const sourceCatalog = await page.evaluate(async () => {
     const [identityRows, speciesRows, subclassRows, supersessionRows] =
@@ -734,19 +739,40 @@ test('whole-library download restores authored and imported content into a fresh
         superseded_content_key: String(row.superseded_content_key),
         successor_content_key: String(row.successor_content_key),
         recorded_at: String(row.recorded_at),
-      })),
+      })).sort((left, right) =>
+        left.content_kind.localeCompare(right.content_kind) ||
+        left.superseded_content_key.localeCompare(right.superseded_content_key) ||
+        left.successor_content_key.localeCompare(right.successor_content_key)
+      ),
     };
   });
   expect(sourceCatalog.identities.map(({ content_key: _contentKey, ...facts }) =>
     facts
   )).toEqual(expectedManifest.map((entry) => ({ ...entry, layer: 'external' })));
-  expect(sourceCatalog.supersessions).toEqual([{
-    content_kind: 'subclass',
-    superseded_content_key: '2024:content.subclass:spell-student',
-    successor_content_key:
-      '2024:content.subclass:spell-student-bundled-revision-2',
-    recorded_at: expect.any(String),
-  }]);
+  expect(sourceCatalog.supersessions).toEqual([
+    {
+      content_kind: 'subclass',
+      superseded_content_key: '2024:content.subclass:spell-student',
+      successor_content_key:
+        '2024:content.subclass:spell-student-bundled-revision-2',
+      recorded_at: expect.any(String),
+    },
+    {
+      content_kind: 'subclass',
+      superseded_content_key: '2024:content.subclass:veteran',
+      successor_content_key:
+        '2024:content.subclass:veteran-bundled-revision-2',
+      recorded_at: expect.any(String),
+    },
+    {
+      content_kind: 'subclass',
+      superseded_content_key:
+        '2024:content.subclass:warrior-of-the-barbed-court',
+      successor_content_key:
+        '2024:content.subclass:warrior-of-the-barbed-court-bundled-revision-2',
+      recorded_at: expect.any(String),
+    },
+  ]);
 
   const [libraryDownload] = await Promise.all([
     page.waitForEvent('download'),
@@ -791,7 +817,7 @@ test('whole-library download restores authored and imported content into a fresh
   });
   await page.getByRole('button', { name: 'Import library' }).click();
   await expect(page.locator('.transfer-status')).toHaveText(
-    'Library imported: 5 published, 0 matched existing.',
+    'Library imported: 7 published, 0 matched existing.',
   );
 
   const restored = await page.evaluate((speciesName) => {
@@ -853,14 +879,20 @@ test('whole-library download restores authored and imported content into a fresh
         'Spell Student',
         'Spell Student (Bundled revision 2)',
         'Veteran',
+        'Veteran (Bundled revision 2)',
         'Warrior of the Barbed Court',
+        'Warrior of the Barbed Court (Bundled revision 2)',
       ].includes(String(row.name))).map((row) => String(row.name)).sort(),
       supersessions: supersessionRows.map((row) => ({
         content_kind: String(row.content_kind),
         superseded_content_key: String(row.superseded_content_key),
         successor_content_key: String(row.successor_content_key),
         recorded_at: String(row.recorded_at),
-      })),
+      })).sort((left, right) =>
+        left.content_kind.localeCompare(right.content_kind) ||
+        left.superseded_content_key.localeCompare(right.superseded_content_key) ||
+        left.successor_content_key.localeCompare(right.successor_content_key)
+      ),
       };
     });
   }, HOSTILE_LIBRARY_SPECIES_NAME);
@@ -877,7 +909,9 @@ test('whole-library download restores authored and imported content into a fresh
     'Spell Student',
     'Spell Student (Bundled revision 2)',
     'Veteran',
+    'Veteran (Bundled revision 2)',
     'Warrior of the Barbed Court',
+    'Warrior of the Barbed Court (Bundled revision 2)',
   ]);
 
   await page.goto('/homebrew');
