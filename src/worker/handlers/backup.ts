@@ -10,6 +10,7 @@ import {
 } from '../../backup/database-backup';
 import {
   commitLibraryImport,
+  exportWholeLibrary,
   importLibraryDocument,
   planLibraryImport,
 } from '../../backup/library-export';
@@ -110,6 +111,11 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
       await importDatabaseBackup(context.lifecycle, params.backup);
       return { imported: true as const };
     },
+  ),
+  defineRpcHandler(
+    'backup.exportLibrary',
+    isEmptyParams,
+    (context) => exportWholeLibrary(context.db),
   ),
   // Transport-only adapters: validation, planning, and installation remain in
   // the library import service shared by backups and portability tests.

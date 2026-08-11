@@ -1,409 +1,355 @@
-# Warrior of the Barbed Court
+# Monastic Tradition: Warrior of the Barbed Court
 
-Status: **provisional, ready for design review only**. This is a MINT-FREE,
-docs-only full subclass draft. The frozen bake-off inputs are reproduced
-without mechanical change; authored text remains subject to owner approval and
-playtest.
+Target rules: SRD 5.2.1 (D&D 2024). Licence: CC-BY-4.0; attribution notice
+in §8. First publication draft (2026-08-10), incorporating every owner
+ruling through 2026-08-10 and two independent publication reviews.
+
+Terminology: your **Focus save DC** = 8 + your Proficiency Bonus + your
+Wisdom modifier. Your Focus Point pool is your Monk level (base class rule,
+restated here because this subclass spends it constantly). *Barbed Court
+spells* means the spells and cantrips you know or have prepared through
+this subclass's Spellcasting feature.
 
 ## 1. Identity
 
-OWNER-APPROVAL: Identity paragraph and ancestry disclosure.
+**Warrior of the Barbed Court** — Somewhere between a duelist's salon and a
+haunted etiquette lesson lies the Barbed Court, a monastic tradition that
+treats the insult as a martial form. Its monks fight surrounded by an
+invisible retinue — spectral hands that slap, beckon, and humiliate — and
+every technique is a provocation: the goad that makes ignoring you
+unbearable, the duel that binds an enemy's pride to your fists, the barbed
+word that lands harder than the blow. A Barbed Court monk wins by being
+*impossible to disregard* — enemies who attack you meet mirror-images,
+warded air, and a wall of unseen palms; enemies who dare attack anyone else
+are slapped back into line. Wisdom drives everything: the eye that reads an
+opponent's vanity is the same eye that guides the striking hand.
 
-A Warrior of the Barbed Court turns an insult into supernatural pressure in
-order to make a foe choose between facing the monk and striking an ally through
-a cutting doubt. Its repeated visible verb is **goad**: in combat the monk
-names the weakness exposed by a failed spell, in exploration a needling whisper
-draws a watcher into revealing itself, and in social scenes a perfectly timed
-word punctures a bully's performance without drawing a weapon.
+## Features by level (index)
 
-The 3.5 SRD Psionic Fist is used only as open-content, concept-level precedent
-for the frame of a monk who develops supernatural casting; no wording or
-mechanical form is taken from it.
+| Monk level | Features |
+|---|---|
+| 3 | Barbed Court Spellcasting · Court Cantrips · Barbed Goad · Faces of the Court · Wisdom-Guided Strikes · Courtier's Slap · The Standing Hand · Innate Sorcery of the Court |
+| 6 | Court Spells row · Focus Refresh · Warding Image · Unshaken Aim · Barbed Fists +1 |
+| 11 | Court Spells row · Hands of the Barbed Court · Barbed Fists +2 |
+| 17 | Court Spells row · Focus-Casting · The Rebuking Shield (initiative manifest + 3-point upgrade) · Hands ×2 + Advantage · Barbed Fists +3 |
 
-## 2. Level 3: Barbed Court Spellcasting
+## 2. Barbed Court Spellcasting (Monk 3)
 
-The curated grants below are binding bake-off inputs approved to proceed by
-D191. They are part of the subclass's power budget, not flavor beside it.
+You have learned to cast spells through the discipline of the Court.
+**Wisdom is your spellcasting ability** for Barbed Court spells. Your spell
+save DC is your Focus save DC; your **spell attack modifier** is your
+Wisdom modifier + your Proficiency Bonus.
 
-| Monk level | Spell level | Always-prepared additions |
-|---:|---:|---|
-| 3 | 1 | *Bane*, *Command*, *Dissonant Whispers*, *Hideous Laughter* |
-| 7 | 2 | *Enthrall*, *Suggestion* |
-| 13 | 3 | *Hypnotic Pattern*, *Tongues* |
-| 19 | 4 | *Compulsion*, *Confusion* |
+**Spell list.** Your spells come from the **Bard spell list**, plus the
+grafted spells named below. (Standing rule, owner-set: spells from outside
+the Bard list enter this subclass only as granted always-prepared spells or
+granted cantrips — the Paladin-oath pattern — and only when named by the
+owner; they are never silently chooseable.)
 
-**Cantrips known.** At Monk level 3, you know *Vicious Mockery* and
-*Prestidigitation*. At Monk level 10, you also know *Message*.
+**Preparation.** The Chosen Spells column below shows how many spells you
+can have prepared; you can prepare any Bard-list spell **of a level for
+which you have spell slots**.
+Whenever you finish a **Long Rest**, you can change your list of prepared
+spells. Whenever you finish a **Short Rest**, you can replace one prepared
+spell.
 
-All thirteen named spells are present in SRD 5.2.1: [*Bane*](../srd/full/srd-5.2.1.txt#L6848),
-[*Command*](../srd/full/srd-5.2.1.txt#L7162),
-[*Dissonant Whispers*](../srd/full/srd-5.2.1.txt#L7703),
-[*Hideous Laughter*](../srd/full/srd-5.2.1.txt#L8824),
-[*Enthrall*](../srd/full/srd-5.2.1.txt#L7950),
-[*Suggestion*](../srd/full/srd-5.2.1.txt#L10595),
-[*Hypnotic Pattern*](../srd/full/srd-5.2.1.txt#L8867),
-[*Tongues*](../srd/full/srd-5.2.1.txt#L10831),
-[*Compulsion*](../srd/full/srd-5.2.1.txt#L7210),
-[*Confusion*](../srd/full/srd-5.2.1.txt#L7181),
-[*Vicious Mockery*](../srd/full/srd-5.2.1.txt#L10963),
-[*Prestidigitation*](../srd/full/srd-5.2.1.txt#L9770), and
-[*Message*](../srd/full/srd-5.2.1.txt#L9417).
+**Ritual casting.** You can cast a prepared spell as a Ritual if it has the
+Ritual tag.
 
-### Monk third-caster spell slots
+**Cantrips.** You know **Shocking Grasp, Chill Touch, Ray of Frost, Vicious
+Mockery, Mage Hand,** and **Guidance**, plus **two** Bard cantrips of your
+choice. Chosen cantrip picks are permanent. Of the granted six, *Mage Hand*
+and *Vicious Mockery* are Bard-native; **Guidance, Shocking Grasp, Chill
+Touch and Ray of Frost are deliberate grafts** from outside the Bard list,
+as are *Shield* and *Blur* below.
 
-| Monk level | 1st | 2nd | 3rd | 4th |
-|---:|---:|---:|---:|---:|
-| 3 | 2 | — | — | — |
-| 4 | 3 | — | — | — |
-| 5 | 3 | — | — | — |
-| 6 | 3 | — | — | — |
-| 7 | 4 | 2 | — | — |
-| 8 | 4 | 2 | — | — |
-| 9 | 4 | 2 | — | — |
-| 10 | 4 | 3 | — | — |
-| 11 | 4 | 3 | — | — |
-| 12 | 4 | 3 | — | — |
-| 13 | 4 | 3 | 2 | — |
-| 14 | 4 | 3 | 2 | — |
-| 15 | 4 | 3 | 2 | — |
-| 16 | 4 | 3 | 3 | — |
-| 17 | 4 | 3 | 3 | — |
-| 18 | 4 | 3 | 3 | — |
-| 19 | 4 | 3 | 3 | 1 |
-| 20 | 4 | 3 | 3 | 1 |
+**Court Spells (always prepared, not counted against Chosen Spells):**
 
-**Cantrips.** You know the cantrips shown on the Barbed Court curated
-list.
+| Monk level | Court Spells |
+|---:|---|
+| 3 | *Shield*, *Dissonant Whispers* |
+| 6 | *Mirror Image*, *Blur*, *Hold Person* |
+| 11 | *Slow*, *Fear* |
+| 17 | *Compulsion* |
 
-**Prepared Spells.** You always have the spells in the Barbed Court curated
-list prepared when you reach the Monk levels shown there. These spells count as
-Monk spells for you.
+### Spellcasting table, Monk 3–20
 
-**Spell Slots.** The Monk Third-Caster Spell Slots table shows how many spell
-slots you have to cast your level 1+ Monk spells. To cast one of those spells,
-you must expend a slot of the spell's level or higher. You regain all expended
-spell slots when you finish a Long Rest.
+| Monk level | Chosen Spells | 1st | 2nd | 3rd | 4th |
+|---:|---:|---:|---:|---:|---:|
+| 3 | 4 | 2 | — | — | — |
+| 4 | 5 | 3 | — | — | — |
+| 5 | 6 | 3 | — | — | — |
+| 6 | 6 | 3 | — | — | — |
+| 7 | 7 | 4 | 2 | — | — |
+| 8 | 7 | 4 | 2 | — | — |
+| 9 | 9 | 4 | 2 | — | — |
+| 10 | 9 | 4 | 3 | — | — |
+| 11 | 10 | 4 | 3 | — | — |
+| 12 | 10 | 4 | 3 | — | — |
+| 13 | 11 | 4 | 3 | 2 | — |
+| 14 | 11 | 4 | 3 | 2 | — |
+| 15 | 12 | 4 | 3 | 2 | — |
+| 16 | 12 | 4 | 3 | 3 | — |
+| 17 | 14 | 4 | 3 | 3 | — |
+| 18 | 14 | 4 | 3 | 3 | — |
+| 19 | 15 | 4 | 3 | 3 | 1 |
+| 20 | 15 | 4 | 3 | 3 | 1 |
 
-**Spellcasting Ability.** Wisdom is your spellcasting ability for your Monk
-spells. Your spell save DC equals 8 plus your Wisdom modifier and Proficiency
-Bonus, and your spell attack modifier equals your Wisdom modifier plus your
-Proficiency Bonus.
+> **Design note — where this table comes from.** Both columns are one-line
+> reads of SRD 5.2.1 tables. **Slots:** caster level = one-third your Monk
+> level, rounded up; read that row of the *Multiclass Spellcaster* table,
+> columns 1–4. ("Rounded up" is this document's choice — it is what makes
+> slots exist at Monk 3.) **Chosen Spells:** the *Paladin Features* table's
+> Prepared Spells column, read at your Monk level. No non-SRD table was
+> consulted; both recipes reproduce every cell from licensed text alone.
+
+### The Focus-magic clauses
+
+- **Court Cantrips (Monk 3).** When you spend one or more Focus Points —
+  for any feature, this subclass's or the Monk's — you can cast one cantrip
+  you know that has a casting time of an Action as part of that expenditure
+  (no action required). Once per turn.
+- **Focus Refresh (Monk 6).** You can spend Focus Points to regain one of
+  your expended spell slots (no action required). The cost is 2 Focus
+  Points per level of the slot regained. *(Deliberately uncapped: the
+  design accepts a rich short-rest slot economy as this subclass's engine;
+  see §5.)*
+- **Focus-Casting (Monk 17).** You can cast any spell you have prepared
+  that has a casting time of an Action by spending Focus Points equal to
+  the spell's level instead of a spell slot.
+- **No Focus-cast spell is ever upcast.** A spell cast by spending Focus
+  Points is cast at its base level; excess points buy nothing. Slots
+  regained by Focus Refresh are ordinary slots and upcast normally. *Focus
+  buys volume at base level; slots buy height.* (The SRD's
+  one-spell-slot-per-turn rule constrains only slots; Focus-cast spells and
+  the free Court Cantrip don't expend slots — deliberate.)
 
 ## 3. Subclass Features
 
-The substantive feature schedule is 3, 6, 11, and 17, matching the SRD Monk
-and Warrior of the Open Hand schedule ([SRD Monk table](../srd/full/srd-5.2.1.txt#L3022)
-and [Open Hand](../srd/full/srd-5.2.1.txt#L3130)). Spellcasting is compact
-support beside the level-3 engine.
-
 ### Level 3: Barbed Goad
 
-FROZEN BAKE-OFF ENGINE: reproduced without mechanical change.
+When you hit a creature with a melee attack, you can spend 1 Focus Point to
+goad it into a duel — an insult spoken aloud, or delivered as a slap,
+sneer, or gesture. For 1 minute, the goaded creature has Disadvantage on
+attack rolls against creatures other than you. When it tries to move more
+than 30 feet away from you, it must first succeed on a Wisdom saving throw
+against your Focus save DC; **on a failed save, it can't willingly move
+more than 30 feet away from you until the start of its next turn.**
 
-Once on each of your turns when one or more creatures fail a saving throw
-against a spell you cast that has a Verbal component, you can choose one of
-those creatures that can hear you. Until the start of your next turn, that
-creature is goaded by you. The first time before then that it makes an attack
-roll against a target other than you, it must subtract one roll of your Martial
-Arts die from the attack roll.
+The effect ends early on the goaded creature if you attack a creature you
+have not goaded, if one of your allies damages it or targets it with a
+harmful spell, or when it succeeds on the withdrawal save above. You can
+goad more than one creature; goading a second creature does not end an
+existing goad. There is no save to resist the goad itself — the bind lands
+on the hit (a deliberate design choice; the escape hatches above are the
+counterplay).
 
-When you goad a creature in this way, you can expend 1 Focus Point to sharpen
-the taunt. If you do, the creature must subtract one roll of your Martial Arts
-die from every attack roll it makes against a target other than you for the
-duration, rather than only the first such attack roll.
+### Level 3: Faces of the Court
 
-### Level 6: Spellwoven Flurry
+You can cast *Mirror Image* without expending a spell slot, using Wisdom as
+the spellcasting ability, a number of times equal to your Proficiency
+Bonus. You regain all uses when you finish a Long Rest.
 
-OWNER-APPROVAL: Full rules text and Barbed Court cantrip interaction note.
+### Level 3: Wisdom-Guided Strikes
 
-While you aren't holding a weapon, whenever you use Flurry of Blows, you can
-replace one of the Unarmed Strikes it grants with casting a cantrip you know
-that has a casting time of an action. The cantrip is cast as part of the Bonus
-Action you take to use Flurry of Blows, and you can't replace more than one
-Unarmed Strike in this way each time you use that Bonus Action.
+You can use your Wisdom modifier in place of Strength or Dexterity for the
+attack and damage rolls of your Unarmed Strikes.
 
-For this subclass, *Vicious Mockery* is the signature interaction. On a failed
-save, it can trigger Barbed Goad. It replaces one strike of the Focus-funded
-Flurry; it never adds a strike or a second cantrip.
+### Level 3: Courtier's Slap
 
-### Level 11: Scandalous Echo
+Once on each of your turns when you take the Attack action and make an
+Unarmed Strike, you can also have a spectral hand appear and slap one
+creature within 10 feet of you as part of that action, then vanish. **The
+slap is an Unarmed Strike if the target is within 5 feet of you** (so
+Wisdom-Guided Strikes, Barbed Fists, Stunning Strike, and the goad's melee
+trigger all apply); **against a farther target it is a ranged weapon
+attack** that uses your Wisdom modifier for the attack and damage rolls (a
+deliberate deviation — declared, not implied) and gains none of those
+riders. In either mode, on a hit the target takes Psychic damage equal to
+one roll of your Martial Arts die + your Wisdom modifier, **and its Speed
+is reduced by 10 feet until the start of your next turn** — a slap that
+stops you mid-stride. The slap works whether or not your Mage Hand is
+present and doesn't consume your Bonus Action. (Design ancestry, pinned by
+owner ruling: the slap IS this kit's version of the two-weapon
+fighting-style-plus-Nick extra attack, delivered as a spectral hand.)
 
-OWNER-APPROVAL: Entire feature, including the second listener, 30-foot range,
-Focus costs, and shared sharpening.
+### Level 3: The Standing Hand
 
-When you goad a creature with Barbed Goad, you can expend 1 Focus Point to
-carry the taunt to a second creature of your choice within 30 feet of the
-goaded creature that can hear you. Until the start of your next turn, the
-second creature is also goaded by you. The first time before then that it makes
-an attack roll against a target other than you, it must subtract one roll of
-your Martial Arts die from the attack roll.
+When you cast *Mage Hand*, its duration is 8 hours, and the hand can carry
+your goad's insult — the slap, sneer, or gesture can visibly come from the
+hand anywhere it reaches (fiction only; the goad's trigger and range are
+unchanged). While your Mage Hand is present, **the Unarmed Strikes you make
+as part of the Attack action have a reach of 10 feet**, delivered by the
+hand. (Bonus Action strikes and Flurry of Blows keep their normal reach.)
 
-If you also expend the Focus Point that sharpens Barbed Goad, the sharpened
-taunt applies to both goaded creatures. Thus carrying and sharpening the taunt
-costs a total of 2 Focus Points.
+### Level 3: Innate Sorcery of the Court
 
-### Level 17: Unanswerable Challenge
+You can spend 2 Focus Points (no action required) to unleash the Court's
+simmering magic for 1 minute: the spell save DC of your Barbed Court spells
+increases by 1, and you have Advantage on the attack rolls of Barbed Court
+spells you cast. The effect doesn't stack with itself; activating it again
+restarts the duration. It does not apply to the Courtier's Slap, which is
+not a spell.
 
-OWNER-APPROVAL: Entire feature, including the 3-Focus cost, one-minute
-duration, repeated save, hearing boundary, and one-target limit.
+### Level 6: Warding Image
 
-When you goad a creature with Barbed Goad, you can expend 3 Focus Points to
-issue an unanswerable challenge instead of using Barbed Goad's normal duration
-and Focus option. The creature is goaded by you for 1 minute. While goaded in
-this way, it must subtract one roll of your Martial Arts die from every attack
-roll it makes against a target other than you.
+An illusory after-image attends you: you gain a +2 bonus to Armor Class.
+(It stacks with Unarmored Defense and with the *Shield* spell; it is an
+illusion in fiction but its bonus is not suppressed by *see invisibility*
+or similar — it works until the doc says otherwise.)
 
-At the end of each of its turns, the creature can make a Wisdom saving throw
-against your Focus Point save DC, ending the effect on itself on a success. The
-effect also ends early if you have the Incapacitated condition or the creature
-can no longer hear you. You can have only one creature goaded by this feature
-at a time; issuing another unanswerable challenge ends the first.
+### Level 6: Unshaken Aim
 
-## 4. Power-Budget Worksheet
+Being within 5 feet of an enemy doesn't impose Disadvantage on your ranged
+attack rolls.
 
-### Host posture and protected dial
+### Level 6: Barbed Fists (+1)
 
-Monk subclass dependence is **Medium**. The base class already has damage,
-defense, mobility, and a Short-Rest Focus engine, so this subclass spends its
-budget on a fixed spell list and ally-protective control. It adds no damage
-die, attack, action, armor, accuracy bonus, save-DC bonus, or new currency. The
-protected dial is the target-choice pressure created by Barbed Goad; frequency,
-target count, duration, hearing, saves, and Focus are its balancing dials.
+You gain a +1 bonus to attack and damage rolls with your Unarmed Strikes.
+The bonus becomes +2 at level 11 and +3 at level 17. If a magic item gives
+your Unarmed Strike a bonus to the same roll, use the higher bonus.
 
-The list itself is a major entry grant: ten always-prepared level 1–4 spells
-plus three fixed cantrips, compared with no spell grant on Warrior of the Open
-Hand. The engine and later features are consequently narrower and deal no
-damage.
+### Level 11: Hands of the Barbed Court
 
-### Feature-by-feature record
+As a Bonus Action, you can spend 4 Focus Points to manifest the full court
+— a 15-foot Emanation of invisible slapping hands — for up to 10 minutes.
+The effect requires Concentration. While the court is manifested, when you
+hit a creature in the Emanation with an attack, the hands add **Psychic
+damage equal to your Wisdom modifier** to the hit.
 
-| Feature | Tier; weight | At-will / nova | Actions, concentration, and uses | Relevance, scaling, pillars, export | Open Hand comparison and verdict |
-|---|---|---|---|---|---|
-| Barbed Court Spellcasting | Entry support; rock | Cantrips at will; slots are the nova | Normal spell action/components/concentration; 2 level-1 slots at 3, eventually 4/3/3/1 | Ten prepared spells + three cantrips; Wisdom and Monk slots; C/E/S; a 3-level dip gets four spells, two cantrips, and two slots | Open Hand gets no spells. This consumes most of the entry breadth budget; **high-value but progression-gated, playtest amber** |
-| Barbed Goad | Entry engine; rock | Baseline first-attack penalty; 1 Focus makes it all attacks for one round | Free rider after a failed Verbal-spell save; no added concentration | Expected 1–3 offers/fight when casting; Martial Arts die and Focus scale; C; dip die remains d6 | Open Hand Technique can affect each Flurry hit immediately. Goad needs a spell failure and protects only other targets; **within budget on paper** |
-| Spellwoven Flurry | Tier 2 bridge; rock | Exchanges one strike for one cantrip; no extra cast | Part of the existing 1-Focus Bonus Action Flurry; weapon-free | Offered when a cantrip is worth a strike; cantrip and Flurry scale; C/E/S; six Monk levels | Wholeness of Body averages 8.5 healing/use at Wisdom +4 and d8, about 34 over four uses. This grants flexibility rather than extra economy; **within budget, synergy amber** |
-| Scandalous Echo | Tier 3 scope; rock | One second baseline goad for 1 Focus; 2 total Focus sharpens both | Same trigger; no action or concentration; one-round duration | Expected 0–2 spends/fight; d10 then d12; C; eleven Monk levels | Fleet Step adds Step of the Wind after almost any Bonus Action. Echo instead prices a second one-round listener from the native pool; **within budget on paper** |
-| Unanswerable Challenge | Tier 4 culmination; rock | No at-will change; 3 Focus extends one goad | Same trigger; one minute; end-turn Wisdom saves; one target | Expected once in a decisive fight; d12 penalty; C/S fiction; seventeen Monk levels | Quivering Palm costs 4 Focus and a later action/attack trade for 10d12 Force damage, half on save. Challenge deals 0 and permits repeated saves; **provisional, control-duration amber** |
+At level 17 the court matures: the hands' extra damage increases to **twice
+your Wisdom modifier**, and the court guides your aim — you have
+**Advantage on your attack rolls** against creatures in the Emanation.
 
-### Explicit numerical checks
+### Level 17: The Rebuking Shield
 
-- At level 3, subtracting a d6 changes a typical d20 success chance by about
-  `(6 + 1) / 40 = 17.5` percentage points. At levels 11 and 17 the d10 and d12
-  estimates are 27.5 and 32.5 points. Boundary Armor Classes reduce those
-  approximations.
-- At level 6 with a 65% hit or failed-save chance, Dexterity +4, and a d8
-  Martial Arts die, one strike contributes about `0.65 × 8.5 = 5.53` expected
-  damage. *Vicious Mockery* contributes about `0.65 × 7 = 4.55`, roughly 0.98
-  less, in exchange for its printed rider and a possible goad. No damage is
-  added to Flurry.
-- At level 11, Scandalous Echo can place at most two d10 penalties. The
-  all-attacks expression costs 2 Focus after the carrier spell; neither target
-  is forced to attack, and attacks against the monk are unaffected.
-- At level 17, a Flurry-delivered *Vicious Mockery* plus Unanswerable Challenge
-  costs 4 Focus total: 1 for Flurry and 3 for the challenge. That equals
-  Quivering Palm's setup cost before Palm's later activation cost, while the
-  challenge deals no damage and offers a save after every affected turn.
+When you roll Initiative, you can manifest the **Hands of the Barbed
+Court** as a Reaction (spending its normal 4 Focus Points; the
+Bonus-Action manifestation remains available as before).
 
-### Whole-kit snapshots
+Whenever you manifest the Hands — at Initiative or as a Bonus Action — you
+can spend **3 additional Focus Points** to raise the Rebuking Shield: for
+as long as the court remains manifested, a creature that hits you with a
+melee attack takes **2d8 Psychic damage**, and you are **immune to the
+Charmed and Frightened conditions and to Psychic damage**. The shield is
+visible only as a shimmer of affronted dignity. This is a subclass
+feature, not spellcasting — no spell slot, no components, and it can't be
+counterspelled. The shield ends when the manifestation ends (including if
+your Concentration on it is broken).
 
-| Snapshot | Barbed Court | Open Hand comparator | Budget verdict |
-|---|---|---|---|
-| Entry (3) | Broad fixed magic plus conditional, ally-facing d20 control | Immediate Push, Topple, or Addle on each Flurry hit | More breadth, less directness; **amber because the list counts heavily** |
-| Tier 2 (6) | Cantrip replaces one weapon-free Flurry strike | Repeatable self-healing with a separate Long-Rest count | Similar slot weight; **Vicious Mockery stack needs live testing** |
-| Tier 3 (11) | Focus can carry one-round pressure to a second listener | Step of the Wind is folded into other Bonus Actions | Narrower and resource-priced; **within budget on paper** |
-| Tier 4 (17) | One foe can face a repeat-save, damage-free challenge | 4-Focus delayed 10d12 damage, half on save | Lower damage, potentially higher defense; **duration and harmed-party amber** |
+*(The rest of level 17 lives in §2 and §3: Focus-Casting, the *Compulsion*
+row, and the Hands' maturation.)*
 
-### Action economy and resource stress
+## 4. Resource and Tracking Summary
 
-- **Ordinary martial turn:** Attack action; Bonus Action Martial Arts or a
-  Focus option; Reaction available; no subclass rider unless a spell failed.
-- **Casting turn:** Action casts a spell; Bonus Action remains crowded; a failed
-  Verbal-spell save can open the goad and its optional Focus spend.
-- **Flurry casting turn:** Attack action; weapon-free 1-Focus Flurry Bonus
-  Action replaces one strike with a cantrip; *Vicious Mockery* can open Goad.
-- **One-fight day:** slots and Focus can be concentrated, but the kit creates no
-  extra attack or damage carrier. A level-17 signature Flurry consumes 4 Focus.
-- **No-Short-Rest day:** cantrips and baseline goads remain; slots and Focus
-  deplete normally, and nothing restores them.
-- **Rest-rich day:** native Focus returns on a Short Rest. No subclass output
-  restores its input or increases a spell's slot level.
-
-## 5. Failure-Taxonomy Pass
-
-All sixteen traps in guideline 04 were checked against the assembled subclass.
-
-| Trap | Check performed | Verdict |
+| Per turn (the only two counters) | Per Short Rest | Per Long Rest |
 |---|---|---|
-| F1 Compounding Punishment | A successful save only prevents that spell/goad trigger; no backlash or repair cost follows. | Clear |
-| F2 Imported Chassis Mismatch | Rules use spell saves, Martial Arts dice, Focus, Flurry, and SRD timing. | Clear |
-| F3 Dip Bait | Three levels grant four prepared spells, two cantrips, two slots, and a d6 goad; stronger delivery, dice, targets, and duration require Monk 6/11/17 and Focus. | Amber; outsider tests required |
-| F4 Farmable or Famine Triggers | Allies and harmless targets consume slots/actions and restore nothing. Failed saves are ordinary but not guaranteed; the spell list supplies deterministic attempts. | Clear on paper |
-| F5 Advantage Faucet | No Advantage is granted. The d20 subtraction is conditional, short, target-limited, and often Focus-priced. | Clear |
-| F6 Action Congestion / Economy Multiplication | Casting contests the Action; Flurry owns the Bonus Action and replaces rather than adds a strike. No extra action or attack exists. | Clear; choice quality amber |
-| F7 Runaway Interaction Math | Once-per-turn trigger, two-target maximum at 11, one prolonged target at 17, and explicit durations cap multiplication. | Clear |
-| F8 Stacking Blindness | *Vicious Mockery* Disadvantage can stack with the Martial Arts-die subtraction. | Amber; primary stack test |
-| F9 Golden-Cage Benchmark | Every slot and whole-kit snapshot uses Warrior of the Open Hand only. | Clear |
-| F10 White-Room Day | Best legal resources, no-rest, and rest-rich days are recorded; maximum damage added is 0. | Amber; control swing needs play |
-| F11 Campaign-Contingent Payload | No creature family, terrain, or ally condition gates a core feature; hearing is player-addressable but not universal. | Clear |
-| F12 Niche Trespass | Defender/controller and social-specialist seats are most exposed; the monk lacks forced targeting, broad skills, or reciprocal communication. | Amber; harmed-seat review |
-| F13 Bookkeeping Tax | Normal goads share one expiry; Echo caps at two; Challenge permits only one prolonged target. | Clear on paper; timed test amber |
-| F14 Bounced Flavor Cheque | Every slot casts, goads, carries, or culminates the same supernatural insult. | Amber pending owner approval |
-| F15 Dead-Air Progression | Level 6 joins magic to Flurry, 11 broadens audience, and 17 extends one challenge to a scene. | Clear |
-| F16 Untested Altitude | No acquisition, tier-2, level-11, or level-17 table play has occurred. | Amber; all mechanics provisional |
+| Courtier's Slap (once/turn) | Focus pool (= Monk level) — funds the goad, Flurry, Court Cantrips trigger, Refresh, Innate Sorcery, the Hands, Focus-Casting | Faces of the Court (PB uses) |
+| Court Cantrips (one free cantrip/turn) | One prepared-spell swap | Full spell re-preparation · spell slots |
 
-## 6. Filled Design Checklist
+Everything else is passive or a lingering condition that expires on its
+own. Design rule, owner-set: the subclass never exceeds two per-turn
+counters.
 
-Legend: **Green** is supported by a rule, calculation, or SRD comparison;
-**Amber** requires owner, cold-reader, harmed-seat, or table evidence. There are
-no Red items.
+## 5. Power-Budget Worksheet
 
-### 6.1 Identity and host declaration
+All figures from the corrected Monte Carlo of 2026-08-10 (post-audit:
+thousands of 4-round combats per point; two enemies — one goad-bound to the
+monk, one defecting to the party's fighter half the time; party present;
+monk base AC 18 with Warding Image; Concentration checked on every hit
+taken; *Shield* slot-cast as a Reaction; enemy AC 14/16/18/18 at levels
+3/6/11/17). The run includes the Monk base class's three-strike Flurry from
+level 10 (Heightened Focus), which an earlier draft of this worksheet
+missed.
 
-| Item | Status | Evidence |
-|---|---|---|
-| Fantasy sentence | Green | A monk repeatedly goads to redirect hostile attention; three scene moments are stated. |
-| Unserved loop | Green | Base Monk and Open Hand move or disable foes but do not cast or protect allies through failed verbal magic. |
-| Fiction-to-rule map | Amber | Spell → barb; failed save → exposed weakness; Goad/Echo/Challenge → mounting public pressure. Owner approval remains. |
-| Flavor cheque by level | Green | 3 goads; 6 weaves mockery into Flurry; 11 carries it; 17 sustains one challenge. |
+All martial comparators carry **+1/+2/+3 magic weapons at levels 6/11/17**
+(owner ruling 2026-08-10); the Barbed Court's Barbed Fists ladder is its
+item-equivalent and doesn't stack, so its own numbers are unchanged.
 
-### 6.2 Schedule and slot budget
+| Build | L3 | L6 | L11 | L17 |
+|---|---:|---:|---:|---:|
+| **Barbed Court, this kit** | **13.7** | **37.9** | **68.8** | **137.7** |
+| Veteran rogue (this project) | 24.9 | 35.2 | 70.0 | 115.9 |
+| Optimized Dex Vengeance Paladin (melee ref.) | 19.5 | 34.7 | 60.5 | 72.3 |
+| Champion Fighter, greatsword | 11.8 | 32.6 | 58.4 | 74.6 |
+| SRD Thief | 18.4 | 26.4 | 43.3 | 75.6 |
+| Legal CME-nova caster (third-party-free build, dummy target) | — | — | 129 | 265 |
 
-| Item | Status | Evidence |
-|---|---|---|
-| Schedule conformance | Green | Monk 3/6/11/17; no added schedule level. |
-| Feature-count explanation | Green | Spellcasting is the compact support grant beside one level-3 engine; one feature follows at each later slot. |
-| Budget per slot | Green | Section 4 records weight, nova, actions, uses, frequency, scaling, pillars, export, and comparator. |
-| Whole-kit budget | Amber | Four snapshots use only Open Hand; spell-list breadth and control stacks still need play. |
-| Class dependence fit | Green | Medium-dependence Monk gains Focus control/utility and no damage repair engine. |
+Recorded caveats, both directions:
 
-### 6.3 Progression and scaling
+1. **The sim undercounts the tank.** The goad's redirect value, the duel's
+   damage prevention, *Fire Shield*'s enemy-turn retaliation, healing, and
+   every defensive spell score at or near zero here. The Barbed Court's
+   party value exceeds its DPR column by design.
+2. **The sim overcounts uptime.** Harder encounters break Concentration
+   faster, and the Hands (rider + Advantage together) are the largest
+   single block of the kit's damage — roughly a third at 11 and 17 by
+   marginal-removal tests on the pre-correction run (non-additive marginals;
+   re-derivation pending).
+3. **Ratios, stated plainly (equal-items basis)**: 0.70× / 1.09× / 1.14× /
+   1.90× the optimized Paladin, and 0.55× / 1.08× / 0.98× / 1.19× this
+   project's own Veteran. Growth 11→17 is +100% — the Hands' Advantage
+   clause was moved to 17 by owner ruling 2026-08-10, making 17 the kit's
+   one great spike (damage doubles and the aim-guidance arrives together).
+   The attack loop is 4/5/6/6 swings at 3/6/11/17 (Attack action + slap +
+   Flurry; three-strike Flurry from 10).
+4. **The caster race is not entered**: 68.8/129 = 0.53× at 11 and
+   137.7/265 = 0.52× at 17 against the strongest legal nova build measured.
+5. Levels 3–5 are the kit's weakest window (0.70× the paladin) — the Hands
+   don't exist yet; the front-load doctrine begins at 6.
 
-| Item | Status | Evidence |
-|---|---|---|
-| Level-3 loop present | Green | Observe a threatening foe; choose spell/Focus; cast; change its attacks against others. |
-| Later features deepen loop | Green | Delivery, target count, and duration improve without a second subsystem. |
-| Tier-appropriate scaling | Amber | Paper checks at 5/11/17 are explicit; live tier checks absent. |
-| Native-engine attachment | Green | Martial Arts die, Focus, Flurry, and Monk slots carry scaling. |
-| No new required ability | Green | Wisdom is already a Monk primary ability. |
+## 6. Failure-Taxonomy Pass
 
-### 6.4 Multiclass and interaction audit
+(The F-codes are this project's internal checklist of common homebrew
+failure modes; verdicts are design review, not playtest.)
 
-| Item | Status | Evidence |
-|---|---|---|
-| Outsider reading 3–5 | Amber | Fighter 17, Rogue 17, and Bard 17 each buy two cantrips, four spells, two/three level-1 slots, and a d6 one-round goad while delaying native tier-4 features or magic. Targeted tests remain. |
-| Dip-resistant scaling | Green | Martial Arts die, Focus supply, Spellwoven delivery, Echo, and Challenge require Monk investment. |
-| Full-stack test | Amber | Paper stack includes Disadvantage, ordinary attacks, party AC support, Flurry, and all-attacks sharpening; live results absent. |
-| Near-automatic overshoots absent | Green | No extra action/attack, unconditional accuracy, broad saves, defense formula, or recovery loop. |
+| Check | Verdict |
+|---|---|
+| F3 Dip Bait | **Amber-high, owner-accepted.** Three Monk levels buy Wisdom-based Martial Arts, the slap, six cantrips + two chosen, four prepared Bard spells with full re-preparation, rituals, the goad, and PB free *Mirror Image* casts. Every later engine (Hands, Refresh, ladder, Focus-Casting) is 6+ locked. |
+| F5 Advantage Faucet | Green: the kit's one Advantage source is the Hands' level-17 clause (Focus-priced, Concentration-fragile); levels 3–16 grant none. |
+| F6 Action Congestion | Green: two per-turn counters by rule; the Bonus Action holds exactly Flurry-vs-Hands-manifest-vs-Step-of-the-Wind. |
+| F8 Stacking Blindness | Unarmored Defense 16 + Warding Image = AC 18; + *Shield* = 23 for a round. The Hands' Advantage does not stack with anything (Advantage doesn't). |
+| F12 Niche Trespass | Two proximity notes, both mechanically unprotectable and differently-chassised: the 10-foot Wisdom-delivered strikes parallel a known non-SRD spectral-arms monk; the goad parallels a known non-SRD taunt rider. Unnamed by policy. |
+| F14 Bounced Flavor Cheque | The psychic slap and Rebuking Shield blank on mindless creatures — accepted ("you cannot humiliate a zombie"). **Dead windows, owner-accepted (ruling 2026-08-07)**: *Hold Person* is granted at 6 but 2nd-level slots arrive at 7; *Slow*/*Fear* at 11 vs 3rd-level slots at 13; *Compulsion* at 17 is covered the same level by Focus-Casting. The early grants are a promise printed with the wait visible. |
 
-### 6.5 Actions, accuracy, and triggers
+## 7. Distance Notes (non-SRD, unnamed by policy)
 
-| Item | Status | Evidence |
-|---|---|---|
-| Action-economy tally | Green | Action Attack or cast; Bonus Action Martial Arts/Flurry/Patient Defense/Step; Reaction base; optional concentration; one free goad rider. |
-| Extra-economy carrier | Green | Spellwoven replaces one strike; no action or attack is added. |
-| Advantage gate | Green | None granted. |
-| Flat-bonus gate | Green | No flat bonus; bounded rolled subtraction only. |
-| Farmability audit | Green | Allies, objects, summons, and repeated setup restore nothing and still consume real actions/resources. |
-| Famine audit | Green | Several listed save spells and *Vicious Mockery* offer player-initiated triggers. |
-| Frequency statement | Green | Goad 1–3 offers/fight; Spellwoven 0–3 uses/fight; Echo 0–2 spends/fight; Challenge about once/decisive fight. |
+The 2024 revision's monk subclasses, a recent official arcane-monk release,
+a well-known creator-published arcane-hand monk, a spectral-arms monk
+tradition, a taunt-rider barbarian, and a paladin dueling-bind spell are
+all distance markers for this design: comparisons were made by measurement,
+and no text, table, or numeric progression from any of them appears here.
+The duel effect was rebuilt from behavior as a non-spell feature; the
+spellcasting tables derive from SRD 5.2.1 alone (§2 design note).
 
-### 6.6 Resource and rest stress
 
-| Item | Status | Evidence |
-|---|---|---|
-| Uses model matches effect | Amber | Native slots/Focus fit, but all-attacks penalties need live validation. |
-| One-fight-day test | Amber | Four-Focus capstone delivery, maximum two short goads, and concurrent spells are enumerated; live control test absent. |
-| No-Short-Rest day | Green | Cantrips and baseline class remain; no special recovery assumption. |
-| Rest-rich day | Green | Only native slots/Focus recover by their printed rules; no feedback loop. |
-| Drawback integrity | Green | Weapon-free Flurry, actions, hearing, saves, and Focus cannot be erased by spare equipment. |
+## Designer's Note — why this subclass runs hot
 
-### 6.7 Pillars, party, and campaign
+The Monk class trails the strongest classes at most tables — a gap
+discussed at length by Colby of *d4: D&D Deep Dive* and Will of *DnD
+Shorts* in **"How to Fix Rogues and Monks in D&D"** (d4 episode 287, June
+2026: https://www.youtube.com/watch?v=09dqKpEk4gY — also at
+https://dndoptimized.buzzsprout.com/1193507/episodes/19420775). This
+subclass is **deliberately tuned above the power of official subclasses**
+to compensate for the class-level deficiencies that episode describes: it
+is, knowingly, a class fix wearing a subclass's clothes. If your table
+already plays with Monk class buffs, tone this subclass down accordingly.
+(In the episode Will mentions writing up his class changes; as of August
+2026 no public write-up could be located — if published, it has likely
+gone to his Patreon, https://www.patreon.com/dndshorts, behind the
+paywall. The reference here is to the episode itself:
+https://www.youtube.com/watch?v=09dqKpEk4gY.)
 
-| Feature | C | E | S | Player initiates? | Weight |
-|---|:---:|:---:|:---:|:---:|---|
-| Spellcasting | C | E | S | Yes | Rock |
-| Barbed Goad | C | — | — | Yes through spells | Rock |
-| Spellwoven Flurry | C | E | S | Yes | Rock |
-| Scandalous Echo | C | — | — | Yes | Rock |
-| Unanswerable Challenge | C | — | — | Yes | Rock |
+## 8. Sources and Licence
 
-| Item | Status | Evidence |
-|---|---|---|
-| Pillar coverage grid | Green | The grid covers every feature and all three pillars. |
-| No single-pillar silence | Green | Fixed magic supplies player-initiated exploration and social presence; every schedule slot has combat substance. |
-| Niche trespass | Amber | Defender/controller and face are bounded by saves, hearing, low skills, and resource costs; observe those seats. |
-| Campaign contingency | Green | Zero core features require a creature family, terrain, damage type, or ally condition. |
-| Social dependency | Green | Hearing is explicit; no campaign premise is required. |
-| Equipment/companion continuity | Green | Only the deliberately weapon-free D189 Flurry option is gated; ordinary treasure does not erase the rest, and there is no companion. |
+This work includes material from the System Reference Document 5.2.1
+("SRD 5.2.1") by Wizards of the Coast LLC, available at
+https://www.dndbeyond.com/srd. The SRD 5.2.1 is licensed under the Creative
+Commons Attribution 4.0 International License, available at
+https://creativecommons.org/licenses/by/4.0/legalcode.
 
-### 6.8 Complexity and table speed
+This document is likewise released under **CC-BY-4.0**. Attribute as:
+"Warrior of the Barbed Court, © 2026 Derrick Schoen, CC-BY-4.0."
 
-| Item | Status | Evidence |
-|---|---|---|
-| One tracked quantity maximum | Green | Short goad target(s) share one expiry; only one prolonged challenge can exist. |
-| One recurring decision center | Green | Spend Focus to sharpen, carry, or prolong the current goad. |
-| Trigger clarity | Green | Player watches their own failed spell save and the target's attacks. |
-| Table-speed simulation | Amber | Estimated first spell/goad turn 35 seconds; fifth use 25 seconds; not timed with a cold reader. |
-| Cold-reader test | Amber | Costs, target, hearing, saves, limits, and durations are stated; independent adjudication absent. |
-
-### 6.9 Playtest coverage and status
-
-| Item | Status | Evidence |
-|---|---|---|
-| Usage instrument | Green | Record eligible/noticed/offered/chosen/resolved, decline reason, Focus, attacks redirected, penalties stacked, forgotten state, rule reopenings, and affected-seat participation. |
-| Acquisition test | Amber | Not run at Monk 3. |
-| Middle-tier test | Amber | Not run at Monk 6–10. |
-| Untested altitude | Amber | Levels 11 and 17 unplayed; both authored features explicitly provisional. |
-| Harmed-party observation | Amber | Not run from defender, controller, or social-specialist seats. |
-| Fifth-use verdict | Amber | Not run. |
-
-### 6.10 Clean-room and release gate
-
-| Item | Status | Evidence |
-|---|---|---|
-| Permitted citations | Green | Only dispatch-authorized clean-room repository sources and anchored SRD appear. |
-| External names / Product Identity | Green | Only the required open-content ancestry precedent and mandatory SRD notice appear; no prohibited product or setting material is used. |
-| Non-SRD quotation | Green | Frozen original inputs are identified; no non-SRD source wording is reproduced. |
-| Risk disposition | Green | Every evidence gap is Amber and listed below. |
-
-| Provisional item | Risk | Required test | Owner/status |
-|---|---|---|---|
-| Identity and Spellwoven wording | Register or interaction may miss owner intent | Owner text review and cold-reader adjudication | OWNER-APPROVAL pending |
-| Barbed Goad stack | *Vicious Mockery* plus d6–d12 subtraction may suppress attacks too reliably | Acquisition and 5/11/17 stack tests across one- and multiattack foes | Frozen engine; untested |
-| Scandalous Echo | A no-save second listener or two sharpened listeners may exceed Fleet Step slot value | Level-11 repeated encounters; record attacks, misses caused, and Focus opportunity cost | OWNER-APPROVAL pending |
-| Unanswerable Challenge | One-minute defender pressure may overperform despite repeated saves | Level-17 one-shot with high-save, multiattack, ranged, and mobile foes | OWNER-APPROVAL pending |
-| Niche and speed | Defender/controller/face participation or table speed may fall | Harmed-seat observation and timed fifth use | Reviewer unassigned |
-
-**Pre-flight result:** **Ready for design review only.** Schedule, rules
-completeness, clean-room boundary, and paper budget pass. Owner approval,
-independent adjudication, and all table tests remain outstanding. Reviewer:
-initial author desk pass. Date: 2026-08-03.
-
-## 7. Distance Checklist
-
-The three pitch-catalog rules were re-run against the final mechanics.
-
-1. **List distance — Pass.** The fixed list is a bardic pressure, mockery, and
-   social-control slice rather than a general arcane list.
-2. **Delivery distance — Pass with D189's explicit exception.** No Focus-to-upcast,
-   concentration-scaled strike damage, or Focus-bought spell menu exists.
-   Spellwoven Flurry replaces one strike only inside the weapon-free,
-   Focus-funded Bonus Action Flurry; it never replaces an Attack-action attack.
-   Goad, Echo, and Challenge deliver magic through failed Verbal-spell saves.
-3. **Name distance — Pass.** “Warrior of the Barbed Court” follows the SRD Monk
-   house style and uses no Arcane/Mystic/Astral or body-part template.
-
-## 8. Clean-Room Sources and License
-
-This draft uses only the dispatch-authorized decisions, the six subclass
-guidelines, the binding monk bake-off and pitch catalog, and SRD 5.2.1. The
-level-3 engine and curated list were not mechanically altered.
-
-This document is released under CC-BY-4.0 (Creative Commons Attribution 4.0
-International).
-
-> This work includes material from the System Reference Document 5.2
-> ("SRD 5.2") by Wizards of the Coast LLC, available at
-> https://www.dndbeyond.com/srd. The SRD 5.2 is licensed under the Creative
-> Commons Attribution 4.0 International License, available at
-> https://creativecommons.org/licenses/by/4.0/legalcode.
+Sources: SRD 5.2.1 only, plus this project's own rulings record and
+simulation logs. No other game text was open during drafting.

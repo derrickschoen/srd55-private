@@ -19,6 +19,8 @@ const OVERSIZED_PORTABLE_ELF_KEY =
   '2024:example.test.species:oversized-portable-elf' as ContentKey;
 const PORTABLE_ELF_KEY =
   '2024:example.test.species:portable-elf' as ContentKey;
+const HOSTILE_LIBRARY_SPECIES_NAME =
+  '<img data-library-export-hostile src=x onerror=alert(1)> X1 Voyager';
 
 interface RecipientFixture {
   readonly library: LibraryExportDocument;
@@ -178,6 +180,26 @@ async function ready(page: import('@playwright/test').Page): Promise<void> {
     'true',
     { timeout: 60_000 },
   );
+}
+
+async function homebrewReady(page: import('@playwright/test').Page): Promise<void> {
+  await expect(page.locator('.homebrew-status')).toHaveText(
+    'Homebrew library loaded.',
+    { timeout: 40_000 },
+  );
+  await expect(page.locator('#homebrew-tab-panel')).toHaveAttribute(
+    'aria-busy',
+    'false',
+  );
+}
+
+async function downloadBytes(
+  download: import('@playwright/test').Download,
+): Promise<Buffer> {
+  const stream = await download.createReadStream();
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+  return Buffer.concat(chunks);
 }
 
 test('v18 names embedded Portable Elf before direct commit and omits the line for SRD-only shares', async ({
@@ -597,4 +619,314 @@ test('the library control accepts v1 and both JSON controls reject the other kin
   await expect(page.getByRole('alert')).toHaveText(
     'This file is a catalog document. Use the Catalog JSON importer.',
   );
+});
+
+test('whole-library download restores authored and imported content into a fresh profile', async ({
+  page,
+}) => {
+  // Measured alone with one worker on PLAYWRIGHT_PORT=5030: Playwright logged
+  // `1 passed (30.1s)`. 30.1s × 1.5 = 45.15s, rounded up to 45.2s.
+  test.setTimeout(45_200);
+  await page.goto('/');
+  await ready(page);
+  await page.evaluate(() => window.staticApp.reset());
+  await page.reload();
+  await ready(page);
+
+  await page.getByText('Import and backups', { exact: true }).click();
+  const [emptyDownload] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByRole('button', { name: 'Download library JSON' }).click(),
+  ]);
+  expect(emptyDownload.suggestedFilename()).toMatch(
+    /^srd-55-library-\d{4}-\d{2}-\d{2}\.json$/u,
+  );
+  const emptyDocument = JSON.parse(
+    (await downloadBytes(emptyDownload)).toString('utf8'),
+  ) as LibraryExportDocument;
+  expect(emptyDocument).toEqual({
+    format: 'dnd-multiclass-spells/library',
+    version: 2,
+    exported_at: expect.any(String),
+    selection: 'all',
+    selected_content_keys: [],
+    content: [],
+    supersessions: [],
+  });
+
+  await page.goto('/homebrew');
+  await homebrewReady(page);
+  await page.getByRole('button', { name: 'New species', exact: true }).click();
+  await page.getByLabel('Name', { exact: true }).fill(HOSTILE_LIBRARY_SPECIES_NAME);
+  await page.getByLabel('Rules edition', { exact: true }).selectOption('expanded');
+  await page.getByLabel('Creature type', { exact: true }).fill('Astral');
+  await page.getByLabel('Primary size', { exact: true }).fill('Medium');
+  await page.getByLabel('Walking speed (feet)', { exact: true }).fill('35');
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await page.getByRole('button', { name: 'Preview publish', exact: true }).click();
+  await page.getByRole('button', { name: 'Publish species', exact: true }).click();
+  const publishedSpecies = page.getByRole('region', { name: 'Species published' });
+  await expect(publishedSpecies).toBeVisible();
+  await expect(publishedSpecies.getByText(
+    HOSTILE_LIBRARY_SPECIES_NAME,
+    { exact: true },
+  )).toBeVisible();
+  await expect(page.locator('[data-library-export-hostile]')).toHaveCount(0);
+
+  await page.goto('/');
+  await ready(page);
+  await page.getByText('Import and backups', { exact: true }).click();
+  await page.getByRole('button', {
+    name: 'Import bundled homebrew',
+    exact: true,
+  }).click();
+  const bundledReview = page.getByRole('dialog', {
+    name: 'Review content import',
+    exact: true,
+  });
+  await expect(bundledReview).toBeVisible();
+  await bundledReview.getByRole('button', {
+    name: 'Import with these choices',
+    exact: true,
+  }).click();
+  await expect(page.locator('.transfer-status')).toHaveText(
+    'Bundled homebrew imported: 3 published, 0 matched existing.',
+  );
+
+  const expectedManifest = [
+    { kind: 'species', name: HOSTILE_LIBRARY_SPECIES_NAME },
+    { kind: 'subclass', name: 'Spell Student' },
+    { kind: 'subclass', name: 'Spell Student (Bundled revision 2)' },
+    { kind: 'subclass', name: 'Veteran' },
+    { kind: 'subclass', name: 'Veteran (Bundled revision 2)' },
+    { kind: 'subclass', name: 'Warrior of the Barbed Court' },
+    {
+      kind: 'subclass',
+      name: 'Warrior of the Barbed Court (Bundled revision 2)',
+    },
+  ];
+  const sourceCatalog = await page.evaluate(async () => {
+    const [identityRows, speciesRows, subclassRows, supersessionRows] =
+      await Promise.all([
+        window.staticApp.inspectRows('catalog_content_identities'),
+        window.staticApp.inspectRows('species_definitions'),
+        window.staticApp.inspectRows('subclass_definitions'),
+        window.staticApp.inspectRows('catalog_content_supersessions'),
+      ]);
+    const names = new Map([...speciesRows, ...subclassRows].map((row) => [
+      String(row.content_key),
+      String(row.name),
+    ]));
+    return {
+      identities: identityRows.filter((row) => row.catalog_layer === 'external')
+        .map((row) => {
+          const contentKey = String(row.content_key);
+          const name = names.get(contentKey);
+          if (name === undefined) {
+            throw new Error(`External content '${contentKey}' has no definition name.`);
+          }
+          return {
+            content_key: contentKey,
+            kind: String(row.content_kind),
+            layer: String(row.catalog_layer),
+            name,
+          };
+        }).sort((left, right) =>
+          left.kind.localeCompare(right.kind) || left.name.localeCompare(right.name)
+        ),
+      supersessions: supersessionRows.map((row) => ({
+        content_kind: String(row.content_kind),
+        superseded_content_key: String(row.superseded_content_key),
+        successor_content_key: String(row.successor_content_key),
+        recorded_at: String(row.recorded_at),
+      })).sort((left, right) =>
+        left.content_kind.localeCompare(right.content_kind) ||
+        left.superseded_content_key.localeCompare(right.superseded_content_key) ||
+        left.successor_content_key.localeCompare(right.successor_content_key)
+      ),
+    };
+  });
+  expect(sourceCatalog.identities.map(({ content_key: _contentKey, ...facts }) =>
+    facts
+  )).toEqual(expectedManifest.map((entry) => ({ ...entry, layer: 'external' })));
+  expect(sourceCatalog.supersessions).toEqual([
+    {
+      content_kind: 'subclass',
+      superseded_content_key: '2024:content.subclass:spell-student',
+      successor_content_key:
+        '2024:content.subclass:spell-student-bundled-revision-2',
+      recorded_at: expect.any(String),
+    },
+    {
+      content_kind: 'subclass',
+      superseded_content_key: '2024:content.subclass:veteran',
+      successor_content_key:
+        '2024:content.subclass:veteran-bundled-revision-2',
+      recorded_at: expect.any(String),
+    },
+    {
+      content_kind: 'subclass',
+      superseded_content_key:
+        '2024:content.subclass:warrior-of-the-barbed-court',
+      successor_content_key:
+        '2024:content.subclass:warrior-of-the-barbed-court-bundled-revision-2',
+      recorded_at: expect.any(String),
+    },
+  ]);
+
+  const [libraryDownload] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByRole('button', { name: 'Download library JSON' }).click(),
+  ]);
+  const libraryBytes = await downloadBytes(libraryDownload);
+  const libraryDocument = JSON.parse(
+    libraryBytes.toString('utf8'),
+  ) as LibraryExportDocument;
+  if (libraryDocument.version !== 2) {
+    throw new Error('The production library download was not a v2 document.');
+  }
+  expect(libraryDocument.selection).toBe('all');
+  expect(libraryDocument.selected_content_keys).toEqual(
+    sourceCatalog.identities.map((entry) => entry.content_key).sort(),
+  );
+  expect(Object.keys(libraryDocument.supersessions[0] ?? {}).sort()).toEqual([
+    'content_kind',
+    'recorded_at',
+    'successor_content_key',
+    'superseded_content_key',
+  ]);
+  expect(libraryDocument.supersessions[0]?.recorded_at).toMatch(
+    /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/u,
+  );
+  expect(libraryDocument.supersessions).toEqual(sourceCatalog.supersessions);
+  expect(libraryDocument.content.map((entry) => ({
+    kind: entry.kind,
+    name: String(entry.aggregate.name),
+  })).sort((left, right) =>
+    left.kind.localeCompare(right.kind) || left.name.localeCompare(right.name)
+  )).toEqual(expectedManifest);
+
+  await page.evaluate(() => window.staticApp.reset());
+  await page.reload();
+  await ready(page);
+  await page.getByText('Import and backups', { exact: true }).click();
+  await page.getByLabel('Library JSON').setInputFiles({
+    name: 'srd-55-library.json',
+    mimeType: 'application/json',
+    buffer: libraryBytes,
+  });
+  await page.getByRole('button', { name: 'Import library' }).click();
+  await expect(page.locator('.transfer-status')).toHaveText(
+    'Library imported: 7 published, 0 matched existing.',
+  );
+
+  const restored = await page.evaluate((speciesName) => {
+    const identities = window.staticApp.inspectRows('catalog_content_identities');
+    const species = window.staticApp.inspectRows('species_definitions');
+    const speciesTemplates = window.staticApp.inspectRows('species_templates');
+    const subclasses = window.staticApp.inspectRows('subclass_definitions');
+    const supersessions = window.staticApp.inspectRows('catalog_content_supersessions');
+    return Promise.all([
+      identities,
+      species,
+      speciesTemplates,
+      subclasses,
+      supersessions,
+    ]).then(([
+      identityRows,
+      speciesRows,
+      templateRows,
+      subclassRows,
+      supersessionRows,
+    ]) => {
+      const names = new Map([...speciesRows, ...subclassRows].map((row) => [
+        String(row.content_key),
+        String(row.name),
+      ]));
+      return {
+        identities: identityRows.filter((row) => row.catalog_layer === 'external')
+          .map((row) => {
+            const contentKey = String(row.content_key);
+            const name = names.get(contentKey);
+            if (name === undefined) {
+              throw new Error(`Restored content '${contentKey}' has no definition name.`);
+            }
+            return {
+              content_key: contentKey,
+              kind: String(row.content_kind),
+              layer: String(row.catalog_layer),
+              name,
+            };
+          }).sort((left, right) =>
+            left.kind.localeCompare(right.kind) || left.name.localeCompare(right.name)
+          ),
+      species: speciesRows.filter((row) => row.name === speciesName).map((row) => {
+        const template = templateRows.find(
+          (candidate) => candidate.content_key === row.content_key,
+        );
+        if (template === undefined) {
+          throw new Error(`Restored species '${speciesName}' has no template.`);
+        }
+        return {
+          name: String(row.name),
+          rules_edition: String(row.rules_edition),
+          creature_type: String(template.creature_type),
+          size: String(template.size),
+          base_speed_feet: Number(template.base_speed_feet),
+        };
+      }),
+      subclasses: subclassRows.filter((row) => [
+        'Spell Student',
+        'Spell Student (Bundled revision 2)',
+        'Veteran',
+        'Veteran (Bundled revision 2)',
+        'Warrior of the Barbed Court',
+        'Warrior of the Barbed Court (Bundled revision 2)',
+      ].includes(String(row.name))).map((row) => String(row.name)).sort(),
+      supersessions: supersessionRows.map((row) => ({
+        content_kind: String(row.content_kind),
+        superseded_content_key: String(row.superseded_content_key),
+        successor_content_key: String(row.successor_content_key),
+        recorded_at: String(row.recorded_at),
+      })).sort((left, right) =>
+        left.content_kind.localeCompare(right.content_kind) ||
+        left.superseded_content_key.localeCompare(right.superseded_content_key) ||
+        left.successor_content_key.localeCompare(right.successor_content_key)
+      ),
+      };
+    });
+  }, HOSTILE_LIBRARY_SPECIES_NAME);
+  expect(restored.identities).toEqual(sourceCatalog.identities);
+  expect(restored.supersessions).toEqual(sourceCatalog.supersessions);
+  expect(restored.species).toEqual([{
+    name: HOSTILE_LIBRARY_SPECIES_NAME,
+    rules_edition: 'expanded',
+    creature_type: 'Astral',
+    size: 'Medium',
+    base_speed_feet: 35,
+  }]);
+  expect(restored.subclasses).toEqual([
+    'Spell Student',
+    'Spell Student (Bundled revision 2)',
+    'Veteran',
+    'Veteran (Bundled revision 2)',
+    'Warrior of the Barbed Court',
+    'Warrior of the Barbed Court (Bundled revision 2)',
+  ]);
+
+  await page.goto('/homebrew');
+  await homebrewReady(page);
+  await expect(page.getByRole('heading', {
+    name: HOSTILE_LIBRARY_SPECIES_NAME,
+    exact: true,
+  })).toBeVisible();
+  await expect(page.locator('[data-library-export-hostile]')).toHaveCount(0);
+  const restoredSpeciesCard = page.locator('.homebrew-card').filter({
+    has: page.getByRole('heading', {
+      name: HOSTILE_LIBRARY_SPECIES_NAME,
+      exact: true,
+    }),
+  });
+  await expect(restoredSpeciesCard.getByText('Homebrew', { exact: true })).toBeVisible();
+  await expect(restoredSpeciesCard).toContainText('Species · immutable published version');
 });

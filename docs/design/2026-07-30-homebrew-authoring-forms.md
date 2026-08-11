@@ -102,8 +102,7 @@ concrete species/subclass/background work in §11.
   622-652`). The missing piece is therefore a typed authoring/import document
   and validation, not a new rules interpretation.
 - **Historical baseline (superseded by D216/D222).** At this design's date the
-  bundled subclass-progression key set was exactly EK and Arcane
-  Trickster, and the boot guard required 20
+  bundled subclass-progression key set was exactly EK and AT, and the boot guard required 20
   progression rows for each (`src/rules/class-progression-lookup.ts:180-257`).
   Their shared seeder loops from level 1 through `PROGRESSION_LEVELS`, and both
   definitions call it (`:610-684`). Thus CI-3s can project the current bundled
