@@ -5,6 +5,752 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-10 — Rebuking Shield final: initiative-triggered Hands manifestation with a 3-point shield upgrade; fire/cold resistance dropped
+
+Owner's rulings, verbatim:
+
+> Rebuking shield should give immunity to charm and fear and psychic
+> damage. / Make it a free action when you roll initiative, and spend x
+> focus points. Walk me through what would be a good number
+
+> Drop the fire \\cold resistant part.
+>
+> Make it activate the hands as well as a 3 point option to upgrade to the
+> hands shield. This also upgrades the hands to a free action on initiative
+> roll as well as what it was before
+
+Final shape, applied to both docs: at 17, **rolling Initiative lets the
+monk manifest the Hands of the Barbed Court as a Reaction** (owner
+follow-up, verbatim: "change to ' When you roll Initiative, you can
+manifest the Hands of the Barbed Court as a reaction'" — a real cost: the
+Reaction is spent until the monk's first turn, so no *Shield* or
+opportunity attack before then; normal 4 Focus; the Bonus-Action path
+remains), and **any manifestation can spend
++3 Focus to raise the Rebuking Shield** — 2d8 Psychic retaliation on melee
+hits taken, immunity to Charmed, Frightened, and Psychic damage, no
+fire/cold resistance, riding the manifestation's duration and ending with
+Concentration. Not spellcasting (no slot, no components,
+uncounterspellable). The earlier once-per-rest cap is gone — the
+initiative trigger and the pool are the limiters (full opening loadout:
+4+3 shield-hands + 1 goad = 8 of 17, four Flurries fit, one Focus-cast
+spare).
+
+Pricing walkthrough given at 2–6; the owner's +3 upgrade lands the combined
+manifestation at 7 — between the recommended 4-per-piece parity and the
+tension point. Measured: the freed round-1 Bonus Action is worth ~+4 at 17
+(137.7 → **141.9**); the immunities and retaliation remain uncounted
+tank value. Concentration-linkage recorded as the shield's real cost: one
+failed save now drops rider, Advantage, retaliation and immunities
+together.
+
+## 2026-08-10 — Barbed Court 17 simplified: Rebuking Shield is a once-per-rest feature; the 4th-level machinery deleted; Blur grafted
+
+Owner's rulings, verbatim:
+
+> For the barbed court, as a 17 level feature, just give the psychic hand
+> based fire shield once per short/long rest. No concentration, does not
+> count as casting a leveled spell because it is a subclass feature.
+>
+> Remove all of the more complicated wording we used to try to justify
+> casting a lvl 4 spell early and don't grant any extra prepared 4th level
+> spells.
+>
+> I like this simplification better .
+>
+> Also, if "blur" is in the srd, add it to the prepared list.
+
+Effects, applied to both the design doc and the player doc:
+
+1. **The Rebuking Shield is now a self-contained level-17 feature**: Bonus
+   Action (drafting assumption, flagged — the spell's own casting time is
+   an Action; one word changes it), 10 minutes, the *Fire Shield* effect
+   with Psychic retaliation, explicitly not spellcasting (no slot, no
+   components, uncounterspellable, not a leveled-spell cast), once per
+   Short or Long Rest. *Fire Shield* leaves the Court Spells table.
+2. **The 4th-level apparatus is deleted**: the "from Monk 17, prepare
+   level 4" clause and A Gift of the Court are both removed. Chosen
+   preparation caps at slot levels (3rd); *Compulsion* remains the sole
+   4th-level grant — always prepared by its row, castable at 17 via
+   Focus-Casting at base level, no special wording required.
+3. **Blur grafted** (SRD 5.2.1 ✓, Sorcerer/Wizard — off-list, entering as
+   a grant per the standing owner-named rule): added to the Monk-6 Court
+   Spells row beside *Mirror Image* and *Hold Person*.
+
+DPR impact: none measurable (the Gift was tempo; the Shield's ~+11
+enemy-turn retaliation was already uncounted; Blur is defense). The level
+17 package reads: *Compulsion* row, Focus-Casting, Rebuking Shield 1/rest,
+Hands ×2 + Advantage, Barbed Fists +3.
+
+## 2026-08-10 — Equal-items basis: every sim comparator carries +1/+2/+3 weapons at 6/11/17
+
+Owner's ruling, verbatim:
+
+> Give every sim build +1 weapons at 6, +2 At 11, +3 at 17
+
+Effect: the comparison boards now assume magic weapons for every martial
+comparator on the DMG rarity ladder. The Barbed Court's numbers are
+unchanged — Barbed Fists is its item-equivalent and its own non-stacking
+clause applies; the ladder finally does exactly the parity job it was
+commissioned for. Equal-items board (burst, L3/6/11/17): Barbed Court
+13.7/37.9/68.8/137.7; Veteran melee 24.9/35.2/70.0/115.9; Paladin
+19.5/34.7/60.5/72.3; Champion 11.8/32.6/58.4/74.6; Thief
+18.4/26.4/43.3/75.6.
+
+Consequences recorded: monk ratios collapse to **0.70×/1.09×/1.14×/1.90×**
+the Paladin and 0.98× the Veteran at 11 — the earlier "hot" readings were
+substantially an itemless-comparator artifact. Veteran ratios hold at
+1.01×/1.16×/1.60× (its band survives the fair basis). **The pending
+level-6 trim (lever A) is recommended withdrawn** — 1.09× at 6 on the fair
+basis needs no toning. Both docs' worksheets updated to this basis.
+
+## 2026-08-10 — Barbed Court: the Hands' Advantage clause moves to 17
+
+Owner's ruling, verbatim:
+
+> Move the hands advantage to 17
+
+Effect: lever B from the tone-down menu. At Monk 11, Hands of the Barbed
+Court is the damage rider alone (+Wis psychic per hit in the Emanation);
+at 17 the court matures — damage doubles to 2×Wis **and** the Advantage
+clause arrives, in one upgrade. Applied to the doc, index, F5 line and
+worksheet.
+
+Measured: L11 89.7 → **68.8** (1.72× → **1.32×** the optimized Paladin;
+1.07× this project's Veteran), L17 unchanged at 137.7 (2.26×). Growth
+11→17 becomes **+100%** — the kit's one great spike, by design. The
+Advantage clause alone was worth ~21 DPR at 11, the single largest dial in
+the kit.
+
+Open from the same directive: the level-6 "a bit" trim — lever A (Barbed
+Fists starts at 11) would take 6 from 1.21× to 1.04×; unruled.
+
+## 2026-08-10 — Barbed Court: the explicit-Nick extra strike is DELETED — it was a misunderstanding; the slap IS the Nick mechanic; Court Forms removed entirely
+
+Owner's ruling, verbatim:
+
+> Delete the extra unarmed strike because I thought I was describing
+> courtiers slap.
+
+Effect: the explicit-Nick grant from earlier today is deleted — the owner's
+"grant the nick property" answer was describing the Courtier's Slap, which
+has carried the TWF-style-plus-Nick design ancestry since its 2026-08-08
+pinning. With Nick gone, Court Forms held only the inert Light and Finesse
+properties, so **the feature is removed entirely**; the slap's text now
+carries the ancestry note in its place. Level 3 holds eight features.
+
+The attack loop, final: **4 / 5 / 6 / 6 swings at Monk 3/6/11/17** (Attack
+action + slap + Flurry, with the base class's three-strike Flurry from 10).
+Board updated: **13.7 / 37.9 / 89.7 / 138.1** — 0.70× / 1.21× / 1.72× /
+2.27× the corrected optimized Paladin; the accidental buff from the
+explicit-Nick reading is fully reversed, landing slightly below the
+pre-mastery-removal numbers (the swappable menu's ~1 DPR is also gone).
+The slap's new 10-ft slow and the owner-named spell rule from the same
+sitting stand unchanged.
+
+## 2026-08-10 — Barbed Court: mastery menu OUT, explicit Nick IN; slap gains a 10-ft slow; off-list spells enter only when owner-named
+
+Owner's rulings, verbatim:
+
+> Remove weapon masteries from the barbed court monk.
+>
+> Allow barbed court to have spells that are not on the bard list if I have
+> named them
+
+Question round answers, verbatim: Court Forms — "Make explicit text that
+the subclass grants the nick property to unarmed strikes even though it is
+not usually possible"; lockdown combo — "Move it onto the slap"; named
+spells — "Spells not on the bard list are provided as spells known by the
+subclass like with a paladin".
+
+Effects, applied to the doc:
+
+1. **Court Forms final**: Light + Finesse + explicit **Nick** on Unarmed
+   Strikes (override text; the extra Attack-action strike adds no ability
+   modifier per RAW, Barbed Fists applies). The swappable five-mastery menu
+   is gone — no choice tracking remains.
+2. **Courtier's Slap** now also reduces the target's Speed by 10 feet until
+   the start of the monk's next turn (both modes) — the slap that stops you
+   mid-stride; restores the Ray-of-Frost speed-stack (−20) from level 3.
+3. **Standing spell-list rule codified**: off-Bard-list spells enter only
+   as granted always-prepared spells or granted cantrips (Paladin-oath
+   pattern), and only when owner-named. Current named set unchanged.
+
+Measured and stated plainly: **the pair is a net buff.** Final fights-back
+board 16.0 / 41.7 / **101.6** / **157.1** at L3/6/11/17 — the explicit Nick
+(a seventh swing) is worth more than the whole removed mastery menu
+(+12/+19 over the mastery-less midpoint, above the pre-removal 90.5/138.5).
+Ratios: 0.82× / 1.34× / **1.95× / 2.58×** the corrected optimized Paladin.
+Owner-ruled with the numbers shown; worksheet updated.
+
+## 2026-08-10 — Publication review loop (Opus + Sol) adjudicated; both docs rewritten as first publication drafts
+
+Two independent publication reviews returned ~45 findings; adjudicated and
+applied in one rewrite pass per doc. Accepted, highest-impact: the
+Courtier's Slap's two contradictory attack classifications (superseded text
+removed; classification-led wording, Wisdom declared in ranged mode); the
+Barbed Goad's missing failure consequence (the *Compelled Duel*-pattern
+"can't willingly move away" clause, dropped at ruling time, restored) plus
+save timing, a narrowed end condition ("a creature you have not goaded"),
+and deletion of the dead folded-Flourish clause; Court Forms' mastery
+unlock sentence (RAW, properties need an unlocking feature and a weapon)
+with Graze/Topple knock-ons printed; the max-prepared-level bound plus the
+Monk-17 level-4 clause that A Gift of the Court needs; the false
+Bard-graft sentence (four cantrip grafts, not one); stale worksheets
+rebuilt from the corrected board in both docs; third-party product and
+creator names stripped to unnamed markers; the Veteran's §5.1 table
+rebuilt to the Deeper-Cuts/level-dice engine (3/9/13/17 → 3d6/9d6/13d6/
+17d6); Old Reserves acknowledged as the second tracked resource; SRD 5.2 →
+5.2.1 attribution fixed with the CC-BY line added; internal jargon keyed
+or cut; feature index added to the monk doc.
+
+Rejected with reasons, on the record: the claim that SRD 5.2.1 lacks the
+one-spell-slot-per-turn rule (it is present — grep-verified in this
+session on 2026-08-07: "On a turn, you can expend only one spell slot to
+cast a spell"); dropping the ki-equivalence entirely (the terminology
+paragraph was trimmed instead — the equivalence remains recorded here and
+in the OGL doc's commentary); renaming Innate Sorcery of the Court (the
+suffix distinguishes it; the term "Barbed Court spells" was defined
+instead); splitting each doc into publish + dossier files (the
+transparency-appendix pattern with an F-code key was chosen — a later
+owner call can still split). Focus Refresh's uncapped economy is now a
+*stated* design decision in the doc rather than an omission.
+
+Both files committed as first publication drafts.
+
+## 2026-08-10 — Collaborative audit (Opus + Sol): sim rebuilt after ~20 accepted findings; corrected boards on the record
+
+At the owner's direction, two independent model sessions audited every sim
+build; findings were adjudicated and the sim rebuilt (`sim4.py`). Accepted,
+highest-impact: 2024 Vow of Enmity and Bonus-Action Divine Smite conflict in
+round 1 (both auditors independently); **the flagship CME build was illegal**
+(Sorc 3/Lore 8 lacks Magical Secrets — rebuilt as Sorc 3/Wizard 8, which
+also removed the Quickened-Metamagic stacking that spell's own text
+forbids); Bladelock's Devouring Blade needs Warlock 12; the ranged Thief
+stacked two Bonus Actions; GWM is once per turn; **monk Flurry is three
+strikes from level 10** (Heightened Focus — the Barbed Court was ~9 DPR
+under-reported); Thief's Reflexes doubles round 1 at Rogue 17. Rejected
+with reasons: the 2014 GWF-reroll claim (2024 is treat-1-2-as-3), deleting
+the monk's Graze (Court Forms is the explicit grant), and "monks have no
+slots" (this subclass is a third-caster).
+
+Corrected burst boards (L3/6/11/17, AC 14/16/18/18; day within 1 except
+paladin): **Barbed Court 16.2/40.9/90.5/138.5** (fights-back env);
+**Veteran melee 25.1/32.8/64.5/108.9, ranged 54.8/93.5 at 11/17**; Paladin
+19.5/31.2/52.2/60.8 (day 46.3/53.3); Thief 18.4/23.7/37.2/64.2; Champion
+10.8/26.7/43.8/52.3; Bladelock ≤41.1/64.5; legal CME nova 129/265; Valor
+90/225. Ratio note, recorded plainly: the homebrew ratios ROSE (Veteran
+1.05×/1.24×/1.79×; monk 1.31×/1.73×/2.28×) chiefly because the corrected
+paladin fell and the monk gained a missed base-class feature — not from any
+homebrew change. Publication review (Phase C) is running on both docs.
+
+## 2026-08-10 — VETERAN: the table becomes two one-line formulas — Deeper Cuts (+1 die) and Veteran's Strike (dice = Rogue level at 9)
+
+Owner's ruling, verbatim:
+
+> So how close would it be to the Monte Carlo list to have lvl3 +1 die and
+> lvl 9 replace with + rogue level ?
+>
+> I think the extra die over Monte Carlo is fine
+
+Effect, superseding the C2 published table from earlier the same day: the
+engine is now **Deeper Cuts (3rd: your Sneak Attack deals one extra die)**
+and **Veteran's Strike (9th: your Sneak Attack dice equal your Rogue level;
+replaces Deeper Cuts)** — the replacement text living in the level-9
+feature exactly as the owner first asked. Old Reserves and everything else
+stand.
+
+Measured against the tuned curve: 25.0/32.5/64.5/109.0 at L3/6/11/17 vs the
+table's 24.9/32.7/60.9/103.6 — identical through 8, one extra die from 11
+(+3.6/+5.4 DPR, owner-accepted), and the ramp fires at 9 (9d6, a +4-dice
+jump, ≈1.05× the level-9 paladin) instead of 10–11. Band at 6: 1.01×.
+The name Veteran's Strike returns to the doc with its new text.
+
+## 2026-08-10 — VETERAN FINAL: custom Sneak Attack table replaces the doubling; Old Reserves is a Pact-Magic-shaped once-per-rest boost
+
+Owner's rulings, verbatim (the simplification arc, in order):
+
+> I don't want to take anything away or change it too much at 9. / The
+> original intention was to keep this on the simpler side of rogue
+> subclasses like the champion is for fighters
+
+> Keep deep cuts simple and put the replacement text in the lvl 9 feature.
+> ... Maybe just publish a new sneak attack table that ramps up more at
+> higher levels as well as a small pool the refreshes on a long/short rest
+> 1/2 rogue level rounded down. Play around with the tuning on the sneak
+> attack dice increase curve to get the non linear increase we want
+
+> I was thinking instead of a pool of dice, it is a pool of damageboosts
+> (rouge-lvl/2 d6s each) x times per day. You choose when to apply
+
+> Similar to warlock spell slots
+
+> Revharge on short/long rest recharge
+
+Final engine, applied to the doc:
+
+1. **Veteran's Sneak Attack (3)** — a published table replacing the Rogue
+   column: 3/3/4/4/5/5/6/**8/10**/11/12/13/14/15/16/17/18/19 (levels
+   3–20). Curve C2, chosen from four simmed candidates: +1 die every other
+   level to 9, the compounding ramp at 10–11, +1 per level after. This
+   single table absorbs Deeper Cuts and retires Veteran's Strike (marked
+   superseded in the doc; level 9 keeps Extensive Experience).
+2. **Old Reserves (3)** — once per Short or Long Rest, add ⌊Rogue level/2⌋
+   d6 to one Sneak Attack; dice double on crits (owner: "for fun");
+   Pact-Magic cadence at the owner's naming. Boost-count tuning simmed
+   (1/SR, 2/SR, 2–4/LR): 1/SR is the only shape inside the band.
+3. Sure Strike stays v4 (half dice, no action, exclusive) — the simpler
+   fork, resolving that open.
+
+Measured, final kit (burst/day identical): **L6 32.8 (1.02× paladin — the
+owner's 0.9–1.05 band), L11 60.2 (1.12×), L17 103 (1.62×, wish-tier
+waiver)**. Tracked resources in the whole subclass: Old Reserves' one use
+and Veteran Reflexes' PB — the Champion-of-rogues brief, met.
+
+## 2026-08-09 — VETERAN: reserve dice double on crits (owner-ruled); reserve-as-engine formula grid simmed, pick pending
+
+Owner's rulings, verbatim:
+
+> Sim it with different formulas on reserve dice replacing the doubled sneak
+> attack dice table at 9. I don't want the rogue too far ahead of the
+> paladin melee or warlock ranged at 3 and 6. Rogue can be more powerful at
+> 11 and 17 because no spells
+
+> Reserve dice should double on a crit for fun
+
+Crit ruling applied (the sims already modeled it; the flag closes). The
+formula grid, melee burst DPR at L3/6/11/17 against the references (melee
+Paladin 12.9/32.2/53.8/63.8; ranged Fiend v2 14.5/22.0/37.2/47.0):
+
+| Formula | L3 | L6 | L11 | L17 |
+|---|---:|---:|---:|---:|
+| current live (double@9 + reserve) | 23.2 | 31.8 | 73.8 | 122.8 |
+| F1 pool L spend L/2, no doubling | 23.0 | 32.0 | 49.2 | 79.8 |
+| F3 reserve from 9 only | 19.7 | 25.6 | 49.7 | 80.5 |
+| F5 pool 2L from 9 | 19.8 | 25.4 | 58.2 | 99.0 |
+| **F6 SA ×1.5 @9 + reserve from 9** | **20.0** | **25.3** | **62.2** | **98.3** |
+
+Finding recorded: no single linear formula satisfies all three constraints
+at once (behind at 6, ahead at 11, two-activation decision) — F1/F3 fall
+behind the paladin at 11; F5 hits the curve but its pool funds four
+activations in a 4-round fight, dissolving the owner's "genuine decision."
+**F6 threads it**: Veteran's Strike becomes ×1.5 (9d6 at 11, 13d6 at 17)
+and the reserve (pool = level, spend ⌊level/2⌋, crit-doubling) starts at 9 —
+behind the paladin at 6 (0.79×), ahead at 11 (1.16×) with the two-hit
+decision intact, 1.54× at 17. The L3 lead over the paladin (1.55×) is the
+rogue chassis itself (Sneak Attack + Steady Aim), not subclass text.
+Formula choice pending.
+
+## 2026-08-09 — VETERAN: Veteran's Reserve adopted (pool reading); Archery removed from Old Training; ranged Champion added to the board
+
+Owner's rulings, verbatim:
+
+> Add rogue level/2 (round down) extra sneak attack dice (rogue level times
+> per short/long rest)
+
+> Because these are bonus dice, they don't double like the dice on the
+> rogue table
+
+> Intention: 2 boosted hits per combat, a genuine decision
+>
+> Looks like we should remove the archery fighting style from 3 to keep
+> pace with the warlock better.
+>
+> Add a dex based ranged optimized champion fighter to the ranged group
+
+Effects:
+
+1. **Veteran's Reserve (level 3)**: a pool of bonus Sneak Attack dice equal
+   to Rogue level per Short/Long Rest, spent ⌊level/2⌋ at a time when
+   dealing Sneak Attack, never doubled by Veteran's Strike. The owner chose
+   the **pool reading** over the always-on "uses" reading after both were
+   simmed (pool: ≈2 activations per combat; uses: never binds in 4-round
+   fights). Crit-doubling of the bonus dice assumed standard, flagged.
+   Level-3 placement is the session's reading of the bump-3-9 context,
+   flagged. Dip audit: a 3-level dip gets three +1d6 activations — trivial.
+2. **Old Training loses Archery** — TWF only. Ranged veteran drops 26/64 →
+   24/60 (dual hand crossbows, no style).
+3. Measured after both changes (burst/day ≈ identical): melee veteran
+   25.7→**32.2 / 73.2** with reserve at 6/11; ranged **30.3 / 70.2**.
+4. **Ranged group finding**: the Dex ranged Champion (longbow, Archery,
+   Action Surge, crit 19–20) lands at **16 / 26** — statistically identical
+   to the EB warlock (17/26). The 2024 ranged-martial baseline is ~26 at 11
+   now that Sharpshooter's −5/+10 is gone; the ranged Veteran sits 2.3–2.7×
+   above that cluster even after the Archery removal, with the SRD Thief
+   (36.5) in between.
+
+## 2026-08-09 — VETERAN: Fighting Style (Archery or TWF) at level 3; Sure Strike v5 simmed with perfect information
+
+Owner's rulings, verbatim:
+
+> Sim out using sure strike pb times per short/long rest to add +5 to an
+> attack roll.
+>
+> What can we do to bump up the lvl3 veteran without making it a must have
+> 3 level dip for fighters?
+
+> Give the choice of archery and twf at 3 and change the sim so that the
+> player knows if sure strike will change a miss to a hit and can decide
+> after rolling the dice
+
+Effects:
+
+1. **New level-3 feature, "Old Training"**: choose the Archery or
+   Two-Weapon Fighting style. Applied to the Veteran doc. Dip audit
+   recorded: near-zero marginal value to a Fighter (styles are their own
+   chassis; GWM builds can use neither option), which was the constraint
+   the owner named.
+2. **Sure Strike v5 modeled with perfect information**: the player sees the
+   roll, spends a use only when +5 converts a miss AND the Sneak Attack is
+   at stake — never on a bare off-hand hit. Simmed against v4 with Old
+   Training included (TWF, melee canonical): L6 25.7→27.1 burst, L11
+   63.3→65.5; day figures within half a point of burst throughout. v5 is
+   +1.5–2.5 DPR over the half-dice floor and replaces the guaranteed floor
+   with miss-insurance (true whiffs now deal zero). **Choice between v4
+   and v5 not yet ruled** — the doc still carries v4 (half dice,
+   SA-exclusive).
+3. Levels 11 sits at 63–66 = 1.17–1.22× the optimized Vengeance Paladin
+   after Old Training — above the 1.1× line the owner set earlier the same
+   day; recorded, not corrected, as the owner's chosen trade for the
+   level-3 bump. The early-only alternative (+1d6 SA absorbed at 9) was
+   presented and not taken.
+
+## 2026-08-09 — VETERAN: Sure Strike second revision — half dice, no action, exclusive with Sneak Attack
+
+Owner's ruling, verbatim:
+
+> Rewrite sure strike so that it costs you all of your sneak attack pool to
+> do half sneak attack dice rounded up. Prevent using sure strike and sneak
+> attack in the same turn. No ba, player chooses if to use it.
+>
+> Player gets 1 sneak attack or sure strike per turn
+
+Effect, superseding the Bonus-Action version ruled earlier today: Sure
+Strike costs no action and is the player's choice on a miss, deals **half
+Sneak Attack dice rounded up** (6d6 at 11, 9d6 at 17), and **fully expends
+the turn's Sneak Attack** — one Sneak Attack or one Sure Strike per turn,
+never both. Applied to the Veteran doc §3.
+
+Measured (vex/nick canonical build): **59.7 / 103.0 burst; 59.5 / 103.6
+sustained** — within noise of every prior variant, because the Vex chain
+holds the whiff rate near 6%. What the revision actually buys is shape,
+not a number: the floor halves on bad rounds, the Bonus Action is freed
+back to Steady Aim and Cunning Action, and the exclusivity rule is one
+clean sentence with no tracking.
+
+## 2026-08-09 — VETERAN: Sure Strike becomes an end-of-turn Bonus Action
+
+Owner's ruling, verbatim:
+
+> Make sure strike a bonus action to spend unused sneak attack at the end of
+> your turn
+
+Effect: Sure Strike's guaranteed Sneak Attack on a miss now costs the
+Bonus Action, taken at the end of the turn, full dice (the half-dice
+variant floated earlier the same day is superseded unadopted). Applied to
+the Veteran doc's §3 feature text with a dated revision note.
+
+Measured (vex/nick canonical build, dummy): 61/105 → **59/103** — about −2
+DPR, because the Vex chain supplies advantage and the held Bonus Action is
+otherwise idle against a dummy. The recorded intent of the cost is
+action-economy pressure at live tables: the floor now competes with Steady
+Aim and Cunning Action for the same Bonus Action, which the sim cannot
+price. Context also recorded: the Veteran's sim baseline moved to
+shortsword (Vex) + scimitar (Nick) dual-wield by owner directive — 61/105
+burst, identical sustained, the only build on the board whose 40-round
+number equals its 4-round number.
+
+## 2026-08-09 — Barbed Court: Fire Shield grafted at 17; one free 4th-level cast per day at 17
+
+Owner's ruling, verbatim:
+
+> Graft at 17 and give 1 level 4 free cast per day at 17
+
+Effects: *Fire Shield* (Wizard 4th, no concentration, 2d8 retaliation on
+melee hits taken, 10 minutes) joins the 17th-level Court Spells row beside
+*Compulsion* — castable the level it arrives via Focus-casting, no dead
+window. And at 17, **once per Long Rest, the monk casts one prepared spell
+of level 4 without expending a spell slot or Focus Points** (base level —
+the no-upcast rule stands). Coverage noted: the free cast reaches any
+prepared 4th-level bard spell, including *Dimension Door*, *Greater
+Invisibility* and *Polymorph* — recorded, not fenced.
+
+Measured: Fire Shield adds ~+11 DPR of enemy-turn retaliation while up in
+the fights-back environment (uncounted in the headline 115); the free cast
+is tempo, not DPR. The 17 package final: hands ×2, Focus-casting, +3
+ladder, *Compulsion* + *Fire Shield* row, one free 4th/day.
+
+Follow-up ruling, same sitting, verbatim:
+
+> Deflator fire shield for psychic dmg
+
+Read as "reflavor": for a Barbed Court monk the grafted spell's retaliation
+damage is **Psychic** in both modes — the court's rebuke stings the mind of
+anyone who dares strike its monk — while the warm/chill resistance choice
+is unchanged. Same trade already accepted for the slap: psychic blanks on
+the mindless (you cannot humiliate a zombie), bites slightly harder on
+everything else. The doc will print it as the row's variant text, styled
+"the Rebuking Shield."
+
+## 2026-08-09 — Barbed Court: spell list pivots to BARD — Cleric-verbatim preparation plus a Short-Rest swap, rituals, full list allowed, rows slimmed
+
+Owner's rulings, verbatim:
+
+> I'm wondering what if we change the spell list to the bard spell list and
+> change it to a prepared cast or like a cleric so they could swap out the
+> spells in ten minutes like cleric can and use the barred spell list and be
+> able to cast rituals. Um, I'm thinking also we'll wanna put a few key
+> wizard spells in the subclass known spells list like shield, and maybe
+> some others I'm not sure. Brainstorm that one, work it through, and
+> highlight spells were missing. I did... I realize now that Misty Step
+> isn't that useful on a month because they already have kind of step at
+> the wind and everything.
+
+> Cleric verbatim. Add short rest.
+>
+> I don't know anything about fire shield
+>
+> Allow all bard spells
+>
+> 4) yes
+
+Effects, closing the pivot (Fire Shield still open, explained separately):
+
+1. **Chosen spells come from the BARD list** (was Wizard). Grep-verified
+   against SRD 5.2.1 spell headers: the kit's enchantment/illusion identity
+   is bard-native (*Mirror Image, Dissonant Whispers, Command, Silence,
+   Slow, Fear, Hold Person, Hypnotic Pattern, Compulsion, Suggestion,
+   Greater Invisibility, Mislead, Dispel Magic*).
+2. **Preparation is the 2024 Cleric pattern verbatim** — change your
+   prepared list when you finish a Long Rest — **plus a bespoke Short-Rest
+   clause: swap one prepared spell when you finish a Short Rest.** The
+   one-per-level swap rule is superseded. Recorded: the Short-Rest swap
+   exceeds any official caster's flexibility; owner-chosen, on a
+   short-rest-driven chassis.
+3. **Ritual casting granted** — Bard-list rituals castable as rituals when
+   prepared (*Detect Magic, Identify, Comprehend Languages, Tiny Hut* et
+   al.): the exploration/social pillar at zero slot cost.
+4. **The full bard list is allowed, healing included** (*Cure Wounds,
+   Healing Word* at third-caster pace) — chosen with eyes open, not
+   inherited.
+5. **Misty Step is dropped** (owner: redundant with Step of the Wind; it is
+   also not on the bard list). Its 6th-row seat goes to **Hold Person**.
+6. **Rows and cantrips, final**: granted cantrips six — Shocking Grasp,
+   Chill Touch, **Ray of Frost** (grafted so the pinned Slow+RoF lockdown
+   survives the list change), Vicious Mockery, Mage Hand, Guidance — plus
+   two chosen Bard cantrips. Court Spells rows: 3rd *Shield* (the Wizard
+   graft), *Dissonant Whispers*; 6th *Mirror Image*, *Hold Person*; 11th
+   *Slow*, *Fear*; 17th *Compulsion*. Bard-native seats are
+   certainty-not-access (always prepared, not counted against the Paladin
+   column); *Shield* is the lone off-list spell graft so far.
+7. DPR impact of the pivot: zero — Shield, Ray of Frost and the loop
+   survive via grants; the fights-back sim stands (78.8 at 11, 115.0 at
+   17, vs Vengeance Paladin 54/64).
+
+## 2026-08-09 — Barbed Court: goad and duel CONSOLIDATED into one feature — the last open mechanic closes
+
+Owner's ruling, verbatim:
+
+> Seems like the goad and the duel do the same thing. Consolidate
+
+Effect: the free goad rider proposed at presentation is not adopted; the
+goad and the duel become **one feature**, carrying the duel's fully-ruled
+mechanics (melee-hit trigger, 1 Focus Point, the spell-effect bind, no
+concentration, 1 minute, the spell's own escape rules) and the goad's ruled
+fiction (the insult — spoken, or a slap, sneer, or gesture, player's
+choice) and its name. Working wording for the rewrite:
+
+> **Barbed Goad.** When you hit a creature with a melee attack, you can
+> spend 1 Focus Point to goad it into a duel — an insult spoken aloud or
+> delivered as a slap, sneer, or gesture. For 1 minute, the target has
+> Disadvantage on attack rolls against creatures other than you, and must
+> succeed on a Wisdom saving throw against your ki save DC to move more
+> than 30 feet away from you. The effect ends early if you attack a
+> different creature, if one of your allies damages the target or targets
+> it with a harmful spell, or on the target's successful save to withdraw.
+> *Goading a second creature does not end an existing goad, and attacking a
+> creature you have goaded does not end your goads on others.*
+
+The italicized concurrency clause is the one drafting decision the
+consolidation forces, flagged: under the inherited escape rules alone,
+attacking duel-target A would end the bind on B, making multi-enemy
+tanking impossible — the role the free goad used to cover. The clause
+restores it at 1 Focus per enemy. Recommended; one word removes it.
+
+Identity paragraph unaffected: "the goad that makes ignoring you
+unbearable, the duel that binds an enemy's pride" reads as one feature's
+fiction — the goad is how the duel begins.
+
+**With this, every open item on the Barbed Court is closed.** The original
+nine-item queue, the five follow-up items, and the goad's numbers are all
+ruled. The doc rewrite is unblocked.
+
+## 2026-08-09 — Barbed Court: identity paragraph APPROVED — queue item 9 CLOSED
+
+Owner's ruling, verbatim:
+
+> That will work
+
+The approved identity paragraph, to open §1 of the rewrite verbatim:
+
+> **Warrior of the Barbed Court** — Somewhere between a duelist's salon and
+> a haunted etiquette lesson lies the Barbed Court, a monastic tradition
+> that treats the insult as a martial form. Its monks fight surrounded by an
+> invisible retinue — spectral hands that slap, beckon, and humiliate — and
+> every technique is a provocation: the goad that makes ignoring you
+> unbearable, the duel that binds an enemy's pride to your fists, the barbed
+> word that lands harder than the blow. A Barbed Court monk wins by being
+> *impossible to disregard* — enemies who attack you meet mirror-images,
+> warded air, and a wall of unseen palms; enemies who dare attack anyone
+> else are slapped back into line. Wisdom drives everything: the eye that
+> reads an opponent's vanity is the same eye that guides the striking hand.
+
+Licence note recorded: the duel is described as "binds an enemy's pride" —
+no non-SRD spell name appears; all vocabulary is the project's own.
+
+## 2026-08-09 — Barbed Court: Spellwoven Strike CUT; Court Cantrips (cantrip-on-Focus-spend) is the weaving mechanic — queue item 8 CLOSED
+
+Owner's ruling, verbatim:
+
+> I want to be able to combine the slow mastery with ray of frost. The one
+> per turn was when I allowed casting a cantrip when spending focus.
+>
+> Maybe cantrip when focus is spent ( only once per turn this way) instead
+> of copying the valor bard is better.
+
+Effects:
+
+1. **Spellwoven Strike (cantrip-replaces-an-attack) is cut**, and the
+   Valor-style inversion (strike-rides-on-cantrip) is declined. Level 6
+   holds five grants.
+2. **Court Cantrips is the surviving mechanism, clarified**: level 3 —
+   when you spend one or more Focus Points, you can cast one cantrip you
+   know (Action casting time) as part of that expenditure, no action
+   required; **once per turn**. The owner clarifies the one-cantrip-per-turn
+   cap was always this feature's own limit, not a global rule — normal
+   Action-cast cantrips follow ordinary rules. The historic reading in
+   earlier entries is corrected by this one.
+3. **Design intent pinned, in the owner's words: the Slow + Ray of Frost
+   stack.** Flurry (1 Focus) triggers a free Ray of Frost; an unarmed hit
+   carrying the Slow mastery is −10 ft Speed and Ray of Frost is −10 more —
+   a 30-Speed enemy drops to 10 inside the 15-foot emanation, which is what
+   the Slow mastery kept its seat for. Ray of Frost is a chosen-cantrip
+   seat, not granted; the doc will note the combo in design notes.
+
+Measured: the free cantrip on Focus-spend rounds adds ~+6 DPR at 6, ~+9 at
+11, ~+13 at 17 (Ray of Frost line, with the hands' Wisdom-psychic rider
+applying to its hit), buying back most of the Nick trim — the loop lands
+≈66–70 at 11, comfortably inside the owner's band. No new trackers: the
+once-per-turn cap was already one of the two counted flags.
+
+## 2026-08-09 — Barbed Court: Court Forms mastery set is Slow/Topple/Push/Sap/Graze — Nick out (the slap already IS the Nick mechanic); queue item 7 CLOSED
+
+Owner's ruling, verbatim:
+
+> Did we add a nick like mechanic for the level 6 slap?
+>
+> I like slow and topple and push and sap and graze
+
+Answer given: the Courtier's Slap (level 3) is the Nick-like mechanic by the
+owner's own pinned intent — once per turn, part of the Attack action, Bonus
+Action free. Consequence adopted with the ruling: **Nick leaves the mastery
+set**, ending the double-dip of two free-extra-attack mechanics; the attack
+loop is honestly 5 (2 Attack + slap + 2 Flurry).
+
+Court Forms, final: Unarmed Strikes have Light and Finesse and ONE of
+**Slow, Topple, Push, Sap, Graze**, chosen at the end of a Short or Long
+Rest. All five are passive on-hit riders — zero per-turn tracking, matching
+the two-tracker budget.
+
+Measurements and notes recorded, not corrected:
+
+- **Graze on unarmed is the biggest deviation** — SRD Graze lives on Heavy
+  weapons only; here it grants Wis-mod damage on a *miss* (~+7 DPR at five
+  attacks), the smoothing pick and the Veteran's Sure Strike in miniature.
+- **Slow keeps its two flags**: outclassed next to Topple for the party and
+  name-colliding with the granted *Slow* spell at 11 ("I hit him with Slow"
+  is ambiguous at the table). Owner keeps it with eyes open; the rewrite
+  will phrase around the collision (e.g. "the Slow mastery property").
+- **Topple remains partly redundant** while the hands' bundled Advantage
+  runs; it is the multi-ally pick (prone feeds the party's melee), not the
+  monk's own.
+- **Push on a taunt-tank** is geometry, not damage — the 15-foot emanation
+  mostly retains pushed targets; the fun is ledges and ally-threat lines.
+- Losing Nick trims roughly −11 DPR from the flat-Wis-rider loop (≈60 at
+  11, ≈77 at 17 before mastery effects; Graze buys back ~+7). The kit sits
+  ~1.1–1.25× the optimized Vengeance Paladin — the leanest it has measured,
+  at the floor of the owner's band; flagged for a re-sim after the rewrite.
+
+## 2026-08-09 — Barbed Court: level 17 is COMPLETE — no named capstone; original queue item 5 CLOSED
+
+Owner's ruling, verbatim:
+
+> 17 is done
+
+Effect: Monk 17 ships as the four accumulated payoffs — the hands rider
+doubling to 2 × Wisdom psychic, Focus-casting at 1 point per spell level
+(never upcast), the +3 Unarmed ladder step beside the d12 Martial Arts die,
+and the granted *Compulsion* row. No named capstone is added; the 2026-08-06
+candidates (Court of One, Unbreakable, Perfect Provocation) are retired
+unbuilt, and the Focus-recovery loop presented as option (b) is declined.
+
+Context recorded: 17's package measures 89 DPR in the fights-back
+environment (1.4× the optimized Vengeance Paladin), 11→17 growth +25%, and
+the freshly-cut complexity budget (two per-turn trackers) stays intact —
+every capstone candidate would have added tracking back.
+
+## 2026-08-09 — Barbed Court: hands rider is flat Wisdom psychic (doubling at 17); bespoke Shield DELETED; Flourish folds into the duel — trackers cut to two
+
+Owner's rulings, verbatim (answering three numbered questions):
+
+> 1yes to both
+>
+> 2 yes
+>
+> 3 yes
+
+Effects:
+
+1. **Invisible hands, final shape.** Bonus Action, 4 Focus Points, 15-foot
+   emanation, Concentration (owner-ruled), up to 10 minutes. While the hands
+   are manifested: your attacks deal **+ your Wisdom modifier Psychic
+   damage** on a hit against creatures in the emanation — **doubled (2 ×
+   Wis) from Monk 17** — and the bundled Advantage state stands as simmed.
+   No dice, no per-turn counter; the only tracking is Concentration and the
+   pool. This supersedes the Martial-Arts-dice scaling menu and all five
+   simulated nerf packages (P1 explicitly rejected as too complicated).
+   Measured in the fights-back environment (two enemies, concentration
+   saves, party present): **~71 DPR at 11, ~89 at 17** — 1.3×/1.4× the
+   optimized Vengeance Paladin (54/64), inside the owner's target band, and
+   the flat-Wisdom scaling weakness is carried by the ladder, the d12 step
+   and the ×2 at 17.
+2. **The bespoke 1-Focus Shield cast is deleted.** Rationale on record: the
+   pool reaches 17 and a 1-Focus Reaction +5 AC becomes effectively at-will,
+   deleting the rationing job of the slot economy. *Shield* remains on the
+   granted Court Spells row, castable with real slots only (the ×2 refresh
+   applies). Supersedes the bespoke-Shield rulings of 2026-08-07.
+3. **Distracting Flourish is no longer a once-per-turn tracked effect** —
+   folded into the duel as passive text (while your duel target is within 5
+   feet of your Mage Hand, it has Disadvantage on attack rolls against
+   creatures other than you). The goad, when its post-redesign numbers are
+   finally ruled (open backlog), is directed to be a **passive on-hit
+   rider, not a counted trigger**. Subclass per-turn trackers drop from
+   four to **two**: the Courtier's Slap and the one-cantrip-per-turn cap.
+
+## 2026-08-09 — Barbed Court: the invisible-hands emanation REQUIRES CONCENTRATION — owner-ruled, no longer an assumption
+
+Owner's ruling, verbatim:
+
+> Make sure the barbed court cme requires concentration
+
+Effect: the invisible-slapping-hands feature carries Concentration for its
+full duration, closing the open assumption in the entry below. Consequence
+already on the record and now load-bearing: the monk concentrates with an
+unproficient Constitution save while tanking by design — the feature's
+realistic uptime in melee is 2–4 rounds per cast, and every dummy-only sim
+figure for the hands is therefore an upper bound. The concentration slot also
+remains the kit's scarcest resource: the hands compete with Slow, Fear,
+Silence and every other concentration spell in the doc.
+
 ## 2026-08-09 — Barbed Court: CME becomes an original "invisible slapping hands" feature — BA cast, Focus cost, Martial Arts dice; scaling menu simulated, choice pending
 
 Owner's directive, verbatim:
@@ -814,8 +1560,7 @@ Owner's question and ruling, verbatim:
 
 Facts established by grep before answering, not from folklore:
 
-- **The third-caster table is in neither SRD.** "EK" and "Arcane
-  Trickster": zero hits in SRD 5.1 and SRD 5.2.1. Even the PHB multiclass
+- **The third-caster table is in neither SRD.** "EK" and "AT": zero hits in SRD 5.1 and SRD 5.2.1. Even the PHB multiclass
   clause "a third of your Fighter or Rogue levels" is absent — the SRD 5.2.1
   multiclass Spell Slots rule counts only full casters and "Half your levels
   (round up) in the Paladin and Ranger classes". The PHB EK/AT table as a

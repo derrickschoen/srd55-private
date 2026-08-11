@@ -29,6 +29,7 @@ import { raiseClassLevelForTest } from '../../helpers/class-levels';
 import { BuildReportBuilder } from '../../../src/reports/build-report-builder';
 import { SpellAccessBuilder } from '../../../src/access/spell-access-builder';
 import { CatalogImporter } from '../../../src/catalog/catalog-importer';
+import { CatalogAuthoringService } from '../../../src/authoring/draft-service';
 import {
   CONTENT_FINGERPRINT_SCHEME_V2,
   CONTENT_FINGERPRINT_SCHEME_V1,
@@ -206,18 +207,16 @@ describe('bundled authored-kind installer', () => {
       "SELECT count(*) FROM catalog_content_identities WHERE catalog_layer = 'external'",
     );
     const firstPlan = planBundledHomebrewInstall(db);
-    const previousCatalog = BUNDLED_HOMEBREW_CATALOG.map((entry) =>
-      entry.catalog_key === 'spell-student'
-        ? Object.freeze({
-            ...entry,
-            revisions: Object.freeze([entry.revisions[0]] as const),
-          })
-        : entry);
-    expect(sha256(canonicalJson(previousCatalog))).toBe(
+    const historicalCatalog = BUNDLED_HOMEBREW_CATALOG.map((entry) =>
+      Object.freeze({
+        ...entry,
+        revisions: Object.freeze([entry.revisions[0]] as const),
+      }));
+    expect(sha256(canonicalJson(historicalCatalog))).toBe(
       '8d36536109be8768e2c274958b1ee9eb70a74cb37a988c7f27e88eebb0d8d84a',
     );
     expect(firstPlan.inputHash).toBe(
-      '50209f767a55af8331a6ea0397f9ca28023ef1fbd173a5d1045c6277277cf3f4',
+      'fc3d16cb869924581fc66a4191ec59ec3b323ee5730a10404b80cfe90537b34a',
     );
 
     expect(firstPlan.entries.map((entry) => [entry.name, entry.outcome, entry.error])).toEqual([
@@ -230,14 +229,24 @@ describe('bundled authored-kind installer', () => {
       outcomes: [{ kind: 'create' }, { kind: 'create' }, { kind: 'create' }],
     });
     expect(db.scalar<number>("SELECT count(*) FROM catalog_content_identities WHERE catalog_layer = 'external'"))
-      .toBe((beforeRoots ?? 0) + 4);
+      .toBe((beforeRoots ?? 0) + 6);
     expect(db.allRaw(
       `SELECT superseded_content_key, successor_content_key
        FROM catalog_content_supersessions WHERE content_kind = 'subclass'`,
-    )).toEqual([{
-      superseded_content_key: '2024:content.subclass:spell-student',
-      successor_content_key: '2024:content.subclass:spell-student-bundled-revision-2',
-    }]);
+    )).toEqual([
+      {
+        superseded_content_key: '2024:content.subclass:spell-student',
+        successor_content_key: '2024:content.subclass:spell-student-bundled-revision-2',
+      },
+      {
+        superseded_content_key: '2024:content.subclass:veteran',
+        successor_content_key: '2024:content.subclass:veteran-bundled-revision-2',
+      },
+      {
+        superseded_content_key: '2024:content.subclass:warrior-of-the-barbed-court',
+        successor_content_key: '2024:content.subclass:warrior-of-the-barbed-court-bundled-revision-2',
+      },
+    ]);
     expect(db.scalar<number>('SELECT count(*) FROM catalog_content_drafts')).toBe(0);
 
     const rootsAfterFirst = db.scalar<number>('SELECT count(*) FROM catalog_content_identities');
@@ -250,7 +259,7 @@ describe('bundled authored-kind installer', () => {
       outcomes: [{ kind: 'match' }, { kind: 'match' }, { kind: 'match' }],
     });
     expect(db.scalar<number>('SELECT count(*) FROM catalog_content_identities')).toBe(rootsAfterFirst);
-    expect(db.scalar<number>('SELECT count(*) FROM catalog_content_supersessions')).toBe(1);
+    expect(db.scalar<number>('SELECT count(*) FROM catalog_content_supersessions')).toBe(3);
     expect(db.scalar<number>('SELECT count(*) FROM catalog_content_drafts')).toBe(0);
   }, 20_000);
 
@@ -268,10 +277,10 @@ describe('bundled authored-kind installer', () => {
     const report = new BuildReportBuilder(db).build(characterId);
     expect(report.classes[0]).toMatchObject({
       name: 'Monk',
-      subclass: 'Warrior of the Barbed Court',
+      subclass: 'Warrior of the Barbed Court (Bundled revision 2)',
       class_level: 7,
       spellcasting_ability: 'wisdom',
-      progression_type: 'third_down',
+      progression_type: 'third_up',
     });
     expect(db.allRaw(
       `SELECT class_level FROM subclass_progressions
@@ -288,15 +297,125 @@ describe('bundled authored-kind installer', () => {
       ability: spell.spellcasting_ability,
       alwaysPrepared: spell.always_prepared,
     }))).toEqual(expect.arrayContaining([
-      { name: 'Bane', ability: 'wisdom', alwaysPrepared: true },
-      { name: 'Command', ability: 'wisdom', alwaysPrepared: true },
+      { name: 'Shield', ability: 'wisdom', alwaysPrepared: true },
       { name: 'Dissonant Whispers', ability: 'wisdom', alwaysPrepared: true },
-      { name: 'Hideous Laughter', ability: 'wisdom', alwaysPrepared: true },
-      { name: 'Enthrall', ability: 'wisdom', alwaysPrepared: true },
-      { name: 'Suggestion', ability: 'wisdom', alwaysPrepared: true },
-      { name: 'Prestidigitation', ability: 'wisdom', alwaysPrepared: true },
+      { name: 'Shocking Grasp', ability: 'wisdom', alwaysPrepared: true },
+      { name: 'Chill Touch', ability: 'wisdom', alwaysPrepared: true },
+      { name: 'Ray of Frost', ability: 'wisdom', alwaysPrepared: true },
       { name: 'Vicious Mockery', ability: 'wisdom', alwaysPrepared: true },
+      { name: 'Mage Hand', ability: 'wisdom', alwaysPrepared: true },
+      { name: 'Guidance', ability: 'wisdom', alwaysPrepared: true },
+      { name: 'Mirror Image', ability: 'wisdom', alwaysPrepared: true },
+      { name: 'Blur', ability: 'wisdom', alwaysPrepared: true },
+      { name: 'Hold Person', ability: 'wisdom', alwaysPrepared: true },
     ]));
+    expect(report.caster.slots).toEqual([
+      { level: 1, count: 4 },
+      { level: 2, count: 2 },
+    ]);
+    expect(db.allRaw(
+      `SELECT rule_key, bucket, count(*) AS slot_count
+       FROM spell_selection_slots
+       WHERE character_id = ? AND rule_key LIKE 'barbed-court-%'
+         AND fixed_spell_version_id IS NULL
+       GROUP BY rule_key, bucket ORDER BY rule_key`,
+      [characterId],
+    )).toEqual([
+      { rule_key: 'barbed-court-cantrips', bucket: 'known', slot_count: 2 },
+      { rule_key: 'barbed-court-prepared-spells', bucket: 'known', slot_count: 7 },
+    ]);
+    expect(db.oneRaw(
+      `SELECT effect.effect_kind, effect.amount, effect.label,
+              identity.catalog_layer
+       FROM character_effects AS effect
+       JOIN character_source_instances AS source ON source.id = effect.source_instance_id
+       JOIN subclass_definitions AS subclass ON subclass.id = source.source_definition_id
+       JOIN catalog_content_identities AS identity
+         ON identity.content_kind = 'subclass' AND identity.content_key = subclass.content_key
+       WHERE effect.character_id = ? AND effect.label = 'Warding Image'`,
+      [characterId],
+    )).toEqual({
+      effect_kind: 'armor_class_bonus',
+      amount: 2,
+      label: 'Warding Image',
+      catalog_layer: 'external',
+    });
+  }, 20_000);
+
+  it('supersedes the rewritten subclasses without retargeting v1 characters and exposes replacement review', async () => {
+    const db = await database();
+    const entries = BUNDLED_HOMEBREW_CATALOG.slice(0, 2);
+    const v1 = entries.map((entry) => Object.freeze({
+      catalog_key: entry.catalog_key,
+      revisions: Object.freeze([entry.revisions[0]] as const),
+    }));
+    const initialPlan = planBundledHomebrewInstall(db, v1);
+    const initial = commitBundledHomebrewInstall(db, initialPlan.token, v1);
+    if (initial.kind !== 'committed') throw new Error('Initial rewritten-subclass catalog failed.');
+    const oldKeys = initial.outcomes.map((outcome) => {
+      if (outcome.kind !== 'create') throw new Error('Initial subclass was not created.');
+      return outcome.contentKey;
+    });
+    const characterIds = [
+      applySubclass(db, oldKeys[0]!, 9),
+      applySubclass(db, oldKeys[1]!, 7),
+    ];
+    const oldVeteranStrike = db.scalar<string>(
+      `SELECT feature.description FROM subclass_features AS feature
+       JOIN subclass_definitions AS subclass ON subclass.id = feature.subclass_definition_id
+       WHERE subclass.content_key = ? AND feature.name = 'Veteran''s Strike'`,
+      [oldKeys[0]!],
+    );
+    expect(oldVeteranStrike).toContain('doubled');
+
+    const successorPlan = planBundledHomebrewInstall(db, entries);
+    expect(successorPlan.entries.map((entry) => [entry.catalog_key, entry.outcome])).toEqual([
+      ['veteran', 'successor'],
+      ['warrior-of-the-barbed-court', 'successor'],
+    ]);
+    const successor = commitBundledHomebrewInstall(db, successorPlan.token, entries);
+    if (successor.kind !== 'committed') throw new Error('Successor catalog failed.');
+    const newKeys = successor.outcomes.map((outcome) => {
+      if (outcome.kind !== 'create') throw new Error('Successor subclass was not created.');
+      return outcome.contentKey;
+    });
+
+    expect(db.allRaw(
+      `SELECT level.character_id, subclass.content_key, identity.catalog_layer
+       FROM character_class_levels AS level
+       JOIN subclass_definitions AS subclass ON subclass.id = level.subclass_definition_id
+       JOIN catalog_content_identities AS identity
+         ON identity.content_kind = 'subclass' AND identity.content_key = subclass.content_key
+       WHERE level.character_id IN (?, ?) ORDER BY level.character_id`,
+      characterIds,
+    )).toEqual(characterIds.map((characterId, index) => ({
+      character_id: characterId,
+      content_key: oldKeys[index],
+      catalog_layer: 'external',
+    })));
+    expect(db.scalar<string>(
+      `SELECT feature.description FROM subclass_features AS feature
+       JOIN subclass_definitions AS subclass ON subclass.id = feature.subclass_definition_id
+       WHERE subclass.content_key = ? AND feature.name = 'Veteran''s Strike'`,
+      [oldKeys[0]!],
+    )).toBe(oldVeteranStrike);
+
+    const authoring = new CatalogAuthoringService(db);
+    for (const [index, oldKey] of oldKeys.entries()) {
+      const review = authoring.previewReplacementSet({
+        old_content_key: oldKey!,
+        new_content_key: newKeys[index]!,
+      });
+      expect(review.replacements).toHaveLength(1);
+      expect(review.replacements[0]).toMatchObject({
+        facts: { character_id: characterIds[index] },
+        review: [expect.objectContaining({
+          candidate_content_key: newKeys[index],
+          candidate_catalog_layer: 'external',
+          reason: 'installed-target',
+        })],
+      });
+    }
   }, 20_000);
 
   it('applies Spell Student through the publisher with its derived level-7 slots', async () => {
@@ -610,7 +729,9 @@ describe('bundled authored-kind installer', () => {
       expect.objectContaining({
         kind: 'subclass',
         content_key: barbedCourt.contentKey,
-        aggregate: expect.objectContaining({ name: 'Warrior of the Barbed Court' }),
+        aggregate: expect.objectContaining({
+          name: 'Warrior of the Barbed Court (Bundled revision 2)',
+        }),
       }),
       expect.objectContaining({
         kind: 'species',
@@ -628,12 +749,22 @@ describe('bundled authored-kind installer', () => {
         aggregate: expect.objectContaining({ name: 'Portable Background' }),
       }),
     ]));
-    expect(backup.supersessions).toEqual([{
-      content_kind: 'species',
-      superseded_content_key: origins.speciesKey,
-      successor_content_key: origins.successorSpeciesKey,
-      recorded_at: '2042-08-07T11:59:00.000Z',
-    }]);
+    expect(backup.supersessions).toEqual([
+      {
+        content_kind: 'species',
+        superseded_content_key: origins.speciesKey,
+        successor_content_key: origins.successorSpeciesKey,
+        recorded_at: '2042-08-07T11:59:00.000Z',
+      },
+      {
+        content_kind: 'subclass',
+        superseded_content_key:
+          '2024:content.subclass:warrior-of-the-barbed-court',
+        successor_content_key:
+          '2024:content.subclass:warrior-of-the-barbed-court-bundled-revision-2',
+        recorded_at: expect.any(String),
+      },
+    ]);
     const sourceProjection = projectStoredAuthoredContentV1(source, {
       kind: 'subclass',
       contentKey: barbedCourt.contentKey,
@@ -663,7 +794,8 @@ describe('bundled authored-kind installer', () => {
       [imported.characterId],
     );
     expect(importedDefinition).toMatchObject({
-      name: 'Warrior of the Barbed Court', catalog_layer: 'external',
+      name: 'Warrior of the Barbed Court (Bundled revision 2)',
+      catalog_layer: 'external',
     });
     expect(target.allRaw(
       `SELECT source.source_type, identity.content_key, identity.catalog_layer

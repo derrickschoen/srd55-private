@@ -221,7 +221,10 @@ describe('persisted class progression catalog', () => {
     ]);
     expect(commitBundledHomebrewInstall(db, plan.token, catalog)).toMatchObject({
       kind: 'committed',
-      outcomes: [{ kind: 'create', contentKey: '2024:content.subclass:veteran' }],
+      outcomes: [{
+        kind: 'create',
+        contentKey: '2024:content.subclass:veteran-bundled-revision-2',
+      }],
     });
     expect(
       db.allRaw(
@@ -230,22 +233,25 @@ describe('persisted class progression catalog', () => {
            FROM subclass_features AS feature
            JOIN subclass_definitions AS subclass
              ON subclass.id = feature.subclass_definition_id
-          WHERE subclass.content_key = '2024:content.subclass:veteran'
+          WHERE subclass.content_key = '2024:content.subclass:veteran-bundled-revision-2'
           ORDER BY feature.sort_order`,
       ),
     ).toEqual([
       { class_level: 3, sort_order: 1, name: 'Seasoned Professional', has_description: 1 },
-      { class_level: 3, sort_order: 2, name: 'Too Old for This', has_description: 1 },
-      { class_level: 3, sort_order: 3, name: 'Deuces Are Wild', has_description: 1 },
-      { class_level: 3, sort_order: 4, name: 'Sure Strike', has_description: 1 },
-      { class_level: 9, sort_order: 5, name: "Veteran's Strike", has_description: 1 },
-      { class_level: 9, sort_order: 6, name: 'Extensive Experience', has_description: 1 },
-      { class_level: 13, sort_order: 7, name: 'Veteran Reflexes', has_description: 1 },
-      { class_level: 13, sort_order: 8, name: 'Critical Instincts', has_description: 1 },
-      { class_level: 13, sort_order: 9, name: 'Fighting Style', has_description: 1 },
-      { class_level: 17, sort_order: 10, name: 'Master of Experience', has_description: 1 },
-      { class_level: 17, sort_order: 11, name: 'Heightened Lethality', has_description: 1 },
-      { class_level: 17, sort_order: 12, name: 'Blindsight', has_description: 1 },
+      { class_level: 3, sort_order: 2, name: 'Old Training', has_description: 1 },
+      { class_level: 3, sort_order: 3, name: 'Deeper Cuts', has_description: 1 },
+      { class_level: 3, sort_order: 4, name: 'Old Reserves', has_description: 1 },
+      { class_level: 3, sort_order: 5, name: 'Too Old for This', has_description: 1 },
+      { class_level: 3, sort_order: 6, name: 'Deuces Are Wild', has_description: 1 },
+      { class_level: 3, sort_order: 7, name: 'Sure Strike', has_description: 1 },
+      { class_level: 9, sort_order: 8, name: "Veteran's Strike", has_description: 1 },
+      { class_level: 9, sort_order: 9, name: 'Extensive Experience', has_description: 1 },
+      { class_level: 13, sort_order: 10, name: 'Veteran Reflexes', has_description: 1 },
+      { class_level: 13, sort_order: 11, name: 'Critical Instincts', has_description: 1 },
+      { class_level: 13, sort_order: 12, name: 'Fighting Style', has_description: 1 },
+      { class_level: 17, sort_order: 13, name: 'Master of Experience', has_description: 1 },
+      { class_level: 17, sort_order: 14, name: 'Heightened Lethality', has_description: 1 },
+      { class_level: 17, sort_order: 15, name: 'Blindsight', has_description: 1 },
     ]);
     expect(
       db.oneRaw(
@@ -260,7 +266,7 @@ describe('persisted class progression catalog', () => {
                   WHERE feature.subclass_definition_id = subclass.id)
                   AS feature_effect_rows
            FROM subclass_definitions AS subclass
-          WHERE subclass.content_key = '2024:content.subclass:veteran'`,
+          WHERE subclass.content_key = '2024:content.subclass:veteran-bundled-revision-2'`,
       ),
     ).toEqual({
       spellcasting_ability: null,
@@ -283,7 +289,7 @@ describe('persisted class progression catalog', () => {
          FROM subclass_definitions AS subclass
          JOIN subclass_features AS feature
            ON feature.subclass_definition_id = subclass.id
-        WHERE subclass.content_key = '2024:content.subclass:veteran'
+        WHERE subclass.content_key = '2024:content.subclass:veteran-bundled-revision-2'
         ORDER BY feature.sort_order`,
     );
 
@@ -300,7 +306,7 @@ describe('persisted class progression catalog', () => {
            FROM subclass_definitions AS subclass
            JOIN subclass_features AS feature
              ON feature.subclass_definition_id = subclass.id
-          WHERE subclass.content_key = '2024:content.subclass:veteran'
+          WHERE subclass.content_key = '2024:content.subclass:veteran-bundled-revision-2'
           ORDER BY feature.sort_order`,
       ),
     ).toEqual(before);
