@@ -5,6 +5,31 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-11 — Foreseen strikes: Long Rest only
+
+Owner's ruling, verbatim (follow-up to the v2 entry below):
+
+> Make it long rest only. I don’t think paladins get anything on a short
+> rest.
+
+Applied: the pool regains on a Long Rest only; mechanics otherwise
+unchanged (Cha-mod Reactions, +Cha to a self or allied attack roll).
+
+**Factual note, surfaced at ruling time**: the premise is not quite
+right — SRD 5.2.1 paladins DO have one Short-Rest hook: Channel
+Divinity "You regain one of its expended uses when you finish a Short
+Rest" (lines 3275–3278). It is the class's only one; no SRD paladin
+subclass feature owns a Short-Rest resource (Devotion: Sacred Weapon
+rides the CD pool, Aura of Devotion and Smite of Protection are
+passive, Holy Nimbus is 1/Long Rest with a level-5-slot reload). The
+Long-Rest cadence for Foreseen strikes therefore matches subclass
+convention even though the stated premise was off. Ruling applied as
+given; the note was surfaced to the owner in the same reply, and any
+reversal will be its own entry.
+
+Sim: burst unchanged (99%/96%/96%/102% of Vengeance); day drops back to
+82–84% (94% at 17) — 11.7/23.8/45.5/61.5 vs 14.3/29.1/54.2/65.5.
+
 ## 2026-08-11 — Foreseen strikes v2: a Reaction adds Cha to a self or allied attack roll, per Short/Long Rest
 
 Owner's ruling, verbatim (superseding the miss-to-hit shape from the
