@@ -23,6 +23,47 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
+## RESTART POINT 2026-08-10-d (newest - read first)
+MAIN 0cb12cae (mirror pushed after verified verdicts). FLOORS: vitest
+267/4,342 all-pass; PW 157 pool; build 0 with digest verification;
+migrations 0000-0041. SIXTY-NINE merges. Rulings through D231.
+
+69TH, wt/w7 (owner-selected from the sweep-3 parked candidate): the
+replacement flow loses its silent lossy Match. The unit's opening
+reachability investigation found the hazard BROADER than the parked
+finding: every replacement preview's reference-only installed-target
+row was misclassified as a cross-boundary key-collision — the
+fingerprint-distrust policy built for cross-user sharing was
+over-applied same-database, discarding the digest the code had itself
+computed from the installed aggregate (i.e. proof Match is lossless).
+Codex's round-0 parity fix therefore forced an explicit Match click
+onto EVERY ordinary replacement journey; the sol digest verified all
+mechanical claims and flagged exactly that as a false dilemma
+(PASS WITH FLAGS), and the supervisor adopted the flag as the round-1
+ask. Fix 1: a nominal private-symbol
+InstalledTargetReferenceCertificate — mintable only from a complete
+stored aggregate, structurally impossible for foreign reference
+projections to carry — certifies the installed-target row (Match
+default, one-click Apply restored, Clone available non-default);
+genuine fingerprint-distinct collisions keep the full parity
+semantics (no default, ReplacementDecision closed union with Clone
+requiring clone_name — Clone was previously UNREPRESENTABLE, per-row
+UI with Apply disabled until resolved, typed
+replacement_review_required refusal); cross-user sharing distrust
+unchanged; W4's shared evaluator untouched; D226 checksum pair
+re-pinned at both sites deliberately (content-registry.ts is a
+declared migration source). Fix 2: the full gate caught two
+pre-existing publisher pins (HA-4/HA-5 versions-lineage) still
+pinning the old classification — adapted to strict full-object
+equality. Supervisor self-verified the certificate type, the checksum
+pair, and the round-2 two-file delta.
+
+IN FLIGHT: nothing. QUEUES EMPTY — the owner picks what feeds next.
+Worktrees: main + wt/party only.
+
+WAITING ON OWNER: Barbed Court sync word; walkthrough friction list;
+bundle deletion (~/dnd-prerewrite-backup); wt/party retirement.
+
 ## RESTART POINT 2026-08-10-c (newest - read first)
 MAIN 4dd7ce6f (mirror pushed after verified verdicts). FLOORS: vitest
 267/4,341 all-pass; PW 157 pool; build 0 with digest verification;
