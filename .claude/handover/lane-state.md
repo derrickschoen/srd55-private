@@ -23,7 +23,83 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-11-a (newest - read first)
+## RESTART POINT 2026-08-11-b (newest - read first)
+MAIN bc52a84a (mirror pushed after verified verdicts). FLOORS: vitest
+269/4,360 all-pass; PW 162 pool; build 0; migrations 0000-0041.
+SEVENTY-SIX merges. SWEEP 4 COMPLETE: S4-01..S4-10 across six units,
+merges 71-76 (X1 export, X2 background truth, X3 no-certificates +
+share names, X4 pickers + reachable remedy, X5 save honesty, X6 human
+preview + casing).
+
+Landed since 08-11-a, each judged (bounded sol digest + supervisor
+self-checks) + full-gated:
+- 75TH 2366e476 X5: one save-status seam, schema-wide human validation
+  vocabulary, live shell refresh. FIX ROUND 1: review caught the
+  failure path piping raw error text ("RPC client is closed.") into
+  pinned user copy — now code-mapped human sentences + negative pins.
+- 76TH bc52a84a X6: exhaustive publish-preview renderer (9 grant + 11
+  effect kinds, new kind = compile error), shared human-labels, jargon
+  removed, display-seam casing parity. My keep-both import-conflict
+  resolution dropped an import opener (syntax error) — tsc caught it
+  pre-gate, fixed c1828c96, disclosed. One full-vitest run VOIDED by
+  owner-IDE load (avg 74; 64 pure-timeout failures) — rerun clean on a
+  calm machine; RULE ADDED: uptime check (1-min load < 4) before every
+  suite.
+- Taxonomy: docs/design/2026-08-11-sheet-effect-taxonomy.md committed
+  499bba85 (isolated two-agent clean-room pipeline; owner deleted raw
+  transcripts; 73 shapes + provenance §16.4) + Addendum A 85b906bf
+  (S74-S98 from the 307-item corpus validation; representability
+  209→280/307; companion-interior boundary declared). Item corpus at
+  ~/Downloads/dnd/items/ (307 files, 5 haiku collectors, 0 failed).
+- Typed-effect-system tranche-1 plan at
+  ~/.claude/plans/2026-08-11-typed-effect-system-tranche-1.md — THREE-
+  ROUND consensus (round 1 near-all accepted incl. ability_override
+  integration over dormant vocabulary; round 2 five blockers fixed
+  incl. LOAD-BEARING supersession and projector-arm-into-E2; round 3
+  CONSENSUS). Increments E1-E5 → merges target 77th-81st.
+
+OWNER DIRECTED FULL FAN-OUT (15:10). IN FLIGHT at write time: E1
+(wt/e1, ValueExpression domain), E2 (wt/e2, migration 0042 + Rogue
+seed + projector arm; plan text is the parallel contract), DEBT
+(wt/debt, adoption-dialog "Certified" label + jargon sweep, port 5090),
+LAYERFIX (wt/layerfix, port 5110 — see finding below), SWEEP 5 (wt/
+sweep5, REVIEW ONLY, player-persona leveling/multiclass walkthrough,
+port 5010). Merge order when gates free (strictly sequential, load-
+checked): E1 → E2 (contract-drift check) → DEBT/LAYERFIX as ready.
+
+LAYER-CONFLATION AUDIT (13-agent workflow, adversarially verified):
+THREE CONFIRMED findings, one root cause — recordSupersession
+(authoring-lifecycle.ts:71) never checks the SUCCESSOR layer, the
+publish-review Match/srd-fallback flow can record external→bundled
+edges, and BOTH purge lineage CTEs (archive-set-lifecycle.ts:661,
+:318) walk supersessions with no layer predicate → purging archived
+homebrew can DESTROY bundled SRD catalog rows and hard-delete
+unrelated characters using them. BLOCKER-class; LAYERFIX lane
+dispatched with root-cause + defense-in-depth + production-writer
+regression scenario. One finding refuted; ~74 clean negatives.
+
+Process ledger (full length per protocol): FIFTH trailing-&
+backgrounding violation (post-76th vitest orphaned; self-caught same
+minute; supervised by log-poll; commit durable). FOURTH was the X4
+fix-1 commit chain. The X4 widening finding stands as recorded in
+08-11-a-era notes: bounded digest AND supervisor judgment endorsed a
+change the full gate proved wrong; regression pin now exists. Codex
+phantom "Claude review" citations continued in every lane report —
+ignored as evidence each time. X4 digest #1 killed at 1h (stalled
+running tests) → ALL digests now BOUNDED read-only, no test execution.
+X3 mutation script is codex-sandbox-only (apply_patch) but the kill
+cycle was independently reproduced by the reviewer. Clean-room
+quarantines destroyed (researcher/reviewer transcripts deleted by
+owner; collector/verifier transcripts remain but contain only fetched
+public-wiki text the owner directed be downloaded to ~/Downloads).
+
+Owner rulings this window: fan-out standing; party sync = periodic
+small proposals (memory party-sync-cadence.md); Veteran sheet-accuracy
+= GENERAL typed shape + stat modifiers, pool SIZES only (no tracker);
+X5/X6 wave-3 parallel-with-planning honored. Waiting on owner:
+walkthrough friction list (stale?), taxonomy-addendum acknowledgment.
+
+## RESTART POINT 2026-08-11-a (superseded by 08-11-b)
 MAIN 5dfbf120 (mirror pushed after verified verdicts). FLOORS: vitest
 267/4,344 all-pass; PW 158 pool; build 0; migrations 0000-0041.
 SEVENTY-TWO merges.

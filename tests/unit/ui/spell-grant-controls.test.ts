@@ -54,7 +54,7 @@ describe('shared spell grant author controls', () => {
       expect(elementText(select as unknown as Node)).toContain(hostileName);
       expect(root.querySelectorAll('[data-hostile-spell]')).toHaveLength(0);
       expect(select.querySelector('optgroup')?.getAttribute('label')).toBe(
-        'Level 2 · expanded — Homebrew · external layer',
+        'Level 2 · Expanded rules — Homebrew · external layer',
       );
       select.value = 'expanded:spell:hostile';
       select.dispatchEvent(new Event('change'));

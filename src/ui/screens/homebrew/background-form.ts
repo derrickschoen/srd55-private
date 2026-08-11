@@ -23,6 +23,8 @@ import {
 } from '../../../domain/enums';
 import type { ContentKey } from '../../../domain/ids';
 import { RpcError } from '../../../rpc/protocol';
+import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
+import { SKILL_LABELS } from '../../../rules/skills';
 import { createAuthoringEditGeneration } from '../../authoring/edit-generation';
 import {
   authoringPathKey,
@@ -45,8 +47,13 @@ import {
 } from '../../content-adoption-dialog';
 import { clear, element, type Cleanup } from '../../dom';
 import { freeTextSpan } from '../../free-text';
+import { abilityLabel, rulesEditionLabel } from '../../human-labels';
 import type { ScreenContext } from '../../screen';
 import { homebrewPublishedPath } from './homebrew-routes';
+import {
+  renderPublishPreviewEffect,
+  renderPublishPreviewGrant,
+} from './publish-preview-renderer';
 import {
   showDraftSaveFailure,
   showDraftSaveProgress,
@@ -151,7 +158,11 @@ function validationIssues(error: unknown): readonly AuthoringValidationIssue[] |
     : null;
 }
 
-function previewElement(preview: PublishPreview): HTMLElement {
+function previewElement(
+  preview: PublishPreview,
+  draft: BackgroundAuthoringDraft,
+  references: BackgroundAuthoringReferences,
+): HTMLElement {
   if (preview.aggregate.kind !== 'background') {
     throw new TypeError('The background form received a non-background publish preview.');
   }
@@ -167,14 +178,36 @@ function previewElement(preview: PublishPreview): HTMLElement {
   const name = element('p');
   name.append('Name: ', freeTextSpan(aggregate.name));
   const feat = element('p');
-  feat.append('Default Origin feat: ', freeTextSpan(aggregate.default_origin_feat_display_name));
+  const featReference = references.origin_feats.find((reference) =>
+    reference.content_key === draft.default_origin_feat_content_key
+  );
+  feat.append(
+    'Default Origin feat: ',
+    freeTextSpan(aggregate.default_origin_feat_display_name),
+    ` · ${catalogLayerLabel(featReference?.catalog_layer ?? 'unknown')}`,
+  );
   root.append(
     name,
-    element('p', { text: `Rules edition: ${aggregate.rules_edition}` }),
-    element('p', { text: `Suggested abilities: ${aggregate.suggested_abilities.map(titleCase).join(', ')}` }),
+    element('p', { text: `Rules edition: ${rulesEditionLabel(aggregate.rules_edition)}` }),
+    element('p', { text: `Suggested abilities: ${aggregate.suggested_abilities.map(abilityLabel).join(', ')}` }),
     feat,
-    element('p', { text: `Skill proficiencies: ${aggregate.skill_proficiencies.map(titleCase).join(', ')}` }),
+    element('p', { text: `Skill proficiencies: ${aggregate.skill_proficiencies.map((skill) => SKILL_LABELS[skill]).join(', ')}` }),
   );
+  const grants = element('ul', { attributes: { 'aria-label': 'Grant preview' } });
+  for (const grant of aggregate.grants) {
+    grants.append(renderPublishPreviewGrant(grant, {
+      catalogNameForGrant: (candidate) => candidate.kind === 'grant_source'
+        ? {
+            name: aggregate.default_origin_feat_display_name,
+            catalog_layer: featReference?.catalog_layer ?? 'unknown',
+          }
+        : null,
+    }));
+  }
+  if (aggregate.grants.length === 0) {
+    grants.append(element('li', { text: 'No structured grants.' }));
+  }
+  root.append(grants);
   if (aggregate.tool_reference_text !== null) {
     const tool = element('p');
     tool.append('Tool reference: ', freeTextSpan(aggregate.tool_reference_text));
@@ -190,7 +223,19 @@ function previewElement(preview: PublishPreview): HTMLElement {
     const list = element('ol');
     for (const item of items) {
       const row = element('li');
-      row.append(`${String(item.quantity)} × `, freeTextSpan(item.printed_name), ` (${item.kind})`);
+      row.append(`${String(item.quantity)} × `, freeTextSpan(item.printed_name));
+      if (item.kind === 'gear') {
+        row.append(' (gear)');
+      } else {
+        const draftItem = (label === 'A'
+          ? draft.equipment_option_a
+          : draft.equipment_option_b)[item.sort_order - 1];
+        const referenceList = item.kind === 'weapon' ? references.weapons : references.armors;
+        const reference = draftItem === undefined || draftItem.kind === 'gear'
+          ? undefined
+          : referenceList.find((candidate) => candidate.content_key === draftItem.content_key);
+        row.append(` (${item.kind}) · ${catalogLayerLabel(reference?.catalog_layer ?? 'unknown')}`);
+      }
       list.append(row);
     }
     section.append(heading, list);
@@ -198,9 +243,7 @@ function previewElement(preview: PublishPreview): HTMLElement {
   }
   const effects = element('ul', { attributes: { 'aria-label': 'Background effect preview' } });
   for (const effect of aggregate.effects) {
-    const row = element('li');
-    row.append(`${titleCase(effect.kind)} — `, freeTextSpan(effect.label));
-    effects.append(row);
+    effects.append(renderPublishPreviewEffect(effect));
   }
   root.append(effects);
   if (aggregate.reference_text !== '') {
@@ -217,7 +260,7 @@ function referenceOptions(
 ): void {
   select.append(...catalogSelectGroups(references.map((reference) => ({
     value: reference.content_key,
-    label: `${reference.name} (${reference.rules_edition})`,
+    label: `${reference.name} (${rulesEditionLabel(reference.rules_edition)})`,
     catalogLayer: reference.catalog_layer,
   }))));
 }
@@ -288,7 +331,12 @@ export function renderBackgroundForm(options: BackgroundFormOptions): Cleanup {
       attributes: { id: 'background-rules-edition', required: '', ...pathAttribute(['rules_edition']) },
     });
     edition.append(element('option', { text: 'Choose…', attributes: { value: '' } }));
-    for (const value of rulesEditions) edition.append(element('option', { text: value, attributes: { value } }));
+    for (const value of rulesEditions) {
+      edition.append(element('option', {
+        text: rulesEditionLabel(value),
+        attributes: { value },
+      }));
+    }
     edition.value = document.rules_edition ?? '';
     edition.addEventListener('change', () => update({
       ...document,
@@ -699,7 +747,7 @@ export function renderBackgroundForm(options: BackgroundFormOptions): Cleanup {
         if (!edits.isCurrent(generation)) { discardStalePreview(); return; }
         clear(validationMount);
         options.mount.querySelector('.background-publish-preview')?.remove();
-        const rendered = previewElement(publishPreview);
+        const rendered = previewElement(publishPreview, document, options.references);
         const publish = element('button', {
           className: 'button-primary', text: 'Publish background',
           attributes: { type: 'button', 'data-authoring-action': 'publish-background' },

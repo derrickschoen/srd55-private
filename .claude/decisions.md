@@ -7,6 +7,24 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D232 — OWNER: the taxonomy's legendary/artifact gap mechanisms stay prose-only (2026-08-11)
+
+The twelve systematic gap families from the 307-item corpus validation
+(taxonomy Addendum A, S74–S98: second stat-blocked entity, instant
+destruction, redirection/reflection, outcome-flip, sub-daily/elapsed-time
+cadences, banked whole-spell storage, random heterogeneous tables,
+involuntary compulsion, repeat-save-to-end, self-state toggles, alignment
+target/gate, and the single-item oddities) are FINE AS TEXT ONLY — they do
+not change the numbers on the sheet, so the engine never grows
+constructors for them. The taxonomy documents them; the sheet renders
+their prose; the table adjudicates. Boundary application: where such a
+shape carries a plain numeric maximum the existing pool machinery already
+models (an item charge pool with an exotic cadence, a storage capacity),
+the NUMBER is modeled and the exotic behavior stays prose. This bounds
+the engine roadmap to number-affecting shapes (tranche 1 and its
+successors) and supersedes the addendum's implicit "future engine
+tranche" framing for these families.
+
 ## D231 — OWNER: U2 lineage rulings — mint content-v2; no step-advance gating; High Elf cantrip swap IS modeled (2026-08-09)
 
 Three rulings on the species-lineage design

@@ -6,6 +6,7 @@ import type {
 import type { ContentKey } from '../../../domain/ids';
 import { catalogSelectGroups } from '../../catalog-control-disclosure';
 import { element } from '../../dom';
+import { rulesEditionLabel } from '../../human-labels';
 
 type SpellDraftGrant = Exclude<AuthoringDraftGrant, { readonly kind: 'skill_proficiency' }>;
 
@@ -114,7 +115,7 @@ export function spellGrantControls(options: SpellGrantControlsOptions): readonly
       value: entry.content_key,
       label: entry.name,
       catalogLayer: entry.catalog_layer,
-      group: `${entry.level === 0 ? 'Cantrip' : `Level ${String(entry.level)}`} · ${entry.rules_edition}`,
+      group: `${entry.level === 0 ? 'Cantrip' : `Level ${String(entry.level)}`} · ${rulesEditionLabel(entry.rules_edition)}`,
     }))));
     if (
       grant.spell_content_key !== null &&

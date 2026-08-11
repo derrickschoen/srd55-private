@@ -294,20 +294,32 @@ export class HomebrewArchiveSetService {
   #lineageRevisionCount(content: ContentLifecycleRow): number {
     const count = this.db.scalar<number>(
       `WITH RECURSIVE lineage(content_key) AS (
-         VALUES (?)
+         SELECT identity.content_key
+           FROM catalog_content_identities AS identity
+          WHERE identity.content_kind = ?
+            AND identity.content_key = ?
+            AND identity.catalog_layer = 'external'
          UNION
          SELECT edge.superseded_content_key
            FROM catalog_content_supersessions AS edge
            JOIN lineage ON lineage.content_key = edge.successor_content_key
+           JOIN catalog_content_identities AS identity
+             ON identity.content_kind = edge.content_kind
+            AND identity.content_key = edge.superseded_content_key
           WHERE edge.content_kind = ?
+            AND identity.catalog_layer = 'external'
          UNION
          SELECT edge.successor_content_key
            FROM catalog_content_supersessions AS edge
            JOIN lineage ON lineage.content_key = edge.superseded_content_key
+           JOIN catalog_content_identities AS identity
+             ON identity.content_kind = edge.content_kind
+            AND identity.content_key = edge.successor_content_key
           WHERE edge.content_kind = ?
+            AND identity.catalog_layer = 'external'
        )
        SELECT count(*) FROM lineage`,
-      [content.contentKey, content.kind, content.kind],
+      [content.kind, content.contentKey, content.kind, content.kind],
     );
     if (count === null || !Number.isSafeInteger(count) || count < 1) {
       throw new TypeError('Archived content lineage has an invalid revision count.');
@@ -333,17 +345,29 @@ export class HomebrewArchiveSetService {
       : '';
     return Object.freeze(this.db.all(
       `WITH RECURSIVE lineage(content_key) AS (
-         VALUES (?)
+         SELECT identity.content_key
+           FROM catalog_content_identities AS identity
+          WHERE identity.content_kind = ?
+            AND identity.content_key = ?
+            AND identity.catalog_layer = 'external'
          UNION
          SELECT edge.superseded_content_key
            FROM catalog_content_supersessions AS edge
            JOIN lineage ON lineage.content_key = edge.successor_content_key
+           JOIN catalog_content_identities AS identity
+             ON identity.content_kind = edge.content_kind
+            AND identity.content_key = edge.superseded_content_key
           WHERE edge.content_kind = ?
+            AND identity.catalog_layer = 'external'
          UNION
          SELECT edge.successor_content_key
            FROM catalog_content_supersessions AS edge
            JOIN lineage ON lineage.content_key = edge.superseded_content_key
+           JOIN catalog_content_identities AS identity
+             ON identity.content_kind = edge.content_kind
+            AND identity.content_key = edge.successor_content_key
           WHERE edge.content_kind = ?
+            AND identity.catalog_layer = 'external'
        )
        SELECT character.id AS character_id,
               character.revision AS character_revision,
@@ -365,7 +389,14 @@ export class HomebrewArchiveSetService {
            WHERE member.content_kind = ?
         )
         ORDER BY character.id`,
-      [content.contentKey, content.kind, content.kind, content.kind, content.kind],
+      [
+        content.kind,
+        content.contentKey,
+        content.kind,
+        content.kind,
+        content.kind,
+        content.kind,
+      ],
       characterRow,
     ).map(publicCharacter));
   }
@@ -659,21 +690,33 @@ export class HomebrewArchiveSetService {
         );
         this.db.exec(
           `WITH RECURSIVE lineage(content_key) AS (
-             VALUES (?)
+             SELECT identity.content_key
+               FROM catalog_content_identities AS identity
+              WHERE identity.content_kind = ?
+                AND identity.content_key = ?
+                AND identity.catalog_layer = 'external'
              UNION
              SELECT edge.superseded_content_key
                FROM catalog_content_supersessions AS edge
                JOIN lineage ON lineage.content_key = edge.successor_content_key
+               JOIN catalog_content_identities AS identity
+                 ON identity.content_kind = edge.content_kind
+                AND identity.content_key = edge.superseded_content_key
               WHERE edge.content_kind = ?
+                AND identity.catalog_layer = 'external'
              UNION
              SELECT edge.successor_content_key
                FROM catalog_content_supersessions AS edge
                JOIN lineage ON lineage.content_key = edge.superseded_content_key
+               JOIN catalog_content_identities AS identity
+                 ON identity.content_kind = edge.content_kind
+                AND identity.content_key = edge.successor_content_key
               WHERE edge.content_kind = ?
+                AND identity.catalog_layer = 'external'
            )
            INSERT INTO ha11_catalog_lineage_purge_scope (content_key)
            SELECT content_key FROM lineage`,
-          [contentKey, contentKind, contentKind],
+          [contentKind, contentKey, contentKind, contentKind],
         );
 
         const purgedContentKeys = Object.freeze(
