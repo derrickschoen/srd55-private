@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   deriveContentIdentityV1,
 } from '../../../src/catalog/content-identity';
+import { externalContentDisclosure } from '../../../src/catalog/content-adoption';
 import { projectFeatContentV1 } from '../../../src/catalog/source-content-projector-v1';
 import { RpcClient } from '../../../src/rpc/client';
 import { createShareClient } from '../../../src/sharing/client';
@@ -87,6 +88,19 @@ function clientFor(document: CharacterShareDocument) {
 }
 
 describe('share client try-then-warn encoding', () => {
+  it('uses honest UNKNOWN display copy when an aggregate supplies no name', () => {
+    expect(externalContentDisclosure({
+      id: 'portable:species:missing-name',
+      kind: 'species',
+      name: '   ',
+    })).toEqual({
+      id: 'portable:species:missing-name',
+      kind: 'species',
+      name: 'UNKNOWN',
+      catalog_layer: 'external',
+    });
+  });
+
   it('falls back to a reference-only fragment and names every omitted carried reference', async () => {
     const highEntropy = noise(180_000);
     const document = documentWithPortableFeats(Array.from(
@@ -99,6 +113,7 @@ describe('share client try-then-warn encoding', () => {
     expect(result).toEqual({
       kind: 'encoded',
       fragment: expect.any(String),
+      embeddedContent: [],
       omittedContent: [{ kind: 'feat', contentKey: carriedFeatKey }],
     });
     if (result.kind !== 'encoded') throw new Error('Expected encoded fallback.');
@@ -112,8 +127,18 @@ describe('share client try-then-warn encoding', () => {
     const result = await clientFor(document).createFragmentResult(1);
 
     expect(result.kind).toBe('encoded');
-    expect(result).not.toHaveProperty('omittedContent');
     if (result.kind !== 'encoded') throw new Error('Expected embedded fragment.');
+    expect(Object.keys(result).sort()).toEqual([
+      'embeddedContent',
+      'fragment',
+      'kind',
+    ]);
+    expect(result.embeddedContent).toEqual([{
+      id: `portable:feat:${carriedFeatKey}`,
+      kind: 'feat',
+      name: 'Keen Memory',
+      catalog_layer: 'external',
+    }]);
     await expect(decodeShareFragment(result.fragment)).resolves.toEqual(document);
   });
 });

@@ -7,10 +7,13 @@ import {
 } from '../../../sharing/client';
 import type { SharePreview } from '../../../sharing/character-share';
 import type { ContentImportPlan } from '../../../catalog/content-adoption';
+import type { ContentImportDisclosure } from '../../../catalog/content-adoption';
+import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
 import { createContentAdoptionDialog } from '../../content-adoption-dialog';
 import { LIBRARY_IMPORT_ROUTE } from './import-backup-controls';
 import { contentImportLabel } from '../../../sharing/import-issues';
 import { element, listen, type Cleanup } from '../../dom';
+import { freeTextSpan } from '../../free-text';
 
 const QR_MAX_LINK_LENGTH = 2_000;
 
@@ -192,7 +195,11 @@ export function createShareControls(
   });
   const previewTitle = element('h3');
   const previewDetails = element('p');
-  previewPanel.append(previewTitle, previewDetails, addButton);
+  const embeddedContent = element('section', {
+    className: 'share-embedded-content',
+    attributes: { hidden: '', 'aria-label': 'Embedded external content' },
+  });
+  previewPanel.append(previewTitle, previewDetails, embeddedContent, addButton);
 
   const linkOutput = element('input', {
     className: 'field share-link-output',
@@ -256,10 +263,53 @@ export function createShareControls(
     qr.removeAttribute('src');
   }
 
-  function announce(message: string, error = false): void {
+  function announce(message: string | Node, error = false): void {
     status.replaceChildren(message);
     status.classList.toggle('transfer-error', error);
     status.setAttribute('role', error ? 'alert' : 'status');
+  }
+
+  function contentDisclosure(disclosure: ContentImportDisclosure): HTMLElement {
+    const label = element('span');
+    label.append(
+      freeTextSpan(disclosure.name),
+      ` — ${disclosure.kind} — ${catalogLayerLabel(disclosure.catalog_layer)}`,
+    );
+    return label;
+  }
+
+  function renderEmbeddedContent(
+    disclosures: readonly ContentImportDisclosure[],
+  ): void {
+    embeddedContent.replaceChildren();
+    embeddedContent.hidden = disclosures.length === 0;
+    if (disclosures.length === 0) return;
+    const list = element('ul');
+    for (const disclosure of disclosures) {
+      list.append(element('li', {}, [contentDisclosure(disclosure)]));
+    }
+    embeddedContent.append(
+      element('p', {
+        text: 'This external content will be installed with the character:',
+      }),
+      list,
+    );
+  }
+
+  function shareReadyAnnouncement(
+    base: string,
+    disclosures: readonly ContentImportDisclosure[],
+  ): Node {
+    const message = document.createDocumentFragment();
+    message.append(base);
+    if (disclosures.length === 0) return message;
+    message.append(' Embedded external content: ');
+    for (const [index, disclosure] of disclosures.entries()) {
+      if (index > 0) message.append(', ');
+      message.append(contentDisclosure(disclosure));
+    }
+    message.append('.');
+    return message;
   }
 
   /**
@@ -319,6 +369,7 @@ export function createShareControls(
       activePreview = result;
       previewTitle.textContent = result.name;
       previewDetails.textContent = previewText(result);
+      renderEmbeddedContent(result.adoptionPlan.incomingContent);
       previewPanel.hidden = false;
       addButton.hidden = false;
       announce('Preview ready. Nothing has been imported.');
@@ -456,9 +507,12 @@ export function createShareControls(
                     contentImportLabel(item.kind, item.contentKey)
                   ).join(', ')
                 } before opening it.`
-              : link.length <= QR_MAX_LINK_LENGTH
-                ? 'Share link and QR code ready.'
-                : 'Share link ready. It is too long for a reliable QR code.',
+              : shareReadyAnnouncement(
+                  link.length <= QR_MAX_LINK_LENGTH
+                    ? 'Share link and QR code ready.'
+                    : 'Share link ready. It is too long for a reliable QR code.',
+                  result.embeddedContent,
+                ),
             'omittedContent' in result,
           );
         })

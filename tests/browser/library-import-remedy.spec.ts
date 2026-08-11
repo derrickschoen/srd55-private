@@ -17,11 +17,14 @@ import { expect, test } from './fixtures/parallel-test';
 
 const OVERSIZED_PORTABLE_ELF_KEY =
   '2024:example.test.species:oversized-portable-elf' as ContentKey;
+const PORTABLE_ELF_KEY =
+  '2024:example.test.species:portable-elf' as ContentKey;
 
 interface RecipientFixture {
   readonly library: LibraryExportDocument;
   readonly collision: LibraryExportDocument;
   readonly legacy: LibraryExportDocument;
+  readonly embedded: LibraryExportDocument;
 }
 
 function entropy(length: number): string {
@@ -42,13 +45,17 @@ function portableElfLibraryDocument(
     readonly scheme: ContentFingerprintScheme;
     readonly digest: ContentFingerprintDigest;
   },
-  oversized: boolean,
+  input: {
+    readonly contentKey: ContentKey;
+    readonly name: string;
+    readonly oversized: boolean;
+  },
 ): LibraryExportDocument {
   const aggregate = {
     kind: 'species',
-    name: 'Oversized Portable Elf',
+    name: input.name,
     rules_edition: '2024',
-    reference_text: oversized
+    reference_text: input.oversized
       ? entropy(180_000)
       : 'A colliding portable configured-choice species.',
     repeatable: false,
@@ -104,10 +111,10 @@ function portableElfLibraryDocument(
     version: LIBRARY_EXPORT_VERSION,
     exported_at: '2042-08-09T00:00:00.000Z',
     selection: 'selected',
-    selected_content_keys: [OVERSIZED_PORTABLE_ELF_KEY],
+    selected_content_keys: [input.contentKey],
     content: [{
       kind: 'species',
-      content_key: OVERSIZED_PORTABLE_ELF_KEY,
+      content_key: input.contentKey,
       key_kind: 'asserted',
       fingerprint_scheme: CONTENT_FINGERPRINT_SCHEME_V2,
       fingerprint_digest: identity.digest,
@@ -142,14 +149,27 @@ async function buildRecipientFixture(
     scheme: initialSpell.scheme as ContentFingerprintScheme,
     digest: initialSpell.digest as ContentFingerprintDigest,
   };
-  const library = portableElfLibraryDocument(reference, true);
-  const collision = portableElfLibraryDocument(reference, false);
+  const library = portableElfLibraryDocument(reference, {
+    contentKey: OVERSIZED_PORTABLE_ELF_KEY,
+    name: 'Oversized Portable Elf',
+    oversized: true,
+  });
+  const collision = portableElfLibraryDocument(reference, {
+    contentKey: OVERSIZED_PORTABLE_ELF_KEY,
+    name: 'Oversized Portable Elf',
+    oversized: false,
+  });
+  const embedded = portableElfLibraryDocument(reference, {
+    contentKey: PORTABLE_ELF_KEY,
+    name: 'Portable Elf',
+    oversized: false,
+  });
   const { supersessions: _supersessions, ...withoutSupersessions } = library;
   const legacy: LibraryExportDocument = {
     ...withoutSupersessions,
     version: 1,
   };
-  return { library, collision, legacy };
+  return { library, collision, legacy, embedded };
 }
 
 async function ready(page: import('@playwright/test').Page): Promise<void> {
@@ -159,6 +179,164 @@ async function ready(page: import('@playwright/test').Page): Promise<void> {
     { timeout: 60_000 },
   );
 }
+
+test('v18 names embedded Portable Elf before direct commit and omits the line for SRD-only shares', async ({
+  browser,
+  page,
+}) => {
+  // Measured alone on PLAYWRIGHT_PORT=5060 at 25.6s. The required x1.5 is
+  // 38.4s, already aligned to the next 100ms boundary.
+  test.setTimeout(38_400);
+  await page.goto('/?import=library');
+  await ready(page);
+  const fixture = await buildRecipientFixture(page);
+  await page.getByLabel('Library JSON').setInputFiles({
+    name: 'portable-elf-library-v2.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(fixture.embedded)),
+  });
+  await page.getByRole('button', { name: 'Import library' }).click();
+  await expect(page.locator('.transfer-status')).toHaveText(
+    'Library imported: 1 published, 0 matched existing.',
+  );
+
+  // Every character row and configured lineage choice is authored through the
+  // production guided writers; no browser fixture writes character tables.
+  await page.getByRole('link', { name: 'Create a character' }).click();
+  await page.getByRole('button', { name: /^Wizard\b/u }).click();
+  await page.getByLabel('Character name').fill('Portable Elf Share');
+  await page.getByRole('button', { name: 'Create character' }).click();
+  await page.getByRole('button', { name: 'Set ability scores' }).click();
+  await page.getByRole('button', { name: 'Choose Portable Elf' }).click();
+  const portableCharacterId = Number((
+    await page.evaluate(() => window.staticApp.inspectRows('characters'))
+  ).find((row) => row.name === 'Portable Elf Share')?.id);
+  expect(Number.isSafeInteger(portableCharacterId)).toBe(true);
+  await page.goto(
+    `/characters/${String(portableCharacterId)}/build/levels/1`,
+  );
+  await page.getByRole('link', { name: 'Species', exact: true }).click();
+  await page.getByRole('radio', { name: 'High Elf', exact: true }).check();
+  await page.getByLabel('Elven Lineage spellcasting ability')
+    .selectOption('intelligence');
+  const cantrip = page.getByRole('combobox', { name: 'High Elf cantrip' });
+  await cantrip.fill('Mage Hand');
+  await page.getByRole('option', { name: /^Mage Hand\b/u }).click();
+  await page.getByRole('button', { name: 'Save Elven Lineage' }).click();
+  await page.goto('/');
+  await ready(page);
+
+  await page.getByRole('button', {
+    name: 'Share Portable Elf Share by link',
+  }).click();
+  await page.getByRole('button', { name: 'Create share link' }).click();
+  await expect(page.locator('.share-status')).toHaveText(
+    'Share link and QR code ready. Embedded external content: ' +
+      'Portable Elf — species — Homebrew · external layer.',
+  );
+  const portableLink = await page.getByLabel('Generated character share link')
+    .inputValue();
+  const portableWire = JSON.parse(gunzipSync(
+    Buffer.from(new URL(portableLink).hash.slice(1), 'base64url'),
+  ).toString('utf8')) as unknown[];
+  expect(portableWire[1]).toBe(18);
+
+  await page.getByRole('link', { name: 'Create a character' }).click();
+  await page.getByRole('button', { name: /^Wizard\b/u }).click();
+  await page.getByLabel('Character name').fill('SRD Only Share');
+  await page.getByRole('button', { name: 'Create character' }).click();
+  await page.goto('/');
+  await ready(page);
+  await page.getByRole('button', {
+    name: 'Share SRD Only Share by link',
+  }).click();
+  await page.getByRole('button', { name: 'Create share link' }).click();
+  await expect(page.locator('.share-status')).toHaveText(
+    'Share link and QR code ready.',
+  );
+  const srdLink = await page.getByLabel('Generated character share link')
+    .inputValue();
+
+  const profile = await browser.newContext();
+  try {
+    const recipient = await profile.newPage();
+    await recipient.goto(portableLink);
+    await ready(recipient);
+    await expect(recipient.getByRole('heading', {
+      name: 'Portable Elf Share',
+    })).toBeVisible();
+    const disclosure = recipient.getByRole('region', {
+      name: 'Embedded external content',
+    });
+    await expect(disclosure).toContainText(
+      'This external content will be installed with the character:',
+    );
+    await expect(disclosure.getByRole('listitem')).toHaveText(
+      'Portable Elf — species — Homebrew · external layer',
+    );
+    expect(await recipient.evaluate(async (portableElfKey) => ({
+      characters: await window.staticApp.inspectRows('characters'),
+      species: (await window.staticApp.inspectRows('species_definitions'))
+        .filter((row) => row.content_key === portableElfKey),
+    }), PORTABLE_ELF_KEY)).toEqual({ characters: [], species: [] });
+    await expect(recipient.locator(
+      '[data-testid="content-adoption-modal"]',
+    )).toHaveCount(0);
+
+    await recipient.getByRole('button', {
+      name: 'Add to my characters',
+    }).click();
+    await expect(recipient.locator('.share-status')).toHaveText(
+      'Character added as #1.',
+    );
+    const installed = await recipient.evaluate(async () => {
+      const characters = await window.staticApp.inspectRows('characters');
+      const species = await window.staticApp.inspectRows('species_definitions');
+      const sources = await window.staticApp.inspectRows(
+        'character_source_instances',
+      );
+      return {
+        characterNames: characters.map((row) => row.name),
+        speciesNames: species.filter((row) =>
+          row.content_key === '2024:example.test.species:portable-elf'
+        ).map((row) => row.name),
+        source: sources.find((row) => row.display_name === 'Portable Elf') ===
+            undefined
+          ? undefined
+          : {
+              ...sources.find((row) => row.display_name === 'Portable Elf'),
+              config: JSON.parse(String(sources.find((row) =>
+                row.display_name === 'Portable Elf'
+              )?.config)),
+            },
+      };
+    });
+    expect(installed.characterNames).toEqual(['Portable Elf Share']);
+    expect(installed.speciesNames).toEqual(['Portable Elf']);
+    expect(installed.source).toEqual(expect.objectContaining({
+      display_name: 'Portable Elf',
+      config: {
+        source_content_key: PORTABLE_ELF_KEY,
+        lineage: {
+          chosen_option: 'High Elf',
+          high_elf_cantrip: '2024:mage-hand',
+        },
+        spellcasting_ability: 'intelligence',
+      },
+    }));
+
+    await recipient.goto(srdLink);
+    await ready(recipient);
+    await expect(recipient.getByRole('region', {
+      name: 'Embedded external content',
+    })).toBeHidden();
+    await expect(recipient.locator('.share-preview')).not.toContainText(
+      'will be installed with the character',
+    );
+  } finally {
+    await profile.close();
+  }
+});
 
 test('v17 refusal links through library adoption to the exact restored choice', async ({
   browser,

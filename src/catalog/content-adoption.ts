@@ -17,6 +17,7 @@ import { projectStoredContentV1 } from './stored-content-projector-v1';
 import { projectStoredContentV2 } from './stored-content-projector-v2';
 import {
   catalogLayerDisclosure,
+  type CatalogNamedDisclosure,
   type CatalogLayerDisclosure,
 } from './catalog-disclosure';
 import {
@@ -170,6 +171,26 @@ export type ContentImportEntryOutcome =
       readonly candidates?: readonly ContentKey[];
     };
 
+/** Display-ready identity for an incoming aggregate, never an internal key. */
+export interface ContentImportDisclosure extends CatalogNamedDisclosure {
+  readonly id: string;
+  readonly kind: ContentKind;
+}
+
+/** Keep honest names and their catalog layer inseparable at the plan seam. */
+export function externalContentDisclosure(input: {
+  readonly id: string;
+  readonly kind: ContentKind;
+  readonly name: string;
+}): ContentImportDisclosure {
+  return Object.freeze({
+    id: input.id,
+    kind: input.kind,
+    name: input.name.trim() === '' ? 'UNKNOWN' : input.name,
+    catalog_layer: 'external',
+  });
+}
+
 export interface ContentImportPlan {
   readonly token: ContentImportPlanToken;
   readonly inputHash: string;
@@ -177,6 +198,8 @@ export interface ContentImportPlan {
   readonly targetHash: string;
   /** Catalog lifecycle writes that are part of, and authenticated by, this plan. */
   readonly spellActivityChanges: readonly ContentImportSpellActivityChange[];
+  /** Incoming aggregates only; reference-only adoption nodes are excluded. */
+  readonly incomingContent: readonly ContentImportDisclosure[];
   readonly reviews: readonly ContentImportReviewRow[];
   readonly outcomes: readonly ContentImportEntryOutcome[];
 }
@@ -879,6 +902,15 @@ function evaluate(
 ): Evaluation {
   const beforeGraphHash = registryGraphHash(db);
   const hashedInput = inputHash(nodes);
+  const incomingContent = Object.freeze(nodes.flatMap((node) =>
+    node.projection.referenceOnly === undefined
+      ? [externalContentDisclosure({
+          id: node.id,
+          kind: node.projection.kind,
+          name: node.projection.name,
+        })]
+      : [],
+  ));
   const reviews: ContentImportReviewRow[] = [];
   const entries: EvaluatedEntry[] = [];
   const byId = new Map<string, EvaluatedEntry>();
@@ -910,6 +942,7 @@ function evaluate(
       graphHash: beforeGraphHash,
       targetHash: sha256(canonicalJson([])),
       spellActivityChanges,
+      incomingContent,
       reviews: Object.freeze(reviews),
       outcomes: Object.freeze(outcomes),
     });
@@ -1321,6 +1354,7 @@ function evaluate(
     graphHash: beforeGraphHash,
     targetHash: liveTargetHash,
     spellActivityChanges,
+    incomingContent,
     reviews: frozenReviews,
     outcomes,
   });

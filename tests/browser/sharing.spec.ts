@@ -375,7 +375,8 @@ test('fits authored content into v18 and imports it with the dependent character
   const output = page.getByLabel('Generated character share link');
   await expect(output).toBeVisible();
   await expect(page.locator('.share-status')).toHaveText(
-    'Share link and QR code ready.',
+    'Share link and QR code ready. Embedded external content: ' +
+      'Portable Fit Species — species — Homebrew · external layer.',
   );
   const link = await output.inputValue();
   const positional = JSON.parse(gunzipSync(
