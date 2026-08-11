@@ -9,12 +9,16 @@ import type {
   ContentImportChoices,
   ContentImportPlanToken,
 } from '../catalog/content-adoption';
-import type { PortableImportPlan } from './portable-content';
+import type {
+  LibraryExportDocument,
+  PortableImportPlan,
+} from './portable-content';
 import type { LibraryImportResult } from './library-export';
 
 export interface BackupClient {
   exportDatabase(): Promise<DatabaseBackup>;
   importDatabase(backup: DatabaseBackup): Promise<{ imported: true }>;
+  exportLibrary(): Promise<LibraryExportDocument>;
   importLibrary(document: unknown): Promise<LibraryImportResult>;
   planLibraryImport(
     document: unknown,
@@ -48,6 +52,11 @@ export function createBackupClient(rpc: RpcClient): BackupClient {
       rpc.call<{ backup: DatabaseBackup }, { imported: true }>(
         'backup.importDatabase',
         { backup },
+      ),
+    exportLibrary: () =>
+      rpc.call<Record<string, never>, LibraryExportDocument>(
+        'backup.exportLibrary',
+        {},
       ),
     importLibrary: (document: unknown) =>
       rpc.call<{ document: unknown }, LibraryImportResult>(
