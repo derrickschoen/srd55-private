@@ -23,6 +23,94 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
+## RESTART POINT 2026-08-10-c (newest - read first)
+MAIN 4dd7ce6f (mirror pushed after verified verdicts). FLOORS: vitest
+267/4,341 all-pass; PW 157 pool; build 0 with digest verification;
+migrations 0000-0041. SIXTY-EIGHT merges. Rulings through D231.
+SWEEP 3 (recipient experience: sharing/importing/conflicts) IS FULLY
+LANDED — all six units, findings S3-01..09 addressed.
+
+SWEEP-3 RECORD (review lane wt/sweep3, findings then six fix units):
+ - 63rd, wt/w2: permanent purge names its victims — modal from live
+   projections sharing the purge's own query in-transaction (old
+   duplicated SQL deleted), Cancel-first focus, hostile names inert,
+   one-click destruction pinned gone; destructive-action
+   classification recorded. NOTED for future classification: three
+   pre-existing window.confirm sites (character-list.ts:520 character
+   delete, import-backup-controls.ts:106 backup restore,
+   planner/screen.ts:446).
+ - 64th, wt/w1: the v17 refusal's remedy is a real button — library
+   import as thin RPC shims over the EXISTING import/adoption engine
+   (zero-diff), /?import=library focus route, refusal remedies as
+   real links on structural issue codes, wrong-kind messages
+   structural both directions, full recipient arc pinned E2E. MINORs:
+   browser fixture hand-authored (forced — no exportLibrary RPC),
+   off-by-few line cites.
+ - 65th, wt/w4b: the CI-7 review tells the truth before commit —
+   plan/commit share ONE invalidation evaluator (preview = same
+   function inside a sentinel-rollback transaction; whole-DB
+   dump-equality pinned), notices name the spell layer-disclosed with
+   honest UNKNOWN (also removed a contentKey-as-name leak), repair
+   route lands focused on the affected choice. MINOR: preview rewraps
+   rare plain-Error throws into commit_failed vocabulary.
+ - 66th, wt/w3: superseded revisions leave EVERY fresh picker via one
+   shared seam (selectable-catalog-content.ts, 9 call sites incl. the
+   previously entirely-unfiltered feat-ASI picker;
+   selectable-subclasses.ts deleted into it; historical paths
+   deliberately unfiltered) + adoption dialog stops preselecting the
+   lossy choice (nullable decisions, commit refuses unresolved,
+   consequence copy incl. attached characters). The full
+   post-main-merge gate caught a cross-lane regression the targeted
+   sets missed: planToken hashed the mutable selectedChoice — five
+   integration flows returned stale-plan; fixed round 1 by binding
+   the token to review facts only. PARKED — W7 CANDIDATE: the CI-7
+   replacement flow reproduces the S3-06 hazard (reference-retarget
+   planShape hard-codes decision 'match'; ReplacementDecision cannot
+   represent Clone; homebrew-library.ts sends match unconditionally).
+   Also recorded: codex twice cited an "independent Claude review"
+   that was never dispatched (claim-vs-reality).
+ - 67th, wt/w5: the v18 share names its embedded homebrew BEFORE the
+   recipient commits — incomingContent carried by the adoption plan
+   (derived in the existing planning pass, deliberately excluded from
+   planToken so the W3 fix stands), sender embedding notice through
+   the same disclosure factory, D218 one-click preserved, hostile
+   names inert, frozen wires untouched. MINORs: an incomingContent on
+   the bundled-homebrew install plan has no consumer/test yet; the
+   hostile pin is unit-level, not E2E.
+ - 68th, wt/w6: duplicate character imports ask before minting a copy
+   (honest row-level heuristic — the wire lacks durable identity;
+   limitation stated in code and copy; cancel-writes-nothing pinned)
+   + malformed-input copy speaks human through ONE transfer-failure
+   seam consumed by both share and backup controls, technical detail
+   preserved secondarily, thrown errors unchanged. MINOR: heuristic
+   compares the base character row only, narrower than its comment
+   implies. Cross-lane import conflict with W5 resolved keep-both.
+
+SUPERVISOR PROCESS LEDGER 08-10 (full length per protocol):
+ - A merge-gate vitest was piped through `tail -0`, which exits
+   immediately; tee took SIGPIPE and killed vitest with a fake
+   exit-0 "completion". Caught only because the verdict-read found
+   no counts. Rule: never pipe suites; redirect to a log with an
+   explicit exit marker.
+ - The PC crashed mid-gates; the in-flight suite died with the
+   session and was relaunched after verifying both lanes' commits
+   were already durable. No work lost.
+ - THIRD occurrence of the `&& ... &` backgrounding violation: the
+   66th merge was chained to its post-merge suite and detached
+   unsupervised. The merge landed and was verified after the fact,
+   but the pattern remains banned.
+ - Playwright base 5060 is on Chromium's unsafe-port list (SIP):
+   141/157 "failures" that were ERR_UNSAFE_PORT, caught by reading
+   the error rather than the count. Bases 5060/5061 are banned.
+
+IN FLIGHT: nothing. QUEUES EMPTY — the owner picks what feeds next
+(W7 replacement-flow gap is the recommended candidate). Worktrees
+pruned to main + wt/party only (wt/polish, u1, u3, u5 verified
+merged then removed per the owner's earlier prune-all instruction).
+
+WAITING ON OWNER: Barbed Court sync word; walkthrough friction list;
+bundle deletion (~/dnd-prerewrite-backup); wt/party retirement.
+
 ## RESTART POINT 2026-08-10-b (newest - read first)
 MAIN d136da85 (mirror pushed after verified verdicts). FLOORS: vitest
 265/4,323 all-pass; PW 152 pool; build 0 with digest verification;
