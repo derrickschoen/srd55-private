@@ -5,6 +5,43 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-11 — Oath of Domination redesign: Voice to 7 (smite-triggered), new level-3 authority engine, smite rider
+
+Owner's ruling, verbatim (after a sim brainstorm on closing the dealt gap
+to Vengeance at levels 3–9):
+
+> move voice of domination to 7, make it free action + 1 channel divinity
+> on a smite to activate.
+> lvl 3, give +1 to spell attack and spell save dc 1 minute after landing
+> a smite
+> check the oath spells for ones paladins can select anyways.
+
+Follow-up decisions (owner-selected):
+
+1. **Level 7 holds two features** — Voice of Domination moves there and
+   Aura of Certainty stays beside it (not deleted, not folded into 15).
+2. **Level 3 also carries a smite rider** — Divine Smite deals +1d8
+   against a creature under the paladin's recent control (sim lever D:
+   ~+1.7 dealt/round at L3, bringing 3–6 to ~90% of Vengeance).
+3. **Voice's activation is smite-triggered only** — free action + 1
+   Channel Divinity immediately after casting Divine Smite; the old
+   Bonus-Action activation path (and its out-of-combat use) is gone.
+   Castings under Voice remain Bonus-Action slotless *Command*s. The
+   activation no longer includes a first casting, and the smite turn's
+   Bonus Action is already spent, so the ceiling is nine castings per
+   activation, not ten.
+
+Oath-spell check, answered: of the ten oath spells, **only *Command*
+also appears on the paladin's own spell list** (SRD 5.2.1 level-1
+Paladin Spells). Bane, Suggestion, Augury, Clairvoyance, Slow,
+Compulsion, Divination, Dominate Person, and Dream are all off-list
+grants. The table stays as fixed by the owner.
+
+Sim numbers at ruling time (dealt/round, burst, vs Vengeance
+19.5/34.8/60.3/72.0 at 3/6/11/17): smite-only policy 16.6/29.6/51.6/69.0;
+with the rider ~90% of Vengeance at 3–6; adaptive Command-then-smite at
+11/17 trades ~6.5/11 dealt for 8.4/14.4 prevented.
+
 ## 2026-08-11 — No personal attribution: the owner's name comes off every homebrew notice
 
 Asked to confirm the Section 15 copyright entry in
