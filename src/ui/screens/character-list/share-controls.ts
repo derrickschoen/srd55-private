@@ -13,6 +13,7 @@ import { createContentAdoptionDialog } from '../../content-adoption-dialog';
 import { LIBRARY_IMPORT_ROUTE } from './import-backup-controls';
 import { contentImportLabel } from '../../../sharing/import-issues';
 import { element, listen, type Cleanup } from '../../dom';
+import { announceTransferFailure } from './transfer-failure';
 import { freeTextSpan } from '../../free-text';
 
 const QR_MAX_LINK_LENGTH = 2_000;
@@ -35,10 +36,6 @@ export interface ShareControls {
   readonly element: HTMLElement;
   shareCharacter(character: Pick<CharacterSummary, 'id' | 'name'>): void;
   readonly cleanup: Cleanup;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 interface DisplayIssue {
@@ -323,7 +320,7 @@ export function createShareControls(
   function announceFailure(error: unknown): void {
     const issues = compatibilityIssues(error);
     if (issues.length === 0) {
-      announce(errorMessage(error), true);
+      announceTransferFailure(status, error);
       return;
     }
     const heading = document.createElement('p');
@@ -528,7 +525,7 @@ export function createShareControls(
       void browser
         .copy(linkOutput.value)
         .then(() => announce('Share link copied.'))
-        .catch((error: unknown) => announce(errorMessage(error), true));
+        .catch((error: unknown) => announceTransferFailure(status, error));
     }),
     listen(nativeShareButton, 'click', () => {
       if (
@@ -549,7 +546,7 @@ export function createShareControls(
             !(error instanceof DOMException) ||
             error.name !== 'AbortError'
           ) {
-            announce(errorMessage(error), true);
+            announceTransferFailure(status, error);
           }
         });
     }),

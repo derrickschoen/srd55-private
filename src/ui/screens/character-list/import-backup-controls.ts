@@ -28,6 +28,8 @@ import type { BundledHomebrewClient } from '../../../authoring/client';
 import { createAuthoringClient } from '../../../authoring/client';
 import type { BundledHomebrewInstallPlan } from '../../../authoring/bundled-homebrew-installer';
 import { LIBRARY_EXPORT_FORMAT } from '../../../backup/portable-content';
+import { canonicalJson } from '../../../commands/canonical-json';
+import { announceTransferFailure } from './transfer-failure';
 
 export const LIBRARY_IMPORT_ROUTE = '/?import=library';
 
@@ -79,10 +81,6 @@ export interface ImportBackupControls {
   updateCharacters(characters: readonly CharacterSummary[]): void;
   focusLibraryImport(): void;
   readonly cleanup: Cleanup;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function safeFilename(name: string): string {
@@ -224,6 +222,36 @@ export class ImportBackupController {
     };
   }
 
+  /**
+   * The character wire has no durable global id: `source_character_id` is a
+   * store-local integer and import does not retain it. Compare every saved
+   * character field except that local id instead. This is deliberately an
+   * honest heuristic: independently-created characters with identical saved
+   * details can match, and a changed prior import can stop matching.
+   */
+  async confirmCharacterCopy(
+    document: CharacterBackupDocument,
+    localCharacters: readonly CharacterSummary[],
+  ): Promise<boolean> {
+    if (localCharacters.length === 0) return true;
+    const incomingDetails = characterDetails(document.character);
+    const localDocuments = await Promise.allSettled(
+      localCharacters.map((character) =>
+        this.services.backup.exportCharacter(character.id)),
+    );
+    const duplicate = localDocuments.some((candidate) =>
+      candidate.status === 'fulfilled' &&
+      characterDetails(candidate.value.character) === incomingDetails,
+    );
+    if (!duplicate) return true;
+
+    const name = String(document.character.name);
+    return this.services.confirm(
+      `This backup appears to have been imported already: a character with the same core saved details as “${name}” is here. ` +
+      'It could be a separate identical character. Create another copy?',
+    );
+  }
+
   private async readCharacterDocument(
     file: ReadableFile,
   ): Promise<CharacterBackupDocument> {
@@ -235,6 +263,11 @@ export class ImportBackupController {
     }
     return document as CharacterBackupDocument;
   }
+}
+
+function characterDetails(character: CharacterBackupDocument['character']): string {
+  const { id: _localId, ...details } = character;
+  return canonicalJson(details);
 }
 
 function isLibraryExportText(text: string): boolean {
@@ -388,7 +421,7 @@ export function createImportBackupControls(
     try {
       announce(await action());
     } catch (error) {
-      announce(errorMessage(error), true);
+      announceTransferFailure(status, error);
     } finally {
       button.disabled = false;
     }
@@ -556,7 +589,7 @@ export function createImportBackupControls(
       adoptionCleanup = rendered.cleanup;
       announce('Review three bundled homebrew entries before importing.');
     }).catch((error: unknown) => {
-      announce(errorMessage(error), true);
+      announceTransferFailure(status, error);
       bundledHomebrewButton.disabled = false;
     });
   }));
@@ -628,6 +661,9 @@ export function createImportBackupControls(
           throw new TypeError('Choose a character JSON backup.');
         }
         const prepared = await controller.prepareCharacterImport(file);
+        if (!await controller.confirmCharacterCopy(prepared.document, characters)) {
+          return 'Character import cancelled. Nothing was changed.';
+        }
         const showAdoptionDialog = (plan: ContentImportPlan): void => {
           adoptionCleanup?.();
           const rendered = createContentAdoptionDialog({
@@ -777,11 +813,12 @@ export function createImportBackupControls(
       try {
         await refreshReceipts();
       } catch (error) {
-        announce(errorMessage(error), true);
+        announceTransferFailure(status, error);
       }
     })();
   }));
-  void refreshReceipts().catch((error: unknown) => announce(errorMessage(error), true));
+  void refreshReceipts().catch((error: unknown) =>
+    announceTransferFailure(status, error));
 
   const updateCharacters = (
     nextCharacters: readonly CharacterSummary[],
