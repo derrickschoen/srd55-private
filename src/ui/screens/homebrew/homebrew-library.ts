@@ -398,12 +398,32 @@ async function renderReplacementRoute(
     const name = element('h3');
     name.append(freeTextSpan(replacement.character_name));
     const changes = element('dl');
+    const installedTarget = replacement.review.find((candidate) =>
+      candidate.reason === 'installed-target'
+    );
     for (const change of replacement.changes) {
-      changes.append(
-        element('dt', { text: change.label }),
-        element('dd', { text: `Before: ${String(change.before)}` }),
-        element('dd', { text: `After: ${String(change.after)}` }),
-      );
+      const before = element('dd');
+      const after = element('dd');
+      if (
+        installedTarget !== undefined &&
+        change.path.length === 1 &&
+        change.path[0] === 'content_key'
+      ) {
+        before.append(
+          'Before: ',
+          freeTextSpan(String(change.before)),
+          ` — ${catalogLayerLabel('external')}`,
+        );
+        after.append(
+          'After Apply: ',
+          freeTextSpan(installedTarget.candidate_name),
+          ` — ${catalogLayerLabel(installedTarget.candidate_catalog_layer)}`,
+        );
+      } else {
+        before.textContent = `Before: ${String(change.before)}`;
+        after.textContent = `After: ${String(change.after)}`;
+      }
+      changes.append(element('dt', { text: change.label }), before, after);
     }
     const consequences = replacement.notices.length === 0
       ? []
@@ -415,10 +435,7 @@ async function renderReplacementRoute(
         ];
     const selectableChoices: HTMLElement[] = [];
     for (const [candidateIndex, candidate] of replacement.review.entries()) {
-      if (
-        candidate.reason !== 'key-collision' &&
-        candidate.reason !== 'installed-target'
-      ) continue;
+      if (candidate.reason !== 'key-collision') continue;
       const key = selectionKey(replacementIndex, candidate.candidate_content_key);
       selectableReviewKeys.push(key);
       const prefix = `replacement-review-${String(replacementIndex + 1)}-${String(candidateIndex + 1)}`;
@@ -440,13 +457,6 @@ async function renderReplacementRoute(
       });
       cloneName.value = candidate.clone_name;
       cloneName.disabled = true;
-      if (candidate.reason === 'installed-target') {
-        match.checked = true;
-        reviewSelections.set(key, {
-          candidate_content_key: candidate.candidate_content_key,
-          decision: 'match',
-        });
-      }
       const chooseMatch = (): void => {
         reviewSelections.set(key, {
           candidate_content_key: candidate.candidate_content_key,
@@ -482,9 +492,7 @@ async function renderReplacementRoute(
             catalogLayerLabel(candidate.candidate_catalog_layer),
         }),
         element('p', {
-          text: candidate.reason === 'installed-target'
-            ? 'This target was certified from the complete entry already installed in this library. Match is safe by default; choose Clone only to fork it.'
-            : 'This same-key replacement reference has no incoming rules evidence. Choose what this attached character should use.',
+          text: 'This same-key replacement reference has no incoming rules evidence. Choose what this attached character should use.',
         }),
         match,
         element('label', {
@@ -529,18 +537,13 @@ async function renderReplacementRoute(
         replacements: plan.replacements.map((replacement, replacementIndex) => ({
           token: replacement.token,
           decisions: replacement.review.flatMap((candidate) => {
-            if (
-              candidate.reason === 'key-collision' ||
-              candidate.reason === 'installed-target'
-            ) {
+            if (candidate.reason === 'installed-target') return [];
+            if (candidate.reason === 'key-collision') {
               const selected = reviewSelection(selectionKey(
                 replacementIndex,
                 candidate.candidate_content_key,
               ));
-              return selected.decision === 'match' &&
-                  candidate.reason === 'installed-target'
-                ? []
-                : [selected];
+              return [selected];
             }
             return [{
               candidate_content_key: candidate.candidate_content_key,

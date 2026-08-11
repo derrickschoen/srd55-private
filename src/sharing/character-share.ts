@@ -1,5 +1,9 @@
 import type { SqlValue } from '@sqlite.org/sqlite-wasm';
 import { normalizeCatalogName } from '../catalog/catalog-normalize';
+import {
+  catalogLayerDisclosure,
+  type CatalogNamedDisclosure,
+} from '../catalog/catalog-disclosure';
 import { normalizeContentIdentityName } from '../catalog/content-identity';
 import {
   registerAssertedPlaceholderContentIdentity,
@@ -127,8 +131,8 @@ export interface ShareImportResult {
 export interface SharePreview {
   readonly name: string;
   readonly classes: readonly {
-    readonly classKey: string;
-    readonly subclassKey?: string;
+    readonly class: CatalogNamedDisclosure;
+    readonly subclass?: CatalogNamedDisclosure;
     readonly level: number;
   }[];
   readonly sourceCount: number;
@@ -1854,6 +1858,57 @@ function shareImportPlan(
   });
 }
 
+function sharePreviewCatalogDisclosure(
+  db: DatabaseContext,
+  planned: ReturnType<typeof shareImportPlan>,
+  kind: 'class' | 'subclass',
+  incomingKey: string,
+): CatalogNamedDisclosure {
+  const marker = referenceMarker(kind, incomingKey);
+  const incoming = planned.plan.incomingContent.find((disclosure) =>
+    planned.prepared.markersByNodeId.get(disclosure.id) === marker
+  );
+  if (incoming !== undefined) {
+    // Reuse the same display-ready disclosure rendered in the external-content
+    // list. Carried content is not installed until commit, so a recipient
+    // catalog lookup cannot name it during preview.
+    return {
+      name: incoming.name,
+      catalog_layer: incoming.catalog_layer,
+    };
+  }
+
+  const resolvedKey = planned.targets.get(marker);
+  if (resolvedKey === undefined) {
+    return { name: `Unknown ${kind} name`, catalog_layer: 'unknown' };
+  }
+  const table = kind === 'class'
+    ? 'class_definitions'
+    : 'subclass_definitions';
+  const row = db.oneRaw(
+    `SELECT definition.name, identity.catalog_layer
+     FROM ${table} AS definition
+     LEFT JOIN catalog_content_identities AS identity
+       ON identity.content_kind = ?
+      AND identity.content_key = definition.content_key
+     WHERE definition.content_key = ?`,
+    [kind, resolvedKey],
+  );
+  if (
+    row === null ||
+    typeof row.name !== 'string' ||
+    row.name.trim() === ''
+  ) {
+    return { name: `Unknown ${kind} name`, catalog_layer: 'unknown' };
+  }
+  return {
+    name: row.name,
+    catalog_layer: catalogLayerDisclosure(
+      typeof row.catalog_layer === 'string' ? row.catalog_layer : null,
+    ),
+  };
+}
+
 function assertImportableWithoutMutation(
   db: DatabaseContext,
   document: CharacterShareDocument,
@@ -1944,10 +1999,22 @@ export function previewCharacterShare(
   return {
     name: document.character.name,
     classes: document.classes.map((row) => ({
-      classKey: row.classKey,
+      class: sharePreviewCatalogDisclosure(
+        db,
+        planned,
+        'class',
+        row.classKey,
+      ),
       ...(row.subclassKey === undefined
         ? {}
-        : { subclassKey: row.subclassKey }),
+        : {
+            subclass: sharePreviewCatalogDisclosure(
+              db,
+              planned,
+              'subclass',
+              row.subclassKey,
+            ),
+          }),
       level: row.level,
     })),
     sourceCount: document.sources.length,

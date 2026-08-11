@@ -100,12 +100,19 @@ test('superseded species leave fresh selection while replacement characters stil
     .toBeVisible();
 
   await page.getByRole('link', { name: 'Review character fixes' }).click();
-  await expect(page.getByLabel('Fix affected characters')).toContainText(
+  const review = page.getByLabel('Fix affected characters');
+  await expect(review).toContainText(
     'Existing Revision Hero',
   );
-  await expect(page.getByRole('radio', {
-    name: 'Match — Uses the existing local entry; this attached character moves to it.',
-  })).toBeChecked();
+  await expect(review).toContainText(
+    'Before: Fresh Picker Species — Homebrew · external layer',
+  );
+  await expect(review).toContainText(
+    'After Apply: Fresh Picker Species Revised — Homebrew · external layer',
+  );
+  await expect(review.getByRole('radio')).toHaveCount(0);
+  await expect(review.getByLabel('Private copy name')).toHaveCount(0);
+  await expect(review).not.toContainText(/certif/iu);
   const apply = page.getByRole('button', { name: 'Apply to all listed characters' });
   await expect(apply).toBeEnabled();
   await apply.click();
