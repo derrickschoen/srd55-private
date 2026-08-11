@@ -850,16 +850,34 @@ function directNewButton(
   return button;
 }
 
-function draftHeading(draft: StoredHomebrewDraft): HTMLElement {
-  const heading = element('h2');
-  heading.append(freeTextSpan(draft.document.name === '' ? 'Untitled draft' : draft.document.name));
-  return element('div', { className: 'homebrew-draft-heading' }, [
-    heading,
-    element('div', { className: 'homebrew-card-badges' }, [
-      badge('Draft', 'draft'),
-      badge(KIND_LABELS[draft.content_kind], 'neutral'),
+interface DraftShellIdentity {
+  readonly heading: HTMLElement;
+  readonly revision: HTMLElement;
+  update(draft: StoredHomebrewDraft): void;
+}
+
+function draftShellIdentity(draft: StoredHomebrewDraft): DraftShellIdentity {
+  const name = element('h2');
+  const revision = element('p', { className: 'homebrew-draft-revision' });
+  const update = (saved: StoredHomebrewDraft): void => {
+    clear(name);
+    name.append(freeTextSpan(
+      saved.document.name === '' ? 'Untitled draft' : saved.document.name,
+    ));
+    revision.textContent = `Saved revision ${String(saved.revision)}.`;
+  };
+  update(draft);
+  return {
+    heading: element('div', { className: 'homebrew-draft-heading' }, [
+      name,
+      element('div', { className: 'homebrew-card-badges' }, [
+        badge('Draft', 'draft'),
+        badge(KIND_LABELS[draft.content_kind], 'neutral'),
+      ]),
     ]),
-  ]);
+    revision,
+    update,
+  };
 }
 
 function publishedResultNotice(
@@ -958,6 +976,7 @@ async function renderDraftRoute(
   const view = shell(context, cleanups);
   const draft = await client.readDraft({ draft_uuid: draftUuid });
   const back = routedLink(context, cleanups, '← All drafts', homebrewTabPath('drafts'));
+  const identity = draftShellIdentity(draft);
   const formMount = element('div', {
     className: 'homebrew-form-mount',
     attributes: {
@@ -968,8 +987,8 @@ async function renderDraftRoute(
   view.main.append(
     back,
     element('article', { className: 'homebrew-draft-shell panel' }, [
-      draftHeading(draft),
-      element('p', { text: `Saved revision ${String(draft.revision)}.` }),
+      identity.heading,
+      identity.revision,
       formMount,
     ]),
   );
@@ -977,6 +996,7 @@ async function renderDraftRoute(
     const spellGrantReferences = await client.spellGrantReferences();
     cleanups.push(renderSpeciesForm({
       context, client, mount: formMount, draft, spellGrantReferences,
+      onSaved: identity.update,
     }));
   } else if (isStoredSubclassDraft(draft)) {
     const [bundledParents, spellGrantReferences] = await Promise.all([
@@ -992,6 +1012,7 @@ async function renderDraftRoute(
       draft,
       parentClasses: bundledParents,
       spellGrantReferences,
+      onSaved: identity.update,
     }));
   } else if (isStoredBackgroundDraft(draft)) {
     const references = await client.backgroundReferences();
@@ -1001,6 +1022,7 @@ async function renderDraftRoute(
       mount: formMount,
       draft,
       references,
+      onSaved: identity.update,
     }));
   } else {
     formMount.append(element('p', {

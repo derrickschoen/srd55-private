@@ -52,6 +52,11 @@ import {
   renderPublishPreviewGrant,
   spellCatalogNameForGrant,
 } from './publish-preview-renderer';
+  showDraftSaveFailure,
+  showDraftSaveProgress,
+  showDraftSaveRefusal,
+  showDraftSaveSuccess,
+} from './draft-save-status';
 import { spellGrantControls } from './spell-grant-controls';
 
 type StoredSpeciesDraft = StoredHomebrewDraft & {
@@ -68,6 +73,7 @@ export interface SpeciesFormOptions {
   readonly randomUuid?: () => string;
   readonly confirmLeave?: () => boolean;
   readonly windowObject?: Window;
+  readonly onSaved?: (draft: StoredSpeciesDraft) => void;
 }
 
 function pathAttribute(path: readonly (string | number)[]): Readonly<Record<string, string>> {
@@ -891,7 +897,7 @@ export function renderSpeciesForm(options: SpeciesFormOptions): Cleanup {
     const saveDraft = async (): Promise<boolean> => {
       save.disabled = true;
       preview.disabled = true;
-      status.textContent = 'Saving draft…';
+      showDraftSaveProgress(status);
       try {
         const saved = await options.client.saveDraft({
           draft_uuid: stored.draft_uuid,
@@ -901,14 +907,17 @@ export function renderSpeciesForm(options: SpeciesFormOptions): Cleanup {
         if (saved.content_kind !== 'species' || saved.document.kind !== 'species') {
           throw new TypeError('Saving the species draft returned a different content kind.');
         }
+        clear(validationMount);
         stored = saved as StoredSpeciesDraft;
         document = stored.document;
         dirty = false;
-        status.textContent = `Saved revision ${String(stored.revision)}.`;
+        options.onSaved?.(stored);
+        showDraftSaveSuccess(status, `Saved revision ${String(stored.revision)}.`);
         return true;
       } catch (error) {
         const conflict = draftRevisionConflict(error);
         if (conflict !== null) {
+          showDraftSaveRefusal(status);
           const dialog = createDraftConflictDialog({
             conflict,
             mount: options.context.root,
@@ -936,11 +945,11 @@ export function renderSpeciesForm(options: SpeciesFormOptions): Cleanup {
         } else {
           const issues = validationIssues(error);
           if (issues !== null) {
+            showDraftSaveRefusal(status);
             clear(validationMount);
             validationMount.append(renderValidationSummary(form, issues));
           } else {
-            status.textContent = error instanceof Error ? error.message : String(error);
-            status.setAttribute('role', 'alert');
+            showDraftSaveFailure(status, error);
           }
         }
         return false;

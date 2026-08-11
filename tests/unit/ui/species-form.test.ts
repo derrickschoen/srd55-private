@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { AuthoringClient } from '../../../src/authoring/client';
 import { CatalogAuthoringService } from '../../../src/authoring/draft-service';
 import type {
@@ -718,6 +718,8 @@ describe('HA-7 species authoring form', () => {
 
   it('pins the species dirty lifecycle through the real Router guard seam', async () => {
     const restoreDocument = installInteractiveDocument();
+    const failure = new Error('Storage unavailable.');
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
       const router = new Router(routerWindow(
         'https://example.test/homebrew/drafts/ha7-species-draft',
@@ -730,7 +732,7 @@ describe('HA-7 species authoring form', () => {
       const remote = { ...stored({ ...speciesDocument(), name: 'Remote revision' }), revision: 3 as DraftRevision };
       const authoring = client({
         saveDraft: async (params) => {
-          if (saveMode === 'fail') throw new Error('Storage unavailable.');
+          if (saveMode === 'fail') throw failure;
           if (saveMode === 'conflict') {
             throw new RpcError('handler_error', 'Draft revision is stale.', {
               reason: 'stale_draft_revision',
@@ -774,6 +776,16 @@ describe('HA-7 species authoring form', () => {
       expect(router.navigate('/blocked-after-edit')).toBe(false);
       button(root, 'Save draft').click();
       await settle();
+      expect(root.querySelector('.species-authoring-status')?.textContent)
+        .toBe(
+          'Draft not saved. Something went wrong before the draft could be stored — try again.',
+        );
+      expect(root.querySelector('.species-authoring-status')?.textContent)
+        .not.toMatch(/RPC|worker|handler|transport|Zod/i);
+      expect(errorLog).toHaveBeenCalledWith('Draft save failed.', failure);
+      errorLog.mockRestore();
+      expect(root.querySelector('.species-authoring-status')?.getAttribute('role'))
+        .toBe('alert');
       expect(button(root, 'Save draft').disabled).toBe(false);
       expect(button(root, 'Preview publish').disabled).toBe(false);
       expect(router.navigate('/blocked-after-failed-save')).toBe(false);
@@ -817,6 +829,52 @@ describe('HA-7 species authoring form', () => {
 
       cleanup();
       router.stop();
+    } finally {
+      errorLog.mockRestore();
+      restoreDocument();
+    }
+  });
+
+  it('ends a validation refusal with human copy and focus on walking speed', async () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const draft = stored();
+      if (!isStoredSpeciesDraft(draft)) throw new Error('Species fixture did not narrow.');
+      const mount = document.createElement('div');
+      const cleanup = renderSpeciesForm({
+        context: context(),
+        client: client({
+          saveDraft: () => Promise.reject(new RpcError(
+            'handler_error',
+            'Draft validation failed.',
+            {
+              reason: 'validation_failed',
+              issues: [{
+                path: ['walking_speed_feet'],
+                code: 'out_of_range',
+                message: 'Walking speed must be at least 1 foot.',
+              }],
+            },
+          )),
+        }),
+        mount,
+        draft,
+      });
+      const root = interactiveElement(mount);
+      const walkingSpeed = byId(root, 'input', 'species-walking-speed');
+
+      button(root, 'Save draft').click();
+      await settle();
+
+      expect(root.querySelector('.species-authoring-status')?.textContent)
+        .toBe('Draft not saved.');
+      expect(elementText(root as unknown as Node))
+        .toContain('Walking speed must be at least 1 foot.');
+      expect(document.activeElement).toBe(walkingSpeed);
+      expect(elementText(root as unknown as Node)).not.toMatch(
+        /saving draft|code points|too small|expected number/iu,
+      );
+      cleanup();
     } finally {
       restoreDocument();
     }

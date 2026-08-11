@@ -926,7 +926,7 @@ describe('HA-8 subclass timeline form', () => {
       let saveFails = true;
       const authoring = client({
         saveDraft: async (params) => {
-          if (saveFails) throw new Error('Storage unavailable.');
+          if (saveFails) throw new RpcError('handler_error', 'Storage unavailable.');
           if (params.document.kind !== 'subclass') throw new Error('Expected subclass.');
           return { ...stored(params.document), revision: 1 as DraftRevision };
         },
@@ -962,6 +962,12 @@ describe('HA-8 subclass timeline form', () => {
       expect(router.navigate('/blocked-after-edit')).toBe(false);
       button(root, 'Save draft').click();
       await settle();
+      expect(root.querySelector('.subclass-authoring-status')?.textContent)
+        .toBe(
+          'Draft not saved. Something went wrong before the draft could be stored — try again.',
+        );
+      expect(root.querySelector('.subclass-authoring-status')?.textContent)
+        .not.toMatch(/RPC|worker|handler|transport|Zod/i);
       expect(router.navigate('/blocked-after-failed-save')).toBe(false);
       expect(button(root, 'Save draft').disabled).toBe(false);
 
@@ -983,6 +989,52 @@ describe('HA-8 subclass timeline form', () => {
 
       cleanup();
       router.stop();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('ends a validation refusal with human copy and focus on the name', async () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const draft = stored();
+      if (!isStoredSubclassDraft(draft)) throw new Error('Subclass fixture did not narrow.');
+      const mount = document.createElement('div');
+      const cleanup = renderSubclassForm({
+        context: context(),
+        client: client({
+          saveDraft: () => Promise.reject(new RpcError(
+            'handler_error',
+            'Draft validation failed.',
+            {
+              reason: 'validation_failed',
+              issues: [{
+                path: ['name'],
+                code: 'too_long',
+                message: 'Name must be 120 characters or fewer.',
+              }],
+            },
+          )),
+        }),
+        mount,
+        draft,
+        parentClasses: parents,
+      });
+      const root = interactiveElement(mount);
+      const name = control(root, 'input', 'subclass-name');
+
+      button(root, 'Save draft').click();
+      await settle();
+
+      expect(root.querySelector('.subclass-authoring-status')?.textContent)
+        .toBe('Draft not saved.');
+      expect(elementText(root as unknown as Node))
+        .toContain('Name must be 120 characters or fewer.');
+      expect(document.activeElement).toBe(name);
+      expect(elementText(root as unknown as Node)).not.toMatch(
+        /saving draft|code points|too small|expected number/iu,
+      );
+      cleanup();
     } finally {
       restoreDocument();
     }

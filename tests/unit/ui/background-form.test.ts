@@ -9,6 +9,7 @@ import type {
 } from '../../../src/authoring/contracts';
 import type { HomebrewDraftItemUuid, HomebrewDraftUuid } from '../../../src/authoring/ids';
 import type { ContentKey } from '../../../src/domain/ids';
+import { RpcError } from '../../../src/rpc/protocol';
 import { parseRoute, Router } from '../../../src/ui/router';
 import type { ScreenContext } from '../../../src/ui/screen';
 import {
@@ -518,6 +519,53 @@ describe('HA-9 background authoring form', () => {
       await settle();
       expect(expected).toEqual([0, 1]);
       expect(documents[1]?.name).toBe('Newer local edit');
+      rendered.cleanup();
+    } finally {
+      restore();
+    }
+  });
+
+  it('terminates validation and transport refusals without losing field focus', async () => {
+    const restore = installInteractiveDocument();
+    try {
+      let refusal: 'validation' | 'transport' = 'validation';
+      const rendered = render(client({
+        saveDraft: () => refusal === 'validation'
+          ? Promise.reject(new RpcError(
+              'handler_error',
+              'Draft validation failed.',
+              {
+                reason: 'validation_failed',
+                issues: [{
+                  path: ['name'],
+                  code: 'too_long',
+                  message: 'Name must be 120 characters or fewer.',
+                }],
+              },
+            ))
+          : Promise.reject(new RpcError('transport_error', 'Database worker stopped.')),
+      }));
+      const name = byId(rendered.root, 'input', 'background-name');
+
+      button(rendered.root, 'Save draft').click();
+      await settle();
+      expect(rendered.root.querySelector('.background-authoring-status')?.textContent)
+        .toBe('Draft not saved.');
+      expect(elementText(rendered.root as unknown as Node))
+        .toContain('Name must be 120 characters or fewer.');
+      expect(document.activeElement).toBe(name);
+
+      refusal = 'transport';
+      button(rendered.root, 'Save draft').click();
+      await settle();
+      expect(rendered.root.querySelector('.background-authoring-status')?.textContent)
+        .toBe(
+          'Draft not saved. The app lost its connection to storage — reload the page and try again.',
+        );
+      expect(rendered.root.querySelector('.background-authoring-status')?.textContent)
+        .not.toMatch(/RPC|worker|handler|transport|Zod/i);
+      expect(rendered.root.querySelector('.background-authoring-status')?.getAttribute('role'))
+        .toBe('alert');
       rendered.cleanup();
     } finally {
       restore();

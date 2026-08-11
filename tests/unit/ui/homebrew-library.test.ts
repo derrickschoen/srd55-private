@@ -686,6 +686,74 @@ describe('HA-6 homebrew library routing and tabs', () => {
     }
   });
 
+  it('refreshes every routed draft shell from the exact successful save result', async () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const savedName = '</h2><img data-s4-shell-hostile src=x> Saved 🐲';
+      const cases = [
+        {
+          draft: speciesDraft(),
+          route: 'draft-species',
+          inputId: 'species-name',
+        },
+        {
+          draft: subclassDraft(),
+          route: 'draft-subclass',
+          inputId: 'subclass-name',
+        },
+        {
+          draft: backgroundDraft(),
+          route: 'draft-background',
+          inputId: 'background-name',
+        },
+      ] as const;
+
+      for (const current of cases) {
+        const screenContext = context(
+          `https://example.test/homebrew/drafts/${current.route}`,
+          [],
+        );
+        const cleanup = await renderHomebrewLibrary(screenContext, {
+          client: authoringClient({
+            readDraft: async () => current.draft,
+            backgroundReferences: async () => ({
+              origin_feats: [], weapons: [], armors: [],
+            }),
+            saveDraft: async (params) => ({
+              ...current.draft,
+              revision: (Number(current.draft.revision) + 1) as DraftRevision,
+              document: params.document,
+            }),
+          }),
+          parentClasses,
+        });
+        const root = interactiveElement(screenContext.root);
+        const name = root.querySelectorAll('input').find(
+          (candidate) => candidate.getAttribute('id') === current.inputId,
+        );
+        if (name === undefined) throw new Error(`Missing ${current.inputId}.`);
+        name.value = savedName;
+        name.dispatchEvent(new Event('input'));
+        root.querySelectorAll('button').find(
+          (candidate) => candidate.textContent === 'Save draft',
+        )?.click();
+        await settle();
+
+        const shellHeading = root.querySelector('.homebrew-draft-heading')?.querySelector('h2');
+        expect(shellHeading === undefined || shellHeading === null
+          ? null
+          : elementText(shellHeading as unknown as Node).trim()).toBe(savedName);
+        expect(root.querySelector('.homebrew-draft-revision')?.textContent)
+          .toBe(`Saved revision ${String(Number(current.draft.revision) + 1)}.`);
+        expect(root.querySelectorAll('img')).toHaveLength(0);
+        expect(root.querySelector('[data-s4-shell-hostile]')).toBeNull();
+        cleanup();
+      }
+    } finally {
+      restoreDocument();
+    }
+  });
+
   it('routes a subclass draft into the timeline form with bundled parent choices', async () => {
     const restoreDocument = installInteractiveDocument();
     try {

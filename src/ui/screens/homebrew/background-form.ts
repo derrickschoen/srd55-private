@@ -54,6 +54,11 @@ import {
   renderPublishPreviewEffect,
   renderPublishPreviewGrant,
 } from './publish-preview-renderer';
+  showDraftSaveFailure,
+  showDraftSaveProgress,
+  showDraftSaveRefusal,
+  showDraftSaveSuccess,
+} from './draft-save-status';
 
 type StoredBackgroundDraft = StoredHomebrewDraft & {
   readonly content_kind: 'background';
@@ -69,6 +74,7 @@ export interface BackgroundFormOptions {
   readonly randomUuid?: () => string;
   readonly confirmLeave?: () => boolean;
   readonly windowObject?: Window;
+  readonly onSaved?: (draft: StoredBackgroundDraft) => void;
 }
 
 function pathAttribute(path: readonly (string | number)[]): Readonly<Record<string, string>> {
@@ -658,7 +664,7 @@ export function renderBackgroundForm(options: BackgroundFormOptions): Cleanup {
       const generation = edits.capture();
       save.disabled = true;
       preview.disabled = true;
-      status.textContent = 'Saving draft…';
+      showDraftSaveProgress(status);
       try {
         const saved = await options.client.saveDraft({
           draft_uuid: stored.draft_uuid,
@@ -668,17 +674,23 @@ export function renderBackgroundForm(options: BackgroundFormOptions): Cleanup {
         if (!isStoredBackgroundDraft(saved)) {
           throw new TypeError('Saving the background draft returned a different content kind.');
         }
+        clear(validationMount);
         stored = saved;
+        options.onSaved?.(stored);
         if (edits.acceptSave(generation)) {
           document = stored.document;
-          status.textContent = `Saved revision ${String(stored.revision)}.`;
+          showDraftSaveSuccess(status, `Saved revision ${String(stored.revision)}.`);
         } else {
-          status.textContent = `Saved revision ${String(stored.revision)}; newer unsaved changes remain.`;
+          showDraftSaveSuccess(
+            status,
+            `Saved revision ${String(stored.revision)}; newer unsaved changes remain.`,
+          );
         }
         return true;
       } catch (error) {
         const conflict = draftRevisionConflict(error);
         if (conflict !== null) {
+          showDraftSaveRefusal(status);
           const dialog = createDraftConflictDialog({
             conflict,
             mount: options.context.root,
@@ -702,11 +714,11 @@ export function renderBackgroundForm(options: BackgroundFormOptions): Cleanup {
         } else {
           const issues = validationIssues(error);
           if (issues !== null) {
+            showDraftSaveRefusal(status);
             clear(validationMount);
             validationMount.append(renderValidationSummary(form, issues));
           } else {
-            status.textContent = error instanceof Error ? error.message : String(error);
-            status.setAttribute('role', 'alert');
+            showDraftSaveFailure(status, error);
           }
         }
         return false;
