@@ -296,7 +296,7 @@ describe('HA-7 species authoring form', () => {
       expect(elementText(root as unknown as Node)).not.toContain('New class');
       expect(root.querySelectorAll('select').find((control) =>
         control.getAttribute('id')?.endsWith('-spell'))?.querySelector('optgroup')
-        ?.getAttribute('label')).toBe('Cantrip · 2024 — SRD · bundled layer');
+        ?.getAttribute('label')).toBe('Cantrip · 2024 rules — SRD · bundled layer');
       expect(elementText(root as unknown as Node)).not.toContain('Spell content key');
       expect(byId(root, 'input', 'species-creature-type').value).toBe('Clockwork');
       expect(byId(root, 'input', 'species-primary-size').value).toBe('Colossal');

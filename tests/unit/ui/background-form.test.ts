@@ -295,12 +295,12 @@ describe('HA-9 background authoring form', () => {
       const optionLabels = rendered.root.querySelectorAll('option').map(
         (option) => elementText(option as unknown as Node),
       );
-      expect(optionLabels).toContain('Alert (2024)');
+      expect(optionLabels).toContain('Alert (2024 rules)');
       expect(optionLabels).toContain(
-        `${hostile} (2024)`,
+        `${hostile} (2024 rules)`,
       );
       expect(optionLabels).toContain(
-        'Leather Armor (2024)',
+        'Leather Armor (2024 rules)',
       );
       expect(
         rendered.root.querySelectorAll('optgroup').map((group) =>

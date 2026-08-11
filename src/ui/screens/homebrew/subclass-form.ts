@@ -28,6 +28,7 @@ import {
 } from '../../../domain/enums';
 import type { ContentKey } from '../../../domain/ids';
 import { RpcError } from '../../../rpc/protocol';
+import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
 import {
   authoringPathKey,
   createEffectCard,
@@ -51,8 +52,14 @@ import {
 import { createAuthoringEditGeneration } from '../../authoring/edit-generation';
 import { clear, element, type Cleanup } from '../../dom';
 import { freeTextSpan } from '../../free-text';
+import { abilityLabel, rulesEditionLabel } from '../../human-labels';
 import type { ScreenContext } from '../../screen';
 import { homebrewPublishedPath } from './homebrew-routes';
+import {
+  renderPublishPreviewEffect,
+  renderPublishPreviewGrant,
+  spellCatalogNameForGrant,
+} from './publish-preview-renderer';
 import { spellGrantControls } from './spell-grant-controls';
 
 type StoredSubclassDraft = StoredHomebrewDraft & {
@@ -251,7 +258,12 @@ export function subclassProgressionGridIssues(
   return Object.freeze(issues);
 }
 
-function previewElement(preview: PublishPreview): HTMLElement {
+function previewElement(
+  preview: PublishPreview,
+  draft: SubclassAuthoringDraft,
+  spellGrantReferences: SpellGrantAuthoringReferences,
+  parentClasses: readonly GuidedClassOption[],
+): HTMLElement {
   if (preview.aggregate.kind !== 'subclass') {
     throw new TypeError('The subclass form received a non-subclass publish preview.');
   }
@@ -266,9 +278,38 @@ function previewElement(preview: PublishPreview): HTMLElement {
   }));
   const name = element('p');
   name.append('Name: ', freeTextSpan(aggregate.name));
+  const parentReference = parentClasses.find((parent) =>
+    parent.content_key === draft.parent_class_content_key
+  );
+  const parent = element('p');
+  parent.append(
+    'Parent class: ',
+    parentReference === undefined
+      ? 'Configured bundled class'
+      : freeTextSpan(parentReference.name),
+    ` · ${catalogLayerLabel(parentReference?.catalog_layer ?? 'unknown')}`,
+  );
   root.append(name, element('p', {
-    text: `Rules edition: ${aggregate.rules_edition}; progression: ${titleCase(aggregate.progression.mode)}.`,
-  }));
+    text: `Rules edition: ${rulesEditionLabel(aggregate.rules_edition)}; progression: ${titleCase(aggregate.progression.mode)}.`,
+  }), parent);
+  const draftGrants = draft.progression.mode === 'override'
+    ? draft.progression.rows.flatMap((progressionRow) => progressionRow.grants)
+    : [];
+  const grantContext = {
+    catalogNameForGrant: (grant: Parameters<typeof renderPublishPreviewGrant>[0]) =>
+      spellCatalogNameForGrant(grant, draftGrants, spellGrantReferences),
+  };
+  const definitionGrants = element('ul', {
+    attributes: { 'aria-label': 'Subclass grant preview' },
+  });
+  if (aggregate.grants.length === 0) {
+    definitionGrants.append(element('li', { text: 'No definition-level grants.' }));
+  } else {
+    for (const grant of aggregate.grants) {
+      definitionGrants.append(renderPublishPreviewGrant(grant, grantContext));
+    }
+  }
+  root.append(definitionGrants);
   if (aggregate.progression.mode === 'override') {
     root.append(element('p', {
       text: `Dense override: ${aggregate.progression.rows.length} levels; ${titleCase(aggregate.progression.caster_contribution)} caster contribution.`,
@@ -276,7 +317,7 @@ function previewElement(preview: PublishPreview): HTMLElement {
     root.append(element('p', {
       text: aggregate.progression.spellcasting_ability === null
         ? 'No spellcasting ability is fixed by this subclass.'
-        : `Spell attack = proficiency bonus + ${titleCase(aggregate.progression.spellcasting_ability)} modifier; spell save DC = 8 + those values. Character values determine the boundary-level numbers.`,
+        : `Spell attack = proficiency bonus + ${abilityLabel(aggregate.progression.spellcasting_ability)} modifier; spell save DC = 8 + those values. Character values determine the boundary-level numbers.`,
     }));
     const boundaries = element('table', {
       className: 'subclass-progression-preview',
@@ -301,8 +342,31 @@ function previewElement(preview: PublishPreview): HTMLElement {
         progressionRow.prepared_or_known_count,
         progressionRow.maximum_spell_level,
         progressionRow.slot_counts.join('/'),
-        progressionRow.grants.length,
       ]) tableRow.append(element('td', { text: String(value) }));
+      const grantCell = element('td');
+      if (progressionRow.grants.length === 0) {
+        grantCell.textContent = 'None';
+      } else {
+        const grantList = element('ul');
+        const draftRow = draft.progression.mode === 'override'
+          ? draft.progression.rows.find((candidate) =>
+              candidate.class_level === progressionRow.class_level
+            )
+          : undefined;
+        const rowGrantContext = {
+          catalogNameForGrant: (grant: Parameters<typeof renderPublishPreviewGrant>[0]) =>
+            spellCatalogNameForGrant(
+              grant,
+              draftRow?.grants ?? [],
+              spellGrantReferences,
+            ),
+        };
+        for (const grant of progressionRow.grants) {
+          grantList.append(renderPublishPreviewGrant(grant, rowGrantContext));
+        }
+        grantCell.append(grantList);
+      }
+      tableRow.append(grantCell);
       body.append(tableRow);
     }
     boundaries.append(body);
@@ -317,9 +381,7 @@ function previewElement(preview: PublishPreview): HTMLElement {
     description.append(freeTextSpan(feature.description));
     const effects = element('ul');
     for (const effect of feature.effects) {
-      const effectItem = element('li');
-      effectItem.append(`${titleCase(effect.kind)} — `, freeTextSpan(effect.label));
-      effects.append(effectItem);
+      effects.append(renderPublishPreviewEffect(effect));
     }
     item.append(heading, description, effects);
     timeline.append(item);
@@ -438,7 +500,10 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
     });
     edition.append(element('option', { text: 'Choose…', attributes: { value: '' } }));
     for (const value of rulesEditions) {
-      edition.append(element('option', { text: value, attributes: { value } }));
+      edition.append(element('option', {
+        text: rulesEditionLabel(value),
+        attributes: { value },
+      }));
     }
     edition.value = document.rules_edition ?? '';
     edition.disabled = locked;
@@ -487,7 +552,7 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
       ...labelledControl('Parent bundled class', parent.id, parent),
       element('p', {
         className: 'authoring-mechanic-disclosure',
-        text: 'Only bundled classes can be subclass parents. The publish service enforces this boundary.',
+        text: 'Only bundled classes can be subclass parents.',
       }),
       ...labelledControl('Reference text for mechanics not applied to the sheet', reference.id, reference),
     ]);
@@ -1317,7 +1382,12 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
         }
         clear(validationMount);
         options.mount.querySelector('.subclass-publish-preview')?.remove();
-        const renderedPreview = previewElement(publishPreview);
+        const renderedPreview = previewElement(
+          publishPreview,
+          document,
+          options.spellGrantReferences,
+          options.parentClasses,
+        );
         const publish = element('button', {
           className: 'button-primary',
           text: 'Publish subclass',

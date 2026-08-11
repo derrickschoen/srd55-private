@@ -778,7 +778,7 @@ describe('HA-6 homebrew library routing and tabs', () => {
         .find((group) => group.getAttribute('label') === 'SRD · bundled layer');
       expect(bundledFeats?.querySelectorAll('option').map(
         (option) => option.textContent,
-      )).toContain('Alert (2024)');
+      )).toContain('Alert (2024 rules)');
       expect(bundledFeats?.getAttribute('label')).toBe(
         'SRD · bundled layer',
       );
