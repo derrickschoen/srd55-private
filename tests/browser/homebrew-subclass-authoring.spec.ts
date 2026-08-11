@@ -28,11 +28,9 @@ async function homebrewReady(page: Page): Promise<void> {
 test('authors a subclass timeline and persists only threshold-eligible character effects', async ({
   page,
 }) => {
-  // Budget: the HA-7 measured guided baseline is 17.7s. Add 20s for the XL grid and
-  // timeline, 15s for publish, and 20s for character threshold commands/reload
-  // = 72.7s guided. A 1.5 contention reserve yields 109.05s; 125s leaves 15.95s
-  // (14.6%) explicit headroom beyond that reserve.
-  test.setTimeout(125_000);
+  // Measured on PLAYWRIGHT_PORT=5090 in the affected five-spec round at 15.4s.
+  // The required x1.5 reserve is 23.1s, already on a 100ms boundary.
+  test.setTimeout(23_100);
   await page.goto('/');
   await ready(page);
   await page.evaluate(() => window.staticApp.reset());
@@ -55,6 +53,20 @@ test('authors a subclass timeline and persists only threshold-eligible character
   await expect(page.getByLabel('Levels 1 through 20 spellcasting progression grid'))
     .toContainText('Class levels 1–20 — unchanged run; expand to edit');
   await page.getByText('Class levels 1–20 — unchanged run; expand to edit').click();
+  const levelThreeProgression = page.getByRole('group', {
+    name: 'Class level 3 progression',
+  });
+  await levelThreeProgression.getByRole('button', { name: 'Add spell grant' }).click();
+  const spellGrant = levelThreeProgression.getByRole('group', {
+    name: 'Spell grant 1 at class level 3',
+  });
+  const spellPicker = spellGrant.getByLabel('Spell', { exact: true });
+  await expect(spellPicker.locator('optgroup').first()).toHaveAttribute(
+    'label', /SRD · bundled layer/u,
+  );
+  await spellPicker.selectOption({ label: 'Light' });
+  await expect(spellGrant.getByLabel('Stable grant label')).toHaveValue('fixed-light');
+  await page.getByText('Class levels 4–20 — unchanged run; expand to edit').click();
   const levelTwentyProgression = page.getByRole('group', { name: 'Class level 20 progression' });
   await levelTwentyProgression.getByLabel('Cantrips known').fill('1');
 
@@ -180,6 +192,10 @@ test('authors a subclass timeline and persists only threshold-eligible character
       'character_class_levels',
       { character_id: character.id },
     );
+    const spellSlots = await window.staticApp.inspectRows(
+      'spell_selection_slots',
+      { character_id: character.id, rule_key: 'fixed-light' },
+    );
     const sheet = await window.appRpc.call<
       { readonly character_id: number },
       {
@@ -195,6 +211,7 @@ test('authors a subclass timeline and persists only threshold-eligible character
       afterLevelTwo,
       afterLevelThree,
       classLevels,
+      spellSlots,
       armorBonuses: sheet.armor_class.bonuses,
     };
   });
@@ -223,6 +240,13 @@ test('authors a subclass timeline and persists only threshold-eligible character
       hit_points_flat: 3,
       label: 'Threshold vitality',
       template_ref: expect.stringMatching(/^subclass_feature_effects:/u),
+    }),
+  ]);
+  expect(journey.spellSlots).toEqual([
+    expect.objectContaining({
+      character_id: journey.characterId,
+      rule_key: 'fixed-light',
+      selection_eligibility: 'valid',
     }),
   ]);
   expect(journey.afterLevelThree).not.toEqual(expect.arrayContaining([

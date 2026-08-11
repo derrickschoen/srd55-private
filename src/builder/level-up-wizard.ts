@@ -320,12 +320,16 @@ export interface LevelUpStateParams {
 }
 
 /** One durable D70 warning, repeated here without re-deriving its prose. */
-export interface LevelUpPermanentWarning {
+interface LevelUpPermanentWarningBase {
   readonly kind: string;
   readonly title: string;
   readonly detail: string;
-  readonly remedy: string;
 }
+
+export type LevelUpPermanentWarning = LevelUpPermanentWarningBase & (
+  | { readonly remedy: string; readonly remedy_action?: never }
+  | { readonly remedy?: never; readonly remedy_action: 'import_catalog' }
+);
 
 export interface LevelUpCharacterSummary {
   readonly character_id: CharacterId;

@@ -174,6 +174,7 @@ function overrideProgression(
     authoringIssue(issues, ['progression', 'rows'], 'required', 'Override progression requires exactly 20 rows.');
   }
   const rows: SubclassContentProgressionRow[] = [];
+  const ruleKeys = new Set<string>();
   draft.rows.forEach((row, rowIndex) => {
     const path = ['progression', 'rows', rowIndex] as const;
     const expectedLevel = rowIndex + 1;
@@ -184,10 +185,9 @@ function overrideProgression(
     if (row.prepared_or_known_count === null) authoringIssue(issues, [...path, 'prepared_or_known_count'], 'required', 'Prepared or known count is required.');
     if (row.maximum_spell_level === null) authoringIssue(issues, [...path, 'maximum_spell_level'], 'required', 'Maximum spell level is required.');
     if (row.slot_counts.length !== 9) authoringIssue(issues, [...path, 'slot_counts'], 'required', 'Exactly nine slot counts are required.');
-    const ruleKeys = new Set<string>();
     const grants = row.grants.flatMap((grant, grantIndex) => {
       if (ruleKeys.has(grant.rule_key)) {
-        authoringIssue(issues, [...path, 'grants', grantIndex, 'rule_key'], 'duplicate', 'Grant rule key must be unique within a level.');
+        authoringIssue(issues, [...path, 'grants', grantIndex, 'rule_key'], 'duplicate', 'Stable grant labels must be unique throughout the subclass.');
       }
       ruleKeys.add(grant.rule_key);
       const resolved = resolvedAuthoringGrant(db, grant, [...path, 'grants', grantIndex], issues);

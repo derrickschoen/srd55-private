@@ -10,6 +10,7 @@ import {
 } from '../../../builder/contracts';
 import type { Skill } from '../../../domain/enums';
 import { SKILL_LABELS } from '../../../rules/skills';
+import { CATALOG_IMPORT_ROUTE } from '../character-list/import-backup-controls';
 
 export interface PlannerCompletenessActions {
   /**
@@ -105,6 +106,13 @@ function entry(
     link.setAttribute('href', guidedSpeciesChoicePath(characterId));
     link.dataset.routerLink = 'true';
     link.textContent = item.remedy;
+    remedy.append(link);
+  } else if (item.kind === 'catalog_gap') {
+    const link = document.createElement('a');
+    link.setAttribute('href', CATALOG_IMPORT_ROUTE);
+    link.dataset.routerLink = 'true';
+    link.className = 'button-secondary';
+    link.textContent = 'Import a catalog with eligible spells';
     remedy.append(link);
   } else {
     remedy.textContent = item.remedy;

@@ -232,6 +232,11 @@ export const handlers: readonly RpcHandler[] = [
     ({ db }) => new CatalogAuthoringService(db).backgroundReferences(),
   ),
   defineRpcHandler(
+    AUTHORING_RPC.spellGrantReferences,
+    isEmptyParams,
+    ({ db }) => new CatalogAuthoringService(db).spellGrantReferences(),
+  ),
+  defineRpcHandler(
     AUTHORING_RPC.createDraft,
     isCreateDraftParams,
     ({ db }, params) => {

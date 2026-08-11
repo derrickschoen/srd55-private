@@ -291,7 +291,7 @@ const completeness: CompletenessResult = {
       kind: 'catalog_gap',
       title: 'No eligible spells',
       detail: 'detail',
-      remedy: 'remedy',
+      remedy_action: 'import_catalog',
       // 'Wizard' is a class this character has; the other name resolved from
       // the source instance's importer-supplied `$config`.
       spell_lists: ['Wizard', HOSTILE_SPELL_LIST],

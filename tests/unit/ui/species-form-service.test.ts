@@ -26,7 +26,7 @@ import { parseRoute, type Router } from '../../../src/ui/router';
 import type { ScreenContext } from '../../../src/ui/screen';
 import {
   isStoredSpeciesDraft,
-  renderSpeciesForm,
+  renderSpeciesForm as renderSpeciesFormBase,
 } from '../../../src/ui/screens/homebrew/species-form';
 import {
   elementText,
@@ -35,6 +35,21 @@ import {
   type InteractiveTestElement,
 } from '../../fixtures/interactive-dom';
 import { openTestDatabase } from '../../helpers/open-db';
+import { seedSpellContent } from '../../../src/rules/spells-srd';
+
+type TestSpeciesFormOptions = Omit<
+  Parameters<typeof renderSpeciesFormBase>[0],
+  'spellGrantReferences'
+> & { readonly spellGrantReferences?: Parameters<
+  typeof renderSpeciesFormBase
+>[0]['spellGrantReferences'] };
+
+function renderSpeciesForm(options: TestSpeciesFormOptions) {
+  return renderSpeciesFormBase({
+    ...options,
+    spellGrantReferences: options.spellGrantReferences ?? { spells: [], lists: [] },
+  });
+}
 
 const connections: Database[] = [];
 let uuidSequence = 0;
@@ -115,6 +130,7 @@ function serviceClient(
   return {
     list: () => rpcCall(() => service.list()),
     backgroundReferences: () => rpcCall(() => service.backgroundReferences()),
+    spellGrantReferences: () => rpcCall(() => service.spellGrantReferences()),
     createDraft: (params) => rpcCall(() => service.createDraft(params)),
     readDraft: (params) => rpcCall(() => service.readDraft(params.draft_uuid)),
     saveDraft: (params) => rpcCall(() => service.saveDraft(params)),
@@ -228,6 +244,20 @@ function publishDirectly(
 }
 
 describe('HA-7 service-driven refusal and terminal paths', () => {
+  it('derives installed spell and spell-list authoring references with catalog disclosure', async () => {
+    const service = await authoringService();
+    seedSpellContent(service.db);
+    const references = service.spellGrantReferences();
+    expect(references.spells).toContainEqual(expect.objectContaining({
+      name: 'Light',
+      rules_edition: '2024',
+      level: 0,
+      catalog_layer: 'bundled',
+    }));
+    expect(references.lists).toEqual(expect.arrayContaining(['Cleric', 'Wizard']));
+    expect(references.spells.every((spell) => spell.content_key !== '')).toBe(true);
+  });
+
   it('HA7-REFUSAL renders real semantic issues, re-enables Preview, and recovers through corrected UI state', async () => {
     const service = await authoringService();
     const created = service.createDraft({ content_kind: 'species' });

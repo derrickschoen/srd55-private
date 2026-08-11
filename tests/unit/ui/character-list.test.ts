@@ -775,7 +775,7 @@ describe('catalog and backup entry points', () => {
     }
   });
 
-  it('opens and focuses the library control when the importer route requests it', () => {
+  it('opens and focuses the requested catalog or library importer control', () => {
     const fixture = services();
     const restoreDocument = installInteractiveDocument();
     try {
@@ -786,6 +786,16 @@ describe('catalog and backup entry points', () => {
         services: fixture.value,
       });
       document.body.append(controls.element);
+      controls.focusCatalogImport();
+
+      expect((controls.element as HTMLDetailsElement).open).toBe(true);
+      const catalogLabel = interactiveElement(controls.element)
+        .querySelectorAll('label').find((label) =>
+          elementText(label as unknown as Node).includes('Catalog JSON')
+        );
+      expect(document.activeElement).toBe(
+        catalogLabel?.querySelector('input'),
+      );
       controls.focusLibraryImport();
 
       expect((controls.element as HTMLDetailsElement).open).toBe(true);

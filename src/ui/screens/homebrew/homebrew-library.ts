@@ -971,15 +971,24 @@ async function renderDraftRoute(
     ]),
   );
   if (isStoredSpeciesDraft(draft)) {
-    cleanups.push(renderSpeciesForm({ context, client, mount: formMount, draft }));
+    const spellGrantReferences = await client.spellGrantReferences();
+    cleanups.push(renderSpeciesForm({
+      context, client, mount: formMount, draft, spellGrantReferences,
+    }));
   } else if (isStoredSubclassDraft(draft)) {
-    const bundledParents = parentClasses ?? await createQueriesClient(context.rpc).guidedClassOptions();
+    const [bundledParents, spellGrantReferences] = await Promise.all([
+      parentClasses === undefined
+        ? createQueriesClient(context.rpc).guidedClassOptions()
+        : Promise.resolve(parentClasses),
+      client.spellGrantReferences(),
+    ]);
     cleanups.push(renderSubclassForm({
       context,
       client,
       mount: formMount,
       draft,
       parentClasses: bundledParents,
+      spellGrantReferences,
     }));
   } else if (isStoredBackgroundDraft(draft)) {
     const references = await client.backgroundReferences();

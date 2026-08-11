@@ -17,7 +17,7 @@ import { parseRoute, Router } from '../../../src/ui/router';
 import type { ScreenContext } from '../../../src/ui/screen';
 import {
   isStoredSubclassDraft,
-  renderSubclassForm,
+  renderSubclassForm as renderSubclassFormBase,
   subclassProgressionGridIssues,
 } from '../../../src/ui/screens/homebrew/subclass-form';
 import {
@@ -26,6 +26,20 @@ import {
   interactiveElement,
   type InteractiveTestElement,
 } from '../../fixtures/interactive-dom';
+
+type TestSubclassFormOptions = Omit<
+  Parameters<typeof renderSubclassFormBase>[0],
+  'spellGrantReferences'
+> & { readonly spellGrantReferences?: Parameters<
+  typeof renderSubclassFormBase
+>[0]['spellGrantReferences'] };
+
+function renderSubclassForm(options: TestSubclassFormOptions) {
+  return renderSubclassFormBase({
+    ...options,
+    spellGrantReferences: options.spellGrantReferences ?? { spells: [], lists: [] },
+  });
+}
 
 const hostile = '</textarea><img data-ha8-hostile src=x> "quoted" 🐲 \u202eRTL\u202c nul\u0000\u0001tail';
 const fighterKey = '2024:class:fighter' as ContentKey;
@@ -128,6 +142,7 @@ function client(overrides: Partial<AuthoringClient> = {}): AuthoringClient {
   return {
     list: () => unused(),
     backgroundReferences: () => unused(),
+    spellGrantReferences: () => unused(),
     createDraft: () => unused(),
     readDraft: () => unused(),
     saveDraft: () => unused(),
@@ -268,6 +283,7 @@ describe('HA-8 subclass timeline form', () => {
         mount,
         draft,
         parentClasses: parents,
+        spellGrantReferences: { spells: [], lists: ['Cleric', 'Wizard'] },
         windowObject: new EventTarget() as unknown as Window,
       });
       const root = interactiveElement(mount);
@@ -466,6 +482,7 @@ describe('HA-8 subclass timeline form', () => {
         mount,
         draft,
         parentClasses: parents,
+        spellGrantReferences: { spells: [], lists: ['Cleric', 'Wizard'] },
         windowObject: new EventTarget() as unknown as Window,
       });
       const root = interactiveElement(mount);
@@ -532,6 +549,7 @@ describe('HA-8 subclass timeline form', () => {
         mount,
         draft,
         parentClasses: parents,
+        spellGrantReferences: { spells: [], lists: ['Cleric', 'Wizard'] },
         windowObject: new EventTarget() as unknown as Window,
       });
       const root = interactiveElement(mount);
@@ -543,6 +561,16 @@ describe('HA-8 subclass timeline form', () => {
       expect(elementText(root as unknown as Node))
         .toContain('Minimum spell level (optional)');
       expect(minimum.value).toBe('1');
+      const list = control(
+        root,
+        'select',
+        'subclass-progression-3-grant-leveled-list-list',
+      );
+      expect(list.value).toBe('Wizard');
+      expect(list.querySelectorAll('option').map((option) =>
+        elementText(option as unknown as Node))).toEqual([
+        'Choose an installed spell list', 'Cleric', 'Wizard',
+      ]);
       input(minimum, '2');
       button(root, 'Save draft').click();
       await settle();

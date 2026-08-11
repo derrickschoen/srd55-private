@@ -32,6 +32,7 @@ import { canonicalJson } from '../../../commands/canonical-json';
 import { announceTransferFailure } from './transfer-failure';
 
 export const LIBRARY_IMPORT_ROUTE = '/?import=library';
+export const CATALOG_IMPORT_ROUTE = '/?import=catalog';
 
 export interface ReadableFile {
   readonly name: string;
@@ -80,6 +81,7 @@ export interface ImportBackupControlsOptions {
 export interface ImportBackupControls {
   readonly element: HTMLElement;
   updateCharacters(characters: readonly CharacterSummary[]): void;
+  focusCatalogImport(): void;
   focusLibraryImport(): void;
   readonly cleanup: Cleanup;
 }
@@ -862,6 +864,11 @@ export function createImportBackupControls(
   return {
     element: root,
     updateCharacters,
+    focusCatalogImport: () => {
+      root.open = true;
+      root.scrollIntoView?.({ block: 'start' });
+      catalogInput.focus();
+    },
     focusLibraryImport: () => {
       root.open = true;
       root.scrollIntoView?.({ block: 'start' });

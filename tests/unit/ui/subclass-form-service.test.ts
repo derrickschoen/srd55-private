@@ -26,7 +26,7 @@ import { parseRoute, type Router } from '../../../src/ui/router';
 import type { ScreenContext } from '../../../src/ui/screen';
 import {
   isStoredSubclassDraft,
-  renderSubclassForm,
+  renderSubclassForm as renderSubclassFormBase,
 } from '../../../src/ui/screens/homebrew/subclass-form';
 import {
   elementText,
@@ -35,6 +35,20 @@ import {
   type InteractiveTestElement,
 } from '../../fixtures/interactive-dom';
 import { openTestDatabase } from '../../helpers/open-db';
+
+type TestSubclassFormOptions = Omit<
+  Parameters<typeof renderSubclassFormBase>[0],
+  'spellGrantReferences'
+> & { readonly spellGrantReferences?: Parameters<
+  typeof renderSubclassFormBase
+>[0]['spellGrantReferences'] };
+
+function renderSubclassForm(options: TestSubclassFormOptions) {
+  return renderSubclassFormBase({
+    ...options,
+    spellGrantReferences: options.spellGrantReferences ?? { spells: [], lists: [] },
+  });
+}
 
 const connections: Database[] = [];
 let uuidSequence = 0;
@@ -163,6 +177,7 @@ function serviceClient(
   return {
     list: () => rpcCall(() => service.list()),
     backgroundReferences: () => rpcCall(() => service.backgroundReferences()),
+    spellGrantReferences: () => rpcCall(() => service.spellGrantReferences()),
     createDraft: (params) => rpcCall(() => service.createDraft(params)),
     readDraft: (params) => rpcCall(() => service.readDraft(params.draft_uuid)),
     saveDraft: (params) => rpcCall(() => service.saveDraft(params)),
@@ -283,6 +298,50 @@ function installRootOnlySubclass(
 }
 
 describe('HA-8 production-service form boundaries', () => {
+  it('refuses duplicate stable grant labels across different subclass levels', async () => {
+    const { service, db } = await fixture();
+    const parent = listGuidedClassOptions(db).find((candidate) => candidate.name === 'Fighter');
+    if (parent === undefined) throw new Error('Bundled Fighter is required.');
+    const created = service.createDraft({ content_kind: 'subclass' });
+    const document = validDocument(
+      created,
+      parent.content_key as ContentKey,
+      'Unique Grant Labels',
+    );
+    if (document.progression.mode !== 'override') throw new Error('Override progression required.');
+    const duplicateGrant = (suffix: string) => ({
+      kind: 'choice_from_list' as const,
+      draft_item_uuid: itemUuid(`duplicate-${suffix}`),
+      rule_key: 'shared-stable-label',
+      list: 'Wizard',
+      count: 1,
+      minimum_spell_level: 0,
+      maximum_spell_level: 0,
+    });
+    const rows = document.progression.rows.map((row, index) => ({
+      ...row,
+      grants: index === 0 ? [duplicateGrant('one')]
+        : index === 1 ? [duplicateGrant('two')]
+        : row.grants,
+    }));
+    const saved = service.saveDraft({
+      draft_uuid: created.draft_uuid,
+      expected_revision: created.revision,
+      document: { ...document, progression: { ...document.progression, rows } },
+    });
+    expect(errorData(() => service.previewPublish({
+      draft_uuid: saved.draft_uuid,
+      expected_revision: saved.revision,
+    }))).toMatchObject({
+      reason: 'validation_failed',
+      issues: [expect.objectContaining({
+        path: ['progression', 'rows', 1, 'grants', 0, 'rule_key'],
+        code: 'duplicate',
+        message: 'Stable grant labels must be unique throughout the subclass.',
+      })],
+    });
+  });
+
   // Measured alone at 2.123s; the explicit timeout preserves headroom for seeded DB boots.
   it('round-trips the full draft and aggregate through the production codec with byte-equivalent save, reload, and rehydration', async () => {
     const { service, db } = await fixture();
