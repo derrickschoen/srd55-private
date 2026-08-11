@@ -37,10 +37,14 @@ Paladin Spells). Bane, Suggestion, Augury, Clairvoyance, Slow,
 Compulsion, Divination, Dominate Person, and Dream are all off-list
 grants. The table stays as fixed by the owner.
 
-Sim numbers at ruling time (dealt/round, burst, vs Vengeance
-19.5/34.8/60.3/72.0 at 3/6/11/17): smite-only policy 16.6/29.6/51.6/69.0;
-with the rider ~90% of Vengeance at 3–6; adaptive Command-then-smite at
-11/17 trades ~6.5/11 dealt for 8.4/14.4 prevented.
+Sim numbers, final kit as committed to tools/sim (dealt/round, burst, vs
+Vengeance 19.4/34.7/60.2/72.1 at 3/6/11/17): smite-only 16.5/29.6/51.7/68.9;
+best policy at 3–6 is mix (one slot-Command round 2) at 16.4/30.1 —
+**85–87% of Vengeance**, up from the old kit's 78% Voice-opener but short
+of the ~90% the lever-D brainstorm projected, because at 3–6 control now
+costs slots so the rider arms less often. Adaptive at 11/17 trades
+~6/10 dealt against smite-only for 8.5/14.4 prevented; Command-max
+prevented is 4.0/6.5/11.9/21.2.
 
 ## 2026-08-11 — No personal attribution: the owner's name comes off every homebrew notice
 

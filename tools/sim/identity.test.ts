@@ -61,7 +61,7 @@ describe('purity: the same seed run twice produces identical results', () => {
   // built once at module scope instead of per-call).
   const cases: Array<[string, () => unknown]> = [
     ['paladin L17 day', () => paladin(mulberry32(42), 17, 4)],
-    ['domination L11 day (open)', () => domination(mulberry32(42), 11, 4, 'open')],
+    ['domination L11 day (adaptive)', () => domination(mulberry32(42), 11, 4, 'adaptive')],
     ['monk L17 day (initManifest)', () => monk(mulberry32(42), 17, 4, true)],
     ['fiend L17 day (blade+dark)', () => fiend(mulberry32(42), 17, 4, true, true)],
     ['veteran L13... L17 ranged day', () => veteran(mulberry32(42), 17, 4, true)],

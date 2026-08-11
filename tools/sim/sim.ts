@@ -97,15 +97,24 @@
 //   solF8 monk `focus = L - 1` documented (goad FP, assumed spent round 1 —
 //         declared simplification: charged even on an all-miss round)
 //
-// Oath of Domination (docs/homebrew/cc-by/2026-08-03-oath-of-domination-subclass.md):
-//   Same Dex-paladin chassis as the Vengeance comparator; the subclass adds no
-//   damage dice. Voice of Domination = BA + 1 Channel Divinity -> 1 minute; each
-//   round may cast slotless Command as a BA. Grovel on a failed Wis save: the
-//   target falls Prone and its turn ends (its whole turn is lost) -> our melee
-//   attacks NEXT round have Advantage. A Command round cannot also Bonus-Action
-//   Divine Smite. Cha 16 flat on the Dex build -> DC 13/14/15/17. Native CD
-//   (2, 3 from L11, 1 back per Short Rest) covers Voice once per combat across
-//   a 4-combat day.
+// Oath of Domination (docs/homebrew/cc-by/2026-08-03-oath-of-domination-subclass.md,
+// as redesigned by owner ruling 2026-08-11 — see rulings.md):
+//   Same Dex-paladin chassis as the Vengeance comparator.
+//   L3 Foretold Authority: +1 spell save DC for 1 minute after casting Divine
+//     Smite, and smites deal +1d8 vs a creature that failed a save against the
+//     paladin's spell within the last minute. Both windows span a whole
+//     4-round combat here.
+//   L7 Voice of Domination: free action + 1 Channel Divinity immediately after
+//     casting Divine Smite -> 1 minute of Bonus-Action slotless Command. The
+//     sim's level bands put it in L11/17 only (L3/6 predate it); CD uses
+//     (2, 3 from L11, 1 back per Short Rest) cover one activation per combat
+//     across a 4-combat day and are not separately tracked. Without Voice a
+//     Command costs a level-1 slot, modeled as burning the smallest
+//     smite-queue entry.
+//   Grovel on a failed Wis save: the target falls Prone and its turn ends
+//   (its whole turn is lost) -> our melee attacks NEXT round have Advantage.
+//   A Command round cannot also Bonus-Action Divine Smite. Cha 16 flat on the
+//   Dex build -> DC 13/14/15/17 (+1 inside the Foretold Authority window).
 
 // --- RNG ---------------------------------------------------------------------
 // Every build takes an injectable Rng (uniform [0,1)) so tests can pin the
@@ -231,19 +240,31 @@ export function paladin(rng: Rng, L: Level, nc: number): CombatResult {
   return { dealt, prevented: 0 };
 }
 
-export type DominationPolicy = 'smite' | 'open' | 'voice';
+export type DominationPolicy = 'smite' | 'mix' | 'adaptive' | 'control';
 
 export function domination(
   rng: Rng,
   L: Level,
   nc: number,
-  policy: DominationPolicy = 'open',
+  policy: DominationPolicy = 'adaptive',
 ): CombatResult {
-  // Oath of Domination on the same chassis. Policies:
-  //   smite: Voice unused; smite every round including round 1.
-  //   open : round 1 = Voice activation + Command; then smite while the queue
-  //          lasts; recast Command when the queue is dry (day-mode tail).
-  //   voice: Command every round, never smite (full control posture).
+  // Oath of Domination on the same chassis, 2026-08-11 redesign (header).
+  // Policies:
+  //   smite   : never Command; the pure dealt ceiling.
+  //   mix     : one Command attempt on round 2 (slot-fueled at 3/6, Voice at
+  //             11/17 — which needs the round-1 smite to have activated it);
+  //             smite otherwise.
+  //   adaptive: at 11/17, smite round 1 to activate Voice, then Command until
+  //             a Grovel lands, smiting on advantage rounds (and commanding
+  //             the day-tail once the queue is dry). Same as mix at 3/6.
+  //   control : Command every possible round — slot-fueled at 3/6 until the
+  //             slots are gone; at 11/17 the round-1 smite activates Voice
+  //             and rounds 2-4 command.
+  // Voice requires a smite THIS combat (activation is smite-triggered and the
+  // 1-minute duration covers one combat); a dry queue therefore means no
+  // slotless Commands in the day-mode tail — those rounds are attacks only.
+  // Foretold Authority: `smited` opens the +1 DC window; `controlled` (a
+  // failed save this combat) arms the +1d8 smite rider.
   // A failed Grovel save ends the enemy's turn: the lost turn is sampled into
   // the prevented channel, and next round's melee attacks have Advantage.
   const wb = WB[L];
@@ -252,22 +273,34 @@ export function domination(
   const mod = ({ 3: 3, 6: 4, 11: 5, 17: 5 } as const)[L] + wb;
   const natk = ({ 3: 2, 6: 3, 11: 3, 17: 3 } as const)[L];
   const rad = L >= 11 ? 1 : 0;
-  const dc = ({ 3: 13, 6: 14, 11: 15, 17: 17 } as const)[L];
+  const dcBase = ({ 3: 13, 6: 14, 11: 15, 17: 17 } as const)[L];
+  const voice = L >= 11;
   const qq = [...SMITE_Q[L]].sort((a, b) => b - a);
   let dealt = 0;
   let prevented = 0;
   for (let c = 0; c < nc; c++) {
     let advNext = false;
+    let smited = false;
+    let controlled = false;
     for (let rnd = 0; rnd < 4; rnd++) {
       const adv = advNext;
       advNext = false;
-      let ba: 'smite' | 'command';
-      if (policy === 'smite') {
-        ba = 'smite';
-      } else if (policy === 'voice') {
-        ba = 'command';
-      } else {
-        ba = rnd === 0 || qq.length === 0 ? 'command' : 'smite';
+      let command = false;
+      if (policy === 'mix') {
+        command = rnd === 1;
+      } else if (policy === 'adaptive') {
+        command = voice ? rnd >= 1 && (!adv || qq.length === 0) : rnd === 1;
+      } else if (policy === 'control') {
+        command = voice ? rnd >= 1 : true;
+      }
+      if (command) {
+        if (voice) {
+          if (!smited) command = false; // Voice never activated this combat
+        } else if (qq.length > 0) {
+          qq.pop(); // smallest entry = the level-1 slot the Command burns
+        } else {
+          command = false; // no slots left to cast with
+        }
       }
       const hits: boolean[] = [];
       for (let i = 0; i < natk; i++) {
@@ -277,12 +310,17 @@ export function domination(
         dealt += d(rng, crit ? 2 : 1, 6) + mod + d(rng, rad * (crit ? 2 : 1), 8);
         hits.push(crit);
       }
-      if (ba === 'smite' && qq.length > 0 && hits.length > 0) {
+      if (!command && qq.length > 0 && hits.length > 0) {
         const sm = qq.shift() as number;
-        dealt += d(rng, sm * (hits.some(Boolean) ? 2 : 1), 8);
-      } else if (ba === 'command') {
+        const mul = hits.some(Boolean) ? 2 : 1;
+        dealt += d(rng, sm * mul, 8);
+        if (controlled) dealt += d(rng, mul, 8); // Foretold Authority rider
+        smited = true; // opens +1 DC; at 11/17 this is the Voice activation
+      } else if (command) {
+        const dc = dcBase + (smited ? 1 : 0);
         if (randInt(rng, 20) + 2 < dc) {
           advNext = true;
+          controlled = true;
           prevented += enemyTurnDamage(rng, L);
         }
       }

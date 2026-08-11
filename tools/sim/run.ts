@@ -123,7 +123,7 @@ function main(N: number, seed = 31): void {
   const hdr =
     ''.padEnd(44) + 'L3    L6    L11   L17    (burst | day)          max 95% CI';
 
-  const dominationRow = (policy: 'smite' | 'open' | 'voice'): BuildFn => {
+  const dominationRow = (policy: 'smite' | 'mix' | 'adaptive' | 'control'): BuildFn => {
     return (r, L, nc) => domination(r, L, nc, policy);
   };
 
@@ -132,8 +132,9 @@ function main(N: number, seed = 31): void {
   console.log('--- MELEE (+1/+2/+3 weapons at 6/11/17) ---');
   showRow({ name: 'Vengeance Paladin', fn: paladin }, seed, N);
   showRow({ name: 'Domination Paladin (smite-only)', fn: dominationRow('smite') }, seed, N);
-  showRow({ name: 'Domination Paladin (Voice opener)', fn: dominationRow('open') }, seed, N);
-  showRow({ name: 'Domination Paladin (Command always)', fn: dominationRow('voice') }, seed, N);
+  showRow({ name: 'Domination Paladin (mix: Cmd rnd 2)', fn: dominationRow('mix') }, seed, N);
+  showRow({ name: 'Domination Paladin (adaptive)', fn: dominationRow('adaptive') }, seed, N);
+  showRow({ name: 'Domination Paladin (Command-max)', fn: dominationRow('control') }, seed, N);
   showRow({ name: 'Champion GWM greatsword', fn: champion }, seed, N);
   showRow({ name: 'SRD Thief (sword+scimitar)', fn: thief }, seed, N);
   showRow({ name: 'Bladelock (greatsword, Hex)', fn: (r, L, nc) => fiend(r, L, nc, true) }, seed, N);
@@ -157,8 +158,8 @@ function main(N: number, seed = 31): void {
 
   console.log('=== DAMAGE PREVENTED per round (full defensive accounting; see sim.ts header) ===');
   console.log(hdr);
-  showRow({ name: 'Domination Paladin (Voice opener)', fn: dominationRow('open') }, seed, N, 1);
-  showRow({ name: 'Domination Paladin (Command always)', fn: dominationRow('voice') }, seed, N, 1);
+  showRow({ name: 'Domination Paladin (adaptive)', fn: dominationRow('adaptive') }, seed, N, 1);
+  showRow({ name: 'Domination Paladin (Command-max)', fn: dominationRow('control') }, seed, N, 1);
   showRow({ name: 'BARBED COURT (Shield/Mirror/goad)', fn: monk }, seed, N, 1);
   showRow({ name: 'BARBED COURT (init manifest @17)', fn: (r, L, nc) => monk(r, L, nc, true) }, seed, N, 1);
   showRow({ name: 'VETERAN melee (Veteran Reflexes @13+)', fn: veteran }, seed, N, 1);
@@ -167,8 +168,8 @@ function main(N: number, seed = 31): void {
   console.log('=== DEALT + PREVENTED per round (control-inclusive contribution) ===');
   console.log(hdr);
   showCombined({ name: 'Vengeance Paladin', fn: paladin }, seed, N);
-  showCombined({ name: 'Domination (Voice opener)', fn: dominationRow('open') }, seed, N);
-  showCombined({ name: 'Domination (Command always)', fn: dominationRow('voice') }, seed, N);
+  showCombined({ name: 'Domination (adaptive)', fn: dominationRow('adaptive') }, seed, N);
+  showCombined({ name: 'Domination (Command-max)', fn: dominationRow('control') }, seed, N);
 }
 
 const rawN = process.argv[2];

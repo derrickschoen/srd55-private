@@ -40,10 +40,10 @@ describe('directional invariants: dealt', () => {
     }
   });
 
-  it('Domination Command-always dealt < Domination smite-only dealt, at every level', () => {
+  it('Domination Command-max dealt < Domination smite-only dealt, at every level', () => {
     for (const L of [3, 6, 11, 17] as const) {
       const rng = mulberry32(2000 + L);
-      const cmd = sampleMeanPerRound((r, L2, nc) => domination(r, L2, nc, 'voice'), rng, L, 1, 6000);
+      const cmd = sampleMeanPerRound((r, L2, nc) => domination(r, L2, nc, 'control'), rng, L, 1, 6000);
       const smite = sampleMeanPerRound((r, L2, nc) => domination(r, L2, nc, 'smite'), rng, L, 1, 6000);
       expect(differsBySigma(cmd, smite, 4)).toBe(true);
       expect(cmd.mean).toBeLessThan(smite.mean);
@@ -52,27 +52,27 @@ describe('directional invariants: dealt', () => {
 });
 
 describe('directional invariants: prevented', () => {
-  it('Domination Command-always prevented > Voice-opener prevented, at every level', () => {
+  it('Domination Command-max prevented > mix prevented, at every level', () => {
     for (const L of [3, 6, 11, 17] as const) {
       const rng = mulberry32(3000 + L);
       const cmd = sampleMeanPerRound(
-        (r, L2, nc) => domination(r, L2, nc, 'voice'),
+        (r, L2, nc) => domination(r, L2, nc, 'control'),
         rng,
         L,
         1,
         6000,
         'prevented',
       );
-      const open = sampleMeanPerRound(
-        (r, L2, nc) => domination(r, L2, nc, 'open'),
+      const mix = sampleMeanPerRound(
+        (r, L2, nc) => domination(r, L2, nc, 'mix'),
         rng,
         L,
         1,
         6000,
         'prevented',
       );
-      expect(differsBySigma(cmd, open, 4)).toBe(true);
-      expect(cmd.mean).toBeGreaterThan(open.mean);
+      expect(differsBySigma(cmd, mix, 4)).toBe(true);
+      expect(cmd.mean).toBeGreaterThan(mix.mean);
     }
   });
 });
