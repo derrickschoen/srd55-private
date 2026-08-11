@@ -11,6 +11,7 @@ import {
   type ContentImportProjection,
 } from '../catalog/content-adoption';
 import {
+  CatalogSupersessionRefusal,
   commitImmutableCatalogPublication,
   planImmutableCatalogPublication,
 } from '../catalog/authoring-lifecycle';
@@ -497,10 +498,21 @@ export function commitSubclassPublish(
       ? { reason: 'content_key_collision', content_key: assertedKey }
       : { reason: 'publish_refused', refusal: refusal.reason });
   }
-  const committed = commitImmutableCatalogPublication(db, publication, {
-    token: chosenPlan.token,
-    choices,
-  });
+  let committed;
+  try {
+    committed = commitImmutableCatalogPublication(db, publication, {
+      token: chosenPlan.token,
+      choices,
+    });
+  } catch (error) {
+    if (error instanceof CatalogSupersessionRefusal) {
+      throw new SubclassPublishError(error.message, {
+        reason: 'publish_refused',
+        refusal: error.reason,
+      });
+    }
+    throw error;
+  }
   if (committed.kind === 'stale-plan') throw new SubclassPublishError('The publish plan is stale.', { reason: 'stale_publish_plan', draft_uuid: draft.draft_uuid });
   if (committed.kind === 'refused') throw new SubclassPublishError('The subclass publish transaction was refused.', { reason: 'publish_refused', refusal: committed.reason });
   const outcome = committed.outcomes[0];

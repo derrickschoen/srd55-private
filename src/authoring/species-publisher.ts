@@ -17,6 +17,7 @@ import {
   type ContentImportProjection,
 } from '../catalog/content-adoption';
 import {
+  CatalogSupersessionRefusal,
   commitImmutableCatalogPublication,
   planImmutableCatalogPublication,
 } from '../catalog/authoring-lifecycle';
@@ -657,10 +658,21 @@ export function commitSpeciesPublish(
         : { refusal: chosenRefusal.reason }),
     } as SpeciesPublishRefusal);
   }
-  const committed = commitImmutableCatalogPublication(db, publication, {
-    token: chosenPlan.token,
-    choices,
-  });
+  let committed;
+  try {
+    committed = commitImmutableCatalogPublication(db, publication, {
+      token: chosenPlan.token,
+      choices,
+    });
+  } catch (error) {
+    if (error instanceof CatalogSupersessionRefusal) {
+      throw new SpeciesPublishError(error.message, {
+        reason: 'publish_refused',
+        refusal: error.reason,
+      });
+    }
+    throw error;
+  }
   if (committed.kind === 'stale-plan') {
     throw new SpeciesPublishError('The publish plan is stale.', {
       reason: 'stale_publish_plan',
