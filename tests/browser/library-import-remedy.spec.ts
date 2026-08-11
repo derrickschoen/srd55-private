@@ -928,5 +928,5 @@ test('whole-library download restores authored and imported content into a fresh
     }),
   });
   await expect(restoredSpeciesCard.getByText('Homebrew', { exact: true })).toBeVisible();
-  await expect(restoredSpeciesCard).toContainText('Species · read-only published version');
+  await expect(restoredSpeciesCard).toContainText('Species · published homebrew version');
 });

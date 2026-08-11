@@ -148,6 +148,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'class_definitions',
       'class_extra_attack_grants',
       'class_feature_effects',
+      'class_feature_value_contributions',
       'class_martial_arts_dice',
       'class_progressions',
       'class_resource_formulas',
@@ -185,6 +186,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'spell_versions',
       'subclass_definitions',
       'subclass_feature_effects',
+      'subclass_feature_value_contributions',
       'subclass_features',
       'subclass_progressions',
       'warning_acknowledgements',
@@ -347,7 +349,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
 });
 
 describe('table scope classification', () => {
-  it('classifies all 82 tables exactly once', () => {
+  it('classifies all 84 tables exactly once', () => {
     const names = Object.keys(TABLE_SCOPES);
     // 30 Laravel-derived tables — 38 until the eight Laravel-only
     // infrastructure ones were dropped — plus the four native weapon tables,
@@ -364,8 +366,9 @@ describe('table scope classification', () => {
     // tables and CI-2b's ONE applied data-migration marker table. Each group is named
     // rather than folded into one total, so a group that vanishes while
     // another grows cannot pass unnoticed.
-    expect(names).toHaveLength(82);
-    expect(new Set(names).size).toBe(82);
+    // Migration 0042 adds the two owner-specific contribution tables.
+    expect(names).toHaveLength(84);
+    expect(new Set(names).size).toBe(84);
     expect([...names].sort()).toEqual([...APPLICATION_TABLES].sort());
   });
 

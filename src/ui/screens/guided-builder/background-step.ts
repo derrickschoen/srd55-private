@@ -52,6 +52,7 @@ import {
 import { SKILL_LABELS } from '../../../rules/skills';
 import { RpcError } from '../../../rpc/protocol';
 import { clear, element, listen, type Cleanup } from '../../dom';
+import { abilityLabel } from '../../human-labels';
 import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
 import { catalogSelectGroups } from '../../catalog-control-disclosure';
 import { characterListLink, guidedShell } from './guided-builder';
@@ -62,15 +63,6 @@ import { characterListLink, guidedShell } from './guided-builder';
  * A1's, A3's and A4's panel values were.
  */
 export const BACKGROUND_STEP_PANEL = 'background-step';
-
-const ABILITY_LABELS: Readonly<Record<Ability, string>> = {
-  strength: 'Strength',
-  dexterity: 'Dexterity',
-  constitution: 'Constitution',
-  intelligence: 'Intelligence',
-  wisdom: 'Wisdom',
-  charisma: 'Charisma',
-};
 
 /** The two printed spread shapes; the SIZE of the budget is not D61's to lift. */
 type IncreaseMode = 'two_one' | 'one_one_one';
@@ -178,7 +170,7 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
     const pairing = selected.pairing;
     suggestionMount.textContent =
       `${pairing.background_name}'s printed default: increases to ` +
-      `${pairing.printed_abilities.join(', ')}, and the ` +
+      `${pairing.suggested_abilities?.map(abilityLabel).join(', ') ?? pairing.printed_abilities.join(', ')}, and the ` +
       `${pairing.printed_feat} feat. Change any of it below; the defaults ` +
       'are marked.';
   };
@@ -279,8 +271,8 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
           // (D68); every ability stays equally selectable.
           const option = element('option', {
             text: isDefaultAbility(ability)
-              ? `${ABILITY_LABELS[ability]} (default)`
-              : ABILITY_LABELS[ability],
+              ? `${abilityLabel(ability)} (default)`
+              : abilityLabel(ability),
             attributes: { value: ability },
           });
           if (ability === slots[index]) {
@@ -428,7 +420,7 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
       },
       MAGIC_INITIATE_ABILITIES.map((candidate) => {
         const option = element('option', {
-          text: ABILITY_LABELS[candidate],
+          text: abilityLabel(candidate),
           attributes: { value: candidate },
         });
         if (candidate === magicInitiateAbility) {
@@ -592,7 +584,7 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
         element('p', {
           className: 'guided-background-printed',
           text:
-            `Printed defaults: ${option.pairing.printed_abilities.join(', ')}; ` +
+            `Printed defaults: ${option.pairing.suggested_abilities?.map(abilityLabel).join(', ') ?? option.pairing.printed_abilities.join(', ')}; ` +
             `${option.pairing.printed_feat}.`,
         }),
       ]);

@@ -9,6 +9,8 @@ import { EXPECTED_BUNDLED_CONTENT_DIGEST_V1 } from '../../../src/catalog/bundled
 import { createApplicationLifecycle } from '../../../src/db/bootstrap';
 import { DatabaseContext } from '../../../src/db/database';
 import type { DatabaseLifecycle } from '../../../src/db/database-lifecycle';
+import type { ContentKey } from '../../../src/domain/ids';
+import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
 import {
   getSqlite3,
   MemoryDatabaseStorage,
@@ -142,6 +144,47 @@ describe('D229 bundled content digest boot verification', () => {
 
     expect(restored.digest).toBe(EXPECTED_BUNDLED_CONTENT_DIGEST_V1);
     expect(bundledContentDigestMismatchesV1(restored)).toEqual([]);
+  });
+
+  it('covers a mutated or deleted Rogue contribution and names the owning class', () => {
+    const rogueMismatch = {
+      catalog_layer: 'bundled' as const,
+      kind: 'class' as const,
+      contentKey: '2024:class:rogue' as ContentKey,
+      name: 'Rogue',
+      reason: 'changed' as const,
+    };
+    const rogueId = db.scalar<number>(
+      "SELECT id FROM class_definitions WHERE content_key = '2024:class:rogue'",
+    );
+    if (rogueId === null) throw new Error('The bundled Rogue is missing.');
+
+    try {
+      db.exec(
+        `UPDATE class_feature_value_contributions SET value_json = ?
+         WHERE class_definition_id = ? AND contribution_key = 'sneak-attack'`,
+        [JSON.stringify({ kind: 'const', amount: 2 }), rogueId],
+      );
+      expect(
+        bundledContentDigestMismatchesV1(bundledContentDigestPassV1(db)),
+      ).toEqual([rogueMismatch]);
+
+      seedClassProgressions(db);
+      db.exec(
+        `DELETE FROM class_feature_value_contributions
+         WHERE class_definition_id = ? AND contribution_key = 'sneak-attack'`,
+        [rogueId],
+      );
+      expect(
+        bundledContentDigestMismatchesV1(bundledContentDigestPassV1(db)),
+      ).toEqual([rogueMismatch]);
+    } finally {
+      seedClassProgressions(db);
+    }
+
+    expect(bundledContentDigestPassV1(db).digest).toBe(
+      EXPECTED_BUNDLED_CONTENT_DIGEST_V1,
+    );
   });
 
   it('names a corrupted aggregate during boot fallback, repairs it, then takes the green pass', () => {

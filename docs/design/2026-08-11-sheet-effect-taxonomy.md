@@ -25,7 +25,9 @@ must encode:
 `gate` (what makes it active) · `cadence` (recharge/usage rhythm, where applicable)
 
 **Numbering.** `S1–S73` are mechanism shapes (§3–§12). `R1–R11` are cross-cutting combination rules
-(§13). `G1–G10` are gating/duration classes (§14). `C1–C8` are cadence classes (§7.3). A published feature is
+(§13). `G1–G10` are gating/duration classes (§14). `C1–C8` are cadence classes (§7.3). **Addendum A**
+continues all four series — `S74–S98`, `C9–C12`, `G11–G13` — from the magic-item corpus validation;
+nothing in §1–§18 was renumbered to accommodate it. A published feature is
 normally one target × one shape × one stack rule × one gate, and often bundles two or three
 independently-parameterised values under one name (S30).
 
@@ -363,7 +365,8 @@ once per day, taken during a short rest; a land-druid analogue exists on the sam
 in-fiction event, concurrently with its normal rest rule.
 *Generic:* a combat-resource pool that refills on a long rest but also regains one unit when its owner
 scores a critical hit or drops a foe. The consequence for the type system is that `recharge` is a
-**list** of rules, not one rule.
+**list** of rules, not one rule. Scope: the mirror-image case — a pool that *drains* on an event or on
+elapsed use — is S96.
 
 **S38. Clock/calendar recharge with a random amount.** Refill keyed to a time of day rather than to
 rests, with the amount rolled.
@@ -446,7 +449,8 @@ changes.
 **S50. Heterogeneous choice slot.** A menu whose options instantiate *different shapes* from this
 taxonomy (*SRD:* the warlock invocation list contains options that are flat bonuses, others that are
 resistance grants, others that are at-will spell grants). The engine's choice abstraction must hold
-options of heterogeneous effect shape, not merely heterogeneous names.
+options of heterogeneous effect shape, not merely heterogeneous names. Scope: the same requirement with
+the selector moved from the player to a die, resolved per use rather than per binding, is S80.
 
 **S51. Selection breadth as a parameter.** Fixed single · choose-N-from-a-closed-list-of-M ·
 choose-N-from-an-open category predicate ("any skill", "a spell from any list") · all-matching-category.
@@ -464,6 +468,8 @@ binding with a lifetime, not a one-time write.
 equivalent to any flat bonus.
 *SRD:* a fighting style that rerolls damage dice showing 1 or 2, once each, and forces use of the new
 roll; a high-level rogue feature that treats a d20 result below 10 as 10 on proficient ability checks.
+Scope: rewriting a roll's *classification* after it has resolved (failure → success) is not a reroll and
+is S77.
 
 **S54. Critical-range modification.** Changes the *classification threshold* of a roll.
 *SRD:* a fighter archetype scores critical hits on 19–20, and later on 18–20. Related but distinct:
@@ -496,7 +502,8 @@ a named category — possibly by a *different* creature, possibly after seeing t
 *SRD:* a guidance-style cantrip's bonus die on one ability check; a bless-style spell's die on attack
 rolls and saves for its duration; a bard's inspiration die handed to an ally and spent by that ally.
 Lifecycle: minted → held with an expiry → consumed → gone. None of "modifier", "pool" or "grant" alone
-covers it.
+covers it. Scope: banking a *whole spell* together with the original caster's DC, attack bonus and slot
+level is a different shape, S79.
 
 **S59. Temporary hit points.** A separate field, not max HP and not healing; lost first; and governed by
 its own non-stacking rule (R3).
@@ -543,8 +550,10 @@ predicate (S66).
 radius, whose value is computed from the **emitter's** stats, with a radius that may itself scale.
 *SRD:* a paladin's protective aura adds the paladin's Charisma modifier to nearby allies' saving throws,
 with the radius increasing at a later level. Engine consequence: a sheet must be able to receive an
-effect whose value is `ForeignField(otherCharacter, f)` — the only shape in this document that breaks
-the single-character closed world.
+effect whose value is `ForeignField(otherCharacter, f)` — the only shape in the original body of this
+document that breaks the single-character closed world. Scope: the aura's reads are **live**. A foreign
+field read once and then frozen — the source creature may afterwards cease to exist and the number
+persists — is S98, and reflection that resolves an effect with a foreign caster's parameters is S76.
 
 **S66. Named derived predicate.** Not an effect: a boolean computed from other fields and given a stable
 name so features can gate on it by name.
@@ -588,7 +597,9 @@ by more than one class needs this treatment or it will silently coerce to a scal
 **S73. Acquisition preconditions.** Gates on *gaining* levels/effects rather than on applying them:
 ability-score prerequisites for entering a class, and a reduced proficiency set granted on multiclass
 entry compared to starting in that class. These belong to the same predicate language as §13's gates but
-run at a different time (build-time validation, not sheet evaluation).
+run at a different time (build-time validation, not sheet evaluation). Scope: preconditions that read
+*other equipped or attuned items* rather than the character's own scores, and that revoke themselves when
+the prerequisite item is removed, are S88; preconditions that read a recorded past event are S89.
 
 ---
 
@@ -642,7 +653,9 @@ to a target quantity.
 **R10. Attunement is an N-slot capacity** (3 by default, and itself a target other effects can raise)
 shared across all attunement-gated item effects, with the player choosing the active subset. Also: some
 items forbid attuning to more than one of their kind at a time — a per-item-family exclusion on top of
-the global capacity.
+the global capacity. Two further cases live on this rule: attunement that is *conditional on other items
+being worn or attuned* and ends when they are removed (S88), and companion bindings that occupy their own
+capacity alongside it (S74).
 
 **R11. Global rounding convention: round down unless a rule says otherwise.** Halving damage, halving
 recovery amounts, and most divisions round down; the exceptions (S4's round-up half-proficiency variant,
@@ -670,10 +683,13 @@ scalar pipeline.
 `G3` **While-attuned** — plus R10's capacity and (usually) simultaneous carry.
 `G4` **Toggled stance/mode** — actively switched on, usually costing a pool unit, ending manually, on a
 timer, or on an **upkeep condition failing** (a stance that ends if its owner does not meet a per-round
-requirement is a distinct sub-case the source draft missed).
-`G5` **Concentration** — timer plus R9 plus damage-triggered saves plus voluntary end.
+requirement is a distinct sub-case the source draft missed). Entry and exit are both **voluntary**; the
+involuntary counterpart, entered by failing a check and not endable at will, is `G11` (S81).
+`G5` **Concentration** — timer plus R9 plus damage-triggered saves plus voluntary end. The recurring
+obligation sits on the **emitter**; an effect whose *target* re-rolls to end it is `G12` (S82).
 `G6` **Timed duration** — (interval, unit), including **turn-relative windows** ("until the end of your
-next turn"), which are not expressible in minutes and need their own clock (S56).
+next turn"), which are not expressible in minutes and need their own clock (S56). A duration that runs
+alongside a recurring exit save is `G12`, not this.
 `G7` **Event-triggered** — fires on a trigger, no standing state (S56).
 `G8` **Self-state-conditional** — a predicate over the owner's own sheet (S64, S66).
 `G9` **Target-conditional** — a predicate over the *other* creature (S63); can never be folded into a
@@ -921,9 +937,333 @@ they must never appear as a term on current or maximum HP.
   grant (S48) because a numeric read site consults it.
 - **Monster/NPC stat-block idioms** (legendary and lair actions) are out of scope; the one that leaks
   onto player sheets, probabilistic recharge, is covered by S38.
+- **The interior of a summoned or bound companion** — its own AC, hit points, turns, attacks and saves —
+  is owned by an encounter layer, not by this engine. What the sheet does own is the binding itself, and
+  the boundary between the two is contracted explicitly in S74 rather than left implicit.
 - **No enumeration of non-SRD content.** Where a shape's most vivid published instances are non-SRD, the
   shape is described with a generic example. The absence of a named example is a licensing decision, not
   a coverage gap.
+
+---
+
+## Addendum A: legendary/artifact-tier mechanisms (2026-08-11 corpus validation)
+
+S1–S73 were assembled from class, subclass, feat and spell shapes, with magic items sampled
+opportunistically. They were subsequently validated against a 307-entry magic-item corpus spanning
+uncommon through artifact. The uncommon and rare tiers are almost entirely covered. The gaps are
+**concentrated in the legendary and artifact tiers**, and they are concentrated there for a structural
+reason worth stating: at those tiers a single named item routinely bundles a second stat-blocked
+creature, a random-outcome table, a multi-day cadence and an identity gate under one name — S24's
+multi-parameter bundling taken past the point where every parameter is a number. Twelve systematic gaps
+and roughly fourteen single-instance oddities were found; they are `S74–S98`, with cadence classes
+`C9–C12` and gating classes `G11–G13`. **No existing number is renumbered or reused.** Everything here is
+post-tranche-1 — tranche 1 being §13's scalar pipeline and §16.1's four constructors — so each entry
+names the constructor family it extends rather than proposing a fifth by default. Sourcing follows §0
+unchanged: no magic item is named, SRD instances are described and tagged `SRD:`, and everything whose
+published instances are non-SRD carries an invented generic example instead.
+
+### A.1 Additions to §1, §2, §7.3 and §14
+
+**Targets (§1).**
+
+| Kind | Added targets |
+|---|---|
+| Scalar | physical age; emitted-light radius (bright and dim radii are two independent scalars); the **cost side** of a pool spend (S95) |
+| Set membership | self-state flags — invisible, ethereal, incorporeal — held as membership rather than as conditions (S83); per-effect immunity tokens (S85) |
+| Enum / categorical | alignment (S84) |
+| Pool | level-denominated storage capacity, filled and drained in spell-level units (S79) — a typed multiset in S72's sense, not a scalar |
+| Entitlement | bound companion instances, with a capacity (S74) |
+| Predicate | recorded-history flags — a past event that gates a present effect (S89) |
+
+**Value sources (§2).** `TimeSince(event)` — elapsed real time since a recorded trigger, which is what
+"at dawn the day after you first do X" and "if three days pass without Y" read; `UseCount(feature)` —
+how many times this feature has been used, ever or within a window (S91); `Snapshot(ForeignField(c, f))`
+— a foreign field frozen at a trigger instant rather than tracked live (S98).
+
+**Cadence classes (§7.3).** `C9` fixed real-time cooldown at an arbitrary unit (an hour, three days, a
+year) — *not* expressible as C5/C6 and not equivalent to them, since resting does not advance it ·
+`C10` randomised cooldown, where the interval is itself a `Dice` value · `C11` continuous-use budget,
+denominated in elapsed time and deducted in stated increments while active (S96) · `C12` terminal —
+no recharge rule at all, the pool drains once and the effect ends permanently.
+
+**Gating classes (§14).** `G11` involuntary compulsion — a constraint imposed on the owner by the effect,
+entered by failing a check rather than by choosing (S81) · `G12` repeat-save-to-end — an effect that
+persists until its victim passes a recurring save on its own schedule (S82) · `G13` history-gated —
+active only once a recorded past event has occurred (S89).
+
+### A.2 The boundary shape: a second stat-blocked entity
+
+**S74. Bound companion instance (a linked sheet, not an effect).** The corpus's largest single gap: items
+that instantiate a creature with its own AC, hit points, speeds, attacks and saves. **This is neither a
+Target nor a new top-level category, and it is not a plain non-goal either.** As a Target it would force
+§1's union to admit "an entire second stat block", breaking the single-character closed world far harder
+than S65 does (S65 *reads* one scalar off another sheet; this would *own* one). As a flat non-goal it
+would discard the parts that are unambiguously the sheet's — the activation cost, the pool or cadence
+gating it, the attunement gating that, the duration, and any effect the entity grants back to its owner.
+The honest model is a **boundary contract**: one entitlement-kind target holding an opaque reference.
+
+- **The sheet owns:** the binding's existence and capacity, the activation gate (G3/G10), the
+  re-instantiation cadence (C9/C10 dominate — multi-day cooldowns are the norm at this tier), the duration
+  and its early-termination triggers (dismissed, dropped to 0 hit points, dawn), and any effect the entity
+  emits **onto the owner's sheet**, which is an ordinary S65 aura with a foreign emitter.
+- **An encounter layer owns:** the entity's stat block, turns, hit points, attacks and saves. This engine
+  neither computes nor stores them.
+- **The contract** is `CompanionBinding { statBlockRef, controlMode, expiry, onExpiry }`, `statBlockRef`
+  opaque here.
+
+`target:` bound-companion entitlement · `shape:` `GrantMember{CompanionBinding}` · `stack:` capacity-
+limited, and several instances forbid a second concurrent binding of the same family (R10's per-family
+exclusion applied to bindings) · `gate:` G3 + G10 · `cadence:` C9/C10.
+*SRD:* a statuette that becomes a beast for a stated duration and cannot be used again for a stated number
+of days; a horn whose blast summons a rolled number of warrior spirits, where both the **number summoned
+and whether they are friendly** depend on a proficiency the blower does or does not have — a binding whose
+parameters read the owner's own sheet. *Generic:* an attuned blade that calls a bound shade and refuses to
+call a second while the first serves.
+**Tranche:** extends `Grant` (4) plus one opaque reference type; deliberately *not* `Value` — nothing here
+is a number this engine computes. **Declared non-goal, restated for §18:** the companion's interior. If a
+later requirement needs its AC on screen, that is a second sheet instance, not an effect shape.
+
+### A.3 New operator and lifecycle shapes
+
+**S75. Instant-destruction outcome (bypasses the damage pipeline entirely).** An outcome that removes a
+creature without routing through hit points, resistances or R7's ordering — distinct from massive
+damage, and distinct from S12's "set current HP to 0", which still leaves a creature to be stabilised.
+`target:` creature existence, not a sheet scalar · `shape:` `Outcome{Destroy}` keyed to a classification
+bucket · `stack:` — · `gate:` typically a critical hit or a failed save, plus an immunity predicate
+listing the creature kinds it cannot touch · `cadence:` varies.
+*SRD:* a slashing weapon that decapitates on a natural 20 and, against creatures on its own exclusion
+list, **degrades to extra dice instead** — the exclusion is part of the shape, not a DM ruling; a maul
+that, on a natural 20 against one creature type, forces a save or death; a charged talisman that destroys
+an opposed-alignment target outright, leaving nothing. Two consequences: `ByOutcome` needs branches that
+are not both numbers (destroy | dice), and destruction outcomes carry a recovery-restriction tag (S90).
+**Tranche:** extends `Op` (2) with a non-numeric outcome, and `ByOutcome` in `Value` (1).
+
+**S76. Redirection and reflection operators.** An incoming effect is re-pointed at a different creature
+before it resolves. Two sub-forms that must not be one constructor: **redirection** moves an attack aimed
+at *someone else* onto you with no change of parameters; **reflection** sends an effect back at its
+originator, and the returning effect keeps the **original caster's** save DC, attack bonus, slot level and
+spellcasting ability — four `ForeignField` reads, so a sheet must be able to *evaluate an effect whose
+formula it does not own*.
+`target:` the resolution target of a foreign effect · `shape:` `Retarget{from, to, preserveParams}` ·
+`stack:` at most one per incoming effect; two is an authoring error · `gate:` G7, usually reaction-costed,
+sometimes conditioned on a specific save result · `cadence:` per-use pool or C6.
+*SRD:* a ring that, on a natural 20 on a save against a single-target spell of bounded level, makes the
+spell target its caster instead using the caster's own parameters; a shield whose curse pulls ranged
+attacks aimed at nearby allies onto the bearer.
+**Tranche:** extends `Op` (2), and forces `ForeignField` (§2) from "auras only" to a general facility.
+
+**S77. Outcome flip (a resolved result is reclassified after the fact).** A failed save becomes a
+successful one — not a reroll (S53 changes the die and you take what you get), not a bonus die (S58
+changes the number before classification), but a rewrite of the *classification* after resolution.
+`target:` roll outcome · `shape:` `FlipOutcome{Fail → Success}` · `stack:` one flip per roll ·
+`gate:` G7 reaction, usually spend-gated and scoped to a stated effect category ·
+`cadence:` per charge, or C6.
+*SRD:* a charged medallion that turns one failed save against a stated source-kind into a success and is
+destroyed with its last charge; a ring that does the same for one category of saves. Why it is its own
+operator: a flip is unconditionally sufficient, whereas any "equivalent" bonus is still bounded by the DC,
+and the two diverge on a natural 1 or when the DC is unknown at bank time.
+**Tranche:** extends `Op` (2); consumes from a `Pool` (3); renders as a `Term` marking the original
+outcome `Superseded`, so §16.4's trace shows the flip rather than hiding it.
+
+**S78. Sub-daily and multi-day cadences, and elapsed-time gating.** The most common cadence above the rare
+tier is neither "per long rest" nor "at dawn" — it is a **real-time cooldown of arbitrary length**, an hour
+to a year, sometimes randomised. Rests do not advance it, so a party that camps for a week is a different
+case from one that takes two long rests.
+`shape:` `Cooldown{ Value }`, the value possibly `Dice` (C10) · `gate:` unavailable while live ·
+`cadence:` C9/C10.
+*SRD:* an item usable once then not again for a stated number of days; a portal-cloth whose reuse interval
+is a rolled number of hours; a pair of wings unusable again for a rolled number of hours after they fade.
+The companion source is `TimeSince(event)`. *Generic:* a weapon whose penalty begins **at dawn on the day
+after** its first attack roll — a gate reading a recorded timestamp, not a rest counter; and a hungry blade
+that turns on its wielder if a stated number of days pass without a stated event, which is G4's upkeep
+condition measured on a calendar rather than per round.
+**Tranche:** `Pool.recharge` (3) gains a `Cooldown` rule; `Value` (1) supplies `Dice` intervals; §2 gains
+`TimeSince`.
+
+**S79. Banked whole-spell storage with frozen originating parameters.** A container holds **a cast spell** —
+not a bonus die (S58), not an entitlement to cast (S48). Banked with it are the parameters of whoever put
+it there: slot level, save DC, attack bonus and spellcasting ability all remain the **original caster's**
+when a different creature releases it.
+`target:` a level-denominated storage pool · `shape:` `Bank{ spell, frozenParams }`, capacity spent in
+spell-level units · `stack:` capacity is a typed multiset (S72) — "three levels" may be one 3rd or three
+1sts · `gate:` G3 while worn · `cadence:` none; it holds until released (C12-adjacent).
+*SRD:* a ring and an orbiting stone that each store a few spell levels, cast later by the wearer but
+resolved with the original caster's numbers; a rod that absorbs a spell's **energy** rather than the spell
+and converts stored levels into slots for its holder — the same pool with a different release rule, which
+is the argument for separating capacity from release.
+**Tranche:** `Pool` (3) gains a level-denominated multiset with a payload; `Grant` (4) gains a release
+entitlement. The sheet must hold and later **evaluate a spell whose casting parameters belong to no class
+on it** — the same requirement S76 raises.
+
+**S80. Per-use random table over heterogeneous payloads.** One activation rolls, and each bucket is a
+**structurally different shape** — a scalar here, a grant there, a companion (S74), a permanent loss,
+nothing at all. S50 establishes that a *choice* menu must hold heterogeneous shapes; this is that
+requirement with the selector moved from the player to a die and the selection made per use, not per
+binding (S52).
+`target:` whatever the drawn bucket targets · `shape:` `RandomTable[ weight → Effect ]`, `Effect` being the
+full effect union recursively · `stack:` per draw, independently · `gate:` G10 · `cadence:` per use.
+*SRD:* a wand whose activation rolls on a long table of unrelated effects; a card deck whose draws
+variously change an ability score, change alignment (S84), destroy carried property, instantiate a hostile
+creature (S74) or grant an entitlement — several permanent and irreversible.
+**Tranche:** extends `Grant`/choice (4) with a random selector, and requires the effect union to be
+**recursively embeddable** — the real cost here, and worth paying once.
+
+**S81. Involuntary compulsion (a constraint imposed on the owner).** G4's stance is entered and ended
+voluntarily. This is its opposite: entered by **failing** a check, ended only on the effect's terms, and
+while active it removes options rather than adding a modifier — a forced target, a forbidden action, an
+attunement that cannot be ended.
+`target:` action-availability predicates, not scalars · `shape:` `Constrain{ predicate }` ·
+`stack:` several may hold at once and do not merge · `gate:` G11 · `cadence:` until its stated end.
+*SRD:* a cursed axe forcing a save whenever its bearer takes damage and, on a failure, dictating the
+bearer's action each round until a condition is met; a cursed blade whose bearer becomes unwilling to part
+with it and **cannot end the attunement**. Engine consequence: §16.3's "a number plus conditional riders"
+is not enough — the output type also needs a set of **active constraints**, which are neither.
+**Tranche:** extends `Op` (2) with a non-numeric constraint, and §14 with G11.
+
+**S82. Repeat-save-to-end.** The commonest duration idiom at this tier, and distinct from both G5 and G6:
+the effect runs on a timer *and* its victim re-rolls a save on a stated schedule, ending it early on a
+success. G5 puts the recurring obligation on the **emitter**; G6 is a pure clock; this puts a recurring
+**exit roll** on the target.
+`shape:` `RepeatSave{ ability, dc, schedule, onSuccess: End }` alongside a maximum duration ·
+`gate:` G12 · `cadence:` the save's own schedule.
+*SRD:* stun, blindness and paralysis riders on weapons and rods that all use "1 minute, save at the end of
+each of your turns to end". *Generic:* a petrifying effect on the **one-shot** variant — a single repeat at
+the end of the next turn, after which the condition worsens permanently. Two schedules of one shape; an
+engine that hard-codes "each turn" gets the second silently wrong.
+**Tranche:** extends the gating vocabulary (§14) and `TransientToken` (§16.3) with a save schedule.
+
+**S83. Self-state toggle as a target.** Invisible, ethereal, incorporeal: not conditions, not senses, not
+movement modes, not derivable from any scalar. They are membership in a small set of **self-states**,
+toggled by their owner, with per-state break conditions that are data on the grant rather than properties
+of the state.
+`target:` self-state flag set · `shape:` `GrantMember{state}` with `breaksOn: [attack, cast, remove, …]` ·
+`stack:` idempotent · `gate:` G2/G3 plus a toggle · `cadence:` C11 in several instances (S96) or C6.
+*SRD:* a ring granting invisibility until its wearer attacks, casts, or ends it as a bonus action; a cloak
+granting the same off a two-hour elapsed budget; plate granting an ethereal state for a fixed interval,
+ending early if the armour comes off.
+**Tranche:** extends `Grant` (4) with a membership target carrying its own termination predicate.
+
+**S84. Alignment as a target and as a gate.** An enum on the sheet that published content both **reads**
+(as an attunement precondition, and as a target-conditional in S63's sense) and **writes** (forcibly, on a
+failed save or a random draw).
+`target:` alignment enum · `shape:` `SetEnum` for the write, `Predicate` for the read ·
+`stack:` last write wins · `gate:` G13/G3 for the read · `cadence:` —.
+*SRD:* items attunable only by a creature of a stated alignment, or only by one whose alignment matches the
+item's own; a talisman that damages by alignment band and destroys only opposed targets; a drawn card that
+inverts both alignment axes and does nothing to a creature that has neither. Three mechanisms — an
+acquisition precondition (S73), a target-conditional (S63) and an enum write — over one field, which is
+why the field must exist rather than being a note.
+**Tranche:** extends `Op` (2) with `SetEnum` on a new categorical target, and S73's precondition language.
+
+### A.4 Single-instance oddities
+
+Each appears once or twice in the corpus. They are recorded rather than generalised: each needs a name so
+it cannot be silently mis-modelled as the thing it resembles, and none earns its own constructor family.
+All extend `Op` (2) unless stated.
+
+**S85. Per-effect immunity token.** Immunity keyed to **one effect instance**, not a damage type or
+condition (S44), and expiring on a clock. `gate:` acquired by *succeeding* against the effect ·
+`cadence:` C9. *SRD:* a summoned beast's fear aura a creature becomes immune to for 24 hours once it saves;
+a creature-swaying effect that cannot be re-attempted on the same target for a stated period.
+Extends `Grant` (4).
+
+**S86. Contested roll (roll versus roll).** Resolution against **another creature's live roll** rather than
+a static DC (S16); the sheet must expose "the check I would make" as a first-class output. *SRD:* opposed
+Intelligence checks to seize control of a hovering annihilating sphere; an opposed check to sway a creature
+another creature already controls. Extends the output type, not `Value`.
+
+**S87. Shared-bonus reallocation across two targets.** One bonus as a **budget split at use time** between
+two targets, re-decided each turn, persisting for a turn-relative window. `shape:`
+`Allocate{ total: Value, across: Target[] }` · `cadence:` C1. *SRD:* a sword whose attack-and-damage bonus
+may be moved wholly or partly to the wielder's AC until the start of their next turn. Not S28: this splits
+across **sheet fields**, not across an effect's targets.
+
+**S88. Co-attunement prerequisite and combined-set benefits.** Attunement gated on *other items* being worn
+or attuned, plus benefits existing only while two attunements are held together. `gate:` a predicate over
+R10's attuned set, evaluated continuously — dropping either item ends the attunement. *SRD:* a maul
+attunable only while a specific belt and gauntlets are worn. *Generic:* a paired relic whose combined
+block of benefits exists only while both halves are attuned to one creature. Extends S73 and R10.
+
+**S89. Narrative-achievement tier unlock.** A gate whose predicate is a **recorded past event**,
+permanently unlocking a further tier of the same item. `gate:` G13. *SRD:* a ring whose second property
+block unlocks once its wearer has helped slay a creature of the linked plane; instructional tomes whose
+benefits apply only after a fixed study period. The sheet's persistent state therefore includes **history
+flags**, not only current values.
+
+**S90. Recovery-restriction tag on a death or destruction outcome.** Which restoration magic can undo an
+outcome is a property **of the outcome**, not of the character. *SRD:* a drawn card summoning a reaper
+whose kills cannot be reversed at all. *Generic:* a soul-consuming blade whose kills are reversible only by
+one named 9th-level spell. Rides on S75.
+
+**S91. Escalating risk on repeated use.** A per-use failure or destruction probability that **grows with
+use count** inside a window. `shape:` `Scale{UseCount(feature), ×k}` as a probability · `cadence:` resets
+with the window. *SRD:* a fan with a cumulative per-reuse chance of tearing apart before dawn; a longevity
+draught whose chance of inverting its own effect rises cumulatively per dose. Distinct from S31's flat
+terminal risk, which does not escalate. Extends `Value` (1) via `UseCount`.
+
+**S92. Active-condition cure versus future resistance.** Removing a condition **now** is not granting
+immunity to it (S44); the two are worded alike and are different targets. *SRD:* a salve that ends a
+current poisoned condition and cures a current disease, versus a pendant granting standing immunity to
+both. Consumables cluster on the former, worn items on the latter.
+
+**S93. Emitted light as a target.** Bright radius and dim radius are two independent scalars, adjustable,
+dismissible, and read by other rules. *SRD:* a blade whose wielder steps its radii up or down in fixed
+increments; a gem whose command word sheds a stated bright radius plus a further dim band until dismissed.
+
+**S94. Cumulative aging.** Physical age as a mutable scalar with its own floor, written in both directions.
+*SRD:* a draught reducing physical age by a rolled amount to a stated minimum, which on later doses may
+instead **add** the same rolled amount (S91). `shape:` `Add{Dice}` + `ClampMin`.
+
+**S95. Pool-spend cost discount.** A modifier on the **cost side** of a spend rather than on any effect
+value, floored at zero. `shape:` `Add{−k}` on `spendCost`, `ClampMin{0}`. *Generic:* an item whose charge
+costs drop by a fixed amount for a qualifying wielder; a focus letting one spell per day be cast at zero
+slot cost. This is why §16.1's `Pool` needs `spendUnit` to be a `Value`, not a constant.
+
+**S96. Event-triggered charge loss, and elapsed-time-denominated pools.** S37's mirror image: a pool that
+**drains** on an event or on elapsed use rather than refilling. Two sub-forms — conditional spend, where
+the charge is consumed only if the effect succeeded, and a continuous budget deducted in stated increments
+while a state is active (C11). *SRD:* a blade losing a charge only when its instant-death effect actually
+kills; a cloak with a two-hour invisibility budget deducted per minute of use and regaining a stated amount
+per uninterrupted idle period; a candle whose burn time is deducted the same way and may be snuffed to
+preserve the remainder. Makes `recharge: RechargeRule[]` symmetric with a `drain: DrainRule[]`.
+
+**S97. Choice between two whole precomputed formulas at use time.** Not S17's substitution of one input:
+the user picks between **two fully-formed bonuses the sheet already computes**, per use. *Generic:* a touch
+attack resolvable with either the character's melee weapon attack bonus or their spell attack bonus, the
+attacker choosing. `shape:` `PickFormula[ Value, Value ]`, choice at use time — S52's
+re-choosable-on-each-use cadence applied to a formula rather than to a grant.
+
+**S98. Snapshot of a foreign field at a trigger instant.** A value read off **another creature** and then
+**frozen**; the source may cease to exist and the number persists. Distinct from S65, whose aura reads are
+live. *Generic:* a weapon granting temporary hit points equal to a slain creature's hit point maximum on a
+24-hour clock, and a critical hit dealing extra damage equal to half the target's hit point maximum,
+computed once at the instant of the hit. `shape:` `Snapshot(ForeignField(c, f), atInstant)` (§2).
+Extends `Value` (1).
+
+### A.5 Cross-references added to existing shapes
+
+S37 → S96 · S50 → S80 · S53 → S77 · S58 → S79 · S65 → S98 · G4 → G11 · G5/G6 → G12 · S73/R10 → S88.
+These are scope notes only; no existing shape's definition changed.
+
+### A.6 Adequacy statement (replacing the implicit caveat behind §17)
+
+§17 stands as written and is not superseded — its four residual UNKNOWNs are unaffected by this pass, and
+the item-provenance question it resolved is what made this validation possible at all. What this addendum
+retires is the *implicit* claim underneath it: that S1–S73 were one more pass away from complete, with the
+remaining pass being more of the same. That was wrong in a specific and instructive way. The missing
+mechanisms were not further arithmetic shapes; the additive, multiplicative, override and scaling families
+survived a 307-item corpus without a single new operator, and the four constructors of §16.1 absorbed the
+rare and uncommon tiers essentially untouched. Everything this pass added is **non-numeric**: an outcome
+that bypasses the number (S75), a re-target of someone else's effect (S76), a reclassification of a
+resolved roll (S77), a clock that rests do not advance (S78), a banked effect carrying a foreign sheet's
+parameters (S79), a die that selects between structurally unlike payloads (S80), a constraint that removes
+options rather than changing values (S81), and a second creature that this engine should explicitly decline
+to own (S74). The taxonomy is therefore now **adequate for the tranche-1 scalar engine and honest about its
+boundary** rather than merely near-complete: §16.3's three surfaced-not-solved items grow to five, adding
+active constraints (S81) and companion bindings (S74) to conditional riders, transient tokens and foreign
+fields. The next pass that would change these conclusions is not another item corpus — it is a spell or
+subclass corpus of comparable size, and the prediction this addendum is willing to be judged on is that
+such a pass adds gates and lifecycles, not operators.
 
 ---
 

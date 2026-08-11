@@ -49,7 +49,7 @@ async function publishBackground(page: Page): Promise<void> {
   await page.getByRole('checkbox', { name: 'Dexterity', exact: true }).check();
   await page.getByRole('checkbox', { name: 'Constitution', exact: true }).check();
   await page.getByRole('combobox', { name: 'Installed Origin feat', exact: true })
-    .selectOption({ label: 'Alert (2024)' });
+    .selectOption({ label: 'Alert (2024 rules)' });
   await page.getByRole('checkbox', { name: 'Athletics', exact: true }).check();
   await page.getByRole('checkbox', { name: 'Survival', exact: true }).check();
   await page.getByRole('textbox', { name: 'Equipment option A description', exact: true })

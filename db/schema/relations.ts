@@ -10,11 +10,13 @@ import {
 import {
   class_definitions,
   class_feature_effects,
+  class_feature_value_contributions,
   class_progressions,
   named_feature_effects,
   named_features,
   subclass_definitions,
   subclass_feature_effects,
+  subclass_feature_value_contributions,
   subclass_features,
   subclass_progressions,
 } from './catalog-classes';
@@ -956,6 +958,7 @@ export const classDefinitionsRelations = relations(
     // not a class table row and the character has not necessarily taken it.
     named_features: many(named_features),
     automatic_feature_effects: many(class_feature_effects),
+    feature_value_contributions: many(class_feature_value_contributions),
   }),
 );
 
@@ -1132,6 +1135,7 @@ export const subclassFeaturesRelations = relations(
       references: [subclass_definitions.id],
     }),
     effects: many(subclass_feature_effects),
+    value_contributions: many(subclass_feature_value_contributions),
   }),
 );
 
@@ -1140,6 +1144,16 @@ export const subclassFeatureEffectsRelations = relations(
   ({ one }) => ({
     feature: one(subclass_features, {
       fields: [subclass_feature_effects.subclass_feature_id],
+      references: [subclass_features.id],
+    }),
+  }),
+);
+
+export const subclassFeatureValueContributionsRelations = relations(
+  subclass_feature_value_contributions,
+  ({ one }) => ({
+    feature: one(subclass_features, {
+      fields: [subclass_feature_value_contributions.subclass_feature_id],
       references: [subclass_features.id],
     }),
   }),
@@ -1168,6 +1182,16 @@ export const classFeatureEffectsRelations = relations(
   ({ one }) => ({
     class_definition: one(class_definitions, {
       fields: [class_feature_effects.class_definition_id],
+      references: [class_definitions.id],
+    }),
+  }),
+);
+
+export const classFeatureValueContributionsRelations = relations(
+  class_feature_value_contributions,
+  ({ one }) => ({
+    class_definition: one(class_definitions, {
+      fields: [class_feature_value_contributions.class_definition_id],
       references: [class_definitions.id],
     }),
   }),

@@ -23,9 +23,9 @@ async function homebrewReady(page: Page): Promise<void> {
 }
 
 test('authors and applies a background with persisted skill grants and a flat effect', async ({ page }) => {
-  // S4-02 measured this complete author/publish/disclose/apply journey alone
-  // at 18.3s on Chromium. 18.3s × 1.5 = 27.45s, rounded up to 27.5s.
-  test.setTimeout(27_500);
+  // Measured alone on PLAYWRIGHT_PORT=5040 at 18.6s with the human preview
+  // and authored-card casing pins. 18.6s × 1.5 = 27.9s.
+  test.setTimeout(27_900);
   await page.goto('/');
   await globalReady(page);
   await page.evaluate(() => window.staticApp.reset());
@@ -46,7 +46,7 @@ test('authors and applies a background with persisted skill grants and a flat ef
     name: 'Installed Origin feat',
     exact: true,
   });
-  await originFeat.selectOption({ label: 'Alert (2024)' });
+  await originFeat.selectOption({ label: 'Alert (2024 rules)' });
   expect(await originFeat.evaluate((select) => {
     const selected = (select as HTMLSelectElement).selectedOptions[0];
     return selected?.parentElement instanceof HTMLOptGroupElement
@@ -71,11 +71,18 @@ test('authors and applies a background with persisted skill grants and a flat ef
   await page.getByRole('button', { name: 'Preview publish', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Publish preview', exact: true })).toBeVisible();
   await expect(page.getByLabel('Background effect preview', { exact: true })).toContainText('Wayfarer ward');
+  await expect(page.getByLabel('Grant preview', { exact: true })).toContainText(
+    'Gain Alert · SRD · bundled layer, including its configured grants.',
+  );
+  await expect(page.getByLabel('Background effect preview', { exact: true })).toContainText(
+    'Wayfarer ward: +2 Armor Class.',
+  );
+  await expect(page.locator('.background-publish-preview code')).toHaveCount(0);
   await page.getByRole('button', { name: 'Publish background', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Background published', exact: true })).toBeVisible();
   await page.getByRole('link', { name: 'View background library', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Journey Wayfarer', exact: true })).toBeVisible();
-  await expect(page.getByText('Background · read-only published version', { exact: true })).toBeVisible();
+  await expect(page.getByText('Background · published homebrew version', { exact: true })).toBeVisible();
 
   await page.getByRole('link', { name: '← Characters', exact: true }).click();
   await globalReady(page);
@@ -89,6 +96,18 @@ test('authors and applies a background with persisted skill grants and a flat ef
   await page.getByRole('radio', { name: 'Manual entry', exact: true }).check();
   await page.getByRole('button', { name: 'Set ability scores', exact: true }).click();
   await page.getByRole('button', { name: 'Choose Human', exact: true }).click();
+  const authoredBackgroundCard = page.locator('.guided-background-card').filter({
+    has: page.getByRole('radio', { name: 'Journey Wayfarer', exact: true }),
+  });
+  const bundledBackgroundCard = page.locator('.guided-background-card').filter({
+    has: page.getByRole('radio', { name: 'Acolyte', exact: true }),
+  });
+  await expect(authoredBackgroundCard.locator('.guided-background-printed')).toHaveText(
+    'Printed defaults: Intelligence, Wisdom, Dexterity; Alert.',
+  );
+  await expect(bundledBackgroundCard.locator('.guided-background-printed')).toHaveText(
+    /Printed defaults: [A-Z][a-z]+, [A-Z][a-z]+, [A-Z][a-z]+;/u,
+  );
   await page.getByRole('radio', { name: 'Journey Wayfarer', exact: true }).check();
   const disclosure = page.locator('.guided-background-apply-disclosure');
   await expect(disclosure).toContainText('What Apply changes now');

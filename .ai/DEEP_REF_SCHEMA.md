@@ -91,7 +91,7 @@ artifact, keep the split.
 |---|---|
 | `generated/column-facts.ts` | GENERATED. Per-column facts: does the column exist, is it `notNull`, could drizzle-zod type it |
 | `generated/reference-facts.ts` | GENERATED. Catalog tables a backup resolves references against |
-| `rows.ts` | The Zod contracts. `COLUMN_REFINEMENTS` (`:421`), `NARROWED_REFINEMENTS` (`:504`), `rowContractError` (`:1582`) |
+| `rows.ts` | The Zod contracts. `COLUMN_REFINEMENTS` (`:422`), `NARROWED_REFINEMENTS` (`:505`), `rowContractError` (`:1613`) |
 | `row-rules.ts` | Cross-column rules a per-column contract cannot express |
 | `json-columns.ts` | WHICH text columns hold serialized JSON, and what SHAPE each reader needs |
 | `tables.ts` | The table inventory and scope classification — §3 below |
@@ -151,10 +151,10 @@ Two mechanisms make this stick, and they are worth knowing by name:
    without that column is `Type 'true' is not assignable to type 'false'`. That
    fact previously lived only in a reviewer's head.
 
-Derived from the classification: `SnapshotTable` (`:1180`), `BackupTable` (`:1182`),
-`ShareTable` (`:1183`), and the ordered constants `CHARACTER_STATE_TABLES`
-(`:1388`), `DELETE_ORDER` (`:1473`), `BACKUP_TABLES` (`:1540`), `SHARE_TABLES`
-(`:1633`).
+Derived from the classification: `SnapshotTable` (`:1196`), `BackupTable` (`:1198`),
+`ShareTable` (`:1199`), and the ordered constants `CHARACTER_STATE_TABLES`
+(`:1406`), `DELETE_ORDER` (`:1491`), `BACKUP_TABLES` (`:1558`), `SHARE_TABLES`
+(`:1651`).
 
 **Classification is not the same as working.** That was Q8's bug, and D24 records
 the discipline that replaced it: each arm gets its own test — a column-for-column

@@ -21,6 +21,7 @@ import {
   weaponDamagePayloadError,
   weaponRangePayloadError,
   classResourceFormulaInvariantError,
+  featureValueContributionInvariantError,
 } from './row-rules';
 import {
   classFormulaResourceKinds,
@@ -613,6 +614,8 @@ type NativeContractTable =
   | 'class_weapon_mastery_counts'
   | 'class_resources'
   | 'class_resource_formulas'
+  | 'class_feature_value_contributions'
+  | 'subclass_feature_value_contributions'
   // The origins TEMPLATE tables. Same reason `weapon_templates` is here: their
   // rows are PARSED out of `docs/srd/source/species-descriptions.txt` and
   // `docs/srd/source/backgrounds.txt` by `src/rules/origins-srd.ts`, and a
@@ -1221,6 +1224,34 @@ const REFINEMENTS = {
   'class_resource_formulas.created_at': sqlTimestamp,
   'class_resource_formulas.updated_at': sqlTimestamp,
 
+  // --- typed feature-value contribution storage (migration 0042) ---------
+  'class_feature_value_contributions.id': positiveInt,
+  'class_feature_value_contributions.class_definition_id': positiveInt,
+  'class_feature_value_contributions.contribution_key': sqlText,
+  'class_feature_value_contributions.label': sqlText,
+  'class_feature_value_contributions.target_kind': sqlText,
+  'class_feature_value_contributions.target_key': sqlText,
+  'class_feature_value_contributions.op': sqlText,
+  'class_feature_value_contributions.active_from_level': classLevel,
+  'class_feature_value_contributions.active_to_level': classLevel,
+  'class_feature_value_contributions.value_json': sqlText,
+  'class_feature_value_contributions.supersedes_ref': sqlText,
+  'class_feature_value_contributions.created_at': sqlTimestamp,
+  'class_feature_value_contributions.updated_at': sqlTimestamp,
+  'subclass_feature_value_contributions.id': positiveInt,
+  'subclass_feature_value_contributions.subclass_feature_id': positiveInt,
+  'subclass_feature_value_contributions.contribution_key': sqlText,
+  'subclass_feature_value_contributions.label': sqlText,
+  'subclass_feature_value_contributions.target_kind': sqlText,
+  'subclass_feature_value_contributions.target_key': sqlText,
+  'subclass_feature_value_contributions.op': sqlText,
+  'subclass_feature_value_contributions.active_from_level': classLevel,
+  'subclass_feature_value_contributions.active_to_level': classLevel,
+  'subclass_feature_value_contributions.value_json': sqlText,
+  'subclass_feature_value_contributions.supersedes_ref': sqlText,
+  'subclass_feature_value_contributions.created_at': sqlTimestamp,
+  'subclass_feature_value_contributions.updated_at': sqlTimestamp,
+
   // --- species_templates ---------------------------------------------------
   'species_templates.id': positiveInt,
   'species_templates.content_key': nonEmptyText,
@@ -1616,6 +1647,16 @@ export function rowContractError(
     }
     if (only === undefined && table === 'class_resource_formulas') {
       return classResourceFormulaInvariantError(
+        result.data as Readonly<Record<string, unknown>>,
+        label,
+      );
+    }
+    if (
+      only === undefined &&
+      (table === 'class_feature_value_contributions' ||
+        table === 'subclass_feature_value_contributions')
+    ) {
+      return featureValueContributionInvariantError(
         result.data as Readonly<Record<string, unknown>>,
         label,
       );

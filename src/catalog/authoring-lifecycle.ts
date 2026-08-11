@@ -51,7 +51,20 @@ function nonRefusedOutcome(
   return outcome === undefined || outcome.kind === 'refused' ? null : outcome;
 }
 
-function recordSupersession(
+export const SUPERSESSION_SUCCESSOR_LAYER_REFUSAL =
+  'A superseding version must resolve to Homebrew · external layer.';
+
+export class CatalogSupersessionRefusal extends Error {
+  constructor(
+    readonly reason: 'successor_not_external',
+    options?: ErrorOptions,
+  ) {
+    super(SUPERSESSION_SUCCESSOR_LAYER_REFUSAL, options);
+    this.name = 'CatalogSupersessionRefusal';
+  }
+}
+
+export function recordSupersession(
   db: DatabaseContext,
   kind: ContentKind,
   oldContentKey: ContentKey,
@@ -65,6 +78,16 @@ function recordSupersession(
      WHERE content_kind = ? AND content_key = ?`,
     [kind, oldContentKey],
   );
+  const newLayer = db.scalar<string>(
+    `SELECT catalog_layer
+     FROM catalog_content_identities
+     WHERE content_kind = ? AND content_key = ?`,
+    [kind, newContentKey],
+  );
+  if (newLayer !== 'external') {
+    throw new CatalogSupersessionRefusal('successor_not_external');
+  }
+
   // A bundled “make a copy” operation is ancestry, not a claim that the
   // bundled aggregate has been superseded. Only edits of external creations
   // participate in local version lineage.
@@ -89,8 +112,8 @@ export function commitImmutableCatalogPublication<K extends ContentKind>(
   const choices = input.choices ?? Object.freeze({});
   const freshPlan = planImmutableCatalogPublication(db, publication, choices);
   const outcome = nonRefusedOutcome(freshPlan);
-
-  return commitContentImport(db, {
+  let supersessionRefusal: CatalogSupersessionRefusal | null = null;
+  const committed = commitContentImport(db, {
     nodes: [publication.node],
     token: input.token,
     choices,
@@ -101,15 +124,37 @@ export function commitImmutableCatalogPublication<K extends ContentKind>(
       ? {}
       : { afterInstall: (transaction: DatabaseContext) => {
           const supersedes = publication.supersedesContentKey;
-          if (supersedes !== undefined && supersedes !== null) {
-            recordSupersession(
-              transaction,
-              publication.node.projection.kind,
-              supersedes,
-              outcome.contentKey,
-            );
+          const recordsLineage = outcome.kind === 'create' ||
+            transaction.scalar<string>(
+              `SELECT catalog_layer
+                 FROM catalog_content_identities
+                WHERE content_kind = ? AND content_key = ?`,
+              [publication.node.projection.kind, outcome.contentKey],
+            ) === 'external';
+          // A Match to an external aggregate is still a same-layer version
+          // resolution used by CI-7. Only a non-external Match resolves without
+          // claiming a lineage relationship.
+          if (
+            supersedes !== undefined && supersedes !== null &&
+            recordsLineage
+          ) {
+            try {
+              recordSupersession(
+                transaction,
+                publication.node.projection.kind,
+                supersedes,
+                outcome.contentKey,
+              );
+            } catch (error) {
+              if (error instanceof CatalogSupersessionRefusal) {
+                supersessionRefusal = error;
+              }
+              throw error;
+            }
           }
           publication.afterInstall?.(transaction, outcome);
         } }),
   });
+  if (supersessionRefusal !== null) throw supersessionRefusal;
+  return committed;
 }
