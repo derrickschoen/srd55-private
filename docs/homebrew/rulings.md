@@ -5,6 +5,42 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-11 — Domination conformed to the 2024 paladin subclass skeleton
+
+Owner's request, verbatim:
+
+> Help me shape this subclass to follow the conventions set by the
+> vengeance and devotion and glory and ancients paladin subclasses
+
+The convention (Devotion verified in SRD 5.2.1; Vengeance/Glory/Ancients
+2024 PHB, general knowledge): 3 = oath spells + one or two Channel
+Divinity options; 7 = one passive aura-style benefit; 15 = a defensive
+or counter Reaction/passive, Cha-mod/LR or 1/LR, never CD-priced;
+20 = Bonus Action transformation, 10 minutes, 1/LR + level-5-slot
+reload. Owner selected all four recommended mappings:
+
+1. **Level 3 = oath spells + Channel Divinity, two options** (Glory
+   precedent): **Voice of Domination** (immediately after casting
+   *Divine Smite*, expend 1 CD, no action → 1 minute of Bonus-Action
+   slotless *Command*s — the Inspiring Smite wording pattern) and
+   **Foreseen Strike** (when the paladin or a creature within 30 feet
+   misses with an attack roll, Reaction + 1 CD → +Cha to the roll).
+   Both ride the class CD pool; Foreseen strikes' own per-Long-Rest
+   pool is deleted.
+2. **The +1 spell attack/save DC window is dropped** (no convention
+   analogue; ~5 percentage points of Command land rate in the sim).
+   The Foretold Authority feature name retires with it.
+3. **Foreseen Formation (15) repriced**: Reaction, Charisma-modifier
+   uses per Long Rest (the Glorious Defense pattern); no CD cost.
+4. **Dominion Foretold (20) extended to 10 minutes** (capstone
+   convention); 1/LR + level-5-slot reload unchanged.
+
+Consequences recorded: Voice returns to level 3 (the F3 dip row
+reopens, though smite-gating and CD costs remain the guards); level 7
+is Aura of Certainty alone, restoring one-feature-per-slot conformance;
+Voice and Strike now compete for the same CD pool, whose
+one-per-Short-Rest recovery is the class's only Short-Rest resource.
+
 ## 2026-08-11 — Foreseen strikes: Long Rest only
 
 Owner's ruling, verbatim (follow-up to the v2 entry below):

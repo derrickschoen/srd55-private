@@ -98,27 +98,26 @@
 //         declared simplification: charged even on an all-miss round)
 //
 // Oath of Domination (docs/homebrew/cc-by/2026-08-03-oath-of-domination-subclass.md,
-// as redesigned by owner ruling 2026-08-11 — see rulings.md):
-//   Same Dex-paladin chassis as the Vengeance comparator.
-//   L3 Foretold Authority: +1 spell save DC for 1 minute after casting Divine
-//     Smite (the window spans a whole 4-round combat here), plus Foreseen
-//     strikes: Cha-modifier (3) times per Long Rest, a Reaction adds Cha
-//     (+3) to a self or allied attack roll. Modeled self-only: a miss by
-//     <=3 becomes a plain hit, once per round, pool shared across the day.
-//     (Three earlier same-day shapes were superseded by owner ruling: a
-//     +1d8 smite-vs-controlled rider, a per-Long-Rest auto-hit pool, and a
-//     Short-Rest cadence for this shape.)
-//   L7 Voice of Domination: free action + 1 Channel Divinity immediately after
-//     casting Divine Smite -> 1 minute of Bonus-Action slotless Command. The
-//     sim's level bands put it in L11/17 only (L3/6 predate it); CD uses
-//     (2, 3 from L11, 1 back per Short Rest) cover one activation per combat
-//     across a 4-combat day and are not separately tracked. Without Voice a
-//     Command costs a level-1 slot, modeled as burning the smallest
-//     smite-queue entry.
+// conformed to the 2024 subclass skeleton by owner rulings 2026-08-11 — see
+// rulings.md):
+//   L3 Channel Divinity, two options sharing the class pool (2 uses, one
+//   back per Short Rest, 3 from L11 — the paladin's only Short-Rest
+//   resource):
+//     Voice of Domination: immediately after casting Divine Smite, 1 CD
+//       (no action) -> 1 minute of Bonus-Action slotless Command.
+//     Foreseen Strike: Reaction + 1 CD, +Cha (+3) to a self or allied
+//       attack roll. Modeled self-only (ally use is unpriced upside): a
+//       miss by <=3 becomes a plain hit, once per round, nat 1 excluded.
+//   Voice and Strike drain the same pool; command policies reserve one use
+//   for the activation until it happens. Commands require Voice active (no
+//   slot-cast fallback is modeled).
 //   Grovel on a failed Wis save: the target falls Prone and its turn ends
 //   (its whole turn is lost) -> our melee attacks NEXT round have Advantage.
-//   A Command round cannot also Bonus-Action Divine Smite. Cha 16 flat on the
-//   Dex build -> DC 13/14/15/17 (+1 inside the Foretold Authority window).
+//   A Command round cannot also Bonus-Action Divine Smite. Cha 16 flat on
+//   the Dex build -> DC 13/14/15/17.
+//   L15 Formation and L20 Dominion are out of the modeled bands' resource
+//   picture (Formation is Cha-mod/LR support movement; Dominion is 10 min,
+//   1/LR + level-5-slot reload).
 
 // --- RNG ---------------------------------------------------------------------
 // Every build takes an injectable Rng (uniform [0,1)) so tests can pin the
@@ -252,24 +251,20 @@ export function domination(
   nc: number,
   policy: DominationPolicy = 'adaptive',
 ): CombatResult {
-  // Oath of Domination on the same chassis, 2026-08-11 redesign (header).
-  // Policies:
-  //   smite   : never Command; the pure dealt ceiling.
-  //   mix     : one Command attempt on round 2 (slot-fueled at 3/6, Voice at
-  //             11/17 — which needs the round-1 smite to have activated it);
-  //             smite otherwise.
-  //   adaptive: at 11/17, smite round 1 to activate Voice, then Command until
-  //             a Grovel lands, smiting on advantage rounds (and commanding
-  //             the day-tail once the queue is dry). Same as mix at 3/6.
-  //   control : Command every possible round — slot-fueled at 3/6 until the
-  //             slots are gone; at 11/17 the round-1 smite activates Voice
-  //             and rounds 2-4 command.
-  // Voice requires a smite THIS combat (activation is smite-triggered and the
-  // 1-minute duration covers one combat); a dry queue therefore means no
-  // slotless Commands in the day-mode tail — those rounds are attacks only.
-  // Foretold Authority: `smited` opens the +1 DC window. (The +1d8 smite
-  // rider from the first redesign batch was removed by owner ruling the same
-  // day: "too complicated".)
+  // Oath of Domination on the same chassis, conformed kit (header).
+  // Policies (all levels share the CD economy; Voice is a level-3 option):
+  //   smite   : never Command; the whole CD pool goes to Foreseen Strikes.
+  //   mix     : activate Voice on the round-1 smite; Command round 2; smite
+  //             rounds 3-4; leftover CD fuels Strikes.
+  //   adaptive: activate Voice on the round-1 smite, then Command until a
+  //             Grovel lands, smiting on advantage rounds (and commanding
+  //             once the queue is dry); leftover CD fuels Strikes.
+  //   control : activate on the round-1 smite; Command rounds 2-4; leftover
+  //             CD fuels Strikes.
+  // Command policies reserve one CD for the activation until it happens.
+  // Voice requires a smite THIS combat (activation is smite-triggered and
+  // the 1-minute duration covers one combat); a dry queue in the day tail
+  // means no activation, so those rounds are attacks and Strikes only.
   // A failed Grovel save ends the enemy's turn: the lost turn is sampled into
   // the prevented channel, and next round's melee attacks have Advantage.
   const wb = WB[L];
@@ -278,49 +273,37 @@ export function domination(
   const mod = ({ 3: 3, 6: 4, 11: 5, 17: 5 } as const)[L] + wb;
   const natk = ({ 3: 2, 6: 3, 11: 3, 17: 3 } as const)[L];
   const rad = L >= 11 ? 1 : 0;
-  const dcBase = ({ 3: 13, 6: 14, 11: 15, 17: 17 } as const)[L];
-  const voice = L >= 11;
+  const dc = ({ 3: 13, 6: 14, 11: 15, 17: 17 } as const)[L];
+  const cdCap = L >= 11 ? 3 : 2;
   const qq = [...SMITE_Q[L]].sort((a, b) => b - a);
-  // Foreseen strikes (owner rulings 2026-08-11, third batch + follow-up):
-  // Cha-modifier (3) times per LONG Rest, Reaction to add Cha mod (+3) to a
-  // self or allied attack roll. Sim models self-use only (ally use is
-  // unpriced table upside): a miss by 3 or less becomes a plain hit, at most
-  // once per round (the Reaction), nat 1 stays a miss. The pool is shared
-  // across the whole day.
-  let strikes = 3;
+  let cd = cdCap;
   let dealt = 0;
   let prevented = 0;
   for (let c = 0; c < nc; c++) {
+    if (c > 0) cd = Math.min(cdCap, cd + 1); // Short Rest: one use back
+    let voiceOn = false;
     let advNext = false;
-    let smited = false;
     for (let rnd = 0; rnd < 4; rnd++) {
       const adv = advNext;
       advNext = false;
       let command = false;
       if (policy === 'mix') {
-        command = rnd === 1;
+        command = voiceOn && rnd === 1;
       } else if (policy === 'adaptive') {
-        command = voice ? rnd >= 1 && (!adv || qq.length === 0) : rnd === 1;
+        command = voiceOn && rnd >= 1 && (!adv || qq.length === 0);
       } else if (policy === 'control') {
-        command = voice ? rnd >= 1 : true;
+        command = voiceOn && rnd >= 1;
       }
-      if (command) {
-        if (voice) {
-          if (!smited) command = false; // Voice never activated this combat
-        } else if (qq.length > 0) {
-          qq.pop(); // smallest entry = the level-1 slot the Command burns
-        } else {
-          command = false; // no slots left to cast with
-        }
-      }
+      // Command policies hold one CD back for the Voice activation.
+      const reserve = policy !== 'smite' && !voiceOn ? 1 : 0;
       const hits: boolean[] = [];
       let reactionFree = true;
       for (let i = 0; i < natk; i++) {
         const r = roll(rng, adv);
         const crit = r === 20;
         let miss = r === 1 || (r + hit < ac && !crit);
-        if (miss && r !== 1 && strikes > 0 && reactionFree && r + hit + 3 >= ac) {
-          strikes -= 1; // Foreseen strike: +Cha turns a near miss into a hit
+        if (miss && r !== 1 && cd > reserve && reactionFree && r + hit + 3 >= ac) {
+          cd -= 1; // Foreseen Strike: +Cha turns a near miss into a hit
           reactionFree = false;
           miss = false;
         }
@@ -331,9 +314,11 @@ export function domination(
       if (!command && qq.length > 0 && hits.length > 0) {
         const sm = qq.shift() as number;
         dealt += d(rng, sm * (hits.some(Boolean) ? 2 : 1), 8);
-        smited = true; // opens +1 DC; at 11/17 this is the Voice activation
+        if (policy !== 'smite' && !voiceOn && cd > 0) {
+          cd -= 1; // Voice of Domination activates on this smite
+          voiceOn = true;
+        }
       } else if (command) {
-        const dc = dcBase + (smited ? 1 : 0);
         if (randInt(rng, 20) + 2 < dc) {
           advNext = true;
           prevented += enemyTurnDamage(rng, L);
