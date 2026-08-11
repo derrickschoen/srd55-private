@@ -349,7 +349,8 @@ Commons Attribution 4.0 International License, available at
 https://creativecommons.org/licenses/by/4.0/legalcode.
 
 This document is likewise released under **CC-BY-4.0**. Attribute as:
-"Warrior of the Barbed Court, © 2026 Derrick Schoen, CC-BY-4.0."
+"Warrior of the Barbed Court, CC-BY-4.0." (By owner ruling 2026-08-11, no
+personal name appears in the notice; attribution is by title alone.)
 
 Sources: SRD 5.2.1 only, plus this project's own rulings record and
 simulation logs. No other game text was open during drafting.

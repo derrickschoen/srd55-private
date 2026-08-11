@@ -5,6 +5,39 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-11 — No personal attribution: the owner's name comes off every homebrew notice
+
+Asked to confirm the Section 15 copyright entry in
+`way-of-the-psionic-fist.md` (which had been filled from the repository's
+git identity), the owner ruled, verbatim:
+
+> Don't put my name on anything. Just attribute the original ogl, or cc-by
+> as required.
+
+Effects:
+
+1. **OGL doc** (`ogl/way-of-the-psionic-fist.md`): the original-content
+   entry "Way of the Psionic Fist Copyright 2026, Derrick Schoen…" is
+   removed from the Section 15 chain. The chain now carries only the
+   Wizards entries, reproduced exactly as published — which is what §6
+   requires for the *copied* content. §6's obligation to add a
+   title/date/holder entry for *original* Open Game Content attaches at
+   distribution; the doc now states that whoever distributes it must add
+   that entry then, and that by this ruling it will not name the owner.
+   `SECTION-15.md` updated to match.
+2. **CC-BY docs** (Barbed Court design + player, Veteran design + player):
+   the "© 2026 Derrick Schoen" lines are removed. CC-BY-4.0 does not
+   require a licensor to name themselves — attribution obligations bind
+   downstream reusers, and §3(a)(1)(A) only requires them to credit what
+   the licensor actually supplies. The notices now instruct attribution by
+   title alone (e.g. "Warrior of the Barbed Court, CC-BY-4.0"). The
+   required SRD 5.2.1 attribution notice is unchanged everywhere.
+3. **Deliberately not changed**: the GitHub account name in
+   `docs/design/2026-08-01-github-spike-evidence.md` (a factual evidence
+   record, not an attribution); the 2026-08-06 entry below that mentions
+   the git identity (this file is verbatim and append-only); git commit
+   authorship (history is never rewritten).
+
 ## 2026-08-10 — Rebuking Shield final: initiative-triggered Hands manifestation with a 3-point shield upgrade; fire/cold resistance dropped
 
 Owner's rulings, verbatim:

@@ -223,18 +223,19 @@ implied.
     Lee, James Wyatt, Robert J. Schwalb, Bruce R. Cordell, Chris Sims, and Steve
     Townshend, based on original material by E. Gary Gygax and Dave Arneson.
 
-    Way of the Psionic Fist Copyright 2026, Derrick Schoen; Author Derrick
-    Schoen.
-
 Both Wizards entries are reproduced exactly as published — the 3.5 chain from
 `srd-3.5/Legal.txt`, the 5.1 chain from `srd-5.1/ogl-page.txt`. Note that the
 two spell "Wizards of the Coast" differently (Inc. and LLC); that difference is
 in the sources and is preserved rather than tidied.
 
-The final entry is ours, required by §6 for original Open Game Content: title,
-copyright date, copyright holder's name. **It was filled from the repository's
-own git identity — confirm this is the name you intend to publish under**, and
-change it here if a different person or entity should hold the copyright.
+No entry for this document's own original Open Game Content appears above, by
+owner ruling of 2026-08-11: no personal name goes on this work. §6's
+requirement to add a title, copyright date, and copyright holder's name for
+original Open Game Content attaches when that content is *distributed* — this
+document is not distributed. **Whoever distributes it must append that entry
+at that time**, choosing a holder that is not the owner's personal name (an
+entity or pseudonym); until then the chain above is complete for everything
+this document copies.
 
 ## Open Game License Version 1.0a
 
