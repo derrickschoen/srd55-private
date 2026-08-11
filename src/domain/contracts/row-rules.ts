@@ -297,12 +297,6 @@ function decodeValueExpressionNode(
         ['minimum', 'maximum'],
         label,
       );
-      if (
-        !Object.hasOwn(expression, 'minimum') &&
-        !Object.hasOwn(expression, 'maximum')
-      ) {
-        throw new TypeError(`${label} must declare a minimum or maximum.`);
-      }
       decodeValueExpressionNode(expression.value, `${label}.value`, state, depth + 1);
       const minimum = Object.hasOwn(expression, 'minimum')
         ? decodeValueExpressionNode(

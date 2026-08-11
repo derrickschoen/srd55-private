@@ -115,6 +115,22 @@ describe('migration-0042 storage-layer value expression decoder', () => {
     ).toThrow();
   });
 
+  it('accepts a bound-less clamp but still refuses malformed clamp keys', () => {
+    const boundless = {
+      kind: 'clamp',
+      value: { kind: 'ref', source: { kind: 'proficiency_bonus' } },
+    };
+    expect(
+      decodeStoredValueExpression(encoded(boundless), 'boundless clamp'),
+    ).toEqual(boundless);
+    expect(() =>
+      decodeStoredValueExpression(
+        encoded({ ...boundless, fallback: { kind: 'const', amount: 0 } }),
+        'malformed clamp',
+      )
+    ).toThrow(/exactly/u);
+  });
+
   it('refuses expression breadth and depth beyond the storage limits', () => {
     const broad = {
       kind: 'sum',
