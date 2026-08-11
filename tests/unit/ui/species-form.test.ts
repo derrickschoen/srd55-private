@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { AuthoringClient } from '../../../src/authoring/client';
 import { CatalogAuthoringService } from '../../../src/authoring/draft-service';
 import type {
@@ -718,6 +718,8 @@ describe('HA-7 species authoring form', () => {
 
   it('pins the species dirty lifecycle through the real Router guard seam', async () => {
     const restoreDocument = installInteractiveDocument();
+    const failure = new Error('Storage unavailable.');
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
       const router = new Router(routerWindow(
         'https://example.test/homebrew/drafts/ha7-species-draft',
@@ -730,7 +732,7 @@ describe('HA-7 species authoring form', () => {
       const remote = { ...stored({ ...speciesDocument(), name: 'Remote revision' }), revision: 3 as DraftRevision };
       const authoring = client({
         saveDraft: async (params) => {
-          if (saveMode === 'fail') throw new Error('Storage unavailable.');
+          if (saveMode === 'fail') throw failure;
           if (saveMode === 'conflict') {
             throw new RpcError('handler_error', 'Draft revision is stale.', {
               reason: 'stale_draft_revision',
@@ -775,7 +777,13 @@ describe('HA-7 species authoring form', () => {
       button(root, 'Save draft').click();
       await settle();
       expect(root.querySelector('.species-authoring-status')?.textContent)
-        .toBe('Draft not saved. Storage unavailable.');
+        .toBe(
+          'Draft not saved. Something went wrong before the draft could be stored — try again.',
+        );
+      expect(root.querySelector('.species-authoring-status')?.textContent)
+        .not.toMatch(/RPC|worker|handler|transport|Zod/i);
+      expect(errorLog).toHaveBeenCalledWith('Draft save failed.', failure);
+      errorLog.mockRestore();
       expect(root.querySelector('.species-authoring-status')?.getAttribute('role'))
         .toBe('alert');
       expect(button(root, 'Save draft').disabled).toBe(false);
@@ -822,6 +830,7 @@ describe('HA-7 species authoring form', () => {
       cleanup();
       router.stop();
     } finally {
+      errorLog.mockRestore();
       restoreDocument();
     }
   });

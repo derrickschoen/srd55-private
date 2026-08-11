@@ -64,6 +64,7 @@ test('refused saves are terminal and human, then every shell refreshes from succ
       await speed.fill('-99');
       await save.click();
       await expect(status).toHaveText('Draft not saved.');
+      await expect(status).not.toHaveText(/RPC|worker|handler|transport|Zod/i);
       const speedSummary = page.getByRole('alert', { name: 'Fix these fields' });
       await expect(speedSummary).toContainText('Walking speed must be at least 1 foot.');
       await expect(speedSummary).not.toContainText(
@@ -76,6 +77,7 @@ test('refused saves are terminal and human, then every shell refreshes from succ
     await name.fill('🐲'.repeat(121));
     await save.click();
     await expect(status).toHaveText('Draft not saved.');
+    await expect(status).not.toHaveText(/RPC|worker|handler|transport|Zod/i);
     const nameSummary = page.getByRole('alert', { name: 'Fix these fields' });
     await expect(nameSummary).toContainText('Name must be 120 characters or fewer.');
     await expect(nameSummary).not.toContainText(
@@ -106,7 +108,10 @@ test('a transport-error save ends in an explicit not-saved alert', async ({ page
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
 
   const status = page.locator('.species-authoring-status');
-  await expect(status).toHaveText('Draft not saved. RPC client is closed.');
+  await expect(status).toHaveText(
+    'Draft not saved. The app lost its connection to storage — reload the page and try again.',
+  );
+  await expect(status).not.toHaveText(/RPC|worker|handler|transport|Zod/i);
   await expect(status).toHaveAttribute('role', 'alert');
   await expect(page.getByRole('button', { name: 'Save draft', exact: true })).toBeEnabled();
 });

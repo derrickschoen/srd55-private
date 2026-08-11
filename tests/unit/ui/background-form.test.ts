@@ -559,7 +559,11 @@ describe('HA-9 background authoring form', () => {
       button(rendered.root, 'Save draft').click();
       await settle();
       expect(rendered.root.querySelector('.background-authoring-status')?.textContent)
-        .toBe('Draft not saved. Database worker stopped.');
+        .toBe(
+          'Draft not saved. The app lost its connection to storage — reload the page and try again.',
+        );
+      expect(rendered.root.querySelector('.background-authoring-status')?.textContent)
+        .not.toMatch(/RPC|worker|handler|transport|Zod/i);
       expect(rendered.root.querySelector('.background-authoring-status')?.getAttribute('role'))
         .toBe('alert');
       rendered.cleanup();

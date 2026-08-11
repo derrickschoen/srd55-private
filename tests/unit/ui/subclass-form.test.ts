@@ -926,7 +926,7 @@ describe('HA-8 subclass timeline form', () => {
       let saveFails = true;
       const authoring = client({
         saveDraft: async (params) => {
-          if (saveFails) throw new Error('Storage unavailable.');
+          if (saveFails) throw new RpcError('handler_error', 'Storage unavailable.');
           if (params.document.kind !== 'subclass') throw new Error('Expected subclass.');
           return { ...stored(params.document), revision: 1 as DraftRevision };
         },
@@ -963,7 +963,11 @@ describe('HA-8 subclass timeline form', () => {
       button(root, 'Save draft').click();
       await settle();
       expect(root.querySelector('.subclass-authoring-status')?.textContent)
-        .toBe('Draft not saved. Storage unavailable.');
+        .toBe(
+          'Draft not saved. Something went wrong before the draft could be stored — try again.',
+        );
+      expect(root.querySelector('.subclass-authoring-status')?.textContent)
+        .not.toMatch(/RPC|worker|handler|transport|Zod/i);
       expect(router.navigate('/blocked-after-failed-save')).toBe(false);
       expect(button(root, 'Save draft').disabled).toBe(false);
 
