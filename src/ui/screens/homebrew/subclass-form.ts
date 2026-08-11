@@ -717,11 +717,10 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
             pathAttribute,
             path: ['progression', 'rows', rowIndex, 'grants', grantIndex],
             references: options.spellGrantReferences,
-            peerRuleKeys: liveOverride().rows.flatMap((candidateRow, candidateRowIndex) =>
-              candidateRow.grants
-                .filter((_, candidateGrantIndex) =>
-                  candidateRowIndex !== rowIndex || candidateGrantIndex !== grantIndex)
-                .map((candidate) => candidate.rule_key)),
+            peerRuleKeys: (liveOverride().rows[rowIndex]?.grants ?? [])
+              .filter((_, candidateGrantIndex) => candidateGrantIndex !== grantIndex)
+              .map((candidate) => candidate.rule_key),
+            ruleKeyScope: 'subclass_level',
             change: changeGrant,
           }),
         );

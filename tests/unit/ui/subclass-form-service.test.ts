@@ -298,7 +298,7 @@ function installRootOnlySubclass(
 }
 
 describe('HA-8 production-service form boundaries', () => {
-  it('refuses duplicate stable grant labels across different subclass levels', async () => {
+  it('refuses duplicate stable grant labels within one subclass level', async () => {
     const { service, db } = await fixture();
     const parent = listGuidedClassOptions(db).find((candidate) => candidate.name === 'Fighter');
     if (parent === undefined) throw new Error('Bundled Fighter is required.');
@@ -320,9 +320,7 @@ describe('HA-8 production-service form boundaries', () => {
     });
     const rows = document.progression.rows.map((row, index) => ({
       ...row,
-      grants: index === 0 ? [duplicateGrant('one')]
-        : index === 1 ? [duplicateGrant('two')]
-        : row.grants,
+      grants: index === 2 ? [duplicateGrant('one'), duplicateGrant('two')] : row.grants,
     }));
     const saved = service.saveDraft({
       draft_uuid: created.draft_uuid,
@@ -335,11 +333,53 @@ describe('HA-8 production-service form boundaries', () => {
     }))).toMatchObject({
       reason: 'validation_failed',
       issues: [expect.objectContaining({
-        path: ['progression', 'rows', 1, 'grants', 0, 'rule_key'],
+        path: ['progression', 'rows', 2, 'grants', 1, 'rule_key'],
         code: 'duplicate',
-        message: 'Stable grant labels must be unique throughout the subclass.',
+        message: 'Stable grant labels must be unique within a class level.',
       })],
     });
+  });
+
+  it('accepts one persistent choice slot repeated across dense subclass levels', async () => {
+    const { service, db } = await fixture();
+    const parent = listGuidedClassOptions(db).find((candidate) => candidate.name === 'Fighter');
+    if (parent === undefined) throw new Error('Bundled Fighter is required.');
+    const created = service.createDraft({ content_kind: 'subclass' });
+    const document = validDocument(
+      created,
+      parent.content_key as ContentKey,
+      'Persistent Grant Timeline',
+    );
+    if (document.progression.mode !== 'override') throw new Error('Override progression required.');
+    const rows = document.progression.rows.map((row, index) => ({
+      ...row,
+      grants: index < 2 ? [] : [{
+        kind: 'choice_from_list' as const,
+        draft_item_uuid: itemUuid(`persistent-choice-${String(index + 1)}`),
+        rule_key: 'persistent-spell-choice',
+        list: 'Wizard',
+        count: 1,
+        minimum_spell_level: 0,
+        maximum_spell_level: 0,
+      }],
+    }));
+    const saved = service.saveDraft({
+      draft_uuid: created.draft_uuid,
+      expected_revision: created.revision,
+      document: { ...document, progression: { ...document.progression, rows } },
+    });
+
+    const preview = service.previewPublish({
+      draft_uuid: saved.draft_uuid,
+      expected_revision: saved.revision,
+    });
+    if (preview.aggregate.kind !== 'subclass' || preview.aggregate.progression.mode !== 'override') {
+      throw new Error('Override subclass aggregate required.');
+    }
+    expect(preview.aggregate.progression.rows.slice(2).map((row) =>
+      row.grants.map((grant) => grant.rule_key))).toEqual(
+      Array.from({ length: 18 }, () => ['persistent-spell-choice']),
+    );
   });
 
   // Measured alone at 2.123s; the explicit timeout preserves headroom for seeded DB boots.

@@ -43,6 +43,7 @@ describe('shared spell grant author controls', () => {
           lists: ['Wizard'],
         },
         peerRuleKeys: ['fixed-spell'],
+        ruleKeyScope: 'species',
         change: (field, value) => Reflect.set(grant, field, value),
       }));
       const root = interactiveElement(host);
@@ -60,6 +61,9 @@ describe('shared spell grant author controls', () => {
       expect(grant.spell_content_key).toBe('expanded:spell:hostile');
       expect(grant.rule_key).toBe('fixed-option-img-data-hostile-spell-src-x-onerror-alert-1-ember');
       expect(elementText(root as unknown as Node)).not.toContain('content key');
+      expect(elementText(root as unknown as Node)).toContain(
+        'Every grant for this species must use a different label.',
+      );
     } finally {
       restoreDocument();
     }
@@ -85,6 +89,7 @@ describe('shared spell grant author controls', () => {
         pathAttribute: () => ({}),
         references: { spells: [], lists: ['Cleric', 'Wizard'] },
         peerRuleKeys: ['wizard-spell-choice'],
+        ruleKeyScope: 'subclass_level',
         change: (field, value) => Reflect.set(grant, field, value),
       }));
       const root = interactiveElement(host);
@@ -100,7 +105,7 @@ describe('shared spell grant author controls', () => {
       expect(grant.list).toBe('Wizard');
       expect(grant.rule_key).toBe('wizard-spell-choice-2');
       expect(elementText(root as unknown as Node)).toContain(
-        'matches the grant when you publish a newer version',
+        'Reuse it at another class level to continue one choice slot',
       );
     } finally {
       restoreDocument();

@@ -16,6 +16,7 @@ export interface SpellGrantControlsOptions {
   readonly path: readonly (string | number)[];
   readonly references: SpellGrantAuthoringReferences;
   readonly peerRuleKeys: readonly string[];
+  readonly ruleKeyScope: 'species' | 'subclass_level';
   change(field: string, value: unknown): void;
 }
 
@@ -84,9 +85,12 @@ export function spellGrantControls(options: SpellGrantControlsOptions): readonly
   });
   ruleKey.value = grant.rule_key;
   ruleKey.addEventListener('input', () => options.change('rule_key', ruleKey.value));
+  const scopeHelp = options.ruleKeyScope === 'subclass_level'
+    ? 'Reuse it at another class level to continue one choice slot; use a new label for a new slot. Labels must be unique within one class level.'
+    : 'Every grant for this species must use a different label.';
   const help = element('p', {
     className: 'muted authoring-field-help',
-    text: 'This stable label matches the grant when you publish a newer version. A unique label is generated for you; change it only when two grants need clearer names.',
+    text: `This label identifies the grant across published versions. A label is generated for you. ${scopeHelp}`,
     attributes: { id: `${options.prefix}-stable-label-help` },
   });
   const controls: HTMLElement[] = [

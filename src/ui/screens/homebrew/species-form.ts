@@ -661,6 +661,7 @@ export function renderSpeciesForm(options: SpeciesFormOptions): Cleanup {
             peerRuleKeys: document.grants
               .filter((_, index) => index !== grantIndex)
               .map((candidate) => candidate.rule_key),
+            ruleKeyScope: 'species',
             change: (field, value) => changeGrant(grantIndex, grant, field, value),
           }));
         } else {
