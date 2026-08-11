@@ -30,25 +30,30 @@ describe('known-probability micro-check: a lone d20 test against a fixed AC', ()
 });
 
 describe('directional invariants: dealt', () => {
-  it('Foreseen strikes flip the L3 burst: Domination (smite-only) > Vengeance there, Vengeance still ahead at L6-11', () => {
-    // Owner ruling 2026-08-11 (second batch): Cha-mod (3) misses per Long
-    // Rest become hits. Three conversions concentrated into one 4-round
-    // combat outweigh Vow of Enmity's advantage at L3 (few attacks, low
-    // accuracy); by L6+ the paladin's own attack volume dilutes them and
-    // Vengeance leads again. Both directions are structural, not tuned.
+  it('Foreseen strikes v2 close the L3 burst to a statistical tie; Vengeance still measurably ahead at L6-11', () => {
+    // Owner ruling 2026-08-11 (third batch): Cha-mod (3) Reactions per
+    // Short/Long Rest add +Cha to an attack roll — a near-miss rescue, once
+    // per round. At L3 (two attacks, low accuracy) that lands smite-only
+    // Domination within noise of Vow-of-Enmity advantage; at L6-11 the
+    // paladin's attack volume makes always-on advantage worth more than
+    // three +3s, and Vengeance leads by a real margin.
     for (const L of [3, 6, 11] as const) {
       const rng = mulberry32(1000 + L);
       const pal = sampleMeanPerRound(paladin, rng, L, 1, 6000);
       const dom = sampleMeanPerRound((r, L2, nc) => domination(r, L2, nc, 'smite'), rng, L, 1, 6000);
-      expect(differsBySigma(pal, dom, 4)).toBe(true);
-      if (L === 3) expect(dom.mean).toBeGreaterThan(pal.mean);
-      else expect(pal.mean).toBeGreaterThan(dom.mean);
+      if (L === 3) {
+        // Parity band: within 5% of each other (the ruling's design target).
+        expect(Math.abs(pal.mean - dom.mean) / pal.mean).toBeLessThan(0.05);
+      } else {
+        expect(differsBySigma(pal, dom, 4)).toBe(true);
+        expect(pal.mean).toBeGreaterThan(dom.mean);
+      }
     }
   });
 
-  it('Foreseen strikes are a Long-Rest pool: Domination day per-round trails Vengeance day at every level', () => {
-    // The same 3 conversions spread over 16 rounds cannot keep up with
-    // always-on advantage; day mode restores the old ordering everywhere.
+  it('Foreseen strikes are a Short-Rest pool: refreshing per combat, Domination day still trails Vengeance day at every level', () => {
+    // Even refreshed each combat, at most three +3s per fight cannot keep up
+    // with always-on advantage across a full day.
     for (const L of [3, 6, 11, 17] as const) {
       const rng = mulberry32(1500 + L);
       const pal = sampleMeanPerRound(paladin, rng, L, 4, 1500);
