@@ -1365,10 +1365,14 @@ describe('HA-5 subclass publisher', () => {
       character_id: character.characterId as CharacterId,
     });
     expect(replacement.review).toEqual([
-      expect.objectContaining({
-        candidate_content_key: successor.result.content_key,
-        reason: 'key-collision',
-      }),
+      {
+        candidate_content_key: 'expanded:content.subclass:versioned-aegis-revised',
+        candidate_name: 'Versioned Aegis Revised',
+        candidate_catalog_layer: 'external',
+        reason: 'installed-target',
+        default_decision: 'match',
+        clone_name: 'Versioned Aegis Revised (Private copy)',
+      },
     ]);
     db.exec(
       'UPDATE catalog_content_identities SET archived_at = ? WHERE content_key = ?',

@@ -1287,10 +1287,14 @@ describe('HA-4 background publisher', () => {
       character_id: character.id as CharacterId,
     });
     expect(replacement.review).toEqual([
-      expect.objectContaining({
-        candidate_content_key: successor.result.content_key,
-        reason: 'key-collision',
-      }),
+      {
+        candidate_content_key: '2024:content.background:versioned-surveyor-revised',
+        candidate_name: 'Versioned Surveyor Revised',
+        candidate_catalog_layer: 'external',
+        reason: 'installed-target',
+        default_decision: 'match',
+        clone_name: 'Versioned Surveyor Revised (Private copy)',
+      },
     ]);
     db.exec(
       'UPDATE catalog_content_identities SET archived_at = ? WHERE content_key = ?',

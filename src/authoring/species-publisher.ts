@@ -541,7 +541,10 @@ export function previewSpeciesPublish(
     }),
     aggregate,
     review: Object.freeze(plan.reviews.map((review) => {
-      if (review.matchClass === 'key-collision') {
+      if (
+        review.matchClass === 'key-collision' ||
+        review.matchClass === 'installed-target'
+      ) {
         throw new SpeciesPublishError('The asserted species key already names different content.', {
           reason: 'content_key_collision',
           content_key: review.targetContentKey,

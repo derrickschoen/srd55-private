@@ -654,18 +654,40 @@ export interface ReplacementChoiceSelection {
   readonly value: string;
 }
 
-export interface ReplacementReviewItem {
+interface ReplacementReviewItemBase {
   readonly candidate_content_key: ContentKey;
   readonly candidate_name: string;
   readonly candidate_catalog_layer: CatalogLayerDisclosure;
-  readonly reason: PublishReviewReason | 'key-collision';
-  readonly default_decision: 'match';
 }
 
-export interface ReplacementDecision {
-  readonly candidate_content_key: ContentKey;
-  readonly decision: Extract<CatalogContentMatchDecision, 'match'>;
-}
+export type ReplacementReviewItem =
+  | (ReplacementReviewItemBase & {
+      readonly reason: PublishReviewReason;
+      readonly default_decision: 'match';
+      readonly clone_name?: never;
+    })
+  | (ReplacementReviewItemBase & {
+      readonly reason: 'key-collision';
+      readonly default_decision: null;
+      readonly clone_name: string;
+    })
+  | (ReplacementReviewItemBase & {
+      readonly reason: 'installed-target';
+      readonly default_decision: 'match';
+      readonly clone_name: string;
+    });
+
+export type ReplacementDecision =
+  | {
+      readonly candidate_content_key: ContentKey;
+      readonly decision: Extract<CatalogContentMatchDecision, 'match'>;
+      readonly clone_name?: never;
+    }
+  | {
+      readonly candidate_content_key: ContentKey;
+      readonly decision: Extract<CatalogContentMatchDecision, 'clone'>;
+      readonly clone_name: string;
+    };
 
 export type ReplacementSelectionDisclosure =
   | {

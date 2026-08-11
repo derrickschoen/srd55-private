@@ -57,9 +57,9 @@ function publishedCard(page: Page, name: string) {
 test('discloses a narrowing spell replacement before apply and repairs the exact choice', async ({
   page,
 }) => {
-  // Measured alone on PLAYWRIGHT_PORT=5050 at 19.3s. The required x1.5
-  // contention reserve is 28.95s, rounded up to the next 100ms.
-  test.setTimeout(29_000);
+  // Measured alone on PLAYWRIGHT_PORT=5090 at 17.4s after the W7 collision
+  // choice. The required x1.5 reserve is 26.1s, rounded up to 100ms.
+  test.setTimeout(26_100);
   await page.goto('/');
   await ready(page);
   await page.evaluate(() => window.staticApp.reset());
@@ -126,7 +126,20 @@ test('discloses a narrowing spell replacement before apply and repairs the exact
   await expect(review).toContainText(consequence);
   await expect(review.getByRole('link', { name: 'Repair selection' })).toHaveCount(0);
 
-  await review.getByRole('button', { name: 'Apply to all listed characters' }).click();
+  await expect(review).toContainText(
+    'Retarget Spell Species Revised — Homebrew · external layer',
+  );
+  const match = review.getByRole('radio', {
+    name: 'Match — Uses the existing local entry; this attached character moves to it.',
+  });
+  const clone = review.getByRole('radio', {
+    name: 'Clone — Installs a renamed private copy of the local entry; this attached character moves to that copy.',
+  });
+  const apply = review.getByRole('button', { name: 'Apply to all listed characters' });
+  await expect(match).toBeChecked();
+  await expect(clone).not.toBeChecked();
+  await expect(apply).toBeEnabled();
+  await apply.click();
   await expect(page.getByRole('heading', { name: 'Character fixes applied' })).toBeVisible();
   await expect(review).toContainText(consequence);
   const repair = review.getByRole('link', { name: 'Repair selection' });

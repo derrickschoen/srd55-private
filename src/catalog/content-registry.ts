@@ -55,6 +55,24 @@ export interface ContentFingerprintCandidate {
   readonly canonicalJson?: CanonicalContentIdentityJson;
 }
 
+const installedTargetCertificate: unique symbol = Symbol(
+  'installed-target-reference-certificate',
+);
+
+/**
+ * Proof minted from a complete aggregate already stored in this database.
+ * The private symbol makes this nominal: foreign-reference projections cannot
+ * manufacture or carry installed-target evidence structurally.
+ */
+export interface InstalledTargetReferenceCertificate {
+  readonly kind: ContentKind;
+  readonly contentKey: ContentKey;
+  readonly fingerprint: ContentFingerprintCandidate & {
+    readonly canonicalJson: CanonicalContentIdentityJson;
+  };
+  readonly [installedTargetCertificate]: true;
+}
+
 export type ContentResolution =
   | {
       readonly kind: 'exact';
@@ -65,7 +83,10 @@ export type ContentResolution =
   | {
       readonly kind: 'exact';
       readonly contentKey: ContentKey;
-      readonly matchClass: 'metadata-conflict' | 'key-collision';
+      readonly matchClass:
+        | 'metadata-conflict'
+        | 'key-collision'
+        | 'installed-target';
       readonly reviewRequired: true;
     }
   | {
@@ -175,6 +196,7 @@ function exactResolution(
   contentKey: ContentKey,
   derivedIdentity: DerivedContentIdentityV1<ContentKind, unknown> | undefined,
   referenceFingerprint: ContentFingerprintCandidate | undefined,
+  installedTarget: InstalledTargetReferenceCertificate | undefined,
   metadataConflict: boolean,
 ): ContentResolution | null {
   const identity = db.one(
@@ -212,6 +234,40 @@ function exactResolution(
       contentKey: identity.content_key,
       matchClass: 'stored-key',
       reviewRequired: false,
+    });
+  }
+
+  if (installedTarget !== undefined) {
+    const storedCurrent = db.one(
+      `SELECT fingerprint_digest, canonical_json
+       FROM catalog_content_fingerprints
+       WHERE content_kind = ? AND content_key = ?
+         AND fingerprint_scheme = ? AND fingerprint_role = 'current'`,
+      [contentKind, contentKey, installedTarget.fingerprint.scheme],
+      (row) => ({
+        digest: sqlString(row, 'fingerprint_digest'),
+        canonicalJson: sqlString(row, 'canonical_json'),
+      }),
+    );
+    if (
+      installedTarget.kind !== contentKind ||
+      installedTarget.contentKey !== identity.content_key ||
+      storedCurrent === null ||
+      storedCurrent.digest !== installedTarget.fingerprint.digest ||
+      storedCurrent.canonicalJson !== installedTarget.fingerprint.canonicalJson
+    ) {
+      return Object.freeze({
+        kind: 'exact',
+        contentKey: identity.content_key,
+        matchClass: 'key-collision',
+        reviewRequired: true,
+      });
+    }
+    return Object.freeze({
+      kind: 'exact',
+      contentKey: identity.content_key,
+      matchClass: 'installed-target',
+      reviewRequired: true,
     });
   }
 
@@ -471,6 +527,7 @@ function resolveInRegistry(
     readonly fingerprints: readonly ContentFingerprintCandidate[];
     readonly derivedIdentity?: DerivedContentIdentityV1<ContentKind, unknown>;
     readonly exactReferenceFingerprint?: ContentFingerprintCandidate;
+    readonly installedTarget?: InstalledTargetReferenceCertificate;
     readonly metadataConflict: boolean;
   },
 ): ContentResolution {
@@ -480,6 +537,7 @@ function resolveInRegistry(
     input.primaryKey,
     input.derivedIdentity,
     input.exactReferenceFingerprint,
+    input.installedTarget,
     input.metadataConflict,
   );
   if (exact !== null) {
@@ -565,6 +623,60 @@ export function resolveContentReference(
     ...(referenceFingerprint === undefined
       ? {}
       : { exactReferenceFingerprint: referenceFingerprint }),
+    metadataConflict: false,
+  });
+}
+
+export function certifyInstalledTargetReference(
+  db: DatabaseContext,
+  input: {
+    readonly kind: ContentKind;
+    readonly contentKey: ContentKey;
+    readonly fingerprint: ContentFingerprintCandidate & {
+      readonly canonicalJson: CanonicalContentIdentityJson;
+    };
+  },
+): InstalledTargetReferenceCertificate {
+  assertContentFingerprintIntegrity(db, input);
+  const current = db.one(
+    `SELECT fingerprint_digest, canonical_json
+     FROM catalog_content_fingerprints
+     WHERE content_kind = ? AND content_key = ?
+       AND fingerprint_scheme = ? AND fingerprint_role = 'current'`,
+    [input.kind, input.contentKey, input.fingerprint.scheme],
+    (row) => ({
+      digest: sqlString(row, 'fingerprint_digest'),
+      canonicalJson: sqlString(row, 'canonical_json'),
+    }),
+  );
+  if (
+    current === null ||
+    current.digest !== input.fingerprint.digest ||
+    current.canonicalJson !== input.fingerprint.canonicalJson
+  ) {
+    throw new ContentIdentityCollision();
+  }
+  return Object.freeze({
+    kind: input.kind,
+    contentKey: input.contentKey,
+    fingerprint: Object.freeze({ ...input.fingerprint }),
+    [installedTargetCertificate]: true as const,
+  });
+}
+
+export function resolveInstalledTargetReference(
+  db: DatabaseContext,
+  input: {
+    readonly contentKey: ContentKey;
+    readonly certificate: InstalledTargetReferenceCertificate;
+  },
+): ContentResolution {
+  return resolveInRegistry(db, {
+    contentKind: input.certificate.kind,
+    primaryKey: input.contentKey,
+    fingerprints: Object.freeze([]),
+    exactReferenceFingerprint: input.certificate.fingerprint,
+    installedTarget: input.certificate,
     metadataConflict: false,
   });
 }
