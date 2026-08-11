@@ -53,6 +53,7 @@ export interface ImportBackupServices {
     BackupClient,
     | 'exportDatabase'
     | 'importDatabase'
+    | 'exportLibrary'
     | 'exportCharacter'
     | 'planCharacterImport'
     | 'commitCharacterImport'
@@ -197,6 +198,16 @@ export class ImportBackupController {
     };
     await this.services.backup.importDatabase(backup);
     return true;
+  }
+
+  async exportLibrary(): Promise<void> {
+    const document = await this.services.backup.exportLibrary();
+    this.services.save({
+      filename: `srd-55-library-${document.exported_at.slice(0, 10)}.json`,
+      contents: new Blob([encodePartyDocument(document).slice()], {
+        type: 'application/json',
+      }),
+    });
   }
 
   async exportCharacter(
@@ -532,6 +543,19 @@ export function createImportBackupControls(
     }),
   );
 
+  const libraryExportButton = element('button', {
+    text: 'Download library JSON',
+    attributes: { type: 'button' },
+  });
+  cleanups.push(
+    listen(libraryExportButton, 'click', () => {
+      void run(libraryExportButton, async () => {
+        await controller.exportLibrary();
+        return 'Library JSON downloaded.';
+      });
+    }),
+  );
+
   const bundledHomebrewButton = element('button', {
     text: 'Import bundled homebrew',
     attributes: { type: 'button' },
@@ -756,6 +780,10 @@ export function createImportBackupControls(
         characterExportButton,
       ]),
       control('Library JSON', libraryInput, libraryButton),
+      element('div', { className: 'transfer-control' }, [
+        element('span', { text: 'Back up library content' }),
+        libraryExportButton,
+      ]),
     ]),
     status,
   ]);

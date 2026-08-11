@@ -673,6 +673,15 @@ describe('catalog and backup entry points', () => {
           persisted.database = backup.sqlite.slice();
           return { imported: true };
         },
+        exportLibrary: async () => ({
+          format: 'dnd-multiclass-spells/library',
+          version: 2,
+          exported_at: '2026-07-23T12:34:56.000Z',
+          selection: 'all',
+          selected_content_keys: [],
+          content: [],
+          supersessions: [],
+        }),
         exportCharacter: async (characterId) =>
           ({
             format: 'dnd-multiclass-spells/character',
@@ -715,7 +724,7 @@ describe('catalog and backup entry points', () => {
     };
   }
 
-  it('labels the complete character JSON input with its rendered accessible name', () => {
+  it('keeps transfer input positions and appends a working library export after its importer', async () => {
     const fixture = services();
     const restoreDocument = installInteractiveDocument();
     try {
@@ -726,7 +735,9 @@ describe('catalog and backup entry points', () => {
         services: fixture.value,
       });
       const root = interactiveElement(controls.element);
-      const characterInput = root.querySelectorAll('input')[2];
+      const inputs = root.querySelectorAll('input');
+      expect(inputs).toHaveLength(4);
+      const characterInput = inputs[2];
       if (characterInput === undefined) throw new Error('Character input missing.');
       const characterImportLabel = root.querySelectorAll('label').find(
         (label) => label.children.includes(characterInput),
@@ -738,6 +749,26 @@ describe('catalog and backup entry points', () => {
       expect(elementText(characterImportLabel as unknown as Node)).toContain(
         'Import complete character JSON',
       );
+      const transferGrid = root.querySelector('.transfer-grid');
+      if (transferGrid === null) throw new Error('Transfer grid missing.');
+      expect(transferGrid.children).toHaveLength(8);
+      expect(elementText(transferGrid.children[5] as unknown as Node)).toContain(
+        'Library JSON',
+      );
+      expect(transferGrid.children[6]?.children.map((child) =>
+        elementText(child as unknown as Node).trim()
+      )).toEqual([
+        'Back up library content',
+        'Download library JSON',
+      ]);
+      const libraryExport = transferGrid.children[6]?.children[1];
+      if (libraryExport === undefined) throw new Error('Library export button missing.');
+      libraryExport.click();
+      for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+      expect(fixture.saved.map((file) => file.filename)).toEqual([
+        'srd-55-library-2026-07-23.json',
+      ]);
+      expect(elementText(controls.element)).toContain('Library JSON downloaded.');
       controls.cleanup();
     } finally {
       restoreDocument();
@@ -1653,13 +1684,27 @@ describe('catalog and backup entry points', () => {
     expect([...fixture.persisted.database]).toEqual([9, 8, 7, 6]);
   });
 
-  it('round-trips character and database backup downloads through persisted services', async () => {
+  it('round-trips character, library, and database backup downloads through persisted services', async () => {
     const fixture = services();
     const controller = new ImportBackupController(fixture.value);
 
     await controller.exportDatabase();
+    await controller.exportLibrary();
     await controller.exportCharacter(summary(7, 'Backup Hero'));
-    const characterJson = await fixture.saved[1]?.contents.text();
+    const libraryJson = await fixture.saved[1]?.contents.text();
+    const characterJson = await fixture.saved[2]?.contents.text();
+    expect(libraryJson).toBe(
+      '{\n' +
+      '  "format": "dnd-multiclass-spells/library",\n' +
+      '  "version": 2,\n' +
+      '  "exported_at": "2026-07-23T12:34:56.000Z",\n' +
+      '  "selection": "all",\n' +
+      '  "selected_content_keys": [],\n' +
+      '  "content": [],\n' +
+      '  "supersessions": []\n' +
+      '}\n',
+    );
+    expect(fixture.saved[1]?.contents.type).toBe('application/json');
     expect(characterJson).toContain('"source_character_id": 7');
     expect(characterJson?.endsWith('\n')).toBe(true);
 
@@ -1674,6 +1719,7 @@ describe('catalog and backup entry points', () => {
 
     expect(fixture.saved.map((file) => file.filename)).toEqual([
       'srd-55-database-2026-07-23.sqlite3',
+      'srd-55-library-2026-07-23.json',
       'backup-hero-character.json',
     ]);
     expect(fixture.persisted.characters).toEqual([

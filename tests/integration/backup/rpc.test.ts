@@ -129,10 +129,33 @@ describe('library adoption RPC', () => {
     };
 
     expect(registry.methods).toEqual(expect.arrayContaining([
+      'backup.exportLibrary',
       'backup.importLibrary',
       'backup.planLibraryImport',
       'backup.commitLibraryImport',
     ]));
+    await expect(rpc.call('backup.exportLibrary', {
+      extra: true,
+    })).rejects.toThrow('Invalid params for RPC method "backup.exportLibrary".');
+    const emptyExport = await client.exportLibrary();
+    expect(Object.keys(emptyExport).sort()).toEqual([
+      'content',
+      'exported_at',
+      'format',
+      'selected_content_keys',
+      'selection',
+      'supersessions',
+      'version',
+    ]);
+    expect(emptyExport).toEqual({
+      format: 'dnd-multiclass-spells/library',
+      version: 2,
+      exported_at: expect.any(String),
+      selection: 'all',
+      selected_content_keys: [],
+      content: [],
+      supersessions: [],
+    });
     await expect(rpc.call('backup.importLibrary', {
       document: legacy,
       extra: true,
