@@ -33,6 +33,7 @@ import {
   isEnumValue,
   skills,
   type Ability,
+  type Skill,
 } from '../domain/enums';
 import {
   backgroundFeatBaseName,
@@ -116,6 +117,13 @@ export interface GuidedBackgroundOption {
   readonly name: string;
   readonly catalog_layer: CatalogLayerDisclosure;
   readonly pairing: BackgroundPrintedPairing;
+  /** The exact template-backed mechanics the guided Apply transaction mints. */
+  readonly applied_skill_proficiencies: readonly [Skill, Skill];
+  readonly applied_effects: readonly {
+    readonly label: string;
+  }[];
+  /** Printed on the sheet, but not represented as a mechanical proficiency. */
+  readonly deferred_tool_reference_text: string;
 }
 
 export interface GuidedBackgroundChoiceOptions {

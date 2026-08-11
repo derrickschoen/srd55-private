@@ -21,10 +21,10 @@
  * instance tree, and the contributions and child feat source cascade away
  * with their owner.
  *
- * WHAT THIS STEP STILL DOES NOT APPLY is disclosed in
- * {@link BACKGROUND_UNAPPLIED_GRANTS}. The entries for the ability increases
- * and the Origin feat are DELETED rather than reworded, per the rule the
- * species step established: a disclosure exists only while its gap does.
+ * THE DISCLOSURE IS OPTION-DERIVED: the exact printed skills, tool text and
+ * configured effects travel with each background option; the chosen feat is
+ * read from the same picker submitted to Apply. Only the fixed transaction
+ * categories (ability contributions and later equipment step) remain prose.
  */
 
 import {
@@ -84,36 +84,6 @@ const SLOT_AMOUNTS: Readonly<Record<IncreaseMode, readonly number[]>> = {
   two_one: [2, 1],
   one_one_one: [1, 1, 1],
 };
-
-/**
- * WHAT CHOOSING A BACKGROUND NOW DOES — the honest replacement for A5's
- * recorded-only line, which B3 made false. Recording is no longer all that
- * happens: the increases become additive contributions that change the
- * sheet's totals (never the allocated base), and the Origin feat becomes a
- * real source whose own grants apply — picking Magic Initiate mints its
- * spell choices.
- */
-export const BACKGROUND_APPLIED_DISCLOSURE =
-  'Choosing a background records its printed text, applies your ability ' +
-  'increases as additions on top of the scores you allocated, and adds ' +
-  'your chosen Origin feat to the character. Choosing again later replaces ' +
-  'all of it together.';
-
-/**
- * WHAT THIS STEP STILL DOES NOT APPLY. The A5 entries for the ability
- * increases and the Origin feat are DELETED — B3 closed those gaps — never
- * reworded; these three remain because their gaps remain.
- */
-export const BACKGROUND_UNAPPLIED_GRANTS: readonly string[] = [
-  'the two skill proficiencies',
-  'the tool proficiency',
-  // The "not built yet" clause this entry carried is DELETED, not reworded,
-  // now that E-B built the step — the standing rule for a disclosure whose
-  // reason has expired. What remains true: THIS step applies no equipment.
-  'the starting equipment package — equipment is the package only, with no ' +
-    'gold alternative, and the package is chosen and applied at the ' +
-    'equipment step',
-];
 
 /**
  * The worker refuses `unknown_origin` as `handler_error` with structured
@@ -211,6 +181,76 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
       `${pairing.printed_abilities.join(', ')}, and the ` +
       `${pairing.printed_feat} feat. Change any of it below; the defaults ` +
       'are marked.';
+  };
+
+  const applyDisclosureMount = element('div', {
+    className: 'guided-background-apply-disclosure',
+  });
+  const renderApplyDisclosure = (): void => {
+    clear(applyDisclosureMount);
+    if (selected === null) {
+      applyDisclosureMount.append(element('p', {
+        text: 'Choose a background to see exactly what Apply will change.',
+      }));
+      return;
+    }
+    const background = selected;
+
+    const chosenFeat = deps.options.origin_feats.find(
+      (feat) => feat.content_key === featKey,
+    );
+    const applied = [
+      element('li', { text: 'your chosen ability-score increases' }),
+      element('li', {
+        text:
+          `${background.applied_skill_proficiencies.map((skill) =>
+            SKILL_LABELS[skill]
+          ).join(' and ')} as skill proficiencies`,
+      }),
+      element('li', {
+        text: chosenFeat === undefined
+          ? 'your chosen Origin feat and its configured grants'
+          : `${chosenFeat.name} · ${catalogLayerLabel(
+              chosenFeat.catalog_layer,
+            )} as your Origin feat, including its configured grants`,
+      }),
+      ...background.applied_effects.map((effect) =>
+        element('li', {
+          text:
+            `${effect.label} · ${catalogLayerLabel(
+              background.catalog_layer,
+            )} as a configured background effect`,
+        })
+      ),
+    ];
+    const sourceLayer = catalogLayerLabel(background.catalog_layer);
+    applyDisclosureMount.append(
+      element('h3', { text: 'What Apply changes now' }),
+      element('p', {
+        text:
+          'Apply records the printed background text and mechanically adds:',
+      }),
+      element('ul', {}, applied),
+      element('h3', { text: 'What stays reference text or happens later' }),
+      element('ul', {}, [
+        element('li', {
+          text:
+            `${background.deferred_tool_reference_text} · ${sourceLayer} is ` +
+            'recorded as tool reference text; no tool proficiency is ' +
+            'mechanically applied.',
+        }),
+        element('li', {
+          text:
+            'The starting equipment package is chosen and mechanically ' +
+            'applied at the equipment step, not by Apply background.',
+        }),
+      ]),
+      element('p', {
+        text:
+          'Applying a different background later replaces this background, ' +
+          'its applied mechanics, and its chosen Origin feat together.',
+      }),
+    );
   };
 
   /** True when `ability` is one of the selected background's printed three. */
@@ -479,6 +519,7 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
       setError(null);
       renderMagicInitiateFields();
       renderSkilledFields();
+      renderApplyDisclosure();
     }),
   );
 
@@ -508,6 +549,7 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
     renderMagicInitiateFields();
     renderSkilledFields();
     renderSuggestion();
+    renderApplyDisclosure();
   };
 
   const backgroundList = element(
@@ -635,10 +677,6 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
     },
     [
       element('h2', { text: 'Choose a background' }),
-      element('p', {
-        className: 'guided-background-applied',
-        text: BACKGROUND_APPLIED_DISCLOSURE,
-      }),
       ...(deps.options.backgrounds.length === 0
         ? [
             element('p', {
@@ -659,21 +697,7 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
             ]),
             magicInitiateFields,
             skilledFields,
-            element('div', { className: 'guided-background-unapplied' }, [
-              element('p', {
-                text:
-                  'A background also carries benefits this step does NOT ' +
-                  'apply yet — applying one puts none of these on the ' +
-                  'character:',
-              }),
-              element(
-                'ul',
-                {},
-                BACKGROUND_UNAPPLIED_GRANTS.map((grant) =>
-                  element('li', { text: grant }),
-                ),
-              ),
-            ]),
+            applyDisclosureMount,
             submit,
           ]),
       errorMount,
@@ -686,6 +710,7 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
   renderMagicInitiateFields();
   renderSkilledFields();
   renderSuggestion();
+  renderApplyDisclosure();
 
   return {
     element: guidedShell('background', panel, deps.characterId),

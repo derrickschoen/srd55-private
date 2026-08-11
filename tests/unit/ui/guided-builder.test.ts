@@ -686,6 +686,9 @@ describe('guided background step', () => {
           suggested_feat_content_key: MAGIC_INITIATE_FEAT_CONTENT_KEY,
           suggested_magic_initiate_list: 'Cleric',
         },
+        applied_skill_proficiencies: ['arcana', 'insight'],
+        applied_effects: [{ label: 'Honest ward' }],
+        deferred_tool_reference_text: 'Calligrapher’s Supplies',
       },
     ],
     origin_feats: [
@@ -707,8 +710,10 @@ describe('guided background step', () => {
     ],
   };
 
-  it('renders a hostile external background inert with its catalog layer disclosed', () => {
+  it('renders hostile external background disclosure data inert with its catalog layer disclosed', () => {
     const hostile = '</span><img data-ha10-background-hostile src=x>';
+    const hostileEffect = '</li><img data-ha10-effect-hostile src=x>';
+    const hostileTool = '</li><img data-ha10-tool-hostile src=x>';
     const step = createBackgroundStep({
       characterId: 1,
       options: {
@@ -718,16 +723,37 @@ describe('guided background step', () => {
           content_key: 'expanded:background:hostile',
           name: hostile,
           catalog_layer: 'external',
+          applied_effects: [{ label: hostileEffect }],
+          deferred_tool_reference_text: hostileTool,
         }],
       },
       applyBackground: () => Promise.reject(new Error('not submitted')),
       navigate: () => undefined,
     });
 
-    expect(elementText(step.element)).toContain(hostile);
-    expect(elementText(step.element)).toContain('Homebrew · external layer');
+    const background = interactiveElement(
+      elementsWithAttribute(
+        step.element,
+        BACKGROUND_STEP_ATTR.option,
+        'expanded:background:hostile',
+      )[0] as unknown as Node,
+    );
+    background.checked = true;
+    background.dispatchEvent(new Event('change'));
+
+    const text = elementText(step.element);
+    expect(text).toContain(hostile);
+    expect(text).toContain(hostileEffect);
+    expect(text).toContain(hostileTool);
+    expect(text.match(/Homebrew · external layer/gu)).toHaveLength(3);
     expect(
       interactiveElement(step.element).querySelector('[data-ha10-background-hostile]'),
+    ).toBeNull();
+    expect(
+      interactiveElement(step.element).querySelector('[data-ha10-effect-hostile]'),
+    ).toBeNull();
+    expect(
+      interactiveElement(step.element).querySelector('[data-ha10-tool-hostile]'),
     ).toBeNull();
     step.cleanup();
   });
@@ -768,48 +794,69 @@ describe('guided background step', () => {
     step.cleanup();
   });
 
-  it('B3-HONESTY says what background apply now does and discloses only the three remaining gaps', () => {
+  it('S4-02 derives the exact applied and deferred background claims from the selected option', () => {
     const step = createBackgroundStep({
       characterId: 1,
       options: backgroundChoices,
       applyBackground: () => Promise.reject(new Error('not submitted')),
       navigate: () => undefined,
     });
-    const text = elementText(step.element);
+    const background = interactiveElement(
+      elementsWithAttribute(
+        step.element,
+        BACKGROUND_STEP_ATTR.option,
+        'test:background:honesty',
+      )[0] as unknown as Node,
+    );
+    background.checked = true;
+    background.dispatchEvent(new Event('change'));
     const disclosure = elementsByTagName(step.element, 'div').find(
-      (element) => element.className === 'guided-background-unapplied',
+      (element) => element.className === 'guided-background-apply-disclosure',
     );
     if (disclosure === undefined) {
-      throw new Error('The background step rendered no unapplied disclosure.');
+      throw new Error('The background step rendered no apply disclosure.');
     }
-    const disclosureList = disclosure.children.find(
-      (element) => element.tagName === 'ul',
-    );
-    if (disclosureList === undefined) {
-      throw new Error('The unapplied disclosure rendered no list.');
-    }
-    const unapplied = disclosureList.children.map((element) =>
-      elementText(element as unknown as Node),
-    );
+    const text = elementText(disclosure as unknown as Node);
 
+    expect(text).toContain('What Apply changes now');
+    expect(text).toContain('your chosen ability-score increases');
+    expect(text).toContain('Arcana and Insight as skill proficiencies');
     expect(text).toContain(
-      'Choosing a background records its printed text, applies your ability ' +
-        'increases as additions on top of the scores you allocated, and adds ' +
-        'your chosen Origin feat to the character.',
+      'Magic Initiate · SRD · bundled layer as your Origin feat, including ' +
+        'its configured grants',
     );
+    expect(text).toContain(
+      'Honest ward · SRD · bundled layer as a configured background effect',
+    );
+    expect(text).toContain('What stays reference text or happens later');
+    expect(text).toContain(
+      'Calligrapher’s Supplies · SRD · bundled layer is recorded as tool ' +
+        'reference text; no tool proficiency is mechanically applied.',
+    );
+    expect(text).toContain(
+      'The starting equipment package is chosen and mechanically applied at ' +
+        'the equipment step, not by Apply background.',
+    );
+    expect(text).not.toContain('puts none of these on the character');
     // D68: nothing on this step may call the player's feat/increase choice a
     // house rule, homebrew, or a departure.
     expect(text).not.toMatch(/house rule|homebrew|departure/i);
-    // RETARGETED WITH E-B: the equipment entry's "not built yet" clause
-    // expired when the equipment step was built; the disclosure now points
-    // at the step instead of at a gap.
-    expect(unapplied).toEqual([
-      'the two skill proficiencies',
-      'the tool proficiency',
-      'the starting equipment package — equipment is the package only, with ' +
-        'no gold alternative, and the package is chosen and applied at the ' +
-        'equipment step',
-    ]);
+
+    const feat = interactiveElement(
+      elementsWithAttribute(
+        step.element,
+        BACKGROUND_STEP_ATTR.feat,
+        '',
+      )[0] as unknown as Node,
+    );
+    feat.value = '2024:feat:lucky';
+    feat.dispatchEvent(new Event('change'));
+    const changedText = elementText(disclosure as unknown as Node);
+    expect(changedText).toContain(
+      'Lucky · SRD · bundled layer as your Origin feat, including its ' +
+        'configured grants',
+    );
+    expect(changedText).not.toContain('Magic Initiate ·');
     step.cleanup();
   });
 
