@@ -137,6 +137,8 @@ describe('character share links', () => {
 
   it('names untrusted embedded aggregates before the clean direct commit', async () => {
     const hostile = '<img data-share-disclosure-hostile src=x onerror=alert(1)>';
+    const hostileSubclass =
+      '<img data-s4-share-hostile src=x onerror=window.s4Xss=1>';
     const token = '1'.repeat(64) as ContentImportPlanToken;
     const plan: ContentImportPlan = {
       token,
@@ -154,6 +156,11 @@ describe('character share links', () => {
         kind: 'feat',
         name: 'UNKNOWN',
         catalog_layer: 'external',
+      }, {
+        id: 'portable:subclass:hostile',
+        kind: 'subclass',
+        name: hostileSubclass,
+        catalog_layer: 'external',
       }],
       reviews: [],
       outcomes: [{
@@ -164,6 +171,10 @@ describe('character share links', () => {
         id: 'portable:feat:unknown',
         kind: 'create',
         contentKey: '2024:feat:unknown' as ContentKey,
+      }, {
+        id: 'portable:subclass:hostile',
+        kind: 'create',
+        contentKey: 'expanded:content.subclass:hostile' as ContentKey,
       }],
     };
     const commits: unknown[] = [];
@@ -180,7 +191,18 @@ describe('character share links', () => {
           }),
           preview: async () => ({
             name: 'Hostile Share',
-            classes: [],
+            classes: [{
+              class: { name: 'Fighter', catalog_layer: 'bundled' },
+              subclass: {
+                name: hostileSubclass,
+                catalog_layer: 'external',
+              },
+              level: 3,
+            }, {
+              class: { name: 'UNKNOWN', catalog_layer: 'unknown' },
+              subclass: { name: '  ', catalog_layer: 'unknown' },
+              level: 1,
+            }],
             sourceCount: 0,
             selectionCount: 0,
             spellbookCount: 0,
@@ -232,12 +254,29 @@ describe('character share links', () => {
       )).toEqual([
         `${hostile} — species — Homebrew · external layer`,
         'UNKNOWN — feat — Homebrew · external layer',
+        `${hostileSubclass} — subclass — Homebrew · external layer`,
       ]);
       expect(disclosure.querySelector('[data-share-disclosure-hostile]')).toBeNull();
       expect(elementText(disclosure as unknown as Node)).toContain(
         'This external content will be installed with the character:',
       );
       expect(root.querySelector('[data-testid="content-adoption-modal"]')).toBeNull();
+      expect(elementText(
+        root.querySelector('.share-preview-classes') as unknown as Node,
+      ).replace(/\s+/gu, ' ').replace(/\s+([,;])/gu, '$1').trim())
+        .toBe(
+          `Fighter / ${hostileSubclass} 3, ` +
+          'Unknown class name / Unknown subclass name 1',
+        );
+      expect(elementText(
+        root.querySelector('.share-preview-layers') as unknown as Node,
+      ).replace(/\s+/gu, ' ').replace(/\s+([,;])/gu, '$1').trim())
+        .toBe(
+          `Fighter — SRD · bundled layer / ${hostileSubclass} — ` +
+          'Homebrew · external layer; Unknown class name — ' +
+          'Unknown catalog layer / Unknown subclass name — Unknown catalog layer',
+        );
+      expect(root.querySelector('[data-s4-share-hostile]')).toBeNull();
 
       add.click();
       for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();

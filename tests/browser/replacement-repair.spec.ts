@@ -127,17 +127,15 @@ test('discloses a narrowing spell replacement before apply and repairs the exact
   await expect(review.getByRole('link', { name: 'Repair selection' })).toHaveCount(0);
 
   await expect(review).toContainText(
-    'Retarget Spell Species Revised — Homebrew · external layer',
+    'Before: Retarget Spell Species — Homebrew · external layer',
   );
-  const match = review.getByRole('radio', {
-    name: 'Match — Uses the existing local entry; this attached character moves to it.',
-  });
-  const clone = review.getByRole('radio', {
-    name: 'Clone — Installs a renamed private copy of the local entry; this attached character moves to that copy.',
-  });
+  await expect(review).toContainText(
+    'After Apply: Retarget Spell Species Revised — Homebrew · external layer',
+  );
+  await expect(review.getByRole('radio')).toHaveCount(0);
+  await expect(review.getByLabel('Private copy name')).toHaveCount(0);
+  await expect(review).not.toContainText(/certif/iu);
   const apply = review.getByRole('button', { name: 'Apply to all listed characters' });
-  await expect(match).toBeChecked();
-  await expect(clone).not.toBeChecked();
   await expect(apply).toBeEnabled();
   await apply.click();
   await expect(page.getByRole('heading', { name: 'Character fixes applied' })).toBeVisible();

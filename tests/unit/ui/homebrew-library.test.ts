@@ -878,11 +878,13 @@ describe('HA-6 homebrew library routing and tabs', () => {
       });
       const root = interactiveElement(screenContext.root);
       expect(elementText(root as unknown as Node)).toContain(hostileCharacter);
-      expect(elementText(root as unknown as Node)).toContain(
+      const reviewCopy = elementText(root as unknown as Node)
+        .replace(/\s+/gu, ' ').trim();
+      expect(reviewCopy).toContain(
         'Before: <b data-ha11-before>Old</b>',
       );
-      expect(elementText(root as unknown as Node)).toContain(
-        'After: <i data-ha11-after>New</i>',
+      expect(reviewCopy).toContain(
+        'After Apply: Installed Target',
       );
       expect(elementText(root as unknown as Node)).toContain(
         'Selections that will become invalid',
@@ -901,11 +903,22 @@ describe('HA-6 homebrew library routing and tabs', () => {
       expect(root.querySelector('[data-ha11-character]')).toBeNull();
       expect(root.querySelector('[data-ha11-before]')).toBeNull();
       expect(root.querySelector('[data-ha11-after]')).toBeNull();
+      expect(reviewCopy).toContain(
+        'Before: <b data-ha11-before>Old</b> — Homebrew · external layer',
+      );
+      expect(reviewCopy).toContain(
+        'After Apply: Installed Target — Homebrew · external layer',
+      );
+      expect(reviewCopy.toLowerCase()).not.toContain('certif');
+      expect(reviewCopy).not.toContain('Private copy name');
+      expect(reviewCopy).not.toContain(
+        'Match — Uses the existing local entry',
+      );
+      expect(reviewCopy).not.toContain(
+        'Clone — Installs a renamed private copy',
+      );
       const controls = root.querySelectorAll('input');
-      expect(controls).toHaveLength(3);
-      expect(controls[0]?.checked).toBe(true);
-      expect(controls[1]?.checked).toBe(false);
-      expect(controls[2]?.disabled).toBe(true);
+      expect(controls).toHaveLength(0);
       const apply = root.querySelectorAll('button').find(
         (button) => button.textContent === 'Apply to all listed characters',
       );
@@ -998,6 +1011,7 @@ describe('HA-6 homebrew library routing and tabs', () => {
       expect(copy).toContain(
         'Clone — Installs a renamed private copy of the local entry; this attached character moves to that copy.',
       );
+      expect(copy.toLowerCase()).not.toContain('certif');
       const controls = root.querySelectorAll('input');
       expect(controls.map((control) => control.getAttribute('checked')))
         .toEqual([null, null, null]);

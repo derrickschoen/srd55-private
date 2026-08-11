@@ -1088,12 +1088,17 @@ describe('catalog authoring RPC handlers', () => {
         'Selections that will become invalid',
       );
       expect(elementText(root as unknown as Node)).toContain(consequence);
-      const match = interactiveRoot.querySelectorAll('input').find(
-        (input) => input.getAttribute('value') === 'match',
+      expect(interactiveRoot.querySelectorAll('input')).toHaveLength(0);
+      const reviewCopy = elementText(root as unknown as Node)
+        .replace(/\s+/gu, ' ').trim();
+      expect(reviewCopy).toContain(
+        'Before: Spell Retarget Old — Homebrew · external layer',
       );
-      if (match === undefined) throw new Error('Replacement Match choice missing.');
-      match.checked = true;
-      match.dispatchEvent(new Event('change'));
+      expect(reviewCopy).toContain(
+        'After Apply: Spell Retarget Incompatible — ' +
+        'Homebrew · external layer',
+      );
+      expect(reviewCopy.toLowerCase()).not.toContain('certif');
       const apply = interactiveRoot.querySelectorAll('button').find(
         (button) => button.textContent === 'Apply to all listed characters',
       );

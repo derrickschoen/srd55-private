@@ -353,6 +353,22 @@ describe('an imported subclass stays distinguishable from a bundled one', () => 
     // them before resolving the same portable key on the character.
     const bare = await database();
     expect(assessImportCompatibility(bare, shared)).toEqual([]);
+    const embeddedPreview = previewCharacterShare(bare, shared);
+    expect(embeddedPreview.classes).toEqual([{
+      class: { name: 'Bard', catalog_layer: 'bundled' },
+      subclass: {
+        name: 'College of the Long Road',
+        catalog_layer: 'external',
+      },
+      level: 6,
+    }]);
+    expect(embeddedPreview.adoptionPlan.incomingContent).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'subclass',
+        name: embeddedPreview.classes[0]?.subclass?.name,
+        catalog_layer: embeddedPreview.classes[0]?.subclass?.catalog_layer,
+      }),
+    ]));
     const embeddedImport = importCharacterShare(bare, shared);
     expect(
       bare.scalar(
