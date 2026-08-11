@@ -53,6 +53,12 @@ import { clear, element, type Cleanup } from '../../dom';
 import { freeTextSpan } from '../../free-text';
 import type { ScreenContext } from '../../screen';
 import { homebrewPublishedPath } from './homebrew-routes';
+import {
+  showDraftSaveFailure,
+  showDraftSaveProgress,
+  showDraftSaveRefusal,
+  showDraftSaveSuccess,
+} from './draft-save-status';
 import { spellGrantControls } from './spell-grant-controls';
 
 type StoredSubclassDraft = StoredHomebrewDraft & {
@@ -70,6 +76,7 @@ export interface SubclassFormOptions {
   readonly randomUuid?: () => string;
   readonly confirmLeave?: () => boolean;
   readonly windowObject?: Window;
+  readonly onSaved?: (draft: StoredSubclassDraft) => void;
 }
 
 const overrideCasterContributions = [
@@ -1218,7 +1225,7 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
       const savedGeneration = edits.capture();
       save.disabled = true;
       preview.disabled = true;
-      status.textContent = 'Saving draft…';
+      showDraftSaveProgress(status);
       try {
         const saved = await options.client.saveDraft({
           draft_uuid: stored.draft_uuid,
@@ -1228,17 +1235,23 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
         if (saved.content_kind !== 'subclass' || saved.document.kind !== 'subclass') {
           throw new TypeError('Saving the subclass draft returned a different content kind.');
         }
+        clear(validationMount);
         stored = saved as StoredSubclassDraft;
+        options.onSaved?.(stored);
         if (edits.acceptSave(savedGeneration)) {
           document = stored.document;
-          status.textContent = `Saved revision ${String(stored.revision)}.`;
+          showDraftSaveSuccess(status, `Saved revision ${String(stored.revision)}.`);
         } else {
-          status.textContent = `Saved revision ${String(stored.revision)}; newer unsaved changes remain.`;
+          showDraftSaveSuccess(
+            status,
+            `Saved revision ${String(stored.revision)}; newer unsaved changes remain.`,
+          );
         }
         return true;
       } catch (error) {
         const conflict = draftRevisionConflict(error);
         if (conflict !== null) {
+          showDraftSaveRefusal(status);
           const dialog = createDraftConflictDialog({
             conflict,
             mount: options.context.root,
@@ -1268,11 +1281,11 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
         } else {
           const issues = validationIssues(error);
           if (issues !== null) {
+            showDraftSaveRefusal(status);
             clear(validationMount);
             validationMount.append(renderValidationSummary(form, issues));
           } else {
-            status.textContent = error instanceof Error ? error.message : String(error);
-            status.setAttribute('role', 'alert');
+            showDraftSaveFailure(status, error);
           }
         }
         return false;
