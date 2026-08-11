@@ -1560,8 +1560,7 @@ Owner's question and ruling, verbatim:
 
 Facts established by grep before answering, not from folklore:
 
-- **The third-caster table is in neither SRD.** "EK" and "Arcane
-  Trickster": zero hits in SRD 5.1 and SRD 5.2.1. Even the PHB multiclass
+- **The third-caster table is in neither SRD.** "EK" and "AT": zero hits in SRD 5.1 and SRD 5.2.1. Even the PHB multiclass
   clause "a third of your Fighter or Rogue levels" is absent — the SRD 5.2.1
   multiclass Spell Slots rule counts only full casters and "Half your levels
   (round up) in the Paladin and Ranger classes". The PHB EK/AT table as a
