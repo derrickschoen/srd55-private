@@ -124,11 +124,19 @@ export function commitImmutableCatalogPublication<K extends ContentKind>(
       ? {}
       : { afterInstall: (transaction: DatabaseContext) => {
           const supersedes = publication.supersedesContentKey;
-          // Match resolves the draft to an already-installed aggregate. It does
-          // not publish a new version and therefore is not a CI-7 lineage event.
+          const recordsLineage = outcome.kind === 'create' ||
+            transaction.scalar<string>(
+              `SELECT catalog_layer
+                 FROM catalog_content_identities
+                WHERE content_kind = ? AND content_key = ?`,
+              [publication.node.projection.kind, outcome.contentKey],
+            ) === 'external';
+          // A Match to an external aggregate is still a same-layer version
+          // resolution used by CI-7. Only a non-external Match resolves without
+          // claiming a lineage relationship.
           if (
             supersedes !== undefined && supersedes !== null &&
-            outcome.kind === 'create'
+            recordsLineage
           ) {
             try {
               recordSupersession(
