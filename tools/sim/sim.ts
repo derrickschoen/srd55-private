@@ -111,6 +111,10 @@
 //   Voice and Strike drain the same pool; command policies reserve one use
 //   for the activation until it happens. Commands require Voice active (no
 //   slot-cast fallback is modeled).
+//   L7 Aura of Certainty (owner ruling 2026-08-11): enemies in the Aura of
+//   Protection save at Disadvantage against the paladin's spells and CD
+//   options — live in the 11/17 bands, applied to Grovel saves (the melee
+//   target is inside the 10-ft aura by the fighting posture).
 //   Grovel on a failed Wis save: the target falls Prone and its turn ends
 //   (its whole turn is lost) -> our melee attacks NEXT round have Advantage.
 //   A Command round cannot also Bonus-Action Divine Smite. Cha 16 flat on
@@ -319,7 +323,13 @@ export function domination(
           voiceOn = true;
         }
       } else if (command) {
-        if (randInt(rng, 20) + 2 < dc) {
+        // Aura of Certainty (L7+, so the 11/17 bands): enemies in the aura
+        // save at Disadvantage against the paladin's spells and CD options.
+        const save =
+          L >= 11
+            ? Math.min(randInt(rng, 20), randInt(rng, 20))
+            : randInt(rng, 20);
+        if (save + 2 < dc) {
           advNext = true;
           prevented += enemyTurnDamage(rng, L);
         }

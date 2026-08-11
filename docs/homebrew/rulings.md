@@ -5,6 +5,37 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-11 — Level 7 aura: enemies save at Disadvantage against the paladin's magic
+
+Owner floated two candidates mid-conformance-pass, verbatim:
+
+> Maybe lvl 7 aura should be disadvantage to enemies on saves against
+> paladin dc
+
+> Or maybe aura should be when a smite lands, free command on all
+> enemies within
+
+Both were priced in the sim (single-enemy model, aura live in the 11/17
+bands). Candidate A (Disadvantage): dealt roughly flat, prevented
++4–6/round on the control posture (11.0→15.4 at 11, 19.5→25.3 at 17) —
+a control-reliability aura. Candidate B (smite → aura-wide free
+*Command*): 103–107% of Vengeance dealt PLUS 15–26 prevented even
+before multi-enemy scaling, and it obsoletes Voice — over budget on
+both axes; advised against as stated. Convention note surfaced: A's
+effect exists in 2024 as an Elder Champion capstone benefit (Ancients
+20, 10 min/day); always-on at 7 front-loads it, and enemy-facing
+level-7 auras have only 2014 Conquest as precedent.
+
+**Owner selected A, the full version** (not scoped to *Command*).
+Drafted as: enemies in the Aura of Protection have Disadvantage on
+saving throws against the paladin's spells and Channel Divinity
+options (the Elder Champion wording pattern, matching "against paladin
+dc"). Drafting choices, flagged: the one-way comprehension ribbon is
+kept on the feature; the Charm-save Advantage is dropped (its budget
+is consumed by the offensive half). Side effect recorded: Foreseen
+Formation's trigger (an enemy SUCCEEDING on a save) fires less often
+inside the aura.
+
 ## 2026-08-11 — Domination conformed to the 2024 paladin subclass skeleton
 
 Owner's request, verbatim:
