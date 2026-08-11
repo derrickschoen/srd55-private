@@ -27,7 +27,7 @@ import {
 } from '../catalog/content-adoption';
 import { resolveContentReference } from '../catalog/content-registry';
 import { spellCatalogDisclosure } from '../catalog/spell-catalog-disclosure';
-import { localContentReferenceImportNode } from '../backup/portable-content';
+import { installedTargetContentReferenceImportNode } from '../backup/portable-content';
 import {
   applyGuidedBackgroundChoices,
   applyGuidedOrigin,
@@ -254,7 +254,7 @@ function importNodeAndPlan(
     });
   }
   assertActiveReplacementTarget(db, facts.content_kind, resolution.contentKey);
-  const node = localContentReferenceImportNode(db, {
+  const node = installedTargetContentReferenceImportNode(db, {
     id: NODE_ID,
     kind: facts.content_kind,
     incomingContentKey: facts.new_content_key,
@@ -336,6 +336,13 @@ function replacementReviewItem(row: ContentImportReviewRow): ReplacementReviewIt
         ...common,
         reason: row.matchClass,
         default_decision: null,
+        clone_name: row.cloneName,
+      });
+    case 'installed-target':
+      return Object.freeze({
+        ...common,
+        reason: row.matchClass,
+        default_decision: 'match',
         clone_name: row.cloneName,
       });
     case 'alias':
@@ -471,13 +478,20 @@ function matchChoices(
     item,
   ]));
   if (
-    decisions.length !== candidates.length ||
     new Set(decisions.map((decision) => decision.candidate_content_key)).size !== decisions.length ||
     decisions.some((decision) => {
       const review = reviews.get(decision.candidate_content_key);
       if (review === undefined) return true;
-      return decision.decision === 'clone' && review.reason !== 'key-collision';
-    })
+      return decision.decision === 'clone' &&
+        review.reason !== 'key-collision' &&
+        review.reason !== 'installed-target';
+    }) ||
+    preview.review.some((review) =>
+      review.reason !== 'installed-target' &&
+      !decisions.some((decision) =>
+        decision.candidate_content_key === review.candidate_content_key
+      )
+    )
   ) {
     throw new ReferenceRetargetError('Explicit review decisions are required.', {
       reason: 'replacement_review_required',

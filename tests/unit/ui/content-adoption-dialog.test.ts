@@ -304,6 +304,7 @@ describe('the D82 content-adoption dialog', () => {
       itemNode('same-name-distinct', 'shared-relic', { rule: 'incoming' }),
       itemNode('unevidenced', 'Unevidenced Relic', { rule: 'not-evidence' }, {
         referenceOnly: {
+          source: 'cross-boundary',
           contentKey: unevidencedStored.projection.assertedKey,
         },
       }),

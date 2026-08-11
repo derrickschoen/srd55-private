@@ -67,6 +67,7 @@ function reasonLabel(review: ContentImportReviewRow): string {
     case 'compatible-fingerprint': return 'Compatible fingerprint';
     case 'srd-fallback': return 'SRD fingerprint fallback';
     case 'metadata-conflict': return 'Metadata conflict';
+    case 'installed-target': return 'Certified installed target';
     case 'key-collision':
       return sameIdentityName(review)
         ? 'Same name, distinct rules content'

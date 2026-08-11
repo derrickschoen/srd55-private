@@ -31,6 +31,7 @@ import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { DatabaseContext } from '../../../src/db/database';
 import type { CharacterId, ContentKey } from '../../../src/domain/ids';
 import { assertedExternalContentKey } from '../../../src/catalog/catalog-key';
+import { localContentReferenceImportNode } from '../../../src/backup/portable-content';
 import { assignSpellSelection } from '../../../src/eligibility/spell-selection-assignment';
 import { RpcClient, type RpcTransport } from '../../../src/rpc/client';
 import type { RpcRequest, RpcResponse } from '../../../src/rpc/protocol';
@@ -619,7 +620,14 @@ describe('catalog authoring RPC handlers', () => {
       new_content_key: derived.derivedKey,
       character_id: first.id as CharacterId,
     });
-    expect(exactPreview.review).toEqual([]);
+    expect(exactPreview.review).toEqual([{
+      candidate_content_key: derived.derivedKey,
+      candidate_name: 'RPC Retarget Exact',
+      candidate_catalog_layer: 'external',
+      reason: 'installed-target',
+      default_decision: 'match',
+      clone_name: 'RPC Retarget Exact (Private copy)',
+    }]);
     expect(await authoringClient.commitReplacement({
       token: exactPreview.token,
       decisions: [],
@@ -662,31 +670,43 @@ describe('catalog authoring RPC handlers', () => {
       kind: 'species',
       content_key: old.content_key,
     });
-    const divergentPreview = await authoringClient.previewReplacement({
+    const installedPreview = await authoringClient.previewReplacement({
       old_content_key: old.content_key,
       new_content_key: reviewedTarget.content_key,
       character_id: second.id as CharacterId,
     });
-    expect(divergentPreview.review).toEqual([
+    expect(installedPreview.review).toEqual([
       {
         candidate_content_key: reviewedTarget.content_key,
         candidate_name: 'RPC Retarget Reviewed',
         candidate_catalog_layer: 'external',
-        reason: 'key-collision',
-        default_decision: null,
+        reason: 'installed-target',
+        default_decision: 'match',
         clone_name: 'RPC Retarget Reviewed (Private copy)',
       },
     ]);
-    await expect(authoringClient.commitReplacement({
-      token: divergentPreview.token,
-      decisions: [],
-      choices: [],
-    })).rejects.toMatchObject({
-      data: {
-        reason: 'replacement_review_required',
-        candidates: [reviewedTarget.content_key],
-      },
+
+    const foreignNode = localContentReferenceImportNode(rpc.context.db, {
+      id: 'test:genuine-cross-boundary-collision',
+      kind: 'species',
+      incomingContentKey: reviewedTarget.content_key,
+      localContentKey: reviewedTarget.content_key,
+      allowRememberedDecision: false,
     });
+    const collisionPlan = planContentImport(rpc.context.db, [foreignNode]);
+    expect(collisionPlan.reviews).toEqual([
+      expect.objectContaining({
+        id: 'test:genuine-cross-boundary-collision',
+        matchClass: 'key-collision',
+        defaultChoice: null,
+        selectedChoice: null,
+      }),
+    ]);
+    expect(commitContentImport(rpc.context.db, {
+      nodes: [foreignNode],
+      token: collisionPlan.token,
+    })).toMatchObject({ kind: 'refused', reason: 'entry_refused' });
+
     for (const invalidDecision of [
       {
         candidate_content_key: reviewedTarget.content_key,
@@ -705,13 +725,13 @@ describe('catalog authoring RPC handlers', () => {
       },
     ]) {
       expect(await rpc.call(AUTHORING_RPC.commitReplacement, {
-        token: divergentPreview.token,
+        token: installedPreview.token,
         decisions: [invalidDecision],
         choices: [],
       })).toMatchObject({ ok: false, error: { code: 'invalid_params' } });
     }
     const cloned = await authoringClient.commitReplacement({
-      token: divergentPreview.token,
+      token: installedPreview.token,
       decisions: [{
         candidate_content_key: reviewedTarget.content_key,
         decision: 'clone',
@@ -764,10 +784,7 @@ describe('catalog authoring RPC handlers', () => {
     });
     expect(await authoringClient.commitReplacement({
       token: matchedPreview.token,
-      decisions: [{
-        candidate_content_key: reviewedTarget.content_key,
-        decision: 'match',
-      }],
+      decisions: [],
       choices: [],
     })).toMatchObject({
       character_id: matched.id,
@@ -820,7 +837,7 @@ describe('catalog authoring RPC handlers', () => {
       `SELECT count(*) FROM catalog_content_match_decisions
        WHERE content_kind = 'species' AND target_content_key = ?`,
       [reviewedTarget.content_key],
-    )).toBe(2);
+    )).toBe(1);
 
     const refused = createGuidedCharacter(
       rpc.context.db,

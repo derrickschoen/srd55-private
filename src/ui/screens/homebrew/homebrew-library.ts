@@ -365,22 +365,22 @@ async function renderReplacementRoute(
     old_content_key: oldContentKey as PublishedHomebrewSummary['content_key'],
     new_content_key: newContentKey as PublishedHomebrewSummary['content_key'],
   });
-  const collisionSelections = new Map<string, ReplacementDecision>();
-  const collisionKeys: string[] = [];
+  const reviewSelections = new Map<string, ReplacementDecision>();
+  const selectableReviewKeys: string[] = [];
   let apply: HTMLButtonElement | null = null;
   const selectionKey = (replacementIndex: number, candidateContentKey: string): string =>
     `${String(replacementIndex)}\u0000${candidateContentKey}`;
-  const collisionSelection = (key: string): ReplacementDecision => {
-    const decision = collisionSelections.get(key);
+  const reviewSelection = (key: string): ReplacementDecision => {
+    const decision = reviewSelections.get(key);
     if (decision === undefined) {
-      throw new Error('An explicit replacement collision choice is required.');
+      throw new Error('An explicit replacement review choice is required.');
     }
     return decision;
   };
   const refreshApplyState = (): void => {
     if (apply === null) return;
-    apply.disabled = collisionKeys.some((key) => {
-      const decision = collisionSelections.get(key);
+    apply.disabled = selectableReviewKeys.some((key) => {
+      const decision = reviewSelections.get(key);
       return decision === undefined ||
         decision.decision === 'clone' && decision.clone_name.trim() === '';
     });
@@ -413,11 +413,14 @@ async function renderReplacementRoute(
             replacementNoticeItem(context, cleanups, notice, false)
           )),
         ];
-    const collisionChoices: HTMLElement[] = [];
+    const selectableChoices: HTMLElement[] = [];
     for (const [candidateIndex, candidate] of replacement.review.entries()) {
-      if (candidate.reason !== 'key-collision') continue;
+      if (
+        candidate.reason !== 'key-collision' &&
+        candidate.reason !== 'installed-target'
+      ) continue;
       const key = selectionKey(replacementIndex, candidate.candidate_content_key);
-      collisionKeys.push(key);
+      selectableReviewKeys.push(key);
       const prefix = `replacement-review-${String(replacementIndex + 1)}-${String(candidateIndex + 1)}`;
       const match = element('input', {
         attributes: {
@@ -437,8 +440,15 @@ async function renderReplacementRoute(
       });
       cloneName.value = candidate.clone_name;
       cloneName.disabled = true;
+      if (candidate.reason === 'installed-target') {
+        match.checked = true;
+        reviewSelections.set(key, {
+          candidate_content_key: candidate.candidate_content_key,
+          decision: 'match',
+        });
+      }
       const chooseMatch = (): void => {
-        collisionSelections.set(key, {
+        reviewSelections.set(key, {
           candidate_content_key: candidate.candidate_content_key,
           decision: 'match',
         });
@@ -446,7 +456,7 @@ async function renderReplacementRoute(
         refreshApplyState();
       };
       const chooseClone = (): void => {
-        collisionSelections.set(key, {
+        reviewSelections.set(key, {
           candidate_content_key: candidate.candidate_content_key,
           decision: 'clone',
           clone_name: cloneName.value,
@@ -463,7 +473,7 @@ async function renderReplacementRoute(
           chooseClone();
         }),
       );
-      collisionChoices.push(element('fieldset', {
+      selectableChoices.push(element('fieldset', {
         className: 'content-adoption-row replacement-review-row',
         attributes: { 'data-content-key': candidate.candidate_content_key },
       }, [
@@ -472,7 +482,9 @@ async function renderReplacementRoute(
             catalogLayerLabel(candidate.candidate_catalog_layer),
         }),
         element('p', {
-          text: 'This same-key replacement reference has no incoming rules evidence. Choose what this attached character should use.',
+          text: candidate.reason === 'installed-target'
+            ? 'This target was certified from the complete entry already installed in this library. Match is safe by default; choose Clone only to fork it.'
+            : 'This same-key replacement reference has no incoming rules evidence. Choose what this attached character should use.',
         }),
         match,
         element('label', {
@@ -494,7 +506,7 @@ async function renderReplacementRoute(
       name,
       changes,
       ...consequences,
-      ...collisionChoices,
+      ...selectableChoices,
     ]));
   }
   if (plan.replacements.length === 0) {
@@ -516,17 +528,25 @@ async function renderReplacementRoute(
         new_content_key: plan.new_content_key,
         replacements: plan.replacements.map((replacement, replacementIndex) => ({
           token: replacement.token,
-          decisions: replacement.review.map((candidate) =>
-            candidate.reason === 'key-collision'
-              ? collisionSelection(selectionKey(
-                  replacementIndex,
-                  candidate.candidate_content_key,
-                ))
-              : {
-                  candidate_content_key: candidate.candidate_content_key,
-                  decision: candidate.default_decision,
-                }
-          ),
+          decisions: replacement.review.flatMap((candidate) => {
+            if (
+              candidate.reason === 'key-collision' ||
+              candidate.reason === 'installed-target'
+            ) {
+              const selected = reviewSelection(selectionKey(
+                replacementIndex,
+                candidate.candidate_content_key,
+              ));
+              return selected.decision === 'match' &&
+                  candidate.reason === 'installed-target'
+                ? []
+                : [selected];
+            }
+            return [{
+              candidate_content_key: candidate.candidate_content_key,
+              decision: candidate.default_decision,
+            }];
+          }),
           choices: [],
         })),
       }).then((result) => {

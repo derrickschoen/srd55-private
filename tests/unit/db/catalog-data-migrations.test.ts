@@ -92,7 +92,7 @@ describe('catalog data-migration registry', () => {
         'src/catalog/content-identity.ts',
         'src/catalog/content-registry.ts',
       ],
-      checksum: '6945964cdc4c1d86693e82388ef5cc401751d2fda303cb6e7eb837a58cd643b6',
+      checksum: '1d2ec07c4dd5793f350423eb69fedc1d498d456992f52fe5a05b2dcfb7375bed',
     }]);
     expect(() =>
       validateCatalogDataMigrationRegistry(CATALOG_DATA_MIGRATIONS)

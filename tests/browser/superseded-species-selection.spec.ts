@@ -103,11 +103,12 @@ test('superseded species leave fresh selection while replacement characters stil
   await expect(page.getByLabel('Fix affected characters')).toContainText(
     'Existing Revision Hero',
   );
-  await page.getByRole('radio', {
+  await expect(page.getByRole('radio', {
     name: 'Match — Uses the existing local entry; this attached character moves to it.',
-  }).check();
-  await page.getByRole('button', { name: 'Apply to all listed characters' })
-    .click();
+  })).toBeChecked();
+  const apply = page.getByRole('button', { name: 'Apply to all listed characters' });
+  await expect(apply).toBeEnabled();
+  await apply.click();
   await expect(page.getByRole('heading', { name: 'Character fixes applied' }))
     .toBeVisible();
 

@@ -16,7 +16,11 @@ import {
   type ContentImportPlan,
   type ContentImportProjection,
 } from '../catalog/content-adoption';
-import { projectContentGraphInDependencyOrder } from '../catalog/content-registry';
+import {
+  certifyInstalledTargetReference,
+  projectContentGraphInDependencyOrder,
+  resolveContentReference,
+} from '../catalog/content-registry';
 import {
   assertedExternalContentKey,
   assertedExternalContentKeyFromDeclared,
@@ -1515,7 +1519,7 @@ export function portableSubclassContentImportNode(
  * this projection exists only so the common Clone choice can copy and rename
  * the matched local aggregate. Match continues to resolve the incoming key.
  */
-export function localContentReferenceImportNode(
+function projectedLocalContentReferenceImportNode(
   db: DatabaseContext,
   input: {
     readonly id: string;
@@ -1524,6 +1528,7 @@ export function localContentReferenceImportNode(
     readonly localContentKey: ContentKey;
     readonly allowRememberedDecision?: boolean;
   },
+  source: 'cross-boundary' | 'installed-target',
 ): ContentImportNode {
   const scheme = db.scalar<string>(
     `SELECT fingerprint_scheme FROM catalog_content_fingerprints
@@ -1546,6 +1551,17 @@ export function localContentReferenceImportNode(
     name: aggregate.name,
     payload: stored.payload,
   });
+  const certificate = source === 'installed-target'
+    ? certifyInstalledTargetReference(db, {
+        kind: input.kind,
+        contentKey: input.localContentKey,
+        fingerprint: {
+          scheme: identity.envelope.scheme,
+          digest: identity.digest,
+          canonicalJson: identity.canonicalJson,
+        },
+      })
+    : null;
   const base = portableNode(db, {
     kind: input.kind,
     content_key: input.incomingContentKey,
@@ -1569,9 +1585,16 @@ export function localContentReferenceImportNode(
     ...(input.allowRememberedDecision === undefined
       ? {}
       : { allowRememberedDecision: input.allowRememberedDecision }),
-    referenceOnly: Object.freeze({
-      contentKey: input.incomingContentKey,
-    }),
+    referenceOnly: certificate === null
+      ? Object.freeze({
+          source: 'cross-boundary' as const,
+          contentKey: input.incomingContentKey,
+        })
+      : Object.freeze({
+          source: 'installed-target' as const,
+          contentKey: input.incomingContentKey,
+          certificate,
+        }),
   });
   return Object.freeze({
     id: input.id,
@@ -1589,6 +1612,47 @@ export function localContentReferenceImportNode(
         : projected;
     },
   });
+}
+
+/** Cross-user reference construction: local recomputation is not evidence. */
+export function localContentReferenceImportNode(
+  db: DatabaseContext,
+  input: {
+    readonly id: string;
+    readonly kind: ContentKind;
+    readonly incomingContentKey: ContentKey;
+    readonly localContentKey: ContentKey;
+    readonly allowRememberedDecision?: boolean;
+  },
+): ContentImportNode {
+  return projectedLocalContentReferenceImportNode(db, input, 'cross-boundary');
+}
+
+/** Same-database construction certified from the complete installed aggregate. */
+export function installedTargetContentReferenceImportNode(
+  db: DatabaseContext,
+  input: {
+    readonly id: string;
+    readonly kind: ContentKind;
+    readonly incomingContentKey: ContentKey;
+    readonly localContentKey: ContentKey;
+    readonly allowRememberedDecision?: boolean;
+  },
+): ContentImportNode {
+  const resolution = resolveContentReference(db, {
+    kind: input.kind,
+    contentKey: input.incomingContentKey,
+  });
+  if (
+    resolution.kind === 'missing' ||
+    resolution.kind === 'ambiguous' ||
+    resolution.contentKey !== input.localContentKey
+  ) {
+    throw new BackupValidationError(
+      `Installed ${input.kind} target '${input.localContentKey}' does not resolve from '${input.incomingContentKey}'.`,
+    );
+  }
+  return projectedLocalContentReferenceImportNode(db, input, 'installed-target');
 }
 
 export function portableContentImportNodes(

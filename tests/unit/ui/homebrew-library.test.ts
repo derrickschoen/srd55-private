@@ -842,7 +842,14 @@ describe('HA-6 homebrew library routing and tabs', () => {
             after: '<i data-ha11-after>New</i>',
           }],
           notices: [invalidation, unknownInvalidation],
-          required_choices: [], review: [],
+          required_choices: [], review: [{
+            candidate_content_key: newKey,
+            candidate_name: 'Installed Target',
+            candidate_catalog_layer: 'external',
+            reason: 'installed-target',
+            default_decision: 'match',
+            clone_name: 'Installed Target (Private copy)',
+          }],
           replaces: ['root_fields', 'traits', 'effects', 'grants', 'filled_choices'],
         }],
       };
@@ -894,9 +901,17 @@ describe('HA-6 homebrew library routing and tabs', () => {
       expect(root.querySelector('[data-ha11-character]')).toBeNull();
       expect(root.querySelector('[data-ha11-before]')).toBeNull();
       expect(root.querySelector('[data-ha11-after]')).toBeNull();
-      root.querySelectorAll('button').find(
+      const controls = root.querySelectorAll('input');
+      expect(controls).toHaveLength(3);
+      expect(controls[0]?.checked).toBe(true);
+      expect(controls[1]?.checked).toBe(false);
+      expect(controls[2]?.disabled).toBe(true);
+      const apply = root.querySelectorAll('button').find(
         (button) => button.textContent === 'Apply to all listed characters',
-      )?.click();
+      );
+      if (apply === undefined) throw new Error('Apply button missing.');
+      expect(apply.disabled).toBe(false);
+      apply.click();
       await settle();
       expect(commits).toEqual([{
         old_content_key: oldKey,

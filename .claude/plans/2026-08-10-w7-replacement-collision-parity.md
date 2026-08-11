@@ -1,32 +1,57 @@
 # W7 replacement collision parity
 
-## Reachability verdict
+## Final reachability and classification design (round 1 correction)
 
-`key-collision` is reachable in a production replacement preview. The existing
-public worker integration fixture publishes a species through
-`CatalogAuthoringService`, attaches the old species through `applyGuidedOrigin`,
-and previews the exact published successor key. The resulting
-`ReplacementPlan.review` contains a `key-collision` row.
+The original mechanical verdict was reproducible but its architectural label
+was wrong. `key-collision` was reachable on the dominant production replacement
+path only because replacement and cross-user sharing used the same
+`localContentReferenceImportNode()` construction. That factory recomputed the
+already-installed target's complete aggregate and digest, then marked the node
+as reference-only; `incomingDecisionFingerprint()` consequently discarded the
+digest under the sharing rule and `exactResolution()` classified every exact,
+asserted, non-bundled target as an unevidenced collision.
 
-This does not require a nested incoming aggregate. Replacement deliberately
-constructs one reference-only adoption node from the already-installed target.
-That node withholds incoming fingerprint evidence, so an exact asserted target
-key is classified as a key collision. Nested rules are part of the installed
-root aggregate; they do not become separate replacement review rows. The row is
-nevertheless public and currently defaults to the lossy decision, so the
-reachable branch of W7 applies.
+The final design separates the two constructions structurally:
+
+- Cross-user sharing keeps the existing foreign-reference node. It carries no
+  aggregate evidence and therefore keeps the existing `key-collision` distrust
+  policy, null default, and explicit-decision refusal.
+- Reference retarget uses a dedicated installed-target node. Its certificate is
+  opaque to callers and is minted only after the aggregate-derived fingerprint
+  agrees with the named current registry fingerprint. The projection is a
+  discriminated union, so installed-target certification and foreign evidence
+  cannot coexist on one node.
+- Registry resolution checks that the exact resolved key is the certificate's
+  local key and that its current digest still agrees. Agreement produces the
+  distinct `installed-target` review class; disagreement remains
+  `key-collision`.
+- `installed-target` retains a visible Match/Clone choice and clone name, but
+  defaults to Match. Apply is enabled immediately, so ordinary replacement is
+  one click; selecting Clone remains an explicit opt-in fork.
+
+Nested rules remain part of the installed root aggregate rather than separate
+review rows. W7's unresolved collision behavior remains reachable through a
+genuinely fingerprint-distinct/unevidenced foreign node and stays pinned at the
+unit/integration boundary.
 
 ## Verified assumptions
 
-- `planShape()` currently maps every content-import review to
-  `default_decision: 'match'`, including `key-collision`.
-- `ReplacementDecision` and the authoring RPC validator accept only `match`.
-- `matchChoices()` requires one explicit decision per review but rejects every
-  decision except `match`; it already returns the shared content-import choice
-  consumed by both plan and commit.
 - `localContentReferenceImportNode()` exposes the adoption planner's generated
   clone name and supports `clone` by reprojecting the complete locally stored
   aggregate under the chosen name.
+- `character-share.ts` is the only production caller that must retain
+  `localContentReferenceImportNode()`; `reference-retarget.ts` can move alone to
+  the installed-target factory.
+- The locally projected identity digest is already computed before
+  `referenceOnly` is attached, and the registry stores a current fingerprint by
+  kind, key, and scheme. The new certificate can therefore validate rather than
+  trust a caller assertion.
+- The installed-target constructor can verify that the incoming reference
+  currently resolves to the certified local key; alias retargets therefore
+  cannot apply a certificate belonging to a different aggregate.
+- `content-registry.ts` is a declared transitive source of the checksum-frozen
+  `reconcile_species_lineage_content_v2` migration. D226 therefore requires its
+  checksum and independent registry pin to be updated with this change.
 - `evaluateRetargetCharacter()` is the sole W4 plan/commit evaluator; this
   change does not need to modify it.
 - W4's affected pins are in `tests/integration/authoring/handlers.test.ts`,
@@ -37,41 +62,50 @@ reachable branch of W7 applies.
 
 ## Implementation
 
-1. Make `ReplacementReviewItem` a discriminated union: ordinary review reasons
-   retain a default Match, while `key-collision` has no default and carries the
-   planner-provided private-copy name. Make `ReplacementDecision` a closed
-   Match/Clone union with `clone_name` required only for Clone.
-2. Preserve one import/evaluation path. Translate the validated replacement
-   decision into the existing `ContentImportChoices`; permit Clone only for a
-   collision row and keep typed `replacement_review_required` refusal for a
-   missing, duplicate, foreign, or incompatible decision.
-3. Add a shared content-decision consequence-copy seam. Keep W3 adoption copy
-   unchanged and add honest reference-replacement wording: Match moves the
-   attached character to the installed local entry; Clone makes a renamed
-   private copy of that local entry and moves the character to it.
-4. In Review character fixes, render Match/Clone/name controls only for
-   collision rows, with no initial radio choice and the Apply button disabled
-   until every collision is resolved. Ordinary/empty plans retain one-click
-   Apply. Show the candidate name with its catalog-layer disclosure.
-5. Update every consumer and RPC exact-key validator in the same change.
+1. Split `ContentImportProjection.referenceOnly` into mutually exclusive
+   `cross-boundary` and `installed-target` variants. The latter requires an
+   opaque registry certificate and cannot carry the former's foreign shape.
+2. Keep `localContentReferenceImportNode()` as the cross-user construction.
+   Add a dedicated installed-target constructor for reference-retarget only;
+   project the complete stored aggregate, derive its identity, verify the
+   incoming reference resolves to that local key, then certify its current
+   digest and canonical bytes.
+3. Resolve installed-target references through a dedicated registry entry
+   point. Exact key + current certificate agreement returns the distinct
+   `installed-target` review class; key/digest/canonical disagreement returns
+   `key-collision`. Cross-boundary `resolveContentReference()` is unchanged.
+4. Extend replacement review typing so `installed-target` carries both
+   `default_decision: 'match'` and `clone_name`. Omitted installed-target
+   decisions use Match; Clone remains explicit. Missing genuine-collision and
+   ordinary review decisions retain `replacement_review_required`.
+5. In Review character fixes, render Match/Clone/name controls for both review
+   classes. `installed-target` starts on Match with Apply enabled; genuine
+   `key-collision` starts unresolved with Apply disabled until selected.
+   Ordinary/empty plans retain one-click Apply. Show the candidate name with its
+   catalog-layer disclosure.
+6. Repin the D226 transitive migration checksum because registry source bytes
+   changed. Do not change migration scope or behavior.
 
 ## Proof
 
-- Integration: production publish + exact replacement yields a collision with
-  `default_decision: null`; omission is typed-refused; explicit Match retargets
-  to the installed target; explicit Clone installs the complete renamed species
-  and retargets a second character to it. Alias/default Match remains pinned.
+- Integration: production publish + exact replacement yields
+  `installed-target` with default Match; one-click/default Match retargets to the
+  installed target; explicit Clone installs the complete renamed species and
+  retargets a second character to it. Alias/default Match remains pinned.
+- Genuine collision: construct a foreign or stale-certified same-key node with
+  divergent fingerprint evidence; pin null default and typed refusal when no
+  decision is supplied.
 - RPC structural: Match accepts exactly two keys; Clone accepts exactly three
   including `clone_name`; half-migrated/extra-key forms are invalid params.
-- Unit UI: collision controls start unresolved, consequence copy names the
-  attached-character effects, Apply stays disabled, and the selected Clone is
-  sent exactly; a clean plan keeps today's one-click payload.
-- Browser: the real replacement repair flow sees the collision controls, proves
-  neither choice is selected, chooses Match, applies, and continues through the
-  W4 notice/repair path.
-- Run typecheck plus only affected Vitest files and the one Playwright file on
-  `PLAYWRIGHT_PORT=5090`. Measure the browser file and record x1.5 rounded up to
-  100 ms in its evidence comment.
+- Unit UI: installed-target controls start on Match and Apply is enabled while
+  the genuine-collision controls remain unresolved/disabled; Clone consequence
+  copy and payload stay pinned.
+- Browser: the three real replacement journeys prove Match is already selected,
+  Apply is initially enabled, and one click continues through their existing
+  replacement/repair behavior.
+- Run typecheck, handlers, homebrew-library unit, catalog-layer completeness,
+  the directly affected migration-registry unit, and the three named browser
+  journeys with `PLAYWRIGHT_PORT=5090`. Do not run full suites.
 - Execute a mutation script that restores the forbidden collision default; the
   named integration test must fail, then restore byte-exact and rerun green.
 

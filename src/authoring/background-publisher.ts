@@ -351,7 +351,10 @@ export function previewBackgroundPublish(
     }),
     aggregate,
     review: Object.freeze(plan.reviews.map((review) => {
-      if (review.matchClass === 'key-collision') {
+      if (
+        review.matchClass === 'key-collision' ||
+        review.matchClass === 'installed-target'
+      ) {
         throw new BackgroundPublishError('The asserted background key already names different content.', {
           reason: 'content_key_collision', content_key: review.targetContentKey,
         });

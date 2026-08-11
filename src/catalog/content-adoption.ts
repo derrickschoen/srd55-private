@@ -23,6 +23,7 @@ import {
 import {
   ContentIdentityCollision,
   ContentIdentityKeyRefusal,
+  resolveInstalledTargetReference,
   projectContentGraphInDependencyOrder,
   registerAssertedContentIdentity,
   repairAssertedPlaceholderContentIdentityName,
@@ -32,6 +33,7 @@ import {
   resolveContentReference,
   type CatalogContentMatchDecision,
   type ContentResolution,
+  type InstalledTargetReferenceCertificate,
 } from './content-registry';
 
 export type ContentImportPlanToken = string & {
@@ -64,14 +66,19 @@ export interface ContentImportProjection<K extends ContentKind = ContentKind> {
    * byte-identical self-match being published now.
    */
   readonly allowRememberedDecision?: boolean;
-  /**
-   * A share link carries only this asserted reference, never aggregate bytes.
-   * The local candidate supplies the projection solely so Clone can copy it;
-   * Match must resolve this key through the registry's reference-only path.
-   */
-  readonly referenceOnly?: {
-    readonly contentKey: ContentKey;
-  };
+  readonly referenceOnly?:
+    | {
+        /** A share contributes a foreign reference and no aggregate evidence. */
+        readonly source: 'cross-boundary';
+        readonly contentKey: ContentKey;
+        readonly certificate?: never;
+      }
+    | {
+        /** A complete local aggregate certified against this database. */
+        readonly source: 'installed-target';
+        readonly contentKey: ContentKey;
+        readonly certificate: InstalledTargetReferenceCertificate;
+      };
   readonly install: (
     db: DatabaseContext,
     contentKey: ContentKey,
@@ -118,6 +125,7 @@ export type ContentImportMatchClass =
   | 'compatible-fingerprint'
   | 'srd-fallback'
   | 'metadata-conflict'
+  | 'installed-target'
   | 'key-collision';
 
 export interface ContentImportConflictDetail {
@@ -297,6 +305,13 @@ function incomingDecisionFingerprint(
       scheme: identity.envelope.scheme,
       digest: identity.digest,
       evidenceDigest: identity.digest,
+    });
+  }
+  if (projection.referenceOnly.source === 'installed-target') {
+    return Object.freeze({
+      scheme: projection.referenceOnly.certificate.fingerprint.scheme,
+      digest: projection.referenceOnly.certificate.fingerprint.digest,
+      evidenceDigest: projection.referenceOnly.certificate.fingerprint.digest,
     });
   }
   const parsed = parseDerivedContentKeyV1(projection.referenceOnly.contentKey);
@@ -630,6 +645,7 @@ function matchClass(resolution: ContentResolution): ContentImportMatchClass | nu
     case 'compatible-fingerprint':
     case 'srd-fallback':
     case 'metadata-conflict':
+    case 'installed-target':
     case 'key-collision':
       return resolution.matchClass;
   }
@@ -1050,10 +1066,15 @@ function evaluate(
           })
         : Object.freeze({
             identity,
-            resolution: resolveContentReference(db, {
-              kind: projection.kind,
-              contentKey: projection.referenceOnly.contentKey,
-            }),
+            resolution: projection.referenceOnly.source === 'installed-target'
+              ? resolveInstalledTargetReference(db, {
+                  contentKey: projection.referenceOnly.contentKey,
+                  certificate: projection.referenceOnly.certificate,
+                })
+              : resolveContentReference(db, {
+                  kind: projection.kind,
+                  contentKey: projection.referenceOnly.contentKey,
+                }),
           });
     } catch (error) {
       const identity = deriveProjectionIdentity(projection);

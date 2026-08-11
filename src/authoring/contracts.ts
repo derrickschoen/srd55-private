@@ -670,6 +670,11 @@ export type ReplacementReviewItem =
       readonly reason: 'key-collision';
       readonly default_decision: null;
       readonly clone_name: string;
+    })
+  | (ReplacementReviewItemBase & {
+      readonly reason: 'installed-target';
+      readonly default_decision: 'match';
+      readonly clone_name: string;
     });
 
 export type ReplacementDecision =

@@ -7,15 +7,11 @@ import {
 import { resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '../..');
-const sourcePath = resolve(root, 'src/authoring/reference-retarget.ts');
+const sourcePath = resolve(root, 'src/catalog/content-adoption.ts');
 const backupPath = resolve('/tmp', 'w7-replacement-collision-mutation.json');
 const action = process.argv[2];
-const original = `        reason: row.matchClass,
-        default_decision: null,
-        clone_name: row.cloneName,`;
-const mutant = `        reason: row.matchClass,
-        default_decision: 'match' as never, // W7_COLLISION_DEFAULT_MUTANT
-        clone_name: row.cloneName,`;
+const original = `      const defaultChoice = reviewClass === 'key-collision' ? null : 'match';`;
+const mutant = `      const defaultChoice = 'match'; // W7_COLLISION_DEFAULT_MUTANT`;
 const detector =
   'tests/integration/authoring/handlers.test.ts :: retargets exact and reviewed references through client, worker, and service without silent divergence';
 
