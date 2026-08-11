@@ -51,9 +51,9 @@ describe('directional invariants: dealt', () => {
     }
   });
 
-  it('Foreseen strikes are a Short-Rest pool: refreshing per combat, Domination day still trails Vengeance day at every level', () => {
-    // Even refreshed each combat, at most three +3s per fight cannot keep up
-    // with always-on advantage across a full day.
+  it('Foreseen strikes are a Long-Rest pool: three +3s across a whole day, so Domination day trails Vengeance day at every level', () => {
+    // Owner follow-up ruling 2026-08-11: Long Rest only. Three rescues
+    // spread over 16 rounds cannot keep up with always-on advantage.
     for (const L of [3, 6, 11, 17] as const) {
       const rng = mulberry32(1500 + L);
       const pal = sampleMeanPerRound(paladin, rng, L, 4, 1500);

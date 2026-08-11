@@ -102,11 +102,12 @@
 //   Same Dex-paladin chassis as the Vengeance comparator.
 //   L3 Foretold Authority: +1 spell save DC for 1 minute after casting Divine
 //     Smite (the window spans a whole 4-round combat here), plus Foreseen
-//     strikes: Cha-modifier (3) times per Short/Long Rest, a Reaction adds
-//     Cha (+3) to a self or allied attack roll. Modeled self-only: a miss by
-//     <=3 becomes a plain hit, once per round, refreshing every combat.
-//     (Two earlier same-day shapes were superseded by owner ruling: a
-//     +1d8 smite-vs-controlled rider, then a per-Long-Rest auto-hit pool.)
+//     strikes: Cha-modifier (3) times per Long Rest, a Reaction adds Cha
+//     (+3) to a self or allied attack roll. Modeled self-only: a miss by
+//     <=3 becomes a plain hit, once per round, pool shared across the day.
+//     (Three earlier same-day shapes were superseded by owner ruling: a
+//     +1d8 smite-vs-controlled rider, a per-Long-Rest auto-hit pool, and a
+//     Short-Rest cadence for this shape.)
 //   L7 Voice of Domination: free action + 1 Channel Divinity immediately after
 //     casting Divine Smite -> 1 minute of Bonus-Action slotless Command. The
 //     sim's level bands put it in L11/17 only (L3/6 predate it); CD uses
@@ -280,17 +281,16 @@ export function domination(
   const dcBase = ({ 3: 13, 6: 14, 11: 15, 17: 17 } as const)[L];
   const voice = L >= 11;
   const qq = [...SMITE_Q[L]].sort((a, b) => b - a);
-  // Foreseen strikes (owner ruling 2026-08-11, third batch, superseding the
-  // miss-to-hit version): Cha-modifier (3) times per SHORT or Long Rest,
-  // Reaction to add Cha mod (+3) to a self or allied attack roll. Sim models
-  // self-use only (ally use is unpriced table upside): a miss by 3 or less
-  // becomes a plain hit, at most once per round (the Reaction), nat 1 stays
-  // a miss, and the pool refreshes every combat (day mode has a Short Rest
-  // between combats).
+  // Foreseen strikes (owner rulings 2026-08-11, third batch + follow-up):
+  // Cha-modifier (3) times per LONG Rest, Reaction to add Cha mod (+3) to a
+  // self or allied attack roll. Sim models self-use only (ally use is
+  // unpriced table upside): a miss by 3 or less becomes a plain hit, at most
+  // once per round (the Reaction), nat 1 stays a miss. The pool is shared
+  // across the whole day.
+  let strikes = 3;
   let dealt = 0;
   let prevented = 0;
   for (let c = 0; c < nc; c++) {
-    let strikes = 3;
     let advNext = false;
     let smited = false;
     for (let rnd = 0; rnd < 4; rnd++) {
