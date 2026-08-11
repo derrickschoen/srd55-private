@@ -101,9 +101,10 @@
 // as redesigned by owner ruling 2026-08-11 — see rulings.md):
 //   Same Dex-paladin chassis as the Vengeance comparator.
 //   L3 Foretold Authority: +1 spell save DC for 1 minute after casting Divine
-//     Smite, and smites deal +1d8 vs a creature that failed a save against the
-//     paladin's spell within the last minute. Both windows span a whole
-//     4-round combat here.
+//     Smite (the window spans a whole 4-round combat here), plus Foreseen
+//     strikes: Cha-modifier (3) times per Long Rest, a missed attack becomes
+//     a plain hit. An earlier +1d8 smite-vs-controlled rider was removed the
+//     same day by owner ruling ("too complicated").
 //   L7 Voice of Domination: free action + 1 Channel Divinity immediately after
 //     casting Divine Smite -> 1 minute of Bonus-Action slotless Command. The
 //     sim's level bands put it in L11/17 only (L3/6 predate it); CD uses
@@ -263,8 +264,9 @@ export function domination(
   // Voice requires a smite THIS combat (activation is smite-triggered and the
   // 1-minute duration covers one combat); a dry queue therefore means no
   // slotless Commands in the day-mode tail — those rounds are attacks only.
-  // Foretold Authority: `smited` opens the +1 DC window; `controlled` (a
-  // failed save this combat) arms the +1d8 smite rider.
+  // Foretold Authority: `smited` opens the +1 DC window. (The +1d8 smite
+  // rider from the first redesign batch was removed by owner ruling the same
+  // day: "too complicated".)
   // A failed Grovel save ends the enemy's turn: the lost turn is sampled into
   // the prevented channel, and next round's melee attacks have Advantage.
   const wb = WB[L];
@@ -276,12 +278,16 @@ export function domination(
   const dcBase = ({ 3: 13, 6: 14, 11: 15, 17: 17 } as const)[L];
   const voice = L >= 11;
   const qq = [...SMITE_Q[L]].sort((a, b) => b - a);
+  // Foreseen strikes (owner ruling 2026-08-11, second batch): Cha-modifier
+  // times per Long Rest (Cha 16 flat -> 3), turn a missed attack into a hit.
+  // The converted hit is not a crit. Encoded heuristic: convert when no
+  // attack has hit yet this round (keeps the round - and its smite - alive).
+  let strikes = 3;
   let dealt = 0;
   let prevented = 0;
   for (let c = 0; c < nc; c++) {
     let advNext = false;
     let smited = false;
-    let controlled = false;
     for (let rnd = 0; rnd < 4; rnd++) {
       const adv = advNext;
       advNext = false;
@@ -306,21 +312,23 @@ export function domination(
       for (let i = 0; i < natk; i++) {
         const r = roll(rng, adv);
         const crit = r === 20;
-        if (r === 1 || (r + hit < ac && !crit)) continue;
+        let miss = r === 1 || (r + hit < ac && !crit);
+        if (miss && strikes > 0 && hits.length === 0) {
+          strikes -= 1; // Foreseen strike: the miss becomes a plain hit
+          miss = false;
+        }
+        if (miss) continue;
         dealt += d(rng, crit ? 2 : 1, 6) + mod + d(rng, rad * (crit ? 2 : 1), 8);
         hits.push(crit);
       }
       if (!command && qq.length > 0 && hits.length > 0) {
         const sm = qq.shift() as number;
-        const mul = hits.some(Boolean) ? 2 : 1;
-        dealt += d(rng, sm * mul, 8);
-        if (controlled) dealt += d(rng, mul, 8); // Foretold Authority rider
+        dealt += d(rng, sm * (hits.some(Boolean) ? 2 : 1), 8);
         smited = true; // opens +1 DC; at 11/17 this is the Voice activation
       } else if (command) {
         const dc = dcBase + (smited ? 1 : 0);
         if (randInt(rng, 20) + 2 < dc) {
           advNext = true;
-          controlled = true;
           prevented += enemyTurnDamage(rng, L);
         }
       }

@@ -30,12 +30,29 @@ describe('known-probability micro-check: a lone d20 test against a fixed AC', ()
 });
 
 describe('directional invariants: dealt', () => {
-  it('Vengeance Paladin dealt > Domination (smite-only) dealt at L3-11 burst', () => {
+  it('Foreseen strikes flip the L3 burst: Domination (smite-only) > Vengeance there, Vengeance still ahead at L6-11', () => {
+    // Owner ruling 2026-08-11 (second batch): Cha-mod (3) misses per Long
+    // Rest become hits. Three conversions concentrated into one 4-round
+    // combat outweigh Vow of Enmity's advantage at L3 (few attacks, low
+    // accuracy); by L6+ the paladin's own attack volume dilutes them and
+    // Vengeance leads again. Both directions are structural, not tuned.
     for (const L of [3, 6, 11] as const) {
       const rng = mulberry32(1000 + L);
       const pal = sampleMeanPerRound(paladin, rng, L, 1, 6000);
       const dom = sampleMeanPerRound((r, L2, nc) => domination(r, L2, nc, 'smite'), rng, L, 1, 6000);
       expect(differsBySigma(pal, dom, 4)).toBe(true);
+      if (L === 3) expect(dom.mean).toBeGreaterThan(pal.mean);
+      else expect(pal.mean).toBeGreaterThan(dom.mean);
+    }
+  });
+
+  it('Foreseen strikes are a Long-Rest pool: Domination day per-round trails Vengeance day at every level', () => {
+    // The same 3 conversions spread over 16 rounds cannot keep up with
+    // always-on advantage; day mode restores the old ordering everywhere.
+    for (const L of [3, 6, 11, 17] as const) {
+      const rng = mulberry32(1500 + L);
+      const pal = sampleMeanPerRound(paladin, rng, L, 4, 1500);
+      const dom = sampleMeanPerRound((r, L2, nc) => domination(r, L2, nc, 'smite'), rng, L, 4, 1500);
       expect(pal.mean).toBeGreaterThan(dom.mean);
     }
   });
