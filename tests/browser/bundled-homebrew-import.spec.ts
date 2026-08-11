@@ -96,7 +96,9 @@ test('imports bundled homebrew through publish, applies derived third-caster slo
   await homebrewReady(page);
   for (const name of [
     'Veteran',
+    'Veteran (Bundled revision 2)',
     'Warrior of the Barbed Court',
+    'Warrior of the Barbed Court (Bundled revision 2)',
     'Spell Student',
     'Spell Student (Bundled revision 2)',
   ]) {
@@ -282,7 +284,9 @@ test('imports bundled homebrew through publish, applies derived third-caster slo
   await homebrewReady(page);
   for (const name of [
     'Veteran',
+    'Veteran (Bundled revision 2)',
     'Warrior of the Barbed Court',
+    'Warrior of the Barbed Court (Bundled revision 2)',
     'Spell Student',
     'Spell Student (Bundled revision 2)',
   ]) {

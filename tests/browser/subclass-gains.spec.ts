@@ -125,7 +125,7 @@ test('S2-3 names bundled and published-homebrew subclass arrivals from their sto
     });
     const veteranRows = await window.staticApp.inspectRows(
       'subclass_definitions',
-      { name: 'Veteran' },
+      { name: 'Veteran (Bundled revision 2)' },
     );
     const veteranKey = veteranRows[0]?.['content_key'];
     if (typeof veteranKey !== 'string' || veteranKey.length === 0) {
@@ -179,7 +179,7 @@ test('S2-3 names bundled and published-homebrew subclass arrivals from their sto
     `[${rogueSeam.panelAttribute}="${rogueSeam.panels.gains}"]`,
   );
   await expect(rogueGains).toContainText("Veteran's Strike");
-  await expect(rogueGains).toContainText('Sneak Attack damage dice are doubled');
+  await expect(rogueGains).toContainText('Sneak Attack dice equal your Rogue level');
   await expect(rogueGains).toContainText('Extensive Experience');
   await expect(rogueGains).toContainText('Homebrew · external layer');
   await expect(rogueGains.getByText('Subclass feature', { exact: true }))

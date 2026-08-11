@@ -387,8 +387,12 @@ describe('level-up wizard state RPC', () => {
     ).toMatchObject({ kind: 'committed' });
     const veteranKey = String(
       harness.context.db.scalar(
-        `SELECT content_key FROM subclass_definitions
-         WHERE name = 'Veteran'`,
+        `SELECT subclass.content_key FROM subclass_definitions AS subclass
+         JOIN catalog_content_identities AS identity
+           ON identity.content_kind = 'subclass'
+          AND identity.content_key = subclass.content_key
+         WHERE subclass.name = 'Veteran (Bundled revision 2)'
+           AND identity.catalog_layer = 'external'`,
       ),
     );
     const rogueCharacterId = createCharacter('Published Veteran Arrival');
@@ -413,7 +417,7 @@ describe('level-up wizard state RPC', () => {
           catalog_layer: 'external',
           rules_text: {
             kind: 'stored',
-            text: expect.stringContaining('Sneak Attack damage dice are doubled'),
+            text: expect.stringContaining('Sneak Attack dice equal your Rogue level'),
           },
         },
         {
@@ -821,8 +825,8 @@ describe('level-up wizard state RPC', () => {
 
     for (const [className, expectedNames] of [
       ['Fighter', ['Champion', 'Spell Student (Bundled revision 2)']],
-      ['Monk', ['Warrior of the Barbed Court', 'Warrior of the Open Hand']],
-      ['Rogue', ['Thief', 'Veteran']],
+      ['Monk', ['Warrior of the Barbed Court (Bundled revision 2)', 'Warrior of the Open Hand']],
+      ['Rogue', ['Thief', 'Veteran (Bundled revision 2)']],
     ] as const) {
       const characterId = createCharacter(`${className} Imported Choices`);
       const definitionId = enterClass(characterId, className);

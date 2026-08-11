@@ -32,8 +32,7 @@ export function deriveThirdCasterSlotCounts(
   classLevel: CharacterLevel,
   table: typeof MULTICLASS_SPELLCASTER_TABLE = MULTICLASS_SPELLCASTER_TABLE,
 ): readonly number[] {
-  const casterLevel = Math.floor(classLevel / 3);
-  return casterLevel === 0 ? zeroSlots() : [...table[casterLevel - 1]!];
+  return deriveThirdCasterSlotCountsForRounding(classLevel, 'down', table);
 }
 
 function maximumSpellLevel(slots: readonly number[]): number {
@@ -46,12 +45,16 @@ function maximumSpellLevel(slots: readonly number[]): number {
 function thirdCasterRows(input: {
   readonly cantripsKnown: (level: CharacterLevel) => number;
   readonly spellsKnown: (level: CharacterLevel) => number;
+  readonly rounding?: 'up' | 'down';
   readonly grants?: (
     level: CharacterLevel,
   ) => SubclassAuthoringDraftProgressionRow['grants'];
 }): readonly SubclassAuthoringDraftProgressionRow[] {
   return characterLevels.map((classLevel) => {
-    const slots = deriveThirdCasterSlotCounts(classLevel);
+    const slots = deriveThirdCasterSlotCountsForRounding(
+      classLevel,
+      input.rounding ?? 'down',
+    );
     return Object.freeze({
       class_level: classLevel,
       cantrips_known: input.cantripsKnown(classLevel),
@@ -61,6 +64,19 @@ function thirdCasterRows(input: {
       grants: Object.freeze(input.grants?.(classLevel) ?? []),
     });
   });
+}
+
+function deriveThirdCasterSlotCountsForRounding(
+  classLevel: CharacterLevel,
+  rounding: 'up' | 'down',
+  table: typeof MULTICLASS_SPELLCASTER_TABLE = MULTICLASS_SPELLCASTER_TABLE,
+): readonly number[] {
+  // Barbed Court's later owner publication chooses up; both paths still apply
+  // the stated fraction to the SRD table rather than transcribing a ladder.
+  if (classLevel < 3) return zeroSlots();
+  const fraction = classLevel / 3;
+  const casterLevel = rounding === 'up' ? Math.ceil(fraction) : Math.floor(fraction);
+  return casterLevel === 0 ? zeroSlots() : [...table[casterLevel - 1]!];
 }
 
 function fixedSpellGrant(
@@ -98,6 +114,25 @@ function spellStudentChoiceGrant(
   });
 }
 
+function barbedCourtChoiceGrant(
+  classLevel: CharacterLevel,
+  kind: 'cantrips' | 'prepared-spells',
+  count: number,
+  maximumSpellLevel: number,
+): NonNullable<SubclassAuthoringDraftProgressionRow['grants']>[number] {
+  return Object.freeze({
+    kind: 'choice_from_list' as const,
+    draft_item_uuid: itemUuid(
+      `bundled-barbed-${kind}-${String(classLevel)}`,
+    ),
+    rule_key: `barbed-court-${kind}`,
+    list: 'Bard',
+    count,
+    minimum_spell_level: kind === 'cantrips' ? 0 : 1,
+    maximum_spell_level: kind === 'cantrips' ? 0 : maximumSpellLevel,
+  });
+}
+
 const barbedCourtGrants = Object.freeze(new Map<CharacterLevel, readonly NonNullable<
   SubclassAuthoringDraftProgressionRow['grants']
 >[number][]>([
@@ -124,7 +159,7 @@ const barbedCourtGrants = Object.freeze(new Map<CharacterLevel, readonly NonNull
   ]],
 ]));
 
-const veteran: SubclassAuthoringDraft = Object.freeze<SubclassAuthoringDraft>({
+const veteranV1: SubclassAuthoringDraft = Object.freeze<SubclassAuthoringDraft>({
   kind: 'subclass',
   document_version: 1,
   name: 'Veteran',
@@ -175,7 +210,7 @@ const veteran: SubclassAuthoringDraft = Object.freeze<SubclassAuthoringDraft>({
   })),
 });
 
-const barbedCourt: SubclassAuthoringDraft = Object.freeze<SubclassAuthoringDraft>({
+const barbedCourtV1: SubclassAuthoringDraft = Object.freeze<SubclassAuthoringDraft>({
   kind: 'subclass',
   document_version: 1,
   name: 'Warrior of the Barbed Court',
@@ -226,6 +261,162 @@ const barbedCourt: SubclassAuthoringDraft = Object.freeze<SubclassAuthoringDraft
     name: String(name),
     description: String(description),
     effects: Object.freeze([]),
+  })),
+});
+
+const veteranV2: SubclassAuthoringDraft = Object.freeze<SubclassAuthoringDraft>({
+  kind: 'subclass',
+  document_version: 1,
+  name: 'Veteran',
+  rules_edition: '2024',
+  reference_text: 'Veterans survive through practiced technique, broad experience, and the ability to perform reliably under pressure. Some are retired soldiers, seasoned scouts, professional adventurers, bounty hunters, or survivors who have learned a little about nearly everything. A Veteran rarely relies on luck: their attacks find vulnerable openings even when they fall short, and their years of experience eventually make them capable in almost any situation.',
+  parent_class_content_key: '2024:class:rogue' as ContentKey,
+  progression: { mode: 'inherit_parent' },
+  features: [
+    [3, 'Seasoned Professional', 'You gain proficiency in one skill of your choice.'],
+    [3, 'Old Training', 'You gain the Two-Weapon Fighting feat. For any feature or feat that requires the Fighting Style Feature as a prerequisite, this feature satisfies it.'],
+    [3, 'Deeper Cuts', 'Your Sneak Attack deals one extra die of damage.'],
+    [3, 'Old Reserves', [
+      'When you deal Sneak Attack damage, you can draw on your reserves (no action required, after seeing the damage roll): add a number of d6s to that damage equal to half your Rogue level (round down). These dice are of the same damage type as the Sneak Attack, are doubled by a critical hit, and can be rerolled by Deuces Are Wild. Because Sure Strike is not Sneak Attack damage, Old Reserves can\'t be added to it. Once you use this feature, you can\'t use it again until you finish a Short or Long Rest.',
+    ].join('\n\n')],
+    [3, 'Too Old for This', 'You can deal Sneak Attack damage only on your turn. You can\'t apply Sneak Attack on Reactions or any effect outside your turn.'],
+    [3, 'Deuces Are Wild', 'When you roll damage for a weapon attack, Sneak Attack, Old Reserves, or Sure Strike, you can reroll each damage die that shows a 2, once per die. You must use the new rolls.'],
+    [3, 'Sure Strike', [
+      'Once per turn, when you miss a creature with an attack using a Finesse or Ranged weapon, you can choose to expend your Sneak Attack for the turn (no action required): the target takes damage equal to half your Sneak Attack dice, rounded up, of the weapon\'s damage type.',
+      'You must be able to see the target, and the attack must not have been made with Disadvantage. On any turn you can deal Sneak Attack damage or use Sure Strike, but never both — using either expends the turn\'s Sneak Attack.',
+    ].join('\n\n')],
+    [9, "Veteran's Strike", 'Your Sneak Attack dice equal your Rogue level (9d6 at 9th level, 20d6 at 20th). This replaces Deeper Cuts.'],
+    [9, 'Extensive Experience', 'You gain proficiency in two skills of your choice. In addition, choose two of your skill proficiencies: you gain Expertise in those skills. You can choose skills in which you gained proficiency from this feature.'],
+    [13, 'Veteran Reflexes', [
+      'When a creature you can see hits you with an attack, you can take a Reaction to increase your Armor Class by an amount equal to your Proficiency Bonus against that attack, potentially causing it to miss.',
+      'You can use this feature a number of times equal to your Proficiency Bonus, and you regain all expended uses when you finish a Long Rest.',
+    ].join('\n\n')],
+    [13, 'Critical Instincts', 'Your weapon attacks score a critical hit on a roll of 19–20.'],
+    [13, 'Fighting Style', 'You gain one Fighting Style feat of your choice. You can\'t take the same feat Old Training granted.'],
+    [17, 'Master of Experience', 'You gain proficiency in every skill in which you don\'t already have proficiency. You gain Expertise in every skill in which you don\'t already have Expertise.'],
+    [17, 'Heightened Lethality', 'Your weapon attacks score a critical hit on a roll of 18–20. This replaces Critical Instincts.'],
+    [17, 'Blindsight', 'You gain Blindsight out to a range of 10 feet.'],
+  ].map(([level, name, description], index) => Object.freeze({
+    draft_item_uuid: itemUuid(`bundled-veteran-v2-feature-${String(index + 1)}`),
+    class_level: level as CharacterLevel,
+    name: String(name),
+    description: String(description),
+    effects: Object.freeze([]),
+  })),
+});
+
+const barbedCourtV2FixedGrants = Object.freeze(new Map<CharacterLevel, readonly NonNullable<
+  SubclassAuthoringDraftProgressionRow['grants']
+>[number][]>([
+  [3, [
+    fixedSpellGrant('Shocking Grasp', 'shocking-grasp'),
+    fixedSpellGrant('Chill Touch', 'chill-touch'),
+    fixedSpellGrant('Ray of Frost', 'ray-of-frost'),
+    fixedSpellGrant('Vicious Mockery', 'vicious-mockery'),
+    fixedSpellGrant('Mage Hand', 'mage-hand'),
+    fixedSpellGrant('Guidance', 'guidance'),
+    fixedSpellGrant('Shield', 'shield'),
+    fixedSpellGrant('Dissonant Whispers', 'dissonant-whispers'),
+  ]],
+  [6, [
+    fixedSpellGrant('Mirror Image', 'mirror-image'),
+    fixedSpellGrant('Blur', 'blur'),
+    fixedSpellGrant('Hold Person', 'hold-person'),
+  ]],
+  [11, [
+    fixedSpellGrant('Slow', 'slow'),
+    fixedSpellGrant('Fear', 'fear'),
+  ]],
+  [17, [fixedSpellGrant('Compulsion', 'compulsion')]],
+]));
+
+const barbedCourtChosenSpellCounts = Object.freeze(new Map<CharacterLevel, number>([
+  [3, 4], [4, 5], [5, 6], [6, 6], [7, 7], [8, 7], [9, 9], [10, 9],
+  [11, 10], [12, 10], [13, 11], [14, 11], [15, 12], [16, 12],
+  [17, 14], [18, 14], [19, 15], [20, 15],
+]));
+
+const barbedCourtV2: SubclassAuthoringDraft = Object.freeze<SubclassAuthoringDraft>({
+  kind: 'subclass',
+  document_version: 1,
+  name: 'Warrior of the Barbed Court',
+  rules_edition: '2024',
+  reference_text: 'Somewhere between a duelist\'s salon and a haunted etiquette lesson lies the Barbed Court, a monastic tradition that treats the insult as a martial form. Its monks fight surrounded by an invisible retinue — spectral hands that slap, beckon, and humiliate — and every technique is a provocation: the goad that makes ignoring you unbearable, the duel that binds an enemy\'s pride to your fists, the barbed word that lands harder than the blow. A Warrior of the Barbed Court wins by being impossible to disregard. Enemies who attack you meet mirror-images, warded air, and a wall of unseen palms; enemies who dare attack anyone else are slapped back into line.',
+  parent_class_content_key: '2024:class:monk' as ContentKey,
+  progression: {
+    mode: 'override',
+    spellcasting_ability: 'wisdom',
+    caster_contribution: 'third_up',
+    rows: thirdCasterRows({
+      rounding: 'up',
+      cantripsKnown: (level) => level < 3 ? 0 : 8,
+      spellsKnown: (level) => barbedCourtChosenSpellCounts.get(level) ?? 0,
+      grants: (level) => {
+        if (level < 3) return [];
+        const slots = deriveThirdCasterSlotCountsForRounding(level, 'up');
+        return [
+          barbedCourtChoiceGrant(level, 'cantrips', 2, 0),
+          barbedCourtChoiceGrant(
+            level,
+            'prepared-spells',
+            barbedCourtChosenSpellCounts.get(level) ?? 0,
+            maximumSpellLevel(slots),
+          ),
+          ...(barbedCourtV2FixedGrants.get(level) ?? []),
+        ];
+      },
+    }),
+  },
+  features: [
+    [3, 'Barbed Court Spellcasting', [
+      'You have learned to cast spells through the discipline of the Court. See the rules on spellcasting; the information below details how you use them with this subclass.',
+      'Cantrips. You know Shocking Grasp, Chill Touch, Ray of Frost, Vicious Mockery, Mage Hand, and Guidance, plus two Bard cantrips of your choice.',
+      'Spell Slots. The Barbed Court Spellcasting table shows how many spell slots you have to cast your level 1+ spells. You regain all expended slots when you finish a Long Rest.',
+      'Prepared Spells. Choose spells from the Bard spell list. The Chosen Spells column shows how many you can have prepared; they must be of a level for which you have spell slots. Whenever you finish a Long Rest, you can change your list of prepared spells. Whenever you finish a Short Rest, you can replace one prepared spell.',
+      'Court Spells. You always have the spells on the Court Spells table prepared once you reach the listed level; they don\'t count against your Chosen Spells.',
+      'Ritual Casting. You can cast a prepared spell as a Ritual if it has the Ritual tag.',
+      'Spellcasting Ability. Wisdom is your spellcasting ability for these spells. Your spell save DC is your Focus save DC; your spell attack modifier is your Wisdom modifier + your Proficiency Bonus.',
+    ].join('\n\n')],
+    [3, 'Court Cantrips', 'When you spend one or more Focus Points, you can cast one cantrip you know that has a casting time of an Action as part of that expenditure (no action required). You can cast a cantrip this way only once per turn.'],
+    [3, 'Barbed Goad', [
+      'When you hit a creature with a melee attack, you can spend 1 Focus Point to goad it into a duel — an insult spoken aloud, or delivered as a slap, sneer, or gesture. For 1 minute, the goaded creature has Disadvantage on attack rolls against creatures other than you. When it tries to move more than 30 feet away from you, it must first succeed on a Wisdom saving throw against your Focus save DC; on a failed save, it can\'t willingly move more than 30 feet away from you until the start of its next turn.',
+      'The effect ends early on a goaded creature if you attack a creature you have not goaded, if one of your allies damages it or targets it with a harmful spell, or when it succeeds on the withdrawal save. You can have more than one creature goaded at a time.',
+    ].join('\n\n')],
+    [3, 'Faces of the Court', 'You can cast Mirror Image without expending a spell slot, using Wisdom as the spellcasting ability, a number of times equal to your Proficiency Bonus. You regain all expended uses when you finish a Long Rest.'],
+    [3, 'Wisdom-Guided Strikes', 'You can use your Wisdom modifier in place of Strength or Dexterity for the attack and damage rolls of your Unarmed Strikes.'],
+    [3, "Courtier's Slap", [
+      'Once on each of your turns when you take the Attack action and make an Unarmed Strike, you can also have a spectral hand appear and slap one creature within 10 feet of you as part of that action; the hand then vanishes. If the target is within 5 feet of you, the slap is an Unarmed Strike; against a farther target, it is a ranged weapon attack that uses your Wisdom modifier for its attack and damage rolls. On a hit, the target takes Psychic damage equal to one roll of your Martial Arts die + your Wisdom modifier, and its Speed is reduced by 10 feet until the start of your next turn.',
+      'The slap works whether or not your Mage Hand is present and doesn\'t require your Bonus Action.',
+    ].join('\n\n')],
+    [3, 'The Standing Hand', 'When you cast Mage Hand, its duration is 8 hours, and the hand can deliver your insults — a goad\'s slap, sneer, or gesture can visibly come from the hand. While your Mage Hand is present, the Unarmed Strikes you make as part of the Attack action have a reach of 10 feet, delivered by the hand.'],
+    [3, 'Innate Sorcery of the Court', 'You can spend 2 Focus Points (no action required) to unleash the Court\'s simmering magic for 1 minute: the spell save DC of your Barbed Court spells increases by 1, and you have Advantage on the attack rolls of Barbed Court spells you cast. The effect doesn\'t stack with itself; activating it again restarts the duration.'],
+    [6, 'Warding Image', 'An illusory after-image attends you: you gain a +2 bonus to Armor Class.'],
+    [6, 'Unshaken Aim', 'Being within 5 feet of an enemy doesn\'t impose Disadvantage on your ranged attack rolls.'],
+    [6, 'Barbed Fists', 'Your Unarmed Strikes gain a +1 bonus to attack and damage rolls. The bonus becomes +2 at Monk level 11 and +3 at Monk level 17. If a magic item gives your Unarmed Strike a bonus to the same roll, use the higher bonus.'],
+    [6, 'Focus Refresh', 'You can spend Focus Points to regain one of your expended spell slots (no action required). The cost is 2 Focus Points per level of the slot regained.'],
+    [11, 'Hands of the Barbed Court', [
+      'As a Bonus Action, you can spend 4 Focus Points to manifest the full court — a 15-foot Emanation of invisible slapping hands — for up to 10 minutes. The effect requires Concentration. While the court is manifested, when you hit a creature in the Emanation with an attack, the hands add Psychic damage equal to your Wisdom modifier to the hit.',
+      'At Monk level 17 the court matures: the hands\' extra damage increases to twice your Wisdom modifier, and the court guides your aim — you have Advantage on attack rolls against creatures in the Emanation.',
+    ].join('\n\n')],
+    [17, 'Focus-Casting', 'You can cast any spell you have prepared that has a casting time of an Action by spending Focus Points equal to the spell\'s level instead of a spell slot. A spell cast by spending Focus Points is always cast at its base level.'],
+    [17, 'The Rebuking Shield', [
+      'When you roll Initiative, you can manifest the Hands of the Barbed Court as a Reaction (spending its normal 4 Focus Points; manifesting as a Bonus Action remains available).',
+      'Whenever you manifest the Hands — at Initiative or as a Bonus Action — you can spend 3 additional Focus Points to raise the Rebuking Shield: for as long as the court remains manifested, a creature that hits you with a melee attack takes 2d8 Psychic damage, and you are immune to the Charmed and Frightened conditions and to Psychic damage. The shield is visible only as a shimmer of affronted dignity. This is a subclass feature, not spellcasting — no spell slot, no components, and it can\'t be counterspelled. The shield ends when the manifestation ends (including if your Concentration is broken).',
+    ].join('\n\n')],
+  ].map(([level, name, description], index) => Object.freeze({
+    draft_item_uuid: itemUuid(`bundled-barbed-v2-feature-${String(index + 1)}`),
+    class_level: level as CharacterLevel,
+    name: String(name),
+    description: String(description),
+    effects: name === 'Warding Image'
+      ? Object.freeze([Object.freeze({
+          kind: 'armor_class_bonus' as const,
+          draft_item_uuid: itemUuid('bundled-barbed-v2-warding-image-ac'),
+          label: 'Warding Image',
+          notes: null,
+          amount: 2,
+        })])
+      : Object.freeze([]),
   })),
 });
 
@@ -288,8 +479,14 @@ const spellStudentV1 = spellStudentRevision(false);
 const spellStudentV2 = spellStudentRevision(true);
 
 export const BUNDLED_HOMEBREW_CATALOG = Object.freeze([
-  Object.freeze({ catalog_key: 'veteran', revisions: Object.freeze([veteran] as const) }),
-  Object.freeze({ catalog_key: 'warrior-of-the-barbed-court', revisions: Object.freeze([barbedCourt] as const) }),
+  Object.freeze({
+    catalog_key: 'veteran',
+    revisions: Object.freeze([veteranV1, veteranV2] as const),
+  }),
+  Object.freeze({
+    catalog_key: 'warrior-of-the-barbed-court',
+    revisions: Object.freeze([barbedCourtV1, barbedCourtV2] as const),
+  }),
   Object.freeze({
     catalog_key: 'spell-student',
     revisions: Object.freeze([spellStudentV1, spellStudentV2] as const),

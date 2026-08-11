@@ -31,30 +31,70 @@ function plain(source: string): string {
   return source
     .replaceAll(/\[([^\]]+)\]\([^\)]+\)/g, '$1')
     .replaceAll(/[*_]/g, '')
+    .replaceAll(/[¹²³⁴⁵⁶⁷]/gu, '')
     .split(/\n{2,}/u)
     .map((paragraph) => paragraph.replaceAll(/\s*\n\s*/g, ' '))
     .join('\n\n')
     .trim();
 }
 
-function featureProse(
-  source: string,
-  sectionHeading: string,
-  nextHeading: string,
-): ReadonlyMap<string, string> {
-  const body = section(source, sectionHeading, nextHeading);
+function publicationIdentity(source: string, subtitle: string): string {
+  const front = section(source, subtitle, '\n\n---');
+  const match = /^\*(?<identity>[\s\S]*?)\*(?:\n\n|$)/u.exec(front);
+  if (match?.groups?.identity === undefined) {
+    throw new Error(`Missing publication identity after ${subtitle}.`);
+  }
+  return plain(match.groups.identity);
+}
+
+function publicationFeatureProse(source: string): ReadonlyMap<string, string> {
+  const firstRule = source.indexOf('\n---\n');
+  const footnotes = source.indexOf('\n### Footnotes — provenance');
+  if (firstRule < 0 || footnotes < 0) throw new Error('Missing publication feature bounds.');
+  const body = source.slice(firstRule + '\n---\n'.length, footnotes);
   const found = new Map<string, string>();
-  const matches = [...body.matchAll(/^### Level \d+: (?<name>.+)$/gmu)];
+  const matches = [...body.matchAll(/^## Level \d+: (?<name>.+)$/gmu)];
   for (const [index, match] of matches.entries()) {
     const contentStart = (match.index ?? 0) + match[0].length;
     const contentEnd = matches[index + 1]?.index ?? body.length;
-    const prose = body.slice(contentStart, contentEnd).trim()
-      .split('\n\n')
-      .filter((paragraph) => !/^(?:OWNER-APPROVAL|FROZEN BAKE-OFF ENGINE):/u.test(paragraph))
-      .join('\n\n');
+    const prose = body.slice(contentStart, contentEnd)
+      .replaceAll(/^---$/gmu, '')
+      .trim();
     found.set(match.groups!.name!, plain(prose));
   }
   return found;
+}
+
+function barbedSpellcastingProse(source: string): string {
+  const body = section(source, '## Level 3: Barbed Court Spellcasting', '### Court Spells');
+  const labels = [
+    'Cantrips', 'Spell Slots', 'Prepared Spells', 'Court Spells',
+    'Ritual Casting', 'Spellcasting Ability',
+  ];
+  const firstLabel = body.indexOf('**Cantrips.**');
+  if (firstLabel < 0) throw new Error('Missing Barbed Court cantrip prose.');
+  const paragraphs = [plain(body.slice(0, firstLabel))];
+  for (const label of labels) {
+    const match = new RegExp(
+      `\\*\\*${label}\\.\\*\\* (?<prose>.*?)(?:\\n\\n|$)`,
+      'su',
+    ).exec(body);
+    if (match?.groups?.prose === undefined) throw new Error(`Missing ${label} prose.`);
+    paragraphs.push(`${label}. ${plain(match.groups.prose)}`);
+  }
+  return paragraphs.join('\n\n');
+}
+
+function markdownTable(
+  source: string,
+  heading: string,
+  nextHeading: string,
+): readonly (readonly string[])[] {
+  return section(source, heading, nextHeading)
+    .split('\n')
+    .filter((line) => /^\|.*\|$/u.test(line))
+    .slice(2)
+    .map((line) => line.slice(1, -1).split('|').map((cell) => plain(cell)));
 }
 
 function catalogSubclass(key: string): SubclassAuthoringDraft {
@@ -65,68 +105,116 @@ function catalogSubclass(key: string): SubclassAuthoringDraft {
 }
 
 describe('bundled homebrew catalog payload', () => {
-  it('matches Veteran identity and feature prose independently from the authoritative markdown', () => {
-    const source = markdown('docs/homebrew/cc-by/2026-08-04-rogue-veteran-subclass.md');
-    const identity = section(source, "Owner's text, verbatim:", '## 2. Schedule');
-    const features = featureProse(source, '## 3. Subclass Features (owner rules text, verbatim)', '## 4. Wording Notes');
+  it('matches the Veteran player publication while retaining the historical revision', () => {
+    const source = markdown('docs/homebrew/cc-by/veteran-player.md');
+    const identity = publicationIdentity(source, '*Rogue Subclass (Roguish Archetype)*');
+    const features = publicationFeatureProse(source);
     const veteran = catalogSubclass('veteran');
+    const entry = BUNDLED_HOMEBREW_CATALOG.find((candidate) => candidate.catalog_key === 'veteran');
 
-    expect(veteran.reference_text).toBe(plain(identity));
+    expect(entry?.revisions).toHaveLength(2);
+    expect(entry?.revisions[0]?.kind === 'subclass'
+      ? entry.revisions[0].features.find((feature) => feature.name === "Veteran's Strike")?.description
+      : null).toContain('doubled');
+    expect(veteran.reference_text).toBe(identity);
     expect(Object.fromEntries(veteran.features.map((feature) => [feature.name, feature.description])))
       .toEqual(Object.fromEntries(features));
   });
 
-  it('matches Barbed Court prose and publishes its complete Wisdom third-caster grants', () => {
-    const source = markdown('docs/homebrew/cc-by/2026-08-03-monk-barbed-court.md');
-    const identity = section(source, 'OWNER-APPROVAL: Identity paragraph and ancestry disclosure.', '## 2. Level 3: Barbed Court Spellcasting');
-    const features = featureProse(source, '## 3. Subclass Features', '## 4. Power-Budget Worksheet');
-    const spellcasting = ['Cantrips', 'Prepared Spells', 'Spell Slots', 'Spellcasting Ability']
-      .map((label) => {
-        const match = new RegExp(
-          `\\*\\*${label}\\.\\*\\* (?<prose>.*?)(?:\\n\\n|$)`,
-          'su',
-        ).exec(source);
-        if (match?.groups?.prose === undefined) throw new Error(`Missing ${label} prose.`);
-        return plain(match.groups.prose);
-      }).join('\n\n');
+  it('matches the Barbed Court player publication and its complete Wisdom third-caster grants', () => {
+    const source = markdown('docs/homebrew/cc-by/warrior-of-the-barbed-court-player.md');
+    const identity = publicationIdentity(source, '*Monk Subclass (Monastic Tradition)*');
+    const features = new Map(publicationFeatureProse(source));
+    features.set('Barbed Court Spellcasting', barbedSpellcastingProse(source));
     const barbed = catalogSubclass('warrior-of-the-barbed-court');
     const actual = Object.fromEntries(barbed.features.map((feature) => [feature.name, feature.description]));
+    const progressionTable = markdownTable(
+      source,
+      '### Barbed Court Spellcasting',
+      '## Level 3: Court Cantrips',
+    );
+    const courtSpellTable = markdownTable(
+      source,
+      '### Court Spells',
+      '### Barbed Court Spellcasting',
+    );
+    const zeroes = [0, 0, 0, 0, 0, 0, 0, 0, 0] as const;
+    const expectedSlots = [zeroes, zeroes, ...progressionTable.map((row) => [
+      ...row.slice(2).map((cell) => cell === '—' ? 0 : Number(cell)),
+      0, 0, 0, 0, 0,
+    ])];
+    const expectedChosen = [0, 0, ...progressionTable.map((row) => Number(row[1]))];
 
-    expect(barbed.reference_text).toBe(plain(identity));
-    expect(actual).toEqual({
-      'Barbed Court Spellcasting': spellcasting,
-      ...Object.fromEntries(features),
-    });
+    expect(barbed.reference_text).toBe(identity);
+    expect(actual).toEqual(Object.fromEntries(features));
     expect(barbed.progression).toMatchObject({
       mode: 'override',
       spellcasting_ability: 'wisdom',
-      caster_contribution: 'third_down',
+      caster_contribution: 'third_up',
     });
     if (barbed.progression.mode !== 'override') throw new Error('Dense progression required.');
     expect(barbed.progression.rows.map((row) => row.class_level)).toEqual(characterLevels);
     expect(barbed.progression.rows.map((row) => row.cantrips_known)).toEqual([
-      0, 0, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+      0, 0, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
     ]);
-    expect(barbed.progression.rows.flatMap((row) => row.grants.map((grant) => [
+    expect(barbed.progression.rows.map((row) => row.prepared_or_known_count))
+      .toEqual(expectedChosen);
+    expect(barbed.progression.rows.map((row) => row.slot_counts)).toEqual(expectedSlots);
+    expect(barbed.progression.rows.flatMap((row) => row.grants.filter(
+      (grant) => grant.kind === 'fixed_spell',
+    ).map((grant) => [
       row.class_level,
       grant.rule_key,
       grant.kind === 'fixed_spell' ? grant.spell_content_key : null,
       grant.kind === 'fixed_spell' ? grant.always_prepared : null,
     ]))).toEqual([
+      [3, 'barbed-court-shocking-grasp', '2024:shocking-grasp', true],
+      [3, 'barbed-court-chill-touch', '2024:chill-touch', true],
+      [3, 'barbed-court-ray-of-frost', '2024:ray-of-frost', true],
       [3, 'barbed-court-vicious-mockery', '2024:vicious-mockery', true],
-      [3, 'barbed-court-prestidigitation', '2024:prestidigitation', true],
-      [3, 'barbed-court-bane', '2024:bane', true],
-      [3, 'barbed-court-command', '2024:command', true],
+      [3, 'barbed-court-mage-hand', '2024:mage-hand', true],
+      [3, 'barbed-court-guidance', '2024:guidance', true],
+      [3, 'barbed-court-shield', '2024:shield', true],
       [3, 'barbed-court-dissonant-whispers', '2024:dissonant-whispers', true],
-      [3, 'barbed-court-hideous-laughter', '2024:hideous-laughter', true],
-      [7, 'barbed-court-enthrall', '2024:enthrall', true],
-      [7, 'barbed-court-suggestion', '2024:suggestion', true],
-      [10, 'barbed-court-message', '2024:message', true],
-      [13, 'barbed-court-hypnotic-pattern', '2024:hypnotic-pattern', true],
-      [13, 'barbed-court-tongues', '2024:tongues', true],
-      [19, 'barbed-court-compulsion', '2024:compulsion', true],
-      [19, 'barbed-court-confusion', '2024:confusion', true],
+      [6, 'barbed-court-mirror-image', '2024:mirror-image', true],
+      [6, 'barbed-court-blur', '2024:blur', true],
+      [6, 'barbed-court-hold-person', '2024:hold-person', true],
+      [11, 'barbed-court-slow', '2024:slow', true],
+      [11, 'barbed-court-fear', '2024:fear', true],
+      [17, 'barbed-court-compulsion', '2024:compulsion', true],
     ]);
+    expect(courtSpellTable.map(([level, spells]) => [
+      Number(level),
+      spells?.split(',').map((spell) => spell.trim()),
+    ])).toEqual([
+      [3, ['Shield', 'Dissonant Whispers']],
+      [6, ['Mirror Image', 'Blur', 'Hold Person']],
+      [11, ['Slow', 'Fear']],
+      [17, ['Compulsion']],
+    ]);
+    expect(barbed.progression.rows.slice(2).map((row) => row.grants.filter(
+      (grant) => grant.kind === 'choice_from_list',
+    ).map((grant) => grant.kind === 'choice_from_list' ? {
+      rule_key: grant.rule_key,
+      list: grant.list,
+      count: grant.count,
+      minimum_spell_level: grant.minimum_spell_level,
+      maximum_spell_level: grant.maximum_spell_level,
+    } : null))).toEqual(barbed.progression.rows.slice(2).map((row) => [{
+      rule_key: 'barbed-court-cantrips',
+      list: 'Bard',
+      count: 2,
+      minimum_spell_level: 0,
+      maximum_spell_level: 0,
+    }, {
+      rule_key: 'barbed-court-prepared-spells',
+      list: 'Bard',
+      count: row.prepared_or_known_count,
+      minimum_spell_level: 1,
+      maximum_spell_level: row.maximum_spell_level,
+    }]));
+    expect(barbed.features.find((feature) => feature.name === 'Warding Image')?.effects)
+      .toEqual([expect.objectContaining({ kind: 'armor_class_bonus', amount: 2 })]);
   });
 
   it('keeps every committed draft inside the shared code-point, list, and encoded-byte limits', () => {
