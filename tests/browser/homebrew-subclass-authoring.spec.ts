@@ -6,6 +6,9 @@ interface CharacterRow {
   readonly revision: number;
 }
 
+const HOSTILE_SUBCLASS_NAME =
+  '<img data-s4-share-hostile src=x onerror=window.s4Xss=1> S4 Subclass';
+
 async function ready(page: Page): Promise<void> {
   await expect(page.locator('#status')).toHaveAttribute(
     'data-ready',
@@ -25,14 +28,13 @@ async function homebrewReady(page: Page): Promise<void> {
   );
 }
 
-test('authors a subclass timeline and persists only threshold-eligible character effects', async ({
+test('authors a subclass timeline, preserves threshold effects, and previews its inert name', async ({
+  browser,
   page,
 }) => {
-  // Budget: the HA-7 measured guided baseline is 17.7s. Add 20s for the XL grid and
-  // timeline, 15s for publish, and 20s for character threshold commands/reload
-  // = 72.7s guided. A 1.5 contention reserve yields 109.05s; 125s leaves 15.95s
-  // (14.6%) explicit headroom beyond that reserve.
-  test.setTimeout(125_000);
+  // Measured alone on PLAYWRIGHT_PORT=5080 at 20.6s after adding the recipient
+  // hostile-name preview. The required x1.5 reserve is 30.9s, rounded to 100ms.
+  test.setTimeout(30_900);
   await page.goto('/');
   await ready(page);
   await page.evaluate(() => window.staticApp.reset());
@@ -44,7 +46,7 @@ test('authors a subclass timeline and persists only threshold-eligible character
   await page.getByRole('button', { name: 'New subclass' }).click();
   await expect(page.getByLabel('Subclass authoring form')).toBeVisible();
 
-  await page.getByLabel('Name').fill('Threshold Cartographer');
+  await page.getByLabel('Name').fill(HOSTILE_SUBCLASS_NAME);
   await page.getByLabel('Rules edition').selectOption('expanded');
   await page.getByLabel('Parent bundled class').selectOption({
     label: 'Fighter',
@@ -94,16 +96,20 @@ test('authors a subclass timeline and persists only threshold-eligible character
   await page.getByRole('button', { name: 'Publish subclass' }).click();
   await expect(page.getByRole('heading', { name: 'Subclass published' })).toBeVisible();
   await page.getByRole('link', { name: 'View subclass library' }).click();
-  const publishedCard = page.locator('.homebrew-card').filter({ hasText: 'Threshold Cartographer' });
-  await expect(publishedCard.getByRole('heading', { name: 'Threshold Cartographer' })).toBeVisible();
+  const publishedCard = page.locator('.homebrew-card').filter({
+    hasText: HOSTILE_SUBCLASS_NAME,
+  });
+  await expect(publishedCard.getByRole('heading', {
+    name: HOSTILE_SUBCLASS_NAME,
+  })).toBeVisible();
   await expect(publishedCard).toContainText('Subclass · immutable published version');
 
-  const journey = await page.evaluate(async () => {
+  const journey = await page.evaluate(async (subclassName) => {
     const classes = await window.staticApp.inspectRows('class_definitions', { name: 'Fighter' });
     const fighterId = Number(classes[0]?.['id']);
     const subclasses = await window.staticApp.inspectRows(
       'subclass_definitions',
-      { name: 'Threshold Cartographer' },
+      { name: subclassName },
     );
     const subclassId = Number(subclasses[0]?.['id']);
     const subclassKey = String(subclasses[0]?.['content_key']);
@@ -191,13 +197,14 @@ test('authors a subclass timeline and persists only threshold-eligible character
     return {
       characterId: character.id,
       subclassId,
+      subclassKey,
       levelTwentyCantrips: Number(levelTwentyProgressions[0]?.['cantrips_known']),
       afterLevelTwo,
       afterLevelThree,
       classLevels,
       armorBonuses: sheet.armor_class.bonuses,
     };
-  });
+  }, HOSTILE_SUBCLASS_NAME);
 
   expect(journey.afterLevelTwo).toEqual([]);
   expect(journey.levelTwentyCantrips).toBe(1);
@@ -243,4 +250,40 @@ test('authors a subclass timeline and persists only threshold-eligible character
 
   await page.getByRole('link', { name: '← Characters' }).click();
   await ready(page);
+  await page.getByRole('button', {
+    name: 'Share Threshold Journey Hero by link',
+  }).click();
+  await page.getByRole('button', { name: 'Create share link' }).click();
+  const output = page.getByLabel('Generated character share link');
+  await expect(output).toBeVisible();
+  const link = await output.inputValue();
+
+  const recipientProfile = await browser.newContext();
+  try {
+    const recipient = await recipientProfile.newPage();
+    await recipient.goto(link);
+    await ready(recipient);
+    await expect(recipient.locator('.share-preview-classes')).toHaveText(
+      `Fighter / ${HOSTILE_SUBCLASS_NAME} 3`,
+    );
+    await expect(recipient.locator('.share-preview-layers')).toHaveText(
+      `Fighter — SRD · bundled layer / ${HOSTILE_SUBCLASS_NAME} — ` +
+      'Homebrew · external layer',
+    );
+    await expect(recipient.locator('.share-preview')).not.toContainText(
+      '2024:class:fighter',
+    );
+    await expect(recipient.locator('.share-preview')).not.toContainText(
+      journey.subclassKey,
+    );
+    await expect(recipient.locator('[data-s4-share-hostile]')).toHaveCount(0);
+    await expect(recipient.getByRole('region', {
+      name: 'Embedded external content',
+    }).getByRole('listitem').filter({ hasText: HOSTILE_SUBCLASS_NAME }))
+      .toHaveText(
+        `${HOSTILE_SUBCLASS_NAME} — subclass — Homebrew · external layer`,
+      );
+  } finally {
+    await recipientProfile.close();
+  }
 });

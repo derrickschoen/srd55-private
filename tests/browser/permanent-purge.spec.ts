@@ -101,9 +101,16 @@ test('publishes, versions, archives, restores, and permanently purges a whole li
     'Purge Journey Hero',
   );
   await clearAnnouncements(page);
-  await expect(page.getByRole('radio', {
-    name: 'Match — Uses the existing local entry; this attached character moves to it.',
-  })).toBeChecked();
+  const review = page.getByLabel('Fix affected characters');
+  await expect(review).toContainText(
+    'Before: Purge Journey Species — Homebrew · external layer',
+  );
+  await expect(review).toContainText(
+    'After Apply: Purge Journey Species Revised — Homebrew · external layer',
+  );
+  await expect(review.getByRole('radio')).toHaveCount(0);
+  await expect(review.getByLabel('Private copy name')).toHaveCount(0);
+  await expect(review).not.toContainText(/certif/iu);
   const applyFixes = page.getByRole('button', { name: 'Apply to all listed characters' });
   await expect(applyFixes).toBeEnabled();
   await applyFixes.focus();

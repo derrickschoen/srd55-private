@@ -110,20 +110,7 @@ export function fragmentFromShareLink(value: string): string {
   return fragment;
 }
 
-function previewText(preview: SharePreview): string {
-  const classes =
-    preview.classes.length === 0
-      ? 'No classes'
-      : preview.classes
-          .map(
-            (item) =>
-              `${item.classKey}${
-                item.subclassKey === undefined
-                  ? ''
-                  : ` / ${item.subclassKey}`
-              } ${item.level}`,
-          )
-          .join(', ');
+function previewCountsText(preview: SharePreview): string {
   // Weapons are named only when there are some. Nought weapons is the common
   // case and a permanent "0 weapons" would be noise; a non-zero count is a
   // section the recipient is about to receive and should be told about.
@@ -142,7 +129,7 @@ function previewText(preview: SharePreview): string {
       ? null
       : `${String(preview.skillProficiencyCount)} skill proficiencies`,
   ].filter((item): item is string => item !== null);
-  return `${classes}. ${preview.selectionCount} selections, ${
+  return `${preview.selectionCount} selections, ${
     preview.spellbookCount
   } spellbook spells, ${preview.sourceCount} other sources${
     preview.weaponCount === 0 ? '' : `, ${preview.weaponCount} weapons`
@@ -151,6 +138,16 @@ function previewText(preview: SharePreview): string {
       ? ''
       : ` ${preview.placeholderCount} unavailable spells will be added as safe placeholders.`
   }`;
+}
+
+function previewCatalogName(
+  disclosure: SharePreview['classes'][number]['class'],
+  kind: 'class' | 'subclass',
+): string {
+  const name = disclosure.name.trim();
+  return name === '' || name === 'UNKNOWN'
+    ? `Unknown ${kind} name`
+    : disclosure.name;
 }
 
 export function createShareControls(
@@ -192,11 +189,21 @@ export function createShareControls(
   });
   const previewTitle = element('h3');
   const previewDetails = element('p');
+  const previewLayers = element('p', {
+    className: 'share-preview-layers',
+    attributes: { hidden: '' },
+  });
   const embeddedContent = element('section', {
     className: 'share-embedded-content',
     attributes: { hidden: '', 'aria-label': 'Embedded external content' },
   });
-  previewPanel.append(previewTitle, previewDetails, embeddedContent, addButton);
+  previewPanel.append(
+    previewTitle,
+    previewDetails,
+    previewLayers,
+    embeddedContent,
+    addButton,
+  );
 
   const linkOutput = element('input', {
     className: 'field share-link-output',
@@ -293,6 +300,46 @@ export function createShareControls(
     );
   }
 
+  function renderPreviewDetails(preview: SharePreview): void {
+    previewDetails.replaceChildren();
+    const classSummary = element('span', {
+      className: 'share-preview-classes',
+    });
+    if (preview.classes.length === 0) {
+      classSummary.textContent = 'No classes';
+    } else {
+      for (const [index, item] of preview.classes.entries()) {
+        if (index > 0) classSummary.append(', ');
+        classSummary.append(freeTextSpan(previewCatalogName(item.class, 'class')));
+        if (item.subclass !== undefined) {
+          classSummary.append(
+            ' / ',
+            freeTextSpan(previewCatalogName(item.subclass, 'subclass')),
+          );
+        }
+        classSummary.append(` ${String(item.level)}`);
+      }
+    }
+    previewDetails.append(classSummary, `. ${previewCountsText(preview)}`);
+
+    previewLayers.replaceChildren();
+    previewLayers.hidden = preview.classes.length === 0;
+    for (const [index, item] of preview.classes.entries()) {
+      if (index > 0) previewLayers.append('; ');
+      previewLayers.append(
+        freeTextSpan(previewCatalogName(item.class, 'class')),
+        ` — ${catalogLayerLabel(item.class.catalog_layer)}`,
+      );
+      if (item.subclass !== undefined) {
+        previewLayers.append(
+          ' / ',
+          freeTextSpan(previewCatalogName(item.subclass, 'subclass')),
+          ` — ${catalogLayerLabel(item.subclass.catalog_layer)}`,
+        );
+      }
+    }
+  }
+
   function shareReadyAnnouncement(
     base: string,
     disclosures: readonly ContentImportDisclosure[],
@@ -365,7 +412,7 @@ export function createShareControls(
       activeFragment = fragment;
       activePreview = result;
       previewTitle.textContent = result.name;
-      previewDetails.textContent = previewText(result);
+      renderPreviewDetails(result);
       renderEmbeddedContent(result.adoptionPlan.incomingContent);
       previewPanel.hidden = false;
       addButton.hidden = false;
