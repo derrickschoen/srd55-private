@@ -16,6 +16,7 @@ import {
 } from '../../../src/builder/guided-creation';
 import type { DatabaseContext } from '../../../src/db/database';
 import { abilities, type Ability } from '../../../src/domain/enums';
+import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
 import {
   decodeShareFragment,
   encodeShareFragment,
@@ -222,6 +223,122 @@ function customMagicInitiateParams(
 }
 
 describe('B3 guided background choices on a seeded application database', () => {
+  it('S4-02 keeps the option-derived disclosure and exact production-writer footprint in both directions', async () => {
+    const harness = await applicationDatabase();
+    const db = harness.context.db;
+    const initial = choiceOptions(db);
+    const initialBackground = backgroundWithDifferentMagicInitiateSuggestion(
+      initial,
+    );
+    const templateId = db.scalar<number>(
+      'SELECT id FROM background_templates WHERE content_key = ?',
+      [initialBackground.content_key],
+    );
+    if (templateId === null) {
+      throw new Error('The selected background template disappeared.');
+    }
+    db.exec(
+      `INSERT INTO background_template_effects (
+         background_template_id, sort_order, effect_kind, amount, label
+       ) VALUES (?, 1, 'armor_class_bonus', 2, 'S4-02 configured ward')`,
+      [templateId],
+    );
+
+    const options = choiceOptions(db);
+    const background = options.backgrounds.find(
+      (candidate) => candidate.content_key === initialBackground.content_key,
+    );
+    if (background === undefined) {
+      throw new Error('The selected background is absent from guided options.');
+    }
+    expect(background.applied_skill_proficiencies).toHaveLength(2);
+    expect(background.applied_effects).toEqual([
+      { label: 'S4-02 configured ward' },
+    ]);
+    expect(background.deferred_tool_reference_text).not.toBe('');
+
+    const characterId = character(db, 'S4-02 Both Ways');
+    const params = printedParams(characterId, background);
+    applyGuidedBackgroundChoices(db, params);
+    const backgroundSource = guidedBackgroundSources(db, characterId).find(
+      (source) => source.source_type === 'background',
+    );
+    if (backgroundSource === undefined) {
+      throw new Error('Apply wrote no owned background source.');
+    }
+
+    expect(db.allRaw(
+      `SELECT grant_key, ordinal, skill, state, source_instance_id
+       FROM character_skill_grants
+       WHERE character_id = ?
+       ORDER BY ordinal`,
+      [characterId],
+    )).toEqual(background.applied_skill_proficiencies.map((skill, index) => ({
+      grant_key: 'background_skill',
+      ordinal: index + 1,
+      skill,
+      state: 'active',
+      source_instance_id: backgroundSource.id,
+    })));
+    expect(db.allRaw(
+      `SELECT skill FROM character_skill_proficiencies
+       WHERE character_id = ? ORDER BY skill`,
+      [characterId],
+    )).toEqual(
+      [...background.applied_skill_proficiencies]
+        .sort()
+        .map((skill) => ({ skill })),
+    );
+
+    const effects = db.allRaw(
+      `SELECT effect_kind, label, template_ref
+       FROM character_effects
+       WHERE character_id = ? AND source_instance_id = ?
+       ORDER BY sort_order`,
+      [characterId, backgroundSource.id],
+    );
+    expect(effects.filter((effect) => effect.effect_kind === 'ability_increase'))
+      .toHaveLength(params.increases.length);
+    expect(effects.filter((effect) => effect.template_ref !== null)).toEqual([
+      {
+        effect_kind: 'armor_class_bonus',
+        label: background.applied_effects[0]?.label,
+        template_ref: expect.stringMatching(/^background_template_effects:/u),
+      },
+    ]);
+    expect(effects).toHaveLength(
+      params.increases.length + background.applied_effects.length,
+    );
+
+    const recorded = db.oneRaw(
+      `SELECT tool_proficiency FROM character_background
+       WHERE character_id = ?`,
+      [characterId],
+    );
+    expect(recorded?.tool_proficiency).toBe(
+      background.deferred_tool_reference_text,
+    );
+    expect(db.scalar(
+      'SELECT count(*) FROM character_items WHERE character_id = ?',
+      [characterId],
+    )).toBe(0);
+    expect(JSON.parse(String(db.scalar(
+      'SELECT config FROM character_source_instances WHERE id = ?',
+      [backgroundSource.id],
+    )))).not.toHaveProperty('equipment_choice');
+
+    const sheet = new CharacterSheetBuilder(db).build(characterId);
+    expect(sheet.printed_features).toContainEqual({
+      source: 'background',
+      source_name: background.name,
+      name: 'Tool Proficiency',
+      text: background.deferred_tool_reference_text,
+    });
+    expect(sheet.gaps.map((gap) => gap.kind)).toContain(
+      'languages_and_tools_not_modelled',
+    );
+  });
+
   it('writes player-chosen increases as capped contributions owned by the background and grants the non-printed Origin feat as its child', async () => {
     const harness = await applicationDatabase();
     const db = harness.context.db;

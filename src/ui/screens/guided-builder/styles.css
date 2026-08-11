@@ -455,13 +455,14 @@
   margin: 0 0 0.75rem;
 }
 
-.guided-background-unapplied p {
+.guided-background-apply-disclosure p,
+.guided-background-apply-disclosure h3 {
   margin: 0;
   font-size: 0.85rem;
   opacity: 0.85;
 }
 
-.guided-background-unapplied ul {
+.guided-background-apply-disclosure ul {
   margin: 0.25rem 0 0;
   padding-left: 1.1rem;
   font-size: 0.85rem;

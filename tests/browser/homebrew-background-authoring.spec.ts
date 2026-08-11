@@ -23,10 +23,9 @@ async function homebrewReady(page: Page): Promise<void> {
 }
 
 test('authors and applies a background with persisted skill grants and a flat effect', async ({ page }) => {
-  // HA-8 measured 14.8s. The required x1.5 contention reserve is 22.2s.
-  // A 90s timeout leaves 67.8s beyond that reserved precedent for the added
-  // guided-character route, reload, and two persisted-row censuses.
-  test.setTimeout(90_000);
+  // S4-02 measured this complete author/publish/disclose/apply journey alone
+  // at 18.3s on Chromium. 18.3s × 1.5 = 27.45s, rounded up to 27.5s.
+  test.setTimeout(27_500);
   await page.goto('/');
   await globalReady(page);
   await page.evaluate(() => window.staticApp.reset());
@@ -91,6 +90,23 @@ test('authors and applies a background with persisted skill grants and a flat ef
   await page.getByRole('button', { name: 'Set ability scores', exact: true }).click();
   await page.getByRole('button', { name: 'Choose Human', exact: true }).click();
   await page.getByRole('radio', { name: 'Journey Wayfarer', exact: true }).check();
+  const disclosure = page.locator('.guided-background-apply-disclosure');
+  await expect(disclosure).toContainText('What Apply changes now');
+  await expect(disclosure).toContainText(
+    'Investigation and Survival as skill proficiencies',
+  );
+  await expect(disclosure).toContainText(
+    'Alert · SRD · bundled layer as your Origin feat',
+  );
+  await expect(disclosure).toContainText(
+    'Wayfarer ward · Homebrew · external layer as a configured background effect',
+  );
+  await expect(disclosure).toContainText(
+    'Navigator tools · Homebrew · external layer is recorded as tool reference text; no tool proficiency is mechanically applied.',
+  );
+  await expect(disclosure).toContainText(
+    'The starting equipment package is chosen and mechanically applied at the equipment step, not by Apply background.',
+  );
   await page.getByRole('button', { name: 'Apply background', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Choose skills', exact: true })).toBeVisible();
 
@@ -120,6 +136,15 @@ test('authors and applies a background with persisted skill grants and a flat ef
       baselineId: baseline.id,
       effects: await window.staticApp.inspectRows('character_effects', { character_id: appliedId }),
       grants: await window.staticApp.inspectRows('character_skill_grants', { character_id: appliedId }),
+      proficiencies: await window.staticApp.inspectRows(
+        'character_skill_proficiencies', { character_id: appliedId },
+      ),
+      items: await window.staticApp.inspectRows(
+        'character_items', { character_id: appliedId },
+      ),
+      background: await window.staticApp.inspectRows(
+        'character_background', { character_id: appliedId },
+      ),
       baselineEffects: await window.staticApp.inspectRows('character_effects', { character_id: baseline.id }),
       baselineAuthoredGrants: baselineGrants.filter((row) =>
         row['skill'] === 'investigation' || row['skill'] === 'survival'),
@@ -139,6 +164,14 @@ test('authors and applies a background with persisted skill grants and a flat ef
     expect.objectContaining({ character_id: persisted.appliedId, skill: 'investigation', state: 'active' }),
     expect.objectContaining({ character_id: persisted.appliedId, skill: 'survival', state: 'active' }),
   ]));
+  expect(persisted.proficiencies.map((row) => row['skill']).sort()).toEqual([
+    'investigation',
+    'survival',
+  ]);
+  expect(persisted.items).toEqual([]);
+  expect(persisted.background).toEqual([
+    expect.objectContaining({ tool_proficiency: 'Navigator tools' }),
+  ]);
   expect(persisted.baselineEffects).toEqual([]);
   expect(persisted.baselineAuthoredGrants).toEqual([]);
 

@@ -254,11 +254,11 @@ export function saveGuidedAbilityDraft(
  * row, which is not on this path at all.
  *
  * `backgroundChosen` (A5): a `character_background` row exists — pinned by the
- * same clause of §8, and by the same reasoning. Note what this deliberately
- * does NOT attest: a background row proves nothing about the feat, the skills,
- * the tool or the equipment, because recording a background applies none of
- * them. The step is complete when the choice is recorded, and the screen says
- * out loud that recording is ALL that happened.
+ * same clause of §8, and by the same reasoning. This predicate deliberately
+ * attests only that the background selection exists; the B3 transaction also
+ * owns ability contributions, skill grants, structured effects and the chosen
+ * Origin-feat source, while tool text remains prose and equipment is applied
+ * by its later step. Those mechanics have their own source/provenance checks.
  *
  * `abilitiesAllocated` (B1): `characters.ability_allocation_method` is
  * non-NULL. The signal is EXPLICIT because inference is unsound (plan B-A2):
@@ -1153,16 +1153,12 @@ function gateInstalledBackground(
  * caller assigns a dense per-character order starting after the character's
  * surviving effects, honouring the template's ordering as array order.
  *
- * THE BACKGROUND ARM (A5) IS THE SPECIES ARM WITH ONE TABLE. A background copy
- * is a single `character_background` row via `backgroundFromTemplate` — no
- * traits, no effects, no proficiency rows, no equipment rows, because the
- * copy records the printed words and applies nothing. Its replace is therefore
- * one delete of the one row the previous copy owned, and it deliberately
- * spares EVERYTHING else on the character — there is nothing else a
- * background apply has ever written. `character_background` is unique per
- * character, so without the delete a re-apply would be a raw constraint
- * failure; with it, re-applying is idempotent under retry and the back button
- * can change a background, same as species.
+ * THE RECORD-ONLY BACKGROUND ARM (A5) IS THE SPECIES ARM WITH ONE TABLE. It is
+ * retained for the generic origin RPC, but the guided screen uses B3's
+ * `applyGuidedBackgroundChoices`, which also applies skills, effects, ability
+ * increases and the Origin feat. This arm copies only `character_background`;
+ * before doing so it removes any B3-owned source tree so it cannot leave the
+ * old mechanics attached to newly recorded prose.
  */
 export function applyGuidedOrigin(
   db: DatabaseContext,
@@ -1538,11 +1534,14 @@ function deleteGuidedBackgroundSources(
 export function listGuidedBackgroundChoiceOptions(
   db: DatabaseContext,
 ): GuidedBackgroundChoiceOptions {
-  const backgrounds = db
+  const templates = db
     .all(
-      `SELECT template.content_key, template.name, template.ability_score_1,
+      `SELECT template.id, template.content_key, template.name,
+              template.ability_score_1,
               template.ability_score_2, template.ability_score_3,
               template.feat_name, template.default_origin_feat_content_key,
+              template.skill_proficiency_1, template.skill_proficiency_2,
+              template.tool_proficiency,
               identity.catalog_layer
        FROM background_templates AS template
        LEFT JOIN catalog_content_identities AS identity
@@ -1558,6 +1557,7 @@ export function listGuidedBackgroundChoiceOptions(
        ORDER BY template.name, template.content_key`,
       undefined,
       (row) => ({
+        id: sqlInteger(row, 'id'),
         content_key: sqlString(row, 'content_key'),
         name: sqlString(row, 'name'),
         ability_score_1: sqlString(row, 'ability_score_1'),
@@ -1568,16 +1568,37 @@ export function listGuidedBackgroundChoiceOptions(
           row,
           'default_origin_feat_content_key',
         ),
+        skill_proficiency_1: sqlString(row, 'skill_proficiency_1'),
+        skill_proficiency_2: sqlString(row, 'skill_proficiency_2'),
+        tool_proficiency: sqlString(row, 'tool_proficiency'),
         catalog_layer: catalogLayerDisclosure(
           sqlNullableString(row, 'catalog_layer'),
         ),
       }),
-    )
-    .map((template) => ({
+    );
+  const effectsByTemplate = new Map<number, Array<{ readonly label: string }>>();
+  for (const effect of db.all(
+    `SELECT background_template_id, label
+     FROM background_template_effects
+     ORDER BY background_template_id, sort_order`,
+    undefined,
+    (row) => ({
+      background_template_id: sqlInteger(row, 'background_template_id'),
+      label: sqlString(row, 'label'),
+    }),
+  )) {
+    const effects = effectsByTemplate.get(effect.background_template_id) ?? [];
+    effects.push({ label: effect.label });
+    effectsByTemplate.set(effect.background_template_id, effects);
+  }
+  const backgrounds = templates.map((template) => ({
       content_key: template.content_key,
       name: template.name,
       catalog_layer: template.catalog_layer,
       pairing: printedPairing(template),
+      applied_skill_proficiencies: backgroundSkillsFromTemplate(template),
+      applied_effects: effectsByTemplate.get(template.id) ?? [],
+      deferred_tool_reference_text: template.tool_proficiency,
     }));
 
   const originFeats = db.all(
@@ -1656,7 +1677,10 @@ function gateInstalledOriginFeat(
  * looks applied with half of it missing.
  */
 function backgroundSkillsFromTemplate(
-  template: BackgroundTemplateRow,
+  template: Pick<
+    BackgroundTemplateRow,
+    'name' | 'skill_proficiency_1' | 'skill_proficiency_2'
+  >,
 ): readonly [Skill, Skill] {
   const first = isEnumValue(skills, template.skill_proficiency_1)
     ? template.skill_proficiency_1
