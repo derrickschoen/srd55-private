@@ -115,22 +115,25 @@ and Aura of Certainty); levels 15 and 20 each grant one feature.
 
 OWNER-APPROVAL: Feature name and rules text, including the bonus size, the
 duration, the use count, and the drafting assumptions on Foreseen strikes
-(declared after the miss is known; the converted hit is not a critical hit).
+(the after-roll timing and the 30-foot ally range; the owner's ruling fixed
+the Reaction cost, the Charisma-modifier bonus and use count, the
+Short/Long Rest cadence, and ally support).
 
 Your strikes prove the vision, and the proof lends your voice weight. After
 you cast *Divine Smite*, you gain a +1 bonus to spell attack rolls and your
 spell save DC for 1 minute. The bonus doesn't stack with itself; a new casting
 restarts the duration.
 
-In addition, you have already seen some blows land. When you miss with an
-attack roll, you can cause it to hit instead. The hit is not a critical hit.
-You can use this benefit a number of times equal to your Charisma modifier
-(minimum of once), and you regain all expended uses when you finish a Long
-Rest.
+In addition, you glimpse a blow's path a heartbeat before it lands. When you
+or a creature you can see within 30 feet makes an attack roll, you can take a
+Reaction to add your Charisma modifier to the roll; you can do so after the
+d20 is rolled but before the outcome is determined. You can use this Reaction
+a number of times equal to your Charisma modifier (minimum of once), and you
+regain all expended uses when you finish a Short or Long Rest.
 
-(A +1d8 smite rider against controlled targets appeared in the first
-2026-08-11 redesign batch and was removed the same day by owner ruling:
-too complicated.)
+(Two earlier same-day shapes were superseded by owner ruling: a +1d8
+smite-vs-controlled rider — "too complicated" — and a per-Long-Rest
+miss-to-hit pool.)
 
 ### Level 7: Voice of Domination
 
@@ -213,9 +216,9 @@ Protection. The subclass therefore adds fixed spell access, a smite-keyed
 accuracy-and-rider engine, one Channel Divinity mode, restrained aura support,
 a resource-priced reposition, and a short transformation. Since the 2026-08-11
 redesign it **does** add a conditional +1 to spell attack rolls and save DC
-and a Charisma-modifier-per-Long-Rest pool of miss-to-hit conversions
-(Foreseen strikes); it still adds no new attack, Action, or companion. This
-follows the paladin posture
+and a Charisma-modifier-per-Short/Long-Rest pool of Reactions that add +Cha
+to a self or allied attack roll (Foreseen strikes); it still adds no new
+attack, Action, or companion. This follows the paladin posture
 in [guideline 01](subclass-guidelines/01-power-budget.md#class-dependence-and-power-shape).
 
 The identity-bearing dial is the repeated Bonus Action casting of *Command*.
@@ -232,7 +235,7 @@ for each casting and the absence of an early ending condition remain.
 | Feature | Tier; weight | At-will / nova | Actions and concentration | Uses and expected relevance | Scaling and export | Pillars | Same-slot SRD comparison |
 |---|---|---|---|---|---|---|---|
 | Oath spells | Entry grant; rock | No slotless casts; ten always-prepared spells by level 17 | Normal spell costs; six of ten require Concentration | Two spells added at each listed level; offered across combat, exploration, and social scenes | Paladin slots and spell DC; a 3-level dip gains only the level-3 pair | C/E/S | Same ten-spell cadence as Oath of Devotion; this list spends more on control and information and less on defense and direct damage |
-| Foretold Authority | Entry engine; rock | The +1 is passive after a smite; Foreseen strikes are a Charisma-modifier-per-Long-Rest pool (typically 3) of miss-to-hit conversions, declared after the miss, never critical | No action and no Concentration; the +1 is a 1-minute window | The +1 is live in any fight where Divine Smite is cast; the strikes are strongest concentrated into one decisive fight and thin across a long day | Spell save DC, smite cadence, and Charisma; a 3-level dip gets the pool and can feed it with any class's attacks | C | Sacred Weapon adds Charisma to every weapon attack for 10 minutes; Foretold Authority instead sharpens the spell engine by a bounded +1 and converts a few whole misses — a nova resource where Sacred Weapon is a sustained one |
+| Foretold Authority | Entry engine; rock | The +1 is passive after a smite; Foreseen strikes are a Charisma-modifier-per-Short/Long-Rest pool (typically 3) of Reactions adding +Cha to a self or allied attack roll, after the d20 but before the outcome | The strikes each cost the paladin's one Reaction; no Concentration; the +1 is a 1-minute window | The +1 is live in any fight where Divine Smite is cast; the strikes refresh every Short Rest and rescue near misses — the paladin's own or an ally's | Spell save DC, smite cadence, and Charisma; a 3-level dip gets the pool and can spend it on any class's attacks or on allies | C | Sacred Weapon adds Charisma to every weapon attack for 10 minutes with no per-use cost; Foreseen strikes add the same modifier to at most three rolls per rest, each costing the Reaction — narrower, but they can land on an ally's roll and Sacred Weapon cannot |
 | Voice of Domination | Tier 2 engine; rock | No at-will effect; one use can produce up to nine slotless castings within 1 minute, with a freely chosen eligible target each time | Activation is a free action taken immediately after casting *Divine Smite* (owner ruling 2026-08-11); each casting uses a Bonus Action; no Concentration | Native Channel Divinity: 2 uses at entry, 3 at level 11; one use recovered on a Short Rest; expected in a consequential fight once a smite has landed | Spell save DC and Paladin Channel Divinity; seven Paladin levels and a smite-cast gate the engine, closing the dip export | C/S | Sacred Weapon lasts 10 minutes, adds Charisma to every attack with one weapon, and rides on the Attack action. Voice lasts 1 minute and adds no damage, but its slotless, freely retargetable control has a higher tactical ceiling; every attempt consumes a Bonus Action and allows the spell's normal save |
 | Aura of Certainty | Tier 2 support; rock plus ribbon | Passive while the base aura is active | No action or Concentration | Charm protection is eligible whenever such an effect appears; comprehension is offered in most language-bearing social scenes | Base Aura of Protection grows from 10 to 30 feet at Paladin 18; seven Paladin levels required | C/S | Aura of Devotion gives outright Charm immunity. Advantage is deliberately weaker; one-way comprehension consumes the remaining budget and can enable close-range speech without replacing reciprocal translation |
 | Foreseen Formation | Tier 3 active support; rock | No at-will effect; one Reaction can move at most five creatures for a typical maximum Charisma modifier of +5 | Reaction; one Channel Divinity; no Concentration | Offered after an enemy succeeds against a listed spell; expected zero to two offers per session and chosen only when formation matters more than another Channel Divinity use | Target count uses the paladin's existing Charisma; range of eligible allies scales with the base aura; 15 Paladin levels required | C | Smite of Protection grants every ally in the aura Half Cover after Divine Smite until the next turn. Formation instead gives one immediate half-Speed move, costs a Reaction and Channel Divinity, and has no lasting AC or save bonus |
@@ -257,14 +260,15 @@ and other paladin features. The ceiling is consequently nine independently
 saved attempts across any eligible targets, not nine guaranteed denied turns.
 
 **Foretold Authority check.** At level 5 with DC 13 against a +2 save, the
-+1 DC moves *Command*'s land rate by 5 percentage points. Each Foreseen
-strike converts a whole miss: weapon die plus modifier immediately, and —
-when no other attack landed that round — it also rescues the round's Divine
-Smite from idling. Concentrated into a single four-round fight, the three
-conversions are worth roughly +4 damage per round at level 3 in simulation
-(the kit's one deliberate overshoot: slightly above a Vow-of-Enmity round
-there); spread across a four-fight day they thin to roughly +1 per round,
-below the Sacred Weapon estimate of ≈2.55.
++1 DC moves *Command*'s land rate by 5 percentage points. A Foreseen strike
+converts only a near miss (within the Charisma modifier), costs the round's
+Reaction, and caps at three per rest — in simulation, self-use is worth
+roughly +2.5 damage per round at level 3 in a single fight, landing the kit
+in a statistical tie with a Vow-of-Enmity comparator there and 96–99% of it
+at 6–17; because the pool refreshes on Short Rests, the full-day gap narrows
+to 87–89% rather than v1's 82–84%. Spent on an ally's roll the value is
+comparable but unpriced here (the sim models self-use only, per the owner's
+ruling).
 
 **Sacred Weapon comparison.** At level 5, assuming two attacks, a normal 65%
 hit chance, Charisma +3, and a 1d8 weapon with Strength +4, Sacred Weapon's
@@ -292,7 +296,7 @@ increase the spell's target count, save DC, duration, or effect.
 
 | Snapshot | Domination kit | Devotion comparator | Budget verdict |
 |---|---|---|---|
-| Entry (3) | Ten-spell cadence begins; smite-keyed +1 spell attack/save DC and Charisma-modifier miss-to-hit conversions per Long Rest | Ten-spell cadence begins; CD accuracy mode | Sacred Weapon sharpens weapon attacks broadly and sustained; Foretold Authority sharpens the spell engine narrowly and spends a small nova pool on certainty — whole misses become hits. The pool deliberately lets a single decisive fight run slightly hot. No slotless control exists until 7. Playtest amber. |
+| Entry (3) | Ten-spell cadence begins; smite-keyed +1 spell attack/save DC and Charisma-modifier Reactions per Short/Long Rest adding +Cha to a self or allied attack roll | Ten-spell cadence begins; CD accuracy mode | Sacred Weapon sharpens the paladin's own weapon attacks broadly and sustained; Foretold Authority sharpens the spell engine, rescues a few near misses per fight at Reaction cost, and can lend the rescue to an ally. Simulated self-use lands at parity with a Vow comparator at 3 and below it at 6+. No slotless control exists until 7. Playtest amber. |
 | Tier 2 (7) | Voice's smite-triggered slotless *Command* engine, plus Charm-save Advantage and one-way comprehension in the aura | Charm immunity in the aura | Two features at 7 by owner ruling 2026-08-11: the slot is deliberately heavy. The aura half stays below the defensive comparator; Voice carries the tactical ceiling and cannot start without a smite. Playtest amber. |
 | Tier 3 (15) | Resource-priced, success-triggered party reposition | Repeated party Half Cover after smites | Domination is more active and spatial but less frequent, costs a Reaction and CD, and offers no numeric defense. |
 | Tier 4 (20) | One-minute sight, Charm immunity, and one Voice activation without a Channel Divinity cost | Ten-minute aura damage, creature-family defense, and sunlight | Domination is shorter and damage-free. Voice remains freely retargetable but gains only resource efficiency; the capstone's broad value rests mainly on Truesight and Charm immunity. |
@@ -334,14 +338,14 @@ matches.
 |---|---|---|
 | F1 Compounding Punishment | Each successful save resolves only that casting of *Command*; it creates no counter, backlash, repair action, or lingering penalty. | Clear. |
 | F2 Imported Chassis Mismatch | Every rule uses SRD actions, spell saves, the base aura, and native Channel Divinity. | Clear. |
-| F3 Dip Bait | A 3-level outsider gets the fixed level-3 spell pair and Foretold Authority. The +1 spell attack/DC exports to a caster stack only for a minute after a slot is smited away, but **Foreseen strikes export to any attacker**: Charisma-modifier guaranteed hits per Long Rest feed GWM/Sharpshooter-style builds and smite novas regardless of the host class (the converted hit is never a critical hit, which caps crit-fisher abuse). Voice sits behind seven Paladin levels and a smite cast, which removes the slotless-control dip this row used to flag. | Amber — the strikes pool is the new hottest dip surface; targeted multiclass playtest required, including a low-Charisma martial dip reading (minimum one use). |
+| F3 Dip Bait | A 3-level outsider gets the fixed level-3 spell pair and Foretold Authority. The +1 spell attack/DC exports to a caster stack only for a minute after a slot is smited away. Foreseen strikes export to any build, but each use costs the Reaction, adds only the dipper's Charisma to the roll, and rescues rather than guarantees — a low-Charisma martial dip gets one +1 per rest (minimum-one clause). Voice sits behind seven Paladin levels and a smite cast, which removes the slotless-control dip this row used to flag. | Amber — the strikes pool favors high-Charisma dippers (a Sorcadin or Warlock front) and support seats; targeted multiclass playtest required. |
 | F4 Farmable or Famine Triggers | No trigger restores resources. Formation requires an enemy's successful save against a finite spell and then spends CD; manufactured targets lose resources rather than create them. Voice is initiated deterministically. | Clear. |
 | F5 Advantage Faucet | The only Advantage is defensive, limited to Charm saves, and bounded by the base aura; the SRD comparator grants immunity. | Clear. |
 | F6 Action-Type Congestion and Economy Multiplication | Voice's castings and the capstone share one Bonus Action loop; only the capstone's activation folds in a casting — Voice's own activation is a free action on a smite turn whose Bonus Action is already spent. The per-round collision between another *Command* and another smite is explicit and chosen. No extra Action, attack, Bonus Action, or turn is granted. | Intentional tension; playtest amber. |
 | F7 Runaway Interaction Math | Voice affects only one target and allows one save per casting, but can choose a different target each time. Formation target count caps at Charisma modifier and costs one Reaction plus CD. Aura Expansion increases area, not magnitude. | Clear on paper; retargeting remains playtest amber. |
 | F8 Stacking Blindness | Voice was assembled with Extra Attack, Divine Smite, Concentration spells, aura bonuses, advantage, and ordinary weapon damage. It adds no accuracy or damage and blocks simultaneous Smite Bonus Actions, but because it requires no Concentration, it can run beside a control spell. | Amber; concurrent-control stacks require playtest. |
 | F9 Golden-Cage Benchmark | Every slot and the assembled kit are compared only to Oath of Devotion on the same paladin chassis. | Clear. |
-| F10 White-Room Day | One-fight, no-Short-Rest, and rest-rich cases are recorded above. Best-round subclass damage is a converted miss (weapon die, modifier, and a rescued smite); the one-fight day is the pool's deliberate best case, and a no-conversion day leaves the full base chassis. The strongest swing remains repeated fresh-save action denial. | Control breadth and duration remain playtest amber. |
+| F10 White-Room Day | One-fight, no-Short-Rest, and rest-rich cases are recorded above. Best-round subclass damage is one rescued near miss (weapon die, modifier, and a rescued smite); the Short/Long Rest cadence keeps the pool level across day shapes rather than nova-loaded. The strongest swing remains repeated fresh-save action denial. | Control breadth and duration remain playtest amber. |
 | F11 Campaign-Contingent Payload | Zero core features require a creature family, terrain, damage type, or ally-supplied condition. Language limits only the comprehension ribbon. Formation's save-success trigger is not the defining loop. | Clear. |
 | F12 Niche Trespass | The likely affected seats are controller and social specialist. Voice pays CD and repeated Bonus Actions but no spell slots or Concentration, and it can retarget; the aura still offers only close-range, one-way communication and no broad skills or reciprocal translation. | Amber; risk increased and harmed-seat review is required. |
 | F13 Bookkeeping Tax | Voice tracks only its one-minute duration; targets and saves resolve independently with each casting. Aura is static, Formation spends the native pool, and Dominion uses its own matching duration. | Clear; timed cold-reader test remains. |
@@ -379,7 +383,7 @@ items in this draft.
 
 | Checklist item | Status | Evidence |
 |---|---|---|
-| Level-3 loop present | Green | Land a smite (spending a Foreseen strike if the round would whiff); press spells through the sharpened minute; repeat. From 7, the same smite also unlocks the slotless Command engine. |
+| Level-3 loop present | Green | Land a smite (a Foreseen strike rescuing a near miss when it matters); press spells through the sharpened minute; lend a strike to an ally's roll when your own attacks are done; repeat. From 7, the same smite also unlocks the slotless Command engine. |
 | Later features deepen the loop | Green | Voice (7) converts the same smites into a slotless command engine, Aura broadens communication and defense, Formation turns successful resistance into positioning, and Dominion grants one Voice activation without smiting or spending Channel Divinity. |
 | Tier-appropriate scaling | Amber | Desk checks at 5, 11, and 17 show no attack/target multiplication; actual tier play is unperformed. |
 | Native-engine attachment | Green | Spell slots, spell DC, Channel Divinity, Aura of Protection, Charisma, and Aura Expansion carry all scaling. |
@@ -390,27 +394,27 @@ items in this draft.
 | Checklist item | Status | Evidence |
 |---|---|---|
 | Outsider reading of levels 3–5 | Amber | Fighter 17 loses its level-18 feature; Bard 17 delays level-9 magic; Warlock 17 delays invocation and spell progression. Each buys the level-3 spell pair and Foretold Authority after three levels; Voice now requires Paladin 7 and a smite cast, so the slotless engine no longer dips. The exported +1 spell attack/DC is smite-gated and minute-long. |
-| Dip-resistant scaling | Amber | No proficiency, armor, attack-stat, or convertible resource grant. The redesign moves Voice behind seven Paladin levels; the remaining dip surface is a smite-gated +1 and the Foreseen strikes pool — the latter is class-agnostic guaranteed accuracy and scales with the dipper's Charisma, so it is the row to watch. |
+| Dip-resistant scaling | Amber | No proficiency, armor, attack-stat, or convertible resource grant. The redesign moves Voice behind seven Paladin levels; the remaining dip surface is a smite-gated +1 and the Foreseen strikes pool — Reaction-priced, Charisma-scaled near-miss rescue that a low-Charisma dipper barely uses. |
 | Full-stack test | Amber | Paper stack with Extra Attack, ordinary weapons, advantage, Radiant Strikes, Divine Smite, and control spells is recorded; live stack testing remains. |
-| Near-automatic overshoots absent | Amber | No extra actions or attacks, broad save grant, defense formula, or recovery loop. Foreseen strikes ARE bounded unconditional accuracy — a Charisma-modifier-per-Long-Rest pool of guaranteed non-critical hits; the bound and the never-crit clause are what keep this out of overshoot territory, and playtest must confirm it. |
+| Near-automatic overshoots absent | Green | No extra actions or attacks, broad save grant, defense formula, or recovery loop. Foreseen strikes are conditional accuracy (a +Cha rescue that only converts near misses), Reaction-priced and pool-bounded — materially below the auto-hit shape this row flagged in the previous draft. |
 
 ### 7.5 Actions, accuracy, and triggers
 
 | Checklist item | Status | Evidence |
 |---|---|---|
 | Action-economy tally | Green | Ordinary: Attack / optional base Bonus Action / Reaction / optional spell Concentration. Voice activation turn: Attack / *Divine Smite* Bonus Action / free-action activation / Reaction; later turns: Attack + Voice casting Bonus Action / Reaction / optional spell Concentration. The activation is the kit's one no-action rider; it grants no attack, cast, or interrupt by itself. |
-| Extra-economy carrier check | Green | No extra action, attack, or turn exists; a Foreseen strike converts an attack the paladin already made rather than granting a new one; Formation movement cannot carry an Opportunity Attack. |
+| Extra-economy carrier check | Green | No extra action, attack, or turn exists; a Foreseen strike modifies a roll already made and spends the Reaction to do it — note it competes for that Reaction with Opportunity Attacks and, from 15, with Foreseen Formation; Formation movement cannot carry an Opportunity Attack. |
 | Advantage gate | Green | Defensive Charm-save Advantage only, within the base aura, below the comparator's immunity. |
 | Flat-bonus gate | Green | The only flat bonus is Foretold Authority's +1 to spell attack rolls and save DC — gated behind casting *Divine Smite*, non-stacking, and capped at 1 minute. No weapon-attack, AC, or save flat bonus exists. |
 | Farmability audit | Green | Allies, harmless targets, summons, objects, repeated encounters, and target swapping can't create Channel Divinity uses or extend Voice's one-minute duration. |
 | Famine audit | Green | Voice has a deterministic Bonus Action activation. Formation is support, and eligible listed spells provide ordinary opportunities. |
-| Frequency statement | Green | Oath spells: scene-dependent but broad; Foretold Authority: the +1 is live in any smite fight, the strikes typically 3/day and strongest saved for one decisive fight; Voice: offered in consequential fights once a smite lands, with up to nine casting turns if the full duration is usable; Aura: passive whenever relevant; Formation: expected 0–2 offers/session; Dominion: one decisive scene/day. |
+| Frequency statement | Green | Oath spells: scene-dependent but broad; Foretold Authority: the +1 is live in any smite fight, the strikes typically 3 per Short/Long Rest and offered whenever a near miss matters; Voice: offered in consequential fights once a smite lands, with up to nine casting turns if the full duration is usable; Aura: passive whenever relevant; Formation: expected 0–2 offers/session; Dominion: one decisive scene/day. |
 
 ### 7.6 Resource and rest stress
 
 | Checklist item | Status | Evidence |
 |---|---|---|
-| Uses model matches effect | Amber | Voice's strong, freely retargetable control spends native CD but no slot; repeated Bonus Actions and fresh saves are its remaining per-casting costs. Foreseen strikes are a Long-Rest pool, matching their nova shape (whole misses become hits — a Short-Rest cadence would over-fuel them). Formation spends native CD; the capstone follows the comparator's Long Rest/level-5-slot reload shape. Live testing must validate that CD alone is sufficient. |
+| Uses model matches effect | Amber | Voice's strong, freely retargetable control spends native CD but no slot; repeated Bonus Actions and fresh saves are its remaining per-casting costs. Foreseen strikes carry a Short/Long Rest cadence because the effect was weakened to match (a Reaction-priced +Cha rescue, not an auto-hit; simulation puts self-use at parity-at-3 and below the comparator elsewhere). Formation spends native CD; the capstone follows the comparator's Long Rest/level-5-slot reload shape. Live testing must validate that CD alone is sufficient. |
 | One-fight-day test | Amber | Maximum compatible resources can be spent, and Voice can run beside a Concentration spell and change targets. Fresh saves, its one-minute duration, and the Bonus Action required for every casting bound the swing; live control testing remains. |
 | No-Short-Rest-day test | Green | Long-Rest CD uses, oath spells, and the aura remain; after CD depletion the paladin retains its full base chassis. |
 | Rest-rich-day test | Green | Only one CD use returns per Short Rest under the base class; no subclass feedback loop exists. |
@@ -421,7 +425,7 @@ items in this draft.
 | Feature | C | E | S | Player initiates? | Weight |
 |---|:---:|:---:|:---:|:---:|---|
 | Oath spells | C | E | S | Yes | Rock |
-| Foretold Authority | C | — | — | Yes via smiting | Rock |
+| Foretold Authority | C | — | — | Yes | Rock |
 | Voice of Domination | C | — | S | Yes via smiting | Rock |
 | Aura of Certainty | C | — | S | Yes for speech | Rock + ribbon |
 | Foreseen Formation | C | — | — | Yes after trigger | Rock |
@@ -468,7 +472,7 @@ items in this draft.
 
 | Provisional item | Risk | Required test | Owner/status |
 |---|---|---|---|
-| Foretold Authority | The +1 may make oath-spell control too reliable, and Foreseen strikes may make single-fight novas (guaranteed smite delivery) feel automatic; the L3 burst deliberately runs slightly above the Vengeance comparator in simulation | Acquisition tests at 3 and 5; record strike timing (whiff-rescue vs greed), pool exhaustion, land-rate shift with and without the +1, and one-fight-day feel | Owner approval pending; untested |
+| Foretold Authority | The +1 may make oath-spell control too reliable; ally-targeted Foreseen strikes may play as a support loop stronger than the simulated self-use, and the Reaction competition (strikes vs Opportunity Attacks vs Formation at 15) needs table feel | Acquisition tests at 3 and 5 with a party; record strike targets (self vs ally), Reaction conflicts, pool exhaustion per rest, and land-rate shift with and without the +1 | Owner approval pending; untested |
 | Voice of Domination | Slotless retargeting and compatibility with Concentration spells may produce too much control; the smite-gated activation may feel earned or feel like a tax when no smite-worthy hit lands | Acquisition tests at 7 and stack tests at 11 and 17; record activation timing, attempts, target changes, failures, rounds denied, smites forgone, and concurrent Concentration effects | Owner approval pending; untested |
 | Aura of Certainty | One-way comprehension may broaden *Suggestion* too far or prove too narrow at 10 feet | Combat/social scenes at 7 and 18 with language-bearing and language-less creatures | Owner approval pending; untested |
 | Foreseen Formation | Five half-Speed moves may overperform with a clustered party after Aura Expansion | Focused level-15 and level-18 positioning tests, including chokepoints and withdrawal | Owner approval pending; untested |

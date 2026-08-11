@@ -5,6 +5,36 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-11 — Foreseen strikes v2: a Reaction adds Cha to a self or allied attack roll, per Short/Long Rest
+
+Owner's ruling, verbatim (superseding the miss-to-hit shape from the
+entry below):
+
+> How about foreseen strikes is charisma modifier times per short/long
+> rest, use your reaction to add charisma mod to a self or allied attack
+> roll. ( model it as self, allow for allies)
+
+Effects:
+
+1. Foreseen strikes becomes: Charisma-modifier uses per **Short or Long
+   Rest**; spend a **Reaction** to add the Charisma modifier to an
+   attack roll made by the paladin **or an ally**. Drafting assumptions,
+   flagged in the doc: usable after the d20 is rolled but before the
+   outcome is determined; ally range drafted at 30 feet; minimum one
+   use.
+2. Sim models self-use only per the owner's instruction ("model it as
+   self, allow for allies"): a miss by 3 or less becomes a plain hit, at
+   most once per round (the Reaction), nat 1 stays a miss, pool
+   refreshes every combat.
+
+Sim, this shape (dealt/round vs Vengeance 19.4/34.7/60.2/72.1 burst,
+14.3/29.1/54.2/65.5 day): smite-only burst **19.2**/33.2/57.6/73.4 —
+**99%/96%/96%/102%**, an L3 statistical tie replacing v1's deliberate
+overshoot; day 12.4/25.5/48.4/63.0 — **87–89%**, up from v1's 82–84%
+because the pool now refreshes on Short Rests. The L3 invariant was
+rewritten from a flip to a ±5% parity band, citing this ruling. Ally
+use is unpriced table upside on top of these numbers.
+
 ## 2026-08-11 — Domination second batch: Foreseen strikes at 3; the smite rider comes back out
 
 Owner's rulings, verbatim (same session, after the redesign below):
