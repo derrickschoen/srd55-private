@@ -144,9 +144,7 @@ function isPreviewReplacementParams(value: unknown): value is PreviewReplacement
 }
 
 function isReplacementDecision(value: unknown): boolean {
-  return isRecord(value) &&
-    hasExactKeys(value, ['candidate_content_key', 'decision']) &&
-    isBoundedKey(value.candidate_content_key) && value.decision === 'match';
+  return isPublishDecision(value);
 }
 
 function isReplacementChoice(value: unknown): boolean {

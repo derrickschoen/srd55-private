@@ -8,16 +8,19 @@ import type {
   AuthoringLibrary,
   HomebrewDraftSummary,
   PublishedHomebrewSummary,
+  ReplacementDecision,
   ReplacementNotice,
   StoredHomebrewDraft,
 } from '../../../authoring/contracts';
 import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
 import type { HomebrewDraftUuid } from '../../../authoring/ids';
+import { AUTHORING_TEXT_LIMITS } from '../../../authoring/limits';
 import type { GuidedClassOption } from '../../../builder/contracts';
 import { createQueriesClient } from '../../../queries/client';
 import { RpcError } from '../../../rpc/protocol';
 import type { ScreenContext } from '../../screen';
 import { clear, element, listen, type Cleanup } from '../../dom';
+import { contentDecisionConsequence } from '../../content-decision-copy';
 import { freeTextSpan } from '../../free-text';
 import {
   createDraftConflictDialog,
@@ -362,6 +365,26 @@ async function renderReplacementRoute(
     old_content_key: oldContentKey as PublishedHomebrewSummary['content_key'],
     new_content_key: newContentKey as PublishedHomebrewSummary['content_key'],
   });
+  const collisionSelections = new Map<string, ReplacementDecision>();
+  const collisionKeys: string[] = [];
+  let apply: HTMLButtonElement | null = null;
+  const selectionKey = (replacementIndex: number, candidateContentKey: string): string =>
+    `${String(replacementIndex)}\u0000${candidateContentKey}`;
+  const collisionSelection = (key: string): ReplacementDecision => {
+    const decision = collisionSelections.get(key);
+    if (decision === undefined) {
+      throw new Error('An explicit replacement collision choice is required.');
+    }
+    return decision;
+  };
+  const refreshApplyState = (): void => {
+    if (apply === null) return;
+    apply.disabled = collisionKeys.some((key) => {
+      const decision = collisionSelections.get(key);
+      return decision === undefined ||
+        decision.decision === 'clone' && decision.clone_name.trim() === '';
+    });
+  };
   const review = element('section', {
     className: 'panel homebrew-replacement-review',
     attributes: { 'aria-label': 'Fix affected characters' },
@@ -371,7 +394,7 @@ async function renderReplacementRoute(
       text: 'Each listed character keeps the previous version unless you explicitly apply every change below.',
     }),
   ]);
-  for (const replacement of plan.replacements) {
+  for (const [replacementIndex, replacement] of plan.replacements.entries()) {
     const name = element('h3');
     name.append(freeTextSpan(replacement.character_name));
     const changes = element('dl');
@@ -390,32 +413,120 @@ async function renderReplacementRoute(
             replacementNoticeItem(context, cleanups, notice, false)
           )),
         ];
+    const collisionChoices: HTMLElement[] = [];
+    for (const [candidateIndex, candidate] of replacement.review.entries()) {
+      if (candidate.reason !== 'key-collision') continue;
+      const key = selectionKey(replacementIndex, candidate.candidate_content_key);
+      collisionKeys.push(key);
+      const prefix = `replacement-review-${String(replacementIndex + 1)}-${String(candidateIndex + 1)}`;
+      const match = element('input', {
+        attributes: {
+          id: `${prefix}-match`, type: 'radio', name: prefix, value: 'match',
+        },
+      });
+      const clone = element('input', {
+        attributes: {
+          id: `${prefix}-clone`, type: 'radio', name: prefix, value: 'clone',
+        },
+      });
+      const cloneName = element('input', {
+        attributes: {
+          id: `${prefix}-clone-name`, type: 'text', value: candidate.clone_name,
+          maxlength: String(AUTHORING_TEXT_LIMITS.name), disabled: '',
+        },
+      });
+      cloneName.value = candidate.clone_name;
+      cloneName.disabled = true;
+      const chooseMatch = (): void => {
+        collisionSelections.set(key, {
+          candidate_content_key: candidate.candidate_content_key,
+          decision: 'match',
+        });
+        cloneName.disabled = true;
+        refreshApplyState();
+      };
+      const chooseClone = (): void => {
+        collisionSelections.set(key, {
+          candidate_content_key: candidate.candidate_content_key,
+          decision: 'clone',
+          clone_name: cloneName.value,
+        });
+        cloneName.disabled = false;
+        refreshApplyState();
+      };
+      cleanups.push(
+        listen(match, 'change', chooseMatch),
+        listen(clone, 'change', chooseClone),
+        listen(cloneName, 'input', () => {
+          clone.checked = true;
+          match.checked = false;
+          chooseClone();
+        }),
+      );
+      collisionChoices.push(element('fieldset', {
+        className: 'content-adoption-row replacement-review-row',
+        attributes: { 'data-content-key': candidate.candidate_content_key },
+      }, [
+        element('legend', {
+          text: `${candidate.candidate_name} — ` +
+            catalogLayerLabel(candidate.candidate_catalog_layer),
+        }),
+        element('p', {
+          text: 'This same-key replacement reference has no incoming rules evidence. Choose what this attached character should use.',
+        }),
+        match,
+        element('label', {
+          text: contentDecisionConsequence('match', 'reference-replacement'),
+          attributes: { for: `${prefix}-match` },
+        }),
+        clone,
+        element('label', {
+          text: contentDecisionConsequence('clone', 'reference-replacement'),
+          attributes: { for: `${prefix}-clone` },
+        }),
+        element('label', {
+          text: 'Private copy name', attributes: { for: `${prefix}-clone-name` },
+        }),
+        cloneName,
+      ]));
+    }
     review.append(element('article', { className: 'homebrew-card' }, [
       name,
       changes,
       ...consequences,
+      ...collisionChoices,
     ]));
   }
   if (plan.replacements.length === 0) {
     review.append(element('p', { text: 'No characters use the previous version.' }));
   } else {
-    const apply = element('button', {
+    const applyButton = element('button', {
       className: 'button-primary',
       text: 'Apply to all listed characters',
       attributes: { type: 'button' },
     });
-    cleanups.push(listen(apply, 'click', () => {
-      apply.disabled = true;
+    apply = applyButton;
+    refreshApplyState();
+    cleanups.push(listen(applyButton, 'click', () => {
+      if (applyButton.disabled) return;
+      applyButton.disabled = true;
       status.textContent = 'Applying every reviewed replacement…';
       void client.commitReplacementSet({
         old_content_key: plan.old_content_key,
         new_content_key: plan.new_content_key,
-        replacements: plan.replacements.map((replacement) => ({
+        replacements: plan.replacements.map((replacement, replacementIndex) => ({
           token: replacement.token,
-          decisions: replacement.review.map((candidate) => ({
-            candidate_content_key: candidate.candidate_content_key,
-            decision: 'match' as const,
-          })),
+          decisions: replacement.review.map((candidate) =>
+            candidate.reason === 'key-collision'
+              ? collisionSelection(selectionKey(
+                  replacementIndex,
+                  candidate.candidate_content_key,
+                ))
+              : {
+                  candidate_content_key: candidate.candidate_content_key,
+                  decision: candidate.default_decision,
+                }
+          ),
           choices: [],
         })),
       }).then((result) => {
@@ -447,12 +558,12 @@ async function renderReplacementRoute(
         }
         status.textContent = 'All listed characters were updated.';
       }).catch((error: unknown) => {
-        apply.disabled = false;
+        refreshApplyState();
         status.textContent = error instanceof Error ? error.message : String(error);
         status.setAttribute('role', 'alert');
       });
     }));
-    review.append(apply);
+    review.append(applyButton);
   }
   view.main.append(review);
   status.textContent = 'Replacement review loaded.';

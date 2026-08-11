@@ -101,6 +101,9 @@ test('publishes, versions, archives, restores, and permanently purges a whole li
     'Purge Journey Hero',
   );
   await clearAnnouncements(page);
+  await page.getByRole('radio', {
+    name: 'Match — Uses the existing local entry; this attached character moves to it.',
+  }).check();
   const applyFixes = page.getByRole('button', { name: 'Apply to all listed characters' });
   await applyFixes.focus();
   await applyFixes.press('Enter');

@@ -23,6 +23,7 @@ import {
   type ContentImportEntryOutcome,
   type ContentImportNode,
   type ContentImportPlan,
+  type ContentImportReviewRow,
 } from '../catalog/content-adoption';
 import { resolveContentReference } from '../catalog/content-registry';
 import { spellCatalogDisclosure } from '../catalog/spell-catalog-disclosure';
@@ -65,6 +66,7 @@ import type {
   ReplacementDecision,
   ReplacementPlan,
   ReplacementNotice,
+  ReplacementReviewItem,
   ReplacementResult,
   ReplacementTokenFacts,
 } from './contracts';
@@ -322,6 +324,32 @@ function targetName(db: DatabaseContext, kind: AuthoredContentKind, key: Content
   return name;
 }
 
+function replacementReviewItem(row: ContentImportReviewRow): ReplacementReviewItem {
+  const common = {
+    candidate_content_key: row.targetContentKey,
+    candidate_name: row.localName,
+    candidate_catalog_layer: row.localCatalogLayer,
+  };
+  switch (row.matchClass) {
+    case 'key-collision':
+      return Object.freeze({
+        ...common,
+        reason: row.matchClass,
+        default_decision: null,
+        clone_name: row.cloneName,
+      });
+    case 'alias':
+    case 'compatible-fingerprint':
+    case 'srd-fallback':
+    case 'metadata-conflict':
+      return Object.freeze({
+        ...common,
+        reason: row.matchClass,
+        default_decision: 'match',
+      });
+  }
+}
+
 function planShape(
   db: DatabaseContext,
   facts: ReplacementTokenFacts,
@@ -344,13 +372,7 @@ function planShape(
     })]),
     notices,
     required_choices: Object.freeze([]),
-    review: Object.freeze(plan.reviews.map((row) => Object.freeze({
-      candidate_content_key: row.targetContentKey,
-      candidate_name: row.localName,
-      candidate_catalog_layer: row.localCatalogLayer,
-      reason: row.matchClass,
-      default_decision: 'match' as const,
-    }))),
+    review: Object.freeze(plan.reviews.map(replacementReviewItem)),
   };
   switch (facts.content_kind) {
     case 'species':
@@ -444,21 +466,31 @@ function matchChoices(
   decisions: readonly ReplacementDecision[],
 ): ContentImportChoices {
   const candidates = preview.review.map((item) => item.candidate_content_key);
+  const reviews = new Map(preview.review.map((item) => [
+    item.candidate_content_key,
+    item,
+  ]));
   if (
     decisions.length !== candidates.length ||
     new Set(decisions.map((decision) => decision.candidate_content_key)).size !== decisions.length ||
-    decisions.some((decision) =>
-      decision.decision !== 'match' ||
-      !candidates.includes(decision.candidate_content_key))
+    decisions.some((decision) => {
+      const review = reviews.get(decision.candidate_content_key);
+      if (review === undefined) return true;
+      return decision.decision === 'clone' && review.reason !== 'key-collision';
+    })
   ) {
     throw new ReferenceRetargetError('Explicit review decisions are required.', {
       reason: 'replacement_review_required',
       candidates,
     });
   }
-  return candidates.length === 0
-    ? Object.freeze({})
-    : Object.freeze({ [NODE_ID]: Object.freeze({ decision: 'match' as const }) });
+  const decision = decisions[0];
+  if (decision === undefined) return Object.freeze({});
+  return Object.freeze({
+    [NODE_ID]: decision.decision === 'match'
+      ? Object.freeze({ decision: 'match' as const })
+      : Object.freeze({ decision: 'clone' as const, cloneName: decision.clone_name }),
+  });
 }
 
 function assertNoUnimplementedChoices(

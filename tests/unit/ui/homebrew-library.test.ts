@@ -918,6 +918,109 @@ describe('HA-6 homebrew library routing and tabs', () => {
     }
   });
 
+  it('requires an explicit collision choice and sends the attached-character Clone consequence exactly', async () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const oldKey = 'expanded:content.species:collision-old' as ContentKey;
+      const newKey = 'expanded:content.species:collision-new' as ContentKey;
+      const candidateKey = 'expanded:content.species:installed-target' as ContentKey;
+      const plan: ReplacementSetPlan = {
+        old_content_key: oldKey,
+        new_content_key: newKey,
+        replacements: [{
+          kind: 'species',
+          token: 'collision-replacement-token' as never,
+          facts: {
+            content_kind: 'species', old_content_key: oldKey,
+            new_content_key: newKey, character_id: 23 as never,
+            character_revision: 5 as never,
+          },
+          character_name: 'Collision Hero',
+          changes: [{
+            path: ['content_key'], label: 'species content reference',
+            before: 'Old Species', after: 'Installed Target',
+          }],
+          notices: [], required_choices: [],
+          review: [{
+            candidate_content_key: candidateKey,
+            candidate_name: 'Installed Target',
+            candidate_catalog_layer: 'external',
+            reason: 'key-collision',
+            default_decision: null,
+            clone_name: 'Installed Target (Private copy)',
+          }],
+          replaces: ['root_fields', 'traits', 'effects', 'grants', 'filled_choices'],
+        }],
+      };
+      const commits: unknown[] = [];
+      const screenContext = context(
+        `https://example.test${homebrewReplacementPath(oldKey, newKey)}`,
+        [],
+      );
+      const cleanup = await renderHomebrewLibrary(screenContext, {
+        client: authoringClient({
+          previewReplacementSet: async () => plan,
+          commitReplacementSet: async (params) => {
+            commits.push(params);
+            return {
+              old_content_key: oldKey,
+              new_content_key: newKey,
+              replacements: [{
+                content_kind: 'species', character_id: 23 as never,
+                character_revision: 6 as never, old_content_key: oldKey,
+                new_content_key: candidateKey, notices: [],
+              }],
+            };
+          },
+        }),
+      });
+      const root = interactiveElement(screenContext.root);
+      const copy = elementText(root as unknown as Node);
+      expect(copy).toContain('Installed Target — Homebrew · external layer');
+      expect(copy).toContain(
+        'Match — Uses the existing local entry; this attached character moves to it.',
+      );
+      expect(copy).toContain(
+        'Clone — Installs a renamed private copy of the local entry; this attached character moves to that copy.',
+      );
+      const controls = root.querySelectorAll('input');
+      expect(controls.map((control) => control.getAttribute('checked')))
+        .toEqual([null, null, null]);
+      const apply = root.querySelectorAll('button').find(
+        (button) => button.textContent === 'Apply to all listed characters',
+      );
+      if (apply === undefined) throw new Error('Apply button missing.');
+      expect(apply.disabled).toBe(true);
+
+      const clone = controls[1];
+      const cloneName = controls[2];
+      if (clone === undefined || cloneName === undefined) {
+        throw new Error('Collision Clone controls missing.');
+      }
+      clone.checked = true;
+      clone.dispatchEvent(new Event('change'));
+      expect(apply.disabled).toBe(false);
+      apply.click();
+      await settle();
+      expect(commits).toEqual([{
+        old_content_key: oldKey,
+        new_content_key: newKey,
+        replacements: [{
+          token: 'collision-replacement-token',
+          decisions: [{
+            candidate_content_key: candidateKey,
+            decision: 'clone',
+            clone_name: 'Installed Target (Private copy)',
+          }],
+          choices: [],
+        }],
+      }]);
+      cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
   it('HA11-ARCHIVE-UI exposes only whole-set delete and restore actions with listed inert names', async () => {
     const restoreDocument = installInteractiveDocument();
     try {

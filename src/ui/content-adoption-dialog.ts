@@ -17,6 +17,7 @@ import type {
 import { clear, element, listen, type Cleanup } from './dom';
 import { attachModalTrap, type ModalTrap } from './modal-trap';
 import { catalogLayerLabel } from '../catalog/catalog-disclosure';
+import { contentDecisionConsequence } from './content-decision-copy';
 
 export interface ContentAdoptionDialogOptions {
   readonly mount: HTMLElement;
@@ -361,12 +362,12 @@ export function createContentAdoptionDialog(
       fieldset.append(
         match,
         element('label', {
-          text: 'Match — Discards the incoming rules; existing characters keep the local entry.',
+          text: contentDecisionConsequence('match', 'adoption'),
           attributes: { for: matchId },
         }),
         clone,
         element('label', {
-          text: 'Clone — Installs the incoming rules under a new name; existing characters stay on the local entry.',
+          text: contentDecisionConsequence('clone', 'adoption'),
           attributes: { for: cloneId },
         }),
         element('label', { text: 'Private copy name', attributes: { for: cloneNameId } }),

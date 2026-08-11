@@ -131,24 +131,33 @@ function publishSpecies(
   name: string,
   speed: number,
   maximumSpellLevel?: number,
+  traitName?: string,
 ) {
   const created = service.createDraft({ content_kind: 'species' });
   const document = completeSpecies(created, name, speed);
   const saved = service.saveDraft({
     draft_uuid: created.draft_uuid,
     expected_revision: created.revision,
-    document: maximumSpellLevel === undefined
-      ? document
-      : {
+    document: {
           ...document,
-          grants: [{
-            kind: 'choice_from_list',
-            draft_item_uuid: `${name}-spell-choice` as HomebrewDraftItemUuid,
-            rule_key: 'retarget-spell-choice',
-            list: 'Wizard',
-            count: 1,
-            maximum_spell_level: maximumSpellLevel,
-          }],
+          ...(maximumSpellLevel === undefined
+            ? {}
+            : { grants: [{
+                kind: 'choice_from_list' as const,
+                draft_item_uuid: `${name}-spell-choice` as HomebrewDraftItemUuid,
+                rule_key: 'retarget-spell-choice',
+                list: 'Wizard',
+                count: 1,
+                maximum_spell_level: maximumSpellLevel,
+              }] }),
+          ...(traitName === undefined
+            ? {}
+            : { traits: [{
+                draft_item_uuid: `${name}-nested-trait` as HomebrewDraftItemUuid,
+                name: traitName,
+                description: 'Nested rules retained by replacement Clone.',
+                effects: [],
+              }] }),
         },
   });
   const preview = service.previewPublish({
@@ -629,7 +638,13 @@ describe('catalog authoring RPC handlers', () => {
       [first.id],
     )).toBe(derived.derivedKey);
 
-    const reviewedTarget = publishSpecies(service, 'RPC Retarget Reviewed', 45);
+    const reviewedTarget = publishSpecies(
+      service,
+      'RPC Retarget Reviewed',
+      45,
+      undefined,
+      'Nested Review Trait',
+    );
     const alias = 'expanded:incoming.owner:rpc-retarget-reviewed' as ContentKey;
     registerContentAlias(rpc.context.db, {
       kind: 'species',
@@ -653,15 +668,126 @@ describe('catalog authoring RPC handlers', () => {
       character_id: second.id as CharacterId,
     });
     expect(divergentPreview.review).toEqual([
-      expect.objectContaining({
+      {
         candidate_content_key: reviewedTarget.content_key,
+        candidate_name: 'RPC Retarget Reviewed',
+        candidate_catalog_layer: 'external',
         reason: 'key-collision',
-      }),
+        default_decision: null,
+        clone_name: 'RPC Retarget Reviewed (Private copy)',
+      },
     ]);
+    await expect(authoringClient.commitReplacement({
+      token: divergentPreview.token,
+      decisions: [],
+      choices: [],
+    })).rejects.toMatchObject({
+      data: {
+        reason: 'replacement_review_required',
+        candidates: [reviewedTarget.content_key],
+      },
+    });
+    for (const invalidDecision of [
+      {
+        candidate_content_key: reviewedTarget.content_key,
+        decision: 'match',
+        clone_name: 'Match must not carry a clone name',
+      },
+      {
+        candidate_content_key: reviewedTarget.content_key,
+        decision: 'clone',
+      },
+      {
+        candidate_content_key: reviewedTarget.content_key,
+        decision: 'clone',
+        clone_name: 'RPC Retarget Reviewed Private',
+        extra: true,
+      },
+    ]) {
+      expect(await rpc.call(AUTHORING_RPC.commitReplacement, {
+        token: divergentPreview.token,
+        decisions: [invalidDecision],
+        choices: [],
+      })).toMatchObject({ ok: false, error: { code: 'invalid_params' } });
+    }
+    const cloned = await authoringClient.commitReplacement({
+      token: divergentPreview.token,
+      decisions: [{
+        candidate_content_key: reviewedTarget.content_key,
+        decision: 'clone',
+        clone_name: 'RPC Retarget Reviewed Private',
+      }],
+      choices: [],
+    });
+    expect(cloned).toMatchObject({
+      character_id: second.id,
+      old_content_key: old.content_key,
+    });
+    expect(cloned.new_content_key).not.toBe(reviewedTarget.content_key);
+    expect(rpc.context.db.oneRaw(
+      `SELECT definition.name, template.base_speed_feet
+       FROM species_definitions AS definition
+       JOIN species_templates AS template USING (content_key)
+       WHERE definition.content_key = ?`,
+      [cloned.new_content_key],
+    )).toEqual({
+      name: 'RPC Retarget Reviewed Private',
+      base_speed_feet: 45,
+    });
+    expect(rpc.context.db.allRaw(
+      `SELECT trait.name, trait.description
+       FROM species_template_traits AS trait
+       JOIN species_templates AS template ON template.id = trait.species_template_id
+       WHERE template.content_key = ? ORDER BY trait.sort_order`,
+      [cloned.new_content_key],
+    )).toEqual([{
+      name: 'Nested Review Trait',
+      description: 'Nested rules retained by replacement Clone.',
+    }]);
+    expect(service.usages(cloned.new_content_key).usages.map((usage) => usage.character_id))
+      .toEqual([second.id]);
+
+    const matched = createGuidedCharacter(
+      rpc.context.db,
+      { name: 'Matched Retarget Hero', class_content_key: classOption.content_key },
+      new CharacterCommandIntegrity('rpc-retarget-matched'),
+    );
+    applyGuidedOrigin(rpc.context.db, {
+      character_id: matched.id as CharacterId,
+      kind: 'species',
+      content_key: old.content_key,
+    });
+    const matchedPreview = await authoringClient.previewReplacement({
+      old_content_key: old.content_key,
+      new_content_key: reviewedTarget.content_key,
+      character_id: matched.id as CharacterId,
+    });
+    expect(await authoringClient.commitReplacement({
+      token: matchedPreview.token,
+      decisions: [{
+        candidate_content_key: reviewedTarget.content_key,
+        decision: 'match',
+      }],
+      choices: [],
+    })).toMatchObject({
+      character_id: matched.id,
+      new_content_key: reviewedTarget.content_key,
+    });
+
+    const aliasCharacter = createGuidedCharacter(
+      rpc.context.db,
+      { name: 'Alias Retarget Hero', class_content_key: classOption.content_key },
+      new CharacterCommandIntegrity('rpc-retarget-alias'),
+    );
+    applyGuidedOrigin(rpc.context.db, {
+      character_id: aliasCharacter.id,
+      kind: 'species',
+      content_key: old.content_key,
+    });
     const reviewedPreview = await authoringClient.previewReplacement({
       old_content_key: old.content_key,
       new_content_key: alias,
-      character_id: second.id as CharacterId,
+      character_id: aliasCharacter.id as CharacterId,
     });
     expect(reviewedPreview.review).toEqual([{
       candidate_content_key: reviewedTarget.content_key,
@@ -677,7 +803,8 @@ describe('catalog authoring RPC handlers', () => {
     })).rejects.toMatchObject({
       data: { reason: 'replacement_review_required' },
     });
-    expect(service.usages(old.content_key).usages.map((usage) => usage.character_id)).toContain(second.id);
+    expect(service.usages(old.content_key).usages.map((usage) => usage.character_id))
+      .toContain(aliasCharacter.id);
     expect(await authoringClient.commitReplacement({
       token: reviewedPreview.token,
       decisions: [{
@@ -686,14 +813,14 @@ describe('catalog authoring RPC handlers', () => {
       }],
       choices: [],
     })).toMatchObject({
-      character_id: second.id,
+      character_id: aliasCharacter.id,
       new_content_key: reviewedTarget.content_key,
     });
     expect(rpc.context.db.scalar<number>(
       `SELECT count(*) FROM catalog_content_match_decisions
        WHERE content_kind = 'species' AND target_content_key = ?`,
       [reviewedTarget.content_key],
-    )).toBe(1);
+    )).toBe(2);
 
     const refused = createGuidedCharacter(
       rpc.context.db,
@@ -937,9 +1064,18 @@ describe('catalog authoring RPC handlers', () => {
         'Selections that will become invalid',
       );
       expect(elementText(root as unknown as Node)).toContain(consequence);
-      interactiveRoot.querySelectorAll('button').find(
+      const match = interactiveRoot.querySelectorAll('input').find(
+        (input) => input.getAttribute('value') === 'match',
+      );
+      if (match === undefined) throw new Error('Replacement Match choice missing.');
+      match.checked = true;
+      match.dispatchEvent(new Event('change'));
+      const apply = interactiveRoot.querySelectorAll('button').find(
         (button) => button.textContent === 'Apply to all listed characters',
-      )?.click();
+      );
+      if (apply === undefined) throw new Error('Replacement Apply button missing.');
+      expect(apply.disabled).toBe(false);
+      apply.click();
       for (let turn = 0; turn < 8; turn += 1) await Promise.resolve();
 
       const rendered = elementText(root as unknown as Node);
