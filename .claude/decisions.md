@@ -7,6 +7,18 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D233 — OWNER: sim comparators become best-effort SRD substitutes before any sim sync (2026-08-11)
+
+The damage sim's three non-SRD comparator builds (a 2024-PHB oath
+paladin, a 2024 feat, a 2024 bard college — currently named in wt/party
+tools/sim) are to be REPLACED with best-effort SRD substitutes (rebuild
+the benchmark builds from SRD 5.2.1 content approximating the same
+optimization role) as part of whatever landing branch first brings
+tools/sim to main. Until then the sim stays in wt/party with its honest
+provenance header. Doc/ruling syncs land WITHOUT the sim (2026-08-11
+docsync dropped the sim portions of mixed commits; those portions ride
+the future sim sync).
+
 ## D232 — OWNER: the taxonomy's legendary/artifact gap mechanisms stay prose-only (2026-08-11)
 
 The twelve systematic gap families from the 307-item corpus validation
