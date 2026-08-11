@@ -153,8 +153,7 @@ describe('completeness detection', () => {
         title: 'No eligible Wizard level 1 spells in your catalog',
         detail:
           'Magic Initiate: Wizard asks for Wizard level 1 spells, and no spell in the imported catalog can fill them.',
-        remedy:
-          'Import a catalog file with more Wizard level 1 spells (Settings → Import catalog).',
+        remedy_action: 'import_catalog',
         spell_lists: ['Wizard'],
         spell_schools: [],
         spell_tags: [],
@@ -184,9 +183,9 @@ describe('completeness detection', () => {
       'No eligible Cleric cantrips in your catalog',
       'No eligible Cleric level 1 spells in your catalog',
     ]);
-    expect(result.catalog_gaps.map((gap) => gap.remedy)).toEqual([
-      'Import a catalog file with more Cleric cantrips (Settings → Import catalog).',
-      'Import a catalog file with more Cleric level 1 spells (Settings → Import catalog).',
+    expect(result.catalog_gaps.map((gap) => gap.remedy_action)).toEqual([
+      'import_catalog',
+      'import_catalog',
     ]);
     expect(result.catalog_gap_count).toBe(2);
   });

@@ -480,6 +480,20 @@ export interface BackgroundAuthoringReferences {
   readonly armors: readonly BackgroundAuthoringReferenceOption[];
 }
 
+export interface SpellGrantAuthoringReference {
+  readonly content_key: ContentKey;
+  readonly name: string;
+  readonly rules_edition: RulesEdition;
+  readonly level: number;
+  readonly catalog_layer: CatalogLayerDisclosure;
+}
+
+/** Installed spell choices and the list vocabulary derived from those spells. */
+export interface SpellGrantAuthoringReferences {
+  readonly spells: readonly SpellGrantAuthoringReference[];
+  readonly lists: readonly string[];
+}
+
 /**
  * Facts authenticated by a publish token. They are intentionally not shared
  * with replacement tokens: a draft revision is not a character revision, and

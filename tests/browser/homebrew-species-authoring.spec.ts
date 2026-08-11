@@ -21,12 +21,9 @@ async function resetHome(page: Page): Promise<void> {
 test('authors, previews, publishes, lists, and applies a homebrew species', async ({
   page,
 }) => {
-  // Budget derivation (pool measurement belongs to the supervisor): the guided
-  // journey measured 25.2s + 15s reserved for this spec's second app boot +
-  // 15s reserved for authoring/publish/grant interactions = 55.2s. Multiplying
-  // by 1.6 for pool contention gives 88.32s, rounded up to 90s. If the measured
-  // pool run exceeds 36s (40%), D200 discipline requires a measured revision.
-  test.setTimeout(90_000);
+  // Measured on PLAYWRIGHT_PORT=5090 in the affected five-spec round at 15.7s.
+  // The required x1.5 reserve is 23.55s, rounded up to 100ms.
+  test.setTimeout(23_600);
   await resetHome(page);
 
   await page.getByRole('link', { name: 'Homebrew library' }).click();
@@ -54,7 +51,7 @@ test('authors, previews, publishes, lists, and applies a homebrew species', asyn
 
   await page.getByRole('button', { name: 'Add grant' }).click();
   const grant = page.locator('.species-grant-card').first();
-  await grant.getByLabel('Rule key').fill('clockwork-lore');
+  await grant.getByLabel('Stable grant label').fill('clockwork-lore');
   await grant.getByLabel('Number of skills to choose').fill('1');
   await grant.getByLabel('Arcana', { exact: true }).check();
   await grant.getByLabel('History', { exact: true }).check();

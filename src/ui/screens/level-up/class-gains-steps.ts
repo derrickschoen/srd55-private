@@ -16,6 +16,7 @@ import type {
 import { element, listen, type Cleanup } from '../../dom';
 import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
 import { catalogControlDescription } from '../../catalog-control-disclosure';
+import { levelUpWarningRemedy } from './warning-remedy';
 
 export type PendingEpicPath = 'resolve_now' | 'next_level';
 export type SubclassDraft =
@@ -119,7 +120,7 @@ export function renderLevelUpWarnings(
           element('li', { attributes: { [LEVEL_UP_ATTR.warning]: warning.kind } }, [
             element('strong', { text: warning.title }),
             element('p', { text: warning.detail }),
-            element('p', { text: warning.remedy }),
+            levelUpWarningRemedy(warning),
           ]),
         ),
       ),
@@ -148,7 +149,7 @@ function prerequisiteWarning(
         )}`,
       }),
       element('p', { text: warning.detail }),
-      element('p', { text: warning.remedy }),
+      levelUpWarningRemedy(warning),
     ],
   );
 }

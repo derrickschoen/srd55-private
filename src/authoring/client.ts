@@ -12,6 +12,7 @@ import {
   type ArchiveSetResult,
   type AuthoringLibrary,
   type BackgroundAuthoringReferences,
+  type SpellGrantAuthoringReferences,
   type ContentUsageList,
   type DraftRevision,
   type HomebrewDraft,
@@ -35,6 +36,7 @@ import {
 export const AUTHORING_RPC = Object.freeze({
   list: 'authoring.list',
   backgroundReferences: 'authoring.backgroundReferences',
+  spellGrantReferences: 'authoring.spellGrantReferences',
   createDraft: 'authoring.createDraft',
   readDraft: 'authoring.readDraft',
   saveDraft: 'authoring.saveDraft',
@@ -134,6 +136,7 @@ export interface PermanentPurgeParams {
 export interface AuthoringClient {
   list(): Promise<AuthoringLibrary>;
   backgroundReferences(): Promise<BackgroundAuthoringReferences>;
+  spellGrantReferences(): Promise<SpellGrantAuthoringReferences>;
   createDraft(params: CreateDraftParams): Promise<StoredHomebrewDraft>;
   readDraft(params: ReadDraftParams): Promise<StoredHomebrewDraft>;
   saveDraft(params: SaveDraftParams): Promise<StoredHomebrewDraft>;
@@ -180,6 +183,11 @@ export function createAuthoringClient(
     backgroundReferences: () =>
       rpc.call<Record<string, never>, BackgroundAuthoringReferences>(
         AUTHORING_RPC.backgroundReferences,
+        {},
+      ),
+    spellGrantReferences: () =>
+      rpc.call<Record<string, never>, SpellGrantAuthoringReferences>(
+        AUTHORING_RPC.spellGrantReferences,
         {},
       ),
     createDraft: (params: CreateDraftParams) =>

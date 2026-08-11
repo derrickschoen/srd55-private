@@ -187,7 +187,7 @@ function overrideProgression(
     const ruleKeys = new Set<string>();
     const grants = row.grants.flatMap((grant, grantIndex) => {
       if (ruleKeys.has(grant.rule_key)) {
-        authoringIssue(issues, [...path, 'grants', grantIndex, 'rule_key'], 'duplicate', 'Grant rule key must be unique within a level.');
+        authoringIssue(issues, [...path, 'grants', grantIndex, 'rule_key'], 'duplicate', 'Stable grant labels must be unique within a class level.');
       }
       ruleKeys.add(grant.rule_key);
       const resolved = resolvedAuthoringGrant(db, grant, [...path, 'grants', grantIndex], issues);

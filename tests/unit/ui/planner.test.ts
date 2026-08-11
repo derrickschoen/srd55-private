@@ -1082,6 +1082,37 @@ describe('planner persisted workflow', () => {
 });
 
 describe('completeness panel wording', () => {
+  it('renders the catalog-gap action as an enabled control owned by the UI', () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const panel = interactiveElement(renderCompleteness({
+        ...emptyCompleteness,
+        catalog_gap_count: 1,
+        catalog_gaps: [{
+          kind: 'catalog_gap',
+          title: 'No eligible Wizard spells in your catalog',
+          detail: 'A source asks for a spell the installed catalog cannot supply.',
+          remedy_action: 'import_catalog',
+          spell_lists: ['Wizard'],
+          spell_schools: [],
+          spell_tags: [],
+          spell_level_min: 1,
+          spell_level_max: 1,
+          sources: ['Homebrew source'],
+        }],
+      }, {
+        fillSkillGrant: () => undefined,
+      }, false));
+      const link = panel.querySelector('a');
+      expect(elementText(link as unknown as Node)).toBe(
+        'Import a catalog with eligible spells',
+      );
+      expect(link?.getAttribute('href')).toBe('/?import=catalog');
+    } finally {
+      restoreDocument();
+    }
+  });
+
   it('routes a required source choice to the guided Species editor', () => {
     const restoreDocument = installInteractiveDocument();
     try {

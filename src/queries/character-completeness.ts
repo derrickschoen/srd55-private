@@ -153,7 +153,7 @@ export interface CatalogGapItem {
   readonly kind: 'catalog_gap';
   readonly title: string;
   readonly detail: string;
-  readonly remedy: string;
+  readonly remedy_action: 'import_catalog';
   readonly spell_lists: readonly string[];
   readonly spell_schools: readonly string[];
   readonly spell_tags: readonly string[];
@@ -507,7 +507,7 @@ function catalogGapItem(gap: CatalogGap): CatalogGapItem {
     kind: 'catalog_gap',
     title: `No eligible ${phrase} in your catalog`,
     detail: `${sourcePhrase} ${asks} for ${phrase}, and no spell in the imported catalog can fill them.`,
-    remedy: `Import a catalog file with more ${phrase} (Settings → Import catalog).`,
+    remedy_action: 'import_catalog',
     spell_lists: [...gap.constraint.lists],
     spell_schools: [...gap.constraint.schools],
     spell_tags: [...gap.constraint.tags],

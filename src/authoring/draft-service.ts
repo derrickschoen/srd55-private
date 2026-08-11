@@ -27,6 +27,7 @@ import type {
   AuthoringGrant,
   AuthoringLibrary,
   BackgroundAuthoringReferences,
+  SpellGrantAuthoringReferences,
   BackgroundAuthoringDraft,
   BackgroundAuthoringDraftEquipment,
   BackgroundContentAggregate,
@@ -726,6 +727,41 @@ export class CatalogAuthoringService {
       )),
       weapons: Object.freeze(references('weapon_templates', 'weapon')),
       armors: Object.freeze(references('armor_templates', 'armor')),
+    });
+  }
+
+  spellGrantReferences(): SpellGrantAuthoringReferences {
+    const spells = this.db.all(
+      `SELECT version.content_key, version.display_name, version.rules_edition,
+              version.level, identity.catalog_layer
+       FROM spell_versions AS version
+       LEFT JOIN catalog_content_identities AS identity
+         ON identity.content_kind = 'spell'
+        AND identity.content_key = version.content_key
+       WHERE ${selectableCatalogContentSql('spell', 'version.content_key')}
+       ORDER BY version.display_name, version.rules_edition, version.level,
+                version.content_key`,
+      undefined,
+      (row) => ({
+        content_key: sqlString(row, 'content_key') as ContentKey,
+        name: sqlString(row, 'display_name'),
+        rules_edition: sqlString(row, 'rules_edition') as RulesEdition,
+        level: sqlInteger(row, 'level'),
+        catalog_layer: catalogLayerDisclosure(sqlNullableString(row, 'catalog_layer')),
+      }),
+    );
+    const lists = this.db.all(
+      `SELECT DISTINCT membership.spell_list_key
+       FROM spell_list_memberships AS membership
+       JOIN spell_versions AS version ON version.id = membership.spell_version_id
+       WHERE ${selectableCatalogContentSql('spell', 'version.content_key')}
+       ORDER BY membership.spell_list_key`,
+      undefined,
+      (row) => sqlString(row, 'spell_list_key'),
+    );
+    return Object.freeze({
+      spells: Object.freeze(spells),
+      lists: Object.freeze(lists),
     });
   }
 

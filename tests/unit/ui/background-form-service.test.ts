@@ -120,6 +120,7 @@ function client(service: CatalogAuthoringService): AuthoringClient {
   return {
     list: () => rpcCall(() => service.list()),
     backgroundReferences: () => rpcCall(() => service.backgroundReferences()),
+    spellGrantReferences: () => rpcCall(() => service.spellGrantReferences()),
     createDraft: (params) => rpcCall(() => service.createDraft(params)),
     readDraft: (params) => rpcCall(() => service.readDraft(params.draft_uuid)),
     saveDraft: (params) => rpcCall(() => service.saveDraft(params)),

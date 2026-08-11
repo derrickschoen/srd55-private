@@ -258,7 +258,7 @@ export function resolvedAuthoringGrant(
       }
       const spell = authoringFingerprintReference(db, 'spell', draft.spell_content_key);
       if (spell === null) {
-        authoringIssue(issues, [...path, 'spell_content_key'], 'unresolved_reference', 'Spell content key does not resolve to one current fingerprint.');
+        authoringIssue(issues, [...path, 'spell_content_key'], 'unresolved_reference', 'The selected spell is no longer installed. Choose an installed spell.');
         return null;
       }
       if (!ruleKeyReady) return null;
@@ -363,7 +363,7 @@ export function speciesDraftToAggregate(
   const ruleKeys = new Set<string>();
   const grants = draft.grants.flatMap((grant, index) => {
     if (ruleKeys.has(grant.rule_key)) {
-      authoringIssue(issues, ['grants', index, 'rule_key'], 'duplicate', 'Grant rule key must be unique.');
+      authoringIssue(issues, ['grants', index, 'rule_key'], 'duplicate', 'Stable grant labels must be unique throughout the species.');
     }
     ruleKeys.add(grant.rule_key);
     const resolved = resolvedAuthoringGrant(db, grant, ['grants', index], issues);

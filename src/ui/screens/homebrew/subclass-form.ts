@@ -4,6 +4,7 @@ import type {
   AuthoringValidationIssue,
   PublishPreview,
   PublishResult,
+  SpellGrantAuthoringReferences,
   StoredHomebrewDraft,
   SubclassAuthoringDraft,
   SubclassAuthoringDraftFeature,
@@ -52,6 +53,7 @@ import { clear, element, type Cleanup } from '../../dom';
 import { freeTextSpan } from '../../free-text';
 import type { ScreenContext } from '../../screen';
 import { homebrewPublishedPath } from './homebrew-routes';
+import { spellGrantControls } from './spell-grant-controls';
 
 type StoredSubclassDraft = StoredHomebrewDraft & {
   readonly content_kind: 'subclass';
@@ -64,6 +66,7 @@ export interface SubclassFormOptions {
   readonly mount: HTMLElement;
   readonly draft: StoredSubclassDraft;
   readonly parentClasses: readonly GuidedClassOption[];
+  readonly spellGrantReferences: SpellGrantAuthoringReferences;
   readonly randomUuid?: () => string;
   readonly confirmLeave?: () => boolean;
   readonly windowObject?: Window;
@@ -699,13 +702,6 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
           replaceProgressionRow(rowIndex, { ...liveRow, grants });
           render();
         });
-        const ruleKey = element('input', {
-          attributes: {
-            id: `${prefix}-rule-key`, type: 'text', required: '',
-            ...pathAttribute(['progression', 'rows', rowIndex, 'grants', grantIndex, 'rule_key']),
-          },
-        });
-        ruleKey.value = grant.rule_key;
         const changeGrant = (field: string, value: unknown): void => {
           Reflect.set(grant, field, value);
           const liveRow = liveOverride().rows[rowIndex]!;
@@ -713,40 +709,31 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
             index === grantIndex ? { ...grant } as AuthoringDraftGrant : candidate);
           replaceProgressionRow(rowIndex, { ...liveRow, grants });
         };
-        ruleKey.addEventListener('input', () => changeGrant('rule_key', ruleKey.value));
         card.append(
           ...labelledControl('Spell grant kind', kind.id, kind),
-          ...labelledControl('Rule key', ruleKey.id, ruleKey),
+          ...spellGrantControls({
+            grant,
+            prefix,
+            pathAttribute,
+            path: ['progression', 'rows', rowIndex, 'grants', grantIndex],
+            references: options.spellGrantReferences,
+            peerRuleKeys: (liveOverride().rows[rowIndex]?.grants ?? [])
+              .filter((_, candidateGrantIndex) => candidateGrantIndex !== grantIndex)
+              .map((candidate) => candidate.rule_key),
+            ruleKeyScope: 'subclass_level',
+            change: changeGrant,
+          }),
         );
         if (grant.kind === 'fixed_spell') {
-          const spell = element('input', {
-            attributes: {
-              id: `${prefix}-spell`, type: 'text', required: '',
-              ...pathAttribute(['progression', 'rows', rowIndex, 'grants', grantIndex, 'spell_content_key']),
-            },
-          });
-          spell.value = grant.spell_content_key ?? '';
-          spell.addEventListener('input', () => changeGrant(
-            'spell_content_key', spell.value === '' ? null : spell.value as ContentKey,
-          ));
           const prepared = element('input', {
             attributes: { id: `${prefix}-prepared`, type: 'checkbox' },
           });
           prepared.checked = grant.always_prepared;
           prepared.addEventListener('change', () => changeGrant('always_prepared', prepared.checked));
           card.append(
-            ...labelledControl('Spell content key', spell.id, spell),
             ...labelledControl('Always prepared', prepared.id, prepared),
           );
         } else if (grant.kind === 'choice_from_list') {
-          const list = element('input', {
-            attributes: {
-              id: `${prefix}-list`, type: 'text', required: '',
-              ...pathAttribute(['progression', 'rows', rowIndex, 'grants', grantIndex, 'list']),
-            },
-          });
-          list.value = grant.list;
-          list.addEventListener('input', () => changeGrant('list', list.value));
           const count = element('input', {
             attributes: {
               id: `${prefix}-count`, type: 'number', min: '1', step: '1', required: '',
@@ -775,7 +762,6 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
           maximum.value = grant.maximum_spell_level === null ? '' : String(grant.maximum_spell_level);
           maximum.addEventListener('input', () => changeGrant('maximum_spell_level', nullableInteger(maximum.value)));
           card.append(
-            ...labelledControl('Spell list', list.id, list),
             ...labelledControl('Number of spells', count.id, count),
             ...labelledControl('Minimum spell level (optional)', minimum.id, minimum),
             ...labelledControl('Maximum spell level (optional)', maximum.id, maximum),

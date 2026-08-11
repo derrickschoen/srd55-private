@@ -571,6 +571,8 @@ export async function renderCharacterList(
       shell.transfer.replaceChildren(transferControls.element);
       if (context.route.query.get('import') === 'library') {
         transferControls.focusLibraryImport();
+      } else if (context.route.query.get('import') === 'catalog') {
+        transferControls.focusCatalogImport();
       }
     } else {
       transferControls.updateCharacters(characters);

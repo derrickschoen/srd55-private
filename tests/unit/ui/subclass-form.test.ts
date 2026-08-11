@@ -17,7 +17,7 @@ import { parseRoute, Router } from '../../../src/ui/router';
 import type { ScreenContext } from '../../../src/ui/screen';
 import {
   isStoredSubclassDraft,
-  renderSubclassForm,
+  renderSubclassForm as renderSubclassFormBase,
   subclassProgressionGridIssues,
 } from '../../../src/ui/screens/homebrew/subclass-form';
 import {
@@ -26,6 +26,20 @@ import {
   interactiveElement,
   type InteractiveTestElement,
 } from '../../fixtures/interactive-dom';
+
+type TestSubclassFormOptions = Omit<
+  Parameters<typeof renderSubclassFormBase>[0],
+  'spellGrantReferences'
+> & { readonly spellGrantReferences?: Parameters<
+  typeof renderSubclassFormBase
+>[0]['spellGrantReferences'] };
+
+function renderSubclassForm(options: TestSubclassFormOptions) {
+  return renderSubclassFormBase({
+    ...options,
+    spellGrantReferences: options.spellGrantReferences ?? { spells: [], lists: [] },
+  });
+}
 
 const hostile = '</textarea><img data-ha8-hostile src=x> "quoted" 🐲 \u202eRTL\u202c nul\u0000\u0001tail';
 const fighterKey = '2024:class:fighter' as ContentKey;
@@ -128,6 +142,7 @@ function client(overrides: Partial<AuthoringClient> = {}): AuthoringClient {
   return {
     list: () => unused(),
     backgroundReferences: () => unused(),
+    spellGrantReferences: () => unused(),
     createDraft: () => unused(),
     readDraft: () => unused(),
     saveDraft: () => unused(),
@@ -268,6 +283,7 @@ describe('HA-8 subclass timeline form', () => {
         mount,
         draft,
         parentClasses: parents,
+        spellGrantReferences: { spells: [], lists: ['Cleric', 'Wizard'] },
         windowObject: new EventTarget() as unknown as Window,
       });
       const root = interactiveElement(mount);
@@ -466,6 +482,7 @@ describe('HA-8 subclass timeline form', () => {
         mount,
         draft,
         parentClasses: parents,
+        spellGrantReferences: { spells: [], lists: ['Cleric', 'Wizard'] },
         windowObject: new EventTarget() as unknown as Window,
       });
       const root = interactiveElement(mount);
@@ -532,6 +549,7 @@ describe('HA-8 subclass timeline form', () => {
         mount,
         draft,
         parentClasses: parents,
+        spellGrantReferences: { spells: [], lists: ['Cleric', 'Wizard'] },
         windowObject: new EventTarget() as unknown as Window,
       });
       const root = interactiveElement(mount);
@@ -543,6 +561,16 @@ describe('HA-8 subclass timeline form', () => {
       expect(elementText(root as unknown as Node))
         .toContain('Minimum spell level (optional)');
       expect(minimum.value).toBe('1');
+      const list = control(
+        root,
+        'select',
+        'subclass-progression-3-grant-leveled-list-list',
+      );
+      expect(list.value).toBe('Wizard');
+      expect(list.querySelectorAll('option').map((option) =>
+        elementText(option as unknown as Node))).toEqual([
+        'Choose an installed spell list', 'Cleric', 'Wizard',
+      ]);
       input(minimum, '2');
       button(root, 'Save draft').click();
       await settle();
@@ -554,6 +582,79 @@ describe('HA-8 subclass timeline form', () => {
         minimum_spell_level: 2,
         maximum_spell_level: 2,
       });
+      cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('generates stable labels per level so repeated labels continue a slot across levels', () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const progressionRows = [...rows()];
+      const choice = (uuid: string) => ({
+        kind: 'choice_from_list' as const,
+        draft_item_uuid: itemUuid(uuid),
+        rule_key: '',
+        list: 'Wizard',
+        count: 1,
+        minimum_spell_level: 0,
+        maximum_spell_level: 0,
+      });
+      progressionRows[2] = { ...progressionRows[2]!, grants: [choice('level-three')] };
+      progressionRows[3] = { ...progressionRows[3]!, grants: [choice('level-four')] };
+      progressionRows[4] = {
+        ...progressionRows[4]!,
+        grants: [choice('level-five-one'), choice('level-five-two')],
+      };
+      const authoredDocument: SubclassAuthoringDraft = {
+        ...richDocument(),
+        progression: {
+          mode: 'override',
+          spellcasting_ability: 'intelligence',
+          caster_contribution: 'third_down',
+          rows: progressionRows,
+        },
+      };
+      const screenContext = context();
+      const mount = document.createElement('div');
+      screenContext.root.append(mount);
+      const draft = stored(authoredDocument);
+      if (!isStoredSubclassDraft(draft)) throw new Error('Subclass fixture did not narrow.');
+      const cleanup = renderSubclassForm({
+        context: screenContext,
+        client: client(),
+        mount,
+        draft,
+        parentClasses: parents,
+        spellGrantReferences: { spells: [], lists: ['Wizard'] },
+        windowObject: new EventTarget() as unknown as Window,
+      });
+      const root = interactiveElement(mount);
+
+      expect(control(
+        root,
+        'input',
+        'subclass-progression-3-grant-level-three-stable-label',
+      ).value).toBe('wizard-spell-choice');
+      expect(control(
+        root,
+        'input',
+        'subclass-progression-4-grant-level-four-stable-label',
+      ).value).toBe('wizard-spell-choice');
+      expect(control(
+        root,
+        'input',
+        'subclass-progression-5-grant-level-five-one-stable-label',
+      ).value).toBe('wizard-spell-choice');
+      expect(control(
+        root,
+        'input',
+        'subclass-progression-5-grant-level-five-two-stable-label',
+      ).value).toBe('wizard-spell-choice-2');
+      expect(elementText(root as unknown as Node)).toContain(
+        'Reuse it at another class level to continue one choice slot',
+      );
       cleanup();
     } finally {
       restoreDocument();

@@ -157,6 +157,7 @@ function authoringClient(
   return {
     list: () => Promise.resolve(library),
     backgroundReferences: () => unused(),
+    spellGrantReferences: () => Promise.resolve({ spells: [], lists: [] }),
     createDraft: () => unused(),
     readDraft: () => unused(),
     saveDraft: () => unused(),

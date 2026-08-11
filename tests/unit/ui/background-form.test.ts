@@ -113,6 +113,7 @@ function client(overrides: Partial<AuthoringClient> = {}): AuthoringClient {
   return {
     list: () => unused(),
     backgroundReferences: () => Promise.resolve(references),
+    spellGrantReferences: () => unused(),
     createDraft: () => unused(),
     readDraft: () => unused(),
     saveDraft: () => unused(),

@@ -4,6 +4,7 @@ import type {
   AuthoringValidationIssue,
   PublishPreview,
   PublishResult,
+  SpellGrantAuthoringReferences,
   SpeciesAuthoringDraft,
   SpeciesAuthoringDraftTrait,
   StoredHomebrewDraft,
@@ -21,7 +22,6 @@ import {
   type CharacterEffectKind,
   type Skill,
 } from '../../../domain/enums';
-import type { ContentKey } from '../../../domain/ids';
 import { RpcError } from '../../../rpc/protocol';
 import {
   authoringPathKey,
@@ -46,6 +46,7 @@ import { clear, element, type Cleanup } from '../../dom';
 import { freeTextSpan } from '../../free-text';
 import type { ScreenContext } from '../../screen';
 import { homebrewPublishedPath } from './homebrew-routes';
+import { spellGrantControls } from './spell-grant-controls';
 
 type StoredSpeciesDraft = StoredHomebrewDraft & {
   readonly content_kind: 'species';
@@ -57,6 +58,7 @@ export interface SpeciesFormOptions {
   readonly client: AuthoringClient;
   readonly mount: HTMLElement;
   readonly draft: StoredSpeciesDraft;
+  readonly spellGrantReferences: SpellGrantAuthoringReferences;
   readonly randomUuid?: () => string;
   readonly confirmLeave?: () => boolean;
   readonly windowObject?: Window;
@@ -648,33 +650,33 @@ export function renderSpeciesForm(options: SpeciesFormOptions): Cleanup {
           replaceGrant(grantIndex, emptyGrant(selected, grant.draft_item_uuid));
           render();
         });
-        const ruleKey = element('input', {
-          attributes: {
-            id: `${prefix}-rule-key`, type: 'text', required: '',
-            ...pathAttribute(['grants', grantIndex, 'rule_key']),
-          },
-        });
-        ruleKey.value = grant.rule_key;
-        ruleKey.addEventListener('input', () =>
-          changeGrant(grantIndex, grant, 'rule_key', ruleKey.value));
-        card.append(
-          ...labelledControl('Grant kind', kind.id, kind),
-          ...labelledControl('Rule key', ruleKey.id, ruleKey),
-        );
-        if (grant.kind === 'fixed_spell') {
-          const spell = element('input', {
+        card.append(...labelledControl('Grant kind', kind.id, kind));
+        if (grant.kind !== 'skill_proficiency') {
+          card.append(...spellGrantControls({
+            grant,
+            prefix,
+            pathAttribute,
+            path: ['grants', grantIndex],
+            references: options.spellGrantReferences,
+            peerRuleKeys: document.grants
+              .filter((_, index) => index !== grantIndex)
+              .map((candidate) => candidate.rule_key),
+            ruleKeyScope: 'species',
+            change: (field, value) => changeGrant(grantIndex, grant, field, value),
+          }));
+        } else {
+          const ruleKey = element('input', {
             attributes: {
-              id: `${prefix}-spell`, type: 'text', required: '',
-              ...pathAttribute(['grants', grantIndex, 'spell_content_key']),
+              id: `${prefix}-rule-key`, type: 'text', required: '',
+              ...pathAttribute(['grants', grantIndex, 'rule_key']),
             },
           });
-          spell.value = grant.spell_content_key ?? '';
-          spell.addEventListener('input', () => changeGrant(
-            grantIndex,
-            grant,
-            'spell_content_key',
-            spell.value === '' ? null : spell.value as ContentKey,
-          ));
+          ruleKey.value = grant.rule_key;
+          ruleKey.addEventListener('input', () =>
+            changeGrant(grantIndex, grant, 'rule_key', ruleKey.value));
+          card.append(...labelledControl('Stable grant label', ruleKey.id, ruleKey));
+        }
+        if (grant.kind === 'fixed_spell') {
           const prepared = element('input', {
             attributes: { id: `${prefix}-prepared`, type: 'checkbox' },
           });
@@ -682,19 +684,9 @@ export function renderSpeciesForm(options: SpeciesFormOptions): Cleanup {
           prepared.addEventListener('change', () =>
             changeGrant(grantIndex, grant, 'always_prepared', prepared.checked));
           card.append(
-            ...labelledControl('Spell content key', spell.id, spell),
             ...labelledControl('Always prepared', prepared.id, prepared),
           );
         } else if (grant.kind === 'choice_from_list') {
-          const list = element('input', {
-            attributes: {
-              id: `${prefix}-list`, type: 'text', required: '',
-              ...pathAttribute(['grants', grantIndex, 'list']),
-            },
-          });
-          list.value = grant.list;
-          list.addEventListener('input', () =>
-            changeGrant(grantIndex, grant, 'list', list.value));
           const count = element('input', {
             attributes: {
               id: `${prefix}-count`, type: 'number', min: '1', step: '1', required: '',
@@ -735,7 +727,6 @@ export function renderSpeciesForm(options: SpeciesFormOptions): Cleanup {
             nullableInteger(maximum.value),
           ));
           card.append(
-            ...labelledControl('Spell list', list.id, list),
             ...labelledControl('Number of spells', count.id, count),
             ...labelledControl('Minimum spell level (optional)', minimum.id, minimum),
             ...labelledControl('Maximum spell level (optional)', maximum.id, maximum),

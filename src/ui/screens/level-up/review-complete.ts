@@ -15,6 +15,7 @@ import {
   type CatalogNamedDisclosure,
   type CatalogLayerDisclosure,
 } from '../../../catalog/catalog-disclosure';
+import { levelUpWarningRemedy } from './warning-remedy';
 
 export interface LevelUpDraftReview {
   readonly subclass:
@@ -89,7 +90,7 @@ function warningList(
       element('li', { attributes: { [LEVEL_UP_ATTR.warning]: warning.kind } }, [
         element('strong', { text: warning.title }),
         element('p', { text: warning.detail }),
-        element('p', { text: warning.remedy }),
+        levelUpWarningRemedy(warning),
       ]),
     ),
   );

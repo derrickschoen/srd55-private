@@ -18,7 +18,7 @@ import { parseRoute, Router } from '../../../src/ui/router';
 import type { ScreenContext } from '../../../src/ui/screen';
 import {
   isStoredSpeciesDraft,
-  renderSpeciesForm,
+  renderSpeciesForm as renderSpeciesFormBase,
 } from '../../../src/ui/screens/homebrew/species-form';
 import {
   elementText,
@@ -27,6 +27,20 @@ import {
   type InteractiveTestElement,
 } from '../../fixtures/interactive-dom';
 import { openTestDatabase } from '../../helpers/open-db';
+
+type TestSpeciesFormOptions = Omit<
+  Parameters<typeof renderSpeciesFormBase>[0],
+  'spellGrantReferences'
+> & { readonly spellGrantReferences?: Parameters<
+  typeof renderSpeciesFormBase
+>[0]['spellGrantReferences'] };
+
+function renderSpeciesForm(options: TestSpeciesFormOptions) {
+  return renderSpeciesFormBase({
+    ...options,
+    spellGrantReferences: options.spellGrantReferences ?? { spells: [], lists: [] },
+  });
+}
 
 const hostile = '</textarea><img data-ha7-hostile src=x> "quoted" 🐉 \u202eRTL\u202c nul\u0000\u0001tail';
 
@@ -116,6 +130,7 @@ function client(overrides: Partial<AuthoringClient> = {}): AuthoringClient {
   return {
     list: () => unused(),
     backgroundReferences: () => unused(),
+    spellGrantReferences: () => unused(),
     createDraft: () => unused(),
     readDraft: () => unused(),
     saveDraft: () => unused(),
@@ -260,6 +275,13 @@ describe('HA-7 species authoring form', () => {
         client: client(),
         mount,
         draft,
+        spellGrantReferences: {
+          spells: [{
+            content_key: '2024:spell:light' as ContentKey,
+            name: 'Light', rules_edition: '2024', level: 0, catalog_layer: 'bundled',
+          }],
+          lists: ['Wizard'],
+        },
         windowObject: new EventTarget() as unknown as Window,
       });
       const root = interactiveElement(mount);
@@ -272,6 +294,10 @@ describe('HA-7 species authoring form', () => {
       expect(elementText(root as unknown as Node)).toContain('Skill proficiency');
       expect(elementText(root as unknown as Node)).not.toContain('Raw grant');
       expect(elementText(root as unknown as Node)).not.toContain('New class');
+      expect(root.querySelectorAll('select').find((control) =>
+        control.getAttribute('id')?.endsWith('-spell'))?.querySelector('optgroup')
+        ?.getAttribute('label')).toBe('Cantrip · 2024 — SRD · bundled layer');
+      expect(elementText(root as unknown as Node)).not.toContain('Spell content key');
       expect(byId(root, 'input', 'species-creature-type').value).toBe('Clockwork');
       expect(byId(root, 'input', 'species-primary-size').value).toBe('Colossal');
       expect(root.querySelectorAll('datalist')).toHaveLength(4);
