@@ -82,6 +82,54 @@ async function spoofUserAgent(
   }, userAgent);
 }
 
+test('cold boot reports the real database stages before readiness', async ({
+  page,
+}) => {
+  // Measured alone on PLAYWRIGHT_PORT=5040 at 6.2s. 6.2 × 1.5 = 9.3s;
+  // rounded up to the next second for the test and readiness budgets.
+  test.setTimeout(10_000);
+  await page.addInitScript(() => {
+    const statuses: string[] = [];
+    Object.defineProperty(window, '__SRD55_BOOT_STATUSES__', {
+      configurable: true,
+      value: statuses,
+    });
+    const record = (): void => {
+      const text = document.querySelector('#status')?.textContent?.trim();
+      if (text !== undefined && text !== '' && statuses.at(-1) !== text) {
+        statuses.push(text);
+      }
+    };
+    new MutationObserver(record).observe(document, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+    document.addEventListener('DOMContentLoaded', record);
+  });
+
+  await page.goto('/');
+  await expect(page.locator('#status')).toHaveAttribute(
+    'data-ready',
+    'true',
+    { timeout: 10_000 },
+  );
+  const statuses = await page.evaluate(() =>
+    Reflect.get(window, '__SRD55_BOOT_STATUSES__') as string[]
+  );
+  expect(statuses).toEqual(expect.arrayContaining([
+    'Loading database engine…',
+    'Opening local character storage…',
+    'Checking database structure…',
+    'Checking bundled character rules…',
+    'Verifying bundled catalog integrity…',
+    'Local database ready.',
+  ]));
+  expect(statuses.indexOf('Loading database engine…')).toBeLessThan(
+    statuses.indexOf('Local database ready.'),
+  );
+});
+
 test('BROWSER-PROBE-CHROMIUM-SILENT: Chromium boots unchanged when the capability is available', async ({
   page,
 }) => {

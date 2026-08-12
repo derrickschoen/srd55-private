@@ -14,13 +14,14 @@
  * its output rather than filling the gap, in the shape `WeaponMasteryLookup`
  * already established: a state, never a number.
  *
- * TWO THINGS THIS APPLICATION CANNOT DECIDE, AND STATES INSTEAD:
+ * TWO THINGS THIS APPLICATION HANDLES WITHOUT GUESSING:
  *
  *  1. WHICH MELEE/RANGED BRANCH THIS PROFILE SHOULD PRESENT. The character
- *     copy now stores nullable `attack_kind`, but this persistence-only change
- *     does not alter attack-profile presentation or feed that field into this
- *     input. BOTH branches therefore remain offered here. No fallback from
- *     `thrown`/`ammunition` is permitted when the stored fact is absent.
+ *     copy stores nullable `attack_kind`, derived from a selected template's
+ *     source group. A recorded branch is first; null keeps the honest
+ *     undecided state. BOTH branches remain available as the existing manual
+ *     override. No fallback from `thrown`/`ammunition` is permitted when the
+ *     stored fact is absent.
  *  2. WHAT A WEAPON'S PROPERTIES DO. The Finesse, Thrown and Versatile rule
  *     texts are not in `docs/srd/source/`; only the weapons table's use of the
  *     words is. The source's "unless a weapon's property says otherwise" is
@@ -48,7 +49,7 @@
  * profile is produced. Recalling the number would be the one thing this module
  * is built not to do.
  */
-import type { Ability } from '../domain/enums';
+import type { Ability, WeaponAttackKind } from '../domain/enums';
 import type { AbilityScores } from './ability-scores';
 import { AttackBonus } from './attack-bonus';
 import {
@@ -104,11 +105,12 @@ export interface AbilityOption {
 /**
  * Which ability a profile uses.
  *
- * FOUR STATES, AND THE MIDDLE TWO ARE NOT THE SAME THING. `choice` is the SRD
- * handing the player a decision ("you can use your Dexterity modifier instead
- * of your Strength modifier"); `undecided` is this application admitting it
- * cannot tell which one applies. Collapsing them would dress an ignorance up as
- * an entitlement.
+ * FIVE STATES, AND THE THREE MULTI-OPTION STATES ARE NOT THE SAME THING.
+ * `choice` is the SRD handing the player a decision ("you can use your
+ * Dexterity modifier instead of your Strength modifier"); `undecided` is this
+ * application admitting it cannot tell which one applies; `recorded` puts the
+ * stored melee/ranged formula first while preserving the manual override.
+ * Collapsing them would dress an ignorance or override up as an entitlement.
  */
 export type ProfileAbilities =
   | { readonly state: 'fixed'; readonly options: readonly AbilityOption[] }
@@ -119,6 +121,12 @@ export type ProfileAbilities =
     }
   | {
       readonly state: 'undecided';
+      readonly options: readonly AbilityOption[];
+      readonly reason: string;
+    }
+  | {
+      /** The recorded formula first, followed by the existing manual override. */
+      readonly state: 'recorded';
       readonly options: readonly AbilityOption[];
       readonly reason: string;
     }
@@ -253,6 +261,8 @@ export interface AttackProfileWeapon {
   readonly damage: WeaponDamage;
   readonly damage_type: string | null;
   readonly versatile_damage: VersatileWeaponDamage;
+  /** Copied from the template's melee/ranged group; null for unrecorded imports. */
+  readonly attack_kind: WeaponAttackKind | null;
   /**
    * Whether this character is proficient with this weapon — REQUIRED, and not
    * optional with a generous default.
@@ -428,10 +438,10 @@ function versatileNote(weapon: AttackProfileWeapon): string | null {
  * says otherwise: Melee attack bonus = Strength modifier + Proficiency Bonus /
  * Ranged attack bonus = Dexterity modifier + Proficiency Bonus."
  *
- * BOTH FORMULAS ARE SHOWN, AND THE STATE IS `undecided` RATHER THAN `choice`.
- * The source branches on melee versus ranged. The character copy now persists
- * that nullable fact, but this persistence-only increment deliberately leaves
- * this presentation unchanged and does not add it to `AttackProfileWeapon`.
+ * BOTH FORMULAS REMAIN AVAILABLE. The source branches on melee versus ranged,
+ * and the character copy persists that nullable fact from its template's
+ * source heading. A recorded branch is shown first while the prior manual
+ * override remains available for properties this application cannot evaluate.
  * The `unless a weapon's property says otherwise` limb is quoted for the same
  * reason as before: the property texts that would override the formula —
  * Finesse, Thrown — are not in `docs/srd/source/`, so nothing here applies them.
@@ -451,22 +461,46 @@ function normalProfile(
       ? `${kind} attack bonus = ${ability} modifier + Proficiency Bonus.`
       : `The printed ${kind.toLowerCase()} formula is ${ability} modifier + ` +
         `Proficiency Bonus; this row is the ${ability} modifier alone.`;
+  const strength = option(
+    input,
+    'strength',
+    formula('Strength', 'Melee'),
+    proficiency,
+  );
+  const dexterity = option(
+    input,
+    'dexterity',
+    formula('Dexterity', 'Ranged'),
+    proficiency,
+  );
+  const options = weapon.attack_kind === 'ranged'
+    ? [dexterity, strength]
+    : [strength, dexterity];
+  const abilities: ProfileAbilities = weapon.attack_kind === null
+    ? {
+        state: 'undecided',
+        reason:
+          'The printed formula is Strength for a melee attack and Dexterity for ' +
+          'a ranged one, unless a weapon property says otherwise. This weapon ' +
+          'does not record whether its attack is melee or ranged, and the ' +
+          'property rules that would override the formula are not among this ' +
+          'application’s sources, so both are shown.',
+        options,
+      }
+    : {
+        state: 'recorded',
+        reason:
+          `This weapon records a ${weapon.attack_kind} attack, so ` +
+          `${weapon.attack_kind === 'ranged' ? 'Dexterity' : 'Strength'} is ` +
+          'shown first. The other ability remains available as a manual ' +
+          'override because this application does not evaluate weapon-property ' +
+          'rules.',
+        options,
+      };
   return {
     kind: 'normal',
     label: 'Attack',
-    abilities: {
-      state: 'undecided',
-      reason:
-        'The printed formula is Strength for a melee attack and Dexterity for ' +
-        'a ranged one, unless a weapon property says otherwise. This ' +
-        'application does not record whether a weapon is melee or ranged, and ' +
-        'the property rules that would override the formula are not among its ' +
-        'sources, so both are shown.',
-      options: [
-        option(input, 'strength', formula('Strength', 'Melee'), proficiency),
-        option(input, 'dexterity', formula('Dexterity', 'Ranged'), proficiency),
-      ],
-    },
+    abilities,
     damage: {
       amount: weapon.damage,
       versatile_note: versatileNote(weapon),

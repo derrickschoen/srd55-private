@@ -1,12 +1,11 @@
 import type { DatabaseContext } from '../db/database';
 import { sqlInteger, sqlNullableString, sqlString } from '../db/codecs';
 import {
-  catalogLayerDisclosure,
   type CatalogNamedDisclosure,
   type CatalogLayerDisclosure,
 } from '../catalog/catalog-disclosure';
 import { spellCatalogDisclosure } from '../catalog/spell-catalog-disclosure';
-import { recordedSourceContentKey } from '../catalog/recorded-source-provenance';
+import { characterSourceCatalogResolution } from '../catalog/recorded-source-provenance';
 import { isEnumValue, abilities, type Ability } from '../domain/enums';
 import type { EligibleSpell } from '../domain/read-models';
 import { GUIDED_SPECIES_SOURCE_MARKER } from '../domain/source-markers';
@@ -29,8 +28,6 @@ interface GuidedSpeciesSource {
   readonly display_name: string;
   readonly config: string | null;
   readonly grant_rules: string | null;
-  readonly definition_content_key: string | null;
-  readonly definition_catalog_layer: string | null;
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -230,15 +227,10 @@ function guidedSpeciesSource(
 ): GuidedSpeciesSource | null {
   return db.one(
     `SELECT source.id, source.display_name, source.config,
-            definition.grant_rules,
-            definition.content_key AS definition_content_key,
-            identity.catalog_layer AS definition_catalog_layer
+            definition.grant_rules
      FROM character_source_instances AS source
      LEFT JOIN species_definitions AS definition
        ON definition.id = source.source_definition_id
-     LEFT JOIN catalog_content_identities AS identity
-       ON identity.content_kind = 'species'
-      AND identity.content_key = definition.content_key
      WHERE source.character_id = ?
        AND source.source_type = 'species'
        AND source.state = 'active'
@@ -250,11 +242,6 @@ function guidedSpeciesSource(
       display_name: sqlString(row, 'display_name'),
       config: sqlNullableString(row, 'config'),
       grant_rules: sqlNullableString(row, 'grant_rules'),
-      definition_content_key: sqlNullableString(row, 'definition_content_key'),
-      definition_catalog_layer: sqlNullableString(
-        row,
-        'definition_catalog_layer',
-      ),
     }),
   );
 }
@@ -263,23 +250,7 @@ function guidedSpeciesCatalogLayer(
   db: DatabaseContext,
   source: GuidedSpeciesSource,
 ): CatalogLayerDisclosure {
-  if (source.definition_content_key !== null) {
-    return catalogLayerDisclosure(source.definition_catalog_layer);
-  }
-  const recordedContentKey = recordedSourceContentKey(source.config);
-  if (recordedContentKey === null) return 'unknown';
-  const storedLayer = db.scalar<string>(
-    `SELECT identity.catalog_layer
-     FROM species_templates AS template
-     JOIN catalog_content_identities AS identity
-       ON identity.content_kind = 'species'
-      AND identity.content_key = template.content_key
-     WHERE template.content_key = ? AND template.name = ?`,
-    [recordedContentKey, source.display_name],
-  );
-  return catalogLayerDisclosure(
-    typeof storedLayer === 'string' ? storedLayer : null,
-  );
+  return characterSourceCatalogResolution(db, source.id).catalog_layer;
 }
 
 export function resolveSpeciesChoice(
