@@ -23,7 +23,64 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-11-d (newest - read first)
+## RESTART POINT 2026-08-12-a (newest - read first)
+MAIN d3c3bfe5 (mirror pushed after verified verdicts). FLOORS: vitest
+275/4,575 all-pass; PW 168 pool (166 + two known flakes isolated-green);
+build 0; migrations 0000-0043. EIGHTY-EIGHT merges. Rulings through
+D233. TYPED EFFECT SYSTEM TRANCHE 1 COMPLETE — E1-E5 landed at merges
+78/79/85/87/88.
+
+- 87TH e3520a7f E4: contributions authorable + portable. Editor subset
+  with preserved-path honesty; eight refusal families; three-seam
+  portability with exact wire-key pins + old-format import; migration
+  0043 (authored resource display, AUTHORIZED). Identity pinned FIRST
+  with the four supervisor-reproduced Veteran v1/v2 fingerprint bytes.
+  Supervisor merge-fallout adaptations (disclosed in the merge):
+  a3cc24f7 (0043 joins prefix-inventory pin; rowContractError anchor
+  1613->1617) and d0227521 (file-standard 20_000 timeouts on the three
+  heaviest new tests — they run 5-10s under full-suite contention).
+  First merged-tree vitest VOIDED: launched at load 6.4.
+- 88TH d3c3bfe5 E5 finale: Veteran v3 via CI-7, v1/v2 BYTE-KEPT
+  (supervisor-verified: only the revisions-array closers moved). Three
+  contributions: Deeper Cuts const(1) active 3-20; Veteran's Strike
+  floor(rogue/2) active 9-20 SUPERSEDES Deeper Cuts by qualified ref
+  (supersession, not band-clip); Veteran Reflexes PB pool w/ authored
+  label + boxes. Upgrade matrix incl. full-projection retention.
+  Correspondence tests parse Rogue table + Veteran doc at runtime
+  (3-8 source+1; 9-20 ceil+floor=L; Reflexes==PB). S5-07 ruled PAYLOAD
+  defect (doc says Prepared Spells, v2 stored 'known'; markerForBucket
+  untouched) -> Barbed Court v3 carries 'prepared' bucket — disclosed
+  scope extension, v2 immutable history. One fingerprint pin moved
+  (click-to-import f0a5206b...); boot digest + v1-slice + all four
+  v1/v2 fingerprints unchanged (supervisor-verified absent from diff).
+  Sol digest CLEAN on 7 axes. Mutation control EXECUTED BY SUPERVISOR
+  (Strike divisor 2->3 fails correspondence at L9; restored, porcelain
+  0). Fix round 1: new spec navigated /homebrew instead of /, library
+  restore count 7->9 (two v3 roots) — cause-fixed, diff confined to the
+  two specs.
+
+Process ledger additions (08-12):
+- TWO load-gate chain-slips: uptime chained into the suite-launch
+  command instead of foreground-gated first. First launched at load 6.4
+  (run VOIDED — its 3 timeout failures were later reproduced and traced
+  to missing per-test timeouts; its 2 content failures were real).
+  Second read 2.96 post-hoc (gate satisfied by luck). Rule restated:
+  uptime is its OWN foreground command BEFORE any suite launch.
+- guided-builder.spec.ts:460 flaked in BOTH E4 and E5 full pools (4th
+  and 5th appearances); character-list.spec.ts:145 joined in E5's
+  rerun. Both always green isolated. Stability look QUEUED.
+- postmerge-88 vitest: catalog-data-migration-prefix-candidate-late
+  timed out 121s vs its 120s explicit limit under full-suite contention;
+  76.6s green isolated. Not a regression (E5 touches no db/migration
+  code). If it recurs, the 120s limit needs the same treatment as
+  d0227521.
+
+QUEUES (owner input pending): sweep 6 (import/recipient persona);
+S5-02 house-rule toggle; party-sync proposal (sim comparators need D233
+SRD substitutes first; boundary 62433bb3); guided-builder flake
+stability look.
+
+## RESTART POINT 2026-08-11-d (superseded by 08-12-a)
 MAIN 3c5b57c7 (mirror pushed after verified verdicts). FLOORS: vitest
 275/4,541 all-pass; PW 166 pool; build 0; migrations 0000-0042.
 EIGHTY-FIVE merges. Rulings through D233.
