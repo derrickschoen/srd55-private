@@ -192,6 +192,38 @@ describe('shared multiclass primary-ability query seam', () => {
     ).toEqual(['Fighter', 'Wizard']);
   });
 
+  it('admits an otherwise blocked update_class entry only through the exact per-character house rule', () => {
+    enterClass('Cleric');
+    expect(() => enterClass('Wizard')).toThrow(
+      'Cannot add Wizard. Wizard requires Intelligence 13 to multiclass; its current score is Intelligence 10.',
+    );
+
+    db.exec(
+      `INSERT INTO character_rule_overrides (character_id, rule_key, value)
+       VALUES (?, 'ignore_multiclass_prerequisites', 'true')`,
+      [characterId],
+    );
+
+    const waived = new CharacterWorkspaceBuilder(db).build(characterId);
+    expect(
+      waived.available_classes.find((option) => option.name === 'Wizard')
+        ?.multiclass_entry,
+    ).toEqual({
+      status: 'waived',
+      refusal: null,
+      explanation: 'House rule: prerequisites waived.',
+    });
+    expect(() => enterClass('Wizard')).not.toThrow();
+    expect(
+      waived.multiclass_prerequisite_house_rule,
+    ).toEqual({ status: 'on' });
+    expect(
+      new CharacterSheetBuilder(db).build(characterId).warnings.map(
+        (warning) => warning.code,
+      ),
+    ).toContain('multiclass_primary_ability_unmet');
+  });
+
   it('treats an absent authored prerequisite as no requirement while enforcing every declared class requirement', () => {
     const contentKey = registerAssertedFixtureContentIdentity(db, {
       kind: 'class',

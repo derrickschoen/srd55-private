@@ -192,6 +192,7 @@ function workspace(): Workspace {
     starting_class_resolution: { class_level_id: null, warnings: [] },
     available_classes: [],
     allow_legacy: false,
+    multiclass_prerequisite_house_rule: { status: 'off' },
     flavor: {
       alignment: HOSTILE_FLAVOR,
       appearance: HOSTILE_FLAVOR,

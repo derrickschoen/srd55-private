@@ -22,6 +22,7 @@ export interface PlannerEditorActions {
   updateFlavor(flavor: CharacterFlavorChanges): void;
   updateAbility(ability: Ability, score: number): void;
   updateLegacy(allowLegacy: boolean): void;
+  setMulticlassPrerequisiteHouseRule(waive: boolean): void;
   updateClass(
     entry: CharacterClass,
     changes: {
@@ -203,7 +204,7 @@ function renderRules(
   actions: PlannerEditorActions,
   disabled: boolean,
 ): HTMLElement {
-  const [section] = panel('Rules editions');
+  const [section] = panel('Rules');
   const label = document.createElement('label');
   label.className = 'checkbox-description';
   const checkbox = document.createElement('input');
@@ -218,7 +219,33 @@ function renderRules(
   description.innerHTML =
     '<strong>Allow legacy 2014 spell versions</strong><small>Legacy versions remain distinct from their 2024 counterparts and conflicting selections are warned.</small>';
   label.append(checkbox, description);
-  section.append(label);
+  const houseRuleLabel = document.createElement('label');
+  houseRuleLabel.className = 'checkbox-description';
+  const houseRule = document.createElement('input');
+  houseRule.type = 'checkbox';
+  houseRule.checked =
+    workspace.multiclass_prerequisite_house_rule.status === 'on';
+  houseRule.disabled = disabled;
+  houseRule.dataset.focusKey = 'waive-multiclass-ability-prerequisites';
+  houseRule.addEventListener('change', () =>
+    actions.setMulticlassPrerequisiteHouseRule(houseRule.checked),
+  );
+  const houseRuleDescription = document.createElement('span');
+  const houseRuleTitle = document.createElement('strong');
+  houseRuleTitle.textContent = 'Waive multiclass ability prerequisites';
+  const houseRuleHelp = document.createElement('small');
+  houseRuleHelp.textContent =
+    'House rule for this character. Classes blocked only by ability scores become available, and the character sheet records the waiver.';
+  houseRuleDescription.append(houseRuleTitle, houseRuleHelp);
+  houseRuleLabel.append(houseRule, houseRuleDescription);
+  section.append(label, houseRuleLabel);
+  if (workspace.multiclass_prerequisite_house_rule.status === 'invalid') {
+    const invalid = document.createElement('p');
+    invalid.setAttribute('role', 'alert');
+    invalid.textContent =
+      'The saved multiclass house rule cannot be read, so prerequisites are still required. Toggle this setting to repair it.';
+    section.append(invalid);
+  }
   return section;
 }
 
@@ -617,6 +644,8 @@ function renderClasses(
       value: String(entry.id),
       label: entry.multiclass_entry.status === 'blocked'
         ? `${entry.name} — unavailable`
+        : entry.multiclass_entry.status === 'waived'
+          ? `${entry.name} — house rule: prerequisites waived`
         : entry.name,
       catalogLayer: entry.catalog_layer,
       disabled: entry.multiclass_entry.status === 'blocked',

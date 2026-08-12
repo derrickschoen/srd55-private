@@ -53,6 +53,9 @@ import {
 import { selectableCatalogContentSql } from './selectable-catalog-content';
 import { multiclassEntryAssessments } from '../rules/multiclass-prerequisite-gate';
 import { characterSourceCatalogResolution } from '../catalog/recorded-source-provenance';
+import {
+  readMulticlassPrerequisiteHouseRule,
+} from '../rules/multiclass-prerequisite-house-rule';
 
 interface SlotWithOrder extends WorkspaceSlot {
   readonly sort_order: number;
@@ -303,6 +306,8 @@ export class CharacterWorkspaceBuilder {
       },
       available_classes: this.availableClassOptions(characterId),
       allow_legacy: character.allow_legacy,
+      multiclass_prerequisite_house_rule:
+        readMulticlassPrerequisiteHouseRule(this.db, characterId),
       flavor: {
         alignment: character.alignment,
         appearance: character.appearance,
@@ -491,12 +496,34 @@ export class CharacterWorkspaceBuilder {
       if (assessment === undefined) {
         throw new TypeError(`Class ${String(option.id)} was not assessed.`);
       }
-      return {
-        ...option,
-        multiclass_entry: assessment.status === 'blocked'
-          ? { status: 'blocked', refusal: assessment.refusal }
-          : { status: assessment.status, refusal: null },
-      };
+      switch (assessment.status) {
+        case 'not_applicable':
+        case 'eligible':
+          return {
+            ...option,
+            multiclass_entry: {
+              status: assessment.status,
+              refusal: null,
+            },
+          };
+        case 'waived':
+          return {
+            ...option,
+            multiclass_entry: {
+              status: assessment.status,
+              refusal: null,
+              explanation: assessment.explanation,
+            },
+          };
+        case 'blocked':
+          return {
+            ...option,
+            multiclass_entry: {
+              status: assessment.status,
+              refusal: assessment.refusal,
+            },
+          };
+      }
     });
   }
 

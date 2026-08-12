@@ -18,6 +18,11 @@ import {
   resolveCharacterAbilities,
   resolvedTotals,
 } from './ability-contributions';
+import {
+  readMulticlassPrerequisiteHouseRule,
+  MULTICLASS_PREREQUISITE_WAIVER_EXPLANATION,
+  type MulticlassPrerequisiteHouseRule,
+} from './multiclass-prerequisite-house-rule';
 
 export interface MulticlassPrerequisiteClass {
   readonly class_definition_id: ClassDefinitionId;
@@ -67,6 +72,11 @@ export type EvaluatedMulticlassPrerequisite =
       };
     });
 
+type MulticlassEntryFailure = Extract<
+  EvaluatedMulticlassPrerequisite,
+  { readonly status: 'unmet' | 'unprovable' }
+>;
+
 export type MulticlassEntryAssessment =
   | {
       readonly status: 'not_applicable' | 'eligible';
@@ -74,11 +84,20 @@ export type MulticlassEntryAssessment =
       readonly refusal: null;
     }
   | {
+      readonly status: 'waived';
+      readonly failures: readonly [
+        MulticlassEntryFailure,
+        ...MulticlassEntryFailure[],
+      ];
+      readonly refusal: null;
+      readonly explanation: typeof MULTICLASS_PREREQUISITE_WAIVER_EXPLANATION;
+    }
+  | {
       readonly status: 'blocked';
-      readonly failures: readonly Extract<
-        EvaluatedMulticlassPrerequisite,
-        { readonly status: 'unmet' | 'unprovable' }
-      >[];
+      readonly failures: readonly [
+        MulticlassEntryFailure,
+        ...MulticlassEntryFailure[],
+      ];
       readonly refusal: string;
     };
 
@@ -285,6 +304,7 @@ function entryAssessment(
   candidate: MulticlassPrerequisiteClass,
   held: readonly MulticlassPrerequisiteClass[],
   totals: Readonly<Record<Ability, number>>,
+  houseRule: MulticlassPrerequisiteHouseRule,
 ): MulticlassEntryAssessment {
   const evaluated = evaluateWithTotals(
     [...held, candidate].filter(classDefinesMulticlassPrerequisite),
@@ -296,15 +316,25 @@ function entryAssessment(
       { readonly status: 'unmet' | 'unprovable' }
     > => entry.status !== 'met',
   );
-  if (failures.length === 0) {
+  const firstFailure = failures[0];
+  if (firstFailure === undefined) {
     return { status: 'eligible', failures: [], refusal: null };
+  }
+  const nonEmptyFailures = [firstFailure, ...failures.slice(1)] as const;
+  if (houseRule.status === 'on') {
+    return {
+      status: 'waived',
+      failures: nonEmptyFailures,
+      refusal: null,
+      explanation: MULTICLASS_PREREQUISITE_WAIVER_EXPLANATION,
+    };
   }
   return {
     status: 'blocked',
-    failures,
+    failures: nonEmptyFailures,
     refusal:
       `Cannot add ${candidate.class_name}. ` +
-      failures.map((failure) => failure.warning.detail).join(' '),
+      nonEmptyFailures.map((failure) => failure.warning.detail).join(' '),
   };
 }
 
@@ -321,6 +351,7 @@ export function multiclassEntryAssessments(
     ]));
   }
   const totals = characterTotals(db, characterId);
+  const houseRule = readMulticlassPrerequisiteHouseRule(db, characterId);
   const assessments = new Map<number, MulticlassEntryAssessment>();
   const heldIds = new Set(held.map((entry) => entry.class_definition_id));
   for (const id of candidateClassDefinitionIds) {
@@ -336,7 +367,7 @@ export function multiclassEntryAssessments(
     if (candidate === null) {
       throw new TypeError('Unknown class.');
     }
-    assessments.set(id, entryAssessment(candidate, held, totals));
+    assessments.set(id, entryAssessment(candidate, held, totals, houseRule));
   }
   return assessments;
 }

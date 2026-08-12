@@ -175,6 +175,26 @@ describe('the derived character sheet', () => {
     ).toBe(beforeRevision);
   });
 
+  it('projects the active multiclass house rule without hiding the SRD shortfall or leaking hostile override text', () => {
+    const hostile = '</p><img data-house-rule-hostile src=x>';
+    db.exec(
+      `INSERT INTO character_rule_overrides (character_id, rule_key, value, note)
+       VALUES
+         (?, 'ignore_multiclass_prerequisites', 'true', ?),
+         (?, ?, 'true', ?)`,
+      [characterId, hostile, characterId, hostile, hostile],
+    );
+
+    const sheet = builder.build(characterId);
+    expect(sheet.house_rules).toEqual([
+      'ignore_multiclass_prerequisites',
+    ]);
+    expect(sheet.warnings.map((warning) => warning.code)).toContain(
+      'multiclass_primary_ability_unmet',
+    );
+    expect(JSON.stringify(sheet)).not.toContain(hostile);
+  });
+
   it('takes the proficiency bonus from TOTAL level, not from either class', () => {
     const sheet = builder.build(characterId);
     expect(sheet.total_level).toBe(8);

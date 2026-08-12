@@ -41,6 +41,8 @@ const commandTypes = [
   'allocate_abilities',
   'set_slot',
   'update_character_rules',
+  'set_multiclass_prerequisite_house_rule',
+  'restore_multiclass_prerequisite_house_rule',
   'update_character_flavor',
   'update_source_config',
   'choose_species_lineage',
@@ -338,6 +340,54 @@ function validateUpdateCharacterRules(record: UnknownRecord): void {
   if (!hasOwn(record, 'allow_legacy') || typeof record.allow_legacy !== 'boolean') {
     invalid('allow_legacy must be a boolean.');
   }
+}
+
+function validateMulticlassPrerequisiteHouseRuleState(value: unknown): void {
+  const state = objectValue(
+    value,
+    'Multiclass prerequisite house-rule restore state must be an object.',
+  );
+  if (state.status === 'absent') {
+    rejectUnknown(state, ['status'], 'house-rule restore state');
+    return;
+  }
+  if (state.status !== 'stored') {
+    invalid('Unknown multiclass prerequisite house-rule restore state.');
+  }
+  const fields = ['value', 'note', 'created_at', 'updated_at'] as const;
+  rejectUnknown(
+    state,
+    ['status', ...fields],
+    'house-rule restore state',
+  );
+  if (!hasOwn(state, 'value') || typeof state.value !== 'string') {
+    invalid('House-rule restore value must be a string.');
+  }
+  for (const field of ['note', 'created_at', 'updated_at'] as const) {
+    if (
+      !hasOwn(state, field) ||
+      (state[field] !== null && typeof state[field] !== 'string')
+    ) {
+      invalid(`House-rule restore ${field} must be a string or null.`);
+    }
+  }
+}
+
+function validateSetMulticlassPrerequisiteHouseRule(
+  record: UnknownRecord,
+): void {
+  rejectUnknown(record, ['type', 'waive', 'reason']);
+  if (!hasOwn(record, 'waive') || typeof record.waive !== 'boolean') {
+    invalid('waive must be a boolean.');
+  }
+}
+
+function validateRestoreMulticlassPrerequisiteHouseRule(
+  record: UnknownRecord,
+): void {
+  rejectUnknown(record, ['type', 'state', 'integrity', 'reason']);
+  validateMulticlassPrerequisiteHouseRuleState(record.state);
+  validateIntegrity(record);
 }
 
 function validateUpdateCharacterFlavor(record: UnknownRecord): void {
@@ -1592,6 +1642,12 @@ function validateByType(
       return record;
     case 'update_character_rules':
       validateUpdateCharacterRules(record);
+      return record;
+    case 'set_multiclass_prerequisite_house_rule':
+      validateSetMulticlassPrerequisiteHouseRule(record);
+      return record;
+    case 'restore_multiclass_prerequisite_house_rule':
+      validateRestoreMulticlassPrerequisiteHouseRule(record);
       return record;
     case 'update_character_flavor':
       validateUpdateCharacterFlavor(record);

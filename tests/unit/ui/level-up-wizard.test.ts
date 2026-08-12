@@ -282,6 +282,7 @@ function sheet(options: {
   return {
     character_id: 7,
     name: options.revisionName ?? 'Fixture Mage',
+    house_rules: [],
     total_level: options.totalLevel,
     proficiency_bonus: number('proficiency_bonus', 'Proficiency bonus', 2),
     ability_scores: [],

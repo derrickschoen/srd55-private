@@ -17,6 +17,10 @@ import { RestoreSlotCommand } from '../../../src/commands/set-slot/restore';
 import { SelectSlotCommand } from '../../../src/commands/set-slot/select';
 import { UpdateAbilityCommand } from '../../../src/commands/update-ability';
 import { UpdateCharacterRulesCommand } from '../../../src/commands/update-character-rules';
+import {
+  RestoreMulticlassPrerequisiteHouseRuleCommand,
+  SetMulticlassPrerequisiteHouseRuleCommand,
+} from '../../../src/commands/set-multiclass-prerequisite-house-rule';
 import { UpdateCharacterFlavorCommand } from '../../../src/commands/update-character-flavor';
 import { UpdateClassCommand } from '../../../src/commands/update-class';
 import { UpdateSourceConfigCommand } from '../../../src/commands/update-source-config';
@@ -78,6 +82,10 @@ describe('character command factory and executor', () => {
       mode: 'delete' as const,
       warning_fingerprint: 'conflicting_versions:test',
     });
+    const protectedHouseRuleRestore = await integrity.attach(characterId, {
+      type: 'restore_multiclass_prerequisite_house_rule' as const,
+      state: { status: 'absent' as const },
+    });
     const variants: readonly [
       CharacterCommandPayload,
       abstract new (...args: never[]) => object,
@@ -102,6 +110,14 @@ describe('character command factory and executor', () => {
       [
         { type: 'update_character_rules', allow_legacy: true },
         UpdateCharacterRulesCommand,
+      ],
+      [
+        { type: 'set_multiclass_prerequisite_house_rule', waive: true },
+        SetMulticlassPrerequisiteHouseRuleCommand,
+      ],
+      [
+        protectedHouseRuleRestore,
+        RestoreMulticlassPrerequisiteHouseRuleCommand,
       ],
       [
         {
@@ -157,13 +173,18 @@ describe('character command factory and executor', () => {
       ],
     ];
 
-    expect(variants).toHaveLength(14);
+    expect(variants).toHaveLength(16);
     for (const [payload, expected] of variants) {
       expect(await factory.make(characterId, payload)).toBeInstanceOf(expected);
     }
 
     await expect(
       factory.make(characterId + 1, protectedRestore),
+    ).rejects.toThrow(
+      'This internal character command is invalid or belongs to another character.',
+    );
+    await expect(
+      factory.make(characterId + 1, protectedHouseRuleRestore),
     ).rejects.toThrow(
       'This internal character command is invalid or belongs to another character.',
     );

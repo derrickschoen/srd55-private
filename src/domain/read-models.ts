@@ -10,6 +10,7 @@ import type {
 import type { AttackProfileResult } from '../rules/attack-profiles';
 import type { StartingClassWarning } from '../rules/sheet';
 import type { CharacterMasteryAllowance } from '../rules/weapon-mastery-lookup';
+import type { MulticlassPrerequisiteHouseRule } from '../rules/multiclass-prerequisite-house-rule';
 import type {
   Ability,
   CastingMode,
@@ -196,6 +197,11 @@ export interface ClassOption {
 export interface ClassEntryOption extends ClassOption {
   readonly multiclass_entry:
     | { readonly status: 'not_applicable' | 'eligible'; readonly refusal: null }
+    | {
+        readonly status: 'waived';
+        readonly refusal: null;
+        readonly explanation: 'House rule: prerequisites waived.';
+      }
     | { readonly status: 'blocked'; readonly refusal: string };
 }
 
@@ -349,6 +355,7 @@ export interface Workspace {
   };
   available_classes: ClassEntryOption[];
   allow_legacy: boolean;
+  multiclass_prerequisite_house_rule: MulticlassPrerequisiteHouseRule;
   flavor: {
     readonly alignment: string | null;
     readonly appearance: string | null;
