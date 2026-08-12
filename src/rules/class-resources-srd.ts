@@ -411,6 +411,28 @@ function requireEvidence(block: string, pattern: RegExp, label: string): RegExpE
   return match;
 }
 
+const ARCANE_RECOVERY_HEADING = 'Level 1: Arcane Recovery';
+const ARCANE_RECOVERY_EVIDENCE =
+  /combined level equal to no more than half your Wizard level/;
+
+/** Exact readable Arcane Recovery prose, normalized from the bundled SRD. */
+export function srdArcaneRecoveryDescription(
+  source: string = srdFullText,
+): string {
+  const readingOrder = sourceReadingOrder(source);
+  const block = featureBlock(
+    readingOrder,
+    fullTextClassSections(readingOrder),
+    'Wizard',
+    ARCANE_RECOVERY_HEADING,
+  );
+  requireEvidence(block, ARCANE_RECOVERY_EVIDENCE, ARCANE_RECOVERY_HEADING);
+  return block.slice(ARCANE_RECOVERY_HEADING.length).trim();
+}
+
+export const SRD_ARCANE_RECOVERY_DESCRIPTION =
+  srdArcaneRecoveryDescription();
+
 function level(value: number): ClassLevel {
   if (!characterLevels.includes(value as CharacterLevel)) {
     throw new SrdClassResourcesError(`formula level ${String(value)} is outside 1..20.`);
@@ -443,7 +465,6 @@ function countWord(value: string): PositiveResourceMaximum {
 }
 
 export type UnmodelledClassResourceFeature =
-  | 'arcane_recovery'
   | 'mystic_arcanum'
   | 'signature_spells';
 
@@ -654,12 +675,11 @@ export function parseSrdClassResourceFormulaManifest(
   }
 
   const unmodelled: SrdUnmodelledClassResourceEntry[] = [
-    { content_key: contentKey('Wizard'), class_name: 'Wizard', resource_kind: 'arcane_recovery', citation: 'srd-5.2.1.txt:4671-4683' },
     { content_key: contentKey('Warlock'), class_name: 'Warlock', resource_kind: 'mystic_arcanum', citation: 'srd-5.2.1.txt:4362-4374' },
     { content_key: contentKey('Wizard'), class_name: 'Wizard', resource_kind: 'signature_spells', citation: 'srd-5.2.1.txt:4763-4771' },
   ];
+  srdArcaneRecoveryDescription(source);
   const absentEvidence = [
-    ['Wizard', 'Level 1: Arcane Recovery', /combined level equal to no more than half your Wizard level/],
     ['Warlock', 'Level 11: Mystic Arcanum', /Choose one level 6 Warlock spell.*?cast your arcanum spell once/],
     ['Wizard', 'Level 20: Signature Spells', /Choose two level 3 spells.*?cast each of them once/],
   ] as const;

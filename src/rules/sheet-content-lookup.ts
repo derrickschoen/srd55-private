@@ -40,6 +40,10 @@ import {
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import {
+  catalogLayerDisclosure,
+  type CatalogLayerDisclosure,
+} from '../catalog/catalog-disclosure';
+import {
   decodeClassResourceFormula,
   type ClassFormulaResourceKind,
   type ClassResourceKind,
@@ -140,6 +144,7 @@ export interface SheetClassContent
     readonly id: number;
     readonly name: string;
     readonly content_key: ContentKey;
+    readonly catalog_layer: CatalogLayerDisclosure;
   } | null;
   /**
    * Every printed feature of `subclass`, in printed order, AT EVERY LEVEL —
@@ -402,6 +407,7 @@ export class SheetContentLookup {
               level.subclass_definition_id AS subclass_definition_id,
               subclass.name AS subclass_name,
               subclass.content_key AS subclass_content_key,
+              subclass_identity.catalog_layer AS subclass_catalog_layer,
               subclass.caster_fraction AS subclass_caster_fraction,
               subclass.caster_rounding AS subclass_caster_rounding,
               subclass_progression.id AS subclass_progression_id,
@@ -414,6 +420,9 @@ export class SheetContentLookup {
         AND base_progression.class_level = level.level
        LEFT JOIN subclass_definitions AS subclass
          ON subclass.id = level.subclass_definition_id
+       LEFT JOIN catalog_content_identities AS subclass_identity
+         ON subclass_identity.content_kind = 'subclass'
+        AND subclass_identity.content_key = subclass.content_key
        LEFT JOIN subclass_progressions AS subclass_progression
          ON subclass_progression.subclass_definition_id = level.subclass_definition_id
         AND subclass_progression.class_level = level.level
@@ -479,6 +488,9 @@ export class SheetContentLookup {
                   id: subclassId,
                   name: subclassName,
                   content_key: subclassContentKey as ContentKey,
+                  catalog_layer: catalogLayerDisclosure(
+                    sqlNullableString(row, 'subclass_catalog_layer'),
+                  ),
                 },
         };
       },

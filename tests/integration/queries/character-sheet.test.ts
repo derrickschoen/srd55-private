@@ -966,6 +966,55 @@ describe('the derived character sheet', () => {
     ]);
   });
 
+  it('shows acquired subclass prose and withholds it below its owning-class level', () => {
+    const contentKey = 'expanded:content.subclass:barbed-oracle';
+    registerFixtureContentIdentity(db, {
+      kind: 'subclass',
+      contentKey,
+      name: 'Barbed Oracle',
+      keyKind: 'asserted',
+    });
+    const subclassId = db.exec(
+      `INSERT INTO subclass_definitions (
+         content_key, class_definition_id, name, rules_edition
+       ) VALUES (?, ?, 'Barbed Oracle', 'expanded')`,
+      [contentKey, classId('Wizard')],
+    ).lastInsertId;
+    const hostileProse =
+      '</details><script data-subclass-rule>hostile()</script> Read this rule.';
+    db.exec(
+      `INSERT INTO subclass_features (
+         subclass_definition_id, class_level, sort_order, name, description
+       ) VALUES
+         (?, 3, 1, 'Barbed Goad', ?),
+         (?, 6, 2, 'Future Barb', 'Not acquired yet.')`,
+      [subclassId, hostileProse, subclassId],
+    );
+    db.exec(
+      `UPDATE character_class_levels
+       SET level = 2, subclass_definition_id = ?
+       WHERE character_id = ? AND class_definition_id = ?`,
+      [subclassId, characterId, classId('Wizard')],
+    );
+
+    expect(builder.build(characterId).subclass_features).toEqual([]);
+
+    db.exec(
+      `UPDATE character_class_levels SET level = 3
+       WHERE character_id = ? AND class_definition_id = ?`,
+      [characterId, classId('Wizard')],
+    );
+    expect(builder.build(characterId).subclass_features).toEqual([
+      {
+        subclass_name: 'Barbed Oracle',
+        subclass_catalog_layer: 'external',
+        class_level: 3,
+        name: 'Barbed Goad',
+        description: hostileProse,
+      },
+    ]);
+  });
+
   it('detects granting words in background notes and a species trait name', () => {
     db.exec(
       `INSERT INTO character_background (
