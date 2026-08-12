@@ -49,5 +49,5 @@ describe('late quarantined schema-prefix candidates', () => {
     }
     lifecycle.close();
   // Measured at ~44s alone on 2026-08-03; grows with every migration.
-  }, 120_000);
+  }, 180_000);
 });

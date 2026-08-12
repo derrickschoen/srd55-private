@@ -50,6 +50,9 @@ import type {
   StoredCommandInverse,
   StoredOperationUndoInverse,
 } from './stored-inverses';
+import {
+  captureMulticlassPrerequisiteHouseRule,
+} from '../rules/multiclass-prerequisite-house-rule';
 
 export interface CharacterCommandPreviewWarning {
   readonly code: 'armor_class_reduced';
@@ -677,6 +680,15 @@ export class CharacterCommandExecutor {
           type: 'update_character_rules',
           allow_legacy: Number(before.character.allow_legacy) === 1,
         };
+      case 'set_multiclass_prerequisite_house_rule':
+      case 'restore_multiclass_prerequisite_house_rule':
+        return this.integrity.attach(characterId, {
+          type: 'restore_multiclass_prerequisite_house_rule',
+          state: captureMulticlassPrerequisiteHouseRule(
+            this.db,
+            characterId,
+          ),
+        });
       case 'update_character_flavor':
         return {
           type: 'internal_flavor_restore',

@@ -707,6 +707,13 @@ function renderPlanner(
           allow_legacy: allowLegacy,
         }),
       ),
+    setMulticlassPrerequisiteHouseRule: (waive: boolean) =>
+      void mutate(() =>
+        session.execute({
+          type: 'set_multiclass_prerequisite_house_rule',
+          waive,
+        }),
+      ),
     // `level` is gone from `update_class` (level-up plan §3): the planner can
     // set a subclass, enter a class at level 1, or remove one — levelling
     // belongs to the one guarded `level_up_class` path.

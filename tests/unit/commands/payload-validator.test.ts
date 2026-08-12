@@ -60,6 +60,21 @@ describe('character command payload validation', () => {
         allow_legacy: false,
       },
       {
+        type: 'set_multiclass_prerequisite_house_rule',
+        waive: true,
+      },
+      {
+        type: 'restore_multiclass_prerequisite_house_rule',
+        state: {
+          status: 'stored',
+          value: '{broken',
+          note: 'Preserve exactly.',
+          created_at: null,
+          updated_at: '2031-01-02 03:04:05',
+        },
+        integrity: signature,
+      },
+      {
         type: 'update_source_config',
         source_instance_id: 3,
         chosen_list: 'Cleric',
@@ -685,10 +700,11 @@ describe('character command payload validation', () => {
 
     const cases: Array<[unknown, string]> = [
       [
-        // The 26-character retired-command boundary remains accepted far
-        // enough to produce "unknown command"; longer junk is still bounded.
-        { type: 'x'.repeat(27) },
-        'type must not exceed 26 characters.',
+        // The longest current command is 42 characters; longer junk remains
+        // bounded while the retired 26-character names still reach the
+        // vocabulary refusal.
+        { type: 'x'.repeat(43) },
+        'type must not exceed 42 characters.',
       ],
       [
         {

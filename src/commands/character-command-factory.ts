@@ -20,6 +20,10 @@ import { ResolveLevelFeatChoiceCommand } from './resolve-level-feat-choice';
 import { ChooseFightingStyleCommand } from './choose-fighting-style';
 import { UpdateAbilityCommand } from './update-ability';
 import { UpdateCharacterRulesCommand } from './update-character-rules';
+import {
+  RestoreMulticlassPrerequisiteHouseRuleCommand,
+  SetMulticlassPrerequisiteHouseRuleCommand,
+} from './set-multiclass-prerequisite-house-rule';
 import { UpdateCharacterFlavorCommand } from './update-character-flavor';
 import { UpdateClassCommand } from './update-class';
 import { UpdateSourceConfigCommand } from './update-source-config';
@@ -62,6 +66,7 @@ export interface ConstructedCharacterCommand {
 function requiresIntegrity(payload: CharacterCommandPayload): boolean {
   return (
     (payload.type === 'set_slot' && payload.mode === 'restore') ||
+    payload.type === 'restore_multiclass_prerequisite_house_rule' ||
     (payload.type === 'acknowledge_warning' &&
       payload.mode === 'delete')
   );
@@ -117,6 +122,18 @@ export class CharacterCommandFactory {
         }
       case 'update_character_rules':
         return new UpdateCharacterRulesCommand(this.db, payload);
+      case 'set_multiclass_prerequisite_house_rule':
+        return new SetMulticlassPrerequisiteHouseRuleCommand(
+          this.db,
+          payload,
+          this.integrity,
+        );
+      case 'restore_multiclass_prerequisite_house_rule':
+        return new RestoreMulticlassPrerequisiteHouseRuleCommand(
+          this.db,
+          payload,
+          this.integrity,
+        );
       case 'update_character_flavor':
         return new UpdateCharacterFlavorCommand(this.db, payload);
       case 'update_source_config':

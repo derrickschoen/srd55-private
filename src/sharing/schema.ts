@@ -283,6 +283,7 @@ export interface SharePreference {
 }
 
 export interface ShareOverride {
+  /** Stable stored key: grant override, UI preference, or named house rule. */
   readonly ruleKey: string;
   readonly value: unknown;
 }

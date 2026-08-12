@@ -47,6 +47,7 @@ const NOOP_EDITOR_ACTIONS: PlannerEditorActions = {
   updateFlavor: () => undefined,
   updateAbility: () => undefined,
   updateLegacy: () => undefined,
+  setMulticlassPrerequisiteHouseRule: () => undefined,
   updateClass: () => undefined,
   removeClass: () => undefined,
   addClass: () => undefined,
@@ -152,6 +153,7 @@ function workspace(
     starting_class_resolution: { class_level_id: null, warnings: [] },
     available_classes: [],
     allow_legacy: allowLegacy,
+    multiclass_prerequisite_house_rule: { status: 'off' },
     flavor: {
       alignment: 'Neutral Good',
       appearance: 'Silver hair',
@@ -253,6 +255,61 @@ describe('planner catalog disclosure', () => {
       expect(add?.disabled).toBe(false);
       add!.click();
       expect(addClass).toHaveBeenCalledWith(3);
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('makes a waived class selectable and explains the house rule in player-facing words', () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const base = workspace(0, 10, false);
+      const setHouseRule = vi.fn();
+      const addClass = vi.fn();
+      const rendered = interactiveElement(renderEditors({
+        workspace: {
+          ...base,
+          multiclass_prerequisite_house_rule: { status: 'on' },
+          available_classes: [{
+            id: 2,
+            name: 'Wizard',
+            catalog_layer: 'bundled',
+            multiclass_entry: {
+              status: 'waived',
+              refusal: null,
+              explanation: 'House rule: prerequisites waived.',
+            },
+          }],
+        },
+        actions: {
+          ...NOOP_EDITOR_ACTIONS,
+          setMulticlassPrerequisiteHouseRule: setHouseRule,
+          addClass,
+        },
+        disabled: false,
+      }));
+      const checkbox = rendered.querySelector(
+        '[data-focus-key="waive-multiclass-ability-prerequisites"]',
+      );
+      const wizard = rendered.querySelectorAll('option').find(
+        (entry) => entry.value === '2',
+      );
+      expect(checkbox?.checked).toBe(true);
+      expect(wizard?.disabled).toBe(false);
+      expect(wizard?.textContent).toContain(
+        'Wizard — house rule: prerequisites waived',
+      );
+      const select = rendered.querySelector('[aria-label="Class to add"]');
+      select!.value = '2';
+      select!.dispatchEvent(new Event('change'));
+      rendered.querySelectorAll('button').find(
+        (button) => button.textContent === 'Add class',
+      )!.click();
+      expect(addClass).toHaveBeenCalledWith(2);
+
+      checkbox!.checked = false;
+      checkbox!.dispatchEvent(new Event('change'));
+      expect(setHouseRule).toHaveBeenCalledWith(false);
     } finally {
       restoreDocument();
     }
@@ -545,6 +602,7 @@ describe('planner ability editor', () => {
         },
         updateAbility: () => undefined,
         updateLegacy: () => undefined,
+        setMulticlassPrerequisiteHouseRule: () => undefined,
         updateClass: () => undefined,
         removeClass: () => undefined,
         addClass: () => undefined,
@@ -567,7 +625,7 @@ describe('planner ability editor', () => {
         interactiveElement(
           renderEditors({ workspace: initial, actions, disabled: false }),
         ).querySelector('h2')?.textContent,
-      ).toBe('Rules editions');
+      ).toBe('Rules');
       const paragraphs = Array.from(rendered.querySelectorAll('p')).map(
         (paragraph) => paragraph.textContent,
       );
@@ -706,6 +764,7 @@ describe('planner ability editor', () => {
           update = { ability, score };
         },
         updateLegacy: () => undefined,
+        setMulticlassPrerequisiteHouseRule: () => undefined,
         updateClass: () => undefined,
         removeClass: () => undefined,
         addClass: () => undefined,
