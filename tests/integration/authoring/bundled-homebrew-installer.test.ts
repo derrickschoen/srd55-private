@@ -200,6 +200,55 @@ function applySubclass(db: DatabaseContext, contentKey: ContentKey, level: numbe
 }
 
 describe('bundled authored-kind installer', () => {
+  it('pins the historical Veteran revision 1 and 2 fingerprint bytes', async () => {
+    const db = await database();
+    const plan = planBundledHomebrewInstall(db);
+    const installed = commitBundledHomebrewInstall(db, plan.token);
+    if (installed.kind !== 'committed') {
+      throw new Error('Bundled catalog install failed.');
+    }
+
+    const contentKeys = [
+      '2024:content.subclass:veteran' as ContentKey,
+      '2024:content.subclass:veteran-bundled-revision-2' as ContentKey,
+    ] as const;
+    const fingerprints = contentKeys.map((contentKey) => {
+      const projection = projectStoredAuthoredContentV1(db, {
+        kind: 'subclass',
+        contentKey,
+        references: storedAuthoredRegistryReferencesV1(db),
+      });
+      return {
+        content_key: contentKey,
+        v1: db.scalar<string>(
+          `SELECT fingerprint_digest FROM catalog_content_fingerprints
+           WHERE content_kind = 'subclass' AND content_key = ?
+             AND fingerprint_scheme = 'content-v1'
+             AND fingerprint_role = 'current'`,
+          [contentKey],
+        ),
+        v2: deriveContentIdentityV2({
+          kind: projection.kind,
+          edition: projection.aggregate.rules_edition,
+          name: projection.aggregate.name,
+          payload: projection.payload,
+        }).digest,
+      };
+    });
+
+    // These are historical bytes captured before feature-value authoring was
+    // added. They must never be regenerated from projector output.
+    expect(fingerprints).toEqual([{
+      content_key: '2024:content.subclass:veteran',
+      v1: '8ff41dc0dc6e0b7f7abd38cadacd9195849e2e06bd01afddcef5a64357289db2',
+      v2: '9b7c16eb2a6dae5bcfc1e903f4851cc7b9ff04554d9ade8f02f6d7a2827c5804',
+    }, {
+      content_key: '2024:content.subclass:veteran-bundled-revision-2',
+      v1: 'ba433201acabb302fac98efa457ed7846392d71c7400c198d00479912422135c',
+      v2: '80206df5cf31d4548572fddb5a89665cce3fcbe7c9e2221380b0fa674ae7d810',
+    }]);
+  });
+
   it('publishes all three entries atomically through drafts and is an exact-fingerprint no-op on repeat', async () => {
     // Measured alone at 4.62s; 20s retains contention headroom.
     const db = await database();

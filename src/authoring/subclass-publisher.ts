@@ -2,6 +2,10 @@ import { canonicalJson } from '../commands/canonical-json';
 import { sha256 } from '../crypto/sha256';
 import type { DatabaseContext } from '../db/database';
 import type { ContentKey } from '../domain/ids';
+import type { ClassLevel } from '../domain/ids';
+import type { PositiveInteger } from '../domain/class-resources';
+import type { ValueExpression } from '../domain/value-expression';
+import { FEATURE_VALUE_CONTRIBUTION_LIMITS } from '../domain/contracts/feature-value-storage-limits';
 import {
   assertedExternalContentKey,
 } from '../catalog/catalog-key';
@@ -33,6 +37,8 @@ import type {
   SubclassContentAggregate,
   SubclassContentProgression,
   SubclassContentProgressionRow,
+  SubclassAuthoringDraftContribution,
+  SubclassFeatureValueContribution,
 } from './contracts';
 import type {
   AuthoringDraftFeatureEffect,
@@ -125,6 +131,18 @@ function inspectDraftItemUuids(
     inspect(feature.draft_item_uuid, ['features', featureIndex, 'draft_item_uuid']);
     feature.effects.forEach((effect, effectIndex) =>
       inspect(effect.draft_item_uuid, ['features', featureIndex, 'effects', effectIndex, 'draft_item_uuid']));
+    (feature.contributions ?? []).forEach((contribution, contributionIndex) => {
+      inspect(
+        contribution.draft_item_uuid,
+        ['features', featureIndex, 'contributions', contributionIndex, 'draft_item_uuid'],
+      );
+      if (contribution.value.kind === 'breakpoint_table') {
+        contribution.value.rows.forEach((row, rowIndex) => inspect(
+          row.draft_item_uuid,
+          ['features', featureIndex, 'contributions', contributionIndex, 'value', 'rows', rowIndex, 'draft_item_uuid'],
+        ));
+      }
+    });
   });
   if (draft.progression.mode === 'override') {
     draft.progression.rows.forEach((row, rowIndex) => {
@@ -132,6 +150,298 @@ function inspectDraftItemUuids(
         inspect(grant.draft_item_uuid, ['progression', 'rows', rowIndex, 'grants', grantIndex, 'draft_item_uuid']));
     });
   }
+}
+
+function contributionValue(
+  draft: SubclassAuthoringDraftContribution,
+  parentClassKey: ContentKey,
+  path: readonly (string | number)[],
+  issues: AuthoringValidationIssue[],
+): ValueExpression | null {
+  switch (draft.value.kind) {
+    case 'constant':
+      if (draft.value.amount === null) {
+        authoringIssue(issues, [...path, 'value', 'amount'], 'required', 'Constant amount is required.');
+        return null;
+      }
+      return { kind: 'const', amount: draft.value.amount };
+    case 'class_level_scale': {
+      const valuePath = [...path, 'value'] as const;
+      if (draft.value.multiply === null) {
+        authoringIssue(issues, [...valuePath, 'multiply'], 'required', 'Multiplier is required.');
+      }
+      if (draft.value.divide === null) {
+        authoringIssue(issues, [...valuePath, 'divide'], 'required', 'Divisor is required.');
+      }
+      if (draft.value.round === null) {
+        authoringIssue(issues, [...valuePath, 'round'], 'required', 'Rounding is required.');
+      }
+      if (
+        draft.value.multiply === null ||
+        draft.value.divide === null ||
+        draft.value.round === null
+      ) return null;
+      return {
+        kind: 'scale',
+        source: { kind: 'class_level', class_content_key: parentClassKey },
+        multiply: draft.value.multiply as PositiveInteger,
+        divide: draft.value.divide as PositiveInteger,
+        round: draft.value.round,
+      };
+    }
+    case 'breakpoint_table': {
+      if (draft.value.rows.length === 0) {
+        authoringIssue(issues, [...path, 'value', 'rows'], 'required', 'At least one breakpoint row is required.');
+        return null;
+      }
+      const rows: Array<{ from: ClassLevel; to: ClassLevel; amount: number }> = [];
+      let previousTo: number | null = null;
+      draft.value.rows.forEach((row, rowIndex) => {
+        const rowPath = [...path, 'value', 'rows', rowIndex] as const;
+        if (row.from === null) authoringIssue(issues, [...rowPath, 'from'], 'required', 'Breakpoint start level is required.');
+        if (row.to === null) authoringIssue(issues, [...rowPath, 'to'], 'required', 'Breakpoint end level is required.');
+        if (row.amount === null) authoringIssue(issues, [...rowPath, 'amount'], 'required', 'Breakpoint amount is required.');
+        if (row.from !== null && row.to !== null) {
+          if (row.from > row.to) {
+            authoringIssue(issues, [...rowPath, 'to'], 'out_of_range', 'Breakpoint end level must not be below its start level.');
+          } else if (previousTo !== null && row.from !== previousTo + 1) {
+            authoringIssue(issues, [...rowPath, 'from'], 'invalid_value', 'Breakpoint rows must be contiguous and ordered.');
+          }
+          previousTo = row.to;
+        }
+        if (row.from !== null && row.to !== null && row.amount !== null && row.from <= row.to) {
+          rows.push({
+            from: row.from as ClassLevel,
+            to: row.to as ClassLevel,
+            amount: row.amount,
+          });
+        }
+      });
+      const first = rows[0];
+      return first === undefined
+        ? null
+        : {
+            kind: 'table',
+            level_source: { kind: 'class_level', class_content_key: parentClassKey },
+            rows: [first, ...rows.slice(1)],
+          };
+    }
+    case 'preserved':
+      return draft.value.expression;
+  }
+}
+
+function contributionTargetKey(
+  contribution: SubclassFeatureValueContribution,
+): string {
+  switch (contribution.target.kind) {
+    case 'feature_dice_count':
+      return `feature_dice_count\u0000${contribution.target.key}`;
+    case 'resource_maximum':
+      return `resource_maximum\u0000${
+        typeof contribution.target.resource === 'string'
+          ? contribution.target.resource
+          : contribution.target.resource.fact_key
+      }`;
+  }
+}
+
+function validateContributionGraph(
+  contributions: readonly {
+    readonly contribution: SubclassFeatureValueContribution;
+    readonly path: readonly (string | number)[];
+  }[],
+  issues: AuthoringValidationIssue[],
+): void {
+  const byKey = new Map<string, typeof contributions[number]>();
+  for (const entry of contributions) {
+    if (!byKey.has(entry.contribution.contribution_key)) {
+      byKey.set(entry.contribution.contribution_key, entry);
+    }
+  }
+  for (const entry of contributions) {
+    const supersedes = entry.contribution.supersedes;
+    if (supersedes === undefined) continue;
+    if (supersedes.contribution_key === entry.contribution.contribution_key) {
+      authoringIssue(issues, [...entry.path, 'supersedes_contribution_key'], 'invalid_value', 'A contribution cannot supersede itself.');
+      continue;
+    }
+    const victim = byKey.get(supersedes.contribution_key);
+    if (victim === undefined) {
+      authoringIssue(issues, [...entry.path, 'supersedes_contribution_key'], 'unresolved_reference', 'Superseded contribution must belong to this subclass.');
+      continue;
+    }
+    if (contributionTargetKey(victim.contribution) !== contributionTargetKey(entry.contribution)) {
+      authoringIssue(issues, [...entry.path, 'supersedes_contribution_key'], 'invalid_value', 'A contribution can only supersede another contribution with the same target.');
+    } else if (
+      victim.contribution.active_from_level > entry.contribution.active_from_level ||
+      victim.contribution.active_to_level < entry.contribution.active_to_level
+    ) {
+      authoringIssue(issues, [...entry.path, 'supersedes_contribution_key'], 'invalid_value', 'A superseded contribution must be active for the superseding contribution’s entire level band.');
+    }
+  }
+  for (const start of contributions) {
+    const positions = new Map<string, number>();
+    const path: typeof contributions[number][] = [];
+    let current: typeof contributions[number] | undefined = start;
+    while (current !== undefined) {
+      const key = current.contribution.contribution_key;
+      if (positions.has(key)) {
+        authoringIssue(issues, [...start.path, 'supersedes_contribution_key'], 'invalid_value', 'Contribution supersession must not contain a cycle.');
+        break;
+      }
+      positions.set(key, path.length);
+      path.push(current);
+      const nextKey: string | undefined =
+        current.contribution.supersedes?.contribution_key;
+      current = nextKey === undefined ? undefined : byKey.get(nextKey);
+    }
+  }
+}
+
+function featureContribution(
+  draft: SubclassAuthoringDraftContribution,
+  featureLevel: number,
+  parentClassKey: ContentKey,
+  contentKey: ContentKey,
+  path: readonly (string | number)[],
+  issues: AuthoringValidationIssue[],
+): SubclassFeatureValueContribution | null {
+  const keyReady = authoringNonEmpty(
+    draft.contribution_key,
+    [...path, 'contribution_key'],
+    issues,
+  );
+  const labelReady = authoringNonEmpty(draft.label, [...path, 'label'], issues);
+  if (draft.op === null) {
+    authoringIssue(issues, [...path, 'op'], 'required', 'Operation is required.');
+  }
+  if (draft.active_from_level === null) {
+    authoringIssue(issues, [...path, 'active_from_level'], 'required', 'Active-from level is required.');
+  }
+  if (draft.active_to_level === null) {
+    authoringIssue(issues, [...path, 'active_to_level'], 'required', 'Active-to level is required.');
+  }
+  if (
+    draft.active_from_level !== null &&
+    draft.active_to_level !== null &&
+    draft.active_from_level > draft.active_to_level
+  ) {
+    authoringIssue(issues, [...path, 'active_to_level'], 'out_of_range', 'Active-to level must not be below active-from level.');
+  }
+  if (
+    draft.active_from_level !== null &&
+    draft.active_from_level < featureLevel
+  ) {
+    authoringIssue(issues, [...path, 'active_from_level'], 'out_of_range', 'Active-from level must not precede the feature level.');
+  }
+  const value = contributionValue(draft, parentClassKey, path, issues);
+  if (
+    draft.value.kind === 'breakpoint_table' &&
+    draft.active_from_level !== null &&
+    draft.active_to_level !== null
+  ) {
+    const first = draft.value.rows[0];
+    const last = draft.value.rows.at(-1);
+    if (
+      first?.from === null || first?.from === undefined ||
+      last?.to === null || last?.to === undefined ||
+      first.from > draft.active_from_level ||
+      last.to < draft.active_to_level
+    ) {
+      authoringIssue(
+        issues,
+        [...path, 'value', 'rows'],
+        'invalid_value',
+        'Breakpoint rows must cover every active level.',
+      );
+    }
+  }
+  let target: SubclassFeatureValueContribution['target'] | null = null;
+  switch (draft.target.kind) {
+    case 'feature_dice_count':
+      if (draft.target.key === null) {
+        authoringIssue(issues, [...path, 'target', 'key'], 'required', 'Feature value target is required.');
+      } else {
+        target = { kind: 'feature_dice_count', key: draft.target.key };
+      }
+      break;
+    case 'resource_maximum': {
+      const displayReady = authoringNonEmpty(
+        draft.target.display_label,
+        [...path, 'target', 'display_label'],
+        issues,
+      );
+      if (draft.target.marking_shape === null) {
+        authoringIssue(issues, [...path, 'target', 'marking_shape'], 'required', 'Resource marking style is required.');
+      }
+      const factKey = `${contentKey}\u0000${draft.contribution_key}`;
+      if ([...factKey].length > FEATURE_VALUE_CONTRIBUTION_LIMITS.keyCodePoints) {
+        authoringIssue(issues, [...path, 'contribution_key'], 'too_long', 'Resource identity exceeds the storage limit.');
+      } else if (displayReady && draft.target.marking_shape !== null) {
+        target = {
+          kind: 'resource_maximum',
+          resource: {
+            fact_key: factKey,
+            display_label: draft.target.display_label,
+            marking_shape: draft.target.marking_shape,
+          },
+        };
+      }
+      break;
+    }
+    case 'preserved': {
+      const preserved = draft.target.target;
+      if (
+        preserved.kind === 'resource_maximum' &&
+        typeof preserved.resource !== 'string'
+      ) {
+        const expectedFactKey = `${contentKey}\u0000${draft.contribution_key}`;
+        if (preserved.resource.fact_key !== expectedFactKey) {
+          authoringIssue(
+            issues,
+            [...path, 'target'],
+            'invalid_value',
+            'Authored resource identity must match this subclass and contribution key.',
+          );
+        } else if (
+          [...expectedFactKey].length > FEATURE_VALUE_CONTRIBUTION_LIMITS.keyCodePoints
+        ) {
+          authoringIssue(issues, [...path, 'contribution_key'], 'too_long', 'Resource identity exceeds the storage limit.');
+        } else {
+          target = preserved;
+        }
+      } else {
+        target = preserved;
+      }
+      break;
+    }
+  }
+  if (
+    !keyReady || !labelReady || draft.op === null ||
+    draft.active_from_level === null || draft.active_to_level === null ||
+    draft.active_from_level > draft.active_to_level ||
+    draft.active_from_level < featureLevel || value === null || target === null
+  ) return null;
+  return {
+    kind: 'feature_value_contribution',
+    contribution_key: draft.contribution_key,
+    label: draft.label,
+    target,
+    op: draft.op,
+    active_from_level: draft.active_from_level as ClassLevel,
+    active_to_level: draft.active_to_level as ClassLevel,
+    value,
+    ...(draft.supersedes_contribution_key === null
+      ? {}
+      : {
+          supersedes: {
+            kind: 'contribution' as const,
+            content_key: contentKey,
+            contribution_key: draft.supersedes_contribution_key,
+          },
+        }),
+  };
 }
 
 function rootOnlyProgression(
@@ -285,7 +595,30 @@ export function subclassDraftToAggregate(
     case 'override': progression = overrideProgression(db, draft.progression, issues); break;
   }
 
+  let authoredContentKey: ContentKey | null = null;
+  if (draft.rules_edition !== null && draft.name.trim() !== '') {
+    try {
+      authoredContentKey = assertedExternalContentKey(
+        'subclass',
+        draft.rules_edition,
+        draft.name.trim(),
+      );
+    } catch (error) {
+      authoringIssue(
+        issues,
+        ['name'],
+        'invalid_value',
+        error instanceof Error ? error.message : 'Name cannot produce a content key.',
+      );
+    }
+  }
+
   const repeatedNames = new Set<string>();
+  const contributionKeys = new Set<string>();
+  const aggregateContributions: Array<{
+    readonly contribution: SubclassFeatureValueContribution;
+    readonly path: readonly (string | number)[];
+  }> = [];
   const features = draft.features.flatMap((feature, featureIndex) => {
     const path = ['features', featureIndex] as const;
     if (feature.class_level === null) authoringIssue(issues, [...path, 'class_level'], 'required', 'Feature level is required.');
@@ -300,15 +633,55 @@ export function subclassDraftToAggregate(
       const resolved = featureEffect(effect, effectIndex + 1, [...path, 'effects', effectIndex], issues);
       return resolved === null ? [] : [resolved];
     });
+    const contributions = (feature.contributions ?? []).flatMap(
+      (contribution, contributionIndex) => {
+        const contributionPath = [...path, 'contributions', contributionIndex] as const;
+        if (contributionKeys.has(contribution.contribution_key)) {
+          authoringIssue(
+            issues,
+            [...contributionPath, 'contribution_key'],
+            'duplicate',
+            'Stable contribution keys must be unique throughout the subclass.',
+          );
+        }
+        contributionKeys.add(contribution.contribution_key);
+        if (
+          feature.class_level === null ||
+          draft.parent_class_content_key === null ||
+          authoredContentKey === null
+        ) return [];
+        const resolved = featureContribution(
+          contribution,
+          feature.class_level,
+          draft.parent_class_content_key,
+          authoredContentKey,
+          contributionPath,
+          issues,
+        );
+        if (resolved === null) return [];
+        aggregateContributions.push({ contribution: resolved, path: contributionPath });
+        return [resolved];
+      },
+    );
     return feature.class_level !== null && nameReady && descriptionReady
-      ? [{ source_order: featureIndex, class_level: feature.class_level, name: feature.name, description: feature.description, effects }]
+      ? [{
+          source_order: featureIndex,
+          class_level: feature.class_level,
+          name: feature.name,
+          description: feature.description,
+          effects,
+          ...(contributions.length === 0 ? {} : { contributions }),
+        }]
       : [];
   }).sort((left, right) => left.class_level - right.class_level || left.source_order - right.source_order)
     .map(({ source_order: _sourceOrder, ...feature }, index) => ({ ...feature, sort_order: index + 1 }));
 
+  validateContributionGraph(aggregateContributions, issues);
+
   if (
     issues.length > 0 || draft.rules_edition === null ||
-    draft.parent_class_content_key === null || parentClass === null || progression === null
+    draft.parent_class_content_key === null || parentClass === null || progression === null ||
+    authoredContentKey === null
   ) {
     throw new SubclassSemanticValidationError(Object.freeze(issues));
   }

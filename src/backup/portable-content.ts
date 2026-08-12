@@ -78,6 +78,12 @@ import type { SpeciesProjectorAggregateV2 } from '../catalog/authored-content-pr
 import type { DatabaseContext } from '../db/database';
 import type { CatalogContentKeyKind } from '../../db/schema/catalog-content';
 import type { ContentKey } from '../domain/ids';
+import { featureValueKeys } from '../domain/feature-values';
+import { FEATURE_VALUE_CONTRIBUTION_LIMITS } from '../domain/contracts/feature-value-storage-limits';
+import {
+  decodeStoredSupersedesReference,
+  decodeStoredValueExpression,
+} from '../domain/contracts/row-rules';
 import { BackupValidationError, assertExactKeys, backupRecord } from './backup-version';
 
 export const LIBRARY_EXPORT_FORMAT = 'dnd-multiclass-spells/library' as const;
@@ -408,6 +414,157 @@ function projectPortableAggregate(
     case 'item': {
       const value = object as unknown as Extract<EquipmentContentAggregate, { kind: 'item' }>;
       return { edition: value.rules_edition, name: value.name, payload: projectItemContentV1(value) };
+    }
+  }
+}
+
+function portableSubclassTargetIdentity(target: Record<string, unknown>): string {
+  if (target.kind === 'feature_dice_count') return `feature_dice_count\u0000${String(target.key)}`;
+  const resource = backupRecord(target.resource, 'Portable subclass contribution resource');
+  return `resource_maximum\u0000${String(resource.fact_key)}`;
+}
+
+function validatePortableSubclassContributions(
+  aggregate: Record<string, unknown>,
+  contentKey: ContentKey,
+): void {
+  if (!Array.isArray(aggregate.features)) {
+    throw new BackupValidationError('Portable subclass aggregate features must be a list.');
+  }
+  const indexed = new Map<string, {
+    readonly target: string;
+    readonly supersedes: string | null;
+    readonly activeFrom: number;
+    readonly activeTo: number;
+  }>();
+  for (const [featureIndex, inputFeature] of aggregate.features.entries()) {
+    const featureLabel = `Portable subclass feature[${String(featureIndex)}]`;
+    const feature = backupRecord(inputFeature, featureLabel);
+    const hasContributions = Object.hasOwn(feature, 'contributions');
+    exactKeys(feature, [
+      'class_level', 'sort_order', 'name', 'description', 'effects',
+      ...(hasContributions ? ['contributions'] : []),
+    ], featureLabel);
+    if (!hasContributions) continue;
+    if (!Array.isArray(feature.contributions)) {
+      throw new BackupValidationError(`${featureLabel}.contributions must be a list.`);
+    }
+    for (const [contributionIndex, inputContribution] of feature.contributions.entries()) {
+      const label = `${featureLabel}.contributions[${String(contributionIndex)}]`;
+      const contribution = backupRecord(inputContribution, label);
+      const hasSupersedes = Object.hasOwn(contribution, 'supersedes');
+      exactKeys(contribution, [
+        'kind', 'contribution_key', 'label', 'target', 'op',
+        'active_from_level', 'active_to_level', 'value',
+        ...(hasSupersedes ? ['supersedes'] : []),
+      ], label);
+      if (
+        contribution.kind !== 'feature_value_contribution' ||
+        typeof contribution.contribution_key !== 'string' ||
+        [...contribution.contribution_key].length < 1 ||
+        [...contribution.contribution_key].length > FEATURE_VALUE_CONTRIBUTION_LIMITS.keyCodePoints ||
+        typeof contribution.label !== 'string' ||
+        [...contribution.label].length < 1 ||
+        [...contribution.label].length > FEATURE_VALUE_CONTRIBUTION_LIMITS.keyCodePoints ||
+        contribution.op !== 'add' ||
+        !Number.isSafeInteger(contribution.active_from_level) ||
+        !Number.isSafeInteger(contribution.active_to_level) ||
+        Number(contribution.active_from_level) < Number(feature.class_level) ||
+        Number(contribution.active_from_level) < 1 ||
+        Number(contribution.active_to_level) > 20 ||
+        Number(contribution.active_from_level) > Number(contribution.active_to_level)
+      ) {
+        throw new BackupValidationError(`${label} is invalid.`);
+      }
+      const target = backupRecord(contribution.target, `${label}.target`);
+      if (target.kind === 'feature_dice_count') {
+        exactKeys(target, ['kind', 'key'], `${label}.target`);
+        if (
+          typeof target.key !== 'string' ||
+          !(featureValueKeys as readonly string[]).includes(target.key)
+        ) throw new BackupValidationError(`${label}.target is invalid.`);
+      } else if (target.kind === 'resource_maximum') {
+        exactKeys(target, ['kind', 'resource'], `${label}.target`);
+        const resource = backupRecord(target.resource, `${label}.target.resource`);
+        exactKeys(
+          resource,
+          ['fact_key', 'display_label', 'marking_shape'],
+          `${label}.target.resource`,
+        );
+        if (
+          resource.fact_key !== `${contentKey}\u0000${contribution.contribution_key}` ||
+          typeof resource.fact_key !== 'string' ||
+          [...resource.fact_key].length > FEATURE_VALUE_CONTRIBUTION_LIMITS.keyCodePoints ||
+          typeof resource.display_label !== 'string' ||
+          [...resource.display_label].length < 1 ||
+          [...resource.display_label].length > FEATURE_VALUE_CONTRIBUTION_LIMITS.keyCodePoints ||
+          (resource.marking_shape !== 'boxes' && resource.marking_shape !== 'remaining')
+        ) throw new BackupValidationError(`${label}.target resource display configuration is invalid.`);
+      } else {
+        throw new BackupValidationError(`${label}.target kind is invalid.`);
+      }
+      decodeStoredValueExpression(
+        JSON.stringify(contribution.value),
+        `${label}.value`,
+      );
+      let supersedesKey: string | null = null;
+      if (hasSupersedes) {
+        const sourceRef = backupRecord(contribution.supersedes, `${label}.supersedes`);
+        exactKeys(
+          sourceRef,
+          ['kind', 'content_key', 'contribution_key'],
+          `${label}.supersedes`,
+        );
+        if (sourceRef.kind !== 'contribution') {
+          throw new BackupValidationError(`${label}.supersedes kind is invalid.`);
+        }
+        const supersedes = decodeStoredSupersedesReference(JSON.stringify({
+          content_key: sourceRef.content_key,
+          contribution_key: sourceRef.contribution_key,
+        }), `${label}.supersedes`);
+        if (
+          supersedes === null ||
+          supersedes.content_key !== contentKey ||
+          supersedes.contribution_key === contribution.contribution_key
+        ) throw new BackupValidationError(`${label}.supersedes must name another contribution in this subclass.`);
+        supersedesKey = String(supersedes.contribution_key);
+      }
+      if (indexed.has(contribution.contribution_key)) {
+        throw new BackupValidationError('Portable subclass contribution keys must be unique throughout the aggregate.');
+      }
+      indexed.set(contribution.contribution_key, {
+        target: portableSubclassTargetIdentity(target),
+        supersedes: supersedesKey,
+        activeFrom: Number(contribution.active_from_level),
+        activeTo: Number(contribution.active_to_level),
+      });
+    }
+  }
+  for (const [key, contribution] of indexed) {
+    if (contribution.supersedes === null) continue;
+    const victim = indexed.get(contribution.supersedes);
+    if (victim === undefined) {
+      throw new BackupValidationError(`Portable subclass contribution '${key}' has a dangling supersedes reference.`);
+    }
+    if (victim.target !== contribution.target) {
+      throw new BackupValidationError(`Portable subclass contribution '${key}' supersedes a different target.`);
+    }
+    if (
+      victim.activeFrom > contribution.activeFrom ||
+      victim.activeTo < contribution.activeTo
+    ) {
+      throw new BackupValidationError(`Portable subclass contribution '${key}' outlives the contribution it supersedes.`);
+    }
+  }
+  for (const start of indexed.keys()) {
+    const seen = new Set<string>();
+    let key: string | null = start;
+    while (key !== null) {
+      if (seen.has(key)) {
+        throw new BackupValidationError('Portable subclass contribution supersession contains a cycle.');
+      }
+      seen.add(key);
+      key = indexed.get(key)?.supersedes ?? null;
     }
   }
 }
@@ -899,6 +1056,12 @@ function validatedEntry(input: unknown, index: number): PortableContentAggregate
   }
   jsonDepth(value.aggregate);
   const aggregate = value.aggregate as PortableContentAggregateValue;
+  if (kind === 'subclass') {
+    validatePortableSubclassContributions(
+      backupRecord(aggregate, 'Portable subclass aggregate'),
+      value.content_key as ContentKey,
+    );
+  }
   const scheme = value.fingerprint_scheme;
   const projected = projectPortableAggregate(kind, aggregate, scheme);
   let expectedKey: ContentKey;
@@ -1239,6 +1402,54 @@ function installSubclass(
           fields.base, fields.ability_1, fields.ability_2, fields.allows_shield,
           fields.weapon_scope, fields.attack_count, effect.label, effect.notes,
           now, now],
+      );
+    }
+    for (const contribution of feature.contributions ?? []) {
+      const target = contribution.target;
+      if (
+        target.kind === 'resource_maximum' &&
+        typeof target.resource === 'string'
+      ) {
+        throw new BackupValidationError(
+          'Portable subclass resource contributions require authored display configuration.',
+        );
+      }
+      let targetKey: string;
+      let resourceDisplayLabel: string | null;
+      let resourceMarkingShape: string | null;
+      if (target.kind === 'feature_dice_count') {
+        targetKey = target.key;
+        resourceDisplayLabel = null;
+        resourceMarkingShape = null;
+      } else {
+        const resource = target.resource;
+        if (typeof resource === 'string') {
+          throw new BackupValidationError(
+            'Portable subclass resource contributions require authored display configuration.',
+          );
+        }
+        targetKey = resource.fact_key;
+        resourceDisplayLabel = resource.display_label;
+        resourceMarkingShape = resource.marking_shape;
+      }
+      db.exec(
+        `INSERT INTO subclass_feature_value_contributions (
+           subclass_feature_id, contribution_key, label, target_kind,
+           target_key, op, active_from_level, active_to_level, value_json,
+           supersedes_ref, resource_display_label, resource_marking_shape,
+           created_at, updated_at
+         ) VALUES (${Array.from({ length: 14 }, () => '?').join(', ')})`,
+        [featureId, contribution.contribution_key, contribution.label,
+          target.kind, targetKey, contribution.op,
+          contribution.active_from_level, contribution.active_to_level,
+          JSON.stringify(contribution.value),
+          contribution.supersedes === undefined
+            ? null
+            : JSON.stringify({
+                content_key: contribution.supersedes.content_key,
+                contribution_key: contribution.supersedes.contribution_key,
+              }),
+          resourceDisplayLabel, resourceMarkingShape, now, now],
       );
     }
   }

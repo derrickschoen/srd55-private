@@ -126,6 +126,59 @@ describe('per-kind durable draft codecs', () => {
     expect(draft.grants[1]).toMatchObject({ minimum_spell_level: 1 });
   });
 
+  it('round-trips the scaling-feature editor subset and rejects nested extra keys', () => {
+    const draft: SubclassAuthoringDraft = {
+      ...subclassDraft(),
+      features: [{
+        draft_item_uuid: item('feature'),
+        class_level: 3,
+        name: 'Scaling feature',
+        description: 'Scales.',
+        effects: [],
+        contributions: [{
+          kind: 'feature_value_contribution',
+          draft_item_uuid: item('contribution'),
+          contribution_key: 'scaled-dice',
+          label: 'Scaled dice',
+          target: { kind: 'feature_dice_count', key: 'sneak_attack' },
+          op: 'add',
+          active_from_level: 3,
+          active_to_level: 20,
+          value: {
+            kind: 'breakpoint_table',
+            rows: [{
+              draft_item_uuid: item('breakpoint'),
+              from: 3,
+              to: 20,
+              amount: 1,
+            }],
+          },
+          supersedes_contribution_key: null,
+        }],
+      }],
+    };
+    expect(decodeStoredDraft(
+      'subclass',
+      1,
+      encodeCurrentDraft('subclass', draft).json,
+    )).toMatchObject({ status: 'ready', document: draft });
+
+    const hostile = JSON.parse(JSON.stringify(draft)) as Record<string, unknown>;
+    const features = hostile.features as Array<Record<string, unknown>>;
+    const contributions = features[0]!.contributions as Array<Record<string, unknown>>;
+    const value = contributions[0]!.value as Record<string, unknown>;
+    value.future_expression_field = true;
+    const error = codecError(() => decodeStoredDraft(
+      'subclass',
+      1,
+      JSON.stringify(hostile),
+    ));
+    expect(error.issues).toContainEqual(expect.objectContaining({
+      path: ['features', 0, 'contributions', 0, 'value', 'future_expression_field'],
+      code: 'unknown_field',
+    }));
+  });
+
   it('refuses unknown root and nested fields with exact structured paths', () => {
     const root = { ...speciesDraft(), future_field: true };
     expect(codecError(() => encodeCurrentDraft('species', root)).issues).toContainEqual({

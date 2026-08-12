@@ -8,6 +8,7 @@ import type {
   StoredHomebrewDraft,
   SubclassAuthoringDraft,
   SubclassAuthoringDraftFeature,
+  SubclassAuthoringDraftContribution,
   SubclassAuthoringDraftProgressionRow,
 } from '../../../authoring/contracts';
 import type {
@@ -26,6 +27,7 @@ import {
   type FeatureTemplateEffectKind,
   type ProgressionType,
 } from '../../../domain/enums';
+import { featureValueKeys } from '../../../domain/feature-values';
 import type { ContentKey } from '../../../domain/ids';
 import { RpcError } from '../../../rpc/protocol';
 import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
@@ -52,7 +54,11 @@ import {
 import { createAuthoringEditGeneration } from '../../authoring/edit-generation';
 import { clear, element, type Cleanup } from '../../dom';
 import { freeTextSpan } from '../../free-text';
-import { abilityLabel, rulesEditionLabel } from '../../human-labels';
+import {
+  abilityLabel,
+  featureValueLabel,
+  rulesEditionLabel,
+} from '../../human-labels';
 import type { ScreenContext } from '../../screen';
 import { homebrewPublishedPath } from './homebrew-routes';
 import {
@@ -147,6 +153,35 @@ function row(classLevel: CharacterLevel): SubclassAuthoringDraftProgressionRow {
 
 function emptyOverrideRows(): readonly SubclassAuthoringDraftProgressionRow[] {
   return characterLevels.map(row);
+}
+
+function emptyContribution(
+  draftItemUuid: HomebrewDraftItemUuid,
+  featureLevel: CharacterLevel,
+): SubclassAuthoringDraftContribution {
+  return {
+    kind: 'feature_value_contribution',
+    draft_item_uuid: draftItemUuid,
+    contribution_key: '',
+    label: '',
+    target: { kind: 'feature_dice_count', key: 'sneak_attack' },
+    op: 'add',
+    active_from_level: featureLevel,
+    active_to_level: 20,
+    value: { kind: 'constant', amount: null },
+    supersedes_contribution_key: null,
+  };
+}
+
+function sameContributionTarget(
+  left: SubclassAuthoringDraftContribution,
+  right: SubclassAuthoringDraftContribution,
+): boolean {
+  if (left.target.kind !== right.target.kind) return false;
+  if (left.target.kind === 'feature_dice_count') {
+    return right.target.kind === left.target.kind && left.target.key === right.target.key;
+  }
+  return right.target.kind === left.target.kind;
 }
 
 function emptyFeatureEffect(
@@ -389,6 +424,39 @@ function previewElement(
     const effects = element('ul');
     for (const effect of feature.effects) {
       effects.append(renderPublishPreviewEffect(effect));
+    }
+    for (const contribution of feature.contributions ?? []) {
+      const target = contribution.target.kind === 'feature_dice_count'
+        ? featureValueLabel(contribution.target.key)
+        : typeof contribution.target.resource === 'string'
+          ? contribution.target.resource
+          : contribution.target.resource.display_label;
+      const value = (() => {
+        switch (contribution.value.kind) {
+          case 'const':
+            return `constant ${String(contribution.value.amount)}`;
+          case 'scale':
+            return `${String(contribution.value.multiply ?? 1)} × class level ÷ ${String(contribution.value.divide ?? 1)}, ${contribution.value.round}`;
+          case 'table':
+            return contribution.value.rows
+              .map((row) => `${String(row.from)}–${String(row.to)}: ${String(row.amount)}`)
+              .join('; ');
+          case 'ref':
+          case 'piecewise':
+          case 'sum':
+          case 'clamp':
+            return 'preserved advanced expression';
+        }
+      })();
+      const contributionItem = element('li');
+      contributionItem.append(
+        freeTextSpan(contribution.label),
+        `: add ${value} to ${target}, levels ${String(contribution.active_from_level)}–${String(contribution.active_to_level)}`,
+        contribution.supersedes === undefined
+          ? '.'
+          : `; supersedes ${contribution.supersedes.contribution_key} in this subclass.`,
+      );
+      effects.append(contributionItem);
     }
     item.append(heading, description, effects);
     timeline.append(item);
@@ -1233,6 +1301,450 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
           update({ ...document, features });
           render();
         });
+        const contributions = element('div', {
+          className: 'subclass-feature-value-contributions',
+          attributes: {
+            'aria-label': `Scaling feature values for ${feature.name || `level ${String(level)} feature ${String(withinLevelIndex + 1)}`}`,
+          },
+        });
+        for (const [contributionIndex, contribution] of (
+          feature.contributions ?? []
+        ).entries()) {
+          let liveContribution = contribution;
+          const replaceContribution = (
+            changed: SubclassAuthoringDraftContribution,
+          ): void => {
+            liveContribution = changed;
+            const features = document.features.map((candidate, index) =>
+              index === featureIndex
+                ? {
+                    ...candidate,
+                    contributions: (candidate.contributions ?? []).map(
+                      (current, position) =>
+                        position === contributionIndex ? changed : current,
+                    ),
+                  }
+                : candidate);
+            update({ ...document, features });
+          };
+          const contributionPath = [
+            'features', featureIndex, 'contributions', contributionIndex,
+          ] as const;
+          const contributionCard = element('fieldset', {
+            className: 'subclass-feature-value-card',
+            attributes: {
+              'data-draft-item-uuid': contribution.draft_item_uuid,
+              'aria-label': `Scaling feature value ${String(contributionIndex + 1)}`,
+            },
+          });
+          contributionCard.append(element('legend', {
+            text: `Scaling feature value ${String(contributionIndex + 1)}`,
+          }));
+          const contributionKey = element('input', {
+            attributes: {
+              id: `${prefix}-contribution-${String(contributionIndex)}-key`,
+              type: 'text',
+              ...pathAttribute([...contributionPath, 'contribution_key']),
+            },
+          });
+          contributionKey.value = contribution.contribution_key;
+          contributionKey.disabled = locked;
+          contributionKey.addEventListener('input', () => replaceContribution({
+            ...liveContribution,
+            contribution_key: contributionKey.value,
+          }));
+          const contributionLabel = element('input', {
+            attributes: {
+              id: `${prefix}-contribution-${String(contributionIndex)}-label`,
+              type: 'text',
+              ...pathAttribute([...contributionPath, 'label']),
+            },
+          });
+          contributionLabel.value = contribution.label;
+          contributionLabel.disabled = locked;
+          contributionLabel.addEventListener('input', () => replaceContribution({
+            ...liveContribution,
+            label: contributionLabel.value,
+          }));
+          contributionCard.append(
+            ...labelledControl('Stable contribution key', contributionKey.id, contributionKey),
+            ...labelledControl('Contribution label', contributionLabel.id, contributionLabel),
+          );
+
+          if (contribution.target.kind === 'preserved') {
+            contributionCard.append(element('p', {
+              text: 'This imported target is preserved exactly and is not editable by this form.',
+            }));
+          } else {
+            const target = element('select', {
+              attributes: {
+                id: `${prefix}-contribution-${String(contributionIndex)}-target`,
+                ...pathAttribute([...contributionPath, 'target']),
+              },
+            });
+            for (const key of featureValueKeys) {
+              target.append(element('option', {
+                text: featureValueLabel(key),
+                attributes: { value: `feature_dice_count:${key}` },
+              }));
+            }
+            target.append(element('option', {
+              text: 'Authored resource maximum',
+              attributes: { value: 'resource_maximum' },
+            }));
+            target.value = contribution.target.kind === 'feature_dice_count'
+              ? `feature_dice_count:${contribution.target.key ?? 'sneak_attack'}`
+              : 'resource_maximum';
+            target.disabled = locked;
+            target.addEventListener('change', () => {
+              replaceContribution({
+                ...liveContribution,
+                target: target.value === 'resource_maximum'
+                  ? {
+                      kind: 'resource_maximum',
+                      display_label: feature.name,
+                      marking_shape: 'boxes',
+                    }
+                  : { kind: 'feature_dice_count', key: 'sneak_attack' },
+                supersedes_contribution_key: null,
+              });
+              render();
+            });
+            contributionCard.append(
+              ...labelledControl('Target value', target.id, target),
+            );
+            if (contribution.target.kind === 'resource_maximum') {
+              const resourceTarget = contribution.target;
+              const displayLabel = element('input', {
+                attributes: {
+                  id: `${prefix}-contribution-${String(contributionIndex)}-resource-label`,
+                  type: 'text',
+                  ...pathAttribute([...contributionPath, 'target', 'display_label']),
+                },
+              });
+              displayLabel.value = resourceTarget.display_label;
+              displayLabel.disabled = locked;
+              displayLabel.addEventListener('input', () => replaceContribution({
+                ...liveContribution,
+                target: {
+                  ...(liveContribution.target.kind === 'resource_maximum'
+                    ? liveContribution.target
+                    : resourceTarget),
+                  display_label: displayLabel.value,
+                },
+              }));
+              const marking = element('select', {
+                attributes: {
+                  id: `${prefix}-contribution-${String(contributionIndex)}-marking`,
+                  ...pathAttribute([...contributionPath, 'target', 'marking_shape']),
+                },
+              });
+              for (const [value, text] of [
+                ['boxes', 'Boxes'], ['remaining', 'Remaining uses'],
+              ] as const) marking.append(element('option', { text, attributes: { value } }));
+              marking.value = resourceTarget.marking_shape ?? '';
+              marking.disabled = locked;
+              marking.addEventListener('change', () => replaceContribution({
+                ...liveContribution,
+                target: {
+                  ...(liveContribution.target.kind === 'resource_maximum'
+                    ? liveContribution.target
+                    : resourceTarget),
+                  marking_shape: marking.value === 'remaining' ? 'remaining' : 'boxes',
+                },
+              }));
+              contributionCard.append(
+                ...labelledControl('Resource display label', displayLabel.id, displayLabel),
+                ...labelledControl('Resource marking style', marking.id, marking),
+              );
+            }
+          }
+
+          const operation = element('select', {
+            attributes: {
+              id: `${prefix}-contribution-${String(contributionIndex)}-op`,
+              ...pathAttribute([...contributionPath, 'op']),
+            },
+          });
+          operation.append(element('option', { text: 'Add', attributes: { value: 'add' } }));
+          operation.value = contribution.op ?? '';
+          operation.disabled = locked;
+          operation.addEventListener('change', () => replaceContribution({
+            ...liveContribution,
+            op: 'add',
+          }));
+          const levelControl = (
+            field: 'active_from_level' | 'active_to_level',
+            label: string,
+          ) => {
+            const select = element('select', {
+              attributes: {
+                id: `${prefix}-contribution-${String(contributionIndex)}-${field}`,
+                ...pathAttribute([...contributionPath, field]),
+              },
+            });
+            for (const candidate of characterLevels) {
+              select.append(element('option', {
+                text: `Level ${String(candidate)}`,
+                attributes: { value: String(candidate) },
+              }));
+            }
+            select.value = String(contribution[field] ?? '');
+            select.disabled = locked;
+            select.addEventListener('change', () => {
+              const next = characterLevels.find((candidate) => candidate === Number(select.value));
+              if (next !== undefined) replaceContribution({ ...liveContribution, [field]: next });
+            });
+            return labelledControl(label, select.id, select);
+          };
+          contributionCard.append(
+            ...labelledControl('Operation', operation.id, operation),
+            ...levelControl('active_from_level', 'Active from level'),
+            ...levelControl('active_to_level', 'Active to level'),
+          );
+
+          if (contribution.value.kind === 'preserved') {
+            contributionCard.append(element('p', {
+              text: 'This imported expression uses the wider storage grammar and is preserved exactly.',
+            }));
+          } else {
+            const valueKind = element('select', {
+              attributes: {
+                id: `${prefix}-contribution-${String(contributionIndex)}-value-kind`,
+                ...pathAttribute([...contributionPath, 'value', 'kind']),
+              },
+            });
+            for (const [value, text] of [
+              ['constant', 'Constant'],
+              ['class_level_scale', 'Class-level scale'],
+              ['breakpoint_table', 'Breakpoint table'],
+            ] as const) valueKind.append(element('option', { text, attributes: { value } }));
+            valueKind.value = contribution.value.kind;
+            valueKind.disabled = locked;
+            valueKind.addEventListener('change', () => {
+              const value: SubclassAuthoringDraftContribution['value'] =
+                valueKind.value === 'class_level_scale'
+                  ? { kind: 'class_level_scale', multiply: 1, divide: 1, round: 'floor' }
+                  : valueKind.value === 'breakpoint_table'
+                    ? { kind: 'breakpoint_table', rows: [] }
+                    : { kind: 'constant', amount: null };
+              replaceContribution({ ...liveContribution, value });
+              render();
+            });
+            contributionCard.append(
+              ...labelledControl('Scaling method', valueKind.id, valueKind),
+            );
+            const numberInput = (
+              field: 'amount' | 'multiply' | 'divide',
+              label: string,
+              value: number | null,
+              onChange: (next: number | null) => void,
+            ) => {
+              const input = element('input', {
+                attributes: {
+                  id: `${prefix}-contribution-${String(contributionIndex)}-${field}`,
+                  type: 'number',
+                  ...pathAttribute([...contributionPath, 'value', field]),
+                },
+              });
+              input.value = value === null ? '' : String(value);
+              input.disabled = locked;
+              input.addEventListener('input', () => onChange(nullableInteger(input.value)));
+              return labelledControl(label, input.id, input);
+            };
+            if (contribution.value.kind === 'constant') {
+              contributionCard.append(...numberInput(
+                'amount',
+                'Amount',
+                contribution.value.amount,
+                (amount) => replaceContribution({
+                  ...liveContribution,
+                  value: { kind: 'constant', amount },
+                }),
+              ));
+            } else if (contribution.value.kind === 'class_level_scale') {
+              const scaleValue = contribution.value;
+              contributionCard.append(
+                ...numberInput('multiply', 'Multiply class level by', scaleValue.multiply, (multiply) => replaceContribution({
+                  ...liveContribution,
+                  value: {
+                    ...(liveContribution.value.kind === 'class_level_scale'
+                      ? liveContribution.value
+                      : scaleValue),
+                    multiply,
+                  },
+                })),
+                ...numberInput('divide', 'Divide class level by', scaleValue.divide, (divide) => replaceContribution({
+                  ...liveContribution,
+                  value: {
+                    ...(liveContribution.value.kind === 'class_level_scale'
+                      ? liveContribution.value
+                      : scaleValue),
+                    divide,
+                  },
+                })),
+              );
+              const rounding = element('select', {
+                attributes: {
+                  id: `${prefix}-contribution-${String(contributionIndex)}-round`,
+                  ...pathAttribute([...contributionPath, 'value', 'round']),
+                },
+              });
+              for (const [value, text] of [['floor', 'Round down'], ['ceiling', 'Round up']] as const) {
+                rounding.append(element('option', { text, attributes: { value } }));
+              }
+              rounding.value = scaleValue.round ?? '';
+              rounding.disabled = locked;
+              rounding.addEventListener('change', () => replaceContribution({
+                ...liveContribution,
+                value: {
+                  ...(liveContribution.value.kind === 'class_level_scale'
+                    ? liveContribution.value
+                    : scaleValue),
+                  round: rounding.value === 'ceiling' ? 'ceiling' : 'floor',
+                },
+              }));
+              contributionCard.append(...labelledControl('Rounding', rounding.id, rounding));
+            } else {
+              for (const [rowIndex, breakpoint] of contribution.value.rows.entries()) {
+                const rowMount = element('div', { className: 'subclass-breakpoint-row' });
+                for (const [field, text] of [
+                  ['from', 'From level'], ['to', 'To level'], ['amount', 'Amount'],
+                ] as const) {
+                  const input = element('input', {
+                    attributes: {
+                      id: `${prefix}-contribution-${String(contributionIndex)}-row-${String(rowIndex)}-${field}`,
+                      type: 'number',
+                      ...pathAttribute([...contributionPath, 'value', 'rows', rowIndex, field]),
+                    },
+                  });
+                  input.value = breakpoint[field] === null ? '' : String(breakpoint[field]);
+                  input.disabled = locked;
+                  input.addEventListener('input', () => {
+                    const rows = liveContribution.value.kind === 'breakpoint_table'
+                      ? liveContribution.value.rows.map((row, index) => index === rowIndex
+                          ? { ...row, [field]: nullableInteger(input.value) }
+                          : row)
+                      : [];
+                    replaceContribution({
+                      ...liveContribution,
+                      value: { kind: 'breakpoint_table', rows },
+                    });
+                  });
+                  rowMount.append(...labelledControl(text, input.id, input));
+                }
+                const removeRow = element('button', {
+                  text: 'Remove breakpoint',
+                  attributes: { type: 'button' },
+                });
+                removeRow.disabled = locked;
+                removeRow.addEventListener('click', () => {
+                  if (liveContribution.value.kind !== 'breakpoint_table') return;
+                  replaceContribution({
+                    ...liveContribution,
+                    value: {
+                      ...liveContribution.value,
+                      rows: liveContribution.value.rows.filter((_row, index) => index !== rowIndex),
+                    },
+                  });
+                  render();
+                });
+                rowMount.append(removeRow);
+                contributionCard.append(rowMount);
+              }
+              const addRow = element('button', {
+                text: 'Add breakpoint',
+                attributes: { type: 'button' },
+              });
+              addRow.disabled = locked;
+              addRow.addEventListener('click', () => {
+                if (liveContribution.value.kind !== 'breakpoint_table') return;
+                replaceContribution({
+                  ...liveContribution,
+                  value: {
+                    ...liveContribution.value,
+                    rows: [...liveContribution.value.rows, {
+                      draft_item_uuid: itemUuid(), from: null, to: null, amount: null,
+                    }],
+                  },
+                });
+                render();
+              });
+              contributionCard.append(addRow);
+            }
+          }
+
+          const supersedes = element('select', {
+            attributes: {
+              id: `${prefix}-contribution-${String(contributionIndex)}-supersedes`,
+              ...pathAttribute([...contributionPath, 'supersedes_contribution_key']),
+            },
+          });
+          supersedes.append(element('option', { text: 'Does not supersede another contribution', attributes: { value: '' } }));
+          for (const ownerFeature of document.features) {
+            for (const candidate of ownerFeature.contributions ?? []) {
+              if (
+                candidate.draft_item_uuid === contribution.draft_item_uuid ||
+                candidate.contribution_key === '' ||
+                !sameContributionTarget(candidate, contribution)
+              ) continue;
+              supersedes.append(element('option', {
+                text: `${candidate.label || candidate.contribution_key} — this subclass`,
+                attributes: { value: candidate.contribution_key },
+              }));
+            }
+          }
+          supersedes.value = contribution.supersedes_contribution_key ?? '';
+          supersedes.disabled = locked;
+          supersedes.addEventListener('change', () => replaceContribution({
+            ...liveContribution,
+            supersedes_contribution_key: supersedes.value || null,
+          }));
+          const removeContribution = element('button', {
+            className: 'button-secondary',
+            text: 'Remove scaling feature value',
+            attributes: { type: 'button' },
+          });
+          removeContribution.disabled = locked;
+          removeContribution.addEventListener('click', () => {
+            const features = document.features.map((candidate, index) =>
+              index === featureIndex
+                ? {
+                    ...candidate,
+                    contributions: (candidate.contributions ?? []).filter(
+                      (_current, position) => position !== contributionIndex,
+                    ),
+                  }
+                : candidate);
+            update({ ...document, features });
+            render();
+          });
+          contributionCard.append(
+            ...labelledControl('Supersedes', supersedes.id, supersedes),
+            removeContribution,
+          );
+          contributions.append(contributionCard);
+        }
+        const addContribution = element('button', {
+          className: 'button-secondary',
+          text: 'Add scaling feature value',
+          attributes: { type: 'button' },
+        });
+        addContribution.disabled = locked;
+        addContribution.addEventListener('click', () => {
+          const features = document.features.map((candidate, index) =>
+            index === featureIndex
+              ? {
+                  ...candidate,
+                  contributions: [
+                    ...(candidate.contributions ?? []),
+                    emptyContribution(itemUuid(), level),
+                  ],
+                }
+              : candidate);
+          update({ ...document, features });
+          render();
+        });
         const reorder = createOrderedCardControls({
           collectionKey: `subclass-level-${String(level)}-features`,
           itemKey: feature.draft_item_uuid,
@@ -1270,7 +1782,7 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
             render();
           },
         });
-        card.append(effects, addEffect, reorder);
+        card.append(effects, addEffect, contributions, addContribution, reorder);
         group.append(card);
       }
       timeline.append(group);

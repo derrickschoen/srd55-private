@@ -454,7 +454,8 @@ function validatedRow(
       : [
           'id', 'class_definition_id', 'contribution_key', 'label',
           'target_kind', 'target_key', 'op', 'active_from_level',
-          'active_to_level', 'value_json', 'supersedes_ref', 'created_at',
+          'active_to_level', 'value_json', 'supersedes_ref',
+          'resource_display_label', 'resource_marking_shape', 'created_at',
           'updated_at',
         ];
     const currentRow = Object.fromEntries(
@@ -766,7 +767,10 @@ function classAggregate(
   ).map((row): CanonicalClassRowV1 => storedSemanticRow(
     row,
     ['class_definition_id'],
-    ['value_json', 'supersedes_ref'],
+    [
+      'value_json', 'supersedes_ref', 'resource_display_label',
+      'resource_marking_shape',
+    ],
     new Set(),
     new Set(),
     {
@@ -779,6 +783,12 @@ function classAggregate(
         row.supersedes_ref,
         'class feature-value contribution supersedes_ref',
       ) as JsonValue | null,
+      ...(row.target_kind === 'resource_maximum'
+        ? {
+            resource_display_label: row.resource_display_label as JsonValue,
+            resource_marking_shape: row.resource_marking_shape as JsonValue,
+          }
+        : {}),
     },
   ));
 

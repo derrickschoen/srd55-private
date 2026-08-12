@@ -978,6 +978,8 @@ CREATE TABLE `class_feature_value_contributions` (
 	`active_to_level` integer NOT NULL,
 	`value_json` TEXT NOT NULL,
 	`supersedes_ref` TEXT,
+	`resource_display_label` VARCHAR,
+	`resource_marking_shape` VARCHAR,
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
 	FOREIGN KEY (`class_definition_id`) REFERENCES `class_definitions`(`id`) ON UPDATE no action ON DELETE cascade,
@@ -989,11 +991,16 @@ CREATE TABLE `class_feature_value_contributions` (
         target_kind IS 'feature_dice_count'
         AND target_key IS 'sneak_attack'
         AND op IS 'add'
+        AND resource_display_label IS NULL
+        AND resource_marking_shape IS NULL
       ) OR (
         target_kind IS 'resource_maximum'
         AND typeof(target_key) = 'text'
         AND length(target_key) BETWEEN 1 AND 200
         AND op IS 'add'
+        AND typeof(resource_display_label) = 'text'
+        AND length(resource_display_label) BETWEEN 1 AND 200
+        AND resource_marking_shape IN ('boxes', 'remaining')
       )),
 	CONSTRAINT "class_feature_value_contributions_active_level_band_check" CHECK(typeof(active_from_level) = 'integer'
         AND typeof(active_to_level) = 'integer'
@@ -1795,6 +1802,8 @@ CREATE TABLE `subclass_feature_value_contributions` (
 	`active_to_level` integer NOT NULL,
 	`value_json` TEXT NOT NULL,
 	`supersedes_ref` TEXT,
+	`resource_display_label` VARCHAR,
+	`resource_marking_shape` VARCHAR,
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
 	FOREIGN KEY (`subclass_feature_id`) REFERENCES `subclass_features`(`id`) ON UPDATE no action ON DELETE cascade,
@@ -1806,11 +1815,16 @@ CREATE TABLE `subclass_feature_value_contributions` (
         target_kind IS 'feature_dice_count'
         AND target_key IS 'sneak_attack'
         AND op IS 'add'
+        AND resource_display_label IS NULL
+        AND resource_marking_shape IS NULL
       ) OR (
         target_kind IS 'resource_maximum'
         AND typeof(target_key) = 'text'
         AND length(target_key) BETWEEN 1 AND 200
         AND op IS 'add'
+        AND typeof(resource_display_label) = 'text'
+        AND length(resource_display_label) BETWEEN 1 AND 200
+        AND resource_marking_shape IN ('boxes', 'remaining')
       )),
 	CONSTRAINT "subclass_feature_value_contributions_active_level_band_check" CHECK(typeof(active_from_level) = 'integer'
         AND typeof(active_to_level) = 'integer'

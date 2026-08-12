@@ -27,6 +27,8 @@ function contributionRow(
     label: 'Sneak Attack',
     target_kind: 'feature_dice_count',
     target_key: 'sneak_attack',
+    resource_display_label: null,
+    resource_marking_shape: null,
     op: 'add',
     active_from_level: 1,
     active_to_level: 20,
@@ -200,6 +202,8 @@ describe('migration-0042 kind-first row contracts', () => {
           label: exactUnicodeBoundary,
           target_kind: 'resource_maximum',
           target_key: exactUnicodeBoundary,
+          resource_display_label: exactUnicodeBoundary,
+          resource_marking_shape: 'boxes',
           value_json: encoded({
             kind: 'ref',
             source: {

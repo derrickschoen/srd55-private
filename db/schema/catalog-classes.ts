@@ -748,6 +748,8 @@ type FeatureValueTargetKind = (typeof featureValueTargetKinds)[number];
 
 const featureValueOperations = ['add'] as const;
 type FeatureValueOperation = (typeof featureValueOperations)[number];
+const resourceMarkingShapes = ['boxes', 'remaining'] as const;
+type ResourceMarkingShape = (typeof resourceMarkingShapes)[number];
 
 function featureValueContributionColumns() {
   return {
@@ -762,6 +764,9 @@ function featureValueContributionColumns() {
     value_json: sqlText()('value_json').notNull(),
     /** Canonical JSON: {"content_key": string, "contribution_key": string}. */
     supersedes_ref: sqlText()('supersedes_ref'),
+    resource_display_label: varchar()('resource_display_label'),
+    resource_marking_shape:
+      varchar<ResourceMarkingShape>()('resource_marking_shape'),
     created_at: datetime()('created_at'),
     updated_at: datetime()('updated_at'),
   };
@@ -795,11 +800,16 @@ function featureValueContributionChecks(prefix: string) {
         target_kind IS 'feature_dice_count'
         AND target_key IS 'sneak_attack'
         AND op IS 'add'
+        AND resource_display_label IS NULL
+        AND resource_marking_shape IS NULL
       ) OR (
         target_kind IS 'resource_maximum'
         AND typeof(target_key) = 'text'
         AND length(target_key) BETWEEN 1 AND ${sql.raw(String(FEATURE_VALUE_CONTRIBUTION_LIMITS.keyCodePoints))}
         AND op IS 'add'
+        AND typeof(resource_display_label) = 'text'
+        AND length(resource_display_label) BETWEEN 1 AND ${sql.raw(String(FEATURE_VALUE_CONTRIBUTION_LIMITS.keyCodePoints))}
+        AND resource_marking_shape IN ('boxes', 'remaining')
       )`,
     ),
     check(

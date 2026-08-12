@@ -14,7 +14,7 @@ export interface ExpectedBundledAggregateDigestV1 {
  * changed aggregate(s) against their seed source, then update this pin.
  */
 export const EXPECTED_BUNDLED_CONTENT_DIGEST_V1 =
-  '05d1c958c77ad6e48cd75ac4047cbc0eb25d1f3c4926bb5303aa91019a6c7274' as const;
+  '178497e63e5ee05dd28c47cae16bda9894c5070f30654d07a05c6ec0abe18a51' as const;
 
 export const EXPECTED_BUNDLED_AGGREGATE_DIGESTS_V1 = Object.freeze([
   Object.freeze({"catalog_layer":"bundled","kind":"weapon","contentKey":"2024:weapon:battleaxe","name":"Battleaxe","digest":"749cd0ee7ef968dfd554a92e7b26637a15791a37c990652f70c0177422d925f9"}),
@@ -415,7 +415,7 @@ export const EXPECTED_BUNDLED_AGGREGATE_DIGESTS_V1 = Object.freeze([
   Object.freeze({"catalog_layer":"bundled","kind":"class","contentKey":"2024:class:monk","name":"Monk","digest":"0bd4a04ae86815989e254a7a9df1d4cda5424c48d3a4af536e0ea45c84e60c06"}),
   Object.freeze({"catalog_layer":"bundled","kind":"class","contentKey":"2024:class:paladin","name":"Paladin","digest":"02e6e73237742ef4e13321c8b001bc976bb61d9b9c3ed65eac9819fe5bf43f16"}),
   Object.freeze({"catalog_layer":"bundled","kind":"class","contentKey":"2024:class:ranger","name":"Ranger","digest":"2f6d2ca49ad84adb7afd513aabc2809a077e0dd85130158bc2470478c2db54a0"}),
-  Object.freeze({"catalog_layer":"bundled","kind":"class","contentKey":"2024:class:rogue","name":"Rogue","digest":"cdb7865e15ba861379c70e99c313465f77a6bdfcacfbd136c9545006da9350b1"}),
+  Object.freeze({"catalog_layer":"bundled","kind":"class","contentKey":"2024:class:rogue","name":"Rogue","digest":"ff78a0662b38f04f06430db827bd119ed14afc91e81749bcc4a675bf68a8e44a"}),
   Object.freeze({"catalog_layer":"bundled","kind":"class","contentKey":"2024:class:sorcerer","name":"Sorcerer","digest":"f0f8c70a65424117da0cd149f41ab40a6efcc7d838fa76b6bf9f3e80a94e79d7"}),
   Object.freeze({"catalog_layer":"bundled","kind":"class","contentKey":"2024:class:warlock","name":"Warlock","digest":"f065b5649cea1d18b531dfe11c5e845bc351d59a853ac5c2e9205ef2b8b77ceb"}),
   Object.freeze({"catalog_layer":"bundled","kind":"class","contentKey":"2024:class:wizard","name":"Wizard","digest":"3a1a07ad6ed071aa2fbdd5895450b918105de6048965246592b33ec576759f1a"}),

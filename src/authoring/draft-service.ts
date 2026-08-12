@@ -51,7 +51,9 @@ import type {
   SpeciesAuthoringDraft,
   StoredHomebrewDraft,
   SubclassAuthoringDraft,
+  SubclassAuthoringDraftContribution,
   SubclassContentAggregate,
+  SubclassFeatureValueContribution,
 } from './contracts';
 import { catalogLayerDisclosure } from '../catalog/catalog-disclosure';
 import { selectableCatalogContentSql } from '../queries/selectable-catalog-content';
@@ -278,6 +280,69 @@ function draftFeatureEffect(
 ): AuthoringDraftFeatureEffect {
   const { sort_order: _sortOrder, ...payload } = effect;
   return { ...payload, draft_item_uuid: itemUuid(randomUuid) } as AuthoringDraftFeatureEffect;
+}
+
+function draftFeatureValueContribution(
+  contribution: SubclassFeatureValueContribution,
+  parentClassKey: ContentKey,
+  randomUuid: () => string,
+): SubclassAuthoringDraftContribution {
+  const editableTarget = contribution.target.kind === 'feature_dice_count'
+    ? { kind: 'feature_dice_count' as const, key: contribution.target.key }
+    : typeof contribution.target.resource === 'string'
+      ? { kind: 'preserved' as const, target: contribution.target }
+      : {
+          kind: 'resource_maximum' as const,
+          display_label: contribution.target.resource.display_label,
+          marking_shape: contribution.target.resource.marking_shape,
+        };
+  const expression = contribution.value;
+  let value: SubclassAuthoringDraftContribution['value'];
+  if (expression.kind === 'const') {
+    value = { kind: 'constant', amount: expression.amount };
+  } else if (
+    expression.kind === 'scale' &&
+    expression.source.kind === 'class_level' &&
+    expression.source.class_content_key === parentClassKey
+  ) {
+    value = {
+      kind: 'class_level_scale',
+      multiply: expression.multiply ?? 1,
+      divide: expression.divide ?? 1,
+      round: expression.round,
+    };
+  } else if (
+    expression.kind === 'table' &&
+    expression.level_source.kind === 'class_level' &&
+    expression.level_source.class_content_key === parentClassKey &&
+    expression.rows[0].from <= contribution.active_from_level &&
+    expression.rows.at(-1)!.to >= contribution.active_to_level
+  ) {
+    value = {
+      kind: 'breakpoint_table',
+      rows: expression.rows.map((row) => ({
+        draft_item_uuid: itemUuid(randomUuid),
+        from: row.from,
+        to: row.to,
+        amount: row.amount,
+      })),
+    };
+  } else {
+    value = { kind: 'preserved', expression };
+  }
+  return {
+    kind: contribution.kind,
+    draft_item_uuid: itemUuid(randomUuid),
+    contribution_key: contribution.contribution_key,
+    label: contribution.label,
+    target: editableTarget,
+    op: contribution.op,
+    active_from_level: contribution.active_from_level,
+    active_to_level: contribution.active_to_level,
+    value,
+    supersedes_contribution_key:
+      contribution.supersedes?.contribution_key ?? null,
+  };
 }
 
 function stringValue(value: JsonValue | ContentFingerprintReference | undefined, label: string): string {
@@ -585,13 +650,14 @@ export class CatalogAuthoringService {
         };
         break;
     }
+    const parentClassContentKey = this.#contentKeyFor(aggregate.parent_class);
     return {
       kind: 'subclass',
       document_version: 1,
       name: aggregate.name,
       rules_edition: aggregate.rules_edition,
       reference_text: aggregate.reference_text,
-      parent_class_content_key: this.#contentKeyFor(aggregate.parent_class),
+      parent_class_content_key: parentClassContentKey,
       progression,
       features: aggregate.features.map((feature) => ({
         draft_item_uuid: itemUuid(this.#randomUuid),
@@ -599,6 +665,16 @@ export class CatalogAuthoringService {
         name: feature.name,
         description: feature.description,
         effects: feature.effects.map((effect) => draftFeatureEffect(effect, this.#randomUuid)),
+        ...((feature.contributions ?? []).length === 0
+          ? {}
+          : {
+              contributions: feature.contributions!.map((contribution) =>
+                draftFeatureValueContribution(
+                  contribution,
+                  parentClassContentKey,
+                  this.#randomUuid,
+                )),
+            }),
       })),
     };
   }

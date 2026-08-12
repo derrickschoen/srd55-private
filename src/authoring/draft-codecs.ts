@@ -8,6 +8,10 @@ import {
   skills,
   spellSchools,
 } from '../domain/enums';
+import { featureValueKeys } from '../domain/feature-values';
+import { classResourceKinds } from '../domain/class-resources';
+import { FEATURE_VALUE_CONTRIBUTION_LIMITS } from '../domain/contracts/feature-value-storage-limits';
+import { decodeStoredValueExpression } from '../domain/contracts/row-rules';
 import type {
   AuthoredContentKind,
   AuthoringValidationIssue,
@@ -360,6 +364,92 @@ const subclassProgression = z.discriminatedUnion('mode', [
     rows: z.array(progressionRow).max(AUTHORING_LIST_LIMITS.classChildRows),
   }),
 ]);
+const contributionMagnitude = nullableInteger(
+  -FEATURE_VALUE_CONTRIBUTION_LIMITS.magnitude,
+  FEATURE_VALUE_CONTRIBUTION_LIMITS.magnitude,
+);
+const contributionValue = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('constant'),
+    amount: contributionMagnitude,
+  }),
+  z.strictObject({
+    kind: z.literal('class_level_scale'),
+    multiply: nullableInteger(1, FEATURE_VALUE_CONTRIBUTION_LIMITS.magnitude),
+    divide: nullableInteger(1, FEATURE_VALUE_CONTRIBUTION_LIMITS.magnitude),
+    round: nullable(z.enum(['floor', 'ceiling'])),
+  }),
+  z.strictObject({
+    kind: z.literal('breakpoint_table'),
+    rows: z.array(z.strictObject({
+      draft_item_uuid: draftItemUuid,
+      from: nullable(classLevel),
+      to: nullable(classLevel),
+      amount: contributionMagnitude,
+    })).max(FEATURE_VALUE_CONTRIBUTION_LIMITS.expressionListEntries),
+  }),
+  z.strictObject({
+    kind: z.literal('preserved'),
+    expression: z.unknown().superRefine((value, context) => {
+      try {
+        decodeStoredValueExpression(
+          JSON.stringify(value),
+          'Preserved feature-value expression',
+        );
+      } catch {
+        context.addIssue({
+          code: 'custom',
+          message: 'invalid_value',
+        });
+      }
+    }),
+  }),
+]);
+const contributionTarget = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('feature_dice_count'),
+    key: nullable(z.enum(featureValueKeys)),
+  }),
+  z.strictObject({
+    kind: z.literal('resource_maximum'),
+    display_label: shortText,
+    marking_shape: nullable(z.enum(['boxes', 'remaining'])),
+  }),
+  z.strictObject({
+    kind: z.literal('preserved'),
+    target: z.discriminatedUnion('kind', [
+      z.strictObject({
+        kind: z.literal('feature_dice_count'),
+        key: z.enum(featureValueKeys),
+      }),
+      z.strictObject({
+        kind: z.literal('resource_maximum'),
+        resource: z.union([
+          z.enum(classResourceKinds),
+          z.strictObject({
+            fact_key: contentKey,
+            display_label: shortText,
+            marking_shape: z.enum(['boxes', 'remaining']),
+          }),
+        ]),
+      }),
+    ]),
+  }),
+]);
+const featureValueContribution = z.strictObject({
+  kind: z.literal('feature_value_contribution'),
+  draft_item_uuid: draftItemUuid,
+  contribution_key: codePointText(FEATURE_VALUE_CONTRIBUTION_LIMITS.keyCodePoints),
+  label: codePointText(FEATURE_VALUE_CONTRIBUTION_LIMITS.keyCodePoints),
+  target: contributionTarget,
+  op: nullable(z.literal('add')),
+  active_from_level: nullable(classLevel),
+  active_to_level: nullable(classLevel),
+  value: contributionValue,
+  supersedes_contribution_key: nullable(
+    codePointText(FEATURE_VALUE_CONTRIBUTION_LIMITS.keyCodePoints),
+  ),
+});
 const subclassV1 = z.strictObject({
   kind: z.literal('subclass'),
   ...baseDraft,
@@ -371,6 +461,9 @@ const subclassV1 = z.strictObject({
     name: shortText,
     description,
     effects: z.array(featureEffect).max(AUTHORING_LIST_LIMITS.effectsPerOwner),
+    contributions: z.array(featureValueContribution)
+      .max(AUTHORING_LIST_LIMITS.effectsPerOwner)
+      .optional(),
   })).max(AUTHORING_LIST_LIMITS.features),
 });
 
@@ -654,7 +747,13 @@ function structuralIssues(value: unknown): AuthoringValidationIssue[] {
     if (Array.isArray(current)) {
       current.forEach((child, index) => visit(child, [...path, index], depth + 1));
     } else {
-      Object.entries(current).forEach(([key, child]) => visit(child, [...path, key], depth + 1));
+      const record = current as Readonly<Record<string, unknown>>;
+      Object.entries(record).forEach(([key, child]) => {
+        // Preserved expressions carry their own stricter storage depth/node/byte
+        // contract in the Zod refinement; their draft wrapper depth is irrelevant.
+        if (record.kind === 'preserved' && key === 'expression') return;
+        visit(child, [...path, key], depth + 1);
+      });
     }
     active.delete(current);
   };
@@ -687,7 +786,9 @@ function semanticIssues(value: unknown): AuthoringValidationIssue[] {
       }
     }
     for (const [key, child] of Object.entries(record)) {
-      if (key === 'effects' && Array.isArray(child)) effectCount += child.length;
+      if ((key === 'effects' || key === 'contributions') && Array.isArray(child)) {
+        effectCount += child.length;
+      }
       visit(child, [...path, key]);
     }
   };

@@ -188,6 +188,70 @@ function validSubclass(
   };
 }
 
+function contributionDocument(
+  document: SubclassAuthoringDraft,
+): SubclassAuthoringDraft {
+  return {
+    ...document,
+    features: document.features.map((feature, index) => index === 0
+      ? {
+          ...feature,
+          contributions: [{
+            kind: 'feature_value_contribution',
+            draft_item_uuid: itemUuid('deeper-cuts-draft'),
+            contribution_key: 'deeper-cuts',
+            label: 'Deeper Cuts',
+            target: { kind: 'feature_dice_count', key: 'sneak_attack' },
+            op: 'add',
+            active_from_level: 3,
+            active_to_level: 20,
+            value: { kind: 'constant', amount: 1 },
+            supersedes_contribution_key: null,
+          }, {
+            kind: 'feature_value_contribution',
+            draft_item_uuid: itemUuid('veterans-strike-draft'),
+            contribution_key: 'veterans-strike',
+            label: "Veteran's Strike",
+            target: { kind: 'feature_dice_count', key: 'sneak_attack' },
+            op: 'add',
+            active_from_level: 9,
+            active_to_level: 20,
+            value: {
+              kind: 'class_level_scale',
+              multiply: 1,
+              divide: 2,
+              round: 'floor',
+            },
+            supersedes_contribution_key: 'deeper-cuts',
+          }, {
+            kind: 'feature_value_contribution',
+            draft_item_uuid: itemUuid('reflexes-draft'),
+            contribution_key: 'veteran-reflexes',
+            label: 'Veteran Reflexes pool',
+            target: {
+              kind: 'resource_maximum',
+              display_label: 'Veteran Reflexes',
+              marking_shape: 'remaining',
+            },
+            op: 'add',
+            active_from_level: 3,
+            active_to_level: 20,
+            value: {
+              kind: 'breakpoint_table',
+              rows: [{
+                draft_item_uuid: itemUuid('reflexes-row-1'),
+                from: 1,
+                to: 20,
+                amount: 2,
+              }],
+            },
+            supersedes_contribution_key: null,
+          }],
+        }
+      : feature),
+  };
+}
+
 function savedSubclass(
   authoring: CatalogAuthoringService,
   name?: string,
@@ -305,6 +369,252 @@ function installPublishedRootOnlySubclass(
 }
 
 describe('HA-5 subclass publisher', () => {
+  it('publishes the three form expression shapes and authored resource display config', async () => {
+    const db = await database();
+    const authoring = service(db);
+    const draft = savedSubclass(
+      authoring,
+      'Typed Veteran',
+      contributionDocument,
+    );
+    const { preview, result } = publish(authoring, draft);
+    expect(result.outcome).toBe('created');
+    if (preview.aggregate.kind !== 'subclass') throw new Error('Expected subclass preview.');
+    expect(preview.aggregate.features[0]?.contributions).toHaveLength(3);
+    expect(db.allRaw(
+      `SELECT contribution.contribution_key, contribution.target_kind,
+              contribution.target_key, contribution.resource_display_label,
+              contribution.resource_marking_shape, contribution.supersedes_ref
+         FROM subclass_feature_value_contributions AS contribution
+         JOIN subclass_features AS feature
+           ON feature.id = contribution.subclass_feature_id
+        JOIN subclass_definitions AS subclass
+          ON subclass.id = feature.subclass_definition_id
+        WHERE subclass.content_key = ?
+        ORDER BY contribution.id`,
+      [result.content_key],
+    )).toEqual([{
+      contribution_key: 'deeper-cuts',
+      target_kind: 'feature_dice_count',
+      target_key: 'sneak_attack',
+      resource_display_label: null,
+      resource_marking_shape: null,
+      supersedes_ref: null,
+    }, {
+      contribution_key: 'veterans-strike',
+      target_kind: 'feature_dice_count',
+      target_key: 'sneak_attack',
+      resource_display_label: null,
+      resource_marking_shape: null,
+      supersedes_ref: JSON.stringify({
+        content_key: result.content_key,
+        contribution_key: 'deeper-cuts',
+      }),
+    }, {
+      contribution_key: 'veteran-reflexes',
+      target_kind: 'resource_maximum',
+      target_key: `${result.content_key}\u0000veteran-reflexes`,
+      resource_display_label: 'Veteran Reflexes',
+      resource_marking_shape: 'remaining',
+      supersedes_ref: null,
+    }]);
+    const copied = authoring.createDraft({
+      content_kind: 'subclass',
+      base_content_key: result.content_key,
+    });
+    if (copied.document.kind !== 'subclass') throw new Error('Expected copied subclass draft.');
+    expect(copied.document.features[0]?.contributions).toEqual([
+      expect.objectContaining({
+        contribution_key: 'deeper-cuts',
+        value: { kind: 'constant', amount: 1 },
+      }),
+      expect.objectContaining({
+        contribution_key: 'veterans-strike',
+        value: {
+          kind: 'class_level_scale', multiply: 1, divide: 2, round: 'floor',
+        },
+        supersedes_contribution_key: 'deeper-cuts',
+      }),
+      expect.objectContaining({
+        contribution_key: 'veteran-reflexes',
+        target: {
+          kind: 'resource_maximum',
+          display_label: 'Veteran Reflexes',
+          marking_shape: 'remaining',
+        },
+        value: expect.objectContaining({ kind: 'breakpoint_table' }),
+      }),
+    ]);
+
+    const partialTable = {
+      kind: 'table' as const,
+      level_source: {
+        kind: 'class_level' as const,
+        class_content_key: '2024:class:fighter' as ContentKey,
+      },
+      rows: [{ from: 5 as never, to: 20 as never, amount: 2 }],
+    };
+    db.exec(
+      `UPDATE subclass_feature_value_contributions
+          SET value_json = ?
+        WHERE contribution_key = 'veteran-reflexes'
+          AND subclass_feature_id IN (
+            SELECT feature.id
+              FROM subclass_features AS feature
+              JOIN subclass_definitions AS subclass
+                ON subclass.id = feature.subclass_definition_id
+             WHERE subclass.content_key = ?
+          )`,
+      [JSON.stringify(partialTable), result.content_key],
+    );
+    const partialCopy = authoring.createDraft({
+      content_kind: 'subclass',
+      base_content_key: result.content_key,
+    });
+    if (partialCopy.document.kind !== 'subclass') throw new Error('Expected partial-table subclass draft.');
+    const partialContribution = partialCopy.document.features[0]?.contributions?.find(
+      (candidate) => candidate.contribution_key === 'veteran-reflexes',
+    );
+    expect(partialContribution?.value).toEqual({
+      kind: 'preserved',
+      expression: partialTable,
+    });
+    const renamedPartial = authoring.saveDraft({
+      draft_uuid: partialCopy.draft_uuid,
+      expected_revision: partialCopy.revision,
+      document: { ...partialCopy.document, name: 'Typed Veteran Partial Copy' },
+    });
+    expect(() => authoring.previewPublish({
+      draft_uuid: renamedPartial.draft_uuid,
+      expected_revision: renamedPartial.revision,
+    })).not.toThrow();
+  });
+
+  it.each([
+    ['dangling', (document: SubclassAuthoringDraft) => {
+      const withValues = contributionDocument(document);
+      const feature = withValues.features[0]!;
+      return { ...withValues, features: [{
+        ...feature,
+        contributions: feature.contributions!.map((entry, index) => index === 1
+          ? { ...entry, supersedes_contribution_key: 'missing' }
+          : entry),
+      }, ...withValues.features.slice(1)] };
+    }, 'Superseded contribution must belong to this subclass.'],
+    ['cross-target', (document: SubclassAuthoringDraft) => {
+      const withValues = contributionDocument(document);
+      const feature = withValues.features[0]!;
+      return { ...withValues, features: [{
+        ...feature,
+        contributions: feature.contributions!.map((entry, index) => index === 2
+          ? { ...entry, supersedes_contribution_key: 'deeper-cuts' }
+          : entry),
+      }, ...withValues.features.slice(1)] };
+    }, 'A contribution can only supersede another contribution with the same target.'],
+    ['self', (document: SubclassAuthoringDraft) => {
+      const withValues = contributionDocument(document);
+      const feature = withValues.features[0]!;
+      return { ...withValues, features: [{
+        ...feature,
+        contributions: feature.contributions!.map((entry, index) => index === 0
+          ? { ...entry, supersedes_contribution_key: 'deeper-cuts' }
+          : entry),
+      }, ...withValues.features.slice(1)] };
+    }, 'A contribution cannot supersede itself.'],
+    ['cycle', (document: SubclassAuthoringDraft) => {
+      const withValues = contributionDocument(document);
+      const feature = withValues.features[0]!;
+      return { ...withValues, features: [{
+        ...feature,
+        contributions: feature.contributions!.map((entry, index) => index === 0
+          ? { ...entry, supersedes_contribution_key: 'veterans-strike' }
+          : entry),
+      }, ...withValues.features.slice(1)] };
+    }, 'Contribution supersession must not contain a cycle.'],
+    ['supersession-band', (document: SubclassAuthoringDraft) => {
+      const withValues = contributionDocument(document);
+      const feature = withValues.features[0]!;
+      return { ...withValues, features: [{
+        ...feature,
+        contributions: feature.contributions!.map((entry, index) => index === 0
+          ? { ...entry, active_to_level: 8 as CharacterLevel }
+          : entry),
+      }, ...withValues.features.slice(1)] };
+    }, 'A superseded contribution must be active for the superseding contribution’s entire level band.'],
+    ['breakpoint-coverage', (document: SubclassAuthoringDraft) => {
+      const withValues = contributionDocument(document);
+      const feature = withValues.features[0]!;
+      return { ...withValues, features: [{
+        ...feature,
+        contributions: feature.contributions!.map((entry, index) => index === 2
+          ? {
+              ...entry,
+              value: {
+                kind: 'breakpoint_table' as const,
+                rows: [{
+                  draft_item_uuid: itemUuid('uncovered-breakpoint'),
+                  from: 4 as CharacterLevel,
+                  to: 20 as CharacterLevel,
+                  amount: 2,
+                }],
+              },
+            }
+          : entry),
+      }, ...withValues.features.slice(1)] };
+    }, 'Breakpoint rows must cover every active level.'],
+    ['duplicate-key', (document: SubclassAuthoringDraft) => {
+      const withValues = contributionDocument(document);
+      const feature = withValues.features[0]!;
+      return { ...withValues, features: [{
+        ...feature,
+        contributions: feature.contributions!.map((entry, index) => index === 2
+          ? { ...entry, contribution_key: 'deeper-cuts' }
+          : entry),
+      }, ...withValues.features.slice(1)] };
+    }, 'Stable contribution keys must be unique throughout the subclass.'],
+    ['bad-band', (document: SubclassAuthoringDraft) => {
+      const withValues = contributionDocument(document);
+      const feature = withValues.features[0]!;
+      return { ...withValues, features: [{
+        ...feature,
+        contributions: feature.contributions!.map((entry, index) => index === 0
+          ? { ...entry, active_from_level: 2 as CharacterLevel }
+          : entry),
+      }, ...withValues.features.slice(1)] };
+    }, 'Active-from level must not precede the feature level.'],
+  ] as const)('refuses %s contribution graphs with pinned human copy', async (
+    _label,
+    transform,
+    message,
+  ) => {
+    const db = await database();
+    const authoring = service(db);
+    const draft = savedSubclass(authoring, `Refusal ${_label}`, transform);
+    const error = authoringError(() => authoring.previewPublish({
+      draft_uuid: draft.draft_uuid,
+      expected_revision: draft.revision,
+    }));
+    expect(error.data).toMatchObject({ reason: 'validation_failed' });
+    if (error.data.reason !== 'validation_failed') throw new Error('Expected validation issues.');
+    expect(error.data.issues.map((issue) => issue.message)).toContain(message);
+  });
+
+  it('normalizes an empty draft contribution list to the old-format feature shape', async () => {
+    const db = await database();
+    const authoring = service(db);
+    const draft = savedSubclass(authoring, 'Empty Contribution Shape', (document) => ({
+      ...document,
+      features: document.features.map((feature, index) => index === 0
+        ? { ...feature, contributions: [] }
+        : feature),
+    }));
+    const preview = authoring.previewPublish({
+      draft_uuid: draft.draft_uuid,
+      expected_revision: draft.revision,
+    });
+    if (preview.aggregate.kind !== 'subclass') throw new Error('Expected subclass preview.');
+    expect(preview.aggregate.features[0]).not.toHaveProperty('contributions');
+  });
   it('collects parent, dense progression, feature, duplicate, and effect errors before install', async () => {
     const db = await database();
     const authoring = service(db);

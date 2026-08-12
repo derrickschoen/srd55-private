@@ -43,6 +43,7 @@ import catalogContentSupersessionGuards from '../../drizzle/0039_catalog_content
 import catalogContentArchiveMembers from '../../drizzle/0040_catalog_content_archive_members.sql?raw';
 import contentV2 from '../../drizzle/0041_content_v2.sql?raw';
 import featureValueContributions from '../../drizzle/0042_feature_value_contributions.sql?raw';
+import authoredResourceDisplay from '../../drizzle/0043_authored_resource_display.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -490,6 +491,16 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       'e780e723ee13f4299460a79fbb40b1a74402532c54ec3dcb8c3cd04082eafd5b',
     resultSchemaChecksum:
       '1b4c7dd8c3866a6ebbc418111d707398bacfb26d06e0bd3229b6c30b3dad7c3c',
+  }),
+  // Typed-effect tranche E4: authored resource targets carry their display
+  // label and marking shape through every persistence and portability seam.
+  Object.freeze({
+    id: '0043_authored_resource_display',
+    sql: authoredResourceDisplay,
+    checksum:
+      'f2fe84c5ef00aa7ad9831bd0e527b34b6f2f1501a44cd6640f3e2e431a64f083',
+    resultSchemaChecksum:
+      'c3064d2f13d8fe5519ee5f808c226f163e6d4acbc9838692678f83ccd69b4129',
   }),
 ]);
 

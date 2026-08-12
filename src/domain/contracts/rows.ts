@@ -1236,6 +1236,8 @@ const REFINEMENTS = {
   'class_feature_value_contributions.active_to_level': classLevel,
   'class_feature_value_contributions.value_json': sqlText,
   'class_feature_value_contributions.supersedes_ref': sqlText,
+  'class_feature_value_contributions.resource_display_label': sqlText,
+  'class_feature_value_contributions.resource_marking_shape': sqlText,
   'class_feature_value_contributions.created_at': sqlTimestamp,
   'class_feature_value_contributions.updated_at': sqlTimestamp,
   'subclass_feature_value_contributions.id': positiveInt,
@@ -1249,6 +1251,8 @@ const REFINEMENTS = {
   'subclass_feature_value_contributions.active_to_level': classLevel,
   'subclass_feature_value_contributions.value_json': sqlText,
   'subclass_feature_value_contributions.supersedes_ref': sqlText,
+  'subclass_feature_value_contributions.resource_display_label': sqlText,
+  'subclass_feature_value_contributions.resource_marking_shape': sqlText,
   'subclass_feature_value_contributions.created_at': sqlTimestamp,
   'subclass_feature_value_contributions.updated_at': sqlTimestamp,
 

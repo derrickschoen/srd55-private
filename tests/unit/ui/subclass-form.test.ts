@@ -262,6 +262,23 @@ function preview(): PublishPreview {
           notes: hostile,
           amount: 2,
         }],
+        contributions: [{
+          kind: 'feature_value_contribution',
+          contribution_key: 'focus-points',
+          label: 'Focus points',
+          target: {
+            kind: 'resource_maximum',
+            resource: {
+              fact_key: 'expanded:subclass:timeline-ward\u0000focus-points',
+              display_label: 'Focus Points',
+              marking_shape: 'remaining',
+            },
+          },
+          op: 'add',
+          active_from_level: 3 as never,
+          active_to_level: 20 as never,
+          value: { kind: 'const', amount: 4 },
+        }],
       }],
     },
     review: [],
@@ -406,12 +423,52 @@ describe('HA-8 subclass timeline form', () => {
       scope.value = 'any_weapon';
       scope.dispatchEvent(new Event('change'));
 
+      button(root, 'Add scaling feature value').click();
+      input(control(root, 'input', 'subclass-feature-ha8-item-1-contribution-0-key'), 'base-dice');
+      input(control(root, 'input', 'subclass-feature-ha8-item-1-contribution-0-label'), 'Base dice');
+      input(control(root, 'input', 'subclass-feature-ha8-item-1-contribution-0-amount'), '1');
+
+      button(root, 'Add scaling feature value').click();
+      input(control(root, 'input', 'subclass-feature-ha8-item-1-contribution-1-key'), 'scaled-dice');
+      input(control(root, 'input', 'subclass-feature-ha8-item-1-contribution-1-label'), 'Scaled dice');
+      const scaleKind = control(root, 'select', 'subclass-feature-ha8-item-1-contribution-1-value-kind');
+      scaleKind.value = 'class_level_scale';
+      scaleKind.dispatchEvent(new Event('change'));
+      input(control(root, 'input', 'subclass-feature-ha8-item-1-contribution-1-multiply'), '2');
+      input(control(root, 'input', 'subclass-feature-ha8-item-1-contribution-1-divide'), '3');
+      const rounding = control(root, 'select', 'subclass-feature-ha8-item-1-contribution-1-round');
+      rounding.value = 'ceiling';
+      rounding.dispatchEvent(new Event('change'));
+      const supersedes = control(root, 'select', 'subclass-feature-ha8-item-1-contribution-1-supersedes');
+      expect(elementText(supersedes as unknown as Node)).toContain('Base dice — this subclass');
+      supersedes.value = 'base-dice';
+      supersedes.dispatchEvent(new Event('change'));
+
+      button(root, 'Add scaling feature value').click();
+      input(control(root, 'input', 'subclass-feature-ha8-item-1-contribution-2-key'), 'focus-points');
+      input(control(root, 'input', 'subclass-feature-ha8-item-1-contribution-2-label'), 'Focus points');
+      const resourceTarget = control(root, 'select', 'subclass-feature-ha8-item-1-contribution-2-target');
+      expect(elementText(resourceTarget as unknown as Node)).toContain('Sneak Attack dice');
+      resourceTarget.value = 'resource_maximum';
+      resourceTarget.dispatchEvent(new Event('change'));
+      input(control(root, 'input', 'subclass-feature-ha8-item-1-contribution-2-resource-label'), 'Focus Points');
+      const marking = control(root, 'select', 'subclass-feature-ha8-item-1-contribution-2-marking');
+      marking.value = 'remaining';
+      marking.dispatchEvent(new Event('change'));
+      const tableKind = control(root, 'select', 'subclass-feature-ha8-item-1-contribution-2-value-kind');
+      tableKind.value = 'breakpoint_table';
+      tableKind.dispatchEvent(new Event('change'));
+      button(root, 'Add breakpoint').click();
+      input(control(root, 'input', 'subclass-feature-ha8-item-1-contribution-2-row-0-from'), '3');
+      input(control(root, 'input', 'subclass-feature-ha8-item-1-contribution-2-row-0-to'), '20');
+      input(control(root, 'input', 'subclass-feature-ha8-item-1-contribution-2-row-0-amount'), '4');
+
       button(root, 'Add feature at level 3').click();
-      const movedLevel = control(root, 'select', 'subclass-feature-ha8-item-4-level');
+      const movedLevel = control(root, 'select', 'subclass-feature-ha8-item-8-level');
       movedLevel.value = '6';
       movedLevel.dispatchEvent(new Event('change'));
-      input(control(root, 'input', 'subclass-feature-ha8-item-4-name'), 'Later ward');
-      input(control(root, 'textarea', 'subclass-feature-ha8-item-4-description'), 'Moves to a new explicit threshold.');
+      input(control(root, 'input', 'subclass-feature-ha8-item-8-name'), 'Later ward');
+      input(control(root, 'textarea', 'subclass-feature-ha8-item-8-description'), 'Moves to a new explicit threshold.');
       button(root, 'Save draft').click();
       await settle();
 
@@ -435,6 +492,19 @@ describe('HA-8 subclass timeline form', () => {
             expect.objectContaining({ kind: 'armor_class_bonus', amount: 2 }),
             expect.objectContaining({ kind: 'extra_attack', attack_count: 2 }),
           ],
+          contributions: [
+            expect.objectContaining({ contribution_key: 'base-dice', value: { kind: 'constant', amount: 1 } }),
+            expect.objectContaining({
+              contribution_key: 'scaled-dice',
+              value: { kind: 'class_level_scale', multiply: 2, divide: 3, round: 'ceiling' },
+              supersedes_contribution_key: 'base-dice',
+            }),
+            expect.objectContaining({
+              contribution_key: 'focus-points',
+              target: { kind: 'resource_maximum', display_label: 'Focus Points', marking_shape: 'remaining' },
+              value: { kind: 'breakpoint_table', rows: [expect.objectContaining({ from: 3, to: 20, amount: 4 })] },
+            }),
+          ],
         }),
         expect.objectContaining({ class_level: 6, name: 'Later ward' }),
       ]);
@@ -445,6 +515,10 @@ describe('HA-8 subclass timeline form', () => {
       expect(elementText(root as unknown as Node)).toContain('Publish preview');
       expect(elementText(root as unknown as Node)).toContain(
         'Spell attack = proficiency bonus + Intelligence modifier',
+      );
+      expect(elementText(root as unknown as Node)).toContain('Focus points');
+      expect(elementText(root as unknown as Node)).toContain(
+        'add constant 4 to Focus Points, levels 3–20',
       );
       expect(root.querySelector('[aria-label="Progression boundary preview"]')).not.toBeNull();
       expect(root.querySelectorAll('img')).toHaveLength(0);
