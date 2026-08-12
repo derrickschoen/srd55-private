@@ -13,6 +13,7 @@ import {
   type FeatureValueKey,
 } from '../domain/feature-values';
 import type { ClassLevel, ContentKey } from '../domain/ids';
+import type { PositiveInteger } from '../domain/class-resources';
 import { decodeStoredSupersedesReference } from '../domain/contracts/row-rules';
 import { decodeStoredValueExpression } from '../domain/contracts/row-rules';
 import {
@@ -21,6 +22,7 @@ import {
   type ValueEvaluationContext,
   type ValueResolution,
 } from '../domain/value-expression';
+import { SRD_ARCANE_RECOVERY_DESCRIPTION } from './class-resources-srd';
 
 export interface FeatureValueClassInput {
   readonly class_definition_id: number;
@@ -60,7 +62,87 @@ export type SheetFeatureValue =
         | Extract<ValueResolution, { readonly kind: 'unavailable' }>['reason']
         | 'malformed_supersession'
         | 'duplicate_source';
+    }
+  | {
+      readonly status: 'computed';
+      readonly kind: 'resource_maximum';
+      readonly id: 'feature-value:arcane_recovery';
+      readonly key: 'arcane_recovery';
+      readonly label: 'Arcane Recovery slot-level budget';
+      readonly value: number;
+      readonly terms: readonly SheetFeatureValueTerm[];
+      readonly catalog_layer: 'bundled';
+      /** Sourced rule text; readable and inert, never part of sheet facts. */
+      readonly description: string;
+    }
+  | {
+      readonly status: 'unavailable';
+      readonly kind: 'resource_maximum';
+      readonly id: 'feature-value:arcane_recovery';
+      readonly key: 'arcane_recovery';
+      readonly label: 'Arcane Recovery slot-level budget';
+      readonly reason: Extract<
+        ValueResolution,
+        { readonly kind: 'unavailable' }
+      >['reason'];
+      readonly catalog_layer: 'bundled';
+      readonly description: string;
     };
+
+const ARCANE_RECOVERY_CONTENT_KEY = '2024:class:wizard' as ContentKey;
+
+function arcaneRecoveryValue(
+  classes: readonly FeatureValueClassInput[],
+  context: ValueEvaluationContext,
+): Extract<SheetFeatureValue, { readonly kind: 'resource_maximum' }> | null {
+  if (
+    !classes.some(
+      (entry) => entry.class_content_key === ARCANE_RECOVERY_CONTENT_KEY,
+    )
+  ) {
+    return null;
+  }
+  const evaluated = evaluateValue(
+    {
+      kind: 'scale',
+      source: {
+        kind: 'class_level',
+        class_content_key: ARCANE_RECOVERY_CONTENT_KEY,
+      },
+      divide: 2 as PositiveInteger,
+      round: 'ceiling',
+    },
+    context,
+  );
+  const common = {
+    kind: 'resource_maximum' as const,
+    id: 'feature-value:arcane_recovery' as const,
+    key: 'arcane_recovery' as const,
+    label: 'Arcane Recovery slot-level budget' as const,
+    catalog_layer: 'bundled' as const,
+    description: SRD_ARCANE_RECOVERY_DESCRIPTION,
+  };
+  if (evaluated.kind === 'unavailable') {
+    return { status: 'unavailable', ...common, reason: evaluated.reason };
+  }
+  return {
+    status: 'computed',
+    ...common,
+    value: evaluated.value,
+    terms: [
+      {
+        source: contributionSource(
+          ARCANE_RECOVERY_CONTENT_KEY,
+          'arcane-recovery-budget',
+        ),
+        label: 'Half Wizard level, rounded up',
+        contribution: evaluated.value,
+        is_base: true,
+        status: 'applied',
+      },
+    ],
+  };
+}
 
 interface ActiveStoredContribution {
   readonly content_key: ContentKey;
@@ -204,7 +286,7 @@ export function resolveSheetFeatureValues(
     grouped.set(stored.target_key, group);
   }
 
-  return [...grouped].map(([key, storedRows]): SheetFeatureValue => {
+  const values = [...grouped].map(([key, storedRows]): SheetFeatureValue => {
     const contributions: FeatureValueContribution<'feature_dice_count'>[] = [];
     const labels = new Map<string, string>();
     const baseSources = new Set<string>();
@@ -273,4 +355,6 @@ export function resolveSheetFeatureValues(
       })),
     };
   });
+  const arcaneRecovery = arcaneRecoveryValue(classes, context);
+  return arcaneRecovery === null ? values : [...values, arcaneRecovery];
 }

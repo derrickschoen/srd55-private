@@ -265,6 +265,7 @@ function sheet(level: number): CharacterSheet {
     armor: [],
     items: [],
     printed_features: [],
+    subclass_features: [],
     flavor: {
       alignment: null,
       appearance: null,

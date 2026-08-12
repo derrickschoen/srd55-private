@@ -23,7 +23,77 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-11-c (newest - read first)
+## RESTART POINT 2026-08-11-d (newest - read first)
+MAIN 3c5b57c7 (mirror pushed after verified verdicts). FLOORS: vitest
+275/4,541 all-pass; PW 166 pool; build 0; migrations 0000-0042.
+EIGHTY-FIVE merges. Rulings through D233.
+
+The S5/E3 wave landed as merges 81st-85th, each full-gated:
+- 81ST a0dee189 DOCSYNC: 8 owner commits (no-personal-attribution on
+  main's notices, Oath of Domination redesign rulings, pending-rulings
+  pointer, OGL-zip NUL-scan exemption); sim portions of mixed commits
+  dropped per D233 (ride the future sim sync).
+- 82ND 33b39a47 SC (S5-09/10/11/12): ranged weapons open on Dexterity
+  from template attack_kind; feat picker via shared vocabulary; ONE
+  recorded-source provenance resolver (root cause: planner's 4th
+  independent path defaulted definitionless bundled to unknown); five
+  real boot phases + worker dispatch fix; D33 guard TIGHTENED. Fix-1:
+  the "nothing stored" weapons spec adapted.
+- 83RD f89c6e84 SB (S5-03/08 BLOCKERs): spellbook-restricted wizard
+  preparation (selection-collection predicate, legacy source-less rows
+  honored); out-of-book preserved + disclosed + repairable; recursive
+  retcon effect deletion + reader defense; 24→21→21 pin. Fix-1: deletion
+  narrowed after over-firing during CI-7 retarget + three real layer
+  fields under the tightened guard. Fix-2: four stale spell-section pins
+  adapted to the disclosed Spellbook collection (golden parity 3→5
+  justified; production untouched).
+- 84TH fc46496b SA (S5-01 BLOCKER + S5-02): Fighter Fighting Style +
+  Weapon Mastery genuinely block level-1 completion through real
+  machinery; shared SRD multiclass gate on BOTH class writers w/ tested
+  RPC bypass + D147 disabled-with-explanation; share/import restore
+  intentionally ungated. Merge: 13 additive keep-both hunks + rank
+  renumber 7-10; TWO supervisor stitch errors self-caught (shared-closer
+  breakage regenerated via git checkout --merge; a test-block closer
+  restored after the vitest transform caught it). Fix-1: 4 vitest
+  fixtures qualified + ADJUDICATION: an authored class with no stored
+  primary-ability expression carries NO multiclass requirement (SRD: a
+  minimum exists only where defined; malformed pinned distinctly; a
+  defensive fail-open corrected). Fix-2: 4 browser fixtures qualified
+  via abilities feeding no pinned value — goldens unmoved.
+- 85TH 3c5b57c7 E3: sheet feature-value resolver (per-owning-class
+  loading, E1 evaluation, supersession fold w/ superseded-retained
+  disclosure, fail-closed); labeled terms + sheetFacts feature_values;
+  typed-term ability parity hand-pinned four outcomes; four-shape
+  resource adapter + 25-kind/26-row zero-change matrix; Rogue
+  class-vs-total mutation kill 3-vs-10 supervisor-reproduced. The lane
+  report's "1,260-combination differential" was NOT found in the repo —
+  ignored uncommitted claim, committed proofs stand. Fix-1: two
+  exact-shape pins adapted to the content_key provenance field.
+
+IN FLIGHT at write time: SD (wt/sd, port 5010, tmp/sd.log — S5-04
+subclass feature prose on the sheet + S5-05 spell rows runnable w/
+cantrip scaling + S5-06 Arcane Recovery max via E3 seams, sizes-only)
+and E4 (wt/e4, port 5030, tmp/e4.log — contributions authorable
+(subclass-form editor subset) + publisher refusals + projector identity
+pin FIRST + backup/share/library portability). E5 (Veteran v3 CI-7 +
+Reflexes PB pool + upgrade matrix + revision-2 sweep + S5-07 labels,
+port 5040) dispatches after both → tranche complete ~88th. Then sweep 6
+import/recipient + S5-02 house-rule toggle per owner.
+
+Process ledger (full length): SEVEN &-violation-family incidents now —
+today added the foreground-timeout pool kill (10-min Bash timeout on a
+14-min pool), the &+wait-in-60s-timeout pool kill, and a &+disown codex
+dispatch SENT WITH ITS OWN "WRONG-METHOD-CAUGHT" LABEL (composed the
+violation, noticed it, sent anyway; killed the disowned process and
+redispatched properly). Also: one wrong-flake isolate-rerun (reran
+character-list when guided-builder had failed — caught by reading);
+buried-verdict-grep (chained the verdict read into a background call);
+three instrument errors total today, each caught by cross-checking.
+Cross-lane full-gate catches this wave: SC 1, SB 2, SA 2, E3 1 — the
+merged-tree full suite remains the load-bearing control; per-lane
+targeted sets consistently miss union/fixture/census interactions.
+
+## RESTART POINT 2026-08-11-c (superseded by 08-11-d)
 MAIN 8aad140b (mirror pushed after verified verdicts). FLOORS: vitest
 273/4,519 all-pass; PW 162 pool; build 0; migrations 0000-0042.
 EIGHTY merges. Rulings through D232 (taxonomy gap mechanisms S74-S98

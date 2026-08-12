@@ -95,6 +95,58 @@ describe('character sheet feature-value projection', () => {
     }
   });
 
+  it('shows Arcane Recovery ceil(Wizard level / 2) at levels 2 and 5 without a usage tracker', () => {
+    for (const [wizardLevel, expected] of [[2, 1], [5, 3]] as const) {
+      const id = db.exec(
+        "INSERT INTO characters (name) VALUES ('Arcane Recovery oracle')",
+      ).lastInsertId;
+      db.exec(
+        `INSERT INTO character_class_levels (
+           character_id, class_definition_id, level, is_starting_class
+         ) VALUES (?, ?, ?, 1)`,
+        [id, classId('Wizard'), wizardLevel],
+      );
+
+      const sheet = builder.build(id);
+      expect(sheet.feature_values).toMatchObject([
+        {
+          status: 'computed',
+          kind: 'resource_maximum',
+          key: 'arcane_recovery',
+          value: expected,
+          terms: [
+            {
+              label: 'Half Wizard level, rounded up',
+              contribution: expected,
+              status: 'applied',
+            },
+          ],
+        },
+      ]);
+      const readable = sheetSections(sheet)
+        .flatMap((section) => section.rows ?? [])
+        .find((row) => row.id === 'feature-value:arcane_recovery');
+      expect(readable).toMatchObject({
+        value: String(expected),
+        disclosure: { summary: 'Read Arcane Recovery rules' },
+      });
+      expect(readable).not.toHaveProperty('resource_marking');
+      expect(readable?.disclosure?.detail.map((cell) => cell.text).join(''))
+        .toContain('none of the slots can be level 6 or higher');
+      expect(sheetFacts(sheet).feature_values).toEqual([
+        {
+          key: 'arcane_recovery',
+          kind: 'resource_maximum',
+          status: 'computed',
+          value: expected,
+          terms: [
+            { contribution: expected, status: 'applied', term_order: 0 },
+          ],
+        },
+      ]);
+    }
+  });
+
   it('folds subclass modifiers in pipeline order and retains a superseded term in disclosure', () => {
     const rogueId = classId('Rogue');
     const contentKey = 'expanded:content.subclass:typed-veteran';
