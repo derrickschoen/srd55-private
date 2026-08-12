@@ -85,6 +85,8 @@ export function createCharacter(
   db: DatabaseContext,
   name: string,
   options: {
+    readonly strength?: number;
+    readonly dexterity?: number;
     readonly intelligence?: number;
     readonly wisdom?: number;
     readonly charisma?: number;
@@ -94,11 +96,13 @@ export function createCharacter(
 ): number {
   return db.exec(
     `INSERT INTO characters (
-       name, intelligence, wisdom, charisma, allow_legacy,
+       name, strength, dexterity, intelligence, wisdom, charisma, allow_legacy,
        proficiency_bonus_override, notes
-     ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       name,
+      options.strength ?? 10,
+      options.dexterity ?? 10,
       options.intelligence ?? 10,
       options.wisdom ?? 10,
       options.charisma ?? 10,
@@ -295,10 +299,16 @@ export function createSlot(
 
 export function createBuildReportFixture(
   db: DatabaseContext,
+  abilities: {
+    readonly strength?: number;
+    readonly dexterity?: number;
+  } = {},
 ): BuildReportFixture {
   seedClassProgressions(db);
 
   const characterId = createCharacter(db, 'R40 Golden', {
+    strength: abilities.strength ?? 10,
+    dexterity: abilities.dexterity ?? 10,
     intelligence: 16,
     wisdom: 14,
     charisma: 18,

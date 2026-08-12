@@ -17,9 +17,13 @@ import {
 } from './fixtures/php-feature-parity-helpers';
 
 let workspaceImage: FixtureImage<WorkspaceFixtureIds>;
+let classSourceImage: FixtureImage<WorkspaceFixtureIds>;
 
 test.beforeAll(async () => {
-  workspaceImage = await workspaceFixtureImage();
+  [workspaceImage, classSourceImage] = await Promise.all([
+    workspaceFixtureImage(),
+    workspaceFixtureImage({ createQualifyingClassSourceCharacter: true }),
+  ]);
 });
 
 test('round-trips source configuration with one audit group and rejects unsupported Magic Initiate lists', async ({
@@ -244,10 +248,13 @@ test('adds a class source with planned slots and addressed spellbook acquisition
 }) => {
   // Measured at 15.4s alone on Chromium; this ceiling is for concurrent-lane contention.
   test.setTimeout(60_000);
-  await install(page, workspaceImage);
-  const character = await rpc<any>(page, 'queries.characters.create', {
-    name: 'Class Source Command',
-  });
+  const image = classSourceImage;
+  await install(page, image);
+  const characterId = image.ids.classSourceCharacter;
+  if (characterId === null) {
+    throw new Error('The class-source fixture character was not created.');
+  }
+  const character = { id: characterId };
   await rpc<unknown>(page, 'queries.savePoints.create', {
     character_id: character.id,
     label: 'Before class-source experiment',
@@ -263,7 +270,7 @@ test('adds a class source with planned slots and addressed spellbook acquisition
     {
       type: 'add_source',
       source_type: 'class',
-      source_definition_id: workspaceImage.ids.sorcererClass,
+      source_definition_id: image.ids.sorcererClass,
       config: { level: 1 },
     },
     19,
@@ -272,7 +279,7 @@ test('adds a class source with planned slots and addressed spellbook acquisition
     forCharacter(await rows(page, 'character_class_levels'), character.id),
   ).toEqual([
     expect.objectContaining({
-      class_definition_id: workspaceImage.ids.sorcererClass,
+      class_definition_id: image.ids.sorcererClass,
       level: 1,
       is_starting_class: 1,
     }),
@@ -281,7 +288,7 @@ test('adds a class source with planned slots and addressed spellbook acquisition
     await rows(page, 'character_source_instances'),
     character.id,
   ).find(
-    (row) => row.source_definition_id === workspaceImage.ids.sorcererClass,
+    (row) => row.source_definition_id === image.ids.sorcererClass,
   )!;
   expect(sorcererSource).toMatchObject({
     display_name: 'Sorcerer 1',
@@ -319,7 +326,7 @@ test('adds a class source with planned slots and addressed spellbook acquisition
     command: {
       type: 'add_source',
       source_type: 'class',
-      source_definition_id: workspaceImage.ids.sorcererClass,
+      source_definition_id: image.ids.sorcererClass,
       config: { level: 1 },
     },
   });
@@ -350,7 +357,7 @@ test('adds a class source with planned slots and addressed spellbook acquisition
     command: {
       type: 'add_source',
       source_type: 'class',
-      source_definition_id: workspaceImage.ids.wizardClass,
+      source_definition_id: image.ids.wizardClass,
       config: { level: 20 },
     },
   });
@@ -381,7 +388,7 @@ test('adds a class source with planned slots and addressed spellbook acquisition
     {
       type: 'add_source',
       source_type: 'class',
-      source_definition_id: workspaceImage.ids.wizardClass,
+      source_definition_id: image.ids.wizardClass,
       config: { level: 1 },
     },
     191,
@@ -390,7 +397,7 @@ test('adds a class source with planned slots and addressed spellbook acquisition
     await rows(page, 'character_source_instances'),
     character.id,
   ).find(
-    (row) => row.source_definition_id === workspaceImage.ids.wizardClass,
+    (row) => row.source_definition_id === image.ids.wizardClass,
   )!;
   expect(wizardSource).toMatchObject({
     display_name: 'Wizard 1',

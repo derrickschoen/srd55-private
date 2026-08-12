@@ -38,10 +38,18 @@ async function createCharacter(
   page: Page,
   name: string,
   className: string,
+  scores: Readonly<{
+    strength?: number;
+    dexterity?: number;
+    constitution?: number;
+    intelligence?: number;
+    wisdom?: number;
+    charisma?: number;
+  }> = {},
 ): Promise<CreatedCharacter> {
   await page.goto('/');
   await ready(page);
-  return page.evaluate(async ({ characterName, requestedClass }) => {
+  return page.evaluate(async ({ characterName, requestedClass, requestedScores }) => {
     await window.staticApp.reset();
     const classes = await window.appRpc.call<
       Record<string, never>,
@@ -68,12 +76,12 @@ async function createCharacter(
       character_id: created.id,
       method: 'manual',
       scores: {
-        strength: 10,
-        dexterity: 10,
-        constitution: 10,
-        intelligence: 10,
-        wisdom: 10,
-        charisma: 10,
+        strength: requestedScores.strength ?? 10,
+        dexterity: requestedScores.dexterity ?? 10,
+        constitution: requestedScores.constitution ?? 10,
+        intelligence: requestedScores.intelligence ?? 10,
+        wisdom: requestedScores.wisdom ?? 10,
+        charisma: requestedScores.charisma ?? 10,
       },
       operation_uuid: crypto.randomUUID(),
       expected_revision: created.revision,
@@ -82,7 +90,11 @@ async function createCharacter(
       { readonly character_id: number },
       CreatedCharacter
     >('queries.characters.get', { character_id: created.id });
-  }, { characterName: name, requestedClass: className });
+  }, {
+    characterName: name,
+    requestedClass: className,
+    requestedScores: scores,
+  });
 }
 
 async function selectPlannedSpell(
@@ -485,6 +497,7 @@ test('starting-class provenance stays first and level up names the new-class pat
     page,
     'Wizard First Multiclass',
     'Wizard',
+    { intelligence: 13, wisdom: 13 },
   );
   await page.goto(`/characters/${String(character.id)}`);
   await expect(page.locator('#planner-status')).toHaveAttribute(

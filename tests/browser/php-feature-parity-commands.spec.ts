@@ -20,12 +20,16 @@ import {
 } from './fixtures/php-feature-parity-helpers';
 
 let workspaceImage: FixtureImage<WorkspaceFixtureIds>;
+let multiclassWorkspaceImage: FixtureImage<WorkspaceFixtureIds>;
 let catalogImage: FixtureImage<SourceCatalogIds>;
 
 test.beforeAll(async () => {
-  [workspaceImage, catalogImage] =
+  [workspaceImage, multiclassWorkspaceImage, catalogImage] =
     await Promise.all([
       workspaceFixtureImage(),
+      workspaceFixtureImage({
+        primaryCharacterAbilities: { strength: 13, dexterity: 13 },
+      }),
       catalogBaseFixtureImage(),
     ]);
 });
@@ -522,25 +526,26 @@ test('adding a class level generates new slots without disturbing existing slots
 }) => {
   // Measured at 15.5s alone on Chromium; this ceiling is for concurrent-lane contention.
   test.setTimeout(60_000);
-  await install(page, workspaceImage);
+  const image = multiclassWorkspaceImage;
+  await install(page, image);
   const before = forCharacter(
     await rows(page, 'spell_selection_slots'),
-    workspaceImage.ids.character,
+    image.ids.character,
   );
   await execute(
     page,
-    workspaceImage.ids.character,
+    image.ids.character,
     0,
     {
       type: 'update_class',
-      class_definition_id: workspaceImage.ids.sorcererClass,
+      class_definition_id: image.ids.sorcererClass,
       subclass_definition_id: null,
     },
     13,
   );
   const after = forCharacter(
     await rows(page, 'spell_selection_slots'),
-    workspaceImage.ids.character,
+    image.ids.character,
   );
   expect(after.filter((row) => before.some((old) => old.id === row.id)))
     .toEqual(before);
@@ -551,10 +556,10 @@ test('adding a class level generates new slots without disturbing existing slots
   expect(
     forCharacter(
       await rows(page, 'character_class_levels'),
-      workspaceImage.ids.character,
+      image.ids.character,
     ).find(
       (row) =>
-        row.class_definition_id === workspaceImage.ids.sorcererClass,
+        row.class_definition_id === image.ids.sorcererClass,
     ),
   ).toMatchObject({
     level: 1,
@@ -564,10 +569,10 @@ test('adding a class level generates new slots without disturbing existing slots
   expect(
     forCharacter(
       await rows(page, 'character_source_instances'),
-      workspaceImage.ids.character,
+      image.ids.character,
     ).find(
       (row) =>
-        row.source_definition_id === workspaceImage.ids.sorcererClass,
+        row.source_definition_id === image.ids.sorcererClass,
     ),
   ).toMatchObject({
     display_name: 'Sorcerer 1',
@@ -579,10 +584,10 @@ test('adding a class level generates new slots without disturbing existing slots
     new Set([
       forCharacter(
         await rows(page, 'character_source_instances'),
-        workspaceImage.ids.character,
+        image.ids.character,
       ).find(
         (row) =>
-          row.source_definition_id === workspaceImage.ids.sorcererClass,
+          row.source_definition_id === image.ids.sorcererClass,
       )!.id,
     ]),
   );
@@ -593,28 +598,29 @@ test('undoes a structural class change through its snapshot inverse', async ({
 }) => {
   // Measured at 15.2s alone on Chromium; this ceiling is for concurrent-lane contention.
   test.setTimeout(60_000);
-  await install(page, workspaceImage);
+  const image = multiclassWorkspaceImage;
+  await install(page, image);
   const before = {
     levels: forCharacter(
       await rows(page, 'character_class_levels'),
-      workspaceImage.ids.character,
+      image.ids.character,
     ),
     sources: forCharacter(
       await rows(page, 'character_source_instances'),
-      workspaceImage.ids.character,
+      image.ids.character,
     ),
     slots: forCharacter(
       await rows(page, 'spell_selection_slots'),
-      workspaceImage.ids.character,
+      image.ids.character,
     ),
   };
   const changed = await execute(
     page,
-    workspaceImage.ids.character,
+    image.ids.character,
     0,
     {
       type: 'update_class',
-      class_definition_id: workspaceImage.ids.sorcererClass,
+      class_definition_id: image.ids.sorcererClass,
       subclass_definition_id: null,
     },
     14,
@@ -631,27 +637,27 @@ test('undoes a structural class change through its snapshot inverse', async ({
   expect(storedClassInverse.snapshot.schema_version).not.toBe('a7-v15');
   await undo(
     page,
-    workspaceImage.ids.character,
+    image.ids.character,
     1,
     changed.operation_uuid,
   );
   expect({
     levels: forCharacter(
       await rows(page, 'character_class_levels'),
-      workspaceImage.ids.character,
+      image.ids.character,
     ),
     sources: forCharacter(
       await rows(page, 'character_source_instances'),
-      workspaceImage.ids.character,
+      image.ids.character,
     ),
     slots: forCharacter(
       await rows(page, 'spell_selection_slots'),
-      workspaceImage.ids.character,
+      image.ids.character,
     ),
   }).toEqual(before);
   expect(
     (await rows(page, 'characters')).find(
-      (row) => row.id === workspaceImage.ids.character,
+      (row) => row.id === image.ids.character,
     ),
   ).toMatchObject({ revision: 2 });
 });
