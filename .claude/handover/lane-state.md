@@ -23,7 +23,31 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-12-b (newest - read first)
+## RESTART POINT 2026-08-12-c (newest - read first)
+MAIN 2d9ea6fd (mirror pushed). NINETY-FOUR merges. THE SIM IS ON MAIN:
+94th landed tools/sim (twelve SRD builds + ranged/thrown rows +
+SUBSTITUTIONS.md, sim tests 132/132 supervisor-run) plus the
+62433bb3..a451975b doc tail (final Domination dossier, rulings.md arc
+VERBATIM, no-personal-attribution, OGL-zip exemption) with D234
+recording the rulings fold BY POINTER. PW pool deliberately skipped:
+zero src/ changes (docsync precedent, disclosed in the merge). Boundary
+a451975b absorbed. wt/simsub and wt/simland pruned. Owner rulings:
+sim landed; homebrew v3 → SIM VALIDATION; next queue = sweep 7 + flake
+stability.
+
+THREE LANES IN FLIGHT (all off 2d9ea6fd): wt/hbval (eight homebrew
+designs added to the board, claimed-vs-measured validation, tools/sim
+only, brief tmp/hbval-dispatch.md w/ v3 spec inline); wt/flake
+(character-list:145 ×5 + guided-builder front-door ×8 — reproduce under
+contention, diagnose the race, cause-fix, 20-run proof, port 5100,
+tmp/flake-dispatch.md); wt/s7 (DISCOVERY: late-campaign persona at
+15+ w/ waived prereqs + upgraded homebrew, findings doc
+2026-08-13-sweep-7-late-campaign-findings.md, port 5110,
+tmp/s7-dispatch.md). Ledger: FOURTH chain-slip (94th post-merge suite
+launched at load 4.21; all-green stands — contention causes false
+failures, not false passes).
+
+## RESTART POINT 2026-08-12-b (superseded by 08-12-c)
 MAIN e963313d (mirror pushed after verified verdicts). FLOORS: vitest
 278/4,645 all-pass; PW 170 pool; build 0; migrations 0000-0046.
 NINETY-THREE merges. SWEEP 6 COMPLETE — all 13 findings fixed across
