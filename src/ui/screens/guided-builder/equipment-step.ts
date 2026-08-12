@@ -42,6 +42,10 @@ import {
   type BackupHintDeps,
 } from './backup-hint';
 import { characterListLink, guidedShell } from './guided-builder';
+import type {
+  GuidedRequiredFighterChoicesState,
+} from '../../../builder/contracts';
+import { catalogSelectGroups } from '../../catalog-control-disclosure';
 
 /**
  * The equipment refusals on the wire: `handler_error` with structured data.
@@ -107,10 +111,20 @@ function lineText(line: GuidedEquipmentItemLine): string {
 export interface EquipmentStepDeps {
   readonly characterId: number;
   readonly state: GuidedEquipmentStepState;
+  readonly fighterChoices: GuidedRequiredFighterChoicesState;
   readonly backupHint?: BackupHintDeps;
   readonly applyEquipment: (
     params: GuidedApplyEquipmentParams,
   ) => Promise<GuidedApplyOriginResult>;
+  readonly chooseFightingStyle: (
+    featContentKey: string,
+    operationUuid: string,
+  ) => Promise<unknown>;
+  readonly setWeaponMastery: (
+    weaponId: number,
+    selected: boolean,
+    operationUuid: string,
+  ) => Promise<unknown>;
   readonly navigate: (path: string) => void;
 }
 
@@ -122,6 +136,7 @@ export interface EquipmentStep {
 export function createEquipmentStep(deps: EquipmentStepDeps): EquipmentStep {
   const cleanups: Cleanup[] = [];
   const controls: HTMLButtonElement[] = [];
+  const restoreRequiredChoiceDisabledStates: Array<() => void> = [];
   let inFlight = false;
 
   const errorMount = element('div', { className: 'guided-error-mount' });
@@ -165,6 +180,29 @@ export function createEquipmentStep(deps: EquipmentStepDeps): EquipmentStep {
       );
       inFlight = false;
       setControlsDisabled(false);
+      for (const restoreDisabledState of restoreRequiredChoiceDisabledStates) {
+        restoreDisabledState();
+      }
+    }
+  };
+
+  const writeRequiredChoice = async (
+    action: (operationUuid: string) => Promise<unknown>,
+  ): Promise<void> => {
+    if (inFlight) return;
+    inFlight = true;
+    setError(null);
+    setControlsDisabled(true);
+    try {
+      await action(crypto.randomUUID());
+      deps.navigate(guidedBuildPath(deps.characterId));
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error));
+      inFlight = false;
+      setControlsDisabled(false);
+      for (const restoreDisabledState of restoreRequiredChoiceDisabledStates) {
+        restoreDisabledState();
+      }
     }
   };
 
@@ -326,10 +364,148 @@ export function createEquipmentStep(deps: EquipmentStepDeps): EquipmentStep {
     );
   }
 
+  const fighter = deps.fighterChoices.fighter;
+  if (fighter !== null) {
+    const fighterChildren: HTMLElement[] = [
+      element('h3', {
+        text:
+          `Required Fighter choices — ` +
+          catalogLayerLabel(fighter.class_catalog_layer),
+      }),
+    ];
+    const chosenStyle = fighter.fighting_style.chosen;
+    if (chosenStyle === null) {
+      const styleSelect = element('select', {
+        className: 'planner-input',
+        attributes: { 'aria-label': 'Fighting Style' },
+      });
+      styleSelect.append(
+        element('option', {
+          text: 'Choose a Fighting Style…',
+          attributes: { value: '' },
+        }),
+      );
+      styleSelect.append(
+        ...catalogSelectGroups(fighter.fighting_style.options.map((option) => ({
+          value: option.content_key,
+          label: option.name,
+          catalogLayer: option.catalog_layer,
+        }))),
+      );
+      const chooseStyle = element('button', {
+        className: 'button-primary guided-fighting-style-choose',
+        text: 'Choose Fighting Style',
+        attributes: { type: 'button' },
+      });
+      chooseStyle.disabled = true;
+      controls.push(chooseStyle);
+      restoreRequiredChoiceDisabledStates.push(() => {
+        chooseStyle.disabled = styleSelect.value === '' || inFlight;
+      });
+      cleanups.push(
+        listen(styleSelect, 'change', () => {
+          chooseStyle.disabled = styleSelect.value === '' || inFlight;
+        }),
+        listen(chooseStyle, 'click', () => {
+          if (styleSelect.value === '') return;
+          void writeRequiredChoice((operationUuid) =>
+            deps.chooseFightingStyle(styleSelect.value, operationUuid),
+          );
+        }),
+      );
+      fighterChildren.push(
+        element('p', {
+          text: 'Choose the Fighting Style feat granted at Fighter level 1.',
+        }),
+        styleSelect,
+        chooseStyle,
+      );
+    } else {
+      fighterChildren.push(
+        element('p', {
+          className: 'guided-fighting-style-recorded',
+          text:
+            `Fighting Style recorded: ${chosenStyle.name} — ` +
+            catalogLayerLabel(chosenStyle.catalog_layer),
+        }),
+      );
+    }
+
+    const mastery = fighter.weapon_mastery;
+    fighterChildren.push(
+      element('h4', { text: 'Weapon Mastery' }),
+      element('p', {
+        className: 'guided-weapon-mastery-count',
+        text: mastery.state === 'known'
+          ? `${String(mastery.selected_count)} of ` +
+            `${String(mastery.required_count)} chosen.`
+          : 'Required choice count unavailable in the installed rules data.',
+      }),
+    );
+    if (mastery.options.length === 0) {
+      fighterChildren.push(
+        element('p', {
+          text:
+            'Confirm the Fighter equipment package before choosing mastered weapons.',
+        }),
+      );
+    } else {
+      const masteryList = element('ul', { className: 'guided-weapon-mastery-options' });
+      for (const weapon of mastery.options) {
+        const toggle = element('button', {
+          className: weapon.selected
+            ? 'button-secondary guided-weapon-mastery-remove'
+            : 'button-primary guided-weapon-mastery-choose',
+          text: weapon.selected
+            ? `Remove mastery: ${weapon.weapon_name}`
+            : `Choose mastery: ${weapon.weapon_name}`,
+          attributes: { type: 'button' },
+        });
+        toggle.disabled =
+          mastery.state !== 'known' ||
+          (!weapon.selected && mastery.selected_count >= mastery.required_count);
+        controls.push(toggle);
+        restoreRequiredChoiceDisabledStates.push(() => {
+          toggle.disabled =
+            mastery.state !== 'known' ||
+            (!weapon.selected &&
+              mastery.selected_count >= mastery.required_count);
+        });
+        cleanups.push(
+          listen(toggle, 'click', () => {
+            void writeRequiredChoice((operationUuid) =>
+              deps.setWeaponMastery(
+                weapon.weapon_id,
+                !weapon.selected,
+                operationUuid,
+              ),
+            );
+          }),
+        );
+        masteryList.append(
+          element('li', {}, [
+            element('span', {
+              text:
+                `${weapon.weapon_name} — ${weapon.mastery_property}`,
+            }),
+            toggle,
+          ]),
+        );
+      }
+      fighterChildren.push(masteryList);
+    }
+    sections.push(
+      element('section', { className: 'guided-fighter-required-choices' }, fighterChildren),
+    );
+  }
+
+  const allRequiredChoicesComplete = fighter === null || fighter.complete;
+  const levelOneComplete = deps.state.complete && allRequiredChoicesComplete;
+
   const backupHint =
     deps.backupHint === undefined
       ? null
-      : createBackupHint(deps.state.complete, deps.backupHint);
+      : createBackupHint(levelOneComplete, deps.backupHint);
   if (backupHint !== null) {
     cleanups.push(backupHint.cleanup);
   }
@@ -360,7 +536,7 @@ export function createEquipmentStep(deps: EquipmentStepDeps): EquipmentStep {
           'alternative.',
       }),
       ...sections,
-      ...(deps.state.complete
+      ...(levelOneComplete
         ? [
             element('p', {
               className: 'guided-equipment-complete',
@@ -374,7 +550,15 @@ export function createEquipmentStep(deps: EquipmentStepDeps): EquipmentStep {
               ? []
               : [backupHint.element]),
           ]
-        : []),
+        : deps.state.complete && fighter !== null
+          ? [
+              element('p', {
+                className: 'guided-equipment-incomplete',
+                text:
+                  'Both equipment packages are recorded. Required Fighter choices remain before level 1 is complete.',
+              }),
+            ]
+          : []),
       errorMount,
       characterListLink(),
     ],

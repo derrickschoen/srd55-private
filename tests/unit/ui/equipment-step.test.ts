@@ -16,6 +16,8 @@ import {
   installInteractiveDocument,
   interactiveElement,
 } from '../../fixtures/interactive-dom';
+import type { GuidedRequiredFighterChoicesState } from '../../../src/builder/contracts';
+import type { ContentKey } from '../../../src/domain/ids';
 
 /**
  * THE EQUIPMENT STEP'S DOM (E-B): the one-option confirmation, the
@@ -111,6 +113,47 @@ function fighterClassPackage(): GuidedEquipmentStepState['class_package'] {
   };
 }
 
+function fighterChoices(
+  complete = false,
+): GuidedRequiredFighterChoicesState {
+  return {
+    character_id: 7,
+    revision: 4,
+    fighter: {
+      class_name: 'Fighter',
+      class_catalog_layer: 'bundled',
+      class_level: 1,
+      fighting_style: {
+        chosen: complete
+          ? {
+              content_key: '2024:feat:archery' as ContentKey,
+              name: 'Archery',
+              catalog_layer: 'bundled',
+            }
+          : null,
+        options: [
+          {
+            content_key: '2024:feat:archery' as ContentKey,
+            name: 'Archery',
+            catalog_layer: 'bundled',
+          },
+        ],
+      },
+      weapon_mastery: {
+        state: 'known',
+        required_count: 3,
+        selected_count: complete ? 3 : 0,
+        options: [
+          { weapon_id: 11, weapon_name: 'Greatsword', mastery_property: 'Graze', selected: complete },
+          { weapon_id: 12, weapon_name: 'Javelin', mastery_property: 'Slow', selected: complete },
+          { weapon_id: 13, weapon_name: 'Longbow', mastery_property: 'Slow', selected: complete },
+        ],
+      },
+      complete,
+    },
+  };
+}
+
 function stepWith(
   state: GuidedEquipmentStepState,
   apply = vi.fn((params: GuidedApplyEquipmentParams) =>
@@ -120,14 +163,24 @@ function stepWith(
     }),
   ),
   navigate = vi.fn(),
+  fighterChoices: GuidedRequiredFighterChoicesState = {
+    character_id: 7,
+    revision: 0,
+    fighter: null,
+  },
+  chooseFightingStyle = vi.fn(() => Promise.resolve()),
+  setWeaponMastery = vi.fn(() => Promise.resolve()),
 ) {
   const step = createEquipmentStep({
     characterId: 7,
     state,
+    fighterChoices,
     applyEquipment: apply,
+    chooseFightingStyle,
+    setWeaponMastery,
     navigate,
   });
-  return { step, apply, navigate };
+  return { step, apply, navigate, chooseFightingStyle, setWeaponMastery };
 }
 
 async function settle(): Promise<void> {
@@ -251,6 +304,83 @@ describe('the confirmation shape', () => {
 });
 
 describe('the recorded and completed states', () => {
+  it('keeps Fighter incomplete and exposes grant-backed style and mastery controls', async () => {
+    const state = wizardAcolyteState();
+    const equipmentComplete = {
+      ...state,
+      class_package: { ...fighterClassPackage(), chosen_option: 'a' as const },
+      background_package: state.background_package === null
+        ? null
+        : { ...state.background_package, chosen_option: 'a' as const },
+      complete: true,
+    };
+    const chooseStyle = vi.fn(() => Promise.resolve());
+    const setMastery = vi.fn(() => Promise.resolve());
+    const { step } = stepWith(
+      equipmentComplete,
+      undefined,
+      undefined,
+      fighterChoices(),
+      chooseStyle,
+      setMastery,
+    );
+    const view = interactiveElement(step.element);
+    expect(
+      view.querySelectorAll(selector(EQUIPMENT_STEP_ATTR.complete)),
+    ).toHaveLength(0);
+    expect(elementText(step.element)).toContain(
+      'Required Fighter choices remain before level 1 is complete',
+    );
+    const style = view.querySelector(
+      '[aria-label="Fighting Style"]',
+    );
+    style!.value = '2024:feat:archery';
+    style!.dispatchEvent(new Event('change'));
+    view.querySelector('.guided-fighting-style-choose')!.click();
+    await settle();
+    expect(chooseStyle).toHaveBeenCalledWith(
+      '2024:feat:archery',
+      expect.any(String),
+    );
+    step.cleanup();
+
+    const second = stepWith(
+      equipmentComplete,
+      undefined,
+      undefined,
+      fighterChoices(),
+      vi.fn(() => Promise.resolve()),
+      setMastery,
+    ).step;
+    interactiveElement(second.element)
+      .querySelector('.guided-weapon-mastery-choose')!
+      .click();
+    await settle();
+    expect(setMastery).toHaveBeenCalledWith(11, true, expect.any(String));
+    second.cleanup();
+  });
+
+  it('declares Fighter level 1 complete only after both required choices are complete', () => {
+    const state = wizardAcolyteState();
+    const { step } = stepWith(
+      {
+        ...state,
+        class_package: { ...fighterClassPackage(), chosen_option: 'a' },
+        background_package: state.background_package === null
+          ? null
+          : { ...state.background_package, chosen_option: 'a' },
+        complete: true,
+      },
+      undefined,
+      undefined,
+      fighterChoices(true),
+    );
+    expect(elementText(step.element)).toContain(
+      'Every level 1 step is complete',
+    );
+    step.cleanup();
+  });
+
   it('shows the recorded option, disables its confirm, and offers the switch', () => {
     const { step } = stepWith({
       ...wizardAcolyteState(),

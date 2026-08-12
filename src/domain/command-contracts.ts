@@ -283,6 +283,11 @@ export interface ResolveLevelFeatChoiceCommand extends CommandBase {
   feat_choice: LevelFeatSelection;
 }
 
+export interface ChooseFightingStyleCommand extends CommandBase {
+  readonly type: 'choose_fighting_style';
+  readonly feat_content_key: string;
+}
+
 /**
  * The editable body of one weapon — the fields a template pre-fills and a user
  * may then change, all of them.
@@ -502,6 +507,7 @@ export type CharacterCommandPayload =
   | UpdateClassCommand
   | LevelUpClassCommand
   | ResolveLevelFeatChoiceCommand
+  | ChooseFightingStyleCommand
   | AddWeaponCommand
   | UpdateWeaponCommand
   | RemoveWeaponCommand

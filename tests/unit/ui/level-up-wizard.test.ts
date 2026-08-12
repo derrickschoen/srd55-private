@@ -1312,7 +1312,7 @@ describe('in-memory draft loss', () => {
       detail:
         'Wizard requires Intelligence 13 to multiclass; its current score is Intelligence 10.',
       remedy:
-        'Multiclassing remains allowed. Raise the named score to clear this permanent warning.',
+        'Raise the named score before adding another class, or remove Wizard if it was added outside the default rules path.',
     };
     const wizard = createLevelUpWizard({
       state: ready({
@@ -1344,7 +1344,7 @@ describe('in-memory draft loss', () => {
     click(wizard.element, LEVEL_UP_ATTR.next);
     expect(elementText(wizard.element)).toContain('Character warnings');
     expect(elementText(wizard.element)).toContain(
-      'Multiclassing remains allowed. Raise the named score to clear this permanent warning.',
+      'Raise the named score before adding another class, or remove Wizard if it was added outside the default rules path.',
     );
     wizard.cleanup();
   });

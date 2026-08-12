@@ -155,6 +155,16 @@ describe('skill grants as outstanding items', () => {
     characterId = db.exec(
       `INSERT INTO characters (name) VALUES ('Dipper')`,
     ).lastInsertId;
+    // This suite exercises skill-grant arithmetic, not prerequisite refusal.
+    // Give its fixture a legal score for every SRD multiclass expression so
+    // every class entry still travels through the production gate.
+    db.exec(
+      `UPDATE characters
+       SET strength = 13, dexterity = 13, intelligence = 13,
+           wisdom = 13, charisma = 13
+       WHERE id = ?`,
+      [characterId],
+    );
   });
 
   afterEach(() => connection.close());
@@ -375,6 +385,11 @@ describe('skill grants as outstanding items', () => {
     db.exec(
       `INSERT INTO class_definitions (content_key, name, rules_edition)
        VALUES ('2024:class:runeblade', 'Runeblade', '2024')`,
+    );
+    db.exec(
+      `UPDATE class_definitions
+       SET primary_ability_expression = '{"kind":"all_of","abilities":["strength"]}'
+       WHERE name = 'Runeblade'`,
     );
     addClass('Runeblade', 1);
     addClass('Bard', 1);

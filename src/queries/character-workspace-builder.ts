@@ -25,6 +25,7 @@ import {
 } from '../domain/enums';
 import type {
   CharacterClass,
+  ClassEntryOption,
   ClassOption,
   RemovableSource,
   SourceDefinition,
@@ -50,6 +51,7 @@ import {
   type MulticlassPrimaryAbilityAssessment,
 } from './multiclass-primary-ability';
 import { selectableCatalogContentSql } from './selectable-catalog-content';
+import { multiclassEntryAssessments } from '../rules/multiclass-prerequisite-gate';
 
 interface SlotWithOrder extends WorkspaceSlot {
   readonly sort_order: number;
@@ -298,7 +300,7 @@ export class CharacterWorkspaceBuilder {
           startingClassResolution.chosen?.class_level.id ?? null,
         warnings: startingClassResolution.warnings,
       },
-      available_classes: this.classOptions(),
+      available_classes: this.availableClassOptions(characterId),
       allow_legacy: character.allow_legacy,
       flavor: {
         alignment: character.alignment,
@@ -474,6 +476,27 @@ export class CharacterWorkspaceBuilder {
             ),
           }),
         );
+  }
+
+  private availableClassOptions(characterId: number): ClassEntryOption[] {
+    const options = this.classOptions();
+    const assessments = multiclassEntryAssessments(
+      this.db,
+      characterId,
+      options.map((option) => option.id),
+    );
+    return options.map((option) => {
+      const assessment = assessments.get(option.id);
+      if (assessment === undefined) {
+        throw new TypeError(`Class ${String(option.id)} was not assessed.`);
+      }
+      return {
+        ...option,
+        multiclass_entry: assessment.status === 'blocked'
+          ? { status: 'blocked', refusal: assessment.refusal }
+          : { status: assessment.status, refusal: null },
+      };
+    });
   }
 
   private slots(

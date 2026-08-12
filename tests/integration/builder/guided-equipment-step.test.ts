@@ -19,10 +19,13 @@ import {
   EquipmentStepRefusal,
 } from '../../../src/builder/equipment-step';
 import { MAGIC_INITIATE_FEAT_CONTENT_KEY } from '../../../src/builder/background-choices';
+import { guidedRequiredFighterChoicesState } from '../../../src/builder/required-fighter-choices';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
+import { CharacterCommandExecutor } from '../../../src/commands/character-command-executor';
 import type { DatabaseContext } from '../../../src/db/database';
 import { EquipmentGrantRefusal } from '../../../src/grants/equipment-grants';
 import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
+import { CharacterCompletenessQueries } from '../../../src/queries/character-completeness';
 import { createEquipmentStep } from '../../../src/ui/screens/guided-builder/equipment-step';
 import { rpcRegistry } from '../../../src/worker/registry';
 import {
@@ -179,6 +182,143 @@ function contentNames(
 const MONEY = /^\d+\s+GP$/u;
 
 describe('the equipment step read (E-B)', () => {
+  it('keeps Fighter incomplete until real feat and weapon rows satisfy both required choices', async () => {
+    const db = (await applicationDatabase()).context.db;
+    const { characterId, contentKey } = createWithClass(
+      db,
+      'Fighter',
+      'Required Choice Fighter',
+    );
+    const backgroundKey = backgroundKeyByName(db, 'Acolyte');
+    applyBackground(db, characterId, backgroundKey);
+    applyGuidedEquipment(db, {
+      character_id: characterId,
+      kind: 'class',
+      content_key: contentKey,
+      option: 'a',
+    });
+    applyGuidedEquipment(db, {
+      character_id: characterId,
+      kind: 'background',
+      content_key: backgroundKey,
+      option: 'a',
+    });
+
+    // A Fighting Style from another provenance cannot pay Fighter's own
+    // required choice. Imported characters can contain this shape, so pin the
+    // parent/marker boundary before the real command writes its source.
+    const unrelatedStyleId = Number(db.scalar(
+      `SELECT id FROM feat_definitions
+       WHERE category = 'fighting_style'
+       ORDER BY id DESC LIMIT 1`,
+    ));
+    db.exec(
+      `INSERT INTO character_source_instances (
+         character_id, instance_uuid, source_type, source_definition_id,
+         display_name, config, acquired_at_character_level, state
+       ) VALUES (?, ?, 'feat', ?, 'Unrelated Fighting Style', '{}', 1, 'active')`,
+      [characterId, crypto.randomUUID(), unrelatedStyleId],
+    );
+
+    const completeness = new CharacterCompletenessQueries(db);
+    expect(
+      completeness.build(characterId).items
+        .map((item) => item.kind)
+        .filter((kind) =>
+          kind === 'fighting_style_choice' || kind === 'weapon_mastery_choice'
+        ),
+    ).toEqual(['fighting_style_choice', 'weapon_mastery_choice']);
+    const before = guidedRequiredFighterChoicesState(db, characterId);
+    expect(before.fighter).toMatchObject({
+      complete: false,
+      fighting_style: { chosen: null },
+      weapon_mastery: { selected_count: 0, required_count: 3 },
+    });
+    if (before.fighter === null) throw new Error('Fighter choices disappeared.');
+
+    const executor = new CharacterCommandExecutor(db, integrity());
+    const execute = async (
+      command:
+        | { readonly type: 'choose_fighting_style'; readonly feat_content_key: string }
+        | { readonly type: 'set_weapon_mastery'; readonly weapon_id: number; readonly selected: boolean },
+    ): Promise<void> => {
+      await executor.execute({
+        character_id: characterId,
+        operation_uuid: crypto.randomUUID(),
+        expected_revision: Number(
+          db.scalar('SELECT revision FROM characters WHERE id = ?', [characterId]),
+        ),
+        command,
+      });
+    };
+    const style = before.fighter.fighting_style.options[0];
+    if (style === undefined) throw new Error('No Fighting Style is installed.');
+    await execute({
+      type: 'choose_fighting_style',
+      feat_content_key: style.content_key,
+    });
+    expect(
+      db.oneRaw(
+        `SELECT definition.content_key, source.state,
+                parent.source_type AS parent_source_type
+         FROM character_source_instances AS source
+         JOIN feat_definitions AS definition
+           ON definition.id = source.source_definition_id
+         LEFT JOIN character_source_instances AS parent
+           ON parent.id = source.parent_source_instance_id
+         WHERE source.character_id = ?
+           AND definition.category = 'fighting_style'
+           AND source.notes = 'required_fighter_choice:fighting_style'`,
+        [characterId],
+      ),
+    ).toEqual({
+      content_key: style.content_key,
+      state: 'active',
+      parent_source_type: 'class',
+    });
+
+    const mastery = before.fighter.weapon_mastery;
+    if (mastery.state !== 'known') {
+      throw new Error('Bundled Fighter mastery count is unavailable.');
+    }
+    expect(
+      mastery.options.filter((weapon) => weapon.weapon_name === 'Javelin'),
+    ).toHaveLength(1);
+    expect(
+      Number(db.scalar(
+        `SELECT count(*) FROM character_weapons
+         WHERE character_id = ? AND name = 'Javelin'`,
+        [characterId],
+      )),
+    ).toBeGreaterThan(1);
+    const masteryIds = mastery.options
+      .slice(0, mastery.required_count)
+      .map((weapon) => weapon.weapon_id);
+    expect(masteryIds).toHaveLength(3);
+    for (const weaponId of masteryIds) {
+      await execute({
+        type: 'set_weapon_mastery',
+        weapon_id: weaponId,
+        selected: true,
+      });
+    }
+    expect(
+      db.scalar(
+        `SELECT COUNT(*) FROM character_weapons
+         WHERE character_id = ? AND mastery_selected = 1`,
+        [characterId],
+      ),
+    ).toBe(3);
+    expect(guidedRequiredFighterChoicesState(db, characterId).fighter)
+      .toMatchObject({ complete: true });
+    expect(
+      completeness.build(characterId).items.map((item) => item.kind),
+    ).not.toContain('fighting_style_choice');
+    expect(
+      completeness.build(characterId).items.map((item) => item.kind),
+    ).not.toContain('weapon_mastery_choice');
+  });
+
   it('offers a Wizard exactly ONE option — the seeded gold option exists and is suppressed (E-NO-GOLD-OFFERED)', async () => {
     const db = (await applicationDatabase()).context.db;
     const { characterId, contentKey } = createWithClass(
@@ -667,7 +807,10 @@ describe('the equipment RPC registry contract', () => {
     const step = createEquipmentStep({
       characterId,
       state,
+      fighterChoices: guidedRequiredFighterChoicesState(db, characterId),
       applyEquipment: () => Promise.reject(new Error('not submitted')),
+      chooseFightingStyle: () => Promise.reject(new Error('not submitted')),
+      setWeaponMastery: () => Promise.reject(new Error('not submitted')),
       navigate: () => undefined,
     });
     const renderedLine = interactiveElement(step.element)

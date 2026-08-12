@@ -17,6 +17,7 @@ import { SelectSlotCommand } from './set-slot/select';
 import { FillSkillGrantCommand } from './fill-skill-grant';
 import { LevelUpClassCommand } from './level-up-class';
 import { ResolveLevelFeatChoiceCommand } from './resolve-level-feat-choice';
+import { ChooseFightingStyleCommand } from './choose-fighting-style';
 import { UpdateAbilityCommand } from './update-ability';
 import { UpdateCharacterRulesCommand } from './update-character-rules';
 import { UpdateCharacterFlavorCommand } from './update-character-flavor';
@@ -150,6 +151,12 @@ export class CharacterCommandFactory {
         return new LevelUpClassCommand(this.db, payload, this.integrity);
       case 'resolve_level_feat_choice':
         return new ResolveLevelFeatChoiceCommand(
+          this.db,
+          payload,
+          this.integrity,
+        );
+      case 'choose_fighting_style':
+        return new ChooseFightingStyleCommand(
           this.db,
           payload,
           this.integrity,

@@ -6,11 +6,8 @@ interface CreatedCharacter {
   readonly revision: number;
 }
 
-const WARNING_DETAIL =
+const REQUIREMENT_DETAIL =
   'Wizard requires Intelligence 13 to multiclass; its current score is Intelligence 10.';
-const WARNING_REMEDY =
-  'Multiclassing remains allowed. Raise the named score to clear this permanent warning.';
-const WARNING_LAYER = 'SRD · bundled layer';
 
 async function ready(page: Page): Promise<void> {
   await expect(page.locator('#status')).toHaveAttribute('data-ready', 'true', {
@@ -57,91 +54,73 @@ async function createCleric(page: Page): Promise<CreatedCharacter> {
   });
 }
 
-test('D96 warns without blocking on planner, level-up, and sheet, then clears at 13', async ({
+test('an ineligible multiclass is refused by the level-up escape and command gate while an eligible one proceeds', async ({
   page,
 }) => {
-  // Measured at 20.5s alone on the required port-4970 run; 30.8s is x1.5,
+  // Measured at 11.9s on the required port-5010 run; 11.9 × 1.5 = 17.85s,
   // rounded up to the next 100ms.
-  test.setTimeout(30_800);
+  test.setTimeout(17_900);
   const character = await createCleric(page);
-  await page.goto(`/characters/${String(character.id)}`);
-  await expect(page.locator('#planner-status')).toHaveAttribute(
-    'data-ready',
-    'true',
-    { timeout: 45_000 },
-  );
-
-  await expect(
-    page.locator('[data-warning-kind="multiclass_primary_ability_unmet"]'),
-  ).toHaveCount(0);
-  await page.getByRole('combobox', { name: 'Class to add' }).selectOption({
-    label: 'Wizard',
-  });
-  const addClass = page.getByRole('button', { name: 'Add class', exact: true });
-  await expect(addClass).toBeEnabled();
-  await addClass.click();
-
-  const plannerWarning = page.locator(
-    '[data-warning-kind="multiclass_primary_ability_unmet"]',
-  );
-  await expect(plannerWarning).toHaveCount(1);
-  await expect(plannerWarning).toContainText(WARNING_DETAIL);
-  await expect(plannerWarning).toContainText(WARNING_REMEDY);
-  await expect(plannerWarning).toContainText(WARNING_LAYER);
-  await expect(page.getByLabel('Remove Wizard')).toBeEnabled();
-
   await page.goto(`/characters/${String(character.id)}/level-up`);
   await expect(
     page.getByRole('heading', { name: 'Choose a held class' }),
   ).toBeVisible({ timeout: 45_000 });
-  const wizardRadio = page.getByRole('radio', { name: /Wizard 1 → 2/u });
-  const clericRadio = page.getByRole('radio', { name: /Cleric 1 → 2/u });
-  const wizardCard = wizardRadio.locator('..');
-  const clericCard = clericRadio.locator('..');
-  await expect(
-    wizardCard.locator(
-      '[data-level-up-warning="multiclass_primary_ability_unmet"]',
-    ),
-  ).toContainText(WARNING_DETAIL);
-  await expect(wizardCard).toContainText(WARNING_LAYER);
-  await expect(
-    clericCard.locator(
-      '[data-level-up-warning="multiclass_primary_ability_unmet"]',
-    ),
-  ).toHaveCount(0);
-  await expect(wizardRadio).toBeEnabled();
-
-  await page.goto(`/characters/${String(character.id)}/sheet`);
-  const sheetWarning = page.locator(
-    '[data-warning-code="multiclass_primary_ability_unmet"]',
-  );
-  await expect(sheetWarning).toContainText(WARNING_DETAIL, { timeout: 45_000 });
-  await expect(sheetWarning).toContainText(WARNING_REMEDY);
-  await expect(sheetWarning).toContainText(WARNING_LAYER);
-
-  await page.goto(`/characters/${String(character.id)}`);
+  await page.getByRole('link', { name: 'Take a level in a new class' }).click();
   await expect(page.locator('#planner-status')).toHaveAttribute(
     'data-ready',
     'true',
     { timeout: 45_000 },
   );
+
+  const classSelect = page.getByRole('combobox', { name: 'Class to add' });
+  const wizardOption = classSelect.locator('option').filter({ hasText: 'Wizard' });
+  await expect(wizardOption).toBeDisabled();
+  await expect(page.locator('.class-add-prerequisite-refusals')).toContainText(
+    `Cannot add Wizard. ${REQUIREMENT_DETAIL}`,
+  );
+  const addClass = page.getByRole('button', { name: 'Add class', exact: true });
+  await expect(addClass).toBeDisabled();
+
+  const commandRefusal = await page.evaluate(async (characterId) => {
+    const classes = await window.staticApp.inspectRows('class_definitions');
+    const wizard = classes.find((entry) => entry['name'] === 'Wizard');
+    const characterRows = await window.staticApp.inspectRows('characters', {
+      id: characterId,
+    });
+    try {
+      await window.appRpc.call('commands.execute', {
+        character_id: characterId,
+        operation_uuid: crypto.randomUUID(),
+        expected_revision: Number(characterRows[0]?.['revision']),
+        command: {
+          type: 'update_class',
+          class_definition_id: Number(wizard?.['id']),
+          subclass_definition_id: null,
+        },
+      });
+      return 'admitted';
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  }, character.id);
+  expect(commandRefusal).toContain(`Cannot add Wizard. ${REQUIREMENT_DETAIL}`);
+  expect(
+    (await page.evaluate(() =>
+      window.staticApp.inspectRows('character_class_levels')
+    )).filter((row) => Number(row['character_id']) === character.id),
+  ).toHaveLength(1);
+
   const intelligence = page.locator('[data-focus-key="ability-intelligence"]');
   await intelligence.fill('13');
   await intelligence.blur();
-  await expect(plannerWarning).toHaveCount(0);
-
-  await page.goto(`/characters/${String(character.id)}/level-up`);
-  await expect(
-    page.getByRole('heading', { name: 'Choose a held class' }),
-  ).toBeVisible({ timeout: 45_000 });
-  await expect(
-    page.locator(
-      '[data-level-up-warning="multiclass_primary_ability_unmet"]',
-    ),
-  ).toHaveCount(0);
-
-  await page.goto(`/characters/${String(character.id)}/sheet`);
-  await expect(
-    page.locator('[data-warning-code="multiclass_primary_ability_unmet"]'),
-  ).toHaveCount(0, { timeout: 45_000 });
+  await expect(wizardOption).toBeEnabled();
+  await classSelect.selectOption({ label: 'Wizard' });
+  await expect(addClass).toBeEnabled();
+  await addClass.click();
+  await expect(page.getByLabel('Remove Wizard')).toBeEnabled();
+  await expect.poll(async () =>
+    (await page.evaluate(() =>
+      window.staticApp.inspectRows('character_class_levels')
+    )).filter((row) => Number(row['character_id']) === character.id).length
+  ).toBe(2);
 });

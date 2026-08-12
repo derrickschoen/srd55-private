@@ -264,7 +264,7 @@ describe('character list and workspace query builders', () => {
         detail:
           'Wizard has no stored primary-ability expression, so its multiclass minimum cannot be judged.',
         remedy:
-          'Multiclassing remains allowed. Repair the stored expression or missing score to make this warning decidable.',
+          'Repair Wizard’s stored prerequisite or the missing ability score before adding another class.',
       },
       subclasses: [
         { id: subclassId, name: 'Abjurer', catalog_layer: 'bundled' },

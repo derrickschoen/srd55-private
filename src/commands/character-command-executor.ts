@@ -756,6 +756,7 @@ export class CharacterCommandExecutor {
       case 'update_class':
       case 'level_up_class':
       case 'resolve_level_feat_choice':
+      case 'choose_fighting_style':
         return {
           type: 'internal_snapshot_restore',
           snapshot: snapshotJson(before),

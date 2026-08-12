@@ -37,7 +37,10 @@ import {
   type BackgroundEquipmentOption,
   type ClassEquipmentOption,
   type EquipmentItemKind,
+  type CharacterLevel,
+  type WeaponMasteryProperty,
 } from '../domain/enums';
+import type { ContentKey } from '../domain/ids';
 import {
   hasExactKeys,
   type EquipmentChoiceConfig,
@@ -53,6 +56,50 @@ export const EQUIPMENT_RPC = Object.freeze({
   /** The one-transaction apply of one source's package choice. */
   applyEquipment: 'queries.characters.applyEquipment',
 } as const);
+
+export const REQUIRED_FIGHTER_CHOICES_RPC = Object.freeze({
+  state: 'queries.guided.requiredFighterChoices',
+} as const);
+
+export interface GuidedFightingStyleOption {
+  readonly content_key: ContentKey;
+  readonly name: string;
+  readonly catalog_layer: CatalogLayerDisclosure;
+}
+
+export interface GuidedWeaponMasteryOption {
+  readonly weapon_id: number;
+  readonly weapon_name: string;
+  readonly mastery_property: WeaponMasteryProperty;
+  readonly selected: boolean;
+}
+
+export interface GuidedRequiredFighterChoicesState {
+  readonly character_id: number;
+  readonly revision: number;
+  readonly fighter: null | {
+    readonly class_name: string;
+    readonly class_catalog_layer: CatalogLayerDisclosure;
+    readonly class_level: CharacterLevel;
+    readonly fighting_style: {
+      readonly chosen: GuidedFightingStyleOption | null;
+      readonly options: readonly GuidedFightingStyleOption[];
+    };
+    readonly weapon_mastery:
+      | {
+          readonly state: 'known';
+          readonly required_count: number;
+          readonly selected_count: number;
+          readonly options: readonly GuidedWeaponMasteryOption[];
+        }
+      | {
+          readonly state: 'unavailable';
+          readonly selected_count: number;
+          readonly options: readonly GuidedWeaponMasteryOption[];
+        };
+    readonly complete: boolean;
+  };
+}
 
 /* ---------------------------------------------------------------- panel */
 

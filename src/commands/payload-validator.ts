@@ -50,6 +50,7 @@ const commandTypes = [
   'update_class',
   'level_up_class',
   'resolve_level_feat_choice',
+  'choose_fighting_style',
   'add_weapon',
   'update_weapon',
   'remove_weapon',
@@ -902,6 +903,11 @@ function validateResolveLevelFeatChoice(record: UnknownRecord): void {
   validateLevelFeatSelection(record.feat_choice);
 }
 
+function validateChooseFightingStyle(record: UnknownRecord): void {
+  rejectUnknown(record, ['type', 'feat_content_key', 'reason']);
+  nonEmptyString(record, 'feat_content_key', 255);
+}
+
 const weaponToggles = [
   'finesse',
   'heavy',
@@ -1612,6 +1618,9 @@ function validateByType(
       return record;
     case 'resolve_level_feat_choice':
       validateResolveLevelFeatChoice(record);
+      return record;
+    case 'choose_fighting_style':
+      validateChooseFightingStyle(record);
       return record;
     case 'add_weapon':
       validateAddWeapon(record);

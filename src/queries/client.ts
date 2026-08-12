@@ -2,6 +2,7 @@ import type { CharacterRow } from '../domain/models';
 import {
   EQUIPMENT_RPC,
   GUIDED_RPC,
+  REQUIRED_FIGHTER_CHOICES_RPC,
   type GuidedAbilityDraft,
   type GuidedAllocateAbilitiesParams,
   type GuidedAllocateAbilitiesResult,
@@ -13,6 +14,7 @@ import {
   type GuidedClassOption,
   type GuidedCreateParams,
   type GuidedEquipmentStepState,
+  type GuidedRequiredFighterChoicesState,
   type GuidedFillSkillGrantParams,
   type GuidedFillSkillGrantResult,
   type GuidedExpertiseStepState,
@@ -152,6 +154,9 @@ export interface QueriesClient extends CatalogClient {
   applyEquipment(
     params: GuidedApplyEquipmentParams,
   ): Promise<GuidedApplyOriginResult>;
+  requiredFighterChoices(
+    characterId: number,
+  ): Promise<GuidedRequiredFighterChoicesState>;
 }
 
 export function createQueriesClient(rpc: RpcClient): QueriesClient {
@@ -383,6 +388,11 @@ export function createQueriesClient(rpc: RpcClient): QueriesClient {
       rpc.call<GuidedApplyEquipmentParams, GuidedApplyOriginResult>(
         EQUIPMENT_RPC.applyEquipment,
         params,
+      ),
+    requiredFighterChoices: (characterId: number) =>
+      rpc.call<GuidedBuildStateParams, GuidedRequiredFighterChoicesState>(
+        REQUIRED_FIGHTER_CHOICES_RPC.state,
+        characterParams(characterId),
       ),
   });
 }

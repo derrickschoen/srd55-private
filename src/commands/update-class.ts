@@ -26,6 +26,7 @@ import type {
 import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
 import type { CharacterCommandIntegrity } from './integrity';
 import type { StoredCharacterSnapshotInverse } from './stored-inverses';
+import { assertMulticlassEntryEligible } from '../rules/multiclass-prerequisite-gate';
 
 /**
  * Both rows below were declared with `unknown` fields: honest about the column
@@ -353,6 +354,9 @@ export class UpdateClassCommand {
         level = 1;
         if (otherLevels !== null && otherLevels + level > 20) {
           throw new TypeError('A character cannot exceed level 20.');
+        }
+        if (otherLevels !== null) {
+          assertMulticlassEntryEligible(this.db, characterId, classId);
         }
         const firstClass = otherLevels === null;
         this.db.exec(

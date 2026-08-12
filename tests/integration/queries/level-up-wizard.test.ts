@@ -442,6 +442,23 @@ describe('level-up wizard state RPC', () => {
     abilitiesAllocated = true,
   ): number {
     const id = classId(name);
+    const heldClassCount = Number(
+      harness.context.db.scalar(
+        'SELECT count(*) FROM character_class_levels WHERE character_id = ?',
+        [characterId],
+      ),
+    );
+    if (heldClassCount > 0) {
+      // Multiclass-focused fixtures in this suite exercise level-up state, not
+      // prerequisite refusal; make their second entry legal through the gate.
+      harness.context.db.exec(
+        `UPDATE characters
+         SET strength = 13, dexterity = 13, intelligence = 13,
+             wisdom = 13, charisma = 13
+         WHERE id = ?`,
+        [characterId],
+      );
+    }
     new UpdateClassCommand(
       harness.context.db,
       { type: 'update_class', class_definition_id: id },
