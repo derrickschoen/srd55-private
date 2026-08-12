@@ -47,6 +47,11 @@ function portableFeat(name: string, notes: string) {
     fingerprint_scheme: identity.envelope.scheme,
     fingerprint_digest: identity.digest,
     aggregate,
+    provenance: {
+      origin_kind: 'authored_here' as const,
+      received: false,
+      local_derivation: false,
+    },
   };
 }
 
@@ -138,6 +143,11 @@ describe('share client try-then-warn encoding', () => {
       kind: 'feat',
       name: 'Keen Memory',
       catalog_layer: 'external',
+      provenance: {
+        origin_kind: 'authored_here',
+        received: false,
+        local_derivation: false,
+      },
     }]);
     await expect(decodeShareFragment(result.fragment)).resolves.toEqual(document);
   });

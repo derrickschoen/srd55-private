@@ -151,10 +151,10 @@ Two mechanisms make this stick, and they are worth knowing by name:
    without that column is `Type 'true' is not assignable to type 'false'`. That
    fact previously lived only in a reviewer's head.
 
-Derived from the classification: `SnapshotTable` (`:1196`), `BackupTable` (`:1198`),
-`ShareTable` (`:1199`), and the ordered constants `CHARACTER_STATE_TABLES`
-(`:1406`), `DELETE_ORDER` (`:1491`), `BACKUP_TABLES` (`:1558`), `SHARE_TABLES`
-(`:1651`).
+Derived from the classification: `SnapshotTable` (`:1204`), `BackupTable` (`:1206`),
+`ShareTable` (`:1207`), and the ordered constants `CHARACTER_STATE_TABLES`
+(`:1415`), `DELETE_ORDER` (`:1500`), `BACKUP_TABLES` (`:1567`), `SHARE_TABLES`
+(`:1660`).
 
 **Classification is not the same as working.** That was Q8's bug, and D24 records
 the discipline that replaced it: each arm gets its own test — a column-for-column

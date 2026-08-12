@@ -1155,6 +1155,9 @@ const COMPLETE_V17_WIRE = [
 /** HA-12: v18 appends portable content; this fixture has none. */
 const COMPLETE_V18_WIRE = [...COMPLETE_V17_WIRE.slice(0, 1), 18,
   ...COMPLETE_V17_WIRE.slice(2), null];
+/** S6-12: v19 changes portable-content meaning; this fixture still has none. */
+const COMPLETE_V19_WIRE = [...COMPLETE_V18_WIRE.slice(0, 1), 19,
+  ...COMPLETE_V18_WIRE.slice(2)];
 
 /** The honest v13 migration: old wire carried neither provenance field. */
 const MIGRATED_COMPLETE_V15_WIRE = [
@@ -1319,8 +1322,9 @@ describe('character-share positional codec', () => {
     );
   });
 
-  it('pins v18 as frozen v17 plus one appended portable-content absence', () => {
-    expect(shareDocumentToPositional(complete)).toEqual(COMPLETE_V18_WIRE);
+  it('keeps frozen v18 readable and pins current v19 with the same absent slot', () => {
+    expect(positionalToShareDocument(COMPLETE_V18_WIRE)).toEqual(complete);
+    expect(shareDocumentToPositional(complete)).toEqual(COMPLETE_V19_WIRE);
   });
 
   it('accepts ability_override only in a hand-frozen v13 document', () => {
@@ -1590,7 +1594,7 @@ describe('character-share positional codec', () => {
     const positional = shareDocumentToPositional(minimal);
     expect(positional).toEqual([
       'dnd-multiclass-spells-character-share',
-      18,
+      19,
       [
         'Ten',
         null,

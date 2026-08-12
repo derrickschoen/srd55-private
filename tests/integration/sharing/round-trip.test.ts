@@ -1508,6 +1508,7 @@ describe('minimal character sharing', () => {
     );
     await expect(client.importCharacter(fragment)).resolves.toEqual({
       characterId: 2,
+      characterName: 'Share Hero',
     });
     await expect(client.commitCharacter(
       fragment,

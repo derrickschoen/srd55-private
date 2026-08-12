@@ -122,10 +122,15 @@ describe('library adoption RPC', () => {
     clients.push(rpc);
     const client = createBackupClient(rpc);
     const current = portableElfLibraryDocument(harness.context.db);
-    const { supersessions: _supersessions, ...withoutSupersessions } = current;
+    const {
+      supersessions: _supersessions,
+      content: currentContent,
+      ...withoutSupersessions
+    } = current;
     const legacy: LibraryExportDocument = {
       ...withoutSupersessions,
       version: 1,
+      content: currentContent.map(({ provenance: _provenance, ...entry }) => entry),
     };
 
     expect(registry.methods).toEqual(expect.arrayContaining([
@@ -149,7 +154,7 @@ describe('library adoption RPC', () => {
     ]);
     expect(emptyExport).toEqual({
       format: 'dnd-multiclass-spells/library',
-      version: 2,
+      version: 3,
       exported_at: expect.any(String),
       selection: 'all',
       selected_content_keys: [],
@@ -173,9 +178,16 @@ describe('library adoption RPC', () => {
       outcomes: [expect.objectContaining({ kind: 'create' })],
     });
 
-    const collision = portableElfLibraryDocument(harness.context.db, {
+    const currentCollision = portableElfLibraryDocument(harness.context.db, {
       oversized: true,
     });
+    const collision: LibraryExportDocument = {
+      ...currentCollision,
+      version: 2,
+      content: currentCollision.content.map(
+        ({ provenance: _provenance, ...entry }) => entry,
+      ),
+    };
     const plan = await client.planLibraryImport(collision, {});
     expect(plan.reviews).toEqual([
       expect.objectContaining({

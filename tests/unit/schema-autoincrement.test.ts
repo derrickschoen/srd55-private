@@ -174,6 +174,7 @@ const naturalKeyTables = [
   'catalog_content_fingerprints',
   'catalog_content_identities',
   'catalog_content_match_decisions',
+  'catalog_content_provenance',
   'catalog_content_supersessions',
   'catalog_data_migrations',
   'character_attunement_slots',
@@ -222,8 +223,9 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
       // tables, 2 typed feature-value contribution tables,
       // 7 stored character-input/choice tables, and 2 spell progression
       // ladders. Counted in parts so one group shrinking while another grows
-      // cannot pass unnoticed. D92's slot row and the draft UUID use natural
-      // primary keys and therefore belong in `naturalKeyTables`.
+      // cannot pass unnoticed. D92's slot row, the draft UUID, and S6-12's
+      // composite provenance identity use natural primary keys and therefore
+      // belong in `naturalKeyTables`.
       expect(declared).toHaveLength(74);
       expect(autoIncrementTables).toHaveLength(30);
       expect(nativeAutoIncrementTables).toHaveLength(44);

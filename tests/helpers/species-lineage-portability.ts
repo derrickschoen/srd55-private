@@ -90,6 +90,11 @@ export function portableElfLibraryDocument(
       fingerprint_scheme: CONTENT_FINGERPRINT_SCHEME_V2,
       fingerprint_digest: identity.digest,
       aggregate,
+      provenance: {
+        origin_kind: 'authored_here',
+        received: false,
+        local_derivation: false,
+      },
     }],
     supersessions: [],
   };

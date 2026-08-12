@@ -4,6 +4,7 @@ import { createApplicationLifecycle } from '../../../src/db/bootstrap';
 import type { DatabaseLifecycle } from '../../../src/db/database-lifecycle';
 import { RpcClient } from '../../../src/rpc/client';
 import {
+  assessImportCompatibility,
   commitCharacterShareImport,
   exportCharacterShare,
   importCharacterShare,
@@ -64,13 +65,13 @@ function exactShareChoice(document: CharacterShareDocument) {
 describe('lineage-chosen character sharing', () => {
   // Measured alone at 2.1s; 2.1 × 1.5 = 3.15s. The 20s guard follows the
   // repository convention for boot-heavy integration tests over 1.5s.
-  it('embeds content-v2 in v18 and restores the exact level-5 High Elf choice in both directions', async () => {
+  it('embeds content-v2 in v19 and restores the exact level-5 High Elf choice in both directions', async () => {
     const source = await database();
     importLibraryDocument(source, portableElfLibraryDocument(source));
     const sourceId = await createLevelFiveHighElf(source, PORTABLE_ELF_KEY);
 
     const exported = exportCharacterShare(source, sourceId);
-    expect(shareDocumentToPositional(exported)[1]).toBe(18);
+    expect(shareDocumentToPositional(exported)[1]).toBe(19);
     expect(exported.portableContent?.content.map((entry) => ({
       kind: entry.kind,
       content_key: entry.content_key,
@@ -101,13 +102,18 @@ describe('lineage-chosen character sharing', () => {
       embeddedContent: [{
         id: `portable:species:${PORTABLE_ELF_KEY}`,
         kind: 'species',
-        name: 'Portable Elf',
-        catalog_layer: 'external',
-      }],
+      name: 'Portable Elf',
+      catalog_layer: 'external',
+      provenance: {
+        origin_kind: 'authored_here',
+        received: true,
+        local_derivation: false,
+      },
+    }],
     });
-    if (encoded.kind !== 'encoded') throw new Error('Expected a v18 fragment.');
+    if (encoded.kind !== 'encoded') throw new Error('Expected a v19 fragment.');
     const decoded = await decodeShareFragment(encoded.fragment);
-    expect(shareDocumentToPositional(decoded)[1]).toBe(18);
+    expect(shareDocumentToPositional(decoded)[1]).toBe(19);
 
     const target = await database();
     const preview = previewCharacterShare(target, decoded);
@@ -188,8 +194,16 @@ describe('lineage-chosen character sharing', () => {
     });
 
     const target = await database();
+    expect(assessImportCompatibility(target, decoded)).toEqual([{
+      code: 'missing_source',
+      contentKeys: [OVERSIZED_PORTABLE_ELF_KEY],
+      summary: 'This character uses a species that is not in your library.',
+      remedy:
+        'Ask the sender for a library JSON containing this species, import it, then retry this share.',
+      remedyKind: 'library-json',
+    }]);
     expect(() => importCharacterShare(target, decoded)).toThrow(
-      `your catalog has no species '${OVERSIZED_PORTABLE_ELF_KEY}'`,
+      'Cannot import this character: This character uses a species that is not in your library.',
     );
     importLibraryDocument(target, library);
     const preview = previewCharacterShare(target, decoded);
