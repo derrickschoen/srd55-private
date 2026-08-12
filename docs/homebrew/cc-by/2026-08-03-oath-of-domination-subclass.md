@@ -223,7 +223,8 @@ in [guideline 01](subclass-guidelines/01-power-budget.md#class-dependence-and-po
 
 The identity-bearing dial is the repeated Bonus Action casting of *Command*.
 Its balancing dials are the Channel Divinity use, the one-minute duration,
-*Command*'s normal range and targeting rules, a fresh save for every casting,
+*Command*'s normal rules (from 7, targeting widens to chosen creatures in the
+aura; range and the spell's effect list do not), a fresh save for every casting,
 and the Bonus Action's competition with Divine Smite and other paladin
 features. The 2026-08-11 redesign adds one more: the engine cannot start
 without first casting *Divine Smite*, so a slot is always spent on offense
@@ -550,7 +551,11 @@ adjudication.
 - *Command* cast through Voice of Domination retains the spell's listed command
   options, range, and saving throw. A new casting creates a new spell effect;
   it does not extend a failed command beyond that target's next turn.
-- Track only when Voice's one-minute duration ends. Choose a target and resolve
+- From level 7, one casting can target any chosen creatures in the aura; each
+  makes its own save and follows its own command word. Resolve them one at a
+  time in an order the paladin's player picks — one command word per casting,
+  spoken once, applies to every target of that casting.
+- Track only when Voice's one-minute duration ends. Choose targets and resolve
   the spell normally for each casting; no target name or saving-throw tally
   carries from one casting to the next.
 
