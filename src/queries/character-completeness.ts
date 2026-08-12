@@ -16,7 +16,11 @@ import { EligibleSpellSearch } from '../eligibility/eligible-spell-search';
 import { CharacterNotFoundError } from './character-crud';
 import { orderSources } from './order-sources';
 import { resolveSpeciesChoice } from '../builder/species-choice';
-import type { CatalogLayerDisclosure } from '../catalog/catalog-disclosure';
+import { guidedRequiredFighterChoicesState } from '../builder/required-fighter-choices';
+import {
+  catalogLayerDisclosure,
+  type CatalogLayerDisclosure,
+} from '../catalog/catalog-disclosure';
 
 export interface UnfilledChoicesItem {
   readonly kind: 'unfilled_choices';
@@ -57,6 +61,31 @@ export interface RequiredSourceChoiceItem {
     | 'spellcasting_ability'
     | 'replaceable_spell'
   )[];
+}
+
+export interface WizardSpellbookIncompleteItem {
+  readonly kind: 'wizard_spellbook_incomplete';
+  readonly title: string;
+  readonly detail: string;
+  readonly remedy: string;
+  readonly source_name: string;
+  readonly source_catalog_layer: CatalogLayerDisclosure;
+  readonly chosen: number;
+  readonly required: number;
+  readonly missing: number;
+  readonly acquisition_id: number;
+}
+
+export interface WizardPreparationOutOfBookItem {
+  readonly kind: 'wizard_preparation_out_of_book';
+  readonly title: string;
+  readonly detail: string;
+  readonly remedy: string;
+  readonly source_name: string;
+  readonly source_catalog_layer: CatalogLayerDisclosure;
+  readonly spell_name: string;
+  readonly spell_catalog_layer: CatalogLayerDisclosure;
+  readonly slot_id: number;
 }
 
 /**
@@ -149,6 +178,36 @@ export interface NoClassItem {
   readonly remedy: string;
 }
 
+export interface FightingStyleChoiceItem {
+  readonly kind: 'fighting_style_choice';
+  readonly title: string;
+  readonly detail: string;
+  readonly remedy: string;
+  readonly remedy_action: 'guided_equipment';
+}
+
+interface WeaponMasteryChoiceItemBase {
+  readonly kind: 'weapon_mastery_choice';
+  readonly title: string;
+  readonly detail: string;
+  readonly chosen: number;
+}
+
+export type WeaponMasteryChoiceItem = WeaponMasteryChoiceItemBase & (
+  | {
+      readonly remedy: string;
+      readonly remedy_action: 'guided_equipment';
+      readonly required: number;
+      readonly missing: number;
+    }
+  | {
+      readonly remedy?: never;
+      readonly remedy_action: 'import_catalog';
+      readonly required: null;
+      readonly missing: null;
+    }
+);
+
 export interface CatalogGapItem {
   readonly kind: 'catalog_gap';
   readonly title: string;
@@ -167,9 +226,13 @@ export type CompletenessItem =
   | UnchosenOptionItem
   | RequiredSourceChoiceItem
   | NoClassItem
+  | FightingStyleChoiceItem
+  | WeaponMasteryChoiceItem
   | OrphanHitPointRollItem
   | UnfilledSkillGrantsItem
-  | ExpertiseGrantItem;
+  | ExpertiseGrantItem
+  | WizardSpellbookIncompleteItem
+  | WizardPreparationOutOfBookItem;
 
 export type CompletenessFinding = CompletenessItem | CatalogGapItem;
 
@@ -890,6 +953,209 @@ export const expertiseGrantWarnings: CompletenessCheck = {
   },
 };
 
+export const requiredFighterChoices: CompletenessCheck = {
+  id: 'required_fighter_choices',
+  run(context) {
+    const state = guidedRequiredFighterChoicesState(
+      context.db,
+      context.characterId,
+    );
+    if (state.fighter === null) return [];
+    const items: Array<FightingStyleChoiceItem | WeaponMasteryChoiceItem> = [];
+    if (state.fighter.fighting_style.chosen === null) {
+      items.push({
+        kind: 'fighting_style_choice',
+        title: 'Fighter — Fighting Style not chosen',
+        detail:
+          'Fighter grants one Fighting Style feat at level 1, but no style is recorded.',
+        remedy:
+          'Return to guided equipment and choose a Fighting Style.',
+        remedy_action: 'guided_equipment',
+      });
+    }
+    const mastery = state.fighter.weapon_mastery;
+    if (mastery.state === 'unavailable') {
+      items.push({
+        kind: 'weapon_mastery_choice',
+        title: 'Fighter — Weapon Mastery requirement unavailable',
+        detail:
+          'The installed rules data cannot determine how many Weapon Mastery choices this Fighter receives.',
+        remedy_action: 'import_catalog',
+        chosen: mastery.selected_count,
+        required: null,
+        missing: null,
+      });
+    } else if (mastery.selected_count !== mastery.required_count) {
+      const missing = Math.max(0, mastery.required_count - mastery.selected_count);
+      const excess = Math.max(0, mastery.selected_count - mastery.required_count);
+      items.push({
+        kind: 'weapon_mastery_choice',
+        title:
+          `Fighter — ${String(mastery.selected_count)} of ` +
+          `${String(mastery.required_count)} Weapon Mastery choices made`,
+        detail: excess > 0
+          ? `Fighter grants ${String(mastery.required_count)} Weapon Mastery ` +
+            `${mastery.required_count === 1 ? 'choice' : 'choices'} at level ${String(state.fighter.class_level)}; ` +
+            `${String(excess)} extra ${excess === 1 ? 'weapon is' : 'weapons are'} selected.`
+          : `Fighter grants ${String(mastery.required_count)} Weapon Mastery ` +
+            `${mastery.required_count === 1 ? 'choice' : 'choices'} at level ${String(state.fighter.class_level)}; ` +
+            `${String(missing)} ${missing === 1 ? 'is' : 'are'} still unchosen.`,
+        remedy: excess > 0
+          ? 'Return to guided equipment and remove the extra mastered weapon selection.'
+          : 'Return to guided equipment and choose the required mastered weapons.',
+        remedy_action: 'guided_equipment',
+        chosen: mastery.selected_count,
+        required: mastery.required_count,
+        missing,
+      });
+    }
+    return items;
+  },
+};
+
+/**
+ * Wizard spellbook integrity is character work, not a catalog gap: the six
+ * initial acquisition rows already exist, and an older out-of-book prepared
+ * choice is preserved until the player replaces it.
+ */
+export const wizardSpellbookIntegrity: CompletenessCheck = {
+  id: 'wizard_spellbook_integrity',
+  run(context) {
+    const acquisitionRows = context.db.all(
+      `SELECT entry.id, entry.source_instance_id,
+              entry.spell_version_id, source.display_name AS source_name,
+              source_catalog.catalog_layer AS source_catalog_layer
+       FROM wizard_spellbook_entries AS entry
+       INNER JOIN character_source_instances AS source
+         ON source.id = entry.source_instance_id
+        AND source.character_id = entry.character_id
+       INNER JOIN class_definitions AS definition
+         ON source.source_type = 'class'
+        AND definition.id = source.source_definition_id
+       LEFT JOIN catalog_content_identities AS source_catalog
+         ON source_catalog.content_kind = 'class'
+        AND source_catalog.content_key = definition.content_key
+       WHERE entry.character_id = ?
+         AND entry.state = 'active'
+         AND source.state = 'active'
+         AND definition.content_key = '2024:class:wizard'
+       ORDER BY source.id, entry.ordinal, entry.id`,
+      [context.characterId],
+      (row) => ({
+        id: sqlInteger(row, 'id'),
+        source_instance_id: sqlInteger(row, 'source_instance_id'),
+        spell_version_id:
+          row.spell_version_id === null
+            ? null
+            : sqlInteger(row, 'spell_version_id'),
+        source_name: sqlString(row, 'source_name'),
+        source_catalog_layer: catalogLayerDisclosure(
+          sqlNullableString(row, 'source_catalog_layer'),
+        ),
+      }),
+    );
+    const bySource = new Map<number, typeof acquisitionRows>();
+    for (const row of acquisitionRows) {
+      const group = bySource.get(row.source_instance_id) ?? [];
+      bySource.set(row.source_instance_id, [...group, row]);
+    }
+    const incomplete = [...bySource.values()].flatMap(
+      (rows): WizardSpellbookIncompleteItem[] => {
+        const firstEmpty = rows.find((row) => row.spell_version_id === null);
+        if (firstEmpty === undefined) return [];
+        const chosen = rows.filter(
+          (row) => row.spell_version_id !== null,
+        ).length;
+        const missing = rows.length - chosen;
+        return [{
+          kind: 'wizard_spellbook_incomplete',
+          title:
+            `${firstEmpty.source_name} — ${String(chosen)} of ` +
+            `${String(rows.length)} spellbook spells chosen`,
+          detail:
+            `This Wizard has ${String(missing)} empty spellbook ` +
+            `${missing === 1 ? 'entry' : 'entries'}. Preparation is limited ` +
+            'to filled entries, so complete the spellbook before choosing the prepared list.',
+          remedy: 'Choose the missing spellbook spells.',
+          source_name: firstEmpty.source_name,
+          source_catalog_layer: firstEmpty.source_catalog_layer,
+          chosen,
+          required: rows.length,
+          missing,
+          acquisition_id: firstEmpty.id,
+        }];
+      },
+    );
+
+    const outOfBook = context.db.all(
+      `SELECT slot.id, source.display_name AS source_name,
+              source_catalog.catalog_layer AS source_catalog_layer,
+              selected.display_name AS spell_name,
+              spell_catalog.catalog_layer AS spell_catalog_layer
+       FROM spell_selection_slots AS slot
+       INNER JOIN character_source_instances AS source
+         ON source.id = slot.source_instance_id
+        AND source.character_id = slot.character_id
+       INNER JOIN spell_versions AS selected
+         ON selected.id = COALESCE(
+           slot.fixed_spell_version_id,
+           slot.current_spell_version_id
+         )
+       INNER JOIN class_definitions AS definition
+         ON source.source_type = 'class'
+        AND definition.id = source.source_definition_id
+       LEFT JOIN catalog_content_identities AS source_catalog
+         ON source_catalog.content_kind = 'class'
+        AND source_catalog.content_key = definition.content_key
+       LEFT JOIN catalog_content_identities AS spell_catalog
+         ON spell_catalog.content_kind = 'spell'
+        AND spell_catalog.content_key = selected.content_key
+       WHERE slot.character_id = ?
+         AND source.state = 'active'
+         AND slot.state IN ('active', 'kept_override')
+         AND slot.rule_key = 'wizard-prepared'
+         AND definition.content_key = '2024:class:wizard'
+         AND NOT EXISTS (
+           SELECT 1
+           FROM wizard_spellbook_entries AS entry
+           LEFT JOIN character_source_instances AS book_source
+             ON book_source.id = entry.source_instance_id
+            AND book_source.character_id = entry.character_id
+           WHERE entry.character_id = slot.character_id
+             AND entry.spell_version_id = selected.id
+             AND entry.state = 'active'
+             AND (
+               entry.source_instance_id IS NULL
+               OR book_source.state = 'active'
+             )
+         )
+       ORDER BY source.display_name, slot.id`,
+      [context.characterId],
+      (row): WizardPreparationOutOfBookItem => {
+        const sourceName = sqlString(row, 'source_name');
+        const spellName = sqlString(row, 'spell_name');
+        return {
+          kind: 'wizard_preparation_out_of_book',
+          title: `${sourceName} — ${spellName} is prepared but not in the spellbook`,
+          detail:
+            'The selection is preserved, but it is invalid and grants no Wizard preparation access until it is replaced with a spell in the active spellbook.',
+          remedy: 'Choose an in-book replacement.',
+          source_name: sourceName,
+          source_catalog_layer: catalogLayerDisclosure(
+            sqlNullableString(row, 'source_catalog_layer'),
+          ),
+          spell_name: spellName,
+          spell_catalog_layer: catalogLayerDisclosure(
+            sqlNullableString(row, 'spell_catalog_layer'),
+          ),
+          slot_id: sqlInteger(row, 'id'),
+        };
+      },
+    );
+    return [...incomplete, ...outOfBook];
+  },
+};
+
 export const completenessChecks: readonly CompletenessCheck[] = Object.freeze([
   requiredSourceChoices,
   unfilledChoices,
@@ -898,6 +1164,8 @@ export const completenessChecks: readonly CompletenessCheck[] = Object.freeze([
   orphanHitPointRolls,
   unfilledSkillGrants,
   expertiseGrantWarnings,
+  requiredFighterChoices,
+  wizardSpellbookIntegrity,
 ]);
 
 const kindRank: Readonly<Record<CompletenessItem['kind'], number>> = {
@@ -918,6 +1186,10 @@ const kindRank: Readonly<Record<CompletenessItem['kind'], number>> = {
   // rather than in a global bucket at the bottom.
   unfilled_skill_grants: 5,
   expertise_grant: 6,
+  fighting_style_choice: 7,
+  weapon_mastery_choice: 8,
+  wizard_spellbook_incomplete: 9,
+  wizard_preparation_out_of_book: 10,
 };
 
 function sortKey(item: CompletenessItem): readonly [string, number, string] {
@@ -945,6 +1217,26 @@ function sortKey(item: CompletenessItem): readonly [string, number, string] {
       item.source_name,
       kindRank.expertise_grant,
       `${item.grant_key}:${String(item.ordinal)}`,
+    ];
+  }
+  if (item.kind === 'fighting_style_choice') {
+    return ['Fighter', kindRank.fighting_style_choice, ''];
+  }
+  if (item.kind === 'weapon_mastery_choice') {
+    return ['Fighter', kindRank.weapon_mastery_choice, ''];
+  }
+  if (item.kind === 'wizard_spellbook_incomplete') {
+    return [
+      item.source_name,
+      kindRank.wizard_spellbook_incomplete,
+      String(item.acquisition_id),
+    ];
+  }
+  if (item.kind === 'wizard_preparation_out_of_book') {
+    return [
+      item.source_name,
+      kindRank.wizard_preparation_out_of_book,
+      String(item.slot_id),
     ];
   }
   return [

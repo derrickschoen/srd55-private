@@ -14,6 +14,7 @@ import { seedClassProgressions } from '../../../src/rules/class-progression-look
 import { seedSheetContent } from '../../../src/rules/sheet-srd';
 import { openTestDatabase } from '../../helpers/open-db';
 import { registerAssertedFixtureContentIdentity } from '../../helpers/content-identity';
+import { GrantRuleSlotGenerator } from '../../../src/grants/grant-rule-slot-generator';
 
 describe('shared multiclass primary-ability query seam', () => {
   let connection: Database;
@@ -69,11 +70,39 @@ describe('shared multiclass primary-ability query seam', () => {
         warning: null,
       }),
     ]);
+    expect(
+      new CharacterWorkspaceBuilder(db).build(characterId).available_classes
+        .find((option) => option.name === 'Wizard')?.multiclass_entry,
+    ).toEqual({ status: 'not_applicable', refusal: null });
   });
 
-  it('projects one named unmet warning through planner, level-up, and sheet without blocking', () => {
+  it('refuses an unmet class before admission and diagnoses an imported illegal multiclass', () => {
     enterClass('Cleric');
-    enterClass('Wizard');
+    expect(() => enterClass('Wizard')).toThrow(
+      'Cannot add Wizard. Wizard requires Intelligence 13 to multiclass; its current score is Intelligence 10.',
+    );
+    expect(
+      db.scalar(
+        `SELECT COUNT(*) FROM character_class_levels AS level
+         JOIN class_definitions AS definition
+           ON definition.id = level.class_definition_id
+         WHERE level.character_id = ? AND definition.name = 'Wizard'`,
+        [characterId],
+      ),
+    ).toBe(0);
+
+    // Imported/legacy images can still contain an illegal multiclass. The
+    // reader diagnoses that tolerated state without turning it into a writer.
+    holdClass('Wizard', 1, false);
+    const wizardSourceId = db.exec(
+      `INSERT INTO character_source_instances (
+         character_id, instance_uuid, source_type, source_definition_id,
+         display_name, config, acquired_at_character_level, state
+       ) VALUES (?, ?, 'class', ?, 'Wizard 1',
+         '{"spellcasting_ability":"intelligence"}', 2, 'active')`,
+      [characterId, crypto.randomUUID(), classId('Wizard')],
+    ).lastInsertId;
+    new GrantRuleSlotGenerator(db).generateForSource(wizardSourceId);
 
     const assessments = new MulticlassPrimaryAbilityQueries(db).build(
       characterId,
@@ -113,7 +142,7 @@ describe('shared multiclass primary-ability query seam', () => {
     const levelUp = new LevelUpStateQuery(db).build(characterId);
     expect(levelUp.kind).toBe('ready');
     if (levelUp.kind !== 'ready') {
-      throw new Error('An unmet D96 minimum blocked the level-up state.');
+      throw new Error('The imported multiclass did not produce a readable state.');
     }
     const wizard = levelUp.class_options.find(
       (option) => option.name === 'Wizard',
@@ -137,8 +166,97 @@ describe('shared multiclass primary-ability query seam', () => {
     expect(new CharacterSheetBuilder(db).build(characterId).warnings).toContainEqual({
       code: 'multiclass_primary_ability_unmet',
       message:
-        'Wizard multiclass ability minimum not met — SRD · bundled layer. Wizard requires Intelligence 13 to multiclass; its current score is Intelligence 10. Multiclassing remains allowed. Raise the named score to clear this permanent warning.',
+        'Wizard multiclass ability minimum not met — SRD · bundled layer. Wizard requires Intelligence 13 to multiclass; its current score is Intelligence 10. Raise the named score before adding another class, or remove Wizard if it was added outside the default rules path.',
     });
+  });
+
+  it('admits an eligible multiclass through the same command gate', () => {
+    db.exec(
+      `UPDATE characters
+       SET strength = 13, intelligence = 13
+       WHERE id = ?`,
+      [characterId],
+    );
+    enterClass('Fighter');
+    expect(() => enterClass('Wizard')).not.toThrow();
+    expect(
+      db.allRaw(
+        `SELECT definition.name
+         FROM character_class_levels AS level
+         JOIN class_definitions AS definition
+           ON definition.id = level.class_definition_id
+         WHERE level.character_id = ?
+         ORDER BY level.id`,
+        [characterId],
+      ).map((row) => String(row.name)),
+    ).toEqual(['Fighter', 'Wizard']);
+  });
+
+  it('treats an absent authored prerequisite as no requirement while enforcing every declared class requirement', () => {
+    const contentKey = registerAssertedFixtureContentIdentity(db, {
+      kind: 'class',
+      edition: 'expanded',
+      name: 'Freeform',
+    });
+    const freeformId = db.exec(
+      `INSERT INTO class_definitions (
+         content_key, name, rules_edition, progression_type,
+         primary_ability_expression
+       ) VALUES (?, 'Freeform', 'expanded', 'none', NULL)`,
+      [contentKey],
+    ).lastInsertId;
+    db.exec(
+      `INSERT INTO class_progressions (
+         class_definition_id, class_level, grant_rules
+       ) VALUES (?, 1, '[]')`,
+      [freeformId],
+    );
+
+    enterClass('Cleric');
+    expect(() => enterClass('Freeform')).not.toThrow();
+    expect(
+      new MulticlassPrimaryAbilityQueries(db).build(characterId).find(
+        (assessment) => assessment.class_name === 'Freeform',
+      ),
+    ).toMatchObject({
+      status: 'not_applicable',
+      evaluation: null,
+      warning: null,
+    });
+
+    db.exec(
+      `UPDATE class_definitions
+       SET primary_ability_expression = '   '
+       WHERE id = ?`,
+      [freeformId],
+    );
+    expect(
+      new MulticlassPrimaryAbilityQueries(db).build(characterId).find(
+        (assessment) => assessment.class_name === 'Freeform',
+      ),
+    ).toMatchObject({
+      status: 'not_applicable',
+      evaluation: null,
+      warning: null,
+    });
+
+    // Blank Freeform contributes no invented requirement, but it does not
+    // excuse the candidate Wizard's declared Intelligence minimum.
+    expect(() => enterClass('Wizard')).toThrow(
+      'Cannot add Wizard. Wizard requires Intelligence 13 to multiclass; its current score is Intelligence 10.',
+    );
+
+    // Non-empty malformed content is different: the held class now has a
+    // declared requirement that cannot be verified, so entry remains closed.
+    db.exec(
+      `UPDATE class_definitions
+       SET primary_ability_expression = '{broken'
+       WHERE id = ?`,
+      [freeformId],
+    );
+    expect(() => enterClass('Wizard')).toThrow(
+      'Cannot add Wizard. Freeform has a stored primary-ability expression this application cannot read, so its multiclass minimum cannot be judged. Wizard requires Intelligence 13 to multiclass; its current score is Intelligence 10.',
+    );
   });
 
   it('checks the current-class side and clears both surfaces at the exact threshold', () => {
@@ -251,11 +369,27 @@ describe('shared multiclass primary-ability query seam', () => {
         .build(characterId)
         .find((assessment) => assessment.class_name === 'Chronomancer'),
     ).toMatchObject({
+      status: 'not_applicable',
+      evaluation: null,
+      warning: null,
+    });
+
+    db.exec(
+      `UPDATE class_definitions
+       SET primary_ability_expression = '{broken'
+       WHERE id = ?`,
+      [homebrewId],
+    );
+    expect(
+      new MulticlassPrimaryAbilityQueries(db)
+        .build(characterId)
+        .find((assessment) => assessment.class_name === 'Chronomancer'),
+    ).toMatchObject({
       status: 'unprovable',
       warning: {
         kind: 'multiclass_primary_ability_unprovable',
         detail:
-          'Chronomancer has no stored primary-ability expression, so its multiclass minimum cannot be judged.',
+          'Chronomancer has a stored primary-ability expression this application cannot read, so its multiclass minimum cannot be judged.',
       },
     });
   });

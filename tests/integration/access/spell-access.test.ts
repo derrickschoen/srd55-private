@@ -845,7 +845,7 @@ describe('persisted spell access routes', () => {
       characterId,
       wizardSourceId,
       preparedId,
-      'wizard:prepared:1',
+      'wizard-prepared',
       { bucket: 'prepared' },
     );
     const clericSlotId = slot(
@@ -856,17 +856,19 @@ describe('persisted spell access routes', () => {
       { bucket: 'prepared' },
     );
     const spellbookEntryIds = new Map<number, number>();
-    for (const versionId of [
+    for (const [index, versionId] of [
       preparedId,
       taggedRitualId,
       ordinaryId,
       inactiveId,
-    ]) {
+    ].entries()) {
       const entryId = db.exec(
-        `INSERT INTO wizard_spellbook_entries
-           (character_id, spell_version_id)
-         VALUES (?, ?)`,
-        [characterId, versionId],
+        `INSERT INTO wizard_spellbook_entries (
+           character_id, source_instance_id, rule_key, ordinal,
+           spell_version_id, spell_level_min, spell_level_max,
+           state, selection_eligibility
+         ) VALUES (?, ?, 'fixture-spellbook', ?, ?, 0, 9, 'active', 'valid')`,
+        [characterId, wizardSourceId, index + 1, versionId],
       ).lastInsertId;
       spellbookEntryIds.set(versionId, entryId);
     }

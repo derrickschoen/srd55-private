@@ -187,12 +187,12 @@ describe('level-up rollback preview RPC', () => {
     );
 
     const levelOneSpellbookNames = [
+      'Mage Armor',
+      'Magic Missile',
+      'Shield',
+      'Sleep',
       'Detect Magic',
       'Feather Fall',
-      'Find Familiar',
-      'Grease',
-      'Jump',
-      'Longstrider',
     ] as const;
     const entries = db.allRaw(
       `SELECT id, ordinal FROM wizard_spellbook_entries

@@ -658,6 +658,12 @@ describe('level_up_class', () => {
   });
 
   it('refuses the 21st character level even when the step itself is adjacent', () => {
+    // The level-cap guard is this test's subject; both class entries satisfy
+    // their independently enforced multiclass prerequisites.
+    db.exec(
+      'UPDATE characters SET strength = 13, intelligence = 13 WHERE id = ?',
+      [characterId],
+    );
     enterClass('Fighter');
     raiseClassLevelForTest(db, characterId, classId('Fighter'), 15);
     enterClass('Wizard');
@@ -890,6 +896,12 @@ describe('level_up_class', () => {
   });
 
   it('rolls class level, feat, skill fills, and Expertise back on a late spell-locator refusal', () => {
+    // This fixture reaches a late transactional refusal. Qualify its Fighter
+    // and Bard entries so the earlier multiclass gate is not the subject.
+    db.exec(
+      'UPDATE characters SET strength = 13, charisma = 13 WHERE id = ?',
+      [characterId],
+    );
     enterClass('Fighter');
     raiseClassLevelForTest(db, characterId, classId('Fighter'), 3);
     enterClass('Fighter');

@@ -15,6 +15,7 @@ import {
 } from '../domain/enums';
 import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
 import type { StoredCharacterSnapshotInverse } from './stored-inverses';
+import { assertMulticlassEntryEligible } from '../rules/multiclass-prerequisite-gate';
 
 import {
   MAGIC_INITIATE_ABILITIES,
@@ -235,6 +236,9 @@ export class AddSourceCommand {
         : otherLevels + (level as number);
     if (resultingLevel > 20) {
       throw new TypeError('A character cannot exceed level 20.');
+    }
+    if (otherLevels !== null) {
+      assertMulticlassEntryEligible(this.db, characterId, classId);
     }
 
     const acquisitions = config.wizard_spellbook_acquisitions;

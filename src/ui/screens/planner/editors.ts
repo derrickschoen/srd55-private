@@ -445,15 +445,7 @@ function renderSources(
     const name = document.createElement('strong');
     // A feat instance's display name can have come from an imported share link.
     name.append(freeTextSpan(source.display_name));
-    const removable = workspace.removable_sources.find(
-      (candidate) => candidate.id === source.id,
-    );
-    const configuredDefinition = removable?.source_definition_id === null || removable === undefined
-      ? undefined
-      : workspace.source_catalog[removable.source_type].find(
-          (candidate) => candidate.id === removable.source_definition_id,
-        );
-    name.append(` — ${catalogLayerLabel(configuredDefinition?.catalog_layer ?? 'unknown')}`);
+    name.append(` — ${catalogLayerLabel(source.catalog_layer)}`);
     const input = document.createElement('select');
     for (const spellList of workspace.spell_lists) {
       input.append(
@@ -488,13 +480,8 @@ function renderSources(
     // Feat, species and background display names can come from a share link.
     descriptionName.append(freeTextSpan(source.display_name));
     const descriptionType = document.createElement('small');
-    const sourceDefinition = source.source_definition_id === null
-      ? undefined
-      : workspace.source_catalog[source.source_type].find(
-          (candidate) => candidate.id === source.source_definition_id,
-        );
     descriptionType.textContent =
-      `${source.source_type} · ${catalogLayerLabel(sourceDefinition?.catalog_layer ?? 'unknown')}` +
+      `${source.source_type} · ${catalogLayerLabel(source.catalog_layer)}` +
       (source.parent_source_instance_id === null
         ? ''
         : ' · granted by another source');
@@ -628,8 +615,11 @@ function renderClasses(
     option('', 'Choose a class…', true),
     ...catalogSelectGroups(available.map((entry) => ({
       value: String(entry.id),
-      label: entry.name,
+      label: entry.multiclass_entry.status === 'blocked'
+        ? `${entry.name} — unavailable`
+        : entry.name,
       catalogLayer: entry.catalog_layer,
+      disabled: entry.multiclass_entry.status === 'blocked',
     }))),
   );
   const add = document.createElement('button');
@@ -645,6 +635,20 @@ function renderClasses(
   });
   addRow.append(selection, add);
   section.append(addRow);
+  const blocked = available.filter(
+    (entry) => entry.multiclass_entry.status === 'blocked',
+  );
+  if (blocked.length > 0) {
+    const reasons = document.createElement('ul');
+    reasons.className = 'class-add-prerequisite-refusals';
+    for (const entry of blocked) {
+      const item = document.createElement('li');
+      item.dataset.classDefinitionId = String(entry.id);
+      item.textContent = entry.multiclass_entry.refusal;
+      reasons.append(item);
+    }
+    section.append(reasons);
+  }
   return section;
 }
 

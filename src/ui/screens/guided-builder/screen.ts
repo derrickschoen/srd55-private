@@ -5,6 +5,7 @@ import {
 } from '../../../builder/contracts';
 import { browserProfileStorage } from '../../../pwa/browser-profile-storage';
 import { createQueriesClient } from '../../../queries/client';
+import { createCommandsClient } from '../../../commands/client';
 import type { Route } from '../../router';
 import { defineScreen, type ScreenContext } from '../../screen';
 import {
@@ -84,6 +85,7 @@ async function render(context: ScreenContext): Promise<() => void> {
     document.title = 'Create a character';
   } else {
     const client = createQueriesClient(context.rpc);
+    const commands = createCommandsClient(context.rpc);
     const state = await client.buildState(characterId);
     const spellRepairAddress = context.route.query.get('step') === 'spells'
       ? guidedSpellRepairAddress(context.route.query.get('repair'))
@@ -191,8 +193,13 @@ async function render(context: ScreenContext): Promise<() => void> {
       // recorded/complete state (the derivation has no "done" member and a
       // finished character rests here). One read supplies both sources'
       // offerable options, the recorded choices and the completion flag.
-      const equipmentState = await client.equipmentStep(characterId);
-      const character = equipmentState.complete
+      const [equipmentState, fighterChoices] = await Promise.all([
+        client.equipmentStep(characterId),
+        client.requiredFighterChoices(characterId),
+      ]);
+      const character =
+        equipmentState.complete &&
+        (fighterChoices.fighter === null || fighterChoices.fighter.complete)
         ? await client.getCharacter(characterId)
         : null;
       const backupController =
@@ -205,6 +212,7 @@ async function render(context: ScreenContext): Promise<() => void> {
       const step = createEquipmentStep({
         characterId,
         state: equipmentState,
+        fighterChoices,
         ...(character === null ||
         backupController === null ||
         hintStorage === null
@@ -217,6 +225,23 @@ async function render(context: ScreenContext): Promise<() => void> {
               },
             }),
         applyEquipment: (params) => client.applyEquipment(params),
+        chooseFightingStyle: (featContentKey, operationUuid) =>
+          commands.execute(
+            characterId,
+            fighterChoices.revision,
+            {
+              type: 'choose_fighting_style',
+              feat_content_key: featContentKey,
+            },
+            operationUuid,
+          ),
+        setWeaponMastery: (weaponId, selected, operationUuid) =>
+          commands.execute(
+            characterId,
+            fighterChoices.revision,
+            { type: 'set_weapon_mastery', weapon_id: weaponId, selected },
+            operationUuid,
+          ),
         navigate: (path) => context.router.navigate(path),
       });
       view = step.element;

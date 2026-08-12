@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type {
   CharacterCommandPayload,
   CharacterFlavorChanges,
@@ -205,6 +205,59 @@ const emptyCompleteness: CompletenessResult = {
 };
 
 describe('planner catalog disclosure', () => {
+  it('disables an ineligible multiclass with its named shortfall while an eligible class proceeds', () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const base = workspace(0, 10, false);
+      const addClass = vi.fn();
+      const rendered = interactiveElement(renderEditors({
+        workspace: {
+          ...base,
+          available_classes: [
+            {
+              id: 2,
+              name: 'Wizard',
+              catalog_layer: 'bundled',
+              multiclass_entry: {
+                status: 'blocked',
+                refusal:
+                  'Cannot add Wizard. Wizard requires Intelligence 13 to multiclass; its current score is Intelligence 10.',
+              },
+            },
+            {
+              id: 3,
+              name: 'Rogue',
+              catalog_layer: 'bundled',
+              multiclass_entry: { status: 'eligible', refusal: null },
+            },
+          ],
+        },
+        actions: { ...NOOP_EDITOR_ACTIONS, addClass },
+        disabled: false,
+      }));
+      const select = rendered.querySelector(
+        '[aria-label="Class to add"]',
+      );
+      const add = rendered.querySelectorAll('button').find(
+        (button) => button.textContent === 'Add class',
+      );
+      const wizard = rendered.querySelectorAll('option').find(
+        (entry) => entry.value === '2',
+      );
+      expect(wizard?.disabled).toBe(true);
+      expect(elementText(rendered as unknown as Node)).toContain(
+        'Cannot add Wizard. Wizard requires Intelligence 13 to multiclass; its current score is Intelligence 10.',
+      );
+      select!.value = '3';
+      select!.dispatchEvent(new Event('change'));
+      expect(add?.disabled).toBe(false);
+      add!.click();
+      expect(addClass).toHaveBeenCalledWith(3);
+    } finally {
+      restoreDocument();
+    }
+  });
+
   it('renders a permanent named prerequisite warning only on the failing class row', () => {
     const restoreDocument = installInteractiveDocument();
     try {
@@ -247,7 +300,7 @@ describe('planner catalog disclosure', () => {
                 detail:
                   'Wizard requires Intelligence 13 to multiclass; its current score is Intelligence 10.',
                 remedy:
-                  'Multiclassing remains allowed. Raise the named score to clear this permanent warning.',
+                  'Raise the named score before adding another class, or remove Wizard if it was added outside the default rules path.',
               },
             },
           ],
@@ -282,7 +335,7 @@ describe('planner catalog disclosure', () => {
         'Wizard requires Intelligence 13 to multiclass; its current score is Intelligence 10.',
       );
       expect(warningText).toContain(
-        'Multiclassing remains allowed. Raise the named score to clear this permanent warning.',
+        'Raise the named score before adding another class, or remove Wizard if it was added outside the default rules path.',
       );
       expect(warningText).not.toContain('Cleric');
       expect(rendered.querySelector('[aria-label="Remove Wizard"]')).not.toBeNull();
@@ -421,7 +474,12 @@ describe('planner catalog disclosure', () => {
           subclasses: [{ id: 9, name: hostileSubclass, catalog_layer: 'external' }],
           multiclass_prerequisite_warning: null,
         }],
-        available_classes: [{ id: 2, name: 'Fighter', catalog_layer: 'bundled' }],
+        available_classes: [{
+          id: 2,
+          name: 'Fighter',
+          catalog_layer: 'bundled',
+          multiclass_entry: { status: 'eligible', refusal: null },
+        }],
         source_catalog: {
           ...base.source_catalog,
           feat: [{
@@ -439,6 +497,7 @@ describe('planner catalog disclosure', () => {
           source_type: 'feat',
           source_definition_id: 7,
           display_name: hostileSource,
+          catalog_layer: 'external',
         }],
       };
       const rendered = interactiveElement(renderEditors({
@@ -1143,6 +1202,93 @@ describe('completeness panel wording', () => {
       expect(elementText(link as unknown as Node)).toBe(
         'Return to the guided Species step to review this required choice.',
       );
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('renders both Fighter gaps as reachable guided controls', () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const panel = interactiveElement(renderCompleteness({
+        ...emptyCompleteness,
+        outstanding_count: 2,
+        items: [
+          {
+            kind: 'fighting_style_choice',
+            title: 'Fighter — Fighting Style not chosen',
+            detail: 'No style is recorded.',
+            remedy: 'Return to guided equipment and choose a Fighting Style.',
+            remedy_action: 'guided_equipment',
+          },
+          {
+            kind: 'weapon_mastery_choice',
+            title: 'Fighter — 0 of 3 Weapon Mastery choices made',
+            detail: 'Three mastered weapons remain.',
+            remedy:
+              'Return to guided equipment and choose the required mastered weapons.',
+            remedy_action: 'guided_equipment',
+            chosen: 0,
+            required: 3,
+            missing: 3,
+          },
+        ],
+      }, { fillSkillGrant: () => undefined }, false));
+      const links = panel.querySelectorAll('a');
+      expect(links).toHaveLength(2);
+      expect(links.map((link) => link.getAttribute('href'))).toEqual([
+        '/characters/7/build/levels/1',
+        '/characters/7/build/levels/1',
+      ]);
+      expect(links.map((link) => elementText(link as unknown as Node))).toEqual([
+        'Return to guided equipment and choose a Fighting Style.',
+        'Return to guided equipment and choose the required mastered weapons.',
+      ]);
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('routes incomplete books and preserved out-of-book preparations to addressed spell repairs', () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const result: CompletenessResult = {
+        ...emptyCompleteness,
+        outstanding_count: 2,
+        items: [{
+          kind: 'wizard_spellbook_incomplete',
+          title: 'Wizard 1 — 0 of 6 spellbook spells chosen',
+          detail: 'Six entries remain empty.',
+          remedy: 'Choose the missing spellbook spells.',
+          source_name: 'Wizard 1',
+          source_catalog_layer: 'bundled',
+          chosen: 0,
+          required: 6,
+          missing: 6,
+          acquisition_id: 41,
+        }, {
+          kind: 'wizard_preparation_out_of_book',
+          title: 'Wizard 1 — Shield is prepared but not in the spellbook',
+          detail: 'The preserved selection needs repair.',
+          remedy: 'Choose an in-book replacement.',
+          source_name: 'Wizard 1',
+          source_catalog_layer: 'bundled',
+          spell_name: 'Shield',
+          spell_catalog_layer: 'bundled',
+          slot_id: 73,
+        }],
+      };
+      const panel = interactiveElement(renderCompleteness(
+        result,
+        { fillSkillGrant: () => undefined },
+        false,
+      ));
+      expect(
+        panel.querySelectorAll('a').map((link) => link.getAttribute('href')),
+      ).toEqual([
+        '/characters/7/build/levels/1?step=spells&repair=spellbook_acquisition-41',
+        '/characters/7/build/levels/1?step=spells&repair=slot_selection-73',
+      ]);
     } finally {
       restoreDocument();
     }

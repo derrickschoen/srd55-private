@@ -193,6 +193,12 @@ export interface ClassOption {
   catalog_layer: CatalogLayerDisclosure;
 }
 
+export interface ClassEntryOption extends ClassOption {
+  readonly multiclass_entry:
+    | { readonly status: 'not_applicable' | 'eligible'; readonly refusal: null }
+    | { readonly status: 'blocked'; readonly refusal: string };
+}
+
 export interface CharacterClass {
   id: number;
   class_definition_id: number;
@@ -232,6 +238,7 @@ export interface RemovableSource {
   source_type: StandaloneSourceType;
   source_definition_id: number | null;
   display_name: string;
+  catalog_layer: CatalogLayerDisclosure;
 }
 
 interface OrderSourceBase {
@@ -340,7 +347,7 @@ export interface Workspace {
     readonly class_level_id: number | null;
     readonly warnings: readonly StartingClassWarning[];
   };
-  available_classes: ClassOption[];
+  available_classes: ClassEntryOption[];
   allow_legacy: boolean;
   flavor: {
     readonly alignment: string | null;
@@ -351,6 +358,7 @@ export interface Workspace {
   configurable_sources: Array<{
     id: number;
     display_name: string;
+    catalog_layer: CatalogLayerDisclosure;
     chosen_list: string;
     spellcasting_ability: Ability;
   }>;

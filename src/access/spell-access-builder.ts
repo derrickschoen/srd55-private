@@ -22,6 +22,11 @@ import {
   type CatalogLayerDisclosure,
 } from '../catalog/catalog-disclosure';
 import { SpellSelectionEligibility } from '../eligibility/spell-selection-eligibility';
+import {
+  effectiveSelectionCollectionForSlot,
+  evaluateSelectionCollectionConstraint,
+} from '../eligibility/spell-selection-collection';
+import { spellSelectionConstraint } from '../eligibility/spell-selection-constraint';
 import { SourceRuleReader } from '../grants/source-rule-reader';
 import {
   resolveCharacterAbilities,
@@ -446,9 +451,32 @@ export class SpellAccessBuilder {
         row.fixed_spell_version_id,
         row.current_spell_version_id,
       );
+      const constraint = {
+        ...spellSelectionConstraint(row),
+        selection_collection: effectiveSelectionCollectionForSlot(
+          this.db,
+          character.id,
+          row.id,
+        ),
+      };
+      if (
+        constraint.selection_collection !== null &&
+        evaluateSelectionCollectionConstraint(
+          this.db,
+          character.id,
+          constraint,
+          row.routeSpellVersionId,
+          this.#eligibility,
+        ).status !== 'valid'
+      ) {
+        continue;
+      }
       if (
         row.state !== 'kept_override' &&
-        this.#eligibility.evaluate(row).status !== 'valid'
+        this.#eligibility.evaluate({
+          ...row,
+          selection_collection: null,
+        }).status !== 'valid'
       ) {
         continue;
       }
@@ -476,7 +504,7 @@ export class SpellAccessBuilder {
           selection_key: row.slotKey,
           bucket: row.bucket,
           always_prepared: row.alwaysPrepared,
-          selection_collection: row.selection_collection,
+          selection_collection: constraint.selection_collection,
           is_selection: true,
           counts_against_limit: row.countsAgainstLimit,
           free_cast: freeCast,
@@ -509,7 +537,21 @@ export class SpellAccessBuilder {
                OR (slot.state = 'active' AND source.state = 'active')
              )
              AND slot.bucket = 'prepared'
-             AND slot.current_spell_version_id IS NOT NULL`,
+             AND slot.current_spell_version_id IS NOT NULL
+             AND EXISTS (
+               SELECT 1
+               FROM wizard_spellbook_entries AS entry
+               LEFT JOIN character_source_instances AS book_source
+                 ON book_source.id = entry.source_instance_id
+                AND book_source.character_id = entry.character_id
+               WHERE entry.character_id = slot.character_id
+                 AND entry.spell_version_id = slot.current_spell_version_id
+                 AND entry.state = 'active'
+                 AND (
+                   entry.source_instance_id IS NULL
+                   OR book_source.state = 'active'
+                 )
+             )`,
           [character.id],
           decodePreparedSlot,
         )
@@ -531,6 +573,9 @@ export class SpellAccessBuilder {
               identity.canonical_name AS identity_name,
               spell_catalog_identity.catalog_layer AS spell_catalog_layer
        FROM wizard_spellbook_entries AS entry
+       LEFT JOIN character_source_instances AS book_source
+         ON book_source.id = entry.source_instance_id
+        AND book_source.character_id = entry.character_id
        INNER JOIN spell_versions AS version
          ON version.id = entry.spell_version_id
        INNER JOIN spell_identities AS identity
@@ -539,6 +584,11 @@ export class SpellAccessBuilder {
          ON spell_catalog_identity.content_kind = 'spell'
         AND spell_catalog_identity.content_key = version.content_key
        WHERE entry.character_id = ?
+         AND entry.state = 'active'
+         AND (
+           entry.source_instance_id IS NULL
+           OR book_source.state = 'active'
+         )
          AND version.is_active = 1
        ORDER BY version.display_name`,
       [character.id],

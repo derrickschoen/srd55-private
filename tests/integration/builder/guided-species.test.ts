@@ -26,6 +26,7 @@ import { applicationSeed } from '../../../src/db/bootstrap';
 import type { DatabaseContext } from '../../../src/db/database';
 import type { Ability } from '../../../src/domain/enums';
 import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
+import { CharacterWorkspaceBuilder } from '../../../src/queries/character-workspace-builder';
 import { CharacterCompletenessQueries } from '../../../src/queries/character-completeness';
 import { CharacterState } from '../../../src/character/character-state';
 import { GrantRuleSlotGenerator } from '../../../src/grants/grant-rule-slot-generator';
@@ -685,6 +686,16 @@ describe('guided lineage spell grants', () => {
       content_key: '2024:species:dwarf',
       catalog_layer: 'bundled',
     });
+    const workspaceSource = new CharacterWorkspaceBuilder(db)
+      .build(characterId)
+      .removable_sources.find((source) => source.source_type === 'species');
+    const sheetSource = new CharacterSheetBuilder(db)
+      .build(characterId)
+      .catalog_sources.find((source) => source.kind === 'species');
+    expect({
+      planner: workspaceSource?.catalog_layer,
+      sheet: sheetSource?.catalog_layer,
+    }).toEqual({ planner: 'bundled', sheet: 'bundled' });
     expect(
       new SpellAccessBuilder(db)
         .buildForCharacter(characterId)
@@ -1677,6 +1688,10 @@ describe('configured species choice and honest projection', () => {
     const rpcHarness = await applicationDatabase();
     const db = rpcHarness.context.db;
     const characterId = createClassedCharacter(db, 'Drow Class Removal');
+    // This fixture tests level-dependent lineage retraction, not multiclass
+    // refusal. Its starting class already qualifies on Strength; make the
+    // added Bard's declared Charisma prerequisite honestly qualify too.
+    db.exec('UPDATE characters SET charisma = 13 WHERE id = ?', [characterId]);
     const primaryClassId = Number(db.scalar(
       'SELECT class_definition_id FROM character_class_levels WHERE character_id = ?',
       [characterId],

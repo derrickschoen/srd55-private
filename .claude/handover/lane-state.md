@@ -23,7 +23,72 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-11-b (newest - read first)
+## RESTART POINT 2026-08-11-c (newest - read first)
+MAIN 8aad140b (mirror pushed after verified verdicts). FLOORS: vitest
+273/4,519 all-pass; PW 162 pool; build 0; migrations 0000-0042.
+EIGHTY merges. Rulings through D232 (taxonomy gap mechanisms S74-S98
+prose-only; engine models numbers only).
+
+Landed 77th-80th, each judged + full-gated by the supervisor:
+- 77TH c10a2e92 LAYERFIX (BLOCKER from the 13-agent audit workflow):
+  cross-layer lineage gate (create + match-to-external record CI-7
+  supersession; match-to-non-external records nothing), dormant
+  successor-layer refusal, external-only predicates on all THREE
+  lineage CTEs, byte-identical bundled-survival regression. TWO fix
+  rounds: round 2 after the full gate caught HA-3/HA-4 same-layer
+  regressions from an over-broad create-only gate. Process: provider
+  content-filter killed the original codex run post-work; supervisor
+  executed the mutation control (first mutation hit the wrong
+  predicate — instrument error caught by reasoning; second killed the
+  named test); a supervisor git checkout destroyed the unstaged fix
+  (F19 REPEAT) — recovered via codex session resume. Gates 269/4361 +
+  build 0 + PW 162/162.
+- 78TH 1844fb39 E1 ValueExpression domain (66 tests; ill-pair TS2322
+  probe; digest zero plan drift). Gates 271/4427 + build 0.
+- 79TH d9616e2a E2 migration 0042 AUTHORIZED MINT + Rogue SA seed +
+  projector arm + digest slices; boot-digest re-pin deliberate
+  (Rogue + transitive Thief), click-to-import unmoved. Fix round 1:
+  clamp-legality parity with E1 + storage-bounds-stricter-by-design
+  ruling documented in code. Fix round 2: merged-tree census/anchor
+  pins (migration inventory +0042, schema census 82→84, emitter
+  message, 10 .ai anchors). Gates 273/4519 + build 0.
+- 80TH 8aad140b DEBT adoption-dialog player words + jargon sweep;
+  merge resolution: both DEBT and landed X6 de-jargonized two strings,
+  main's phrasings won all six sites (a supervisor keep-both import
+  resolution earlier in the day also shipped a syntax error tsc
+  caught — both merge-resolution incidents recorded). Gates 273/4519
+  + build 0 + PW 162/162.
+
+Sim license check (owner-requested): wt/party tools/sim has exactly
+three self-disclosed non-SRD comparators (Oath of Vengeance, GWM,
+College of Valor) used as benchmark builds; main carries only factual
+name references in cc-by doc benchmark tables; judged D59-authorized;
+owner decision pending on genericizing names IF the sim ever syncs.
+
+SWEEP 5 (player leveling/multiclass walkthrough): 12 findings, owner
+approved ALL, ordering INTERLEAVE. IN FLIGHT at write time — four
+parallel codex lanes off 8aad140b: SA (S5-01 Fighter required choices
++ S5-02 multiclass prereq refusal, wt/sa, 5010, tmp/sa.log), SB
+(S5-03 wizard spellbook-only preparation + S5-08 retcon species-HP
+ghost, wt/sb, 5030, tmp/sb.log), SC (S5-09 ranged Dex-row + S5-10
+feat copy + S5-11 provenance parity + S5-12 boot feedback, wt/sc,
+5040, tmp/sc.log), E3 (sheet resolver + Computed terms + ability-
+override integration w/ 4-outcome parity pinned first + 25-kind
+adapter matrix + sheetFacts + Rogue browser pins, wt/e3, 5080,
+tmp/e3.log). Ritual per lane; merges 81st+. QUEUED AFTER E3: SD
+(S5-04 subclass prose + S5-05 spell details + S5-06 resource remedy)
+and E4 (authoring + portability); E5 (Veteran v3 + Reflexes pool +
+upgrade matrix + S5-07 labels) last. Briefs tmp/{sa,sb,sc,e3}-
+dispatch.md; findings wt/sweep5/artifacts/sweep5-findings.md (KEEP
+wt/sweep5).
+
+Process ledger additions: THREE full-gate catches today beyond fix
+rounds already noted (X6 contended-run void → load-check rule; E2
+census; LAYERFIX same-layer). FIVE &-violations total. F19 repeat.
+Session-resume id verification now standard. Bounded digests (no test
+execution) standard after the 1h digest stall.
+
+## RESTART POINT 2026-08-11-b (superseded by 08-11-c)
 MAIN bc52a84a (mirror pushed after verified verdicts). FLOORS: vitest
 269/4,360 all-pass; PW 162 pool; build 0; migrations 0000-0041.
 SEVENTY-SIX merges. SWEEP 4 COMPLETE: S4-01..S4-10 across six units,

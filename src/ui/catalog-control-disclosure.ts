@@ -8,6 +8,7 @@ export interface CatalogSelectOption {
   readonly label: string;
   readonly catalogLayer: CatalogLayerDisclosure;
   readonly selected?: boolean;
+  readonly disabled?: boolean;
   /** Optional mechanical grouping that remains visible beside provenance. */
   readonly group?: string;
 }
@@ -38,6 +39,8 @@ export function catalogSelectGroups(
     option.textContent = entry.label;
     option.selected = entry.selected ?? false;
     if (option.selected) option.setAttribute('selected', '');
+    option.disabled = entry.disabled ?? false;
+    if (option.disabled) option.setAttribute('disabled', '');
     group.append(option);
   }
   return [...groups.values()];

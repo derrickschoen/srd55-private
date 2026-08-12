@@ -32,6 +32,8 @@ import {
   bundledContentDigestPassV1,
   type BundledContentDigestPassV1,
 } from '../catalog/bundled-content-digest-v1';
+import type { DatabaseBootStage } from './database-boot-progress';
+import type { DatabaseContext } from './database';
 
 function hasNoCurrentFingerprints(pass: BundledContentDigestPassV1): boolean {
   return pass.aggregates.every((aggregate) =>
@@ -83,7 +85,11 @@ function namedDigestMismatch(pass: BundledContentDigestPassV1): string {
  * `tests/integration/rules/background-equipment.test.ts` seeds origins into a
  * database with no weapon catalog on purpose to prove it.
  */
-export const applicationSeed: DatabaseSeed = (db) => {
+function seedApplication(
+  db: DatabaseContext,
+  onProgress: (stage: DatabaseBootStage) => void,
+): void {
+  onProgress('checking_bundled_rules');
   ensureBundledClassContent(db);
   ensureBundledSrdSubclassContent(db);
   ensureBundledClassResources(db);
@@ -106,6 +112,7 @@ export const applicationSeed: DatabaseSeed = (db) => {
   // trivially incomplete database skips canonicalization and enters the same
   // repair path directly; equal-count substitutions and byte drift still take
   // the digest and remain tamper-evident on every plausible healthy boot.
+  onProgress('verifying_catalog_integrity');
   const digestPass = bundledContentCouldMatchBuildV1(db)
     ? bundledContentDigestPassV1(db)
     : undefined;
@@ -173,7 +180,10 @@ export const applicationSeed: DatabaseSeed = (db) => {
         `verification: ${namedDigestMismatch(verifiedDigest)}.`,
     );
   }
-};
+}
+
+export const applicationSeed: DatabaseSeed = (db) =>
+  seedApplication(db, () => undefined);
 
 /**
  * Composition root for the application database. Everything that boots a real
@@ -183,6 +193,12 @@ export const applicationSeed: DatabaseSeed = (db) => {
 export function createApplicationLifecycle(
   sqlite3: Sqlite3Static,
   storage: DatabaseStorage,
+  onProgress: (stage: DatabaseBootStage) => void = () => undefined,
 ): DatabaseLifecycle {
-  return new DatabaseLifecycle(sqlite3, storage, schema, applicationSeed);
+  return new DatabaseLifecycle(
+    sqlite3,
+    storage,
+    schema,
+    (db) => seedApplication(db, onProgress),
+  );
 }

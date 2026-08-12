@@ -141,7 +141,8 @@ describe('fill_skill_grant through the real executor', () => {
     seedClassProgressions(db);
     seedSheetContent(db);
     characterId = db.exec(
-      `INSERT INTO characters (name, strength) VALUES ('Fill Hero', 15)`,
+      `INSERT INTO characters (name, strength, charisma)
+       VALUES ('Fill Hero', 15, 13)`,
     ).lastInsertId;
     updateClass('Fighter', 5);
   });

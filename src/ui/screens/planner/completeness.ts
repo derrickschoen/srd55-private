@@ -5,6 +5,8 @@ import type {
   UnfilledSkillGrantsItem,
 } from '../../../queries/character-completeness';
 import {
+  guidedBuildPath,
+  guidedSpellRepairPath,
   guidedSpeciesChoicePath,
   SKILL_GRANT_KEYS,
 } from '../../../builder/contracts';
@@ -105,6 +107,47 @@ function entry(
     const link = document.createElement('a');
     link.setAttribute('href', guidedSpeciesChoicePath(characterId));
     link.dataset.routerLink = 'true';
+    link.textContent = item.remedy;
+    remedy.append(link);
+  } else if (
+    item.kind === 'fighting_style_choice' ||
+    (item.kind === 'weapon_mastery_choice' &&
+      item.remedy_action === 'guided_equipment')
+  ) {
+    const link = document.createElement('a');
+    link.setAttribute('href', guidedBuildPath(characterId));
+    link.dataset.routerLink = 'true';
+    link.textContent = item.remedy;
+    remedy.append(link);
+  } else if (
+    item.kind === 'weapon_mastery_choice' &&
+    item.remedy_action === 'import_catalog'
+  ) {
+    const link = document.createElement('a');
+    link.setAttribute('href', CATALOG_IMPORT_ROUTE);
+    link.dataset.routerLink = 'true';
+    link.className = 'button-secondary';
+    link.textContent = 'Import or repair Fighter Weapon Mastery rules data';
+    remedy.append(link);
+  } else if (
+    item.kind === 'wizard_spellbook_incomplete' ||
+    item.kind === 'wizard_preparation_out_of_book'
+  ) {
+    const link = document.createElement('a');
+    link.setAttribute(
+      'href',
+      guidedSpellRepairPath(
+        characterId,
+        item.kind === 'wizard_spellbook_incomplete'
+          ? 'spellbook_acquisition'
+          : 'slot_selection',
+        item.kind === 'wizard_spellbook_incomplete'
+          ? item.acquisition_id
+          : item.slot_id,
+      ),
+    );
+    link.dataset.routerLink = 'true';
+    link.className = 'button-secondary';
     link.textContent = item.remedy;
     remedy.append(link);
   } else if (item.kind === 'catalog_gap') {

@@ -38,10 +38,18 @@ async function createCharacter(
   page: Page,
   name: string,
   className: string,
+  scores: Readonly<{
+    strength?: number;
+    dexterity?: number;
+    constitution?: number;
+    intelligence?: number;
+    wisdom?: number;
+    charisma?: number;
+  }> = {},
 ): Promise<CreatedCharacter> {
   await page.goto('/');
   await ready(page);
-  return page.evaluate(async ({ characterName, requestedClass }) => {
+  return page.evaluate(async ({ characterName, requestedClass, requestedScores }) => {
     await window.staticApp.reset();
     const classes = await window.appRpc.call<
       Record<string, never>,
@@ -68,12 +76,12 @@ async function createCharacter(
       character_id: created.id,
       method: 'manual',
       scores: {
-        strength: 10,
-        dexterity: 10,
-        constitution: 10,
-        intelligence: 10,
-        wisdom: 10,
-        charisma: 10,
+        strength: requestedScores.strength ?? 10,
+        dexterity: requestedScores.dexterity ?? 10,
+        constitution: requestedScores.constitution ?? 10,
+        intelligence: requestedScores.intelligence ?? 10,
+        wisdom: requestedScores.wisdom ?? 10,
+        charisma: requestedScores.charisma ?? 10,
       },
       operation_uuid: crypto.randomUUID(),
       expected_revision: created.revision,
@@ -82,7 +90,11 @@ async function createCharacter(
       { readonly character_id: number },
       CreatedCharacter
     >('queries.characters.get', { character_id: created.id });
-  }, { characterName: name, requestedClass: className });
+  }, {
+    characterName: name,
+    requestedClass: className,
+    requestedScores: scores,
+  });
 }
 
 async function selectPlannedSpell(
@@ -485,6 +497,7 @@ test('starting-class provenance stays first and level up names the new-class pat
     page,
     'Wizard First Multiclass',
     'Wizard',
+    { intelligence: 13, wisdom: 13 },
   );
   await page.goto(`/characters/${String(character.id)}`);
   await expect(page.locator('#planner-status')).toHaveAttribute(
@@ -807,14 +820,15 @@ test('W-BROWSER-PLANNED-DRAFT carries planned_subchoices from UI through Review 
   await completeWizardLevelOneChoices(page, character.id);
   await openWizardPlannedReview(page, character);
 
-  for (const text of [
-    'Thunderwave — Wizard — SRD · bundled layer',
-    'Chromatic Orb — Wizard — SRD · bundled layer',
-    'Comprehend Languages — Wizard — SRD · bundled layer',
-    'Arcana — Wizard — Scholar',
-    'Scholar — SRD · bundled layer',
-  ]) {
-    await expect(page.getByText(text, { exact: true })).toBeVisible();
+  for (const [text, count] of [
+    ['Thunderwave — Wizard — SRD · bundled layer', 2],
+    ['Comprehend Languages — Wizard — SRD · bundled layer', 1],
+    ['Arcana — Wizard — Scholar', 1],
+    ['Scholar — SRD · bundled layer', 1],
+  ] as const) {
+    const fact = page.getByText(text, { exact: true });
+    await expect(fact).toHaveCount(count);
+    await expect(fact.first()).toBeVisible();
   }
   await clearAnnouncements(page);
   await page.locator('[data-level-up-confirm]').focus();
@@ -826,13 +840,19 @@ test('W-BROWSER-PLANNED-DRAFT carries planned_subchoices from UI through Review 
     page.getByRole('heading', { name: 'Wizard level 2 complete' }),
   ).toBeFocused({ timeout: 45_000 });
   await expect(page.locator('.level-up-route')).toHaveAttribute('aria-busy', 'false');
-  for (const name of ACCEPTANCE_WIZARD_2_CHOICES.spells.map(
+  for (const name of new Set(ACCEPTANCE_WIZARD_2_CHOICES.spells.map(
     (choice) => choice.spell_name,
-  )) {
-    await expect(page.getByText(
+  ))) {
+    const completedFact = page.getByText(
       `Spell: ${name} — Wizard — SRD · bundled layer.`,
       { exact: true },
-    )).toBeVisible();
+    );
+    await expect(completedFact).toHaveCount(
+      ACCEPTANCE_WIZARD_2_CHOICES.spells.filter(
+        (choice) => choice.spell_name === name,
+      ).length,
+    );
+    await expect(completedFact.first()).toBeVisible();
   }
 
   expect(await rows(page, 'character_class_levels')).toEqual([
@@ -867,7 +887,13 @@ test('W-BROWSER-PLANNED-DRAFT carries planned_subchoices from UI through Review 
     exact: true,
   }).locator('..');
   for (const choice of ACCEPTANCE_WIZARD_2_CHOICES.spells) {
-    const bucket = choice.kind === 'spellbook_acquisition'
+    const preparedTwin = choice.kind === 'spellbook_acquisition' &&
+      ACCEPTANCE_WIZARD_2_CHOICES.spells.some(
+        (candidate) =>
+          candidate.kind === 'slot_selection' &&
+          candidate.spell_name === choice.spell_name,
+      );
+    const bucket = choice.kind === 'spellbook_acquisition' && !preparedTwin
       ? spellSection.locator('[data-sheet-id^="spellbook:class:"]', {
           hasText: choice.spell_name,
         })
@@ -875,7 +901,7 @@ test('W-BROWSER-PLANNED-DRAFT carries planned_subchoices from UI through Review 
           hasText: choice.spell_name,
         });
     await expect(bucket).toContainText(
-      `${choice.spell_name}Level 1${choice.kind === 'spellbook_acquisition' ? 'Spellbook' : 'Prepared'}`,
+      `${choice.spell_name}Level 1${choice.kind === 'spellbook_acquisition' && !preparedTwin ? 'Spellbook' : 'Prepared'}`,
     );
   }
 });
@@ -922,7 +948,9 @@ test('W-BROWSER-LU2-ROLLBACK a UI draft refused at its locator restores every da
   await expect(alert).toContainText('index: 2');
   await expect(alert).toContainText('issue: locator_not_found');
   await expect(alert).toContainText(
-    'locator: source=selected_class, rule_key=ui-induced-missing-rule, ordinal=8',
+    // Spellbook acquisitions are deliberately planned before preparations, so
+    // the mutated last subchoice is prepared ordinal 5 rather than book 8.
+    'locator: source=selected_class, rule_key=ui-induced-missing-rule, ordinal=5',
   );
   await expect(page.locator('.level-up-route')).toHaveAttribute('aria-busy', 'false');
   expect(await databaseDigest(page)).toBe(before);

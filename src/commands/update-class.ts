@@ -26,6 +26,8 @@ import type {
 import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
 import type { CharacterCommandIntegrity } from './integrity';
 import type { StoredCharacterSnapshotInverse } from './stored-inverses';
+import { assertMulticlassEntryEligible } from '../rules/multiclass-prerequisite-gate';
+import { deleteSourceTreeEffects } from '../rules/source-effect-retcon';
 
 /**
  * Both rows below were declared with `unknown` fields: honest about the column
@@ -153,13 +155,23 @@ export function syncClassSourceState(
     classId,
     level,
   );
-  syncSubclassSources(db, generator, characterId, classId, subclassId, level);
+  syncSubclassSources(
+    db,
+    generator,
+    characterId,
+    classId,
+    subclassId,
+    level,
+    'delete-retired-effects',
+  );
 }
 
 /**
  * Reconcile the subclass source instances of one class: tombstone every
  * subclass source that is not the chosen one, and create or reactivate the
- * chosen one's, regenerating grants either way.
+ * chosen one's, regenerating grants either way. Catalog replacement uses the
+ * preserve policy because its captured manual effects are remapped immediately
+ * after this reconciliation; player-driven switch/removal deletes them.
  */
 export function syncSubclassSources(
   db: DatabaseContext,
@@ -168,6 +180,7 @@ export function syncSubclassSources(
   classId: number,
   subclassId: number | null,
   level: number,
+  retiredEffectPolicy: 'delete-retired-effects' | 'preserve-for-retarget',
 ): void {
   const sources = db.all(
     `SELECT source.id AS id,
@@ -199,6 +212,9 @@ export function syncSubclassSources(
     );
     clearGeneratedFeatureEffects(db, characterId, sourceId);
     generator.generateForSource(sourceId);
+    if (retiredEffectPolicy === 'delete-retired-effects') {
+      deleteSourceTreeEffects(db, sourceId);
+    }
   }
   if (subclassId === null) {
     return;
@@ -354,6 +370,9 @@ export class UpdateClassCommand {
         if (otherLevels !== null && otherLevels + level > 20) {
           throw new TypeError('A character cannot exceed level 20.');
         }
+        if (otherLevels !== null) {
+          assertMulticlassEntryEligible(this.db, characterId, classId);
+        }
         const firstClass = otherLevels === null;
         this.db.exec(
           `INSERT INTO character_class_levels (
@@ -438,6 +457,7 @@ export class UpdateClassCommand {
         [timestamp, sourceId],
       );
       this.#generator.generateForSource(sourceId);
+      deleteSourceTreeEffects(this.db, sourceId);
     }
     this.db.exec(
       `DELETE FROM character_class_levels

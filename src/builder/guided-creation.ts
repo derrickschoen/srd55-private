@@ -2334,6 +2334,7 @@ export function guidedSpellsStepState(
     return {
       kind: 'slot_selection' as const,
       id: row.id,
+      bucket: row.bucket,
       label: guidedSpellChoiceLabel(
         row.sourceName,
         guidedSpellBucketLabel(row.bucket),
@@ -2415,7 +2416,15 @@ export function guidedSpellsStepState(
   return {
     character_id: characterId,
     revision,
-    choices: [...slots, ...acquisitions],
+    choices: [
+      ...slots
+        .filter((choice) => choice.bucket === 'cantrip_known')
+        .map(({ bucket: _bucket, ...choice }) => choice),
+      ...acquisitions,
+      ...slots
+        .filter((choice) => choice.bucket !== 'cantrip_known')
+        .map(({ bucket: _bucket, ...choice }) => choice),
+    ],
   };
 }
 

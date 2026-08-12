@@ -38,7 +38,12 @@ describe('character rule and source commands', () => {
   });
 
   function character(name = 'C42 Character'): number {
-    return db.exec('INSERT INTO characters (name) VALUES (?)', [name])
+    return db.exec(
+      `INSERT INTO characters (
+         name, strength, dexterity, intelligence, wisdom, charisma
+       ) VALUES (?, 13, 13, 13, 13, 13)`,
+      [name],
+    )
       .lastInsertId;
   }
 
@@ -82,9 +87,16 @@ describe('character rule and source commands', () => {
     const classId = db.exec(
       `INSERT INTO class_definitions (
          content_key, name, rules_edition, spellcasting_ability,
-         progression_type
-       ) VALUES (?, ?, '2024', ?, 'full')`,
-      [contentKey, name, ability],
+         progression_type, primary_ability_expression
+       ) VALUES (?, ?, '2024', ?, 'full', ?)`,
+      [
+        contentKey,
+        name,
+        ability,
+        ability === null
+          ? null
+          : JSON.stringify({ kind: 'all_of', abilities: [ability] }),
+      ],
     ).lastInsertId;
     db.exec(
       `INSERT INTO class_progressions (
@@ -885,6 +897,16 @@ describe('character rule and source commands', () => {
        WHERE id = ?`,
       [selectedSpellId, Number(slot.id)],
     );
+    db.exec(
+      `INSERT INTO character_effects (
+         character_id, sort_order, effect_kind, hit_points_flat,
+         speed_bonus_feet,
+         source_instance_id, label
+       ) VALUES
+         (?, 1, 'hp_modifier', 3, NULL, ?, 'Root effect'),
+         (?, 2, 'speed', NULL, 5, ?, 'Child effect')`,
+      [characterId, rootId, characterId, childId],
+    );
     const before = state.capture(characterId);
 
     const removed = new RemoveSourceCommand(
@@ -925,12 +947,58 @@ describe('character rule and source commands', () => {
       selection_invalid_reason:
         'Selection preserved because its source is no longer active.',
     });
+    expect(
+      db.scalar(
+        `SELECT count(*) FROM character_effects
+         WHERE source_instance_id IN (?, ?)`,
+        [rootId, childId],
+      ),
+    ).toBe(0);
 
     const inverse = await removed.inverse();
     expect(inverse).toMatchObject({ type: 'internal_snapshot_restore' });
     expect(inverse).not.toHaveProperty('integrity');
     state.restore(characterId, inverse.snapshot);
     expect(state.capture(characterId)).toEqual(before);
+
+    const backgroundId = definition(
+      'background_definitions',
+      '2024:background:removal-effect',
+      'Removal Background',
+      [],
+    );
+    add(characterId, {
+      type: 'add_source',
+      source_type: 'background',
+      source_definition_id: backgroundId,
+      config: {},
+    });
+    const backgroundSourceId = Number(
+      db.scalar(
+        `SELECT id FROM character_source_instances
+         WHERE character_id = ? AND source_type = 'background'
+           AND state = 'active'`,
+        [characterId],
+      ),
+    );
+    db.exec(
+      `INSERT INTO character_effects (
+         character_id, sort_order, effect_kind, hit_points_flat,
+         source_instance_id, label
+       ) VALUES (?, 3, 'hp_modifier', 2, ?, 'Background effect')`,
+      [characterId, backgroundSourceId],
+    );
+    new RemoveSourceCommand(
+      db,
+      { type: 'remove_source', source_instance_id: backgroundSourceId },
+      integrity,
+    ).apply(characterId);
+    expect(
+      db.scalar(
+        'SELECT count(*) FROM character_effects WHERE source_instance_id = ?',
+        [backgroundSourceId],
+      ),
+    ).toBe(0);
 
     const classId = classDefinition('Sorcerer', 'charisma', []);
     add(characterId, {
