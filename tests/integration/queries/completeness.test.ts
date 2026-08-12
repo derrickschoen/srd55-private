@@ -181,6 +181,7 @@ describe('completeness detection', () => {
           'This Wizard has 5 empty spellbook entries. Preparation is limited to filled entries, so complete the spellbook before choosing the prepared list.',
         remedy: 'Choose the missing spellbook spells.',
         source_name: 'Wizard 1',
+        source_catalog_layer: 'bundled',
         chosen: 1,
         required: 6,
         missing: 5,
@@ -193,7 +194,9 @@ describe('completeness detection', () => {
           'The selection is preserved, but it is invalid and grants no Wizard preparation access until it is replaced with a spell in the active spellbook.',
         remedy: 'Choose an in-book replacement.',
         source_name: 'Wizard 1',
+        source_catalog_layer: 'bundled',
         spell_name: 'Out of Book Ward',
+        spell_catalog_layer: 'external',
         slot_id: preparedSlotId,
       },
     ]);

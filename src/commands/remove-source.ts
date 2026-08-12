@@ -3,7 +3,7 @@ import {
   type CharacterStateSnapshot,
 } from '../character/character-state';
 import type { CharacterCommandIntegrity } from './integrity';
-import { rowId } from '../db/codecs';
+import { sqlInteger, sqlString } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import type {
   RemoveSourceCommand as RemoveSourcePayload,
@@ -33,20 +33,24 @@ export class RemoveSourceCommand {
 
   apply(characterId: number): void {
     this.db.transaction(() => {
-      const sourceId = this.db.one(
-        `SELECT id
+      const source = this.db.one(
+        `SELECT id, source_type
          FROM character_source_instances
          WHERE character_id = ? AND id = ?
            AND source_type IN ('feat', 'species', 'background')
            AND state = 'active'`,
         [characterId, this.payload.source_instance_id],
-        rowId,
+        (row) => ({
+          id: sqlInteger(row, 'id'),
+          type: sqlString(row, 'source_type'),
+        }),
       );
-      if (sourceId === null) {
+      if (source === null) {
         throw new TypeError(
           'Removable source does not belong to this character.',
         );
       }
+      const sourceId = source.id;
 
       this.#characterId = characterId;
       this.#before = this.#state.capture(characterId);
@@ -57,7 +61,13 @@ export class RemoveSourceCommand {
         [new Date().toISOString(), sourceId],
       );
       this.#generator.generateForSource(sourceId);
-      deleteSourceTreeEffects(this.db, sourceId);
+      // Removed feat effects remain archival share data, but the active-source
+      // eligibility guard makes them mechanically inert. Species and
+      // backgrounds are origin retcons: their entire effect trees must cease
+      // to exist in the same transaction as the tombstone.
+      if (source.type !== 'feat') {
+        deleteSourceTreeEffects(this.db, sourceId);
+      }
     });
   }
 

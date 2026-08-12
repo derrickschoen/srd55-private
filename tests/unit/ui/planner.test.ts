@@ -1161,6 +1161,7 @@ describe('completeness panel wording', () => {
           detail: 'Six entries remain empty.',
           remedy: 'Choose the missing spellbook spells.',
           source_name: 'Wizard 1',
+          source_catalog_layer: 'bundled',
           chosen: 0,
           required: 6,
           missing: 6,
@@ -1171,7 +1172,9 @@ describe('completeness panel wording', () => {
           detail: 'The preserved selection needs repair.',
           remedy: 'Choose an in-book replacement.',
           source_name: 'Wizard 1',
+          source_catalog_layer: 'bundled',
           spell_name: 'Shield',
+          spell_catalog_layer: 'bundled',
           slot_id: 73,
         }],
       };

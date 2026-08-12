@@ -16,7 +16,10 @@ import { EligibleSpellSearch } from '../eligibility/eligible-spell-search';
 import { CharacterNotFoundError } from './character-crud';
 import { orderSources } from './order-sources';
 import { resolveSpeciesChoice } from '../builder/species-choice';
-import type { CatalogLayerDisclosure } from '../catalog/catalog-disclosure';
+import {
+  catalogLayerDisclosure,
+  type CatalogLayerDisclosure,
+} from '../catalog/catalog-disclosure';
 
 export interface UnfilledChoicesItem {
   readonly kind: 'unfilled_choices';
@@ -65,6 +68,7 @@ export interface WizardSpellbookIncompleteItem {
   readonly detail: string;
   readonly remedy: string;
   readonly source_name: string;
+  readonly source_catalog_layer: CatalogLayerDisclosure;
   readonly chosen: number;
   readonly required: number;
   readonly missing: number;
@@ -77,7 +81,9 @@ export interface WizardPreparationOutOfBookItem {
   readonly detail: string;
   readonly remedy: string;
   readonly source_name: string;
+  readonly source_catalog_layer: CatalogLayerDisclosure;
   readonly spell_name: string;
+  readonly spell_catalog_layer: CatalogLayerDisclosure;
   readonly slot_id: number;
 }
 
@@ -924,7 +930,8 @@ export const wizardSpellbookIntegrity: CompletenessCheck = {
   run(context) {
     const acquisitionRows = context.db.all(
       `SELECT entry.id, entry.source_instance_id,
-              entry.spell_version_id, source.display_name AS source_name
+              entry.spell_version_id, source.display_name AS source_name,
+              source_catalog.catalog_layer AS source_catalog_layer
        FROM wizard_spellbook_entries AS entry
        INNER JOIN character_source_instances AS source
          ON source.id = entry.source_instance_id
@@ -932,6 +939,9 @@ export const wizardSpellbookIntegrity: CompletenessCheck = {
        INNER JOIN class_definitions AS definition
          ON source.source_type = 'class'
         AND definition.id = source.source_definition_id
+       LEFT JOIN catalog_content_identities AS source_catalog
+         ON source_catalog.content_kind = 'class'
+        AND source_catalog.content_key = definition.content_key
        WHERE entry.character_id = ?
          AND entry.state = 'active'
          AND source.state = 'active'
@@ -946,6 +956,9 @@ export const wizardSpellbookIntegrity: CompletenessCheck = {
             ? null
             : sqlInteger(row, 'spell_version_id'),
         source_name: sqlString(row, 'source_name'),
+        source_catalog_layer: catalogLayerDisclosure(
+          sqlNullableString(row, 'source_catalog_layer'),
+        ),
       }),
     );
     const bySource = new Map<number, typeof acquisitionRows>();
@@ -972,6 +985,7 @@ export const wizardSpellbookIntegrity: CompletenessCheck = {
             'to filled entries, so complete the spellbook before choosing the prepared list.',
           remedy: 'Choose the missing spellbook spells.',
           source_name: firstEmpty.source_name,
+          source_catalog_layer: firstEmpty.source_catalog_layer,
           chosen,
           required: rows.length,
           missing,
@@ -982,7 +996,9 @@ export const wizardSpellbookIntegrity: CompletenessCheck = {
 
     const outOfBook = context.db.all(
       `SELECT slot.id, source.display_name AS source_name,
-              selected.display_name AS spell_name
+              source_catalog.catalog_layer AS source_catalog_layer,
+              selected.display_name AS spell_name,
+              spell_catalog.catalog_layer AS spell_catalog_layer
        FROM spell_selection_slots AS slot
        INNER JOIN character_source_instances AS source
          ON source.id = slot.source_instance_id
@@ -995,6 +1011,12 @@ export const wizardSpellbookIntegrity: CompletenessCheck = {
        INNER JOIN class_definitions AS definition
          ON source.source_type = 'class'
         AND definition.id = source.source_definition_id
+       LEFT JOIN catalog_content_identities AS source_catalog
+         ON source_catalog.content_kind = 'class'
+        AND source_catalog.content_key = definition.content_key
+       LEFT JOIN catalog_content_identities AS spell_catalog
+         ON spell_catalog.content_kind = 'spell'
+        AND spell_catalog.content_key = selected.content_key
        WHERE slot.character_id = ?
          AND source.state = 'active'
          AND slot.state IN ('active', 'kept_override')
@@ -1026,7 +1048,13 @@ export const wizardSpellbookIntegrity: CompletenessCheck = {
             'The selection is preserved, but it is invalid and grants no Wizard preparation access until it is replaced with a spell in the active spellbook.',
           remedy: 'Choose an in-book replacement.',
           source_name: sourceName,
+          source_catalog_layer: catalogLayerDisclosure(
+            sqlNullableString(row, 'source_catalog_layer'),
+          ),
           spell_name: spellName,
+          spell_catalog_layer: catalogLayerDisclosure(
+            sqlNullableString(row, 'spell_catalog_layer'),
+          ),
           slot_id: sqlInteger(row, 'id'),
         };
       },
