@@ -1086,7 +1086,7 @@ describe('catalog authoring RPC handlers', () => {
     const unavailablePreview = await authoringClient.previewReplacement({
       old_content_key: old.content_key,
       new_content_key: incompatible.content_key,
-      character_id: uiCharacter.id,
+      character_id: uiCharacter.id as CharacterId,
     });
     expect(unavailablePreview.rules_change_review).toBe('unavailable');
     expect(unavailablePreview.rules_changes).toEqual([]);
@@ -1265,7 +1265,7 @@ describe('catalog authoring RPC handlers', () => {
       old_content_key: predecessor.content_key,
       new_content_key: successor.content_key,
       replacements: commits.slice(0, 1),
-      kept_character_ids: [second.id],
+      kept_character_ids: [second.id as CharacterId],
     })).toMatchObject({ replacements: [{ character_id: first.id }] });
     expect(service.usages(predecessor.content_key).usages.map((usage) => usage.character_id))
       .toEqual([second.id]);

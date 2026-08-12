@@ -494,7 +494,13 @@ describe('HA-3 species publisher', () => {
       target,
       [expectedKey],
       '2042-06-08T00:00:00.000Z',
-    )).toEqual(exported);
+    )).toEqual({
+      ...exported,
+      content: exported.content.map((entry) => ({
+        ...entry,
+        provenance: { ...entry.provenance, received: true },
+      })),
+    });
   }, 20_000);
 
   it('remaps current and save-point species effect provenance to target-local template rows across offset ids', async () => {

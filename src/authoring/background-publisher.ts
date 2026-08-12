@@ -8,6 +8,7 @@ import {
 } from '../catalog/catalog-key';
 import {
   type ContentImportChoices,
+  type ContentImportEntryOutcome,
   type ContentImportNode,
   type ContentImportProjection,
 } from '../catalog/content-adoption';
@@ -18,6 +19,10 @@ import {
 } from '../catalog/authoring-lifecycle';
 import { deriveContentIdentityV1 } from '../catalog/content-identity';
 import { portableSourceContentImportNode } from '../catalog/source-content-importer';
+import {
+  authoredContentProvenance,
+  recordContentProvenance,
+} from '../catalog/content-provenance';
 import { projectAuthoredContentAggregateV1 } from '../catalog/stored-authored-content-projector-v1';
 import type { ContentKey } from '../domain/ids';
 import { GrantRule } from '../grants/grant-rule';
@@ -440,7 +445,15 @@ export function commitBackgroundPublish(
     node,
     operationIdentity: operation,
     supersedesContentKey: draft.base_content_key,
-    afterInstall: (transaction: DatabaseContext) => {
+    afterInstall: (transaction: DatabaseContext, outcome: ContentImportEntryOutcome) => {
+      if (outcome.kind === 'create' || outcome.kind === 'remembered-clone') {
+        recordContentProvenance(transaction, {
+          kind: 'background', contentKey: outcome.contentKey,
+          provenance: authoredContentProvenance(
+            transaction, 'background', draft.base_content_key,
+          ),
+        });
+      }
       const deleted = transaction.exec(
         'DELETE FROM catalog_content_drafts WHERE draft_uuid = ? AND revision = ?',
         [draft.draft_uuid, draft.revision],

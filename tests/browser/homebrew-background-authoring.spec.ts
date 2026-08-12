@@ -82,7 +82,7 @@ test('authors and applies a background with persisted skill grants and a flat ef
   await expect(page.getByRole('heading', { name: 'Background published', exact: true })).toBeVisible();
   await page.getByRole('link', { name: 'View background library', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Journey Wayfarer', exact: true })).toBeVisible();
-  await expect(page.getByText('Background · published homebrew version', { exact: true })).toBeVisible();
+  await expect(page.getByText('Background · Authored here', { exact: true })).toBeVisible();
 
   await page.getByRole('link', { name: '← Characters', exact: true }).click();
   await globalReady(page);

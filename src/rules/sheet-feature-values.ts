@@ -27,6 +27,7 @@ import {
   type ValueResolution,
 } from '../domain/value-expression';
 import { SRD_ARCANE_RECOVERY_DESCRIPTION } from './class-resources-srd';
+import { historicalContributionGapForInstalledSubclass } from '../catalog/historical-contribution-gaps';
 
 export interface FeatureValueClassInput {
   readonly class_definition_id: number;
@@ -65,7 +66,8 @@ export type SheetFeatureValue =
       readonly reason:
         | Extract<ValueResolution, { readonly kind: 'unavailable' }>['reason']
         | 'malformed_supersession'
-        | 'duplicate_source';
+        | 'duplicate_source'
+        | 'historical_contributions_not_recorded';
     }
   | {
       readonly status: 'computed';
@@ -114,7 +116,8 @@ export type SheetAuthoredResourceMaximum =
       readonly reason:
         | Extract<ValueResolution, { readonly kind: 'unavailable' }>['reason']
         | 'malformed_supersession'
-        | 'duplicate_source';
+        | 'duplicate_source'
+        | 'historical_contributions_not_recorded';
     };
 
 const ARCANE_RECOVERY_CONTENT_KEY = '2024:class:wizard' as ContentKey;
@@ -292,12 +295,13 @@ function supersedesReference(
 function unavailable(
   key: FeatureValueKey,
   reason: Extract<SheetFeatureValue, { readonly status: 'unavailable' }>['reason'],
+  label: 'Sneak Attack' = 'Sneak Attack',
 ): SheetFeatureValue {
   return {
     status: 'unavailable',
     id: `feature-value:${key}`,
     key,
-    label: 'Sneak Attack',
+    label,
     reason,
   };
 }
@@ -307,6 +311,14 @@ export function resolveSheetFeatureValues(
   classes: readonly FeatureValueClassInput[],
   context: ValueEvaluationContext,
 ): readonly SheetFeatureValue[] {
+  const historicalGaps = classes.flatMap((entry) => {
+    if (entry.subclass === null) return [];
+    const gap = historicalContributionGapForInstalledSubclass(
+      db,
+      entry.subclass.content_key,
+    );
+    return gap === null ? [] : [gap];
+  });
   const grouped = new Map<FeatureValueKey, ActiveStoredContribution[]>();
   for (const stored of activeRows(db, classes)) {
     const group = grouped.get(stored.target_key) ?? [];
@@ -314,7 +326,7 @@ export function resolveSheetFeatureValues(
     grouped.set(stored.target_key, group);
   }
 
-  const values = [...grouped].map(([key, storedRows]): SheetFeatureValue => {
+  let values = [...grouped].map(([key, storedRows]): SheetFeatureValue => {
     const contributions: FeatureValueContribution<'feature_dice_count'>[] = [];
     const labels = new Map<string, string>();
     const baseSources = new Set<string>();
@@ -383,6 +395,16 @@ export function resolveSheetFeatureValues(
       })),
     };
   });
+  for (const target of historicalGaps.flatMap((gap) => gap.featureValues)) {
+    const unknown = unavailable(
+      target.key,
+      'historical_contributions_not_recorded',
+      target.label,
+    );
+    values = values.some((value) => value.id === unknown.id)
+      ? values.map((value) => value.id === unknown.id ? unknown : value)
+      : [...values, unknown];
+  }
   const arcaneRecovery = arcaneRecoveryValue(classes, context);
   return arcaneRecovery === null ? values : [...values, arcaneRecovery];
 }
@@ -453,13 +475,21 @@ export function resolveSheetAuthoredResources(
   classes: readonly FeatureValueClassInput[],
   context: ValueEvaluationContext,
 ): readonly SheetAuthoredResourceMaximum[] {
+  const historicalGaps = classes.flatMap((entry) => {
+    if (entry.subclass === null) return [];
+    const gap = historicalContributionGapForInstalledSubclass(
+      db,
+      entry.subclass.content_key,
+    );
+    return gap === null ? [] : [{ contentKey: entry.subclass.content_key, gap }];
+  });
   const grouped = new Map<string, ActiveAuthoredResourceContribution[]>();
   for (const stored of authoredResourceRows(db, classes)) {
     const group = grouped.get(stored.fact_key) ?? [];
     group.push(stored);
     grouped.set(stored.fact_key, group);
   }
-  return [...grouped].map(([factKey, storedRows]) => {
+  const resources: SheetAuthoredResourceMaximum[] = [...grouped].map(([factKey, storedRows]) => {
     const first = storedRows[0]!;
     const id = `resource:authored:${encodeURIComponent(factKey)}`;
     const common = {
@@ -547,4 +577,20 @@ export function resolveSheetAuthoredResources(
       })),
     };
   });
+  for (const historical of historicalGaps) {
+    for (const target of historical.gap.resources) {
+      const factKey = `${historical.contentKey}\u0000${target.contributionKey}`;
+      if (resources.some((resource) => resource.fact_key === factKey)) continue;
+      resources.push({
+        status: 'unavailable' as const,
+        kind: 'authored' as const,
+        id: `resource:authored:${encodeURIComponent(factKey)}`,
+        fact_key: factKey,
+        label: target.label,
+        marking_shape: target.markingShape,
+        reason: 'historical_contributions_not_recorded' as const,
+      });
+    }
+  }
+  return resources;
 }

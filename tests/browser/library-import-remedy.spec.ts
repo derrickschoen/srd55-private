@@ -1,4 +1,5 @@
 import { gunzipSync } from 'node:zlib';
+import type { Page } from '@playwright/test';
 import {
   LIBRARY_EXPORT_FORMAT,
   LIBRARY_EXPORT_VERSION,
@@ -121,8 +122,18 @@ function portableElfLibraryDocument(
       fingerprint_scheme: CONTENT_FINGERPRINT_SCHEME_V2,
       fingerprint_digest: identity.digest,
       aggregate,
+      provenance: {
+        origin_kind: 'authored_here',
+        received: false,
+        local_derivation: false,
+      },
     }],
     supersessions: [],
+    lifecycle: [{
+      content_kind: 'species',
+      content_key: input.contentKey,
+      archived_at: null,
+    }],
   };
 }
 
@@ -166,10 +177,17 @@ async function buildRecipientFixture(
     name: 'Portable Elf',
     oversized: false,
   });
-  const { supersessions: _supersessions, ...withoutSupersessions } = library;
+  const legacyContent = library.content.map(({ provenance: _provenance, ...entry }) => entry);
+  const {
+    supersessions: _supersessions,
+    lifecycle: _lifecycle,
+    content: _content,
+    ...withoutSupersessions
+  } = library;
   const legacy: LibraryExportDocument = {
     ...withoutSupersessions,
     version: 1,
+    content: legacyContent,
   };
   return { library, collision, legacy, embedded };
 }
@@ -213,7 +231,7 @@ async function confirmLibraryReview(page: Page): Promise<void> {
   await review.getByRole('button', { name: 'Import library' }).click();
 }
 
-test('v18 names embedded Portable Elf before direct commit and omits the line for SRD-only shares', async ({
+test('v20 names embedded Portable Elf before direct commit and omits the line for SRD-only shares', async ({
   browser,
   page,
 }) => {
@@ -231,7 +249,7 @@ test('v18 names embedded Portable Elf before direct commit and omits the line fo
   await page.getByRole('button', { name: 'Import library' }).click();
   await confirmLibraryReview(page);
   await expect(page.locator('.transfer-status')).toHaveText(
-    'Library imported: 1 published, 0 matched existing.',
+    'Library imported: 1 added to your library, 0 matched existing.',
   );
 
   // Every character row and configured lineage choice is authored through the
@@ -266,14 +284,15 @@ test('v18 names embedded Portable Elf before direct commit and omits the line fo
   await page.getByRole('button', { name: 'Create share link' }).click();
   await expect(page.locator('.share-status')).toHaveText(
     'Share link and QR code ready. Embedded external content: ' +
-      'Portable Elf — species — Homebrew · external layer.',
+      'Portable Elf — species — Received homebrew — original author not recorded; ' +
+      'a local copy will be added to your library.',
   );
   const portableLink = await page.getByLabel('Generated character share link')
     .inputValue();
   const portableWire = JSON.parse(gunzipSync(
     Buffer.from(new URL(portableLink).hash.slice(1), 'base64url'),
   ).toString('utf8')) as unknown[];
-  expect(portableWire[1]).toBe(18);
+  expect(portableWire[1]).toBe(20);
 
   await page.getByRole('link', { name: 'Create a character' }).click();
   await page.getByRole('button', { name: /^Wizard\b/u }).click();
@@ -306,7 +325,9 @@ test('v18 names embedded Portable Elf before direct commit and omits the line fo
       'Sent with this character. The link does not include the sender’s name.',
     );
     await expect(disclosure.getByRole('listitem')).toHaveText(
-      'Portable Elf — species; 1 version; this character uses Portable Elf',
+      'Portable Elf — species; 1 version; this character uses Portable Elf; ' +
+        'Received homebrew — original author not recorded; ' +
+        'a local copy will be added to your library',
     );
     expect(await recipient.evaluate(async (portableElfKey) => ({
       characters: await window.staticApp.inspectRows('characters'),
@@ -321,7 +342,7 @@ test('v18 names embedded Portable Elf before direct commit and omits the line fo
       name: 'Add to my characters',
     }).click();
     await expect(recipient.locator('.share-status')).toHaveText(
-      'Character added as #1.',
+      'Portable Elf Share was added. Open character.',
     );
     const installed = await recipient.evaluate(async () => {
       const characters = await window.staticApp.inspectRows('characters');
@@ -390,7 +411,7 @@ test('v17 refusal links through library adoption to the exact restored choice', 
   await page.getByRole('button', { name: 'Import library' }).click();
   await confirmLibraryReview(page);
   await expect(page.locator('.transfer-status')).toHaveText(
-    'Library imported: 1 published, 0 matched existing.',
+    'Library imported: 1 added to your library, 0 matched existing.',
   );
 
   // Production guided writers create the exact configured choice that the
@@ -430,24 +451,25 @@ test('v17 refusal links through library adoption to the exact restored choice', 
   const positional = JSON.parse(gunzipSync(
     Buffer.from(new URL(link).hash.slice(1), 'base64url'),
   ).toString('utf8')) as unknown[];
-  expect(positional[1]).toBe(17);
+  expect(positional[1]).toBe(20);
 
   const profile = await browser.newContext();
   try {
     const recipient = await profile.newPage();
     await recipient.goto(link);
     await ready(recipient);
-    const required = `species '${OVERSIZED_PORTABLE_ELF_KEY}'`;
-    const remedyText = `Import ${required}, then open the link again.`;
+    const required = 'This character uses Oversized Portable Elf, which is not in your library.';
+    const remedyText =
+      'Ask the sender for a library JSON containing Oversized Portable Elf, import it, then retry this share.';
     const remedy = recipient.getByRole('link', { name: remedyText });
     await expect(recipient.locator('.share-status')).toContainText(required);
-    await expect(remedy).toHaveAttribute('href', '/?import=library');
+    await expect(remedy).toHaveAttribute('href', `/?import=library#${new URL(link).hash.slice(1)}`);
     await expect(
       recipient.getByRole('button', { name: 'Add to my characters' }),
     ).toBeHidden();
 
     await remedy.click();
-    await expect(recipient).toHaveURL(/\/?\?import=library$/u);
+    await expect(recipient).toHaveURL(/\/?\?import=library#/u);
     await ready(recipient);
     const libraryInput = recipient.getByLabel('Library JSON');
     await expect(recipient.locator('details.transfer-panel')).toHaveAttribute(
@@ -463,7 +485,7 @@ test('v17 refusal links through library adoption to the exact restored choice', 
     await recipient.getByRole('button', { name: 'Import library' }).click();
     await confirmLibraryReview(recipient);
     await expect(recipient.locator('.transfer-status')).toHaveText(
-      'Library imported: 1 published, 0 matched existing.',
+      'Library imported: 1 added to your library, 0 matched existing. Retry share.',
     );
 
     // A second document at the same key still goes through the common adoption
@@ -494,7 +516,7 @@ test('v17 refusal links through library adoption to the exact restored choice', 
     await expect(libraryCommit).toBeEnabled();
     await libraryCommit.click();
     await expect(recipient.locator('.transfer-status')).toHaveText(
-      'Library imported: 0 published, 1 matched existing.',
+      'Library imported: 0 added to your library, 1 matched existing. Retry share.',
     );
 
     // Reopening the original link is the documented retry. Its reference-only
@@ -517,7 +539,7 @@ test('v17 refusal links through library adoption to the exact restored choice', 
       name: 'Import with these choices',
     });
     const shareMatch = shareReview.getByRole('radio', {
-      name: /Match — Discards the incoming rules; existing characters keep the local entry\./,
+      name: /Use this local Oversized Portable Elf for the imported character\./,
     });
     await expect(shareMatch).not.toBeChecked();
     await expect(shareCommit).toBeDisabled();
@@ -525,7 +547,7 @@ test('v17 refusal links through library adoption to the exact restored choice', 
     await expect(shareCommit).toBeEnabled();
     await shareCommit.click();
     await expect(recipient.locator('.share-status')).toContainText(
-      'Character added as #1.',
+      'Reference-only High Elf was added. Open character.',
     );
 
     const restored = await recipient.evaluate(async () => {
@@ -612,7 +634,8 @@ test('the library control accepts v1 and both JSON controls reject the other kin
   await page.getByRole('button', { name: 'Import library' }).click();
   await confirmLibraryReview(page);
   await expect(page.locator('.transfer-status')).toHaveText(
-    'Library imported: 1 published, 0 matched existing.',
+    'Library imported: 1 added to your library, 0 matched existing. ' +
+    'This older export did not record archive state; carried entries were restored live.',
   );
 
   await page.getByLabel('Catalog JSON').setInputFiles({
@@ -661,12 +684,13 @@ test('whole-library download restores authored and imported content into a fresh
   ) as LibraryExportDocument;
   expect(emptyDocument).toEqual({
     format: 'dnd-multiclass-spells/library',
-    version: 2,
+    version: 3,
     exported_at: expect.any(String),
     selection: 'all',
     selected_content_keys: [],
     content: [],
     supersessions: [],
+    lifecycle: [],
   });
 
   await page.goto('/homebrew');
@@ -705,7 +729,7 @@ test('whole-library download restores authored and imported content into a fresh
     exact: true,
   }).click();
   await expect(page.locator('.transfer-status')).toHaveText(
-    'Bundled homebrew imported: 3 published, 0 matched existing.',
+    'Bundled homebrew imported: 3 added to your library, 0 matched existing.',
   );
 
   const expectedManifest = [
@@ -818,8 +842,8 @@ test('whole-library download restores authored and imported content into a fresh
   const libraryDocument = JSON.parse(
     libraryBytes.toString('utf8'),
   ) as LibraryExportDocument;
-  if (libraryDocument.version !== 2) {
-    throw new Error('The production library download was not a v2 document.');
+  if (libraryDocument.version !== 3) {
+    throw new Error('The production library download was not a v3 document.');
   }
   expect(libraryDocument.selection).toBe('all');
   expect(libraryDocument.selected_content_keys).toEqual(
@@ -858,7 +882,7 @@ test('whole-library download restores authored and imported content into a fresh
   );
   await confirmLibraryReview(page);
   await expect(page.locator('.transfer-status')).toHaveText(
-    'Library imported: 9 published, 0 matched existing.',
+    'Library imported: 9 added to your library, 0 matched existing.',
   );
 
   const restored = await page.evaluate((speciesName) => {
@@ -974,6 +998,7 @@ test('whole-library download restores authored and imported content into a fresh
   });
   await expect(restoredSpeciesCard.getByText('Homebrew', { exact: true })).toBeVisible();
   await expect(restoredSpeciesCard).toContainText(
-    'Species · 1 version · 0 character attachments',
+    'Species · Received homebrew — origin author not recorded; this is your local copy · ' +
+      '1 version · 0 character attachments',
   );
 });

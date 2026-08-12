@@ -202,6 +202,58 @@ export const characters = sqliteTable('characters', {
 ]);
 
 /**
+ * Recipient-local identity for share publication and update lineage.
+ *
+ * `local_document_id` belongs to this local character and is exported when
+ * this copy is shared. `received_document_id` belongs to the sender whose
+ * document this character last accepted. They stay distinct so forwarding a
+ * received character never claims the original sender's identity.
+ */
+export const character_share_receipts = sqliteTable(
+  'character_share_receipts',
+  {
+    character_id: integer('character_id')
+      .primaryKey()
+      .notNull()
+      .$type<CharacterId>()
+      .references(() => characters.id, { onDelete: 'cascade' }),
+    local_document_id: varchar()('local_document_id').notNull(),
+    received_document_id: varchar()('received_document_id'),
+    received_revision: integer('received_revision'),
+    baseline_character_revision: integer('baseline_character_revision'),
+    created_at: datetime()('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+    updated_at: datetime()('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    check(
+      'character_share_receipts_local_document_id_check',
+      sql`length(${table.local_document_id}) > 0`,
+    ),
+    check(
+      'character_share_receipts_received_document_id_check',
+      sql`${table.received_document_id} IS NULL OR length(${table.received_document_id}) > 0`,
+    ),
+    check(
+      'character_share_receipts_received_pair_check',
+      sql`(${table.received_document_id} IS NULL
+            AND ${table.received_revision} IS NULL
+            AND ${table.baseline_character_revision} IS NULL)
+          OR (${table.received_document_id} IS NOT NULL
+            AND typeof(${table.received_revision}) = 'integer'
+            AND ${table.received_revision} >= 0
+            AND typeof(${table.baseline_character_revision}) = 'integer'
+            AND ${table.baseline_character_revision} >= 0)`,
+    ),
+    uniqueIndex('character_share_receipts_local_document_id_unique').on(
+      table.local_document_id,
+    ),
+    uniqueIndex('character_share_receipts_received_document_id_unique').on(
+      table.received_document_id,
+    ),
+  ],
+);
+
+/**
  * A source a character has taken: a class, subclass, feat, species or
  * background.
  *

@@ -2,6 +2,7 @@ import {
   catalogContentLayers,
   type CatalogContentLayer,
 } from './content-registry';
+import type { ContentProvenance } from './content-provenance';
 
 /**
  * What a catalog consumer can honestly say about an entry's publication layer.
@@ -31,6 +32,7 @@ export interface CharacterCatalogDisclosure {
 export interface CatalogNamedDisclosure {
   readonly name: string;
   readonly catalog_layer: CatalogLayerDisclosure;
+  readonly provenance?: ContentProvenance;
 }
 
 export function catalogLayerDisclosure(

@@ -75,6 +75,26 @@ function minimalDocument(
   };
 }
 
+function expectRecipientReexport(
+  actual: CharacterShareDocument,
+  incoming: CharacterShareDocument,
+): void {
+  expect(incoming.documentIdentity).toEqual({
+    document_id: expect.any(String),
+    revision: 0,
+  });
+  expect(actual).toEqual({
+    ...incoming,
+    documentIdentity: {
+      document_id: expect.any(String),
+      revision: 0,
+    },
+  });
+  expect(actual.documentIdentity?.document_id).not.toBe(
+    incoming.documentIdentity?.document_id,
+  );
+}
+
 describe('combined character level validation', () => {
   const classRow = (id: number, level: number) => ({
     id,
@@ -1017,9 +1037,10 @@ describe('adversarial character-share fidelity', () => {
     }
     const shared = await throughShareLink(document);
     const imported = importCharacterShare(targetDb, shared);
-    expect(
+    expectRecipientReexport(
       exportCharacterShare(targetDb, imported.characterId),
-    ).toEqual(document);
+      document,
+    );
   });
 
   it('round-trips empty and single-class characters without inventing optional state', async () => {
@@ -1028,7 +1049,8 @@ describe('adversarial character-share fidelity', () => {
     const emptyDocument = exportCharacterShare(emptySource, emptyId);
     const emptyTarget = await database();
     const importedEmpty = importCharacterShare(emptyTarget, emptyDocument);
-    expect(exportCharacterShare(emptyTarget, importedEmpty.characterId)).toEqual(
+    expectRecipientReexport(
+      exportCharacterShare(emptyTarget, importedEmpty.characterId),
       emptyDocument,
     );
 
@@ -1062,9 +1084,10 @@ describe('adversarial character-share fidelity', () => {
       singleTarget,
       sharedSingle,
     );
-    expect(
+    expectRecipientReexport(
       exportCharacterShare(singleTarget, importedSingle.characterId),
-    ).toEqual(singleDocument);
+      singleDocument,
+    );
   });
 
   it('preserves homebrew subclass config that controls regenerated slots', async () => {
@@ -1309,11 +1332,12 @@ describe('adversarial character-share fidelity', () => {
     );
     const shared = await throughShareLink(document);
     const imported = importCharacterShare(targetDb, shared);
-    expect(
+    expectRecipientReexport(
       exportCharacterShare(targetDb, imported.characterId, {
         loadouts: true,
       }),
-    ).toEqual(document);
+      document,
+    );
   });
 
   it('preserves unselected placeholder names, false preferences, opt-ins, strings, and extreme overrides', async () => {
@@ -1372,12 +1396,13 @@ describe('adversarial character-share fidelity', () => {
     const targetDb = await database();
     const shared = await throughShareLink(document);
     const imported = importCharacterShare(targetDb, shared);
-    expect(
+    expectRecipientReexport(
       exportCharacterShare(targetDb, imported.characterId, {
         acknowledgements: true,
         loadouts: true,
       }),
-    ).toEqual(document);
+      document,
+    );
     expect(
       targetDb.oneRaw(
         `SELECT display_name FROM spell_versions WHERE content_key = ?`,
@@ -1863,7 +1888,8 @@ describe('adversarial character-share rejection', () => {
 
   it('rejects wrong format/version, tuple arity errors, and extra or missing elements', async () => {
     const positional = shareDocumentToPositional(minimalDocument());
-    const v17 = shareDocumentToReferencePositional(minimalDocument());
+    const v17 = shareDocumentToReferencePositional(minimalDocument()).slice(0, 21);
+    v17[1] = 17;
     const withEffect = shareDocumentToPositional(
       minimalDocument({
         effects: [{
@@ -1882,8 +1908,8 @@ describe('adversarial character-share rejection', () => {
       null,
     ];
     const cases: Array<[unknown, RegExp]> = [
-      [[...positional.slice(0, 10)], /tuple of length 22/],
-      [[...positional, null], /tuple of length 22/],
+      [[...positional.slice(0, 10)], /tuple of length 23/],
+      [[...positional, null], /tuple of length 23/],
       [
         ['wrong-format', ...positional.slice(1)],
         /format is unsupported/,

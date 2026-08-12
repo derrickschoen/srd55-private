@@ -44,7 +44,9 @@ import catalogContentArchiveMembers from '../../drizzle/0040_catalog_content_arc
 import contentV2 from '../../drizzle/0041_content_v2.sql?raw';
 import featureValueContributions from '../../drizzle/0042_feature_value_contributions.sql?raw';
 import authoredResourceDisplay from '../../drizzle/0043_authored_resource_display.sql?raw';
-import recipientReplacementChoices from '../../drizzle/0044_recipient_replacement_choices.sql?raw';
+import catalogContentProvenance from '../../drizzle/0044_catalog_content_provenance.sql?raw';
+import characterShareReceipts from '../../drizzle/0045_character_share_receipts.sql?raw';
+import recipientReplacementChoices from '../../drizzle/0046_recipient_replacement_choices.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -503,14 +505,32 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
     resultSchemaChecksum:
       'c3064d2f13d8fe5519ee5f808c226f163e6d4acbc9838692678f83ccd69b4129',
   }),
+  // Sweep 6 S6-12: rules identity no longer pretends to answer authorship or
+  // transfer history. Existing external rows remain unknown because the old
+  // schema recorded no evidence from which a stronger claim could be made.
+  Object.freeze({
+    id: '0044_catalog_content_provenance',
+    sql: catalogContentProvenance,
+    checksum:
+      'feb20e2440a1242305b72ed7981e0e44b57ee812be85c2ee116782c9fecf819e',
+    resultSchemaChecksum:
+      '960eb02651a6fb6b58b9f492c42c2c5b5981b656101866263170c0a9e30d90ca',
+  }),
+  Object.freeze({
+    id: '0045_character_share_receipts',
+    sql: characterShareReceipts,
+    checksum: '0d228b25caaa393c88d16fed16455a1984e24c3724e36e2ea4f02c2f8ca1ea4a',
+    resultSchemaChecksum:
+      '4659d931e88ec03f4e77d9b90424714bf4109216fea5abc681df0206236b9275',
+  }),
   // S6-08: keeping an older version is a durable recipient decision, scoped
   // to the exact offered transition and character rather than navigation UI.
   Object.freeze({
-    id: '0044_recipient_replacement_choices',
+    id: '0046_recipient_replacement_choices',
     sql: recipientReplacementChoices,
     checksum: '4f57c9b0076b917840411e0e9cf134f3e99bbaa2e42a2cb5e895f0b16aaf72e0',
     resultSchemaChecksum:
-      'b1f047c9a032b37cac26f934fbfe6736e0c7a57b68fdfd84664c1e14c48d777b',
+      '6bf18fa1d55c0b2cde67556afb20d300c2889098d53ddb3ac37ae782dff0fd2a',
   }),
 ]);
 

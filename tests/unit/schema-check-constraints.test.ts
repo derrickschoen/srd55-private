@@ -1135,6 +1135,37 @@ const catalogContentIdentity =
     });
   };
 
+const catalogContentProvenance =
+  (values: Values): Write =>
+  (db) => {
+    const contentKey = `2024:test.owner:${uid('provenance')}`;
+    insert(db, 'catalog_content_identities', {
+      content_key: contentKey,
+      content_kind: 'species',
+      key_kind: 'asserted',
+      catalog_layer: 'external',
+      normalized_name: uid('provenance'),
+    });
+    insert(db, 'catalog_content_provenance', {
+      content_kind: 'species',
+      content_key: contentKey,
+      origin_kind: 'unknown',
+      received: 0,
+      local_derivation: 0,
+      ...values,
+    });
+  };
+
+const characterShareReceipt =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'character_share_receipts', {
+      character_id: newCharacter(db),
+      local_document_id: uid('local-share-document'),
+      ...values,
+    });
+  };
+
 const catalogContentArchiveMember =
   (values: Values): Write =>
   (db) => {
@@ -1564,6 +1595,60 @@ function authoredCharacterEffectConstraintCases(
 
 const CONSTRAINT_CASES: readonly ConstraintCase[] = [
   {
+    constraint: 'character_share_receipts_local_document_id_check',
+    rejects: [[
+      'an empty local document id',
+      characterShareReceipt({ local_document_id: '' }),
+    ]],
+    accepts: [[
+      'a non-empty local document id',
+      characterShareReceipt({}),
+    ]],
+  },
+  {
+    constraint: 'character_share_receipts_received_document_id_check',
+    rejects: [[
+      'an empty received document id',
+      characterShareReceipt({
+        received_document_id: '', received_revision: 0,
+        baseline_character_revision: 0,
+      }),
+    ]],
+    accepts: [[
+      'a non-empty received document id',
+      characterShareReceipt({
+        received_document_id: uid('received-share-document'),
+        received_revision: 0, baseline_character_revision: 0,
+      }),
+    ]],
+  },
+  {
+    constraint: 'character_share_receipts_received_pair_check',
+    rejects: [
+      ['an id without its revisions', characterShareReceipt({
+        received_document_id: uid('received-share-document'),
+      })],
+      ['revisions without an id', characterShareReceipt({
+        received_revision: 0, baseline_character_revision: 0,
+      })],
+      ['a negative received revision', characterShareReceipt({
+        received_document_id: uid('received-share-document'),
+        received_revision: -1, baseline_character_revision: 0,
+      })],
+      ['a negative baseline revision', characterShareReceipt({
+        received_document_id: uid('received-share-document'),
+        received_revision: 0, baseline_character_revision: -1,
+      })],
+    ],
+    accepts: [
+      ['an entirely absent received lineage', characterShareReceipt({})],
+      ['a complete received lineage', characterShareReceipt({
+        received_document_id: uid('received-share-document'),
+        received_revision: 1, baseline_character_revision: 2,
+      })],
+    ],
+  },
+  {
     constraint: 'catalog_content_identities_archived_at_check',
     rejects: [
       ['an integer lifecycle value', catalogContentIdentity({ archived_at: 20420304 })],
@@ -1575,6 +1660,73 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
       ['the active NULL', catalogContentIdentity({ archived_at: null })],
       ['an ISO timestamp', catalogContentIdentity({ archived_at: '2042-03-04T05:06:07.000Z' })],
       ['a SQLite timestamp', catalogContentIdentity({ archived_at: '2042-03-04 05:06:07' })],
+    ],
+  },
+  {
+    constraint: 'catalog_content_provenance_kind_check',
+    rejects: [[
+      'an unknown content kind',
+      catalogContentProvenance({ content_kind: 'talent' }),
+    ]],
+    accepts: [[
+      'a known content kind',
+      catalogContentProvenance({ content_kind: 'species' }),
+    ]],
+  },
+  {
+    constraint: 'catalog_content_provenance_origin_kind_check',
+    rejects: [[
+      'an invented origin',
+      catalogContentProvenance({ origin_kind: 'claimed_by_sender' }),
+    ]],
+    accepts: [
+      ['authored here', catalogContentProvenance({ origin_kind: 'authored_here' })],
+      ['built in', catalogContentProvenance({ origin_kind: 'built_in' })],
+      ['unknown', catalogContentProvenance({ origin_kind: 'unknown' })],
+    ],
+  },
+  {
+    constraint: 'catalog_content_provenance_received_check',
+    rejects: [[
+      'a received flag outside the boolean set',
+      catalogContentProvenance({ received: 2 }),
+    ]],
+    accepts: [
+      ['not received', catalogContentProvenance({ received: 0 })],
+      ['received', catalogContentProvenance({ received: 1 })],
+    ],
+  },
+  {
+    constraint: 'catalog_content_provenance_local_derivation_check',
+    rejects: [[
+      'a derivation flag outside the boolean set',
+      catalogContentProvenance({ local_derivation: 2 }),
+    ]],
+    accepts: [
+      ['not derived locally', catalogContentProvenance({ local_derivation: 0 })],
+      ['derived locally', catalogContentProvenance({ local_derivation: 1 })],
+    ],
+  },
+  {
+    constraint: 'catalog_content_provenance_labels_check',
+    rejects: [
+      ['an empty author label', catalogContentProvenance({ author_label: '' })],
+      ['an author label above 200 characters', catalogContentProvenance({ author_label: 'a'.repeat(201) })],
+      ['an empty source label', catalogContentProvenance({ source_label: '' })],
+      ['a source label above 200 characters', catalogContentProvenance({ source_label: 's'.repeat(201) })],
+      ['an empty license label', catalogContentProvenance({ license_label: '' })],
+      ['a license label above 200 characters', catalogContentProvenance({ license_label: 'l'.repeat(201) })],
+      ['empty attribution', catalogContentProvenance({ attribution_text: '' })],
+      ['attribution above 4096 bytes', catalogContentProvenance({ attribution_text: 'x'.repeat(4097) })],
+    ],
+    accepts: [
+      ['absent optional attribution', catalogContentProvenance({})],
+      ['labels and attribution at their bounds', catalogContentProvenance({
+        author_label: 'a'.repeat(200),
+        source_label: 's'.repeat(200),
+        license_label: 'l'.repeat(200),
+        attribution_text: 'x'.repeat(4096),
+      })],
     ],
   },
   {

@@ -29,6 +29,7 @@ import type {
   ContentFingerprintScheme,
   ContentKind,
 } from '../catalog/content-identity';
+import type { ContentProvenance } from '../catalog/content-provenance';
 import type {
   CatalogContentLayer,
   CatalogContentMatchDecision,
@@ -499,6 +500,7 @@ export interface PublishedHomebrewSummary {
   readonly catalog_layer: 'external';
   readonly superseded_by: ContentKey | null;
   readonly usage_count: number;
+  readonly provenance: ContentProvenance;
 }
 
 export interface AuthoringLibrary {

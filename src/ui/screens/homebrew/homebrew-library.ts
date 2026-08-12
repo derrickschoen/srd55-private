@@ -13,6 +13,10 @@ import type {
   StoredHomebrewDraft,
 } from '../../../authoring/contracts';
 import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
+import {
+  contentProvenanceDetails,
+  contentProvenanceLabel,
+} from '../../../catalog/content-provenance';
 import type { HomebrewDraftUuid } from '../../../authoring/ids';
 import { AUTHORING_TEXT_LIMITS } from '../../../authoring/limits';
 import type { GuidedClassOption } from '../../../builder/contracts';
@@ -415,6 +419,15 @@ function publishedCard(
           homebrewReplacementPath(version.content_key, successor.content_key),
         )),
       ])];
+  const provenanceDetails = contentProvenanceDetails(item.provenance);
+  const attribution = element('details');
+  attribution.hidden = provenanceDetails.length === 0;
+  attribution.append(element('summary', { text: 'Attribution details' }));
+  for (const detail of provenanceDetails) {
+    const line = element('p');
+    line.append(`${detail.label}: `, freeTextSpan(detail.value));
+    attribution.append(line);
+  }
   return element('article', { className: 'homebrew-card panel' }, [
     element('div', { className: 'homebrew-card-heading' }, [
       title,
@@ -424,10 +437,12 @@ function publishedCard(
       ]),
     ]),
     element('p', {
-      text: `${KIND_LABELS[item.content_kind]} · ${String(lineage.versions.length)} ` +
+      text: `${KIND_LABELS[item.content_kind]} · ${contentProvenanceLabel(item.provenance)} · ` +
+        `${String(lineage.versions.length)} ` +
         `version${lineage.versions.length === 1 ? '' : 's'} · ` +
         `${String(totalUsage)} character attachment${totalUsage === 1 ? '' : 's'}`,
     }),
+    attribution,
     ...updateSummary,
     history,
     element('div', { className: 'homebrew-card-actions' }, [

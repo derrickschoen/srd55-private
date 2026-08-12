@@ -198,6 +198,11 @@ export interface ShareCharacter {
   readonly notes?: string;
 }
 
+export interface ShareDocumentIdentity {
+  readonly document_id: string;
+  readonly revision: number;
+}
+
 export interface ShareClass {
   readonly id: number;
   readonly classKey: string;
@@ -797,8 +802,10 @@ export interface CharacterShareDocument {
   readonly items?: readonly ShareItem[];
   /** D92: exactly three nullable zero-based references into `items`. */
   readonly attunementSlots?: ShareAttunementSlots;
-  /** V18: exact external aggregate closure plus immutable version lineage. */
+  /** V19: exact external aggregate closure, lineage, and origin provenance. */
   readonly portableContent?: PortableContentBundle;
+  /** V19: absent only when an older link was migrated. */
+  readonly documentIdentity?: ShareDocumentIdentity;
 }
 
 export class ShareValidationError extends TypeError {
@@ -1964,6 +1971,7 @@ export function validateShareDocument(
       'items',
       'attunementSlots',
       'portableContent',
+      'documentIdentity',
     ],
     'document',
   );
@@ -2922,7 +2930,10 @@ export function validateShareDocument(
   let portableContent: PortableContentBundle | undefined;
   if (source.portableContent !== undefined) {
     try {
-      portableContent = validatePortableContentBundle(source.portableContent);
+      portableContent = validatePortableContentBundle(
+        source.portableContent,
+        true,
+      );
     } catch (error) {
       if (error instanceof BackupValidationError) {
         throw new ShareValidationError(error.message);
@@ -2934,6 +2945,25 @@ export function validateShareDocument(
         'portableContent must be absent when it carries no external content.',
       );
     }
+  }
+
+  let documentIdentity: ShareDocumentIdentity | undefined;
+  if (source.documentIdentity !== undefined) {
+    const identity = record(source.documentIdentity, 'documentIdentity');
+    exactKeys(identity, ['document_id', 'revision'], [], 'documentIdentity');
+    documentIdentity = Object.freeze({
+      document_id: text(
+        identity.document_id,
+        'documentIdentity.document_id',
+        128,
+      ),
+      revision: integer(
+        identity.revision,
+        'documentIdentity.revision',
+        0,
+        Number.MAX_SAFE_INTEGER,
+      ),
+    });
   }
 
   return {
@@ -2963,5 +2993,6 @@ export function validateShareDocument(
     ...(items === undefined ? {} : { items }),
     ...(attunementSlots === undefined ? {} : { attunementSlots }),
     ...(portableContent === undefined ? {} : { portableContent }),
+    ...(documentIdentity === undefined ? {} : { documentIdentity }),
   };
 }

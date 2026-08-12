@@ -7,6 +7,7 @@ import type { CatalogClient } from '../../../catalog/client';
 import { createCatalogClient } from '../../../catalog/client';
 import type {
   CharacterBackupDocument,
+  CharacterImportResult,
 } from '../../../backup/character-backup';
 import type { BackupClient } from '../../../backup/client';
 import { createBackupClient } from '../../../backup/client';
@@ -34,6 +35,7 @@ import { freeTextSpan } from '../../free-text';
 
 export const LIBRARY_IMPORT_ROUTE = '/?import=library';
 export const CATALOG_IMPORT_ROUTE = '/?import=catalog';
+export const BUNDLED_HOMEBREW_IMPORT_ROUTE = '/?import=bundled-homebrew';
 
 function libraryArrivalReview(plan: ContentImportPlan): HTMLElement {
   const lineages = plan.incomingLineages ?? plan.incomingContent.map((entry) => ({
@@ -144,6 +146,7 @@ export interface ImportBackupControls {
   updateCharacters(characters: readonly CharacterSummary[]): void;
   focusCatalogImport(): void;
   focusLibraryImport(): void;
+  focusBundledHomebrewImport(): void;
   readonly cleanup: Cleanup;
 }
 
@@ -154,6 +157,27 @@ function safeFilename(name: string): string {
     .replace(/^-+|-+$/g, '')
     .toLowerCase();
   return normalized || 'character';
+}
+
+function characterImportMessage(result: CharacterImportResult): string {
+  const gaps = result.notices.filter((notice) =>
+    notice.kind === 'historical_contributions_not_recorded'
+  );
+  if (gaps.length === 0) return `Character imported as #${String(result.characterId)}.`;
+  const facts = [...new Set(gaps.flatMap((notice) => notice.content.affectedFacts))];
+  return `Character imported as #${String(result.characterId)}. ` +
+    `UNKNOWN values: ${facts.join(', ')}. This backup predates structured ` +
+    'contributions; review the named successor before upgrading.';
+}
+
+function historicalLibraryLifecycleDisclosure(document: unknown): string {
+  if (document === null || typeof document !== 'object' || Array.isArray(document)) {
+    return '';
+  }
+  const version = Reflect.get(document, 'version');
+  return version === 1 || version === 2
+    ? ' This older export did not record archive state; carried entries were restored live.'
+    : '';
 }
 
 function saveBrowserFile(file: SavedFile): void {
@@ -426,7 +450,7 @@ export function librarySummary(
     outcome.kind === 'match' || outcome.kind === 'remembered-match' ||
     outcome.kind === 'remembered-clone' || outcome.kind === 'review'
   ).length;
-  return `${String(created)} published, ${String(matched)} matched existing`;
+  return `${String(created)} added to your library, ${String(matched)} matched existing`;
 }
 
 function files(input: HTMLInputElement): File[] {
@@ -477,15 +501,15 @@ export function createImportBackupControls(
     },
   });
 
-  function announce(message: string, error = false): void {
-    status.textContent = message;
+  function announce(message: string | Node, error = false): void {
+    status.replaceChildren(message);
     status.classList.toggle('transfer-error', error);
     status.setAttribute('role', error ? 'alert' : 'status');
   }
 
   async function run(
     button: HTMLButtonElement,
-    action: () => Promise<string>,
+    action: () => Promise<string | Node>,
   ): Promise<void> {
     if (button.disabled) {
       return;
@@ -499,6 +523,20 @@ export function createImportBackupControls(
     } finally {
       button.disabled = false;
     }
+  }
+
+  function importSuccess(message: string): Node {
+    const result = document.createDocumentFragment();
+    result.append(message);
+    const fragment = typeof location === 'undefined' ? '' : location.hash.slice(1);
+    if (fragment !== '') {
+      const retry = element('a', {
+        text: 'Retry share',
+        attributes: { href: `/#${fragment}` },
+      });
+      result.append(' ', retry, '.');
+    }
+    return result;
   }
 
   const catalogButton = element('button', {
@@ -583,7 +621,10 @@ export function createImportBackupControls(
           onCommitted: async (result) => {
             await options.onPersistedChange();
             libraryInput.value = '';
-            announce(`Library imported: ${librarySummary(result.outcomes)}.`);
+            announce(importSuccess(
+              `Library imported: ${librarySummary(result.outcomes)}.` +
+                historicalLibraryLifecycleDisclosure(prepared.document),
+            ));
           },
           onCancel: () => announce('Library import cancelled.'),
         });
@@ -652,7 +693,9 @@ export function createImportBackupControls(
           const matched = result.outcomes.filter((outcome) =>
             outcome.kind === 'match' || outcome.kind === 'remembered-match').length;
           const created = result.outcomes.filter((outcome) => outcome.kind === 'create').length;
-          announce(`Bundled homebrew imported: ${String(created)} published, ${String(matched)} matched existing.`);
+          announce(importSuccess(
+            `Bundled homebrew imported: ${String(created)} added to your library, ${String(matched)} matched existing.`,
+          ));
           bundledHomebrewButton.disabled = false;
         },
         onCancel: () => {
@@ -759,7 +802,7 @@ export function createImportBackupControls(
               >;
               await options.onPersistedChange();
               characterInput.value = '';
-              announce(`Character imported as #${committed.result.characterId}.`);
+              announce(characterImportMessage(committed.result));
             },
             onCancel: () => announce('Character import cancelled.'),
           });
@@ -783,7 +826,7 @@ export function createImportBackupControls(
           }
           await options.onPersistedChange();
           characterInput.value = '';
-          return `Character imported as #${committed.result.characterId}.`;
+          return characterImportMessage(committed.result);
         }
         showAdoptionDialog(prepared.plan);
         return prepared.plan.reviews.length === 0
@@ -931,6 +974,11 @@ export function createImportBackupControls(
       root.open = true;
       root.scrollIntoView?.({ block: 'start' });
       libraryInput.focus();
+    },
+    focusBundledHomebrewImport: () => {
+      root.open = true;
+      root.scrollIntoView?.({ block: 'start' });
+      bundledHomebrewButton.focus();
     },
     cleanup: () => {
       adoptionCleanup?.();

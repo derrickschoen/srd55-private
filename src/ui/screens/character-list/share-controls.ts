@@ -6,14 +6,23 @@ import {
   type ShareClient,
 } from '../../../sharing/client';
 import type { SharePreview } from '../../../sharing/character-share';
+import type { ShareUpdateDisposition } from '../../../sharing/character-share';
 import type { ContentImportPlan } from '../../../catalog/content-adoption';
 import type {
   ContentImportDisclosure,
   ContentImportLineageDisclosure,
 } from '../../../catalog/content-adoption';
 import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
+import {
+  contentProvenanceDetails,
+  contentProvenanceLabel,
+  incomingContentProvenanceLabel,
+} from '../../../catalog/content-provenance';
 import { createContentAdoptionDialog } from '../../content-adoption-dialog';
-import { LIBRARY_IMPORT_ROUTE } from './import-backup-controls';
+import {
+  BUNDLED_HOMEBREW_IMPORT_ROUTE,
+  LIBRARY_IMPORT_ROUTE,
+} from './import-backup-controls';
 import { contentImportLabel } from '../../../sharing/import-issues';
 import { element, listen, type Cleanup } from '../../dom';
 import { announceTransferFailure } from './transfer-failure';
@@ -45,6 +54,8 @@ interface DisplayIssue {
   readonly code?: string;
   readonly summary: string;
   readonly remedy: string;
+  readonly remedyKind?: 'bundled-homebrew' | 'library-json';
+  readonly contentKey?: string;
 }
 
 /**
@@ -76,6 +87,15 @@ function compatibilityIssues(error: unknown): readonly DisplayIssue[] {
               : {}),
             summary: (entry as DisplayIssue).summary,
             remedy: (entry as DisplayIssue).remedy,
+            ...(Reflect.get(entry, 'remedyKind') === 'bundled-homebrew' ||
+              Reflect.get(entry, 'remedyKind') === 'library-json'
+              ? { remedyKind: Reflect.get(entry, 'remedyKind') as
+                  'bundled-homebrew' | 'library-json' }
+              : {}),
+            ...(Array.isArray(Reflect.get(entry, 'contentKeys')) &&
+              typeof (Reflect.get(entry, 'contentKeys') as unknown[])[0] === 'string'
+              ? { contentKey: (Reflect.get(entry, 'contentKeys') as string[])[0] }
+              : {}),
           },
         ]
       : [],
@@ -186,6 +206,20 @@ export function createShareControls(
     text: 'Add to my characters',
     attributes: { type: 'button', hidden: '' },
   });
+  const updateButton = element('button', {
+    className: 'button-primary',
+    text: 'Update existing character',
+    attributes: { type: 'button', hidden: '' },
+  });
+  const keepBothButton = element('button', {
+    className: 'button-secondary',
+    text: 'Keep both characters',
+    attributes: { type: 'button', hidden: '' },
+  });
+  const updateReview = element('p', {
+    className: 'share-update-review',
+    attributes: { hidden: '' },
+  });
   const previewPanel = element('section', {
     className: 'share-preview',
     attributes: { hidden: '', 'aria-label': 'Shared character preview' },
@@ -205,7 +239,10 @@ export function createShareControls(
     previewDetails,
     previewLayers,
     embeddedContent,
+    updateReview,
     addButton,
+    updateButton,
+    keepBothButton,
   );
 
   const linkOutput = element('input', {
@@ -276,17 +313,47 @@ export function createShareControls(
     status.setAttribute('role', error ? 'alert' : 'status');
   }
 
+  function shareAddedAnnouncement(result: {
+    readonly characterId: number;
+    readonly characterName: string;
+  }): Node {
+    const message = document.createDocumentFragment();
+    message.append(freeTextSpan(result.characterName), ' was added. ');
+    message.append(element('a', {
+      text: 'Open character',
+      attributes: {
+        href: `/characters/${String(result.characterId)}`,
+      },
+    }), '.');
+    return message;
+  }
+
   function contentDisclosure(disclosure: ContentImportDisclosure): HTMLElement {
     const label = element('span');
     label.append(
       freeTextSpan(disclosure.name),
-      ` — ${disclosure.kind} — ${catalogLayerLabel(disclosure.catalog_layer)}`,
+      ` — ${disclosure.kind} — ${
+        disclosure.provenance === undefined
+          ? 'Homebrew from the sender — a local copy will be added to your library'
+          : incomingContentProvenanceLabel(disclosure.provenance)
+      }`,
     );
-    return label;
+    if (disclosure.provenance === undefined) return label;
+    const details = contentProvenanceDetails(disclosure.provenance);
+    if (details.length === 0) return label;
+    const technical = element('details');
+    technical.append(element('summary', { text: 'Attribution details' }));
+    for (const detail of details) {
+      const line = element('p');
+      line.append(`${detail.label}: `, freeTextSpan(detail.value));
+      technical.append(line);
+    }
+    return element('span', {}, [label, technical]);
   }
 
   function renderEmbeddedContent(
     lineages: readonly ContentImportLineageDisclosure[],
+    disclosures: readonly ContentImportDisclosure[],
   ): void {
     embeddedContent.replaceChildren();
     embeddedContent.hidden = lineages.length === 0;
@@ -296,14 +363,39 @@ export function createShareControls(
       const latest = lineage.versions.at(-1);
       if (latest === undefined) continue;
       const used = lineage.versions.find((version) => version.used_by_character);
+      const latestDisclosure = disclosures.find((entry) => entry.id === latest.id);
       const item = element('li');
       item.append(
         freeTextSpan(latest.name),
         ` — ${lineage.kind}; ${String(lineage.versions.length)} ` +
-          `version${lineage.versions.length === 1 ? '' : 's'}`,
+          `version${lineage.versions.length === 1 ? '' : 's'}` +
+          (used === undefined && latestDisclosure !== undefined ? ';' : ''),
         used === undefined ? '' : '; this character uses ',
       );
-      if (used !== undefined) item.append(freeTextSpan(used.name));
+      if (used !== undefined) {
+        item.append(freeTextSpan(used.name));
+        if (latestDisclosure !== undefined) item.append(';');
+      }
+      if (latestDisclosure !== undefined) {
+        item.append(
+          ` ${latestDisclosure.provenance === undefined
+            ? 'Homebrew from the sender — a local copy will be added to your library'
+            : incomingContentProvenanceLabel(latestDisclosure.provenance)}`,
+        );
+        if (latestDisclosure.provenance !== undefined) {
+          const details = contentProvenanceDetails(latestDisclosure.provenance);
+          if (details.length > 0) {
+            const attribution = element('details');
+            attribution.append(element('summary', { text: 'Attribution details' }));
+            for (const detail of details) {
+              const line = element('p');
+              line.append(`${detail.label}: `, freeTextSpan(detail.value));
+              attribution.append(line);
+            }
+            item.append(' ', attribution);
+          }
+        }
+      }
       if (lineage.versions.length > 1) {
         const history = element('details');
         history.append(element('summary', { text: 'Version history' }));
@@ -328,6 +420,23 @@ export function createShareControls(
   }
 
   function renderPreviewDetails(preview: SharePreview): void {
+    const previewOriginLabel = (
+      disclosure: SharePreview['classes'][number]['class'],
+    ): string => {
+      if (disclosure.incoming) {
+        return disclosure.provenance === undefined
+          ? 'Homebrew from the sender — a local copy will be added to your library'
+          : incomingContentProvenanceLabel(disclosure.provenance);
+      }
+      if (disclosure.provenance !== undefined) {
+        return contentProvenanceLabel(disclosure.provenance);
+      }
+      switch (disclosure.catalog_layer) {
+        case 'bundled': return 'Built into the app';
+        case 'external': return 'Homebrew in your library';
+        case 'unknown': return 'Origin not recorded';
+      }
+    };
     previewDetails.replaceChildren();
     const classSummary = element('span', {
       className: 'share-preview-classes',
@@ -348,6 +457,16 @@ export function createShareControls(
       }
     }
     previewDetails.append(classSummary, `. ${previewCountsText(preview)}`);
+    const historicalContributionGaps = preview.historicalContributionGaps ?? [];
+    if (historicalContributionGaps.length > 0) {
+      const facts = [...new Set(historicalContributionGaps.flatMap(
+        (gap) => gap.affectedFacts,
+      ))];
+      previewDetails.append(
+        ` UNKNOWN after import: ${facts.join(', ')}. This content predates ` +
+        'structured contributions; review its named successor before upgrading.',
+      );
+    }
 
     previewLayers.replaceChildren();
     previewLayers.hidden = preview.classes.length === 0;
@@ -355,13 +474,13 @@ export function createShareControls(
       if (index > 0) previewLayers.append('; ');
       previewLayers.append(
         freeTextSpan(previewCatalogName(item.class, 'class')),
-        ` — ${catalogLayerLabel(item.class.catalog_layer)}`,
+        ` — ${previewOriginLabel(item.class)}`,
       );
       if (item.subclass !== undefined) {
         previewLayers.append(
           ' / ',
           freeTextSpan(previewCatalogName(item.subclass, 'subclass')),
-          ` — ${catalogLayerLabel(item.subclass.catalog_layer)}`,
+          ` — ${previewOriginLabel(item.subclass)}`,
         );
       }
     }
@@ -410,17 +529,31 @@ export function createShareControls(
       // textContent, never innerHTML: content keys and names originate in a
       // share link a stranger may have crafted.
       what.textContent = issue.summary;
-      const linksToLibraryImport = issue.code === 'missing_class' ||
-        issue.code === 'missing_subclass' || issue.code === 'missing_source';
-      const how = linksToLibraryImport
+      const linksToImport = issue.remedyKind !== undefined;
+      const how = linksToImport
         ? document.createElement('a')
         : document.createElement('span');
       how.className = 'share-issue-remedy';
       how.textContent = issue.remedy;
-      if (linksToLibraryImport) {
-        how.setAttribute('href', LIBRARY_IMPORT_ROUTE);
+      if (linksToImport) {
+        const route = issue.remedyKind === 'bundled-homebrew'
+          ? BUNDLED_HOMEBREW_IMPORT_ROUTE
+          : LIBRARY_IMPORT_ROUTE;
+        how.setAttribute(
+          'href',
+          activeFragment === null ? route : `${route}#${activeFragment}`,
+        );
       }
       item.append(what, ' ', how);
+      if (issue.contentKey !== undefined) {
+        const technical = document.createElement('details');
+        const summary = document.createElement('summary');
+        summary.textContent = 'Technical details';
+        const key = document.createElement('code');
+        key.textContent = `Internal content key: ${issue.contentKey}`;
+        technical.append(summary, key);
+        item.append(technical);
+      }
       list.append(item);
     }
     status.replaceChildren(heading, list);
@@ -435,8 +568,8 @@ export function createShareControls(
     announce('Checking share link…');
     try {
       const fragment = fragmentFromShareLink(value);
-      const result = await client.preview(fragment);
       activeFragment = fragment;
+      const result = await client.preview(fragment);
       activePreview = result;
       previewTitle.textContent = result.name;
       renderPreviewDetails(result);
@@ -445,12 +578,30 @@ export function createShareControls(
           kind: entry.kind,
           versions: [{ id: entry.id, name: entry.name, used_by_character: false }],
         }),
-      ));
+      ), result.embeddedContent);
       previewPanel.hidden = false;
-      addButton.hidden = false;
+      if (result.update == null) {
+        addButton.hidden = false;
+        updateButton.hidden = true;
+        keepBothButton.hidden = true;
+        updateReview.hidden = true;
+      } else {
+        addButton.hidden = true;
+        updateButton.hidden = false;
+        keepBothButton.hidden = false;
+        updateReview.hidden = false;
+        updateReview.textContent =
+          `This is revision ${String(result.update.incomingDocumentRevision)} ` +
+          `of a character you received at revision ${String(result.update.receivedDocumentRevision)}. ` +
+          `Update “${result.update.name}” in place or keep both copies. ` +
+          'Updating replaces the shared sheet and its edit/undo history. ' +
+          'Save points, party publication linkage, and private sections omitted from the link stay local.' +
+          (result.update.locallyModified
+            ? ' Your existing copy has local changes; shared changes will be replaced after this review.'
+            : ' Your existing copy has not changed since the last receipt.');
+      }
       announce('Preview ready. Nothing has been imported.');
     } catch (error) {
-      activeFragment = null;
       activePreview = null;
       announceFailure(error);
     } finally {
@@ -462,10 +613,15 @@ export function createShareControls(
     listen(previewButton, 'click', () => {
       void preview(input.value);
     }),
-    listen(addButton, 'click', () => {
+    listen(addButton, 'click', () => commitPreview(null)),
+    listen(updateButton, 'click', () => commitPreview('update_existing')),
+    listen(keepBothButton, 'click', () => commitPreview('keep_both')),
+  );
+
+  function commitPreview(disposition: ShareUpdateDisposition | null): void {
       if (
         activeFragment === null || activePreview === null ||
-        addButton.disabled
+        addButton.disabled || updateButton.disabled || keepBothButton.disabled
       ) {
         return;
       }
@@ -481,13 +637,20 @@ export function createShareControls(
             fragment,
             submitted.token,
             choices,
+            disposition ?? undefined,
           ),
           onCommitted: async (result) => {
             const shareResult = result as typeof result & {
-              readonly result: { readonly characterId: number };
+              readonly result: {
+                readonly characterId: number;
+                readonly characterName: string;
+                readonly disposition: 'new' | ShareUpdateDisposition;
+              };
             };
             await options.onPersistedChange();
-            announce(`Character added as #${shareResult.result.characterId}.`);
+            announce(shareResult.result.disposition === 'update_existing'
+              ? `Character #${String(shareResult.result.characterId)} updated.`
+              : shareAddedAnnouncement(shareResult.result));
             addButton.hidden = true;
             activeFragment = null;
             activePreview = null;
@@ -507,9 +670,18 @@ export function createShareControls(
         return;
       }
       addButton.disabled = true;
-      announce('Adding a new character…');
+      updateButton.disabled = true;
+      keepBothButton.disabled = true;
+      announce(disposition === 'update_existing'
+        ? 'Updating the received character…'
+        : 'Adding a new character…');
       void client
-        .commitCharacter(fragment, activePreview.adoptionPlan.token, {})
+        .commitCharacter(
+          fragment,
+          activePreview.adoptionPlan.token,
+          {},
+          disposition ?? undefined,
+        )
         .then(async (result) => {
           if (result.kind === 'stale-plan') {
             showAdoptionDialog(result.freshPlan);
@@ -520,7 +692,9 @@ export function createShareControls(
             throw new TypeError('Shared character import was refused.');
           }
           await options.onPersistedChange();
-          announce(`Character added as #${result.result.characterId}.`);
+          announce(result.result.disposition === 'update_existing'
+            ? `Character #${String(result.result.characterId)} updated.`
+            : shareAddedAnnouncement(result.result));
           addButton.hidden = true;
           activeFragment = null;
           activePreview = null;
@@ -528,8 +702,12 @@ export function createShareControls(
         .catch((error: unknown) => announceFailure(error))
         .finally(() => {
           addButton.disabled = false;
+          updateButton.disabled = false;
+          keepBothButton.disabled = false;
         });
-    }),
+    }
+
+  cleanups.push(
     listen(exportButton, 'click', () => {
       if (exporting === null || exportButton.disabled) {
         return;
@@ -580,7 +758,7 @@ export function createShareControls(
             'omittedContent' in result
               ? `Share link ready without external content. The recipient must import ${
                   result.omittedContent.map((item) =>
-                    contentImportLabel(item.kind, item.contentKey)
+                    contentImportLabel(item.kind, item.contentKey, item.name)
                   ).join(', ')
                 } before opening it.`
               : shareReadyAnnouncement(

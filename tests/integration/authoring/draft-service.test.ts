@@ -212,6 +212,9 @@ describe('catalog authoring draft service', () => {
         catalog_layer: 'external',
         superseded_by: null,
         usage_count: 0,
+        provenance: {
+          origin_kind: 'unknown', received: false, local_derivation: false,
+        },
       },
       {
         content_key: 'expanded:draft.service:alpha-species',
@@ -221,6 +224,9 @@ describe('catalog authoring draft service', () => {
         catalog_layer: 'external',
         superseded_by: null,
         usage_count: 0,
+        provenance: {
+          origin_kind: 'unknown', received: false, local_derivation: false,
+        },
       },
       {
         content_key: 'expanded:draft.service:zulu-species',
@@ -230,6 +236,9 @@ describe('catalog authoring draft service', () => {
         catalog_layer: 'external',
         superseded_by: null,
         usage_count: 0,
+        provenance: {
+          origin_kind: 'unknown', received: false, local_derivation: false,
+        },
       },
     ]);
   });

@@ -25,6 +25,7 @@ import type {
   RpcResponse,
 } from '../../../src/rpc/protocol';
 import {
+  commitCharacterShareImport,
   ensureSharedSpell,
   exportCharacterShare,
   importCharacterShare,
@@ -45,6 +46,7 @@ import {
 import { ShareWireRetirementError } from '../../../src/sharing/wire-schemas';
 import { handlers as sharingHandlers } from '../../../src/worker/handlers/sharing';
 import { buildAgentReference } from '../../../src/ui/screens/planner/agent-reference';
+import { SHARE_TABLES } from '../../../src/domain/contracts/tables';
 import type { HandlerContext } from '../../../src/worker/handler';
 import { rpcRegistry } from '../../../src/worker/registry';
 import {
@@ -522,6 +524,246 @@ function choices(db: DatabaseContext, characterId: number) {
 }
 
 describe('minimal character sharing', () => {
+  it('audits every direct character FK used by update-in-place', async () => {
+    const db = await database();
+    const tables = db.allRaw(
+      "SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name",
+    );
+    const directShareTables = new Set<string>(Object.values(SHARE_TABLES));
+    const audited = tables.flatMap((table) => {
+      const tableName = String(table.name);
+      return db.allRaw(`PRAGMA foreign_key_list(${JSON.stringify(tableName)})`)
+        .filter((foreignKey) => foreignKey.table === 'characters')
+        .map((foreignKey) => ({
+          table: tableName,
+          onDelete: String(foreignKey.on_delete),
+          handling: directShareTables.has(tableName)
+            ? 'shared_payload_replaced'
+            : tableName === 'party_document_states'
+              ? 'external_link_preserved_by_root_update'
+              : tableName === 'character_save_points' ||
+                  tableName === 'character_sheet_adjustments'
+                ? 'recipient_state_preserved_by_root_update'
+                : tableName === 'character_share_receipts'
+                  ? 'lineage_refreshed_in_place'
+                  : tableName === 'change_log' ||
+                      tableName === 'character_operations'
+                    ? 'stale_history_explicitly_reset_and_disclosed'
+                    : 'UNCLASSIFIED',
+        }));
+    });
+    expect(audited).not.toContainEqual(expect.objectContaining({
+      handling: 'UNCLASSIFIED',
+    }));
+    expect(audited).toHaveLength(27);
+    expect(audited.filter((entry) => entry.onDelete === 'SET NULL')).toEqual([{
+      table: 'party_document_states',
+      onDelete: 'SET NULL',
+      handling: 'external_link_preserved_by_root_update',
+    }]);
+    expect(audited.filter((entry) => entry.handling ===
+      'recipient_state_preserved_by_root_update').map((entry) => entry.table))
+      .toEqual(['character_save_points', 'character_sheet_adjustments']);
+  });
+
+  it('S6-05 keeps a sender lineage stable and requires update-in-place or keep-both', async () => {
+    const source = await database();
+    const sourceId = source.exec(
+      "INSERT INTO characters (name) VALUES ('First delivery')",
+    ).lastInsertId;
+    const first = exportCharacterShare(source, sourceId);
+    expect(exportCharacterShare(source, sourceId).documentIdentity).toEqual(
+      first.documentIdentity,
+    );
+
+    const updateTarget = await database();
+    const firstImported = importCharacterShare(updateTarget, first);
+    updateTarget.exec(
+      `INSERT INTO party_document_states (
+         forge, repository, path, document_kind, publication_id,
+         character_id, observation_state
+       ) VALUES (
+         'github', 'party/example', 'characters/first.json', 'character',
+         'party-publication-1', ?, 'Published at revision N from this device'
+       )`,
+      [firstImported.characterId],
+    );
+    updateTarget.exec(
+      `INSERT INTO character_save_points (
+         character_id, label, snapshot, schema_version
+       ) VALUES (?, 'Before sender update', '{}', 'a7-v12')`,
+      [firstImported.characterId],
+    );
+    updateTarget.exec(
+      'INSERT INTO character_sheet_adjustments (character_id) VALUES (?)',
+      [firstImported.characterId],
+    );
+    updateTarget.exec(
+      `INSERT INTO change_log (
+         character_id, sequence, entity_type, action_type
+       ) VALUES (?, 1, 'character', 'update')`,
+      [firstImported.characterId],
+    );
+    updateTarget.exec(
+      `INSERT INTO character_operations (
+         character_id, operation_uuid, expected_revision,
+         resulting_revision, inverse_command
+       ) VALUES (?, 'pre-share-update-operation', 0, 1, '{}')`,
+      [firstImported.characterId],
+    );
+    updateTarget.exec(
+      `INSERT INTO character_rule_overrides (character_id, rule_key, value)
+       VALUES (?, 'ignore_multiclass_prerequisites', 'true')`,
+      [firstImported.characterId],
+    );
+    updateTarget.exec(
+      `INSERT INTO warning_acknowledgements (
+         character_id, warning_fingerprint, note
+       ) VALUES (?, 'recipient-private-warning', 'Keep locally')`,
+      [firstImported.characterId],
+    );
+    updateTarget.exec(
+      "INSERT INTO spell_loadouts (character_id, name) VALUES (?, 'Recipient private loadout')",
+      [firstImported.characterId],
+    );
+    source.exec(
+      "UPDATE characters SET name = 'Second delivery', revision = revision + 1 WHERE id = ?",
+      [sourceId],
+    );
+    const second = exportCharacterShare(source, sourceId);
+    expect(second.documentIdentity).toEqual({
+      document_id: first.documentIdentity?.document_id,
+      revision: 1,
+    });
+
+    updateTarget.exec(
+      `UPDATE characters SET name = 'Recipient notes', notes = 'Recipient private note',
+         revision = revision + 1 WHERE id = ?`,
+      [firstImported.characterId],
+    );
+    const updatePreview = previewCharacterShare(updateTarget, second);
+    expect(updatePreview.update).toMatchObject({
+      characterId: firstImported.characterId,
+      receivedDocumentRevision: 0,
+      incomingDocumentRevision: 1,
+      locallyModified: true,
+    });
+    expect(() => importCharacterShare(updateTarget, second)).toThrow(
+      'choose whether to update',
+    );
+    const updated = commitCharacterShareImport(
+      updateTarget,
+      second,
+      updatePreview.adoptionPlan.token,
+      Object.freeze({}),
+      'update_existing',
+    );
+    expect(updated.kind).toBe('committed');
+    if (updated.kind !== 'committed') throw new Error('Expected committed update.');
+    expect(updated.result).toEqual({
+      characterId: firstImported.characterId,
+      characterName: 'Second delivery',
+      disposition: 'update_existing',
+    });
+    expect(updateTarget.oneRaw(
+      'SELECT id, name, notes FROM characters',
+    )).toEqual({
+      id: firstImported.characterId,
+      name: 'Second delivery',
+      notes: 'Recipient private note',
+    });
+    expect(updateTarget.oneRaw(
+      `SELECT publication_id, character_id, observation_state
+       FROM party_document_states`,
+    )).toEqual({
+      publication_id: 'party-publication-1',
+      character_id: firstImported.characterId,
+      observation_state: 'Published at revision N from this device',
+    });
+    expect(updateTarget.scalar(
+      'SELECT count(*) FROM character_save_points WHERE character_id = ?',
+      [firstImported.characterId],
+    )).toBe(1);
+    expect(updateTarget.scalar(
+      'SELECT count(*) FROM character_sheet_adjustments WHERE character_id = ?',
+      [firstImported.characterId],
+    )).toBe(1);
+    expect(updateTarget.scalar(
+      'SELECT count(*) FROM change_log WHERE character_id = ?',
+      [firstImported.characterId],
+    )).toBe(0);
+    expect(updateTarget.scalar(
+      'SELECT count(*) FROM character_operations WHERE character_id = ?',
+      [firstImported.characterId],
+    )).toBe(0);
+    expect(updateTarget.scalar(
+      'SELECT count(*) FROM character_rule_overrides WHERE character_id = ?',
+      [firstImported.characterId],
+    )).toBe(0);
+    expect(updateTarget.oneRaw(
+      `SELECT warning_fingerprint, note FROM warning_acknowledgements
+       WHERE character_id = ?`,
+      [firstImported.characterId],
+    )).toEqual({
+      warning_fingerprint: 'recipient-private-warning',
+      note: 'Keep locally',
+    });
+    expect(updateTarget.oneRaw(
+      'SELECT name FROM spell_loadouts WHERE character_id = ?',
+      [firstImported.characterId],
+    )).toEqual({ name: 'Recipient private loadout' });
+
+    const keepBothTarget = await database();
+    const keptFirst = importCharacterShare(keepBothTarget, first);
+    const keepBothPreview = previewCharacterShare(keepBothTarget, second);
+    const keptBoth = commitCharacterShareImport(
+      keepBothTarget,
+      second,
+      keepBothPreview.adoptionPlan.token,
+      Object.freeze({}),
+      'keep_both',
+    );
+    expect(keptBoth.kind).toBe('committed');
+    if (keptBoth.kind !== 'committed') throw new Error('Expected committed clone.');
+    expect(keptBoth.result.disposition).toBe('keep_both');
+    expect(keptBoth.result.characterId).not.toBe(keptFirst.characterId);
+    expect(keepBothTarget.allRaw(
+      'SELECT name FROM characters ORDER BY id',
+    )).toEqual([{ name: 'First delivery' }, { name: 'Second delivery' }]);
+    source.exec(
+      "UPDATE characters SET name = 'Third delivery', revision = revision + 1 WHERE id = ?",
+      [sourceId],
+    );
+    const third = exportCharacterShare(source, sourceId);
+    expect(previewCharacterShare(keepBothTarget, third).update).toMatchObject({
+      characterId: keptBoth.result.characterId,
+      incomingDocumentRevision: 2,
+    });
+
+    const staleTarget = await database();
+    const staleFirst = importCharacterShare(staleTarget, first);
+    const stalePreview = previewCharacterShare(staleTarget, second);
+    staleTarget.exec(
+      'UPDATE characters SET revision = revision + 1 WHERE id = ?',
+      [staleFirst.characterId],
+    );
+    const staleCommit = commitCharacterShareImport(
+      staleTarget,
+      second,
+      stalePreview.adoptionPlan.token,
+      Object.freeze({}),
+      'update_existing',
+    );
+    expect(staleCommit.kind).toBe('stale-plan');
+    expect(staleTarget.oneRaw(
+      'SELECT id, name, revision FROM characters',
+    )).toEqual({
+      id: staleFirst.characterId,
+      name: 'First delivery',
+      revision: 1,
+    });
+  }, 20_000);
+
   it('round-trips the multiclass house rule through the existing override wire keys and defaults old characters to off', async () => {
     const source = await database();
     const sourceId = source.exec(
@@ -555,6 +797,7 @@ describe('minimal character sharing', () => {
       },
       overrides: [],
     };
+    delete (oldDocument as { documentIdentity?: unknown }).documentIdentity;
     const oldImported = importCharacterShare(target, oldDocument);
     expect(
       readMulticlassPrerequisiteHouseRule(
@@ -1508,11 +1751,16 @@ describe('minimal character sharing', () => {
     );
     await expect(client.importCharacter(fragment)).resolves.toEqual({
       characterId: 2,
+      characterName: 'Share Hero',
+      disposition: 'new',
     });
+    const duplicatePlan = await client.preview(fragment);
+    expect(duplicatePlan.update).not.toBeNull();
     await expect(client.commitCharacter(
       fragment,
-      planned.adoptionPlan.token,
+      duplicatePlan.adoptionPlan.token,
       {},
+      'keep_both',
     )).resolves.toMatchObject({
       kind: 'committed',
       result: { characterId: 3 },
@@ -2454,7 +2702,7 @@ describe('D83 ability override sharing', () => {
     const decoded = await decodeShareFragment(
       await encodeShareFragment(exportCharacterShare(source, characterId)),
     );
-    expect(decoded.version).toBe(18);
+    expect(decoded.version).toBe(20);
     expect(decoded.effects).toMatchObject([
       {
         kind: 'ability_override',

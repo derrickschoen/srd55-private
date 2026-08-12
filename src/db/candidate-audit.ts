@@ -398,6 +398,17 @@ export const UNENFORCED_OWNERSHIP_TABLES: readonly OwnedWithCharacterId[] =
  */
 export function auditCharacterOwnership(db: Database): void {
   for (const table of CHARACTER_OWNED_TABLES) {
+    // The migration contract tests deliberately audit historical target
+    // schemas with a historical migration registry. The lifecycle's schema
+    // signature check still rejects a missing table for the active target;
+    // this guard only prevents today's classification from querying a table
+    // that did not exist in an honestly older target schema.
+    if (db.selectValue(
+      "SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name = ?",
+      [table],
+    ) !== 1) {
+      continue;
+    }
     const orphan = firstRow(
       db,
       `SELECT owned.rowid AS orphan_rowid, owned.character_id AS character_id

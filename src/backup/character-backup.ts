@@ -52,6 +52,7 @@ import {
   PRE_ARCHIVE_CHARACTER_BACKUP_VERSION,
   PRE_FLAVOR_CHARACTER_BACKUP_VERSION,
   PRE_LINEAGE_CHARACTER_BACKUP_VERSION,
+  PRE_PROVENANCE_CHARACTER_BACKUP_VERSION,
   PREVIOUS_CHARACTER_BACKUP_VERSION,
 } from './backup-version';
 import {
@@ -66,6 +67,7 @@ import {
   type PortableContentAggregate,
   type PortableContentSupersession,
 } from './portable-content';
+import { historicalContributionGapForPortable } from '../catalog/historical-contribution-gaps';
 import { CHARACTER_TEXT_LIMITS } from '../domain/character-limits';
 import {
   BACKUP_DIRECT_TABLES,
@@ -152,6 +154,18 @@ export interface CharacterBackupDocument {
   readonly supersessions: readonly PortableContentSupersession[];
 }
 
+export interface PreProvenanceCharacterBackupDocument {
+  readonly format: typeof CHARACTER_BACKUP_FORMAT;
+  readonly version: typeof PRE_PROVENANCE_CHARACTER_BACKUP_VERSION;
+  readonly exported_at: string;
+  readonly source_character_id: number;
+  readonly character: BackupRow;
+  readonly tables: CharacterBackupTables;
+  readonly references: CharacterBackupReferences;
+  readonly content: readonly PortableContentAggregate[];
+  readonly supersessions: readonly PortableContentSupersession[];
+}
+
 export interface PreLineageCharacterBackupDocument {
   readonly format: typeof CHARACTER_BACKUP_FORMAT;
   readonly version: typeof PRE_LINEAGE_CHARACTER_BACKUP_VERSION;
@@ -213,6 +227,15 @@ export interface CharacterImportResult {
 }
 
 export type CharacterImportNotice =
+  | {
+      readonly kind: 'historical_contributions_not_recorded';
+      readonly content: {
+        readonly contentKey: string;
+        readonly name: string;
+        readonly affectedFacts: readonly string[];
+        readonly successorContentKey: string;
+      };
+    }
   | {
       readonly kind: 'species_effect_template_ref_unresolved';
       readonly effect: {
@@ -1234,6 +1257,7 @@ function validateDocument(input: unknown): ValidatedDocument {
   const version = document.version;
   if (
     version !== CHARACTER_BACKUP_VERSION &&
+    version !== PRE_PROVENANCE_CHARACTER_BACKUP_VERSION &&
     version !== PRE_LINEAGE_CHARACTER_BACKUP_VERSION &&
     version !== PREVIOUS_CHARACTER_BACKUP_VERSION &&
     version !== PRE_ARCHIVE_CHARACTER_BACKUP_VERSION &&
@@ -1259,7 +1283,8 @@ function validateDocument(input: unknown): ValidatedDocument {
           'tables',
           'references',
         ]
-      : version === CHARACTER_BACKUP_VERSION
+      : version === CHARACTER_BACKUP_VERSION ||
+          version === PRE_PROVENANCE_CHARACTER_BACKUP_VERSION
         ? [
             'format',
             'version',
@@ -1344,6 +1369,7 @@ function validateDocument(input: unknown): ValidatedDocument {
   assertExactKeys(
     rawCharacter,
     version === CHARACTER_BACKUP_VERSION ||
+    version === PRE_PROVENANCE_CHARACTER_BACKUP_VERSION ||
     version === PRE_LINEAGE_CHARACTER_BACKUP_VERSION ||
     version === PREVIOUS_CHARACTER_BACKUP_VERSION
       ? currentCharacterColumns
@@ -1354,6 +1380,7 @@ function validateDocument(input: unknown): ValidatedDocument {
   );
   const character: MutableRow =
     version === CHARACTER_BACKUP_VERSION ||
+    version === PRE_PROVENANCE_CHARACTER_BACKUP_VERSION ||
     version === PRE_LINEAGE_CHARACTER_BACKUP_VERSION ||
     version === PREVIOUS_CHARACTER_BACKUP_VERSION
       ? rawCharacter
@@ -1538,6 +1565,8 @@ function validateDocument(input: unknown): ValidatedDocument {
       ? emptySpellDefinitions()
       : version === CHARACTER_BACKUP_VERSION
         ? emptySpellDefinitions()
+      : version === PRE_PROVENANCE_CHARACTER_BACKUP_VERSION
+        ? emptySpellDefinitions()
       : version === PRE_LINEAGE_CHARACTER_BACKUP_VERSION
         ? emptySpellDefinitions()
       : validateSpellDefinitions(
@@ -1545,10 +1574,15 @@ function validateDocument(input: unknown): ValidatedDocument {
           referenceMaps.spell_versions,
         );
   const content = version === CHARACTER_BACKUP_VERSION ||
+      version === PRE_PROVENANCE_CHARACTER_BACKUP_VERSION ||
       version === PRE_LINEAGE_CHARACTER_BACKUP_VERSION
-    ? validatePortableContent(document.content)
+    ? validatePortableContent(
+        document.content,
+        version === CHARACTER_BACKUP_VERSION,
+      )
     : Object.freeze([]);
-  const supersessions = version === CHARACTER_BACKUP_VERSION
+  const supersessions = version === CHARACTER_BACKUP_VERSION ||
+      version === PRE_PROVENANCE_CHARACTER_BACKUP_VERSION
     ? validatePortableContentBundle({
         content,
         supersessions: document.supersessions,
@@ -3951,6 +3985,25 @@ export function importCharacterBackup(
 
   return db.transaction((transaction) => {
     const notices: CharacterImportNotice[] = [];
+    const usedSubclassKeys = new Set(
+      validated.document.references.subclass_definitions.map((reference) =>
+        reference.content_key
+      ),
+    );
+    for (const entry of validated.document.content) {
+      if (entry.kind !== 'subclass' || !usedSubclassKeys.has(entry.content_key)) continue;
+      const gap = historicalContributionGapForPortable(entry);
+      if (gap === null) continue;
+      notices.push(Object.freeze({
+        kind: 'historical_contributions_not_recorded',
+        content: Object.freeze({
+          contentKey: entry.content_key,
+          name: gap.contentName,
+          affectedFacts: gap.affectedFacts,
+          successorContentKey: gap.successorContentKey,
+        }),
+      }));
+    }
     const restoredSpells = restoreSpellDefinitions(
       transaction,
       validated.legacySpellDefinitions,

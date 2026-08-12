@@ -646,8 +646,71 @@ const VERSION_FIXTURES = {
           fingerprint_digest:
             featProjectorV1Vector.sha256 as ContentFingerprintDigest,
           aggregate: featProjectorV1Vector.aggregate,
+          provenance: {
+            origin_kind: 'unknown',
+            received: false,
+            local_derivation: false,
+          },
         }],
         supersessions: [],
+      },
+    },
+  },
+  19: {
+    // Hand-authored from the frozen v18 tuple by changing only the version and
+    // adding the provenance object whose presence v19 requires, then compressed
+    // with deterministic gzip level 9.
+    fragment:
+      'H4sIAAAAAAACA6VSTYvbMBT8K-ad7WBvPhz71ksplMLSQy_ZYF6kiSMiS-6THBKW_Pdi56Nle1wQQswbjeaN3oa001k32GiU5RCy0MPakKkDC6sIycKBBZQWVbqhX8U6efUSeWeRfIN4St1g7ae3bbr5b31G852UdxEuUr15p6NxmmragyOlj0pzxIVqwrlnp6HrOzwbWfURcFmHzsuFUjri0tw1OARIhKaU9sa1kF6Mi01QB3Sg-iGenYoPDG1ahEg1lbt8vSp5Va728xddVtWyYFTLqizyxYKr-apQep2vK97nL_lO6wrVfLWYr5a5XpdlzpQSt62g5QiqPzbneLLxHXDJj4d_GSxCA22i8e6fnscwOKIdWTW1cBC2lFJnXGNxgqV6SpN4Z6yJl6b3xsVAdf4XMk4JOKC5AQbh46Uno-Oz6YbuURf04GmSqN6zDUipFwh-DyaYOOpstim1wtOT49n5CaafUGxtohHZ2DBLkjd5c68CZQLsZZbcALqOgv4Ex05NUXkxrXHPrxziwQt0c8A43yRQMCfopxvrFdtGQ8yJb8ndC7ebjeXdGBF9Nec4CJIvE0zX6zalMPSQgBCMd5P76_YP8jTzqmoDAAA',
+    expected: {
+      format: CHARACTER_SHARE_FORMAT,
+      version: CHARACTER_SHARE_VERSION,
+      character: { name: 'V18 Portable Hero' },
+      classes: [],
+      sources: [],
+      selections: [],
+      spellbook: [],
+      preferences: [],
+      overrides: [],
+      portableContent: {
+        content: [{
+          kind: 'feat',
+          content_key: 'expanded:content.feat:keen-memory',
+          key_kind: 'asserted',
+          fingerprint_scheme: CONTENT_FINGERPRINT_SCHEME_V1,
+          fingerprint_digest:
+            featProjectorV1Vector.sha256 as ContentFingerprintDigest,
+          aggregate: featProjectorV1Vector.aggregate,
+          provenance: {
+            origin_kind: 'authored_here',
+            received: false,
+            local_derivation: false,
+            author_label: 'Fixture Author',
+          },
+        }],
+        supersessions: [],
+      },
+    },
+  },
+  20: {
+    // Independently compressed with Node gzip from a hand-authored v20 tuple.
+    // The final root object is the stable sender document identity.
+    fragment:
+      'H4sIAAAAAAACA6WMMQrDMAwAvxI0W5BmCeQF7Qe6mFCMJYhBkYtkF0rp3ztl6xY4brjhIpAS7l1ayZLc0Z8s4pi3ZCk3NvQtGUOYxhDhPo3DjVhbae_hylYhaBc5rTXEf5zZfoBq7jtrexSCBZyV2PCIeIEAxq_ipSos83f9AWO8WfIKAQAA',
+    expected: {
+      format: CHARACTER_SHARE_FORMAT,
+      version: CHARACTER_SHARE_VERSION,
+      character: { name: 'V20 Identity Hero' },
+      classes: [],
+      sources: [],
+      selections: [],
+      spellbook: [],
+      preferences: [],
+      overrides: [],
+      acknowledgements: [],
+      documentIdentity: {
+        document_id: 'sender-document-1',
+        revision: 7,
       },
     },
   },

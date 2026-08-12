@@ -24,8 +24,8 @@ import schemaSql from '../../src/db/schema.sql?raw';
  *   reverse — every FK constraint has a matching declared `one()` edge.
  *
  * Comparison is by CONSTRAINT SET, not row count. `PRAGMA foreign_key_list`
- * returns one row per column, so the 23 composite foreign keys contribute two
- * rows each: 112 constraints, 135 rows. Counting rows would let a composite key
+ * returns one row per column, so the 24 composite foreign keys contribute two
+ * rows each: 114 constraints, 138 rows. Counting rows would let a composite key
  * degrade into two single-column keys unnoticed — which would silently drop
  * exactly the cross-character and wrong-class protections those keys exist for.
  */
@@ -133,7 +133,7 @@ afterAll(() => {
 });
 
 describe('declared relations match the foreign keys', () => {
-  it('budgets 112 constraints across 135 PRAGMA rows', () => {
+  it('budgets 114 constraints across 138 PRAGMA rows', () => {
     const tables = db
       .selectValues(
         `SELECT name FROM sqlite_schema
@@ -242,10 +242,12 @@ describe('declared relations match the foreign keys', () => {
     // exactly one constraint and one PRAGMA row.
     // CI-7 adds two composite lineage edges; D214 adds the archive manifest's
     // composite owner edge. Those three constraints occupy six PRAGMA rows.
-    // Migration 0042 adds one owner FK for each contribution table. S6-08
-    // adds two composite content edges and one character edge (five rows).
-    expect(constraintEdges(db)).toHaveLength(112);
-    expect(rowCount).toBe(135);
+    // Migration 0042 adds one owner FK for each contribution table. S6-12's
+    // provenance row adds one composite registry-identity edge: one constraint
+    // across two PRAGMA rows. S6-05's receipt adds one character edge/row.
+    // S6-08 adds two composite content edges and one character edge (five rows).
+    expect(constraintEdges(db)).toHaveLength(114);
+    expect(rowCount).toBe(138);
   });
 
   it('declares a relation for every foreign key, and a foreign key for every relation', () => {
@@ -254,7 +256,7 @@ describe('declared relations match the foreign keys', () => {
     expect(declaredEdges()).toEqual(constraintEdges(db));
   });
 
-  it('keeps all 21 composite foreign keys composite', () => {
+  it('keeps all 24 composite foreign keys composite', () => {
     const edges = declaredEdges();
     expect(edges).toContain(
       'character_class_levels: subclass_definition_id,class_definition_id -> subclass_definitions.id,class_definition_id',
@@ -303,6 +305,9 @@ describe('declared relations match the foreign keys', () => {
     );
     expect(edges).toContain(
       'catalog_content_match_decisions: content_kind,target_content_key -> catalog_content_identities.content_kind,content_key',
+    );
+    expect(edges).toContain(
+      'catalog_content_provenance: content_kind,content_key -> catalog_content_identities.content_kind,content_key',
     );
     expect(edges).toContain(
       'catalog_content_drafts: content_kind,base_content_key -> catalog_content_identities.content_kind,content_key',

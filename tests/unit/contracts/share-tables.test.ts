@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
+  CHARACTER_SHARE_LOCAL_RESET_TABLES,
+  CHARACTER_SHARE_RECEIPT_TABLE,
   SHARE_TABLES,
   TABLE_SCOPES,
 } from '../../../src/domain/contracts/tables';
@@ -80,6 +82,8 @@ describe('the share scope drives the sharing module', () => {
         ([name, scopes]) =>
           scopes.role === 'character_owned' &&
           !scopes.share &&
+          name !== CHARACTER_SHARE_RECEIPT_TABLE &&
+          !(CHARACTER_SHARE_LOCAL_RESET_TABLES as readonly string[]).includes(name) &&
           !Object.hasOwn(SHARE_TABLES, name),
       )
       .map(([name]) => name);
@@ -92,5 +96,27 @@ describe('the share scope drives the sharing module', () => {
         `character-share.ts names ${table} in SQL, but it is not share-scoped`,
       ).toBe(false);
     }
+  });
+
+  it('addresses recipient-local lineage through its typed non-portable table name', () => {
+    expect(TABLE_SCOPES[CHARACTER_SHARE_RECEIPT_TABLE].share).toBe(false);
+    expect(SHARING_SOURCE).toContain(
+      `\${CHARACTER_SHARE_RECEIPT_TABLE}`,
+    );
+    expect(sqlTableTokens(SHARING_SOURCE)).not.toContain(
+      CHARACTER_SHARE_RECEIPT_TABLE,
+    );
+  });
+
+  it('names stale recipient journals explicitly without making them portable', () => {
+    expect(CHARACTER_SHARE_LOCAL_RESET_TABLES).toEqual([
+      'change_log', 'character_operations',
+    ]);
+    for (const table of CHARACTER_SHARE_LOCAL_RESET_TABLES) {
+      expect(TABLE_SCOPES[table].share).toBe(false);
+    }
+    expect(SHARING_SOURCE).toContain(
+      'for (const table of CHARACTER_SHARE_LOCAL_RESET_TABLES)',
+    );
   });
 });

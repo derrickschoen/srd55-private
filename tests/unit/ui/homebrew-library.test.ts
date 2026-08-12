@@ -121,6 +121,10 @@ const library: AuthoringLibrary = {
       catalog_layer: 'external',
       superseded_by: null,
       usage_count: 0,
+      provenance: {
+        origin_kind: 'unknown', received: true, local_derivation: false,
+        author_label: hostileName,
+      },
     },
     {
       content_key: '2024:content.subclass:warder' as ContentKey,
@@ -130,6 +134,9 @@ const library: AuthoringLibrary = {
       catalog_layer: 'external',
       superseded_by: null,
       usage_count: 0,
+      provenance: {
+        origin_kind: 'authored_here', received: false, local_derivation: false,
+      },
     },
     {
       content_key: '2024:content.background:keeper' as ContentKey,
@@ -139,6 +146,9 @@ const library: AuthoringLibrary = {
       catalog_layer: 'external',
       superseded_by: null,
       usage_count: 0,
+      provenance: {
+        origin_kind: 'authored_here', received: false, local_derivation: false,
+      },
     },
   ],
   drafts: [{
@@ -368,6 +378,9 @@ describe('HA-6 homebrew library routing and tabs', () => {
       expect(elementText(root as unknown as Node)).toContain('Homebrew');
       expect(elementText(root as unknown as Node)).not.toContain('New class');
       expect(elementText(root as unknown as Node)).toContain(hostileName);
+      expect(elementText(root as unknown as Node)).toContain(
+        `Received homebrew by ${hostileName} — this is your local copy`,
+      );
       expect(root.querySelectorAll('img')).toHaveLength(0);
       expect(root.querySelectorAll('[data-hostile-library]')).toHaveLength(0);
       const marked = root.querySelectorAll('[data-free-text="unverified-origin"]');
@@ -412,17 +425,26 @@ describe('HA-6 homebrew library routing and tabs', () => {
           content_key: v1, content_kind: 'subclass', name: 'Veteran',
           rules_edition: '2024', catalog_layer: 'external',
           superseded_by: v2, usage_count: 0,
+          provenance: {
+            origin_kind: 'authored_here', received: false, local_derivation: false,
+          },
         },
         {
           content_key: v2, content_kind: 'subclass',
           name: '<b data-hostile-history>Veteran revision 2</b>',
           rules_edition: '2024', catalog_layer: 'external',
           superseded_by: v3, usage_count: 1,
+          provenance: {
+            origin_kind: 'authored_here', received: false, local_derivation: false,
+          },
         },
         {
           content_key: v3, content_kind: 'subclass', name: 'Veteran revision 3',
           rules_edition: '2024', catalog_layer: 'external',
           superseded_by: null, usage_count: 0,
+          provenance: {
+            origin_kind: 'authored_here', received: false, local_derivation: false,
+          },
         },
       ];
       expect(publishedHomebrewLineages(entries)).toHaveLength(1);
@@ -1148,11 +1170,13 @@ describe('HA-6 homebrew library routing and tabs', () => {
       const copy = elementText(root as unknown as Node);
       expect(copy).toContain('Installed Target — Homebrew · external layer');
       expect(copy).toContain(
-        'Match — Uses the existing local entry; this attached character moves to it.',
+        'Use the existing local entry for this character.',
       );
       expect(copy).toContain(
-        'Clone — Installs a renamed private copy of the local entry; this attached character moves to that copy.',
+        'Create a renamed private copy of the local entry for this character.',
       );
+      expect(copy).not.toContain('Discards the incoming rules');
+      expect(copy).not.toContain('Installs the incoming rules');
       expect(copy.toLowerCase()).not.toContain('certif');
       const controls = root.querySelectorAll('input');
       expect(controls.map((control) => control.getAttribute('checked')))

@@ -95,6 +95,7 @@ import {
   previewReferenceRetarget,
   ReferenceRetargetError,
 } from './reference-retarget';
+import { storedContentProvenance } from '../catalog/content-provenance';
 
 interface DraftRow {
   readonly draft_uuid: HomebrewDraftUuid;
@@ -708,7 +709,7 @@ export class CatalogAuthoringService {
   }
 
   list(): AuthoringLibrary {
-    const publishedRows: PublishedRow[] = this.db.all(
+    const published: PublishedHomebrewSummary[] = this.db.all(
       `SELECT identity.content_key, identity.content_kind,
               CASE identity.content_kind
                 WHEN 'species' THEN species.name
@@ -767,12 +768,15 @@ export class CatalogAuthoringService {
        ORDER BY identity.content_kind, name, identity.content_key`,
       undefined,
       publishedRow,
-    );
-    const published: PublishedHomebrewSummary[] = publishedRows.map((row) => ({
+    ).map((row) => ({
       ...row,
       catalog_layer: 'external' as const,
+      provenance: storedContentProvenance(
+        this.db,
+        row.content_kind,
+        row.content_key,
+      ),
     }));
-
     const rows = this.db.all(
       `SELECT draft_uuid, content_kind, document_version, base_content_key,
               revision, document_json, created_at, updated_at

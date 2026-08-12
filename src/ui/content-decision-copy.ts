@@ -10,6 +10,7 @@ export type ContentDecisionContext = 'adoption' | 'reference-replacement';
 export function contentDecisionConsequence(
   decision: ContentDecision,
   context: ContentDecisionContext,
+  localName?: string,
 ): string {
   switch (context) {
     case 'adoption':
@@ -22,9 +23,13 @@ export function contentDecisionConsequence(
     case 'reference-replacement':
       switch (decision) {
         case 'match':
-          return 'Match — Uses the existing local entry; this attached character moves to it.';
+          return localName === undefined
+            ? 'Use the existing local entry for this character.'
+            : `Use this local ${localName} for the imported character.`;
         case 'clone':
-          return 'Clone — Installs a renamed private copy of the local entry; this attached character moves to that copy.';
+          return localName === undefined
+            ? 'Create a renamed private copy of the local entry for this character.'
+            : `Create a private copy of this local ${localName} and attach the imported character.`;
       }
   }
 }

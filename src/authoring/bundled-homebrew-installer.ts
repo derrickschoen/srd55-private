@@ -30,6 +30,7 @@ import { backgroundDraftToAggregate } from './background-publisher';
 import { subclassDraftToAggregate } from './subclass-publisher';
 import type { BundledHomebrewCatalogEntry } from './bundled-homebrew-catalog';
 import { BUNDLED_HOMEBREW_CATALOG } from './bundled-homebrew-catalog';
+import { recordContentProvenance } from '../catalog/content-provenance';
 
 export interface BundledHomebrewEntrySummary {
   readonly catalog_key: string;
@@ -266,6 +267,14 @@ function installEntry(
       throw new TypeError(`Bundled entry "${entry.catalog_key}" unexpectedly requires adoption review.`);
     }
     result = authoring.commitPublish({ token: preview.token, decisions: [] });
+    recordContentProvenance(db, {
+      kind: revision.document.kind,
+      contentKey: result.content_key,
+      provenance: {
+        origin_kind: 'built_in', received: false, local_derivation: false,
+      },
+      replace: true,
+    });
     baseContentKey = result.content_key;
   }
   if (result === null) {

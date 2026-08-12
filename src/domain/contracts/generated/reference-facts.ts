@@ -100,6 +100,12 @@ export const FOREIGN_KEY_FACTS = [
     targetColumns: ['content_kind', 'content_key'],
   },
   {
+    table: 'catalog_content_provenance',
+    columns: ['content_kind', 'content_key'],
+    target: 'catalog_content_identities',
+    targetColumns: ['content_kind', 'content_key'],
+  },
+  {
     table: 'catalog_content_replacement_choices',
     columns: ['content_kind', 'superseded_content_key'],
     target: 'catalog_content_identities',
@@ -263,6 +269,12 @@ export const FOREIGN_KEY_FACTS = [
   },
   {
     table: 'character_save_points',
+    columns: ['character_id'],
+    target: 'characters',
+    targetColumns: ['id'],
+  },
+  {
+    table: 'character_share_receipts',
     columns: ['character_id'],
     target: 'characters',
     targetColumns: ['id'],

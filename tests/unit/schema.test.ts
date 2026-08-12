@@ -110,6 +110,14 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
     ],
     numeric: ['reviewed_at'],
   },
+  catalog_content_provenance: {
+    integer: ['received', 'local_derivation'],
+    text: [
+      'content_kind', 'content_key', 'origin_kind', 'author_label',
+      'source_label', 'license_label', 'attribution_text',
+    ],
+    numeric: ['recorded_at'],
+  },
   catalog_content_supersessions: {
     text: [
       'content_kind', 'superseded_content_key', 'successor_content_key',
@@ -166,6 +174,13 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
   character_save_points: {
     integer: ['id', 'character_id'],
     text: ['label', 'snapshot', 'schema_version'],
+    numeric: ['created_at', 'updated_at'],
+  },
+  character_share_receipts: {
+    integer: [
+      'character_id', 'received_revision', 'baseline_character_revision',
+    ],
+    text: ['local_document_id', 'received_document_id'],
     numeric: ['created_at', 'updated_at'],
   },
   character_source_instances: {
@@ -798,6 +813,10 @@ const expectedNotNull: Record<string, string[]> = {
     'incoming_fingerprint_digest', 'decision', 'target_content_key',
     'reviewed_at',
   ],
+  catalog_content_provenance: [
+    'content_kind', 'content_key', 'origin_kind', 'received',
+    'local_derivation', 'recorded_at',
+  ],
   catalog_content_supersessions: [
     'content_kind', 'superseded_content_key', 'successor_content_key',
     'recorded_at',
@@ -985,6 +1004,9 @@ const expectedNotNull: Record<string, string[]> = {
   character_operations: ['id', 'character_id', 'operation_uuid', 'expected_revision', 'resulting_revision', 'inverse_command'],
   character_rule_overrides: ['id', 'character_id', 'rule_key', 'value'],
   character_save_points: ['id', 'character_id', 'label', 'snapshot', 'schema_version'],
+  character_share_receipts: [
+    'character_id', 'local_document_id', 'created_at', 'updated_at',
+  ],
   character_source_instances: ['id', 'character_id', 'instance_uuid', 'source_type', 'display_name', 'state'],
   character_spell_preferences: ['id', 'character_id', 'spell_version_id', 'favourite'],
   characters: [
@@ -1055,6 +1077,8 @@ const expectedNamedIndexes: Record<string, string> = {
     'catalog_content_identities:content_kind,normalized_name',
   catalog_content_identities_archive_list_index:
     'catalog_content_identities:archived_at,content_kind,normalized_name,content_key',
+  catalog_content_provenance_received_index:
+    'catalog_content_provenance:received,origin_kind,content_kind',
   catalog_content_fingerprints_current_unique:
     'catalog_content_fingerprints:content_key:unique',
   catalog_content_fingerprints_resolution_index:
@@ -1216,6 +1240,10 @@ const expectedNamedIndexes: Record<string, string> = {
     'class_martial_arts_dice:class_definition_id,class_level:unique',
   character_rule_overrides_character_id_rule_key_unique:
     'character_rule_overrides:character_id,rule_key:unique',
+  character_share_receipts_local_document_id_unique:
+    'character_share_receipts:local_document_id:unique',
+  character_share_receipts_received_document_id_unique:
+    'character_share_receipts:received_document_id:unique',
   character_class_levels_character_id_class_definition_id_unique:
     'character_class_levels:character_id,class_definition_id:unique',
   character_class_levels_id_character_id_unique:
@@ -1326,6 +1354,7 @@ const expectedUniqueGroups: Record<string, string[]> = {
   ],
   character_operations: ['operation_uuid'],
   character_rule_overrides: ['character_id,rule_key'],
+  character_share_receipts: ['local_document_id', 'received_document_id'],
   character_source_instances: ['id,character_id', 'instance_uuid'],
   character_items: ['id,character_id'],
   character_weapons: ['id,character_id'],
@@ -1448,12 +1477,16 @@ const expectedDefaults: Record<string, Record<string, string>> = {
   },
   catalog_content_match_decisions: { reviewed_at: 'CURRENT_TIMESTAMP' },
   catalog_content_replacement_choices: { decided_at: 'CURRENT_TIMESTAMP' },
+  catalog_content_provenance: { recorded_at: 'CURRENT_TIMESTAMP' },
   catalog_content_supersessions: { recorded_at: 'CURRENT_TIMESTAMP' },
   catalog_data_migrations: { applied_at: 'CURRENT_TIMESTAMP' },
   change_log: { reversible: 'true' },
   character_class_levels: { is_starting_class: 'false', level: '1' },
   character_skill_grants: { state: "'active'" },
   character_skill_expertise_grants: { state: "'active'" },
+  character_share_receipts: {
+    created_at: 'CURRENT_TIMESTAMP', updated_at: 'CURRENT_TIMESTAMP',
+  },
   character_source_instances: { state: "'active'" },
   character_spell_preferences: { favourite: 'false' },
   characters: {
@@ -1577,6 +1610,9 @@ const expectedForeignKeys: Record<string, string[]> = {
   catalog_content_match_decisions: [
     'content_kind,target_content_key->catalog_content_identities.content_kind,content_key|RESTRICT',
   ],
+  catalog_content_provenance: [
+    'content_kind,content_key->catalog_content_identities.content_kind,content_key|CASCADE',
+  ],
   catalog_content_supersessions: [
     'content_kind,superseded_content_key->catalog_content_identities.content_kind,content_key|RESTRICT',
     'content_kind,successor_content_key->catalog_content_identities.content_kind,content_key|RESTRICT',
@@ -1673,6 +1709,7 @@ const expectedForeignKeys: Record<string, string[]> = {
   ],
   character_rule_overrides: ['character_id->characters.id|CASCADE'],
   character_save_points: ['character_id->characters.id|CASCADE'],
+  character_share_receipts: ['character_id->characters.id|CASCADE'],
   character_source_instances: [
     'character_id->characters.id|CASCADE',
     'parent_source_instance_id->character_source_instances.id|SET NULL',

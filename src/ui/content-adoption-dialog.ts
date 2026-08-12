@@ -334,6 +334,9 @@ export function createContentAdoptionDialog(
       const matchId = `content-adoption-${row.id}-match`;
       const cloneId = `content-adoption-${row.id}-clone`;
       const cloneNameId = `content-adoption-${row.id}-clone-name`;
+      const decisionContext = row.incomingFingerprint === null
+        ? 'reference-replacement' as const
+        : 'adoption' as const;
       const match = element('input', {
         attributes: {
           id: matchId,
@@ -364,12 +367,16 @@ export function createContentAdoptionDialog(
       fieldset.append(
         match,
         element('label', {
-          text: contentDecisionConsequence('match', 'adoption'),
+          text: contentDecisionConsequence(
+            'match', decisionContext, row.localName,
+          ),
           attributes: { for: matchId },
         }),
         clone,
         element('label', {
-          text: contentDecisionConsequence('clone', 'adoption'),
+          text: contentDecisionConsequence(
+            'clone', decisionContext, row.localName,
+          ),
           attributes: { for: cloneId },
         }),
         element('label', { text: 'Private copy name', attributes: { for: cloneNameId } }),

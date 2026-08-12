@@ -327,6 +327,30 @@ CREATE TABLE `catalog_content_match_decisions` (
 	CONSTRAINT "catalog_content_match_decisions_decision_check" CHECK("catalog_content_match_decisions"."decision" IN ('match', 'clone'))
 );
 
+CREATE TABLE `catalog_content_provenance` (
+	`content_kind` VARCHAR NOT NULL,
+	`content_key` VARCHAR NOT NULL,
+	`origin_kind` VARCHAR NOT NULL,
+	`received` TINYINT(1) NOT NULL,
+	`local_derivation` TINYINT(1) NOT NULL,
+	`author_label` VARCHAR,
+	`source_label` VARCHAR,
+	`license_label` VARCHAR,
+	`attribution_text` TEXT,
+	`recorded_at` DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	PRIMARY KEY(`content_kind`, `content_key`),
+	FOREIGN KEY (`content_kind`,`content_key`) REFERENCES `catalog_content_identities`(`content_kind`,`content_key`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "catalog_content_provenance_kind_check" CHECK(`content_kind` IN ('class', 'subclass', 'feat', 'species', 'background', 'spell', 'weapon', 'armor', 'item')),
+	CONSTRAINT "catalog_content_provenance_origin_kind_check" CHECK(`origin_kind` IN ('authored_here', 'built_in', 'unknown')),
+	CONSTRAINT "catalog_content_provenance_received_check" CHECK("catalog_content_provenance"."received" IN (0, 1)),
+	CONSTRAINT "catalog_content_provenance_local_derivation_check" CHECK("catalog_content_provenance"."local_derivation" IN (0, 1)),
+	CONSTRAINT "catalog_content_provenance_labels_check" CHECK(("catalog_content_provenance"."author_label" IS NULL OR length("catalog_content_provenance"."author_label") BETWEEN 1 AND 200)
+        AND ("catalog_content_provenance"."source_label" IS NULL OR length("catalog_content_provenance"."source_label") BETWEEN 1 AND 200)
+        AND ("catalog_content_provenance"."license_label" IS NULL OR length("catalog_content_provenance"."license_label") BETWEEN 1 AND 200)
+        AND ("catalog_content_provenance"."attribution_text" IS NULL OR length(CAST("catalog_content_provenance"."attribution_text" AS BLOB)) BETWEEN 1 AND 4096))
+);
+
+CREATE INDEX `catalog_content_provenance_received_index` ON `catalog_content_provenance` (`received`,`origin_kind`,`content_kind`);
 CREATE TABLE `catalog_content_replacement_choices` (
 	`content_kind` VARCHAR NOT NULL,
 	`superseded_content_key` VARCHAR NOT NULL,
@@ -618,6 +642,29 @@ CREATE TABLE `character_save_points` (
 	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE cascade
 );
 
+CREATE TABLE `character_share_receipts` (
+	`character_id` integer PRIMARY KEY NOT NULL,
+	`local_document_id` VARCHAR NOT NULL,
+	`received_document_id` VARCHAR,
+	`received_revision` integer,
+	`baseline_character_revision` integer,
+	`created_at` DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "character_share_receipts_local_document_id_check" CHECK(length("character_share_receipts"."local_document_id") > 0),
+	CONSTRAINT "character_share_receipts_received_document_id_check" CHECK("character_share_receipts"."received_document_id" IS NULL OR length("character_share_receipts"."received_document_id") > 0),
+	CONSTRAINT "character_share_receipts_received_pair_check" CHECK(("character_share_receipts"."received_document_id" IS NULL
+            AND "character_share_receipts"."received_revision" IS NULL
+            AND "character_share_receipts"."baseline_character_revision" IS NULL)
+          OR ("character_share_receipts"."received_document_id" IS NOT NULL
+            AND typeof("character_share_receipts"."received_revision") = 'integer'
+            AND "character_share_receipts"."received_revision" >= 0
+            AND typeof("character_share_receipts"."baseline_character_revision") = 'integer'
+            AND "character_share_receipts"."baseline_character_revision" >= 0))
+);
+
+CREATE UNIQUE INDEX `character_share_receipts_local_document_id_unique` ON `character_share_receipts` (`local_document_id`);
+CREATE UNIQUE INDEX `character_share_receipts_received_document_id_unique` ON `character_share_receipts` (`received_document_id`);
 CREATE TABLE `character_sheet_adjustments` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,

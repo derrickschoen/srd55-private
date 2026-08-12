@@ -391,18 +391,21 @@ describe('bundled authored-kind installer', () => {
       old_content_key: v2Key,
       new_content_key: v3Key,
     });
+    // Revision 2 predates structured contribution storage. Its projected
+    // feature values are deliberately UNKNOWN, while revision 3's values are
+    // still named so the recipient can see exactly what the update supplies.
     expect(review.replacements).toEqual([
       expect.objectContaining({
         facts: expect.objectContaining({ character_id: characterId }),
         rules_changes: expect.arrayContaining([
           {
             label: 'Sneak Attack',
-            before: '7d6',
+            before: 'UNKNOWN',
             after: '13d6',
           },
           {
             label: 'Veteran Reflexes',
-            before: 'Not on the sheet',
+            before: 'UNKNOWN',
             after: '5 uses',
           },
         ]),

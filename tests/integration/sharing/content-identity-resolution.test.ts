@@ -280,10 +280,16 @@ describe('CI-SHARE-REFERENCE', () => {
     });
 
     const matchingWire = frozenWire(FROZEN_V17_MATCHING_DIGEST_REFERENCE_FRAGMENT);
-    const emitted = Buffer.from(JSON.stringify(
-      shareDocumentToReferencePositional(matchingWire.document),
-    ));
-    expect(emitted.equals(matchingWire.original)).toBe(true);
+    if (!Array.isArray(matchingWire.raw)) {
+      throw new Error('Frozen v17 matching-digest wire must be positional.');
+    }
+    expect(shareDocumentToReferencePositional(matchingWire.document)).toEqual([
+      matchingWire.raw[0],
+      20,
+      ...matchingWire.raw.slice(2),
+      null, // v18 portable content stays absent in reference-only mode
+      null, // v20 stable document identity was absent from the v17 fixture
+    ]);
 
     const stored = projectStoredContentV1(db, 'spell', derivedKey);
     const divergentIdentity = deriveContentIdentityV1({
