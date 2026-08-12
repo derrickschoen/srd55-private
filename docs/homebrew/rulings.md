@@ -5,6 +5,37 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-11 — Foreseen Strike dropped; level 7 gains aura-wide Command targeting
+
+Owner's rulings, verbatim:
+
+> Foreseen strike seems too weak to ever get chosen.
+
+> Lvl 7 command targets all creatures you choose in the aura
+
+Follow-up decisions (owner-selected): Foreseen Strike is **dropped
+entirely** (level 3 = Voice as the single CD option, the Vow-of-Enmity
+shape) — per CD use it was dominated by Voice (~6–15 damage once vs up
+to nine save-or-lose-turn attempts) and would never be chosen. The
+aura-wide Command targeting **replaces the ally OA-immunity clause** at
+7: the slot is now Blindsight (self, aura radius) + Command targets any
+chosen creatures in the aura + the comprehension ribbon.
+
+Budget flags surfaced at ruling time and accepted: aura-wide targeting
+under Voice is an every-round multi-target slotless save-or-lose-turn
+engine — most of the earlier rejected smite-trigger candidate returning
+via the casting itself — and the single-enemy sim CANNOT price it (its
+value roughly scales with enemies in the 10-ft radius, 30 at 18). At
+20 it stacks with Inevitable Word: every aura enemy saving at
+Disadvantage, every round, for ten minutes — recorded as the capstone
+playtest item.
+
+Sim, dealt (single-target, therefore control-channel understated):
+smite-only 16.5/29.6/51.7/68.9 vs Vengeance 19.4/34.7/60.2/72.1 —
+**85–96%**, the dealt gap reopening deliberately with the strikes gone;
+the kit's budget is now fully in control. The old parity-band invariant
+was replaced by Vengeance>Domination everywhere, citing this ruling.
+
 ## 2026-08-11 — Level 7 aura final: Blindsight + ally OA immunity; save-Disadvantage moves to the capstone
 
 Owner's decisions (a same-day revision of the save-Disadvantage entry

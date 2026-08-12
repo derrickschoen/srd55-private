@@ -30,35 +30,36 @@ describe('known-probability micro-check: a lone d20 test against a fixed AC', ()
 });
 
 describe('directional invariants: dealt', () => {
-  it('Foreseen strikes v2 close the L3 burst to a statistical tie; Vengeance still measurably ahead at L6-11', () => {
-    // Owner ruling 2026-08-11 (third batch): Cha-mod (3) Reactions per
-    // Short/Long Rest add +Cha to an attack roll — a near-miss rescue, once
-    // per round. At L3 (two attacks, low accuracy) that lands smite-only
-    // Domination within noise of Vow-of-Enmity advantage; at L6-11 the
-    // paladin's attack volume makes always-on advantage worth more than
-    // three +3s, and Vengeance leads by a real margin.
-    for (const L of [3, 6, 11] as const) {
-      const rng = mulberry32(1000 + L);
-      const pal = sampleMeanPerRound(paladin, rng, L, 1, 6000);
-      const dom = sampleMeanPerRound((r, L2, nc) => domination(r, L2, nc, 'smite'), rng, L, 1, 6000);
-      if (L === 3) {
-        // Parity band: within 5% of each other (the ruling's design target).
-        expect(Math.abs(pal.mean - dom.mean) / pal.mean).toBeLessThan(0.05);
-      } else {
-        expect(differsBySigma(pal, dom, 4)).toBe(true);
-        expect(pal.mean).toBeGreaterThan(dom.mean);
-      }
-    }
-  });
-
-  it('Foreseen strikes are a Long-Rest pool: three +3s across a whole day, so Domination day trails Vengeance day at every level', () => {
-    // Owner follow-up ruling 2026-08-11: Long Rest only. Three rescues
-    // spread over 16 rounds cannot keep up with always-on advantage.
+  it('Vengeance dealt > Domination (smite-only) dealt at every level, burst and day', () => {
+    // Owner ruling 2026-08-11 (Foreseen Strike dropped as a dominated
+    // choice): the conformed kit adds no accuracy or damage carrier, so
+    // Vow-of-Enmity advantage wins the dealt board everywhere. This gap is
+    // deliberate: the kit's budget lives in the control channel, whose
+    // aura-wide Command targeting (L7+) this single-enemy model cannot
+    // price — see the sim.ts header.
     for (const L of [3, 6, 11, 17] as const) {
-      const rng = mulberry32(1500 + L);
-      const pal = sampleMeanPerRound(paladin, rng, L, 4, 1500);
-      const dom = sampleMeanPerRound((r, L2, nc) => domination(r, L2, nc, 'smite'), rng, L, 4, 1500);
-      expect(pal.mean).toBeGreaterThan(dom.mean);
+      const rngBurst = mulberry32(1000 + L);
+      const palBurst = sampleMeanPerRound(paladin, rngBurst, L, 1, 6000);
+      const domBurst = sampleMeanPerRound(
+        (r, L2, nc) => domination(r, L2, nc, 'smite'),
+        rngBurst,
+        L,
+        1,
+        6000,
+      );
+      expect(differsBySigma(palBurst, domBurst, 4)).toBe(true);
+      expect(palBurst.mean).toBeGreaterThan(domBurst.mean);
+
+      const rngDay = mulberry32(1500 + L);
+      const palDay = sampleMeanPerRound(paladin, rngDay, L, 4, 1500);
+      const domDay = sampleMeanPerRound(
+        (r, L2, nc) => domination(r, L2, nc, 'smite'),
+        rngDay,
+        L,
+        4,
+        1500,
+      );
+      expect(palDay.mean).toBeGreaterThan(domDay.mean);
     }
   });
 

@@ -100,17 +100,16 @@
 // Oath of Domination (docs/homebrew/cc-by/2026-08-03-oath-of-domination-subclass.md,
 // conformed to the 2024 subclass skeleton by owner rulings 2026-08-11 — see
 // rulings.md):
-//   L3 Channel Divinity, two options sharing the class pool (2 uses, one
-//   back per Short Rest, 3 from L11 — the paladin's only Short-Rest
-//   resource):
+//   L3 Channel Divinity, one option on the class pool (2 uses, one back per
+//   Short Rest, 3 from L11 — the paladin's only Short-Rest resource):
 //     Voice of Domination: immediately after casting Divine Smite, 1 CD
 //       (no action) -> 1 minute of Bonus-Action slotless Command.
-//     Foreseen Strike: Reaction + 1 CD, +Cha (+3) to a self or allied
-//       attack roll. Modeled self-only (ally use is unpriced upside): a
-//       miss by <=3 becomes a plain hit, once per round, nat 1 excluded.
-//   Voice and Strike drain the same pool; command policies reserve one use
-//   for the activation until it happens. Commands require Voice active (no
-//   slot-cast fallback is modeled).
+//   (Foreseen Strike was dropped by owner ruling 2026-08-11: per CD use it
+//   was dominated by Voice and would never be chosen.)
+//   Commands require Voice active (no slot-cast fallback is modeled).
+//   L7 also upgrades Command targeting to every chosen creature in the aura;
+//   the single-enemy model cannot price that, so the 11/17 control/prevented
+//   numbers UNDERSTATE the kit against groups.
 //   L7 Aura of Certainty (final owner ruling 2026-08-11): paladin Blindsight
 //   at the aura's radius + allies inside don't provoke Opportunity Attacks +
 //   comprehension ribbon. Worth ~0 in this single-character, no-vision-denial
@@ -257,19 +256,17 @@ export function domination(
   policy: DominationPolicy = 'adaptive',
 ): CombatResult {
   // Oath of Domination on the same chassis, conformed kit (header).
-  // Policies (all levels share the CD economy; Voice is a level-3 option):
-  //   smite   : never Command; the whole CD pool goes to Foreseen Strikes.
+  // Policies (all levels share the CD economy; Voice is the level-3 option):
+  //   smite   : never Command; CD goes unspent (pure dealt ceiling).
   //   mix     : activate Voice on the round-1 smite; Command round 2; smite
-  //             rounds 3-4; leftover CD fuels Strikes.
+  //             rounds 3-4.
   //   adaptive: activate Voice on the round-1 smite, then Command until a
   //             Grovel lands, smiting on advantage rounds (and commanding
-  //             once the queue is dry); leftover CD fuels Strikes.
-  //   control : activate on the round-1 smite; Command rounds 2-4; leftover
-  //             CD fuels Strikes.
-  // Command policies reserve one CD for the activation until it happens.
+  //             once the queue is dry).
+  //   control : activate on the round-1 smite; Command rounds 2-4.
   // Voice requires a smite THIS combat (activation is smite-triggered and
   // the 1-minute duration covers one combat); a dry queue in the day tail
-  // means no activation, so those rounds are attacks and Strikes only.
+  // means no activation, so those rounds are attacks only.
   // A failed Grovel save ends the enemy's turn: the lost turn is sampled into
   // the prevented channel, and next round's melee attacks have Advantage.
   const wb = WB[L];
@@ -299,20 +296,11 @@ export function domination(
       } else if (policy === 'control') {
         command = voiceOn && rnd >= 1;
       }
-      // Command policies hold one CD back for the Voice activation.
-      const reserve = policy !== 'smite' && !voiceOn ? 1 : 0;
       const hits: boolean[] = [];
-      let reactionFree = true;
       for (let i = 0; i < natk; i++) {
         const r = roll(rng, adv);
         const crit = r === 20;
-        let miss = r === 1 || (r + hit < ac && !crit);
-        if (miss && r !== 1 && cd > reserve && reactionFree && r + hit + 3 >= ac) {
-          cd -= 1; // Foreseen Strike: +Cha turns a near miss into a hit
-          reactionFree = false;
-          miss = false;
-        }
-        if (miss) continue;
+        if (r === 1 || (r + hit < ac && !crit)) continue;
         dealt += d(rng, crit ? 2 : 1, 6) + mod + d(rng, rad * (crit ? 2 : 1), 8);
         hits.push(crit);
       }
