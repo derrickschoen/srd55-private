@@ -668,7 +668,9 @@ test('planner parity flows persist override, clear, selection, acknowledgement, 
   const wizard = page
     .getByRole('heading', { name: 'Wizard spellbook access' })
     .locator('..');
-  await expect(wizard).toContainText('In my book · 3');
+  // Mage Armor, Magic Missile, and both Shield versions are prepared from the
+  // book; Detect Magic is the fifth, ritual-only book entry.
+  await expect(wizard).toContainText('In my book · 5');
   await expect(wizard).toContainText('Detect Magic');
   await expect(
     page.getByText('Composition and table assumptions'),

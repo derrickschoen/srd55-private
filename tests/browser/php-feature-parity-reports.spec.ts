@@ -167,6 +167,10 @@ test('builds the golden read-only report values and duplicate classifications', 
     { name: 'Detect Magic', prepared: false, active: true },
     { name: 'Mage Armor', prepared: true, active: true },
     { name: 'Magic Missile', prepared: true, active: true },
+    // The fixture prepares both catalog versions. S5-03 requires both to have
+    // corresponding book rows, and the golden report preserves both versions.
+    { name: 'Shield', prepared: true, active: true },
+    { name: 'Shield', prepared: true, active: true },
   ]);
   expect(report.wizard.prepared.map((entry: Row) => entry.spell_name)).toEqual([
     'Mage Armor',

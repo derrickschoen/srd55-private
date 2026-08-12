@@ -935,7 +935,9 @@ test('W-BROWSER-LU2-ROLLBACK a UI draft refused at its locator restores every da
   await expect(alert).toContainText('index: 2');
   await expect(alert).toContainText('issue: locator_not_found');
   await expect(alert).toContainText(
-    'locator: source=selected_class, rule_key=ui-induced-missing-rule, ordinal=8',
+    // Spellbook acquisitions are deliberately planned before preparations, so
+    // the mutated last subchoice is prepared ordinal 5 rather than book 8.
+    'locator: source=selected_class, rule_key=ui-induced-missing-rule, ordinal=5',
   );
   await expect(page.locator('.level-up-route')).toHaveAttribute('aria-busy', 'false');
   expect(await databaseDigest(page)).toBe(before);
