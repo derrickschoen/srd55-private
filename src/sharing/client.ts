@@ -24,6 +24,7 @@ import type { ContentKind } from '../catalog/content-identity';
 export interface OmittedShareContent {
   readonly kind: ContentKind;
   readonly contentKey: string;
+  readonly name: string;
 }
 
 export type ShareFragmentResult =
@@ -104,7 +105,10 @@ export function createShareClient(rpc: RpcClient): ShareClient {
           embeddedContent: embeddedPortableDisclosures(document),
         });
       }
-      const fallback = await tryEncodeReferenceOnlyShareFragment(document);
+      const referenceOnlyDocument = withCarriedSourceNames(document);
+      const fallback = await tryEncodeReferenceOnlyShareFragment(
+        referenceOnlyDocument,
+      );
       if (fallback.kind === 'too_large') return fallback;
       return Object.freeze({
         ...fallback,
@@ -152,6 +156,9 @@ function embeddedPortableDisclosures(
       id: `portable:${entry.kind}:${entry.content_key}`,
       kind: entry.kind,
       name: entry.aggregate.name,
+      ...(entry.provenance === undefined
+        ? {}
+        : { provenance: entry.provenance }),
     })
   ));
 }
@@ -159,10 +166,13 @@ function embeddedPortableDisclosures(
 function omittedPortableReferences(
   document: CharacterShareDocument,
 ): readonly OmittedShareContent[] {
-  const carried = new Set((document.portableContent?.content ?? []).map(
-    (entry) => `${entry.kind}\u0000${entry.content_key}`,
+  const carried = new Map((document.portableContent?.content ?? []).map(
+    (entry) => [
+      `${entry.kind}\u0000${entry.content_key}`,
+      String(entry.aggregate.name),
+    ],
   ));
-  const references: OmittedShareContent[] = [];
+  const references: Omit<OmittedShareContent, 'name'>[] = [];
   for (const item of document.classes) {
     references.push({ kind: 'class', contentKey: item.classKey });
     if (item.subclassKey !== undefined) {
@@ -189,10 +199,38 @@ function omittedPortableReferences(
     contentKey,
   })));
   const seen = new Set<string>();
-  return Object.freeze(references.filter((reference) => {
+  return Object.freeze(references.flatMap((reference) => {
     const marker = `${reference.kind}\u0000${reference.contentKey}`;
-    if (!carried.has(marker) || seen.has(marker)) return false;
+    const name = carried.get(marker);
+    if (name === undefined || seen.has(marker)) return [];
     seen.add(marker);
-    return true;
+    return [{ ...reference, name }];
   }));
+}
+
+/**
+ * A v17 fallback cannot carry the aggregate, but its frozen source tuple does
+ * have an optional display-name slot. Preserve an authored name there so both
+ * ends can speak about the missing content without promoting its internal key
+ * to the player-facing label.
+ */
+function withCarriedSourceNames(
+  document: CharacterShareDocument,
+): CharacterShareDocument {
+  const carriedNames = new Map((document.portableContent?.content ?? []).map(
+    (entry) => [
+      `${entry.kind}\u0000${entry.content_key}`,
+      String(entry.aggregate.name),
+    ],
+  ));
+  return {
+    ...document,
+    sources: document.sources.map((source) => {
+      if (source.generated === true || source.key === undefined) return source;
+      const name = carriedNames.get(`${source.type}\u0000${source.key}`);
+      return name === undefined || source.name !== undefined
+        ? source
+        : { ...source, name };
+    }),
+  };
 }

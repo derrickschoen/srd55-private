@@ -85,10 +85,16 @@ import {
   decodeStoredValueExpression,
 } from '../domain/contracts/row-rules';
 import { BackupValidationError, assertExactKeys, backupRecord } from './backup-version';
+import {
+  CONTENT_PROVENANCE_LIMITS,
+  recordContentProvenance,
+  storedContentProvenance,
+  type ContentProvenance,
+} from '../catalog/content-provenance';
 
 export const LIBRARY_EXPORT_FORMAT = 'dnd-multiclass-spells/library' as const;
 export const LIBRARY_EXPORT_VERSION = 3 as const;
-export const PRE_LIFECYCLE_LIBRARY_EXPORT_VERSION = 2 as const;
+export const PRE_PROVENANCE_LIBRARY_EXPORT_VERSION = 2 as const;
 export const LEGACY_LIBRARY_EXPORT_VERSION = 1 as const;
 
 export const PORTABLE_CONTENT_LIMITS = Object.freeze({
@@ -122,6 +128,8 @@ export interface PortableContentAggregate {
   readonly fingerprint_digest: ContentFingerprintDigest;
   readonly aggregate: PortableContentAggregateValue;
   readonly spell_identity?: PortableSpellIdentityMetadata;
+  /** Absent only on a historical v18/v6/v2-or-earlier document. */
+  readonly provenance?: ContentProvenance;
 }
 
 export interface PortableContentSupersession {
@@ -157,7 +165,7 @@ export type LibraryExportDocument = LibraryExportBase & (
       readonly lifecycle: readonly PortableContentLifecycle[];
     }
   | {
-      readonly version: typeof PRE_LIFECYCLE_LIBRARY_EXPORT_VERSION;
+      readonly version: typeof PRE_PROVENANCE_LIBRARY_EXPORT_VERSION;
       readonly supersessions: readonly PortableContentSupersession[];
       readonly lifecycle?: never;
     }
@@ -926,6 +934,11 @@ export function exportPortableContentClosure(
           fingerprint_scheme: identity.envelope.scheme,
           fingerprint_digest: identity.digest,
           aggregate,
+          provenance: storedContentProvenance(
+            db,
+            local.kind,
+            local.localContentKey,
+          ),
           ...(local.spellIdentity === undefined
             ? {}
             : { spell_identity: local.spellIdentity }),
@@ -1072,7 +1085,72 @@ export function exportLibraryDocument(
   return Object.freeze(document);
 }
 
-function validatedEntry(input: unknown, index: number): PortableContentAggregate {
+function validatedProvenance(input: unknown, label: string): ContentProvenance {
+  const value = backupRecord(input, label);
+  exactKeys(value, [
+    'origin_kind', 'received', 'local_derivation',
+    ...(Object.hasOwn(value, 'author_label') ? ['author_label'] : []),
+    ...(Object.hasOwn(value, 'source_label') ? ['source_label'] : []),
+    ...(Object.hasOwn(value, 'license_label') ? ['license_label'] : []),
+    ...(Object.hasOwn(value, 'attribution_text') ? ['attribution_text'] : []),
+  ], label);
+  if (
+    value.origin_kind !== 'authored_here' &&
+    value.origin_kind !== 'built_in' &&
+    value.origin_kind !== 'unknown'
+  ) {
+    throw new BackupValidationError(`${label}.origin_kind is unsupported.`);
+  }
+  if (typeof value.received !== 'boolean') {
+    throw new BackupValidationError(`${label}.received must be boolean.`);
+  }
+  if (typeof value.local_derivation !== 'boolean') {
+    throw new BackupValidationError(`${label}.local_derivation must be boolean.`);
+  }
+  const labels = ['author_label', 'source_label', 'license_label'] as const;
+  for (const key of labels) {
+    const member = value[key];
+    if (
+      member !== undefined &&
+      (typeof member !== 'string' || member.length < 1 ||
+        member.length > CONTENT_PROVENANCE_LIMITS.label)
+    ) {
+      throw new BackupValidationError(`${label}.${key} is invalid.`);
+    }
+  }
+  if (
+    value.attribution_text !== undefined &&
+    (typeof value.attribution_text !== 'string' ||
+      new TextEncoder().encode(value.attribution_text).byteLength < 1 ||
+      new TextEncoder().encode(value.attribution_text).byteLength >
+        CONTENT_PROVENANCE_LIMITS.attributionBytes)
+  ) {
+    throw new BackupValidationError(`${label}.attribution_text is invalid.`);
+  }
+  return Object.freeze({
+    origin_kind: value.origin_kind,
+    received: value.received,
+    local_derivation: value.local_derivation,
+    ...(typeof value.author_label === 'string'
+      ? { author_label: value.author_label }
+      : {}),
+    ...(typeof value.source_label === 'string'
+      ? { source_label: value.source_label }
+      : {}),
+    ...(typeof value.license_label === 'string'
+      ? { license_label: value.license_label }
+      : {}),
+    ...(typeof value.attribution_text === 'string'
+      ? { attribution_text: value.attribution_text }
+      : {}),
+  });
+}
+
+function validatedEntry(
+  input: unknown,
+  index: number,
+  provenanceRequired: boolean,
+): PortableContentAggregate {
   const value = backupRecord(input, `Portable content[${String(index)}]`);
   if (typeof value.kind !== 'string' || !(contentKinds as readonly string[]).includes(value.kind)) {
     throw new BackupValidationError(`Portable content[${String(index)}].kind is unsupported.`);
@@ -1082,7 +1160,13 @@ function validatedEntry(input: unknown, index: number): PortableContentAggregate
     'kind', 'content_key', 'key_kind', 'fingerprint_scheme',
     'fingerprint_digest', 'aggregate',
     ...(kind === 'spell' ? ['spell_identity'] : []),
+    ...(Object.hasOwn(value, 'provenance') ? ['provenance'] : []),
   ], `Portable content[${String(index)}]`);
+  if (provenanceRequired && value.provenance === undefined) {
+    throw new BackupValidationError(
+      `Portable content[${String(index)}].provenance is required.`,
+    );
+  }
   if (typeof value.content_key !== 'string' || value.content_key.length === 0) {
     throw new BackupValidationError(`Portable content[${String(index)}].content_key must be non-empty text.`);
   }
@@ -1133,6 +1217,12 @@ function validatedEntry(input: unknown, index: number): PortableContentAggregate
   const spellIdentity = kind === 'spell'
     ? validatedSpellIdentity(value.spell_identity, index)
     : undefined;
+  const provenance = value.provenance === undefined
+    ? undefined
+    : validatedProvenance(
+        value.provenance,
+        `Portable content[${String(index)}].provenance`,
+      );
   return Object.freeze({
     kind,
     content_key: value.content_key,
@@ -1140,6 +1230,7 @@ function validatedEntry(input: unknown, index: number): PortableContentAggregate
     fingerprint_scheme: scheme,
     fingerprint_digest: value.fingerprint_digest as ContentFingerprintDigest,
     aggregate,
+    ...(provenance === undefined ? {} : { provenance }),
     ...(spellIdentity === undefined ? {} : { spell_identity: spellIdentity }),
   });
 }
@@ -1194,7 +1285,10 @@ function validatedSpellIdentity(
   });
 }
 
-export function validatePortableContent(input: unknown): readonly PortableContentAggregate[] {
+export function validatePortableContent(
+  input: unknown,
+  provenanceRequired = false,
+): readonly PortableContentAggregate[] {
   if (!Array.isArray(input)) throw new BackupValidationError('Portable content must be a list.');
   if (input.length > PORTABLE_CONTENT_LIMITS.entries) {
     throw new BackupValidationError(`Portable content must contain at most ${String(PORTABLE_CONTENT_LIMITS.entries)} entries.`);
@@ -1207,7 +1301,8 @@ export function validatePortableContent(input: unknown): readonly PortableConten
   if (bytes > PORTABLE_CONTENT_LIMITS.encodedBytes) {
     throw new BackupValidationError(`Portable content exceeds ${String(PORTABLE_CONTENT_LIMITS.encodedBytes)} bytes.`);
   }
-  const entries = input.map(validatedEntry);
+  const entries = input.map((entry, index) =>
+    validatedEntry(entry, index, provenanceRequired));
   const identities = new Set<string>();
   for (const entry of entries) {
     const marker = `${entry.kind}\u0000${entry.content_key}`;
@@ -1217,10 +1312,13 @@ export function validatePortableContent(input: unknown): readonly PortableConten
   return Object.freeze(entries);
 }
 
-export function validatePortableContentBundle(input: unknown): PortableContentBundle {
+export function validatePortableContentBundle(
+  input: unknown,
+  provenanceRequired = false,
+): PortableContentBundle {
   const value = backupRecord(input, 'Portable content bundle');
   exactKeys(value, ['content', 'supersessions'], 'Portable content bundle');
-  const content = validatePortableContent(value.content);
+  const content = validatePortableContent(value.content, provenanceRequired);
   if (!Array.isArray(value.supersessions)) {
     throw new BackupValidationError('Portable content supersessions must be a list.');
   }
@@ -1278,12 +1376,12 @@ export function validateLibraryDocument(input: unknown): asserts input is Librar
     'format', 'version', 'exported_at', 'selection',
     'selected_content_keys', 'content',
     ...(value.version === LIBRARY_EXPORT_VERSION ? ['supersessions', 'lifecycle'] :
-      value.version === PRE_LIFECYCLE_LIBRARY_EXPORT_VERSION ? ['supersessions'] : []),
+      value.version === PRE_PROVENANCE_LIBRARY_EXPORT_VERSION ? ['supersessions'] : []),
   ], 'Library export');
   if (
     value.format !== LIBRARY_EXPORT_FORMAT ||
     value.version !== LIBRARY_EXPORT_VERSION &&
-      value.version !== PRE_LIFECYCLE_LIBRARY_EXPORT_VERSION &&
+      value.version !== PRE_PROVENANCE_LIBRARY_EXPORT_VERSION &&
       value.version !== LEGACY_LIBRARY_EXPORT_VERSION
   ) {
     throw new BackupValidationError('Unsupported library export format or version.');
@@ -1306,7 +1404,10 @@ export function validateLibraryDocument(input: unknown): asserts input is Librar
   ) {
     throw new BackupValidationError('Library export selected_content_keys must be unique and sorted.');
   }
-  const content = validatePortableContent(value.content);
+  const content = validatePortableContent(
+    value.content,
+    value.version === LIBRARY_EXPORT_VERSION,
+  );
   validatePortableContentBundle({
     content,
     supersessions: value.supersessions ?? [],
@@ -1844,6 +1945,9 @@ export function portableSubclassContentImportNode(
     fingerprint_scheme: identity.envelope.scheme,
     fingerprint_digest: identity.digest,
     aggregate,
+    provenance: {
+      origin_kind: 'authored_here', received: false, local_derivation: false,
+    },
   }) as ContentImportNode<'subclass'>;
 }
 
@@ -2003,6 +2107,21 @@ export function restorePortableContentSupersessions(
   targets: ReadonlyMap<string, ContentKey>,
 ): void {
   const bundle = validatePortableContentBundle(input);
+  for (const entry of bundle.content) {
+    const target = targets.get(
+      `${entry.kind}\u0000${entry.content_key}`,
+    ) ?? entry.content_key as ContentKey;
+    const carried = entry.provenance ?? {
+      origin_kind: 'unknown' as const,
+      received: false,
+      local_derivation: false,
+    };
+    recordContentProvenance(db, {
+      kind: entry.kind,
+      contentKey: target,
+      provenance: Object.freeze({ ...carried, received: true }),
+    });
+  }
   for (const edge of bundle.supersessions) {
     const superseded = targets.get(
       `${edge.content_kind}\u0000${edge.superseded_content_key}`,

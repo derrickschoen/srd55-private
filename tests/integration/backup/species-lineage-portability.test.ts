@@ -61,14 +61,14 @@ async function sourceFixture(): Promise<{
 describe('lineage portability through fresh databases', () => {
   // Measured alone at 2.0s; 2.0 × 1.5 = 3.0s. The 20s guard follows the
   // repository convention for boot-heavy integration tests over 1.5s.
-  it('round-trips character backup v6 with the exact chosen and gated slot set', async () => {
+  it('round-trips character backup v7 with the exact chosen and gated slot set', async () => {
     const source = await sourceFixture();
     const backup = exportCharacterBackup(
       source.lifecycle.database,
       source.characterId,
       '2042-08-09T00:00:00.000Z',
     );
-    expect(backup.version).toBe(6);
+    expect(backup.version).toBe(7);
 
     const target = await lifecycle();
     const imported = importCharacterBackup(target.database, backup);
@@ -81,7 +81,7 @@ describe('lineage portability through fresh databases', () => {
 
   // Measured alone at 2.0s; 2.0 × 1.5 = 3.0s. The 20s guard follows the
   // repository convention for boot-heavy integration tests over 1.5s.
-  it('reconciles level-gated lineage slots omitted from an adopted v6 character', async () => {
+  it('reconciles level-gated lineage slots omitted from an adopted v7 character', async () => {
     const source = await sourceFixture();
     const backup = exportCharacterBackup(
       source.lifecycle.database,
@@ -148,14 +148,14 @@ describe('lineage portability through fresh databases', () => {
 
   // Measured alone at 1.8s; 1.8 × 1.5 = 2.7s. The 20s guard follows the
   // repository convention for boot-heavy integration tests over 1.5s.
-  it('round-trips library v2 before the same production writers recreate the exact choice', async () => {
+  it('round-trips library v3 before the same production writers recreate the exact choice', async () => {
     const source = await sourceFixture();
     const library = exportSelectedLibraryContent(
       source.lifecycle.database,
       [PORTABLE_ELF_KEY],
       '2042-08-09T00:00:00.000Z',
     );
-    expect(library.version).toBe(2);
+    expect(library.version).toBe(3);
 
     const target = await lifecycle();
     importLibraryDocument(target.database, library);

@@ -662,6 +662,7 @@ describe('minimal character sharing', () => {
     if (updated.kind !== 'committed') throw new Error('Expected committed update.');
     expect(updated.result).toEqual({
       characterId: firstImported.characterId,
+      characterName: 'Second delivery',
       disposition: 'update_existing',
     });
     expect(updateTarget.oneRaw(
@@ -1750,6 +1751,7 @@ describe('minimal character sharing', () => {
     );
     await expect(client.importCharacter(fragment)).resolves.toEqual({
       characterId: 2,
+      characterName: 'Share Hero',
       disposition: 'new',
     });
     const duplicatePlan = await client.preview(fragment);
@@ -2700,7 +2702,7 @@ describe('D83 ability override sharing', () => {
     const decoded = await decodeShareFragment(
       await encodeShareFragment(exportCharacterShare(source, characterId)),
     );
-    expect(decoded.version).toBe(19);
+    expect(decoded.version).toBe(20);
     expect(decoded.effects).toMatchObject([
       {
         kind: 'ability_override',

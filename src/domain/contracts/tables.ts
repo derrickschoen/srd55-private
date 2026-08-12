@@ -488,6 +488,14 @@ export const TABLE_SCOPES = {
     share: false,
     backupReference: false,
   },
+  catalog_content_provenance: {
+    role: 'catalog_registry',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
   catalog_content_fingerprints: {
     role: 'catalog_registry',
     snapshot: false,
@@ -1335,6 +1343,7 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'catalog_content_fingerprints',
   'catalog_content_identities',
   'catalog_content_match_decisions',
+  'catalog_content_provenance',
   'catalog_content_supersessions',
   'catalog_data_migrations',
   'class_equipment_items',

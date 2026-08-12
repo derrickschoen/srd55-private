@@ -19,7 +19,15 @@ import type {
   NormalizedContentName,
 } from '../../src/catalog/content-identity';
 import { contentKinds } from '../../src/catalog/content-identity';
-import { datetime, oneOf, varchar } from './columns';
+import { datetime, oneOf, sqlText, tinyint1, varchar } from './columns';
+
+export const catalogContentOriginKinds = [
+  'authored_here',
+  'built_in',
+  'unknown',
+] as const;
+export type CatalogContentOriginKind =
+  (typeof catalogContentOriginKinds)[number];
 
 export type CatalogContentKeyKind =
   | 'derived'
@@ -195,6 +203,71 @@ export const catalog_content_identities = sqliteTable(
       table.content_kind,
       table.normalized_name,
       table.content_key,
+    ),
+  ],
+);
+
+/**
+ * Transfer provenance is not rules identity. The fingerprint says what an
+ * aggregate is; this row says what we honestly know about where it came from.
+ * Nullable attribution stays nullable all the way through re-export.
+ */
+export const catalog_content_provenance = sqliteTable(
+  'catalog_content_provenance',
+  {
+    content_kind: varchar<ContentKind>()('content_kind').notNull(),
+    content_key: varchar<ContentKey>()('content_key').notNull(),
+    origin_kind: varchar<CatalogContentOriginKind>()('origin_kind').notNull(),
+    received: tinyint1('received').notNull(),
+    local_derivation: tinyint1('local_derivation').notNull(),
+    author_label: varchar()('author_label'),
+    source_label: varchar()('source_label'),
+    license_label: varchar()('license_label'),
+    attribution_text: sqlText()('attribution_text'),
+    recorded_at: datetime<Timestamp>()('recorded_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    check(
+      'catalog_content_provenance_kind_check',
+      oneOf('content_kind', contentKinds),
+    ),
+    check(
+      'catalog_content_provenance_origin_kind_check',
+      oneOf('origin_kind', catalogContentOriginKinds),
+    ),
+    check(
+      'catalog_content_provenance_received_check',
+      sql`${table.received} IN (0, 1)`,
+    ),
+    check(
+      'catalog_content_provenance_local_derivation_check',
+      sql`${table.local_derivation} IN (0, 1)`,
+    ),
+    check(
+      'catalog_content_provenance_labels_check',
+      sql`(${table.author_label} IS NULL OR length(${table.author_label}) BETWEEN 1 AND 200)
+        AND (${table.source_label} IS NULL OR length(${table.source_label}) BETWEEN 1 AND 200)
+        AND (${table.license_label} IS NULL OR length(${table.license_label}) BETWEEN 1 AND 200)
+        AND (${table.attribution_text} IS NULL OR length(CAST(${table.attribution_text} AS BLOB)) BETWEEN 1 AND 4096)`,
+    ),
+    foreignKey({
+      name: 'catalog_content_provenance_identity_foreign',
+      columns: [table.content_kind, table.content_key],
+      foreignColumns: [
+        catalog_content_identities.content_kind,
+        catalog_content_identities.content_key,
+      ],
+    }).onDelete('cascade'),
+    primaryKey({
+      name: 'catalog_content_provenance_primary',
+      columns: [table.content_kind, table.content_key],
+    }),
+    index('catalog_content_provenance_received_index').on(
+      table.received,
+      table.origin_kind,
+      table.content_kind,
     ),
   ],
 );

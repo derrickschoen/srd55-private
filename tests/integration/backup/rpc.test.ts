@@ -125,11 +125,13 @@ describe('library adoption RPC', () => {
     const {
       supersessions: _supersessions,
       lifecycle: _lifecycle,
+      content: currentContent,
       ...withoutSupersessions
     } = current;
     const legacy: LibraryExportDocument = {
       ...withoutSupersessions,
       version: 1,
+      content: currentContent.map(({ provenance: _provenance, ...entry }) => entry),
     };
 
     expect(registry.methods).toEqual(expect.arrayContaining([
@@ -179,9 +181,18 @@ describe('library adoption RPC', () => {
       outcomes: [expect.objectContaining({ kind: 'create' })],
     });
 
-    const collision = portableElfLibraryDocument(harness.context.db, {
+    const currentCollision = portableElfLibraryDocument(harness.context.db, {
       oversized: true,
     });
+    const { lifecycle: _collisionLifecycle, ...withoutCollisionLifecycle } =
+      currentCollision;
+    const collision: LibraryExportDocument = {
+      ...withoutCollisionLifecycle,
+      version: 2,
+      content: currentCollision.content.map(
+        ({ provenance: _provenance, ...entry }) => entry,
+      ),
+    };
     const plan = await client.planLibraryImport(collision, {});
     expect(plan.reviews).toEqual([
       expect.objectContaining({

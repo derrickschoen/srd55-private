@@ -103,6 +103,14 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
     ],
     numeric: ['reviewed_at'],
   },
+  catalog_content_provenance: {
+    integer: ['received', 'local_derivation'],
+    text: [
+      'content_kind', 'content_key', 'origin_kind', 'author_label',
+      'source_label', 'license_label', 'attribution_text',
+    ],
+    numeric: ['recorded_at'],
+  },
   catalog_content_supersessions: {
     text: [
       'content_kind', 'superseded_content_key', 'successor_content_key',
@@ -787,6 +795,10 @@ const expectedNotNull: Record<string, string[]> = {
     'incoming_fingerprint_digest', 'decision', 'target_content_key',
     'reviewed_at',
   ],
+  catalog_content_provenance: [
+    'content_kind', 'content_key', 'origin_kind', 'received',
+    'local_derivation', 'recorded_at',
+  ],
   catalog_content_supersessions: [
     'content_kind', 'superseded_content_key', 'successor_content_key',
     'recorded_at',
@@ -1044,6 +1056,8 @@ const expectedNamedIndexes: Record<string, string> = {
     'catalog_content_identities:content_kind,normalized_name',
   catalog_content_identities_archive_list_index:
     'catalog_content_identities:archived_at,content_kind,normalized_name,content_key',
+  catalog_content_provenance_received_index:
+    'catalog_content_provenance:received,origin_kind,content_kind',
   catalog_content_fingerprints_current_unique:
     'catalog_content_fingerprints:content_key:unique',
   catalog_content_fingerprints_resolution_index:
@@ -1434,6 +1448,7 @@ const expectedDefaults: Record<string, Record<string, string>> = {
     updated_at: 'CURRENT_TIMESTAMP',
   },
   catalog_content_match_decisions: { reviewed_at: 'CURRENT_TIMESTAMP' },
+  catalog_content_provenance: { recorded_at: 'CURRENT_TIMESTAMP' },
   catalog_content_supersessions: { recorded_at: 'CURRENT_TIMESTAMP' },
   catalog_data_migrations: { applied_at: 'CURRENT_TIMESTAMP' },
   change_log: { reversible: 'true' },
@@ -1557,6 +1572,9 @@ const expectedForeignKeys: Record<string, string[]> = {
   ],
   catalog_content_match_decisions: [
     'content_kind,target_content_key->catalog_content_identities.content_kind,content_key|RESTRICT',
+  ],
+  catalog_content_provenance: [
+    'content_kind,content_key->catalog_content_identities.content_kind,content_key|CASCADE',
   ],
   catalog_content_supersessions: [
     'content_kind,superseded_content_key->catalog_content_identities.content_kind,content_key|RESTRICT',

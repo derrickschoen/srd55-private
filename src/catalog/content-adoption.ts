@@ -20,6 +20,7 @@ import {
   type CatalogNamedDisclosure,
   type CatalogLayerDisclosure,
 } from './catalog-disclosure';
+import type { ContentProvenance } from './content-provenance';
 import {
   ContentIdentityCollision,
   ContentIdentityKeyRefusal,
@@ -190,12 +191,16 @@ export function externalContentDisclosure(input: {
   readonly id: string;
   readonly kind: ContentKind;
   readonly name: string;
+  readonly provenance?: ContentProvenance;
 }): ContentImportDisclosure {
   return Object.freeze({
     id: input.id,
     kind: input.kind,
     name: input.name.trim() === '' ? 'UNKNOWN' : input.name,
     catalog_layer: 'external',
+    ...(input.provenance === undefined
+      ? {}
+      : { provenance: input.provenance }),
   });
 }
 

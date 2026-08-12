@@ -229,9 +229,9 @@ test('creates, independently verifies, previews, and explicitly imports a durabl
   // mints v15 by appending the Expertise-grant collection at the root. LU-1
   // mints v16 by appending durable class-level feat occurrences. D104 mints
   // v17 by appending alignment, appearance, and backstory to the character.
-  // v18 appended portable authored content; v19 appends the sender's stable
-  // document identity so a later delivery can be reviewed as an update.
-  expect(positional[1]).toBe(19);
+  // v18 appended portable authored content, v19 added provenance, and v20
+  // appends stable identity so a later delivery can be reviewed as an update.
+  expect(positional[1]).toBe(20);
   expect((positional[2] as unknown[])[0]).toBe('Journey Hero 🧙');
   // FIFTEEN since v17, with notes and the allocation signal still in their
   // frozen positions, followed by three null flavor absences.
@@ -282,9 +282,11 @@ test('creates, independently verifies, previews, and explicitly imports a durabl
     await freshPage
       .getByRole('button', { name: 'Add to my characters' })
       .click();
-    await expect(freshPage.locator('.share-status')).toContainText(
-      'Character added as #1.',
+    await expect(freshPage.locator('.share-status')).toHaveText(
+      'Journey Hero 🧙 was added. Open character.',
     );
+    await expect(freshPage.getByRole('link', { name: 'Open character' }))
+      .toHaveAttribute('href', '/characters/1');
     expect(
       await freshPage.evaluate(() =>
         window.staticApp.inspectRows('characters'),
@@ -315,8 +317,10 @@ test('creates, independently verifies, previews, and explicitly imports a durabl
     ).toHaveLength(1);
     await freshPage.getByRole('button', { name: 'Keep both characters' }).click();
     await expect(freshPage.locator('.share-status')).toContainText(
-      'Character added as #2.',
+      'Journey Hero 🧙 was added. Open character.',
     );
+    await expect(freshPage.getByRole('link', { name: 'Open character' }))
+      .toHaveAttribute('href', '/characters/2');
     expect(
       await freshPage.evaluate(() =>
         window.staticApp.inspectRows('characters'),
@@ -371,7 +375,7 @@ test('oversized share refusal exposes no link, copy, share, or QR output', async
   await expect.soft(page.locator('.share-qr')).not.toHaveAttribute('src');
 });
 
-test('fits authored content into v19 and imports it with the dependent character', async ({
+test('fits authored content into v20 and imports it with the dependent character', async ({
   browser,
   page,
 }) => {
@@ -391,17 +395,23 @@ test('fits authored content into v19 and imports it with the dependent character
   await expect(output).toBeVisible();
   await expect(page.locator('.share-status')).toHaveText(
     'Share link and QR code ready. Embedded external content: ' +
-      'Portable Fit Species — species — Homebrew · external layer.',
+      'Portable Fit Species — species — Homebrew from the sender — ' +
+      'origin not recorded; a local copy will be added to your library.',
   );
   const link = await output.inputValue();
   const positional = JSON.parse(gunzipSync(
     Buffer.from(new URL(link).hash.slice(1), 'base64url'),
   ).toString('utf8')) as unknown[];
-  expect(positional[1]).toBe(19);
+  expect(positional[1]).toBe(20);
   expect(positional[21]).toMatchObject({
     content: [expect.objectContaining({
       kind: 'species',
       content_key: 'expanded:content.species:portable-fit-species',
+      provenance: {
+        origin_kind: 'unknown',
+        received: false,
+        local_derivation: false,
+      },
     })],
     supersessions: [],
   });
@@ -412,9 +422,11 @@ test('fits authored content into v19 and imports it with the dependent character
     await recipient.goto(link);
     await ready(recipient);
     await recipient.getByRole('button', { name: 'Add to my characters' }).click();
-    await expect(recipient.locator('.share-status')).toContainText(
-      'Character added as #1.',
+    await expect(recipient.locator('.share-status')).toHaveText(
+      'Portable Fit Hero was added. Open character.',
     );
+    await expect(recipient.getByRole('link', { name: 'Open character' }))
+      .toHaveAttribute('href', '/characters/1');
     expect(await recipient.evaluate(async () => ({
       characters: await window.staticApp.inspectRows('characters'),
       species: (await window.staticApp.inspectRows('species_definitions'))
@@ -431,7 +443,7 @@ test('fits authored content into v19 and imports it with the dependent character
   }
 });
 
-test('omits oversized content, preserves v19 identity, and the recipient refuses by name', async ({
+test('omits oversized content, preserves v20 identity, and the recipient refuses by name', async ({
   browser,
   page,
 }) => {
@@ -447,7 +459,7 @@ test('omits oversized content, preserves v19 identity, and the recipient refuses
 
   await page.getByRole('button', { name: 'Share Omitted Content Hero by link' }).click();
   await page.getByRole('button', { name: 'Create share link' }).click();
-  const required = "species 'expanded:content.species:oversized-portable-species'";
+  const required = 'Oversized Portable Species (species)';
   const warning = page.locator('.share-status');
   await expect(warning).toHaveText(
     `Share link ready without external content. The recipient must import ${required} before opening it.`,
@@ -458,7 +470,7 @@ test('omits oversized content, preserves v19 identity, and the recipient refuses
   const positional = JSON.parse(gunzipSync(
     Buffer.from(new URL(link).hash.slice(1), 'base64url'),
   ).toString('utf8')) as unknown[];
-  expect(positional[1]).toBe(19);
+  expect(positional[1]).toBe(20);
   expect(positional).toHaveLength(23);
   expect(positional[21]).toBeNull();
   expect(positional[22]).toEqual({
@@ -471,10 +483,20 @@ test('omits oversized content, preserves v19 identity, and the recipient refuses
     const recipient = await freshProfile.newPage();
     await recipient.goto(link);
     await ready(recipient);
-    await expect(recipient.locator('.share-status')).toContainText(required);
     await expect(recipient.locator('.share-status')).toContainText(
-      `Import ${required}, then open the link again.`,
+      'This character uses Oversized Portable Species, which is not in your library.',
     );
+    const remedy = recipient.getByRole('link', {
+      name: 'Ask the sender for a library JSON containing Oversized Portable Species, import it, then retry this share.',
+    });
+    await expect(remedy).toHaveAttribute(
+      'href',
+      `/?import=library#${new URL(link).hash.slice(1)}`,
+    );
+    await expect(recipient.getByText(
+      'Internal content key: expanded:content.species:oversized-portable-species',
+      { exact: true },
+    )).toBeAttached();
     await expect(
       recipient.getByRole('button', { name: 'Add to my characters' }),
     ).toBeHidden();

@@ -119,6 +119,10 @@ const library: AuthoringLibrary = {
       rules_edition: 'expanded',
       catalog_layer: 'external',
       superseded_by: null,
+      provenance: {
+        origin_kind: 'unknown', received: true, local_derivation: false,
+        author_label: hostileName,
+      },
     },
     {
       content_key: '2024:content.subclass:warder' as ContentKey,
@@ -127,6 +131,9 @@ const library: AuthoringLibrary = {
       rules_edition: '2024',
       catalog_layer: 'external',
       superseded_by: null,
+      provenance: {
+        origin_kind: 'authored_here', received: false, local_derivation: false,
+      },
     },
     {
       content_key: '2024:content.background:keeper' as ContentKey,
@@ -135,6 +142,9 @@ const library: AuthoringLibrary = {
       rules_edition: '2024',
       catalog_layer: 'external',
       superseded_by: null,
+      provenance: {
+        origin_kind: 'authored_here', received: false, local_derivation: false,
+      },
     },
   ],
   drafts: [{
@@ -364,6 +374,9 @@ describe('HA-6 homebrew library routing and tabs', () => {
       expect(elementText(root as unknown as Node)).toContain('Homebrew');
       expect(elementText(root as unknown as Node)).not.toContain('New class');
       expect(elementText(root as unknown as Node)).toContain(hostileName);
+      expect(elementText(root as unknown as Node)).toContain(
+        `Received homebrew by ${hostileName} — this is your local copy`,
+      );
       expect(root.querySelectorAll('img')).toHaveLength(0);
       expect(root.querySelectorAll('[data-hostile-library]')).toHaveLength(0);
       const marked = root.querySelectorAll('[data-free-text="unverified-origin"]');
@@ -1075,11 +1088,13 @@ describe('HA-6 homebrew library routing and tabs', () => {
       const copy = elementText(root as unknown as Node);
       expect(copy).toContain('Installed Target — Homebrew · external layer');
       expect(copy).toContain(
-        'Match — Uses the existing local entry; this attached character moves to it.',
+        'Use the existing local entry for this character.',
       );
       expect(copy).toContain(
-        'Clone — Installs a renamed private copy of the local entry; this attached character moves to that copy.',
+        'Create a renamed private copy of the local entry for this character.',
       );
+      expect(copy).not.toContain('Discards the incoming rules');
+      expect(copy).not.toContain('Installs the incoming rules');
       expect(copy.toLowerCase()).not.toContain('certif');
       const controls = root.querySelectorAll('input');
       expect(controls.map((control) => control.getAttribute('checked')))

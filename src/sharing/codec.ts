@@ -1140,7 +1140,8 @@ export function positionalToShareDocument(
     case 15:
     case 16:
     case 17:
-    case 18: {
+    case 18:
+    case 19: {
       let migrated: unknown = input;
       for (const [from, migration] of Object.entries(MIGRATIONS)) {
         if (Number(from) >= version) {
@@ -1149,7 +1150,7 @@ export function positionalToShareDocument(
       }
       return decodeCurrentWire(migrated);
     }
-    case 19:
+    case 20:
       return decodeCurrentWire(input);
     default:
       throw new ShareValidationError('version is unsupported.');

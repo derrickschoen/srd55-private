@@ -152,7 +152,7 @@ export const CATALOG_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
         }),
       ]),
       checksum:
-        'ad43d7f4e62910886229ba7121df2c4856ced5abc161990936a64b52955d2991',
+        '62726e1a111feb64684804d238137578bc7ee979c62206eee864006b3a60b8a4',
       run: reconcileSpeciesLineageContentV2,
     }),
   ]);

@@ -17,6 +17,7 @@ import { WIRE_SCHEMA_V16 } from './v16';
 import { WIRE_SCHEMA_V17 } from './v17';
 import { WIRE_SCHEMA_V18 } from './v18';
 import { WIRE_SCHEMA_V19 } from './v19';
+import { WIRE_SCHEMA_V20 } from './v20';
 import {
   versatileWeaponDamageFromLegacy,
   weaponDamageFromLegacy,
@@ -33,7 +34,7 @@ import {
  * domain requires a new schema version, an adjacent migration, and a
  * hand-frozen fragment fixture. Never edit an existing version.
  */
-export const CURRENT_CHARACTER_SHARE_VERSION = 19 as const;
+export const CURRENT_CHARACTER_SHARE_VERSION = 20 as const;
 
 /**
  * Any change to tuple field order, meaning, membership, or accepted value
@@ -60,6 +61,7 @@ export const SHARE_SCHEMAS = Object.freeze({
   17: WIRE_SCHEMA_V17,
   18: WIRE_SCHEMA_V18,
   19: WIRE_SCHEMA_V19,
+  20: WIRE_SCHEMA_V20,
 } as const);
 
 export type SupportedShareVersion = keyof typeof SHARE_SCHEMAS;
@@ -998,20 +1000,69 @@ function migrateV17ToV18(document: unknown): unknown {
   return migrated;
 }
 
-/** V18 predates stable character identity; preserve that absence as null. */
+/** V19 predates stable character identity; preserve that absence as null. */
+function migrateV19ToV20(document: unknown): unknown {
+  if (
+    !Array.isArray(document) ||
+    !WIRE_SCHEMA_V19.tuples.root.arities.some((arity) => arity === document.length)
+  ) {
+    throw new TypeError('wire document has an unsupported v19 tuple length.');
+  }
+  const migrated = [...document, null];
+  const versionIndex = WIRE_SCHEMA_V19.tuples.root.fields.findIndex(
+    (field) => field.key === 'version',
+  );
+  if (versionIndex < 0) throw new TypeError('wire v19 schema is missing the version field.');
+  migrated[versionIndex] = 20;
+  return migrated;
+}
+
+/**
+ * V18 carried rules but no provenance. Absence cannot prove an author, source,
+ * or licence, so the adjacent migration states only that the origin is
+ * unknown. The receiving import records the transfer separately.
+ */
 function migrateV18ToV19(document: unknown): unknown {
   if (
     !Array.isArray(document) ||
-    !WIRE_SCHEMA_V18.tuples.root.arities.some((arity) => arity === document.length)
+    !WIRE_SCHEMA_V18.tuples.root.arities.some(
+      (arity) => arity === document.length,
+    )
   ) {
     throw new TypeError('wire document has an unsupported v18 tuple length.');
   }
-  const migrated = [...document, null];
-  const versionIndex = WIRE_SCHEMA_V18.tuples.root.fields.findIndex(
-    (field) => field.key === 'version',
+  const portableIndex = WIRE_SCHEMA_V18.tuples.root.fields.findIndex(
+    (field) => field.key === 'portableContent',
   );
-  if (versionIndex < 0) throw new TypeError('wire v18 schema is missing the version field.');
-  migrated[versionIndex] = 19;
+  const portable = document[portableIndex];
+  if (
+    portable !== null &&
+    (typeof portable !== 'object' || Array.isArray(portable))
+  ) {
+    throw new TypeError('wire portable content must be null or an object.');
+  }
+  const migrated = [...document];
+  migrated[1] = 19;
+  if (portable !== null) {
+    const record = portable as Record<string, unknown>;
+    if (!Array.isArray(record.content)) {
+      throw new TypeError('wire portable content entries must be a list.');
+    }
+    migrated[portableIndex] = {
+      ...record,
+      content: record.content.map((entry) => {
+        if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
+          throw new TypeError('wire portable content entry must be an object.');
+        }
+        return {
+          ...entry,
+          provenance: {
+            origin_kind: 'unknown', received: false, local_derivation: false,
+          },
+        };
+      }),
+    };
+  }
   return migrated;
 }
 
@@ -1042,6 +1093,7 @@ export const MIGRATIONS = Object.freeze({
   16: migrateV16ToV17,
   17: migrateV17ToV18,
   18: migrateV18ToV19,
+  19: migrateV19ToV20,
 }) satisfies AdjacentMigrations;
 
 export { WIRE_SCHEMA_V1 } from './v1';
@@ -1063,6 +1115,7 @@ export { WIRE_SCHEMA_V16 } from './v16';
 export { WIRE_SCHEMA_V17 } from './v17';
 export { WIRE_SCHEMA_V18 } from './v18';
 export { WIRE_SCHEMA_V19 } from './v19';
+export { WIRE_SCHEMA_V20 } from './v20';
 export type { WireField, WireSchemaV1 } from './v1';
 export type { WireSchemaV2 } from './v2';
 export type { WireSchemaV14 } from './v14';
@@ -1070,6 +1123,8 @@ export type { WireSchemaV15 } from './v15';
 export type { WireSchemaV16 } from './v16';
 export type { WireSchemaV17 } from './v17';
 export type { WireSchemaV18 } from './v18';
+export type { WireSchemaV19 } from './v19';
+export type { WireSchemaV20 } from './v20';
 export type { WireSchemaV3 } from './v3';
 export type { WireSchemaV4 } from './v4';
 export type { WireSchemaV5 } from './v5';
