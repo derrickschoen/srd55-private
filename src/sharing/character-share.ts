@@ -2249,10 +2249,14 @@ function shareUpdatePreview(
 /**
  * Replace only the incoming share scope. The character root is deliberately
  * retained: deleting it would fire unrelated FK actions such as severing a
- * party publication. Save points and local sheet adjustments are likewise
- * recipient-owned and survive. Audit/undo rows address the replaced graph, so
- * they are reset explicitly instead of being left capable of replaying stale
- * row ids. Opt-in sections survive when the sender did not include them.
+ * party publication. Save points, local sheet adjustments, and explicit Keep
+ * decisions for exact content-version offers are likewise recipient-owned and
+ * survive. A Keep decision can become dormant when the arriving sheet no
+ * longer uses that version, but the sender cannot revoke it; its exact
+ * old-version/new-version key prevents it from applying to another offer.
+ * Audit/undo rows address the replaced graph, so they are reset explicitly
+ * instead of being left capable of replaying stale row ids. Opt-in sections
+ * survive when the sender did not include them.
  */
 function clearSharedCharacterForUpdate(
   db: DatabaseContext,
