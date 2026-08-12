@@ -314,9 +314,11 @@ test('an unchosen Elf lineage stays non-gating while the sheet changes from UNKN
     });
     await expect(add).toHaveCount(1);
     await add.click();
-    await expect(recipient.locator('.share-status')).toContainText(
-      'Character added as #1.',
+    await expect(recipient.locator('.share-status')).toHaveText(
+      'Truthful Lineage Wizard was added. Open character.',
     );
+    await expect(recipient.getByRole('link', { name: 'Open character' }))
+      .toHaveAttribute('href', '/characters/1');
     const restored = await recipient.evaluate(async () => {
       const sources = (await window.staticApp.inspectRows(
         'character_source_instances',

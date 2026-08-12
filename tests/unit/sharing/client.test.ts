@@ -119,11 +119,22 @@ describe('share client try-then-warn encoding', () => {
       kind: 'encoded',
       fragment: expect.any(String),
       embeddedContent: [],
-      omittedContent: [{ kind: 'feat', contentKey: carriedFeatKey }],
+      omittedContent: [{
+        kind: 'feat',
+        contentKey: carriedFeatKey,
+        name: 'Keen Memory',
+      }],
     });
     if (result.kind !== 'encoded') throw new Error('Expected encoded fallback.');
     const decoded = await decodeShareFragment(result.fragment);
     expect(decoded.portableContent).toBeUndefined();
+    expect(decoded.sources).toEqual([{
+      id: 0,
+      type: 'feat',
+      key: carriedFeatKey,
+      name: 'Keen Memory',
+      acquired: 1,
+    }]);
   });
 
   it('keeps portable content embedded when the first encoding fits', async () => {

@@ -79,11 +79,17 @@ const SOURCE_LABEL: Readonly<Record<string, string>> = {
 };
 
 /** One shared label for sender warnings and recipient import remedies. */
-export function contentImportLabel(type: string, key: string): string {
+export function contentImportLabel(
+  type: string,
+  key: string,
+  contentName?: string,
+): string {
   const label = type === 'class' || type === 'subclass' || type === 'spell'
     ? type
     : SOURCE_LABEL[type] ?? type;
-  return `${label} '${key}'`;
+  return contentName === undefined
+    ? `${label} '${key}'`
+    : `${contentName} (${label})`;
 }
 
 export function missingClassIssue(classKey: string): ShareImportIssue {
@@ -114,7 +120,11 @@ function knownBundledHomebrewName(
   return null;
 }
 
-function missingPortableIssue(type: string, key: string): ShareImportIssue {
+function missingPortableIssue(
+  type: string,
+  key: string,
+  contentName?: string,
+): ShareImportIssue {
   const code = type === 'class'
     ? 'missing_class' as const
     : type === 'subclass'
@@ -130,6 +140,17 @@ function missingPortableIssue(type: string, key: string): ShareImportIssue {
       summary: `This character uses ${knownName}, which is not in your library.`,
       remedy: 'Import bundled homebrew, then retry this share.',
       remedyKind: 'bundled-homebrew',
+    };
+  }
+  if (contentName !== undefined) {
+    return {
+      code,
+      contentKeys: [key],
+      contentName,
+      summary: `This character uses ${contentName}, which is not in your library.`,
+      remedy:
+        `Ask the sender for a library JSON containing ${contentName}, import it, then retry this share.`,
+      remedyKind: 'library-json',
     };
   }
   return {
@@ -148,8 +169,9 @@ export function missingSubclassIssue(subclassKey: string): ShareImportIssue {
 export function missingSourceIssue(
   type: string,
   key: string,
+  contentName?: string,
 ): ShareImportIssue {
-  return missingPortableIssue(type, key);
+  return missingPortableIssue(type, key, contentName);
 }
 
 export function ambiguousReferenceIssue(

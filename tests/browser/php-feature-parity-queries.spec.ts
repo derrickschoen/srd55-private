@@ -364,7 +364,7 @@ test('captures every restorable character table and reports exact state differen
   });
   expect(document).toMatchObject({
     format: 'dnd-multiclass-spells/character',
-    version: 6,
+    version: 7,
     source_character_id: workspaceImage.ids.character,
     character: { name: 'R40 Golden', revision: 0 },
   });

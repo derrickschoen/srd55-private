@@ -1409,6 +1409,7 @@ interface ShareCatalogReference {
   readonly kind: ContentKind;
   readonly contentKey: ContentKey;
   readonly issueType: 'class' | 'subclass' | ShareSource['type'] | 'spell';
+  readonly contentName?: string;
 }
 
 interface PreparedShareReferences {
@@ -1460,6 +1461,7 @@ function shareCatalogReferences(
       kind: item.type,
       contentKey: item.key as ContentKey,
       issueType: item.type,
+      ...(item.name === undefined ? {} : { contentName: item.name }),
     });
   }
   for (const contentKey of shareSpellKeys(document)) {
@@ -1485,7 +1487,11 @@ function missingReferenceIssue(reference: ShareCatalogReference): ShareImportIss
     case 'feat':
     case 'species':
     case 'background':
-      return missingSourceIssue(reference.issueType, reference.contentKey);
+      return missingSourceIssue(
+        reference.issueType,
+        reference.contentKey,
+        reference.contentName,
+      );
     case 'spell':
       throw new Error('Missing spells become placeholders, not compatibility issues.');
   }

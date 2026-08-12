@@ -28,5 +28,20 @@ describe('reference-only missing-content remedies', () => {
           'Ask the sender for a library JSON containing this species, import it, then retry this share.',
         remedyKind: 'library-json',
       });
+
+    expect(missingSourceIssue(
+      'species',
+      'expanded:someone:star-person',
+      '<img src=x onerror=alert(1)> Star Person',
+    )).toEqual({
+      code: 'missing_source',
+      contentKeys: ['expanded:someone:star-person'],
+      contentName: '<img src=x onerror=alert(1)> Star Person',
+      summary:
+        'This character uses <img src=x onerror=alert(1)> Star Person, which is not in your library.',
+      remedy:
+        'Ask the sender for a library JSON containing <img src=x onerror=alert(1)> Star Person, import it, then retry this share.',
+      remedyKind: 'library-json',
+    });
   });
 });

@@ -628,7 +628,7 @@ export function createShareControls(
             'omittedContent' in result
               ? `Share link ready without external content. The recipient must import ${
                   result.omittedContent.map((item) =>
-                    contentImportLabel(item.kind, item.contentKey)
+                    contentImportLabel(item.kind, item.contentKey, item.name)
                   ).join(', ')
                 } before opening it.`
               : shareReadyAnnouncement(

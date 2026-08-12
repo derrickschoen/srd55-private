@@ -111,7 +111,7 @@ test('imports bundled homebrew through publish, applies derived third-caster slo
     const card = publishedCard(page, name);
     await expect(card).toBeVisible();
     await expect(card.getByText('Homebrew', { exact: true })).toBeVisible();
-    await expect(card).toContainText('Subclass · published homebrew version');
+    await expect(card).toContainText('Subclass · Built into the app');
   }
 
   await page.getByRole('link', { name: '← Characters', exact: true }).click();

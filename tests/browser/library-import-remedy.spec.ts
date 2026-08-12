@@ -261,8 +261,8 @@ test('v19 names embedded Portable Elf before direct commit and omits the line fo
   await page.getByRole('button', { name: 'Create share link' }).click();
   await expect(page.locator('.share-status')).toHaveText(
     'Share link and QR code ready. Embedded external content: ' +
-      'Portable Elf — species — Received homebrew — origin author not recorded; ' +
-      'this is your local copy.',
+      'Portable Elf — species — Received homebrew — original author not recorded; ' +
+      'a local copy will be added to your library.',
   );
   const portableLink = await page.getByLabel('Generated character share link')
     .inputValue();
@@ -813,8 +813,8 @@ test('whole-library download restores authored and imported content into a fresh
   const libraryDocument = JSON.parse(
     libraryBytes.toString('utf8'),
   ) as LibraryExportDocument;
-  if (libraryDocument.version !== 2) {
-    throw new Error('The production library download was not a v2 document.');
+  if (libraryDocument.version !== 3) {
+    throw new Error('The production library download was not a v3 document.');
   }
   expect(libraryDocument.selection).toBe('all');
   expect(libraryDocument.selected_content_keys).toEqual(
@@ -963,5 +963,7 @@ test('whole-library download restores authored and imported content into a fresh
     }),
   });
   await expect(restoredSpeciesCard.getByText('Homebrew', { exact: true })).toBeVisible();
-  await expect(restoredSpeciesCard).toContainText('Species · published homebrew version');
+  await expect(restoredSpeciesCard).toContainText(
+    'Species · Received homebrew — origin author not recorded; this is your local copy',
+  );
 });
