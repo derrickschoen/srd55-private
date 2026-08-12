@@ -433,9 +433,9 @@ test('v17 refusal links through library adoption to the exact restored choice', 
     const recipient = await profile.newPage();
     await recipient.goto(link);
     await ready(recipient);
-    const required = 'This character uses a species that is not in your library.';
+    const required = 'This character uses Oversized Portable Elf, which is not in your library.';
     const remedyText =
-      'Ask the sender for a library JSON containing this species, import it, then retry this share.';
+      'Ask the sender for a library JSON containing Oversized Portable Elf, import it, then retry this share.';
     const remedy = recipient.getByRole('link', { name: remedyText });
     await expect(recipient.locator('.share-status')).toContainText(required);
     await expect(remedy).toHaveAttribute('href', `/?import=library#${new URL(link).hash.slice(1)}`);
