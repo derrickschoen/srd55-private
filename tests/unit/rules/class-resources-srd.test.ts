@@ -9,6 +9,7 @@ import {
 import {
   parseSrdClassResourceFormulaManifest,
   parseSrdClassResourceManifest,
+  srdArcaneRecoveryDescription,
   SrdClassResourcesError,
 } from '../../../src/rules/class-resources-srd';
 
@@ -133,7 +134,7 @@ describe('SRD class resource source parsers', () => {
     );
   });
 
-  it('pins all eighteen decoded formulas and the three deliberate absences', () => {
+  it('pins all eighteen decoded formulas and the two remaining deliberate absences', () => {
     const parsed = parseSrdClassResourceFormulaManifest();
     expect(parsed.formulas).toHaveLength(18);
     expect(
@@ -163,8 +164,22 @@ describe('SRD class resource source parsers', () => {
       { content_key: '2024:class:fighter', resource_kind: 'indomitable', formula: { kind: 'fixed_count_by_class_level', steps: [{ minimum_class_level: 9, count: 1 }, { minimum_class_level: 13, count: 2 }, { minimum_class_level: 17, count: 3 }] } },
     ]);
     expect(parsed.unmodelled.map((entry) => entry.resource_kind)).toEqual([
-      'arcane_recovery', 'mystic_arcanum', 'signature_spells',
+      'mystic_arcanum', 'signature_spells',
     ]);
+  });
+
+  it('projects the complete Arcane Recovery prose from the cited SRD block', () => {
+    const description = srdArcaneRecoveryDescription();
+    expect(description).toContain(
+      'You can regain some of your magical energy by studying your spellbook.',
+    );
+    expect(description).toContain(
+      'For example, if you’re a level 4 Wizard, you can recover up to two levels’ worth of spell slots',
+    );
+    expect(description).toContain(
+      'Once you use this feature, you can’t do so again until you finish a Long Rest.',
+    );
+    expect(description).not.toContain('Level 2: Scholar');
   });
 
   it('negative control: removing Bardic Inspiration minimum-of-once evidence is rejected', () => {

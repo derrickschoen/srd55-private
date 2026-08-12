@@ -24,6 +24,7 @@ import {
   flavorAppendix,
   flavorPrintProjection,
   orderedSheetPrintAppendices,
+  currentCantripEffect,
   sheetHeaderRouteActions,
   sheetFacts,
   sheetSections,
@@ -299,6 +300,7 @@ function sheet(changes: Partial<CharacterSheet> = {}): CharacterSheet {
         text: HOSTILE_TRAIT_TEXT,
       },
     ],
+    subclass_features: [],
     flavor: {
       alignment: null,
       appearance: null,
@@ -955,7 +957,7 @@ describe('the character sheet is projected twice from one value', () => {
     expect(readableText(value).match(/Save DC 13/g)).toHaveLength(1);
   });
 
-  it('compact spell rows contain only D149 fields', () => {
+  it('spell rows disclose the stored turn rules through one readable seam', () => {
     const compact = spell(101, 'Hostile Bolt', {
       level: { status: 'unknown', reason: 'placeholder_level' },
       marker: 'prepared',
@@ -982,22 +984,77 @@ describe('the character sheet is projected twice from one value', () => {
       spells: [classSpellGroup(11, 'Wizard', [compact])],
     });
     const text = spellReadableText(value);
+    const rules = spellSectionOf(value).spell_groups[0]?.rows[0]?.disclosure;
 
     expect(text).toContain('Hostile Bolt Level unknown Prepared');
     expect(text).toContain('Save DC 15 · Spell attack +7');
-    for (const excluded of [
+    expect(rules?.summary).toBe('Read spell rules');
+    const disclosed = textOf(rules?.detail ?? []);
+    for (const included of [
       'ONE ACTION SENTINEL',
       'RANGE SENTINEL',
       'DURATION SENTINEL',
       'COMPONENT SENTINEL',
-      'UPCAST SENTINEL',
-      'CANTRIP UPGRADE SENTINEL',
       'DESCRIPTION SENTINEL',
-      'ranged_spell',
-      'dexterity',
     ]) {
-      expect(text).not.toContain(excluded);
+      expect(disclosed).toContain(included);
     }
+    expect(text).not.toContain('DESCRIPTION SENTINEL');
+  });
+
+  it('shows Fire Bolt current dice at character levels 5 and 11', () => {
+    const fireBolt = spell(101, 'Fire Bolt', {
+      level: { status: 'known', value: 0 as SpellLevel },
+      reference: {
+        ...spell(999, 'reference').reference,
+        description:
+          'On a hit, the target takes 1d10 Fire damage. Cantrip Upgrade. ' +
+          'The damage increases when you reach levels 5 (2d10), 11 (3d10), ' +
+          'and 17 (4d10).',
+      },
+    });
+
+    expect(currentCantripEffect(fireBolt, 5)).toEqual({
+      status: 'recorded',
+      character_level: 5,
+      value: '2d10',
+    });
+    expect(currentCantripEffect(fireBolt, 8)).toEqual({
+      status: 'recorded',
+      character_level: 8,
+      value: '2d10',
+    });
+    expect(currentCantripEffect(fireBolt, 11)).toEqual({
+      status: 'recorded',
+      character_level: 11,
+      value: '3d10',
+    });
+    expect(currentCantripEffect(fireBolt, 4)).toEqual({
+      status: 'unknown',
+      reason: 'current_value_not_recorded',
+    });
+  });
+
+  it('keeps hostile subclass prose inert, layer-disclosed, and out of facts', () => {
+    const hostile = '</p><script data-subclass-payload>attack()</script>';
+    const value = sheet({
+      subclass_features: [{
+        subclass_name: 'Warrior of the Barbed Court',
+        subclass_catalog_layer: 'external',
+        class_level: 3,
+        name: 'Barbed Goad',
+        description: hostile,
+      }],
+    });
+    const feature = row(value, 'subclass-feature:0');
+
+    expect(textOf(feature.label)).toBe('Barbed Goad');
+    expect(textOf(feature.detail)).toContain('Homebrew · external layer');
+    expect(feature.disclosure).toEqual({
+      summary: 'Read feature rules',
+      detail: [{ text: hostile, free_text: true }],
+    });
+    expect(JSON.stringify(sheetFacts(value))).not.toContain(hostile);
   });
 
   it('hostile spell text is visible inert and absent from sheet facts', () => {
@@ -2204,7 +2261,7 @@ describe('resource rows and paper marking treatment', () => {
       class_name: null,
       reason: 'feature_text_maximum_not_modelled',
       detail:
-        'Arcane Recovery is a slot-level budget, while Mystic Arcanum and Signature Spells are per-spell single uses; use their printed feature text.',
+        'Mystic Arcanum and Signature Spells are per-spell single uses, not one shared resource maximum.',
     };
     const value = sheet({ resources: [disclosure] });
     const matching = rowsOf(value).filter((entry) => entry.id === disclosure.id);

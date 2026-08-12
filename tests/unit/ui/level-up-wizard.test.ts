@@ -350,6 +350,7 @@ function sheet(options: {
     armor: [],
     items: [],
     printed_features: [],
+    subclass_features: [],
     flavor: {
       alignment: null,
       appearance: null,

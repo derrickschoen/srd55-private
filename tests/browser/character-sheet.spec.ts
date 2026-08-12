@@ -52,7 +52,10 @@ const HOSTILE_SPELL_PROSE =
   '</p><script data-hostile-spell-prose>appendix-payload</script>';
 const LONG_SPELL_PROSE =
   `long spell opening\n${'A deliberately long stored spell paragraph. '.repeat(180)}` +
-  '\nlong spell ending  ';
+  '\nlong spell ending  \nCantrip Upgrade. The damage increases when you ' +
+  'reach levels 5 (2d10), 11 (3d10), and 17 (4d10).';
+const HOSTILE_SUBCLASS_PROSE =
+  '</details><script data-hostile-subclass-prose>subclass-payload</script>';
 const SAGE_TOOL_TEXT = 'Calligrapher’s Supplies';
 const HOSTILE_BACKSTORY =
   'a'.repeat(399) +
@@ -156,8 +159,12 @@ function defineSpell(
   return db.exec(
     `INSERT INTO spell_versions (
        content_key, spell_identity_id, display_name, rules_edition,
-       level, school, short_summary, is_active
-     ) VALUES (?, ?, ?, '2024', ?, 'Abjuration', ?, 1)`,
+       level, school, casting_time, range, components, duration,
+       short_summary, is_active
+     ) VALUES (
+       ?, ?, ?, '2024', ?, 'Abjuration', 'Action', '120 feet', 'V, S',
+       'Instantaneous', ?, 1
+     )`,
     [
       contentKey,
       identityId,
@@ -219,6 +226,26 @@ async function sheetImage(): Promise<SheetImage> {
     'intelligence',
     'wisdom',
   ]);
+  const subclassContentKey = registerBrowserFixtureContentIdentity(db, {
+    kind: 'subclass',
+    edition: 'sheet-browser',
+    name: 'Barbed Court browser oracle',
+    keyKind: 'asserted',
+  });
+  const subclassId = db.exec(
+    `INSERT INTO subclass_definitions (
+       content_key, class_definition_id, name, rules_edition
+     ) VALUES (?, ?, 'Barbed Court browser oracle', 'expanded')`,
+    [subclassContentKey, fighterId],
+  ).lastInsertId;
+  db.exec(
+    `INSERT INTO subclass_features (
+       subclass_definition_id, class_level, sort_order, name, description
+     ) VALUES
+       (?, 3, 1, 'Barbed Goad', ?),
+       (?, 7, 2, 'Future Barb', 'Not acquired yet.')`,
+    [subclassId, HOSTILE_SUBCLASS_PROSE, subclassId],
+  );
   db.exec(
     `UPDATE class_definitions
      SET spellcasting_ability = 'intelligence'
@@ -289,6 +316,11 @@ async function sheetImage(): Promise<SheetImage> {
        (character_id, class_definition_id, level, is_starting_class)
      VALUES (?, ?, 5, 1), (?, ?, 3, 0)`,
     [characterId, fighterId, characterId, wizardId],
+  );
+  db.exec(
+    `UPDATE character_class_levels SET subclass_definition_id = ?
+     WHERE character_id = ? AND class_definition_id = ?`,
+    [subclassId, characterId, fighterId],
   );
   db.exec(
     `INSERT INTO character_armor
@@ -904,6 +936,29 @@ test('the sheet prints the derived numbers, and prints what it lacks', async ({
   await expect(
     page.locator('[data-sheet-id$=":action_surge"] .sheet-resource-box'),
   ).toHaveCount(1);
+  const arcaneRecovery = page.locator(
+    '[data-sheet-id="feature-value:arcane_recovery"]',
+  );
+  await expect(arcaneRecovery.locator('.sheet-figure')).toHaveText('2');
+  await expect(arcaneRecovery.locator('.sheet-resource-track')).toHaveCount(0);
+  await arcaneRecovery.getByText('Read Arcane Recovery rules').click();
+  await expect(arcaneRecovery).toContainText(
+    'You can regain some of your magical energy by studying your spellbook.',
+  );
+  await expect(arcaneRecovery).toContainText(
+    'if you’re a level 4 Wizard, you can recover up to two levels’ worth of spell slots',
+  );
+
+  const subclassFeature = page.locator(
+    '[data-sheet-id="subclass-feature:0"]',
+  );
+  await expect(subclassFeature).toContainText(
+    'Barbed GoadLevel 3Barbed Court browser oracle · Homebrew · external layer',
+  );
+  await subclassFeature.getByText('Read feature rules').click();
+  await expect(subclassFeature).toContainText(HOSTILE_SUBCLASS_PROSE);
+  await expect(page.locator('[data-hostile-subclass-prose]')).toHaveCount(0);
+  await expect(page.locator('[data-sheet-id="subclass-feature:1"]')).toHaveCount(0);
 
   await expect(page).toHaveTitle(`${HOSTILE_NAME} character sheet`);
 
@@ -962,7 +1017,7 @@ test('hostile spell text is visible inert and absent from sheet facts', async ({
     `${HOSTILE_SPELL_NAME}Level 1Prepared`,
   );
   await expect(
-    hostileSpell.locator('[data-free-text="unverified-origin"]'),
+    hostileSpell.locator('dt [data-free-text="unverified-origin"]'),
   ).toHaveText(HOSTILE_SPELL_NAME);
   await expect(section).toContainText('Fire BoltCantripKnown');
   await expect(section).toContainText('Save DC 12 · Spell attack +4');
@@ -972,7 +1027,16 @@ test('hostile spell text is visible inert and absent from sheet facts', async ({
   await expect(page.locator('[data-hostile-spell-name]')).toHaveCount(0);
   await expect(page.locator('[data-hostile-spell-source]')).toHaveCount(0);
   await expect(page.locator('[data-hostile-spell-prose]')).toHaveCount(0);
-  await expect(section).not.toContainText(HOSTILE_SPELL_PROSE);
+  await hostileSpell.getByText('Read spell rules').click();
+  await expect(hostileSpell).toContainText(HOSTILE_SPELL_PROSE);
+  const fireBolt = section.locator('[data-sheet-id^="spell:class:"]', {
+    hasText: 'Fire Bolt',
+  });
+  await fireBolt.getByText('Read spell rules').click();
+  await expect(fireBolt).toContainText(
+    'Casting time: Action. Range: 120 feet. Components: V, S. ' +
+      'Duration: Instantaneous. Current cantrip effect: 2d10 at character level 8.',
+  );
   const facts = page.locator('#character-sheet-facts');
   await expect(facts).not.toContainText(HOSTILE_SPELL_NAME);
   await expect(facts).not.toContainText(HOSTILE_SPELL_SOURCE);

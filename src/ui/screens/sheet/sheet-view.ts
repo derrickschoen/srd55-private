@@ -504,6 +504,87 @@ function spellMarkerText(spell: SheetSpell): string {
   return unhandled;
 }
 
+export type CurrentCantripEffect =
+  | {
+      readonly status: 'recorded';
+      readonly character_level: number;
+      readonly value: string;
+    }
+  | {
+      readonly status: 'unknown';
+      readonly reason: 'character_level_unknown' | 'current_value_not_recorded';
+    };
+
+/**
+ * Reads only explicit `level (current value)` pairs from stored rule text.
+ * It never guesses a die from a spell name or treats a prose increment as a
+ * base value. Imported prose outside this narrow shape stays UNKNOWN (D33).
+ */
+export function currentCantripEffect(
+  spell: SheetSpellbookEntry,
+  totalCharacterLevel: number | null,
+): CurrentCantripEffect {
+  if (totalCharacterLevel === null) {
+    return { status: 'unknown', reason: 'character_level_unknown' };
+  }
+  const summary = spell.reference.cantrip_upgrade_summary;
+  const description = spell.reference.description;
+  const marker = description?.indexOf('Cantrip Upgrade.') ?? -1;
+  const source = summary ?? (marker < 0 ? null : description?.slice(marker));
+  if (source === null || source === undefined) {
+    return { status: 'unknown', reason: 'current_value_not_recorded' };
+  }
+  const recorded = [...source.matchAll(/\b(\d{1,2})\s*\(([^()\n]{1,80})\)/gu)]
+    .map((match) => ({ level: Number(match[1]), value: match[2] ?? '' }))
+    .filter(
+      (entry) =>
+        Number.isInteger(entry.level) &&
+        entry.level >= 1 &&
+        entry.level <= totalCharacterLevel &&
+        entry.value.trim().length > 0,
+    )
+    .sort((left, right) => right.level - left.level)[0];
+  return recorded === undefined
+    ? { status: 'unknown', reason: 'current_value_not_recorded' }
+    : {
+        status: 'recorded',
+        character_level: totalCharacterLevel,
+        value: recorded.value,
+      };
+}
+
+function spellRulesDisclosure(
+  spell: SheetSpellbookEntry,
+  totalCharacterLevel: number | null,
+): SheetCell[] {
+  const cells: SheetCell[] = [];
+  const fact = (label: string, value: string | null): void => {
+    if (cells.length > 0) cells.push({ text: ' ' });
+    cells.push(
+      { text: `${label}: ` },
+      value === null
+        ? { text: 'UNKNOWN — not recorded.' }
+        : { text: value, free_text: true },
+      ...(value === null ? [] : [{ text: '.' }]),
+    );
+  };
+  fact('Casting time', spell.reference.casting_time);
+  fact('Range', spell.reference.range);
+  fact('Components', spell.reference.components);
+  fact('Duration', spell.reference.duration);
+  if (spell.level.status === 'known' && spell.level.value === 0) {
+    const current = currentCantripEffect(spell, totalCharacterLevel);
+    fact(
+      'Current cantrip effect',
+      current.status === 'recorded'
+        ? `${current.value} at character level ${String(totalCharacterLevel)}`
+        : null,
+    );
+  }
+  fact('Effect', spell.reference.description);
+  return cells;
+}
+
 function spellGroupId(group: SheetSpellGroup): string {
   switch (group.kind) {
     case 'class':
@@ -515,7 +596,10 @@ function spellGroupId(group: SheetSpellGroup): string {
   return unhandled;
 }
 
-function spellSection(spells: CharacterSpellSection): SheetSpellSection {
+function spellSection(
+  spells: CharacterSpellSection,
+  totalCharacterLevel: number | null,
+): SheetSpellSection {
   let contributingClassGroups = 0;
   for (const group of spells) {
     if (group.kind === 'class') {
@@ -571,6 +655,10 @@ function spellSection(spells: CharacterSpellSection): SheetSpellSection {
           detail: plain(
             `${spellMarkerText(spell)} · ${catalogLayerLabel(spell.catalog_layer)}`,
           ),
+          disclosure: {
+            summary: 'Read spell rules',
+            detail: spellRulesDisclosure(spell, totalCharacterLevel),
+          },
         })),
         spellbook_rows:
           group.kind === 'class'
@@ -581,6 +669,10 @@ function spellSection(spells: CharacterSpellSection): SheetSpellSection {
                 detail: plain(
                   `Spellbook · ${catalogLayerLabel(spell.catalog_layer)}`,
                 ),
+                disclosure: {
+                  summary: 'Read spell rules',
+                  detail: spellRulesDisclosure(spell, totalCharacterLevel),
+                },
               }))
             : [],
       };
@@ -947,6 +1039,32 @@ function featureValueRows(
   values: readonly SheetFeatureValue[],
 ): readonly SheetRow[] {
   return values.map((feature): SheetRow => {
+    if ('kind' in feature) {
+      if (feature.status === 'unavailable') {
+        return {
+          id: feature.id,
+          label: plain(feature.label),
+          value: 'UNKNOWN',
+          detail: plain(featureValueUnavailableDetail(feature.reason)),
+          disclosure: {
+            summary: 'Read Arcane Recovery rules',
+            detail: [{ text: feature.description, free_text: true }],
+          },
+        };
+      }
+      return {
+        id: feature.id,
+        label: plain(feature.label),
+        value: String(feature.value),
+        detail: plain(
+          `Half Wizard level, rounded up · ${catalogLayerLabel(feature.catalog_layer)}. No usage tracker: this is a combined recovered-slot-level budget.`,
+        ),
+        disclosure: {
+          summary: 'Read Arcane Recovery rules',
+          detail: [{ text: feature.description, free_text: true }],
+        },
+      };
+    }
     if (feature.status === 'unavailable') {
       return {
         id: feature.id,
@@ -1128,7 +1246,7 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
 
   if (sheet.feature_values.length > 0) {
     sections.push({
-      caption: 'Feature dice',
+      caption: 'Feature values',
       rows: featureValueRows(sheet.feature_values),
     });
   }
@@ -1339,7 +1457,26 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
   sections.push({ caption: 'Attacks and movement', rows: combat });
 
   if (sheet.spells.length > 0) {
-    sections.push(spellSection(sheet.spells));
+    sections.push(spellSection(sheet.spells, sheet.total_level));
+  }
+
+  if (sheet.subclass_features.length > 0) {
+    sections.push({
+      caption: 'Subclass features',
+      rows: sheet.subclass_features.map((feature, index) => ({
+        id: `subclass-feature:${String(index)}`,
+        label: [{ text: feature.name, free_text: true }],
+        value: `Level ${String(feature.class_level)}`,
+        detail: [
+          { text: feature.subclass_name, free_text: true },
+          { text: ` · ${catalogLayerLabel(feature.subclass_catalog_layer)}` },
+        ],
+        disclosure: {
+          summary: 'Read feature rules',
+          detail: [{ text: feature.description, free_text: true }],
+        },
+      })),
+    });
   }
 
   // D102: PRINT THE WORDS, DO NOT TURN THEM INTO FACTS. Background tool text
@@ -1603,7 +1740,26 @@ export function sheetFacts(sheet: CharacterSheet): Record<string, unknown> {
             },
     },
     feature_values: sheet.feature_values.map((feature) =>
-      feature.status === 'unavailable'
+      'kind' in feature
+        ? feature.status === 'unavailable'
+          ? {
+              key: feature.key,
+              kind: feature.kind,
+              status: feature.status,
+              reason: feature.reason,
+            }
+          : {
+              key: feature.key,
+              kind: feature.kind,
+              status: feature.status,
+              value: feature.value,
+              terms: feature.terms.map((term, term_order) => ({
+                contribution: term.contribution,
+                status: term.status,
+                term_order,
+              })),
+            }
+        : feature.status === 'unavailable'
         ? {
             key: feature.key,
             status: feature.status,

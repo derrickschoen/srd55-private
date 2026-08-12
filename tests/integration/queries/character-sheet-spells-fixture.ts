@@ -74,7 +74,7 @@ export const RETIREMENT_LONG_PROSE =
  * be regenerated from CharacterSheetBuilder output.
  */
 export const HAND_AUTHORED_D91_R_RESOURCE_BYTES = new TextEncoder().encode(
-  '[{"status":"absent","id":"resource:feature-text-not-modelled","kind":null,"class_name":null,"reason":"feature_text_maximum_not_modelled","detail":"Arcane Recovery is a slot-level budget, while Mystic Arcanum and Signature Spells are per-spell single uses; use their printed feature text."},{"status":"computed","id":"resource:spell-slot:1","kind":"spell_slot","class_definition_id":null,"class_name":null,"class_level":null,"spell_level":1,"maximum":3,"computation":{"kind":"shared_spell_slots","effective_caster_level":2}}]',
+  '[{"status":"absent","id":"resource:feature-text-not-modelled","kind":null,"class_name":null,"reason":"feature_text_maximum_not_modelled","detail":"Mystic Arcanum and Signature Spells are per-spell single uses, not one shared resource maximum."},{"status":"computed","id":"resource:spell-slot:1","kind":"spell_slot","class_definition_id":null,"class_name":null,"class_level":null,"spell_level":1,"maximum":3,"computation":{"kind":"shared_spell_slots","effective_caster_level":2}}]',
 );
 
 interface SourceOptions {

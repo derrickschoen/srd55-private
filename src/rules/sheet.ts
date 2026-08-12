@@ -2005,7 +2005,7 @@ export function resolveSheetResources(
         null,
         null,
         'feature_text_maximum_not_modelled',
-        'Arcane Recovery is a slot-level budget, while Mystic Arcanum and Signature Spells are per-spell single uses; use their printed feature text.',
+        'Mystic Arcanum and Signature Spells are per-spell single uses, not one shared resource maximum.',
       ),
     );
   }

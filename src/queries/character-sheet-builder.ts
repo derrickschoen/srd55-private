@@ -212,6 +212,15 @@ export interface SheetPrintedFeature {
   readonly text: string | null;
 }
 
+/** Current-level prose from the subclass selected for one owning class. */
+export interface SheetSubclassFeature {
+  readonly subclass_name: string;
+  readonly subclass_catalog_layer: CatalogLayerDisclosure;
+  readonly class_level: number;
+  readonly name: string;
+  readonly description: string;
+}
+
 export interface SheetArmorClassFormula {
   /** User/catalog-authored display label; never copied into structured JSON. */
   readonly label: string;
@@ -420,6 +429,8 @@ export interface CharacterSheet {
   readonly items: readonly SheetItemRow[];
   /** Printed background/species prose; deliberately absent from `sheetFacts`. */
   readonly printed_features: readonly SheetPrintedFeature[];
+  /** Selected subclass features acquired at the owning class's current level. */
+  readonly subclass_features: readonly SheetSubclassFeature[];
   /** Character-authored prose; deliberately absent from `sheetFacts`. */
   readonly flavor: CharacterFlavor;
   /** D162 UI state; never part of the character's structured sheet facts. */
@@ -549,12 +560,11 @@ const sheetClassRow: RowCodec<SheetClassJoinRow> = (row) => ({
 export const SHEET_GAPS: readonly SheetGap[] = Object.freeze([
   {
     kind: 'no_class_feature_text',
-    title: 'Class features are not printed',
+    title: 'Base class feature prose is partial',
     detail:
-      'This application seeds no class feature text and no subclass feature ' +
-      'text beyond two Warlock invocations, so the features section of a ' +
-      'printed sheet is not reproduced here. What is missing is the prose; ' +
-      'the numbers below do not depend on it.',
+      'Selected subclass features are printed at their acquired levels, and ' +
+      'Arcane Recovery includes its sourced rule. Other base class feature ' +
+      'prose is not recorded here; their modeled numbers remain available.',
   },
   {
     kind: 'partial_subclass_catalog',
@@ -1140,6 +1150,19 @@ export class CharacterSheetBuilder {
       armor: armorRows,
       items: this.#items(characterId),
       printed_features: printedFeatures.features,
+      subclass_features: content.flatMap((entry): SheetSubclassFeature[] => {
+        const subclass = entry.subclass;
+        if (subclass === null) return [];
+        return entry.all_subclass_features
+          .filter((feature) => feature.class_level <= entry.level)
+          .map((feature) => ({
+            subclass_name: subclass.name,
+            subclass_catalog_layer: subclass.catalog_layer,
+            class_level: feature.class_level,
+            name: feature.name,
+            description: feature.description,
+          }));
+      }),
       flavor: {
         alignment: character.alignment,
         appearance: character.appearance,
