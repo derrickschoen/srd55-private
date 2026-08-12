@@ -437,12 +437,16 @@ function publishedCard(
       ]),
     ]),
     element('p', {
-      text: `${KIND_LABELS[item.content_kind]} · ${contentProvenanceLabel(item.provenance)} · ` +
-        `${String(lineage.versions.length)} ` +
+      className: 'homebrew-card-provenance',
+      text: `${KIND_LABELS[item.content_kind]} · ${contentProvenanceLabel(item.provenance)}`,
+    }),
+    attribution,
+    element('p', {
+      className: 'homebrew-card-history-summary',
+      text: `${String(lineage.versions.length)} ` +
         `version${lineage.versions.length === 1 ? '' : 's'} · ` +
         `${String(totalUsage)} character attachment${totalUsage === 1 ? '' : 's'}`,
     }),
-    attribution,
     ...updateSummary,
     history,
     element('div', { className: 'homebrew-card-actions' }, [

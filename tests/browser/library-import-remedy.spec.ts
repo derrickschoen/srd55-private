@@ -325,9 +325,8 @@ test('v20 names embedded Portable Elf before direct commit and omits the line fo
       'Sent with this character. The link does not include the sender’s name.',
     );
     await expect(disclosure.getByRole('listitem')).toHaveText(
-      'Portable Elf — species; 1 version; this character uses Portable Elf; ' +
-        'Received homebrew — original author not recorded; ' +
-        'a local copy will be added to your library',
+      'Portable Elf — species — Received homebrew — original author not recorded; ' +
+        'a local copy will be added to your library; 1 version; this character uses Portable Elf',
     );
     expect(await recipient.evaluate(async (portableElfKey) => ({
       characters: await window.staticApp.inspectRows('characters'),
@@ -997,8 +996,12 @@ test('whole-library download restores authored and imported content into a fresh
     }),
   });
   await expect(restoredSpeciesCard.getByText('Homebrew', { exact: true })).toBeVisible();
-  await expect(restoredSpeciesCard).toContainText(
-    'Species · Received homebrew — origin author not recorded; this is your local copy · ' +
-      '1 version · 0 character attachments',
-  );
+  await expect(restoredSpeciesCard.getByText(
+    'Species · Received homebrew — origin author not recorded; this is your local copy',
+    { exact: true },
+  )).toBeVisible();
+  await expect(restoredSpeciesCard.getByText(
+    '1 version · 0 character attachments',
+    { exact: true },
+  )).toBeVisible();
 });

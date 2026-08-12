@@ -108,18 +108,19 @@ test('publishes, versions, archives, restores, and permanently purges a whole li
   await expect(review).toContainText(
     'After Apply: Purge Journey Species Revised — Homebrew · external layer',
   );
-  await expect(review.getByRole('radio')).toHaveCount(0);
+  await expect(review.getByRole('radio')).toHaveCount(2);
+  await review.getByLabel('Apply the new version').check();
   await expect(review.getByLabel('Private copy name')).toHaveCount(0);
   await expect(review).not.toContainText(/certif/iu);
-  const applyFixes = page.getByRole('button', { name: 'Apply to all listed characters' });
+  const applyFixes = page.getByRole('button', { name: 'Apply selected updates' });
   await expect(applyFixes).toBeEnabled();
   await applyFixes.focus();
   await applyFixes.press('Enter');
   await expect(page.getByRole('heading', { name: 'Character fixes applied' }))
     .toBeVisible();
   await expect.poll(() => announcedMessages(page)).toEqual(expect.arrayContaining([
-    'Applying every reviewed replacement…',
-    'All listed characters were updated.',
+    'Applying the selected updates…',
+    'The reviewed choices were applied.',
   ]));
 
   const lineageKeys = await page.evaluate(async () =>

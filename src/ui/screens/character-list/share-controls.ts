@@ -365,23 +365,25 @@ export function createShareControls(
       const used = lineage.versions.find((version) => version.used_by_character);
       const latestDisclosure = disclosures.find((entry) => entry.id === latest.id);
       const item = element('li');
-      item.append(
+      const provenance = element('span', {
+        className: 'share-embedded-content-provenance',
+      });
+      provenance.append(
         freeTextSpan(latest.name),
-        ` — ${lineage.kind}; ${String(lineage.versions.length)} ` +
-          `version${lineage.versions.length === 1 ? '' : 's'}` +
-          (used === undefined && latestDisclosure !== undefined ? ';' : ''),
+        ` — ${lineage.kind} — ${latestDisclosure?.provenance === undefined
+          ? 'Homebrew from the sender — a local copy will be added to your library'
+          : incomingContentProvenanceLabel(latestDisclosure.provenance)}`,
+      );
+      item.append(
+        provenance,
+        `; ${String(lineage.versions.length)} ` +
+          `version${lineage.versions.length === 1 ? '' : 's'}`,
         used === undefined ? '' : '; this character uses ',
       );
       if (used !== undefined) {
         item.append(freeTextSpan(used.name));
-        if (latestDisclosure !== undefined) item.append(';');
       }
       if (latestDisclosure !== undefined) {
-        item.append(
-          ` ${latestDisclosure.provenance === undefined
-            ? 'Homebrew from the sender — a local copy will be added to your library'
-            : incomingContentProvenanceLabel(latestDisclosure.provenance)}`,
-        );
         if (latestDisclosure.provenance !== undefined) {
           const details = contentProvenanceDetails(latestDisclosure.provenance);
           if (details.length > 0) {

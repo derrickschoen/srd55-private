@@ -77,10 +77,13 @@ test('S6 recipient surfaces use provenance, inert names, and a direct sheet acti
   const disclosure = page.getByRole('region', {
     name: 'Embedded external content',
   });
-  await expect(disclosure).toContainText(
+  await expect(disclosure.locator('.share-embedded-content-provenance')).toHaveText(
     `Keen Memory — feat — Homebrew by ${HOSTILE_AUTHOR} — ` +
       'a local copy will be added to your library',
   );
+  await expect(disclosure.getByRole('listitem')).toContainText('1 version');
+  await expect(disclosure).toContainText('Attribution details');
+  await expect(disclosure).toContainText(`Original author: ${HOSTILE_AUTHOR}`);
   await expect(page.locator('.share-preview')).not.toContainText('external layer');
   await expect(page.locator('.share-preview')).not.toContainText('bundled layer');
   await expect(page.locator('[data-s6-character], [data-s6-author]')).toHaveCount(0);

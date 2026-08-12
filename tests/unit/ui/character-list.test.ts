@@ -284,10 +284,10 @@ describe('character share links', () => {
       expect(disclosure.querySelectorAll('li').map((item) =>
         elementText(item as unknown as Node).replace(/\s+/gu, ' ').trim()
       )).toEqual([
-        `${hostile} — species; 1 version; Homebrew by ${hostileAuthor} — a local copy will be added to your library ` +
+        `${hostile} — species — Homebrew by ${hostileAuthor} — a local copy will be added to your library ; 1 version ` +
           `Attribution details Original author: ${hostileAuthor}`,
-        'UNKNOWN — feat; 1 version; Homebrew from the sender — a local copy will be added to your library',
-        `${hostileSubclass} — subclass; 1 version; Homebrew from the sender — a local copy will be added to your library`,
+        'UNKNOWN — feat — Homebrew from the sender — a local copy will be added to your library ; 1 version',
+        `${hostileSubclass} — subclass — Homebrew from the sender — a local copy will be added to your library ; 1 version`,
       ]);
       expect(disclosure.querySelector('[data-share-disclosure-hostile]')).toBeNull();
       expect(elementText(disclosure as unknown as Node)).toContain(

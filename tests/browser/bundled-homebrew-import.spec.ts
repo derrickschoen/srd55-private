@@ -106,9 +106,12 @@ test('imports bundled homebrew through publish, applies derived third-caster slo
     const card = publishedCard(page, name);
     await expect(card).toBeVisible();
     await expect(card.getByText('Homebrew', { exact: true })).toBeVisible();
-    await expect(card).toContainText(
-      `Subclass · Built into the app · ${String(versionCount)} versions`,
-    );
+    await expect(card.getByText('Subclass · Built into the app', { exact: true }))
+      .toBeVisible();
+    await expect(card.getByText(
+      `${String(versionCount)} versions · 0 character attachments`,
+      { exact: true },
+    )).toBeVisible();
     await expect(card).toContainText(`History — ${String(versionCount)} versions`);
   }
   await expect(page.locator('.homebrew-grid > .homebrew-card')).toHaveCount(3);
