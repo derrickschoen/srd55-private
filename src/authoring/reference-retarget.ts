@@ -1414,6 +1414,7 @@ function retargetCharacter(
         level.classId,
         target.id,
         level.level,
+        'preserve-for-retarget',
       );
       const newSourceId = db.scalar<number>(
         `SELECT id FROM character_source_instances

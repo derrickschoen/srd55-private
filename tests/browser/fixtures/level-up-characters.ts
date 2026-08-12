@@ -39,23 +39,13 @@ export const ACCEPTANCE_WIZARD_2_CHOICES = {
   }],
   spells: [
     {
-      kind: 'slot_selection',
-      locator: {
-        source: { kind: 'selected_class' },
-        rule_key: 'wizard-prepared',
-        ordinal: 5,
-      },
-      spell_name: 'Thunderwave',
-      mode: 'new',
-    },
-    {
       kind: 'spellbook_acquisition',
       locator: {
         source: { kind: 'selected_class' },
         rule_key: 'wizard-spellbook',
         ordinal: 7,
       },
-      spell_name: 'Chromatic Orb',
+      spell_name: 'Thunderwave',
     },
     {
       kind: 'spellbook_acquisition',
@@ -65,6 +55,16 @@ export const ACCEPTANCE_WIZARD_2_CHOICES = {
         ordinal: 8,
       },
       spell_name: 'Comprehend Languages',
+    },
+    {
+      kind: 'slot_selection',
+      locator: {
+        source: { kind: 'selected_class' },
+        rule_key: 'wizard-prepared',
+        ordinal: 5,
+      },
+      spell_name: 'Thunderwave',
+      mode: 'new',
     },
   ],
 } as const satisfies AcceptanceWizard2Choices;

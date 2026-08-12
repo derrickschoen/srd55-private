@@ -297,7 +297,8 @@ content.
 conversations, cold-reader check.
 
 This document is released under **CC-BY-4.0**. Attribute as: "Veteran
-(Rogue subclass), © 2026 Derrick Schoen, CC-BY-4.0."
+(Rogue subclass), CC-BY-4.0." (By owner ruling 2026-08-11, no personal
+name appears in the notice; attribution is by title alone.)
 
 > This work includes material from the System Reference Document 5.2.1
 > ("SRD 5.2.1") by Wizards of the Coast LLC, available at

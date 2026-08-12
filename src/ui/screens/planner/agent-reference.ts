@@ -498,6 +498,19 @@ export type ReferenceOutstandingItem =
       readonly chosen: number;
       readonly required: number | null;
       readonly missing: number | null;
+    }
+  | {
+      readonly kind: 'wizard_spellbook_incomplete';
+      readonly source_ref: number;
+      readonly chosen: number;
+      readonly required: number;
+      readonly missing: number;
+      readonly acquisition_id: number;
+    }
+  | {
+      readonly kind: 'wizard_preparation_out_of_book';
+      readonly source_ref: number;
+      readonly slot_id: number;
     };
 
 export interface ReferenceCatalogGap {
@@ -983,6 +996,23 @@ export function buildAgentReference(
           chosen: item.chosen,
           required: item.required,
           missing: item.missing,
+        };
+      }
+      if (item.kind === 'wizard_spellbook_incomplete') {
+        return {
+          kind: 'wizard_spellbook_incomplete',
+          source_ref: registry.register(item.source_name, null),
+          chosen: item.chosen,
+          required: item.required,
+          missing: item.missing,
+          acquisition_id: item.acquisition_id,
+        };
+      }
+      if (item.kind === 'wizard_preparation_out_of_book') {
+        return {
+          kind: 'wizard_preparation_out_of_book',
+          source_ref: registry.register(item.source_name, null),
+          slot_id: item.slot_id,
         };
       }
       return {
@@ -1872,6 +1902,24 @@ export function agentReferenceSections(
                 ? 'required Weapon Mastery count unavailable in installed rules data'
                 : `${String(item.chosen)} of ${String(item.required)} mastered ` +
                   `weapons chosen; ${String(item.missing)} still unchosen`),
+            ];
+          }
+          if (item.kind === 'wizard_spellbook_incomplete') {
+            return [
+              cell('wizard_spellbook_incomplete'),
+              sourceCell(projection, item.source_ref),
+              cell(
+                `${String(item.chosen)} of ${String(item.required)} ` +
+                  `spellbook entries chosen; ${String(item.missing)} ` +
+                  `still empty (acquisition id ${String(item.acquisition_id)})`,
+              ),
+            ];
+          }
+          if (item.kind === 'wizard_preparation_out_of_book') {
+            return [
+              cell('wizard_preparation_out_of_book'),
+              sourceCell(projection, item.source_ref),
+              cell(`prepared slot ${String(item.slot_id)} is not in the active spellbook`),
             ];
           }
           return [

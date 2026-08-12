@@ -106,6 +106,10 @@ const ELIGIBLE_EFFECT_SQL = `
    AND source.character_id = effect.character_id
   WHERE effect.character_id = ?
     AND (
+      effect.source_instance_id IS NULL
+      OR source.state = 'active'
+    )
+    AND (
       effect.character_item_id IS NULL
       OR item.requires_attunement = 0
       OR item.id IN (

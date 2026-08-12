@@ -267,18 +267,18 @@ describe('GF-2 guided Expertise and spell adoption', () => {
     expect(guidedSpellsStepState(db, characterId).choices.map((choice) => choice.label))
       .toEqual([
         'Wizard cantrip 1 of 3',
-        'Wizard prepared spell 1 of 4',
         'Wizard cantrip 2 of 3',
-        'Wizard prepared spell 2 of 4',
         'Wizard cantrip 3 of 3',
-        'Wizard prepared spell 3 of 4',
-        'Wizard prepared spell 4 of 4',
         'Wizard spellbook spell 1 of 6',
         'Wizard spellbook spell 2 of 6',
         'Wizard spellbook spell 3 of 6',
         'Wizard spellbook spell 4 of 6',
         'Wizard spellbook spell 5 of 6',
         'Wizard spellbook spell 6 of 6',
+        'Wizard prepared spell 1 of 4',
+        'Wizard prepared spell 2 of 4',
+        'Wizard prepared spell 3 of 4',
+        'Wizard prepared spell 4 of 4',
       ]);
 
     while (true) {

@@ -274,6 +274,5 @@ https://www.dndbeyond.com/srd, licensed under the Creative Commons
 Attribution 4.0 International License
 (https://creativecommons.org/licenses/by/4.0/legalcode).*
 
-*Warrior of the Barbed Court © 2026 Derrick Schoen, released under
-CC-BY-4.0. Attribute as: "Warrior of the Barbed Court, © 2026 Derrick
-Schoen, CC-BY-4.0."*
+*Warrior of the Barbed Court, released under CC-BY-4.0. Attribute as:
+"Warrior of the Barbed Court, CC-BY-4.0."*

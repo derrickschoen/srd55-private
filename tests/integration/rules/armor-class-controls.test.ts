@@ -135,6 +135,34 @@ afterEach(() => {
 });
 
 describe('Armor Class mutation controls', () => {
+  it('excludes a tombstoned source even if a legacy effect row survives', async () => {
+    const db = await database();
+    const characterId = guidedCharacter(
+      db,
+      '2024:class:monk',
+      'Legacy Ghost Monk',
+    );
+    const monkSourceId = sourceId(db, characterId, 'class');
+    expect(
+      readEligibleCharacterEffects(db, characterId, 'display'),
+    ).toHaveLength(1);
+
+    db.exec(
+      `UPDATE character_source_instances SET state = 'tombstoned'
+       WHERE id = ?`,
+      [monkSourceId],
+    );
+    expect(
+      db.scalar(
+        'SELECT count(*) FROM character_effects WHERE source_instance_id = ?',
+        [monkSourceId],
+      ),
+    ).toBe(1);
+    expect(
+      readEligibleCharacterEffects(db, characterId, 'display'),
+    ).toEqual([]);
+  });
+
   it('gives a guided level-1 Barbarian the sourced shield-compatible formula', async () => {
     const db = await database();
     const characterId = guidedCharacter(

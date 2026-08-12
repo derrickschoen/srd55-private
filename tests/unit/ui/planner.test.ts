@@ -497,6 +497,7 @@ describe('planner catalog disclosure', () => {
           source_type: 'feat',
           source_definition_id: 7,
           display_name: hostileSource,
+          catalog_layer: 'external',
         }],
       };
       const rendered = interactiveElement(renderEditors({
@@ -1242,6 +1243,45 @@ describe('completeness panel wording', () => {
       expect(links.map((link) => elementText(link as unknown as Node))).toEqual([
         'Return to guided equipment and choose a Fighting Style.',
         'Return to guided equipment and choose the required mastered weapons.',
+  it('routes incomplete books and preserved out-of-book preparations to addressed spell repairs', () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const result: CompletenessResult = {
+        ...emptyCompleteness,
+        outstanding_count: 2,
+        items: [{
+          kind: 'wizard_spellbook_incomplete',
+          title: 'Wizard 1 — 0 of 6 spellbook spells chosen',
+          detail: 'Six entries remain empty.',
+          remedy: 'Choose the missing spellbook spells.',
+          source_name: 'Wizard 1',
+          source_catalog_layer: 'bundled',
+          chosen: 0,
+          required: 6,
+          missing: 6,
+          acquisition_id: 41,
+        }, {
+          kind: 'wizard_preparation_out_of_book',
+          title: 'Wizard 1 — Shield is prepared but not in the spellbook',
+          detail: 'The preserved selection needs repair.',
+          remedy: 'Choose an in-book replacement.',
+          source_name: 'Wizard 1',
+          source_catalog_layer: 'bundled',
+          spell_name: 'Shield',
+          spell_catalog_layer: 'bundled',
+          slot_id: 73,
+        }],
+      };
+      const panel = interactiveElement(renderCompleteness(
+        result,
+        { fillSkillGrant: () => undefined },
+        false,
+      ));
+      expect(
+        panel.querySelectorAll('a').map((link) => link.getAttribute('href')),
+      ).toEqual([
+        '/characters/7/build/levels/1?step=spells&repair=spellbook_acquisition-41',
+        '/characters/7/build/levels/1?step=spells&repair=slot_selection-73',
       ]);
     } finally {
       restoreDocument();

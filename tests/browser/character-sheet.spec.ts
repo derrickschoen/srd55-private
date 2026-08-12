@@ -1338,7 +1338,15 @@ test('spell section and print appendix replace the legacy print route without wr
   await expect(druid.locator('.sheet-number dt').allTextContents())
     .resolves.toEqual(['Thorn Whip', 'Goodberry']);
   await expect(wizard.locator('.sheet-number dt').allTextContents())
-    .resolves.toEqual(['Mage Hand', 'Command', 'Shield']);
+    // Detect Magic and Unseen Servant are active book-only rows. Shield is in
+    // the book too, but is already represented by its prepared row.
+    .resolves.toEqual([
+      'Mage Hand',
+      'Command',
+      'Shield',
+      'Detect Magic',
+      'Unseen Servant',
+    ]);
   await expect(gift2.locator('.sheet-number dt').allTextContents())
     .resolves.toEqual(['Misty Step']);
   await expect(gift10.locator('.sheet-number dt').allTextContents())

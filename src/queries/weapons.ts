@@ -274,6 +274,7 @@ export class WeaponQueries {
         damage: weapon.damage,
         damage_type: weapon.damage_type,
         versatile_damage: weapon.versatile_damage,
+        attack_kind: weapon.attack_kind,
         // The three columns a proficiency question reads and nothing else: the
         // narrow `ProficiencyWeapon` shape is what stops this path guessing a
         // category from a damage die or a name.

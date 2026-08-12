@@ -313,6 +313,8 @@ describe('deterministic read-only build report', () => {
       { name: 'Detect Magic', prepared: false, active: true },
       { name: 'Mage Armor', prepared: true, active: true },
       { name: 'Magic Missile', prepared: true, active: true },
+      { name: 'Shield', prepared: true, active: true },
+      { name: 'Shield', prepared: true, active: true },
     ]);
     expect(report.wizard.prepared.map((entry) => entry.spell_name)).toEqual([
       'Mage Armor',

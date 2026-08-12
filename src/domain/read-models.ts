@@ -238,6 +238,7 @@ export interface RemovableSource {
   source_type: StandaloneSourceType;
   source_definition_id: number | null;
   display_name: string;
+  catalog_layer: CatalogLayerDisclosure;
 }
 
 interface OrderSourceBase {
@@ -357,6 +358,7 @@ export interface Workspace {
   configurable_sources: Array<{
     id: number;
     display_name: string;
+    catalog_layer: CatalogLayerDisclosure;
     chosen_list: string;
     spellcasting_ability: Ability;
   }>;

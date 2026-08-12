@@ -22,6 +22,12 @@ import {
   type SpellSelectionConstraint,
 } from './spell-selection-constraint';
 import { selectableCatalogContentSql } from '../queries/selectable-catalog-content';
+import {
+  effectiveSelectionCollectionForSlot,
+  evaluateSelectionCollectionConstraint,
+  selectionCollectionPredicate,
+  supportedSelectionCollection,
+} from './spell-selection-collection';
 
 export interface EligibleSpell {
   id: number;
@@ -141,10 +147,12 @@ export class EligibleSpellSearch {
 
     return candidates.filter(
       (candidate) =>
-        this.#eligibility.evaluateConstraint(
+        evaluateSelectionCollectionConstraint(
+          this.db,
           characterId,
           constraint,
           candidate.id,
+          this.#eligibility,
         ).status ===
         'valid',
     );
@@ -168,7 +176,10 @@ export class EligibleSpellSearch {
     characterId: number,
     constraint: SpellSelectionConstraint,
   ): boolean {
-    if (constraint.selection_collection !== null) {
+    if (
+      constraint.selection_collection !== null &&
+      !supportedSelectionCollection(constraint.selection_collection)
+    ) {
       return false;
     }
     const { clauses, bindings } = this.#candidatePredicate(
@@ -205,7 +216,14 @@ export class EligibleSpellSearch {
     if (slot === null) {
       throw new EligibleSpellSearchNotFoundError(characterId, slotId);
     }
-    return slot;
+    return {
+      ...slot,
+      selection_collection: effectiveSelectionCollectionForSlot(
+        this.db,
+        characterId,
+        slotId,
+      ),
+    };
   }
 
   #candidatePredicate(
@@ -282,6 +300,15 @@ export class EligibleSpellSearch {
           AND required_tag.tag = ?
       )`);
       bindings.push(tag);
+    }
+    const collection = selectionCollectionPredicate(
+      characterId,
+      constraint.selection_collection,
+      'version.id',
+    );
+    if (collection !== null) {
+      clauses.push(collection.sql);
+      bindings.push(...collection.bindings);
     }
 
     return { clauses, bindings };

@@ -167,7 +167,7 @@ export type BuildReportResult = Omit<
 };
 
 const wizardExplanation =
-  '“In my book” marks only the spells that Ritual Adept can expose; it does not constrain Wizard preparation and is not the same as labeling a spell known or prepared. Prepared spells are limited choices drawn from the whole Wizard spell list and can use spell slots. A spell can therefore appear both in the book and as prepared. An unprepared ritual-tagged spell in the book appears as ritual-only access; that route is not a selection, consumes no preparation capacity, and is ignored by duplicate-waste checks. Unprepared non-ritual book spells are not castable.';
+  '“In my book” marks the Wizard spells recorded in this character’s spellbook. Wizard preparation choices are drawn from those entries; fixed always-prepared grants do not consume spellbook or preparation capacity. A spell can therefore appear both in the book and as prepared. An unprepared ritual-tagged spell in the book appears as ritual-only access; that route is not a selection, consumes no preparation capacity, and is ignored by duplicate-waste checks. Unprepared non-ritual book spells are not castable.';
 
 function decodeAbility(value: string | null, label: string): Ability | null {
   if (value === null) {

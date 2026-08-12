@@ -44,9 +44,19 @@ const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 
 // These are PWA manifest raster icons: binary by nature and never grep targets.
 // Their SVG source of truth, public/icons/app-icon.svg, remains text and scanned.
+//
+// The two zips are the OGL-quarantine archives: the 3.0 and 3.5 SRD
+// distributions committed as published (e0b8b373), kept binary so their
+// Section 15 provenance can be verified against the originals rather than
+// trusted. Nobody greps inside a zip; the working extracts that ARE grep
+// targets (srd-3.5/psionic-fist.txt, srd-3.5/Legal.txt, the SOURCE.md files)
+// are tracked as plain text and remain scanned. Exemption authorized by
+// owner ruling 2026-08-11.
 const BINARY_EXEMPT: readonly string[] = [
   'public/icons/app-icon-192.png',
   'public/icons/app-icon-512.png',
+  'docs/homebrew/ogl/srd-3.0/SRD-3.0-rtf-PARTIAL.zip',
+  'docs/homebrew/ogl/srd-3.5/SRD-3.5-rtf.zip',
 ];
 
 function isBinaryExempt(path: string): boolean {
