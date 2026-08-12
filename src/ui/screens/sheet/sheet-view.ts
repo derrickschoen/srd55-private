@@ -35,7 +35,10 @@ import {
   type ClassFormulaResourceKind,
   type ClassResourceKind,
 } from '../../../domain/class-resources';
-import type { SheetFeatureValue } from '../../../rules/sheet-feature-values';
+import type {
+  SheetAuthoredResourceMaximum,
+  SheetFeatureValue,
+} from '../../../rules/sheet-feature-values';
 
 export interface SheetHeaderRouteAction {
   readonly label: 'All characters' | 'Level Up' | 'Open planner';
@@ -943,8 +946,11 @@ function resourceComputationText(
 }
 
 function computedResourceLabel(
-  resource: Extract<SheetResourceMaximum, { status: 'computed' }>,
+  resource: Extract<SheetResourceMaximum | SheetAuthoredResourceMaximum, { status: 'computed' }>,
 ): SheetCell[] {
+  if (resource.kind === 'authored') {
+    return [{ text: resource.label, free_text: true }];
+  }
   if (resource.kind === 'spell_slot') {
     return plain(`Level ${String(resource.spell_level)} spell slots`);
   }
@@ -1008,9 +1014,17 @@ function absentResourceCells(
 }
 
 function resourceRows(
-  resources: readonly SheetResourceMaximum[],
+  resources: readonly (SheetResourceMaximum | SheetAuthoredResourceMaximum)[],
 ): readonly SheetRow[] {
   return resources.map((resource): SheetRow => {
+    if (resource.status === 'unavailable') {
+      return {
+        id: resource.id,
+        label: [{ text: resource.label, free_text: true }],
+        value: 'UNKNOWN',
+        detail: plain(`Authored resource maximum unavailable: ${resource.reason}.`),
+      };
+    }
     if (resource.status === 'absent') {
       const cells = absentResourceCells(resource);
       return {
@@ -1018,6 +1032,18 @@ function resourceRows(
         label: cells.label,
         value: null,
         detail: cells.detail,
+      };
+    }
+    if (resource.kind === 'authored') {
+      return {
+        id: resource.id,
+        label: computedResourceLabel(resource),
+        value: String(resource.maximum),
+        detail: plain('Authored pool maximum computed from its typed expression. No usage tracking is stored.'),
+        resource_marking: {
+          shape: resource.marking_shape,
+          maximum: resource.maximum,
+        },
       };
     }
     return {
@@ -1811,12 +1837,19 @@ export function sheetFacts(sheet: CharacterSheet): Record<string, unknown> {
     resources: sheet.resources.flatMap((resource) =>
       resource.status === 'computed'
         ? [
-            {
-              kind: resource.kind,
-              maximum: resource.maximum,
-              class_level: resource.class_level,
-              spell_level: resource.spell_level,
-            },
+            resource.kind === 'authored'
+              ? {
+                  kind: resource.kind,
+                  fact_key: resource.fact_key,
+                  maximum: resource.maximum,
+                  marking_shape: resource.marking_shape,
+                }
+              : {
+                  kind: resource.kind,
+                  maximum: resource.maximum,
+                  class_level: resource.class_level,
+                  spell_level: resource.spell_level,
+                },
           ]
         : [],
     ),

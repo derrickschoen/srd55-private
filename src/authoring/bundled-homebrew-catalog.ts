@@ -305,6 +305,85 @@ const veteranV2: SubclassAuthoringDraft = Object.freeze<SubclassAuthoringDraft>(
   })),
 });
 
+const veteranV3: SubclassAuthoringDraft = Object.freeze<SubclassAuthoringDraft>({
+  ...veteranV2,
+  features: Object.freeze(veteranV2.features.map((feature) => {
+    switch (feature.name) {
+      case 'Deeper Cuts':
+        return Object.freeze({
+          ...feature,
+          contributions: Object.freeze([Object.freeze({
+            kind: 'feature_value_contribution' as const,
+            draft_item_uuid: itemUuid('bundled-veteran-v3-deeper-cuts'),
+            contribution_key: 'deeper-cuts',
+            label: 'Deeper Cuts',
+            target: Object.freeze({
+              kind: 'feature_dice_count' as const,
+              key: 'sneak_attack' as const,
+            }),
+            op: 'add' as const,
+            active_from_level: 3,
+            active_to_level: 20,
+            value: Object.freeze({ kind: 'constant' as const, amount: 1 }),
+            supersedes_contribution_key: null,
+          })]),
+        });
+      case "Veteran's Strike":
+        return Object.freeze({
+          ...feature,
+          contributions: Object.freeze([Object.freeze({
+            kind: 'feature_value_contribution' as const,
+            draft_item_uuid: itemUuid('bundled-veteran-v3-veterans-strike'),
+            contribution_key: 'veterans-strike',
+            label: "Veteran's Strike",
+            target: Object.freeze({
+              kind: 'feature_dice_count' as const,
+              key: 'sneak_attack' as const,
+            }),
+            op: 'add' as const,
+            active_from_level: 9,
+            active_to_level: 20,
+            value: Object.freeze({
+              kind: 'class_level_scale' as const,
+              multiply: 1,
+              divide: 2,
+              round: 'floor' as const,
+            }),
+            supersedes_contribution_key: 'deeper-cuts',
+          })]),
+        });
+      case 'Veteran Reflexes':
+        return Object.freeze({
+          ...feature,
+          contributions: Object.freeze([Object.freeze({
+            kind: 'feature_value_contribution' as const,
+            draft_item_uuid: itemUuid('bundled-veteran-v3-veteran-reflexes'),
+            contribution_key: 'veteran-reflexes',
+            label: 'Veteran Reflexes',
+            target: Object.freeze({
+              kind: 'resource_maximum' as const,
+              display_label: 'Veteran Reflexes',
+              marking_shape: 'boxes' as const,
+            }),
+            op: 'add' as const,
+            active_from_level: 13,
+            active_to_level: 20,
+            value: Object.freeze({
+              kind: 'preserved' as const,
+              expression: Object.freeze({
+                kind: 'ref' as const,
+                source: Object.freeze({ kind: 'proficiency_bonus' as const }),
+              }),
+            }),
+            supersedes_contribution_key: null,
+          })]),
+        });
+      default:
+        return feature;
+    }
+  })),
+});
+
 const barbedCourtV2FixedGrants = Object.freeze(new Map<CharacterLevel, readonly NonNullable<
   SubclassAuthoringDraftProgressionRow['grants']
 >[number][]>([
@@ -420,6 +499,23 @@ const barbedCourtV2: SubclassAuthoringDraft = Object.freeze<SubclassAuthoringDra
   })),
 });
 
+const barbedCourtV3: SubclassAuthoringDraft = Object.freeze<SubclassAuthoringDraft>({
+  ...barbedCourtV2,
+  progression: barbedCourtV2.progression.mode === 'override'
+    ? Object.freeze({
+        ...barbedCourtV2.progression,
+        rows: Object.freeze(barbedCourtV2.progression.rows.map((row) => Object.freeze({
+          ...row,
+          grants: Object.freeze(row.grants.map((grant) =>
+            grant.kind === 'choice_from_list' &&
+              grant.rule_key === 'barbed-court-prepared-spells'
+              ? Object.freeze({ ...grant, bucket: 'prepared' as const })
+              : grant)),
+        }))),
+      })
+    : barbedCourtV2.progression,
+});
+
 function spellStudentRevision(
   explicitSpellLevels: boolean,
 ): SubclassAuthoringDraft {
@@ -481,11 +577,11 @@ const spellStudentV2 = spellStudentRevision(true);
 export const BUNDLED_HOMEBREW_CATALOG = Object.freeze([
   Object.freeze({
     catalog_key: 'veteran',
-    revisions: Object.freeze([veteranV1, veteranV2] as const),
+    revisions: Object.freeze([veteranV1, veteranV2, veteranV3] as const),
   }),
   Object.freeze({
     catalog_key: 'warrior-of-the-barbed-court',
-    revisions: Object.freeze([barbedCourtV1, barbedCourtV2] as const),
+    revisions: Object.freeze([barbedCourtV1, barbedCourtV2, barbedCourtV3] as const),
   }),
   Object.freeze({
     catalog_key: 'spell-student',

@@ -248,6 +248,7 @@ function emptyGrant(
         rule_key: '',
         list: '',
         count: null,
+        bucket: 'known',
         minimum_spell_level: null,
         maximum_spell_level: null,
       };
@@ -259,6 +260,7 @@ function emptyGrant(
         schools: [],
         tags: [],
         count: null,
+        bucket: 'known',
         minimum_spell_level: null,
         maximum_spell_level: null,
       };
@@ -874,6 +876,22 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
             ...labelledControl('Always prepared', prepared.id, prepared),
           );
         } else if (grant.kind === 'choice_from_list') {
+          const bucket = element('select', {
+            attributes: {
+              id: `${prefix}-bucket`,
+              ...pathAttribute(['progression', 'rows', rowIndex, 'grants', grantIndex, 'bucket']),
+            },
+          });
+          bucket.append(
+            element('option', { text: 'Known', attributes: { value: 'known' } }),
+            element('option', { text: 'Prepared', attributes: { value: 'prepared' } }),
+          );
+          bucket.value = grant.bucket ?? 'known';
+          bucket.addEventListener('change', () => {
+            if (bucket.value === 'known' || bucket.value === 'prepared') {
+              changeGrant('bucket', bucket.value);
+            }
+          });
           const count = element('input', {
             attributes: {
               id: `${prefix}-count`, type: 'number', min: '1', step: '1', required: '',
@@ -902,11 +920,28 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
           maximum.value = grant.maximum_spell_level === null ? '' : String(grant.maximum_spell_level);
           maximum.addEventListener('input', () => changeGrant('maximum_spell_level', nullableInteger(maximum.value)));
           card.append(
+            ...labelledControl('Spell handling', bucket.id, bucket),
             ...labelledControl('Number of spells', count.id, count),
             ...labelledControl('Minimum spell level (optional)', minimum.id, minimum),
             ...labelledControl('Maximum spell level (optional)', maximum.id, maximum),
           );
         } else {
+          const bucket = element('select', {
+            attributes: {
+              id: `${prefix}-bucket`,
+              ...pathAttribute(['progression', 'rows', rowIndex, 'grants', grantIndex, 'bucket']),
+            },
+          });
+          bucket.append(
+            element('option', { text: 'Known', attributes: { value: 'known' } }),
+            element('option', { text: 'Prepared', attributes: { value: 'prepared' } }),
+          );
+          bucket.value = grant.bucket ?? 'known';
+          bucket.addEventListener('change', () => {
+            if (bucket.value === 'known' || bucket.value === 'prepared') {
+              changeGrant('bucket', bucket.value);
+            }
+          });
           const schools = element('textarea', {
             attributes: {
               id: `${prefix}-schools`,
@@ -950,6 +985,7 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
           maximum.value = grant.maximum_spell_level === null ? '' : String(grant.maximum_spell_level);
           maximum.addEventListener('input', () => changeGrant('maximum_spell_level', nullableInteger(maximum.value)));
           card.append(
+            ...labelledControl('Spell handling', bucket.id, bucket),
             ...labelledControl('Schools (known or custom, one per line)', schools.id, schools),
             element('p', { text: `Known schools: ${spellSchools.join(', ')}.` }),
             ...labelledControl('Tags (one per line)', tags.id, tags),

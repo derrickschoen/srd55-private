@@ -119,6 +119,7 @@ const listGrant = z.strictObject({
   rule_key: ruleKey,
   list: shortText,
   count: nullableInteger(1, AUTHORING_LIST_LIMITS.grants),
+  bucket: z.enum(['known', 'prepared']).optional(),
   minimum_spell_level: nullableInteger(
     AUTHORING_NUMERIC_LIMITS.minimumSpellLevel,
     AUTHORING_NUMERIC_LIMITS.maximumSpellLevel,
@@ -137,6 +138,7 @@ const queryGrant = z.strictObject({
     .array(codePointText(AUTHORING_TEXT_LIMITS.queryTag))
     .max(AUTHORING_LIST_LIMITS.queryValues),
   count: nullableInteger(1, AUTHORING_LIST_LIMITS.grants),
+  bucket: z.enum(['known', 'prepared']).optional(),
   minimum_spell_level: nullableInteger(
     AUTHORING_NUMERIC_LIMITS.minimumSpellLevel,
     AUTHORING_NUMERIC_LIMITS.maximumSpellLevel,

@@ -38,6 +38,7 @@ import {
 } from '../../../src/catalog/content-identity';
 import { featProjectorV1Vector } from '../../unit/catalog/fixtures/source-projector-v1-vectors';
 import { SpellSelectionService } from '../../../src/eligibility/spell-selection-service';
+import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
 import { eligibilityInvalidReasons } from '../../../src/eligibility/spell-selection-eligibility';
 import { sha256 } from '../../../src/crypto/sha256';
 
@@ -66,6 +67,13 @@ function spellStudentEntry(): BundledHomebrewCatalogEntry<SubclassAuthoringDraft
   const entry = BUNDLED_HOMEBREW_CATALOG.find((candidate) =>
     candidate.catalog_key === 'spell-student');
   if (entry === undefined) throw new Error('Spell Student catalog entry is missing.');
+  return entry;
+}
+
+function veteranEntry(): BundledHomebrewCatalogEntry<SubclassAuthoringDraft> {
+  const entry = BUNDLED_HOMEBREW_CATALOG.find((candidate) =>
+    candidate.catalog_key === 'veteran');
+  if (entry === undefined) throw new Error('Veteran catalog entry is missing.');
   return entry;
 }
 
@@ -265,7 +273,7 @@ describe('bundled authored-kind installer', () => {
       '8d36536109be8768e2c274958b1ee9eb70a74cb37a988c7f27e88eebb0d8d84a',
     );
     expect(firstPlan.inputHash).toBe(
-      'fc3d16cb869924581fc66a4191ec59ec3b323ee5730a10404b80cfe90537b34a',
+      'f0a5206baf3735ecbb8c8a0edef51f5ac30affbcca4c4a6d3ebcc14b13f5372e',
     );
 
     expect(firstPlan.entries.map((entry) => [entry.name, entry.outcome, entry.error])).toEqual([
@@ -275,10 +283,16 @@ describe('bundled authored-kind installer', () => {
     ]);
     expect(commitBundledHomebrewInstall(db, firstPlan.token)).toMatchObject({
       kind: 'committed',
-      outcomes: [{ kind: 'create' }, { kind: 'create' }, { kind: 'create' }],
+      outcomes: [{
+        kind: 'create',
+        contentKey: '2024:content.subclass:veteran-bundled-revision-3',
+      }, {
+        kind: 'create',
+        contentKey: '2024:content.subclass:warrior-of-the-barbed-court-bundled-revision-3',
+      }, { kind: 'create' }],
     });
     expect(db.scalar<number>("SELECT count(*) FROM catalog_content_identities WHERE catalog_layer = 'external'"))
-      .toBe((beforeRoots ?? 0) + 6);
+      .toBe((beforeRoots ?? 0) + 8);
     expect(db.allRaw(
       `SELECT superseded_content_key, successor_content_key
        FROM catalog_content_supersessions WHERE content_kind = 'subclass'`,
@@ -292,8 +306,16 @@ describe('bundled authored-kind installer', () => {
         successor_content_key: '2024:content.subclass:veteran-bundled-revision-2',
       },
       {
+        superseded_content_key: '2024:content.subclass:veteran-bundled-revision-2',
+        successor_content_key: '2024:content.subclass:veteran-bundled-revision-3',
+      },
+      {
         superseded_content_key: '2024:content.subclass:warrior-of-the-barbed-court',
         successor_content_key: '2024:content.subclass:warrior-of-the-barbed-court-bundled-revision-2',
+      },
+      {
+        superseded_content_key: '2024:content.subclass:warrior-of-the-barbed-court-bundled-revision-2',
+        successor_content_key: '2024:content.subclass:warrior-of-the-barbed-court-bundled-revision-3',
       },
     ]);
     expect(db.scalar<number>('SELECT count(*) FROM catalog_content_drafts')).toBe(0);
@@ -308,8 +330,84 @@ describe('bundled authored-kind installer', () => {
       outcomes: [{ kind: 'match' }, { kind: 'match' }, { kind: 'match' }],
     });
     expect(db.scalar<number>('SELECT count(*) FROM catalog_content_identities')).toBe(rootsAfterFirst);
-    expect(db.scalar<number>('SELECT count(*) FROM catalog_content_supersessions')).toBe(3);
+    expect(db.scalar<number>('SELECT count(*) FROM catalog_content_supersessions')).toBe(5);
     expect(db.scalar<number>('SELECT count(*) FROM catalog_content_drafts')).toBe(0);
+  }, 20_000);
+
+  it('upgrades Veteran v2 to v3 while retaining the v2 character bytes and exposing replacement review', async () => {
+    const db = await database();
+    const entry = veteranEntry();
+    const first = entry.revisions[0];
+    const second = entry.revisions[1];
+    const third = entry.revisions[2];
+    if (first === undefined || second === undefined || third === undefined) {
+      throw new Error('Veteran requires v1, v2, and v3 revisions.');
+    }
+    const v2 = Object.freeze([Object.freeze({
+      catalog_key: entry.catalog_key,
+      revisions: Object.freeze([first, second] as const),
+    })] as const satisfies readonly BundledHomebrewCatalogEntry[]);
+    const v3 = Object.freeze([entry] as const satisfies readonly BundledHomebrewCatalogEntry[]);
+
+    const initialPlan = planBundledHomebrewInstall(db, v2);
+    const initial = commitBundledHomebrewInstall(db, initialPlan.token, v2);
+    if (initial.kind !== 'committed' || initial.outcomes[0]?.kind !== 'create') {
+      throw new Error('Veteran v2 install failed.');
+    }
+    const v2Key = initial.outcomes[0].contentKey;
+    expect(v2Key).toBe('2024:content.subclass:veteran-bundled-revision-2');
+    const characterId = applySubclass(db, v2Key, 13);
+    const before = projectStoredAuthoredContentV1(db, {
+      kind: 'subclass',
+      contentKey: v2Key,
+      references: storedAuthoredRegistryReferencesV1(db),
+    });
+
+    const upgradePlan = planBundledHomebrewInstall(db, v3);
+    expect(upgradePlan.entries).toEqual([
+      expect.objectContaining({ catalog_key: 'veteran', outcome: 'successor' }),
+    ]);
+    const upgraded = commitBundledHomebrewInstall(db, upgradePlan.token, v3);
+    if (upgraded.kind !== 'committed' || upgraded.outcomes[0]?.kind !== 'create') {
+      throw new Error('Veteran v3 upgrade failed.');
+    }
+    const v3Key = upgraded.outcomes[0].contentKey;
+    expect(v3Key).toBe('2024:content.subclass:veteran-bundled-revision-3');
+    expect(db.oneRaw(
+      `SELECT level.character_id, subclass.content_key
+         FROM character_class_levels AS level
+         JOIN subclass_definitions AS subclass
+           ON subclass.id = level.subclass_definition_id
+        WHERE level.character_id = ?`,
+      [characterId],
+    )).toEqual({ character_id: characterId, content_key: v2Key });
+    expect(projectStoredAuthoredContentV1(db, {
+      kind: 'subclass',
+      contentKey: v2Key,
+      references: storedAuthoredRegistryReferencesV1(db),
+    })).toEqual(before);
+
+    const review = new CatalogAuthoringService(db).previewReplacementSet({
+      old_content_key: v2Key,
+      new_content_key: v3Key,
+    });
+    expect(review.replacements).toEqual([
+      expect.objectContaining({
+        facts: expect.objectContaining({ character_id: characterId }),
+        review: [expect.objectContaining({
+          candidate_content_key: v3Key,
+          candidate_catalog_layer: 'external',
+          reason: 'installed-target',
+        })],
+      }),
+    ]);
+
+    const repeated = planBundledHomebrewInstall(db, v3);
+    expect(repeated.entries[0]?.outcome).toBe('matched_existing');
+    expect(commitBundledHomebrewInstall(db, repeated.token, v3)).toMatchObject({
+      kind: 'committed',
+      outcomes: [{ kind: 'match', contentKey: v3Key }],
+    });
   }, 20_000);
 
   it('publishes and applies Barbed Court as a Wisdom third-caster with its curated grants', async () => {
@@ -326,7 +424,7 @@ describe('bundled authored-kind installer', () => {
     const report = new BuildReportBuilder(db).build(characterId);
     expect(report.classes[0]).toMatchObject({
       name: 'Monk',
-      subclass: 'Warrior of the Barbed Court (Bundled revision 2)',
+      subclass: 'Warrior of the Barbed Court (Bundled revision 3)',
       class_level: 7,
       spellcasting_ability: 'wisdom',
       progression_type: 'third_up',
@@ -371,8 +469,25 @@ describe('bundled authored-kind installer', () => {
       [characterId],
     )).toEqual([
       { rule_key: 'barbed-court-cantrips', bucket: 'known', slot_count: 2 },
-      { rule_key: 'barbed-court-prepared-spells', bucket: 'known', slot_count: 7 },
+      { rule_key: 'barbed-court-prepared-spells', bucket: 'prepared', slot_count: 7 },
     ]);
+    const preparedSlotId = db.scalar<number>(
+      `SELECT id FROM spell_selection_slots
+       WHERE character_id = ? AND rule_key = 'barbed-court-prepared-spells'
+       ORDER BY ordinal LIMIT 1`,
+      [characterId],
+    );
+    const healingWordId = db.scalar<number>(
+      "SELECT id FROM spell_versions WHERE display_name = 'Healing Word' AND rules_edition = '2024'",
+    );
+    if (preparedSlotId === null || healingWordId === null) {
+      throw new Error('Barbed Court prepared-spell fixture is missing.');
+    }
+    new SpellSelectionService(db).select(preparedSlotId, healingWordId);
+    const selected = new CharacterSheetBuilder(db).build(characterId).spells
+      .flatMap((group) => group.spells)
+      .find((spell) => spell.name === 'Healing Word');
+    expect(selected).toMatchObject({ marker: 'prepared' });
     expect(db.oneRaw(
       `SELECT effect.effect_kind, effect.amount, effect.label,
               identity.catalog_layer
@@ -416,6 +531,11 @@ describe('bundled authored-kind installer', () => {
       [oldKeys[0]!],
     );
     expect(oldVeteranStrike).toContain('doubled');
+    const oldVeteranProjection = projectStoredAuthoredContentV1(db, {
+      kind: 'subclass',
+      contentKey: oldKeys[0]!,
+      references: storedAuthoredRegistryReferencesV1(db),
+    });
 
     const successorPlan = planBundledHomebrewInstall(db, entries);
     expect(successorPlan.entries.map((entry) => [entry.catalog_key, entry.outcome])).toEqual([
@@ -448,6 +568,11 @@ describe('bundled authored-kind installer', () => {
        WHERE subclass.content_key = ? AND feature.name = 'Veteran''s Strike'`,
       [oldKeys[0]!],
     )).toBe(oldVeteranStrike);
+    expect(projectStoredAuthoredContentV1(db, {
+      kind: 'subclass',
+      contentKey: oldKeys[0]!,
+      references: storedAuthoredRegistryReferencesV1(db),
+    })).toEqual(oldVeteranProjection);
 
     const authoring = new CatalogAuthoringService(db);
     for (const [index, oldKey] of oldKeys.entries()) {
@@ -779,7 +904,7 @@ describe('bundled authored-kind installer', () => {
         kind: 'subclass',
         content_key: barbedCourt.contentKey,
         aggregate: expect.objectContaining({
-          name: 'Warrior of the Barbed Court (Bundled revision 2)',
+          name: 'Warrior of the Barbed Court (Bundled revision 3)',
         }),
       }),
       expect.objectContaining({
@@ -813,6 +938,14 @@ describe('bundled authored-kind installer', () => {
           '2024:content.subclass:warrior-of-the-barbed-court-bundled-revision-2',
         recorded_at: expect.any(String),
       },
+      {
+        content_kind: 'subclass',
+        superseded_content_key:
+          '2024:content.subclass:warrior-of-the-barbed-court-bundled-revision-2',
+        successor_content_key:
+          '2024:content.subclass:warrior-of-the-barbed-court-bundled-revision-3',
+        recorded_at: expect.any(String),
+      },
     ]);
     const sourceProjection = projectStoredAuthoredContentV1(source, {
       kind: 'subclass',
@@ -843,7 +976,7 @@ describe('bundled authored-kind installer', () => {
       [imported.characterId],
     );
     expect(importedDefinition).toMatchObject({
-      name: 'Warrior of the Barbed Court (Bundled revision 2)',
+      name: 'Warrior of the Barbed Court (Bundled revision 3)',
       catalog_layer: 'external',
     });
     expect(target.allRaw(

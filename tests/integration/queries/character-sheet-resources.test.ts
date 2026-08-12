@@ -83,12 +83,12 @@ describe('character sheet resource projection', () => {
   }
 
   function computed(
-    resources: readonly SheetResourceMaximum[],
+    resources: CharacterSheet['resources'],
     kind: string,
   ): Extract<SheetResourceMaximum, { status: 'computed' }>[] {
     return resources.filter(
       (entry): entry is Extract<SheetResourceMaximum, { status: 'computed' }> =>
-        entry.status === 'computed' && entry.kind === kind,
+        entry.status === 'computed' && entry.kind !== 'authored' && entry.kind === kind,
     );
   }
 
@@ -316,6 +316,7 @@ describe('character sheet resource projection', () => {
     const actual = sheet.resources.flatMap((resource) => {
       if (
         resource.status !== 'computed' ||
+        resource.kind === 'authored' ||
         resource.kind === 'spell_slot' ||
         resource.kind === 'pact_slot'
       ) {

@@ -6,6 +6,33 @@ import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-buil
 import { sheetFacts, sheetSections } from '../../../src/ui/screens/sheet/sheet-view';
 import { openTestDatabase } from '../../helpers/open-db';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
+import classLevelTables from '../../../docs/srd/source/class-level-tables.txt?raw';
+import veteranPlayer from '../../../docs/homebrew/cc-by/veteran-player.md?raw';
+import { BUNDLED_HOMEBREW_CATALOG } from '../../../src/authoring/bundled-homebrew-catalog';
+import {
+  commitBundledHomebrewInstall,
+  planBundledHomebrewInstall,
+} from '../../../src/authoring/bundled-homebrew-installer';
+
+interface RogueSourceRow {
+  readonly level: number;
+  readonly proficiencyBonus: number;
+  readonly sneakAttackDice: number;
+}
+
+function rogueSourceRows(): readonly RogueSourceRow[] {
+  const start = classLevelTables.indexOf('=== Rogue Features table');
+  const end = classLevelTables.indexOf('=== Sorcerer Features table', start);
+  if (start < 0 || end < 0) throw new Error('The bounded Rogue source table is missing.');
+  return classLevelTables.slice(start, end).split('\n').flatMap((line) => {
+    const match = /^\s*(?<level>[1-9]|1\d|20)\s+\+(?<pb>[2-6]).*\s(?<dice>\d+)d6\s*$/u.exec(line);
+    return match?.groups === undefined ? [] : [{
+      level: Number(match.groups.level),
+      proficiencyBonus: Number(match.groups.pb),
+      sneakAttackDice: Number(match.groups.dice),
+    }];
+  });
+}
 
 describe('character sheet feature-value projection', () => {
   let connection: Database;
@@ -310,4 +337,97 @@ describe('character sheet feature-value projection', () => {
       reason: 'duplicate_source',
     }]);
   });
+
+  it('derives Veteran v3 Sneak Attack correspondence and Reflexes maxima from the two source documents', () => {
+    expect(veteranPlayer).toMatch(/Your Sneak Attack. deals one extra die of damage\./u);
+    expect(veteranPlayer).toMatch(/Your Sneak Attack dice equal your Rogue level/u);
+    expect(veteranPlayer).toContain('This replaces Deeper Cuts.');
+    expect(veteranPlayer).toMatch(/a number of times equal to your Proficiency\s+Bonus/u);
+
+    const catalog = BUNDLED_HOMEBREW_CATALOG.filter(
+      (entry) => entry.catalog_key === 'veteran',
+    );
+    const plan = planBundledHomebrewInstall(db, catalog);
+    const installed = commitBundledHomebrewInstall(db, plan.token, catalog);
+    if (installed.kind !== 'committed') throw new Error('Veteran v3 install failed.');
+    const outcome = installed.outcomes[0];
+    if (outcome?.kind !== 'create') throw new Error('Veteran v3 was not freshly created.');
+    const subclassId = db.scalar<number>(
+      'SELECT id FROM subclass_definitions WHERE content_key = ?',
+      [outcome.contentKey],
+    );
+    if (subclassId === null) throw new Error('Veteran v3 definition is missing.');
+
+    const rows = rogueSourceRows();
+    expect(rows).toHaveLength(20);
+    const id = character(3);
+    db.exec(
+      'UPDATE character_class_levels SET subclass_definition_id = ? WHERE character_id = ?',
+      [subclassId, id],
+    );
+    for (const source of rows.filter(({ level }) => level >= 3)) {
+      db.exec(
+        'UPDATE character_class_levels SET level = ? WHERE character_id = ?',
+        [source.level, id],
+      );
+      const sheet = builder.build(id);
+      const sneakAttack = sheet.feature_values.find((value) => value.key === 'sneak_attack');
+      if (sneakAttack?.status !== 'computed' || 'kind' in sneakAttack) {
+        throw new Error(`Veteran Sneak Attack is unavailable at level ${String(source.level)}.`);
+      }
+      const appliedSum = sneakAttack.terms.reduce(
+        (sum, term) => term.status === 'applied' ? sum + term.contribution : sum,
+        0,
+      );
+      if (source.level < 9) {
+        expect(sneakAttack.value).toBe(source.sneakAttackDice + 1);
+        expect(appliedSum).toBe(source.sneakAttackDice + 1);
+      } else {
+        expect(source.sneakAttackDice + Math.floor(source.level / 2))
+          .toBe(source.level);
+        expect(sneakAttack.value).toBe(source.level);
+        expect(appliedSum).toBe(source.level);
+        expect(sneakAttack.terms).toEqual([
+          expect.objectContaining({ label: 'Sneak Attack', status: 'applied' }),
+          expect.objectContaining({
+            label: 'Deeper Cuts',
+            status: { superseded_by: expect.any(Object) },
+          }),
+          expect.objectContaining({ label: "Veteran's Strike", status: 'applied' }),
+        ]);
+      }
+      const reflexes = sheet.resources.find(
+        (resource) => resource.kind === 'authored' && resource.label === 'Veteran Reflexes',
+      );
+      if (source.level < 13) {
+        expect(reflexes).toBeUndefined();
+      } else {
+        expect(reflexes).toMatchObject({
+          status: 'computed',
+          fact_key:
+            '2024:content.subclass:veteran-bundled-revision-3\u0000veteran-reflexes',
+          maximum: source.proficiencyBonus,
+          marking_shape: 'boxes',
+        });
+        const readable = sheetSections(sheet)
+          .flatMap((section) => section.rows ?? [])
+          .find((row) => row.id === reflexes?.id);
+        expect(readable).toMatchObject({
+          label: [{ text: 'Veteran Reflexes', free_text: true }],
+          value: String(source.proficiencyBonus),
+          resource_marking: {
+            shape: 'boxes',
+            maximum: source.proficiencyBonus,
+          },
+        });
+        expect(sheetFacts(sheet).resources).toContainEqual({
+          kind: 'authored',
+          fact_key:
+            '2024:content.subclass:veteran-bundled-revision-3\u0000veteran-reflexes',
+          maximum: source.proficiencyBonus,
+          marking_shape: 'boxes',
+        });
+      }
+    }
+  }, 20_000);
 });

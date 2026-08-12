@@ -223,7 +223,7 @@ describe('persisted class progression catalog', () => {
       kind: 'committed',
       outcomes: [{
         kind: 'create',
-        contentKey: '2024:content.subclass:veteran-bundled-revision-2',
+        contentKey: '2024:content.subclass:veteran-bundled-revision-3',
       }],
     });
     expect(
@@ -233,7 +233,7 @@ describe('persisted class progression catalog', () => {
            FROM subclass_features AS feature
            JOIN subclass_definitions AS subclass
              ON subclass.id = feature.subclass_definition_id
-          WHERE subclass.content_key = '2024:content.subclass:veteran-bundled-revision-2'
+          WHERE subclass.content_key = '2024:content.subclass:veteran-bundled-revision-3'
           ORDER BY feature.sort_order`,
       ),
     ).toEqual([
@@ -264,15 +264,22 @@ describe('persisted class progression catalog', () => {
                    JOIN subclass_features AS feature
                      ON feature.id = effect.subclass_feature_id
                   WHERE feature.subclass_definition_id = subclass.id)
-                  AS feature_effect_rows
+                  AS feature_effect_rows,
+                (SELECT count(*)
+                   FROM subclass_feature_value_contributions AS contribution
+                   JOIN subclass_features AS feature
+                     ON feature.id = contribution.subclass_feature_id
+                  WHERE feature.subclass_definition_id = subclass.id)
+                  AS feature_value_contribution_rows
            FROM subclass_definitions AS subclass
-          WHERE subclass.content_key = '2024:content.subclass:veteran-bundled-revision-2'`,
+          WHERE subclass.content_key = '2024:content.subclass:veteran-bundled-revision-3'`,
       ),
     ).toEqual({
       spellcasting_ability: null,
       caster_fraction: null,
       progression_rows: 0,
       feature_effect_rows: 0,
+      feature_value_contribution_rows: 3,
     });
   }, 20_000);
 
@@ -289,7 +296,7 @@ describe('persisted class progression catalog', () => {
          FROM subclass_definitions AS subclass
          JOIN subclass_features AS feature
            ON feature.subclass_definition_id = subclass.id
-        WHERE subclass.content_key = '2024:content.subclass:veteran-bundled-revision-2'
+        WHERE subclass.content_key = '2024:content.subclass:veteran-bundled-revision-3'
         ORDER BY feature.sort_order`,
     );
 
@@ -306,7 +313,7 @@ describe('persisted class progression catalog', () => {
            FROM subclass_definitions AS subclass
            JOIN subclass_features AS feature
              ON feature.subclass_definition_id = subclass.id
-          WHERE subclass.content_key = '2024:content.subclass:veteran-bundled-revision-2'
+          WHERE subclass.content_key = '2024:content.subclass:veteran-bundled-revision-3'
           ORDER BY feature.sort_order`,
       ),
     ).toEqual(before);
