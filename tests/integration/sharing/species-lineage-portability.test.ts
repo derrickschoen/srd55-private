@@ -13,6 +13,7 @@ import {
 import { createShareClient } from '../../../src/sharing/client';
 import {
   decodeShareFragment,
+  positionalToShareDocument,
   shareDocumentToPositional,
   shareDocumentToReferencePositional,
 } from '../../../src/sharing/codec';
@@ -145,11 +146,12 @@ describe('lineage-chosen character sharing', () => {
 
   // Measured alone at 2.2s; 2.2 × 1.5 = 3.3s. The 20s guard follows the
   // repository convention for boot-heavy integration tests over 1.5s.
-  it('falls back byte-frozen to v17 and restores the exact choice after the named library import', async () => {
+  it('decodes the pre-name v17 shape, emits a named v17 fallback, and restores the exact choice after library import', async () => {
     const source = await database();
+    const speciesName = 'Oversized Portable Elf';
     const library = portableElfLibraryDocument(source, {
       contentKey: OVERSIZED_PORTABLE_ELF_KEY,
-      name: 'Oversized Portable Elf',
+      name: speciesName,
       oversized: true,
     });
     importLibraryDocument(source, library);
@@ -160,6 +162,43 @@ describe('lineage-chosen character sharing', () => {
     );
     const exported = exportCharacterShare(source, sourceId);
 
+    // OLD V17 INPUT ACCEPTANCE IS INDEPENDENT OF TODAY'S EMISSION. Before
+    // S6-09 the optional source-name slot was null; that shape must continue
+    // to decode without inventing a name or losing the configured choice.
+    const preNameV17 = shareDocumentToReferencePositional(exported);
+    const preNameSources = preNameV17[4];
+    if (!Array.isArray(preNameSources) || !Array.isArray(preNameSources[0])) {
+      throw new Error('Expected the fixture species source in v17.');
+    }
+    expect(preNameSources[0][5]).toBeNull();
+    const preNameDecoded = positionalToShareDocument(preNameV17);
+    expect(exactShareChoice(preNameDecoded)).toEqual({
+      source: expect.objectContaining({
+        type: 'species',
+        key: OVERSIZED_PORTABLE_ELF_KEY,
+        config: {
+          ...EXPECTED_LEVEL_FIVE_HIGH_ELF.config,
+          source_content_key: OVERSIZED_PORTABLE_ELF_KEY,
+        },
+      }),
+      selections: [{
+        ref: expect.any(Number),
+        ruleKey: 'elf-lineage:replaceable_spell',
+        ordinal: 1,
+        spellKey: CHOSEN_HIGH_ELF_CANTRIP_KEY,
+      }],
+    });
+
+    // NEW V17 EMISSION differs only in the existing optional source-name slot.
+    // Build the expectation from the authored fixture, never from the emitted
+    // fragment under test.
+    const expectedNamedV17 = structuredClone(preNameV17);
+    const expectedSources = expectedNamedV17[4];
+    if (!Array.isArray(expectedSources) || !Array.isArray(expectedSources[0])) {
+      throw new Error('Expected the fixture species source in v17.');
+    }
+    expectedSources[0][5] = speciesName;
+
     const encoded = await clientFor(exported).createFragmentResult(sourceId);
     expect(encoded).toEqual({
       kind: 'encoded',
@@ -168,13 +207,13 @@ describe('lineage-chosen character sharing', () => {
       omittedContent: [{
         kind: 'species',
         contentKey: OVERSIZED_PORTABLE_ELF_KEY,
+        name: speciesName,
       }],
     });
     if (encoded.kind !== 'encoded') throw new Error('Expected a v17 fallback.');
     const decoded = await decodeShareFragment(encoded.fragment);
     const positional = shareDocumentToReferencePositional(decoded);
-    expect(positional[1]).toBe(17);
-    expect(positional).toHaveLength(21);
+    expect(positional).toEqual(expectedNamedV17);
     expect(decoded.portableContent).toBeUndefined();
     expect(exactShareChoice(decoded)).toEqual({
       source: expect.objectContaining({
@@ -197,13 +236,15 @@ describe('lineage-chosen character sharing', () => {
     expect(assessImportCompatibility(target, decoded)).toEqual([{
       code: 'missing_source',
       contentKeys: [OVERSIZED_PORTABLE_ELF_KEY],
-      summary: 'This character uses a species that is not in your library.',
+      contentName: speciesName,
+      summary:
+        `This character uses ${speciesName}, which is not in your library.`,
       remedy:
-        'Ask the sender for a library JSON containing this species, import it, then retry this share.',
+        `Ask the sender for a library JSON containing ${speciesName}, import it, then retry this share.`,
       remedyKind: 'library-json',
     }]);
     expect(() => importCharacterShare(target, decoded)).toThrow(
-      'Cannot import this character: This character uses a species that is not in your library.',
+      `Cannot import this character: This character uses ${speciesName}, which is not in your library.`,
     );
     importLibraryDocument(target, library);
     const preview = previewCharacterShare(target, decoded);
@@ -239,6 +280,6 @@ describe('lineage-chosen character sharing', () => {
     });
     expect(exactShareChoice(
       exportCharacterShare(target, imported.characterId),
-    )).toEqual(exactShareChoice(decoded));
+    )).toEqual(exactShareChoice(preNameDecoded));
   }, 20_000);
 });
