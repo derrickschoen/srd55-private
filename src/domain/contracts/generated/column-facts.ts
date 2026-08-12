@@ -157,6 +157,13 @@ export const COLUMN_FACTS = {
     attribution_text: { base: 'degraded', notNull: false },
     recorded_at: { base: 'degraded', notNull: true },
   },
+  catalog_content_replacement_choices: {
+    content_kind: { base: 'degraded', notNull: true },
+    superseded_content_key: { base: 'degraded', notNull: true },
+    successor_content_key: { base: 'degraded', notNull: true },
+    character_id: { base: 'integer', notNull: true },
+    decided_at: { base: 'degraded', notNull: true },
+  },
   catalog_content_supersessions: {
     content_kind: { base: 'degraded', notNull: true },
     superseded_content_key: { base: 'degraded', notNull: true },

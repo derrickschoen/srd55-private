@@ -31,10 +31,71 @@ import type { BundledHomebrewInstallPlan } from '../../../authoring/bundled-home
 import { LIBRARY_EXPORT_FORMAT } from '../../../backup/portable-content';
 import { canonicalJson } from '../../../commands/canonical-json';
 import { announceTransferFailure } from './transfer-failure';
+import { freeTextSpan } from '../../free-text';
 
 export const LIBRARY_IMPORT_ROUTE = '/?import=library';
 export const CATALOG_IMPORT_ROUTE = '/?import=catalog';
 export const BUNDLED_HOMEBREW_IMPORT_ROUTE = '/?import=bundled-homebrew';
+
+function libraryArrivalReview(plan: ContentImportPlan): HTMLElement {
+  const lineages = plan.incomingLineages ?? plan.incomingContent.map((entry) => ({
+    kind: entry.kind,
+    versions: [{ id: entry.id, name: entry.name, used_by_character: false }],
+  }));
+  const list = element('ul');
+  for (const lineage of lineages) {
+    const latest = lineage.versions.at(-1);
+    if (latest === undefined) continue;
+    const item = element('li');
+    item.append(
+      freeTextSpan(latest.name),
+      ` — ${lineage.kind}; ${String(lineage.versions.length)} ` +
+        `version${lineage.versions.length === 1 ? '' : 's'}`,
+    );
+    const outcomeLabels = new Set(lineage.versions.map((version) => {
+      const outcome = plan.outcomes.find((entry) => entry.id === version.id);
+      switch (outcome?.kind) {
+        case 'create': return 'will be added';
+        case 'match':
+        case 'remembered-match':
+        case 'remembered-clone': return 'already in this library';
+        case 'review': return 'needs a choice before import';
+        case 'refused': return 'cannot be imported';
+        case undefined: return 'will be reviewed during import';
+      }
+    }));
+    item.append(` — ${[...outcomeLabels].join('; ')}`);
+    if (lineage.versions.length > 1) {
+      const history = element('details');
+      history.append(element('summary', { text: 'Version history' }));
+      const versions = element('ol');
+      for (const version of lineage.versions) {
+        const versionItem = element('li');
+        versionItem.append(freeTextSpan(version.name));
+        versions.append(versionItem);
+      }
+      history.append(versions);
+      item.append(history);
+    }
+    list.append(item);
+  }
+  if (lineages.length === 0) {
+    list.append(element('li', { text: 'This file contains no library content.' }));
+  }
+  return element('section', {
+    className: 'library-arrival-review',
+    attributes: { 'aria-label': 'Library contents' },
+  }, [
+    element('h3', { text: 'What will arrive' }),
+    element('p', {
+      text: 'From: a library file selected on this device. The file does not record the sender’s name.',
+    }),
+    element('p', {
+      text: 'Only reusable content is included; this import does not add characters.',
+    }),
+    list,
+  ]);
+}
 
 export interface ReadableFile {
   readonly name: string;
@@ -540,31 +601,17 @@ export function createImportBackupControls(
           throw new TypeError('Choose a library JSON export.');
         }
         const prepared = await controller.prepareLibraryImport(file);
-        const directImport = services.backup.importLibrary;
         const replan = services.backup.planLibraryImport;
         const commit = services.backup.commitLibraryImport;
-        if (
-          directImport === undefined || replan === undefined ||
-          commit === undefined
-        ) {
+        if (replan === undefined || commit === undefined) {
           throw new TypeError('Library import services are unavailable.');
-        }
-        const hasRefusal = prepared.plan.outcomes.some(
-          (outcome) => outcome.kind === 'refused',
-        );
-        if (prepared.plan.reviews.length === 0 && !hasRefusal) {
-          const result = await directImport(prepared.document);
-          await options.onPersistedChange();
-          libraryInput.value = '';
-          return importSuccess(
-            `Library imported: ${librarySummary(result.outcomes)}.` +
-              historicalLibraryLifecycleDisclosure(prepared.document),
-          );
         }
         adoptionCleanup?.();
         const rendered = createContentAdoptionDialog({
           mount: root,
           plan: prepared.plan,
+          commitLabel: 'Import library',
+          renderPlanDetails: libraryArrivalReview,
           replan: (choices) => replan(prepared.document, choices),
           commit: (plan, choices) => commit(
             prepared.document,
@@ -582,9 +629,7 @@ export function createImportBackupControls(
           onCancel: () => announce('Library import cancelled.'),
         });
         adoptionCleanup = rendered.cleanup;
-        return prepared.plan.reviews.length === 0
-          ? 'Review the refused library import before continuing.'
-          : 'Review each colliding library entry before importing.';
+        return 'Review what is arriving before importing the library.';
       });
     }),
   );

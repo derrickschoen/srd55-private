@@ -98,21 +98,23 @@ test('imports bundled homebrew through publish, applies derived third-caster slo
   await page.getByRole('link', { name: 'Homebrew library', exact: true }).click();
   await page.getByRole('tab', { name: 'Subclasses', exact: true }).click();
   await homebrewReady(page);
-  for (const name of [
-    'Veteran',
-    'Veteran (Bundled revision 2)',
-    'Veteran (Bundled revision 3)',
-    'Warrior of the Barbed Court',
-    'Warrior of the Barbed Court (Bundled revision 2)',
-    'Warrior of the Barbed Court (Bundled revision 3)',
-    'Spell Student',
-    'Spell Student (Bundled revision 2)',
-  ]) {
+  for (const [name, versionCount] of [
+    ['Veteran (Bundled revision 3)', 3],
+    ['Warrior of the Barbed Court (Bundled revision 3)', 3],
+    ['Spell Student (Bundled revision 2)', 2],
+  ] as const) {
     const card = publishedCard(page, name);
     await expect(card).toBeVisible();
     await expect(card.getByText('Homebrew', { exact: true })).toBeVisible();
-    await expect(card).toContainText('Subclass · Built into the app');
+    await expect(card.getByText('Subclass · Built into the app', { exact: true }))
+      .toBeVisible();
+    await expect(card.getByText(
+      `${String(versionCount)} versions · 0 character attachments`,
+      { exact: true },
+    )).toBeVisible();
+    await expect(card).toContainText(`History — ${String(versionCount)} versions`);
   }
+  await expect(page.locator('.homebrew-grid > .homebrew-card')).toHaveCount(3);
 
   await page.getByRole('link', { name: '← Characters', exact: true }).click();
   await globalReady(page);
@@ -289,17 +291,13 @@ test('imports bundled homebrew through publish, applies derived third-caster slo
   await page.reload();
   await homebrewReady(page);
   for (const name of [
-    'Veteran',
-    'Veteran (Bundled revision 2)',
     'Veteran (Bundled revision 3)',
-    'Warrior of the Barbed Court',
-    'Warrior of the Barbed Court (Bundled revision 2)',
     'Warrior of the Barbed Court (Bundled revision 3)',
-    'Spell Student',
     'Spell Student (Bundled revision 2)',
   ]) {
     await expect(publishedCard(page, name)).toBeVisible();
   }
+  await expect(page.locator('.homebrew-grid > .homebrew-card')).toHaveCount(3);
   expect(await page.evaluate((characterId) => window.staticApp.inspectRows(
     'character_class_levels',
     { character_id: characterId },
@@ -427,12 +425,21 @@ test('Veteran v3 sheet values and the v2-to-v3 replacement review are visible', 
       current = await advance(current, level, level === 3 ? v3Key : undefined);
     }
     let historical = await create('Veteran v2 replacement oracle');
-    historical = await advance(historical, 2);
-    historical = await advance(historical, 3, v2Key);
+    for (let level = 2; level <= 13; level += 1) {
+      historical = await advance(
+        historical,
+        level,
+        level === 3 ? v2Key : undefined,
+      );
+    }
+    let kept = await create('Veteran v2 keep oracle');
+    kept = await advance(kept, 2);
+    kept = await advance(kept, 3, v2Key);
     return {
       v3CharacterId: current.id,
       v3Revision: current.revision,
       v2CharacterId: historical.id,
+      keptCharacterId: kept.id,
       classDefinitionId,
       v2Key,
       v3Key,
@@ -491,14 +498,89 @@ test('Veteran v3 sheet values and the v2-to-v3 replacement review are visible', 
   await expect(reflexes).toContainText('Veteran Reflexes');
   await expect(reflexes.locator('.sheet-resource-box')).toHaveCount(5);
 
-  await page.goto(
-    `/homebrew/replacements/${encodeURIComponent(characters.v2Key)}/${encodeURIComponent(characters.v3Key)}`,
+  await page.goto('/homebrew?tab=subclass');
+  const veteranCard = page.locator('.homebrew-card').filter({
+    has: page.getByRole('heading', {
+      name: 'Veteran (Bundled revision 3)',
+      exact: true,
+    }),
+  });
+  await expect(veteranCard).toHaveCount(1);
+  await expect(page.getByRole('heading', { name: 'Veteran', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('heading', {
+    name: 'Veteran (Bundled revision 2)', exact: true,
+  })).toHaveCount(0);
+  await veteranCard.getByText('History — 3 versions', { exact: true }).click();
+  const reviewUpdate = veteranCard.locator('.homebrew-available-updates').getByRole(
+    'link',
+    { name: 'Review next version for 2 characters' },
   );
+  await expect(reviewUpdate).toBeVisible();
+  await reviewUpdate.click();
   await expect(page.locator('.homebrew-status')).toHaveText('Replacement review loaded.');
   const review = page.getByRole('region', { name: 'Fix affected characters' });
   await expect(review).toContainText('Veteran v2 replacement oracle');
+  await expect(review).toContainText('Veteran v2 keep oracle');
   await expect(review).toContainText('Before: Veteran (Bundled revision 2)');
   await expect(review).toContainText('After Apply: Veteran (Bundled revision 3)');
-  await expect(review.getByRole('button', { name: 'Apply to all listed characters' }))
-    .toBeEnabled();
+  const updatedCharacter = review.getByRole('heading', {
+    name: 'Veteran v2 replacement oracle',
+  }).locator('..');
+  await expect(updatedCharacter.locator('.replacement-rules-changes > *')).toHaveText([
+    'Sneak Attack',
+    'Current sheet: UNKNOWN',
+    'With this update: 13d6',
+    'Veteran Reflexes',
+    'Current sheet: UNKNOWN',
+    'With this update: 5 uses',
+  ]);
+  await updatedCharacter.getByLabel('Apply the new version').check();
+  const keptCharacter = review.getByRole('heading', {
+    name: 'Veteran v2 keep oracle',
+  }).locator('..');
+  await keptCharacter.getByLabel('Keep the current version').check();
+  const applySelected = review.getByRole('button', { name: 'Apply selected updates' });
+  await expect(applySelected).toBeEnabled();
+  await applySelected.click();
+  await expect(review).toContainText(
+    '1 character(s) now use the new version; 1 kept the current version.',
+  );
+  expect(await page.evaluate(async (fixture) => {
+    const levels = await window.staticApp.inspectRows('character_class_levels');
+    const subclasses = await window.staticApp.inspectRows('subclass_definitions');
+    const keysById = new Map(subclasses.map((row) => [
+      Number(row.id),
+      String(row.content_key),
+    ]));
+    const versionKeys = [fixture.updated, fixture.kept].map((characterId) => {
+      const row = levels.find((candidate) =>
+        Number(candidate.character_id) === characterId &&
+        candidate.subclass_definition_id !== null
+      );
+      return row === undefined
+        ? null
+        : keysById.get(Number(row.subclass_definition_id)) ?? null;
+    });
+    const choices = await window.staticApp.inspectRows(
+      'catalog_content_replacement_choices',
+    );
+    return {
+      versionKeys,
+      keptChoices: choices.map((choice) => ({
+        characterId: Number(choice.character_id),
+        oldKey: String(choice.superseded_content_key),
+        newKey: String(choice.successor_content_key),
+      })),
+    };
+  }, {
+    updated: characters.v2CharacterId,
+    kept: characters.keptCharacterId,
+  })).toEqual({
+    versionKeys: [characters.v3Key, characters.v2Key],
+    keptChoices: [{
+      characterId: characters.keptCharacterId,
+      oldKey: characters.v2Key,
+      newKey: characters.v3Key,
+    }],
+  });
 });

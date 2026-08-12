@@ -110,10 +110,11 @@ test('superseded species leave fresh selection while replacement characters stil
   await expect(review).toContainText(
     'After Apply: Fresh Picker Species Revised — Homebrew · external layer',
   );
-  await expect(review.getByRole('radio')).toHaveCount(0);
+  await expect(review.getByRole('radio')).toHaveCount(2);
+  await review.getByLabel('Apply the new version').check();
   await expect(review.getByLabel('Private copy name')).toHaveCount(0);
   await expect(review).not.toContainText(/certif/iu);
-  const apply = page.getByRole('button', { name: 'Apply to all listed characters' });
+  const apply = page.getByRole('button', { name: 'Apply selected updates' });
   await expect(apply).toBeEnabled();
   await apply.click();
   await expect(page.getByRole('heading', { name: 'Character fixes applied' }))

@@ -114,6 +114,7 @@ interface PublishedRow {
   readonly name: string;
   readonly rules_edition: PublishedHomebrewSummary['rules_edition'];
   readonly superseded_by: ContentKey | null;
+  readonly usage_count: number;
 }
 
 export class AuthoringServiceError extends Error {
@@ -163,6 +164,7 @@ function publishedRow(row: SqlRow): PublishedRow {
     name: sqlString(row, 'name'),
     rules_edition: edition,
     superseded_by: sqlNullableString(row, 'superseded_by') as ContentKey | null,
+    usage_count: sqlInteger(row, 'usage_count'),
   };
 }
 
@@ -719,7 +721,32 @@ export class CatalogAuthoringService {
                 WHEN 'background' THEN background.rules_edition
                 WHEN 'subclass' THEN subclass.rules_edition
               END AS rules_edition,
-              supersession.successor_content_key AS superseded_by
+              supersession.successor_content_key AS superseded_by,
+              CASE identity.content_kind
+                WHEN 'species' THEN (
+                  SELECT count(DISTINCT source.character_id)
+                  FROM character_source_instances AS source
+                  JOIN species_definitions AS used_species
+                    ON used_species.id = source.source_definition_id
+                  WHERE source.source_type = 'species' AND source.state = 'active'
+                    AND used_species.content_key = identity.content_key
+                )
+                WHEN 'background' THEN (
+                  SELECT count(DISTINCT source.character_id)
+                  FROM character_source_instances AS source
+                  JOIN background_definitions AS used_background
+                    ON used_background.id = source.source_definition_id
+                  WHERE source.source_type = 'background' AND source.state = 'active'
+                    AND used_background.content_key = identity.content_key
+                )
+                WHEN 'subclass' THEN (
+                  SELECT count(DISTINCT level.character_id)
+                  FROM character_class_levels AS level
+                  JOIN subclass_definitions AS used_subclass
+                    ON used_subclass.id = level.subclass_definition_id
+                  WHERE used_subclass.content_key = identity.content_key
+                )
+              END AS usage_count
        FROM catalog_content_identities AS identity
        LEFT JOIN species_definitions AS species
          ON identity.content_kind = 'species' AND species.content_key = identity.content_key
@@ -750,7 +777,6 @@ export class CatalogAuthoringService {
         row.content_key,
       ),
     }));
-
     const rows = this.db.all(
       `SELECT draft_uuid, content_kind, document_version, base_content_key,
               revision, document_json, created_at, updated_at
@@ -1096,9 +1122,9 @@ export class CatalogAuthoringService {
     readonly old_content_key: ContentKey;
     readonly new_content_key: ContentKey;
     readonly character_id: CharacterId;
-  }): ReplacementPlan {
+  }, includeRulesReview = true): ReplacementPlan {
     try {
-      return previewReferenceRetarget(this.db, input);
+      return previewReferenceRetarget(this.db, input, includeRulesReview);
     } catch (error) {
       return replacementServiceError(error);
     }
@@ -1119,7 +1145,7 @@ export class CatalogAuthoringService {
   previewReplacementSet(input: {
     readonly old_content_key: ContentKey;
     readonly new_content_key: ContentKey;
-  }): ReplacementSetPlan {
+  }, includeRulesReview = true): ReplacementSetPlan {
     const usages = this.usages(input.old_content_key);
     const archivedAt = this.db.scalar<string>(
       `SELECT archived_at FROM catalog_content_identities
@@ -1143,7 +1169,7 @@ export class CatalogAuthoringService {
           old_content_key: input.old_content_key,
           new_content_key: input.new_content_key,
           character_id: usage.character_id,
-        }))),
+        }, includeRulesReview))),
     });
   }
 
@@ -1151,13 +1177,38 @@ export class CatalogAuthoringService {
     readonly old_content_key: ContentKey;
     readonly new_content_key: ContentKey;
     readonly replacements: readonly ReplacementSetCommit[];
+    readonly kept_character_ids: readonly CharacterId[];
   }): ReplacementSetResult {
     return this.db.transaction(() => {
-      const fresh = this.previewReplacementSet(input);
+      const fresh = this.previewReplacementSet(input, false);
+      const freshByToken = new Map(fresh.replacements.map((replacement) => [
+        replacement.token,
+        replacement,
+      ]));
+      const keptIds = new Set(input.kept_character_ids);
+      const selectedIds = input.replacements.flatMap((replacement) => {
+        const reviewed = freshByToken.get(replacement.token);
+        return reviewed === undefined ? [] : [reviewed.facts.character_id];
+      });
+      const selectedIdSet = new Set(selectedIds);
+      const freshIds = fresh.replacements.map((replacement) =>
+        replacement.facts.character_id
+      );
       if (
-        fresh.replacements.length !== input.replacements.length ||
-        fresh.replacements.some((plan, index) =>
-          plan.token !== input.replacements[index]?.token)
+        new Set(input.replacements.map((replacement) => replacement.token)).size !==
+          input.replacements.length ||
+        input.replacements.some((replacement) =>
+          !freshByToken.has(replacement.token)
+        ) ||
+        keptIds.size !== input.kept_character_ids.length ||
+        selectedIdSet.size !== selectedIds.length ||
+        input.kept_character_ids.some((characterId) => selectedIdSet.has(characterId)) ||
+        freshIds.some((characterId) =>
+          !selectedIdSet.has(characterId) && !keptIds.has(characterId)
+        ) ||
+        [...selectedIdSet, ...keptIds].some((characterId) =>
+          !freshIds.includes(characterId)
+        )
       ) {
         throw new AuthoringServiceError('The replacement-set plan is stale.', {
           reason: 'stale_replacement_set_plan',
@@ -1165,8 +1216,8 @@ export class CatalogAuthoringService {
           new_content_key: input.new_content_key,
         });
       }
-      const replacements = input.replacements.map((replacement, index) => {
-        const reviewed = fresh.replacements[index];
+      const replacements = input.replacements.map((replacement) => {
+        const reviewed = freshByToken.get(replacement.token);
         if (reviewed === undefined) throw new Error('Replacement-set plan is incomplete.');
         // Each CI-7 commit may legitimately change global catalog/import-plan
         // facts used by the next token. The set preview above authenticates the
@@ -1176,7 +1227,7 @@ export class CatalogAuthoringService {
           old_content_key: reviewed.facts.old_content_key,
           new_content_key: reviewed.facts.new_content_key,
           character_id: reviewed.facts.character_id,
-        });
+        }, false);
         if (
           current.review.length !== reviewed.review.length ||
           current.review.some((candidate, reviewIndex) =>
@@ -1189,10 +1240,34 @@ export class CatalogAuthoringService {
         }
         return this.commitReplacement({ ...replacement, token: current.token });
       });
+      const contentKind = fresh.replacements[0]?.kind;
+      if (contentKind !== undefined) {
+        for (const characterId of selectedIdSet) {
+          this.db.exec(
+            `DELETE FROM catalog_content_replacement_choices
+             WHERE content_kind = ? AND superseded_content_key = ?
+               AND successor_content_key = ? AND character_id = ?`,
+            [contentKind, input.old_content_key, input.new_content_key, characterId],
+          );
+        }
+        for (const characterId of keptIds) {
+          this.db.exec(
+            `INSERT INTO catalog_content_replacement_choices (
+               content_kind, superseded_content_key, successor_content_key,
+               character_id, decided_at
+             ) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+             ON CONFLICT (
+               content_kind, superseded_content_key, successor_content_key, character_id
+             ) DO UPDATE SET decided_at = excluded.decided_at`,
+            [contentKind, input.old_content_key, input.new_content_key, characterId],
+          );
+        }
+      }
       return Object.freeze({
         old_content_key: input.old_content_key,
         new_content_key: input.new_content_key,
         replacements: Object.freeze(replacements),
+        kept_character_ids: Object.freeze([...keptIds]),
       });
     });
   }

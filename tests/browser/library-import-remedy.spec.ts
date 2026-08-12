@@ -1,4 +1,5 @@
 import { gunzipSync } from 'node:zlib';
+import type { Page } from '@playwright/test';
 import {
   LIBRARY_EXPORT_FORMAT,
   LIBRARY_EXPORT_VERSION,
@@ -219,6 +220,17 @@ async function downloadBytes(
   return Buffer.concat(chunks);
 }
 
+async function confirmLibraryReview(page: Page): Promise<void> {
+  const review = page.locator('[data-testid="content-adoption-modal"]');
+  await expect(review).toBeVisible();
+  await expect(review.getByRole('heading', { name: 'Review content import' }))
+    .toBeVisible();
+  await expect(review.getByRole('region', { name: 'Library contents' })).toContainText(
+    'The file does not record the sender’s name.',
+  );
+  await review.getByRole('button', { name: 'Import library' }).click();
+}
+
 test('v20 names embedded Portable Elf before direct commit and omits the line for SRD-only shares', async ({
   browser,
   page,
@@ -235,6 +247,7 @@ test('v20 names embedded Portable Elf before direct commit and omits the line fo
     buffer: Buffer.from(JSON.stringify(fixture.embedded)),
   });
   await page.getByRole('button', { name: 'Import library' }).click();
+  await confirmLibraryReview(page);
   await expect(page.locator('.transfer-status')).toHaveText(
     'Library imported: 1 added to your library, 0 matched existing.',
   );
@@ -309,11 +322,11 @@ test('v20 names embedded Portable Elf before direct commit and omits the line fo
       name: 'Embedded external content',
     });
     await expect(disclosure).toContainText(
-      'This external content will be installed with the character:',
+      'Sent with this character. The link does not include the sender’s name.',
     );
     await expect(disclosure.getByRole('listitem')).toHaveText(
       'Portable Elf — species — Received homebrew — original author not recorded; ' +
-        'a local copy will be added to your library',
+        'a local copy will be added to your library; 1 version; this character uses Portable Elf',
     );
     expect(await recipient.evaluate(async (portableElfKey) => ({
       characters: await window.staticApp.inspectRows('characters'),
@@ -395,6 +408,7 @@ test('v17 refusal links through library adoption to the exact restored choice', 
     buffer: Buffer.from(JSON.stringify(fixture.library)),
   });
   await page.getByRole('button', { name: 'Import library' }).click();
+  await confirmLibraryReview(page);
   await expect(page.locator('.transfer-status')).toHaveText(
     'Library imported: 1 added to your library, 0 matched existing.',
   );
@@ -468,6 +482,7 @@ test('v17 refusal links through library adoption to the exact restored choice', 
       buffer: Buffer.from(JSON.stringify(fixture.library)),
     });
     await recipient.getByRole('button', { name: 'Import library' }).click();
+    await confirmLibraryReview(recipient);
     await expect(recipient.locator('.transfer-status')).toHaveText(
       'Library imported: 1 added to your library, 0 matched existing. Retry share.',
     );
@@ -489,7 +504,7 @@ test('v17 refusal links through library adoption to the exact restored choice', 
       'local: Oversized Portable Elf — Homebrew · external layer',
     );
     const libraryCommit = libraryReview.getByRole('button', {
-      name: 'Import with these choices',
+      name: 'Import library',
     });
     const libraryMatch = libraryReview.getByRole('radio', {
       name: /Match — Discards the incoming rules; existing characters keep the local entry\./,
@@ -616,6 +631,7 @@ test('the library control accepts v1 and both JSON controls reject the other kin
     buffer: Buffer.from(JSON.stringify(fixture.legacy)),
   });
   await page.getByRole('button', { name: 'Import library' }).click();
+  await confirmLibraryReview(page);
   await expect(page.locator('.transfer-status')).toHaveText(
     'Library imported: 1 added to your library, 0 matched existing. ' +
     'This older export did not record archive state; carried entries were restored live.',
@@ -859,6 +875,11 @@ test('whole-library download restores authored and imported content into a fresh
     buffer: libraryBytes,
   });
   await page.getByRole('button', { name: 'Import library' }).click();
+  const cleanReview = page.locator('[data-testid="content-adoption-modal"]');
+  await expect(cleanReview).toContainText(
+    'Veteran (Bundled revision 3) — subclass; 3 versions',
+  );
+  await confirmLibraryReview(page);
   await expect(page.locator('.transfer-status')).toHaveText(
     'Library imported: 9 added to your library, 0 matched existing.',
   );
@@ -975,7 +996,12 @@ test('whole-library download restores authored and imported content into a fresh
     }),
   });
   await expect(restoredSpeciesCard.getByText('Homebrew', { exact: true })).toBeVisible();
-  await expect(restoredSpeciesCard).toContainText(
+  await expect(restoredSpeciesCard.getByText(
     'Species · Received homebrew — origin author not recorded; this is your local copy',
-  );
+    { exact: true },
+  )).toBeVisible();
+  await expect(restoredSpeciesCard.getByText(
+    '1 version · 0 character attachments',
+    { exact: true },
+  )).toBeVisible();
 });

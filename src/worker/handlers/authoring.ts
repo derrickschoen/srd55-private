@@ -175,10 +175,14 @@ function isCommitReplacementSetParams(
   value: unknown,
 ): value is CommitReplacementSetParams {
   return isRecord(value) &&
-    hasExactKeys(value, ['old_content_key', 'new_content_key', 'replacements']) &&
+    hasExactKeys(value, [
+      'old_content_key', 'new_content_key', 'replacements', 'kept_character_ids',
+    ]) &&
     isBoundedKey(value.old_content_key) && isBoundedKey(value.new_content_key) &&
     Array.isArray(value.replacements) &&
-    value.replacements.every(isCommitReplacementParams);
+    value.replacements.every(isCommitReplacementParams) &&
+    Array.isArray(value.kept_character_ids) &&
+    value.kept_character_ids.every(isCharacterId);
 }
 
 function isContentLifecycleParams(value: unknown): value is ContentLifecycleParams {

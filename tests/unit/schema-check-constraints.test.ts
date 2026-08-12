@@ -1215,6 +1215,35 @@ const catalogContentSupersession =
     });
   };
 
+const catalogContentReplacementChoice =
+  (values: Values): Write =>
+  (db) => {
+    const suffix = uid('catalog-content-replacement-choice');
+    const oldKey = typeof values.superseded_content_key === 'string'
+      ? values.superseded_content_key
+      : `2024:test.owner:${suffix}-old`;
+    const newKey = typeof values.successor_content_key === 'string'
+      ? values.successor_content_key
+      : `2024:test.owner:${suffix}-new`;
+    for (const contentKey of new Set([oldKey, newKey])) {
+      insert(db, 'catalog_content_identities', {
+        content_key: contentKey,
+        content_kind: 'species',
+        key_kind: 'asserted',
+        catalog_layer: 'external',
+        normalized_name: uid('replacementchoice'),
+      });
+    }
+    insert(db, 'catalog_content_replacement_choices', {
+      content_kind: 'species',
+      superseded_content_key: oldKey,
+      successor_content_key: newKey,
+      character_id: newCharacter(db),
+      decided_at: '2042-08-12 13:14:15',
+      ...values,
+    });
+  };
+
 const catalogDataMigration =
   (values: Values): Write =>
   (db) => {
@@ -1780,6 +1809,47 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     accepts: [[
       'two distinct immutable versions',
       catalogContentSupersession({}),
+    ]],
+  },
+  {
+    constraint: 'catalog_content_replacement_choices_kind_check',
+    rejects: [[
+      'a non-authorable class kind',
+      catalogContentReplacementChoice({ content_kind: 'class' }),
+    ]],
+    accepts: [[
+      'a species choice',
+      catalogContentReplacementChoice({ content_kind: 'species' }),
+    ]],
+  },
+  {
+    constraint: 'catalog_content_replacement_choices_distinct_keys_check',
+    rejects: [[
+      'the same version on both sides',
+      catalogContentReplacementChoice({
+        superseded_content_key: '2024:test.owner:same-replacement-choice',
+        successor_content_key: '2024:test.owner:same-replacement-choice',
+      }),
+    ]],
+    accepts: [['two distinct versions', catalogContentReplacementChoice({})]],
+  },
+  {
+    constraint: 'catalog_content_replacement_choices_character_id_check',
+    rejects: [
+      ['character id zero', catalogContentReplacementChoice({ character_id: 0 })],
+      ['a text character id', catalogContentReplacementChoice({ character_id: 'one' })],
+    ],
+    accepts: [['a positive character id', catalogContentReplacementChoice({})]],
+  },
+  {
+    constraint: 'catalog_content_replacement_choices_decided_at_check',
+    rejects: [[
+      'an integer decision time',
+      catalogContentReplacementChoice({ decided_at: 20420812 }),
+    ]],
+    accepts: [[
+      'a SQLite timestamp',
+      catalogContentReplacementChoice({ decided_at: '2042-08-12 13:14:15' }),
     ]],
   },
   {

@@ -33,6 +33,7 @@ export interface ContentAdoptionDialogOptions {
     result: Extract<ContentImportCommitResult, { readonly kind: 'committed' }>,
   ) => void | Promise<void>;
   readonly onCancel?: () => void;
+  readonly commitLabel?: string;
   /** Invocation-specific plan facts rendered and refreshed beside the shared counts. */
   readonly renderPlanDetails?: (plan: ContentImportPlan) => HTMLElement;
 }
@@ -235,7 +236,7 @@ export function createContentAdoptionDialog(
     attributes: { type: 'button' },
   });
   const commit = element('button', {
-    text: 'Import with these choices',
+    text: options.commitLabel ?? 'Import with these choices',
     attributes: { type: 'button' },
   });
   const planBlocksCommit = (candidate: ContentImportPlan): boolean =>

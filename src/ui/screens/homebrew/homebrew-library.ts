@@ -76,6 +76,42 @@ export const HOMEBREW_LIBRARY_TABS: readonly LibraryTabDefinition[] = [
   { id: 'drafts', label: 'Drafts' },
 ] as const;
 
+export interface PublishedHomebrewLineage {
+  readonly versions: readonly PublishedHomebrewSummary[];
+}
+
+export function publishedHomebrewLineages(
+  entries: readonly PublishedHomebrewSummary[],
+): readonly PublishedHomebrewLineage[] {
+  const byKey = new Map(entries.map((entry) => [entry.content_key, entry]));
+  const predecessorKeys = new Set(entries.flatMap((entry) =>
+    entry.superseded_by === null ? [] : [entry.superseded_by]
+  ));
+  const visited = new Set<string>();
+  const lineages: PublishedHomebrewLineage[] = [];
+  const append = (start: PublishedHomebrewSummary): void => {
+    const versions: PublishedHomebrewSummary[] = [];
+    let cursor: PublishedHomebrewSummary | undefined = start;
+    while (cursor !== undefined && !visited.has(cursor.content_key)) {
+      visited.add(cursor.content_key);
+      versions.push(cursor);
+      cursor = cursor.superseded_by === null
+        ? undefined
+        : byKey.get(cursor.superseded_by);
+    }
+    if (versions.length > 0) {
+      lineages.push(Object.freeze({ versions: Object.freeze(versions) }));
+    }
+  };
+  for (const entry of entries) {
+    if (!predecessorKeys.has(entry.content_key)) append(entry);
+  }
+  for (const entry of entries) {
+    if (!visited.has(entry.content_key)) append(entry);
+  }
+  return Object.freeze(lineages);
+}
+
 const KIND_LABELS: Readonly<Record<AuthoredContentKind, string>> = {
   species: 'Species',
   subclass: 'Subclass',
@@ -88,6 +124,11 @@ export function homebrewTabPath(tab: HomebrewLibraryTab): string {
 
 export function homebrewDraftPath(draftUuid: HomebrewDraftUuid): string {
   return `${HOMEBREW_ROUTE}/drafts/${encodeURIComponent(draftUuid)}`;
+}
+
+function replacementKeptPath(kind: AuthoredContentKind, keptCount: number): string {
+  const path = homebrewTabPath(kind);
+  return `${path}${path.includes('?') ? '&' : '?'}replacementOutcome=kept&keptCount=${String(keptCount)}`;
 }
 
 export function selectedHomebrewTab(value: string | null): HomebrewLibraryTab {
@@ -287,11 +328,13 @@ function tabList(
 
 function publishedCard(
   context: ScreenContext,
-  item: PublishedHomebrewSummary,
+  lineage: PublishedHomebrewLineage,
   client: AuthoringClient,
   status: HTMLElement,
   cleanups: Cleanup[],
 ): HTMLElement {
+  const item = lineage.versions.at(-1);
+  if (item === undefined) throw new Error('Published content history is empty.');
   const edit = element('button', {
     className: 'button-secondary',
     text: 'Edit as new version',
@@ -323,6 +366,59 @@ function publishedCard(
   );
   const title = element('h2');
   title.append(freeTextSpan(item.name));
+  const history = element('details', { className: 'homebrew-version-history' });
+  history.append(element('summary', {
+    text: `History — ${String(lineage.versions.length)} version${lineage.versions.length === 1 ? '' : 's'}`,
+  }));
+  const versionList = element('ol');
+  for (const [index, version] of lineage.versions.entries()) {
+    const versionItem = element('li');
+    versionItem.append(
+      `Revision ${String(index + 1)}: `,
+      freeTextSpan(version.name),
+      version === item ? ' — current' : '',
+      version.usage_count === 0
+        ? ' — no characters use this version'
+        : ` — ${String(version.usage_count)} character${version.usage_count === 1 ? '' : 's'} use this version`,
+    );
+    if (version.superseded_by !== null && version.usage_count > 0) {
+      const successor = lineage.versions[index + 1];
+      if (successor !== undefined) {
+        versionItem.append(' ', routedLink(
+          context,
+          cleanups,
+          `Review next version for ${String(version.usage_count)} character${version.usage_count === 1 ? '' : 's'}`,
+          homebrewReplacementPath(version.content_key, successor.content_key),
+        ));
+      }
+    }
+    versionList.append(versionItem);
+  }
+  history.append(versionList);
+  const totalUsage = lineage.versions.reduce(
+    (total, version) => total + version.usage_count,
+    0,
+  );
+  const availableUpdates = lineage.versions.flatMap((version, index) => {
+    const successor = lineage.versions[index + 1];
+    return version.superseded_by === null || version.usage_count === 0 || successor === undefined
+      ? []
+      : [{ version, successor }];
+  });
+  const updateSummary = availableUpdates.length === 0
+    ? []
+    : [element('div', { className: 'homebrew-available-updates' }, [
+        element('p', {
+          text: `${String(availableUpdates.reduce((total, update) =>
+            total + update.version.usage_count, 0))} attached character(s) have a newer version available.`,
+        }),
+        ...availableUpdates.map(({ version, successor }) => routedLink(
+          context,
+          cleanups,
+          `Review next version for ${String(version.usage_count)} character${version.usage_count === 1 ? '' : 's'}`,
+          homebrewReplacementPath(version.content_key, successor.content_key),
+        )),
+      ])];
   const provenanceDetails = contentProvenanceDetails(item.provenance);
   const attribution = element('details');
   attribution.hidden = provenanceDetails.length === 0;
@@ -341,9 +437,18 @@ function publishedCard(
       ]),
     ]),
     element('p', {
+      className: 'homebrew-card-provenance',
       text: `${KIND_LABELS[item.content_kind]} · ${contentProvenanceLabel(item.provenance)}`,
     }),
     attribution,
+    element('p', {
+      className: 'homebrew-card-history-summary',
+      text: `${String(lineage.versions.length)} ` +
+        `version${lineage.versions.length === 1 ? '' : 's'} · ` +
+        `${String(totalUsage)} character attachment${totalUsage === 1 ? '' : 's'}`,
+    }),
+    ...updateSummary,
+    history,
     element('div', { className: 'homebrew-card-actions' }, [
       ...(item.superseded_by === null ? [edit] : []),
       remove,
@@ -382,7 +487,10 @@ async function renderReplacementRoute(
     new_content_key: newContentKey as PublishedHomebrewSummary['content_key'],
   });
   const reviewSelections = new Map<string, ReplacementDecision>();
-  const selectableReviewKeys: string[] = [];
+  const characterSelections = new Map<number, 'apply' | 'keep'>();
+  const characterApplyControls = new Map<number, HTMLInputElement>();
+  const characterKeepControls = new Map<number, HTMLInputElement>();
+  const selectableReviewKeys: { readonly key: string; readonly characterId: number }[] = [];
   let apply: HTMLButtonElement | null = null;
   const selectionKey = (replacementIndex: number, candidateContentKey: string): string =>
     `${String(replacementIndex)}\u0000${candidateContentKey}`;
@@ -395,11 +503,16 @@ async function renderReplacementRoute(
   };
   const refreshApplyState = (): void => {
     if (apply === null) return;
-    apply.disabled = selectableReviewKeys.some((key) => {
+    const everyCharacterReviewed = plan.replacements.every((replacement) =>
+      characterSelections.has(replacement.facts.character_id)
+    );
+    const collisionMissing = selectableReviewKeys.some(({ key, characterId }) => {
+      if (characterSelections.get(characterId) !== 'apply') return false;
       const decision = reviewSelections.get(key);
       return decision === undefined ||
         decision.decision === 'clone' && decision.clone_name.trim() === '';
     });
+    apply.disabled = !everyCharacterReviewed || collisionMissing;
   };
   const review = element('section', {
     className: 'panel homebrew-replacement-review',
@@ -407,7 +520,7 @@ async function renderReplacementRoute(
   }, [
     element('h2', { text: 'Review character fixes' }),
     element('p', {
-      text: 'Each listed character keeps the previous version unless you explicitly apply every change below.',
+      text: 'Choose Apply or Keep for each character. You can update some characters and keep the current version on others.',
     }),
   ]);
   for (const [replacementIndex, replacement] of plan.replacements.entries()) {
@@ -441,6 +554,17 @@ async function renderReplacementRoute(
       }
       changes.append(element('dt', { text: change.label }), before, after);
     }
+    const replacementRulesChanges = replacement.rules_changes ?? [];
+    const rulesChanges = element('dl', { className: 'replacement-rules-changes' });
+    for (const change of replacementRulesChanges) {
+      const label = element('dt');
+      label.append(freeTextSpan(change.label));
+      rulesChanges.append(
+        label,
+        element('dd', { text: `Current sheet: ${change.before}` }),
+        element('dd', { text: `With this update: ${change.after}` }),
+      );
+    }
     const consequences = replacement.notices.length === 0
       ? []
       : [
@@ -453,7 +577,10 @@ async function renderReplacementRoute(
     for (const [candidateIndex, candidate] of replacement.review.entries()) {
       if (candidate.reason !== 'key-collision') continue;
       const key = selectionKey(replacementIndex, candidate.candidate_content_key);
-      selectableReviewKeys.push(key);
+      selectableReviewKeys.push({
+        key,
+        characterId: replacement.facts.character_id,
+      });
       const prefix = `replacement-review-${String(replacementIndex + 1)}-${String(candidateIndex + 1)}`;
       const match = element('input', {
         attributes: {
@@ -526,11 +653,73 @@ async function renderReplacementRoute(
         cloneName,
       ]));
     }
+    const applyChoiceId = `replacement-character-${String(replacement.facts.character_id)}-apply`;
+    const keepChoiceId = `replacement-character-${String(replacement.facts.character_id)}-keep`;
+    const applyChoice = element('input', {
+      attributes: {
+        id: applyChoiceId,
+        type: 'radio',
+        name: `replacement-character-${String(replacement.facts.character_id)}`,
+        value: 'apply',
+      },
+    });
+    const keepChoice = element('input', {
+      attributes: {
+        id: keepChoiceId,
+        type: 'radio',
+        name: `replacement-character-${String(replacement.facts.character_id)}`,
+        value: 'keep',
+        ...(replacement.kept_at === null ? {} : { checked: '' }),
+      },
+    });
+    if (replacement.kept_at !== null) {
+      applyChoice.checked = false;
+      keepChoice.checked = true;
+      characterSelections.set(replacement.facts.character_id, 'keep');
+    }
+    characterApplyControls.set(replacement.facts.character_id, applyChoice);
+    characterKeepControls.set(replacement.facts.character_id, keepChoice);
+    cleanups.push(
+      listen(applyChoice, 'change', () => {
+        characterSelections.set(replacement.facts.character_id, 'apply');
+        refreshApplyState();
+      }),
+      listen(keepChoice, 'change', () => {
+        characterSelections.set(replacement.facts.character_id, 'keep');
+        refreshApplyState();
+      }),
+    );
     review.append(element('article', { className: 'homebrew-card' }, [
       name,
       changes,
+      element('h4', { text: 'What changes on the sheet' }),
+      ...(replacement.rules_change_review === 'unavailable'
+        ? [element('p', {
+            text: 'The character update can be reviewed, but this sheet could not be compared. Open the character after applying to review its rules.',
+          })]
+        : replacementRulesChanges.length === 0
+          ? [element('p', {
+              text: 'No changes were found in the sheet values, features, resistances, proficiencies, or spells this review can compare.',
+            })]
+        : [rulesChanges]),
       ...consequences,
       ...selectableChoices,
+      ...(replacement.kept_at === null ? [] : [element('p', {
+        text: 'You previously chose to keep this character on the current version. You can change that choice here.',
+      })]),
+      element('fieldset', { className: 'replacement-character-choice' }, [
+        element('legend', { text: 'Choose for this character' }),
+        applyChoice,
+        element('label', {
+          text: 'Apply the new version',
+          attributes: { for: applyChoiceId },
+        }),
+        keepChoice,
+        element('label', {
+          text: 'Keep the current version',
+          attributes: { for: keepChoiceId },
+        }),
+      ]),
     ]));
   }
   if (plan.replacements.length === 0) {
@@ -538,42 +727,70 @@ async function renderReplacementRoute(
   } else {
     const applyButton = element('button', {
       className: 'button-primary',
-      text: 'Apply to all listed characters',
+      text: 'Apply selected updates',
       attributes: { type: 'button' },
     });
     apply = applyButton;
     refreshApplyState();
     cleanups.push(listen(applyButton, 'click', () => {
       if (applyButton.disabled) return;
+      const selectedReplacements = plan.replacements.flatMap(
+        (replacement, replacementIndex) => {
+          if (characterSelections.get(replacement.facts.character_id) !== 'apply') {
+            return [];
+          }
+          return [{
+            token: replacement.token,
+            decisions: replacement.review.flatMap((candidate) => {
+              if (candidate.reason === 'installed-target') return [];
+              if (candidate.reason === 'key-collision') {
+                const selected = reviewSelection(selectionKey(
+                  replacementIndex,
+                  candidate.candidate_content_key,
+                ));
+                return [selected];
+              }
+              return [{
+                candidate_content_key: candidate.candidate_content_key,
+                decision: candidate.default_decision,
+              }];
+            }),
+            choices: [],
+          }];
+        },
+      );
+      const keptCount = plan.replacements.length - selectedReplacements.length;
+      const keptCharacterIds = plan.replacements.flatMap((replacement) =>
+        characterSelections.get(replacement.facts.character_id) === 'keep'
+          ? [replacement.facts.character_id]
+          : []
+      );
       applyButton.disabled = true;
-      status.textContent = 'Applying every reviewed replacement…';
+      status.textContent = selectedReplacements.length === 0
+        ? 'Recording the reviewed choices…'
+        : 'Applying the selected updates…';
       void client.commitReplacementSet({
         old_content_key: plan.old_content_key,
         new_content_key: plan.new_content_key,
-        replacements: plan.replacements.map((replacement, replacementIndex) => ({
-          token: replacement.token,
-          decisions: replacement.review.flatMap((candidate) => {
-            if (candidate.reason === 'installed-target') return [];
-            if (candidate.reason === 'key-collision') {
-              const selected = reviewSelection(selectionKey(
-                replacementIndex,
-                candidate.candidate_content_key,
-              ));
-              return [selected];
-            }
-            return [{
-              candidate_content_key: candidate.candidate_content_key,
-              decision: candidate.default_decision,
-            }];
-          }),
-          choices: [],
-        })),
+        replacements: selectedReplacements,
+        kept_character_ids: keptCharacterIds,
       }).then((result) => {
+        if (result.replacements.length === 0) {
+          status.textContent = `${String(result.kept_character_ids.length)} character(s) kept the current version. This choice was recorded.`;
+          const kind = plan.replacements[0]?.kind;
+          context.router.navigate(
+            kind === undefined
+              ? HOMEBREW_ROUTE
+              : replacementKeptPath(kind, result.kept_character_ids.length),
+          );
+          return;
+        }
         clear(review);
         review.append(
           element('h2', { text: 'Character fixes applied' }),
           element('p', {
-            text: `${String(result.replacements.length)} character(s) now use the new version.`,
+            text: `${String(result.replacements.length)} character(s) now use the new version; ` +
+              `${String(keptCount)} kept the current version.`,
           }),
         );
         for (const replacement of result.replacements) {
@@ -595,14 +812,53 @@ async function renderReplacementRoute(
             )),
           ]));
         }
-        status.textContent = 'All listed characters were updated.';
+        status.textContent = 'The reviewed choices were applied.';
       }).catch((error: unknown) => {
         refreshApplyState();
         status.textContent = error instanceof Error ? error.message : String(error);
         status.setAttribute('role', 'alert');
       });
     }));
-    review.append(applyButton);
+    const applyAll = element('button', {
+      className: 'button-secondary',
+      text: 'Apply to all listed characters',
+      attributes: { type: 'button' },
+    });
+    const keepAll = element('button', {
+      className: 'button-secondary',
+      text: 'Keep current versions',
+      attributes: { type: 'button' },
+    });
+    cleanups.push(
+      listen(applyAll, 'click', () => {
+        for (const replacement of plan.replacements) {
+          characterSelections.set(replacement.facts.character_id, 'apply');
+          const control = characterApplyControls.get(replacement.facts.character_id);
+          if (control !== undefined) control.checked = true;
+        }
+        refreshApplyState();
+        if (applyButton.disabled) {
+          status.textContent = 'Choose how to handle the named local-content conflict before applying all updates.';
+          status.setAttribute('role', 'alert');
+          return;
+        }
+        applyButton.click();
+      }),
+      listen(keepAll, 'click', () => {
+        for (const replacement of plan.replacements) {
+          characterSelections.set(replacement.facts.character_id, 'keep');
+          const control = characterKeepControls.get(replacement.facts.character_id);
+          if (control !== undefined) control.checked = true;
+        }
+        refreshApplyState();
+        applyButton.click();
+      }),
+    );
+    review.append(element('div', { className: 'homebrew-card-actions' }, [
+      applyButton,
+      applyAll,
+      keepAll,
+    ]));
   }
   view.main.append(review);
   status.textContent = 'Replacement review loaded.';
@@ -1124,6 +1380,11 @@ export async function renderHomebrewLibrary(
     : publishedRouteResult(context.route.query);
   const showMissingDraftNotice = selected === 'drafts' &&
     context.route.query.get('notice') === HOMEBREW_MISSING_DRAFT_NOTICE;
+  const keptCountText = context.route.query.get('keptCount');
+  const keptCount = context.route.query.get('replacementOutcome') === 'kept' &&
+      keptCountText !== null && /^\d+$/u.test(keptCountText)
+    ? Number(keptCountText)
+    : null;
   const view = shell(context, cleanups);
   const status = element('p', {
     className: 'homebrew-status',
@@ -1165,6 +1426,19 @@ export async function renderHomebrewLibrary(
       noticeMount.append(notice.root);
       routeAnnouncement = notice.announcement;
       routeHeading = notice.heading;
+    } else if (keptCount !== null && Number.isSafeInteger(keptCount)) {
+      const heading = element('h2', {
+        text: 'Current versions kept',
+        attributes: { tabindex: '-1' },
+      });
+      noticeMount.append(element('section', { className: 'panel' }, [
+        heading,
+        element('p', {
+          text: `${String(keptCount)} character(s) kept the current version. No changes were made.`,
+        }),
+      ]));
+      routeAnnouncement = `${String(keptCount)} character(s) kept the current version. No changes were made.`;
+      routeHeading = heading;
     }
     if (selected === 'drafts') {
       panel.append(element('h2', { text: 'Drafts' }));
@@ -1200,8 +1474,8 @@ export async function renderHomebrewLibrary(
         }));
       } else {
         const cards = element('div', { className: 'homebrew-grid' });
-        for (const entry of entries) {
-          cards.append(publishedCard(context, entry, client, status, cardCleanups));
+        for (const lineage of publishedHomebrewLineages(entries)) {
+          cards.append(publishedCard(context, lineage, client, status, cardCleanups));
         }
         panel.append(cards);
       }

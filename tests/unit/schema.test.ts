@@ -89,6 +89,13 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
     text: ['content_kind', 'content_key', 'character_name'],
     numeric: ['archived_at'],
   },
+  catalog_content_replacement_choices: {
+    integer: ['character_id'],
+    text: [
+      'content_kind', 'superseded_content_key', 'successor_content_key',
+    ],
+    numeric: ['decided_at'],
+  },
   catalog_content_drafts: {
     integer: ['document_version', 'revision'],
     text: [
@@ -793,6 +800,10 @@ const expectedNotNull: Record<string, string[]> = {
     'content_kind', 'content_key', 'character_id', 'character_revision',
     'character_name', 'archived_at',
   ],
+  catalog_content_replacement_choices: [
+    'content_kind', 'superseded_content_key', 'successor_content_key',
+    'character_id', 'decided_at',
+  ],
   catalog_content_drafts: [
     'draft_uuid', 'content_kind', 'document_version', 'revision',
     'document_json', 'created_at', 'updated_at',
@@ -1078,6 +1089,8 @@ const expectedNamedIndexes: Record<string, string> = {
     'catalog_content_drafts:content_kind,updated_at,draft_uuid',
   catalog_content_drafts_base_content_index:
     'catalog_content_drafts:content_kind,base_content_key',
+  catalog_content_replacement_choices_character_index:
+    'catalog_content_replacement_choices:character_id,content_kind',
   catalog_content_supersessions_successor_index:
     'catalog_content_supersessions:content_kind,successor_content_key',
   background_definitions_content_key_unique:
@@ -1463,6 +1476,7 @@ const expectedDefaults: Record<string, Record<string, string>> = {
     updated_at: 'CURRENT_TIMESTAMP',
   },
   catalog_content_match_decisions: { reviewed_at: 'CURRENT_TIMESTAMP' },
+  catalog_content_replacement_choices: { decided_at: 'CURRENT_TIMESTAMP' },
   catalog_content_provenance: { recorded_at: 'CURRENT_TIMESTAMP' },
   catalog_content_supersessions: { recorded_at: 'CURRENT_TIMESTAMP' },
   catalog_data_migrations: { applied_at: 'CURRENT_TIMESTAMP' },
@@ -1578,6 +1592,11 @@ const expectedDefaultedRow: Record<string, unknown> = {
 const expectedForeignKeys: Record<string, string[]> = {
   catalog_content_archive_members: [
     'content_kind,content_key->catalog_content_identities.content_kind,content_key|CASCADE',
+  ],
+  catalog_content_replacement_choices: [
+    'content_kind,superseded_content_key->catalog_content_identities.content_kind,content_key|CASCADE',
+    'content_kind,successor_content_key->catalog_content_identities.content_kind,content_key|CASCADE',
+    'character_id->characters.id|CASCADE',
   ],
   catalog_content_drafts: [
     'content_kind,base_content_key->catalog_content_identities.content_kind,content_key|RESTRICT',

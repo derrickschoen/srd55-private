@@ -49,6 +49,7 @@ import {
 import {
   catalog_content_archive_members,
   catalog_content_drafts,
+  catalog_content_replacement_choices,
 } from './catalog-authoring';
 import {
   change_log,
@@ -1254,6 +1255,12 @@ export const catalogContentIdentitiesRelations = relations(
     }),
     drafts_based_on_content: many(catalog_content_drafts),
     archive_members: many(catalog_content_archive_members),
+    kept_replacement_choices: many(catalog_content_replacement_choices, {
+      relationName: 'superseded_replacement_choice',
+    }),
+    offered_replacement_choices: many(catalog_content_replacement_choices, {
+      relationName: 'successor_replacement_choice',
+    }),
     classes: many(class_definitions),
     subclasses: many(subclass_definitions),
     feats: many(feat_definitions),
@@ -1296,6 +1303,38 @@ export const catalogContentArchiveMembersRelations = relations(
         catalog_content_identities.content_kind,
         catalog_content_identities.content_key,
       ],
+    }),
+  }),
+);
+
+export const catalogContentReplacementChoicesRelations = relations(
+  catalog_content_replacement_choices,
+  ({ one }) => ({
+    superseded_content: one(catalog_content_identities, {
+      relationName: 'superseded_replacement_choice',
+      fields: [
+        catalog_content_replacement_choices.content_kind,
+        catalog_content_replacement_choices.superseded_content_key,
+      ],
+      references: [
+        catalog_content_identities.content_kind,
+        catalog_content_identities.content_key,
+      ],
+    }),
+    successor_content: one(catalog_content_identities, {
+      relationName: 'successor_replacement_choice',
+      fields: [
+        catalog_content_replacement_choices.content_kind,
+        catalog_content_replacement_choices.successor_content_key,
+      ],
+      references: [
+        catalog_content_identities.content_kind,
+        catalog_content_identities.content_key,
+      ],
+    }),
+    character: one(characters, {
+      fields: [catalog_content_replacement_choices.character_id],
+      references: [characters.id],
     }),
   }),
 );

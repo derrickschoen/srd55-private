@@ -133,10 +133,11 @@ test('discloses a narrowing spell replacement before apply and repairs the exact
   await expect(review).toContainText(
     'After Apply: Retarget Spell Species Revised — Homebrew · external layer',
   );
-  await expect(review.getByRole('radio')).toHaveCount(0);
+  await expect(review.getByRole('radio')).toHaveCount(2);
+  await review.getByLabel('Apply the new version').check();
   await expect(review.getByLabel('Private copy name')).toHaveCount(0);
   await expect(review).not.toContainText(/certif/iu);
-  const apply = review.getByRole('button', { name: 'Apply to all listed characters' });
+  const apply = review.getByRole('button', { name: 'Apply selected updates' });
   await expect(apply).toBeEnabled();
   await apply.click();
   await expect(page.getByRole('heading', { name: 'Character fixes applied' })).toBeVisible();

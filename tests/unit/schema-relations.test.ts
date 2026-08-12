@@ -24,8 +24,8 @@ import schemaSql from '../../src/db/schema.sql?raw';
  *   reverse — every FK constraint has a matching declared `one()` edge.
  *
  * Comparison is by CONSTRAINT SET, not row count. `PRAGMA foreign_key_list`
- * returns one row per column, so the 22 composite foreign keys contribute two
- * rows each: 111 constraints, 133 rows. Counting rows would let a composite key
+ * returns one row per column, so the 24 composite foreign keys contribute two
+ * rows each: 114 constraints, 138 rows. Counting rows would let a composite key
  * degrade into two single-column keys unnoticed — which would silently drop
  * exactly the cross-character and wrong-class protections those keys exist for.
  */
@@ -133,7 +133,7 @@ afterAll(() => {
 });
 
 describe('declared relations match the foreign keys', () => {
-  it('budgets 111 constraints across 133 PRAGMA rows', () => {
+  it('budgets 114 constraints across 138 PRAGMA rows', () => {
     const tables = db
       .selectValues(
         `SELECT name FROM sqlite_schema
@@ -245,8 +245,9 @@ describe('declared relations match the foreign keys', () => {
     // Migration 0042 adds one owner FK for each contribution table. S6-12's
     // provenance row adds one composite registry-identity edge: one constraint
     // across two PRAGMA rows. S6-05's receipt adds one character edge/row.
-    expect(constraintEdges(db)).toHaveLength(111);
-    expect(rowCount).toBe(133);
+    // S6-08 adds two composite content edges and one character edge (five rows).
+    expect(constraintEdges(db)).toHaveLength(114);
+    expect(rowCount).toBe(138);
   });
 
   it('declares a relation for every foreign key, and a foreign key for every relation', () => {
@@ -255,7 +256,7 @@ describe('declared relations match the foreign keys', () => {
     expect(declaredEdges()).toEqual(constraintEdges(db));
   });
 
-  it('keeps all 22 composite foreign keys composite', () => {
+  it('keeps all 24 composite foreign keys composite', () => {
     const edges = declaredEdges();
     expect(edges).toContain(
       'character_class_levels: subclass_definition_id,class_definition_id -> subclass_definitions.id,class_definition_id',
@@ -319,6 +320,15 @@ describe('declared relations match the foreign keys', () => {
     );
     expect(edges).toContain(
       'catalog_content_archive_members: content_kind,content_key -> catalog_content_identities.content_kind,content_key',
+    );
+    expect(edges).toContain(
+      'catalog_content_replacement_choices: content_kind,superseded_content_key -> catalog_content_identities.content_kind,content_key',
+    );
+    expect(edges).toContain(
+      'catalog_content_replacement_choices: content_kind,successor_content_key -> catalog_content_identities.content_kind,content_key',
+    );
+    expect(edges).toContain(
+      'catalog_content_replacement_choices: character_id -> characters.id',
     );
     expect(edges).toContain(
       'character_level_feat_choices: feat_source_instance_id,character_id -> character_source_instances.id,character_id',

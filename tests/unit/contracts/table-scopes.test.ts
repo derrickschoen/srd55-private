@@ -114,6 +114,8 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'catalog_content_aliases',
       // D214 durable archive-set membership is whole-database registry state.
       'catalog_content_archive_members',
+      // S6-08 durable recipient choices are whole-database registry state.
+      'catalog_content_replacement_choices',
       // HA-2 incomplete drafts are whole-database state only (D139).
       'catalog_content_drafts',
       'catalog_content_fingerprints',
@@ -352,7 +354,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
 });
 
 describe('table scope classification', () => {
-  it('classifies all 86 tables exactly once', () => {
+  it('classifies all 87 tables exactly once', () => {
     const names = Object.keys(TABLE_SCOPES);
     // 30 Laravel-derived tables — 38 until the eight Laravel-only
     // infrastructure ones were dropped — plus the four native weapon tables,
@@ -371,9 +373,10 @@ describe('table scope classification', () => {
     // another grows cannot pass unnoticed.
     // Migration 0042 adds the two owner-specific contribution tables, and
     // 0044 adds one registry-only provenance table while 0045 adds the
-    // character-owned share-lineage receipt table.
-    expect(names).toHaveLength(86);
-    expect(new Set(names).size).toBe(86);
+    // character-owned share-lineage receipt table. Migration 0046 adds the
+    // recipient's durable replacement-choice table.
+    expect(names).toHaveLength(87);
+    expect(new Set(names).size).toBe(87);
     expect([...names].sort()).toEqual([...APPLICATION_TABLES].sort());
   });
 

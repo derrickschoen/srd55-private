@@ -4104,7 +4104,10 @@ export function planCharacterBackupImport(
     characterImportOperationIdentity(validated),
   );
   assertPlannedCharacterReferences(db, validated, nodes, plan);
-  return portableImportPlan(plan);
+  return portableImportPlan(plan, {
+    content: validated.document.content,
+    supersessions: validated.document.supersessions ?? [],
+  });
 }
 
 function characterImportOperationIdentity(validated: ValidatedDocument): string {

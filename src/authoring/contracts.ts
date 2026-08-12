@@ -499,6 +499,7 @@ export interface PublishedHomebrewSummary {
   readonly rules_edition: RulesEdition;
   readonly catalog_layer: 'external';
   readonly superseded_by: ContentKey | null;
+  readonly usage_count: number;
   readonly provenance: ContentProvenance;
 }
 
@@ -682,6 +683,7 @@ export interface ReplacementSetResult {
   readonly old_content_key: ContentKey;
   readonly new_content_key: ContentKey;
   readonly replacements: readonly ReplacementResult[];
+  readonly kept_character_ids: readonly CharacterId[];
 }
 
 export interface ReplacementChange {
@@ -689,6 +691,13 @@ export interface ReplacementChange {
   readonly label: string;
   readonly before: JsonValue;
   readonly after: JsonValue;
+}
+
+export interface ReplacementRuleChange {
+  /** Player-visible sheet or feature label; authored labels remain untrusted text. */
+  readonly label: string;
+  readonly before: string;
+  readonly after: string;
 }
 
 export interface ReplacementChoiceRequirement {
@@ -705,7 +714,11 @@ interface ReplacementPlanBase<K extends AuthoredContentKind> {
   readonly token: ReplacementPlanToken;
   readonly facts: ReplacementTokenFacts & { readonly content_kind: K };
   readonly character_name: string;
+  /** Present when the recipient previously chose to keep this exact version. */
+  readonly kept_at: string | null;
   readonly changes: readonly ReplacementChange[];
+  readonly rules_changes: readonly ReplacementRuleChange[];
+  readonly rules_change_review: 'available' | 'unavailable';
   readonly notices: readonly ReplacementNotice[];
   readonly required_choices: readonly ReplacementChoiceRequirement[];
   readonly review: readonly ReplacementReviewItem[];

@@ -118,6 +118,7 @@ export interface PreviewReplacementSetParams {
 
 export interface CommitReplacementSetParams extends PreviewReplacementSetParams {
   readonly replacements: readonly ReplacementSetCommit[];
+  readonly kept_character_ids: readonly CharacterId[];
 }
 
 export interface ContentLifecycleParams {

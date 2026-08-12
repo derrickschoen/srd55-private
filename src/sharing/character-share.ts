@@ -22,9 +22,11 @@ import {
 import {
   exportPortableContentBundle,
   localContentReferenceImportNode,
+  portableContentLineages,
   portableContentImportNodes,
   restorePortableContentSupersessions,
 } from '../backup/portable-content';
+import type { ContentImportLineageDisclosure } from '../catalog/content-adoption';
 import { canonicalJson } from '../commands/canonical-json';
 import { sha256 } from '../crypto/sha256';
 import { assertSourceRepeatable } from '../commands/add-source';
@@ -198,6 +200,7 @@ export interface SharePreview {
    * is written.
    */
   readonly includesWrittenText: boolean;
+  readonly incomingLineages: readonly ContentImportLineageDisclosure[];
   readonly update: ShareUpdatePreview | null;
   readonly historicalContributionGaps: readonly {
     readonly contentName: string;
@@ -2113,6 +2116,9 @@ export function previewCharacterShare(
     planned.targets,
     choices,
   );
+  const usedContentKeys = new Set(
+    shareCatalogReferences(document).map((reference) => reference.contentKey),
+  );
   return {
     name: document.character.name,
     classes: document.classes.map((row) => ({
@@ -2152,6 +2158,9 @@ export function previewCharacterShare(
       document.character.appearance !== undefined ||
       document.character.backstory !== undefined ||
       document.character.notes !== undefined,
+    incomingLineages: document.portableContent === undefined
+      ? Object.freeze([])
+      : portableContentLineages(document.portableContent, usedContentKeys),
     update: shareUpdatePreview(db, document),
     historicalContributionGaps: shareHistoricalContributionGaps(db, document),
     adoptionPlan: planned.plan,
@@ -2240,10 +2249,14 @@ function shareUpdatePreview(
 /**
  * Replace only the incoming share scope. The character root is deliberately
  * retained: deleting it would fire unrelated FK actions such as severing a
- * party publication. Save points and local sheet adjustments are likewise
- * recipient-owned and survive. Audit/undo rows address the replaced graph, so
- * they are reset explicitly instead of being left capable of replaying stale
- * row ids. Opt-in sections survive when the sender did not include them.
+ * party publication. Save points, local sheet adjustments, and explicit Keep
+ * decisions for exact content-version offers are likewise recipient-owned and
+ * survive. A Keep decision can become dormant when the arriving sheet no
+ * longer uses that version, but the sender cannot revoke it; its exact
+ * old-version/new-version key prevents it from applying to another offer.
+ * Audit/undo rows address the replaced graph, so they are reset explicitly
+ * instead of being left capable of replaying stale row ids. Opt-in sections
+ * survive when the sender did not include them.
  */
 function clearSharedCharacterForUpdate(
   db: DatabaseContext,

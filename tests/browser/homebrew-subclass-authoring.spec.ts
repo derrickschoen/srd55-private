@@ -340,13 +340,17 @@ test('authors a subclass timeline, preserves threshold effects, and previews its
       journey.subclassKey,
     );
     await expect(recipient.locator('[data-s4-share-hostile]')).toHaveCount(0);
-    await expect(recipient.getByRole('region', {
+    const importedSubclass = recipient.getByRole('region', {
       name: 'Embedded external content',
-    }).getByRole('listitem').filter({ hasText: HOSTILE_SUBCLASS_NAME }))
+    }).getByRole('listitem').filter({ hasText: HOSTILE_SUBCLASS_NAME });
+    await expect(importedSubclass.locator('.share-embedded-content-provenance'))
       .toHaveText(
         `${HOSTILE_SUBCLASS_NAME} — subclass — ` +
           'Homebrew from the sender — a local copy will be added to your library',
       );
+    await expect(importedSubclass).toContainText(
+      `1 version; this character uses ${HOSTILE_SUBCLASS_NAME}`,
+    );
   } finally {
     await recipientProfile.close();
   }

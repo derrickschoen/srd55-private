@@ -13,6 +13,7 @@ import {
   remapProjectionFingerprintReferences,
   type ContentImportDependencyTarget,
   type ContentImportNode,
+  type ContentImportLineageDisclosure,
   type ContentImportPlan,
   type ContentImportProjection,
 } from '../catalog/content-adoption';
@@ -198,6 +199,7 @@ export interface PortableImportPreview {
 
 export interface PortableImportPlan extends ContentImportPlan {
   readonly preview: PortableImportPreview;
+  readonly incomingLineages: readonly ContentImportLineageDisclosure[];
 }
 
 function zeroKindCounts(): Record<ContentKind, number> {
@@ -207,8 +209,65 @@ function zeroKindCounts(): Record<ContentKind, number> {
   >;
 }
 
+function portableAggregateName(entry: PortableContentAggregate): string {
+  return entry.aggregate.name.trim() === '' ? 'UNKNOWN' : entry.aggregate.name;
+}
+
+function portableNodeId(kind: ContentKind, contentKey: string): string {
+  return `portable:${kind}:${contentKey}`;
+}
+
+export function portableContentLineages(
+  bundle: PortableContentBundle,
+  usedContentKeys: ReadonlySet<string> = new Set<string>(),
+): readonly ContentImportLineageDisclosure[] {
+  const entries = new Map(bundle.content.map((entry) => [
+    `${entry.kind}\u0000${entry.content_key}`,
+    entry,
+  ]));
+  const successors = new Map(bundle.supersessions.map((edge) => [
+    `${edge.content_kind}\u0000${edge.superseded_content_key}`,
+    `${edge.content_kind}\u0000${edge.successor_content_key}`,
+  ]));
+  const predecessorKeys = new Set(successors.values());
+  const visited = new Set<string>();
+  const lineages: ContentImportLineageDisclosure[] = [];
+  const appendLineage = (start: string): void => {
+    const versions: { id: string; name: string; used_by_character: boolean }[] = [];
+    let cursor: string | undefined = start;
+    while (cursor !== undefined && !visited.has(cursor)) {
+      const entry = entries.get(cursor);
+      if (entry === undefined) break;
+      visited.add(cursor);
+      versions.push({
+        id: portableNodeId(entry.kind, entry.content_key),
+        name: portableAggregateName(entry),
+        used_by_character: usedContentKeys.has(entry.content_key),
+      });
+      cursor = successors.get(cursor);
+    }
+    const first = entries.get(start);
+    if (first !== undefined && versions.length > 0) {
+      lineages.push(Object.freeze({
+        kind: first.kind,
+        versions: Object.freeze(versions.map((version) => Object.freeze(version))),
+      }));
+    }
+  };
+  for (const key of entries.keys()) {
+    if (!predecessorKeys.has(key)) appendLineage(key);
+  }
+  for (const key of entries.keys()) {
+    if (!visited.has(key)) appendLineage(key);
+  }
+  return Object.freeze(lineages);
+}
+
 /** Counted view over the authenticated CI-4a outcomes; it adds no install path. */
-export function portableImportPlan(plan: ContentImportPlan): PortableImportPlan {
+export function portableImportPlan(
+  plan: ContentImportPlan,
+  bundle?: PortableContentBundle,
+): PortableImportPlan {
   const created = zeroKindCounts();
   const matched = zeroKindCounts();
   const reviews = zeroKindCounts();
@@ -241,8 +300,19 @@ export function portableImportPlan(plan: ContentImportPlan): PortableImportPlan 
       }
     }
   }
+  const incomingLineages = bundle === undefined
+    ? plan.incomingContent.map((entry) => Object.freeze({
+        kind: entry.kind,
+        versions: Object.freeze([Object.freeze({
+          id: entry.id,
+          name: entry.name,
+          used_by_character: false,
+        })]),
+      }))
+    : portableContentLineages(bundle);
   return Object.freeze({
     ...plan,
+    incomingLineages,
     preview: Object.freeze({
       new_by_kind: Object.freeze(created),
       matched_by_kind: Object.freeze(matched),

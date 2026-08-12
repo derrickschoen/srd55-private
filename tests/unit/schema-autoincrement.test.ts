@@ -175,6 +175,7 @@ const naturalKeyTables = [
   'catalog_content_identities',
   'catalog_content_match_decisions',
   'catalog_content_provenance',
+  'catalog_content_replacement_choices',
   'catalog_content_supersessions',
   'catalog_data_migrations',
   'character_attunement_slots',
@@ -227,7 +228,8 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
       // ladders. Counted in parts so one group shrinking while another grows
       // cannot pass unnoticed. D92's slot row, the draft UUID, and S6-12's
       // composite provenance identity use natural primary keys and therefore
-      // belong in `naturalKeyTables`.
+      // belong in `naturalKeyTables`; so do S6-05's one-per-character receipt
+      // and S6-08's exact-transition replacement choice.
       expect(declared).toHaveLength(74);
       expect(autoIncrementTables).toHaveLength(30);
       expect(nativeAutoIncrementTables).toHaveLength(44);

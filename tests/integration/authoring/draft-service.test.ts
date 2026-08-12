@@ -211,6 +211,7 @@ describe('catalog authoring draft service', () => {
         rules_edition: 'expanded',
         catalog_layer: 'external',
         superseded_by: null,
+        usage_count: 0,
         provenance: {
           origin_kind: 'unknown', received: false, local_derivation: false,
         },
@@ -222,6 +223,7 @@ describe('catalog authoring draft service', () => {
         rules_edition: 'expanded',
         catalog_layer: 'external',
         superseded_by: null,
+        usage_count: 0,
         provenance: {
           origin_kind: 'unknown', received: false, local_derivation: false,
         },
@@ -233,6 +235,7 @@ describe('catalog authoring draft service', () => {
         rules_edition: 'expanded',
         catalog_layer: 'external',
         superseded_by: null,
+        usage_count: 0,
         provenance: {
           origin_kind: 'unknown', received: false, local_derivation: false,
         },

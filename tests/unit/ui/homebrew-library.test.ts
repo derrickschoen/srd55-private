@@ -21,6 +21,7 @@ import {
   homebrewMissingDraftPath,
   homebrewReplacementPath,
   homebrewTabPath,
+  publishedHomebrewLineages,
   renderHomebrewLibrary,
   selectedHomebrewTab,
 } from '../../../src/ui/screens/homebrew/homebrew-library';
@@ -119,6 +120,7 @@ const library: AuthoringLibrary = {
       rules_edition: 'expanded',
       catalog_layer: 'external',
       superseded_by: null,
+      usage_count: 0,
       provenance: {
         origin_kind: 'unknown', received: true, local_derivation: false,
         author_label: hostileName,
@@ -131,6 +133,7 @@ const library: AuthoringLibrary = {
       rules_edition: '2024',
       catalog_layer: 'external',
       superseded_by: null,
+      usage_count: 0,
       provenance: {
         origin_kind: 'authored_here', received: false, local_derivation: false,
       },
@@ -142,6 +145,7 @@ const library: AuthoringLibrary = {
       rules_edition: '2024',
       catalog_layer: 'external',
       superseded_by: null,
+      usage_count: 0,
       provenance: {
         origin_kind: 'authored_here', received: false, local_derivation: false,
       },
@@ -404,6 +408,67 @@ describe('HA-6 homebrew library routing and tabs', () => {
         '/homebrew/drafts/new-species',
         '/homebrew/drafts/copy-species',
       ]);
+      cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('presents a persisted three-version history as one item with a reachable character update', async () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const v1 = '2024:content.subclass:veteran' as ContentKey;
+      const v2 = '2024:content.subclass:veteran-2' as ContentKey;
+      const v3 = '2024:content.subclass:veteran-3' as ContentKey;
+      const entries: AuthoringLibrary['published'] = [
+        {
+          content_key: v1, content_kind: 'subclass', name: 'Veteran',
+          rules_edition: '2024', catalog_layer: 'external',
+          superseded_by: v2, usage_count: 0,
+          provenance: {
+            origin_kind: 'authored_here', received: false, local_derivation: false,
+          },
+        },
+        {
+          content_key: v2, content_kind: 'subclass',
+          name: '<b data-hostile-history>Veteran revision 2</b>',
+          rules_edition: '2024', catalog_layer: 'external',
+          superseded_by: v3, usage_count: 1,
+          provenance: {
+            origin_kind: 'authored_here', received: false, local_derivation: false,
+          },
+        },
+        {
+          content_key: v3, content_kind: 'subclass', name: 'Veteran revision 3',
+          rules_edition: '2024', catalog_layer: 'external',
+          superseded_by: null, usage_count: 0,
+          provenance: {
+            origin_kind: 'authored_here', received: false, local_derivation: false,
+          },
+        },
+      ];
+      expect(publishedHomebrewLineages(entries)).toHaveLength(1);
+      const navigated: string[] = [];
+      const screenContext = context(
+        'https://example.test/homebrew?tab=subclass',
+        navigated,
+      );
+      const cleanup = await renderHomebrewLibrary(screenContext, {
+        client: authoringClient({
+          list: async () => ({ published: entries, drafts: [] }),
+        }),
+      });
+      const root = interactiveElement(screenContext.root);
+      expect(root.querySelector('.homebrew-grid')?.querySelectorAll('.homebrew-card'))
+        .toHaveLength(1);
+      expect(elementText(root as unknown as Node)).toContain('History — 3 versions');
+      expect(root.querySelector('[data-hostile-history]')).toBeNull();
+      const update = root.querySelectorAll('a').find(
+        (link) => link.textContent === 'Review next version for 1 character',
+      );
+      expect(update?.getAttribute('href')).toBe(homebrewReplacementPath(v2, v3));
+      update?.click();
+      expect(navigated).toEqual([homebrewReplacementPath(v2, v3)]);
       cleanup();
     } finally {
       restoreDocument();
@@ -918,11 +983,18 @@ describe('HA-6 homebrew library routing and tabs', () => {
             character_revision: 3 as never,
           },
           character_name: hostileCharacter,
+          kept_at: null,
           changes: [{
             path: ['content_key'], label: 'species content reference',
             before: '<b data-ha11-before>Old</b>',
             after: '<i data-ha11-after>New</i>',
           }],
+          rules_changes: [{
+            label: '<em data-hostile-rule-change>Sneak Attack</em>',
+            before: '7d6',
+            after: '13d6',
+          }],
+          rules_change_review: 'available',
           notices: [invalidation, unknownInvalidation],
           required_choices: [], review: [{
             candidate_content_key: newKey,
@@ -954,6 +1026,7 @@ describe('HA-6 homebrew library routing and tabs', () => {
                 new_content_key: newKey,
                 notices: [invalidation, unknownInvalidation],
               }],
+              kept_character_ids: [],
             };
           },
         }),
@@ -999,8 +1072,12 @@ describe('HA-6 homebrew library routing and tabs', () => {
       expect(reviewCopy).not.toContain(
         'Clone — Installs a renamed private copy',
       );
+      expect(root.querySelector('[data-hostile-rule-change]')).toBeNull();
+      expect(reviewCopy).toContain(
+        'What changes on the sheet <em data-hostile-rule-change>Sneak Attack</em> Current sheet: 7d6 With this update: 13d6',
+      );
       const controls = root.querySelectorAll('input');
-      expect(controls).toHaveLength(0);
+      expect(controls).toHaveLength(2);
       const apply = root.querySelectorAll('button').find(
         (button) => button.textContent === 'Apply to all listed characters',
       );
@@ -1012,6 +1089,7 @@ describe('HA-6 homebrew library routing and tabs', () => {
         old_content_key: oldKey,
         new_content_key: newKey,
         replacements: [{ token: 'replacement-token', decisions: [], choices: [] }],
+        kept_character_ids: [],
       }]);
       expect(elementText(root as unknown as Node)).toContain('Character fixes applied');
       expect(elementText(root as unknown as Node)).toContain(hostileCharacter);
@@ -1046,10 +1124,13 @@ describe('HA-6 homebrew library routing and tabs', () => {
             character_revision: 5 as never,
           },
           character_name: 'Collision Hero',
+          kept_at: null,
           changes: [{
             path: ['content_key'], label: 'species content reference',
             before: 'Old Species', after: 'Installed Target',
           }],
+          rules_changes: [],
+          rules_change_review: 'available',
           notices: [], required_choices: [],
           review: [{
             candidate_content_key: candidateKey,
@@ -1080,6 +1161,7 @@ describe('HA-6 homebrew library routing and tabs', () => {
                 character_revision: 6 as never, old_content_key: oldKey,
                 new_content_key: candidateKey, notices: [],
               }],
+              kept_character_ids: [],
             };
           },
         }),
@@ -1098,9 +1180,9 @@ describe('HA-6 homebrew library routing and tabs', () => {
       expect(copy.toLowerCase()).not.toContain('certif');
       const controls = root.querySelectorAll('input');
       expect(controls.map((control) => control.getAttribute('checked')))
-        .toEqual([null, null, null]);
+        .toEqual([null, null, null, null, null]);
       const apply = root.querySelectorAll('button').find(
-        (button) => button.textContent === 'Apply to all listed characters',
+        (button) => button.textContent === 'Apply selected updates',
       );
       if (apply === undefined) throw new Error('Apply button missing.');
       expect(apply.disabled).toBe(true);
@@ -1112,12 +1194,15 @@ describe('HA-6 homebrew library routing and tabs', () => {
       }
       clone.checked = true;
       clone.dispatchEvent(new Event('change'));
-      expect(apply.disabled).toBe(false);
-      apply.click();
+      expect(apply.disabled).toBe(true);
+      root.querySelectorAll('button').find(
+        (button) => button.textContent === 'Apply to all listed characters',
+      )?.click();
       await settle();
       expect(commits).toEqual([{
         old_content_key: oldKey,
         new_content_key: newKey,
+        kept_character_ids: [],
         replacements: [{
           token: 'collision-replacement-token',
           decisions: [{

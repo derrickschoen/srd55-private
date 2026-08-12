@@ -541,7 +541,8 @@ describe('minimal character sharing', () => {
             ? 'shared_payload_replaced'
             : tableName === 'party_document_states'
               ? 'external_link_preserved_by_root_update'
-              : tableName === 'character_save_points' ||
+              : tableName === 'catalog_content_replacement_choices' ||
+                  tableName === 'character_save_points' ||
                   tableName === 'character_sheet_adjustments'
                 ? 'recipient_state_preserved_by_root_update'
                 : tableName === 'character_share_receipts'
@@ -555,7 +556,7 @@ describe('minimal character sharing', () => {
     expect(audited).not.toContainEqual(expect.objectContaining({
       handling: 'UNCLASSIFIED',
     }));
-    expect(audited).toHaveLength(27);
+    expect(audited).toHaveLength(28);
     expect(audited.filter((entry) => entry.onDelete === 'SET NULL')).toEqual([{
       table: 'party_document_states',
       onDelete: 'SET NULL',
@@ -563,7 +564,11 @@ describe('minimal character sharing', () => {
     }]);
     expect(audited.filter((entry) => entry.handling ===
       'recipient_state_preserved_by_root_update').map((entry) => entry.table))
-      .toEqual(['character_save_points', 'character_sheet_adjustments']);
+      .toEqual([
+        'catalog_content_replacement_choices',
+        'character_save_points',
+        'character_sheet_adjustments',
+      ]);
   });
 
   it('S6-05 keeps a sender lineage stable and requires update-in-place or keep-both', async () => {
@@ -596,6 +601,28 @@ describe('minimal character sharing', () => {
     );
     updateTarget.exec(
       'INSERT INTO character_sheet_adjustments (character_id) VALUES (?)',
+      [firstImported.characterId],
+    );
+    registerFixtureIdentity(
+      updateTarget,
+      'species',
+      '2024:species:recipient-kept-version',
+      'Recipient Kept Version',
+    );
+    registerFixtureIdentity(
+      updateTarget,
+      'species',
+      '2024:species:offered-replacement',
+      'Offered Replacement',
+    );
+    updateTarget.exec(
+      `INSERT INTO catalog_content_replacement_choices (
+         content_kind, superseded_content_key, successor_content_key,
+         character_id, decided_at
+       ) VALUES (
+         'species', '2024:species:recipient-kept-version',
+         '2024:species:offered-replacement', ?, '2026-08-12T12:00:00.000Z'
+       )`,
       [firstImported.characterId],
     );
     updateTarget.exec(
@@ -688,6 +715,19 @@ describe('minimal character sharing', () => {
       'SELECT count(*) FROM character_sheet_adjustments WHERE character_id = ?',
       [firstImported.characterId],
     )).toBe(1);
+    expect(updateTarget.oneRaw(
+      `SELECT content_kind, superseded_content_key, successor_content_key,
+              character_id, decided_at
+       FROM catalog_content_replacement_choices
+       WHERE character_id = ?`,
+      [firstImported.characterId],
+    )).toEqual({
+      content_kind: 'species',
+      superseded_content_key: '2024:species:recipient-kept-version',
+      successor_content_key: '2024:species:offered-replacement',
+      character_id: firstImported.characterId,
+      decided_at: '2026-08-12T12:00:00.000Z',
+    });
     expect(updateTarget.scalar(
       'SELECT count(*) FROM change_log WHERE character_id = ?',
       [firstImported.characterId],

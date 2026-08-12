@@ -8,7 +8,11 @@ import {
 import type { SharePreview } from '../../../sharing/character-share';
 import type { ShareUpdateDisposition } from '../../../sharing/character-share';
 import type { ContentImportPlan } from '../../../catalog/content-adoption';
-import type { ContentImportDisclosure } from '../../../catalog/content-adoption';
+import type {
+  ContentImportDisclosure,
+  ContentImportLineageDisclosure,
+} from '../../../catalog/content-adoption';
+import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
 import {
   contentProvenanceDetails,
   contentProvenanceLabel,
@@ -348,18 +352,70 @@ export function createShareControls(
   }
 
   function renderEmbeddedContent(
+    lineages: readonly ContentImportLineageDisclosure[],
     disclosures: readonly ContentImportDisclosure[],
   ): void {
     embeddedContent.replaceChildren();
-    embeddedContent.hidden = disclosures.length === 0;
-    if (disclosures.length === 0) return;
+    embeddedContent.hidden = lineages.length === 0;
+    if (lineages.length === 0) return;
     const list = element('ul');
-    for (const disclosure of disclosures) {
-      list.append(element('li', {}, [contentDisclosure(disclosure)]));
+    for (const lineage of lineages) {
+      const latest = lineage.versions.at(-1);
+      if (latest === undefined) continue;
+      const used = lineage.versions.find((version) => version.used_by_character);
+      const latestDisclosure = disclosures.find((entry) => entry.id === latest.id);
+      const item = element('li');
+      const provenance = element('span', {
+        className: 'share-embedded-content-provenance',
+      });
+      provenance.append(
+        freeTextSpan(latest.name),
+        ` — ${lineage.kind} — ${latestDisclosure?.provenance === undefined
+          ? 'Homebrew from the sender — a local copy will be added to your library'
+          : incomingContentProvenanceLabel(latestDisclosure.provenance)}`,
+      );
+      item.append(
+        provenance,
+        `; ${String(lineage.versions.length)} ` +
+          `version${lineage.versions.length === 1 ? '' : 's'}`,
+        used === undefined ? '' : '; this character uses ',
+      );
+      if (used !== undefined) {
+        item.append(freeTextSpan(used.name));
+      }
+      if (latestDisclosure !== undefined) {
+        if (latestDisclosure.provenance !== undefined) {
+          const details = contentProvenanceDetails(latestDisclosure.provenance);
+          if (details.length > 0) {
+            const attribution = element('details');
+            attribution.append(element('summary', { text: 'Attribution details' }));
+            for (const detail of details) {
+              const line = element('p');
+              line.append(`${detail.label}: `, freeTextSpan(detail.value));
+              attribution.append(line);
+            }
+            item.append(' ', attribution);
+          }
+        }
+      }
+      if (lineage.versions.length > 1) {
+        const history = element('details');
+        history.append(element('summary', { text: 'Version history' }));
+        const versions = element('ol');
+        for (const version of lineage.versions) {
+          const versionItem = element('li');
+          versionItem.append(freeTextSpan(version.name));
+          if (version.used_by_character) versionItem.append(' — used by this character');
+          versions.append(versionItem);
+        }
+        history.append(versions);
+        item.append(history);
+      }
+      list.append(item);
     }
     embeddedContent.append(
       element('p', {
-        text: 'This external content will be installed with the character:',
+        text: 'Sent with this character. The link does not include the sender’s name. Nothing is installed until you choose Add to my characters.',
       }),
       list,
     );
@@ -519,7 +575,12 @@ export function createShareControls(
       activePreview = result;
       previewTitle.textContent = result.name;
       renderPreviewDetails(result);
-      renderEmbeddedContent(result.embeddedContent);
+      renderEmbeddedContent(result.incomingLineages ?? result.adoptionPlan.incomingContent.map(
+        (entry) => ({
+          kind: entry.kind,
+          versions: [{ id: entry.id, name: entry.name, used_by_character: false }],
+        }),
+      ), result.embeddedContent);
       previewPanel.hidden = false;
       if (result.update == null) {
         addButton.hidden = false;

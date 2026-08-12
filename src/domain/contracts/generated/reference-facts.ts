@@ -106,6 +106,24 @@ export const FOREIGN_KEY_FACTS = [
     targetColumns: ['content_kind', 'content_key'],
   },
   {
+    table: 'catalog_content_replacement_choices',
+    columns: ['content_kind', 'superseded_content_key'],
+    target: 'catalog_content_identities',
+    targetColumns: ['content_kind', 'content_key'],
+  },
+  {
+    table: 'catalog_content_replacement_choices',
+    columns: ['content_kind', 'successor_content_key'],
+    target: 'catalog_content_identities',
+    targetColumns: ['content_kind', 'content_key'],
+  },
+  {
+    table: 'catalog_content_replacement_choices',
+    columns: ['character_id'],
+    target: 'characters',
+    targetColumns: ['id'],
+  },
+  {
     table: 'catalog_content_supersessions',
     columns: ['content_kind', 'superseded_content_key'],
     target: 'catalog_content_identities',
