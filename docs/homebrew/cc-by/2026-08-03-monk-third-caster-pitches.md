@@ -17,7 +17,7 @@ spell names verified present in SRD 5.2.1.
   legitimized by the Bard/Cleric/Paladin corpus pattern).
 - Third-caster slot progression: 1st-level slots at 3, 2nd at 7, 3rd at 13,
   4th at 19. Exists to exercise the app's third-caster machinery (D169
-  replaces EK / AT, which are not in the SRD).
+  replaces Eldritch Knight / Arcane Trickster, which are not in the SRD).
 - **Wisdom** casting (guideline 01 heuristic 12: no new ability dependency).
 - Monk dependence is **Medium** (guideline 01): the subclass should alter
   what Focus buys — movement, control, utility — not stack damage riders.

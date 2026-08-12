@@ -7,6 +7,26 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D234 — OWNER: the sim lands on main; the subclass-session rulings arc folds by pointer (2026-08-12)
+
+The owner approved landing tools/sim on main ("Land it now"), satisfying
+D233's condition: the three non-SRD comparators were already replaced
+with SRD substitutes (Devotion / Savage Attacker / Lore) with the
+statistical invariant re-measured, and the board now carries all twelve
+SRD 5.2.1 subclasses plus ranged/thrown rows per the owner's directive.
+
+The subclass-session rulings (docs/homebrew/rulings.md, nine dated
+2026-08-11 entries: Strike-drop + aura-wide Command targeting; aura
+final Blindsight + Inevitable Word to 20; aura save-Disadvantage
+[superseded]; skeleton conformance; Foreseen Long-Rest-only; strikes v2
+[superseded]; second batch [superseded]; Voice-to-7 redesign
+[superseded]; no-personal-attribution) land on main IN rulings.md with
+their supersession arc verbatim. Per the handoff and the pointer-not-
+copy lesson in CLAUDE.md, this entry is the fold: rulings.md is the
+authoritative arc and outranks any doc it disagrees with; the arc is
+deliberately NOT duplicated here. Party-sync boundary advances to
+a451975b.
+
 ## D233 — OWNER: sim comparators become best-effort SRD substitutes before any sim sync (2026-08-11)
 
 The damage sim's three non-SRD comparator builds (a 2024-PHB oath
