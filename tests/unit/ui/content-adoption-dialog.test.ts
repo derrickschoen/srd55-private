@@ -456,9 +456,25 @@ describe('the D82 content-adoption dialog', () => {
         (row) => row.getAttribute('data-content-id') ===
           'portable:item:compatible',
       );
-      if (distinctRow === undefined || compatibleRow === undefined) {
+      const referenceOnlyRow = dialog.querySelectorAll('.content-adoption-row').find(
+        (row) => row.getAttribute('data-content-id') ===
+          'portable:item:unevidenced',
+      );
+      if (
+        distinctRow === undefined || compatibleRow === undefined ||
+        referenceOnlyRow === undefined
+      ) {
         throw new Error('Expected adoption review rows are missing.');
       }
+      const referenceOnlyText = elementText(referenceOnlyRow as unknown as Node);
+      expect(referenceOnlyText).toContain(
+        'Use this local Unevidenced Relic for the imported character.',
+      );
+      expect(referenceOnlyText).toContain(
+        'Create a private copy of this local Unevidenced Relic and attach the imported character.',
+      );
+      expect(referenceOnlyText).not.toContain('Discards the incoming rules');
+      expect(referenceOnlyText).not.toContain('Installs the incoming rules');
       expect(distinctRow.querySelectorAll('input').slice(0, 2).map((input) =>
         input.getAttribute('checked')
       )).toEqual([null, null]);

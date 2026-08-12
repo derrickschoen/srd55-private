@@ -573,6 +573,8 @@ export async function renderCharacterList(
         transferControls.focusLibraryImport();
       } else if (context.route.query.get('import') === 'catalog') {
         transferControls.focusCatalogImport();
+      } else if (context.route.query.get('import') === 'bundled-homebrew') {
+        transferControls.focusBundledHomebrewImport();
       }
     } else {
       transferControls.updateCharacters(characters);

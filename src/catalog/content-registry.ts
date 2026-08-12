@@ -14,6 +14,7 @@ import {
   type ContentKind,
   type DerivedContentIdentityV1,
 } from './content-identity';
+import { recordContentProvenance } from './content-provenance';
 import {
   assertedExternalContentKeyFromDeclared,
   isAssertedExternalContentKey,
@@ -801,6 +802,13 @@ export function registerBundledStableContentIdentity(
      ) VALUES (?, ?, 'bundled-stable', 'bundled', ?)`,
     [input.contentKey, input.kind, input.normalizedName],
   );
+  recordContentProvenance(db, {
+    kind: input.kind,
+    contentKey: input.contentKey,
+    provenance: {
+      origin_kind: 'built_in', received: false, local_derivation: false,
+    },
+  });
 }
 
 /** Trusted seeders call this before inserting a root on a fresh image. */

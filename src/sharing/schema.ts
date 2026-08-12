@@ -797,7 +797,7 @@ export interface CharacterShareDocument {
   readonly items?: readonly ShareItem[];
   /** D92: exactly three nullable zero-based references into `items`. */
   readonly attunementSlots?: ShareAttunementSlots;
-  /** V18: exact external aggregate closure plus immutable version lineage. */
+  /** V19: exact external aggregate closure, lineage, and origin provenance. */
   readonly portableContent?: PortableContentBundle;
 }
 
@@ -2922,7 +2922,10 @@ export function validateShareDocument(
   let portableContent: PortableContentBundle | undefined;
   if (source.portableContent !== undefined) {
     try {
-      portableContent = validatePortableContentBundle(source.portableContent);
+      portableContent = validatePortableContentBundle(
+        source.portableContent,
+        true,
+      );
     } catch (error) {
       if (error instanceof BackupValidationError) {
         throw new ShareValidationError(error.message);

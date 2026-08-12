@@ -13,6 +13,7 @@ import {
 } from '../catalog/catalog-key';
 import {
   type ContentImportChoices,
+  type ContentImportEntryOutcome,
   type ContentImportNode,
   type ContentImportProjection,
 } from '../catalog/content-adoption';
@@ -27,6 +28,10 @@ import {
   type ContentKind,
 } from '../catalog/content-identity';
 import { portableSourceContentImportNode } from '../catalog/source-content-importer';
+import {
+  authoredContentProvenance,
+  recordContentProvenance,
+} from '../catalog/content-provenance';
 import { projectAuthoredContentAggregateV1 } from '../catalog/stored-authored-content-projector-v1';
 import { storedContentMatchesFingerprintReferenceV1 } from '../catalog/stored-content-projector-v1';
 import type {
@@ -638,7 +643,15 @@ export function commitSpeciesPublish(
     node,
     operationIdentity: operation,
     supersedesContentKey: draft.base_content_key,
-    afterInstall: (transaction: DatabaseContext) => {
+    afterInstall: (transaction: DatabaseContext, outcome: ContentImportEntryOutcome) => {
+      if (outcome.kind === 'create' || outcome.kind === 'remembered-clone') {
+        recordContentProvenance(transaction, {
+          kind: 'species', contentKey: outcome.contentKey,
+          provenance: authoredContentProvenance(
+            transaction, 'species', draft.base_content_key,
+          ),
+        });
+      }
       const deleted = transaction.exec(
         'DELETE FROM catalog_content_drafts WHERE draft_uuid = ? AND revision = ?',
         [draft.draft_uuid, draft.revision],

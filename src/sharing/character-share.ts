@@ -5,6 +5,7 @@ import {
   type CatalogNamedDisclosure,
 } from '../catalog/catalog-disclosure';
 import { normalizeContentIdentityName } from '../catalog/content-identity';
+import { storedContentProvenance } from '../catalog/content-provenance';
 import {
   registerAssertedPlaceholderContentIdentity,
   resolveContentReference,
@@ -126,13 +127,19 @@ export interface ShareExportOptions {
 
 export interface ShareImportResult {
   readonly characterId: number;
+  readonly characterName: string;
+}
+
+export interface SharePreviewCatalogDisclosure extends CatalogNamedDisclosure {
+  /** True only when this exact class/subclass aggregate travels in the link. */
+  readonly incoming: boolean;
 }
 
 export interface SharePreview {
   readonly name: string;
   readonly classes: readonly {
-    readonly class: CatalogNamedDisclosure;
-    readonly subclass?: CatalogNamedDisclosure;
+    readonly class: SharePreviewCatalogDisclosure;
+    readonly subclass?: SharePreviewCatalogDisclosure;
     readonly level: number;
   }[];
   readonly sourceCount: number;
@@ -168,6 +175,7 @@ export interface SharePreview {
    */
   readonly includesWrittenText: boolean;
   readonly adoptionPlan: ContentImportPlan;
+  readonly embeddedContent: readonly import('../catalog/content-adoption').ContentImportDisclosure[];
 }
 
 export type ShareImportCommitResult =
@@ -1401,6 +1409,7 @@ interface ShareCatalogReference {
   readonly kind: ContentKind;
   readonly contentKey: ContentKey;
   readonly issueType: 'class' | 'subclass' | ShareSource['type'] | 'spell';
+  readonly contentName?: string;
 }
 
 interface PreparedShareReferences {
@@ -1452,6 +1461,7 @@ function shareCatalogReferences(
       kind: item.type,
       contentKey: item.key as ContentKey,
       issueType: item.type,
+      ...(item.name === undefined ? {} : { contentName: item.name }),
     });
   }
   for (const contentKey of shareSpellKeys(document)) {
@@ -1477,7 +1487,11 @@ function missingReferenceIssue(reference: ShareCatalogReference): ShareImportIss
     case 'feat':
     case 'species':
     case 'background':
-      return missingSourceIssue(reference.issueType, reference.contentKey);
+      return missingSourceIssue(
+        reference.issueType,
+        reference.contentKey,
+        reference.contentName,
+      );
     case 'spell':
       throw new Error('Missing spells become placeholders, not compatibility issues.');
   }
@@ -1860,10 +1874,11 @@ function shareImportPlan(
 
 function sharePreviewCatalogDisclosure(
   db: DatabaseContext,
+  document: CharacterShareDocument,
   planned: ReturnType<typeof shareImportPlan>,
   kind: 'class' | 'subclass',
   incomingKey: string,
-): CatalogNamedDisclosure {
+): SharePreviewCatalogDisclosure {
   const marker = referenceMarker(kind, incomingKey);
   const incoming = planned.plan.incomingContent.find((disclosure) =>
     planned.prepared.markersByNodeId.get(disclosure.id) === marker
@@ -1872,15 +1887,24 @@ function sharePreviewCatalogDisclosure(
     // Reuse the same display-ready disclosure rendered in the external-content
     // list. Carried content is not installed until commit, so a recipient
     // catalog lookup cannot name it during preview.
+    const carried = document.portableContent?.content.find((entry) =>
+      referenceMarker(entry.kind, entry.content_key) === marker
+    );
     return {
       name: incoming.name,
       catalog_layer: incoming.catalog_layer,
+      incoming: true,
+      ...(carried?.provenance === undefined
+        ? {}
+        : { provenance: carried.provenance }),
     };
   }
 
   const resolvedKey = planned.targets.get(marker);
   if (resolvedKey === undefined) {
-    return { name: `Unknown ${kind} name`, catalog_layer: 'unknown' };
+    return {
+      name: `Unknown ${kind} name`, catalog_layer: 'unknown', incoming: false,
+    };
   }
   const table = kind === 'class'
     ? 'class_definitions'
@@ -1899,13 +1923,17 @@ function sharePreviewCatalogDisclosure(
     typeof row.name !== 'string' ||
     row.name.trim() === ''
   ) {
-    return { name: `Unknown ${kind} name`, catalog_layer: 'unknown' };
+    return {
+      name: `Unknown ${kind} name`, catalog_layer: 'unknown', incoming: false,
+    };
   }
   return {
     name: row.name,
+    incoming: false,
     catalog_layer: catalogLayerDisclosure(
       typeof row.catalog_layer === 'string' ? row.catalog_layer : null,
     ),
+    provenance: storedContentProvenance(db, kind, resolvedKey),
   };
 }
 
@@ -2001,6 +2029,7 @@ export function previewCharacterShare(
     classes: document.classes.map((row) => ({
       class: sharePreviewCatalogDisclosure(
         db,
+        document,
         planned,
         'class',
         row.classKey,
@@ -2010,6 +2039,7 @@ export function previewCharacterShare(
         : {
             subclass: sharePreviewCatalogDisclosure(
               db,
+              document,
               planned,
               'subclass',
               row.subclassKey,
@@ -2034,6 +2064,17 @@ export function previewCharacterShare(
       document.character.backstory !== undefined ||
       document.character.notes !== undefined,
     adoptionPlan: planned.plan,
+    embeddedContent: Object.freeze(
+      (document.portableContent?.content ?? []).map((entry) => ({
+        id: `portable:${entry.kind}:${entry.content_key}`,
+        kind: entry.kind,
+        name: entry.aggregate.name,
+        catalog_layer: 'external' as const,
+        ...(entry.provenance === undefined
+          ? {}
+          : { provenance: entry.provenance }),
+      })),
+    ),
   };
 }
 
@@ -2963,7 +3004,7 @@ function insertCharacterShare(
     // shared character-level seam makes the imported source agree with its
     // chosen material and total level before the transaction can commit.
     reconcileCharacterLevelDependentSources(db, characterId, generator);
-    return { characterId };
+    return { characterId, characterName: c.name };
   });
 }
 

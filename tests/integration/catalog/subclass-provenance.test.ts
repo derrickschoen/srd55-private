@@ -11,6 +11,11 @@ import {
 import { CatalogImporter } from '../../../src/catalog/catalog-importer';
 import { reconcileBundledContentRegistryV1 } from '../../../src/catalog/bundled-content-registry-v1';
 import { importedContentKeyOwner } from '../../../src/catalog/catalog-key';
+import {
+  authoredContentProvenance,
+  recordContentProvenance,
+} from '../../../src/catalog/content-provenance';
+import type { ContentKey } from '../../../src/domain/ids';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { UpdateClassCommand } from '../../../src/commands/update-class';
 import { DatabaseContext } from '../../../src/db/database';
@@ -336,9 +341,20 @@ describe('an imported subclass stays distinguishable from a bundled one', () => 
   // 4747 x 1.5 = 7120.5, rounded up to 7200ms.
   it('travels through an embedded share and stays identifiable in the reference-only fallback', async () => {
     const source = await database();
+    const sourceSubclassId = importSubclass(source);
+    const hostileAuthor = '<img data-provenance-author onerror=alert(1)>';
+    recordContentProvenance(source, {
+      kind: 'subclass',
+      contentKey: SUBCLASS_KEY as ContentKey,
+      provenance: {
+        origin_kind: 'authored_here',
+        received: false,
+        local_derivation: false,
+        author_label: hostileAuthor,
+      },
+    });
     const shared = exportCharacterShare(
-      source,
-      walker(source, importSubclass(source)),
+      source, walker(source, sourceSubclassId),
     );
     expect(shared.classes[0]?.subclassKey).toBe(SUBCLASS_KEY);
     const sourceCurrentFingerprint = source.scalar<string>(
@@ -349,16 +365,36 @@ describe('an imported subclass stays distinguishable from a bundled one', () => 
     );
     expect(sourceCurrentFingerprint).toMatch(/^[0-9a-f]{64}$/);
 
-    // The v18 link carries authenticated rules, so a bare recipient can install
+    expect(shared.portableContent?.content.find((entry) =>
+      entry.content_key === SUBCLASS_KEY
+    )?.provenance).toEqual({
+      origin_kind: 'authored_here',
+      received: false,
+      local_derivation: false,
+      author_label: hostileAuthor,
+    });
+
+    // The v19 link carries authenticated rules and provenance, so a bare recipient can install
     // them before resolving the same portable key on the character.
     const bare = await database();
     expect(assessImportCompatibility(bare, shared)).toEqual([]);
     const embeddedPreview = previewCharacterShare(bare, shared);
     expect(embeddedPreview.classes).toEqual([{
-      class: { name: 'Bard', catalog_layer: 'bundled' },
+      class: {
+        name: 'Bard', catalog_layer: 'bundled',
+        incoming: false,
+        provenance: {
+          origin_kind: 'built_in', received: false, local_derivation: false,
+        },
+      },
       subclass: {
         name: 'College of the Long Road',
         catalog_layer: 'external',
+        incoming: true,
+        provenance: {
+          origin_kind: 'authored_here', received: false,
+          local_derivation: false, author_label: hostileAuthor,
+        },
       },
       level: 6,
     }]);
@@ -381,15 +417,42 @@ describe('an imported subclass stays distinguishable from a bundled one', () => 
       ),
     ).toBe(SUBCLASS_KEY);
     expect(importedContentKeyOwner(SUBCLASS_KEY)).toBe('longroad.homebrew');
+    expect(bare.oneRaw(
+      `SELECT origin_kind, received, local_derivation, author_label
+       FROM catalog_content_provenance
+       WHERE content_kind = 'subclass' AND content_key = ?`,
+      [SUBCLASS_KEY],
+    )).toEqual({
+      origin_kind: 'authored_here',
+      received: 1,
+      local_derivation: 0,
+      author_label: hostileAuthor,
+    });
+    expect(authoredContentProvenance(
+      bare, 'subclass', SUBCLASS_KEY as ContentKey,
+    )).toEqual({
+      origin_kind: 'authored_here',
+      received: false,
+      local_derivation: true,
+      author_label: hostileAuthor,
+    });
+    const reshared = exportCharacterShare(bare, embeddedImport.characterId);
+    expect(reshared.portableContent?.content.find((entry) =>
+      entry.content_key === SUBCLASS_KEY
+    )?.provenance).toEqual({
+      origin_kind: 'authored_here',
+      received: true,
+      local_derivation: false,
+      author_label: hostileAuthor,
+    });
 
     const referenceOnly = positionalToShareDocument(
       shareDocumentToReferencePositional(shared),
     );
     expect(referenceOnly.portableContent).toBeUndefined();
 
-    // A reference-only recipient without it is TOLD, in terms of the key.
-    // `missingSubclassIssue` is what the share screen prints, and this is the
-    // sentence that only means something because the key says whose content it is.
+    // A reference-only recipient without it gets the sender-library remedy;
+    // the opaque key remains available only as a diagnostic field.
     const fallbackBare = await database();
     expect(assessImportCompatibility(fallbackBare, referenceOnly)).toEqual([
       expect.objectContaining({

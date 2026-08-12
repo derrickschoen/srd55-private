@@ -140,7 +140,7 @@ test('authors a subclass timeline, preserves threshold effects, and previews its
   await expect(publishedCard.getByRole('heading', {
     name: HOSTILE_SUBCLASS_NAME,
   })).toBeVisible();
-  await expect(publishedCard).toContainText('Subclass · published homebrew version');
+  await expect(publishedCard).toContainText('Subclass · Authored here');
 
   const journey = await page.evaluate(async (subclassName) => {
     const classes = await window.staticApp.inspectRows('class_definitions', { name: 'Fighter' });
@@ -330,8 +330,8 @@ test('authors a subclass timeline, preserves threshold effects, and previews its
       `Fighter / ${HOSTILE_SUBCLASS_NAME} 3`,
     );
     await expect(recipient.locator('.share-preview-layers')).toHaveText(
-      `Fighter — SRD · bundled layer / ${HOSTILE_SUBCLASS_NAME} — ` +
-      'Homebrew · external layer',
+      `Fighter — Built into the app / ${HOSTILE_SUBCLASS_NAME} — ` +
+      'Homebrew from the sender — a local copy will be added to your library',
     );
     await expect(recipient.locator('.share-preview')).not.toContainText(
       '2024:class:fighter',
@@ -344,7 +344,8 @@ test('authors a subclass timeline, preserves threshold effects, and previews its
       name: 'Embedded external content',
     }).getByRole('listitem').filter({ hasText: HOSTILE_SUBCLASS_NAME }))
       .toHaveText(
-        `${HOSTILE_SUBCLASS_NAME} — subclass — Homebrew · external layer`,
+        `${HOSTILE_SUBCLASS_NAME} — subclass — ` +
+          'Homebrew from the sender — a local copy will be added to your library',
       );
   } finally {
     await recipientProfile.close();

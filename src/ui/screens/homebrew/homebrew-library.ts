@@ -13,6 +13,10 @@ import type {
   StoredHomebrewDraft,
 } from '../../../authoring/contracts';
 import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
+import {
+  contentProvenanceDetails,
+  contentProvenanceLabel,
+} from '../../../catalog/content-provenance';
 import type { HomebrewDraftUuid } from '../../../authoring/ids';
 import { AUTHORING_TEXT_LIMITS } from '../../../authoring/limits';
 import type { GuidedClassOption } from '../../../builder/contracts';
@@ -319,6 +323,15 @@ function publishedCard(
   );
   const title = element('h2');
   title.append(freeTextSpan(item.name));
+  const provenanceDetails = contentProvenanceDetails(item.provenance);
+  const attribution = element('details');
+  attribution.hidden = provenanceDetails.length === 0;
+  attribution.append(element('summary', { text: 'Attribution details' }));
+  for (const detail of provenanceDetails) {
+    const line = element('p');
+    line.append(`${detail.label}: `, freeTextSpan(detail.value));
+    attribution.append(line);
+  }
   return element('article', { className: 'homebrew-card panel' }, [
     element('div', { className: 'homebrew-card-heading' }, [
       title,
@@ -327,7 +340,10 @@ function publishedCard(
         badge(item.rules_edition, 'neutral'),
       ]),
     ]),
-    element('p', { text: `${KIND_LABELS[item.content_kind]} · published homebrew version` }),
+    element('p', {
+      text: `${KIND_LABELS[item.content_kind]} · ${contentProvenanceLabel(item.provenance)}`,
+    }),
+    attribution,
     element('div', { className: 'homebrew-card-actions' }, [
       ...(item.superseded_by === null ? [edit] : []),
       remove,

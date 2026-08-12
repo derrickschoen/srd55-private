@@ -52,6 +52,7 @@ import {
   PRE_ARCHIVE_CHARACTER_BACKUP_VERSION,
   PRE_FLAVOR_CHARACTER_BACKUP_VERSION,
   PRE_LINEAGE_CHARACTER_BACKUP_VERSION,
+  PRE_PROVENANCE_CHARACTER_BACKUP_VERSION,
   PREVIOUS_CHARACTER_BACKUP_VERSION,
 } from './backup-version';
 import {
@@ -143,6 +144,18 @@ export type CharacterBackupSpellDefinitions = {
 export interface CharacterBackupDocument {
   readonly format: typeof CHARACTER_BACKUP_FORMAT;
   readonly version: typeof CHARACTER_BACKUP_VERSION;
+  readonly exported_at: string;
+  readonly source_character_id: number;
+  readonly character: BackupRow;
+  readonly tables: CharacterBackupTables;
+  readonly references: CharacterBackupReferences;
+  readonly content: readonly PortableContentAggregate[];
+  readonly supersessions: readonly PortableContentSupersession[];
+}
+
+export interface PreProvenanceCharacterBackupDocument {
+  readonly format: typeof CHARACTER_BACKUP_FORMAT;
+  readonly version: typeof PRE_PROVENANCE_CHARACTER_BACKUP_VERSION;
   readonly exported_at: string;
   readonly source_character_id: number;
   readonly character: BackupRow;
@@ -1234,6 +1247,7 @@ function validateDocument(input: unknown): ValidatedDocument {
   const version = document.version;
   if (
     version !== CHARACTER_BACKUP_VERSION &&
+    version !== PRE_PROVENANCE_CHARACTER_BACKUP_VERSION &&
     version !== PRE_LINEAGE_CHARACTER_BACKUP_VERSION &&
     version !== PREVIOUS_CHARACTER_BACKUP_VERSION &&
     version !== PRE_ARCHIVE_CHARACTER_BACKUP_VERSION &&
@@ -1259,7 +1273,8 @@ function validateDocument(input: unknown): ValidatedDocument {
           'tables',
           'references',
         ]
-      : version === CHARACTER_BACKUP_VERSION
+      : version === CHARACTER_BACKUP_VERSION ||
+          version === PRE_PROVENANCE_CHARACTER_BACKUP_VERSION
         ? [
             'format',
             'version',
@@ -1344,6 +1359,7 @@ function validateDocument(input: unknown): ValidatedDocument {
   assertExactKeys(
     rawCharacter,
     version === CHARACTER_BACKUP_VERSION ||
+    version === PRE_PROVENANCE_CHARACTER_BACKUP_VERSION ||
     version === PRE_LINEAGE_CHARACTER_BACKUP_VERSION ||
     version === PREVIOUS_CHARACTER_BACKUP_VERSION
       ? currentCharacterColumns
@@ -1354,6 +1370,7 @@ function validateDocument(input: unknown): ValidatedDocument {
   );
   const character: MutableRow =
     version === CHARACTER_BACKUP_VERSION ||
+    version === PRE_PROVENANCE_CHARACTER_BACKUP_VERSION ||
     version === PRE_LINEAGE_CHARACTER_BACKUP_VERSION ||
     version === PREVIOUS_CHARACTER_BACKUP_VERSION
       ? rawCharacter
@@ -1538,6 +1555,8 @@ function validateDocument(input: unknown): ValidatedDocument {
       ? emptySpellDefinitions()
       : version === CHARACTER_BACKUP_VERSION
         ? emptySpellDefinitions()
+      : version === PRE_PROVENANCE_CHARACTER_BACKUP_VERSION
+        ? emptySpellDefinitions()
       : version === PRE_LINEAGE_CHARACTER_BACKUP_VERSION
         ? emptySpellDefinitions()
       : validateSpellDefinitions(
@@ -1545,10 +1564,15 @@ function validateDocument(input: unknown): ValidatedDocument {
           referenceMaps.spell_versions,
         );
   const content = version === CHARACTER_BACKUP_VERSION ||
+      version === PRE_PROVENANCE_CHARACTER_BACKUP_VERSION ||
       version === PRE_LINEAGE_CHARACTER_BACKUP_VERSION
-    ? validatePortableContent(document.content)
+    ? validatePortableContent(
+        document.content,
+        version === CHARACTER_BACKUP_VERSION,
+      )
     : Object.freeze([]);
-  const supersessions = version === CHARACTER_BACKUP_VERSION
+  const supersessions = version === CHARACTER_BACKUP_VERSION ||
+      version === PRE_PROVENANCE_CHARACTER_BACKUP_VERSION
     ? validatePortableContentBundle({
         content,
         supersessions: document.supersessions,

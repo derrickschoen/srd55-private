@@ -492,13 +492,18 @@ describe('portable character backup user-authored spells', () => {
         created_at: timestamp,
         updated_at: timestamp,
       });
-      expect(
-        exportCharacterBackup(
+      const reexported = exportCharacterBackup(
           target,
           imported.characterId,
           '2026-07-28T13:15:00.000Z',
-        ),
-      ).toEqual(document);
+        );
+      expect(reexported).toEqual({
+        ...document,
+        content: document.content.map((entry) => ({
+          ...entry,
+          provenance: { ...entry.provenance, received: true },
+        })),
+      });
     },
   );
 

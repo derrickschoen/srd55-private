@@ -43,6 +43,7 @@ import {
   catalog_content_fingerprints,
   catalog_content_identities,
   catalog_content_match_decisions,
+  catalog_content_provenance,
   catalog_content_supersessions,
 } from './catalog-content';
 import {
@@ -1233,6 +1234,7 @@ export const catalogContentIdentitiesRelations = relations(
     fingerprints: many(catalog_content_fingerprints),
     aliases: many(catalog_content_aliases),
     decisions: many(catalog_content_match_decisions),
+    provenance: many(catalog_content_provenance),
     superseded_versions: many(catalog_content_supersessions, {
       relationName: 'superseded_content',
     }),
@@ -1326,6 +1328,22 @@ export const catalogContentMatchDecisionsRelations = relations(
       fields: [
         catalog_content_match_decisions.content_kind,
         catalog_content_match_decisions.target_content_key,
+      ],
+      references: [
+        catalog_content_identities.content_kind,
+        catalog_content_identities.content_key,
+      ],
+    }),
+  }),
+);
+
+export const catalogContentProvenanceRelations = relations(
+  catalog_content_provenance,
+  ({ one }) => ({
+    content_identity: one(catalog_content_identities, {
+      fields: [
+        catalog_content_provenance.content_kind,
+        catalog_content_provenance.content_key,
       ],
       references: [
         catalog_content_identities.content_kind,

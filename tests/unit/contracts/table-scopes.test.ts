@@ -119,6 +119,8 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'catalog_content_fingerprints',
       'catalog_content_identities',
       'catalog_content_match_decisions',
+      // S6-12 origin and transfer facts are whole-database registry state.
+      'catalog_content_provenance',
       'catalog_content_supersessions',
       'catalog_data_migrations',
       'class_equipment_items',
@@ -349,7 +351,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
 });
 
 describe('table scope classification', () => {
-  it('classifies all 84 tables exactly once', () => {
+  it('classifies all 85 tables exactly once', () => {
     const names = Object.keys(TABLE_SCOPES);
     // 30 Laravel-derived tables — 38 until the eight Laravel-only
     // infrastructure ones were dropped — plus the four native weapon tables,
@@ -366,9 +368,10 @@ describe('table scope classification', () => {
     // tables and CI-2b's ONE applied data-migration marker table. Each group is named
     // rather than folded into one total, so a group that vanishes while
     // another grows cannot pass unnoticed.
-    // Migration 0042 adds the two owner-specific contribution tables.
-    expect(names).toHaveLength(84);
-    expect(new Set(names).size).toBe(84);
+    // Migration 0042 adds the two owner-specific contribution tables; 0044
+    // adds one registry-only provenance table.
+    expect(names).toHaveLength(85);
+    expect(new Set(names).size).toBe(85);
     expect([...names].sort()).toEqual([...APPLICATION_TABLES].sort());
   });
 

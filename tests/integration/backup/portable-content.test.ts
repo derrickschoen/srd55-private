@@ -23,11 +23,13 @@ import {
 } from '../../../src/backup/library-export';
 import {
   PRE_LINEAGE_CHARACTER_BACKUP_VERSION,
+  PRE_PROVENANCE_CHARACTER_BACKUP_VERSION,
   PRE_FLAVOR_CHARACTER_BACKUP_VERSION,
   PREVIOUS_CHARACTER_BACKUP_VERSION,
 } from '../../../src/backup/backup-version';
 import {
   libraryContentImportNodes,
+  PRE_PROVENANCE_LIBRARY_EXPORT_VERSION,
   portableSubclassContentImportNode,
   restorePortableContentSupersessions,
   validateLibraryDocument,
@@ -398,8 +400,14 @@ function manifestEnumeration(document: {
 }
 
 function importedLibraryStateProjection(db: DatabaseContext) {
+  const library = structuredClone(exportWholeLibrary(db, exportedAt));
+  const historicalLibrary = {
+    ...library,
+    version: 2,
+    content: library.content.map(({ provenance: _provenance, ...entry }) => entry),
+  };
   return {
-    library: exportWholeLibrary(db, exportedAt),
+    library: historicalLibrary,
     supersessions: db.allRaw(
       `SELECT content_kind, superseded_content_key, successor_content_key,
               recorded_at
@@ -459,7 +467,7 @@ function emptyHistoricalSpellDefinitions() {
 }
 
 describe('portable content manifests', () => {
-  it('carries subclass contributions through library, character backup, and v18 share with exact wire keys', async () => {
+  it('carries subclass contributions through library, character backup, and v19 share with exact wire keys', async () => {
     const source = await database();
     const fixture = seedContributionSubclass(source);
     const characterId = seedContributionCharacter(source, fixture);
@@ -475,7 +483,7 @@ describe('portable content manifests', () => {
     const contributions = feature.contributions ?? [];
     expect(Object.keys(entry).sort()).toEqual([
       'aggregate', 'content_key', 'fingerprint_digest', 'fingerprint_scheme',
-      'key_kind', 'kind',
+      'key_kind', 'kind', 'provenance',
     ]);
     expect(Object.keys(feature).sort()).toEqual([
       'class_level', 'contributions', 'description', 'effects', 'name', 'sort_order',
@@ -512,7 +520,7 @@ describe('portable content manifests', () => {
     expect(contributionRows(backupTarget)).toEqual(expectedRows);
 
     const share = exportCharacterShare(source, characterId);
-    expect(share.version).toBe(18);
+    expect(share.version).toBe(19);
     expect(share.classes).toEqual(expect.arrayContaining([
       expect.objectContaining({ subclassKey: fixture.contentKey }),
     ]));
@@ -739,11 +747,18 @@ describe('portable content manifests', () => {
 
     const target = await database();
     importLibraryDocument(target, document);
-    expect(exportSelectedLibraryContent(
+    const reexported = exportSelectedLibraryContent(
       target,
       [fixture.speciesKey],
       exportedAt,
-    )).toEqual(document);
+    );
+    expect(reexported).toEqual({
+      ...document,
+      content: document.content.map((entry) => ({
+        ...entry,
+        provenance: { ...entry.provenance, received: true },
+      })),
+    });
     expect(target.scalar<number>('SELECT count(*) FROM background_definitions')).toBe(0);
     expect(target.allRaw(
       `SELECT content_kind, superseded_content_key, successor_content_key, recorded_at
@@ -768,7 +783,7 @@ describe('portable content manifests', () => {
     const document = exportWholeLibrary(source, exportedAt);
 
     expect(document.format).toBe('dnd-multiclass-spells/library');
-    expect(document.version).toBe(2);
+    expect(document.version).toBe(3);
     expect(document.selection).toBe('all');
     expect(JSON.stringify(document)).toContain('CI7-SUPERSESSION-SENTINEL');
     expect(manifestEnumeration(document)).toEqual([
@@ -839,6 +854,8 @@ describe('portable content manifests', () => {
     ) as unknown as Record<string, unknown>;
     previous.version = 1;
     delete previous.supersessions;
+    previous.content = (previous.content as Array<Record<string, unknown>>)
+      .map(({ provenance: _provenance, ...entry }) => entry);
 
     const target = await database();
     importLibraryDocument(target, previous);
@@ -855,6 +872,32 @@ describe('portable content manifests', () => {
       `SELECT content_kind, superseded_content_key, successor_content_key
        FROM catalog_content_supersessions`,
     )).toEqual([]);
+  });
+
+  it('S6-12 imports a v2 library with absent attribution as received and unknown', async () => {
+    const source = await database();
+    const fixture = seedClosureLibrary(source);
+    const previous = structuredClone(
+      exportWholeLibrary(source, exportedAt),
+    ) as unknown as Record<string, unknown>;
+    previous.version = PRE_PROVENANCE_LIBRARY_EXPORT_VERSION;
+    previous.content = (previous.content as Array<Record<string, unknown>>)
+      .map(({ provenance: _provenance, ...entry }) => entry);
+
+    const target = await database();
+    importLibraryDocument(target, previous);
+    expect(PRE_PROVENANCE_LIBRARY_EXPORT_VERSION).toBe(2);
+    expect(target.oneRaw(
+      `SELECT origin_kind, received, local_derivation, author_label
+       FROM catalog_content_provenance
+       WHERE content_kind = 'species' AND content_key = ?`,
+      [fixture.speciesKey],
+    )).toEqual({
+      origin_kind: 'unknown',
+      received: 1,
+      local_derivation: 0,
+      author_label: null,
+    });
   });
 
   it('CI5-ITEM-DEFINITION round-trips attunement and the complete ability-override definition effect', async () => {
@@ -1067,6 +1110,34 @@ describe('portable content manifests', () => {
       `SELECT content_kind, superseded_content_key, successor_content_key
        FROM catalog_content_supersessions`,
     )).toEqual([]);
+  });
+
+  it('S6-12 imports a v6 character backup without inventing attribution', async () => {
+    const source = await database();
+    const fixture = seedClosureLibrary(source);
+    const previous = structuredClone(exportCharacterBackup(
+      source,
+      seedClosureCharacter(source, fixture),
+      exportedAt,
+    )) as unknown as Record<string, unknown>;
+    previous.version = PRE_PROVENANCE_CHARACTER_BACKUP_VERSION;
+    previous.content = (previous.content as Array<Record<string, unknown>>)
+      .map(({ provenance: _provenance, ...entry }) => entry);
+
+    const target = await database();
+    importCharacterBackup(target, previous);
+    expect(PRE_PROVENANCE_CHARACTER_BACKUP_VERSION).toBe(6);
+    expect(target.oneRaw(
+      `SELECT origin_kind, received, local_derivation, author_label
+       FROM catalog_content_provenance
+       WHERE content_kind = 'background' AND content_key = ?`,
+      [fixture.backgroundKey],
+    )).toEqual({
+      origin_kind: 'unknown',
+      received: 1,
+      local_derivation: 0,
+      author_label: null,
+    });
   });
 
   it('binds a character import plan token to the complete character payload', async () => {
