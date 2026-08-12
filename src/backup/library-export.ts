@@ -17,6 +17,7 @@ import {
   restorePortableContentSupersessions,
   restorePortableContentLifecycle,
   validateLibraryDocument,
+  type CurrentLibraryExportDocument,
   type LibraryExportDocument,
   type PortableImportPlan,
 } from './portable-content';
@@ -34,7 +35,7 @@ function libraryImportOperationIdentity(document: LibraryExportDocument): string
 export function exportWholeLibrary(
   db: DatabaseContext,
   exportedAt?: string,
-): LibraryExportDocument {
+): CurrentLibraryExportDocument {
   return exportLibraryDocument(db, undefined, exportedAt);
 }
 
@@ -42,7 +43,7 @@ export function exportSelectedLibraryContent(
   db: DatabaseContext,
   selectedContentKeys: readonly ContentKey[],
   exportedAt?: string,
-): LibraryExportDocument {
+): CurrentLibraryExportDocument {
   return exportLibraryDocument(db, selectedContentKeys, exportedAt);
 }
 

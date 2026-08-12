@@ -128,6 +128,11 @@ function portableElfLibraryDocument(
       },
     }],
     supersessions: [],
+    lifecycle: [{
+      content_kind: 'species',
+      content_key: input.contentKey,
+      archived_at: null,
+    }],
   };
 }
 
@@ -172,7 +177,12 @@ async function buildRecipientFixture(
     oversized: false,
   });
   const legacyContent = library.content.map(({ provenance: _provenance, ...entry }) => entry);
-  const { supersessions: _supersessions, content: _content, ...withoutSupersessions } = library;
+  const {
+    supersessions: _supersessions,
+    lifecycle: _lifecycle,
+    content: _content,
+    ...withoutSupersessions
+  } = library;
   const legacy: LibraryExportDocument = {
     ...withoutSupersessions,
     version: 1,

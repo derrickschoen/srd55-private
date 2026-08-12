@@ -132,6 +132,11 @@ export interface PortableContentAggregate {
   readonly provenance?: ContentProvenance;
 }
 
+/** Newly emitted portable content always carries an honest provenance value. */
+export interface CurrentPortableContentAggregate extends PortableContentAggregate {
+  readonly provenance: ContentProvenance;
+}
+
 export interface PortableContentSupersession {
   readonly content_kind: ContentKind;
   readonly superseded_content_key: string;
@@ -150,6 +155,10 @@ export interface PortableContentBundle {
   readonly supersessions: readonly PortableContentSupersession[];
 }
 
+export interface CurrentPortableContentBundle extends PortableContentBundle {
+  readonly content: readonly CurrentPortableContentAggregate[];
+}
+
 interface LibraryExportBase {
   readonly format: typeof LIBRARY_EXPORT_FORMAT;
   readonly exported_at: string;
@@ -158,12 +167,16 @@ interface LibraryExportBase {
   readonly content: readonly PortableContentAggregate[];
 }
 
-export type LibraryExportDocument = LibraryExportBase & (
-  | {
-      readonly version: typeof LIBRARY_EXPORT_VERSION;
-      readonly supersessions: readonly PortableContentSupersession[];
-      readonly lifecycle: readonly PortableContentLifecycle[];
-    }
+export type CurrentLibraryExportDocument = Omit<LibraryExportBase, 'content'> & {
+  readonly version: typeof LIBRARY_EXPORT_VERSION;
+  readonly content: readonly CurrentPortableContentAggregate[];
+  readonly supersessions: readonly PortableContentSupersession[];
+  readonly lifecycle: readonly PortableContentLifecycle[];
+};
+
+export type LibraryExportDocument =
+  | CurrentLibraryExportDocument
+  | (LibraryExportBase & (
   | {
       readonly version: typeof PRE_PROVENANCE_LIBRARY_EXPORT_VERSION;
       readonly supersessions: readonly PortableContentSupersession[];
@@ -172,8 +185,9 @@ export type LibraryExportDocument = LibraryExportBase & (
   | {
       readonly version: typeof LEGACY_LIBRARY_EXPORT_VERSION;
       readonly supersessions?: never;
+      readonly lifecycle?: never;
     }
-);
+  ));
 
 export interface PortableImportPreview {
   readonly new_by_kind: Readonly<Record<ContentKind, number>>;
@@ -816,7 +830,7 @@ function referencedExternalKey(
 export function exportPortableContentClosure(
   db: DatabaseContext,
   roots: readonly { readonly kind: ContentKind; readonly contentKey: ContentKey }[],
-): readonly PortableContentAggregate[] {
+): readonly CurrentPortableContentAggregate[] {
   const pending = [...roots];
   const seen = new Set<string>();
   const localEntries: LocalPortableEntry[] = [];
@@ -864,7 +878,7 @@ export function exportPortableContentClosure(
   }
   const byMarker = new Map(localEntries.map((entry) => [entry.marker, entry]));
   const projectedTargets = new Map<string, ContentImportDependencyTarget>();
-  let entries: readonly PortableContentAggregate[];
+  let entries: readonly CurrentPortableContentAggregate[];
   try {
     entries = projectContentGraphInDependencyOrder(
       localEntries.map((entry) => ({
@@ -968,7 +982,7 @@ export function exportPortableContentClosure(
 export function exportPortableContentBundle(
   db: DatabaseContext,
   roots: readonly { readonly kind: ContentKind; readonly contentKey: ContentKey }[],
-): PortableContentBundle {
+): CurrentPortableContentBundle {
   const content = exportPortableContentClosure(db, roots);
   const markers = new Set(content.map(
     (entry) => `${entry.kind}\u0000${entry.content_key}`,
@@ -1014,7 +1028,7 @@ export function exportLibraryDocument(
   db: DatabaseContext,
   selectedContentKeys?: readonly ContentKey[],
   exportedAt = new Date().toISOString(),
-): LibraryExportDocument {
+): CurrentLibraryExportDocument {
   const selection = selectedContentKeys === undefined ? 'all' : 'selected';
   const localKeys = selectedContentKeys === undefined
     ? externalRoots(db).map((root) => root.contentKey)
@@ -1041,7 +1055,7 @@ export function exportLibraryDocument(
         root.kind,
         root.contentKey,
       )).sort();
-  const document: LibraryExportDocument = {
+  const document: CurrentLibraryExportDocument = {
     format: LIBRARY_EXPORT_FORMAT,
     version: LIBRARY_EXPORT_VERSION,
     exported_at: exportedAt,

@@ -1691,6 +1691,16 @@ export const SHARE_TABLES: { readonly [N in ShareTable]: N } = {
   character_level_feat_choices: 'character_level_feat_choices',
 };
 
+/** Recipient-local share lineage. It participates in sharing without travelling. */
+export const CHARACTER_SHARE_RECEIPT_TABLE =
+  'character_share_receipts' satisfies AnyTableName;
+
+/** Local journals invalidated when incoming share-owned rows are replaced. */
+export const CHARACTER_SHARE_LOCAL_RESET_TABLES = [
+  'change_log',
+  'character_operations',
+] as const satisfies readonly AnyTableName[];
+
 /**
  * The polymorphic source maps stay MAPS, constrained on both axes.
  *

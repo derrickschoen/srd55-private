@@ -42,6 +42,8 @@ import {
 } from '../domain/enums';
 import { splitLegacyTraitEffect } from '../rules/legacy-trait-effects';
 import {
+  CHARACTER_SHARE_LOCAL_RESET_TABLES,
+  CHARACTER_SHARE_RECEIPT_TABLE,
   SHARE_TABLES,
   SOURCE_DEFINITION_TABLE,
   type AnyTableName,
@@ -245,12 +247,12 @@ const SOURCE_TABLES = SOURCE_DEFINITION_TABLE satisfies Readonly<
 /**
  * THE SHARE PAYLOAD'S TABLE NAMES COME FROM THE CLASSIFICATION.
  *
- * Every table name in this module's SQL is interpolated from `SHARE_TABLES`
- * (character-owned rows) or `SOURCE_TABLES` (catalog lookups) — none is a bare
- * literal. That is what makes `TableScopes.share` a contract rather than a
- * comment: marking a table `share: true` without handling it here does not
- * compile, and naming a table here that is not share-scoped does not compile
- * either.
+ * Portable rows come from `SHARE_TABLES`; recipient-local lineage and stale
+ * journal resets use their separately typed constants; catalog lookups use
+ * `SOURCE_TABLES`. No table name is a bare literal. This makes the scopes a
+ * contract rather than a comment: marking `share: true` without handling it
+ * does not compile, and naming a table here that is not share-scoped does not
+ * compile either.
  *
  * The catalog tables this module reads (`spell_versions`, `spell_identities`,
  * `class_definitions`, `subclass_definitions`) are NOT share-scoped and are
@@ -752,13 +754,13 @@ function localShareDocumentId(
 ): string {
   return db.transaction(() => {
     db.exec(
-      `INSERT OR IGNORE INTO character_share_receipts (
+      `INSERT OR IGNORE INTO ${CHARACTER_SHARE_RECEIPT_TABLE} (
          character_id, local_document_id
        ) VALUES (?, ?)`,
       [characterId, crypto.randomUUID()],
     );
     const documentId = db.scalar<string>(
-      `SELECT local_document_id FROM character_share_receipts
+      `SELECT local_document_id FROM ${CHARACTER_SHARE_RECEIPT_TABLE}
        WHERE character_id = ?`,
       [characterId],
     );
@@ -1891,7 +1893,7 @@ function shareOperationIdentity(
     : db.oneRaw(
         `SELECT receipt.character_id, receipt.received_revision,
                 receipt.baseline_character_revision, character.revision
-         FROM character_share_receipts AS receipt
+         FROM ${CHARACTER_SHARE_RECEIPT_TABLE} AS receipt
          JOIN characters AS character ON character.id = receipt.character_id
          WHERE receipt.received_document_id = ?`,
         [document.documentIdentity.document_id],
@@ -2201,7 +2203,7 @@ function shareUpdatePreview(
     `SELECT receipt.character_id, receipt.received_revision,
             receipt.baseline_character_revision,
             character.name, character.revision
-     FROM character_share_receipts AS receipt
+     FROM ${CHARACTER_SHARE_RECEIPT_TABLE} AS receipt
      JOIN characters AS character ON character.id = receipt.character_id
      WHERE receipt.received_document_id = ?`,
     [document.documentIdentity.document_id],
@@ -2221,7 +2223,7 @@ function shareUpdatePreview(
     classes: Object.freeze(db.allRaw(
       `SELECT class.name AS class_name, subclass.name AS subclass_name,
               level.level
-       FROM character_class_levels AS level
+       FROM ${SHARE_TABLES.character_class_levels} AS level
        JOIN class_definitions AS class ON class.id = level.class_definition_id
        LEFT JOIN subclass_definitions AS subclass
          ON subclass.id = level.subclass_definition_id
@@ -2284,8 +2286,9 @@ function clearSharedCharacterForUpdate(
       [characterId],
     );
   }
-  db.exec('DELETE FROM change_log WHERE character_id = ?', [characterId]);
-  db.exec('DELETE FROM character_operations WHERE character_id = ?', [characterId]);
+  for (const table of CHARACTER_SHARE_LOCAL_RESET_TABLES) {
+    db.exec(`DELETE FROM ${table} WHERE character_id = ?`, [characterId]);
+  }
 }
 
 function insertCharacterShare(
@@ -2302,7 +2305,7 @@ function insertCharacterShare(
     const replacing = update !== null && disposition === 'update_existing';
     const preservedLocalDocumentId = replacing
       ? db.scalar<string>(
-          `SELECT local_document_id FROM character_share_receipts
+          `SELECT local_document_id FROM ${CHARACTER_SHARE_RECEIPT_TABLE}
            WHERE character_id = ?`,
           [update.characterId],
         )
@@ -3271,7 +3274,7 @@ function insertCharacterShare(
     if (document.documentIdentity !== undefined && recordReceipt) {
       if (replacing) {
         const refreshed = db.exec(
-          `UPDATE character_share_receipts
+          `UPDATE ${CHARACTER_SHARE_RECEIPT_TABLE}
            SET received_document_id = ?, received_revision = ?,
                baseline_character_revision = 0, updated_at = ?
            WHERE character_id = ? AND local_document_id = ?`,
@@ -3286,7 +3289,7 @@ function insertCharacterShare(
         }
       } else if (update !== null && disposition === 'keep_both') {
         const released = db.exec(
-          `UPDATE character_share_receipts
+          `UPDATE ${CHARACTER_SHARE_RECEIPT_TABLE}
            SET received_document_id = NULL, received_revision = NULL,
                baseline_character_revision = NULL, updated_at = ?
            WHERE character_id = ? AND received_document_id = ?
@@ -3307,7 +3310,7 @@ function insertCharacterShare(
       }
       if (!replacing) {
         db.exec(
-          `INSERT INTO character_share_receipts (
+          `INSERT INTO ${CHARACTER_SHARE_RECEIPT_TABLE} (
              character_id, local_document_id, received_document_id,
              received_revision, baseline_character_revision, created_at, updated_at
            ) VALUES (?, ?, ?, ?, 0, ?, ?)`,

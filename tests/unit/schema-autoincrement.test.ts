@@ -178,6 +178,8 @@ const naturalKeyTables = [
   'catalog_content_supersessions',
   'catalog_data_migrations',
   'character_attunement_slots',
+  // One lineage receipt per character; character_id is both identity and FK.
+  'character_share_receipts',
   'party_document_states',
 ] as const;
 

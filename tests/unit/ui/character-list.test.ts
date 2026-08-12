@@ -227,6 +227,8 @@ describe('character share links', () => {
             includesAcknowledgements: false,
             includesLoadouts: false,
             includesWrittenText: false,
+            update: null,
+            historicalContributionGaps: [],
             adoptionPlan: plan,
             embeddedContent: plan.incomingContent.map((entry, index) => ({
               ...entry,
@@ -239,14 +241,16 @@ describe('character share links', () => {
             })),
           }),
           importCharacter: async () => ({
-            characterId: 1, characterName: 'Hostile Share',
+            characterId: 1, characterName: 'Hostile Share', disposition: 'new',
           }),
           commitCharacter: async (fragment, submittedToken, choices) => {
             commits.push({ fragment, token: submittedToken, choices });
             return {
               kind: 'committed',
               outcomes: plan.outcomes,
-              result: { characterId: 9, characterName: 'Hostile Share' },
+              result: {
+                characterId: 9, characterName: 'Hostile Share', disposition: 'new',
+              },
             };
           },
         },
@@ -377,17 +381,21 @@ describe('character share links', () => {
             includesAcknowledgements: false,
             includesLoadouts: false,
             includesWrittenText: false,
+            update: null,
+            historicalContributionGaps: [],
             adoptionPlan: plan,
             embeddedContent: [],
           }),
           importCharacter: async () => ({
-            characterId: 1, characterName: 'Shared Mage',
+            characterId: 1, characterName: 'Shared Mage', disposition: 'new',
           }),
           commitCharacter: async (fragment, submittedToken, choices) => {
             submitted.push({ fragment, token: submittedToken, choices });
             return {
               kind: 'committed', outcomes: plan.outcomes,
-              result: { characterId: 7, characterName: 'Shared Mage' },
+              result: {
+                characterId: 7, characterName: 'Shared Mage', disposition: 'new',
+              },
             };
           },
         },

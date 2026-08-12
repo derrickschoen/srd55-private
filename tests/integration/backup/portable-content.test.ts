@@ -1260,7 +1260,9 @@ describe('portable content manifests', () => {
         status: 'unavailable',
         reason: 'historical_contributions_not_recorded',
       });
-    expect(sheet.resources.find((resource) => resource.label === 'Veteran Reflexes'))
+    expect(sheet.resources.find((resource) =>
+      resource.kind === 'authored' && resource.label === 'Veteran Reflexes'
+    ))
       .toMatchObject({
         status: 'unavailable',
         reason: 'historical_contributions_not_recorded',
