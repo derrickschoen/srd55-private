@@ -67,8 +67,8 @@ function templateRows(page: Page) {
  * THE INCREASE DEFAULTS TO CHARISMA, AND THAT IS LOAD-BEARING. This helper
  * changes the character in order to get past the refusal, so it must not
  * change a number the calling test asserts. It first shipped hardcoded to
- * STRENGTH and broke `the attack profiles derive from the weapon, the class
- * and nothing stored`: a Fighter levelled to 5 read `+4 / 1d8 +1` instead of
+ * STRENGTH and broke `a recorded melee Longsword opens on Strength and keeps
+ * the manual override`: a Fighter levelled to 5 read `+4 / 1d8 +1` instead of
  * `+3 / 1d8`, because the helper had quietly raised the very ability the
  * profile is computed from. The app was right and the fixture was wrong.
  * Charisma moves no weapon attack, no armour class and no hit point total;
@@ -447,7 +447,7 @@ test('a weapon can be removed, and the panel says nothing about the licensor', a
  * schema default of 10 — modifier 0. That makes the proficiency bonus the whole
  * of the to-hit number, which is exactly what a level change should move.
  */
-test('the attack profiles derive from the weapon, the class and nothing stored', async ({
+test('a recorded melee Longsword opens on Strength and keeps the manual override', async ({
   page,
 }) => {
   await openPlanner(page, 'Weapon Bearer');
@@ -479,14 +479,16 @@ test('the attack profiles derive from the weapon, the class and nothing stored',
   const ability = page.getByRole('combobox', {
     name: 'Ability for Attack with Longsword',
   });
+  await expect(ability).toHaveValue('strength');
   await ability.selectOption('dexterity');
   await expect(numbers).toHaveText(
     'To hit: +2 (Dexterity) · Damage: 1d8 Slashing',
   );
 
-  // The two facts the application cannot check are ON THE PAGE, not hidden.
+  // The recorded melee identity explains the first row, while the other
+  // ability remains an explicit manual override for unmodelled property rules.
   await expect(profiles).toContainText(
-    'does not record whether a weapon is melee or ranged',
+    'This weapon records a melee attack, so Strength is shown first. The other ability remains available as a manual override because this application does not evaluate weapon-property rules.',
   );
   // THE PROFICIENCY DECISION IS ON THE PAGE, and it is a decision now rather
   // than a deferral. A Fighter IS proficient with a Longsword, so the +2 above
@@ -515,10 +517,15 @@ test('the attack profiles derive from the weapon, the class and nothing stored',
     'To hit: +3 (Strength) · Damage: 1d8 Slashing',
   );
 
-  // Nothing was written to produce any of it.
+  // The weapon copy honestly records the template's melee identity; no derived
+  // attack numbers are stored on the character.
   const rows = await weaponRows(page);
   expect(rows).toHaveLength(1);
-  expect(rows[0]).toMatchObject({ name: 'Longsword', damage_dice: '1d8' });
+  expect(rows[0]).toMatchObject({
+    name: 'Longsword',
+    attack_kind: 'melee',
+    damage_dice: '1d8',
+  });
 
   const body = await page.locator('body').innerText();
   expect(body).not.toMatch(/D&D|Dungeons|Wizards/);
