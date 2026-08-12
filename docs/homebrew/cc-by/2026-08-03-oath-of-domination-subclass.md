@@ -348,7 +348,7 @@ matches.
 | F9 Golden-Cage Benchmark | Every slot and the assembled kit are compared only to Oath of Devotion on the same paladin chassis. | Clear. |
 | F10 White-Room Day | One-fight, no-Short-Rest, and rest-rich cases are recorded above. Best-round subclass damage is one rescued near miss (weapon die, modifier, and a rescued smite); the Long-Rest cadence makes the one-fight day the pool's best case, matching the class's own rest posture. The strongest swing remains repeated fresh-save action denial. | Control breadth and duration remain playtest amber. |
 | F11 Campaign-Contingent Payload | Zero core features require a creature family, terrain, damage type, or ally-supplied condition. Language limits only the comprehension ribbon. Formation's save-success trigger is not the defining loop. | Clear. |
-| F12 Niche Trespass | The likely affected seats are controller and social specialist. Voice pays CD and repeated Bonus Actions but no spell slots or Concentration, and it can retarget; the save amplifier now lives only inside the capstone's ten minutes. The ally OA-immunity clause brushes the battlefield-controller seat gently (it frees movement rather than denying it). | Amber; harmed-seat review still required, concentrated on the level-20 window. |
+| F12 Niche Trespass | The likely affected seats are controller and social specialist. Voice pays CD and repeated Bonus Actions but no spell slots or Concentration; from 7 one casting can attempt to deny every enemy in the aura, which is a controller's signature move performed without Concentration. The save amplifier lives only inside the capstone's ten minutes. | Amber-high; harmed-seat review from the controller chair is required at 7+ and at the level-20 window. |
 | F13 Bookkeeping Tax | Voice tracks only its one-minute duration; targets and saves resolve independently with each casting. Aura is static, Formation tracks its own per-Long-Rest count, and Dominion uses the standard 10-minute capstone timer. | Clear; timed cold-reader test remains. |
 | F14 Bounced Flavor Cheque | Level 3 lets each strike prove the vision and lend the voice weight; level 7 turns proven strikes into repeated commands and makes certainty protective and speech unavoidable; level 15 turns foreseen resistance into formation; level 20 sustains command while seeing through deception. No self-doubt mechanic appears. | Clear, pending owner approval of authored prose. |
 | F15 Dead-Air Progression | Level 7 adds social access and defense, level 15 adds a Reaction reposition verb, and level 20 modestly improves Voice's resource efficiency alongside two substantial protections. | Clear. |
@@ -367,15 +367,15 @@ items in this draft.
 |---|---|---|
 | Fantasy sentence | Green | A paladin whose strikes prove the vision and whose proven voice commands the scene into the believed future; the combat, exploration, and social moments are stated in the identity section. |
 | Unserved loop | Green | Base paladin and Oath of Devotion do not repeatedly recast *Command* through Channel Divinity. |
-| Fiction-to-rule map | Amber | Command → Voice; certainty → Aura; prophecy → Formation and Truesight; bodily toll stays in flavor and never becomes a mechanical hesitation or punishment. D186's obsolete tenet title requires the owner-confirmed carrier recorded in the Vision section. |
-| Flavor cheque by level | Green | 3 makes each strike lend the voice authority; 7 commands repeatedly and makes speech understood and allies resolute; 15 repositions after foreseen resistance; 20 sustains the command engine with clear sight. |
+| Fiction-to-rule map | Amber | Command → Voice and the aura's whole-room targeting; foresight → Blindsight and Foreseen Formation; prophecy fulfilled → Truesight and Inevitable Word at 20; bodily toll stays in flavor and never becomes a mechanical hesitation or punishment. D186's obsolete tenet title requires the owner-confirmed carrier recorded in the Vision section. |
+| Flavor cheque by level | Green | 3 turns the proving strike into a minute of command; 7 sees every blow coming and addresses the whole room at once; 15 repositions after foreseen resistance; 20 sustains the command engine with clear sight and an irresistible voice. |
 
 ### 7.2 Schedule and slot budget
 
 | Checklist item | Status | Evidence |
 |---|---|---|
 | Schedule conformance | Green | Host Paladin; exact schedule 3/7/15/20. |
-| Feature-count explanation | Green | Level 3 has the standard bundle: fixed oath spells plus Channel Divinity with two options (the Oath of Glory precedent). Levels 7, 15, and 20 have one feature each — conformance restored by owner ruling 2026-08-11. |
+| Feature-count explanation | Green | Level 3 has the standard bundle: fixed oath spells plus one Channel Divinity option (the Vow-of-Enmity shape; a second option was tried and dropped the same day as a dominated choice). Levels 7, 15, and 20 have one feature each. |
 | Budget per slot | Green | The feature-by-feature record supplies weight, frequency, action, uses, scaling, pillars, export, and same-slot comparator. |
 | Whole-kit budget | Green | Entry, tier-2, tier-3, and tier-4 snapshots compare the assembled kit with Oath of Devotion. |
 | Class dependence fit | Green | No damage engine or new pool; the kit redirects spells, CD, aura, and support on a low-medium-dependence host. |
@@ -405,7 +405,7 @@ items in this draft.
 |---|---|---|
 | Action-economy tally | Green | Ordinary: Attack / optional base Bonus Action / Reaction / optional spell Concentration. Voice activation turn: Attack / *Divine Smite* Bonus Action / free-action activation / Reaction; later turns: Attack + Voice casting Bonus Action / Reaction / optional spell Concentration. The activation is the kit's one no-action rider; it grants no attack, cast, or interrupt by itself. |
 | Extra-economy carrier check | Green | No extra action, attack, or turn exists; aura targeting multiplies a casting's targets, not the paladin's actions; Formation movement cannot carry an Opportunity Attack. |
-| Advantage gate | Green | Defensive Charm-save Advantage only, within the base aura, below the comparator's immunity. |
+| Advantage gate | Green | No feature grants or denies Advantage anywhere in the kit (Grovel's prone window belongs to the spell; the capstone's save Disadvantage is Inevitable Word's, time-boxed). |
 | Flat-bonus gate | Green | No flat bonus exists anywhere in the kit. |
 | Farmability audit | Green | Allies, harmless targets, summons, objects, repeated encounters, and target swapping can't create Channel Divinity uses or extend Voice's one-minute duration. |
 | Famine audit | Green | Voice has a deterministic Bonus Action activation. Formation is support, and eligible listed spells provide ordinary opportunities. |
@@ -474,7 +474,7 @@ items in this draft.
 |---|---|---|---|
 | Aura-wide Command targeting | The kit's declared power center: under Voice it is an every-round, multi-target, slotless save-or-lose-turn engine the single-enemy sim cannot price, and at 20 it stacks with Inevitable Word (all aura enemies at save Disadvantage for ten minutes) | Group-fight playtests at 7, 11, and 18 (30-foot aura) counting denied turns per round; the level-20 one-shot must run the full Dominion + Voice + Inevitable Word stack | Owner approval pending; untested |
 | Voice of Domination | Slotless retargeting and compatibility with Concentration spells may produce too much control; the smite-gated activation may feel earned or feel like a tax when no smite-worthy hit lands | Acquisition tests at 7 and stack tests at 11 and 17; record activation timing, attempts, target changes, failures, rounds denied, smites forgone, and concurrent Concentration effects | Owner approval pending; untested |
-| Aura of Certainty | Ally OA immunity may trivialize melee positioning for the whole party (kiting, retreat, and repositioning become free inside 10 feet, 30 at 18) and it partially overlaps Foreseen Formation's no-provoke clause at 15; Blindsight's value is scenario-spiked and hard to budget on paper | Combat tests at 7 and 18 with mobile parties, kiting enemies, and at least one vision-denial fight (invisibility or Darkness); Formation redundancy checked at 15 | Owner approval pending; untested |
+| Aura of Certainty | Blindsight's value is scenario-spiked and hard to budget on paper; the aura-targeting half is tracked in its own row below; the comprehension ribbon may broaden *Suggestion* scenes | Combat tests at 7 and 18 with at least one vision-denial fight (invisibility or Darkness); comprehension checked in language scenes | Owner approval pending; untested |
 | Foreseen Formation | Five half-Speed moves may overperform with a clustered party after Aura Expansion | Focused level-15 and level-18 positioning tests, including chokepoints and withdrawal | Owner approval pending; untested |
 | Dominion Foretold | A Voice activation without a Channel Divinity cost may add too much value beside Truesight and Charm immunity | Level-20 one-shot with high-save targets, Legendary Resistance where present, changing targets, concurrent Concentration spells, and crowded Bonus Actions | Owner approval pending; untested |
 | D186 tenet carrier | D186 assigns the no-re-examination function to a tenet title absent from the binding final set | Owner confirms whether *The Vision Does Not Rest* carries the function or directs a different resolution without rewriting the final tenets | Owner confirmation pending |
@@ -483,7 +483,7 @@ items in this draft.
 **Pre-flight result:** **Ready for design review only.** Structural, schedule,
 clean-room, and paper-budget checks pass. Owner approval, cold-reader review,
 and every table-play check remain outstanding. Reviewer: initial author desk
-pass. Date: 2026-08-03.
+pass. Date: 2026-08-03; revised through the 2026-08-11 owner redesign arc (see `../rulings.md`), desk checks re-run against the final kit.
 
 ## 8. The Vision
 
