@@ -13,6 +13,11 @@ import {
   veteran,
 } from './sim';
 import { ALWAYS_MIN } from './test-helpers';
+import {
+  HOMEBREW_BUILDS,
+  vanwardPatientStack,
+  type HomebrewBuild,
+} from './homebrew';
 
 describe('monk(initManifest) is inert below L17', () => {
   it('produces byte-identical results to monk() at L3, L6, L11 under the same seed', () => {
@@ -92,5 +97,32 @@ describe('purity: the same seed run twice produces identical results', () => {
     for (let i = 0; i < 10; i++) {
       expect(domination(mulberry32(9001), 17, 4, 'smite')).toEqual(reference);
     }
+  });
+});
+
+describe('homebrew validation build identities', () => {
+  const builds: ReadonlyArray<readonly [string, HomebrewBuild]> = [
+    ...HOMEBREW_BUILDS,
+    ['Patient Volley + Vanward declared stack', vanwardPatientStack],
+  ];
+
+  it.each(builds)('%s is deterministic, finite, and total at L5/11/17', (_name, build) => {
+    for (const level of [5, 11, 17] as const) {
+      const first = build(mulberry32(8200 + level), level);
+      const second = build(mulberry32(8200 + level), level);
+      expect(second).toEqual(first);
+      expect(Number.isFinite(first.dealt)).toBe(true);
+      expect(Number.isFinite(first.prevented)).toBe(true);
+      expect(first.dealt).toBeGreaterThanOrEqual(0);
+      expect(first.prevented).toBe(0);
+    }
+  });
+
+  it('all nine wrappers have distinct names and the two Ambush wrappers remain separate identities', () => {
+    const names = HOMEBREW_BUILDS.map(([name]) => name);
+    expect(HOMEBREW_BUILDS).toHaveLength(9);
+    expect(new Set(names).size).toBe(9);
+    expect(names).toContain('Vanward Conclave');
+    expect(names).toContain('Cold Open');
   });
 });

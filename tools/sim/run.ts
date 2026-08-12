@@ -41,6 +41,7 @@ import {
   thiefShortbow,
   veteran,
 } from './sim';
+import { printHomebrewValidationBoard } from './homebrew-board';
 
 type BuildFn = (rng: Rng, L: Level, nc: number) => CombatResult | null;
 
@@ -213,6 +214,8 @@ function main(N: number, seed = 31): void {
   showCombined({ name: 'Domination (adaptive)', fn: dominationRow('adaptive') }, seed, N);
   showCombined({ name: 'Domination (Command-max)', fn: dominationRow('control') }, seed, N);
   console.log('† Lore CME burst and day cells are declared upper bounds: burst front-loads the largest remaining slots; day does not pay cross-combat CME recasts.');
+  console.log();
+  printHomebrewValidationBoard(N);
 }
 
 const rawN = process.argv[2];

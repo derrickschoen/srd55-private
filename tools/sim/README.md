@@ -1,17 +1,23 @@
 # tools/sim — DPR Monte Carlo simulation
 
-A dice-accurate Monte Carlo simulator comparing three homebrew D&D subclasses
-(Warrior of the Barbed Court, Veteran, Oath of Domination) against best-effort
-SRD 5.2.1 comparator builds, across four character levels and two combat
-shapes (a single fresh "burst" combat, and a four-combat "day" with Short
-Rests between). It reports both damage dealt and damage prevented (control
-and defensive features credited as negated enemy damage).
+A dice-accurate Monte Carlo simulator with two boards:
+
+- the original four-round SRD 5.2.1 comparison board at levels 3/6/11/17,
+  including Warrior of the Barbed Court, Veteran, and Oath of Domination; and
+- a separate three-round homebrew-validation board at levels 5/11/17 with the
+  design document's fixed 60% normal-hit / 5% critical / 35% miss distribution.
+
+The original board reports damage dealt and damage prevented. The validation
+board reports every stated claim beside the measured value, delta, and 95%
+confidence interval; it does not tune mechanics to make claims match.
 
 ## What's here
 
 | File | Purpose |
 |---|---|
 | `sim.ts` | The library. Every build is a pure function `(rng, level, combats) => { dealt, prevented }`, taking an injectable `Rng = () => number` so callers (and tests) can pin the dice. |
+| `homebrew.ts` | Pure three-round builds for the eight numbered homebrew entries (nine wrappers because the shared Ambush Primitive has Ranger and Rogue versions), plus the declared Ranger stack. |
+| `homebrew-board.ts` | Claimed-vs-measured rows and explicit diagnostics for the four-attack Anchor aside, Ranger stack, and Cutting Chorus headline values. |
 | `run.ts` | CLI harness. Prints the three summary tables (dealt / prevented / dealt+prevented) with 95% confidence intervals. |
 | `test-helpers.ts` | Shared test utilities: deterministic `Rng` builders and a seeded-sampling statistics helper. Not a test file itself. |
 | `*.test.ts` | The test suite (see below). |
@@ -32,6 +38,12 @@ npx vite-node run.ts            # default N=2000 trials/cell
 npx vite-node run.ts 20000       # more trials, tighter confidence intervals
 ```
 
+The homebrew section is appended after the existing board. Its feature rows
+measure marginal damage only, except Circle of the Broken Tooth, whose design
+claim is total Wild Shape DPR. Cutting Chorus's claimed "net" is underspecified
+because no foregone ally attack is defined; the board labels its chosen proxy:
+the displaced die is valued on an identical 65%-hit, `1d8+3` ally attack.
+
 ## Running the tests
 
 From inside this directory:
@@ -46,7 +58,7 @@ Or standalone, from anywhere, without `cd`-ing in first:
 npx vitest run --root path/to/tools/sim
 ```
 
-The current suite is verified to pass (72 tests, 7 files) under vitest 3.2.7;
+The current suite is verified to pass (155 tests, 8 files) under vitest 3.2.7;
 nothing in the suite is version-specific. The first run may create a small
 `node_modules/` holding vitest's own transform cache — harmless, gitignore it.
 

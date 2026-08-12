@@ -16,6 +16,18 @@ import {
   veteran,
 } from './sim';
 import {
+  anchorPoint,
+  brokenTempo,
+  brokenTooth,
+  coldOpen,
+  cuttingChorus,
+  cuttingMomentum,
+  longGrudge,
+  patientVolley,
+  vanwardConclave,
+  vanwardPatientStack,
+} from './homebrew';
+import {
   ALWAYS_MIN,
   constRng,
   DAMAGE_DIE_MID,
@@ -194,5 +206,108 @@ describe('monk: hand-crafted sequences steering specific return-fire branches', 
     const r = monk(scriptedRng(values), 11, 1);
     // Round 1 cantrip: 3d8 (each face 5) = 15, + rider (Wis=5 at L11) = 20.
     expect(r).toEqual({ dealt: 20, prevented: 0 });
+  });
+});
+
+describe('homebrew validation: exact three-round state accounting', () => {
+  // x=.72 yields d20=15 and fixed die faces d6=5, d8=6, d10=8, d12=9.
+  // Every attack is a non-critical hit, isolating thresholds and once/turn
+  // state from critical-hit doubling.
+  const HIT = constRng(0.72);
+
+  it('Long Grudge uses one d6 rider on the first of two hits each turn', () => {
+    const result = longGrudge(HIT, 5);
+    expect(result.dealt).toBe(3 * 5);
+    expect(result.trace.triggers).toBe(3);
+    expect(result.trace.criticalTriggers).toBe(0);
+    expect(result.trace.bondTargetId).toBe(1);
+    expect(result.trace.bondRoundsRemaining).toBe(7);
+  });
+
+  it('ordinary homebrew rider dice double on a critical hit', () => {
+    // x=.99 makes every attack a natural 20 and every damage die its maximum.
+    expect(longGrudge(constRng(0.99), 5).dealt).toBe(3 * 2 * 6);
+    expect(anchorPoint(constRng(0.99), 17).dealt).toBe(3 * 4 * 8);
+    expect(brokenTempo(constRng(0.99), 5).dealt).toBe(3 * 2 * 6);
+  });
+
+  it('Anchor Point uses one d8 rider and applies both non-damage locks each turn', () => {
+    const result = anchorPoint(HIT, 11);
+    expect(result.dealt).toBe(3 * 6);
+    expect(result.trace.speedZeroTurns).toBe(3);
+    expect(result.trace.reactionLockedTurns).toBe(3);
+  });
+
+  it('Patient Volley remains eligible after each preceding hit', () => {
+    const result = patientVolley(HIT, 5);
+    expect(result.dealt).toBe(3 * 6);
+    expect(result.trace.patientEligibleTurns).toBe(3);
+  });
+
+  it('Patient Volley round 2 can miss eligibility, then recover it from a hit that turn', () => {
+    // R1 misses both attacks. R2 is therefore ineligible, but its two hits set
+    // the last-turn flag. R3 is eligible and its first hit adds one d8 (face6).
+    const values = [MISS, MISS, 0.72, 0.72, 0.72, 0.72, 0.72];
+    const result = patientVolley(scriptedRng(values), 5);
+    expect(result.dealt).toBe(6);
+    expect(result.trace.patientEligibleTurns).toBe(2);
+    expect(result.trace.triggers).toBe(1);
+  });
+
+  it('Cutting Chorus L6 gets exactly its second rapier attack when boosts do not convert misses', () => {
+    const result = cuttingChorus(HIT, 6);
+    expect(result.dealt).toBe(3 * (6 + 3));
+    expect(result.trace.extraAttackDamage).toBe(27);
+    expect(result.trace.accuracyDamage).toBe(0);
+    expect(result.trace.opportunityCost).toBe(0);
+    expect(result.trace.inspirationSpent).toBe(3);
+    expect(result.trace.extraAttackActive).toBe(true);
+  });
+
+  it('both Ambush wrappers use the same first-turn-only primitive with their own dice', () => {
+    const vanward = vanwardConclave(HIT, 11);
+    const cold = coldOpen(HIT, 17);
+    expect(vanward.dealt).toBe(2 * 6);
+    expect(vanward.trace.roundOneDamage).toBe(12);
+    expect(cold.dealt).toBe(3 * 5);
+    expect(cold.trace.roundOneDamage).toBe(15);
+    expect(vanward.trace.triggers).toBe(1);
+    expect(cold.trace.triggers).toBe(1);
+  });
+
+  it('the declared Ranger stack applies both riders to round 1 and only Patient thereafter', () => {
+    const result = vanwardPatientStack(HIT, 5);
+    expect(result.dealt).toBe(4 * 6);
+    expect(result.trace.roundOneDamage).toBe(2 * 6);
+  });
+
+  it('Broken Tooth uses two d10+Wisdom attacks and records transform temp HP', () => {
+    const result = brokenTooth(HIT, 11);
+    expect(result.dealt).toBe(3 * 2 * (8 + 4));
+    expect(result.trace.tempHp).toBe(11);
+    expect(result.trace.shapeActive).toBe(true);
+    expect(result.trace.attackModifier).toBe(8);
+  });
+
+  it('Cutting Momentum adds only +3 on the first hit when no hit is critical', () => {
+    expect(cuttingMomentum(HIT, 17).dealt).toBe(3 * 3);
+  });
+
+  it('Cutting Momentum expands the remainder of only the triggering turn', () => {
+    // Round 1: natural 20 first hit activates 18-20; second attack is 18 and
+    // gains two marginal greatsword dice, each face 4. Rounds 2-3 miss.
+    const values = [0.99, 0.86, 0.5, 0.5, ...repeat(MISS, 4)];
+    const result = cuttingMomentum(scriptedRng(values), 5);
+    expect(result.dealt).toBe(2 + 4 + 4);
+    expect(result.trace.criticalTriggers).toBe(1);
+  });
+
+  it('Broken Tempo spends once each turn while Second Wind restores one die', () => {
+    const result = brokenTempo(HIT, 17);
+    expect(result.dealt).toBe(3 * 8);
+    expect(result.trace.triggers).toBe(3);
+    expect(result.trace.secondWindRegains).toBe(1);
+    expect(result.trace.criticalRegains).toBe(0);
+    expect(result.trace.poolRemaining).toBe(4);
   });
 });
