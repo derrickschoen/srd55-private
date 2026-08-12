@@ -515,6 +515,7 @@ describe('the grants a character actually has, read from the database', () => {
     expect(bard?.subclass).toEqual({
       id: subclassId,
       name: HOMEBREW_SUBCLASS_NAME,
+      content_key: HOMEBREW_SUBCLASS_KEY,
     });
     const result = attacksPerAction(classes());
     // TWO, applied outright: a subclass IS recorded on the character, and the
