@@ -51,17 +51,22 @@ import { resolveAttacksPerAction } from './extra-attack';
 import {
   classFormulaResourceLabel,
   classResourceLabel,
+  resourceFormulaAbilities,
   type ClassFormulaResourceKind,
   type ClassResourceFormula,
   type ClassResourceKind,
+  type PositiveInteger,
   type PositiveResourceMaximum,
   type ResourceFormulaAbility,
 } from '../domain/class-resources';
 import type {
   ClassDefinitionId,
   ClassLevel,
+  ContentKey,
   SpellLevel,
 } from '../domain/ids';
+import { classResourceFormulaExpression } from '../domain/class-resource-value-expression';
+import { evaluateValue } from '../domain/value-expression';
 import { CasterContribution } from './caster-contribution';
 import { isProgressionType } from './progression-type';
 import { casterLevel, pactMagic, slots } from './spell-slots';
@@ -1348,6 +1353,7 @@ export type SheetSpellProgressionRow =
 /** The corruption-preserving catalog input to the pure resource resolver. */
 export interface SheetResourceClassInput {
   readonly class_definition_id: ClassDefinitionId;
+  readonly class_content_key: ContentKey;
   readonly class_name: string;
   readonly class_level: unknown;
   readonly catalog: SheetResourceCatalog;
@@ -1423,19 +1429,9 @@ function absentResource(
   };
 }
 
-function formulaMinimumLevel(formula: ClassResourceFormula): ClassLevel {
-  switch (formula.kind) {
-    case 'fixed_count':
-    case 'ability_modifier_minimum_one':
-    case 'class_level_multiple':
-      return formula.minimum_class_level;
-    case 'fixed_count_by_class_level':
-      return formula.steps[0].minimum_class_level;
-  }
-}
-
 function resolvedFormula(
   formula: ClassResourceFormula,
+  classContentKey: ContentKey,
   classLevel: ClassLevel,
   abilities: SheetResourceAbilityInputs,
 ):
@@ -1446,62 +1442,61 @@ function resolvedFormula(
       readonly computation: SheetResourceComputation;
     }
   | { readonly status: 'ability_absent'; readonly ability: ResourceFormulaAbility } {
-  if (classLevel < formulaMinimumLevel(formula)) {
+  const provided = classResourceFormulaExpression(
+    formula,
+    classContentKey,
+    classLevel,
+  );
+  if (provided.kind === 'not_acquired') {
     return { status: 'not_acquired' };
   }
-  switch (formula.kind) {
-    case 'fixed_count':
-      return {
-        status: 'computed',
-        maximum: formula.count,
-        computation: formula,
-      };
-    case 'fixed_count_by_class_level': {
-      let acquired = formula.steps[0];
-      for (const step of formula.steps) {
-        if (step.minimum_class_level <= classLevel) {
-          acquired = step;
-        }
-      }
-      return {
-        status: 'computed',
-        maximum: acquired.count,
-        computation: formula,
-      };
-    }
-    case 'ability_modifier_minimum_one': {
-      const input = abilities[formula.ability];
-      if (
-        input.status === 'absent' ||
-        !Number.isSafeInteger(input.modifier)
-      ) {
-        return { status: 'ability_absent', ability: formula.ability };
-      }
-      const maximum = positiveResourceMaximum(
-        Math.max(1, Number(input.modifier)),
-      );
-      if (maximum === null) {
-        return { status: 'ability_absent', ability: formula.ability };
-      }
-      return {
-        status: 'computed',
-        maximum,
-        computation: {
-          ...formula,
-          resolved_modifier: Number(input.modifier),
-        },
-      };
-    }
-    case 'class_level_multiple': {
-      const maximum = positiveResourceMaximum(
-        Number(formula.multiplier) * Number(classLevel),
-      );
-      if (maximum === null) {
-        throw new TypeError('A valid class-level multiplier produced an invalid maximum.');
-      }
-      return { status: 'computed', maximum, computation: formula };
+  const abilityModifiers = new Map<Ability, number>();
+  for (const ability of resourceFormulaAbilities) {
+    const input = abilities[ability];
+    if (input.status === 'present' && Number.isSafeInteger(input.modifier)) {
+      abilityModifiers.set(ability, Number(input.modifier));
     }
   }
+  const evaluated = evaluateValue(provided.value, {
+    // Adapter output can only read the owning class or one of the two formula
+    // abilities. These other required context fields are therefore present by
+    // type but unreachable through the adapter's closed output union.
+    character_level: classLevel,
+    proficiency_bonus: 1 as PositiveInteger,
+    class_levels: new Map([[classContentKey, classLevel]]),
+    ability_modifiers: abilityModifiers,
+  });
+  if (evaluated.kind === 'unavailable') {
+    if (
+      formula.kind === 'ability_modifier_minimum_one' &&
+      evaluated.reason === 'missing_ability'
+    ) {
+      return { status: 'ability_absent', ability: formula.ability };
+    }
+    throw new TypeError(
+      `A decoded class-resource formula evaluated as ${evaluated.reason}.`,
+    );
+  }
+  const maximum = positiveResourceMaximum(evaluated.value);
+  if (maximum === null) {
+    if (formula.kind === 'ability_modifier_minimum_one') {
+      return { status: 'ability_absent', ability: formula.ability };
+    }
+    throw new TypeError(
+      'A decoded class-resource formula produced an invalid maximum.',
+    );
+  }
+  return {
+    status: 'computed',
+    maximum,
+    computation:
+      formula.kind === 'ability_modifier_minimum_one'
+        ? {
+            ...formula,
+            resolved_modifier: abilityModifiers.get(formula.ability) as number,
+          }
+        : formula,
+  };
 }
 
 type DecodedSlots =
@@ -1966,7 +1961,12 @@ export function resolveSheetResources(
         );
         continue;
       }
-      const formula = resolvedFormula(row.formula, classLevel, abilities);
+      const formula = resolvedFormula(
+        row.formula,
+        entry.class_content_key,
+        classLevel,
+        abilities,
+      );
       if (formula.status === 'not_acquired') {
         continue;
       }

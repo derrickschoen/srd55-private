@@ -68,6 +68,7 @@ function resourceClass(
 ): SheetResourceClassInput {
   return {
     class_definition_id: id as ClassDefinitionId,
+    class_content_key: `test:class:${String(id)}` as import('../../../src/domain/ids').ContentKey,
     class_name: className,
     class_level: classLevel,
     catalog: {
@@ -1455,6 +1456,18 @@ describe('sheet resource maxima', () => {
       },
     ]);
     expect('maximum' in missing[0]!).toBe(false);
+
+    const hostile = resolveSheetResources([classes[0]!], {
+      ...PRESENT_ABILITIES,
+      charisma: { status: 'present', modifier: 'not-a-number' },
+    });
+    expect(hostile).toMatchObject([
+      {
+        status: 'absent',
+        reason: 'resource_formula_ability_input_missing_or_invalid',
+      },
+    ]);
+    expect('maximum' in hostile[0]!).toBe(false);
   });
 
   it('uses combined shared slots, guards sole subclass casters, and keeps Pact separate', () => {

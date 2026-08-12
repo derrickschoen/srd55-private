@@ -72,6 +72,10 @@ interface RetirementSheetImage extends SheetImage {
   readonly fixture: SheetSpellRetirementFixture;
 }
 
+interface FeatureValueSheetImage extends SheetImage {
+  readonly levels: Readonly<Record<'one' | 'two' | 'five' | 'twenty' | 'multiclass', number>>;
+}
+
 function exportedImage(
   sqlite3: Awaited<ReturnType<typeof sqlite3InitModule>>,
   connection: Database,
@@ -657,6 +661,69 @@ async function abilityOverrideImage(): Promise<SheetImage> {
     ],
   );
   return exportedImage(sqlite3, connection, characterId);
+}
+
+async function featureValueSheetImage(): Promise<FeatureValueSheetImage> {
+  const sqlite3 = await sqlite3InitModule();
+  const connection = new sqlite3.oo1.DB(':memory:', 'c');
+  connection.exec(schema);
+  const db = new DatabaseContext(connection);
+  const rogueId = defineClass(db, 'Rogue', 8, ['dexterity', 'intelligence']);
+  const otherId = defineClass(
+    db,
+    'Other',
+    8,
+    ['strength', 'constitution'],
+    'feature-value-other',
+  );
+  db.exec(
+    `INSERT INTO class_feature_value_contributions (
+       class_definition_id, contribution_key, label, target_kind, target_key,
+       op, active_from_level, active_to_level, value_json
+     ) VALUES (
+       ?, 'sneak-attack', 'Sneak Attack', 'feature_dice_count',
+       'sneak_attack', 'add', 1, 20, ?
+     )`,
+    [
+      rogueId,
+      JSON.stringify({
+        kind: 'scale',
+        source: { kind: 'class_level', class_content_key: '2024:class:rogue' },
+        divide: 2,
+        round: 'ceiling',
+      }),
+    ],
+  );
+  const levels = {} as Record<keyof FeatureValueSheetImage['levels'], number>;
+  for (const [name, rogueLevel, otherLevel] of [
+    ['one', 1, 0],
+    ['two', 2, 0],
+    ['five', 5, 0],
+    ['twenty', 20, 0],
+    ['multiclass', 5, 15],
+  ] as const) {
+    const characterId = db.exec(
+      'INSERT INTO characters (name) VALUES (?)',
+      [`Rogue ${String(rogueLevel)} oracle`],
+    ).lastInsertId;
+    levels[name] = characterId;
+    db.exec(
+      `INSERT INTO character_class_levels (
+         character_id, class_definition_id, level, is_starting_class
+       ) VALUES (?, ?, ?, 1)`,
+      [characterId, rogueId, rogueLevel],
+    );
+    if (otherLevel > 0) {
+      db.exec(
+        `INSERT INTO character_class_levels (
+           character_id, class_definition_id, level, is_starting_class
+         ) VALUES (?, ?, ?, 0)`,
+        [characterId, otherId, otherLevel],
+      );
+    }
+  }
+  const image = exportedImage(sqlite3, connection, levels.one);
+  return { ...image, levels };
 }
 
 async function ready(page: Page): Promise<void> {
@@ -2101,6 +2168,35 @@ test('ability overrides render the winning source and the floored source term', 
       { set_to: 24, outcome: 'applied' },
     ],
   });
+});
+
+test('Rogue Sneak Attack uses Rogue level at 1/2/5/20 and exposes its term breakdown', async ({
+  page,
+}, testInfo) => {
+  // Measured at 12.8s on Chromium; 20s is the requested 1.5x budget rounded up.
+  testInfo.setTimeout(20_000);
+  const image = await featureValueSheetImage();
+  await install(page, image);
+  for (const [name, expected] of [
+    ['one', '1d6'],
+    ['two', '1d6'],
+    ['five', '3d6'],
+    ['twenty', '10d6'],
+    ['multiclass', '3d6'],
+  ] as const) {
+    await navigateWithinApp(page, `/characters/${String(image.levels[name])}/sheet`);
+    const row = page.locator('[data-sheet-id="feature-value:sneak_attack"]');
+    await expect(row).toBeVisible();
+    await expect(row.locator('[data-sheet-value="feature-value:sneak_attack"]'))
+      .toHaveText(expected);
+    await expect(row).toContainText(`Sneak Attack contributes ${expected}.`);
+  }
+  const facts = JSON.parse(
+    (await page.locator('#character-sheet-facts').textContent()) ?? '',
+  ) as { feature_values: { key: string; value: number }[] };
+  expect(facts.feature_values).toMatchObject([
+    { key: 'sneak_attack', value: 3 },
+  ]);
 });
 
 test('the planner links to the sheet, and the sheet links back', async ({

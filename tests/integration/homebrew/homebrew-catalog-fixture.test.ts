@@ -523,6 +523,7 @@ describe('the College of the Long Road imports and reaches the sheet', () => {
     expect(entry?.subclass).toEqual({
       id: subclassId(db),
       name: 'College of the Long Road',
+      content_key: SUBCLASS_KEY,
     });
     // `all_subclass_features` is NOT level-filtered — the level 14 feature is
     // listed for a Bard 6, because this is a planner.

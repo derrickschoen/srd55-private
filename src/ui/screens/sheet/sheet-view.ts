@@ -35,6 +35,7 @@ import {
   type ClassFormulaResourceKind,
   type ClassResourceKind,
 } from '../../../domain/class-resources';
+import type { SheetFeatureValue } from '../../../rules/sheet-feature-values';
 
 export interface SheetHeaderRouteAction {
   readonly label: 'All characters' | 'Level Up' | 'Open planner';
@@ -398,13 +399,17 @@ export interface SheetRow {
   /** A stable machine key, never localised and never reordered. */
   readonly id: string;
   readonly label: readonly SheetCell[];
-  /** The number as printed, or `null` for a row that carries only prose. */
-  readonly value: string | null;
+  /** The value as printed, tokenised when it contains untrusted labels. */
+  readonly value: string | readonly SheetCell[] | null;
   /** How the number was reached, in the source's own terms. */
   readonly detail: readonly SheetCell[];
   readonly resource_marking?: {
     readonly shape: ResourceMarkingShape;
     readonly maximum: number;
+  };
+  readonly disclosure?: {
+    readonly summary: string;
+    readonly detail: readonly SheetCell[];
   };
 }
 
@@ -938,6 +943,98 @@ function resourceRows(
   });
 }
 
+function featureValueRows(
+  values: readonly SheetFeatureValue[],
+): readonly SheetRow[] {
+  return values.map((feature): SheetRow => {
+    if (feature.status === 'unavailable') {
+      return {
+        id: feature.id,
+        label: plain(feature.label),
+        value: 'UNKNOWN',
+        detail: plain(featureValueUnavailableDetail(feature.reason)),
+      };
+    }
+    const applied = feature.terms.filter((term) => term.status === 'applied');
+    const superseded = feature.terms.filter(
+      (term) => typeof term.status === 'object',
+    );
+    const valueCells: SheetCell[] = [];
+    for (const [index, term] of applied.entries()) {
+      if (index > 0) valueCells.push({ text: ' + ' });
+      valueCells.push({
+        text: `${String(term.contribution)}d${String(feature.die_size)}`,
+      });
+      if (!term.is_base) {
+        valueCells.push(
+          { text: ' (' },
+          { text: term.label, free_text: true },
+          { text: ')' },
+        );
+      }
+    }
+    const detail: SheetCell[] = [];
+    for (const [index, term] of applied.entries()) {
+      if (index > 0) detail.push({ text: ' ' });
+      detail.push(
+        { text: term.label, free_text: true },
+        {
+          text: ` contributes ${String(term.contribution)}d${String(feature.die_size)}.`,
+        },
+      );
+    }
+    const supersededDetail: SheetCell[] = [];
+    for (const [index, term] of superseded.entries()) {
+      if (index > 0) supersededDetail.push({ text: ' ' });
+      supersededDetail.push(
+        { text: term.label, free_text: true },
+        {
+          text: ` would contribute ${String(term.contribution)}d${String(feature.die_size)} but is superseded.`,
+        },
+      );
+    }
+    return {
+      id: feature.id,
+      label: plain(feature.label),
+      value: valueCells,
+      detail,
+      ...(supersededDetail.length === 0
+        ? {}
+        : {
+            disclosure: {
+              summary: 'Superseded terms',
+              detail: supersededDetail,
+            },
+          }),
+    };
+  });
+}
+
+function featureValueUnavailableDetail(
+  reason: Extract<SheetFeatureValue, { readonly status: 'unavailable' }>['reason'],
+): string {
+  switch (reason) {
+    case 'missing_class':
+      return 'This value needs a class level the character does not have.';
+    case 'missing_ability':
+      return 'This value needs an ability modifier that is not available.';
+    case 'invalid_data':
+      return 'One of the recorded contributions is invalid.';
+    case 'overflow':
+      return 'The recorded contributions produce a number that is too large.';
+    case 'malformed_supersession':
+      return 'The recorded replacement links are incomplete or contradictory.';
+    case 'duplicate_source':
+      return 'Two recorded contributions use the same source key.';
+    default: {
+      const unreachable: never = reason;
+      throw new TypeError(
+        `Unhandled feature-value absence ${String(unreachable)}.`,
+      );
+    }
+  }
+}
+
 /**
  * The readable projection: every number on the sheet as a labelled row.
  *
@@ -1028,6 +1125,13 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
   sections.push({ caption: 'Core numbers', rows: core });
 
   sections.push({ caption: 'Resources', rows: resourceRows(sheet.resources) });
+
+  if (sheet.feature_values.length > 0) {
+    sections.push({
+      caption: 'Feature dice',
+      rows: featureValueRows(sheet.feature_values),
+    });
+  }
 
   sections.push({
     caption: 'Ability scores',
@@ -1498,6 +1602,42 @@ export function sheetFacts(sheet: CharacterSheet): Record<string, unknown> {
               loser_count: sheet.armor_class.tie_break.losers.length,
             },
     },
+    feature_values: sheet.feature_values.map((feature) =>
+      feature.status === 'unavailable'
+        ? {
+            key: feature.key,
+            status: feature.status,
+            reason: feature.reason,
+          }
+        : {
+            key: feature.key,
+            status: feature.status,
+            value: feature.value,
+            die_size: feature.die_size,
+            terms: feature.terms.map((term, index, terms) => {
+              const status = term.status;
+              const supersededBy =
+                typeof status !== 'object'
+                  ? null
+                  : terms.findIndex(
+                      (candidate) =>
+                        candidate.source.kind === 'contribution' &&
+                        status.superseded_by.kind === 'contribution' &&
+                        candidate.source.content_key ===
+                          status.superseded_by.content_key &&
+                        candidate.source.contribution_key ===
+                          status.superseded_by.contribution_key,
+                    );
+              return {
+                contribution: term.contribution,
+                status: typeof status === 'object' ? 'superseded' : status,
+                superseded_by:
+                  supersededBy === -1 ? null : supersededBy,
+                term_order: index,
+              };
+            }),
+          },
+    ),
     initiative: sheet.initiative.value,
     passive_perception: sheet.passive_perception.value,
     saving_throws: sheet.saves.map((save) => ({
@@ -1719,7 +1859,8 @@ function renderSheetRow(row: SheetRow): HTMLDivElement {
     const figure = document.createElement('span');
     figure.className = 'sheet-figure';
     figure.dataset.sheetValue = row.id;
-    figure.textContent = row.value;
+    if (typeof row.value === 'string') figure.textContent = row.value;
+    else cells(row.value, figure);
     value.append(figure);
   }
   if (row.resource_marking !== undefined) {
@@ -1732,6 +1873,17 @@ function renderSheetRow(row: SheetRow): HTMLDivElement {
   }
   cells(row.detail, detail);
   value.append(detail);
+  if (row.disclosure !== undefined) {
+    const disclosure = document.createElement('details');
+    disclosure.className = 'sheet-term-disclosure';
+    const summary = document.createElement('summary');
+    summary.textContent = row.disclosure.summary;
+    const disclosureDetail = document.createElement('p');
+    disclosureDetail.className = 'sheet-formula';
+    cells(row.disclosure.detail, disclosureDetail);
+    disclosure.append(summary, disclosureDetail);
+    value.append(disclosure);
+  }
   container.append(label, value);
   return container;
 }

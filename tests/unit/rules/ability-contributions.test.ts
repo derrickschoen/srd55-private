@@ -4,7 +4,10 @@ import type {
   AbilityOverrideCandidate,
   GuidedAbilityScores,
 } from '../../../src/builder/contracts';
-import { resolveAbilities } from '../../../src/rules/ability-contributions';
+import {
+  resolveAbilities,
+  resolveAbilityOverrideComputation,
+} from '../../../src/rules/ability-contributions';
 
 const BASE_19: GuidedAbilityScores = {
   strength: 19,
@@ -31,14 +34,15 @@ function override(
   effectId: number,
   setTo: number,
   label: string,
+  provenance: 'item' | 'source' = 'item',
 ): AbilityOverrideCandidate {
   return {
     effect_id: effectId,
     ability: 'strength',
     set_to: setTo,
     label,
-    source_instance_id: null,
-    character_item_id: effectId,
+    source_instance_id: provenance === 'source' ? effectId + 100 : null,
+    character_item_id: provenance === 'item' ? effectId : null,
   };
 }
 
@@ -140,5 +144,98 @@ describe('B2 ability contribution arithmetic', () => {
     expect(resolved.strength.overrides[0]?.outcome).toBe(
       'floored_by_increased_score',
     );
+  });
+
+  it('E3 regression-pins all four outcomes with provenance and acquisition order before typed-term integration', () => {
+    const resolved = resolveAbilities(
+      { ...BASE_19, strength: 20 },
+      [increase(2, 22)],
+      [
+        override(41, 21, 'Floored belt'),
+        override(42, 24, 'Winning belt'),
+        override(43, 24, 'Equal belt'),
+        override(44, 23, 'Lower belt'),
+      ],
+    );
+
+    expect(resolved.strength).toEqual({
+      base: 20,
+      contributions: [increase(2, 22)],
+      increased: 22,
+      overrides: [
+        {
+          ...override(41, 21, 'Floored belt'),
+          outcome: 'floored_by_increased_score',
+        },
+        {
+          ...override(42, 24, 'Winning belt'),
+          outcome: 'applied',
+        },
+        {
+          ...override(43, 24, 'Equal belt'),
+          outcome: 'tied_at_winning_value',
+        },
+        {
+          ...override(44, 23, 'Lower belt'),
+          outcome: 'superseded_by_higher_override',
+        },
+      ],
+      total: 24,
+    });
+  });
+
+  it('E3 maps that oracle to acquisition-ordered SetIfHigher Computed terms without changing it', () => {
+    const candidates = [
+      override(41, 21, 'Floored boon', 'source'),
+      override(42, 24, 'Winning belt'),
+      override(43, 24, 'Equal belt'),
+      override(44, 23, 'Lower belt'),
+    ];
+
+    expect(resolveAbilityOverrideComputation(22, candidates)).toEqual({
+      terms: [
+        {
+          source: { kind: 'character_effect', effect_id: 41, source_instance_id: 141 },
+          op: 'set_if_higher',
+          contribution: 21,
+          status: 'floored_by_increased_score',
+        },
+        {
+          source: { kind: 'character_effect', effect_id: 42, character_item_id: 42 },
+          op: 'set_if_higher',
+          contribution: 24,
+          status: 'applied',
+        },
+        {
+          source: { kind: 'character_effect', effect_id: 43, character_item_id: 43 },
+          op: 'set_if_higher',
+          contribution: 24,
+          status: 'applied_equal',
+        },
+        {
+          source: { kind: 'character_effect', effect_id: 44, character_item_id: 44 },
+          op: 'set_if_higher',
+          contribution: 23,
+          status: {
+            superseded_by: {
+              kind: 'character_effect', effect_id: 42, character_item_id: 42,
+            },
+          },
+        },
+      ],
+      value: 24,
+      riders: [],
+    });
+
+    expect(resolveAbilities(
+      { ...BASE_19, strength: 20 },
+      [increase(2, 22)],
+      candidates,
+    ).strength.overrides.map((entry) => entry.outcome)).toEqual([
+      'floored_by_increased_score',
+      'applied',
+      'tied_at_winning_value',
+      'superseded_by_higher_override',
+    ]);
   });
 });

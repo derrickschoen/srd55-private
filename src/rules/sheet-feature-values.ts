@@ -1,0 +1,276 @@
+import { sqlString, type SqlRow } from '../db/codecs';
+import type { DatabaseContext } from '../db/database';
+import {
+  sourceRefKey,
+  type SourceRef,
+  type TermStatusFor,
+} from '../domain/computed';
+import {
+  contributionSource,
+  featureValueKeys,
+  foldFeatureValues,
+  type FeatureValueContribution,
+  type FeatureValueKey,
+} from '../domain/feature-values';
+import type { ClassLevel, ContentKey } from '../domain/ids';
+import { decodeStoredSupersedesReference } from '../domain/contracts/row-rules';
+import { decodeStoredValueExpression } from '../domain/contracts/row-rules';
+import {
+  decodedValueExpression,
+  evaluateValue,
+  type ValueEvaluationContext,
+  type ValueResolution,
+} from '../domain/value-expression';
+
+export interface FeatureValueClassInput {
+  readonly class_definition_id: number;
+  readonly class_content_key: ContentKey;
+  readonly class_level: ClassLevel;
+  readonly subclass: {
+    readonly id: number;
+    readonly content_key: ContentKey;
+  } | null;
+}
+
+export interface SheetFeatureValueTerm {
+  readonly source: SourceRef;
+  /** Catalog-authored display text; readable projection only. */
+  readonly label: string;
+  readonly contribution: number;
+  readonly is_base: boolean;
+  readonly status: TermStatusFor<'add'>;
+}
+
+export type SheetFeatureValue =
+  | {
+      readonly status: 'computed';
+      readonly id: string;
+      readonly key: FeatureValueKey;
+      readonly label: 'Sneak Attack';
+      readonly die_size: 6;
+      readonly value: number;
+      readonly terms: readonly SheetFeatureValueTerm[];
+    }
+  | {
+      readonly status: 'unavailable';
+      readonly id: string;
+      readonly key: FeatureValueKey;
+      readonly label: 'Sneak Attack';
+      readonly reason:
+        | Extract<ValueResolution, { readonly kind: 'unavailable' }>['reason']
+        | 'malformed_supersession'
+        | 'duplicate_source';
+    };
+
+interface ActiveStoredContribution {
+  readonly content_key: ContentKey;
+  readonly contribution_key: string;
+  readonly label: string;
+  readonly target_key: FeatureValueKey;
+  readonly value_json: string;
+  readonly supersedes_ref: string | null;
+  readonly is_base: boolean;
+}
+
+function isFeatureValueKey(value: string): value is FeatureValueKey {
+  return (featureValueKeys as readonly string[]).includes(value);
+}
+
+function row(
+  contentKey: ContentKey,
+  value: SqlRow,
+  owner: 'class' | 'subclass',
+): ActiveStoredContribution {
+  const contributionKey = sqlString(value, 'contribution_key');
+  const targetKey = sqlString(value, 'target_key');
+  if (!isFeatureValueKey(targetKey)) {
+    throw new TypeError(`Unknown stored feature-value target ${targetKey}.`);
+  }
+  const supersedes = value.supersedes_ref;
+  if (supersedes !== null && typeof supersedes !== 'string') {
+    throw new TypeError('Stored feature-value supersedes_ref is not text.');
+  }
+  return {
+    content_key: contentKey,
+    contribution_key: contributionKey,
+    label: sqlString(value, 'label'),
+    target_key: targetKey,
+    value_json: sqlString(value, 'value_json'),
+    supersedes_ref: supersedes,
+    is_base: owner === 'class' && contributionKey === 'sneak-attack',
+  };
+}
+
+/** Provider-owned acquisition filtering: rows outside their level band do not exist here. */
+function activeRows(
+  db: DatabaseContext,
+  classes: readonly FeatureValueClassInput[],
+): readonly ActiveStoredContribution[] {
+  const rows: ActiveStoredContribution[] = [];
+  for (const entry of classes) {
+    rows.push(
+      ...db.all(
+        `SELECT contribution_key, label, target_key, value_json, supersedes_ref
+           FROM class_feature_value_contributions
+          WHERE class_definition_id = ?
+            AND target_kind = 'feature_dice_count'
+            AND active_from_level <= ?
+            AND active_to_level >= ?
+          ORDER BY id`,
+        [entry.class_definition_id, entry.class_level, entry.class_level],
+        (stored) => row(entry.class_content_key, stored, 'class'),
+      ),
+    );
+    const subclass = entry.subclass;
+    if (subclass === null) continue;
+    rows.push(
+      ...db.all(
+        `SELECT contribution.contribution_key, contribution.label,
+                contribution.target_key, contribution.value_json,
+                contribution.supersedes_ref
+           FROM subclass_feature_value_contributions AS contribution
+           JOIN subclass_features AS feature
+             ON feature.id = contribution.subclass_feature_id
+          WHERE feature.subclass_definition_id = ?
+            AND feature.class_level <= ?
+            AND contribution.target_kind = 'feature_dice_count'
+            AND contribution.active_from_level <= ?
+            AND contribution.active_to_level >= ?
+          ORDER BY feature.sort_order, contribution.id`,
+        [
+          subclass.id,
+          entry.class_level,
+          entry.class_level,
+          entry.class_level,
+        ],
+        (stored) => row(subclass.content_key, stored, 'subclass'),
+      ),
+    );
+  }
+  return rows;
+}
+
+function supersedesReference(
+  json: string | null,
+):
+  | { readonly kind: 'none' }
+  | {
+      readonly kind: 'valid';
+      readonly value: ReturnType<typeof contributionSource>;
+    }
+  | { readonly kind: 'invalid' } {
+  let value: ReturnType<typeof decodeStoredSupersedesReference>;
+  try {
+    value = decodeStoredSupersedesReference(
+      json,
+      'sheet feature-value supersedes_ref',
+    );
+  } catch {
+    return { kind: 'invalid' };
+  }
+  if (value === null) return { kind: 'none' };
+  const contentKey = value.content_key;
+  const contributionKey = value.contribution_key;
+  return typeof contentKey === 'string' && typeof contributionKey === 'string'
+    ? {
+        kind: 'valid',
+        value: contributionSource(contentKey as ContentKey, contributionKey),
+      }
+    : { kind: 'invalid' };
+}
+
+function unavailable(
+  key: FeatureValueKey,
+  reason: Extract<SheetFeatureValue, { readonly status: 'unavailable' }>['reason'],
+): SheetFeatureValue {
+  return {
+    status: 'unavailable',
+    id: `feature-value:${key}`,
+    key,
+    label: 'Sneak Attack',
+    reason,
+  };
+}
+
+export function resolveSheetFeatureValues(
+  db: DatabaseContext,
+  classes: readonly FeatureValueClassInput[],
+  context: ValueEvaluationContext,
+): readonly SheetFeatureValue[] {
+  const grouped = new Map<FeatureValueKey, ActiveStoredContribution[]>();
+  for (const stored of activeRows(db, classes)) {
+    const group = grouped.get(stored.target_key) ?? [];
+    group.push(stored);
+    grouped.set(stored.target_key, group);
+  }
+
+  return [...grouped].map(([key, storedRows]): SheetFeatureValue => {
+    const contributions: FeatureValueContribution<'feature_dice_count'>[] = [];
+    const labels = new Map<string, string>();
+    const baseSources = new Set<string>();
+    const seenSources = new Set<string>();
+    for (const stored of storedRows) {
+      const source = contributionSource(
+        stored.content_key,
+        stored.contribution_key,
+      );
+      const sourceIdentity = sourceRefKey(source);
+      if (seenSources.has(sourceIdentity)) {
+        return unavailable(key, 'duplicate_source');
+      }
+      seenSources.add(sourceIdentity);
+      if (stored.is_base) baseSources.add(sourceIdentity);
+      try {
+        decodeStoredValueExpression(
+          stored.value_json,
+          `sheet feature value ${stored.contribution_key}`,
+        );
+      } catch {
+        return unavailable(key, 'invalid_data');
+      }
+      const decoded = decodedValueExpression(stored.value_json);
+      if (decoded.kind === 'invalid_data') {
+        return unavailable(key, 'invalid_data');
+      }
+      const evaluated = evaluateValue(decoded.value, context);
+      if (evaluated.kind === 'unavailable') {
+        return unavailable(key, evaluated.reason);
+      }
+      labels.set(sourceIdentity, stored.label);
+      const supersedes = supersedesReference(stored.supersedes_ref);
+      if (supersedes.kind === 'invalid') {
+        return unavailable(key, 'invalid_data');
+      }
+      contributions.push({
+        source,
+        target: { kind: 'feature_dice_count', key },
+        op: 'add',
+        value: evaluated.value,
+        ...(supersedes.kind === 'none' ? {} : { supersedes: supersedes.value }),
+      });
+    }
+    const folded = foldFeatureValues(contributions);
+    if (folded.kind === 'malformed_graph') {
+      return unavailable(key, 'malformed_supersession');
+    }
+    const missingLabel = folded.computed.terms.some(
+      (term) => !labels.has(sourceRefKey(term.source)),
+    );
+    if (missingLabel) return unavailable(key, 'invalid_data');
+    return {
+      status: 'computed',
+      id: `feature-value:${key}`,
+      key,
+      label: 'Sneak Attack',
+      die_size: 6,
+      value: folded.computed.value,
+      terms: folded.computed.terms.map((term) => ({
+        source: term.source,
+        label: labels.get(sourceRefKey(term.source)) as string,
+        contribution: term.contribution as number,
+        is_base: baseSources.has(sourceRefKey(term.source)),
+        status: term.status,
+      })),
+    };
+  });
+}
