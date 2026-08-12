@@ -12,6 +12,7 @@ import {
   devotionThrown,
   draconic,
   evoker,
+  fiend,
   fiendPatron,
   hunter,
   hunterRanged,
@@ -49,6 +50,7 @@ const BOARD: ReadonlyArray<readonly [string, Build]> = [
   ['Evoker', evoker],
   ['Draconic', draconic],
   ['Fiend', fiendPatron],
+  ['Fiend slot volleys', fiend],
   ['Lore', loreCollege],
 ];
 

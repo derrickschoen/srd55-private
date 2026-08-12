@@ -79,6 +79,7 @@ describe('run.ts N validation (F20)', () => {
       'SRD Evoker — ranged spells',
       'SRD Draconic (Fire) — ranged spells',
       'SRD Fiend — ranged spell attacks',
+      'SRD Fiend — slot volleys',
       'SRD Lore — caster posture',
     ]) {
       expect(allOutput).toContain(name);

@@ -58,7 +58,7 @@ Or standalone, from anywhere, without `cd`-ing in first:
 npx vitest run --root path/to/tools/sim
 ```
 
-The current suite is verified to pass (155 tests, 8 files) under vitest 3.2.7;
+The current suite is verified to pass (161 tests, 8 files) under vitest 3.2.7;
 nothing in the suite is version-specific. The first run may create a small
 `node_modules/` holding vitest's own transform cache — harmless, gitignore it.
 

@@ -12,6 +12,7 @@ import {
   championRanged,
   devotion,
   domination,
+  fiend,
   monk,
   veteran,
 } from './sim';
@@ -119,6 +120,39 @@ describe('constant-value Rng (fixed non-crit hit): exact smite-queue accounting'
     const smiteTotal = L17_QUEUE.slice(0, 4).reduce((a, b) => a + b, 0) * 6;
     const r = domination(constRng(X), 17, 1, 'smite');
     expect(r).toEqual({ dealt: weaponTotal + smiteTotal, prevented: 0 });
+  });
+});
+
+describe('Fiend slot volleys: exact Scorching Ray accounting', () => {
+  it('uses 3/4/6/6 rays at pact-slot levels 2/3/5/5, each dealing 2d6 plus Hex', () => {
+    // x=.72: d20=15 (non-critical hit), d6=5, d10=8. Combat 1 spends
+    // one Pact slot on the day-long Hex, then spends every remaining slot on
+    // Scorching Ray before falling back to Eldritch Blast + Agonizing Blast.
+    const expected = {
+      3: 3 * (2 * 5 + 5) + 3 * (8 + 3 + 5),
+      6: 4 * (2 * 5 + 5) + 3 * 2 * (8 + 4 + 5),
+      11: 2 * 6 * (2 * 5 + 5) + 2 * 3 * (8 + 5 + 5),
+      17: 3 * 6 * (2 * 5 + 5) + 4 * (8 + 5 + 5),
+    } as const;
+
+    for (const level of [3, 6, 11, 17] as const) {
+      expect(fiend(constRng(0.72), level, 1)).toEqual({
+        dealt: expected[level],
+        prevented: 0,
+      });
+    }
+  });
+
+  it('refreshes Pact slots each combat while the first Hex spans the day', () => {
+    // At L11 each six-ray volley deals 6*(2d6+Hex)=90 under x=.72, and each
+    // fallback EB round deals 3*(d10+Cha+Hex)=54. Combat 1 pays Hex and has
+    // 2 volleys + 2 EB rounds; combats 2-4 have 3 volleys + 1 EB round.
+    const firstCombat = 2 * 90 + 2 * 54;
+    const laterCombat = 3 * 90 + 54;
+    expect(fiend(constRng(0.72), 11, 4)).toEqual({
+      dealt: firstCombat + 3 * laterCombat,
+      prevented: 0,
+    });
   });
 });
 

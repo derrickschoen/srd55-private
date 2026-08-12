@@ -66,8 +66,9 @@
 //     "Fireball," and "Fire Bolt." SRD Twinned does not duplicate these
 //     damage spells; its modeled damage contribution is honestly zero.
 //   - Fiend Patron: "Warlock" (Pact Magic, Agonizing Blast), "Warlock
-//     Subclass: Fiend Patron" (Dark One's Blessing, Fiendish Resilience, Hurl
-//     Through Hell), and "Eldritch Blast"/"Hex" spell descriptions.
+//     Subclass: Fiend Patron" (Fiend Spells grants Scorching Ray; Dark One's
+//     Blessing, Fiendish Resilience, Hurl Through Hell), and "Scorching Ray,"
+//     "Eldritch Blast," and "Hex" spell descriptions.
 //   - College of Lore: "Bard" (Bardic Inspiration, Font of Inspiration,
 //     Magical Secrets) and "Bard Subclass: College of Lore" (Cutting Words,
 //     Magical Discoveries), plus "Dissonant Whispers," "Vicious Mockery,"
@@ -1236,8 +1237,12 @@ export function fiend(
   // Fiend warlock. blade: Pact of the Blade greatsword (items ladder applies,
   // F2/owner ruling), Hex (or Darkness variant: Devil's Sight advantage),
   // Eldritch Smite once per turn from the Pact Magic pool — Warlock 5+ only
-  // (F7). Otherwise: Eldritch Blast + Agonizing Blast with Hex, leveled-slot
-  // Scorching-Ray-style volleys first (spell attacks: itemless).
+  // (F7). Otherwise: exact Scorching Ray volleys from the Fiend Spells list
+  // first (3 rays at slot level 2, +1 ray per higher slot; each ray is 2d6),
+  // then Eldritch Blast + Agonizing Blast with Hex (spell attacks: itemless).
+  // Pact slots refresh on a Short Rest; the board places one between modeled
+  // combats, so the slot-volley posture refreshes every combat and burst is
+  // expected to approximately equal day DPR.
   // Hex upcast on a pact slot (level 2/3/5/5) lasts 4/8/24/24 hours, so one
   // casting spans the whole 4-combat day: the slot is paid once, in combat 1
   // (F26). Darkness is Concentration 10 minutes and is re-paid every combat.
@@ -1285,7 +1290,7 @@ export function fiend(
         if (sq > 0) {
           sq -= 1;
           for (let v = 0; v < slvl + 1; v++) {
-            // Scorching-Ray-style volley
+            // Scorching Ray: 3 rays at level 2, +1 per higher slot.
             const r = roll(rng, false);
             const crit = r === 20;
             if (r > 1 && (r + hit >= ac || crit)) {

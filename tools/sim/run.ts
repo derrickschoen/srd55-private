@@ -69,6 +69,9 @@ const SRD_ROWS: readonly Row[] = [
   { name: 'SRD Evoker — ranged spells', fn: evoker },
   { name: 'SRD Draconic (Fire) — ranged spells', fn: draconic },
   { name: 'SRD Fiend — ranged spell attacks', fn: fiendPatron },
+  // Pact slots refresh each modeled combat at the intervening Short Rest, so
+  // this posture's burst and day DPR remain close instead of depleting.
+  { name: 'SRD Fiend — slot volleys', fn: (rng, level, combats) => fiend(rng, level, combats, false) },
   { name: 'SRD Lore — caster posture', fn: loreCollege },
 ];
 
@@ -181,7 +184,6 @@ function main(N: number, seed = 31): void {
   showRow({ name: 'BARBED COURT (fights-back env)', fn: monk }, seed, N);
   showRow({ name: 'BARBED COURT (init manifest @17)', fn: (r, L, nc) => monk(r, L, nc, true) }, seed, N);
   console.log('--- LEGACY ALTERNATE POSTURES ---');
-  showRow({ name: 'Fiend EB/volley legacy policy', fn: fiend }, seed, N);
   showRow({ name: 'VETERAN ranged (hand crossbows)', fn: (r, L, nc) => veteran(r, L, nc, true) }, seed, N);
   console.log('--- LEGACY CASTER NOVA POSTURES ---');
   showRow({ name: 'Sorc3/Wiz8+ CME nova', fn: sorcwiz, minLevel: 11 }, seed, N);

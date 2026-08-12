@@ -7,6 +7,7 @@ import {
   devotion,
   domination,
   fiend,
+  fiendPatron,
   monk,
   mulberry32,
   sorcwiz,
@@ -57,6 +58,24 @@ describe('champion vs championRanged: share championCore, but are not the same b
       const ranged = championRanged(ALWAYS_MIN, L, 1);
       expect(melee.dealt).toBeGreaterThan(0);
       expect(ranged.dealt).toBe(0);
+    }
+  });
+});
+
+describe('Fiend sustained vs slot-volley postures are distinct deterministic identities', () => {
+  it('same seed reproduces the slot-volley posture at every board level', () => {
+    for (const level of [3, 6, 11, 17] as const) {
+      expect(fiend(mulberry32(666 + level), level, 4)).toEqual(
+        fiend(mulberry32(666 + level), level, 4),
+      );
+    }
+  });
+
+  it('slot volleys differ from the Hurl-capable sustained Fiend posture', () => {
+    for (const level of [3, 6, 11, 17] as const) {
+      expect(fiend(mulberry32(667 + level), level, 1)).not.toEqual(
+        fiendPatron(mulberry32(667 + level), level, 1),
+      );
     }
   });
 });
