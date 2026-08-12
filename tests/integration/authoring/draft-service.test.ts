@@ -211,6 +211,7 @@ describe('catalog authoring draft service', () => {
         rules_edition: 'expanded',
         catalog_layer: 'external',
         superseded_by: null,
+        usage_count: 0,
       },
       {
         content_key: 'expanded:draft.service:alpha-species',
@@ -219,6 +220,7 @@ describe('catalog authoring draft service', () => {
         rules_edition: 'expanded',
         catalog_layer: 'external',
         superseded_by: null,
+        usage_count: 0,
       },
       {
         content_key: 'expanded:draft.service:zulu-species',
@@ -227,6 +229,7 @@ describe('catalog authoring draft service', () => {
         rules_edition: 'expanded',
         catalog_layer: 'external',
         superseded_by: null,
+        usage_count: 0,
       },
     ]);
   });

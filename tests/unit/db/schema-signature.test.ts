@@ -67,7 +67,7 @@ describe('pre-Drizzle database images', () => {
     // is why the counts are asserted rather than left as a surprise: the
     // fixture still declares the eight Laravel-only tables that were dropped,
     // leaving 30 tables shared with the generated artifact. The generated
-    // artifact now declares 84 tables, so the old image is also short of 54
+    // artifact now declares 85 tables, so the old image is also short of 55
     // `applicationTables` and fails EARLIER, not less.
     //
     // These are COUNTS, not an equivalence proof, and do not claim to be one.
@@ -78,7 +78,7 @@ describe('pre-Drizzle database images', () => {
     const tableCount = (sql: string) =>
       [...sql.matchAll(/CREATE TABLE/g)].length;
     expect(tableCount(preDrizzleSchema)).toBe(38);
-    expect(tableCount(schema)).toBe(84);
+    expect(tableCount(schema)).toBe(85);
   });
 
   it('rejects a pre-Drizzle image at open instead of half-working', async () => {
@@ -102,6 +102,7 @@ describe('pre-Drizzle database images', () => {
         'background_template_effects, ' +
         'background_templates, ' +
         'catalog_content_aliases, catalog_content_archive_members, ' +
+        'catalog_content_replacement_choices, ' +
         'catalog_content_drafts, ' +
         'catalog_content_fingerprints, ' +
         'catalog_content_identities, catalog_content_match_decisions, ' +

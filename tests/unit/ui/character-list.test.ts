@@ -252,13 +252,13 @@ describe('character share links', () => {
       expect(disclosure.querySelectorAll('li').map((item) =>
         elementText(item as unknown as Node).replace(/\s+/gu, ' ').trim()
       )).toEqual([
-        `${hostile} — species — Homebrew · external layer`,
-        'UNKNOWN — feat — Homebrew · external layer',
-        `${hostileSubclass} — subclass — Homebrew · external layer`,
+        `${hostile} — species; 1 version`,
+        'UNKNOWN — feat; 1 version',
+        `${hostileSubclass} — subclass; 1 version`,
       ]);
       expect(disclosure.querySelector('[data-share-disclosure-hostile]')).toBeNull();
       expect(elementText(disclosure as unknown as Node)).toContain(
-        'This external content will be installed with the character:',
+        'The link does not include the sender’s name.',
       );
       expect(root.querySelector('[data-testid="content-adoption-modal"]')).toBeNull();
       expect(elementText(
@@ -1047,6 +1047,115 @@ describe('catalog and backup entry points', () => {
         descriptions_loaded: 0,
       }),
     ).toBe('0 created, 0 updated, 0 tombstoned, 0 subclasses created, 1 subclass updated');
+  });
+
+  it('reviews a clean whole-library arrival with grouped inert history before commit', async () => {
+    const fixture = services();
+    const hostileLatest = '<img data-hostile-library-review src=x> Latest';
+    const zeroKinds = {
+      class: 0, subclass: 0, feat: 0, species: 0, background: 0,
+      spell: 0, weapon: 0, armor: 0, item: 0,
+    } as const;
+    const plan: PortableImportPlan = {
+      token: 'library-review' as ContentImportPlanToken,
+      inputHash: 'input', graphHash: 'graph', targetHash: 'target',
+      spellActivityChanges: [],
+      incomingContent: [
+        {
+          id: 'portable:subclass:earlier', kind: 'subclass', name: 'Earlier version',
+          catalog_layer: 'external',
+        },
+        {
+          id: 'portable:subclass:latest', kind: 'subclass', name: hostileLatest,
+          catalog_layer: 'external',
+        },
+      ],
+      incomingLineages: [{
+        kind: 'subclass',
+        versions: [
+          { id: 'portable:subclass:earlier', name: 'Earlier version', used_by_character: false },
+          { id: 'portable:subclass:latest', name: hostileLatest, used_by_character: false },
+        ],
+      }],
+      reviews: [],
+      outcomes: [
+        {
+          id: 'portable:subclass:earlier', kind: 'match',
+          contentKey: '2024:content.subclass:earlier' as ContentKey,
+        },
+        {
+          id: 'portable:subclass:latest', kind: 'create',
+          contentKey: '2024:content.subclass:latest' as ContentKey,
+        },
+      ],
+      preview: {
+        new_by_kind: { ...zeroKinds, subclass: 1 },
+        matched_by_kind: { ...zeroKinds, subclass: 1 },
+        review_required_by_kind: zeroKinds,
+        refused_by_kind: zeroKinds,
+      },
+    };
+    let commits = 0;
+    let persistedChanges = 0;
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const controls = createImportBackupControls({
+        rpc: null as never,
+        characters: [],
+        onPersistedChange: () => { persistedChanges += 1; },
+        services: {
+          ...fixture.value,
+          backup: {
+            ...fixture.value.backup,
+            planLibraryImport: async () => plan,
+            commitLibraryImport: async () => {
+              commits += 1;
+              return { kind: 'committed', outcomes: plan.outcomes };
+            },
+          },
+        },
+      });
+      document.body.append(controls.element);
+      const root = interactiveElement(controls.element);
+      const input = root.querySelectorAll('input')[3];
+      const button = root.querySelectorAll('button').find((candidate) =>
+        candidate.textContent === 'Import library'
+      );
+      if (input === undefined || button === undefined) {
+        throw new Error('Library controls missing.');
+      }
+      Object.defineProperty(input, 'files', {
+        configurable: true,
+        value: [readableFile('library.json', '{}')],
+      });
+      button.click();
+      for (let turn = 0; turn < 6; turn += 1) await Promise.resolve();
+
+      expect(commits).toBe(0);
+      const dialogNode = root.querySelector('[data-testid="content-adoption-modal"]');
+      if (dialogNode === null) throw new Error('Library review missing.');
+      expect(elementText(dialogNode as unknown as Node).replace(/\s+/gu, ' ')).toContain(
+        `${hostileLatest} — subclass; 2 versions — already in this library; will be added`,
+      );
+      expect(elementText(dialogNode as unknown as Node)).toContain(
+        'The file does not record the sender’s name.',
+      );
+      expect(dialogNode.querySelector('[data-hostile-library-review]')).toBeNull();
+      const commit = interactiveElement(dialogNode).querySelectorAll('button').find(
+        (candidate) => candidate.textContent === 'Import library',
+      );
+      if (commit === undefined) throw new Error('Library confirmation missing.');
+      commit.click();
+      for (let turn = 0; turn < 6; turn += 1) await Promise.resolve();
+      expect(commits).toBe(1);
+      expect(persistedChanges).toBe(1);
+      expect(elementText(controls.element)).toContain(
+        'Library imported: 1 published, 1 matched existing.',
+      );
+      controls.cleanup();
+    } finally {
+      restoreDocument();
+    }
   });
 
   it('refreshes the bundled summary on a stale plan while keeping hostile names inert', async () => {

@@ -58,6 +58,7 @@ export function planLibraryImport(
       Object.freeze([]),
       libraryImportOperationIdentity(document),
     ),
+    { content: document.content, supersessions: document.supersessions ?? [] },
   );
 }
 

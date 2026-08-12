@@ -1010,8 +1010,9 @@ describe('catalog authoring RPC handlers', () => {
       true,
     );
     expect(Object.keys(degraded.preview).sort()).toEqual([
-      'changes', 'character_name', 'facts', 'kind', 'notices', 'replaces',
-      'required_choices', 'review', 'token',
+      'changes', 'character_name', 'facts', 'kept_at', 'kind', 'notices', 'replaces',
+      'required_choices', 'review', 'rules_change_review', 'rules_changes',
+      'token',
     ]);
     expect(degraded.preview.notices).toEqual(degraded.result.notices);
     expect(Object.keys(degraded.preview.notices[0] ?? {}).sort()).toEqual([
@@ -1095,7 +1096,7 @@ describe('catalog authoring RPC handlers', () => {
         'Selections that will become invalid',
       );
       expect(elementText(root as unknown as Node)).toContain(consequence);
-      expect(interactiveRoot.querySelectorAll('input')).toHaveLength(0);
+      expect(interactiveRoot.querySelectorAll('input')).toHaveLength(2);
       const reviewCopy = elementText(root as unknown as Node)
         .replace(/\s+/gu, ' ').trim();
       expect(reviewCopy).toContain(
@@ -1229,6 +1230,7 @@ describe('catalog authoring RPC handlers', () => {
       old_content_key: predecessor.content_key,
       new_content_key: successor.content_key,
       replacements: commits,
+      kept_character_ids: [],
     })).rejects.toMatchObject({ data: { reason: 'replacement_refused', refusal: 'commit_failed' } });
     expect(service.usages(predecessor.content_key).usages.map((usage) => usage.character_id))
       .toEqual([first.id, second.id]);
@@ -1238,11 +1240,50 @@ describe('catalog authoring RPC handlers', () => {
     expect(await authoring.commitReplacementSet({
       old_content_key: predecessor.content_key,
       new_content_key: successor.content_key,
-      replacements: commits,
-    })).toMatchObject({ replacements: [{ character_id: first.id }, { character_id: second.id }] });
+      replacements: commits.slice(0, 1),
+      kept_character_ids: [second.id],
+    })).toMatchObject({ replacements: [{ character_id: first.id }] });
+    expect(service.usages(predecessor.content_key).usages.map((usage) => usage.character_id))
+      .toEqual([second.id]);
+    expect(service.usages(successor.content_key).usages.map((usage) => usage.character_id))
+      .toEqual([first.id]);
+    expect(rpc.context.db.oneRaw(
+      `SELECT content_kind, superseded_content_key, successor_content_key,
+              character_id
+       FROM catalog_content_replacement_choices`,
+    )).toEqual({
+      content_kind: 'species',
+      superseded_content_key: predecessor.content_key,
+      successor_content_key: successor.content_key,
+      character_id: second.id,
+    });
+
+    const remaining = await authoring.previewReplacementSet({
+      old_content_key: predecessor.content_key,
+      new_content_key: successor.content_key,
+    });
+    const remainingReplacement = remaining.replacements[0];
+    if (remainingReplacement === undefined) throw new Error('Remaining replacement missing.');
+    expect(remainingReplacement.kept_at).toEqual(expect.any(String));
+    expect(await authoring.commitReplacementSet({
+      old_content_key: predecessor.content_key,
+      new_content_key: successor.content_key,
+      replacements: [{
+        token: remainingReplacement.token,
+        decisions: remainingReplacement.review.map((review) => ({
+          candidate_content_key: review.candidate_content_key,
+          decision: 'match' as const,
+        })),
+        choices: [],
+      }],
+      kept_character_ids: [],
+    })).toMatchObject({ replacements: [{ character_id: second.id }] });
     expect(service.usages(predecessor.content_key).usages).toEqual([]);
     expect(service.usages(successor.content_key).usages.map((usage) => usage.character_id))
       .toEqual([first.id, second.id]);
+    expect(rpc.context.db.scalar<number>(
+      'SELECT count(*) FROM catalog_content_replacement_choices',
+    )).toBe(0);
     expect(service.usages(neighbour.content_key).usages.map((usage) => usage.character_id))
       .toEqual([adjacent.id]);
   }, 20_000);

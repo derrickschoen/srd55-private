@@ -185,6 +185,17 @@ export interface ContentImportDisclosure extends CatalogNamedDisclosure {
   readonly kind: ContentKind;
 }
 
+/** Recipient-facing history for one connected set of incoming versions. */
+export interface ContentImportLineageDisclosure {
+  readonly kind: ContentKind;
+  readonly versions: readonly {
+    /** Correlates this disclosure with the authenticated import outcome. */
+    readonly id: string;
+    readonly name: string;
+    readonly used_by_character: boolean;
+  }[];
+}
+
 /** Keep honest names and their catalog layer inseparable at the plan seam. */
 export function externalContentDisclosure(input: {
   readonly id: string;
@@ -208,6 +219,8 @@ export interface ContentImportPlan {
   readonly spellActivityChanges: readonly ContentImportSpellActivityChange[];
   /** Incoming aggregates only; reference-only adoption nodes are excluded. */
   readonly incomingContent: readonly ContentImportDisclosure[];
+  /** Present when the caller can recover version history from its document. */
+  readonly incomingLineages?: readonly ContentImportLineageDisclosure[];
   readonly reviews: readonly ContentImportReviewRow[];
   readonly outcomes: readonly ContentImportEntryOutcome[];
 }

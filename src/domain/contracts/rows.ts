@@ -600,6 +600,7 @@ export type RowContractTable =
 type NativeContractTable =
   | 'catalog_content_identities'
   | 'catalog_content_archive_members'
+  | 'catalog_content_replacement_choices'
   | 'catalog_content_drafts'
   | 'catalog_content_fingerprints'
   | 'catalog_content_aliases'
@@ -689,6 +690,12 @@ const REFINEMENTS = {
   'catalog_content_archive_members.character_revision': nonNegativeInt,
   'catalog_content_archive_members.character_name': sqlText,
   'catalog_content_archive_members.archived_at': sqlTimestamp,
+
+  'catalog_content_replacement_choices.content_kind': authoredContentKindEnum,
+  'catalog_content_replacement_choices.superseded_content_key': nonEmptyText,
+  'catalog_content_replacement_choices.successor_content_key': nonEmptyText,
+  'catalog_content_replacement_choices.character_id': positiveInt,
+  'catalog_content_replacement_choices.decided_at': sqlTimestamp,
 
   'catalog_content_fingerprints.content_kind': contentKindEnum,
   'catalog_content_fingerprints.fingerprint_scheme':

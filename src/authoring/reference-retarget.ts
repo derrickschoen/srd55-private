@@ -15,6 +15,10 @@ import type {
   ContentKey,
 } from '../domain/ids';
 import type { JsonObject } from '../domain/models';
+import {
+  CharacterSheetBuilder,
+  type CharacterSheet,
+} from '../queries/character-sheet-builder';
 import { abilities, isEnumValue, skills, type Skill } from '../domain/enums';
 import {
   commitContentImport,
@@ -66,6 +70,7 @@ import type {
   ReplacementDecision,
   ReplacementPlan,
   ReplacementNotice,
+  ReplacementRuleChange,
   ReplacementReviewItem,
   ReplacementResult,
   ReplacementTokenFacts,
@@ -357,12 +362,150 @@ function replacementReviewItem(row: ContentImportReviewRow): ReplacementReviewIt
   }
 }
 
+function replacementRuleChanges(
+  before: CharacterSheet,
+  after: CharacterSheet,
+): readonly ReplacementRuleChange[] {
+  const changes: ReplacementRuleChange[] = [];
+  const add = (label: string, previous: string, next: string): void => {
+    if (previous === next) return;
+    changes.push(Object.freeze({ label, before: previous, after: next }));
+  };
+  const number = (value: number | null): string =>
+    value === null ? 'UNKNOWN' : String(value);
+  add('Hit Point Maximum', number(before.hit_point_maximum.value), number(after.hit_point_maximum.value));
+  add('Armor Class', String(before.armor_class.value), String(after.armor_class.value));
+  add('Initiative', String(before.initiative.value), String(after.initiative.value));
+  add('Passive Perception', number(before.passive_perception.value), number(after.passive_perception.value));
+  const walkingSpeed = (sheet: CharacterSheet): string =>
+    sheet.walking_speed.kind === 'known'
+      ? `${String(sheet.walking_speed.value)} feet`
+      : 'UNKNOWN';
+  add('Walking Speed', walkingSpeed(before), walkingSpeed(after));
+  const knownNumber = (value: CharacterSheet['lineage_darkvision']): string => {
+    if (value === null) return 'None';
+    return value.kind === 'known' ? `${String(value.value)} feet` : 'UNKNOWN';
+  };
+  add('Darkvision', knownNumber(before.lineage_darkvision), knownNumber(after.lineage_darkvision));
+  const list = (values: readonly string[]): string =>
+    values.length === 0 ? 'None' : [...values].sort().join(', ');
+  add('Damage Resistances', list(before.damage_resistances), list(after.damage_resistances));
+  add(
+    'Resistances awaiting a choice',
+    list(before.unchosen_damage_resistances),
+    list(after.unchosen_damage_resistances),
+  );
+  add(
+    'Attacks with the Attack action',
+    String(before.attacks_per_action.count),
+    String(after.attacks_per_action.count),
+  );
+
+  const mapNumbers = <T extends { readonly label: string; readonly value: number | null }>(
+    values: readonly T[],
+  ): ReadonlyMap<string, string> => new Map(values.map((value) => [
+    value.label,
+    number(value.value),
+  ]));
+  const compareMaps = (
+    previous: ReadonlyMap<string, string>,
+    next: ReadonlyMap<string, string>,
+  ): void => {
+    const labels = new Set([...previous.keys(), ...next.keys()]);
+    for (const label of labels) {
+      add(label, previous.get(label) ?? 'Not on the sheet', next.get(label) ?? 'Not on the sheet');
+    }
+  };
+  compareMaps(mapNumbers(before.ability_scores), mapNumbers(after.ability_scores));
+  compareMaps(mapNumbers(before.saves), mapNumbers(after.saves));
+  compareMaps(mapNumbers(before.skills), mapNumbers(after.skills));
+
+  const featureValues = (sheet: CharacterSheet): ReadonlyMap<string, string> =>
+    new Map(sheet.feature_values.map((value) => [
+      value.label,
+      value.status === 'unavailable'
+        ? 'UNKNOWN'
+        : 'die_size' in value
+          ? `${String(value.value)}d${String(value.die_size)}`
+          : String(value.value),
+    ]));
+  compareMaps(featureValues(before), featureValues(after));
+
+  const authoredResources = (sheet: CharacterSheet): ReadonlyMap<string, string> =>
+    new Map(sheet.resources.flatMap((resource) =>
+      resource.kind === 'authored'
+        ? [[
+            resource.label,
+            resource.status === 'computed'
+              ? `${String(resource.maximum)} uses`
+              : 'UNKNOWN',
+          ] as const]
+        : []
+    ));
+  compareMaps(authoredResources(before), authoredResources(after));
+
+  const printedFeatures = (sheet: CharacterSheet): ReadonlyMap<string, string> =>
+    new Map(sheet.printed_features.map((feature) => [
+      `${feature.source_name ?? (feature.source === 'background' ? 'Background' : 'Species')}: ${feature.name}`,
+      feature.text ?? 'No rules text provided',
+    ]));
+  compareMaps(printedFeatures(before), printedFeatures(after));
+
+  const proficiencySummary = (sheet: CharacterSheet): string => [
+    `Armor: ${list(sheet.proficiencies.armor_training)}`,
+    `Weapons: ${list(sheet.proficiencies.weapon_proficiencies.map((entry) =>
+      `${entry.category}${entry.property_qualifier === null ? '' : ` (${entry.property_qualifier})`}`
+    ))}`,
+  ].join('; ');
+  add('Proficiencies', proficiencySummary(before), proficiencySummary(after));
+
+  const spellSummary = (sheet: CharacterSheet): string => {
+    const spellNames = sheet.spells.flatMap((group) =>
+      group.spells.map((spell) => spell.name)
+    );
+    const statistics = sheet.spells.flatMap((group) =>
+      group.statistics.flatMap((statistic) => statistic.status === 'computed'
+        ? [`${statistic.ability}: save DC ${String(statistic.save_dc)}, attack ${statistic.attack_bonus >= 0 ? '+' : ''}${String(statistic.attack_bonus)}`]
+        : ['Spellcasting numbers unavailable'])
+    );
+    return `${list(spellNames)}; ${list(statistics)}`;
+  };
+  add('Spells and spellcasting', spellSummary(before), spellSummary(after));
+
+  const features = (sheet: CharacterSheet): ReadonlyMap<string, string> =>
+    new Map(sheet.subclass_features.map((feature) => [
+      `${String(feature.class_level)}\u0000${feature.name}`,
+      feature.description,
+    ]));
+  const previousFeatures = features(before);
+  const nextFeatures = features(after);
+  const featureKeys = new Set([...previousFeatures.keys(), ...nextFeatures.keys()]);
+  for (const key of featureKeys) {
+    const separator = key.indexOf('\u0000');
+    const level = key.slice(0, separator);
+    const label = key.slice(separator + 1);
+    const previous = previousFeatures.get(key);
+    const next = nextFeatures.get(key);
+    if (previous === undefined) {
+      add(label, 'Not available', `Available at class level ${level}`);
+    } else if (next === undefined) {
+      add(label, `Available at class level ${level}`, 'Not available');
+    } else if (previous !== next) {
+      add(label, previous, next);
+    }
+  }
+  return Object.freeze(changes);
+}
+
 function planShape(
   db: DatabaseContext,
   facts: ReplacementTokenFacts,
   characterName: string,
   plan: ContentImportPlan,
   notices: readonly ReplacementNotice[],
+  rulesChanges: readonly ReplacementRuleChange[],
+  rulesChangeReview: 'available' | 'unavailable',
+  keptAt: string | null,
 ): ReplacementPlan {
   const outcome = nonRefusedOutcome(plan);
   const oldName = targetName(db, facts.content_kind, facts.old_content_key);
@@ -371,12 +514,15 @@ function planShape(
     token: encodedToken(facts, plan.token),
     facts,
     character_name: characterName,
+    kept_at: keptAt,
     changes: Object.freeze([Object.freeze({
       path: Object.freeze(['content_key']),
       label: `${facts.content_kind} content reference`,
       before: oldName,
       after: newName,
     })]),
+    rules_changes: rulesChanges,
+    rules_change_review: rulesChangeReview,
     notices,
     required_choices: Object.freeze([]),
     review: Object.freeze(plan.reviews.map(replacementReviewItem)),
@@ -419,6 +565,7 @@ export function previewReferenceRetarget(
     readonly new_content_key: ContentKey;
     readonly character_id: CharacterId;
   },
+  includeRulesReview = true,
 ): ReplacementPlan {
   const reference = characterReference(db, {
     characterId: input.character_id,
@@ -459,13 +606,41 @@ export function previewReferenceRetarget(
       });
     }
   }
-  const notices = evaluateRetargetCharacter(
+  let beforeSheet: CharacterSheet | null = null;
+  if (includeRulesReview) {
+    try {
+      beforeSheet = new CharacterSheetBuilder(db).build(input.character_id);
+    } catch {
+      beforeSheet = null;
+    }
+  }
+  const evaluated = evaluateRetargetCharacter(
     db,
     facts,
     outcome.contentKey,
     'preview',
-  ).notices;
-  return planShape(db, facts, reference.characterName, plan, notices);
+    includeRulesReview,
+  );
+  const keptAt = db.scalar<string>(
+    `SELECT decided_at FROM catalog_content_replacement_choices
+     WHERE content_kind = ? AND superseded_content_key = ?
+       AND successor_content_key = ? AND character_id = ?`,
+    [facts.content_kind, facts.old_content_key, facts.new_content_key, facts.character_id],
+  );
+  return planShape(
+    db,
+    facts,
+    reference.characterName,
+    plan,
+    evaluated.notices,
+    beforeSheet === null || evaluated.afterSheet === null
+      ? Object.freeze([])
+      : replacementRuleChanges(beforeSheet, evaluated.afterSheet),
+    includeRulesReview && beforeSheet !== null && evaluated.afterSheet !== null
+      ? 'available'
+      : 'unavailable',
+    keptAt,
+  );
 }
 
 function matchChoices(
@@ -1441,8 +1616,12 @@ function retargetCharacter(
 
 type RetargetCharacterResult = ReturnType<typeof retargetCharacter>;
 
+interface RetargetCharacterEvaluation extends RetargetCharacterResult {
+  readonly afterSheet: CharacterSheet | null;
+}
+
 class RetargetPreviewRollback extends Error {
-  constructor(readonly result: RetargetCharacterResult) {
+  constructor(readonly result: RetargetCharacterEvaluation) {
     super('Reference retarget preview rollback.');
   }
 }
@@ -1457,15 +1636,26 @@ function evaluateRetargetCharacter(
   facts: ReplacementTokenFacts,
   targetContentKey: ContentKey,
   mode: 'preview' | 'commit',
-): RetargetCharacterResult {
+  includeAfterSheet = true,
+): RetargetCharacterEvaluation {
   if (mode === 'commit') {
-    return retargetCharacter(db, facts, targetContentKey);
+    return { ...retargetCharacter(db, facts, targetContentKey), afterSheet: null };
   }
   try {
     db.transaction(() => {
-      throw new RetargetPreviewRollback(
-        retargetCharacter(db, facts, targetContentKey),
-      );
+      const result = retargetCharacter(db, facts, targetContentKey);
+      let afterSheet: CharacterSheet | null = null;
+      if (includeAfterSheet) {
+        try {
+          afterSheet = new CharacterSheetBuilder(db).build(facts.character_id);
+        } catch {
+          afterSheet = null;
+        }
+      }
+      throw new RetargetPreviewRollback({
+        ...result,
+        afterSheet,
+      });
     });
   } catch (error) {
     if (error instanceof RetargetPreviewRollback) return error.result;
@@ -1497,7 +1687,7 @@ export function commitReferenceRetarget(
     old_content_key: facts.old_content_key,
     new_content_key: facts.new_content_key,
     character_id: facts.character_id,
-  });
+  }, false);
   if (preview.token !== input.token) {
     throw new ReferenceRetargetError('The replacement plan is stale.', {
       reason: 'stale_replacement_plan',

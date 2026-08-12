@@ -20,6 +20,7 @@ import type {
   Timestamp,
 } from '../../src/domain/ids';
 import { catalog_content_identities } from './catalog-content';
+import { characters } from './character';
 import { datetime, oneOf, sqlText, varchar } from './columns';
 
 /**
@@ -134,5 +135,71 @@ export const catalog_content_archive_members = sqliteTable(
       name: 'catalog_content_archive_members_primary',
       columns: [table.content_kind, table.content_key, table.character_id],
     }),
+  ],
+);
+
+/** A recipient's durable decision to leave one character on an older version. */
+export const catalog_content_replacement_choices = sqliteTable(
+  'catalog_content_replacement_choices',
+  {
+    content_kind: varchar<AuthoredContentKind>()('content_kind').notNull(),
+    superseded_content_key: varchar<ContentKey>()('superseded_content_key').notNull(),
+    successor_content_key: varchar<ContentKey>()('successor_content_key').notNull(),
+    character_id: integer('character_id').notNull().$type<CharacterId>(),
+    decided_at: datetime<Timestamp>()('decided_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    check(
+      'catalog_content_replacement_choices_kind_check',
+      oneOf('content_kind', authoredContentKinds),
+    ),
+    check(
+      'catalog_content_replacement_choices_distinct_keys_check',
+      sql`${table.superseded_content_key} <> ${table.successor_content_key}`,
+    ),
+    check(
+      'catalog_content_replacement_choices_character_id_check',
+      sql`typeof(${table.character_id}) = 'integer' AND ${table.character_id} >= 1`,
+    ),
+    check(
+      'catalog_content_replacement_choices_decided_at_check',
+      sql`typeof(${table.decided_at}) = 'text'`,
+    ),
+    foreignKey({
+      name: 'catalog_content_replacement_choices_superseded_foreign',
+      columns: [table.content_kind, table.superseded_content_key],
+      foreignColumns: [
+        catalog_content_identities.content_kind,
+        catalog_content_identities.content_key,
+      ],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'catalog_content_replacement_choices_successor_foreign',
+      columns: [table.content_kind, table.successor_content_key],
+      foreignColumns: [
+        catalog_content_identities.content_kind,
+        catalog_content_identities.content_key,
+      ],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'catalog_content_replacement_choices_character_foreign',
+      columns: [table.character_id],
+      foreignColumns: [characters.id],
+    }).onDelete('cascade'),
+    primaryKey({
+      name: 'catalog_content_replacement_choices_primary',
+      columns: [
+        table.content_kind,
+        table.superseded_content_key,
+        table.successor_content_key,
+        table.character_id,
+      ],
+    }),
+    index('catalog_content_replacement_choices_character_index').on(
+      table.character_id,
+      table.content_kind,
+    ),
   ],
 );

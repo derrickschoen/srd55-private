@@ -7,7 +7,10 @@ import {
 } from '../../../sharing/client';
 import type { SharePreview } from '../../../sharing/character-share';
 import type { ContentImportPlan } from '../../../catalog/content-adoption';
-import type { ContentImportDisclosure } from '../../../catalog/content-adoption';
+import type {
+  ContentImportDisclosure,
+  ContentImportLineageDisclosure,
+} from '../../../catalog/content-adoption';
 import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
 import { createContentAdoptionDialog } from '../../content-adoption-dialog';
 import { LIBRARY_IMPORT_ROUTE } from './import-backup-controls';
@@ -283,18 +286,42 @@ export function createShareControls(
   }
 
   function renderEmbeddedContent(
-    disclosures: readonly ContentImportDisclosure[],
+    lineages: readonly ContentImportLineageDisclosure[],
   ): void {
     embeddedContent.replaceChildren();
-    embeddedContent.hidden = disclosures.length === 0;
-    if (disclosures.length === 0) return;
+    embeddedContent.hidden = lineages.length === 0;
+    if (lineages.length === 0) return;
     const list = element('ul');
-    for (const disclosure of disclosures) {
-      list.append(element('li', {}, [contentDisclosure(disclosure)]));
+    for (const lineage of lineages) {
+      const latest = lineage.versions.at(-1);
+      if (latest === undefined) continue;
+      const used = lineage.versions.find((version) => version.used_by_character);
+      const item = element('li');
+      item.append(
+        freeTextSpan(latest.name),
+        ` — ${lineage.kind}; ${String(lineage.versions.length)} ` +
+          `version${lineage.versions.length === 1 ? '' : 's'}`,
+        used === undefined ? '' : '; this character uses ',
+      );
+      if (used !== undefined) item.append(freeTextSpan(used.name));
+      if (lineage.versions.length > 1) {
+        const history = element('details');
+        history.append(element('summary', { text: 'Version history' }));
+        const versions = element('ol');
+        for (const version of lineage.versions) {
+          const versionItem = element('li');
+          versionItem.append(freeTextSpan(version.name));
+          if (version.used_by_character) versionItem.append(' — used by this character');
+          versions.append(versionItem);
+        }
+        history.append(versions);
+        item.append(history);
+      }
+      list.append(item);
     }
     embeddedContent.append(
       element('p', {
-        text: 'This external content will be installed with the character:',
+        text: 'Sent with this character. The link does not include the sender’s name. Nothing is installed until you choose Add to my characters.',
       }),
       list,
     );
@@ -413,7 +440,12 @@ export function createShareControls(
       activePreview = result;
       previewTitle.textContent = result.name;
       renderPreviewDetails(result);
-      renderEmbeddedContent(result.adoptionPlan.incomingContent);
+      renderEmbeddedContent(result.incomingLineages ?? result.adoptionPlan.incomingContent.map(
+        (entry) => ({
+          kind: entry.kind,
+          versions: [{ id: entry.id, name: entry.name, used_by_character: false }],
+        }),
+      ));
       previewPanel.hidden = false;
       addButton.hidden = false;
       announce('Preview ready. Nothing has been imported.');

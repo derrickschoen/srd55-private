@@ -394,6 +394,18 @@ describe('bundled authored-kind installer', () => {
     expect(review.replacements).toEqual([
       expect.objectContaining({
         facts: expect.objectContaining({ character_id: characterId }),
+        rules_changes: expect.arrayContaining([
+          {
+            label: 'Sneak Attack',
+            before: '7d6',
+            after: '13d6',
+          },
+          {
+            label: 'Veteran Reflexes',
+            before: 'Not on the sheet',
+            after: '5 uses',
+          },
+        ]),
         review: [expect.objectContaining({
           candidate_content_key: v3Key,
           candidate_catalog_layer: 'external',

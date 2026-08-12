@@ -127,6 +127,14 @@ describe('lineage-chosen character sharing', () => {
       name: 'Portable Elf',
       catalog_layer: 'external',
     }]);
+    expect(preview.incomingLineages).toEqual([{
+      kind: 'species',
+      versions: [{
+        id: `portable:species:${PORTABLE_ELF_KEY}`,
+        name: 'Portable Elf',
+        used_by_character: true,
+      }],
+    }]);
     const imported = importCharacterShare(target, decoded);
     expect(importedSpeciesSemanticCensus(target, PORTABLE_ELF_KEY)).toBe(9);
     expect(lineagePortabilityProjection(target, imported.characterId)).toEqual(

@@ -21,9 +21,11 @@ import {
 import {
   exportPortableContentBundle,
   localContentReferenceImportNode,
+  portableContentLineages,
   portableContentImportNodes,
   restorePortableContentSupersessions,
 } from '../backup/portable-content';
+import type { ContentImportLineageDisclosure } from '../catalog/content-adoption';
 import { canonicalJson } from '../commands/canonical-json';
 import { sha256 } from '../crypto/sha256';
 import { assertSourceRepeatable } from '../commands/add-source';
@@ -167,6 +169,7 @@ export interface SharePreview {
    * is written.
    */
   readonly includesWrittenText: boolean;
+  readonly incomingLineages: readonly ContentImportLineageDisclosure[];
   readonly adoptionPlan: ContentImportPlan;
 }
 
@@ -1996,6 +1999,9 @@ export function previewCharacterShare(
     planned.targets,
     choices,
   );
+  const usedContentKeys = new Set(
+    shareCatalogReferences(document).map((reference) => reference.contentKey),
+  );
   return {
     name: document.character.name,
     classes: document.classes.map((row) => ({
@@ -2033,6 +2039,9 @@ export function previewCharacterShare(
       document.character.appearance !== undefined ||
       document.character.backstory !== undefined ||
       document.character.notes !== undefined,
+    incomingLineages: document.portableContent === undefined
+      ? Object.freeze([])
+      : portableContentLineages(document.portableContent, usedContentKeys),
     adoptionPlan: planned.plan,
   };
 }

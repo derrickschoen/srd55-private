@@ -44,6 +44,7 @@ import catalogContentArchiveMembers from '../../drizzle/0040_catalog_content_arc
 import contentV2 from '../../drizzle/0041_content_v2.sql?raw';
 import featureValueContributions from '../../drizzle/0042_feature_value_contributions.sql?raw';
 import authoredResourceDisplay from '../../drizzle/0043_authored_resource_display.sql?raw';
+import recipientReplacementChoices from '../../drizzle/0044_recipient_replacement_choices.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -501,6 +502,15 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       'f2fe84c5ef00aa7ad9831bd0e527b34b6f2f1501a44cd6640f3e2e431a64f083',
     resultSchemaChecksum:
       'c3064d2f13d8fe5519ee5f808c226f163e6d4acbc9838692678f83ccd69b4129',
+  }),
+  // S6-08: keeping an older version is a durable recipient decision, scoped
+  // to the exact offered transition and character rather than navigation UI.
+  Object.freeze({
+    id: '0044_recipient_replacement_choices',
+    sql: recipientReplacementChoices,
+    checksum: '4f57c9b0076b917840411e0e9cf134f3e99bbaa2e42a2cb5e895f0b16aaf72e0',
+    resultSchemaChecksum:
+      'b1f047c9a032b37cac26f934fbfe6736e0c7a57b68fdfd84664c1e14c48d777b',
   }),
 ]);
 

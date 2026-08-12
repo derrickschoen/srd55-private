@@ -541,6 +541,16 @@ export const TABLE_SCOPES = {
     share: false,
     backupReference: false,
   },
+  // A recipient-local review decision belongs to the whole database image;
+  // it is neither content being shared nor character backup payload.
+  catalog_content_replacement_choices: {
+    role: 'catalog_registry',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
 
   // --- the spell catalog -------------------------------------------------
   spell_identities: {
@@ -1323,6 +1333,7 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'background_templates',
   'catalog_content_aliases',
   'catalog_content_archive_members',
+  'catalog_content_replacement_choices',
   'catalog_content_drafts',
   'catalog_content_fingerprints',
   'catalog_content_identities',
