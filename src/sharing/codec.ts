@@ -119,6 +119,10 @@ const ROOT_PORTABLE_CONTENT_INDEX = fieldIndex(
   WIRE_SCHEMA.tuples.root.fields,
   'portableContent',
 );
+const ROOT_DOCUMENT_IDENTITY_INDEX = fieldIndex(
+  WIRE_SCHEMA.tuples.root.fields,
+  'documentIdentity',
+);
 
 const CHARACTER_TUPLE_LENGTHS = WIRE_SCHEMA.tuples.character.arities;
 const SHEET_TUPLE_LENGTH = WIRE_SCHEMA.tuples.sheet.arities[0];
@@ -609,6 +613,7 @@ export function shareDocumentToPositional(
         objectToPositional(row, WIRE_SCHEMA.tuples.levelFeatChoice.fields)
       ),
       portableContent: document.portableContent,
+      documentIdentity: document.documentIdentity,
     },
     WIRE_SCHEMA.tuples.root.fields,
   );
@@ -630,6 +635,7 @@ function decodeCurrentWire(input: unknown): CharacterShareDocument {
   const wireExpertiseGrants = root[ROOT_EXPERTISE_GRANTS_INDEX];
   const wireLevelFeatChoices = root[ROOT_LEVEL_FEAT_CHOICES_INDEX];
   const wirePortableContent = root[ROOT_PORTABLE_CONTENT_INDEX];
+  const wireDocumentIdentity = root[ROOT_DOCUMENT_IDENTITY_INDEX];
   const wireAttunementSlots =
     root[ROOT_ATTUNEMENT_SLOTS_INDEX] === null
       ? null
@@ -1032,16 +1038,18 @@ function decodeCurrentWire(input: unknown): CharacterShareDocument {
   if (wirePortableContent !== null) {
     raw.portableContent = wirePortableContent;
   }
+  if (wireDocumentIdentity !== null) {
+    raw.documentIdentity = wireDocumentIdentity;
+  }
   return validateShareDocument(raw);
 }
 
-/** Frozen v17 reference-only projection used for SRD links and v18 fallback. */
+/** Current-wire reference-only projection; character identity still travels. */
 export function shareDocumentToReferencePositional(
   document: CharacterShareDocument,
 ): unknown[] {
   const positional = shareDocumentToPositional(document);
-  positional[ROOT_VERSION_INDEX] = 17;
-  positional.splice(ROOT_PORTABLE_CONTENT_INDEX, 1);
+  positional[ROOT_PORTABLE_CONTENT_INDEX] = null;
   return positional;
 }
 
@@ -1131,7 +1139,9 @@ export function positionalToShareDocument(
     case 14:
     case 15:
     case 16:
-    case 17: {
+    case 17:
+    case 18:
+    case 19: {
       let migrated: unknown = input;
       for (const [from, migration] of Object.entries(MIGRATIONS)) {
         if (Number(from) >= version) {
@@ -1140,9 +1150,7 @@ export function positionalToShareDocument(
       }
       return decodeCurrentWire(migrated);
     }
-    case 18:
-      return decodeCurrentWire(MIGRATIONS[18](input));
-    case 19:
+    case 20:
       return decodeCurrentWire(input);
     default:
       throw new ShareValidationError('version is unsupported.');

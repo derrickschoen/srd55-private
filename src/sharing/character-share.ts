@@ -42,6 +42,8 @@ import {
 } from '../domain/enums';
 import { splitLegacyTraitEffect } from '../rules/legacy-trait-effects';
 import {
+  CHARACTER_SHARE_LOCAL_RESET_TABLES,
+  CHARACTER_SHARE_RECEIPT_TABLE,
   SHARE_TABLES,
   SOURCE_DEFINITION_TABLE,
   type AnyTableName,
@@ -105,6 +107,10 @@ import {
   type WeaponRange,
 } from '../domain/weapon-range';
 import { GUIDED_SPECIES_SOURCE_MARKER } from '../domain/source-markers';
+import {
+  historicalContributionGapForInstalledSubclass,
+  historicalContributionGapForPortable,
+} from '../catalog/historical-contribution-gaps';
 
 /**
  * WHAT THE SHARER CHOOSES TO SEND. Every flag is OPT-IN and every default is
@@ -128,6 +134,24 @@ export interface ShareExportOptions {
 export interface ShareImportResult {
   readonly characterId: number;
   readonly characterName: string;
+  readonly disposition: 'new' | ShareUpdateDisposition;
+}
+
+export type ShareUpdateDisposition = 'update_existing' | 'keep_both';
+
+export interface ShareUpdatePreview {
+  readonly characterId: number;
+  readonly name: string;
+  readonly reviewedCharacterRevision: number;
+  readonly reviewedBaselineRevision: number;
+  readonly receivedDocumentRevision: number;
+  readonly incomingDocumentRevision: number;
+  readonly locallyModified: boolean;
+  readonly classes: readonly {
+    readonly className: string;
+    readonly subclassName: string | null;
+    readonly level: number;
+  }[];
 }
 
 export interface SharePreviewCatalogDisclosure extends CatalogNamedDisclosure {
@@ -174,6 +198,12 @@ export interface SharePreview {
    * is written.
    */
   readonly includesWrittenText: boolean;
+  readonly update: ShareUpdatePreview | null;
+  readonly historicalContributionGaps: readonly {
+    readonly contentName: string;
+    readonly affectedFacts: readonly string[];
+    readonly successorContentKey: string;
+  }[];
   readonly adoptionPlan: ContentImportPlan;
   readonly embeddedContent: readonly import('../catalog/content-adoption').ContentImportDisclosure[];
 }
@@ -217,12 +247,12 @@ const SOURCE_TABLES = SOURCE_DEFINITION_TABLE satisfies Readonly<
 /**
  * THE SHARE PAYLOAD'S TABLE NAMES COME FROM THE CLASSIFICATION.
  *
- * Every table name in this module's SQL is interpolated from `SHARE_TABLES`
- * (character-owned rows) or `SOURCE_TABLES` (catalog lookups) — none is a bare
- * literal. That is what makes `TableScopes.share` a contract rather than a
- * comment: marking a table `share: true` without handling it here does not
- * compile, and naming a table here that is not share-scoped does not compile
- * either.
+ * Portable rows come from `SHARE_TABLES`; recipient-local lineage and stale
+ * journal resets use their separately typed constants; catalog lookups use
+ * `SOURCE_TABLES`. No table name is a bare literal. This makes the scopes a
+ * contract rather than a comment: marking `share: true` without handling it
+ * does not compile, and naming a table here that is not share-scoped does not
+ * compile either.
  *
  * The catalog tables this module reads (`spell_versions`, `spell_identities`,
  * `class_definitions`, `subclass_definitions`) are NOT share-scoped and are
@@ -716,6 +746,29 @@ function spellRows(
     [characterId, characterId, characterId, characterId],
   );
   return new Map(rows.map((row) => [Number(row.id), row]));
+}
+
+function localShareDocumentId(
+  db: DatabaseContext,
+  characterId: number,
+): string {
+  return db.transaction(() => {
+    db.exec(
+      `INSERT OR IGNORE INTO ${CHARACTER_SHARE_RECEIPT_TABLE} (
+         character_id, local_document_id
+       ) VALUES (?, ?)`,
+      [characterId, crypto.randomUUID()],
+    );
+    const documentId = db.scalar<string>(
+      `SELECT local_document_id FROM ${CHARACTER_SHARE_RECEIPT_TABLE}
+       WHERE character_id = ?`,
+      [characterId],
+    );
+    if (documentId === null) {
+      throw new Error('Character share identity could not be persisted.');
+    }
+    return documentId;
+  });
 }
 
 export function exportCharacterShare(
@@ -1266,6 +1319,10 @@ export function exportCharacterShare(
       spellName: String(version.display_name),
     }))
     .sort((left, right) => left.spellKey.localeCompare(right.spellKey));
+  const documentIdentity = Object.freeze({
+    document_id: localShareDocumentId(db, characterId),
+    revision: Number(character.revision),
+  });
   const referenceDocument: CharacterShareDocument = {
     format: CHARACTER_SHARE_FORMAT,
     version: CHARACTER_SHARE_VERSION,
@@ -1329,6 +1386,7 @@ export function exportCharacterShare(
     spellbook,
     preferences,
     overrides,
+    documentIdentity,
     ...(placeholders.length === 0 ? {} : { placeholders }),
     ...(acknowledgements === undefined ? {} : { acknowledgements }),
     ...(loadouts === undefined ? {} : { loadouts }),
@@ -1826,8 +1884,21 @@ function spellNameMap(
 
 const PREVIEW_ROLLBACK = new Error('Rollback successful share preview.');
 
-function shareOperationIdentity(document: CharacterShareDocument): string {
-  return sha256(canonicalJson(document));
+function shareOperationIdentity(
+  db: DatabaseContext,
+  document: CharacterShareDocument,
+): string {
+  const reviewedReceipt = document.documentIdentity === undefined
+    ? null
+    : db.oneRaw(
+        `SELECT receipt.character_id, receipt.received_revision,
+                receipt.baseline_character_revision, character.revision
+         FROM ${CHARACTER_SHARE_RECEIPT_TABLE} AS receipt
+         JOIN characters AS character ON character.id = receipt.character_id
+         WHERE receipt.received_document_id = ?`,
+        [document.documentIdentity.document_id],
+      );
+  return sha256(canonicalJson({ document, reviewedReceipt }));
 }
 
 function targetsForPlan(
@@ -1863,7 +1934,7 @@ function shareImportPlan(
     prepared.nodes,
     choices,
     Object.freeze([]),
-    shareOperationIdentity(document),
+    shareOperationIdentity(db, document),
   );
   return Object.freeze({
     prepared,
@@ -1945,6 +2016,10 @@ function assertImportableWithoutMutation(
   targets: ReadonlyMap<string, ContentKey>,
   choices: ContentImportChoices,
 ): void {
+  const simulatedUpdate = shareUpdatePreview(db, document);
+  const simulatedDisposition = simulatedUpdate === null
+    ? null
+    : 'update_existing' as const;
   // A preview must prove the character can be inserted, but an unresolved
   // key collision has deliberately supplied no user decision. Simulate the
   // existing-local branch only inside this rollback transaction; the returned
@@ -1973,14 +2048,21 @@ function assertImportableWithoutMutation(
         throwCompatibilityIssues(
           assessImportCompatibility(db, document, simulation.targets),
         );
-        insertCharacterShare(db, document, simulation.targets);
+        insertCharacterShare(
+          db,
+          document,
+          simulation.targets,
+          simulatedUpdate,
+          simulatedDisposition,
+          false,
+        );
         throw PREVIEW_ROLLBACK;
       }
       const result = commitContentImport(db, {
         nodes: simulation.prepared.nodes,
         token: simulation.plan.token,
         choices: simulation.choices,
-        operationIdentity: shareOperationIdentity(document),
+        operationIdentity: shareOperationIdentity(db, document),
         afterInstall: (database) => {
           if (document.portableContent !== undefined) {
             restorePortableContentSupersessions(
@@ -1992,7 +2074,14 @@ function assertImportableWithoutMutation(
           throwCompatibilityIssues(
             assessImportCompatibility(database, document, simulation.targets),
           );
-          insertCharacterShare(database, document, simulation.targets);
+          insertCharacterShare(
+            database,
+            document,
+            simulation.targets,
+            simulatedUpdate,
+            simulatedDisposition,
+            false,
+          );
         },
       });
       if (result.kind !== 'committed') {
@@ -2063,6 +2152,8 @@ export function previewCharacterShare(
       document.character.appearance !== undefined ||
       document.character.backstory !== undefined ||
       document.character.notes !== undefined,
+    update: shareUpdatePreview(db, document),
+    historicalContributionGaps: shareHistoricalContributionGaps(db, document),
     adoptionPlan: planned.plan,
     embeddedContent: Object.freeze(
       (document.portableContent?.content ?? []).map((entry) => ({
@@ -2078,15 +2169,190 @@ export function previewCharacterShare(
   };
 }
 
+function shareHistoricalContributionGaps(
+  db: DatabaseContext,
+  document: CharacterShareDocument,
+): SharePreview['historicalContributionGaps'] {
+  const portable = new Map((document.portableContent?.content ?? []).map(
+    (entry) => [`${entry.kind}\u0000${entry.content_key}`, entry],
+  ));
+  const gaps = document.classes.flatMap((entry) => {
+    if (entry.subclassKey === undefined) return [];
+    const portableEntry = portable.get(`subclass\u0000${entry.subclassKey}`);
+    const gap = portableEntry === undefined
+      ? historicalContributionGapForInstalledSubclass(
+          db,
+          entry.subclassKey as ContentKey,
+        )
+      : historicalContributionGapForPortable(portableEntry);
+    return gap === null ? [] : [Object.freeze({
+      contentName: gap.contentName,
+      affectedFacts: gap.affectedFacts,
+      successorContentKey: gap.successorContentKey,
+    })];
+  });
+  return Object.freeze(gaps);
+}
+
+function shareUpdatePreview(
+  db: DatabaseContext,
+  document: CharacterShareDocument,
+): ShareUpdatePreview | null {
+  if (document.documentIdentity === undefined) return null;
+  const receipt = db.oneRaw(
+    `SELECT receipt.character_id, receipt.received_revision,
+            receipt.baseline_character_revision,
+            character.name, character.revision
+     FROM ${CHARACTER_SHARE_RECEIPT_TABLE} AS receipt
+     JOIN characters AS character ON character.id = receipt.character_id
+     WHERE receipt.received_document_id = ?`,
+    [document.documentIdentity.document_id],
+  );
+  if (receipt === null) return null;
+  const characterId = Number(receipt.character_id);
+  const characterRevision = Number(receipt.revision);
+  const baselineRevision = Number(receipt.baseline_character_revision);
+  return Object.freeze({
+    characterId,
+    name: String(receipt.name),
+    reviewedCharacterRevision: characterRevision,
+    reviewedBaselineRevision: baselineRevision,
+    receivedDocumentRevision: Number(receipt.received_revision),
+    incomingDocumentRevision: document.documentIdentity.revision,
+    locallyModified: characterRevision !== baselineRevision,
+    classes: Object.freeze(db.allRaw(
+      `SELECT class.name AS class_name, subclass.name AS subclass_name,
+              level.level
+       FROM ${SHARE_TABLES.character_class_levels} AS level
+       JOIN class_definitions AS class ON class.id = level.class_definition_id
+       LEFT JOIN subclass_definitions AS subclass
+         ON subclass.id = level.subclass_definition_id
+       WHERE level.character_id = ? ORDER BY level.id`,
+      [characterId],
+    ).map((row) => Object.freeze({
+      className: String(row.class_name),
+      subclassName: row.subclass_name === null ? null : String(row.subclass_name),
+      level: Number(row.level),
+    }))),
+  });
+}
+
+/**
+ * Replace only the incoming share scope. The character root is deliberately
+ * retained: deleting it would fire unrelated FK actions such as severing a
+ * party publication. Save points and local sheet adjustments are likewise
+ * recipient-owned and survive. Audit/undo rows address the replaced graph, so
+ * they are reset explicitly instead of being left capable of replaying stale
+ * row ids. Opt-in sections survive when the sender did not include them.
+ */
+function clearSharedCharacterForUpdate(
+  db: DatabaseContext,
+  characterId: number,
+  document: CharacterShareDocument,
+): void {
+  const directTables = [
+    SHARE_TABLES.character_attunement_slots,
+    SHARE_TABLES.character_level_feat_choices,
+    SHARE_TABLES.character_effects,
+    SHARE_TABLES.character_skill_expertise_grants,
+    SHARE_TABLES.character_skill_grants,
+    SHARE_TABLES.spell_selection_slots,
+    SHARE_TABLES.wizard_spellbook_entries,
+    SHARE_TABLES.character_items,
+    SHARE_TABLES.character_weapons,
+    SHARE_TABLES.character_class_levels,
+    SHARE_TABLES.character_source_instances,
+    SHARE_TABLES.character_armor,
+    SHARE_TABLES.character_background,
+    SHARE_TABLES.character_hit_point_rolls,
+    SHARE_TABLES.character_rule_overrides,
+    SHARE_TABLES.character_skill_proficiencies,
+    SHARE_TABLES.character_species_traits,
+    SHARE_TABLES.character_species,
+    SHARE_TABLES.character_spell_preferences,
+  ] as const;
+  for (const table of directTables) {
+    db.exec(`DELETE FROM ${table} WHERE character_id = ?`, [characterId]);
+  }
+  if (document.loadouts !== undefined) {
+    db.exec(
+      `DELETE FROM ${SHARE_TABLES.spell_loadouts} WHERE character_id = ?`,
+      [characterId],
+    );
+  }
+  if (document.acknowledgements !== undefined) {
+    db.exec(
+      `DELETE FROM ${SHARE_TABLES.warning_acknowledgements} WHERE character_id = ?`,
+      [characterId],
+    );
+  }
+  for (const table of CHARACTER_SHARE_LOCAL_RESET_TABLES) {
+    db.exec(`DELETE FROM ${table} WHERE character_id = ?`, [characterId]);
+  }
+}
+
 function insertCharacterShare(
   db: DatabaseContext,
   document: CharacterShareDocument,
   targets: ReadonlyMap<string, ContentKey>,
+  update: ShareUpdatePreview | null = null,
+  disposition: ShareUpdateDisposition | null = null,
+  recordReceipt = true,
 ): ShareImportResult {
   return db.transaction(() => {
     const now = timestamp();
     const c = document.character;
-    const characterId = db.exec(
+    const replacing = update !== null && disposition === 'update_existing';
+    const preservedLocalDocumentId = replacing
+      ? db.scalar<string>(
+          `SELECT local_document_id FROM ${CHARACTER_SHARE_RECEIPT_TABLE}
+           WHERE character_id = ?`,
+          [update.characterId],
+        )
+      : null;
+    let characterId: number;
+    if (replacing) {
+      const replaced = db.exec(
+        `UPDATE characters SET
+           name = ?, strength = ?, dexterity = ?, constitution = ?,
+           intelligence = ?, wisdom = ?, charisma = ?,
+           ability_allocation_method = ?, proficiency_bonus_override = ?,
+           rules_edition_preference = ?, allow_legacy = ?, revision = 0,
+           alignment = COALESCE(?, alignment),
+           appearance = COALESCE(?, appearance),
+           backstory = COALESCE(?, backstory),
+           notes = COALESCE(?, notes), updated_at = ?
+         WHERE id = ? AND revision = ?`,
+        [
+          c.name,
+          c.strength ?? 10,
+          c.dexterity ?? 10,
+          c.constitution ?? 10,
+          c.intelligence ?? 10,
+          c.wisdom ?? 10,
+          c.charisma ?? 10,
+          c.ability_allocation_method ?? null,
+          c.proficiency_bonus_override ?? null,
+          c.rules_edition_preference ?? '2024',
+          c.allow_legacy === true ? 1 : 0,
+          c.alignment ?? null,
+          c.appearance ?? null,
+          c.backstory ?? null,
+          c.notes ?? null,
+          now,
+          update.characterId,
+          update.reviewedCharacterRevision,
+        ],
+      );
+      if (replaced.changes !== 1 || preservedLocalDocumentId === null) {
+        throw new ShareValidationError(
+          'the existing received character changed; preview the share again.',
+        );
+      }
+      clearSharedCharacterForUpdate(db, update.characterId, document);
+      characterId = update.characterId;
+    } else {
+      characterId = db.exec(
       `INSERT INTO characters (
          name, strength, dexterity, constitution, intelligence, wisdom,
          charisma, ability_allocation_method, proficiency_bonus_override,
@@ -2119,7 +2385,8 @@ function insertCharacterShare(
         now,
         now,
       ],
-    ).lastInsertId;
+      ).lastInsertId;
+    }
     const generator = configuredChoiceSlotGenerator(db);
     const rootsByRef = new Map<number, number[]>();
     const classLevelIdsByRef = new Map<number, number>();
@@ -3004,7 +3271,65 @@ function insertCharacterShare(
     // shared character-level seam makes the imported source agree with its
     // chosen material and total level before the transaction can commit.
     reconcileCharacterLevelDependentSources(db, characterId, generator);
-    return { characterId, characterName: c.name };
+    if (document.documentIdentity !== undefined && recordReceipt) {
+      if (replacing) {
+        const refreshed = db.exec(
+          `UPDATE ${CHARACTER_SHARE_RECEIPT_TABLE}
+           SET received_document_id = ?, received_revision = ?,
+               baseline_character_revision = 0, updated_at = ?
+           WHERE character_id = ? AND local_document_id = ?`,
+          [document.documentIdentity.document_id,
+            document.documentIdentity.revision, now, characterId,
+            preservedLocalDocumentId],
+        );
+        if (refreshed.changes !== 1) {
+          throw new ShareValidationError(
+            'the existing received character changed; preview the share again.',
+          );
+        }
+      } else if (update !== null && disposition === 'keep_both') {
+        const released = db.exec(
+          `UPDATE ${CHARACTER_SHARE_RECEIPT_TABLE}
+           SET received_document_id = NULL, received_revision = NULL,
+               baseline_character_revision = NULL, updated_at = ?
+           WHERE character_id = ? AND received_document_id = ?
+             AND baseline_character_revision = ?
+             AND EXISTS (
+               SELECT 1 FROM characters
+               WHERE id = ? AND revision = ?
+             )`,
+          [now, update.characterId, document.documentIdentity.document_id,
+            update.reviewedBaselineRevision, update.characterId,
+            update.reviewedCharacterRevision],
+        );
+        if (released.changes !== 1) {
+          throw new ShareValidationError(
+            'the existing received character changed; preview the share again.',
+          );
+        }
+      }
+      if (!replacing) {
+        db.exec(
+          `INSERT INTO ${CHARACTER_SHARE_RECEIPT_TABLE} (
+             character_id, local_document_id, received_document_id,
+             received_revision, baseline_character_revision, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, 0, ?, ?)`,
+          [
+            characterId,
+            crypto.randomUUID(),
+            document.documentIdentity.document_id,
+            document.documentIdentity.revision,
+            now,
+            now,
+          ],
+        );
+      }
+    }
+    return {
+      characterId,
+      characterName: c.name,
+      disposition: disposition ?? 'new',
+    };
   });
 }
 
@@ -3013,15 +3338,25 @@ export function commitCharacterShareImport(
   input: unknown,
   token: ContentImportPlanToken,
   choices: ContentImportChoices = Object.freeze({}),
+  disposition: ShareUpdateDisposition | null = null,
 ): ShareImportCommitResult {
   const document = validateShareDocument(input);
   const planned = shareImportPlan(db, document, choices);
+  const update = shareUpdatePreview(db, document);
+  if (update !== null && disposition === null) {
+    throw new ShareValidationError(
+      'choose whether to update the existing received character or keep both.',
+    );
+  }
+  if (update === null && disposition !== null) {
+    throw new ShareValidationError('this share does not match a received character.');
+  }
   let imported: ShareImportResult | null = null;
   const committed = commitContentImport(db, {
     nodes: planned.prepared.nodes,
     token,
     choices,
-    operationIdentity: shareOperationIdentity(document),
+    operationIdentity: shareOperationIdentity(db, document),
     afterInstall: (database) => {
       if (document.portableContent !== undefined) {
         restorePortableContentSupersessions(
@@ -3033,7 +3368,13 @@ export function commitCharacterShareImport(
       throwCompatibilityIssues(
         assessImportCompatibility(database, document, planned.targets),
       );
-      imported = insertCharacterShare(database, document, planned.targets);
+      imported = insertCharacterShare(
+        database,
+        document,
+        planned.targets,
+        update,
+        disposition,
+      );
     },
   });
   if (committed.kind !== 'committed') return committed;
@@ -3062,6 +3403,8 @@ export function importCharacterShare(
     db,
     input,
     preview.adoptionPlan.token,
+    Object.freeze({}),
+    null,
   );
   if (committed.kind !== 'committed') {
     throw new ShareValidationError('Share content adoption was refused.');

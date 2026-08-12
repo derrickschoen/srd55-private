@@ -1045,7 +1045,9 @@ function resourceRows(
         id: resource.id,
         label: [{ text: resource.label, free_text: true }],
         value: 'UNKNOWN',
-        detail: plain(`Authored resource maximum unavailable: ${resource.reason}.`),
+        detail: plain(resource.reason === 'historical_contributions_not_recorded'
+          ? 'This imported content predates structured contributions, so the maximum is UNKNOWN. Review its exact successor before upgrading.'
+          : `Authored resource maximum unavailable: ${resource.reason}.`),
       };
     }
     if (resource.status === 'absent') {
@@ -1193,6 +1195,8 @@ function featureValueUnavailableDetail(
       return 'The recorded replacement links are incomplete or contradictory.';
     case 'duplicate_source':
       return 'Two recorded contributions use the same source key.';
+    case 'historical_contributions_not_recorded':
+      return 'This imported content predates structured contributions, so the value is UNKNOWN. Review its exact successor before upgrading.';
     default: {
       const unreachable: never = reason;
       throw new TypeError(

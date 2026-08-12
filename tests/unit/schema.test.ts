@@ -169,6 +169,13 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
     text: ['label', 'snapshot', 'schema_version'],
     numeric: ['created_at', 'updated_at'],
   },
+  character_share_receipts: {
+    integer: [
+      'character_id', 'received_revision', 'baseline_character_revision',
+    ],
+    text: ['local_document_id', 'received_document_id'],
+    numeric: ['created_at', 'updated_at'],
+  },
   character_source_instances: {
     integer: [
       'id', 'character_id', 'parent_source_instance_id',
@@ -986,6 +993,9 @@ const expectedNotNull: Record<string, string[]> = {
   character_operations: ['id', 'character_id', 'operation_uuid', 'expected_revision', 'resulting_revision', 'inverse_command'],
   character_rule_overrides: ['id', 'character_id', 'rule_key', 'value'],
   character_save_points: ['id', 'character_id', 'label', 'snapshot', 'schema_version'],
+  character_share_receipts: [
+    'character_id', 'local_document_id', 'created_at', 'updated_at',
+  ],
   character_source_instances: ['id', 'character_id', 'instance_uuid', 'source_type', 'display_name', 'state'],
   character_spell_preferences: ['id', 'character_id', 'spell_version_id', 'favourite'],
   characters: [
@@ -1217,6 +1227,10 @@ const expectedNamedIndexes: Record<string, string> = {
     'class_martial_arts_dice:class_definition_id,class_level:unique',
   character_rule_overrides_character_id_rule_key_unique:
     'character_rule_overrides:character_id,rule_key:unique',
+  character_share_receipts_local_document_id_unique:
+    'character_share_receipts:local_document_id:unique',
+  character_share_receipts_received_document_id_unique:
+    'character_share_receipts:received_document_id:unique',
   character_class_levels_character_id_class_definition_id_unique:
     'character_class_levels:character_id,class_definition_id:unique',
   character_class_levels_id_character_id_unique:
@@ -1327,6 +1341,7 @@ const expectedUniqueGroups: Record<string, string[]> = {
   ],
   character_operations: ['operation_uuid'],
   character_rule_overrides: ['character_id,rule_key'],
+  character_share_receipts: ['local_document_id', 'received_document_id'],
   character_source_instances: ['id,character_id', 'instance_uuid'],
   character_items: ['id,character_id'],
   character_weapons: ['id,character_id'],
@@ -1455,6 +1470,9 @@ const expectedDefaults: Record<string, Record<string, string>> = {
   character_class_levels: { is_starting_class: 'false', level: '1' },
   character_skill_grants: { state: "'active'" },
   character_skill_expertise_grants: { state: "'active'" },
+  character_share_receipts: {
+    created_at: 'CURRENT_TIMESTAMP', updated_at: 'CURRENT_TIMESTAMP',
+  },
   character_source_instances: { state: "'active'" },
   character_spell_preferences: { favourite: 'false' },
   characters: {
@@ -1672,6 +1690,7 @@ const expectedForeignKeys: Record<string, string[]> = {
   ],
   character_rule_overrides: ['character_id->characters.id|CASCADE'],
   character_save_points: ['character_id->characters.id|CASCADE'],
+  character_share_receipts: ['character_id->characters.id|CASCADE'],
   character_source_instances: [
     'character_id->characters.id|CASCADE',
     'parent_source_instance_id->character_source_instances.id|SET NULL',

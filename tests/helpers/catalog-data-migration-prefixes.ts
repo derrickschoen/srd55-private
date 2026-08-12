@@ -54,6 +54,7 @@ export const RECORDED_SCHEMA_PREFIX_IDS = [
   '0042_feature_value_contributions',
   '0043_authored_resource_display',
   '0044_catalog_content_provenance',
+  '0045_character_share_receipts',
 ] as const;
 
 export const PREFIX_MIGRATION_ID = 'test_catalog_prefix_probe';

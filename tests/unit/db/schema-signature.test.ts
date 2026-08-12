@@ -67,7 +67,7 @@ describe('pre-Drizzle database images', () => {
     // is why the counts are asserted rather than left as a surprise: the
     // fixture still declares the eight Laravel-only tables that were dropped,
     // leaving 30 tables shared with the generated artifact. The generated
-    // artifact now declares 85 tables, so the old image is also short of 55
+    // artifact now declares 86 tables, so the old image is also short of 56
     // `applicationTables` and fails EARLIER, not less.
     //
     // These are COUNTS, not an equivalence proof, and do not claim to be one.
@@ -78,7 +78,7 @@ describe('pre-Drizzle database images', () => {
     const tableCount = (sql: string) =>
       [...sql.matchAll(/CREATE TABLE/g)].length;
     expect(tableCount(preDrizzleSchema)).toBe(38);
-    expect(tableCount(schema)).toBe(85);
+    expect(tableCount(schema)).toBe(86);
   });
 
   it('rejects a pre-Drizzle image at open instead of half-working', async () => {
@@ -95,7 +95,7 @@ describe('pre-Drizzle database images', () => {
     // actually short of. Both paths produce the same recoverable
     // `schema_mismatch` status, which is what the next test depends on.
     expect(boot.detail).toContain(
-      // All 55 current application tables absent from the frozen fixture, in
+      // All 56 current application tables absent from the frozen fixture, in
       // the order the missing-table check reports them.
       'Database image is missing application tables: armor_templates, ' +
         'background_equipment_items, ' +
@@ -113,6 +113,7 @@ describe('pre-Drizzle database images', () => {
         'character_background, ' +
         'character_effects, character_hit_point_rolls, character_items, ' +
         'character_level_feat_choices, ' +
+        'character_share_receipts, ' +
         'character_sheet_adjustments, ' +
         'character_skill_grants, ' +
         'character_skill_expertise_grants, ' +

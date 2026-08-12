@@ -56,6 +56,7 @@ import {
   character_operations,
   character_rule_overrides,
   character_save_points,
+  character_share_receipts,
   character_skill_expertise_grants,
   character_level_feat_choices,
   character_skill_grants,
@@ -160,6 +161,16 @@ export const partyDocumentStatesRelations = relations(
   ({ one }) => ({
     character: one(characters, {
       fields: [party_document_states.character_id],
+      references: [characters.id],
+    }),
+  }),
+);
+
+export const characterShareReceiptsRelations = relations(
+  character_share_receipts,
+  ({ one }) => ({
+    character: one(characters, {
+      fields: [character_share_receipts.character_id],
       references: [characters.id],
     }),
   }),

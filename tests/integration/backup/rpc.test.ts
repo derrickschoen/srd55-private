@@ -115,7 +115,7 @@ describe('character backup adoption RPC', () => {
 describe('library adoption RPC', () => {
   // Measured alone at 2.0s; 2.0 x 1.5 = 3.0s. The 20s guard follows the
   // repository convention for boot-heavy integration tests over 1.5s.
-  it('imports v1 directly and keeps v2 key collisions on preview and commit', async () => {
+  it('imports v1 directly and keeps current key collisions on preview and commit', async () => {
     const harness = await createRpcHarness([]);
     harnesses.push(harness);
     const rpc = new RpcClient(new WorkerTransport(harness.context));
@@ -124,6 +124,7 @@ describe('library adoption RPC', () => {
     const current = portableElfLibraryDocument(harness.context.db);
     const {
       supersessions: _supersessions,
+      lifecycle: _lifecycle,
       content: currentContent,
       ...withoutSupersessions
     } = current;
@@ -147,6 +148,7 @@ describe('library adoption RPC', () => {
       'content',
       'exported_at',
       'format',
+      'lifecycle',
       'selected_content_keys',
       'selection',
       'supersessions',
@@ -160,6 +162,7 @@ describe('library adoption RPC', () => {
       selected_content_keys: [],
       content: [],
       supersessions: [],
+      lifecycle: [],
     });
     await expect(rpc.call('backup.importLibrary', {
       document: legacy,
@@ -181,8 +184,10 @@ describe('library adoption RPC', () => {
     const currentCollision = portableElfLibraryDocument(harness.context.db, {
       oversized: true,
     });
+    const { lifecycle: _collisionLifecycle, ...withoutCollisionLifecycle } =
+      currentCollision;
     const collision: LibraryExportDocument = {
-      ...currentCollision,
+      ...withoutCollisionLifecycle,
       version: 2,
       content: currentCollision.content.map(
         ({ provenance: _provenance, ...entry }) => entry,

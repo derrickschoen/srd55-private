@@ -15,7 +15,9 @@ import {
   libraryContentImportNodes,
   portableImportPlan,
   restorePortableContentSupersessions,
+  restorePortableContentLifecycle,
   validateLibraryDocument,
+  type CurrentLibraryExportDocument,
   type LibraryExportDocument,
   type PortableImportPlan,
 } from './portable-content';
@@ -23,6 +25,7 @@ import { BackupValidationError } from './backup-version';
 
 export interface LibraryImportResult {
   readonly outcomes: Extract<ContentImportCommitResult, { readonly kind: 'committed' }>['outcomes'];
+  readonly lifecycleWasRecorded: boolean;
 }
 
 function libraryImportOperationIdentity(document: LibraryExportDocument): string {
@@ -32,7 +35,7 @@ function libraryImportOperationIdentity(document: LibraryExportDocument): string
 export function exportWholeLibrary(
   db: DatabaseContext,
   exportedAt?: string,
-): LibraryExportDocument {
+): CurrentLibraryExportDocument {
   return exportLibraryDocument(db, undefined, exportedAt);
 }
 
@@ -40,7 +43,7 @@ export function exportSelectedLibraryContent(
   db: DatabaseContext,
   selectedContentKeys: readonly ContentKey[],
   exportedAt?: string,
-): LibraryExportDocument {
+): CurrentLibraryExportDocument {
   return exportLibraryDocument(db, selectedContentKeys, exportedAt);
 }
 
@@ -79,14 +82,23 @@ export function commitLibraryImport(
     operationIdentity,
   );
   const targets = new Map<string, ContentKey>();
+  const lifecycleTargets = new Map<string, ContentKey>();
   for (const [index, node] of nodes.entries()) {
     const entry = document.content[index];
     const outcome = plan.outcomes.find((candidate) => candidate.id === node.id);
     if (
       entry !== undefined && outcome !== undefined &&
-      outcome.kind !== 'refused' && outcome.kind !== 'review'
+      outcome.kind !== 'refused' && (
+        outcome.kind !== 'review' || plan.reviews.some(
+          (review) => review.id === outcome.id && review.selectedChoice !== null,
+        )
+      )
     ) {
-      targets.set(`${entry.kind}\u0000${entry.content_key}`, outcome.contentKey);
+      const marker = `${entry.kind}\u0000${entry.content_key}`;
+      targets.set(marker, outcome.contentKey);
+      if (outcome.kind === 'create') {
+        lifecycleTargets.set(marker, outcome.contentKey);
+      }
     }
   }
   return commitContentImport(db, {
@@ -96,11 +108,14 @@ export function commitLibraryImport(
     operationIdentity,
     precommitPlan: plan,
     planner,
-    afterInstall: (transaction) => restorePortableContentSupersessions(
-      transaction,
-      { content: document.content, supersessions: document.supersessions ?? [] },
-      targets,
-    ),
+    afterInstall: (transaction) => {
+      restorePortableContentSupersessions(
+        transaction,
+        { content: document.content, supersessions: document.supersessions ?? [] },
+        targets,
+      );
+      restorePortableContentLifecycle(transaction, document, lifecycleTargets);
+    },
   });
 }
 
@@ -109,6 +124,7 @@ export function importLibraryDocument(
   db: DatabaseContext,
   document: unknown,
 ): LibraryImportResult {
+  validateLibraryDocument(document);
   const plan = planLibraryImport(db, document);
   if (plan.reviews.length > 0) {
     throw new BackupValidationError(
@@ -119,5 +135,8 @@ export function importLibraryDocument(
   if (result.kind !== 'committed') {
     throw new BackupValidationError(`Library import was ${result.kind}.`);
   }
-  return Object.freeze({ outcomes: result.outcomes });
+  return Object.freeze({
+    outcomes: result.outcomes,
+    lifecycleWasRecorded: document.version === 3,
+  });
 }

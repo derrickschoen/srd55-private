@@ -149,18 +149,19 @@ any late reference, constraint, or write failure rolls everything back.
 ## Portable library document
 
 The library service can export the whole installed external library or an
-explicitly selected subset. UI exposure is intentionally later. Version 2 is a
+explicitly selected subset. UI exposure is intentionally later. Version 3 is a
 different document kind from a character:
 
 ```text
 {
   format: "dnd-multiclass-spells/library",
-  version: 2,
+  version: 3,
   exported_at: "<ISO-8601 timestamp>",
   selection: "all" | "selected",
   selected_content_keys: ["expanded:content.species:marsh-kin"],
   content: [ ...same semantic manifest entries as character v6... ],
-  supersessions: [ ...connected immutable lineage edges... ]
+  supersessions: [ ...connected immutable lineage edges... ],
+  lifecycle: [ ...archive timestamp or null for every carried entry... ]
 }
 ```
 
@@ -169,5 +170,6 @@ dependencies, and connected supersession lineage, but not unrelated creations.
 Whole-library export treats every installed external aggregate as a root.
 Import uses the same plan/token/commit adoption protocol and identity resolver
 as character v6, so repeated imports match existing content rather than
-duplicating it. Historical version 1 remains readable and imports with empty
-lineage.
+duplicating it. Historical versions 1 and 2 remain readable. Missing lineage
+and lifecycle fields receive typed empty/live defaults, and the import UI
+discloses the archive-state assumption.

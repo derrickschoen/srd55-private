@@ -1156,6 +1156,16 @@ const catalogContentProvenance =
     });
   };
 
+const characterShareReceipt =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'character_share_receipts', {
+      character_id: newCharacter(db),
+      local_document_id: uid('local-share-document'),
+      ...values,
+    });
+  };
+
 const catalogContentArchiveMember =
   (values: Values): Write =>
   (db) => {
@@ -1555,6 +1565,60 @@ function authoredCharacterEffectConstraintCases(
 }
 
 const CONSTRAINT_CASES: readonly ConstraintCase[] = [
+  {
+    constraint: 'character_share_receipts_local_document_id_check',
+    rejects: [[
+      'an empty local document id',
+      characterShareReceipt({ local_document_id: '' }),
+    ]],
+    accepts: [[
+      'a non-empty local document id',
+      characterShareReceipt({}),
+    ]],
+  },
+  {
+    constraint: 'character_share_receipts_received_document_id_check',
+    rejects: [[
+      'an empty received document id',
+      characterShareReceipt({
+        received_document_id: '', received_revision: 0,
+        baseline_character_revision: 0,
+      }),
+    ]],
+    accepts: [[
+      'a non-empty received document id',
+      characterShareReceipt({
+        received_document_id: uid('received-share-document'),
+        received_revision: 0, baseline_character_revision: 0,
+      }),
+    ]],
+  },
+  {
+    constraint: 'character_share_receipts_received_pair_check',
+    rejects: [
+      ['an id without its revisions', characterShareReceipt({
+        received_document_id: uid('received-share-document'),
+      })],
+      ['revisions without an id', characterShareReceipt({
+        received_revision: 0, baseline_character_revision: 0,
+      })],
+      ['a negative received revision', characterShareReceipt({
+        received_document_id: uid('received-share-document'),
+        received_revision: -1, baseline_character_revision: 0,
+      })],
+      ['a negative baseline revision', characterShareReceipt({
+        received_document_id: uid('received-share-document'),
+        received_revision: 0, baseline_character_revision: -1,
+      })],
+    ],
+    accepts: [
+      ['an entirely absent received lineage', characterShareReceipt({})],
+      ['a complete received lineage', characterShareReceipt({
+        received_document_id: uid('received-share-document'),
+        received_revision: 1, baseline_character_revision: 2,
+      })],
+    ],
+  },
   {
     constraint: 'catalog_content_identities_archived_at_check',
     rejects: [

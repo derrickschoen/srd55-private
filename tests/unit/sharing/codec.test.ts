@@ -1158,6 +1158,9 @@ const COMPLETE_V18_WIRE = [...COMPLETE_V17_WIRE.slice(0, 1), 18,
 /** S6-12: v19 changes portable-content meaning; this fixture still has none. */
 const COMPLETE_V19_WIRE = [...COMPLETE_V18_WIRE.slice(0, 1), 19,
   ...COMPLETE_V18_WIRE.slice(2)];
+/** S6-05: v20 appends stable document identity; this fixture has none. */
+const COMPLETE_V20_WIRE = [...COMPLETE_V19_WIRE.slice(0, 1), 20,
+  ...COMPLETE_V19_WIRE.slice(2), null];
 
 /** The honest v13 migration: old wire carried neither provenance field. */
 const MIGRATED_COMPLETE_V15_WIRE = [
@@ -1322,9 +1325,10 @@ describe('character-share positional codec', () => {
     );
   });
 
-  it('keeps frozen v18 readable and pins current v19 with the same absent slot', () => {
+  it('keeps frozen v18/v19 readable and pins v20 as the identity append', () => {
     expect(positionalToShareDocument(COMPLETE_V18_WIRE)).toEqual(complete);
-    expect(shareDocumentToPositional(complete)).toEqual(COMPLETE_V19_WIRE);
+    expect(positionalToShareDocument(COMPLETE_V19_WIRE)).toEqual(complete);
+    expect(shareDocumentToPositional(complete)).toEqual(COMPLETE_V20_WIRE);
   });
 
   it('accepts ability_override only in a hand-frozen v13 document', () => {
@@ -1594,7 +1598,7 @@ describe('character-share positional codec', () => {
     const positional = shareDocumentToPositional(minimal);
     expect(positional).toEqual([
       'dnd-multiclass-spells-character-share',
-      19,
+      20,
       [
         'Ten',
         null,
@@ -1666,8 +1670,10 @@ describe('character-share positional codec', () => {
       null,
       // Element 21: HA-12 portable content, absent for this SRD-only link.
       null,
+      // Element 22: S6-05 stable document identity, absent in this manual fixture.
+      null,
     ]);
-    expect(positional).toHaveLength(22);
+    expect(positional).toHaveLength(23);
     expect((positional[2] as unknown[]).length).toBe(15);
     expect((positional[3] as unknown[][])[0]).toHaveLength(8);
     expect((positional[4] as unknown[][])[0]).toHaveLength(7);
@@ -2273,6 +2279,7 @@ describe('a share link generated before the sheet inputs travelled', () => {
     currentWithoutSheet.push(null); // expertiseGrants, absent (GF-2)
     currentWithoutSheet.push(null); // levelFeatChoices, absent (LU-1)
     currentWithoutSheet.push(null); // portableContent, absent (HA-12)
+    currentWithoutSheet.push(null); // documentIdentity, absent (S6-05)
     // NOT re-expressed at v6/v7: v6 appended a sourceRef slot to the weapon
     // tuples and v7 (D69) removed it again, so the current weapon tuple is
     // the v5 shape this migrated root already carries.
@@ -2498,6 +2505,7 @@ describe('a share link generated before weapons travelled', () => {
     baseline.push(null); // expertiseGrants (GF-2)
     baseline.push(null); // levelFeatChoices (LU-1)
     baseline.push(null); // portableContent (HA-12)
+    baseline.push(null); // documentIdentity (S6-05)
     const decodedBaseline = positionalToShareDocument(baseline);
 
     const withNullTupleOrigin = [...baseline];
@@ -2539,6 +2547,7 @@ describe('a share link generated before weapons travelled', () => {
     withWeapons.push(null); // expertiseGrants (GF-2)
     withWeapons.push(null); // levelFeatChoices (LU-1)
     withWeapons.push(null); // portableContent (HA-12)
+    withWeapons.push(null); // documentIdentity (S6-05)
     const decoded = positionalToShareDocument(withWeapons);
     expect(decoded.weapons).toEqual([]);
     expect(decoded).not.toHaveProperty('species');
@@ -2567,6 +2576,7 @@ describe('a share link generated before weapons travelled', () => {
     withOrigin.push(null); // expertiseGrants (GF-2)
     withOrigin.push(null); // levelFeatChoices (LU-1)
     withOrigin.push(null); // portableContent (HA-12)
+    withOrigin.push(null); // documentIdentity (S6-05)
     const decoded = positionalToShareDocument(withOrigin);
     expect(decoded.weapons).toEqual([]);
     expect(decoded).not.toHaveProperty('armor');
@@ -2687,6 +2697,7 @@ describe('a share link generated before a character note could travel', () => {
     migratedRoot.push(null); // expertiseGrants (GF-2)
     migratedRoot.push(null); // levelFeatChoices (LU-1)
     migratedRoot.push(null); // portableContent (HA-12)
+    migratedRoot.push(null); // documentIdentity (S6-05)
     const decoded = positionalToShareDocument(migratedRoot);
     expect(decoded.character.notes).toBe(
       'Sent on purpose, by a sharer who opted in.',

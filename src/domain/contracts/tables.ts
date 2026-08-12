@@ -182,6 +182,14 @@ export const TABLE_SCOPES = {
     share: false,
     backupReference: false,
   },
+  character_share_receipts: {
+    role: 'character_owned',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
   character_class_levels: {
     role: 'character_owned',
     snapshot: true,
@@ -1351,6 +1359,7 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'character_operations',
   'character_rule_overrides',
   'character_save_points',
+  'character_share_receipts',
   'character_sheet_adjustments',
   'character_skill_grants',
   'character_skill_expertise_grants',
@@ -1681,6 +1690,16 @@ export const SHARE_TABLES: { readonly [N in ShareTable]: N } = {
   character_attunement_slots: 'character_attunement_slots',
   character_level_feat_choices: 'character_level_feat_choices',
 };
+
+/** Recipient-local share lineage. It participates in sharing without travelling. */
+export const CHARACTER_SHARE_RECEIPT_TABLE =
+  'character_share_receipts' satisfies AnyTableName;
+
+/** Local journals invalidated when incoming share-owned rows are replaced. */
+export const CHARACTER_SHARE_LOCAL_RESET_TABLES = [
+  'change_log',
+  'character_operations',
+] as const satisfies readonly AnyTableName[];
 
 /**
  * The polymorphic source maps stay MAPS, constrained on both axes.

@@ -128,6 +128,11 @@ function portableElfLibraryDocument(
       },
     }],
     supersessions: [],
+    lifecycle: [{
+      content_kind: 'species',
+      content_key: input.contentKey,
+      archived_at: null,
+    }],
   };
 }
 
@@ -172,7 +177,12 @@ async function buildRecipientFixture(
     oversized: false,
   });
   const legacyContent = library.content.map(({ provenance: _provenance, ...entry }) => entry);
-  const { supersessions: _supersessions, content: _content, ...withoutSupersessions } = library;
+  const {
+    supersessions: _supersessions,
+    lifecycle: _lifecycle,
+    content: _content,
+    ...withoutSupersessions
+  } = library;
   const legacy: LibraryExportDocument = {
     ...withoutSupersessions,
     version: 1,
@@ -209,7 +219,7 @@ async function downloadBytes(
   return Buffer.concat(chunks);
 }
 
-test('v19 names embedded Portable Elf before direct commit and omits the line for SRD-only shares', async ({
+test('v20 names embedded Portable Elf before direct commit and omits the line for SRD-only shares', async ({
   browser,
   page,
 }) => {
@@ -269,7 +279,7 @@ test('v19 names embedded Portable Elf before direct commit and omits the line fo
   const portableWire = JSON.parse(gunzipSync(
     Buffer.from(new URL(portableLink).hash.slice(1), 'base64url'),
   ).toString('utf8')) as unknown[];
-  expect(portableWire[1]).toBe(19);
+  expect(portableWire[1]).toBe(20);
 
   await page.getByRole('link', { name: 'Create a character' }).click();
   await page.getByRole('button', { name: /^Wizard\b/u }).click();
@@ -426,7 +436,7 @@ test('v17 refusal links through library adoption to the exact restored choice', 
   const positional = JSON.parse(gunzipSync(
     Buffer.from(new URL(link).hash.slice(1), 'base64url'),
   ).toString('utf8')) as unknown[];
-  expect(positional[1]).toBe(17);
+  expect(positional[1]).toBe(20);
 
   const profile = await browser.newContext();
   try {
@@ -607,7 +617,8 @@ test('the library control accepts v1 and both JSON controls reject the other kin
   });
   await page.getByRole('button', { name: 'Import library' }).click();
   await expect(page.locator('.transfer-status')).toHaveText(
-    'Library imported: 1 added to your library, 0 matched existing.',
+    'Library imported: 1 added to your library, 0 matched existing. ' +
+    'This older export did not record archive state; carried entries were restored live.',
   );
 
   await page.getByLabel('Catalog JSON').setInputFiles({
@@ -662,6 +673,7 @@ test('whole-library download restores authored and imported content into a fresh
     selected_content_keys: [],
     content: [],
     supersessions: [],
+    lifecycle: [],
   });
 
   await page.goto('/homebrew');

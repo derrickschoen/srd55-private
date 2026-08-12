@@ -7,6 +7,7 @@ import type { CatalogClient } from '../../../catalog/client';
 import { createCatalogClient } from '../../../catalog/client';
 import type {
   CharacterBackupDocument,
+  CharacterImportResult,
 } from '../../../backup/character-backup';
 import type { BackupClient } from '../../../backup/client';
 import { createBackupClient } from '../../../backup/client';
@@ -95,6 +96,27 @@ function safeFilename(name: string): string {
     .replace(/^-+|-+$/g, '')
     .toLowerCase();
   return normalized || 'character';
+}
+
+function characterImportMessage(result: CharacterImportResult): string {
+  const gaps = result.notices.filter((notice) =>
+    notice.kind === 'historical_contributions_not_recorded'
+  );
+  if (gaps.length === 0) return `Character imported as #${String(result.characterId)}.`;
+  const facts = [...new Set(gaps.flatMap((notice) => notice.content.affectedFacts))];
+  return `Character imported as #${String(result.characterId)}. ` +
+    `UNKNOWN values: ${facts.join(', ')}. This backup predates structured ` +
+    'contributions; review the named successor before upgrading.';
+}
+
+function historicalLibraryLifecycleDisclosure(document: unknown): string {
+  if (document === null || typeof document !== 'object' || Array.isArray(document)) {
+    return '';
+  }
+  const version = Reflect.get(document, 'version');
+  return version === 1 || version === 2
+    ? ' This older export did not record archive state; carried entries were restored live.'
+    : '';
 }
 
 function saveBrowserFile(file: SavedFile): void {
@@ -535,7 +557,8 @@ export function createImportBackupControls(
           await options.onPersistedChange();
           libraryInput.value = '';
           return importSuccess(
-            `Library imported: ${librarySummary(result.outcomes)}.`,
+            `Library imported: ${librarySummary(result.outcomes)}.` +
+              historicalLibraryLifecycleDisclosure(prepared.document),
           );
         }
         adoptionCleanup?.();
@@ -552,7 +575,8 @@ export function createImportBackupControls(
             await options.onPersistedChange();
             libraryInput.value = '';
             announce(importSuccess(
-              `Library imported: ${librarySummary(result.outcomes)}.`,
+              `Library imported: ${librarySummary(result.outcomes)}.` +
+                historicalLibraryLifecycleDisclosure(prepared.document),
             ));
           },
           onCancel: () => announce('Library import cancelled.'),
@@ -733,7 +757,7 @@ export function createImportBackupControls(
               >;
               await options.onPersistedChange();
               characterInput.value = '';
-              announce(`Character imported as #${committed.result.characterId}.`);
+              announce(characterImportMessage(committed.result));
             },
             onCancel: () => announce('Character import cancelled.'),
           });
@@ -757,7 +781,7 @@ export function createImportBackupControls(
           }
           await options.onPersistedChange();
           characterInput.value = '';
-          return `Character imported as #${committed.result.characterId}.`;
+          return characterImportMessage(committed.result);
         }
         showAdoptionDialog(prepared.plan);
         return prepared.plan.reviews.length === 0

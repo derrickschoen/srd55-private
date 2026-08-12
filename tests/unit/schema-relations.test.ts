@@ -25,7 +25,7 @@ import schemaSql from '../../src/db/schema.sql?raw';
  *
  * Comparison is by CONSTRAINT SET, not row count. `PRAGMA foreign_key_list`
  * returns one row per column, so the 22 composite foreign keys contribute two
- * rows each: 110 constraints, 132 rows. Counting rows would let a composite key
+ * rows each: 111 constraints, 133 rows. Counting rows would let a composite key
  * degrade into two single-column keys unnoticed — which would silently drop
  * exactly the cross-character and wrong-class protections those keys exist for.
  */
@@ -133,7 +133,7 @@ afterAll(() => {
 });
 
 describe('declared relations match the foreign keys', () => {
-  it('budgets 110 constraints across 132 PRAGMA rows', () => {
+  it('budgets 111 constraints across 133 PRAGMA rows', () => {
     const tables = db
       .selectValues(
         `SELECT name FROM sqlite_schema
@@ -244,9 +244,9 @@ describe('declared relations match the foreign keys', () => {
     // composite owner edge. Those three constraints occupy six PRAGMA rows.
     // Migration 0042 adds one owner FK for each contribution table. S6-12's
     // provenance row adds one composite registry-identity edge: one constraint
-    // across two PRAGMA rows.
-    expect(constraintEdges(db)).toHaveLength(110);
-    expect(rowCount).toBe(132);
+    // across two PRAGMA rows. S6-05's receipt adds one character edge/row.
+    expect(constraintEdges(db)).toHaveLength(111);
+    expect(rowCount).toBe(133);
   });
 
   it('declares a relation for every foreign key, and a foreign key for every relation', () => {
