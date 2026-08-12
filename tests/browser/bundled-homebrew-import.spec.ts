@@ -6,6 +6,10 @@ interface CharacterRow {
   readonly revision: number;
 }
 
+interface CommandResult {
+  readonly revision: number;
+}
+
 interface BuildReportResult {
   readonly caster: {
     readonly caster_level: number;
@@ -322,8 +326,6 @@ test('Veteran v3 sheet values and the v2-to-v3 replacement review are visible', 
   await page.evaluate(() => window.staticApp.reset());
   await page.reload();
   await globalReady(page);
-  await page.getByRole('link', { name: 'Homebrew library', exact: true }).click();
-  await homebrewReady(page);
   await importBundledHomebrew(
     page,
     'Bundled homebrew imported: 3 published, 0 matched existing.',
@@ -359,7 +361,7 @@ test('Veteran v3 sheet values and the v2-to-v3 replacement review are visible', 
         name,
         class_content_key: rogue.content_key,
       });
-      return window.appRpc.call<
+      await window.appRpc.call<
         {
           readonly character_id: number;
           readonly method: 'manual';
@@ -367,7 +369,7 @@ test('Veteran v3 sheet values and the v2-to-v3 replacement review are visible', 
           readonly operation_uuid: string;
           readonly expected_revision: number;
         },
-        CharacterRow
+        unknown
       >('queries.characters.allocateAbilities', {
         character_id: created.id,
         method: 'manual',
@@ -382,34 +384,44 @@ test('Veteran v3 sheet values and the v2-to-v3 replacement review are visible', 
         operation_uuid: crypto.randomUUID(),
         expected_revision: created.revision,
       });
+      return window.appRpc.call<
+        { readonly character_id: number },
+        CharacterRow
+      >('queries.characters.get', { character_id: created.id });
     };
     const advance = async (
       current: CharacterRow,
       targetLevel: number,
       subclassContentKey?: string,
-    ): Promise<CharacterRow> => window.appRpc.call('commands.execute', {
-      character_id: current.id,
-      operation_uuid: crypto.randomUUID(),
-      expected_revision: current.revision,
-      command: {
-        type: 'level_up_class',
-        class_definition_id: classDefinitionId,
-        target_level: targetLevel,
-        ...(subclassContentKey === undefined
-          ? {}
-          : { subclass_content_key: subclassContentKey }),
-        ...([4, 8, 10, 12].includes(targetLevel)
-          ? {
-              feat_choice: {
-                kind: 'feat',
-                feat_content_key: '2024:feat:ability-score-improvement',
-                config: {},
-                ability_increases: [{ ability: 'dexterity', amount: 2 }],
-              },
-            }
-          : {}),
-      },
-    });
+    ): Promise<CharacterRow> => {
+      const result = await window.appRpc.call<Record<string, unknown>, CommandResult>(
+        'commands.execute',
+        {
+          character_id: current.id,
+          operation_uuid: crypto.randomUUID(),
+          expected_revision: current.revision,
+          command: {
+            type: 'level_up_class',
+            class_definition_id: classDefinitionId,
+            target_level: targetLevel,
+            ...(subclassContentKey === undefined
+              ? {}
+              : { subclass_content_key: subclassContentKey }),
+            ...([4, 8, 10, 12].includes(targetLevel)
+              ? {
+                  feat_choice: {
+                    kind: 'feat',
+                    feat_content_key: '2024:feat:ability-score-improvement',
+                    config: {},
+                    ability_increases: [{ ability: 'dexterity', amount: 2 }],
+                  },
+                }
+              : {}),
+          },
+        },
+      );
+      return { id: current.id, revision: result.revision };
+    };
     let current = await create('Veteran v3 sheet oracle');
     for (let level = 2; level <= 8; level += 1) {
       current = await advance(current, level, level === 3 ? v3Key : undefined);
@@ -430,7 +442,7 @@ test('Veteran v3 sheet values and the v2-to-v3 replacement review are visible', 
   await page.goto(`/characters/${String(characters.v3CharacterId)}/sheet`);
   const sneakAttack = page.locator('[data-sheet-id="feature-value:sneak_attack"]');
   await expect(sneakAttack.locator('[data-sheet-value="feature-value:sneak_attack"]'))
-    .toHaveText('5d6');
+    .toHaveText('4d6 + 1d6 (Deeper Cuts)');
   await expect(sneakAttack).toContainText('Deeper Cuts contributes 1d6.');
 
   await page.evaluate(async (fixture) => {
@@ -438,7 +450,7 @@ test('Veteran v3 sheet values and the v2-to-v3 replacement review are visible', 
     for (let level = 9; level <= 13; level += 1) {
       const updated = await window.appRpc.call<
         Record<string, unknown>,
-        CharacterRow
+        CommandResult
       >('commands.execute', {
         character_id: fixture.characterId,
         operation_uuid: crypto.randomUUID(),
@@ -468,7 +480,7 @@ test('Veteran v3 sheet values and the v2-to-v3 replacement review are visible', 
   });
   await page.reload();
   await expect(sneakAttack.locator('[data-sheet-value="feature-value:sneak_attack"]'))
-    .toHaveText('13d6');
+    .toHaveText("7d6 + 6d6 (Veteran's Strike)");
   await expect(sneakAttack).toContainText("Veteran's Strike contributes 6d6.");
   await expect(sneakAttack).toContainText(
     'Deeper Cuts would contribute 1d6 but is superseded.',

@@ -838,7 +838,7 @@ test('whole-library download restores authored and imported content into a fresh
   });
   await page.getByRole('button', { name: 'Import library' }).click();
   await expect(page.locator('.transfer-status')).toHaveText(
-    'Library imported: 7 published, 0 matched existing.',
+    'Library imported: 9 published, 0 matched existing.',
   );
 
   const restored = await page.evaluate((speciesName) => {
