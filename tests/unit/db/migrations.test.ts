@@ -1790,6 +1790,76 @@ describe('database migration chain', () => {
     }
   });
 
+  it('0043 preserves contribution rows and backfills authored resource display config', async () => {
+    const beforeResourceDisplay = DATABASE_MIGRATIONS
+      .slice(0, DATABASE_MIGRATIONS.findIndex(
+        (entry) => entry.id === '0043_authored_resource_display',
+      ))
+      .map((entry) => entry.sql)
+      .join('\n');
+    const storage = await storageHolding(`${beforeResourceDisplay}
+      INSERT INTO catalog_content_identities (
+        content_key, content_kind, key_kind, catalog_layer, normalized_name
+      ) VALUES
+        ('expanded:migration.fixture:class', 'class', 'asserted', 'external', 'migration class'),
+        ('expanded:migration.fixture:subclass', 'subclass', 'asserted', 'external', 'migration subclass');
+      INSERT INTO class_definitions (
+        id, content_key, name, rules_edition, progression_type
+      ) VALUES (911, 'expanded:migration.fixture:class', 'Migration Class', 'expanded', 'none');
+      INSERT INTO subclass_definitions (
+        id, content_key, class_definition_id, name, rules_edition
+      ) VALUES (912, 'expanded:migration.fixture:subclass', 911, 'Migration Subclass', 'expanded');
+      INSERT INTO subclass_features (
+        id, subclass_definition_id, class_level, sort_order, name, description
+      ) VALUES (913, 912, 3, 1, 'Migration Feature', 'Preserved feature.');
+      INSERT INTO class_feature_value_contributions (
+        id, class_definition_id, contribution_key, label, target_kind,
+        target_key, op, active_from_level, active_to_level, value_json
+      ) VALUES (914, 911, 'focus', 'Focus Pool', 'resource_maximum',
+                'expanded:migration.fixture:class' || char(0) || 'focus',
+                'add', 1, 20, '{"kind":"const","amount":1}');
+      INSERT INTO subclass_feature_value_contributions (
+        id, subclass_feature_id, contribution_key, label, target_kind,
+        target_key, op, active_from_level, active_to_level, value_json
+      ) VALUES (915, 913, 'dice', 'Migration Dice', 'feature_dice_count',
+                'sneak_attack', 'add', 3, 20, '{"kind":"const","amount":1}');`);
+    const lifecycle = new DatabaseLifecycle(
+      sqlite3,
+      storage,
+      schema,
+      () => undefined,
+      DATABASE_MIGRATIONS,
+    );
+    lifecycle.open();
+    try {
+      expect(lifecycle.database.allRaw(
+        `SELECT id, contribution_key, resource_display_label,
+                resource_marking_shape
+           FROM class_feature_value_contributions
+           UNION ALL
+         SELECT id, contribution_key, resource_display_label,
+                resource_marking_shape
+           FROM subclass_feature_value_contributions
+          ORDER BY id`,
+      )).toEqual([
+        {
+          id: 914,
+          contribution_key: 'focus',
+          resource_display_label: 'Focus Pool',
+          resource_marking_shape: 'boxes',
+        },
+        {
+          id: 915,
+          contribution_key: 'dice',
+          resource_display_label: null,
+          resource_marking_shape: null,
+        },
+      ]);
+    } finally {
+      lifecycle.close();
+    }
+  });
+
   it('Q4 rejects General background keys and reverse category mutation', () => {
     const database = new sqlite3.oo1.DB(':memory:', 'c');
     try {

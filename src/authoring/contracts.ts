@@ -15,6 +15,14 @@ import type {
   ContentKey,
 } from '../domain/ids';
 import type { JsonValue } from '../domain/models';
+import type { ContributionKey, SourceRef } from '../domain/computed';
+import type {
+  AuthoredResourceRef,
+  FeatureValueKey,
+  FeatureValueTarget,
+} from '../domain/feature-values';
+import type { ClassLevel } from '../domain/ids';
+import type { ValueExpression } from '../domain/value-expression';
 import type {
   CanonicalContentIdentityJson,
   ContentFingerprintDigest,
@@ -202,6 +210,63 @@ export interface SubclassAuthoringDraftFeature {
   readonly name: string;
   readonly description: string;
   readonly effects: readonly AuthoringDraftFeatureEffect[];
+  /** Absent on pre-E4 draft documents; the codec preserves that distinction. */
+  readonly contributions?: readonly SubclassAuthoringDraftContribution[];
+}
+
+export type SubclassAuthoringDraftContributionValue =
+  | {
+      readonly kind: 'constant';
+      readonly amount: number | null;
+    }
+  | {
+      readonly kind: 'class_level_scale';
+      readonly multiply: number | null;
+      readonly divide: number | null;
+      readonly round: 'floor' | 'ceiling' | null;
+    }
+  | {
+      readonly kind: 'breakpoint_table';
+      readonly rows: readonly {
+        readonly draft_item_uuid: HomebrewDraftItemUuid;
+        readonly from: CharacterLevel | null;
+        readonly to: CharacterLevel | null;
+        readonly amount: number | null;
+      }[];
+    }
+  | {
+      /** Wider imported grammar is retained but intentionally not form-editable. */
+      readonly kind: 'preserved';
+      readonly expression: ValueExpression;
+    };
+
+export type SubclassAuthoringDraftContributionTarget =
+  | {
+      readonly kind: 'feature_dice_count';
+      readonly key: FeatureValueKey | null;
+    }
+  | {
+      readonly kind: 'resource_maximum';
+      readonly display_label: string;
+      readonly marking_shape: AuthoredResourceRef['marking_shape'] | null;
+    }
+  | {
+      readonly kind: 'preserved';
+      readonly target: FeatureValueTarget;
+    };
+
+export interface SubclassAuthoringDraftContribution {
+  readonly kind: 'feature_value_contribution';
+  readonly draft_item_uuid: HomebrewDraftItemUuid;
+  readonly contribution_key: string;
+  readonly label: string;
+  readonly target: SubclassAuthoringDraftContributionTarget;
+  readonly op: 'add' | null;
+  readonly active_from_level: CharacterLevel | null;
+  readonly active_to_level: CharacterLevel | null;
+  readonly value: SubclassAuthoringDraftContributionValue;
+  /** Portable publication qualifies this aggregate-local key with content_key. */
+  readonly supersedes_contribution_key: string | null;
 }
 
 export interface SubclassAuthoringDraft
@@ -373,6 +438,20 @@ export interface SubclassContentFeature {
   readonly name: string;
   readonly description: string;
   readonly effects: readonly AuthoringFeatureEffect[];
+  /** Optional keeps pre-E4 portable aggregates structurally valid unchanged. */
+  readonly contributions?: readonly SubclassFeatureValueContribution[];
+}
+
+export interface SubclassFeatureValueContribution {
+  readonly kind: 'feature_value_contribution';
+  readonly contribution_key: ContributionKey;
+  readonly label: string;
+  readonly target: FeatureValueTarget;
+  readonly op: 'add';
+  readonly active_from_level: ClassLevel;
+  readonly active_to_level: ClassLevel;
+  readonly value: ValueExpression;
+  readonly supersedes?: Extract<SourceRef, { readonly kind: 'contribution' }>;
 }
 
 export interface SubclassContentAggregate

@@ -5,9 +5,11 @@ import type {
   SpeciesContentAggregate,
   SpeciesContentTrait,
   SubclassContentAggregate,
+  SubclassFeatureValueContribution,
 } from '../authoring/contracts';
 import type { DamageType, DomainSourceType, GrantRuleKind } from '../domain/enums';
 import type { JsonValue } from '../domain/models';
+import type { AuthoredResourceRef } from '../domain/feature-values';
 import type {
   AuthoringCharacterEffect,
   AuthoringFeatureEffect,
@@ -107,7 +109,8 @@ export type AuthoredCreationOwnedTable =
   | 'subclass_definitions'
   | 'subclass_progressions'
   | 'subclass_features'
-  | 'subclass_feature_effects';
+  | 'subclass_feature_effects'
+  | 'subclass_feature_value_contributions';
 
 export interface AuthoredProjectorContractV1<
   K extends AuthoredProjectorKind,
@@ -131,6 +134,32 @@ type CanonicalizedEffect<E extends AuthoringCharacterEffect | AuthoringFeatureEf
 
 export type CanonicalCharacterEffectV1 = CanonicalizedEffect<AuthoringCharacterEffect>;
 export type CanonicalFeatureEffectV1 = CanonicalizedEffect<AuthoringFeatureEffect>;
+export type CanonicalFeatureValueContributionV1 =
+  Omit<SubclassFeatureValueContribution, 'label' | 'target'> & {
+    readonly label: CanonicalRuleText;
+    readonly target:
+      | Extract<
+          SubclassFeatureValueContribution['target'],
+          { readonly kind: 'feature_dice_count' }
+        >
+      | {
+          readonly kind: 'resource_maximum';
+          readonly resource:
+            | Exclude<
+                Extract<
+                  SubclassFeatureValueContribution['target'],
+                  { readonly kind: 'resource_maximum' }
+                >['resource'],
+                AuthoredResourceRef
+              >
+            | (Omit<AuthoredResourceRef, 'display_label'> & {
+                readonly display_label: CanonicalRuleText;
+              });
+        };
+  };
+export type CanonicalSubclassFeatureEffectV1 =
+  | CanonicalFeatureEffectV1
+  | CanonicalFeatureValueContributionV1;
 
 export type SpeciesProjectorCharacterEffectV1 =
   | Exclude<AuthoringCharacterEffect, { readonly kind: 'damage_resistance' }>
@@ -277,7 +306,7 @@ export interface CanonicalSubclassFeatureV1 {
   readonly class_level: SubclassContentAggregate['features'][number]['class_level'];
   readonly name: string;
   readonly description: CanonicalRuleText;
-  readonly effects: ContentIdentitySequence<CanonicalFeatureEffectV1>;
+  readonly effects: ContentIdentitySequence<CanonicalSubclassFeatureEffectV1>;
 }
 
 export interface SubclassProjectorPayloadV1 {
@@ -340,6 +369,7 @@ export const AUTHORED_PROJECTOR_INVENTORY_V1 = {
       'subclass_progressions',
       'subclass_features',
       'subclass_feature_effects',
+      'subclass_feature_value_contributions',
     ],
     outboundReferenceRoles: [
       'grant.fixed_spell',

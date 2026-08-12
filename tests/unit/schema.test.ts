@@ -659,7 +659,8 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
     ],
     text: [
       'contribution_key', 'label', 'target_kind', 'target_key', 'op',
-      'value_json', 'supersedes_ref',
+      'value_json', 'supersedes_ref', 'resource_display_label',
+      'resource_marking_shape',
     ],
     numeric: ['created_at', 'updated_at'],
   },
@@ -693,7 +694,8 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
     ],
     text: [
       'contribution_key', 'label', 'target_kind', 'target_key', 'op',
-      'value_json', 'supersedes_ref',
+      'value_json', 'supersedes_ref', 'resource_display_label',
+      'resource_marking_shape',
     ],
     numeric: ['created_at', 'updated_at'],
   },

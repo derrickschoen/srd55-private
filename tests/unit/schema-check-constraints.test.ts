@@ -1247,7 +1247,10 @@ function featureValueContributionConstraintCases(
     {
       constraint: `${table}_target_kind_check`,
       rejects: [['an unknown target kind', contribution({ target_kind: 'spell_damage' })]],
-      accepts: [['a resource maximum target', contribution({ target_kind: 'resource_maximum', target_key: 'focus_points' })]],
+      accepts: [['a resource maximum target', contribution({
+        target_kind: 'resource_maximum', target_key: 'focus_points',
+        resource_display_label: 'Focus Points', resource_marking_shape: 'boxes',
+      })]],
     },
     {
       constraint: `${table}_op_check`,
@@ -1258,13 +1261,18 @@ function featureValueContributionConstraintCases(
       constraint: `${table}_target_payload_check`,
       rejects: [
         ['an unknown feature dice target', contribution({ target_key: 'superiority_dice' })],
-        ['an empty resource key', contribution({ target_kind: 'resource_maximum', target_key: '' })],
-        ['a resource key beyond the storage bound', contribution({ target_kind: 'resource_maximum', target_key: 'r'.repeat(201) })],
+        ['an empty resource key', contribution({ target_kind: 'resource_maximum', target_key: '', resource_display_label: 'Focus Points', resource_marking_shape: 'boxes' })],
+        ['a resource key beyond the storage bound', contribution({ target_kind: 'resource_maximum', target_key: 'r'.repeat(201), resource_display_label: 'Focus Points', resource_marking_shape: 'boxes' })],
+        ['a resource without a display label', contribution({ target_kind: 'resource_maximum', target_key: 'focus_points', resource_display_label: null, resource_marking_shape: 'boxes' })],
+        ['an empty resource display label', contribution({ target_kind: 'resource_maximum', target_key: 'focus_points', resource_display_label: '', resource_marking_shape: 'boxes' })],
+        ['a resource display label beyond the storage bound', contribution({ target_kind: 'resource_maximum', target_key: 'focus_points', resource_display_label: 'l'.repeat(201), resource_marking_shape: 'boxes' })],
+        ['an unknown resource marking shape', contribution({ target_kind: 'resource_maximum', target_key: 'focus_points', resource_display_label: 'Focus Points', resource_marking_shape: 'circles' })],
+        ['resource display fields on feature dice', contribution({ resource_display_label: 'Sneak Dice', resource_marking_shape: 'boxes' })],
       ],
       accepts: [
         ['Sneak Attack dice', contribution({})],
-        ['a bounded resource key', contribution({ target_kind: 'resource_maximum', target_key: 'r'.repeat(200) })],
-        ['a Unicode resource key at the code-point bound', contribution({ target_kind: 'resource_maximum', target_key: '🗝'.repeat(200) })],
+        ['a bounded resource key', contribution({ target_kind: 'resource_maximum', target_key: 'r'.repeat(200), resource_display_label: 'Focus Points', resource_marking_shape: 'boxes' })],
+        ['a Unicode resource key at the code-point bound', contribution({ target_kind: 'resource_maximum', target_key: '🗝'.repeat(200), resource_display_label: '🗝'.repeat(200), resource_marking_shape: 'remaining' })],
       ],
     },
     {

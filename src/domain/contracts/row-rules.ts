@@ -426,9 +426,13 @@ export function featureValueContributionInvariantError(
       throw new TypeError('active level band must be ordered within 1 through 20.');
     }
     if (row.target_kind === 'feature_dice_count') {
-      if (row.target_key !== 'sneak_attack' || row.op !== 'add') {
+      if (
+        row.target_key !== 'sneak_attack' || row.op !== 'add' ||
+        row.resource_display_label !== null ||
+        row.resource_marking_shape !== null
+      ) {
         throw new TypeError(
-          'feature_dice_count requires target_key sneak_attack and op add.',
+          'feature_dice_count requires target_key sneak_attack, op add, and no resource display configuration.',
         );
       }
     } else if (row.target_kind === 'resource_maximum') {
@@ -437,10 +441,16 @@ export function featureValueContributionInvariantError(
         storageCodePointLength(row.target_key) < 1 ||
         storageCodePointLength(row.target_key) >
           FEATURE_VALUE_CONTRIBUTION_LIMITS.keyCodePoints ||
-        row.op !== 'add'
+        row.op !== 'add' ||
+        typeof row.resource_display_label !== 'string' ||
+        storageCodePointLength(row.resource_display_label) < 1 ||
+        storageCodePointLength(row.resource_display_label) >
+          FEATURE_VALUE_CONTRIBUTION_LIMITS.keyCodePoints ||
+        (row.resource_marking_shape !== 'boxes' &&
+          row.resource_marking_shape !== 'remaining')
       ) {
         throw new TypeError(
-          'resource_maximum requires a bounded target_key and op add.',
+          'resource_maximum requires a bounded target_key, op add, and complete display configuration.',
         );
       }
     } else {

@@ -9,6 +9,7 @@ import {
   authoredGrantSetV1Vectors,
   authoredProjectorV1Vectors,
 } from './fixtures/authored-projector-v1-vectors';
+import type { SubclassContentAggregate } from '../../../src/authoring/contracts';
 
 describe('HA-1 authored content-v1 projector contracts', () => {
   it.each([
@@ -101,6 +102,7 @@ describe('HA-1 authored content-v1 projector contracts', () => {
           'subclass_progressions',
           'subclass_features',
           'subclass_feature_effects',
+          'subclass_feature_value_contributions',
         ],
         outboundReferenceRoles: [
           'grant.fixed_spell',
@@ -109,6 +111,44 @@ describe('HA-1 authored content-v1 projector contracts', () => {
         ],
       },
     });
+  });
+
+  it('places contribution arms inside the ordered feature effects collection', () => {
+    const base = authoredProjectorV1Vectors[2].aggregate;
+    if (base.kind !== 'subclass') throw new TypeError('Expected the subclass vector.');
+    const feature = base.features[0]!;
+    const aggregate: SubclassContentAggregate = {
+      ...base,
+      features: [{
+        ...feature,
+        contributions: [{
+          kind: 'feature_value_contribution',
+          contribution_key: 'shadow-dice',
+          label: 'Shadow Dice',
+          target: { kind: 'feature_dice_count', key: 'sneak_attack' },
+          op: 'add',
+          active_from_level: 3 as never,
+          active_to_level: 20 as never,
+          value: { kind: 'const', amount: 1 },
+        }],
+      }, ...base.features.slice(1)],
+    };
+
+    const projected = projectAuthoredContentAggregateV1<'subclass'>(aggregate).payload;
+    expect(projected).not.toHaveProperty('contributions');
+    expect(projected.features.values[0]!.effects.values).toEqual([
+      ...authoredProjectorV1Vectors[2].payload.features.values[0]!.effects.values,
+      {
+        kind: 'feature_value_contribution',
+        contribution_key: 'shadow-dice',
+        label: 'Shadow Dice',
+        target: { kind: 'feature_dice_count', key: 'sneak_attack' },
+        op: 'add',
+        active_from_level: 3,
+        active_to_level: 20,
+        value: { kind: 'const', amount: 1 },
+      },
+    ]);
   });
 
   it('pins the override vector to one row for every level in order', () => {

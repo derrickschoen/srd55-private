@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   BackgroundContentAggregate,
   SpeciesContentAggregate,
+  SubclassContentAggregate,
 } from '../../../src/authoring/contracts';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import { sha256 } from '../../../src/crypto/sha256';
@@ -27,9 +28,19 @@ import {
 } from '../../../src/backup/backup-version';
 import {
   libraryContentImportNodes,
+  portableSubclassContentImportNode,
   restorePortableContentSupersessions,
+  validateLibraryDocument,
   type LibraryExportDocument,
 } from '../../../src/backup/portable-content';
+import {
+  exportCharacterShare,
+  importCharacterShare,
+} from '../../../src/sharing/character-share';
+import {
+  decodeShareFragment,
+  encodeShareFragment,
+} from '../../../src/sharing/codec';
 import { CatalogImporter } from '../../../src/catalog/catalog-importer';
 import {
   commitContentImport,
@@ -41,7 +52,7 @@ import {
   CONTENT_FINGERPRINT_SCHEME_V1,
   type ContentFingerprintDigest,
 } from '../../../src/catalog/content-identity';
-import { createApplicationLifecycle } from '../../../src/db/bootstrap';
+import { applicationSeed, createApplicationLifecycle } from '../../../src/db/bootstrap';
 import { DatabaseContext } from '../../../src/db/database';
 import { creatureSize, creatureType } from '../../../src/domain/enums';
 import type { ContentKey } from '../../../src/domain/ids';
@@ -196,6 +207,150 @@ function seedClosureCharacter(
   return characterId;
 }
 
+const contributionSubclassKey =
+  'expanded:content.subclass:portable-scaling' as ContentKey;
+
+function seedContributionSubclass(
+  db: DatabaseContext,
+  withContributions = true,
+): { readonly contentKey: ContentKey; readonly classId: number; readonly subclassId: number } {
+  applicationSeed(db);
+  const classKey = '2024:class:fighter' as ContentKey;
+  const contentKey = withContributions
+    ? contributionSubclassKey
+    : 'expanded:content.subclass:portable-plain' as ContentKey;
+  const aggregate: SubclassContentAggregate = {
+    kind: 'subclass',
+    name: withContributions ? 'Portable Scaling' : 'Portable Plain',
+    rules_edition: 'expanded',
+    reference_text: 'Portable subclass fixture.',
+    parent_class: { kind: 'class', ...fingerprint(db, classKey) },
+    grants: [],
+    progression: { mode: 'inherit_parent' },
+    features: [{
+      class_level: 3 as never,
+      sort_order: 1,
+      name: 'Portable feature',
+      description: 'Carries authored values.',
+      effects: [],
+      ...(withContributions ? { contributions: [
+        {
+          kind: 'feature_value_contribution' as const,
+          contribution_key: 'base-dice',
+          label: 'Base Dice',
+          target: { kind: 'feature_dice_count' as const, key: 'sneak_attack' as const },
+          op: 'add' as const,
+          active_from_level: 3 as never,
+          active_to_level: 20 as never,
+          value: { kind: 'const' as const, amount: 1 },
+        },
+        {
+          kind: 'feature_value_contribution' as const,
+          contribution_key: 'scaled-dice',
+          label: 'Scaled Dice',
+          target: { kind: 'feature_dice_count' as const, key: 'sneak_attack' as const },
+          op: 'add' as const,
+          active_from_level: 9 as never,
+          active_to_level: 20 as never,
+          value: {
+            kind: 'scale' as const,
+            source: { kind: 'class_level' as const, class_content_key: classKey },
+            multiply: 1 as never,
+            divide: 2 as never,
+            round: 'ceiling' as const,
+          },
+          supersedes: {
+            kind: 'contribution' as const,
+            content_key: contentKey,
+            contribution_key: 'base-dice',
+          },
+        },
+        {
+          kind: 'feature_value_contribution' as const,
+          contribution_key: 'focus-points',
+          label: 'Focus Points',
+          target: {
+            kind: 'resource_maximum' as const,
+            resource: {
+              fact_key: `${contentKey}\u0000focus-points`,
+              display_label: 'Focus Points',
+              marking_shape: 'remaining' as const,
+            },
+          },
+          op: 'add' as const,
+          active_from_level: 3 as never,
+          active_to_level: 20 as never,
+          value: {
+            kind: 'table' as const,
+            level_source: { kind: 'class_level' as const, class_content_key: classKey },
+            rows: [
+              { from: 3 as never, to: 8 as never, amount: 2 },
+              { from: 9 as never, to: 20 as never, amount: 4 },
+            ],
+          },
+        },
+      ] } : {}),
+    }],
+  };
+  const node = portableSubclassContentImportNode(db, aggregate, contentKey);
+  const plan = planContentImport(db, [node]);
+  const committed = commitContentImport(db, { nodes: [node], token: plan.token });
+  if (committed.kind !== 'committed') throw new Error('Portable subclass import was refused.');
+  const classId = db.scalar<number>(
+    'SELECT id FROM class_definitions WHERE content_key = ?', [classKey],
+  );
+  const subclassId = db.scalar<number>(
+    'SELECT id FROM subclass_definitions WHERE content_key = ?', [contentKey],
+  );
+  if (classId === null || subclassId === null) throw new Error('Portable subclass did not install.');
+  return { contentKey, classId, subclassId };
+}
+
+function seedContributionCharacter(
+  db: DatabaseContext,
+  fixture: ReturnType<typeof seedContributionSubclass>,
+): number {
+  const characterId = db.exec(
+    "INSERT INTO characters (name) VALUES ('Portable Scaling Hero')",
+  ).lastInsertId;
+  db.exec(
+    `INSERT INTO character_class_levels (
+       character_id, class_definition_id, subclass_definition_id, level,
+       is_starting_class
+     ) VALUES (?, ?, ?, 10, 1)`,
+    [characterId, fixture.classId, fixture.subclassId],
+  );
+  db.exec(
+    `INSERT INTO character_source_instances (
+       character_id, instance_uuid, source_type, source_definition_id,
+       display_name, acquired_at_character_level, state
+     ) VALUES
+       (?, 'portable-scaling-class', 'class', ?, 'Fighter 10', 1, 'active'),
+       (?, 'portable-scaling-subclass', 'subclass', ?, 'Portable Scaling', 3, 'active')`,
+    [characterId, fixture.classId, characterId, fixture.subclassId],
+  );
+  return characterId;
+}
+
+function contributionRows(db: DatabaseContext): readonly Readonly<Record<string, unknown>>[] {
+  return db.allRaw(
+    `SELECT contribution.contribution_key, contribution.label,
+            contribution.target_kind, contribution.target_key,
+            contribution.resource_display_label,
+            contribution.resource_marking_shape, contribution.op,
+            contribution.active_from_level, contribution.active_to_level,
+            contribution.value_json, contribution.supersedes_ref
+       FROM subclass_feature_value_contributions AS contribution
+       ORDER BY contribution.contribution_key`,
+  ).map((row) => ({
+    ...row,
+    value_json: canonicalJson(JSON.parse(String(row.value_json))),
+    supersedes_ref: row.supersedes_ref === null
+      ? null
+      : canonicalJson(JSON.parse(String(row.supersedes_ref))),
+  }));
+}
+
 function rekeyExternalContentAsDerived(
   db: DatabaseContext,
   kind: string,
@@ -304,6 +459,136 @@ function emptyHistoricalSpellDefinitions() {
 }
 
 describe('portable content manifests', () => {
+  it('carries subclass contributions through library, character backup, and v18 share with exact wire keys', async () => {
+    const source = await database();
+    const fixture = seedContributionSubclass(source);
+    const characterId = seedContributionCharacter(source, fixture);
+    const expectedRows = contributionRows(source);
+
+    const library = exportSelectedLibraryContent(source, [fixture.contentKey], exportedAt);
+    validateLibraryDocument(library);
+    const entry = library.content.find((candidate) => candidate.kind === 'subclass');
+    if (entry?.kind !== 'subclass') throw new Error('Subclass was absent from library export.');
+    const aggregate = entry.aggregate;
+    if (aggregate.kind !== 'subclass') throw new Error('Subclass aggregate kind was lost.');
+    const feature = aggregate.features[0]!;
+    const contributions = feature.contributions ?? [];
+    expect(Object.keys(entry).sort()).toEqual([
+      'aggregate', 'content_key', 'fingerprint_digest', 'fingerprint_scheme',
+      'key_kind', 'kind',
+    ]);
+    expect(Object.keys(feature).sort()).toEqual([
+      'class_level', 'contributions', 'description', 'effects', 'name', 'sort_order',
+    ]);
+    expect(contributions).toHaveLength(3);
+    expect(Object.keys(contributions[0]!).sort()).toEqual([
+      'active_from_level', 'active_to_level', 'contribution_key', 'kind',
+      'label', 'op', 'target', 'value',
+    ]);
+    expect(Object.keys(contributions[1]!).sort()).toEqual([
+      'active_from_level', 'active_to_level', 'contribution_key', 'kind',
+      'label', 'op', 'supersedes', 'target', 'value',
+    ]);
+    const resource = contributions.find((candidate) =>
+      candidate.target.kind === 'resource_maximum');
+    if (resource?.target.kind !== 'resource_maximum' ||
+        typeof resource.target.resource === 'string') {
+      throw new Error('Authored resource target was absent.');
+    }
+    expect(Object.keys(resource.target).sort()).toEqual(['kind', 'resource']);
+    expect(Object.keys(resource.target.resource).sort()).toEqual([
+      'display_label', 'fact_key', 'marking_shape',
+    ]);
+
+    const libraryTarget = await database();
+    applicationSeed(libraryTarget);
+    importLibraryDocument(libraryTarget, library);
+    expect(contributionRows(libraryTarget)).toEqual(expectedRows);
+
+    const backup = exportCharacterBackup(source, characterId, exportedAt);
+    const backupTarget = await database();
+    applicationSeed(backupTarget);
+    importCharacterBackup(backupTarget, backup);
+    expect(contributionRows(backupTarget)).toEqual(expectedRows);
+
+    const share = exportCharacterShare(source, characterId);
+    expect(share.version).toBe(18);
+    expect(share.classes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ subclassKey: fixture.contentKey }),
+    ]));
+    expect(share.portableContent?.content.find((candidate) =>
+      candidate.kind === 'subclass')?.aggregate).toEqual(entry.aggregate);
+    const decoded = await decodeShareFragment(await encodeShareFragment(share));
+    expect(decoded).toEqual(share);
+    const shareTarget = await database();
+    applicationSeed(shareTarget);
+    importCharacterShare(shareTarget, decoded);
+    expect(contributionRows(shareTarget)).toEqual(expectedRows);
+  }, 20_000);
+
+  it('rejects contribution extra keys and still imports an old-format subclass with no contribution field', async () => {
+    const source = await database();
+    const contributed = seedContributionSubclass(source);
+    const library = exportSelectedLibraryContent(source, [contributed.contentKey], exportedAt);
+    const hostile = JSON.parse(JSON.stringify(library)) as LibraryExportDocument;
+    const hostileEntry = hostile.content.find((candidate) => candidate.kind === 'subclass');
+    if (hostileEntry?.kind !== 'subclass') throw new Error('Missing hostile subclass fixture.');
+    const hostileAggregate = hostileEntry.aggregate;
+    if (hostileAggregate.kind !== 'subclass') throw new Error('Hostile aggregate kind was lost.');
+    const hostileContribution = hostileAggregate.features[0]?.contributions?.[0] as
+      unknown as Record<string, unknown>;
+    hostileContribution.future_contribution_field = true;
+    expect(() => validateLibraryDocument(hostile)).toThrow(
+      /future_contribution_field|unknown key|exact/u,
+    );
+
+    const plainSource = await database();
+    const plain = seedContributionSubclass(plainSource, false);
+    const oldFormat = exportSelectedLibraryContent(plainSource, [plain.contentKey], exportedAt);
+    const plainEntry = oldFormat.content.find((candidate) => candidate.kind === 'subclass');
+    if (plainEntry?.kind !== 'subclass') throw new Error('Missing plain subclass fixture.');
+    const plainAggregate = plainEntry.aggregate;
+    if (plainAggregate.kind !== 'subclass') throw new Error('Plain aggregate kind was lost.');
+    expect(plainAggregate.features[0]).not.toHaveProperty('contributions');
+    const target = await database();
+    applicationSeed(target);
+    expect(() => importLibraryDocument(target, oldFormat)).not.toThrow();
+    expect(contributionRows(target)).toEqual([]);
+  }, 20_000);
+
+  it('rejects supersession bands and derived resource keys before portable installation', async () => {
+    const source = await database();
+    const contributed = seedContributionSubclass(source);
+    const library = exportSelectedLibraryContent(source, [contributed.contentKey], exportedAt);
+
+    const outliving = JSON.parse(JSON.stringify(library)) as LibraryExportDocument;
+    const outlivingEntry = outliving.content.find((candidate) => candidate.kind === 'subclass');
+    if (outlivingEntry?.kind !== 'subclass') throw new Error('Missing outliving subclass fixture.');
+    if (outlivingEntry.aggregate.kind !== 'subclass') throw new Error('Outliving aggregate kind was lost.');
+    const outlivingContributions = outlivingEntry.aggregate.features[0]?.contributions ?? [];
+    const victim = outlivingContributions.find((candidate) =>
+      candidate.contribution_key === 'base-dice');
+    if (victim === undefined) throw new Error('Missing supersession victim fixture.');
+    (victim as { active_to_level: number }).active_to_level = 8;
+    expect(() => validateLibraryDocument(outliving)).toThrow(/outlives/u);
+
+    const oversized = JSON.parse(JSON.stringify(library)) as LibraryExportDocument;
+    const oversizedEntry = oversized.content.find((candidate) => candidate.kind === 'subclass');
+    if (oversizedEntry?.kind !== 'subclass') throw new Error('Missing resource-key subclass fixture.');
+    if (oversizedEntry.aggregate.kind !== 'subclass') throw new Error('Resource-key aggregate kind was lost.');
+    const oversizedResource = oversizedEntry.aggregate.features[0]?.contributions?.find((candidate) =>
+      candidate.target.kind === 'resource_maximum');
+    if (
+      oversizedResource?.target.kind !== 'resource_maximum' ||
+      typeof oversizedResource.target.resource === 'string'
+    ) throw new Error('Missing authored resource fixture.');
+    const longKey = 'x'.repeat(200);
+    (oversizedResource as { contribution_key: string }).contribution_key = longKey;
+    (oversizedResource.target.resource as { fact_key: string }).fact_key =
+      `${contributed.contentKey}\u0000${longKey}`;
+    expect(() => validateLibraryDocument(oversized)).toThrow(/resource display configuration/u);
+  });
+
   it('CI5-PW-R40-FINGERPRINT finalizes parity fixture spells before portable export', async () => {
     const fixture = await workspaceFixtureImage();
     const sqlite3 = await getSqlite3();

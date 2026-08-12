@@ -32,9 +32,9 @@ test('authors a subclass timeline, preserves threshold effects, and previews its
   browser,
   page,
 }) => {
-  // Measured alone on PLAYWRIGHT_PORT=5040 at 21.9s with the human grant and
-  // effect preview pins. 21.9s × 1.5 = 32.85s, rounded up to 100ms.
-  test.setTimeout(32_900);
+  // Measured alone on PLAYWRIGHT_PORT=5030 at 22.0s with the contribution
+  // editor path. 22.0s × 1.5 = 33s.
+  test.setTimeout(33_000);
   await page.goto('/');
   await ready(page);
   await page.evaluate(() => window.staticApp.reset());
@@ -89,6 +89,20 @@ test('authors a subclass timeline, preserves threshold effects, and previews its
   await hitPoints.getByLabel('Effect kind').selectOption('hp_modifier');
   await hitPoints.getByLabel('Label').fill('Threshold vitality');
   await hitPoints.getByLabel('Flat hit points').fill('3');
+  await levelThree.getByRole('button', { name: 'Add scaling feature value' }).click();
+  let scalingValue = levelThree.getByRole('group', { name: 'Scaling feature value 1' });
+  await scalingValue.getByLabel('Stable contribution key').fill('threshold-focus');
+  await scalingValue.getByLabel('Contribution label').fill('Threshold Focus');
+  await scalingValue.getByLabel('Target value').selectOption('resource_maximum');
+  scalingValue = levelThree.getByRole('group', { name: 'Scaling feature value 1' });
+  await scalingValue.getByLabel('Resource display label').fill('Threshold Focus');
+  await scalingValue.getByLabel('Resource marking style').selectOption('remaining');
+  await scalingValue.getByLabel('Scaling method').selectOption('breakpoint_table');
+  scalingValue = levelThree.getByRole('group', { name: 'Scaling feature value 1' });
+  await scalingValue.getByRole('button', { name: 'Add breakpoint' }).click();
+  await scalingValue.getByRole('spinbutton', { name: 'From level', exact: true }).fill('3');
+  await scalingValue.getByRole('spinbutton', { name: 'To level', exact: true }).fill('20');
+  await scalingValue.getByRole('spinbutton', { name: 'Amount', exact: true }).fill('4');
 
   await page.getByLabel('Timeline level').selectOption('6');
   await page.getByRole('button', { name: 'Add level' }).click();
@@ -112,6 +126,9 @@ test('authors a subclass timeline, preserves threshold effects, and previews its
   );
   await expect(page.getByLabel('Subclass feature preview')).toContainText(
     'Threshold armor: +2 Armor Class.',
+  );
+  await expect(page.getByLabel('Subclass feature preview')).toContainText(
+    'add 3–20: 4 to Threshold Focus, levels 3–20',
   );
   await expect(page.locator('.subclass-publish-preview code')).toHaveCount(0);
   await page.getByRole('button', { name: 'Publish subclass' }).click();
@@ -137,6 +154,10 @@ test('authors a subclass timeline, preserves threshold effects, and previews its
     if (!Number.isSafeInteger(fighterId) || !Number.isSafeInteger(subclassId)) {
       throw new Error('Published Fighter subclass was not persisted.');
     }
+    const contributionRows = await window.staticApp.inspectRows(
+      'subclass_feature_value_contributions',
+      { contribution_key: 'threshold-focus' },
+    );
     const levelTwentyProgressions = await window.staticApp.inspectRows(
       'subclass_progressions',
       { subclass_definition_id: subclassId, class_level: 20 },
@@ -223,6 +244,7 @@ test('authors a subclass timeline, preserves threshold effects, and previews its
       characterId: character.id,
       subclassId,
       subclassKey,
+      contributionRows,
       levelTwentyCantrips: Number(levelTwentyProgressions[0]?.['cantrips_known']),
       afterLevelTwo,
       afterLevelThree,
@@ -271,6 +293,14 @@ test('authors a subclass timeline, preserves threshold effects, and previews its
   expect(journey.armorBonuses).toEqual(expect.arrayContaining([
     expect.objectContaining({ label: 'Threshold armor', amount: 2 }),
   ]));
+  expect(journey.contributionRows).toEqual([
+    expect.objectContaining({
+      contribution_key: 'threshold-focus',
+      target_kind: 'resource_maximum',
+      resource_display_label: 'Threshold Focus',
+      resource_marking_shape: 'remaining',
+    }),
+  ]);
 
   // The boot shell's #status is replaced by the mounted route. Homebrew owns
   // its readiness signal through the loaded status and settled tab panel.

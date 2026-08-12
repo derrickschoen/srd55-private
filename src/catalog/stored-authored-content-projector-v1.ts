@@ -7,6 +7,7 @@ import type {
   SpeciesContentAggregate,
   SubclassContentAggregate,
   SubclassContentProgressionRow,
+  SubclassFeatureValueContribution,
 } from '../authoring/contracts';
 import type {
   AuthoringCharacterEffect,
@@ -43,6 +44,14 @@ import {
   type RulesEdition,
 } from '../domain/enums';
 import type { ContentKey } from '../domain/ids';
+import type { ClassLevel } from '../domain/ids';
+import { featureValueKeys } from '../domain/feature-values';
+import { decodedValueExpression } from '../domain/value-expression';
+import {
+  decodeStoredSupersedesReference,
+  decodeStoredValueExpression,
+} from '../domain/contracts/row-rules';
+import { rowContractError } from '../domain/contracts/rows';
 import type { JsonObject, JsonValue } from '../domain/models';
 import { GrantRule } from '../grants/grant-rule';
 import {
@@ -59,6 +68,7 @@ import type {
   CanonicalAuthoringGrantV1,
   CanonicalCharacterEffectV1,
   CanonicalFeatureEffectV1,
+  CanonicalFeatureValueContributionV1,
   CanonicalSpeciesCharacterEffectV1,
   SpeciesProjectorCharacterEffectV1,
   SpeciesProjectorAggregateV1,
@@ -989,6 +999,39 @@ function canonicalFeatureEffect(
   return canonicalCharacterEffect(effect);
 }
 
+function canonicalFeatureValueContribution(
+  contribution: SubclassFeatureValueContribution,
+): CanonicalFeatureValueContributionV1 {
+  let target: CanonicalFeatureValueContributionV1['target'];
+  if (contribution.target.kind === 'feature_dice_count') {
+    target = contribution.target;
+  } else {
+    const resource = contribution.target.resource;
+    target = typeof resource === 'string'
+      ? { kind: 'resource_maximum', resource }
+      : {
+          kind: 'resource_maximum',
+          resource: {
+            ...resource,
+            display_label: canonicalRuleText(resource.display_label),
+          },
+        };
+  }
+  return {
+    kind: contribution.kind,
+    contribution_key: contribution.contribution_key,
+    label: canonicalRuleText(contribution.label),
+    target,
+    op: contribution.op,
+    active_from_level: contribution.active_from_level,
+    active_to_level: contribution.active_to_level,
+    value: contribution.value,
+    ...(contribution.supersedes === undefined
+      ? {}
+      : { supersedes: contribution.supersedes }),
+  };
+}
+
 function fingerprintValue<K extends ContentKind>(
   value: JsonValue | ContentFingerprintReference | undefined,
   kind: K,
@@ -1196,7 +1239,10 @@ function projectSubclass(
       class_level: feature.class_level,
       name: feature.name,
       description: canonicalRuleText(feature.description),
-      effects: contentIdentitySequence(feature.effects.map(canonicalFeatureEffect)),
+      effects: contentIdentitySequence([
+        ...feature.effects.map(canonicalFeatureEffect),
+        ...(feature.contributions ?? []).map(canonicalFeatureValueContribution),
+      ]),
     }))),
   };
   const progressionGrants = aggregate.progression.mode === 'override'
@@ -1895,6 +1941,84 @@ function readSubclass(
           caster_contribution: casterContribution(root.caster_fraction, root.caster_rounding),
           rows: denseProgression(progressionRows),
         };
+  const featureContributions = (
+    featureId: number,
+  ): readonly SubclassFeatureValueContribution[] => db.all(
+    `SELECT id, subclass_feature_id, contribution_key, label, target_kind,
+            target_key, op, active_from_level, active_to_level, value_json,
+            supersedes_ref, resource_display_label, resource_marking_shape,
+            created_at, updated_at
+       FROM subclass_feature_value_contributions
+      WHERE subclass_feature_id = ?
+      ORDER BY id`,
+    [featureId],
+    (row) => {
+      const error = rowContractError(
+        'subclass_feature_value_contributions',
+        row,
+        'stored subclass feature-value contribution',
+      );
+      if (error !== null) return projectionError(error);
+      const valueJson = sqlString(row, 'value_json');
+      decodeStoredValueExpression(valueJson, 'subclass feature-value contribution value_json');
+      const decoded = decodedValueExpression(valueJson);
+      if (decoded.kind === 'invalid_data') {
+        return projectionError('subclass feature-value contribution value_json is invalid.');
+      }
+      const targetKind = sqlString(row, 'target_kind');
+      const targetKey = sqlString(row, 'target_key');
+      let target: SubclassFeatureValueContribution['target'];
+      if (targetKind === 'feature_dice_count') {
+        if (!isEnumValue(featureValueKeys, targetKey)) {
+          return projectionError(`unknown feature value target '${targetKey}'.`);
+        }
+        target = { kind: targetKind, key: targetKey };
+      } else if (targetKind === 'resource_maximum') {
+        const displayLabel = sqlNullableString(row, 'resource_display_label');
+        const markingShape = sqlNullableString(row, 'resource_marking_shape');
+        if (
+          displayLabel === null ||
+          (markingShape !== 'boxes' && markingShape !== 'remaining')
+        ) {
+          return projectionError('authored resource display configuration is missing.');
+        }
+        target = {
+          kind: targetKind,
+          resource: {
+            fact_key: targetKey,
+            display_label: displayLabel,
+            marking_shape: markingShape,
+          },
+        };
+      } else {
+        return projectionError(`unknown feature-value target kind '${targetKind}'.`);
+      }
+      const supersedesJson = row.supersedes_ref;
+      const supersedes = decodeStoredSupersedesReference(
+        supersedesJson,
+        'subclass feature-value contribution supersedes_ref',
+      );
+      return {
+        kind: 'feature_value_contribution',
+        contribution_key: sqlString(row, 'contribution_key'),
+        label: sqlString(row, 'label'),
+        target,
+        op: 'add',
+        active_from_level: sqlInteger(row, 'active_from_level') as ClassLevel,
+        active_to_level: sqlInteger(row, 'active_to_level') as ClassLevel,
+        value: decoded.value,
+        ...(supersedes === null
+          ? {}
+          : {
+              supersedes: {
+                kind: 'contribution' as const,
+                content_key: supersedes.content_key as ContentKey,
+                contribution_key: String(supersedes.contribution_key),
+              },
+            }),
+      };
+    },
+  );
   const features = db.all(
     `SELECT id, class_level, sort_order, name, description
      FROM subclass_features WHERE subclass_definition_id = ?
@@ -1907,13 +2031,17 @@ function readSubclass(
       name: sqlString(row, 'name'),
       description: sqlString(row, 'description'),
     }),
-  ).map((feature) => ({
-    class_level: feature.class_level,
-    sort_order: feature.sort_order,
-    name: feature.name,
-    description: feature.description,
-    effects: readEffects(db, 'subclass_feature_effects', 'subclass_feature_id', feature.id),
-  }));
+  ).map((feature) => {
+    const contributions = featureContributions(feature.id);
+    return {
+      class_level: feature.class_level,
+      sort_order: feature.sort_order,
+      name: feature.name,
+      description: feature.description,
+      effects: readEffects(db, 'subclass_feature_effects', 'subclass_feature_id', feature.id),
+      ...(contributions.length === 0 ? {} : { contributions }),
+    };
+  });
   return {
     kind: 'subclass',
     name: nonEmpty(root.name, 'subclass name'),
