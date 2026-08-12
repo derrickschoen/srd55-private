@@ -92,7 +92,7 @@ test('imports bundled homebrew through publish, applies derived third-caster slo
 
   await importBundledHomebrew(
     page,
-    'Bundled homebrew imported: 3 published, 0 matched existing.',
+    'Bundled homebrew imported: 3 added to your library, 0 matched existing.',
   );
 
   await page.getByRole('link', { name: 'Homebrew library', exact: true }).click();
@@ -280,7 +280,7 @@ test('imports bundled homebrew through publish, applies derived third-caster slo
   await globalReady(page);
   await importBundledHomebrew(
     page,
-    'Bundled homebrew imported: 0 published, 3 matched existing.',
+    'Bundled homebrew imported: 0 added to your library, 3 matched existing.',
   );
 
   await page.getByRole('link', { name: 'Homebrew library', exact: true }).click();
@@ -328,7 +328,7 @@ test('Veteran v3 sheet values and the v2-to-v3 replacement review are visible', 
   await globalReady(page);
   await importBundledHomebrew(
     page,
-    'Bundled homebrew imported: 3 published, 0 matched existing.',
+    'Bundled homebrew imported: 3 added to your library, 0 matched existing.',
   );
 
   const characters = await page.evaluate(async () => {

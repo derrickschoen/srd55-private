@@ -11,6 +11,8 @@
  * Repairing these automatically is deliberately out of scope for now — see
  * `docs/sharing/SCHEMA.md`.
  */
+import { BUNDLED_HOMEBREW_CATALOG } from '../authoring/bundled-homebrew-catalog';
+import { assertedExternalContentKey } from '../catalog/catalog-key';
 
 export type ShareImportIssueCode =
   | 'missing_class'
@@ -34,6 +36,8 @@ export interface ShareImportIssue {
    * never promise an in-app operation that does not exist.
    */
   readonly remedy: string;
+  readonly remedyKind?: 'bundled-homebrew' | 'library-json';
+  readonly contentName?: string;
   readonly ruleKey?: string;
   readonly ordinal?: number;
 }
@@ -83,36 +87,69 @@ export function contentImportLabel(type: string, key: string): string {
 }
 
 export function missingClassIssue(classKey: string): ShareImportIssue {
-  const required = contentImportLabel('class', classKey);
+  return missingPortableIssue('class', classKey);
+}
+
+function knownBundledHomebrewName(
+  type: string,
+  key: string,
+): string | null {
+  for (const entry of BUNDLED_HOMEBREW_CATALOG) {
+    for (const [index, revision] of entry.revisions.entries()) {
+      if (revision.kind !== type || revision.rules_edition === null) continue;
+      const name = index === 0
+        ? revision.name
+        : `${revision.name} (Bundled revision ${String(index + 1)})`;
+      if (
+        assertedExternalContentKey(
+          revision.kind,
+          revision.rules_edition,
+          name,
+        ) === key
+      ) {
+        return name;
+      }
+    }
+  }
+  return null;
+}
+
+function missingPortableIssue(type: string, key: string): ShareImportIssue {
+  const code = type === 'class'
+    ? 'missing_class' as const
+    : type === 'subclass'
+      ? 'missing_subclass' as const
+      : 'missing_source' as const;
+  const knownName = knownBundledHomebrewName(type, key);
+  const label = SOURCE_LABEL[type] ?? type;
+  if (knownName !== null) {
+    return {
+      code,
+      contentKeys: [key],
+      contentName: knownName,
+      summary: `This character uses ${knownName}, which is not in your library.`,
+      remedy: 'Import bundled homebrew, then retry this share.',
+      remedyKind: 'bundled-homebrew',
+    };
+  }
   return {
-    code: 'missing_class',
-    contentKeys: [classKey],
-    summary: `your catalog has no ${required}.`,
-    remedy: `Import ${required}, then open the link again.`,
+    code,
+    contentKeys: [key],
+    summary: `This character uses a ${label} that is not in your library.`,
+    remedy: `Ask the sender for a library JSON containing this ${label}, import it, then retry this share.`,
+    remedyKind: 'library-json',
   };
 }
 
 export function missingSubclassIssue(subclassKey: string): ShareImportIssue {
-  const required = contentImportLabel('subclass', subclassKey);
-  return {
-    code: 'missing_subclass',
-    contentKeys: [subclassKey],
-    summary: `your catalog has no ${required}.`,
-    remedy: `Import ${required}, then open the link again.`,
-  };
+  return missingPortableIssue('subclass', subclassKey);
 }
 
 export function missingSourceIssue(
   type: string,
   key: string,
 ): ShareImportIssue {
-  const required = contentImportLabel(type, key);
-  return {
-    code: 'missing_source',
-    contentKeys: [key],
-    summary: `your catalog has no ${required}.`,
-    remedy: `Import ${required}, then open the link again.`,
-  };
+  return missingPortableIssue(type, key);
 }
 
 export function ambiguousReferenceIssue(

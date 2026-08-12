@@ -145,6 +145,18 @@ export const COLUMN_FACTS = {
     target_content_key: { base: 'degraded', notNull: true },
     reviewed_at: { base: 'degraded', notNull: true },
   },
+  catalog_content_provenance: {
+    content_kind: { base: 'degraded', notNull: true },
+    content_key: { base: 'degraded', notNull: true },
+    origin_kind: { base: 'degraded', notNull: true },
+    received: { base: 'degraded', notNull: true },
+    local_derivation: { base: 'degraded', notNull: true },
+    author_label: { base: 'degraded', notNull: false },
+    source_label: { base: 'degraded', notNull: false },
+    license_label: { base: 'degraded', notNull: false },
+    attribution_text: { base: 'degraded', notNull: false },
+    recorded_at: { base: 'degraded', notNull: true },
+  },
   catalog_content_supersessions: {
     content_kind: { base: 'degraded', notNull: true },
     superseded_content_key: { base: 'degraded', notNull: true },

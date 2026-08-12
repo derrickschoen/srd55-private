@@ -11,6 +11,7 @@ import {
 } from '../catalog/catalog-key';
 import {
   type ContentImportChoices,
+  type ContentImportEntryOutcome,
   type ContentImportNode,
   type ContentImportProjection,
 } from '../catalog/content-adoption';
@@ -26,6 +27,10 @@ import {
   storedAuthoredRegistryReferencesV1,
 } from '../catalog/stored-authored-content-projector-v1';
 import { portableSubclassContentImportNode } from '../backup/portable-content';
+import {
+  authoredContentProvenance,
+  recordContentProvenance,
+} from '../catalog/content-provenance';
 import type {
   AuthoringValidationIssue,
   DenseSubclassContentProgression,
@@ -856,7 +861,15 @@ export function commitSubclassPublish(
     node,
     operationIdentity: operation,
     supersedesContentKey: draft.base_content_key,
-    afterInstall: (transaction: DatabaseContext) => {
+    afterInstall: (transaction: DatabaseContext, outcome: ContentImportEntryOutcome) => {
+      if (outcome.kind === 'create' || outcome.kind === 'remembered-clone') {
+        recordContentProvenance(transaction, {
+          kind: 'subclass', contentKey: outcome.contentKey,
+          provenance: authoredContentProvenance(
+            transaction, 'subclass', draft.base_content_key,
+          ),
+        });
+      }
       const deleted = transaction.exec(
         'DELETE FROM catalog_content_drafts WHERE draft_uuid = ? AND revision = ?',
         [draft.draft_uuid, draft.revision],

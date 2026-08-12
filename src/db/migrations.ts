@@ -44,6 +44,7 @@ import catalogContentArchiveMembers from '../../drizzle/0040_catalog_content_arc
 import contentV2 from '../../drizzle/0041_content_v2.sql?raw';
 import featureValueContributions from '../../drizzle/0042_feature_value_contributions.sql?raw';
 import authoredResourceDisplay from '../../drizzle/0043_authored_resource_display.sql?raw';
+import catalogContentProvenance from '../../drizzle/0044_catalog_content_provenance.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -501,6 +502,17 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       'f2fe84c5ef00aa7ad9831bd0e527b34b6f2f1501a44cd6640f3e2e431a64f083',
     resultSchemaChecksum:
       'c3064d2f13d8fe5519ee5f808c226f163e6d4acbc9838692678f83ccd69b4129',
+  }),
+  // Sweep 6 S6-12: rules identity no longer pretends to answer authorship or
+  // transfer history. Existing external rows remain unknown because the old
+  // schema recorded no evidence from which a stronger claim could be made.
+  Object.freeze({
+    id: '0044_catalog_content_provenance',
+    sql: catalogContentProvenance,
+    checksum:
+      'feb20e2440a1242305b72ed7981e0e44b57ee812be85c2ee116782c9fecf819e',
+    resultSchemaChecksum:
+      '960eb02651a6fb6b58b9f492c42c2c5b5981b656101866263170c0a9e30d90ca',
   }),
 ]);
 

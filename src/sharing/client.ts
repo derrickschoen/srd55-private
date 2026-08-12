@@ -143,6 +143,9 @@ function embeddedPortableDisclosures(
       id: `portable:${entry.kind}:${entry.content_key}`,
       kind: entry.kind,
       name: entry.aggregate.name,
+      ...(entry.provenance === undefined
+        ? {}
+        : { provenance: entry.provenance }),
     })
   ));
 }

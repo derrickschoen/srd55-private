@@ -486,7 +486,7 @@ describe('bundled spell forks', () => {
     });
   });
 
-  it('carries forks and imported homebrew in v18 while v17 stays reference-only', async () => {
+  it('carries forks and imported homebrew in v19 while v17 stays reference-only', async () => {
     const sender = await seededDatabase();
     const fork = forkSrdSpell(sender, {
       sourceContentKey: '2024:fireball',
@@ -555,7 +555,7 @@ describe('bundled spell forks', () => {
     const referenceOnly = positionalToShareDocument(
       shareDocumentToReferencePositional(shared),
     );
-    expect(referenceOnly.version).toBe(18);
+    expect(referenceOnly.version).toBe(19);
     expect(referenceOnly.spellbook).toEqual(shared.spellbook);
     expect(referenceOnly.portableContent).toBeUndefined();
     expect(JSON.stringify(referenceOnly)).not.toContain(

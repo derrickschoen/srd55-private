@@ -139,6 +139,8 @@ describe('character share links', () => {
     const hostile = '<img data-share-disclosure-hostile src=x onerror=alert(1)>';
     const hostileSubclass =
       '<img data-s4-share-hostile src=x onerror=window.s4Xss=1>';
+    const hostileAuthor =
+      '<img data-share-author-hostile src=x onerror=window.authorXss=1>';
     const token = '1'.repeat(64) as ContentImportPlanToken;
     const plan: ContentImportPlan = {
       token,
@@ -192,15 +194,26 @@ describe('character share links', () => {
           preview: async () => ({
             name: 'Hostile Share',
             classes: [{
-              class: { name: 'Fighter', catalog_layer: 'bundled' },
-              subclass: {
+              class: {
+                name: 'Fighter', catalog_layer: 'bundled', incoming: false,
+              },
+            subclass: {
                 name: hostileSubclass,
                 catalog_layer: 'external',
+                incoming: true,
+                provenance: {
+                  origin_kind: 'authored_here', received: false,
+                  local_derivation: false, author_label: hostileAuthor,
+                },
               },
               level: 3,
             }, {
-              class: { name: 'UNKNOWN', catalog_layer: 'unknown' },
-              subclass: { name: '  ', catalog_layer: 'unknown' },
+              class: {
+                name: 'UNKNOWN', catalog_layer: 'unknown', incoming: false,
+              },
+              subclass: {
+                name: '  ', catalog_layer: 'unknown', incoming: false,
+              },
               level: 1,
             }],
             sourceCount: 0,
@@ -215,14 +228,25 @@ describe('character share links', () => {
             includesLoadouts: false,
             includesWrittenText: false,
             adoptionPlan: plan,
+            embeddedContent: plan.incomingContent.map((entry, index) => ({
+              ...entry,
+              provenance: {
+                origin_kind: 'authored_here' as const,
+                received: false,
+                local_derivation: false,
+                ...(index === 0 ? { author_label: hostileAuthor } : {}),
+              },
+            })),
           }),
-          importCharacter: async () => ({ characterId: 1 }),
+          importCharacter: async () => ({
+            characterId: 1, characterName: 'Hostile Share',
+          }),
           commitCharacter: async (fragment, submittedToken, choices) => {
             commits.push({ fragment, token: submittedToken, choices });
             return {
               kind: 'committed',
               outcomes: plan.outcomes,
-              result: { characterId: 9 },
+              result: { characterId: 9, characterName: 'Hostile Share' },
             };
           },
         },
@@ -252,9 +276,10 @@ describe('character share links', () => {
       expect(disclosure.querySelectorAll('li').map((item) =>
         elementText(item as unknown as Node).replace(/\s+/gu, ' ').trim()
       )).toEqual([
-        `${hostile} — species — Homebrew · external layer`,
-        'UNKNOWN — feat — Homebrew · external layer',
-        `${hostileSubclass} — subclass — Homebrew · external layer`,
+        `${hostile} — species — Homebrew by ${hostileAuthor} — a local copy will be added to your library ` +
+          `Attribution details Original author: ${hostileAuthor}`,
+        'UNKNOWN — feat — Homebrew from the sender — a local copy will be added to your library',
+        `${hostileSubclass} — subclass — Homebrew from the sender — a local copy will be added to your library`,
       ]);
       expect(disclosure.querySelector('[data-share-disclosure-hostile]')).toBeNull();
       expect(elementText(disclosure as unknown as Node)).toContain(
@@ -272,15 +297,22 @@ describe('character share links', () => {
         root.querySelector('.share-preview-layers') as unknown as Node,
       ).replace(/\s+/gu, ' ').replace(/\s+([,;])/gu, '$1').trim())
         .toBe(
-          `Fighter — SRD · bundled layer / ${hostileSubclass} — ` +
-          'Homebrew · external layer; Unknown class name — ' +
-          'Unknown catalog layer / Unknown subclass name — Unknown catalog layer',
+          `Fighter — Built into the app / ${hostileSubclass} — ` +
+          `Homebrew by ${hostileAuthor} — a local copy will be added to your library; ` +
+          'Unknown class name — Origin not recorded / Unknown subclass name — Origin not recorded',
         );
       expect(root.querySelector('[data-s4-share-hostile]')).toBeNull();
+      expect(root.querySelector('[data-share-author-hostile]')).toBeNull();
 
       add.click();
       for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
       expect(commits).toEqual([{ fragment: 'fragment', token, choices: {} }]);
+      expect(elementText(root.querySelector('.share-status') as unknown as Node)
+        .replace(/\s+/gu, ' ').replace(/\s+\./gu, '.').trim())
+        .toContain('Hostile Share was added. Open character.');
+      expect(root.querySelector('.share-status')?.querySelector('a')
+        ?.getAttribute('href'))
+        .toBe('/characters/9');
       expect(root.querySelector('[data-testid="content-adoption-modal"]')).toBeNull();
       controls.cleanup();
     } finally {
@@ -346,11 +378,17 @@ describe('character share links', () => {
             includesLoadouts: false,
             includesWrittenText: false,
             adoptionPlan: plan,
+            embeddedContent: [],
           }),
-          importCharacter: async () => ({ characterId: 1 }),
+          importCharacter: async () => ({
+            characterId: 1, characterName: 'Shared Mage',
+          }),
           commitCharacter: async (fragment, submittedToken, choices) => {
             submitted.push({ fragment, token: submittedToken, choices });
-            return { kind: 'committed', outcomes: plan.outcomes, result: { characterId: 7 } };
+            return {
+              kind: 'committed', outcomes: plan.outcomes,
+              result: { characterId: 7, characterName: 'Shared Mage' },
+            };
           },
         },
         browser: { baseUrl: 'https://example.test/' },
@@ -413,8 +451,18 @@ describe('character share links', () => {
             data: {
               issues: [{
                 code: 'missing_source',
-                summary: "your catalog has no species '2024:missing-elf'.",
-                remedy: "Import species '2024:missing-elf', then open the link again.",
+                contentKeys: ['2024:missing-elf'],
+                summary: 'This character uses a species that is not in your library.',
+                remedy: 'Ask the sender for a library JSON containing this species, import it, then retry this share.',
+                remedyKind: 'library-json',
+              }, {
+                code: 'missing_subclass',
+                contentKeys: [
+                  '2024:content.subclass:veteran-bundled-revision-3',
+                ],
+                summary: 'This character uses Veteran (Bundled revision 3), which is not in your library.',
+                remedy: 'Import bundled homebrew, then retry this share.',
+                remedyKind: 'bundled-homebrew',
               }],
             },
           }),
@@ -440,9 +488,20 @@ describe('character share links', () => {
 
       const remedy = root.querySelector('.share-issue-remedy');
       expect(remedy?.tagName.toLowerCase()).toBe('a');
-      expect(remedy?.getAttribute('href')).toBe('/?import=library');
+      expect(remedy?.getAttribute('href')).toBe(
+        '/?import=library#reference-only',
+      );
       expect(remedy?.textContent).toBe(
-        "Import species '2024:missing-elf', then open the link again.",
+        'Ask the sender for a library JSON containing this species, import it, then retry this share.',
+      );
+      expect(elementText(root.querySelector('details') as unknown as Node))
+        .toContain('Internal content key: 2024:missing-elf');
+      const remedies = root.querySelectorAll('.share-issue-remedy');
+      expect(remedies[1]?.getAttribute('href')).toBe(
+        '/?import=bundled-homebrew#reference-only',
+      );
+      expect(remedies[1]?.textContent).toBe(
+        'Import bundled homebrew, then retry this share.',
       );
       controls.cleanup();
     } finally {
@@ -1152,7 +1211,7 @@ describe('catalog and backup entry points', () => {
       expect(persistedChanges).toBe(1);
       expect(button.disabled).toBe(false);
       expect(elementText(controls.element)).toContain(
-        'Bundled homebrew imported: 0 published, 3 matched existing.',
+        'Bundled homebrew imported: 0 added to your library, 3 matched existing.',
       );
       controls.cleanup();
     } finally {

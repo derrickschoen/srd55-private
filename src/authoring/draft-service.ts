@@ -95,6 +95,7 @@ import {
   previewReferenceRetarget,
   ReferenceRetargetError,
 } from './reference-retarget';
+import { storedContentProvenance } from '../catalog/content-provenance';
 
 interface DraftRow {
   readonly draft_uuid: HomebrewDraftUuid;
@@ -740,7 +741,15 @@ export class CatalogAuthoringService {
        ORDER BY identity.content_kind, name, identity.content_key`,
       undefined,
       publishedRow,
-    ).map((row) => ({ ...row, catalog_layer: 'external' as const }));
+    ).map((row) => ({
+      ...row,
+      catalog_layer: 'external' as const,
+      provenance: storedContentProvenance(
+        this.db,
+        row.content_kind,
+        row.content_key,
+      ),
+    }));
 
     const rows = this.db.all(
       `SELECT draft_uuid, content_kind, document_version, base_content_key,

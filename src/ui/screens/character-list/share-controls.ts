@@ -8,9 +8,16 @@ import {
 import type { SharePreview } from '../../../sharing/character-share';
 import type { ContentImportPlan } from '../../../catalog/content-adoption';
 import type { ContentImportDisclosure } from '../../../catalog/content-adoption';
-import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
+import {
+  contentProvenanceDetails,
+  contentProvenanceLabel,
+  incomingContentProvenanceLabel,
+} from '../../../catalog/content-provenance';
 import { createContentAdoptionDialog } from '../../content-adoption-dialog';
-import { LIBRARY_IMPORT_ROUTE } from './import-backup-controls';
+import {
+  BUNDLED_HOMEBREW_IMPORT_ROUTE,
+  LIBRARY_IMPORT_ROUTE,
+} from './import-backup-controls';
 import { contentImportLabel } from '../../../sharing/import-issues';
 import { element, listen, type Cleanup } from '../../dom';
 import { announceTransferFailure } from './transfer-failure';
@@ -42,6 +49,8 @@ interface DisplayIssue {
   readonly code?: string;
   readonly summary: string;
   readonly remedy: string;
+  readonly remedyKind?: 'bundled-homebrew' | 'library-json';
+  readonly contentKey?: string;
 }
 
 /**
@@ -73,6 +82,15 @@ function compatibilityIssues(error: unknown): readonly DisplayIssue[] {
               : {}),
             summary: (entry as DisplayIssue).summary,
             remedy: (entry as DisplayIssue).remedy,
+            ...(Reflect.get(entry, 'remedyKind') === 'bundled-homebrew' ||
+              Reflect.get(entry, 'remedyKind') === 'library-json'
+              ? { remedyKind: Reflect.get(entry, 'remedyKind') as
+                  'bundled-homebrew' | 'library-json' }
+              : {}),
+            ...(Array.isArray(Reflect.get(entry, 'contentKeys')) &&
+              typeof (Reflect.get(entry, 'contentKeys') as unknown[])[0] === 'string'
+              ? { contentKey: (Reflect.get(entry, 'contentKeys') as string[])[0] }
+              : {}),
           },
         ]
       : [],
@@ -273,13 +291,42 @@ export function createShareControls(
     status.setAttribute('role', error ? 'alert' : 'status');
   }
 
+  function shareAddedAnnouncement(result: {
+    readonly characterId: number;
+    readonly characterName: string;
+  }): Node {
+    const message = document.createDocumentFragment();
+    message.append(freeTextSpan(result.characterName), ' was added. ');
+    message.append(element('a', {
+      text: 'Open character',
+      attributes: {
+        href: `/characters/${String(result.characterId)}`,
+      },
+    }), '.');
+    return message;
+  }
+
   function contentDisclosure(disclosure: ContentImportDisclosure): HTMLElement {
     const label = element('span');
     label.append(
       freeTextSpan(disclosure.name),
-      ` — ${disclosure.kind} — ${catalogLayerLabel(disclosure.catalog_layer)}`,
+      ` — ${disclosure.kind} — ${
+        disclosure.provenance === undefined
+          ? 'Homebrew from the sender — a local copy will be added to your library'
+          : incomingContentProvenanceLabel(disclosure.provenance)
+      }`,
     );
-    return label;
+    if (disclosure.provenance === undefined) return label;
+    const details = contentProvenanceDetails(disclosure.provenance);
+    if (details.length === 0) return label;
+    const technical = element('details');
+    technical.append(element('summary', { text: 'Attribution details' }));
+    for (const detail of details) {
+      const line = element('p');
+      line.append(`${detail.label}: `, freeTextSpan(detail.value));
+      technical.append(line);
+    }
+    return element('span', {}, [label, technical]);
   }
 
   function renderEmbeddedContent(
@@ -301,6 +348,23 @@ export function createShareControls(
   }
 
   function renderPreviewDetails(preview: SharePreview): void {
+    const previewOriginLabel = (
+      disclosure: SharePreview['classes'][number]['class'],
+    ): string => {
+      if (disclosure.incoming) {
+        return disclosure.provenance === undefined
+          ? 'Homebrew from the sender — a local copy will be added to your library'
+          : incomingContentProvenanceLabel(disclosure.provenance);
+      }
+      if (disclosure.provenance !== undefined) {
+        return contentProvenanceLabel(disclosure.provenance);
+      }
+      switch (disclosure.catalog_layer) {
+        case 'bundled': return 'Built into the app';
+        case 'external': return 'Homebrew in your library';
+        case 'unknown': return 'Origin not recorded';
+      }
+    };
     previewDetails.replaceChildren();
     const classSummary = element('span', {
       className: 'share-preview-classes',
@@ -328,13 +392,13 @@ export function createShareControls(
       if (index > 0) previewLayers.append('; ');
       previewLayers.append(
         freeTextSpan(previewCatalogName(item.class, 'class')),
-        ` — ${catalogLayerLabel(item.class.catalog_layer)}`,
+        ` — ${previewOriginLabel(item.class)}`,
       );
       if (item.subclass !== undefined) {
         previewLayers.append(
           ' / ',
           freeTextSpan(previewCatalogName(item.subclass, 'subclass')),
-          ` — ${catalogLayerLabel(item.subclass.catalog_layer)}`,
+          ` — ${previewOriginLabel(item.subclass)}`,
         );
       }
     }
@@ -383,17 +447,31 @@ export function createShareControls(
       // textContent, never innerHTML: content keys and names originate in a
       // share link a stranger may have crafted.
       what.textContent = issue.summary;
-      const linksToLibraryImport = issue.code === 'missing_class' ||
-        issue.code === 'missing_subclass' || issue.code === 'missing_source';
-      const how = linksToLibraryImport
+      const linksToImport = issue.remedyKind !== undefined;
+      const how = linksToImport
         ? document.createElement('a')
         : document.createElement('span');
       how.className = 'share-issue-remedy';
       how.textContent = issue.remedy;
-      if (linksToLibraryImport) {
-        how.setAttribute('href', LIBRARY_IMPORT_ROUTE);
+      if (linksToImport) {
+        const route = issue.remedyKind === 'bundled-homebrew'
+          ? BUNDLED_HOMEBREW_IMPORT_ROUTE
+          : LIBRARY_IMPORT_ROUTE;
+        how.setAttribute(
+          'href',
+          activeFragment === null ? route : `${route}#${activeFragment}`,
+        );
       }
       item.append(what, ' ', how);
+      if (issue.contentKey !== undefined) {
+        const technical = document.createElement('details');
+        const summary = document.createElement('summary');
+        summary.textContent = 'Technical details';
+        const key = document.createElement('code');
+        key.textContent = `Internal content key: ${issue.contentKey}`;
+        technical.append(summary, key);
+        item.append(technical);
+      }
       list.append(item);
     }
     status.replaceChildren(heading, list);
@@ -408,17 +486,16 @@ export function createShareControls(
     announce('Checking share link…');
     try {
       const fragment = fragmentFromShareLink(value);
-      const result = await client.preview(fragment);
       activeFragment = fragment;
+      const result = await client.preview(fragment);
       activePreview = result;
       previewTitle.textContent = result.name;
       renderPreviewDetails(result);
-      renderEmbeddedContent(result.adoptionPlan.incomingContent);
+      renderEmbeddedContent(result.embeddedContent);
       previewPanel.hidden = false;
       addButton.hidden = false;
       announce('Preview ready. Nothing has been imported.');
     } catch (error) {
-      activeFragment = null;
       activePreview = null;
       announceFailure(error);
     } finally {
@@ -452,10 +529,13 @@ export function createShareControls(
           ),
           onCommitted: async (result) => {
             const shareResult = result as typeof result & {
-              readonly result: { readonly characterId: number };
+              readonly result: {
+                readonly characterId: number;
+                readonly characterName: string;
+              };
             };
             await options.onPersistedChange();
-            announce(`Character added as #${shareResult.result.characterId}.`);
+            announce(shareAddedAnnouncement(shareResult.result));
             addButton.hidden = true;
             activeFragment = null;
             activePreview = null;
@@ -488,7 +568,7 @@ export function createShareControls(
             throw new TypeError('Shared character import was refused.');
           }
           await options.onPersistedChange();
-          announce(`Character added as #${result.result.characterId}.`);
+          announce(shareAddedAnnouncement(result.result));
           addButton.hidden = true;
           activeFragment = null;
           activePreview = null;

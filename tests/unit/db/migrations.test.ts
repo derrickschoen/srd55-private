@@ -1860,6 +1860,57 @@ describe('database migration chain', () => {
     }
   });
 
+  it('0044 preserves identities while backfilling only provable origin facts', async () => {
+    const beforeProvenance = DATABASE_MIGRATIONS
+      .slice(0, DATABASE_MIGRATIONS.findIndex(
+        (entry) => entry.id === '0044_catalog_content_provenance',
+      ))
+      .map((entry) => entry.sql)
+      .join('\n');
+    const storage = await storageHolding(`${beforeProvenance}
+      INSERT INTO catalog_content_identities (
+        content_key, content_kind, key_kind, catalog_layer, normalized_name
+      ) VALUES
+        ('2024:class:migration-built-in', 'class', 'bundled-stable', 'bundled', 'migration built in'),
+        ('expanded:content.species:migration-homebrew', 'species', 'asserted', 'external', 'migration homebrew');`);
+    const lifecycle = new DatabaseLifecycle(
+      sqlite3, storage, schema, () => undefined, DATABASE_MIGRATIONS,
+    );
+    lifecycle.open();
+    try {
+      expect(lifecycle.database.allRaw(
+        `SELECT content_key, origin_kind, received, local_derivation,
+                author_label, source_label, license_label, attribution_text
+         FROM catalog_content_provenance
+         WHERE content_key LIKE '%migration%'
+         ORDER BY content_key`,
+      )).toEqual([
+        {
+          content_key: '2024:class:migration-built-in',
+          origin_kind: 'built_in',
+          received: 0,
+          local_derivation: 0,
+          author_label: null,
+          source_label: null,
+          license_label: null,
+          attribution_text: null,
+        },
+        {
+          content_key: 'expanded:content.species:migration-homebrew',
+          origin_kind: 'unknown',
+          received: 0,
+          local_derivation: 0,
+          author_label: null,
+          source_label: null,
+          license_label: null,
+          attribution_text: null,
+        },
+      ]);
+    } finally {
+      lifecycle.close();
+    }
+  });
+
   it('Q4 rejects General background keys and reverse category mutation', () => {
     const database = new sqlite3.oo1.DB(':memory:', 'c');
     try {
