@@ -292,6 +292,7 @@ describe('character list and workspace query builders', () => {
       {
         id: fixture.featSourceId,
         display_name: 'Magic Initiate: Wizard',
+        catalog_layer: 'bundled',
         chosen_list: 'Wizard',
         spellcasting_ability: 'wisdom',
       },

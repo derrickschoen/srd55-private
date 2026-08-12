@@ -11,10 +11,13 @@ import {
   type LevelUpWarningPresentation,
 } from '../../../builder/level-up-wizard';
 import type { Ability } from '../../../domain/enums';
-import type { JsonObject, JsonValue } from '../../../domain/models';
+import type { JsonObject } from '../../../domain/models';
 import type { PlannedCharacterEffect } from '../../../builder/level-up-wizard';
 import { element, listen, type Cleanup } from '../../dom';
 import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
+import type { AuthoringGrant } from '../../../authoring/contracts';
+import { GrantRule, type GrantRuleObject } from '../../../grants/grant-rule';
+import { renderPublishPreviewGrant } from '../homebrew/publish-preview-renderer';
 
 export type FeatStepDraft =
   | {
@@ -68,7 +71,7 @@ function reasonText(reason: FeatEligibilityReason): string {
     case 'already_taken':
       return 'This nonrepeatable feat has already been taken.';
     case 'repeat_configuration_unavailable':
-      return `No unused ${titleCaseIdentifier(reason.field)} configuration remains.`;
+      return `No unused ${titleCaseIdentifier(reason.field)} choice remains.`;
     case 'repeat_configuration_already_used':
       return `${titleCaseIdentifier(reason.field)} “${reason.value}” has already been used for this repeatable feat.`;
     case 'ability_score_unknown':
@@ -76,7 +79,7 @@ function reasonText(reason: FeatEligibilityReason): string {
     case 'feature_unprovable':
       return `Required feature cannot be verified: ${titleCaseIdentifier(reason.feature)}.`;
     case 'repeat_configuration_unprovable':
-      return `Prior ${titleCaseIdentifier(reason.field)} configurations cannot be verified.`;
+      return `Prior ${titleCaseIdentifier(reason.field)} choices cannot be verified.`;
   }
 }
 
@@ -146,18 +149,6 @@ function effectText(effect: PlannedCharacterEffect): string {
   }
 }
 
-function structuredValue(value: JsonValue | undefined): string {
-  if (value === undefined) return 'not supplied';
-  if (value === null) return 'null';
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => structuredValue(item)).join(', ')}]`;
-  }
-  if (typeof value === 'object') {
-    return `{ ${Object.entries(value).map(([key, item]) => `${key}: ${structuredValue(item)}`).join('; ')} }`;
-  }
-  return String(value);
-}
-
 function renderEffects(plan: FeatApplicationPlan): HTMLElement {
   return element('section', { className: 'level-up-feat-plan-section' }, [
     element('h4', { text: 'Applied effects' }),
@@ -179,28 +170,28 @@ function renderEffects(plan: FeatApplicationPlan): HTMLElement {
   ]);
 }
 
+function previewGrant(rule: GrantRuleObject): HTMLLIElement {
+  const normalized = GrantRule.fromObject(rule).toObject();
+  const kind = normalized.kind;
+  const ruleKey = normalized.rule_key;
+  if (typeof kind !== 'string' || typeof ruleKey !== 'string') {
+    throw new TypeError('A planned feat grant has no stable label or kind.');
+  }
+  const item = renderPublishPreviewGrant(normalized as AuthoringGrant);
+  const label = element('p', { text: `Stable grant label: ${ruleKey}` });
+  item.append(label);
+  return item;
+}
+
 function renderGrantRules(plan: FeatApplicationPlan): HTMLElement {
   return element('section', { className: 'level-up-feat-plan-section' }, [
-    element('h4', { text: 'Grant-rule benefits' }),
+    element('h4', { text: 'Choices and proficiencies' }),
     ...(plan.grant_rules.length === 0
-      ? [element('p', { text: 'No grant-rule benefits.' })]
+      ? [element('p', { text: 'No choices or proficiencies.' })]
       : [element(
           'ol',
           {},
-          plan.grant_rules.map((rule) =>
-            element(
-              'li',
-              {},
-              [element(
-                'dl',
-                { className: 'level-up-feat-rule' },
-                Object.entries(rule).flatMap(([key, value]) => [
-                  element('dt', { text: titleCaseIdentifier(key) }),
-                  element('dd', { text: structuredValue(value as JsonValue) }),
-                ]),
-              )],
-            ),
-          ),
+          plan.grant_rules.map(previewGrant),
         )]),
   ]);
 }
@@ -299,7 +290,7 @@ function eligibilityDescription(
     ...(refusedApplications.length === 0
       ? []
       : [
-          element('h4', { text: 'Unavailable returned configurations' }),
+          element('h4', { text: 'Unavailable ways to take this feat' }),
           element(
             'ul',
             {},
@@ -438,16 +429,16 @@ function createCandidateCard(options: {
         abilityPresentation(candidate),
         ...(qualified
           ? [element('fieldset', { className: 'level-up-feat-applications' }, [
-              element('legend', { text: 'Returned configurations' }),
+              element('legend', { text: 'Ways to take this feat' }),
               ...(controls.length === 0
                 ? [element('p', {
-                    text: 'No qualified application configuration was returned.',
+                    text: 'No available way to take this feat was found.',
                   })]
                 : controls),
             ])]
           : []),
         ...(plan === null
-          ? [element('p', { text: 'No application plan was returned.' })]
+          ? [element('p', { text: 'This feat’s effects are unavailable.' })]
           : [renderPlan(plan)]),
       ],
     ),
@@ -542,8 +533,8 @@ export function createFeatStep(options: {
         }),
         element('p', {
           text: options.step === 'feat'
-            ? 'Choose one qualified feat configuration for this class level.'
-            : 'Choose one qualified Epic Boon configuration.',
+            ? 'Choose one available way to take a feat for this class level.'
+            : 'Choose one available way to take an Epic Boon.',
         }),
         element('div', { className: 'level-up-feat-grid' }, cards),
         ...(defer === null ? [] : [

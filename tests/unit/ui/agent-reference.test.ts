@@ -208,6 +208,7 @@ function workspace(): Workspace {
         source_type: 'feat',
         source_definition_id: 9,
         display_name: HOSTILE_SOURCE_NAME,
+        catalog_layer: 'external',
       },
     ],
     spell_lists: ['Cleric', 'Druid', 'Wizard'],

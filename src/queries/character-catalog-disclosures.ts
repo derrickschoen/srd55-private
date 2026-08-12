@@ -9,8 +9,13 @@ import {
   catalogLayerDisclosure,
   type CharacterCatalogDisclosure,
 } from '../catalog/catalog-disclosure';
-import { recordedSourceContentKey } from '../catalog/recorded-source-provenance';
-import { sqlInteger, sqlNullableString, sqlString } from '../db/codecs';
+import { characterSourceCatalogResolution } from '../catalog/recorded-source-provenance';
+import {
+  sqlInteger,
+  sqlNullableInteger,
+  sqlNullableString,
+  sqlString,
+} from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import { GUIDED_SPECIES_SOURCE_MARKER } from '../domain/source-markers';
 
@@ -83,126 +88,64 @@ export function characterCatalogDisclosures(
 
   const speciesCopy = db.one(
     `SELECT copied.name,
-            definition.content_key,
-            identity.catalog_layer,
-            source.display_name AS source_display_name,
-            source.config AS source_config
+            source.id AS source_id
      FROM character_species AS copied
      LEFT JOIN character_source_instances AS source
        ON source.character_id = copied.character_id
       AND source.source_type = 'species'
       AND source.state = 'active'
       AND source.notes = ?
-     LEFT JOIN species_definitions AS definition
-       ON definition.id = source.source_definition_id
-     LEFT JOIN catalog_content_identities AS identity
-       ON identity.content_kind = 'species'
-      AND identity.content_key = definition.content_key
      WHERE copied.character_id = ?`,
     [GUIDED_SPECIES_SOURCE_MARKER, characterId],
     (row) => ({
       name: sqlString(row, 'name'),
-      content_key: sqlNullableString(row, 'content_key'),
-      catalog_layer: catalogLayerDisclosure(
-        sqlNullableString(row, 'catalog_layer'),
-      ),
-      source_display_name: sqlNullableString(row, 'source_display_name'),
-      source_config: sqlNullableString(row, 'source_config'),
+      source_id: sqlNullableInteger(row, 'source_id'),
     }),
   );
   if (speciesCopy !== null) {
-    if (speciesCopy.content_key !== null) {
-      disclosures.push({
-        kind: 'species',
-        name: speciesCopy.name,
-        content_key: speciesCopy.content_key,
-        catalog_layer: speciesCopy.catalog_layer,
-      });
-    } else {
-      const recordedContentKey = recordedSourceContentKey(
-        speciesCopy.source_config,
-      );
-      const templateIdentity =
-        recordedContentKey === null ||
-        speciesCopy.source_display_name === null ||
-        speciesCopy.source_display_name !== speciesCopy.name
-          ? null
-          : db.one(
-              `SELECT template.content_key, identity.catalog_layer
-               FROM species_templates AS template
-               JOIN catalog_content_identities AS identity
-                 ON identity.content_kind = 'species'
-                AND identity.content_key = template.content_key
-               WHERE template.content_key = ?
-                 AND template.name = ?`,
-              [
-                recordedContentKey,
-                speciesCopy.source_display_name,
-              ],
-              (row) => ({
-                content_key: sqlString(row, 'content_key'),
-                catalog_layer: catalogLayerDisclosure(
-                  sqlNullableString(row, 'catalog_layer'),
-                ),
-              }),
-            );
-      disclosures.push({
-        kind: 'species',
-        name: speciesCopy.name,
-        content_key: templateIdentity?.content_key ?? null,
-        catalog_layer: templateIdentity?.catalog_layer ?? 'unknown',
-      });
-    }
+    const resolution = speciesCopy.source_id === null
+      ? { content_key: null, catalog_layer: 'unknown' as const }
+      : characterSourceCatalogResolution(
+          db,
+          speciesCopy.source_id,
+          speciesCopy.name,
+        );
+    disclosures.push({
+      kind: 'species',
+      name: speciesCopy.name,
+      ...resolution,
+    });
   }
 
   const background = db.one(
-    `SELECT copied.name,
-            definition.content_key,
-            identity.catalog_layer
+    `SELECT copied.name, source.id AS source_id
      FROM character_background AS copied
      LEFT JOIN character_source_instances AS source
        ON source.character_id = copied.character_id
       AND source.source_type = 'background'
       AND source.state = 'active'
       AND source.notes = ?
-     LEFT JOIN background_definitions AS definition
-       ON definition.id = source.source_definition_id
-     LEFT JOIN catalog_content_identities AS identity
-       ON identity.content_kind = 'background'
-      AND identity.content_key = definition.content_key
      WHERE copied.character_id = ?`,
     [GUIDED_BACKGROUND_SOURCE_MARKER, characterId],
-    (row): CharacterCatalogDisclosure => ({
-      kind: 'background',
+    (row) => ({
       name: sqlString(row, 'name'),
-      content_key: sqlNullableString(row, 'content_key'),
-      catalog_layer: catalogLayerDisclosure(
-        sqlNullableString(row, 'catalog_layer'),
-      ),
+      source_id: sqlNullableInteger(row, 'source_id'),
     }),
   );
-  if (background !== null) disclosures.push(background);
+  if (background !== null) {
+    const resolution = background.source_id === null
+      ? { content_key: null, catalog_layer: 'unknown' as const }
+      : characterSourceCatalogResolution(
+          db,
+          background.source_id,
+          background.name,
+        );
+    disclosures.push({ kind: 'background', name: background.name, ...resolution });
+  }
 
   const otherActiveSources = db.all(
-    `SELECT source.id, source.source_type, source.display_name,
-            COALESCE(feat.content_key, species.content_key,
-                     background.content_key) AS content_key,
-            identity.catalog_layer
+    `SELECT source.id, source.source_type, source.display_name
      FROM character_source_instances AS source
-     LEFT JOIN feat_definitions AS feat
-       ON source.source_type = 'feat'
-      AND feat.id = source.source_definition_id
-     LEFT JOIN species_definitions AS species
-       ON source.source_type = 'species'
-      AND species.id = source.source_definition_id
-     LEFT JOIN background_definitions AS background
-       ON source.source_type = 'background'
-      AND background.id = source.source_definition_id
-     LEFT JOIN catalog_content_identities AS identity
-       ON identity.content_kind = source.source_type
-      AND identity.content_key = COALESCE(
-            feat.content_key, species.content_key, background.content_key
-          )
      WHERE source.character_id = ?
        AND source.state = 'active'
        AND source.source_type IN ('feat', 'species', 'background')
@@ -221,13 +164,11 @@ export function characterCatalogDisclosures(
       if (kind !== 'feat' && kind !== 'species' && kind !== 'background') {
         throw new Error(`Unsupported catalog source kind "${kind}".`);
       }
+      const sourceId = sqlInteger(row, 'id');
       return {
         kind,
         name: sqlString(row, 'display_name'),
-        content_key: sqlNullableString(row, 'content_key'),
-        catalog_layer: catalogLayerDisclosure(
-          sqlNullableString(row, 'catalog_layer'),
-        ),
+        ...characterSourceCatalogResolution(db, sourceId),
       };
     },
   );

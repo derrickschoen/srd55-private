@@ -5,6 +5,195 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-11 — Domination conformed to the 2024 paladin subclass skeleton
+
+Owner's request, verbatim:
+
+> Help me shape this subclass to follow the conventions set by the
+> vengeance and devotion and glory and ancients paladin subclasses
+
+The convention (Devotion verified in SRD 5.2.1; Vengeance/Glory/Ancients
+2024 PHB, general knowledge): 3 = oath spells + one or two Channel
+Divinity options; 7 = one passive aura-style benefit; 15 = a defensive
+or counter Reaction/passive, Cha-mod/LR or 1/LR, never CD-priced;
+20 = Bonus Action transformation, 10 minutes, 1/LR + level-5-slot
+reload. Owner selected all four recommended mappings:
+
+1. **Level 3 = oath spells + Channel Divinity, two options** (Glory
+   precedent): **Voice of Domination** (immediately after casting
+   *Divine Smite*, expend 1 CD, no action → 1 minute of Bonus-Action
+   slotless *Command*s — the Inspiring Smite wording pattern) and
+   **Foreseen Strike** (when the paladin or a creature within 30 feet
+   misses with an attack roll, Reaction + 1 CD → +Cha to the roll).
+   Both ride the class CD pool; Foreseen strikes' own per-Long-Rest
+   pool is deleted.
+2. **The +1 spell attack/save DC window is dropped** (no convention
+   analogue; ~5 percentage points of Command land rate in the sim).
+   The Foretold Authority feature name retires with it.
+3. **Foreseen Formation (15) repriced**: Reaction, Charisma-modifier
+   uses per Long Rest (the Glorious Defense pattern); no CD cost.
+4. **Dominion Foretold (20) extended to 10 minutes** (capstone
+   convention); 1/LR + level-5-slot reload unchanged.
+
+Consequences recorded: Voice returns to level 3 (the F3 dip row
+reopens, though smite-gating and CD costs remain the guards); level 7
+is Aura of Certainty alone, restoring one-feature-per-slot conformance;
+Voice and Strike now compete for the same CD pool, whose
+one-per-Short-Rest recovery is the class's only Short-Rest resource.
+
+## 2026-08-11 — Foreseen strikes: Long Rest only
+
+Owner's ruling, verbatim (follow-up to the v2 entry below):
+
+> Make it long rest only. I don’t think paladins get anything on a short
+> rest.
+
+Applied: the pool regains on a Long Rest only; mechanics otherwise
+unchanged (Cha-mod Reactions, +Cha to a self or allied attack roll).
+
+**Factual note, surfaced at ruling time**: the premise is not quite
+right — SRD 5.2.1 paladins DO have one Short-Rest hook: Channel
+Divinity "You regain one of its expended uses when you finish a Short
+Rest" (lines 3275–3278). It is the class's only one; no SRD paladin
+subclass feature owns a Short-Rest resource (Devotion: Sacred Weapon
+rides the CD pool, Aura of Devotion and Smite of Protection are
+passive, Holy Nimbus is 1/Long Rest with a level-5-slot reload). The
+Long-Rest cadence for Foreseen strikes therefore matches subclass
+convention even though the stated premise was off. Ruling applied as
+given; the note was surfaced to the owner in the same reply, and any
+reversal will be its own entry.
+
+Sim: burst unchanged (99%/96%/96%/102% of Vengeance); day drops back to
+82–84% (94% at 17) — 11.7/23.8/45.5/61.5 vs 14.3/29.1/54.2/65.5.
+
+## 2026-08-11 — Foreseen strikes v2: a Reaction adds Cha to a self or allied attack roll, per Short/Long Rest
+
+Owner's ruling, verbatim (superseding the miss-to-hit shape from the
+entry below):
+
+> How about foreseen strikes is charisma modifier times per short/long
+> rest, use your reaction to add charisma mod to a self or allied attack
+> roll. ( model it as self, allow for allies)
+
+Effects:
+
+1. Foreseen strikes becomes: Charisma-modifier uses per **Short or Long
+   Rest**; spend a **Reaction** to add the Charisma modifier to an
+   attack roll made by the paladin **or an ally**. Drafting assumptions,
+   flagged in the doc: usable after the d20 is rolled but before the
+   outcome is determined; ally range drafted at 30 feet; minimum one
+   use.
+2. Sim models self-use only per the owner's instruction ("model it as
+   self, allow for allies"): a miss by 3 or less becomes a plain hit, at
+   most once per round (the Reaction), nat 1 stays a miss, pool
+   refreshes every combat.
+
+Sim, this shape (dealt/round vs Vengeance 19.4/34.7/60.2/72.1 burst,
+14.3/29.1/54.2/65.5 day): smite-only burst **19.2**/33.2/57.6/73.4 —
+**99%/96%/96%/102%**, an L3 statistical tie replacing v1's deliberate
+overshoot; day 12.4/25.5/48.4/63.0 — **87–89%**, up from v1's 82–84%
+because the pool now refreshes on Short Rests. The L3 invariant was
+rewritten from a flip to a ±5% parity band, citing this ruling. Ally
+use is unpriced table upside on top of these numbers.
+
+## 2026-08-11 — Domination second batch: Foreseen strikes at 3; the smite rider comes back out
+
+Owner's rulings, verbatim (same session, after the redesign below):
+
+> Lvl 3 , spellcasting mod times per day, turn a miss into a hit
+
+> And take out the bonus d8 from smite, too complicated
+
+Effects:
+
+1. **Foretold Authority loses the +1d8 smite-vs-controlled rider** (from
+   the redesign entry below) — removed as too complicated. The +1 spell
+   attack / save DC window stays.
+2. **Foretold Authority gains Foreseen strikes**: a number of times per
+   Long Rest equal to the paladin's spellcasting (Charisma) modifier,
+   turn a missed attack roll into a hit. Drafting assumptions, flagged
+   in the doc: declared after seeing the miss; the converted hit is not
+   a critical hit; minimum one use.
+
+Sim, final level-3 kit (dealt/round, burst, vs Vengeance
+19.4/34.7/60.2/72.1): smite-only **20.5**/32.9/56.6/71.3 —
+**106%/95%/94%/99% of Vengeance**; the goal of closing the 3–9 gap is
+met and slightly exceeded at 3 in burst. Day mode (3 conversions across
+16 rounds) trails at 82–84%: 11.8/23.8/45.3/60.9. The sim's directional
+invariant was rewritten to encode the deliberate L3-burst flip
+(Domination > Vengeance) and the day-mode ordering (Vengeance ahead
+everywhere), citing this ruling.
+
+## 2026-08-11 — Oath of Domination redesign: Voice to 7 (smite-triggered), new level-3 authority engine, smite rider
+
+Owner's ruling, verbatim (after a sim brainstorm on closing the dealt gap
+to Vengeance at levels 3–9):
+
+> move voice of domination to 7, make it free action + 1 channel divinity
+> on a smite to activate.
+> lvl 3, give +1 to spell attack and spell save dc 1 minute after landing
+> a smite
+> check the oath spells for ones paladins can select anyways.
+
+Follow-up decisions (owner-selected):
+
+1. **Level 7 holds two features** — Voice of Domination moves there and
+   Aura of Certainty stays beside it (not deleted, not folded into 15).
+2. **Level 3 also carries a smite rider** — Divine Smite deals +1d8
+   against a creature under the paladin's recent control (sim lever D:
+   ~+1.7 dealt/round at L3, bringing 3–6 to ~90% of Vengeance).
+3. **Voice's activation is smite-triggered only** — free action + 1
+   Channel Divinity immediately after casting Divine Smite; the old
+   Bonus-Action activation path (and its out-of-combat use) is gone.
+   Castings under Voice remain Bonus-Action slotless *Command*s. The
+   activation no longer includes a first casting, and the smite turn's
+   Bonus Action is already spent, so the ceiling is nine castings per
+   activation, not ten.
+
+Oath-spell check, answered: of the ten oath spells, **only *Command*
+also appears on the paladin's own spell list** (SRD 5.2.1 level-1
+Paladin Spells). Bane, Suggestion, Augury, Clairvoyance, Slow,
+Compulsion, Divination, Dominate Person, and Dream are all off-list
+grants. The table stays as fixed by the owner.
+
+Sim numbers at ruling time (dealt/round, burst, vs Vengeance
+19.5/34.8/60.3/72.0 at 3/6/11/17): smite-only policy 16.6/29.6/51.6/69.0;
+with the rider ~90% of Vengeance at 3–6; adaptive Command-then-smite at
+11/17 trades ~6.5/11 dealt for 8.4/14.4 prevented.
+
+## 2026-08-11 — No personal attribution: the owner's name comes off every homebrew notice
+
+Asked to confirm the Section 15 copyright entry in
+`way-of-the-psionic-fist.md` (which had been filled from the repository's
+git identity), the owner ruled, verbatim:
+
+> Don't put my name on anything. Just attribute the original ogl, or cc-by
+> as required.
+
+Effects:
+
+1. **OGL doc** (`ogl/way-of-the-psionic-fist.md`): the original-content
+   entry "Way of the Psionic Fist Copyright 2026, Derrick Schoen…" is
+   removed from the Section 15 chain. The chain now carries only the
+   Wizards entries, reproduced exactly as published — which is what §6
+   requires for the *copied* content. §6's obligation to add a
+   title/date/holder entry for *original* Open Game Content attaches at
+   distribution; the doc now states that whoever distributes it must add
+   that entry then, and that by this ruling it will not name the owner.
+   `SECTION-15.md` updated to match.
+2. **CC-BY docs** (Barbed Court design + player, Veteran design + player):
+   the "© 2026 Derrick Schoen" lines are removed. CC-BY-4.0 does not
+   require a licensor to name themselves — attribution obligations bind
+   downstream reusers, and §3(a)(1)(A) only requires them to credit what
+   the licensor actually supplies. The notices now instruct attribution by
+   title alone (e.g. "Warrior of the Barbed Court, CC-BY-4.0"). The
+   required SRD 5.2.1 attribution notice is unchanged everywhere.
+3. **Deliberately not changed**: the GitHub account name in
+   `docs/design/2026-08-01-github-spike-evidence.md` (a factual evidence
+   record, not an attribution); the 2026-08-06 entry below that mentions
+   the git identity (this file is verbatim and append-only); git commit
+   authorship (history is never rewritten).
+
 ## 2026-08-10 — Rebuking Shield final: initiative-triggered Hands manifestation with a 3-point shield upgrade; fire/cold resistance dropped
 
 Owner's rulings, verbatim:

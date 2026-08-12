@@ -439,6 +439,7 @@ describe('planner catalog disclosure', () => {
           source_type: 'feat',
           source_definition_id: 7,
           display_name: hostileSource,
+          catalog_layer: 'external',
         }],
       };
       const rendered = interactiveElement(renderEditors({
