@@ -192,6 +192,73 @@ describe('shared multiclass primary-ability query seam', () => {
     ).toEqual(['Fighter', 'Wizard']);
   });
 
+  it('treats an absent authored prerequisite as no requirement while enforcing every declared class requirement', () => {
+    const contentKey = registerAssertedFixtureContentIdentity(db, {
+      kind: 'class',
+      edition: 'expanded',
+      name: 'Freeform',
+    });
+    const freeformId = db.exec(
+      `INSERT INTO class_definitions (
+         content_key, name, rules_edition, progression_type,
+         primary_ability_expression
+       ) VALUES (?, 'Freeform', 'expanded', 'none', NULL)`,
+      [contentKey],
+    ).lastInsertId;
+    db.exec(
+      `INSERT INTO class_progressions (
+         class_definition_id, class_level, grant_rules
+       ) VALUES (?, 1, '[]')`,
+      [freeformId],
+    );
+
+    enterClass('Cleric');
+    expect(() => enterClass('Freeform')).not.toThrow();
+    expect(
+      new MulticlassPrimaryAbilityQueries(db).build(characterId).find(
+        (assessment) => assessment.class_name === 'Freeform',
+      ),
+    ).toMatchObject({
+      status: 'not_applicable',
+      evaluation: null,
+      warning: null,
+    });
+
+    db.exec(
+      `UPDATE class_definitions
+       SET primary_ability_expression = '   '
+       WHERE id = ?`,
+      [freeformId],
+    );
+    expect(
+      new MulticlassPrimaryAbilityQueries(db).build(characterId).find(
+        (assessment) => assessment.class_name === 'Freeform',
+      ),
+    ).toMatchObject({
+      status: 'not_applicable',
+      evaluation: null,
+      warning: null,
+    });
+
+    // Blank Freeform contributes no invented requirement, but it does not
+    // excuse the candidate Wizard's declared Intelligence minimum.
+    expect(() => enterClass('Wizard')).toThrow(
+      'Cannot add Wizard. Wizard requires Intelligence 13 to multiclass; its current score is Intelligence 10.',
+    );
+
+    // Non-empty malformed content is different: the held class now has a
+    // declared requirement that cannot be verified, so entry remains closed.
+    db.exec(
+      `UPDATE class_definitions
+       SET primary_ability_expression = '{broken'
+       WHERE id = ?`,
+      [freeformId],
+    );
+    expect(() => enterClass('Wizard')).toThrow(
+      'Cannot add Wizard. Freeform has a stored primary-ability expression this application cannot read, so its multiclass minimum cannot be judged. Wizard requires Intelligence 13 to multiclass; its current score is Intelligence 10.',
+    );
+  });
+
   it('checks the current-class side and clears both surfaces at the exact threshold', () => {
     db.exec(
       `UPDATE characters SET intelligence = 13, wisdom = 10 WHERE id = ?`,
@@ -302,11 +369,27 @@ describe('shared multiclass primary-ability query seam', () => {
         .build(characterId)
         .find((assessment) => assessment.class_name === 'Chronomancer'),
     ).toMatchObject({
+      status: 'not_applicable',
+      evaluation: null,
+      warning: null,
+    });
+
+    db.exec(
+      `UPDATE class_definitions
+       SET primary_ability_expression = '{broken'
+       WHERE id = ?`,
+      [homebrewId],
+    );
+    expect(
+      new MulticlassPrimaryAbilityQueries(db)
+        .build(characterId)
+        .find((assessment) => assessment.class_name === 'Chronomancer'),
+    ).toMatchObject({
       status: 'unprovable',
       warning: {
         kind: 'multiclass_primary_ability_unprovable',
         detail:
-          'Chronomancer has no stored primary-ability expression, so its multiclass minimum cannot be judged.',
+          'Chronomancer has a stored primary-ability expression this application cannot read, so its multiclass minimum cannot be judged.',
       },
     });
   });

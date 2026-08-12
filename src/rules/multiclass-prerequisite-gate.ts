@@ -26,6 +26,17 @@ export interface MulticlassPrerequisiteClass {
   readonly stored_expression: string | null;
 }
 
+/**
+ * An authored class with no expression declares no multiclass prerequisite.
+ * This is distinct from malformed non-empty content, which remains
+ * unprovable and therefore fail-closed at entry.
+ */
+export function classDefinesMulticlassPrerequisite(
+  row: MulticlassPrerequisiteClass,
+): boolean {
+  return row.stored_expression !== null && row.stored_expression.trim() !== '';
+}
+
 export type EvaluatedMulticlassPrerequisite =
   | (MulticlassPrerequisiteClass & {
       readonly status: 'met';
@@ -275,7 +286,10 @@ function entryAssessment(
   held: readonly MulticlassPrerequisiteClass[],
   totals: Readonly<Record<Ability, number>>,
 ): MulticlassEntryAssessment {
-  const evaluated = evaluateWithTotals([...held, candidate], totals);
+  const evaluated = evaluateWithTotals(
+    [...held, candidate].filter(classDefinesMulticlassPrerequisite),
+    totals,
+  );
   const failures = evaluated.filter(
     (entry): entry is Extract<
       EvaluatedMulticlassPrerequisite,
