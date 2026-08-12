@@ -85,6 +85,27 @@ export interface UpdateCharacterRulesCommand extends CommandBase {
   allow_legacy: boolean;
 }
 
+export interface SetMulticlassPrerequisiteHouseRuleCommand
+  extends CommandBase {
+  readonly type: 'set_multiclass_prerequisite_house_rule';
+  readonly waive: boolean;
+}
+
+export interface RestoreMulticlassPrerequisiteHouseRuleCommand
+  extends CommandBase {
+  readonly type: 'restore_multiclass_prerequisite_house_rule';
+  readonly state:
+    | { readonly status: 'absent' }
+    | {
+        readonly status: 'stored';
+        readonly value: string;
+        readonly note: string | null;
+        readonly created_at: string | null;
+        readonly updated_at: string | null;
+      };
+  readonly integrity: string;
+}
+
 export interface CharacterFlavorValues {
   alignment: string | null;
   appearance: string | null;
@@ -498,6 +519,8 @@ export type CharacterCommandPayload =
   | AllocateAbilitiesCommand
   | SetSlotCommand
   | UpdateCharacterRulesCommand
+  | SetMulticlassPrerequisiteHouseRuleCommand
+  | RestoreMulticlassPrerequisiteHouseRuleCommand
   | UpdateCharacterFlavorCommand
   | UpdateSourceConfigCommand
   | ChooseSpeciesLineageCommand

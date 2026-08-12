@@ -29,6 +29,11 @@ import {
   resolveCharacterAbilities,
   resolvedTotals,
 } from '../rules/ability-contributions';
+import {
+  MULTICLASS_PREREQUISITE_HOUSE_RULE_KEY,
+  readMulticlassPrerequisiteHouseRule,
+  type CharacterHouseRuleKey,
+} from '../rules/multiclass-prerequisite-house-rule';
 import type { AbilityOverrideOutcome } from '../builder/contracts';
 import { AbilityScores } from '../rules/ability-scores';
 import { SheetContentLookup } from '../rules/sheet-content-lookup';
@@ -383,6 +388,8 @@ export interface CharacterFlavor {
 export interface CharacterSheet {
   readonly character_id: number;
   readonly name: string;
+  /** Closed, character-owned rule departures; never user-authored prose. */
+  readonly house_rules: readonly CharacterHouseRuleKey[];
   readonly total_level: number | null;
   readonly proficiency_bonus: UndeterminedSheetNumber;
   readonly ability_scores: readonly SheetAbilityScore[];
@@ -751,6 +758,10 @@ export class CharacterSheetBuilder {
     const multiclassPrerequisites = new MulticlassPrimaryAbilityQueries(
       this.db,
     ).build(characterId);
+    const multiclassHouseRule = readMulticlassPrerequisiteHouseRule(
+      this.db,
+      characterId,
+    );
     const rolls = this.#rolls(characterId);
     const speciesChoice = resolveSpeciesChoice(this.db, characterId);
     const choiceStates =
@@ -979,6 +990,10 @@ export class CharacterSheetBuilder {
     return {
       character_id: characterId,
       name: character.name,
+      house_rules:
+        multiclassHouseRule.status === 'on'
+          ? [MULTICLASS_PREREQUISITE_HOUSE_RULE_KEY]
+          : [],
       total_level: totalLevel,
       proficiency_bonus: {
         id: 'proficiency_bonus',

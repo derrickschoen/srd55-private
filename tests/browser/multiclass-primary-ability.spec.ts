@@ -54,12 +54,12 @@ async function createCleric(page: Page): Promise<CreatedCharacter> {
   });
 }
 
-test('an ineligible multiclass is refused by the level-up escape and command gate while an eligible one proceeds', async ({
+test('the house-rule toggle unlocks the refused multiclass and remains visible on the sheet', async ({
   page,
 }) => {
-  // Measured at 11.9s on the required port-5010 run; 11.9 × 1.5 = 17.85s,
-  // rounded up to the next 100ms.
-  test.setTimeout(17_900);
+  // This follow-on adds a second route boot plus print emulation to the former
+  // 11.9s gate journey; 30s leaves deliberate headroom on the required port.
+  test.setTimeout(30_000);
   const character = await createCleric(page);
   await page.goto(`/characters/${String(character.id)}/level-up`);
   await expect(
@@ -110,11 +110,16 @@ test('an ineligible multiclass is refused by the level-up escape and command gat
     )).filter((row) => Number(row['character_id']) === character.id),
   ).toHaveLength(1);
 
-  const intelligence = page.locator('[data-focus-key="ability-intelligence"]');
-  await intelligence.fill('13');
-  await intelligence.blur();
+  const waiver = page.getByLabel('Waive multiclass ability prerequisites');
+  await waiver.check();
+  await expect(waiver).toBeChecked();
   await expect(wizardOption).toBeEnabled();
-  await classSelect.selectOption({ label: 'Wizard' });
+  await expect(wizardOption).toContainText(
+    'house rule: prerequisites waived',
+  );
+  const wizardValue = await wizardOption.getAttribute('value');
+  if (wizardValue === null) throw new Error('Wizard option has no value.');
+  await classSelect.selectOption(wizardValue);
   await expect(addClass).toBeEnabled();
   await addClass.click();
   await expect(page.getByLabel('Remove Wizard')).toBeEnabled();
@@ -123,4 +128,21 @@ test('an ineligible multiclass is refused by the level-up escape and command gat
       window.staticApp.inspectRows('character_class_levels')
     )).filter((row) => Number(row['character_id']) === character.id).length
   ).toBe(2);
+
+  await page.goto(`/characters/${String(character.id)}/sheet`);
+  const disclosure = page.locator(
+    '[data-house-rule="ignore_multiclass_prerequisites"]',
+  );
+  await expect(disclosure).toHaveText(
+    'Multiclass ability prerequisites are waived for this character.',
+    { timeout: 45_000 },
+  );
+  await expect(
+    page.locator('[data-warning-code="multiclass_primary_ability_unmet"]'),
+  ).toContainText(REQUIREMENT_DETAIL);
+  expect(
+    await page.locator('#character-sheet-facts').textContent(),
+  ).toContain('ignore_multiclass_prerequisites');
+  await page.emulateMedia({ media: 'print' });
+  await expect(disclosure).toBeVisible();
 });

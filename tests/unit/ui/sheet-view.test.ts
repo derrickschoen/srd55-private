@@ -27,6 +27,7 @@ import {
   currentCantripEffect,
   sheetHeaderRouteActions,
   sheetFacts,
+  sheetHouseRuleDisclosures,
   sheetSections,
   spellAppendix,
   type SheetCell,
@@ -83,6 +84,28 @@ describe('catalog provenance disclosure', () => {
   });
 });
 
+describe('multiclass house-rule provenance', () => {
+  it('pairs one closed structured key with readable player-facing disclosure', () => {
+    const value = sheet({
+      house_rules: ['ignore_multiclass_prerequisites'],
+    });
+    expect(sheetHouseRuleDisclosures(value)).toEqual([{
+      key: 'ignore_multiclass_prerequisites',
+      text:
+        'Multiclass ability prerequisites are waived for this character.',
+    }]);
+    expect(sheetFacts(value).house_rules).toEqual([
+      'ignore_multiclass_prerequisites',
+    ]);
+  });
+
+  it('keeps the default sheet free of house-rule claims', () => {
+    const value = sheet();
+    expect(sheetHouseRuleDisclosures(value)).toEqual([]);
+    expect(sheetFacts(value).house_rules).toEqual([]);
+  });
+});
+
 /**
  * D4, ON THE SHEET.
  *
@@ -127,6 +150,7 @@ function sheet(changes: Partial<CharacterSheet> = {}): CharacterSheet {
   return {
     character_id: 7,
     name: HOSTILE_CHARACTER_NAME,
+    house_rules: [],
     total_level: 8,
     proficiency_bonus: {
       id: 'proficiency_bonus',
@@ -1349,6 +1373,9 @@ describe('the character sheet is projected twice from one value', () => {
       items: () => ids.has('item:0'),
       hit_point_rolls: () =>
         [...ids].some((id) => id.startsWith('hit_point_roll:')),
+      house_rules: () =>
+        (parsed.house_rules as unknown[]).length === 0 ||
+        sheetHouseRuleDisclosures(value).length > 0,
       // D28's three. Each has a row of its own, and the per-weapon verdict has
       // one row per weapon so a reader can see WHICH weapon is undecided
       // rather than only how many are.

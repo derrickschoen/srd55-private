@@ -713,6 +713,52 @@ describe('character rule and source commands', () => {
     ).toThrow('A character cannot exceed level 20.');
   });
 
+  it('keeps add_source multiclass entry closed until the character house rule waives ability prerequisites', () => {
+    const characterId = character('Waived source entry');
+    db.exec('UPDATE characters SET intelligence = 10 WHERE id = ?', [
+      characterId,
+    ]);
+    const clericId = classDefinition('Waiver Cleric', 'wisdom', []);
+    const wizardId = classDefinition('Waiver Wizard', 'intelligence', []);
+    add(characterId, {
+      type: 'add_source',
+      source_type: 'class',
+      source_definition_id: clericId,
+      config: { level: 1 },
+    });
+
+    const wizardPayload: AddSourcePayload = {
+      type: 'add_source',
+      source_type: 'class',
+      source_definition_id: wizardId,
+      config: { level: 1 },
+    };
+    expect(() => add(characterId, wizardPayload)).toThrow(
+      'Cannot add Waiver Wizard. Waiver Wizard requires Intelligence 13 to multiclass; its current score is Intelligence 10.',
+    );
+    expect(
+      db.scalar<number>(
+        `SELECT count(*) FROM character_class_levels
+         WHERE character_id = ? AND class_definition_id = ?`,
+        [characterId, wizardId],
+      ),
+    ).toBe(0);
+
+    db.exec(
+      `INSERT INTO character_rule_overrides (character_id, rule_key, value)
+       VALUES (?, 'ignore_multiclass_prerequisites', 'true')`,
+      [characterId],
+    );
+    expect(() => add(characterId, wizardPayload)).not.toThrow();
+    expect(
+      db.scalar<number>(
+        `SELECT count(*) FROM character_class_levels
+         WHERE character_id = ? AND class_definition_id = ?`,
+        [characterId, wizardId],
+      ),
+    ).toBe(1);
+  });
+
   it('adds a nested source tree, rejects non-repeatable duplicates and invalid configurable inputs without residue', () => {
     const magicInitiateId = definition(
       'feat_definitions',

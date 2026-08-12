@@ -53,6 +53,9 @@ import {
 } from '../../helpers/rpc-harness';
 import { openTestDatabase } from '../../helpers/open-db';
 import { raiseClassLevelForTest } from '../../helpers/class-levels';
+import {
+  readMulticlassPrerequisiteHouseRule,
+} from '../../../src/rules/multiclass-prerequisite-house-rule';
 
 const connections: Database[] = [];
 const harnesses: RpcHarness[] = [];
@@ -519,6 +522,48 @@ function choices(db: DatabaseContext, characterId: number) {
 }
 
 describe('minimal character sharing', () => {
+  it('round-trips the multiclass house rule through the existing override wire keys and defaults old characters to off', async () => {
+    const source = await database();
+    const sourceId = source.exec(
+      "INSERT INTO characters (name) VALUES ('Portable house rule')",
+    ).lastInsertId;
+    source.exec(
+      `INSERT INTO character_rule_overrides (character_id, rule_key, value)
+       VALUES (?, 'ignore_multiclass_prerequisites', 'true')`,
+      [sourceId],
+    );
+    const document = exportCharacterShare(source, sourceId);
+    expect(document.overrides).toEqual([{
+      ruleKey: 'ignore_multiclass_prerequisites',
+      value: true,
+    }]);
+
+    const target = await database();
+    const decoded = await decodeShareFragment(
+      await encodeShareFragment(document),
+    );
+    const imported = importCharacterShare(target, decoded);
+    expect(
+      readMulticlassPrerequisiteHouseRule(target, imported.characterId),
+    ).toEqual({ status: 'on' });
+
+    const oldDocument: CharacterShareDocument = {
+      ...document,
+      character: {
+        ...document.character,
+        name: 'Before the house-rule key',
+      },
+      overrides: [],
+    };
+    const oldImported = importCharacterShare(target, oldDocument);
+    expect(
+      readMulticlassPrerequisiteHouseRule(
+        target,
+        oldImported.characterId,
+      ),
+    ).toEqual({ status: 'off' });
+  });
+
   it('rebuilds derived slots and round-trips all opted-in choices in a second database', async () => {
     const source = await database();
     const sourceCatalog = seedCatalog(source);

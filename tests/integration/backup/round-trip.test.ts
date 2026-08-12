@@ -30,6 +30,9 @@ import {
   openTestDatabase,
 } from '../../helpers/open-db';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
+import {
+  readMulticlassPrerequisiteHouseRule,
+} from '../../../src/rules/multiclass-prerequisite-house-rule';
 
 const opened: Database[] = [];
 const lifecycles: DatabaseLifecycle[] = [];
@@ -389,6 +392,36 @@ afterEach(() => {
 });
 
 describe('portable character backup', () => {
+  it('round-trips the multiclass house-rule row without a backup version change', async () => {
+    const source = await database();
+    const sourceCharacterId = source.exec(
+      "INSERT INTO characters (name) VALUES ('Backed-up house rule')",
+    ).lastInsertId;
+    source.exec(
+      `INSERT INTO character_rule_overrides (character_id, rule_key, value)
+       VALUES (?, 'ignore_multiclass_prerequisites', 'true')`,
+      [sourceCharacterId],
+    );
+    const document = exportCharacterBackup(
+      source,
+      sourceCharacterId,
+      '2026-08-12T12:00:00.000Z',
+    );
+    expect(document.version).toBe(CHARACTER_BACKUP_VERSION);
+    expect(document.tables.character_rule_overrides).toEqual([
+      expect.objectContaining({
+        rule_key: 'ignore_multiclass_prerequisites',
+        value: 'true',
+      }),
+    ]);
+
+    const target = await database();
+    const imported = importCharacterBackup(target, document);
+    expect(
+      readMulticlassPrerequisiteHouseRule(target, imported.characterId),
+    ).toEqual({ status: 'on' });
+  });
+
   it('default-fills quantity one in a historical item row and re-exports it', async () => {
     const source = await database();
     const sourceCharacterId = source.exec(
@@ -1221,6 +1254,10 @@ describe('an already-downloaded backup file', () => {
     ).toBe(false);
 
     const { characterId } = importCharacterBackup(target, archived);
+
+    expect(
+      readMulticlassPrerequisiteHouseRule(target, characterId),
+    ).toEqual({ status: 'off' });
 
     expect(
       target.oneRaw(

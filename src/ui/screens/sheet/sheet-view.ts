@@ -39,6 +39,9 @@ import type {
   SheetAuthoredResourceMaximum,
   SheetFeatureValue,
 } from '../../../rules/sheet-feature-values';
+import {
+  MULTICLASS_PREREQUISITE_HOUSE_RULE_KEY,
+} from '../../../rules/multiclass-prerequisite-house-rule';
 
 export interface SheetHeaderRouteAction {
   readonly label: 'All characters' | 'Level Up' | 'Open planner';
@@ -111,6 +114,26 @@ export const SHEET_PRINT_APPENDIX_PROSE_CLASS =
   'sheet-print-appendix-prose';
 export const MISSING_SPELL_TEXT_DISCLOSURE =
   'Full spell text unavailable for this imported or placeholder spell.';
+
+export interface SheetHouseRuleDisclosure {
+  readonly key: typeof MULTICLASS_PREREQUISITE_HOUSE_RULE_KEY;
+  readonly text: 'Multiclass ability prerequisites are waived for this character.';
+}
+
+export function sheetHouseRuleDisclosures(
+  sheet: CharacterSheet,
+): readonly SheetHouseRuleDisclosure[] {
+  return sheet.house_rules.map((rule): SheetHouseRuleDisclosure => {
+    switch (rule) {
+      case MULTICLASS_PREREQUISITE_HOUSE_RULE_KEY:
+        return {
+          key: rule,
+          text:
+            'Multiclass ability prerequisites are waived for this character.',
+        };
+    }
+  });
+}
 
 export interface FlavorAppendixContent {
   readonly id: 'flavor';
@@ -1729,6 +1752,7 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
 export function sheetFacts(sheet: CharacterSheet): Record<string, unknown> {
   return {
     character_id: sheet.character_id,
+    house_rules: [...sheet.house_rules],
     total_level: sheet.total_level,
     proficiency_bonus: sheet.proficiency_bonus.value,
     ability_modifiers: sheet.ability_scores.map((entry) => ({
@@ -2218,7 +2242,24 @@ export function renderSheet(sheet: CharacterSheet): HTMLElement {
   }
   shell.append(header);
 
-  // THE WARNINGS COME FIRST AND ARE NOT COLLAPSIBLE. Each describes a
+  const houseRules = sheetHouseRuleDisclosures(sheet);
+  if (houseRules.length > 0) {
+    const rules = document.createElement('section');
+    rules.className = 'sheet-panel sheet-house-rules';
+    const rulesHeading = document.createElement('h2');
+    rulesHeading.textContent = 'House rules';
+    rules.append(rulesHeading);
+    for (const rule of houseRules) {
+      const disclosure = document.createElement('p');
+      disclosure.dataset.houseRule = rule.key;
+      disclosure.textContent = rule.text;
+      rules.append(disclosure);
+    }
+    shell.append(rules);
+  }
+
+  // AFTER THE CLOSED HOUSE-RULE DISCLOSURE, WARNINGS COME FIRST AMONG THE
+  // DERIVED FACTS AND ARE NOT COLLAPSIBLE. Each describes a
   // degradation of a number printed below it — a crossed armour slot, an unmet
   // Strength requirement, no starting class — so a reader who sees the number
   // without the warning has been told something false.
