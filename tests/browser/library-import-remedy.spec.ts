@@ -699,10 +699,15 @@ test('whole-library download restores authored and imported content into a fresh
     { kind: 'subclass', name: 'Spell Student (Bundled revision 2)' },
     { kind: 'subclass', name: 'Veteran' },
     { kind: 'subclass', name: 'Veteran (Bundled revision 2)' },
+    { kind: 'subclass', name: 'Veteran (Bundled revision 3)' },
     { kind: 'subclass', name: 'Warrior of the Barbed Court' },
     {
       kind: 'subclass',
       name: 'Warrior of the Barbed Court (Bundled revision 2)',
+    },
+    {
+      kind: 'subclass',
+      name: 'Warrior of the Barbed Court (Bundled revision 3)',
     },
   ];
   const sourceCatalog = await page.evaluate(async () => {
@@ -767,9 +772,25 @@ test('whole-library download restores authored and imported content into a fresh
     {
       content_kind: 'subclass',
       superseded_content_key:
+        '2024:content.subclass:veteran-bundled-revision-2',
+      successor_content_key:
+        '2024:content.subclass:veteran-bundled-revision-3',
+      recorded_at: expect.any(String),
+    },
+    {
+      content_kind: 'subclass',
+      superseded_content_key:
         '2024:content.subclass:warrior-of-the-barbed-court',
       successor_content_key:
         '2024:content.subclass:warrior-of-the-barbed-court-bundled-revision-2',
+      recorded_at: expect.any(String),
+    },
+    {
+      content_kind: 'subclass',
+      superseded_content_key:
+        '2024:content.subclass:warrior-of-the-barbed-court-bundled-revision-2',
+      successor_content_key:
+        '2024:content.subclass:warrior-of-the-barbed-court-bundled-revision-3',
       recorded_at: expect.any(String),
     },
   ]);
@@ -880,8 +901,10 @@ test('whole-library download restores authored and imported content into a fresh
         'Spell Student (Bundled revision 2)',
         'Veteran',
         'Veteran (Bundled revision 2)',
+        'Veteran (Bundled revision 3)',
         'Warrior of the Barbed Court',
         'Warrior of the Barbed Court (Bundled revision 2)',
+        'Warrior of the Barbed Court (Bundled revision 3)',
       ].includes(String(row.name))).map((row) => String(row.name)).sort(),
       supersessions: supersessionRows.map((row) => ({
         content_kind: String(row.content_kind),
@@ -910,8 +933,10 @@ test('whole-library download restores authored and imported content into a fresh
     'Spell Student (Bundled revision 2)',
     'Veteran',
     'Veteran (Bundled revision 2)',
+    'Veteran (Bundled revision 3)',
     'Warrior of the Barbed Court',
     'Warrior of the Barbed Court (Bundled revision 2)',
+    'Warrior of the Barbed Court (Bundled revision 3)',
   ]);
 
   await page.goto('/homebrew');

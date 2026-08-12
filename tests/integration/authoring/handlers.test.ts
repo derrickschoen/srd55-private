@@ -456,8 +456,10 @@ describe('catalog authoring RPC handlers', () => {
       .filter((entry) => [
         'Veteran',
         'Veteran (Bundled revision 2)',
+        'Veteran (Bundled revision 3)',
         'Warrior of the Barbed Court',
         'Warrior of the Barbed Court (Bundled revision 2)',
+        'Warrior of the Barbed Court (Bundled revision 3)',
         'Spell Student',
         'Spell Student (Bundled revision 2)',
       ]
@@ -468,9 +470,14 @@ describe('catalog authoring RPC handlers', () => {
         { name: 'Spell Student (Bundled revision 2)', catalog_layer: 'external' },
         { name: 'Veteran', catalog_layer: 'external' },
         { name: 'Veteran (Bundled revision 2)', catalog_layer: 'external' },
+        { name: 'Veteran (Bundled revision 3)', catalog_layer: 'external' },
         { name: 'Warrior of the Barbed Court', catalog_layer: 'external' },
         {
           name: 'Warrior of the Barbed Court (Bundled revision 2)',
+          catalog_layer: 'external',
+        },
+        {
+          name: 'Warrior of the Barbed Court (Bundled revision 3)',
           catalog_layer: 'external',
         },
       ]);

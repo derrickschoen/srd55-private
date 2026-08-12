@@ -125,7 +125,7 @@ test('S2-3 names bundled and published-homebrew subclass arrivals from their sto
     });
     const veteranRows = await window.staticApp.inspectRows(
       'subclass_definitions',
-      { name: 'Veteran (Bundled revision 2)' },
+      { name: 'Veteran (Bundled revision 3)' },
     );
     const veteranKey = veteranRows[0]?.['content_key'];
     if (typeof veteranKey !== 'string' || veteranKey.length === 0) {

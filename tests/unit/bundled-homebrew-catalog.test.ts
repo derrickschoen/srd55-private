@@ -112,13 +112,52 @@ describe('bundled homebrew catalog payload', () => {
     const veteran = catalogSubclass('veteran');
     const entry = BUNDLED_HOMEBREW_CATALOG.find((candidate) => candidate.catalog_key === 'veteran');
 
-    expect(entry?.revisions).toHaveLength(2);
+    expect(entry?.revisions).toHaveLength(3);
     expect(entry?.revisions[0]?.kind === 'subclass'
       ? entry.revisions[0].features.find((feature) => feature.name === "Veteran's Strike")?.description
       : null).toContain('doubled');
     expect(veteran.reference_text).toBe(identity);
     expect(Object.fromEntries(veteran.features.map((feature) => [feature.name, feature.description])))
       .toEqual(Object.fromEntries(features));
+    expect(veteran.features.flatMap((feature) => feature.contributions ?? []))
+      .toEqual([
+        expect.objectContaining({
+          contribution_key: 'deeper-cuts',
+          active_from_level: 3,
+          active_to_level: 20,
+          value: { kind: 'constant', amount: 1 },
+          supersedes_contribution_key: null,
+        }),
+        expect.objectContaining({
+          contribution_key: 'veterans-strike',
+          active_from_level: 9,
+          active_to_level: 20,
+          value: {
+            kind: 'class_level_scale',
+            multiply: 1,
+            divide: 2,
+            round: 'floor',
+          },
+          supersedes_contribution_key: 'deeper-cuts',
+        }),
+        expect.objectContaining({
+          contribution_key: 'veteran-reflexes',
+          active_from_level: 13,
+          active_to_level: 20,
+          target: {
+            kind: 'resource_maximum',
+            display_label: 'Veteran Reflexes',
+            marking_shape: 'boxes',
+          },
+          value: {
+            kind: 'preserved',
+            expression: {
+              kind: 'ref',
+              source: { kind: 'proficiency_bonus' },
+            },
+          },
+        }),
+      ]);
   });
 
   it('matches the Barbed Court player publication and its complete Wisdom third-caster grants', () => {
@@ -198,18 +237,21 @@ describe('bundled homebrew catalog payload', () => {
       rule_key: grant.rule_key,
       list: grant.list,
       count: grant.count,
+      bucket: grant.bucket ?? 'known',
       minimum_spell_level: grant.minimum_spell_level,
       maximum_spell_level: grant.maximum_spell_level,
     } : null))).toEqual(barbed.progression.rows.slice(2).map((row) => [{
       rule_key: 'barbed-court-cantrips',
       list: 'Bard',
       count: 2,
+      bucket: 'known',
       minimum_spell_level: 0,
       maximum_spell_level: 0,
     }, {
       rule_key: 'barbed-court-prepared-spells',
       list: 'Bard',
       count: row.prepared_or_known_count,
+      bucket: 'prepared',
       minimum_spell_level: 1,
       maximum_spell_level: row.maximum_spell_level,
     }]));

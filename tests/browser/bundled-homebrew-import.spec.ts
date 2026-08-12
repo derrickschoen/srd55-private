@@ -97,8 +97,10 @@ test('imports bundled homebrew through publish, applies derived third-caster slo
   for (const name of [
     'Veteran',
     'Veteran (Bundled revision 2)',
+    'Veteran (Bundled revision 3)',
     'Warrior of the Barbed Court',
     'Warrior of the Barbed Court (Bundled revision 2)',
+    'Warrior of the Barbed Court (Bundled revision 3)',
     'Spell Student',
     'Spell Student (Bundled revision 2)',
   ]) {
@@ -285,8 +287,10 @@ test('imports bundled homebrew through publish, applies derived third-caster slo
   for (const name of [
     'Veteran',
     'Veteran (Bundled revision 2)',
+    'Veteran (Bundled revision 3)',
     'Warrior of the Barbed Court',
     'Warrior of the Barbed Court (Bundled revision 2)',
+    'Warrior of the Barbed Court (Bundled revision 3)',
     'Spell Student',
     'Spell Student (Bundled revision 2)',
   ]) {
@@ -307,4 +311,182 @@ test('imports bundled homebrew through publish, applies derived third-caster slo
 
   await page.getByRole('link', { name: '← Characters', exact: true }).click();
   await globalReady(page);
+});
+
+test('Veteran v3 sheet values and the v2-to-v3 replacement review are visible', async ({
+  page,
+}) => {
+  test.setTimeout(65_000);
+  await page.goto('/');
+  await globalReady(page);
+  await page.evaluate(() => window.staticApp.reset());
+  await page.reload();
+  await globalReady(page);
+  await page.getByRole('link', { name: 'Homebrew library', exact: true }).click();
+  await homebrewReady(page);
+  await importBundledHomebrew(
+    page,
+    'Bundled homebrew imported: 3 published, 0 matched existing.',
+  );
+
+  const characters = await page.evaluate(async () => {
+    const classes = await window.appRpc.call<
+      Record<string, never>,
+      readonly { readonly content_key: string; readonly name: string }[]
+    >('queries.characters.guidedClassOptions', {});
+    const rogue = classes.find((entry) => entry.name === 'Rogue');
+    if (rogue === undefined) throw new Error('Bundled Rogue is missing.');
+    const classRows = await window.staticApp.inspectRows('class_definitions', { name: 'Rogue' });
+    const classDefinitionId = Number(classRows[0]?.['id']);
+    const v2Rows = await window.staticApp.inspectRows(
+      'subclass_definitions',
+      { name: 'Veteran (Bundled revision 2)' },
+    );
+    const v3Rows = await window.staticApp.inspectRows(
+      'subclass_definitions',
+      { name: 'Veteran (Bundled revision 3)' },
+    );
+    const v2Key = String(v2Rows[0]?.['content_key']);
+    const v3Key = String(v3Rows[0]?.['content_key']);
+    if (!Number.isSafeInteger(classDefinitionId) || v2Key === '' || v3Key === '') {
+      throw new Error('Veteran lineage fixtures are missing.');
+    }
+    const create = async (name: string) => {
+      const created = await window.appRpc.call<
+        { readonly name: string; readonly class_content_key: string },
+        CharacterRow
+      >('queries.characters.createGuided', {
+        name,
+        class_content_key: rogue.content_key,
+      });
+      return window.appRpc.call<
+        {
+          readonly character_id: number;
+          readonly method: 'manual';
+          readonly scores: Record<string, number>;
+          readonly operation_uuid: string;
+          readonly expected_revision: number;
+        },
+        CharacterRow
+      >('queries.characters.allocateAbilities', {
+        character_id: created.id,
+        method: 'manual',
+        scores: {
+          strength: 10,
+          dexterity: 10,
+          constitution: 10,
+          intelligence: 10,
+          wisdom: 10,
+          charisma: 10,
+        },
+        operation_uuid: crypto.randomUUID(),
+        expected_revision: created.revision,
+      });
+    };
+    const advance = async (
+      current: CharacterRow,
+      targetLevel: number,
+      subclassContentKey?: string,
+    ): Promise<CharacterRow> => window.appRpc.call('commands.execute', {
+      character_id: current.id,
+      operation_uuid: crypto.randomUUID(),
+      expected_revision: current.revision,
+      command: {
+        type: 'level_up_class',
+        class_definition_id: classDefinitionId,
+        target_level: targetLevel,
+        ...(subclassContentKey === undefined
+          ? {}
+          : { subclass_content_key: subclassContentKey }),
+        ...([4, 8, 10, 12].includes(targetLevel)
+          ? {
+              feat_choice: {
+                kind: 'feat',
+                feat_content_key: '2024:feat:ability-score-improvement',
+                config: {},
+                ability_increases: [{ ability: 'dexterity', amount: 2 }],
+              },
+            }
+          : {}),
+      },
+    });
+    let current = await create('Veteran v3 sheet oracle');
+    for (let level = 2; level <= 8; level += 1) {
+      current = await advance(current, level, level === 3 ? v3Key : undefined);
+    }
+    let historical = await create('Veteran v2 replacement oracle');
+    historical = await advance(historical, 2);
+    historical = await advance(historical, 3, v2Key);
+    return {
+      v3CharacterId: current.id,
+      v3Revision: current.revision,
+      v2CharacterId: historical.id,
+      classDefinitionId,
+      v2Key,
+      v3Key,
+    };
+  });
+
+  await page.goto(`/characters/${String(characters.v3CharacterId)}/sheet`);
+  const sneakAttack = page.locator('[data-sheet-id="feature-value:sneak_attack"]');
+  await expect(sneakAttack.locator('[data-sheet-value="feature-value:sneak_attack"]'))
+    .toHaveText('5d6');
+  await expect(sneakAttack).toContainText('Deeper Cuts contributes 1d6.');
+
+  await page.evaluate(async (fixture) => {
+    let revision = fixture.revision;
+    for (let level = 9; level <= 13; level += 1) {
+      const updated = await window.appRpc.call<
+        Record<string, unknown>,
+        CharacterRow
+      >('commands.execute', {
+        character_id: fixture.characterId,
+        operation_uuid: crypto.randomUUID(),
+        expected_revision: revision,
+        command: {
+          type: 'level_up_class',
+          class_definition_id: fixture.classDefinitionId,
+          target_level: level,
+          ...([10, 12].includes(level)
+            ? {
+                feat_choice: {
+                  kind: 'feat',
+                  feat_content_key: '2024:feat:ability-score-improvement',
+                  config: {},
+                  ability_increases: [{ ability: 'dexterity', amount: 2 }],
+                },
+              }
+            : {}),
+        },
+      });
+      revision = updated.revision;
+    }
+  }, {
+    characterId: characters.v3CharacterId,
+    revision: characters.v3Revision,
+    classDefinitionId: characters.classDefinitionId,
+  });
+  await page.reload();
+  await expect(sneakAttack.locator('[data-sheet-value="feature-value:sneak_attack"]'))
+    .toHaveText('13d6');
+  await expect(sneakAttack).toContainText("Veteran's Strike contributes 6d6.");
+  await expect(sneakAttack).toContainText(
+    'Deeper Cuts would contribute 1d6 but is superseded.',
+  );
+  const reflexes = page.locator('[data-sheet-id^="resource:authored:"]').filter({
+    hasText: 'Veteran Reflexes',
+  });
+  await expect(reflexes).toContainText('Veteran Reflexes');
+  await expect(reflexes.locator('.sheet-resource-box')).toHaveCount(5);
+
+  await page.goto(
+    `/homebrew/replacements/${encodeURIComponent(characters.v2Key)}/${encodeURIComponent(characters.v3Key)}`,
+  );
+  await expect(page.locator('.homebrew-status')).toHaveText('Replacement review loaded.');
+  const review = page.getByRole('region', { name: 'Fix affected characters' });
+  await expect(review).toContainText('Veteran v2 replacement oracle');
+  await expect(review).toContainText('Before: Veteran (Bundled revision 2)');
+  await expect(review).toContainText('After Apply: Veteran (Bundled revision 3)');
+  await expect(review.getByRole('button', { name: 'Apply to all listed characters' }))
+    .toBeEnabled();
 });

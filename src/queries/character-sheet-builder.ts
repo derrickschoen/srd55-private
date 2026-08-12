@@ -106,7 +106,9 @@ import type {
 } from '../catalog/catalog-disclosure';
 import { characterCatalogDisclosures } from './character-catalog-disclosures';
 import {
+  resolveSheetAuthoredResources,
   resolveSheetFeatureValues,
+  type SheetAuthoredResourceMaximum,
   type SheetFeatureValue,
 } from '../rules/sheet-feature-values';
 import type { CharacterLevel } from '../domain/enums';
@@ -397,7 +399,7 @@ export interface CharacterSheet {
   readonly skills: readonly SheetSkill[];
   readonly attacks_per_action: AttacksPerAction;
   readonly feature_values: readonly SheetFeatureValue[];
-  readonly resources: readonly SheetResourceMaximum[];
+  readonly resources: readonly (SheetResourceMaximum | SheetAuthoredResourceMaximum)[];
   readonly spells: CharacterSpellSection;
   readonly martial_arts: readonly {
     readonly class_name: string;
@@ -774,49 +776,58 @@ export class CharacterSheetBuilder {
       character.proficiency_bonus_override,
     );
     const totalLevel = characterLevel(classes.map((entry) => entry.level));
+    const featureValueClasses = content.map((entry) => ({
+      class_definition_id: entry.class_definition_id,
+      class_content_key: entry.class_content_key,
+      class_level: entry.class_level as ClassLevel,
+      subclass:
+        entry.subclass === null
+          ? null
+          : {
+              id: entry.subclass.id,
+              content_key: entry.subclass.content_key,
+            },
+    }));
+    const valueContext = {
+      // No acquired contribution exists without at least one class. Keeping
+      // the absence at the provider means this witness is never evaluated.
+      character_level: (totalLevel ?? 1) as CharacterLevel,
+      proficiency_bonus: bonus as PositiveInteger,
+      class_levels: new Map(
+        content.map((entry) => [
+          entry.class_content_key,
+          entry.class_level as ClassLevel,
+        ]),
+      ),
+      ability_modifiers: new Map(
+        abilities.map((ability) => [
+          ability,
+          scores.score(ability).modifier(),
+        ]),
+      ),
+    };
     const featureValues = resolveSheetFeatureValues(
       this.db,
-      content.map((entry) => ({
-        class_definition_id: entry.class_definition_id,
-        class_content_key: entry.class_content_key,
-        class_level: entry.class_level as ClassLevel,
-        subclass:
-          entry.subclass === null
-            ? null
-            : {
-                id: entry.subclass.id,
-                content_key: entry.subclass.content_key,
-              },
-      })),
-      {
-        // No acquired contribution exists without at least one class. Keeping
-        // the absence at the provider means this witness is never evaluated.
-        character_level: (totalLevel ?? 1) as CharacterLevel,
-        proficiency_bonus: bonus as PositiveInteger,
-        class_levels: new Map(
-          content.map((entry) => [
-            entry.class_content_key,
-            entry.class_level as ClassLevel,
-          ]),
-        ),
-        ability_modifiers: new Map(
-          abilities.map((ability) => [
-            ability,
-            scores.score(ability).modifier(),
-          ]),
-        ),
-      },
+      featureValueClasses,
+      valueContext,
     );
-    const resources = resolveSheetResources(content, {
-      charisma: {
-        status: 'present',
-        modifier: scores.score('charisma').modifier(),
-      },
-      wisdom: {
-        status: 'present',
-        modifier: scores.score('wisdom').modifier(),
-      },
-    });
+    const resources = [
+      ...resolveSheetResources(content, {
+        charisma: {
+          status: 'present',
+          modifier: scores.score('charisma').modifier(),
+        },
+        wisdom: {
+          status: 'present',
+          modifier: scores.score('wisdom').modifier(),
+        },
+      }),
+      ...resolveSheetAuthoredResources(
+        this.db,
+        featureValueClasses,
+        valueContext,
+      ),
+    ];
     const spells = this.#spells.build(characterId);
 
     const hitPoints = hitPointMaximum({ classes, scores, rolls: rolls.map });

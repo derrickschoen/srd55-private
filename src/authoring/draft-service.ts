@@ -498,6 +498,7 @@ export class CatalogAuthoringService {
           ...common,
           list: stringValue(grant.list, `grant ${grant.rule_key}.list`),
           count: nullableIntegerValue(grant.count, `grant ${grant.rule_key}.count`),
+          bucket: grant.bucket === 'prepared' ? 'prepared' : 'known',
           minimum_spell_level: nullableIntegerValue(
             grant.level_min,
             `grant ${grant.rule_key}.minimum_spell_level`,
@@ -517,6 +518,7 @@ export class CatalogAuthoringService {
           ).map(spellSchool),
           tags: nullableStringArray(grant.tags, `grant ${grant.rule_key}.tags`),
           count: nullableIntegerValue(grant.count, `grant ${grant.rule_key}.count`),
+          bucket: grant.bucket === 'prepared' ? 'prepared' : 'known',
           minimum_spell_level: nullableIntegerValue(
             grant.level_min,
             `grant ${grant.rule_key}.minimum_spell_level`,

@@ -99,6 +99,8 @@ export type AuthoringDraftGrant =
       readonly rule_key: string;
       readonly list: string;
       readonly count: number | null;
+      /** Absent on pre-E5 drafts, whose authored choices were always known. */
+      readonly bucket?: 'known' | 'prepared';
       readonly minimum_spell_level?: number | null;
       readonly maximum_spell_level: number | null;
     }
@@ -109,6 +111,8 @@ export type AuthoringDraftGrant =
       readonly schools: readonly SpellSchool[];
       readonly tags: readonly string[];
       readonly count: number | null;
+      /** Absent on pre-E5 drafts, whose authored choices were always known. */
+      readonly bucket?: 'known' | 'prepared';
       readonly minimum_spell_level: number | null;
       readonly maximum_spell_level: number | null;
     }
