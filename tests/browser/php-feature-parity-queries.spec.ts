@@ -160,6 +160,7 @@ test('builds the complete workspace editing contract for the seeded character', 
     'starting_class_resolution',
     'available_classes',
     'allow_legacy',
+    'multiclass_prerequisite_house_rule',
     'flavor',
     'configurable_sources',
     'order_sources',
@@ -180,6 +181,7 @@ test('builds the complete workspace editing contract for the seeded character', 
   });
   expect(workspace.revision).toBe(0);
   expect(workspace.allow_legacy).toBe(false);
+  expect(workspace.multiclass_prerequisite_house_rule).toEqual({ status: 'off' });
   expect(workspace.flavor).toEqual({
     alignment: null,
     appearance: null,
