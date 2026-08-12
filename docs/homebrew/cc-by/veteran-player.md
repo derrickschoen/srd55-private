@@ -165,5 +165,5 @@ https://www.dndbeyond.com/srd, licensed under the Creative Commons
 Attribution 4.0 International License
 (https://creativecommons.org/licenses/by/4.0/legalcode).*
 
-*Veteran © 2026 Derrick Schoen, released under CC-BY-4.0. Attribute as:
-"Veteran (Rogue subclass), © 2026 Derrick Schoen, CC-BY-4.0."*
+*Veteran, released under CC-BY-4.0. Attribute as: "Veteran (Rogue
+subclass), CC-BY-4.0."*
