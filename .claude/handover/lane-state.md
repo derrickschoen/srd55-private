@@ -23,7 +23,84 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-12-a (newest - read first)
+## RESTART POINT 2026-08-12-b (newest - read first)
+MAIN e963313d (mirror pushed after verified verdicts). FLOORS: vitest
+278/4,645 all-pass; PW 170 pool; build 0; migrations 0000-0046.
+NINETY-THREE merges. SWEEP 6 COMPLETE — all 13 findings fixed across
+merges 91-93. Party-sync boundary now a451975b (subclass-session
+handoff absorbed; rulings-arc folds into decisions.md verbatim at the
+future sim-sync merge).
+
+- 91ST 37a5eb6a s6c (S6-01/09/10/12/13 provenance+labels): player-words
+  provenance on every seam; mint 0044_catalog_content_provenance
+  ADJUDICATED (provenance columns on the identities table would fold
+  authorship into the pinned content-identity fingerprint via its
+  SELECT * digest slice); share v19 + library v3 + backup v7, all prior
+  formats accepted, received-origin-unknown never invented. THREE codex
+  fix rounds (census/version pins; 13 copy-pin specs + a REAL v17
+  regression — fallback shares now name their content in the existing
+  optional slot; the v17 vitest pin split into decode-stability +
+  fixture-derived emission) + ONE supervisor same-family spec
+  adaptation after the second pool.
+- 92ND b812b9a2 s6a (S6-04/05/11 data integrity): archived lifecycle
+  rides library v3 both ways; S6-05 update-in-place via ROOT-PRESERVING
+  UPDATE — the digest caught the original DELETE-reinsert firing
+  ON DELETE SET NULL on party_document_states and silently severing
+  party linkage; 28 direct character FKs classified in a dynamically
+  enforced audit; S6-11 UNKNOWN sheet facts keyed on frozen fingerprint
+  evidence; mint 0045_character_share_receipts; share v20 = v19 +
+  document identity. Merge fix round 2 (first collision resolution left
+  the keep-both incomplete: library type lost lifecycle, census + v20
+  arity wrong) + THREE supervisor pin adaptations, one of which was
+  OVER-APPLIED to two v2 sites and corrected by the spec-file's own run
+  BEFORE commit (recorded at full length).
+- 93RD e963313d s6b (S6-02/03/06/07/08 one-surface recipient review):
+  lineage as one content w/ history; conflict-free imports still
+  reviewed (bypass branch deleted); computed before/after sheet effects
+  + could-not-compare fallback PROVEN via a schema-admitted unknown
+  edition; explicit persisted Keep decisions, preserved through
+  update-in-place (a Keep is the recipient's record; the sender cannot
+  revoke it); mint 0046. Supervisor CONCLUDED the collision merge
+  (codex sandbox hit read-only git metadata; resolution was codex's,
+  verified by supervisor build run); fix round 2 = FK-classification
+  decision + 8 anchors; fix round 3 = the one-card grouping had
+  appended lineage metadata onto the landed provenance line — now an
+  inert span of its own w/ history separate.
+
+THREE-WAY 0044 COLLISION: s6c/s6a/s6b each independently minted
+migration 0044 (s6a and s6c also both minted share v19). Resolution:
+merge order by readiness; later lanes renumber (0045, 0046) and s6a
+re-versioned to v20. Lesson for parallel waves: assign migration
+numbers and wire versions AT DISPATCH when multiple lanes may mint.
+
+SIM (wt/simsub, PROPOSAL ONLY — never lands autonomously): complete at
+1d070f28, six commits. D233 substitutes (Vengeance->Devotion,
+GWM->Savage Attacker, Valor->Lore) w/ the statistical invariant
+RE-MEASURED and rewritten citing D233; twelve SRD 5.2.1 subclass builds
+cited against the full SRD text w/ SRD-only feat packages; ranged/
+thrown rows per owner directive (six martial ranged rows; wizard/
+sorcerer/bard no melee; Life/Land/Fiend documented ranged-by-posture);
+tools/sim/SUBSTITUTIONS.md (29 rows + guide-numbers caveat); Lore CME
+cells declared upper bounds w/ in-band dagger; 132/132 sim tests.
+
+HOMEBREW ALTERNATIVES: v3 PROPOSAL-READY at scratchpad/
+homebrew-alternatives-v3.md (session-local). Eight designs, sol-drafted
++ opus-reviewed across 3 rounds (1 KEEP as-drafted, rest revised per
+recomputed math; distinctness collisions w/ Hexblade's Curse / Combat
+Inspiration / Dread Ambusher all resolved; EK = covered-by-multiclass;
+cleric damage hole NAMED OPEN).
+
+PROCESS LEDGER (08-12 additions): THREE load-gate chain-slips (uptime
+chained into suite launches; all read sub-4 post-hoc; the rule stands —
+uptime is its OWN foreground command BEFORE any launch). Codex sandbox
+cannot write git metadata in worktrees — supervisor concludes collision
+merges. Flakes: character-list.spec.ts:145 now ×5, guided-builder
+front-door spec ×8 — STABILITY LOOK QUEUED, owner-acknowledged.
+
+QUEUES (owner input pending): sim landing proposal (w/ rulings-arc
+fold); homebrew v3 next step; flake stability look; next sweep.
+
+## RESTART POINT 2026-08-12-a (superseded by 08-12-b)
 MAIN d3c3bfe5 (mirror pushed after verified verdicts). FLOORS: vitest
 275/4,575 all-pass; PW 168 pool (166 + two known flakes isolated-green);
 build 0; migrations 0000-0043. EIGHTY-EIGHT merges. Rulings through
