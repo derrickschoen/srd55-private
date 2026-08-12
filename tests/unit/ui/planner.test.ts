@@ -1243,6 +1243,12 @@ describe('completeness panel wording', () => {
       expect(links.map((link) => elementText(link as unknown as Node))).toEqual([
         'Return to guided equipment and choose a Fighting Style.',
         'Return to guided equipment and choose the required mastered weapons.',
+      ]);
+    } finally {
+      restoreDocument();
+    }
+  });
+
   it('routes incomplete books and preserved out-of-book preparations to addressed spell repairs', () => {
     const restoreDocument = installInteractiveDocument();
     try {
