@@ -202,7 +202,7 @@ async function downloadBytes(
   return Buffer.concat(chunks);
 }
 
-test('v18 names embedded Portable Elf before direct commit and omits the line for SRD-only shares', async ({
+test('v19 names embedded Portable Elf before direct commit and omits the line for SRD-only shares', async ({
   browser,
   page,
 }) => {
@@ -261,7 +261,7 @@ test('v18 names embedded Portable Elf before direct commit and omits the line fo
   const portableWire = JSON.parse(gunzipSync(
     Buffer.from(new URL(portableLink).hash.slice(1), 'base64url'),
   ).toString('utf8')) as unknown[];
-  expect(portableWire[1]).toBe(18);
+  expect(portableWire[1]).toBe(19);
 
   await page.getByRole('link', { name: 'Create a character' }).click();
   await page.getByRole('button', { name: /^Wizard\b/u }).click();
@@ -417,7 +417,7 @@ test('v17 refusal links through library adoption to the exact restored choice', 
   const positional = JSON.parse(gunzipSync(
     Buffer.from(new URL(link).hash.slice(1), 'base64url'),
   ).toString('utf8')) as unknown[];
-  expect(positional[1]).toBe(17);
+  expect(positional[1]).toBe(19);
 
   const profile = await browser.newContext();
   try {
@@ -646,12 +646,13 @@ test('whole-library download restores authored and imported content into a fresh
   ) as LibraryExportDocument;
   expect(emptyDocument).toEqual({
     format: 'dnd-multiclass-spells/library',
-    version: 2,
+    version: 3,
     exported_at: expect.any(String),
     selection: 'all',
     selected_content_keys: [],
     content: [],
     supersessions: [],
+    lifecycle: [],
   });
 
   await page.goto('/homebrew');
@@ -803,8 +804,8 @@ test('whole-library download restores authored and imported content into a fresh
   const libraryDocument = JSON.parse(
     libraryBytes.toString('utf8'),
   ) as LibraryExportDocument;
-  if (libraryDocument.version !== 2) {
-    throw new Error('The production library download was not a v2 document.');
+  if (libraryDocument.version !== 3) {
+    throw new Error('The production library download was not a v3 document.');
   }
   expect(libraryDocument.selection).toBe('all');
   expect(libraryDocument.selected_content_keys).toEqual(

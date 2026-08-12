@@ -25,6 +25,7 @@ import type {
   RpcResponse,
 } from '../../../src/rpc/protocol';
 import {
+  commitCharacterShareImport,
   ensureSharedSpell,
   exportCharacterShare,
   importCharacterShare,
@@ -522,6 +523,110 @@ function choices(db: DatabaseContext, characterId: number) {
 }
 
 describe('minimal character sharing', () => {
+  it('S6-05 keeps a sender lineage stable and requires update-in-place or keep-both', async () => {
+    const source = await database();
+    const sourceId = source.exec(
+      "INSERT INTO characters (name) VALUES ('First delivery')",
+    ).lastInsertId;
+    const first = exportCharacterShare(source, sourceId);
+    expect(exportCharacterShare(source, sourceId).documentIdentity).toEqual(
+      first.documentIdentity,
+    );
+
+    const updateTarget = await database();
+    const firstImported = importCharacterShare(updateTarget, first);
+    source.exec(
+      "UPDATE characters SET name = 'Second delivery', revision = revision + 1 WHERE id = ?",
+      [sourceId],
+    );
+    const second = exportCharacterShare(source, sourceId);
+    expect(second.documentIdentity).toEqual({
+      document_id: first.documentIdentity?.document_id,
+      revision: 1,
+    });
+
+    updateTarget.exec(
+      "UPDATE characters SET name = 'Recipient notes', revision = revision + 1 WHERE id = ?",
+      [firstImported.characterId],
+    );
+    const updatePreview = previewCharacterShare(updateTarget, second);
+    expect(updatePreview.update).toMatchObject({
+      characterId: firstImported.characterId,
+      receivedDocumentRevision: 0,
+      incomingDocumentRevision: 1,
+      locallyModified: true,
+    });
+    expect(() => importCharacterShare(updateTarget, second)).toThrow(
+      'choose whether to update',
+    );
+    const updated = commitCharacterShareImport(
+      updateTarget,
+      second,
+      updatePreview.adoptionPlan.token,
+      Object.freeze({}),
+      'update_existing',
+    );
+    expect(updated.kind).toBe('committed');
+    if (updated.kind !== 'committed') throw new Error('Expected committed update.');
+    expect(updated.result).toEqual({
+      characterId: firstImported.characterId,
+      disposition: 'update_existing',
+    });
+    expect(updateTarget.oneRaw(
+      'SELECT id, name FROM characters',
+    )).toEqual({ id: firstImported.characterId, name: 'Second delivery' });
+
+    const keepBothTarget = await database();
+    const keptFirst = importCharacterShare(keepBothTarget, first);
+    const keepBothPreview = previewCharacterShare(keepBothTarget, second);
+    const keptBoth = commitCharacterShareImport(
+      keepBothTarget,
+      second,
+      keepBothPreview.adoptionPlan.token,
+      Object.freeze({}),
+      'keep_both',
+    );
+    expect(keptBoth.kind).toBe('committed');
+    if (keptBoth.kind !== 'committed') throw new Error('Expected committed clone.');
+    expect(keptBoth.result.disposition).toBe('keep_both');
+    expect(keptBoth.result.characterId).not.toBe(keptFirst.characterId);
+    expect(keepBothTarget.allRaw(
+      'SELECT name FROM characters ORDER BY id',
+    )).toEqual([{ name: 'First delivery' }, { name: 'Second delivery' }]);
+    source.exec(
+      "UPDATE characters SET name = 'Third delivery', revision = revision + 1 WHERE id = ?",
+      [sourceId],
+    );
+    const third = exportCharacterShare(source, sourceId);
+    expect(previewCharacterShare(keepBothTarget, third).update).toMatchObject({
+      characterId: keptBoth.result.characterId,
+      incomingDocumentRevision: 2,
+    });
+
+    const staleTarget = await database();
+    const staleFirst = importCharacterShare(staleTarget, first);
+    const stalePreview = previewCharacterShare(staleTarget, second);
+    staleTarget.exec(
+      'UPDATE characters SET revision = revision + 1 WHERE id = ?',
+      [staleFirst.characterId],
+    );
+    const staleCommit = commitCharacterShareImport(
+      staleTarget,
+      second,
+      stalePreview.adoptionPlan.token,
+      Object.freeze({}),
+      'update_existing',
+    );
+    expect(staleCommit.kind).toBe('stale-plan');
+    expect(staleTarget.oneRaw(
+      'SELECT id, name, revision FROM characters',
+    )).toEqual({
+      id: staleFirst.characterId,
+      name: 'First delivery',
+      revision: 1,
+    });
+  }, 20_000);
+
   it('round-trips the multiclass house rule through the existing override wire keys and defaults old characters to off', async () => {
     const source = await database();
     const sourceId = source.exec(
@@ -555,6 +660,7 @@ describe('minimal character sharing', () => {
       },
       overrides: [],
     };
+    delete (oldDocument as { documentIdentity?: unknown }).documentIdentity;
     const oldImported = importCharacterShare(target, oldDocument);
     expect(
       readMulticlassPrerequisiteHouseRule(
@@ -1508,11 +1614,15 @@ describe('minimal character sharing', () => {
     );
     await expect(client.importCharacter(fragment)).resolves.toEqual({
       characterId: 2,
+      disposition: 'new',
     });
+    const duplicatePlan = await client.preview(fragment);
+    expect(duplicatePlan.update).not.toBeNull();
     await expect(client.commitCharacter(
       fragment,
-      planned.adoptionPlan.token,
+      duplicatePlan.adoptionPlan.token,
       {},
+      'keep_both',
     )).resolves.toMatchObject({
       kind: 'committed',
       result: { characterId: 3 },
@@ -2454,7 +2564,7 @@ describe('D83 ability override sharing', () => {
     const decoded = await decodeShareFragment(
       await encodeShareFragment(exportCharacterShare(source, characterId)),
     );
-    expect(decoded.version).toBe(18);
+    expect(decoded.version).toBe(19);
     expect(decoded.effects).toMatchObject([
       {
         kind: 'ability_override',

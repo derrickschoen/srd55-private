@@ -6,6 +6,7 @@ import {
   type ShareClient,
 } from '../../../sharing/client';
 import type { SharePreview } from '../../../sharing/character-share';
+import type { ShareUpdateDisposition } from '../../../sharing/character-share';
 import type { ContentImportPlan } from '../../../catalog/content-adoption';
 import type { ContentImportDisclosure } from '../../../catalog/content-adoption';
 import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
@@ -183,6 +184,20 @@ export function createShareControls(
     text: 'Add to my characters',
     attributes: { type: 'button', hidden: '' },
   });
+  const updateButton = element('button', {
+    className: 'button-primary',
+    text: 'Update existing character',
+    attributes: { type: 'button', hidden: '' },
+  });
+  const keepBothButton = element('button', {
+    className: 'button-secondary',
+    text: 'Keep both characters',
+    attributes: { type: 'button', hidden: '' },
+  });
+  const updateReview = element('p', {
+    className: 'share-update-review',
+    attributes: { hidden: '' },
+  });
   const previewPanel = element('section', {
     className: 'share-preview',
     attributes: { hidden: '', 'aria-label': 'Shared character preview' },
@@ -202,7 +217,10 @@ export function createShareControls(
     previewDetails,
     previewLayers,
     embeddedContent,
+    updateReview,
     addButton,
+    updateButton,
+    keepBothButton,
   );
 
   const linkOutput = element('input', {
@@ -321,6 +339,16 @@ export function createShareControls(
       }
     }
     previewDetails.append(classSummary, `. ${previewCountsText(preview)}`);
+    const historicalContributionGaps = preview.historicalContributionGaps ?? [];
+    if (historicalContributionGaps.length > 0) {
+      const facts = [...new Set(historicalContributionGaps.flatMap(
+        (gap) => gap.affectedFacts,
+      ))];
+      previewDetails.append(
+        ` UNKNOWN after import: ${facts.join(', ')}. This content predates ` +
+        'structured contributions; review its named successor before upgrading.',
+      );
+    }
 
     previewLayers.replaceChildren();
     previewLayers.hidden = preview.classes.length === 0;
@@ -415,7 +443,24 @@ export function createShareControls(
       renderPreviewDetails(result);
       renderEmbeddedContent(result.adoptionPlan.incomingContent);
       previewPanel.hidden = false;
-      addButton.hidden = false;
+      if (result.update == null) {
+        addButton.hidden = false;
+        updateButton.hidden = true;
+        keepBothButton.hidden = true;
+        updateReview.hidden = true;
+      } else {
+        addButton.hidden = true;
+        updateButton.hidden = false;
+        keepBothButton.hidden = false;
+        updateReview.hidden = false;
+        updateReview.textContent =
+          `This is revision ${String(result.update.incomingDocumentRevision)} ` +
+          `of a character you received at revision ${String(result.update.receivedDocumentRevision)}. ` +
+          `Update “${result.update.name}” in place or keep both copies.` +
+          (result.update.locallyModified
+            ? ' Your existing copy has local changes; updating will replace them after this review.'
+            : ' Your existing copy has not changed since the last receipt.');
+      }
       announce('Preview ready. Nothing has been imported.');
     } catch (error) {
       activeFragment = null;
@@ -430,10 +475,15 @@ export function createShareControls(
     listen(previewButton, 'click', () => {
       void preview(input.value);
     }),
-    listen(addButton, 'click', () => {
+    listen(addButton, 'click', () => commitPreview(null)),
+    listen(updateButton, 'click', () => commitPreview('update_existing')),
+    listen(keepBothButton, 'click', () => commitPreview('keep_both')),
+  );
+
+  function commitPreview(disposition: ShareUpdateDisposition | null): void {
       if (
         activeFragment === null || activePreview === null ||
-        addButton.disabled
+        addButton.disabled || updateButton.disabled || keepBothButton.disabled
       ) {
         return;
       }
@@ -449,13 +499,21 @@ export function createShareControls(
             fragment,
             submitted.token,
             choices,
+            disposition ?? undefined,
           ),
           onCommitted: async (result) => {
             const shareResult = result as typeof result & {
-              readonly result: { readonly characterId: number };
+              readonly result: {
+                readonly characterId: number;
+                readonly disposition: 'new' | ShareUpdateDisposition;
+              };
             };
             await options.onPersistedChange();
-            announce(`Character added as #${shareResult.result.characterId}.`);
+            announce(
+              shareResult.result.disposition === 'update_existing'
+                ? `Character #${String(shareResult.result.characterId)} updated.`
+                : `Character added as #${String(shareResult.result.characterId)}.`,
+            );
             addButton.hidden = true;
             activeFragment = null;
             activePreview = null;
@@ -475,9 +533,18 @@ export function createShareControls(
         return;
       }
       addButton.disabled = true;
-      announce('Adding a new character…');
+      updateButton.disabled = true;
+      keepBothButton.disabled = true;
+      announce(disposition === 'update_existing'
+        ? 'Updating the received character…'
+        : 'Adding a new character…');
       void client
-        .commitCharacter(fragment, activePreview.adoptionPlan.token, {})
+        .commitCharacter(
+          fragment,
+          activePreview.adoptionPlan.token,
+          {},
+          disposition ?? undefined,
+        )
         .then(async (result) => {
           if (result.kind === 'stale-plan') {
             showAdoptionDialog(result.freshPlan);
@@ -488,7 +555,9 @@ export function createShareControls(
             throw new TypeError('Shared character import was refused.');
           }
           await options.onPersistedChange();
-          announce(`Character added as #${result.result.characterId}.`);
+          announce(result.result.disposition === 'update_existing'
+            ? `Character #${String(result.result.characterId)} updated.`
+            : `Character added as #${String(result.result.characterId)}.`);
           addButton.hidden = true;
           activeFragment = null;
           activePreview = null;
@@ -496,8 +565,12 @@ export function createShareControls(
         .catch((error: unknown) => announceFailure(error))
         .finally(() => {
           addButton.disabled = false;
+          updateButton.disabled = false;
+          keepBothButton.disabled = false;
         });
-    }),
+    }
+
+  cleanups.push(
     listen(exportButton, 'click', () => {
       if (exporting === null || exportButton.disabled) {
         return;

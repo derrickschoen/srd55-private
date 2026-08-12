@@ -307,6 +307,15 @@ export const COLUMN_FACTS = {
     created_at: { base: 'degraded', notNull: false },
     updated_at: { base: 'degraded', notNull: false },
   },
+  character_share_receipts: {
+    character_id: { base: 'integer', notNull: true },
+    local_document_id: { base: 'degraded', notNull: true },
+    received_document_id: { base: 'degraded', notNull: false },
+    received_revision: { base: 'integer', notNull: false },
+    baseline_character_revision: { base: 'integer', notNull: false },
+    created_at: { base: 'degraded', notNull: true },
+    updated_at: { base: 'degraded', notNull: true },
+  },
   character_sheet_adjustments: {
     id: { base: 'integer', notNull: true },
     character_id: { base: 'integer', notNull: true },

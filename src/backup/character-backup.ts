@@ -66,6 +66,7 @@ import {
   type PortableContentAggregate,
   type PortableContentSupersession,
 } from './portable-content';
+import { historicalContributionGapForPortable } from '../catalog/historical-contribution-gaps';
 import { CHARACTER_TEXT_LIMITS } from '../domain/character-limits';
 import {
   BACKUP_DIRECT_TABLES,
@@ -213,6 +214,15 @@ export interface CharacterImportResult {
 }
 
 export type CharacterImportNotice =
+  | {
+      readonly kind: 'historical_contributions_not_recorded';
+      readonly content: {
+        readonly contentKey: string;
+        readonly name: string;
+        readonly affectedFacts: readonly string[];
+        readonly successorContentKey: string;
+      };
+    }
   | {
       readonly kind: 'species_effect_template_ref_unresolved';
       readonly effect: {
@@ -3951,6 +3961,25 @@ export function importCharacterBackup(
 
   return db.transaction((transaction) => {
     const notices: CharacterImportNotice[] = [];
+    const usedSubclassKeys = new Set(
+      validated.document.references.subclass_definitions.map((reference) =>
+        reference.content_key
+      ),
+    );
+    for (const entry of validated.document.content) {
+      if (entry.kind !== 'subclass' || !usedSubclassKeys.has(entry.content_key)) continue;
+      const gap = historicalContributionGapForPortable(entry);
+      if (gap === null) continue;
+      notices.push(Object.freeze({
+        kind: 'historical_contributions_not_recorded',
+        content: Object.freeze({
+          contentKey: entry.content_key,
+          name: gap.contentName,
+          affectedFacts: gap.affectedFacts,
+          successorContentKey: gap.successorContentKey,
+        }),
+      }));
+    }
     const restoredSpells = restoreSpellDefinitions(
       transaction,
       validated.legacySpellDefinitions,

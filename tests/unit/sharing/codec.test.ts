@@ -1319,8 +1319,13 @@ describe('character-share positional codec', () => {
     );
   });
 
-  it('pins v18 as frozen v17 plus one appended portable-content absence', () => {
-    expect(shareDocumentToPositional(complete)).toEqual(COMPLETE_V18_WIRE);
+  it('pins v19 as frozen v18 plus one appended document-identity absence', () => {
+    expect(shareDocumentToPositional(complete)).toEqual([
+      ...COMPLETE_V18_WIRE.slice(0, 1),
+      19,
+      ...COMPLETE_V18_WIRE.slice(2),
+      null,
+    ]);
   });
 
   it('accepts ability_override only in a hand-frozen v13 document', () => {
@@ -1590,7 +1595,7 @@ describe('character-share positional codec', () => {
     const positional = shareDocumentToPositional(minimal);
     expect(positional).toEqual([
       'dnd-multiclass-spells-character-share',
-      18,
+      19,
       [
         'Ten',
         null,
@@ -1662,8 +1667,10 @@ describe('character-share positional codec', () => {
       null,
       // Element 21: HA-12 portable content, absent for this SRD-only link.
       null,
+      // Element 22: S6-05 stable document identity, absent in this manual fixture.
+      null,
     ]);
-    expect(positional).toHaveLength(22);
+    expect(positional).toHaveLength(23);
     expect((positional[2] as unknown[]).length).toBe(15);
     expect((positional[3] as unknown[][])[0]).toHaveLength(8);
     expect((positional[4] as unknown[][])[0]).toHaveLength(7);
@@ -2269,6 +2276,7 @@ describe('a share link generated before the sheet inputs travelled', () => {
     currentWithoutSheet.push(null); // expertiseGrants, absent (GF-2)
     currentWithoutSheet.push(null); // levelFeatChoices, absent (LU-1)
     currentWithoutSheet.push(null); // portableContent, absent (HA-12)
+    currentWithoutSheet.push(null); // documentIdentity, absent (S6-05)
     // NOT re-expressed at v6/v7: v6 appended a sourceRef slot to the weapon
     // tuples and v7 (D69) removed it again, so the current weapon tuple is
     // the v5 shape this migrated root already carries.
@@ -2494,6 +2502,7 @@ describe('a share link generated before weapons travelled', () => {
     baseline.push(null); // expertiseGrants (GF-2)
     baseline.push(null); // levelFeatChoices (LU-1)
     baseline.push(null); // portableContent (HA-12)
+    baseline.push(null); // documentIdentity (S6-05)
     const decodedBaseline = positionalToShareDocument(baseline);
 
     const withNullTupleOrigin = [...baseline];
@@ -2535,6 +2544,7 @@ describe('a share link generated before weapons travelled', () => {
     withWeapons.push(null); // expertiseGrants (GF-2)
     withWeapons.push(null); // levelFeatChoices (LU-1)
     withWeapons.push(null); // portableContent (HA-12)
+    withWeapons.push(null); // documentIdentity (S6-05)
     const decoded = positionalToShareDocument(withWeapons);
     expect(decoded.weapons).toEqual([]);
     expect(decoded).not.toHaveProperty('species');
@@ -2563,6 +2573,7 @@ describe('a share link generated before weapons travelled', () => {
     withOrigin.push(null); // expertiseGrants (GF-2)
     withOrigin.push(null); // levelFeatChoices (LU-1)
     withOrigin.push(null); // portableContent (HA-12)
+    withOrigin.push(null); // documentIdentity (S6-05)
     const decoded = positionalToShareDocument(withOrigin);
     expect(decoded.weapons).toEqual([]);
     expect(decoded).not.toHaveProperty('armor');
@@ -2683,6 +2694,7 @@ describe('a share link generated before a character note could travel', () => {
     migratedRoot.push(null); // expertiseGrants (GF-2)
     migratedRoot.push(null); // levelFeatChoices (LU-1)
     migratedRoot.push(null); // portableContent (HA-12)
+    migratedRoot.push(null); // documentIdentity (S6-05)
     const decoded = positionalToShareDocument(migratedRoot);
     expect(decoded.character.notes).toBe(
       'Sent on purpose, by a sharer who opted in.',

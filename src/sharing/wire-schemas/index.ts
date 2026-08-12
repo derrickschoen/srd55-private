@@ -16,6 +16,7 @@ import { WIRE_SCHEMA_V15 } from './v15';
 import { WIRE_SCHEMA_V16 } from './v16';
 import { WIRE_SCHEMA_V17 } from './v17';
 import { WIRE_SCHEMA_V18 } from './v18';
+import { WIRE_SCHEMA_V19 } from './v19';
 import {
   versatileWeaponDamageFromLegacy,
   weaponDamageFromLegacy,
@@ -32,7 +33,7 @@ import {
  * domain requires a new schema version, an adjacent migration, and a
  * hand-frozen fragment fixture. Never edit an existing version.
  */
-export const CURRENT_CHARACTER_SHARE_VERSION = 18 as const;
+export const CURRENT_CHARACTER_SHARE_VERSION = 19 as const;
 
 /**
  * Any change to tuple field order, meaning, membership, or accepted value
@@ -58,6 +59,7 @@ export const SHARE_SCHEMAS = Object.freeze({
   16: WIRE_SCHEMA_V16,
   17: WIRE_SCHEMA_V17,
   18: WIRE_SCHEMA_V18,
+  19: WIRE_SCHEMA_V19,
 } as const);
 
 export type SupportedShareVersion = keyof typeof SHARE_SCHEMAS;
@@ -996,6 +998,23 @@ function migrateV17ToV18(document: unknown): unknown {
   return migrated;
 }
 
+/** V18 predates stable character identity; preserve that absence as null. */
+function migrateV18ToV19(document: unknown): unknown {
+  if (
+    !Array.isArray(document) ||
+    !WIRE_SCHEMA_V18.tuples.root.arities.some((arity) => arity === document.length)
+  ) {
+    throw new TypeError('wire document has an unsupported v18 tuple length.');
+  }
+  const migrated = [...document, null];
+  const versionIndex = WIRE_SCHEMA_V18.tuples.root.fields.findIndex(
+    (field) => field.key === 'version',
+  );
+  if (versionIndex < 0) throw new TypeError('wire v18 schema is missing the version field.');
+  migrated[versionIndex] = 19;
+  return migrated;
+}
+
 /**
  * ADJACENT means each migration lifts exactly one version step; the decoder
  * composes them, so a v1 document runs 1→2, then 2→3, then 3→4, then 4→5 —
@@ -1022,6 +1041,7 @@ export const MIGRATIONS = Object.freeze({
   15: migrateV15ToV16,
   16: migrateV16ToV17,
   17: migrateV17ToV18,
+  18: migrateV18ToV19,
 }) satisfies AdjacentMigrations;
 
 export { WIRE_SCHEMA_V1 } from './v1';
@@ -1042,6 +1062,7 @@ export { WIRE_SCHEMA_V15 } from './v15';
 export { WIRE_SCHEMA_V16 } from './v16';
 export { WIRE_SCHEMA_V17 } from './v17';
 export { WIRE_SCHEMA_V18 } from './v18';
+export { WIRE_SCHEMA_V19 } from './v19';
 export type { WireField, WireSchemaV1 } from './v1';
 export type { WireSchemaV2 } from './v2';
 export type { WireSchemaV14 } from './v14';

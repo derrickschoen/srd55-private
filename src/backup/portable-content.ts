@@ -87,7 +87,8 @@ import {
 import { BackupValidationError, assertExactKeys, backupRecord } from './backup-version';
 
 export const LIBRARY_EXPORT_FORMAT = 'dnd-multiclass-spells/library' as const;
-export const LIBRARY_EXPORT_VERSION = 2 as const;
+export const LIBRARY_EXPORT_VERSION = 3 as const;
+export const PRE_LIFECYCLE_LIBRARY_EXPORT_VERSION = 2 as const;
 export const LEGACY_LIBRARY_EXPORT_VERSION = 1 as const;
 
 export const PORTABLE_CONTENT_LIMITS = Object.freeze({
@@ -130,6 +131,12 @@ export interface PortableContentSupersession {
   readonly recorded_at: string;
 }
 
+export interface PortableContentLifecycle {
+  readonly content_kind: ContentKind;
+  readonly content_key: string;
+  readonly archived_at: string | null;
+}
+
 export interface PortableContentBundle {
   readonly content: readonly PortableContentAggregate[];
   readonly supersessions: readonly PortableContentSupersession[];
@@ -147,6 +154,12 @@ export type LibraryExportDocument = LibraryExportBase & (
   | {
       readonly version: typeof LIBRARY_EXPORT_VERSION;
       readonly supersessions: readonly PortableContentSupersession[];
+      readonly lifecycle: readonly PortableContentLifecycle[];
+    }
+  | {
+      readonly version: typeof PRE_LIFECYCLE_LIBRARY_EXPORT_VERSION;
+      readonly supersessions: readonly PortableContentSupersession[];
+      readonly lifecycle?: never;
     }
   | {
       readonly version: typeof LEGACY_LIBRARY_EXPORT_VERSION;
@@ -1023,6 +1036,37 @@ export function exportLibraryDocument(
     selected_content_keys: Object.freeze(keys),
     content,
     supersessions: portable.supersessions,
+    lifecycle: Object.freeze(content.map((entry) => {
+      const candidates = db.allRaw(
+        `SELECT identity.content_key, identity.archived_at
+         FROM catalog_content_identities AS identity
+         JOIN catalog_content_fingerprints AS fingerprint
+           ON fingerprint.content_kind = identity.content_kind
+          AND fingerprint.content_key = identity.content_key
+         WHERE identity.content_kind = ?
+           AND identity.catalog_layer = 'external'
+           AND fingerprint.fingerprint_scheme = ?
+           AND fingerprint.fingerprint_digest = ?
+           AND fingerprint.fingerprint_role = 'current'
+         ORDER BY identity.content_key`,
+        [entry.kind, entry.fingerprint_scheme, entry.fingerprint_digest],
+      ).filter((candidate) => portableContentKeyForExport(
+        db,
+        entry.kind,
+        String(candidate.content_key) as ContentKey,
+      ) === entry.content_key);
+      if (candidates.length !== 1) {
+        throw new BackupValidationError(
+          `Portable lifecycle source '${entry.content_key}' does not resolve uniquely.`,
+        );
+      }
+      const archivedAt = candidates[0]!.archived_at;
+      return Object.freeze({
+        content_kind: entry.kind,
+        content_key: entry.content_key,
+        archived_at: archivedAt === null ? null : String(archivedAt),
+      });
+    })),
   };
   validateLibraryDocument(document);
   return Object.freeze(document);
@@ -1233,11 +1277,13 @@ export function validateLibraryDocument(input: unknown): asserts input is Librar
   exactKeys(value, [
     'format', 'version', 'exported_at', 'selection',
     'selected_content_keys', 'content',
-    ...(value.version === LIBRARY_EXPORT_VERSION ? ['supersessions'] : []),
+    ...(value.version === LIBRARY_EXPORT_VERSION ? ['supersessions', 'lifecycle'] :
+      value.version === PRE_LIFECYCLE_LIBRARY_EXPORT_VERSION ? ['supersessions'] : []),
   ], 'Library export');
   if (
     value.format !== LIBRARY_EXPORT_FORMAT ||
     value.version !== LIBRARY_EXPORT_VERSION &&
+      value.version !== PRE_LIFECYCLE_LIBRARY_EXPORT_VERSION &&
       value.version !== LEGACY_LIBRARY_EXPORT_VERSION
   ) {
     throw new BackupValidationError('Unsupported library export format or version.');
@@ -1266,8 +1312,85 @@ export function validateLibraryDocument(input: unknown): asserts input is Librar
     supersessions: value.supersessions ?? [],
   });
   const carriedKeys = new Set(content.map((entry) => entry.content_key));
+  const carriedMarkers = new Set(content.map(
+    (entry) => `${entry.kind}\u0000${entry.content_key}`,
+  ));
   if (selectedKeys.some((key) => !carriedKeys.has(key))) {
     throw new BackupValidationError('Library export selected_content_keys must name carried content.');
+  }
+  if (value.version === LIBRARY_EXPORT_VERSION) {
+    if (!Array.isArray(value.lifecycle) || value.lifecycle.length !== content.length) {
+      throw new BackupValidationError('Library export lifecycle must name every carried entry.');
+    }
+    const lifecycleMarkers = new Set<string>();
+    for (const [index, inputLifecycle] of value.lifecycle.entries()) {
+      const lifecycle = backupRecord(
+        inputLifecycle,
+        `Library export lifecycle[${String(index)}]`,
+      );
+      exactKeys(
+        lifecycle,
+        ['content_kind', 'content_key', 'archived_at'],
+        `Library export lifecycle[${String(index)}]`,
+      );
+      if (
+        typeof lifecycle.content_kind !== 'string' ||
+        !(contentKinds as readonly string[]).includes(lifecycle.content_kind) ||
+        typeof lifecycle.content_key !== 'string' ||
+        lifecycle.content_key.length === 0 ||
+        lifecycle.archived_at !== null && (
+          typeof lifecycle.archived_at !== 'string' ||
+          !Number.isFinite(Date.parse(lifecycle.archived_at)) ||
+          new Date(lifecycle.archived_at).toISOString() !== lifecycle.archived_at
+        )
+      ) {
+        throw new BackupValidationError(
+          `Library export lifecycle[${String(index)}] is invalid.`,
+        );
+      }
+      const marker = `${lifecycle.content_kind}\u0000${lifecycle.content_key}`;
+      if (!carriedMarkers.has(marker) || lifecycleMarkers.has(marker)) {
+        throw new BackupValidationError(
+          `Library export lifecycle[${String(index)}] must uniquely name carried content.`,
+        );
+      }
+      lifecycleMarkers.add(marker);
+    }
+    if (lifecycleMarkers.size !== content.length) {
+      throw new BackupValidationError('Library export lifecycle must name every carried entry.');
+    }
+  }
+}
+
+/** Restore library-only lifecycle after content targets have been resolved. */
+export function restorePortableContentLifecycle(
+  db: DatabaseContext,
+  input: unknown,
+  targets: ReadonlyMap<string, ContentKey>,
+): void {
+  validateLibraryDocument(input);
+  const lifecycle = 'lifecycle' in input ? input.lifecycle : input.content.map((entry) => ({
+    content_kind: entry.kind,
+    content_key: entry.content_key,
+    archived_at: null,
+  }));
+  for (const entry of lifecycle) {
+    const target = targets.get(
+      `${entry.content_kind}\u0000${entry.content_key}`,
+    );
+    // Lifecycle belongs to the recipient once an aggregate already exists.
+    // Only identities created by this import receive the sender's state.
+    if (target === undefined) continue;
+    const updated = db.exec(
+      `UPDATE catalog_content_identities SET archived_at = ?
+       WHERE content_kind = ? AND content_key = ?`,
+      [entry.archived_at, entry.content_kind, target],
+    );
+    if (updated.changes !== 1) {
+      throw new BackupValidationError(
+        `Library lifecycle target '${target}' is missing.`,
+      );
+    }
   }
 }
 

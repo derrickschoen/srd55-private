@@ -250,6 +250,12 @@ export const FOREIGN_KEY_FACTS = [
     targetColumns: ['id'],
   },
   {
+    table: 'character_share_receipts',
+    columns: ['character_id'],
+    target: 'characters',
+    targetColumns: ['id'],
+  },
+  {
     table: 'character_sheet_adjustments',
     columns: ['character_id'],
     target: 'characters',

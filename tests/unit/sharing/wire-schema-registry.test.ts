@@ -651,6 +651,28 @@ const VERSION_FIXTURES = {
       },
     },
   },
+  19: {
+    // Independently compressed with Node gzip from a hand-authored v19 tuple.
+    // The final root object is the stable sender document identity.
+    fragment:
+      'H4sIAAAAAAACA6WMMQrDMAwAvxI0W4Onkryg_UAXE4qxBDEocpHsQgn9e6du3QLHDTdcAlLCfUivRbI7-pNFHMuWLZfOhr5lYwhxDgnucZ5uxNprf09XtgZBh8hprSH948z2AGpl7Kz9UQkWcFZiw1_ECAGMX9VrU1gun_UL7d5neQoBAAA',
+    expected: {
+      format: CHARACTER_SHARE_FORMAT,
+      version: CHARACTER_SHARE_VERSION,
+      character: { name: 'V19 Identity Hero' },
+      classes: [],
+      sources: [],
+      selections: [],
+      spellbook: [],
+      preferences: [],
+      overrides: [],
+      acknowledgements: [],
+      documentIdentity: {
+        document_id: 'sender-document-1',
+        revision: 7,
+      },
+    },
+  },
 } satisfies Record<SupportedShareVersion, FrozenFixture>;
 
 const HISTORICAL_SCHEMA_MODULE_SHA256 = {

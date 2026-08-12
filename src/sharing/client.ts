@@ -4,6 +4,7 @@ import type {
   ShareExportOptions,
   ShareImportResult,
   SharePreview,
+  ShareUpdateDisposition,
 } from './character-share';
 import type {
   ContentImportChoices,
@@ -56,6 +57,7 @@ export interface ShareClient {
     fragment: string,
     token: ContentImportPlanToken,
     choices: ContentImportChoices,
+    disposition?: ShareUpdateDisposition,
   ): Promise<ShareImportCommitResult>;
 }
 
@@ -124,14 +126,21 @@ export function createShareClient(rpc: RpcClient): ShareClient {
       fragment: string,
       token: ContentImportPlanToken,
       choices: ContentImportChoices,
+      disposition?: ShareUpdateDisposition,
     ) => rpc.call<
       {
         fragment: string;
         token: ContentImportPlanToken;
         choices: ContentImportChoices;
+        disposition?: ShareUpdateDisposition;
       },
       ShareImportCommitResult
-    >('share.importCharacter', { fragment, token, choices }),
+    >('share.importCharacter', {
+      fragment,
+      token,
+      choices,
+      ...(disposition === undefined ? {} : { disposition }),
+    }),
   });
 }
 

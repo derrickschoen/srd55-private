@@ -115,14 +115,18 @@ describe('character backup adoption RPC', () => {
 describe('library adoption RPC', () => {
   // Measured alone at 2.0s; 2.0 x 1.5 = 3.0s. The 20s guard follows the
   // repository convention for boot-heavy integration tests over 1.5s.
-  it('imports v1 directly and keeps v2 key collisions on preview and commit', async () => {
+  it('imports v1 directly and keeps current key collisions on preview and commit', async () => {
     const harness = await createRpcHarness([]);
     harnesses.push(harness);
     const rpc = new RpcClient(new WorkerTransport(harness.context));
     clients.push(rpc);
     const client = createBackupClient(rpc);
     const current = portableElfLibraryDocument(harness.context.db);
-    const { supersessions: _supersessions, ...withoutSupersessions } = current;
+    const {
+      supersessions: _supersessions,
+      lifecycle: _lifecycle,
+      ...withoutSupersessions
+    } = current;
     const legacy: LibraryExportDocument = {
       ...withoutSupersessions,
       version: 1,
@@ -142,6 +146,7 @@ describe('library adoption RPC', () => {
       'content',
       'exported_at',
       'format',
+      'lifecycle',
       'selected_content_keys',
       'selection',
       'supersessions',
@@ -149,12 +154,13 @@ describe('library adoption RPC', () => {
     ]);
     expect(emptyExport).toEqual({
       format: 'dnd-multiclass-spells/library',
-      version: 2,
+      version: 3,
       exported_at: expect.any(String),
       selection: 'all',
       selected_content_keys: [],
       content: [],
       supersessions: [],
+      lifecycle: [],
     });
     await expect(rpc.call('backup.importLibrary', {
       document: legacy,

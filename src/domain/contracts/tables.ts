@@ -182,6 +182,14 @@ export const TABLE_SCOPES = {
     share: false,
     backupReference: false,
   },
+  character_share_receipts: {
+    role: 'catalog_registry',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
   character_class_levels: {
     role: 'character_owned',
     snapshot: true,
@@ -1342,6 +1350,7 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'character_operations',
   'character_rule_overrides',
   'character_save_points',
+  'character_share_receipts',
   'character_sheet_adjustments',
   'character_skill_grants',
   'character_skill_expertise_grants',

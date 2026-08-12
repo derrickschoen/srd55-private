@@ -64,13 +64,13 @@ function exactShareChoice(document: CharacterShareDocument) {
 describe('lineage-chosen character sharing', () => {
   // Measured alone at 2.1s; 2.1 × 1.5 = 3.15s. The 20s guard follows the
   // repository convention for boot-heavy integration tests over 1.5s.
-  it('embeds content-v2 in v18 and restores the exact level-5 High Elf choice in both directions', async () => {
+  it('embeds content-v2 in v19 and restores the exact level-5 High Elf choice in both directions', async () => {
     const source = await database();
     importLibraryDocument(source, portableElfLibraryDocument(source));
     const sourceId = await createLevelFiveHighElf(source, PORTABLE_ELF_KEY);
 
     const exported = exportCharacterShare(source, sourceId);
-    expect(shareDocumentToPositional(exported)[1]).toBe(18);
+    expect(shareDocumentToPositional(exported)[1]).toBe(19);
     expect(exported.portableContent?.content.map((entry) => ({
       kind: entry.kind,
       content_key: entry.content_key,
@@ -105,9 +105,9 @@ describe('lineage-chosen character sharing', () => {
         catalog_layer: 'external',
       }],
     });
-    if (encoded.kind !== 'encoded') throw new Error('Expected a v18 fragment.');
+    if (encoded.kind !== 'encoded') throw new Error('Expected a v19 fragment.');
     const decoded = await decodeShareFragment(encoded.fragment);
-    expect(shareDocumentToPositional(decoded)[1]).toBe(18);
+    expect(shareDocumentToPositional(decoded)[1]).toBe(19);
 
     const target = await database();
     const preview = previewCharacterShare(target, decoded);
@@ -164,11 +164,11 @@ describe('lineage-chosen character sharing', () => {
         contentKey: OVERSIZED_PORTABLE_ELF_KEY,
       }],
     });
-    if (encoded.kind !== 'encoded') throw new Error('Expected a v17 fallback.');
+    if (encoded.kind !== 'encoded') throw new Error('Expected a v19 reference-only document.');
     const decoded = await decodeShareFragment(encoded.fragment);
     const positional = shareDocumentToReferencePositional(decoded);
-    expect(positional[1]).toBe(17);
-    expect(positional).toHaveLength(21);
+    expect(positional[1]).toBe(19);
+    expect(positional).toHaveLength(23);
     expect(decoded.portableContent).toBeUndefined();
     expect(exactShareChoice(decoded)).toEqual({
       source: expect.objectContaining({

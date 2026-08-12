@@ -42,6 +42,7 @@ interface FragmentParams {
   readonly fragment: string;
   readonly choices?: import('../../catalog/content-adoption').ContentImportChoices;
   readonly token?: import('../../catalog/content-adoption').ContentImportPlanToken;
+  readonly disposition?: import('../../sharing/character-share').ShareUpdateDisposition;
 }
 
 function isExportParams(params: unknown): params is ExportParams {
@@ -60,11 +61,13 @@ function isFragmentParams(params: unknown): params is FragmentParams {
   return (
     isRecord(params) &&
     Object.keys(params).every((key) =>
-      ['fragment', 'choices', 'token'].includes(key)) &&
+      ['fragment', 'choices', 'token', 'disposition'].includes(key)) &&
     typeof params.fragment === 'string' &&
     (params.choices === undefined || isContentImportChoices(params.choices)) &&
     (params.token === undefined ||
       typeof params.token === 'string' && /^[0-9a-f]{64}$/u.test(params.token))
+    && (params.disposition === undefined ||
+      params.disposition === 'update_existing' || params.disposition === 'keep_both')
   );
 }
 
@@ -123,6 +126,7 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
               document,
               params.token,
               params.choices ?? Object.freeze({}),
+              params.disposition ?? null,
             );
       } catch (error) {
         // The generic registry catch keeps only `error.message`, so structured

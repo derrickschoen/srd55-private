@@ -229,7 +229,9 @@ test('creates, independently verifies, previews, and explicitly imports a durabl
   // mints v15 by appending the Expertise-grant collection at the root. LU-1
   // mints v16 by appending durable class-level feat occurrences. D104 mints
   // v17 by appending alignment, appearance, and backstory to the character.
-  expect(positional[1]).toBe(17);
+  // v18 appended portable authored content; v19 appends the sender's stable
+  // document identity so a later delivery can be reviewed as an update.
+  expect(positional[1]).toBe(19);
   expect((positional[2] as unknown[])[0]).toBe('Journey Hero 🧙');
   // FIFTEEN since v17, with notes and the allocation signal still in their
   // frozen positions, followed by three null flavor absences.
@@ -250,13 +252,18 @@ test('creates, independently verifies, previews, and explicitly imports a durabl
   // Expertise grants as the twentieth root position. V16 appends level feat
   // choices as the twenty-first. Absent data is an
   // occupied null slot, never a shorter tuple.
-  expect(positional).toHaveLength(21);
+  expect(positional).toHaveLength(23);
   expect(positional[15]).toBeNull();
   expect(positional[16]).toBeNull();
   expect(positional[17]).toBeNull();
   expect(positional[18]).toBeNull();
   expect(positional[19]).toBeNull();
   expect(positional[20]).toBeNull();
+  expect(positional[21]).toBeNull();
+  expect(positional[22]).toEqual({
+    document_id: expect.any(String),
+    revision: 0,
+  });
 
   const freshProfile = await browser.newContext();
   try {
@@ -288,17 +295,22 @@ test('creates, independently verifies, previews, and explicitly imports a durabl
 
     await freshPage.reload();
     await ready(freshPage);
+    await expect(freshPage.getByText(
+      'Update “Journey Hero 🧙” in place or keep both copies.',
+      { exact: false },
+    )).toBeVisible();
     await expect(
-      freshPage.getByRole('button', { name: 'Add to my characters' }),
+      freshPage.getByRole('button', { name: 'Update existing character' }),
+    ).toBeVisible();
+    await expect(
+      freshPage.getByRole('button', { name: 'Keep both characters' }),
     ).toBeVisible();
     expect(
       await freshPage.evaluate(() =>
         window.staticApp.inspectRows('characters'),
       ),
     ).toHaveLength(1);
-    await freshPage
-      .getByRole('button', { name: 'Add to my characters' })
-      .click();
+    await freshPage.getByRole('button', { name: 'Keep both characters' }).click();
     await expect(freshPage.locator('.share-status')).toContainText(
       'Character added as #2.',
     );
@@ -356,7 +368,7 @@ test('oversized share refusal exposes no link, copy, share, or QR output', async
   await expect.soft(page.locator('.share-qr')).not.toHaveAttribute('src');
 });
 
-test('fits authored content into v18 and imports it with the dependent character', async ({
+test('fits authored content into v19 and imports it with the dependent character', async ({
   browser,
   page,
 }) => {
@@ -382,7 +394,7 @@ test('fits authored content into v18 and imports it with the dependent character
   const positional = JSON.parse(gunzipSync(
     Buffer.from(new URL(link).hash.slice(1), 'base64url'),
   ).toString('utf8')) as unknown[];
-  expect(positional[1]).toBe(18);
+  expect(positional[1]).toBe(19);
   expect(positional[21]).toMatchObject({
     content: [expect.objectContaining({
       kind: 'species',
@@ -416,7 +428,7 @@ test('fits authored content into v18 and imports it with the dependent character
   }
 });
 
-test('falls back to v17, warns by content name, and the recipient refuses by the same name', async ({
+test('omits oversized content, preserves v19 identity, and the recipient refuses by name', async ({
   browser,
   page,
 }) => {
@@ -443,8 +455,13 @@ test('falls back to v17, warns by content name, and the recipient refuses by the
   const positional = JSON.parse(gunzipSync(
     Buffer.from(new URL(link).hash.slice(1), 'base64url'),
   ).toString('utf8')) as unknown[];
-  expect(positional[1]).toBe(17);
-  expect(positional).toHaveLength(21);
+  expect(positional[1]).toBe(19);
+  expect(positional).toHaveLength(23);
+  expect(positional[21]).toBeNull();
+  expect(positional[22]).toEqual({
+    document_id: expect.any(String),
+    revision: 0,
+  });
 
   const freshProfile = await browser.newContext();
   try {

@@ -92,6 +92,11 @@ export function portableElfLibraryDocument(
       aggregate,
     }],
     supersessions: [],
+    lifecycle: [{
+      content_kind: 'species',
+      content_key: contentKey,
+      archived_at: null,
+    }],
   };
 }
 

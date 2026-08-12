@@ -198,6 +198,11 @@ export interface ShareCharacter {
   readonly notes?: string;
 }
 
+export interface ShareDocumentIdentity {
+  readonly document_id: string;
+  readonly revision: number;
+}
+
 export interface ShareClass {
   readonly id: number;
   readonly classKey: string;
@@ -799,6 +804,8 @@ export interface CharacterShareDocument {
   readonly attunementSlots?: ShareAttunementSlots;
   /** V18: exact external aggregate closure plus immutable version lineage. */
   readonly portableContent?: PortableContentBundle;
+  /** V19: absent only when an older link was migrated. */
+  readonly documentIdentity?: ShareDocumentIdentity;
 }
 
 export class ShareValidationError extends TypeError {
@@ -1964,6 +1971,7 @@ export function validateShareDocument(
       'items',
       'attunementSlots',
       'portableContent',
+      'documentIdentity',
     ],
     'document',
   );
@@ -2936,6 +2944,25 @@ export function validateShareDocument(
     }
   }
 
+  let documentIdentity: ShareDocumentIdentity | undefined;
+  if (source.documentIdentity !== undefined) {
+    const identity = record(source.documentIdentity, 'documentIdentity');
+    exactKeys(identity, ['document_id', 'revision'], [], 'documentIdentity');
+    documentIdentity = Object.freeze({
+      document_id: text(
+        identity.document_id,
+        'documentIdentity.document_id',
+        128,
+      ),
+      revision: integer(
+        identity.revision,
+        'documentIdentity.revision',
+        0,
+        Number.MAX_SAFE_INTEGER,
+      ),
+    });
+  }
+
   return {
     format: CHARACTER_SHARE_FORMAT,
     version: CHARACTER_SHARE_VERSION,
@@ -2963,5 +2990,6 @@ export function validateShareDocument(
     ...(items === undefined ? {} : { items }),
     ...(attunementSlots === undefined ? {} : { attunementSlots }),
     ...(portableContent === undefined ? {} : { portableContent }),
+    ...(documentIdentity === undefined ? {} : { documentIdentity }),
   };
 }
