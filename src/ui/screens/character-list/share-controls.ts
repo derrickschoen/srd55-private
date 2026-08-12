@@ -456,9 +456,11 @@ export function createShareControls(
         updateReview.textContent =
           `This is revision ${String(result.update.incomingDocumentRevision)} ` +
           `of a character you received at revision ${String(result.update.receivedDocumentRevision)}. ` +
-          `Update “${result.update.name}” in place or keep both copies.` +
+          `Update “${result.update.name}” in place or keep both copies. ` +
+          'Updating replaces the shared sheet and its edit/undo history. ' +
+          'Save points, party publication linkage, and private sections omitted from the link stay local.' +
           (result.update.locallyModified
-            ? ' Your existing copy has local changes; updating will replace them after this review.'
+            ? ' Your existing copy has local changes; shared changes will be replaced after this review.'
             : ' Your existing copy has not changed since the last receipt.');
       }
       announce('Preview ready. Nothing has been imported.');

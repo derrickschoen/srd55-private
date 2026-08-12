@@ -299,6 +299,9 @@ test('creates, independently verifies, previews, and explicitly imports a durabl
       'Update “Journey Hero 🧙” in place or keep both copies.',
       { exact: false },
     )).toBeVisible();
+    await expect(freshPage.locator('.share-update-review')).toContainText(
+      'Save points, party publication linkage, and private sections omitted from the link stay local.',
+    );
     await expect(
       freshPage.getByRole('button', { name: 'Update existing character' }),
     ).toBeVisible();

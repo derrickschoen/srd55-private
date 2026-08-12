@@ -183,7 +183,7 @@ export const TABLE_SCOPES = {
     backupReference: false,
   },
   character_share_receipts: {
-    role: 'catalog_registry',
+    role: 'character_owned',
     snapshot: false,
     backupDirect: false,
     backup: false,

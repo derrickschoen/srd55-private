@@ -2194,6 +2194,59 @@ function shareUpdatePreview(
   });
 }
 
+/**
+ * Replace only the incoming share scope. The character root is deliberately
+ * retained: deleting it would fire unrelated FK actions such as severing a
+ * party publication. Save points and local sheet adjustments are likewise
+ * recipient-owned and survive. Audit/undo rows address the replaced graph, so
+ * they are reset explicitly instead of being left capable of replaying stale
+ * row ids. Opt-in sections survive when the sender did not include them.
+ */
+function clearSharedCharacterForUpdate(
+  db: DatabaseContext,
+  characterId: number,
+  document: CharacterShareDocument,
+): void {
+  const directTables = [
+    SHARE_TABLES.character_attunement_slots,
+    SHARE_TABLES.character_level_feat_choices,
+    SHARE_TABLES.character_effects,
+    SHARE_TABLES.character_skill_expertise_grants,
+    SHARE_TABLES.character_skill_grants,
+    SHARE_TABLES.spell_selection_slots,
+    SHARE_TABLES.wizard_spellbook_entries,
+    SHARE_TABLES.character_items,
+    SHARE_TABLES.character_weapons,
+    SHARE_TABLES.character_class_levels,
+    SHARE_TABLES.character_source_instances,
+    SHARE_TABLES.character_armor,
+    SHARE_TABLES.character_background,
+    SHARE_TABLES.character_hit_point_rolls,
+    SHARE_TABLES.character_rule_overrides,
+    SHARE_TABLES.character_skill_proficiencies,
+    SHARE_TABLES.character_species_traits,
+    SHARE_TABLES.character_species,
+    SHARE_TABLES.character_spell_preferences,
+  ] as const;
+  for (const table of directTables) {
+    db.exec(`DELETE FROM ${table} WHERE character_id = ?`, [characterId]);
+  }
+  if (document.loadouts !== undefined) {
+    db.exec(
+      `DELETE FROM ${SHARE_TABLES.spell_loadouts} WHERE character_id = ?`,
+      [characterId],
+    );
+  }
+  if (document.acknowledgements !== undefined) {
+    db.exec(
+      `DELETE FROM ${SHARE_TABLES.warning_acknowledgements} WHERE character_id = ?`,
+      [characterId],
+    );
+  }
+  db.exec('DELETE FROM change_log WHERE character_id = ?', [characterId]);
+  db.exec('DELETE FROM character_operations WHERE character_id = ?', [characterId]);
+}
+
 function insertCharacterShare(
   db: DatabaseContext,
   document: CharacterShareDocument,
@@ -2213,27 +2266,57 @@ function insertCharacterShare(
           [update.characterId],
         )
       : null;
+    let characterId: number;
     if (replacing) {
-      const removed = db.exec(
-        'DELETE FROM characters WHERE id = ? AND revision = ?',
-        [update.characterId, update.reviewedCharacterRevision],
+      const replaced = db.exec(
+        `UPDATE characters SET
+           name = ?, strength = ?, dexterity = ?, constitution = ?,
+           intelligence = ?, wisdom = ?, charisma = ?,
+           ability_allocation_method = ?, proficiency_bonus_override = ?,
+           rules_edition_preference = ?, allow_legacy = ?, revision = 0,
+           alignment = COALESCE(?, alignment),
+           appearance = COALESCE(?, appearance),
+           backstory = COALESCE(?, backstory),
+           notes = COALESCE(?, notes), updated_at = ?
+         WHERE id = ? AND revision = ?`,
+        [
+          c.name,
+          c.strength ?? 10,
+          c.dexterity ?? 10,
+          c.constitution ?? 10,
+          c.intelligence ?? 10,
+          c.wisdom ?? 10,
+          c.charisma ?? 10,
+          c.ability_allocation_method ?? null,
+          c.proficiency_bonus_override ?? null,
+          c.rules_edition_preference ?? '2024',
+          c.allow_legacy === true ? 1 : 0,
+          c.alignment ?? null,
+          c.appearance ?? null,
+          c.backstory ?? null,
+          c.notes ?? null,
+          now,
+          update.characterId,
+          update.reviewedCharacterRevision,
+        ],
       );
-      if (removed.changes !== 1 || preservedLocalDocumentId === null) {
+      if (replaced.changes !== 1 || preservedLocalDocumentId === null) {
         throw new ShareValidationError(
           'the existing received character changed; preview the share again.',
         );
       }
-    }
-    const characterId = db.exec(
-      `INSERT INTO characters (${replacing ? 'id, ' : ''}
+      clearSharedCharacterForUpdate(db, update.characterId, document);
+      characterId = update.characterId;
+    } else {
+      characterId = db.exec(
+      `INSERT INTO characters (
          name, strength, dexterity, constitution, intelligence, wisdom,
          charisma, ability_allocation_method, proficiency_bonus_override,
          rules_edition_preference, allow_legacy, revision,
          alignment, appearance, backstory, notes,
          created_at, updated_at
-       ) VALUES (${replacing ? '?, ' : ''}?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
       [
-        ...(replacing ? [update.characterId] : []),
         c.name,
         // `?? 10` refills the scores the exporter compressed away — which is
         // exactly why the allocation signal below must travel independently:
@@ -2258,7 +2341,8 @@ function insertCharacterShare(
         now,
         now,
       ],
-    ).lastInsertId;
+      ).lastInsertId;
+    }
     const generator = configuredChoiceSlotGenerator(db);
     const rootsByRef = new Map<number, number[]>();
     const classLevelIdsByRef = new Map<number, number>();
@@ -3144,7 +3228,22 @@ function insertCharacterShare(
     // chosen material and total level before the transaction can commit.
     reconcileCharacterLevelDependentSources(db, characterId, generator);
     if (document.documentIdentity !== undefined && recordReceipt) {
-      if (update !== null && disposition === 'keep_both') {
+      if (replacing) {
+        const refreshed = db.exec(
+          `UPDATE character_share_receipts
+           SET received_document_id = ?, received_revision = ?,
+               baseline_character_revision = 0, updated_at = ?
+           WHERE character_id = ? AND local_document_id = ?`,
+          [document.documentIdentity.document_id,
+            document.documentIdentity.revision, now, characterId,
+            preservedLocalDocumentId],
+        );
+        if (refreshed.changes !== 1) {
+          throw new ShareValidationError(
+            'the existing received character changed; preview the share again.',
+          );
+        }
+      } else if (update !== null && disposition === 'keep_both') {
         const released = db.exec(
           `UPDATE character_share_receipts
            SET received_document_id = NULL, received_revision = NULL,
@@ -3165,20 +3264,22 @@ function insertCharacterShare(
           );
         }
       }
-      db.exec(
-        `INSERT INTO character_share_receipts (
-           character_id, local_document_id, received_document_id,
-           received_revision, baseline_character_revision, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, 0, ?, ?)`,
-        [
-          characterId,
-          preservedLocalDocumentId ?? crypto.randomUUID(),
-          document.documentIdentity.document_id,
-          document.documentIdentity.revision,
-          now,
-          now,
-        ],
-      );
+      if (!replacing) {
+        db.exec(
+          `INSERT INTO character_share_receipts (
+             character_id, local_document_id, received_document_id,
+             received_revision, baseline_character_revision, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, 0, ?, ?)`,
+          [
+            characterId,
+            crypto.randomUUID(),
+            document.documentIdentity.document_id,
+            document.documentIdentity.revision,
+            now,
+            now,
+          ],
+        );
+      }
     }
     return {
       characterId,
