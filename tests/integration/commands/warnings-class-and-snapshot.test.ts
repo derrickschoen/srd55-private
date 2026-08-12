@@ -40,8 +40,10 @@ describe('warning, class, and snapshot commands', () => {
 
   function character(name = 'C43 Character'): number {
     return db.exec(
-      `INSERT INTO characters (name, allow_legacy)
-       VALUES (?, 1)`,
+      `INSERT INTO characters (
+         name, allow_legacy, strength, dexterity, intelligence,
+         wisdom, charisma
+       ) VALUES (?, 1, 13, 13, 13, 13, 13)`,
       [name],
     ).lastInsertId;
   }
@@ -60,9 +62,16 @@ describe('warning, class, and snapshot commands', () => {
     const classId = db.exec(
       `INSERT INTO class_definitions (
          content_key, name, rules_edition, spellcasting_ability,
-         progression_type
-       ) VALUES (?, ?, '2024', ?, 'full')`,
-      [contentKey, name, ability],
+         progression_type, primary_ability_expression
+       ) VALUES (?, ?, '2024', ?, 'full', ?)`,
+      [
+        contentKey,
+        name,
+        ability,
+        ability === null
+          ? null
+          : JSON.stringify({ kind: 'all_of', abilities: [ability] }),
+      ],
     ).lastInsertId;
     for (const [level, rules] of Object.entries(progressions)) {
       db.exec(

@@ -460,9 +460,9 @@ test('Elf Wizard skills finish top to bottom and spell choices stay labelled and
 test('the empty-database front door chooses class first, persists once named, and survives reload without a planner escape', async ({
   page,
 }) => {
-  // The four-worker parallel pool measured 25.2s; 65s preserves at least
-  // 2.5x wall-clock headroom under parallel-pool contention.
-  test.setTimeout(65_000);
+  // Measured at 33.5s with the required Fighter choices on port 5010;
+  // 33.5 × 1.5 = 50.25s, rounded up to the next 100ms.
+  test.setTimeout(50_300);
   await page.setViewportSize({ width: 390, height: 844 });
   await resetHome(page);
 
@@ -903,19 +903,57 @@ test('the empty-database front door chooses class first, persists once named, an
   ).toHaveCount(0);
 
   // Confirm the Acolyte package. Its option A carries no weapon or armour,
-  // so it mints nothing and ONLY records the choice — and the whole level 1
-  // journey is complete.
+  // so it mints nothing and ONLY records the choice. Fighter's two required
+  // rules choices still prevent the broader completion claim.
   await backgroundSection
     .locator(`[${persistedSeam.equipmentChooseAttribute}="a"]`)
     .click();
   await expect(
     page.locator(`[${persistedSeam.equipmentCompleteAttribute}]`),
-  ).toBeVisible();
+  ).toHaveCount(0);
+  await expect(page.getByText(
+    'Both equipment packages are recorded. Required Fighter choices remain before level 1 is complete.',
+    { exact: true },
+  )).toBeVisible();
   await expectNoPlannerRouteAnchors(page);
 
-  // D116's one-time hint is tied to this exact terminal read state. It is an
-  // inline hint, not a condition-bound warning or modal, and both actions are
-  // ordinary labelled buttons reachable by keyboard.
+  // X4's reachable-remedy pattern: both query-layer gaps are named in the
+  // planner and each returns to the real guided control, not an instruction
+  // the UI cannot carry out.
+  await page.goto(`/characters/${String(characterId)}`);
+  await expect(page.getByText(
+    'Fighter — Fighting Style not chosen',
+    { exact: true },
+  )).toBeVisible();
+  await expect(page.getByText(
+    'Fighter — 0 of 3 Weapon Mastery choices made',
+    { exact: true },
+  )).toBeVisible();
+  await page.getByRole('link', {
+    name: 'Return to guided equipment and choose a Fighting Style.',
+  }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Confirm starting equipment' }),
+  ).toBeVisible();
+
+  await page.getByLabel('Fighting Style').selectOption({ label: 'Archery' });
+  await page.getByRole('button', { name: 'Choose Fighting Style' }).click();
+  await expect(page.getByText(
+    'Fighting Style recorded: Archery — SRD · bundled layer',
+    { exact: true },
+  )).toBeVisible();
+  const masteryChoices = page.locator('.guided-weapon-mastery-choose');
+  await expect(masteryChoices).toHaveCount(3);
+  for (const remaining of [2, 1, 0]) {
+    await masteryChoices.first().click();
+    await expect(masteryChoices).toHaveCount(remaining);
+  }
+  await expect(
+    page.locator(`[${persistedSeam.equipmentCompleteAttribute}]`),
+  ).toBeVisible();
+
+  // D116's one-time hint is tied to the first terminal read state, so assert
+  // and dismiss it before leaving this route to verify planner completeness.
   const backupHint = page.locator('[data-backup-hint]');
   await expect(backupHint).toBeVisible();
   await expect(backupHint).toContainText(
@@ -928,6 +966,44 @@ test('the empty-database front door chooses class first, persists once named, an
     .getByRole('button', { name: 'Dismiss backup hint' })
     .click();
   await expect(backupHint).toBeHidden();
+
+  const requiredRows = await page.evaluate(async () => {
+    const sources = await window.staticApp.inspectRows(
+      'character_source_instances',
+    );
+    const feats = await window.staticApp.inspectRows('feat_definitions');
+    const weapons = await window.staticApp.inspectRows('character_weapons');
+    const style = sources.find((source) => {
+      const definition = feats.find(
+        (feat) => Number(feat['id']) === Number(source['source_definition_id']),
+      );
+      return source['source_type'] === 'feat' &&
+        definition?.['content_key'] === '2024:feat:archery';
+    });
+    return {
+      style_state: style?.['state'],
+      mastered_names: weapons
+        .filter((weapon) => Number(weapon['mastery_selected']) === 1)
+        .map((weapon) => String(weapon['name']))
+        .sort(),
+    };
+  });
+  expect(requiredRows).toEqual({
+    style_state: 'active',
+    mastered_names: ['Flail', 'Greatsword', 'Javelin'],
+  });
+
+  await page.goto(`/characters/${String(characterId)}`);
+  await expect(page.getByText(
+    'Fighter — Fighting Style not chosen',
+    { exact: true },
+  )).toHaveCount(0);
+  await expect(page.getByText(/Fighter — \d+ of 3 Weapon Mastery choices made/u))
+    .toHaveCount(0);
+  await page.goto(persistedSeam.buildPath);
+  await expect(
+    page.locator(`[${persistedSeam.equipmentCompleteAttribute}]`),
+  ).toBeVisible();
 
   // The provenance is on disk, per grant: two FILLED background grants under
   // the background's source, two FILLED class grants under the Fighter's —

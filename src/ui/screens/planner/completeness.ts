@@ -5,6 +5,7 @@ import type {
   UnfilledSkillGrantsItem,
 } from '../../../queries/character-completeness';
 import {
+  guidedBuildPath,
   guidedSpellRepairPath,
   guidedSpeciesChoicePath,
   SKILL_GRANT_KEYS,
@@ -107,6 +108,26 @@ function entry(
     link.setAttribute('href', guidedSpeciesChoicePath(characterId));
     link.dataset.routerLink = 'true';
     link.textContent = item.remedy;
+    remedy.append(link);
+  } else if (
+    item.kind === 'fighting_style_choice' ||
+    (item.kind === 'weapon_mastery_choice' &&
+      item.remedy_action === 'guided_equipment')
+  ) {
+    const link = document.createElement('a');
+    link.setAttribute('href', guidedBuildPath(characterId));
+    link.dataset.routerLink = 'true';
+    link.textContent = item.remedy;
+    remedy.append(link);
+  } else if (
+    item.kind === 'weapon_mastery_choice' &&
+    item.remedy_action === 'import_catalog'
+  ) {
+    const link = document.createElement('a');
+    link.setAttribute('href', CATALOG_IMPORT_ROUTE);
+    link.dataset.routerLink = 'true';
+    link.className = 'button-secondary';
+    link.textContent = 'Import or repair Fighter Weapon Mastery rules data';
     remedy.append(link);
   } else if (
     item.kind === 'wizard_spellbook_incomplete' ||

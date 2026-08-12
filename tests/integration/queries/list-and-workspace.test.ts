@@ -255,17 +255,7 @@ describe('character list and workspace query builders', () => {
       catalog_layer: 'bundled',
       subclass_name: 'Abjurer',
       subclass_catalog_layer: 'bundled',
-      multiclass_prerequisite_warning: {
-        kind: 'multiclass_primary_ability_unprovable',
-        class_definition_id: wizardId,
-        class_name: 'Wizard',
-        class_catalog_layer: 'bundled',
-        title: 'Wizard multiclass ability minimum cannot be verified',
-        detail:
-          'Wizard has no stored primary-ability expression, so its multiclass minimum cannot be judged.',
-        remedy:
-          'Multiclassing remains allowed. Repair the stored expression or missing score to make this warning decidable.',
-      },
+      multiclass_prerequisite_warning: null,
       subclasses: [
         { id: subclassId, name: 'Abjurer', catalog_layer: 'bundled' },
         { id: externalSubclassId, name: 'External Tradition', catalog_layer: 'external' },

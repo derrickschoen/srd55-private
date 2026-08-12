@@ -615,8 +615,11 @@ function renderClasses(
     option('', 'Choose a class…', true),
     ...catalogSelectGroups(available.map((entry) => ({
       value: String(entry.id),
-      label: entry.name,
+      label: entry.multiclass_entry.status === 'blocked'
+        ? `${entry.name} — unavailable`
+        : entry.name,
       catalogLayer: entry.catalog_layer,
+      disabled: entry.multiclass_entry.status === 'blocked',
     }))),
   );
   const add = document.createElement('button');
@@ -632,6 +635,20 @@ function renderClasses(
   });
   addRow.append(selection, add);
   section.append(addRow);
+  const blocked = available.filter(
+    (entry) => entry.multiclass_entry.status === 'blocked',
+  );
+  if (blocked.length > 0) {
+    const reasons = document.createElement('ul');
+    reasons.className = 'class-add-prerequisite-refusals';
+    for (const entry of blocked) {
+      const item = document.createElement('li');
+      item.dataset.classDefinitionId = String(entry.id);
+      item.textContent = entry.multiclass_entry.refusal;
+      reasons.append(item);
+    }
+    section.append(reasons);
+  }
   return section;
 }
 

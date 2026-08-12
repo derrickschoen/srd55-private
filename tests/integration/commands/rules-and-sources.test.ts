@@ -38,7 +38,12 @@ describe('character rule and source commands', () => {
   });
 
   function character(name = 'C42 Character'): number {
-    return db.exec('INSERT INTO characters (name) VALUES (?)', [name])
+    return db.exec(
+      `INSERT INTO characters (
+         name, strength, dexterity, intelligence, wisdom, charisma
+       ) VALUES (?, 13, 13, 13, 13, 13)`,
+      [name],
+    )
       .lastInsertId;
   }
 
@@ -82,9 +87,16 @@ describe('character rule and source commands', () => {
     const classId = db.exec(
       `INSERT INTO class_definitions (
          content_key, name, rules_edition, spellcasting_ability,
-         progression_type
-       ) VALUES (?, ?, '2024', ?, 'full')`,
-      [contentKey, name, ability],
+         progression_type, primary_ability_expression
+       ) VALUES (?, ?, '2024', ?, 'full', ?)`,
+      [
+        contentKey,
+        name,
+        ability,
+        ability === null
+          ? null
+          : JSON.stringify({ kind: 'all_of', abilities: [ability] }),
+      ],
     ).lastInsertId;
     db.exec(
       `INSERT INTO class_progressions (

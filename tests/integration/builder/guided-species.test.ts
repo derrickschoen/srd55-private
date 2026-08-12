@@ -1688,6 +1688,10 @@ describe('configured species choice and honest projection', () => {
     const rpcHarness = await applicationDatabase();
     const db = rpcHarness.context.db;
     const characterId = createClassedCharacter(db, 'Drow Class Removal');
+    // This fixture tests level-dependent lineage retraction, not multiclass
+    // refusal. Its starting class already qualifies on Strength; make the
+    // added Bard's declared Charisma prerequisite honestly qualify too.
+    db.exec('UPDATE characters SET charisma = 13 WHERE id = ?', [characterId]);
     const primaryClassId = Number(db.scalar(
       'SELECT class_definition_id FROM character_class_levels WHERE character_id = ?',
       [characterId],

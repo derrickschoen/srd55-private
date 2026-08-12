@@ -10,6 +10,7 @@ import {
 } from '../../../src/queries/character-completeness';
 import { CharacterListBuilder } from '../../../src/queries/character-list-builder';
 import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
+import { seedSheetContent } from '../../../src/rules/sheet-srd';
 import { openTestDatabase } from '../../helpers/open-db';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import { assignSpellSelection } from '../../../src/eligibility/spell-selection-assignment';
@@ -516,6 +517,14 @@ describe('completeness detection', () => {
   it('reports an unchosen Cleric order without flagging any other class', async () => {
     const db = await context();
     const characterId = createCharacter(db, 'Order Probe');
+    seedSheetContent(db);
+    db.exec(
+      `UPDATE characters
+       SET strength = 13, dexterity = 13, intelligence = 13,
+           wisdom = 13, charisma = 13
+       WHERE id = ?`,
+      [characterId],
+    );
     const integrity = new CharacterCommandIntegrity('completeness-fixture');
     for (const [className, config] of [
       ['Cleric', { level: 3 }],

@@ -79,6 +79,10 @@ import {
   resolveSpeciesChoice,
 } from '../../builder/species-choice';
 import { characterCommandRpcError } from '../character-command-errors';
+import {
+  guidedRequiredFighterChoicesState,
+} from '../../builder/required-fighter-choices';
+import { REQUIRED_FIGHTER_CHOICES_RPC } from '../../builder/contracts';
 
 /**
  * Not in the seam because the seam pins only what BOTH agents must agree on;
@@ -341,6 +345,12 @@ function translatingRefusals<T>(operation: () => T): T {
 }
 
 export const handlers: readonly RpcHandler[] = Object.freeze([
+  defineRpcHandler(
+    REQUIRED_FIGHTER_CHOICES_RPC.state,
+    isGuidedBuildStateParams,
+    (context, params) =>
+      guidedRequiredFighterChoicesState(context.db, params.character_id),
+  ),
   defineRpcHandler(
     GUIDED_RPC.buildState,
     isGuidedBuildStateParams,

@@ -5,6 +5,7 @@ import { DatabaseContext } from '../../../src/db/database';
 import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
 import {
   createBuildReportFixture,
+  createCharacter,
   createSlot,
   createSource,
   createSpell,
@@ -57,6 +58,15 @@ export interface WorkspaceFixtureIds {
   readonly humanDefinition: number;
   readonly backgroundDefinition: number;
   readonly magicInitiateDefinition: number;
+  readonly classSourceCharacter: number | null;
+}
+
+interface WorkspaceFixtureOptions {
+  readonly primaryCharacterAbilities?: {
+    readonly strength?: number;
+    readonly dexterity?: number;
+  };
+  readonly createQualifyingClassSourceCharacter?: boolean;
 }
 
 export interface ReportFixtureIds {
@@ -415,11 +425,23 @@ async function image<TIds extends object>(
   return { bytes, ids };
 }
 
-export async function workspaceFixtureImage(): Promise<
+export async function workspaceFixtureImage(
+  options: WorkspaceFixtureOptions = {},
+): Promise<
   FixtureImage<WorkspaceFixtureIds>
 > {
   return image((db) => {
-    const fixture = createBuildReportFixture(db);
+    const fixture = createBuildReportFixture(
+      db,
+      options.primaryCharacterAbilities,
+    );
+    const classSourceCharacter =
+      options.createQualifyingClassSourceCharacter === true
+        ? createCharacter(db, 'Class Source Command', {
+          intelligence: 13,
+          charisma: 13,
+        })
+        : null;
     db.exec(
       `UPDATE characters
        SET allow_legacy = 0, notes = NULL
@@ -612,6 +634,7 @@ export async function workspaceFixtureImage(): Promise<
       humanDefinition: catalog.human,
       backgroundDefinition: catalog.background,
       magicInitiateDefinition: catalog.magicInitiate,
+      classSourceCharacter,
     };
   });
 }

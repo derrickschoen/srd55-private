@@ -63,6 +63,7 @@ const EXEMPTIONS = new Map<string, string>([
   ['src/authoring/contracts.ts::ArchiveSetCharacter::character_name', 'DEFENDED: Character names are character-owned text recorded in an archive membership manifest, not names of installed catalog content.'],
   ['src/access/spell-access-builder.ts::SpellAccessRoute::identity_name', 'The canonical identity name is mechanical deduplication input; spell_name is the rendered catalog value.'],
   ['src/builder/background-choices.ts::BackgroundPrintedPairing::background_name', 'The pairing is nested under GuidedBackgroundOption, whose catalog layer owns and accompanies this printed text.'],
+  ['src/builder/equipment-choices.ts::GuidedWeaponMasteryOption::weapon_name', 'A character weapon is an editable character-owned value, not an installed catalog reference.'],
   ['src/builder/armor-class-effects.ts::CharacterItemRow::name', 'Character item rows are editable character-owned values, not installed catalog references.'],
   ['src/catalog/catalog-schema.ts::CatalogSubclassRecord::name', 'An uninstalled catalog document has no publication layer until the publisher registers it.'],
   ['src/catalog/spell-fork.ts::ForkSpellResult::displayName', 'The command result repeats the submitted fork name; publication review carries the installed identity.'],

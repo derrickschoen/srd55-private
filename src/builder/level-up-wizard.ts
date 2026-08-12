@@ -328,6 +328,10 @@ interface LevelUpPermanentWarningBase {
 
 export type LevelUpPermanentWarning = LevelUpPermanentWarningBase & (
   | { readonly remedy: string; readonly remedy_action?: never }
+  | {
+      readonly remedy: string;
+      readonly remedy_action: 'guided_equipment';
+    }
   | { readonly remedy?: never; readonly remedy_action: 'import_catalog' }
 );
 
