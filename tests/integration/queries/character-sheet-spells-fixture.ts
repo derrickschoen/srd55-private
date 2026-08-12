@@ -624,9 +624,11 @@ export function createCharacterSheetSpellsFixture(
   );
   db.exec(
     `INSERT INTO wizard_spellbook_entries (
-       character_id, spell_version_id
-     ) VALUES (?, ?)`,
-    [characterId, ritualOnly],
+       character_id, source_instance_id, rule_key, ordinal,
+       spell_version_id, spell_level_min, spell_level_max,
+       state, selection_eligibility
+     ) VALUES (?, ?, 'fixture-spellbook', 1, ?, 0, 9, 'active', 'valid')`,
+    [characterId, subclassSourceId, ritualOnly],
   );
   // Deliberately noncanonical insertion order. Echo Ward is already selected
   // in the Wizard group, so it proves the unprepared bucket does not duplicate
@@ -911,12 +913,18 @@ export function createSheetSpellRetirementFixture(
       faerieFireSlotId,
     ],
   );
-  for (const spellId of [detectMagic, shield, unseenServant]) {
+  for (const [index, spellId] of [
+    detectMagic,
+    shield,
+    unseenServant,
+  ].entries()) {
     db.exec(
       `INSERT INTO wizard_spellbook_entries (
-         character_id, spell_version_id
-       ) VALUES (?, ?)`,
-      [characterId, spellId],
+         character_id, source_instance_id, rule_key, ordinal,
+         spell_version_id, spell_level_min, spell_level_max,
+         state, selection_eligibility
+       ) VALUES (?, ?, 'fixture-spellbook', ?, ?, 0, 9, 'active', 'valid')`,
+      [characterId, wizardSourceId, index + 1, spellId],
     );
   }
   // D162 makes the appendix optional. Seeding this named preference lets the

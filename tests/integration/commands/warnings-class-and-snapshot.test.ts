@@ -459,6 +459,21 @@ describe('warning, class, and snapshot commands', () => {
     expect(addedInverse).not.toHaveProperty('integrity');
 
     const state = new CharacterState(db);
+    const classSourceId = Number(
+      db.scalar(
+        `SELECT id FROM character_source_instances
+         WHERE character_id = ? AND source_type = 'class'
+           AND source_definition_id = ?`,
+        [characterId, classId],
+      ),
+    );
+    db.exec(
+      `INSERT INTO character_effects (
+         character_id, sort_order, effect_kind, hit_points_flat,
+         source_instance_id, label
+       ) VALUES (?, 1, 'hp_modifier', 4, ?, 'Removed class effect')`,
+      [characterId, classSourceId],
+    );
     const beforeRemoval = state.capture(characterId);
     const removed = await runClass(characterId, {
       class_definition_id: classId,
@@ -488,6 +503,12 @@ describe('warning, class, and snapshot commands', () => {
       current_spell_version_id: spellId,
       slot_state: 'orphaned',
     });
+    expect(
+      db.scalar(
+        'SELECT count(*) FROM character_effects WHERE source_instance_id = ?',
+        [classSourceId],
+      ),
+    ).toBe(0);
     const removalInverse = await removed.inverse();
     expect(removalInverse).toMatchObject({
       type: 'internal_snapshot_restore',
@@ -542,10 +563,23 @@ describe('warning, class, and snapshot commands', () => {
        WHERE id = ?`,
       [firstSourceId],
     );
+    db.exec(
+      `INSERT INTO character_effects (
+         character_id, sort_order, effect_kind, speed_bonus_feet,
+         source_instance_id, label
+       ) VALUES (?, 1, 'speed', 5, ?, 'First subclass effect')`,
+      [characterId, firstSourceId],
+    );
     await runClass(characterId, {
       class_definition_id: classId,
       subclass_definition_id: secondSubclassId,
     });
+    expect(
+      db.scalar(
+        'SELECT count(*) FROM character_effects WHERE source_instance_id = ?',
+        [firstSourceId],
+      ),
+    ).toBe(0);
     await runClass(characterId, {
       class_definition_id: classId,
       subclass_definition_id: firstSubclassId,

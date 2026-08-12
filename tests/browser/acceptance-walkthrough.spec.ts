@@ -47,9 +47,15 @@ async function expectLevelTwoAcceptanceSheet(page: Page): Promise<void> {
   await expect(arcana).toContainText('Arcana (Expertise)');
   await expect(arcana.locator('.sheet-figure')).toHaveText('+5');
   for (const choice of ACCEPTANCE_WIZARD_2_CHOICES.spells) {
+    const hasPreparedTwin = choice.kind === 'spellbook_acquisition' &&
+      ACCEPTANCE_WIZARD_2_CHOICES.spells.some(
+        (candidate) =>
+          candidate.kind === 'slot_selection' &&
+          candidate.spell_name === choice.spell_name,
+      );
     const row = page
       .locator(
-        choice.kind === 'spellbook_acquisition'
+        choice.kind === 'spellbook_acquisition' && !hasPreparedTwin
           ? '[data-sheet-id^="spellbook:"]'
           : '[data-sheet-id^="spell:"]',
       )
@@ -58,7 +64,7 @@ async function expectLevelTwoAcceptanceSheet(page: Page): Promise<void> {
       })
       .first();
     await expect(row).toBeVisible();
-    if (choice.kind === 'spellbook_acquisition') {
+    if (choice.kind === 'spellbook_acquisition' && !hasPreparedTwin) {
       await expect(row).toContainText(
         `${choice.spell_name}Level 1Spellbook`,
       );
@@ -183,12 +189,12 @@ test('an unassisted sitting creates a caster through the current guided level 1 
     'Thunderwave',
   ];
   const spellbookSpells = [
+    'Mage Armor',
+    'Magic Missile',
+    'Shield',
+    'Sleep',
     'Detect Magic',
     'Feather Fall',
-    'Find Familiar',
-    'Grease',
-    'Jump',
-    'Longstrider',
   ];
   let spellChoicesMade = 0;
   while (
@@ -384,13 +390,18 @@ test('an unassisted sitting creates a caster through the current guided level 1 
   ).toBeFocused();
   await expect(levelUpFact(page, 'Hit point maximum')).toHaveText('9 → 16');
   await expect(page.getByText('Arcana — Wizard — Scholar', { exact: true })).toBeVisible();
-  for (const choice of ACCEPTANCE_WIZARD_2_CHOICES.spells) {
-    await expect(
-      page.getByText(
-        `${choice.spell_name} — Wizard — SRD · bundled layer`,
-        { exact: true },
-      ),
-    ).toBeVisible();
+  for (const spellName of new Set(
+    ACCEPTANCE_WIZARD_2_CHOICES.spells.map((choice) => choice.spell_name),
+  )) {
+    const fact = page.getByText(
+      `${spellName} — Wizard — SRD · bundled layer`,
+      { exact: true },
+    );
+    const expectedCount = ACCEPTANCE_WIZARD_2_CHOICES.spells.filter(
+      (choice) => choice.spell_name === spellName,
+    ).length;
+    await expect(fact).toHaveCount(expectedCount);
+    await expect(fact.first()).toBeVisible();
   }
   await page.locator('[data-level-up-confirm]').click();
   await expect(

@@ -232,7 +232,18 @@ export class LevelUpPlannedChoicesQuery {
     sourceCatalogLayer: CatalogLayerDisclosure,
     durableSourceId: SourceInstanceId | null,
   ): readonly LevelUpPlannedSpellProjection[] {
-    const plan = this.#spells.planSource(context, source);
+    const plan = [...this.#spells.planSource(context, source)].sort(
+      (left, right) => {
+        const rank = (grant: PlannedSpellGrant): number =>
+          grant.kind === 'slot_selection' &&
+          grant.bucket === 'cantrip_known'
+            ? 0
+            : grant.kind === 'spellbook_acquisition'
+              ? 1
+              : 2;
+        return rank(left) - rank(right);
+      },
+    );
     return plan.flatMap((grant) => this.#spellChoice(
       context.character_id,
       sourceLabel(source, label),
