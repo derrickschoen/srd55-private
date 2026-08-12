@@ -30,7 +30,7 @@ produce a review packet. Two rules with teeth:
   type, or costume is rejected before any mechanics exist.
 - The clean-room boundary is procedural: a design may cite only these six
   files and anchored SRD lines. (This is the rule that caught nothing being
-  citable for EK when we started the monk — and forced a
+  citable for Eldritch Knight when we started the monk — and forced a
   better subclass.)
 
 ## 01 — Power budget: the numbers

@@ -21,11 +21,11 @@ Content.
 |---|---|
 | `2026-08-03-monk-third-caster-pitches.md` | The 20-pitch monk catalog (three clean-room panels). D190 picked three finalists; D193 added a fourth. ~16 pitches remain unbuilt. |
 | `2026-08-03-monk-bakeoff.md` | Side-by-side comparison packet for the three D190 finalists on the shared third-caster engine. |
-| `2026-08-03-monk-barbed-court.md` | Warrior of the Barbed Court — arcane taunt-tank. Under heavy owner redesign as of 2026-08-06; see `../rulings.md`. |
+| `2026-08-03-monk-barbed-court.md` | Warrior of the Barbed Court — arcane taunt-tank. Owner redesign concluded 2026-08-10 (Rebuking Shield final); see `../rulings.md`. |
 | `2026-08-03-monk-ten-selves.md` | Warrior of the Ten Selves — illusion/duplicate monk. |
 | `2026-08-03-monk-hundred-knots.md` | Warrior of the Hundred Knots — primal/binding monk. |
 | `2026-08-03-monk-waking-will.md` | Warrior of the Waking Will — D193's clean-room adaptation of the Psionic Fist concept. Route A in `../ogl/LICENSING.md`: concept only, original name, original wording. |
-| `2026-08-03-oath-of-domination-subclass.md` | Paladin Oath of Domination (command/prophecy, D186/D188 tenets + simplified Voice). |
+| `2026-08-03-oath-of-domination-subclass.md` | Paladin Oath of Domination (command/prophecy, D186/D188 tenets). Conformed to the 2024 subclass skeleton by the 2026-08-11 owner redesign arc: smite-triggered Voice CD at 3, Blindsight + aura-wide *Command* targeting at 7, Cha/LR Formation at 15, 10-minute Dominion with Inevitable Word at 20. |
 | `2026-08-03-ranger-simple-subclass.md` | Ranger "Pursuer" (D192 owner-frozen Hunter's Mark engine; the level-7 unbind is a labeled hot outlier). |
 | `2026-08-04-rogue-veteran-subclass.md` | Rogue **Veteran** (owner-authored kit, ruling 2026-08-04). |
 | `oath-of-domination-inputs.md` | The owner's raw inputs for the Oath of Domination. |

@@ -19,7 +19,7 @@ What worked, in order:
   verdict; the scan is.
 - **Designs may cite only the six files and anchored SRD lines.** This rule
   has teeth precisely when it hurts — starting the monk, nothing was citable
-  for EK's engine, and the constraint forced a better original
+  for Eldritch Knight's engine, and the constraint forced a better original
   design instead of a file-off-by-one copy.
 - **Non-SRD works appear only as distance markers.** The pitch catalog names
   an upcoming official subclass and a community homebrew *solely* to define

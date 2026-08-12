@@ -178,7 +178,7 @@ Numbers use a 65% hit chance and the 2014 Martial Arts die.
   1 ki each, from a pool equal to character level — *shield* and *false life* on
   a large pool is the exposure. Levels 6, 11 and 17 hold everything else.
   **Amber; outsider builds untested.**
-- **Niche trespass.** The self-buff register overlaps the EK's
+- **Niche trespass.** The self-buff register overlaps the Eldritch Knight's
   abjurations and any defensive caster. The list carries no attack, no healing
   and no control, which is the intended containment.
 

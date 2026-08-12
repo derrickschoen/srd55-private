@@ -5,6 +5,99 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-11 — Foreseen Strike dropped; level 7 gains aura-wide Command targeting
+
+Owner's rulings, verbatim:
+
+> Foreseen strike seems too weak to ever get chosen.
+
+> Lvl 7 command targets all creatures you choose in the aura
+
+Follow-up decisions (owner-selected): Foreseen Strike is **dropped
+entirely** (level 3 = Voice as the single CD option, the Vow-of-Enmity
+shape) — per CD use it was dominated by Voice (~6–15 damage once vs up
+to nine save-or-lose-turn attempts) and would never be chosen. The
+aura-wide Command targeting **replaces the ally OA-immunity clause** at
+7: the slot is now Blindsight (self, aura radius) + Command targets any
+chosen creatures in the aura + the comprehension ribbon.
+
+Budget flags surfaced at ruling time and accepted: aura-wide targeting
+under Voice is an every-round multi-target slotless save-or-lose-turn
+engine — most of the earlier rejected smite-trigger candidate returning
+via the casting itself — and the single-enemy sim CANNOT price it (its
+value roughly scales with enemies in the 10-ft radius, 30 at 18). At
+20 it stacks with Inevitable Word: every aura enemy saving at
+Disadvantage, every round, for ten minutes — recorded as the capstone
+playtest item.
+
+Sim, dealt (single-target, therefore control-channel understated):
+smite-only 16.5/29.6/51.7/68.9 vs Vengeance 19.4/34.7/60.2/72.1 —
+**85–96%**, the dealt gap reopening deliberately with the strikes gone;
+the kit's budget is now fully in control. The old parity-band invariant
+was replaced by Vengeance>Domination everywhere, citing this ruling.
+
+## 2026-08-11 — Level 7 aura final: Blindsight + ally OA immunity; save-Disadvantage moves to the capstone
+
+Owner's decisions (a same-day revision of the save-Disadvantage entry
+below, reached through a compare-and-decide pass on Blindsight):
+
+> [L7:] Paladin gets blindsight. Allies get immune from opportunity
+> attacks
+
+and: the full save-Disadvantage aura **moves into Dominion Foretold at
+20** — the altitude where the 2024 game itself puts that effect (Elder
+Champion). Applied shape:
+
+1. **Aura of Certainty (7), final**: the paladin has Blindsight with a
+   range equal to the Aura of Protection's radius (10 ft, 30 at 18;
+   self only — owner-selected); allies' movement doesn't provoke
+   Opportunity Attacks while they're in the aura; the one-way
+   comprehension ribbon stays (drafting choice, flagged). The
+   always-on save-Disadvantage from the earlier same-day ruling is
+   removed.
+2. **Dominion Foretold (20) gains Inevitable Word**: while active,
+   enemies in the aura have Disadvantage on saving throws against the
+   paladin's spells and Channel Divinity options.
+
+Notes recorded: the ally clause partially overlaps Foreseen Formation
+at 15 (its movement already doesn't provoke; its payload remains the
+off-turn movement itself); Blindsight and ally OA immunity are worth
+~0 in the single-character sim (no vision denial, no allies modeled) —
+their value is table-side; control-posture prevented at 11/17 returns
+to 11.0/19.5 with the save amplifier now capstone-gated. The F5 amber
+and the F12 amber-high from the previous aura clear.
+
+## 2026-08-11 — Level 7 aura: enemies save at Disadvantage against the paladin's magic
+
+Owner floated two candidates mid-conformance-pass, verbatim:
+
+> Maybe lvl 7 aura should be disadvantage to enemies on saves against
+> paladin dc
+
+> Or maybe aura should be when a smite lands, free command on all
+> enemies within
+
+Both were priced in the sim (single-enemy model, aura live in the 11/17
+bands). Candidate A (Disadvantage): dealt roughly flat, prevented
++4–6/round on the control posture (11.0→15.4 at 11, 19.5→25.3 at 17) —
+a control-reliability aura. Candidate B (smite → aura-wide free
+*Command*): 103–107% of Vengeance dealt PLUS 15–26 prevented even
+before multi-enemy scaling, and it obsoletes Voice — over budget on
+both axes; advised against as stated. Convention note surfaced: A's
+effect exists in 2024 as an Elder Champion capstone benefit (Ancients
+20, 10 min/day); always-on at 7 front-loads it, and enemy-facing
+level-7 auras have only 2014 Conquest as precedent.
+
+**Owner selected A, the full version** (not scoped to *Command*).
+Drafted as: enemies in the Aura of Protection have Disadvantage on
+saving throws against the paladin's spells and Channel Divinity
+options (the Elder Champion wording pattern, matching "against paladin
+dc"). Drafting choices, flagged: the one-way comprehension ribbon is
+kept on the feature; the Charm-save Advantage is dropped (its budget
+is consumed by the offensive half). Side effect recorded: Foreseen
+Formation's trigger (an enemy SUCCEEDING on a save) fires less often
+inside the aura.
+
 ## 2026-08-11 — Domination conformed to the 2024 paladin subclass skeleton
 
 Owner's request, verbatim:
@@ -156,10 +249,14 @@ Paladin Spells). Bane, Suggestion, Augury, Clairvoyance, Slow,
 Compulsion, Divination, Dominate Person, and Dream are all off-list
 grants. The table stays as fixed by the owner.
 
-Sim numbers at ruling time (dealt/round, burst, vs Vengeance
-19.5/34.8/60.3/72.0 at 3/6/11/17): smite-only policy 16.6/29.6/51.6/69.0;
-with the rider ~90% of Vengeance at 3–6; adaptive Command-then-smite at
-11/17 trades ~6.5/11 dealt for 8.4/14.4 prevented.
+Sim numbers, final kit as committed to tools/sim (dealt/round, burst, vs
+Vengeance 19.4/34.7/60.2/72.1 at 3/6/11/17): smite-only 16.5/29.6/51.7/68.9;
+best policy at 3–6 is mix (one slot-Command round 2) at 16.4/30.1 —
+**85–87% of Vengeance**, up from the old kit's 78% Voice-opener but short
+of the ~90% the lever-D brainstorm projected, because at 3–6 control now
+costs slots so the rider arms less often. Adaptive at 11/17 trades
+~6/10 dealt against smite-only for 8.5/14.4 prevented; Command-max
+prevented is 4.0/6.5/11.9/21.2.
 
 ## 2026-08-11 — No personal attribution: the owner's name comes off every homebrew notice
 
@@ -1749,7 +1846,8 @@ Owner's question and ruling, verbatim:
 
 Facts established by grep before answering, not from folklore:
 
-- **The third-caster table is in neither SRD.** "EK" and "AT": zero hits in SRD 5.1 and SRD 5.2.1. Even the PHB multiclass
+- **The third-caster table is in neither SRD.** "Eldritch Knight" and "Arcane
+  Trickster": zero hits in SRD 5.1 and SRD 5.2.1. Even the PHB multiclass
   clause "a third of your Fighter or Rogue levels" is absent — the SRD 5.2.1
   multiclass Spell Slots rule counts only full casters and "Half your levels
   (round up) in the Paladin and Ranger classes". The PHB EK/AT table as a
@@ -2703,7 +2801,7 @@ level, capped at level 3 from Monk 13 and level 5 from Monk 17.
 
 Findings reported at ruling time, recorded not corrected:
 
-- **Licensing.** EK and AT are **not in SRD 5.2.1**
+- **Licensing.** Eldritch Knight and Arcane Trickster are **not in SRD 5.2.1**
   (grep-verified, zero hits). Under D59/D191 they may be named as distance
   markers only, never used as a source or mechanical template — their prepared-
   spell tables and wording cannot be copied. The structure the owner asked for
