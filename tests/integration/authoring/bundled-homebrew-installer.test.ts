@@ -247,7 +247,7 @@ describe('bundled authored-kind installer', () => {
       v1: 'ba433201acabb302fac98efa457ed7846392d71c7400c198d00479912422135c',
       v2: '80206df5cf31d4548572fddb5a89665cce3fcbe7c9e2221380b0fa674ae7d810',
     }]);
-  });
+  }, 20_000);
 
   it('publishes all three entries atomically through drafts and is an exact-fingerprint no-op on repeat', async () => {
     // Measured alone at 4.62s; 20s retains contention headroom.

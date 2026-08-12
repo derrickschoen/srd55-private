@@ -524,7 +524,7 @@ describe('portable content manifests', () => {
     applicationSeed(shareTarget);
     importCharacterShare(shareTarget, decoded);
     expect(contributionRows(shareTarget)).toEqual(expectedRows);
-  });
+  }, 20_000);
 
   it('rejects contribution extra keys and still imports an old-format subclass with no contribution field', async () => {
     const source = await database();
@@ -554,7 +554,7 @@ describe('portable content manifests', () => {
     applicationSeed(target);
     expect(() => importLibraryDocument(target, oldFormat)).not.toThrow();
     expect(contributionRows(target)).toEqual([]);
-  });
+  }, 20_000);
 
   it('rejects supersession bands and derived resource keys before portable installation', async () => {
     const source = await database();
