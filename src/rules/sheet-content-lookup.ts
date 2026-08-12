@@ -50,7 +50,7 @@ import type { ClassFeatureEffect } from './class-feature-effects';
 import { classFeatureEffect } from './class-feature-effects';
 import type { ExtraAttackGrant } from './extra-attack';
 import { selectionUnresolved } from './extra-attack';
-import type { ClassDefinitionId } from '../domain/ids';
+import type { ClassDefinitionId, ContentKey } from '../domain/ids';
 import {
   parseSrdClassResourceFormulaManifest,
   parseSrdClassResourceManifest,
@@ -122,6 +122,7 @@ export interface SheetClassContent
   extends SheetClassLevels,
     SheetResourceClassInput {
   readonly class_definition_id: ClassDefinitionId;
+  readonly class_content_key: ContentKey;
   /**
    * The subclass chosen for THIS class, or `null`.
    *
@@ -135,7 +136,11 @@ export interface SheetClassContent
    * is D6d applied to a read model: two correlated nulls can disagree, and a
    * value with an id and no name is a state no reader should have to consider.
    */
-  readonly subclass: { readonly id: number; readonly name: string } | null;
+  readonly subclass: {
+    readonly id: number;
+    readonly name: string;
+    readonly content_key: ContentKey;
+  } | null;
   /**
    * Every printed feature of `subclass`, in printed order, AT EVERY LEVEL —
    * including the ones this character has not reached. Empty without a
@@ -396,6 +401,7 @@ export class SheetContentLookup {
               base_progression.pact_slots AS base_pact_slots,
               level.subclass_definition_id AS subclass_definition_id,
               subclass.name AS subclass_name,
+              subclass.content_key AS subclass_content_key,
               subclass.caster_fraction AS subclass_caster_fraction,
               subclass.caster_rounding AS subclass_caster_rounding,
               subclass_progression.id AS subclass_progression_id,
@@ -423,6 +429,10 @@ export class SheetContentLookup {
         const contentKey = sqlString(row, 'class_content_key');
         const subclassId = sqlNullableInteger(row, 'subclass_definition_id');
         const subclassName = sqlNullableString(row, 'subclass_name');
+        const subclassContentKey = sqlNullableString(
+          row,
+          'subclass_content_key',
+        );
         const baseProgressionId = sqlNullableInteger(row, 'base_progression_id');
         const subclassProgressionId = sqlNullableInteger(
           row,
@@ -430,6 +440,7 @@ export class SheetContentLookup {
         );
         return {
           class_definition_id: classDefinitionId,
+          class_content_key: contentKey as ContentKey,
           class_name: sqlString(row, 'class_name'),
           level: classLevel,
           class_level: classLevel,
@@ -460,9 +471,15 @@ export class SheetContentLookup {
           // together or present together; the pair is collapsed here rather
           // than carried as two independently nullable fields.
           subclass:
-            subclassId === null || subclassName === null
+            subclassId === null ||
+            subclassName === null ||
+            subclassContentKey === null
               ? null
-              : { id: subclassId, name: subclassName },
+              : {
+                  id: subclassId,
+                  name: subclassName,
+                  content_key: subclassContentKey as ContentKey,
+                },
         };
       },
     );

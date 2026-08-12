@@ -215,6 +215,7 @@ function sheet(changes: Partial<CharacterSheet> = {}): CharacterSheet {
       },
     ],
     attacks_per_action: { count: 2, unresolved: [] },
+    feature_values: [],
     resources: [],
     spells: [],
     martial_arts: [],
@@ -1263,6 +1264,9 @@ describe('the character sheet is projected twice from one value', () => {
       saving_throws: () => ids.has('save:strength'),
       skills: () => ids.has('skill:stealth'),
       attacks_per_action: () => ids.has('attacks_per_action'),
+      feature_values: () =>
+        (parsed.feature_values as unknown[]).length === 0 ||
+        [...ids].some((id) => id.startsWith('feature-value:')),
       resources: () =>
         (parsed.resources as unknown[]).length === 0 ||
         [...ids].some((id) => id.startsWith('resource:')),
@@ -1899,6 +1903,161 @@ describe('the character sheet is projected twice from one value', () => {
     const value = sheet();
     expect(sheetFacts(value)).toEqual(sheetFacts(value));
     expect(sheetSections(value)).toEqual(sheetSections(value));
+  });
+});
+
+describe('ability override term disclosure', () => {
+  it('keeps all four classified terms in order in readable text and sheet facts', () => {
+    const value = sheet({
+      ability_scores: [{
+        id: 'ability:strength',
+        label: 'strength',
+        ability: 'strength',
+        score: 24,
+        value: 7,
+        formula: '(score − 10) / 2, rounded down.',
+        base_score: 20,
+        increased_score: 22,
+        override_terms: [
+          { label: 'Floored', set_to: 21, outcome: 'floored_by_increased_score' },
+          { label: 'Winner', set_to: 24, outcome: 'applied' },
+          { label: 'Equal', set_to: 24, outcome: 'tied_at_winning_value' },
+          { label: 'Lower', set_to: 23, outcome: 'superseded_by_higher_override' },
+        ],
+      }],
+    });
+    const ability = row(value, 'ability:strength');
+    const text = ability.detail.map((cell) => cell.text).join('');
+
+    expect(text).toContain('Floored would set the score to 21 but is inert');
+    expect(text).toContain('Winner sets the score to 24 and is the winning override.');
+    expect(text).toContain('Equal also sets the score to 24, matching the winning value without stacking.');
+    expect(text).toContain('Lower would set the score to 23 but is inert; a higher set-to value wins.');
+    expect(sheetFacts(value).ability_modifiers).toEqual([{
+      ability: 'strength',
+      score: 24,
+      modifier: 7,
+      overrides: [
+        { set_to: 21, outcome: 'floored_by_increased_score' },
+        { set_to: 24, outcome: 'applied' },
+        { set_to: 24, outcome: 'tied_at_winning_value' },
+        { set_to: 23, outcome: 'superseded_by_higher_override' },
+      ],
+    }]);
+  });
+});
+
+describe('feature-value term rows', () => {
+  it('prints labelled applied terms, discloses superseded terms, and keeps free labels out of facts', () => {
+    const hostile = '</span><img data-feature-term src=x>';
+    const baseSource = {
+      kind: 'contribution' as const,
+      content_key: '2024:class:rogue' as import('../../../src/domain/ids').ContentKey,
+      contribution_key: 'sneak-attack',
+    };
+    const oldSource = {
+      kind: 'contribution' as const,
+      content_key: 'expanded:subclass:veteran' as import('../../../src/domain/ids').ContentKey,
+      contribution_key: 'old',
+    };
+    const newSource = {
+      kind: 'contribution' as const,
+      content_key: 'expanded:subclass:veteran' as import('../../../src/domain/ids').ContentKey,
+      contribution_key: 'new',
+    };
+    const value = sheet({
+      feature_values: [{
+        status: 'computed',
+        id: 'feature-value:sneak_attack',
+        key: 'sneak_attack',
+        label: 'Sneak Attack',
+        die_size: 6,
+        value: 9,
+        terms: [
+          { source: baseSource, label: 'Sneak Attack', contribution: 5, is_base: true, status: 'applied' },
+          { source: oldSource, label: hostile, contribution: 1, is_base: false, status: { superseded_by: newSource } },
+          { source: newSource, label: 'Veteran Strike', contribution: 4, is_base: false, status: 'applied' },
+        ],
+      }],
+    });
+    const feature = row(value, 'feature-value:sneak_attack');
+
+    expect(Array.isArray(feature.value) ? textOf(feature.value) : feature.value)
+      .toBe('5d6 + 4d6 (Veteran Strike)');
+    expect(feature.value).toContainEqual({
+      text: 'Veteran Strike',
+      free_text: true,
+    });
+    expect(feature.disclosure).toMatchObject({
+      summary: 'Superseded terms',
+      detail: [
+        { text: hostile, free_text: true },
+        { text: ' would contribute 1d6 but is superseded.' },
+      ],
+    });
+    expect(sheetFacts(value).feature_values).toEqual([{
+      key: 'sneak_attack',
+      status: 'computed',
+      value: 9,
+      die_size: 6,
+      terms: [
+        { contribution: 5, status: 'applied', superseded_by: null, term_order: 0 },
+        { contribution: 1, status: 'superseded', superseded_by: 2, term_order: 1 },
+        { contribution: 4, status: 'applied', superseded_by: null, term_order: 2 },
+      ],
+    }]);
+    expect(JSON.stringify(sheetFacts(value))).not.toContain(hostile);
+  });
+
+  it('turns typed resolver failures into player-facing UNKNOWN copy', () => {
+    const value = sheet({
+      feature_values: [{
+        status: 'unavailable',
+        id: 'feature-value:sneak_attack',
+        key: 'sneak_attack',
+        label: 'Sneak Attack',
+        reason: 'invalid_data',
+      }],
+    });
+    const feature = row(value, 'feature-value:sneak_attack');
+
+    expect(feature.value).toBe('UNKNOWN');
+    expect(textOf(feature.detail)).toBe(
+      'One of the recorded contributions is invalid.',
+    );
+    expect(textOf(feature.detail)).not.toContain('invalid_data');
+  });
+
+  it('keeps the first applied modifier labelled when the base is superseded', () => {
+    const base = {
+      kind: 'contribution' as const,
+      content_key: '2024:class:rogue' as import('../../../src/domain/ids').ContentKey,
+      contribution_key: 'sneak-attack',
+    };
+    const replacement = {
+      kind: 'contribution' as const,
+      content_key: 'expanded:subclass:replacement' as import('../../../src/domain/ids').ContentKey,
+      contribution_key: 'replacement',
+    };
+    const value = sheet({
+      feature_values: [{
+        status: 'computed',
+        id: 'feature-value:sneak_attack',
+        key: 'sneak_attack',
+        label: 'Sneak Attack',
+        die_size: 6,
+        value: 6,
+        terms: [
+          { source: base, label: 'Sneak Attack', contribution: 3, is_base: true, status: { superseded_by: replacement } },
+          { source: replacement, label: 'Replacement Dice', contribution: 6, is_base: false, status: 'applied' },
+        ],
+      }],
+    });
+    const printed = row(value, 'feature-value:sneak_attack').value;
+
+    expect(Array.isArray(printed) ? textOf(printed) : printed).toBe(
+      '6d6 (Replacement Dice)',
+    );
   });
 });
 

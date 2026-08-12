@@ -105,6 +105,13 @@ import type {
   CharacterCatalogDisclosure,
 } from '../catalog/catalog-disclosure';
 import { characterCatalogDisclosures } from './character-catalog-disclosures';
+import {
+  resolveSheetFeatureValues,
+  type SheetFeatureValue,
+} from '../rules/sheet-feature-values';
+import type { CharacterLevel } from '../domain/enums';
+import type { ClassLevel } from '../domain/ids';
+import type { PositiveInteger } from '../domain/class-resources';
 
 /**
  * THE CHARACTER SHEET, ASSEMBLED AND THROWN AWAY.
@@ -380,6 +387,7 @@ export interface CharacterSheet {
   readonly saves: readonly SheetSave[];
   readonly skills: readonly SheetSkill[];
   readonly attacks_per_action: AttacksPerAction;
+  readonly feature_values: readonly SheetFeatureValue[];
   readonly resources: readonly SheetResourceMaximum[];
   readonly spells: CharacterSpellSection;
   readonly martial_arts: readonly {
@@ -756,6 +764,39 @@ export class CharacterSheetBuilder {
       character.proficiency_bonus_override,
     );
     const totalLevel = characterLevel(classes.map((entry) => entry.level));
+    const featureValues = resolveSheetFeatureValues(
+      this.db,
+      content.map((entry) => ({
+        class_definition_id: entry.class_definition_id,
+        class_content_key: entry.class_content_key,
+        class_level: entry.class_level as ClassLevel,
+        subclass:
+          entry.subclass === null
+            ? null
+            : {
+                id: entry.subclass.id,
+                content_key: entry.subclass.content_key,
+              },
+      })),
+      {
+        // No acquired contribution exists without at least one class. Keeping
+        // the absence at the provider means this witness is never evaluated.
+        character_level: (totalLevel ?? 1) as CharacterLevel,
+        proficiency_bonus: bonus as PositiveInteger,
+        class_levels: new Map(
+          content.map((entry) => [
+            entry.class_content_key,
+            entry.class_level as ClassLevel,
+          ]),
+        ),
+        ability_modifiers: new Map(
+          abilities.map((ability) => [
+            ability,
+            scores.score(ability).modifier(),
+          ]),
+        ),
+      },
+    );
     const resources = resolveSheetResources(content, {
       charisma: {
         status: 'present',
@@ -1065,6 +1106,7 @@ export class CharacterSheetBuilder {
         };
       }),
       attacks_per_action: attacksPerAction(content),
+      feature_values: featureValues,
       resources,
       spells,
       martial_arts: martialArtsDice(content).map((die) => ({ ...die })),

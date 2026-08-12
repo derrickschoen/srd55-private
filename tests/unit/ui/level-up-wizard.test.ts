@@ -320,6 +320,7 @@ function sheet(options: {
     saves: [],
     skills: [],
     attacks_per_action: { count: 1, unresolved: [] },
+    feature_values: [],
     resources: [],
     spells: [],
     martial_arts: [],

@@ -16,6 +16,11 @@ import { openTestDatabase } from '../../helpers/open-db';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import { rpcRegistry } from '../../../src/worker/registry';
 import { createRpcHarness } from '../../helpers/rpc-harness';
+import { sheetSections } from '../../../src/ui/screens/sheet/sheet-view';
+import {
+  classFormulaResourceKinds,
+  classResourceKinds,
+} from '../../../src/domain/class-resources';
 
 describe('character sheet resource projection', () => {
   let connection: Database;
@@ -294,5 +299,69 @@ describe('character sheet resource projection', () => {
         reason: 'spell_progression_missing_or_invalid',
       }),
     );
+  });
+
+  it('pins all 25 class-resource kinds at level 20 with labels, maxima, class qualification, and marking shape', () => {
+    const classes = [
+      'Barbarian', 'Bard', 'Cleric', 'Druid', 'Fighter', 'Monk',
+      'Paladin', 'Ranger', 'Rogue', 'Sorcerer', 'Warlock', 'Wizard',
+    ].map((name) => ({ name, level: 20 }));
+    const sheet = builder.build(character('Twenty-five resource kinds', classes));
+    const resourceRows = sheetSections(sheet)
+      .find((section) => section.caption === 'Resources');
+    if (resourceRows === undefined || !('rows' in resourceRows)) {
+      throw new Error('The sheet has no Resources section.');
+    }
+    const rowsById = new Map(resourceRows.rows.map((row) => [row.id, row]));
+    const actual = sheet.resources.flatMap((resource) => {
+      if (
+        resource.status !== 'computed' ||
+        resource.kind === 'spell_slot' ||
+        resource.kind === 'pact_slot'
+      ) {
+        return [];
+      }
+      const row = rowsById.get(resource.id);
+      if (row === undefined) throw new Error(`Missing row ${resource.id}.`);
+      return [[
+        resource.class_name,
+        resource.kind,
+        row.label.map((cell) => cell.text).join(''),
+        resource.maximum,
+        row.resource_marking?.shape,
+      ] as const];
+    });
+
+    expect(new Set(actual.map((entry) => entry[1]))).toEqual(
+      new Set([...classResourceKinds, ...classFormulaResourceKinds]),
+    );
+    expect(actual).toEqual([
+      ['Barbarian', 'rage', 'Barbarian — Rages', 6, 'boxes'],
+      ['Barbarian', 'persistent_rage_recovery', 'Barbarian — Persistent Rage Recovery', 1, 'boxes'],
+      ['Bard', 'bardic_inspiration', 'Bard — Bardic Inspiration', 1, 'boxes'],
+      ['Cleric', 'channel_divinity', 'Cleric — Channel Divinity', 4, 'boxes'],
+      ['Cleric', 'divine_intervention', 'Cleric — Divine Intervention', 1, 'boxes'],
+      ['Druid', 'wild_shape', 'Druid — Wild Shape', 4, 'boxes'],
+      ['Druid', 'wild_resurgence_conversion', 'Druid — Wild Resurgence Conversion', 1, 'boxes'],
+      ['Druid', 'nature_magician_conversion', 'Druid — Nature Magician Conversion', 1, 'boxes'],
+      ['Fighter', 'second_wind', 'Fighter — Second Wind', 4, 'boxes'],
+      ['Fighter', 'action_surge', 'Fighter — Action Surge', 2, 'boxes'],
+      ['Fighter', 'indomitable', 'Fighter — Indomitable', 3, 'boxes'],
+      ['Monk', 'focus_points', 'Monk — Focus Points', 20, 'remaining'],
+      ['Monk', 'uncanny_metabolism', 'Monk — Uncanny Metabolism', 1, 'boxes'],
+      ['Paladin', 'channel_divinity', 'Paladin — Channel Divinity', 3, 'boxes'],
+      ['Paladin', 'paladins_smite', "Paladin — Paladin's Smite", 1, 'boxes'],
+      ['Paladin', 'faithful_steed', 'Paladin — Faithful Steed', 1, 'boxes'],
+      ['Paladin', 'lay_on_hands', 'Paladin — Lay On Hands', 100, 'remaining'],
+      ['Ranger', 'favored_enemy', 'Ranger — Favored Enemy', 6, 'boxes'],
+      ['Ranger', 'tireless', 'Ranger — Tireless', 1, 'boxes'],
+      ['Ranger', 'natures_veil', "Ranger — Nature's Veil", 1, 'boxes'],
+      ['Rogue', 'stroke_of_luck', 'Rogue — Stroke of Luck', 1, 'boxes'],
+      ['Sorcerer', 'sorcery_points', 'Sorcerer — Sorcery Points', 20, 'remaining'],
+      ['Sorcerer', 'innate_sorcery', 'Sorcerer — Innate Sorcery', 2, 'boxes'],
+      ['Sorcerer', 'sorcerous_restoration', 'Sorcerer — Sorcerous Restoration', 1, 'boxes'],
+      ['Warlock', 'magical_cunning', 'Warlock — Magical Cunning', 1, 'boxes'],
+      ['Warlock', 'contact_patron', 'Warlock — Contact Patron', 1, 'boxes'],
+    ]);
   });
 });

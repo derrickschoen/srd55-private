@@ -41,11 +41,22 @@ import {
   ABILITY_SCORE_MIN,
   type AbilityIncreaseContribution,
   type AbilityOverrideCandidate,
+  type AbilityOverrideOutcome,
   type ResolvedAbilities,
   type ResolvedAbility,
 } from '../builder/contracts';
 import type { DatabaseContext } from '../db/database';
+import type {
+  Computed,
+  SourceRef,
+  TermStatusFor,
+} from '../domain/computed';
 import { abilities, type Ability } from '../domain/enums';
+import type {
+  CharacterEffectId,
+  CharacterItemId,
+  SourceInstanceId,
+} from '../domain/ids';
 import { readEligibleCharacterEffects } from './eligible-character-effects';
 import type { EligibleCharacterEffect } from './eligible-character-effects';
 
@@ -91,30 +102,23 @@ export function resolveAbilities(
     const ownOverrides = overrides.filter(
       (override) => override.ability === ability,
     );
-    const winner = ownOverrides.reduce<AbilityOverrideCandidate | null>(
-      (highest, override) =>
-        highest === null || override.set_to > highest.set_to
-          ? override
-          : highest,
-      null,
-    );
     const increased = running;
-    const resolvedOverrides = ownOverrides.map((override) => ({
-      ...override,
-      outcome:
-        override.set_to <= increased
-          ? ('floored_by_increased_score' as const)
-          : override.effect_id === winner?.effect_id
-            ? ('applied' as const)
-            : override.set_to === winner?.set_to
-              ? ('tied_at_winning_value' as const)
-              : ('superseded_by_higher_override' as const),
-    }));
-    if (winner !== null) {
-      // D83's order is exact: base -> individually capped increases -> highest
-      // SET target, floored at the increased score. SET effects never add.
-      running = Math.max(increased, winner.set_to);
-    }
+    const overrideComputation = resolveAbilityOverrideComputation(
+      increased,
+      ownOverrides,
+    );
+    const resolvedOverrides = ownOverrides.map((override, index) => {
+      const term = overrideComputation.terms[index];
+      if (term === undefined) {
+        throw new TypeError(
+          'Ability override term order diverged from its candidates.',
+        );
+      }
+      return { ...override, outcome: outcomeForTermStatus(term.status) };
+    });
+    // D83's order is exact: base -> individually capped increases -> highest
+    // SET target, floored at the increased score. SET effects never add.
+    running = overrideComputation.value;
     resolved[ability] = {
       base: base[ability],
       contributions: own,
@@ -124,6 +128,90 @@ export function resolveAbilities(
     };
   }
   return resolved;
+}
+
+function overrideSource(override: AbilityOverrideCandidate): SourceRef {
+  return {
+    kind: 'character_effect',
+    effect_id: override.effect_id as CharacterEffectId,
+    ...(override.source_instance_id === null
+      ? {}
+      : { source_instance_id: override.source_instance_id as SourceInstanceId }),
+    ...(override.character_item_id === null
+      ? {}
+      : { character_item_id: override.character_item_id as CharacterItemId }),
+  };
+}
+
+function outcomeForTermStatus(
+  status: TermStatusFor<'set_if_higher'>,
+): AbilityOverrideOutcome {
+  if (typeof status === 'object') {
+    return 'superseded_by_higher_override';
+  }
+  switch (status) {
+    case 'applied':
+      return 'applied';
+    case 'applied_equal':
+      return 'tied_at_winning_value';
+    case 'floored_by_increased_score':
+      return 'floored_by_increased_score';
+    default: {
+      const unreachable: never = status;
+      throw new TypeError(
+        `Unhandled ability override status ${String(unreachable)}.`,
+      );
+    }
+  }
+}
+
+function overrideTermStatus(
+  increased: number,
+  override: AbilityOverrideCandidate,
+  winner: AbilityOverrideCandidate | null,
+): TermStatusFor<'set_if_higher'> {
+  if (override.set_to <= increased) return 'floored_by_increased_score';
+  /* c8 ignore next 3 -- a non-floored override is itself a winner candidate. */
+  if (winner === null) {
+    throw new TypeError('An ability override has no winning candidate.');
+  }
+  if (override.effect_id === winner.effect_id) return 'applied';
+  if (override.set_to === winner.set_to) return 'applied_equal';
+  return { superseded_by: overrideSource(winner) };
+}
+
+/**
+ * D83's SetIfHigher trace in the shared Computed model.
+ *
+ * The increased score is the floor supplied by the preceding additive stage.
+ * Each override remains one acquisition-ordered character-effect term: equal
+ * winners are applied-equal, lower candidates point at the winning source, and
+ * a candidate below the increase floor remains visible as its own floored term.
+ */
+export function resolveAbilityOverrideComputation(
+  increased: number,
+  overrides: readonly AbilityOverrideCandidate[],
+): Computed<number, 'set_if_higher'> {
+  const winner = overrides.reduce<AbilityOverrideCandidate | null>(
+    (highest, override) =>
+      highest === null || override.set_to > highest.set_to
+        ? override
+        : highest,
+    null,
+  );
+  const terms = overrides.map((override) => {
+    return {
+      source: overrideSource(override),
+      op: 'set_if_higher' as const,
+      contribution: override.set_to,
+      status: overrideTermStatus(increased, override, winner),
+    };
+  });
+  return {
+    terms,
+    value: Math.max(increased, winner?.set_to ?? increased),
+    riders: [],
+  };
 }
 
 /**

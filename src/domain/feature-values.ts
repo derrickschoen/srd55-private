@@ -5,6 +5,7 @@ import type {
   SourceRef,
   Term,
 } from './computed';
+import { sourceRefKey } from './computed';
 import type { ContentKey } from './ids';
 
 export const featureValueKeys = ['sneak_attack'] as const;
@@ -73,10 +74,6 @@ export type FeatureValueFold<K extends FeatureValueTargetKind> =
   | { readonly kind: 'resolved'; readonly computed: Computed<ValueOf<K>> }
   | { readonly kind: 'malformed_graph'; readonly error: SupersessionGraphError };
 
-function sourceKey(source: ContributionSourceRef): string {
-  return `${source.content_key}\u0000${source.contribution_key}`;
-}
-
 function sameTarget(
   left: FeatureValueTarget,
   right: FeatureValueTarget,
@@ -111,12 +108,12 @@ export function foldFeatureValues<K extends FeatureValueTargetKind>(
 ): FeatureValueFold<K> {
   const indexed = new Map<string, FeatureValueContribution<K>>();
   for (const contribution of contributions) {
-    indexed.set(sourceKey(contribution.source), contribution);
+    indexed.set(sourceRefKey(contribution.source), contribution);
   }
 
   for (const contribution of contributions) {
     if (contribution.supersedes === undefined) continue;
-    const victim = indexed.get(sourceKey(contribution.supersedes));
+    const victim = indexed.get(sourceRefKey(contribution.supersedes));
     if (victim === undefined) {
       return {
         kind: 'malformed_graph',
@@ -144,7 +141,7 @@ export function foldFeatureValues<K extends FeatureValueTargetKind>(
     const positions = new Map<string, number>();
     let current: FeatureValueContribution<K> | undefined = start;
     while (current !== undefined) {
-      const key = sourceKey(current.source);
+      const key = sourceRefKey(current.source);
       const at = positions.get(key);
       if (at !== undefined) {
         return {
@@ -160,7 +157,7 @@ export function foldFeatureValues<K extends FeatureValueTargetKind>(
       current =
         current.supersedes === undefined
           ? undefined
-          : indexed.get(sourceKey(current.supersedes));
+          : indexed.get(sourceRefKey(current.supersedes));
     }
   }
 
@@ -168,14 +165,14 @@ export function foldFeatureValues<K extends FeatureValueTargetKind>(
   for (const contribution of contributions) {
     if (contribution.supersedes !== undefined) {
       supersededBy.set(
-        sourceKey(contribution.supersedes),
+        sourceRefKey(contribution.supersedes),
         contribution.source,
       );
     }
   }
 
   const terms: Term<ValueOf<K>>[] = contributions.map((contribution) => {
-    const superseder = supersededBy.get(sourceKey(contribution.source));
+    const superseder = supersededBy.get(sourceRefKey(contribution.source));
     return {
       source: contribution.source,
       op: contribution.op,
@@ -190,7 +187,7 @@ export function foldFeatureValues<K extends FeatureValueTargetKind>(
   const value = contributions.reduce<number>(
     (total, contribution) =>
       total +
-      (supersededBy.has(sourceKey(contribution.source))
+      (supersededBy.has(sourceRefKey(contribution.source))
         ? 0
         : contribution.value),
     0,
