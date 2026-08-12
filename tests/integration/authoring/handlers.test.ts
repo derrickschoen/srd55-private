@@ -48,6 +48,7 @@ import {
 } from '../../fixtures/interactive-dom';
 import type { SubclassAuthoringDraft } from '../../../src/authoring/contracts';
 import { CharacterListBuilder } from '../../../src/queries/character-list-builder';
+import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
 import { createQueriesClient } from '../../../src/queries/client';
 import { parseRoute } from '../../../src/ui/router';
 import type { ScreenContext } from '../../../src/ui/screen';
@@ -1070,6 +1071,25 @@ describe('catalog authoring RPC handlers', () => {
     });
 
     const uiCharacter = selectedCharacter('Apply All Notice Hero');
+    // `spell_versions.rules_edition` is intentionally open at the storage
+    // boundary, while the sheet reader only knows the application's current
+    // editions. This is a real persisted state (no mocked builder): the
+    // selected spell remains referentially valid, but its sheet section cannot
+    // be decoded until a later build understands the edition.
+    rpc.context.db.exec(
+      `UPDATE spell_versions SET rules_edition = 'future-edition'
+       WHERE id = ?`,
+      [spellVersionId],
+    );
+    expect(() => new CharacterSheetBuilder(rpc.context.db).build(uiCharacter.id))
+      .toThrow('Unknown spell rules edition future-edition.');
+    const unavailablePreview = await authoringClient.previewReplacement({
+      old_content_key: old.content_key,
+      new_content_key: incompatible.content_key,
+      character_id: uiCharacter.id,
+    });
+    expect(unavailablePreview.rules_change_review).toBe('unavailable');
+    expect(unavailablePreview.rules_changes).toEqual([]);
     const restoreDocument = installInteractiveDocument();
     try {
       const root = document.createElement('div');
@@ -1105,6 +1125,10 @@ describe('catalog authoring RPC handlers', () => {
       expect(reviewCopy).toContain(
         'After Apply: Spell Retarget Incompatible — ' +
         'Homebrew · external layer',
+      );
+      expect(reviewCopy).toContain(
+        'The character update can be reviewed, but this sheet could not be ' +
+        'compared. Open the character after applying to review its rules.',
       );
       expect(reviewCopy.toLowerCase()).not.toContain('certif');
       const apply = interactiveRoot.querySelectorAll('button').find(
