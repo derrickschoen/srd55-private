@@ -1,8 +1,8 @@
 # CC-BY subclasses
 
 Every document in this folder is our own original text, released under
-**CC-BY-4.0** and built against **SRD 5.2.1**, which Wizards released under the
-same licence.
+**CC-BY-4.0** and built against **SRD 5.2.1**, which is itself released
+under the same licence (see the attribution notice below).
 
 **No OGL content is permitted here.** Not a sentence, not a feature name, not a
 table of numbers from a 3.0/3.5 SRD source. Concepts may cross from
@@ -35,8 +35,8 @@ Content.
 Every document here reproduces this verbatim. Do not paraphrase or shorten it,
 and per `docs/srd/ATTRIBUTION.md` do not add any other attribution to Wizards:
 
-> This work includes material from the System Reference Document 5.2
-> ("SRD 5.2") by Wizards of the Coast LLC, available at
-> https://www.dndbeyond.com/srd. The SRD 5.2 is licensed under the Creative
+> This work includes material from the System Reference Document 5.2.1
+> ("SRD 5.2.1") by Wizards of the Coast LLC, available at
+> https://www.dndbeyond.com/srd. The SRD 5.2.1 is licensed under the Creative
 > Commons Attribution 4.0 International License, available at
 > https://creativecommons.org/licenses/by/4.0/legalcode.

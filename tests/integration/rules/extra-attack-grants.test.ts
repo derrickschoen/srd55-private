@@ -140,7 +140,7 @@ describe('the grants a character actually has, read from the database', () => {
   });
 
   it('seeds no subclass feature at all, which D3 requires', () => {
-    // SRD 5.2 carries one subclass per class and not one of them grants Extra
+    // SRD 5.2.1 carries one subclass per class and not one of them grants Extra
     // Attack. The owner's example is not free-licensed, so the MODEL ships and
     // the CONTENT does not. This is that promise, as a failable claim.
     expect(

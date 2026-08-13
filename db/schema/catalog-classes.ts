@@ -473,7 +473,7 @@ export const subclass_progressions = sqliteTable(
 /**
  * One printed feature of one subclass: free text, and occasionally a number.
  *
- * SHIPS EMPTY, DELIBERATELY. SRD 5.2 carries one subclass per class and not one
+ * SHIPS EMPTY, DELIBERATELY. SRD 5.2.1 carries one subclass per class and not one
  * of them grants Extra Attack, so there is no bundled row here and
  * `src/rules/sheet-srd.ts` writes none. D3 and D19 §1 both say so: the MODEL is
  * the deliverable and the CONTENT is not free-licensed. The table is exercised
@@ -578,7 +578,7 @@ export const subclass_feature_effects = sqliteTable(
 
 /**
  * A NAMED, OPTIONAL FEATURE OF A CLASS THAT IS NEITHER A CLASS TABLE ROW NOR A
- * SUBCLASS — D19 case 2, and the one SRD 5.2 actually lets us bundle.
+ * SUBCLASS — D19 case 2, and the one SRD 5.2.1 actually lets us bundle.
  *
  * Two rows are seeded from `docs/srd/source/extra-attack-other-sources.txt`.
  * They are the proof the model works on shippable content rather than only on a

@@ -12,12 +12,6 @@ furnished to do so, subject to the following conditions:
 The above copyright notice and this permission notice shall be included in all
 copies or substantial portions of the Software.
 
-This license applies to the project's original software. Game content from
-the System Reference Document 5.2.1 and this project's homebrew documents
-are separately licensed under the Creative Commons Attribution 4.0
-International License — see NOTICE.md for the attribution statements and
-the exact file inventory.
-
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -25,3 +19,22 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+Scope
+
+The MIT License above applies to this project's original software. Content
+in this repository is licensed separately:
+
+- Material from the System Reference Document 5.2.1 is licensed under the
+  Creative Commons Attribution 4.0 International License; the required
+  attribution statement is in NOTICE.md.
+- This project's own homebrew documents under docs/homebrew/cc-by/ and the
+  homebrew design guidelines are licensed under the Creative Commons
+  Attribution 4.0 International License.
+- docs/homebrew/ogl/ contains material under the Open Game License 1.0a;
+  the license text and its Section 15 chain are in that folder.
+
+NOTICE.md carries the attribution statements and the file inventory; it is
+updated at any merge that adds license-relevant content.

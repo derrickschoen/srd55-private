@@ -92,7 +92,10 @@ describe('catalog data-migration registry', () => {
         'src/catalog/content-identity.ts',
         'src/catalog/content-registry.ts',
       ],
-      checksum: '62726e1a111feb64684804d238137578bc7ee979c62206eee864006b3a60b8a4',
+      // Re-pinned 2026-08-13 with the registry: origin-definitions-srd.ts's
+      // SRD attribution header corrected to the 5.2.1 statement the source
+      // document requires (comment-only diff, verified).
+      checksum: 'b124c031979c8e4eceb6afecbdd8e7b02d20c3a182b5a0fbe4d0dd600813e956',
     }]);
     expect(() =>
       validateCatalogDataMigrationRegistry(CATALOG_DATA_MIGRATIONS)

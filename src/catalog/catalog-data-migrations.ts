@@ -151,8 +151,12 @@ export const CATALOG_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
           bytes: contentRegistrySource,
         }),
       ]),
+      // Re-pinned 2026-08-13: the SRD attribution header in
+      // origin-definitions-srd.ts was corrected from the 5.2 statement to the
+      // 5.2.1 statement the source document requires (comment-only diff,
+      // verified; no reconciled row changes).
       checksum:
-        '62726e1a111feb64684804d238137578bc7ee979c62206eee864006b3a60b8a4',
+        'b124c031979c8e4eceb6afecbdd8e7b02d20c3a182b5a0fbe4d0dd600813e956',
       run: reconcileSpeciesLineageContentV2,
     }),
   ]);

@@ -11,7 +11,7 @@ ever becomes tracked.
 existing game concepts where a fixture cannot do its job without them — "Bard",
 "Extra Attack", "Bardic Inspiration", the spell schools, the ability names. A
 homebrew *Bard* subclass that never says "Bard" would not exercise the thing
-under test. Those are mechanic names from SRD 5.2, which
+under test. Those are mechanic names from SRD 5.2.1, which
 `docs/srd/ATTRIBUTION.md` records as CC-BY-4.0 and therefore bundleable. What is
 **not** taken from it is the wording.
 

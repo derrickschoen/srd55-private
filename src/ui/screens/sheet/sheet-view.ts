@@ -2602,7 +2602,7 @@ export function setSheetPrintContent(
   notice.className = 'sheet-print-notice';
   notice.dataset.sheetPrintNotice = 'true';
   const noticeHeading = document.createElement('h2');
-  noticeHeading.textContent = 'SRD 5.2 attribution';
+  noticeHeading.textContent = 'SRD 5.2.1 attribution';
   const attribution = document.createElement('p');
   attribution.textContent = SRD_ATTRIBUTION_NOTICE;
   const origin = document.createElement('p');

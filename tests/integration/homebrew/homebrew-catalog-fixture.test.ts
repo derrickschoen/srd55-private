@@ -1009,7 +1009,7 @@ describe('the fixtures are original prose, not SRD prose', () => {
   // inside a directory whose README claimed everything was invented here. The
   // wording has been rewritten; this stops the claim from silently rotting again.
   //
-  // SRD 5.2 is CC-BY-4.0 (docs/srd/ATTRIBUTION.md), so this is a truthfulness
+  // SRD 5.2.1 is CC-BY-4.0 (docs/srd/ATTRIBUTION.md), so this is a truthfulness
   // rule rather than a licensing one — but a fixture whose whole rhetorical
   // weight rests on being hand-written has to actually be hand-written.
   //

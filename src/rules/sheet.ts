@@ -187,7 +187,7 @@ export interface ClassGrantRow<TGrant> {
  *
  * THE PRICE, STATED RATHER THAN DISCOVERED: one row carries one
  * `property_qualifier`, so an entry grant cannot be qualified differently from
- * the initial grant of the same category. Unreachable in SRD 5.2 — the two
+ * the initial grant of the same category. Unreachable in SRD 5.2.1 — the two
  * qualified rows (Monk `Light`, Rogue `Finesse or Light`) are not entry grants,
  * and the four flagged Martial rows carry no qualifier — but a real limit on an
  * imported class. `db/schema/sheet.ts` says the same beside the column.

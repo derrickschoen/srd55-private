@@ -1,7 +1,7 @@
 /**
- * This work includes material from the System Reference Document 5.2
- * ("SRD 5.2") by Wizards of the Coast LLC, available at
- * https://www.dndbeyond.com/srd. The SRD 5.2 is licensed under the Creative
+ * This work includes material from the System Reference Document 5.2.1
+ * ("SRD 5.2.1") by Wizards of the Coast LLC, available at
+ * https://www.dndbeyond.com/srd. The SRD 5.2.1 is licensed under the Creative
  * Commons Attribution 4.0 International License, available at
  * https://creativecommons.org/licenses/by/4.0/legalcode.
  *
@@ -651,7 +651,7 @@ function sameClassFeatureEffect(
 /**
  * THE TWO BUNDLED NAMED FEATURES (D19 §2).
  *
- * `docs/srd/source/extra-attack-other-sources.txt` is SRD 5.2 and therefore
+ * `docs/srd/source/extra-attack-other-sources.txt` is SRD 5.2.1 and therefore
  * bundleable, and these two rows are the only Extra Attack content in this
  * repository that the old `(class, level)` model could not hold. They are the
  * proof the D19 model works on SHIPPABLE content rather than only on a fixture:

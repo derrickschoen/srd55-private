@@ -1,7 +1,7 @@
-# SRD 5.2 attribution
+# SRD 5.2.1 attribution
 
 This project bundles reference material from the D&D System Reference Document
-5.2, which Wizards of the Coast released under the Creative Commons Attribution
+5.2.1, which Wizards of the Coast released under the Creative Commons Attribution
 4.0 International licence.
 
 ## Required notice — reproduce verbatim
@@ -9,9 +9,9 @@ This project bundles reference material from the D&D System Reference Document
 The following statement must appear wherever SRD-derived content ships. Do not
 paraphrase it, and do not shorten it:
 
-> This work includes material from the System Reference Document 5.2
-> ("SRD 5.2") by Wizards of the Coast LLC, available at
-> https://www.dndbeyond.com/srd. The SRD 5.2 is licensed under the Creative
+> This work includes material from the System Reference Document 5.2.1
+> ("SRD 5.2.1") by Wizards of the Coast LLC, available at
+> https://www.dndbeyond.com/srd. The SRD 5.2.1 is licensed under the Creative
 > Commons Attribution 4.0 International License, available at
 > https://creativecommons.org/licenses/by/4.0/legalcode.
 
@@ -41,7 +41,7 @@ rendering SRD content and therefore carry the notice too.
 ## What may be bundled
 
 Bundle content **only** under a free licence whose sole obligation is
-attribution. CC-BY-4.0 (the SRD 5.2 licence) qualifies, as do MIT and
+attribution. CC-BY-4.0 (the SRD 5.2.1 licence) qualifies, as do MIT and
 Apache-2.0 for code-like data.
 
 CC-BY-**SA** does *not* qualify and must not be bundled, despite being a

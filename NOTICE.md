@@ -3,14 +3,14 @@
 This file is the attribution inventory for material that could be included in
 a public release of this project. Paths are relative to the repository root.
 
-## SRD 5.2 material (CC-BY-4.0)
+## SRD 5.2.1 material (CC-BY-4.0)
 
 The following notice applies to material derived from the System Reference
-Document 5.2:
+Document 5.2.1:
 
-> This work includes material from the System Reference Document 5.2
-> ("SRD 5.2") by Wizards of the Coast LLC, available at
-> https://www.dndbeyond.com/srd. The SRD 5.2 is licensed under the Creative
+> This work includes material from the System Reference Document 5.2.1
+> ("SRD 5.2.1") by Wizards of the Coast LLC, available at
+> https://www.dndbeyond.com/srd. The SRD 5.2.1 is licensed under the Creative
 > Commons Attribution 4.0 International License, available at
 > https://creativecommons.org/licenses/by/4.0/legalcode.
 
@@ -63,9 +63,13 @@ the source pages and checksum for every extract.
 
 The following rules modules carry the full notice in their header comments:
 
+- `src/rules/ability-score-generation-srd.ts`
 - `src/rules/armor-srd.ts`
 - `src/rules/background-definitions-srd.ts`
+- `src/rules/class-choice-entitlements-srd.ts`
 - `src/rules/class-equipment-srd.ts`
+- `src/rules/class-level-features-srd.ts`
+- `src/rules/class-resources-srd.ts`
 - `src/rules/class-traits-srd.ts`
 - `src/rules/extra-attack-srd.ts`
 - `src/rules/feats-srd.ts`
@@ -130,9 +134,17 @@ The following homebrew documents currently reproduce the full notice:
 
 ## Project-original content (CC-BY-4.0)
 
-`docs/homebrew/README.md` releases every document in `docs/homebrew/` under
-the Creative Commons Attribution 4.0 International License. That
-project-original corpus includes:
+`docs/homebrew/README.md` releases this project's own homebrew documents —
+the `docs/homebrew/cc-by/` tree, the design-guidelines corpus, and the
+surrounding project-original documents — under the Creative Commons
+Attribution 4.0 International License. The OGL quarantine at
+`docs/homebrew/ogl/` is **not** part of that grant: it holds Open Game
+License 1.0a source material and the Psionic Fist conversion derived from
+it, carries `OGL-1.0a.txt` and its Section 15 chain in-folder, and text
+never moves from `ogl/` to `cc-by/`. (An earlier revision of this file
+claimed the CC-BY grant covered "every document in `docs/homebrew/`" —
+wrong since the quarantine was created, caught by independent review
+2026-08-13.) The project-original CC-BY corpus includes:
 
 - the Veteran rogue subclass in
   `docs/homebrew/cc-by/2026-08-04-rogue-veteran-subclass.md`;

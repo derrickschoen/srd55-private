@@ -173,7 +173,7 @@ describe('a printed spell range, parsed', () => {
 
   it('KEEPS the self origin when the area word is outside the four-shape list', () => {
     // THE COLLAPSE `range_kind` EXISTS TO PREVENT, MEASURED ON THE FORM THAT
-    // ACTUALLY PRINTS IT. Emanation and Cube are two of SRD 5.2's six areas of
+    // ACTUALLY PRINTS IT. Emanation and Cube are two of SRD 5.2.1's six areas of
     // effect and neither is a member of `spellAreaShapes`, so
     // `Self (15-foot Emanation)` — the printed Range line of a whole family of
     // self-origin spells — used to store four NULLs: the SAME storage state as
