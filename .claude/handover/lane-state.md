@@ -23,7 +23,52 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-12-d (newest - read first)
+## RESTART POINT 2026-08-13-e (newest - read first)
+MAIN 747964f7 (mirror pushed). NINETY-EIGHT merges. Floors: vitest 278
+files / 4,645 tests; PW 170 (168 in-pool + sharing:378 iso 27.3s +
+library-import-remedy:661 iso 34.7s, both known contention-prone, both
+green); sim 171/171; build 0; migrations 0000-0046.
+
+98TH (7589aa9a + c87a7878 budget raise + 747964f7 licensing fixes,
+wt/barbed2 pruned): owner V5 batch on Warrior of the Barbed Court —
+Innate Sorcery of the Court and Unshaken Aim removed, Courtier's Slap
+reworded to owner text, grapple clause moved from Hands (11) to The
+Standing Hand (3) gated on Mage Hand; Hands reverted byte-exact to V3
+text; doc in lockstep; codex review all-invariants-held. LATENCY
+FINDINGS (disclosed): bundled install commits one identity per revision
+(11 at V5); import.spec:318 status wait 5s→30s and installer
+atomic-publish budget 20s→45s, both assertion-unchanged with comments;
+revision-compaction pass suggested when convenient.
+
+REPO IS NOW PUBLIC (owner-ordered after two-agent licensing sweep, both
+PUBLIC-READY; fixes: CC-BY footers on two process docs, NOTICE inventory
+paths corrected). Public gist of the barbed-court player doc:
+https://gist.github.com/derrickschoen/50a1166701a4ca340dc99b2cf6335ac5
+D59 discipline unchanged — every commit is now world-visible.
+
+NEW OWNER DIRECTIVE 2026-08-13 (active): d4-deep-dive validation
+project. 86 Colby Poulson (d4: D&D Deep Dive) build docx in
+~/Downloads/d4-deep-dive/, 327 damage reports. New PRIVATE repo
+~/PhpstormProjects/dnd-d4-builds-code-test imports this public repo
+(submodule) and holds ALL copyrighted material (docx-derived fixtures,
+scraped 2024 PHB/XGtE/TCoE catalog from
+~/PhpstormProjects/dndbeyond_2024_multiclass_calculator/data/) private
+only. Goals: Playwright builds each character level-by-level checking
+sheet discrepancies; sim within ~5% of docx DPR; then sim our homebrew.
+Colby methodology recovered: per-episode Google math sheets
+(assumptions table + DPR-vs-AC 10–25 grid at check levels), LudicSavant
+closed-form hit math, advantage crit 9.75%, fractional attacks for
+reaction-attack uptime (e.g. 4.25), per-build inline assumptions (50%
+Vex uptime). Master comparison sheet downloaded (DPR curves per build
+at levels 6/9/13/17). Owner: methodology not in files → search web +
+his YouTube (done, sheets are better evidence).
+
+OWNER-OPEN (do not act unprompted): s7 fix-wave scope PARKED (do NOT
+re-ask); homebrew v3 adopt/author; optional LICENSE file for code
+(all-rights-reserved today); optional repo rename (still srd55-private);
+wt/party player-doc divergence (V4+V5 changes on main only).
+
+## RESTART POINT 2026-08-12-d (superseded by -e)
 MAIN 989afd76 (mirror pushed). NINETY-SEVEN merges. Floors: vitest
 278 files / 4,645 tests; PW 170; sim 171/171; build 0; migrations
 0000-0046.
