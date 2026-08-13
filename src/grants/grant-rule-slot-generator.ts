@@ -457,7 +457,7 @@ export class GrantRuleSlotGenerator {
           );
     if (definition === null) {
       /**
-       * AN UNWRITTEN `definition_key_config` IS A CHOICE OWED, NOT A FAULT.
+       * A DECLARED PENDING CHOICE IS OWED, NOT A FAULT.
        *
        * A rule that delegates WHICH definition it grants to the source's own
        * config describes two legal states, and only one of them was handled.
@@ -475,20 +475,30 @@ export class GrantRuleSlotGenerator {
        * whole level-up back, which is the level-up refusing to happen because
        * a choice it grants has not been made.
        *
+       * THE RULE MUST SAY SO (`allows_pending_choice`). Silence is only
+       * correct where a surface tracks the owed choice and asks for it, which
+       * today is exactly the Champion's. Without the declaration an
+       * unresolvable definition stays LOUD, so a background added with no
+       * Origin feat still refuses, and an imported rule whose
+       * `definition_key_config` names a path nothing ever writes still
+       * refuses instead of granting nothing forever with nobody told.
+       *
        * Returning no marker leaves the entitlement OUTSTANDING and nothing
        * materialised. `reconcileGrantedChildren` reads the same empty set, so
        * clearing the config later deactivates a previously granted child by
        * the existing path rather than a second one.
        *
-       * A key that IS written but names nothing still throws: that is a
-       * dangling reference to missing content, a real fault.
+       * A key that IS written but names nothing still throws even where a
+       * pending choice is declared: that is a dangling reference to missing
+       * content, a real fault.
        */
       const delegated = typeof data.definition_key_config === 'string';
+      const pendingAllowed = data.allows_pending_choice === true;
       const unchosen =
         definitionKey === null ||
         definitionKey === undefined ||
         definitionKey === '';
-      if (delegated && unchosen) {
+      if (delegated && pendingAllowed && unchosen) {
         return [];
       }
       throw new Error(

@@ -54,6 +54,7 @@ export const GRANT_RULE_FIELD_CONFIG_CONSUMPTION = Object.freeze({
   definition_key_config: 'when_present',
   child_config: 'never',
   child_config_config: 'when_present',
+  allows_pending_choice: 'when_true',
   capability_key: 'never',
   collection: 'never',
   access_mode: 'never',
@@ -396,6 +397,38 @@ function validateKindFields(
         `Grant-source rule '${ruleKey}' requires a source definition reference.`,
       );
     }
+  }
+
+  /**
+   * `allows_pending_choice` DECLARES that this rule may be active while the
+   * config naming what it grants is still unwritten — the choice is owed, and
+   * the generator materialises nothing until it is made.
+   *
+   * It is opt-in because the silence it buys is only correct where a surface
+   * tracks the owed choice and asks for it. Everywhere else an unresolvable
+   * definition is a fault and must stay loud: a background added with no
+   * Origin feat, or an imported rule whose `definition_key_config` names a
+   * path nothing ever writes, would otherwise grant nothing forever with
+   * nobody told. Default false, so a producer has to say the word.
+   */
+  const pendingChoice = input.allows_pending_choice;
+  if (pendingChoice !== undefined && typeof pendingChoice !== 'boolean') {
+    throw new TypeError(
+      `Grant rule '${ruleKey}' field 'allows_pending_choice' must be boolean.`,
+    );
+  }
+  if (
+    pendingChoice === true &&
+    !(
+      kind === 'grant_source' &&
+      typeof input.definition_key_config === 'string' &&
+      input.definition_key_config.trim() !== ''
+    )
+  ) {
+    throw new TypeError(
+      `Grant rule '${ruleKey}' may not allow a pending choice without ` +
+        'delegating its definition through definition_key_config.',
+    );
   }
 
   if (kind === 'capability') {

@@ -157,18 +157,22 @@ export const CATALOG_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
       // verified; no reconciled row changes).
       //
       // Re-pinned again 2026-08-13 (D226 working exactly as designed):
-      // grant-rule-slot-generator.ts changed — an unwritten
-      // `definition_key_config` on an ACTIVE grant_source rule now means "the
-      // choice is owed" and materialises nothing, instead of throwing. This
-      // migration's OWN reconciled rows are unaffected: lineage grants reach
-      // the generator as configured_choice option grants (fixed_spell and
-      // skill kinds), never as a grant_source delegating its definition to
-      // config, so no lineage row can take the new path. The pin moves anyway
-      // because D226 freezes the TRANSITIVE SOURCE, not the subset of it a
-      // migration happens to exercise — a freeze covering only the exercised
-      // subset would be a claim broader than the freeze.
+      // grant-rule.ts and grant-rule-slot-generator.ts changed together — a
+      // grant_source rule may now DECLARE `allows_pending_choice`, and one
+      // that does materialises nothing while the config naming what it grants
+      // is unwritten, instead of throwing. This migration's OWN reconciled
+      // rows are unaffected: lineage grants reach the generator as
+      // configured_choice OPTION GRANTS, which are fixed_spell rules, and none
+      // of them is a grant_source delegating its definition to config, so no
+      // lineage row can take the new path and none can carry the new field.
+      // (Species SKILL grants are not option grants at all — they are
+      // synchronised by their own `syncSpeciesSkillGrants` arm, outside this
+      // seam.) The pin moves anyway because D226 freezes the TRANSITIVE
+      // SOURCE, not the subset of it a migration happens to exercise — a
+      // freeze covering only the exercised subset would be a claim broader
+      // than the freeze.
       checksum:
-        'ef8ae6f41b52b88f04869b4de15eabc55191b64f1e423a9223143287a1b2f1c1',
+        'e0cdab308225b671b03b3720bda42781591f1cb3d808f3125e59a641b7262d3c',
       run: reconcileSpeciesLineageContentV2,
     }),
   ]);

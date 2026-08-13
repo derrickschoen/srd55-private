@@ -172,6 +172,15 @@ export interface SrdSubclassGrantedFeatChoiceRule {
   readonly definition_key_config: typeof ADDITIONAL_FIGHTING_STYLE_KEY_CONFIG;
   readonly child_config_config: typeof ADDITIONAL_FIGHTING_STYLE_CONFIG_CONFIG;
   readonly active_from_class_level: CharacterLevel;
+  /**
+   * The level gate guarantees this rule activates BEFORE the choice can be
+   * made: the Champion reaches level 7 inside a level-up transaction, where
+   * the feat is necessarily unchosen. The rule declares that, and the owed
+   * choice is tracked and nagged (`required-fighter-choices.ts`,
+   * `character-completeness.ts`). Without the declaration the generator
+   * refuses an unresolvable definition, which is the right default.
+   */
+  readonly allows_pending_choice: true;
 }
 
 export interface SrdSubclassFeatChoiceRuleSet {
@@ -1070,6 +1079,7 @@ function championFeatChoiceRuleSet(
     definition_key_config: ADDITIONAL_FIGHTING_STYLE_KEY_CONFIG,
     child_config_config: ADDITIONAL_FIGHTING_STYLE_CONFIG_CONFIG,
     active_from_class_level: feature.class_level,
+    allows_pending_choice: true,
   });
   GrantRule.fromObject(rule);
   return Object.freeze({

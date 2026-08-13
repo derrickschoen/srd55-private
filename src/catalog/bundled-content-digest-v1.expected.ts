@@ -18,9 +18,14 @@ export interface ExpectedBundledAggregateDigestV1 {
  * Fighting Style" feature ("You gain another Fighting Style feat of your
  * choice", SRD 5.2.1 printed page 52). The other 443 aggregate digests are
  * byte-identical; the set was diffed entry by entry before this pin moved.
+ *
+ * Re-pinned again 2026-08-13, same single aggregate: that rule now also
+ * carries `allows_pending_choice: true`, the opt-in declaring that the feature
+ * activates at level 7 before its choice can be made. Re-diffed entry by
+ * entry; again exactly one aggregate moved.
  */
 export const EXPECTED_BUNDLED_CONTENT_DIGEST_V1 =
-  '95c69125d2a2cfb7330302f23a59de5b172b110b7081fbdfc9f52c79eab8dfbd' as const;
+  '42f3019500f9cec61846f52ecc5646b2d7e86eea8123b37299a4b422428aa673' as const;
 
 export const EXPECTED_BUNDLED_AGGREGATE_DIGESTS_V1 = Object.freeze([
   Object.freeze({"catalog_layer":"bundled","kind":"weapon","contentKey":"2024:weapon:battleaxe","name":"Battleaxe","digest":"749cd0ee7ef968dfd554a92e7b26637a15791a37c990652f70c0177422d925f9"}),
@@ -442,7 +447,7 @@ export const EXPECTED_BUNDLED_AGGREGATE_DIGESTS_V1 = Object.freeze([
   Object.freeze({"catalog_layer":"bundled","kind":"feat","contentKey":"2024:feat:savage-attacker","name":"Savage Attacker","digest":"6b08e9a8e7c070f89907b502ecbbe43622709df90ee84be5094b1d463e51ada1"}),
   Object.freeze({"catalog_layer":"bundled","kind":"feat","contentKey":"2024:feat:skilled","name":"Skilled","digest":"c2bb28e5da7240ac5a39c76ae3929d86b7635ce5119d96bd9523f80dd0779cfe"}),
   Object.freeze({"catalog_layer":"bundled","kind":"feat","contentKey":"2024:feat:two-weapon-fighting","name":"Two-Weapon Fighting","digest":"4e9ef5750138f08180001d8eeaa64086404aab9d04afbab560010f2585e11c4e"}),
-  Object.freeze({"catalog_layer":"bundled","kind":"subclass","contentKey":"2024:subclass:champion","name":"Champion","digest":"bf08ff2c23197ab2427538bbd658587009fc2b123df0fbd38586ed4592720d4c"}),
+  Object.freeze({"catalog_layer":"bundled","kind":"subclass","contentKey":"2024:subclass:champion","name":"Champion","digest":"66521a0940f5737a2d4c3d223c55cc48bdfe1e8f37d3cba94bb86796ccbffbce"}),
   Object.freeze({"catalog_layer":"bundled","kind":"subclass","contentKey":"2024:subclass:circle-of-the-land","name":"Circle of the Land","digest":"07b77cc364405c2461991508555458efbdf0252279a092fb4d10ad455650ec8f"}),
   Object.freeze({"catalog_layer":"bundled","kind":"subclass","contentKey":"2024:subclass:college-of-lore","name":"College of Lore","digest":"31c6e9332508fd8459fa0a5a39fd864f31704867417db731bd1e3c253f9292d0"}),
   Object.freeze({"catalog_layer":"bundled","kind":"subclass","contentKey":"2024:subclass:draconic-sorcery","name":"Draconic Sorcery","digest":"68189323dc5d8727d9156b0a3abf0a7fdfc9baeed951c09b4443b23f8252b305"}),

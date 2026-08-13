@@ -6,6 +6,8 @@ import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { UpdateClassCommand } from '../../../src/commands/update-class';
 import { LevelUpClassCommand } from '../../../src/commands/level-up-class';
 import { GrantRuleSlotGenerator } from '../../../src/grants/grant-rule-slot-generator';
+import { GrantRule } from '../../../src/grants/grant-rule';
+import { AddSourceCommand } from '../../../src/commands/add-source';
 import { ChooseFightingStyleCommand } from '../../../src/commands/choose-fighting-style';
 import { guidedRequiredFighterChoicesState } from '../../../src/builder/required-fighter-choices';
 import { CharacterCompletenessQueries } from '../../../src/queries/character-completeness';
@@ -185,6 +187,7 @@ describe('Champion level 7 additional Fighting Style', () => {
         definition_key_config: 'additional_fighting_style_key',
         child_config_config: 'additional_fighting_style_config',
         active_from_class_level: 7,
+        allows_pending_choice: true,
         count: 1,
         always_prepared: false,
         with_slots: true,
@@ -371,8 +374,90 @@ describe('Champion level 7 additional Fighting Style', () => {
   });
 
   /**
+   * THE OWED-CHOICE SILENCE IS OPT-IN, AND EVERY OTHER DELEGATING RULE STAYS
+   * LOUD.
+   *
+   * A skip that applied to ANY absent delegated key would have bought the
+   * Champion's correctness with everyone else's: only the Champion has an
+   * entitlement record and a completeness nag, so anywhere else
+   * "materialise nothing" means "grant nothing, forever, with nobody told".
+   * These are the cases a blanket skip would have swallowed.
+   */
+  it('still refuses a background added with no Origin feat chosen', () => {
+    // `add_source` validates and persists the config BEFORE generating, so an
+    // empty config reaches the generator with the background's seeded
+    // grant_source rule already active. That rule declares no pending choice,
+    // so it must refuse rather than silently grant no Origin feat.
+    const backgroundId = Number(
+      db.scalar('SELECT id FROM background_definitions ORDER BY id LIMIT 1'),
+    );
+    expect(backgroundId).toBeGreaterThan(0);
+    expect(() =>
+      new AddSourceCommand(
+        db,
+        {
+          type: 'add_source',
+          source_type: 'background',
+          source_definition_id: backgroundId,
+          config: {},
+        },
+        integrity,
+      ).apply(characterId),
+    ).toThrow(/could not resolve its definition/u);
+  });
+
+  it('still refuses a delegating rule whose config PATH nothing writes', () => {
+    // A mistyped PATH (not a mistyped VALUE) resolves to nothing, exactly like
+    // an unmade choice. Undeclared, it is a fault, so it refuses — the same
+    // Champion rule with its declaration removed and its path misspelt.
+    const subclass = subclassId('2024:subclass:champion');
+    db.exec(
+      'UPDATE subclass_definitions SET grant_rules = ? WHERE id = ?',
+      [
+        JSON.stringify([
+          {
+            kind: 'grant_source',
+            rule_key: 'champion-additional-fighting-style',
+            source_type: 'feat',
+            definition_key_config: 'aditional_fighting_style_key',
+            active_from_class_level: 7,
+          },
+        ]),
+        subclass,
+      ],
+    );
+    fighterWithSubclass(subclass, 6);
+    expect(() =>
+      new LevelUpClassCommand(
+        db,
+        {
+          type: 'level_up_class',
+          class_definition_id: classId('Fighter'),
+          target_level: 7,
+        },
+        integrity,
+      ).apply(characterId),
+    ).toThrow(/could not resolve its definition/u);
+  });
+
+  it('refuses to build a pending-choice rule that delegates nothing', () => {
+    // The declaration is meaningless without `definition_key_config`, so it is
+    // refused at the type's own boundary rather than sitting in a seed.
+    expect(() =>
+      GrantRule.fromObject({
+        kind: 'grant_source',
+        rule_key: 'nowhere',
+        source_type: 'feat',
+        source_definition_key: '2024:feat:defense',
+        allows_pending_choice: true,
+      }),
+    ).toThrow(/without delegating its definition/u);
+  });
+
+  /**
    * A key that IS written but names nothing is still a fault. The owed-choice
-   * skip must not swallow a dangling reference to missing content.
+   * skip must not swallow a dangling reference to missing content, even where
+   * a pending choice IS declared.
    */
   it('still refuses a written key that resolves to no definition', () => {
     fighterWithSubclass(subclassId('2024:subclass:champion'), 7);

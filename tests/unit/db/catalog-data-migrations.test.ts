@@ -96,11 +96,12 @@ describe('catalog data-migration registry', () => {
       // SRD attribution header corrected to the 5.2.1 statement the source
       // document requires (comment-only diff, verified).
       //
-      // Re-pinned again 2026-08-13 with the registry: an unwritten
-      // `definition_key_config` on an ACTIVE grant_source rule is now an owed
-      // choice in grant-rule-slot-generator.ts rather than a throw. No lineage
-      // row changes — see the registry entry for why the pin still moves.
-      checksum: 'ef8ae6f41b52b88f04869b4de15eabc55191b64f1e423a9223143287a1b2f1c1',
+      // Re-pinned again 2026-08-13 with the registry: grant-rule.ts gained the
+      // opt-in `allows_pending_choice` field and grant-rule-slot-generator.ts
+      // honours it, so a rule that DECLARES a pending choice waits instead of
+      // throwing while its config is unwritten. No lineage row changes — see
+      // the registry entry for why the pin still moves.
+      checksum: 'e0cdab308225b671b03b3720bda42781591f1cb3d808f3125e59a641b7262d3c',
     }]);
     expect(() =>
       validateCatalogDataMigrationRegistry(CATALOG_DATA_MIGRATIONS)

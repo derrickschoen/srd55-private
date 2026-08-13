@@ -60,6 +60,7 @@ const EXPECTED_CHAMPION_ADDITIONAL_FIGHTING_STYLE_RULE = {
     definition_key_config: 'additional_fighting_style_key',
     child_config_config: 'additional_fighting_style_config',
     active_from_class_level: 7,
+    allows_pending_choice: true,
     count: 1,
     always_prepared: false,
     with_slots: true,
