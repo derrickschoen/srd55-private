@@ -66,8 +66,9 @@
 //     "Fireball," and "Fire Bolt." SRD Twinned does not duplicate these
 //     damage spells; its modeled damage contribution is honestly zero.
 //   - Fiend Patron: "Warlock" (Pact Magic, Agonizing Blast), "Warlock
-//     Subclass: Fiend Patron" (Dark One's Blessing, Fiendish Resilience, Hurl
-//     Through Hell), and "Eldritch Blast"/"Hex" spell descriptions.
+//     Subclass: Fiend Patron" (Fiend Spells grants Scorching Ray; Dark One's
+//     Blessing, Fiendish Resilience, Hurl Through Hell), and "Scorching Ray,"
+//     "Eldritch Blast," and "Hex" spell descriptions.
 //   - College of Lore: "Bard" (Bardic Inspiration, Font of Inspiration,
 //     Magical Secrets) and "Bard Subclass: College of Lore" (Cutting Words,
 //     Magical Discoveries), plus "Dissonant Whispers," "Vicious Mockery,"
@@ -237,6 +238,31 @@ export interface CombatResult {
   prevented: number;
 }
 
+export type ConcentrationRole = 'none' | 'damage-anchored' | 'buff/control' | 'level-dependent';
+
+/** Explicit concentration posture for every row on the complete SRD board. */
+export const SRD_CONCENTRATION_ROLES = {
+  berserker: 'none',
+  berserkerThrown: 'none',
+  champion: 'none',
+  championRanged: 'none',
+  openHand: 'none',
+  openHandThrown: 'none',
+  thief: 'none',
+  thiefShortbow: 'none',
+  devotion: 'none',
+  devotionThrown: 'none',
+  hunter: 'damage-anchored',
+  hunterRanged: 'damage-anchored',
+  lifeDomain: 'damage-anchored',
+  circleLand: 'buff/control',
+  evoker: 'none',
+  draconic: 'none',
+  fiendPatron: 'damage-anchored',
+  fiend: 'damage-anchored',
+  loreCollege: 'level-dependent',
+} as const satisfies Record<string, ConcentrationRole>;
+
 export const AC: Record<Level, number> = { 3: 14, 6: 16, 11: 18, 17: 18 };
 export const WB: Record<Level, number> = { 3: 0, 6: 1, 11: 2, 17: 3 }; // equal-items weapon bonus
 
@@ -345,33 +371,41 @@ function recoveredSlots(levelBudget: number): number[] {
 // --- MELEE, equal items -----------------------------------------------------
 
 export function devotion(rng: Rng, L: Level, nc: number): CombatResult {
-  // Dex Oath of Devotion paladin. Sacred Weapon is activated as part of the
-  // first Attack action and adds Charisma +3 to this weapon's attack rolls for
-  // 10 minutes. Two Channel Divinity uses plus one recovered at each Short
-  // Rest cover all four modeled combats, so activation never displaces Smite.
-  // Divine Smite is a BA spell: one per turn on a round with a hit, greediest
-  // slot first; the smite's dice are doubled when any hit that turn was a crit.
+  // Dex Oath of Devotion paladin, shortsword (Vex) + scimitar (Nick), with
+  // Two-Weapon Fighting. Sacred Weapon is activated as part of the first
+  // Attack action and enchants only the held shortsword; it consumes no Bonus
+  // Action, so round 1 can still Smite. Two Channel Divinity uses plus one
+  // recovered at each Short Rest cover all four modeled combats.
+  // Divine Smite is an immediate post-hit Bonus Action. The rotation spends
+  // the next greedy slot on the first confirmed hit each turn; only THAT hit's
+  // critical state doubles the Smite dice. Nick stays inside the Attack action.
   const wb = WB[L];
-  const hit = ({ 3: 5, 6: 7, 11: 9, 17: 11 } as const)[L] + wb + 3;
+  const hit = proficiency(L) + abilityMod(L) + wb;
   const ac = AC[L];
-  const mod = ({ 3: 3, 6: 4, 11: 5, 17: 5 } as const)[L] + wb;
-  const natk = ({ 3: 2, 6: 3, 11: 3, 17: 3 } as const)[L];
+  const mod = abilityMod(L) + wb;
+  const actionAttacks = L >= 5 ? 2 : 1;
+  const attacks = actionAttacks + 1;
   const rad = L >= 11 ? 1 : 0; // Radiant Strikes
   const qq = [...SMITE_Q[L]].sort((a, b) => b - a);
   let dealt = 0;
   for (let c = 0; c < nc; c++) {
+    let vex = false;
     for (let rnd = 0; rnd < 4; rnd++) {
-      const hits: boolean[] = [];
-      for (let i = 0; i < natk; i++) {
-        const r = roll(rng, false);
+      let smiteAvailable = qq.length > 0;
+      for (let i = 0; i < attacks; i++) {
+        const nickAttack = i === attacks - 1;
+        const advantage = vex;
+        vex = false; // Vex applies to this next attack, hit or miss.
+        const r = roll(rng, advantage);
         const crit = r === 20;
-        if (r === 1 || (r + hit < ac && !crit)) continue;
+        if (r === 1 || (r + hit + (nickAttack ? 0 : 3) < ac && !crit)) continue;
         dealt += d(rng, crit ? 2 : 1, 6) + mod + d(rng, rad * (crit ? 2 : 1), 8);
-        hits.push(crit);
-      }
-      if (qq.length > 0 && hits.length > 0) {
-        const sm = qq.shift() as number;
-        dealt += d(rng, sm * (hits.some(Boolean) ? 2 : 1), 8);
+        if (!nickAttack) vex = true; // Sacred shortsword also has Vex.
+        if (smiteAvailable) {
+          smiteAvailable = false;
+          const sm = qq.shift() as number;
+          dealt += d(rng, sm * (crit ? 2 : 1), 8);
+        }
       }
     }
   }
@@ -385,6 +419,11 @@ export function devotionThrown(rng: Rng, L: Level, nc: number): CombatResult {
   // part of round 1's Attack action, adds Charisma to that attack, then ends
   // once the throw means the paladin is no longer carrying that weapon. The
   // remaining attacks get no Sacred Weapon bonus. Archery is inapplicable.
+  // The explicit SRD starting loadout has six javelins. They can be drawn as
+  // part of each attack and are recovered between combats, but attacks seven
+  // and eight in one combat hit the out-of-stock branch. Slow has no DPR value
+  // against the stationary benchmark. Smite fires on the first confirmed hit
+  // each turn, so its dice use that hit's critical state and no later roll.
   const wb = WB[L];
   const baseHit = proficiency(L) + abilityMod(L) + wb;
   const attacks = L >= 5 ? 2 : 1;
@@ -393,9 +432,12 @@ export function devotionThrown(rng: Rng, L: Level, nc: number): CombatResult {
   let dealt = 0;
   for (let c = 0; c < nc; c++) {
     let sacredJavelin = true;
+    let javelins = 6;
     for (let rnd = 0; rnd < 4; rnd++) {
-      const hits: boolean[] = [];
-      for (let i = 0; i < attacks; i++) {
+      let smiteAvailable = smites.length > 0;
+      const availableAttacks = Math.min(attacks, javelins);
+      for (let i = 0; i < availableAttacks; i++) {
+        javelins--;
         const sacred = sacredJavelin;
         sacredJavelin = false;
         const r = roll(rng, false);
@@ -406,11 +448,11 @@ export function devotionThrown(rng: Rng, L: Level, nc: number): CombatResult {
           abilityMod(L) +
           wb +
           d(rng, radiantDice * (crit ? 2 : 1), 8);
-        hits.push(crit);
-      }
-      if (hits.length > 0 && smites.length > 0) {
-        const smiteDice = smites.shift() as number;
-        dealt += d(rng, smiteDice * (hits.some(Boolean) ? 2 : 1), 8);
+        if (smiteAvailable) {
+          smiteAvailable = false;
+          const smiteDice = smites.shift() as number;
+          dealt += d(rng, smiteDice * (crit ? 2 : 1), 8);
+        }
       }
     }
   }
@@ -492,6 +534,12 @@ export function domination(
   return { dealt, prevented };
 }
 
+/** Action Surge placement policy for the Champion's four-round combat. */
+export function championSurgesOnRound(L: Level, ranged: boolean, round: number): boolean {
+  if (L >= 17) return round === 0 || round === 1;
+  return round === (ranged ? 1 : 0);
+}
+
 function championCore(rng: Rng, L: Level, nc: number, ranged: boolean): CombatResult {
   // Champion Fighter, shared chassis for the melee (Savage Attacker
   // greatsword) and ranged (hand-crossbow-free shortbow + Archery) rows.
@@ -514,7 +562,10 @@ function championCore(rng: Rng, L: Level, nc: number, ranged: boolean): CombatRe
     let ma = false; // Studied Attacks: advantage on next attack after a miss
     let vex = false; // ranged: Vex carries to the next attack
     for (let rnd = 0; rnd < 4; rnd++) {
-      const surge = rnd === 0 || (L >= 17 && rnd === 1); // F4: two uses at 17
+      // The ranged posture banks shortbow Vex in round 1 before spending its
+      // single Action Surge in round 2. At L17 both legal uses occupy distinct
+      // turns (rounds 1 and 2), preserving the once-per-turn limit.
+      const surge = championSurgesOnRound(L, ranged, rnd);
       let n = natk + (surge ? natk : 0);
       let savageUsed = false;
       let hi = L >= 10; // Heroic Warrior: free Heroic Inspiration each turn
@@ -685,8 +736,11 @@ export function berserker(rng: Rng, L: Level, nc: number): CombatResult {
 export function berserkerThrown(rng: Rng, L: Level, nc: number): CombatResult {
   // Two handaxes at normal thrown range. Because Thrown melee weapons retain
   // their melee attack ability, these are Strength attacks: Rage, Reckless,
-  // Frenzy, and Brutal Strike all work. Light supplies one extra attack; the
-  // off-hand omits only the Strength modifier. The equal-items ruling treats
+  // Frenzy, and Brutal Strike all work. Light supplies one Bonus Action attack
+  // after round 1; entering Rage consumes that Bonus Action on round 1. The
+  // off-hand omits only the Strength modifier. Handaxe Vex is redundant with
+  // Reckless except on the attack that forgoes Reckless to use Brutal Strike,
+  // where carried Vex can still supply Advantage. The equal-items ruling treats
   // the thrown-weapon supply as the row's +X weapon. No enemy is within 5
   // feet, so Retaliation and the resistance support stream are absent.
   const wb = WB[L];
@@ -695,15 +749,20 @@ export function berserkerThrown(rng: Rng, L: Level, nc: number): CombatResult {
   const attackActionAttacks = L >= 5 ? 2 : 1;
   let dealt = 0;
   for (let c = 0; c < nc; c++) {
+    let vex = false;
     for (let rnd = 0; rnd < 4; rnd++) {
       let frenzyPending = true;
-      const totalAttacks = attackActionAttacks + 1; // Light extra attack
+      const lightExtraAttacks = rnd === 0 ? 0 : 1; // round 1 BA enters Rage
+      const totalAttacks = attackActionAttacks + lightExtraAttacks;
       for (let i = 0; i < totalAttacks; i++) {
         const brutal = L >= 9 && i === attackActionAttacks - 1;
-        const r = roll(rng, !brutal); // Reckless has no melee-only restriction
+        const advantage = !brutal || vex; // advantage sources combine by OR
+        vex = false;
+        const r = roll(rng, advantage); // Reckless has no melee-only restriction
         const crit = r === 20;
         if (r === 1 || (r + hit < AC[L] && !crit)) continue;
-        const isLightExtra = i === totalAttacks - 1;
+        vex = true;
+        const isLightExtra = lightExtraAttacks === 1 && i === totalAttacks - 1;
         dealt +=
           d(rng, crit ? 2 : 1, 6) +
           wb +
@@ -781,8 +840,10 @@ export function openHandThrown(rng: Rng, L: Level, nc: number): CombatResult {
   // a Monk weapon, so Dexterous Attacks and the Martial Arts die apply. Focus
   // funds one ranged Stunning Strike per turn when possible; a failed save
   // helps later attacks that turn, while a successful save grants Advantage
-  // only to the next attack. Flurry/Open Hand Technique/Quivering Palm cannot
-  // reach this target and are honestly absent from the ranged posture.
+  // only to the next attack. Handaxe Vex carries across attacks and turns;
+  // Vex and Stunning Strike combine by OR, never as extra advantage dice.
+  // Flurry/Open Hand Technique/Quivering Palm cannot reach this target and are
+  // honestly absent from the ranged posture.
   const wb = WB[L];
   const hit = proficiency(L) + abilityMod(L) + wb;
   const martialDie = ({ 3: 6, 6: 8, 11: 10, 17: 12 } as const)[L];
@@ -791,21 +852,26 @@ export function openHandThrown(rng: Rng, L: Level, nc: number): CombatResult {
   let dealt = 0;
   for (let c = 0; c < nc; c++) {
     let focus = L;
+    let vex = false;
     for (let rnd = 0; rnd < 4; rnd++) {
-      let advantage = false;
+      let stunned = false;
+      let stunningAdvantage = false;
       let stunAvailable = L >= 5 && focus > 0;
       for (let i = 0; i < attacks; i++) {
-        const r = roll(rng, advantage);
-        advantage = false;
+        const r = roll(rng, vex || stunned || stunningAdvantage);
+        vex = false;
+        stunningAdvantage = false;
         const crit = r === 20;
         if (r === 1 || (r + hit < AC[L] && !crit)) continue;
+        vex = true;
         dealt += d(rng, (crit ? 2 : 1), martialDie) + abilityMod(L) + wb;
         if (stunAvailable) {
           focus -= 1;
           stunAvailable = false;
-          // Either outcome grants Advantage to any remaining attack this turn.
-          advantage = true;
-          saveFails(rng, dc); // resolve the sourced save and consume its RNG draw
+          // Failure leaves the target Stunned until our next turn; success
+          // grants Advantage only to the next attack before then.
+          stunned = saveFails(rng, dc);
+          if (!stunned) stunningAdvantage = true;
         }
       }
     }
@@ -815,8 +881,10 @@ export function openHandThrown(rng: Rng, L: Level, nc: number): CombatResult {
 
 export function hunter(rng: Rng, L: Level, nc: number): CombatResult {
   // Hunter Ranger, TWF Fighting Style, shortsword (Vex) + scimitar (Nick).
-  // Hunter's Mark is established with the round-1 Bonus Action and remains
-  // for the combat. Its SRD die is d6 at these levels (d10 arrives at Ranger
+  // Hunter's Mark is established with the round-1 Bonus Action while Nick
+  // keeps the Light attack inside the Attack action. It remains on the living
+  // benchmark target: SRD 5.2.1 has no retarget-on-kill clause. Its die is d6
+  // at these levels (d10 arrives at Ranger
   // 20). Colossus Slayer assumes the benchmark target starts wounded. From
   // L11, Superior Hunter's Prey sends one Mark die/turn to a second target;
   // that off-target amplification is returned in the support channel.
@@ -832,11 +900,13 @@ export function hunter(rng: Rng, L: Level, nc: number): CombatResult {
       let colossusPending = true;
       let hitMarked = false;
       for (let i = 0; i < attacks; i++) {
+        const nickAttack = i === attacks - 1;
         const r = roll(rng, L >= 17 || vex); // Precise Hunter at L17
+        vex = false; // the next attack consumed any carried Vex
         const crit = r === 20;
         const ok = r > 1 && (r + hit >= AC[L] || crit);
-        vex = ok;
         if (!ok) continue;
+        if (!nickAttack) vex = true; // shortsword; Nick itself grants no Vex
         hitMarked = true;
         dealt += d(rng, crit ? 2 : 1, 6) + flat + d(rng, crit ? 2 : 1, 6);
         if (colossusPending) {
@@ -1236,8 +1306,12 @@ export function fiend(
   // Fiend warlock. blade: Pact of the Blade greatsword (items ladder applies,
   // F2/owner ruling), Hex (or Darkness variant: Devil's Sight advantage),
   // Eldritch Smite once per turn from the Pact Magic pool — Warlock 5+ only
-  // (F7). Otherwise: Eldritch Blast + Agonizing Blast with Hex, leveled-slot
-  // Scorching-Ray-style volleys first (spell attacks: itemless).
+  // (F7). Otherwise: exact Scorching Ray volleys from the Fiend Spells list
+  // first (3 rays at slot level 2, +1 ray per higher slot; each ray is 2d6),
+  // then Eldritch Blast + Agonizing Blast with Hex (spell attacks: itemless).
+  // Pact slots refresh on a Short Rest; the board places one between modeled
+  // combats, so the slot-volley posture refreshes every combat and burst is
+  // expected to approximately equal day DPR.
   // Hex upcast on a pact slot (level 2/3/5/5) lasts 4/8/24/24 hours, so one
   // casting spans the whole 4-combat day: the slot is paid once, in combat 1
   // (F26). Darkness is Concentration 10 minutes and is re-paid every combat.
@@ -1253,6 +1327,7 @@ export function fiend(
     const upkeep = dark ? 1 : c === 0 ? 1 : 0;
     let sq = slots - upkeep;
     for (let rnd = 0; rnd < 4; rnd++) {
+      const hexCastThisTurn = !dark && c === 0 && rnd === 0;
       if (blade) {
         const natk = L >= 17 ? 3 : L >= 5 ? 2 : 1;
         let drunk = false;
@@ -1282,10 +1357,10 @@ export function fiend(
           dealt += d(rng, sm * (hits.some(Boolean) ? 2 : 1), 8);
         }
       } else {
-        if (sq > 0) {
+        if (sq > 0 && !hexCastThisTurn) {
           sq -= 1;
           for (let v = 0; v < slvl + 1; v++) {
-            // Scorching-Ray-style volley
+            // Scorching Ray: 3 rays at level 2, +1 per higher slot.
             const r = roll(rng, false);
             const crit = r === 20;
             if (r > 1 && (r + hit >= ac || crit)) {
@@ -1293,6 +1368,9 @@ export function fiend(
             }
           }
         } else {
+          // Combat 1 round 1 casts Hex with a Pact slot. The SRD permits only
+          // one slot-spending spell per turn, so that turn uses slotless EB;
+          // it cannot also spend a slot on Scorching Ray.
           const beams = L < 5 ? 1 : L < 11 ? 2 : L < 17 ? 3 : 4;
           for (let b = 0; b < beams; b++) {
             const r = roll(rng, false);
@@ -1364,7 +1442,10 @@ export function lifeDomain(rng: Rng, L: Level, nc: number): CombatResult {
   // action per combat restores its full 5*level pool (sufficient Bloodied
   // allies are assumed). One level-1 Healing Word per combat prices Disciple
   // of Life and, from L6, Blessed Healer. At L5+, the greediest available
-  // level-3+ slot starts Spirit Guardians; it gets one save/tick per round.
+  // level-3+ slot starts Spirit Guardians. The party-first walk-the-aura
+  // posture enters the target's space on the Cleric's turn, then the target
+  // ends its own turn in the emanation: two independent saves/ticks per round,
+  // each on a different turn and therefore legal under the once-per-turn cap.
   // Remaining actions use Sacred Flame, with Potent Spellcasting from L7.
   const dc = 8 + proficiency(L) + abilityMod(L);
   const slots = [...FULL_SLOT_Q[L]];
@@ -1379,8 +1460,10 @@ export function lifeDomain(rng: Rng, L: Level, nc: number): CombatResult {
     if (canHeal) slots.splice(healingIndex, 1);
     for (let rnd = 0; rnd < 4; rnd++) {
       if (spiritSlot > 0) {
-        const spiritDamage = d(rng, spiritSlot, 8); // 3d8 + 1d8/slot above 3
-        dealt += saveForHalf(rng, dc, spiritDamage);
+        for (let tick = 0; tick < 2; tick++) {
+          const spiritDamage = d(rng, spiritSlot, 8); // 3d8 + 1d8/slot above 3
+          dealt += saveForHalf(rng, dc, spiritDamage);
+        }
       }
       const preserveRound = spiritSlot > 0 ? 1 : 0;
       if (rnd === preserveRound) {
@@ -1457,8 +1540,11 @@ export function evoker(rng: Rng, L: Level, nc: number): CombatResult {
   // dry rounds use Acid Splash so Potent Cantrip guarantees half damage on a
   // successful save. Sculpt Spells (L6+) protects one adjacent ally from the
   // same rolled area damage; that avoided friendly fire is support. Empowered
-  // Evocation adds Intelligence from L10. Overchannel (L14+) maximizes the
-  // first level-5-or-lower spell once per Long Rest, without self-damage.
+  // Evocation adds Intelligence from L10. The environment exposes one ally,
+  // safely within Sculpt's sourced 1+slot-level exclusion count. Overchannel
+  // (L14+) maximizes the first level-5-or-lower spell once per Long Rest. Its
+  // legal repeats are declined because the board has no self-damage valuation
+  // channel for the escalating 2d12-per-slot-level Necrotic cost.
   const dc = 8 + proficiency(L) + abilityMod(L);
   const slots = [
     ...FULL_SLOT_Q[L],
@@ -1523,10 +1609,38 @@ function chromaticOrb(
   return { dealt, prevented: amplified };
 }
 
+export interface DraconicTurnCasting {
+  action: 'leveled spell' | 'cantrip';
+  bonusAction: 'leveled spell' | 'cantrip' | 'none';
+  slotsSpent: 0 | 1;
+}
+
+/** Pure decision node for the SRD one-slot-per-turn + Quickened lock. */
+export function draconicTurnCasting(
+  hasSlot: boolean,
+  canQuicken: boolean,
+): DraconicTurnCasting {
+  if (hasSlot && canQuicken) {
+    return { action: 'cantrip', bonusAction: 'leveled spell', slotsSpent: 1 };
+  }
+  if (hasSlot) {
+    return { action: 'leveled spell', bonusAction: 'none', slotsSpent: 1 };
+  }
+  return {
+    action: 'cantrip',
+    bonusAction: canQuicken ? 'cantrip' : 'none',
+    slotsSpent: 0,
+  };
+}
+
 export function draconic(rng: Rng, L: Level, nc: number): CombatResult {
   // Fire Draconic Sorcerer. Slots level 3+ cast Fireball; lower slots cast
   // Chromatic Orb, whose sourced matching-d8 leap damage is off-target
-  // amplification. Quickened Spell (2 SP) adds an action Fire Bolt. Sorcerous
+  // amplification. On a leveled-spell turn, Quickened Spell (2 SP) changes
+  // that spell to a Bonus Action and the action casts Fire Bolt. On a dry turn,
+  // both spells are Fire Bolt (one action, one Quickened); no slot is spent.
+  // This obeys both Quickened's level-1+ lock and the general one-slot-per-turn
+  // rule. Sorcerous
   // Restoration restores floor(level/2) SP once after a Short Rest in a day.
   // Innate Sorcery covers the first two combats (+1 DC, Advantage on spell
   // attacks). Elemental Affinity adds Charisma to each Fire spell from L6.
@@ -1549,6 +1663,10 @@ export function draconic(rng: Rng, L: Level, nc: number): CombatResult {
       const quickened = sorceryPoints >= 2;
       if (quickened) sorceryPoints -= 2;
       const slot = slots.shift();
+      const casting = draconicTurnCasting(slot !== undefined, quickened);
+      // When a slot exists, this is the Quickened Bonus Action spell; the
+      // Fire Bolt below is the action. With no slot, this is the action Fire
+      // Bolt and the block below is a second, Quickened Fire Bolt.
       if (slot !== undefined && slot >= 3) {
         const rolled = d(rng, 8 + slot - 3, 6) + (L >= 6 ? abilityMod(L) : 0);
         dealt += saveForHalf(rng, dc, rolled);
@@ -1563,7 +1681,7 @@ export function draconic(rng: Rng, L: Level, nc: number): CombatResult {
           dealt += d(rng, cantripDice(L) * (crit ? 2 : 1), 10) + (L >= 6 ? abilityMod(L) : 0);
         }
       }
-      if (quickened) {
+      if (casting.bonusAction !== 'none') {
         const r = roll(rng, innate);
         const crit = r === 20;
         if (r > 1 && (r + proficiency(L) + abilityMod(L) >= AC[L] || crit)) {

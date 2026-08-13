@@ -79,6 +79,7 @@ describe('run.ts N validation (F20)', () => {
       'SRD Evoker — ranged spells',
       'SRD Draconic (Fire) — ranged spells',
       'SRD Fiend — ranged spell attacks',
+      'SRD Fiend — slot volleys',
       'SRD Lore — caster posture',
     ]) {
       expect(allOutput).toContain(name);
@@ -87,6 +88,21 @@ describe('run.ts N validation (F20)', () => {
     expect(allOutput).toContain(
       '† Lore CME burst and day cells are declared upper bounds',
     );
+    expect(allOutput).toContain('HOMEBREW 3-ROUND CLAIMED → MEASURED');
+    for (const name of [
+      'Long Grudge — rider DPR',
+      'Anchor Point — rider DPR',
+      'Patient Volley — rider DPR',
+      'Cutting Chorus — net DPR proxy',
+      'Vanward — 3-round average',
+      'Cold Open — round-1 nova',
+      'Broken Tooth — total form DPR',
+      'Cutting Momentum — package DPR',
+      'Broken Tempo — maneuver DPR',
+    ]) {
+      expect(allOutput).toContain(name);
+    }
+    expect(allOutput).toContain('Patient + Vanward — round-1 stack, L5');
   });
 
   it('defaults to N=2000 when no argv is supplied (does not throw)', async () => {

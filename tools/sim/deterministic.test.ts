@@ -8,13 +8,32 @@
 // on the wrong branch. All draw-count derivations are documented inline.
 import { describe, expect, it } from 'vitest';
 import {
+  berserkerThrown,
   champion,
   championRanged,
+  championSurgesOnRound,
   devotion,
   domination,
+  draconicTurnCasting,
+  fiend,
+  hunter,
+  lifeDomain,
   monk,
+  openHandThrown,
   veteran,
 } from './sim';
+import {
+  anchorPoint,
+  brokenTempo,
+  brokenTooth,
+  coldOpen,
+  cuttingChorus,
+  cuttingMomentum,
+  longGrudge,
+  patientVolley,
+  vanwardConclave,
+  vanwardPatientStack,
+} from './homebrew';
 import {
   ALWAYS_MIN,
   constRng,
@@ -110,6 +129,142 @@ describe('constant-value Rng (fixed non-crit hit): exact smite-queue accounting'
   });
 });
 
+describe('rotation decision nodes: exact ordering and action-economy accounting', () => {
+  it('Devotion smites the first confirmed hit immediately, not a later critical hit', () => {
+    // L3 has two attacks/round (shortsword then Nick). Attack 1 is a normal
+    // hit and consumes the 2d8 Smite at minimum faces. Its Vex makes attack 2
+    // roll twice; that attack crits, but cannot retroactively double Smite.
+    // Remaining attacks all miss. Damage = (d6 1 + Dex 3 + 2d8 2) +
+    // (critical 2d6 2 + Dex 3) = 11.
+    const values = [
+      0.72, 0, 0, 0,
+      0.99, 0, 0, 0,
+      ...repeat(MISS, 6),
+    ];
+    expect(devotion(scriptedRng(values), 3, 1)).toEqual({ dealt: 11, prevented: 0 });
+  });
+
+  it('Devotion doubles Smite dice when the first confirmed hit itself is critical', () => {
+    // Critical shortsword: 2d6 + Dex + doubled 2d8 Smite = 9 at min faces.
+    // Its Vex feeds a plain Nick hit for d6+Dex=4; later attacks miss.
+    const values = [
+      0.99, 0, 0, 0, 0, 0, 0,
+      0.72, 0.72, 0,
+      ...repeat(MISS, 6),
+    ];
+    expect(devotion(scriptedRng(values), 3, 1)).toEqual({ dealt: 13, prevented: 0 });
+  });
+
+  it('Champion banks shortbow Vex before its single surge and uses both L17 surges on separate turns', () => {
+    expect([0, 1, 2, 3].filter((round) => championSurgesOnRound(11, false, round))).toEqual([0]);
+    expect([0, 1, 2, 3].filter((round) => championSurgesOnRound(11, true, round))).toEqual([1]);
+    expect([0, 1, 2, 3].filter((round) => championSurgesOnRound(17, true, round))).toEqual([0, 1]);
+  });
+
+  it('thrown Berserker pays the round-one Rage BA tax and Vex supplies every Brutal attack', () => {
+    let draws = 0;
+    const rng = (): number => {
+      draws += 1;
+      return 0.72;
+    };
+    // L11: 2 attacks in round 1, then 3 each round = 11. Each has Advantage
+    // (Reckless, or carried Vex on the Brutal attack): 22 d20 draws. Damage
+    // uses 11 weapon dice, 12 Frenzy dice, and 4 Brutal d10s: 27 more draws.
+    expect(berserkerThrown(rng, 11, 1)).toEqual({ dealt: 242, prevented: 0 });
+    expect(draws).toBe(49);
+  });
+
+  it('thrown Open Hand carries handaxe Vex across turns', () => {
+    let draws = 0;
+    const rng = (): number => {
+      draws += 1;
+      return 0.72;
+    };
+    // Four L3 attacks: one initial d20, three Vex-advantaged pairs, and four
+    // damage dice. Each hit deals d6(5)+Dex3=8.
+    expect(openHandThrown(rng, 3, 1)).toEqual({ dealt: 32, prevented: 0 });
+    expect(draws).toBe(11);
+  });
+
+  it('Hunter Nick consumes Vex but does not create Vex for the next turn', () => {
+    let draws = 0;
+    const rng = (): number => {
+      draws += 1;
+      return 0.72;
+    };
+    // L3 each round: shortsword normal, Nick scimitar with Vex advantage.
+    // Attack d20 draws = 4*(1+2)=12; weapon/Mark/Colossus dice = 4*5=20.
+    expect(hunter(rng, 3, 1)).toEqual({ dealt: 128, prevented: 0 });
+    expect(draws).toBe(32);
+  });
+
+  it('Fiend cannot cast Hex and Scorching Ray with Pact slots on the same turn', () => {
+    // L6 round 1 casts Hex and fires two EB beams. Both hit for
+    // d10(8)+Cha4+Hex d6(5)=17. Every later attack misses.
+    const values = [
+      0.72, 0.72, 0.72,
+      0.72, 0.72, 0.72,
+      ...repeat(MISS, 8),
+    ];
+    expect(fiend(scriptedRng(values), 6, 1)).toEqual({ dealt: 34, prevented: 0 });
+  });
+
+  it('Life walks Spirit Guardians onto the target, then resolves its end-turn tick', () => {
+    // L6 has a 3rd-level slot: 2 ticks/round * 4 rounds * half of 3d8(18)
+    // =72. Preserve Life prevents 30; Healing Word 2d4(6)+Wis4+Disciple3
+    // plus Blessed Healer3 prevents 16 more.
+    expect(lifeDomain(constRng(0.72), 6, 1)).toEqual({ dealt: 72, prevented: 46 });
+  });
+
+  it('Draconic casting decisions spend at most one slot and honor Quickened locking', () => {
+    expect(draconicTurnCasting(true, true)).toEqual({
+      action: 'cantrip', bonusAction: 'leveled spell', slotsSpent: 1,
+    });
+    expect(draconicTurnCasting(true, false)).toEqual({
+      action: 'leveled spell', bonusAction: 'none', slotsSpent: 1,
+    });
+    expect(draconicTurnCasting(false, true)).toEqual({
+      action: 'cantrip', bonusAction: 'cantrip', slotsSpent: 0,
+    });
+    expect(draconicTurnCasting(false, false)).toEqual({
+      action: 'cantrip', bonusAction: 'none', slotsSpent: 0,
+    });
+  });
+});
+
+describe('Fiend slot volleys: exact Scorching Ray accounting', () => {
+  it('uses 3/4/6/6 rays at pact-slot levels 2/3/5/5, each dealing 2d6 plus Hex', () => {
+    // x=.72: d20=15 (non-critical hit), d6=5, d10=8. Combat 1 spends
+    // one Pact slot on the day-long Hex, then spends every remaining slot on
+    // Scorching Ray before falling back to Eldritch Blast + Agonizing Blast.
+    const expected = {
+      3: 3 * (2 * 5 + 5) + 3 * (8 + 3 + 5),
+      6: 4 * (2 * 5 + 5) + 3 * 2 * (8 + 4 + 5),
+      11: 2 * 6 * (2 * 5 + 5) + 2 * 3 * (8 + 5 + 5),
+      17: 3 * 6 * (2 * 5 + 5) + 4 * (8 + 5 + 5),
+    } as const;
+
+    for (const level of [3, 6, 11, 17] as const) {
+      expect(fiend(constRng(0.72), level, 1)).toEqual({
+        dealt: expected[level],
+        prevented: 0,
+      });
+    }
+  });
+
+  it('refreshes Pact slots each combat while the first Hex spans the day', () => {
+    // At L11 each six-ray volley deals 6*(2d6+Hex)=90 under x=.72, and each
+    // fallback EB round deals 3*(d10+Cha+Hex)=54. Combat 1 pays Hex and has
+    // 2 volleys + 2 EB rounds; combats 2-4 have 3 volleys + 1 EB round.
+    const firstCombat = 2 * 90 + 2 * 54;
+    const laterCombat = 3 * 90 + 54;
+    expect(fiend(constRng(0.72), 11, 4)).toEqual({
+      dealt: firstCombat + 3 * laterCombat,
+      prevented: 0,
+    });
+  });
+});
+
 describe('monk: hand-crafted sequences steering specific return-fire branches', () => {
   // Shared shape for every case below: the monk's own attacks and Court
   // Cantrip roll are all forced to miss (MISS = nat 1), isolating the
@@ -194,5 +349,108 @@ describe('monk: hand-crafted sequences steering specific return-fire branches', 
     const r = monk(scriptedRng(values), 11, 1);
     // Round 1 cantrip: 3d8 (each face 5) = 15, + rider (Wis=5 at L11) = 20.
     expect(r).toEqual({ dealt: 20, prevented: 0 });
+  });
+});
+
+describe('homebrew validation: exact three-round state accounting', () => {
+  // x=.72 yields d20=15 and fixed die faces d6=5, d8=6, d10=8, d12=9.
+  // Every attack is a non-critical hit, isolating thresholds and once/turn
+  // state from critical-hit doubling.
+  const HIT = constRng(0.72);
+
+  it('Long Grudge uses one d6 rider on the first of two hits each turn', () => {
+    const result = longGrudge(HIT, 5);
+    expect(result.dealt).toBe(3 * 5);
+    expect(result.trace.triggers).toBe(3);
+    expect(result.trace.criticalTriggers).toBe(0);
+    expect(result.trace.bondTargetId).toBe(1);
+    expect(result.trace.bondRoundsRemaining).toBe(7);
+  });
+
+  it('ordinary homebrew rider dice double on a critical hit', () => {
+    // x=.99 makes every attack a natural 20 and every damage die its maximum.
+    expect(longGrudge(constRng(0.99), 5).dealt).toBe(3 * 2 * 6);
+    expect(anchorPoint(constRng(0.99), 17).dealt).toBe(3 * 4 * 8);
+    expect(brokenTempo(constRng(0.99), 5).dealt).toBe(3 * 2 * 6);
+  });
+
+  it('Anchor Point uses one d8 rider and applies both non-damage locks each turn', () => {
+    const result = anchorPoint(HIT, 11);
+    expect(result.dealt).toBe(3 * 6);
+    expect(result.trace.speedZeroTurns).toBe(3);
+    expect(result.trace.reactionLockedTurns).toBe(3);
+  });
+
+  it('Patient Volley remains eligible after each preceding hit', () => {
+    const result = patientVolley(HIT, 5);
+    expect(result.dealt).toBe(3 * 6);
+    expect(result.trace.patientEligibleTurns).toBe(3);
+  });
+
+  it('Patient Volley round 2 can miss eligibility, then recover it from a hit that turn', () => {
+    // R1 misses both attacks. R2 is therefore ineligible, but its two hits set
+    // the last-turn flag. R3 is eligible and its first hit adds one d8 (face6).
+    const values = [MISS, MISS, 0.72, 0.72, 0.72, 0.72, 0.72];
+    const result = patientVolley(scriptedRng(values), 5);
+    expect(result.dealt).toBe(6);
+    expect(result.trace.patientEligibleTurns).toBe(2);
+    expect(result.trace.triggers).toBe(1);
+  });
+
+  it('Cutting Chorus L6 gets exactly its second rapier attack when boosts do not convert misses', () => {
+    const result = cuttingChorus(HIT, 6);
+    expect(result.dealt).toBe(3 * (6 + 3));
+    expect(result.trace.extraAttackDamage).toBe(27);
+    expect(result.trace.accuracyDamage).toBe(0);
+    expect(result.trace.opportunityCost).toBe(0);
+    expect(result.trace.inspirationSpent).toBe(3);
+    expect(result.trace.extraAttackActive).toBe(true);
+  });
+
+  it('both Ambush wrappers use the same first-turn-only primitive with their own dice', () => {
+    const vanward = vanwardConclave(HIT, 11);
+    const cold = coldOpen(HIT, 17);
+    expect(vanward.dealt).toBe(2 * 6);
+    expect(vanward.trace.roundOneDamage).toBe(12);
+    expect(cold.dealt).toBe(3 * 5);
+    expect(cold.trace.roundOneDamage).toBe(15);
+    expect(vanward.trace.triggers).toBe(1);
+    expect(cold.trace.triggers).toBe(1);
+  });
+
+  it('the declared Ranger stack applies both riders to round 1 and only Patient thereafter', () => {
+    const result = vanwardPatientStack(HIT, 5);
+    expect(result.dealt).toBe(4 * 6);
+    expect(result.trace.roundOneDamage).toBe(2 * 6);
+  });
+
+  it('Broken Tooth uses two d10+Wisdom attacks and records transform temp HP', () => {
+    const result = brokenTooth(HIT, 11);
+    expect(result.dealt).toBe(3 * 2 * (8 + 4));
+    expect(result.trace.tempHp).toBe(11);
+    expect(result.trace.shapeActive).toBe(true);
+    expect(result.trace.attackModifier).toBe(8);
+  });
+
+  it('Cutting Momentum adds only +3 on the first hit when no hit is critical', () => {
+    expect(cuttingMomentum(HIT, 17).dealt).toBe(3 * 3);
+  });
+
+  it('Cutting Momentum expands the remainder of only the triggering turn', () => {
+    // Round 1: natural 20 first hit activates 18-20; second attack is 18 and
+    // gains two marginal greatsword dice, each face 4. Rounds 2-3 miss.
+    const values = [0.99, 0.86, 0.5, 0.5, ...repeat(MISS, 4)];
+    const result = cuttingMomentum(scriptedRng(values), 5);
+    expect(result.dealt).toBe(2 + 4 + 4);
+    expect(result.trace.criticalTriggers).toBe(1);
+  });
+
+  it('Broken Tempo spends once each turn while Second Wind restores one die', () => {
+    const result = brokenTempo(HIT, 17);
+    expect(result.dealt).toBe(3 * 8);
+    expect(result.trace.triggers).toBe(3);
+    expect(result.trace.secondWindRegains).toBe(1);
+    expect(result.trace.criticalRegains).toBe(0);
+    expect(result.trace.poolRemaining).toBe(4);
   });
 });

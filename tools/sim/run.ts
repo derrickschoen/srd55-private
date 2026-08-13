@@ -41,6 +41,7 @@ import {
   thiefShortbow,
   veteran,
 } from './sim';
+import { printHomebrewValidationBoard } from './homebrew-board';
 
 type BuildFn = (rng: Rng, L: Level, nc: number) => CombatResult | null;
 
@@ -68,6 +69,9 @@ const SRD_ROWS: readonly Row[] = [
   { name: 'SRD Evoker — ranged spells', fn: evoker },
   { name: 'SRD Draconic (Fire) — ranged spells', fn: draconic },
   { name: 'SRD Fiend — ranged spell attacks', fn: fiendPatron },
+  // Pact slots refresh each modeled combat at the intervening Short Rest, so
+  // this posture's burst and day DPR remain close instead of depleting.
+  { name: 'SRD Fiend — slot volleys', fn: (rng, level, combats) => fiend(rng, level, combats, false) },
   { name: 'SRD Lore — caster posture', fn: loreCollege },
 ];
 
@@ -180,7 +184,6 @@ function main(N: number, seed = 31): void {
   showRow({ name: 'BARBED COURT (fights-back env)', fn: monk }, seed, N);
   showRow({ name: 'BARBED COURT (init manifest @17)', fn: (r, L, nc) => monk(r, L, nc, true) }, seed, N);
   console.log('--- LEGACY ALTERNATE POSTURES ---');
-  showRow({ name: 'Fiend EB/volley legacy policy', fn: fiend }, seed, N);
   showRow({ name: 'VETERAN ranged (hand crossbows)', fn: (r, L, nc) => veteran(r, L, nc, true) }, seed, N);
   console.log('--- LEGACY CASTER NOVA POSTURES ---');
   showRow({ name: 'Sorc3/Wiz8+ CME nova', fn: sorcwiz, minLevel: 11 }, seed, N);
@@ -213,6 +216,8 @@ function main(N: number, seed = 31): void {
   showCombined({ name: 'Domination (adaptive)', fn: dominationRow('adaptive') }, seed, N);
   showCombined({ name: 'Domination (Command-max)', fn: dominationRow('control') }, seed, N);
   console.log('† Lore CME burst and day cells are declared upper bounds: burst front-loads the largest remaining slots; day does not pay cross-combat CME recasts.');
+  console.log();
+  printHomebrewValidationBoard(N);
 }
 
 const rawN = process.argv[2];

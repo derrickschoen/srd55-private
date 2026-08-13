@@ -4,15 +4,22 @@ import { describe, expect, it } from 'vitest';
 import {
   champion,
   championRanged,
+  SRD_CONCENTRATION_ROLES,
   devotion,
   domination,
   fiend,
+  fiendPatron,
   monk,
   mulberry32,
   sorcwiz,
   veteran,
 } from './sim';
 import { ALWAYS_MIN } from './test-helpers';
+import {
+  HOMEBREW_BUILDS,
+  vanwardPatientStack,
+  type HomebrewBuild,
+} from './homebrew';
 
 describe('monk(initManifest) is inert below L17', () => {
   it('produces byte-identical results to monk() at L3, L6, L11 under the same seed', () => {
@@ -56,6 +63,35 @@ describe('champion vs championRanged: share championCore, but are not the same b
   });
 });
 
+describe('Fiend sustained vs slot-volley postures are distinct deterministic identities', () => {
+  it('same seed reproduces the slot-volley posture at every board level', () => {
+    for (const level of [3, 6, 11, 17] as const) {
+      expect(fiend(mulberry32(666 + level), level, 4)).toEqual(
+        fiend(mulberry32(666 + level), level, 4),
+      );
+    }
+  });
+
+  it('slot volleys differ from the Hurl-capable sustained Fiend posture', () => {
+    for (const level of [3, 6, 11, 17] as const) {
+      expect(fiend(mulberry32(667 + level), level, 1)).not.toEqual(
+        fiendPatron(mulberry32(667 + level), level, 1),
+      );
+    }
+  });
+});
+
+describe('complete-board concentration posture identities', () => {
+  it('classifies all nineteen SRD board rows without an implicit fallback', () => {
+    expect(Object.keys(SRD_CONCENTRATION_ROLES)).toHaveLength(19);
+    expect(SRD_CONCENTRATION_ROLES.hunter).toBe('damage-anchored');
+    expect(SRD_CONCENTRATION_ROLES.lifeDomain).toBe('damage-anchored');
+    expect(SRD_CONCENTRATION_ROLES.circleLand).toBe('buff/control');
+    expect(SRD_CONCENTRATION_ROLES.loreCollege).toBe('level-dependent');
+    expect(SRD_CONCENTRATION_ROLES.draconic).toBe('none');
+  });
+});
+
 describe('purity: the same seed run twice produces identical results', () => {
   // Guards against hidden shared/mutable module state (e.g. a build that
   // accidentally mutated one of the exported Record constants, or a queue
@@ -92,5 +128,32 @@ describe('purity: the same seed run twice produces identical results', () => {
     for (let i = 0; i < 10; i++) {
       expect(domination(mulberry32(9001), 17, 4, 'smite')).toEqual(reference);
     }
+  });
+});
+
+describe('homebrew validation build identities', () => {
+  const builds: ReadonlyArray<readonly [string, HomebrewBuild]> = [
+    ...HOMEBREW_BUILDS,
+    ['Patient Volley + Vanward declared stack', vanwardPatientStack],
+  ];
+
+  it.each(builds)('%s is deterministic, finite, and total at L5/11/17', (_name, build) => {
+    for (const level of [5, 11, 17] as const) {
+      const first = build(mulberry32(8200 + level), level);
+      const second = build(mulberry32(8200 + level), level);
+      expect(second).toEqual(first);
+      expect(Number.isFinite(first.dealt)).toBe(true);
+      expect(Number.isFinite(first.prevented)).toBe(true);
+      expect(first.dealt).toBeGreaterThanOrEqual(0);
+      expect(first.prevented).toBe(0);
+    }
+  });
+
+  it('all nine wrappers have distinct names and the two Ambush wrappers remain separate identities', () => {
+    const names = HOMEBREW_BUILDS.map(([name]) => name);
+    expect(HOMEBREW_BUILDS).toHaveLength(9);
+    expect(new Set(names).size).toBe(9);
+    expect(names).toContain('Vanward Conclave');
+    expect(names).toContain('Cold Open');
   });
 });
