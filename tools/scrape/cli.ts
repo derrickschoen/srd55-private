@@ -22,6 +22,12 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { PageCache } from './cache';
 import { buildCatalogDocuments, BuildRefused, type BuildFailure, type BuiltPage } from './build-catalog';
 import {
+  buildFeatDocuments,
+  FeatBuildRefused,
+  type BuiltFeatPage,
+  type FeatBuildFailure,
+} from './build-feat-catalog';
+import {
   DEFAULT_DELAY_MS,
   httpTransport,
   PoliteFetcher,
@@ -30,10 +36,27 @@ import {
   USER_AGENT,
 } from './fetcher';
 import { scrapeLayout } from './layout';
+import { parseFeatPage } from './parse-feat';
 import { parseSpellPage } from './parse-spell';
 import { CrawlQueue } from './queue';
 import { inNamespace, pageName, parseSitemap } from './sitemap';
 import type { RulesEdition } from '../../src/domain/enums';
+
+/**
+ * The namespaces `build` knows how to turn into documents, and which parser
+ * handles each. `fetch` needs none of this — `commandFetch` below is already
+ * generic over `--namespace`, since all it does is filter the sitemap and fill
+ * the cache; it took zero code changes to fetch `feat:` pages (verified live,
+ * 2026-08-13: `fetch --namespace feat --limit 3` filtered 177 sitemap entries
+ * and cached three pages through the existing robots/rate-limit/cache path).
+ * Only `build` is namespace-specific, because only `build` picks a parser.
+ */
+const BUILD_NAMESPACES = ['spell', 'feat'] as const;
+type BuildNamespace = (typeof BUILD_NAMESPACES)[number];
+
+function isBuildNamespace(value: string): value is BuildNamespace {
+  return (BUILD_NAMESPACES as readonly string[]).includes(value);
+}
 
 const ORIGIN = 'http://dnd2024.wikidot.com';
 const SITEMAP_URL = `${ORIGIN}/sitemap.xml`;
@@ -183,7 +206,7 @@ async function commandFetch(options: Options): Promise<number> {
   return 0;
 }
 
-async function commandBuild(options: Options): Promise<number> {
+async function commandBuildSpells(options: Options): Promise<number> {
   const layout = scrapeLayout(undefined, options.namespace);
   const queue = new CrawlQueue(layout.queuePath);
   if (!(await queue.load())) {
@@ -277,18 +300,119 @@ async function commandBuild(options: Options): Promise<number> {
   return 0;
 }
 
+/**
+ * `--list` filters on `spellLists`, a field `ParsedFeatDocument` does not
+ * have — feats have no spell-list equivalent to filter on — so it is refused
+ * outright here rather than silently ignored. Silently ignoring it would let
+ * `build --namespace feat --list bard` look like it did something.
+ */
+async function commandBuildFeats(options: Options): Promise<number> {
+  if (options.list !== null) {
+    log('--list has no meaning for --namespace feat (feats carry no spell list).');
+    return 1;
+  }
+  const layout = scrapeLayout(undefined, options.namespace);
+  const queue = new CrawlQueue(layout.queuePath);
+  if (!(await queue.load())) {
+    log(`no queue at ${layout.queuePath} — run "fetch" first.`);
+    return 1;
+  }
+  const cache = new PageCache(layout.cacheDir);
+
+  const pages: BuiltFeatPage[] = [];
+  const parseFailures: FeatBuildFailure[] = [];
+  for (const item of queue.items) {
+    if (item.state !== 'done') {
+      continue;
+    }
+    const entry = await cache.read(item.url);
+    if (entry === null) {
+      parseFailures.push({ url: item.url, reason: 'cache entry missing' });
+      continue;
+    }
+    const slug = pageName(item.url) ?? item.url;
+    const parsed = parseFeatPage(entry.body, { edition: EDITION, slug });
+    if (!parsed.ok) {
+      parseFailures.push({ url: item.url, reason: parsed.reason });
+      continue;
+    }
+    pages.push({
+      url: item.url,
+      document: parsed.value.document,
+      description: parsed.value.description,
+    });
+  }
+
+  let output;
+  try {
+    output = buildFeatDocuments({
+      pages,
+      queue: queue.items,
+      parseFailures,
+      allowPartial: options.allowPartial,
+    });
+  } catch (error) {
+    if (error instanceof FeatBuildRefused) {
+      log(`build refused.\n${error.message}`);
+      return 1;
+    }
+    throw error;
+  }
+
+  await mkdir(layout.outDir, { recursive: true });
+  await writeFile(layout.tier1Path, `${output.tier1}\n`, 'utf8');
+  await writeFile(layout.tier2Path, `${output.tier2}\n`, 'utf8');
+  await writeFile(
+    layout.reportPath,
+    `${JSON.stringify(output.report, null, 2)}\n`,
+    'utf8',
+  );
+  log(`wrote ${output.report.recordCount} record(s):`);
+  log(`  Tier 1  ${layout.tier1Path}`);
+  log(`  Tier 2  ${layout.tier2Path}`);
+  log(`  report  ${layout.reportPath}`);
+  // UNWIRED, NOT MERELY UNFINISHED — see build-feat-catalog.ts's file comment.
+  // There is no importer for this shape yet, so "partial" here only ever means
+  // "the crawl or the parse was incomplete", never "importing this would
+  // deactivate something", because nothing imports it.
+  log('  NOTE: this document shape has no import path yet (see');
+  log('        tools/scrape/build-feat-catalog.ts for what is missing).');
+  if (output.report.partial) {
+    log('  NOTE: partial run — the crawl or the parse did not finish.');
+  }
+  return 0;
+}
+
+async function commandBuild(options: Options): Promise<number> {
+  if (!isBuildNamespace(options.namespace)) {
+    log(
+      `build does not know namespace "${options.namespace}"; it knows ` +
+        `${BUILD_NAMESPACES.join(', ')}.`,
+    );
+    return 1;
+  }
+  return options.namespace === 'feat'
+    ? commandBuildFeats(options)
+    : commandBuildSpells(options);
+}
+
 function usage(): number {
   log(
     [
       'Local-only scraper. Output is gitignored and sentinel-named; it is never',
       'part of the build and must never be committed.',
       '',
-      '  fetch --namespace spell [--limit N] [--delay 1500] [--max-age-days 30] [--offline]',
-      '  build [--namespace spell] [--list bard] [--allow-partial]',
+      '  fetch --namespace spell|feat [--limit N] [--delay 1500] [--max-age-days 30] [--offline]',
+      '  build --namespace spell [--list bard] [--allow-partial]',
+      '  build --namespace feat [--allow-partial]',
       '',
-      '--list narrows the output, which makes it a PARTIAL build: an import is a',
-      'full replacement, so every spell it filters out would be deactivated. It',
-      'therefore requires --allow-partial, exactly as an unfinished crawl does.',
+      '--list narrows the SPELL output, which makes it a PARTIAL build: an import',
+      'is a full replacement, so every spell it filters out would be deactivated.',
+      'It therefore requires --allow-partial, exactly as an unfinished crawl does.',
+      '--list has no meaning for --namespace feat.',
+      '',
+      'feat build output has no import path yet — see',
+      'tools/scrape/build-feat-catalog.ts for what is missing.',
       '',
       'There is no flag that ignores robots.txt and none that fetches faster',
       'than the 1000ms floor.',
