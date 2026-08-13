@@ -516,6 +516,21 @@ const barbedCourtV3: SubclassAuthoringDraft = Object.freeze<SubclassAuthoringDra
     : barbedCourtV2.progression,
 });
 
+const barbedCourtV4: SubclassAuthoringDraft = Object.freeze<SubclassAuthoringDraft>({
+  ...barbedCourtV3,
+  features: Object.freeze(barbedCourtV3.features.map((feature) =>
+    feature.name === 'Hands of the Barbed Court'
+      ? Object.freeze({
+          ...feature,
+          description: [
+            'As a Bonus Action, you can spend 4 Focus Points to manifest the full court — a 15-foot Emanation of invisible slapping hands — for up to 10 minutes. The effect requires Concentration. While the court is manifested, when you hit a creature in the Emanation with an attack, the hands add Psychic damage equal to your Wisdom modifier to the hit.',
+            'The hands also hold what you seize: while the court is manifested, you can grapple creatures up to two sizes larger than you (one size beyond the usual limit).',
+            'At Monk level 17 the court matures: the hands\' extra damage increases to twice your Wisdom modifier, and the court guides your aim — you have Advantage on attack rolls against creatures in the Emanation.',
+          ].join('\n\n'),
+        })
+      : feature)),
+});
+
 function spellStudentRevision(
   explicitSpellLevels: boolean,
 ): SubclassAuthoringDraft {
@@ -581,7 +596,7 @@ export const BUNDLED_HOMEBREW_CATALOG = Object.freeze([
   }),
   Object.freeze({
     catalog_key: 'warrior-of-the-barbed-court',
-    revisions: Object.freeze([barbedCourtV1, barbedCourtV2, barbedCourtV3] as const),
+    revisions: Object.freeze([barbedCourtV1, barbedCourtV2, barbedCourtV3, barbedCourtV4] as const),
   }),
   Object.freeze({
     catalog_key: 'spell-student',

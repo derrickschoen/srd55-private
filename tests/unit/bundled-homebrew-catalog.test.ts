@@ -167,6 +167,17 @@ describe('bundled homebrew catalog payload', () => {
     features.set('Barbed Court Spellcasting', barbedSpellcastingProse(source));
     const barbed = catalogSubclass('warrior-of-the-barbed-court');
     const actual = Object.fromEntries(barbed.features.map((feature) => [feature.name, feature.description]));
+    const entry = BUNDLED_HOMEBREW_CATALOG.find(
+      (candidate) => candidate.catalog_key === 'warrior-of-the-barbed-court',
+    );
+    const handsAt = (revision: number): string | null => {
+      const document = entry?.revisions[revision];
+      return document?.kind === 'subclass'
+        ? document.features.find(
+            (feature) => feature.name === 'Hands of the Barbed Court',
+          )?.description ?? null
+        : null;
+    };
     const progressionTable = markdownTable(
       source,
       '### Barbed Court Spellcasting',
@@ -186,6 +197,11 @@ describe('bundled homebrew catalog payload', () => {
 
     expect(barbed.reference_text).toBe(identity);
     expect(actual).toEqual(Object.fromEntries(features));
+    expect(entry?.revisions).toHaveLength(4);
+    expect(handsAt(2)).not.toContain('grapple');
+    expect(handsAt(3)).toContain(
+      'you can grapple creatures up to two sizes larger than you',
+    );
     expect(barbed.progression).toMatchObject({
       mode: 'override',
       spellcasting_ability: 'wisdom',

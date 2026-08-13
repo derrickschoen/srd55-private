@@ -100,7 +100,7 @@ test('imports bundled homebrew through publish, applies derived third-caster slo
   await homebrewReady(page);
   for (const [name, versionCount] of [
     ['Veteran (Bundled revision 3)', 3],
-    ['Warrior of the Barbed Court (Bundled revision 3)', 3],
+    ['Warrior of the Barbed Court (Bundled revision 4)', 4],
     ['Spell Student (Bundled revision 2)', 2],
   ] as const) {
     const card = publishedCard(page, name);
@@ -292,7 +292,7 @@ test('imports bundled homebrew through publish, applies derived third-caster slo
   await homebrewReady(page);
   for (const name of [
     'Veteran (Bundled revision 3)',
-    'Warrior of the Barbed Court (Bundled revision 3)',
+    'Warrior of the Barbed Court (Bundled revision 4)',
     'Spell Student (Bundled revision 2)',
   ]) {
     await expect(publishedCard(page, name)).toBeVisible();
