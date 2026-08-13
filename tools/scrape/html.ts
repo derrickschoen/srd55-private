@@ -131,7 +131,7 @@ export function extractByClass(html: string, className: string): string[] {
   return found;
 }
 
-function extractBalanced(
+export function extractBalanced(
   html: string,
   tagName: string,
   start: number,
@@ -158,6 +158,34 @@ export function paragraphs(html: string): string[] {
     const region = extractBalanced(html, 'p', match.index + match[0].length);
     if (region !== null) {
       found.push(region);
+    }
+  }
+  return found;
+}
+
+/**
+ * Top-level blocks among the given tag names, IN DOCUMENT ORDER, as raw inner
+ * HTML paired with the (lowercased) tag that carried them.
+ *
+ * Generalises {@link paragraphs} to headings and tables: the subclass and
+ * species pages interleave `<h3>`/`<h4>`/`<h5>` and `<table>` with `<p>` at the
+ * same nesting depth (a class feature's name is its own `<h3>`, not a labelled
+ * paragraph the way a feat benefit is), so a parser reading them needs the
+ * heading boundaries in the same pass as the prose between them rather than
+ * two separately-ordered lists it would have to re-interleave by hand.
+ */
+export function blocksOf(
+  html: string,
+  tagNames: readonly string[],
+): { readonly tag: string; readonly html: string }[] {
+  const found: { tag: string; html: string }[] = [];
+  const scanner = new RegExp(`<(${tagNames.join('|')})\\b[^>]*>`, 'giu');
+  let match: RegExpExecArray | null;
+  while ((match = scanner.exec(html)) !== null) {
+    const tag = (match[1] as string).toLowerCase();
+    const region = extractBalanced(html, tag, match.index + match[0].length);
+    if (region !== null) {
+      found.push({ tag, html: region });
     }
   }
   return found;
