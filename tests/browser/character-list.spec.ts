@@ -245,7 +245,15 @@ test('U1 incomplete cards resume durable ability work while allocated level-up s
   );
   await expect(allocatedCard.getByRole('link', { name: 'Level Up' })).toHaveCount(0);
   await allocatedCard.getByRole('link', { name: 'Open workspace' }).click();
+  await page.evaluate(() => {
+    document.body.dataset.playwrightDocument = 'planner';
+  });
   await page.getByRole('link', { name: 'Character sheet' }).click();
+  await expect(page.locator('[data-screen="character-sheet"]')).toBeVisible();
+  await expect(page.locator('#app')).toHaveAttribute('aria-busy', 'false');
+  expect(
+    await page.evaluate(() => document.body.dataset.playwrightDocument),
+  ).toBe('planner');
   const sheetLinks = page.locator('.sheet-header a');
   await expect(sheetLinks).toHaveCount(3);
   await expect(sheetLinks.nth(1)).toHaveText('Level Up');

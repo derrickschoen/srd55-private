@@ -575,9 +575,24 @@ function renderPlanner(
     view.renderedStatus !== statusText;
   status.value = statusChanged ? '' : statusText;
   const sheet = document.createElement('a');
-  sheet.href = `/characters/${session.characterId}/sheet`;
+  const sheetPath = `/characters/${session.characterId}/sheet`;
+  sheet.href = sheetPath;
   sheet.className = 'button-secondary';
   sheet.textContent = 'Character sheet';
+  sheet.addEventListener('click', (event) => {
+    if (
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    ) {
+      return;
+    }
+    event.preventDefault();
+    context.router.navigate(sheetPath);
+  });
   const homebrew = document.createElement('a');
   homebrew.href = HOMEBREW_ROUTE;
   homebrew.className = 'button-secondary';
