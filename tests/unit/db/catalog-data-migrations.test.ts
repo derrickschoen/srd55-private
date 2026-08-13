@@ -102,7 +102,6 @@ describe('catalog data-migration registry', () => {
       // honours it, so a rule that DECLARES a pending choice waits instead of
       // throwing while its config is unwritten. No lineage row changes — see
       // the registry entry for why the pin still moves.
-      checksum: 'e0cdab308225b671b03b3720bda42781591f1cb3d808f3125e59a641b7262d3c',
       // MERGE 2026-08-13: champion (allows_pending_choice) and R4 (typed state +
       // frozen source-instance-state module) both moved this pin; recomputed
       // below over the MERGED frozen sources by the designed procedure.
