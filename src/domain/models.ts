@@ -9,6 +9,7 @@ import type {
   SelectionEligibility,
   SlotBucket,
   SlotState,
+  SourceInstanceState,
   SpellAreaShape,
   SpellRangeKind,
   SpellSchool,
@@ -171,7 +172,7 @@ export interface CharacterSourceInstanceRow extends TimestampedRow {
   display_name: string;
   config: JsonObject | null;
   acquired_at_character_level: number | null;
-  state: string;
+  state: SourceInstanceState;
   notes: string | null;
 }
 

@@ -92,10 +92,15 @@ describe('catalog data-migration registry', () => {
         'src/catalog/content-identity.ts',
         'src/catalog/content-registry.ts',
       ],
-      // Re-pinned 2026-08-13 with the registry: origin-definitions-srd.ts's
-      // SRD attribution header corrected to the 5.2.1 statement the source
-      // document requires (comment-only diff, verified).
-      checksum: 'b124c031979c8e4eceb6afecbdd8e7b02d20c3a182b5a0fbe4d0dd600813e956',
+      // Re-pinned 2026-08-13 with the registry (R4, D226): the frozen source
+      // `src/grants/source-rule-reader.ts` gained a throwing decode for
+      // `character_source_instances.state`, so `GrantSourceInstance.state` is
+      // now `SourceInstanceState` rather than `string`. The reconciliation's
+      // OUTPUT is unchanged — every row it walks holds `active` or
+      // `tombstoned` — but D226 is explicit that a behavioural source changing
+      // is what a frozen artefact should notice, and re-pinning is the accepted
+      // cost rather than a reason to route around the freeze.
+      checksum: 'c077a07074f66c54bfe430f7b37ec4b6a9d5f9f988550b7466148fbe9e0a63bf',
     }]);
     expect(() =>
       validateCatalogDataMigrationRegistry(CATALOG_DATA_MIGRATIONS)

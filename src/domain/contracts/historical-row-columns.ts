@@ -77,6 +77,35 @@ const ADDED_DEFAULTED_ROW_COLUMNS: Readonly<
     state: 'active',
     selection_eligibility: 'valid',
   },
+  // THERE IS DELIBERATELY NO `character_source_instances` ENTRY FOR THE R4
+  // LANE, AND THE ABSENCE IS AN ANSWER RATHER THAN AN OVERSIGHT.
+  //
+  // Migration 0047 puts a `oneOf` CHECK on `character_source_instances.state`,
+  // and a CHECK is the one write-side obligation that reaches the import path:
+  // `insertPortableRow` (`src/backup/character-backup.ts`) builds a raw
+  // `INSERT INTO "character_source_instances"` straight from a document's
+  // columns, so from 0047 onwards a document carrying a third value would fail
+  // at that INSERT. D8 makes that the highest-severity failure there is — a
+  // contract narrower than its column making a user's own backup unrestorable —
+  // so the audit doc requires normalization to LAND BEFORE the DDL unless the
+  // vocabulary can be shown to be complete.
+  //
+  // It can be, and this is the reasoning rather than an assurance. The column
+  // is NOT NULL with a `'active'` default, so a document omitting it restores
+  // as `'active'`; no other value can enter a document except by having been in
+  // a database this application wrote. Every writer in the tree sets one of the
+  // two literals (`remove-source.ts`, `update-class.ts` ×2,
+  // `grant-rule-slot-generator.ts` — whose child-source INSERT binds the value
+  // rather than inlining it, and whose bound attribute has only ever been
+  // `'active'` — and `authoring/reference-retarget.ts`). An audit of EVERY blob
+  // in this repository's history (each distinct version of every file ever
+  // committed on any branch, deduplicated) found exactly two literals ever
+  // written to this column: `'active'` and `'tombstoned'`.
+  //
+  // So there is no historical value to migrate forward, and inventing a
+  // normalization rule for one would be machinery justified by what it protects
+  // rather than what it does. Should a third literal ever ship, THAT is when an
+  // entry belongs here — and it belongs here before its CHECK widens, not after.
 };
 
 /**

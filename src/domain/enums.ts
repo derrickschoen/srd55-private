@@ -121,6 +121,29 @@ export const slotStates = [
 export type SlotState = (typeof slotStates)[number];
 
 /**
+ * The lifecycle of one taken source (`character_source_instances.state`).
+ *
+ * TWO members, and `tombstoned` is NOT a member of any other `state`
+ * vocabulary in the schema — that is the whole point of declaring this one
+ * separately (R4, D13). `slotStates` a few lines up shares the name `state`,
+ * shares the member `active`, and shares NOTHING ELSE: a slot can be
+ * `discarded` or `kept_override`, which a source cannot be, and a source can
+ * be `tombstoned`, which a slot cannot. Merging the two would let a writer
+ * store a member on a row no reader ever counts — the silent-disable failure
+ * the slot state's own CHECK comment warns about — and constraining this
+ * column to `slotStates` would have broken class removal on its first write.
+ *
+ * `tombstoned`, not `orphaned`: a source is removed by the character's owner
+ * and its row is kept only so the rows hanging off it keep their provenance.
+ * An `orphaned` slot or grant is the OPPOSITE case — the row survives an event
+ * it did not choose, and can be revived. There is no revival from `tombstoned`;
+ * re-adding a class writes `active` back over the same row
+ * (`update-class.ts`), which is a re-take, not a reactivation.
+ */
+export const sourceInstanceStates = ['active', 'tombstoned'] as const;
+export type SourceInstanceState = (typeof sourceInstanceStates)[number];
+
+/**
  * Addressable Wizard spellbook acquisitions have the same preserve-on-loss
  * lifecycle as skill grants: a rule can stop applying without erasing the
  * selected spell that row remembers.

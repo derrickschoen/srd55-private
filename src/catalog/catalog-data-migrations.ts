@@ -151,12 +151,15 @@ export const CATALOG_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
           bytes: contentRegistrySource,
         }),
       ]),
-      // Re-pinned 2026-08-13: the SRD attribution header in
-      // origin-definitions-srd.ts was corrected from the 5.2 statement to the
-      // 5.2.1 statement the source document requires (comment-only diff,
-      // verified; no reconciled row changes).
+      // Re-pinned 2026-08-13 (R4, D226): `src/grants/source-rule-reader.ts` is
+      // one of this migration's frozen behavioural sources, and R4 gave it a
+      // throwing decode for `character_source_instances.state`, narrowing
+      // `GrantSourceInstance.state` to `SourceInstanceState`. No reconciled row
+      // changes — every source instance this walks holds `active` or
+      // `tombstoned` — but the freeze exists to notice a behavioural source
+      // moving, so the pin moves with it.
       checksum:
-        'b124c031979c8e4eceb6afecbdd8e7b02d20c3a182b5a0fbe4d0dd600813e956',
+        'c077a07074f66c54bfe430f7b37ec4b6a9d5f9f988550b7466148fbe9e0a63bf',
       run: reconcileSpeciesLineageContentV2,
     }),
   ]);

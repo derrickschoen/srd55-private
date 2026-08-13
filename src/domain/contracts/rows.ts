@@ -57,6 +57,7 @@ import {
   spellbookAcquisitionStates,
   skillGrantStates,
   slotBuckets,
+  sourceInstanceStates,
   skills,
   spellAreaShapes,
   spellRangeKinds,
@@ -290,6 +291,12 @@ const rulesEditionEnum = z.enum(rulesEditions);
 const abilityEnum = z.enum(abilities);
 const abilityAllocationMethodEnum = z.enum(abilityAllocationMethods);
 const sourceTypeEnum = z.enum(domainSourceTypes);
+/**
+ * NOT `slotStateEnum`, and the separation is the R4 lane's whole subject:
+ * `character_source_instances.state` and `spell_selection_slots.state` share a
+ * column name and the member `active` and nothing else.
+ */
+const sourceInstanceStateEnum = z.enum(sourceInstanceStates);
 const slotBucketEnum = z.enum(slotBuckets);
 const slotStateEnum = z.enum(slotStates);
 const skillGrantStateEnum = z.enum(skillGrantStates);
@@ -436,6 +443,7 @@ export const COLUMN_REFINEMENTS = {
   abilityEnum,
   abilityAllocationMethodEnum,
   sourceTypeEnum,
+  sourceInstanceStateEnum,
   slotBucketEnum,
   slotStateEnum,
   skillGrantStateEnum,
@@ -670,9 +678,16 @@ type OptionalRefinementKey = Exclude<
  *
  * Columns declared as a plain `varchar()` deliberately get a text refinement
  * rather than an enum even where a single writer happens to produce enum-like
- * values (`eligibility_kind`, `character_source_instances.state`): inventing a
- * constraint the schema does not declare is exactly the over-tightening D6b
- * forbids.
+ * values (`eligibility_kind`): inventing a constraint the schema does not
+ * declare is exactly the over-tightening D6b forbids.
+ *
+ * `character_source_instances.state` used to be named in that sentence and no
+ * longer is. It moved to `sourceInstanceStateEnum` in the R4 lane, and the
+ * order is what makes it legitimate rather than the same over-tightening under
+ * a new name: the enum was declared first (`sourceInstanceStates`), the column
+ * was typed with it, migration 0047 gave the schema its `oneOf` CHECK, and only
+ * then did this table narrow. The contract now enforces exactly what the column
+ * enforces — which is D235's read side — instead of a set invented here.
  */
 const REFINEMENTS = {
   // --- catalog content identity registry ---------------------------------
@@ -887,7 +902,7 @@ const REFINEMENTS = {
   'character_source_instances.source_type': sourceTypeEnum,
   'character_source_instances.source_definition_id': positiveInt,
   'character_source_instances.display_name': sqlText,
-  'character_source_instances.state': sqlText,
+  'character_source_instances.state': sourceInstanceStateEnum,
   'character_source_instances.notes': sqlText,
   'character_source_instances.created_at': sqlTimestamp,
   'character_source_instances.updated_at': sqlTimestamp,

@@ -38,7 +38,21 @@ import {
   type DamageType,
   type DomainSourceType,
   type ExtraAttackWeaponScope,
+  type SourceInstanceState,
 } from '../domain/enums';
+
+/**
+ * THE SOURCE-STATE GATE, BOUND RATHER THAN INLINED, AND THE REASON IS THAT
+ * R4's NEW TYPE COULD NOT OTHERWISE SEE IT.
+ *
+ * Typing `character_source_instances.state` as `SourceInstanceState` makes a
+ * TypeScript `state === 'tombstoend'` stop compiling — but this gate was never
+ * a TypeScript comparison. It was the string `'active'` inside a SQL template,
+ * which no type reaches: a typo there compiles, runs, matches no row, and
+ * silently drops EVERY effect from the sheet. Binding the value as a parameter
+ * annotated with the enum type is what puts it back inside the type system.
+ */
+const ACTIVE_SOURCE_STATE: SourceInstanceState = 'active';
 
 export type EligibleCharacterEffectOrder = 'acquisition' | 'display';
 
@@ -107,7 +121,7 @@ const ELIGIBLE_EFFECT_SQL = `
   WHERE effect.character_id = ?
     AND (
       effect.source_instance_id IS NULL
-      OR source.state = 'active'
+      OR source.state = ?
     )
     AND (
       effect.character_item_id IS NULL
@@ -146,7 +160,7 @@ export function readEligibleCharacterEffects(
             effect.weapon_scope, effect.label
      ${ELIGIBLE_EFFECT_SQL}
      ORDER BY ${orderBy}`,
-    [characterId],
+    [characterId, ACTIVE_SOURCE_STATE],
     (row): EligibleCharacterEffect => ({
       id: sqlInteger(row, 'id'),
       sort_order: sqlInteger(row, 'sort_order'),

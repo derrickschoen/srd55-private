@@ -10,7 +10,9 @@ import type { DatabaseContext } from '../db/database';
 import {
   domainSourceTypes,
   isEnumValue,
+  sourceInstanceStates,
   type DomainSourceType,
+  type SourceInstanceState,
 } from '../domain/enums';
 import { GrantRule } from './grant-rule';
 import {
@@ -48,7 +50,7 @@ export interface GrantSourceInstance {
   readonly displayName: string;
   readonly config: string | null;
   readonly acquiredAtCharacterLevel: number | null;
-  readonly state: string;
+  readonly state: SourceInstanceState;
   readonly notes: string | null;
 }
 
@@ -72,9 +74,25 @@ function decodeSource(row: SqlRow): GrantSourceInstance {
       row,
       'acquired_at_character_level',
     ),
-    state: sqlString(row, 'state'),
+    state: requiredSourceInstanceState(row),
     notes: sqlNullableString(row, 'notes'),
   };
+}
+
+/**
+ * D235's read side for `character_source_instances.state`.
+ *
+ * This decode is the ONE place the generator's `state !== 'active'` and
+ * `state !== 'tombstoned'` gates get their type from, so a row carrying a third
+ * value stops here loudly instead of silently taking the `!== 'active'` branch
+ * and deactivating a live source's whole tree.
+ */
+function requiredSourceInstanceState(row: SqlRow): SourceInstanceState {
+  const state = sqlString(row, 'state');
+  if (!isEnumValue(sourceInstanceStates, state)) {
+    throw new Error(`Unknown source instance state '${state}'.`);
+  }
+  return state;
 }
 
 function isContainer(value: unknown): value is JsonContainer {

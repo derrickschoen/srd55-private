@@ -33,6 +33,7 @@ import type {
   SpellbookAcquisitionState,
   SlotBucket,
   SlotState,
+  SourceInstanceState,
 } from '../../src/domain/enums';
 import {
   abilities,
@@ -45,6 +46,7 @@ import {
   skills,
   slotBuckets,
   slotStates,
+  sourceInstanceStates,
 } from '../../src/domain/enums';
 import {
   datetime,
@@ -291,34 +293,49 @@ export const character_source_instances = sqliteTable(
     config: sqlText()('config'),
     acquired_at_character_level: integer('acquired_at_character_level'),
     /**
-     * NO CHECK CONSTRAINT, AND THE REASON IS STRONGER THAN "THE PROOF PHASE
-     * WAS UNSURE". This looks like the most obvious enum column in the schema —
-     * it is a `state`, it is `NOT NULL`, it defaults to `'active'` — and
-     * constraining it to `slotStates` would have broken class removal on its
-     * FIRST WRITE. `'tombstoned'` is not a member of `slotStates`, yet four
-     * shipped writers set it here: `remove-source.ts:53`, `update-class.ts:250`
-     * and `:337`, and `grant-rule-slot-generator.ts:724`.
+     * CONSTRAINED SINCE 0047, AND THE ORDER IT TOOK TO GET HERE IS THE POINT.
      *
-     * `spell_selection_slots.state` a few tables down IS constrained, to a
-     * vocabulary this column does not share. Two columns named `state`, two
-     * different closed sets, and only one of them is declared — which is
-     * exactly the trap. This column's real vocabulary has never been written
-     * down anywhere: it is `varchar()` with no type parameter, and
-     * `src/domain/contracts/rows.ts` types it `sqlText` on purpose, because
-     * "inventing a constraint the schema does not declare is exactly the
-     * over-tightening D6b forbids".
+     * This column carried the longest "no CHECK here" comment in the schema,
+     * and the reason was never doubt about the vocabulary — it was that the
+     * vocabulary had no owner. `'tombstoned'` is not a member of `slotStates`,
+     * so the obvious CHECK would have broken class removal on its first write,
+     * and a CHECK transcribed from a grep of the writers would have been a
+     * second, unowned copy of a set nothing declared. D13 ruled the order:
+     * *"`state` stays unconstrained until its vocabulary is declared in enums
+     * (a CHECK must read ONE source)."*
      *
-     * Declaring the enum first, in `src/domain/enums.ts`, and typing the column
-     * with it is the prerequisite. A CHECK transcribed here from a grep of the
-     * writers would be a second, unowned copy of a vocabulary — the precise
-     * duplication `oneOf` exists to prevent.
+     * `sourceInstanceStates` in `src/domain/enums.ts` is now that source. It is
+     * DELIBERATELY NOT `slotStates`, which `spell_selection_slots.state` a few
+     * tables down reads: two columns named `state`, two closed sets, one shared
+     * member, and now both declared. `oneOf` below reads the value array whose
+     * type this column's `varchar<SourceInstanceState>()` already names, so
+     * widening the enum widens the CHECK at the next `npm run db:schema` and
+     * there is no list here to forget.
+     *
+     * The four writers the old comment named all set one of the two members:
+     * `remove-source.ts`, `update-class.ts` (twice), `grant-rule-slot-generator.ts`
+     * — plus `authoring/reference-retarget.ts`, a FIFTH the old comment predates.
+     * A full-history blob audit (every `INSERT`/`UPDATE` naming this table in
+     * every blob this repository has ever held) found no third literal, which
+     * is why 0047's copy needs no normalization: see the note on
+     * `character_source_instances` in `src/domain/contracts/historical-row-columns.ts`.
      */
-    state: varchar()('state').notNull().default('active'),
+    state: varchar<SourceInstanceState>()('state')
+      .notNull()
+      .default('active'),
     notes: sqlText()('notes'),
     created_at: datetime()('created_at'),
     updated_at: datetime()('updated_at'),
   },
   (table) => [
+    /**
+     * D13's precondition, discharged: the CHECK reads `sourceInstanceStates`,
+     * the same array whose type the column above declares.
+     */
+    check(
+      'character_source_instances_state_check',
+      oneOf('state', sourceInstanceStates),
+    ),
     uniqueIndex('character_source_instances_instance_uuid_unique').on(
       table.instance_uuid,
     ),

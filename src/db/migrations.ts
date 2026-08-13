@@ -47,6 +47,7 @@ import authoredResourceDisplay from '../../drizzle/0043_authored_resource_displa
 import catalogContentProvenance from '../../drizzle/0044_catalog_content_provenance.sql?raw';
 import characterShareReceipts from '../../drizzle/0045_character_share_receipts.sql?raw';
 import recipientReplacementChoices from '../../drizzle/0046_recipient_replacement_choices.sql?raw';
+import sourceInstanceState from '../../drizzle/0047_source_instance_state.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -531,6 +532,18 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
     checksum: '4f57c9b0076b917840411e0e9cf134f3e99bbaa2e42a2cb5e895f0b16aaf72e0',
     resultSchemaChecksum:
       '6bf18fa1d55c0b2cde67556afb20d300c2889098d53ddb3ac37ae782dff0fd2a',
+  }),
+  // R4 / D13: the last undeclared `state` vocabulary gets its enum, its typed
+  // column and — only in that order — its CHECK. The rebuild's INSERT ... SELECT
+  // IS the data audit: a row holding a third value aborts before the old table
+  // is dropped, inside BEGIN EXCLUSIVE, and ROLLBACK restores the source image.
+  Object.freeze({
+    id: '0047_source_instance_state',
+    sql: sourceInstanceState,
+    checksum:
+      'eff818e23110f1396a4dd889adbdd0144d1c2f2c3f5289795676db6e9c93b598',
+    resultSchemaChecksum:
+      '8fc7357f83ec72da982783a0221cb368ac5aa5747d27cbdc80b670fe00a4ae67',
   }),
 ]);
 

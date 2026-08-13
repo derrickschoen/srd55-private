@@ -180,12 +180,17 @@ function newSpellIdentity(db: Database): number {
   });
 }
 
-function newSource(db: Database, characterId: number): number {
+function newSource(
+  db: Database,
+  characterId: number,
+  values: Values = {},
+): number {
   return insert(db, 'character_source_instances', {
     character_id: characterId,
     instance_uuid: uid('source'),
     source_type: 'feat',
     display_name: uid('Feat'),
+    ...values,
   });
 }
 
@@ -764,6 +769,19 @@ const slotEdit =
   (initial: Values, patch: Values): Write =>
   (db) => {
     update(db, 'spell_selection_slots', newSlot(db, initial), patch);
+  };
+
+const sourceInstance =
+  (values: Values): Write =>
+  (db) => {
+    newSource(db, newCharacter(db), values);
+  };
+
+const sourceInstanceEdit =
+  (patch: Values): Write =>
+  (db) => {
+    const characterId = newCharacter(db);
+    update(db, 'character_source_instances', newSource(db, characterId), patch);
   };
 
 const spellVersionEdit =
@@ -2122,9 +2140,8 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
       // `character_source_instances.state`, written by `update-class.ts` and
       // `grant-rule-slot-generator.ts`. The two `state` columns are different
       // vocabularies that merely share a name, and this asserts that the slot
-      // one does not quietly accept its neighbour's members. It is also why
-      // `character_source_instances.state` is left unconstrained — see the note
-      // in `db/schema/character.ts`.
+      // one does not quietly accept its neighbour's members. Since R4 the
+      // neighbour is constrained too, and the case below is this one's mirror.
       ['a transition to a state belonging to another table', slotEdit({}, { state: 'tombstoned' })],
     ],
     accepts: [
@@ -2133,6 +2150,39 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
       ['orphaned', slot({ state: 'orphaned' })],
       ['discarded', slot({ state: 'discarded' })],
       ['the orphaning transition a removed class performs', slotEdit({}, { state: 'orphaned' })],
+    ],
+  },
+  {
+    /**
+     * THE MIRROR OF THE SLOT CASE ABOVE, AND THE END OF THE LONGEST-STANDING
+     * "NO CHECK HERE" NOTE IN THE SCHEMA.
+     *
+     * This column went unconstrained until R4 not from doubt but from D13's
+     * order: a CHECK must read ONE declared source, and this vocabulary had
+     * none. `sourceInstanceStates` is now that source. The rejects below are
+     * chosen to be the two failures that were actually available: a typo of a
+     * real member, and members of the NEIGHBOURING `state` column whose set
+     * this one was nearly constrained to. `orphaned` and `kept_override` are
+     * both perfectly legal three tables away, which is exactly why a shared
+     * vocabulary would have been the wrong answer.
+     */
+    constraint: 'character_source_instances_state_check',
+    rejects: [
+      ['a typo of a real member', sourceInstance({ state: 'tombstoend' })],
+      ["the slot column's kept_override", sourceInstance({ state: 'kept_override' })],
+      // A source is minted `active` and moved by UPDATE thereafter, so the
+      // realistic bad value arrives as a transition, exactly as it does for a
+      // slot. `orphaned` is what a slot or a skill grant becomes when this row
+      // tombstones — the neighbouring word for the neighbouring event.
+      ['a transition to a state belonging to another table', sourceInstanceEdit({ state: 'orphaned' })],
+      ['the empty string a missing binding would produce', sourceInstance({ state: '' })],
+    ],
+    accepts: [
+      ['the active default', sourceInstance({})],
+      ['active named explicitly', sourceInstance({ state: 'active' })],
+      ['tombstoned at insert, which the grant generator writes', sourceInstance({ state: 'tombstoned' })],
+      ['the tombstoning transition class removal performs', sourceInstanceEdit({ state: 'tombstoned' })],
+      ['the re-take transition that writes active back', sourceInstanceEdit({ state: 'active' })],
     ],
   },
   {
