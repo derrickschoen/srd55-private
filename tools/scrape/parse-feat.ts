@@ -12,9 +12,22 @@
  *
  * CROSS-CHECK, DO NOT TRUST ONE SIGNAL. The descriptor line and the page's own
  * tag list can both carry the feat's category (Origin/General/Fighting
- * Style/Epic Boon). When both are present and they disagree the record FAILS
- * rather than picking a winner, exactly as the spell parser refuses a
- * school/tag disagreement.
+ * Style/Epic Boon — the four 2024 PHB categories this module's vocabulary is
+ * closed OVER, not closed absolutely: see OUT_OF_SCOPE_FEAT_CATEGORIES below
+ * for the non-PHB categories the live namespace also carries). When both are
+ * present and they disagree the record FAILS rather than picking a winner,
+ * exactly as the spell parser refuses a school/tag disagreement.
+ *
+ * OUT OF SCOPE IS NOT THE SAME AS MALFORMED. A feat page in a category this
+ * project does not replicate (Eberron's Dragonmark, the Planar Pact, Dark
+ * Gift) is not a parse failure — the page is perfectly well-formed, this
+ * project simply has no use for it. `parseFeatPage` reports that as a SKIP
+ * (`ok: false, skipped: true`), distinct from a genuine parse failure
+ * (`ok: false, skipped: false`), so a caller can let a full namespace crawl
+ * complete without `--allow-partial` while a truly malformed page still
+ * blocks it. A category that is neither one of the four in-scope names nor
+ * one of the three known out-of-scope names still fails loudly — this
+ * module knows exactly two closed vocabularies, not "anything is fine."
  *
  * NOTHING SCRAPED IS COMMITTED. The tests for this module run against synthetic
  * markup written by hand for the purpose, never a saved page.
@@ -53,7 +66,9 @@
  * clause, never structured; the benefit paragraphs are Tier 2 text, never a
  * grant), and the one piece of real mechanical structure that IS safe to read —
  * the "Ability Score Increase." paragraph, which has exactly two printed shapes
- * in the whole ruleset — is promoted to `abilityIncreaseOptions`. Bridging this
+ * across every feat IN 2024 PHB SCOPE (see OUT_OF_SCOPE_FEAT_CATEGORIES for the
+ * non-PHB feats this module skips rather than reading) — is promoted to
+ * `abilityIncreaseOptions`. Bridging this
  * to `FeatContentAggregateV1` is future work for whoever wires a feat import
  * path to the scraper, and it needs its own STRICT AND LOUD prerequisite/grant
  * reader in the shape of `parsePrintedPrerequisites`/`grantRules` in
@@ -74,7 +89,7 @@ import {
   emphasisedTexts,
   extractByClass,
   extractElementById,
-  paragraphs,
+  strictBlocksOf,
   toSeparatedText,
   toText,
 } from './html';
@@ -116,21 +131,45 @@ export interface ParsedFeat {
   readonly description: readonly FeatParagraph[];
 }
 
+/**
+ * `skipped` distinguishes a genuine parse failure (`skipped: false` — the
+ * page is malformed, or reads as something this module cannot honestly
+ * classify) from a page that parsed FINE but is out of this project's scope
+ * (`skipped: true` — see OUT_OF_SCOPE_FEAT_CATEGORIES). Both are `ok: false`
+ * so existing `result.ok === false && result.reason` call sites keep
+ * working unmodified; callers that need to let a full crawl complete
+ * without `--allow-partial` route on `skipped` instead of collapsing both
+ * into one failure list.
+ */
 export type ParseResult =
   | { readonly ok: true; readonly value: ParsedFeat }
-  | { readonly ok: false; readonly reason: string };
+  | { readonly ok: false; readonly skipped: false; readonly reason: string }
+  | { readonly ok: false; readonly skipped: true; readonly reason: string };
 
 function fail(reason: string): ParseResult {
-  return { ok: false, reason };
+  return { ok: false, skipped: false, reason };
+}
+
+function skip(reason: string): ParseResult {
+  return { ok: false, skipped: true, reason };
 }
 
 /**
- * The four source-shaped categories, as the descriptor line prints them, mapped
- * to the app's own `KnownFeatGrouping` vocabulary (`src/domain/enums.ts`). The
- * scraper task's shorthand spelled these `fighting-style`/`epic`; the app's own
- * enum spells them `fighting_style`/`epic_boon`, and this module follows the
- * app's enum on the reasoning that a document meant to align with the catalog
- * schema should speak the catalog schema's vocabulary, not a paraphrase of it.
+ * The four IN-SCOPE, source-shaped categories, as the descriptor line prints
+ * them, mapped to the app's own `KnownFeatGrouping` vocabulary
+ * (`src/domain/enums.ts`). The scraper task's shorthand spelled these
+ * `fighting-style`/`epic`; the app's own enum spells them
+ * `fighting_style`/`epic_boon`, and this module follows the app's enum on
+ * the reasoning that a document meant to align with the catalog schema
+ * should speak the catalog schema's vocabulary, not a paraphrase of it.
+ *
+ * CLOSED WITHIN 2024 PHB SCOPE, not closed absolutely — this project
+ * replicates 2024 PHB-based builds, and these four are every category the
+ * PHB prints. The live namespace also carries non-PHB setting categories
+ * (Dragonmark, Planar Pact, Dark Gift); see
+ * `OUT_OF_SCOPE_FEAT_CATEGORIES` below for that second, equally closed
+ * vocabulary, and this module's file comment for why a page in one of those
+ * categories is a SKIP rather than a parse failure.
  */
 const CATEGORY_BY_PRINTED_NAME: ReadonlyMap<string, KnownFeatGrouping> =
   new Map([
@@ -139,6 +178,22 @@ const CATEGORY_BY_PRINTED_NAME: ReadonlyMap<string, KnownFeatGrouping> =
     ['Fighting Style', 'fighting_style'],
     ['Epic Boon', 'epic_boon'],
   ]);
+
+/**
+ * NON-PHB setting categories the live `feat:` namespace also carries —
+ * Eberron's Dragonmark, the Planar Pact, and Dark Gift — out of scope for
+ * this project, which replicates 2024 PHB-based builds only. Recognised on
+ * the descriptor line and reported as a SKIP (see `ParseResult`) rather
+ * than a parse failure, so a full crawl of the `feat` namespace can
+ * complete without `--allow-partial`. This is NOT a catch-all: a category
+ * printed on a page that matches neither this set nor
+ * `CATEGORY_BY_PRINTED_NAME` still fails loudly, exactly as before.
+ */
+const OUT_OF_SCOPE_FEAT_CATEGORIES: ReadonlySet<string> = new Set([
+  'Dragonmark',
+  'Planar Pact',
+  'Dark Gift',
+]);
 
 /**
  * The page-tags equivalent, guessed from ONE confirmed live sample
@@ -183,11 +238,19 @@ function readPageTags(html: string): Set<string> {
 
 interface Descriptor {
   readonly category: KnownFeatGrouping | null;
+  /** The printed category name, when it matched neither known vocabulary. */
+  readonly outOfScopeCategory: string | null;
   readonly prerequisite: string | null;
 }
 
+// Captures ANY Title Case category name before " Feat", not just the four
+// in-scope ones — unlike an earlier draft's closed alternation, this lets
+// `readDescriptor` tell an OUT-OF-SCOPE category (Dragonmark, Planar Pact,
+// Dark Gift — see `OUT_OF_SCOPE_FEAT_CATEGORIES`) apart from a genuinely
+// UNRECOGNISED one. Both still refuse a bare `CATEGORY_BY_PRINTED_NAME`
+// membership test; only the caller's response to each differs.
 const WITH_CATEGORY =
-  /^(Origin|General|Fighting Style|Epic Boon) Feat(?:\s*\(Prerequisite:\s*([^)]+)\))?$/u;
+  /^([A-Z][A-Za-z' -]*) Feat(?:\s*\(Prerequisite:\s*([^)]+)\))?$/u;
 const PREREQUISITE_ONLY = /^Prerequisite:\s*(.+)$/u;
 
 /**
@@ -202,20 +265,32 @@ const PREREQUISITE_ONLY = /^Prerequisite:\s*(.+)$/u;
 function readDescriptor(text: string): Descriptor | string {
   const withCategory = WITH_CATEGORY.exec(text);
   if (withCategory !== null) {
-    const category = CATEGORY_BY_PRINTED_NAME.get(withCategory[1] as string);
-    if (category === undefined) {
-      return `descriptor names an unrecognised category: "${text}"`;
-    }
+    const printedCategory = withCategory[1] as string;
     const prerequisite = withCategory[2];
-    return {
-      category,
-      prerequisite: prerequisite === undefined ? null : prerequisite.trim(),
-    };
+    const prerequisiteValue =
+      prerequisite === undefined ? null : prerequisite.trim();
+    const category = CATEGORY_BY_PRINTED_NAME.get(printedCategory);
+    if (category !== undefined) {
+      return {
+        category,
+        outOfScopeCategory: null,
+        prerequisite: prerequisiteValue,
+      };
+    }
+    if (OUT_OF_SCOPE_FEAT_CATEGORIES.has(printedCategory)) {
+      return {
+        category: null,
+        outOfScopeCategory: printedCategory,
+        prerequisite: prerequisiteValue,
+      };
+    }
+    return `descriptor names an unrecognised category: "${text}"`;
   }
   const prerequisiteOnly = PREREQUISITE_ONLY.exec(text);
   if (prerequisiteOnly !== null) {
     return {
       category: null,
+      outOfScopeCategory: null,
       prerequisite: (prerequisiteOnly[1] as string).trim(),
     };
   }
@@ -321,9 +396,15 @@ const ONE_POINT_ASI =
 
 /**
  * Reads the "Ability Score Increase." paragraph, if one is printed, into the
- * two closed shapes the whole ruleset ever uses. This is the one piece of
- * benefit-text structure this module promotes out of prose — see the
- * file-level comment for why nothing else is. Deliberately written against
+ * two closed shapes observed across every feat IN 2024 PHB SCOPE — not
+ * "the whole ruleset ever uses": a non-PHB feat (Potent Dragonmark) prints a
+ * third wording, but a page in that category is skipped before it ever
+ * reaches this function — see `OUT_OF_SCOPE_FEAT_CATEGORIES` and the
+ * file-level comment. A page whose category IS in scope but whose ASI
+ * paragraph matches neither shape below still fails loudly, exactly as
+ * before. This is the one piece of benefit-text structure this module
+ * promotes out of prose — see the file-level comment for why nothing else
+ * is. Deliberately written against
  * STRAIGHT apostrophes: the wikidot pages print `can't` with `U+0027`
  * (verified against the live `feat:tactical-combatant` sample), unlike
  * `src/rules/feats-srd.ts`'s SRD text extract, which uses the curly `U+2019`.
@@ -390,32 +471,51 @@ export function parseFeatPage(
   if (content === null) {
     return fail('no <div id="page-content"> — page shell not recognised');
   }
-  const blocks = paragraphs(content);
+  // Headings and tables (and, on some pages, lists) can carry rules text
+  // exactly the way a benefit paragraph does — see this module's F1 fix
+  // note in the file header. `strictBlocksOf` captures all of them, in
+  // document order, and refuses loudly naming any OTHER top-level element
+  // it meets rather than walking past it the way a `<p>`-only scan would.
+  const strict = strictBlocksOf(content, ['p', 'h4', 'h5', 'h6', 'table', 'ul', 'ol']);
+  if (!strict.ok) {
+    return fail(
+      `feat body contains an unrecognised <${strict.tag}> element — refusing ` +
+        `rather than silently dropping it (page "${options.slug}")`,
+    );
+  }
+  const blocks = strict.blocks;
   if (blocks.length === 0) {
     return fail('page content has no paragraphs');
   }
 
-  const sourceParagraph = blocks.find((block) =>
-    /^\s*Source\s*:/iu.test(toText(block)),
+  const sourceBlock = blocks.find(
+    (block) => block.tag === 'p' && /^\s*Source\s*:/iu.test(toText(block.html)),
   );
-  if (sourceParagraph === undefined) {
+  if (sourceBlock === undefined) {
     return fail('no "Source:" line');
   }
-  const sourceBook = toText(sourceParagraph).replace(/^\s*Source\s*:\s*/iu, '');
+  const sourceBook = toText(sourceBlock.html).replace(/^\s*Source\s*:\s*/iu, '');
   if (sourceBook === '') {
     return fail('"Source:" line names no book');
   }
 
-  const descriptorParagraph = blocks.find(
-    (block) => emphasisedTexts(block).length > 0,
+  const descriptorBlock = blocks.find(
+    (block) => block.tag === 'p' && emphasisedTexts(block.html).length > 0,
   );
-  if (descriptorParagraph === undefined) {
+  if (descriptorBlock === undefined) {
     return fail('no <em> descriptor line');
   }
-  const emphasised = emphasisedTexts(descriptorParagraph);
+  const emphasised = emphasisedTexts(descriptorBlock.html);
   const descriptor = readDescriptor(emphasised[0] as string);
   if (typeof descriptor === 'string') {
     return fail(descriptor);
+  }
+  if (descriptor.outOfScopeCategory !== null) {
+    return skip(
+      `feat category "${descriptor.outOfScopeCategory}" is out of 2024 PHB ` +
+        'scope (non-PHB setting content) — see OUT_OF_SCOPE_FEAT_CATEGORIES ' +
+        `in tools/scrape/parse-feat.ts (page "${options.slug}")`,
+    );
   }
 
   const pageTags = readPageTags(html);
@@ -426,10 +526,12 @@ export function parseFeatPage(
   const category = categoryResult.category;
 
   const bodyBlocks = blocks.filter(
-    (block) => block !== sourceParagraph && block !== descriptorParagraph,
+    (block) => block !== sourceBlock && block !== descriptorBlock,
   );
   const description = bodyBlocks
-    .map(readParagraph)
+    .map((block) =>
+      block.tag === 'p' ? readParagraph(block.html) : { label: null, text: toText(block.html) },
+    )
     .filter((paragraph) => paragraph.text !== '');
   if (description.length === 0) {
     return fail('no body text after the descriptor');

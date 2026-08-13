@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { parseSpeciesPage } from '../../../tools/scrape/parse-species';
 import { isSpellVersionKey } from '../../../src/catalog/catalog-key';
 import {
+  AMBIGUOUS_LINEAGE_DEPTHS,
   HEADING_NAME_MISMATCH,
   MOSSKIN,
   NO_CONTENT_DIV,
@@ -101,5 +102,30 @@ describe('species page parser', () => {
     const result = parse(html);
     expect(result.ok).toBe(false);
     expect(result.ok === false && result.reason).toContain(needle);
+  });
+
+  // F5: the `species:elf` shape (real lineages plus a shallower
+  // alternate-setting heading with its own subsections) has no positive
+  // signal telling the setting heading apart from a fourth real lineage, so
+  // the honest outcome is a loud refusal — never three real lineages plus
+  // three fabricated ones, and never five real lineages with the setting
+  // heading silently merged into "House Wanewood".
+  it('refuses a page whose pre-Traits root headings mix depths, rather than guessing which are real lineages', () => {
+    const result = parse(AMBIGUOUS_LINEAGE_DEPTHS);
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.reason).toContain('depth');
+    // Never a silent guess: no document is returned to fabricate lineages from.
+  });
+
+  it('emits ONLY uniform-depth root headings as lineages, folding a deeper heading into its parent', () => {
+    // MOSSKIN's two lineages are both `<h5>` — uniform depth, so both are
+    // confidently real, and none of Mosskin's other content (traits, the
+    // folded "Mosskin Lineages" table) is mistaken for a lineage.
+    const { document } = expectOk(MOSSKIN, 'species:mosskin');
+    expect(document.lineages).toHaveLength(2);
+    expect(document.lineages.map((lineage) => lineage.name)).toEqual([
+      'Deep Root',
+      'Bright Canopy',
+    ]);
   });
 });

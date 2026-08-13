@@ -5,13 +5,19 @@ import {
   BOON_OF_THE_UNBROKEN_LINE,
   BULWARK_STANCE,
   CATEGORY_DISAGREEMENT,
+  DARK_GIFT_FEAT,
+  DRAGONMARK_FEAT,
   GRIM_MOMENTUM,
   LEDGERKEEPERS_KIT,
   NO_CONTENT_DIV,
   NO_SOURCE_LINE,
+  PLANAR_PACT_FEAT,
   PROSE_DESCRIPTOR,
   STONECROSSED_WANDERER,
+  TABLE_BEARING_FEAT,
+  UNKNOWN_CATEGORY_FEAT,
   UNREADABLE_ABILITY_INCREASE,
+  UNRECOGNISED_BODY_ELEMENT,
 } from '../../fixtures/scrape/synthetic-feat-pages';
 
 function parse(html: string, slug = 'feat:test') {
@@ -143,5 +149,66 @@ describe('feat page parser', () => {
     const result = parse(html);
     expect(result.ok).toBe(false);
     expect(result.ok === false && result.reason).toContain(needle);
+  });
+
+  // F1: headings, tables and lists inside the feat body are captured
+  // verbatim, in document order, rather than silently dropped by an old
+  // `<p>`-only scan.
+  it('captures a body heading, table and list as verbatim prose, in document order', () => {
+    const { description } = expectOk(TABLE_BEARING_FEAT, 'feat:ledger-of-contingencies');
+    expect(description).toEqual([
+      { label: null, text: 'You gain the following benefits.' },
+      {
+        label: 'Contingency Plan.',
+        text: expect.stringContaining('Contingency Table'),
+      },
+      { label: null, text: 'Contingency Table' },
+      { label: null, text: expect.stringContaining('Gain Advantage') },
+      { label: null, text: expect.stringContaining('cannot choose the same condition') },
+    ]);
+    // The table and list text really did make it through, not just their tags.
+    expect(description.some((p) => p.text.includes('Gain Advantage'))).toBe(true);
+    expect(description.some((p) => p.text.includes('cannot choose the same condition twice'))).toBe(true);
+  });
+
+  it('refuses a body element it was not written to expect, naming the tag', () => {
+    const result = parse(UNRECOGNISED_BODY_ELEMENT);
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.reason).toContain('blockquote');
+  });
+
+  // F3: non-PHB setting categories are a SKIP, not a parse failure.
+  it.each([
+    ['Dragonmark', DRAGONMARK_FEAT],
+    ['Planar Pact', PLANAR_PACT_FEAT],
+    ['Dark Gift', DARK_GIFT_FEAT],
+  ])('skips a %s feat as out of 2024 PHB scope, distinct from a parse failure', (categoryName, html) => {
+    const result = parse(html);
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error('unreachable');
+    }
+    expect(result.skipped).toBe(true);
+    expect(result.reason).toContain(categoryName);
+  });
+
+  it('still refuses loudly on a category that is neither in-scope nor a known out-of-scope name', () => {
+    const result = parse(UNKNOWN_CATEGORY_FEAT);
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error('unreachable');
+    }
+    expect(result.skipped).toBe(false);
+    expect(result.reason).toContain('Mystic');
+  });
+
+  it('marks every existing malformed-page fixture as a genuine failure, not a skip', () => {
+    for (const html of [PROSE_DESCRIPTOR, NO_CONTENT_DIV, NO_SOURCE_LINE, UNREADABLE_ABILITY_INCREASE]) {
+      const result = parse(html);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.skipped).toBe(false);
+      }
+    }
   });
 });

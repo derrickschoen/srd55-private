@@ -140,6 +140,88 @@ export function inSubclassNamespaces(
 }
 
 /**
+ * Known non-subclass pages inside the thirteen parent-class namespaces,
+ * skipped at QUEUE TIME — before `fetch` ever requests them — so the
+ * documented default `fetch --namespace subclass` -> `build --namespace
+ * subclass` flow can complete without `--allow-partial`. Two shapes:
+ *
+ * GLOBAL: `main` (the class's own overview page) and `spell-list`,
+ * confirmed present in EVERY one of the thirteen namespaces (this module's
+ * earlier file comment, live sitemap sample 2026-08-13).
+ *
+ * PER-NAMESPACE: class-specific extras confirmed live on that one
+ * namespace only, from the same sample — `sorcerer:metamagic` and
+ * `warlock:eldritch-invocations`.
+ *
+ * THIS LIST IS NOT EXHAUSTIVE, and does not try to be — this module's file
+ * comment already explains why enumerating every non-subclass slug on all
+ * thirteen namespaces is not something a sitemap-only view can do. A page
+ * this list does not know about still reaches `fetch`, gets cached, and
+ * then FAILS LOUDLY in `parse-subclass.ts`'s page-tag check when `build`
+ * runs — exactly the behaviour this project wants for a page nobody
+ * confirmed. Only the entries confirmed here skip that path, and the skip
+ * is logged with a reason, never silent.
+ */
+const GLOBAL_SUBCLASS_NAMESPACE_AUXILIARY_SLUGS: ReadonlySet<string> =
+  new Set(['main', 'spell-list']);
+
+const PER_NAMESPACE_SUBCLASS_AUXILIARY_SLUGS: ReadonlyMap<
+  SubclassParentClassNamespace,
+  ReadonlySet<string>
+> = new Map([
+  ['sorcerer', new Set(['metamagic'])],
+  ['warlock', new Set(['eldritch-invocations'])],
+]);
+
+export interface SubclassNamespaceSkip {
+  readonly url: string;
+  readonly reason: string;
+}
+
+export interface SubclassNamespacePartition {
+  readonly included: SitemapEntry[];
+  readonly skipped: SubclassNamespaceSkip[];
+}
+
+/**
+ * `inSubclassNamespaces`, partitioned into pages worth queueing and pages
+ * known in advance to be non-subclass auxiliary pages — see
+ * `GLOBAL_SUBCLASS_NAMESPACE_AUXILIARY_SLUGS` and
+ * `PER_NAMESPACE_SUBCLASS_AUXILIARY_SLUGS` above. The caller logs
+ * `skipped` with its reasons rather than dropping it silently.
+ */
+export function partitionSubclassNamespaceEntries(
+  entries: readonly SitemapEntry[],
+): SubclassNamespacePartition {
+  const included: SitemapEntry[] = [];
+  const skipped: SubclassNamespaceSkip[] = [];
+  for (const entry of inSubclassNamespaces(entries)) {
+    // `inSubclassNamespaces` already proved `pageName` is non-null and its
+    // namespace is one of the thirteen known ones.
+    const name = pageName(entry.url) as string;
+    const namespace = name.split(':', 1)[0] as SubclassParentClassNamespace;
+    const slug = name.slice(namespace.length + 1);
+    if (GLOBAL_SUBCLASS_NAMESPACE_AUXILIARY_SLUGS.has(slug)) {
+      skipped.push({
+        url: entry.url,
+        reason: `known auxiliary page "${slug}" (confirmed on every class namespace)`,
+      });
+      continue;
+    }
+    const perNamespace = PER_NAMESPACE_SUBCLASS_AUXILIARY_SLUGS.get(namespace);
+    if (perNamespace !== undefined && perNamespace.has(slug)) {
+      skipped.push({
+        url: entry.url,
+        reason: `known auxiliary page "${namespace}:${slug}"`,
+      });
+      continue;
+    }
+    included.push(entry);
+  }
+  return { included, skipped };
+}
+
+/**
  * The parent class implied by a subclass page's own name, e.g.
  * `fighter:champion` -> `Fighter`. This is the ONLY reliable class signal a
  * subclass page carries — see `parse-subclass.ts`'s file comment for why the

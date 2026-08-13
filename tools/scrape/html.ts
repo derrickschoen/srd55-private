@@ -191,6 +191,79 @@ export function blocksOf(
   return found;
 }
 
+export interface StrictBlock {
+  readonly tag: string;
+  readonly html: string;
+}
+
+export type StrictBlocksResult =
+  | { readonly ok: true; readonly blocks: StrictBlock[] }
+  | { readonly ok: false; readonly tag: string };
+
+/**
+ * Splits a content region into top-level blocks whose tag is one of
+ * `knownTags`, IN DOCUMENT ORDER, and REFUSES — naming the offending tag —
+ * the moment it meets a top-level element that is none of them.
+ *
+ * {@link blocksOf} only ever looks for the tags it is told to find, so a
+ * tag it was not given is invisible to it — a silent drop, not a refusal.
+ * That is fine for a caller that already folds "everything else" into the
+ * nearest open block, but wrong for a caller whose "everything else" might
+ * be a rules-bearing element (a `<table>`, a `<ul>`) it was never taught to
+ * expect. This is that caller's tool: same balanced-tag walk as
+ * {@link blocksOf}, but a top-level tag outside `knownTags` is a hard
+ * failure instead of something that never got looked at.
+ *
+ * Only ELEMENT tags are inspected; plain text (or whitespace) between two
+ * blocks is skipped without comment, since none of this project's pages
+ * print rules text outside some block element. A tag nested INSIDE an
+ * already-consumed block (an `<a>` inside a `<p>`, a `<tr>` inside a
+ * `<table>`) is part of that block's own inner HTML and is never
+ * independently inspected — this function only ever looks at the top
+ * level.
+ */
+export function strictBlocksOf(
+  html: string,
+  knownTags: readonly string[],
+): StrictBlocksResult {
+  const known = new Set(knownTags.map((tag) => tag.toLowerCase()));
+  const found: StrictBlock[] = [];
+  const tagStart = /<([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>/gu;
+  let cursor = 0;
+  for (;;) {
+    tagStart.lastIndex = cursor;
+    const match = tagStart.exec(html);
+    if (match === null) {
+      break;
+    }
+    const tag = (match[1] as string).toLowerCase();
+    if (!known.has(tag)) {
+      return { ok: false, tag };
+    }
+    const start = match.index + match[0].length;
+    const scanner = new RegExp(`<(/?)${tag}\\b[^>]*>`, 'giu');
+    scanner.lastIndex = start;
+    let depth = 1;
+    let step: RegExpExecArray | null;
+    let end: number | null = null;
+    let content = '';
+    while ((step = scanner.exec(html)) !== null) {
+      depth += step[1] === '/' ? -1 : 1;
+      if (depth === 0) {
+        content = html.slice(start, step.index);
+        end = step.index + step[0].length;
+        break;
+      }
+    }
+    if (end === null) {
+      return { ok: false, tag: `${tag}> (unclosed)` };
+    }
+    found.push({ tag, html: content });
+    cursor = end;
+  }
+  return { ok: true, blocks: found };
+}
+
 /** Splits a paragraph on `<br>` / `<br />` into its text lines. */
 export function lines(paragraphHtml: string): string[] {
   return paragraphHtml

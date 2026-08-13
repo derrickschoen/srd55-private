@@ -8,6 +8,7 @@ import {
   NO_SOURCE_LINE,
   NOT_TAGGED_SUBCLASS,
   TIDEBOUND_PATH,
+  WARDSPUN_LINEAGE,
 } from '../../fixtures/scrape/synthetic-subclass-pages';
 
 function parse(html: string, slug = 'fighter:test', parentClass = 'Fighter') {
@@ -123,5 +124,23 @@ describe('subclass page parser', () => {
     const result = parse(html);
     expect(result.ok).toBe(false);
     expect(result.ok === false && result.reason).toContain(needle);
+  });
+
+  // F6: a `<h5>` table-label heading is captured verbatim rather than
+  // vanishing while its table's contents survive unlabelled.
+  it('captures a <h5> table-label heading folded into the feature it follows', () => {
+    const { document } = expectOk(WARDSPUN_LINEAGE, 'sorcerer:wardspun-lineage', 'Sorcerer');
+    expect(document.features).toHaveLength(3);
+
+    const wardsFeature = document.features[1]!;
+    expect(wardsFeature.name).toBe('Ancestral Wards');
+    expect(wardsFeature.descriptionParagraphs).toEqual([
+      expect.stringContaining('chosen when you gain this feature'),
+      'Ancestral Wards',
+      expect.stringContaining('Ward of Stone'),
+    ]);
+    expect(
+      wardsFeature.descriptionParagraphs.some((p) => p.includes('Resistance to bludgeoning damage')),
+    ).toBe(true);
   });
 });

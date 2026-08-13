@@ -188,6 +188,36 @@ export const NO_TRAITS = syntheticSpeciesPage({
   tags: ['common'],
 });
 
+/**
+ * F5: the `species:elf` shape this module's file comment describes —
+ * three `<h5>` lineage sections, THEN a shallower `<h3>` alternate-setting
+ * heading with its own two `<h4>` subsections. The setting heading is a
+ * ROOT section exactly like the three real lineages (nothing shallower
+ * opened before it either), but at a DIFFERENT tag depth — this module has
+ * no positive way to tell it apart from a fourth real lineage, so it must
+ * refuse the whole page rather than guess. (Its two `<h4>` subsections
+ * *are* positively classifiable — deeper than their `<h3>` parent, so
+ * folded rather than emitted — but that does not rescue the page, because
+ * the root-depth mismatch is what trips the refusal.)
+ */
+export const AMBIGUOUS_LINEAGE_DEPTHS = syntheticSpeciesPage({
+  title: 'Duskborn',
+  sources: ["Wandering Tinker's Companion"],
+  intro: ['Duskborn trace their lines through three ancient houses.'],
+  lineages: [
+    { tag: 'h5', name: 'House Ashgrave', body: ['House Ashgrave duskborn favour the old rites.'] },
+    { tag: 'h5', name: 'House Emberfall', body: ['House Emberfall duskborn carry a spark of old fire.'] },
+    { tag: 'h5', name: 'House Wanewood', body: ['House Wanewood duskborn walk quietly between worlds.'] },
+    { tag: 'h3', name: 'Farshore Setting', body: ['A whole alternate-setting variant, not a fourth house.'] },
+    { tag: 'h4', name: 'In the Shallows', body: ['One Farshore subsection.'] },
+    { tag: 'h4', name: 'In the Deep', body: ['A second Farshore subsection.'] },
+  ],
+  size: 'Medium',
+  speed: '30 feet',
+  traits: [{ name: 'Duskborn Sight', body: 'You have Darkvision with a range of 60 feet.' }],
+  tags: ['common'],
+});
+
 /** Malformed: no "Source:" line at all. */
 export const NO_SOURCE_LINE = `<html><head><title>Nameless Draft - Homebrew Test Wiki</title></head>
 <body><div id="page-content">

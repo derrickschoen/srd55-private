@@ -197,3 +197,27 @@ export const SYNTHETIC_SITEMAP = `<?xml version="1.0" encoding="UTF-8"?>
   <url><loc>http://example.invalid/bard:college-of-the-long-road</loc></url>
   <url><loc>http://example.invalid/spell:ledger-of-small-debts</loc><lastmod>2026-07-18T08:30:00+00:00</lastmod></url>
 </urlset>`;
+
+/**
+ * F2/F7(d): a synthetic sitemap shaped like the thirteen subclass parent-
+ * class namespaces — real subclass pages, the GLOBAL auxiliary pages every
+ * namespace carries (`main`, `spell-list`), the two documented PER-NAMESPACE
+ * auxiliaries (`sorcerer:metamagic`, `warlock:eldritch-invocations`), and one
+ * namespace page this fixture does NOT claim to know about
+ * (`fighter:unlisted-extra`) — so a test can prove the KNOWN auxiliaries are
+ * skipped at queue time while a genuinely unknown one is still queued and
+ * left to fail downstream, in the parser's own page-tag check.
+ */
+export const SUBCLASS_NAMESPACE_SITEMAP = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>http://example.invalid/fighter:main</loc><lastmod>2026-07-01T00:00:00+00:00</lastmod></url>
+  <url><loc>http://example.invalid/fighter:spell-list</loc><lastmod>2026-07-01T00:00:00+00:00</lastmod></url>
+  <url><loc>http://example.invalid/fighter:champion</loc><lastmod>2026-07-01T00:00:00+00:00</lastmod></url>
+  <url><loc>http://example.invalid/fighter:unlisted-extra</loc><lastmod>2026-07-01T00:00:00+00:00</lastmod></url>
+  <url><loc>http://example.invalid/sorcerer:main</loc><lastmod>2026-07-01T00:00:00+00:00</lastmod></url>
+  <url><loc>http://example.invalid/sorcerer:metamagic</loc><lastmod>2026-07-01T00:00:00+00:00</lastmod></url>
+  <url><loc>http://example.invalid/sorcerer:draconic-bloodline</loc><lastmod>2026-07-01T00:00:00+00:00</lastmod></url>
+  <url><loc>http://example.invalid/warlock:eldritch-invocations</loc><lastmod>2026-07-01T00:00:00+00:00</lastmod></url>
+  <url><loc>http://example.invalid/warlock:fiend</loc><lastmod>2026-07-01T00:00:00+00:00</lastmod></url>
+  <url><loc>http://example.invalid/spell:lanternfall</loc><lastmod>2026-07-21T02:42:05+00:00</lastmod></url>
+</urlset>`;

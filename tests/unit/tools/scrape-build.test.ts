@@ -7,8 +7,14 @@ import {
   BuildRefused,
   type BuiltPage,
 } from '../../../tools/scrape/build-catalog';
+import {
+  buildFeatDocuments,
+  FeatBuildRefused,
+  type BuiltFeatPage,
+} from '../../../tools/scrape/build-feat-catalog';
 import { CrawlQueue, type QueueItem } from '../../../tools/scrape/queue';
 import { parseSpellPage } from '../../../tools/scrape/parse-spell';
+import { parseFeatPage } from '../../../tools/scrape/parse-feat';
 import {
   parseCatalogDocuments,
   parseDescriptionDocuments,
@@ -25,6 +31,7 @@ import {
   LEDGER_OF_SMALL_DEBTS,
   THREADCALL,
 } from '../../fixtures/scrape/synthetic-pages';
+import { GRIM_MOMENTUM } from '../../fixtures/scrape/synthetic-feat-pages';
 
 function page(html: string, url: string): BuiltPage {
   const parsed = parseSpellPage(html, { edition: '2024', slug: 'spell:x' });
@@ -252,6 +259,65 @@ describe('building the catalog documents', () => {
         allowPartial: false,
       }),
     ).toThrow(/two pages produced versionKey/u);
+  });
+});
+
+describe('building the feat documents', () => {
+  function featPage(html: string, url: string): BuiltFeatPage {
+    const parsed = parseFeatPage(html, { edition: '2024', slug: 'feat:x' });
+    if (!parsed.ok) {
+      throw new Error(parsed.reason);
+    }
+    return { url, document: parsed.value.document, description: parsed.value.description };
+  }
+
+  const FEAT_PAGES = [featPage(GRIM_MOMENTUM, 'http://example.invalid/feat:grim-momentum')];
+  const FEAT_DONE = FEAT_PAGES.map((built) => item(built.url, 'done'));
+
+  // F3/F7(c): an out-of-scope SKIP must not force --allow-partial the way a
+  // genuine parse failure does, so a full namespace crawl (real feats plus
+  // a few Dragonmark/Planar Pact/Dark Gift pages) can complete on its own.
+  it('does not refuse a build carrying out-of-scope skips, unlike a real parse failure', () => {
+    const output = buildFeatDocuments({
+      pages: FEAT_PAGES,
+      queue: FEAT_DONE,
+      parseFailures: [],
+      outOfScopeSkips: [
+        { url: 'http://example.invalid/feat:mark-of-making', reason: 'Dragonmark' },
+      ],
+      allowPartial: false,
+    });
+    expect(output.report.recordCount).toBe(1);
+    expect(output.report.partial).toBe(false);
+    expect(output.report.outOfScopeSkips).toEqual([
+      { url: 'http://example.invalid/feat:mark-of-making', reason: 'Dragonmark' },
+    ]);
+  });
+
+  it('still refuses on a genuine parse failure, which out-of-scope skips must never mask', () => {
+    expect(() =>
+      buildFeatDocuments({
+        pages: FEAT_PAGES,
+        queue: FEAT_DONE,
+        parseFailures: [
+          { url: 'http://example.invalid/feat:odd', reason: 'no "Source:" line' },
+        ],
+        outOfScopeSkips: [
+          { url: 'http://example.invalid/feat:mark-of-making', reason: 'Dragonmark' },
+        ],
+        allowPartial: false,
+      }),
+    ).toThrow(FeatBuildRefused);
+  });
+
+  it('defaults outOfScopeSkips to empty when the caller omits it', () => {
+    const output = buildFeatDocuments({
+      pages: FEAT_PAGES,
+      queue: FEAT_DONE,
+      parseFailures: [],
+      allowPartial: false,
+    });
+    expect(output.report.outOfScopeSkips).toEqual([]);
   });
 });
 

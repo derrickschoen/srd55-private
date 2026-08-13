@@ -55,10 +55,11 @@ import { parseSpeciesPage } from './parse-species';
 import { CrawlQueue } from './queue';
 import {
   inNamespace,
-  inSubclassNamespaces,
   pageName,
   parseSitemap,
+  partitionSubclassNamespaceEntries,
   subclassParentClassFromPageName,
+  type SitemapEntry,
 } from './sitemap';
 import type { RulesEdition } from '../../src/domain/enums';
 
@@ -72,10 +73,16 @@ import type { RulesEdition } from '../../src/domain/enums';
  *
  * `subclass` IS THE EXCEPTION, because there is no `subclass:` namespace on
  * the site — see `sitemap.ts`'s file comment for the live sitemap facts.
- * `commandFetch` below special-cases it to `inSubclassNamespaces`, which
- * unions the thirteen real per-class namespaces instead of filtering one.
- * Only `build` picks a parser; `fetch` filling the cache is otherwise
- * unaware of what a page's content will turn out to be.
+ * `commandFetch` below special-cases it to `partitionSubclassNamespaceEntries`,
+ * which unions the thirteen real per-class namespaces instead of filtering
+ * one AND drops the confirmed non-subclass auxiliary pages inside them
+ * (`sitemap.ts`'s `GLOBAL_SUBCLASS_NAMESPACE_AUXILIARY_SLUGS` /
+ * `PER_NAMESPACE_SUBCLASS_AUXILIARY_SLUGS`) before they are ever queued, so
+ * the documented default `fetch subclass` -> `build subclass` flow does not
+ * need `--allow-partial` just to route around pages known in advance to be
+ * something other than a subclass. Only `build` picks a parser; `fetch`
+ * filling the cache is otherwise unaware of what a page's content will turn
+ * out to be.
  */
 const BUILD_NAMESPACES = ['spell', 'feat', 'subclass', 'species'] as const;
 type BuildNamespace = (typeof BUILD_NAMESPACES)[number];
@@ -186,13 +193,29 @@ async function commandFetch(options: Options): Promise<number> {
   // `subclass` IS A PSEUDO-NAMESPACE — see this module's file comment and
   // `sitemap.ts`'s for why: the site has no `subclass:` prefix, so it is the
   // union of the thirteen real per-class namespaces instead of a filter on
-  // one.
+  // one. Known non-subclass AUXILIARY pages inside those namespaces (each
+  // class's `main` / `spell-list`, plus a couple of confirmed class-specific
+  // extras) are skipped HERE, at queue time, with a logged notice — see
+  // `partitionSubclassNamespaceEntries` in `sitemap.ts` — so the documented
+  // default fetch/build flow can complete without `--allow-partial`. Pages
+  // this list does not know about are still queued and still fail loudly
+  // downstream, in `parse-subclass.ts`'s page-tag check.
   const parsedSitemap = parseSitemap(sitemap.body);
-  const entries =
-    options.namespace === 'subclass'
-      ? inSubclassNamespaces(parsedSitemap)
-      : inNamespace(parsedSitemap, options.namespace);
-  log(`sitemap: ${entries.length} page(s) in namespace "${options.namespace}"`);
+  let entries: SitemapEntry[];
+  if (options.namespace === 'subclass') {
+    const partition = partitionSubclassNamespaceEntries(parsedSitemap);
+    entries = partition.included;
+    log(
+      `sitemap: ${entries.length} page(s) in namespace "subclass" ` +
+        `(${partition.skipped.length} known auxiliary page(s) skipped)`,
+    );
+    for (const skipped of partition.skipped) {
+      log(`  auxiliary-page skip: ${skipped.url} — ${skipped.reason}`);
+    }
+  } else {
+    entries = inNamespace(parsedSitemap, options.namespace);
+    log(`sitemap: ${entries.length} page(s) in namespace "${options.namespace}"`);
+  }
 
   const selected =
     options.limit === null ? entries : entries.slice(0, options.limit);
@@ -355,6 +378,7 @@ async function commandBuildFeats(options: Options): Promise<number> {
 
   const pages: BuiltFeatPage[] = [];
   const parseFailures: FeatBuildFailure[] = [];
+  const outOfScopeSkips: FeatBuildFailure[] = [];
   for (const item of queue.items) {
     if (item.state !== 'done') {
       continue;
@@ -367,6 +391,14 @@ async function commandBuildFeats(options: Options): Promise<number> {
     const slug = pageName(item.url) ?? item.url;
     const parsed = parseFeatPage(entry.body, { edition: EDITION, slug });
     if (!parsed.ok) {
+      // A SKIP (an out-of-2024-PHB-scope category — see
+      // `OUT_OF_SCOPE_FEAT_CATEGORIES` in parse-feat.ts) is not a parse
+      // failure: it must not force --allow-partial the way a genuinely
+      // malformed page does. See build-feat-catalog.ts's `outOfScopeSkips`.
+      if (parsed.skipped) {
+        outOfScopeSkips.push({ url: item.url, reason: parsed.reason });
+        continue;
+      }
       parseFailures.push({ url: item.url, reason: parsed.reason });
       continue;
     }
@@ -383,6 +415,7 @@ async function commandBuildFeats(options: Options): Promise<number> {
       pages,
       queue: queue.items,
       parseFailures,
+      outOfScopeSkips,
       allowPartial: options.allowPartial,
     });
   } catch (error) {
@@ -411,6 +444,15 @@ async function commandBuildFeats(options: Options): Promise<number> {
   // deactivate something", because nothing imports it.
   log('  NOTE: this document shape has no import path yet (see');
   log('        tools/scrape/build-feat-catalog.ts for what is missing).');
+  if (output.report.outOfScopeSkips.length > 0) {
+    log(
+      `  NOTE: ${output.report.outOfScopeSkips.length} page(s) skipped as ` +
+        'out of 2024 PHB scope (non-PHB feat categories):',
+    );
+    for (const skipped of output.report.outOfScopeSkips) {
+      log(`    ${skipped.url} — ${skipped.reason}`);
+    }
+  }
   if (output.report.partial) {
     log('  NOTE: partial run — the crawl or the parse did not finish.');
   }
@@ -424,8 +466,8 @@ async function commandBuildFeats(options: Options): Promise<number> {
  * `parentClass` is resolved per-page from the URL, not from anything on the
  * page — see `parse-subclass.ts`'s file comment. A page whose URL falls
  * outside the thirteen known class namespaces (should not happen after
- * `inSubclassNamespaces` filtered the fetch, but the queue may predate a
- * change to that list) is a parse failure, not a crash.
+ * `partitionSubclassNamespaceEntries` filtered the fetch, but the queue may
+ * predate a change to that list) is a parse failure, not a crash.
  */
 async function commandBuildSubclasses(options: Options): Promise<number> {
   if (options.list !== null) {
@@ -612,7 +654,10 @@ function usage(): number {
       '--namespace subclass is a PSEUDO-NAMESPACE: the site has no "subclass:"',
       'prefix, so fetch unions the thirteen real per-class namespaces instead —',
       'see sitemap.ts for the live facts. build resolves each page\'s parent class',
-      'from its URL, not from anything printed on the page.',
+      'from its URL, not from anything printed on the page. fetch skips known',
+      'non-subclass auxiliary pages (each class\'s main/spell-list and a couple of',
+      'confirmed extras) before queueing them, with a logged notice, so this',
+      'default flow does not need --allow-partial just to route around them.',
       '',
       '--list narrows the SPELL output, which makes it a PARTIAL build: an import',
       'is a full replacement, so every spell it filters out would be deactivated.',

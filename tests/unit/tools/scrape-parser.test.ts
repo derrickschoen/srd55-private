@@ -4,8 +4,11 @@ import { parseCatalogDocuments } from '../../../src/catalog/catalog-schema';
 import { isSpellVersionKey } from '../../../src/catalog/catalog-key';
 import {
   inNamespace,
+  inSubclassNamespaces,
   pageName,
   parseSitemap,
+  partitionSubclassNamespaceEntries,
+  subclassParentClassFromPageName,
 } from '../../../tools/scrape/sitemap';
 import {
   CONTRADICTORY,
@@ -16,6 +19,7 @@ import {
   NO_CONTENT_DIV,
   NO_DEFINITION_BLOCK,
   PROSE_DESCRIPTOR,
+  SUBCLASS_NAMESPACE_SITEMAP,
   SYNTHETIC_SITEMAP,
   THREADCALL,
 } from '../../fixtures/scrape/synthetic-pages';
@@ -207,5 +211,62 @@ describe('sitemap frontier', () => {
       'spell:threadcall',
       'spell:ledger-of-small-debts',
     ]);
+  });
+
+  // F2/F7(d): the subclass pseudo-namespace's known-auxiliary-page skip.
+  describe('the subclass pseudo-namespace', () => {
+    const entries = parseSitemap(SUBCLASS_NAMESPACE_SITEMAP);
+
+    it('unions the real per-class namespaces, excluding non-subclass ones like "spell"', () => {
+      const names = inSubclassNamespaces(entries).map((entry) => pageName(entry.url));
+      expect(names).not.toContain('spell:lanternfall');
+      expect(names).toContain('fighter:champion');
+      expect(names).toContain('sorcerer:draconic-bloodline');
+    });
+
+    it('skips the GLOBAL auxiliary pages (main, spell-list) on every namespace, with a reason', () => {
+      const { included, skipped } = partitionSubclassNamespaceEntries(entries);
+      const includedNames = included.map((entry) => pageName(entry.url));
+      expect(includedNames).not.toContain('fighter:main');
+      expect(includedNames).not.toContain('fighter:spell-list');
+
+      const skippedNames = skipped.map((entry) => pageName(entry.url));
+      expect(skippedNames).toContain('fighter:main');
+      expect(skippedNames).toContain('fighter:spell-list');
+      const mainSkip = skipped.find(
+        (entry) => pageName(entry.url) === 'fighter:main',
+      );
+      expect(mainSkip?.reason).toContain('main');
+    });
+
+    it('skips the two documented PER-NAMESPACE auxiliary pages, but only in their own namespace', () => {
+      const { included, skipped } = partitionSubclassNamespaceEntries(entries);
+      const includedNames = included.map((entry) => pageName(entry.url));
+      const skippedNames = skipped.map((entry) => pageName(entry.url));
+
+      expect(skippedNames).toContain('sorcerer:metamagic');
+      expect(skippedNames).toContain('warlock:eldritch-invocations');
+      // "metamagic" is only a known auxiliary slug UNDER sorcerer — a
+      // same-named page in another namespace would not match.
+      expect(includedNames).not.toContain('sorcerer:main');
+    });
+
+    it('leaves a genuinely unknown auxiliary-shaped page QUEUED, for the parser to refuse downstream', () => {
+      const { included, skipped } = partitionSubclassNamespaceEntries(entries);
+      expect(included.map((entry) => pageName(entry.url))).toContain(
+        'fighter:unlisted-extra',
+      );
+      expect(skipped.map((entry) => pageName(entry.url))).not.toContain(
+        'fighter:unlisted-extra',
+      );
+    });
+
+    it('resolves the parent class from a subclass page name, not from anything printed on the page', () => {
+      expect(subclassParentClassFromPageName('fighter:champion')).toBe('Fighter');
+      expect(subclassParentClassFromPageName('sorcerer:draconic-bloodline')).toBe(
+        'Sorcerer',
+      );
+      expect(subclassParentClassFromPageName('spell:lanternfall')).toBe(null);
+    });
   });
 });

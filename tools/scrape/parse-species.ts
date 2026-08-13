@@ -51,17 +51,35 @@
  * ALSO prints a FOURTH pre-Traits section, `<h3>Lorwyn-Shadowmoor</h3>`, with
  * its own nested `Source:` line and two `<h4>` subsections (`In Lorwyn` / `In
  * Shadowmoor`). That section is not one of the "choose a lineage" options the
- * other three are — it reads as a whole alternate-setting variant — so
- * folding its content into "Wood Elves" (the lineage immediately before it)
- * would misattribute prose to the wrong lineage, which this module treats as
- * exactly the kind of confident fabrication `parse-feat.ts`'s file comment
- * warns against. Rather than guess a nesting rule from one ambiguous sample,
- * `readLineages` below treats EVERY heading before the Traits heading —
- * `<h3>`, `<h4>` or `<h5>` alike — as the start of its own lineage-shaped
- * section. That reads `species:elf` as five sections rather than three
- * "real" lineages plus a two-part aside, which is a less tidy shape than the
- * intuitive one, but it never claims a peer relationship between sections
- * this module cannot verify from three samples.
+ * other three are — it reads as a whole alternate-setting variant, SIX
+ * headings in total (three lineages, one setting heading, two of its own
+ * subsections) — so folding its content into "Wood Elves" (the lineage
+ * immediately before it), or worse, emitting it and its two subsections as
+ * three MORE lineage choices, would misattribute prose to the wrong lineage
+ * or fabricate choice semantics the page never printed. Either is exactly
+ * the kind of confident fabrication `parse-feat.ts`'s file comment warns
+ * against.
+ *
+ * `readLineages` below reads a POSITIVE structural signal instead of
+ * guessing: `<h4>In Lorwyn</h4>` / `<h4>In Shadowmoor</h4>` are DEEPER
+ * (`h4`) than the `<h3>Lorwyn-Shadowmoor</h3>` heading immediately before
+ * them, which is itself SHALLOWER than the `<h5>` lineage headings that
+ * came before IT — a heading that is deeper than its immediate predecessor
+ * is a subsection of it, not a peer, by ordinary document-outline reading,
+ * and a subsection is confidently NOT its own lineage choice; its prose
+ * folds into the section that opened it instead of vanishing. That leaves
+ * one open question this module still refuses to guess at: whether
+ * `Lorwyn-Shadowmoor` (a ROOT-level heading, exactly like the three real
+ * lineages, just at a shallower tag) IS a fourth lineage or the setting
+ * aside it reads as in English. Nothing in the markup answers that — tag
+ * depth alone cannot distinguish "third heading" from "different KIND of
+ * heading" — so when a page's pre-Traits ROOT headings do not all share one
+ * tag depth, `readLineages` REFUSES THE WHOLE PAGE rather than picking a
+ * reading, exactly the `species:elf` shape above. A page whose lineage
+ * headings ARE uniform in depth (the common case; no live sample turned up
+ * a page mixing tags at the root) parses cleanly, with every root heading
+ * emitted as a lineage and every deeper heading folded into its nearest
+ * root ancestor as verbatim prose.
  *
  * A DIFFERENT FOLD RULE APPLIES ONCE THE TRAITS BEGIN, ON BETTER EVIDENCE: a
  * `<h5>` heading plus `<table>` for a trait's own reference table is
@@ -147,6 +165,12 @@ function fail(reason: string): ParseResult {
 
 type Block = { readonly tag: string; readonly html: string };
 const HEADING_TAGS = new Set(['h3', 'h4', 'h5']);
+/** Shallow to deep. Used only to compare two headings' nesting, never printed raw. */
+const HEADING_RANK: ReadonlyMap<string, number> = new Map([
+  ['h3', 0],
+  ['h4', 1],
+  ['h5', 2],
+]);
 
 /**
  * One `<strong>Label.</strong> rest of the sentence…` paragraph, exactly the
@@ -166,27 +190,51 @@ function readLabelledParagraph(html: string): { label: string | null; text: stri
   return { label: null, text: toText(html) };
 }
 
+interface LineageNode {
+  readonly name: string;
+  readonly tag: string;
+  readonly rank: number;
+  /** True when nothing shallower-or-equal opened before it — see the file comment. */
+  readonly isRoot: boolean;
+  readonly descriptionParagraphs: string[];
+}
+
 /**
- * Sections before the Traits heading. See the file-level comment: every
- * heading in that zone — `<h3>`, `<h4>` or `<h5>` alike — starts its own
- * section rather than being folded into a sibling, since this module has no
- * verified rule for when two headings are "the same lineage" and refuses to
- * invent one.
+ * Sections before the Traits heading, read with the POSITIVE nesting signal
+ * the file-level comment describes: a heading DEEPER than the most recently
+ * opened still-open heading is that heading's subsection (folded into it as
+ * prose, never its own lineage); a heading at or shallower than it closes
+ * that ancestor and opens a new ROOT section instead. Only ROOT sections are
+ * lineage CANDIDATES — see below for why they still are not automatically
+ * lineages.
  */
-function readLineages(
+function readLineageNodes(
   blocks: readonly Block[],
   sourceBlocks: ReadonlySet<Block>,
-): SpeciesLineage[] {
-  const lineages: { name: string; descriptionParagraphs: string[] }[] = [];
+): LineageNode[] {
+  const nodes: LineageNode[] = [];
+  const stack: number[] = [];
   for (const block of blocks) {
     if (sourceBlocks.has(block)) {
       continue;
     }
     if (HEADING_TAGS.has(block.tag)) {
-      lineages.push({ name: toText(block.html), descriptionParagraphs: [] });
+      const rank = HEADING_RANK.get(block.tag) as number;
+      while (stack.length > 0 && (stack[stack.length - 1] as number) >= rank) {
+        stack.pop();
+      }
+      const node: LineageNode = {
+        name: toText(block.html),
+        tag: block.tag,
+        rank,
+        isRoot: stack.length === 0,
+        descriptionParagraphs: [],
+      };
+      nodes.push(node);
+      stack.push(rank);
       continue;
     }
-    const current = lineages[lineages.length - 1];
+    const current = nodes[nodes.length - 1];
     if (current === undefined) {
       // Flavour text before the first heading. Not required by this
       // module's document shape; dropped rather than guessed into a lineage
@@ -198,7 +246,46 @@ function readLineages(
       current.descriptionParagraphs.push(text);
     }
   }
-  return lineages;
+  return nodes;
+}
+
+/**
+ * Turns the pre-Traits heading tree into lineages, or a failure reason.
+ *
+ * Every ROOT heading (see `readLineageNodes`) is a lineage CANDIDATE, but
+ * tag depth alone cannot tell a real lineage-choice heading apart from a
+ * differently-shaped root section (an alternate-setting variant, printed at
+ * a shallower tag than the lineages around it — the `species:elf` shape the
+ * file comment describes) — both are equally "nothing shallower opened
+ * before this". So this function trusts root headings as lineages ONLY
+ * when EVERY root in the zone shares one tag depth: uniform depth is the
+ * positive signal that they are peers of the same kind. The moment root
+ * depths differ, the honest answer is "cannot tell", and this module
+ * refuses the whole page rather than guess which roots are real —
+ * fabricated lineages must stay impossible, not merely unlikely.
+ */
+function readLineages(
+  blocks: readonly Block[],
+  sourceBlocks: ReadonlySet<Block>,
+): SpeciesLineage[] | string {
+  const nodes = readLineageNodes(blocks, sourceBlocks);
+  const roots = nodes.filter((node) => node.isRoot);
+  if (roots.length === 0) {
+    return [];
+  }
+  const rootTags = new Set(roots.map((node) => node.tag));
+  if (rootTags.size > 1) {
+    return (
+      'pre-Traits headings open at more than one depth at the top level ' +
+      `(${[...rootTags].sort().join(', ')}) — cannot positively tell a ` +
+      'lineage-choice heading apart from a differently-shaped section (e.g. ' +
+      'an alternate-setting variant) without guessing'
+    );
+  }
+  return roots.map((node) => ({
+    name: node.name,
+    descriptionParagraphs: node.descriptionParagraphs,
+  }));
 }
 
 /**
@@ -327,10 +414,14 @@ export function parseSpeciesPage(
     );
   }
 
-  const lineages = readLineages(
+  const lineagesResult = readLineages(
     blocks.slice(0, traitsHeadingIndex),
     sourceBlockSet,
   );
+  if (typeof lineagesResult === 'string') {
+    return fail(lineagesResult);
+  }
+  const lineages = lineagesResult;
 
   const definitionBlock = blocks[traitsHeadingIndex + 1];
   const definition =

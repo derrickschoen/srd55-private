@@ -21,10 +21,18 @@ interface SyntheticFeatPageInput {
   readonly descriptor: string;
   readonly body: readonly string[];
   readonly tags: readonly string[];
+  /**
+   * Raw HTML blocks inserted verbatim after `body`'s `<p>` paragraphs — for
+   * fixtures exercising headings/tables/lists/unrecognised elements in the
+   * feat body (F1), which `body` cannot express since it always wraps each
+   * entry in `<p>…</p>`.
+   */
+  readonly extraBlocks?: readonly string[];
 }
 
 export function syntheticFeatPage(input: SyntheticFeatPageInput): string {
   const body = input.body.map((text) => `<p>${text}</p>`).join('\n');
+  const extraBlocks = (input.extraBlocks ?? []).join('\n');
   return `<html><head><title>${input.title} - Homebrew Test Wiki</title></head>
 <body>
 <div id="container">
@@ -34,6 +42,7 @@ export function syntheticFeatPage(input: SyntheticFeatPageInput): string {
 <p>Source: ${input.source}</p>
 <p><em>${input.descriptor}</em></p>
 ${body}
+${extraBlocks}
   </div>
   <div class="page-tags"><span>${input.tags
     .map((tag) => `<a href="/system:page-tags/tag/${tag}">${tag}</a>`)
@@ -181,3 +190,87 @@ export const NO_SOURCE_LINE = `<html><head><title>Nameless Draft - Homebrew Test
 /** Malformed: the page shell is missing entirely. */
 export const NO_CONTENT_DIV = `<html><head><title>Nothing Here</title></head>
 <body><p>Source: Wandering Tinker's Companion</p></body></html>`;
+
+/**
+ * F1: a General feat whose body carries a `<h4>` table-label heading, a
+ * `<table>` and a `<ul>` list in ADDITION to `<p>` benefit paragraphs —
+ * exercising the "capture headings/tables/lists as verbatim prose, in
+ * document order" fix rather than the old `<p>`-only scan, which silently
+ * dropped all three.
+ */
+export const TABLE_BEARING_FEAT = syntheticFeatPage({
+  title: 'Ledger of Contingencies',
+  source: "Wandering Tinker's Companion",
+  descriptor: 'General Feat (Prerequisite: Level 4+)',
+  body: [
+    'You gain the following benefits.',
+    '<strong>Contingency Plan.</strong> Choose one condition from the Contingency Table below.',
+  ],
+  extraBlocks: [
+    '<h4>Contingency Table</h4>',
+    '<table><tr><td>Roll</td><td>Effect</td></tr><tr><td>1</td><td>Gain Advantage on your next save</td></tr></table>',
+    '<ul><li>You cannot choose the same condition twice in a row.</li></ul>',
+  ],
+  tags: ['common', 'generalfeat'],
+});
+
+/**
+ * F1: a feat body carrying an element this module was not written to
+ * expect (a bare `<blockquote>`) — must FAIL LOUDLY naming the tag, never
+ * silently drop it the way the old `<p>`-only scan would have.
+ */
+export const UNRECOGNISED_BODY_ELEMENT = syntheticFeatPage({
+  title: 'Quietly Broken',
+  source: "Wandering Tinker's Companion",
+  descriptor: 'General Feat (Prerequisite: Level 4+)',
+  body: ['You gain the following benefits.'],
+  extraBlocks: ['<blockquote>An aside the parser was never taught to read.</blockquote>'],
+  tags: ['common', 'generalfeat'],
+});
+
+/**
+ * F3: a Dragonmark feat — Eberron setting content, out of this project's
+ * 2024 PHB scope. Must be a SKIP (`skipped: true`), not a parse failure, so
+ * a full `feat` namespace crawl can complete without `--allow-partial`.
+ */
+export const DRAGONMARK_FEAT = syntheticFeatPage({
+  title: 'Mark of Making',
+  source: "Eberron: Rising from the Last War",
+  descriptor: 'Dragonmark Feat (Prerequisite: Level 4+, Artificer or Warforged)',
+  body: [
+    'You gain the following benefits.',
+    '<strong>Siberys Shard Attunement.</strong> You can attune to one additional item.',
+  ],
+  tags: ['common', 'dragonmarkfeat'],
+});
+
+/** F3: same non-PHB-scope SKIP, for the Planar Pact category. */
+export const PLANAR_PACT_FEAT = syntheticFeatPage({
+  title: 'Bound to the Abyss',
+  source: "Wandering Tinker's Companion",
+  descriptor: 'Planar Pact Feat (Prerequisite: Level 4+)',
+  body: ['You gain the following benefits.'],
+  tags: ['common', 'planarpactfeat'],
+});
+
+/** F3: same non-PHB-scope SKIP, for the Dark Gift category. */
+export const DARK_GIFT_FEAT = syntheticFeatPage({
+  title: 'Gift of the Grave',
+  source: "Wandering Tinker's Companion",
+  descriptor: 'Dark Gift Feat',
+  body: ['You gain the following benefits.'],
+  tags: ['common', 'darkgiftfeat'],
+});
+
+/**
+ * F3: a category that is neither one of the four in-scope PHB names nor
+ * one of the three known out-of-scope names — must still fail loudly, not
+ * be swallowed by the widened "any Title Case name" descriptor regex.
+ */
+export const UNKNOWN_CATEGORY_FEAT = syntheticFeatPage({
+  title: 'Mystery Box',
+  source: "Wandering Tinker's Companion",
+  descriptor: 'Mystic Feat (Prerequisite: Level 4+)',
+  body: ['You gain the following benefits.'],
+  tags: ['common'],
+});

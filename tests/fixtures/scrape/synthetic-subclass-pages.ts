@@ -26,6 +26,8 @@ interface SyntheticSubclassPageInput {
     readonly body: readonly string[];
     /** A bare, level-less heading + table folded into THIS feature, if any. */
     readonly extraHeading?: string;
+    /** Defaults to `h3`; pass `h4`/`h5`/`h6` to exercise F6's fix. */
+    readonly extraHeadingTag?: 'h3' | 'h4' | 'h5' | 'h6';
     readonly extraTable?: string;
   }[];
   readonly tags: readonly string[];
@@ -36,10 +38,11 @@ export function syntheticSubclassPage(input: SyntheticSubclassPageInput): string
   const features = input.features
     .map((feature) => {
       const body = feature.body.map((text) => `<p>${text}</p>`).join('\n');
+      const headingTag = feature.extraHeadingTag ?? 'h3';
       const extra =
         feature.extraHeading === undefined
           ? ''
-          : `\n<h3>${feature.extraHeading}</h3>\n<table>${feature.extraTable ?? ''}</table>`;
+          : `\n<${headingTag}>${feature.extraHeading}</${headingTag}>\n<table>${feature.extraTable ?? ''}</table>`;
       return `<h3>Level ${feature.level}: ${feature.name}</h3>\n${body}${extra}`;
     })
     .join('\n');
@@ -129,6 +132,43 @@ export const TIDEBOUND_PATH = syntheticSubclassPage({
       level: 6,
       name: 'Undertow',
       body: ['As a Bonus Action, you can pull a willing creature within 30 feet of you up to 15 feet toward you.'],
+    },
+  ],
+  tags: ['subclass'],
+});
+
+/**
+ * F6: a caster subclass whose reference-table label is printed as a `<h5>`
+ * heading (common on live subclass pages) rather than the bare `<h3>`
+ * `TIDEBOUND_PATH` exercises — the old `blocksOf(['p', 'h3', 'table'])`
+ * scan was blind to `<h5>` entirely, so the heading text vanished while the
+ * table right after it still surfaced as unlabelled prose.
+ */
+export const WARDSPUN_LINEAGE = syntheticSubclassPage({
+  title: 'Wardspun Lineage',
+  source: "Wandering Tinker's Companion",
+  intro: [
+    '<em>Every Ward Remembers Its Maker</em>',
+    'A Wardspun sorcerer channels ancestral protections older than any spellbook.',
+  ],
+  features: [
+    {
+      level: 3,
+      name: 'Warding Echo',
+      body: ['You always have Shield prepared, and it does not count against the number of spells you know.'],
+    },
+    {
+      level: 3,
+      name: 'Ancestral Wards',
+      body: ['Your bloodline grants you one of the wards below, chosen when you gain this feature.'],
+      extraHeading: 'Ancestral Wards',
+      extraHeadingTag: 'h5',
+      extraTable: '<tr><td>Ward</td><td>Benefit</td></tr><tr><td>Ward of Stone</td><td>Resistance to bludgeoning damage</td></tr>',
+    },
+    {
+      level: 6,
+      name: 'Reflected Harm',
+      body: ['When you take damage from a spell, you can use your Reaction to redirect half of it back at the caster.'],
     },
   ],
   tags: ['subclass'],

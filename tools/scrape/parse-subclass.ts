@@ -42,12 +42,18 @@
  * folds anything that is NOT itself a matching heading — a bare repeated
  * subheading (`cleric:life-domain` prints a SECOND, level-less `<h3>Life
  * Domain Spells</h3>` immediately before the domain-spells `<table>`, right
- * after the leveled heading of the same name) or a table — into the MOST
- * RECENTLY opened feature's `descriptionParagraphs`, as verbatim text, rather
- * than trying to model the domain-spells table as structured per-level spell
- * grants. That is the same "prose beats fabricated structure" call
- * `parse-feat.ts` makes for benefit paragraphs, applied to a table instead of
- * a sentence.
+ * after the leveled heading of the same name), a `<h4>`/`<h5>`/`<h6>`
+ * table-label heading (common on live subclass pages — a reference table's
+ * own caption, printed as a smaller heading than the feature's own `<h3>`),
+ * or a table — into the MOST RECENTLY opened feature's
+ * `descriptionParagraphs`, as verbatim text, rather than trying to model the
+ * domain-spells table as structured per-level spell grants. That is the same
+ * "prose beats fabricated structure" call `parse-feat.ts` makes for benefit
+ * paragraphs, applied to a table instead of a sentence. Reading only `h3`
+ * here previously left `h4`/`h5`/`h6` headings invisible to `blocksOf`
+ * entirely — not folded, not refused, simply never looked at — while the
+ * `<table>` right after one still surfaced as prose with its own label
+ * silently missing.
  *
  * ---
  *
@@ -221,7 +227,7 @@ export function parseSubclassPage(
     );
   }
 
-  const blocks = blocksOf(content, ['p', 'h3', 'table']);
+  const blocks = blocksOf(content, ['p', 'h3', 'h4', 'h5', 'h6', 'table']);
   if (blocks.length === 0) {
     return fail('page content has no paragraphs or headings');
   }

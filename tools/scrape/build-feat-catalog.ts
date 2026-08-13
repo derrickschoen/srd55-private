@@ -57,6 +57,15 @@ export interface FeatBuildReport {
   readonly unfinished: { url: string; state: string; reason: string | null }[];
   readonly parseFailures: FeatBuildFailure[];
   readonly robotsSkips: { url: string; reason: string }[];
+  /**
+   * Pages that parsed FINE but named a category out of this project's 2024
+   * PHB scope (Dragonmark, Planar Pact, Dark Gift — see
+   * `parse-feat.ts`'s `OUT_OF_SCOPE_FEAT_CATEGORIES`). NOT a parse failure
+   * and NOT counted toward `partial`: excluding known-out-of-scope content
+   * is by design, not an incomplete crawl, so it must not force
+   * `--allow-partial` the way a genuine parse failure does.
+   */
+  readonly outOfScopeSkips: FeatBuildFailure[];
 }
 
 export interface FeatBuildOutput {
@@ -73,6 +82,8 @@ export interface FeatBuildInput {
   readonly pages: readonly BuiltFeatPage[];
   readonly queue: readonly QueueItem[];
   readonly parseFailures: readonly FeatBuildFailure[];
+  /** See `FeatBuildReport.outOfScopeSkips`. Defaults to none. */
+  readonly outOfScopeSkips?: readonly FeatBuildFailure[];
   readonly allowPartial: boolean;
   readonly now?: () => string;
 }
@@ -162,6 +173,7 @@ export function buildFeatDocuments(input: FeatBuildInput): FeatBuildOutput {
       unfinished,
       parseFailures: [...input.parseFailures],
       robotsSkips,
+      outOfScopeSkips: [...(input.outOfScopeSkips ?? [])],
     },
   };
 }
