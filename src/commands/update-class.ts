@@ -28,6 +28,10 @@ import type { CharacterCommandIntegrity } from './integrity';
 import type { StoredCharacterSnapshotInverse } from './stored-inverses';
 import { assertMulticlassEntryEligible } from '../rules/multiclass-prerequisite-gate';
 import { deleteSourceTreeEffects } from '../rules/source-effect-retcon';
+import {
+  ACTIVE_SOURCE_INSTANCE_STATE,
+  TOMBSTONED_SOURCE_INSTANCE_STATE,
+} from '../domain/source-instance-state';
 
 /**
  * Both rows below were declared with `unknown` fields: honest about the column
@@ -119,7 +123,7 @@ export function syncClassSourceState(
          character_id, instance_uuid, source_type,
          source_definition_id, display_name, config,
          acquired_at_character_level, state, created_at, updated_at
-       ) VALUES (?, ?, 'class', ?, ?, ?, ?, 'active', ?, ?)`,
+       ) VALUES (?, ?, 'class', ?, ?, ?, ?, ?, ?, ?)`,
       [
         characterId,
         crypto.randomUUID(),
@@ -127,6 +131,7 @@ export function syncClassSourceState(
         `${definition.name} ${level}`,
         config,
         acquiredAtCharacterLevel,
+        ACTIVE_SOURCE_INSTANCE_STATE,
         timestamp,
         timestamp,
       ],
@@ -135,12 +140,13 @@ export function syncClassSourceState(
     sourceId = source.id;
     db.exec(
       `UPDATE character_source_instances
-       SET display_name = ?, config = ?, state = 'active',
+       SET display_name = ?, config = ?, state = ?,
            updated_at = ?
        WHERE id = ?`,
       [
         `${definition.name} ${level}`,
         config,
+        ACTIVE_SOURCE_INSTANCE_STATE,
         timestamp,
         sourceId,
       ],
@@ -206,9 +212,9 @@ export function syncSubclassSources(
     const sourceId = source.id;
     db.exec(
       `UPDATE character_source_instances
-       SET state = 'tombstoned', updated_at = ?
+       SET state = ?, updated_at = ?
        WHERE id = ?`,
-      [timestamp, sourceId],
+      [TOMBSTONED_SOURCE_INSTANCE_STATE, timestamp, sourceId],
     );
     clearGeneratedFeatureEffects(db, characterId, sourceId);
     generator.generateForSource(sourceId);
@@ -246,7 +252,7 @@ export function syncSubclassSources(
          character_id, instance_uuid, source_type,
          source_definition_id, display_name, config,
          acquired_at_character_level, state, created_at, updated_at
-       ) VALUES (?, ?, 'subclass', ?, ?, ?, ?, 'active', ?, ?)`,
+       ) VALUES (?, ?, 'subclass', ?, ?, ?, ?, ?, ?, ?)`,
       [
         characterId,
         crypto.randomUUID(),
@@ -254,6 +260,7 @@ export function syncSubclassSources(
         definition.name,
         config,
         level,
+        ACTIVE_SOURCE_INSTANCE_STATE,
         timestamp,
         timestamp,
       ],
@@ -262,12 +269,13 @@ export function syncSubclassSources(
     sourceId = source.id;
     db.exec(
       `UPDATE character_source_instances
-       SET display_name = ?, config = ?, state = 'active',
+       SET display_name = ?, config = ?, state = ?,
            updated_at = ?
        WHERE id = ?`,
       [
         definition.name,
         config,
+        ACTIVE_SOURCE_INSTANCE_STATE,
         timestamp,
         sourceId,
       ],
@@ -452,9 +460,9 @@ export class UpdateClassCommand {
     for (const sourceId of sourceIds) {
       this.db.exec(
         `UPDATE character_source_instances
-         SET state = 'tombstoned', updated_at = ?
+         SET state = ?, updated_at = ?
          WHERE id = ?`,
-        [timestamp, sourceId],
+        [TOMBSTONED_SOURCE_INSTANCE_STATE, timestamp, sourceId],
       );
       this.#generator.generateForSource(sourceId);
       deleteSourceTreeEffects(this.db, sourceId);

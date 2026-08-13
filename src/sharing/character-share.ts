@@ -113,6 +113,7 @@ import {
   historicalContributionGapForInstalledSubclass,
   historicalContributionGapForPortable,
 } from '../catalog/historical-contribution-gaps';
+import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 
 /**
  * WHAT THE SHARER CHOOSES TO SEND. Every flag is OPT-IN and every default is
@@ -788,9 +789,9 @@ export function exportCharacterShare(
   }
   const allSources = db.allRaw(
     `SELECT * FROM ${SHARE_TABLES.character_source_instances}
-     WHERE character_id = ? AND state = 'active'
+     WHERE character_id = ? AND state = ?
      ORDER BY acquired_at_character_level, id`,
-    [characterId],
+    [characterId, ACTIVE_SOURCE_INSTANCE_STATE],
   );
   const classLevels = db.allRaw(
     `SELECT level.*, source.id AS source_instance_id,
@@ -801,10 +802,10 @@ export function exportCharacterShare(
        ON source.character_id = level.character_id
       AND source.source_type = 'class'
       AND source.source_definition_id = level.class_definition_id
-      AND source.state = 'active'
+      AND source.state = ?
      WHERE level.character_id = ?
      ORDER BY source.acquired_at_character_level, level.id`,
-    [characterId],
+    [ACTIVE_SOURCE_INSTANCE_STATE, characterId],
   );
 
   let nextId = 0;
@@ -1839,7 +1840,7 @@ function insertSource(
        character_id, instance_uuid, source_type, source_definition_id,
        display_name, config, acquired_at_character_level, state,
        created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       characterId,
       crypto.randomUUID(),
@@ -1848,6 +1849,7 @@ function insertSource(
       displayName,
       JSON.stringify(config),
       acquired,
+      ACTIVE_SOURCE_INSTANCE_STATE,
       now,
       now,
     ],
@@ -2495,13 +2497,14 @@ function insertCharacterShare(
              character_id, instance_uuid, source_type, source_definition_id,
              display_name, config, acquired_at_character_level, state, notes,
              created_at, updated_at
-           ) VALUES (?, ?, 'species', NULL, ?, ?, ?, 'active', ?, ?, ?)`,
+           ) VALUES (?, ?, 'species', NULL, ?, ?, ?, ?, ?, ?, ?)`,
           [
             characterId,
             crypto.randomUUID(),
             item.name ?? 'Generated species',
             JSON.stringify(item.config ?? {}),
             item.acquired,
+            ACTIVE_SOURCE_INSTANCE_STATE,
             GUIDED_SPECIES_SOURCE_MARKER,
             now,
             now,

@@ -2,6 +2,7 @@ import { sqlInteger, sqlNullableString, sqlString } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import type { OrderSource } from '../domain/read-models';
 import { jsonRecord, type JsonRecord } from './source-config';
+import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 
 export function orderSources(
   db: DatabaseContext,
@@ -15,10 +16,10 @@ export function orderSources(
        ON class.id = source.source_definition_id
      WHERE source.character_id = ?
        AND source.source_type = 'class'
-       AND source.state = 'active'
+       AND source.state = ?
        AND class.name IN ('Cleric', 'Druid')
      ORDER BY class.name, source.id`,
-    [characterId],
+    [characterId, ACTIVE_SOURCE_INSTANCE_STATE],
     (row): OrderSource => {
       const className = sqlString(row, 'class_name');
       const config = jsonRecord(sqlNullableString(row, 'config'));

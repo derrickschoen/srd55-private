@@ -12,6 +12,7 @@ import {
   spellSelectionConstraint,
   type SpellSelectionConstraint,
 } from './spell-selection-constraint';
+import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 
 export const WIZARD_SPELLBOOK_COLLECTION = 'wizard_spellbook';
 export const WIZARD_OUT_OF_BOOK_REASON =
@@ -19,7 +20,12 @@ export const WIZARD_OUT_OF_BOOK_REASON =
 
 export interface SelectionCollectionPredicate {
   readonly sql: string;
-  readonly bindings: readonly number[];
+  /**
+   * `number | string`, not `number`: since R4 the predicate binds the source
+   * state alongside the character id rather than writing `'active'` into the
+   * SQL, where a typo would compile and silently match nothing.
+   */
+  readonly bindings: readonly (number | string)[];
 }
 
 export function supportedSelectionCollection(collection: string): boolean {
@@ -55,10 +61,10 @@ export function selectionCollectionPredicate(
             AND collection_entry.state = 'active'
             AND (
               collection_entry.source_instance_id IS NULL
-              OR collection_source.state = 'active'
+              OR collection_source.state = ?
             )
         )`,
-        bindings: [characterId],
+        bindings: [characterId, ACTIVE_SOURCE_INSTANCE_STATE],
       };
   }
   throw new Error(`Unsupported selection collection '${collection}'.`);
@@ -165,10 +171,10 @@ export function refreshWizardPreparationEligibility(
      WHERE slot.character_id = ?
        AND slot.rule_key = 'wizard-prepared'
        AND slot.state IN ('active', 'kept_override')
-       AND source.state = 'active'
+       AND source.state = ?
        AND definition.content_key = '2024:class:wizard'
      ORDER BY slot.id`,
-    [characterId],
+    [characterId, ACTIVE_SOURCE_INSTANCE_STATE],
     (row) => ({
       id: sqlInteger(row, 'id'),
       fixed_spell_version_id:

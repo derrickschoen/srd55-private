@@ -22,6 +22,7 @@ import type {
   GuidedSpeciesChoiceStateResult,
   SpeciesChoiceResolution,
 } from './contracts';
+import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 
 interface GuidedSpeciesSource {
   readonly id: number;
@@ -233,10 +234,10 @@ function guidedSpeciesSource(
        ON definition.id = source.source_definition_id
      WHERE source.character_id = ?
        AND source.source_type = 'species'
-       AND source.state = 'active'
+       AND source.state = ?
        AND source.notes = ?
      ORDER BY source.id`,
-    [characterId, GUIDED_SPECIES_SOURCE_MARKER],
+    [characterId, ACTIVE_SOURCE_INSTANCE_STATE, GUIDED_SPECIES_SOURCE_MARKER],
     (row) => ({
       id: sqlInteger(row, 'id'),
       display_name: sqlString(row, 'display_name'),

@@ -17,6 +17,7 @@ import type {
   GuidedRequiredFighterChoicesState,
   GuidedWeaponMasteryOption,
 } from './equipment-choices';
+import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 
 /** The one Fighter class key every required-choice read is scoped to. */
 const FIGHTER_CLASS_CONTENT_KEY = '2024:class:fighter';
@@ -57,7 +58,7 @@ function chosenFightingStyle(
        ON fighter_source.id = source.parent_source_instance_id
       AND fighter_source.character_id = source.character_id
       AND fighter_source.source_type = 'class'
-      AND fighter_source.state = 'active'
+      AND fighter_source.state = ?
      JOIN class_definitions AS fighter_definition
        ON fighter_definition.id = fighter_source.source_definition_id
       AND fighter_definition.content_key = '2024:class:fighter'
@@ -66,12 +67,12 @@ function chosenFightingStyle(
       AND identity.content_key = definition.content_key
      WHERE source.character_id = ?
        AND source.source_type = 'feat'
-       AND source.state = 'active'
+       AND source.state = ?
        AND source.notes = 'required_fighter_choice:fighting_style'
        AND definition.category = 'fighting_style'
      ORDER BY source.id
      LIMIT 1`,
-    [characterId],
+    [ACTIVE_SOURCE_INSTANCE_STATE, characterId, ACTIVE_SOURCE_INSTANCE_STATE],
     (row) => ({
       content_key: sqlString(row, 'content_key') as ContentKey,
       name: sqlString(row, 'name'),

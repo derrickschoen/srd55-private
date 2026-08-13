@@ -1,6 +1,7 @@
 import type { DatabaseContext } from '../db/database';
 import { abilities } from '../domain/enums';
 import { asiLevelsForClassName } from './class-level-features-srd';
+import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 
 const ASI_CONTENT_KEY = '2024:feat:ability-score-improvement';
 
@@ -76,8 +77,9 @@ export function reconcileLegacyLevelFeatChoices(db: DatabaseContext): void {
          ON source.character_id = level.character_id
         AND source.source_type = 'class'
         AND source.source_definition_id = level.class_definition_id
-        AND source.state = 'active'
+        AND source.state = ?
        ORDER BY level.character_id, level.id`,
+      [ACTIVE_SOURCE_INSTANCE_STATE],
     );
 
     for (const held of heldClasses) {
@@ -118,13 +120,14 @@ export function reconcileLegacyLevelFeatChoices(db: DatabaseContext): void {
                  source_definition_id, display_name, config,
                  acquired_at_character_level, state, notes,
                  created_at, updated_at
-               ) VALUES (?, ?, 'feat', ?, ?, '{}', ?, 'active', NULL, ?, ?)`,
+               ) VALUES (?, ?, 'feat', ?, ?, '{}', ?, ?, NULL, ?, ?)`,
               [
                 Number(held.character_id),
                 crypto.randomUUID(),
                 Number(asiDefinition.id),
                 String(asiDefinition.name),
                 Math.min(20, Math.max(classLevel, totalLevel)),
+                ACTIVE_SOURCE_INSTANCE_STATE,
                 now,
                 now,
               ],

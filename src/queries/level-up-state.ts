@@ -102,6 +102,7 @@ import {
   type MulticlassPrimaryAbilityAssessment,
 } from './multiclass-primary-ability';
 import { selectableCatalogContentSql } from './selectable-catalog-content';
+import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 
 interface CharacterRow {
   readonly id: CharacterId;
@@ -1021,9 +1022,9 @@ export class LevelUpStateQuery {
          ON definition.id = source.source_definition_id
        WHERE source.character_id = ?
          AND source.source_type = 'feat'
-         AND source.state = 'active'
+         AND source.state = ?
        ORDER BY source.id`,
-      [character.id],
+      [character.id, ACTIVE_SOURCE_INSTANCE_STATE],
       (row) => ({
         feat_content_key: sqlString(row, 'content_key') as ContentKey,
         config: jsonObject(

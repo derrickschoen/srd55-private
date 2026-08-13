@@ -81,6 +81,7 @@ describe('catalog data-migration registry', () => {
         'src/grants/configured-choice-rule.ts',
         'src/grants/grant-rule.ts',
         'src/grants/source-rule-reader.ts',
+        'src/domain/source-instance-state.ts',
         'src/rules/character-level.ts',
         'src/grants/grant-rule-slot-generator.ts',
         'src/grants/grant-rule-planner.ts',
@@ -101,7 +102,18 @@ describe('catalog data-migration registry', () => {
       // honours it, so a rule that DECLARES a pending choice waits instead of
       // throwing while its config is unwritten. No lineage row changes — see
       // the registry entry for why the pin still moves.
-      checksum: 'e0cdab308225b671b03b3720bda42781591f1cb3d808f3125e59a641b7262d3c',
+      // MERGE 2026-08-13: champion (allows_pending_choice) and R4 (typed state +
+      // frozen source-instance-state module) both moved this pin; recomputed
+      // below over the MERGED frozen sources by the designed procedure.
+      // Re-pinned 2026-08-13 with the registry (R4, D226). The path list above
+      // is the half of this pin that matters most: `source-rule-reader.ts` now
+      // THROWS on a state outside the vocabulary, and R4 round 1 pinned the
+      // reader without pinning the vocabulary it reads — a freeze that a
+      // one-line edit to `enums.ts` could have walked straight through. Round 2
+      // added `src/domain/source-instance-state.ts`, a module that exists to be
+      // exactly this wide. Reconciliation's OUTPUT is unchanged in both rounds;
+      // re-pinning is D226's accepted cost, not a way around the freeze.
+      checksum: '52af2f598ab61b90647e05aa736963cb78d576631e680b481567953786b21d29',
     }]);
     expect(() =>
       validateCatalogDataMigrationRegistry(CATALOG_DATA_MIGRATIONS)

@@ -121,6 +121,40 @@ export const slotStates = [
 export type SlotState = (typeof slotStates)[number];
 
 /**
+ * The lifecycle of one taken source (`character_source_instances.state`).
+ *
+ * DECLARED IN ITS OWN MODULE AND RE-EXPORTED HERE, which is not this file's
+ * habit and is not decoration: `src/domain/source-instance-state.ts` is a
+ * frozen behavioural source of a checksum-pinned catalog data migration (D226),
+ * and freezing `enums.ts` whole would churn that pin every time an unrelated
+ * vocabulary moved. The full reasoning is in that file. Everything else about
+ * this vocabulary reads exactly as if it were declared here.
+ *
+ * TWO members, and `tombstoned` is NOT a member of any other `state`
+ * vocabulary in the schema — that is the whole point of declaring this one
+ * separately (R4, D13). `slotStates` a few lines up shares the name `state`,
+ * shares the member `active`, and shares NOTHING ELSE: a slot can be
+ * `discarded` or `kept_override`, which a source cannot be, and a source can
+ * be `tombstoned`, which a slot cannot. Merging the two would let a writer
+ * store a member on a row no reader ever counts — the silent-disable failure
+ * the slot state's own CHECK comment warns about — and constraining this
+ * column to `slotStates` would have broken class removal on its first write.
+ *
+ * `tombstoned`, not `orphaned`: a source is removed by the character's owner
+ * and its row is kept only so the rows hanging off it keep their provenance.
+ * An `orphaned` slot or grant is the OPPOSITE case — the row survives an event
+ * it did not choose, and can be revived. There is no revival from `tombstoned`;
+ * re-adding a class writes `active` back over the same row
+ * (`update-class.ts`), which is a re-take, not a reactivation.
+ */
+export {
+  ACTIVE_SOURCE_INSTANCE_STATE,
+  TOMBSTONED_SOURCE_INSTANCE_STATE,
+  sourceInstanceStates,
+  type SourceInstanceState,
+} from './source-instance-state';
+
+/**
  * Addressable Wizard spellbook acquisitions have the same preserve-on-loss
  * lifecycle as skill grants: a rule can stop applying without erasing the
  * selected spell that row remembers.

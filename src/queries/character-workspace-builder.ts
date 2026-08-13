@@ -56,6 +56,7 @@ import { characterSourceCatalogResolution } from '../catalog/recorded-source-pro
 import {
   readMulticlassPrerequisiteHouseRule,
 } from '../rules/multiclass-prerequisite-house-rule';
+import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 
 interface SlotWithOrder extends WorkspaceSlot {
   readonly sort_order: number;
@@ -661,10 +662,10 @@ export class CharacterWorkspaceBuilder {
          ON feat.id = source.source_definition_id
        WHERE source.character_id = ?
          AND source.source_type = 'feat'
-         AND source.state = 'active'
+         AND source.state = ?
          AND feat.content_key = '2024:feat:magic-initiate'
        ORDER BY source.id`,
-      [characterId],
+      [characterId, ACTIVE_SOURCE_INSTANCE_STATE],
       (row) => {
         const id = sqlInteger(row, 'id');
         const config = jsonRecord(sqlNullableString(row, 'config'));
@@ -719,9 +720,9 @@ export class CharacterWorkspaceBuilder {
        FROM character_source_instances
        WHERE character_id = ?
          AND source_type IN ('feat', 'species', 'background')
-         AND state = 'active'
+         AND state = ?
        ORDER BY source_type, display_name, id`,
-      [characterId],
+      [characterId, ACTIVE_SOURCE_INSTANCE_STATE],
       (row): RemovableSource => {
         const id = sqlInteger(row, 'id');
         return {

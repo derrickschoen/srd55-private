@@ -22,6 +22,7 @@ import {
 } from '../grants/character-level-source-reconciliation';
 import type { CharacterCommandIntegrity } from './integrity';
 import type { StoredCharacterSnapshotInverse } from './stored-inverses';
+import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 
 export type SpeciesLineageRefusalReason =
   | 'guided_species_source_missing'
@@ -131,9 +132,13 @@ export class ChooseSpeciesLineageCommand {
          LEFT JOIN species_definitions AS definition
            ON definition.id = source.source_definition_id
          WHERE source.character_id = ? AND source.notes = ?
-           AND source.state = 'active'
+           AND source.state = ?
          ORDER BY source.id`,
-        [characterId, GUIDED_SPECIES_SOURCE_MARKER],
+        [
+          characterId,
+          GUIDED_SPECIES_SOURCE_MARKER,
+          ACTIVE_SOURCE_INSTANCE_STATE,
+        ],
         (row): SpeciesChoiceSource => ({
           id: sqlInteger(row, 'id'),
           source_type: sqlString(row, 'source_type'),

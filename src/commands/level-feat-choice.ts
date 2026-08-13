@@ -42,6 +42,7 @@ import { decodeGrantJson } from '../grants/source-rule-reader';
 import { canonicalJson } from './canonical-json';
 import { appendSourceEffects } from './equipment-effects';
 import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
+import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 
 function record(value: unknown, label: string): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -230,9 +231,9 @@ function projectedCharacter(
      FROM character_source_instances csi
      JOIN feat_definitions fd ON fd.id = csi.source_definition_id
      WHERE csi.character_id = ? AND csi.source_type = 'feat'
-       AND csi.state = 'active'
+       AND csi.state = ?
      ORDER BY csi.id`,
-    [characterId],
+    [characterId, ACTIVE_SOURCE_INSTANCE_STATE],
   ).map((row) => ({
     feat_content_key: sqlString(row, 'content_key') as ContentKey,
     config: decodedRecord(sqlNullableString(row, 'config'), 'Feat source config'),
@@ -337,7 +338,7 @@ export function applyLevelFeatSelection(
        character_id, instance_uuid, source_type, source_definition_id,
        display_name, config, acquired_at_character_level, state,
        created_at, updated_at
-     ) VALUES (?, ?, 'feat', ?, ?, ?, ?, 'active', ?, ?)`,
+     ) VALUES (?, ?, 'feat', ?, ?, ?, ?, ?, ?, ?)`,
     [
       input.characterId,
       crypto.randomUUID(),
@@ -345,6 +346,7 @@ export function applyLevelFeatSelection(
       displayName,
       canonicalJson(plan.config),
       input.projectedTotalLevel,
+      ACTIVE_SOURCE_INSTANCE_STATE,
       timestamp,
       timestamp,
     ],

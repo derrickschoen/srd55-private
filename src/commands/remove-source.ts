@@ -11,6 +11,10 @@ import type {
 import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
 import type { StoredCharacterSnapshotInverse } from './stored-inverses';
 import { deleteSourceTreeEffects } from '../rules/source-effect-retcon';
+import {
+  ACTIVE_SOURCE_INSTANCE_STATE,
+  TOMBSTONED_SOURCE_INSTANCE_STATE,
+} from '../domain/source-instance-state';
 
 export class RemoveSourceCommand {
   readonly actionType = 'remove_source';
@@ -38,8 +42,12 @@ export class RemoveSourceCommand {
          FROM character_source_instances
          WHERE character_id = ? AND id = ?
            AND source_type IN ('feat', 'species', 'background')
-           AND state = 'active'`,
-        [characterId, this.payload.source_instance_id],
+           AND state = ?`,
+        [
+          characterId,
+          this.payload.source_instance_id,
+          ACTIVE_SOURCE_INSTANCE_STATE,
+        ],
         (row) => ({
           id: sqlInteger(row, 'id'),
           type: sqlString(row, 'source_type'),
@@ -56,9 +64,9 @@ export class RemoveSourceCommand {
       this.#before = this.#state.capture(characterId);
       this.db.exec(
         `UPDATE character_source_instances
-         SET state = 'tombstoned', updated_at = ?
+         SET state = ?, updated_at = ?
          WHERE id = ?`,
-        [new Date().toISOString(), sourceId],
+        [TOMBSTONED_SOURCE_INSTANCE_STATE, new Date().toISOString(), sourceId],
       );
       this.#generator.generateForSource(sourceId);
       // Removed feat effects remain archival share data, but the active-source

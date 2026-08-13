@@ -230,6 +230,52 @@ const SCHEMA_BEFORE_ASSERTED_CONTENT_KEYS = DATABASE_MIGRATIONS
   .map((entry) => entry.sql)
   .join('\n');
 
+const SOURCE_INSTANCE_STATE_INDEX = DATABASE_MIGRATIONS.findIndex(
+  (entry) => entry.id === '0047_source_instance_state',
+);
+const SCHEMA_BEFORE_SOURCE_INSTANCE_STATE = DATABASE_MIGRATIONS
+  .slice(0, SOURCE_INSTANCE_STATE_INDEX)
+  .map((entry) => entry.sql)
+  .join('\n');
+const SOURCE_INSTANCE_STATE_MIGRATION =
+  DATABASE_MIGRATIONS[SOURCE_INSTANCE_STATE_INDEX]!;
+
+/**
+ * One character, three source instances (one of them deleted so the
+ * AUTOINCREMENT high-water mark differs from the live maximum), a parent/child
+ * pair across the self-reference, and a level-feat choice pointing at a source
+ * so the BEFORE DELETE trigger has something to null.
+ */
+const SOURCE_INSTANCE_STATE_FIXTURE = `
+INSERT INTO characters (id, name) VALUES (7, 'Rebuild Survivor');
+INSERT INTO character_source_instances (
+  id, character_id, instance_uuid, parent_source_instance_id, source_type,
+  source_definition_id, display_name, config, acquired_at_character_level,
+  state, notes, created_at, updated_at
+) VALUES
+  (
+    11, 7, 'rebuild-class', NULL, 'class', 31, 'Wizard 3',
+    '{"school":"abjuration"}', 1, 'active', 'a note that must survive',
+    '2040-01-02T03:04:05.000Z', '2041-02-03T04:05:06.000Z'
+  ),
+  (
+    12, 7, 'rebuild-subclass', 11, 'subclass', 32, 'Abjurer', NULL, 3,
+    'tombstoned', NULL, NULL, NULL
+  ),
+  (
+    14, 7, 'rebuild-feat', NULL, 'feat', NULL, 'Chosen Feat', NULL, 4,
+    'active', NULL, NULL, NULL
+  ),
+  (
+    99, 7, 'rebuild-deleted', NULL, 'feat', NULL, 'Deleted Feat', NULL, NULL,
+    'active', NULL, NULL, NULL
+  );
+DELETE FROM character_source_instances WHERE id = 99;
+INSERT INTO character_level_feat_choices (
+  id, character_id, character_class_level_id, class_level, choice_kind,
+  feat_source_instance_id
+) VALUES (5, 7, 500, 4, 'asi_level_feat', 14);`;
+
 const ASSERTED_CONTENT_KEYS_MIGRATION_COUNT =
   DATABASE_MIGRATIONS.findIndex(
     (entry) => entry.id === '0033_asserted_content_keys',
@@ -3345,6 +3391,187 @@ describe('database migration chain', () => {
     ).toBe(1);
     lifecycle.close();
   }, 6900);
+
+  /**
+   * 0047 IS A TABLE REBUILD, AND THE THINGS A REBUILD LOSES ARE WHAT THESE
+   * ASSERT. `DROP TABLE` takes the three indexes AND the BEFORE DELETE trigger
+   * with it, and re-creating the row set is where a column can silently swap
+   * places. The lane's first draft did lose the trigger; only the exact-schema
+   * signature check caught it, so it is now also asserted behaviourally here.
+   */
+  it('0047 rebuilds character_source_instances without losing a row, the high-water mark, the self-reference or the trigger', () => {
+    const db = new sqlite3.oo1.DB(':memory:', 'c');
+    try {
+      db.exec(SCHEMA_BEFORE_SOURCE_INSTANCE_STATE);
+      // AFTER the chain, not before: every rebuild migration ends with
+      // `PRAGMA foreign_keys=ON`, so a pragma set first would be undone.
+      db.exec('PRAGMA foreign_keys = OFF');
+      db.exec(SOURCE_INSTANCE_STATE_FIXTURE);
+      expect(db.selectValue('SELECT max(id) FROM character_source_instances'))
+        .toBe(14);
+      expect(
+        db.selectValue(
+          `SELECT seq FROM sqlite_sequence
+           WHERE name = 'character_source_instances'`,
+        ),
+      ).toBe(99);
+
+      db.exec(SOURCE_INSTANCE_STATE_MIGRATION.sql);
+
+      expect(
+        db.selectObjects(
+          `SELECT id, character_id, instance_uuid, parent_source_instance_id,
+                  source_type, source_definition_id, display_name, config,
+                  acquired_at_character_level, state, notes, created_at,
+                  updated_at
+           FROM character_source_instances ORDER BY id`,
+        ),
+      ).toEqual([
+        {
+          id: 11,
+          character_id: 7,
+          instance_uuid: 'rebuild-class',
+          parent_source_instance_id: null,
+          source_type: 'class',
+          source_definition_id: 31,
+          display_name: 'Wizard 3',
+          config: '{"school":"abjuration"}',
+          acquired_at_character_level: 1,
+          state: 'active',
+          notes: 'a note that must survive',
+          created_at: '2040-01-02T03:04:05.000Z',
+          updated_at: '2041-02-03T04:05:06.000Z',
+        },
+        {
+          id: 12,
+          character_id: 7,
+          instance_uuid: 'rebuild-subclass',
+          parent_source_instance_id: 11,
+          source_type: 'subclass',
+          source_definition_id: 32,
+          display_name: 'Abjurer',
+          config: null,
+          acquired_at_character_level: 3,
+          state: 'tombstoned',
+          notes: null,
+          created_at: null,
+          updated_at: null,
+        },
+        {
+          id: 14,
+          character_id: 7,
+          instance_uuid: 'rebuild-feat',
+          parent_source_instance_id: null,
+          source_type: 'feat',
+          source_definition_id: null,
+          display_name: 'Chosen Feat',
+          config: null,
+          acquired_at_character_level: 4,
+          state: 'active',
+          notes: null,
+          created_at: null,
+          updated_at: null,
+        },
+      ]);
+      // A rebuild that reseeded AUTOINCREMENT would hand out an id the deleted
+      // row already used, and save-point reservation depends on it not doing so.
+      expect(
+        db.selectValue(
+          `SELECT seq FROM sqlite_sequence
+           WHERE name = 'character_source_instances'`,
+        ),
+      ).toBe(99);
+      expect(
+        db.selectValues(
+          `SELECT name FROM sqlite_schema
+           WHERE tbl_name = 'character_source_instances'
+             AND type IN ('index', 'trigger')
+             AND name NOT LIKE 'sqlite_%'
+           ORDER BY name`,
+        ),
+      ).toEqual([
+        'character_source_instances_character_id_state_index',
+        'character_source_instances_id_character_id_unique',
+        'character_source_instances_instance_uuid_unique',
+        'character_sources_clear_level_feat_choices_before_delete',
+      ]);
+
+      // Both survivors of the rebuild, EXECUTED rather than read out of the
+      // DDL. The self-reference first, with enforcement on: deleting the class
+      // orphans its subclass rather than removing it (the schema's only
+      // ON DELETE SET NULL).
+      db.exec('PRAGMA foreign_keys = ON');
+      db.exec('DELETE FROM character_source_instances WHERE id = 11');
+      expect(
+        db.selectValue(
+          `SELECT parent_source_instance_id FROM character_source_instances
+           WHERE id = 12`,
+        ),
+      ).toBeNull();
+      // Then the trigger. Enforcement is off for this one because the fixture's
+      // level-feat choice deliberately points at no real class-level row, and
+      // the trigger's UPDATE would re-check that unrelated reference.
+      db.exec('PRAGMA foreign_keys = OFF');
+      db.exec('DELETE FROM character_source_instances WHERE id = 14');
+      expect(
+        db.selectValue(
+          `SELECT feat_source_instance_id FROM character_level_feat_choices
+           WHERE id = 5`,
+        ),
+      ).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  /**
+   * THE DATA AUDIT, AND ITS FAILURE IS THE CORRECT OUTCOME.
+   *
+   * No shipped writer produces a third state — that is what put the CHECK in
+   * 0047 — but the migration must not be trusted to be gentle if one exists.
+   * The copy aborts, named, before the old table is dropped; the surrounding
+   * BEGIN EXCLUSIVE (which `applyMigrationSuffix` opens in production) then
+   * restores the exact source image, third value and all.
+   */
+  it('0047 aborts loudly on a state outside the vocabulary and leaves the image intact', () => {
+    const db = new sqlite3.oo1.DB(':memory:', 'c');
+    try {
+      db.exec(SCHEMA_BEFORE_SOURCE_INSTANCE_STATE);
+      db.exec('PRAGMA foreign_keys = OFF');
+      db.exec(SOURCE_INSTANCE_STATE_FIXTURE);
+      // A DELIBERATE INVALID WRITE, and the only kind of row allowed to hold a
+      // third state anywhere: no application writer produces one — that is the
+      // finding 0047 rests on — so proving the CHECK can refuse one means
+      // manufacturing it here. It lives and dies inside this test's own
+      // database and reaches no document. The pre-0047 column really does
+      // accept it, which is why the audit was needed rather than assumed.
+      db.exec(
+        `INSERT INTO character_source_instances (
+           id, character_id, instance_uuid, source_type, display_name, state
+         ) VALUES (15, 7, 'rebuild-strange', 'feat', 'Strange', 'kept_override')`,
+      );
+
+      db.exec('BEGIN EXCLUSIVE');
+      expect(() => {
+        db.exec(SOURCE_INSTANCE_STATE_MIGRATION.sql);
+      }).toThrow(/character_source_instances_state_check/);
+      db.exec('ROLLBACK');
+
+      expect(
+        db.selectValues(
+          'SELECT state FROM character_source_instances ORDER BY id',
+        ),
+      ).toEqual(['active', 'tombstoned', 'active', 'kept_override']);
+      expect(
+        db.selectValue(
+          `SELECT count(*) FROM sqlite_schema
+           WHERE name = 'r4_character_source_instances'`,
+        ),
+      ).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
 
   it('rejects a checksum mismatch before touching the image', () => {
     const shipped = DATABASE_MIGRATIONS[0]!;

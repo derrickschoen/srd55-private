@@ -27,6 +27,7 @@ import {
   asiLevelsForClassName,
   epicBoonLevelsForClassName,
 } from '../rules/class-level-features-srd';
+import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 
 interface HeldClassPlan {
   readonly level: number;
@@ -223,17 +224,22 @@ export class LevelUpPlannedEligibleSpells {
          ON class_source.character_id = level.character_id
         AND class_source.source_type = 'class'
         AND class_source.source_definition_id = level.class_definition_id
-        AND class_source.state = 'active'
+        AND class_source.state = ?
        LEFT JOIN character_source_instances AS subclass_source
          ON subclass_source.character_id = level.character_id
         AND subclass_source.source_type = 'subclass'
         AND subclass_source.source_definition_id =
             level.subclass_definition_id
-        AND subclass_source.state = 'active'
+        AND subclass_source.state = ?
        LEFT JOIN subclass_definitions AS subclass
          ON subclass.id = level.subclass_definition_id
        WHERE level.character_id = ? AND level.class_definition_id = ?`,
-      [params.character_id, params.class_definition_id],
+      [
+        ACTIVE_SOURCE_INSTANCE_STATE,
+        ACTIVE_SOURCE_INSTANCE_STATE,
+        params.character_id,
+        params.class_definition_id,
+      ],
       heldClassPlan,
     );
     if (

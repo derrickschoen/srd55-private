@@ -33,6 +33,7 @@ import {
   LevelUpPlannedEligibleSpells,
   type LevelUpPlannedSpellPlanParams,
 } from './level-up-planned-eligible-spells';
+import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 
 export interface LevelUpPlannedChoiceContext
   extends LevelUpPlannedSpellPlanParams {
@@ -353,8 +354,8 @@ export class LevelUpPlannedChoicesQuery {
          ON identity.content_kind = 'class'
         AND identity.content_key = definition.content_key
        WHERE source.character_id = ? AND source.source_type = 'class'
-         AND source.source_definition_id = ? AND source.state = 'active'`,
-      [characterId, classDefinitionId],
+         AND source.source_definition_id = ? AND source.state = ?`,
+      [characterId, classDefinitionId, ACTIVE_SOURCE_INSTANCE_STATE],
       (row) => ({
         id: sqlInteger(row, 'id') as SourceInstanceId,
         label: sqlString(row, 'display_name'),
@@ -376,8 +377,12 @@ export class LevelUpPlannedChoicesQuery {
        JOIN subclass_definitions AS definition
          ON definition.id = source.source_definition_id
        WHERE source.character_id = ? AND source.source_type = 'subclass'
-         AND source.state = 'active' AND definition.content_key = ?`,
-      [context.character_id, context.subclass_content_key],
+         AND source.state = ? AND definition.content_key = ?`,
+      [
+        context.character_id,
+        ACTIVE_SOURCE_INSTANCE_STATE,
+        context.subclass_content_key,
+      ],
     );
     return id === null ? null : Number(id) as SourceInstanceId;
   }
@@ -393,14 +398,14 @@ export class LevelUpPlannedChoicesQuery {
          ON source.character_id = level.character_id
         AND source.source_type = 'subclass'
         AND source.source_definition_id = level.subclass_definition_id
-        AND source.state = 'active'
+        AND source.state = ?
        JOIN subclass_definitions AS definition
          ON definition.id = source.source_definition_id
        LEFT JOIN catalog_content_identities AS identity
          ON identity.content_kind = 'subclass'
         AND identity.content_key = definition.content_key
        WHERE level.character_id = ? AND level.class_definition_id = ?`,
-      [characterId, classDefinitionId],
+      [ACTIVE_SOURCE_INSTANCE_STATE, characterId, classDefinitionId],
       (row) => ({
         id: sqlInteger(row, 'id') as SourceInstanceId,
         label: sqlString(row, 'display_name'),
@@ -432,11 +437,16 @@ export class LevelUpPlannedChoicesQuery {
         AND identity.content_key = COALESCE(
               feat.content_key, species.content_key, background.content_key
             )
-       WHERE source.character_id = ? AND source.state = 'active'
+       WHERE source.character_id = ? AND source.state = ?
          AND (? IS NULL OR source.id <> ?)
          AND source.source_type NOT IN ('class', 'subclass')
        ORDER BY source.id`,
-      [characterId, selectedClassSourceId, selectedClassSourceId],
+      [
+        characterId,
+        ACTIVE_SOURCE_INSTANCE_STATE,
+        selectedClassSourceId,
+        selectedClassSourceId,
+      ],
       (row) => ({
         id: sqlInteger(row, 'id') as SourceInstanceId,
         label: sqlString(row, 'display_name'),

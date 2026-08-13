@@ -149,6 +149,7 @@ import {
   type GuidedSkillsStepState,
   type OriginKind,
 } from './contracts';
+import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 
 /**
  * Per-character UI state, stored through the same character_rule_overrides
@@ -399,11 +400,11 @@ export function resolveEquipmentClassSource(
   }
   const instanceId = db.scalar(
     `SELECT id FROM character_source_instances
-     WHERE character_id = ? AND source_type = 'class' AND state = 'active'
+     WHERE character_id = ? AND source_type = 'class' AND state = ?
        AND source_definition_id = ?
      ORDER BY id
      LIMIT 1`,
-    [characterId, definition.definition_id],
+    [characterId, ACTIVE_SOURCE_INSTANCE_STATE, definition.definition_id],
   );
   return {
     content_key: definition.content_key,
@@ -441,10 +442,10 @@ export function resolveEquipmentBackgroundSource(
      WHERE source.character_id = ?
        AND source.source_type = 'background'
        AND source.parent_source_instance_id IS NULL
-       AND source.state = 'active'
+       AND source.state = ?
      ORDER BY source.id
      LIMIT 1`,
-    [characterId],
+    [characterId, ACTIVE_SOURCE_INSTANCE_STATE],
     (row) => ({
       instance_id: sqlInteger(row, 'instance_id'),
       content_key: sqlString(row, 'content_key'),
@@ -594,7 +595,7 @@ export function readGuidedStepEvidence(
              INNER JOIN character_source_instances AS source
                ON source.id = slot.source_instance_id
               AND source.character_id = slot.character_id
-             WHERE slot.character_id = ? AND source.state = 'active'
+             WHERE slot.character_id = ? AND source.state = ?
                AND slot.state = 'active' AND slot.is_locked = 0
                AND slot.fixed_spell_version_id IS NULL
                AND slot.current_spell_version_id IS NULL
@@ -603,10 +604,15 @@ export function readGuidedStepEvidence(
              INNER JOIN character_source_instances AS source
                ON source.id = entry.source_instance_id
               AND source.character_id = entry.character_id
-             WHERE entry.character_id = ? AND source.state = 'active'
+             WHERE entry.character_id = ? AND source.state = ?
                AND entry.state = 'active' AND entry.spell_version_id IS NULL
            )`,
-          [characterId, characterId],
+          [
+            characterId,
+            ACTIVE_SOURCE_INSTANCE_STATE,
+            characterId,
+            ACTIVE_SOURCE_INSTANCE_STATE,
+          ],
         ) ?? 0,
       ) === 0,
     equipmentChosen:
@@ -1461,7 +1467,7 @@ function replaceGuidedLineageGrants(
        character_id, instance_uuid, source_type, source_definition_id,
        display_name, config, acquired_at_character_level, state, notes,
        created_at, updated_at
-     ) VALUES (?, ?, 'species', ?, ?, ?, 1, 'active', ?, ?, ?)`,
+     ) VALUES (?, ?, 'species', ?, ?, ?, 1, ?, ?, ?, ?)`,
     [
       characterId,
       crypto.randomUUID(),
@@ -1470,6 +1476,7 @@ function replaceGuidedLineageGrants(
       JSON.stringify({
         source_content_key: template.content_key,
       }),
+      ACTIVE_SOURCE_INSTANCE_STATE,
       GUIDED_SPECIES_SOURCE_MARKER,
       timestamp,
       timestamp,
@@ -1811,13 +1818,14 @@ export function applyGuidedBackgroundChoices(
          character_id, instance_uuid, source_type, source_definition_id,
          display_name, config, acquired_at_character_level, state, notes,
          created_at, updated_at
-       ) VALUES (?, ?, 'background', ?, ?, ?, 1, 'active', ?, ?, ?)`,
+       ) VALUES (?, ?, 'background', ?, ?, ?, 1, ?, ?, ?, ?)`,
       [
         characterId,
         crypto.randomUUID(),
         definitionId,
         template.name,
         JSON.stringify(config),
+        ACTIVE_SOURCE_INSTANCE_STATE,
         GUIDED_BACKGROUND_SOURCE_MARKER,
         timestamp,
         timestamp,
@@ -2145,9 +2153,9 @@ export function guidedSkillsStepState(
   const reader = new SourceRuleReader(db);
   const activeSourceIds = db.all(
     `SELECT id FROM character_source_instances
-     WHERE character_id = ? AND state = 'active'
+     WHERE character_id = ? AND state = ?
      ORDER BY id`,
-    [characterId],
+    [characterId, ACTIVE_SOURCE_INSTANCE_STATE],
     rowId,
   );
   const unmodelledToolAlternativeSources: Array<
@@ -2301,11 +2309,11 @@ export function guidedSpellsStepState(
      LEFT JOIN catalog_content_identities AS identity
        ON identity.content_kind = 'spell'
       AND identity.content_key = selected.content_key
-     WHERE slot.character_id = ? AND source.state = 'active'
+     WHERE slot.character_id = ? AND source.state = ?
        AND slot.state = 'active' AND slot.is_locked = 0
        AND slot.fixed_spell_version_id IS NULL
      ORDER BY source.id, slot.sort_order, slot.ordinal`,
-    [characterId],
+    [characterId, ACTIVE_SOURCE_INSTANCE_STATE],
     (row) => ({
       id: sqlInteger(row, 'id'),
       sourceInstanceId: sqlInteger(row, 'source_instance_id'),
@@ -2369,10 +2377,10 @@ export function guidedSpellsStepState(
      LEFT JOIN catalog_content_identities AS identity
        ON identity.content_kind = 'spell'
       AND identity.content_key = selected.content_key
-     WHERE entry.character_id = ? AND source.state = 'active'
+     WHERE entry.character_id = ? AND source.state = ?
        AND entry.state = 'active'
      ORDER BY source.id, entry.ordinal`,
-    [characterId],
+    [characterId, ACTIVE_SOURCE_INSTANCE_STATE],
     (row) => ({
       id: sqlInteger(row, 'id'),
       sourceInstanceId: sqlInteger(row, 'source_instance_id'),

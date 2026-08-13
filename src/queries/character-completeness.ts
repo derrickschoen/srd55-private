@@ -21,6 +21,7 @@ import {
   catalogLayerDisclosure,
   type CatalogLayerDisclosure,
 } from '../catalog/catalog-disclosure';
+import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 
 export interface UnfilledChoicesItem {
   readonly kind: 'unfilled_choices';
@@ -436,13 +437,13 @@ function reportableSlots(context: CheckContext): ReportableSlot[] {
             AND source.character_id = slot.character_id
      WHERE slot.character_id = ?
        AND slot.state = 'active'
-       AND source.state = 'active'
+       AND source.state = ?
        AND slot.required = 1
        AND slot.is_locked = 0
        AND slot.bucket <> 'automatic'
        AND slot.selection_collection IS NULL
      ORDER BY source.display_name, slot.rule_key, slot.bucket, slot.id`,
-    [context.characterId],
+    [context.characterId, ACTIVE_SOURCE_INSTANCE_STATE],
     (row): ReportableSlot | null => {
       const constraint = slotConstraint(row);
       const filled =
@@ -1051,10 +1052,10 @@ export const wizardSpellbookIntegrity: CompletenessCheck = {
         AND source_catalog.content_key = definition.content_key
        WHERE entry.character_id = ?
          AND entry.state = 'active'
-         AND source.state = 'active'
+         AND source.state = ?
          AND definition.content_key = '2024:class:wizard'
        ORDER BY source.id, entry.ordinal, entry.id`,
-      [context.characterId],
+      [context.characterId, ACTIVE_SOURCE_INSTANCE_STATE],
       (row) => ({
         id: sqlInteger(row, 'id'),
         source_instance_id: sqlInteger(row, 'source_instance_id'),
@@ -1125,7 +1126,7 @@ export const wizardSpellbookIntegrity: CompletenessCheck = {
          ON spell_catalog.content_kind = 'spell'
         AND spell_catalog.content_key = selected.content_key
        WHERE slot.character_id = ?
-         AND source.state = 'active'
+         AND source.state = ?
          AND slot.state IN ('active', 'kept_override')
          AND slot.rule_key = 'wizard-prepared'
          AND definition.content_key = '2024:class:wizard'
@@ -1140,11 +1141,15 @@ export const wizardSpellbookIntegrity: CompletenessCheck = {
              AND entry.state = 'active'
              AND (
                entry.source_instance_id IS NULL
-               OR book_source.state = 'active'
+               OR book_source.state = ?
              )
          )
        ORDER BY source.display_name, slot.id`,
-      [context.characterId],
+      [
+        context.characterId,
+        ACTIVE_SOURCE_INSTANCE_STATE,
+        ACTIVE_SOURCE_INSTANCE_STATE,
+      ],
       (row): WizardPreparationOutOfBookItem => {
         const sourceName = sqlString(row, 'source_name');
         const spellName = sqlString(row, 'spell_name');

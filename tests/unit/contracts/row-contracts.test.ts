@@ -460,6 +460,39 @@ describe('per-table row contracts', () => {
     );
   });
 
+  /**
+   * R4 / D235's read side. This contract typed `state` as free text until the
+   * column's vocabulary was declared, because inventing a constraint the schema
+   * does not declare is the over-tightening D6b forbids. The schema declares one
+   * now (migration 0047), so the contract enforces exactly it — no wider, which
+   * would let a row through that the column itself refuses, and no narrower,
+   * which is how a contract makes a user's own backup unrestorable (D8).
+   */
+  it('refuses a source state outside the declared vocabulary and accepts both members', () => {
+    for (const state of ['active', 'tombstoned']) {
+      expect(
+        rowContractError(
+          'character_source_instances',
+          { ...sourceRow(), state },
+          label,
+        ),
+        state,
+      ).toBeNull();
+    }
+    // A typo, then two members of NEIGHBOURING `state` columns — legal three
+    // tables away, meaningless here.
+    for (const state of ['tombstoend', 'kept_override', 'orphaned', '']) {
+      expect(
+        rowContractError(
+          'character_source_instances',
+          { ...sourceRow(), state },
+          label,
+        ),
+        state,
+      ).toContain(`${label}.state:`);
+    }
+  });
+
   it('refuses the retired coin equipment kind at the command-side seed contract', () => {
     const equipmentLabel = 'Bundled background_equipment_items row';
     expect(

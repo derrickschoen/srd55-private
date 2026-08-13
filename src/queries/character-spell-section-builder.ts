@@ -29,6 +29,7 @@ import type {
   SpellLevel,
   SpellVersionId,
 } from '../domain/ids';
+import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 
 export type SheetSpellMarker = 'prepared' | 'known';
 
@@ -584,7 +585,7 @@ export class CharacterSpellSectionBuilder {
        INNER JOIN character_source_instances AS source
          ON source.id = entry.source_instance_id
         AND source.character_id = entry.character_id
-        AND source.state = 'active'
+        AND source.state = ?
        INNER JOIN spell_versions AS version
          ON version.id = entry.spell_version_id
         AND version.is_active = 1
@@ -592,7 +593,7 @@ export class CharacterSpellSectionBuilder {
          AND entry.state = 'active'
          AND entry.spell_version_id IS NOT NULL
        ORDER BY entry.id`,
-      [characterId],
+      [ACTIVE_SOURCE_INSTANCE_STATE, characterId],
       decodeSpellbookAcquisition,
     );
   }

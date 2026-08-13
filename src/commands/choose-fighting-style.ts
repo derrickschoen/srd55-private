@@ -17,6 +17,7 @@ import { sqlInteger } from '../db/codecs';
 import type { StoredCharacterSnapshotInverse } from './stored-inverses';
 import type { CharacterCommandIntegrity } from './integrity';
 import { applyLevelFeatSelection } from './level-feat-choice';
+import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 
 /**
  * Records a Fighter's required Fighting Style as the real feat source.
@@ -89,11 +90,11 @@ export class ChooseFightingStyleCommand {
            ON definition.id = source.source_definition_id
          WHERE source.character_id = ?
            AND source.source_type = 'class'
-           AND source.state = 'active'
+           AND source.state = ?
            AND definition.content_key = '2024:class:fighter'
          ORDER BY source.id
          LIMIT 1`,
-        [characterId],
+        [characterId, ACTIVE_SOURCE_INSTANCE_STATE],
         (row) => ({
           source_instance_id: sqlInteger(row, 'source_instance_id'),
           class_definition_id: sqlInteger(row, 'class_definition_id'),

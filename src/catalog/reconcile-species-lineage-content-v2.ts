@@ -15,6 +15,7 @@ import {
   projectStoredSpeciesContentV2,
   storedAuthoredRegistryReferencesV1,
 } from './stored-authored-content-projector-v1';
+import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 
 const LINEAGE_KEYS = new Set([
   '2024:species:elf',
@@ -70,12 +71,12 @@ export function reconcileSpeciesLineageContentV2(db: DatabaseContext): void {
      FROM character_source_instances AS source
      JOIN species_definitions AS definition
        ON definition.id = source.source_definition_id
-     WHERE source.source_type = 'species' AND source.state = 'active'
+     WHERE source.source_type = 'species' AND source.state = ?
        AND definition.content_key IN (
          '2024:species:elf', '2024:species:gnome', '2024:species:tiefling'
        )
      ORDER BY source.id`,
-    [],
+    [ACTIVE_SOURCE_INSTANCE_STATE],
     (row) => ({
       id: sqlInteger(row, 'id'),
       contentKey: sqlString(row, 'content_key'),

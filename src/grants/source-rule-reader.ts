@@ -12,6 +12,15 @@ import {
   isEnumValue,
   type DomainSourceType,
 } from '../domain/enums';
+// DIRECT, not through the `enums.ts` re-export, and D226 is the reason: this
+// module is a frozen behavioural source of `reconcile_species_lineage_content_v2`,
+// and the decode below THROWS on a non-member, so the vocabulary is inside that
+// migration's behaviour and has to be inside its checksum. Naming the frozen
+// module keeps the dependency legible to whoever next reads the pin.
+import {
+  sourceInstanceStates,
+  type SourceInstanceState,
+} from '../domain/source-instance-state';
 import { GrantRule } from './grant-rule';
 import {
   ConfiguredChoiceRule,
@@ -48,7 +57,7 @@ export interface GrantSourceInstance {
   readonly displayName: string;
   readonly config: string | null;
   readonly acquiredAtCharacterLevel: number | null;
-  readonly state: string;
+  readonly state: SourceInstanceState;
   readonly notes: string | null;
 }
 
@@ -72,9 +81,25 @@ function decodeSource(row: SqlRow): GrantSourceInstance {
       row,
       'acquired_at_character_level',
     ),
-    state: sqlString(row, 'state'),
+    state: requiredSourceInstanceState(row),
     notes: sqlNullableString(row, 'notes'),
   };
+}
+
+/**
+ * D235's read side for `character_source_instances.state`.
+ *
+ * This decode is the ONE place the generator's `state !== 'active'` and
+ * `state !== 'tombstoned'` gates get their type from, so a row carrying a third
+ * value stops here loudly instead of silently taking the `!== 'active'` branch
+ * and deactivating a live source's whole tree.
+ */
+function requiredSourceInstanceState(row: SqlRow): SourceInstanceState {
+  const state = sqlString(row, 'state');
+  if (!isEnumValue(sourceInstanceStates, state)) {
+    throw new Error(`Unknown source instance state '${state}'.`);
+  }
+  return state;
 }
 
 function isContainer(value: unknown): value is JsonContainer {

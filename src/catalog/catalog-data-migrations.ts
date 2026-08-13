@@ -16,6 +16,7 @@ import lineageSeedSource from '../rules/origin-definitions-srd.ts?raw';
 import configuredChoiceSource from '../grants/configured-choice-rule.ts?raw';
 import grantRuleSource from '../grants/grant-rule.ts?raw';
 import sourceRuleReaderSource from '../grants/source-rule-reader.ts?raw';
+import sourceInstanceStateSource from '../domain/source-instance-state.ts?raw';
 import characterLevelSource from '../rules/character-level.ts?raw';
 import slotGeneratorSource from '../grants/grant-rule-slot-generator.ts?raw';
 import grantPlannerSource from '../grants/grant-rule-planner.ts?raw';
@@ -110,6 +111,14 @@ export const CATALOG_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
           path: 'src/grants/source-rule-reader.ts',
           bytes: sourceRuleReaderSource,
         }),
+        // D226 round 2: `source-rule-reader.ts`'s decode THROWS on a state
+        // outside this array, so the array decides whether reconciliation
+        // accepts a row or aborts. It is a module of its own precisely so this
+        // pin covers one vocabulary rather than every vocabulary in `enums.ts`.
+        Object.freeze({
+          path: 'src/domain/source-instance-state.ts',
+          bytes: sourceInstanceStateSource,
+        }),
         Object.freeze({
           path: 'src/rules/character-level.ts',
           bytes: characterLevelSource,
@@ -171,8 +180,22 @@ export const CATALOG_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
       // SOURCE, not the subset of it a migration happens to exercise — a
       // freeze covering only the exercised subset would be a claim broader
       // than the freeze.
+      // MERGE 2026-08-13: champion (allows_pending_choice) and R4 (typed state +
+      // frozen source-instance-state module) both moved this pin; recomputed
+      // below over the MERGED frozen sources by the designed procedure.
+      // Re-pinned 2026-08-13 (R4, D226), twice in one lane and the second time
+      // is the interesting one. Round 1: `src/grants/source-rule-reader.ts` — a
+      // frozen source — gained a throwing decode for
+      // `character_source_instances.state`, narrowing `GrantSourceInstance.state`
+      // to `SourceInstanceState`. Round 2: codex found that freeze INCOMPLETE,
+      // and correctly — the decode's behaviour now depends on the vocabulary
+      // array, which lived in `enums.ts` and was not pinned, so editing the
+      // enum could change what this migration accepts without moving this
+      // checksum. `src/domain/source-instance-state.ts` above is the remedy and
+      // exists for it. No reconciled row changes in either round: every source
+      // instance this walks holds `active` or `tombstoned`.
       checksum:
-        'e0cdab308225b671b03b3720bda42781591f1cb3d808f3125e59a641b7262d3c',
+        '52af2f598ab61b90647e05aa736963cb78d576631e680b481567953786b21d29',
       run: reconcileSpeciesLineageContentV2,
     }),
   ]);

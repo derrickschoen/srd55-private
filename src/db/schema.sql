@@ -747,7 +747,8 @@ CREATE TABLE `character_source_instances` (
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
 	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`parent_source_instance_id`) REFERENCES `character_source_instances`(`id`) ON UPDATE no action ON DELETE set null
+	FOREIGN KEY (`parent_source_instance_id`) REFERENCES `character_source_instances`(`id`) ON UPDATE no action ON DELETE set null,
+	CONSTRAINT "character_source_instances_state_check" CHECK(`state` IN ('active', 'tombstoned'))
 );
 
 CREATE UNIQUE INDEX `character_source_instances_instance_uuid_unique` ON `character_source_instances` (`instance_uuid`);
