@@ -4,6 +4,8 @@ import { applicationSeed } from '../../../src/db/bootstrap';
 import { DatabaseContext } from '../../../src/db/database';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { UpdateClassCommand } from '../../../src/commands/update-class';
+import { LevelUpClassCommand } from '../../../src/commands/level-up-class';
+import { GrantRuleSlotGenerator } from '../../../src/grants/grant-rule-slot-generator';
 import { ChooseFightingStyleCommand } from '../../../src/commands/choose-fighting-style';
 import { guidedRequiredFighterChoicesState } from '../../../src/builder/required-fighter-choices';
 import { CharacterCompletenessQueries } from '../../../src/queries/character-completeness';
@@ -271,6 +273,125 @@ describe('Champion level 7 additional Fighting Style', () => {
     expect(() => chooseStyle(baseKey)).toThrow(
       /not available for this subclass/u,
     );
+  });
+
+  /**
+   * CHAMP-L7-LEVELUP — the production path, through the real command.
+   *
+   * The rule becomes ACTIVE the instant Fighter 6 becomes Fighter 7, and the
+   * config naming the chosen feat cannot possibly be written yet.
+   * `level_up_class` reconciles the subclass source inside its own
+   * transaction, so a generator that treated the unwritten config as a fault
+   * took the whole level-up down with it — the level-up refusing to happen
+   * because a choice it grants has not been made.
+   *
+   * The fixture-path tests above cannot catch this: `raiseClassLevelForTest`
+   * writes the level row and regenerates only the CLASS source, never the
+   * subclass one. This test takes no fixture shortcut across that boundary.
+   */
+  it('survives a real Fighter 6 → 7 level-up with the choice outstanding (CHAMP-L7-LEVELUP)', () => {
+    fighterWithSubclass(subclassId('2024:subclass:champion'), 6);
+    recordBaseStyle();
+    expect(fighterState().additional_fighting_style).toEqual({
+      state: 'not_entitled',
+    });
+
+    new LevelUpClassCommand(
+      db,
+      {
+        type: 'level_up_class',
+        class_definition_id: classId('Fighter'),
+        target_level: 7,
+      },
+      integrity,
+    ).apply(characterId);
+
+    // The transaction committed: the level really moved, nothing rolled back.
+    expect(
+      Number(
+        db.scalar(
+          `SELECT level FROM character_class_levels
+           WHERE character_id = ? AND class_definition_id = ?`,
+          [characterId, classId('Fighter')],
+        ),
+      ),
+    ).toBe(7);
+
+    // The entitlement is now outstanding, with NOTHING materialised for it.
+    const owed = fighterState().additional_fighting_style;
+    expect(owed.state).toBe('entitled');
+    if (owed.state !== 'entitled') return;
+    expect(owed.chosen).toBeNull();
+    expect(fightingStyleFeatSources()).toHaveLength(1);
+    expect(outstandingTitles()).toContain(
+      'Champion — Additional Fighting Style not chosen',
+    );
+
+    // And the choice, made afterwards, materialises the real feat source.
+    const extra = owed.options[0];
+    if (extra === undefined) throw new Error('No second style is offered.');
+    chooseStyle(extra.content_key);
+    expect(fightingStyleFeatSources()).toEqual([
+      expect.objectContaining({ parent_source_type: 'class' }),
+      {
+        content_key: extra.content_key,
+        state: 'active',
+        parent_source_type: 'subclass',
+      },
+    ]);
+  });
+
+  /**
+   * The other half of the owed state: an unwritten config must mean "nothing
+   * granted", never "keep whatever was granted before". Clearing the choice
+   * has to withdraw the feat through the existing reconcile path.
+   */
+  it('withdraws the granted feat when the choice is cleared (CHAMP-L7-LEVELUP)', () => {
+    fighterWithSubclass(subclassId('2024:subclass:champion'), 7);
+    recordBaseStyle();
+    const owed = fighterState().additional_fighting_style;
+    if (owed.state !== 'entitled') throw new Error('Not entitled.');
+    chooseStyle(owed.options[0]!.content_key);
+    expect(fightingStyleFeatSources()).toHaveLength(2);
+
+    db.exec(
+      `UPDATE character_source_instances SET config = '{}' WHERE id = ?`,
+      [owed.source_instance_id],
+    );
+    new GrantRuleSlotGenerator(db).generateForSource(owed.source_instance_id);
+
+    expect(fightingStyleFeatSources()).toEqual([
+      expect.objectContaining({ state: 'active', parent_source_type: 'class' }),
+      expect.objectContaining({ parent_source_type: 'subclass' }),
+    ]);
+    expect(fightingStyleFeatSources()[1]!.state).not.toBe('active');
+    expect(fighterState().additional_fighting_style).toEqual(
+      expect.objectContaining({ state: 'entitled', chosen: null }),
+    );
+  });
+
+  /**
+   * A key that IS written but names nothing is still a fault. The owed-choice
+   * skip must not swallow a dangling reference to missing content.
+   */
+  it('still refuses a written key that resolves to no definition', () => {
+    fighterWithSubclass(subclassId('2024:subclass:champion'), 7);
+    const source = Number(
+      db.scalar(
+        `SELECT id FROM character_source_instances
+         WHERE character_id = ? AND source_type = 'subclass' AND state = 'active'`,
+        [characterId],
+      ),
+    );
+    db.exec(
+      `UPDATE character_source_instances
+       SET config = '{"additional_fighting_style_key":"2024:feat:not-a-feat"}'
+       WHERE id = ?`,
+      [source],
+    );
+    expect(() =>
+      new GrantRuleSlotGenerator(db).generateForSource(source),
+    ).toThrow(/could not resolve its definition/u);
   });
 
   it('reports the unmade extra choice and stops once it is made (CHAMP-L7-NAGS)', () => {

@@ -456,6 +456,41 @@ export class GrantRuleSlotGenerator {
             namedDefinition,
           );
     if (definition === null) {
+      /**
+       * AN UNWRITTEN `definition_key_config` IS A CHOICE OWED, NOT A FAULT.
+       *
+       * A rule that delegates WHICH definition it grants to the source's own
+       * config describes two legal states, and only one of them was handled.
+       * The config named a definition — materialise it — or the config is not
+       * written yet, which means the player has not chosen. The second state
+       * threw, so a rule could not become active BEFORE its choice was made.
+       *
+       * Backgrounds never met this: `applyGuidedBackgroundChoices` writes
+       * `origin_feat_key` in the same INSERT that creates the background
+       * source, so the config exists before the generator ever runs. They
+       * share the latent shape; they just cannot reach it. A subclass rule
+       * gated with `active_from_class_level` reaches it every time — the
+       * Champion becomes level 7 during a level-up transaction, and the
+       * choice cannot possibly have been made yet. Throwing there rolled the
+       * whole level-up back, which is the level-up refusing to happen because
+       * a choice it grants has not been made.
+       *
+       * Returning no marker leaves the entitlement OUTSTANDING and nothing
+       * materialised. `reconcileGrantedChildren` reads the same empty set, so
+       * clearing the config later deactivates a previously granted child by
+       * the existing path rather than a second one.
+       *
+       * A key that IS written but names nothing still throws: that is a
+       * dangling reference to missing content, a real fault.
+       */
+      const delegated = typeof data.definition_key_config === 'string';
+      const unchosen =
+        definitionKey === null ||
+        definitionKey === undefined ||
+        definitionKey === '';
+      if (delegated && unchosen) {
+        return [];
+      }
       throw new Error(
         `Grant-source rule '${rule.ruleKey}' could not resolve its definition.`,
       );

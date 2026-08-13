@@ -95,7 +95,12 @@ describe('catalog data-migration registry', () => {
       // Re-pinned 2026-08-13 with the registry: origin-definitions-srd.ts's
       // SRD attribution header corrected to the 5.2.1 statement the source
       // document requires (comment-only diff, verified).
-      checksum: 'b124c031979c8e4eceb6afecbdd8e7b02d20c3a182b5a0fbe4d0dd600813e956',
+      //
+      // Re-pinned again 2026-08-13 with the registry: an unwritten
+      // `definition_key_config` on an ACTIVE grant_source rule is now an owed
+      // choice in grant-rule-slot-generator.ts rather than a throw. No lineage
+      // row changes — see the registry entry for why the pin still moves.
+      checksum: 'ef8ae6f41b52b88f04869b4de15eabc55191b64f1e423a9223143287a1b2f1c1',
     }]);
     expect(() =>
       validateCatalogDataMigrationRegistry(CATALOG_DATA_MIGRATIONS)
