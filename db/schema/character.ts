@@ -315,10 +315,17 @@ export const character_source_instances = sqliteTable(
      * The four writers the old comment named all set one of the two members:
      * `remove-source.ts`, `update-class.ts` (twice), `grant-rule-slot-generator.ts`
      * — plus `authoring/reference-retarget.ts`, a FIFTH the old comment predates.
+     * None of them spells a literal any more: since R4 every reader and writer
+     * of this column binds `ACTIVE_SOURCE_INSTANCE_STATE` or
+     * `TOMBSTONED_SOURCE_INSTANCE_STATE` as a parameter, because the CHECK
+     * catches a WRITER's typo loudly while a READER's typo stays silent and
+     * quietly empties a result set.
+     *
      * A full-history blob audit (every `INSERT`/`UPDATE` naming this table in
-     * every blob this repository has ever held) found no third literal, which
-     * is why 0047's copy needs no normalization: see the note on
-     * `character_source_instances` in `src/domain/contracts/historical-row-columns.ts`.
+     * every blob this repository has ever held) found no third literal written
+     * by application code, which is why 0047's copy needs no normalization: see
+     * the note on `character_source_instances` in
+     * `src/domain/contracts/historical-row-columns.ts`.
      */
     state: varchar<SourceInstanceState>()('state')
       .notNull()

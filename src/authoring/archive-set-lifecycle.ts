@@ -25,6 +25,7 @@ import type {
   PermanentPurgeResult,
 } from './contracts';
 import type { ArchiveSetPlanToken } from './ids';
+import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 
 export class ArchiveSetLifecycleError extends Error {
   constructor(
@@ -224,10 +225,10 @@ export class HomebrewArchiveSetService {
        FROM characters AS character
        JOIN character_source_instances AS source ON source.character_id = character.id
        JOIN ${table} AS definition ON definition.id = source.source_definition_id
-       WHERE source.source_type = ? AND source.state = 'active'
+       WHERE source.source_type = ? AND source.state = ?
          AND definition.content_key = ?
        ORDER BY character.id`,
-      [content.kind, content.contentKey],
+      [content.kind, ACTIVE_SOURCE_INSTANCE_STATE, content.contentKey],
       characterRow,
     ));
   }
@@ -251,7 +252,7 @@ export class HomebrewArchiveSetService {
                     ON definition.id = source.source_definition_id
                   WHERE source.character_id = member.character_id
                     AND source.source_type = 'species'
-                    AND source.state = 'active'
+                    AND source.state = ?
                     AND definition.content_key = member.content_key
                 )
                 WHEN 'background' THEN EXISTS (
@@ -261,7 +262,7 @@ export class HomebrewArchiveSetService {
                     ON definition.id = source.source_definition_id
                   WHERE source.character_id = member.character_id
                     AND source.source_type = 'background'
-                    AND source.state = 'active'
+                    AND source.state = ?
                     AND definition.content_key = member.content_key
                 )
                 WHEN 'subclass' THEN EXISTS (
@@ -277,7 +278,12 @@ export class HomebrewArchiveSetService {
        LEFT JOIN characters AS character ON character.id = member.character_id
        WHERE member.content_kind = ? AND member.content_key = ?
        ORDER BY member.character_id`,
-      [content.kind, content.contentKey],
+      [
+        ACTIVE_SOURCE_INSTANCE_STATE,
+        ACTIVE_SOURCE_INSTANCE_STATE,
+        content.kind,
+        content.contentKey,
+      ],
       archiveManifestMemberRow,
     ));
   }

@@ -48,6 +48,10 @@ import {
   type GrantSourceInstance,
 } from './source-rule-reader';
 import { characterLevel } from '../rules/character-level';
+import {
+  ACTIVE_SOURCE_INSTANCE_STATE,
+  TOMBSTONED_SOURCE_INSTANCE_STATE,
+} from '../domain/source-instance-state';
 
 type Attributes = Record<string, SqlValue>;
 type JsonContainer = Record<string, unknown> | unknown[];
@@ -954,9 +958,13 @@ export class GrantRuleSlotGenerator {
     if (source.state !== 'tombstoned') {
       this.db.exec(
         `UPDATE character_source_instances
-         SET state = 'tombstoned', updated_at = ?
+         SET state = ?, updated_at = ?
          WHERE id = ?`,
-        [new Date().toISOString(), sourceInstanceId],
+        [
+          TOMBSTONED_SOURCE_INSTANCE_STATE,
+          new Date().toISOString(),
+          sourceInstanceId,
+        ],
       );
     }
   }
@@ -984,12 +992,13 @@ export class GrantRuleSlotGenerator {
        WHERE character_id = ?
          AND source_type = ?
          AND source_definition_id = ?
-         AND state = 'active'
+         AND state = ?
          AND id != ?`,
       [
         source.characterId,
         source.sourceType,
         source.sourceDefinitionId,
+        ACTIVE_SOURCE_INSTANCE_STATE,
         source.id,
       ],
       nullableConfig,

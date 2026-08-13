@@ -13,6 +13,7 @@ import {
   evaluateSelectionCollectionConstraint,
   refreshWizardPreparationEligibility,
 } from './spell-selection-collection';
+import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 
 export type SpellSelectionAddress =
   | { readonly kind: 'slot_selection'; readonly id: number }
@@ -138,8 +139,8 @@ export function assignSpellSelection(
            WHERE slot.id = ?
              AND slot.character_id = ?
              AND slot.state IN ('active', 'kept_override')
-             AND source.state = 'active'`,
-          [input.address.id, input.character_id],
+             AND source.state = ?`,
+          [input.address.id, input.character_id, ACTIVE_SOURCE_INSTANCE_STATE],
           slotSelection,
         )
       : db.one(
@@ -154,8 +155,8 @@ export function assignSpellSelection(
            WHERE entry.id = ?
              AND entry.character_id = ?
              AND entry.state = 'active'
-             AND source.state = 'active'`,
-          [input.address.id, input.character_id],
+             AND source.state = ?`,
+          [input.address.id, input.character_id, ACTIVE_SOURCE_INSTANCE_STATE],
           spellbookSelection,
         );
   if (selection === null) {

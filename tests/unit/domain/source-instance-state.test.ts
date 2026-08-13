@@ -6,6 +6,14 @@ import {
   spellbookAcquisitionStates,
   type SourceInstanceState,
 } from '../../../src/domain/enums';
+import {
+  ACTIVE_SOURCE_INSTANCE_STATE,
+  TOMBSTONED_SOURCE_INSTANCE_STATE,
+  sourceInstanceStates as frozenSourceInstanceStates,
+} from '../../../src/domain/source-instance-state';
+import {
+  CATALOG_DATA_MIGRATIONS,
+} from '../../../src/catalog/catalog-data-migrations';
 
 /**
  * THE PIN FOR `character_source_instances.state`.
@@ -26,6 +34,31 @@ import {
 describe('sourceInstanceStates', () => {
   it('is exactly the two members the taken-source lifecycle has', () => {
     expect(sourceInstanceStates).toEqual(['active', 'tombstoned']);
+    expect([
+      ACTIVE_SOURCE_INSTANCE_STATE,
+      TOMBSTONED_SOURCE_INSTANCE_STATE,
+    ]).toEqual([...sourceInstanceStates]);
+  });
+
+  /**
+   * THE FREEZE THIS MODULE EXISTS FOR, ASSERTED RATHER THAN COMMENTED.
+   *
+   * `source-rule-reader.ts` throws on a state outside this array, and it is a
+   * frozen behavioural source of `reconcile_species_lineage_content_v2` — so
+   * D226 requires the ARRAY to be inside that migration's checksum too, not
+   * just the reader. R4 round 1 missed exactly that. Two things could undo the
+   * fix silently, and both fail here: dropping the module from the frozen
+   * source list, and re-declaring the vocabulary in `enums.ts` so the
+   * re-export stops pointing at the pinned module.
+   */
+  it('is the same array the pinned migration source declares, and that source is pinned', () => {
+    expect(sourceInstanceStates).toBe(frozenSourceInstanceStates);
+    const lineage = CATALOG_DATA_MIGRATIONS.find(
+      (migration) => migration.id === 'reconcile_species_lineage_content_v2',
+    );
+    expect(lineage?.sources.map((source) => source.path)).toContain(
+      'src/domain/source-instance-state.ts',
+    );
   });
 
   it('is not slotStates, and the difference runs in both directions', () => {

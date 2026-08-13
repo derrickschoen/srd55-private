@@ -18,6 +18,7 @@ import {
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import { GUIDED_SPECIES_SOURCE_MARKER } from '../domain/source-markers';
+import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 
 /**
  * Catalog provenance for content actually applied to one character.
@@ -93,10 +94,10 @@ export function characterCatalogDisclosures(
      LEFT JOIN character_source_instances AS source
        ON source.character_id = copied.character_id
       AND source.source_type = 'species'
-      AND source.state = 'active'
+      AND source.state = ?
       AND source.notes = ?
      WHERE copied.character_id = ?`,
-    [GUIDED_SPECIES_SOURCE_MARKER, characterId],
+    [ACTIVE_SOURCE_INSTANCE_STATE, GUIDED_SPECIES_SOURCE_MARKER, characterId],
     (row) => ({
       name: sqlString(row, 'name'),
       source_id: sqlNullableInteger(row, 'source_id'),
@@ -123,10 +124,14 @@ export function characterCatalogDisclosures(
      LEFT JOIN character_source_instances AS source
        ON source.character_id = copied.character_id
       AND source.source_type = 'background'
-      AND source.state = 'active'
+      AND source.state = ?
       AND source.notes = ?
      WHERE copied.character_id = ?`,
-    [GUIDED_BACKGROUND_SOURCE_MARKER, characterId],
+    [
+      ACTIVE_SOURCE_INSTANCE_STATE,
+      GUIDED_BACKGROUND_SOURCE_MARKER,
+      characterId,
+    ],
     (row) => ({
       name: sqlString(row, 'name'),
       source_id: sqlNullableInteger(row, 'source_id'),
@@ -147,7 +152,7 @@ export function characterCatalogDisclosures(
     `SELECT source.id, source.source_type, source.display_name
      FROM character_source_instances AS source
      WHERE source.character_id = ?
-       AND source.state = 'active'
+       AND source.state = ?
        AND source.source_type IN ('feat', 'species', 'background')
        AND NOT (
          (source.source_type = 'species' AND source.notes = ?)
@@ -156,6 +161,7 @@ export function characterCatalogDisclosures(
      ORDER BY source.source_type, source.display_name, source.id`,
     [
       characterId,
+      ACTIVE_SOURCE_INSTANCE_STATE,
       GUIDED_SPECIES_SOURCE_MARKER,
       GUIDED_BACKGROUND_SOURCE_MARKER,
     ],

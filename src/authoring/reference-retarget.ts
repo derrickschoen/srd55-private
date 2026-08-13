@@ -76,6 +76,10 @@ import type {
   ReplacementTokenFacts,
 } from './contracts';
 import type { ReplacementPlanToken } from './ids';
+import {
+  ACTIVE_SOURCE_INSTANCE_STATE,
+  TOMBSTONED_SOURCE_INSTANCE_STATE,
+} from '../domain/source-instance-state';
 
 const NODE_ID = 'authoring:reference-retarget';
 
@@ -182,8 +186,13 @@ function characterReference(
          JOIN ${definitionTable} AS definition
            ON definition.id = source.source_definition_id
          WHERE source.character_id = ? AND source.source_type = ?
-           AND source.state = 'active' AND definition.content_key = ?`,
-        [input.characterId, identity.kind, input.oldContentKey],
+           AND source.state = ? AND definition.content_key = ?`,
+        [
+          input.characterId,
+          identity.kind,
+          ACTIVE_SOURCE_INSTANCE_STATE,
+          input.oldContentKey,
+        ],
       );
   if (referenced !== 1) {
     throw new ReferenceRetargetError('The character does not use the old reference.', {
@@ -700,9 +709,14 @@ function backgroundParams(db: DatabaseContext, facts: ReplacementTokenFacts) {
      JOIN background_definitions AS definition
        ON definition.id = source.source_definition_id
      WHERE source.character_id = ? AND source.source_type = 'background'
-       AND source.state = 'active' AND source.notes = ?
+       AND source.state = ? AND source.notes = ?
        AND definition.content_key = ?`,
-    [facts.character_id, GUIDED_BACKGROUND_SOURCE_MARKER, facts.old_content_key],
+    [
+      facts.character_id,
+      ACTIVE_SOURCE_INSTANCE_STATE,
+      GUIDED_BACKGROUND_SOURCE_MARKER,
+      facts.old_content_key,
+    ],
     (row) => ({ id: sqlInteger(row, 'id'), config: sqlNullableString(row, 'config') }),
   );
   if (source === null || source.config === null) {
@@ -986,9 +1000,13 @@ function retireDeletableGuidedSource(
 ): void {
   db.exec(
     `UPDATE character_source_instances
-     SET notes = ?, state = 'tombstoned', updated_at = CURRENT_TIMESTAMP
+     SET notes = ?, state = ?, updated_at = CURRENT_TIMESTAMP
      WHERE id = ?`,
-    [`retargeted:${facts.content_kind}:${facts.old_content_key}`, rootId],
+    [
+      `retargeted:${facts.content_kind}:${facts.old_content_key}`,
+      TOMBSTONED_SOURCE_INSTANCE_STATE,
+      rootId,
+    ],
   );
   new GrantRuleSlotGenerator(db).generateForSource(rootId);
 }
@@ -1439,9 +1457,14 @@ function retargetCharacter(
          JOIN species_definitions AS definition
            ON definition.id = source.source_definition_id
          WHERE source.character_id = ? AND source.source_type = 'species'
-           AND source.state = 'active' AND source.notes = ?
+           AND source.state = ? AND source.notes = ?
            AND definition.content_key = ?`,
-        [facts.character_id, GUIDED_SPECIES_SOURCE_MARKER, facts.old_content_key],
+        [
+          facts.character_id,
+          ACTIVE_SOURCE_INSTANCE_STATE,
+          GUIDED_SPECIES_SOURCE_MARKER,
+          facts.old_content_key,
+        ],
       );
       if (guidedSourceId === null) throw new Error('Species choices cannot be preserved.');
       retargetState = captureRetargetState(db, facts, guidedSourceId);
@@ -1457,9 +1480,14 @@ function retargetCharacter(
          JOIN species_definitions AS definition
            ON definition.id = source.source_definition_id
          WHERE source.character_id = ? AND source.source_type = 'species'
-           AND source.state = 'active' AND source.notes = ?
+           AND source.state = ? AND source.notes = ?
            AND definition.content_key = ?`,
-        [facts.character_id, GUIDED_SPECIES_SOURCE_MARKER, targetContentKey],
+        [
+          facts.character_id,
+          ACTIVE_SOURCE_INSTANCE_STATE,
+          GUIDED_SPECIES_SOURCE_MARKER,
+          targetContentKey,
+        ],
       );
       if (newSourceId === null) {
         throw new Error('Replacement species source is missing.');
@@ -1495,9 +1523,14 @@ function retargetCharacter(
          JOIN background_definitions AS definition
            ON definition.id = source.source_definition_id
          WHERE source.character_id = ? AND source.source_type = 'background'
-           AND source.state = 'active' AND source.notes = ?
+           AND source.state = ? AND source.notes = ?
            AND definition.content_key = ?`,
-        [facts.character_id, GUIDED_BACKGROUND_SOURCE_MARKER, facts.old_content_key],
+        [
+          facts.character_id,
+          ACTIVE_SOURCE_INSTANCE_STATE,
+          GUIDED_BACKGROUND_SOURCE_MARKER,
+          facts.old_content_key,
+        ],
       );
       if (guidedSourceId === null) throw new Error('Background choices cannot be preserved.');
       retargetState = captureRetargetState(db, facts, guidedSourceId);
@@ -1507,8 +1540,12 @@ function retargetCharacter(
         const source = db.one(
           `SELECT id, config FROM character_source_instances
            WHERE character_id = ? AND source_type = 'background'
-             AND state = 'active' AND notes = ?`,
-          [facts.character_id, GUIDED_BACKGROUND_SOURCE_MARKER],
+             AND state = ? AND notes = ?`,
+          [
+            facts.character_id,
+            ACTIVE_SOURCE_INSTANCE_STATE,
+            GUIDED_BACKGROUND_SOURCE_MARKER,
+          ],
           (row) => ({
             id: sqlInteger(row, 'id'),
             config: sqlNullableString(row, 'config'),
@@ -1532,9 +1569,14 @@ function retargetCharacter(
          JOIN background_definitions AS definition
            ON definition.id = source.source_definition_id
          WHERE source.character_id = ? AND source.source_type = 'background'
-           AND source.state = 'active' AND source.notes = ?
+           AND source.state = ? AND source.notes = ?
            AND definition.content_key = ?`,
-        [facts.character_id, GUIDED_BACKGROUND_SOURCE_MARKER, targetContentKey],
+        [
+          facts.character_id,
+          ACTIVE_SOURCE_INSTANCE_STATE,
+          GUIDED_BACKGROUND_SOURCE_MARKER,
+          targetContentKey,
+        ],
       );
       if (replacementSourceId === null) throw new Error('Replacement background source is missing.');
       newRootId = replacementSourceId;
@@ -1569,8 +1611,12 @@ function retargetCharacter(
       const oldSourceId = db.scalar<number>(
         `SELECT id FROM character_source_instances
          WHERE character_id = ? AND source_type = 'subclass'
-           AND source_definition_id = ? AND state = 'active'`,
-        [facts.character_id, level.oldSubclassId],
+           AND source_definition_id = ? AND state = ?`,
+        [
+          facts.character_id,
+          level.oldSubclassId,
+          ACTIVE_SOURCE_INSTANCE_STATE,
+        ],
       );
       if (oldSourceId === null) throw new Error('Replacement subclass source is missing.');
       retargetState = captureRetargetState(db, facts, oldSourceId);
@@ -1594,8 +1640,8 @@ function retargetCharacter(
       const newSourceId = db.scalar<number>(
         `SELECT id FROM character_source_instances
          WHERE character_id = ? AND source_type = 'subclass'
-           AND source_definition_id = ? AND state = 'active'`,
-        [facts.character_id, target.id],
+           AND source_definition_id = ? AND state = ?`,
+        [facts.character_id, target.id, ACTIVE_SOURCE_INSTANCE_STATE],
       );
       if (newSourceId === null) throw new Error('Replacement subclass source is missing.');
       newRootId = newSourceId;

@@ -17,6 +17,7 @@ import type {
 import { MAGIC_INITIATE_LISTS } from '../domain/background-feat-name';
 import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
 import type { StoredCharacterSnapshotInverse } from './stored-inverses';
+import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 
 /**
  * The configurable source instance, decoded once at the read.
@@ -107,8 +108,12 @@ export class UpdateSourceConfigCommand {
         `SELECT id, parent_source_instance_id, source_type,
                 source_definition_id, config
          FROM character_source_instances
-         WHERE character_id = ? AND id = ? AND state = 'active'`,
-        [characterId, this.payload.source_instance_id],
+         WHERE character_id = ? AND id = ? AND state = ?`,
+        [
+          characterId,
+          this.payload.source_instance_id,
+          ACTIVE_SOURCE_INSTANCE_STATE,
+        ],
         configurableSource,
       );
       if (source === null) {

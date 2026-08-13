@@ -81,6 +81,7 @@ describe('catalog data-migration registry', () => {
         'src/grants/configured-choice-rule.ts',
         'src/grants/grant-rule.ts',
         'src/grants/source-rule-reader.ts',
+        'src/domain/source-instance-state.ts',
         'src/rules/character-level.ts',
         'src/grants/grant-rule-slot-generator.ts',
         'src/grants/grant-rule-planner.ts',
@@ -92,15 +93,15 @@ describe('catalog data-migration registry', () => {
         'src/catalog/content-identity.ts',
         'src/catalog/content-registry.ts',
       ],
-      // Re-pinned 2026-08-13 with the registry (R4, D226): the frozen source
-      // `src/grants/source-rule-reader.ts` gained a throwing decode for
-      // `character_source_instances.state`, so `GrantSourceInstance.state` is
-      // now `SourceInstanceState` rather than `string`. The reconciliation's
-      // OUTPUT is unchanged — every row it walks holds `active` or
-      // `tombstoned` — but D226 is explicit that a behavioural source changing
-      // is what a frozen artefact should notice, and re-pinning is the accepted
-      // cost rather than a reason to route around the freeze.
-      checksum: 'c077a07074f66c54bfe430f7b37ec4b6a9d5f9f988550b7466148fbe9e0a63bf',
+      // Re-pinned 2026-08-13 with the registry (R4, D226). The path list above
+      // is the half of this pin that matters most: `source-rule-reader.ts` now
+      // THROWS on a state outside the vocabulary, and R4 round 1 pinned the
+      // reader without pinning the vocabulary it reads — a freeze that a
+      // one-line edit to `enums.ts` could have walked straight through. Round 2
+      // added `src/domain/source-instance-state.ts`, a module that exists to be
+      // exactly this wide. Reconciliation's OUTPUT is unchanged in both rounds;
+      // re-pinning is D226's accepted cost, not a way around the freeze.
+      checksum: 'f8b78632498fc05f5e4f94981430db558526e4e4e93e261772376b64b84a2c35',
     }]);
     expect(() =>
       validateCatalogDataMigrationRegistry(CATALOG_DATA_MIGRATIONS)

@@ -3539,8 +3539,12 @@ describe('database migration chain', () => {
       db.exec(SCHEMA_BEFORE_SOURCE_INSTANCE_STATE);
       db.exec('PRAGMA foreign_keys = OFF');
       db.exec(SOURCE_INSTANCE_STATE_FIXTURE);
-      // The pre-0047 column really does accept it, which is why the audit is
-      // needed rather than assumed.
+      // A DELIBERATE INVALID WRITE, and the only kind of row allowed to hold a
+      // third state anywhere: no application writer produces one — that is the
+      // finding 0047 rests on — so proving the CHECK can refuse one means
+      // manufacturing it here. It lives and dies inside this test's own
+      // database and reaches no document. The pre-0047 column really does
+      // accept it, which is why the audit was needed rather than assumed.
       db.exec(
         `INSERT INTO character_source_instances (
            id, character_id, instance_uuid, source_type, display_name, state

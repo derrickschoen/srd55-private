@@ -10,10 +10,17 @@ import type { DatabaseContext } from '../db/database';
 import {
   domainSourceTypes,
   isEnumValue,
-  sourceInstanceStates,
   type DomainSourceType,
-  type SourceInstanceState,
 } from '../domain/enums';
+// DIRECT, not through the `enums.ts` re-export, and D226 is the reason: this
+// module is a frozen behavioural source of `reconcile_species_lineage_content_v2`,
+// and the decode below THROWS on a non-member, so the vocabulary is inside that
+// migration's behaviour and has to be inside its checksum. Naming the frozen
+// module keeps the dependency legible to whoever next reads the pin.
+import {
+  sourceInstanceStates,
+  type SourceInstanceState,
+} from '../domain/source-instance-state';
 import { GrantRule } from './grant-rule';
 import {
   ConfiguredChoiceRule,

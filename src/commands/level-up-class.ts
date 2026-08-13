@@ -66,6 +66,7 @@ import { applyLevelFeatSelection } from './level-feat-choice';
 import {
   reconcileCharacterLevelDependentSources,
 } from '../grants/character-level-source-reconciliation';
+import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 
 /**
  * The named refusal, carrying the seam's `LevelUpRefusalData` so a surface
@@ -118,8 +119,8 @@ function sourceIdFor(
       return db.scalar<number>(
         `SELECT id FROM character_source_instances
          WHERE character_id = ? AND source_type = 'class'
-           AND source_definition_id = ? AND state = 'active'`,
-        [characterId, advancedClassDefinitionId],
+           AND source_definition_id = ? AND state = ?`,
+        [characterId, advancedClassDefinitionId, ACTIVE_SOURCE_INSTANCE_STATE],
       );
     case 'selected_class_subclass':
       return selectedSubclassDefinitionId === null
@@ -127,16 +128,20 @@ function sourceIdFor(
         : db.scalar<number>(
             `SELECT id FROM character_source_instances
              WHERE character_id = ? AND source_type = 'subclass'
-               AND source_definition_id = ? AND state = 'active'`,
-            [characterId, selectedSubclassDefinitionId],
+               AND source_definition_id = ? AND state = ?`,
+            [
+              characterId,
+              selectedSubclassDefinitionId,
+              ACTIVE_SOURCE_INSTANCE_STATE,
+            ],
           );
     case 'selected_feat':
       return selectedFeatSourceId;
     case 'existing_source':
       return db.scalar<number>(
         `SELECT id FROM character_source_instances
-         WHERE id = ? AND character_id = ? AND state = 'active'`,
-        [source.source_instance_id, characterId],
+         WHERE id = ? AND character_id = ? AND state = ?`,
+        [source.source_instance_id, characterId, ACTIVE_SOURCE_INSTANCE_STATE],
       );
   }
 }

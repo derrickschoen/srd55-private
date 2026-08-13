@@ -12,6 +12,7 @@ import {
   sourceDefinitionTable,
   type GrantSourceInstance,
 } from './source-rule-reader';
+import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 
 function dependsOnCharacterLevel(
   db: DatabaseContext,
@@ -108,9 +109,9 @@ export function reconcileCharacterLevelDependentSources(
   const configuredGenerator = configuredChoiceSlotGenerator(db);
   const sourceIds = db.all(
     `SELECT id FROM character_source_instances
-     WHERE character_id = ? AND state = 'active'
+     WHERE character_id = ? AND state = ?
      ORDER BY id`,
-    [characterId],
+    [characterId, ACTIVE_SOURCE_INSTANCE_STATE],
     rowId,
   );
   for (const sourceId of sourceIds) {

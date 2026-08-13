@@ -38,6 +38,7 @@ import {
   legacyArmorClassAdjustmentError,
   splitLegacyArmorClassAdjustment,
 } from '../rules/legacy-armor-class-adjustment';
+import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 
 /**
  * THE SEMANTIC AUDIT OF A QUARANTINED CANDIDATE DATABASE.
@@ -280,7 +281,7 @@ function auditArchiveManifests(db: Database): void {
                   ON definition.id = source.source_definition_id
                 WHERE source.character_id = member.character_id
                   AND source.source_type = 'species'
-                  AND source.state = 'active'
+                  AND source.state = ?
                   AND definition.content_key = member.content_key
               )
               WHEN 'background' THEN EXISTS (
@@ -290,7 +291,7 @@ function auditArchiveManifests(db: Database): void {
                   ON definition.id = source.source_definition_id
                 WHERE source.character_id = member.character_id
                   AND source.source_type = 'background'
-                  AND source.state = 'active'
+                  AND source.state = ?
                   AND definition.content_key = member.content_key
               )
               WHEN 'subclass' THEN EXISTS (
@@ -308,6 +309,8 @@ function auditArchiveManifests(db: Database): void {
       AND identity.content_key = member.content_key
      LEFT JOIN characters AS character ON character.id = member.character_id
      ORDER BY member.content_kind, member.content_key, member.character_id`,
+    // Species arm then background arm, the order the CASE evaluates them.
+    [ACTIVE_SOURCE_INSTANCE_STATE, ACTIVE_SOURCE_INSTANCE_STATE],
   );
   for (const row of rows) {
     const label = `Candidate database ${ARCHIVE_MEMBER_TABLE} rowid ${String(

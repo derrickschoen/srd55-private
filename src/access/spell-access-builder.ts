@@ -37,6 +37,7 @@ import { characterLevel } from '../rules/character-level';
 import { proficiencyBonus } from '../rules/proficiency';
 import { SpellSlotAssignment } from './spell-slot-assignment';
 import { deduplicateRoutes } from './route-key';
+import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 
 /**
  * The character as spell access computes with it: RESOLVED scores, not the six
@@ -439,9 +440,9 @@ export class SpellAccessBuilder {
          AND version.is_active = 1
          AND (
            slot.state = 'kept_override'
-           OR (slot.state = 'active' AND source.state = 'active')
+           OR (slot.state = 'active' AND source.state = ?)
          )`,
-      [character.id],
+      [character.id, ACTIVE_SOURCE_INSTANCE_STATE],
       decodeSlotRoute,
     );
 
@@ -534,7 +535,7 @@ export class SpellAccessBuilder {
              AND class.name = 'Wizard'
              AND (
                slot.state = 'kept_override'
-               OR (slot.state = 'active' AND source.state = 'active')
+               OR (slot.state = 'active' AND source.state = ?)
              )
              AND slot.bucket = 'prepared'
              AND slot.current_spell_version_id IS NOT NULL
@@ -549,10 +550,14 @@ export class SpellAccessBuilder {
                  AND entry.state = 'active'
                  AND (
                    entry.source_instance_id IS NULL
-                   OR book_source.state = 'active'
+                   OR book_source.state = ?
                  )
              )`,
-          [character.id],
+          [
+            character.id,
+            ACTIVE_SOURCE_INSTANCE_STATE,
+            ACTIVE_SOURCE_INSTANCE_STATE,
+          ],
           decodePreparedSlot,
         )
         .filter(
@@ -587,11 +592,11 @@ export class SpellAccessBuilder {
          AND entry.state = 'active'
          AND (
            entry.source_instance_id IS NULL
-           OR book_source.state = 'active'
+           OR book_source.state = ?
          )
          AND version.is_active = 1
        ORDER BY version.display_name`,
-      [character.id],
+      [character.id, ACTIVE_SOURCE_INSTANCE_STATE],
       decodeSpellbookEntry,
     );
     const capabilities = this.ritualCapabilities(character.id);

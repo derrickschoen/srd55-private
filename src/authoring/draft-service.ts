@@ -96,6 +96,7 @@ import {
   ReferenceRetargetError,
 } from './reference-retarget';
 import { storedContentProvenance } from '../catalog/content-provenance';
+import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 
 interface DraftRow {
   readonly draft_uuid: HomebrewDraftUuid;
@@ -728,7 +729,7 @@ export class CatalogAuthoringService {
                   FROM character_source_instances AS source
                   JOIN species_definitions AS used_species
                     ON used_species.id = source.source_definition_id
-                  WHERE source.source_type = 'species' AND source.state = 'active'
+                  WHERE source.source_type = 'species' AND source.state = ?
                     AND used_species.content_key = identity.content_key
                 )
                 WHEN 'background' THEN (
@@ -736,7 +737,7 @@ export class CatalogAuthoringService {
                   FROM character_source_instances AS source
                   JOIN background_definitions AS used_background
                     ON used_background.id = source.source_definition_id
-                  WHERE source.source_type = 'background' AND source.state = 'active'
+                  WHERE source.source_type = 'background' AND source.state = ?
                     AND used_background.content_key = identity.content_key
                 )
                 WHEN 'subclass' THEN (
@@ -766,7 +767,9 @@ export class CatalogAuthoringService {
            OR subclass.content_key IS NOT NULL
          )
        ORDER BY identity.content_kind, name, identity.content_key`,
-      undefined,
+      // Two binds, in the order the CASE arms above evaluate them: species,
+      // then background. The subclass arm counts class levels, not sources.
+      [ACTIVE_SOURCE_INSTANCE_STATE, ACTIVE_SOURCE_INSTANCE_STATE],
       publishedRow,
     ).map((row) => ({
       ...row,
@@ -1089,9 +1092,9 @@ export class CatalogAuthoringService {
            JOIN character_source_instances AS source ON source.character_id = character.id
            JOIN ${definitionTable} AS definition ON definition.id = source.source_definition_id
            WHERE source.source_type = ? AND definition.content_key = ?
-             AND source.state = 'active'
+             AND source.state = ?
            ORDER BY character.id`,
-          [identity, contentKey],
+          [identity, contentKey, ACTIVE_SOURCE_INSTANCE_STATE],
           usageCodec,
         );
         break;

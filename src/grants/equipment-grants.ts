@@ -23,6 +23,7 @@ import {
   weaponAttackKindOf,
   weaponProficiencyCategoryOf,
 } from '../rules/weapon-template-fold';
+import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 
 /**
  * THE STARTING-EQUIPMENT MINT — the runtime the seam's
@@ -235,9 +236,9 @@ function recordingSourceInstanceId(
          ON definition.id = source.source_definition_id
        WHERE source.character_id = ?
          AND source.source_type = 'class'
-         AND source.state = 'active'
+         AND source.state = ?
          AND definition.content_key = ?`,
-      [params.character_id, params.content_key],
+      [params.character_id, ACTIVE_SOURCE_INSTANCE_STATE, params.content_key],
     );
     if (typeof classInstance !== 'number') {
       throw new Error(
@@ -258,9 +259,9 @@ function recordingSourceInstanceId(
      WHERE source.character_id = ?
        AND source.source_type = 'background'
        AND source.parent_source_instance_id IS NULL
-       AND source.state = 'active'
+       AND source.state = ?
        AND definition.content_key = ?`,
-    [params.character_id, params.content_key],
+    [params.character_id, ACTIVE_SOURCE_INSTANCE_STATE, params.content_key],
   );
   if (typeof backgroundInstance === 'number') {
     return backgroundInstance;
@@ -286,12 +287,13 @@ function recordingSourceInstanceId(
        character_id, instance_uuid, source_type, source_definition_id,
        display_name, config, acquired_at_character_level, state, notes,
        created_at, updated_at
-     ) VALUES (?, ?, 'background', ?, ?, NULL, 1, 'active', ?, ?, ?)`,
+     ) VALUES (?, ?, 'background', ?, ?, NULL, 1, ?, ?, ?, ?)`,
     [
       params.character_id,
       crypto.randomUUID(),
       definitionId,
       displayName,
+      ACTIVE_SOURCE_INSTANCE_STATE,
       GUIDED_BACKGROUND_SOURCE_MARKER,
       now,
       now,

@@ -17,6 +17,7 @@ import {
   type ExpertisePool,
 } from '../rules/class-choice-entitlements-srd';
 import { activeGrantedSkills, resolveSkillGrants } from './skill-grants';
+import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 
 export const EXPERTISE_GRANT_ORPHAN_REASONS = Object.freeze({
   sourceRemoved: 'source_removed',
@@ -208,9 +209,9 @@ export function reconcileCharacterSkillExpertise(
   const sources = db.all(
     `SELECT id, source_type, source_definition_id
      FROM character_source_instances
-     WHERE character_id = ? AND state = 'active'
+     WHERE character_id = ? AND state = ?
      ORDER BY id`,
-    [characterId],
+    [characterId, ACTIVE_SOURCE_INSTANCE_STATE],
     (row) => ({
       id: sqlInteger(row, 'id'),
       sourceType: sqlString(row, 'source_type'),

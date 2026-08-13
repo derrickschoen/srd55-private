@@ -21,6 +21,7 @@ import {
   MAGIC_INITIATE_ABILITIES,
 } from '../builder/background-choices';
 import { MAGIC_INITIATE_LISTS } from '../domain/background-feat-name';
+import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 const SOURCE_TYPES = ['class', 'feat', 'species', 'background'] as const;
 
 type MutableConfig = Record<string, unknown>;
@@ -64,9 +65,14 @@ export function assertSourceRepeatable(
       `SELECT EXISTS (
          SELECT 1 FROM character_source_instances
          WHERE character_id = ? AND source_type = ?
-           AND source_definition_id = ? AND state = 'active'
+           AND source_definition_id = ? AND state = ?
        )`,
-      [characterId, sourceType, Number(definition.id)],
+      [
+        characterId,
+        sourceType,
+        Number(definition.id),
+        ACTIVE_SOURCE_INSTANCE_STATE,
+      ],
     ) ?? 0,
   ) === 1;
   if (
@@ -176,7 +182,7 @@ export class AddSourceCommand {
            character_id, instance_uuid, source_type, source_definition_id,
            display_name, config, acquired_at_character_level, state,
            created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           characterId,
           crypto.randomUUID(),
@@ -187,6 +193,7 @@ export class AddSourceCommand {
           // The column is nullable, so a source added before the class
           // precondition is satisfied records the absence instead of level 1.
           totalLevel,
+          ACTIVE_SOURCE_INSTANCE_STATE,
           now,
           now,
         ],
@@ -285,7 +292,7 @@ export class AddSourceCommand {
          character_id, instance_uuid, source_type, source_definition_id,
          display_name, config, acquired_at_character_level, state,
          created_at, updated_at
-       ) VALUES (?, ?, 'class', ?, ?, ?, ?, 'active', ?, ?)`,
+       ) VALUES (?, ?, 'class', ?, ?, ?, ?, ?, ?, ?)`,
       [
         characterId,
         crypto.randomUUID(),
@@ -295,6 +302,7 @@ export class AddSourceCommand {
         // A first class is acquired at character level 1; later classes are
         // acquired at the next level after the already-recorded total.
         otherLevels === null ? 1 : otherLevels + 1,
+        ACTIVE_SOURCE_INSTANCE_STATE,
         now,
         now,
       ],

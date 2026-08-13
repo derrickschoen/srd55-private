@@ -12,6 +12,7 @@ import {
   type EligibilitySlot,
 } from './spell-selection-eligibility';
 import { assignSpellSelection } from './spell-selection-assignment';
+import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 
 interface SelectableSlot extends EligibilitySlot {
   isLocked: boolean;
@@ -69,8 +70,8 @@ export class SpellSelectionService {
           AND source.character_id = slot.character_id
          WHERE slot.id = ?
            AND slot.state = 'active'
-           AND source.state = 'active'`,
-        [slotId],
+           AND source.state = ?`,
+        [slotId, ACTIVE_SOURCE_INSTANCE_STATE],
         decodeSlot,
       );
       if (slot === null) {
