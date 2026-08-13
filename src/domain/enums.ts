@@ -931,7 +931,7 @@ export type SpellRangeKind = (typeof spellRangeKinds)[number];
  * `lightning_bolt` would have invited a second member meaning the same thing.
  *
  * WHAT A SINGLE `area_feet` CANNOT HOLD, MEASURED RATHER THAN WAVED AT. The
- * only SRD 5.2 text in this repository that names an area shape is
+ * only SRD 5.2.1 text in this repository that names an area shape is
  * `docs/srd/source/species-descriptions.txt:78`, the Dragonborn's Breath
  * Weapon: *"either a 15-foot Cone or a 30-foot Line that is 5 feet wide"*. A
  * LINE therefore carries a length AND a width, and a CYLINDER a radius AND a

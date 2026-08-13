@@ -545,8 +545,8 @@ None changes a spell's slot level.
   Hand section and the named spell entries
 - `.claude/decisions.md`: D169, D174, D189, D190
 
-This work includes material from the System Reference Document 5.2
-("SRD 5.2") by Wizards of the Coast LLC, available at
-https://www.dndbeyond.com/srd. The SRD 5.2 is licensed under the Creative
+This work includes material from the System Reference Document 5.2.1
+("SRD 5.2.1") by Wizards of the Coast LLC, available at
+https://www.dndbeyond.com/srd. The SRD 5.2.1 is licensed under the Creative
 Commons Attribution 4.0 International License, available at
 https://creativecommons.org/licenses/by/4.0/legalcode.

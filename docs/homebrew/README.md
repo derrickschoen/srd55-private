@@ -19,7 +19,7 @@ survive somebody copying a paragraph.
 
 | Folder | Licence | Rule |
 |---|---|---|
-| `cc-by/` | CC-BY-4.0 + the SRD 5.2 notice | Our own text, built from SRD 5.2.1. **No OGL content, ever.** |
+| `cc-by/` | CC-BY-4.0 + the SRD 5.2.1 notice | Our own text, built from SRD 5.2.1. **No OGL content, ever.** |
 | `ogl/` | Open Game License 1.0a | 3.0/3.5/5.1 SRD source, and any conversion that reuses it. Carries the licence and the Section 15 chain. Holds the Psionic Fist conversion, which targets **SRD 5.1 (2014 rules)** because 5.2 is CC-BY-only and cannot be taken under the OGL. |
 
 **Text never moves from `ogl/` to `cc-by/`.** Concepts may cross; sentences,
@@ -57,7 +57,7 @@ design review only": no playtest has been run on anything.
 
 ## Licensing (binding, D59/D191/D176)
 
-`cc-by/`: CC-BY-4.0 with the SRD 5.2 attribution notice. The test is
+`cc-by/`: CC-BY-4.0 with the SRD 5.2.1 attribution notice. The test is
 authorization, not copyright, and only what lands in git matters. Non-SRD works
 may be *named* only as distance markers (things to verify we are not close to),
 never used as sources. Open-content ancestry (3.0/3.5 SRD) is permitted
@@ -69,8 +69,8 @@ D176.
 
 ---
 
-This work includes material from the System Reference Document 5.2
-("SRD 5.2") by Wizards of the Coast LLC, available at
-https://www.dndbeyond.com/srd. The SRD 5.2 is licensed under the Creative
+This work includes material from the System Reference Document 5.2.1
+("SRD 5.2.1") by Wizards of the Coast LLC, available at
+https://www.dndbeyond.com/srd. The SRD 5.2.1 is licensed under the Creative
 Commons Attribution 4.0 International License, available at
 https://creativecommons.org/licenses/by/4.0/legalcode.

@@ -39,38 +39,38 @@ pages interleave and the weapon table becomes unreadable.
 
 | Extract | Source | Page | SHA-256 |
 |---|---|---|---|
-| `source/weapons-table.txt` | Weapons table, all four categories | 90 | `d78ee14dbd9bb78701a9f3cee8e871c11fe3e88e646fd5e6604c6cb30d7c8497` |
-| `source/weapon-mastery-progression.txt` | Barbarian and Fighter class tables (the count is a COLUMN) | 27, 47 | `39274ea85dbcb94ef663cf5923c53e90db4f2d51a0fa29c759128e448cce0811` |
-| `source/weapon-mastery-flat-classes.txt` | Paladin, Ranger, Rogue feature text (the count is PROSE) | 55, 57, 60 | `616493484b5b0d3b6b0ff11072ad156141fca4e90a2364f37159745715b07591` |
-| `source/class-core-traits.txt` | Core Traits table for all twelve classes — hit die, saving throws, skill/weapon proficiencies, armour training | 26-72 | `64dcc7e5e6fe26e6bb063e8f74a916d140e1cd944c192da4ace1c306ada32bbf` |
-| `source/class-starting-equipment.txt` | Starting Equipment row for all twelve classes, with PDF line wrapping and discretionary hyphenation removed | 28, 31, 36, 41, 47, 49, 53, 57, 61, 64, 70, 77 | `ebf127023e3f5f910bb3f5c50857d10287ea61328363b6cdddc7c54a3f07dfbf` |
-| `source/class-level-tables.txt` | Complete level 1–20 Features table for all twelve classes, including spell-slot columns where printed | 28, 31, 36, 41, 47, 50, 53, 58, 62, 65, 71, 77 | `d2cb3235450169b047fb835735320f8f238bf538cf81fb96b8276cbff69a9af9` |
-| `source/class-expertise.txt` | Every class feature that grants Expertise — Bard, Ranger, Rogue and Wizard Scholar | 31, 59, 61, 77 | `3ad9ee1733f5e3f38507fc98959cf1e7fd2a2a518419fd7a9eb1317d49c0daaa` |
-| `source/class-spell-replacement.txt` | Spell-replacement permissions and timing for all eight spellcasting classes | 31, 35-36, 41, 55, 59, 64-65, 70-71, 76-77 | `0bec1f18ee5f6d3fb2774b227c8a78153b337ff0e42b860c52bd0f46f36c846b` |
-| `source/armor-table.txt` | Armor table: **12 armours plus Shield — 13 rows**, with AC formula, Strength requirement and stealth penalty | 91 | `c8bd735199d7649f19877f6e746ce2fca40496340c48a0733eb9f0371bfaa884` |
-| `source/species-descriptions.txt` | All nine species — creature type, size, speed and traits | 84-86 | `37e05427bbe352a485d0c336cf49bc79886f186203e0497bfdaa978255e6ab3b` |
-| `source/backgrounds.txt` | All four backgrounds — the five parts each, plus the prose describing them | 83 | `9272cca5b81852bf43ddc013e5581cc3736e8c559c26a702774843e7d0fd3f8d` |
-| `source/feats.txt` | Complete Feat Descriptions section — introductory rules and all 17 feats, with PDF line wrapping and discretionary hyphenation removed | 87-88 | `a1d4c8e010381c42a68ae92eed1f77221c7311f9038c2fdb158aca6976befe79` |
-| `source/subclasses.txt` | All twelve subclass names and levelled feature headings, plus the Life Domain, Circle of the Land, Oath of Devotion, Draconic Sorcery and Fiend Patron spell tables; feature prose omitted under D152 | 30, 35, 40, 46, 49, 52, 56-57, 61, 64, 69-70, 76, 82 | `369dcd4fe5adebcd1f4711b3877a70b2e90126df7cac534e4b347cd875a89110` |
-| `source/weapon-attack-cantrips.txt` | True Strike and Shillelagh, the two cantrips that rewrite a weapon attack (D14) | 157, 163 | `067d1f684daba78391fadb639166dcbba2164683360786059fd65e313b01c50a` |
-| `source/attack-class-features.txt` | Martial Arts (all three benefits, die progression) and every Extra Attack grant, plus the multiclass rule (D15) | 24, 27, 47, 49, 55, 57 | `4d9404fe30d3e49b41168f14b9da7a70803fcaa93aa0b93bc8fd805dcae0c96b` |
-| `source/extra-attack-other-sources.txt` | Thirsting Blade and Devouring Blade — Extra Attack granted by an INVOCATION, and scoped to one weapon (D19) | 68, 69, 24 | `53073d181f004ed2bfdf94d7d54278bdaa00ced8e0f46723732278cd3e59c2cb` |
-| `source/skills-table.txt` | The Skills table (all 18 skills and the ability each uses), the Proficiency Bonus table, and the rules that apply the bonus to a skill or a save | 10, 12, 13 | `f950b9e22f6cc2162d0a04db5b019151de0c0714f52f021accc6ebaee5b1fd5f` |
-| `source/ability-score-generation.txt` | Ability-score generation: Standard Array, Random Generation, and Point Cost, including the complete point-cost and Standard Array by Class tables | 21 | `ff76b23f1bb5a7f6ae5b4b8d857887d3f0966cf97cbddeb9f72bc109a1bc6752` |
-| `source/sheet-math.txt` | Passive Perception, Level 1 Hit Points by Class, Fixed Hit Points by Class, Initiative, unarmoured Armor Class | 21-23 | `69ea40b3f3ac7bd7df28868bc0d142ba4fe29163305377bba235f3f691f2ff1e` |
-| `source/multiclassing.txt` | Multiclassing: Hit Points and Hit Dice, Proficiency Bonus, proficiencies, Armor Class and Extra Attack | 24-25 | `4a6cef7329a5338f16e23fc4404d650e5d157ee7a45d99773b9ba7780909d99b` |
-| `source/multiclass-entry-grants.txt` | The "As a Multiclass Character" clause of all twelve classes — the SUBSET a second class grants (D28) | 27-72 | `3ad04904410c40e03c07dceef379414d2c1bfc0ff2e2f1d64c50448256d9b6ec` |
-| `source/domain-vocabularies.txt` | Schools of Magic, conditions, creature types, damage types and size categories | 104, 179-180, 188 | `ef5e8cced8f6dc1dad92d2903cbbcad144cb2d742bebfe595e6290bf4cc32901` |
-| `source/bard-spell-list.txt` | Complete Bard Spell List | 33-35 | `c0b9c78a5f56a1feffdb58bf42bcac2e475e09e9eae7ec623b617854bdbd4228` |
-| `source/cleric-spell-list.txt` | Complete Cleric Spell List | 38-40 | `9a891b62d3fee06ce0a759437da2385233373afef9ed367e9e65e301a962214c` |
-| `source/druid-spell-list.txt` | Complete Druid Spell List | 44-45 | `b9577c1fb57e334f00e4cdd8663b596edd31f4a1e468b834e596f5ebda3d24a1` |
-| `source/paladin-spell-list.txt` | Complete Paladin Spell List | 55-56 | `444894bc59347f5a5fe931d12340d478662c45592adcd08d713470e269c18ee4` |
-| `source/ranger-spell-list.txt` | Complete Ranger Spell List | 60 | `4331180fbbce595e0c72e7647a0ba3c114671c14c6ccd421420d56584bbb2b16` |
-| `source/sorcerer-spell-list.txt` | Complete Sorcerer Spell List | 67-69 | `7942750ff98fd1a230cd44a42cf79064caa40f63eabfcd68c546b9666dbd7fa6` |
-| `source/warlock-spell-list.txt` | Complete Warlock Spell List | 74-76 | `0845b2b01463abc15c56b6c6f3b0eb2f234920e4ad5e93ce672ad5110839c7cb` |
-| `source/wizard-spell-list.txt` | Complete Wizard Spell List | 79-82 | `c1e51d5f924cdb5ff0b36f73ccce3870b9b3f11b974ef827daabace8ba23a583` |
-| `source/spell-descriptions.txt` | Complete Spell Descriptions section, enumerating 339 unique spell headings | 107-175 | `93e7a5c245b073586872c0736deb24a5463f94c55033871bd71e6d76cf0bd4fa` |
-| `source/unarmored-defense.txt` | Unarmored Defense — the Barbarian and Monk level-1 features, whose second ability AND shield clause differ (D75) | 29, 50 | `312bfc8e1e4dbe5f8bcfca589cbd4c7b9faaee89cfe47c4fbec4e62c4e75e544` |
+| `source/weapons-table.txt` | Weapons table, all four categories | 90 | `bec5ac33b7ecfea781ac594f5724778d73de3c5baa057dbb934419cd7a44630f` |
+| `source/weapon-mastery-progression.txt` | Barbarian and Fighter class tables (the count is a COLUMN) | 27, 47 | `abffb6f60ee785df7e951772ad068d0993e3aa0c84046beaad5e9249c9694aff` |
+| `source/weapon-mastery-flat-classes.txt` | Paladin, Ranger, Rogue feature text (the count is PROSE) | 55, 57, 60 | `143b8da92571cdf11d5ff8c884b6bbe0703a1b7b1a5c1c3757fff1f0a06e6631` |
+| `source/class-core-traits.txt` | Core Traits table for all twelve classes — hit die, saving throws, skill/weapon proficiencies, armour training | 26-72 | `56e5145be00c43c11602067b0dcea9aa8f3669c3cd4b5e6087a57978672e89be` |
+| `source/class-starting-equipment.txt` | Starting Equipment row for all twelve classes, with PDF line wrapping and discretionary hyphenation removed | 28, 31, 36, 41, 47, 49, 53, 57, 61, 64, 70, 77 | `e4011ad3662cd63aea29df7998eb9bf078c1aaccb8ada199b3801c406fa039fe` |
+| `source/class-level-tables.txt` | Complete level 1–20 Features table for all twelve classes, including spell-slot columns where printed | 28, 31, 36, 41, 47, 50, 53, 58, 62, 65, 71, 77 | `a42925cfeff1df54e909947389daf7ae641377a57b456fa7c4bfd9b503a4ea0c` |
+| `source/class-expertise.txt` | Every class feature that grants Expertise — Bard, Ranger, Rogue and Wizard Scholar | 31, 59, 61, 77 | `42b990b7a8b5dd606922ce12d98ffbd1198360f3b347ad8eb277a5b57b6083e1` |
+| `source/class-spell-replacement.txt` | Spell-replacement permissions and timing for all eight spellcasting classes | 31, 35-36, 41, 55, 59, 64-65, 70-71, 76-77 | `f108ba0c2bf5aa5f806a0fabf84bc79e2751448a90ea554b0cce3cd2426e7f22` |
+| `source/armor-table.txt` | Armor table: **12 armours plus Shield — 13 rows**, with AC formula, Strength requirement and stealth penalty | 91 | `a5cf0886a0339b8955d9bb990a43e282800780e963658c4f20ea590c9a62fdd0` |
+| `source/species-descriptions.txt` | All nine species — creature type, size, speed and traits | 84-86 | `d59101de6375cabe17c320303b8f365cd7ea2a2e589ebf568324c750c0655da9` |
+| `source/backgrounds.txt` | All four backgrounds — the five parts each, plus the prose describing them | 83 | `6993612280d0d255d5b702945f4da9448fbd3966ef5b47b8e196e0e0cc837a06` |
+| `source/feats.txt` | Complete Feat Descriptions section — introductory rules and all 17 feats, with PDF line wrapping and discretionary hyphenation removed | 87-88 | `96af9e58dffa92f66d6cca8311ebcbc56ec599c137efb32823da7f0a4e32747a` |
+| `source/subclasses.txt` | All twelve subclass names and levelled feature headings, plus the Life Domain, Circle of the Land, Oath of Devotion, Draconic Sorcery and Fiend Patron spell tables; feature prose omitted under D152 | 30, 35, 40, 46, 49, 52, 56-57, 61, 64, 69-70, 76, 82 | `2745c4437a6a314da408f057aa5ed2f092ea6961324841a70cac8799cf747816` |
+| `source/weapon-attack-cantrips.txt` | True Strike and Shillelagh, the two cantrips that rewrite a weapon attack (D14) | 157, 163 | `372b4358275937d204601ca0ae645db90a7aa32ce76821863e8a5e25f3341880` |
+| `source/attack-class-features.txt` | Martial Arts (all three benefits, die progression) and every Extra Attack grant, plus the multiclass rule (D15) | 24, 27, 47, 49, 55, 57 | `ee6b151bead045d30518c9698f991d49fd9790420a8eb62c5b8068b107bd5d59` |
+| `source/extra-attack-other-sources.txt` | Thirsting Blade and Devouring Blade — Extra Attack granted by an INVOCATION, and scoped to one weapon (D19) | 68, 69, 24 | `828a1c9829b77622b734326d79b5877d7f424489ff72035bafd1542f4e74328c` |
+| `source/skills-table.txt` | The Skills table (all 18 skills and the ability each uses), the Proficiency Bonus table, and the rules that apply the bonus to a skill or a save | 10, 12, 13 | `626c451b2c3d535ecb484c12521ae4b63a77922eb5b2c78f6379e143039d0868` |
+| `source/ability-score-generation.txt` | Ability-score generation: Standard Array, Random Generation, and Point Cost, including the complete point-cost and Standard Array by Class tables | 21 | `0999337da9d793311c72fb5198cd7e3f23c6fc72e1dbdd6a6adc6f72d4c6b441` |
+| `source/sheet-math.txt` | Passive Perception, Level 1 Hit Points by Class, Fixed Hit Points by Class, Initiative, unarmoured Armor Class | 21-23 | `bbdb97493386a773512cfe379bd5be82430eb49f212902ca7180be54933373c9` |
+| `source/multiclassing.txt` | Multiclassing: Hit Points and Hit Dice, Proficiency Bonus, proficiencies, Armor Class and Extra Attack | 24-25 | `e815c8d2cbd7cebffd1a471353476095393a810c91be4319e2f096a22a4505a7` |
+| `source/multiclass-entry-grants.txt` | The "As a Multiclass Character" clause of all twelve classes — the SUBSET a second class grants (D28) | 27-72 | `c0397f4114b33a64f6a8d198ba5e088393c035b8e137fbf482129a2b495e47b9` |
+| `source/domain-vocabularies.txt` | Schools of Magic, conditions, creature types, damage types and size categories | 104, 179-180, 188 | `d555d3eb9fb517d88585e8a4efcedd3ef7ad675450ecc2155567989ab35b2626` |
+| `source/bard-spell-list.txt` | Complete Bard Spell List | 33-35 | `7cdca733e61177a5d73606c918b905647bf793681ab9a648577c09c1f40ad9ad` |
+| `source/cleric-spell-list.txt` | Complete Cleric Spell List | 38-40 | `8a91ee63ab3ee4ef39c54e066c3ba255cdfb6a2ef39ab7391d8d92e051d2a547` |
+| `source/druid-spell-list.txt` | Complete Druid Spell List | 44-45 | `054589b1545c8eb3b7e7d7c1b215816790cef44091d75b944a9fc398957667f4` |
+| `source/paladin-spell-list.txt` | Complete Paladin Spell List | 55-56 | `783040fafe3f1b7266cda2739c4f6ccb9357d0e026aafee9730111f4e46f3d75` |
+| `source/ranger-spell-list.txt` | Complete Ranger Spell List | 60 | `dd1ab7523bce6cf483f8977088185994b4a67389279bfe48389cef4099c090b2` |
+| `source/sorcerer-spell-list.txt` | Complete Sorcerer Spell List | 67-69 | `2f5571a173d92e4ca53e931009564483fa2fbe91e2b140871d2c3f5e106ea394` |
+| `source/warlock-spell-list.txt` | Complete Warlock Spell List | 74-76 | `43d0c57d27e3580d8f2ff6b0174fb778f1eb43251ec91e182f126fcbb14621e1` |
+| `source/wizard-spell-list.txt` | Complete Wizard Spell List | 79-82 | `8400870a0b7a789fc9f8cf94ea5e9faed9c1682c9bfa9bcc9fd4ee748a713926` |
+| `source/spell-descriptions.txt` | Complete Spell Descriptions section, enumerating 339 unique spell headings | 107-175 | `4f7e4d4df2eb62b47a38e70be5a6c09de084e40886069937ca2c048590470750` |
+| `source/unarmored-defense.txt` | Unarmored Defense — the Barbarian and Monk level-1 features, whose second ability AND shield clause differ (D75) | 29, 50 | `7e225c919bd6c225c106352d2292560ddf1791711b458dd342581896aba56af5` |
 
 ### Why there is a checksum PER EXTRACT, and not only for the PDF
 
@@ -173,8 +173,10 @@ previously believed here:
 document above, byte for byte after its notice header, committed 2026-07-30 at
 the owner's direction ("we will need it all"). The PDF was re-fetched that day
 and its SHA-256 matched this file's table exactly before conversion. Committed
-file SHA-256: `e69e053879d96e8e5568a6807212875ab1dfa1e4059cd14444c0a33f5fba95f2`
-(2,146,883 bytes).
+file SHA-256: `7c53ca15f0d3dafbae54fb0eab10fc60a51af180b8b86254ce006a12e5bbe207`
+(2,146,889 bytes; re-pinned 2026-08-13 when the file's attribution header
+was corrected from the 5.2 statement to the 5.2.1 statement — the six-byte
+delta is exactly that header correction, the SRD body is unchanged).
 
 Two-column pages interleave their columns on each line in that file, so the
 extracts in `source/` remain the readable, column-sliced references and every

@@ -213,7 +213,7 @@ export function parseSpellRange(raw: string | null): SpellRange | null {
 
   // THE ORIGIN SURVIVES AN AREA WE CANNOT READ, AND THAT IS THE WHOLE POINT OF
   // `range_kind`. `Self (15-foot Emanation)` and `Self (15-foot Cube)` are
-  // printed SRD 5.2 Range lines — Emanation and Cube are two of that document's
+  // printed SRD 5.2.1 Range lines — Emanation and Cube are two of that document's
   // six areas of effect and neither is a member of the owner's four-shape list
   // (see {@link SpellAreaShape}). Returning `null` for the whole line because
   // the PARENTHETICAL is outside our vocabulary would store the same four NULLs

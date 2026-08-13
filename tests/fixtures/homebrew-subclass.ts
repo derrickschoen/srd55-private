@@ -6,13 +6,13 @@ import { registerFixtureContentIdentity } from '../helpers/content-identity';
  *
  * D19 §1 is the reason this is here and the reason it is here rather than in
  * `src/rules/`. The owner's request — "some subclasses can add extra attack at
- * level 6" — names a subclass that is NOT in SRD 5.2 and is not free-licensed,
+ * level 6" — names a subclass that is NOT in SRD 5.2.1 and is not free-licensed,
  * so D3 governs: the MODEL must be able to express it, and the bundled seed
  * must not contain it. Nothing in `src/` writes a `subclass_features` row.
  *
  * ORIGINAL, AND THAT WORD IS DOING WORK. The name, the two features' names and
  * every sentence of their text were written for this fixture, AND NOT ONE OF
- * THEM IS TRANSCRIBED FROM ANYWHERE — SRD 5.2 included. An earlier draft of the
+ * THEM IS TRANSCRIBED FROM ANYWHERE — SRD 5.2.1 included. An earlier draft of the
  * level 6 feature was a clause reordering of the SRD's own "you can attack
  * twice instead of once whenever you take the Attack action on your turn". That
  * was licence-safe (CC-BY, already bundled here under the required notice) but

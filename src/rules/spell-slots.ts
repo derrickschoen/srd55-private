@@ -1,5 +1,5 @@
 /**
- * The tables in this file are derived from the System Reference Document 5.2
+ * The tables in this file are derived from the System Reference Document 5.2.1
  * and ship inside the bundle, so they carry the same obligation as any bundled
  * data file: see SRD_ATTRIBUTION_NOTICE in ./srd-attribution, which the running
  * application renders, and docs/srd/ATTRIBUTION.md.

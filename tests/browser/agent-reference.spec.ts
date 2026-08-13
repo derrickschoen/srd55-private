@@ -318,7 +318,7 @@ test('the build reference sections are collapsed, present in the DOM, and never 
     value.scope.coverage.find((fact) => fact.concept === 'subclass')?.state,
   ).toBe('partial');
   await expect(scope).toContainText('character sheet screen');
-  await expect(scope).toContainText('System Reference Document 5.2');
+  await expect(scope).toContainText('System Reference Document 5.2.1');
 });
 
 test('the planner exposes accessible names and a real sort state for an operator', async ({

@@ -30,7 +30,7 @@ export function renderLegalPage(): string {
         </header>
 
         <section class="legal-section">
-          <h2>System Reference Document 5.2</h2>
+          <h2>System Reference Document 5.2.1</h2>
           <p class="srd-attribution" data-testid="srd-attribution">${attributionNotice()}</p>
           <p>The class list, the cantrip and spell-slot progressions, and the
             multiclass spellcaster slot table SRD-55 calculates with are

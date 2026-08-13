@@ -1,6 +1,7 @@
 {
   "name": "srd-55",
   "private": true,
+  "license": "MIT",
   "version": "0.0.0",
   "description": "SRD-55 is a local-first character builder",
   "type": "module",
