@@ -39,6 +39,29 @@ export const ASI_UNREADABLE: FeatParagraph = {
   text: 'Increase whichever ability score you feel like today.',
 };
 
+/**
+ * F1 (codex round-1, HIGH): the two-point/"any" shape's PREFIX matches, but
+ * the paragraph keeps going after it — an extra mechanic bolted onto the
+ * same paragraph, the way a hand-edited wikidot page can. Must NOT parse:
+ * the whole paragraph stays in `unmodeledProse`, never split so the trailing
+ * clause is silently lost.
+ */
+export const ASI_TWO_POINT_WITH_TRAILING_CLAUSE: FeatParagraph = {
+  label: 'Ability Score Increase.',
+  text:
+    'Increase one ability score of your choice by 2, or increase two ability ' +
+    'scores of your choice by 1. This feat can’t increase an ability score ' +
+    'above 20. You also gain the ability to breathe underwater.',
+};
+
+/** F1: the one-point/named-pair shape's prefix matches, with trailing content. */
+export const ASI_ONE_POINT_WITH_TRAILING_CLAUSE: FeatParagraph = {
+  label: 'Ability Score Increase.',
+  text:
+    'Increase your Wisdom or Charisma score by 1, to a maximum of 20. ' +
+    'You also gain darkvision out to 60 feet.',
+};
+
 /** Shape (b): the ONLY recognised single-skill-proficiency sentence. */
 export const SKILL_PROFICIENCY_SURVIVAL: FeatParagraph = {
   label: 'Keen Tracker.',
