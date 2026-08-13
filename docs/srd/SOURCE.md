@@ -173,8 +173,10 @@ previously believed here:
 document above, byte for byte after its notice header, committed 2026-07-30 at
 the owner's direction ("we will need it all"). The PDF was re-fetched that day
 and its SHA-256 matched this file's table exactly before conversion. Committed
-file SHA-256: `e69e053879d96e8e5568a6807212875ab1dfa1e4059cd14444c0a33f5fba95f2`
-(2,146,883 bytes).
+file SHA-256: `7c53ca15f0d3dafbae54fb0eab10fc60a51af180b8b86254ce006a12e5bbe207`
+(2,146,889 bytes; re-pinned 2026-08-13 when the file's attribution header
+was corrected from the 5.2 statement to the 5.2.1 statement — the six-byte
+delta is exactly that header correction, the SRD body is unchanged).
 
 Two-column pages interleave their columns on each line in that file, so the
 extracts in `source/` remain the readable, column-sliced references and every
