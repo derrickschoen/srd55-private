@@ -792,7 +792,7 @@ test('the empty-database front door chooses class first, persists once named, an
       .isVisible()
       .catch(() => false)
   ) {
-    const pickers = page.getByRole('combobox');
+    const pickers = page.locator('.guided-spell-choice').getByRole('combobox');
     const count = await pickers.count();
     const picker = pickers.first();
     const label = await picker.getAttribute('aria-label');
