@@ -751,6 +751,10 @@ test('whole-library download restores authored and imported content into a fresh
       kind: 'subclass',
       name: 'Warrior of the Barbed Court (Bundled revision 4)',
     },
+    {
+      kind: 'subclass',
+      name: 'Warrior of the Barbed Court (Bundled revision 5)',
+    },
   ];
   const sourceCatalog = await page.evaluate(async () => {
     const [identityRows, speciesRows, subclassRows, supersessionRows] =
@@ -843,6 +847,14 @@ test('whole-library download restores authored and imported content into a fresh
         '2024:content.subclass:warrior-of-the-barbed-court-bundled-revision-4',
       recorded_at: expect.any(String),
     },
+    {
+      content_kind: 'subclass',
+      superseded_content_key:
+        '2024:content.subclass:warrior-of-the-barbed-court-bundled-revision-4',
+      successor_content_key:
+        '2024:content.subclass:warrior-of-the-barbed-court-bundled-revision-5',
+      recorded_at: expect.any(String),
+    },
   ]);
 
   const [libraryDownload] = await Promise.all([
@@ -893,7 +905,7 @@ test('whole-library download restores authored and imported content into a fresh
   );
   await confirmLibraryReview(page);
   await expect(page.locator('.transfer-status')).toHaveText(
-    'Library imported: 10 added to your library, 0 matched existing.',
+    'Library imported: 11 added to your library, 0 matched existing.',
   );
 
   const restored = await page.evaluate((speciesName) => {
@@ -961,6 +973,7 @@ test('whole-library download restores authored and imported content into a fresh
         'Warrior of the Barbed Court (Bundled revision 2)',
         'Warrior of the Barbed Court (Bundled revision 3)',
         'Warrior of the Barbed Court (Bundled revision 4)',
+        'Warrior of the Barbed Court (Bundled revision 5)',
       ].includes(String(row.name))).map((row) => String(row.name)).sort(),
       supersessions: supersessionRows.map((row) => ({
         content_kind: String(row.content_kind),
@@ -994,6 +1007,7 @@ test('whole-library download restores authored and imported content into a fresh
     'Warrior of the Barbed Court (Bundled revision 2)',
     'Warrior of the Barbed Court (Bundled revision 3)',
     'Warrior of the Barbed Court (Bundled revision 4)',
+    'Warrior of the Barbed Court (Bundled revision 5)',
   ]);
 
   await page.goto('/homebrew');

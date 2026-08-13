@@ -68,7 +68,12 @@ async function importBundledHomebrew(
     name: 'Import with these choices',
     exact: true,
   }).click();
-  await expect(page.locator('.transfer-status')).toHaveText(expectedSummary);
+  // The bundled install commits one identity per catalog revision (11 as of
+  // barbedCourtV5) inside the browser; under a shared CPU that legitimately
+  // exceeds the default 5s expect window. The asserted text is unchanged.
+  await expect(page.locator('.transfer-status')).toHaveText(expectedSummary, {
+    timeout: 30_000,
+  });
   await expect(trigger).toBeEnabled();
 }
 
@@ -100,7 +105,7 @@ test('imports bundled homebrew through publish, applies derived third-caster slo
   await homebrewReady(page);
   for (const [name, versionCount] of [
     ['Veteran (Bundled revision 3)', 3],
-    ['Warrior of the Barbed Court (Bundled revision 4)', 4],
+    ['Warrior of the Barbed Court (Bundled revision 5)', 5],
     ['Spell Student (Bundled revision 2)', 2],
   ] as const) {
     const card = publishedCard(page, name);
@@ -292,7 +297,7 @@ test('imports bundled homebrew through publish, applies derived third-caster slo
   await homebrewReady(page);
   for (const name of [
     'Veteran (Bundled revision 3)',
-    'Warrior of the Barbed Court (Bundled revision 4)',
+    'Warrior of the Barbed Court (Bundled revision 5)',
     'Spell Student (Bundled revision 2)',
   ]) {
     await expect(publishedCard(page, name)).toBeVisible();

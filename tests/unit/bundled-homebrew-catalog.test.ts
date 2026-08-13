@@ -197,11 +197,23 @@ describe('bundled homebrew catalog payload', () => {
 
     expect(barbed.reference_text).toBe(identity);
     expect(actual).toEqual(Object.fromEntries(features));
-    expect(entry?.revisions).toHaveLength(4);
+    expect(entry?.revisions).toHaveLength(5);
     expect(handsAt(2)).not.toContain('grapple');
     expect(handsAt(3)).toContain(
       'you can grapple creatures up to two sizes larger than you',
     );
+    const featureNamesAt = (revision: number): readonly string[] => {
+      const document = entry?.revisions[revision];
+      return document?.kind === 'subclass'
+        ? document.features.map((feature) => feature.name)
+        : [];
+    };
+    expect(featureNamesAt(3)).toEqual(expect.arrayContaining([
+      'Innate Sorcery of the Court',
+      'Unshaken Aim',
+    ]));
+    expect(featureNamesAt(4)).not.toContain('Innate Sorcery of the Court');
+    expect(featureNamesAt(4)).not.toContain('Unshaken Aim');
     expect(barbed.progression).toMatchObject({
       mode: 'override',
       spellcasting_ability: 'wisdom',

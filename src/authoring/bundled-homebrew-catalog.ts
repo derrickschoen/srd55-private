@@ -531,6 +531,38 @@ const barbedCourtV4: SubclassAuthoringDraft = Object.freeze<SubclassAuthoringDra
       : feature)),
 });
 
+const barbedCourtV5: SubclassAuthoringDraft = Object.freeze<SubclassAuthoringDraft>({
+  ...barbedCourtV4,
+  features: Object.freeze(barbedCourtV4.features.filter((feature) =>
+    feature.name !== 'Innate Sorcery of the Court' &&
+      feature.name !== 'Unshaken Aim').map((feature) =>
+    feature.name === 'Hands of the Barbed Court'
+      ? Object.freeze({
+          ...feature,
+          description: [
+            'As a Bonus Action, you can spend 4 Focus Points to manifest the full court — a 15-foot Emanation of invisible slapping hands — for up to 10 minutes. The effect requires Concentration. While the court is manifested, when you hit a creature in the Emanation with an attack, the hands add Psychic damage equal to your Wisdom modifier to the hit.',
+            'At Monk level 17 the court matures: the hands\' extra damage increases to twice your Wisdom modifier, and the court guides your aim — you have Advantage on attack rolls against creatures in the Emanation.',
+          ].join('\n\n'),
+        })
+      : feature.name === 'The Standing Hand'
+      ? Object.freeze({
+          ...feature,
+          description: [
+            'When you cast Mage Hand, its duration is 8 hours, and the hand can deliver your insults — a goad\'s slap, sneer, or gesture can visibly come from the hand. While your Mage Hand is present, the Unarmed Strikes you make as part of the Attack action have a reach of 10 feet, delivered by the hand.',
+            'The hand also holds what you seize: while your Mage Hand is present, you can grapple creatures up to two sizes larger than you (one size beyond the usual limit).',
+          ].join('\n\n'),
+        })
+      : feature.name === "Courtier's Slap"
+      ? Object.freeze({
+          ...feature,
+          description: [
+            'Once on each of your turns when you take the Attack action, you can also have a spectral hand appear and make an unarmed strike against one creature within 10 feet of you as part of that action; the hand then vanishes. On a hit, the target takes Psychic damage equal to one roll of your Martial Arts die + your Wisdom modifier, and its Speed is reduced by 10 feet until the start of your next turn.',
+            'The slap works whether or not your Mage Hand is present and doesn\'t require your Bonus Action.',
+          ].join('\n\n'),
+        })
+      : feature)),
+});
+
 function spellStudentRevision(
   explicitSpellLevels: boolean,
 ): SubclassAuthoringDraft {
@@ -596,7 +628,7 @@ export const BUNDLED_HOMEBREW_CATALOG = Object.freeze([
   }),
   Object.freeze({
     catalog_key: 'warrior-of-the-barbed-court',
-    revisions: Object.freeze([barbedCourtV1, barbedCourtV2, barbedCourtV3, barbedCourtV4] as const),
+    revisions: Object.freeze([barbedCourtV1, barbedCourtV2, barbedCourtV3, barbedCourtV4, barbedCourtV5] as const),
   }),
   Object.freeze({
     catalog_key: 'spell-student',

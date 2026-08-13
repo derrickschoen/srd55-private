@@ -115,15 +115,12 @@ the attack and damage rolls of your Unarmed Strikes.
 
 ## Level 3: Courtier's Slap
 
-Once on each of your turns when you take the Attack action and make an
-Unarmed Strike, you can also have a spectral hand appear and slap one
+Once on each of your turns when you take the Attack action, you can also
+have a spectral hand appear and make an unarmed strike against one
 creature within 10 feet of you as part of that action; the hand then
-vanishes. If the target is within 5 feet of you, the slap is an Unarmed
-Strike; against a farther target, it is a ranged weapon attack that uses
-your Wisdom modifier for its attack and damage rolls. On a hit, the
-target takes Psychic damage equal to one roll of your Martial Arts die +
-your Wisdom modifier, and its Speed is reduced by 10 feet until the start
-of your next turn.
+vanishes. On a hit, the target takes Psychic damage equal to one roll of
+your Martial Arts die + your Wisdom modifier, and its Speed is reduced by
+10 feet until the start of your next turn.
 
 The slap works whether or not your *Mage Hand* is present and doesn't
 require your Bonus Action.
@@ -136,24 +133,15 @@ from the hand. While your *Mage Hand* is present, the Unarmed Strikes you
 make as part of the Attack action have a reach of 10 feet, delivered by
 the hand.
 
-## Level 3: Innate Sorcery of the Court
-
-You can spend 2 Focus Points (no action required) to unleash the Court's
-simmering magic for 1 minute: the spell save DC of your Barbed Court
-spells increases by 1, and you have Advantage on the attack rolls of
-Barbed Court spells you cast.⁶ The effect doesn't stack with itself;
-activating it again restarts the duration.
+The hand also holds what you seize: while your *Mage Hand* is present,
+you can grapple creatures up to two sizes larger than you (one size
+beyond the usual limit).
 
 ---
 
 ## Level 6: Warding Image
 
 An illusory after-image attends you: you gain a +2 bonus to Armor Class.
-
-## Level 6: Unshaken Aim
-
-Being within 5 feet of an enemy doesn't impose Disadvantage on your
-ranged attack rolls.
 
 ## Level 6: Barbed Fists
 
@@ -178,10 +166,6 @@ minutes. The effect requires Concentration. While the court is
 manifested, when you hit a creature in the Emanation with an attack, the
 hands add Psychic damage equal to your Wisdom modifier to the hit.
 
-The hands also hold what you seize: while the court is manifested, you
-can grapple creatures up to two sizes larger than you (one size beyond
-the usual limit).
-
 At Monk level 17 the court matures: the hands' extra damage increases to
 twice your Wisdom modifier, and the court guides your aim — you have
 Advantage on attack rolls against creatures in the Emanation.
@@ -204,7 +188,7 @@ Bonus Action remains available).
 Whenever you manifest the Hands — at Initiative or as a Bonus Action — you
 can spend 3 additional Focus Points to raise the Rebuking Shield: for as
 long as the court remains manifested, a creature that hits you with a
-melee attack takes 2d8 Psychic damage,⁷ and you are immune to the Charmed
+melee attack takes 2d8 Psychic damage,⁶ and you are immune to the Charmed
 and Frightened conditions and to Psychic damage. The shield is visible
 only as a shimmer of affronted dignity. This is a subclass feature, not
 spellcasting — no spell slot, no components, and it can't be
@@ -242,12 +226,7 @@ pattern. Every named spell is an SRD 5.2.1 spell, unmodified. *Shield* and
 *Blur* are granted from outside the Bard list (both Sorcerer/Wizard
 spells in the SRD).
 
-⁶ Adapted from the SRD 5.2.1 Sorcerer feature *Innate Sorcery*: the
-benefits (+1 save DC, Advantage on the spells' attack rolls, 1 minute)
-are the SRD's; the Bonus Action activation and twice-per-Long-Rest limit
-are replaced by the Focus Point cost.
-
-⁷ The Rebuking Shield's retaliation clause adapts the SRD 5.2.1 spell
+⁶ The Rebuking Shield's retaliation clause adapts the SRD 5.2.1 spell
 *Fire Shield*'s 2d8-on-melee-hit mechanic, with the damage type changed to
 Psychic, the resistance clause removed, and the effect delivered as a
 subclass feature rather than a casting of the spell.

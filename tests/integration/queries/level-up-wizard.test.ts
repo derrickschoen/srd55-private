@@ -842,7 +842,7 @@ describe('level-up wizard state RPC', () => {
 
     for (const [className, expectedNames] of [
       ['Fighter', ['Champion', 'Spell Student (Bundled revision 2)']],
-      ['Monk', ['Warrior of the Barbed Court (Bundled revision 4)', 'Warrior of the Open Hand']],
+      ['Monk', ['Warrior of the Barbed Court (Bundled revision 5)', 'Warrior of the Open Hand']],
       ['Rogue', ['Thief', 'Veteran (Bundled revision 3)']],
     ] as const) {
       const characterId = createCharacter(`${className} Imported Choices`);
