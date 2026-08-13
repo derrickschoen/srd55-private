@@ -7,6 +7,18 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D236 — OWNER: species templates may author ability_override; the effect vocabulary is fully wide (2026-08-13)
+
+Follow-up to D235's sibling ruling. Asked directly whether a species
+template may author `ability_override` (set-to score, Headband-of-Intellect
+shape) or whether that stays character-only per D83's rationale, the owner
+chose: **allow on species too — fully wide, widest authoring surface.**
+D83's template exclusion is superseded for species templates; the R1 scope
+table carries no species-side exclusion row. The source-required invariant
+on ability effects (an increase/override must carry a source_instance_id
+once applied to a character) is unchanged — this ruling is about what a
+TEMPLATE may declare, not how an applied effect is owned.
+
 ## D235 — OWNER: rows conflicting with declared types are unstorable at write and THROW at read (2026-08-13)
 
 The owner, during the type-contracts audit (docs/design/2026-08-13-type-contracts-audit.md):
