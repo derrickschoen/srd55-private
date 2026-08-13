@@ -7,6 +7,27 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D235 — OWNER: rows conflicting with declared types are unstorable at write and THROW at read (2026-08-13)
+
+The owner, during the type-contracts audit (docs/design/2026-08-13-type-contracts-audit.md):
+"The ts code should make it impossible to store a row that conflicts with the
+types. It should throw an error if a row is selected that conflicts with the
+types." Two obligations: (1) WRITE-side — the path that stores a row must make
+a type-conflicting row unrepresentable (typed columns, closed vocabularies,
+CHECKs transcribed from ONE enum source per D13); (2) READ-side — reading a row
+that violates its declared contract is a throwing error at the read boundary,
+not a value that flows on. Reads validate through a parse boundary (a
+projector/`fromObject`-style factory or the Zod row contract), applied per
+query result, not only at import/backup boundaries as before. R2's
+`slotContract(row)` projector and R4's typed `state` are instances; new read
+models follow suit. Performance shape: validate once per row per query at the
+projection into a domain object — not per field access.
+
+Same ruling's sibling call: the species-template effect vocabulary dispute
+(DB CHECK 10 kinds vs Zod contract 5) resolves WIDE — `speciesTemplateEffectKinds`
+and its Zod enum are deleted; the D83 ability_override-on-templates question is
+reopened as a follow-up, not silently decided.
+
 ## D234 — OWNER: the sim lands on main; the subclass-session rulings arc folds by pointer (2026-08-12)
 
 The owner approved landing tools/sim on main ("Land it now"), satisfying
