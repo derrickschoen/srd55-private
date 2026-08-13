@@ -23,7 +23,55 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-12-c (newest - read first)
+## RESTART POINT 2026-08-12-d (newest - read first)
+MAIN 989afd76 (mirror pushed). NINETY-SEVEN merges. Floors: vitest
+278 files / 4,645 tests; PW 170; sim 171/171; build 0; migrations
+0000-0046.
+
+95TH (30725516, wt/flake pruned): the two chronic flakes were a
+navigation defect and a subject mismatch. Planner→sheet was a
+full-document navigation restarting worker/OPFS/catalog boot; SPA-router
+fix w/ modifier-click fallthrough, spec waits for sheet + aria-busy
+false + document-lifetime sentinel; guided-builder counted page-global
+comboboxes vs Equipment's legitimate Fighting Style select → exact
+.guided-spell-choice selector. 20/20 proofs each; pool 169 passed +
+sharing.spec:378 (v20 authored import) timed out once in-pool, iso-pass
+25.1s vs 30s budget — disclosed, not a lane regression.
+
+96TH (c47473fc, wt/hbval pruned): homebrew validated in sim + rotations
+adopted from SRD text. Eight v3 designs measured (claims mostly LOW from
+crit-doubling omission — measured numbers are the deliverable); Fiend
+slot-volley row 10.8/19.2/33.7/45.6 vs cantrip 7.6/16.5/26.5/54.7;
+rotation adoptions cited to docs/srd/full/srd-5.2.1.txt (one-slot :6398,
+SG double-tick :10490 once-per-TURN reading flagged, Scorching Ray
+:10145, HM no-retarget :8917); board: Life ~doubles at 11+, Devotion
+thrown drops (BA contention + six-javelin cap, srd-board assertions
+corrected hand-derived). ROTATION_AUDIT.md declares unpriced; sim
+161→171; digest CLEAN (citations spot-checked to text); D233
+byte-identical.
+
+97TH (989afd76, wt/barbed pruned): OWNER-REQUESTED Barbed Court buff —
+grapple up to two sizes larger while Hands of the Barbed Court is
+manifested (one beyond SRD default). Append-only barbedCourtV4
+(veteranV3 pattern, uuids kept); player doc lockstep
+(extractor-enforced); catalog test pins revisions=4 + V3-lacks/V4-has.
+CLAUDE IMPLEMENTED, CODEX REVIEWED (P1: stale downstream revision pins
+— hand-updated at installer/level-up-wizard/import.spec/remedy.spec
+sites; install inputHash fingerprint refreshed from run 51cb7332…,
+run-derived and disclosed, behavior pins hand-updated first). Gates:
+targeted 27/27, vitest 278/4645, build 0, PW 169 + sharing:378 iso-pass
+25.7s; import.spec:318 timed out once under pool load, iso 29.6s —
+bundled import commit slower w/ 9th revision, latency note not defect.
+NOTE: wt/party's copy of warrior-of-the-barbed-court-player.md now
+DIVERGES from main (grapple clause on main only; wt/party OWNER-ACTIVE,
+untouched).
+
+PARKED: sweep-7 findings (S7-01..08) committed on wt/s7, digest CLEAN;
+fix-wave scope question REJECTED by owner — awaiting owner, do NOT
+re-ask. Queues otherwise empty. Homebrew v3 adopt/author decisions
+still open with owner.
+
+## RESTART POINT 2026-08-12-c (superseded by 08-12-d)
 MAIN 2d9ea6fd (mirror pushed). NINETY-FOUR merges. THE SIM IS ON MAIN:
 94th landed tools/sim (twelve SRD builds + ranged/thrown rows +
 SUBSTITUTIONS.md, sim tests 132/132 supervisor-run) plus the
