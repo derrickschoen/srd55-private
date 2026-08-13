@@ -273,7 +273,7 @@ describe('bundled authored-kind installer', () => {
       '8d36536109be8768e2c274958b1ee9eb70a74cb37a988c7f27e88eebb0d8d84a',
     );
     expect(firstPlan.inputHash).toBe(
-      'f0a5206baf3735ecbb8c8a0edef51f5ac30affbcca4c4a6d3ebcc14b13f5372e',
+      '51cb733242987e074e4b561f23db9cfdcf524dc269aef055319689755c69fb79',
     );
 
     expect(firstPlan.entries.map((entry) => [entry.name, entry.outcome, entry.error])).toEqual([
@@ -288,11 +288,11 @@ describe('bundled authored-kind installer', () => {
         contentKey: '2024:content.subclass:veteran-bundled-revision-3',
       }, {
         kind: 'create',
-        contentKey: '2024:content.subclass:warrior-of-the-barbed-court-bundled-revision-3',
+        contentKey: '2024:content.subclass:warrior-of-the-barbed-court-bundled-revision-4',
       }, { kind: 'create' }],
     });
     expect(db.scalar<number>("SELECT count(*) FROM catalog_content_identities WHERE catalog_layer = 'external'"))
-      .toBe((beforeRoots ?? 0) + 8);
+      .toBe((beforeRoots ?? 0) + 9);
     expect(db.allRaw(
       `SELECT superseded_content_key, successor_content_key
        FROM catalog_content_supersessions WHERE content_kind = 'subclass'`,
@@ -317,6 +317,10 @@ describe('bundled authored-kind installer', () => {
         superseded_content_key: '2024:content.subclass:warrior-of-the-barbed-court-bundled-revision-2',
         successor_content_key: '2024:content.subclass:warrior-of-the-barbed-court-bundled-revision-3',
       },
+      {
+        superseded_content_key: '2024:content.subclass:warrior-of-the-barbed-court-bundled-revision-3',
+        successor_content_key: '2024:content.subclass:warrior-of-the-barbed-court-bundled-revision-4',
+      },
     ]);
     expect(db.scalar<number>('SELECT count(*) FROM catalog_content_drafts')).toBe(0);
 
@@ -330,7 +334,7 @@ describe('bundled authored-kind installer', () => {
       outcomes: [{ kind: 'match' }, { kind: 'match' }, { kind: 'match' }],
     });
     expect(db.scalar<number>('SELECT count(*) FROM catalog_content_identities')).toBe(rootsAfterFirst);
-    expect(db.scalar<number>('SELECT count(*) FROM catalog_content_supersessions')).toBe(5);
+    expect(db.scalar<number>('SELECT count(*) FROM catalog_content_supersessions')).toBe(6);
     expect(db.scalar<number>('SELECT count(*) FROM catalog_content_drafts')).toBe(0);
   }, 20_000);
 
@@ -439,7 +443,7 @@ describe('bundled authored-kind installer', () => {
     const report = new BuildReportBuilder(db).build(characterId);
     expect(report.classes[0]).toMatchObject({
       name: 'Monk',
-      subclass: 'Warrior of the Barbed Court (Bundled revision 3)',
+      subclass: 'Warrior of the Barbed Court (Bundled revision 4)',
       class_level: 7,
       spellcasting_ability: 'wisdom',
       progression_type: 'third_up',
@@ -919,7 +923,7 @@ describe('bundled authored-kind installer', () => {
         kind: 'subclass',
         content_key: barbedCourt.contentKey,
         aggregate: expect.objectContaining({
-          name: 'Warrior of the Barbed Court (Bundled revision 3)',
+          name: 'Warrior of the Barbed Court (Bundled revision 4)',
         }),
       }),
       expect.objectContaining({
@@ -961,6 +965,14 @@ describe('bundled authored-kind installer', () => {
           '2024:content.subclass:warrior-of-the-barbed-court-bundled-revision-3',
         recorded_at: expect.any(String),
       },
+      {
+        content_kind: 'subclass',
+        superseded_content_key:
+          '2024:content.subclass:warrior-of-the-barbed-court-bundled-revision-3',
+        successor_content_key:
+          '2024:content.subclass:warrior-of-the-barbed-court-bundled-revision-4',
+        recorded_at: expect.any(String),
+      },
     ]);
     const sourceProjection = projectStoredAuthoredContentV1(source, {
       kind: 'subclass',
@@ -991,7 +1003,7 @@ describe('bundled authored-kind installer', () => {
       [imported.characterId],
     );
     expect(importedDefinition).toMatchObject({
-      name: 'Warrior of the Barbed Court (Bundled revision 3)',
+      name: 'Warrior of the Barbed Court (Bundled revision 4)',
       catalog_layer: 'external',
     });
     expect(target.allRaw(
