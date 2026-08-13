@@ -95,7 +95,13 @@ describe('catalog data-migration registry', () => {
       // Re-pinned 2026-08-13 with the registry: origin-definitions-srd.ts's
       // SRD attribution header corrected to the 5.2.1 statement the source
       // document requires (comment-only diff, verified).
-      checksum: 'b124c031979c8e4eceb6afecbdd8e7b02d20c3a182b5a0fbe4d0dd600813e956',
+      //
+      // Re-pinned again 2026-08-13 with the registry: grant-rule.ts gained the
+      // opt-in `allows_pending_choice` field and grant-rule-slot-generator.ts
+      // honours it, so a rule that DECLARES a pending choice waits instead of
+      // throwing while its config is unwritten. No lineage row changes — see
+      // the registry entry for why the pin still moves.
+      checksum: 'e0cdab308225b671b03b3720bda42781591f1cb3d808f3125e59a641b7262d3c',
     }]);
     expect(() =>
       validateCatalogDataMigrationRegistry(CATALOG_DATA_MIGRATIONS)

@@ -45,6 +45,29 @@ function expectedSrdFixedSpellRule(
   };
 }
 
+/**
+ * The one non-spell subclass grant rule the SRD seed carries: Champion's
+ * level-7 Additional Fighting Style, in the exact NORMALISED shape
+ * `GrantRule.fromObject` persists (defaulted `count`, `always_prepared`,
+ * `with_slots` and `free_cast` included).
+ */
+const EXPECTED_CHAMPION_ADDITIONAL_FIGHTING_STYLE_RULE = {
+  subclass_name: 'Champion',
+  rule: {
+    kind: 'grant_source',
+    rule_key: 'champion-additional-fighting-style',
+    source_type: 'feat',
+    definition_key_config: 'additional_fighting_style_key',
+    child_config_config: 'additional_fighting_style_config',
+    active_from_class_level: 7,
+    allows_pending_choice: true,
+    count: 1,
+    always_prepared: false,
+    with_slots: true,
+    free_cast: null,
+  },
+} as const;
+
 const EXPECTED_SRD_FIXED_SPELL_RULES = [
   ['Draconic Sorcery', 'draconic-sorcery', 3, 'alter-self'],
   ['Draconic Sorcery', 'draconic-sorcery', 3, 'chromatic-orb'],
@@ -400,9 +423,14 @@ describe('persisted class progression catalog', () => {
           rule,
         }));
       });
-    expect(persistedRules).toHaveLength(40);
-    expect(persistedRules).toEqual(
-      EXPECTED_SRD_FIXED_SPELL_RULES.map(
+    // 40 fixed-spell rules, unchanged, plus ONE new rule: Champion's level-7
+    // "Additional Fighting Style" ("You gain another Fighting Style feat of
+    // your choice", SRD 5.2.1 printed page 52). Champion sorts first by name,
+    // so it leads the ordered list; the fixed-spell expectations are untouched.
+    expect(persistedRules).toHaveLength(41);
+    expect(persistedRules).toEqual([
+      EXPECTED_CHAMPION_ADDITIONAL_FIGHTING_STYLE_RULE,
+      ...EXPECTED_SRD_FIXED_SPELL_RULES.map(
         ([subclassName, rulePrefix, activeFromClassLevel, spellSlug]) =>
           expectedSrdFixedSpellRule(
             subclassName,
@@ -411,7 +439,7 @@ describe('persisted class progression catalog', () => {
             spellSlug,
           ),
       ),
-    );
+    ]);
   });
 
   it.each([

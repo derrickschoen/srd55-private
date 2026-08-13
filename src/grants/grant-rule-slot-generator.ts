@@ -456,6 +456,51 @@ export class GrantRuleSlotGenerator {
             namedDefinition,
           );
     if (definition === null) {
+      /**
+       * A DECLARED PENDING CHOICE IS OWED, NOT A FAULT.
+       *
+       * A rule that delegates WHICH definition it grants to the source's own
+       * config describes two legal states, and only one of them was handled.
+       * The config named a definition — materialise it — or the config is not
+       * written yet, which means the player has not chosen. The second state
+       * threw, so a rule could not become active BEFORE its choice was made.
+       *
+       * Backgrounds never met this: `applyGuidedBackgroundChoices` writes
+       * `origin_feat_key` in the same INSERT that creates the background
+       * source, so the config exists before the generator ever runs. They
+       * share the latent shape; they just cannot reach it. A subclass rule
+       * gated with `active_from_class_level` reaches it every time — the
+       * Champion becomes level 7 during a level-up transaction, and the
+       * choice cannot possibly have been made yet. Throwing there rolled the
+       * whole level-up back, which is the level-up refusing to happen because
+       * a choice it grants has not been made.
+       *
+       * THE RULE MUST SAY SO (`allows_pending_choice`). Silence is only
+       * correct where a surface tracks the owed choice and asks for it, which
+       * today is exactly the Champion's. Without the declaration an
+       * unresolvable definition stays LOUD, so a background added with no
+       * Origin feat still refuses, and an imported rule whose
+       * `definition_key_config` names a path nothing ever writes still
+       * refuses instead of granting nothing forever with nobody told.
+       *
+       * Returning no marker leaves the entitlement OUTSTANDING and nothing
+       * materialised. `reconcileGrantedChildren` reads the same empty set, so
+       * clearing the config later deactivates a previously granted child by
+       * the existing path rather than a second one.
+       *
+       * A key that IS written but names nothing still throws even where a
+       * pending choice is declared: that is a dangling reference to missing
+       * content, a real fault.
+       */
+      const delegated = typeof data.definition_key_config === 'string';
+      const pendingAllowed = data.allows_pending_choice === true;
+      const unchosen =
+        definitionKey === null ||
+        definitionKey === undefined ||
+        definitionKey === '';
+      if (delegated && pendingAllowed && unchosen) {
+        return [];
+      }
       throw new Error(
         `Grant-source rule '${rule.ruleKey}' could not resolve its definition.`,
       );
