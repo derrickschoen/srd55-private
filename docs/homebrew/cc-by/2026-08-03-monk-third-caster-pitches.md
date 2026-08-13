@@ -172,3 +172,11 @@ Owner picks 1-3 pitches for a bake-off: each gets a drafted level-3 bundle
 one winner goes through the full guideline process (fantasy sentence, three
 scene moments, budget worksheet, failure-taxonomy pass, 05 checklist,
 distance checklist re-run) into the draft document for owner approval.
+
+---
+
+*This work includes material from the System Reference Document 5.2.1
+("SRD 5.2.1") by Wizards of the Coast LLC, available at
+https://www.dndbeyond.com/srd, licensed under the Creative Commons
+Attribution 4.0 International License
+(https://creativecommons.org/licenses/by/4.0/legalcode).*

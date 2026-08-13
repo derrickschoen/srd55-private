@@ -112,14 +112,18 @@ application database. The seeded material consists of:
 The following homebrew documents currently reproduce the full notice:
 
 - `docs/homebrew/README.md`
-- `docs/homebrew/2026-08-03-monk-bakeoff.md`
-- `docs/homebrew/2026-08-03-monk-barbed-court.md`
-- `docs/homebrew/2026-08-03-monk-hundred-knots.md`
-- `docs/homebrew/2026-08-03-monk-ten-selves.md`
-- `docs/homebrew/2026-08-03-monk-waking-will.md`
-- `docs/homebrew/2026-08-03-oath-of-domination-subclass.md`
-- `docs/homebrew/2026-08-03-ranger-simple-subclass.md`
-- `docs/homebrew/2026-08-04-rogue-veteran-subclass.md`
+- `docs/homebrew/cc-by/2026-08-03-monk-bakeoff.md`
+- `docs/homebrew/cc-by/2026-08-03-monk-barbed-court.md`
+- `docs/homebrew/cc-by/2026-08-03-monk-hundred-knots.md`
+- `docs/homebrew/cc-by/2026-08-03-monk-ten-selves.md`
+- `docs/homebrew/cc-by/2026-08-03-monk-third-caster-pitches.md`
+- `docs/homebrew/cc-by/2026-08-03-monk-waking-will.md`
+- `docs/homebrew/cc-by/2026-08-03-oath-of-domination-subclass.md`
+- `docs/homebrew/cc-by/2026-08-03-ranger-simple-subclass.md`
+- `docs/homebrew/cc-by/2026-08-04-rogue-veteran-subclass.md`
+- `docs/homebrew/cc-by/oath-of-domination-inputs.md`
+- `docs/homebrew/cc-by/veteran-player.md`
+- `docs/homebrew/cc-by/warrior-of-the-barbed-court-player.md`
 - `docs/homebrew/subclass-guidelines/01-power-budget.md`
 - `docs/homebrew/subclass-guidelines/02-cadence-and-anatomy.md`
 - `docs/homebrew/subclass-guidelines/README.md`
@@ -131,17 +135,17 @@ the Creative Commons Attribution 4.0 International License. That
 project-original corpus includes:
 
 - the Veteran rogue subclass in
-  `docs/homebrew/2026-08-04-rogue-veteran-subclass.md`;
+  `docs/homebrew/cc-by/2026-08-04-rogue-veteran-subclass.md`;
 - the four monk subclass drafts in
-  `docs/homebrew/2026-08-03-monk-barbed-court.md`,
-  `docs/homebrew/2026-08-03-monk-ten-selves.md`,
-  `docs/homebrew/2026-08-03-monk-hundred-knots.md`, and
-  `docs/homebrew/2026-08-03-monk-waking-will.md`, with their supporting pitch
+  `docs/homebrew/cc-by/2026-08-03-monk-barbed-court.md`,
+  `docs/homebrew/cc-by/2026-08-03-monk-ten-selves.md`,
+  `docs/homebrew/cc-by/2026-08-03-monk-hundred-knots.md`, and
+  `docs/homebrew/cc-by/2026-08-03-monk-waking-will.md`, with their supporting pitch
   and comparison documents in `docs/homebrew/`;
 - the Oath of Domination paladin subclass in
-  `docs/homebrew/2026-08-03-oath-of-domination-subclass.md`;
+  `docs/homebrew/cc-by/2026-08-03-oath-of-domination-subclass.md`;
 - the Pursuer ranger subclass in
-  `docs/homebrew/2026-08-03-ranger-simple-subclass.md`; and
+  `docs/homebrew/cc-by/2026-08-03-ranger-simple-subclass.md`; and
 - the six-file design-guidelines corpus and its report in
   `docs/homebrew/subclass-guidelines/`, together with the operating lessons in
   `docs/homebrew/lessons.md`.
@@ -152,7 +156,7 @@ No code license is declared here.
 
 ## Waking Will concept ancestry
 
-`docs/homebrew/2026-08-03-monk-waking-will.md` makes the following disclosure:
+`docs/homebrew/cc-by/2026-08-03-monk-waking-will.md` makes the following disclosure:
 
 > The 3.5 SRD Psionic Fist is this subclass's open-content concept ancestor; this adaptation uses none of its wording or subsystem mechanics.
 

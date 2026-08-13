@@ -127,3 +127,11 @@ always read two ways (saved town / massacred rebellion). He never
 supplies the reader's doubt himself; the world never confirms or
 debunks the vision (Augury and Divination answer ambiguously by rule -
 D182).
+
+---
+
+*This work includes material from the System Reference Document 5.2.1
+("SRD 5.2.1") by Wizards of the Coast LLC, available at
+https://www.dndbeyond.com/srd, licensed under the Creative Commons
+Attribution 4.0 International License
+(https://creativecommons.org/licenses/by/4.0/legalcode).*
