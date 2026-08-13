@@ -22,6 +22,24 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { PageCache } from './cache';
 import { buildCatalogDocuments, BuildRefused, type BuildFailure, type BuiltPage } from './build-catalog';
 import {
+  buildFeatDocuments,
+  FeatBuildRefused,
+  type BuiltFeatPage,
+  type FeatBuildFailure,
+} from './build-feat-catalog';
+import {
+  buildSubclassDocuments,
+  SubclassBuildRefused,
+  type BuiltSubclassPage,
+  type SubclassBuildFailure,
+} from './build-subclass-catalog';
+import {
+  buildSpeciesDocuments,
+  SpeciesBuildRefused,
+  type BuiltSpeciesPage,
+  type SpeciesBuildFailure,
+} from './build-species-catalog';
+import {
   DEFAULT_DELAY_MS,
   httpTransport,
   PoliteFetcher,
@@ -30,10 +48,48 @@ import {
   USER_AGENT,
 } from './fetcher';
 import { scrapeLayout } from './layout';
+import { parseFeatPage } from './parse-feat';
 import { parseSpellPage } from './parse-spell';
+import { parseSubclassPage } from './parse-subclass';
+import { parseSpeciesPage } from './parse-species';
 import { CrawlQueue } from './queue';
-import { inNamespace, pageName, parseSitemap } from './sitemap';
+import {
+  inNamespace,
+  pageName,
+  parseSitemap,
+  partitionSubclassNamespaceEntries,
+  subclassParentClassFromPageName,
+  type SitemapEntry,
+} from './sitemap';
 import type { RulesEdition } from '../../src/domain/enums';
+
+/**
+ * The namespaces `build` knows how to turn into documents, and which parser
+ * handles each. `fetch` is generic over `--namespace` for three of these —
+ * `spell`, `feat`, `species` all have one real sitemap namespace apiece, and
+ * filtering by it is all `commandFetch` needs to do (verified live,
+ * 2026-08-13: `fetch --namespace feat --limit 3` filtered 177 sitemap entries
+ * and cached three pages through the existing robots/rate-limit/cache path).
+ *
+ * `subclass` IS THE EXCEPTION, because there is no `subclass:` namespace on
+ * the site — see `sitemap.ts`'s file comment for the live sitemap facts.
+ * `commandFetch` below special-cases it to `partitionSubclassNamespaceEntries`,
+ * which unions the thirteen real per-class namespaces instead of filtering
+ * one AND drops the confirmed non-subclass auxiliary pages inside them
+ * (`sitemap.ts`'s `GLOBAL_SUBCLASS_NAMESPACE_AUXILIARY_SLUGS` /
+ * `PER_NAMESPACE_SUBCLASS_AUXILIARY_SLUGS`) before they are ever queued, so
+ * the documented default `fetch subclass` -> `build subclass` flow does not
+ * need `--allow-partial` just to route around pages known in advance to be
+ * something other than a subclass. Only `build` picks a parser; `fetch`
+ * filling the cache is otherwise unaware of what a page's content will turn
+ * out to be.
+ */
+const BUILD_NAMESPACES = ['spell', 'feat', 'subclass', 'species'] as const;
+type BuildNamespace = (typeof BUILD_NAMESPACES)[number];
+
+function isBuildNamespace(value: string): value is BuildNamespace {
+  return (BUILD_NAMESPACES as readonly string[]).includes(value);
+}
 
 const ORIGIN = 'http://dnd2024.wikidot.com';
 const SITEMAP_URL = `${ORIGIN}/sitemap.xml`;
@@ -134,8 +190,53 @@ async function commandFetch(options: Options): Promise<number> {
     log(`could not read the sitemap: ${sitemap.reason}`);
     return 1;
   }
-  const entries = inNamespace(parseSitemap(sitemap.body), options.namespace);
-  log(`sitemap: ${entries.length} page(s) in namespace "${options.namespace}"`);
+  // `subclass` IS A PSEUDO-NAMESPACE — see this module's file comment and
+  // `sitemap.ts`'s for why: the site has no `subclass:` prefix, so it is the
+  // union of the thirteen real per-class namespaces instead of a filter on
+  // one. Known non-subclass AUXILIARY pages inside those namespaces (each
+  // class's `main` / `spell-list`, plus a couple of confirmed class-specific
+  // extras) are skipped HERE, at queue time, with a logged notice — see
+  // `partitionSubclassNamespaceEntries` in `sitemap.ts` — so the documented
+  // default fetch/build flow can complete without `--allow-partial`. Pages
+  // this list does not know about are still queued and still fail loudly
+  // downstream, in `parse-subclass.ts`'s page-tag check.
+  const parsedSitemap = parseSitemap(sitemap.body);
+  let entries: SitemapEntry[];
+  if (options.namespace === 'subclass') {
+    const partition = partitionSubclassNamespaceEntries(parsedSitemap);
+    entries = partition.included;
+    log(
+      `sitemap: ${entries.length} page(s) in namespace "subclass" ` +
+        `(${partition.skipped.length} known auxiliary page(s) skipped)`,
+    );
+    for (const skipped of partition.skipped) {
+      log(`  auxiliary-page skip: ${skipped.url} — ${skipped.reason}`);
+    }
+    // R2-2: `seed()` below is additive-only, so a queue persisted by an
+    // OLDER version of this tool (before the auxiliary-page skip existed)
+    // can still carry `main`/`spell-list`/per-namespace-auxiliary entries
+    // from back then, and `seed()` would never remove them — they would
+    // sit there as `done` (a stale successful fetch) or `pending` and, on
+    // `build`, still fail `parse-subclass.ts`'s page-tag check, refusing
+    // the build without `--allow-partial` for the exact class of page this
+    // fix exists to route around. Pruning by the CURRENT run's own
+    // known-auxiliary URL set is safe precisely because it is recomputed
+    // from the live sitemap every run, not a fixed list baked into the
+    // queue file.
+    const pruned = queue.prune(new Set(partition.skipped.map((skip) => skip.url)));
+    if (pruned.length > 0) {
+      log(
+        `pruned ${pruned.length} known-auxiliary page(s) already persisted ` +
+          'in the queue from an earlier run:',
+      );
+      for (const item of pruned) {
+        log(`  auxiliary-page prune: ${item.url} (was "${item.state}")`);
+      }
+    }
+  } else {
+    entries = inNamespace(parsedSitemap, options.namespace);
+    log(`sitemap: ${entries.length} page(s) in namespace "${options.namespace}"`);
+  }
 
   const selected =
     options.limit === null ? entries : entries.slice(0, options.limit);
@@ -183,7 +284,7 @@ async function commandFetch(options: Options): Promise<number> {
   return 0;
 }
 
-async function commandBuild(options: Options): Promise<number> {
+async function commandBuildSpells(options: Options): Promise<number> {
   const layout = scrapeLayout(undefined, options.namespace);
   const queue = new CrawlQueue(layout.queuePath);
   if (!(await queue.load())) {
@@ -277,18 +378,316 @@ async function commandBuild(options: Options): Promise<number> {
   return 0;
 }
 
+/**
+ * `--list` filters on `spellLists`, a field `ParsedFeatDocument` does not
+ * have — feats have no spell-list equivalent to filter on — so it is refused
+ * outright here rather than silently ignored. Silently ignoring it would let
+ * `build --namespace feat --list bard` look like it did something.
+ */
+async function commandBuildFeats(options: Options): Promise<number> {
+  if (options.list !== null) {
+    log('--list has no meaning for --namespace feat (feats carry no spell list).');
+    return 1;
+  }
+  const layout = scrapeLayout(undefined, options.namespace);
+  const queue = new CrawlQueue(layout.queuePath);
+  if (!(await queue.load())) {
+    log(`no queue at ${layout.queuePath} — run "fetch" first.`);
+    return 1;
+  }
+  const cache = new PageCache(layout.cacheDir);
+
+  const pages: BuiltFeatPage[] = [];
+  const parseFailures: FeatBuildFailure[] = [];
+  const outOfScopeSkips: FeatBuildFailure[] = [];
+  for (const item of queue.items) {
+    if (item.state !== 'done') {
+      continue;
+    }
+    const entry = await cache.read(item.url);
+    if (entry === null) {
+      parseFailures.push({ url: item.url, reason: 'cache entry missing' });
+      continue;
+    }
+    const slug = pageName(item.url) ?? item.url;
+    const parsed = parseFeatPage(entry.body, { edition: EDITION, slug });
+    if (!parsed.ok) {
+      // A SKIP (an out-of-2024-PHB-scope category — see
+      // `OUT_OF_SCOPE_FEAT_CATEGORIES` in parse-feat.ts) is not a parse
+      // failure: it must not force --allow-partial the way a genuinely
+      // malformed page does. See build-feat-catalog.ts's `outOfScopeSkips`.
+      if (parsed.skipped) {
+        outOfScopeSkips.push({ url: item.url, reason: parsed.reason });
+        continue;
+      }
+      parseFailures.push({ url: item.url, reason: parsed.reason });
+      continue;
+    }
+    pages.push({
+      url: item.url,
+      document: parsed.value.document,
+      description: parsed.value.description,
+    });
+  }
+
+  let output;
+  try {
+    output = buildFeatDocuments({
+      pages,
+      queue: queue.items,
+      parseFailures,
+      outOfScopeSkips,
+      allowPartial: options.allowPartial,
+    });
+  } catch (error) {
+    if (error instanceof FeatBuildRefused) {
+      log(`build refused.\n${error.message}`);
+      return 1;
+    }
+    throw error;
+  }
+
+  await mkdir(layout.outDir, { recursive: true });
+  await writeFile(layout.tier1Path, `${output.tier1}\n`, 'utf8');
+  await writeFile(layout.tier2Path, `${output.tier2}\n`, 'utf8');
+  await writeFile(
+    layout.reportPath,
+    `${JSON.stringify(output.report, null, 2)}\n`,
+    'utf8',
+  );
+  log(`wrote ${output.report.recordCount} record(s):`);
+  log(`  Tier 1  ${layout.tier1Path}`);
+  log(`  Tier 2  ${layout.tier2Path}`);
+  log(`  report  ${layout.reportPath}`);
+  // UNWIRED, NOT MERELY UNFINISHED — see build-feat-catalog.ts's file comment.
+  // There is no importer for this shape yet, so "partial" here only ever means
+  // "the crawl or the parse was incomplete", never "importing this would
+  // deactivate something", because nothing imports it.
+  log('  NOTE: this document shape has no import path yet (see');
+  log('        tools/scrape/build-feat-catalog.ts for what is missing).');
+  if (output.report.outOfScopeSkips.length > 0) {
+    log(
+      `  NOTE: ${output.report.outOfScopeSkips.length} page(s) skipped as ` +
+        'out of 2024 PHB scope (non-PHB feat categories):',
+    );
+    for (const skipped of output.report.outOfScopeSkips) {
+      log(`    ${skipped.url} — ${skipped.reason}`);
+    }
+  }
+  if (output.report.partial) {
+    log('  NOTE: partial run — the crawl or the parse did not finish.');
+  }
+  return 0;
+}
+
+/**
+ * `--list` has no `spellLists`-equivalent to filter on here either — same
+ * refusal as `commandBuildFeats`, for the same reason.
+ *
+ * `parentClass` is resolved per-page from the URL, not from anything on the
+ * page — see `parse-subclass.ts`'s file comment. A page whose URL falls
+ * outside the thirteen known class namespaces (should not happen after
+ * `partitionSubclassNamespaceEntries` filtered the fetch, but the queue may
+ * predate a change to that list) is a parse failure, not a crash.
+ */
+async function commandBuildSubclasses(options: Options): Promise<number> {
+  if (options.list !== null) {
+    log('--list has no meaning for --namespace subclass (subclasses carry no spell list).');
+    return 1;
+  }
+  const layout = scrapeLayout(undefined, options.namespace);
+  const queue = new CrawlQueue(layout.queuePath);
+  if (!(await queue.load())) {
+    log(`no queue at ${layout.queuePath} — run "fetch" first.`);
+    return 1;
+  }
+  const cache = new PageCache(layout.cacheDir);
+
+  const pages: BuiltSubclassPage[] = [];
+  const parseFailures: SubclassBuildFailure[] = [];
+  for (const item of queue.items) {
+    if (item.state !== 'done') {
+      continue;
+    }
+    const entry = await cache.read(item.url);
+    if (entry === null) {
+      parseFailures.push({ url: item.url, reason: 'cache entry missing' });
+      continue;
+    }
+    const slug = pageName(item.url) ?? item.url;
+    const parentClass = subclassParentClassFromPageName(slug);
+    if (parentClass === null) {
+      parseFailures.push({
+        url: item.url,
+        reason: `cannot resolve a parent class from the page name "${slug}"`,
+      });
+      continue;
+    }
+    const parsed = parseSubclassPage(entry.body, {
+      edition: EDITION,
+      slug,
+      parentClass,
+    });
+    if (!parsed.ok) {
+      parseFailures.push({ url: item.url, reason: parsed.reason });
+      continue;
+    }
+    pages.push({ url: item.url, document: parsed.value.document });
+  }
+
+  let output;
+  try {
+    output = buildSubclassDocuments({
+      pages,
+      queue: queue.items,
+      parseFailures,
+      allowPartial: options.allowPartial,
+    });
+  } catch (error) {
+    if (error instanceof SubclassBuildRefused) {
+      log(`build refused.\n${error.message}`);
+      return 1;
+    }
+    throw error;
+  }
+
+  await mkdir(layout.outDir, { recursive: true });
+  await writeFile(layout.tier1Path, `${output.tier1}\n`, 'utf8');
+  await writeFile(layout.tier2Path, `${output.tier2}\n`, 'utf8');
+  await writeFile(
+    layout.reportPath,
+    `${JSON.stringify(output.report, null, 2)}\n`,
+    'utf8',
+  );
+  log(`wrote ${output.report.recordCount} record(s):`);
+  log(`  Tier 1  ${layout.tier1Path}`);
+  log(`  Tier 2  ${layout.tier2Path}`);
+  log(`  report  ${layout.reportPath}`);
+  log('  NOTE: this document shape has no import path yet (see');
+  log('        tools/scrape/build-subclass-catalog.ts for what is missing).');
+  if (output.report.partial) {
+    log('  NOTE: partial run — the crawl or the parse did not finish.');
+  }
+  return 0;
+}
+
+/** `--list` has no meaning here either — same refusal, for the same reason. */
+async function commandBuildSpecies(options: Options): Promise<number> {
+  if (options.list !== null) {
+    log('--list has no meaning for --namespace species (species carry no spell list).');
+    return 1;
+  }
+  const layout = scrapeLayout(undefined, options.namespace);
+  const queue = new CrawlQueue(layout.queuePath);
+  if (!(await queue.load())) {
+    log(`no queue at ${layout.queuePath} — run "fetch" first.`);
+    return 1;
+  }
+  const cache = new PageCache(layout.cacheDir);
+
+  const pages: BuiltSpeciesPage[] = [];
+  const parseFailures: SpeciesBuildFailure[] = [];
+  for (const item of queue.items) {
+    if (item.state !== 'done') {
+      continue;
+    }
+    const entry = await cache.read(item.url);
+    if (entry === null) {
+      parseFailures.push({ url: item.url, reason: 'cache entry missing' });
+      continue;
+    }
+    const slug = pageName(item.url) ?? item.url;
+    const parsed = parseSpeciesPage(entry.body, { edition: EDITION, slug });
+    if (!parsed.ok) {
+      parseFailures.push({ url: item.url, reason: parsed.reason });
+      continue;
+    }
+    pages.push({ url: item.url, document: parsed.value.document });
+  }
+
+  let output;
+  try {
+    output = buildSpeciesDocuments({
+      pages,
+      queue: queue.items,
+      parseFailures,
+      allowPartial: options.allowPartial,
+    });
+  } catch (error) {
+    if (error instanceof SpeciesBuildRefused) {
+      log(`build refused.\n${error.message}`);
+      return 1;
+    }
+    throw error;
+  }
+
+  await mkdir(layout.outDir, { recursive: true });
+  await writeFile(layout.tier1Path, `${output.tier1}\n`, 'utf8');
+  await writeFile(layout.tier2Path, `${output.tier2}\n`, 'utf8');
+  await writeFile(
+    layout.reportPath,
+    `${JSON.stringify(output.report, null, 2)}\n`,
+    'utf8',
+  );
+  log(`wrote ${output.report.recordCount} record(s):`);
+  log(`  Tier 1  ${layout.tier1Path}`);
+  log(`  Tier 2  ${layout.tier2Path}`);
+  log(`  report  ${layout.reportPath}`);
+  log('  NOTE: this document shape has no import path yet (see');
+  log('        tools/scrape/build-species-catalog.ts for what is missing).');
+  if (output.report.partial) {
+    log('  NOTE: partial run — the crawl or the parse did not finish.');
+  }
+  return 0;
+}
+
+async function commandBuild(options: Options): Promise<number> {
+  if (!isBuildNamespace(options.namespace)) {
+    log(
+      `build does not know namespace "${options.namespace}"; it knows ` +
+        `${BUILD_NAMESPACES.join(', ')}.`,
+    );
+    return 1;
+  }
+  if (options.namespace === 'feat') {
+    return commandBuildFeats(options);
+  }
+  if (options.namespace === 'subclass') {
+    return commandBuildSubclasses(options);
+  }
+  if (options.namespace === 'species') {
+    return commandBuildSpecies(options);
+  }
+  return commandBuildSpells(options);
+}
+
 function usage(): number {
   log(
     [
       'Local-only scraper. Output is gitignored and sentinel-named; it is never',
       'part of the build and must never be committed.',
       '',
-      '  fetch --namespace spell [--limit N] [--delay 1500] [--max-age-days 30] [--offline]',
-      '  build [--namespace spell] [--list bard] [--allow-partial]',
+      '  fetch --namespace spell|feat|subclass|species [--limit N] [--delay 1500]',
+      '        [--max-age-days 30] [--offline]',
+      '  build --namespace spell [--list bard] [--allow-partial]',
+      '  build --namespace feat|subclass|species [--allow-partial]',
       '',
-      '--list narrows the output, which makes it a PARTIAL build: an import is a',
-      'full replacement, so every spell it filters out would be deactivated. It',
-      'therefore requires --allow-partial, exactly as an unfinished crawl does.',
+      '--namespace subclass is a PSEUDO-NAMESPACE: the site has no "subclass:"',
+      'prefix, so fetch unions the thirteen real per-class namespaces instead —',
+      'see sitemap.ts for the live facts. build resolves each page\'s parent class',
+      'from its URL, not from anything printed on the page. fetch skips known',
+      'non-subclass auxiliary pages (each class\'s main/spell-list and a couple of',
+      'confirmed extras) before queueing them, with a logged notice, so this',
+      'default flow does not need --allow-partial just to route around them.',
+      '',
+      '--list narrows the SPELL output, which makes it a PARTIAL build: an import',
+      'is a full replacement, so every spell it filters out would be deactivated.',
+      'It therefore requires --allow-partial, exactly as an unfinished crawl does.',
+      '--list has no meaning for --namespace feat, subclass or species.',
+      '',
+      'feat/subclass/species build output has no import path yet — see',
+      'tools/scrape/build-feat-catalog.ts, build-subclass-catalog.ts and',
+      'build-species-catalog.ts for what is missing from each.',
       '',
       'There is no flag that ignores robots.txt and none that fetches faster',
       'than the 1000ms floor.',

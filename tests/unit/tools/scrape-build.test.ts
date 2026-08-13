@@ -7,8 +7,18 @@ import {
   BuildRefused,
   type BuiltPage,
 } from '../../../tools/scrape/build-catalog';
+import {
+  buildFeatDocuments,
+  FeatBuildRefused,
+  type BuiltFeatPage,
+} from '../../../tools/scrape/build-feat-catalog';
 import { CrawlQueue, type QueueItem } from '../../../tools/scrape/queue';
 import { parseSpellPage } from '../../../tools/scrape/parse-spell';
+import { parseFeatPage } from '../../../tools/scrape/parse-feat';
+import {
+  parseSitemap,
+  partitionSubclassNamespaceEntries,
+} from '../../../tools/scrape/sitemap';
 import {
   parseCatalogDocuments,
   parseDescriptionDocuments,
@@ -23,8 +33,10 @@ import { scrapeLayout } from '../../../tools/scrape/layout';
 import {
   LANTERNFALL,
   LEDGER_OF_SMALL_DEBTS,
+  SUBCLASS_NAMESPACE_SITEMAP,
   THREADCALL,
 } from '../../fixtures/scrape/synthetic-pages';
+import { GRIM_MOMENTUM } from '../../fixtures/scrape/synthetic-feat-pages';
 
 function page(html: string, url: string): BuiltPage {
   const parsed = parseSpellPage(html, { edition: '2024', slug: 'spell:x' });
@@ -255,6 +267,65 @@ describe('building the catalog documents', () => {
   });
 });
 
+describe('building the feat documents', () => {
+  function featPage(html: string, url: string): BuiltFeatPage {
+    const parsed = parseFeatPage(html, { edition: '2024', slug: 'feat:x' });
+    if (!parsed.ok) {
+      throw new Error(parsed.reason);
+    }
+    return { url, document: parsed.value.document, description: parsed.value.description };
+  }
+
+  const FEAT_PAGES = [featPage(GRIM_MOMENTUM, 'http://example.invalid/feat:grim-momentum')];
+  const FEAT_DONE = FEAT_PAGES.map((built) => item(built.url, 'done'));
+
+  // F3/F7(c): an out-of-scope SKIP must not force --allow-partial the way a
+  // genuine parse failure does, so a full namespace crawl (real feats plus
+  // a few Dragonmark/Planar Pact/Dark Gift pages) can complete on its own.
+  it('does not refuse a build carrying out-of-scope skips, unlike a real parse failure', () => {
+    const output = buildFeatDocuments({
+      pages: FEAT_PAGES,
+      queue: FEAT_DONE,
+      parseFailures: [],
+      outOfScopeSkips: [
+        { url: 'http://example.invalid/feat:mark-of-making', reason: 'Dragonmark' },
+      ],
+      allowPartial: false,
+    });
+    expect(output.report.recordCount).toBe(1);
+    expect(output.report.partial).toBe(false);
+    expect(output.report.outOfScopeSkips).toEqual([
+      { url: 'http://example.invalid/feat:mark-of-making', reason: 'Dragonmark' },
+    ]);
+  });
+
+  it('still refuses on a genuine parse failure, which out-of-scope skips must never mask', () => {
+    expect(() =>
+      buildFeatDocuments({
+        pages: FEAT_PAGES,
+        queue: FEAT_DONE,
+        parseFailures: [
+          { url: 'http://example.invalid/feat:odd', reason: 'no "Source:" line' },
+        ],
+        outOfScopeSkips: [
+          { url: 'http://example.invalid/feat:mark-of-making', reason: 'Dragonmark' },
+        ],
+        allowPartial: false,
+      }),
+    ).toThrow(FeatBuildRefused);
+  });
+
+  it('defaults outOfScopeSkips to empty when the caller omits it', () => {
+    const output = buildFeatDocuments({
+      pages: FEAT_PAGES,
+      queue: FEAT_DONE,
+      parseFailures: [],
+      allowPartial: false,
+    });
+    expect(output.report.outOfScopeSkips).toEqual([]);
+  });
+});
+
 describe('the resumable queue', () => {
   it('round-trips, resumes only unfinished work, and stamps its own file', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'scrape-queue-'));
@@ -299,6 +370,90 @@ describe('the resumable queue', () => {
     resumed.seed([{ url: 'http://example.invalid/spell:a', lastmod: '2026-06-06' }]);
     expect(resumed.pending().map((entry) => entry.url)).toContain(
       'http://example.invalid/spell:a',
+    );
+  });
+
+  it('seed() is additive-only: a URL absent from the new frontier is left exactly as it was', () => {
+    // The premise `prune()` exists to fix: seed() alone can never remove a
+    // stale entry, whatever its state.
+    const queue = new CrawlQueue('/unused-in-this-test');
+    queue.seed([{ url: 'http://example.invalid/fighter:main', lastmod: '2026-01-01' }]);
+    queue.mark('http://example.invalid/fighter:main', 'done');
+    queue.seed([]); // A frontier that no longer names the page at all.
+    expect(queue.items.map((entry) => entry.url)).toContain(
+      'http://example.invalid/fighter:main',
+    );
+  });
+
+  it('prune() removes named URLs regardless of state, and reports what it removed', () => {
+    const queue = new CrawlQueue('/unused-in-this-test');
+    queue.seed([
+      { url: 'http://example.invalid/fighter:main', lastmod: '2026-01-01' },
+      { url: 'http://example.invalid/fighter:champion', lastmod: '2026-01-01' },
+    ]);
+    queue.mark('http://example.invalid/fighter:main', 'done');
+    // fighter:champion is untouched — pruning must be selective, not a reset.
+
+    const removed = queue.prune(new Set(['http://example.invalid/fighter:main']));
+    expect(removed).toEqual([
+      {
+        url: 'http://example.invalid/fighter:main',
+        lastmod: '2026-01-01',
+        state: 'done',
+        reason: null,
+      },
+    ]);
+    expect(queue.items.map((entry) => entry.url)).toEqual([
+      'http://example.invalid/fighter:champion',
+    ]);
+
+    // A URL that was never queued prunes to nothing, not an error.
+    expect(queue.prune(new Set(['http://example.invalid/never-queued']))).toEqual([]);
+  });
+
+  // R2-2: reproduces the exact regression — a queue persisted by an OLDER
+  // version of this tool, before the auxiliary-page skip existed, still
+  // carries `fighter:main` as a successfully fetched (`done`) page. A rerun
+  // of TODAY's `fetch --namespace subclass` must not leave it sitting there
+  // to fail `parse-subclass.ts`'s page-tag check on the next `build` and
+  // force `--allow-partial` for a page this project never wanted queued.
+  it('prunes a stale known-auxiliary entry left over from an older run, using the current sitemap', () => {
+    const queue = new CrawlQueue('/unused-in-this-test');
+    // Simulates the OLD code: no auxiliary-page filtering, so fighter:main
+    // and fighter:spell-list were queued and fetched like any subclass page.
+    queue.seed([
+      { url: 'http://example.invalid/fighter:main', lastmod: '2026-07-01T00:00:00+00:00' },
+      { url: 'http://example.invalid/fighter:spell-list', lastmod: '2026-07-01T00:00:00+00:00' },
+      { url: 'http://example.invalid/fighter:champion', lastmod: '2026-07-01T00:00:00+00:00' },
+    ]);
+    queue.mark('http://example.invalid/fighter:main', 'done');
+    queue.mark('http://example.invalid/fighter:spell-list', 'done');
+    queue.mark('http://example.invalid/fighter:champion', 'done');
+
+    // TODAY's fetch: compute the partition exactly the way commandFetch does...
+    const partition = partitionSubclassNamespaceEntries(parseSitemap(SUBCLASS_NAMESPACE_SITEMAP));
+    // ...then prune the queue by the current run's own skip list, the same
+    // call cli.ts's commandFetch makes.
+    const pruned = queue.prune(new Set(partition.skipped.map((skip) => skip.url)));
+
+    expect(pruned.map((entry) => entry.url).sort()).toEqual([
+      'http://example.invalid/fighter:main',
+      'http://example.invalid/fighter:spell-list',
+    ]);
+    // The real subclass page survives, untouched and still "done".
+    const champion = queue.items.find(
+      (entry) => entry.url === 'http://example.invalid/fighter:champion',
+    );
+    expect(champion?.state).toBe('done');
+
+    // Re-seeding with today's (already-filtered) frontier does not bring
+    // the pruned pages back.
+    queue.seed(partition.included);
+    expect(queue.items.map((entry) => entry.url)).not.toContain(
+      'http://example.invalid/fighter:main',
+    );
+    expect(queue.items.map((entry) => entry.url)).not.toContain(
+      'http://example.invalid/fighter:spell-list',
     );
   });
 });
