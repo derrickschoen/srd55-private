@@ -135,7 +135,19 @@ function subclassNames(lifecycle: DatabaseLifecycle): string[] {
   );
 }
 
-function subclassFixedRuleCount(lifecycle: DatabaseLifecycle): number {
+/**
+ * Counts persisted subclass grant rules OF ONE KIND.
+ *
+ * It counted every rule until Champion gained the `grant_source` rule for its
+ * level-7 "Additional Fighting Style" feature (SRD 5.2.1, printed page 52:
+ * "You gain another Fighting Style feat of your choice"). The 40 fixed-spell
+ * rules the callers pin are unchanged; splitting the count by kind keeps that
+ * pin exact instead of letting a new rule of any kind absorb into one total.
+ */
+function subclassRuleCount(
+  lifecycle: DatabaseLifecycle,
+  kind: string,
+): number {
   return lifecycle.database
     .allRaw(
       `SELECT grant_rules FROM subclass_definitions
@@ -146,8 +158,26 @@ function subclassFixedRuleCount(lifecycle: DatabaseLifecycle): number {
       if (!Array.isArray(decoded)) {
         throw new TypeError('Persisted subclass grant rules are not an array.');
       }
-      return total + decoded.length;
+      return (
+        total +
+        decoded.filter(
+          (rule) =>
+            rule !== null &&
+            typeof rule === 'object' &&
+            (rule as { kind?: unknown }).kind === kind,
+        ).length
+      );
     }, 0);
+}
+
+function subclassFixedRuleCount(lifecycle: DatabaseLifecycle): number {
+  return subclassRuleCount(lifecycle, 'fixed_spell');
+}
+
+function subclassGrantSourceRuleCount(
+  lifecycle: DatabaseLifecycle,
+): number {
+  return subclassRuleCount(lifecycle, 'grant_source');
 }
 
 function retiredBundledRootCount(lifecycle: DatabaseLifecycle): number {
@@ -175,6 +205,8 @@ describe('application database bootstrap', () => {
       lifecycle.database.scalar('SELECT count(*) FROM subclass_features'),
     ).toBe(58);
     expect(subclassFixedRuleCount(lifecycle)).toBe(40);
+    // Exactly one: Champion's level-7 extra Fighting Style.
+    expect(subclassGrantSourceRuleCount(lifecycle)).toBe(1);
     expect(
       lifecycle.database.scalar(
         `SELECT count(*) FROM class_progressions

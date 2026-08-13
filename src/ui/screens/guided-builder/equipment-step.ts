@@ -431,6 +431,71 @@ export function createEquipmentStep(deps: EquipmentStepDeps): EquipmentStep {
       );
     }
 
+    // The subclass's extra Fighting Style (Champion level 7). Offered only once
+    // the level-1 style is recorded, because the command fills the two
+    // entitlements in that order.
+    const additional = fighter.additional_fighting_style;
+    if (additional.state === 'entitled' && chosenStyle !== null) {
+      if (additional.chosen === null) {
+        const extraSelect = element('select', {
+          className: 'planner-input',
+          attributes: { 'aria-label': 'Additional Fighting Style' },
+        });
+        extraSelect.append(
+          element('option', {
+            text: 'Choose an additional Fighting Style…',
+            attributes: { value: '' },
+          }),
+        );
+        extraSelect.append(
+          ...catalogSelectGroups(additional.options.map((option) => ({
+            value: option.content_key,
+            label: option.name,
+            catalogLayer: option.catalog_layer,
+          }))),
+        );
+        const chooseExtra = element('button', {
+          className: 'button-primary guided-additional-fighting-style-choose',
+          text: 'Choose additional Fighting Style',
+          attributes: { type: 'button' },
+        });
+        chooseExtra.disabled = true;
+        controls.push(chooseExtra);
+        restoreRequiredChoiceDisabledStates.push(() => {
+          chooseExtra.disabled = extraSelect.value === '' || inFlight;
+        });
+        cleanups.push(
+          listen(extraSelect, 'change', () => {
+            chooseExtra.disabled = extraSelect.value === '' || inFlight;
+          }),
+          listen(chooseExtra, 'click', () => {
+            if (extraSelect.value === '') return;
+            void writeRequiredChoice((operationUuid) =>
+              deps.chooseFightingStyle(extraSelect.value, operationUuid),
+            );
+          }),
+        );
+        fighterChildren.push(
+          element('p', {
+            text:
+              `${additional.subclass_name} grants another Fighting Style feat ` +
+              'of your choice.',
+          }),
+          extraSelect,
+          chooseExtra,
+        );
+      } else {
+        fighterChildren.push(
+          element('p', {
+            className: 'guided-additional-fighting-style-recorded',
+            text:
+              `Additional Fighting Style recorded: ${additional.chosen.name} — ` +
+              catalogLayerLabel(additional.chosen.catalog_layer),
+          }),
+        );
+      }
+    }
+
     const mastery = fighter.weapon_mastery;
     fighterChildren.push(
       element('h4', { text: 'Weapon Mastery' }),

@@ -160,6 +160,29 @@ export const CATALOG_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
           bytes: contentRegistrySource,
         }),
       ]),
+      // Re-pinned 2026-08-13: the SRD attribution header in
+      // origin-definitions-srd.ts was corrected from the 5.2 statement to the
+      // 5.2.1 statement the source document requires (comment-only diff,
+      // verified; no reconciled row changes).
+      //
+      // Re-pinned again 2026-08-13 (D226 working exactly as designed):
+      // grant-rule.ts and grant-rule-slot-generator.ts changed together — a
+      // grant_source rule may now DECLARE `allows_pending_choice`, and one
+      // that does materialises nothing while the config naming what it grants
+      // is unwritten, instead of throwing. This migration's OWN reconciled
+      // rows are unaffected: lineage grants reach the generator as
+      // configured_choice OPTION GRANTS, which are fixed_spell rules, and none
+      // of them is a grant_source delegating its definition to config, so no
+      // lineage row can take the new path and none can carry the new field.
+      // (Species SKILL grants are not option grants at all — they are
+      // synchronised by their own `syncSpeciesSkillGrants` arm, outside this
+      // seam.) The pin moves anyway because D226 freezes the TRANSITIVE
+      // SOURCE, not the subset of it a migration happens to exercise — a
+      // freeze covering only the exercised subset would be a claim broader
+      // than the freeze.
+      // MERGE 2026-08-13: champion (allows_pending_choice) and R4 (typed state +
+      // frozen source-instance-state module) both moved this pin; recomputed
+      // below over the MERGED frozen sources by the designed procedure.
       // Re-pinned 2026-08-13 (R4, D226), twice in one lane and the second time
       // is the interesting one. Round 1: `src/grants/source-rule-reader.ts` — a
       // frozen source — gained a throwing decode for
@@ -172,7 +195,7 @@ export const CATALOG_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
       // exists for it. No reconciled row changes in either round: every source
       // instance this walks holds `active` or `tombstoned`.
       checksum:
-        'f8b78632498fc05f5e4f94981430db558526e4e4e93e261772376b64b84a2c35',
+        '52af2f598ab61b90647e05aa736963cb78d576631e680b481567953786b21d29',
       run: reconcileSpeciesLineageContentV2,
     }),
   ]);

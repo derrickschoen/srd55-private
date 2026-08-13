@@ -12,6 +12,15 @@
 > Per D222/D223, third-caster pins use the optional bundled-homebrew Spell Student
 > and derive its ladder from the SRD multiclass table. The remainder is retained
 > as the design/decision record.
+>
+> **Superseded status (2026-08-13):** the Fighter row's "Seed six names only" is
+> no longer current. Champion's level-7 **Additional Fighting Style** is now
+> seeded as a REAL grant rule. The row's reasoning — that the feature is an open
+> choice while "the current fighting-style rule requires a fixed `style_key`" —
+> was true of the `fighting_style` GRANT KIND and only of it; an open feat
+> choice is the `grant_source` + `definition_key_config` shape the four
+> backgrounds already use for their Origin feat, which the row did not consider.
+> Champion therefore seeds six feature names AND one grant rule.
 
 ## 1. Outcome and ruling chain
 
