@@ -193,27 +193,41 @@ function readLabelledParagraph(html: string): { label: string | null; text: stri
 interface LineageNode {
   readonly name: string;
   readonly tag: string;
-  readonly rank: number;
-  /** True when nothing shallower-or-equal opened before it — see the file comment. */
-  readonly isRoot: boolean;
   readonly descriptionParagraphs: string[];
 }
 
 /**
  * Sections before the Traits heading, read with the POSITIVE nesting signal
  * the file-level comment describes: a heading DEEPER than the most recently
- * opened still-open heading is that heading's subsection (folded into it as
- * prose, never its own lineage); a heading at or shallower than it closes
- * that ancestor and opens a new ROOT section instead. Only ROOT sections are
- * lineage CANDIDATES — see below for why they still are not automatically
- * lineages.
+ * opened heading is a SUBSECTION of it, not its own lineage — but "folded"
+ * has to mean something a caller can still see. `open` tracks the
+ * descriptionParagraphs ARRAY of whichever ROOT heading is currently in
+ * scope; a subsection heading's own name AND every block under it push onto
+ * that SAME array (never a array of their own that then goes nowhere), the
+ * same "bare heading is verbatim prose" idiom `parse-subclass.ts` uses for a
+ * table-label heading. A heading at or shallower than the open one closes it
+ * and opens a new ROOT (a new lineage CANDIDATE — see `readLineages` for why
+ * a root is still not automatically a lineage), which becomes the new
+ * `open` target for whatever follows it. Only ROOT headings are returned;
+ * a subsection is never returned as its own entry, by construction — there
+ * is no code path that could resurrect one as a lineage.
+ *
+ * AN EARLIER DRAFT of this function gave every heading — root or nested —
+ * its own `descriptionParagraphs` array and folded text into
+ * `nodes[nodes.length - 1]` (whichever heading was textually most recent),
+ * then returned only the roots. That silently discarded every nested
+ * heading's name and prose: a subsection's content landed in an array that
+ * was never part of the returned root and was simply dropped. The page
+ * still parsed "successfully" with a plausible-looking but truncated
+ * lineage — exactly the silent data loss this project refuses to ship.
  */
 function readLineageNodes(
   blocks: readonly Block[],
   sourceBlocks: ReadonlySet<Block>,
 ): LineageNode[] {
-  const nodes: LineageNode[] = [];
+  const roots: LineageNode[] = [];
   const stack: number[] = [];
+  let open: string[] | null = null;
   for (const block of blocks) {
     if (sourceBlocks.has(block)) {
       continue;
@@ -223,19 +237,18 @@ function readLineageNodes(
       while (stack.length > 0 && (stack[stack.length - 1] as number) >= rank) {
         stack.pop();
       }
-      const node: LineageNode = {
-        name: toText(block.html),
-        tag: block.tag,
-        rank,
-        isRoot: stack.length === 0,
-        descriptionParagraphs: [],
-      };
-      nodes.push(node);
+      const name = toText(block.html);
+      if (stack.length === 0) {
+        const node: LineageNode = { name, tag: block.tag, descriptionParagraphs: [] };
+        roots.push(node);
+        open = node.descriptionParagraphs;
+      } else if (open !== null && name !== '') {
+        open.push(name);
+      }
       stack.push(rank);
       continue;
     }
-    const current = nodes[nodes.length - 1];
-    if (current === undefined) {
+    if (open === null) {
       // Flavour text before the first heading. Not required by this
       // module's document shape; dropped rather than guessed into a lineage
       // that does not exist yet.
@@ -243,10 +256,10 @@ function readLineageNodes(
     }
     const text = toText(block.html);
     if (text !== '') {
-      current.descriptionParagraphs.push(text);
+      open.push(text);
     }
   }
-  return nodes;
+  return roots;
 }
 
 /**
@@ -268,8 +281,7 @@ function readLineages(
   blocks: readonly Block[],
   sourceBlocks: ReadonlySet<Block>,
 ): SpeciesLineage[] | string {
-  const nodes = readLineageNodes(blocks, sourceBlocks);
-  const roots = nodes.filter((node) => node.isRoot);
+  const roots = readLineageNodes(blocks, sourceBlocks);
   if (roots.length === 0) {
     return [];
   }

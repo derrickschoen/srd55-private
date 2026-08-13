@@ -125,6 +125,44 @@ export const MOSSKIN = syntheticSpeciesPage({
 });
 
 /**
+ * R2-1: a species with a UNIFORM-depth (`<h3>`) pair of root lineages,
+ * where the SECOND root also carries a nested `<h4>` subsection — deeper
+ * than its `<h3>` parent, so it folds as verbatim prose rather than opening
+ * a third lineage. This is the fixture the folding test actually needs:
+ * `MOSSKIN`'s two lineages are both `<h5>` with no nested heading at all,
+ * so a test built only on it can assert "two lineages" without ever
+ * exercising the fold path — which is exactly how an earlier version of
+ * `readLineageNodes` silently dropped nested content while still looking
+ * green.
+ */
+export const THORNKIN = syntheticSpeciesPage({
+  title: 'Thornkin',
+  sources: ["Wandering Tinker's Companion"],
+  intro: ['Thornkin trace their lines through two old holdings.'],
+  lineages: [
+    {
+      tag: 'h3',
+      name: 'Stonebound',
+      body: ['Stonebound thornkin never leave the hill they were born on.'],
+    },
+    {
+      tag: 'h3',
+      name: 'Windborn',
+      body: ['Windborn thornkin travel with the seasons.'],
+    },
+    {
+      tag: 'h4',
+      name: 'Windborn Enclaves',
+      body: ['Windborn enclaves gather at the first frost of autumn.'],
+    },
+  ],
+  size: 'Medium',
+  speed: '30 feet',
+  traits: [{ name: 'Rootbound Memory', body: 'You have Advantage on checks to recall local history.' }],
+  tags: ['common'],
+});
+
+/**
  * A species WITHOUT lineages, shaped after the live `species:human` sample,
  * and exercising the SIZE CHOICE shape ("Medium … or Small …") that is why
  * `size` stays verbatim prose rather than a closed enum.

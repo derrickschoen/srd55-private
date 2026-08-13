@@ -274,3 +274,20 @@ export const UNKNOWN_CATEGORY_FEAT = syntheticFeatPage({
   body: ['You gain the following benefits.'],
   tags: ['common'],
 });
+
+/**
+ * R2-3: the descriptor says "Dragonmark Feat" (out of 2024 PHB scope) but
+ * the page tags say `generalfeat` (in scope) — two PRESENT, DIFFERENT
+ * category signals. This must FAIL LOUDLY as a disagreement, never be
+ * silently classified as an out-of-scope skip on the descriptor's word
+ * alone: an earlier version resolved the descriptor's out-of-scope reading
+ * before the tag cross-check ever ran, so a page like this one would have
+ * vanished from a crawl instead of being flagged as self-contradictory.
+ */
+export const OUT_OF_SCOPE_TAG_DISAGREEMENT = syntheticFeatPage({
+  title: 'Contested Heritage',
+  source: "Wandering Tinker's Companion",
+  descriptor: 'Dragonmark Feat (Prerequisite: Level 4+)',
+  body: ['You gain the following benefits.'],
+  tags: ['common', 'generalfeat'],
+});

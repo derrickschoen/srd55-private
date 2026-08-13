@@ -11,6 +11,7 @@ import {
   LEDGERKEEPERS_KIT,
   NO_CONTENT_DIV,
   NO_SOURCE_LINE,
+  OUT_OF_SCOPE_TAG_DISAGREEMENT,
   PLANAR_PACT_FEAT,
   PROSE_DESCRIPTOR,
   STONECROSSED_WANDERER,
@@ -200,6 +201,20 @@ describe('feat page parser', () => {
     }
     expect(result.skipped).toBe(false);
     expect(result.reason).toContain('Mystic');
+  });
+
+  // R2-3: the cross-check must run BEFORE an out-of-scope descriptor
+  // reading is trusted — a descriptor/tag disagreement about scope is a
+  // genuine disagreement, not grounds for a quiet skip.
+  it('refuses loudly, not a skip, when the descriptor says out-of-scope but the tag says in-scope', () => {
+    const result = parse(OUT_OF_SCOPE_TAG_DISAGREEMENT);
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error('unreachable');
+    }
+    expect(result.skipped).toBe(false);
+    expect(result.reason).toContain('Dragonmark');
+    expect(result.reason).toContain('general');
   });
 
   it('marks every existing malformed-page fixture as a genuine failure, not a skip', () => {

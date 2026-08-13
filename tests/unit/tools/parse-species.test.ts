@@ -10,6 +10,7 @@ import {
   NO_SOURCE_LINE,
   NO_TRAITS,
   NO_TRAITS_HEADING,
+  THORNKIN,
   UNPARSEABLE_SPEED,
   WAYFOLK,
 } from '../../fixtures/scrape/synthetic-species-pages';
@@ -117,15 +118,46 @@ describe('species page parser', () => {
     // Never a silent guess: no document is returned to fabricate lineages from.
   });
 
-  it('emits ONLY uniform-depth root headings as lineages, folding a deeper heading into its parent', () => {
-    // MOSSKIN's two lineages are both `<h5>` — uniform depth, so both are
-    // confidently real, and none of Mosskin's other content (traits, the
-    // folded "Mosskin Lineages" table) is mistaken for a lineage.
+  it('emits ONLY uniform-depth root headings as lineages', () => {
+    // MOSSKIN's two lineages are both `<h5>` with no nested heading under
+    // either — uniform depth, so both are confidently real, and none of
+    // Mosskin's other content (traits, the folded "Mosskin Lineages" table)
+    // is mistaken for a lineage. This does NOT exercise folding a nested
+    // pre-Traits heading — see THORNKIN below for that (R2-1).
     const { document } = expectOk(MOSSKIN, 'species:mosskin');
     expect(document.lineages).toHaveLength(2);
     expect(document.lineages.map((lineage) => lineage.name)).toEqual([
       'Deep Root',
       'Bright Canopy',
     ]);
+  });
+
+  // R2-1: a nested pre-Traits heading's NAME and its own prose must survive,
+  // verbatim, inside its root ancestor's descriptionParagraphs — not vanish
+  // the way an earlier draft of `readLineageNodes` silently dropped them
+  // (their text landed on a node object that was never part of the
+  // returned roots). THORNKIN's second root, "Windborn", carries a nested
+  // `<h4>Windborn Enclaves</h4>` subsection; this pins that its heading text
+  // and body both come through, in order, rather than disappearing.
+  it('folds a nested pre-Traits heading — its name and prose — into its root ancestor, verbatim', () => {
+    const { document } = expectOk(THORNKIN, 'species:thornkin');
+    expect(document.lineages).toHaveLength(2);
+    expect(document.lineages[0]).toEqual({
+      name: 'Stonebound',
+      descriptionParagraphs: [expect.stringContaining('never leave the hill')],
+    });
+    const windborn = document.lineages[1]!;
+    expect(windborn.name).toBe('Windborn');
+    expect(windborn.descriptionParagraphs).toEqual([
+      expect.stringContaining('travel with the seasons'),
+      'Windborn Enclaves',
+      expect.stringContaining('gather at the first frost of autumn'),
+    ]);
+    // Not merely present somewhere in the document — specifically inside
+    // the root's own OWN prose array, which is the thing this project
+    // actually returns to a caller.
+    expect(
+      windborn.descriptionParagraphs.some((p) => p.includes('first frost of autumn')),
+    ).toBe(true);
   });
 });

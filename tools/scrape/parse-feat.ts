@@ -53,7 +53,7 @@
  * three-page live sample (2026-08-13, `feat:chef`, `feat:tactical-combatant`,
  * `feat:shifting-combatant`) already turned up a "DND Beyond Drops" source page
  * whose descriptor line omits the category name entirely (see
- * `readPageCategory` below) — exactly the kind of hand-edited irregularity
+ * `resolveCategorySignal` below) — exactly the kind of hand-edited irregularity
  * `parse-spell.ts`'s file-level comment warns about. Inferring a `GrantRule` out
  * of arbitrary wikidot prose is the SAME plausible-and-wrong fabrication
  * `parse-spell.ts` refuses when it leaves `attackModes`/`saveAbilities` empty
@@ -201,10 +201,10 @@ const OUT_OF_SCOPE_FEAT_CATEGORIES: ReadonlySet<string> = new Set([
  * 2026-08-13) and extended to the other three categories by the same
  * squash-no-separator pattern. The other three spellings are UNVERIFIED — see
  * the module's file-level comment and the scraper report for this lane. Getting
- * one wrong does not mis-categorise a feat: `readPageCategory` below only ever
- * uses a page-tag match to CONFIRM or be silent, and a wrong guess just means
- * this cross-check goes silent (matching the "no tags present" case), never
- * that it picks the wrong category outright.
+ * one wrong does not mis-categorise a feat: `resolveCategorySignal` below only
+ * ever uses a page-tag match to CONFIRM or be silent, and a wrong guess just
+ * means this cross-check goes silent (matching the "no tags present" case),
+ * never that it picks the wrong category outright.
  */
 const GROUPING_BY_CATEGORY_TAG: ReadonlyMap<string, KnownFeatGrouping> =
   new Map([
@@ -213,6 +213,49 @@ const GROUPING_BY_CATEGORY_TAG: ReadonlyMap<string, KnownFeatGrouping> =
     ['fightingstylefeat', 'fighting_style'],
     ['epicboonfeat', 'epic_boon'],
   ]);
+
+/**
+ * The OUT-OF-SCOPE equivalent of `GROUPING_BY_CATEGORY_TAG` above, guessed
+ * by the identical squash-no-separator pattern and EQUALLY UNVERIFIED — no
+ * live sample confirms any of these three. That is fine for the same
+ * reason it is fine above: `resolveCategorySignal` below only ever uses a
+ * page-tag match to CONFIRM a signal the descriptor already gave, or to
+ * DISAGREE with it; a wrong guess here just means the cross-check goes
+ * silent on that page (falling back to the descriptor alone), never that a
+ * page gets mis-skipped or mis-failed because of a bad tag guess.
+ */
+const OUT_OF_SCOPE_GROUPING_BY_TAG: ReadonlyMap<string, string> = new Map([
+  ['dragonmarkfeat', 'Dragonmark'],
+  ['planarpactfeat', 'Planar Pact'],
+  ['darkgiftfeat', 'Dark Gift'],
+]);
+
+/**
+ * A feat's category signal, generalised over BOTH closed vocabularies this
+ * module knows — the four 2024-PHB `KnownFeatGrouping`s and the three
+ * out-of-scope names — so `resolveCategorySignal` can cross-check a
+ * descriptor against page tags EXACTLY ONCE, regardless of which
+ * vocabulary either signal turns out to belong to. See R2-3 in this
+ * module's own fix history: an earlier version resolved the descriptor's
+ * out-of-scope reading FIRST and skipped immediately, before the page-tag
+ * cross-check that exists specifically to catch this kind of thing ever
+ * ran — so a page whose descriptor said "Dragonmark Feat" but whose tag
+ * said `generalfeat` was silently excluded instead of loudly refused for
+ * disagreeing with itself.
+ */
+type CategorySignal =
+  | { readonly kind: 'in-scope'; readonly value: KnownFeatGrouping }
+  | { readonly kind: 'out-of-scope'; readonly value: string };
+
+function describeSignal(signal: CategorySignal): string {
+  return signal.kind === 'in-scope'
+    ? signal.value
+    : `${signal.value} (out of 2024 PHB scope)`;
+}
+
+function signalsEqual(a: CategorySignal, b: CategorySignal): boolean {
+  return a.kind === b.kind && a.value === b.value;
+}
 
 const ABILITY_BY_PRINTED_NAME: ReadonlyMap<string, Ability> = new Map(
   abilities.map((ability) => [
@@ -259,8 +302,8 @@ const PREREQUISITE_ONLY = /^Prerequisite:\s*(.+)$/u;
  * `Fighting Style Feat` with no parenthetical at all, and — confirmed on
  * `feat:chef`, a Player's Handbook page, not a "Drops" one — `Prerequisite:
  * Level 4+` with NO category name printed at all. That last shape is why
- * `category` here is nullable and why `readPageCategory` below treats the page
- * tags as more than decoration.
+ * `category` here is nullable and why `resolveCategorySignal` below treats
+ * the page tags as more than decoration.
  */
 function readDescriptor(text: string): Descriptor | string {
   const withCategory = WITH_CATEGORY.exec(text);
@@ -301,65 +344,92 @@ function readDescriptor(text: string): Descriptor | string {
 }
 
 /**
- * `readPageCategory`'s result. NOT `KnownFeatGrouping | string`: every member
- * of `KnownFeatGrouping` IS a string, so `typeof result === 'string'` can
- * never tell a resolved category apart from a failure reason — this shape
- * exists because that exact bug shipped first and every one of this test
- * file's fixtures failed with the resolved category itself as the "reason".
+ * `resolveCategorySignal`'s result. NOT `CategorySignal | string`: a plain
+ * string result could not tell a resolved signal apart from a failure
+ * reason — the same shape-collision bug `parse-feat.ts`'s earlier
+ * `CategoryResult` was written to avoid, generalised to the wider
+ * `CategorySignal` union.
  */
-type CategoryResult =
-  | { readonly ok: true; readonly category: KnownFeatGrouping }
+type CategoryResolution =
+  | { readonly ok: true; readonly signal: CategorySignal }
   | { readonly ok: false; readonly reason: string };
 
 /**
- * Resolves the feat's category from the descriptor and the page tags, and
- * FAILS on a genuine disagreement rather than picking a winner — see the
- * module's file-level "CROSS-CHECK" note. Absence on one side is not a
- * disagreement: `feat:chef` has no category in its descriptor at all, so the
- * tag is the only signal, and a page with no recognised category tag (a real
- * possibility given `GROUPING_BY_CATEGORY_TAG` is only one-quarter confirmed)
- * simply leaves the descriptor's answer unconfirmed rather than unusable.
+ * Resolves the feat's category SIGNAL — in-scope OR out-of-scope, either
+ * one — from the descriptor and the page tags, and FAILS on a genuine
+ * disagreement rather than picking a winner — see the module's file-level
+ * "CROSS-CHECK" note and `CategorySignal`'s own comment for why this now
+ * covers both vocabularies in ONE pass rather than letting an out-of-scope
+ * descriptor reading skip the check entirely (R2-3).
+ *
+ * Absence on one side is still not a disagreement: `feat:chef` has no
+ * category in its descriptor at all, so the tag is the only signal, and a
+ * page with no recognised category tag (a real possibility given both tag
+ * maps are largely unverified guesses) simply leaves the descriptor's
+ * answer unconfirmed rather than unusable. Only two PRESENT, DIFFERENT
+ * signals — whichever vocabulary either belongs to — are a disagreement.
  */
-function readPageCategory(
-  descriptorCategory: KnownFeatGrouping | null,
+function resolveCategorySignal(
+  descriptor: Descriptor,
   pageTags: ReadonlySet<string>,
-): CategoryResult {
-  const tagCategories = new Set<KnownFeatGrouping>();
+): CategoryResolution {
+  const descriptorSignal: CategorySignal | null =
+    descriptor.category !== null
+      ? { kind: 'in-scope', value: descriptor.category }
+      : descriptor.outOfScopeCategory !== null
+        ? { kind: 'out-of-scope', value: descriptor.outOfScopeCategory }
+        : null;
+
+  const tagSignals: CategorySignal[] = [];
   for (const tag of pageTags) {
-    const category = GROUPING_BY_CATEGORY_TAG.get(tag);
-    if (category !== undefined) {
-      tagCategories.add(category);
+    const inScope = GROUPING_BY_CATEGORY_TAG.get(tag);
+    if (inScope !== undefined) {
+      tagSignals.push({ kind: 'in-scope', value: inScope });
+      continue;
+    }
+    const outOfScope = OUT_OF_SCOPE_GROUPING_BY_TAG.get(tag);
+    if (outOfScope !== undefined) {
+      tagSignals.push({ kind: 'out-of-scope', value: outOfScope });
     }
   }
-  if (tagCategories.size > 1) {
+  const distinctTagSignals: CategorySignal[] = [];
+  for (const signal of tagSignals) {
+    if (!distinctTagSignals.some((existing) => signalsEqual(existing, signal))) {
+      distinctTagSignals.push(signal);
+    }
+  }
+  if (distinctTagSignals.length > 1) {
     return {
       ok: false,
-      reason: `page tags carry more than one feat-category tag: ${[...tagCategories].sort().join(', ')}`,
+      reason:
+        'page tags carry more than one feat-category tag: ' +
+        distinctTagSignals.map(describeSignal).sort().join(', '),
     };
   }
-  const tagCategory = tagCategories.size === 1 ? [...tagCategories][0]! : null;
+  const tagSignal = distinctTagSignals[0] ?? null;
 
   if (
-    descriptorCategory !== null &&
-    tagCategory !== null &&
-    descriptorCategory !== tagCategory
+    descriptorSignal !== null &&
+    tagSignal !== null &&
+    !signalsEqual(descriptorSignal, tagSignal)
   ) {
     return {
       ok: false,
       reason:
-        `descriptor says category "${descriptorCategory}" but the page tags say ` +
-        `"${tagCategory}"`,
+        `descriptor says category "${describeSignal(descriptorSignal)}" but ` +
+        `the page tags say "${describeSignal(tagSignal)}"`,
     };
   }
-  const resolved = descriptorCategory ?? tagCategory;
+  const resolved = descriptorSignal ?? tagSignal;
   if (resolved === null) {
     return {
       ok: false,
       reason:
-        'no feat category in the descriptor and none of the four known category tags on the page',
+        'no feat category in the descriptor and none of the known category ' +
+        'tags (in-scope or out-of-scope) on the page',
     };
   }
-  return { ok: true, category: resolved };
+  return { ok: true, signal: resolved };
 }
 
 /**
@@ -510,20 +580,24 @@ export function parseFeatPage(
   if (typeof descriptor === 'string') {
     return fail(descriptor);
   }
-  if (descriptor.outOfScopeCategory !== null) {
+
+  // R2-3: the cross-check runs BEFORE any out-of-scope decision — an
+  // out-of-scope descriptor reading is never trusted alone. See
+  // `resolveCategorySignal`'s own comment for why an earlier version got
+  // this order wrong.
+  const pageTags = readPageTags(html);
+  const resolution = resolveCategorySignal(descriptor, pageTags);
+  if (!resolution.ok) {
+    return fail(resolution.reason);
+  }
+  if (resolution.signal.kind === 'out-of-scope') {
     return skip(
-      `feat category "${descriptor.outOfScopeCategory}" is out of 2024 PHB ` +
-        'scope (non-PHB setting content) — see OUT_OF_SCOPE_FEAT_CATEGORIES ' +
-        `in tools/scrape/parse-feat.ts (page "${options.slug}")`,
+      `feat category "${resolution.signal.value}" is out of 2024 PHB scope ` +
+        '(non-PHB setting content) — see OUT_OF_SCOPE_FEAT_CATEGORIES in ' +
+        `tools/scrape/parse-feat.ts (page "${options.slug}")`,
     );
   }
-
-  const pageTags = readPageTags(html);
-  const categoryResult = readPageCategory(descriptor.category, pageTags);
-  if (!categoryResult.ok) {
-    return fail(categoryResult.reason);
-  }
-  const category = categoryResult.category;
+  const category = resolution.signal.value;
 
   const bodyBlocks = blocks.filter(
     (block) => block !== sourceBlock && block !== descriptorBlock,

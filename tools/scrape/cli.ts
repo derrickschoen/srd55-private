@@ -212,6 +212,27 @@ async function commandFetch(options: Options): Promise<number> {
     for (const skipped of partition.skipped) {
       log(`  auxiliary-page skip: ${skipped.url} — ${skipped.reason}`);
     }
+    // R2-2: `seed()` below is additive-only, so a queue persisted by an
+    // OLDER version of this tool (before the auxiliary-page skip existed)
+    // can still carry `main`/`spell-list`/per-namespace-auxiliary entries
+    // from back then, and `seed()` would never remove them — they would
+    // sit there as `done` (a stale successful fetch) or `pending` and, on
+    // `build`, still fail `parse-subclass.ts`'s page-tag check, refusing
+    // the build without `--allow-partial` for the exact class of page this
+    // fix exists to route around. Pruning by the CURRENT run's own
+    // known-auxiliary URL set is safe precisely because it is recomputed
+    // from the live sitemap every run, not a fixed list baked into the
+    // queue file.
+    const pruned = queue.prune(new Set(partition.skipped.map((skip) => skip.url)));
+    if (pruned.length > 0) {
+      log(
+        `pruned ${pruned.length} known-auxiliary page(s) already persisted ` +
+          'in the queue from an earlier run:',
+      );
+      for (const item of pruned) {
+        log(`  auxiliary-page prune: ${item.url} (was "${item.state}")`);
+      }
+    }
   } else {
     entries = inNamespace(parsedSitemap, options.namespace);
     log(`sitemap: ${entries.length} page(s) in namespace "${options.namespace}"`);

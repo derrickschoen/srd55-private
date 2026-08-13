@@ -111,6 +111,29 @@ export class CrawlQueue {
     );
   }
 
+  /**
+   * Removes entries whose URL is in `urls` entirely, regardless of state —
+   * `seed()` is additive-only (an entry it does not see is left exactly as
+   * it was, done/failed/pending alike), so a URL a caller has since decided
+   * this crawl should never have queued at all (see `commandFetch`'s
+   * auxiliary-page skip in `cli.ts`, R2-2: a queue persisted by an OLDER
+   * version of this tool, before that skip existed, still carries the
+   * pages it queued back then) needs its own removal path, not a `seed()`
+   * call that can only ever add or update. Returns the removed entries so
+   * the caller can log what it dropped and why.
+   */
+  prune(urls: ReadonlySet<string>): QueueItem[] {
+    const removed: QueueItem[] = [];
+    for (const url of urls) {
+      const existing = this.#items.get(url);
+      if (existing !== undefined) {
+        removed.push(existing);
+        this.#items.delete(url);
+      }
+    }
+    return removed;
+  }
+
   mark(url: string, state: QueueState, reason: string | null = null): void {
     const item = this.#items.get(url);
     if (item === undefined) {
