@@ -151,8 +151,11 @@ project-original corpus includes:
   `docs/homebrew/lessons.md`.
 
 The project's own application code, including `src/`, `db/`, `scripts/`,
-`tools/`, and `tests/`, is **all rights reserved pending the owner's choice**.
-No code license is declared here.
+`tools/`, and `tests/`, is licensed under the **MIT License** — see the
+[LICENSE](LICENSE) file at the repository root. The MIT license covers the
+software only; the SRD 5.2.1 material and the CC-BY-4.0 documents listed
+in this file keep their own license and attribution requirements, which
+travel with any redistribution.
 
 ## Waking Will concept ancestry
 
