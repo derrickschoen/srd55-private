@@ -47,6 +47,7 @@ import {
   SITEMAP_MAX_AGE_MS,
   USER_AGENT,
 } from './fetcher';
+import { bridgeFeatProse } from './feat-grants-bridge';
 import { scrapeLayout } from './layout';
 import { parseFeatPage } from './parse-feat';
 import { parseSpellPage } from './parse-spell';
@@ -481,6 +482,130 @@ async function commandBuildFeats(options: Options): Promise<number> {
 }
 
 /**
+ * Runs every parsed feat page through `feat-grants-bridge.ts` and reports
+ * counts only — REPORTING ONLY, no Tier 1/2 document is written, exactly
+ * like `commandBuildFeats`'s own "no import path yet" note but one step
+ * earlier: this command does not even assemble a document shape, since the
+ * bridge output (`BridgedGrant[]` plus `UnrepresentedShape[]` plus verbatim
+ * `unmodeledProse`) is not `FeatContentAggregateV1` itself — see
+ * `feat-grants-bridge.ts`'s file comment for what closing that LAST gap
+ * (prerequisites, and wiring the grants into a real aggregate) would still
+ * need.
+ *
+ * FOUR MUTUALLY EXCLUSIVE PER-PAGE CATEGORIES, in priority order (codex
+ * round-1 review):
+ *
+ *  - `refused`     — the bridge itself refused (only an empty prose list, in
+ *                    practice never reached here since `parseFeatPage`
+ *                    already requires body text).
+ *  - `recognized-unrepresented` — at least one paragraph matched a shape
+ *                    this module CAN read but has nowhere real to put yet
+ *                    (skill proficiency, speed) — the most useful bucket to
+ *                    watch: it is where a future schema change pays off.
+ *  - `bridged`     — every paragraph became a grant (in this version, only
+ *                    possible for a feat whose entire body is one ASI
+ *                    paragraph — codex round-1 downgraded skill and speed out
+ *                    of `grants`, so "bridged" now means ASI-only).
+ *  - `unmodeled`   — parsed fine, nothing above applied; some or all prose
+ *                    fell through with no named reason.
+ *
+ * `--namespace` is required to be `feat` (not defaulted) so a stray `bridge`
+ * invocation with no flags does not silently read the wrong cache the way an
+ * implicit default could.
+ */
+async function commandBridge(options: Options): Promise<number> {
+  if (options.namespace !== 'feat') {
+    log(
+      `bridge only understands --namespace feat (it closes the feat prose->` +
+        `grants gap and nothing else); got "${options.namespace}".`,
+    );
+    return 1;
+  }
+  const layout = scrapeLayout(undefined, options.namespace);
+  const queue = new CrawlQueue(layout.queuePath);
+  if (!(await queue.load())) {
+    log(`no queue at ${layout.queuePath} — run "fetch" first.`);
+    return 1;
+  }
+  const cache = new PageCache(layout.cacheDir);
+
+  let bridged = 0;
+  let recognizedUnrepresented = 0;
+  let unmodeled = 0;
+  let refused = 0;
+  let parseFailures = 0;
+  let outOfScopeSkips = 0;
+  let totalGrants = 0;
+  let totalUnrepresentedSkill = 0;
+  let totalUnrepresentedSpeed = 0;
+  let totalUnmodeledProse = 0;
+
+  for (const item of queue.items) {
+    if (item.state !== 'done') {
+      continue;
+    }
+    const entry = await cache.read(item.url);
+    if (entry === null) {
+      parseFailures += 1;
+      log(`  PARSE FAIL ${item.url} — cache entry missing`);
+      continue;
+    }
+    const slug = pageName(item.url) ?? item.url;
+    const parsed = parseFeatPage(entry.body, { edition: EDITION, slug });
+    if (!parsed.ok) {
+      if (parsed.skipped) {
+        outOfScopeSkips += 1;
+        continue;
+      }
+      parseFailures += 1;
+      log(`  PARSE FAIL ${item.url} — ${parsed.reason}`);
+      continue;
+    }
+
+    const result = bridgeFeatProse(parsed.value.description);
+    if (result.kind === 'refused') {
+      refused += 1;
+      log(`  REFUSED ${item.url} — ${result.reason}`);
+      continue;
+    }
+    totalGrants += result.grants.length;
+    totalUnmodeledProse += result.unmodeledProse.length;
+    for (const gap of result.unrepresented) {
+      if (gap.shape === 'skill_proficiency') {
+        totalUnrepresentedSkill += 1;
+      } else {
+        totalUnrepresentedSpeed += 1;
+      }
+    }
+    if (result.unrepresented.length > 0) {
+      recognizedUnrepresented += 1;
+      for (const gap of result.unrepresented) {
+        log(`  RECOGNIZED-UNREPRESENTED ${item.url} — ${gap.shape}: "${gap.sentence}"`);
+      }
+    } else if (result.unmodeledProse.length === 0) {
+      bridged += 1;
+    } else {
+      unmodeled += 1;
+    }
+  }
+
+  log(
+    `bridge done: ${bridged} bridged, ${recognizedUnrepresented} ` +
+      `recognized-unrepresented, ${unmodeled} unmodeled, ${refused} refused ` +
+      `(${parseFailures} parse failure(s), ${outOfScopeSkips} out-of-scope ` +
+      'skip(s))',
+  );
+  log(
+    `  ${totalGrants} ability_score_increase grant(s) recognised; ` +
+      `${totalUnrepresentedSkill} skill-proficiency + ${totalUnrepresentedSpeed} ` +
+      `speed-increase sentence(s) recognised but unrepresented; ` +
+      `${totalUnmodeledProse} prose block(s) total left unmodeled`,
+  );
+  log('  NOTE: reporting only — this command writes no import document.');
+  return 0;
+}
+
+/**
  * `--list` has no `spellLists`-equivalent to filter on here either — same
  * refusal as `commandBuildFeats`, for the same reason.
  *
@@ -671,6 +796,14 @@ function usage(): number {
       '        [--max-age-days 30] [--offline]',
       '  build --namespace spell [--list bard] [--allow-partial]',
       '  build --namespace feat|subclass|species [--allow-partial]',
+      '  bridge --namespace feat',
+      '',
+      'bridge reads the feat queue/cache (run fetch --namespace feat first),',
+      'runs each parsed page through tools/scrape/feat-grants-bridge.ts, and',
+      'reports bridged/recognized-unrepresented/unmodeled/refused counts. It',
+      'writes no import document — reporting only. See feat-grants-bridge.ts',
+      'for the closed sentence shapes it recognises and why skill-proficiency',
+      'and movement-speed sentences are recognised but unrepresented.',
       '',
       '--namespace subclass is a PSEUDO-NAMESPACE: the site has no "subclass:"',
       'prefix, so fetch unions the thirteen real per-class namespaces instead —',
@@ -703,6 +836,9 @@ async function main(): Promise<number> {
   }
   if (options.command === 'build') {
     return commandBuild(options);
+  }
+  if (options.command === 'bridge') {
+    return commandBridge(options);
   }
   return usage();
 }

@@ -481,7 +481,16 @@ const ONE_POINT_ASI =
  * Neither regex here needs to cross that word at all, which is the more
  * robust fix — it does not depend on either source agreeing on the glyph.
  */
-function readAbilityIncreaseOptions(
+/**
+ * Exported for `feat-grants-bridge.ts`, which reads the SAME "Ability Score
+ * Increase." paragraph this parser already promotes into
+ * `document.abilityIncreaseOptions` — reusing this function rather than
+ * re-deriving the two closed shapes a second time from scratch, per the
+ * "do not duplicate what can be imported" rule the bridge module's file
+ * comment states. Nothing about this export changes this module's own
+ * behaviour or tests.
+ */
+export function readAbilityIncreaseOptions(
   benefitParagraphs: readonly FeatParagraph[],
 ): AbilityIncreaseOptions | string | null {
   const asi = benefitParagraphs.find((paragraph) => paragraph.label === 'Ability Score Increase.');
