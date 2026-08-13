@@ -689,14 +689,6 @@ describe('SRD subclass manifest', () => {
         reason: 'the_renewable_land_choice_has_no_typed_capture_path',
       },
     });
-    expect(parsed.by_class.Fighter.mechanical_outcome).toEqual({
-      kind: 'deferred',
-      deferral: {
-        kind: 'additional_fighting_style_open_choice',
-        feature_name: 'Additional Fighting Style',
-        reason: 'the_rule_requires_a_fixed_style_key',
-      },
-    });
     expect(parsed.by_class.Wizard.mechanical_outcome).toEqual({
       kind: 'deferred',
       deferral: {
@@ -708,6 +700,73 @@ describe('SRD subclass manifest', () => {
     });
   });
 
+  /**
+   * SRD 5.2.1, Fighter Subclass: Champion — "Level 7: Additional Fighting
+   * Style. You gain another Fighting Style feat of your choice."
+   * (`docs/srd/full/srd-5.2.1.txt` lines 2993-2994.)
+   *
+   * REPLACES the former `additional_fighting_style_open_choice` deferral,
+   * whose stated reason — "the rule requires a fixed style key" — was true
+   * only of the `fighting_style` GRANT KIND. An open feat choice is the
+   * `grant_source` shape the backgrounds already use for their Origin feat,
+   * so the feature is now carried rather than deferred. Strict superset: the
+   * deferral asserted the feature was NOT modelled; this asserts exactly how
+   * it is.
+   */
+  it('carries Champion’s level-7 extra Fighting Style as a real grant rule', () => {
+    const outcome = manifest().by_class.Fighter.mechanical_outcome;
+    expect(outcome).toEqual({
+      kind: 'granted_feat_choice',
+      rule_set: {
+        class_name: 'Fighter',
+        subclass_name: 'Champion',
+        feature_name: 'Additional Fighting Style',
+        feat_grouping: 'fighting_style',
+        rules: [
+          {
+            kind: 'grant_source',
+            rule_key: 'champion-additional-fighting-style',
+            source_type: 'feat',
+            definition_key_config: 'additional_fighting_style_key',
+            child_config_config: 'additional_fighting_style_config',
+            active_from_class_level: 7,
+          },
+        ],
+      },
+    });
+  });
+
+  it('reads the extra Fighting Style level off the printed heading', () => {
+    // F27: the level is sourced, not a literal. Move the printed heading and
+    // the rule must move with it.
+    const moved = parseSrdSubclasses(
+      SOURCE.replace(
+        '     Level 7: Additional Fighting Style',
+        '     Level 9: Additional Fighting Style',
+      ),
+    );
+    const outcome = moved.by_class.Fighter.mechanical_outcome;
+    expect(outcome.kind).toBe('granted_feat_choice');
+    expect(
+      outcome.kind === 'granted_feat_choice'
+        ? outcome.rule_set.rules[0]?.active_from_class_level
+        : null,
+    ).toBe(9);
+  });
+
+  it('refuses a Champion whose extra Fighting Style heading is renamed', () => {
+    // The feature-count guard already catches a DELETED heading, so this
+    // renames one instead: the rule may not survive its own feature.
+    expect(() =>
+      parseSrdSubclasses(
+        SOURCE.replace(
+          '     Level 7: Additional Fighting Style',
+          '     Level 7: Additional Fighting Stance',
+        ),
+      ),
+    ).toThrow(/Additional Fighting Style/u);
+  });
+
   it('distinguishes legitimate no-rule subclasses from deferrals and parsed rules', () => {
     const parsed = manifest();
     for (const className of ['Barbarian', 'Monk', 'Ranger', 'Rogue'] as const) {
@@ -716,9 +775,12 @@ describe('SRD subclass manifest', () => {
         reason: 'the_extracted_catalog_facts_contain_no_spell_or_choice_rule',
       });
     }
-    for (const className of ['Bard', 'Druid', 'Fighter', 'Wizard'] as const) {
+    for (const className of ['Bard', 'Druid', 'Wizard'] as const) {
       expect(parsed.by_class[className].mechanical_outcome.kind).toBe('deferred');
     }
+    expect(parsed.by_class.Fighter.mechanical_outcome.kind).toBe(
+      'granted_feat_choice',
+    );
     for (const className of ['Cleric', 'Paladin', 'Sorcerer', 'Warlock'] as const) {
       expect(parsed.by_class[className].mechanical_outcome.kind).toBe(
         'unconditional_fixed_spells',

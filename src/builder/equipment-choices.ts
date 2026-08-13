@@ -67,6 +67,17 @@ export interface GuidedFightingStyleOption {
   readonly catalog_layer: CatalogLayerDisclosure;
 }
 
+export type GuidedAdditionalFightingStyleState =
+  | { readonly state: 'not_entitled' }
+  | {
+      readonly state: 'entitled';
+      readonly subclass_name: string;
+      readonly subclass_catalog_layer: CatalogLayerDisclosure;
+      readonly source_instance_id: number;
+      readonly chosen: GuidedFightingStyleOption | null;
+      readonly options: readonly GuidedFightingStyleOption[];
+    };
+
 export interface GuidedWeaponMasteryOption {
   readonly weapon_id: number;
   readonly weapon_name: string;
@@ -85,6 +96,13 @@ export interface GuidedRequiredFighterChoicesState {
       readonly chosen: GuidedFightingStyleOption | null;
       readonly options: readonly GuidedFightingStyleOption[];
     };
+    /**
+     * The Champion's level-7 "Additional Fighting Style" entitlement, read from
+     * the subclass's own ACTIVE grant rules rather than from a class/level
+     * literal — a homebrew subclass carrying the same rule is entitled too, and
+     * a Fighter whose subclass does not carry it never is.
+     */
+    readonly additional_fighting_style: GuidedAdditionalFightingStyleState;
     readonly weapon_mastery:
       | {
           readonly state: 'known';

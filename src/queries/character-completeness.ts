@@ -973,6 +973,20 @@ export const requiredFighterChoices: CompletenessCheck = {
         remedy_action: 'guided_equipment',
       });
     }
+    const additional = state.fighter.additional_fighting_style;
+    if (additional.state === 'entitled' && additional.chosen === null) {
+      items.push({
+        kind: 'fighting_style_choice',
+        title:
+          `${additional.subclass_name} — Additional Fighting Style not chosen`,
+        detail:
+          `${additional.subclass_name} grants another Fighting Style feat of ` +
+          'your choice, but no second style is recorded.',
+        remedy:
+          'Return to guided equipment and choose the additional Fighting Style.',
+        remedy_action: 'guided_equipment',
+      });
+    }
     const mastery = state.fighter.weapon_mastery;
     if (mastery.state === 'unavailable') {
       items.push({

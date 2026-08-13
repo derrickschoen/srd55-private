@@ -134,15 +134,54 @@ export type SrdSubclassDeferral =
       readonly reason: 'the_renewable_land_choice_has_no_typed_capture_path';
     }
   | {
-      readonly kind: 'additional_fighting_style_open_choice';
-      readonly feature_name: 'Additional Fighting Style';
-      readonly reason: 'the_rule_requires_a_fixed_style_key';
-    }
-  | {
       readonly kind: 'evocation_savant_timing_excluded';
       readonly feature_name: 'Evocation Savant';
       readonly reason: 'the_acquisition_timing_exists_only_in_excluded_feature_prose';
     };
+
+/**
+ * The config path naming the feat chosen for a subclass's extra Fighting Style,
+ * and the path carrying that feat's own configuration.
+ *
+ * DELIBERATELY THE BACKGROUND ORIGIN-FEAT VOCABULARY, one level over: the
+ * generator already resolves a `grant_source` rule's definition from the
+ * source instance's own config (`definition_key_config` /
+ * `child_config_config`, `grant-rule-slot-generator.ts`), which is how a
+ * background grants the Origin feat the PLAYER picks rather than one the
+ * definition dictates. Champion's level-7 feature is the same shape — "another
+ * Fighting Style feat of your choice" — so it reuses that path instead of
+ * growing a second one.
+ */
+export const ADDITIONAL_FIGHTING_STYLE_KEY_CONFIG =
+  'additional_fighting_style_key';
+export const ADDITIONAL_FIGHTING_STYLE_CONFIG_CONFIG =
+  'additional_fighting_style_config';
+
+/**
+ * A subclass rule granting one feat the player chooses from a printed grouping.
+ *
+ * The `fighting_style` GRANT KIND cannot express this: it requires a fixed
+ * `style_key` (`grant-rule.ts`), and it materialises nothing in either the
+ * planner or the generator. A rule that names one style would be a different
+ * feature, and an inert rule would be a promise the sheet never keeps.
+ */
+export interface SrdSubclassGrantedFeatChoiceRule {
+  readonly kind: 'grant_source';
+  readonly rule_key: string;
+  readonly source_type: 'feat';
+  readonly definition_key_config: typeof ADDITIONAL_FIGHTING_STYLE_KEY_CONFIG;
+  readonly child_config_config: typeof ADDITIONAL_FIGHTING_STYLE_CONFIG_CONFIG;
+  readonly active_from_class_level: CharacterLevel;
+}
+
+export interface SrdSubclassFeatChoiceRuleSet {
+  readonly class_name: 'Fighter';
+  readonly subclass_name: 'Champion';
+  readonly feature_name: 'Additional Fighting Style';
+  /** The printed grouping the choice draws from, not a chosen style. */
+  readonly feat_grouping: 'fighting_style';
+  readonly rules: readonly SrdSubclassGrantedFeatChoiceRule[];
+}
 
 export type SrdSubclassMechanicalOutcome =
   | {
@@ -152,6 +191,10 @@ export type SrdSubclassMechanicalOutcome =
   | {
       readonly kind: 'unconditional_fixed_spells';
       readonly rule_set: SrdSubclassUnconditionalRuleSet;
+    }
+  | {
+      readonly kind: 'granted_feat_choice';
+      readonly rule_set: SrdSubclassFeatChoiceRuleSet;
     }
   | {
       readonly kind: 'deferred';
@@ -994,8 +1037,52 @@ function unconditionalRuleSets(
   return Object.freeze(sets);
 }
 
+/**
+ * "Level 7: Additional Fighting Style … You gain another Fighting Style feat of
+ * your choice." — SRD 5.2.1, printed page 52 (`docs/srd/full/srd-5.2.1.txt`
+ * lines 2993-2994; the heading itself is the retained catalog line in
+ * `docs/srd/source/subclasses.txt`).
+ *
+ * The LEVEL is read off the parsed heading rather than written as a literal —
+ * F27: the builder must not enforce a number it cannot trace to the committed
+ * source.
+ */
+const CHAMPION_ADDITIONAL_FIGHTING_STYLE_FEATURE = 'Additional Fighting Style';
+export const CHAMPION_ADDITIONAL_FIGHTING_STYLE_RULE_KEY =
+  'champion-additional-fighting-style';
+
+function championFeatChoiceRuleSet(
+  section: ParsedSection,
+): SrdSubclassFeatChoiceRuleSet {
+  const feature = section.features.find(
+    (candidate) =>
+      candidate.name === CHAMPION_ADDITIONAL_FIGHTING_STYLE_FEATURE,
+  );
+  if (feature === undefined || section.subclass_name !== 'Champion') {
+    throw new SrdSubclassesError(
+      `Fighter is missing feature ${CHAMPION_ADDITIONAL_FIGHTING_STYLE_FEATURE}.`,
+    );
+  }
+  const rule: SrdSubclassGrantedFeatChoiceRule = Object.freeze({
+    kind: 'grant_source',
+    rule_key: CHAMPION_ADDITIONAL_FIGHTING_STYLE_RULE_KEY,
+    source_type: 'feat',
+    definition_key_config: ADDITIONAL_FIGHTING_STYLE_KEY_CONFIG,
+    child_config_config: ADDITIONAL_FIGHTING_STYLE_CONFIG_CONFIG,
+    active_from_class_level: feature.class_level,
+  });
+  GrantRule.fromObject(rule);
+  return Object.freeze({
+    class_name: 'Fighter',
+    subclass_name: 'Champion',
+    feature_name: CHAMPION_ADDITIONAL_FIGHTING_STYLE_FEATURE,
+    feat_grouping: 'fighting_style',
+    rules: Object.freeze([rule]),
+  });
+}
+
 function deferralForClass(
-  className: 'Bard' | 'Druid' | 'Fighter' | 'Wizard',
+  className: 'Bard' | 'Druid' | 'Wizard',
 ): SrdSubclassDeferral {
   switch (className) {
     case 'Bard':
@@ -1011,12 +1098,6 @@ function deferralForClass(
         evidence_table: 'circle_of_the_land',
         reason: 'the_renewable_land_choice_has_no_typed_capture_path',
       });
-    case 'Fighter':
-      return Object.freeze({
-        kind: 'additional_fighting_style_open_choice',
-        feature_name: 'Additional Fighting Style',
-        reason: 'the_rule_requires_a_fixed_style_key',
-      });
     case 'Wizard':
       return Object.freeze({
         kind: 'evocation_savant_timing_excluded',
@@ -1030,10 +1111,15 @@ function mechanicalOutcome(
   section: ParsedSection,
   ruleSets: readonly SrdSubclassUnconditionalRuleSet[],
 ): SrdSubclassMechanicalOutcome {
+  if (section.class_name === 'Fighter') {
+    return Object.freeze({
+      kind: 'granted_feat_choice',
+      rule_set: championFeatChoiceRuleSet(section),
+    });
+  }
   if (
     section.class_name === 'Bard' ||
     section.class_name === 'Druid' ||
-    section.class_name === 'Fighter' ||
     section.class_name === 'Wizard'
   ) {
     const deferral = deferralForClass(section.class_name);

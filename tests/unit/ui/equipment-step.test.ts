@@ -115,6 +115,9 @@ function fighterClassPackage(): GuidedEquipmentStepState['class_package'] {
 
 function fighterChoices(
   complete = false,
+  additional: NonNullable<
+    GuidedRequiredFighterChoicesState['fighter']
+  >['additional_fighting_style'] = { state: 'not_entitled' },
 ): GuidedRequiredFighterChoicesState {
   return {
     character_id: 7,
@@ -123,6 +126,7 @@ function fighterChoices(
       class_name: 'Fighter',
       class_catalog_layer: 'bundled',
       class_level: 1,
+      additional_fighting_style: additional,
       fighting_style: {
         chosen: complete
           ? {
@@ -358,6 +362,86 @@ describe('the recorded and completed states', () => {
     await settle();
     expect(setMastery).toHaveBeenCalledWith(11, true, expect.any(String));
     second.cleanup();
+  });
+
+  /**
+   * Champion level 7, "You gain another Fighting Style feat of your choice"
+   * (SRD 5.2.1, printed page 52). The second control reuses the one
+   * `chooseFightingStyle` call: the command fills the level-1 entitlement
+   * first and the subclass's extra one after, so the caller names a feat and
+   * never an entitlement.
+   */
+  it('offers the subclass’s extra Fighting Style once the first is recorded', async () => {
+    const state = wizardAcolyteState();
+    const equipmentComplete = {
+      ...state,
+      class_package: { ...fighterClassPackage(), chosen_option: 'a' as const },
+      background_package: state.background_package === null
+        ? null
+        : { ...state.background_package, chosen_option: 'a' as const },
+      complete: true,
+    };
+    const chooseStyle = vi.fn(() => Promise.resolve());
+    const entitled = fighterChoices(true, {
+      state: 'entitled',
+      subclass_name: 'Champion',
+      subclass_catalog_layer: 'bundled',
+      source_instance_id: 42,
+      chosen: null,
+      options: [
+        {
+          content_key: '2024:feat:defense' as ContentKey,
+          name: 'Defense',
+          catalog_layer: 'bundled',
+        },
+      ],
+    });
+    const { step } = stepWith(
+      equipmentComplete,
+      undefined,
+      undefined,
+      entitled,
+      chooseStyle,
+    );
+    const view = interactiveElement(step.element);
+    expect(elementText(step.element)).toContain(
+      'Champion grants another Fighting Style feat of your choice.',
+    );
+    const extra = view.querySelector('[aria-label="Additional Fighting Style"]');
+    extra!.value = '2024:feat:defense';
+    extra!.dispatchEvent(new Event('change'));
+    view.querySelector('.guided-additional-fighting-style-choose')!.click();
+    await settle();
+    expect(chooseStyle).toHaveBeenCalledWith(
+      '2024:feat:defense',
+      expect.any(String),
+    );
+    step.cleanup();
+  });
+
+  it('hides the extra Fighting Style control when it is not granted', () => {
+    const state = wizardAcolyteState();
+    const { step } = stepWith(
+      {
+        ...state,
+        class_package: { ...fighterClassPackage(), chosen_option: 'a' as const },
+        background_package: state.background_package === null
+          ? null
+          : { ...state.background_package, chosen_option: 'a' as const },
+        complete: true,
+      },
+      undefined,
+      undefined,
+      fighterChoices(true),
+    );
+    const view = interactiveElement(step.element);
+    expect(
+      view.querySelectorAll('.guided-additional-fighting-style-choose'),
+    ).toHaveLength(0);
+    expect(elementText(step.element)).not.toContain(
+      'another Fighting Style feat',
+    );
+    step.cleanup();
   });
 
   it('declares Fighter level 1 complete only after both required choices are complete', () => {

@@ -82,10 +82,14 @@ function normalizedRuleObjects(
 function grantRulesFor(
   definition: SrdSubclassDefinition,
 ): readonly GrantRuleObject[] | null {
-  if (definition.mechanical_outcome.kind !== 'unconditional_fixed_spells') {
+  const outcome = definition.mechanical_outcome;
+  if (
+    outcome.kind !== 'unconditional_fixed_spells' &&
+    outcome.kind !== 'granted_feat_choice'
+  ) {
     return null;
   }
-  return normalizedRuleObjects(definition.mechanical_outcome.rule_set.rules);
+  return normalizedRuleObjects(outcome.rule_set.rules);
 }
 
 let cachedSeeds: readonly BundledSubclassSeed[] | undefined;
