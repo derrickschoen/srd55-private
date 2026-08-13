@@ -340,7 +340,11 @@ describe('bundled authored-kind installer', () => {
     expect(db.scalar<number>('SELECT count(*) FROM catalog_content_identities')).toBe(rootsAfterFirst);
     expect(db.scalar<number>('SELECT count(*) FROM catalog_content_supersessions')).toBe(7);
     expect(db.scalar<number>('SELECT count(*) FROM catalog_content_drafts')).toBe(0);
-  }, 20_000);
+    // The full install publishes one document per bundled revision (11 as of
+    // barbedCourtV5) plus the repeat no-op pass; 2.7s at 8 revisions grew to
+    // 9.2s at 10 when run alone, and the old 20s budget trips under full-suite
+    // parallelism. Assertions above are unchanged.
+  }, 45_000);
 
   it('upgrades Veteran v2 to v3 while retaining the v2 character bytes and exposing replacement review', async () => {
     const db = await database();
