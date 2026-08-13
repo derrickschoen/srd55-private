@@ -8,12 +8,18 @@
 // on the wrong branch. All draw-count derivations are documented inline.
 import { describe, expect, it } from 'vitest';
 import {
+  berserkerThrown,
   champion,
   championRanged,
+  championSurgesOnRound,
   devotion,
   domination,
+  draconicTurnCasting,
   fiend,
+  hunter,
+  lifeDomain,
   monk,
+  openHandThrown,
   veteran,
 } from './sim';
 import {
@@ -120,6 +126,109 @@ describe('constant-value Rng (fixed non-crit hit): exact smite-queue accounting'
     const smiteTotal = L17_QUEUE.slice(0, 4).reduce((a, b) => a + b, 0) * 6;
     const r = domination(constRng(X), 17, 1, 'smite');
     expect(r).toEqual({ dealt: weaponTotal + smiteTotal, prevented: 0 });
+  });
+});
+
+describe('rotation decision nodes: exact ordering and action-economy accounting', () => {
+  it('Devotion smites the first confirmed hit immediately, not a later critical hit', () => {
+    // L3 has two attacks/round (shortsword then Nick). Attack 1 is a normal
+    // hit and consumes the 2d8 Smite at minimum faces. Its Vex makes attack 2
+    // roll twice; that attack crits, but cannot retroactively double Smite.
+    // Remaining attacks all miss. Damage = (d6 1 + Dex 3 + 2d8 2) +
+    // (critical 2d6 2 + Dex 3) = 11.
+    const values = [
+      0.72, 0, 0, 0,
+      0.99, 0, 0, 0,
+      ...repeat(MISS, 6),
+    ];
+    expect(devotion(scriptedRng(values), 3, 1)).toEqual({ dealt: 11, prevented: 0 });
+  });
+
+  it('Devotion doubles Smite dice when the first confirmed hit itself is critical', () => {
+    // Critical shortsword: 2d6 + Dex + doubled 2d8 Smite = 9 at min faces.
+    // Its Vex feeds a plain Nick hit for d6+Dex=4; later attacks miss.
+    const values = [
+      0.99, 0, 0, 0, 0, 0, 0,
+      0.72, 0.72, 0,
+      ...repeat(MISS, 6),
+    ];
+    expect(devotion(scriptedRng(values), 3, 1)).toEqual({ dealt: 13, prevented: 0 });
+  });
+
+  it('Champion banks shortbow Vex before its single surge and uses both L17 surges on separate turns', () => {
+    expect([0, 1, 2, 3].filter((round) => championSurgesOnRound(11, false, round))).toEqual([0]);
+    expect([0, 1, 2, 3].filter((round) => championSurgesOnRound(11, true, round))).toEqual([1]);
+    expect([0, 1, 2, 3].filter((round) => championSurgesOnRound(17, true, round))).toEqual([0, 1]);
+  });
+
+  it('thrown Berserker pays the round-one Rage BA tax and Vex supplies every Brutal attack', () => {
+    let draws = 0;
+    const rng = (): number => {
+      draws += 1;
+      return 0.72;
+    };
+    // L11: 2 attacks in round 1, then 3 each round = 11. Each has Advantage
+    // (Reckless, or carried Vex on the Brutal attack): 22 d20 draws. Damage
+    // uses 11 weapon dice, 12 Frenzy dice, and 4 Brutal d10s: 27 more draws.
+    expect(berserkerThrown(rng, 11, 1)).toEqual({ dealt: 242, prevented: 0 });
+    expect(draws).toBe(49);
+  });
+
+  it('thrown Open Hand carries handaxe Vex across turns', () => {
+    let draws = 0;
+    const rng = (): number => {
+      draws += 1;
+      return 0.72;
+    };
+    // Four L3 attacks: one initial d20, three Vex-advantaged pairs, and four
+    // damage dice. Each hit deals d6(5)+Dex3=8.
+    expect(openHandThrown(rng, 3, 1)).toEqual({ dealt: 32, prevented: 0 });
+    expect(draws).toBe(11);
+  });
+
+  it('Hunter Nick consumes Vex but does not create Vex for the next turn', () => {
+    let draws = 0;
+    const rng = (): number => {
+      draws += 1;
+      return 0.72;
+    };
+    // L3 each round: shortsword normal, Nick scimitar with Vex advantage.
+    // Attack d20 draws = 4*(1+2)=12; weapon/Mark/Colossus dice = 4*5=20.
+    expect(hunter(rng, 3, 1)).toEqual({ dealt: 128, prevented: 0 });
+    expect(draws).toBe(32);
+  });
+
+  it('Fiend cannot cast Hex and Scorching Ray with Pact slots on the same turn', () => {
+    // L6 round 1 casts Hex and fires two EB beams. Both hit for
+    // d10(8)+Cha4+Hex d6(5)=17. Every later attack misses.
+    const values = [
+      0.72, 0.72, 0.72,
+      0.72, 0.72, 0.72,
+      ...repeat(MISS, 8),
+    ];
+    expect(fiend(scriptedRng(values), 6, 1)).toEqual({ dealt: 34, prevented: 0 });
+  });
+
+  it('Life walks Spirit Guardians onto the target, then resolves its end-turn tick', () => {
+    // L6 has a 3rd-level slot: 2 ticks/round * 4 rounds * half of 3d8(18)
+    // =72. Preserve Life prevents 30; Healing Word 2d4(6)+Wis4+Disciple3
+    // plus Blessed Healer3 prevents 16 more.
+    expect(lifeDomain(constRng(0.72), 6, 1)).toEqual({ dealt: 72, prevented: 46 });
+  });
+
+  it('Draconic casting decisions spend at most one slot and honor Quickened locking', () => {
+    expect(draconicTurnCasting(true, true)).toEqual({
+      action: 'cantrip', bonusAction: 'leveled spell', slotsSpent: 1,
+    });
+    expect(draconicTurnCasting(true, false)).toEqual({
+      action: 'leveled spell', bonusAction: 'none', slotsSpent: 1,
+    });
+    expect(draconicTurnCasting(false, true)).toEqual({
+      action: 'cantrip', bonusAction: 'cantrip', slotsSpent: 0,
+    });
+    expect(draconicTurnCasting(false, false)).toEqual({
+      action: 'cantrip', bonusAction: 'none', slotsSpent: 0,
+    });
   });
 });
 

@@ -19,6 +19,8 @@ confidence interval; it does not tune mechanics to make claims match.
 | `homebrew.ts` | Pure three-round builds for the eight numbered homebrew entries (nine wrappers because the shared Ambush Primitive has Ranger and Rogue versions), plus the declared Ranger stack. |
 | `homebrew-board.ts` | Claimed-vs-measured rows and explicit diagnostics for the four-attack Anchor aside, Ranger stack, and Cutting Chorus headline values. |
 | `run.ts` | CLI harness. Prints the three summary tables (dealt / prevented / dealt+prevented) with 95% confidence intervals. |
+| `ROTATION_AUDIT.md` | Per-row 2024 rotation audit, SRD adoption citations, and explicitly unpriced or non-SRD mechanics. |
+| `SUBSTITUTIONS.md` | SRD-only stand-ins for guide options, including the corrected 2024 GWM/Sharpshooter framing and non-SRD rotation exclusions. |
 | `test-helpers.ts` | Shared test utilities: deterministic `Rng` builders and a seeded-sampling statistics helper. Not a test file itself. |
 | `*.test.ts` | The test suite (see below). |
 | `vitest.config.ts`, `tsconfig.json` | Standalone config — this folder runs on its own, with no dependency on the repo's `src/` or `tests/`. |
@@ -58,7 +60,7 @@ Or standalone, from anywhere, without `cd`-ing in first:
 npx vitest run --root path/to/tools/sim
 ```
 
-The current suite is verified to pass (161 tests, 8 files) under vitest 3.2.7;
+The current suite is verified to pass (171 tests, 8 files) under vitest 3.2.7;
 nothing in the suite is version-specific. The first run may create a small
 `node_modules/` holding vitest's own transform cache — harmless, gitignore it.
 

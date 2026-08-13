@@ -74,9 +74,10 @@ describe('ranged/thrown posture identities have independent exact accounting', (
   // directly from the cited dice, attack counts, and resource queues.
   const X = 0.72;
 
-  it('Berserker L3 thrown: two handaxes, off-hand omits Strength, Frenzy stays legal', () => {
-    // Per round: main 5+Str3+Rage2=10; Light 5+Rage2=7; Frenzy 2d6=10.
-    expect(berserkerThrown(constRng(X), 3, 1)).toEqual({ dealt: 4 * 27, prevented: 0 });
+  it('Berserker L3 thrown: Rage consumes round-one BA; later Light attacks omit Strength', () => {
+    // Round 1: main 10 + Frenzy 10 = 20 because entering Rage uses the BA.
+    // Rounds 2-4: main 10 + Light 7 + Frenzy 10 = 27 each.
+    expect(berserkerThrown(constRng(X), 3, 1)).toEqual({ dealt: 20 + 3 * 27, prevented: 0 });
   });
 
   it('Open Hand L6 thrown: Martial Arts d8 and two attacks, but no ranged Flurry', () => {
@@ -90,11 +91,12 @@ describe('ranged/thrown posture identities have independent exact accounting', (
     expect(thiefShortbow(constRng(X), 17, 1)).toEqual({ dealt: 5 * 58, prevented: 0 });
   });
 
-  it('Devotion L17 thrown: two javelins per round retain Radiant Strikes and smites', () => {
-    // Eight weapon hits: d6(5)+Str5+item3+d8(6)=19. Four greediest smites
-    // consume [6,5,5,5]d8 at face6. Sacred Weapon changes accuracy only.
+  it('Devotion L17 thrown: the six-javelin starting supply caps attacks and smites', () => {
+    // Six weapon hits: d6(5)+Str5+item3+d8(6)=19. The first hit in each of
+    // the three stocked rounds consumes the [6,5,5]d8 greediest smites.
+    // Sacred Weapon changes accuracy only.
     expect(devotionThrown(constRng(X), 17, 1)).toEqual({
-      dealt: 8 * 19 + (6 + 5 + 5 + 5) * 6,
+      dealt: 6 * 19 + (6 + 5 + 5) * 6,
       prevented: 0,
     });
   });

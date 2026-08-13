@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   champion,
   championRanged,
+  SRD_CONCENTRATION_ROLES,
   devotion,
   domination,
   fiend,
@@ -77,6 +78,17 @@ describe('Fiend sustained vs slot-volley postures are distinct deterministic ide
         fiendPatron(mulberry32(667 + level), level, 1),
       );
     }
+  });
+});
+
+describe('complete-board concentration posture identities', () => {
+  it('classifies all nineteen SRD board rows without an implicit fallback', () => {
+    expect(Object.keys(SRD_CONCENTRATION_ROLES)).toHaveLength(19);
+    expect(SRD_CONCENTRATION_ROLES.hunter).toBe('damage-anchored');
+    expect(SRD_CONCENTRATION_ROLES.lifeDomain).toBe('damage-anchored');
+    expect(SRD_CONCENTRATION_ROLES.circleLand).toBe('buff/control');
+    expect(SRD_CONCENTRATION_ROLES.loreCollege).toBe('level-dependent');
+    expect(SRD_CONCENTRATION_ROLES.draconic).toBe('none');
   });
 });
 
