@@ -7,6 +7,57 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D240 — OWNER: the DPR simulator ships as a sheet summary linking to a full page (2026-08-14)
+
+Asked where the advanced-user simulator lives. Ruled **both**: a single
+headline DPR number on the character sheet, which links into a dedicated
+simulator page carrying the rounds / short-rest / long-rest settings and the
+results grid. Discovery beats purity here — a page nobody finds is not an
+advanced feature, it is a hidden one. Cost accepted: two surfaces to keep
+consistent, so the sheet summary must be *derived from* the same computation
+the page runs, never a second implementation of it. Supersedes nothing; this
+is the binding target for the design doc in `wt/simdoc`.
+
+## D239 — OWNER: the private regression gate BLOCKS, and re-pins are explicit (2026-08-14)
+
+Asked what happens when the private harness gate fails because SRD content
+legitimately changed. Ruled: **block the merge**, and require an explicit
+re-pin carrying a justification comment naming what changed and why. Rejected
+the softer options (classify-then-block-only-on-engine-drift; warn-only). The
+reasoning that governs future cases: a gate that classifies its own failures
+decides which regressions are allowed, and a gate that never blocks is
+documentation. Every content change therefore gets a recorded decision, which
+is the point of holding the harness at all.
+
+## D238 — OWNER: an undeclared convention never becomes a passing reading (2026-08-14)
+
+Asked what the harness should do when a build reconciles only under a
+convention the author never declared — the live case is #30, Chromatic Orb's
+leap chain, which fits if his "three enemies" premise is flat area damage
+rather than a literal bounce chain. Ruled: **leave the build failing and
+document the candidate reading.** Rejected both modelling it as a named
+opt-in mode and adopting it as the default. The scorecard therefore keeps
+carrying failures whose cause we believe we understand, and that is correct:
+a red cell with a written-up hypothesis is honest, while a green cell resting
+on an invented convention silently converts a guess into our comparison
+basis. Pairs with the errata evidentiary standard — we do not file a claim we
+cannot cite, and we do not pass a build on a convention nobody stated.
+
+## D237 — OWNER: lanes self-gate; the supervisor re-runs only the merge gate (2026-08-14)
+
+Concurrency ruling, prompted by a finding against our own process: the R1
+merge gate produced 15 pure-timeout failures at loadavg 155.93 on 24 cores
+because three codex lanes were running their own suites at the same time. No
+assertion failed; the gate had measured the machine.
+
+Ruled: **keep maximum fan-out, and require each lane to run and report its own
+suite before returning.** The supervisor then re-runs only the merge gate, on
+a quiet box. Consequences that bind: a gate run made under load is DISCARDED,
+never interpreted and never absorbed by re-pinning a budget (budgets remain
+LAW); lane-reported greens are CLAIMED, and every report must keep them
+distinct from what the supervisor VERIFIED; the merge gate itself is never
+delegated.
+
 ## D236 — OWNER: species templates may author ability_override; the effect vocabulary is fully wide (2026-08-13)
 
 Follow-up to D235's sibling ruling. Asked directly whether a species
