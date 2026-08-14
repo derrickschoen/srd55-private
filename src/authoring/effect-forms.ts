@@ -1,64 +1,16 @@
 import type {
-  Ability,
   CharacterEffectKind,
-  DamageType,
-  ExtraAttackWeaponScope,
+  EffectKindName,
+  EffectPayloadByKind,
   FeatureTemplateEffectKind,
-} from '../domain/enums';
+} from '../domain/effect-kinds';
 import type { HomebrewDraftItemUuid } from './ids';
 import { AUTHORING_NUMERIC_LIMITS } from './limits';
 
-interface EffectPayloadByKind {
-  readonly damage_resistance: {
-    readonly damage_type: DamageType;
-  };
-  readonly hp_modifier: {
-    readonly hit_points_flat: number | null;
-    readonly hit_points_per_level: number | null;
-  };
-  readonly speed: {
-    readonly speed_bonus_feet: number;
-  };
-  readonly ability_increase: {
-    readonly ability: Ability;
-    readonly amount: number;
-    readonly maximum: number;
-  };
-  readonly ability_override: {
-    readonly ability: Ability;
-    readonly maximum: number;
-  };
-  readonly armor_class_bonus: {
-    readonly amount: number;
-  };
-  readonly armor_class_formula: {
-    readonly base: number;
-    readonly ability_1: Ability;
-    readonly ability_2: Ability | null;
-    readonly allows_shield: boolean;
-  };
-  readonly attack_ability_override: {
-    readonly ability: Ability;
-    readonly weapon_scope: ExtraAttackWeaponScope;
-  };
-  readonly weapon_attack_bonus: {
-    readonly amount: number;
-    readonly weapon_scope: ExtraAttackWeaponScope;
-  };
-  readonly weapon_damage_bonus: {
-    readonly amount: number;
-    readonly weapon_scope: ExtraAttackWeaponScope;
-  };
-  readonly extra_attack: {
-    readonly attack_count: number;
-    readonly weapon_scope: ExtraAttackWeaponScope;
-  };
-}
-
-export type AuthorableEffectKind = keyof EffectPayloadByKind;
+export type AuthorableEffectKind = EffectKindName;
 
 type EffectPayload<K extends AuthorableEffectKind> =
-  EffectPayloadByKind[K];
+  EffectPayloadByKind<'authored'>[K];
 
 interface PublishedEffectBase<K extends AuthorableEffectKind> {
   readonly kind: K;

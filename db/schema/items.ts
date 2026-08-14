@@ -13,15 +13,12 @@ import type {
   ItemDefinitionEffectId,
   ItemDefinitionId,
 } from '../../src/domain/ids';
-import type {
-  CharacterEffectKind,
-  DamageType,
-  RulesEdition,
-} from '../../src/domain/enums';
+import type { DamageType, RulesEdition } from '../../src/domain/enums';
+import { rulesEditions } from '../../src/domain/enums';
 import {
   characterEffectKinds,
-  rulesEditions,
-} from '../../src/domain/enums';
+  type CharacterEffectKind,
+} from '../../src/domain/effect-kinds';
 import {
   datetime,
   integerAtLeast,

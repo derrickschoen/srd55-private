@@ -8,12 +8,14 @@ import {
 import type { AuthoringValidationIssue } from '../../authoring/contracts';
 import {
   abilities,
-  characterEffectKinds,
   damageTypes,
   extraAttackWeaponScopes,
+} from '../../domain/enums';
+import {
+  characterEffectKinds,
   featureTemplateEffectKinds,
   type FeatureTemplateEffectKind,
-} from '../../domain/enums';
+} from '../../domain/effect-kinds';
 import { element } from '../dom';
 import { freeTextSpan } from '../free-text';
 import type { ScreenContext } from '../screen';

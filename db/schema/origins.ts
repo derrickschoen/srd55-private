@@ -29,24 +29,24 @@ import type {
 import type {
   Ability,
   BackgroundEquipmentOption,
-  CharacterEffectKind,
   CreatureSize,
   CreatureType,
   DamageType,
   EquipmentItemKind,
   ExtraAttackWeaponScope,
   RulesEdition,
-  SpeciesTemplateEffectKind,
 } from '../../src/domain/enums';
 import {
   abilities,
   backgroundEquipmentOptions,
-  characterEffectKinds,
   equipmentItemKinds,
   extraAttackWeaponScopes,
   rulesEditions,
-  speciesTemplateEffectKinds,
 } from '../../src/domain/enums';
+import {
+  characterEffectKinds,
+  type CharacterEffectKind,
+} from '../../src/domain/effect-kinds';
 import {
   datetime,
   equipmentItemPayload,
@@ -642,9 +642,9 @@ export const character_effects = sqliteTable(
      * background increases stop at 20 (`docs/srd/source/backgrounds.txt:51`),
      * ASI feats at 20 (`feats.txt:67`), Epic Boons at 30. It is bounded 1–30
      * `ability_override` reuses that same range because its target becomes the
-     * resolved score. It is CHARACTER-ONLY: no feature-template effect CHECK
-     * is widened by D83 because the shipped corpus has no authorable feat or
-     * species needing SET-to-score.
+     * resolved score. D83 keeps it out of class/feat template vocabularies;
+     * D236 supersedes the species exclusion and permits it here through the
+     * wide character-effect vocabulary.
      *
      * Both uses are bounded 1–30 because `AbilityScore` throws outside that range
      * (`src/rules/ability-score.ts:4-13`) — a stored `max 32` on a high base
