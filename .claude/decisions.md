@@ -7,6 +7,47 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D244 — OWNER: the private regression gate is a standalone runner the ritual invokes (2026-08-14)
+
+Follow-up to D239, which made the gate blocking. Asked where it runs. Ruled:
+a **separate gate script living in the private repo, pinned to a public SHA**,
+invoked as an explicit step of the merge ritual. Rejected wiring it into
+`orchestration/merge-to-main.sh` (that would put a private path, which exists
+only on this machine, into a public script) and rejected leaving it purely
+procedural. The public repo therefore carries no knowledge that the gate
+exists; the private repo owns the coupling, which is the same direction D59
+already points.
+
+## D243 — OWNER: the simulator's probability core starts now, ahead of its UI (2026-08-14)
+
+The licensing audit blocked reuse of the private engine, so the simulator has
+to be rebuilt independently from the bundled SRD. Asked when that starts.
+Ruled: **start the probability core now** — before the advanced UI shell and
+without waiting for the v1 usability bar. Reasoning that governs: the core is
+where the correctness risk actually lives, and it is the part that must be
+verifiable against public rules rather than against anything derived. UI
+attaches later, to a core already proved.
+
+## D242 — OWNER: unresolved entries get full treatment, source-internal ones get a table (2026-08-14)
+
+Presentation ruling for the remaining errata walkthrough. The 9 UNRESOLVED
+entries are walked at the same depth as the accusations, because that is where
+the remaining doubt lives and doubt is the thing worth reading. The 12
+SOURCE-INTERNAL entries get one line each in a table with a dossier link.
+Batches 1–3 (7 retracted, 4 strong, 3 weak) were delivered at full depth.
+
+## D241 — OWNER: a convention is applied completely or not at all (2026-08-14)
+
+The R3 lane branded 33 of 59 identifier fields — every id in `models.ts` plus
+the four highest-risk read-model ids — and judged the remaining 26 low-risk.
+Asked whether to accept. Ruled: **finish all 59 before merging.** Neither
+partial-then-merge nor merge-then-follow-up was accepted.
+
+The principle to carry forward: a half-applied convention is worse than no
+convention, because a reader cannot tell whether an unbranded id is
+deliberately exempt or merely unfinished. Scope reductions proposed by an
+implementer are findings to bring back, not decisions to take.
+
 ## D240 — OWNER: the DPR simulator ships as a sheet summary linking to a full page (2026-08-14)
 
 Asked where the advanced-user simulator lives. Ruled **both**: a single
