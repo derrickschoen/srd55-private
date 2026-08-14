@@ -17,7 +17,6 @@ import {
 } from '../../../src/simulation/contracts';
 import {
   publicProbabilityCoverageManifest,
-  reviewedSaveEffectStableKeys,
   reviewedSaveSuccessClauses,
 } from '../../../src/simulation/coverage';
 import {
@@ -129,36 +128,37 @@ describe('save fold arms and contributions', () => {
   function base(
     on_success: SavingThrowDamageEvent['on_success'],
   ): SavingThrowDamageEvent {
-    const effectStableKey = on_success.kind === 'half'
-      ? reviewedSaveEffectStableKeys.fireball
-      : reviewedSaveEffectStableKeys.acid_splash;
+    const clause = on_success.kind === 'half'
+      ? reviewedSaveSuccessClauses.flaming_sphere
+      : on_success.kind === 'sourced_damage'
+        ? reviewedSaveSuccessClauses.vitriolic_sphere
+        : reviewedSaveSuccessClauses.acid_splash;
+    const failedDamage = on_success.kind === 'half'
+      ? { count: 2, die: 6 as const, type: fire }
+      : on_success.kind === 'sourced_damage'
+        ? { count: 10, die: 4 as const, type: damageType('Acid') }
+        : { count: 1, die: 6 as const, type: damageType('Acid') };
     return {
       kind: 'saving_throw_damage',
       event_id: routineEventId('save:multi'),
-      source: { ...weapon, stable_key: effectStableKey },
+      source: clause.effect_source,
       frequency: { kind: 'each_declared_event' },
       duration: { kind: 'instantaneous' },
-      save_success_clause_id: on_success.kind === 'half'
-        ? reviewedSaveSuccessClauses.fireball.id
-        : on_success.kind === 'sourced_damage'
-          ? reviewedSaveSuccessClauses.vitriolic_sphere.id
-          : reviewedSaveSuccessClauses.acid_splash.id,
+      save_success_clause_id: clause.id,
       ability: 'dexterity',
       save_dc: saveDifficultyClass(13),
       roll_state: 'normal',
       damage_on_failed_save: [
         {
-          source: weapon,
-          damage_type: fire,
+          source: clause.effect_source,
+          damage_type: failedDamage.type,
           components: [{
             kind: 'dice',
-            pool: { count: positiveDiceCount(2), die: 6 },
+            pool: {
+              count: positiveDiceCount(failedDamage.count),
+              die: failedDamage.die,
+            },
           }],
-        },
-        {
-          source: other,
-          damage_type: slashing,
-          components: [{ kind: 'flat', modifier: damageFlatModifier(3) }],
         },
       ],
       on_success,
@@ -167,6 +167,7 @@ describe('save fold arms and contributions', () => {
   const responses = [
     { damage_type: fire, response: 'normal' as const },
     { damage_type: slashing, response: 'normal' as const },
+    { damage_type: damageType('Acid'), response: 'normal' as const },
   ];
 
   it('none arm', () => {
@@ -183,7 +184,7 @@ describe('save fold arms and contributions', () => {
     }
     // save succeeds on 13..20 => 8/20 = 0.4 success, 0.6 fail
     expect(r.failed_save_probability).toBeCloseTo(0.6, 12);
-    expect(r.expected_damage).toBeCloseTo(0.6 * (7 + 3), 10);
+    expect(r.expected_damage).toBeCloseTo(0.6 * 3.5, 10);
     expect(
       r.contributions.reduce((s, c) => s + c.expected_damage, 0),
     ).toBeCloseTo(r.expected_damage, 10);
@@ -193,7 +194,7 @@ describe('save fold arms and contributions', () => {
     const r = foldSavingThrowEvent(
       base({
         kind: 'half',
-        evidence: reviewedSaveSuccessClauses.fireball.evidence,
+        evidence: reviewedSaveSuccessClauses.flaming_sphere.evidence,
       }),
       { save_bonus: targetSaveBonus(0), damage_responses: responses },
     );
@@ -207,7 +208,7 @@ describe('save fold arms and contributions', () => {
         halfFire += Math.floor((a + b) / 2) / 36;
       }
     }
-    const expected = 0.6 * (7 + 3) + 0.4 * (halfFire + Math.floor(3 / 2));
+    const expected = 0.6 * 7 + 0.4 * halfFire;
     expect(r.expected_damage).toBeCloseTo(expected, 10);
     expect(
       r.contributions.reduce((s, c) => s + c.expected_damage, 0),

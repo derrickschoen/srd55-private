@@ -20,7 +20,6 @@ import {
   bundledSrdSourceRef,
   damageNeutralityEvidence,
   publicProbabilityCoverageManifest,
-  reviewedSaveEffectStableKeys,
   reviewedSaveSuccessClauses,
   reviewedDamageNeutralMechanicIds,
 } from '../../../src/simulation/coverage';
@@ -37,13 +36,20 @@ const source: SourceRef = {
   stable_key: sourceStableKey('spell:unrelated-fire'),
 };
 const fire = damageType('Fire');
-const responses = [{ damage_type: fire, response: 'normal' as const }];
+const responses = [
+  { damage_type: fire, response: 'normal' as const },
+  { damage_type: damageType('Acid'), response: 'normal' as const },
+];
 
 function saveEvent(input: {
   readonly source: SourceRef;
   readonly evidence: PublicSourceRef;
   readonly success: 'none' | 'half';
 }): SavingThrowDamageEvent {
+  const isHalf = input.success === 'half';
+  const damage = isHalf
+    ? { count: 8, type: fire }
+    : { count: 1, type: damageType('Acid') };
   return {
     kind: 'saving_throw_damage',
     event_id: routineEventId('review:save'),
@@ -58,10 +64,10 @@ function saveEvent(input: {
       : reviewedSaveSuccessClauses.acid_splash.id,
     damage_on_failed_save: [{
       source: input.source,
-      damage_type: fire,
+      damage_type: damage.type,
       components: [{
         kind: 'dice',
-        pool: { count: positiveDiceCount(1), die: 6 },
+        pool: { count: positiveDiceCount(damage.count), die: 6 },
       }],
     }],
     on_success: {
@@ -131,10 +137,7 @@ describe('confirmed review findings after repair', () => {
   });
 
   it('F1 negative control accepts Acid Splash itself at 1.75 and composes numerically', () => {
-    const acidSplash = {
-      ...source,
-      stable_key: reviewedSaveEffectStableKeys.acid_splash,
-    };
+    const acidSplash = reviewedSaveSuccessClauses.acid_splash.effect_source;
     const result = foldSavingThrowEvent(
       saveEvent({
         source: acidSplash,
@@ -153,6 +156,49 @@ describe('confirmed review findings after repair', () => {
     if (composed.status === 'available') {
       expect(composed.expected_damage).toBeCloseTo(1.75, 12);
     }
+  });
+
+  it('R5 F1 refuses a weapon that forges Acid Splash stable identity', () => {
+    const forgedWeapon: SourceRef = {
+      ...source,
+      stable_key: reviewedSaveSuccessClauses.acid_splash.effect_stable_key,
+    };
+    const result = foldSavingThrowEvent(saveEvent({
+      source: forgedWeapon,
+      evidence: reviewedSaveSuccessClauses.acid_splash.evidence,
+      success: 'none',
+    }), {
+      save_bonus: targetSaveBonus(0),
+      damage_responses: responses,
+    });
+    expect(result.status).toBe('unavailable');
+    expect(result).not.toHaveProperty('expected_damage');
+  });
+
+  it('R5 F2 refuses canonical Acid Splash identity with invented ability and damage', () => {
+    const genuine = saveEvent({
+      source: reviewedSaveSuccessClauses.acid_splash.effect_source,
+      evidence: reviewedSaveSuccessClauses.acid_splash.evidence,
+      success: 'none',
+    });
+    const invented: SavingThrowDamageEvent = {
+      ...genuine,
+      ability: 'constitution',
+      damage_on_failed_save: [{
+        source: genuine.source,
+        damage_type: fire,
+        components: [{
+          kind: 'dice',
+          pool: { count: positiveDiceCount(1), die: 4 },
+        }],
+      }],
+    };
+    const result = foldSavingThrowEvent(invented, {
+      save_bonus: targetSaveBonus(0),
+      damage_responses: responses,
+    });
+    expect(result.status).toBe('unavailable');
+    expect(result).not.toHaveProperty('expected_damage');
   });
 
   it('F1 refuses Fireball half evidence for an unregistered effect and survives composition', () => {
@@ -175,10 +221,7 @@ describe('confirmed review findings after repair', () => {
   });
 
   it('F1 negative control accepts Fireball itself at 2.5 and composes numerically', () => {
-    const fireball = {
-      ...source,
-      stable_key: reviewedSaveEffectStableKeys.fireball,
-    };
+    const fireball = reviewedSaveSuccessClauses.fireball.effect_source;
     const result = foldSavingThrowEvent(
       saveEvent({
         source: fireball,
@@ -191,20 +234,17 @@ describe('confirmed review findings after repair', () => {
     if (result.status !== 'available') {
       throw new Error(result.reason);
     }
-    expect(result.expected_damage).toBeCloseTo(2.5, 12);
+    expect(result.expected_damage).toBeCloseTo(20.875, 12);
     const composed = composeRoundDamageFolds([result]);
     expect(composed.status).toBe('available');
     if (composed.status === 'available') {
-      expect(composed.expected_damage).toBeCloseTo(2.5, 12);
+      expect(composed.expected_damage).toBeCloseTo(20.875, 12);
     }
   });
 
   it('R4 F1 binds Storm of Vengeance initial thunder to its exact save clause', () => {
-    const stormSource: SourceRef = {
-      ...source,
-      stable_key:
-        reviewedSaveEffectStableKeys.storm_of_vengeance_initial,
-    };
+    const stormSource =
+      reviewedSaveSuccessClauses.storm_of_vengeance_initial.effect_source;
     const thunder = damageType('Thunder');
     const base: SavingThrowDamageEvent = {
       kind: 'saving_throw_damage',
@@ -285,10 +325,7 @@ describe('confirmed review findings after repair', () => {
       },
     ];
     for (const testCase of cases) {
-      const spellSource: SourceRef = {
-        ...source,
-        stable_key: testCase.clause.effect_stable_key,
-      };
+      const spellSource = testCase.clause.effect_source;
       const event: SavingThrowDamageEvent = {
         kind: 'saving_throw_damage',
         event_id: routineEventId(`review:${testCase.clause.id}`),
@@ -319,6 +356,78 @@ describe('confirmed review findings after repair', () => {
         save_bonus: targetSaveBonus(0),
         damage_responses: [{
           damage_type: testCase.damageType,
+          response: 'normal',
+        }],
+      });
+      expect(result.status, testCase.clause.id).toBe('available');
+      if (result.status !== 'available') {
+        throw new Error(result.reason);
+      }
+      expect(result.expected_damage, testCase.clause.id).toBeCloseTo(
+        testCase.expected,
+        12,
+      );
+    }
+  });
+
+  it('R5 F5 evaluates source-discovered saves that gate recurring damage', () => {
+    const cases = [
+      {
+        clause: reviewedSaveSuccessClauses.ensnaring_strike,
+        ability: 'strength' as const,
+        count: 1,
+        die: 6 as const,
+        type: damageType('Piercing'),
+        expected: 1.75,
+      },
+      {
+        clause: reviewedSaveSuccessClauses.phantasmal_force,
+        ability: 'intelligence' as const,
+        count: 2,
+        die: 8 as const,
+        type: damageType('Psychic'),
+        expected: 4.5,
+      },
+      {
+        clause: reviewedSaveSuccessClauses.searing_smite,
+        ability: 'constitution' as const,
+        count: 1,
+        die: 6 as const,
+        type: fire,
+        expected: 1.75,
+      },
+    ];
+    for (const testCase of cases) {
+      const event: SavingThrowDamageEvent = {
+        kind: 'saving_throw_damage',
+        event_id: routineEventId(`review:${testCase.clause.id}`),
+        source: testCase.clause.effect_source,
+        ability: testCase.ability,
+        save_dc: saveDifficultyClass(11),
+        roll_state: 'normal',
+        frequency: { kind: 'each_declared_event' },
+        duration: { kind: 'instantaneous' },
+        save_success_clause_id: testCase.clause.id,
+        damage_on_failed_save: [{
+          source: testCase.clause.effect_source,
+          damage_type: testCase.type,
+          components: [{
+            kind: 'dice',
+            pool: {
+              count: positiveDiceCount(testCase.count),
+              die: testCase.die,
+            },
+          }],
+        }],
+        on_success: {
+          kind: 'none',
+          evidence: testCase.clause.evidence,
+        },
+      };
+      const result = foldSavingThrowEvent(event, {
+        save_bonus: targetSaveBonus(0),
+        damage_responses: [{
+          damage_type: testCase.type,
           response: 'normal',
         }],
       });

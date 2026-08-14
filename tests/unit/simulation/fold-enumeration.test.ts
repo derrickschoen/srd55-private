@@ -18,7 +18,6 @@ import {
 } from '../../../src/simulation/contracts';
 import {
   publicProbabilityCoverageManifest,
-  reviewedSaveEffectStableKeys,
   reviewedSaveSuccessClauses,
 } from '../../../src/simulation/coverage';
 import {
@@ -166,20 +165,17 @@ describe('brute-force save fold', () => {
           const event: SavingThrowDamageEvent = {
             kind: 'saving_throw_damage',
             event_id: routineEventId('save:probe'),
-            source: {
-              ...source,
-              stable_key: reviewedSaveEffectStableKeys.fireball,
-            },
+            source: reviewedSaveSuccessClauses.burning_hands.effect_source,
             ability: 'dexterity',
             save_dc: saveDifficultyClass(dc),
             roll_state: state,
             frequency: { kind: 'each_declared_event' },
             duration: { kind: 'instantaneous' },
             save_success_clause_id:
-              reviewedSaveSuccessClauses.fireball.id,
+              reviewedSaveSuccessClauses.burning_hands.id,
             damage_on_failed_save: [{
-              source,
-              damage_type: slashing,
+              source: reviewedSaveSuccessClauses.burning_hands.effect_source,
+              damage_type: damageType('Fire'),
               components: [{
                 kind: 'dice',
                 pool: { count: positiveDiceCount(3), die: 6 },
@@ -187,7 +183,7 @@ describe('brute-force save fold', () => {
             }],
             on_success: {
               kind: 'half',
-              evidence: reviewedSaveSuccessClauses.fireball.evidence,
+              evidence: reviewedSaveSuccessClauses.burning_hands.evidence,
             },
           };
           const faces = d20Faces(state);
@@ -204,7 +200,7 @@ describe('brute-force save fold', () => {
           }
           const actual = foldSavingThrowEvent(event, {
             save_bonus: targetSaveBonus(2),
-            damage_responses: [{ damage_type: slashing, response }],
+            damage_responses: [{ damage_type: damageType('Fire'), response }],
           });
           expect(actual.status).toBe('available');
           if (actual.status !== 'available') {

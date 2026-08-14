@@ -759,6 +759,9 @@ export type ResourceRecoveryEvidence = {
   readonly clause_id: ResourceRecoveryClauseId;
   readonly resource_source: SourceRef;
   readonly citation: PublicSourceRef;
+  readonly authorized_rest: RestKind;
+  readonly authorized_rule_kind: Exclude<ResourceRecoveryRule['kind'], 'none'>;
+  readonly authorized_amount: PositiveResourceRecoveryAmount | null;
   readonly [resourceRecoveryEvidenceBrand]: true;
 };
 
@@ -779,13 +782,13 @@ export type SimResourcePool = {
   readonly recovery: ResourceRecovery;
 };
 
-export type ResourceRecoveryState = {
-  readonly once_per_long_rest_used: boolean;
+const simResourcePoolSetBrand: unique symbol = Symbol('SimResourcePoolSet');
+export type SimResourcePoolSet = readonly SimResourcePool[] & {
+  readonly [simResourcePoolSetBrand]: true;
 };
 
 export type ResourceRecoveryResult = {
   readonly recovered_units: number;
-  readonly state: ResourceRecoveryState;
 };
 
 function sameSourceRef(left: SourceRef, right: SourceRef): boolean {
@@ -805,11 +808,11 @@ function sameSourceRef(left: SourceRef, right: SourceRef): boolean {
   }
 }
 
-export function recoveredResourceUnits(
+function recoveredResourceUnits(
   pool: SimResourcePool,
   rest: RestKind,
   expendedUnits: unknown,
-  state: ResourceRecoveryState,
+  oncePerLongRestUsed: boolean,
 ): ResourceRecoveryResult {
   const expended = integerInRange(
     expendedUnits,
@@ -820,34 +823,106 @@ export function recoveredResourceUnits(
   const rule = pool.recovery[rest];
   if (
     rule.kind !== 'none' &&
-    !sameSourceRef(pool.source, rule.evidence.resource_source)
+    (!sameSourceRef(pool.source, rule.evidence.resource_source) ||
+      rule.evidence.authorized_rest !== rest ||
+      rule.evidence.authorized_rule_kind !== rule.kind ||
+      (rule.kind !== 'all' &&
+        rule.evidence.authorized_amount !== rule.amount) ||
+      (rule.kind === 'all' && rule.evidence.authorized_amount !== null))
   ) {
     throw new TypeError(
-      'Resource-recovery evidence is not bound to this resource pool source.',
+      'Resource-recovery evidence is not bound to this pool, rest, and recovery rule.',
     );
   }
-  const result = (recovered_units: number, once_per_long_rest_used: boolean): ResourceRecoveryResult => ({
-    recovered_units,
-    state: { once_per_long_rest_used },
-  });
   switch (rule.kind) {
     case 'none':
-      return result(0, rest === 'long_rest' ? false : state.once_per_long_rest_used);
+      return { recovered_units: 0 };
     case 'fixed':
-      return result(
-        Math.min(rule.amount, expended),
-        rest === 'long_rest' ? false : state.once_per_long_rest_used,
-      );
+      return { recovered_units: Math.min(rule.amount, expended) };
     case 'fixed_once_per_long_rest':
-      if (rest === 'long_rest') {
-        return result(Math.min(rule.amount, expended), false);
-      }
-      return state.once_per_long_rest_used
-        ? result(0, true)
-        : result(Math.min(rule.amount, expended), true);
+      return {
+        recovered_units: oncePerLongRestUsed
+          ? 0
+          : Math.min(rule.amount, expended),
+      };
     case 'all':
-      return result(expended, rest === 'long_rest' ? false : state.once_per_long_rest_used);
+      return { recovered_units: expended };
   }
+}
+
+export function simResourcePoolSet(
+  pools: readonly SimResourcePool[],
+): SimResourcePoolSet {
+  const ids = new Set<SimResourceId>();
+  for (const [index, pool] of pools.entries()) {
+    if (ids.has(pool.id)) {
+      throw new TypeError(`Duplicate simulation resource pool ID: ${pool.id}.`);
+    }
+    ids.add(pool.id);
+    if (pools.slice(0, index).some((other) =>
+      sameSourceRef(other.source, pool.source) ||
+      other.source.stable_key === pool.source.stable_key
+    )) {
+      throw new TypeError(
+        `Duplicate logical simulation resource pool source: ${pool.source.stable_key}.`,
+      );
+    }
+  }
+  return Object.freeze(Object.assign(
+    [...pools],
+    { [simResourcePoolSetBrand]: true as const },
+  ));
+}
+
+export class ResourceRecoverySession {
+  readonly #pools: ReadonlyMap<SimResourceId, SimResourcePool>;
+  readonly #oncePerLongRestUsed = new Map<SimResourceId, boolean>();
+
+  private constructor(pools: SimResourcePoolSet) {
+    if (pools[simResourcePoolSetBrand] !== true) {
+      throw new TypeError('Recovery sessions require a validated pool set.');
+    }
+    this.#pools = new Map(pools.map((pool) => [pool.id, pool]));
+    for (const pool of pools) {
+      this.#oncePerLongRestUsed.set(pool.id, false);
+    }
+  }
+
+  static create(pools: SimResourcePoolSet): ResourceRecoverySession {
+    return new ResourceRecoverySession(pools);
+  }
+
+  recover(
+    poolId: SimResourceId,
+    rest: RestKind,
+    expendedUnits: unknown,
+  ): ResourceRecoveryResult {
+    const pool = this.#pools.get(poolId);
+    if (pool === undefined) {
+      throw new TypeError(`Recovery session has no resource pool ${poolId}.`);
+    }
+    const used = this.#oncePerLongRestUsed.get(poolId);
+    if (used === undefined) {
+      throw new TypeError(`Recovery state has no resource pool ${poolId}.`);
+    }
+    const result = recoveredResourceUnits(pool, rest, expendedUnits, used);
+    if (rest === 'long_rest') {
+      this.#oncePerLongRestUsed.set(poolId, false);
+    } else if (
+      pool.recovery.short_rest.kind === 'fixed_once_per_long_rest' &&
+      !used &&
+      result.recovered_units > 0
+    ) {
+      this.#oncePerLongRestUsed.set(poolId, true);
+    }
+    return result;
+  }
+}
+
+export function createResourceRecoverySession(
+  pools: SimResourcePoolSet,
+): ResourceRecoverySession {
+  return ResourceRecoverySession.create(pools);
 }
 
 export type RoundPlan = {
@@ -888,7 +963,7 @@ export type SimulationInput = {
   readonly character_revision: CharacterRevision;
   readonly settings: SimulationSettings;
   readonly routine: SupportedRoutine;
-  readonly resource_pools: readonly SimResourcePool[];
+  readonly resource_pools: SimResourcePoolSet;
   readonly assumptions: readonly SimulationAssumption[];
 };
 

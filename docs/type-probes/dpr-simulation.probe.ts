@@ -18,6 +18,8 @@ import type {
   PublicSourceRef,
   RoutineEventId,
   SaveSuccessClauseId,
+  SimResourcePool,
+  SimResourcePoolSet,
   SimResourceId,
   TargetArmorClass,
 } from '../../src/simulation/contracts';
@@ -58,3 +60,4 @@ export const uncheckedBundledHeading: PublicSourceRef = { kind: 'bundled_srd', p
 export const unboundNeutrality: CatalogMechanicCoverage = { status: 'confirmed_damage_neutral', evidence: { kind: 'project_owned', path: projectOwnedSourcePath('src/simulation/contracts.ts') } };
 export const forgedNeutralityId: DamageNeutralMechanicId = sourceStableKey('srd-5.2.1:spell:fireball:flammable-objects');
 export const effectKeyAsSaveClause: SaveSuccessClauseId = sourceStableKey('srd-5.2.1:spell:fireball');
+export const unvalidatedResourcePools: SimResourcePoolSet = [] as readonly SimResourcePool[];

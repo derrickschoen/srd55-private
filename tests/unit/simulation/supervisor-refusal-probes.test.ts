@@ -24,7 +24,6 @@ import {
 } from '../../../src/simulation/coverage';
 import {
   sourceStableKey,
-  encounterRoundCount,
   saveDifficultyClass,
   targetSaveBonus,
   targetArmorClass,
@@ -32,7 +31,9 @@ import {
   positiveDiceCount,
   routineEventId,
   expandedCriticalMinimumRoll,
+  type SourceRef,
 } from '../../../src/simulation/contracts';
+import type { ContentKey } from '../../../src/domain/ids';
 import { foldSavingThrowEvent, foldAttackEvent } from '../../../src/simulation/probability';
 
 import { it, expect } from 'vitest';
@@ -49,14 +50,14 @@ it('supervisor independent probe of simcore fix round 2', () => {
 });
 function run() {
 
-const src = (key: string) =>
-  ({
-    kind: 'character_source',
-    source_instance_id: 1 as never,
-    stable_key: sourceStableKey(key),
-    rounds: encounterRoundCount(1),
-    evidence: bundledSrdSourceRef('Saving Throws'),
-  }) as never;
+const src = (key: string): SourceRef => {
+  const stableKey = sourceStableKey(key);
+  return {
+    kind: 'catalog_content',
+    content_key: stableKey as ContentKey,
+    stable_key: stableKey,
+  };
+};
 
 // ---------- F1: per-effect save clause ----------
 const acidEvidence = bundledSrdSourceRef('Acid Splash');

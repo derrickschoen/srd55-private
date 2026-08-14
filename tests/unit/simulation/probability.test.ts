@@ -24,7 +24,6 @@ import {
 import {
   expandedCriticalHitEvidenceManifest,
   publicProbabilityCoverageManifest,
-  reviewedSaveEffectStableKeys,
   reviewedSaveSuccessClauses,
 } from '../../../src/simulation/coverage';
 import {
@@ -480,24 +479,34 @@ describe('damage responses and save outcomes', () => {
   function saveEvent(
     on_success: SavingThrowDamageEvent['on_success'],
   ): SavingThrowDamageEvent {
-    const effectStableKey = on_success.kind === 'half'
-      ? reviewedSaveEffectStableKeys.fireball
-      : reviewedSaveEffectStableKeys.acid_splash;
+    const clause = on_success.kind === 'half'
+      ? reviewedSaveSuccessClauses.flaming_sphere
+      : on_success.kind === 'sourced_damage'
+        ? reviewedSaveSuccessClauses.vitriolic_sphere
+        : reviewedSaveSuccessClauses.acid_splash;
+    const damage = on_success.kind === 'half'
+      ? { count: 2, die: 6 as const, type: damageType('Fire') }
+      : on_success.kind === 'sourced_damage'
+        ? { count: 10, die: 4 as const, type: damageType('Acid') }
+        : { count: 1, die: 6 as const, type: damageType('Acid') };
     return {
       kind: 'saving_throw_damage',
       event_id: routineEventId('save:1'),
-      source: { ...source, stable_key: effectStableKey },
+      source: clause.effect_source,
       ability: 'dexterity',
       save_dc: saveDifficultyClass(11),
       roll_state: 'normal',
       frequency: { kind: 'each_declared_event' },
       duration: { kind: 'instantaneous' },
-      save_success_clause_id: on_success.kind === 'half'
-        ? reviewedSaveSuccessClauses.fireball.id
-        : on_success.kind === 'sourced_damage'
-          ? reviewedSaveSuccessClauses.vitriolic_sphere.id
-          : reviewedSaveSuccessClauses.acid_splash.id,
-      damage_on_failed_save: [diceInstance(1, 4)],
+      save_success_clause_id: clause.id,
+      damage_on_failed_save: [{
+        source: clause.effect_source,
+        damage_type: damage.type,
+        components: [{
+          kind: 'dice',
+          pool: { count: positiveDiceCount(damage.count), die: damage.die },
+        }],
+      }],
       on_success,
     };
   }
@@ -508,30 +517,36 @@ describe('damage responses and save outcomes', () => {
         kind: 'none',
         evidence: reviewedSaveSuccessClauses.acid_splash.evidence,
       }),
-      { save_bonus: targetSaveBonus(0), damage_responses: normalSlashing },
+      {
+        save_bonus: targetSaveBonus(0),
+        damage_responses: [{ damage_type: damageType('Acid'), response: 'normal' }],
+      },
     );
     expect(result.status).toBe('available');
     if (result.status !== 'available') {
       throw new Error(result.reason);
     }
     expect(result.failed_save_probability).toBe(0.5);
-    expect(result.expected_damage).toBe(1.25);
+    expect(result.expected_damage).toBe(1.75);
   });
 
   it('applies sourced half damage per outcome before weighting', () => {
     const result = foldSavingThrowEvent(
       saveEvent({
         kind: 'half',
-        evidence: reviewedSaveSuccessClauses.fireball.evidence,
+        evidence: reviewedSaveSuccessClauses.flaming_sphere.evidence,
       }),
-      { save_bonus: targetSaveBonus(0), damage_responses: normalSlashing },
+      {
+        save_bonus: targetSaveBonus(0),
+        damage_responses: [{ damage_type: damageType('Fire'), response: 'normal' }],
+      },
     );
     expect(result.status).toBe('available');
     if (result.status !== 'available') {
       throw new Error(result.reason);
     }
-    // Failure average 2.5; success average floor(d4/2) = 1.
-    expect(result.expected_damage).toBe(1.75);
+    // Failure average 7; success average floor(2d6/2) = 3.25.
+    expect(result.expected_damage).toBeCloseTo(5.125, 12);
   });
 
   it('evaluates bundled Burning Hands instead of refusing the sourced spell', () => {
@@ -542,13 +557,20 @@ describe('damage responses and save outcomes', () => {
     });
     const event: SavingThrowDamageEvent = {
       ...base,
-      source: { ...base.source, stable_key: clause.effect_stable_key },
+      source: clause.effect_source,
       save_success_clause_id: clause.id,
-      damage_on_failed_save: [diceInstance(3, 6)],
+      damage_on_failed_save: [{
+        source: clause.effect_source,
+        damage_type: damageType('Fire'),
+        components: [{
+          kind: 'dice',
+          pool: { count: positiveDiceCount(3), die: 6 },
+        }],
+      }],
     };
     const result = foldSavingThrowEvent(event, {
       save_bonus: targetSaveBonus(0),
-      damage_responses: normalSlashing,
+      damage_responses: [{ damage_type: damageType('Fire'), response: 'normal' }],
     });
     expect(result.status).toBe('available');
     if (result.status !== 'available') {
@@ -563,7 +585,7 @@ describe('damage responses and save outcomes', () => {
     };
     const refused = foldSavingThrowEvent(unrelated, {
       save_bonus: targetSaveBonus(0),
-      damage_responses: normalSlashing,
+      damage_responses: [{ damage_type: damageType('Fire'), response: 'normal' }],
     });
     expect(refused.status).toBe('unavailable');
     expect(refused).not.toHaveProperty('expected_damage');
@@ -573,20 +595,27 @@ describe('damage responses and save outcomes', () => {
     const result = foldSavingThrowEvent(
       saveEvent({
         kind: 'half',
-        evidence: reviewedSaveSuccessClauses.fireball.evidence,
+        evidence: reviewedSaveSuccessClauses.flaming_sphere.evidence,
       }),
       {
         save_bonus: targetSaveBonus(0),
-        damage_responses: [{ damage_type: slashing, response: 'resistant' }],
+        damage_responses: [{ damage_type: damageType('Fire'), response: 'resistant' }],
       },
     );
     expect(result.status).toBe('available');
     if (result.status !== 'available') {
       throw new Error(result.reason);
     }
-    // Failure resistant d4 average = 1. Success floor(floor(d4/2)/2)
-    // outcomes are 0,0,0,1, average .25. Each save branch has probability .5.
-    expect(result.expected_damage).toBe(0.625);
+    let failure = 0;
+    let success = 0;
+    for (let first = 1; first <= 6; first += 1) {
+      for (let second = 1; second <= 6; second += 1) {
+        const total = first + second;
+        failure += Math.floor(total / 2) / 36;
+        success += Math.floor(Math.floor(total / 2) / 2) / 36;
+      }
+    }
+    expect(result.expected_damage).toBeCloseTo((failure + success) / 2, 12);
   });
 
   it('refuses generic evidence for an effect-specific success damage outcome', () => {

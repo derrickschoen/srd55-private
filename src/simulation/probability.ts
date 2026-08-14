@@ -580,6 +580,8 @@ export function foldSavingThrowEvent(
     event.source,
     event.save_success_clause_id,
     event.on_success,
+    event.ability,
+    event.damage_on_failed_save,
   );
   const successProbability = saveSuccessProbability(
     event.save_dc,
