@@ -20,7 +20,6 @@ import type {
 } from '../../src/domain/ids';
 import type {
   Ability,
-  FeatureTemplateEffectKind,
   ExtraAttackWeaponScope,
   DamageType,
   KnownDamageType,
@@ -31,9 +30,12 @@ import {
   abilities,
   damageTypes,
   extraAttackWeaponScopes,
-  featureTemplateEffectKinds,
   progressionTypes,
 } from '../../src/domain/enums';
+import {
+  featureTemplateEffectKinds,
+  type FeatureTemplateEffectKind,
+} from '../../src/domain/effect-kinds';
 import {
   datetime,
   integerAtLeast,

@@ -36,7 +36,6 @@ import {
   armorDexBonuses,
   armorSlots,
   backgroundEquipmentOptions,
-  characterEffectKinds,
   classEquipmentOptions,
   equipmentItemKinds,
   conditionType,
@@ -63,15 +62,17 @@ import {
   spellRangeKinds,
   spellSchool,
   slotStates,
-  effectKinds,
-  featureTemplateEffectKinds,
-  speciesTemplateEffectKinds,
   srdWeaponGroups,
   weaponAttackKinds,
   weaponMasteryGrants,
   weaponMasteryProperties,
   weaponProficiencyCategories,
 } from '../enums';
+import {
+  characterEffectKinds,
+  effectKinds,
+  featureTemplateEffectKinds,
+} from '../effect-kinds';
 import { weaponRangeKinds } from '../weapon-range';
 import {
   CONTENT_FINGERPRINT_SCHEME_V1,
@@ -347,14 +348,11 @@ const weaponRangeKindEnum = z.enum(weaponRangeKinds);
  * vanish with no error anywhere.
  */
 const effectKindEnum = z.enum(effectKinds);
-const speciesTemplateEffectKindEnum = z.enum(speciesTemplateEffectKinds);
 /**
  * `character_effects.effect_kind`'s OWN, wider enum (AC-1) — see
- * `characterEffectKinds` in `src/domain/enums.ts`. Deliberately a SEPARATE
- * schema from {@link effectKindEnum} rather than a widening of it:
- * `species_template_trait_effects.effect_kind` keeps the narrower one, and a
- * shared schema would let an AC-1 kind pass validation for a row it can never
- * legally belong to.
+ * `characterEffectKinds` in `src/domain/effect-kinds.ts`. D236 gives species
+ * templates this same wide vocabulary, including `ability_override`; class
+ * and feat templates retain their separate scope-derived enum below.
  */
 const characterEffectKindEnum = z.enum(characterEffectKinds);
 const featureTemplateEffectKindEnum = z.enum(featureTemplateEffectKinds);
@@ -464,7 +462,6 @@ export const COLUMN_REFINEMENTS = {
   weaponRangeKindEnum,
   effectKindEnum,
   featureTemplateEffectKindEnum,
-  speciesTemplateEffectKindEnum,
   characterEffectKindEnum,
   extraAttackWeaponScopeEnum,
   armorSlotEnum,

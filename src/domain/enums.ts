@@ -785,21 +785,19 @@ export type FreeCastPoolScope = (typeof freeCastPoolScopes)[number];
  * create a real source instance before copying it, so the character-side
  * provenance requirement remains enforceable.
  */
-export const effectKinds = [
-  'damage_resistance',
-  'hp_modifier',
-  'speed',
-  'ability_increase',
-] as const;
-export type EffectKind = (typeof effectKinds)[number];
+export {
+  effectKinds,
+  type EffectKind,
+} from './effect-kinds';
 
 /**
  * `character_effects`' OWN, WIDER vocabulary (AC-1,
  * `docs/design/2026-07-29-armor-class-items-and-effects.md` §1, D72).
  *
- * A SUPERSET OF `effectKinds`, NOT A REPLACEMENT OF IT. The arrays remain
- * separate because bundled-only feature tables add `extra_attack`, while the
- * authored species/background tables intentionally use this exact vocabulary.
+ * A SUPERSET OF `effectKinds`, NOT A REPLACEMENT OF IT. Both runtime arrays
+ * derive from the scope rows in `effect-kinds.ts`; bundled-only feature tables
+ * add `extra_attack`, while species/background tables use this exact wide
+ * vocabulary under D236.
  *
  * The five new members close the Armor Class gap `sheet.ts:754-759` names in
  * its own comment — Unarmored Defense and every other alternative AC formula
@@ -819,16 +817,10 @@ export type EffectKind = (typeof effectKinds)[number];
  * `character_effects`, `species_template_trait_effects`, and
  * `background_template_effects` use this vocabulary.
  */
-export const characterEffectKinds = [
-  ...effectKinds,
-  'ability_override',
-  'armor_class_bonus',
-  'armor_class_formula',
-  'attack_ability_override',
-  'weapon_attack_bonus',
-  'weapon_damage_bonus',
-] as const;
-export type CharacterEffectKind = (typeof characterEffectKinds)[number];
+export {
+  characterEffectKinds,
+  type CharacterEffectKind,
+} from './effect-kinds';
 
 /**
  * WHAT GRANTED AN EXTRA ATTACK — the closed set D19 says the model needs.
@@ -912,39 +904,22 @@ export type ExtraAttackWeaponScope = (typeof extraAttackWeaponScopes)[number];
  * second member is added, the child table D18 already named as the real fix is
  * the change to make, before any content uses it.
  */
-export const classFeatureEffectKinds = ['extra_attack'] as const;
-export type ClassFeatureEffectKind = (typeof classFeatureEffectKinds)[number];
+export {
+  classFeatureEffectKinds,
+  type ClassFeatureEffectKind,
+} from './effect-kinds';
 
 /**
  * Every effect a class, subclass, or optional named feature template can
  * describe. `extra_attack` remains catalog-live, while the pre-D83 character
- * kinds are copied into `character_effects` by class sync. D83's
- * `ability_override` is deliberately character-only: no catalog feat, species,
- * class, or subclass template needs to author a set-to ability score.
+ * kinds are copied into `character_effects` by class sync. D83 still excludes
+ * `ability_override` from this class/feat vocabulary; D236 separately permits
+ * species templates to use it through the wide character vocabulary.
  */
-export const featureTemplateEffectKinds = [
-  ...effectKinds,
-  'armor_class_bonus',
-  'armor_class_formula',
-  'attack_ability_override',
-  'weapon_attack_bonus',
-  'weapon_damage_bonus',
-  ...classFeatureEffectKinds,
-] as const;
-export type FeatureTemplateEffectKind =
-  (typeof featureTemplateEffectKinds)[number];
-
-/**
- * Species templates can produce the pre-AC effects plus the AC formula D72
- * assigns to a species. `ability_increase` remains refused by the table's
- * source-required invariant.
- */
-export const speciesTemplateEffectKinds = [
-  ...effectKinds,
-  'armor_class_formula',
-] as const;
-export type SpeciesTemplateEffectKind =
-  (typeof speciesTemplateEffectKinds)[number];
+export {
+  featureTemplateEffectKinds,
+  type FeatureTemplateEffectKind,
+} from './effect-kinds';
 
 export const effectReliabilityCategories = [
   'attack_roll',

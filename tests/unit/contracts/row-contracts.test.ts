@@ -68,6 +68,31 @@ function sourceRow(): Record<string, unknown> {
   };
 }
 
+function speciesTemplateTraitEffectRow(): Record<string, unknown> {
+  return {
+    id: 17,
+    species_template_trait_id: 13,
+    sort_order: 1,
+    effect_kind: 'ability_override',
+    damage_type: null,
+    hit_points_flat: null,
+    hit_points_per_level: null,
+    speed_bonus_feet: null,
+    ability: 'strength',
+    amount: null,
+    maximum: 19,
+    base: null,
+    ability_1: null,
+    ability_2: null,
+    allows_shield: null,
+    weapon_scope: null,
+    label: 'Set Strength',
+    notes: null,
+    created_at: null,
+    updated_at: null,
+  };
+}
+
 function featDefinitionRow(): Record<string, unknown> {
   return {
     id: 31,
@@ -305,6 +330,22 @@ describe('F11: the level every sheet computation runs off', () => {
 });
 
 describe('per-table row contracts', () => {
+  it('uses the wide character-effect vocabulary for species templates under D236', () => {
+    const row = speciesTemplateTraitEffectRow();
+    const effectLabel = 'Species template trait effect';
+
+    expect(
+      rowContractError('species_template_trait_effects', row, effectLabel),
+    ).toBeNull();
+    expect(
+      rowContractError(
+        'species_template_trait_effects',
+        { ...row, effect_kind: 'extra_attack' },
+        effectLabel,
+      ),
+    ).toContain(`${effectLabel}.effect_kind:`);
+  });
+
   it('accepts a well-formed row', () => {
     expect(
       rowContractError('characters', characterRow(), 'Character'),

@@ -3289,9 +3289,9 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
   },
   {
     constraint: 'species_template_trait_effects_weapon_scope_check',
-    // No current species template kind may carry a weapon scope, so the kind
-    // check is the rejecting guard and the vocabulary check's reachable state
-    // is NULL. This accept pins that the domain check does not over-reject it.
+    // D236 permits the wide character vocabulary here, including weapon-scoped
+    // kinds. Their positive and negative payload cases are pinned by the shared
+    // authored-character cases below; this row keeps the nullable limb pinned.
     rejects: [],
     accepts: [['the required NULL scope', speciesTemplateTraitEffect({ effect_kind: 'damage_resistance', weapon_scope: null })]],
   },
