@@ -109,15 +109,24 @@ const NOT_APP_SHELL = new Set([
 // above gives: this file is plain .mjs run by bare node and cannot import the
 // .ts module. The duplication is checked rather than trusted —
 // tests/unit/licensing/bundled-license-files.test.ts imports the constant and
-// asserts every entry appears here with the same filename and literal.
+// asserts every entry appears here with the same filename and digest.
 //
-// The literal is read back out of the emitted bytes, so an emitter that wrote
-// an empty or truncated file fails the build instead of passing it.
+// EXACT BYTES, not a substring. An earlier version of this control read the
+// emitted file back and checked `.includes(literal)` — a check a truncation
+// can pass: the CC-BY legalcode's required title occurs 2,982 bytes into an
+// 18,657-byte file, so a copy cut off anywhere after the title (but before
+// the end) still contains the literal and would have been accepted.
+// SHA-256 over the whole file has no such blind spot — see the `sha256`
+// field's doc comment in tools/licenses/bundled-license-files.ts for what it
+// pins and the re-pin procedure.
 const LICENSE_REQUIRED = [
-  ['LICENSE.txt', 'MIT License'],
+  [
+    'LICENSE.txt',
+    'c2e78021e8fefd24038aa4ead9753f6c568bf0a7fbb667c82b8aeba193772c21',
+  ],
   [
     'licenses/CC-BY-4.0.txt',
-    'Creative Commons Attribution 4.0 International Public License',
+    '9ba9550ad48438d0836ddab3da480b3b69ffa0aac7b7878b5a0039e7ab429411',
   ],
 ];
 
@@ -218,7 +227,7 @@ for (const required of PWA_REQUIRED) {
   }
 }
 
-for (const [required, literal] of LICENSE_REQUIRED) {
+for (const [required, expectedSha256] of LICENSE_REQUIRED) {
   const path = byName.get(required);
   if (path === undefined) {
     fail(
@@ -226,10 +235,16 @@ for (const [required, literal] of LICENSE_REQUIRED) {
         'missing from the build output.',
     );
   }
-  if (!readFileSync(path, 'utf8').includes(literal)) {
+  const actualSha256 = createHash('sha256')
+    .update(readFileSync(path))
+    .digest('hex');
+  if (actualSha256 !== expectedSha256) {
     fail(
-      `license control failed: "${required}" does not contain "${literal}", ` +
-        'so the build ships a licence text that is empty or truncated.',
+      `license control failed: "${required}" has sha256 ${actualSha256}, ` +
+        `expected ${expectedSha256}. The build ships a licence text that ` +
+        'has been altered or truncated — or the pinned digest in ' +
+        'LICENSE_REQUIRED is stale after a deliberate edit to the source ' +
+        'file and needs re-pinning (see tools/licenses/bundled-license-files.ts).',
     );
   }
 }

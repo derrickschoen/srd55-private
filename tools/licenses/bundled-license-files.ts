@@ -29,11 +29,32 @@ export interface BundledLicenseFile {
   /** Path within the repository, relative to its root. */
   readonly sourcePath: string;
   /**
-   * A distinctive literal the emitted file must contain. The build guard reads
-   * it back out of `dist/`, so an emitter that shipped an empty or truncated
-   * file fails the build instead of passing it.
+   * A distinctive literal the emitted file is expected to contain. Kept for
+   * readability and as a secondary, human-legible check
+   * (`tests/unit/licensing/bundled-license-files.test.ts`); the build guard's
+   * pass/fail decision runs on {@link sha256}, not on this.
    */
   readonly literal: string;
+  /**
+   * SHA-256 of `sourcePath`'s exact bytes, pinned by hand. This is what makes
+   * the build guard catch a truncation a substring check cannot: the required
+   * `literal` for the CC-BY legalcode occurs 2,982 bytes into an 18,657-byte
+   * file, so a copy cut off anywhere after the title but before the end still
+   * contains the literal and would pass a `.includes()` check. Exact-byte
+   * comparison closes that gap; `tools/assert-dist-clean.mjs` recomputes this
+   * digest from what actually landed in `dist/` and fails the build on any
+   * mismatch, truncated or not.
+   *
+   * RE-PIN PROCEDURE: recompute after any deliberate edit to `sourcePath`
+   * (`node -e "console.log(require('node:crypto').createHash('sha256')
+   * .update(require('node:fs').readFileSync('LICENSE')).digest('hex'))"`, path
+   * adjusted per file) and update both this literal and the hand-kept copy in
+   * `tools/assert-dist-clean.mjs`'s `LICENSE_REQUIRED`. An un-re-pinned digest
+   * after a real edit is exactly the failure this field exists to produce —
+   * treat the build breaking as the correct outcome, not a bug to route
+   * around.
+   */
+  readonly sha256: string;
 }
 
 export const BUNDLED_LICENSE_FILES: readonly BundledLicenseFile[] =
@@ -42,11 +63,15 @@ export const BUNDLED_LICENSE_FILES: readonly BundledLicenseFile[] =
       fileName: 'LICENSE.txt',
       sourcePath: 'LICENSE',
       literal: 'MIT License',
+      sha256:
+        'c2e78021e8fefd24038aa4ead9753f6c568bf0a7fbb667c82b8aeba193772c21',
     }),
     Object.freeze({
       fileName: 'licenses/CC-BY-4.0.txt',
       sourcePath: 'docs/licenses/CC-BY-4.0.txt',
       literal: 'Creative Commons Attribution 4.0 International Public License',
+      sha256:
+        '9ba9550ad48438d0836ddab3da480b3b69ffa0aac7b7878b5a0039e7ab429411',
     }),
   ]);
 

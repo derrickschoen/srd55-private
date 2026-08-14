@@ -32,6 +32,12 @@ function repositoryFile(path: string): string {
   return readFileSync(join(repositoryRoot, path), 'utf8');
 }
 
+function repositoryFileSha256(path: string): string {
+  return createHash('sha256')
+    .update(readFileSync(join(repositoryRoot, path)))
+    .digest('hex');
+}
+
 describe('the licence texts the build ships', () => {
   it('reads every declared source file out of the repository', () => {
     const assets = bundledLicenseAssets(repositoryRoot);
@@ -60,6 +66,17 @@ describe('the licence texts the build ships', () => {
     }
   });
 
+  it('pins the exact sha256 of every declared source file, not just a substring', () => {
+    // The literal alone is not enough: the CC-BY legalcode's required title
+    // sits 2,982 bytes into an 18,657-byte file, so a copy truncated anywhere
+    // after the title would still contain it. This is the digest
+    // tools/assert-dist-clean.mjs recomputes from dist/ and compares against
+    // its own hand-kept copy of these same values.
+    for (const file of BUNDLED_LICENSE_FILES) {
+      expect(repositoryFileSha256(file.sourcePath)).toBe(file.sha256);
+    }
+  });
+
   it('carries the CC-BY-4.0 legalcode whole, not a summary of it', () => {
     const legalcode = repositoryFile('docs/licenses/CC-BY-4.0.txt');
 
@@ -78,11 +95,16 @@ describe('the licence texts the build ships', () => {
     ]) {
       expect(legalcode).toContain(section);
     }
-    expect(
-      createHash('sha256')
-        .update(readFileSync(join(repositoryRoot, 'docs/licenses/CC-BY-4.0.txt')))
-        .digest('hex'),
-    ).toBe(CC_BY_4_0_SHA256);
+    // Cross-checked against the independently retrieved canonical digest
+    // above, not only against the repo's own pin in bundled-license-files.ts —
+    // the two are recorded from different sources and agreeing is the proof.
+    expect(repositoryFileSha256('docs/licenses/CC-BY-4.0.txt')).toBe(
+      CC_BY_4_0_SHA256,
+    );
+    const ccByEntry = BUNDLED_LICENSE_FILES.find(
+      (file) => file.sourcePath === 'docs/licenses/CC-BY-4.0.txt',
+    );
+    expect(ccByEntry?.sha256).toBe(CC_BY_4_0_SHA256);
   });
 
   it('is the same list the plain-node build guard enforces', () => {
@@ -90,7 +112,7 @@ describe('the licence texts the build ships', () => {
 
     for (const file of BUNDLED_LICENSE_FILES) {
       expect(guard).toContain(`'${file.fileName}'`);
-      expect(guard).toContain(file.literal);
+      expect(guard).toContain(file.sha256);
     }
   });
 });
