@@ -3274,6 +3274,14 @@ describe('database migration chain', () => {
 
   // Green-main in-suite: 3734ms, 4186ms, 4424ms; isolated: 2576ms here,
   // 2573ms on main. Convention: 4424ms x 1.5 = 6636ms, rounded to 6700ms.
+  //
+  // RE-MEASURED 2026-08-13. The 6700ms pin flaked six times in one day and the
+  // margin was 1ms on one run. Measured in-suite on this machine, with the
+  // budget temporarily lifted so the true duration could be read rather than
+  // guessed: 6606ms. Same convention, fresh number: 6606 x 1.5 = 9909ms,
+  // rounded to 10000ms. Isolated is still ~2.9s; the gap between isolated and
+  // in-suite is what the 1.5x is for, and the machine got slower than the day
+  // the original was taken.
   it('rolls a mid-chain failure back to the original signature and bytes', async () => {
     const targetSchema = `${schema}\n${FIRST_INDEX}\n${SECOND_INDEX}\n`;
     const registry = Object.freeze([
@@ -3318,7 +3326,7 @@ describe('database migration chain', () => {
     } finally {
       inspect.close();
     }
-  }, 6700);
+  }, 10000);
 
   it('migrates once and performs no second migration after reopen', async () => {
     const targetSchema = `${schema}\n${FIRST_INDEX}\n`;
@@ -3343,6 +3351,11 @@ describe('database migration chain', () => {
   // digest-postmerge.log=4482, a11ygaps-vitest2.log=4421,
   // a11ygaps-postmerge.log=4569, a11ygaps-postmerge2.log=4575.
   // 4575 x 1.5 = 6862.5, rounded up to 6900ms.
+  //
+  // RE-MEASURED 2026-08-13, and this one was already over: in-suite 7373ms
+  // against a 6900ms budget, i.e. it was failing whenever it was reached under
+  // load and had simply not been the test to trip first. Same convention:
+  // 7373 x 1.5 = 11059.5ms, rounded to 11100ms.
   it('migrates a known-old import while quarantined and exports it stably', async () => {
     const targetSchema = `${schema}\n${FIRST_INDEX}\n`;
     const registry = Object.freeze([
@@ -3390,7 +3403,7 @@ describe('database migration chain', () => {
       ),
     ).toBe(1);
     lifecycle.close();
-  }, 6900);
+  }, 11100);
 
   /**
    * 0047 IS A TABLE REBUILD, AND THE THINGS A REBUILD LOSES ARE WHAT THESE
