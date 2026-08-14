@@ -13,6 +13,7 @@ import {
   type ContentFingerprintDigest,
 } from '../../src/catalog/content-identity';
 import { featProjectorV1Vector } from '../unit/catalog/fixtures/source-projector-v1-vectors';
+import { contentLicenseLabel } from '../../src/domain/enums';
 
 const HOSTILE_CHARACTER =
   '<img data-s6-character src=x onerror=alert(1)> Recipient Hero';
@@ -63,7 +64,7 @@ test('S6 recipient surfaces use provenance, inert names, and a direct sheet acti
           local_derivation: false,
           author_label: HOSTILE_AUTHOR,
           source_label: 'Sender campaign',
-          license_label: 'Shared with attribution',
+          license_label: contentLicenseLabel('Shared with attribution'),
           attribution_text: 'Original author retained.',
         },
       }],

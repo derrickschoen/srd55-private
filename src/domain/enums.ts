@@ -477,6 +477,55 @@ export const creatureSize = (value: string): CreatureSize =>
   value as CreatureSize;
 
 /**
+ * THE LICENCE A PIECE OF CATALOG CONTENT TRAVELS UNDER.
+ *
+ * `catalog_content_provenance.license_label` has always been free text, so a
+ * row could say `CC-BY-4.0`, `cc by 4`, `Creative Commons`, or a sentence, and
+ * nothing downstream could tell those apart or act on any of them. The three
+ * literals below are the licences this repository actually deals in — the SRD
+ * 5.2.1 and this project's own homebrew (`CC-BY-4.0`), the quarantined Open
+ * Game License material (`OGL-1.0a`), and code-like data (`MIT`) — as
+ * `NOTICE.md`, `README.md` and `docs/srd/ATTRIBUTION.md` all name them.
+ *
+ * OPEN, and it must stay open, for the reason `AGENTS.md` states as a
+ * data-loss bug: users import homebrew from wherever they got it. Someone
+ * else's catalog may declare `CC-BY-SA-4.0`, a bespoke fan-content permission,
+ * or a licence that did not exist when this was written, and a closed enum
+ * would refuse their own document at the import boundary rather than record
+ * what it says. The passthrough is byte-for-byte — no normalization, no
+ * casing rules, no "did you mean" — so a label round-trips through backup and
+ * share exactly as the sender wrote it.
+ *
+ * WHAT THE KNOWN SET BUYS, given the passthrough accepts everything: the three
+ * labels are literals a switch can be exhaustive over, so anything that wants
+ * to act on a licence (link the bundled legalcode, refuse to bundle what
+ * `ATTRIBUTION.md` forbids, group a library by licence) reasons about them
+ * instead of matching strings; and the brand makes the OTHER labels of the same
+ * row — `author_label`, `source_label` — unassignable here, so a source cannot
+ * be recorded as a licence by a slip of the keyboard. Every value crosses
+ * {@link contentLicenseLabel} to get in, which is where the boundary is.
+ *
+ * NO DDL. The column is `varchar` with a 1..200 length CHECK and stays exactly
+ * that: a CHECK constraining the vocabulary would reach the import path's own
+ * INSERTs and make an older or foreign document unrestorable — D8's
+ * highest-severity failure, and the reason this lane is a type and not a
+ * constraint.
+ */
+export const contentLicenses = ['CC-BY-4.0', 'OGL-1.0a', 'MIT'] as const;
+export type KnownContentLicense = (typeof contentLicenses)[number];
+export type ContentLicenseLabel =
+  | KnownContentLicense
+  | PassthroughVocabulary<'ContentLicenseLabel'>;
+export const contentLicenseLabel = (value: string): ContentLicenseLabel =>
+  value as ContentLicenseLabel;
+
+/** Whether a stored label names one of the licences this project knows. */
+export const isKnownContentLicense = (
+  value: ContentLicenseLabel,
+): value is KnownContentLicense =>
+  (contentLicenses as readonly string[]).includes(value);
+
+/**
  * The two weapon-proficiency categories the Core Traits tables name.
  *
  * NOT the whole story on its own, and `class_weapon_proficiencies` carries a

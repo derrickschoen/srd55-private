@@ -53,7 +53,7 @@ npm run test:all                          # test → build → test:browser
 ```
 
 - **`--configLoader runner`** is on every vitest/vite script in `package.json`.
-  Keep it if you invoke them by hand; `vite.config.ts:237-246` records why.
+  Keep it if you invoke them by hand; `vite.config.ts:279-293` records why.
 - **`tsc -b` covers `tests/`, `tools/`, `scripts/` and `db/`.** There is no
   "tests are exempt" escape hatch, and this is what lets a type-level proof ride
   CI for free. It also means `src/` is compiled twice (once per project), so raw

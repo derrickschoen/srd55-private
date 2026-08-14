@@ -6,12 +6,19 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { execFile } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import {
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+  mkdirSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { SCRAPE_SENTINEL } from '../../../tools/scrape/provenance';
+import { BUNDLED_LICENSE_FILES } from '../../../tools/licenses/bundled-license-files';
 import {
   appShellCacheName,
   appShellUrl,
@@ -22,6 +29,11 @@ import {
 const scanner = fileURLToPath(
   new URL('../../../tools/assert-dist-clean.mjs', import.meta.url),
 );
+const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
+
+function repoFileBytes(relativePath: string): Buffer {
+  return readFileSync(join(repoRoot, relativePath));
+}
 
 const made: string[] = [];
 
@@ -37,11 +49,21 @@ afterEach(() => {
 function distWith(files: Record<string, string>): string {
   const root = mkdtempSync(join(tmpdir(), 'assert-dist-clean-'));
   made.push(root);
-  const complete: Record<string, string> = {
+  const complete: Record<string, string | Uint8Array> = {
     'manifest.webmanifest': '{"name":"Test"}',
     'icons/app-icon.svg': '<svg/>',
     'icons/app-icon-192.png': 'png-192',
     'icons/app-icon-512.png': 'png-512',
+    // The licence texts a real build emits: the guard now checks the emitted
+    // file's sha256 against a pinned digest of the source file's exact bytes
+    // (not merely a substring), so the fixture must carry the REAL bytes —
+    // a stand-in like the bare literal would fail the happy-path tests below.
+    ...Object.fromEntries(
+      BUNDLED_LICENSE_FILES.map((file) => [
+        file.fileName,
+        repoFileBytes(file.sourcePath),
+      ]),
+    ),
     ...files,
   };
   complete['index.html'] =
@@ -108,7 +130,7 @@ describe('the dist guard passes only a genuinely clean build', () => {
       }),
     );
     expect(run.code).toBe(0);
-    expect(run.stdout).toContain('7 files scanned');
+    expect(run.stdout).toContain('9 files scanned');
   });
 
   it('fails when the PWA shell bytes no longer match the cache version', async () => {
@@ -131,6 +153,82 @@ describe('the dist guard passes only a genuinely clean build', () => {
     expect(run.stderr).toContain(
       'required build artifact "manifest.webmanifest" is missing',
     );
+  });
+
+  it('says how many licence texts it read back', async () => {
+    const run = await scan(distWith({ 'assets/index.js': CLEAN }));
+
+    expect(run.code).toBe(0);
+    expect(run.stdout).toContain(
+      `${BUNDLED_LICENSE_FILES.length} licence texts bundled`,
+    );
+  });
+
+  it.each([...BUNDLED_LICENSE_FILES])(
+    'fails when the build ships without $fileName',
+    async (file) => {
+      const root = distWith({ 'assets/index.js': CLEAN });
+      rmSync(join(root, file.fileName));
+
+      const run = await scan(root);
+
+      expect(run.code).toBe(1);
+      expect(run.stderr).toContain(
+        `required licence text "${file.fileName}" is missing`,
+      );
+    },
+  );
+
+  it.each([...BUNDLED_LICENSE_FILES])(
+    'fails when $fileName ships empty rather than absent',
+    async (file) => {
+      const root = distWith({ 'assets/index.js': CLEAN });
+      writeFileSync(join(root, file.fileName), '');
+
+      const run = await scan(root);
+
+      expect(run.code).toBe(1);
+      expect(run.stderr).toContain(`"${file.fileName}" has sha256`);
+    },
+  );
+
+  it.each([...BUNDLED_LICENSE_FILES])(
+    'fails when $fileName is truncated right after its required literal, not merely emptied',
+    async (file) => {
+      // The regression this closes: an earlier guard version accepted this
+      // exact shape. `.includes(literal)` cannot tell a whole file from one
+      // truncated the instant after its required phrase, because the phrase
+      // is still there — only the sha256 comparison catches it.
+      const full = repoFileBytes(file.sourcePath);
+      const literalStart = full.indexOf(file.literal, 0, 'utf8');
+      expect(literalStart).toBeGreaterThanOrEqual(0);
+      const truncated = full.subarray(
+        0,
+        literalStart + file.literal.length + 50,
+      );
+      expect(truncated.length).toBeGreaterThan(0);
+      expect(truncated.length).toBeLessThan(full.length);
+      expect(truncated.toString('utf8')).toContain(file.literal);
+
+      const root = distWith({ 'assets/index.js': CLEAN });
+      writeFileSync(join(root, file.fileName), truncated);
+
+      const run = await scan(root);
+
+      expect(run.code).toBe(1);
+      expect(run.stderr).toContain(`"${file.fileName}" has sha256`);
+    },
+  );
+
+  it('holds the plain-node guard and the emitter list to the same entries', () => {
+    // The two copies cannot import each other: assert-dist-clean.mjs is run by
+    // bare node. Nothing but this assertion stops them drifting apart, exactly
+    // as for SCRAPE_SENTINEL above.
+    const guard = readFileSync(scanner, 'utf8');
+    for (const file of BUNDLED_LICENSE_FILES) {
+      expect(guard).toContain(`'${file.fileName}'`);
+      expect(guard).toContain(file.sha256);
+    }
   });
 });
 
