@@ -7,6 +7,72 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D249 — OWNER: UI is designed by Claude first, through a four-stage pipeline (2026-08-14)
+
+Ruling on how UI work is produced, overriding the general "codex implements"
+default for UI only:
+
+1. **Claude design skills first.** The official `frontend-design` skill is
+   already installed and is the starting point, not an afterthought.
+2. **Fable plans** the UI, from several perspectives.
+3. **Opus creates** it.
+4. **Fable reviews** it, again from several perspectives.
+5. **codex `-p sol` is a second reviewer**, explicitly for diversity — a
+   different model family sees different failures.
+
+This is a standing authorization for Fable subagents on UI work specifically,
+which otherwise require asking first. It does not extend to non-UI work, where
+codex remains the implementer. Claude sonnet remains prohibited everywhere.
+
+## D248 — OWNER: fan out into worktrees as far as possible (2026-08-14)
+
+Asked what to do after the R3 and simulation merges. Ruled: **fan out into
+worktrees as much as possible**, each worktree proving all tests pass before it
+tries to merge back, each with its own database, using workflows where the work
+suits them.
+
+**Reconciliation with the one-suite-at-a-time amendment**, which this ruling
+does not repeal but does constrain: lanes fan out without limit and run
+FOCUSED tests themselves; separate databases remove the shared-fixture
+collisions; the supervisor still runs each full suite, and runs them SERIALLY
+on a quiet box. Parallelism therefore lives in the work, and serialization
+lives only in the timing-sensitive gate. A lane that self-gates a full suite
+while another does the same produces false timeouts, and that failure has
+already been observed twice.
+
+## D247 — OWNER: a first-landing subsystem is reviewed until clean, with no round cap (2026-08-14)
+
+The three-round review cap does not apply while a subsystem is landing for the
+first time. Prompted by the simulation core, whose first review round found
+three real defects including a refusal that silently became zero. The reasoning
+that governs future cases: early defects set the shape everything later builds
+on, so the code that most deserves review attention is exactly the code a round
+cap would cut short.
+
+## D246 — OWNER: the simulator's first shippable slice covers attacks, saves and resources (2026-08-14)
+
+Not the narrow weapon-attack-only slice. The first flag-gated release must
+carry ordinary attacks, saving-throw damage effects, AND the rounds /
+short-rest / long-rest resource budget — because settings that do not change
+the result are decoration, and a simulator that cannot model a save is not one
+an advanced user can trust.
+
+Cost accepted: longer to reach honestly, and saving-throw evidence is precisely
+where the first review round found a defect.
+
+## D245 — OWNER: a number ships only when every gap is provably zero (2026-08-14)
+
+When a character carries a mechanic the simulator cannot source, the result
+shows a number ONLY if every excluded mechanic is proved damage-neutral for the
+chosen routine. Otherwise it refuses and names the blockers. Rejected both the
+partial-number-with-caveats option and whole-result refusal.
+
+This is the strictest honest option and it creates real work: each exclusion
+needs a per-mechanic proof of neutrality, not an assumption. It also settles
+the review finding that an unsourced save-success clause could be labelled
+`none` and contribute zero — under this ruling, zero and unknown are different
+values and the second one is not printable.
+
 ## F20 — parse boundary accepts unknown enum members in class feature effects (2026-08-14)
 
 Found while reviewing the R3 lane, and verified PRE-EXISTING on `main` — not
