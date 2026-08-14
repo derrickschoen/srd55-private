@@ -371,6 +371,20 @@ type SourceDerivedSaveClause = {
   readonly failed_damage_signatures: readonly FailedDamageSignature[];
 };
 
+export type SourceDerivedSaveDamageCandidate = SourceDerivedSaveClause & {
+  readonly heading: string;
+};
+
+type SaveClauseDiscriminator =
+  | { readonly kind: 'ability'; readonly ability: Ability }
+  | {
+      readonly kind: 'damage_signature';
+      readonly dice_count: number;
+      readonly die_size: number;
+      readonly damage_type: DamageType | null;
+    }
+  | { readonly kind: 'source_text'; readonly includes: string };
+
 const abilityBySourceName = {
   Strength: 'strength',
   Dexterity: 'dexterity',
@@ -567,36 +581,98 @@ function gateDamageSaveClause(body: string): SourceDerivedSaveClause | null {
 
 const bundledSpellBodies = spellDescriptionsByHeading();
 const sourceDerivedSaveClauses = new Map<string, readonly SourceDerivedSaveClause[]>();
+let rawSourceDerivedSaveDamageCandidateCount = 0;
 for (const [heading, body] of bundledSpellBodies) {
   const direct = directDamageSaveClauses(body);
   const gate = gateDamageSaveClause(body);
+  rawSourceDerivedSaveDamageCandidateCount += direct.length + (gate === null ? 0 : 1);
+  // These two gate patterns rediscover the same save already owned by the
+  // direct predicate. Direct owns them; retaining both would manufacture two
+  // candidates from one source clause.
+  const directOwnsGate = heading === 'Ensnaring Strike' ||
+    heading === 'Ray of Enfeeblement';
   sourceDerivedSaveClauses.set(
     heading,
-    gate === null ? direct : [...direct, gate].sort(
+    gate === null || directOwnsGate ? direct : [...direct, gate].sort(
       (left, right) => body.indexOf(left.span) - body.indexOf(right.span),
     ),
   );
 }
 
+export const sourceDerivedSaveDamageCandidateCounts = Object.freeze({
+  before_deduplication: rawSourceDerivedSaveDamageCandidateCount,
+  after_deduplication: [...sourceDerivedSaveClauses.values()].reduce(
+    (count, clauses) => count + clauses.length,
+    0,
+  ),
+});
+
+export const sourceDerivedSaveDamageCandidates = Object.freeze(
+  [...sourceDerivedSaveClauses.entries()].flatMap(([heading, clauses]) =>
+    clauses.map((clause) => Object.freeze({ heading, ...clause })),
+  ),
+) satisfies readonly SourceDerivedSaveDamageCandidate[];
+
 const nextSourceClauseByHeading = new Map<string, number>();
+
+function sourceClauseMatchesDiscriminator(
+  clause: SourceDerivedSaveClause,
+  discriminator: SaveClauseDiscriminator,
+): boolean {
+  switch (discriminator.kind) {
+    case 'ability':
+      return clause.ability === discriminator.ability;
+    case 'damage_signature':
+      return clause.failed_damage_signatures.some((signature) =>
+        signature.dice_count === discriminator.dice_count &&
+        signature.die_size === discriminator.die_size &&
+        signature.damage_type === discriminator.damage_type,
+      );
+    case 'source_text':
+      return clause.span.includes(discriminator.includes);
+  }
+}
 
 function reviewedSaveClause(
   key: string,
   spellSlug: string,
   heading: ReviewedBundledSrdHeading,
   kind: SaveSuccessOutcome['kind'],
+  discriminator?: SaveClauseDiscriminator,
 ): ReviewedSaveSuccessClause {
+  const id = saveSuccessClauseId(`srd-5.2.1:spell:${spellSlug}:save:${key}`);
   const sourceIndex = nextSourceClauseByHeading.get(heading) ?? 0;
-  const sourceClause = sourceDerivedSaveClauses.get(heading)?.[sourceIndex];
+  const candidates = sourceDerivedSaveClauses.get(heading) ?? [];
+  const sourceClause = candidates[sourceIndex];
   if (sourceClause === undefined) {
     throw new TypeError(
       `No source-derived damage save clause ${String(sourceIndex + 1)} exists for ${heading}.`,
     );
   }
+  if (candidates.length > 1 && discriminator === undefined) {
+    throw new TypeError(
+      `${id} has multiple source candidates and requires a clause discriminator.`,
+    );
+  }
+  if (discriminator !== undefined) {
+    const matches = candidates.filter((candidate) =>
+      sourceClauseMatchesDiscriminator(candidate, discriminator),
+    );
+    if (matches.length !== 1 || matches[0] !== sourceClause) {
+      throw new TypeError(
+        `${id} is mis-bound: its source candidate does not uniquely match the declared ${discriminator.kind} discriminator.`,
+      );
+    }
+  }
+  if (sourceClause.kind !== kind) {
+    throw new TypeError(
+      `${id} is mis-bound: source outcome ${sourceClause.kind} does not match declared outcome ${kind}.`,
+    );
+  }
   nextSourceClauseByHeading.set(heading, sourceIndex + 1);
   const stableKey = sourceStableKey(`srd-5.2.1:spell:${spellSlug}`);
   return {
-    id: saveSuccessClauseId(`srd-5.2.1:spell:${spellSlug}:save:${key}`),
+    id,
     effect_source: {
       kind: 'catalog_content',
       content_key: String(stableKey) as ContentKey,
@@ -635,8 +711,8 @@ export const reviewedSaveSuccessClauses = {
   cone_of_cold: reviewedSaveClause('damage', 'cone-of-cold', 'Cone of Cold', 'half'),
   conjure_animals: reviewedSaveClause('damage', 'conjure-animals', 'Conjure Animals', 'none'),
   conjure_celestial: reviewedSaveClause('damage', 'conjure-celestial', 'Conjure Celestial', 'half'),
-  conjure_elemental_initial: reviewedSaveClause('initial-damage', 'conjure-elemental', 'Conjure Elemental', 'none'),
-  conjure_elemental_repeat: reviewedSaveClause('repeat-damage', 'conjure-elemental', 'Conjure Elemental', 'none'),
+  conjure_elemental_initial: reviewedSaveClause('initial-damage', 'conjure-elemental', 'Conjure Elemental', 'none', { kind: 'damage_signature', dice_count: 8, die_size: 8, damage_type: null }),
+  conjure_elemental_repeat: reviewedSaveClause('repeat-damage', 'conjure-elemental', 'Conjure Elemental', 'none', { kind: 'damage_signature', dice_count: 4, die_size: 8, damage_type: null }),
   conjure_woodland_beings: reviewedSaveClause('damage', 'conjure-woodland-beings', 'Conjure Woodland Beings', 'half'),
   contagion: reviewedSaveClause('damage', 'contagion', 'Contagion', 'none'),
   contact_other_plane: reviewedSaveClause('damage', 'contact-other-plane', 'Contact Other Plane', 'none'),
@@ -671,8 +747,8 @@ export const reviewedSaveSuccessClauses = {
   mind_spike: reviewedSaveClause('damage', 'mind-spike', 'Mind Spike', 'half'),
   moonbeam: reviewedSaveClause('damage', 'moonbeam', 'Moonbeam', 'half'),
   phantasmal_force: reviewedSaveClause('recurring-damage', 'phantasmal-force', 'Phantasmal Force', 'none'),
-  phantasmal_killer_initial: reviewedSaveClause('initial-damage', 'phantasmal-killer', 'Phantasmal Killer', 'half'),
-  phantasmal_killer_repeat: reviewedSaveClause('repeat-damage', 'phantasmal-killer', 'Phantasmal Killer', 'none'),
+  phantasmal_killer_initial: reviewedSaveClause('initial-damage', 'phantasmal-killer', 'Phantasmal Killer', 'half', { kind: 'source_text', includes: 'Disadvantage on ability checks' }),
+  phantasmal_killer_repeat: reviewedSaveClause('repeat-damage', 'phantasmal-killer', 'Phantasmal Killer', 'none', { kind: 'source_text', includes: 'damage again' }),
   prismatic_spray: reviewedSaveClause('damaging-rays', 'prismatic-spray', 'Prismatic Spray', 'half'),
   prismatic_wall: reviewedSaveClause('damaging-layers', 'prismatic-wall', 'Prismatic Wall', 'half'),
   ray_of_enfeeblement: reviewedSaveClause('damage-reduction', 'ray-of-enfeeblement', 'Ray of Enfeeblement', 'none'),
@@ -680,24 +756,24 @@ export const reviewedSaveSuccessClauses = {
   searing_smite: reviewedSaveClause('recurring-damage', 'searing-smite', 'Searing Smite', 'none'),
   shatter: reviewedSaveClause('damage', 'shatter', 'Shatter', 'half'),
   spirit_guardians: reviewedSaveClause('damage', 'spirit-guardians', 'Spirit Guardians', 'half'),
-  storm_of_vengeance_initial: reviewedSaveClause('initial-thunder-damage', 'storm-of-vengeance', 'Storm of Vengeance', 'none'),
-  storm_of_vengeance_lightning: reviewedSaveClause('lightning-damage', 'storm-of-vengeance', 'Storm of Vengeance', 'half'),
+  storm_of_vengeance_initial: reviewedSaveClause('initial-thunder-damage', 'storm-of-vengeance', 'Storm of Vengeance', 'none', { kind: 'ability', ability: 'constitution' }),
+  storm_of_vengeance_lightning: reviewedSaveClause('lightning-damage', 'storm-of-vengeance', 'Storm of Vengeance', 'half', { kind: 'ability', ability: 'dexterity' }),
   summon_dragon: reviewedSaveClause('breath-weapon', 'summon-dragon', 'Summon Dragon', 'half'),
   sunbeam: reviewedSaveClause('damage', 'sunbeam', 'Sunbeam', 'half'),
   sunburst: reviewedSaveClause('damage', 'sunburst', 'Sunburst', 'half'),
   symbol: reviewedSaveClause('death-damage', 'symbol', 'Symbol', 'half'),
   thunderwave: reviewedSaveClause('damage', 'thunderwave', 'Thunderwave', 'half'),
-  tsunami_initial: reviewedSaveClause('initial-damage', 'tsunami', 'Tsunami', 'half'),
-  tsunami_ongoing: reviewedSaveClause('ongoing-damage', 'tsunami', 'Tsunami', 'none'),
+  tsunami_initial: reviewedSaveClause('initial-damage', 'tsunami', 'Tsunami', 'half', { kind: 'damage_signature', dice_count: 6, die_size: 10, damage_type: 'Bludgeoning' }),
+  tsunami_ongoing: reviewedSaveClause('ongoing-damage', 'tsunami', 'Tsunami', 'none', { kind: 'damage_signature', dice_count: 5, die_size: 10, damage_type: 'Bludgeoning' }),
   vicious_mockery: reviewedSaveClause('damage', 'vicious-mockery', 'Vicious Mockery', 'none'),
   vitriolic_sphere: reviewedSaveClause('damage', 'vitriolic-sphere', 'Vitriolic Sphere', 'sourced_damage'),
   wall_of_fire: reviewedSaveClause('damage', 'wall-of-fire', 'Wall of Fire', 'half'),
-  wall_of_ice_initial: reviewedSaveClause('initial-damage', 'wall-of-ice', 'Wall of Ice', 'half'),
-  wall_of_ice_frigid_air: reviewedSaveClause('frigid-air-damage', 'wall-of-ice', 'Wall of Ice', 'half'),
-  wall_of_thorns_piercing: reviewedSaveClause('piercing-damage', 'wall-of-thorns', 'Wall of Thorns', 'half'),
-  wall_of_thorns_slashing: reviewedSaveClause('slashing-damage', 'wall-of-thorns', 'Wall of Thorns', 'half'),
-  weird_initial: reviewedSaveClause('initial-damage', 'weird', 'Weird', 'half'),
-  weird_repeat: reviewedSaveClause('repeat-damage', 'weird', 'Weird', 'none'),
+  wall_of_ice_initial: reviewedSaveClause('initial-damage', 'wall-of-ice', 'Wall of Ice', 'half', { kind: 'ability', ability: 'dexterity' }),
+  wall_of_ice_frigid_air: reviewedSaveClause('frigid-air-damage', 'wall-of-ice', 'Wall of Ice', 'half', { kind: 'ability', ability: 'constitution' }),
+  wall_of_thorns_piercing: reviewedSaveClause('piercing-damage', 'wall-of-thorns', 'Wall of Thorns', 'half', { kind: 'damage_signature', dice_count: 7, die_size: 8, damage_type: 'Piercing' }),
+  wall_of_thorns_slashing: reviewedSaveClause('slashing-damage', 'wall-of-thorns', 'Wall of Thorns', 'half', { kind: 'damage_signature', dice_count: 7, die_size: 8, damage_type: 'Slashing' }),
+  weird_initial: reviewedSaveClause('initial-damage', 'weird', 'Weird', 'half', { kind: 'damage_signature', dice_count: 10, die_size: 10, damage_type: 'Psychic' }),
+  weird_repeat: reviewedSaveClause('repeat-damage', 'weird', 'Weird', 'none', { kind: 'damage_signature', dice_count: 5, die_size: 10, damage_type: 'Psychic' }),
   wind_wall: reviewedSaveClause('damage', 'wind-wall', 'Wind Wall', 'half'),
 } as const satisfies Record<string, ReviewedSaveSuccessClause>;
 

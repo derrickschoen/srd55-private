@@ -24,6 +24,7 @@ import {
   projectOwnedSourcePath,
   restCadence,
   simResourceId,
+  simResourcePoolKey,
   simResourcePoolSet,
   sourceStableKey,
   type DprRequestContext,
@@ -43,6 +44,8 @@ import {
   reviewedResourceRecoveryClauses,
   reviewedSaveSuccessClauses,
   saveSuccessOutcomeEvidenceManifest,
+  sourceDerivedSaveDamageCandidateCounts,
+  sourceDerivedSaveDamageCandidates,
   sheetGapCoverage,
   sheetWarningCoverage,
   unmodelledIssuePriority,
@@ -119,6 +122,7 @@ describe('DPR branded constructors', () => {
     const rageSource = reviewedResourceRecoveryClauses.rage.resource_source;
     const rage: SimResourcePool = {
       id: simResourceId('barbarian:rage'),
+      logical_key: simResourcePoolKey('barbarian:rage'),
       source: rageSource,
       maximum,
       recovery: {
@@ -182,6 +186,7 @@ describe('DPR branded constructors', () => {
     );
     const channelDivinity: SimResourcePool = {
       id: simResourceId('cleric:channel-divinity'),
+      logical_key: simResourcePoolKey('cleric:channel-divinity'),
       source: clericSource,
       maximum,
       recovery: {
@@ -246,12 +251,13 @@ describe('DPR branded constructors', () => {
     );
   });
 
-  it('applies Sorcerous Restoration only once until a Long Rest', () => {
+  it('keeps same-source logical pools accepted and independently recoverable', () => {
     const maximum = positiveResourceMaximum(10);
     const sorcerySource =
       reviewedResourceRecoveryClauses.sorcerous_restoration.resource_source;
     const sorceryPoints: SimResourcePool = {
       id: simResourceId('sorcerer:sorcery-points'),
+      logical_key: simResourcePoolKey('sorcerer:sorcery-points'),
       source: sorcerySource,
       maximum,
       recovery: {
@@ -350,8 +356,59 @@ describe('DPR branded constructors', () => {
 
     expect(() => simResourcePoolSet([
       sorceryPoints,
-      { ...sorceryPoints, id: simResourceId('duplicate:sorcery-points') },
-    ])).toThrow('Duplicate logical simulation resource pool source');
+      {
+        ...sorceryPoints,
+        id: simResourceId('duplicate:sorcery-points'),
+      },
+    ])).toThrow('Duplicate logical simulation resource pool key');
+
+    const secondMaximum = positiveResourceMaximum(6);
+    const secondPool: SimResourcePool = {
+      id: simResourceId('sorcerer:second-pool'),
+      logical_key: simResourcePoolKey('sorcerer:second-pool'),
+      source: sorcerySource,
+      maximum: secondMaximum,
+      recovery: {
+        short_rest: {
+          kind: 'fixed_once_per_long_rest',
+          amount: positiveResourceRecoveryAmount(3, secondMaximum),
+          evidence: resourceRecoveryEvidence(
+            sorcerySource,
+            reviewedResourceRecoveryClauses.sorcerous_restoration.id,
+            {
+              rest: 'short_rest',
+              rule_kind: 'fixed_once_per_long_rest',
+              amount: 3,
+              maximum: secondMaximum,
+            },
+          ),
+        },
+        long_rest: { kind: 'none' },
+      },
+    };
+    const sameSourceSession = createResourceRecoverySession(
+      simResourcePoolSet([sorceryPoints, secondPool]),
+    );
+    expect(sameSourceSession.recover(
+      sorceryPoints.id,
+      'short_rest',
+      10,
+    ).recovered_units).toBe(5);
+    expect(sameSourceSession.recover(
+      secondPool.id,
+      'short_rest',
+      6,
+    ).recovered_units).toBe(3);
+    expect(sameSourceSession.recover(
+      sorceryPoints.id,
+      'short_rest',
+      5,
+    ).recovered_units).toBe(0);
+    expect(sameSourceSession.recover(
+      secondPool.id,
+      'short_rest',
+      3,
+    ).recovered_units).toBe(0);
   });
 
   it('accepts only registered repository-relative project-owned sources', () => {
@@ -672,89 +729,60 @@ describe('coverage vocabularies and bundled provenance', () => {
   });
 
   it('enumerates every bundled spell save whose outcome changes numeric damage', () => {
-    const extract = readFileSync(
-      'docs/srd/source/spell-descriptions.txt',
-      'utf8',
+    expect(sourceDerivedSaveDamageCandidateCounts).toEqual({
+      before_deduplication: 81,
+      after_deduplication: 79,
+    });
+    const sourceCandidatesBySpan = new Map(
+      sourceDerivedSaveDamageCandidates.map((candidate) => [
+        `${candidate.heading}\u0000${candidate.span}`,
+        candidate,
+      ]),
     );
-    const lines = extract.split('\n');
-    const metadata = /^\s*(?:Level [1-9] (?:Abjuration|Conjuration|Divination|Enchantment|Evocation|Illusion|Necromancy|Transmutation)|(?:Abjuration|Conjuration|Divination|Enchantment|Evocation|Illusion|Necromancy|Transmutation) Cantrip) \(/u;
-    const pageMarker = /^=== SRD/u;
-    const starts = lines.flatMap((line, index) => metadata.test(line) ? [index] : []);
-    const previousContent = (before: number): number => {
-      for (let index = before - 1; index >= 0; index -= 1) {
-        const line = lines[index] ?? '';
-        if (line.trim() !== '' && !pageMarker.test(line)) {
-          return index;
-        }
-      }
-      throw new Error('Spell metadata has no preceding heading.');
-    };
-    const sourceDerivedHeadings = new Set<string>();
-    const descriptions = new Map<string, string>();
-    for (const [position, start] of starts.entries()) {
-      const nameIndex = previousContent(start);
-      const end = position + 1 < starts.length
-        ? previousContent(starts[position + 1] as number)
-        : lines.length;
-      const body = lines.slice(start, end)
-        .filter((line) => !pageMarker.test(line))
-        .join(' ')
-        .replace(/-\s+/gu, '')
-        .replace(/\s+/gu, ' ');
-      const heading = (lines[nameIndex] ?? '').trim();
-      descriptions.set(heading, body);
-      const hasHalfDamageSuccess =
-        /half (?:as much|the initial) damage|half damage/iu.test(body);
-      const hasDirectDamageSave =
-        /saving throw or take [^.]{0,180}damage/iu.test(body) ||
-        /On (?:a )?failed save,[^.]{0,180}\b(?:it|you|target|creature)\s+takes? [^.]{0,100}\bdamage/iu.test(body);
-      const hasRecurringDamageGate = [
-        /saving throw[^.]{0,180}Grappled[\s\S]{0,260}?grapples[^.]*damage[^.]*\d+d\d+/iu,
-        /saving throw or become cursed[\s\S]{0,560}?extra \d+d\d+ [A-Za-z]+ damage/iu,
-        /saving throw[\s\S]{0,140}?spell has no effect[\s\S]{0,1500}?(?:extra \d+d\d+ damage|\d+d\d+[^.]*less damage)/iu,
-        /saving throw[\s\S]{0,300}?successful save[^.]*spell ends[\s\S]{0,220}?(?:While [A-Za-z]+, )?[^.]*\d+d\d+ [A-Za-z]+ damage/iu,
-        /saving throw or have the Charmed condition[\s\S]{0,300}?While Charmed[^.]*\d+d\d+ [A-Za-z]+ damage/iu,
-        /saving throw[\s\S]{0,1100}?affected target[\s\S]{0,440}?\d+d\d+ [A-Za-z]+ damage/iu,
-        /saving throw[\s\S]{0,420}?subtracts \d+d\d+ from all its damage rolls/iu,
-        /\d+d\d+ [A-Za-z]+ damage[\s\S]{0,180}?start of each of its turns[\s\S]{0,240}?saving throw[\s\S]{0,140}?successful save[^.]*spell ends/iu,
-      ].some((pattern) => pattern.test(body));
-      if (hasHalfDamageSuccess || hasDirectDamageSave || hasRecurringDamageGate) {
-        sourceDerivedHeadings.add(heading);
-      }
-    }
-    const registered = new Set(
-      [...saveSuccessOutcomeEvidenceManifest.values()].map((clause) => {
-        if (clause.evidence.kind !== 'bundled_srd') {
-          throw new Error('Save clauses must cite bundled spell headings.');
-        }
-        return clause.evidence.heading as string;
-      }),
-    );
-    expect([...registered].sort()).toEqual([...sourceDerivedHeadings].sort());
-    expect(registered).toContain('Burning Hands');
-    const locatedSourceSpans = new Set<string>();
+    const manifestClausesBySpan = new Map<string, string>();
     for (const clause of saveSuccessOutcomeEvidenceManifest.values()) {
       if (clause.evidence.kind !== 'bundled_srd') {
         throw new Error('Save clauses must cite bundled spell headings.');
       }
       const heading = clause.evidence.heading as string;
-      const body = descriptions.get(heading);
-      expect(body, heading).toBeDefined();
-      expect(body, clause.id).toContain(clause.source_span);
+      const sourceKey = `${heading}\u0000${clause.source_span}`;
+      const sourceCandidate = sourceCandidatesBySpan.get(sourceKey);
+      expect(
+        sourceCandidate,
+        `${clause.id} is not bound to a source-derived save candidate`,
+      ).toBeDefined();
       expect(clause.source_span, clause.id).toMatch(/sav(?:e|ing throw)/iu);
-      const sourceOutcome = /half the initial damage only/iu.test(clause.source_span)
-        ? 'sourced_damage'
-        : /half (?:as much|the initial) damage|half damage/iu.test(clause.source_span)
-          ? 'half'
-          : 'none';
-      expect(clause.kind, `${clause.id}: ${clause.source_span}`).toBe(
-        sourceOutcome,
+      expect(clause.kind, `${clause.id}: source outcome`).toBe(
+        sourceCandidate?.kind,
       );
-      locatedSourceSpans.add(`${heading}\u0000${clause.source_span}`);
+      expect(clause.ability, `${clause.id}: source ability`).toBe(
+        sourceCandidate?.ability,
+      );
+      expect(
+        clause.failed_damage_signatures,
+        `${clause.id}: source damage signature`,
+      ).toEqual(sourceCandidate?.failed_damage_signatures);
+      manifestClausesBySpan.set(sourceKey, clause.id);
     }
-    expect(locatedSourceSpans.size).toBe(
+    for (const candidate of sourceDerivedSaveDamageCandidates) {
+      const sourceKey = `${candidate.heading}\u0000${candidate.span}`;
+      expect(
+        manifestClausesBySpan.has(sourceKey),
+        `Missing reviewed save clause for ${candidate.heading}: ${candidate.span}`,
+      ).toBe(true);
+    }
+    expect(saveSuccessOutcomeEvidenceManifest.size).toBe(
+      sourceDerivedSaveDamageCandidateCounts.after_deduplication,
+    );
+    expect(new Set(manifestClausesBySpan.values()).size).toBe(
       saveSuccessOutcomeEvidenceManifest.size,
     );
+    expect([...manifestClausesBySpan.keys()].sort()).toEqual(
+      [...sourceCandidatesBySpan.keys()].sort(),
+    );
+    expect([...manifestClausesBySpan.keys()].some((key) =>
+      key.startsWith('Burning Hands\u0000'),
+    )).toBe(true);
   });
 
   it('checks bundled headings and still accepts legitimate proof references', () => {

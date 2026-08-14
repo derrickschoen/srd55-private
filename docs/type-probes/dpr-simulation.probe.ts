@@ -19,6 +19,7 @@ import type {
   RoutineEventId,
   SaveSuccessClauseId,
   SimResourcePool,
+  SimResourcePoolKey,
   SimResourcePoolSet,
   SimResourceId,
   TargetArmorClass,
@@ -46,6 +47,7 @@ export const armorClassFromRound: TargetArmorClass = encounterRoundCount(3);
 export const routineFromEvent: CharacterAttackRoutineId = routineEventId('event');
 export const eventFromResource: RoutineEventId = simResourceId('resource');
 export const resourceFromRoutine: SimResourceId = characterAttackRoutineId('routine');
+export const poolKeyFromResourceId: SimResourcePoolKey = simResourceId('resource');
 export const costFromCap: PositiveResourceCost = 1 as EncounterResourceCap;
 export const probabilityFromNumber: Probability = 0.5;
 export const eventFromRound: ExpectedEventDamage = expectedRoundDamage(4);

@@ -115,12 +115,52 @@ ok(
   genuine.status === 'available' && Math.abs(genuine.expected_damage - 2.45) < 1e-12,
 );
 
-// A registered effect citing the WRONG registered evidence must still refuse.
-const crossed = foldSavingThrowEvent(
-  saveEvent('srd-5.2.1:spell:fireball', acidEvidence),
-  target,
+// Isolate evidence identity: these two events have the same registered source,
+// clause ID, save ability, success kind, and failed-save damage. Only the
+// evidence citation differs.
+const fireballEvidence = bundledSrdSourceRef('Fireball');
+const fireballEvent = (
+  evidence: ReturnType<typeof bundledSrdSourceRef>,
+): Parameters<typeof foldSavingThrowEvent>[0] => ({
+  kind: 'saving_throw_damage',
+  event_id: routineEventId('fireball-evidence-probe'),
+  source: src('srd-5.2.1:spell:fireball'),
+  ability: 'dexterity',
+  save_dc: saveDifficultyClass(15),
+  roll_state: 'normal',
+  frequency: { kind: 'each_declared_event' },
+  duration: { kind: 'instantaneous' },
+  save_success_clause_id: 'srd-5.2.1:spell:fireball:save:damage',
+  on_success: { kind: 'half', evidence },
+  damage_on_failed_save: [{
+    source: src('srd-5.2.1:spell:fireball'),
+    damage_type: 'Fire',
+    components: [{
+      kind: 'dice',
+      pool: { count: positiveDiceCount(8), die: 6 },
+    }],
+  }],
+});
+const fireTarget: Parameters<typeof foldSavingThrowEvent>[1] = {
+  save_bonus: targetSaveBonus(0),
+  damage_responses: [{ damage_type: 'Fire', response: 'normal' }],
+};
+const genuineFireball = foldSavingThrowEvent(
+  fireballEvent(fireballEvidence),
+  fireTarget,
 );
-ok('F1 registered effect citing another effect evidence is REFUSED', crossed.status === 'unavailable');
+ok(
+  'F1 evidence-isolation control: genuine Fireball evidence is AVAILABLE',
+  genuineFireball.status === 'available',
+);
+const crossed = foldSavingThrowEvent(
+  fireballEvent(acidEvidence),
+  fireTarget,
+);
+ok(
+  'F1 registered effect citing another effect evidence is REFUSED (evidence only)',
+  crossed.status === 'unavailable',
+);
 
 ok(
   'F1 predicate: unregistered key rejected',

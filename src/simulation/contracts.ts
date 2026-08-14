@@ -27,6 +27,7 @@ export type CharacterAttackRoutineId = Brand<
 >;
 export type RoutineEventId = Brand<string, 'RoutineEventId'>;
 export type SimResourceId = Brand<string, 'SimResourceId'>;
+export type SimResourcePoolKey = Brand<string, 'SimResourcePoolKey'>;
 export type UnmodelledIssueId = Brand<string, 'UnmodelledIssueId'>;
 export type BundledSrdPath = Brand<string, 'BundledSrdPath'>;
 export type BundledSrdHeading = Brand<string, 'BundledSrdHeading'>;
@@ -309,6 +310,8 @@ export const routineEventId = (value: unknown): RoutineEventId =>
   nonemptyKey(value, 'Routine event ID') as RoutineEventId;
 export const simResourceId = (value: unknown): SimResourceId =>
   nonemptyKey(value, 'Simulation resource ID') as SimResourceId;
+export const simResourcePoolKey = (value: unknown): SimResourcePoolKey =>
+  nonemptyKey(value, 'Simulation resource pool key') as SimResourcePoolKey;
 export const unmodelledIssueId = (value: unknown): UnmodelledIssueId =>
   nonemptyKey(value, 'Unmodelled issue ID') as UnmodelledIssueId;
 export const sourceStableKey = (value: unknown): SourceStableKey =>
@@ -777,6 +780,8 @@ export type ResourceRecovery = {
 
 export type SimResourcePool = {
   readonly id: SimResourceId;
+  /** Logical identity of the expendable pool; provenance is recorded separately. */
+  readonly logical_key: SimResourcePoolKey;
   readonly source: SourceRef;
   readonly maximum: PositiveResourceMaximum;
   readonly recovery: ResourceRecovery;
@@ -854,19 +859,18 @@ export function simResourcePoolSet(
   pools: readonly SimResourcePool[],
 ): SimResourcePoolSet {
   const ids = new Set<SimResourceId>();
-  for (const [index, pool] of pools.entries()) {
+  const logicalKeys = new Set<SimResourcePoolKey>();
+  for (const pool of pools) {
     if (ids.has(pool.id)) {
       throw new TypeError(`Duplicate simulation resource pool ID: ${pool.id}.`);
     }
     ids.add(pool.id);
-    if (pools.slice(0, index).some((other) =>
-      sameSourceRef(other.source, pool.source) ||
-      other.source.stable_key === pool.source.stable_key
-    )) {
+    if (logicalKeys.has(pool.logical_key)) {
       throw new TypeError(
-        `Duplicate logical simulation resource pool source: ${pool.source.stable_key}.`,
+        `Duplicate logical simulation resource pool key: ${pool.logical_key}.`,
       );
     }
+    logicalKeys.add(pool.logical_key);
   }
   return Object.freeze(Object.assign(
     [...pools],
