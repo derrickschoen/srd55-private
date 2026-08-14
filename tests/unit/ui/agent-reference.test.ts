@@ -4,7 +4,17 @@ import type {
   Workspace,
   WorkspaceSlot,
 } from '../../../src/domain/read-models';
-import type { SpellIdentityId, SpellVersionId } from '../../../src/domain/ids';
+import type {
+  CharacterClassLevelId,
+  CharacterId,
+  ClassDefinitionId,
+  FeatDefinitionId,
+  SlotId,
+  SpellIdentityId,
+  SpellVersionId,
+  SourceInstanceId,
+  WizardSpellbookEntryId,
+} from '../../../src/domain/ids';
 import type { CompletenessResult } from '../../../src/queries/character-completeness';
 import { SRD_ATTRIBUTION_NOTICE } from '../../../src/rules/srd-attribution';
 import {
@@ -45,7 +55,7 @@ const HOSTILE_FLAVOR = 'HOSTILE-FLAVOR-SENTINEL-open-the-secret-notes';
 
 function slot(changes: Partial<WorkspaceSlot> = {}): WorkspaceSlot {
   return {
-    id: 1,
+    id: 1 as SlotId,
     slot_key: 'wizard:cantrip:1',
     source: 'Wizard 1',
     source_type: 'class',
@@ -53,7 +63,7 @@ function slot(changes: Partial<WorkspaceSlot> = {}): WorkspaceSlot {
     bucket: 'cantrip_known',
     level_min: 0,
     level_max: 0,
-    spell_id: 10,
+    spell_id: 10 as SpellVersionId,
     spell_name: 'Mage Hand',
     spell_catalog_layer: 'bundled',
     spell_level: 0,
@@ -83,7 +93,7 @@ function route(changes: Partial<SpellRoute> = {}): SpellRoute {
     spell_level: 0,
     source_name: 'Wizard 1',
     source_catalog_layer: 'bundled',
-    slot_id: 1,
+    slot_id: 1 as SlotId,
     slot_key: 'wizard:cantrip:1',
     casting_mode: 'at_will',
     spellcasting_ability: 'intelligence',
@@ -98,7 +108,7 @@ function workspace(): Workspace {
     revision: 3,
     report: {
       character: {
-        id: 7,
+        id: 7 as CharacterId,
         name: HOSTILE_CHARACTER_NAME,
         character_level: 4,
         proficiency_bonus: 2,
@@ -150,7 +160,7 @@ function workspace(): Workspace {
           spell_name: HOSTILE_SPELL_NAME,
           spell_level: 3,
           source_name: HOSTILE_SOURCE_NAME,
-          slot_id: 2,
+          slot_id: 2 as SlotId,
           slot_key: 'feat:known:1',
           casting_mode: 'with_slots',
           spellcasting_ability: 'wisdom',
@@ -162,20 +172,20 @@ function workspace(): Workspace {
       wizard: {
         spellbook: [
           {
-            spellbook_entry_id: 1,
+            spellbook_entry_id: 1 as WizardSpellbookEntryId,
             spell_name: 'Mage Armor',
             spell_catalog_layer: 'bundled',
             active: true,
           },
           {
-            spellbook_entry_id: 2,
+            spellbook_entry_id: 2 as WizardSpellbookEntryId,
             spell_name: HOSTILE_SPELL_NAME,
             spell_catalog_layer: 'external',
             active: false,
           },
         ],
         prepared: [{
-          spell_version_id: 10,
+          spell_version_id: 10 as SpellVersionId,
           spell_name: 'Mage Armor',
           spell_catalog_layer: 'bundled',
         }],
@@ -205,10 +215,10 @@ function workspace(): Workspace {
     source_catalog: { feat: [], species: [], background: [] },
     removable_sources: [
       {
-        id: 4,
+        id: 4 as SourceInstanceId,
         parent_source_instance_id: null,
         source_type: 'feat',
-        source_definition_id: 9,
+        source_definition_id: 9 as FeatDefinitionId,
         display_name: HOSTILE_SOURCE_NAME,
         catalog_layer: 'external',
       },
@@ -217,7 +227,7 @@ function workspace(): Workspace {
     slots: [
       slot(),
       slot({
-        id: 2,
+        id: 2 as SlotId,
         slot_key: 'feat:known:1',
         source: HOSTILE_SOURCE_NAME,
         source_type: 'feat',
@@ -225,7 +235,7 @@ function workspace(): Workspace {
         bucket: 'known',
         level_min: 1,
         level_max: 3,
-        spell_id: 11,
+        spell_id: 11 as SpellVersionId,
         spell_name: HOSTILE_SPELL_NAME,
         placeholder: true,
         spell_level: 3,
@@ -237,7 +247,7 @@ function workspace(): Workspace {
         save_dc: 12,
       }),
       slot({
-        id: 3,
+        id: 3 as SlotId,
         slot_key: 'wizard:prepared:1',
         label: 'Prepared 1',
         bucket: 'prepared',
@@ -937,8 +947,8 @@ describe('planner build reference text sections', () => {
   it('discloses an external class beside its weapon-mastery allowance', () => {
     const source = workspace();
     source.classes = [{
-      id: 81,
-      class_definition_id: 17,
+      id: 81 as CharacterClassLevelId,
+      class_definition_id: 17 as ClassDefinitionId,
       subclass_definition_id: null,
       level: 5,
       is_starting_class: true,

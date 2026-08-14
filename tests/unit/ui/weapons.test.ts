@@ -5,6 +5,10 @@ import type {
   WeaponsPanel,
   WeaponTemplate,
 } from '../../../src/domain/read-models';
+import type {
+  CharacterWeaponId,
+  WeaponTemplateId,
+} from '../../../src/domain/ids';
 import {
   blankWeapon,
   damageSummary,
@@ -22,7 +26,7 @@ import {
 
 function weapon(changes: Partial<CharacterWeapon> = {}): CharacterWeapon {
   return {
-    id: 1,
+    id: 1 as CharacterWeaponId,
     ...blankWeapon(),
     name: 'Test weapon',
     mastery_selected: false,
@@ -33,7 +37,7 @@ function weapon(changes: Partial<CharacterWeapon> = {}): CharacterWeapon {
 function template(changes: Partial<WeaponTemplate> = {}): WeaponTemplate {
   const { notes: _notes, ...profile } = blankWeapon();
   return {
-    id: 9,
+    id: 9 as WeaponTemplateId,
     content_key: '2024:weapon:longsword',
     srd_group: 'martial_melee',
     catalog_layer: 'bundled',

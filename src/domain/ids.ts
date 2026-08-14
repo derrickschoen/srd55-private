@@ -1,5 +1,5 @@
 import type { core } from 'zod';
-import type { CharacterLevel } from './enums';
+import type { CharacterLevel, StandaloneSourceType } from './enums';
 
 /**
  * Branded identifier types.
@@ -9,12 +9,10 @@ import type { CharacterLevel } from './enums';
  * several read models today. Branding is how that confusion becomes a compile
  * error rather than a wrong row at runtime.
  *
- * SCOPE TODAY, PRECISELY. The brands reach the build-time Drizzle columns and
- * every identifier in `src/domain/models.ts`. The highest-risk read-model
- * pairs are branded too: `SpellRoute` and `DuplicateAssessment` keep spell
- * identity ids distinct from spell version ids. Other read-model boundaries
- * remain incremental work; a bare `number` there is not evidence that two ids
- * are interchangeable.
+ * SCOPE TODAY, PRECISELY. Every identifier in both `src/domain/models.ts` and
+ * `src/domain/read-models.ts` is branded. Read-model decoders establish those
+ * brands at the SQL boundary, matching branded Drizzle columns where their
+ * schema declarations expose them.
  *
  * The brand marker is Zod's, so a Drizzle column declared
  * `.$type<SpellVersionId>()` and a Zod schema declared
@@ -169,10 +167,16 @@ export type SubclassDefinitionId = Brand<number, 'SubclassDefinitionId'>;
 export type FeatDefinitionId = Brand<number, 'FeatDefinitionId'>;
 export type SpeciesDefinitionId = Brand<number, 'SpeciesDefinitionId'>;
 export type BackgroundDefinitionId = Brand<number, 'BackgroundDefinitionId'>;
+export interface StandaloneDefinitionIds {
+  readonly feat: FeatDefinitionId;
+  readonly species: SpeciesDefinitionId;
+  readonly background: BackgroundDefinitionId;
+}
 export type StandaloneDefinitionId =
-  | FeatDefinitionId
-  | SpeciesDefinitionId
-  | BackgroundDefinitionId;
+  StandaloneDefinitionIds[StandaloneSourceType];
+export type StandaloneDefinitionIdFor<
+  Type extends StandaloneSourceType,
+> = StandaloneDefinitionIds[Type];
 export type SourceDefinitionId =
   | ClassDefinitionId
   | SubclassDefinitionId
@@ -183,6 +187,13 @@ export type CharacterOperationId = Brand<number, 'CharacterOperationId'>;
 export type ChangeLogId = Brand<number, 'ChangeLogId'>;
 /** Polymorphic `change_log.entity_id`; its table is selected by `entity_type`. */
 export type AuditEntityId = Brand<number, 'AuditEntityId'>;
+/** `character_save_points.id`. */
+export type CharacterSavePointId = Brand<number, 'CharacterSavePointId'>;
+/** `warning_acknowledgements.id`. */
+export type WarningAcknowledgementId = Brand<
+  number,
+  'WarningAcknowledgementId'
+>;
 
 /**
  * The two class-feature catalog ids (D19).

@@ -17,7 +17,12 @@ import {
   type SlotBucket,
 } from '../domain/enums';
 import type { JsonValue } from '../domain/models';
-import type { SpellIdentityId, SpellVersionId } from '../domain/ids';
+import type {
+  SlotId,
+  SpellIdentityId,
+  SpellVersionId,
+  WizardSpellbookEntryId,
+} from '../domain/ids';
 import {
   catalogLayerDisclosure,
   type CatalogLayerDisclosure,
@@ -60,7 +65,7 @@ interface CharacterRow {
 }
 
 interface SlotRouteRow {
-  readonly id: number;
+  readonly id: SlotId;
   readonly character_id: number;
   readonly source_instance_id: number;
   readonly fixed_spell_version_id: number | null;
@@ -107,7 +112,7 @@ interface PreparedSlotRow {
 }
 
 interface SpellbookEntry {
-  readonly id: number;
+  readonly id: WizardSpellbookEntryId;
   readonly spellVersionId: SpellVersionId;
   readonly spellIdentityId: SpellIdentityId;
   readonly spellName: string;
@@ -143,7 +148,7 @@ export interface SpellAccessRoute {
   readonly source_instance_id: number;
   readonly source_name: string;
   readonly source_catalog_layer: CatalogLayerDisclosure;
-  readonly slot_id: number | null;
+  readonly slot_id: SlotId | null;
   readonly slot_key: string | null;
   readonly selection_key: string | null;
   readonly bucket: SlotBucket | null;
@@ -153,7 +158,7 @@ export interface SpellAccessRoute {
   readonly counts_against_limit: boolean;
   readonly free_cast: JsonValue | null;
   readonly spellcasting_ability: Ability | null;
-  readonly spellbook_entry_id?: number;
+  readonly spellbook_entry_id?: WizardSpellbookEntryId;
 }
 
 function decodeCharacter(row: SqlRow): CharacterRow {
@@ -175,7 +180,7 @@ function decodeSlotRoute(row: SqlRow): SlotRouteRow {
     throw new TypeError(`Unknown spell selection bucket ${bucket}.`);
   }
   return {
-    id: sqlInteger(row, 'id'),
+    id: sqlInteger(row, 'id') as SlotId,
     character_id: sqlInteger(row, 'character_id'),
     source_instance_id: sqlInteger(row, 'source_instance_id'),
     fixed_spell_version_id: sqlNullableInteger(
@@ -245,7 +250,7 @@ function decodePreparedSlot(row: SqlRow): PreparedSlotRow {
 
 function decodeSpellbookEntry(row: SqlRow): SpellbookEntry {
   return {
-    id: sqlInteger(row, 'id'),
+    id: sqlInteger(row, 'id') as WizardSpellbookEntryId,
     spellVersionId: sqlInteger(row, 'spell_version_id') as SpellVersionId,
     spellIdentityId: sqlInteger(row, 'spell_identity_id') as SpellIdentityId,
     spellName: sqlString(row, 'spell_name'),

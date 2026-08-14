@@ -14,7 +14,11 @@ import type {
 import type { AttunementSlot } from '../domain/attunement';
 import { readOwnedEffectsByOwner } from '../commands/equipment-effects';
 import { equipmentEffectInput, projectStoredEquipmentContentV1 } from '../catalog/equipment-content-projector-v1';
-import type { ContentKey } from '../domain/ids';
+import type {
+  CharacterItemId,
+  ContentKey,
+  SourceInstanceId,
+} from '../domain/ids';
 import { catalogLayerDisclosure } from '../catalog/catalog-disclosure';
 import { selectableCatalogContentSql } from './selectable-catalog-content';
 
@@ -43,14 +47,17 @@ export class ItemQueries {
        ORDER BY item.name, item.id`,
       [characterId],
       (row): CharacterItem => {
-        const id = sqlInteger(row, 'id');
+        const id = sqlInteger(row, 'id') as CharacterItemId;
         return {
           id,
           name: sqlString(row, 'name'),
           description: sqlNullableString(row, 'description'),
           quantity: sqlInteger(row, 'quantity'),
           requires_attunement: sqlBoolean(row, 'requires_attunement'),
-          source_instance_id: sqlNullableInteger(row, 'source_instance_id'),
+          source_instance_id: sqlNullableInteger(
+            row,
+            'source_instance_id',
+          ) as SourceInstanceId | null,
           attunement_slot:
             sqlNullableInteger(row, 'attunement_slot') as AttunementSlot | null,
           effects: effectsByItem.get(id) ?? [],

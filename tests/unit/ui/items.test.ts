@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { ItemsPanel } from '../../../src/domain/read-models';
-import type { ContentKey } from '../../../src/domain/ids';
+import type {
+  CharacterItemId,
+  ContentKey,
+} from '../../../src/domain/ids';
 import {
   activateAttunementReplacementModal,
   renderItems,
@@ -16,7 +19,7 @@ const panel: ItemsPanel = {
   definitions: [],
   items: [
     {
-      id: 10,
+      id: 10 as CharacterItemId,
       name: 'Crown',
       description: null,
       quantity: 1,
@@ -26,7 +29,7 @@ const panel: ItemsPanel = {
       effects: [],
     },
     {
-      id: 20,
+      id: 20 as CharacterItemId,
       name: 'Cloak',
       description: null,
       quantity: 2,
@@ -36,7 +39,7 @@ const panel: ItemsPanel = {
       effects: [],
     },
     {
-      id: 30,
+      id: 30 as CharacterItemId,
       name: 'Ring',
       description: null,
       quantity: 3,
@@ -46,7 +49,7 @@ const panel: ItemsPanel = {
       effects: [],
     },
     {
-      id: 40,
+      id: 40 as CharacterItemId,
       name: 'Boots',
       description: null,
       quantity: 4,

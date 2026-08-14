@@ -68,7 +68,7 @@ function character(id: number, name: string): CharacterRow {
 
 function summary(id: number, name: string): CharacterSummary {
   return {
-    id,
+    id: id as CharacterId,
     name,
     level_one_complete: false,
     level: null,

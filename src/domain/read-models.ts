@@ -2,9 +2,22 @@ import type { WeaponFields } from './command-contracts';
 import type { EquipmentEffectInput } from './equipment-effects';
 import type { AttunementSlot } from './attunement';
 import type {
+  CharacterClassLevelId,
+  CharacterId,
+  CharacterItemId,
+  CharacterSavePointId,
+  CharacterWeaponId,
+  ClassDefinitionId,
   ContentKey,
+  SlotId,
   SpellIdentityId,
   SpellVersionId,
+  SourceInstanceId,
+  StandaloneDefinitionIdFor,
+  SubclassDefinitionId,
+  WarningAcknowledgementId,
+  WeaponTemplateId,
+  WizardSpellbookEntryId,
 } from './ids';
 import type { MulticlassPrimaryAbilityWarning } from './primary-ability';
 import type {
@@ -61,14 +74,14 @@ export type WeaponProfile = Omit<
 >;
 
 export interface WeaponTemplate extends WeaponProfile {
-  id: number;
+  id: WeaponTemplateId;
   content_key: string;
   srd_group: SrdWeaponGroup;
   catalog_layer: CatalogLayerDisclosure;
 }
 
 export interface CharacterWeapon extends WeaponFields {
-  id: number;
+  id: CharacterWeaponId;
   /** The per-character choice. Never a property of the weapon itself. */
   mastery_selected: boolean;
 }
@@ -96,12 +109,12 @@ export interface WeaponsPanel {
 }
 
 export interface CharacterItem {
-  readonly id: number;
+  readonly id: CharacterItemId;
   readonly name: string;
   readonly description: string | null;
   readonly quantity: number;
   readonly requires_attunement: boolean;
-  readonly source_instance_id: number | null;
+  readonly source_instance_id: SourceInstanceId | null;
   readonly attunement_slot: AttunementSlot | null;
   readonly effects: readonly EquipmentEffectInput[];
 }
@@ -134,7 +147,7 @@ export interface SpellRoute {
   spell_level: number;
   source_name: string;
   source_catalog_layer: CatalogLayerDisclosure;
-  slot_id: number | null;
+  slot_id: SlotId | null;
   slot_key: string | null;
   casting_mode: CastingMode;
   spellcasting_ability: Ability | null;
@@ -157,14 +170,14 @@ export interface DuplicateAssessment {
     label: string;
   }>;
   acknowledgement: {
-    id: number;
+    id: WarningAcknowledgementId;
     note: string;
     created_at: string;
   } | null;
 }
 
 export interface WorkspaceSlot {
-  id: number;
+  id: SlotId;
   slot_key: string;
   source: string;
   source_type: DomainSourceType;
@@ -172,7 +185,7 @@ export interface WorkspaceSlot {
   bucket: SlotBucket;
   level_min: number;
   level_max: number;
-  spell_id: number | null;
+  spell_id: SpellVersionId | null;
   spell_name: string | null;
   spell_catalog_layer: CatalogLayerDisclosure | null;
   placeholder?: boolean;
@@ -192,13 +205,15 @@ export interface WorkspaceSlot {
   locked: boolean;
 }
 
-export interface ClassOption {
-  id: number;
+export interface ClassOption<
+  Id extends ClassDefinitionId | SubclassDefinitionId,
+> {
+  id: Id;
   name: string;
   catalog_layer: CatalogLayerDisclosure;
 }
 
-export interface ClassEntryOption extends ClassOption {
+export interface ClassEntryOption extends ClassOption<ClassDefinitionId> {
   readonly multiclass_entry:
     | { readonly status: 'not_applicable' | 'eligible'; readonly refusal: null }
     | {
@@ -210,28 +225,28 @@ export interface ClassEntryOption extends ClassOption {
 }
 
 export interface CharacterClass {
-  id: number;
-  class_definition_id: number;
-  subclass_definition_id: number | null;
+  id: CharacterClassLevelId;
+  class_definition_id: ClassDefinitionId;
+  subclass_definition_id: SubclassDefinitionId | null;
   level: number;
   is_starting_class: boolean;
   name: string;
   catalog_layer: CatalogLayerDisclosure;
   subclass_name: string | null;
   subclass_catalog_layer: CatalogLayerDisclosure | null;
-  subclasses: ClassOption[];
+  subclasses: ClassOption<SubclassDefinitionId>[];
   readonly multiclass_prerequisite_warning:
     MulticlassPrimaryAbilityWarning | null;
 }
 
 export interface SavePoint {
-  id: number;
+  id: CharacterSavePointId;
   label: string;
   created_at: string;
 }
 
-export interface SourceDefinition {
-  id: number;
+export interface SourceDefinition<Type extends StandaloneSourceType> {
+  id: StandaloneDefinitionIdFor<Type>;
   content_key: string;
   name: string;
   catalog_layer: CatalogLayerDisclosure;
@@ -242,17 +257,22 @@ export interface SourceDefinition {
     | 'none';
 }
 
-export interface RemovableSource {
-  id: number;
-  parent_source_instance_id: number | null;
-  source_type: StandaloneSourceType;
-  source_definition_id: number | null;
+interface RemovableSourceBase {
+  id: SourceInstanceId;
+  parent_source_instance_id: SourceInstanceId | null;
   display_name: string;
   catalog_layer: CatalogLayerDisclosure;
 }
 
+export type RemovableSource = {
+  [Type in StandaloneSourceType]: RemovableSourceBase & {
+    source_type: Type;
+    source_definition_id: StandaloneDefinitionIdFor<Type> | null;
+  };
+}[StandaloneSourceType];
+
 interface OrderSourceBase {
-  id: number;
+  id: SourceInstanceId;
   display_name: string;
 }
 
@@ -276,7 +296,7 @@ export type OrderSource = OrderSourceBase &
 
 export interface BuildReport {
   character: {
-    id: number;
+    id: CharacterId;
     name: string;
     character_level: number | null;
     proficiency_bonus: number | null;
@@ -321,18 +341,18 @@ export interface BuildReport {
   duplicate_assessments: DuplicateAssessment[];
   wizard: {
     spellbook: Array<{
-      spellbook_entry_id: number;
+      spellbook_entry_id: WizardSpellbookEntryId;
       spell_name: string;
       spell_catalog_layer: CatalogLayerDisclosure;
       active: boolean;
     }>;
     prepared: Array<{
-      spell_version_id: number;
+      spell_version_id: SpellVersionId;
       spell_name: string;
       spell_catalog_layer: CatalogLayerDisclosure;
     }>;
     ritual_only: Array<{
-      spellbook_entry_id: number;
+      spellbook_entry_id: WizardSpellbookEntryId;
       spell_name: string;
       spell_catalog_layer: CatalogLayerDisclosure;
     }>;
@@ -354,7 +374,7 @@ export interface Workspace {
   report: WorkspaceBuildReport;
   classes: CharacterClass[];
   starting_class_resolution: {
-    readonly class_level_id: number | null;
+    readonly class_level_id: CharacterClassLevelId | null;
     readonly warnings: readonly StartingClassWarning[];
   };
   available_classes: ClassEntryOption[];
@@ -367,14 +387,16 @@ export interface Workspace {
     readonly notes: string | null;
   };
   configurable_sources: Array<{
-    id: number;
+    id: SourceInstanceId;
     display_name: string;
     catalog_layer: CatalogLayerDisclosure;
     chosen_list: string;
     spellcasting_ability: Ability;
   }>;
   order_sources: OrderSource[];
-  source_catalog: Record<StandaloneSourceType, SourceDefinition[]>;
+  source_catalog: {
+    [Type in StandaloneSourceType]: SourceDefinition<Type>[];
+  };
   removable_sources: RemovableSource[];
   spell_lists: string[];
   slots: WorkspaceSlot[];
@@ -388,7 +410,7 @@ export interface Workspace {
 }
 
 export interface EligibleSpell {
-  id: number;
+  id: SpellVersionId;
   name: string;
   level: number;
   school: SpellSchool;
@@ -399,7 +421,7 @@ export interface EligibleSpell {
 }
 
 export interface CharacterSummary {
-  id: number;
+  id: CharacterId;
   name: string;
   /** Every guided level-1 step is durably complete. */
   level_one_complete: boolean;

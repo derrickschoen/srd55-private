@@ -5,6 +5,7 @@ import {
 } from '../builder/guided-creation';
 import type { DatabaseContext } from '../db/database';
 import type { CharacterSummary } from '../domain/read-models';
+import type { CharacterId } from '../domain/ids';
 import { BuildReportBuilder } from '../reports/build-report-builder';
 import { ACTIVE_CHARACTER_LIST_QUERY } from './character-lifecycle-queries';
 
@@ -24,7 +25,7 @@ export class CharacterListBuilder {
         ACTIVE_CHARACTER_LIST_QUERY,
         undefined,
         (row) => ({
-          id: sqlInteger(row, 'id'),
+          id: sqlInteger(row, 'id') as CharacterId,
           name: sqlString(row, 'name'),
         }),
       )

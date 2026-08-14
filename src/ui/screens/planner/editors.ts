@@ -335,7 +335,7 @@ function renderAbilities(
 }
 
 function sourceConfiguration(
-  definition: SourceDefinition,
+  definition: SourceDefinition<StandaloneSourceType>,
   list: string,
   ability: string,
 ): JsonObject {
@@ -401,7 +401,9 @@ function renderSources(
     abilityField.hidden = true;
     add.disabled = true;
   };
-  const chosenDefinition = (): SourceDefinition | undefined =>
+  const chosenDefinition = ():
+    | SourceDefinition<StandaloneSourceType>
+    | undefined =>
     workspace.source_catalog[sourceType].find(
       (item) => item.id === Number(definition.value),
     );
