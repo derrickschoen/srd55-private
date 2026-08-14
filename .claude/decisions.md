@@ -7,6 +7,31 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## F20 — parse boundary accepts unknown enum members in class feature effects (2026-08-14)
+
+Found while reviewing the R3 lane, and verified PRE-EXISTING on `main` — not
+introduced by that lane, so it did not block its merge. Executed probes against
+`parseSourceCatalogRecord('class', ...)` on `main`:
+
+```
+ACCEPTED {"effect_kind":"ability_increase","ability":"luck","amount":1}
+ACCEPTED {"effect_kind":"damage_resistance","damage_type":"radiant-ish"}
+ACCEPTED {"effect_kind":"extra_attack","weapon_scope":"siege_only"}
+```
+
+`ability`, `damage_type` and `weapon_scope` are closed vocabularies in the type
+system, and the parse boundary validates them only as text. D235 says a row
+conflicting with the declared types must be unstorable at write and must THROW
+at read; these three throw at neither.
+
+Belongs to the D235 reader sweep (task #20). The fix is the same shape the R3
+lane used for `feature_value_contributions`: validate the discriminated arm
+against its closed vocabulary with `isEnumValue`, at the boundary, before the
+value reaches a contract that claims it is narrow.
+
+Recorded here rather than left in a lane report because a known-bad that lives
+only in a review transcript is indistinguishable from one nobody found.
+
 ## D244 — OWNER: the private regression gate is a standalone runner the ritual invokes (2026-08-14)
 
 Follow-up to D239, which made the gate blocking. Asked where it runs. Ruled:
