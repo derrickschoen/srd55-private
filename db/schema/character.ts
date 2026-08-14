@@ -9,12 +9,16 @@ import {
 } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 import type {
+  AuditEntityId,
+  CharacterClassLevelId,
   CharacterId,
   CharacterLevelFeatChoiceId,
+  CharacterOperationId,
   CharacterSkillExpertiseGrantId,
   CharacterSkillGrantId,
   ClassDefinitionId,
   ClassLevel,
+  ChangeLogId,
   SlotId,
   SourceInstanceId,
   SpellVersionId,
@@ -372,7 +376,10 @@ export const character_source_instances = sqliteTable(
 export const character_class_levels = sqliteTable(
   'character_class_levels',
   {
-    id: integer('id').primaryKey({ autoIncrement: true }).notNull(),
+    id: integer('id')
+      .primaryKey({ autoIncrement: true })
+      .notNull()
+      .$type<CharacterClassLevelId>(),
     character_id: integer('character_id')
       .notNull()
       .$type<CharacterId>()
@@ -953,7 +960,10 @@ export const wizard_spellbook_entries = sqliteTable(
 export const change_log = sqliteTable(
   'change_log',
   {
-    id: integer('id').primaryKey({ autoIncrement: true }).notNull(),
+    id: integer('id')
+      .primaryKey({ autoIncrement: true })
+      .notNull()
+      .$type<ChangeLogId>(),
     character_id: integer('character_id')
       .notNull()
       .$type<CharacterId>()
@@ -962,7 +972,7 @@ export const change_log = sqliteTable(
     group_id: varchar()('group_id'),
     operation_uuid: varchar()('operation_uuid'),
     entity_type: varchar()('entity_type').notNull(),
-    entity_id: integer('entity_id'),
+    entity_id: integer('entity_id').$type<AuditEntityId>(),
     previous_value: sqlText()('previous_value'),
     new_value: sqlText()('new_value'),
     reason: varchar()('reason'),
@@ -1114,7 +1124,10 @@ export const character_rule_overrides = sqliteTable(
 export const character_operations = sqliteTable(
   'character_operations',
   {
-    id: integer('id').primaryKey({ autoIncrement: true }).notNull(),
+    id: integer('id')
+      .primaryKey({ autoIncrement: true })
+      .notNull()
+      .$type<CharacterOperationId>(),
     character_id: integer('character_id')
       .notNull()
       .$type<CharacterId>()

@@ -22,6 +22,7 @@ import {
 } from '../domain/enums';
 import type { ContentKey } from '../domain/ids';
 import type { JsonObject, JsonValue } from '../domain/models';
+import type { HasEdition, HasName } from './content-contract-fragments';
 import { decodeClassResourceFormula } from '../domain/class-resources';
 import { decodePrimaryAbilityExpression } from '../domain/primary-ability';
 import type { AuthoringGrant, ContentFingerprintReference } from '../authoring/contracts';
@@ -69,10 +70,8 @@ type CanonicalScalar =
 
 export type CanonicalClassRowV1 = Readonly<Record<string, CanonicalScalar>>;
 
-export interface ClassContentAggregateV1 {
+export type ClassContentAggregateV1 = HasName & HasEdition & {
   readonly kind: 'class';
-  readonly name: string;
-  readonly rules_edition: RulesEdition;
   readonly spellcasting_ability: string | null;
   readonly progression_type: string;
   readonly caster_fraction: string | null;
@@ -101,12 +100,10 @@ export interface ClassContentAggregateV1 {
   readonly named_features: readonly CanonicalClassRowV1[];
   /** Stored-only, default-included future root columns; never accepted from documents. */
   readonly stored_fields?: CanonicalClassRowV1;
-}
+};
 
-export interface FeatContentAggregateV1 {
+export type FeatContentAggregateV1 = HasName & HasEdition & {
   readonly kind: 'feat';
-  readonly name: string;
-  readonly rules_edition: RulesEdition;
   readonly category: string | null;
   readonly min_level: number | null;
   readonly ability_points: number;
@@ -118,7 +115,7 @@ export interface FeatContentAggregateV1 {
   readonly notes: string | null;
   /** Stored-only, default-included future root columns; never accepted from documents. */
   readonly stored_fields?: CanonicalClassRowV1;
-}
+};
 
 export type SourceContentReferenceV1 =
   | { readonly role: 'class.grant'; readonly reference: ContentFingerprintReference }

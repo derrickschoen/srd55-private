@@ -47,6 +47,11 @@ import type { EligibleSpell } from '../domain/read-models';
 import type { GrantRuleObject } from '../grants/grant-rule';
 import type { CharacterSheet } from '../queries/character-sheet-builder';
 import type { CatalogLayerDisclosure } from '../catalog/catalog-disclosure';
+import type {
+  HasContentKey,
+  HasName,
+  HasProvenance,
+} from '../catalog/content-contract-fragments';
 
 export type AbilityIncreaseAbilities = 'any' | readonly Ability[];
 
@@ -198,10 +203,7 @@ export interface FeatSpellReplacementEntitlement {
   readonly list_config_key: 'chosen_list';
 }
 
-export interface FeatDefinitionForApplication {
-  readonly content_key: ContentKey;
-  readonly name: string;
-  readonly catalog_layer: CatalogLayerDisclosure;
+export type FeatDefinitionForApplication = HasContentKey & HasName & HasProvenance & {
   readonly grouping: KnownFeatGrouping;
   readonly min_level: CharacterLevel | null;
   readonly ability_points: 0 | 1 | 2;
@@ -211,7 +213,7 @@ export interface FeatDefinitionForApplication {
   readonly prerequisites: readonly FeatPrerequisite[];
   readonly grant_rules: readonly GrantRuleObject[];
   readonly notes: string;
-}
+};
 
 export type LevelUpStep =
   | 'class'
@@ -244,19 +246,19 @@ export type PlannedSpellChoice = LevelUpPlannedSpellChoice;
 export type PlannedSkillChoice = LevelUpPlannedSkillChoice;
 export type PlannedExpertiseChoice = LevelUpPlannedExpertiseChoice;
 
-export interface LevelUpPlannedSkillProjection {
+export interface PlannedFromSource {
   readonly locator: PlannedGrantLocator;
   readonly source_label: string;
   readonly source_catalog_layer: CatalogLayerDisclosure;
-  readonly available_skills: readonly Skill[];
 }
 
-export interface LevelUpPlannedExpertiseProjection {
-  readonly locator: PlannedGrantLocator;
-  readonly source_label: string;
-  readonly source_catalog_layer: CatalogLayerDisclosure;
+export type LevelUpPlannedSkillProjection = PlannedFromSource & {
   readonly available_skills: readonly Skill[];
-}
+};
+
+export type LevelUpPlannedExpertiseProjection = PlannedFromSource & {
+  readonly available_skills: readonly Skill[];
+};
 
 export type LevelUpPlannedSpellProjection =
   | {

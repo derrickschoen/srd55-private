@@ -36,6 +36,10 @@ import type {
 } from '../catalog/content-registry';
 import type { CatalogLayerDisclosure } from '../catalog/catalog-disclosure';
 import type {
+  HasEdition,
+  HasName,
+} from '../catalog/content-contract-fragments';
+import type {
   AuthoringCharacterEffect,
   AuthoringDraftCharacterEffect,
   AuthoringDraftFeatureEffect,
@@ -286,13 +290,11 @@ export type HomebrewDraft =
   | SubclassAuthoringDraft
   | BackgroundAuthoringDraft;
 
-interface PublishableHomebrewBase<K extends AuthoredContentKind> {
+type PublishableHomebrewBase<K extends AuthoredContentKind> = HasName & HasEdition & {
   readonly kind: K;
-  readonly name: string;
-  readonly rules_edition: RulesEdition;
   /** Stored in the matching definition root's nullable `notes` column. */
   readonly reference_text: string;
-}
+};
 
 export interface SpeciesContentAggregate
   extends PublishableHomebrewBase<'species'> {

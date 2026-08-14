@@ -4,6 +4,7 @@ import type {
   Workspace,
   WorkspaceSlot,
 } from '../../../src/domain/read-models';
+import type { SpellIdentityId, SpellVersionId } from '../../../src/domain/ids';
 import type { CompletenessResult } from '../../../src/queries/character-completeness';
 import { SRD_ATTRIBUTION_NOTICE } from '../../../src/rules/srd-attribution';
 import {
@@ -75,8 +76,8 @@ function slot(changes: Partial<WorkspaceSlot> = {}): WorkspaceSlot {
 
 function route(changes: Partial<SpellRoute> = {}): SpellRoute {
   return {
-    spell_identity_id: 1,
-    spell_version_id: 10,
+    spell_identity_id: 1 as SpellIdentityId,
+    spell_version_id: 10 as SpellVersionId,
     spell_name: 'Mage Hand',
     spell_catalog_layer: 'bundled',
     spell_level: 0,
@@ -144,8 +145,8 @@ function workspace(): Workspace {
       access_routes: [
         route(),
         route({
-          spell_identity_id: 2,
-          spell_version_id: 11,
+          spell_identity_id: 2 as SpellIdentityId,
+          spell_version_id: 11 as SpellVersionId,
           spell_name: HOSTILE_SPELL_NAME,
           spell_level: 3,
           source_name: HOSTILE_SOURCE_NAME,

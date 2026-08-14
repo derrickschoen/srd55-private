@@ -28,7 +28,11 @@ import type {
   ContentImportPlanToken,
 } from '../../../src/catalog/content-adoption';
 import type { ContentFingerprintDigest } from '../../../src/catalog/content-identity';
-import type { ContentKey } from '../../../src/domain/ids';
+import type {
+  CharacterId,
+  CharacterRevision,
+  ContentKey,
+} from '../../../src/domain/ids';
 import type { PortableImportPlan } from '../../../src/backup/portable-content';
 import type { BundledHomebrewInstallPlan } from '../../../src/authoring/bundled-homebrew-installer';
 import {
@@ -39,7 +43,7 @@ import {
 
 function character(id: number, name: string): CharacterRow {
   return {
-    id,
+    id: id as CharacterId,
     name,
     strength: 10,
     dexterity: 10,
@@ -51,7 +55,7 @@ function character(id: number, name: string): CharacterRow {
     proficiency_bonus_override: null,
     rules_edition_preference: '2024',
     allow_legacy: false,
-    revision: 0,
+    revision: 0 as CharacterRevision,
     alignment: null,
     appearance: null,
     backstory: null,

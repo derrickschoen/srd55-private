@@ -787,36 +787,69 @@ export function parseSourceCatalogRecord(
   switch (kind) {
     case 'class': {
       validateClassGrants(base.aggregate);
+      const field = <Key extends keyof ClassContentAggregateV1>(
+        key: Key,
+      ): ClassContentAggregateV1[Key] =>
+        base.aggregate[key] as ClassContentAggregateV1[Key];
       const aggregate = {
-        ...base.aggregate,
-        progressions: list(
-          base.aggregate.progressions,
-          'aggregate.progressions',
-          AUTHORING_NUMERIC_LIMITS.maximumClassLevel,
-        ).map((value, index) => {
-          const progression = record(
-            value,
-            `aggregate.progressions[${String(index)}]`,
-          );
-          return {
-            ...progression,
-            grant_rules: normalizedGrantList(
-              progression.grant_rules,
-              `aggregate.progressions[${String(index)}].grant_rules`,
-            ),
-          };
-        }),
-      } as unknown as ClassContentAggregateV1;
+        kind: 'class',
+        name: base.name,
+        rules_edition: base.rulesEdition,
+        spellcasting_ability: field('spellcasting_ability'),
+        progression_type: field('progression_type'),
+        caster_fraction: field('caster_fraction'),
+        caster_rounding: field('caster_rounding'),
+        prepares_or_knows: field('prepares_or_knows'),
+        supports_ritual_casting: field('supports_ritual_casting'),
+        ritual_casting_mode: field('ritual_casting_mode'),
+        primary_ability_expression: field('primary_ability_expression'),
+        notes: field('notes'),
+        progressions: field('progressions').map((progression, index) => ({
+          ...progression,
+          grant_rules: normalizedGrantList(
+            progression.grant_rules,
+            `aggregate.progressions[${String(index)}].grant_rules`,
+          ),
+        })),
+        sheet_traits: field('sheet_traits'),
+        saving_throw_proficiencies: field('saving_throw_proficiencies'),
+        skill_options: field('skill_options'),
+        armor_training: field('armor_training'),
+        weapon_proficiencies: field('weapon_proficiencies'),
+        extra_attack_grants: field('extra_attack_grants'),
+        martial_arts_dice: field('martial_arts_dice'),
+        weapon_mastery_grants: field('weapon_mastery_grants'),
+        weapon_mastery_counts: field('weapon_mastery_counts'),
+        equipment_items: field('equipment_items'),
+        resources: field('resources'),
+        resource_formulas: field('resource_formulas'),
+        feature_effects: field('feature_effects'),
+        named_features: field('named_features'),
+      } satisfies ClassContentAggregateV1;
       deriveContentIdentityV1({ kind, edition: base.rulesEdition, name: base.name, payload: projectClassContentV1(aggregate) });
       return { kind, aggregate };
     }
     case 'feat': {
       const grants = normalizedGrantList(base.aggregate.grants, 'aggregate.grants');
       validateFeat(base.aggregate);
+      const field = <Key extends keyof FeatContentAggregateV1>(
+        key: Key,
+      ): FeatContentAggregateV1[Key] =>
+        base.aggregate[key] as FeatContentAggregateV1[Key];
       const aggregate = {
-        ...base.aggregate,
+        kind: 'feat',
+        name: base.name,
+        rules_edition: base.rulesEdition,
+        category: field('category'),
+        min_level: field('min_level'),
+        ability_points: field('ability_points'),
+        ability_increase_abilities: field('ability_increase_abilities'),
+        ability_increase_maximum: field('ability_increase_maximum'),
+        repeatable: field('repeatable'),
+        prerequisites: field('prerequisites'),
         grants,
-      } as unknown as FeatContentAggregateV1;
+        notes: field('notes'),
+      } satisfies FeatContentAggregateV1;
       deriveContentIdentityV1({ kind, edition: base.rulesEdition, name: base.name, payload: projectFeatContentV1(aggregate) });
       return { kind, aggregate };
     }

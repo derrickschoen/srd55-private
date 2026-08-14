@@ -14,6 +14,23 @@ import type {
   SpellRangeKind,
   SpellSchool,
 } from './enums';
+import type {
+  AuditEntityId,
+  CharacterClassLevelId,
+  CharacterId,
+  CharacterOperationId,
+  CharacterRevision,
+  ChangeLogId,
+  ClassDefinitionId,
+  SlotId,
+  SourceDefinitionId,
+  SourceInstanceId,
+  SpellIdentityId,
+  SpellVersionId,
+  StandaloneDefinitionId,
+  SubclassDefinitionId,
+  WizardSpellbookEntryId,
+} from './ids';
 
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
@@ -25,7 +42,7 @@ export interface TimestampedRow {
 }
 
 export interface DefinitionRow extends TimestampedRow {
-  id: number;
+  id: StandaloneDefinitionId;
   content_key: string;
   name: string;
   rules_edition: RulesEdition;
@@ -37,7 +54,7 @@ export interface DefinitionRow extends TimestampedRow {
 }
 
 export interface SpellIdentityRow extends TimestampedRow {
-  id: number;
+  id: SpellIdentityId;
   content_key: string;
   canonical_name: string;
   normalized_name: string;
@@ -45,9 +62,9 @@ export interface SpellIdentityRow extends TimestampedRow {
 }
 
 export interface SpellVersionRow extends TimestampedRow {
-  id: number;
+  id: SpellVersionId;
   content_key: string;
-  spell_identity_id: number;
+  spell_identity_id: SpellIdentityId;
   display_name: string;
   rules_edition: RulesEdition;
   level: number;
@@ -98,7 +115,7 @@ export interface SpellVersionRow extends TimestampedRow {
 }
 
 export interface CharacterRow extends TimestampedRow {
-  id: number;
+  id: CharacterId;
   name: string;
   strength: number;
   dexterity: number;
@@ -114,7 +131,7 @@ export interface CharacterRow extends TimestampedRow {
   proficiency_bonus_override: number | null;
   rules_edition_preference: RulesEdition;
   allow_legacy: boolean;
-  revision: number;
+  revision: CharacterRevision;
   alignment: string | null;
   appearance: string | null;
   backstory: string | null;
@@ -124,7 +141,7 @@ export interface CharacterRow extends TimestampedRow {
 }
 
 export interface ClassDefinitionRow extends TimestampedRow {
-  id: number;
+  id: ClassDefinitionId;
   content_key: string;
   name: string;
   rules_edition: RulesEdition;
@@ -140,9 +157,9 @@ export interface ClassDefinitionRow extends TimestampedRow {
 }
 
 export interface SubclassDefinitionRow extends TimestampedRow {
-  id: number;
+  id: SubclassDefinitionId;
   content_key: string;
-  class_definition_id: number;
+  class_definition_id: ClassDefinitionId;
   name: string;
   rules_edition: RulesEdition;
   spellcasting_ability: Ability | null;
@@ -152,10 +169,10 @@ export interface SubclassDefinitionRow extends TimestampedRow {
 }
 
 export interface CharacterClassLevelRow extends TimestampedRow {
-  id: number;
-  character_id: number;
-  class_definition_id: number;
-  subclass_definition_id: number | null;
+  id: CharacterClassLevelId;
+  character_id: CharacterId;
+  class_definition_id: ClassDefinitionId;
+  subclass_definition_id: SubclassDefinitionId | null;
   level: number;
   is_starting_class: boolean;
   spellcasting_ability_override: Ability | null;
@@ -163,12 +180,12 @@ export interface CharacterClassLevelRow extends TimestampedRow {
 }
 
 export interface CharacterSourceInstanceRow extends TimestampedRow {
-  id: number;
-  character_id: number;
+  id: SourceInstanceId;
+  character_id: CharacterId;
   instance_uuid: string;
-  parent_source_instance_id: number | null;
+  parent_source_instance_id: SourceInstanceId | null;
   source_type: DomainSourceType;
-  source_definition_id: number | null;
+  source_definition_id: SourceDefinitionId | null;
   display_name: string;
   config: JsonObject | null;
   acquired_at_character_level: number | null;
@@ -177,16 +194,16 @@ export interface CharacterSourceInstanceRow extends TimestampedRow {
 }
 
 export interface SpellSelectionSlotRow extends TimestampedRow {
-  id: number;
-  character_id: number;
-  source_instance_id: number;
+  id: SlotId;
+  character_id: CharacterId;
+  source_instance_id: SourceInstanceId;
   slot_key: string;
   rule_key: string;
   ordinal: number;
   bucket: SlotBucket;
   eligibility_kind: string;
-  fixed_spell_version_id: number | null;
-  current_spell_version_id: number | null;
+  fixed_spell_version_id: SpellVersionId | null;
+  current_spell_version_id: SpellVersionId | null;
   label: string | null;
   spell_level_min: number;
   spell_level_max: number;
@@ -212,28 +229,28 @@ export interface SpellSelectionSlotRow extends TimestampedRow {
 }
 
 export interface WizardSpellbookEntryRow extends TimestampedRow {
-  id: number;
-  character_id: number;
-  spell_version_id: number;
+  id: WizardSpellbookEntryId;
+  character_id: CharacterId;
+  spell_version_id: SpellVersionId;
 }
 
 export interface CharacterOperationRow extends TimestampedRow {
-  id: number;
-  character_id: number;
+  id: CharacterOperationId;
+  character_id: CharacterId;
   operation_uuid: string;
-  expected_revision: number;
-  resulting_revision: number;
+  expected_revision: CharacterRevision;
+  resulting_revision: CharacterRevision;
   inverse_command: JsonObject;
 }
 
 export interface ChangeLogRow extends TimestampedRow {
-  id: number;
-  character_id: number;
+  id: ChangeLogId;
+  character_id: CharacterId;
   sequence: number;
   group_id: string | null;
   operation_uuid: string | null;
   entity_type: string;
-  entity_id: number | null;
+  entity_id: AuditEntityId | null;
   previous_value: JsonValue | null;
   new_value: JsonValue | null;
   reason: string | null;

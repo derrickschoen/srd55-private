@@ -1,7 +1,11 @@
 import type { WeaponFields } from './command-contracts';
 import type { EquipmentEffectInput } from './equipment-effects';
 import type { AttunementSlot } from './attunement';
-import type { ContentKey } from './ids';
+import type {
+  ContentKey,
+  SpellIdentityId,
+  SpellVersionId,
+} from './ids';
 import type { MulticlassPrimaryAbilityWarning } from './primary-ability';
 import type {
   CatalogLayerDisclosure,
@@ -123,8 +127,8 @@ export interface FreeCast {
 }
 
 export interface SpellRoute {
-  spell_identity_id: number;
-  spell_version_id: number;
+  spell_identity_id: SpellIdentityId;
+  spell_version_id: SpellVersionId;
   spell_name: string;
   spell_catalog_layer: CatalogLayerDisclosure;
   spell_level: number;
@@ -139,7 +143,7 @@ export interface SpellRoute {
 }
 
 export interface DuplicateAssessment {
-  spell_identity_id: number;
+  spell_identity_id: SpellIdentityId;
   spell_name: string;
   category: DuplicateCategory;
   sources: string[];
@@ -147,7 +151,7 @@ export interface DuplicateAssessment {
   explanation: string;
   warning_fingerprint: string | null;
   versions: Array<{
-    spell_version_id: number;
+    spell_version_id: SpellVersionId;
     content_key: string;
     edition: RulesEdition;
     label: string;
