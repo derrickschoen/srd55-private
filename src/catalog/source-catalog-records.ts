@@ -13,6 +13,13 @@ import {
   skills,
   type RulesEdition,
 } from '../domain/enums';
+import { FEATURE_VALUE_CONTRIBUTION_LIMITS } from '../domain/contracts/feature-value-storage-limits';
+import {
+  decodeStoredSupersedesReference,
+  decodeStoredValueExpression,
+} from '../domain/contracts/row-rules';
+import { featureValueKeys } from '../domain/feature-values';
+import type { JsonObject, JsonValue } from '../domain/models';
 import { CHARACTER_EFFECT_FORM } from '../authoring/effect-forms';
 import {
   AUTHORING_LIST_LIMITS,
@@ -27,6 +34,7 @@ import { projectAuthoredContentAggregateV1 } from './stored-authored-content-pro
 import {
   projectClassContentV1,
   projectFeatContentV1,
+  type CanonicalClassRowV1,
   type ClassContentAggregateV1,
   type FeatContentAggregateV1,
 } from './source-content-projector-v1';
@@ -131,6 +139,255 @@ function nullableBoundedText(
   if (value === null) return null;
   return boundedText(value, label, maximum);
 }
+
+function nullableBoundedString(
+  value: unknown,
+  label: string,
+  maximum: number,
+): string | null {
+  if (value === null) return null;
+  return boundedString(value, label, maximum);
+}
+
+function jsonValue(value: unknown, label: string): JsonValue {
+  if (
+    value === null || typeof value === 'string' ||
+    typeof value === 'boolean'
+  ) {
+    return value;
+  }
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      throw new TypeError(`Catalog field '${label}' must contain finite JSON numbers.`);
+    }
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry, index) => jsonValue(entry, `${label}[${String(index)}]`));
+  }
+  const object = record(value, label);
+  const parsed: Record<string, JsonValue> = {};
+  for (const [key, entry] of Object.entries(object)) {
+    parsed[key] = jsonValue(entry, `${label}.${key}`);
+  }
+  return parsed;
+}
+
+function jsonObject(value: unknown, label: string): JsonObject {
+  const object = record(value, label);
+  const parsed: Record<string, JsonValue> = {};
+  for (const [key, entry] of Object.entries(object)) {
+    parsed[key] = jsonValue(entry, `${label}.${key}`);
+  }
+  return parsed;
+}
+
+function jsonObjectList(
+  value: unknown,
+  label: string,
+  maximum: number,
+): readonly JsonObject[] {
+  return list(value, label, maximum)
+    .map((entry, index) => jsonObject(entry, `${label}[${String(index)}]`));
+}
+
+function canonicalClassRow(value: unknown, label: string): CanonicalClassRowV1 {
+  return jsonObject(value, label);
+}
+
+function canonicalClassRows(
+  value: unknown,
+  label: string,
+  maximum: number,
+): readonly CanonicalClassRowV1[] {
+  return list(value, label, maximum)
+    .map((entry, index) => canonicalClassRow(entry, `${label}[${String(index)}]`));
+}
+
+function nullableCanonicalClassRow(
+  value: unknown,
+  label: string,
+): CanonicalClassRowV1 | null {
+  return value === null ? null : canonicalClassRow(value, label);
+}
+
+function featureValueContribution(
+  value: unknown,
+  label: string,
+): CanonicalClassRowV1 {
+  const contribution = record(value, label);
+  exactKeys(contribution, label, [
+    'kind', 'contribution_key', 'label', 'target_kind', 'target_key', 'op',
+    'active_from_level', 'active_to_level', 'value', 'supersedes_ref',
+    'resource_display_label', 'resource_marking_shape',
+  ]);
+  if (contribution.kind !== 'feature_value_contribution') {
+    throw new TypeError(`Catalog field '${label}.kind' is invalid.`);
+  }
+  boundedText(
+    contribution.contribution_key,
+    `${label}.contribution_key`,
+    FEATURE_VALUE_CONTRIBUTION_LIMITS.keyCodePoints,
+  );
+  boundedText(
+    contribution.label,
+    `${label}.label`,
+    FEATURE_VALUE_CONTRIBUTION_LIMITS.keyCodePoints,
+  );
+  if (
+    contribution.target_kind !== 'feature_dice_count' &&
+    contribution.target_kind !== 'resource_maximum'
+  ) {
+    throw new TypeError(`Catalog field '${label}.target_kind' is invalid.`);
+  }
+  if (contribution.op !== 'add') {
+    throw new TypeError(`Catalog field '${label}.op' is invalid.`);
+  }
+  const activeFrom = integer(
+    contribution.active_from_level,
+    `${label}.active_from_level`,
+    AUTHORING_NUMERIC_LIMITS.minimumClassLevel,
+    AUTHORING_NUMERIC_LIMITS.maximumClassLevel,
+  );
+  const activeTo = integer(
+    contribution.active_to_level,
+    `${label}.active_to_level`,
+    AUTHORING_NUMERIC_LIMITS.minimumClassLevel,
+    AUTHORING_NUMERIC_LIMITS.maximumClassLevel,
+  );
+  if (activeFrom > activeTo) {
+    throw new TypeError(
+      `Catalog field '${label}.active_from_level' must not exceed active_to_level.`,
+    );
+  }
+
+  if (contribution.target_kind === 'feature_dice_count') {
+    exactKeys(contribution, label, [
+      'kind', 'contribution_key', 'label', 'target_kind', 'target_key', 'op',
+      'active_from_level', 'active_to_level', 'value', 'supersedes_ref',
+    ]);
+    if (!isEnumValue(featureValueKeys, contribution.target_key)) {
+      throw new TypeError(`Catalog field '${label}.target_key' is invalid.`);
+    }
+  } else {
+    exactKeys(contribution, label, [
+      'kind', 'contribution_key', 'label', 'target_kind', 'target_key', 'op',
+      'active_from_level', 'active_to_level', 'value', 'supersedes_ref',
+      'resource_display_label', 'resource_marking_shape',
+    ]);
+    boundedText(
+      contribution.target_key,
+      `${label}.target_key`,
+      FEATURE_VALUE_CONTRIBUTION_LIMITS.keyCodePoints,
+    );
+    boundedText(
+      contribution.resource_display_label,
+      `${label}.resource_display_label`,
+      FEATURE_VALUE_CONTRIBUTION_LIMITS.keyCodePoints,
+    );
+    if (
+      contribution.resource_marking_shape !== 'boxes' &&
+      contribution.resource_marking_shape !== 'remaining'
+    ) {
+      throw new TypeError(`Catalog field '${label}.resource_marking_shape' is invalid.`);
+    }
+  }
+
+  let encodedValue: string | undefined;
+  try {
+    encodedValue = JSON.stringify(contribution.value);
+  } catch (error) {
+    throw new TypeError(`Catalog field '${label}.value' must be valid JSON.`, { cause: error });
+  }
+  const parsedValue = decodeStoredValueExpression(encodedValue, `${label}.value`) as JsonValue;
+
+  let parsedSupersedes: JsonValue | null;
+  if (contribution.supersedes_ref === null) {
+    parsedSupersedes = null;
+  } else {
+    let encodedSupersedes: string | undefined;
+    try {
+      encodedSupersedes = JSON.stringify(contribution.supersedes_ref);
+    } catch (error) {
+      throw new TypeError(
+        `Catalog field '${label}.supersedes_ref' must be valid JSON.`,
+        { cause: error },
+      );
+    }
+    parsedSupersedes = decodeStoredSupersedesReference(
+      encodedSupersedes,
+      `${label}.supersedes_ref`,
+    ) as JsonValue;
+  }
+
+  return {
+    ...contribution,
+    value: parsedValue,
+    supersedes_ref: parsedSupersedes,
+  } as CanonicalClassRowV1;
+}
+
+function optionalFeatureValueContributions(
+  value: unknown,
+): readonly CanonicalClassRowV1[] | undefined {
+  if (value === undefined) return undefined;
+  return list(
+    value,
+    'aggregate.feature_value_contributions',
+    AUTHORING_LIST_LIMITS.effectsPerAggregate,
+  ).map((entry, index) => featureValueContribution(
+    entry,
+    `aggregate.feature_value_contributions[${String(index)}]`,
+  ));
+}
+
+function canonicalClassProgressions(
+  value: unknown,
+): readonly CanonicalClassRowV1[] {
+  return canonicalClassRows(
+    value,
+    'aggregate.progressions',
+    AUTHORING_NUMERIC_LIMITS.maximumClassLevel,
+  ).map((progression, index) => ({
+    ...progression,
+    grant_rules: normalizedGrantList(
+      progression.grant_rules,
+      `aggregate.progressions[${String(index)}].grant_rules`,
+    ),
+  }));
+}
+
+function featAbilityIncreaseAbilities(
+  value: unknown,
+): 'any' | readonly string[] | null {
+  if (value === null || value === 'any') return value;
+  const choices = list(value, 'aggregate.ability_increase_abilities', abilities.length);
+  if (
+    choices.length === 0 ||
+    choices.some((ability) => !isEnumValue(abilities, ability))
+  ) {
+    throw new TypeError("Catalog field 'aggregate.ability_increase_abilities' is invalid.");
+  }
+  return choices.map((ability, index) => boundedText(
+    ability,
+    `aggregate.ability_increase_abilities[${String(index)}]`,
+    AUTHORING_TEXT_LIMITS.openVocabulary,
+  ));
+}
+
+function documentStoredFields(
+  value: unknown,
+  label: string,
+): undefined {
+  if (value !== undefined) {
+    throw new TypeError(`Catalog field '${label}' is stored-only and cannot appear in a document.`);
+  }
+  return undefined;
+}
+
+type ExhaustiveAggregateFields<Aggregate> = {
+  readonly [Key in keyof Required<Aggregate>]: Aggregate[Key];
+};
 
 function fingerprint(
   value: unknown,
@@ -565,7 +822,8 @@ function validateClassGrants(aggregate: Record<string, unknown>): void {
     'saving_throw_proficiencies', 'skill_options', 'armor_training',
     'weapon_proficiencies', 'extra_attack_grants', 'martial_arts_dice',
     'weapon_mastery_grants', 'weapon_mastery_counts', 'equipment_items',
-    'resources', 'resource_formulas', 'feature_effects', 'named_features',
+    'resources', 'resource_formulas', 'feature_effects',
+    'feature_value_contributions', 'named_features', 'stored_fields',
   ]);
   boundedText(aggregate.name, 'aggregate.name', AUTHORING_TEXT_LIMITS.name);
   boolean(aggregate.supports_ritual_casting, 'aggregate.supports_ritual_casting');
@@ -659,6 +917,7 @@ function validateClassGrants(aggregate: Record<string, unknown>): void {
     ['class_level', 'name', ...classEffectFields],
     AUTHORING_LIST_LIMITS.effectsPerAggregate,
   ).forEach((row, index) => validateClassEffect(row, `aggregate.feature_effects[${String(index)}]`, false));
+  optionalFeatureValueContributions(aggregate.feature_value_contributions);
   validateClassRows(aggregate, 'named_features', [
     'name', 'rules_edition', 'prerequisite', 'description', 'class_level', 'effects',
   ], AUTHORING_LIST_LIMITS.features).forEach((row, index) => {
@@ -690,7 +949,7 @@ function validateFeat(aggregate: Record<string, unknown>): void {
     'kind', 'name', 'rules_edition', 'category', 'min_level',
     'ability_points', 'ability_increase_abilities',
     'ability_increase_maximum', 'repeatable', 'prerequisites', 'grants',
-    'notes',
+    'notes', 'stored_fields',
   ]);
   boundedText(aggregate.name, 'aggregate.name', AUTHORING_TEXT_LIMITS.name);
   if (aggregate.notes !== null) {
@@ -787,70 +1046,83 @@ export function parseSourceCatalogRecord(
   switch (kind) {
     case 'class': {
       validateClassGrants(base.aggregate);
-      const field = <Key extends keyof ClassContentAggregateV1>(
-        key: Key,
-      ): ClassContentAggregateV1[Key] =>
-        base.aggregate[key] as ClassContentAggregateV1[Key];
-      const aggregate = {
+      const fields = {
         kind: 'class',
-        name: base.name,
-        rules_edition: base.rulesEdition,
-        spellcasting_ability: field('spellcasting_ability'),
-        progression_type: field('progression_type'),
-        caster_fraction: field('caster_fraction'),
-        caster_rounding: field('caster_rounding'),
-        prepares_or_knows: field('prepares_or_knows'),
-        supports_ritual_casting: field('supports_ritual_casting'),
-        ritual_casting_mode: field('ritual_casting_mode'),
-        primary_ability_expression: field('primary_ability_expression'),
-        notes: field('notes'),
-        progressions: field('progressions').map((progression, index) => ({
-          ...progression,
-          grant_rules: normalizedGrantList(
-            progression.grant_rules,
-            `aggregate.progressions[${String(index)}].grant_rules`,
-          ),
-        })),
-        sheet_traits: field('sheet_traits'),
-        saving_throw_proficiencies: field('saving_throw_proficiencies'),
-        skill_options: field('skill_options'),
-        armor_training: field('armor_training'),
-        weapon_proficiencies: field('weapon_proficiencies'),
-        extra_attack_grants: field('extra_attack_grants'),
-        martial_arts_dice: field('martial_arts_dice'),
-        weapon_mastery_grants: field('weapon_mastery_grants'),
-        weapon_mastery_counts: field('weapon_mastery_counts'),
-        equipment_items: field('equipment_items'),
-        resources: field('resources'),
-        resource_formulas: field('resource_formulas'),
-        feature_effects: field('feature_effects'),
-        named_features: field('named_features'),
-      } satisfies ClassContentAggregateV1;
-      deriveContentIdentityV1({ kind, edition: base.rulesEdition, name: base.name, payload: projectClassContentV1(aggregate) });
+        name: boundedText(base.aggregate.name, 'aggregate.name', AUTHORING_TEXT_LIMITS.name),
+        rules_edition: edition(base.aggregate.rules_edition),
+        spellcasting_ability: nullableBoundedText(base.aggregate.spellcasting_ability, 'aggregate.spellcasting_ability', AUTHORING_TEXT_LIMITS.openVocabulary),
+        progression_type: boundedText(base.aggregate.progression_type, 'aggregate.progression_type', AUTHORING_TEXT_LIMITS.openVocabulary),
+        caster_fraction: nullableBoundedText(base.aggregate.caster_fraction, 'aggregate.caster_fraction', AUTHORING_TEXT_LIMITS.openVocabulary),
+        caster_rounding: nullableBoundedText(base.aggregate.caster_rounding, 'aggregate.caster_rounding', AUTHORING_TEXT_LIMITS.openVocabulary),
+        prepares_or_knows: nullableBoundedText(base.aggregate.prepares_or_knows, 'aggregate.prepares_or_knows', AUTHORING_TEXT_LIMITS.openVocabulary),
+        supports_ritual_casting: boolean(base.aggregate.supports_ritual_casting, 'aggregate.supports_ritual_casting'),
+        ritual_casting_mode: nullableBoundedText(base.aggregate.ritual_casting_mode, 'aggregate.ritual_casting_mode', AUTHORING_TEXT_LIMITS.openVocabulary),
+        primary_ability_expression: nullableBoundedText(base.aggregate.primary_ability_expression, 'aggregate.primary_ability_expression', AUTHORING_TEXT_LIMITS.referenceText),
+        notes: nullableBoundedText(base.aggregate.notes, 'aggregate.notes', AUTHORING_TEXT_LIMITS.referenceText),
+        progressions: canonicalClassProgressions(base.aggregate.progressions),
+        sheet_traits: nullableCanonicalClassRow(base.aggregate.sheet_traits, 'aggregate.sheet_traits'),
+        saving_throw_proficiencies: canonicalClassRows(base.aggregate.saving_throw_proficiencies, 'aggregate.saving_throw_proficiencies', AUTHORING_LIST_LIMITS.classChildRows),
+        skill_options: canonicalClassRows(base.aggregate.skill_options, 'aggregate.skill_options', AUTHORING_LIST_LIMITS.classChildRows),
+        armor_training: canonicalClassRows(base.aggregate.armor_training, 'aggregate.armor_training', AUTHORING_LIST_LIMITS.classChildRows),
+        weapon_proficiencies: canonicalClassRows(base.aggregate.weapon_proficiencies, 'aggregate.weapon_proficiencies', AUTHORING_LIST_LIMITS.classChildRows),
+        extra_attack_grants: canonicalClassRows(base.aggregate.extra_attack_grants, 'aggregate.extra_attack_grants', AUTHORING_LIST_LIMITS.classChildRows),
+        martial_arts_dice: canonicalClassRows(base.aggregate.martial_arts_dice, 'aggregate.martial_arts_dice', AUTHORING_LIST_LIMITS.classChildRows),
+        weapon_mastery_grants: canonicalClassRows(base.aggregate.weapon_mastery_grants, 'aggregate.weapon_mastery_grants', AUTHORING_LIST_LIMITS.classChildRows),
+        weapon_mastery_counts: canonicalClassRows(base.aggregate.weapon_mastery_counts, 'aggregate.weapon_mastery_counts', AUTHORING_LIST_LIMITS.classChildRows),
+        equipment_items: canonicalClassRows(base.aggregate.equipment_items, 'aggregate.equipment_items', AUTHORING_LIST_LIMITS.classChildRows),
+        resources: canonicalClassRows(base.aggregate.resources, 'aggregate.resources', AUTHORING_LIST_LIMITS.classChildRows),
+        resource_formulas: canonicalClassRows(base.aggregate.resource_formulas, 'aggregate.resource_formulas', AUTHORING_LIST_LIMITS.classChildRows),
+        feature_effects: canonicalClassRows(base.aggregate.feature_effects, 'aggregate.feature_effects', AUTHORING_LIST_LIMITS.effectsPerAggregate),
+        feature_value_contributions: optionalFeatureValueContributions(base.aggregate.feature_value_contributions),
+        named_features: canonicalClassRows(base.aggregate.named_features, 'aggregate.named_features', AUTHORING_LIST_LIMITS.features),
+        stored_fields: documentStoredFields(base.aggregate.stored_fields, 'aggregate.stored_fields'),
+      } satisfies ExhaustiveAggregateFields<ClassContentAggregateV1>;
+      const {
+        feature_value_contributions: featureValueContributions,
+        stored_fields: storedFields,
+        ...requiredFields
+      } = fields;
+      const aggregate: ClassContentAggregateV1 = featureValueContributions === undefined
+        ? requiredFields
+        : { ...requiredFields, feature_value_contributions: featureValueContributions };
+      void storedFields;
+      deriveContentIdentityV1({
+        kind,
+        edition: aggregate.rules_edition,
+        name: aggregate.name,
+        payload: projectClassContentV1(aggregate),
+      });
       return { kind, aggregate };
     }
     case 'feat': {
-      const grants = normalizedGrantList(base.aggregate.grants, 'aggregate.grants');
       validateFeat(base.aggregate);
-      const field = <Key extends keyof FeatContentAggregateV1>(
-        key: Key,
-      ): FeatContentAggregateV1[Key] =>
-        base.aggregate[key] as FeatContentAggregateV1[Key];
-      const aggregate = {
+      const fields = {
         kind: 'feat',
-        name: base.name,
-        rules_edition: base.rulesEdition,
-        category: field('category'),
-        min_level: field('min_level'),
-        ability_points: field('ability_points'),
-        ability_increase_abilities: field('ability_increase_abilities'),
-        ability_increase_maximum: field('ability_increase_maximum'),
-        repeatable: field('repeatable'),
-        prerequisites: field('prerequisites'),
-        grants,
-        notes: field('notes'),
-      } satisfies FeatContentAggregateV1;
-      deriveContentIdentityV1({ kind, edition: base.rulesEdition, name: base.name, payload: projectFeatContentV1(aggregate) });
+        name: boundedText(base.aggregate.name, 'aggregate.name', AUTHORING_TEXT_LIMITS.name),
+        rules_edition: edition(base.aggregate.rules_edition),
+        category: nullableBoundedText(base.aggregate.category, 'aggregate.category', AUTHORING_TEXT_LIMITS.shortLabel),
+        min_level: base.aggregate.min_level === null
+          ? null
+          : integer(base.aggregate.min_level, 'aggregate.min_level', AUTHORING_NUMERIC_LIMITS.minimumClassLevel, AUTHORING_NUMERIC_LIMITS.maximumClassLevel),
+        ability_points: integer(base.aggregate.ability_points, 'aggregate.ability_points', 0, 2),
+        ability_increase_abilities: featAbilityIncreaseAbilities(base.aggregate.ability_increase_abilities),
+        ability_increase_maximum: base.aggregate.ability_increase_maximum === null
+          ? null
+          : integer(base.aggregate.ability_increase_maximum, 'aggregate.ability_increase_maximum', AUTHORING_NUMERIC_LIMITS.minimumAbilityScore, AUTHORING_NUMERIC_LIMITS.maximumAbilityScore),
+        repeatable: boolean(base.aggregate.repeatable, 'aggregate.repeatable'),
+        prerequisites: jsonObjectList(base.aggregate.prerequisites, 'aggregate.prerequisites', AUTHORING_LIST_LIMITS.grants),
+        grants: normalizedGrantList(base.aggregate.grants, 'aggregate.grants'),
+        notes: nullableBoundedString(base.aggregate.notes, 'aggregate.notes', AUTHORING_TEXT_LIMITS.referenceText),
+        stored_fields: documentStoredFields(base.aggregate.stored_fields, 'aggregate.stored_fields'),
+      } satisfies ExhaustiveAggregateFields<FeatContentAggregateV1>;
+      const { stored_fields: storedFields, ...aggregate } = fields;
+      void storedFields;
+      deriveContentIdentityV1({
+        kind,
+        edition: aggregate.rules_edition,
+        name: aggregate.name,
+        payload: projectFeatContentV1(aggregate),
+      });
       return { kind, aggregate };
     }
     case 'species': {

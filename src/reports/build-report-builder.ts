@@ -23,7 +23,14 @@ import type {
   BuildReport,
   WorkspaceSlot,
 } from '../domain/read-models';
-import type { SpellIdentityId, SpellVersionId } from '../domain/ids';
+import type {
+  CharacterId,
+  SlotId,
+  SpellIdentityId,
+  SpellVersionId,
+  WarningAcknowledgementId,
+  WizardSpellbookEntryId,
+} from '../domain/ids';
 import {
   DuplicateWarningDetector,
   type DuplicateWarningAssessment,
@@ -64,7 +71,7 @@ import {
 import { characterCatalogDisclosures } from '../queries/character-catalog-disclosures';
 
 interface Character {
-  readonly id: number;
+  readonly id: CharacterId;
   readonly name: string;
   readonly strength: number;
   readonly dexterity: number;
@@ -109,7 +116,7 @@ interface BuildClass {
 }
 
 interface WizardSpellbookEntry {
-  readonly spellbook_entry_id: number;
+  readonly spellbook_entry_id: WizardSpellbookEntryId;
   readonly spell_version_id: SpellVersionId;
   readonly spell_name: string;
   readonly spell_catalog_layer: CatalogLayerDisclosure;
@@ -119,22 +126,22 @@ interface WizardSpellbookEntry {
 }
 
 interface PreparedSpell {
-  readonly spell_version_id: number;
+  readonly spell_version_id: SpellVersionId;
   readonly spell_name: string;
   readonly spell_catalog_layer: CatalogLayerDisclosure;
   readonly level: number;
 }
 
 interface RitualOnlySpell {
-  readonly spellbook_entry_id: number;
-  readonly spell_version_id: number;
+  readonly spellbook_entry_id: WizardSpellbookEntryId;
+  readonly spell_version_id: SpellVersionId;
   readonly spell_name: string;
   readonly spell_catalog_layer: CatalogLayerDisclosure;
   readonly level: number;
 }
 
 interface WarningAcknowledgement {
-  readonly id: number;
+  readonly id: WarningAcknowledgementId;
   readonly note: string;
   readonly created_at: string;
 }
@@ -183,7 +190,7 @@ function decodeAbility(value: string | null, label: string): Ability | null {
 
 function decodeCharacter(row: SqlRow): Character {
   return {
-    id: sqlInteger(row, 'id'),
+    id: sqlInteger(row, 'id') as CharacterId,
     name: sqlString(row, 'name'),
     strength: sqlInteger(row, 'strength'),
     dexterity: sqlInteger(row, 'dexterity'),
@@ -345,13 +352,13 @@ function preparationCallout(
  * spell that is not a ritual.
  */
 interface ReportSlotRow {
-  readonly id: number;
+  readonly id: SlotId;
   readonly slot_key: string;
   readonly label: string | null;
   readonly bucket: SlotBucket;
   readonly spell_level_min: number;
   readonly spell_level_max: number;
-  readonly spell_version_id: number | null;
+  readonly spell_version_id: SpellVersionId | null;
   readonly state: SlotState;
   readonly eligibility: SelectionEligibility;
   readonly invalid_reason: string | null;
@@ -374,15 +381,16 @@ interface ReportSlotRow {
 }
 
 const reportSlotRow: RowCodec<ReportSlotRow> = (row) => ({
-  id: sqlInteger(row, 'id'),
+  id: sqlInteger(row, 'id') as SlotId,
   slot_key: sqlString(row, 'slot_key'),
   label: sqlNullableString(row, 'label'),
   bucket: sqlString(row, 'bucket') as SlotBucket,
   spell_level_min: sqlInteger(row, 'spell_level_min'),
   spell_level_max: sqlInteger(row, 'spell_level_max'),
-  spell_version_id:
+  spell_version_id: (
     sqlNullableInteger(row, 'fixed_spell_version_id') ??
-    sqlNullableInteger(row, 'current_spell_version_id'),
+    sqlNullableInteger(row, 'current_spell_version_id')
+  ) as SpellVersionId | null,
   state: sqlString(row, 'state') as SlotState,
   eligibility: sqlString(row, 'selection_eligibility') as SelectionEligibility,
   invalid_reason: sqlNullableString(row, 'selection_invalid_reason'),
@@ -629,7 +637,7 @@ export class BuildReportBuilder {
       (stored) => ({
         warning_fingerprint: sqlString(stored, 'warning_fingerprint'),
         acknowledgement: {
-          id: sqlInteger(stored, 'id'),
+          id: sqlInteger(stored, 'id') as WarningAcknowledgementId,
           note: sqlNullableString(stored, 'note') ?? '',
           created_at: sqlNullableString(stored, 'created_at') ?? '',
         },
@@ -690,7 +698,10 @@ export class BuildReportBuilder {
          WHERE entry.character_id = ?`,
         [characterId],
         (row): WizardSpellbookEntry => ({
-          spellbook_entry_id: sqlInteger(row, 'spellbook_entry_id'),
+          spellbook_entry_id: sqlInteger(
+            row,
+            'spellbook_entry_id',
+          ) as WizardSpellbookEntryId,
           spell_version_id: sqlInteger(row, 'spell_version_id') as SpellVersionId,
           spell_name: sqlString(row, 'spell_name'),
           spell_catalog_layer: catalogLayerDisclosure(
@@ -900,8 +911,8 @@ export class BuildReportBuilder {
     table:
       | 'spell_version_attack_modes'
       | 'spell_version_save_abilities',
-    versionIds: readonly number[],
-  ): Set<number> {
+    versionIds: readonly SpellVersionId[],
+  ): Set<SpellVersionId> {
     if (versionIds.length === 0) {
       return new Set();
     }
@@ -913,7 +924,7 @@ export class BuildReportBuilder {
          FROM ${table}
          WHERE spell_version_id IN (${placeholders})`,
         uniqueIds,
-        (row) => sqlInteger(row, 'spell_version_id'),
+        (row) => sqlInteger(row, 'spell_version_id') as SpellVersionId,
       ),
     );
   }

@@ -33,7 +33,19 @@ import type {
   WorkspaceBuildReport,
   WorkspaceSlot,
 } from '../domain/read-models';
-import type { SpellIdentityId } from '../domain/ids';
+import type {
+  CharacterClassLevelId,
+  BackgroundDefinitionId,
+  ClassDefinitionId,
+  FeatDefinitionId,
+  SlotId,
+  SpellIdentityId,
+  SpellVersionId,
+  SourceInstanceId,
+  SpeciesDefinitionId,
+  StandaloneDefinitionIdFor,
+  SubclassDefinitionId,
+} from '../domain/ids';
 import {
   BuildReportBuilder,
   type BuildReportResult,
@@ -107,13 +119,13 @@ const workspaceCharacter: RowCodec<WorkspaceCharacter> = (row) => ({
  * but it does so knowing which of the two it has.
  */
 interface WorkspaceSlotRow {
-  readonly id: number;
+  readonly id: SlotId;
   readonly slot_key: string;
   readonly label: string | null;
   readonly bucket: SlotBucket;
   readonly spell_level_min: number;
   readonly spell_level_max: number;
-  readonly spell_version_id: number | null;
+  readonly spell_version_id: SpellVersionId | null;
   readonly state: SlotState;
   readonly eligibility: SelectionEligibility;
   readonly invalid_reason: string | null;
@@ -136,15 +148,16 @@ interface WorkspaceSlotRow {
 }
 
 const workspaceSlotRow: RowCodec<WorkspaceSlotRow> = (row) => ({
-  id: sqlInteger(row, 'id'),
+  id: sqlInteger(row, 'id') as SlotId,
   slot_key: sqlString(row, 'slot_key'),
   label: sqlNullableString(row, 'label'),
   bucket: sqlString(row, 'bucket') as SlotBucket,
   spell_level_min: sqlInteger(row, 'spell_level_min'),
   spell_level_max: sqlInteger(row, 'spell_level_max'),
-  spell_version_id:
+  spell_version_id: (
     sqlNullableInteger(row, 'fixed_spell_version_id') ??
-    sqlNullableInteger(row, 'current_spell_version_id'),
+    sqlNullableInteger(row, 'current_spell_version_id')
+  ) as SpellVersionId | null,
   state: sqlString(row, 'state') as SlotState,
   eligibility: sqlString(row, 'selection_eligibility') as SelectionEligibility,
   invalid_reason: sqlNullableString(row, 'selection_invalid_reason'),
@@ -191,7 +204,7 @@ function titleBucket(bucket: string): string {
 function configurationKind(
   contentKey: string,
   grantRulesJson: string | null,
-): SourceDefinition['configuration_kind'] {
+): SourceDefinition<StandaloneSourceType>['configuration_kind'] {
   if (contentKey === '2024:feat:magic-initiate') {
     return 'magic_initiate';
   }
@@ -274,7 +287,7 @@ export class CharacterWorkspaceBuilder {
     const warningAssessments = report.duplicate_assessments.filter(
       (assessment) => assessment.category !== 'none',
     );
-    const workspaceReport = {
+    const workspaceReport: WorkspaceBuildReport = {
       ...report,
       invalid_selections: invalid,
       summary: {
@@ -284,7 +297,7 @@ export class CharacterWorkspaceBuilder {
         access_routes: report.access_routes.length,
         warning_count: warningAssessments.length + invalid.length,
       },
-    } as WorkspaceBuildReport;
+    };
     const classes = this.classes(
       characterId,
       new MulticlassPrimaryAbilityQueries(this.db).build(characterId),
@@ -405,14 +418,14 @@ export class CharacterWorkspaceBuilder {
         const classDefinitionId = sqlInteger(
           row,
           'class_definition_id',
-        );
+        ) as ClassDefinitionId;
         return {
-          id: sqlInteger(row, 'id'),
+          id: sqlInteger(row, 'id') as CharacterClassLevelId,
           class_definition_id: classDefinitionId,
           subclass_definition_id: sqlNullableInteger(
             row,
             'subclass_definition_id',
-          ),
+          ) as SubclassDefinitionId | null,
           level: sqlInteger(row, 'level'),
           is_starting_class: sqlBoolean(row, 'is_starting_class'),
           name: sqlString(row, 'name'),
@@ -436,7 +449,13 @@ export class CharacterWorkspaceBuilder {
     );
   }
 
-  private classOptions(classDefinitionId?: number): ClassOption[] {
+  private classOptions(): ClassOption<ClassDefinitionId>[];
+  private classOptions(
+    classDefinitionId: ClassDefinitionId,
+  ): ClassOption<SubclassDefinitionId>[];
+  private classOptions(
+    classDefinitionId?: ClassDefinitionId,
+  ): Array<ClassOption<ClassDefinitionId | SubclassDefinitionId>> {
     return classDefinitionId === undefined
       ? this.db.all(
           `SELECT definition.id, definition.content_key, definition.name,
@@ -450,7 +469,7 @@ export class CharacterWorkspaceBuilder {
            ORDER BY definition.name, definition.id`,
           undefined,
           (row) => ({
-            id: sqlInteger(row, 'id'),
+            id: sqlInteger(row, 'id') as ClassDefinitionId,
             content_key: sqlString(row, 'content_key'),
             name: sqlString(row, 'name'),
             catalog_layer: catalogLayerDisclosure(
@@ -477,7 +496,7 @@ export class CharacterWorkspaceBuilder {
            ORDER BY subclass.name, subclass.id`,
           [classDefinitionId],
           (row) => ({
-            id: sqlInteger(row, 'id'),
+            id: sqlInteger(row, 'id') as SubclassDefinitionId,
             name: sqlString(row, 'name'),
             catalog_layer: catalogLayerDisclosure(
               sqlNullableString(row, 'catalog_layer'),
@@ -668,7 +687,7 @@ export class CharacterWorkspaceBuilder {
        ORDER BY source.id`,
       [characterId, ACTIVE_SOURCE_INSTANCE_STATE],
       (row) => {
-        const id = sqlInteger(row, 'id');
+        const id = sqlInteger(row, 'id') as SourceInstanceId;
         const config = jsonRecord(sqlNullableString(row, 'config'));
         return {
           id,
@@ -684,9 +703,9 @@ export class CharacterWorkspaceBuilder {
     );
   }
 
-  private sourceDefinitions(
-    sourceType: StandaloneSourceType,
-  ): SourceDefinition[] {
+  private sourceDefinitions<Type extends StandaloneSourceType>(
+    sourceType: Type,
+  ): SourceDefinition<Type>[] {
     return this.db.all(
       `SELECT definition.id, definition.content_key, definition.name,
               definition.repeatable, definition.grant_rules,
@@ -698,8 +717,8 @@ export class CharacterWorkspaceBuilder {
        WHERE ${selectableCatalogContentSql(sourceType, 'definition.content_key')}
        ORDER BY definition.name, definition.id`,
       undefined,
-      (row): SourceDefinition => ({
-        id: sqlInteger(row, 'id'),
+      (row): SourceDefinition<Type> => ({
+        id: sqlInteger(row, 'id') as StandaloneDefinitionIdFor<Type>,
         content_key: sqlString(row, 'content_key'),
         name: sqlString(row, 'name'),
         catalog_layer: catalogLayerDisclosure(
@@ -725,25 +744,46 @@ export class CharacterWorkspaceBuilder {
        ORDER BY source_type, display_name, id`,
       [characterId, ACTIVE_SOURCE_INSTANCE_STATE],
       (row): RemovableSource => {
-        const id = sqlInteger(row, 'id');
-        return {
+        const id = sqlInteger(row, 'id') as SourceInstanceId;
+        const common = {
           id,
           parent_source_instance_id: sqlNullableInteger(
             row,
             'parent_source_instance_id',
-          ),
-          source_type: sqlString(
-            row,
-            'source_type',
-          ) as StandaloneSourceType,
-          source_definition_id: sqlNullableInteger(
-            row,
-            'source_definition_id',
-          ),
+          ) as SourceInstanceId | null,
           display_name: sqlString(row, 'display_name'),
           catalog_layer: characterSourceCatalogResolution(this.db, id)
             .catalog_layer,
         };
+        const sourceType = sqlString(row, 'source_type');
+        const sourceDefinitionId = sqlNullableInteger(
+          row,
+          'source_definition_id',
+        );
+        switch (sourceType) {
+          case 'feat':
+            return {
+              ...common,
+              source_type: sourceType,
+              source_definition_id:
+                sourceDefinitionId as FeatDefinitionId | null,
+            };
+          case 'species':
+            return {
+              ...common,
+              source_type: sourceType,
+              source_definition_id:
+                sourceDefinitionId as SpeciesDefinitionId | null,
+            };
+          case 'background':
+            return {
+              ...common,
+              source_type: sourceType,
+              source_definition_id:
+                sourceDefinitionId as BackgroundDefinitionId | null,
+            };
+        }
+        throw new TypeError(`Unknown standalone source type '${sourceType}'.`);
       },
     );
   }
