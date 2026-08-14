@@ -21,7 +21,7 @@ import {
   saveSuccessOutcomeHasEvidence,
   criticalHitHasEvidence,
   publicProbabilityCoverageManifest,
-} from './src/simulation/coverage';
+} from '../../../src/simulation/coverage';
 import {
   sourceStableKey,
   encounterRoundCount,
@@ -31,8 +31,9 @@ import {
   attackRollModifier,
   positiveDiceCount,
   routineEventId,
-} from './src/simulation/contracts';
-import { foldSavingThrowEvent, foldAttackEvent } from './src/simulation/probability';
+  expandedCriticalMinimumRoll,
+} from '../../../src/simulation/contracts';
+import { foldSavingThrowEvent, foldAttackEvent } from '../../../src/simulation/probability';
 
 import { it, expect } from 'vitest';
 const failures: string[] = [];
@@ -178,4 +179,67 @@ ok('F4 real-but-unreviewed heading REFUSED', throws('Spell Descriptions'));
 ok('F4 substring of reviewed heading REFUSED', throws('Critical'));
 ok('F4 negative control: reviewed heading ACCEPTED', !throws('Critical Hits'));
 ok('F4 negative control: Order of Application ACCEPTED', !throws('Order of Application'));
+
+// ---------- ROUND 3: expanded critical ranges (supervisor's own arithmetic) ----------
+const critEvent = (crit: unknown) =>
+  ({
+    kind: 'attack_roll',
+    event_id: routineEventId('a2'),
+    source: src('srd-5.2.1:weapon:greatsword'),
+    attack_bonus: attackRollModifier(0),
+    frequency: { kind: 'at_will' },
+    duration: { kind: 'instantaneous' },
+    critical: crit,
+    damage: [
+      {
+        source: src('srd-5.2.1:weapon:greatsword'),
+        damage_type: 'piercing',
+        components: [
+          { kind: 'dice', pool: { count: positiveDiceCount(1), die: 6 }, trigger: 'hit' },
+        ],
+      },
+    ],
+  }) as never;
+
+const expanded = (min: number, heading: string) =>
+  ({
+    kind: 'expanded_range',
+    minimum_roll: expandedCriticalMinimumRoll(min),
+    evidence: bundledSrdSourceRef(heading),
+  }) as never;
+
+const r19 = foldAttackEvent(critEvent(expanded(19, 'Level 3: Improved Critical')), atkTarget);
+ok('R3 19-20 available', r19.status === 'available');
+ok(
+  'R3 19-20 critical probability is exactly 2/20',
+  r19.status === 'available' && Math.abs(r19.critical_probability - 0.1) < 1e-12,
+);
+
+const r18 = foldAttackEvent(critEvent(expanded(18, 'Level 15: Superior Critical')), atkTarget);
+ok(
+  'R3 18-20 critical probability is exactly 3/20',
+  r18.status === 'available' && Math.abs(r18.critical_probability - 0.15) < 1e-12,
+);
+
+// An expanded range citing the GENERIC critical rule proves nothing about the range.
+const rBadEvidence = foldAttackEvent(
+  critEvent(expanded(19, 'Critical Hits')),
+  atkTarget,
+);
+ok('R3 expanded range citing generic Critical Hits is REFUSED', rBadEvidence.status === 'unavailable');
+
+// Citing the WRONG expanded rule for the range must also refuse.
+const rMismatched = foldAttackEvent(
+  critEvent(expanded(19, 'Level 15: Superior Critical')),
+  atkTarget,
+);
+ok('R3 19 citing the 18-20 rule is REFUSED', rMismatched.status === 'unavailable');
+
+const ctorThrows = (v: unknown) => {
+  try { expandedCriticalMinimumRoll(v); return false; } catch { return true; }
+};
+ok('R3 minimum_roll 20 REFUSED (that is natural_20)', ctorThrows(20));
+ok('R3 minimum_roll 1 REFUSED', ctorThrows(1));
+ok('R3 minimum_roll 19 ACCEPTED', !ctorThrows(19));
+
 }

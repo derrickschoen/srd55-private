@@ -53,6 +53,10 @@ export type PositiveResourceMaximum = Brand<
   number,
   'PositiveResourceMaximum'
 >;
+export type PositiveResourceRecoveryAmount = Brand<
+  number,
+  'PositiveResourceRecoveryAmount'
+>;
 export type PositiveResourceCost = Brand<number, 'PositiveResourceCost'>;
 export type EncounterResourceCap = Brand<number, 'EncounterResourceCap'>;
 export type ExpectedEventDamage = Brand<number, 'ExpectedEventDamage'>;
@@ -76,6 +80,11 @@ export type DamageRollTotal = Brand<number, 'DamageRollTotal'>;
 export type AttackRollModifier = Brand<number, 'AttackRollModifier'>;
 export type SaveDifficultyClass = Brand<number, 'SaveDifficultyClass'>;
 export type DamageFlatModifier = Brand<number, 'DamageFlatModifier'>;
+export type ExpandedCriticalMinimumRoll = Brand<
+  number,
+  'ExpandedCriticalMinimumRoll'
+>;
+export type SaveSuccessClauseId = Brand<string, 'SaveSuccessClauseId'>;
 
 function integerInRange(
   value: unknown,
@@ -196,6 +205,18 @@ export const positiveResourceCost = (
 ): PositiveResourceCost =>
   positiveInteger(value, 'Resource cost') as PositiveResourceCost;
 
+export function positiveResourceRecoveryAmount(
+  value: unknown,
+  maximum: PositiveResourceMaximum,
+): PositiveResourceRecoveryAmount {
+  return integerInRange(
+    value,
+    1,
+    maximum,
+    'Resource recovery amount',
+  ) as PositiveResourceRecoveryAmount;
+}
+
 export function encounterResourceCap(
   value: unknown,
   poolMaximum: PositiveResourceMaximum,
@@ -283,6 +304,17 @@ export const unmodelledIssueId = (value: unknown): UnmodelledIssueId =>
   nonemptyKey(value, 'Unmodelled issue ID') as UnmodelledIssueId;
 export const sourceStableKey = (value: unknown): SourceStableKey =>
   nonemptyKey(value, 'Source stable key') as SourceStableKey;
+export const saveSuccessClauseId = (value: unknown): SaveSuccessClauseId =>
+  nonemptyKey(value, 'Save-success clause ID') as SaveSuccessClauseId;
+export const expandedCriticalMinimumRoll = (
+  value: unknown,
+): ExpandedCriticalMinimumRoll =>
+  integerInRange(
+    value,
+    2,
+    19,
+    'Expanded critical minimum roll',
+  ) as ExpandedCriticalMinimumRoll;
 
 export const BUNDLED_SRD_5_2_1_PATH =
   'docs/srd/full/srd-5.2.1.txt' as BundledSrdPath;
@@ -598,6 +630,17 @@ export type AttackDamageInstance = {
   readonly components: NonEmptyReadonlyArray<AttackDamageComponent>;
 };
 
+export type CriticalHitRule =
+  | {
+      readonly kind: 'natural_20';
+      readonly evidence: PublicSourceRef;
+    }
+  | {
+      readonly kind: 'expanded_range';
+      readonly minimum_roll: ExpandedCriticalMinimumRoll;
+      readonly evidence: PublicSourceRef;
+    };
+
 export type AttackRollEvent = {
   readonly kind: 'attack_roll';
   readonly event_id: RoutineEventId;
@@ -605,10 +648,7 @@ export type AttackRollEvent = {
   readonly attack_bonus: AttackRollModifier;
   readonly frequency: EventFrequency;
   readonly duration: InstantaneousDuration;
-  readonly critical: {
-    readonly kind: 'natural_20';
-    readonly evidence: PublicSourceRef;
-  };
+  readonly critical: CriticalHitRule;
   readonly damage: NonEmptyReadonlyArray<AttackDamageInstance>;
 };
 
@@ -676,7 +716,25 @@ export type ResourceGuardedEvent = {
 };
 
 export type RoundEvent = AtomicRoundEvent | ResourceGuardedEvent;
-export type ResourceRecovery = 'short_rest' | 'long_rest';
+export type RestKind = 'short_rest' | 'long_rest';
+export type ResourceRecoveryRule =
+  | { readonly kind: 'none' }
+  | {
+      readonly kind: 'fixed';
+      readonly amount: PositiveResourceRecoveryAmount;
+    }
+  | { readonly kind: 'all' };
+
+/**
+ * Resource recovery is a pair of independently sourced rest rules. This shape
+ * directly represents the repeated bundled-SRD rule used by Rage and Channel
+ * Divinity: recover one use on a Short Rest and all uses on a Long Rest.
+ */
+export type ResourceRecovery = {
+  readonly short_rest: ResourceRecoveryRule;
+  readonly long_rest: ResourceRecoveryRule;
+  readonly evidence: PublicSourceRef;
+};
 
 export type SimResourcePool = {
   readonly id: SimResourceId;
@@ -684,6 +742,28 @@ export type SimResourcePool = {
   readonly maximum: PositiveResourceMaximum;
   readonly recovery: ResourceRecovery;
 };
+
+export function recoveredResourceUnits(
+  pool: SimResourcePool,
+  rest: RestKind,
+  expendedUnits: unknown,
+): number {
+  const expended = integerInRange(
+    expendedUnits,
+    0,
+    pool.maximum,
+    'Expended resource units',
+  );
+  const rule = pool.recovery[rest];
+  switch (rule.kind) {
+    case 'none':
+      return 0;
+    case 'fixed':
+      return Math.min(rule.amount, expended);
+    case 'all':
+      return expended;
+  }
+}
 
 export type RoundPlan = {
   readonly round: EncounterRoundOrdinal;
@@ -739,11 +819,18 @@ export type ModeledMechanic =
       readonly pool: SimResourcePool;
     };
 
+declare const damageNeutralityEvidenceBrand: unique symbol;
+export type DamageNeutralityEvidence = {
+  readonly mechanic: SourceRef;
+  readonly evidence: PublicSourceRef;
+  readonly [damageNeutralityEvidenceBrand]: true;
+};
+
 export type CatalogMechanicCoverage =
   | { readonly status: 'modeled'; readonly mechanic: ModeledMechanic }
   | {
       readonly status: 'confirmed_damage_neutral';
-      readonly evidence: PublicSourceRef;
+      readonly proof: DamageNeutralityEvidence;
     }
   | {
       readonly status: 'unsupported_damage_relevant';
@@ -758,7 +845,7 @@ export type EvaluatedMechanicCoverage =
     }
   | {
       readonly status: 'confirmed_damage_neutral';
-      readonly evidence: PublicSourceRef;
+      readonly proof: DamageNeutralityEvidence;
     }
   | {
       readonly status: 'confirmed_irrelevant_to_routine';

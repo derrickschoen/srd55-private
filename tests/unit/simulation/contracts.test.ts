@@ -1,7 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { damageType } from '../../../src/domain/enums';
-import type { CharacterId, CharacterRevision } from '../../../src/domain/ids';
+import type {
+  CharacterId,
+  CharacterRevision,
+  ContentKey,
+} from '../../../src/domain/ids';
 import {
   BUNDLED_SRD_5_2_1_PATH,
   PROJECT_OWNED_SOURCE_LICENSE_BY_PATH,
@@ -12,12 +16,18 @@ import {
   expectedEventDamage,
   expectedRoundDamage,
   positiveResourceMaximum,
+  positiveResourceRecoveryAmount,
   probability,
   projectOwnedSourceLicense,
   projectOwnedSourcePath,
   restCadence,
+  recoveredResourceUnits,
+  simResourceId,
+  sourceStableKey,
   type DprRequestContext,
   type DprSimulationOptions,
+  type SimResourcePool,
+  type SourceRef,
 } from '../../../src/simulation/contracts';
 import {
   bundledSrdSourceRef,
@@ -100,6 +110,35 @@ describe('DPR branded constructors', () => {
     expect(() => encounterResourceCap(4, maximum)).toThrow();
   });
 
+  it('represents Rage one-use Short Rest and all-use Long Rest recovery', () => {
+    const maximum = positiveResourceMaximum(2);
+    const rageSource: SourceRef = {
+      kind: 'catalog_content',
+      content_key: '2024:barbarian-rage' as ContentKey,
+      stable_key: sourceStableKey('srd-5.2.1:class:barbarian:rage'),
+    };
+    const rage: SimResourcePool = {
+      id: simResourceId('barbarian:rage'),
+      source: rageSource,
+      maximum,
+      recovery: {
+        short_rest: {
+          kind: 'fixed',
+          amount: positiveResourceRecoveryAmount(1, maximum),
+        },
+        long_rest: { kind: 'all' },
+        // Bundled SRD 5.2.1 lines 1767-1770: one use on a Short Rest, all on a Long Rest.
+        evidence: bundledSrdSourceRef('Level 1: Rage'),
+      },
+    };
+    expect(recoveredResourceUnits(rage, 'short_rest', 2)).toBe(1);
+    expect(recoveredResourceUnits(rage, 'long_rest', 2)).toBe(2);
+    expect(recoveredResourceUnits(rage, 'short_rest', 0)).toBe(0);
+    expect(() => positiveResourceRecoveryAmount(3, maximum)).toThrow(
+      'Resource recovery amount must be an integer from 1 to 2',
+    );
+  });
+
   it('accepts only registered repository-relative project-owned sources', () => {
     const sourcePath = projectOwnedSourcePath('src/simulation/contracts.ts');
     expect(projectOwnedSourceLicense(sourcePath)).toBe('MIT');
@@ -143,6 +182,16 @@ describe('DPR request parsing', () => {
     expect(parsed.settings.target.damage_responses[1]?.damage_type).toBe(
       'Chronal',
     );
+  });
+
+  it('permits an empty target damage-response array as an explicit unknown', () => {
+    const input = cloneInput();
+    const target = (input.settings as Record<string, unknown>)
+      .target as Record<string, unknown>;
+    target.damage_responses = [];
+    expect(
+      parseDprSimulationRequest(input).settings.target.damage_responses,
+    ).toEqual([]);
   });
 
   it('rejects unknown fields at every envelope level', () => {
@@ -405,6 +454,85 @@ describe('coverage vocabularies and bundled provenance', () => {
       .toBe('Advantage/Disadvantage');
     expect(publicProbabilityCoverageManifest.save_half_damage.heading)
       .toBe('Half Damage');
+  });
+
+  it('enumerates every bundled spell save whose outcome changes numeric damage', () => {
+    const extract = readFileSync(
+      'docs/srd/source/spell-descriptions.txt',
+      'utf8',
+    );
+    const lines = extract.split('\n');
+    const metadata = /^\s*(?:Level [1-9] (?:Abjuration|Conjuration|Divination|Enchantment|Evocation|Illusion|Necromancy|Transmutation)|(?:Abjuration|Conjuration|Divination|Enchantment|Evocation|Illusion|Necromancy|Transmutation) Cantrip) \(/u;
+    const pageMarker = /^=== SRD/u;
+    const starts = lines.flatMap((line, index) => metadata.test(line) ? [index] : []);
+    const previousContent = (before: number): number => {
+      for (let index = before - 1; index >= 0; index -= 1) {
+        const line = lines[index] ?? '';
+        if (line.trim() !== '' && !pageMarker.test(line)) {
+          return index;
+        }
+      }
+      throw new Error('Spell metadata has no preceding heading.');
+    };
+    const sourceDerived = new Set<string>();
+    const descriptions = new Map<string, string>();
+    for (const [position, start] of starts.entries()) {
+      const nameIndex = previousContent(start);
+      const end = position + 1 < starts.length
+        ? previousContent(starts[position + 1] as number)
+        : lines.length;
+      const body = lines.slice(start, end)
+        .filter((line) => !pageMarker.test(line))
+        .join(' ')
+        .replace(/-\s+/gu, '')
+        .replace(/\s+/gu, ' ');
+      const heading = (lines[nameIndex] ?? '').trim();
+      descriptions.set(heading, body);
+      const hasHalfDamageSuccess =
+        /half (?:as much|the initial) damage|half damage/iu.test(body);
+      const hasNoDamageSuccess =
+        /saving throw or take [^.]{0,180}damage/iu.test(body) ||
+        /saving throw\. On a failed save,[^.]{0,180}(?:takes? [^.]{0,100}damage|damage)/iu.test(body);
+      if (hasHalfDamageSuccess || hasNoDamageSuccess) {
+        sourceDerived.add(heading);
+      }
+    }
+    const registered = new Set(
+      [...saveSuccessOutcomeEvidenceManifest.values()].map((clause) => {
+        if (clause.evidence.kind !== 'bundled_srd') {
+          throw new Error('Save clauses must cite bundled spell headings.');
+        }
+        return clause.evidence.heading as string;
+      }),
+    );
+    expect([...registered].sort()).toEqual([...sourceDerived].sort());
+    expect(registered).toContain('Burning Hands');
+    for (const clause of saveSuccessOutcomeEvidenceManifest.values()) {
+      if (clause.evidence.kind !== 'bundled_srd') {
+        throw new Error('Save clauses must cite bundled spell headings.');
+      }
+      const body = descriptions.get(clause.evidence.heading as string);
+      expect(body, clause.evidence.heading).toBeDefined();
+      switch (clause.kind) {
+        case 'half':
+          expect(
+            /half (?:as much|the initial) damage|half damage/iu.test(body ?? ''),
+            clause.evidence.heading,
+          ).toBe(true);
+          break;
+        case 'none':
+          expect(
+            /saving throw or take [^.]{0,180}damage/iu.test(body ?? '') ||
+              /saving throw\. On a failed save,[^.]{0,180}(?:takes? [^.]{0,100}damage|damage)/iu.test(body ?? ''),
+            clause.evidence.heading,
+          ).toBe(true);
+          break;
+        case 'sourced_damage':
+          expect(clause.evidence.heading).toBe('Vitriolic Sphere');
+          expect(body).toContain('half the initial damage only');
+          break;
+      }
+    }
   });
 
   it('checks bundled headings and still accepts legitimate proof references', () => {

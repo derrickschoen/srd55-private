@@ -5,6 +5,7 @@ import {
   attackRollModifier,
   damageFlatModifier,
   damageRollTotal,
+  expandedCriticalMinimumRoll,
   positiveDiceCount,
   routineEventId,
   saveDifficultyClass,
@@ -21,6 +22,7 @@ import {
   type TargetDamageResponse,
 } from '../../../src/simulation/contracts';
 import {
+  expandedCriticalHitEvidenceManifest,
   publicProbabilityCoverageManifest,
   reviewedSaveEffectStableKeys,
   reviewedSaveSuccessClauses,
@@ -28,6 +30,7 @@ import {
 import {
   applyDamageResponse,
   attackRollProbabilities,
+  composeRoundDamageFolds,
   enumerateDicePool,
   foldAttackEvent,
   foldAutomaticDamageEvent,
@@ -71,6 +74,7 @@ function independentlyEnumeratedAttack(
   bonus: number,
   armorClass: number,
   state: RollState,
+  criticalMinimum = 20,
 ): { hit: number; critical: number; miss: number } {
   const rolls = rawD20Outcomes(state);
   let hits = 0;
@@ -79,7 +83,7 @@ function independentlyEnumeratedAttack(
     if (face === 1) {
       continue;
     }
-    if (face === 20) {
+    if (face >= criticalMinimum) {
       hits += 1;
       criticals += 1;
       continue;
@@ -177,6 +181,30 @@ describe('independently derived d20 probabilities', () => {
         'normal',
       ),
     ).toEqual({ hit: 0.05, critical: 0.05, miss: 0.95 });
+  });
+
+  it('matches independent enumeration for Champion 19-20 and 18-20 ranges', () => {
+    for (const threshold of [19, 18] as const) {
+      for (const state of ['normal', 'advantage', 'disadvantage'] as const) {
+        for (const armorClass of [0, 15, 50]) {
+          const expected = independentlyEnumeratedAttack(
+            5,
+            armorClass,
+            state,
+            threshold,
+          );
+          const actual = attackRollProbabilities(
+            attackRollModifier(5),
+            targetArmorClass(armorClass),
+            state,
+            expandedCriticalMinimumRoll(threshold),
+          );
+          expect(actual.hit).toBeCloseTo(expected.hit, 12);
+          expect(actual.critical).toBeCloseTo(expected.critical, 12);
+          expect(actual.miss).toBeCloseTo(expected.miss, 12);
+        }
+      }
+    }
   });
 
   it('matches independent save enumeration without importing attack auto outcomes', () => {
@@ -343,6 +371,60 @@ describe('critical-hit and trigger folds', () => {
     }
     expect(result.expected_damage).toBeCloseTo((18 * 6.5 + 14 + 2) / 20, 12);
   });
+
+  it('evaluates both sourced Champion expanded ranges at their exact rates', () => {
+    // Bundled SRD 5.2.1 lines 2979-2982 give 19-20; lines 3001-3004 give 18-20.
+    for (const [threshold, ordinaryFaces, criticalFaces] of [
+      [19, 17, 2],
+      [18, 16, 3],
+    ] as const) {
+      const evidence = expandedCriticalHitEvidenceManifest.get(threshold);
+      if (evidence === undefined) {
+        throw new Error(`Missing threshold ${String(threshold)} evidence.`);
+      }
+      const event: AttackRollEvent = {
+        ...ordinaryAttack(),
+        critical: {
+          kind: 'expanded_range',
+          minimum_roll: expandedCriticalMinimumRoll(threshold),
+          evidence,
+        },
+      };
+      const result = foldAttackEvent(event, {
+        armor_class: targetArmorClass(0),
+        roll_state: 'normal',
+        damage_responses: normalSlashing,
+      });
+      expect(result.status).toBe('available');
+      if (result.status !== 'available') {
+        throw new Error(result.reason);
+      }
+      expect(result.hit_probability).toBe(0.95);
+      expect(result.critical_probability).toBe(criticalFaces / 20);
+      expect(result.expected_damage).toBeCloseTo(
+        (ordinaryFaces * 6.5 + criticalFaces * 10) / 20,
+        12,
+      );
+    }
+  });
+
+  it('refuses an expanded critical range without its own citation', () => {
+    const event: AttackRollEvent = {
+      ...ordinaryAttack(),
+      critical: {
+        kind: 'expanded_range',
+        minimum_roll: expandedCriticalMinimumRoll(19),
+        evidence: publicProbabilityCoverageManifest.critical_hit,
+      },
+    };
+    const result = foldAttackEvent(event, {
+      armor_class: targetArmorClass(0),
+      roll_state: 'normal',
+      damage_responses: normalSlashing,
+    });
+    expect(result.status).toBe('unavailable');
+    expect(result).not.toHaveProperty('expected_damage');
+  });
 });
 
 describe('damage responses and save outcomes', () => {
@@ -447,6 +529,37 @@ describe('damage responses and save outcomes', () => {
     expect(result.expected_damage).toBe(1.75);
   });
 
+  it('evaluates bundled Burning Hands instead of refusing the sourced spell', () => {
+    const clause = reviewedSaveSuccessClauses.burning_hands;
+    const base = saveEvent({ kind: 'half', evidence: clause.evidence });
+    const event: SavingThrowDamageEvent = {
+      ...base,
+      source: { ...base.source, stable_key: clause.effect_stable_key },
+      damage_on_failed_save: [diceInstance(3, 6)],
+    };
+    const result = foldSavingThrowEvent(event, {
+      save_bonus: targetSaveBonus(0),
+      damage_responses: normalSlashing,
+    });
+    expect(result.status).toBe('available');
+    if (result.status !== 'available') {
+      throw new Error(result.reason);
+    }
+    // DC 11 gives equal save branches. 3d6 averages 10.5; floor(3d6/2) averages 5.
+    expect(result.expected_damage).toBeCloseTo(7.75, 12);
+
+    const unrelated: SavingThrowDamageEvent = {
+      ...event,
+      source,
+    };
+    const refused = foldSavingThrowEvent(unrelated, {
+      save_bonus: targetSaveBonus(0),
+      damage_responses: normalSlashing,
+    });
+    expect(refused.status).toBe('unavailable');
+    expect(refused).not.toHaveProperty('expected_damage');
+  });
+
   it('orders save-half adjustment before resistance on every odd outcome', () => {
     const result = foldSavingThrowEvent(
       saveEvent({
@@ -499,6 +612,7 @@ describe('damage responses and save outcomes', () => {
     expect(result.status).toBe('unavailable');
     if (result.status === 'unavailable') {
       expect(result.reason).toContain('none');
+      expect(result.failed_save_probability).toBe(0.5);
       expect(result).not.toHaveProperty('expected_damage');
     }
   });
@@ -518,7 +632,7 @@ describe('damage responses and save outcomes', () => {
     }
   });
 
-  it('refuses to invent a missing damage response', () => {
+  it('returns unavailable for a publicly constructible missing damage response', () => {
     const event: AutomaticDamageEvent = {
       kind: 'automatic_damage',
       event_id: routineEventId('automatic:missing-response'),
@@ -527,8 +641,20 @@ describe('damage responses and save outcomes', () => {
       duration: { kind: 'instantaneous' },
       damage: [diceInstance(1, 4)],
     };
-    expect(() => foldAutomaticDamageEvent(event, [])).toThrow(
-      'exactly one target response',
-    );
+    const missing = foldAutomaticDamageEvent(event, []);
+    expect(missing.status).toBe('unavailable');
+    expect(missing).not.toHaveProperty('expected_damage');
+    const composed = composeRoundDamageFolds([
+      foldAutomaticDamageEvent(event, normalSlashing),
+      missing,
+    ]);
+    expect(composed.status).toBe('unavailable');
+    expect(composed).not.toHaveProperty('expected_damage');
+
+    const sourced = foldAutomaticDamageEvent(event, normalSlashing);
+    expect(sourced.status).toBe('available');
+    if (sourced.status === 'available') {
+      expect(sourced.expected_damage).toBe(2.5);
+    }
   });
 });

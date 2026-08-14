@@ -4,6 +4,7 @@
  */
 import type {
   AttackDamageComponent,
+  CatalogMechanicCoverage,
   CharacterAttackRoutineId,
   EncounterResourceCap,
   EncounterRoundCount,
@@ -51,3 +52,4 @@ export const ordinaryDiceOptOut: AttackDamageComponent = { kind: 'dice', pool: {
 export const forgedProbability: Probability = probability(0.5) as ExpectedEventDamage;
 export const selfAssertedProjectLicense: PublicSourceRef = { kind: 'project_owned', path: projectOwnedSourcePath('src/simulation/contracts.ts'), license: 'MIT' };
 export const uncheckedBundledHeading: PublicSourceRef = { kind: 'bundled_srd', path: BUNDLED_SRD_5_2_1_PATH, heading: 'This Heading Does Not Exist' };
+export const unboundNeutrality: CatalogMechanicCoverage = { status: 'confirmed_damage_neutral', evidence: { kind: 'project_owned', path: projectOwnedSourcePath('src/simulation/contracts.ts') } };

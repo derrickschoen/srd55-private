@@ -18,9 +18,11 @@ import {
 } from '../../../src/simulation/contracts';
 import {
   bundledSrdSourceRef,
+  damageNeutralityEvidence,
   publicProbabilityCoverageManifest,
   reviewedSaveEffectStableKeys,
   reviewedSaveSuccessClauses,
+  reviewedDamageNeutralMechanicStableKeys,
 } from '../../../src/simulation/coverage';
 import {
   composeRoundDamageFolds,
@@ -286,25 +288,31 @@ describe('confirmed review findings after repair', () => {
     expect(refusal).toContain('not a reviewed literal heading');
   });
 
-  it('F4 negative control accepts a real checked heading as damage-neutral proof', () => {
-    const evidence = bundledSrdSourceRef('Critical Hits');
+  it('R3 F2 binds damage-neutral proof to the exact classified mechanic', () => {
+    const mechanic = {
+      ...source,
+      stable_key:
+        reviewedDamageNeutralMechanicStableKeys.fireball_flammable_objects,
+    };
+    const evidence = bundledSrdSourceRef('Fireball');
+    const proof = damageNeutralityEvidence(mechanic, evidence);
     const coverage: CatalogMechanicCoverage = {
       status: 'confirmed_damage_neutral',
-      evidence,
+      proof,
     };
     expect(coverage).toEqual({
       status: 'confirmed_damage_neutral',
-      evidence: publicProbabilityCoverageManifest.critical_hit,
+      proof: { mechanic, evidence },
     });
-    const result = foldAttackEvent(attackEvent(evidence), {
-      armor_class: targetArmorClass(0),
-      roll_state: 'normal',
-      damage_responses: responses,
-    });
-    expect(result.status).toBe('available');
-    if (result.status !== 'available') {
-      throw new Error(result.reason);
-    }
-    expect(result.expected_damage).toBeCloseTo(3.5, 12);
+  });
+
+  it('R3 F2 refuses Fireball proof for a different mechanic', () => {
+    // Round 2's accepted negative control used Critical Hits as if citation
+    // existence proved neutrality. That was the wrong behavior: relevance is
+    // now checked against the mechanic stable key before a proof can be minted.
+    expect(() => damageNeutralityEvidence(
+      source,
+      bundledSrdSourceRef('Fireball'),
+    )).toThrow('does not establish neutrality for this mechanic');
   });
 });

@@ -3,11 +3,15 @@ import type { SheetWarning } from '../rules/sheet';
 import bundledSrd521 from '../../docs/srd/full/srd-5.2.1.txt?raw';
 import {
   BUNDLED_SRD_5_2_1_PATH,
+  saveSuccessClauseId,
   sourceStableKey,
   unmodelledIssueKinds,
   unmodelledIssueId,
   type BundledSrdHeading,
+  type CriticalHitRule,
+  type DamageNeutralityEvidence,
   type PublicSourceRef,
+  type SaveSuccessClauseId,
   type SaveSuccessOutcome,
   type SourceRef,
   type SourceStableKey,
@@ -188,15 +192,78 @@ const reviewedBundledSrdHeadings = [
   'Acid Splash',
   'Advantage/Disadvantage',
   'Attack Rolls',
+  'Befuddlement',
+  'Black Tentacles',
+  'Blade Barrier',
+  'Blight',
+  'Burning Hands',
+  'Call Lightning',
+  'Chain Lightning',
+  'Circle of Death',
+  'Cloudkill',
+  'Cone of Cold',
+  'Conjure Animals',
+  'Conjure Celestial',
+  'Conjure Woodland Beings',
+  'Contagion',
+  'Control Water',
   'Critical Hits',
   'Damage Rolls',
+  'Delayed Blast Fireball',
+  'Disintegrate',
+  'Dissonant Whispers',
+  'Dragon’s Breath',
+  'Dream',
+  'Earthquake',
+  'Faithful Hound',
+  'Finger of Death',
   'Fireball',
+  'Fire Storm',
+  'Flame Strike',
+  'Flaming Sphere',
+  'Freezing Sphere',
+  'Glyph of Warding',
+  'Guardian of Faith',
   'Half Damage',
+  'Harm',
+  'Hellish Rebuke',
+  'Ice Knife',
+  'Ice Storm',
+  'Incendiary Cloud',
+  'Inflict Wounds',
   'Immunity',
+  'Insect Plague',
+  'Level 1: Rage',
+  'Level 3: Improved Critical',
+  'Level 15: Superior Critical',
+  'Lightning Bolt',
+  'Meteor Swarm',
+  'Mind Spike',
+  'Moonbeam',
   'Order of Application',
+  'Phantasmal Killer',
+  'Prismatic Spray',
+  'Prismatic Wall',
   'Resistance and Vulnerability',
   'Rolling 20 or 1',
+  'Sacred Flame',
   'Saving Throws',
+  'Shatter',
+  'Spirit Guardians',
+  'Storm of Vengeance',
+  'Summon Dragon',
+  'Sunbeam',
+  'Sunburst',
+  'Symbol',
+  'Thunderwave',
+  'Tsunami',
+  'Vicious Mockery',
+  'Vitriolic Sphere',
+  'Wall of Fire',
+  'Wall of Ice',
+  'Wall of Thorns',
+  'Weird',
+  'Wind Wall',
 ] as const;
 
 type ReviewedBundledSrdHeading =
@@ -258,26 +325,114 @@ export const publicProbabilityCoverageManifest = {
   immunity: bundledHeading('Immunity'),
 } as const satisfies Record<PublicProbabilityMechanicKind, PublicSourceRef>;
 
-export const reviewedSaveEffectStableKeys = {
-  acid_splash: sourceStableKey('srd-5.2.1:spell:acid-splash'),
-  fireball: sourceStableKey('srd-5.2.1:spell:fireball'),
-} as const;
-
 type ReviewedSaveSuccessClause = {
+  readonly id: SaveSuccessClauseId;
+  readonly effect_stable_key: SourceStableKey;
   readonly kind: SaveSuccessOutcome['kind'];
   readonly evidence: PublicSourceRef;
 };
 
+function reviewedSaveClause(
+  key: string,
+  spellSlug: string,
+  heading: ReviewedBundledSrdHeading,
+  kind: SaveSuccessOutcome['kind'],
+): ReviewedSaveSuccessClause {
+  return {
+    id: saveSuccessClauseId(`srd-5.2.1:spell:${spellSlug}:save:${key}`),
+    effect_stable_key: sourceStableKey(`srd-5.2.1:spell:${spellSlug}`),
+    kind,
+    evidence: bundledHeading(heading),
+  };
+}
+
+/**
+ * Enumerated from all 339 bundled spell descriptions. The completeness test
+ * independently scans the verbatim spell extract for every save whose outcome
+ * changes numeric damage, then compares that source-derived set with this one.
+ * Enumeration is used because the success clause belongs to the individual
+ * spell (and, for multi-save spells, the individual save), not to a safe
+ * general rule that can be inferred from the spell's school or level.
+ */
 export const reviewedSaveSuccessClauses = {
-  acid_splash: {
-    kind: 'none',
-    evidence: bundledHeading('Acid Splash'),
-  },
-  fireball: {
-    kind: 'half',
-    evidence: bundledHeading('Fireball'),
-  },
+  acid_splash: reviewedSaveClause('damage', 'acid-splash', 'Acid Splash', 'none'),
+  befuddlement: reviewedSaveClause('damage', 'befuddlement', 'Befuddlement', 'half'),
+  black_tentacles: reviewedSaveClause('damage', 'black-tentacles', 'Black Tentacles', 'none'),
+  blade_barrier: reviewedSaveClause('damage', 'blade-barrier', 'Blade Barrier', 'half'),
+  blight: reviewedSaveClause('damage', 'blight', 'Blight', 'half'),
+  burning_hands: reviewedSaveClause('damage', 'burning-hands', 'Burning Hands', 'half'),
+  call_lightning: reviewedSaveClause('damage', 'call-lightning', 'Call Lightning', 'half'),
+  chain_lightning: reviewedSaveClause('damage', 'chain-lightning', 'Chain Lightning', 'half'),
+  circle_of_death: reviewedSaveClause('damage', 'circle-of-death', 'Circle of Death', 'half'),
+  cloudkill: reviewedSaveClause('damage', 'cloudkill', 'Cloudkill', 'half'),
+  cone_of_cold: reviewedSaveClause('damage', 'cone-of-cold', 'Cone of Cold', 'half'),
+  conjure_animals: reviewedSaveClause('damage', 'conjure-animals', 'Conjure Animals', 'none'),
+  conjure_celestial: reviewedSaveClause('damage', 'conjure-celestial', 'Conjure Celestial', 'half'),
+  conjure_woodland_beings: reviewedSaveClause('damage', 'conjure-woodland-beings', 'Conjure Woodland Beings', 'half'),
+  contagion: reviewedSaveClause('damage', 'contagion', 'Contagion', 'none'),
+  control_water: reviewedSaveClause('damage', 'control-water', 'Control Water', 'half'),
+  delayed_blast_fireball: reviewedSaveClause('damage', 'delayed-blast-fireball', 'Delayed Blast Fireball', 'half'),
+  disintegrate: reviewedSaveClause('damage', 'disintegrate', 'Disintegrate', 'none'),
+  dissonant_whispers: reviewedSaveClause('damage', 'dissonant-whispers', 'Dissonant Whispers', 'half'),
+  dragons_breath: reviewedSaveClause('damage', 'dragon-s-breath', 'Dragon’s Breath', 'half'),
+  dream: reviewedSaveClause('damage', 'dream', 'Dream', 'none'),
+  earthquake: reviewedSaveClause('collapse-damage', 'earthquake', 'Earthquake', 'half'),
+  faithful_hound: reviewedSaveClause('damage', 'faithful-hound', 'Faithful Hound', 'none'),
+  finger_of_death: reviewedSaveClause('damage', 'finger-of-death', 'Finger of Death', 'half'),
+  fireball: reviewedSaveClause('damage', 'fireball', 'Fireball', 'half'),
+  fire_storm: reviewedSaveClause('damage', 'fire-storm', 'Fire Storm', 'half'),
+  flame_strike: reviewedSaveClause('damage', 'flame-strike', 'Flame Strike', 'half'),
+  flaming_sphere: reviewedSaveClause('damage', 'flaming-sphere', 'Flaming Sphere', 'half'),
+  freezing_sphere: reviewedSaveClause('damage', 'freezing-sphere', 'Freezing Sphere', 'half'),
+  glyph_of_warding: reviewedSaveClause('explosive-runes', 'glyph-of-warding', 'Glyph of Warding', 'half'),
+  guardian_of_faith: reviewedSaveClause('damage', 'guardian-of-faith', 'Guardian of Faith', 'half'),
+  harm: reviewedSaveClause('damage', 'harm', 'Harm', 'half'),
+  hellish_rebuke: reviewedSaveClause('damage', 'hellish-rebuke', 'Hellish Rebuke', 'half'),
+  ice_knife: reviewedSaveClause('explosion-damage', 'ice-knife', 'Ice Knife', 'none'),
+  ice_storm: reviewedSaveClause('damage', 'ice-storm', 'Ice Storm', 'half'),
+  incendiary_cloud: reviewedSaveClause('damage', 'incendiary-cloud', 'Incendiary Cloud', 'half'),
+  inflict_wounds: reviewedSaveClause('damage', 'inflict-wounds', 'Inflict Wounds', 'half'),
+  insect_plague: reviewedSaveClause('damage', 'insect-plague', 'Insect Plague', 'half'),
+  lightning_bolt: reviewedSaveClause('damage', 'lightning-bolt', 'Lightning Bolt', 'half'),
+  meteor_swarm: reviewedSaveClause('damage', 'meteor-swarm', 'Meteor Swarm', 'half'),
+  mind_spike: reviewedSaveClause('damage', 'mind-spike', 'Mind Spike', 'half'),
+  moonbeam: reviewedSaveClause('damage', 'moonbeam', 'Moonbeam', 'half'),
+  phantasmal_killer_initial: reviewedSaveClause('initial-damage', 'phantasmal-killer', 'Phantasmal Killer', 'half'),
+  phantasmal_killer_repeat: reviewedSaveClause('repeat-damage', 'phantasmal-killer', 'Phantasmal Killer', 'none'),
+  prismatic_spray: reviewedSaveClause('damaging-rays', 'prismatic-spray', 'Prismatic Spray', 'half'),
+  prismatic_wall: reviewedSaveClause('damaging-layers', 'prismatic-wall', 'Prismatic Wall', 'half'),
+  sacred_flame: reviewedSaveClause('damage', 'sacred-flame', 'Sacred Flame', 'none'),
+  shatter: reviewedSaveClause('damage', 'shatter', 'Shatter', 'half'),
+  spirit_guardians: reviewedSaveClause('damage', 'spirit-guardians', 'Spirit Guardians', 'half'),
+  storm_of_vengeance_initial: reviewedSaveClause('initial-thunder-damage', 'storm-of-vengeance', 'Storm of Vengeance', 'none'),
+  storm_of_vengeance_lightning: reviewedSaveClause('lightning-damage', 'storm-of-vengeance', 'Storm of Vengeance', 'half'),
+  summon_dragon: reviewedSaveClause('breath-weapon', 'summon-dragon', 'Summon Dragon', 'half'),
+  sunbeam: reviewedSaveClause('damage', 'sunbeam', 'Sunbeam', 'half'),
+  sunburst: reviewedSaveClause('damage', 'sunburst', 'Sunburst', 'half'),
+  symbol: reviewedSaveClause('death-damage', 'symbol', 'Symbol', 'half'),
+  thunderwave: reviewedSaveClause('damage', 'thunderwave', 'Thunderwave', 'half'),
+  tsunami_initial: reviewedSaveClause('initial-damage', 'tsunami', 'Tsunami', 'half'),
+  tsunami_ongoing: reviewedSaveClause('ongoing-damage', 'tsunami', 'Tsunami', 'none'),
+  vicious_mockery: reviewedSaveClause('damage', 'vicious-mockery', 'Vicious Mockery', 'none'),
+  vitriolic_sphere: reviewedSaveClause('damage', 'vitriolic-sphere', 'Vitriolic Sphere', 'sourced_damage'),
+  wall_of_fire: reviewedSaveClause('damage', 'wall-of-fire', 'Wall of Fire', 'half'),
+  wall_of_ice_initial: reviewedSaveClause('initial-damage', 'wall-of-ice', 'Wall of Ice', 'half'),
+  wall_of_ice_frigid_air: reviewedSaveClause('frigid-air-damage', 'wall-of-ice', 'Wall of Ice', 'half'),
+  wall_of_thorns_piercing: reviewedSaveClause('piercing-damage', 'wall-of-thorns', 'Wall of Thorns', 'half'),
+  wall_of_thorns_slashing: reviewedSaveClause('slashing-damage', 'wall-of-thorns', 'Wall of Thorns', 'half'),
+  weird_initial: reviewedSaveClause('initial-damage', 'weird', 'Weird', 'half'),
+  weird_repeat: reviewedSaveClause('repeat-damage', 'weird', 'Weird', 'none'),
+  wind_wall: reviewedSaveClause('damage', 'wind-wall', 'Wind Wall', 'half'),
 } as const satisfies Record<string, ReviewedSaveSuccessClause>;
+
+export const reviewedSaveEffectStableKeys = Object.fromEntries(
+  Object.entries(reviewedSaveSuccessClauses).map(([key, clause]) => [
+    key,
+    clause.effect_stable_key,
+  ]),
+) as {
+  readonly [Key in keyof typeof reviewedSaveSuccessClauses]: SourceStableKey;
+};
 
 /**
  * Reviewed success clauses keyed by the effect's own stable identity. Acid
@@ -287,12 +442,14 @@ export const reviewedSaveSuccessClauses = {
  * particular effect.
  */
 export const saveSuccessOutcomeEvidenceManifest: ReadonlyMap<
-  SourceStableKey,
+  SaveSuccessClauseId,
   ReviewedSaveSuccessClause
-> = new Map<SourceStableKey, ReviewedSaveSuccessClause>([
-  [reviewedSaveEffectStableKeys.acid_splash, reviewedSaveSuccessClauses.acid_splash],
-  [reviewedSaveEffectStableKeys.fireball, reviewedSaveSuccessClauses.fireball],
-]);
+> = new Map(
+  Object.values(reviewedSaveSuccessClauses).map((clause) => [
+    clause.id,
+    clause,
+  ]),
+);
 
 function samePublicSource(left: PublicSourceRef, right: PublicSourceRef): boolean {
   if (left.kind !== right.kind || left.path !== right.path) {
@@ -311,12 +468,31 @@ export function saveSuccessOutcomeHasEvidence(
   effect: SourceRef,
   outcome: SaveSuccessOutcome,
 ): boolean {
-  const expected = saveSuccessOutcomeEvidenceManifest.get(
-    effect.stable_key,
-  );
-  return expected !== undefined &&
+  return [...saveSuccessOutcomeEvidenceManifest.values()].some((expected) =>
+    expected.effect_stable_key === effect.stable_key &&
     expected.kind === outcome.kind &&
-    samePublicSource(outcome.evidence, expected.evidence);
+    samePublicSource(outcome.evidence, expected.evidence));
+}
+
+export const expandedCriticalHitEvidenceManifest: ReadonlyMap<
+  number,
+  PublicSourceRef
+> = new Map([
+  [19, bundledHeading('Level 3: Improved Critical')],
+  [18, bundledHeading('Level 15: Superior Critical')],
+] as const);
+
+export function criticalHitRuleHasEvidence(rule: CriticalHitRule): boolean {
+  switch (rule.kind) {
+    case 'natural_20':
+      return criticalHitHasEvidence(rule.evidence);
+    case 'expanded_range': {
+      const expected = expandedCriticalHitEvidenceManifest.get(
+        rule.minimum_roll,
+      );
+      return expected !== undefined && samePublicSource(rule.evidence, expected);
+    }
+  }
 }
 
 export function criticalHitHasEvidence(evidence: PublicSourceRef): boolean {
@@ -324,6 +500,37 @@ export function criticalHitHasEvidence(evidence: PublicSourceRef): boolean {
     evidence,
     publicProbabilityCoverageManifest.critical_hit,
   );
+}
+
+export const reviewedDamageNeutralMechanicStableKeys = {
+  fireball_flammable_objects: sourceStableKey(
+    'srd-5.2.1:spell:fireball:flammable-objects',
+  ),
+} as const;
+
+const damageNeutralityEvidenceManifest = new Map([
+  [
+    reviewedDamageNeutralMechanicStableKeys.fireball_flammable_objects,
+    bundledHeading('Fireball'),
+  ],
+]);
+
+/**
+ * This constructor corrects a round-2 test that treated any real heading as
+ * damage-neutral proof. A proof is now minted only when its citation is the
+ * reviewed citation for the exact mechanic stable key being classified.
+ */
+export function damageNeutralityEvidence(
+  mechanic: SourceRef,
+  evidence: PublicSourceRef,
+): DamageNeutralityEvidence {
+  const expected = damageNeutralityEvidenceManifest.get(mechanic.stable_key);
+  if (expected === undefined || !samePublicSource(evidence, expected)) {
+    throw new TypeError(
+      'Damage-neutral evidence does not establish neutrality for this mechanic.',
+    );
+  }
+  return { mechanic, evidence } as DamageNeutralityEvidence;
 }
 
 // A set-equality assertion at runtime complements the `satisfies` compile gate.

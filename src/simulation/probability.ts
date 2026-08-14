@@ -15,6 +15,7 @@ import {
   type DamageRollTotal,
   type DicePool,
   type ExpectedEventDamage,
+  type ExpandedCriticalMinimumRoll,
   type NonEmptyReadonlyArray,
   type PublicSourceRef,
   type Probability,
@@ -25,7 +26,7 @@ import {
   type TargetSaveBonus,
 } from './contracts';
 import {
-  criticalHitHasEvidence,
+  criticalHitRuleHasEvidence,
   publicProbabilityCoverageManifest,
   saveSuccessOutcomeHasEvidence,
 } from './coverage';
@@ -50,7 +51,7 @@ export type DamageFoldContribution = {
   readonly expected_damage: ExpectedEventDamage;
 };
 
-export type DamageEventFold = {
+export type AvailableDamageEventFold = {
   readonly status: 'available';
   readonly expected_damage: ExpectedEventDamage;
   readonly contributions: readonly DamageFoldContribution[];
@@ -58,19 +59,23 @@ export type DamageEventFold = {
 
 export type UnavailableDamageEventFold = {
   readonly status: 'unavailable';
-  readonly evidence: PublicSourceRef;
+  readonly evidence: PublicSourceRef | null;
   readonly reason: string;
 };
 
+export type DamageEventFold =
+  | AvailableDamageEventFold
+  | UnavailableDamageEventFold;
+
 export type AttackEventFold =
-  | (DamageEventFold & {
+  | (AvailableDamageEventFold & {
       readonly hit_probability: Probability;
       readonly critical_probability: Probability;
     })
   | UnavailableDamageEventFold;
 
 export type SaveEventFold =
-  | (DamageEventFold & {
+  | (AvailableDamageEventFold & {
       readonly status: 'available';
       readonly failed_save_probability: Probability;
     })
@@ -319,6 +324,7 @@ export function attackRollProbabilities(
   attackBonus: AttackRollModifier,
   armorClass: TargetArmorClass,
   state: RollState,
+  criticalMinimumRoll: 20 | ExpandedCriticalMinimumRoll = 20,
 ): AttackRollProbabilities {
   const attackEvidence = publicProbabilityCoverageManifest.attack_roll;
   const naturalEvidence =
@@ -337,7 +343,7 @@ export function attackRollProbabilities(
     if (face === 1) {
       continue;
     }
-    if (face === 20) {
+    if (face >= criticalMinimumRoll) {
       hitWeight += weight;
       criticalWeight += weight;
       continue;
@@ -404,18 +410,38 @@ export function applyDamageResponse(
 function targetResponse(
   damageType: DamageType,
   responses: readonly TargetDamageResponse[],
-): DamageResponse {
+): DamageResponse | null {
   const matches = responses.filter(
     (candidate) => candidate.damage_type === damageType,
   );
-  if (matches.length !== 1) {
+  if (matches.length > 1) {
     throw new Error(
       `Expected exactly one target response for damage type ${damageType}.`,
     );
   }
-  return matches[0]?.response ?? (() => {
-    throw new Error('Unreachable missing damage response.');
-  })();
+  return matches[0]?.response ?? null;
+}
+
+function missingDamageResponse(
+  instances: readonly (DamageInstance | AttackDamageInstance)[],
+  responses: readonly TargetDamageResponse[],
+): DamageType | null {
+  for (const instance of instances) {
+    if (targetResponse(instance.damage_type, responses) === null) {
+      return instance.damage_type;
+    }
+  }
+  return null;
+}
+
+function unavailableDamageResponse(
+  damageType: DamageType,
+): UnavailableDamageEventFold {
+  return {
+    status: 'unavailable',
+    evidence: null,
+    reason: `The target response for damage type ${damageType} is unavailable.`,
+  };
 }
 
 function expectedDistributionDamage(
@@ -440,13 +466,15 @@ function foldOrdinaryInstances(
   instances: readonly DamageInstance[],
   responses: readonly TargetDamageResponse[],
   adjustment?: (total: DamageRollTotal) => DamageRollTotal,
-): DamageEventFold {
+): AvailableDamageEventFold {
   const contributions = instances.map((instance) => ({
     source: instance.source,
     damage_type: instance.damage_type,
     expected_damage: expectedDistributionDamage(
       distributionForDamageComponents(instance.components),
-      targetResponse(instance.damage_type, responses),
+      targetResponse(instance.damage_type, responses) ?? (() => {
+        throw new Error('Missing damage response was not preflighted.');
+      })(),
       adjustment,
     ),
   }));
@@ -465,6 +493,9 @@ function expectedAttackInstance(
   chances: AttackRollProbabilities,
 ): ExpectedEventDamage {
   const response = targetResponse(instance.damage_type, responses);
+  if (response === null) {
+    throw new Error('Missing damage response was not preflighted.');
+  }
   const ordinaryHitProbability = chances.hit - chances.critical;
   const missDamage = expectedDistributionDamage(
     distributionForAttackInstance(instance, 'miss'),
@@ -493,24 +524,27 @@ export function foldAttackEvent(
     readonly damage_responses: readonly TargetDamageResponse[];
   },
 ): AttackEventFold {
-  if (event.critical.kind !== 'natural_20') {
-    // This is a corrupt in-memory value that violates the closed domain type,
-    // not merely missing evidence. There is no alternate critical kind this
-    // stage can represent, so continuing would mean executing an impossible
-    // program rather than reporting an unavailable sourced clause.
-    throw new Error('Only the sourced natural-20 critical rule is modelled.');
-  }
-  if (!criticalHitHasEvidence(event.critical.evidence)) {
+  if (!criticalHitRuleHasEvidence(event.critical)) {
     return {
       status: 'unavailable',
       evidence: event.critical.evidence,
-      reason: 'The cited evidence does not establish the Critical Hits damage rule.',
+      reason: 'The cited evidence does not establish this critical-hit range.',
     };
+  }
+  const missingResponse = missingDamageResponse(
+    event.damage,
+    target.damage_responses,
+  );
+  if (missingResponse !== null) {
+    return unavailableDamageResponse(missingResponse);
   }
   const chances = attackRollProbabilities(
     event.attack_bonus,
     target.armor_class,
     target.roll_state,
+    event.critical.kind === 'natural_20'
+      ? 20
+      : event.critical.minimum_roll,
   );
   const contributions = event.damage.map((instance) => ({
     source: instance.source,
@@ -539,6 +573,13 @@ export function foldSavingThrowEvent(
     readonly damage_responses: readonly TargetDamageResponse[];
   },
 ): SaveEventFold {
+  // Validate the effect-bound clause before doing any probability arithmetic.
+  // The unavailable arm intentionally retains the independently useful save
+  // probability, but it is computed only after the citation has been checked.
+  const hasSuccessClauseEvidence = saveSuccessOutcomeHasEvidence(
+    event.source,
+    event.on_success,
+  );
   const successProbability = saveSuccessProbability(
     event.save_dc,
     target.save_bonus,
@@ -546,7 +587,7 @@ export function foldSavingThrowEvent(
   );
   const failedProbability = probability(1 - successProbability);
 
-  if (!saveSuccessOutcomeHasEvidence(event.source, event.on_success)) {
+  if (!hasSuccessClauseEvidence) {
     return {
       status: 'unavailable',
       failed_save_probability: failedProbability,
@@ -555,12 +596,26 @@ export function foldSavingThrowEvent(
     };
   }
 
+  const successDamage = event.on_success.kind === 'sourced_damage'
+    ? event.on_success.damage
+    : [];
+  const missingResponse = missingDamageResponse(
+    [...event.damage_on_failed_save, ...successDamage],
+    target.damage_responses,
+  );
+  if (missingResponse !== null) {
+    return {
+      ...unavailableDamageResponse(missingResponse),
+      failed_save_probability: failedProbability,
+    };
+  }
+
   const failure = foldOrdinaryInstances(
     event.damage_on_failed_save,
     target.damage_responses,
   );
 
-  let success: DamageEventFold;
+  let success: AvailableDamageEventFold;
   switch (event.on_success.kind) {
     case 'none':
       success = {
@@ -618,6 +673,10 @@ export function foldAutomaticDamageEvent(
   event: AutomaticDamageEvent,
   responses: readonly TargetDamageResponse[],
 ): DamageEventFold {
+  const missingResponse = missingDamageResponse(event.damage, responses);
+  if (missingResponse !== null) {
+    return unavailableDamageResponse(missingResponse);
+  }
   return foldOrdinaryInstances(event.damage, responses);
 }
 
@@ -647,7 +706,7 @@ export function composeRoundDamageFolds(
       failures: [firstFailure, ...remainingFailures],
     };
   }
-  const available = folds as readonly DamageEventFold[];
+  const available = folds as readonly AvailableDamageEventFold[];
   return {
     status: 'available',
     expected_damage: sumExpected(
