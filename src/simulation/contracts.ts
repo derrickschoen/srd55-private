@@ -84,7 +84,16 @@ export type ExpandedCriticalMinimumRoll = Brand<
   number,
   'ExpandedCriticalMinimumRoll'
 >;
-export type SaveSuccessClauseId = Brand<string, 'SaveSuccessClauseId'>;
+export type SaveSuccessClauseId =
+  `srd-5.2.1:spell:${string}:save:${string}`;
+export type DamageNeutralMechanicId = Brand<
+  string,
+  'DamageNeutralMechanicId'
+>;
+export type ResourceRecoveryClauseId = Brand<
+  string,
+  'ResourceRecoveryClauseId'
+>;
 
 function integerInRange(
   value: unknown,
@@ -306,6 +315,10 @@ export const sourceStableKey = (value: unknown): SourceStableKey =>
   nonemptyKey(value, 'Source stable key') as SourceStableKey;
 export const saveSuccessClauseId = (value: unknown): SaveSuccessClauseId =>
   nonemptyKey(value, 'Save-success clause ID') as SaveSuccessClauseId;
+export const resourceRecoveryClauseId = (
+  value: unknown,
+): ResourceRecoveryClauseId =>
+  nonemptyKey(value, 'Resource-recovery clause ID') as ResourceRecoveryClauseId;
 export const expandedCriticalMinimumRoll = (
   value: unknown,
 ): ExpandedCriticalMinimumRoll =>
@@ -653,8 +666,14 @@ export type AttackRollEvent = {
 };
 
 export type SaveSuccessOutcome =
-  | { readonly kind: 'none'; readonly evidence: PublicSourceRef }
-  | { readonly kind: 'half'; readonly evidence: PublicSourceRef }
+  | {
+      readonly kind: 'none';
+      readonly evidence: PublicSourceRef;
+    }
+  | {
+      readonly kind: 'half';
+      readonly evidence: PublicSourceRef;
+    }
   | {
       readonly kind: 'sourced_damage';
       readonly evidence: PublicSourceRef;
@@ -670,6 +689,7 @@ export type SavingThrowDamageEvent = {
   readonly roll_state: RollState;
   readonly frequency: EventFrequency;
   readonly duration: InstantaneousDuration;
+  readonly save_success_clause_id: SaveSuccessClauseId;
   readonly damage_on_failed_save: NonEmptyReadonlyArray<DamageInstance>;
   readonly on_success: SaveSuccessOutcome;
 };
@@ -722,8 +742,25 @@ export type ResourceRecoveryRule =
   | {
       readonly kind: 'fixed';
       readonly amount: PositiveResourceRecoveryAmount;
+      readonly evidence: ResourceRecoveryEvidence;
     }
-  | { readonly kind: 'all' };
+  | {
+      readonly kind: 'fixed_once_per_long_rest';
+      readonly amount: PositiveResourceRecoveryAmount;
+      readonly evidence: ResourceRecoveryEvidence;
+    }
+  | {
+      readonly kind: 'all';
+      readonly evidence: ResourceRecoveryEvidence;
+    };
+
+declare const resourceRecoveryEvidenceBrand: unique symbol;
+export type ResourceRecoveryEvidence = {
+  readonly clause_id: ResourceRecoveryClauseId;
+  readonly resource_source: SourceRef;
+  readonly citation: PublicSourceRef;
+  readonly [resourceRecoveryEvidenceBrand]: true;
+};
 
 /**
  * Resource recovery is a pair of independently sourced rest rules. This shape
@@ -733,7 +770,6 @@ export type ResourceRecoveryRule =
 export type ResourceRecovery = {
   readonly short_rest: ResourceRecoveryRule;
   readonly long_rest: ResourceRecoveryRule;
-  readonly evidence: PublicSourceRef;
 };
 
 export type SimResourcePool = {
@@ -743,11 +779,38 @@ export type SimResourcePool = {
   readonly recovery: ResourceRecovery;
 };
 
+export type ResourceRecoveryState = {
+  readonly once_per_long_rest_used: boolean;
+};
+
+export type ResourceRecoveryResult = {
+  readonly recovered_units: number;
+  readonly state: ResourceRecoveryState;
+};
+
+function sameSourceRef(left: SourceRef, right: SourceRef): boolean {
+  if (left.kind !== right.kind || left.stable_key !== right.stable_key) {
+    return false;
+  }
+  switch (left.kind) {
+    case 'character_source':
+      return right.kind === 'character_source' &&
+        left.source_instance_id === right.source_instance_id;
+    case 'catalog_content':
+      return right.kind === 'catalog_content' &&
+        left.content_key === right.content_key;
+    case 'character_weapon':
+      return right.kind === 'character_weapon' &&
+        left.weapon_id === right.weapon_id;
+  }
+}
+
 export function recoveredResourceUnits(
   pool: SimResourcePool,
   rest: RestKind,
   expendedUnits: unknown,
-): number {
+  state: ResourceRecoveryState,
+): ResourceRecoveryResult {
   const expended = integerInRange(
     expendedUnits,
     0,
@@ -755,13 +818,35 @@ export function recoveredResourceUnits(
     'Expended resource units',
   );
   const rule = pool.recovery[rest];
+  if (
+    rule.kind !== 'none' &&
+    !sameSourceRef(pool.source, rule.evidence.resource_source)
+  ) {
+    throw new TypeError(
+      'Resource-recovery evidence is not bound to this resource pool source.',
+    );
+  }
+  const result = (recovered_units: number, once_per_long_rest_used: boolean): ResourceRecoveryResult => ({
+    recovered_units,
+    state: { once_per_long_rest_used },
+  });
   switch (rule.kind) {
     case 'none':
-      return 0;
+      return result(0, rest === 'long_rest' ? false : state.once_per_long_rest_used);
     case 'fixed':
-      return Math.min(rule.amount, expended);
+      return result(
+        Math.min(rule.amount, expended),
+        rest === 'long_rest' ? false : state.once_per_long_rest_used,
+      );
+    case 'fixed_once_per_long_rest':
+      if (rest === 'long_rest') {
+        return result(Math.min(rule.amount, expended), false);
+      }
+      return state.once_per_long_rest_used
+        ? result(0, true)
+        : result(Math.min(rule.amount, expended), true);
     case 'all':
-      return expended;
+      return result(expended, rest === 'long_rest' ? false : state.once_per_long_rest_used);
   }
 }
 
@@ -821,7 +906,7 @@ export type ModeledMechanic =
 
 declare const damageNeutralityEvidenceBrand: unique symbol;
 export type DamageNeutralityEvidence = {
-  readonly mechanic: SourceRef;
+  readonly mechanic: DamageNeutralMechanicId;
   readonly evidence: PublicSourceRef;
   readonly [damageNeutralityEvidenceBrand]: true;
 };

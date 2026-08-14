@@ -3,14 +3,18 @@ import type { SheetWarning } from '../rules/sheet';
 import bundledSrd521 from '../../docs/srd/full/srd-5.2.1.txt?raw';
 import {
   BUNDLED_SRD_5_2_1_PATH,
+  resourceRecoveryClauseId,
   saveSuccessClauseId,
   sourceStableKey,
   unmodelledIssueKinds,
   unmodelledIssueId,
   type BundledSrdHeading,
   type CriticalHitRule,
+  type DamageNeutralMechanicId,
   type DamageNeutralityEvidence,
   type PublicSourceRef,
+  type ResourceRecoveryClauseId,
+  type ResourceRecoveryEvidence,
   type SaveSuccessClauseId,
   type SaveSuccessOutcome,
   type SourceRef,
@@ -204,8 +208,10 @@ const reviewedBundledSrdHeadings = [
   'Cone of Cold',
   'Conjure Animals',
   'Conjure Celestial',
+  'Conjure Elemental',
   'Conjure Woodland Beings',
   'Contagion',
+  'Contact Other Plane',
   'Control Water',
   'Critical Hits',
   'Damage Rolls',
@@ -234,6 +240,8 @@ const reviewedBundledSrdHeadings = [
   'Immunity',
   'Insect Plague',
   'Level 1: Rage',
+  'Level 2: Channel Divinity',
+  'Level 2: Font of Magic',
   'Level 3: Improved Critical',
   'Level 15: Superior Critical',
   'Lightning Bolt',
@@ -250,6 +258,7 @@ const reviewedBundledSrdHeadings = [
   'Saving Throws',
   'Shatter',
   'Spirit Guardians',
+  'Level 5: Sorcerous Restoration',
   'Storm of Vengeance',
   'Summon Dragon',
   'Sunbeam',
@@ -368,8 +377,11 @@ export const reviewedSaveSuccessClauses = {
   cone_of_cold: reviewedSaveClause('damage', 'cone-of-cold', 'Cone of Cold', 'half'),
   conjure_animals: reviewedSaveClause('damage', 'conjure-animals', 'Conjure Animals', 'none'),
   conjure_celestial: reviewedSaveClause('damage', 'conjure-celestial', 'Conjure Celestial', 'half'),
+  conjure_elemental_initial: reviewedSaveClause('initial-damage', 'conjure-elemental', 'Conjure Elemental', 'none'),
+  conjure_elemental_repeat: reviewedSaveClause('repeat-damage', 'conjure-elemental', 'Conjure Elemental', 'none'),
   conjure_woodland_beings: reviewedSaveClause('damage', 'conjure-woodland-beings', 'Conjure Woodland Beings', 'half'),
   contagion: reviewedSaveClause('damage', 'contagion', 'Contagion', 'none'),
+  contact_other_plane: reviewedSaveClause('damage', 'contact-other-plane', 'Contact Other Plane', 'none'),
   control_water: reviewedSaveClause('damage', 'control-water', 'Control Water', 'half'),
   delayed_blast_fireball: reviewedSaveClause('damage', 'delayed-blast-fireball', 'Delayed Blast Fireball', 'half'),
   disintegrate: reviewedSaveClause('damage', 'disintegrate', 'Disintegrate', 'none'),
@@ -466,12 +478,14 @@ function samePublicSource(left: PublicSourceRef, right: PublicSourceRef): boolea
  */
 export function saveSuccessOutcomeHasEvidence(
   effect: SourceRef,
+  clauseId: SaveSuccessClauseId,
   outcome: SaveSuccessOutcome,
 ): boolean {
-  return [...saveSuccessOutcomeEvidenceManifest.values()].some((expected) =>
+  const expected = saveSuccessOutcomeEvidenceManifest.get(clauseId);
+  return expected !== undefined &&
     expected.effect_stable_key === effect.stable_key &&
     expected.kind === outcome.kind &&
-    samePublicSource(outcome.evidence, expected.evidence));
+    samePublicSource(outcome.evidence, expected.evidence);
 }
 
 export const expandedCriticalHitEvidenceManifest: ReadonlyMap<
@@ -502,15 +516,14 @@ export function criticalHitHasEvidence(evidence: PublicSourceRef): boolean {
   );
 }
 
-export const reviewedDamageNeutralMechanicStableKeys = {
-  fireball_flammable_objects: sourceStableKey(
-    'srd-5.2.1:spell:fireball:flammable-objects',
-  ),
+export const reviewedDamageNeutralMechanicIds = {
+  fireball_flammable_objects:
+    'srd-5.2.1:spell:fireball:flammable-objects' as DamageNeutralMechanicId,
 } as const;
 
 const damageNeutralityEvidenceManifest = new Map([
   [
-    reviewedDamageNeutralMechanicStableKeys.fireball_flammable_objects,
+    reviewedDamageNeutralMechanicIds.fireball_flammable_objects,
     bundledHeading('Fireball'),
   ],
 ]);
@@ -518,19 +531,92 @@ const damageNeutralityEvidenceManifest = new Map([
 /**
  * This constructor corrects a round-2 test that treated any real heading as
  * damage-neutral proof. A proof is now minted only when its citation is the
- * reviewed citation for the exact mechanic stable key being classified.
+ * reviewed citation for a code-owned mechanic ID. Database-backed SourceRef
+ * fields are deliberately not accepted here: their stable keys are data and
+ * cannot mint neutrality proof.
  */
 export function damageNeutralityEvidence(
-  mechanic: SourceRef,
+  mechanic: DamageNeutralMechanicId,
   evidence: PublicSourceRef,
 ): DamageNeutralityEvidence {
-  const expected = damageNeutralityEvidenceManifest.get(mechanic.stable_key);
+  const expected = damageNeutralityEvidenceManifest.get(mechanic);
   if (expected === undefined || !samePublicSource(evidence, expected)) {
     throw new TypeError(
       'Damage-neutral evidence does not establish neutrality for this mechanic.',
     );
   }
   return { mechanic, evidence } as DamageNeutralityEvidence;
+}
+
+type ReviewedResourceRecoveryClause = {
+  readonly id: ResourceRecoveryClauseId;
+  readonly resource_stable_key: SourceStableKey;
+  readonly citation: PublicSourceRef;
+};
+
+function reviewedResourceRecoveryClause(
+  id: string,
+  resourceStableKey: string,
+  heading: ReviewedBundledSrdHeading,
+): ReviewedResourceRecoveryClause {
+  return {
+    id: resourceRecoveryClauseId(id),
+    resource_stable_key: sourceStableKey(resourceStableKey),
+    citation: bundledHeading(heading),
+  };
+}
+
+export const reviewedResourceRecoveryClauses = {
+  rage: reviewedResourceRecoveryClause(
+    'srd-5.2.1:class:barbarian:rage:recovery',
+    'srd-5.2.1:class:barbarian:rage',
+    'Level 1: Rage',
+  ),
+  channel_divinity: reviewedResourceRecoveryClause(
+    'srd-5.2.1:class:cleric:channel-divinity:recovery',
+    'srd-5.2.1:class:cleric:channel-divinity',
+    'Level 2: Channel Divinity',
+  ),
+  sorcerous_restoration: reviewedResourceRecoveryClause(
+    'srd-5.2.1:class:sorcerer:sorcery-points:sorcerous-restoration',
+    'srd-5.2.1:class:sorcerer:sorcery-points',
+    'Level 5: Sorcerous Restoration',
+  ),
+  font_of_magic: reviewedResourceRecoveryClause(
+    'srd-5.2.1:class:sorcerer:sorcery-points:long-rest-recovery',
+    'srd-5.2.1:class:sorcerer:sorcery-points',
+    'Level 2: Font of Magic',
+  ),
+} as const satisfies Record<string, ReviewedResourceRecoveryClause>;
+
+const resourceRecoveryEvidenceManifest: ReadonlyMap<
+  ResourceRecoveryClauseId,
+  ReviewedResourceRecoveryClause
+> = new Map(
+  Object.values(reviewedResourceRecoveryClauses).map((clause) => [
+    clause.id,
+    clause,
+  ]),
+);
+
+export function resourceRecoveryEvidence(
+  resourceSource: SourceRef,
+  clauseId: ResourceRecoveryClauseId,
+): ResourceRecoveryEvidence {
+  const clause = resourceRecoveryEvidenceManifest.get(clauseId);
+  if (
+    clause === undefined ||
+    clause.resource_stable_key !== resourceSource.stable_key
+  ) {
+    throw new TypeError(
+      'Resource-recovery evidence does not establish recovery for this resource source.',
+    );
+  }
+  return {
+    clause_id: clause.id,
+    resource_source: resourceSource,
+    citation: clause.citation,
+  } as ResourceRecoveryEvidence;
 }
 
 // A set-equality assertion at runtime complements the `satisfies` compile gate.

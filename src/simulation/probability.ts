@@ -578,6 +578,7 @@ export function foldSavingThrowEvent(
   // probability, but it is computed only after the citation has been checked.
   const hasSuccessClauseEvidence = saveSuccessOutcomeHasEvidence(
     event.source,
+    event.save_success_clause_id,
     event.on_success,
   );
   const successProbability = saveSuccessProbability(

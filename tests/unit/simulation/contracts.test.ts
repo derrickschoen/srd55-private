@@ -37,6 +37,8 @@ import {
   probabilityManifestIsComplete,
   publicProbabilityCoverageManifest,
   publicProbabilityMechanicKinds,
+  resourceRecoveryEvidence,
+  reviewedResourceRecoveryClauses,
   reviewedSaveSuccessClauses,
   saveSuccessOutcomeEvidenceManifest,
   sheetGapCoverage,
@@ -125,18 +127,167 @@ describe('DPR branded constructors', () => {
         short_rest: {
           kind: 'fixed',
           amount: positiveResourceRecoveryAmount(1, maximum),
+          evidence: resourceRecoveryEvidence(
+            rageSource,
+            reviewedResourceRecoveryClauses.rage.id,
+          ),
         },
-        long_rest: { kind: 'all' },
         // Bundled SRD 5.2.1 lines 1767-1770: one use on a Short Rest, all on a Long Rest.
-        evidence: bundledSrdSourceRef('Level 1: Rage'),
+        long_rest: {
+          kind: 'all',
+          evidence: resourceRecoveryEvidence(
+            rageSource,
+            reviewedResourceRecoveryClauses.rage.id,
+          ),
+        },
       },
     };
-    expect(recoveredResourceUnits(rage, 'short_rest', 2)).toBe(1);
-    expect(recoveredResourceUnits(rage, 'long_rest', 2)).toBe(2);
-    expect(recoveredResourceUnits(rage, 'short_rest', 0)).toBe(0);
+    expect(recoveredResourceUnits(
+      rage,
+      'short_rest',
+      2,
+      { once_per_long_rest_used: false },
+    ).recovered_units).toBe(1);
+    expect(recoveredResourceUnits(
+      rage,
+      'long_rest',
+      2,
+      { once_per_long_rest_used: true },
+    )).toEqual({
+      recovered_units: 2,
+      state: { once_per_long_rest_used: false },
+    });
+    expect(recoveredResourceUnits(
+      rage,
+      'short_rest',
+      0,
+      { once_per_long_rest_used: false },
+    ).recovered_units).toBe(0);
     expect(() => positiveResourceRecoveryAmount(3, maximum)).toThrow(
       'Resource recovery amount must be an integer from 1 to 2',
     );
+  });
+
+  it('binds Channel Divinity recovery evidence to the Cleric pool source', () => {
+    const maximum = positiveResourceMaximum(3);
+    const clericSource: SourceRef = {
+      kind: 'catalog_content',
+      content_key: '2024:cleric-channel-divinity' as ContentKey,
+      stable_key: sourceStableKey('srd-5.2.1:class:cleric:channel-divinity'),
+    };
+    const evidence = resourceRecoveryEvidence(
+      clericSource,
+      reviewedResourceRecoveryClauses.channel_divinity.id,
+    );
+    expect(evidence.citation).toEqual(
+      bundledSrdSourceRef('Level 2: Channel Divinity'),
+    );
+    const channelDivinity: SimResourcePool = {
+      id: simResourceId('cleric:channel-divinity'),
+      source: clericSource,
+      maximum,
+      recovery: {
+        short_rest: {
+          kind: 'fixed',
+          amount: positiveResourceRecoveryAmount(1, maximum),
+          evidence,
+        },
+        long_rest: {
+          kind: 'all',
+          evidence,
+        },
+      },
+    };
+    expect(recoveredResourceUnits(
+      channelDivinity,
+      'short_rest',
+      2,
+      { once_per_long_rest_used: false },
+    ).recovered_units).toBe(1);
+    expect(() => resourceRecoveryEvidence(
+      clericSource,
+      reviewedResourceRecoveryClauses.rage.id,
+    )).toThrow('does not establish recovery for this resource source');
+    const rageSource: SourceRef = {
+      kind: 'catalog_content',
+      content_key: '2024:barbarian-rage' as ContentKey,
+      stable_key: sourceStableKey('srd-5.2.1:class:barbarian:rage'),
+    };
+    const borrowedRageEvidence: SimResourcePool = {
+      ...channelDivinity,
+      recovery: {
+        short_rest: {
+          kind: 'fixed',
+          amount: positiveResourceRecoveryAmount(1, maximum),
+          evidence: resourceRecoveryEvidence(
+            rageSource,
+            reviewedResourceRecoveryClauses.rage.id,
+          ),
+        },
+        long_rest: { kind: 'none' },
+      },
+    };
+    expect(() => recoveredResourceUnits(
+      borrowedRageEvidence,
+      'short_rest',
+      2,
+      { once_per_long_rest_used: false },
+    )).toThrow('not bound to this resource pool source');
+  });
+
+  it('applies Sorcerous Restoration only once until a Long Rest', () => {
+    const maximum = positiveResourceMaximum(10);
+    const sorcerySource: SourceRef = {
+      kind: 'catalog_content',
+      content_key: '2024:sorcery-points' as ContentKey,
+      stable_key: sourceStableKey('srd-5.2.1:class:sorcerer:sorcery-points'),
+    };
+    const sorceryPoints: SimResourcePool = {
+      id: simResourceId('sorcerer:sorcery-points'),
+      source: sorcerySource,
+      maximum,
+      recovery: {
+        short_rest: {
+          kind: 'fixed_once_per_long_rest',
+          amount: positiveResourceRecoveryAmount(5, maximum),
+          evidence: resourceRecoveryEvidence(
+            sorcerySource,
+            reviewedResourceRecoveryClauses.sorcerous_restoration.id,
+          ),
+        },
+        long_rest: {
+          kind: 'all',
+          evidence: resourceRecoveryEvidence(
+            sorcerySource,
+            reviewedResourceRecoveryClauses.font_of_magic.id,
+          ),
+        },
+      },
+    };
+    const first = recoveredResourceUnits(
+      sorceryPoints,
+      'short_rest',
+      10,
+      { once_per_long_rest_used: false },
+    );
+    const second = recoveredResourceUnits(
+      sorceryPoints,
+      'short_rest',
+      5,
+      first.state,
+    );
+    expect(first.recovered_units).toBe(5);
+    expect(second.recovered_units).toBe(0);
+    expect(first.recovered_units + second.recovered_units).toBe(5);
+    expect(recoveredResourceUnits(
+      sorceryPoints,
+      'long_rest',
+      5,
+      second.state,
+    )).toEqual({
+      recovered_units: 5,
+      state: { once_per_long_rest_used: false },
+    });
   });
 
   it('accepts only registered repository-relative project-owned sources', () => {
@@ -492,7 +643,7 @@ describe('coverage vocabularies and bundled provenance', () => {
         /half (?:as much|the initial) damage|half damage/iu.test(body);
       const hasNoDamageSuccess =
         /saving throw or take [^.]{0,180}damage/iu.test(body) ||
-        /saving throw\. On a failed save,[^.]{0,180}(?:takes? [^.]{0,100}damage|damage)/iu.test(body);
+        /On (?:a )?failed save,[^.]{0,180}\b(?:it|you|target|creature)\s+takes? [^.]{0,100}\bdamage/iu.test(body);
       if (hasHalfDamageSuccess || hasNoDamageSuccess) {
         sourceDerived.add(heading);
       }
@@ -507,6 +658,83 @@ describe('coverage vocabularies and bundled provenance', () => {
     );
     expect([...registered].sort()).toEqual([...sourceDerived].sort());
     expect(registered).toContain('Burning Hands');
+    const sourceAuditedClauseIds = [
+      'srd-5.2.1:spell:acid-splash:save:damage',
+      'srd-5.2.1:spell:befuddlement:save:damage',
+      'srd-5.2.1:spell:black-tentacles:save:damage',
+      'srd-5.2.1:spell:blade-barrier:save:damage',
+      'srd-5.2.1:spell:blight:save:damage',
+      'srd-5.2.1:spell:burning-hands:save:damage',
+      'srd-5.2.1:spell:call-lightning:save:damage',
+      'srd-5.2.1:spell:chain-lightning:save:damage',
+      'srd-5.2.1:spell:circle-of-death:save:damage',
+      'srd-5.2.1:spell:cloudkill:save:damage',
+      'srd-5.2.1:spell:cone-of-cold:save:damage',
+      'srd-5.2.1:spell:conjure-animals:save:damage',
+      'srd-5.2.1:spell:conjure-celestial:save:damage',
+      'srd-5.2.1:spell:conjure-elemental:save:initial-damage',
+      'srd-5.2.1:spell:conjure-elemental:save:repeat-damage',
+      'srd-5.2.1:spell:conjure-woodland-beings:save:damage',
+      'srd-5.2.1:spell:contagion:save:damage',
+      'srd-5.2.1:spell:contact-other-plane:save:damage',
+      'srd-5.2.1:spell:control-water:save:damage',
+      'srd-5.2.1:spell:delayed-blast-fireball:save:damage',
+      'srd-5.2.1:spell:disintegrate:save:damage',
+      'srd-5.2.1:spell:dissonant-whispers:save:damage',
+      'srd-5.2.1:spell:dragon-s-breath:save:damage',
+      'srd-5.2.1:spell:dream:save:damage',
+      'srd-5.2.1:spell:earthquake:save:collapse-damage',
+      'srd-5.2.1:spell:faithful-hound:save:damage',
+      'srd-5.2.1:spell:finger-of-death:save:damage',
+      'srd-5.2.1:spell:fireball:save:damage',
+      'srd-5.2.1:spell:fire-storm:save:damage',
+      'srd-5.2.1:spell:flame-strike:save:damage',
+      'srd-5.2.1:spell:flaming-sphere:save:damage',
+      'srd-5.2.1:spell:freezing-sphere:save:damage',
+      'srd-5.2.1:spell:glyph-of-warding:save:explosive-runes',
+      'srd-5.2.1:spell:guardian-of-faith:save:damage',
+      'srd-5.2.1:spell:harm:save:damage',
+      'srd-5.2.1:spell:hellish-rebuke:save:damage',
+      'srd-5.2.1:spell:ice-knife:save:explosion-damage',
+      'srd-5.2.1:spell:ice-storm:save:damage',
+      'srd-5.2.1:spell:incendiary-cloud:save:damage',
+      'srd-5.2.1:spell:inflict-wounds:save:damage',
+      'srd-5.2.1:spell:insect-plague:save:damage',
+      'srd-5.2.1:spell:lightning-bolt:save:damage',
+      'srd-5.2.1:spell:meteor-swarm:save:damage',
+      'srd-5.2.1:spell:mind-spike:save:damage',
+      'srd-5.2.1:spell:moonbeam:save:damage',
+      'srd-5.2.1:spell:phantasmal-killer:save:initial-damage',
+      'srd-5.2.1:spell:phantasmal-killer:save:repeat-damage',
+      'srd-5.2.1:spell:prismatic-spray:save:damaging-rays',
+      'srd-5.2.1:spell:prismatic-wall:save:damaging-layers',
+      'srd-5.2.1:spell:sacred-flame:save:damage',
+      'srd-5.2.1:spell:shatter:save:damage',
+      'srd-5.2.1:spell:spirit-guardians:save:damage',
+      'srd-5.2.1:spell:storm-of-vengeance:save:initial-thunder-damage',
+      'srd-5.2.1:spell:storm-of-vengeance:save:lightning-damage',
+      'srd-5.2.1:spell:summon-dragon:save:breath-weapon',
+      'srd-5.2.1:spell:sunbeam:save:damage',
+      'srd-5.2.1:spell:sunburst:save:damage',
+      'srd-5.2.1:spell:symbol:save:death-damage',
+      'srd-5.2.1:spell:thunderwave:save:damage',
+      'srd-5.2.1:spell:tsunami:save:initial-damage',
+      'srd-5.2.1:spell:tsunami:save:ongoing-damage',
+      'srd-5.2.1:spell:vicious-mockery:save:damage',
+      'srd-5.2.1:spell:vitriolic-sphere:save:damage',
+      'srd-5.2.1:spell:wall-of-fire:save:damage',
+      'srd-5.2.1:spell:wall-of-ice:save:initial-damage',
+      'srd-5.2.1:spell:wall-of-ice:save:frigid-air-damage',
+      'srd-5.2.1:spell:wall-of-thorns:save:piercing-damage',
+      'srd-5.2.1:spell:wall-of-thorns:save:slashing-damage',
+      'srd-5.2.1:spell:weird:save:initial-damage',
+      'srd-5.2.1:spell:weird:save:repeat-damage',
+      'srd-5.2.1:spell:wind-wall:save:damage',
+    ];
+    expect([...saveSuccessOutcomeEvidenceManifest.keys()].sort()).toEqual(
+      sourceAuditedClauseIds.sort(),
+    );
+    expect(sourceAuditedClauseIds).toHaveLength(71);
     for (const clause of saveSuccessOutcomeEvidenceManifest.values()) {
       if (clause.evidence.kind !== 'bundled_srd') {
         throw new Error('Save clauses must cite bundled spell headings.');
@@ -523,7 +751,7 @@ describe('coverage vocabularies and bundled provenance', () => {
         case 'none':
           expect(
             /saving throw or take [^.]{0,180}damage/iu.test(body ?? '') ||
-              /saving throw\. On a failed save,[^.]{0,180}(?:takes? [^.]{0,100}damage|damage)/iu.test(body ?? ''),
+              /On (?:a )?failed save,[^.]{0,180}\b(?:it|you|target|creature)\s+takes? [^.]{0,100}\bdamage/iu.test(body ?? ''),
             clause.evidence.heading,
           ).toBe(true);
           break;

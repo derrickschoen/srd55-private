@@ -6,6 +6,7 @@ import type {
   AttackDamageComponent,
   CatalogMechanicCoverage,
   CharacterAttackRoutineId,
+  DamageNeutralMechanicId,
   EncounterResourceCap,
   EncounterRoundCount,
   ExpectedCycleDamage,
@@ -16,6 +17,7 @@ import type {
   PositiveResourceCost,
   PublicSourceRef,
   RoutineEventId,
+  SaveSuccessClauseId,
   SimResourceId,
   TargetArmorClass,
 } from '../../src/simulation/contracts';
@@ -33,6 +35,7 @@ import {
   projectOwnedSourcePath,
   routineEventId,
   simResourceId,
+  sourceStableKey,
   targetArmorClass,
 } from '../../src/simulation/contracts';
 
@@ -53,3 +56,5 @@ export const forgedProbability: Probability = probability(0.5) as ExpectedEventD
 export const selfAssertedProjectLicense: PublicSourceRef = { kind: 'project_owned', path: projectOwnedSourcePath('src/simulation/contracts.ts'), license: 'MIT' };
 export const uncheckedBundledHeading: PublicSourceRef = { kind: 'bundled_srd', path: BUNDLED_SRD_5_2_1_PATH, heading: 'This Heading Does Not Exist' };
 export const unboundNeutrality: CatalogMechanicCoverage = { status: 'confirmed_damage_neutral', evidence: { kind: 'project_owned', path: projectOwnedSourcePath('src/simulation/contracts.ts') } };
+export const forgedNeutralityId: DamageNeutralMechanicId = sourceStableKey('srd-5.2.1:spell:fireball:flammable-objects');
+export const effectKeyAsSaveClause: SaveSuccessClauseId = sourceStableKey('srd-5.2.1:spell:fireball');

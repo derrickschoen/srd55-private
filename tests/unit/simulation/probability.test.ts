@@ -492,6 +492,11 @@ describe('damage responses and save outcomes', () => {
       roll_state: 'normal',
       frequency: { kind: 'each_declared_event' },
       duration: { kind: 'instantaneous' },
+      save_success_clause_id: on_success.kind === 'half'
+        ? reviewedSaveSuccessClauses.fireball.id
+        : on_success.kind === 'sourced_damage'
+          ? reviewedSaveSuccessClauses.vitriolic_sphere.id
+          : reviewedSaveSuccessClauses.acid_splash.id,
       damage_on_failed_save: [diceInstance(1, 4)],
       on_success,
     };
@@ -531,10 +536,14 @@ describe('damage responses and save outcomes', () => {
 
   it('evaluates bundled Burning Hands instead of refusing the sourced spell', () => {
     const clause = reviewedSaveSuccessClauses.burning_hands;
-    const base = saveEvent({ kind: 'half', evidence: clause.evidence });
+    const base = saveEvent({
+      kind: 'half',
+      evidence: clause.evidence,
+    });
     const event: SavingThrowDamageEvent = {
       ...base,
       source: { ...base.source, stable_key: clause.effect_stable_key },
+      save_success_clause_id: clause.id,
       damage_on_failed_save: [diceInstance(3, 6)],
     };
     const result = foldSavingThrowEvent(event, {

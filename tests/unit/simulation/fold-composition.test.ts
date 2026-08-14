@@ -138,6 +138,11 @@ describe('save fold arms and contributions', () => {
       source: { ...weapon, stable_key: effectStableKey },
       frequency: { kind: 'each_declared_event' },
       duration: { kind: 'instantaneous' },
+      save_success_clause_id: on_success.kind === 'half'
+        ? reviewedSaveSuccessClauses.fireball.id
+        : on_success.kind === 'sourced_damage'
+          ? reviewedSaveSuccessClauses.vitriolic_sphere.id
+          : reviewedSaveSuccessClauses.acid_splash.id,
       ability: 'dexterity',
       save_dc: saveDifficultyClass(13),
       roll_state: 'normal',

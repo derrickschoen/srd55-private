@@ -61,31 +61,39 @@ const src = (key: string) =>
 // ---------- F1: per-effect save clause ----------
 const acidEvidence = bundledSrdSourceRef('Acid Splash');
 
-const saveEvent = (stableKey: string, evidence: unknown) =>
+const saveEvent = (
+  stableKey: string,
+  evidence: ReturnType<typeof bundledSrdSourceRef>,
+): Parameters<typeof foldSavingThrowEvent>[0] =>
   ({
     kind: 'saving_throw_damage',
     event_id: routineEventId('e1'),
     source: src(stableKey),
+    ability: 'dexterity',
     save_dc: saveDifficultyClass(15),
     roll_state: 'normal',
-    frequency: { kind: 'at_will' },
+    frequency: { kind: 'each_declared_event' },
     duration: { kind: 'instantaneous' },
-    on_success: { kind: 'none', evidence },
+    save_success_clause_id: 'srd-5.2.1:spell:acid-splash:save:damage',
+    on_success: {
+      kind: 'none',
+      evidence,
+    },
     damage_on_failed_save: [
       {
         source: src(stableKey),
-        damage_type: 'fire',
+        damage_type: 'Acid',
         components: [
-          { kind: 'dice', pool: { count: positiveDiceCount(1), die: 4 }, trigger: 'hit' },
+          { kind: 'dice', pool: { count: positiveDiceCount(1), die: 6 } },
         ],
       },
     ],
-  }) as never;
+  });
 
-const target = {
+const target: Parameters<typeof foldSavingThrowEvent>[1] = {
   save_bonus: targetSaveBonus(0),
-  damage_responses: [{ damage_type: 'fire', response: 'normal' }],
-} as never;
+  damage_responses: [{ damage_type: 'Acid', response: 'normal' }],
+};
 
 // The exact attack codex claimed to have closed: an UNRELATED effect borrowing
 // Acid Splash's citation. Must be unavailable, not a zero.
@@ -101,6 +109,10 @@ const genuine = foldSavingThrowEvent(
   target,
 );
 ok('F1 negative control: genuine Acid Splash still AVAILABLE', genuine.status === 'available');
+ok(
+  'F1 negative control: genuine Acid Splash is exactly 2.45 damage',
+  genuine.status === 'available' && Math.abs(genuine.expected_damage - 2.45) < 1e-12,
+);
 
 // A registered effect citing the WRONG registered evidence must still refuse.
 const crossed = foldSavingThrowEvent(
@@ -111,17 +123,23 @@ ok('F1 registered effect citing another effect evidence is REFUSED', crossed.sta
 
 ok(
   'F1 predicate: unregistered key rejected',
-  !saveSuccessOutcomeHasEvidence(src('srd-5.2.1:spell:nope'), {
+  !saveSuccessOutcomeHasEvidence(
+    src('srd-5.2.1:spell:nope'),
+    'srd-5.2.1:spell:acid-splash:save:damage',
+    {
     kind: 'none',
     evidence: acidEvidence,
-  } as never),
+  }),
 );
 ok(
   'F1 predicate: registered key accepted',
-  saveSuccessOutcomeHasEvidence(src(reviewedSaveEffectStableKeys.acid_splash), {
+  saveSuccessOutcomeHasEvidence(
+    src(reviewedSaveEffectStableKeys.acid_splash),
+    'srd-5.2.1:spell:acid-splash:save:damage',
+    {
     kind: 'none',
     evidence: acidEvidence,
-  } as never),
+  }),
 );
 
 // ---------- F3: critical evidence ----------

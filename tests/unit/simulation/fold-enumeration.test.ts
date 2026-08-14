@@ -175,6 +175,8 @@ describe('brute-force save fold', () => {
             roll_state: state,
             frequency: { kind: 'each_declared_event' },
             duration: { kind: 'instantaneous' },
+            save_success_clause_id:
+              reviewedSaveSuccessClauses.fireball.id,
             damage_on_failed_save: [{
               source,
               damage_type: slashing,
