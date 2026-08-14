@@ -10,6 +10,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { aiBridge } from './tools/ai-bridge/plugin';
+import { bundledLicenseAssets } from './tools/licenses/bundled-license-files';
 import {
   appShellCacheName,
   appShellUrl,
@@ -42,6 +43,48 @@ function deployableAssets(
     assets.push({ fileName, source: readFileSync(path) });
   }
   return assets;
+}
+
+/**
+ * THE BUILD SHIPS THE LICENCES IT IS DISTRIBUTED UNDER.
+ *
+ * `dist/` is the artifact people actually receive, and it carried no licence
+ * notice of any kind: the MIT permission notice and the CC-BY-4.0 legalcode
+ * both lived only in the repository. `tools/licenses/bundled-license-files.ts`
+ * says which repository files travel and where they land; this emits them.
+ *
+ * `emitFile` rather than a post-build copy, and that is load-bearing. The
+ * emitted assets are written during `writeBundle`, so the app-shell plugin's
+ * `closeBundle` scan below already sees them: they are hashed into the cache
+ * name and precached like every other shell file. A file copied in AFTER that
+ * scan would be present in `dist/` but absent from the service worker's
+ * transcription, and `tools/assert-dist-clean.mjs` — which recomputes the shell
+ * hash from what it finds on disk — would fail the build.
+ *
+ * Bytes are read from the repository at build time rather than duplicated here,
+ * so there is no second copy of a licence text to keep in sync.
+ */
+function bundledLicenseTexts(): Plugin {
+  let repositoryRoot: string | undefined;
+  return {
+    name: 'bundled-license-texts',
+    apply: 'build',
+    configResolved(config) {
+      repositoryRoot = config.root;
+    },
+    generateBundle() {
+      if (repositoryRoot === undefined) {
+        this.error('The repository root is unavailable for licence emission.');
+      }
+      for (const asset of bundledLicenseAssets(repositoryRoot)) {
+        this.emitFile({
+          type: 'asset',
+          fileName: asset.fileName,
+          source: asset.source,
+        });
+      }
+    },
+  };
 }
 
 /**
@@ -230,7 +273,7 @@ const core = {
 
 const shared = {
   ...core,
-  plugins: [...core.plugins, appShellServiceWorker()],
+  plugins: [...core.plugins, bundledLicenseTexts(), appShellServiceWorker()],
 };
 
 /**

@@ -1,5 +1,18 @@
 import { srdAttributionSegments } from '../../../rules/srd-attribution';
 
+/**
+ * Where the build puts the two licence texts it ships. Emitted by the
+ * `bundled-license-texts` plugin in vite.config.ts from the list in
+ * `tools/licenses/bundled-license-files.ts`; the paths are relative because the
+ * build's `base` is, so the app keeps working under a sub-path deploy.
+ *
+ * `tests/unit/licensing/bundled-license-files.test.ts` holds these strings to
+ * the emitted filenames, so a renamed asset cannot leave a dead link behind on
+ * the one page whose job is to make the licences readable.
+ */
+const CC_BY_LEGALCODE_HREF = './licenses/CC-BY-4.0.txt';
+const MIT_LICENSE_HREF = './LICENSE.txt';
+
 function escapeHtml(value: unknown): string {
   return String(value)
     .replaceAll('&', '&amp;')
@@ -39,6 +52,20 @@ export function renderLegalPage(): string {
             content. Catalogs you import from your own copies stay in your
             browser: nothing you import is uploaded, and a share link carries
             your own choices — spell identifiers and names — never rules text.</p>
+          <p>The complete terms travel with this app rather than only being
+            linked: <a href="${CC_BY_LEGALCODE_HREF}"
+            data-testid="cc-by-legalcode">read the bundled CC-BY-4.0
+            legalcode</a>.</p>
+        </section>
+
+        <section class="legal-section">
+          <h2>This application</h2>
+          <p>SRD-55's own code is under the MIT licence, whose permission
+            notice ships with every build:
+            <a href="${MIT_LICENSE_HREF}" data-testid="mit-license">read the
+            bundled MIT licence</a>. It covers the software only — the game
+            content above keeps the licence and attribution requirements
+            described there.</p>
         </section>
       </main>
     </div>`;

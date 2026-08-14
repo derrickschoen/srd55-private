@@ -95,6 +95,32 @@ const NOT_APP_SHELL = new Set([
   'service-worker.js',
 ]);
 
+// A DEPLOYED BUILD MUST STATE THE LICENCES IT IS REDISTRIBUTED UNDER.
+//
+// MIT obliges the permission notice to travel with "all copies or substantial
+// portions of the Software", and dist/ is the copy people actually receive. It
+// carried no notice at all until the `bundled-license-texts` plugin in
+// vite.config.ts began emitting these; this control is what stops that
+// silently regressing to the state it was in — a plugin quietly dropped from
+// the array leaves a build that looks perfectly clean.
+//
+// Kept in sync BY HAND with BUNDLED_LICENSE_FILES in
+// tools/licenses/bundled-license-files.ts, for the reason the scrape sentinel
+// above gives: this file is plain .mjs run by bare node and cannot import the
+// .ts module. The duplication is checked rather than trusted —
+// tests/unit/licensing/bundled-license-files.test.ts imports the constant and
+// asserts every entry appears here with the same filename and literal.
+//
+// The literal is read back out of the emitted bytes, so an emitter that wrote
+// an empty or truncated file fails the build instead of passing it.
+const LICENSE_REQUIRED = [
+  ['LICENSE.txt', 'MIT License'],
+  [
+    'licenses/CC-BY-4.0.txt',
+    'Creative Commons Attribution 4.0 International Public License',
+  ],
+];
+
 function walk(dir) {
   const found = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -192,6 +218,22 @@ for (const required of PWA_REQUIRED) {
   }
 }
 
+for (const [required, literal] of LICENSE_REQUIRED) {
+  const path = byName.get(required);
+  if (path === undefined) {
+    fail(
+      `license control failed: required licence text "${required}" is ` +
+        'missing from the build output.',
+    );
+  }
+  if (!readFileSync(path, 'utf8').includes(literal)) {
+    fail(
+      `license control failed: "${required}" does not contain "${literal}", ` +
+        'so the build ships a licence text that is empty or truncated.',
+    );
+  }
+}
+
 const index = readFileSync(byName.get('index.html'), 'utf8');
 if (!/<link\s+rel="manifest"\s+href="\.\/manifest\.webmanifest"\s*\/?>/.test(index)) {
   fail(
@@ -282,5 +324,5 @@ if (process.argv[2] === undefined) {
 process.stdout.write(
   `dist clean: ${files.length} files scanned, ` +
     `control OK, migration control OK, ${appShellFiles.length} PWA shell ` +
-    'files transcribed\n',
+    `files transcribed, ${LICENSE_REQUIRED.length} licence texts bundled\n`,
 );

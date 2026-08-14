@@ -29,6 +29,25 @@ must not:
 Naming the SRD itself is required; naming Wizards beyond the notice is not
 permitted.
 
+## "Compatible with fifth edition" is an express permission, not an inference
+
+Immediately after the required notice, the source document's Legal
+Information section grants a second, narrower permission (quoted here inline
+rather than as a blockquote, because `tests/unit/ui/legal.test.ts` treats
+every blockquote in this file as part of the one notice it compares
+byte-for-byte against `SRD_ATTRIBUTION_NOTICE`): a work carrying the required
+notice "may... include a statement on your work indicating that it is
+'compatible with fifth edition' or '5E compatible.'" Verified at
+`docs/srd/full/srd-5.2.1.txt:29-30` (SRD 5.2.1, page 1, "Legal Information").
+
+This is a right the source grants directly, not something inferred from
+CC-BY-4.0's own terms, and it licenses exactly those two phrasings — not a
+claim of official status, endorsement, or compatibility with any named
+commercial product, all of which the constraint above still forbids.
+
+This app does not currently use either phrase; this entry exists so a future
+screen or document does not have to re-derive whether it may.
+
 ## Where the notice must appear
 
 - In the application UI, reachable from any screen that renders SRD content.

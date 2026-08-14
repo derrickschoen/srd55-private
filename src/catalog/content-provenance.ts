@@ -1,5 +1,9 @@
 import type { CatalogContentOriginKind } from '../../db/schema/catalog-content';
 import type { DatabaseContext } from '../db/database';
+import {
+  contentLicenseLabel,
+  type ContentLicenseLabel,
+} from '../domain/enums';
 import type { ContentKey } from '../domain/ids';
 import type { ContentKind } from './content-identity';
 
@@ -14,7 +18,13 @@ export interface ContentProvenance {
   readonly local_derivation: boolean;
   readonly author_label?: string;
   readonly source_label?: string;
-  readonly license_label?: string;
+  /**
+   * Machine-readable to the extent it honestly can be: one of the licences we
+   * know (`ContentLicenseLabel`'s known set) or whatever the author wrote,
+   * carried through unchanged. See `src/domain/enums.ts` for why this is a
+   * known set with a passthrough limb rather than an enum or free text.
+   */
+  readonly license_label?: ContentLicenseLabel;
   readonly attribution_text?: string;
 }
 
@@ -77,7 +87,7 @@ export function storedContentProvenance(
       ? { source_label: row.source_label }
       : {}),
     ...(typeof row.license_label === 'string'
-      ? { license_label: row.license_label }
+      ? { license_label: contentLicenseLabel(row.license_label) }
       : {}),
     ...(typeof row.attribution_text === 'string'
       ? { attribution_text: row.attribution_text }

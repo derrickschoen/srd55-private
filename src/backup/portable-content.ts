@@ -79,6 +79,7 @@ import type { SpeciesProjectorAggregateV2 } from '../catalog/authored-content-pr
 import type { DatabaseContext } from '../db/database';
 import type { CatalogContentKeyKind } from '../../db/schema/catalog-content';
 import type { ContentKey } from '../domain/ids';
+import { contentLicenseLabel } from '../domain/enums';
 import { featureValueKeys } from '../domain/feature-values';
 import { FEATURE_VALUE_CONTRIBUTION_LIMITS } from '../domain/contracts/feature-value-storage-limits';
 import {
@@ -1222,7 +1223,7 @@ function validatedProvenance(input: unknown, label: string): ContentProvenance {
       ? { source_label: value.source_label }
       : {}),
     ...(typeof value.license_label === 'string'
-      ? { license_label: value.license_label }
+      ? { license_label: contentLicenseLabel(value.license_label) }
       : {}),
     ...(typeof value.attribution_text === 'string'
       ? { attribution_text: value.attribution_text }
