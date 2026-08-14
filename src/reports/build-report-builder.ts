@@ -23,6 +23,7 @@ import type {
   BuildReport,
   WorkspaceSlot,
 } from '../domain/read-models';
+import type { SpellIdentityId, SpellVersionId } from '../domain/ids';
 import {
   DuplicateWarningDetector,
   type DuplicateWarningAssessment,
@@ -109,7 +110,7 @@ interface BuildClass {
 
 interface WizardSpellbookEntry {
   readonly spellbook_entry_id: number;
-  readonly spell_version_id: number;
+  readonly spell_version_id: SpellVersionId;
   readonly spell_name: string;
   readonly spell_catalog_layer: CatalogLayerDisclosure;
   readonly level: number;
@@ -367,7 +368,7 @@ interface ReportSlotRow {
   readonly spell_catalog_layer: CatalogLayerDisclosure | null;
   readonly spell_level: number | null;
   readonly spell_edition: RulesEdition | null;
-  readonly spell_identity_id: number | null;
+  readonly spell_identity_id: SpellIdentityId | null;
   readonly ritual: boolean | null;
   readonly concentration: boolean | null;
 }
@@ -400,7 +401,7 @@ const reportSlotRow: RowCodec<ReportSlotRow> = (row) => ({
   ),
   spell_level: sqlNullableInteger(row, 'spell_level'),
   spell_edition: sqlNullableString(row, 'spell_edition') as RulesEdition | null,
-  spell_identity_id: sqlNullableInteger(row, 'spell_identity_id'),
+  spell_identity_id: sqlNullableInteger(row, 'spell_identity_id') as SpellIdentityId | null,
   ritual: row.ritual === null ? null : sqlBoolean(row, 'ritual'),
   concentration:
     row.concentration === null ? null : sqlBoolean(row, 'concentration'),
@@ -690,7 +691,7 @@ export class BuildReportBuilder {
         [characterId],
         (row): WizardSpellbookEntry => ({
           spellbook_entry_id: sqlInteger(row, 'spellbook_entry_id'),
-          spell_version_id: sqlInteger(row, 'spell_version_id'),
+          spell_version_id: sqlInteger(row, 'spell_version_id') as SpellVersionId,
           spell_name: sqlString(row, 'spell_name'),
           spell_catalog_layer: catalogLayerDisclosure(
             sqlNullableString(row, 'catalog_layer'),
@@ -698,7 +699,7 @@ export class BuildReportBuilder {
           level: sqlInteger(row, 'level'),
           active: sqlBoolean(row, 'is_active'),
           prepared: preparedVersionIds.has(
-            sqlInteger(row, 'spell_version_id'),
+            sqlInteger(row, 'spell_version_id') as SpellVersionId,
           ),
         }),
       )

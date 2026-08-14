@@ -7,6 +7,7 @@ import {
 } from '../../../src/builder/contracts';
 import { abilities, type Ability } from '../../../src/domain/enums';
 import type { CharacterRow } from '../../../src/domain/models';
+import type { CharacterId, CharacterRevision } from '../../../src/domain/ids';
 import {
   createAbilitiesStep,
 } from '../../../src/ui/screens/guided-builder/abilities-step';
@@ -31,7 +32,7 @@ afterEach(() => {
 
 function character(): CharacterRow {
   return {
-    id: 7,
+    id: 7 as CharacterId,
     name: 'Base Score Reader',
     strength: 11,
     dexterity: 12,
@@ -43,7 +44,7 @@ function character(): CharacterRow {
     proficiency_bonus_override: null,
     rules_edition_preference: '2024',
     allow_legacy: false,
-    revision: 0,
+    revision: 0 as CharacterRevision,
     alignment: null,
     appearance: null,
     backstory: null,

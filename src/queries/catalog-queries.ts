@@ -15,6 +15,13 @@ import type {
   SpellVersionRow,
   SubclassDefinitionRow,
 } from '../domain/models';
+import type {
+  ClassDefinitionId,
+  SpellIdentityId,
+  SpellVersionId,
+  StandaloneDefinitionId,
+  SubclassDefinitionId,
+} from '../domain/ids';
 import {
   bundledSourceContentKeys,
   type BundledSourceKind,
@@ -92,7 +99,7 @@ function timestamps(row: SqlRow) {
 
 function decodeClass(row: SqlRow): ClassDefinitionRow {
   return {
-    id: sqlInteger(row, 'id'),
+    id: sqlInteger(row, 'id') as ClassDefinitionId,
     content_key: sqlString(row, 'content_key'),
     name: sqlString(row, 'name'),
     rules_edition: sqlString(row, 'rules_edition') as RulesEdition,
@@ -123,9 +130,9 @@ function decodeClass(row: SqlRow): ClassDefinitionRow {
 
 function decodeSubclass(row: SqlRow): SubclassDefinitionRow {
   return {
-    id: sqlInteger(row, 'id'),
+    id: sqlInteger(row, 'id') as SubclassDefinitionId,
     content_key: sqlString(row, 'content_key'),
-    class_definition_id: sqlInteger(row, 'class_definition_id'),
+    class_definition_id: sqlInteger(row, 'class_definition_id') as ClassDefinitionId,
     name: sqlString(row, 'name'),
     rules_edition: sqlString(row, 'rules_edition') as RulesEdition,
     spellcasting_ability: sqlNullableString(
@@ -141,7 +148,7 @@ function decodeSubclass(row: SqlRow): SubclassDefinitionRow {
 
 function decodeDefinition(row: SqlRow): DefinitionRow {
   return {
-    id: sqlInteger(row, 'id'),
+    id: sqlInteger(row, 'id') as StandaloneDefinitionId,
     content_key: sqlString(row, 'content_key'),
     name: sqlString(row, 'name'),
     rules_edition: sqlString(row, 'rules_edition') as RulesEdition,
@@ -201,9 +208,9 @@ function enumMember<T extends string>(
 
 function decodeSpell(row: SqlRow): Omit<CatalogSpell, 'catalog_layer'> {
   return {
-    id: sqlInteger(row, 'id'),
+    id: sqlInteger(row, 'id') as SpellVersionId,
     content_key: sqlString(row, 'content_key'),
-    spell_identity_id: sqlInteger(row, 'spell_identity_id'),
+    spell_identity_id: sqlInteger(row, 'spell_identity_id') as SpellIdentityId,
     display_name: sqlString(row, 'display_name'),
     rules_edition: sqlString(row, 'rules_edition') as RulesEdition,
     level: sqlInteger(row, 'level'),

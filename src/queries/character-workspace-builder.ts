@@ -33,6 +33,7 @@ import type {
   WorkspaceBuildReport,
   WorkspaceSlot,
 } from '../domain/read-models';
+import type { SpellIdentityId } from '../domain/ids';
 import {
   BuildReportBuilder,
   type BuildReportResult,
@@ -129,7 +130,7 @@ interface WorkspaceSlotRow {
   readonly spell_provenance: string | null;
   readonly spell_level: number | null;
   readonly spell_edition: RulesEdition | null;
-  readonly spell_identity_id: number | null;
+  readonly spell_identity_id: SpellIdentityId | null;
   readonly ritual: boolean | null;
   readonly concentration: boolean | null;
 }
@@ -162,7 +163,7 @@ const workspaceSlotRow: RowCodec<WorkspaceSlotRow> = (row) => ({
   spell_provenance: sqlNullableString(row, 'spell_provenance'),
   spell_level: sqlNullableInteger(row, 'spell_level'),
   spell_edition: sqlNullableString(row, 'spell_edition') as RulesEdition | null,
-  spell_identity_id: sqlNullableInteger(row, 'spell_identity_id'),
+  spell_identity_id: sqlNullableInteger(row, 'spell_identity_id') as SpellIdentityId | null,
   ritual: row.ritual === null ? null : sqlBoolean(row, 'ritual'),
   concentration:
     row.concentration === null ? null : sqlBoolean(row, 'concentration'),

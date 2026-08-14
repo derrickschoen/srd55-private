@@ -3,10 +3,11 @@ import type {
   RulesEdition,
 } from '../domain/enums';
 import { sha256 } from '../crypto/sha256';
+import type { SpellIdentityId, SpellVersionId } from '../domain/ids';
 
 export interface DuplicateWarningRoute {
-  spell_identity_id: number;
-  spell_version_id: number;
+  spell_identity_id: SpellIdentityId;
+  spell_version_id: SpellVersionId;
   identity_name: string;
   spell_name: string;
   spell_content_key: string;
@@ -18,14 +19,14 @@ export interface DuplicateWarningRoute {
 }
 
 export interface DuplicateWarningVersion {
-  spell_version_id: number;
+  spell_version_id: SpellVersionId;
   content_key: string;
   edition: RulesEdition;
   label: string;
 }
 
 export interface DuplicateWarningAssessment {
-  spell_identity_id: number;
+  spell_identity_id: SpellIdentityId;
   spell_name: string;
   category: DuplicateCategory;
   selection_count: number;
@@ -98,7 +99,7 @@ export class DuplicateWarningDetector {
   classify(
     routes: readonly DuplicateWarningRoute[],
   ): DuplicateWarningAssessment[] {
-    const groups = new Map<number, DuplicateWarningRoute[]>();
+    const groups = new Map<SpellIdentityId, DuplicateWarningRoute[]>();
     for (const route of routes) {
       const identityRoutes = groups.get(route.spell_identity_id);
       if (identityRoutes === undefined) {
