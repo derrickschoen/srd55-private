@@ -16,10 +16,12 @@ import {
   type DicePool,
   type ExpectedEventDamage,
   type ExpandedCriticalMinimumRoll,
+  type EventFrequency,
   type NonEmptyReadonlyArray,
   type PublicSourceRef,
   type Probability,
   type RollState,
+  type SaveSuccessClauseId,
   type SavingThrowDamageEvent,
   type TargetArmorClass,
   type TargetDamageResponse,
@@ -28,7 +30,7 @@ import {
 import {
   criticalHitRuleHasEvidence,
   publicProbabilityCoverageManifest,
-  saveSuccessOutcomeHasEvidence,
+  saveSuccessOutcomeEvidenceFailureReason,
 } from './coverage';
 
 export type DamageOutcome = {
@@ -63,6 +65,11 @@ export type UnavailableDamageEventFold = {
   readonly reason: string;
 };
 
+type SaveRecurrence = {
+  readonly clause_id: SaveSuccessClauseId;
+  readonly frequency: EventFrequency;
+};
+
 export type DamageEventFold =
   | AvailableDamageEventFold
   | UnavailableDamageEventFold;
@@ -78,6 +85,8 @@ export type SaveEventFold =
   | (AvailableDamageEventFold & {
       readonly status: 'available';
       readonly failed_save_probability: Probability;
+      /** The reviewed clause ID is evidence-bound and cannot be caller-relabeled. */
+      readonly recurrence: SaveRecurrence;
     })
   | {
       readonly status: UnavailableDamageEventFold['status'];
@@ -576,7 +585,7 @@ export function foldSavingThrowEvent(
   // Validate the effect-bound clause before doing any probability arithmetic.
   // The unavailable arm intentionally retains the independently useful save
   // probability, but it is computed only after the citation has been checked.
-  const hasSuccessClauseEvidence = saveSuccessOutcomeHasEvidence(
+  const evidenceFailureReason = saveSuccessOutcomeEvidenceFailureReason(
     event.source,
     event.save_success_clause_id,
     event.on_success,
@@ -593,12 +602,12 @@ export function foldSavingThrowEvent(
   );
   const failedProbability = probability(1 - successProbability);
 
-  if (!hasSuccessClauseEvidence) {
+  if (evidenceFailureReason !== null) {
     return {
       status: 'unavailable',
       failed_save_probability: failedProbability,
       evidence: event.on_success.evidence,
-      reason: `The cited evidence does not establish the ${event.on_success.kind} successful-save clause.`,
+      reason: evidenceFailureReason,
     };
   }
 
@@ -670,6 +679,10 @@ export function foldSavingThrowEvent(
   return {
     status: 'available',
     failed_save_probability: failedProbability,
+    recurrence: {
+      clause_id: event.save_success_clause_id,
+      frequency: event.frequency,
+    },
     expected_damage: expectedEventDamage(
       failure.expected_damage * failedProbability +
         success.expected_damage * successProbability,
@@ -716,6 +729,30 @@ export function composeRoundDamageFolds(
     };
   }
   const available = folds as readonly AvailableDamageEventFold[];
+  const cappedByClause = new Map<SaveSuccessClauseId, EventFrequency>();
+  for (const fold of available) {
+    if (!('recurrence' in fold)) {
+      continue;
+    }
+    const recurrence = fold.recurrence as SaveRecurrence;
+    if (recurrence.frequency.kind === 'each_declared_event') {
+      continue;
+    }
+    if (cappedByClause.has(recurrence.clause_id)) {
+      const cadence = recurrence.frequency.kind === 'once_per_round'
+        ? 'once per round'
+        : 'once per turn';
+      return {
+        status: 'unavailable',
+        failures: [{
+          status: 'unavailable',
+          evidence: recurrence.frequency.evidence,
+          reason: `Source clause ${recurrence.clause_id} is limited to ${cadence} and cannot be composed twice in one round.`,
+        }],
+      };
+    }
+    cappedByClause.set(recurrence.clause_id, recurrence.frequency);
+  }
   return {
     status: 'available',
     expected_damage: sumExpected(

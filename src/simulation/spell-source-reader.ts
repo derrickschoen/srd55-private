@@ -21,7 +21,8 @@ export type SourceDerivedSaveSuccess =
 export type SourceDerivedDamageFrequency =
   | { readonly kind: 'each_declared_event' }
   | { readonly kind: 'once_per_turn'; readonly turn: 'source' | 'target' }
-  | { readonly kind: 'once_per_round' };
+  | { readonly kind: 'once_per_round' }
+  | { readonly kind: 'unavailable'; readonly reason: string };
 
 export type SourceDerivedDamageDuration =
   | { readonly kind: 'instantaneous' }
@@ -36,6 +37,10 @@ export type SourceDerivedDamageRepetitions =
       readonly minimum: 1;
       readonly maximum: 1 | 2;
     }
+  | { readonly status: 'unavailable'; readonly reason: string };
+
+export type SourceDerivedFixedSaveDc =
+  | { readonly status: 'available'; readonly value: number | null }
   | { readonly status: 'unavailable'; readonly reason: string };
 
 /**
@@ -59,7 +64,7 @@ export type SourceDerivedSaveClause = {
   readonly save_start: number;
   readonly ability: Ability;
   readonly success: SourceDerivedSaveSuccess;
-  readonly fixed_save_dc: number | null;
+  readonly fixed_save_dc: SourceDerivedFixedSaveDc;
   readonly frequency: SourceDerivedDamageFrequency;
   readonly duration: SourceDerivedDamageDuration;
   readonly timing_unavailable_reason: string | null;
@@ -480,6 +485,9 @@ function sourceDerivedSaveSuccess(
   if (/(?:half (?:as much|the initial) damage|half damage|Success:\s*Half damage)/iu.test(span)) {
     return { status: 'available', kind: 'half' };
   }
+  if (/(?:On a successful save|Successful Save:|Success:)[^.]*\bno damage\b/iu.test(span)) {
+    return { status: 'available', kind: 'none' };
+  }
   const damageIsFailureScoped =
     /(?:On (?:a )?failed save|Failed Save:|Failure:)[^.]*\bdamage\b/iu.test(span) ||
     /\b(?:must )?succeed[^.]*\bor take\b[^.]*\bdamage\b/iu.test(span) ||
@@ -495,25 +503,43 @@ function sourceDerivedSaveSuccess(
   };
 }
 
-function sourceFixedSaveDc(span: string): number | null {
-  const fixed = /\bDC (\d+) (?:Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma) saving throw\b/iu.exec(span);
-  return fixed === null ? null : Number(fixed[1]);
+function sourceFixedSaveDc(span: string): SourceDerivedFixedSaveDc {
+  const beforeAbility = /\bDC (\d+) (?:Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma) saving throw\b/iu.exec(span);
+  if (beforeAbility !== null) {
+    return { status: 'available', value: Number(beforeAbility[1]) };
+  }
+  const afterSave = /\b(?:Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma) saving throw against DC (\d+)\b/iu.exec(span);
+  if (afterSave !== null) {
+    return { status: 'available', value: Number(afterSave[1]) };
+  }
+  const unsupported = /\bDC\s*\d+\b/iu.exec(span);
+  return unsupported === null
+    ? { status: 'available', value: null }
+    : {
+        status: 'unavailable',
+        reason: `The source fixed save DC syntax is not representable: ${unsupported[0]}.`,
+      };
 }
 
-function sourceDamageFrequency(span: string): SourceDerivedDamageFrequency {
+function sourceDamageFrequency(
+  span: string,
+  spellBody: string,
+): SourceDerivedDamageFrequency {
   const sentences = span.match(/[^.!?]+(?:[.!?]|$)/gu) ?? [span];
   const saveSentence = sentences.find((sentence) =>
     /(?:saving throw|Saving Throw:|repeats? (?:that|the) save)/u.test(sentence),
   ) ?? '';
   const explicitLimit = sentences.find((sentence) =>
-    /(?:this save|that save|take this damage|be affected by this spell) only once (?:per|on a) (?:turn|round)/iu.test(sentence),
+    /(?:this save|that save|take this damage|be affected by this spell) only \w+ (?:per|on a) (?:turn|round)/iu.test(sentence),
   ) ?? '';
-  const evidenceText = `${saveSentence} ${explicitLimit}`;
+  const spellWideLimit = /\b(?:A creature|Each creature|The target) is targeted only once per turn\b/iu.exec(spellBody)?.[0] ?? '';
+  const evidenceText = `${saveSentence} ${explicitLimit} ${spellWideLimit}`;
   if (/\bonly once per round\b/iu.test(evidenceText)) {
     return { kind: 'once_per_round' };
   }
   if (
     /\bonly once (?:per|on a) turn\b/iu.test(evidenceText) ||
+    /\bfor the first time on a turn\b/iu.test(saveSentence) ||
     /\bat the (?:start|end) of each of its turns\b/iu.test(saveSentence) ||
     /\bat the end of each of their turns\b/iu.test(saveSentence)
   ) {
@@ -521,6 +547,13 @@ function sourceDamageFrequency(span: string): SourceDerivedDamageFrequency {
   }
   if (/\bat the (?:start|end) of each of your turns\b/iu.test(saveSentence)) {
     return { kind: 'once_per_turn', turn: 'source' };
+  }
+  const unsupportedLimit = /\b(?:only (?:once|twice|\w+) (?:per|on a) (?:turn|round)|for the (?:first|second|\w+) time on a turn)\b/iu.exec(evidenceText);
+  if (unsupportedLimit !== null) {
+    return {
+      kind: 'unavailable',
+      reason: `The source recurrence is not representable: ${unsupportedLimit[0]}.`,
+    };
   }
   return { kind: 'each_declared_event' };
 }
@@ -539,14 +572,34 @@ function sourceDamageDuration(
 }
 
 function unsupportedSourceDamageTiming(span: string): string | null {
-  return /\bdamage when (?:it|the target) wakes? up\b/iu.test(span)
-    ? 'The damage occurs when the target wakes; that delayed timing is not representable.'
-    : null;
+  if (/\bdamage when (?:it|the target) wakes? up\b/iu.test(span)) {
+    return 'The damage occurs when the target wakes; that delayed timing is not representable.';
+  }
+  if (/\bdamage at the end of its next turn\b/iu.test(span)) {
+    return 'The delayed damage occurs at the end of the target’s next turn; round scheduling is not representable.';
+  }
+  const unsupported = /\bdamage at the (?:start|end) of (?:its|the target’s|the target's) next turn\b/iu.exec(span);
+  return unsupported === null
+    ? null
+    : `The source timing is not representable: ${unsupported[0]}.`;
 }
 
 function sourceDamageRepetitions(
   sourceText: string,
 ): SourceDerivedDamageRepetitions {
+  if (/\broll 1d8\b[\s\S]*\bstruck by two rays\b[\s\S]*\broll twice\b/iu.test(sourceText)) {
+    return {
+      status: 'unavailable',
+      reason: 'The random ray selection and conditional two-ray branch are not representable.',
+    };
+  }
+  const repeatedDamage = /\b(?:takes?|deals?) (?:this|the) damage (?:twice|\w+ times)\b/iu.exec(sourceText);
+  if (repeatedDamage !== null) {
+    return {
+      status: 'unavailable',
+      reason: `The source repetition cardinality is not representable: ${repeatedDamage[0]}.`,
+    };
+  }
   const rayCardinality = /\bstruck by (one|two|three|four|five|six|seven|eight|\d+) rays?\b/iu.exec(sourceText);
   if (rayCardinality === null) {
     return { status: 'available', minimum: 1, maximum: 1 };
@@ -572,7 +625,14 @@ function directFailureDamageSpan(span: string): string {
 function directDamageSaveClauses(body: string): SourceDerivedSaveClause[] {
   const explicitSave = /\b(?:(Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma)(?: \([^)]*\))? (?:saving throw|Saving Throw:)|repeats? (?:that|the) save|repeats the save)/giu;
   const matches = [...body.matchAll(explicitSave)];
-  const clauses: SourceDerivedSaveClause[] = [];
+  const owners: {
+    readonly match: RegExpMatchArray;
+    readonly start: number;
+    readonly ability: Ability;
+    readonly repeats_damage: boolean;
+    readonly failed_damage_signatures: readonly FailedDamageSignature[];
+    readonly damage_occurrences: readonly SourceDamageOccurrence[];
+  }[] = [];
   let inheritedAbility: Ability | null = null;
   let inheritedDamageSignatures: readonly FailedDamageSignature[] = [];
   let inheritedDamageOccurrences: readonly SourceDamageOccurrence[] = [];
@@ -597,25 +657,39 @@ function directDamageSaveClauses(body: string): SourceDerivedSaveClause[] {
     const damageOccurrences = repeatsDamage && inheritedDamageOccurrences.length > 0
       ? inheritedDamageOccurrences.filter((occurrence) => occurrence.arm === 'failure')
       : directOccurrences;
-    clauses.push({
-      span,
+    owners.push({
+      match,
       start: start + leading,
-      end: start + leading + span.length,
-      save_start: match.index ?? start + leading,
       ability: inheritedAbility,
-      success: sourceDerivedSaveSuccess(span, 'direct'),
-      fixed_save_dc: sourceFixedSaveDc(span),
-      frequency: sourceDamageFrequency(span),
-      duration: sourceDamageDuration(damageOccurrences),
-      timing_unavailable_reason: unsupportedSourceDamageTiming(span),
-      repetitions: sourceDamageRepetitions(body),
+      repeats_damage: repeatsDamage,
       failed_damage_signatures: failedDamageSignatures,
       damage_occurrences: damageOccurrences,
     });
     inheritedDamageSignatures = failedDamageSignatures;
     inheritedDamageOccurrences = damageOccurrences;
   }
-  return clauses;
+  return owners.map((owner, index) => {
+    const end = owners[index + 1]?.match.index ?? body.length;
+    const span = body.slice(owner.start, end).trimEnd();
+    const damageOccurrences = owner.repeats_damage && owner.damage_occurrences.length > 0
+      ? owner.damage_occurrences
+      : sourceDamageOccurrences(span, owner.start);
+    return {
+      span,
+      start: owner.start,
+      end: owner.start + span.length,
+      save_start: owner.match.index ?? owner.start,
+      ability: owner.ability,
+      success: sourceDerivedSaveSuccess(span, 'direct'),
+      fixed_save_dc: sourceFixedSaveDc(span),
+      frequency: sourceDamageFrequency(span, body),
+      duration: sourceDamageDuration(damageOccurrences),
+      timing_unavailable_reason: unsupportedSourceDamageTiming(span),
+      repetitions: sourceDamageRepetitions(body),
+      failed_damage_signatures: owner.failed_damage_signatures,
+      damage_occurrences: damageOccurrences,
+    };
+  });
 }
 
 function gateDamageSaveClause(body: string): SourceDerivedSaveClause | null {
@@ -649,7 +723,7 @@ function gateDamageSaveClause(body: string): SourceDerivedSaveClause | null {
         ability: sourceAbility(span, null),
         success: sourceDerivedSaveSuccess(span, 'gate'),
         fixed_save_dc: sourceFixedSaveDc(span),
-        frequency: sourceDamageFrequency(span),
+        frequency: sourceDamageFrequency(span, body),
         duration: { kind: 'instantaneous' },
         timing_unavailable_reason: null,
         repetitions: sourceDamageRepetitions(body),

@@ -787,46 +787,12 @@ export type ResourceRecovery = {
 
 export type SimResourcePool = {
   readonly id: SimResourceId;
-  /** Equal keys require constructor-produced identity evidence. */
+  /** Logical keys are unique; resource aliasing is unsupported. */
   readonly logical_key: SimResourcePoolKey;
   readonly source: SourceRef;
   readonly maximum: PositiveResourceMaximum;
   readonly recovery: ResourceRecovery;
-  readonly alias_evidence?: SimResourcePoolAliasEvidence;
 };
-
-const simResourcePoolAliasEvidenceBrand: unique symbol = Symbol(
-  'SimResourcePoolAliasEvidence',
-);
-type SimResourcePoolAliasEvidence = {
-  readonly canonical_id: SimResourceId;
-  readonly alias_id: SimResourceId;
-  readonly logical_key: SimResourcePoolKey;
-  readonly [simResourcePoolAliasEvidenceBrand]: true;
-};
-
-/**
- * Derives a second identifier for one already-constructed mechanic. Callers
- * cannot make two independently declared pools aliases by repeating a key.
- */
-export function simResourcePoolAlias(
-  canonical: SimResourcePool,
-  aliasId: SimResourceId,
-): SimResourcePool {
-  if (canonical.alias_evidence !== undefined) {
-    throw new TypeError('A simulation resource alias must name the canonical pool directly.');
-  }
-  return Object.freeze({
-    ...canonical,
-    id: aliasId,
-    alias_evidence: Object.freeze({
-      canonical_id: canonical.id,
-      alias_id: aliasId,
-      logical_key: canonical.logical_key,
-      [simResourcePoolAliasEvidenceBrand]: true as const,
-    }),
-  });
-}
 
 const simResourcePoolSetBrand: unique symbol = Symbol('SimResourcePoolSet');
 const logicalPoolIdentityByIdBrand: unique symbol = Symbol(
@@ -904,42 +870,19 @@ export function simResourcePoolSet(
   pools: readonly SimResourcePool[],
 ): SimResourcePoolSet {
   const ids = new Set<SimResourceId>();
-  const firstPoolByLogicalKey = new Map<SimResourcePoolKey, SimResourcePool>();
+  const logicalKeys = new Set<SimResourcePoolKey>();
   const logicalIdentityById = new Map<SimResourceId, string>();
   for (const pool of pools) {
     if (ids.has(pool.id)) {
       throw new TypeError(`Duplicate simulation resource pool ID: ${pool.id}.`);
     }
     ids.add(pool.id);
-    const aliasedPool = firstPoolByLogicalKey.get(pool.logical_key);
-    if (aliasedPool === undefined && pool.alias_evidence !== undefined) {
+    if (logicalKeys.has(pool.logical_key)) {
       throw new TypeError(
-        `Simulation resource alias identity evidence names a missing canonical pool: ${pool.id}.`,
+        `Simulation resource pool aliasing is unsupported; logical keys must be unique: ${pool.logical_key}.`,
       );
     }
-    if (aliasedPool !== undefined) {
-      if (
-        pool.alias_evidence?.[simResourcePoolAliasEvidenceBrand] !== true ||
-        pool.alias_evidence.canonical_id !== aliasedPool.id ||
-        pool.alias_evidence.alias_id !== pool.id ||
-        pool.alias_evidence.logical_key !== pool.logical_key
-      ) {
-        throw new TypeError(
-          `Logical simulation resource pool alias requires constructor-produced identity evidence: ${pool.logical_key}.`,
-        );
-      }
-      if (
-        !sameSourceRef(aliasedPool.source, pool.source) ||
-        !sameResourcePoolMechanics(aliasedPool, pool)
-      ) {
-        throw new TypeError(
-          `Logical simulation resource pool aliases disagree: ${pool.logical_key}.`,
-        );
-      }
-    }
-    if (aliasedPool === undefined) {
-      firstPoolByLogicalKey.set(pool.logical_key, pool);
-    }
+    logicalKeys.add(pool.logical_key);
     logicalIdentityById.set(pool.id, pool.logical_key);
   }
   return Object.freeze(Object.assign(
@@ -949,32 +892,6 @@ export function simResourcePoolSet(
       [logicalPoolIdentityByIdBrand]: logicalIdentityById,
     },
   ));
-}
-
-function sameRecoveryRuleMechanics(
-  left: ResourceRecoveryRule,
-  right: ResourceRecoveryRule,
-): boolean {
-  switch (left.kind) {
-    case 'none':
-      return right.kind === 'none';
-    case 'fixed':
-      return right.kind === 'fixed' && left.amount === right.amount;
-    case 'fixed_once_per_long_rest':
-      return right.kind === 'fixed_once_per_long_rest' &&
-        left.amount === right.amount;
-    case 'all':
-      return right.kind === 'all';
-  }
-}
-
-function sameResourcePoolMechanics(
-  left: SimResourcePool,
-  right: SimResourcePool,
-): boolean {
-  return left.maximum === right.maximum &&
-    sameRecoveryRuleMechanics(left.recovery.short_rest, right.recovery.short_rest) &&
-    sameRecoveryRuleMechanics(left.recovery.long_rest, right.recovery.long_rest);
 }
 
 export class ResourceRecoverySession {

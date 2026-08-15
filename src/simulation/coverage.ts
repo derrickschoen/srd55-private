@@ -785,6 +785,9 @@ function reviewedSaveClause(
   }
   const stableKey = sourceStableKey(`srd-5.2.1:spell:${spellSlug}`);
   const evidence = bundledHeading(heading);
+  const fixedSaveDc = sourceClause.fixed_save_dc.status === 'available'
+    ? sourceClause.fixed_save_dc.value
+    : null;
   const frequency: EventFrequency = sourceClause.frequency.kind === 'once_per_turn'
     ? {
         kind: 'once_per_turn',
@@ -796,14 +799,57 @@ function reviewedSaveClause(
       : { kind: 'each_declared_event' };
   if (
     sourceClause.success.status === 'unavailable' ||
+    sourceClause.fixed_save_dc.status === 'unavailable' ||
+    sourceClause.frequency.kind === 'unavailable' ||
     sourceClause.repetitions.status === 'unavailable' ||
     sourceClause.timing_unavailable_reason !== null
   ) {
     const unavailableReason = sourceClause.success.status === 'unavailable'
       ? sourceClause.success.reason
+      : sourceClause.fixed_save_dc.status === 'unavailable'
+        ? sourceClause.fixed_save_dc.reason
+      : sourceClause.frequency.kind === 'unavailable'
+        ? sourceClause.frequency.reason
       : sourceClause.repetitions.status === 'unavailable'
         ? sourceClause.repetitions.reason
         : sourceClause.timing_unavailable_reason ?? 'Source evidence is unavailable.';
+    const unavailableRequirements: ReviewedDamageRequirements | undefined =
+      sourceClause.success.status === 'available'
+        ? reviewedDamageRequirementsByClause[
+            `${spellSlug}:${key}` as keyof typeof reviewedDamageRequirementsByClause
+          ]
+        : undefined;
+    if (sourceClause.success.status === 'available' && unavailableRequirements === undefined) {
+      throw new TypeError(`${id} has no independently reviewed damage requirements.`);
+    }
+    if (
+      unavailableRequirements !== undefined &&
+      !damageSlotsAreBijective(
+        unavailableRequirements.failed,
+        sourceDamageSlots(sourceClause, 'failure'),
+      )
+    ) {
+      throw new TypeError(`${id} unavailable failed-save damage slots disagree with the source.`);
+    }
+    if (
+      unavailableRequirements !== undefined &&
+      !damageSlotsAreBijective(
+        unavailableRequirements.success ?? [],
+        sourceDamageSlots(sourceClause, 'success'),
+      )
+    ) {
+      throw new TypeError(`${id} unavailable successful-save damage slots disagree with the source.`);
+    }
+    const unavailableSourceTransform = sourceClause.damage_occurrences.some((occurrence) =>
+      occurrence.arm === 'success' && occurrence.roll_transform === 'floor_half'
+    ) ? 'floor_half' : 'none';
+    const unavailableSuccessTransform = unavailableRequirements?.success_roll_transform ?? 'none';
+    if (
+      unavailableRequirements !== undefined &&
+      unavailableSuccessTransform !== unavailableSourceTransform
+    ) {
+      throw new TypeError(`${id} unavailable successful-save roll transform disagrees with the source.`);
+    }
     consumedSourceClauses.add(sourceClause);
     return {
       id,
@@ -820,12 +866,12 @@ function reviewedSaveClause(
       evidence,
       source_span: sourceClause.span,
       ability: sourceClause.ability,
-      fixed_save_dc: sourceClause.fixed_save_dc,
+      fixed_save_dc: fixedSaveDc,
       frequency,
-      failed_damage_signature_slots: [],
-      success_damage_signature_slots: [],
+      failed_damage_signature_slots: unavailableRequirements?.failed ?? [],
+      success_damage_signature_slots: unavailableRequirements?.success ?? [],
       failed_damage_slot_repetitions: { minimum: 1, maximum: 1 },
-      success_roll_transform: 'none',
+      success_roll_transform: unavailableSuccessTransform,
       duration: sourceClause.duration,
     };
   }
@@ -872,7 +918,7 @@ function reviewedSaveClause(
     evidence,
     source_span: sourceClause.span,
     ability: sourceClause.ability,
-    fixed_save_dc: sourceClause.fixed_save_dc,
+    fixed_save_dc: fixedSaveDc,
     frequency,
     failed_damage_signature_slots: requirements.failed,
     success_damage_signature_slots: requirements.success ?? [],
@@ -972,6 +1018,108 @@ export const reviewedSaveSuccessClauses = {
   wind_wall: reviewedSaveClause('damage', 'wind-wall', 'Wind Wall'),
 } as const satisfies Record<string, ReviewedSaveSuccessClause>;
 
+/**
+ * Independent success-kind oracle transcribed from the raw bundled spell text
+ * and the round-10 supervisor/reviewer clause-by-clause enumerations. It is not
+ * generated from `sourceDerivedSaveDamageCandidates`. The exhaustive key type
+ * makes a new reviewed clause fail compilation until a human classifies it;
+ * the runtime comparison makes an extractor reclassification fail module load
+ * unless that independent transcription is deliberately reviewed too.
+ */
+export const reviewedSaveSuccessKindOracle = Object.freeze({
+  acid_splash: 'none',
+  arcane_hand_grasping: 'unavailable',
+  befuddlement: 'half',
+  bestow_curse_damage: 'unavailable',
+  black_tentacles: 'none',
+  blade_barrier: 'half',
+  blight: 'half',
+  burning_hands: 'half',
+  call_lightning: 'half',
+  chain_lightning: 'half',
+  circle_of_death: 'half',
+  cloudkill: 'half',
+  cone_of_cold: 'half',
+  conjure_animals: 'none',
+  conjure_celestial: 'half',
+  conjure_elemental_initial: 'none',
+  conjure_elemental_repeat: 'none',
+  conjure_woodland_beings: 'half',
+  contagion: 'none',
+  contact_other_plane: 'none',
+  control_water: 'half',
+  delayed_blast_fireball: 'half',
+  disintegrate: 'none',
+  dissonant_whispers: 'half',
+  dragons_breath: 'half',
+  dream: 'none',
+  earthquake: 'half',
+  enlarge_reduce_damage: 'unavailable',
+  ensnaring_strike: 'unavailable',
+  faithful_hound: 'none',
+  finger_of_death: 'half',
+  fireball: 'half',
+  fire_storm: 'half',
+  flame_strike: 'half',
+  flaming_sphere: 'half',
+  freezing_sphere: 'half',
+  geas: 'unavailable',
+  glyph_of_warding: 'half',
+  guardian_of_faith: 'half',
+  harm: 'half',
+  hellish_rebuke: 'half',
+  ice_knife: 'none',
+  ice_storm: 'half',
+  incendiary_cloud: 'half',
+  inflict_wounds: 'half',
+  insect_plague: 'half',
+  lightning_bolt: 'half',
+  meteor_swarm: 'half',
+  mind_spike: 'half',
+  moonbeam: 'half',
+  phantasmal_force: 'unavailable',
+  phantasmal_killer_initial: 'half',
+  phantasmal_killer_repeat: 'none',
+  prismatic_spray: 'half',
+  prismatic_wall: 'half',
+  ray_of_enfeeblement: 'unavailable',
+  sacred_flame: 'none',
+  searing_smite: 'unavailable',
+  shatter: 'half',
+  spirit_guardians: 'half',
+  storm_of_vengeance_initial: 'none',
+  storm_of_vengeance_lightning: 'half',
+  summon_dragon: 'half',
+  sunbeam: 'half',
+  sunburst: 'half',
+  symbol: 'half',
+  thunderwave: 'half',
+  tsunami_initial: 'half',
+  tsunami_ongoing: 'none',
+  vicious_mockery: 'none',
+  vitriolic_sphere: 'sourced_damage',
+  wall_of_fire: 'half',
+  wall_of_ice_initial: 'half',
+  wall_of_ice_frigid_air: 'half',
+  wall_of_thorns_piercing: 'half',
+  wall_of_thorns_slashing: 'half',
+  weird_initial: 'half',
+  weird_repeat: 'none',
+  wind_wall: 'half',
+} as const satisfies Record<
+  keyof typeof reviewedSaveSuccessClauses,
+  ReviewedSaveSuccessClause['kind']
+>);
+
+for (const [key, expectedKind] of Object.entries(reviewedSaveSuccessKindOracle)) {
+  const actual = reviewedSaveSuccessClauses[key as keyof typeof reviewedSaveSuccessClauses];
+  if (actual.kind !== expectedKind) {
+    throw new TypeError(
+      `${actual.id} source-derived success kind ${actual.kind} disagrees with the independent reviewed oracle ${expectedKind}.`,
+    );
+  }
+}
+
 export const reviewedSaveEffectStableKeys = Object.fromEntries(
   Object.entries(reviewedSaveSuccessClauses).map(([key, clause]) => [
     key,
@@ -1043,20 +1191,22 @@ function damageMatchesSourceClause(
       ));
   }
   type SuppliedPool = {
+    readonly instance_index: number;
     readonly damage_type: string;
     readonly kind: 'dice' | 'flat';
     readonly die: number | null;
     readonly amount: number;
   };
   const suppliedByKey = new Map<string, SuppliedPool>();
-  for (const instance of damage) {
+  for (const [instanceIndex, instance] of damage.entries()) {
     for (const component of instance.components) {
       const kind = component.kind;
       const die = kind === 'dice' ? component.pool.die : null;
       const amount = kind === 'dice' ? component.pool.count : component.modifier;
-      const key = JSON.stringify([instance.damage_type, kind, die]);
+      const key = JSON.stringify([instanceIndex, instance.damage_type, kind, die]);
       const existing = suppliedByKey.get(key);
       suppliedByKey.set(key, {
+        instance_index: instanceIndex,
         damage_type: instance.damage_type,
         kind,
         die,
@@ -1156,10 +1306,38 @@ export function saveSuccessOutcomeHasEvidence(
   saveDc: number,
   frequency: EventFrequency,
 ): boolean {
+  return saveSuccessOutcomeEvidenceFailureReason(
+    effect,
+    clauseId,
+    outcome,
+    ability,
+    damageOnFailedSave,
+    duration,
+    saveDc,
+    frequency,
+  ) === null;
+}
+
+export function saveSuccessOutcomeEvidenceFailureReason(
+  effect: SourceRef,
+  clauseId: SaveSuccessClauseId,
+  outcome: SaveSuccessOutcome,
+  ability: Ability,
+  damageOnFailedSave: readonly DamageInstance[],
+  duration: SavingThrowDamageDuration,
+  saveDc: number,
+  frequency: EventFrequency,
+): string | null {
   const expected = saveSuccessOutcomeEvidenceManifest.get(clauseId);
-  return expected !== undefined &&
-    expected.kind !== 'unavailable' &&
-    expected.unavailable_reason === null &&
+  if (expected?.kind === 'unavailable') {
+    return expected.unavailable_reason ??
+      'The reviewed source clause is unavailable for numeric folding.';
+  }
+  const genericReason = `The cited evidence does not establish the ${outcome.kind} successful-save clause.`;
+  if (expected === undefined) {
+    return genericReason;
+  }
+  const matches =
     sameSourceRef(expected.effect_source, effect) &&
     expected.kind === outcome.kind &&
     samePublicSource(outcome.evidence, expected.evidence) &&
@@ -1182,6 +1360,13 @@ export function saveSuccessOutcomeHasEvidence(
         { minimum: 1, maximum: 1 },
       )
     ));
+  if (!matches) {
+    return genericReason;
+  }
+  if (expected.unavailable_reason !== null) {
+    return expected.unavailable_reason;
+  }
+  return null;
 }
 
 export const expandedCriticalHitEvidenceManifest: ReadonlyMap<

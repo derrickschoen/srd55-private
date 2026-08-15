@@ -24,7 +24,6 @@ import {
   projectOwnedSourcePath,
   restCadence,
   simResourceId,
-  simResourcePoolAlias,
   simResourcePoolKey,
   simResourcePoolSet,
   sourceStableKey,
@@ -357,25 +356,10 @@ describe('DPR branded constructors', () => {
       },
     )).toThrow('does not establish recovery for this resource source');
 
-    const aliasedSorceryPoints = simResourcePoolAlias(
+    expect(() => simResourcePoolSet([
       sorceryPoints,
-      simResourceId('duplicate:sorcery-points'),
-    );
-    const aliasSession = createResourceRecoverySession(
-      simResourcePoolSet([sorceryPoints, aliasedSorceryPoints]),
-    );
-    const firstAliasRecovery = aliasSession.recover(
-      sorceryPoints.id,
-      'short_rest',
-      10,
-    ).recovered_units;
-    const secondAliasRecovery = aliasSession.recover(
-      aliasedSorceryPoints.id,
-      'short_rest',
-      10,
-    ).recovered_units;
-    expect([firstAliasRecovery, secondAliasRecovery]).toEqual([5, 0]);
-    expect(firstAliasRecovery + secondAliasRecovery).toBe(5);
+      { ...sorceryPoints, id: simResourceId('duplicate:sorcery-points') },
+    ])).toThrow('aliasing is unsupported');
 
     const distinctSorceryPoints: SimResourcePool = {
       ...sorceryPoints,
@@ -421,7 +405,7 @@ describe('DPR branded constructors', () => {
         ...secondPool,
         logical_key: sorceryPoints.logical_key,
       },
-    ])).toThrow('requires constructor-produced identity evidence');
+    ])).toThrow('aliasing is unsupported');
     const sameSourceSession = createResourceRecoverySession(
       simResourcePoolSet([sorceryPoints, secondPool]),
     );

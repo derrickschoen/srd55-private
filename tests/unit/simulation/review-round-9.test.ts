@@ -12,7 +12,6 @@ import {
   routineEventId,
   saveDifficultyClass,
   simResourceId,
-  simResourcePoolAlias,
   simResourcePoolKey,
   simResourcePoolSet,
   sourceStableKey,
@@ -152,7 +151,7 @@ describe('round 9 refusal discipline reproductions', () => {
     }
   });
 
-  it('refuses a raw same-key alias assertion without identity evidence', () => {
+  it('refuses resource-pool aliasing and accepts independent pools', () => {
     const first: SimResourcePool = {
       id: simResourceId('round-9:first'),
       logical_key: simResourcePoolKey('round-9:claimed-alias'),
@@ -165,37 +164,18 @@ describe('round 9 refusal discipline reproductions', () => {
       id: simResourceId('round-9:second'),
       source: source('round-9:second'),
     };
-    expect(() => simResourcePoolSet([first, second])).toThrow(
-      'identity evidence',
-    );
+    expect(() => simResourcePoolSet([first, second])).toThrow('aliasing is unsupported');
     expect(() => simResourcePoolSet([
       first,
       { ...first, id: simResourceId('round-9:same-source-claim') },
-    ])).toThrow('identity evidence');
-    const provenAlias = simResourcePoolAlias(
-      first,
-      simResourceId('round-9:proven-alias'),
-    );
-    const secondProvenAlias = simResourcePoolAlias(
-      first,
-      simResourceId('round-9:second-proven-alias'),
-    );
-    expect(() => simResourcePoolSet([
-      first,
-      provenAlias,
-      secondProvenAlias,
-    ])).not.toThrow();
-    expect(() => simResourcePoolSet([
-      first,
-      { ...provenAlias, id: simResourceId('round-9:stolen-proof') },
-    ])).toThrow('identity evidence');
+    ])).toThrow('aliasing is unsupported');
     expect(() => simResourcePoolSet([
       first,
       { ...second, logical_key: simResourcePoolKey('round-9:independent') },
     ])).not.toThrow();
   });
 
-  it('accepts equivalent split pools without merging type, arm, or clause', () => {
+  it('keeps roll-boundary, type, arm, and clause partitions distinct', () => {
     const clause = reviewedSaveSuccessClauses.vitriolic_sphere;
     const event = saveEvent(clause, {
       save_dc: saveDifficultyClass(11),
@@ -214,10 +194,8 @@ describe('round 9 refusal discipline reproductions', () => {
       },
     });
     const result = foldSavingThrowEvent(event, target('Acid'));
-    expect(result.status).toBe('available');
-    if (result.status === 'available') {
-      expect(result.expected_damage).toBeCloseTo(24.875, 12);
-    }
+    expect(result.status).toBe('unavailable');
+    expect(result).not.toHaveProperty('expected_damage');
     expect(foldSavingThrowEvent({
       ...event,
       damage_on_failed_save: [
@@ -238,10 +216,8 @@ describe('round 9 refusal discipline reproductions', () => {
       ],
       on_success: { kind: 'none', evidence: conjureAnimals.evidence },
     }), target('Slashing'));
-    expect(splitAcrossInstances.status).toBe('available');
-    if (splitAcrossInstances.status === 'available') {
-      expect(splitAcrossInstances.expected_damage).toBeCloseTo(8.25, 12);
-    }
+    expect(splitAcrossInstances.status).toBe('unavailable');
+    expect(splitAcrossInstances).not.toHaveProperty('expected_damage');
   });
 
   it('gives the explicit D239 workflow when page pins fail', () => {
@@ -258,7 +234,6 @@ describe('round 9 exhaustive source classifications', () => {
   it('derives all 26 former none arms or refuses the eight gate clauses', () => {
     const derivedNone = [
       'acid_splash',
-      'befuddlement',
       'black_tentacles',
       'conjure_animals',
       'conjure_elemental_initial',
@@ -316,13 +291,17 @@ describe('round 9 exhaustive source classifications', () => {
       ['conjure_celestial', 'once_per_turn', 'target'],
       ['conjure_elemental_repeat', 'once_per_turn', 'target'],
       ['conjure_woodland_beings', 'once_per_turn', 'target'],
+      ['control_water', 'once_per_turn', 'target'],
+      ['guardian_of_faith', 'once_per_turn', 'target'],
       ['incendiary_cloud', 'once_per_turn', 'target'],
       ['insect_plague', 'once_per_turn', 'target'],
       ['moonbeam', 'once_per_turn', 'target'],
       ['phantasmal_killer_repeat', 'once_per_turn', 'target'],
       ['searing_smite', 'once_per_turn', 'target'],
       ['spirit_guardians', 'once_per_turn', 'target'],
+      ['symbol', 'once_per_turn', 'target'],
       ['tsunami_ongoing', 'once_per_round', null],
+      ['wall_of_ice_frigid_air', 'once_per_turn', 'target'],
       ['wall_of_thorns_slashing', 'once_per_turn', 'target'],
       ['weird_repeat', 'once_per_turn', 'target'],
     ]);
@@ -394,12 +373,15 @@ describe('round 9 exhaustive source classifications', () => {
     expect(mutated.clauses_by_heading.get('Tsunami')?.[1]?.frequency)
       .toEqual({ kind: 'once_per_turn', turn: 'target' });
     expect(mutated.clauses_by_heading.get('Contact Other Plane')?.[0]?.fixed_save_dc)
-      .toBe(16);
+      .toEqual({ status: 'available', value: 16 });
     expect(mutated.clauses_by_heading.get('Prismatic Spray')?.[0]?.repetitions.status)
       .toBe('unavailable');
     expect(sourceDerivedSaveDamageCandidates.find((candidate) =>
       candidate.heading === 'Prismatic Spray'
-    )?.repetitions).toEqual({ status: 'available', minimum: 1, maximum: 2 });
+    )?.repetitions).toEqual({
+      status: 'unavailable',
+      reason: 'The random ray selection and conditional two-ray branch are not representable.',
+    });
     expect(sourceDerivedSaveDamageCandidates.find((candidate) =>
       candidate.heading === 'Acid Splash'
     )?.repetitions).toEqual({ status: 'available', minimum: 1, maximum: 1 });

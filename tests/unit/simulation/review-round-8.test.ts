@@ -104,7 +104,7 @@ describe('round 8 clause-local source evidence', () => {
 });
 
 describe('round 8 damage-slot matching', () => {
-  it('accepts Vitriolic Sphere with half the initial 10d4 and explicit delayed damage', () => {
+  it('refuses Vitriolic Sphere until its explicit delayed damage can be scheduled', () => {
     const clause = reviewedSaveSuccessClauses.vitriolic_sphere;
     const acid = diceDamage(clause.effect_source, 'Acid', [
       { count: 10, die: 4 },
@@ -132,9 +132,10 @@ describe('round 8 damage-slot matching', () => {
       },
     };
     const result = foldSavingThrowEvent(event, target('Acid'));
-    expect(result.status).toBe('available');
-    if (result.status === 'available') {
-      expect(result.expected_damage).toBeCloseTo(24.875, 12);
+    expect(result.status).toBe('unavailable');
+    expect(result).not.toHaveProperty('expected_damage');
+    if (result.status === 'unavailable') {
+      expect(result.reason).toContain('delayed');
     }
     expect(foldSavingThrowEvent({
       ...event,
@@ -193,7 +194,7 @@ describe('round 8 damage-slot matching', () => {
       .toBe('available');
   });
 
-  it('accepts one or two Prismatic Spray damaging rays and refuses three', () => {
+  it('refuses caller-selected Prismatic Spray rays without random weighting', () => {
     const clause = reviewedSaveSuccessClauses.prismatic_spray;
     const event = (damage: SavingThrowDamageEvent['damage_on_failed_save']): SavingThrowDamageEvent => ({
       kind: 'saving_throw_damage',
@@ -212,11 +213,15 @@ describe('round 8 damage-slot matching', () => {
     const acid = diceDamage(clause.effect_source, 'Acid', [{ count: 12, die: 6 }]);
     const cold = diceDamage(clause.effect_source, 'Cold', [{ count: 12, die: 6 }]);
     const prismaticTarget = target('Fire', 'Acid', 'Cold');
-    expect(foldSavingThrowEvent(event([fire]), prismaticTarget).status).toBe('available');
+    const one = foldSavingThrowEvent(event([fire]), prismaticTarget);
+    expect(one.status).toBe('unavailable');
+    if (one.status === 'unavailable') {
+      expect(one.reason).toContain('random');
+    }
     expect(foldSavingThrowEvent(event([fire, acid]), prismaticTarget).status)
-      .toBe('available');
+      .toBe('unavailable');
     expect(foldSavingThrowEvent(event([fire, fire]), prismaticTarget).status)
-      .toBe('available');
+      .toBe('unavailable');
     expect(foldSavingThrowEvent(event([
       diceDamage(clause.effect_source, 'Fire', [{ count: 24, die: 6 }]),
     ]), prismaticTarget).status).toBe('unavailable');
