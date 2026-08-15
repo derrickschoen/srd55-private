@@ -356,18 +356,9 @@ describe('DPR branded constructors', () => {
       },
     )).toThrow('does not establish recovery for this resource source');
 
-    expect(() => simResourcePoolSet([
-      sorceryPoints,
-      {
-        ...sorceryPoints,
-        id: simResourceId('duplicate:sorcery-points'),
-      },
-    ])).toThrow('Duplicate logical simulation resource pool key');
-
     const aliasedSorceryPoints: SimResourcePool = {
       ...sorceryPoints,
       id: simResourceId('duplicate:sorcery-points'),
-      logical_key: simResourcePoolKey('duplicate:sorcery-points'),
     };
     const aliasSession = createResourceRecoverySession(
       simResourcePoolSet([sorceryPoints, aliasedSorceryPoints]),
@@ -384,6 +375,20 @@ describe('DPR branded constructors', () => {
     ).recovered_units;
     expect([firstAliasRecovery, secondAliasRecovery]).toEqual([5, 0]);
     expect(firstAliasRecovery + secondAliasRecovery).toBe(5);
+
+    const distinctSorceryPoints: SimResourcePool = {
+      ...aliasedSorceryPoints,
+      id: simResourceId('distinct:sorcery-points'),
+      logical_key: simResourcePoolKey('distinct:sorcery-points'),
+    };
+    const distinctSession = createResourceRecoverySession(
+      simResourcePoolSet([sorceryPoints, distinctSorceryPoints]),
+    );
+    expect([
+      distinctSession.recover(sorceryPoints.id, 'short_rest', 10).recovered_units,
+      distinctSession.recover(distinctSorceryPoints.id, 'short_rest', 10)
+        .recovered_units,
+    ]).toEqual([5, 5]);
 
     const secondMaximum = positiveResourceMaximum(6);
     const secondPool: SimResourcePool = {
@@ -409,6 +414,13 @@ describe('DPR branded constructors', () => {
         long_rest: { kind: 'none' },
       },
     };
+    expect(() => simResourcePoolSet([
+      sorceryPoints,
+      {
+        ...secondPool,
+        logical_key: sorceryPoints.logical_key,
+      },
+    ])).toThrow('Logical simulation resource pool aliases disagree');
     const sameSourceSession = createResourceRecoverySession(
       simResourcePoolSet([sorceryPoints, secondPool]),
     );
@@ -822,8 +834,14 @@ describe('coverage vocabularies and bundled provenance', () => {
       ]]);
     expect(reviewedSaveSuccessClauses.vitriolic_sphere.success_damage_signature_slots)
       .toEqual([[
-        { damage_type: 'Acid', dice_count: 5, die_size: 4, flat_modifier: null },
+        { damage_type: 'Acid', dice_count: 10, die_size: 4, flat_modifier: null },
       ]]);
+    expect(reviewedSaveSuccessClauses.vitriolic_sphere.success_roll_transform)
+      .toBe('floor_half');
+    expect(reviewedSaveSuccessClauses.vitriolic_sphere.duration).toEqual({
+      kind: 'includes_delayed_damage',
+      delayed_until: 'end_of_target_next_turn',
+    });
   });
 
   it('reconciles every high-recall lexical suspect or exact reviewed exclusion', () => {

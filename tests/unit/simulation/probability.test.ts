@@ -628,6 +628,7 @@ describe('damage responses and save outcomes', () => {
       saveEvent({
         kind: 'sourced_damage',
         evidence: publicProbabilityCoverageManifest.saving_throw,
+        roll_transform: 'none',
         damage: [successDamage],
       }),
       { save_bonus: targetSaveBonus(0), damage_responses: normalSlashing },

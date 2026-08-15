@@ -220,6 +220,7 @@ describe('save fold arms and contributions', () => {
       base({
         kind: 'sourced_damage',
         evidence: publicProbabilityCoverageManifest.saving_throw,
+        roll_transform: 'none',
         damage: [{
           source: weapon,
           damage_type: fire,

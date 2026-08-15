@@ -592,6 +592,12 @@ export type EventFrequency =
     };
 
 export type InstantaneousDuration = { readonly kind: 'instantaneous' };
+export type SavingThrowDamageDuration =
+  | InstantaneousDuration
+  | {
+      readonly kind: 'includes_delayed_damage';
+      readonly delayed_until: 'end_of_target_next_turn';
+    };
 
 export type SetupDuration =
   | {
@@ -681,6 +687,7 @@ export type SaveSuccessOutcome =
       readonly kind: 'sourced_damage';
       readonly evidence: PublicSourceRef;
       readonly damage: NonEmptyReadonlyArray<DamageInstance>;
+      readonly roll_transform: 'none' | 'floor_half';
     };
 
 export type SavingThrowDamageEvent = {
@@ -691,7 +698,7 @@ export type SavingThrowDamageEvent = {
   readonly save_dc: SaveDifficultyClass;
   readonly roll_state: RollState;
   readonly frequency: EventFrequency;
-  readonly duration: InstantaneousDuration;
+  readonly duration: SavingThrowDamageDuration;
   readonly save_success_clause_id: SaveSuccessClauseId;
   readonly damage_on_failed_save: NonEmptyReadonlyArray<DamageInstance>;
   readonly on_success: SaveSuccessOutcome;
@@ -780,7 +787,7 @@ export type ResourceRecovery = {
 
 export type SimResourcePool = {
   readonly id: SimResourceId;
-  /** Logical identity of the expendable pool; provenance is recorded separately. */
+  /** Equal keys explicitly alias one pool; different keys are always independent. */
   readonly logical_key: SimResourcePoolKey;
   readonly source: SourceRef;
   readonly maximum: PositiveResourceMaximum;
@@ -788,12 +795,12 @@ export type SimResourcePool = {
 };
 
 const simResourcePoolSetBrand: unique symbol = Symbol('SimResourcePoolSet');
-const mechanicalPoolIdentityByIdBrand: unique symbol = Symbol(
-  'MechanicalPoolIdentityById',
+const logicalPoolIdentityByIdBrand: unique symbol = Symbol(
+  'LogicalPoolIdentityById',
 );
 export type SimResourcePoolSet = readonly SimResourcePool[] & {
   readonly [simResourcePoolSetBrand]: true;
-  readonly [mechanicalPoolIdentityByIdBrand]: ReadonlyMap<SimResourceId, string>;
+  readonly [logicalPoolIdentityByIdBrand]: ReadonlyMap<SimResourceId, string>;
 };
 
 export type ResourceRecoveryResult = {
@@ -863,67 +870,63 @@ export function simResourcePoolSet(
   pools: readonly SimResourcePool[],
 ): SimResourcePoolSet {
   const ids = new Set<SimResourceId>();
-  const logicalKeys = new Set<SimResourcePoolKey>();
-  const mechanicalIdentityById = new Map<SimResourceId, string>();
+  const firstPoolByLogicalKey = new Map<SimResourcePoolKey, SimResourcePool>();
+  const logicalIdentityById = new Map<SimResourceId, string>();
   for (const pool of pools) {
     if (ids.has(pool.id)) {
       throw new TypeError(`Duplicate simulation resource pool ID: ${pool.id}.`);
     }
     ids.add(pool.id);
-    if (logicalKeys.has(pool.logical_key)) {
+    const aliasedPool = firstPoolByLogicalKey.get(pool.logical_key);
+    if (
+      aliasedPool !== undefined &&
+      !sameResourcePoolMechanics(aliasedPool, pool)
+    ) {
       throw new TypeError(
-        `Duplicate logical simulation resource pool key: ${pool.logical_key}.`,
+        `Logical simulation resource pool aliases disagree: ${pool.logical_key}.`,
       );
     }
-    logicalKeys.add(pool.logical_key);
-    mechanicalIdentityById.set(pool.id, mechanicalPoolIdentity(pool));
+    firstPoolByLogicalKey.set(pool.logical_key, pool);
+    logicalIdentityById.set(pool.id, pool.logical_key);
   }
   return Object.freeze(Object.assign(
     [...pools],
     {
       [simResourcePoolSetBrand]: true as const,
-      [mechanicalPoolIdentityByIdBrand]: mechanicalIdentityById,
+      [logicalPoolIdentityByIdBrand]: logicalIdentityById,
     },
   ));
 }
 
-function sourceRefIdentity(source: SourceRef): readonly (string | number)[] {
-  switch (source.kind) {
-    case 'character_source':
-      return [source.kind, source.source_instance_id, source.stable_key];
-    case 'catalog_content':
-      return [source.kind, source.content_key, source.stable_key];
-    case 'character_weapon':
-      return [source.kind, source.weapon_id, source.stable_key];
-  }
-}
-
-function recoveryRuleIdentity(
-  rule: ResourceRecoveryRule,
-): readonly (string | number)[] {
-  switch (rule.kind) {
+function sameRecoveryRuleMechanics(
+  left: ResourceRecoveryRule,
+  right: ResourceRecoveryRule,
+): boolean {
+  switch (left.kind) {
     case 'none':
-      return ['none'];
+      return right.kind === 'none';
     case 'fixed':
+      return right.kind === 'fixed' && left.amount === right.amount;
     case 'fixed_once_per_long_rest':
-      return [rule.kind, rule.amount, rule.evidence.clause_id];
+      return right.kind === 'fixed_once_per_long_rest' &&
+        left.amount === right.amount;
     case 'all':
-      return [rule.kind, rule.evidence.clause_id];
+      return right.kind === 'all';
   }
 }
 
-function mechanicalPoolIdentity(pool: SimResourcePool): string {
-  return JSON.stringify([
-    sourceRefIdentity(pool.source),
-    pool.maximum,
-    recoveryRuleIdentity(pool.recovery.short_rest),
-    recoveryRuleIdentity(pool.recovery.long_rest),
-  ]);
+function sameResourcePoolMechanics(
+  left: SimResourcePool,
+  right: SimResourcePool,
+): boolean {
+  return left.maximum === right.maximum &&
+    sameRecoveryRuleMechanics(left.recovery.short_rest, right.recovery.short_rest) &&
+    sameRecoveryRuleMechanics(left.recovery.long_rest, right.recovery.long_rest);
 }
 
 export class ResourceRecoverySession {
   readonly #pools: ReadonlyMap<SimResourceId, SimResourcePool>;
-  readonly #mechanicalIdentityById: ReadonlyMap<SimResourceId, string>;
+  readonly #logicalIdentityById: ReadonlyMap<SimResourceId, string>;
   readonly #oncePerLongRestUsed = new Map<string, boolean>();
 
   private constructor(pools: SimResourcePoolSet) {
@@ -931,8 +934,8 @@ export class ResourceRecoverySession {
       throw new TypeError('Recovery sessions require a validated pool set.');
     }
     this.#pools = new Map(pools.map((pool) => [pool.id, pool]));
-    this.#mechanicalIdentityById = pools[mechanicalPoolIdentityByIdBrand];
-    for (const identity of this.#mechanicalIdentityById.values()) {
+    this.#logicalIdentityById = pools[logicalPoolIdentityByIdBrand];
+    for (const identity of this.#logicalIdentityById.values()) {
       this.#oncePerLongRestUsed.set(identity, false);
     }
   }
@@ -950,23 +953,23 @@ export class ResourceRecoverySession {
     if (pool === undefined) {
       throw new TypeError(`Recovery session has no resource pool ${poolId}.`);
     }
-    const mechanicalIdentity = this.#mechanicalIdentityById.get(poolId);
-    if (mechanicalIdentity === undefined) {
+    const logicalIdentity = this.#logicalIdentityById.get(poolId);
+    if (logicalIdentity === undefined) {
       throw new TypeError(`Recovery state has no resource pool ${poolId}.`);
     }
-    const used = this.#oncePerLongRestUsed.get(mechanicalIdentity);
+    const used = this.#oncePerLongRestUsed.get(logicalIdentity);
     if (used === undefined) {
       throw new TypeError(`Recovery state has no resource pool ${poolId}.`);
     }
     const result = recoveredResourceUnits(pool, rest, expendedUnits, used);
     if (rest === 'long_rest') {
-      this.#oncePerLongRestUsed.set(mechanicalIdentity, false);
+      this.#oncePerLongRestUsed.set(logicalIdentity, false);
     } else if (
       pool.recovery.short_rest.kind === 'fixed_once_per_long_rest' &&
       !used &&
       result.recovered_units > 0
     ) {
-      this.#oncePerLongRestUsed.set(mechanicalIdentity, true);
+      this.#oncePerLongRestUsed.set(logicalIdentity, true);
     }
     return result;
   }

@@ -8,6 +8,26 @@ export type FailedDamageSignature = {
   readonly flat_modifier: number | null;
 };
 
+export type SourceDamageArm = 'failure' | 'success';
+export type SourceDamageTiming =
+  | 'on_save_resolution'
+  | 'end_of_target_next_turn';
+export type SourceDamageRollTransform = 'none' | 'floor_half';
+
+/**
+ * One clause-local occurrence of a damage amount and its associated type.
+ * Alternative types that share one amount share a slot index. Offsets are
+ * relative to the owning spell body, never to the unsliced PDF row stream.
+ */
+export type SourceDamageOccurrence = FailedDamageSignature & {
+  readonly arm: SourceDamageArm;
+  readonly timing: SourceDamageTiming;
+  readonly roll_transform: SourceDamageRollTransform;
+  readonly start: number;
+  readonly end: number;
+  readonly slot_index: number;
+};
+
 export type SourceDerivedSaveClause = {
   readonly span: string;
   readonly start: number;
@@ -16,6 +36,7 @@ export type SourceDerivedSaveClause = {
   readonly ability: Ability;
   readonly kind: SaveSuccessOutcome['kind'];
   readonly failed_damage_signatures: readonly FailedDamageSignature[];
+  readonly damage_occurrences: readonly SourceDamageOccurrence[];
 };
 
 export type SourceDerivedSaveDamageCandidate = SourceDerivedSaveClause & {
@@ -154,6 +175,11 @@ export function spellDescriptionsFromFullLayout(
     const footer = PAGE_FOOTER.exec((lines[footerIndex] ?? '').trim());
     const page = Number(footer?.[1] ?? footer?.[2]);
     if (page < 107 || page > 175) {
+      if (lines.some((line) => SPELL_METADATA.test(line.trim()))) {
+        throw new TypeError(
+          `Found spell metadata outside the reviewed SRD spell pages 107-175 on page ${String(page)}.`,
+        );
+      }
       continue;
     }
     seenPages.push(page);
@@ -172,7 +198,13 @@ export function spellDescriptionsFromFullLayout(
       `Expected complete SRD spell pages 107-175; read ${seenPages.join(', ')}.`,
     );
   }
-  return headingsFromReadingOrderLines(readingOrder);
+  const descriptions = headingsFromReadingOrderLines(readingOrder);
+  if (descriptions.size !== 339) {
+    throw new TypeError(
+      `Expected 339 SRD spell descriptions on pages 107-175; read ${String(descriptions.size)}.`,
+    );
+  }
+  return descriptions;
 }
 
 function sourceAbility(span: string, fallback: Ability | null): Ability {
@@ -197,21 +229,39 @@ function rangeContains(
 export function sourceDamageSignatures(
   span: string,
 ): readonly FailedDamageSignature[] {
-  const signatures: FailedDamageSignature[] = [];
+  return damageOccurrenceGroups(span).flatMap((group) => group.signatures);
+}
+
+type DamageOccurrenceGroup = {
+  readonly start: number;
+  readonly end: number;
+  readonly signatures: readonly FailedDamageSignature[];
+};
+
+function damageOccurrenceGroups(span: string): readonly DamageOccurrenceGroup[] {
+  const groups: DamageOccurrenceGroup[] = [];
   const directlyOwnedDice: { start: number; end: number }[] = [];
   const dicePattern = new RegExp(
-    `(\\d+)d(\\d+)(?:\\s*\\+\\s*(\\d+))?[^.]{0,55}?\\b(${DAMAGE_TYPES}) damage`,
+    `(\\d+)d(\\d+)(?:\\s*\\+\\s*(\\d+))?([^.]{0,80}?)\\bdamage`,
     'giu',
   );
   for (const match of span.matchAll(dicePattern)) {
     const start = match.index ?? 0;
     const diceText = `${match[1] ?? ''}d${match[2] ?? ''}`;
-    directlyOwnedDice.push({ start, end: start + diceText.length });
-    signatures.push({
-      dice_count: Number(match[1]),
-      die_size: Number(match[2]),
-      flat_modifier: match[3] === undefined ? null : Number(match[3]),
-      damage_type: match[4] as DamageType,
+    const types = [...(match[4] ?? '').matchAll(new RegExp(`\\b(${DAMAGE_TYPES})\\b`, 'giu'))]
+      .map((typeMatch) => typeMatch[1] as DamageType);
+    if (types.length > 0) {
+      directlyOwnedDice.push({ start, end: start + diceText.length });
+    }
+    groups.push({
+      start,
+      end: start + (match[0]?.length ?? diceText.length),
+      signatures: (types.length === 0 ? [null] : types).map((damageType) => ({
+        dice_count: Number(match[1]),
+        die_size: Number(match[2]),
+        flat_modifier: null,
+        damage_type: damageType,
+      })),
     });
   }
   const flatPattern = new RegExp(
@@ -220,16 +270,20 @@ export function sourceDamageSignatures(
   );
   for (const match of span.matchAll(flatPattern)) {
     if (!span.slice(Math.max(0, (match.index ?? 0) - 3), match.index).includes('d')) {
-      signatures.push({
-        dice_count: null,
-        die_size: null,
-        flat_modifier: Number(match[1]),
-        damage_type: match[2] as DamageType,
+      groups.push({
+        start: match.index ?? 0,
+        end: (match.index ?? 0) + (match[0]?.length ?? 0),
+        signatures: [{
+          dice_count: null,
+          die_size: null,
+          flat_modifier: Number(match[1]),
+          damage_type: match[2] as DamageType,
+        }],
       });
     }
   }
   const reverseDicePattern = new RegExp(
-    `\\b(${DAMAGE_TYPES}) damage[^.]{0,80}?(\\d+)d(\\d+)(?:\\s*\\+\\s*(\\d+))?`,
+    `\\b(${DAMAGE_TYPES}) damage[\\s\\S]{0,220}?(\\d+)d(\\d+)(?:\\s*\\+\\s*(\\d+))?`,
     'giu',
   );
   for (const match of span.matchAll(reverseDicePattern)) {
@@ -243,34 +297,167 @@ export function sourceDamageSignatures(
     if (rangeContains(directlyOwnedDice, diceIndex)) {
       continue;
     }
-    signatures.push({
-      dice_count: Number(match[2]),
-      die_size: Number(match[3]),
-      flat_modifier: match[4] === undefined ? null : Number(match[4]),
-      damage_type: match[1] as DamageType,
+    groups.push({
+      start: diceIndex,
+      end: diceIndex + diceText.length,
+      signatures: [{
+        dice_count: Number(match[2]),
+        die_size: Number(match[3]),
+        flat_modifier: null,
+        damage_type: match[1] as DamageType,
+      }],
     });
   }
-  if (signatures.length === 0 && /\d+d\d+[^.]{0,70}?damage of (?:the|a) [^.]+ type/iu.test(span)) {
+  if (groups.length === 0 && /\d+d\d+[^.]{0,70}?damage of (?:the|a) [^.]+ type/iu.test(span)) {
     const dice = /(\d+)d(\d+)/u.exec(span);
-    signatures.push({
-      dice_count: dice === null ? null : Number(dice[1]),
-      die_size: dice === null ? null : Number(dice[2]),
-      flat_modifier: null,
-      damage_type: null,
-    });
-  }
-  if (signatures.length === 0) {
-    const dice = /(\d+)d(\d+)[^.]{0,80}?damage/iu.exec(span);
-    if (dice !== null) {
-      signatures.push({
-        dice_count: Number(dice[1]),
-        die_size: Number(dice[2]),
+    const start = dice?.index ?? 0;
+    groups.push({
+      start,
+      end: start + (dice?.[0].length ?? 0),
+      signatures: [{
+        dice_count: dice === null ? null : Number(dice[1]),
+        die_size: dice === null ? null : Number(dice[2]),
         flat_modifier: null,
         damage_type: null,
+      }],
+    });
+  }
+  if (groups.length === 0) {
+    const dice = /(\d+)d(\d+)[^.]{0,80}?damage/iu.exec(span);
+    if (dice !== null) {
+      groups.push({
+        start: dice.index,
+        end: dice.index + dice[0].length,
+        signatures: [{
+          dice_count: Number(dice[1]),
+          die_size: Number(dice[2]),
+          flat_modifier: null,
+          damage_type: null,
+        }],
       });
     }
   }
-  return signatures;
+  return groups
+    .filter((group) =>
+      !group.signatures.every((signature) => signature.damage_type === null) ||
+      !groups.some((candidate) =>
+        candidate !== group &&
+        candidate.start === group.start &&
+        candidate.signatures.some((signature) => signature.damage_type !== null),
+      )
+    )
+    .sort((left, right) => left.start - right.start);
+}
+
+function failureDamageSlices(span: string): readonly {
+  readonly text: string;
+  readonly start: number;
+}[] {
+  const sentences = [...span.matchAll(/[^.!?]+(?:[.!?]|$)/gu)].map((match) => ({
+    text: match[0] ?? '',
+    start: match.index ?? 0,
+  }));
+  const explicit = sentences.filter(({ text }) =>
+    /(?:failed save|Failure:|saving throw[^.]{0,160}?or take|taking [^.]{0,160}?damage on (?:a )?failed save)/iu.test(text) &&
+    /(?:\d+d\d+|\b\d+\b)[^.]{0,100}?damage|damage[^.]{0,100}?(?:\d+d\d+|\b\d+\b)/iu.test(text),
+  );
+  if (explicit.length > 0) {
+    return explicit;
+  }
+  const fallback = directFailureDamageSpan(span);
+  return [{ text: fallback, start: span.indexOf(fallback) }];
+}
+
+function sourceDamageOccurrences(
+  span: string,
+  bodyStart: number,
+): readonly SourceDamageOccurrence[] {
+  const groups = failureDamageSlices(span).flatMap((slice) =>
+    damageOccurrenceGroups(slice.text).map((group) => ({
+      ...group,
+      start: slice.start + group.start,
+      end: slice.start + group.end,
+    })),
+  );
+  const prismaticAlternatives = /Prismatic (?:Rays|Layers)|struck by two rays/iu.test(span);
+  const mergedSlotByGroup: number[] = [];
+  let nextSlot = 0;
+  for (const [index, group] of groups.entries()) {
+    const previous = groups[index - 1];
+    const bridge = previous === undefined ? '' : span.slice(previous.end, group.start);
+    const sharesAlternativeSlot = prismaticAlternatives || /\bor\b/iu.test(bridge);
+    if (index === 0 || !sharesAlternativeSlot) {
+      nextSlot = index === 0 ? 0 : nextSlot + 1;
+    }
+    mergedSlotByGroup.push(nextSlot);
+  }
+  const failure = groups.flatMap((group, groupIndex) => {
+    const sentenceEnd = span.indexOf('.', group.end);
+    const nextGroupStart = groups[groupIndex + 1]?.start;
+    const timingText = span.slice(
+      group.end,
+      nextGroupStart ?? (sentenceEnd < 0 ? span.length : sentenceEnd),
+    );
+    const timing: SourceDamageTiming = /^\s*at the end of its next turn/iu.test(timingText)
+      ? 'end_of_target_next_turn'
+      : 'on_save_resolution';
+    return group.signatures.map((signature) => ({
+      ...signature,
+      arm: 'failure' as const,
+      timing,
+      roll_transform: 'none' as const,
+      start: bodyStart + group.start,
+      end: bodyStart + group.end,
+      slot_index: mergedSlotByGroup[groupIndex] ?? groupIndex,
+    }));
+  });
+  const halfInitial = /half the initial damage only/iu.exec(span);
+  if (halfInitial === null) {
+    return failure;
+  }
+  const initial = failure.find((occurrence) =>
+    occurrence.timing === 'on_save_resolution',
+  );
+  if (initial === undefined) {
+    throw new TypeError(`Half-initial-damage clause has no initial damage occurrence: ${span}`);
+  }
+  return [
+    ...failure,
+    {
+      ...initial,
+      arm: 'success',
+      roll_transform: 'floor_half',
+      start: bodyStart + (halfInitial.index ?? 0),
+      end: bodyStart + (halfInitial.index ?? 0) + halfInitial[0].length,
+      slot_index: 0,
+    },
+  ];
+}
+
+function nearestUniqueDamageOccurrences(
+  occurrences: readonly SourceDamageOccurrence[],
+  saveStart: number,
+): readonly SourceDamageOccurrence[] {
+  const bySignature = new Map<string, SourceDamageOccurrence>();
+  for (const occurrence of occurrences) {
+    const key = JSON.stringify([
+      occurrence.arm,
+      occurrence.damage_type,
+      occurrence.dice_count,
+      occurrence.die_size,
+      occurrence.flat_modifier,
+    ]);
+    const existing = bySignature.get(key);
+    if (
+      existing === undefined ||
+      Math.abs(occurrence.start - saveStart) < Math.abs(existing.start - saveStart)
+    ) {
+      bySignature.set(key, occurrence);
+    }
+  }
+  return [...bySignature.values()]
+    .sort((left, right) => left.start - right.start)
+    .map((occurrence, slotIndex) => ({ ...occurrence, slot_index: slotIndex }));
 }
 
 function directFailureDamageSpan(span: string): string {
@@ -288,6 +475,7 @@ function directDamageSaveClauses(body: string): SourceDerivedSaveClause[] {
   const clauses: SourceDerivedSaveClause[] = [];
   let inheritedAbility: Ability | null = null;
   let inheritedDamageSignatures: readonly FailedDamageSignature[] = [];
+  let inheritedDamageOccurrences: readonly SourceDamageOccurrence[] = [];
   for (const [index, match] of matches.entries()) {
     const start = body.lastIndexOf('.', match.index ?? 0) + 1;
     const next = matches[index + 1]?.index ?? body.length;
@@ -310,6 +498,10 @@ function directDamageSaveClauses(body: string): SourceDerivedSaveClause[] {
     const failedDamageSignatures = signatures.length === 0 && repeatsDamage
       ? inheritedDamageSignatures
       : signatures;
+    const directOccurrences = sourceDamageOccurrences(span, start + leading);
+    const damageOccurrences = repeatsDamage && inheritedDamageOccurrences.length > 0
+      ? inheritedDamageOccurrences.filter((occurrence) => occurrence.arm === 'failure')
+      : directOccurrences;
     clauses.push({
       span,
       start: start + leading,
@@ -318,8 +510,10 @@ function directDamageSaveClauses(body: string): SourceDerivedSaveClause[] {
       ability: inheritedAbility,
       kind,
       failed_damage_signatures: failedDamageSignatures,
+      damage_occurrences: damageOccurrences,
     });
     inheritedDamageSignatures = failedDamageSignatures;
+    inheritedDamageOccurrences = damageOccurrences;
   }
   return clauses;
 }
@@ -346,14 +540,19 @@ function gateDamageSaveClause(body: string): SourceDerivedSaveClause | null {
       if (saveOffset === undefined) {
         throw new TypeError(`Gate damage clause has no explicit save position: ${span}`);
       }
+      const bodySaveStart = start + saveOffset;
       return {
         span,
         start,
         end: start + span.length,
-        save_start: start + saveOffset,
+        save_start: bodySaveStart,
         ability: sourceAbility(span, null),
         kind: 'none',
         failed_damage_signatures: sourceDamageSignatures(span),
+        damage_occurrences: nearestUniqueDamageOccurrences(
+          sourceDamageOccurrences(span, start),
+          bodySaveStart,
+        ),
       };
     }
   }

@@ -582,6 +582,7 @@ export function foldSavingThrowEvent(
     event.on_success,
     event.ability,
     event.damage_on_failed_save,
+    event.duration,
   );
   const successProbability = saveSuccessProbability(
     event.save_dc,
@@ -639,6 +640,9 @@ export function foldSavingThrowEvent(
       success = foldOrdinaryInstances(
         event.on_success.damage,
         target.damage_responses,
+        event.on_success.roll_transform === 'floor_half'
+          ? (total) => damageRollTotal(Math.floor(total / 2))
+          : undefined,
       );
       break;
   }
