@@ -237,33 +237,29 @@ describe('save fold arms and contributions', () => {
 });
 
 describe('automatic damage with mixed components', () => {
-  it('sums several dice pools and modifiers before clamping', () => {
+  it('sums registered dice and flat components in one damage roll', () => {
+    const clause = reviewedSaveSuccessClauses.finger_of_death;
     const event: AutomaticDamageEvent = {
       kind: 'automatic_damage',
       event_id: routineEventId('auto:mixed'),
-      source: weapon,
+      source: clause.effect_source,
+      damage_clause_id: clause.id,
+      evidence: clause.evidence,
       frequency: { kind: 'each_declared_event' },
       duration: { kind: 'instantaneous' },
       damage: [{
-        source: weapon,
-        damage_type: fire,
+        source: clause.effect_source,
+        damage_type: damageType('Necrotic'),
         components: [
-          { kind: 'dice', pool: { count: positiveDiceCount(1), die: 4 } },
-          { kind: 'dice', pool: { count: positiveDiceCount(1), die: 6 } },
-          { kind: 'flat', modifier: damageFlatModifier(2) },
-          { kind: 'flat', modifier: damageFlatModifier(-4) },
+          { kind: 'dice', pool: { count: positiveDiceCount(7), die: 8 } },
+          { kind: 'flat', modifier: damageFlatModifier(30) },
         ],
       }],
     };
-    let expected = 0;
-    for (let a = 1; a <= 4; a += 1) {
-      for (let b = 1; b <= 6; b += 1) {
-        expected += Math.max(0, a + b + 2 - 4) / 24;
-      }
-    }
     const r = foldAutomaticDamageEvent(event, [
-      { damage_type: fire, response: 'normal' },
+      { damage_type: damageType('Necrotic'), response: 'normal' },
     ]);
-    expect(r.expected_damage).toBeCloseTo(expected, 10);
+    expect(r.status).toBe('available');
+    expect(r.expected_damage).toBeCloseTo(61.5, 10);
   });
 });

@@ -708,6 +708,8 @@ export type AutomaticDamageEvent = {
   readonly kind: 'automatic_damage';
   readonly event_id: RoutineEventId;
   readonly source: SourceRef;
+  readonly damage_clause_id: SaveSuccessClauseId;
+  readonly evidence: PublicSourceRef;
   readonly frequency: EventFrequency;
   readonly duration: InstantaneousDuration;
   readonly damage: NonEmptyReadonlyArray<DamageInstance>;

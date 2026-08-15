@@ -387,15 +387,21 @@ function damageOccurrenceGroups(span: string): readonly DamageOccurrenceGroup[] 
     .sort((left, right) => left.start - right.start);
 }
 
+function explicitFailureDamageSlices(span: string): readonly {
+  readonly text: string;
+  readonly start: number;
+}[] {
+  return sourceSentences(span).filter(({ text }) =>
+    /(?:failed save|failed (?:that|the|a) saving throw|Failure:|saving throw[^.]{0,160}?or take|taking [^.]{0,160}?damage on (?:a )?failed save)/iu.test(text) &&
+    /(?:\d+d\d+|\b\d+\b)[^.]{0,100}?damage|damage[^.]{0,100}?(?:\d+d\d+|\b\d+\b)/iu.test(text),
+  );
+}
+
 function failureDamageSlices(span: string): readonly {
   readonly text: string;
   readonly start: number;
 }[] {
-  const sentences = sourceSentences(span);
-  const explicit = sentences.filter(({ text }) =>
-    /(?:failed save|Failure:|saving throw[^.]{0,160}?or take|taking [^.]{0,160}?damage on (?:a )?failed save)/iu.test(text) &&
-    /(?:\d+d\d+|\b\d+\b)[^.]{0,100}?damage|damage[^.]{0,100}?(?:\d+d\d+|\b\d+\b)/iu.test(text),
-  );
+  const explicit = explicitFailureDamageSlices(span);
   if (explicit.length > 0) {
     return explicit;
   }
@@ -406,19 +412,48 @@ function failureDamageSlices(span: string): readonly {
 function sourceDamageOccurrences(
   span: string,
   bodyStart: number,
+  ownership: 'direct' | 'gate' = 'direct',
 ): readonly SourceDamageOccurrence[] {
-  const groups = failureDamageSlices(span).flatMap((slice, sliceIndex) => {
+  const slices = ownership === 'gate'
+    ? explicitFailureDamageSlices(span)
+    : failureDamageSlices(span);
+  const groups = slices.flatMap((slice, sliceIndex) => {
     const explicitOneRollMarkers = [
       ...slice.text.matchAll(/\b(?:as\s+)?one(?:\s+damage)?\s+roll\b/giu),
     ];
-    return damageOccurrenceGroups(slice.text).map((group) => ({
+    const occurrenceGroups = damageOccurrenceGroups(slice.text);
+    const markerScopeByGroup = occurrenceGroups.map(() => -1);
+    for (const [markerIndex, marker] of explicitOneRollMarkers.entries()) {
+      const markerStart = marker.index ?? 0;
+      const markerEnd = markerStart + (marker[0]?.length ?? 0);
+      const previousMarker = explicitOneRollMarkers[markerIndex - 1];
+      const previousMarkerEnd = previousMarker === undefined
+        ? 0
+        : (previousMarker.index ?? 0) + (previousMarker[0]?.length ?? 0);
+      const nextMarkerStart = explicitOneRollMarkers[markerIndex + 1]?.index ??
+        slice.text.length;
+      const preceding = occurrenceGroups.flatMap((group, groupIndex) =>
+        group.start >= previousMarkerEnd && group.end <= markerStart
+          ? [groupIndex]
+          : []
+      );
+      const scoped = preceding.length > 0
+        ? preceding
+        : occurrenceGroups.flatMap((group, groupIndex) =>
+            group.start >= markerEnd && group.start < nextMarkerStart
+              ? [groupIndex]
+              : []
+          );
+      for (const groupIndex of scoped) {
+        markerScopeByGroup[groupIndex] = markerIndex;
+      }
+    }
+    return occurrenceGroups.map((group, groupIndex) => ({
       ...group,
       start: slice.start + group.start,
       end: slice.start + group.end,
       slice_index: sliceIndex,
-      explicitly_one_roll_scope: explicitOneRollMarkers.findIndex((marker) =>
-        (marker.index ?? 0) >= group.end
-      ),
+      explicitly_one_roll_scope: markerScopeByGroup[groupIndex] ?? -1,
     }));
   });
   const prismaticAlternatives = /Prismatic (?:Rays|Layers)|struck by two rays/iu.test(span);
@@ -661,7 +696,7 @@ function candidateBelongsToCheck(
     'iu',
   ).test(fromDc);
   const checkAfterValue = new RegExp(
-    `^${numericDcMarker}\\b[^;.!?]*\\b(?:ability|${ability}(?:\\s+\\([^)]*\\))?)\\s+check\\b`,
+    `^${numericDcMarker}\\b\\s+(?:for|of)\\s+(?:the\\s+)?(?:ability|${ability}(?:\\s+\\([^)]*\\))?)\\s+check\\b`,
     'iu',
   ).test(fromDc);
   const parentheticalCheck = new RegExp(
@@ -694,7 +729,7 @@ export function sourceFixedSaveDc(span: string): SourceDerivedFixedSaveDc {
   );
   if (saveBearingSpan) {
     for (const sentence of sentences) {
-      const threshold = /\broll\s+is\s+\d+\s+or\s+higher\b/iu.exec(sentence.text);
+      const threshold = /\b(?:A\s+)?roll(?:\s+is|\s+of)\s+\d+\s+or\s+higher\b/iu.exec(sentence.text);
       if (threshold !== null) {
         return {
           status: 'unavailable',
@@ -970,6 +1005,15 @@ function gateDamageSaveClause(body: string): SourceDerivedSaveClause | null {
         throw new TypeError(`Gate damage clause has no explicit save position: ${span}`);
       }
       const bodySaveStart = start + saveOffset;
+      const damageOccurrences = sourceDamageOccurrences(span, start, 'gate');
+      const failedDamageSignatures = damageOccurrences
+        .filter((occurrence) => occurrence.arm === 'failure')
+        .map((occurrence) => ({
+          damage_type: occurrence.damage_type,
+          dice_count: occurrence.dice_count,
+          die_size: occurrence.die_size,
+          flat_modifier: occurrence.flat_modifier,
+        }));
       return {
         span,
         start,
@@ -979,11 +1023,11 @@ function gateDamageSaveClause(body: string): SourceDerivedSaveClause | null {
         success: sourceDerivedSaveSuccess(span, 'gate'),
         fixed_save_dc: sourceFixedSaveDc(span),
         frequency: sourceDamageFrequency(span, body),
-        duration: { kind: 'instantaneous' },
+        duration: sourceDamageDuration(damageOccurrences),
         timing_unavailable_reason: null,
         repetitions: sourceDamageRepetitions(body),
-        failed_damage_signatures: [],
-        damage_occurrences: [],
+        failed_damage_signatures: failedDamageSignatures,
+        damage_occurrences: damageOccurrences,
       };
     }
   }

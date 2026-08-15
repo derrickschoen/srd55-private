@@ -13,9 +13,9 @@ import {
 import {
   reviewedDamageRollSlotGroupOracle,
   reviewedFixedSaveDcOracle,
+  reviewedSaveAvailabilityOracle,
   reviewedSaveSuccessClauses,
   reviewedSaveSuccessKindOracle,
-  reviewedUnavailableSaveClauseOracle,
   sourceDerivedSaveDamageCandidates,
 } from '../../../src/simulation/coverage';
 import {
@@ -113,28 +113,48 @@ describe('round 14 damage-roll grouping drift alarms', () => {
       occurrence.roll_index,
     ])).toEqual([[0, 0], [1, 0], [2, 1], [3, 1]]);
 
-    const source = reviewedSaveSuccessClauses.fireball.effect_source;
-    const damage = (count: number): DamageInstance => ({
+    const damage = (
+      source: DamageInstance['source'],
+      count: number,
+      type: 'Cold' | 'Fire' | 'Radiant',
+    ): DamageInstance => ({
       source,
-      damage_type: damageType('Fire'),
+      damage_type: damageType(type),
       components: [{
         kind: 'dice',
         pool: { count: positiveDiceCount(count), die: 6 },
       }],
     });
-    const event = (instances: [DamageInstance, ...DamageInstance[]]): AutomaticDamageEvent => ({
+    const event = (
+      clause: (typeof reviewedSaveSuccessClauses)[keyof typeof reviewedSaveSuccessClauses],
+      instances: [DamageInstance, ...DamageInstance[]],
+    ): AutomaticDamageEvent => ({
       kind: 'automatic_damage',
       event_id: routineEventId(`round-14:one-roll:${String(instances.length)}`),
-      source,
-      frequency: { kind: 'each_declared_event' },
-      duration: { kind: 'instantaneous' },
+      source: clause.effect_source,
+      damage_clause_id: clause.id,
+      evidence: clause.evidence,
+      frequency: clause.frequency,
+      duration: clause.duration,
       damage: instances,
     });
-    const resistant = [{ damage_type: damageType('Fire'), response: 'resistant' as const }];
-    expect(foldAutomaticDamageEvent(event([damage(3), damage(7)]), resistant).expected_damage)
-      .toBeCloseTo(17, 12);
-    expect(foldAutomaticDamageEvent(event([damage(10)]), resistant).expected_damage)
-      .toBeCloseTo(17.25, 12);
+    const flameStrike = reviewedSaveSuccessClauses.flame_strike;
+    const freezingSphere = reviewedSaveSuccessClauses.freezing_sphere;
+    const responses = ['Cold', 'Fire', 'Radiant'].map((type) => ({
+      damage_type: damageType(type),
+      response: 'resistant' as const,
+    }));
+    const separateRolls = foldAutomaticDamageEvent(event(flameStrike, [
+      damage(flameStrike.effect_source, 5, 'Fire'),
+      damage(flameStrike.effect_source, 5, 'Radiant'),
+    ]), responses);
+    const oneRoll = foldAutomaticDamageEvent(event(freezingSphere, [
+      damage(freezingSphere.effect_source, 10, 'Cold'),
+    ]), responses);
+    expect(separateRolls.status).toBe('available');
+    expect(oneRoll.status).toBe('available');
+    expect(separateRolls.expected_damage).toBeCloseTo(17, 12);
+    expect(oneRoll.expected_damage).toBeCloseTo(17.25, 12);
   });
 
   it('keeps additive damage separate when an intervening clause contains broad or', () => {
@@ -224,6 +244,8 @@ describe('D259 registration-required folding', () => {
     expect(corpusSentences.filter(({ text }) => /\bcheck(?:s|ing)?\b/iu.test(text)))
       .toHaveLength(42);
     expect(Object.keys(reviewedSaveSuccessKindOracle)).toHaveLength(79);
-    expect(reviewedUnavailableSaveClauseOracle).toHaveLength(11);
+    expect(Object.keys(reviewedSaveAvailabilityOracle)).toHaveLength(79);
+    expect(Object.values(reviewedSaveAvailabilityOracle)
+      .filter((availability) => availability === 'unavailable')).toHaveLength(11);
   });
 });

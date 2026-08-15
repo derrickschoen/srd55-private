@@ -13,7 +13,7 @@ import {
 } from '../../../src/simulation/contracts';
 import {
   reviewedSaveSuccessClauses,
-  reviewedUnavailableSaveClauseOracle,
+  reviewedSaveAvailabilityOracle,
   sourceDerivedSaveDamageCandidates,
 } from '../../../src/simulation/coverage';
 import { foldSavingThrowEvent } from '../../../src/simulation/probability';
@@ -187,7 +187,11 @@ describe('round 11 concrete reproductions', () => {
   });
 
   it('pins complete numeric availability independently from success kind', () => {
-    expect(reviewedUnavailableSaveClauseOracle).toEqual([
+    expect(Object.keys(reviewedSaveAvailabilityOracle)).toHaveLength(79);
+    const unavailable = Object.entries(reviewedSaveAvailabilityOracle)
+      .filter(([, availability]) => availability === 'unavailable')
+      .map(([key]) => key);
+    expect(unavailable).toEqual([
       'arcane_hand_grasping',
       'bestow_curse_damage',
       'dream',
@@ -203,6 +207,6 @@ describe('round 11 concrete reproductions', () => {
     expect(Object.entries(reviewedSaveSuccessClauses)
       .filter(([, clause]) => clause.unavailable_reason !== null)
       .map(([key]) => key))
-      .toEqual(reviewedUnavailableSaveClauseOracle);
+      .toEqual(unavailable);
   });
 });

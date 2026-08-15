@@ -99,18 +99,21 @@ function attackEvent(evidence: PublicSourceRef): AttackRollEvent {
 }
 
 function automaticEvent(): AutomaticDamageEvent {
+  const clause = reviewedSaveSuccessClauses.acid_splash;
   return {
     kind: 'automatic_damage',
     event_id: routineEventId('review:auto'),
-    source,
+    source: clause.effect_source,
+    damage_clause_id: clause.id,
+    evidence: clause.evidence,
     frequency: { kind: 'each_declared_event' },
     duration: { kind: 'instantaneous' },
     damage: [{
-      source,
-      damage_type: fire,
+      source: clause.effect_source,
+      damage_type: damageType('Acid'),
       components: [{
         kind: 'dice',
-        pool: { count: positiveDiceCount(1), die: 4 },
+        pool: { count: positiveDiceCount(1), die: 6 },
       }],
     }],
   };

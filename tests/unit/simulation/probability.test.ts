@@ -34,6 +34,7 @@ import {
   foldAttackEvent,
   foldAutomaticDamageEvent,
   foldSavingThrowEvent,
+  ordinaryDamageDistribution,
   resolveRollState,
   saveSuccessProbability,
 } from '../../../src/simulation/probability';
@@ -438,42 +439,40 @@ describe('damage responses and save outcomes', () => {
   });
 
   it('rounds resistance per outcome instead of halving the final expectation', () => {
+    const clause = reviewedSaveSuccessClauses.acid_splash;
     const event: AutomaticDamageEvent = {
       kind: 'automatic_damage',
       event_id: routineEventId('automatic:1'),
-      source,
-      frequency: { kind: 'each_declared_event' },
-      duration: { kind: 'instantaneous' },
-      damage: [diceInstance(1, 4)],
-    };
-    const result = foldAutomaticDamageEvent(event, [
-      { damage_type: slashing, response: 'resistant' },
-    ]);
-    // floor(1/2), floor(2/2), floor(3/2), floor(4/2) = 0,1,1,2.
-    expect(result.expected_damage).toBe(1);
-    expect(result.expected_damage).not.toBe(1.25);
-  });
-
-  it('adds a damage penalty to the dice before clamping the whole roll at zero', () => {
-    const event: AutomaticDamageEvent = {
-      kind: 'automatic_damage',
-      event_id: routineEventId('automatic:penalty'),
-      source,
+      source: clause.effect_source,
+      damage_clause_id: clause.id,
+      evidence: clause.evidence,
       frequency: { kind: 'each_declared_event' },
       duration: { kind: 'instantaneous' },
       damage: [{
-        source,
-        damage_type: slashing,
-        components: [
-          {
-            kind: 'dice',
-            pool: { count: positiveDiceCount(1), die: 4 },
-          },
-          { kind: 'flat', modifier: damageFlatModifier(-5) },
-        ],
+        source: clause.effect_source,
+        damage_type: damageType('Acid'),
+        components: [{
+          kind: 'dice',
+          pool: { count: positiveDiceCount(1), die: 6 },
+        }],
       }],
     };
-    expect(foldAutomaticDamageEvent(event, normalSlashing).expected_damage).toBe(0);
+    const result = foldAutomaticDamageEvent(event, [
+      { damage_type: damageType('Acid'), response: 'resistant' },
+    ]);
+    // floor(1/2) through floor(6/2) = 0,1,1,2,2,3.
+    expect(result.expected_damage).toBe(1.5);
+    expect(result.expected_damage).not.toBe(1.75);
+  });
+
+  it('adds a damage penalty to the dice before clamping the whole roll at zero', () => {
+    expect(ordinaryDamageDistribution([
+      {
+        kind: 'dice',
+        pool: { count: positiveDiceCount(1), die: 4 },
+      },
+      { kind: 'flat', modifier: damageFlatModifier(-5) },
+    ])).toEqual([{ total: damageRollTotal(0), probability: 1 }]);
   });
 
   function saveEvent(
@@ -672,28 +671,42 @@ describe('damage responses and save outcomes', () => {
   });
 
   it('returns unavailable for a publicly constructible missing damage response', () => {
+    const clause = reviewedSaveSuccessClauses.acid_splash;
     const event: AutomaticDamageEvent = {
       kind: 'automatic_damage',
       event_id: routineEventId('automatic:missing-response'),
-      source,
+      source: clause.effect_source,
+      damage_clause_id: clause.id,
+      evidence: clause.evidence,
       frequency: { kind: 'each_declared_event' },
       duration: { kind: 'instantaneous' },
-      damage: [diceInstance(1, 4)],
+      damage: [{
+        source: clause.effect_source,
+        damage_type: damageType('Acid'),
+        components: [{
+          kind: 'dice',
+          pool: { count: positiveDiceCount(1), die: 6 },
+        }],
+      }],
     };
     const missing = foldAutomaticDamageEvent(event, []);
     expect(missing.status).toBe('unavailable');
     expect(missing).not.toHaveProperty('expected_damage');
     const composed = composeRoundDamageFolds([
-      foldAutomaticDamageEvent(event, normalSlashing),
+      foldAutomaticDamageEvent(event, [
+        { damage_type: damageType('Acid'), response: 'normal' },
+      ]),
       missing,
     ]);
     expect(composed.status).toBe('unavailable');
     expect(composed).not.toHaveProperty('expected_damage');
 
-    const sourced = foldAutomaticDamageEvent(event, normalSlashing);
+    const sourced = foldAutomaticDamageEvent(event, [
+      { damage_type: damageType('Acid'), response: 'normal' },
+    ]);
     expect(sourced.status).toBe('available');
     if (sourced.status === 'available') {
-      expect(sourced.expected_damage).toBe(2.5);
+      expect(sourced.expected_damage).toBe(3.5);
     }
   });
 });

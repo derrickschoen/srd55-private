@@ -28,6 +28,7 @@ import {
   type TargetSaveBonus,
 } from './contracts';
 import {
+  automaticDamageEvidenceFailureReason,
   criticalHitRuleHasEvidence,
   publicProbabilityCoverageManifest,
   saveSuccessOutcomeEvidenceFailureReason,
@@ -179,7 +180,7 @@ function combineDistributions(
   return normalizedDistribution(combined);
 }
 
-function distributionForDamageComponents(
+export function ordinaryDamageDistribution(
   components: readonly DamageComponent[],
 ): DamageOutcomeDistribution {
   let distribution = singleOutcome(0);
@@ -480,7 +481,7 @@ function foldOrdinaryInstances(
     source: instance.source,
     damage_type: instance.damage_type,
     expected_damage: expectedDistributionDamage(
-      distributionForDamageComponents(instance.components),
+      ordinaryDamageDistribution(instance.components),
       targetResponse(instance.damage_type, responses) ?? (() => {
         throw new Error('Missing damage response was not preflighted.');
       })(),
@@ -695,6 +696,21 @@ export function foldAutomaticDamageEvent(
   event: AutomaticDamageEvent,
   responses: readonly TargetDamageResponse[],
 ): DamageEventFold {
+  const evidenceFailureReason = automaticDamageEvidenceFailureReason(
+    event.source,
+    event.damage_clause_id,
+    event.evidence,
+    event.damage,
+    event.duration,
+    event.frequency,
+  );
+  if (evidenceFailureReason !== null) {
+    return {
+      status: 'unavailable',
+      evidence: event.evidence,
+      reason: evidenceFailureReason,
+    };
+  }
   const missingResponse = missingDamageResponse(event.damage, responses);
   if (missingResponse !== null) {
     return unavailableDamageResponse(missingResponse);
