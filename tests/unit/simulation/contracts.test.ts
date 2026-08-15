@@ -36,6 +36,7 @@ import {
   bundledSrdSourceRef,
   compactIssueMessages,
   createUnmodelledIssue,
+  highRecallDamageSaveSuspects,
   orderUnmodelledIssues,
   probabilityManifestIsComplete,
   publicProbabilityCoverageManifest,
@@ -46,6 +47,7 @@ import {
   saveSuccessOutcomeEvidenceManifest,
   sourceDerivedSaveDamageCandidateCounts,
   sourceDerivedSaveDamageCandidates,
+  unreconciledHighRecallDamageSaveSuspects,
   sheetGapCoverage,
   sheetWarningCoverage,
   unmodelledIssuePriority,
@@ -361,6 +363,27 @@ describe('DPR branded constructors', () => {
         id: simResourceId('duplicate:sorcery-points'),
       },
     ])).toThrow('Duplicate logical simulation resource pool key');
+
+    const aliasedSorceryPoints: SimResourcePool = {
+      ...sorceryPoints,
+      id: simResourceId('duplicate:sorcery-points'),
+      logical_key: simResourcePoolKey('duplicate:sorcery-points'),
+    };
+    const aliasSession = createResourceRecoverySession(
+      simResourcePoolSet([sorceryPoints, aliasedSorceryPoints]),
+    );
+    const firstAliasRecovery = aliasSession.recover(
+      sorceryPoints.id,
+      'short_rest',
+      10,
+    ).recovered_units;
+    const secondAliasRecovery = aliasSession.recover(
+      aliasedSorceryPoints.id,
+      'short_rest',
+      10,
+    ).recovered_units;
+    expect([firstAliasRecovery, secondAliasRecovery]).toEqual([5, 0]);
+    expect(firstAliasRecovery + secondAliasRecovery).toBe(5);
 
     const secondMaximum = positiveResourceMaximum(6);
     const secondPool: SimResourcePool = {
@@ -728,7 +751,7 @@ describe('coverage vocabularies and bundled provenance', () => {
       .toBe('Half Damage');
   });
 
-  it('enumerates every bundled spell save whose outcome changes numeric damage', () => {
+  it('reconciles every extracted damage-save span with one reviewed clause', () => {
     expect(sourceDerivedSaveDamageCandidateCounts).toEqual({
       before_deduplication: 81,
       after_deduplication: 79,
@@ -758,10 +781,6 @@ describe('coverage vocabularies and bundled provenance', () => {
       expect(clause.ability, `${clause.id}: source ability`).toBe(
         sourceCandidate?.ability,
       );
-      expect(
-        clause.failed_damage_signatures,
-        `${clause.id}: source damage signature`,
-      ).toEqual(sourceCandidate?.failed_damage_signatures);
       manifestClausesBySpan.set(sourceKey, clause.id);
     }
     for (const candidate of sourceDerivedSaveDamageCandidates) {
@@ -783,6 +802,39 @@ describe('coverage vocabularies and bundled provenance', () => {
     expect([...manifestClausesBySpan.keys()].some((key) =>
       key.startsWith('Burning Hands\u0000'),
     )).toBe(true);
+  });
+
+  it('uses independently reviewed required slots rather than extractor projections', () => {
+    expect(reviewedSaveSuccessClauses.ice_storm.failed_damage_signature_slots)
+      .toEqual([
+        [{ damage_type: 'Bludgeoning', dice_count: 2, die_size: 10, flat_modifier: null }],
+        [{ damage_type: 'Cold', dice_count: 4, die_size: 6, flat_modifier: null }],
+      ]);
+    expect(reviewedSaveSuccessClauses.flame_strike.failed_damage_signature_slots)
+      .toEqual([
+        [{ damage_type: 'Fire', dice_count: 5, die_size: 6, flat_modifier: null }],
+        [{ damage_type: 'Radiant', dice_count: 5, die_size: 6, flat_modifier: null }],
+      ]);
+    expect(reviewedSaveSuccessClauses.spirit_guardians.failed_damage_signature_slots)
+      .toEqual([[
+        { damage_type: 'Radiant', dice_count: 3, die_size: 8, flat_modifier: null },
+        { damage_type: 'Necrotic', dice_count: 3, die_size: 8, flat_modifier: null },
+      ]]);
+    expect(reviewedSaveSuccessClauses.vitriolic_sphere.success_damage_signature_slots)
+      .toEqual([[
+        { damage_type: 'Acid', dice_count: 5, die_size: 4, flat_modifier: null },
+      ]]);
+  });
+
+  it('reconciles every high-recall lexical suspect or exact reviewed exclusion', () => {
+    expect(unreconciledHighRecallDamageSaveSuspects).toEqual([]);
+    expect(sourceDerivedSaveDamageCandidates.filter((candidate) =>
+      !highRecallDamageSaveSuspects.some((suspect) =>
+        suspect.heading === candidate.heading &&
+        candidate.start < suspect.end &&
+        suspect.start < candidate.end,
+      ),
+    )).toEqual([]);
   });
 
   it('checks bundled headings and still accepts legitimate proof references', () => {

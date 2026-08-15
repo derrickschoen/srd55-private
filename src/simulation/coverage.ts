@@ -26,6 +26,16 @@ import {
   type UnmodelledIssue,
   type UnmodelledIssueKind,
 } from './contracts';
+import {
+  deriveSaveDamageCoverageFromBodies,
+  spellDescriptionsByHeading,
+  spellDescriptionsFromFullLayout,
+  type FailedDamageSignature,
+  type SourceDerivedSaveClause,
+  type SourceDerivedSaveDamageCandidate,
+} from './spell-source-reader';
+
+export type { SourceDerivedSaveDamageCandidate } from './spell-source-reader';
 
 export type CoverageClassification =
   | 'blocking'
@@ -354,26 +364,155 @@ type ReviewedSaveSuccessClause = {
   readonly evidence: PublicSourceRef;
   readonly source_span: string;
   readonly ability: Ability;
-  readonly failed_damage_signatures: readonly FailedDamageSignature[];
+  readonly failed_damage_signature_slots: readonly DamageSignatureSlot[];
+  readonly success_damage_signature_slots: readonly DamageSignatureSlot[];
 };
 
-type FailedDamageSignature = {
-  readonly damage_type: DamageType | null;
-  readonly dice_count: number | null;
-  readonly die_size: number | null;
-  readonly flat_modifier: number | null;
+type DamageSignatureSlot = readonly [
+  FailedDamageSignature,
+  ...FailedDamageSignature[],
+];
+
+type ReviewedDamageRequirements = {
+  readonly failed: readonly DamageSignatureSlot[];
+  readonly success?: readonly DamageSignatureSlot[];
 };
 
-type SourceDerivedSaveClause = {
-  readonly span: string;
-  readonly ability: Ability;
-  readonly kind: SaveSuccessOutcome['kind'];
-  readonly failed_damage_signatures: readonly FailedDamageSignature[];
-};
+const dice = (
+  count: number,
+  die: number,
+  damageType: DamageType | null,
+): FailedDamageSignature => ({
+  damage_type: damageType,
+  dice_count: count,
+  die_size: die,
+  flat_modifier: null,
+});
 
-export type SourceDerivedSaveDamageCandidate = SourceDerivedSaveClause & {
-  readonly heading: string;
-};
+const flat = (
+  modifier: number,
+  damageType: DamageType,
+): FailedDamageSignature => ({
+  damage_type: damageType,
+  dice_count: null,
+  die_size: null,
+  flat_modifier: modifier,
+});
+
+const required = (
+  signature: FailedDamageSignature,
+  ...alternatives: readonly FailedDamageSignature[]
+): DamageSignatureSlot => [signature, ...alternatives];
+
+/**
+ * Human-reviewed damage-component oracle. These requirements are declarations,
+ * not projections of `deriveSaveDamageCoverage`: a slot is required once, and
+ * multiple signatures inside one slot are alternatives. That distinction is
+ * what Flame Strike (two slots) and Spirit Guardians (one alternative slot)
+ * require and what a flat signature array cannot express.
+ */
+const reviewedDamageRequirementsByClause = {
+  'acid-splash:damage': { failed: [required(dice(1, 6, 'Acid'))] },
+  'arcane-hand:grasping-hand-damage': { failed: [required(dice(4, 6, 'Bludgeoning'))] },
+  'befuddlement:damage': { failed: [required(dice(10, 12, 'Psychic'))] },
+  'bestow-curse:curse-damage': { failed: [required(dice(1, 8, 'Necrotic'))] },
+  'black-tentacles:damage': { failed: [required(dice(3, 6, 'Bludgeoning'))] },
+  'blade-barrier:damage': { failed: [required(dice(6, 10, 'Force'))] },
+  'blight:damage': { failed: [required(dice(8, 8, 'Necrotic'))] },
+  'burning-hands:damage': { failed: [required(dice(3, 6, 'Fire'))] },
+  'call-lightning:damage': { failed: [required(dice(3, 10, 'Lightning'))] },
+  'chain-lightning:damage': { failed: [required(dice(10, 8, 'Lightning'))] },
+  'circle-of-death:damage': { failed: [required(dice(8, 8, 'Necrotic'))] },
+  'cloudkill:damage': { failed: [required(dice(5, 8, 'Poison'))] },
+  'cone-of-cold:damage': { failed: [required(dice(8, 8, 'Cold'))] },
+  'conjure-animals:damage': { failed: [required(dice(3, 10, 'Slashing'))] },
+  'conjure-celestial:damage': { failed: [required(dice(6, 12, 'Radiant'))] },
+  'conjure-elemental:initial-damage': { failed: [required(dice(8, 8, null))] },
+  'conjure-elemental:repeat-damage': { failed: [required(dice(4, 8, null))] },
+  'conjure-woodland-beings:damage': { failed: [required(dice(5, 8, 'Force'))] },
+  'contagion:damage': { failed: [required(dice(11, 8, 'Necrotic'))] },
+  'contact-other-plane:damage': { failed: [required(dice(6, 6, 'Psychic'))] },
+  'control-water:damage': { failed: [required(dice(2, 8, 'Bludgeoning'))] },
+  'delayed-blast-fireball:damage': { failed: [required(dice(12, 6, 'Fire'))] },
+  'disintegrate:damage': { failed: [required(dice(10, 6, 'Force')), required(flat(40, 'Force'))] },
+  'dissonant-whispers:damage': { failed: [required(dice(3, 6, 'Psychic'))] },
+  'dragon-s-breath:damage': { failed: [required(dice(3, 6, null))] },
+  'dream:damage': { failed: [required(dice(3, 6, 'Psychic'))] },
+  'earthquake:collapse-damage': { failed: [required(dice(12, 6, 'Bludgeoning'))] },
+  'enlarge-reduce:weapon-damage': { failed: [required(dice(1, 4, null))] },
+  'ensnaring-strike:recurring-damage': { failed: [required(dice(1, 6, 'Piercing'))] },
+  'faithful-hound:damage': { failed: [required(dice(4, 8, 'Force'))] },
+  'finger-of-death:damage': { failed: [required(dice(7, 8, 'Necrotic')), required(flat(30, 'Necrotic'))] },
+  'fireball:damage': { failed: [required(dice(8, 6, 'Fire'))] },
+  'fire-storm:damage': { failed: [required(dice(7, 10, 'Fire'))] },
+  'flame-strike:damage': { failed: [required(dice(5, 6, 'Fire')), required(dice(5, 6, 'Radiant'))] },
+  'flaming-sphere:damage': { failed: [required(dice(2, 6, 'Fire'))] },
+  'freezing-sphere:damage': { failed: [required(dice(10, 6, 'Cold'))] },
+  'geas:recurring-damage': { failed: [required(dice(5, 10, 'Psychic'))] },
+  'glyph-of-warding:explosive-runes': { failed: [required(
+    dice(5, 8, 'Acid'),
+    dice(5, 8, 'Cold'),
+    dice(5, 8, 'Fire'),
+    dice(5, 8, 'Lightning'),
+    dice(5, 8, 'Thunder'),
+  )] },
+  'guardian-of-faith:damage': { failed: [required(flat(20, 'Radiant'))] },
+  'harm:damage': { failed: [required(dice(14, 6, 'Necrotic'))] },
+  'hellish-rebuke:damage': { failed: [required(dice(2, 10, 'Fire'))] },
+  'ice-knife:explosion-damage': { failed: [required(dice(2, 6, 'Cold'))] },
+  'ice-storm:damage': { failed: [required(dice(2, 10, 'Bludgeoning')), required(dice(4, 6, 'Cold'))] },
+  'incendiary-cloud:damage': { failed: [required(dice(10, 8, 'Fire'))] },
+  'inflict-wounds:damage': { failed: [required(dice(2, 10, 'Necrotic'))] },
+  'insect-plague:damage': { failed: [required(dice(4, 10, 'Piercing'))] },
+  'lightning-bolt:damage': { failed: [required(dice(8, 6, 'Lightning'))] },
+  'meteor-swarm:damage': { failed: [required(dice(20, 6, 'Fire')), required(dice(20, 6, 'Bludgeoning'))] },
+  'mind-spike:damage': { failed: [required(dice(3, 8, 'Psychic'))] },
+  'moonbeam:damage': { failed: [required(dice(2, 10, 'Radiant'))] },
+  'phantasmal-force:recurring-damage': { failed: [required(dice(2, 8, 'Psychic'))] },
+  'phantasmal-killer:initial-damage': { failed: [required(dice(4, 10, 'Psychic'))] },
+  'phantasmal-killer:repeat-damage': { failed: [required(dice(4, 10, 'Psychic'))] },
+  'prismatic-spray:damaging-rays': { failed: [required(
+    dice(12, 6, 'Fire'),
+    dice(12, 6, 'Acid'),
+    dice(12, 6, 'Lightning'),
+    dice(12, 6, 'Poison'),
+    dice(12, 6, 'Cold'),
+  )] },
+  'prismatic-wall:damaging-layers': { failed: [required(
+    dice(12, 6, 'Fire'),
+    dice(12, 6, 'Acid'),
+    dice(12, 6, 'Lightning'),
+    dice(12, 6, 'Poison'),
+    dice(12, 6, 'Cold'),
+  )] },
+  'ray-of-enfeeblement:damage-reduction': { failed: [required(dice(1, 8, null))] },
+  'sacred-flame:damage': { failed: [required(dice(1, 8, 'Radiant'))] },
+  'searing-smite:recurring-damage': { failed: [required(dice(1, 6, 'Fire'))] },
+  'shatter:damage': { failed: [required(dice(3, 8, 'Thunder'))] },
+  'spirit-guardians:damage': { failed: [required(dice(3, 8, 'Radiant'), dice(3, 8, 'Necrotic'))] },
+  'storm-of-vengeance:initial-thunder-damage': { failed: [required(dice(2, 6, 'Thunder'))] },
+  'storm-of-vengeance:lightning-damage': { failed: [required(dice(10, 6, 'Lightning'))] },
+  'summon-dragon:breath-weapon': { failed: [required(dice(2, 6, null))] },
+  'sunbeam:damage': { failed: [required(dice(6, 8, 'Radiant'))] },
+  'sunburst:damage': { failed: [required(dice(12, 6, 'Radiant'))] },
+  'symbol:death-damage': { failed: [required(dice(10, 10, 'Necrotic'))] },
+  'thunderwave:damage': { failed: [required(dice(2, 8, 'Thunder'))] },
+  'tsunami:initial-damage': { failed: [required(dice(6, 10, 'Bludgeoning'))] },
+  'tsunami:ongoing-damage': { failed: [required(dice(5, 10, 'Bludgeoning'))] },
+  'vicious-mockery:damage': { failed: [required(dice(1, 6, 'Psychic'))] },
+  'vitriolic-sphere:damage': {
+    failed: [required(dice(10, 4, 'Acid')), required(dice(5, 4, 'Acid'))],
+    success: [required(dice(5, 4, 'Acid'))],
+  },
+  'wall-of-fire:damage': { failed: [required(dice(5, 8, 'Fire'))] },
+  'wall-of-ice:initial-damage': { failed: [required(dice(10, 6, 'Cold'))] },
+  'wall-of-ice:frigid-air-damage': { failed: [required(dice(5, 6, 'Cold'))] },
+  'wall-of-thorns:piercing-damage': { failed: [required(dice(7, 8, 'Piercing'))] },
+  'wall-of-thorns:slashing-damage': { failed: [required(dice(7, 8, 'Slashing'))] },
+  'weird:initial-damage': { failed: [required(dice(10, 10, 'Psychic'))] },
+  'weird:repeat-damage': { failed: [required(dice(5, 10, 'Psychic'))] },
+  'wind-wall:damage': { failed: [required(dice(4, 8, 'Bludgeoning'))] },
+} as const satisfies Record<string, ReviewedDamageRequirements>;
 
 type SaveClauseDiscriminator =
   | { readonly kind: 'ability'; readonly ability: Ability }
@@ -385,235 +524,100 @@ type SaveClauseDiscriminator =
     }
   | { readonly kind: 'source_text'; readonly includes: string };
 
-const abilityBySourceName = {
-  Strength: 'strength',
-  Dexterity: 'dexterity',
-  Constitution: 'constitution',
-  Intelligence: 'intelligence',
-  Wisdom: 'wisdom',
-  Charisma: 'charisma',
-} as const satisfies Record<string, Ability>;
-
-const damageTypeNames = [
-  'Acid',
-  'Bludgeoning',
-  'Cold',
-  'Fire',
-  'Force',
-  'Lightning',
-  'Necrotic',
-  'Piercing',
-  'Poison',
-  'Psychic',
-  'Radiant',
-  'Slashing',
-  'Thunder',
-] as const satisfies readonly DamageType[];
-
-function spellDescriptionsByHeading(): ReadonlyMap<string, string> {
-  const lines = bundledSpellDescriptions.split('\n');
-  const metadata = /^\s*(?:Level [1-9] (?:Abjuration|Conjuration|Divination|Enchantment|Evocation|Illusion|Necromancy|Transmutation)|(?:Abjuration|Conjuration|Divination|Enchantment|Evocation|Illusion|Necromancy|Transmutation) Cantrip) \(/u;
-  const pageMarker = /^=== SRD/u;
-  const starts = lines.flatMap((line, index) => metadata.test(line) ? [index] : []);
-  const previousContent = (before: number): number => {
-    for (let index = before - 1; index >= 0; index -= 1) {
-      const line = lines[index] ?? '';
-      if (line.trim() !== '' && !pageMarker.test(line)) {
-        return index;
-      }
-    }
-    throw new TypeError('Bundled spell metadata has no preceding heading.');
-  };
-  return new Map(starts.map((start, position) => {
-    const headingIndex = previousContent(start);
-    const end = position + 1 < starts.length
-      ? previousContent(starts[position + 1] as number)
-      : lines.length;
-    return [
-      (lines[headingIndex] ?? '').trim(),
-      lines.slice(start, end)
-        .filter((line) => !pageMarker.test(line))
-        .join(' ')
-        .replace(/-\s+/gu, '')
-        .replace(/\s+/gu, ' ')
-        .trim(),
-    ];
-  }));
-}
-
-function sourceAbility(span: string, fallback: Ability | null): Ability {
-  const match = /\b(Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma)(?: \([^)]*\))? (?:saving throw|Saving Throw:)/u.exec(span);
-  const name = match?.[1];
-  if (name !== undefined && Object.hasOwn(abilityBySourceName, name)) {
-    return abilityBySourceName[name as keyof typeof abilityBySourceName];
-  }
-  if (fallback !== null) {
-    return fallback;
-  }
-  throw new TypeError(`Could not derive a save ability from: ${span}`);
-}
-
-function sourceDamageSignatures(span: string): readonly FailedDamageSignature[] {
-  const signatures: FailedDamageSignature[] = [];
-  const dicePattern = /(\d+)d(\d+)(?:\s*\+\s*(\d+))?[^.]{0,55}?\b(Acid|Bludgeoning|Cold|Fire|Force|Lightning|Necrotic|Piercing|Poison|Psychic|Radiant|Slashing|Thunder) damage/giu;
-  for (const match of span.matchAll(dicePattern)) {
-    signatures.push({
-      dice_count: Number(match[1]),
-      die_size: Number(match[2]),
-      flat_modifier: match[3] === undefined ? null : Number(match[3]),
-      damage_type: match[4] as DamageType,
-    });
-  }
-  const flatPattern = /\b(\d+) (Acid|Bludgeoning|Cold|Fire|Force|Lightning|Necrotic|Piercing|Poison|Psychic|Radiant|Slashing|Thunder) damage/giu;
-  for (const match of span.matchAll(flatPattern)) {
-    if (!span.slice(Math.max(0, (match.index ?? 0) - 3), match.index).includes('d')) {
-      signatures.push({
-        dice_count: null,
-        die_size: null,
-        flat_modifier: Number(match[1]),
-        damage_type: match[2] as DamageType,
-      });
-    }
-  }
-  const reverseDicePattern = /\b(Acid|Bludgeoning|Cold|Fire|Force|Lightning|Necrotic|Piercing|Poison|Psychic|Radiant|Slashing|Thunder) damage[^.]{0,80}?(\d+)d(\d+)(?:\s*\+\s*(\d+))?/giu;
-  for (const match of span.matchAll(reverseDicePattern)) {
-    signatures.push({
-      dice_count: Number(match[2]),
-      die_size: Number(match[3]),
-      flat_modifier: match[4] === undefined ? null : Number(match[4]),
-      damage_type: match[1] as DamageType,
-    });
-  }
-  if (signatures.length === 0 && /\d+d\d+[^.]{0,70}?damage of (?:the|a) [^.]+ type/iu.test(span)) {
-    const dice = /(\d+)d(\d+)/u.exec(span);
-    signatures.push({
-      dice_count: dice === null ? null : Number(dice[1]),
-      die_size: dice === null ? null : Number(dice[2]),
-      flat_modifier: null,
-      damage_type: null,
-    });
-  }
-  if (signatures.length === 0) {
-    const dice = /(\d+)d(\d+)[^.]{0,80}?damage/iu.exec(span);
-    if (dice !== null) {
-      signatures.push({
-        dice_count: Number(dice[1]),
-        die_size: Number(dice[2]),
-        flat_modifier: null,
-        damage_type: null,
-      });
-    }
-  }
-  return signatures;
-}
-
-function directFailureDamageSpan(span: string): string {
-  const sentences = span.match(/[^.!?]+[.!?]/gu) ?? [span];
-  const relevant = sentences.find((sentence) =>
-    /(?:failed save|Failure:|saving throw[^.]{0,160}?or take|taking [^.]{0,160}?damage on (?:a )?failed save)/iu.test(sentence) &&
-    /(?:\d+d\d+|\b\d+\b)[^.]{0,100}?damage|damage[^.]{0,100}?(?:\d+d\d+|\b\d+\b)/iu.test(sentence),
-  );
-  return relevant ?? span;
-}
-
-function directDamageSaveClauses(body: string): SourceDerivedSaveClause[] {
-  const explicitSave = /\b(?:(Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma)(?: \([^)]*\))? (?:saving throw|Saving Throw:)|repeats? (?:that|the) save|repeats the save)/giu;
-  const matches = [...body.matchAll(explicitSave)];
-  const clauses: SourceDerivedSaveClause[] = [];
-  let inheritedAbility: Ability | null = null;
-  let inheritedDamageSignatures: readonly FailedDamageSignature[] = [];
-  for (const [index, match] of matches.entries()) {
-    const start = body.lastIndexOf('.', match.index ?? 0) + 1;
-    const next = matches[index + 1]?.index ?? body.length;
-    const span = body.slice(start, next).trim();
-    inheritedAbility = sourceAbility(span, inheritedAbility);
-    const repeatsDamage = /(?:takes?|deals?) (?:the )?[A-Za-z]+ damage again/iu.test(span);
-    const directDamage = /(?:failed save|Failure:|saving throw[^.]{0,140}?or take|taking [^.]{0,140}?damage on (?:a )?failed save)[\s\S]{0,240}?(?:\d+d\d+|\b\d+\b)[^.]{0,90}?damage|(?:\d+d\d+|\b\d+\b)[^.]{0,90}?damage[^.]{0,120}?(?:failed save|Failure:)/iu.test(span) ||
-      (repeatsDamage && inheritedDamageSignatures.length > 0);
-    if (!directDamage) {
-      continue;
-    }
-    const kind: SaveSuccessOutcome['kind'] = /half the initial damage only/iu.test(span)
-      ? 'sourced_damage'
-      : /half (?:as much|the initial) damage|half damage/iu.test(span)
-        ? 'half'
-        : 'none';
-    const signatures = sourceDamageSignatures(directFailureDamageSpan(span));
-    const failedDamageSignatures = signatures.length === 0 && repeatsDamage
-      ? inheritedDamageSignatures
-      : signatures;
-    clauses.push({
-      span,
-      ability: inheritedAbility,
-      kind,
-      failed_damage_signatures: failedDamageSignatures,
-    });
-    inheritedDamageSignatures = failedDamageSignatures;
-  }
-  return clauses;
-}
-
-function gateDamageSaveClause(body: string): SourceDerivedSaveClause | null {
-  const gatePatterns = [
-    /[^.]*Dexterity saving throw[^.]*Grappled[^.]*\.[\s\S]{0,240}?grapples[^.]*damage[^.]*4d6[^.]*\./iu,
-    /[^.]*must succeed on a Wisdom saving throw or become cursed[\s\S]{0,520}?extra 1d8 Necrotic damage[^.]*\./iu,
-    /[^.]*Constitution saving throw[\s\S]{0,120}?successful save[^.]*spell has no effect[\s\S]{0,1500}?(?:extra 1d4 damage|1d4[^.]*less damage)[^.]*\./iu,
-    /[^.]*Strength saving throw[\s\S]{0,260}?successful save[^.]*spell ends[\s\S]{0,180}?While Restrained[^.]*1d6 Piercing damage[^.]*\./iu,
-    /[^.]*Wisdom saving throw or have the Charmed condition[\s\S]{0,260}?While Charmed[^.]*5d10 Psychic damage[^.]*\./iu,
-    /[^.]*Intelligence saving throw[\s\S]{0,900}?affected target[\s\S]{0,420}?2d8 Psychic damage[^.]*\./iu,
-    /[^.]*Constitution saving throw[\s\S]{0,360}?subtracts 1d8 from all its damage rolls[^.]*\./iu,
-    /[^.]*1d6 Fire damage[\s\S]{0,220}?start of each of its turns[\s\S]{0,180}?Constitution saving throw[\s\S]{0,120}?successful save[^.]*spell ends[^.]*\./iu,
-  ];
-  for (const pattern of gatePatterns) {
-    const match = pattern.exec(body);
-    if (match !== null) {
-      const span = match[0].trim();
-      return {
-        span,
-        ability: sourceAbility(span, null),
-        kind: 'none',
-        failed_damage_signatures: sourceDamageSignatures(span),
-      };
-    }
-  }
-  return null;
-}
-
-const bundledSpellBodies = spellDescriptionsByHeading();
-const sourceDerivedSaveClauses = new Map<string, readonly SourceDerivedSaveClause[]>();
-let rawSourceDerivedSaveDamageCandidateCount = 0;
-for (const [heading, body] of bundledSpellBodies) {
-  const direct = directDamageSaveClauses(body);
-  const gate = gateDamageSaveClause(body);
-  rawSourceDerivedSaveDamageCandidateCount += direct.length + (gate === null ? 0 : 1);
-  // These two gate patterns rediscover the same save already owned by the
-  // direct predicate. Direct owns them; retaining both would manufacture two
-  // candidates from one source clause.
-  const directOwnsGate = heading === 'Ensnaring Strike' ||
-    heading === 'Ray of Enfeeblement';
-  sourceDerivedSaveClauses.set(
-    heading,
-    gate === null || directOwnsGate ? direct : [...direct, gate].sort(
-      (left, right) => body.indexOf(left.span) - body.indexOf(right.span),
-    ),
+const bundledSpellBodies = spellDescriptionsFromFullLayout(bundledSrd521);
+const extractedSpellBodies = spellDescriptionsByHeading(bundledSpellDescriptions);
+if (
+  bundledSpellBodies.size !== extractedSpellBodies.size ||
+  [...bundledSpellBodies].some(([heading, body]) =>
+    extractedSpellBodies.get(heading) !== body,
+  )
+) {
+  throw new TypeError(
+    'Column-safe full SRD spell reading does not match the committed readable spell extract.',
   );
 }
+const sourceCoverage = deriveSaveDamageCoverageFromBodies(bundledSpellBodies);
+const sourceDerivedSaveClauses = sourceCoverage.clauses_by_heading;
 
-export const sourceDerivedSaveDamageCandidateCounts = Object.freeze({
-  before_deduplication: rawSourceDerivedSaveDamageCandidateCount,
-  after_deduplication: [...sourceDerivedSaveClauses.values()].reduce(
-    (count, clauses) => count + clauses.length,
-    0,
-  ),
-});
-
+export const sourceDerivedSaveDamageCandidateCounts = sourceCoverage.counts;
 export const sourceDerivedSaveDamageCandidates = Object.freeze(
-  [...sourceDerivedSaveClauses.entries()].flatMap(([heading, clauses]) =>
-    clauses.map((clause) => Object.freeze({ heading, ...clause })),
-  ),
+  sourceCoverage.candidates,
 ) satisfies readonly SourceDerivedSaveDamageCandidate[];
 
-const nextSourceClauseByHeading = new Map<string, number>();
+/**
+ * An independent bounded lexical audit, not a proof over unrestricted English.
+ * Every current reviewed clause must overlap a suspect, and every extra suspect
+ * must be owned by a clause or an exact-span exclusion below.
+ */
+export const highRecallDamageSaveSuspects = Object.freeze(
+  sourceCoverage.broad_suspects,
+);
+
+const reviewedHighRecallDamageSaveExclusions = [
+  {
+    heading: 'Heat Metal',
+    source_span: 'Until the spell ends, you can take a Bonus Action on each of your later turns to deal this damage again if the object is within range. If a creature is holding or wearing the object and takes the damage from it, the creature must succeed on a Constitution saving throw or drop the object if it can. If it doesn’t drop the object, it has Disadvantage on attack rolls and ability checks until the start of your next turn. Using a Higher-Level Spell Slot. The damage increases by 1d8 for each spell slot level above 2.',
+    rationale: 'The save controls dropping the object; it does not change Heat Metal damage.',
+  },
+  {
+    heading: 'Sleep',
+    source_span: 'Level 1 Enchantment (Bard, Sorcerer, Wizard) Casting Time: Action Range: 60 feet Components: V, S, M (a pinch of sand or rose petals) Duration: Concentration, up to 1 minute Each creature of your choice in a 5-foot-radius Sphere centered on a point within range must succeed on a Wisdom saving throw or have the Incapacitated condition until the end of its next turn, at which point it must repeat the save. If the target fails the second save, the target has the Unconscious condition for the duration. The spell ends on a target if it takes damage or someone within 5 feet of it takes an action to shake it out of the spell’s effect. Creatures that don’t sleep, such as elves, or that have Immunity to the Exhaustion condition automatically succeed on saves against this spell.',
+    rationale: 'Damage ends Sleep; neither save changes numeric damage.',
+  },
+  {
+    heading: 'Wall of Stone',
+    source_span: 'If the wall cuts through a creature’s space when it appears, the creature is pushed to one side of the wall (you choose which side). If a creature would be surrounded on all sides by the wall (or the wall and another solid surface), that creature can make a Dexterity saving throw. On a success, it can use its Reaction to move up to its Speed so that it is no longer enclosed by the wall. The wall can have any shape you desire, though it can’t occupy the same space as a creature or object. The wall doesn’t need to be vertical or rest on a firm foundation. It must, however, merge with and be solidly supported by existing stone. Thus, you can use this spell to bridge a chasm or create a ramp. If you create a span greater than 20 feet in length, you must halve the size of each panel to create supports. You can crudely shape the wall to create battlements and the like. The wall is an object made of stone that can be damaged and thus breached. Each panel has AC 15 and 30 Hit Points per inch of thickness, and it has Immunity to Poison and Psychic damage. Reducing a panel to 0 Hit Points destroys it and might cause connected panels to collapse at the GM’s discretion. If you maintain your Concentration on this spell for its full duration, the wall becomes permanent and can’t be dispelled. Otherwise, the wall disappears when the spell ends.',
+    rationale: 'The save controls enclosure; later text describes damage to the wall object.',
+  },
+  {
+    heading: 'Warding Bond',
+    source_span: 'Level 2 Abjuration (Cleric, Paladin) Casting Time: Action Range: Touch Components: V, S, M (a pair of platinum rings worth 50+ GP each, which you and the target must wear for the duration) Duration: 1 hour You touch another creature that is willing and create a mystic connection between you and the target until the spell ends. While the target is within 60 feet of you, it gains a +1 bonus to AC and saving throws, and it has Resistance to all damage. Also, each time it takes damage, you take the same amount of damage. The spell ends if you drop to 0 Hit Points or if you and the target become separated by more than 60 feet. It also ends if the spell is cast again on either of the connected creatures.',
+    rationale: 'The saving-throw bonus and damage transfer are separate effects; there is no save outcome.',
+  },
+  {
+    heading: 'Web',
+    source_span: 'Webs layered over a flat surface have a depth of 5 feet. The first time a creature enters the webs on a turn or starts its turn there, it must succeed on a Dexterity saving throw or have the Restrained condition while in the webs or until it breaks free. A creature Restrained by the webs can take an action to make a Strength (Athletics) check against your spell save DC. If it succeeds, it is no longer Restrained. The webs are flammable. Any 5-foot Cube of webs exposed to fire burns away in 1 round, dealing 2d4 Fire damage to any creature that starts its turn in the fire.',
+    rationale: 'The save controls restraint; fire damage is caused by igniting the webs.',
+  },
+  {
+    heading: 'Wish',
+    source_span: 'Reality reshapes itself to accommodate the new result. For example, a Wish spell could undo an ally’s failed saving throw or a foe’s Critical Hit. You can force the reroll to be made with Advantage or Disadvantage, and you choose whether to use the reroll or the original roll. Reshape Reality. You may wish for something not included in any of the other effects. To do so, state your wish to the GM as precisely as possible. The GM has great latitude in ruling what occurs in such an instance; the greater the wish, the greater the likelihood that something goes wrong. This spell might simply fail, the effect you desire might be achieved only in part, or you might suffer an unforeseen consequence as a result of how you worded the wish. For example, wishing that a villain were dead might propel you forward in time to a period when that villain is no longer alive, effectively removing you from the game. Similarly, wishing for a Legendary magic item or an Artifact might instantly transport you to the presence of the item’s current owner. If your wish is granted and its effects have consequences for a whole community, region, or world, you are likely to attract powerful foes. If your wish would affect a god, the god’s divine servants might instantly intervene to prevent it or to encourage you to craft the wish in a particular way. If your wish would undo the multiverse itself, your wish fails. The stress of casting Wish to produce any effect other than duplicating another spell weakens you. After enduring that stress, each time you cast a spell until you finish a Long Rest, you take 1d10 Necrotic damage per level of that spell. This damage can’t be reduced or prevented in any way. In addition, your Strength score becomes 3 for 2d4 days.',
+    rationale: 'Wish mentions rerolling an existing save; its later stress damage has no save.',
+  },
+] as const;
+
+export const unreconciledHighRecallDamageSaveSuspects = Object.freeze(
+  highRecallDamageSaveSuspects.filter((suspect) =>
+    !sourceDerivedSaveDamageCandidates.some((candidate) =>
+      candidate.heading === suspect.heading &&
+      candidate.start < suspect.end &&
+      suspect.start < candidate.end,
+    ) &&
+    !reviewedHighRecallDamageSaveExclusions.some((exclusion) =>
+      exclusion.heading === suspect.heading &&
+      exclusion.source_span === suspect.span,
+    ),
+  ),
+);
+
+const consumedSourceClauses = new Set<SourceDerivedSaveClause>();
+
+const multiClauseSemanticAnchorById = {
+  'srd-5.2.1:spell:conjure-elemental:save:initial-damage': '8d8 damage',
+  'srd-5.2.1:spell:conjure-elemental:save:repeat-damage': '4d8 damage',
+  'srd-5.2.1:spell:phantasmal-killer:save:initial-damage': 'Disadvantage on ability checks',
+  'srd-5.2.1:spell:phantasmal-killer:save:repeat-damage': 'damage again',
+  'srd-5.2.1:spell:storm-of-vengeance:save:initial-thunder-damage': '2d6 Thunder damage',
+  'srd-5.2.1:spell:storm-of-vengeance:save:lightning-damage': '10d6 Lightning damage',
+  'srd-5.2.1:spell:tsunami:save:initial-damage': '6d10 Bludgeoning damage',
+  'srd-5.2.1:spell:tsunami:save:ongoing-damage': '5d10 Bludgeoning damage',
+  'srd-5.2.1:spell:wall-of-ice:save:initial-damage': '10d6 Cold damage',
+  'srd-5.2.1:spell:wall-of-ice:save:frigid-air-damage': '5d6 Cold damage',
+  'srd-5.2.1:spell:wall-of-thorns:save:piercing-damage': '7d8 Piercing damage',
+  'srd-5.2.1:spell:wall-of-thorns:save:slashing-damage': '7d8 Slashing damage',
+  'srd-5.2.1:spell:weird:save:initial-damage': '10d10 Psychic damage',
+  'srd-5.2.1:spell:weird:save:repeat-damage': '5d10 Psychic damage',
+} as const satisfies Record<string, string>;
 
 function sourceClauseMatchesDiscriminator(
   clause: SourceDerivedSaveClause,
@@ -633,6 +637,17 @@ function sourceClauseMatchesDiscriminator(
   }
 }
 
+function signatureHasIndependentSourceWitness(
+  span: string,
+  signature: FailedDamageSignature,
+): boolean {
+  const amount = signature.dice_count === null || signature.die_size === null
+    ? String(signature.flat_modifier)
+    : `${String(signature.dice_count)}d${String(signature.die_size)}`;
+  return span.includes(amount) &&
+    (signature.damage_type === null || span.includes(signature.damage_type));
+}
+
 function reviewedSaveClause(
   key: string,
   spellSlug: string,
@@ -641,12 +656,16 @@ function reviewedSaveClause(
   discriminator?: SaveClauseDiscriminator,
 ): ReviewedSaveSuccessClause {
   const id = saveSuccessClauseId(`srd-5.2.1:spell:${spellSlug}:save:${key}`);
-  const sourceIndex = nextSourceClauseByHeading.get(heading) ?? 0;
   const candidates = sourceDerivedSaveClauses.get(heading) ?? [];
-  const sourceClause = candidates[sourceIndex];
+  const matches = discriminator === undefined
+    ? candidates
+    : candidates.filter((candidate) =>
+        sourceClauseMatchesDiscriminator(candidate, discriminator),
+      );
+  const sourceClause = matches.length === 1 ? matches[0] : undefined;
   if (sourceClause === undefined) {
     throw new TypeError(
-      `No source-derived damage save clause ${String(sourceIndex + 1)} exists for ${heading}.`,
+      `${id} does not uniquely select one source-derived damage save clause for ${heading}.`,
     );
   }
   if (candidates.length > 1 && discriminator === undefined) {
@@ -655,21 +674,45 @@ function reviewedSaveClause(
     );
   }
   if (discriminator !== undefined) {
-    const matches = candidates.filter((candidate) =>
-      sourceClauseMatchesDiscriminator(candidate, discriminator),
-    );
-    if (matches.length !== 1 || matches[0] !== sourceClause) {
+    if (matches.length !== 1) {
       throw new TypeError(
         `${id} is mis-bound: its source candidate does not uniquely match the declared ${discriminator.kind} discriminator.`,
       );
     }
+  }
+  if (consumedSourceClauses.has(sourceClause)) {
+    throw new TypeError(`${id} reuses a source clause already bound to another ID.`);
   }
   if (sourceClause.kind !== kind) {
     throw new TypeError(
       `${id} is mis-bound: source outcome ${sourceClause.kind} does not match declared outcome ${kind}.`,
     );
   }
-  nextSourceClauseByHeading.set(heading, sourceIndex + 1);
+  if (candidates.length > 1) {
+    const semanticAnchor = multiClauseSemanticAnchorById[
+      id as keyof typeof multiClauseSemanticAnchorById
+    ];
+    if (semanticAnchor === undefined || !sourceClause.span.includes(semanticAnchor)) {
+      throw new TypeError(`${id} is not bound to its reviewed semantic source anchor.`);
+    }
+  }
+  const requirements: ReviewedDamageRequirements | undefined = reviewedDamageRequirementsByClause[
+    `${spellSlug}:${key}` as keyof typeof reviewedDamageRequirementsByClause
+  ];
+  if (requirements === undefined) {
+    throw new TypeError(`${id} has no independently reviewed damage requirements.`);
+  }
+  const declaredSignatures = [
+    ...requirements.failed,
+    ...(requirements.success ?? []),
+  ].flat();
+  const sourceWitness = bundledSpellBodies.get(heading) ?? sourceClause.span;
+  if (!declaredSignatures.every((signature) =>
+    signatureHasIndependentSourceWitness(sourceWitness, signature),
+  )) {
+    throw new TypeError(`${id} declares damage without a source-text witness.`);
+  }
+  consumedSourceClauses.add(sourceClause);
   const stableKey = sourceStableKey(`srd-5.2.1:spell:${spellSlug}`);
   return {
     id,
@@ -683,7 +726,8 @@ function reviewedSaveClause(
     evidence: bundledHeading(heading),
     source_span: sourceClause.span,
     ability: sourceClause.ability,
-    failed_damage_signatures: sourceClause.failed_damage_signatures,
+    failed_damage_signature_slots: requirements.failed,
+    success_damage_signature_slots: requirements.success ?? [],
   };
 }
 
@@ -831,30 +875,60 @@ function sameSourceRef(left: SourceRef, right: SourceRef): boolean {
 function damageMatchesSourceClause(
   effect: SourceRef,
   damage: readonly DamageInstance[],
-  signatures: readonly FailedDamageSignature[],
+  slots: readonly DamageSignatureSlot[],
 ): boolean {
   if (damage.some((instance) => !sameSourceRef(instance.source, effect))) {
     return false;
   }
-  if (signatures.length === 0) {
-    return true;
+  const supplied = damage.flatMap((instance) =>
+    instance.components.map((component) => ({
+      damage_type: instance.damage_type,
+      component,
+    })),
+  );
+  if (supplied.length !== slots.length) {
+    return false;
   }
-  return damage.every((instance) => instance.components.every((component) =>
-    signatures.some((signature) => {
+  const matches = (
+    value: (typeof supplied)[number],
+    signature: FailedDamageSignature,
+  ): boolean => {
       if (
         signature.damage_type !== null &&
-        signature.damage_type !== instance.damage_type
+        signature.damage_type !== value.damage_type
       ) {
         return false;
       }
-      if (component.kind === 'dice') {
-        return signature.die_size === component.pool.die &&
+      if (value.component.kind === 'dice') {
+        return signature.flat_modifier === null &&
+          signature.die_size === value.component.pool.die &&
           signature.dice_count !== null &&
-          component.pool.count >= signature.dice_count;
+          value.component.pool.count >= signature.dice_count;
       }
-      return signature.flat_modifier === component.modifier;
-    }),
-  ));
+      return signature.dice_count === null &&
+        signature.die_size === null &&
+        signature.flat_modifier === value.component.modifier;
+  };
+  const assign = (slotIndex: number, used: ReadonlySet<number>): boolean => {
+    if (slotIndex === slots.length) {
+      return used.size === supplied.length;
+    }
+    const slot = slots[slotIndex] as DamageSignatureSlot;
+    for (const [suppliedIndex, value] of supplied.entries()) {
+      if (
+        !used.has(suppliedIndex) &&
+        slot.some((signature) => matches(value, signature))
+      ) {
+        const nextUsed = new Set(used);
+        nextUsed.add(suppliedIndex);
+        if (assign(slotIndex + 1, nextUsed)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+  return assign(0, new Set<number>());
 }
 
 /**
@@ -878,12 +952,12 @@ export function saveSuccessOutcomeHasEvidence(
     (damageOnFailedSave === undefined || damageMatchesSourceClause(
       effect,
       damageOnFailedSave,
-      expected.failed_damage_signatures,
+      expected.failed_damage_signature_slots,
     )) &&
     (outcome.kind !== 'sourced_damage' || damageMatchesSourceClause(
       effect,
       outcome.damage,
-      expected.failed_damage_signatures,
+      expected.success_damage_signature_slots,
     ));
 }
 

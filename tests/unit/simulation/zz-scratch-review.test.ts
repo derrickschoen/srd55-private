@@ -7,7 +7,7 @@ it('scratch dump', () => {
     id: clause.id,
     kind: clause.kind,
     ability: clause.ability,
-    sigs: clause.failed_damage_signatures,
+    sigs: clause.failed_damage_signature_slots,
     span: clause.source_span,
   }));
   console.log(JSON.stringify(rows, null, 1));
