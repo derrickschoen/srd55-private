@@ -75,9 +75,39 @@ Follow it rather than re-deciding.
 |---|---|
 | **Binding decisions and findings — READ BEFORE CHANGING ANYTHING** | `.claude/decisions.md` (D-numbered decisions, F-numbered findings; highest number is newest) |
 | Open questions for the owner | `.claude/pending-questions/` |
+| **D&D rules and spells — NEVER answer from memory** | `.ai/rules/INDEX.md` (answers inline; `.ai/AGENTS.md` has the lookup protocol) |
 | Deep reference for agents | `.ai/` |
 | Licensing rules for bundled content | `docs/srd/ATTRIBUTION.md` |
 | Where SRD content came from | `docs/srd/SOURCE.md` |
 
 If this file and the decisions file disagree, **the decisions file wins**. It is
 the record of what was decided and why; this file is only orientation.
+
+## Never state a D&D rule from memory
+
+Look it up before asserting any rule, spell effect, class feature, or number.
+The default lookup delegates to codex so the library is read in ITS context
+rather than yours — you pay for one line:
+
+```
+python3 ~/.claude/skills/verified-kb/scripts/kb_ask.py --kb .ai/rules '<question>'
+```
+
+Two readers (codex sol-medium + claude sonnet) answer in parallel and are
+compared; `[2/2 agree]` is corroboration, exit 2 is an unresolved disagreement
+you must settle yourself by reading the cited entries.
+
+`KB: NOT-IN-KB` means it is genuinely absent — read source and add the entry.
+That is a correct answer; a confident guess is not. Grep `.ai/rules/INDEX.md`
+directly only when it is already in context and you need one known key.
+
+This is not caution for its own sake. Recall was wrong **three times in one
+session** — half-caster multiclass rounding, Channel Divinity recovery, and
+Magic Missile dart scaling — on facts sitting in `docs/srd/` the whole time, and
+another agent caught every one. `.ai/rules/AGENT_ERRATA.md` lists the wrong
+priors already caught; if your belief is on it, your belief is wrong.
+
+Also: **do not `grep` the SRD directly.** It is two-column, so a phrase spanning
+a sentence is interleaved with the neighbouring column and plain `grep` returns
+nothing for text that is present — silently, and it reads exactly like "no such
+rule". Use `python3 .ai/rules/srdgrep.py '<phrase>'`, which normalizes first.
