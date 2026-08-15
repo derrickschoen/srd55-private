@@ -2825,3 +2825,39 @@ an AI-with-source decode pass that writes their rows — and per round 14's
 named process gap ("same-change oracle co-minting"), that decode pass must be
 SEPARATE from any parser change: oracle rows and parser code never land in
 the same change for the same clause.
+
+## D260 — Round-3 collaborative brainstorm rulings (2026-08-15)
+
+Five fresh Claude perspectives (VTT table-runner / deployment-infra /
+sim-matrix economics / release / next-session) plus codex sixth; 26
+candidates; duplicates merged; blockers asked one at a time:
+
+1. **NPC party profiles: DERIVED FROM SRD CLASSES at level 7** — standard-array
+   Fighter/Cleric/Wizard built from the class tables, cited like everything
+   else, appended to the contract beside the enemy save row.
+2. **VTT rooms: DM-AUTHORITATIVE DOC** — players send proposals; only the DM
+   client mutates the shared doc, on every transport. Kick = stop accepting a
+   peer.
+3. **VTT persistence: DM-LOCAL AUTOSAVE** — Yjs snapshots into the DM's
+   SQLite; DM refresh safe; full DM disconnect pauses the game; server
+   stateless.
+4. **Board B official composite: EQUAL-WEIGHT AVERAGE of the solo-boss and
+   3-mook day variants**; both columns still printed.
+5. **Toggles: H1 COLLAPSES INTO H4.** Three house-rule toggles ship (H4
+   Dex-for-Str prereqs incl. Paladin, H2 feat decoupling, H3 MI ability);
+   contract keeps H1 as history; disclosures name H4.
+6. **Cloudflare: CONFIGS ONLY, NO DEPLOY.** wrangler.toml + relay worker code
+   staged in-repo; nothing deploys until the owner acts. No paid plan.
+7. **Release scope: VTT ships AFTER v1** as its own milestone; **the mirror
+   goes PUBLIC when v1-usable is declared.**
+8. **Fog is TECHNICALLY SECRET** — the DM client sends players a filtered
+   doc; hidden state never leaves the DM. (Natural fit with ruling 2.)
+9. **Simcore registry: PUBLIC SRD CORE + PRIVATE ORACLE OVERLAYS** — Board B's
+   Xanathar/Tasha registrations and user imports live in overlay files that
+   never touch the public repo.
+
+Supervisor-decided without asking: simcore round briefs/findings become
+committed docs (private repo) rather than scratchpad-only; handover files get
+a refresh at the next quiescent point; the 11 walkthrough specs are the
+supervisor's next authoring task and their absence is a queue fact, not an
+owner decision.
