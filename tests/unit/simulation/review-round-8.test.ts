@@ -106,10 +106,6 @@ describe('round 8 clause-local source evidence', () => {
 describe('round 8 damage-slot matching', () => {
   it('refuses Vitriolic Sphere until its explicit delayed damage can be scheduled', () => {
     const clause = reviewedSaveSuccessClauses.vitriolic_sphere;
-    const acid = diceDamage(clause.effect_source, 'Acid', [
-      { count: 10, die: 4 },
-      { count: 5, die: 4 },
-    ]);
     const event: SavingThrowDamageEvent = {
       kind: 'saving_throw_damage',
       event_id: routineEventId('round-8:vitriolic-sphere'),
@@ -123,7 +119,10 @@ describe('round 8 damage-slot matching', () => {
         delayed_until: 'end_of_target_next_turn',
       },
       save_success_clause_id: clause.id,
-      damage_on_failed_save: [acid],
+      damage_on_failed_save: [
+        diceDamage(clause.effect_source, 'Acid', [{ count: 10, die: 4 }]),
+        diceDamage(clause.effect_source, 'Acid', [{ count: 5, die: 4 }]),
+      ],
       on_success: {
         kind: 'sourced_damage',
         evidence: clause.evidence,

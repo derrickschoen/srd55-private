@@ -370,6 +370,7 @@ type ReviewedSaveSuccessClause = {
   readonly fixed_save_dc: number | null;
   readonly frequency: EventFrequency;
   readonly failed_damage_signature_slots: readonly DamageSignatureSlot[];
+  readonly failed_damage_roll_slot_groups: readonly DamageRollSlotGroup[];
   readonly success_damage_signature_slots: readonly DamageSignatureSlot[];
   readonly failed_damage_slot_repetitions: DamageSlotRepetitions;
   readonly success_roll_transform: 'none' | 'floor_half';
@@ -381,8 +382,11 @@ type DamageSignatureSlot = readonly [
   ...FailedDamageSignature[],
 ];
 
+type DamageRollSlotGroup = readonly [number, ...number[]];
+
 type ReviewedDamageRequirements = {
   readonly failed: readonly DamageSignatureSlot[];
+  readonly failed_roll_slot_groups?: readonly DamageRollSlotGroup[];
   readonly success?: readonly DamageSignatureSlot[];
   readonly success_roll_transform?: 'none' | 'floor_half';
 };
@@ -446,13 +450,19 @@ const reviewedDamageRequirementsByClause = {
   'contact-other-plane:damage': { failed: [required(dice(6, 6, 'Psychic'))] },
   'control-water:damage': { failed: [required(dice(2, 8, 'Bludgeoning'))] },
   'delayed-blast-fireball:damage': { failed: [required(dice(12, 6, 'Fire'))] },
-  'disintegrate:damage': { failed: [required(dice(10, 6, 'Force')), required(flat(40, 'Force'))] },
+  'disintegrate:damage': {
+    failed: [required(dice(10, 6, 'Force')), required(flat(40, 'Force'))],
+    failed_roll_slot_groups: [[0, 1]],
+  },
   'dissonant-whispers:damage': { failed: [required(dice(3, 6, 'Psychic'))] },
   'dragon-s-breath:damage': { failed: [required(dice(3, 6, null))] },
   'dream:damage': { failed: [required(dice(3, 6, 'Psychic'))] },
   'earthquake:collapse-damage': { failed: [required(dice(12, 6, 'Bludgeoning'))] },
   'faithful-hound:damage': { failed: [required(dice(4, 8, 'Force'))] },
-  'finger-of-death:damage': { failed: [required(dice(7, 8, 'Necrotic')), required(flat(30, 'Necrotic'))] },
+  'finger-of-death:damage': {
+    failed: [required(dice(7, 8, 'Necrotic')), required(flat(30, 'Necrotic'))],
+    failed_roll_slot_groups: [[0, 1]],
+  },
   'fireball:damage': { failed: [required(dice(8, 6, 'Fire'))] },
   'fire-storm:damage': { failed: [required(dice(7, 10, 'Fire'))] },
   'flame-strike:damage': { failed: [required(dice(5, 6, 'Fire')), required(dice(5, 6, 'Radiant'))] },
@@ -788,6 +798,25 @@ function reviewedSaveClause(
   const fixedSaveDc = sourceClause.fixed_save_dc.status === 'available'
     ? sourceClause.fixed_save_dc.value
     : null;
+  const requirements: ReviewedDamageRequirements | undefined = reviewedDamageRequirementsByClause[
+    `${spellSlug}:${key}` as keyof typeof reviewedDamageRequirementsByClause
+  ];
+  const failedDamageRollSlotGroups: readonly DamageRollSlotGroup[] =
+    requirements?.failed_roll_slot_groups ??
+    (requirements?.failed.map((_, index) => [index]) ?? []);
+  const groupedSlotIndexes = failedDamageRollSlotGroups.flat();
+  if (
+    requirements !== undefined &&
+    (
+      groupedSlotIndexes.length !== requirements.failed.length ||
+      new Set(groupedSlotIndexes).size !== requirements.failed.length ||
+      groupedSlotIndexes.some((index) =>
+        index < 0 || index >= requirements.failed.length
+      )
+    )
+  ) {
+    throw new TypeError(`${id} damage-roll slot groups do not partition its failed-save slots.`);
+  }
   const frequency: EventFrequency = sourceClause.frequency.kind === 'once_per_turn'
     ? {
         kind: 'once_per_turn',
@@ -814,11 +843,7 @@ function reviewedSaveClause(
         ? sourceClause.repetitions.reason
         : sourceClause.timing_unavailable_reason ?? 'Source evidence is unavailable.';
     const unavailableRequirements: ReviewedDamageRequirements | undefined =
-      sourceClause.success.status === 'available'
-        ? reviewedDamageRequirementsByClause[
-            `${spellSlug}:${key}` as keyof typeof reviewedDamageRequirementsByClause
-          ]
-        : undefined;
+      sourceClause.success.status === 'available' ? requirements : undefined;
     if (sourceClause.success.status === 'available' && unavailableRequirements === undefined) {
       throw new TypeError(`${id} has no independently reviewed damage requirements.`);
     }
@@ -869,15 +894,15 @@ function reviewedSaveClause(
       fixed_save_dc: fixedSaveDc,
       frequency,
       failed_damage_signature_slots: unavailableRequirements?.failed ?? [],
+      failed_damage_roll_slot_groups: unavailableRequirements === undefined
+        ? []
+        : failedDamageRollSlotGroups,
       success_damage_signature_slots: unavailableRequirements?.success ?? [],
       failed_damage_slot_repetitions: { minimum: 1, maximum: 1 },
       success_roll_transform: unavailableSuccessTransform,
       duration: sourceClause.duration,
     };
   }
-  const requirements: ReviewedDamageRequirements | undefined = reviewedDamageRequirementsByClause[
-    `${spellSlug}:${key}` as keyof typeof reviewedDamageRequirementsByClause
-  ];
   if (requirements === undefined) {
     throw new TypeError(`${id} has no independently reviewed damage requirements.`);
   }
@@ -921,6 +946,7 @@ function reviewedSaveClause(
     fixed_save_dc: fixedSaveDc,
     frequency,
     failed_damage_signature_slots: requirements.failed,
+    failed_damage_roll_slot_groups: failedDamageRollSlotGroups,
     success_damage_signature_slots: requirements.success ?? [],
     failed_damage_slot_repetitions: failedRepetitions,
     success_roll_transform: successRollTransform,
@@ -1111,11 +1137,42 @@ export const reviewedSaveSuccessKindOracle = Object.freeze({
   ReviewedSaveSuccessClause['kind']
 >);
 
+/**
+ * Independent transcription of the clauses whose complete numeric fold is
+ * unavailable even when their successful-save kind is known. Keeping this
+ * separate from the source reader makes availability regressions visible;
+ * in particular, a stray DC in an ability check cannot silently turn a
+ * reviewed `half` clause into a refusal.
+ */
+export const reviewedUnavailableSaveClauseOracle = Object.freeze([
+  'arcane_hand_grasping',
+  'bestow_curse_damage',
+  'dream',
+  'enlarge_reduce_damage',
+  'ensnaring_strike',
+  'geas',
+  'phantasmal_force',
+  'prismatic_spray',
+  'ray_of_enfeeblement',
+  'searing_smite',
+  'vitriolic_sphere',
+] as const satisfies readonly (keyof typeof reviewedSaveSuccessClauses)[]);
+
+const independentlyUnavailableSaveClauses = new Set<string>(
+  reviewedUnavailableSaveClauseOracle,
+);
+
 for (const [key, expectedKind] of Object.entries(reviewedSaveSuccessKindOracle)) {
   const actual = reviewedSaveSuccessClauses[key as keyof typeof reviewedSaveSuccessClauses];
   if (actual.kind !== expectedKind) {
     throw new TypeError(
       `${actual.id} source-derived success kind ${actual.kind} disagrees with the independent reviewed oracle ${expectedKind}.`,
+    );
+  }
+  const expectedUnavailable = independentlyUnavailableSaveClauses.has(key);
+  if ((actual.unavailable_reason !== null) !== expectedUnavailable) {
+    throw new TypeError(
+      `${actual.id} source-derived availability disagrees with the independent reviewed oracle.`,
     );
   }
 }
@@ -1175,20 +1232,11 @@ function damageMatchesSourceClause(
   effect: SourceRef,
   damage: readonly DamageInstance[],
   slots: readonly DamageSignatureSlot[],
+  rollSlotGroups: readonly DamageRollSlotGroup[],
   repetitions: DamageSlotRepetitions,
 ): boolean {
   if (damage.some((instance) => !sameSourceRef(instance.source, effect))) {
     return false;
-  }
-  if (repetitions.maximum > 1) {
-    return damage.length >= repetitions.minimum &&
-      damage.length <= repetitions.maximum &&
-      damage.every((instance) => damageMatchesSourceClause(
-        effect,
-        [instance],
-        slots,
-        { minimum: 1, maximum: 1 },
-      ));
   }
   type SuppliedPool = {
     readonly instance_index: number;
@@ -1217,32 +1265,67 @@ function damageMatchesSourceClause(
   const supplied = [...suppliedByKey.values()];
   const requiredAmount = (signature: FailedDamageSignature): number | null =>
     signature.dice_count ?? signature.flat_modifier;
-  const assign = (
-    requiredSlots: readonly DamageSignatureSlot[],
-    slotIndex: number,
-    remaining: readonly number[],
+  const rollMatchesInstance = (
+    slotGroup: DamageRollSlotGroup,
+    instanceIndex: number,
   ): boolean => {
-    if (slotIndex === requiredSlots.length) {
-      return remaining.every((amount) => amount === 0);
-    }
-    const slot = requiredSlots[slotIndex] as DamageSignatureSlot;
-    for (const signature of slot) {
-      const amount = requiredAmount(signature);
-      if (amount === null) {
-        continue;
+    const instancePools = supplied.filter((pool) =>
+      pool.instance_index === instanceIndex
+    );
+    const assignSlot = (
+      groupSlotIndex: number,
+      remaining: readonly number[],
+    ): boolean => {
+      if (groupSlotIndex === slotGroup.length) {
+        return remaining.every((amount) => amount === 0);
       }
-      for (const [suppliedIndex, pool] of supplied.entries()) {
-        const kindMatches = signature.dice_count === null
-          ? pool.kind === 'flat' && signature.die_size === null
-          : pool.kind === 'dice' && signature.die_size === pool.die;
-        const typeMatches = signature.damage_type === null ||
-          signature.damage_type === pool.damage_type;
-        if (kindMatches && typeMatches && (remaining[suppliedIndex] ?? 0) >= amount) {
-          const next = [...remaining];
-          next[suppliedIndex] = (next[suppliedIndex] ?? 0) - amount;
-          if (assign(requiredSlots, slotIndex + 1, next)) {
-            return true;
+      const slotIndex = slotGroup[groupSlotIndex];
+      const slot = slotIndex === undefined ? undefined : slots[slotIndex];
+      if (slot === undefined) {
+        return false;
+      }
+      for (const signature of slot) {
+        const amount = requiredAmount(signature);
+        if (amount === null) {
+          continue;
+        }
+        for (const [localIndex, pool] of instancePools.entries()) {
+          const kindMatches = signature.dice_count === null
+            ? pool.kind === 'flat' && signature.die_size === null
+            : pool.kind === 'dice' && signature.die_size === pool.die;
+          const typeMatches = signature.damage_type === null ||
+            signature.damage_type === pool.damage_type;
+          if (kindMatches && typeMatches && (remaining[localIndex] ?? 0) >= amount) {
+            const next = [...remaining];
+            next[localIndex] = (next[localIndex] ?? 0) - amount;
+            if (assignSlot(groupSlotIndex + 1, next)) {
+              return true;
+            }
           }
+        }
+      }
+      return false;
+    };
+    return assignSlot(0, instancePools.map((pool) => pool.amount));
+  };
+  const assignRolls = (
+    requiredRolls: readonly DamageRollSlotGroup[],
+    slotIndex: number,
+    usedInstances: ReadonlySet<number>,
+  ): boolean => {
+    if (slotIndex === requiredRolls.length) {
+      return usedInstances.size === damage.length;
+    }
+    const roll = requiredRolls[slotIndex];
+    if (roll === undefined) {
+      return false;
+    }
+    for (const instanceIndex of damage.keys()) {
+      if (!usedInstances.has(instanceIndex) && rollMatchesInstance(roll, instanceIndex)) {
+        const next = new Set(usedInstances);
+        next.add(instanceIndex);
+        if (assignRolls(requiredRolls, slotIndex + 1, next)) {
+          return true;
         }
       }
     }
@@ -1253,8 +1336,11 @@ function damageMatchesSourceClause(
     repeat <= repetitions.maximum;
     repeat += 1
   ) {
-    const requiredSlots = Array.from({ length: repeat }, () => slots).flat();
-    if (assign(requiredSlots, 0, supplied.map((pool) => pool.amount))) {
+    const requiredRolls = Array.from({ length: repeat }, () => rollSlotGroups).flat();
+    if (
+      requiredRolls.length === damage.length &&
+      assignRolls(requiredRolls, 0, new Set<number>())
+    ) {
       return true;
     }
   }
@@ -1349,6 +1435,7 @@ export function saveSuccessOutcomeEvidenceFailureReason(
       effect,
       damageOnFailedSave,
       expected.failed_damage_signature_slots,
+      expected.failed_damage_roll_slot_groups,
       expected.failed_damage_slot_repetitions,
     ) &&
     (outcome.kind !== 'sourced_damage' || (
@@ -1357,6 +1444,7 @@ export function saveSuccessOutcomeEvidenceFailureReason(
         effect,
         outcome.damage,
         expected.success_damage_signature_slots,
+        expected.success_damage_signature_slots.map((_, index) => [index]),
         { minimum: 1, maximum: 1 },
       )
     ));

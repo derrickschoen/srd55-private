@@ -512,7 +512,37 @@ function sourceFixedSaveDc(span: string): SourceDerivedFixedSaveDc {
   if (afterSave !== null) {
     return { status: 'available', value: Number(afterSave[1]) };
   }
-  const unsupported = /\bDC\s*\d+\b/iu.exec(span);
+  const unsupported = [...span.matchAll(/\bDC\s*\d+\b/giu)].find((candidate) => {
+    const index = candidate.index ?? 0;
+    const sentenceStart = Math.max(
+      span.lastIndexOf('.', index - 1),
+      span.lastIndexOf('!', index - 1),
+      span.lastIndexOf('?', index - 1),
+    ) + 1;
+    const followingStops = [
+      span.indexOf('.', index),
+      span.indexOf('!', index),
+      span.indexOf('?', index),
+    ].filter((stop) => stop >= 0);
+    const sentenceEnd = followingStops.length === 0
+      ? span.length
+      : Math.min(...followingStops) + 1;
+    const sentence = span.slice(sentenceStart, sentenceEnd);
+    const relativeIndex = index - sentenceStart;
+    const beforeDc = sentence.slice(0, relativeIndex);
+    const fromDc = sentence.slice(relativeIndex);
+    const ability = '(?:Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma)';
+    const belongsToCheck = new RegExp(
+      `^DC\\s*\\d+\\s+${ability}(?:\\s+\\([^)]*\\))?\\s+check\\b`,
+      'iu',
+    ).test(fromDc) || /\bcheck(?:\s+against)?\s*$/iu.test(beforeDc);
+    const followsSave = /\bsaving throw\b[^.!?]*$/iu.test(beforeDc);
+    const precedesSave = new RegExp(
+      `^DC\\s*\\d+[^.!?]*\\b${ability}(?:\\s+\\([^)]*\\))?\\s+saving throw\\b`,
+      'iu',
+    ).test(fromDc);
+    return !belongsToCheck && (followsSave || precedesSave);
+  }) ?? null;
   return unsupported === null
     ? { status: 'available', value: null }
     : {
