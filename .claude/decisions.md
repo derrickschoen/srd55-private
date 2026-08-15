@@ -2741,3 +2741,28 @@ unavailable cell, and their value (if any) lives on the judged axes.
 Combined with D254's condition model this empties the refusal list of its
 last two combat-facing holdouts: the 11-entry unavailability set becomes
 9 modelable conditions + 2 out-of-combat classifications.
+
+## D256 — OWNER RULINGS on the remaining unavailability survivors (2026-08-15)
+
+1. **Prismatic Spray is MODELED.** Random-table events join the condition-model
+   scope: Monte Carlo rolls the literal 1d8 per target (rerolling 8s for the
+   two-ray result); the analytic engine uses the verified 45/56 damaging-ray
+   closed form.
+2. **The casting-time sweep RUNS.** Every spell on both boards is classified
+   in-combat / out-of-combat from its casting time (the Geas/Dream D255 ruling
+   made systematic). No design may lean on an uncastable spell in a 4-round
+   combat.
+3. **Caster identity is MODELED via a PARTY: assume a Fighter, a Cleric and a
+   Wizard are the other party members.** Two-castings-of-one-clause
+   composition becomes representable (different casters are different
+   identities). Scope note: this introduces party context for identity and
+   composition purposes; it does not reopen C8's party-HP healing model
+   unless separately ruled.
+4. **Subclass Bonus Proficiencies — and anything else that affects
+   character-sheet numbers — MUST BE MODELED, not marked unknown.** College
+   of Lore's text is IN the full SRD ("Level 3: Bonus Proficiencies — You
+   gain proficiency with three skills of your choice"), only missing from the
+   subclasses.txt extract; the extract gets regenerated to carry subclass
+   feature TEXT, the app models it, and the walkthrough spec asserts three
+   Lore bonus skills instead of expectUnknowns. D33 'unknown' remains only
+   for values genuinely absent from source.
