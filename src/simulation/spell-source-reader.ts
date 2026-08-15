@@ -47,6 +47,7 @@ export type SourceDerivedFixedSaveDc =
  * One clause-local occurrence of a damage amount and its associated type.
  * Alternative types that share one amount share a slot index. Offsets are
  * relative to the owning spell body, never to the unsliced PDF row stream.
+ * Components whose source ranges overlap belong to one damage roll.
  */
 export type SourceDamageOccurrence = FailedDamageSignature & {
   readonly arm: SourceDamageArm;
@@ -55,6 +56,7 @@ export type SourceDamageOccurrence = FailedDamageSignature & {
   readonly start: number;
   readonly end: number;
   readonly slot_index: number;
+  readonly roll_index: number;
 };
 
 export type SourceDerivedSaveClause = {
@@ -416,7 +418,9 @@ function sourceDamageOccurrences(
   );
   const prismaticAlternatives = /Prismatic (?:Rays|Layers)|struck by two rays/iu.test(span);
   const mergedSlotByGroup: number[] = [];
+  const rollByGroup: number[] = [];
   let nextSlot = 0;
+  let nextRoll = 0;
   for (const [index, group] of groups.entries()) {
     const previous = groups[index - 1];
     const bridge = previous === undefined ? '' : span.slice(previous.end, group.start);
@@ -425,6 +429,14 @@ function sourceDamageOccurrences(
       nextSlot = index === 0 ? 0 : nextSlot + 1;
     }
     mergedSlotByGroup.push(nextSlot);
+    if (
+      previous !== undefined &&
+      !sharesAlternativeSlot &&
+      group.start >= previous.end
+    ) {
+      nextRoll += 1;
+    }
+    rollByGroup.push(nextRoll);
   }
   const failure = groups.flatMap((group, groupIndex) => {
     const sentenceEnd = span.indexOf('.', group.end);
@@ -444,6 +456,7 @@ function sourceDamageOccurrences(
       start: bodyStart + group.start,
       end: bodyStart + group.end,
       slot_index: mergedSlotByGroup[groupIndex] ?? groupIndex,
+      roll_index: rollByGroup[groupIndex] ?? groupIndex,
     }));
   });
   const halfInitial = /half the initial damage only/iu.exec(span);
@@ -465,6 +478,7 @@ function sourceDamageOccurrences(
       start: bodyStart + (halfInitial.index ?? 0),
       end: bodyStart + (halfInitial.index ?? 0) + halfInitial[0].length,
       slot_index: 0,
+      roll_index: 0,
     },
   ];
 }
@@ -503,52 +517,127 @@ function sourceDerivedSaveSuccess(
   };
 }
 
-function sourceFixedSaveDc(span: string): SourceDerivedFixedSaveDc {
-  const beforeAbility = /\bDC (\d+) (?:Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma) saving throw\b/iu.exec(span);
-  if (beforeAbility !== null) {
-    return { status: 'available', value: Number(beforeAbility[1]) };
+function isSourceSentencePeriod(span: string, index: number): boolean {
+  const before = span.slice(0, index + 1);
+  const after = span.slice(index + 1);
+  const next = span[index + 1];
+  if (next !== undefined && /[\p{L}\p{N}]/u.test(next)) {
+    return false;
   }
-  const afterSave = /\b(?:Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma) saving throw against DC (\d+)\b/iu.exec(span);
-  if (afterSave !== null) {
-    return { status: 'available', value: Number(afterSave[1]) };
+  if (
+    /\bvs\.$/iu.test(before) &&
+    /^\s*(?:DC\b|D\.C\.|Difficulty Class\b)/iu.test(after)
+  ) {
+    return false;
   }
-  const unsupported = [...span.matchAll(/\bDC\s*\d+\b/giu)].find((candidate) => {
-    const index = candidate.index ?? 0;
-    const sentenceStart = Math.max(
-      span.lastIndexOf('.', index - 1),
-      span.lastIndexOf('!', index - 1),
-      span.lastIndexOf('?', index - 1),
-    ) + 1;
-    const followingStops = [
-      span.indexOf('.', index),
-      span.indexOf('!', index),
-      span.indexOf('?', index),
-    ].filter((stop) => stop >= 0);
-    const sentenceEnd = followingStops.length === 0
-      ? span.length
-      : Math.min(...followingStops) + 1;
-    const sentence = span.slice(sentenceStart, sentenceEnd);
-    const relativeIndex = index - sentenceStart;
-    const beforeDc = sentence.slice(0, relativeIndex);
-    const fromDc = sentence.slice(relativeIndex);
-    const ability = '(?:Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma)';
-    const belongsToCheck = new RegExp(
-      `^DC\\s*\\d+\\s+${ability}(?:\\s+\\([^)]*\\))?\\s+check\\b`,
-      'iu',
-    ).test(fromDc) || /\bcheck(?:\s+against)?\s*$/iu.test(beforeDc);
-    const followsSave = /\bsaving throw\b[^.!?]*$/iu.test(beforeDc);
-    const precedesSave = new RegExp(
-      `^DC\\s*\\d+[^.!?]*\\b${ability}(?:\\s+\\([^)]*\\))?\\s+saving throw\\b`,
-      'iu',
-    ).test(fromDc);
-    return !belongsToCheck && (followsSave || precedesSave);
-  }) ?? null;
-  return unsupported === null
-    ? { status: 'available', value: null }
-    : {
+  if (
+    /\bD\.C\.$/iu.test(before) &&
+    /^\s*(?:(?:is|equals|of)\s+|[:=]\s*)?\d/iu.test(after)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+export function sourceSentences(span: string): readonly {
+  readonly start: number;
+  readonly end: number;
+  readonly text: string;
+}[] {
+  const sentences: { start: number; end: number; text: string }[] = [];
+  let start = 0;
+  for (let index = 0; index < span.length; index += 1) {
+    const character = span[index];
+    const isStop = character === '!' || character === '?' ||
+      (character === '.' && isSourceSentencePeriod(span, index));
+    if (!isStop) {
+      continue;
+    }
+    sentences.push({ start, end: index + 1, text: span.slice(start, index + 1) });
+    start = index + 1;
+  }
+  if (start < span.length) {
+    sentences.push({ start, end: span.length, text: span.slice(start) });
+  }
+  return sentences.length === 0
+    ? [{ start: 0, end: span.length, text: span }]
+    : sentences;
+}
+
+export function sourceFixedSaveDc(span: string): SourceDerivedFixedSaveDc {
+  const ability = '(?:Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma)';
+  const dcMarker = '(?:DC|D\\.C\\.|Difficulty Class)';
+  const numericDcMarker = `${dcMarker}\\s*(?:(?:is|equals|of)\\s+|[:=]\\s*)?\\d+`;
+  const fixedValues: number[] = [];
+  for (const sentence of sourceSentences(span)) {
+    const recognized: {
+      readonly start: number;
+      readonly end: number;
+      readonly value: number;
+    }[] = [];
+    for (const pattern of [
+      new RegExp(`\\bDC\\s+(\\d+)\\s+${ability} saving throw\\b`, 'giu'),
+      new RegExp(
+        `\\b${ability} saving throw(?:\\s+against\\s+DC|\\s+with\\s+a\\s+DC\\s+of|\\s+(?:vs\\.?|versus)\\s+DC)\\s*(\\d+)\\b`,
+        'giu',
+      ),
+    ]) {
+      for (const match of sentence.text.matchAll(pattern)) {
+        recognized.push({
+          start: match.index ?? 0,
+          end: (match.index ?? 0) + (match[0]?.length ?? 0),
+          value: Number(match[1]),
+        });
+      }
+    }
+    const numericDc = new RegExp(
+      `\\b${numericDcMarker}\\b`,
+      'giu',
+    );
+    const unsupported = [...sentence.text.matchAll(numericDc)].find((candidate) => {
+      const index = candidate.index ?? 0;
+      if (recognized.some((range) => index >= range.start && index < range.end)) {
+        return false;
+      }
+      const beforeDc = sentence.text.slice(0, index);
+      const fromDc = sentence.text.slice(index);
+      const checkAfterDc = new RegExp(
+        `^${numericDcMarker}\\s+${ability}(?:\\s+\\([^)]*\\))?\\s+check\\b`,
+        'iu',
+      ).test(fromDc);
+      const parentheticalCheck = new RegExp(
+        `\\b(?:ability check|${ability}(?:\\s+\\([^)]*\\))?\\s+check)\\b([^;.!?]*)\\(\\s*$`,
+        'iu',
+      ).exec(beforeDc);
+      const checkBeforeDc = /\bcheck\b\s+(?:against|versus|vs\.)\s*$/iu.test(beforeDc) ||
+        (
+          parentheticalCheck !== null &&
+          !/\b(?:saving throw|save)\b/iu.test(parentheticalCheck[1] ?? '')
+        );
+      const belongsToCheck = checkAfterDc || checkBeforeDc;
+      const followsSave = /\b(?:saving throw|save)\b/iu.test(beforeDc);
+      const precedesSave = new RegExp(
+        `^${numericDcMarker}[^;.!?]*\\b(?:${ability}(?:\\s+\\([^)]*\\))?\\s+saving throw|save)\\b`,
+        'iu',
+      ).test(fromDc);
+      return !belongsToCheck && (followsSave || precedesSave);
+    }) ?? null;
+    if (unsupported !== null) {
+      return {
         status: 'unavailable',
         reason: `The source fixed save DC syntax is not representable: ${unsupported[0]}.`,
       };
+    }
+    fixedValues.push(...recognized.map((match) => match.value));
+  }
+  const distinctValues = [...new Set(fixedValues)];
+  if (distinctValues.length > 1) {
+    return {
+      status: 'unavailable',
+      reason: `The source declares conflicting fixed save DCs: ${distinctValues.join(', ')}.`,
+    };
+  }
+  return { status: 'available', value: distinctValues[0] ?? null };
 }
 
 function sourceDamageFrequency(

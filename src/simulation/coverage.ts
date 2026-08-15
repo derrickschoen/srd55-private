@@ -384,12 +384,25 @@ type DamageSignatureSlot = readonly [
 
 type DamageRollSlotGroup = readonly [number, ...number[]];
 
-type ReviewedDamageRequirements = {
-  readonly failed: readonly DamageSignatureSlot[];
-  readonly failed_roll_slot_groups?: readonly DamageRollSlotGroup[];
+type ReviewedDamageRequirementsCommon = {
   readonly success?: readonly DamageSignatureSlot[];
   readonly success_roll_transform?: 'none' | 'floor_half';
 };
+
+type ReviewedDamageRequirements = ReviewedDamageRequirementsCommon & (
+  | {
+      readonly failed: readonly [DamageSignatureSlot];
+      readonly failed_roll_slot_groups?: never;
+    }
+  | {
+      readonly failed: readonly [
+        DamageSignatureSlot,
+        DamageSignatureSlot,
+        ...DamageSignatureSlot[],
+      ];
+      readonly failed_roll_slot_groups: readonly DamageRollSlotGroup[];
+    }
+);
 
 type DamageSlotRepetitions = {
   readonly minimum: 1;
@@ -421,6 +434,18 @@ const required = (
   signature: FailedDamageSignature,
   ...alternatives: readonly FailedDamageSignature[]
 ): DamageSignatureSlot => [signature, ...alternatives];
+
+function failedRollSlotGroups(
+  requirements: ReviewedDamageRequirements,
+): readonly DamageRollSlotGroup[] {
+  if (requirements.failed.length === 1) {
+    return [[0]];
+  }
+  if (requirements.failed_roll_slot_groups === undefined) {
+    throw new TypeError('Every multi-slot damage clause must declare its source roll-slot groups.');
+  }
+  return requirements.failed_roll_slot_groups;
+}
 
 /**
  * Human-reviewed damage-component oracle. These requirements are declarations,
@@ -465,7 +490,10 @@ const reviewedDamageRequirementsByClause = {
   },
   'fireball:damage': { failed: [required(dice(8, 6, 'Fire'))] },
   'fire-storm:damage': { failed: [required(dice(7, 10, 'Fire'))] },
-  'flame-strike:damage': { failed: [required(dice(5, 6, 'Fire')), required(dice(5, 6, 'Radiant'))] },
+  'flame-strike:damage': {
+    failed: [required(dice(5, 6, 'Fire')), required(dice(5, 6, 'Radiant'))],
+    failed_roll_slot_groups: [[0], [1]],
+  },
   'flaming-sphere:damage': { failed: [required(dice(2, 6, 'Fire'))] },
   'freezing-sphere:damage': { failed: [required(dice(10, 6, 'Cold'))] },
   'glyph-of-warding:explosive-runes': { failed: [required(
@@ -479,12 +507,18 @@ const reviewedDamageRequirementsByClause = {
   'harm:damage': { failed: [required(dice(14, 6, 'Necrotic'))] },
   'hellish-rebuke:damage': { failed: [required(dice(2, 10, 'Fire'))] },
   'ice-knife:explosion-damage': { failed: [required(dice(2, 6, 'Cold'))] },
-  'ice-storm:damage': { failed: [required(dice(2, 10, 'Bludgeoning')), required(dice(4, 6, 'Cold'))] },
+  'ice-storm:damage': {
+    failed: [required(dice(2, 10, 'Bludgeoning')), required(dice(4, 6, 'Cold'))],
+    failed_roll_slot_groups: [[0], [1]],
+  },
   'incendiary-cloud:damage': { failed: [required(dice(10, 8, 'Fire'))] },
   'inflict-wounds:damage': { failed: [required(dice(2, 10, 'Necrotic'))] },
   'insect-plague:damage': { failed: [required(dice(4, 10, 'Piercing'))] },
   'lightning-bolt:damage': { failed: [required(dice(8, 6, 'Lightning'))] },
-  'meteor-swarm:damage': { failed: [required(dice(20, 6, 'Fire')), required(dice(20, 6, 'Bludgeoning'))] },
+  'meteor-swarm:damage': {
+    failed: [required(dice(20, 6, 'Fire')), required(dice(20, 6, 'Bludgeoning'))],
+    failed_roll_slot_groups: [[0], [1]],
+  },
   'mind-spike:damage': { failed: [required(dice(3, 8, 'Psychic'))] },
   'moonbeam:damage': { failed: [required(dice(2, 10, 'Radiant'))] },
   'phantasmal-killer:initial-damage': { failed: [required(dice(4, 10, 'Psychic'))] },
@@ -518,6 +552,7 @@ const reviewedDamageRequirementsByClause = {
   'vicious-mockery:damage': { failed: [required(dice(1, 6, 'Psychic'))] },
   'vitriolic-sphere:damage': {
     failed: [required(dice(10, 4, 'Acid')), required(dice(5, 4, 'Acid'))],
+    failed_roll_slot_groups: [[0], [1]],
     success: [required(dice(10, 4, 'Acid'))],
     success_roll_transform: 'floor_half',
   },
@@ -696,6 +731,41 @@ function sourceDamageSlots(
     });
 }
 
+function sourceDamageRollSlotGroups(
+  clause: SourceDerivedSaveClause,
+  arm: 'failure' | 'success',
+): readonly DamageRollSlotGroup[] {
+  const slotsByRoll = new Map<number, Set<number>>();
+  for (const occurrence of clause.damage_occurrences) {
+    if (occurrence.arm !== arm) {
+      continue;
+    }
+    const slots = slotsByRoll.get(occurrence.roll_index) ?? new Set<number>();
+    slots.add(occurrence.slot_index);
+    slotsByRoll.set(occurrence.roll_index, slots);
+  }
+  return [...slotsByRoll.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([, slots]) => {
+      const [first, ...rest] = [...slots].sort((left, right) => left - right);
+      if (first === undefined) {
+        throw new TypeError('Source damage roll has no signature slots.');
+      }
+      return [first, ...rest];
+    });
+}
+
+function sameDamageRollSlotGroups(
+  left: readonly DamageRollSlotGroup[],
+  right: readonly DamageRollSlotGroup[],
+): boolean {
+  return left.length === right.length && left.every((group, groupIndex) => {
+    const other = right[groupIndex];
+    return other !== undefined && group.length === other.length &&
+      group.every((slotIndex, slotPosition) => slotIndex === other[slotPosition]);
+  });
+}
+
 function damageSlotsAreBijective(
   declared: readonly DamageSignatureSlot[],
   sourced: readonly DamageSignatureSlot[],
@@ -801,9 +871,9 @@ function reviewedSaveClause(
   const requirements: ReviewedDamageRequirements | undefined = reviewedDamageRequirementsByClause[
     `${spellSlug}:${key}` as keyof typeof reviewedDamageRequirementsByClause
   ];
-  const failedDamageRollSlotGroups: readonly DamageRollSlotGroup[] =
-    requirements?.failed_roll_slot_groups ??
-    (requirements?.failed.map((_, index) => [index]) ?? []);
+  const failedDamageRollSlotGroups: readonly DamageRollSlotGroup[] = requirements === undefined
+    ? []
+    : failedRollSlotGroups(requirements);
   const groupedSlotIndexes = failedDamageRollSlotGroups.flat();
   if (
     requirements !== undefined &&
@@ -816,6 +886,15 @@ function reviewedSaveClause(
     )
   ) {
     throw new TypeError(`${id} damage-roll slot groups do not partition its failed-save slots.`);
+  }
+  if (
+    requirements !== undefined &&
+    !sameDamageRollSlotGroups(
+      failedDamageRollSlotGroups,
+      sourceDamageRollSlotGroups(sourceClause, 'failure'),
+    )
+  ) {
+    throw new TypeError(`${id} damage-roll slot groups disagree with the clause-local source rolls.`);
   }
   const frequency: EventFrequency = sourceClause.frequency.kind === 'once_per_turn'
     ? {
