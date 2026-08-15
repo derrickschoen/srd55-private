@@ -47,7 +47,8 @@ export type SourceDerivedFixedSaveDc =
  * One clause-local occurrence of a damage amount and its associated type.
  * Alternative types that share one amount share a slot index. Offsets are
  * relative to the owning spell body, never to the unsliced PDF row stream.
- * Components whose source ranges overlap belong to one damage roll.
+ * Components whose source ranges overlap, or whose sentence explicitly says
+ * they are one roll, belong to one damage roll.
  */
 export type SourceDamageOccurrence = FailedDamageSignature & {
   readonly arm: SourceDamageArm;
@@ -409,11 +410,13 @@ function sourceDamageOccurrences(
   span: string,
   bodyStart: number,
 ): readonly SourceDamageOccurrence[] {
-  const groups = failureDamageSlices(span).flatMap((slice) =>
+  const groups = failureDamageSlices(span).flatMap((slice, sliceIndex) =>
     damageOccurrenceGroups(slice.text).map((group) => ({
       ...group,
       start: slice.start + group.start,
       end: slice.start + group.end,
+      slice_index: sliceIndex,
+      explicitly_one_roll: /\b(?:as\s+)?one(?:\s+damage)?\s+roll\b/iu.test(slice.text),
     })),
   );
   const prismaticAlternatives = /Prismatic (?:Rays|Layers)|struck by two rays/iu.test(span);
@@ -432,7 +435,12 @@ function sourceDamageOccurrences(
     if (
       previous !== undefined &&
       !sharesAlternativeSlot &&
-      group.start >= previous.end
+      group.start >= previous.end &&
+      !(
+        group.explicitly_one_roll &&
+        previous.explicitly_one_roll &&
+        group.slice_index === previous.slice_index
+      )
     ) {
       nextRoll += 1;
     }
@@ -524,6 +532,9 @@ function isSourceSentencePeriod(span: string, index: number): boolean {
   if (next !== undefined && /[\p{L}\p{N}]/u.test(next)) {
     return false;
   }
+  if (/^\s*\p{Ll}/u.test(after)) {
+    return false;
+  }
   if (
     /\bvs\.$/iu.test(before) &&
     /^\s*(?:DC\b|D\.C\.|Difficulty Class\b)/iu.test(after)
@@ -564,12 +575,106 @@ export function sourceSentences(span: string): readonly {
     : sentences;
 }
 
+type DcVocabularyNumericCandidate = {
+  readonly start: number;
+  readonly end: number;
+  readonly text: string;
+  readonly marker_distance: number;
+};
+
+function dcVocabularyNumericCandidates(
+  sentence: string,
+): readonly DcVocabularyNumericCandidate[] {
+  const markers = [...sentence.matchAll(/\b(?:DC\b|D\.C\.|Difficulty Class\b)/giu)]
+    .map((match) => ({
+      start: match.index ?? 0,
+      end: (match.index ?? 0) + (match[0]?.length ?? 0),
+    }));
+  const candidates: DcVocabularyNumericCandidate[] = [];
+  for (const number of sentence.matchAll(/\b\d+\b/gu)) {
+    const numberStart = number.index ?? 0;
+    const numberEnd = numberStart + (number[0]?.length ?? 0);
+    const numberSuffix = sentence.slice(numberEnd);
+    if (/^(?:-(?:foot|mile)|\s+(?:feet|miles?))\b/iu.test(numberSuffix)) {
+      continue;
+    }
+    const marker = markers
+      .map((candidate) => ({
+        candidate,
+        distance: candidate.end <= numberStart
+          ? numberStart - candidate.end
+          : candidate.start >= numberEnd
+            ? candidate.start - numberEnd
+            : 0,
+      }))
+      .sort((left, right) => left.distance - right.distance)[0]?.candidate;
+    if (marker === undefined) {
+      continue;
+    }
+    const start = Math.min(marker.start, numberStart);
+    const end = Math.max(marker.end, numberEnd);
+    const markerDistance = marker.end <= numberStart
+      ? numberStart - marker.end
+      : marker.start - numberEnd;
+    candidates.push({
+      start,
+      end,
+      text: sentence.slice(start, end).trim(),
+      marker_distance: markerDistance,
+    });
+  }
+  return candidates.sort((left, right) =>
+    left.marker_distance - right.marker_distance || left.start - right.start
+  );
+}
+
+function containsSaveBearingVocabulary(sentence: string): boolean {
+  const withoutCheckStatistic = sentence.replace(/\bspell save DC\b/giu, '');
+  return /\bsaving throw\b|\b(?:failed|successful) save\b|\b(?:the|this) save (?:DC\b|D\.C\.|Difficulty Class\b)/iu
+    .test(withoutCheckStatistic);
+}
+
+function candidateBelongsToCheck(
+  sentence: string,
+  candidate: DcVocabularyNumericCandidate,
+  numericDcMarker: string,
+  ability: string,
+): boolean {
+  const beforeDc = sentence.slice(0, candidate.start);
+  const fromDc = sentence.slice(candidate.start);
+  const checkAfterDc = new RegExp(
+    `^${numericDcMarker}\\s+${ability}(?:\\s+\\([^)]*\\))?\\s+check\\b`,
+    'iu',
+  ).test(fromDc);
+  const parentheticalCheck = new RegExp(
+    `\\b(?:ability check|${ability}(?:\\s+\\([^)]*\\))?\\s+check)\\b([^;.!?]*)\\(\\s*$`,
+    'iu',
+  ).exec(beforeDc);
+  const ownershipTail = parentheticalCheck?.[1] ?? '';
+  const parentheticalBelongsToCheck = parentheticalCheck !== null && (
+    !/\b(?:saving throw|save)\b/iu.test(ownershipTail) ||
+    /\bspell save DC\b/iu.test(ownershipTail)
+  );
+  const checkBeforeDc = /\bcheck\b\s+(?:against|versus|vs\.)\s*$/iu.test(beforeDc) ||
+    parentheticalBelongsToCheck;
+  const checkOwnsCandidateMarker = new RegExp(
+    `\\b(?:ability check|${ability}(?:\\s+\\([^)]*\\))?\\s+check)\\b[^;.!?]*(?:\\(\\s*)?(?:DC|D\\.C\\.|Difficulty Class)\\s*$`,
+    'iu',
+  ).test(candidate.text);
+  return checkAfterDc || checkBeforeDc || checkOwnsCandidateMarker;
+}
+
 export function sourceFixedSaveDc(span: string): SourceDerivedFixedSaveDc {
   const ability = '(?:Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma)';
   const dcMarker = '(?:DC|D\\.C\\.|Difficulty Class)';
   const numericDcMarker = `${dcMarker}\\s*(?:(?:is|equals|of)\\s+|[:=]\\s*)?\\d+`;
   const fixedValues: number[] = [];
-  for (const sentence of sourceSentences(span)) {
+  const sentences = sourceSentences(span);
+  const saveBearingSpan = sentences.some((sentence) =>
+    containsSaveBearingVocabulary(sentence.text)
+  );
+  for (const sentence of sentences) {
+    const candidates = dcVocabularyNumericCandidates(sentence.text);
     const recognized: {
       readonly start: number;
       readonly end: number;
@@ -578,9 +683,14 @@ export function sourceFixedSaveDc(span: string): SourceDerivedFixedSaveDc {
     for (const pattern of [
       new RegExp(`\\bDC\\s+(\\d+)\\s+${ability} saving throw\\b`, 'giu'),
       new RegExp(
-        `\\b${ability} saving throw(?:\\s+against\\s+DC|\\s+with\\s+a\\s+DC\\s+of|\\s+(?:vs\\.?|versus)\\s+DC)\\s*(\\d+)\\b`,
+        `\\b${ability} saving throw(?:\\s+against\\s+(?:a\\s+)?DC(?:\\s+of)?|\\s+with\\s+a\\s+DC\\s+of|\\s+(?:vs\\.?|versus)\\s+(?:a\\s+)?DC(?:\\s+of)?)\\s*(\\d+)\\b`,
         'giu',
       ),
+      new RegExp(
+        `\\b(?:The\\s+)?${dcMarker}\\s+for\\s+(?:this|the)\\s+saving throw\\s+(?:is|equals)\\s+(\\d+)\\b`,
+        'giu',
+      ),
+      new RegExp(`^\\s*The\\s+${dcMarker}\\s+(?:is|equals)\\s+(\\d+)\\b`, 'giu'),
     ]) {
       for (const match of sentence.text.matchAll(pattern)) {
         recognized.push({
@@ -590,45 +700,30 @@ export function sourceFixedSaveDc(span: string): SourceDerivedFixedSaveDc {
         });
       }
     }
-    const numericDc = new RegExp(
-      `\\b${numericDcMarker}\\b`,
-      'giu',
-    );
-    const unsupported = [...sentence.text.matchAll(numericDc)].find((candidate) => {
-      const index = candidate.index ?? 0;
-      if (recognized.some((range) => index >= range.start && index < range.end)) {
-        return false;
-      }
-      const beforeDc = sentence.text.slice(0, index);
-      const fromDc = sentence.text.slice(index);
-      const checkAfterDc = new RegExp(
-        `^${numericDcMarker}\\s+${ability}(?:\\s+\\([^)]*\\))?\\s+check\\b`,
-        'iu',
-      ).test(fromDc);
-      const parentheticalCheck = new RegExp(
-        `\\b(?:ability check|${ability}(?:\\s+\\([^)]*\\))?\\s+check)\\b([^;.!?]*)\\(\\s*$`,
-        'iu',
-      ).exec(beforeDc);
-      const checkBeforeDc = /\bcheck\b\s+(?:against|versus|vs\.)\s*$/iu.test(beforeDc) ||
-        (
-          parentheticalCheck !== null &&
-          !/\b(?:saving throw|save)\b/iu.test(parentheticalCheck[1] ?? '')
+    const unsupported = saveBearingSpan
+      ? candidates.find((candidate) => {
+        if (recognized.some((range) =>
+          candidate.start >= range.start && candidate.end <= range.end
+        )) {
+          return false;
+        }
+        return !candidateBelongsToCheck(
+          sentence.text,
+          candidate,
+          numericDcMarker,
+          ability,
         );
-      const belongsToCheck = checkAfterDc || checkBeforeDc;
-      const followsSave = /\b(?:saving throw|save)\b/iu.test(beforeDc);
-      const precedesSave = new RegExp(
-        `^${numericDcMarker}[^;.!?]*\\b(?:${ability}(?:\\s+\\([^)]*\\))?\\s+saving throw|save)\\b`,
-        'iu',
-      ).test(fromDc);
-      return !belongsToCheck && (followsSave || precedesSave);
-    }) ?? null;
+      }) ?? null
+      : null;
     if (unsupported !== null) {
       return {
         status: 'unavailable',
-        reason: `The source fixed save DC syntax is not representable: ${unsupported[0]}.`,
+        reason: `The source fixed save DC syntax is not representable: ${unsupported.text}.`,
       };
     }
-    fixedValues.push(...recognized.map((match) => match.value));
+    if (saveBearingSpan) {
+      fixedValues.push(...recognized.map((match) => match.value));
+    }
   }
   const distinctValues = [...new Set(fixedValues)];
   if (distinctValues.length > 1) {

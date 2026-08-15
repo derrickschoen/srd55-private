@@ -1217,6 +1217,117 @@ export const reviewedSaveSuccessKindOracle = Object.freeze({
 >);
 
 /**
+ * D257: independent per-clause fixed-save-DC oracle, decoded from raw source
+ * by the supervisor (2026-08-15). This table is the AUTHORITY on printed save
+ * DCs; the scanner is a drift alarm. Corpus census at decode time: four
+ * numeric-DC sentences exist (Contact Other Plane, Dispel Magic, Earthquake,
+ * Maze); only Contact Other Plane's belongs to a damage-save clause. A new
+ * clause must add its row here, decoded from source, before it can fold.
+ */
+export const reviewedFixedSaveDcOracle = Object.freeze({
+  acid_splash: null,
+  arcane_hand_grasping: null,
+  befuddlement: null,
+  bestow_curse_damage: null,
+  black_tentacles: null,
+  blade_barrier: null,
+  blight: null,
+  burning_hands: null,
+  call_lightning: null,
+  chain_lightning: null,
+  circle_of_death: null,
+  cloudkill: null,
+  cone_of_cold: null,
+  conjure_animals: null,
+  conjure_celestial: null,
+  conjure_elemental_initial: null,
+  conjure_elemental_repeat: null,
+  conjure_woodland_beings: null,
+  contagion: null,
+  contact_other_plane: 15,
+  control_water: null,
+  delayed_blast_fireball: null,
+  disintegrate: null,
+  dissonant_whispers: null,
+  dragons_breath: null,
+  dream: null,
+  earthquake: null,
+  enlarge_reduce_damage: null,
+  ensnaring_strike: null,
+  faithful_hound: null,
+  finger_of_death: null,
+  fireball: null,
+  fire_storm: null,
+  flame_strike: null,
+  flaming_sphere: null,
+  freezing_sphere: null,
+  geas: null,
+  glyph_of_warding: null,
+  guardian_of_faith: null,
+  harm: null,
+  hellish_rebuke: null,
+  ice_knife: null,
+  ice_storm: null,
+  incendiary_cloud: null,
+  inflict_wounds: null,
+  insect_plague: null,
+  lightning_bolt: null,
+  meteor_swarm: null,
+  mind_spike: null,
+  moonbeam: null,
+  phantasmal_force: null,
+  phantasmal_killer_initial: null,
+  phantasmal_killer_repeat: null,
+  prismatic_spray: null,
+  prismatic_wall: null,
+  ray_of_enfeeblement: null,
+  sacred_flame: null,
+  searing_smite: null,
+  shatter: null,
+  spirit_guardians: null,
+  storm_of_vengeance_initial: null,
+  storm_of_vengeance_lightning: null,
+  summon_dragon: null,
+  sunbeam: null,
+  sunburst: null,
+  symbol: null,
+  thunderwave: null,
+  tsunami_initial: null,
+  tsunami_ongoing: null,
+  vicious_mockery: null,
+  vitriolic_sphere: null,
+  wall_of_fire: null,
+  wall_of_ice_initial: null,
+  wall_of_ice_frigid_air: null,
+  wall_of_thorns_piercing: null,
+  wall_of_thorns_slashing: null,
+  weird_initial: null,
+  weird_repeat: null,
+  wind_wall: null,
+} as const satisfies Record<
+  keyof typeof reviewedSaveSuccessClauses,
+  number | null
+>);
+
+/**
+ * Independent damage-roll grouping oracle transcribed from the raw bundled
+ * spell text. These are not copied from `reviewedDamageRequirementsByClause`
+ * or projected from `damage_occurrences`: changing a runtime declaration or
+ * parser interpretation must disagree here until the source is reviewed.
+ */
+export const reviewedDamageRollSlotGroupOracle = Object.freeze({
+  disintegrate: [[0, 1]],
+  finger_of_death: [[0, 1]],
+  flame_strike: [[0], [1]],
+  ice_storm: [[0], [1]],
+  meteor_swarm: [[0], [1]],
+  vitriolic_sphere: [[0], [1]],
+} as const satisfies Partial<Record<
+  keyof typeof reviewedSaveSuccessClauses,
+  readonly DamageRollSlotGroup[]
+>>);
+
+/**
  * Independent transcription of the clauses whose complete numeric fold is
  * unavailable even when their successful-save kind is known. Keeping this
  * separate from the source reader makes availability regressions visible;
@@ -1252,6 +1363,32 @@ for (const [key, expectedKind] of Object.entries(reviewedSaveSuccessKindOracle))
   if ((actual.unavailable_reason !== null) !== expectedUnavailable) {
     throw new TypeError(
       `${actual.id} source-derived availability disagrees with the independent reviewed oracle.`,
+    );
+  }
+  const expectedRollGroups = reviewedDamageRollSlotGroupOracle[
+    key as keyof typeof reviewedDamageRollSlotGroupOracle
+  ] as readonly DamageRollSlotGroup[] | undefined;
+  const hasMultipleDamageSlots = actual.failed_damage_signature_slots.length > 1;
+  if (hasMultipleDamageSlots !== (expectedRollGroups !== undefined)) {
+    throw new TypeError(
+      `${actual.id} multi-slot damage shape disagrees with the independent grouping oracle.`,
+    );
+  }
+  if (
+    expectedRollGroups !== undefined &&
+    !sameDamageRollSlotGroups(actual.failed_damage_roll_slot_groups, expectedRollGroups)
+  ) {
+    throw new TypeError(
+      `${actual.id} damage-roll declaration disagrees with the independent grouping oracle.`,
+    );
+  }
+}
+
+for (const [key, expectedDc] of Object.entries(reviewedFixedSaveDcOracle)) {
+  const actual = reviewedSaveSuccessClauses[key as keyof typeof reviewedSaveSuccessClauses];
+  if (actual.fixed_save_dc !== expectedDc) {
+    throw new TypeError(
+      `${actual.id} source-derived fixed save DC ${String(actual.fixed_save_dc)} disagrees with the independent reviewed oracle ${String(expectedDc)}.`,
     );
   }
 }
