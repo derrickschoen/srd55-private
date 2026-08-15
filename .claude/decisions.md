@@ -2710,3 +2710,21 @@ Supervisor-decided without asking (recorded for the register): mirror-history
 D59 audit runs as a lane; recurring defect shapes (fail-open, inverse bugs,
 unstaged files) become automated checks; handover docs get a session-death
 refresh; stale tirelocator files stay queued.
+
+## D254 — OWNER DIRECTIVE: recurring save-governed damage is MODELED AS A
+## CONDITION, not refused (2026-08-15)
+
+Verbatim model, given against the Searing Smite example: "The smite does
+damage first. It also applies the ongoing fire damage condition. It takes the
+damage at the start of the next turn because it has the condition. If it
+saves, the condition is removed. If it starts any turn with the condition,
+the condition deals the damage."
+
+So the event vocabulary gains CONDITIONS: applied by a hit or failed save;
+carrying a damage tick with a declared timing (start-of-turn / end-of-turn /
+delayed-one-tick); removed by a save (save-ends), a duration, or an external
+effect. In Monte Carlo this is a per-target state flag checked each round; in
+the analytic engine it is a geometric-series expectation over P(save-ends).
+Refusal remains only where even the condition model cannot express the source
+(GM-choice triggers). This supersedes the estimate-field design (D250.1) for
+every clause the condition model can express — model beats estimate.
