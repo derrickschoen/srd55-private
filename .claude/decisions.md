@@ -2670,3 +2670,43 @@ merge ritual; day-assumptions stated once per report). Asked one at a time:
 11. **Play cards/badges: NEITHER for now.** Boards stay analyst documents.
 12. **Board publishing ritual STANDING**: private report + clean-room public
     variant + mirror push, every board, no per-board approval.
+
+## D253 — Round-2 collaborative brainstorm rulings (2026-08-15)
+
+Six perspectives (five Claude: DM / first-time user / maintenance-debt /
+lane-ops / adversarial-risk; plus codex as a different-model sixth), 26
+candidates collated, blockers asked one at a time:
+
+1. **Enemy saves: PIN A PER-TIER SAVE ROW into C1** (typical CR 5-6 mods,
+   e.g. Str +3 / Dex +1 / Con +3 / Int +0 / Wis +1 / Cha +0 at the level-6
+   row) before any Board B sim.
+2. **Enemy count: TWO-VARIANT DAY** — every combat scored as solo-boss AND
+   3-mook (total incoming stream unchanged), reported side by side.
+   **AND: wis-shepherd is CUT from Board B; no pre-2024 summon spells
+   anywhere on the board.**
+3. **A denied enemy turn credits Prevented at the enemy profile's expected
+   round output vs DEF_AC for the denied duration** — deterministic from C1.
+4. **Enemy targets the PC only; the familiar is PASSIVE** — Help/utility on
+   judged axes, zero measured contribution.
+5. **Unavailable measured axes enter the composite as an INTERVAL and the
+   rank as a RANGE** (axis at 0 vs at board-max). No exclusion, no
+   renormalizing, no silent zero.
+6. **Variant ranking: the GENERAL list is the official score and rank; the
+   tuned list is a +delta column.** One row per build.
+7. **Walkthroughs assert CHOICES AND SOURCES at every level**, not just sheet
+   values — a silent substitution with identical numbers is a HALT.
+8. **AI-bridge acceptance bar: STRUCTURED ACTIONS, CONFIRMED** — the bridge
+   emits next-step actions, Playwright validates each against the spec and
+   applies it; any wrong advice or dead end fails the acceptance.
+9. **D147's broad ignore-prereqs toggle is RETIRED**; the four labelled H1-H4
+   toggles replace it, with a migration note.
+10. **Toggles default OFF; every walkthrough starts from a COLD PROFILE; the
+    Kennel run includes one deliberate wrong-pick-and-recover sequence** —
+    a dead end on recovery is a HALT.
+11. **The halt→fix→rerun loop is UNCAPPED**, and **the toggle lane BUNDLES
+    #19's preparation-warning panel** (same planner disclosure surface).
+
+Supervisor-decided without asking (recorded for the register): mirror-history
+D59 audit runs as a lane; recurring defect shapes (fail-open, inverse bugs,
+unstaged files) become automated checks; handover docs get a session-death
+refresh; stale tirelocator files stay queued.
