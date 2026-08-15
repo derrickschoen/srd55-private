@@ -2588,3 +2588,31 @@ Kept for reference resolution: D16/D17 were renumbered at merge (unrelated
 entries, both kept); D32/D33 were written as D30/D31 on a branch and
 renumbered; two entries were written as F17 concurrently — the
 structured-values one became F18; D29 was renumbered from D27 at merge.
+
+## D250 — Six owner rulings, taken one at a time (2026-08-15)
+
+Asked via AskUserQuestion, one per prompt, at the owner's request. Verbatim
+outcomes:
+
+1. **Sim posture: HYBRID, refuse by default.** Refusals remain authoritative
+   per D245. A refused clause MAY additionally carry a clearly-labelled
+   ESTIMATE field; the composer must never silently consume an estimate — any
+   composed result that includes one is itself labelled estimated. Round 11
+   carries the design of that field.
+2. **Board B parallelism: YES.** Design/legality phases run alongside simcore
+   review rounds; only actual sim/suite runs serialize on the machine.
+3. **Publish: PUSH 9505e1e8 to the mirror AND create a public clean-room
+   variant of BUILD_CRAFT.md** (mechanics patterns only; must pass
+   cleanroom_lint.py; D59 boundary applies — gate outcomes may be public,
+   audit evidence may not). Both go out together.
+4. **Board A weighting ADOPTED as a standing ruling** for future boards:
+   DPR 20 / Prevented 15 / Spells 20 / Fun 20 / Novelty 15 / Skills 10.
+   To be recorded in the mutt contract as C19.
+5. **Resource-alias removal RATIFIED.** The capability stays deleted after
+   failing four consecutive rounds (inferred → declared → unproven evidence →
+   removed). Any future need triggers a fresh evidence-bound design, never a
+   revival of the old seam.
+6. **Machine priority: INTERLEAVE.** Simcore round 11 review (read-only, no
+   suite) runs while the Playwright walkthrough engine is written; browser
+   runs still serialize (one suite machine-wide, unique port). The Playwright
+   mutt runs remain the owner's explicit deliverable.
