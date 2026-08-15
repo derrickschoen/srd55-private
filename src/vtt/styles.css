@@ -1,0 +1,222 @@
+.vtt-shell {
+  --vtt-ink: #211d19;
+  --vtt-muted: #655d53;
+  --vtt-paper: #f4efe4;
+  --vtt-rust: #9c3f25;
+  --vtt-border: #c8bdab;
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 2rem clamp(1rem, 3vw, 3rem) 4rem;
+  color: var(--vtt-ink);
+  font-family: Georgia, 'Times New Roman', serif;
+}
+
+.vtt-shell [hidden] {
+  display: none !important;
+}
+
+.vtt-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.vtt-header {
+  padding: 1.5rem 0;
+  border-bottom: 3px double var(--vtt-ink);
+}
+
+.vtt-header h1 {
+  margin: 0;
+  font-size: clamp(2.4rem, 7vw, 5rem);
+  line-height: 0.95;
+  letter-spacing: -0.05em;
+}
+
+.vtt-kicker {
+  margin: 0 0 0.5rem;
+  color: var(--vtt-rust);
+  font: 700 0.78rem/1.2 system-ui, sans-serif;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.vtt-panel,
+.vtt-workspace {
+  margin-top: 1.5rem;
+  padding: 1.25rem;
+  border: 1px solid var(--vtt-border);
+  background: #fffdf8;
+  box-shadow: 5px 5px 0 #ded4c4;
+}
+
+.vtt-panel h2,
+.vtt-workspace h2,
+.vtt-sidebar h3,
+.vtt-sidebar h4 {
+  margin-top: 0;
+}
+
+.vtt-setup-fields,
+.vtt-actions,
+.vtt-fog-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.vtt-field {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 12rem;
+  color: var(--vtt-muted);
+  font: 650 0.82rem/1.25 system-ui, sans-serif;
+}
+
+.vtt-field input,
+.vtt-field select,
+.vtt-field textarea,
+.vtt-setup-fields input,
+.vtt-setup-fields select {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0.58rem 0.65rem;
+  border: 1px solid #8d8272;
+  border-radius: 2px;
+  background: #fff;
+  color: var(--vtt-ink);
+  font: 1rem/1.35 system-ui, sans-serif;
+}
+
+.vtt-shell button {
+  padding: 0.62rem 0.85rem;
+  border: 1px solid #6d2a18;
+  border-radius: 2px;
+  background: var(--vtt-rust);
+  color: white;
+  font: 700 0.88rem/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.vtt-shell button:hover,
+.vtt-shell button:focus-visible {
+  background: #742c18;
+}
+
+.vtt-shell button[aria-pressed='true'] {
+  outline: 3px solid #e5af4a;
+  outline-offset: 2px;
+}
+
+.vtt-actions {
+  margin-top: 0.8rem;
+}
+
+.vtt-network-note,
+.vtt-fog-warning {
+  max-width: 74ch;
+  color: var(--vtt-muted);
+  font: 0.9rem/1.45 system-ui, sans-serif;
+}
+
+.vtt-status,
+.vtt-role,
+.vtt-error {
+  display: block;
+  margin-top: 0.8rem;
+  font: 650 0.92rem/1.4 system-ui, sans-serif;
+}
+
+.vtt-error {
+  color: #9c1f14;
+}
+
+.vtt-manual textarea {
+  min-height: 6rem;
+  resize: vertical;
+}
+
+.vtt-board-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.vtt-board-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 800px) minmax(230px, 1fr);
+  gap: 1.2rem;
+  align-items: start;
+  margin-top: 1rem;
+}
+
+.vtt-board-region {
+  overflow: auto;
+  border: 3px solid #342d27;
+  background: #342d27;
+}
+
+.vtt-canvas {
+  display: block;
+  width: 800px;
+  height: 600px;
+  max-width: none;
+  background: var(--vtt-paper);
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.vtt-sidebar {
+  display: grid;
+  gap: 1rem;
+  font-family: system-ui, sans-serif;
+}
+
+.vtt-token-form,
+.vtt-token-editor,
+.vtt-dice-form {
+  display: grid;
+  gap: 0.6rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--vtt-border);
+}
+
+.vtt-token-list,
+.vtt-dice-log {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vtt-token-list button {
+  width: 100%;
+  padding-left: 1.8rem;
+  border-color: var(--vtt-border);
+  background:
+    radial-gradient(circle at 0.75rem center, var(--token-color) 0 0.42rem, transparent 0.44rem),
+    #f7f1e7;
+  color: var(--vtt-ink);
+  text-align: left;
+}
+
+.vtt-dice-log li {
+  padding: 0.55rem 0.65rem;
+  border-left: 3px solid var(--vtt-rust);
+  background: #f3ecdf;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 1050px) {
+  .vtt-board-layout {
+    grid-template-columns: 1fr;
+  }
+}
