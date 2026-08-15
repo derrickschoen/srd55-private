@@ -74,6 +74,7 @@ Follow it rather than re-deciding.
 | What | Where |
 |---|---|
 | **Binding decisions and findings — READ BEFORE CHANGING ANYTHING** | `.claude/decisions.md` (D-numbered decisions, F-numbered findings; highest number is newest) |
+| Standing rules for the autonomous build loop | `.claude/supervision.md` (model policy, gates, forbidden paths, hard stops, failure lessons) |
 | Open questions for the owner | `.claude/pending-questions/` |
 | **D&D rules and spells — NEVER answer from memory** | `.ai/rules/INDEX.md` (answers inline; `.ai/AGENTS.md` has the lookup protocol) |
 | Deep reference for agents | `.ai/` |
