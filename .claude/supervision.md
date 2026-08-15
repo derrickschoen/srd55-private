@@ -28,14 +28,33 @@ KB, sonnet decides nothing.
 
 ## Effort
 
-Project default is `medium` (`.claude/settings.local.json`, gitignored). Gating
-and verification ticks are mechanical — run the suite, read the verdict, diff
-the tree — and do not need more. Raise to `high` via `/config` for work that is
-genuinely reasoning-bound: authoring a review round, adjudicating a finding,
-designing a contract. Lower it again afterwards.
+**Default is `high`, globally, and that is deliberate.** Fable in particular
+stays at `high`. Effort is decided per dispatch, not lowered as a blanket
+policy.
 
-There is no per-tick effort switch. The setting is session-scoped, so this is a
-default plus a deliberate exception, not an automatic policy.
+`effortLevel` in `settings.json` is a **single global value** — there is no
+per-model map (no `effortByModel` anywhere in the CLI). "Fable high, Opus
+medium" cannot be expressed as a setting. The levers that do exist:
+
+| Lever | Scope |
+|---|---|
+| `/effort <low\|medium\|high\|xhigh\|max\|auto>` | current session, interactive |
+| `claude --effort <level>` | one launched process |
+| `CLAUDE_CODE_EFFORT_LEVEL=<level>` | session-only, overrides settings, saves nothing |
+| `Workflow` → `agent({effort})` | one subagent call |
+| `Agent` tool | **no effort parameter** — inherits the session |
+
+**On `claude-opus-5`, `medium` and `high` are the same configuration.** The
+CLI's per-model effort table resolves both to an identical cell:
+`{cell:"o5-bmin", modelEffort:"typed", finderBudgetHint:false,
+measuredExternal:true}`. Only `low` (cell `low`), `xhigh` and `max` differ.
+Measured across every local transcript, Opus 5 at medium (n=200) shows mean
+output 1,197 tokens against high (n=16,558) at 1,060 — medium is not cheaper.
+`claude-opus-4-8` is different: it has genuinely distinct cells per level.
+Fable 5 is also genuinely graded — high mean 1,165, xhigh mean 2,649.
+
+So: do not reach for `medium` on Opus 5 expecting a saving. It buys nothing.
+The real levers are cadence, context size, and delegation.
 
 ## Cadence
 
