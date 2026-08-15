@@ -182,3 +182,8 @@ The supervisor gates, verifies and merges. That is never delegated.
 worktree clean → full vitest (**read the verdict**) → `npm run build` →
 Playwright on a unique port, expect 170 → codex review → `merge-to-main.sh` →
 post-merge vitest → `git push mirror main` → prune.
+20. **Never mutate a worktree while its own suite is running.** A background
+    full-suite run collects files as they are on disk mid-run; a mutation
+    cycle raced against it produces failures that look like the fix's and are
+    yours. The one-suite rule applies to the supervisor's own runs too:
+    mutation cycles and full suites SERIALIZE in a worktree.
