@@ -2861,3 +2861,18 @@ committed docs (private repo) rather than scratchpad-only; handover files get
 a refresh at the next quiescent point; the 11 walkthrough specs are the
 supervisor's next authoring task and their absence is a queue fact, not an
 owner decision.
+
+## D261 — OWNER AMENDMENT: one combat shape — a boss WITH three mooks (2026-08-15)
+
+Verbatim: "the one boss should have 3 mooks with him instead of splitting.
+Most fights have multiple enemies for action economy."
+
+This SUPERSEDES D253.2's two-variant day and D260.4's equal-weight average:
+every combat is ONE encounter containing a boss and three mooks — four
+bodies, real action economy, one official basis, one composite. The C1 total
+incoming stream is unchanged and is distributed across the four bodies with
+the split declared in the contract (supervisor to append with the C22 rows;
+boss carries the majority share, mooks the remainder). AoE and multi-target
+effects resolve against the real four-body group; single-target rotations
+choose targets. The side-by-side variant columns are retired before ever
+being produced — no sim ran under the superseded design.
