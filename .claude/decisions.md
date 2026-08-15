@@ -2728,3 +2728,16 @@ the analytic engine it is a geometric-series expectation over P(save-ends).
 Refusal remains only where even the condition model cannot express the source
 (GM-choice triggers). This supersedes the estimate-field design (D250.1) for
 every clause the condition model can express — model beats estimate.
+
+## D255 — OWNER RULING: Geas and Dream are OUT-OF-COMBAT spells (2026-08-15)
+
+Both verified from docs/srd/source/spell-descriptions.txt: Casting Time
+1 minute apiece — ten rounds, uncastable inside a 4-round combat. Dream
+additionally resolves during the target's sleep. The sim classifies both
+OUT-OF-COMBAT: a new category, distinct from `unavailable` — the engine is
+not refusing to price them; they are ruled outside the combat model's
+domain. They never appear in DPR/Prevented folds, never produce an
+unavailable cell, and their value (if any) lives on the judged axes.
+Combined with D254's condition model this empties the refusal list of its
+last two combat-facing holdouts: the 11-entry unavailability set becomes
+9 modelable conditions + 2 out-of-combat classifications.
