@@ -2766,3 +2766,22 @@ last two combat-facing holdouts: the 11-entry unavailability set becomes
    feature TEXT, the app models it, and the walkthrough spec asserts three
    Lore bonus skills instead of expectUnknowns. D33 'unknown' remains only
    for values genuinely absent from source.
+
+## D257 — OWNER DESIGN: fixed-DC authority is enumerated rules + light
+## generalization + loud novelty (2026-08-15)
+
+Verbatim: "There are a finite number of these fixed dc spells. Ai can decode
+them all and include code rule for each so the code doesn't need to be as
+smart. Try to lightly generalize so new spells with the same wording get
+covered. New types of wording need new ai intervention."
+
+Implementation shape: (1) the reviewed oracle gains a per-clause fixed-DC
+column — every one of the 79 clauses decoded once by AI-with-source, 2
+non-null today — and that table is the AUTHORITY; (2) the scanner keeps a
+LIGHTLY generalized recognizer for the known phrasings so a new spell using
+the same wording auto-derives its row's candidate; (3) any DC-vocabulary
+wording outside the known forms REFUSES loudly (the round-13 burden
+inversion) — that refusal IS the "new ai intervention" trigger: a human/AI
+reads the spell, adds the rule and the oracle row. Extraction never silently
+overrides the table; disagreement between table and recognizer is a build
+failure, not a preference.
