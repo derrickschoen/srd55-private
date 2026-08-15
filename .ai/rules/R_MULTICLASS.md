@@ -65,3 +65,11 @@ CHECK: python3 -c "t=open('docs/srd/source/multiclassing.txt').read();s=t[t.find
 SRC: docs/srd/source/multiclassing.txt
 CODE: NONE
 TRAP: This is proven by ABSENCE, so no QUOTE can establish it — an entry here needs a CHECK. The costly form of the error is not "Warlock 1 is bad" (a 1-level dip is cheap and buys Pact Magic plus an invocation) but a MULTI-LEVEL Warlock dip: Warlock 3 spends 3 of 7 character levels for zero shared-slot progression, collapsing a Shape B mutt from caster level 7 (4/3/3/1) to 4 (4/3) and deleting every 3rd- and 4th-level slot.
+
+### R-MC-009 prepared-spell-level-caps-per-class
+Q: can a multiclass character prepare 3rd level spells; what level spells can each class prepare; multiclass prepare higher level spells; level 1 dip what spells
+A: Preparation is PER CLASS, as if single-classed at that class's level. A level-1 class prepares ONLY level-1 spells; a level-3 full caster prepares up to level 2 (SRD example: level 3 Sorcerer, "spells of level 1 or 2"). Preparing a LEVEL-3 spell requires one FULL-CASTER class at level 5+ (full casters gain 3rd-level slots at class level 5; half-casters not until class level 9). Shared multiclass slots above a class's cap exist for UPCASTING only (see R-MC-003).
+CHECK: python3 -c "t=open('docs/srd/source/multiclassing.txt').read();i=t.find('Spells Prepared');s=t[i:i+700];assert i>=0 and len(s)>400;n=' '.join(s.split());assert 'for each class individually' in n;assert 'single-classed member of that class' in n;assert 'level 4 Ranger / level 3 Sorcerer' in n;assert 'level 1 or 2' in n"
+SRC: docs/srd/source/multiclassing.txt
+CODE: NONE
+TRAP: The shared slot table lies to the eye. A seven-dip at character level 7 shows slots up to level 3 (or 4 with a 3-level class) — and can still prepare NOTHING above level 1 (or 2). The quoted sentence is COLUMN-INTERLEAVED in the source ("what spells you Paladin, you have ten d10 Hit Dice"), so a contiguous-sentence QUOTE cannot verify it; the CHECK uses short phrases that survive the interleave. Inverse trap (errata E-mistake #6): "a multiclass prepares only 1st-level spells" is true ONLY when every class is level 1 — state the cap per class, never per character.

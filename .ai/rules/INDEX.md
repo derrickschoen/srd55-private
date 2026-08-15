@@ -59,6 +59,7 @@ re-proved against their sources by `kb_verify.py`; your memory is not.
 | proficiency bonus multiclass character level or class level | TOTAL CHARACTER level. Level 7 total = +3 regardless of how it is split. | R-MC-006 | R_MULTICLASS.md |
 | multiclass prerequisite ability scores; primary ability of each class; what 13 do I need | Barbarian Str; Bard Cha; Cleric Wis; Druid Wis; Fighter Str OR Dex; Monk Dex AND Wis; Paladin Str AND Cha; Ranger Dex AND Wis; Rogue Dex; Sorcerer Cha; Warlock Cha; Wizard Int. | R-MC-007 | R_MULTICLASS.md |
 | do warlock levels count toward multiclass spell slots; is pact magic added to the shared slot table; warlock dip caster level | NO. The Spell Slots total names Bard/Cleric/Druid/Sorcerer/Wizard in full and Paladin/Ranger at half rounded up. Warlock is ABSENT, so every Warlock level contributes ZERO shared slots; Pact Magic is a wholly separate pool. | R-MC-008 | R_MULTICLASS.md |
+| can a multiclass character prepare 3rd level spells; what level spells can each class prepare; multiclass prepare higher level spells; level 1 dip what spells | Preparation is PER CLASS, as if single-classed at that class's level. A level-1 class prepares ONLY level-1 spells; a level-3 full caster prepares up to level 2 (SRD example: level 3 Sorcerer, "spells of level 1 or 2"). Preparing a LEVEL-3 spell requires one FULL-CASTER class at level 5+ (full casters gain 3rd-level slots at class level 5; half-casters not until class level 9). Shared multiclass slots above a class's cap exist for UPCASTING only (see R-MC-003). | R-MC-009 | R_MULTICLASS.md |
 | how many Cleric or Paladin Channel Divinity uses return on a Short Rest or Long Rest | For both Cleric and Paladin, regain ONE expended use after a Short Rest and ALL expended uses after a Long Rest. | R-REST-001 | R_RESTS.md |
 | how many Cleric Channel Divinity uses at level 2 | TWO uses from Cleric level 2. | R-REST-002 | R_RESTS.md |
 | how many Rage uses return on a Short Rest or Long Rest | Regain ONE expended Rage use after a Short Rest and ALL expended uses after a Long Rest. | R-REST-003 | R_RESTS.md |
@@ -136,6 +137,7 @@ Read before asserting anything in these areas.
 - **R-MC-005** — Assuming a dip grants the class's full starting proficiency list. It does not — check `docs/srd/source/multiclass-entry-grants.txt` for the per-class subset before assuming armour training.
 - **R-MC-007** — Treating 7 classes as needing 7 separate 13s. It is a SET COVER over this table — Cha 13 + Wis 13 + Dex 13 alone unlocks seven classes (Bard, Sorcerer, Warlock, Cleric, Druid, Rogue, Fighter).
 - **R-MC-008** — This is proven by ABSENCE, so no QUOTE can establish it — an entry here needs a CHECK. The costly form of the error is not "Warlock 1 is bad" (a 1-level dip is cheap and buys Pact Magic plus an invocation) but a MULTI-LEVEL Warlock dip: Warlock 3 spends 3 of 7 character levels for zero shared-slot progression, collapsing a Shape B mutt from caster level 7 (4/3/3/1) to 4 (4/3) and deleting every 3rd- and 4th-level slot.
+- **R-MC-009** — The shared slot table lies to the eye. A seven-dip at character level 7 shows slots up to level 3 (or 4 with a 3-level class) — and can still prepare NOTHING above level 1 (or 2). The quoted sentence is COLUMN-INTERLEAVED in the source ("what spells you Paladin, you have ten d10 Hit Dice"), so a contiguous-sentence QUOTE cannot verify it; the CHECK uses short phrases that survive the interleave. Inverse trap (errata E-mistake #6): "a multiclass prepares only 1st-level spells" is true ONLY when every class is level 1 — state the cap per class, never per character.
 - **R-REST-001** — Restoring all Channel Divinity uses on a Short Rest, as older phrasing and memory suggest.
 - **R-REST-002** — Assigning one use at level 2 from the 2014 Cleric table.
 - **R-REST-003** — Treating Rage as Long-Rest-only because that was the 2014 recovery rule.
@@ -169,7 +171,7 @@ Read before asserting anything in these areas.
 | `GLOSSARY.md` | 12 |
 | `R_ABILITIES.md` | 5 |
 | `R_COMBAT.md` | 25 |
-| `R_MULTICLASS.md` | 8 |
+| `R_MULTICLASS.md` | 9 |
 | `R_RESTS.md` | 10 |
 | `R_SPELLCASTING.md` | 15 |
 
@@ -179,5 +181,5 @@ Read before asserting anything in these areas.
 2. `grep -i '^Q:.*<keyword>' .ai/kb/*.md` — topic entries.
 3. Not here? Go to the SOURCE, not to memory. Then ADD the entry.
 
-75 entries, 72 with recorded traps.
+76 entries, 73 with recorded traps.
 
