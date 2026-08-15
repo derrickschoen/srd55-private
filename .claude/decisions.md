@@ -2616,3 +2616,22 @@ outcomes:
    suite) runs while the Playwright walkthrough engine is written; browser
    runs still serialize (one suite machine-wide, unique port). The Playwright
    mutt runs remain the owner's explicit deliverable.
+
+## D251 — Six more owner rulings, asked one at a time (2026-08-15)
+
+1. **Walkthrough bug handling: SEVERITY SPLIT.** Dead ends and wrong sheet
+   numbers HALT the runs (they invalidate later walkthroughs) and become fix
+   lanes immediately; missing-warning gaps and cosmetics BATCH to the end of
+   all 11 runs.
+2. **The Cantrip Kennel is SCORED ON BOARD B** as a full competitor (sim +
+   judged axes), not a site-test vehicle or reference row.
+3. **AI guidance path: FULL PATH ON ONE BUILD.** The Cantrip Kennel gets an
+   end-to-end chat-guided creation run via the offline AI bridge; every other
+   build asserts the agent-reference panel facts only.
+4. **Push policy: ROUTINE AT EVERY MERGE.** `git push mirror main` returns to
+   being the merge ritual's final step, no per-batch approval. The D59
+   licensing gate remains a hard stop BEFORE anything lands in git.
+5. **The archetypes/concepts temp doc MERGES INTO the Board A report** —
+   one durable document, not two. Cleanroom lint re-run after the merge.
+6. **wt-party RETIRES NOW.** Audit for unlanded work; anything real becomes a
+   sync proposal per the party-sync cadence; then prune worktree and branch.
