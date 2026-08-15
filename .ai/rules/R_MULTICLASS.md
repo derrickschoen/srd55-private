@@ -73,3 +73,43 @@ CHECK: python3 -c "t=open('docs/srd/source/multiclassing.txt').read();i=t.find('
 SRC: docs/srd/source/multiclassing.txt
 CODE: NONE
 TRAP: The shared slot table lies to the eye. A seven-dip at character level 7 shows slots up to level 3 (or 4 with a 3-level class) — and can still prepare NOTHING above level 1 (or 2). The quoted sentence is COLUMN-INTERLEAVED in the source ("what spells you Paladin, you have ten d10 Hit Dice"), so a contiguous-sentence QUOTE cannot verify it; the CHECK uses short phrases that survive the interleave. Inverse trap (errata E-mistake #6): "a multiclass prepares only 1st-level spells" is true ONLY when every class is level 1 — state the cap per class, never per character.
+
+### R-MC-010 multiclass-hit-points-new-class-uses-levels-after-1
+Q: multiclass hit points new class first level maximized die; does a dip grant max hit die; level 1 hit points which class
+A: Every level in a NEW class grants Hit Points as described for levels after 1 (fixed average or roll + Con); the maximized level-1 value applies ONLY when total character level is 1.
+QUOTE: "Points for a class only when your total character"
+SRC: docs/srd/source/multiclassing.txt
+CODE: NONE
+TRAP: Treating each class's first level as 'level 1 of that class' and granting the maximized Hit Point Die again, inflating a Fighter 5 / Barbarian 2 by ~5 HP. The full sentence is column-interleaved ('You gain the level 1 Hit / Points for a class only when your total character / level is 1.') — a CHECK spanning the three left-column fragments is needed to prove the whole clause.
+
+### R-MC-011 multiclass-hit-dice-pool-same-type-separate-types
+Q: multiclass hit dice pool combine; same die type pool together; different die types tracked separately; short rest hit dice multiclass
+A: Add the Hit Dice from all classes into one pool: same die type pools together (Fighter 5 / Paladin 5 = ten d10), different types are tracked separately (Cleric 5 / Paladin 5 = five d8 AND five d10, spendable individually).
+QUOTE: "are the same die type, you can pool them together."
+SRC: docs/srd/source/multiclassing.txt
+CODE: NONE
+TRAP: Converting all Hit Dice to one class's die size, averaging them, or capping Short Rest spending at one class's count; each class's die comes from that class's own Hit Point Die trait. Supporting span also verified verbatim: 'you have five d8 Hit Dice and five d10'.
+
+### R-MC-012 multiclass-cantrips-known-per-class-table-column
+Q: how many cantrips does a multiclass character know; cantrips per class or combined caster level; paladin ranger cantrips; cantrip count source
+A: Cantrips are PER CLASS from that class's own Features-table Cantrips column (level 1: Sorcerer 4, Cleric 3, Wizard 3, Bard 2, Druid 2, Warlock 2); Paladin and Ranger tables have NO Cantrips column, so they grant zero cantrips at every level.
+QUOTE: "well as four Sorcerer cantrips)."
+SRC: docs/srd/source/multiclassing.txt
+CODE: NONE
+TRAP: Deriving a shared cantrip count from combined caster level or the Multiclass Spellcaster table (which has no cantrip column), or granting a Paladin/Ranger dip cantrips. The Paladin/Ranger zero is proven by ABSENCE of a Cantrips column in docs/srd/source/class-level-tables.txt, so that half needs a CHECK-style assertion, not a quote; the per-class level-1 counts need CHECKs against each table's column.
+
+### R-MC-013 prepared-spell-count-from-class-table-not-formula
+Q: how many spells can I prepare; prepared spells number formula ability modifier plus level; prepared spells column class table multiclass
+A: The NUMBER of prepared spells is the fixed Prepared Spells column of that class's own Features table, per class as if single-classed (Ranger 4 prepares 5, Sorcerer 3 prepares 6, Cleric 5 prepares 9) — NOT ability modifier + class level, and never one combined count per character.
+QUOTE: "you can prepare five level 1 Ranger spells, and you"
+SRC: docs/srd/source/multiclassing.txt
+CODE: NONE
+TRAP: Applying the 2014 'spellcasting ability modifier + class level' preparation formula (Cleric 5 with Wis 16 would give 8; the SRD 5.2.1 table says 9), or computing one combined prepared count for the whole character. R-MC-009 covers the spell-LEVEL cap per class but not the COUNT source.
+
+### R-MC-014 paladin-ranger-spellcasting-at-class-level-1
+Q: when do paladin and ranger get spellcasting; half caster spells at level 1 or 2; level 1 paladin dip spell slots prepared spells
+A: In SRD 5.2.1 Paladin and Ranger have the Spellcasting feature at CLASS LEVEL 1: each level-1 row grants 2 prepared spells and 2 level-1 spell slots.
+QUOTE: "Lay On Hands, Spellcasting,"
+SRC: docs/srd/source/class-level-tables.txt
+CODE: NONE
+TRAP: Importing the 2014 half-caster start where Paladin/Ranger gain no spellcasting until class level 2, producing a level-1 Paladin or Ranger (or a 1-level dip) with zero spells and zero slots. Companion span also verified verbatim for Ranger: 'Spellcasting, Favored Enemy,'. R-MC-001 covers only the multiclass caster-level contribution, not the class's own level-1 feature.

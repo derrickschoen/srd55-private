@@ -197,3 +197,35 @@ QUOTE: "you have Advantage on your next attack roll"
 SRC: docs/srd/full/srd-5.2.1.txt
 CODE: NONE
 TRAP: Granting Advantage against any target or on every later attack during the duration.
+
+### R-COMBAT-026 extra-attack-two-attacks-on-attack-action
+Q: what does extra attack do; how many attacks per attack action at fighter barbarian monk paladin ranger level 5; attack twice
+A: With Extra Attack (class level 5 in these martial classes) you attack TWICE instead of once whenever you take the Attack action on your turn.
+QUOTE: "You can attack twice instead of once whenever you"
+SRC: docs/srd/source/attack-class-features.txt
+CODE: src/rules/extra-attack-srd.ts parseSrdNamedExtraAttackFeatures
+TRAP: Simulating one attack per Attack action for a level 5-7 martial (halves DPR), or granting it at total character level 5 instead of class level 5. Source sentence is COLUMN-INTERLEAVED with Second Wind text, so the entry needs a CHECK asserting two spans, both proven present: this quote plus 'take the Attack action on your turn.'
+
+### R-COMBAT-027 grapple-shove-unarmed-strike-save-dc
+Q: how do grapple and shove work 2024; contested athletics acrobatics check or saving throw; grapple shove save dc; monk dexterity grapple shove dc
+A: Grapple and Shove are OPTIONS of the Unarmed Strike that force a SAVE against a DC (Strength-based by default) — not 2014 contested Athletics/Acrobatics checks — and Monk Dexterous Attacks may use Dexterity for the DC.
+QUOTE: "of your Unarmed Strike, you can use your Dexterity modifier instead of your Strength modifier to determine the save DC."
+SRC: docs/srd/source/attack-class-features.txt
+CODE: NONE
+TRAP: 2014 recall: opposed Athletics vs Athletics/Acrobatics checks instead of a save DC, or computing a Monk's Grapple/Shove DC from Strength when Dexterity is higher. The general Unarmed Strike DC formula (8 + Str mod + PB, target's Str or Dex save) is NOT in this extract — do not quote it until a new extract lands.
+
+### R-COMBAT-028 monk-martial-arts-die-replaces-damage-monk-level-scaling
+Q: monk martial arts die 1d6; replace or add to weapon damage; does the martial arts die scale with monk class level or total character level; 1d8 at monk 5
+A: Roll the Martial Arts die (1d6; 1d8 at Monk 5) IN PLACE OF the normal damage of Unarmed Strikes or Monk weapons; the die scales with MONK class levels, not total character level.
+QUOTE: "You can roll 1d6 in place of the normal damage of your Unarmed Strike or Monk weapons."
+SRC: docs/srd/source/attack-class-features.txt
+CODE: src/rules/attack-profiles.ts martialArtsProfile
+TRAP: Scaling the die by total character level (the R-SPELL-001 cantrip rule bleeding over — a Monk 1 / X 6 sheet gets 1d8 instead of 1d6), or adding the die on top of the weapon's own damage die instead of substituting. Companion span proven present: 'This die changes as you gain Monk levels,'.
+
+### R-COMBAT-029 monk-dexterous-attacks-dex-for-attack-and-damage
+Q: can a monk use dexterity with a quarterstaff; dexterous attacks dex instead of strength for attack and damage rolls of unarmed strikes and monk weapons
+A: Dexterous Attacks lets a Monk use Dexterity instead of Strength for the attack and damage rolls of Unarmed Strikes and Monk weapons — a feature override of the R-COMBAT-008 melee-uses-Strength default.
+QUOTE: "instead of your Strength modifier for the attack and damage rolls of your Unarmed Strikes and Monk weapons."
+SRC: docs/srd/source/attack-class-features.txt
+CODE: src/rules/attack-profiles.ts martialArtsProfile
+TRAP: Statting a Monk's quarterstaff with Strength via the R-COMBAT-008 default because it lacks Finesse — the substitution comes from the class feature, not a weapon property, and applies only while Martial Arts conditions hold (no armor, no Shield, unarmed or only Monk weapons).
