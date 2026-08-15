@@ -108,7 +108,11 @@ describe('round 13 valid-case controls', () => {
     )).toHaveLength(42);
     expect(reviewedSaveSuccessClauses.contact_other_plane.fixed_save_dc).toBe(15);
     expect(reviewedSaveSuccessClauses.earthquake.fixed_save_dc).toBeNull();
-    expect(reviewedDamageRollSlotGroupOracle).toEqual({
+    // Round 14 (D259) made the grouping oracle TOTAL. The six multi-slot
+    // rows keep their exact hand-transcribed values, and the oracle must now
+    // cover every reviewed clause — strictly stricter than the old six-row
+    // partial equality this control asserted before.
+    expect(reviewedDamageRollSlotGroupOracle).toMatchObject({
       disintegrate: [[0, 1]],
       finger_of_death: [[0, 1]],
       flame_strike: [[0], [1]],
@@ -116,5 +120,7 @@ describe('round 13 valid-case controls', () => {
       meteor_swarm: [[0], [1]],
       vitriolic_sphere: [[0], [1]],
     });
+    expect(Object.keys(reviewedDamageRollSlotGroupOracle))
+      .toHaveLength(Object.keys(reviewedSaveSuccessClauses).length);
   });
 });

@@ -653,6 +653,7 @@ export const unreconciledHighRecallDamageSaveSuspects = Object.freeze(
 );
 
 const consumedSourceClauses = new Set<SourceDerivedSaveClause>();
+const sourceClauseByReviewedId = new Map<SaveSuccessClauseId, SourceDerivedSaveClause>();
 
 const multiClauseSemanticAnchorById = {
   'srd-5.2.1:spell:conjure-elemental:save:initial-damage': '8d8 damage',
@@ -855,6 +856,7 @@ function reviewedSaveClause(
   if (consumedSourceClauses.has(sourceClause)) {
     throw new TypeError(`${id} reuses a source clause already bound to another ID.`);
   }
+  sourceClauseByReviewedId.set(id, sourceClause);
   if (candidates.length > 1) {
     const semanticAnchor = multiClauseSemanticAnchorById[
       id as keyof typeof multiClauseSemanticAnchorById
@@ -1316,16 +1318,89 @@ export const reviewedFixedSaveDcOracle = Object.freeze({
  * parser interpretation must disagree here until the source is reviewed.
  */
 export const reviewedDamageRollSlotGroupOracle = Object.freeze({
+  acid_splash: [[0]],
+  arcane_hand_grasping: [],
+  befuddlement: [[0]],
+  bestow_curse_damage: [],
+  black_tentacles: [[0]],
+  blade_barrier: [[0]],
+  blight: [[0]],
+  burning_hands: [[0]],
+  call_lightning: [[0]],
+  chain_lightning: [[0]],
+  circle_of_death: [[0]],
+  cloudkill: [[0]],
+  cone_of_cold: [[0]],
+  conjure_animals: [[0]],
+  conjure_celestial: [[0]],
+  conjure_elemental_initial: [[0]],
+  conjure_elemental_repeat: [[0]],
+  conjure_woodland_beings: [[0]],
+  contagion: [[0]],
+  contact_other_plane: [[0]],
+  control_water: [[0]],
+  delayed_blast_fireball: [[0]],
   disintegrate: [[0, 1]],
+  dissonant_whispers: [[0]],
+  dragons_breath: [[0]],
+  dream: [[0]],
+  earthquake: [[0]],
+  enlarge_reduce_damage: [],
+  ensnaring_strike: [[0]],
+  faithful_hound: [[0]],
   finger_of_death: [[0, 1]],
+  fireball: [[0]],
+  fire_storm: [[0]],
   flame_strike: [[0], [1]],
+  flaming_sphere: [[0]],
+  freezing_sphere: [[0]],
+  geas: [],
+  glyph_of_warding: [[0]],
+  guardian_of_faith: [[0]],
+  harm: [[0]],
+  hellish_rebuke: [[0]],
+  ice_knife: [[0]],
   ice_storm: [[0], [1]],
+  incendiary_cloud: [[0]],
+  inflict_wounds: [[0]],
+  insect_plague: [[0]],
+  lightning_bolt: [[0]],
   meteor_swarm: [[0], [1]],
+  mind_spike: [[0]],
+  moonbeam: [[0]],
+  phantasmal_force: [],
+  phantasmal_killer_initial: [[0]],
+  phantasmal_killer_repeat: [[0]],
+  prismatic_spray: [[0]],
+  prismatic_wall: [[0]],
+  ray_of_enfeeblement: [[0]],
+  sacred_flame: [[0]],
+  searing_smite: [],
+  shatter: [[0]],
+  spirit_guardians: [[0]],
+  storm_of_vengeance_initial: [[0]],
+  storm_of_vengeance_lightning: [[0]],
+  summon_dragon: [[0]],
+  sunbeam: [[0]],
+  sunburst: [[0]],
+  symbol: [[0]],
+  thunderwave: [[0]],
+  tsunami_initial: [[0]],
+  tsunami_ongoing: [[0]],
+  vicious_mockery: [[0]],
   vitriolic_sphere: [[0], [1]],
-} as const satisfies Partial<Record<
+  wall_of_fire: [[0]],
+  wall_of_ice_initial: [[0]],
+  wall_of_ice_frigid_air: [[0]],
+  wall_of_thorns_piercing: [[0]],
+  wall_of_thorns_slashing: [[0]],
+  weird_initial: [[0]],
+  weird_repeat: [[0]],
+  wind_wall: [[0]],
+} as const satisfies Record<
   keyof typeof reviewedSaveSuccessClauses,
   readonly DamageRollSlotGroup[]
->>);
+>);
 
 /**
  * Independent transcription of the clauses whose complete numeric fold is
@@ -1354,6 +1429,10 @@ const independentlyUnavailableSaveClauses = new Set<string>(
 
 for (const [key, expectedKind] of Object.entries(reviewedSaveSuccessKindOracle)) {
   const actual = reviewedSaveSuccessClauses[key as keyof typeof reviewedSaveSuccessClauses];
+  const sourceClause = sourceClauseByReviewedId.get(actual.id);
+  if (sourceClause === undefined) {
+    throw new TypeError(`${actual.id} has no registered source clause.`);
+  }
   if (actual.kind !== expectedKind) {
     throw new TypeError(
       `${actual.id} source-derived success kind ${actual.kind} disagrees with the independent reviewed oracle ${expectedKind}.`,
@@ -1367,15 +1446,19 @@ for (const [key, expectedKind] of Object.entries(reviewedSaveSuccessKindOracle))
   }
   const expectedRollGroups = reviewedDamageRollSlotGroupOracle[
     key as keyof typeof reviewedDamageRollSlotGroupOracle
-  ] as readonly DamageRollSlotGroup[] | undefined;
-  const hasMultipleDamageSlots = actual.failed_damage_signature_slots.length > 1;
-  if (hasMultipleDamageSlots !== (expectedRollGroups !== undefined)) {
+  ] as readonly DamageRollSlotGroup[];
+  if (
+    !sameDamageRollSlotGroups(
+      sourceDamageRollSlotGroups(sourceClause, 'failure'),
+      expectedRollGroups,
+    )
+  ) {
     throw new TypeError(
-      `${actual.id} multi-slot damage shape disagrees with the independent grouping oracle.`,
+      `${actual.id} source-derived damage-roll groups disagree with the independent grouping oracle.`,
     );
   }
   if (
-    expectedRollGroups !== undefined &&
+    actual.failed_damage_signature_slots.length > 0 &&
     !sameDamageRollSlotGroups(actual.failed_damage_roll_slot_groups, expectedRollGroups)
   ) {
     throw new TypeError(

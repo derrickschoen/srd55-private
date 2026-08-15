@@ -391,10 +391,7 @@ function failureDamageSlices(span: string): readonly {
   readonly text: string;
   readonly start: number;
 }[] {
-  const sentences = [...span.matchAll(/[^.!?]+(?:[.!?]|$)/gu)].map((match) => ({
-    text: match[0] ?? '',
-    start: match.index ?? 0,
-  }));
+  const sentences = sourceSentences(span);
   const explicit = sentences.filter(({ text }) =>
     /(?:failed save|Failure:|saving throw[^.]{0,160}?or take|taking [^.]{0,160}?damage on (?:a )?failed save)/iu.test(text) &&
     /(?:\d+d\d+|\b\d+\b)[^.]{0,100}?damage|damage[^.]{0,100}?(?:\d+d\d+|\b\d+\b)/iu.test(text),
@@ -410,15 +407,20 @@ function sourceDamageOccurrences(
   span: string,
   bodyStart: number,
 ): readonly SourceDamageOccurrence[] {
-  const groups = failureDamageSlices(span).flatMap((slice, sliceIndex) =>
-    damageOccurrenceGroups(slice.text).map((group) => ({
+  const groups = failureDamageSlices(span).flatMap((slice, sliceIndex) => {
+    const explicitOneRollMarkers = [
+      ...slice.text.matchAll(/\b(?:as\s+)?one(?:\s+damage)?\s+roll\b/giu),
+    ];
+    return damageOccurrenceGroups(slice.text).map((group) => ({
       ...group,
       start: slice.start + group.start,
       end: slice.start + group.end,
       slice_index: sliceIndex,
-      explicitly_one_roll: /\b(?:as\s+)?one(?:\s+damage)?\s+roll\b/iu.test(slice.text),
-    })),
-  );
+      explicitly_one_roll_scope: explicitOneRollMarkers.findIndex((marker) =>
+        (marker.index ?? 0) >= group.end
+      ),
+    }));
+  });
   const prismaticAlternatives = /Prismatic (?:Rays|Layers)|struck by two rays/iu.test(span);
   const mergedSlotByGroup: number[] = [];
   const rollByGroup: number[] = [];
@@ -427,7 +429,7 @@ function sourceDamageOccurrences(
   for (const [index, group] of groups.entries()) {
     const previous = groups[index - 1];
     const bridge = previous === undefined ? '' : span.slice(previous.end, group.start);
-    const sharesAlternativeSlot = prismaticAlternatives || /\bor\b/iu.test(bridge);
+    const sharesAlternativeSlot = prismaticAlternatives || /\bor\s*$/iu.test(bridge);
     if (index === 0 || !sharesAlternativeSlot) {
       nextSlot = index === 0 ? 0 : nextSlot + 1;
     }
@@ -437,8 +439,8 @@ function sourceDamageOccurrences(
       !sharesAlternativeSlot &&
       group.start >= previous.end &&
       !(
-        group.explicitly_one_roll &&
-        previous.explicitly_one_roll &&
+        group.explicitly_one_roll_scope >= 0 &&
+        group.explicitly_one_roll_scope === previous.explicitly_one_roll_scope &&
         group.slice_index === previous.slice_index
       )
     ) {
@@ -532,7 +534,19 @@ function isSourceSentencePeriod(span: string, index: number): boolean {
   if (next !== undefined && /[\p{L}\p{N}]/u.test(next)) {
     return false;
   }
-  if (/^\s*\p{Ll}/u.test(after)) {
+  if (/^\s*[,;:]?\s*\p{Ll}/u.test(after)) {
+    return false;
+  }
+  if (
+    /\b(?:St|Mt|Dr|vs)\.$/iu.test(before) &&
+    /^\s*\p{Lu}[\p{L}\p{M}'’.-]*/u.test(after)
+  ) {
+    return false;
+  }
+  if (
+    /\b(?:e\.g|i\.e)\.$/iu.test(before) &&
+    /^\s*,?\s*\p{L}/u.test(after)
+  ) {
     return false;
   }
   if (
@@ -646,6 +660,10 @@ function candidateBelongsToCheck(
     `^${numericDcMarker}\\s+${ability}(?:\\s+\\([^)]*\\))?\\s+check\\b`,
     'iu',
   ).test(fromDc);
+  const checkAfterValue = new RegExp(
+    `^${numericDcMarker}\\b[^;.!?]*\\b(?:ability|${ability}(?:\\s+\\([^)]*\\))?)\\s+check\\b`,
+    'iu',
+  ).test(fromDc);
   const parentheticalCheck = new RegExp(
     `\\b(?:ability check|${ability}(?:\\s+\\([^)]*\\))?\\s+check)\\b([^;.!?]*)\\(\\s*$`,
     'iu',
@@ -656,12 +674,13 @@ function candidateBelongsToCheck(
     /\bspell save DC\b/iu.test(ownershipTail)
   );
   const checkBeforeDc = /\bcheck\b\s+(?:against|versus|vs\.)\s*$/iu.test(beforeDc) ||
+    /\bcheck\b(?:\s*[-—–,:;]\s*(?:(?:the\s+)?check\b\s*)?)?$/iu.test(beforeDc) ||
     parentheticalBelongsToCheck;
   const checkOwnsCandidateMarker = new RegExp(
     `\\b(?:ability check|${ability}(?:\\s+\\([^)]*\\))?\\s+check)\\b[^;.!?]*(?:\\(\\s*)?(?:DC|D\\.C\\.|Difficulty Class)\\s*$`,
     'iu',
   ).test(candidate.text);
-  return checkAfterDc || checkBeforeDc || checkOwnsCandidateMarker;
+  return checkAfterDc || checkAfterValue || checkBeforeDc || checkOwnsCandidateMarker;
 }
 
 export function sourceFixedSaveDc(span: string): SourceDerivedFixedSaveDc {
@@ -673,9 +692,28 @@ export function sourceFixedSaveDc(span: string): SourceDerivedFixedSaveDc {
   const saveBearingSpan = sentences.some((sentence) =>
     containsSaveBearingVocabulary(sentence.text)
   );
+  if (saveBearingSpan) {
+    for (const sentence of sentences) {
+      const threshold = /\broll\s+is\s+\d+\s+or\s+higher\b/iu.exec(sentence.text);
+      if (threshold !== null) {
+        return {
+          status: 'unavailable',
+          reason: `The source fixed save DC syntax is not representable: ${threshold[0]}.`,
+        };
+      }
+    }
+  }
   for (const sentence of sentences) {
     const candidates = dcVocabularyNumericCandidates(sentence.text);
-    const recognized: {
+    const checkOwnedCandidates = candidates.filter((candidate) =>
+      candidateBelongsToCheck(
+        sentence.text,
+        candidate,
+        numericDcMarker,
+        ability,
+      )
+    );
+    const recognizedCandidates: {
       readonly start: number;
       readonly end: number;
       readonly value: number;
@@ -693,26 +731,29 @@ export function sourceFixedSaveDc(span: string): SourceDerivedFixedSaveDc {
       new RegExp(`^\\s*The\\s+${dcMarker}\\s+(?:is|equals)\\s+(\\d+)\\b`, 'giu'),
     ]) {
       for (const match of sentence.text.matchAll(pattern)) {
-        recognized.push({
+        recognizedCandidates.push({
           start: match.index ?? 0,
           end: (match.index ?? 0) + (match[0]?.length ?? 0),
           value: Number(match[1]),
         });
       }
     }
+    const recognized = recognizedCandidates.filter((range) =>
+      !checkOwnedCandidates.some((candidate) =>
+        candidate.start < range.end && range.start < candidate.end
+      )
+    );
     const unsupported = saveBearingSpan
       ? candidates.find((candidate) => {
+        if (checkOwnedCandidates.includes(candidate)) {
+          return false;
+        }
         if (recognized.some((range) =>
           candidate.start >= range.start && candidate.end <= range.end
         )) {
           return false;
         }
-        return !candidateBelongsToCheck(
-          sentence.text,
-          candidate,
-          numericDcMarker,
-          ability,
-        );
+        return true;
       }) ?? null
       : null;
     if (unsupported !== null) {
