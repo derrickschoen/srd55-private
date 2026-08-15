@@ -2785,3 +2785,21 @@ inversion) — that refusal IS the "new ai intervention" trigger: a human/AI
 reads the spell, adds the rule and the oracle row. Extraction never silently
 overrides the table; disagreement between table and recognizer is a build
 failure, not a preference.
+
+## D258 — Four more rulings (2026-08-15)
+
+1. **Party NPCs are BUFF TARGETS ONLY** (extends D256.3): declared attack
+   profiles that buffs can modify — Bless/Faerie Fire become measured as the
+   delta on NPC output — but NPCs take no damage, make no decisions, and C8's
+   party-HP model stays closed.
+2. **Fable judges Board B** — same editorship as Board A, one-time
+   authorization: fable scores the judged axes with citations, the supervisor
+   verifies every composite arithmetically.
+3. **VTT phase 1 PROTOTYPES NOW, in parallel** — own worktree, own port;
+   shared board (grid, tokens, DM fog, dice log) as a Yjs doc over a
+   pluggable transport (Trystero default, manual-SDP fallback); no rules
+   integration in phase 1; touches nothing the walkthroughs need.
+4. **Queue triage:** #18 (DPR sim in-app UI), #20 (D235 reader sweep) and
+   #21 (Stryker threshold) SURVIVE. **#17 (errata triple-check) is KILLED** —
+   the errata dossier's existing two-pass record stands; no triple-check
+   deep-dive.
