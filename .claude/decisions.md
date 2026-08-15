@@ -2803,3 +2803,25 @@ failure, not a preference.
    #21 (Stryker threshold) SURVIVE. **#17 (errata triple-check) is KILLED** —
    the errata dossier's existing two-pass record stands; no triple-check
    deep-dive.
+
+## D259 — Correction to D257's census, and the registration-required design (2026-08-15)
+
+CORRECTION (supervisor's own error, caught by review round 14): D257 said the
+fixed-DC oracle has "2 non-null today". The oracle and the source census
+support exactly ONE non-null row — contact_other_plane: 15. Earthquake's
+DC 20 is check-owned and its row is null. The "2" was a stale figure from
+before Earthquake was decoded. decisions.md is append-only, so the wrong
+sentence stands above with this correction governing.
+
+DESIGN AMENDMENT, completing D257: rounds 12-14 each defeated the DC scanner
+with composed English that is lawful but off-corpus. Under D257 the answer is
+not a smarter parser — it is REGISTRATION-REQUIRED FOLDING: a clause may fold
+ONLY if it has rows in ALL reviewed oracles (kind, availability, fixed DC,
+grouping — the grouping oracle becomes TOTAL over all clauses, not partial
+with derived membership). An unregistered clause refuses by construction, so
+novel wording cannot fail open no matter what the parser misses; parsing is
+demoted entirely to a drift alarm over REGISTERED rows. New spells onboard by
+an AI-with-source decode pass that writes their rows — and per round 14's
+named process gap ("same-change oracle co-minting"), that decode pass must be
+SEPARATE from any parser change: oracle rows and parser code never land in
+the same change for the same clause.
