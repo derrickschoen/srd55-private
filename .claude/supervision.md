@@ -44,17 +44,32 @@ medium" cannot be expressed as a setting. The levers that do exist:
 | `Workflow` → `agent({effort})` | one subagent call |
 | `Agent` tool | **no effort parameter** — inherits the session |
 
-**On `claude-opus-5`, `medium` and `high` are the same configuration.** The
-CLI's per-model effort table resolves both to an identical cell:
-`{cell:"o5-bmin", modelEffort:"typed", finderBudgetHint:false,
-measuredExternal:true}`. Only `low` (cell `low`), `xhigh` and `max` differ.
-Measured across every local transcript, Opus 5 at medium (n=200) shows mean
-output 1,197 tokens against high (n=16,558) at 1,060 — medium is not cheaper.
-`claude-opus-4-8` is different: it has genuinely distinct cells per level.
-Fable 5 is also genuinely graded — high mean 1,165, xhigh mean 2,649.
+**Opus runs at `medium`; Fable runs at `high`.** Opus 5 at medium has a
+measured median turn time of **2.3s against 4.4s at high** (n=200 / n=16,578
+across every local transcript) — roughly 1.9x faster, with lower reasoning
+cost as the mechanism.
 
-So: do not reach for `medium` on Opus 5 expecting a saving. It buys nothing.
-The real levers are cadence, context size, and delegation.
+I previously claimed medium and high were "the same configuration" on Opus 5.
+That was wrong and the correction matters more than the claim did:
+
+- The shared field is `cell:"o5-bmin"`, which is the **harness-side budget
+  hint**, not the effort sent to the model. The dispatcher is
+  `ZZl(e,t){let r=oQr[e][t]; return r.modelEffort==="typed" ? t : r.modelEffort}`
+  — and on Opus 5 both levels carry `modelEffort:"typed"`, so the function
+  returns the level string itself. `medium` sends *medium*; `high` sends
+  *high*. They differ in precisely the field that controls model reasoning.
+- The evidence I used could not have detected the difference. I compared
+  `output_tokens`, but **0% of these records carry a thinking block** —
+  reasoning content is not in the transcripts at all. Effort scales reasoning
+  tokens; that measurement was blind to the quantity in dispute.
+- Latency was in the same records the whole time and points the other way.
+
+Reasoning-token cost cannot be measured from local transcripts. Absence of a
+measurement is not evidence of absence of an effect — the 2.3s/4.4s split is
+the observable that survives.
+
+Since `effortLevel` is global per session, the policy is a switch, not a map:
+`/effort medium` for Opus work, `/effort high` when driving Fable.
 
 ## Cadence
 
