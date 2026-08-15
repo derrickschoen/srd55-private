@@ -2635,3 +2635,38 @@ outcomes:
    one durable document, not two. Cleanroom lint re-run after the merge.
 6. **wt-party RETIRES NOW.** Audit for unlanded work; anything real becomes a
    sync proposal per the party-sync cadence; then prune worktree and branch.
+
+## D252 — Eleven owner rulings from the five-perspective brainstorm (2026-08-15)
+
+Collated from 25 candidates (player / rules-lawyer / product-QA / sim-method /
+steward perspectives); duplicates merged; four decided by the supervisor
+without asking (private-pass artifacts stay private per D59; all 11
+walkthroughs rerun after the batch-fix wave; verify_citations.py joins the
+merge ritual; day-assumptions stated once per report). Asked one at a time:
+
+1. **Review stopping rule: clean = TWO consecutive quiet rounds** (zero
+   High/P1). **Board B sims run NOW** on current simcore; any build touched by
+   a later review finding gets a targeted re-run.
+2. **Board B rest cadence: Board A's day unchanged** (4 combats x 4 rounds,
+   short rests between all).
+3. **Measured stays PURE.** No labelled estimate ever feeds DPR/Prevented; a
+   dependent cell goes partly-UNAVAILABLE, stated plainly.
+4. **Prepared lists: TWO SCORED VARIANTS per Board B build** — a tuned
+   day-list and a general-purpose list; the delta is reported information.
+5. **Fun stays pure enjoyment; every build carries a separate unweighted
+   TABLE-LOAD note** (light/medium/heavy).
+6. **Kennel: C18 does NOT apply** — Pact of the Chain dropped for the Kennel;
+   Magic Initiate (Wizard) carries Find Familiar; Warlock 1 takes a different
+   invocation (Pact of the Tome if SRD-verified — three extra cantrips).
+   C18 unchanged for the Board A ten.
+7. **ALL FOUR house rules (H1-H4) become real labelled site toggles with sheet
+   disclosures** — H2/H3 toggle UI is v1 work, new app lane.
+8. **Walkthroughs verify EVERY level 1-7 on ALL builds.**
+9. **Sheet oracle: all deterministic values + HP STRICT** against the
+   supervisor's computed fixed-average; a site HP-policy difference itself
+   halts and gets ruled on.
+10. **v1-USABLE acceptance = green walkthroughs + the D251.3 AI-guided Kennel
+    run completing guided creation.** No human pass required.
+11. **Play cards/badges: NEITHER for now.** Boards stay analyst documents.
+12. **Board publishing ritual STANDING**: private report + clean-room public
+    variant + mirror push, every board, no per-board approval.
