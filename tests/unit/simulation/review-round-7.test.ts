@@ -130,7 +130,7 @@ function saveEvent(
     ability: clause.ability,
     save_dc: saveDifficultyClass(15),
     roll_state: 'normal',
-    frequency: { kind: 'each_declared_event' },
+    frequency: clause.frequency,
     duration: { kind: 'instantaneous' },
     save_success_clause_id: clause.id,
     damage_on_failed_save: damage,

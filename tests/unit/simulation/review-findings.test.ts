@@ -333,7 +333,7 @@ describe('confirmed review findings after repair', () => {
         ability: testCase.ability,
         save_dc: saveDifficultyClass(testCase.dc),
         roll_state: 'normal',
-        frequency: { kind: 'each_declared_event' },
+        frequency: testCase.clause.frequency,
         duration: { kind: 'instantaneous' },
         save_success_clause_id: testCase.clause.id,
         damage_on_failed_save: [{
@@ -370,7 +370,7 @@ describe('confirmed review findings after repair', () => {
     }
   });
 
-  it('R5 F5 evaluates source-discovered saves that gate recurring damage', () => {
+  it('R9 refuses source-discovered saves that only gate recurring damage', () => {
     const cases = [
       {
         clause: reviewedSaveSuccessClauses.ensnaring_strike,
@@ -378,7 +378,6 @@ describe('confirmed review findings after repair', () => {
         count: 1,
         die: 6 as const,
         type: damageType('Piercing'),
-        expected: 1.75,
       },
       {
         clause: reviewedSaveSuccessClauses.phantasmal_force,
@@ -386,7 +385,6 @@ describe('confirmed review findings after repair', () => {
         count: 2,
         die: 8 as const,
         type: damageType('Psychic'),
-        expected: 4.5,
       },
       {
         clause: reviewedSaveSuccessClauses.searing_smite,
@@ -394,7 +392,6 @@ describe('confirmed review findings after repair', () => {
         count: 1,
         die: 6 as const,
         type: fire,
-        expected: 1.75,
       },
     ];
     for (const testCase of cases) {
@@ -431,14 +428,8 @@ describe('confirmed review findings after repair', () => {
           response: 'normal',
         }],
       });
-      expect(result.status, testCase.clause.id).toBe('available');
-      if (result.status !== 'available') {
-        throw new Error(result.reason);
-      }
-      expect(result.expected_damage, testCase.clause.id).toBeCloseTo(
-        testCase.expected,
-        12,
-      );
+      expect(result.status, testCase.clause.id).toBe('unavailable');
+      expect(result, testCase.clause.id).not.toHaveProperty('expected_damage');
     }
   });
 

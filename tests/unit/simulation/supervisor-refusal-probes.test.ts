@@ -161,6 +161,10 @@ ok(
   'F1 registered effect citing another effect evidence is REFUSED (evidence only)',
   crossed.status === 'unavailable',
 );
+const acidProofEvent = saveEvent(
+  'srd-5.2.1:spell:acid-splash',
+  acidEvidence,
+);
 
 ok(
   'F1 predicate: unregistered key rejected',
@@ -170,7 +174,13 @@ ok(
     {
     kind: 'none',
     evidence: acidEvidence,
-  }),
+  },
+    acidProofEvent.ability,
+    acidProofEvent.damage_on_failed_save,
+    acidProofEvent.duration,
+    acidProofEvent.save_dc,
+    acidProofEvent.frequency,
+  ),
 );
 ok(
   'F1 predicate: registered key accepted',
@@ -180,7 +190,13 @@ ok(
     {
     kind: 'none',
     evidence: acidEvidence,
-  }),
+  },
+    acidProofEvent.ability,
+    acidProofEvent.damage_on_failed_save,
+    acidProofEvent.duration,
+    acidProofEvent.save_dc,
+    acidProofEvent.frequency,
+  ),
 );
 
 // ---------- F3: critical evidence ----------

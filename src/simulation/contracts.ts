@@ -787,12 +787,46 @@ export type ResourceRecovery = {
 
 export type SimResourcePool = {
   readonly id: SimResourceId;
-  /** Equal keys explicitly alias one pool; different keys are always independent. */
+  /** Equal keys require constructor-produced identity evidence. */
   readonly logical_key: SimResourcePoolKey;
   readonly source: SourceRef;
   readonly maximum: PositiveResourceMaximum;
   readonly recovery: ResourceRecovery;
+  readonly alias_evidence?: SimResourcePoolAliasEvidence;
 };
+
+const simResourcePoolAliasEvidenceBrand: unique symbol = Symbol(
+  'SimResourcePoolAliasEvidence',
+);
+type SimResourcePoolAliasEvidence = {
+  readonly canonical_id: SimResourceId;
+  readonly alias_id: SimResourceId;
+  readonly logical_key: SimResourcePoolKey;
+  readonly [simResourcePoolAliasEvidenceBrand]: true;
+};
+
+/**
+ * Derives a second identifier for one already-constructed mechanic. Callers
+ * cannot make two independently declared pools aliases by repeating a key.
+ */
+export function simResourcePoolAlias(
+  canonical: SimResourcePool,
+  aliasId: SimResourceId,
+): SimResourcePool {
+  if (canonical.alias_evidence !== undefined) {
+    throw new TypeError('A simulation resource alias must name the canonical pool directly.');
+  }
+  return Object.freeze({
+    ...canonical,
+    id: aliasId,
+    alias_evidence: Object.freeze({
+      canonical_id: canonical.id,
+      alias_id: aliasId,
+      logical_key: canonical.logical_key,
+      [simResourcePoolAliasEvidenceBrand]: true as const,
+    }),
+  });
+}
 
 const simResourcePoolSetBrand: unique symbol = Symbol('SimResourcePoolSet');
 const logicalPoolIdentityByIdBrand: unique symbol = Symbol(
@@ -878,15 +912,34 @@ export function simResourcePoolSet(
     }
     ids.add(pool.id);
     const aliasedPool = firstPoolByLogicalKey.get(pool.logical_key);
-    if (
-      aliasedPool !== undefined &&
-      !sameResourcePoolMechanics(aliasedPool, pool)
-    ) {
+    if (aliasedPool === undefined && pool.alias_evidence !== undefined) {
       throw new TypeError(
-        `Logical simulation resource pool aliases disagree: ${pool.logical_key}.`,
+        `Simulation resource alias identity evidence names a missing canonical pool: ${pool.id}.`,
       );
     }
-    firstPoolByLogicalKey.set(pool.logical_key, pool);
+    if (aliasedPool !== undefined) {
+      if (
+        pool.alias_evidence?.[simResourcePoolAliasEvidenceBrand] !== true ||
+        pool.alias_evidence.canonical_id !== aliasedPool.id ||
+        pool.alias_evidence.alias_id !== pool.id ||
+        pool.alias_evidence.logical_key !== pool.logical_key
+      ) {
+        throw new TypeError(
+          `Logical simulation resource pool alias requires constructor-produced identity evidence: ${pool.logical_key}.`,
+        );
+      }
+      if (
+        !sameSourceRef(aliasedPool.source, pool.source) ||
+        !sameResourcePoolMechanics(aliasedPool, pool)
+      ) {
+        throw new TypeError(
+          `Logical simulation resource pool aliases disagree: ${pool.logical_key}.`,
+        );
+      }
+    }
+    if (aliasedPool === undefined) {
+      firstPoolByLogicalKey.set(pool.logical_key, pool);
+    }
     logicalIdentityById.set(pool.id, pool.logical_key);
   }
   return Object.freeze(Object.assign(

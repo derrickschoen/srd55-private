@@ -24,6 +24,7 @@ import {
   projectOwnedSourcePath,
   restCadence,
   simResourceId,
+  simResourcePoolAlias,
   simResourcePoolKey,
   simResourcePoolSet,
   sourceStableKey,
@@ -356,10 +357,10 @@ describe('DPR branded constructors', () => {
       },
     )).toThrow('does not establish recovery for this resource source');
 
-    const aliasedSorceryPoints: SimResourcePool = {
-      ...sorceryPoints,
-      id: simResourceId('duplicate:sorcery-points'),
-    };
+    const aliasedSorceryPoints = simResourcePoolAlias(
+      sorceryPoints,
+      simResourceId('duplicate:sorcery-points'),
+    );
     const aliasSession = createResourceRecoverySession(
       simResourcePoolSet([sorceryPoints, aliasedSorceryPoints]),
     );
@@ -377,7 +378,7 @@ describe('DPR branded constructors', () => {
     expect(firstAliasRecovery + secondAliasRecovery).toBe(5);
 
     const distinctSorceryPoints: SimResourcePool = {
-      ...aliasedSorceryPoints,
+      ...sorceryPoints,
       id: simResourceId('distinct:sorcery-points'),
       logical_key: simResourcePoolKey('distinct:sorcery-points'),
     };
@@ -420,7 +421,7 @@ describe('DPR branded constructors', () => {
         ...secondPool,
         logical_key: sorceryPoints.logical_key,
       },
-    ])).toThrow('Logical simulation resource pool aliases disagree');
+    ])).toThrow('requires constructor-produced identity evidence');
     const sameSourceSession = createResourceRecoverySession(
       simResourcePoolSet([sorceryPoints, secondPool]),
     );
@@ -788,7 +789,9 @@ describe('coverage vocabularies and bundled provenance', () => {
       ).toBeDefined();
       expect(clause.source_span, clause.id).toMatch(/sav(?:e|ing throw)/iu);
       expect(clause.kind, `${clause.id}: source outcome`).toBe(
-        sourceCandidate?.kind,
+        sourceCandidate?.success.status === 'available'
+          ? sourceCandidate.success.kind
+          : 'unavailable',
       );
       expect(clause.ability, `${clause.id}: source ability`).toBe(
         sourceCandidate?.ability,

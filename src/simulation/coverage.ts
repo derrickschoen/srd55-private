@@ -16,6 +16,7 @@ import {
   type DamageInstance,
   type DamageNeutralMechanicId,
   type DamageNeutralityEvidence,
+  type EventFrequency,
   type PublicSourceRef,
   type ResourceRecoveryClauseId,
   type ResourceRecoveryEvidence,
@@ -361,10 +362,13 @@ type ReviewedSaveSuccessClause = {
   readonly id: SaveSuccessClauseId;
   readonly effect_source: SourceRef & { readonly kind: 'catalog_content' };
   readonly effect_stable_key: SourceStableKey;
-  readonly kind: SaveSuccessOutcome['kind'];
+  readonly kind: SaveSuccessOutcome['kind'] | 'unavailable';
+  readonly unavailable_reason: string | null;
   readonly evidence: PublicSourceRef;
   readonly source_span: string;
   readonly ability: Ability;
+  readonly fixed_save_dc: number | null;
+  readonly frequency: EventFrequency;
   readonly failed_damage_signature_slots: readonly DamageSignatureSlot[];
   readonly success_damage_signature_slots: readonly DamageSignatureSlot[];
   readonly failed_damage_slot_repetitions: DamageSlotRepetitions;
@@ -380,9 +384,7 @@ type DamageSignatureSlot = readonly [
 type ReviewedDamageRequirements = {
   readonly failed: readonly DamageSignatureSlot[];
   readonly success?: readonly DamageSignatureSlot[];
-  readonly failed_repetitions?: DamageSlotRepetitions;
   readonly success_roll_transform?: 'none' | 'floor_half';
-  readonly duration?: SavingThrowDamageDuration;
 };
 
 type DamageSlotRepetitions = {
@@ -425,9 +427,7 @@ const required = (
  */
 const reviewedDamageRequirementsByClause = {
   'acid-splash:damage': { failed: [required(dice(1, 6, 'Acid'))] },
-  'arcane-hand:grasping-hand-damage': { failed: [required(dice(4, 6, 'Bludgeoning'))] },
   'befuddlement:damage': { failed: [required(dice(10, 12, 'Psychic'))] },
-  'bestow-curse:curse-damage': { failed: [required(dice(1, 8, 'Necrotic'))] },
   'black-tentacles:damage': { failed: [required(dice(3, 6, 'Bludgeoning'))] },
   'blade-barrier:damage': { failed: [required(dice(6, 10, 'Force'))] },
   'blight:damage': { failed: [required(dice(8, 8, 'Necrotic'))] },
@@ -451,8 +451,6 @@ const reviewedDamageRequirementsByClause = {
   'dragon-s-breath:damage': { failed: [required(dice(3, 6, null))] },
   'dream:damage': { failed: [required(dice(3, 6, 'Psychic'))] },
   'earthquake:collapse-damage': { failed: [required(dice(12, 6, 'Bludgeoning'))] },
-  'enlarge-reduce:weapon-damage': { failed: [required(dice(1, 4, null))] },
-  'ensnaring-strike:recurring-damage': { failed: [required(dice(1, 6, 'Piercing'))] },
   'faithful-hound:damage': { failed: [required(dice(4, 8, 'Force'))] },
   'finger-of-death:damage': { failed: [required(dice(7, 8, 'Necrotic')), required(flat(30, 'Necrotic'))] },
   'fireball:damage': { failed: [required(dice(8, 6, 'Fire'))] },
@@ -460,7 +458,6 @@ const reviewedDamageRequirementsByClause = {
   'flame-strike:damage': { failed: [required(dice(5, 6, 'Fire')), required(dice(5, 6, 'Radiant'))] },
   'flaming-sphere:damage': { failed: [required(dice(2, 6, 'Fire'))] },
   'freezing-sphere:damage': { failed: [required(dice(10, 6, 'Cold'))] },
-  'geas:recurring-damage': { failed: [required(dice(5, 10, 'Psychic'))] },
   'glyph-of-warding:explosive-runes': { failed: [required(
     dice(5, 8, 'Acid'),
     dice(5, 8, 'Cold'),
@@ -480,7 +477,6 @@ const reviewedDamageRequirementsByClause = {
   'meteor-swarm:damage': { failed: [required(dice(20, 6, 'Fire')), required(dice(20, 6, 'Bludgeoning'))] },
   'mind-spike:damage': { failed: [required(dice(3, 8, 'Psychic'))] },
   'moonbeam:damage': { failed: [required(dice(2, 10, 'Radiant'))] },
-  'phantasmal-force:recurring-damage': { failed: [required(dice(2, 8, 'Psychic'))] },
   'phantasmal-killer:initial-damage': { failed: [required(dice(4, 10, 'Psychic'))] },
   'phantasmal-killer:repeat-damage': { failed: [required(dice(4, 10, 'Psychic'))] },
   'prismatic-spray:damaging-rays': { failed: [required(
@@ -489,7 +485,7 @@ const reviewedDamageRequirementsByClause = {
     dice(12, 6, 'Lightning'),
     dice(12, 6, 'Poison'),
     dice(12, 6, 'Cold'),
-  )], failed_repetitions: { minimum: 1, maximum: 2 } },
+  )] },
   'prismatic-wall:damaging-layers': { failed: [required(
     dice(12, 6, 'Fire'),
     dice(12, 6, 'Acid'),
@@ -497,9 +493,7 @@ const reviewedDamageRequirementsByClause = {
     dice(12, 6, 'Poison'),
     dice(12, 6, 'Cold'),
   )] },
-  'ray-of-enfeeblement:damage-reduction': { failed: [required(dice(1, 8, null))] },
   'sacred-flame:damage': { failed: [required(dice(1, 8, 'Radiant'))] },
-  'searing-smite:recurring-damage': { failed: [required(dice(1, 6, 'Fire'))] },
   'shatter:damage': { failed: [required(dice(3, 8, 'Thunder'))] },
   'spirit-guardians:damage': { failed: [required(dice(3, 8, 'Radiant'), dice(3, 8, 'Necrotic'))] },
   'storm-of-vengeance:initial-thunder-damage': { failed: [required(dice(2, 6, 'Thunder'))] },
@@ -516,10 +510,6 @@ const reviewedDamageRequirementsByClause = {
     failed: [required(dice(10, 4, 'Acid')), required(dice(5, 4, 'Acid'))],
     success: [required(dice(10, 4, 'Acid'))],
     success_roll_transform: 'floor_half',
-    duration: {
-      kind: 'includes_delayed_damage',
-      delayed_until: 'end_of_target_next_turn',
-    },
   },
   'wall-of-fire:damage': { failed: [required(dice(5, 8, 'Fire'))] },
   'wall-of-ice:initial-damage': { failed: [required(dice(10, 6, 'Cold'))] },
@@ -755,7 +745,6 @@ function reviewedSaveClause(
   key: string,
   spellSlug: string,
   heading: ReviewedBundledSrdHeading,
-  kind: SaveSuccessOutcome['kind'],
   discriminator?: SaveClauseDiscriminator,
 ): ReviewedSaveSuccessClause {
   const id = saveSuccessClauseId(`srd-5.2.1:spell:${spellSlug}:save:${key}`);
@@ -786,11 +775,6 @@ function reviewedSaveClause(
   if (consumedSourceClauses.has(sourceClause)) {
     throw new TypeError(`${id} reuses a source clause already bound to another ID.`);
   }
-  if (sourceClause.kind !== kind) {
-    throw new TypeError(
-      `${id} is mis-bound: source outcome ${sourceClause.kind} does not match declared outcome ${kind}.`,
-    );
-  }
   if (candidates.length > 1) {
     const semanticAnchor = multiClauseSemanticAnchorById[
       id as keyof typeof multiClauseSemanticAnchorById
@@ -798,6 +782,52 @@ function reviewedSaveClause(
     if (semanticAnchor === undefined || !sourceClause.span.includes(semanticAnchor)) {
       throw new TypeError(`${id} is not bound to its reviewed semantic source anchor.`);
     }
+  }
+  const stableKey = sourceStableKey(`srd-5.2.1:spell:${spellSlug}`);
+  const evidence = bundledHeading(heading);
+  const frequency: EventFrequency = sourceClause.frequency.kind === 'once_per_turn'
+    ? {
+        kind: 'once_per_turn',
+        turn: sourceClause.frequency.turn,
+        evidence,
+      }
+    : sourceClause.frequency.kind === 'once_per_round'
+      ? { kind: 'once_per_round', evidence }
+      : { kind: 'each_declared_event' };
+  if (
+    sourceClause.success.status === 'unavailable' ||
+    sourceClause.repetitions.status === 'unavailable' ||
+    sourceClause.timing_unavailable_reason !== null
+  ) {
+    const unavailableReason = sourceClause.success.status === 'unavailable'
+      ? sourceClause.success.reason
+      : sourceClause.repetitions.status === 'unavailable'
+        ? sourceClause.repetitions.reason
+        : sourceClause.timing_unavailable_reason ?? 'Source evidence is unavailable.';
+    consumedSourceClauses.add(sourceClause);
+    return {
+      id,
+      effect_source: {
+        kind: 'catalog_content',
+        content_key: String(stableKey) as ContentKey,
+        stable_key: stableKey,
+      },
+      effect_stable_key: stableKey,
+      kind: sourceClause.success.status === 'available'
+        ? sourceClause.success.kind
+        : 'unavailable',
+      unavailable_reason: unavailableReason,
+      evidence,
+      source_span: sourceClause.span,
+      ability: sourceClause.ability,
+      fixed_save_dc: sourceClause.fixed_save_dc,
+      frequency,
+      failed_damage_signature_slots: [],
+      success_damage_signature_slots: [],
+      failed_damage_slot_repetitions: { minimum: 1, maximum: 1 },
+      success_roll_transform: 'none',
+      duration: sourceClause.duration,
+    };
   }
   const requirements: ReviewedDamageRequirements | undefined = reviewedDamageRequirementsByClause[
     `${spellSlug}:${key}` as keyof typeof reviewedDamageRequirementsByClause
@@ -817,18 +847,10 @@ function reviewedSaveClause(
       `${id} successful-save damage slots do not bijectively match clause-local source occurrences: declared ${JSON.stringify(requirements.success ?? [])}, source ${JSON.stringify(sourcedSuccessSlots)}.`,
     );
   }
-  const failedRepetitions = requirements.failed_repetitions ?? {
-    minimum: 1,
-    maximum: 1,
+  const failedRepetitions: DamageSlotRepetitions = {
+    minimum: sourceClause.repetitions.minimum,
+    maximum: sourceClause.repetitions.maximum,
   };
-  const sourceMaximumRepetitions = /struck by two rays/iu.test(
-    bundledSpellBodies.get(heading) ?? sourceClause.span,
-  )
-    ? 2
-    : 1;
-  if (failedRepetitions.maximum !== sourceMaximumRepetitions) {
-    throw new TypeError(`${id} damage-slot repetitions do not match the source clause.`);
-  }
   const sourceSuccessTransform = sourceClause.damage_occurrences.some((occurrence) =>
     occurrence.arm === 'success' && occurrence.roll_transform === 'floor_half'
   ) ? 'floor_half' : 'none';
@@ -836,17 +858,7 @@ function reviewedSaveClause(
   if (successRollTransform !== sourceSuccessTransform) {
     throw new TypeError(`${id} successful-save roll transform does not match the source clause.`);
   }
-  const sourceHasDelayedDamage = sourceClause.damage_occurrences.some((occurrence) =>
-    occurrence.arm === 'failure' && occurrence.timing === 'end_of_target_next_turn'
-  );
-  const duration: SavingThrowDamageDuration = requirements.duration ?? {
-    kind: 'instantaneous',
-  };
-  if (sourceHasDelayedDamage !== (duration.kind === 'includes_delayed_damage')) {
-    throw new TypeError(`${id} damage timing does not match the source clause.`);
-  }
   consumedSourceClauses.add(sourceClause);
-  const stableKey = sourceStableKey(`srd-5.2.1:spell:${spellSlug}`);
   return {
     id,
     effect_source: {
@@ -855,15 +867,18 @@ function reviewedSaveClause(
       stable_key: stableKey,
     },
     effect_stable_key: stableKey,
-    kind,
-    evidence: bundledHeading(heading),
+    kind: sourceClause.success.kind,
+    unavailable_reason: null,
+    evidence,
     source_span: sourceClause.span,
     ability: sourceClause.ability,
+    fixed_save_dc: sourceClause.fixed_save_dc,
+    frequency,
     failed_damage_signature_slots: requirements.failed,
     success_damage_signature_slots: requirements.success ?? [],
     failed_damage_slot_repetitions: failedRepetitions,
     success_roll_transform: successRollTransform,
-    duration,
+    duration: sourceClause.duration,
   };
 }
 
@@ -876,85 +891,85 @@ function reviewedSaveClause(
  * general rule that can be inferred from the spell's school or level.
  */
 export const reviewedSaveSuccessClauses = {
-  acid_splash: reviewedSaveClause('damage', 'acid-splash', 'Acid Splash', 'none'),
-  arcane_hand_grasping: reviewedSaveClause('grasping-hand-damage', 'arcane-hand', 'Arcane Hand', 'none'),
-  befuddlement: reviewedSaveClause('damage', 'befuddlement', 'Befuddlement', 'none'),
-  bestow_curse_damage: reviewedSaveClause('curse-damage', 'bestow-curse', 'Bestow Curse', 'none'),
-  black_tentacles: reviewedSaveClause('damage', 'black-tentacles', 'Black Tentacles', 'none'),
-  blade_barrier: reviewedSaveClause('damage', 'blade-barrier', 'Blade Barrier', 'half'),
-  blight: reviewedSaveClause('damage', 'blight', 'Blight', 'half'),
-  burning_hands: reviewedSaveClause('damage', 'burning-hands', 'Burning Hands', 'half'),
-  call_lightning: reviewedSaveClause('damage', 'call-lightning', 'Call Lightning', 'half'),
-  chain_lightning: reviewedSaveClause('damage', 'chain-lightning', 'Chain Lightning', 'half'),
-  circle_of_death: reviewedSaveClause('damage', 'circle-of-death', 'Circle of Death', 'half'),
-  cloudkill: reviewedSaveClause('damage', 'cloudkill', 'Cloudkill', 'half'),
-  cone_of_cold: reviewedSaveClause('damage', 'cone-of-cold', 'Cone of Cold', 'half'),
-  conjure_animals: reviewedSaveClause('damage', 'conjure-animals', 'Conjure Animals', 'none'),
-  conjure_celestial: reviewedSaveClause('damage', 'conjure-celestial', 'Conjure Celestial', 'half'),
-  conjure_elemental_initial: reviewedSaveClause('initial-damage', 'conjure-elemental', 'Conjure Elemental', 'none', { kind: 'damage_signature', dice_count: 8, die_size: 8, damage_type: null }),
-  conjure_elemental_repeat: reviewedSaveClause('repeat-damage', 'conjure-elemental', 'Conjure Elemental', 'none', { kind: 'damage_signature', dice_count: 4, die_size: 8, damage_type: null }),
-  conjure_woodland_beings: reviewedSaveClause('damage', 'conjure-woodland-beings', 'Conjure Woodland Beings', 'half'),
-  contagion: reviewedSaveClause('damage', 'contagion', 'Contagion', 'none'),
-  contact_other_plane: reviewedSaveClause('damage', 'contact-other-plane', 'Contact Other Plane', 'none'),
-  control_water: reviewedSaveClause('damage', 'control-water', 'Control Water', 'half'),
-  delayed_blast_fireball: reviewedSaveClause('damage', 'delayed-blast-fireball', 'Delayed Blast Fireball', 'half'),
-  disintegrate: reviewedSaveClause('damage', 'disintegrate', 'Disintegrate', 'none'),
-  dissonant_whispers: reviewedSaveClause('damage', 'dissonant-whispers', 'Dissonant Whispers', 'half'),
-  dragons_breath: reviewedSaveClause('damage', 'dragon-s-breath', 'Dragon’s Breath', 'half'),
-  dream: reviewedSaveClause('damage', 'dream', 'Dream', 'none'),
-  earthquake: reviewedSaveClause('collapse-damage', 'earthquake', 'Earthquake', 'half'),
-  enlarge_reduce_damage: reviewedSaveClause('weapon-damage', 'enlarge-reduce', 'Enlarge/Reduce', 'none'),
-  ensnaring_strike: reviewedSaveClause('recurring-damage', 'ensnaring-strike', 'Ensnaring Strike', 'none'),
-  faithful_hound: reviewedSaveClause('damage', 'faithful-hound', 'Faithful Hound', 'none'),
-  finger_of_death: reviewedSaveClause('damage', 'finger-of-death', 'Finger of Death', 'half'),
-  fireball: reviewedSaveClause('damage', 'fireball', 'Fireball', 'half'),
-  fire_storm: reviewedSaveClause('damage', 'fire-storm', 'Fire Storm', 'half'),
-  flame_strike: reviewedSaveClause('damage', 'flame-strike', 'Flame Strike', 'half'),
-  flaming_sphere: reviewedSaveClause('damage', 'flaming-sphere', 'Flaming Sphere', 'half'),
-  freezing_sphere: reviewedSaveClause('damage', 'freezing-sphere', 'Freezing Sphere', 'half'),
-  geas: reviewedSaveClause('recurring-damage', 'geas', 'Geas', 'none'),
-  glyph_of_warding: reviewedSaveClause('explosive-runes', 'glyph-of-warding', 'Glyph of Warding', 'half'),
-  guardian_of_faith: reviewedSaveClause('damage', 'guardian-of-faith', 'Guardian of Faith', 'half'),
-  harm: reviewedSaveClause('damage', 'harm', 'Harm', 'half'),
-  hellish_rebuke: reviewedSaveClause('damage', 'hellish-rebuke', 'Hellish Rebuke', 'half'),
-  ice_knife: reviewedSaveClause('explosion-damage', 'ice-knife', 'Ice Knife', 'none'),
-  ice_storm: reviewedSaveClause('damage', 'ice-storm', 'Ice Storm', 'half'),
-  incendiary_cloud: reviewedSaveClause('damage', 'incendiary-cloud', 'Incendiary Cloud', 'half'),
-  inflict_wounds: reviewedSaveClause('damage', 'inflict-wounds', 'Inflict Wounds', 'half'),
-  insect_plague: reviewedSaveClause('damage', 'insect-plague', 'Insect Plague', 'half'),
-  lightning_bolt: reviewedSaveClause('damage', 'lightning-bolt', 'Lightning Bolt', 'half'),
-  meteor_swarm: reviewedSaveClause('damage', 'meteor-swarm', 'Meteor Swarm', 'half'),
-  mind_spike: reviewedSaveClause('damage', 'mind-spike', 'Mind Spike', 'half'),
-  moonbeam: reviewedSaveClause('damage', 'moonbeam', 'Moonbeam', 'half'),
-  phantasmal_force: reviewedSaveClause('recurring-damage', 'phantasmal-force', 'Phantasmal Force', 'none'),
-  phantasmal_killer_initial: reviewedSaveClause('initial-damage', 'phantasmal-killer', 'Phantasmal Killer', 'half', { kind: 'source_text', includes: 'Disadvantage on ability checks' }),
-  phantasmal_killer_repeat: reviewedSaveClause('repeat-damage', 'phantasmal-killer', 'Phantasmal Killer', 'none', { kind: 'source_text', includes: 'damage again' }),
-  prismatic_spray: reviewedSaveClause('damaging-rays', 'prismatic-spray', 'Prismatic Spray', 'half'),
-  prismatic_wall: reviewedSaveClause('damaging-layers', 'prismatic-wall', 'Prismatic Wall', 'half'),
-  ray_of_enfeeblement: reviewedSaveClause('damage-reduction', 'ray-of-enfeeblement', 'Ray of Enfeeblement', 'none'),
-  sacred_flame: reviewedSaveClause('damage', 'sacred-flame', 'Sacred Flame', 'none'),
-  searing_smite: reviewedSaveClause('recurring-damage', 'searing-smite', 'Searing Smite', 'none'),
-  shatter: reviewedSaveClause('damage', 'shatter', 'Shatter', 'half'),
-  spirit_guardians: reviewedSaveClause('damage', 'spirit-guardians', 'Spirit Guardians', 'half'),
-  storm_of_vengeance_initial: reviewedSaveClause('initial-thunder-damage', 'storm-of-vengeance', 'Storm of Vengeance', 'none', { kind: 'ability', ability: 'constitution' }),
-  storm_of_vengeance_lightning: reviewedSaveClause('lightning-damage', 'storm-of-vengeance', 'Storm of Vengeance', 'half', { kind: 'ability', ability: 'dexterity' }),
-  summon_dragon: reviewedSaveClause('breath-weapon', 'summon-dragon', 'Summon Dragon', 'half'),
-  sunbeam: reviewedSaveClause('damage', 'sunbeam', 'Sunbeam', 'half'),
-  sunburst: reviewedSaveClause('damage', 'sunburst', 'Sunburst', 'half'),
-  symbol: reviewedSaveClause('death-damage', 'symbol', 'Symbol', 'half'),
-  thunderwave: reviewedSaveClause('damage', 'thunderwave', 'Thunderwave', 'half'),
-  tsunami_initial: reviewedSaveClause('initial-damage', 'tsunami', 'Tsunami', 'half', { kind: 'damage_signature', dice_count: 6, die_size: 10, damage_type: 'Bludgeoning' }),
-  tsunami_ongoing: reviewedSaveClause('ongoing-damage', 'tsunami', 'Tsunami', 'none', { kind: 'damage_signature', dice_count: 5, die_size: 10, damage_type: 'Bludgeoning' }),
-  vicious_mockery: reviewedSaveClause('damage', 'vicious-mockery', 'Vicious Mockery', 'none'),
-  vitriolic_sphere: reviewedSaveClause('damage', 'vitriolic-sphere', 'Vitriolic Sphere', 'sourced_damage'),
-  wall_of_fire: reviewedSaveClause('damage', 'wall-of-fire', 'Wall of Fire', 'half'),
-  wall_of_ice_initial: reviewedSaveClause('initial-damage', 'wall-of-ice', 'Wall of Ice', 'half', { kind: 'ability', ability: 'dexterity' }),
-  wall_of_ice_frigid_air: reviewedSaveClause('frigid-air-damage', 'wall-of-ice', 'Wall of Ice', 'half', { kind: 'ability', ability: 'constitution' }),
-  wall_of_thorns_piercing: reviewedSaveClause('piercing-damage', 'wall-of-thorns', 'Wall of Thorns', 'half', { kind: 'damage_signature', dice_count: 7, die_size: 8, damage_type: 'Piercing' }),
-  wall_of_thorns_slashing: reviewedSaveClause('slashing-damage', 'wall-of-thorns', 'Wall of Thorns', 'half', { kind: 'damage_signature', dice_count: 7, die_size: 8, damage_type: 'Slashing' }),
-  weird_initial: reviewedSaveClause('initial-damage', 'weird', 'Weird', 'half', { kind: 'damage_signature', dice_count: 10, die_size: 10, damage_type: 'Psychic' }),
-  weird_repeat: reviewedSaveClause('repeat-damage', 'weird', 'Weird', 'none', { kind: 'damage_signature', dice_count: 5, die_size: 10, damage_type: 'Psychic' }),
-  wind_wall: reviewedSaveClause('damage', 'wind-wall', 'Wind Wall', 'half'),
+  acid_splash: reviewedSaveClause('damage', 'acid-splash', 'Acid Splash'),
+  arcane_hand_grasping: reviewedSaveClause('grasping-hand-damage', 'arcane-hand', 'Arcane Hand'),
+  befuddlement: reviewedSaveClause('damage', 'befuddlement', 'Befuddlement'),
+  bestow_curse_damage: reviewedSaveClause('curse-damage', 'bestow-curse', 'Bestow Curse'),
+  black_tentacles: reviewedSaveClause('damage', 'black-tentacles', 'Black Tentacles'),
+  blade_barrier: reviewedSaveClause('damage', 'blade-barrier', 'Blade Barrier'),
+  blight: reviewedSaveClause('damage', 'blight', 'Blight'),
+  burning_hands: reviewedSaveClause('damage', 'burning-hands', 'Burning Hands'),
+  call_lightning: reviewedSaveClause('damage', 'call-lightning', 'Call Lightning'),
+  chain_lightning: reviewedSaveClause('damage', 'chain-lightning', 'Chain Lightning'),
+  circle_of_death: reviewedSaveClause('damage', 'circle-of-death', 'Circle of Death'),
+  cloudkill: reviewedSaveClause('damage', 'cloudkill', 'Cloudkill'),
+  cone_of_cold: reviewedSaveClause('damage', 'cone-of-cold', 'Cone of Cold'),
+  conjure_animals: reviewedSaveClause('damage', 'conjure-animals', 'Conjure Animals'),
+  conjure_celestial: reviewedSaveClause('damage', 'conjure-celestial', 'Conjure Celestial'),
+  conjure_elemental_initial: reviewedSaveClause('initial-damage', 'conjure-elemental', 'Conjure Elemental', { kind: 'damage_signature', dice_count: 8, die_size: 8, damage_type: null }),
+  conjure_elemental_repeat: reviewedSaveClause('repeat-damage', 'conjure-elemental', 'Conjure Elemental', { kind: 'damage_signature', dice_count: 4, die_size: 8, damage_type: null }),
+  conjure_woodland_beings: reviewedSaveClause('damage', 'conjure-woodland-beings', 'Conjure Woodland Beings'),
+  contagion: reviewedSaveClause('damage', 'contagion', 'Contagion'),
+  contact_other_plane: reviewedSaveClause('damage', 'contact-other-plane', 'Contact Other Plane'),
+  control_water: reviewedSaveClause('damage', 'control-water', 'Control Water'),
+  delayed_blast_fireball: reviewedSaveClause('damage', 'delayed-blast-fireball', 'Delayed Blast Fireball'),
+  disintegrate: reviewedSaveClause('damage', 'disintegrate', 'Disintegrate'),
+  dissonant_whispers: reviewedSaveClause('damage', 'dissonant-whispers', 'Dissonant Whispers'),
+  dragons_breath: reviewedSaveClause('damage', 'dragon-s-breath', 'Dragon’s Breath'),
+  dream: reviewedSaveClause('damage', 'dream', 'Dream'),
+  earthquake: reviewedSaveClause('collapse-damage', 'earthquake', 'Earthquake'),
+  enlarge_reduce_damage: reviewedSaveClause('weapon-damage', 'enlarge-reduce', 'Enlarge/Reduce'),
+  ensnaring_strike: reviewedSaveClause('recurring-damage', 'ensnaring-strike', 'Ensnaring Strike'),
+  faithful_hound: reviewedSaveClause('damage', 'faithful-hound', 'Faithful Hound'),
+  finger_of_death: reviewedSaveClause('damage', 'finger-of-death', 'Finger of Death'),
+  fireball: reviewedSaveClause('damage', 'fireball', 'Fireball'),
+  fire_storm: reviewedSaveClause('damage', 'fire-storm', 'Fire Storm'),
+  flame_strike: reviewedSaveClause('damage', 'flame-strike', 'Flame Strike'),
+  flaming_sphere: reviewedSaveClause('damage', 'flaming-sphere', 'Flaming Sphere'),
+  freezing_sphere: reviewedSaveClause('damage', 'freezing-sphere', 'Freezing Sphere'),
+  geas: reviewedSaveClause('recurring-damage', 'geas', 'Geas'),
+  glyph_of_warding: reviewedSaveClause('explosive-runes', 'glyph-of-warding', 'Glyph of Warding'),
+  guardian_of_faith: reviewedSaveClause('damage', 'guardian-of-faith', 'Guardian of Faith'),
+  harm: reviewedSaveClause('damage', 'harm', 'Harm'),
+  hellish_rebuke: reviewedSaveClause('damage', 'hellish-rebuke', 'Hellish Rebuke'),
+  ice_knife: reviewedSaveClause('explosion-damage', 'ice-knife', 'Ice Knife'),
+  ice_storm: reviewedSaveClause('damage', 'ice-storm', 'Ice Storm'),
+  incendiary_cloud: reviewedSaveClause('damage', 'incendiary-cloud', 'Incendiary Cloud'),
+  inflict_wounds: reviewedSaveClause('damage', 'inflict-wounds', 'Inflict Wounds'),
+  insect_plague: reviewedSaveClause('damage', 'insect-plague', 'Insect Plague'),
+  lightning_bolt: reviewedSaveClause('damage', 'lightning-bolt', 'Lightning Bolt'),
+  meteor_swarm: reviewedSaveClause('damage', 'meteor-swarm', 'Meteor Swarm'),
+  mind_spike: reviewedSaveClause('damage', 'mind-spike', 'Mind Spike'),
+  moonbeam: reviewedSaveClause('damage', 'moonbeam', 'Moonbeam'),
+  phantasmal_force: reviewedSaveClause('recurring-damage', 'phantasmal-force', 'Phantasmal Force'),
+  phantasmal_killer_initial: reviewedSaveClause('initial-damage', 'phantasmal-killer', 'Phantasmal Killer', { kind: 'source_text', includes: 'Disadvantage on ability checks' }),
+  phantasmal_killer_repeat: reviewedSaveClause('repeat-damage', 'phantasmal-killer', 'Phantasmal Killer', { kind: 'source_text', includes: 'damage again' }),
+  prismatic_spray: reviewedSaveClause('damaging-rays', 'prismatic-spray', 'Prismatic Spray'),
+  prismatic_wall: reviewedSaveClause('damaging-layers', 'prismatic-wall', 'Prismatic Wall'),
+  ray_of_enfeeblement: reviewedSaveClause('damage-reduction', 'ray-of-enfeeblement', 'Ray of Enfeeblement'),
+  sacred_flame: reviewedSaveClause('damage', 'sacred-flame', 'Sacred Flame'),
+  searing_smite: reviewedSaveClause('recurring-damage', 'searing-smite', 'Searing Smite'),
+  shatter: reviewedSaveClause('damage', 'shatter', 'Shatter'),
+  spirit_guardians: reviewedSaveClause('damage', 'spirit-guardians', 'Spirit Guardians'),
+  storm_of_vengeance_initial: reviewedSaveClause('initial-thunder-damage', 'storm-of-vengeance', 'Storm of Vengeance', { kind: 'ability', ability: 'constitution' }),
+  storm_of_vengeance_lightning: reviewedSaveClause('lightning-damage', 'storm-of-vengeance', 'Storm of Vengeance', { kind: 'ability', ability: 'dexterity' }),
+  summon_dragon: reviewedSaveClause('breath-weapon', 'summon-dragon', 'Summon Dragon'),
+  sunbeam: reviewedSaveClause('damage', 'sunbeam', 'Sunbeam'),
+  sunburst: reviewedSaveClause('damage', 'sunburst', 'Sunburst'),
+  symbol: reviewedSaveClause('death-damage', 'symbol', 'Symbol'),
+  thunderwave: reviewedSaveClause('damage', 'thunderwave', 'Thunderwave'),
+  tsunami_initial: reviewedSaveClause('initial-damage', 'tsunami', 'Tsunami', { kind: 'damage_signature', dice_count: 6, die_size: 10, damage_type: 'Bludgeoning' }),
+  tsunami_ongoing: reviewedSaveClause('ongoing-damage', 'tsunami', 'Tsunami', { kind: 'damage_signature', dice_count: 5, die_size: 10, damage_type: 'Bludgeoning' }),
+  vicious_mockery: reviewedSaveClause('damage', 'vicious-mockery', 'Vicious Mockery'),
+  vitriolic_sphere: reviewedSaveClause('damage', 'vitriolic-sphere', 'Vitriolic Sphere'),
+  wall_of_fire: reviewedSaveClause('damage', 'wall-of-fire', 'Wall of Fire'),
+  wall_of_ice_initial: reviewedSaveClause('initial-damage', 'wall-of-ice', 'Wall of Ice', { kind: 'ability', ability: 'dexterity' }),
+  wall_of_ice_frigid_air: reviewedSaveClause('frigid-air-damage', 'wall-of-ice', 'Wall of Ice', { kind: 'ability', ability: 'constitution' }),
+  wall_of_thorns_piercing: reviewedSaveClause('piercing-damage', 'wall-of-thorns', 'Wall of Thorns', { kind: 'damage_signature', dice_count: 7, die_size: 8, damage_type: 'Piercing' }),
+  wall_of_thorns_slashing: reviewedSaveClause('slashing-damage', 'wall-of-thorns', 'Wall of Thorns', { kind: 'damage_signature', dice_count: 7, die_size: 8, damage_type: 'Slashing' }),
+  weird_initial: reviewedSaveClause('initial-damage', 'weird', 'Weird', { kind: 'damage_signature', dice_count: 10, die_size: 10, damage_type: 'Psychic' }),
+  weird_repeat: reviewedSaveClause('repeat-damage', 'weird', 'Weird', { kind: 'damage_signature', dice_count: 5, die_size: 10, damage_type: 'Psychic' }),
+  wind_wall: reviewedSaveClause('damage', 'wind-wall', 'Wind Wall'),
 } as const satisfies Record<string, ReviewedSaveSuccessClause>;
 
 export const reviewedSaveEffectStableKeys = Object.fromEntries(
@@ -1034,12 +1049,12 @@ function damageMatchesSourceClause(
     readonly amount: number;
   };
   const suppliedByKey = new Map<string, SuppliedPool>();
-  for (const [instanceIndex, instance] of damage.entries()) {
+  for (const instance of damage) {
     for (const component of instance.components) {
       const kind = component.kind;
       const die = kind === 'dice' ? component.pool.die : null;
       const amount = kind === 'dice' ? component.pool.count : component.modifier;
-      const key = JSON.stringify([instanceIndex, instance.damage_type, kind, die]);
+      const key = JSON.stringify([instance.damage_type, kind, die]);
       const existing = suppliedByKey.get(key);
       suppliedByKey.set(key, {
         damage_type: instance.damage_type,
@@ -1106,6 +1121,26 @@ function sameSavingThrowDamageDuration(
         left.delayed_until === right.delayed_until));
 }
 
+function sameEventFrequency(
+  left: EventFrequency,
+  right: EventFrequency,
+): boolean {
+  if (left.kind !== right.kind) {
+    return false;
+  }
+  switch (left.kind) {
+    case 'each_declared_event':
+      return true;
+    case 'once_per_turn':
+      return right.kind === 'once_per_turn' &&
+        left.turn === right.turn &&
+        samePublicSource(left.evidence, right.evidence);
+    case 'once_per_round':
+      return right.kind === 'once_per_round' &&
+        samePublicSource(left.evidence, right.evidence);
+  }
+}
+
 /**
  * A general saving-throw rule does not establish an individual effect's
  * success clause. Only reviewed, code-owned entries may authorize a numeric
@@ -1115,23 +1150,29 @@ export function saveSuccessOutcomeHasEvidence(
   effect: SourceRef,
   clauseId: SaveSuccessClauseId,
   outcome: SaveSuccessOutcome,
-  ability?: Ability,
-  damageOnFailedSave?: readonly DamageInstance[],
-  duration?: SavingThrowDamageDuration,
+  ability: Ability,
+  damageOnFailedSave: readonly DamageInstance[],
+  duration: SavingThrowDamageDuration,
+  saveDc: number,
+  frequency: EventFrequency,
 ): boolean {
   const expected = saveSuccessOutcomeEvidenceManifest.get(clauseId);
   return expected !== undefined &&
+    expected.kind !== 'unavailable' &&
+    expected.unavailable_reason === null &&
     sameSourceRef(expected.effect_source, effect) &&
     expected.kind === outcome.kind &&
     samePublicSource(outcome.evidence, expected.evidence) &&
-    (ability === undefined || ability === expected.ability) &&
-    (duration === undefined || sameSavingThrowDamageDuration(duration, expected.duration)) &&
-    (damageOnFailedSave === undefined || damageMatchesSourceClause(
+    ability === expected.ability &&
+    sameSavingThrowDamageDuration(duration, expected.duration) &&
+    (expected.fixed_save_dc === null || saveDc === expected.fixed_save_dc) &&
+    sameEventFrequency(frequency, expected.frequency) &&
+    damageMatchesSourceClause(
       effect,
       damageOnFailedSave,
       expected.failed_damage_signature_slots,
       expected.failed_damage_slot_repetitions,
-    )) &&
+    ) &&
     (outcome.kind !== 'sourced_damage' || (
       outcome.roll_transform === expected.success_roll_transform &&
       damageMatchesSourceClause(

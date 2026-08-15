@@ -14,6 +14,30 @@ export type SourceDamageTiming =
   | 'end_of_target_next_turn';
 export type SourceDamageRollTransform = 'none' | 'floor_half';
 
+export type SourceDerivedSaveSuccess =
+  | { readonly status: 'available'; readonly kind: SaveSuccessOutcome['kind'] }
+  | { readonly status: 'unavailable'; readonly reason: string };
+
+export type SourceDerivedDamageFrequency =
+  | { readonly kind: 'each_declared_event' }
+  | { readonly kind: 'once_per_turn'; readonly turn: 'source' | 'target' }
+  | { readonly kind: 'once_per_round' };
+
+export type SourceDerivedDamageDuration =
+  | { readonly kind: 'instantaneous' }
+  | {
+      readonly kind: 'includes_delayed_damage';
+      readonly delayed_until: 'end_of_target_next_turn';
+    };
+
+export type SourceDerivedDamageRepetitions =
+  | {
+      readonly status: 'available';
+      readonly minimum: 1;
+      readonly maximum: 1 | 2;
+    }
+  | { readonly status: 'unavailable'; readonly reason: string };
+
 /**
  * One clause-local occurrence of a damage amount and its associated type.
  * Alternative types that share one amount share a slot index. Offsets are
@@ -34,7 +58,12 @@ export type SourceDerivedSaveClause = {
   readonly end: number;
   readonly save_start: number;
   readonly ability: Ability;
-  readonly kind: SaveSuccessOutcome['kind'];
+  readonly success: SourceDerivedSaveSuccess;
+  readonly fixed_save_dc: number | null;
+  readonly frequency: SourceDerivedDamageFrequency;
+  readonly duration: SourceDerivedDamageDuration;
+  readonly timing_unavailable_reason: string | null;
+  readonly repetitions: SourceDerivedDamageRepetitions;
   readonly failed_damage_signatures: readonly FailedDamageSignature[];
   readonly damage_occurrences: readonly SourceDamageOccurrence[];
 };
@@ -65,6 +94,7 @@ const COLUMN_MARKER = /^=== SRD 5\.2\.1 page \d+, (?:left|right) column ===$/u;
 const SPELL_METADATA = /^(?:Level [1-9] (?:Abjuration|Conjuration|Divination|Enchantment|Evocation|Illusion|Necromancy|Transmutation)|(?:Abjuration|Conjuration|Divination|Enchantment|Evocation|Illusion|Necromancy|Transmutation) Cantrip) \(/u;
 const DAMAGE_TYPES = 'Acid|Bludgeoning|Cold|Fire|Force|Lightning|Necrotic|Piercing|Poison|Psychic|Radiant|Slashing|Thunder';
 const PAGE_FOOTER = /^(?:(\d+)\s+System Reference Document 5\.2\.1|System Reference Document 5\.2\.1\s+(\d+))\s*$/u;
+const SPELL_PAGE_REPIN_WORKFLOW = 'To re-pin a legitimate SRD revision, inspect the changed spell pages, update the reviewed page range/count and committed readable extract, and record a justification naming what changed and why.';
 
 const abilityBySourceName = {
   Strength: 'strength',
@@ -177,7 +207,7 @@ export function spellDescriptionsFromFullLayout(
     if (page < 107 || page > 175) {
       if (lines.some((line) => SPELL_METADATA.test(line.trim()))) {
         throw new TypeError(
-          `Found spell metadata outside the reviewed SRD spell pages 107-175 on page ${String(page)}.`,
+          `Found spell metadata outside the reviewed SRD spell pages 107-175 on page ${String(page)}. ${SPELL_PAGE_REPIN_WORKFLOW}`,
         );
       }
       continue;
@@ -195,13 +225,13 @@ export function spellDescriptionsFromFullLayout(
     seenPages.some((page, index) => page !== 107 + index)
   ) {
     throw new TypeError(
-      `Expected complete SRD spell pages 107-175; read ${seenPages.join(', ')}.`,
+      `Expected complete SRD spell pages 107-175; read ${seenPages.join(', ')}. ${SPELL_PAGE_REPIN_WORKFLOW}`,
     );
   }
   const descriptions = headingsFromReadingOrderLines(readingOrder);
   if (descriptions.size !== 339) {
     throw new TypeError(
-      `Expected 339 SRD spell descriptions on pages 107-175; read ${String(descriptions.size)}.`,
+      `Expected 339 SRD spell descriptions on pages 107-175; read ${String(descriptions.size)}. ${SPELL_PAGE_REPIN_WORKFLOW}`,
     );
   }
   return descriptions;
@@ -434,30 +464,100 @@ function sourceDamageOccurrences(
   ];
 }
 
-function nearestUniqueDamageOccurrences(
-  occurrences: readonly SourceDamageOccurrence[],
-  saveStart: number,
-): readonly SourceDamageOccurrence[] {
-  const bySignature = new Map<string, SourceDamageOccurrence>();
-  for (const occurrence of occurrences) {
-    const key = JSON.stringify([
-      occurrence.arm,
-      occurrence.damage_type,
-      occurrence.dice_count,
-      occurrence.die_size,
-      occurrence.flat_modifier,
-    ]);
-    const existing = bySignature.get(key);
-    if (
-      existing === undefined ||
-      Math.abs(occurrence.start - saveStart) < Math.abs(existing.start - saveStart)
-    ) {
-      bySignature.set(key, occurrence);
-    }
+function sourceDerivedSaveSuccess(
+  span: string,
+  ownership: 'direct' | 'gate',
+): SourceDerivedSaveSuccess {
+  if (ownership === 'gate') {
+    return {
+      status: 'unavailable',
+      reason: 'The save gates another effect; the source does not make the numeric expression failed-save damage.',
+    };
   }
-  return [...bySignature.values()]
-    .sort((left, right) => left.start - right.start)
-    .map((occurrence, slotIndex) => ({ ...occurrence, slot_index: slotIndex }));
+  if (/half the initial damage only/iu.test(span)) {
+    return { status: 'available', kind: 'sourced_damage' };
+  }
+  if (/(?:half (?:as much|the initial) damage|half damage|Success:\s*Half damage)/iu.test(span)) {
+    return { status: 'available', kind: 'half' };
+  }
+  const damageIsFailureScoped =
+    /(?:On (?:a )?failed save|Failed Save:|Failure:)[^.]*\bdamage\b/iu.test(span) ||
+    /\b(?:must )?succeed[^.]*\bor take\b[^.]*\bdamage\b/iu.test(span) ||
+    /\btaking\b[^.]*\bdamage on (?:a )?failed save\b/iu.test(span);
+  const successDealsDamage =
+    /(?:On a successful save|Successful Save:|Success:)[^.]*\bdamage\b/iu.test(span);
+  if (damageIsFailureScoped && !successDealsDamage) {
+    return { status: 'available', kind: 'none' };
+  }
+  return {
+    status: 'unavailable',
+    reason: 'The source clause does not prove the successful-save damage arm.',
+  };
+}
+
+function sourceFixedSaveDc(span: string): number | null {
+  const fixed = /\bDC (\d+) (?:Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma) saving throw\b/iu.exec(span);
+  return fixed === null ? null : Number(fixed[1]);
+}
+
+function sourceDamageFrequency(span: string): SourceDerivedDamageFrequency {
+  const sentences = span.match(/[^.!?]+(?:[.!?]|$)/gu) ?? [span];
+  const saveSentence = sentences.find((sentence) =>
+    /(?:saving throw|Saving Throw:|repeats? (?:that|the) save)/u.test(sentence),
+  ) ?? '';
+  const explicitLimit = sentences.find((sentence) =>
+    /(?:this save|that save|take this damage|be affected by this spell) only once (?:per|on a) (?:turn|round)/iu.test(sentence),
+  ) ?? '';
+  const evidenceText = `${saveSentence} ${explicitLimit}`;
+  if (/\bonly once per round\b/iu.test(evidenceText)) {
+    return { kind: 'once_per_round' };
+  }
+  if (
+    /\bonly once (?:per|on a) turn\b/iu.test(evidenceText) ||
+    /\bat the (?:start|end) of each of its turns\b/iu.test(saveSentence) ||
+    /\bat the end of each of their turns\b/iu.test(saveSentence)
+  ) {
+    return { kind: 'once_per_turn', turn: 'target' };
+  }
+  if (/\bat the (?:start|end) of each of your turns\b/iu.test(saveSentence)) {
+    return { kind: 'once_per_turn', turn: 'source' };
+  }
+  return { kind: 'each_declared_event' };
+}
+
+function sourceDamageDuration(
+  occurrences: readonly SourceDamageOccurrence[],
+): SourceDerivedDamageDuration {
+  return occurrences.some((occurrence) =>
+    occurrence.timing === 'end_of_target_next_turn'
+  )
+    ? {
+        kind: 'includes_delayed_damage',
+        delayed_until: 'end_of_target_next_turn',
+      }
+    : { kind: 'instantaneous' };
+}
+
+function unsupportedSourceDamageTiming(span: string): string | null {
+  return /\bdamage when (?:it|the target) wakes? up\b/iu.test(span)
+    ? 'The damage occurs when the target wakes; that delayed timing is not representable.'
+    : null;
+}
+
+function sourceDamageRepetitions(
+  sourceText: string,
+): SourceDerivedDamageRepetitions {
+  const rayCardinality = /\bstruck by (one|two|three|four|five|six|seven|eight|\d+) rays?\b/iu.exec(sourceText);
+  if (rayCardinality === null) {
+    return { status: 'available', minimum: 1, maximum: 1 };
+  }
+  if (rayCardinality[1]?.toLowerCase() === 'two') {
+    return { status: 'available', minimum: 1, maximum: 2 };
+  }
+  return {
+    status: 'unavailable',
+    reason: `The source repetition cardinality is not representable: ${rayCardinality[0]}.`,
+  };
 }
 
 function directFailureDamageSpan(span: string): string {
@@ -489,11 +589,6 @@ function directDamageSaveClauses(body: string): SourceDerivedSaveClause[] {
     if (!directDamage) {
       continue;
     }
-    const kind: SaveSuccessOutcome['kind'] = /half the initial damage only/iu.test(span)
-      ? 'sourced_damage'
-      : /half (?:as much|the initial) damage|half damage/iu.test(span)
-        ? 'half'
-        : 'none';
     const signatures = sourceDamageSignatures(directFailureDamageSpan(span));
     const failedDamageSignatures = signatures.length === 0 && repeatsDamage
       ? inheritedDamageSignatures
@@ -508,7 +603,12 @@ function directDamageSaveClauses(body: string): SourceDerivedSaveClause[] {
       end: start + leading + span.length,
       save_start: match.index ?? start + leading,
       ability: inheritedAbility,
-      kind,
+      success: sourceDerivedSaveSuccess(span, 'direct'),
+      fixed_save_dc: sourceFixedSaveDc(span),
+      frequency: sourceDamageFrequency(span),
+      duration: sourceDamageDuration(damageOccurrences),
+      timing_unavailable_reason: unsupportedSourceDamageTiming(span),
+      repetitions: sourceDamageRepetitions(body),
       failed_damage_signatures: failedDamageSignatures,
       damage_occurrences: damageOccurrences,
     });
@@ -547,12 +647,14 @@ function gateDamageSaveClause(body: string): SourceDerivedSaveClause | null {
         end: start + span.length,
         save_start: bodySaveStart,
         ability: sourceAbility(span, null),
-        kind: 'none',
-        failed_damage_signatures: sourceDamageSignatures(span),
-        damage_occurrences: nearestUniqueDamageOccurrences(
-          sourceDamageOccurrences(span, start),
-          bodySaveStart,
-        ),
+        success: sourceDerivedSaveSuccess(span, 'gate'),
+        fixed_save_dc: sourceFixedSaveDc(span),
+        frequency: sourceDamageFrequency(span),
+        duration: { kind: 'instantaneous' },
+        timing_unavailable_reason: null,
+        repetitions: sourceDamageRepetitions(body),
+        failed_damage_signatures: [],
+        damage_occurrences: [],
       };
     }
   }
@@ -575,7 +677,7 @@ function sameClauseOwnership(
 ): boolean {
   return direct.save_start === gate.save_start &&
     direct.ability === gate.ability &&
-    direct.kind === gate.kind &&
+    direct.success.status === gate.success.status &&
     gate.failed_damage_signatures.every((signature) =>
       direct.failed_damage_signatures.some((candidate) =>
         sameSignature(signature, candidate),
