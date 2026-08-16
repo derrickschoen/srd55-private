@@ -159,7 +159,7 @@ describe('round 21 identity-backed public gates', () => {
     };
     const session = createResourceRecoverySession(simResourcePoolSet([forged]));
 
-    expect(() => session.recover(forged.id, 'short_rest', 2)).toThrow(
+    expect(() => session.recover(forged.id, 'short_rest')).toThrow(
       'must be minted by the reviewed evidence path',
     );
   });
@@ -169,7 +169,8 @@ describe('round 21 identity-backed public gates', () => {
     const set = simResourcePoolSet([rage]);
     expect(Object.isFrozen(set)).toBe(true);
 
-    expect(createResourceRecoverySession(set)
-      .recover(rage.id, 'short_rest', 2)).toEqual({ recovered_units: 1 });
+    const session = createResourceRecoverySession(set);
+    session.spend(rage.id, 2);
+    expect(session.recover(rage.id, 'short_rest')).toEqual({ recovered_units: 1 });
   });
 });

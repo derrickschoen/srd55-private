@@ -119,10 +119,11 @@ describe('DPR branded constructors', () => {
     expect(() => encounterResourceCap(4, maximum)).toThrow();
   });
 
-  it('represents Rage one-use Short Rest and all-use Long Rest recovery', () => {
+  // Bundled SRD 5.2.1 lines 1767-1770: one use on a Short Rest, all on a Long Rest.
+  function ragePool(): SimResourcePool {
     const maximum = positiveResourceMaximum(2);
     const rageSource = reviewedResourceRecoveryClauses.rage.resource_source;
-    const rage: SimResourcePool = {
+    return {
       id: simResourceId('barbarian:rage'),
       logical_key: simResourcePoolKey('barbarian:rage'),
       source: rageSource,
@@ -142,7 +143,6 @@ describe('DPR branded constructors', () => {
             },
           ),
         },
-        // Bundled SRD 5.2.1 lines 1767-1770: one use on a Short Rest, all on a Long Rest.
         long_rest: {
           kind: 'all',
           evidence: resourceRecoveryEvidence(
@@ -158,14 +158,57 @@ describe('DPR branded constructors', () => {
         },
       },
     };
+  }
+
+  it('represents Rage one-use Short Rest and all-use Long Rest recovery', () => {
+    const maximum = positiveResourceMaximum(2);
+    const rage = ragePool();
     const session = createResourceRecoverySession(simResourcePoolSet([rage]));
-    expect(session.recover(rage.id, 'short_rest', 2).recovered_units).toBe(1);
-    expect(session.recover(rage.id, 'long_rest', 2)).toEqual({
+    expect(session.availableUnits(rage.id)).toBe(2);
+    session.spend(rage.id, 2);
+    expect(session.availableUnits(rage.id)).toBe(0);
+    expect(session.recover(rage.id, 'short_rest').recovered_units).toBe(1);
+    expect(session.availableUnits(rage.id)).toBe(1);
+    session.spend(rage.id, 1);
+    expect(session.recover(rage.id, 'long_rest')).toEqual({
       recovered_units: 2,
     });
-    expect(session.recover(rage.id, 'short_rest', 0).recovered_units).toBe(0);
+    expect(session.availableUnits(rage.id)).toBe(2);
+    expect(session.recover(rage.id, 'short_rest').recovered_units).toBe(0);
+    expect(session.availableUnits(rage.id)).toBe(2);
+    expect(() => session.spend(rage.id, 3)).toThrow(
+      'Cannot spend 3 resource units; only 2 available',
+    );
     expect(() => positiveResourceRecoveryAmount(3, maximum)).toThrow(
       'Resource recovery amount must be an integer from 1 to 2',
+    );
+  });
+
+  it('enforces D267 bounded-counter invariants on every pool', () => {
+    const rage = ragePool();
+    const session = createResourceRecoverySession(simResourcePoolSet([rage]));
+    // Floor: spending below zero refuses loudly instead of clamping.
+    session.spend(rage.id, 1);
+    expect(() => session.spend(rage.id, 2)).toThrow(
+      'Cannot spend 2 resource units; only 1 available',
+    );
+    // Cost must be a positive integer.
+    expect(() => session.spend(rage.id, 0)).toThrow('Resource cost');
+    expect(() => session.spend(rage.id, 1.5)).toThrow('Resource cost');
+    expect(() => session.spend(rage.id, -1)).toThrow('Resource cost');
+    // Ceiling: recovery into a partially spent pool never exceeds maximum.
+    expect(session.recover(rage.id, 'long_rest').recovered_units).toBe(1);
+    expect(session.availableUnits(rage.id)).toBe(2);
+    expect(session.recover(rage.id, 'long_rest').recovered_units).toBe(0);
+    expect(session.availableUnits(rage.id)).toBe(2);
+    // Unknown pools refuse on every accessor.
+    const stranger = simResourceId('nobody:home');
+    expect(() => session.availableUnits(stranger)).toThrow(
+      'has no resource pool',
+    );
+    expect(() => session.spend(stranger, 1)).toThrow('has no resource pool');
+    expect(() => session.recover(stranger, 'long_rest')).toThrow(
+      'has no resource pool',
     );
   });
 
@@ -212,9 +255,12 @@ describe('DPR branded constructors', () => {
         },
       },
     };
-    expect(createResourceRecoverySession(
+    const channelSession = createResourceRecoverySession(
       simResourcePoolSet([channelDivinity]),
-    ).recover(channelDivinity.id, 'short_rest', 2).recovered_units).toBe(1);
+    );
+    channelSession.spend(channelDivinity.id, 2);
+    expect(channelSession.recover(channelDivinity.id, 'short_rest')
+      .recovered_units).toBe(1);
     expect(() => resourceRecoveryEvidence(
       clericSource,
       reviewedResourceRecoveryClauses.rage.id,
@@ -248,7 +294,7 @@ describe('DPR branded constructors', () => {
     };
     expect(() => createResourceRecoverySession(
       simResourcePoolSet([borrowedRageEvidence]),
-    ).recover(borrowedRageEvidence.id, 'short_rest', 2)).toThrow(
+    ).recover(borrowedRageEvidence.id, 'short_rest')).toThrow(
       'not bound to this pool, rest, and recovery rule',
     );
   });
@@ -295,28 +341,32 @@ describe('DPR branded constructors', () => {
     const session = createResourceRecoverySession(
       simResourcePoolSet([sorceryPoints]),
     );
-    const first = session.recover(sorceryPoints.id, 'short_rest', 10);
-    const second = session.recover(sorceryPoints.id, 'short_rest', 5);
-    const third = session.recover(sorceryPoints.id, 'short_rest', 5);
+    session.spend(sorceryPoints.id, 10);
+    const first = session.recover(sorceryPoints.id, 'short_rest');
+    const second = session.recover(sorceryPoints.id, 'short_rest');
+    const third = session.recover(sorceryPoints.id, 'short_rest');
     expect(first.recovered_units).toBe(5);
     expect(second.recovered_units).toBe(0);
     expect(third.recovered_units).toBe(0);
     expect(
       first.recovered_units + second.recovered_units + third.recovered_units,
     ).toBe(5);
-    expect(session.recover(sorceryPoints.id, 'long_rest', 5)).toEqual({
+    expect(session.availableUnits(sorceryPoints.id)).toBe(5);
+    expect(session.recover(sorceryPoints.id, 'long_rest')).toEqual({
       recovered_units: 5,
     });
-    expect(session.recover(sorceryPoints.id, 'short_rest', 10).recovered_units)
+    expect(session.availableUnits(sorceryPoints.id)).toBe(10);
+    session.spend(sorceryPoints.id, 10);
+    expect(session.recover(sorceryPoints.id, 'short_rest').recovered_units)
       .toBe(5);
 
     const independentRun = createResourceRecoverySession(
       simResourcePoolSet([sorceryPoints]),
     );
+    independentRun.spend(sorceryPoints.id, 10);
     expect(independentRun.recover(
       sorceryPoints.id,
       'short_rest',
-      10,
     ).recovered_units).toBe(5);
 
     expect(() => resourceRecoveryEvidence(
@@ -369,9 +419,11 @@ describe('DPR branded constructors', () => {
     const distinctSession = createResourceRecoverySession(
       simResourcePoolSet([sorceryPoints, distinctSorceryPoints]),
     );
+    distinctSession.spend(sorceryPoints.id, 10);
+    distinctSession.spend(distinctSorceryPoints.id, 10);
     expect([
-      distinctSession.recover(sorceryPoints.id, 'short_rest', 10).recovered_units,
-      distinctSession.recover(distinctSorceryPoints.id, 'short_rest', 10)
+      distinctSession.recover(sorceryPoints.id, 'short_rest').recovered_units,
+      distinctSession.recover(distinctSorceryPoints.id, 'short_rest')
         .recovered_units,
     ]).toEqual([5, 5]);
 
@@ -409,25 +461,23 @@ describe('DPR branded constructors', () => {
     const sameSourceSession = createResourceRecoverySession(
       simResourcePoolSet([sorceryPoints, secondPool]),
     );
+    sameSourceSession.spend(sorceryPoints.id, 10);
+    sameSourceSession.spend(secondPool.id, 6);
     expect(sameSourceSession.recover(
       sorceryPoints.id,
       'short_rest',
-      10,
     ).recovered_units).toBe(5);
     expect(sameSourceSession.recover(
       secondPool.id,
       'short_rest',
-      6,
     ).recovered_units).toBe(3);
     expect(sameSourceSession.recover(
       sorceryPoints.id,
       'short_rest',
-      5,
     ).recovered_units).toBe(0);
     expect(sameSourceSession.recover(
       secondPool.id,
       'short_rest',
-      3,
     ).recovered_units).toBe(0);
   });
 

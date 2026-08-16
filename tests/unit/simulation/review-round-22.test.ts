@@ -103,11 +103,9 @@ describe('round 22 caller-object snapshots', () => {
     const set = simResourcePoolSet([callerPool]);
     expect(recoveryReads).toBe(1);
 
-    const result = createResourceRecoverySession(set).recover(
-      callerPool.id,
-      'short_rest',
-      2,
-    );
+    const session = createResourceRecoverySession(set);
+    session.spend(callerPool.id, 2);
+    const result = session.recover(callerPool.id, 'short_rest');
 
     expect(result).toEqual({ recovered_units: 1 });
     expect(recoveryReads).toBe(1);

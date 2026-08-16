@@ -1465,18 +1465,17 @@ function sameSourceRef(left: SourceRef, right: SourceRef): boolean {
   }
 }
 
+/**
+ * D267: `expended` is session-owned bounded-counter state (an integer in
+ * 0..pool.maximum by construction inside ResourceRecoverySession), never
+ * caller-supplied.
+ */
 function recoveredResourceUnits(
   pool: SimResourcePool,
   rest: RestKind,
-  expendedUnits: unknown,
+  expended: number,
   oncePerLongRestUsed: boolean,
 ): ResourceRecoveryResult {
-  const expended = integerInRange(
-    expendedUnits,
-    0,
-    pool.maximum,
-    'Expended resource units',
-  );
   const rule = pool.recovery[rest];
   const ruleKind = rule.kind;
   switch (ruleKind) {
@@ -1633,10 +1632,19 @@ function snapshotResourceRecoveryRule(
   }
 }
 
+/**
+ * D267: every pool in a session is a bounded counter — floor 0, ceiling
+ * `pool.maximum` — owned by the session. Sessions start fully available
+ * (long-rest state). `spend` subtracts and THROWS below zero (an
+ * insufficient-resource spend is a simulator logic error, not a value to
+ * clamp); recovery adds back clamped at the ceiling. The expended count fed
+ * to the recovery rules is derived from this state, never caller-supplied.
+ */
 export class ResourceRecoverySession {
   readonly #pools: ReadonlyMap<SimResourceId, SimResourcePool>;
   readonly #logicalIdentityById: ReadonlyMap<SimResourceId, string>;
   readonly #oncePerLongRestUsed = new Map<string, boolean>();
+  readonly #availableUnits = new Map<SimResourceId, number>();
 
   private constructor(pools: SimResourcePoolSet) {
     if (!mintedSimResourcePoolSets.has(pools)) {
@@ -1652,21 +1660,47 @@ export class ResourceRecoverySession {
     for (const identity of this.#logicalIdentityById.values()) {
       this.#oncePerLongRestUsed.set(identity, false);
     }
+    for (const [id, pool] of this.#pools) {
+      this.#availableUnits.set(id, pool.maximum);
+    }
   }
 
   static create(pools: SimResourcePoolSet): ResourceRecoverySession {
     return new ResourceRecoverySession(pools);
   }
 
-  recover(
-    poolId: SimResourceId,
-    rest: RestKind,
-    expendedUnits: unknown,
-  ): ResourceRecoveryResult {
+  #poolAndAvailable(poolId: SimResourceId): {
+    pool: SimResourcePool;
+    available: number;
+  } {
     const pool = this.#pools.get(poolId);
-    if (pool === undefined) {
+    const available = this.#availableUnits.get(poolId);
+    if (pool === undefined || available === undefined) {
       throw new TypeError(`Recovery session has no resource pool ${poolId}.`);
     }
+    return { pool, available };
+  }
+
+  availableUnits(poolId: SimResourceId): number {
+    return this.#poolAndAvailable(poolId).available;
+  }
+
+  spend(poolId: SimResourceId, cost: unknown): number {
+    const { available } = this.#poolAndAvailable(poolId);
+    const spent = positiveResourceCost(cost);
+    if (spent > available) {
+      throw new RangeError(
+        `Cannot spend ${String(spent)} resource units; only ` +
+          `${String(available)} available in pool ${poolId}.`,
+      );
+    }
+    const remaining = available - spent;
+    this.#availableUnits.set(poolId, remaining);
+    return remaining;
+  }
+
+  recover(poolId: SimResourceId, rest: RestKind): ResourceRecoveryResult {
+    const { pool, available } = this.#poolAndAvailable(poolId);
     const logicalIdentity = this.#logicalIdentityById.get(poolId);
     if (logicalIdentity === undefined) {
       throw new TypeError(`Recovery state has no resource pool ${poolId}.`);
@@ -1675,7 +1709,12 @@ export class ResourceRecoverySession {
     if (used === undefined) {
       throw new TypeError(`Recovery state has no resource pool ${poolId}.`);
     }
-    const result = recoveredResourceUnits(pool, rest, expendedUnits, used);
+    const expended = pool.maximum - available;
+    const result = recoveredResourceUnits(pool, rest, expended, used);
+    this.#availableUnits.set(
+      poolId,
+      Math.min(available + result.recovered_units, pool.maximum),
+    );
     if (rest === 'long_rest') {
       this.#oncePerLongRestUsed.set(logicalIdentity, false);
     } else if (
