@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { damageType } from '../../../src/domain/enums';
-import type { CharacterWeaponId, ContentKey } from '../../../src/domain/ids';
+import type {
+  CharacterWeaponId,
+  ContentKey,
+  SourceInstanceId,
+} from '../../../src/domain/ids';
 import {
   BUNDLED_SRD_5_2_1_PATH,
   positiveDiceCount,
@@ -42,6 +46,14 @@ function weaponSource(weaponId: number, stableKey: string): SourceRef {
   return {
     kind: 'character_weapon',
     weapon_id: weaponId as CharacterWeaponId,
+    stable_key: sourceStableKey(stableKey),
+  };
+}
+
+function characterSource(instanceId: number, stableKey: string): SourceRef {
+  return {
+    kind: 'character_source',
+    source_instance_id: instanceId as SourceInstanceId,
     stable_key: sourceStableKey(stableKey),
   };
 }
@@ -120,6 +132,26 @@ describe('sameSourceRef near-miss pairs, through attackDamageSourcesFailureReaso
       attackDamageSourcesFailureReason(
         catalogSource('srd-5.2.1:spell:fireball', 'catalog:shared-key'),
         damageFrom(catalogSource('srd-5.2.1:spell:scorching-ray', 'catalog:shared-key')),
+      ),
+    ).toBe(ATTACK_DAMAGE_SOURCE_REASON);
+  });
+
+  it('accepts two character sources that agree on kind, stable key and instance id', () => {
+    expect(
+      attackDamageSourcesFailureReason(
+        characterSource(31, 'character-source:31'),
+        damageFrom(characterSource(31, 'character-source:31')),
+      ),
+    ).toBeNull();
+  });
+
+  it('refuses a character damage source whose source instance id alone differs', () => {
+    // Identical kind and identical stable key: the `character_source` arm is
+    // the only comparison that can separate these two instances.
+    expect(
+      attackDamageSourcesFailureReason(
+        characterSource(31, 'character-source:shared-key'),
+        damageFrom(characterSource(32, 'character-source:shared-key')),
       ),
     ).toBe(ATTACK_DAMAGE_SOURCE_REASON);
   });

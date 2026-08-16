@@ -1,4 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+// Side-effect import: registers this file in vitest's module graph so
+// Stryker's vitest-runner "related tests" selection includes it. The tests
+// themselves re-import via vi.resetModules() + dynamic import.
+import '../../../src/simulation/coverage';
 
 /**
  * Near-miss probes for the roll-slot-group PARTITION guard in
