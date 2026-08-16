@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { DprRequestContext } from './contracts';
 import {
   DprRequestParseError,
@@ -8,9 +9,24 @@ const DPR_ROUTE_PARAMETER = 'dpr';
 const DPR_ROUTE_VERSION = 1;
 
 type DprRouteEnvelopeV1 = {
-  readonly version: 1;
+  readonly version: typeof DPR_ROUTE_VERSION;
   readonly context: DprRequestContext;
 };
+
+/**
+ * The wire envelope is exact: object, not array, not null, exactly the two
+ * declared keys, and a version that can only ever be the literal 1. Every one
+ * of those used to be a hand-rolled conditional; the schema is now the single
+ * statement of the shape, and `z.literal` makes the version a type, not a
+ * comparison. `context` stays `unknown` here on purpose — the request parsers
+ * own its shape — but `strictObject` still requires the key to be present.
+ */
+const routeEnvelopeSchema = z.strictObject({
+  version: z.literal(DPR_ROUTE_VERSION, {
+    error: 'Unsupported DPR route version.',
+  }),
+  context: z.unknown(),
+});
 
 /**
  * Returns the normalized query portion only, without a leading question mark.
@@ -51,21 +67,16 @@ export function parseDprRouteContext(query: string): DprRequestContext {
     throw new DprRequestParseError(['Route payload must be valid JSON.']);
   }
 
-  if (
-    typeof decoded !== 'object' ||
-    decoded === null ||
-    Array.isArray(decoded) ||
-    Object.keys(decoded).length !== 2 ||
-    !Object.hasOwn(decoded, 'version') ||
-    !Object.hasOwn(decoded, 'context')
-  ) {
-    throw new DprRequestParseError([
-      'Route payload must be an exact versioned envelope.',
-    ]);
+  const result = routeEnvelopeSchema.safeParse(decoded);
+  if (!result.success) {
+    throw new DprRequestParseError(
+      result.error.issues.map((issue) => issue.message),
+    );
   }
-  const envelope = decoded as Readonly<Record<string, unknown>>;
-  if (envelope.version !== DPR_ROUTE_VERSION) {
-    throw new DprRequestParseError(['Unsupported DPR route version.']);
-  }
-  return parseDprRequestContext(envelope.context);
+
+  const envelope: DprRouteEnvelopeV1 = {
+    version: result.data.version,
+    context: parseDprRequestContext(result.data.context),
+  };
+  return envelope.context;
 }

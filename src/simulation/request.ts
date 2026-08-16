@@ -19,11 +19,16 @@ import {
 } from './contracts';
 
 export class DprRequestParseError extends TypeError {
+  /**
+   * Declared at the literal type rather than assigned into `Error.name`, whose
+   * `string` type would accept any other name — including an empty one.
+   */
+  override readonly name: 'DprRequestParseError' = 'DprRequestParseError';
+
   readonly issues: readonly string[];
 
   constructor(issues: readonly string[]) {
     super(`Invalid DPR request: ${issues.join('; ')}`);
-    this.name = 'DprRequestParseError';
     this.issues = issues;
   }
 }

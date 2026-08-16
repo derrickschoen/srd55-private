@@ -44,7 +44,18 @@ export function headlineDprSettings(
   };
 }
 
-function selectionIssue(discriminator: string): UnmodelledIssue {
+/**
+ * The reasons the headline cannot pick a routine for itself. Closed on purpose:
+ * as a `string` the discriminator accepted any value at all, so a wrong one —
+ * including the empty string — was a compiling program. Kept a pure type so it
+ * costs nothing at runtime.
+ */
+type HeadlineSelectionCause =
+  | 'multiple-supported-routines'
+  | 'multiple-save-dependent-routines'
+  | 'no-routines';
+
+function selectionIssue(discriminator: HeadlineSelectionCause): UnmodelledIssue {
   return createUnmodelledIssue({
     kind: 'routine_selection_required',
     source: null,
