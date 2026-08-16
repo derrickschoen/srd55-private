@@ -13,6 +13,7 @@ import {
   unmodelledIssueKinds,
   unmodelledIssueId,
   type BundledSrdHeading,
+  type AttackRollClauseId,
   type CriticalHitRule,
   type DamageInstance,
   type DamageNeutralMechanicId,
@@ -31,6 +32,8 @@ import {
 } from './contracts';
 import {
   deriveSaveDamageCoverageFromBodies,
+  spellBodyDigestInputsByHeading,
+  spellBodyDigestInputsFromFullLayout,
   spellDescriptionsByHeading,
   spellDescriptionsFromFullLayout,
   type FailedDamageSignature,
@@ -367,7 +370,7 @@ type ReviewedSaveSuccessClause = {
   readonly unavailable_reason: string | null;
   readonly evidence: PublicSourceRef;
   readonly source_span: string;
-  readonly source_span_sha256: string;
+  readonly spell_body_sha256: string;
   readonly ability: Ability;
   readonly fixed_save_dc: number | null;
   readonly frequency: EventFrequency;
@@ -580,14 +583,24 @@ type SaveClauseDiscriminator =
 
 const bundledSpellBodies = spellDescriptionsFromFullLayout(bundledSrd521);
 const extractedSpellBodies = spellDescriptionsByHeading(bundledSpellDescriptions);
+const bundledSpellBodyDigestInputs = spellBodyDigestInputsFromFullLayout(
+  bundledSrd521,
+);
+const extractedSpellBodyDigestInputs = spellBodyDigestInputsByHeading(
+  bundledSpellDescriptions,
+);
 if (
   bundledSpellBodies.size !== extractedSpellBodies.size ||
   [...bundledSpellBodies].some(([heading, body]) =>
     extractedSpellBodies.get(heading) !== body,
+  ) ||
+  bundledSpellBodyDigestInputs.size !== extractedSpellBodyDigestInputs.size ||
+  [...bundledSpellBodyDigestInputs].some(([heading, body]) =>
+    extractedSpellBodyDigestInputs.get(heading) !== body,
   )
 ) {
   throw new TypeError(
-    'Column-safe full SRD spell reading does not match the committed readable spell extract.',
+    'Column-safe full SRD spell reading, including raw digest bodies, does not match the committed readable spell extract.',
   );
 }
 const sourceCoverage = deriveSaveDamageCoverageFromBodies(bundledSpellBodies);
@@ -825,118 +838,124 @@ function damageSignaturesAreBijective(
 }
 
 /**
- * Mechanical round-15 baseline over the whitespace-normalized source spans
- * already reviewed in rounds 1-15. These constants are deliberately
- * independent of the live extract after this one sanctioned initialization.
+ * Mechanical round-16 baseline over the raw, line-break-flattened whole spell
+ * bodies already reviewed in rounds 1-16. Multi-clause spells deliberately
+ * repeat one body digest. These constants are independent of the live extract
+ * after this one sanctioned initialization.
  */
-export const reviewedSourceSpanSha256Oracle = Object.freeze({
-  acid_splash: '46cf4eece444326543ac1d22069584e3ab26b8d6cd3bf62db56165258badafb4',
-  arcane_hand_grasping: '5feeb17aa426dfbad1c4d772d1f2beb063c1c63eb973ff67f8eb3cd35af39599',
-  befuddlement: 'ace7ba17d391406c4272eb1563231f8ff0db02c94f107867fd1377ff1d27aef2',
-  bestow_curse_damage: '1081d2f870eb3accac34d6f4041722eb10990b0bed48bf672aa0b35002d335a2',
-  black_tentacles: '6f9c81bb1ea97dc768da6fcd0f20dd1ca7ed617d7c893dd6ecd4db4eca90d652',
-  blade_barrier: '5fd4ad639fc06bdab72a454de55b4efcc20a52b7359e0d24feeb6405947e89d3',
-  blight: 'd080c5b7a0f9dc3997ee3632b0770c409464cdfbff84efd35e1895d943e73fe8',
-  burning_hands: '16f345a51c0314e599586665cbd8ac8478a3c590032c30582728879769ca6dd1',
-  call_lightning: 'f8cdc7ce52090d8ffbe804596986b25cb7244cfd76bfbbff93f8110d6a5fbeff',
-  chain_lightning: 'b7a2cf55e04f885d7b58961239fe9512a00d4c34ec28e90313b6936f666184e7',
-  circle_of_death: 'de5e7e6f2a74d9744356c906784ce2d70e8c0ff7c185225b4e82cae9a2167150',
-  cloudkill: '3cec64a1b718c2fbc96f7a5e39fcd3239c4cab5dc0addf976ec56a19fb12c63c',
-  cone_of_cold: 'e96a9da1f6a1fcc2f303b1b89ee39602a4de4ed8f61a3467756b7e6a4e0b9838',
-  conjure_animals: '82f07964999fc5e96a07bd2a63958074db6093dd7a05fd593da4235e5bfac5b7',
-  conjure_celestial: '7f5da6b8f5ba26977832a08e291c36932c8900ad466634dc3cba7039ebf23995',
-  conjure_elemental_initial: '5d2d51d9845f8692e89a4f6406349617a64a41959de65fd209f2232c50db5be0',
-  conjure_elemental_repeat: '3658e8ff3548b0b87bdf196f7332f8182605c2283aab296e053721dfdd31cd92',
-  conjure_woodland_beings: '54f33251f82c0034e330f4b72e84cb2822b56d4d061d7894c0eff5ea494c8765',
-  contagion: 'a6267a578f33540fa45f8be2a03ec097e579ae1eeeb3660f4c1d5cd98f51481a',
-  contact_other_plane: 'b312be8556ea04150fe3703e5cda40b639543b2ef71a74f9259f1c1104a3dac2',
-  control_water: '228b0e3e603518dd527f3a8082b433c5c724fe18a798bac39e49e55e229407df',
-  delayed_blast_fireball: '144a42a13d3ad8f62d0f649cef26b7b9bb184a9ee7572612aaf0e40cd70d8778',
-  disintegrate: 'd3cc21c21ad82dbfb563868a72eee349892eae4949e35b98d2ca38c5b9b61f9b',
-  dissonant_whispers: '8fb58b13335e529a4ea49aba6298454ddbafeeb123dba06752a5f316e6eab0d9',
-  dragons_breath: 'acc4c31ac54dd53a367b2e395223cf1ab09d89cee293e74da46bd30a7b3adaca',
-  dream: '1e74c2fa4d675d179fa012983719da77c7a772ce9afa99b7371d4adeb4ce33ff',
-  earthquake: 'c7a2d1dfc59ed8d2449df77301a804ac6b88b41851bb7d243c41fea1dd0582d1',
-  enlarge_reduce_damage: '6b2dbce1dca6ba9a25b2af70d80647b126051866a93330536f9a5bd65a4caf46',
-  ensnaring_strike: 'a66cade09bb8654882d818156b430533b9be678f40d400a3c232905455220a1b',
-  faithful_hound: 'bec18664bbdc45a6c6b785cb856dfd1d952f6752e021cf3bc0037ac125682df5',
-  finger_of_death: '529f55e0efaa6aec2976cc8d775efc1acfacd3dba852fd22d5f4f3b6a1c397e0',
-  fireball: 'e585d2ffe600edae72b14569bcfa577d53d20054804ee6135e25d9e3a9d7db47',
-  fire_storm: 'e6d2d3b518d4aaecd93f746eb18a1dc2ef29e94a80ab012a6c0aeaea6cda6a3f',
-  flame_strike: 'e40cfabc32455fd2309ad90c720c2e2443824d22581bc9c1352faac2adf49791',
-  flaming_sphere: '735760c5ad96904de02b1b93f629142833da2760207cfd73f0718bf586eedfe4',
-  freezing_sphere: '96d4691bac78fcacf439ee6432d4552c3c325e37fc537f443f117acc5a4d96f4',
-  geas: 'bce14e215c513295a50a5396308cb5444a29a61fd82e67ae70860a9686a5f9f1',
-  glyph_of_warding: 'ecde8fd62d8e5f9d056adaa23bb131d21544445055669d6a2fa6ad0d4a403653',
-  guardian_of_faith: '3fe26d4d9e3345387b451bbc524ed80994455f2264fd637f704c9260812592f7',
-  harm: 'd64335221fb2f6a27c6a680685ddbc0619e5f2c59719491ab32a58c25d157be2',
-  hellish_rebuke: 'd9c34a93ba68659bd17110e1c2a4c57c905932ebe8966f51b6c9e4323a86d1c7',
-  ice_knife: '57589fbade54e6cd2c8e590fd018a627f6090b18a5e2343a11b51788645f1791',
-  ice_storm: '74525dd94d11880cfabc491c96260171a4769876deebde05b3896c8b4c9f3e70',
-  incendiary_cloud: 'dcadad37fc992ed8a774e2d23ea64a77f5641cf1b62af0675188ca8fd8800595',
-  inflict_wounds: '3192e3e42cedf581fa9a82c12098ecfef24825227faf44aced6c67828674e93b',
-  insect_plague: '0cd15f85b21a2d71b235b491c857221347793247e26b1939b29f4e00a5351f3d',
-  lightning_bolt: '1012f58c3ab535f7b5c704bad66ac58dc383c4e1d5dfc86dc37404fa3ff7f76b',
-  meteor_swarm: '95a51d4e33c4b65fd03805a14eb1e327f587cbf8449db35d183014f0168a7924',
-  mind_spike: 'cfac20a4a38452146a19eebad5874a9560461f70227c68fc61f6f9e04817211d',
-  moonbeam: '5c45207bf2073ec35d90fc2e2816d2ba068811bdde06f1a3dd6e303609a82675',
-  phantasmal_force: 'c4c1be827d0edc89c31051dfe27e6a83a3a120c74d5e5e4f3d4dc727b4653c93',
-  phantasmal_killer_initial: 'c019e85d79f4e499aa7228de5f9dfd33c38b2eb9cadeed97df0659bfca2c670d',
-  phantasmal_killer_repeat: '0c7dbd7715ca1069714cc078fa4ea2eef3600b42d627c112ff626c5493c2b81c',
-  prismatic_spray: '083fcad27d2a17edeafefd175c2e415aab807825754c628babda90079a803318',
-  prismatic_wall: '516b2aa0d6fd39bcd79479dcd9efb7900a28544c4016c1581007813c6eee8db2',
-  ray_of_enfeeblement: 'a5da52cd69537ee5698d0878489dbe3307f0d504fc20c5188f0148852e749623',
-  sacred_flame: '8a8d8a9c655fe7abf07bba38db26527b7e42277d06d8be20d5bce25aad72b86c',
-  searing_smite: 'f2d4fe0d60df42aa1b7dddc262f69b528ee91d0c0e76f137df22d7811d0aa151',
-  shatter: 'ec149c852ccea7de6ee2239df496d7e057f07465bcc224daa6feb02d9d1e108d',
-  spirit_guardians: 'cdf50c7cceb50ebac9994df46db7e9bcf92594d242552f34cfea137c84a8c5b6',
-  storm_of_vengeance_initial: '693aa2c7ecc2b3878622d36020cfeb05906a96cd0f0fb9b289d4cae6b9a350da',
-  storm_of_vengeance_lightning: '778ff288fc85ccb5f214a80465965fbdd2963a460d710ade7f0743ef4485293b',
-  summon_dragon: '2dc7a05093c420637275b259a5ec8bc85c04cf1ad57fa2ba36adafe69fc72853',
-  sunbeam: 'e3873695f0d365d44d6a7f33435cc15d040254632659e53e8157dda9a0f1075d',
-  sunburst: 'c3dd95de1a351ef2132544ff2615ab6a59367eee8eed974449e82b7a22e1e06c',
-  symbol: '2c797ae620ddf294be8bbc202b993329830fa28bb1f5a1e578e78bdbcb71592d',
-  thunderwave: '34cbd4e729f425f8e58e6ff5698e35743276f30457dd611f24bb8b52dd8adaa2',
-  tsunami_initial: '941b883aab876b35479fbeb3be3866e0d5d9895e5094c51f1441c5b15c12dd90',
-  tsunami_ongoing: '180bae1926d492fd68f85a57fb6c3c5dccff3a59ba04cb8fd9ad3724aa1d4207',
-  vicious_mockery: '2f2e5fda2cffbde616b81d8445db33fa901a853cb08b40a73a097910a9ada580',
-  vitriolic_sphere: '127cafbe09ff62df4722c160516b1062f737f273edff97ce338bd408d358c76c',
-  wall_of_fire: '7414877b0f9d1a65242581bf774a8cac30c2de766f8addaeae24cad409c600e6',
-  wall_of_ice_initial: '929952ddf3f3681f6c4a2588c03cffe8323eb6cc356c382c4768b5bdbcdfcd0f',
-  wall_of_ice_frigid_air: '9f35854e7db698e934384fe0c547c5b5dbf61831d653f47c65b756edca2adf28',
-  wall_of_thorns_piercing: 'df5dd1f1604baf71713939a0968484ee41331735c338927f0f37567fc3f6631d',
-  wall_of_thorns_slashing: 'b37f22194990e98bb48b004a3b0798067762697c23fc4a6936476f44b67c8627',
-  weird_initial: '6e3d1501ad12813e00d8a374ae6df254aba0042a17a2f776dffec3e9eec46066',
-  weird_repeat: '427dc581ece8d47667a94cc34dbd8d7fa1a61d5155105478a547ce2cef6b90b4',
-  wind_wall: '7ef090b50f30de43069807d16662e8f64be01aab4a56c90d62ded1e7a9ca82ba',
+export const reviewedSpellBodySha256Oracle = Object.freeze({
+  acid_splash: '6fcc9844cbd9c7d35fab1473c2c694b9bc8309e46878785457b0163f9d70abea',
+  arcane_hand_grasping: '96762412f657cc14213fceac7ce2df803223810fb96f7612d4c03316dd0c9249',
+  befuddlement: 'dd30204835bd35abc8621b27f9f2841c49e874c21d1c591591d695cccaebe3ce',
+  bestow_curse_damage: '5549e904b1ba6e0dbaf39ff92647f9f295508a1938983cbd6f87ab8a30904008',
+  black_tentacles: 'f173705f0bf1818cc3a82eaa1c2f69e96357e0650010f5599cbeaabd7f40b5ee',
+  blade_barrier: '21049d1f13bd816425b2b2ae80991d7e9fc10fa2f517bad475402e83b662b62c',
+  blight: '48d28383f79556a4c5cf25f605532e3122635a93f715b6a2f65050a8c6565a6b',
+  burning_hands: '3c9c56294f19496e0ad3d4a5eafbf85c245ce6edbfb32d59ca2d985adf01e053',
+  call_lightning: 'c6a4a0b22788e39bd18ea2ae1c5ba83a6be53471d1a229211a8fd8c26adaeb69',
+  chain_lightning: '87253ee4bf738f75c08a0d94caa7ebf0604976b6c824f10ef9cb521c052677b1',
+  circle_of_death: 'fe69b61b61392aa195bbe1ca5a8e436385fa9a6ec2969d58bd416cd26ce6aba0',
+  cloudkill: '3b12c7a0890321e686704d9d5de90907950d3b38bf47d55bfdfe37011e4fbfb1',
+  cone_of_cold: 'c342a44d10a813389364f8afcf437b9c9ad08f06ab3621cbe3fa8637f7319205',
+  conjure_animals: 'be2c62ba82b0c0a31553127f9d6e38a3ca739ffdc45b1d9ad3a69d4a3de9347f',
+  conjure_celestial: '982854b7a29add28b5c0dbe4360bbd9e4a2392e8a387f6a7b047873b29edc720',
+  conjure_elemental_initial: '166ba3dfeb1e10241282f1869d29c88a990bcbf1cf073befd55ef354b0967b7a',
+  conjure_elemental_repeat: '166ba3dfeb1e10241282f1869d29c88a990bcbf1cf073befd55ef354b0967b7a',
+  conjure_woodland_beings: '44de2bec0df710ea08b8905960361669df63ef5a7184d7c81013b16b0affccd7',
+  contagion: '7e0d4e739f5b1eee3e40909e43e2a04d4abaf671ffc56ac08c997e9f63bc0cd8',
+  contact_other_plane: '08c876cdba3b61cb2d8230518f448224baafca2d9a111e7bf1311cae9d3131cf',
+  control_water: 'fd5cc8d1d6104f7c49394edc03face72e0415caf507aa165d3a1c732bf1a8a89',
+  delayed_blast_fireball: 'f3b53ec23d0eaed351716498d23cb0b27f96e298d0d6f901bdd347d0655c3ebe',
+  disintegrate: '8755285b18857465d4944b1e1dedd434a24d100bc8c2f91804eb93c3bf07a4cf',
+  dissonant_whispers: 'a92a305b16441b878103ff3b888d2bc62b09e33bc73dd1fb36ea21ce0a5f8f0b',
+  dragons_breath: '3516f9ae9ff1bb8d6b636ee198d2dda04cbdae7a48166866d8cfb126954253f1',
+  dream: '461ece836ff79daa5ffc8057edff609aeed2913c6832a69838729632d9fa4dc4',
+  earthquake: '0388c50df840ad18fbb4781cabccd18531badb424a038af10fe4195808d539ea',
+  enlarge_reduce_damage: '2bbe8a06e26d21851e0024045e6d815ade42796404a084c0dae75fe5e40b19a4',
+  ensnaring_strike: '9b7c5847c4cb4d1ca72f6c5f6bcf7507f1eb58d997ec0d6deec116dc3b359f95',
+  faithful_hound: '7564acdcfa8a82d2d377d8d070765a69e9dbaafe9b92a6dfa8badeba8cd4b5a7',
+  finger_of_death: 'de6b926cf861790c8df3daf165de5f1b586f44fb0fff6ab5de3d44116b61bcaf',
+  fireball: '9b09f4bcb2d1c028aa9ca80fc5f0be522a0266f293131a52f4cb33da98b3aad0',
+  fire_storm: '1e60ebac024f986268602bb6159ea9838a84e5170a0b3eed687fe697c55aa75b',
+  flame_strike: 'ec9fa2b692871975971cd64717f183084ddaf73f430b4f62be0fb7bee5a06e7c',
+  flaming_sphere: '480e214828eaea1de82d2c7ac7f790ee303b09252a60252be2349a4e9e64a65a',
+  freezing_sphere: '28ac36c7177aa17fab18488029916475875c9d8cd7ae7421f8b55415d69c6b22',
+  geas: '94741b1fa27928815491dc85989efd7f3c38f6bd92113f03b2ea6f9333cae765',
+  glyph_of_warding: '4d017bb239074c5bf6749e933bfbb792c6a5c2d55d38cce2f548083b3cab4ed5',
+  guardian_of_faith: '8267045493da3a48b51a2749b25101c86e249a7a3a840b0d2df68f21330d8f67',
+  harm: 'b9e48cdaa9e9102ecbcf55047dd15fadfe88a514be8ebf04118af5a8f1d94b89',
+  hellish_rebuke: 'ae1dff28209fbb12fac7bf86c821b800c9baff93925ea57e8eabe400889e1ba8',
+  ice_knife: '383861188637b73cbddbba4e2a412520449040c8c865b0f443c2361ae26bb6b6',
+  ice_storm: '5d1b487d3a67e562371b40317077a8d2b01d8ee8b39bd47fb5e247c889a3dbcb',
+  incendiary_cloud: '64a15cf0e19b671b913d34d33a36d1f7148fdf2ee43c6fadc3e2ea32b34d3bbd',
+  inflict_wounds: '5b52d952d62c1f69fcc9ace40a902e80fe60c8680bda9976aecba9fa014d21a2',
+  insect_plague: 'fcd8add2305f95db0951a6c02f7ce36b40bcadbe9e8cfad488b1eecf86df5ae7',
+  lightning_bolt: '6296fbe6458db4335010dc61c5b49703f4f3b0a889b2b255b4a009433042ff0f',
+  meteor_swarm: '09dbb4cc40dc38eee63401b188aaf782627052e996d41eefd5c5c8b04c36dcfa',
+  mind_spike: '29af1a756dccb9939562b179aec0c6cb6873ea33c2407fe83ca8a3f11fa4d683',
+  moonbeam: '7e097c45dee6c21d6070bdcfebc7caa412c95ea524553635d4da6a5762663e03',
+  phantasmal_force: 'f2e3af69a6a71d6bbabe534e9baf2e37f5e86179f8a707f2e60969d653c04fae',
+  phantasmal_killer_initial: 'bbf1a1e068c61e8c37e627a8cabd0aecbae5e49d132f4a916426c29fe70b77c6',
+  phantasmal_killer_repeat: 'bbf1a1e068c61e8c37e627a8cabd0aecbae5e49d132f4a916426c29fe70b77c6',
+  prismatic_spray: 'bb423f75b10a9aef4a073b116c42a92db0d8823148dc061281a4d12a5dfd560b',
+  prismatic_wall: 'e4dfe058faa96f5c61da01c5f13e000b452b75538110a3f15bd2327b39a1664f',
+  ray_of_enfeeblement: '925b0f0d2f551c3aaa27f578a7c18232e6a3cce0d875637cda81212ab00a042e',
+  sacred_flame: 'ef1bbe697896144b4d93463a16f2d16ca14f6d9155e52fded27fb8960565cbe5',
+  searing_smite: 'cc1d6736f2d003f5a01c5dbef78bb42780289e18f9095c34edd70a5f77c7762f',
+  shatter: '165bee4a1a1e0c4eb16a26c273bd5a7199599e337f715712b0bff4659820dfe7',
+  spirit_guardians: 'c485d7f95ea94a6cb1249de4f67e8893b3264edbffa9d61d34a7e606f7fcb0fa',
+  storm_of_vengeance_initial: 'fed02d70c94eef35ac57f89237c94d2ef2d43d735948a5a96bed1eff516c61b9',
+  storm_of_vengeance_lightning: 'fed02d70c94eef35ac57f89237c94d2ef2d43d735948a5a96bed1eff516c61b9',
+  summon_dragon: '6e875330c4a917cea459e76e643081b725e4a4e29bbac076d652b0d4ee6067c5',
+  sunbeam: 'd26533c27463cc66fc6176749ac1e0aec39ab413a1da2ef6c7a85800795c96bc',
+  sunburst: '49c40ea5b41e7542d663f331fff41e7da30befe740e7864e8f5188fab13d5a33',
+  symbol: '786b56779c8919c7df4a282ae8450c802a58a2e320ba72b7a039bd98960dcfa0',
+  thunderwave: '4182b3c9a2cf0f02613e7d0ffbe5e1d2ee8424040ddb6244ee3c935ce7e2bae4',
+  tsunami_initial: 'ff61748a3bad0486998a008b8e604a4e8fe137b57e701e588982718142c0275a',
+  tsunami_ongoing: 'ff61748a3bad0486998a008b8e604a4e8fe137b57e701e588982718142c0275a',
+  vicious_mockery: '9482db95dabf5c8b24ff0b2e24e1246806c1adfc7d76ef3cb00ed31bf111c6ef',
+  vitriolic_sphere: '983435ebaee86e9388c5e2443776557359c347cd919c903170b411625f951543',
+  wall_of_fire: '8d8e0cb08a822af397cc88781df7ff53313c3d0aa18f7ab14b64c895bbc96228',
+  wall_of_ice_initial: '3f35bcb3a649e54b0ce5fb05d6d91b448ea328c339b9fa377aec02e308c8d071',
+  wall_of_ice_frigid_air: '3f35bcb3a649e54b0ce5fb05d6d91b448ea328c339b9fa377aec02e308c8d071',
+  wall_of_thorns_piercing: 'a88fa17e835d296d735ec52fc9dd883826863acc7d8dfe7eea0cc534aac586d2',
+  wall_of_thorns_slashing: 'a88fa17e835d296d735ec52fc9dd883826863acc7d8dfe7eea0cc534aac586d2',
+  weird_initial: '97f992ed49d7e742e5f0ef457046895a83fc84d9ceef33d93a8132bb50a37d42',
+  weird_repeat: '97f992ed49d7e742e5f0ef457046895a83fc84d9ceef33d93a8132bb50a37d42',
+  wind_wall: '3283a491bb0476509d81570578244ee8e3a52e59d5fe3c3d87d086fb2853d227',
 } as const satisfies Record<string, string>);
 
-export function normalizeReviewedSourceSpan(span: string): string {
-  return span.trim().replace(/\s+/gu, ' ');
+export function normalizeReviewedSpellBody(body: string): string {
+  return body.trim().replace(/\s*[\r\n]+\s*/gu, ' ');
 }
 
-export function assertReviewedSourceSpanDigest(
-  key: keyof typeof reviewedSourceSpanSha256Oracle,
+export function assertReviewedSpellBodyDigest(
+  key: keyof typeof reviewedSpellBodySha256Oracle,
   clauseId: SaveSuccessClauseId,
-  sourceSpan: string,
+  spellBody: string,
 ): void {
-  const expected = reviewedSourceSpanSha256Oracle[key];
-  const actual = sha256(normalizeReviewedSourceSpan(sourceSpan));
+  const expected = reviewedSpellBodySha256Oracle[key];
+  const actual = sha256(normalizeReviewedSpellBody(spellBody));
   if (actual !== expected) {
     throw new TypeError(
-      `${clauseId} source span digest mismatch: expected ${expected}, read ${actual}. Re-decode the clause and update its reviewed values and digest together; do not combine a digest update with parser changes for this clause.`,
+      `${clauseId} spell body digest mismatch: expected ${expected}, read ${actual}. Re-decode the clause and update its reviewed values and digest together; do not combine a digest update with parser changes for this clause.`,
     );
   }
 }
 
 function reviewedSaveClause(
-  oracleKey: keyof typeof reviewedSourceSpanSha256Oracle,
+  oracleKey: keyof typeof reviewedSpellBodySha256Oracle,
   key: string,
   spellSlug: string,
   heading: ReviewedBundledSrdHeading,
   discriminator?: SaveClauseDiscriminator,
 ): ReviewedSaveSuccessClause {
   const id = saveSuccessClauseId(`srd-5.2.1:spell:${spellSlug}:save:${key}`);
+  const spellBody = bundledSpellBodyDigestInputs.get(heading);
+  if (spellBody === undefined) {
+    throw new TypeError(`${id} has no raw spell body for ${heading}.`);
+  }
+  assertReviewedSpellBodyDigest(oracleKey, id, spellBody);
   const candidates = sourceDerivedSaveClauses.get(heading) ?? [];
   const matches = discriminator === undefined
     ? candidates
@@ -949,7 +968,6 @@ function reviewedSaveClause(
       `${id} does not uniquely select one source-derived damage save clause for ${heading}.`,
     );
   }
-  assertReviewedSourceSpanDigest(oracleKey, id, sourceClause.span);
   if (candidates.length > 1 && discriminator === undefined) {
     throw new TypeError(
       `${id} has multiple source candidates and requires a clause discriminator.`,
@@ -1080,7 +1098,7 @@ function reviewedSaveClause(
       unavailable_reason: unavailableReason,
       evidence,
       source_span: sourceClause.span,
-      source_span_sha256: reviewedSourceSpanSha256Oracle[oracleKey],
+      spell_body_sha256: reviewedSpellBodySha256Oracle[oracleKey],
       ability: sourceClause.ability,
       fixed_save_dc: fixedSaveDc,
       frequency,
@@ -1133,7 +1151,7 @@ function reviewedSaveClause(
     unavailable_reason: null,
     evidence,
     source_span: sourceClause.span,
-    source_span_sha256: reviewedSourceSpanSha256Oracle[oracleKey],
+    spell_body_sha256: reviewedSpellBodySha256Oracle[oracleKey],
     ability: sourceClause.ability,
     fixed_save_dc: fixedSaveDc,
     frequency,
@@ -1978,6 +1996,61 @@ export function automaticDamageEvidenceFailureReason(
       expected.failed_damage_roll_slot_groups,
       expected.failed_damage_slot_repetitions,
     )
+    ? null
+    : genericReason;
+}
+
+type RegisteredAttackRollClause = {
+  readonly source: SourceRef & { readonly kind: 'character_weapon' };
+  readonly evidence: PublicSourceRef;
+};
+
+const registeredAttackRollClauses = new Map<
+  AttackRollClauseId,
+  RegisteredAttackRollClause
+>();
+
+/**
+ * Character weapons are the current non-spell attack origin. Their app-layer
+ * assembler must take this route before it can build an attack event; spell
+ * attacks will need a separately reviewed spell-clause route when introduced.
+ */
+export function registerCharacterWeaponAttackClause(
+  source: SourceRef & { readonly kind: 'character_weapon' },
+): {
+  readonly attack_roll_clause_id: AttackRollClauseId;
+  readonly attack_roll_evidence: PublicSourceRef;
+} {
+  if (source.kind !== 'character_weapon') {
+    throw new TypeError('Only character weapons can use the weapon attack registration route.');
+  }
+  const clauseId = (
+    `character-weapon:${String(source.weapon_id)}:${encodeURIComponent(source.stable_key)}:attack-roll`
+  ) as AttackRollClauseId;
+  const evidence = publicProbabilityCoverageManifest.attack_roll;
+  const existing = registeredAttackRollClauses.get(clauseId);
+  if (existing !== undefined && !sameSourceRef(existing.source, source)) {
+    throw new TypeError('Attack-roll clause identity collides with another weapon source.');
+  }
+  registeredAttackRollClauses.set(clauseId, { source, evidence });
+  return {
+    attack_roll_clause_id: clauseId,
+    attack_roll_evidence: evidence,
+  };
+}
+
+export function attackRollEvidenceFailureReason(
+  source: SourceRef,
+  clauseId: AttackRollClauseId | undefined,
+  evidence: PublicSourceRef | undefined,
+): string | null {
+  const expected = clauseId === undefined
+    ? undefined
+    : registeredAttackRollClauses.get(clauseId);
+  const genericReason = 'The cited evidence does not establish this attack-roll clause.';
+  return expected !== undefined && evidence !== undefined &&
+    sameSourceRef(expected.source, source) &&
+    samePublicSource(expected.evidence, evidence)
     ? null
     : genericReason;
 }

@@ -21,6 +21,7 @@ import {
   saveSuccessOutcomeHasEvidence,
   criticalHitHasEvidence,
   publicProbabilityCoverageManifest,
+  registerCharacterWeaponAttackClause,
 } from '../../../src/simulation/coverage';
 import {
   sourceStableKey,
@@ -33,7 +34,7 @@ import {
   expandedCriticalMinimumRoll,
   type SourceRef,
 } from '../../../src/simulation/contracts';
-import type { ContentKey } from '../../../src/domain/ids';
+import type { CharacterWeaponId, ContentKey } from '../../../src/domain/ids';
 import { foldSavingThrowEvent, foldAttackEvent } from '../../../src/simulation/probability';
 
 import { it, expect } from 'vitest';
@@ -200,18 +201,25 @@ ok(
 );
 
 // ---------- F3: critical evidence ----------
+const attackSource: SourceRef = {
+  kind: 'character_weapon',
+  weapon_id: 91 as CharacterWeaponId,
+  stable_key: sourceStableKey('srd-5.2.1:weapon:dagger'),
+};
+const attackRegistration = registerCharacterWeaponAttackClause(attackSource);
 const attackEvent = (evidence: unknown) =>
   ({
     kind: 'attack_roll',
     event_id: routineEventId('a1'),
-    source: src('srd-5.2.1:weapon:dagger'),
+    source: attackSource,
+    ...attackRegistration,
     attack_bonus: attackRollModifier(0),
     frequency: { kind: 'at_will' },
     duration: { kind: 'instantaneous' },
     critical: { kind: 'natural_20', evidence },
     damage: [
       {
-        source: src('srd-5.2.1:weapon:dagger'),
+        source: attackSource,
         damage_type: 'piercing',
         components: [
           { kind: 'dice', pool: { count: positiveDiceCount(1), die: 6 }, trigger: 'hit' },
@@ -260,14 +268,15 @@ const critEvent = (crit: unknown) =>
   ({
     kind: 'attack_roll',
     event_id: routineEventId('a2'),
-    source: src('srd-5.2.1:weapon:greatsword'),
+    source: attackSource,
+    ...attackRegistration,
     attack_bonus: attackRollModifier(0),
     frequency: { kind: 'at_will' },
     duration: { kind: 'instantaneous' },
     critical: crit,
     damage: [
       {
-        source: src('srd-5.2.1:weapon:greatsword'),
+        source: attackSource,
         damage_type: 'piercing',
         components: [
           { kind: 'dice', pool: { count: positiveDiceCount(1), die: 6 }, trigger: 'hit' },

@@ -11,21 +11,23 @@ import {
 } from '../../../src/simulation/contracts';
 import {
   assertReviewedDamageRollGroups,
-  assertReviewedSourceSpanDigest,
-  normalizeReviewedSourceSpan,
+  assertReviewedSpellBodyDigest,
+  normalizeReviewedSpellBody,
   reviewedSaveAvailabilityOracle,
   reviewedSaveSuccessClauses,
-  reviewedSourceSpanSha256Oracle,
+  reviewedSpellBodySha256Oracle,
 } from '../../../src/simulation/coverage';
 import { foldAutomaticDamageEvent } from '../../../src/simulation/probability';
 import {
   deriveSaveDamageCoverageFromBodies,
   sourceFixedSaveDc,
+  spellBodyDigestInputsByHeading,
   spellDescriptionsByHeading,
 } from '../../../src/simulation/spell-source-reader';
 
 const spellExtract = readFileSync('docs/srd/source/spell-descriptions.txt', 'utf8');
 const spellBodies = spellDescriptionsByHeading(spellExtract);
+const spellBodyDigestInputs = spellBodyDigestInputsByHeading(spellExtract);
 
 function occurrences(body: string): readonly (readonly [number, number])[] {
   return deriveSaveDamageCoverageFromBodies(new Map([['Round 15', body]]))
@@ -108,7 +110,7 @@ describe('round 15 fixed-DC reproductions', () => {
   });
 });
 
-describe('round 15 registered-span digest guard', () => {
+describe('round 15 registered-body digest guard', () => {
   const fireball = spellBodies.get('Fireball');
   if (fireball === undefined) {
     throw new Error('Fireball is missing from the bundled spell extract.');
@@ -117,27 +119,31 @@ describe('round 15 registered-span digest guard', () => {
     'makes a Dexterity saving throw, taking 8d6 Fire damage on a failed save or half as much damage on a successful one.';
 
   it('puts one independently stored digest on every registered clause', () => {
-    expect(Object.keys(reviewedSourceSpanSha256Oracle)).toHaveLength(79);
-    expect(new Set(Object.keys(reviewedSourceSpanSha256Oracle)))
+    expect(Object.keys(reviewedSpellBodySha256Oracle)).toHaveLength(79);
+    expect(new Set(Object.keys(reviewedSpellBodySha256Oracle)))
       .toEqual(new Set(Object.keys(reviewedSaveSuccessClauses)));
     for (const [key, clause] of Object.entries(reviewedSaveSuccessClauses)) {
-      expect(clause.source_span_sha256).toBe(
-        reviewedSourceSpanSha256Oracle[
-          key as keyof typeof reviewedSourceSpanSha256Oracle
+      expect(clause.spell_body_sha256).toBe(
+        reviewedSpellBodySha256Oracle[
+          key as keyof typeof reviewedSpellBodySha256Oracle
         ],
       );
-      expect(clause.source_span_sha256).toMatch(/^[0-9a-f]{64}$/u);
+      expect(clause.spell_body_sha256).toMatch(/^[0-9a-f]{64}$/u);
     }
   });
 
-  it('pins whitespace normalization to trim plus one-space collapsing', () => {
-    expect(normalizeReviewedSourceSpan(' \n\tAlpha\u00a0 Beta \r\n'))
+  it('pins body normalization to line-break whitespace collapsing only', () => {
+    expect(normalizeReviewedSpellBody(' \n Alpha \r\n Beta \n'))
       .toBe('Alpha Beta');
     const clause = reviewedSaveSuccessClauses.fireball;
-    expect(() => assertReviewedSourceSpanDigest(
+    const body = spellBodyDigestInputs.get('Fireball');
+    if (body === undefined) {
+      throw new Error('Fireball raw body is missing.');
+    }
+    expect(() => assertReviewedSpellBodyDigest(
       'fireball',
       clause.id,
-      `\n${clause.source_span.replaceAll(' ', '\t\n')}\n`,
+      `\n${body}\n`,
     )).not.toThrow();
   });
 
@@ -154,11 +160,11 @@ describe('round 15 registered-span digest guard', () => {
     it(`makes the module-load guard reject Fireball ${name} drift`, () => {
       const mutated = fireball.replace(originalWording, wording);
       const clause = onlyClause('Fireball', mutated);
-      expect(() => assertReviewedSourceSpanDigest(
+      expect(() => assertReviewedSpellBodyDigest(
         'fireball',
         reviewedSaveSuccessClauses.fireball.id,
-        clause.span,
-      )).toThrow(/fireball:save:damage source span digest mismatch/iu);
+        mutated,
+      )).toThrow(/fireball:save:damage spell body digest mismatch/iu);
     });
   }
 });
@@ -194,7 +200,7 @@ describe('round 15 one-roll marker boundaries', () => {
   }
 
   it('makes the digest guard catch the registered Flame Strike drift too', () => {
-    const flameStrike = spellBodies.get('Flame Strike');
+    const flameStrike = spellBodyDigestInputs.get('Flame Strike');
     if (flameStrike === undefined) {
       throw new Error('Flame Strike is missing from the bundled spell extract.');
     }
@@ -202,17 +208,17 @@ describe('round 15 one-roll marker boundaries', () => {
       'taking 5d6 Fire damage and 5d6 Radiant damage on a failed save',
       'taking as one damage roll 5d6 Fire damage and 5d6 Radiant damage on a failed save',
     );
-    expect(() => assertReviewedSourceSpanDigest(
+    expect(() => assertReviewedSpellBodyDigest(
       'flame_strike',
       reviewedSaveSuccessClauses.flame_strike.id,
-      onlyClause('Flame Strike', mutated).span,
-    )).toThrow(/flame-strike:save:damage source span digest mismatch/iu);
+      mutated,
+    )).toThrow(/flame-strike:save:damage spell body digest mismatch/iu);
   });
 });
 
 describe('round 15 gate damage scanning', () => {
-  function mutatedGeasClause() {
-    const geas = spellBodies.get('Geas');
+  function mutatedGeas() {
+    const geas = spellBodyDigestInputs.get('Geas');
     if (geas === undefined) {
       throw new Error('Geas is missing from the bundled spell extract.');
     }
@@ -220,26 +226,26 @@ describe('round 15 gate damage scanning', () => {
       'While Charmed, the creature takes 5d10 Psychic damage if it acts in a manner directly counter to your command.',
       'While Charmed, because it failed that saving throw, the creature immediately takes 5d10 Psychic damage.',
     );
-    return onlyClause('Geas', mutated);
+    return { body: mutated, clause: onlyClause('Geas', mutated.replace(/-\s+/gu, '')) };
   }
 
   it('finds a failed-save damage arm added to Geas', () => {
-    expect(mutatedGeasClause().damage_occurrences
+    expect(mutatedGeas().clause.damage_occurrences
       .filter((occurrence) => occurrence.arm === 'failure')
       .map((occurrence) => [occurrence.slot_index, occurrence.roll_index]))
       .toEqual([[0, 0]]);
   });
 
   it('rejects Geas through the digest guard', () => {
-    expect(() => assertReviewedSourceSpanDigest(
+    expect(() => assertReviewedSpellBodyDigest(
       'geas',
       reviewedSaveSuccessClauses.geas.id,
-      mutatedGeasClause().span,
-    )).toThrow(/geas:save:recurring-damage source span digest mismatch/iu);
+      mutatedGeas().body,
+    )).toThrow(/geas:save:recurring-damage spell body digest mismatch/iu);
   });
 
   it('still rejects Geas structurally when the digest check is deliberately bypassed', () => {
-    expect(() => assertReviewedDamageRollGroups('geas', mutatedGeasClause()))
+    expect(() => assertReviewedDamageRollGroups('geas', mutatedGeas().clause))
       .toThrow(/damage-roll groups disagree/iu);
   });
 });

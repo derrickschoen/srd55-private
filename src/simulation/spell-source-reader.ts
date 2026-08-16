@@ -118,9 +118,14 @@ const abilityBySourceName = {
  * load-bearing: accepting an unmarked `pdftotext -layout` stream here would
  * silently reintroduce row-wise interleaving between unrelated columns.
  */
+type SpellBodyForms = {
+  readonly parsed: string;
+  readonly digest_input: string;
+};
+
 function headingsFromReadingOrderLines(
   lines: readonly string[],
-): ReadonlyMap<string, string> {
+): ReadonlyMap<string, SpellBodyForms> {
   const starts = lines.flatMap((line, index) =>
     SPELL_METADATA.test(line.trim()) ? [index] : [],
   );
@@ -137,20 +142,39 @@ function headingsFromReadingOrderLines(
     const end = position + 1 < starts.length
       ? previousContent(starts[position + 1] as number)
       : lines.length;
+    const digestInput = lines.slice(start, end)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .join(' ');
     return [
       (lines[headingIndex] ?? '').trim(),
-      lines.slice(start, end)
-        .join(' ')
-        .replace(/-\s+/gu, '')
-        .replace(/\s+/gu, ' ')
-        .trim(),
+      {
+        digest_input: digestInput,
+        parsed: digestInput.replace(/-\s+/gu, ''),
+      },
     ];
   }));
 }
 
-export function spellDescriptionsByHeading(
-  columnSlicedExtract: string,
+function parsedBodies(
+  forms: ReadonlyMap<string, SpellBodyForms>,
 ): ReadonlyMap<string, string> {
+  return new Map(
+    [...forms].map(([heading, body]) => [heading, body.parsed]),
+  );
+}
+
+function digestInputs(
+  forms: ReadonlyMap<string, SpellBodyForms>,
+): ReadonlyMap<string, string> {
+  return new Map(
+    [...forms].map(([heading, body]) => [heading, body.digest_input]),
+  );
+}
+
+function spellBodyFormsByHeading(
+  columnSlicedExtract: string,
+): ReadonlyMap<string, SpellBodyForms> {
   const rawLines = columnSlicedExtract.split('\n');
   const firstColumn = rawLines.findIndex((line) => COLUMN_MARKER.test(line));
   if (firstColumn < 0) {
@@ -162,6 +186,22 @@ export function spellDescriptionsByHeading(
     !COLUMN_MARKER.test(line),
   );
   return headingsFromReadingOrderLines(lines);
+}
+
+export function spellDescriptionsByHeading(
+  columnSlicedExtract: string,
+): ReadonlyMap<string, string> {
+  return parsedBodies(spellBodyFormsByHeading(columnSlicedExtract));
+}
+
+/**
+ * Returns the whole per-heading body before parser de-hyphenation. Physical
+ * line-break whitespace is flattened to one separator; printed hyphens remain.
+ */
+export function spellBodyDigestInputsByHeading(
+  columnSlicedExtract: string,
+): ReadonlyMap<string, string> {
+  return digestInputs(spellBodyFormsByHeading(columnSlicedExtract));
 }
 
 function splitSafe(line: string, column: number): boolean {
@@ -199,9 +239,9 @@ function findGutter(lines: readonly string[], page: number): number {
  * before either column is flattened, so neighbouring prose can never be read
  * as one sentence.
  */
-export function spellDescriptionsFromFullLayout(
+function spellBodyFormsFromFullLayout(
   fullLayout: string,
-): ReadonlyMap<string, string> {
+): ReadonlyMap<string, SpellBodyForms> {
   const readingOrder: string[] = [];
   const seenPages: number[] = [];
   for (const rawPage of fullLayout.split('\f')) {
@@ -243,6 +283,18 @@ export function spellDescriptionsFromFullLayout(
     );
   }
   return descriptions;
+}
+
+export function spellDescriptionsFromFullLayout(
+  fullLayout: string,
+): ReadonlyMap<string, string> {
+  return parsedBodies(spellBodyFormsFromFullLayout(fullLayout));
+}
+
+export function spellBodyDigestInputsFromFullLayout(
+  fullLayout: string,
+): ReadonlyMap<string, string> {
+  return digestInputs(spellBodyFormsFromFullLayout(fullLayout));
 }
 
 function sourceAbility(span: string, fallback: Ability | null): Ability {
@@ -437,7 +489,12 @@ function sourceDamageOccurrences(
           ? [groupIndex]
           : []
       );
-      const scoped = preceding.length > 0
+      const lastPreceding = preceding.length === 0
+        ? undefined
+        : occurrenceGroups[preceding[preceding.length - 1] as number];
+      const commaDelimitedPrefix = lastPreceding !== undefined &&
+        /,\s*$/u.test(slice.text.slice(lastPreceding.end, markerStart));
+      const scoped = preceding.length > 0 && !commaDelimitedPrefix
         ? preceding
         : occurrenceGroups.flatMap((group, groupIndex) =>
             group.start >= markerEnd && group.start < nextMarkerStart

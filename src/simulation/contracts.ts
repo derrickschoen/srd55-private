@@ -87,6 +87,7 @@ export type ExpandedCriticalMinimumRoll = Brand<
 >;
 export type SaveSuccessClauseId =
   `srd-5.2.1:spell:${string}:save:${string}`;
+export type AttackRollClauseId = Brand<string, 'AttackRollClauseId'>;
 export type DamageNeutralMechanicId = Brand<
   string,
   'DamageNeutralMechanicId'
@@ -667,6 +668,8 @@ export type AttackRollEvent = {
   readonly kind: 'attack_roll';
   readonly event_id: RoutineEventId;
   readonly source: SourceRef;
+  readonly attack_roll_clause_id: AttackRollClauseId;
+  readonly attack_roll_evidence: PublicSourceRef;
   readonly attack_bonus: AttackRollModifier;
   readonly frequency: EventFrequency;
   readonly duration: InstantaneousDuration;

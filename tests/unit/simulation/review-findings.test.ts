@@ -20,6 +20,7 @@ import {
   bundledSrdSourceRef,
   damageNeutralityEvidence,
   publicProbabilityCoverageManifest,
+  registerCharacterWeaponAttackClause,
   reviewedSaveSuccessClauses,
   reviewedDamageNeutralMechanicIds,
 } from '../../../src/simulation/coverage';
@@ -35,6 +36,7 @@ const source: SourceRef = {
   weapon_id: 41 as CharacterWeaponId,
   stable_key: sourceStableKey('spell:unrelated-fire'),
 };
+const attackRegistration = registerCharacterWeaponAttackClause(source);
 const fire = damageType('Fire');
 const responses = [
   { damage_type: fire, response: 'normal' as const },
@@ -82,6 +84,7 @@ function attackEvent(evidence: PublicSourceRef): AttackRollEvent {
     kind: 'attack_roll',
     event_id: routineEventId('review:attack'),
     source,
+    ...attackRegistration,
     attack_bonus: attackRollModifier(100),
     frequency: { kind: 'each_declared_event' },
     duration: { kind: 'instantaneous' },

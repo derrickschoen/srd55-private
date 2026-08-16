@@ -17,6 +17,7 @@ import {
 } from '../../../src/simulation/contracts';
 import {
   publicProbabilityCoverageManifest,
+  registerCharacterWeaponAttackClause,
   reviewedSaveSuccessClauses,
 } from '../../../src/simulation/coverage';
 import {
@@ -35,6 +36,7 @@ const other: SourceRef = {
   weapon_id: 10 as CharacterWeaponId,
   stable_key: sourceStableKey('weapon:10'),
 };
+const weaponAttackRegistration = registerCharacterWeaponAttackClause(weapon);
 const slashing = damageType('Slashing');
 const fire = damageType('Fire');
 
@@ -44,6 +46,7 @@ describe('multi-instance attack with miss damage', () => {
       kind: 'attack_roll',
       event_id: routineEventId('attack:multi'),
       source: weapon,
+      ...weaponAttackRegistration,
       frequency: { kind: 'each_declared_event' },
       duration: { kind: 'instantaneous' },
       attack_bonus: attackRollModifier(100),

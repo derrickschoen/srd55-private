@@ -24,6 +24,7 @@ import {
 import {
   expandedCriticalHitEvidenceManifest,
   publicProbabilityCoverageManifest,
+  registerCharacterWeaponAttackClause,
   reviewedSaveSuccessClauses,
 } from '../../../src/simulation/coverage';
 import {
@@ -44,6 +45,7 @@ const source: SourceRef = {
   weapon_id: 9 as CharacterWeaponId,
   stable_key: sourceStableKey('weapon:9'),
 };
+const attackRegistration = registerCharacterWeaponAttackClause(source);
 
 const slashing = damageType('Slashing');
 const normalSlashing: readonly TargetDamageResponse[] = [
@@ -296,6 +298,7 @@ describe('critical-hit and trigger folds', () => {
       kind: 'attack_roll',
       event_id: routineEventId('attack:1'),
       source,
+      ...attackRegistration,
       attack_bonus: attackRollModifier(100),
       frequency: { kind: 'each_declared_event' },
       duration: { kind: 'instantaneous' },

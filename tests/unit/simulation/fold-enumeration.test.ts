@@ -18,6 +18,7 @@ import {
 } from '../../../src/simulation/contracts';
 import {
   publicProbabilityCoverageManifest,
+  registerCharacterWeaponAttackClause,
   reviewedSaveSuccessClauses,
 } from '../../../src/simulation/coverage';
 import {
@@ -30,6 +31,7 @@ const source: SourceRef = {
   weapon_id: 9 as CharacterWeaponId,
   stable_key: sourceStableKey('weapon:9'),
 };
+const attackRegistration = registerCharacterWeaponAttackClause(source);
 const slashing = damageType('Slashing');
 
 function respond(total: number, response: DamageResponse): number {
@@ -84,6 +86,7 @@ describe('brute-force attack fold', () => {
             kind: 'attack_roll',
             event_id: routineEventId('attack:probe'),
             source,
+            ...attackRegistration,
             attack_bonus: attackRollModifier(4),
             frequency: { kind: 'each_declared_event' },
             duration: { kind: 'instantaneous' },
