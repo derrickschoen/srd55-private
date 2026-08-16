@@ -229,3 +229,51 @@ QUOTE: "instead of your Strength modifier for the attack and damage rolls of you
 SRC: docs/srd/source/attack-class-features.txt
 CODE: src/rules/attack-profiles.ts martialArtsProfile
 TRAP: Statting a Monk's quarterstaff with Strength via the R-COMBAT-008 default because it lacks Finesse — the substitution comes from the class feature, not a weapon property, and applies only while Martial Arts conditions hold (no armor, no Shield, unarmed or only Monk weapons).
+
+### R-COMBAT-030 ready-action-trigger-response
+Q: how does the ready action work prepare an action with a trigger readied action
+A: On your turn take Ready: declare a perceivable trigger and the single action (or move up to your Speed) you will take; releasing it costs your Reaction and must happen before the start of your next turn.
+QUOTE: "You take the Ready action to wait for a particular"
+SRC: docs/srd/full/srd-5.2.1.txt
+CODE: NONE
+TRAP: Letting the released response differ from the declared one, or using a non-perceivable trigger such as unspoken intent.
+
+### R-COMBAT-031 ready-resolves-after-trigger
+Q: does a readied action interrupt its trigger when does a readied reaction resolve
+A: It never interrupts; you take your Reaction right after the trigger finishes, or ignore the trigger and keep the Reaction.
+QUOTE: "Reaction right after the trigger finishes or ignore"
+SRC: docs/srd/full/srd-5.2.1.txt
+CODE: NONE
+TRAP: Resolving the readied action before or during the trigger, interrupt-style, e.g. shooting an enemy before their declared attack lands.
+
+### R-COMBAT-032 ready-spell-slot-and-concentration
+Q: can I ready a spell readied spell slot lost concentration casting time
+A: Only a spell with a casting time of an action; the slot is expended when you ready it, holding it requires Concentration up to the start of your next turn, and broken Concentration wastes the spell.
+QUOTE: "a casting time of an action, and holding on to the"
+SRC: docs/srd/full/srd-5.2.1.txt
+CODE: NONE
+TRAP: Refunding the slot when the trigger never occurs, or keeping a prior Concentration spell running while holding a readied spell.
+
+### R-COMBAT-033 ready-bonus-action-impossible
+Q: can I ready a bonus action prepare a bonus action with a trigger healing word misty step
+A: No; Ready accepts only an action or movement, and no rule grants a Bonus Action in response to a trigger, so bonus-action spells cannot be readied at all.
+QUOTE: "can take a Bonus Action only when a special ability,"
+SRC: docs/srd/full/srd-5.2.1.txt
+CODE: NONE
+TRAP: Allowing Healing Word or Misty Step to be readied because they seem smaller than a full action.
+
+### R-COMBAT-034 bonus-action-your-turn-only
+Q: when can I take a bonus action how many per turn off turn
+A: One per turn, only on your own turn, and only when a rule explicitly grants one.
+QUOTE: "You can take only one Bonus Action on your turn,"
+SRC: docs/srd/full/srd-5.2.1.txt
+CODE: NONE
+TRAP: Granting a bonus action on another creature's turn as part of a Reaction or readied action.
+
+### R-COMBAT-035 reaction-budget-refresh
+Q: how many reactions per round when do reactions refresh
+A: One; once taken you cannot take another until the start of your next turn, and it is usable on your turn or another creature's.
+QUOTE: "you take a Reaction, you can’t take another one"
+SRC: docs/srd/full/srd-5.2.1.txt
+CODE: NONE
+TRAP: Refreshing the Reaction at the end of the round instead of at the start of your own next turn.
