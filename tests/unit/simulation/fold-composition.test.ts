@@ -11,7 +11,6 @@ import {
   targetArmorClass,
   targetSaveBonus,
   type AttackRollEvent,
-  type AutomaticDamageEvent,
   type SavingThrowDamageEvent,
   type SourceRef,
 } from '../../../src/simulation/contracts';
@@ -22,7 +21,6 @@ import {
 } from '../../../src/simulation/coverage';
 import {
   foldAttackEvent,
-  foldAutomaticDamageEvent,
   foldSavingThrowEvent,
 } from '../../../src/simulation/probability';
 
@@ -37,6 +35,7 @@ const other: SourceRef = {
   stable_key: sourceStableKey('weapon:10'),
 };
 const weaponAttackRegistration = registerCharacterWeaponAttackClause(weapon);
+const otherAttackRegistration = registerCharacterWeaponAttackClause(other);
 const slashing = damageType('Slashing');
 const fire = damageType('Fire');
 
@@ -73,6 +72,8 @@ describe('multi-instance attack with miss damage', () => {
         },
         {
           source: other,
+          source_attack_roll_clause_id:
+            otherAttackRegistration.attack_roll_clause_id,
           damage_type: fire,
           components: [{
             kind: 'dice',
@@ -239,18 +240,20 @@ describe('save fold arms and contributions', () => {
   });
 });
 
-describe('automatic damage with mixed components', () => {
-  it('sums registered dice and flat components in one damage roll', () => {
+describe('save damage with mixed components', () => {
+  it('sums registered dice and flat components before applying the save', () => {
     const clause = reviewedSaveSuccessClauses.finger_of_death;
-    const event: AutomaticDamageEvent = {
-      kind: 'automatic_damage',
-      event_id: routineEventId('auto:mixed'),
+    const event: SavingThrowDamageEvent = {
+      kind: 'saving_throw_damage',
+      event_id: routineEventId('save:mixed'),
       source: clause.effect_source,
-      damage_clause_id: clause.id,
-      evidence: clause.evidence,
+      ability: clause.ability,
+      save_dc: saveDifficultyClass(11),
+      roll_state: 'normal',
+      save_success_clause_id: clause.id,
       frequency: { kind: 'each_declared_event' },
       duration: { kind: 'instantaneous' },
-      damage: [{
+      damage_on_failed_save: [{
         source: clause.effect_source,
         damage_type: damageType('Necrotic'),
         components: [
@@ -258,11 +261,17 @@ describe('automatic damage with mixed components', () => {
           { kind: 'flat', modifier: damageFlatModifier(30) },
         ],
       }],
+      on_success: { kind: 'half', evidence: clause.evidence },
     };
-    const r = foldAutomaticDamageEvent(event, [
-      { damage_type: damageType('Necrotic'), response: 'normal' },
-    ]);
+    const r = foldSavingThrowEvent(event, {
+      save_bonus: targetSaveBonus(0),
+      damage_responses: [
+        { damage_type: damageType('Necrotic'), response: 'normal' },
+      ],
+    });
     expect(r.status).toBe('available');
-    expect(r.expected_damage).toBeCloseTo(61.5, 10);
+    // DC 11 vs +0 fails half the time. E[7d8 + 30] = 61.5 and
+    // E[floor((7d8 + 30) / 2)] = (61.5 - 0.5) / 2 = 30.5.
+    expect(r.expected_damage).toBeCloseTo((61.5 + 30.5) / 2, 10);
   });
 });

@@ -649,6 +649,8 @@ export type DamageInstance = {
 
 export type AttackDamageInstance = {
   readonly source: SourceRef;
+  /** Required when this instance is sourced by something other than the attack. */
+  readonly source_attack_roll_clause_id?: AttackRollClauseId;
   readonly damage_type: DamageType;
   readonly components: NonEmptyReadonlyArray<AttackDamageComponent>;
 };

@@ -28,6 +28,7 @@ import {
   type TargetSaveBonus,
 } from './contracts';
 import {
+  attackDamageSourcesFailureReason,
   attackRollEvidenceFailureReason,
   automaticDamageEvidenceFailureReason,
   criticalHitRuleHasEvidence,
@@ -545,6 +546,17 @@ export function foldAttackEvent(
       status: 'unavailable',
       evidence: event.attack_roll_evidence ?? null,
       reason: attackEvidenceFailure,
+    };
+  }
+  const damageSourceFailure = attackDamageSourcesFailureReason(
+    event.source,
+    event.damage,
+  );
+  if (damageSourceFailure !== null) {
+    return {
+      status: 'unavailable',
+      evidence: null,
+      reason: damageSourceFailure,
     };
   }
   if (!criticalHitRuleHasEvidence(event.critical)) {

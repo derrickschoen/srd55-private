@@ -6,7 +6,6 @@ import {
   routineEventId,
   saveDifficultyClass,
   targetSaveBonus,
-  type AutomaticDamageEvent,
   type DamageInstance,
   type SavingThrowDamageEvent,
 } from '../../../src/simulation/contracts';
@@ -19,7 +18,6 @@ import {
   sourceDerivedSaveDamageCandidates,
 } from '../../../src/simulation/coverage';
 import {
-  foldAutomaticDamageEvent,
   foldSavingThrowEvent,
 } from '../../../src/simulation/probability';
 import {
@@ -128,15 +126,18 @@ describe('round 14 damage-roll grouping drift alarms', () => {
     const event = (
       clause: (typeof reviewedSaveSuccessClauses)[keyof typeof reviewedSaveSuccessClauses],
       instances: [DamageInstance, ...DamageInstance[]],
-    ): AutomaticDamageEvent => ({
-      kind: 'automatic_damage',
+    ): SavingThrowDamageEvent => ({
+      kind: 'saving_throw_damage',
       event_id: routineEventId(`round-14:one-roll:${String(instances.length)}`),
       source: clause.effect_source,
-      damage_clause_id: clause.id,
-      evidence: clause.evidence,
+      ability: clause.ability,
+      save_dc: saveDifficultyClass(21),
+      roll_state: 'normal',
+      save_success_clause_id: clause.id,
       frequency: clause.frequency,
       duration: clause.duration,
-      damage: instances,
+      damage_on_failed_save: instances,
+      on_success: { kind: 'half', evidence: clause.evidence },
     });
     const flameStrike = reviewedSaveSuccessClauses.flame_strike;
     const freezingSphere = reviewedSaveSuccessClauses.freezing_sphere;
@@ -144,15 +145,23 @@ describe('round 14 damage-roll grouping drift alarms', () => {
       damage_type: damageType(type),
       response: 'resistant' as const,
     }));
-    const separateRolls = foldAutomaticDamageEvent(event(flameStrike, [
+    const target = {
+      save_bonus: targetSaveBonus(0),
+      damage_responses: responses,
+    };
+    const separateRolls = foldSavingThrowEvent(event(flameStrike, [
       damage(flameStrike.effect_source, 5, 'Fire'),
       damage(flameStrike.effect_source, 5, 'Radiant'),
-    ]), responses);
-    const oneRoll = foldAutomaticDamageEvent(event(freezingSphere, [
+    ]), target);
+    const oneRoll = foldSavingThrowEvent(event(freezingSphere, [
       damage(freezingSphere.effect_source, 10, 'Cold'),
-    ]), responses);
+    ]), target);
     expect(separateRolls.status).toBe('available');
     expect(oneRoll.status).toBe('available');
+    // DC 21 vs +0 fails on every face. For S made of d6s,
+    // E[floor(S/2)] = (E[S] - P(S odd)) / 2 and P(S odd) = 1/2:
+    // two separate 5d6 rolls give 2 * (17.5 - 0.5) / 2 = 17;
+    // one 10d6 roll gives (35 - 0.5) / 2 = 17.25.
     expect(separateRolls.expected_damage).toBeCloseTo(17, 12);
     expect(oneRoll.expected_damage).toBeCloseTo(17.25, 12);
   });
