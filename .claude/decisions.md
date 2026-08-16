@@ -7,6 +7,24 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D267 — OWNER: resource pools are bounded counters, 0..sheet-derived maximum (2026-08-16)
+
+During the 2c (evidence-identity) walkthrough the owner ruled on the pool
+model: "We need to model the pools as having an upper limit just like spell
+slots. Max number is an integer that is calculated based on sheet data.
+Minimum is always 0. Can subtract when used (ie rage, sorcery points) can add
+any number when appropriate, but the number never exceeds the ceiling."
+Binding shape: every consumable resource (Rage uses, sorcery points, Channel
+Divinity, spell slots alike) carries a bounded level — floor 0, ceiling an
+integer derived from sheet data — with spend subtracting and recovery adding
+**clamped at the ceiling** (RAW: you regain up to your maximum). Supervisor
+default pending review (reversible): the level is a minted state object bound
+to its pool by reference identity; overspend below 0 THROWS (fail-closed —
+insufficient-resource spends are simulator logic errors, not clampable), while
+over-recovery CLAMPS (RAW-sanctioned). Replaces the `expendedUnits: unknown`
+per-call revalidation seam in recoveredResourceUnits. Queued at the head of
+the typing-improvement batch (2b survey).
+
 ## D266 — OWNER: no Cloudflare deploy until local is approved; prepare only (2026-08-16)
 
 Asked to reconcile D260.7's future "mirror goes PUBLIC" with the repo
