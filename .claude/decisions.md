@@ -7,6 +7,19 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D266 — OWNER: no Cloudflare deploy until local is approved; prepare only (2026-08-16)
+
+Asked to reconcile D260.7's future "mirror goes PUBLIC" with the repo
+being already world-readable since 2026-08-13 (verified: anonymous API,
+private:false). Ruled: **"no cloudflare deploy until i approve local.
+prepare for it but don't do it."** The publication event still ahead is
+the SITE deploy; it is gated on the owner approving the locally served
+build first. Deploy preparation (build output, staged wrangler configs)
+continues; the deploy itself is a HARD STOP outward-facing action, in
+line with D121/D127/D128. The repo's current public state, including
+.claude/, was not countermanded and stands as owner-ordered on
+2026-08-13.
+
 ## D265 — OWNER: v1 acceptance gains a stranger spec AND an export round trip in every mutt spec (2026-08-16)
 
 The strongest option was chosen explicitly: (1) one BLOCKING stranger
