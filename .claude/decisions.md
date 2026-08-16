@@ -2876,3 +2876,45 @@ boss carries the majority share, mooks the remainder). AoE and multi-target
 effects resolve against the real four-body group; single-target rotations
 choose targets. The side-by-side variant columns are retired before ever
 being produced — no sim ran under the superseded design.
+
+## D262 — Round-4 collaborative brainstorm rulings (2026-08-15)
+
+Codex (11 candidates) + Claude (8) collated to ten distinct questions;
+asked one at a time. Two AskUserQuestion rounds on the registry question
+were "explain more" — the ruling below was made after the under-the-hood
+explainer (parse-once + digest tripwire + who-operates framing).
+
+1. **v1 gate: PRIVATE-LIBRARY PASS BLOCKS v1.** The private-library
+   walkthrough pass (import + non-SRD paths) must complete before the mirror
+   flips public, even though its content never ships. Non-halting defect
+   policy was not amended — D251.1's severity split stands.
+2. **Post-v1 first lane: DPR SIM UI (#18)** — the in-app advanced-user
+   simulator precedes launch hardening, scorecard expansion, and VTT
+   phase 2.
+3. **Board B is a REDESIGN SIGNAL** — the report's job is to identify
+   underperforming mechanics/concepts and feed another design round, not to
+   crown builds. Structure the report for that reading.
+4. **Sim fidelity ceiling: CHASE THE DOCX** — fidelity is sufficient when
+   the sim tracks the external d4 methodology within tolerance; that
+   reference, not sensitivity tests or a fixed scope, is the stopping rule.
+5. **Private-pass corpus: known-tricky spells (Thorn Whip / Cloud of
+   Daggers / Armor of Agathys), non-SRD subclasses + feats, non-SRD species
+   + backgrounds.** Full class spell lists are explicitly NOT required.
+6. **AI-guided mode at public v1: POWER-USER SETUP** — documented as
+   bring-your-own-AI; the site guarantees the hooks (alt text, structured
+   actions), not the experience. The deterministic flow is the product.
+7. **Clean-room public depth: MAX LAWFUL DETAIL** — public board variants
+   publish everything the D59 gate permits per build, accepting a heavier
+   clean-room review each time.
+8. **VTT phase 2 negative scope: NO cloud accounts, NO voice/video, NO
+   hosted asset library.** Rules automation was offered as an exclusion and
+   NOT chosen — it is in bounds for phase 2.
+9. **Registry ops: AI-ASSISTED INTERNAL** — the decode+review registration
+   pipeline becomes a maintained internal tool (cheap SRD revisions and
+   private-library growth); user imports keep refusing with "sim
+   unavailable". Extends D260.9's overlay split with an operator.
+10. **KB target for v1: ALL BUNDLED MECHANICS** — every mechanical rule the
+    bundled SRD content can surface gets a KB entry; KB completeness is its
+    own release deliverable with its own audit (beyond the 127-entry sweep).
+11. **Persistence: EXPORT/IMPORT REQUIRED AT v1** — file save + re-import
+    joins the v1 bar; localStorage reload-safety alone is insufficient.
