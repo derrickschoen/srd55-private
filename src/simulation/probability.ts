@@ -4,10 +4,19 @@ import {
   expectedEventDamage,
   positiveDiceCount,
   probability,
+  snapshotAttackFoldTarget,
+  snapshotAttackRollEvent,
+  snapshotAutomaticDamageEvent,
+  snapshotDamageComponents,
+  snapshotDicePool,
+  snapshotSavingThrowDamageEvent,
+  snapshotSavingThrowFoldTarget,
+  snapshotTargetDamageResponses,
   type AttackDamageComponent,
   type AttackDamageInstance,
   type AttackRollEvent,
   type AttackRollModifier,
+  type AttackFoldTarget,
   type AutomaticDamageEvent,
   type DamageComponent,
   type DamageInstance,
@@ -23,6 +32,7 @@ import {
   type RollState,
   type SaveSuccessClauseId,
   type SavingThrowDamageEvent,
+  type SavingThrowFoldTarget,
   type TargetArmorClass,
   type TargetDamageResponse,
   type TargetSaveBonus,
@@ -160,6 +170,12 @@ function normalizedDistribution(
  * @see publicProbabilityCoverageManifest.damage_roll
  */
 export function enumerateDicePool(pool: DicePool): DamageOutcomeDistribution {
+  return enumerateDicePoolSnapshot(snapshotDicePool(pool));
+}
+
+function enumerateDicePoolSnapshot(
+  pool: DicePool,
+): DamageOutcomeDistribution {
   // Referencing the manifest entry here keeps the rule implementation beside
   // its bundled-source citation instead of relying on a prose-only inventory.
   const evidence = publicProbabilityCoverageManifest.damage_roll;
@@ -208,6 +224,12 @@ function combineDistributions(
 export function ordinaryDamageDistribution(
   components: readonly DamageComponent[],
 ): DamageOutcomeDistribution {
+  return ordinaryDamageDistributionSnapshot(snapshotDamageComponents(components));
+}
+
+function ordinaryDamageDistributionSnapshot(
+  components: readonly DamageComponent[],
+): DamageOutcomeDistribution {
   let distribution = singleOutcome(0);
   let flatModifier = 0;
   for (const component of components) {
@@ -215,7 +237,7 @@ export function ordinaryDamageDistribution(
       case 'dice':
         distribution = combineDistributions(
           distribution,
-          enumerateDicePool(component.pool),
+          enumerateDicePoolSnapshot(component.pool),
         );
         break;
       case 'flat':
@@ -277,7 +299,7 @@ function distributionForAttackInstance(
             : component.pool.count;
         distribution = combineDistributions(
           distribution,
-          enumerateDicePool({ count, die: component.pool.die }),
+          enumerateDicePoolSnapshot({ count, die: component.pool.die }),
         );
         break;
       }
@@ -506,7 +528,7 @@ function foldOrdinaryInstances(
     source: instance.source,
     damage_type: instance.damage_type,
     expected_damage: expectedDistributionDamage(
-      ordinaryDamageDistribution(instance.components),
+      ordinaryDamageDistributionSnapshot(instance.components),
       targetResponse(instance.damage_type, responses) ?? (() => {
         throw new Error('Missing damage response was not preflighted.');
       })(),
@@ -553,27 +575,25 @@ function expectedAttackInstance(
 
 export function foldAttackEvent(
   event: AttackRollEvent,
-  target: {
-    readonly armor_class: TargetArmorClass;
-    readonly roll_state: RollState;
-    readonly damage_responses: readonly TargetDamageResponse[];
-  },
+  target: AttackFoldTarget,
 ): AttackEventFold {
+  const snapshot = snapshotAttackRollEvent(event);
+  const targetSnapshot = snapshotAttackFoldTarget(target);
   const attackEvidenceFailure = attackRollEvidenceFailureReason(
-    event.source,
-    event.attack_roll_clause_id,
-    event.attack_roll_evidence,
+    snapshot.source,
+    snapshot.attack_roll_clause_id,
+    snapshot.attack_roll_evidence,
   );
   if (attackEvidenceFailure !== null) {
     return {
       status: 'unavailable',
-      evidence: event.attack_roll_evidence ?? null,
+      evidence: snapshot.attack_roll_evidence,
       reason: attackEvidenceFailure,
     };
   }
   const damageSourceFailure = attackDamageSourcesFailureReason(
-    event.source,
-    event.damage,
+    snapshot.source,
+    snapshot.damage,
   );
   if (damageSourceFailure !== null) {
     return {
@@ -582,34 +602,34 @@ export function foldAttackEvent(
       reason: damageSourceFailure,
     };
   }
-  if (!criticalHitRuleHasEvidence(event.critical)) {
+  if (!criticalHitRuleHasEvidence(snapshot.critical)) {
     return {
       status: 'unavailable',
-      evidence: event.critical.evidence,
+      evidence: snapshot.critical.evidence,
       reason: 'The cited evidence does not establish this critical-hit range.',
     };
   }
   const missingResponse = missingDamageResponse(
-    event.damage,
-    target.damage_responses,
+    snapshot.damage,
+    targetSnapshot.damage_responses,
   );
   if (missingResponse !== null) {
     return unavailableDamageResponse(missingResponse);
   }
   const chances = attackRollProbabilities(
-    event.attack_bonus,
-    target.armor_class,
-    target.roll_state,
-    event.critical.kind === 'natural_20'
+    snapshot.attack_bonus,
+    targetSnapshot.armor_class,
+    targetSnapshot.roll_state,
+    snapshot.critical.kind === 'natural_20'
       ? 20
-      : event.critical.minimum_roll,
+      : snapshot.critical.minimum_roll,
   );
-  const contributions = event.damage.map((instance) => ({
+  const contributions = snapshot.damage.map((instance) => ({
     source: instance.source,
     damage_type: instance.damage_type,
     expected_damage: expectedAttackInstance(
       instance,
-      target.damage_responses,
+      targetSnapshot.damage_responses,
       chances,
     ),
   }));
@@ -626,28 +646,27 @@ export function foldAttackEvent(
 
 export function foldSavingThrowEvent(
   event: SavingThrowDamageEvent,
-  target: {
-    readonly save_bonus: TargetSaveBonus;
-    readonly damage_responses: readonly TargetDamageResponse[];
-  },
+  target: SavingThrowFoldTarget,
 ): SaveEventFold {
+  const snapshot = snapshotSavingThrowDamageEvent(event);
+  const targetSnapshot = snapshotSavingThrowFoldTarget(target);
   // Validate the effect-bound clause before doing any probability arithmetic.
   // The unavailable arm intentionally retains the independently useful save
   // probability, but it is computed only after the citation has been checked.
   const evidenceFailureReason = saveSuccessOutcomeEvidenceFailureReason(
-    event.source,
-    event.save_success_clause_id,
-    event.on_success,
-    event.ability,
-    event.damage_on_failed_save,
-    event.duration,
-    event.save_dc,
-    event.frequency,
+    snapshot.source,
+    snapshot.save_success_clause_id,
+    snapshot.on_success,
+    snapshot.ability,
+    snapshot.damage_on_failed_save,
+    snapshot.duration,
+    snapshot.save_dc,
+    snapshot.frequency,
   );
   const successProbability = saveSuccessProbability(
-    event.save_dc,
-    target.save_bonus,
-    event.roll_state,
+    snapshot.save_dc,
+    targetSnapshot.save_bonus,
+    snapshot.roll_state,
   );
   const failedProbability = probability(1 - successProbability);
 
@@ -655,17 +674,17 @@ export function foldSavingThrowEvent(
     return {
       status: 'unavailable',
       failed_save_probability: failedProbability,
-      evidence: event.on_success.evidence,
+      evidence: snapshot.on_success.evidence,
       reason: evidenceFailureReason,
     };
   }
 
-  const successDamage = event.on_success.kind === 'sourced_damage'
-    ? event.on_success.damage
+  const successDamage = snapshot.on_success.kind === 'sourced_damage'
+    ? snapshot.on_success.damage
     : [];
   const missingResponse = missingDamageResponse(
-    [...event.damage_on_failed_save, ...successDamage],
-    target.damage_responses,
+    [...snapshot.damage_on_failed_save, ...successDamage],
+    targetSnapshot.damage_responses,
   );
   if (missingResponse !== null) {
     return {
@@ -675,12 +694,12 @@ export function foldSavingThrowEvent(
   }
 
   const failure = foldOrdinaryInstances(
-    event.damage_on_failed_save,
-    target.damage_responses,
+    snapshot.damage_on_failed_save,
+    targetSnapshot.damage_responses,
   );
 
   let success: AvailableDamageEventFold;
-  switch (event.on_success.kind) {
+  switch (snapshot.on_success.kind) {
     case 'none':
       success = registeredAvailableDamageEventFold({
         status: 'available',
@@ -690,17 +709,17 @@ export function foldSavingThrowEvent(
       break;
     case 'half': {
       success = foldOrdinaryInstances(
-        event.damage_on_failed_save,
-        target.damage_responses,
+        snapshot.damage_on_failed_save,
+        targetSnapshot.damage_responses,
         (total) => damageRollTotal(Math.floor(total / 2)),
       );
       break;
     }
     case 'sourced_damage':
       success = foldOrdinaryInstances(
-        event.on_success.damage,
-        target.damage_responses,
-        event.on_success.roll_transform === 'floor_half'
+        snapshot.on_success.damage,
+        targetSnapshot.damage_responses,
+        snapshot.on_success.roll_transform === 'floor_half'
           ? (total) => damageRollTotal(Math.floor(total / 2))
           : undefined,
       );
@@ -729,8 +748,8 @@ export function foldSavingThrowEvent(
     status: 'available',
     failed_save_probability: failedProbability,
     recurrence: {
-      clause_id: event.save_success_clause_id,
-      frequency: event.frequency,
+      clause_id: snapshot.save_success_clause_id,
+      frequency: snapshot.frequency,
     },
     expected_damage: expectedEventDamage(
       failure.expected_damage * failedProbability +
@@ -744,26 +763,28 @@ export function foldAutomaticDamageEvent(
   event: AutomaticDamageEvent,
   responses: readonly TargetDamageResponse[],
 ): DamageEventFold {
+  const snapshot = snapshotAutomaticDamageEvent(event);
+  const responseSnapshot = snapshotTargetDamageResponses(responses);
   const evidenceFailureReason = automaticDamageEvidenceFailureReason(
-    event.source,
-    event.damage_clause_id,
-    event.evidence,
-    event.damage,
-    event.duration,
-    event.frequency,
+    snapshot.source,
+    snapshot.damage_clause_id,
+    snapshot.evidence,
+    snapshot.damage,
+    snapshot.duration,
+    snapshot.frequency,
   );
   if (evidenceFailureReason !== null) {
     return {
       status: 'unavailable',
-      evidence: event.evidence,
+      evidence: snapshot.evidence,
       reason: evidenceFailureReason,
     };
   }
-  const missingResponse = missingDamageResponse(event.damage, responses);
+  const missingResponse = missingDamageResponse(snapshot.damage, responseSnapshot);
   if (missingResponse !== null) {
     return unavailableDamageResponse(missingResponse);
   }
-  return foldOrdinaryInstances(event.damage, responses);
+  return foldOrdinaryInstances(snapshot.damage, responseSnapshot);
 }
 
 /**

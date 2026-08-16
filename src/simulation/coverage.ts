@@ -10,6 +10,8 @@ import {
   BUNDLED_SRD_5_2_1_PATH,
   reviewedResourceRecoverySourceSha256Oracle,
   saveSuccessClauseId,
+  snapshotPublicSourceRef,
+  snapshotSourceRef,
   sourceStableKey,
   unmodelledIssueKinds,
   unmodelledIssueId,
@@ -1729,11 +1731,17 @@ export const saveSuccessOutcomeEvidenceManifest: ReadonlyMap<
 );
 
 function samePublicSource(left: PublicSourceRef, right: PublicSourceRef): boolean {
-  if (left.kind !== right.kind || left.path !== right.path) {
+  const leftSnapshot = snapshotPublicSourceRef(left);
+  const rightSnapshot = snapshotPublicSourceRef(right);
+  if (
+    leftSnapshot.kind !== rightSnapshot.kind ||
+    leftSnapshot.path !== rightSnapshot.path
+  ) {
     return false;
   }
-  return left.kind === 'project_owned' ||
-    (right.kind === 'bundled_srd' && left.heading === right.heading);
+  return leftSnapshot.kind === 'project_owned' ||
+    (rightSnapshot.kind === 'bundled_srd' &&
+      leftSnapshot.heading === rightSnapshot.heading);
 }
 
 function sameSourceRef(left: SourceRef, right: SourceRef): boolean {
@@ -2034,16 +2042,13 @@ export const registeredAttackRollClauses: ReadonlyMap<
  * attacks will need a separately reviewed spell-clause route when introduced.
  * This probability layer has no character repository or weapon-catalog handle,
  * so the caller must establish that `weapon_id` exists before registration.
- * Registration binds that trusted character weapon identity; it does not try
- * to replace the sheet assembler's caller-supplied attack arithmetic. SourceRef
- * is a value object, so an equal structural copy is indistinguishable from the
- * caller's original object. Weapon damage amounts share the already-declared
- * caller-trust boundary with the caller-supplied attack bonus.
- *
- * D263 keeps deliberate in-process prototype reassignment and post-hoc
- * mutation of returned or minted objects inside that caller-trust boundary.
- * Deep-freezing handed-out registered state remains an accident tripwire, not
- * a guarantee against self-sabotage; the existing freezes stay in place.
+ * Registration binds a one-pass snapshot of that trusted character weapon
+ * identity; later changes to the caller object cannot split the clause ID from
+ * the stored source. It does not try to replace the sheet assembler's
+ * caller-supplied attack arithmetic. SourceRef is a value object, so an equal
+ * structural copy remains indistinguishable from the caller's original value.
+ * Weapon damage amounts share the already-declared caller-trust boundary with
+ * the caller-supplied attack bonus, after both have been snapshotted at entry.
  */
 export function registerCharacterWeaponAttackClause(
   source: SourceRef & { readonly kind: 'character_weapon' },
@@ -2051,23 +2056,20 @@ export function registerCharacterWeaponAttackClause(
   readonly attack_roll_clause_id: AttackRollClauseId;
   readonly attack_roll_evidence: PublicSourceRef;
 } {
-  if (source.kind !== 'character_weapon') {
+  const sourceSnapshot = snapshotSourceRef(source);
+  if (sourceSnapshot.kind !== 'character_weapon') {
     throw new TypeError('Only character weapons can use the weapon attack registration route.');
   }
   const clauseId = (
-    `character-weapon:${String(source.weapon_id)}:${encodeURIComponent(source.stable_key)}:attack-roll`
+    `character-weapon:${String(sourceSnapshot.weapon_id)}:${encodeURIComponent(sourceSnapshot.stable_key)}:attack-roll`
   ) as AttackRollClauseId;
   const evidence = publicProbabilityCoverageManifest.attack_roll;
   const existing = registeredAttackRollClauseBacking.get(clauseId);
-  if (existing !== undefined && !sameSourceRef(existing.source, source)) {
+  if (existing !== undefined && !sameSourceRef(existing.source, sourceSnapshot)) {
     throw new TypeError('Attack-roll clause identity collides with another weapon source.');
   }
   const registeredClause = deepFreeze({
-    source: {
-      kind: source.kind,
-      weapon_id: source.weapon_id,
-      stable_key: source.stable_key,
-    },
+    source: sourceSnapshot,
     evidence,
   });
   registeredAttackRollClauseBacking.set(clauseId, registeredClause);
@@ -2087,8 +2089,19 @@ export function attackDamageSourcesFailureReason(
   attackSource: SourceRef,
   damage: readonly AttackDamageInstance[],
 ): string | null {
-  for (const instance of damage) {
-    if (!sameSourceRef(instance.source, attackSource)) {
+  const sourceSnapshot = snapshotSourceRef(attackSource);
+  const damageCount = damage.length;
+  if (!Number.isSafeInteger(damageCount) || damageCount < 0) {
+    throw new TypeError('Attack damage instances must have a valid length.');
+  }
+  const damageSources: SourceRef[] = [];
+  for (let index = 0; index < damageCount; index += 1) {
+    const instance = damage[index] as AttackDamageInstance;
+    const instanceSource = instance.source;
+    damageSources.push(snapshotSourceRef(instanceSource));
+  }
+  for (const damageSource of damageSources) {
+    if (!sameSourceRef(damageSource, sourceSnapshot)) {
       return 'Every attack damage instance must use the attack event source; unreviewed rider sources are unavailable.';
     }
   }

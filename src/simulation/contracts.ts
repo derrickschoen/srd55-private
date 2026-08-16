@@ -6,7 +6,14 @@ import type {
   SourceInstanceId,
   Brand,
 } from '../domain/ids';
-import type { Ability, DamageType, DieSize } from '../domain/enums';
+import {
+  abilities,
+  damageType,
+  isDieSize,
+  type Ability,
+  type DamageType,
+  type DieSize,
+} from '../domain/enums';
 
 export type NonEmptyReadonlyArray<T> = readonly [T, ...T[]];
 
@@ -718,6 +725,465 @@ export type AutomaticDamageEvent = {
   readonly damage: NonEmptyReadonlyArray<DamageInstance>;
 };
 
+function frozenPlain<T extends object>(value: T): Readonly<T> {
+  return Object.freeze(value);
+}
+
+function snapshotArray<T, U>(
+  values: readonly T[],
+  snapshot: (value: T) => U,
+): readonly U[] {
+  const length = values.length;
+  if (!Number.isSafeInteger(length) || length < 0) {
+    throw new TypeError('Snapshot arrays must have a valid length.');
+  }
+  const result: U[] = [];
+  for (let index = 0; index < length; index += 1) {
+    result.push(snapshot(values[index] as T));
+  }
+  return Object.freeze(result);
+}
+
+function snapshotNonEmptyArray<T, U>(
+  values: NonEmptyReadonlyArray<T>,
+  snapshot: (value: T) => U,
+  label: string,
+): NonEmptyReadonlyArray<U> {
+  const result = snapshotArray(values, snapshot);
+  if (result.length === 0) {
+    throw new TypeError(`${label} must be nonempty.`);
+  }
+  return result as NonEmptyReadonlyArray<U>;
+}
+
+/** Captures a caller-owned source value without retaining its object. */
+export function snapshotSourceRef(source: SourceRef): SourceRef {
+  const kind = source.kind;
+  switch (kind) {
+    case 'character_source': {
+      const sourceInstanceId = source.source_instance_id;
+      const stableKey = source.stable_key;
+      return frozenPlain({
+        kind,
+        source_instance_id: finiteInteger(
+          sourceInstanceId,
+          'Character source instance ID',
+        ) as SourceInstanceId,
+        stable_key: sourceStableKey(stableKey),
+      });
+    }
+    case 'catalog_content': {
+      const contentKey = source.content_key;
+      const stableKey = source.stable_key;
+      return frozenPlain({
+        kind,
+        content_key: nonemptyKey(contentKey, 'Catalog content key') as ContentKey,
+        stable_key: sourceStableKey(stableKey),
+      });
+    }
+    case 'character_weapon': {
+      const weaponId = source.weapon_id;
+      const stableKey = source.stable_key;
+      return frozenPlain({
+        kind,
+        weapon_id: finiteInteger(weaponId, 'Character weapon ID') as CharacterWeaponId,
+        stable_key: sourceStableKey(stableKey),
+      });
+    }
+    default:
+      throw new TypeError(`Simulation source kind is invalid: ${String(kind)}.`);
+  }
+}
+
+/** Captures a caller-owned public citation without retaining its object. */
+export function snapshotPublicSourceRef(source: PublicSourceRef): PublicSourceRef {
+  const kind = source.kind;
+  switch (kind) {
+    case 'bundled_srd': {
+      const path = source.path;
+      const heading = source.heading;
+      return frozenPlain({
+        kind,
+        path: bundledSrdPath(path),
+        heading: nonemptyKey(heading, 'Bundled SRD heading') as BundledSrdHeading,
+      });
+    }
+    case 'project_owned': {
+      const path = source.path;
+      return frozenPlain({ kind, path: projectOwnedSourcePath(path) });
+    }
+    default:
+      throw new TypeError(`Public source kind is invalid: ${String(kind)}.`);
+  }
+}
+
+export function snapshotDicePool(pool: DicePool): DicePool {
+  const count = pool.count;
+  const die = pool.die;
+  if (typeof die !== 'number' || !isDieSize(die)) {
+    throw new RangeError(`Die size is invalid: ${String(die)}.`);
+  }
+  return frozenPlain({ count: positiveDiceCount(count), die });
+}
+
+function snapshotDamageType(value: DamageType): DamageType {
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    value.includes('\u0000')
+  ) {
+    throw new TypeError('Damage type must be nonempty and contain no NUL bytes.');
+  }
+  return damageType(value);
+}
+
+export function snapshotDamageComponent(
+  component: DamageComponent,
+): DamageComponent {
+  const kind = component.kind;
+  switch (kind) {
+    case 'dice': {
+      const pool = component.pool;
+      return frozenPlain({ kind, pool: snapshotDicePool(pool) });
+    }
+    case 'flat': {
+      const modifier = component.modifier;
+      return frozenPlain({ kind, modifier: damageFlatModifier(modifier) });
+    }
+    default:
+      throw new TypeError(`Damage component kind is invalid: ${String(kind)}.`);
+  }
+}
+
+export function snapshotDamageInstance(instance: DamageInstance): DamageInstance {
+  const source = instance.source;
+  const damageTypeValue = instance.damage_type;
+  const components = instance.components;
+  return frozenPlain({
+    source: snapshotSourceRef(source),
+    damage_type: snapshotDamageType(damageTypeValue),
+    components: snapshotNonEmptyArray(
+      components,
+      snapshotDamageComponent,
+      'Damage components',
+    ),
+  });
+}
+
+export function snapshotAttackDamageComponent(
+  component: AttackDamageComponent,
+): AttackDamageComponent {
+  const kind = component.kind;
+  const trigger = component.trigger;
+  if (trigger !== 'hit' && trigger !== 'critical_hit' && trigger !== 'miss') {
+    throw new TypeError(`Attack damage trigger is invalid: ${String(trigger)}.`);
+  }
+  switch (kind) {
+    case 'dice': {
+      const pool = component.pool;
+      return frozenPlain({ kind, pool: snapshotDicePool(pool), trigger });
+    }
+    case 'flat': {
+      const modifier = component.modifier;
+      return frozenPlain({
+        kind,
+        modifier: damageFlatModifier(modifier),
+        trigger,
+      });
+    }
+    default:
+      throw new TypeError(`Attack damage component kind is invalid: ${String(kind)}.`);
+  }
+}
+
+export function snapshotAttackDamageInstance(
+  instance: AttackDamageInstance,
+): AttackDamageInstance {
+  const source = instance.source;
+  const damageTypeValue = instance.damage_type;
+  const components = instance.components;
+  return frozenPlain({
+    source: snapshotSourceRef(source),
+    damage_type: snapshotDamageType(damageTypeValue),
+    components: snapshotNonEmptyArray(
+      components,
+      snapshotAttackDamageComponent,
+      'Attack damage components',
+    ),
+  });
+}
+
+function snapshotEventFrequency(frequency: EventFrequency): EventFrequency {
+  const kind = frequency.kind;
+  switch (kind) {
+    case 'each_declared_event':
+      return frozenPlain({ kind });
+    case 'once_per_turn': {
+      const turn = frequency.turn;
+      const evidence = frequency.evidence;
+      if (turn !== 'source' && turn !== 'target') {
+        throw new TypeError(`Event-frequency turn is invalid: ${String(turn)}.`);
+      }
+      return frozenPlain({
+        kind,
+        turn,
+        evidence: snapshotPublicSourceRef(evidence),
+      });
+    }
+    case 'once_per_round': {
+      const evidence = frequency.evidence;
+      return frozenPlain({ kind, evidence: snapshotPublicSourceRef(evidence) });
+    }
+    default:
+      throw new TypeError(`Event frequency is invalid: ${String(kind)}.`);
+  }
+}
+
+function snapshotSavingThrowDamageDuration(
+  duration: SavingThrowDamageDuration,
+): SavingThrowDamageDuration {
+  const kind = duration.kind;
+  switch (kind) {
+    case 'instantaneous':
+      return frozenPlain({ kind });
+    case 'includes_delayed_damage': {
+      const delayedUntil = duration.delayed_until;
+      if (delayedUntil !== 'end_of_target_next_turn') {
+        throw new TypeError(
+          `Saving-throw delayed duration is invalid: ${String(delayedUntil)}.`,
+        );
+      }
+      return frozenPlain({ kind, delayed_until: delayedUntil });
+    }
+    default:
+      throw new TypeError(`Saving-throw duration is invalid: ${String(kind)}.`);
+  }
+}
+
+function snapshotSaveSuccessOutcome(
+  outcome: SaveSuccessOutcome,
+): SaveSuccessOutcome {
+  const kind = outcome.kind;
+  const evidence = outcome.evidence;
+  switch (kind) {
+    case 'none':
+    case 'half':
+      return frozenPlain({ kind, evidence: snapshotPublicSourceRef(evidence) });
+    case 'sourced_damage': {
+      const damage = outcome.damage;
+      const rollTransform = outcome.roll_transform;
+      if (rollTransform !== 'none' && rollTransform !== 'floor_half') {
+        throw new TypeError(
+          `Successful-save roll transform is invalid: ${String(rollTransform)}.`,
+        );
+      }
+      return frozenPlain({
+        kind,
+        evidence: snapshotPublicSourceRef(evidence),
+        damage: snapshotNonEmptyArray(
+          damage,
+          snapshotDamageInstance,
+          'Successful-save damage instances',
+        ),
+        roll_transform: rollTransform,
+      });
+    }
+    default:
+      throw new TypeError(`Successful-save outcome is invalid: ${String(kind)}.`);
+  }
+}
+
+function snapshotRollState(state: RollState): RollState {
+  if (!(rollStates as readonly unknown[]).includes(state)) {
+    throw new TypeError(`Roll state is invalid: ${String(state)}.`);
+  }
+  return state;
+}
+
+function snapshotAbility(ability: Ability): Ability {
+  if (!(abilities as readonly unknown[]).includes(ability)) {
+    throw new TypeError(`Saving-throw ability is invalid: ${String(ability)}.`);
+  }
+  return ability;
+}
+
+function snapshotDamageResponse(response: TargetDamageResponse): TargetDamageResponse {
+  const damageTypeValue = response.damage_type;
+  const responseValue = response.response;
+  if (!(damageResponses as readonly unknown[]).includes(responseValue)) {
+    throw new TypeError(`Damage response is invalid: ${String(responseValue)}.`);
+  }
+  return frozenPlain({
+    damage_type: snapshotDamageType(damageTypeValue),
+    response: responseValue,
+  });
+}
+
+export type AttackFoldTarget = {
+  readonly armor_class: TargetArmorClass;
+  readonly roll_state: RollState;
+  readonly damage_responses: readonly TargetDamageResponse[];
+};
+
+export type SavingThrowFoldTarget = {
+  readonly save_bonus: TargetSaveBonus;
+  readonly damage_responses: readonly TargetDamageResponse[];
+};
+
+export function snapshotAttackFoldTarget(target: AttackFoldTarget): AttackFoldTarget {
+  const armorClass = target.armor_class;
+  const rollState = target.roll_state;
+  const damageResponsesValue = target.damage_responses;
+  return frozenPlain({
+    armor_class: targetArmorClass(armorClass),
+    roll_state: snapshotRollState(rollState),
+    damage_responses: snapshotArray(damageResponsesValue, snapshotDamageResponse),
+  });
+}
+
+export function snapshotSavingThrowFoldTarget(
+  target: SavingThrowFoldTarget,
+): SavingThrowFoldTarget {
+  const saveBonus = target.save_bonus;
+  const damageResponsesValue = target.damage_responses;
+  return frozenPlain({
+    save_bonus: targetSaveBonus(saveBonus),
+    damage_responses: snapshotArray(damageResponsesValue, snapshotDamageResponse),
+  });
+}
+
+export function snapshotTargetDamageResponses(
+  responses: readonly TargetDamageResponse[],
+): readonly TargetDamageResponse[] {
+  return snapshotArray(responses, snapshotDamageResponse);
+}
+
+export function snapshotDamageComponents(
+  components: readonly DamageComponent[],
+): readonly DamageComponent[] {
+  return snapshotArray(components, snapshotDamageComponent);
+}
+
+function snapshotCriticalHitRule(rule: CriticalHitRule): CriticalHitRule {
+  const kind = rule.kind;
+  const evidence = rule.evidence;
+  switch (kind) {
+    case 'natural_20':
+      return frozenPlain({ kind, evidence: snapshotPublicSourceRef(evidence) });
+    case 'expanded_range': {
+      const minimumRoll = rule.minimum_roll;
+      return frozenPlain({
+        kind,
+        minimum_roll: expandedCriticalMinimumRoll(minimumRoll),
+        evidence: snapshotPublicSourceRef(evidence),
+      });
+    }
+    default:
+      throw new TypeError(`Critical-hit rule is invalid: ${String(kind)}.`);
+  }
+}
+
+export function snapshotAttackRollEvent(event: AttackRollEvent): AttackRollEvent {
+  const kind = event.kind;
+  const eventId = event.event_id;
+  const source = event.source;
+  const clauseId = event.attack_roll_clause_id;
+  const evidence = event.attack_roll_evidence;
+  const attackBonus = event.attack_bonus;
+  const frequency = event.frequency;
+  const duration = event.duration;
+  const critical = event.critical;
+  const damage = event.damage;
+  if (kind !== 'attack_roll' || duration.kind !== 'instantaneous') {
+    throw new TypeError('Attack events must be instantaneous attack rolls.');
+  }
+  return frozenPlain({
+    kind,
+    event_id: routineEventId(eventId),
+    source: snapshotSourceRef(source),
+    attack_roll_clause_id: nonemptyKey(
+      clauseId,
+      'Attack-roll clause ID',
+    ) as AttackRollClauseId,
+    attack_roll_evidence: snapshotPublicSourceRef(evidence),
+    attack_bonus: attackRollModifier(attackBonus),
+    frequency: snapshotEventFrequency(frequency),
+    duration: frozenPlain({ kind: 'instantaneous' }),
+    critical: snapshotCriticalHitRule(critical),
+    damage: snapshotNonEmptyArray(
+      damage,
+      snapshotAttackDamageInstance,
+      'Attack damage instances',
+    ),
+  });
+}
+
+export function snapshotSavingThrowDamageEvent(
+  event: SavingThrowDamageEvent,
+): SavingThrowDamageEvent {
+  const kind = event.kind;
+  const eventId = event.event_id;
+  const source = event.source;
+  const ability = event.ability;
+  const saveDc = event.save_dc;
+  const rollState = event.roll_state;
+  const frequency = event.frequency;
+  const duration = event.duration;
+  const clauseId = event.save_success_clause_id;
+  const failedDamage = event.damage_on_failed_save;
+  const onSuccess = event.on_success;
+  if (kind !== 'saving_throw_damage') {
+    throw new TypeError('Saving-throw damage event kind is invalid.');
+  }
+  return frozenPlain({
+    kind,
+    event_id: routineEventId(eventId),
+    source: snapshotSourceRef(source),
+    ability: snapshotAbility(ability),
+    save_dc: saveDifficultyClass(saveDc),
+    roll_state: snapshotRollState(rollState),
+    frequency: snapshotEventFrequency(frequency),
+    duration: snapshotSavingThrowDamageDuration(duration),
+    save_success_clause_id: saveSuccessClauseId(clauseId),
+    damage_on_failed_save: snapshotNonEmptyArray(
+      failedDamage,
+      snapshotDamageInstance,
+      'Failed-save damage instances',
+    ),
+    on_success: snapshotSaveSuccessOutcome(onSuccess),
+  });
+}
+
+export function snapshotAutomaticDamageEvent(
+  event: AutomaticDamageEvent,
+): AutomaticDamageEvent {
+  const kind = event.kind;
+  const eventId = event.event_id;
+  const source = event.source;
+  const clauseId = event.damage_clause_id;
+  const evidence = event.evidence;
+  const frequency = event.frequency;
+  const duration = event.duration;
+  const damage = event.damage;
+  if (kind !== 'automatic_damage' || duration.kind !== 'instantaneous') {
+    throw new TypeError('Automatic damage events must be instantaneous.');
+  }
+  return frozenPlain({
+    kind,
+    event_id: routineEventId(eventId),
+    source: snapshotSourceRef(source),
+    damage_clause_id: saveSuccessClauseId(clauseId),
+    evidence: snapshotPublicSourceRef(evidence),
+    frequency: snapshotEventFrequency(frequency),
+    duration: frozenPlain({ kind: 'instantaneous' }),
+    damage: snapshotNonEmptyArray(
+      damage,
+      snapshotDamageInstance,
+      'Automatic damage instances',
+    ),
+  });
+}
+
 export type ApplySetupEvent = {
   readonly kind: 'setup';
   readonly event_id: RoutineEventId;
@@ -1088,8 +1554,32 @@ export function simResourcePoolSet(
   const logicalIdentityById = new Map<SimResourceId, string>();
   const poolsById = new Map<SimResourceId, SimResourcePool>();
   const validatedPools: SimResourcePool[] = [];
-  for (const pool of pools) {
-    const { id, logical_key: logicalKey } = pool;
+  const poolCount = pools.length;
+  if (!Number.isSafeInteger(poolCount) || poolCount < 0) {
+    throw new TypeError('Simulation resource pools must have a valid length.');
+  }
+  for (let index = 0; index < poolCount; index += 1) {
+    const callerPool = pools[index] as SimResourcePool;
+    const rawId = callerPool.id;
+    const rawLogicalKey = callerPool.logical_key;
+    const rawSource = callerPool.source;
+    const rawMaximum = callerPool.maximum;
+    const rawRecovery = callerPool.recovery;
+    const id = simResourceId(rawId);
+    const logicalKey = simResourcePoolKey(rawLogicalKey);
+    const maximum = positiveResourceMaximum(rawMaximum);
+    const shortRest = rawRecovery.short_rest;
+    const longRest = rawRecovery.long_rest;
+    const pool = frozenPlain({
+      id,
+      logical_key: logicalKey,
+      source: snapshotSourceRef(rawSource),
+      maximum,
+      recovery: frozenPlain({
+        short_rest: snapshotResourceRecoveryRule(shortRest, maximum),
+        long_rest: snapshotResourceRecoveryRule(longRest, maximum),
+      }),
+    });
     if (ids.has(id)) {
       throw new TypeError(`Duplicate simulation resource pool ID: ${id}.`);
     }
@@ -1114,6 +1604,33 @@ export function simResourcePoolSet(
   logicalPoolIdentityBySet.set(frozen, logicalIdentityById);
   resourcePoolsBySet.set(frozen, poolsById);
   return frozen;
+}
+
+function snapshotResourceRecoveryRule(
+  rule: ResourceRecoveryRule,
+  maximum: PositiveResourceMaximum,
+): ResourceRecoveryRule {
+  const kind = rule.kind;
+  switch (kind) {
+    case 'none':
+      return frozenPlain({ kind });
+    case 'fixed':
+    case 'fixed_once_per_long_rest': {
+      const amount = rule.amount;
+      const evidence = rule.evidence;
+      return frozenPlain({
+        kind,
+        amount: positiveResourceRecoveryAmount(amount, maximum),
+        evidence,
+      });
+    }
+    case 'all': {
+      const evidence = rule.evidence;
+      return frozenPlain({ kind, evidence });
+    }
+    default:
+      throw new TypeError(`Resource-recovery rule kind is invalid: ${String(kind)}.`);
+  }
 }
 
 export class ResourceRecoverySession {

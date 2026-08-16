@@ -216,7 +216,7 @@ const attackEvent = (evidence: unknown) =>
     source: attackSource,
     ...attackRegistration,
     attack_bonus: attackRollModifier(0),
-    frequency: { kind: 'at_will' },
+    frequency: { kind: 'each_declared_event' },
     duration: { kind: 'instantaneous' },
     critical: { kind: 'natural_20', evidence },
     damage: [
@@ -273,7 +273,7 @@ const critEvent = (crit: unknown) =>
     source: attackSource,
     ...attackRegistration,
     attack_bonus: attackRollModifier(0),
-    frequency: { kind: 'at_will' },
+    frequency: { kind: 'each_declared_event' },
     duration: { kind: 'instantaneous' },
     critical: crit,
     damage: [
