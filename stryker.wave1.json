@@ -1,0 +1,23 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "mutate": [
+    "src/simulation/contracts.ts:340-380",
+    "src/simulation/coverage.ts:600-690",
+    "src/simulation/route.ts",
+    "src/simulation/headline.ts",
+    "src/simulation/request.ts"
+  ],
+  "mutator": { "excludedMutations": ["Regex"] },
+  "testRunner": "vitest",
+  "vitest": { "configFile": "vitest.config.ts" },
+  "checkers": ["typescript"],
+  "tsconfigFile": "tsconfig.json",
+  "coverageAnalysis": "perTest",
+  "reporters": ["json", "progress"],
+  "jsonReporter": { "fileName": "reports/wave1-verification.json" },
+  "thresholds": { "high": 90, "low": 70, "break": null },
+  "timeoutMS": 20000,
+  "concurrency": 12,
+  "tempDirName": ".stryker-tmp-wave1",
+  "cleanTempDir": true
+}

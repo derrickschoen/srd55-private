@@ -49,6 +49,18 @@ are pinned exactly to 9.6.1 in package.json for this reason. Verify a fresh
 apply with the narrow experiment configs `stryker.exp1.json` /
 `stryker.exp2.json`.
 
+## Why `tsconfigFile: "tsconfig.json"` is correct here (and only here)
+
+The repo gate rule says never `npx tsc -p tsconfig.json` — the root config is
+a solution file (`files: []`, only project references) and `tsc -p` exits 0
+checking nothing. Stryker's typescript-checker is different: it uses
+`ts.createSolutionBuilder` (see
+`node_modules/@stryker-mutator/typescript-checker/dist/src/typescript-compiler.js`),
+which walks project references the way `tsc -b` does. Evidence it works: the
+2026-08-16 full run reported 1,455 CompileError mutants. Do not "fix" the
+Stryker config to point at `tsconfig.app.json`; do not use the root config
+with `tsc -p`.
+
 ## What NOT to do
 
 - Do not enable `ignoreStatic` — it discards static mutants instead of scoring
