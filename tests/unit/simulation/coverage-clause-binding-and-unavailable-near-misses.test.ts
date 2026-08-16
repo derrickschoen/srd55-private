@@ -442,6 +442,30 @@ describe('unavailable-source requirements and transform agreement', () => {
     ).toBe(GEAS_GROUPING_ORACLE_MESSAGE);
   });
 
+  it('keeps a floor-half success occurrence unenforced when no requirements entry exists', async () => {
+    // No injected requirements: `unavailableRequirements` is undefined, so the
+    // transform-agreement guard (coverage.ts:1102, `unavailableRequirements
+    // !== undefined && ...`) must be SKIPPED even though the source shows a
+    // floor_half success occurrence that disagrees with the 'none' fallback.
+    // A mutant forcing the left conjunct to true starts enforcing the absent
+    // entry and throws before the grouping oracle this test pins.
+    expect(
+      await moduleEvaluationMessage({
+        clauses: geas({
+          damage_occurrences: [
+            occurrence({ arm: 'failure' }),
+            occurrence({
+              arm: 'success',
+              roll_transform: 'floor_half',
+              roll_index: 1,
+              slot_index: 0,
+            }),
+          ],
+        }),
+      }),
+    ).toBe(GEAS_GROUPING_ORACLE_MESSAGE);
+  });
+
   it('refuses an available success arm that has no independently reviewed requirements', async () => {
     expect(
       await moduleEvaluationMessage({

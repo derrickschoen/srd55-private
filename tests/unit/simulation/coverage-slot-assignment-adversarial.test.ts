@@ -348,6 +348,17 @@ describe('supplied-pool matching inside the damage signature matcher', () => {
     ).toBe(GENERIC_REASON);
   });
 
+  it('refuses a flat pool one point below the declared amount', () => {
+    // The dice slot is fully funded but the flat pool holds 39 against a
+    // declared 40: the remaining-amount check inside the slot matcher
+    // (coverage.ts:1837, `(remaining[localIndex] ?? 0) >= amount`) is the only
+    // clause that can refuse the assignment. A mutant forcing that check to
+    // true accepts the underfunded pool and drives the remainder negative.
+    expect(
+      reasonForDisintegrate(disintegrateDamage([dicePool(10, 6), flatPool(39)])),
+    ).toBe(GENERIC_REASON);
+  });
+
   it('refuses a flat pool one point above the declared amount', () => {
     // Every slot is assignable and the dice pool lands on exactly zero; the
     // flat pool is left holding 1, so the all-pools-consumed check at the leaf
