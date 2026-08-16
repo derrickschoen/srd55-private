@@ -141,8 +141,8 @@ function saveEvent(
 const diceDamage = (
   clause: typeof reviewedSaveSuccessClauses.flame_strike,
   count: number,
-  die: 6 | 10,
-  type: 'Fire' | 'Radiant' | 'Bludgeoning' | 'Cold',
+  die: 6 | 8 | 10,
+  type: 'Fire' | 'Radiant' | 'Bludgeoning' | 'Cold' | 'Necrotic',
 ): SavingThrowDamageEvent['damage_on_failed_save'][number] => ({
   source: clause.effect_source,
   damage_type: damageType(type),

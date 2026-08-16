@@ -12,6 +12,7 @@ import {
   type AttackRollEvent,
   type AutomaticDamageEvent,
   type CatalogMechanicCoverage,
+  type DamageNeutralMechanicId,
   type PublicSourceRef,
   type SavingThrowDamageEvent,
   type SourceRef,
@@ -541,7 +542,12 @@ describe('confirmed review findings after repair', () => {
         sourceStableKey('srd-5.2.1:spell:fireball:flammable-objects'),
     };
     const evidence = bundledSrdSourceRef('Fireball');
-    expect(() => damageNeutralityEvidence(forgedWeapon, evidence)).toThrow(
+    // Deliberately pass a forged object through the runtime refusal path; the
+    // public contract otherwise makes this invalid mechanic ID unrepresentable.
+    expect(() => damageNeutralityEvidence(
+      forgedWeapon as unknown as DamageNeutralMechanicId,
+      evidence,
+    )).toThrow(
       'does not establish neutrality for this mechanic',
     );
   });
@@ -566,7 +572,8 @@ describe('confirmed review findings after repair', () => {
     // existence proved neutrality. That was the wrong behavior: relevance is
     // now checked against the mechanic stable key before a proof can be minted.
     expect(() => damageNeutralityEvidence(
-      source,
+      // This object is intentionally invalid so the runtime refusal is tested.
+      source as unknown as DamageNeutralMechanicId,
       bundledSrdSourceRef('Fireball'),
     )).toThrow('does not establish neutrality for this mechanic');
   });

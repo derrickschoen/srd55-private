@@ -55,7 +55,9 @@ const src = (key: string): SourceRef => {
   const stableKey = sourceStableKey(key);
   return {
     kind: 'catalog_content',
-    content_key: stableKey as ContentKey,
+    // This refusal probe deliberately crosses two distinct branded-ID types so
+    // the malformed runtime value reaches the production validation path.
+    content_key: stableKey as unknown as ContentKey,
     stable_key: stableKey,
   };
 };

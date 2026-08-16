@@ -468,6 +468,9 @@ describe('damage responses and save outcomes', () => {
       ],
     });
     expect(result.status).toBe('available');
+    if (result.status !== 'available') {
+      throw new Error('The resistant save fold must remain available.');
+    }
     // floor(1/2) through floor(6/2) = 0,1,1,2,2,3.
     expect(result.expected_damage).toBe(1.5);
     expect(result.expected_damage).not.toBe(1.75);

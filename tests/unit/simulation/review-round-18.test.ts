@@ -41,7 +41,9 @@ describe('round 18 captured Map intrinsics', () => {
     // change that lookup nor receive a backing that could gain forged -> 950.
     expect(stolen).toBeUndefined();
     expect(result).toBe(1);
-    expect(view.has('forged')).toBe(false);
+    // Deliberately exercise the runtime path with a key outside this Map's
+    // literal-key contract; production callers cannot supply this value.
+    expect(view.has('forged' as unknown as 'reviewed')).toBe(false);
   });
 
   it('keeps iteration correct without exposing its backing through poisoned entries', () => {
@@ -121,6 +123,9 @@ describe('round 18 deeply immutable registered state', () => {
       damage_responses: [{ damage_type: fire, response: 'normal' }],
     });
     expect(result.status).toBe('available');
+    if (result.status !== 'available') {
+      throw new Error('The canonical Fireball fold must remain available.');
+    }
     // DC 11 vs +0 fails on 1..10: 1/2 * E[8d6] +
     // 1/2 * E[floor(8d6/2)] = 1/2 * 28 + 1/2 * 13.75 = 20.875.
     expect(result.expected_damage).toBeCloseTo(20.875, 12);

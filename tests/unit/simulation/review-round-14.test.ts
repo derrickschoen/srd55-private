@@ -158,6 +158,9 @@ describe('round 14 damage-roll grouping drift alarms', () => {
     ]), target);
     expect(separateRolls.status).toBe('available');
     expect(oneRoll.status).toBe('available');
+    if (separateRolls.status !== 'available' || oneRoll.status !== 'available') {
+      throw new Error('Both reviewed damage-roll groupings must remain available.');
+    }
     // DC 21 vs +0 fails on every face. For S made of d6s,
     // E[floor(S/2)] = (E[S] - P(S odd)) / 2 and P(S odd) = 1/2:
     // two separate 5d6 rolls give 2 * (17.5 - 0.5) / 2 = 17;

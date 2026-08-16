@@ -120,7 +120,9 @@ describe('round 9 refusal discipline reproductions', () => {
     const input = {
       save_dc: saveDifficultyClass(11),
       duration: { kind: 'instantaneous' } as const,
-      damage_on_failed_save: [damage(clause.effect_source, 'Bludgeoning', 5, 10)],
+      damage_on_failed_save: [
+        damage(clause.effect_source, 'Bludgeoning', 5, 10),
+      ] as const,
       on_success: { kind: 'none' as const, evidence: clause.evidence },
     };
     expect(foldSavingThrowEvent(saveEvent(clause, {

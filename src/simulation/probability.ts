@@ -56,10 +56,18 @@ export type DamageFoldContribution = {
   readonly expected_damage: ExpectedEventDamage;
 };
 
-export type AvailableDamageEventFold = {
+const registeredAvailableDamageEventFoldBrand: unique symbol = Symbol(
+  'RegisteredAvailableDamageEventFold',
+);
+
+type AvailableDamageEventFoldFields = {
   readonly status: 'available';
   readonly expected_damage: ExpectedEventDamage;
   readonly contributions: readonly DamageFoldContribution[];
+};
+
+export type AvailableDamageEventFold = AvailableDamageEventFoldFields & {
+  readonly [registeredAvailableDamageEventFoldBrand]: true;
 };
 
 export type UnavailableDamageEventFold = {
@@ -102,6 +110,19 @@ export type RoundDamageFold =
       readonly status: 'unavailable';
       readonly failures: NonEmptyReadonlyArray<UnavailableDamageEventFold>;
     };
+
+/** Mints the runtime marker that only evidence-checked event-fold paths use. */
+function registeredAvailableDamageEventFold<
+  T extends AvailableDamageEventFoldFields,
+>(fold: T): T & AvailableDamageEventFold {
+  Object.defineProperty(fold, registeredAvailableDamageEventFoldBrand, {
+    value: true,
+    enumerable: false,
+    configurable: false,
+    writable: false,
+  });
+  return fold as T & AvailableDamageEventFold;
+}
 
 function addProbability(
   outcomes: Map<number, number>,
@@ -490,13 +511,13 @@ function foldOrdinaryInstances(
       adjustment,
     ),
   }));
-  return {
+  return registeredAvailableDamageEventFold({
     status: 'available',
     expected_damage: sumExpected(
       contributions.map((contribution) => contribution.expected_damage),
     ),
     contributions,
-  };
+  });
 }
 
 function expectedAttackInstance(
@@ -590,7 +611,7 @@ export function foldAttackEvent(
       chances,
     ),
   }));
-  return {
+  return registeredAvailableDamageEventFold({
     status: 'available',
     hit_probability: chances.hit,
     critical_probability: chances.critical,
@@ -598,7 +619,7 @@ export function foldAttackEvent(
       contributions.map((contribution) => contribution.expected_damage),
     ),
     contributions,
-  };
+  });
 }
 
 export function foldSavingThrowEvent(
@@ -659,11 +680,11 @@ export function foldSavingThrowEvent(
   let success: AvailableDamageEventFold;
   switch (event.on_success.kind) {
     case 'none':
-      success = {
+      success = registeredAvailableDamageEventFold({
         status: 'available',
         expected_damage: expectedEventDamage(0),
         contributions: [],
-      };
+      });
       break;
     case 'half': {
       success = foldOrdinaryInstances(
@@ -702,7 +723,7 @@ export function foldSavingThrowEvent(
   failure.contributions.forEach((value) => addWeighted(value, failedProbability));
   success.contributions.forEach((value) => addWeighted(value, successProbability));
 
-  return {
+  return registeredAvailableDamageEventFold({
     status: 'available',
     failed_save_probability: failedProbability,
     recurrence: {
@@ -714,7 +735,7 @@ export function foldSavingThrowEvent(
         success.expected_damage * successProbability,
     ),
     contributions: [...contributionKeys.values()],
-  };
+  });
 }
 
 export function foldAutomaticDamageEvent(
@@ -753,6 +774,16 @@ export function composeRoundDamageFolds(
     DamageEventFold | AttackEventFold | SaveEventFold
   >,
 ): RoundDamageFold {
+  for (const fold of folds) {
+    if (
+      fold.status === 'available' &&
+      fold[registeredAvailableDamageEventFoldBrand] !== true
+    ) {
+      throw new TypeError(
+        'Available round-damage folds must be minted by a registered event-fold path.',
+      );
+    }
+  }
   const failures = folds.flatMap((fold) =>
     fold.status === 'unavailable'
       ? [{
@@ -794,11 +825,11 @@ export function composeRoundDamageFolds(
     }
     cappedByClause.set(recurrence.clause_id, recurrence.frequency);
   }
-  return {
+  return registeredAvailableDamageEventFold({
     status: 'available',
     expected_damage: sumExpected(
       available.map((fold) => fold.expected_damage),
     ),
     contributions: available.flatMap((fold) => fold.contributions),
-  };
+  });
 }

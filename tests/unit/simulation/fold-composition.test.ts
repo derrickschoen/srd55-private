@@ -265,6 +265,9 @@ describe('save damage with mixed components', () => {
       ],
     });
     expect(r.status).toBe('available');
+    if (r.status !== 'available') {
+      throw new Error('Finger of Death must produce an available damage fold.');
+    }
     // DC 11 vs +0 fails half the time. E[7d8 + 30] = 61.5 and
     // E[floor((7d8 + 30) / 2)] = (61.5 - 0.5) / 2 = 30.5.
     expect(r.expected_damage).toBeCloseTo((61.5 + 30.5) / 2, 10);

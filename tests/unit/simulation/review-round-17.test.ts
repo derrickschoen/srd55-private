@@ -86,6 +86,9 @@ describe('round 17 save-aware automatic-damage boundary', () => {
       damage_responses: [{ damage_type: fire, response: 'normal' }],
     });
     expect(result.status).toBe('available');
+    if (result.status !== 'available') {
+      throw new Error('The reviewed Fireball save fold must remain available.');
+    }
     // DC 11 vs +0 fails on 1..10: 1/2 * E[8d6] + 1/2 * E[floor(8d6/2)]
     // = 1/2 * 28 + 1/2 * 13.75 = 20.875.
     expect(result.expected_damage).toBeCloseTo(20.875, 12);
@@ -242,6 +245,9 @@ describe('round 17 weapon rider registration boundary', () => {
       ],
     });
     expect(result.status).toBe('available');
+    if (result.status !== 'available') {
+      throw new Error('The registered multi-instance weapon fold must remain available.');
+    }
     // Natural 1 misses; the other 19 faces deal both flat components, and the
     // critical face does not double either: 19/20 * (1000 + 10) = 959.5.
     expect(result.expected_damage).toBeCloseTo(959.5, 12);

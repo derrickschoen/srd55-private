@@ -742,9 +742,19 @@ describe('coverage vocabularies and bundled provenance', () => {
       expect(clause.evidence.kind, effect).toBe('bundled_srd');
       expect(clause.evidence.path, effect).toBe(BUNDLED_SRD_5_2_1_PATH);
     }
-    expect(publicProbabilityCoverageManifest.advantage_and_disadvantage.heading)
+    const advantage = publicProbabilityCoverageManifest.advantage_and_disadvantage;
+    expect(advantage.kind).toBe('bundled_srd');
+    if (advantage.kind !== 'bundled_srd') {
+      throw new Error('Advantage/Disadvantage must cite bundled SRD content.');
+    }
+    expect(advantage.heading)
       .toBe('Advantage/Disadvantage');
-    expect(publicProbabilityCoverageManifest.save_half_damage.heading)
+    const saveHalfDamage = publicProbabilityCoverageManifest.save_half_damage;
+    expect(saveHalfDamage.kind).toBe('bundled_srd');
+    if (saveHalfDamage.kind !== 'bundled_srd') {
+      throw new Error('Half Damage must cite bundled SRD content.');
+    }
+    expect(saveHalfDamage.heading)
       .toBe('Half Damage');
   });
 

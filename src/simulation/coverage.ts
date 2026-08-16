@@ -2035,6 +2035,11 @@ export const registeredAttackRollClauses: ReadonlyMap<
  * is a value object, so an equal structural copy is indistinguishable from the
  * caller's original object. Weapon damage amounts share the already-declared
  * caller-trust boundary with the caller-supplied attack bonus.
+ *
+ * D263 keeps deliberate in-process prototype reassignment and post-hoc
+ * mutation of returned or minted objects inside that caller-trust boundary.
+ * Deep-freezing handed-out registered state remains an accident tripwire, not
+ * a guarantee against self-sabotage; the existing freezes stay in place.
  */
 export function registerCharacterWeaponAttackClause(
   source: SourceRef & { readonly kind: 'character_weapon' },
@@ -2167,13 +2172,114 @@ type ReviewedResourceRecoveryClause = {
   readonly resource_source: SourceRef & { readonly kind: 'catalog_content' };
   readonly resource_stable_key: SourceStableKey;
   readonly citation: PublicSourceRef;
+  readonly source_span_sha256: string;
   readonly semantics:
     | 'one_short_all_long'
     | 'half_maximum_once_short'
     | 'all_long';
 };
 
+type ReviewedResourceRecoveryRow =
+  | 'rage'
+  | 'channel_divinity'
+  | 'sorcerous_restoration'
+  | 'font_of_magic';
+
+type ResourceRecoverySourceSpanSpec = {
+  readonly start: string;
+  readonly end: string;
+  readonly column_start: number;
+  readonly column_end: number | undefined;
+};
+
+const reviewedResourceRecoverySourceSpanSpecs = {
+  rage: {
+    start: 'You regain one ex-',
+    end: 'Rest.',
+    column_start: 68,
+    column_end: undefined,
+  },
+  channel_divinity: {
+    start: 'You regain one of its expended uses when you finish',
+    end: 'Long Rest.',
+    column_start: 64,
+    column_end: undefined,
+  },
+  sorcerous_restoration: {
+    start: 'When you finish a Short Rest, you can regain ex-',
+    end: 'finish a Long Rest.',
+    column_start: 63,
+    column_end: undefined,
+  },
+  font_of_magic: {
+    start: 'You regain all ex-',
+    end: 'Long Rest.',
+    column_start: 0,
+    column_end: 59,
+  },
+} as const satisfies Record<
+  ReviewedResourceRecoveryRow,
+  ResourceRecoverySourceSpanSpec
+>;
+
+/** Independently pinned raw-layout spans reviewed for each recovery row. */
+export const reviewedResourceRecoverySourceSha256Oracle = Object.freeze({
+  rage: 'a0fa93f47f37fe7007020547059719df42e2f21dea285c50e7728095b02f1597',
+  channel_divinity: '94db73ece426e847fb992be76b5d3120697dfc9585cf3c2842e380651e84866e',
+  sorcerous_restoration: '582185b2425346a940a89aec56cc94c88f8d527f434a283192a9778c374a342f',
+  font_of_magic: '4be851bb7b5563c67479aa682afb062744401938e02bd142999dc00aad738d55',
+} as const satisfies Record<ReviewedResourceRecoveryRow, string>);
+
+function resourceRecoverySourceSpan(
+  source: string,
+  row: ReviewedResourceRecoveryRow,
+): string {
+  const spec = reviewedResourceRecoverySourceSpanSpecs[row];
+  const lines = source.split(/\r?\n/u);
+  const firstLine = lines.findIndex((line) => line.includes(spec.start));
+  const lastLine = lines.findIndex((line, index) =>
+    index >= firstLine && line.includes(spec.end),
+  );
+  if (firstLine < 0 || lastLine < firstLine) {
+    throw new TypeError(
+      `${row} resource-recovery source span drift: its reviewed anchors are missing.`,
+    );
+  }
+  const columnSpan = lines.slice(firstLine, lastLine + 1)
+    .map((line) => line.slice(spec.column_start, spec.column_end).trim())
+    .filter((line) => line.length > 0)
+    .join(' ');
+  const start = columnSpan.indexOf(spec.start);
+  const end = columnSpan.indexOf(spec.end, start);
+  if (start < 0 || end < start) {
+    throw new TypeError(
+      `${row} resource-recovery source span drift: its reviewed column slice is missing.`,
+    );
+  }
+  return columnSpan.slice(start, end + spec.end.length);
+}
+
+/** This is the load-time guard; tests pass altered source copies through it. */
+export function assertReviewedResourceRecoverySourceDigests(
+  source: string,
+): void {
+  for (const row of Object.keys(
+    reviewedResourceRecoverySourceSpanSpecs,
+  ) as ReviewedResourceRecoveryRow[]) {
+    const expected = reviewedResourceRecoverySourceSha256Oracle[row];
+    const actual = sha256(resourceRecoverySourceSpan(source, row));
+    if (actual !== expected) {
+      throw new TypeError(
+        `${row} resource-recovery source span drift: expected ${expected}, read ${actual}. Re-review the row semantics and digest together.`,
+      );
+    }
+  }
+}
+
+assertReviewedResourceRecoverySourceDigests(bundledSrd521);
+
 function reviewedResourceRecoveryClause(
+  row: ReviewedResourceRecoveryRow,
   id: string,
   resourceStableKey: string,
   heading: ReviewedBundledSrdHeading,
@@ -2189,30 +2295,35 @@ function reviewedResourceRecoveryClause(
     },
     resource_stable_key: stableKey,
     citation: bundledHeading(heading),
+    source_span_sha256: reviewedResourceRecoverySourceSha256Oracle[row],
     semantics,
   };
 }
 
 export const reviewedResourceRecoveryClauses = {
   rage: reviewedResourceRecoveryClause(
+    'rage',
     'srd-5.2.1:class:barbarian:rage:recovery',
     'srd-5.2.1:class:barbarian:rage',
     'Level 1: Rage',
     'one_short_all_long',
   ),
   channel_divinity: reviewedResourceRecoveryClause(
+    'channel_divinity',
     'srd-5.2.1:class:cleric:channel-divinity:recovery',
     'srd-5.2.1:class:cleric:channel-divinity',
     'Level 2: Channel Divinity',
     'one_short_all_long',
   ),
   sorcerous_restoration: reviewedResourceRecoveryClause(
+    'sorcerous_restoration',
     'srd-5.2.1:class:sorcerer:sorcery-points:sorcerous-restoration',
     'srd-5.2.1:class:sorcerer:sorcery-points',
     'Level 5: Sorcerous Restoration',
     'half_maximum_once_short',
   ),
   font_of_magic: reviewedResourceRecoveryClause(
+    'font_of_magic',
     'srd-5.2.1:class:sorcerer:sorcery-points:long-rest-recovery',
     'srd-5.2.1:class:sorcerer:sorcery-points',
     'Level 2: Font of Magic',

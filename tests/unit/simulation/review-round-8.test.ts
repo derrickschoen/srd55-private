@@ -26,14 +26,26 @@ const diceDamage = (
   source: DamageInstance['source'],
   type: string,
   pools: readonly { readonly count: number; readonly die: 4 | 6 }[],
-): DamageInstance => ({
-  source,
-  damage_type: damageType(type),
-  components: pools.map((pool) => ({
-    kind: 'dice' as const,
-    pool: { count: positiveDiceCount(pool.count), die: pool.die },
-  })),
-});
+): DamageInstance => {
+  const [first, ...rest] = pools;
+  if (first === undefined) {
+    throw new Error('A test damage instance requires at least one dice pool.');
+  }
+  return {
+    source,
+    damage_type: damageType(type),
+    components: [
+      {
+        kind: 'dice',
+        pool: { count: positiveDiceCount(first.count), die: first.die },
+      },
+      ...rest.map((pool) => ({
+        kind: 'dice' as const,
+        pool: { count: positiveDiceCount(pool.count), die: pool.die },
+      })),
+    ],
+  };
+};
 
 const target = (...types: readonly string[]) => ({
   save_bonus: targetSaveBonus(0),

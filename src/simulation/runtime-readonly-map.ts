@@ -29,7 +29,14 @@ function deepFreezeValue(value: unknown, seen: WeakSet<object>): void {
   Object.freeze(value);
 }
 
-/** Recursively freezes every own enumerable object or array reachable here. */
+/**
+ * Recursively freezes every own enumerable object or array reachable here.
+ *
+ * D263 boundary: this is an accident tripwire for our own future code, not a
+ * hostile-caller guarantee. Deliberate in-process prototype reassignment and
+ * post-hoc mutation of returned or minted objects remain caller-trusted, just
+ * like mutation beyond the round-18 structural-copy boundary.
+ */
 export function deepFreeze<T>(value: T): T {
   deepFreezeValue(value, new WeakSet<object>());
   return value;
