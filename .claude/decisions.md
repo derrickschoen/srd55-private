@@ -7,6 +7,19 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D265 — OWNER: v1 acceptance gains a stranger spec AND an export round trip in every mutt spec (2026-08-16)
+
+The strongest option was chosen explicitly: (1) one BLOCKING stranger
+spec joins the 11 mutt walkthroughs — single-class 1→5, cold profile,
+choices-and-sources every level, a mid-journey reload, then export →
+re-import into a fresh profile with identical sheet numbers; (2) EVERY
+mutt spec appends an export→re-import final step after its last
+checkpoint. This gives D262.11 (export/import on the v1 bar) its
+acceptance-side teeth and puts the bar's own persona inside the gate.
+Cost accepted: touches every spec and lengthens every run. Specs lead;
+the walkthrough engine implements the step in its own lane (same
+sequencing as the three-toggle shape, D260.5).
+
 ## D264 — OWNER: mutation testing runs in parallel with other work (2026-08-16)
 
 "This pc has a powerful ryzen 7900x. you can do mutation testing with
