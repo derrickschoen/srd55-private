@@ -18,6 +18,7 @@ import {
   type AttackRollModifier,
   type AttackFoldTarget,
   type AutomaticDamageEvent,
+  type BundledSrdSourceRef,
   type DamageComponent,
   type DamageInstance,
   type DamageResponse,
@@ -45,6 +46,32 @@ import {
   publicProbabilityCoverageManifest,
   saveSuccessOutcomeEvidenceFailureReason,
 } from './coverage';
+
+/**
+ * The bundled-SRD citations the folds in this module implement, bound once,
+ * here, at the module boundary.
+ *
+ * Each field is typed `BundledSrdSourceRef` — the bundled arm itself, not the
+ * `PublicSourceRef` union — so "this fold rests on bundled, redistributable
+ * SRD text" is checked by the compiler when this table is built. The folds
+ * below therefore carry no `evidence.kind !== 'bundled_srd'` guard: such a
+ * guard could only ever be dead code here, and dead defensive conditionals are
+ * exactly the shape that silently degrades (a flipped or removed condition
+ * changes nothing, so no test can notice). A citation that stopped being
+ * bundled content would fail to compile at this binding instead.
+ */
+export const probabilityFoldCitations: {
+  readonly attack_roll: BundledSrdSourceRef;
+  readonly natural_one_and_twenty: BundledSrdSourceRef;
+  readonly saving_throw: BundledSrdSourceRef;
+  readonly damage_roll: BundledSrdSourceRef;
+} = Object.freeze({
+  attack_roll: publicProbabilityCoverageManifest.attack_roll,
+  natural_one_and_twenty:
+    publicProbabilityCoverageManifest.natural_one_and_twenty,
+  saving_throw: publicProbabilityCoverageManifest.saving_throw,
+  damage_roll: publicProbabilityCoverageManifest.damage_roll,
+});
 
 export type DamageOutcome = {
   readonly total: DamageRollTotal;
@@ -176,13 +203,8 @@ export function enumerateDicePool(pool: DicePool): DamageOutcomeDistribution {
 function enumerateDicePoolSnapshot(
   pool: DicePool,
 ): DamageOutcomeDistribution {
-  // Referencing the manifest entry here keeps the rule implementation beside
-  // its bundled-source citation instead of relying on a prose-only inventory.
-  const evidence = publicProbabilityCoverageManifest.damage_roll;
-  if (evidence.kind !== 'bundled_srd') {
-    throw new Error('Damage-roll evidence must be bundled SRD content.');
-  }
-
+  // Cited by `probabilityFoldCitations.damage_roll`, which is type-checked as
+  // bundled SRD content; no runtime citation check belongs in the fold.
   let outcomes = new Map<number, number>([[0, 1]]);
   for (let dieIndex = 0; dieIndex < pool.count; dieIndex += 1) {
     const next = new Map<number, number>();
@@ -383,16 +405,8 @@ export function attackRollProbabilities(
   state: RollState,
   criticalMinimumRoll: 20 | ExpandedCriticalMinimumRoll = 20,
 ): AttackRollProbabilities {
-  const attackEvidence = publicProbabilityCoverageManifest.attack_roll;
-  const naturalEvidence =
-    publicProbabilityCoverageManifest.natural_one_and_twenty;
-  if (
-    attackEvidence.kind !== 'bundled_srd' ||
-    naturalEvidence.kind !== 'bundled_srd'
-  ) {
-    throw new Error('Attack-roll evidence must be bundled SRD content.');
-  }
-
+  // Cited by `probabilityFoldCitations.attack_roll` and
+  // `.natural_one_and_twenty`, both type-checked as bundled SRD content.
   let hitWeight = 0;
   let criticalWeight = 0;
   for (let face = 1; face <= 20; face += 1) {
@@ -428,10 +442,8 @@ export function saveSuccessProbability(
   saveBonus: TargetSaveBonus,
   state: RollState,
 ): Probability {
-  const evidence = publicProbabilityCoverageManifest.saving_throw;
-  if (evidence.kind !== 'bundled_srd') {
-    throw new Error('Saving-throw evidence must be bundled SRD content.');
-  }
+  // Cited by `probabilityFoldCitations.saving_throw`, type-checked as bundled
+  // SRD content.
   let successWeight = 0;
   for (let face = 1; face <= 20; face += 1) {
     if (face + saveBonus >= saveDc) {

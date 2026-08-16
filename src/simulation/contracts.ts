@@ -499,16 +499,26 @@ export type HeadlineScenarioResolution =
       readonly issues: NonEmptyReadonlyArray<UnmodelledIssue>;
     };
 
-export type PublicSourceRef =
-  | {
-      readonly kind: 'bundled_srd';
-      readonly path: BundledSrdPath;
-      readonly heading: BundledSrdHeading;
-    }
-  | {
-      readonly kind: 'project_owned';
-      readonly path: ProjectOwnedSourcePath;
-    };
+/**
+ * The bundled, redistributable-SRD arm of a public citation, named so that a
+ * value can be *typed* as bundled content instead of being narrowed from the
+ * wide union by a runtime `kind` check. Code that only ever cites bundled SRD
+ * text takes this type, which makes a non-bundled citation a compile error at
+ * the call site rather than a throw that a mutated conditional could skip.
+ */
+export type BundledSrdSourceRef = {
+  readonly kind: 'bundled_srd';
+  readonly path: BundledSrdPath;
+  readonly heading: BundledSrdHeading;
+};
+
+/** The project-authored arm of a public citation. */
+export type ProjectOwnedSourceRef = {
+  readonly kind: 'project_owned';
+  readonly path: ProjectOwnedSourcePath;
+};
+
+export type PublicSourceRef = BundledSrdSourceRef | ProjectOwnedSourceRef;
 
 export type SourceRef =
   | {

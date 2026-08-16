@@ -16,6 +16,7 @@ import {
   unmodelledIssueKinds,
   unmodelledIssueId,
   type BundledSrdHeading,
+  type BundledSrdSourceRef,
   type AttackDamageInstance,
   type AttackRollClauseId,
   type CriticalHitRule,
@@ -333,7 +334,7 @@ const bundledSrdLineSegments = new Set(
  * the bundled two-column SRD text. The brand prevents unchecked object literals
  * from satisfying any proof-bearing `PublicSourceRef` field.
  */
-export function bundledSrdSourceRef(heading: unknown): PublicSourceRef {
+export function bundledSrdSourceRef(heading: unknown): BundledSrdSourceRef {
   if (
     typeof heading !== 'string' ||
     !reviewedBundledSrdHeadings.some((candidate) => candidate === heading) ||
@@ -352,12 +353,17 @@ export function bundledSrdSourceRef(heading: unknown): PublicSourceRef {
 
 const bundledHeading = (
   heading: ReviewedBundledSrdHeading,
-): PublicSourceRef => bundledSrdSourceRef(heading);
+): BundledSrdSourceRef => bundledSrdSourceRef(heading);
 
 /**
  * The complete Stage 2B rules inventory. Each entry points to the bundled,
  * redistributable SRD text that authorizes and defines the mechanic. Functions
  * in `probability.ts` cite these entries beside the fold they implement.
+ *
+ * The entry type is `BundledSrdSourceRef`, not the wide `PublicSourceRef`
+ * union: "every Stage 2B mechanic cites bundled SRD content" is a compile-time
+ * property of this table. A project-owned citation added here fails to compile
+ * here, so no consumer needs — or is allowed to grow — a runtime `kind` guard.
  */
 export const publicProbabilityCoverageManifest = {
   attack_roll: bundledHeading('Attack Rolls'),
@@ -373,7 +379,7 @@ export const publicProbabilityCoverageManifest = {
   vulnerability: bundledHeading('Resistance and Vulnerability'),
   damage_order: bundledHeading('Order of Application'),
   immunity: bundledHeading('Immunity'),
-} as const satisfies Record<PublicProbabilityMechanicKind, PublicSourceRef>;
+} as const satisfies Record<PublicProbabilityMechanicKind, BundledSrdSourceRef>;
 
 type ReviewedSaveSuccessClause = {
   readonly id: SaveSuccessClauseId;
