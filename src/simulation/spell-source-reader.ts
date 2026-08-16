@@ -656,12 +656,20 @@ function isSourceSentencePeriod(span: string, index: number): boolean {
   return true;
 }
 
-export function sourceSentences(span: string): readonly {
+export type SourceSentence = {
   readonly start: number;
   readonly end: number;
   readonly text: string;
-}[] {
-  const sentences: { start: number; end: number; text: string }[] = [];
+};
+
+/**
+ * Splitting a span always yields at least one sentence, so the nonemptiness is
+ * carried by the type instead of being re-checked at every call site.
+ */
+export type SourceSentences = readonly [SourceSentence, ...SourceSentence[]];
+
+export function sourceSentences(span: string): SourceSentences {
+  const sentences: SourceSentence[] = [];
   let start = 0;
   for (let index = 0; index < span.length; index += 1) {
     const character = span[index];
@@ -676,9 +684,11 @@ export function sourceSentences(span: string): readonly {
   if (start < span.length) {
     sentences.push({ start, end: span.length, text: span.slice(start) });
   }
-  return sentences.length === 0
-    ? [{ start: 0, end: span.length, text: span }]
-    : sentences;
+  const [first, ...rest] = sentences;
+  if (first === undefined) {
+    return [{ start: 0, end: span.length, text: span }];
+  }
+  return [first, ...rest];
 }
 
 type DcVocabularyNumericCandidate = {
@@ -969,17 +979,40 @@ function directFailureDamageSpan(span: string): string {
   return relevant ?? span;
 }
 
+/**
+ * A save-clause owner either repeats damage it inherited from an earlier clause
+ * — in which case it carries those occurrences, and there is always at least one
+ * of them — or it does not, in which case it carries none at all and the
+ * occurrences are re-derived from the owner's widened span.
+ *
+ * The old shape paired a `repeats_damage: boolean` with a possibly-empty
+ * `damage_occurrences` array and correlated the two with a runtime check. That
+ * correlation was unrepresentable in the type system, so `repeats_damage &&
+ * damage_occurrences.length > 0` could be weakened without any compiler
+ * complaint. Here the two illegal combinations (repeating with no occurrences,
+ * not repeating but carrying some) cannot be constructed at all.
+ */
+type DirectDamageOwnerBase = {
+  readonly match: RegExpMatchArray;
+  readonly start: number;
+  readonly ability: Ability;
+  readonly failed_damage_signatures: readonly FailedDamageSignature[];
+};
+
+type DirectDamageOwner =
+  | (DirectDamageOwnerBase & { readonly kind: 'direct' })
+  | (DirectDamageOwnerBase & {
+    readonly kind: 'repeated';
+    readonly damage_occurrences: readonly [
+      SourceDamageOccurrence,
+      ...SourceDamageOccurrence[],
+    ];
+  });
+
 function directDamageSaveClauses(body: string): SourceDerivedSaveClause[] {
   const explicitSave = /\b(?:(Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma)(?: \([^)]*\))? (?:saving throw|Saving Throw:)|repeats? (?:that|the) save|repeats the save)/giu;
   const matches = [...body.matchAll(explicitSave)];
-  const owners: {
-    readonly match: RegExpMatchArray;
-    readonly start: number;
-    readonly ability: Ability;
-    readonly repeats_damage: boolean;
-    readonly failed_damage_signatures: readonly FailedDamageSignature[];
-    readonly damage_occurrences: readonly SourceDamageOccurrence[];
-  }[] = [];
+  const owners: DirectDamageOwner[] = [];
   let inheritedAbility: Ability | null = null;
   let inheritedDamageSignatures: readonly FailedDamageSignature[] = [];
   let inheritedDamageOccurrences: readonly SourceDamageOccurrence[] = [];
@@ -1004,21 +1037,29 @@ function directDamageSaveClauses(body: string): SourceDerivedSaveClause[] {
     const damageOccurrences = repeatsDamage && inheritedDamageOccurrences.length > 0
       ? inheritedDamageOccurrences.filter((occurrence) => occurrence.arm === 'failure')
       : directOccurrences;
-    owners.push({
+    const ownerBase: DirectDamageOwnerBase = {
       match,
       start: start + leading,
       ability: inheritedAbility,
-      repeats_damage: repeatsDamage,
       failed_damage_signatures: failedDamageSignatures,
-      damage_occurrences: damageOccurrences,
-    });
+    };
+    const [firstOccurrence, ...restOccurrences] = damageOccurrences;
+    if (repeatsDamage && firstOccurrence !== undefined) {
+      owners.push({
+        ...ownerBase,
+        kind: 'repeated',
+        damage_occurrences: [firstOccurrence, ...restOccurrences],
+      });
+    } else {
+      owners.push({ ...ownerBase, kind: 'direct' });
+    }
     inheritedDamageSignatures = failedDamageSignatures;
     inheritedDamageOccurrences = damageOccurrences;
   }
   return owners.map((owner, index) => {
     const end = owners[index + 1]?.match.index ?? body.length;
     const span = body.slice(owner.start, end).trimEnd();
-    const damageOccurrences = owner.repeats_damage && owner.damage_occurrences.length > 0
+    const damageOccurrences = owner.kind === 'repeated'
       ? owner.damage_occurrences
       : sourceDamageOccurrences(span, owner.start);
     return {
