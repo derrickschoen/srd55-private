@@ -7,6 +7,38 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D263 — OWNER RULINGS: simcore type debt, tamper boundary, loop-state home (2026-08-16)
+
+Three rulings after the reboot recovery and simcore review round 19
+(5 High, all reproduced; valid-case controls all held).
+
+1. **Loop working state lives in a durable directory outside git**
+   (`~/.claude/loop-scratch/`). The reboot destroyed the tmpfs scratchpad —
+   briefs, dispatch logs, and two generated spec-input files survived only
+   because workflow journals happen to persist. Briefs, dispatch logs, and
+   generated intermediates go there from now on; git/`.claude/` remain the
+   durable record of decisions and results, not of working state.
+
+2. **The simcore type debt is repaired file-by-file, then confirmed by one
+   more adversarial round before merge.** Context: the lane is runtime-green
+   (179 sim tests pass) but `npm run build`'s `tsc -b` — the real merge
+   gate — fails with 20 errors across 11 round-N test files. The recorded
+   per-round gate line (`tsc -p tsconfig.app.json`) does not typecheck
+   tests; supervisor gate error, recorded at full length in the session.
+   Per-round file provenance is kept (no consolidation); no tsc exclusion.
+   The standing brief's "build OR tsc -p app-config" wording is void — the
+   compile gate for a lane with test changes is `tsc -b`.
+
+3. **Tamper-resistance boundary: accidents yes, self-sabotage no.** The sim
+   defends against our own future code mutating state by ACCIDENT (deep-freeze
+   what we hand out stays), but deliberate in-process attacks — prototype
+   reassignment, post-hoc mutation of returned objects — are inside the
+   documented caller-trust boundary, same status as round 18's structural-clone
+   limit. Round-19 findings 1 and 5 are real under any reading and are fixed
+   (an unregistered fold path that returns a number; recovery rows pinned to a
+   heading with no digest). Findings 2–4 are documented as boundary, not fixed.
+   Reviewers stop earning Highs for in-process self-attacks; the arms race ends.
+
 ## D249 — OWNER: UI is designed by Claude first, through a four-stage pipeline (2026-08-14)
 
 Ruling on how UI work is produced, overriding the general "codex implements"
