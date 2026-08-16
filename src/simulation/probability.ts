@@ -60,6 +60,12 @@ declare const registeredAvailableDamageEventFoldBrand: unique symbol;
 
 const mintedAvailableDamageEventFolds = new WeakSet<object>();
 
+function isMintedAvailableDamageEventFold(
+  fold: object,
+): boolean {
+  return mintedAvailableDamageEventFolds.has(fold);
+}
+
 type AvailableDamageEventFoldFields = {
   readonly status: 'available';
   readonly expected_damage: ExpectedEventDamage;
@@ -770,25 +776,28 @@ export function composeRoundDamageFolds(
     DamageEventFold | AttackEventFold | SaveEventFold
   >,
 ): RoundDamageFold {
+  const available: AvailableDamageEventFold[] = [];
+  const failures: UnavailableDamageEventFold[] = [];
   for (const fold of folds) {
-    if (
-      fold.status === 'available' &&
-      !mintedAvailableDamageEventFolds.has(fold)
-    ) {
+    if (isMintedAvailableDamageEventFold(fold)) {
+      available.push(fold as AvailableDamageEventFold);
+      continue;
+    }
+    const status = fold.status;
+    if (status === 'available') {
       throw new TypeError(
         'Available round-damage folds must be minted by a registered event-fold path.',
       );
     }
+    if (status === 'unavailable') {
+      const { evidence, reason } = fold;
+      failures.push({ status, evidence, reason });
+      continue;
+    }
+    throw new TypeError(
+      `Round-damage fold status is invalid: ${String(status)}.`,
+    );
   }
-  const failures = folds.flatMap((fold) =>
-    fold.status === 'unavailable'
-      ? [{
-          status: fold.status,
-          evidence: fold.evidence,
-          reason: fold.reason,
-        } satisfies UnavailableDamageEventFold]
-      : [],
-  );
   const [firstFailure, ...remainingFailures] = failures;
   if (firstFailure !== undefined) {
     return {
@@ -796,7 +805,6 @@ export function composeRoundDamageFolds(
       failures: [firstFailure, ...remainingFailures],
     };
   }
-  const available = folds as readonly AvailableDamageEventFold[];
   const cappedByClause = new Map<SaveSuccessClauseId, EventFrequency>();
   for (const fold of available) {
     if (!('recurrence' in fold)) {

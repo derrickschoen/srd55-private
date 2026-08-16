@@ -8,7 +8,7 @@ import type { Ability, DamageType } from '../domain/enums';
 import type { ContentKey } from '../domain/ids';
 import {
   BUNDLED_SRD_5_2_1_PATH,
-  resourceRecoveryClauseId,
+  reviewedResourceRecoverySourceSha256Oracle,
   saveSuccessClauseId,
   sourceStableKey,
   unmodelledIssueKinds,
@@ -22,8 +22,7 @@ import {
   type DamageNeutralityEvidence,
   type EventFrequency,
   type PublicSourceRef,
-  type ResourceRecoveryClauseId,
-  type ResourceRecoveryEvidence,
+  type ReviewedResourceRecoveryRow,
   type SaveSuccessClauseId,
   type SaveSuccessOutcome,
   type SavingThrowDamageDuration,
@@ -31,6 +30,11 @@ import {
   type SourceStableKey,
   type UnmodelledIssue,
   type UnmodelledIssueKind,
+} from './contracts';
+export {
+  resourceRecoveryEvidence,
+  reviewedResourceRecoveryClauses,
+  reviewedResourceRecoverySourceSha256Oracle,
 } from './contracts';
 import {
   deriveSaveDamageCoverageFromBodies,
@@ -2167,24 +2171,6 @@ export function damageNeutralityEvidence(
   return { mechanic, evidence } as DamageNeutralityEvidence;
 }
 
-type ReviewedResourceRecoveryClause = {
-  readonly id: ResourceRecoveryClauseId;
-  readonly resource_source: SourceRef & { readonly kind: 'catalog_content' };
-  readonly resource_stable_key: SourceStableKey;
-  readonly citation: PublicSourceRef;
-  readonly source_span_sha256: string;
-  readonly semantics:
-    | 'one_short_all_long'
-    | 'half_maximum_once_short'
-    | 'all_long';
-};
-
-type ReviewedResourceRecoveryRow =
-  | 'rage'
-  | 'channel_divinity'
-  | 'sorcerous_restoration'
-  | 'font_of_magic';
-
 type ResourceRecoverySourceSpanSpec = {
   readonly start: string;
   readonly end: string;
@@ -2221,14 +2207,6 @@ const reviewedResourceRecoverySourceSpanSpecs = {
   ReviewedResourceRecoveryRow,
   ResourceRecoverySourceSpanSpec
 >;
-
-/** Independently pinned raw-layout spans reviewed for each recovery row. */
-export const reviewedResourceRecoverySourceSha256Oracle = Object.freeze({
-  rage: 'a0fa93f47f37fe7007020547059719df42e2f21dea285c50e7728095b02f1597',
-  channel_divinity: '94db73ece426e847fb992be76b5d3120697dfc9585cf3c2842e380651e84866e',
-  sorcerous_restoration: '582185b2425346a940a89aec56cc94c88f8d527f434a283192a9778c374a342f',
-  font_of_magic: '4be851bb7b5563c67479aa682afb062744401938e02bd142999dc00aad738d55',
-} as const satisfies Record<ReviewedResourceRecoveryRow, string>);
 
 function resourceRecoverySourceSpan(
   source: string,
@@ -2277,126 +2255,6 @@ export function assertReviewedResourceRecoverySourceDigests(
 }
 
 assertReviewedResourceRecoverySourceDigests(bundledSrd521);
-
-function reviewedResourceRecoveryClause(
-  row: ReviewedResourceRecoveryRow,
-  id: string,
-  resourceStableKey: string,
-  heading: ReviewedBundledSrdHeading,
-  semantics: ReviewedResourceRecoveryClause['semantics'],
-): ReviewedResourceRecoveryClause {
-  const stableKey = sourceStableKey(resourceStableKey);
-  return {
-    id: resourceRecoveryClauseId(id),
-    resource_source: {
-      kind: 'catalog_content',
-      content_key: String(stableKey) as ContentKey,
-      stable_key: stableKey,
-    },
-    resource_stable_key: stableKey,
-    citation: bundledHeading(heading),
-    source_span_sha256: reviewedResourceRecoverySourceSha256Oracle[row],
-    semantics,
-  };
-}
-
-export const reviewedResourceRecoveryClauses = {
-  rage: reviewedResourceRecoveryClause(
-    'rage',
-    'srd-5.2.1:class:barbarian:rage:recovery',
-    'srd-5.2.1:class:barbarian:rage',
-    'Level 1: Rage',
-    'one_short_all_long',
-  ),
-  channel_divinity: reviewedResourceRecoveryClause(
-    'channel_divinity',
-    'srd-5.2.1:class:cleric:channel-divinity:recovery',
-    'srd-5.2.1:class:cleric:channel-divinity',
-    'Level 2: Channel Divinity',
-    'one_short_all_long',
-  ),
-  sorcerous_restoration: reviewedResourceRecoveryClause(
-    'sorcerous_restoration',
-    'srd-5.2.1:class:sorcerer:sorcery-points:sorcerous-restoration',
-    'srd-5.2.1:class:sorcerer:sorcery-points',
-    'Level 5: Sorcerous Restoration',
-    'half_maximum_once_short',
-  ),
-  font_of_magic: reviewedResourceRecoveryClause(
-    'font_of_magic',
-    'srd-5.2.1:class:sorcerer:sorcery-points:long-rest-recovery',
-    'srd-5.2.1:class:sorcerer:sorcery-points',
-    'Level 2: Font of Magic',
-    'all_long',
-  ),
-} as const satisfies Record<string, ReviewedResourceRecoveryClause>;
-
-const resourceRecoveryEvidenceManifest: ReadonlyMap<
-  ResourceRecoveryClauseId,
-  ReviewedResourceRecoveryClause
-> = runtimeReadonlyMap(
-  Object.values(reviewedResourceRecoveryClauses).map((clause) => [
-    clause.id,
-    clause,
-  ]),
-);
-
-export function resourceRecoveryEvidence(
-  resourceSource: SourceRef,
-  clauseId: ResourceRecoveryClauseId,
-  authorization: {
-    readonly rest: 'short_rest' | 'long_rest';
-    readonly rule_kind: 'fixed' | 'fixed_once_per_long_rest' | 'all';
-    readonly amount: number | null;
-    readonly maximum: number;
-  },
-): ResourceRecoveryEvidence {
-  const clause = resourceRecoveryEvidenceManifest.get(clauseId);
-  if (
-    clause === undefined ||
-    !sameSourceRef(clause.resource_source, resourceSource)
-  ) {
-    throw new TypeError(
-      'Resource-recovery evidence does not establish recovery for this resource source.',
-    );
-  }
-  const expected = (() => {
-    switch (clause.semantics) {
-      case 'one_short_all_long':
-        return authorization.rest === 'short_rest'
-          ? { rule_kind: 'fixed' as const, amount: 1 }
-          : { rule_kind: 'all' as const, amount: null };
-      case 'half_maximum_once_short':
-        return authorization.rest === 'short_rest'
-          ? {
-              rule_kind: 'fixed_once_per_long_rest' as const,
-              amount: Math.floor(authorization.maximum / 2),
-            }
-          : null;
-      case 'all_long':
-        return authorization.rest === 'long_rest'
-          ? { rule_kind: 'all' as const, amount: null }
-          : null;
-    }
-  })();
-  if (
-    expected === null ||
-    expected.rule_kind !== authorization.rule_kind ||
-    expected.amount !== authorization.amount
-  ) {
-    throw new TypeError(
-      'Resource-recovery evidence does not authorize this rest, rule kind, and amount.',
-    );
-  }
-  return {
-    clause_id: clause.id,
-    resource_source: resourceSource,
-    citation: clause.citation,
-    authorized_rest: authorization.rest,
-    authorized_rule_kind: authorization.rule_kind,
-    authorized_amount: authorization.amount,
-  } as ResourceRecoveryEvidence;
-}
 
 // A set-equality assertion at runtime complements the `satisfies` compile gate.
 export function probabilityManifestIsComplete(): boolean {

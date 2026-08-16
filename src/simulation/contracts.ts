@@ -780,6 +780,170 @@ export type ResourceRecoveryEvidence = {
   readonly [resourceRecoveryEvidenceBrand]: true;
 };
 
+export type ReviewedResourceRecoveryRow =
+  | 'rage'
+  | 'channel_divinity'
+  | 'sorcerous_restoration'
+  | 'font_of_magic';
+
+export type ReviewedResourceRecoveryClause = {
+  readonly id: ResourceRecoveryClauseId;
+  readonly resource_source: SourceRef & { readonly kind: 'catalog_content' };
+  readonly resource_stable_key: SourceStableKey;
+  readonly citation: PublicSourceRef;
+  readonly source_span_sha256: string;
+  readonly semantics:
+    | 'one_short_all_long'
+    | 'half_maximum_once_short'
+    | 'all_long';
+};
+
+/** Independently pinned raw-layout spans reviewed for each recovery row. */
+export const reviewedResourceRecoverySourceSha256Oracle = Object.freeze({
+  rage: 'a0fa93f47f37fe7007020547059719df42e2f21dea285c50e7728095b02f1597',
+  channel_divinity: '94db73ece426e847fb992be76b5d3120697dfc9585cf3c2842e380651e84866e',
+  sorcerous_restoration: '582185b2425346a940a89aec56cc94c88f8d527f434a283192a9778c374a342f',
+  font_of_magic: '4be851bb7b5563c67479aa682afb062744401938e02bd142999dc00aad738d55',
+} as const satisfies Record<ReviewedResourceRecoveryRow, string>);
+
+function reviewedResourceRecoveryClause(
+  row: ReviewedResourceRecoveryRow,
+  id: string,
+  resourceStableKey: string,
+  heading: string,
+  semantics: ReviewedResourceRecoveryClause['semantics'],
+): ReviewedResourceRecoveryClause {
+  const stableKey = sourceStableKey(resourceStableKey);
+  const resourceSource = Object.freeze({
+    kind: 'catalog_content' as const,
+    content_key: String(stableKey) as ContentKey,
+    stable_key: stableKey,
+  });
+  const citation = Object.freeze({
+    kind: 'bundled_srd' as const,
+    path: BUNDLED_SRD_5_2_1_PATH,
+    heading: heading as BundledSrdHeading,
+  });
+  return Object.freeze({
+    id: resourceRecoveryClauseId(id),
+    resource_source: resourceSource,
+    resource_stable_key: stableKey,
+    citation,
+    source_span_sha256: reviewedResourceRecoverySourceSha256Oracle[row],
+    semantics,
+  });
+}
+
+export const reviewedResourceRecoveryClauses = Object.freeze({
+  rage: reviewedResourceRecoveryClause(
+    'rage',
+    'srd-5.2.1:class:barbarian:rage:recovery',
+    'srd-5.2.1:class:barbarian:rage',
+    'Level 1: Rage',
+    'one_short_all_long',
+  ),
+  channel_divinity: reviewedResourceRecoveryClause(
+    'channel_divinity',
+    'srd-5.2.1:class:cleric:channel-divinity:recovery',
+    'srd-5.2.1:class:cleric:channel-divinity',
+    'Level 2: Channel Divinity',
+    'one_short_all_long',
+  ),
+  sorcerous_restoration: reviewedResourceRecoveryClause(
+    'sorcerous_restoration',
+    'srd-5.2.1:class:sorcerer:sorcery-points:sorcerous-restoration',
+    'srd-5.2.1:class:sorcerer:sorcery-points',
+    'Level 5: Sorcerous Restoration',
+    'half_maximum_once_short',
+  ),
+  font_of_magic: reviewedResourceRecoveryClause(
+    'font_of_magic',
+    'srd-5.2.1:class:sorcerer:sorcery-points:long-rest-recovery',
+    'srd-5.2.1:class:sorcerer:sorcery-points',
+    'Level 2: Font of Magic',
+    'all_long',
+  ),
+} as const satisfies Record<string, ReviewedResourceRecoveryClause>);
+
+const resourceRecoveryEvidenceManifest: ReadonlyMap<
+  ResourceRecoveryClauseId,
+  ReviewedResourceRecoveryClause
+> = new Map(
+  Object.values(reviewedResourceRecoveryClauses).map((clause) => [
+    clause.id,
+    clause,
+  ]),
+);
+const mintedResourceRecoveryEvidence = new WeakSet<object>();
+
+export function resourceRecoveryEvidence(
+  resourceSource: SourceRef,
+  clauseId: ResourceRecoveryClauseId,
+  authorization: {
+    readonly rest: RestKind;
+    readonly rule_kind: Exclude<ResourceRecoveryRule['kind'], 'none'>;
+    readonly amount: number | null;
+    readonly maximum: number;
+  },
+): ResourceRecoveryEvidence {
+  const {
+    rest,
+    rule_kind: ruleKind,
+    amount,
+    maximum: rawMaximum,
+  } = authorization;
+  const clause = resourceRecoveryEvidenceManifest.get(clauseId);
+  if (
+    clause === undefined ||
+    !sameSourceRef(clause.resource_source, resourceSource)
+  ) {
+    throw new TypeError(
+      'Resource-recovery evidence does not establish recovery for this resource source.',
+    );
+  }
+  const maximum = positiveResourceMaximum(rawMaximum);
+  const expected = (() => {
+    switch (clause.semantics) {
+      case 'one_short_all_long':
+        return rest === 'short_rest'
+          ? { rule_kind: 'fixed' as const, amount: 1 }
+          : { rule_kind: 'all' as const, amount: null };
+      case 'half_maximum_once_short':
+        return rest === 'short_rest'
+          ? {
+              rule_kind: 'fixed_once_per_long_rest' as const,
+              amount: Math.floor(maximum / 2),
+            }
+          : null;
+      case 'all_long':
+        return rest === 'long_rest'
+          ? { rule_kind: 'all' as const, amount: null }
+          : null;
+    }
+  })();
+  if (
+    expected === null ||
+    expected.rule_kind !== ruleKind ||
+    expected.amount !== amount
+  ) {
+    throw new TypeError(
+      'Resource-recovery evidence does not authorize this rest, rule kind, and amount.',
+    );
+  }
+  const evidence = Object.freeze({
+    clause_id: clause.id,
+    resource_source: clause.resource_source,
+    citation: clause.citation,
+    authorized_rest: rest,
+    authorized_rule_kind: ruleKind,
+    authorized_amount: amount === null
+      ? null
+      : positiveResourceRecoveryAmount(amount, maximum),
+  }) as ResourceRecoveryEvidence;
+  mintedResourceRecoveryEvidence.add(evidence);
+  return evidence;
+}
+
 /**
  * Resource recovery is a pair of independently sourced rest rules. This shape
  * directly represents the repeated bundled-SRD rule used by Rage and Channel
@@ -800,13 +964,19 @@ export type SimResourcePool = {
 };
 
 const simResourcePoolSetBrand: unique symbol = Symbol('SimResourcePoolSet');
-const logicalPoolIdentityByIdBrand: unique symbol = Symbol(
-  'LogicalPoolIdentityById',
-);
 export type SimResourcePoolSet = readonly SimResourcePool[] & {
   readonly [simResourcePoolSetBrand]: true;
-  readonly [logicalPoolIdentityByIdBrand]: ReadonlyMap<SimResourceId, string>;
 };
+
+const mintedSimResourcePoolSets = new WeakSet<object>();
+const logicalPoolIdentityBySet = new WeakMap<
+  object,
+  ReadonlyMap<SimResourceId, string>
+>();
+const resourcePoolsBySet = new WeakMap<
+  object,
+  ReadonlyMap<SimResourceId, SimResourcePool>
+>();
 
 export type ResourceRecoveryResult = {
   readonly recovered_units: number;
@@ -842,32 +1012,71 @@ function recoveredResourceUnits(
     'Expended resource units',
   );
   const rule = pool.recovery[rest];
+  const ruleKind = rule.kind;
+  switch (ruleKind) {
+    case 'none':
+      return { recovered_units: 0 };
+    case 'fixed': {
+      const { amount, evidence } = rule;
+      assertRecoveryEvidenceIsBound(
+        pool.source,
+        rest,
+        ruleKind,
+        amount,
+        evidence,
+      );
+      return { recovered_units: Math.min(amount, expended) };
+    }
+    case 'fixed_once_per_long_rest': {
+      const { amount, evidence } = rule;
+      assertRecoveryEvidenceIsBound(
+        pool.source,
+        rest,
+        ruleKind,
+        amount,
+        evidence,
+      );
+      return {
+        recovered_units: oncePerLongRestUsed
+          ? 0
+          : Math.min(amount, expended),
+      };
+    }
+    case 'all': {
+      const { evidence } = rule;
+      assertRecoveryEvidenceIsBound(
+        pool.source,
+        rest,
+        ruleKind,
+        null,
+        evidence,
+      );
+      return { recovered_units: expended };
+    }
+  }
+}
+
+function assertRecoveryEvidenceIsBound(
+  poolSource: SourceRef,
+  rest: RestKind,
+  ruleKind: Exclude<ResourceRecoveryRule['kind'], 'none'>,
+  amount: PositiveResourceRecoveryAmount | null,
+  evidence: ResourceRecoveryEvidence,
+): void {
+  if (!mintedResourceRecoveryEvidence.has(evidence)) {
+    throw new TypeError(
+      'Resource-recovery evidence must be minted by the reviewed evidence path.',
+    );
+  }
   if (
-    rule.kind !== 'none' &&
-    (!sameSourceRef(pool.source, rule.evidence.resource_source) ||
-      rule.evidence.authorized_rest !== rest ||
-      rule.evidence.authorized_rule_kind !== rule.kind ||
-      (rule.kind !== 'all' &&
-        rule.evidence.authorized_amount !== rule.amount) ||
-      (rule.kind === 'all' && rule.evidence.authorized_amount !== null))
+    !sameSourceRef(poolSource, evidence.resource_source) ||
+    evidence.authorized_rest !== rest ||
+    evidence.authorized_rule_kind !== ruleKind ||
+    evidence.authorized_amount !== amount
   ) {
     throw new TypeError(
       'Resource-recovery evidence is not bound to this pool, rest, and recovery rule.',
     );
-  }
-  switch (rule.kind) {
-    case 'none':
-      return { recovered_units: 0 };
-    case 'fixed':
-      return { recovered_units: Math.min(rule.amount, expended) };
-    case 'fixed_once_per_long_rest':
-      return {
-        recovered_units: oncePerLongRestUsed
-          ? 0
-          : Math.min(rule.amount, expended),
-      };
-    case 'all':
-      return { recovered_units: expended };
   }
 }
 
@@ -877,26 +1086,34 @@ export function simResourcePoolSet(
   const ids = new Set<SimResourceId>();
   const logicalKeys = new Set<SimResourcePoolKey>();
   const logicalIdentityById = new Map<SimResourceId, string>();
+  const poolsById = new Map<SimResourceId, SimResourcePool>();
+  const validatedPools: SimResourcePool[] = [];
   for (const pool of pools) {
-    if (ids.has(pool.id)) {
-      throw new TypeError(`Duplicate simulation resource pool ID: ${pool.id}.`);
+    const { id, logical_key: logicalKey } = pool;
+    if (ids.has(id)) {
+      throw new TypeError(`Duplicate simulation resource pool ID: ${id}.`);
     }
-    ids.add(pool.id);
-    if (logicalKeys.has(pool.logical_key)) {
+    ids.add(id);
+    if (logicalKeys.has(logicalKey)) {
       throw new TypeError(
-        `Simulation resource pool aliasing is unsupported; logical keys must be unique: ${pool.logical_key}.`,
+        `Simulation resource pool aliasing is unsupported; logical keys must be unique: ${logicalKey}.`,
       );
     }
-    logicalKeys.add(pool.logical_key);
-    logicalIdentityById.set(pool.id, pool.logical_key);
+    logicalKeys.add(logicalKey);
+    logicalIdentityById.set(id, logicalKey);
+    poolsById.set(id, pool);
+    validatedPools.push(pool);
   }
-  return Object.freeze(Object.assign(
-    [...pools],
+  const frozen = Object.freeze(Object.assign(
+    validatedPools,
     {
       [simResourcePoolSetBrand]: true as const,
-      [logicalPoolIdentityByIdBrand]: logicalIdentityById,
     },
   ));
+  mintedSimResourcePoolSets.add(frozen);
+  logicalPoolIdentityBySet.set(frozen, logicalIdentityById);
+  resourcePoolsBySet.set(frozen, poolsById);
+  return frozen;
 }
 
 export class ResourceRecoverySession {
@@ -905,11 +1122,16 @@ export class ResourceRecoverySession {
   readonly #oncePerLongRestUsed = new Map<string, boolean>();
 
   private constructor(pools: SimResourcePoolSet) {
-    if (pools[simResourcePoolSetBrand] !== true) {
+    if (!mintedSimResourcePoolSets.has(pools)) {
       throw new TypeError('Recovery sessions require a validated pool set.');
     }
-    this.#pools = new Map(pools.map((pool) => [pool.id, pool]));
-    this.#logicalIdentityById = pools[logicalPoolIdentityByIdBrand];
+    const poolMap = resourcePoolsBySet.get(pools);
+    const logicalIdentityMap = logicalPoolIdentityBySet.get(pools);
+    if (poolMap === undefined || logicalIdentityMap === undefined) {
+      throw new TypeError('Recovery sessions require a validated pool set.');
+    }
+    this.#pools = poolMap;
+    this.#logicalIdentityById = logicalIdentityMap;
     for (const identity of this.#logicalIdentityById.values()) {
       this.#oncePerLongRestUsed.set(identity, false);
     }
