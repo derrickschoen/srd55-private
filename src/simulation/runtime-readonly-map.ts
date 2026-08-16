@@ -1,3 +1,40 @@
+const mapPrototype = Map.prototype as Map<unknown, unknown>;
+const mapGetIntrinsic = mapPrototype.get;
+const mapHasIntrinsic = mapPrototype.has;
+const mapEntriesIntrinsic = mapPrototype.entries;
+const mapKeysIntrinsic = mapPrototype.keys;
+const mapValuesIntrinsic = mapPrototype.values;
+const mapIteratorIntrinsic = mapPrototype[Symbol.iterator];
+const mapSizeDescriptor = Object.getOwnPropertyDescriptor(
+  mapPrototype,
+  'size',
+);
+
+if (mapSizeDescriptor?.get === undefined) {
+  throw new TypeError('Map.prototype.size getter is unavailable.');
+}
+const mapSizeIntrinsic = mapSizeDescriptor.get;
+
+function deepFreezeValue(value: unknown, seen: WeakSet<object>): void {
+  if (value === null || typeof value !== 'object' || seen.has(value)) {
+    return;
+  }
+  seen.add(value);
+  for (const key of Reflect.ownKeys(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (descriptor?.enumerable === true) {
+      deepFreezeValue(Reflect.get(value, key), seen);
+    }
+  }
+  Object.freeze(value);
+}
+
+/** Recursively freezes every own enumerable object or array reachable here. */
+export function deepFreeze<T>(value: T): T {
+  deepFreezeValue(value, new WeakSet<object>());
+  return value;
+}
+
 class RuntimeReadonlyMap<K, V> implements ReadonlyMap<K, V> {
   readonly #backing: Map<K, V>;
 
@@ -6,38 +43,47 @@ class RuntimeReadonlyMap<K, V> implements ReadonlyMap<K, V> {
   }
 
   get size(): number {
-    return this.#backing.size;
+    return Reflect.apply(mapSizeIntrinsic, this.#backing, []) as number;
   }
 
   get(key: K): V | undefined {
-    return this.#backing.get(key);
+    return Reflect.apply(mapGetIntrinsic, this.#backing, [key]) as V | undefined;
   }
 
   has(key: K): boolean {
-    return this.#backing.has(key);
+    return Reflect.apply(mapHasIntrinsic, this.#backing, [key]) as boolean;
   }
 
-  entries() {
-    return this.#backing.entries();
+  entries(): MapIterator<[K, V]> {
+    return Reflect.apply(mapEntriesIntrinsic, this.#backing, []) as MapIterator<[K, V]>;
   }
 
-  keys() {
-    return this.#backing.keys();
+  keys(): MapIterator<K> {
+    return Reflect.apply(mapKeysIntrinsic, this.#backing, []) as MapIterator<K>;
   }
 
-  values() {
-    return this.#backing.values();
+  values(): MapIterator<V> {
+    return Reflect.apply(mapValuesIntrinsic, this.#backing, []) as MapIterator<V>;
   }
 
-  [Symbol.iterator]() {
-    return this.entries();
+  [Symbol.iterator](): MapIterator<[K, V]> {
+    return Reflect.apply(
+      mapIteratorIntrinsic,
+      this.#backing,
+      [],
+    ) as MapIterator<[K, V]>;
   }
 
   forEach(
     callbackfn: (value: V, key: K, map: ReadonlyMap<K, V>) => void,
     thisArg?: unknown,
   ): void {
-    for (const [key, value] of this.#backing) {
+    const entries = Reflect.apply(
+      mapEntriesIntrinsic,
+      this.#backing,
+      [],
+    ) as MapIterator<[K, V]>;
+    for (const [key, value] of entries) {
       callbackfn.call(thisArg, value, key, this);
     }
   }

@@ -139,7 +139,7 @@ describe('round 17 weapon rider registration boundary', () => {
     expect(result).not.toHaveProperty('expected_damage');
   });
 
-  it('accepts a rider source carrying its own registered clause identity', () => {
+  it('refuses a registered weapon B rider in weapon A\'s event', () => {
     const weapon: SourceRef & { readonly kind: 'character_weapon' } = {
       kind: 'character_weapon',
       weapon_id: 1000 as CharacterWeaponId,
@@ -151,7 +151,7 @@ describe('round 17 weapon rider registration boundary', () => {
       stable_key: sourceStableKey('character-weapon:1001'),
     };
     const registration = registerCharacterWeaponAttackClause(weapon);
-    const riderRegistration = registerCharacterWeaponAttackClause(rider);
+    registerCharacterWeaponAttackClause(rider);
     const force = damageType('Force');
     const event: AttackRollEvent = {
       kind: 'attack_roll',
@@ -167,7 +167,6 @@ describe('round 17 weapon rider registration boundary', () => {
       },
       damage: [{
         source: rider,
-        source_attack_roll_clause_id: riderRegistration.attack_roll_clause_id,
         damage_type: force,
         components: [{
           kind: 'flat',
@@ -182,10 +181,70 @@ describe('round 17 weapon rider registration boundary', () => {
       roll_state: 'normal',
       damage_responses: [{ damage_type: force, response: 'normal' }],
     });
+    // The event source is weapon 1000 while the damage source is weapon 1001;
+    // the second registration binds no rider formula, so the gate fails closed.
+    expect(result.status).toBe('unavailable');
+    expect(result).toMatchObject({
+      reason: 'Every attack damage instance must use the attack event source; unreviewed rider sources are unavailable.',
+    });
+    expect(result).not.toHaveProperty('expected_damage');
+  });
+
+  it('accepts multiple damage instances sourced by the attack weapon', () => {
+    const weapon: SourceRef & { readonly kind: 'character_weapon' } = {
+      kind: 'character_weapon',
+      weapon_id: 1003 as CharacterWeaponId,
+      stable_key: sourceStableKey('character-weapon:1003'),
+    };
+    const registration = registerCharacterWeaponAttackClause(weapon);
+    const force = damageType('Force');
+    const fire = damageType('Fire');
+    const event: AttackRollEvent = {
+      kind: 'attack_roll',
+      event_id: routineEventId('round-18:multi-instance-weapon-damage'),
+      source: weapon,
+      ...registration,
+      attack_bonus: attackRollModifier(100),
+      frequency: { kind: 'each_declared_event' },
+      duration: { kind: 'instantaneous' },
+      critical: {
+        kind: 'natural_20',
+        evidence: publicProbabilityCoverageManifest.critical_hit,
+      },
+      damage: [
+        {
+          source: weapon,
+          damage_type: force,
+          components: [{
+            kind: 'flat',
+            modifier: damageFlatModifier(1000),
+            trigger: 'hit',
+          }],
+        },
+        {
+          source: weapon,
+          damage_type: fire,
+          components: [{
+            kind: 'flat',
+            modifier: damageFlatModifier(10),
+            trigger: 'hit',
+          }],
+        },
+      ],
+    };
+
+    const result = foldAttackEvent(event, {
+      armor_class: targetArmorClass(0),
+      roll_state: 'normal',
+      damage_responses: [
+        { damage_type: force, response: 'normal' },
+        { damage_type: fire, response: 'normal' },
+      ],
+    });
     expect(result.status).toBe('available');
-    // Natural 1 misses; the other 19 faces deal the flat 1000, including the
-    // critical face because flat modifiers are not doubled: 19/20 * 1000.
-    expect(result.expected_damage).toBeCloseTo(950, 12);
+    // Natural 1 misses; the other 19 faces deal both flat components, and the
+    // critical face does not double either: 19/20 * (1000 + 10) = 959.5.
+    expect(result.expected_damage).toBeCloseTo(959.5, 12);
   });
 });
 
@@ -200,7 +259,17 @@ describe('round 17 runtime-immutable registration manifests', () => {
 
     expect(saveSuccessOutcomeEvidenceManifest.size).toBe(79);
     expect(saveSuccessOutcomeEvidenceManifest.has(fireball.id)).toBe(true);
-    expect(saveSuccessOutcomeEvidenceManifest.get(fireball.id)).toBe(fireball);
+    const registeredFireball = saveSuccessOutcomeEvidenceManifest.get(fireball.id);
+    // Round-18 finding 3 removed the reference-liveness assertion: registered
+    // rows are compared by value and must expose only deeply frozen state.
+    expect(registeredFireball).toEqual(fireball);
+    expect(Object.isFrozen(registeredFireball)).toBe(true);
+    expect(Object.isFrozen(registeredFireball?.failed_damage_signature_slots))
+      .toBe(true);
+    expect(Object.isFrozen(registeredFireball?.failed_damage_signature_slots[0]))
+      .toBe(true);
+    expect(Object.isFrozen(registeredFireball?.failed_damage_signature_slots[0]?.[0]))
+      .toBe(true);
     expect([...saveSuccessOutcomeEvidenceManifest]).toHaveLength(79);
     expect(() => mutable.set(fakeId, fireball)).toThrow();
     expect(saveSuccessOutcomeEvidenceManifest.has(fakeId)).toBe(false);

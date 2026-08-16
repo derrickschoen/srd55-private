@@ -43,6 +43,7 @@ import {
   type SourceDerivedSaveDamageCandidate,
 } from './spell-source-reader';
 import {
+  deepFreeze,
   runtimeReadonlyMap,
   runtimeReadonlyMapView,
 } from './runtime-readonly-map';
@@ -1717,10 +1718,10 @@ export const saveSuccessOutcomeEvidenceManifest: ReadonlyMap<
   SaveSuccessClauseId,
   ReviewedSaveSuccessClause
 > = runtimeReadonlyMap(
-  Object.values(reviewedSaveSuccessClauses).map((clause) => [
-    clause.id,
-    clause,
-  ]),
+  Object.values(reviewedSaveSuccessClauses).map((clause) => {
+    const frozenClause = deepFreeze(clause);
+    return [frozenClause.id, frozenClause] as const;
+  }),
 );
 
 function samePublicSource(left: PublicSourceRef, right: PublicSourceRef): boolean {
@@ -2030,7 +2031,10 @@ export const registeredAttackRollClauses: ReadonlyMap<
  * This probability layer has no character repository or weapon-catalog handle,
  * so the caller must establish that `weapon_id` exists before registration.
  * Registration binds that trusted character weapon identity; it does not try
- * to replace the sheet assembler's caller-supplied attack arithmetic.
+ * to replace the sheet assembler's caller-supplied attack arithmetic. SourceRef
+ * is a value object, so an equal structural copy is indistinguishable from the
+ * caller's original object. Weapon damage amounts share the already-declared
+ * caller-trust boundary with the caller-supplied attack bonus.
  */
 export function registerCharacterWeaponAttackClause(
   source: SourceRef & { readonly kind: 'character_weapon' },
@@ -2049,26 +2053,34 @@ export function registerCharacterWeaponAttackClause(
   if (existing !== undefined && !sameSourceRef(existing.source, source)) {
     throw new TypeError('Attack-roll clause identity collides with another weapon source.');
   }
-  registeredAttackRollClauseBacking.set(clauseId, { source, evidence });
+  const registeredClause = deepFreeze({
+    source: {
+      kind: source.kind,
+      weapon_id: source.weapon_id,
+      stable_key: source.stable_key,
+    },
+    evidence,
+  });
+  registeredAttackRollClauseBacking.set(clauseId, registeredClause);
   return {
     attack_roll_clause_id: clauseId,
     attack_roll_evidence: evidence,
   };
 }
 
+/**
+ * SourceRef carries value identity only: an equal structural copy cannot be
+ * distinguished here. Weapon damage arithmetic, like attack bonus, is the
+ * character assembler's declared caller-trust boundary. Riders stay closed
+ * until a reviewed, content-derived registration can bind their formulas.
+ */
 export function attackDamageSourcesFailureReason(
   attackSource: SourceRef,
   damage: readonly AttackDamageInstance[],
 ): string | null {
   for (const instance of damage) {
-    if (sameSourceRef(instance.source, attackSource)) {
-      continue;
-    }
-    const registered = instance.source_attack_roll_clause_id === undefined
-      ? undefined
-      : registeredAttackRollClauses.get(instance.source_attack_roll_clause_id);
-    if (registered === undefined || !sameSourceRef(registered.source, instance.source)) {
-      return 'Every attack damage source must be the registered attack source or carry its own registered clause identity.';
+    if (!sameSourceRef(instance.source, attackSource)) {
+      return 'Every attack damage instance must use the attack event source; unreviewed rider sources are unavailable.';
     }
   }
   return null;

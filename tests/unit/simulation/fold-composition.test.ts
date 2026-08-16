@@ -29,13 +29,7 @@ const weapon: SourceRef = {
   weapon_id: 9 as CharacterWeaponId,
   stable_key: sourceStableKey('weapon:9'),
 };
-const other: SourceRef = {
-  kind: 'character_weapon',
-  weapon_id: 10 as CharacterWeaponId,
-  stable_key: sourceStableKey('weapon:10'),
-};
 const weaponAttackRegistration = registerCharacterWeaponAttackClause(weapon);
-const otherAttackRegistration = registerCharacterWeaponAttackClause(other);
 const slashing = damageType('Slashing');
 const fire = damageType('Fire');
 
@@ -71,9 +65,7 @@ describe('multi-instance attack with miss damage', () => {
           ],
         },
         {
-          source: other,
-          source_attack_roll_clause_id:
-            otherAttackRegistration.attack_roll_clause_id,
+          source: weapon,
           damage_type: fire,
           components: [{
             kind: 'dice',
@@ -97,6 +89,9 @@ describe('multi-instance attack with miss damage', () => {
     }
     // slashing: 18 ordinary (1d6 = 3.5), 1 crit (2d6 = 7), 1 miss (flat 2).
     const slashingExpected = (18 * 3.5 + 7 + 2) / 20;
+    // The same attack weapon can source a second damage type (the Flame Tongue
+    // shape). Source does not enter either per-instance closed form, so these
+    // reviewed numbers remain identical after re-sourcing the fire instance.
     // fire 2d4 resisted -> floor(t/2) over 2d4: totals 2..8 w/ 1,2,3,4,3,2,1 /16
     let fireBranch = 0;
     for (let a = 1; a <= 4; a += 1) {
