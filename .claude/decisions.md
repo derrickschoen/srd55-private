@@ -7,6 +7,22 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D264 — OWNER: mutation testing runs in parallel with other work (2026-08-16)
+
+"This pc has a powerful ryzen 7900x. you can do mutation testing with
+recompiling in parallel with other things." Stryker runs (concurrency 6 on
+12c/24t) do NOT reserve the machine; dispatches, reviews, and authoring
+continue alongside them.
+
+Reconciliation with the one-suite-at-a-time rule, which this does not
+repeal: that rule exists because TIMING-SENSITIVE gate suites (full
+vitest/Playwright with measured per-test budgets) produce false timeout
+reds under load. Mutation testing plus non-suite work is now expressly
+fine. If a full gate suite must run while a mutation run is active and it
+fails only on known contention-prone timing tests, the existing lesson
+applies: discard and re-run on a quiet machine rather than blaming the
+lane — never re-pin a budget from a loaded run.
+
 ## D263 — OWNER RULINGS: simcore type debt, tamper boundary, loop-state home (2026-08-16)
 
 Three rulings after the reboot recovery and simcore review round 19
