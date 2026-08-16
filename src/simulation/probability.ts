@@ -56,9 +56,9 @@ export type DamageFoldContribution = {
   readonly expected_damage: ExpectedEventDamage;
 };
 
-const registeredAvailableDamageEventFoldBrand: unique symbol = Symbol(
-  'RegisteredAvailableDamageEventFold',
-);
+declare const registeredAvailableDamageEventFoldBrand: unique symbol;
+
+const mintedAvailableDamageEventFolds = new WeakSet<object>();
 
 type AvailableDamageEventFoldFields = {
   readonly status: 'available';
@@ -111,17 +111,13 @@ export type RoundDamageFold =
       readonly failures: NonEmptyReadonlyArray<UnavailableDamageEventFold>;
     };
 
-/** Mints the runtime marker that only evidence-checked event-fold paths use. */
+/** Mints an identity that only evidence-checked event-fold paths can hold. */
 function registeredAvailableDamageEventFold<
   T extends AvailableDamageEventFoldFields,
 >(fold: T): T & AvailableDamageEventFold {
-  Object.defineProperty(fold, registeredAvailableDamageEventFoldBrand, {
-    value: true,
-    enumerable: false,
-    configurable: false,
-    writable: false,
-  });
-  return fold as T & AvailableDamageEventFold;
+  const frozen = Object.freeze(fold);
+  mintedAvailableDamageEventFolds.add(frozen);
+  return frozen as T & AvailableDamageEventFold;
 }
 
 function addProbability(
@@ -777,7 +773,7 @@ export function composeRoundDamageFolds(
   for (const fold of folds) {
     if (
       fold.status === 'available' &&
-      fold[registeredAvailableDamageEventFoldBrand] !== true
+      !mintedAvailableDamageEventFolds.has(fold)
     ) {
       throw new TypeError(
         'Available round-damage folds must be minted by a registered event-fold path.',
