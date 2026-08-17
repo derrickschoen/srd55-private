@@ -7,6 +7,18 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D273 — OWNER: error/refusal message text is NOT contractual (2026-08-16)
+
+Q1 ruled: **"Not contractual."** Diagnostic prose in throws/refusals is not
+part of the tested contract — all message-text mutants (~100+ Survived and
+NoCoverage StringLiterals on diagnostic sites) are formally out of scope,
+and the honest mutation denominator shrinks accordingly. EXISTING message
+assertions stay (weakening assertions remains forbidden, and lanes may
+still use message identity to distinguish WHICH guard fired — that use is
+about guard selection, not message wording); no NEW message-wording
+assertions are written. Options declined: load-bearing-only codification
+(supervisor recommendation), error-ID codes, fully contractual.
+
 ## D272 — OWNER: Kennel spec relaxes to max-assemblable SRD cantrips (2026-08-16)
 
 The Board B Kennel definition carries [Tasha]/[Xanathar]/[2024] cantrips a
