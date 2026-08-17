@@ -7,6 +7,13 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D289 — OWNER: no cadence promise during pre-alpha (2026-08-17)
+
+Release cadence ruled: **"No promise in pre-alpha."** Gated increments
+ship when ready; nothing is stated publicly about rhythm; the update
+prompt carries a changelog line only. Declined: publicly-stated
+ready-when-gated, scheduled+hotfixes, rare big releases.
+
 ## D288 — OWNER: roll forward only (2026-08-17)
 
 Deployed-build recovery ruled: **"Roll forward only."** An older bundle is
