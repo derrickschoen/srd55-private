@@ -325,13 +325,25 @@ function validateSetSlot(record: UnknownRecord): void {
     invalid('Unknown slot mutation mode.');
   }
 
-  if (mode === 'select') {
-    positiveInteger(record, 'spell_version_id');
-  } else if (mode === 'keep_override') {
-    nonEmptyString(record, 'note', 2000);
-  } else if (mode === 'restore') {
-    validateSlotRestoreState(record.state);
-    validateIntegrity(record);
+  switch (mode) {
+    case 'select':
+      positiveInteger(record, 'spell_version_id');
+      break;
+    case 'keep_override':
+      nonEmptyString(record, 'note', 2000);
+      break;
+    case 'restore':
+      validateSlotRestoreState(record.state);
+      validateIntegrity(record);
+      break;
+    case 'clear':
+      break;
+    /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+       tsc probe verified that the never assignment rejects a new mode. */
+    default: {
+      const unreachable: never = mode;
+      throw new TypeError(`Unhandled slot mutation mode ${String(unreachable)}.`);
+    }
   }
 }
 
