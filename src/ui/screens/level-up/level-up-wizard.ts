@@ -621,11 +621,25 @@ export function createLevelUpWizard(options: {
             option.subclass_definition_id ===
             selectedSubclassId,
         );
-    const featChoice = levelFeatDraft?.kind === 'selected'
-      ? levelFeatDraft.application.selection
-      : levelFeatDraft?.kind === 'defer_epic_boon'
-        ? { kind: 'defer_epic_boon' as const }
-        : undefined;
+    let featChoice: LevelUpPreviewCommand['feat_choice'] | undefined;
+    if (levelFeatDraft === null) {
+      featChoice = undefined;
+    } else {
+      switch (levelFeatDraft.kind) {
+        case 'selected':
+          featChoice = levelFeatDraft.application.selection;
+          break;
+        case 'defer_epic_boon':
+          featChoice = { kind: 'defer_epic_boon' };
+          break;
+        /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+           tsc probe verified that the never assignment rejects a new draft. */
+        default: {
+          const unreachable: never = levelFeatDraft;
+          throw new TypeError(`Unhandled feat step draft ${String(unreachable)}.`);
+        }
+      }
+    }
     const projection = plannedProjection();
     const hasPlannedWork =
       projection.skills.length > 0 ||
