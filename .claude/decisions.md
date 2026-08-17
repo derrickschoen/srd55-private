@@ -7,6 +7,36 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D269 — OWNER: type-pattern directives from the 3a-3c walkthrough (2026-08-16)
+
+Three standing directives on how the domain gets typed, from the owner's
+responses to the ranked type improvements:
+(a) **Exhaustive discriminated switches are the house pattern** — "look for
+more solutions like this elsewhere." Where a shape is a closed set of
+alternatives, model it as a discriminated union and consume it with a switch
+tsc checks exhaustively. Corollary ruling: Failed/Success damage should NOT
+have separate shape definitions — one shared Damage signature type, passed
+into whichever arm calls for it; hunt for other duplicate near-identical
+shapes and unify them.
+(b) **Successful type-fix patterns are KB material** — keep a list in the KB
+so future sessions learn from worked examples, and consult it for new
+opportunities whenever it grows.
+(c) **Stateful domain values get a class with domain methods** ("if this was
+Java, a class with increment and decrement") — raw branded numbers are for
+immutable quantities; anything that changes over time gets an
+invariant-owning object like ResourceRecoverySession's bounded counter.
+
+## D268 — OWNER: save DC is always the formula 8 + PB + ability modifier (2026-08-16)
+
+Responding to the proposed `absent | fixed{dc} | unavailable` union for save
+DCs (item 3d): **"it is always a number, we may not know the result yet, but
+we know it is 8 + PB + ability modifier. We can replace the parts of the
+formula later on if we really don't have access to them yet."** Binding
+shape: a save DC is modeled as the structured formula (base 8 + proficiency
+bonus + spellcasting-ability modifier) whose PARTS may be unresolved, never
+as an absent/unavailable state. Resolution substitutes the parts when sheet
+data supplies them. Supersedes the union-arms proposal.
+
 ## D267 — OWNER: resource pools are bounded counters, 0..sheet-derived maximum (2026-08-16)
 
 During the 2c (evidence-identity) walkthrough the owner ruled on the pool
