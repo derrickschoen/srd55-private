@@ -7,6 +7,21 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D299 — OWNER: content needs a ui-hidden marking (2026-08-17)
+
+Owner, in the D298 context of lightweight test content: "We need a way to
+mark things as ui hidden." Taken for now (reversible default, D7): a
+closed visibility discriminant on homebrew/bundled catalog content —
+`visibility: 'listed' | 'ui_hidden'` — where `ui_hidden` entries are
+excluded from every user-facing browse/pick surface but remain fully
+loadable by tests, the simulator, and direct programmatic access; the
+absence of a value means `listed` only at the IMPORT boundary (stored rows
+always carry the explicit value). Seam: the discriminant lives with the
+content schema so an unhandled visibility arm fails tsc at each listing
+site. Cost to flip: rename/widen the union; no data loss. The eight D296
+entries land as `ui_hidden` first; flipping one to `listed` is a
+deliberate later act.
+
 ## D298 — OWNER: v3 entries are lightweight test content, NOT Veteran-grade dossiers (2026-08-17)
 
 Clarifying D296/D297 scope: the intent of adopting all eight is "more types
