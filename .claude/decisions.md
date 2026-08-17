@@ -7,6 +7,13 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D287 — OWNER: telemetry is Cloudflare cookieless aggregates only (2026-08-17)
+
+Public-site telemetry ruled: **Cloudflare's built-in cookieless
+page/error aggregates only** — no client-side beacon code ships in the
+bundle, no character content, nothing per-user, no cookies. Declined:
+none-at-all, opt-in diagnostics, opt-out analytics.
+
 ## D286 — OWNER: supervisor performs the local review itself; deploy stays gated (2026-08-17)
 
 Asked what D266 approval consists of, the owner ruled: **"I don't have
