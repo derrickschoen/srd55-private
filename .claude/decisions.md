@@ -7,7 +7,24 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
-## D273 — OWNER: error/refusal message text is NOT contractual (2026-08-16)
+## D274 — OWNER: tagged error classes with derived messages; supersedes D273 (2026-08-16)
+
+The owner flagged bare `throw new TypeError('prose')` as a smell and asked
+for community research; ruled for the recommendation: **hand-rolled tagged
+error classes, zero dependencies** — literal `name` discriminant (the T4
+pattern: literal TYPE so a ""-mutant fails tsc), structured readonly
+params, message DERIVED from params in the constructor (one place). The
+contract: tests assert class + params at every guard; the exact formatted
+message is asserted ONCE per error class via its formatter. Expected
+refusals (the `string | null` failure-reason returns, status unions)
+graduate incrementally to plain discriminated Results per D269(a);
+invariant guards keep throwing, but typed. Serves D270's S7-04 fix
+(human-readable refusals from structured fields). Migration is its own
+workstream sequenced after wave 5. Declined: Result libraries
+(neverthrow/Effect — dependency weight), exact-message assertions on bare
+TypeErrors, status quo.
+
+## D273 — OWNER (superseded same day by D274): error/refusal message text is NOT contractual (2026-08-16)
 
 Q1 ruled: **"Not contractual."** Diagnostic prose in throws/refusals is not
 part of the tested contract — all message-text mutants (~100+ Survived and
