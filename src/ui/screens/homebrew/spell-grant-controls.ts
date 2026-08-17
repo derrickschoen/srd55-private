@@ -99,7 +99,8 @@ export function spellGrantControls(options: SpellGrantControlsOptions): readonly
     help,
   ];
 
-  if (grant.kind === 'fixed_spell') {
+  switch (grant.kind) {
+    case 'fixed_spell': {
     const spell = element('select', {
       attributes: {
         id: `${options.prefix}-spell`,
@@ -140,7 +141,9 @@ export function spellGrantControls(options: SpellGrantControlsOptions): readonly
       }
     });
     controls.push(...labelledControl('Spell', spell.id, spell));
-  } else if (grant.kind === 'choice_from_list') {
+      break;
+    }
+    case 'choice_from_list': {
     const list = element('select', {
       attributes: {
         id: `${options.prefix}-list`,
@@ -173,6 +176,16 @@ export function spellGrantControls(options: SpellGrantControlsOptions): readonly
       }
     });
     controls.push(...labelledControl('Spell list', list.id, list));
+      break;
+    }
+    case 'choice_from_query':
+      break;
+    /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+       tsc probe verified that the never assignment rejects a new grant. */
+    default: {
+      const unreachable: never = grant;
+      throw new TypeError(`Unhandled spell draft grant ${String(unreachable)}.`);
+    }
   }
 
   return controls;
