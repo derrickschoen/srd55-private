@@ -7,6 +7,20 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D281 — OWNER: delete EVERYTHING unreachable, including defensive arms (2026-08-17)
+
+NoCoverage resolution ruled: **"Delete everything unreachable."** If no
+test can reach a code path through ordinary inputs, it is deleted — the
+PRE-ALPHA bias applied without the keep-and-justify carve-out the
+supervisor recommended. Defensive arms guarding future data (e.g. the
+contracts sameSourceRef weapon/character arms unreachable through any
+mintable source) are deleted too and re-added when the data that reaches
+them arrives; unreachable-today is unrepresentable-today, and the type
+system should say so. Reachable-but-untested code gets tests. Q2 note:
+this composes with the hostile-input question — "reachable" means
+ordinary constructible inputs, consistent with the campaign's equivalence
+convention pending that ruling.
+
 ## D280 — OWNER: the v1 mutation bar is WHOLE-src/ zero-unexplained (2026-08-17)
 
 Ruled: **"Whole src/ zero unexplained"** — the largest option, knowingly.
