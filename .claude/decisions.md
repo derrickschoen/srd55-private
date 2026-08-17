@@ -7,6 +7,15 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D295 — OWNER: deploy configs stay placeholder; mobile-viewport testing confirmed (2026-08-17)
+
+Deploy identity ruled: **"Placeholder until later"** — prepared wrangler
+configs carry PROJECT_NAME_TBD; the name/domain decision waits until
+deploy is near; zero outward surface. Same-day addendum to D293, owner's
+words: **"Maybe try with mobile sized viewport testing as well as full
+desktop"** — emulated mobile-viewport runs join the browser suites and
+the D286 self-review explicitly, alongside full desktop.
+
 ## D294 — OWNER: all MAJOR self-review findings auto-block v1 (2026-08-17)
 
 Triage policy ruled: **"All MAJOR auto-block."** Any MAJOR-severity
