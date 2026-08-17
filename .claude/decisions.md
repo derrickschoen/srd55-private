@@ -7,6 +7,16 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D277 — OWNER: error migration completes BEFORE the S7 repairs (2026-08-17)
+
+Start-order ruling for the three ready workstreams: **"Migrate first"** —
+the D276 tagged-error migration proceeds module-by-module to completion,
+so the five S7 v1-blocking repairs (D270) are then built on the final
+error taxonomy rather than repairing guards that migration would rewrite.
+Wave-5 increment 5 (exhaustive-switch pass) slots into spare capacity.
+Options declined: S7-first-combined-where-overlapping (supervisor
+recommendation), S7 strictly first, all-parallel per-module judgment.
+
 ## D276 — OWNER: migrate EVERYWHERE to tagged error classes now (2026-08-17)
 
 After the four-option deep dive, ruled: **"migrate everywhere to option
