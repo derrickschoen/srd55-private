@@ -7,6 +7,18 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D297 — OWNER: homebrew v3 sub-rulings — both Ambush chassis; Chorus cost from d4; cleric slot stays open (2026-08-17)
+
+Three sub-rulings completing D296: (1) Ambush Primitive ships on **both**
+chassis — Vanward Conclave (Ranger) and Cold Open (Rogue); Cold Open's
+unpreserved measured delta must be re-run before its dossier cites numbers.
+(2) Cutting Chorus's displaced-ally opportunity cost is **re-derived from
+the d4 scorecard builds** (party-average attacks over the 89-build set),
+NOT the provisional 65%/1d8+3 proxy — the Chorus dossier's net-DPR figure
+is therefore blocked behind d4 expansion (D292); the mechanic's authoring
+can proceed, its net claim cannot. (3) The cleric damage slot **stays
+open** — a recorded open item, no commissioned candidates.
+
 ## D296 — OWNER: ALL EIGHT homebrew v3 entries adopted for full authoring (2026-08-17)
 
 Presented with the reconstructed v3 packet (eight entries, sim-validated per
