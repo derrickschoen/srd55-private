@@ -7,6 +7,20 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D296 — OWNER: ALL EIGHT homebrew v3 entries adopted for full authoring (2026-08-17)
+
+Presented with the reconstructed v3 packet (eight entries, sim-validated per
+tools/sim/2026-08-12-homebrew-validation-plan.md, measured numbers the
+deliverable per the park-time record), the owner selected **all eight**:
+Long Grudge, Anchor Point, Patient Volley, Cutting Chorus, Ambush Primitive
+(Vanward/Cold Open), Broken Tooth, Cutting Momentum, Broken Tempo. Each
+advances to a full prose dossier + app content behind the v1 gates (D292).
+Entries that measured over claim (Anchor Point, Patient Volley, Vanward,
+Broken Tooth, Broken Tempo) are adopted as MEASURED — authoring works from
+the simulated numbers, not the stale claims. Open sub-rulings still owed:
+Ambush chassis cardinality, Cutting Chorus ally-attack opportunity cost,
+the named-open cleric damage slot.
+
 ## D295 — OWNER: deploy configs stay placeholder; mobile-viewport testing confirmed (2026-08-17)
 
 Deploy identity ruled: **"Placeholder until later"** — prepared wrangler
