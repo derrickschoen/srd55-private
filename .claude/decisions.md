@@ -7,6 +7,20 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D283 — OWNER: cold-boot verification stamp (2026-08-17)
+
+Cold-boot trade ruled: **"Verification stamp."** The full integrity suite
+(schema signature, quick_check, FK check, catalog digest) runs on first
+boot and whenever the stamp is invalid; the stamp persists (app
+version/build id + database image digest) and while it matches, boot
+skips the ~3s structure checks and ~1s digest for a ~1s warm-equivalent
+start. A corrupted-but-stamped image is caught later rather than at boot
+— accepted. Implementation notes: the stamp must bind to BOTH the build
+(schema may change per release) and the image bytes (digest already
+computed for export paths); any write invalidates lazily; stamp lives
+beside the image in OPFS. Declined: optimize-checks-directly (supervisor
+recommendation), read-only fast open, leave-for-v1.
+
 ## D282 — OWNER: ordinary inputs judge killability; hardening stays at entries (2026-08-17)
 
 The long-standing hostility question (Q2) ruled: **"Ordinary + entry
