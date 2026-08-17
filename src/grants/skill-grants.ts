@@ -27,6 +27,38 @@ import { GrantRule } from './grant-rule';
 import { SourceRuleReader } from './source-rule-reader';
 import { catalogLayerDisclosure } from '../catalog/catalog-disclosure';
 
+export class StoredSkillGrantSkillError extends TypeError {
+  override readonly name = 'StoredSkillGrantSkillError' as const;
+  constructor(readonly skill: string) {
+    super(`Unknown stored skill '${skill}'.`);
+  }
+}
+
+export class StoredSkillGrantStateError extends TypeError {
+  override readonly name = 'StoredSkillGrantStateError' as const;
+  constructor(readonly state: string) {
+    super(`Unknown skill grant state '${state}'.`);
+  }
+}
+
+export class SkillGrantDuplicateSelectionError extends TypeError {
+  override readonly name = 'SkillGrantDuplicateSelectionError' as const;
+  constructor(readonly grant_key: string) {
+    super(`Grant rule '${grant_key}' cannot select the same skill twice.`);
+  }
+}
+
+export class SkillGrantDuplicateSourceSkillError extends Error {
+  override readonly name = 'SkillGrantDuplicateSourceSkillError' as const;
+  constructor(readonly skill: Skill) {
+    super(
+      `Duplicate skill ${skill} in one source's grant list — the printed ` +
+        'content never repeats a skill, so this is a data defect, not a ' +
+        'choice to reconcile.',
+    );
+  }
+}
+
 /**
  * THE SKILL GRANTS — resolver, projection reconciler, and the generator's
  * class arm (plan `docs/design/2026-07-29-skills-with-provenance.md`).
@@ -43,11 +75,11 @@ import { catalogLayerDisclosure } from '../catalog/catalog-disclosure';
 const skillGrantRow: RowCodec<SkillGrantRow> = (row) => {
   const skill = sqlNullableString(row, 'skill');
   if (skill !== null && !isEnumValue(skills, skill)) {
-    throw new TypeError(`Unknown stored skill '${skill}'.`);
+    throw new StoredSkillGrantSkillError(skill);
   }
   const state = sqlString(row, 'state');
   if (!isEnumValue(skillGrantStates, state)) {
-    throw new TypeError(`Unknown skill grant state '${state}'.`);
+    throw new StoredSkillGrantStateError(state);
   }
   return {
     id: sqlInteger(row, 'id'),
@@ -148,9 +180,7 @@ export function syncToolAlternativeSkillGrants(
     (skill): skill is Skill => skill !== null,
   );
   if (new Set(recordedSkills).size !== recordedSkills.length) {
-    throw new TypeError(
-      `Grant rule '${grantKey}' cannot select the same skill twice.`,
-    );
+    throw new SkillGrantDuplicateSelectionError(grantKey);
   }
   const existing = db.all(
     `SELECT id, character_id, source_instance_id, grant_key, ordinal,
@@ -881,11 +911,7 @@ export function mintFilledSkillGrants(
 ): void {
   for (const [index, skill] of granted.entries()) {
     if (granted.indexOf(skill) !== index) {
-      throw new Error(
-        `Duplicate skill ${skill} in one source's grant list — the printed ` +
-          'content never repeats a skill, so this is a data defect, not a ' +
-          'choice to reconcile.',
-      );
+      throw new SkillGrantDuplicateSourceSkillError(skill);
     }
     if (skillHeldByOtherActiveGrant(db, characterId, skill, -1)) {
       throw new SkillGrantRefusal(

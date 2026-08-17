@@ -4,6 +4,24 @@ import {
   parseSourceGrantRules,
 } from '../../../src/grants/configured-choice-rule';
 import { GrantRule } from '../../../src/grants/grant-rule';
+import {
+  ConfiguredChoiceExactKeysError,
+  ConfiguredChoiceNestedRuleError,
+  SourceGrantRuleKeyError,
+} from '../../../src/grants/configured-choice-rule-errors';
+import {
+  GrantRuleActivationConflictError,
+  GrantRuleKindError,
+} from '../../../src/grants/grant-rule-errors';
+
+function thrown(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return expect.fail('Expected an error, but the call returned.');
+}
 
 function configuredChoice() {
   return {
@@ -44,12 +62,14 @@ describe('configured source-choice contract', () => {
     expect(parsed.options[0]?.value).toBe('Moon Lineage');
     expect(parsed.options[0]?.grants[0]?.ruleKey).toBe('fixture-moon-light');
     expect(parsed.toObject()).toEqual(input);
-    expect(() => GrantRule.fromObject(input)).toThrow(
-      "Unknown grant rule kind 'configured_choice'.",
-    );
-    expect(() => ConfiguredChoiceRule.fromObject(
+    const materialError = thrown(() => GrantRule.fromObject(input));
+    expect(materialError).toBeInstanceOf(GrantRuleKindError);
+    expect(materialError).toMatchObject({ value: 'configured_choice' });
+    const descriptorError = thrown(() => ConfiguredChoiceRule.fromObject(
       input.options[0]?.grants[0],
-    )).toThrow('Configured-choice rule must contain exactly');
+    ));
+    expect(descriptorError).toBeInstanceOf(ConfiguredChoiceExactKeysError);
+    expect(descriptorError).toMatchObject({ label: 'Configured-choice rule' });
 
     const passthroughBase = configuredChoice();
     const passthrough = {
@@ -73,10 +93,12 @@ describe('configured source-choice contract', () => {
   });
 
   it('refuses unknown fields, nesting, and rule-key collisions', () => {
-    expect(() => ConfiguredChoiceRule.fromObject({
+    const unknownFieldError = thrown(() => ConfiguredChoiceRule.fromObject({
       ...configuredChoice(),
       future_default: 'guess',
-    })).toThrow('Configured-choice rule must contain exactly');
+    }));
+    expect(unknownFieldError).toBeInstanceOf(ConfiguredChoiceExactKeysError);
+    expect(unknownFieldError).toMatchObject({ label: 'Configured-choice rule' });
 
     const base = configuredChoice();
     const nested = {
@@ -86,11 +108,11 @@ describe('configured source-choice contract', () => {
         grants: [configuredChoice()],
       }],
     };
-    expect(() => ConfiguredChoiceRule.fromObject(nested)).toThrow(
-      'Configured-choice rules may not be nested.',
+    expect(thrown(() => ConfiguredChoiceRule.fromObject(nested))).toBeInstanceOf(
+      ConfiguredChoiceNestedRuleError,
     );
 
-    expect(() => parseSourceGrantRules([
+    const collision = thrown(() => parseSourceGrantRules([
       configuredChoice(),
       {
         kind: 'fixed_spell',
@@ -98,7 +120,9 @@ describe('configured source-choice contract', () => {
         spell_version_key: '2024:light',
         bucket: 'cantrip_known',
       },
-    ])).toThrow("Source grant rules repeat rule_key 'fixture-moon-light'.");
+    ]));
+    expect(collision).toBeInstanceOf(SourceGrantRuleKeyError);
+    expect(collision).toMatchObject({ rule_key: 'fixture-moon-light' });
   });
 
   it('closes character-level gates to 1..20 and makes both gates incoherent', () => {
@@ -118,13 +142,15 @@ describe('configured source-choice contract', () => {
       active_from_character_level: 21,
     })).toThrow('must be between 1 and 20');
 
-    expect(() => GrantRule.fromObject({
+    const conflict = thrown(() => GrantRule.fromObject({
       kind: 'fixed_spell',
       rule_key: 'crossed-gates',
       spell_version_key: '2024:misty-step',
       bucket: 'prepared',
       active_from_class_level: 3,
       active_from_character_level: 3,
-    })).toThrow('must not define both');
+    }));
+    expect(conflict).toBeInstanceOf(GrantRuleActivationConflictError);
+    expect(conflict).toMatchObject({ rule_key: 'crossed-gates' });
   });
 });

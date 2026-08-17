@@ -17,6 +17,13 @@ export function replaceableSpellRuleKey(configuredRuleKey: string): string {
   return `${configuredRuleKey}:replaceable_spell`;
 }
 
+export class ReplaceableSpellRuleKeyCollisionError extends TypeError {
+  override readonly name = 'ReplaceableSpellRuleKeyCollisionError' as const;
+  constructor(readonly rule_key: string) {
+    super(`Replaceable-spell rule key '${rule_key}' collides with a stored rule.`);
+  }
+}
+
 /** B-owned runtime expansion layered over Unit A's checksum-frozen reader. */
 export class ConfiguredChoiceMaterialReader extends SourceRuleReader {
   constructor(private readonly choiceDb: DatabaseContext) {
@@ -61,9 +68,7 @@ export class ConfiguredChoiceMaterialReader extends SourceRuleReader {
       });
     for (const rule of replaceableRules) {
       if (material.some((candidate) => candidate.ruleKey === rule.ruleKey)) {
-        throw new TypeError(
-          `Replaceable-spell rule key '${rule.ruleKey}' collides with a stored rule.`,
-        );
+        throw new ReplaceableSpellRuleKeyCollisionError(rule.ruleKey);
       }
     }
     return [...material, ...replaceableRules];

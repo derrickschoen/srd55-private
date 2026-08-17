@@ -27,6 +27,17 @@ import {
   parseSourceGrantRules,
 } from './configured-choice-rule';
 import { characterLevel } from '../rules/character-level';
+import {
+  GrantRuleClassLevelSourceError,
+  GrantRulesJsonContainerError,
+  GrantSourceClassLevelMissingError,
+  GrantSourceDefinitionMissingError,
+  GrantSourceInstanceStateError,
+  GrantSourceRulesListError,
+  GrantSourceTypeError,
+  StoredGrantRuleRecordError,
+  type GrantRuleRecordLocation,
+} from './source-rule-reader-errors';
 
 type JsonContainer = Record<string, unknown> | unknown[];
 
@@ -97,7 +108,7 @@ function decodeSource(row: SqlRow): GrantSourceInstance {
 function requiredSourceInstanceState(row: SqlRow): SourceInstanceState {
   const state = sqlString(row, 'state');
   if (!isEnumValue(sourceInstanceStates, state)) {
-    throw new Error(`Unknown source instance state '${state}'.`);
+    throw new GrantSourceInstanceStateError(state);
   }
   return state;
 }
@@ -147,9 +158,7 @@ export function decodeGrantJson(
   }
   const decoded: unknown = JSON.parse(json);
   if (!isContainer(decoded)) {
-    throw new TypeError(
-      'Grant-rule JSON values must decode to arrays or objects.',
-    );
+    throw new GrantRulesJsonContainerError();
   }
   return decoded;
 }
@@ -158,16 +167,17 @@ export function sourceDefinitionTable(
   sourceType: string,
 ): `${DomainSourceType}_definitions` {
   if (!isEnumValue(domainSourceTypes, sourceType)) {
-    throw new TypeError(
-      `Unsupported grant source type '${sourceType}'.`,
-    );
+    throw new GrantSourceTypeError(sourceType);
   }
   return `${sourceType}_definitions`;
 }
 
-function parseRule(value: unknown, message: string): GrantRule {
+function parseRule(
+  value: unknown,
+  location: GrantRuleRecordLocation,
+): GrantRule {
   if (!isRecord(value)) {
-    throw new TypeError(message);
+    throw new StoredGrantRuleRecordError(location);
   }
   return GrantRule.fromObject(value);
 }
@@ -225,15 +235,11 @@ export class SourceRuleReader {
       identifiedGrantRulesText,
     );
     if (definition === null) {
-      throw new Error(
-        `Definition for source instance ${source.id} does not exist.`,
-      );
+      throw new GrantSourceDefinitionMissingError(source.id, 'source');
     }
     const rules = decodeGrantJson(definition.grant_rules);
     if (!Array.isArray(rules)) {
-      throw new TypeError(
-        `Grant rules for source instance ${source.id} must be a list.`,
-      );
+      throw new GrantSourceRulesListError(source.id);
     }
     const config = decodeGrantJson(source.config);
     return parseSourceGrantRules(rules).flatMap((rule) => {
@@ -261,9 +267,7 @@ export class SourceRuleReader {
       if (Number.isSafeInteger(configuredLevel)) {
         return configuredLevel as number;
       }
-      throw new TypeError(
-        'Rule active_from_class_level requires a class, subclass, or configured class_level source.',
-      );
+      throw new GrantRuleClassLevelSourceError();
     }
 
     const level = this.db.scalar<number>(
@@ -273,9 +277,7 @@ export class SourceRuleReader {
       [source.characterId, classDefinitionId ?? 0],
     );
     if (level === null) {
-      throw new Error(
-        `Source instance ${source.id} has no matching class level.`,
-      );
+      throw new GrantSourceClassLevelMissingError(source.id, 'source');
     }
     return level;
   }
@@ -316,9 +318,7 @@ export class SourceRuleReader {
       [source.characterId, source.sourceDefinitionId ?? 0],
     );
     if (classLevel === null) {
-      throw new Error(
-        `Class source instance ${source.id} has no character class level.`,
-      );
+      throw new GrantSourceClassLevelMissingError(source.id, 'class_source');
     }
 
     const byRuleKey = new Map<string, GrantRule>();
@@ -333,10 +333,7 @@ export class SourceRuleReader {
     for (const progression of progressions) {
       const rules = decodeGrantJson(progression);
       for (const ruleData of containerValues(rules)) {
-        const rule = parseRule(
-          ruleData,
-          'Class progression grant rules must be objects.',
-        );
+        const rule = parseRule(ruleData, 'class_progression');
         byRuleKey.set(rule.ruleKey, rule);
       }
     }
@@ -355,18 +352,13 @@ export class SourceRuleReader {
       identifiedGrantRulesText,
     );
     if (definition === null) {
-      throw new Error(
-        `Definition for subclass source instance ${source.id} does not exist.`,
-      );
+      throw new GrantSourceDefinitionMissingError(source.id, 'subclass_source');
     }
 
     const byRuleKey = new Map<string, GrantRule>();
     const staticRules = decodeGrantJson(definition.grant_rules);
     for (const ruleData of containerValues(staticRules)) {
-      const rule = parseRule(
-        ruleData,
-        'Static subclass grant rules must be objects.',
-      );
+      const rule = parseRule(ruleData, 'static_subclass');
       byRuleKey.set(rule.ruleKey, rule);
     }
 
@@ -381,10 +373,7 @@ export class SourceRuleReader {
     for (const progression of progressions) {
       const rules = decodeGrantJson(progression);
       for (const ruleData of containerValues(rules)) {
-        const rule = parseRule(
-          ruleData,
-          'Subclass progression grant rules must be objects.',
-        );
+        const rule = parseRule(ruleData, 'subclass_progression');
         byRuleKey.set(rule.ruleKey, rule);
       }
     }

@@ -79,11 +79,15 @@ describe('catalog data-migration registry', () => {
         'src/catalog/reconcile-species-lineage-content-v2.ts',
         'src/rules/origin-definitions-srd.ts',
         'src/grants/configured-choice-rule.ts',
+        'src/grants/configured-choice-rule-errors.ts',
         'src/grants/grant-rule.ts',
+        'src/grants/grant-rule-errors.ts',
         'src/grants/source-rule-reader.ts',
+        'src/grants/source-rule-reader-errors.ts',
         'src/domain/source-instance-state.ts',
         'src/rules/character-level.ts',
         'src/grants/grant-rule-slot-generator.ts',
+        'src/grants/grant-rule-slot-generator-errors.ts',
         'src/grants/grant-rule-planner.ts',
         'src/grants/skill-grants.ts',
         'src/grants/skill-expertise-grants.ts',
@@ -113,7 +117,9 @@ describe('catalog data-migration registry', () => {
       // added `src/domain/source-instance-state.ts`, a module that exists to be
       // exactly this wide. Reconciliation's OUTPUT is unchanged in both rounds;
       // re-pinning is D226's accepted cost, not a way around the freeze.
-      checksum: '52af2f598ab61b90647e05aa736963cb78d576631e680b481567953786b21d29',
+      // Re-pinned 2026-08-17 for fact-bearing grants errors; their four new
+      // sibling modules are pinned above as transitive behavioural sources.
+      checksum: 'e680dc8015b722b7110c91d62206fd6481ce86ed3a933031e69aa9e0d3d11c40',
     }]);
     expect(() =>
       validateCatalogDataMigrationRegistry(CATALOG_DATA_MIGRATIONS)
