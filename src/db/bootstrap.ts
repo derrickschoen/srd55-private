@@ -2,9 +2,16 @@ import type { Sqlite3Static } from '@sqlite.org/sqlite-wasm';
 import schema from './schema.sql?raw';
 import {
   DatabaseLifecycle,
-  type DatabaseSeed,
   type DatabaseStorage,
+  type DatabaseVerificationMode,
 } from './database-lifecycle';
+import { DATABASE_MIGRATIONS } from './migrations';
+import {
+  CATALOG_DATA_MIGRATIONS,
+} from '../catalog/catalog-data-migrations';
+import { sha256 } from '../crypto/sha256';
+import type { BootVerificationBuildKey } from './boot-verification-stamp';
+import { EXPECTED_BUNDLED_CONTENT_DIGEST_V1 } from '../catalog/bundled-content-digest-v1.expected';
 import { ensureBundledClassContent } from '../rules/class-progression-lookup';
 import {
   assertBundledSrdSubclassSpellReferences,
@@ -88,6 +95,7 @@ function namedDigestMismatch(pass: BundledContentDigestPassV1): string {
 function seedApplication(
   db: DatabaseContext,
   onProgress: (stage: DatabaseBootStage) => void,
+  verification: DatabaseVerificationMode,
 ): void {
   onProgress('checking_bundled_rules');
   ensureBundledClassContent(db);
@@ -106,6 +114,16 @@ function seedApplication(
   // the instance config, at grant generation — never at seed time.
   ensureBundledBackgroundDefinitions(db);
   ensureBundledFeatContent(db);
+  // D283. A reproduced stamp already binds this build's pinned corpus digest
+  // to these exact image bytes, so canonicalizing 444 aggregates to reach the
+  // same digest again is the second of the ~4s the stamp exists to give back.
+  // The two passes below are NOT digest work — they operate on stored
+  // relations and user rows — and stay on every boot.
+  if (verification === 'stamped') {
+    assertBundledSrdSubclassSpellReferences(db);
+    reconcileLegacyLevelFeatChoices(db);
+    return;
+  }
   // A one-row aggregate-count gate runs before the digest and the spell source
   // parser/cardinality repair. A healthy database therefore takes the digest
   // without parsing four source extracts or querying 339 registrations. A
@@ -182,8 +200,43 @@ function seedApplication(
   }
 }
 
-export const applicationSeed: DatabaseSeed = (db) =>
-  seedApplication(db, () => undefined);
+export function applicationSeed(
+  db: DatabaseContext,
+  verification: DatabaseVerificationMode = 'full',
+): void {
+  seedApplication(db, () => undefined, verification);
+}
+
+/**
+ * The build half of the D283 verification stamp key.
+ *
+ * Every field is already a frozen build constant — no new version string to
+ * bump, and therefore none to forget. `schemaChecksum` is the migration
+ * registry's target, so it moves with the schema by construction;
+ * `bundledContentDigest` is the pinned whole-corpus digest, which is the very
+ * value the catalog pass would otherwise recompute; the migration registry
+ * checksum is derived from each migration's own frozen id and checksum, so a
+ * new data migration invalidates every stamp in the wild.
+ */
+export function applicationBootVerificationBuildKey():
+  BootVerificationBuildKey {
+  const target = DATABASE_MIGRATIONS.at(-1);
+  if (target === undefined) {
+    throw new TypeError('Database migration registry is empty.');
+  }
+  return {
+    schemaChecksum: target.resultSchemaChecksum,
+    bundledContentDigest: EXPECTED_BUNDLED_CONTENT_DIGEST_V1,
+    catalogDataMigrationsChecksum: sha256(
+      JSON.stringify(
+        CATALOG_DATA_MIGRATIONS.map((migration) => [
+          migration.id,
+          migration.checksum,
+        ]),
+      ),
+    ),
+  };
+}
 
 /**
  * Composition root for the application database. Everything that boots a real
@@ -199,6 +252,6 @@ export function createApplicationLifecycle(
     sqlite3,
     storage,
     schema,
-    (db) => seedApplication(db, onProgress),
+    (db, verification) => seedApplication(db, onProgress, verification),
   );
 }

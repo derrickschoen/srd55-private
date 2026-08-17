@@ -37,15 +37,36 @@ import {
 export const applicationTables = APPLICATION_TABLES;
 
 /**
+ * How much of the acceptance proof this open has to perform (D283).
+ *
+ * `'full'` is the only mode that PROVES anything: integrity, foreign keys,
+ * triggers, and — in the application seed — the bundled catalog digest.
+ * `'stamped'` means a verification stamp for exactly these bytes, this schema
+ * and this bundled corpus was reproduced before the open, so re-deriving the
+ * same verdict would cost four seconds to learn nothing.
+ *
+ * It is a mode rather than a boolean so that the skip has a name at every seam
+ * it travels through — the lifecycle, the seed, and the boot timeline all say
+ * `'stamped'`, and a new mode would be a compile error at each of them.
+ */
+export type DatabaseVerificationMode = 'full' | 'stamped';
+
+/**
  * Bundled content applied to an open application database. Called on every
  * `open()`, including the opens performed by `reset()` and `replace()`, so the
  * implementation is responsible for being a no-op when the content is already
  * present.
  *
+ * The verification mode is passed through because the catalog digest — the
+ * other second of a cold boot — is a seed-time proof, not an open-time one.
+ *
  * A seed is BEST EFFORT: `open()` reports a throwing seed and then carries on
  * with an unseeded database. See `DatabaseLifecycle.open`.
  */
-export type DatabaseSeed = (db: DatabaseContext) => void;
+export type DatabaseSeed = (
+  db: DatabaseContext,
+  verification: DatabaseVerificationMode,
+) => void;
 
 export interface DatabaseStorage {
   readonly filename: string;
@@ -222,7 +243,18 @@ export class DatabaseLifecycle {
     return this.#context?.isOpen === true;
   }
 
-  open(): DatabaseContext {
+  /**
+   * Opens the stored image, proving it acceptable first.
+   *
+   * `verification` defaults to `'full'`, so every path that did not opt in —
+   * `reopen`, `replace`, `reset`, and every test — behaves exactly as before.
+   * A stamped open is downgraded to full for a NEW image: bytes this process
+   * is about to create have never been verified by anyone, and a stamp that
+   * happened to be lying beside them cannot be about them.
+   */
+  open(
+    verification: DatabaseVerificationMode = 'full',
+  ): DatabaseContext {
     if (this.#context?.isOpen) {
       return this.#context;
     }
@@ -232,15 +264,16 @@ export class DatabaseLifecycle {
       validateMigrationRegistry(this.migrations);
       validateCatalogDataMigrationRegistry(this.catalogDataMigrations);
       const isNewImage = !hasApplicationSchema(connection);
+      const mode: DatabaseVerificationMode = isNewImage ? 'full' : verification;
       if (isNewImage) {
         connection.exec(this.schema);
       } else {
         this.#migrateKnownSchema(connection);
       }
-      this.#validateApplicationDatabase(connection);
+      this.#validateApplicationDatabase(connection, mode);
       const context = new DatabaseContext(connection);
       runCatalogDataMigrations(context, this.catalogDataMigrations);
-      this.#applySeed(context);
+      this.#applySeed(context, mode);
       this.#context = context;
       return this.#context;
     } catch (error) {
@@ -258,9 +291,12 @@ export class DatabaseLifecycle {
    * data intact, and it is still resettable, so the honest response is to
    * report the failure and boot.
    */
-  #applySeed(context: DatabaseContext): void {
+  #applySeed(
+    context: DatabaseContext,
+    verification: DatabaseVerificationMode,
+  ): void {
     try {
-      this.seed(context);
+      this.seed(context, verification);
     } catch (error) {
       console.error('Bundled content could not be seeded.', error);
     }
@@ -368,13 +404,24 @@ export class DatabaseLifecycle {
     return this.replace(bytes);
   }
 
-  #validateApplicationDatabase(db: Database): void {
+  #validateApplicationDatabase(
+    db: Database,
+    verification: DatabaseVerificationMode = 'full',
+  ): void {
     // The exact target signature below is the authoritative table inventory.
     // Keeping the static current-build inventory out of this path also lets
     // migration tests instantiate a lifecycle for a genuine historical target
     // without pretending that a later table already existed. The public
     // validator still uses the current inventory for unknown-image diagnosis.
-    validateDatabaseConnectionCore(db);
+    //
+    // The page-by-page and row-by-row proofs are the ~3s a stamped boot buys
+    // back. The SCHEMA SIGNATURE comparison below is never skipped: it costs
+    // one query against `sqlite_schema`, it is what decides whether migrations
+    // ran correctly, and a build whose schema moved must not be able to open a
+    // stale image just because a stamp survived the upgrade.
+    if (verification === 'full') {
+      validateDatabaseConnectionCore(db);
+    }
     if (databaseSchemaSignature(db) !== this.#applicationSchemaSignature()) {
       throw new Error(
         'Database image schema does not match the application schema.',
