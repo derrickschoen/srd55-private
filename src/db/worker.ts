@@ -1,6 +1,8 @@
 /// <reference lib="webworker" />
 
-import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
+import sqlite3InitModule, {
+  type Sqlite3Static,
+} from '@sqlite.org/sqlite-wasm';
 import {
   createSahPoolStorage,
   type DatabaseLifecycle,
@@ -16,10 +18,12 @@ import { rpcRegistry } from '../worker/registry';
 import type { RuntimeEnvironment } from '../worker/handler';
 import {
   bootDatabase,
+  bootFailureRejection,
   bootHandlerContext,
   degradedRejection,
   type DatabaseBoot,
 } from '../worker/boot';
+import { classifyStoragePoolInstallFailure } from './storage-pool-lock';
 import {
   databaseBootProgress,
   type DatabaseBootStage,
@@ -27,6 +31,25 @@ import {
 
 const scope = self as DedicatedWorkerGlobalScope;
 const filename = '/dnd-multiclass-spells.sqlite3';
+const poolName = 'dnd-multiclass-spells-sahpool';
+
+/**
+ * A second tab cannot install the pool while the first tab holds it. The raw
+ * browser exception is classified HERE, at the throw site, because this is the
+ * only place that still knows which operation failed — one layer up it is
+ * indistinguishable from a wasm load failure.
+ */
+async function installStoragePool(sqlite3: Sqlite3Static) {
+  try {
+    return await sqlite3.installOpfsSAHPoolVfs({
+      initialCapacity: 6,
+      name: poolName,
+      directory: `/${poolName}`,
+    });
+  } catch (error) {
+    throw classifyStoragePoolInstallFailure(error, poolName);
+  }
+}
 
 async function initialize(): Promise<DatabaseBoot> {
   const report = (stage: DatabaseBootStage): void => {
@@ -35,11 +58,7 @@ async function initialize(): Promise<DatabaseBoot> {
   report('loading_engine');
   const sqlite3 = await sqlite3InitModule();
   report('opening_storage');
-  const pool = await sqlite3.installOpfsSAHPoolVfs({
-    initialCapacity: 6,
-    name: 'dnd-multiclass-spells-sahpool',
-    directory: '/dnd-multiclass-spells-sahpool',
-  });
+  const pool = await installStoragePool(sqlite3);
   const lifecycle = createApplicationLifecycle(
     sqlite3,
     createSahPoolStorage(pool, filename),
@@ -86,13 +105,7 @@ async function respond(value: unknown): Promise<void> {
             )
           : rpcFailure(value.id, rejection.toPayload());
     } catch (error) {
-      response = rpcFailure(
-        value.id,
-        new RpcError(
-          'handler_error',
-          error instanceof Error ? error.message : String(error),
-        ).toPayload(),
-      );
+      response = rpcFailure(value.id, bootFailureRejection(error).toPayload());
     }
   }
   scope.postMessage(response);

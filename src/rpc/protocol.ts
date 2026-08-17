@@ -19,7 +19,15 @@ export type RpcErrorCode =
    * worker booted degraded. Only the recovery methods
    * (`system.exportDatabase`, `system.reset`) are dispatchable.
    */
-  | 'schema_mismatch';
+  | 'schema_mismatch'
+  /**
+   * Another tab of this origin holds the exclusive OPFS SyncAccessHandle pool,
+   * so this tab's worker never opened a database and NO method is dispatchable
+   * — not even the recovery methods, which need the storage handle the other
+   * tab is holding. Distinct from `handler_error` because the remedy is a user
+   * action (close the other tab) rather than a repair of stored data.
+   */
+  | 'storage_pool_locked';
 
 export interface RpcErrorPayload {
   code: RpcErrorCode;
