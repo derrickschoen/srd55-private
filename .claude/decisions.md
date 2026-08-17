@@ -7,6 +7,19 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D284 — OWNER: second tab opens READ-ONLY (2026-08-17)
+
+Multi-tab contract ruled: **"Read-only second tab."** Today a second
+tab's OPFS SAH pool install fails with a raw error (accidental exclusive
+lock). At v1: the second tab detects the conflict and opens a READ-ONLY
+view — a snapshot of the database image with a persistent banner naming
+the owning tab; all writes happen only in the owner. Build: snapshot
+channel (BroadcastChannel or export-image handoff) + staleness handling
+(banner shows snapshot age; refresh action re-requests). Takeover when
+the owning tab is truly gone remains available via the existing
+stale-handle path. Declined: friendly refusal only (supervisor
+recommendation), full synchronized tabs, detect+warn.
+
 ## D283 — OWNER: cold-boot verification stamp (2026-08-17)
 
 Cold-boot trade ruled: **"Verification stamp."** The full integrity suite
