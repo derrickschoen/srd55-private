@@ -7,6 +7,14 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D288 — OWNER: roll forward only (2026-08-17)
+
+Deployed-build recovery ruled: **"Roll forward only."** An older bundle is
+never republished (service-worker skew makes old-code/new-schema pairings
+unsafe); a bad build is superseded by an emergency repair build.
+Migrations carry no downgrade-safety obligation. Declined:
+downgrade-safe migrations, emergency stop screen, pull-the-build.
+
 ## D287 — OWNER: telemetry is Cloudflare cookieless aggregates only (2026-08-17)
 
 Public-site telemetry ruled: **Cloudflare's built-in cookieless
