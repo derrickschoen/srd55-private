@@ -7,6 +7,14 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D292 — OWNER: homebrew v3 and d4 scorecard reactivate; party stays parked (2026-08-17)
+
+Parked-workstream ruling: **homebrew v3 adopt/author decisions** return
+to the question queue, and the **d4 scorecard** roadmap resumes
+(ceiling-mode comparison basis, extending toward all 89 builds — now with
+D291's ±1% bar as the fidelity line). **wt/party sync stays parked.**
+Both reactivated streams run behind the v1 gates in priority.
+
 ## D291 — OWNER: docx fidelity bar is ±1% DPR per build (2026-08-17)
 
 "Tracks the DOCX" defined numerically: **aggregate damage-per-round
