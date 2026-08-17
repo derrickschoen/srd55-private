@@ -7,6 +7,15 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D291 — OWNER: docx fidelity bar is ±1% DPR per build (2026-08-17)
+
+"Tracks the DOCX" defined numerically: **aggregate damage-per-round
+within ±1% per build** against the docx reference; individual mechanics
+may drift provided each build's total holds the band. Sharpens D262's
+fidelity-ceiling acceptance into a pass/fail line for the simulator's
+fidelity checks. Declined: exact-where-modeled-with-gap-list (supervisor
+recommendation), ±5%, direction-only.
+
 ## D290 — OWNER: licensing trio — CC-BY docs, anonymous externals, redact pastes (2026-08-17)
 
 Three publishing rulings: (1) our original public docs (reports, build
