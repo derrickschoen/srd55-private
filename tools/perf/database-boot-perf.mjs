@@ -140,6 +140,10 @@ async function main() {
     'loading_engine',
     'opening_storage',
     'checking_structure',
+    // A stamped boot (D283) reports this INSTEAD of checking_structure and
+    // never reports verifying_catalog_integrity, so "(not reported)" against
+    // those two is how a fast boot reads here.
+    'reusing_verification',
     'checking_bundled_rules',
     'verifying_catalog_integrity',
     'total',

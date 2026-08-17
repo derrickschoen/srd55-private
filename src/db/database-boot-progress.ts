@@ -2,6 +2,13 @@ export const databaseBootStages = [
   'loading_engine',
   'opening_storage',
   'checking_structure',
+  // D283. Reported INSTEAD of `checking_structure` when a verification stamp
+  // for exactly these bytes was reproduced, so a fast boot is never silent:
+  // the timeline shows a `reusing_verification` phase and, because the seed
+  // skips it too, no `verifying_catalog_integrity` phase at all. A boot that
+  // got quicker for a reason nobody can see is indistinguishable from a boot
+  // that stopped checking.
+  'reusing_verification',
   'checking_bundled_rules',
   'verifying_catalog_integrity',
 ] as const;
@@ -32,6 +39,8 @@ export function databaseBootStageLabel(stage: DatabaseBootStage): string {
       return 'Opening local character storage…';
     case 'checking_structure':
       return 'Checking database structure…';
+    case 'reusing_verification':
+      return 'Reusing the last verified database check…';
     case 'checking_bundled_rules':
       return 'Checking bundled character rules…';
     case 'verifying_catalog_integrity':

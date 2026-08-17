@@ -1,4 +1,7 @@
-import type { DatabaseLifecycle } from '../db/database-lifecycle';
+import type {
+  DatabaseLifecycle,
+  DatabaseVerificationMode,
+} from '../db/database-lifecycle';
 import { RpcError } from '../rpc/protocol';
 import type { HandlerContext, RuntimeEnvironment } from './handler';
 
@@ -44,9 +47,12 @@ export const DEGRADED_SAFE_METHODS: ReadonlySet<string> = new Set([
   'system.reset',
 ]);
 
-export function bootDatabase(lifecycle: DatabaseLifecycle): DatabaseBoot {
+export function bootDatabase(
+  lifecycle: DatabaseLifecycle,
+  verification: DatabaseVerificationMode = 'full',
+): DatabaseBoot {
   try {
-    lifecycle.open();
+    lifecycle.open(verification);
     return { status: 'ready', lifecycle };
   } catch (error) {
     return {
