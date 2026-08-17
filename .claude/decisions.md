@@ -7,6 +7,22 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D282 — OWNER: ordinary inputs judge killability; hardening stays at entries (2026-08-17)
+
+The long-standing hostility question (Q2) ruled: **"Ordinary + entry
+hardening."** Killability, reachability, and mutant equivalence are judged
+on ordinary constructible inputs — hostile Proxy/getter/intrinsic
+observations delivered through mocked internal seams do NOT count. The
+seven wave-3 contested equivalence claims STAND; D281's unreachable-arm
+deletions stand. The rounds-17-22 snapshot-once/captured-intrinsics
+posture CONTINUES at public entry points (defending against accidental
+exotic objects from in-bundle bugs — D263's accidents-yes boundary);
+interior code trusts the structured-clone RPC boundary, which strips
+getters/Proxies/prototypes by construction. Prototype-injection and
+doMock test seams remain legitimate testing technique. Declined:
+harden-until-moot everywhere, fully-out-of-scope (freezing entry
+hardening), hostile-counts.
+
 ## D281 — OWNER: delete EVERYTHING unreachable, including defensive arms (2026-08-17)
 
 NoCoverage resolution ruled: **"Delete everything unreachable."** If no
