@@ -327,16 +327,27 @@ export function evaluateFeatEligibility(
     }
 
     const evidence = character.feature_evidence[prerequisite.feature];
-    if (evidence === 'absent') {
-      unmet.push({
-        kind: 'feature_missing',
-        feature: prerequisite.feature,
-      });
-    } else if (evidence === 'unprovable') {
-      unprovable.push({
-        kind: 'feature_unprovable',
-        feature: prerequisite.feature,
-      });
+    switch (evidence) {
+      case 'absent':
+        unmet.push({
+          kind: 'feature_missing',
+          feature: prerequisite.feature,
+        });
+        break;
+      case 'unprovable':
+        unprovable.push({
+          kind: 'feature_unprovable',
+          feature: prerequisite.feature,
+        });
+        break;
+      case 'present':
+        break;
+      /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+         tsc probe verified that the never assignment rejects new evidence. */
+      default: {
+        const unreachable: never = evidence;
+        throw new TypeError(`Unhandled feat feature evidence ${String(unreachable)}.`);
+      }
     }
   }
 
