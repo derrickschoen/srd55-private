@@ -7,6 +7,29 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D301 — SUPERVISOR-VERIFIED: Kennel max-assemblable cantrips = 19, by source (2026-08-17)
+
+Owner directed: "Check yourself. Separate cantrips from classes with
+cantrips from other sources (feats, species, backgrounds)." Verified
+independently from docs/srd/source (not the spec lane's claim):
+
+- **From classes: 15.** Class-table cantrip columns: Sorcerer L3 = 4,
+  Bard L1 = 2, Cleric L1 = 3, Druid L1 = 2, Warlock L1 = 2 (13), plus
+  Divine Order Thaumaturge +1 Cleric cantrip (full corpus :2309) and
+  Primal Order Magician +1 Druid cantrip (:2562). Multiclass keeps
+  per-class counts (multiclassing.txt:66-69).
+- **From feats: 4.** Magic Initiate grants two cantrips (feats.txt),
+  Repeatable with a different list each time — Wizard (via Sage) +
+  Druid (via Human Versatile) = 4.
+- **From species directly: 0** (Human Versatile supplies a feat ROUTE,
+  not a cantrip). **From backgrounds directly: 0** (Sage likewise).
+
+All 19 names sit on their claimed SRD lists (each checked, incl. Message
+and Resistance under the Druid "Cantrips (Level 0)" heading, lines 29/32);
+19 distinct. This is the verification D272 required at authoring; the
+kennel.json assertion "EXACTLY 19" is CONFIRMED. D251.2's "exactly 18"
+stays superseded (per D272).
+
 ## D300 — OWNER: vitest 4 upgrade approved conditional on clean assessment (2026-08-17)
 
 The `onTaskUpdate` false-failure class (exit 1 with 0 test failures under
