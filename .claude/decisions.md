@@ -7,6 +7,16 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D271 — OWNER: round 24 is a fresh adversarial round over the post-round-23 delta (2026-08-16)
+
+Round 23's CLEAN (quiet 1 of 2) certified a tree that no longer exists —
+the mutation campaign landed six production changes since (D267 bounded
+counters + five wave-1 type refactors) plus ~15 test files. Ruled: **fresh
+adversarial round 24 scoped to those six production changes** (tests-only
+commits exempt). If CLEAN it counts as quiet 1 of 2 for the CURRENT tree;
+one more quiet round, then the wt/simcore -> main merge. Options declined:
+counting the campaign itself as round 24; merging now; holding for wave 5.
+
 ## D270 — OWNER: all five S7 MAJOR sheet defects block v1 (2026-08-16)
 
 Presented with the reach analysis (S7-01 Alert/initiative, S7-02 finesse
