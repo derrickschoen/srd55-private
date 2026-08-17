@@ -14,6 +14,11 @@ import {
   isDatabaseBootProgress,
   type DatabaseBootProgress,
 } from './db/database-boot-progress';
+import {
+  databaseBootMeasureName,
+  DatabaseBootTimeline,
+  type DatabaseBootPhase,
+} from './db/database-boot-timeline';
 import type { SystemInfo } from './worker/handlers/system';
 import { Application } from './ui/app';
 import { Router } from './ui/router';
@@ -107,6 +112,17 @@ class DatabaseWorkerTransport implements RpcTransport {
     (progress: DatabaseBootProgress) => void
   >();
   #worker: Worker | undefined;
+  #activatedAtMs: number | undefined;
+
+  /**
+   * The main-thread instant of the most recent `new Worker(...)`, which is the
+   * zero point the worker's own stage clock is offset from. Undefined until the
+   * capability decision releases activation — the same condition that makes
+   * every other member of this class inert.
+   */
+  get activatedAtMs(): number | undefined {
+    return this.#activatedAtMs;
+  }
 
   readonly #onWorkerMessage = (event: MessageEvent<unknown>): void => {
     if (isDatabaseBootProgress(event.data)) {
@@ -122,6 +138,7 @@ class DatabaseWorkerTransport implements RpcTransport {
     if (this.#worker !== undefined) {
       return;
     }
+    this.#activatedAtMs = performance.now();
     const worker = new Worker(new URL('./db/worker.ts', import.meta.url), {
       type: 'module',
     });
@@ -355,12 +372,36 @@ const startDatabaseBoot = (): void => {
   // is never persisted and never changes whether the notice is rendered.
   databaseBootStarted = true;
   const bootStatus = showDatabaseBootStatus('Starting local database…');
+  /**
+   * The stage reports already drive the status text; recording them as
+   * `performance` measures as well is what makes the boot's internal split —
+   * wasm, OPFS pool, schema, catalog seed — a number rather than an inference
+   * from a status the user happened to see.
+   */
+  const recordPhase = (phase: DatabaseBootPhase): void => {
+    performance.measure(databaseBootMeasureName(phase), {
+      start: phase.startMs,
+      end: phase.endMs,
+    });
+  };
+  let timeline: DatabaseBootTimeline | undefined;
   const reportProgress = (progress: DatabaseBootProgress): void => {
     bootStatus.value = databaseBootStageLabel(progress.stage);
+    // `loading_engine` is the first thing a worker reports, so it is also the
+    // signal that a RESTARTED worker has begun again — the retry path would
+    // otherwise fold two boots into one timeline whose phases interleave.
+    if (progress.stage === 'loading_engine' || timeline === undefined) {
+      const activatedAtMs = databaseWorkerTransport.activatedAtMs;
+      timeline = new DatabaseBootTimeline(activatedAtMs ?? performance.now());
+    }
+    recordPhase(timeline.observe(progress));
   };
   databaseWorkerTransport.addProgressListener(reportProgress);
   void bootDatabaseWorkerWithRetry(databaseWorkerTransport, system.info)
     .then(() => {
+      for (const phase of timeline?.finish(performance.now()) ?? []) {
+        recordPhase(phase);
+      }
       databaseWorkerTransport.removeProgressListener(reportProgress);
       databaseReady = true;
       if (application === undefined) {

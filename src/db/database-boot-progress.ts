@@ -11,6 +11,17 @@ export type DatabaseBootStage = (typeof databaseBootStages)[number];
 export interface DatabaseBootProgress {
   readonly kind: 'database_boot_progress';
   readonly stage: DatabaseBootStage;
+  /**
+   * Milliseconds from the worker's own time origin — which is the moment the
+   * worker started, not the moment the page loaded — to the moment this stage
+   * BEGAN. Taken inside the worker rather than on arrival because the receiving
+   * thread is the one that can be busy: at boot it is running module
+   * evaluation, first paint, and the capability probe, so a message posted at
+   * the true stage boundary can sit in the task queue and be timestamped late.
+   * The producer's clock is the only one that cannot attribute the reader's
+   * delay to the worker.
+   */
+  readonly elapsedMs: number;
 }
 
 export function databaseBootStageLabel(stage: DatabaseBootStage): string {
@@ -30,8 +41,9 @@ export function databaseBootStageLabel(stage: DatabaseBootStage): string {
 
 export function databaseBootProgress(
   stage: DatabaseBootStage,
+  elapsedMs: number,
 ): DatabaseBootProgress {
-  return { kind: 'database_boot_progress', stage };
+  return { kind: 'database_boot_progress', stage, elapsedMs };
 }
 
 export function isDatabaseBootProgress(
@@ -40,5 +52,8 @@ export function isDatabaseBootProgress(
   if (value === null || typeof value !== 'object') return false;
   if (Reflect.get(value, 'kind') !== 'database_boot_progress') return false;
   const stage = Reflect.get(value, 'stage');
-  return (databaseBootStages as readonly unknown[]).includes(stage);
+  if (!(databaseBootStages as readonly unknown[]).includes(stage)) return false;
+  const elapsedMs = Reflect.get(value, 'elapsedMs');
+  return typeof elapsedMs === 'number' && Number.isFinite(elapsedMs) &&
+    elapsedMs >= 0;
 }
