@@ -7,6 +7,18 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D272 — OWNER: Kennel spec relaxes to max-assemblable SRD cantrips (2026-08-16)
+
+The Board B Kennel definition carries [Tasha]/[Xanathar]/[2024] cantrips a
+public SRD-only fixture cannot commit (D59). Ruled: **"Relax to
+max-assemblable"** — author spec 11 with SRD 5.2.1 cantrips only and assert
+the count actually reachable from the repo's SRD lists (verified at
+authoring), superseding D251.2's "exactly 18". Build skeleton (Human,
+custom background, Sorc3/Bard1/Cleric1/Druid1/Warlock1, double Magic
+Initiate, D252.6's Tome-if-SRD-verified) unchanged. Options declined: SRD
+substitutes keeping exactly-18; names-only non-SRD entries; replacing the
+archetype.
+
 ## D271 — OWNER: round 24 is a fresh adversarial round over the post-round-23 delta (2026-08-16)
 
 Round 23's CLEAN (quiet 1 of 2) certified a tree that no longer exists —
