@@ -1,0 +1,405 @@
+{
+  "id": "kennel",
+  "specNumber": 11,
+  "name": "The Cantrip Kennel — max-assemblable SRD 5.2.1 cantrips",
+  "stagingNote": "AUTHORED ON A main-BASED LANE, WHERE tests/browser/fixtures/mutt-specs/ DOES NOT EXIST. The ten landed mutt specs live on wt/walkthrough at tests/browser/fixtures/mutt-specs/*.json; this lane was scoped docs-only and may not add under tests/. This file is the spec in the landed fixture format, verbatim-movable to tests/browser/fixtures/mutt-specs/kennel.json by the walkthrough engine lane with no content edit. Specs lead, the engine follows (D265, D260.5).",
+  "houseRuleToggles": {
+    "h4": false,
+    "h2": false,
+    "h3": false
+  },
+  "toggleNotes": {
+    "h4": "Unused: every multiclass entry is RAW-legal. Sorcerer, Bard and Warlock each need Charisma 13 (class-core-traits.txt:253, :45, :278; build has Cha 15); Cleric and Druid each need Wisdom 13 (class-core-traits.txt:70, :97; build has Wis 17). The multiclass rule requires 13 in the primary ability of the NEW class and of the CURRENT classes (multiclassing.txt:20-25) — both halves hold at every entry. Third fully-RAW spec in the matrix after wis-b and wis-b-f.",
+    "h2": "Unused: the background increases are +2 Wisdom / +1 Constitution, and Sage's fixed ability list is Constitution, Intelligence, Wisdom (backgrounds.txt:35). No free-choice house rule is needed.",
+    "h3": "Unused: RAW Magic Initiate already lets the player choose Intelligence, Wisdom or Charisma as the feat's spellcasting ability (feats.txt:42)."
+  },
+  "coldProfile": true,
+  "species": "Human",
+  "speciesNote": "D272 pins Human. SRD 5.2.1 Human traits are Resourceful (species-descriptions.txt:224), Skillful (:226) and Versatile (:228). Versatile — 'You gain an Origin feat of your choice' — is the second Magic Initiate, and is the ONLY SRD route to a second origin feat at level 1. Human grants no cantrip of its own.",
+  "background": "Sage",
+  "backgroundNote": "D272's build skeleton says 'custom background'. SRD 5.2.1 HAS NO CUSTOM BACKGROUND RULE: the licensed set is exactly four fixed backgrounds — Acolyte, Criminal, Sage, Soldier — each with a fixed three-ability list and a fixed origin feat (backgrounds.txt:12-25, :34-51). A custom background is therefore not assemblable from SRD content, and D272's own governing instruction is 'SRD 5.2.1 cantrips only ... the count actually reachable from the repo's SRD lists'. Sage is selected because its feat is Magic Initiate (Wizard) (backgrounds.txt:36), which is one of the two Magic Initiates the skeleton requires. Acolyte would work equally well for the COUNT (Magic Initiate (Cleric), backgrounds.txt line block at srd-5.2.1.txt:5006-5008, also two cantrips); Criminal and Soldier grant zero cantrips and are strictly worse. Same class of supervisor correction the other ten specs made when the drafts named a background whose SRD feat did not match the build.",
+  "languages": [
+    "Common",
+    "Draconic",
+    "Dwarvish"
+  ],
+  "languagesSource": "Common plus two from the Standard Languages table (srd-5.2.1.txt:1214-1216, table at :1235-1250). No class or feat in this build grants an extra language.",
+  "abilityArray": {
+    "pointBuy": {
+      "str": 8,
+      "dex": 12,
+      "con": 13,
+      "int": 8,
+      "wis": 15,
+      "cha": 15
+    },
+    "pointBuyArithmetic": "Str 8 (0) + Dex 12 (4) + Con 13 (5) + Int 8 (0) + Wis 15 (9) + Cha 15 (9) = 27. Costs from the Ability Score Point Costs table (ability-score-generation.txt:29-34); the 27-point budget at :24.",
+    "backgroundIncreases": {
+      "plusTwo": "wisdom",
+      "plusOne": "constitution",
+      "houseRule": null
+    },
+    "final": {
+      "str": 8,
+      "dex": 12,
+      "con": 14,
+      "int": 8,
+      "wis": 17,
+      "cha": 15
+    },
+    "finalNote": "Con 14 gives the +2 Constitution modifier used in every HP derivation below."
+  },
+  "startingClass": "Sorcerer",
+  "buildSkeletonSource": "D272 (unchanged from D251.2): Sorcerer 3 / Bard 1 / Cleric 1 / Druid 1 / Warlock 1, double Magic Initiate. Only the cantrip CONTENT was relaxed — from [Tasha]/[Xanathar]/[2024] entries a public SRD-only fixture cannot carry (D59) to max-assemblable SRD 5.2.1, superseding the 'exactly 18' target.",
+  "maxAssemblable": {
+    "assertedCantripCount": 19,
+    "assertedDistinct": true,
+    "arithmetic": "Sorcerer 3 = 4 (class-level-tables.txt:251, Cantrips column) + Bard 1 = 2 (:40) + Cleric 1 = 3 (:67) + Divine Order (Thaumaturge) = 1 (srd-5.2.1.txt:2309-2310) + Druid 1 = 2 (:92) + Primal Order (Magician) = 1 (srd-5.2.1.txt:2562-2563) + Warlock 1 = 2 (:279) + Magic Initiate x2 = 4 (feats.txt:42) = 19.",
+    "distinctnessProof": "The six SRD 5.2.1 cantrip lists union to 27 distinct names: Sorcerer 16 (sorcerer-spell-list.txt:31-49), Bard 10 (bard-spell-list.txt:25-39), Cleric 7 (cleric-spell-list.txt:28-37), Druid 11 (druid-spell-list.txt:25-35), Warlock 7 (warlock-spell-list.txt:29-35), Wizard 15 (wizard-spell-list.txt:27-52). Bard adds Starry Wisp and Vicious Mockery to the Sorcerer 16; Cleric adds Guidance, Resistance, Sacred Flame, Spare the Dying, Thaumaturgy; Druid adds Druidcraft, Produce Flame, Shillelagh; Warlock adds Eldritch Blast; Wizard adds nothing. 16+2+5+3+1 = 27. Nineteen picks into a 27-name pool can all be distinct, and the assignment below realises it — no pick is forced onto a name another slot already holds.",
+    "ceilingReason": "19 is a PICK-CAPACITY ceiling, not a list-access ceiling. The eight SRD cantrips this build does not end up knowing — Dancing Lights, Elementalism, Light, Mage Hand, Mending, Poison Spray, Prestidigitation, True Strike — are all on lists the build can already draw from. They are unreached only because the skeleton grants 19 picks, not 27.",
+    "whyNoMore": "No other SRD choice inside D272's skeleton raises the number. The two Divine Order options are Protector (martial weapons + Heavy armor) and Thaumaturge (+1 Cleric cantrip); Thaumaturge is taken. The two Primal Order options are Warden (martial weapons + Medium armor) and Magician (+1 Druid cantrip); Magician is taken. Of the four SRD backgrounds only Sage and Acolyte carry a Magic Initiate, and both carry exactly one (two cantrips). Human grants no cantrip; the species that do (a Fiendish Legacy's Otherworldly Presence grants the Thaumaturgy cantrip, species-descriptions.txt:225-228 right column) are outside D272's pinned Human. Raising any single class's level would cost a level from another and lose more cantrips than it gains at these tiers.",
+    "pactOfTheTomeUnknown": "UNKNOWN — NOT COUNTED, AND NOT ASSUMED EITHER WAY. D252.6 admits Pact of the Tome's extra cantrips only 'if SRD-verified'. It is NOT verifiable from this repo's SRD source: the invocation's own benefit text is TRUNCATED in docs/srd/full/srd-5.2.1.txt, which ends the entry mid-sentence at line 4507 ('... granting you the benefits below. The') and never resumes — page 75's columns carry the Warlock spell tables instead. `grep -n 'Book of Shadows'` over the full extract returns exactly two lines (4428, 4505), neither of which is a cantrip grant, and no line anywhere in the extract states how many cantrips the Book of Shadows confers. The D252.6 condition is therefore NOT MET and the spec asserts 19 with no Tome contribution. It does NOT assert that Tome grants zero. Re-derivation, if the number is wanted: re-extract printed pages 73-75 from the SRD 5.2.1 PDF whose SHA-256 is recorded in docs/srd/SOURCE.md, slicing by CHARACTER at the measured gutter, and read the Pact of the Tome benefit list. Until that extract exists, the Warlock 1 invocation choice in this spec is left unpinned (see levels[7].invocationNote) and the sheet must show whatever it shows without this spec claiming a number. Per D33 a disclosed wrong number is still a wrong number; this stays an UNKNOWN.",
+    "supersedes": "D251.2's 'exactly 18'. The relaxed SRD-only count is 19, verified at authoring (2026-08-17) against the extracts named above."
+  },
+  "levels": [
+    {
+      "order": 1,
+      "class": "Sorcerer",
+      "classLevel": 1,
+      "pick": {
+        "abilityBoosts": {
+          "plusTwo": "wisdom",
+          "plusOne": "constitution"
+        },
+        "abilityBoostsSource": "Sage's ability list is Constitution, Intelligence, Wisdom (backgrounds.txt:35); a background increases one by 2 and another by 1 (backgrounds.txt:48-51).",
+        "skills": [
+          "Insight",
+          "Persuasion"
+        ],
+        "skillsSource": "Sorcerer starting class, Choose 2 from Arcana, Deception, Insight, Intimidation, Persuasion, Religion (class-core-traits.txt:258). Arcana is avoided because Sage already grants it.",
+        "backgroundSkills": [
+          "Arcana",
+          "History"
+        ],
+        "backgroundSkillsSource": "Sage Skill Proficiencies: Arcana and History (backgrounds.txt:37).",
+        "speciesSkill": "Perception",
+        "speciesSkillSource": "Human Skillful: proficiency in one skill of your choice (species-descriptions.txt:226-227).",
+        "originFeat": "Magic Initiate (Wizard)",
+        "originFeatSource": "Sage's fixed feat (backgrounds.txt:36).",
+        "originFeatChoices": {
+          "ability": "Charisma",
+          "abilitySource": "RAW choice of Intelligence, Wisdom or Charisma at feat selection (feats.txt:42); Charisma matches the Sorcerer/Bard/Warlock side of the build.",
+          "cantrips": [
+            "Shocking Grasp",
+            "Minor Illusion"
+          ],
+          "cantripsSource": "Two cantrips from the Cleric, Druid or Wizard spell list (feats.txt:42); Sage pins the list to Wizard. Shocking Grasp (wizard-spell-list.txt:51) and Minor Illusion (:46) are chosen because no other slot in this build can reach them without displacing a pick.",
+          "levelOneSpell": "Find Familiar",
+          "levelOneSpellSource": "A level 1 spell from the same list (feats.txt:44); Find Familiar is on the Wizard list (wizard-spell-list.txt:73). Always prepared; one free cast per Long Rest. D252.6 dropped Pact of the Chain for this build and put Find Familiar on Magic Initiate (Wizard) instead — that clause is satisfied here."
+        },
+        "secondOriginFeat": "Magic Initiate (Druid)",
+        "secondOriginFeatSource": "Human Versatile: an Origin feat of your choice (species-descriptions.txt:228). Magic Initiate is Repeatable but 'you must choose a different spell list each time' (feats.txt:48), so with Sage holding Wizard the second instance takes Cleric or Druid. Druid is chosen: the Cleric list has only seven cantrips and the Cleric class slot already takes four of them, leaving three, whereas the Druid list has eleven with three taken.",
+        "secondOriginFeatChoices": {
+          "ability": "Wisdom",
+          "abilitySource": "feats.txt:42.",
+          "cantrips": [
+            "Message",
+            "Resistance"
+          ],
+          "cantripsSource": "Both on the Druid list (druid-spell-list.txt:29, :32) and taken by no other slot.",
+          "levelOneSpell": "Thunderwave",
+          "levelOneSpellSource": "Level 1 Druid spell (druid-spell-list.txt:60); always prepared, one free cast per Long Rest (feats.txt:44). Chosen so it duplicates no other prepared entry."
+        },
+        "cantrips": [
+          "Sorcerous Burst",
+          "Fire Bolt",
+          "Ray of Frost",
+          "Acid Splash"
+        ],
+        "cantripsNote": "4 known at Sorcerer 1 and unchanged at Sorcerer 3 (class-level-tables.txt:247, :251). All four on the Sorcerer list: Sorcerous Burst (sorcerer-spell-list.txt:48), Fire Bolt (:35), Ray of Frost (:45), Acid Splash (:31). Sorcerous Burst and Acid Splash are reachable ONLY here — Sorcerous Burst appears on no other SRD list at all, and Acid Splash's only other list (Wizard) is spent on Shocking Grasp/Minor Illusion.",
+        "prepared": [
+          "Magic Missile",
+          "Shield"
+        ],
+        "preparedNote": "2 prepared at Sorcerer 1 (class-level-tables.txt:247), level 1 only. Magic Missile (sorcerer-spell-list.txt:70), Shield (:72)."
+      }
+    },
+    {
+      "order": 2,
+      "class": "Sorcerer",
+      "classLevel": 2,
+      "pick": {
+        "prepared": [
+          "Magic Missile",
+          "Shield",
+          "Chromatic Orb",
+          "Sleep"
+        ],
+        "preparedNote": "4 prepared at Sorcerer 2 (class-level-tables.txt:249), still level 1 only. Chromatic Orb (sorcerer-spell-list.txt:57), Sleep (:74). Font of Magic and Metamagic arrive at this level; Metamagic options are outside the cantrip question this spec asserts and are recorded by the walkthrough as choices-and-sources, not pinned here."
+      }
+    },
+    {
+      "order": 3,
+      "class": "Sorcerer",
+      "classLevel": 3,
+      "pick": {
+        "subclass": null,
+        "subclassNote": "Sorcerer Subclass is a level 3 feature (class-level-tables.txt:251). D272 pins the class split but names no Sorcerer subclass, and no SRD sorcerous origin grants a cantrip, so the choice cannot change this spec's asserted count. The walkthrough must still record WHICH subclass was chosen and its source; a silent substitution is a HALT per D253.7. The spec deliberately leaves it open rather than inventing a pin — an UNKNOWN stated as one (D33).",
+        "prepared": [
+          "Magic Missile",
+          "Shield",
+          "Chromatic Orb",
+          "Sleep",
+          "Hold Person",
+          "Flaming Sphere"
+        ],
+        "preparedNote": "6 prepared at Sorcerer 3 (class-level-tables.txt:251). Sorcerer 3 has level 2 slots on its own table, so level 2 Sorcerer spells are preparable: Hold Person (sorcerer-spell-list.txt:95), Flaming Sphere (:89). Prepared-spell level caps are computed per CLASS, not per character."
+      }
+    },
+    {
+      "order": 4,
+      "class": "Bard",
+      "classLevel": 1,
+      "pick": {
+        "prerequisiteNote": "RAW-legal: Bard's primary ability is Charisma (class-core-traits.txt:45); build has Cha 15, and the current class (Sorcerer) is also Charisma (:253).",
+        "skills": [
+          "Performance"
+        ],
+        "skillsSource": "Bard multiclass entry grants 'proficiency in one skill of your choice' (multiclass-entry-grants.txt:36-38). The Bard's own list is 'Choose any 3 skills' (class-core-traits.txt:49), so the entry pick is unrestricted; Performance is a fill pick that collides with nothing already granted.",
+        "instrument": "one Musical Instrument of your choice",
+        "instrumentSource": "multiclass-entry-grants.txt:38-39.",
+        "cantrips": [
+          "Vicious Mockery",
+          "Starry Wisp"
+        ],
+        "cantripsNote": "2 known at Bard 1 (class-level-tables.txt:40). Vicious Mockery (bard-spell-list.txt:39) is Bard-only in SRD 5.2.1; Starry Wisp (:37) is otherwise only on the Druid list, which is fully spent. Taking these two here is what makes 19 reachable.",
+        "prepared": [
+          "Faerie Fire",
+          "Healing Word",
+          "Heroism",
+          "Dissonant Whispers"
+        ],
+        "preparedNote": "4 prepared at Bard 1 (class-level-tables.txt:40), level 1 only. Faerie Fire (bard-spell-list.txt:58), Healing Word (:61), Heroism (:62), Dissonant Whispers (:57)."
+      }
+    },
+    {
+      "order": 5,
+      "class": "Cleric",
+      "classLevel": 1,
+      "pick": {
+        "prerequisiteNote": "RAW-legal: Cleric's primary ability is Wisdom (class-core-traits.txt:70); build has Wis 17.",
+        "divineOrder": "Thaumaturge",
+        "divineOrderSource": "Cleric level 1 Divine Order (class-level-tables.txt:67). Thaumaturge: 'You know one extra cantrip from the Cleric spell list' (srd-5.2.1.txt:2309-2310). This is a COUNT-BEARING pick, not a fill pick — Protector's martial weapons and Heavy armor training add no cantrip and would make the asserted count 18.",
+        "cantrips": [
+          "Sacred Flame",
+          "Guidance",
+          "Thaumaturgy",
+          "Spare the Dying"
+        ],
+        "cantripsNote": "3 known at Cleric 1 (class-level-tables.txt:67) plus 1 from Thaumaturge = 4. All on the Cleric list: Sacred Flame (cleric-spell-list.txt:34), Guidance (:28), Thaumaturgy (:37), Spare the Dying (:36). Light, Mending and Resistance are the three Cleric cantrips left unpicked; Resistance is recovered via Magic Initiate (Druid), Light and Mending are not recovered anywhere.",
+        "prepared": [
+          "Bless",
+          "Guiding Bolt",
+          "Shield of Faith",
+          "Command"
+        ],
+        "preparedNote": "4 prepared at Cleric 1 (class-level-tables.txt:67), level 1 only. Bless (cleric-spell-list.txt:44), Guiding Bolt (:54), Shield of Faith (:62), Command (:45)."
+      }
+    },
+    {
+      "order": 6,
+      "class": "Druid",
+      "classLevel": 1,
+      "pick": {
+        "prerequisiteNote": "RAW-legal: Druid's primary ability is Wisdom (class-core-traits.txt:97); build has Wis 17.",
+        "primalOrder": "Magician",
+        "primalOrderSource": "Druid level 1 Primal Order (class-level-tables.txt:92). Magician: 'You know one extra cantrip from the Druid spell list' (srd-5.2.1.txt:2562-2563). Count-bearing, like Thaumaturge; Warden would make the asserted count 18.",
+        "cantrips": [
+          "Druidcraft",
+          "Produce Flame",
+          "Shillelagh"
+        ],
+        "cantripsNote": "2 known at Druid 1 (class-level-tables.txt:92) plus 1 from Magician = 3. All Druid-list-only in SRD 5.2.1: Druidcraft (druid-spell-list.txt:25), Produce Flame (:31), Shillelagh (:33). Message and Resistance — also Druid-list — are deliberately NOT taken here because Magic Initiate (Druid) takes them; the class slots spend on the three names no other slot can reach.",
+        "prepared": [
+          "Goodberry",
+          "Entangle",
+          "Longstrider",
+          "Speak with Animals"
+        ],
+        "preparedNote": "4 prepared at Druid 1 (class-level-tables.txt:92), level 1 only. Goodberry (druid-spell-list.txt:52), Entangle (:49), Longstrider (:56), Speak with Animals (:59)."
+      }
+    },
+    {
+      "order": 7,
+      "class": "Warlock",
+      "classLevel": 1,
+      "pick": {
+        "prerequisiteNote": "RAW-legal: Warlock's primary ability is Charisma (class-core-traits.txt:278); build has Cha 15.",
+        "invocation": null,
+        "invocationNote": "UNPINNED, DELIBERATELY. Warlock 1 knows 1 Eldritch Invocation (class-level-tables.txt:279). D252.6 wanted Pact of the Tome 'if SRD-verified'; it is not verifiable from this repo's extracts (see maxAssemblable.pactOfTheTomeUnknown), so the spec neither pins Tome nor pins a substitute, and asserts no cantrip from this slot. Separately, the schema note at src/domain/contracts/tables.ts:764 records that NOTHING IN THE CHARACTER SCHEMA POINTS AT AN INVOCATION — there is no invocation selection anywhere in it — so a walkthrough may find no invocation step to drive at all. Either outcome (no step, or a step the spec does not pin) is reported as an observation; a WRONG cantrip count on the sheet is a HALT, an absent invocation step is not.",
+        "cantrips": [
+          "Eldritch Blast",
+          "Chill Touch"
+        ],
+        "cantripsNote": "2 known at Warlock 1 (class-level-tables.txt:279). Eldritch Blast (warlock-spell-list.txt:30) is Warlock-only in SRD 5.2.1. Chill Touch (:29) is otherwise only on the Sorcerer and Wizard lists, both fully spent, so it is reachable only here.",
+        "prepared": [
+          "Hex",
+          "Hellish Rebuke"
+        ],
+        "preparedNote": "2 prepared at Warlock 1 (class-level-tables.txt:279), level 1 only. Hex (warlock-spell-list.txt:45), Hellish Rebuke (:44).",
+        "pactMagicNote": "Pact Magic slots are a separate pool from the shared Spellcasting slots and are asserted as pactSlots in the final checkpoint. Either pool may cast the other's prepared spells (srd-5.2.1.txt:1629-1636)."
+      }
+    }
+  ],
+  "cantrips": [
+    { "name": "Sorcerous Burst", "list": "Sorcerer" },
+    { "name": "Fire Bolt", "list": "Sorcerer" },
+    { "name": "Ray of Frost", "list": "Sorcerer" },
+    { "name": "Acid Splash", "list": "Sorcerer" },
+    { "name": "Vicious Mockery", "list": "Bard" },
+    { "name": "Starry Wisp", "list": "Bard" },
+    { "name": "Sacred Flame", "list": "Cleric" },
+    { "name": "Guidance", "list": "Cleric" },
+    { "name": "Thaumaturgy", "list": "Cleric (Divine Order: Thaumaturge)" },
+    { "name": "Spare the Dying", "list": "Cleric" },
+    { "name": "Druidcraft", "list": "Druid" },
+    { "name": "Produce Flame", "list": "Druid" },
+    { "name": "Shillelagh", "list": "Druid (Primal Order: Magician)" },
+    { "name": "Eldritch Blast", "list": "Warlock" },
+    { "name": "Chill Touch", "list": "Warlock" },
+    { "name": "Shocking Grasp", "list": "Magic Initiate (Wizard)" },
+    { "name": "Minor Illusion", "list": "Magic Initiate (Wizard)" },
+    { "name": "Message", "list": "Magic Initiate (Druid)" },
+    { "name": "Resistance", "list": "Magic Initiate (Druid)" }
+  ],
+  "cantripsAssertion": "EXACTLY 19 entries, all distinct, each with the list attribution shown. A sheet showing 18 or 20, or showing 19 with a repeated name, is a wrong number and a HALT per D251.1. This is the spec's headline assertion and the reason it exists (D272).",
+  "preparedSpells": [
+    { "name": "Magic Missile", "list": "Sorcerer" },
+    { "name": "Shield", "list": "Sorcerer" },
+    { "name": "Chromatic Orb", "list": "Sorcerer" },
+    { "name": "Sleep", "list": "Sorcerer" },
+    { "name": "Hold Person", "list": "Sorcerer" },
+    { "name": "Flaming Sphere", "list": "Sorcerer" },
+    { "name": "Faerie Fire", "list": "Bard" },
+    { "name": "Healing Word", "list": "Bard" },
+    { "name": "Heroism", "list": "Bard" },
+    { "name": "Dissonant Whispers", "list": "Bard" },
+    { "name": "Bless", "list": "Cleric" },
+    { "name": "Guiding Bolt", "list": "Cleric" },
+    { "name": "Shield of Faith", "list": "Cleric" },
+    { "name": "Command", "list": "Cleric" },
+    { "name": "Goodberry", "list": "Druid" },
+    { "name": "Entangle", "list": "Druid" },
+    { "name": "Longstrider", "list": "Druid" },
+    { "name": "Speak with Animals", "list": "Druid" },
+    { "name": "Hex", "list": "Warlock" },
+    { "name": "Hellish Rebuke", "list": "Warlock" },
+    { "name": "Find Familiar", "list": "Magic Initiate (Wizard), always prepared" },
+    { "name": "Thunderwave", "list": "Magic Initiate (Druid), always prepared" }
+  ],
+  "preparedSpellsAssertion": "20 class-prepared entries (6 Sorcerer + 4 Bard + 4 Cleric + 4 Druid + 2 Warlock, each count from that class's own row in class-level-tables.txt) plus the 2 always-prepared Magic Initiate spells, which do NOT count against any class's prepared total (feats.txt:44).",
+  "duplicateAttempts": [
+    {
+      "name": "Guidance",
+      "onList": "Druid",
+      "expectWarningCategory": "wasteful",
+      "note": "Guidance is on both the Cleric list (cleric-spell-list.txt:28) and the Druid list (druid-spell-list.txt:27). At the Druid 1 step it is already known from Cleric 1, so spending a Druid cantrip pick on it buys nothing. The app must say so at SELECTION time, name the source the character already has it from, and still allow the pick — this is a waste, not an illegal choice. Silence here is a missing-warning gap (batched per D251.1), not a HALT."
+    }
+  ],
+  "checkpoints": [
+    {
+      "afterLevel": 1,
+      "slots": { "1": 2 },
+      "slotsDerivation": "Sorcerer 1, single caster class; Sorcerer Features table row 1 = 2 (class-level-tables.txt:247).",
+      "hp": 8,
+      "hpDerivation": "Sorcerer 1: max d6 = 6 + Con mod +2 (Con 14) = 8. The level 1 maximum applies only at total character level 1 (multiclassing.txt:55-58).",
+      "cantripCount": 8,
+      "cantripCountDerivation": "Sorcerer 4 + Magic Initiate (Wizard) 2 + Magic Initiate (Druid) 2 = 8. Both origin feats land at level 1 — one from Sage, one from Human Versatile.",
+      "expectUnknowns": []
+    },
+    {
+      "afterLevel": 2,
+      "slots": { "1": 3 },
+      "slotsDerivation": "Caster level 2 (Sorcerer 2); Multiclass Spellcaster table row 2 = 3 (srd-5.2.1.txt:1642-1646).",
+      "hp": 14,
+      "hpDerivation": "8 + (Sorcerer d6 fixed 4 + Con 2) = 14.",
+      "cantripCount": 8,
+      "expectUnknowns": []
+    },
+    {
+      "afterLevel": 3,
+      "slots": { "1": 4, "2": 2 },
+      "slotsDerivation": "Caster level 3; Multiclass Spellcaster table row 3 = 4/2.",
+      "hp": 20,
+      "hpDerivation": "14 + 6 = 20.",
+      "cantripCount": 8,
+      "expectUnknowns": []
+    },
+    {
+      "afterLevel": 4,
+      "slots": { "1": 4, "2": 3 },
+      "slotsDerivation": "Caster level 4 (Sorcerer 3 + Bard 1, both full casters — all levels in Bard, Cleric, Druid, Sorcerer and Wizard count in full, multiclassing.txt:80-81); table row 4 = 4/3.",
+      "hp": 27,
+      "hpDerivation": "20 + (Bard d8 fixed 5 + Con 2) = 27.",
+      "cantripCount": 10,
+      "cantripCountDerivation": "8 + Bard 2 = 10.",
+      "expectUnknowns": []
+    },
+    {
+      "afterLevel": 5,
+      "slots": { "1": 4, "2": 3, "3": 2 },
+      "slotsDerivation": "Caster level 5 (+ Cleric 1); table row 5 = 4/3/2.",
+      "hp": 34,
+      "hpDerivation": "27 + (Cleric d8 fixed 5 + Con 2) = 34.",
+      "cantripCount": 14,
+      "cantripCountDerivation": "10 + Cleric 3 + Thaumaturge 1 = 14.",
+      "expectUnknowns": []
+    },
+    {
+      "afterLevel": 6,
+      "slots": { "1": 4, "2": 3, "3": 3 },
+      "slotsDerivation": "Caster level 6 (+ Druid 1); table row 6 = 4/3/3.",
+      "hp": 41,
+      "hpDerivation": "34 + (Druid d8 fixed 5 + Con 2) = 41.",
+      "cantripCount": 17,
+      "cantripCountDerivation": "14 + Druid 2 + Magician 1 = 17.",
+      "expectUnknowns": []
+    },
+    {
+      "afterLevel": 7,
+      "slots": { "1": 4, "2": 3, "3": 3 },
+      "slotsDerivation": "Warlock 1 is Pact Magic, not Spellcasting, and contributes NOTHING to the shared pool (multiclassing.txt:80-83 lists only Bard, Cleric, Druid, Sorcerer, Wizard at full and Paladin, Ranger at half). Shared slots must NOT change from the after-level-6 checkpoint; caster level stays 6.",
+      "pactSlots": { "count": 1, "slotLevel": 1 },
+      "pactSlotsDerivation": "Warlock Features table row 1: Spell Slots 1, Slot Level 1 (class-level-tables.txt:279).",
+      "hp": 48,
+      "hpDerivation": "41 + (Warlock d8 fixed 5 + Con 2) = 48.",
+      "cantripCount": 19,
+      "cantripCountDerivation": "17 + Warlock 2 = 19. THE HEADLINE ASSERTION.",
+      "expectUnknowns": []
+    }
+  ],
+  "checkpointsNote": "All seven levels are checkpointed, per D252.8 (walkthroughs verify every level 1-7 on all builds). Choices and sources are asserted at every level, not just sheet values — a silent substitution with identical numbers is a HALT (D253.7).",
+  "aiGuidedRun": {
+    "required": true,
+    "source": "D251.3: the Cantrip Kennel gets the one end-to-end chat-guided creation run via the offline AI bridge; every other build asserts agent-reference panel facts only. D252.10 puts that completed run on the v1-USABLE bar.",
+    "assert": "The bridge emits structured next-step actions; Playwright validates each against this spec and applies it (D253.8). Any wrong advice or dead end fails the acceptance.",
+    "wrongPickAndRecover": {
+      "required": true,
+      "source": "D253.10: the Kennel run includes one deliberate wrong-pick-and-recover sequence; a dead end on recovery is a HALT.",
+      "sequence": "At the Cleric 1 Divine Order step, choose Protector — the count-losing option. Advance one step. Then go back and change it to Thaumaturge.",
+      "assert": "After the wrong pick the sheet shows 13 cantrips at that checkpoint, not 14, and shows the martial-weapon and Heavy-armor grants sourced to Divine Order (Protector). After the correction it shows 14, the fourth Cleric cantrip is selectable, and the Protector grants are GONE from the sheet rather than stranded. A retained Protector grant after switching to Thaumaturge is a data-integrity lie and a HALT; no reachable back-step to the Divine Order choice is a dead end and a HALT."
+    }
+  },
+  "exportRoundTrip": {
+    "afterLevel": 7,
+    "freshProfile": true,
+    "assert": "Re-import into a fresh profile reproduces the final checkpoint exactly: slots, pactSlots where present, hp, and the complete cantrip and prepared-spell lists with their list attributions. Any divergence is a HALT per D251.1.",
+    "source": "D265: every mutt spec ends in an export round trip; D262.11 put export/import on the v1 bar."
+  },
+  "viewports": {
+    "tested": "desktop",
+    "bestEffort": "emulated mobile viewport",
+    "source": "D293 (desktop is the tested matrix; mobile is a real engineering target carrying no tested claim) as addended by D295 (emulated mobile-viewport runs join the browser suites alongside full desktop). A mobile-viewport failure on this spec is reported and does not block; a desktop failure follows the D251.1 severity split."
+  },
+  "licensing": "Every rules claim above cites SRD 5.2.1 material bundled in this repository under CC-BY-4.0. No content from any other book appears, and the [Tasha]/[Xanathar]/[2024] cantrips of the original Kennel definition are absent by construction — that removal IS D272."
+}
