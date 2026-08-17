@@ -7,6 +7,20 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D276 — OWNER: migrate EVERYWHERE to tagged error classes now (2026-08-17)
+
+After the four-option deep dive, ruled: **"migrate everywhere to option
+a."** D274's tagged-class pattern (literal `name`, structured params,
+message derived in one place; class+params asserted per guard, exact
+message once per class) is to be applied across the whole codebase, not
+just src/simulation, starting now rather than after wave 5. Sequencing to
+avoid collisions: main-repo src/ modules migrate in parallel lanes
+immediately; src/simulation migrates after wave-5 increment 1 lands (same
+files). Also ruled: benchmark experiment — temp worktrees for Deno
+(with/without type checking), Bun+typia, and plain Bun, measuring speed
+and effectiveness against the current Node toolchain; report with real
+numbers.
+
 ## D275 — OWNER: do not post the #6150 upstream comment (2026-08-17)
 
 Ruled "Don't post." The stryker-js #6150 confirmation comment (our vitest
