@@ -384,13 +384,27 @@ function rootMetadataConflict(
   name: string,
   edition: string,
 ): boolean {
-  const table = kind === 'class'
-    ? 'class_definitions'
-    : kind === 'feat'
-      ? 'feat_definitions'
-      : kind === 'species'
-        ? 'species_definitions'
-        : 'background_definitions';
+  let table: 'class_definitions' | 'feat_definitions' | 'species_definitions' | 'background_definitions';
+  switch (kind) {
+    case 'class':
+      table = 'class_definitions';
+      break;
+    case 'feat':
+      table = 'feat_definitions';
+      break;
+    case 'species':
+      table = 'species_definitions';
+      break;
+    case 'background':
+      table = 'background_definitions';
+      break;
+    /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+       tsc probe verified that the never assignment rejects a new kind. */
+    default: {
+      const unreachable: never = kind;
+      throw new TypeError(`Unhandled source aggregate kind ${String(unreachable)}.`);
+    }
+  }
   const row = db.oneRaw(
     `SELECT name, rules_edition FROM ${table} WHERE content_key = ?`,
     [contentKey],
@@ -429,6 +443,46 @@ function sourcePayload(aggregate: SourceAggregate): unknown {
     case 'feat': return projectFeatContentV1(aggregate);
     case 'species':
     case 'background': return projectAuthoredContentAggregateV1(aggregate).payload;
+  }
+}
+
+function sourceProjectionTable(
+  kind: SourceAggregate['kind'],
+): 'class_definitions' | 'feat_definitions' | 'species_definitions' | 'background_definitions' {
+  switch (kind) {
+    case 'class':
+      return 'class_definitions';
+    case 'feat':
+      return 'feat_definitions';
+    case 'species':
+      return 'species_definitions';
+    case 'background':
+      return 'background_definitions';
+    /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+       tsc probe verified that the never assignment rejects a new kind. */
+    default: {
+      const unreachable: never = kind;
+      throw new TypeError(`Unhandled source aggregate kind ${String(unreachable)}.`);
+    }
+  }
+}
+
+function sourceCreatedCounter(
+  kind: Exclude<SourceAggregate['kind'], 'class'>,
+): 'feats_created' | 'species_created' | 'backgrounds_created' {
+  switch (kind) {
+    case 'feat':
+      return 'feats_created';
+    case 'species':
+      return 'species_created';
+    case 'background':
+      return 'backgrounds_created';
+    /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+       tsc probe verified that the never assignment rejects a new kind. */
+    default: {
+      const unreachable: never = kind;
+      throw new TypeError(`Unhandled creatable source kind ${String(unreachable)}.`);
+    }
   }
 }
 
@@ -558,15 +612,8 @@ function sourceProjection(
     projectStored: (database, contentKey) =>
       projectStoredContentV1(database, aggregate.kind, contentKey),
     install: (database, contentKey, _projection, phase) => {
-      const table = aggregate.kind === 'class'
-        ? 'class_definitions'
-        : aggregate.kind === 'feat'
-          ? 'feat_definitions'
-          : aggregate.kind === 'species'
-            ? 'species_definitions'
-            : 'background_definitions';
       if (database.scalar<number>(
-        `SELECT 1 FROM ${table} WHERE content_key = ?`,
+        `SELECT 1 FROM ${sourceProjectionTable(aggregate.kind)} WHERE content_key = ?`,
         [contentKey],
       ) === 1) return;
       switch (aggregate.kind) {
@@ -576,12 +623,7 @@ function sourceProjection(
         case 'background': insertBackground(database, aggregate, contentKey); break;
       }
       if (phase === 'commit') {
-        const counter = aggregate.kind === 'feat'
-          ? 'feats_created'
-          : aggregate.kind === 'species'
-            ? 'species_created'
-            : 'backgrounds_created';
-        counters[counter] += 1;
+        counters[sourceCreatedCounter(aggregate.kind)] += 1;
       }
     },
   };
