@@ -302,37 +302,49 @@ function draftFeatureValueContribution(
         };
   const expression = contribution.value;
   let value: SubclassAuthoringDraftContribution['value'];
-  if (expression.kind === 'const') {
-    value = { kind: 'constant', amount: expression.amount };
-  } else if (
-    expression.kind === 'scale' &&
-    expression.source.kind === 'class_level' &&
-    expression.source.class_content_key === parentClassKey
-  ) {
-    value = {
-      kind: 'class_level_scale',
-      multiply: expression.multiply ?? 1,
-      divide: expression.divide ?? 1,
-      round: expression.round,
-    };
-  } else if (
-    expression.kind === 'table' &&
-    expression.level_source.kind === 'class_level' &&
-    expression.level_source.class_content_key === parentClassKey &&
-    expression.rows[0].from <= contribution.active_from_level &&
-    expression.rows.at(-1)!.to >= contribution.active_to_level
-  ) {
-    value = {
-      kind: 'breakpoint_table',
-      rows: expression.rows.map((row) => ({
-        draft_item_uuid: itemUuid(randomUuid),
-        from: row.from,
-        to: row.to,
-        amount: row.amount,
-      })),
-    };
-  } else {
-    value = { kind: 'preserved', expression };
+  switch (expression.kind) {
+    case 'const':
+      value = { kind: 'constant', amount: expression.amount };
+      break;
+    case 'scale':
+      value = expression.source.kind === 'class_level' &&
+          expression.source.class_content_key === parentClassKey
+        ? {
+            kind: 'class_level_scale',
+            multiply: expression.multiply ?? 1,
+            divide: expression.divide ?? 1,
+            round: expression.round,
+          }
+        : { kind: 'preserved', expression };
+      break;
+    case 'table':
+      value = expression.level_source.kind === 'class_level' &&
+          expression.level_source.class_content_key === parentClassKey &&
+          expression.rows[0].from <= contribution.active_from_level &&
+          expression.rows.at(-1)!.to >= contribution.active_to_level
+        ? {
+            kind: 'breakpoint_table',
+            rows: expression.rows.map((row) => ({
+              draft_item_uuid: itemUuid(randomUuid),
+              from: row.from,
+              to: row.to,
+              amount: row.amount,
+            })),
+          }
+        : { kind: 'preserved', expression };
+      break;
+    case 'ref':
+    case 'piecewise':
+    case 'sum':
+    case 'clamp':
+      value = { kind: 'preserved', expression };
+      break;
+    /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+       tsc probe verified that the never assignment rejects a new kind. */
+    default: {
+      const unreachable: never = expression;
+      throw new TypeError(`Unhandled value expression ${String(unreachable)}.`);
+    }
   }
   return {
     kind: contribution.kind,
