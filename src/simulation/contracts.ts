@@ -1458,7 +1458,17 @@ export type ResourceRecoveryResult = {
   readonly recovered_units: number;
 };
 
-function sameSourceRef(left: SourceRef, right: SourceRef): boolean {
+/**
+ * Effect identity: two source refs name the same effect. The `right.kind ===`
+ * re-checks are narrowing devices, not redundant guards — TypeScript narrows
+ * `left` alone in the switch, so `right` has to be re-narrowed before its
+ * arm-specific field is readable.
+ *
+ * Exported because `coverage.ts` needs exactly this predicate. It kept a
+ * character-for-character copy until wave 5; one implementation means one set
+ * of arms to cover.
+ */
+export function sameSourceRef(left: SourceRef, right: SourceRef): boolean {
   if (left.kind !== right.kind || left.stable_key !== right.stable_key) {
     return false;
   }

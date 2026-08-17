@@ -9,6 +9,7 @@ import type { ContentKey } from '../domain/ids';
 import {
   BUNDLED_SRD_5_2_1_PATH,
   reviewedResourceRecoverySourceSha256Oracle,
+  sameSourceRef,
   saveSuccessClauseId,
   snapshotPublicSourceRef,
   snapshotSourceRef,
@@ -1752,23 +1753,6 @@ function samePublicSource(left: PublicSourceRef, right: PublicSourceRef): boolea
   return leftSnapshot.kind === 'project_owned' ||
     (rightSnapshot.kind === 'bundled_srd' &&
       leftSnapshot.heading === rightSnapshot.heading);
-}
-
-function sameSourceRef(left: SourceRef, right: SourceRef): boolean {
-  if (left.kind !== right.kind || left.stable_key !== right.stable_key) {
-    return false;
-  }
-  switch (left.kind) {
-    case 'character_source':
-      return right.kind === 'character_source' &&
-        left.source_instance_id === right.source_instance_id;
-    case 'catalog_content':
-      return right.kind === 'catalog_content' &&
-        left.content_key === right.content_key;
-    case 'character_weapon':
-      return right.kind === 'character_weapon' &&
-        left.weapon_id === right.weapon_id;
-  }
 }
 
 function damageMatchesSourceClause(
