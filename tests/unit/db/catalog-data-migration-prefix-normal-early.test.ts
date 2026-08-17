@@ -1,3 +1,4 @@
+import { expectIdenticalDatabaseImages } from '../../helpers/database-image-equality';
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { Sqlite3Static } from '@sqlite.org/sqlite-wasm';
 import schema from '../../../src/db/schema.sql?raw';
@@ -64,7 +65,7 @@ describe('early schema-prefix catalog data migrations', () => {
         catalogDataMigrationProbeExecutions(),
         `${prefixId} reopen`,
       ).toBe(1);
-      expect(await lifecycle.exportBytes()).toEqual(firstOpenBytes);
+      expectIdenticalDatabaseImages(await lifecycle.exportBytes(), firstOpenBytes, `${prefixId} reopen image`);
     }
     lifecycle.close();
     // Hang-guard, not a perf pin: measured 32.3s isolated, 67.5s under

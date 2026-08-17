@@ -1,3 +1,4 @@
+import { expectIdenticalDatabaseImages } from '../../helpers/database-image-equality';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type {
   Database,
@@ -3073,7 +3074,7 @@ describe('database migration chain', () => {
     imported.open();
     await imported.replace(migratedBytes);
     expect(read(imported.database)).toEqual(expected);
-    expect(await imported.exportBytes()).toEqual(migratedBytes);
+    expectIdenticalDatabaseImages(await imported.exportBytes(), migratedBytes, 'imported migrated image');
     imported.close();
     lifecycle.close();
   }, 20_000);
