@@ -7,6 +7,18 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D300 — OWNER: vitest 4 upgrade approved conditional on clean assessment (2026-08-17)
+
+The `onTaskUpdate` false-failure class (exit 1 with 0 test failures under
+load) is birpc's hardcoded 60s RPC timeout; vitest 3.x exposes no setting
+and upstream's fix (timeout disabled, PR #8297) ships only in vitest 4.
+Owner ruled: **upgrade to vitest 4 if the read-only assessment lane shows
+small blast radius and Stryker/simcore-patch compatibility**; if blocked,
+return to the owner (patch-package of 3.2.7 was NOT approved). Until the
+upgrade lands and is gated, the parallel-suite protocol stands: parallel
+runs advisory only, official gates solo-quiet. Also ruled the same
+session: plan files stay UNTRACKED (reboot-safe copies to .tmp/ instead).
+
 ## D299 — OWNER: content needs a ui-hidden marking (2026-08-17)
 
 Owner, in the D298 context of lightweight test content: "We need a way to
