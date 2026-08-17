@@ -50,6 +50,7 @@ import {
   spellDescriptionsFromFullLayout,
   damageSignatureOf,
   type DamageSignature,
+  type SourceDerivedDamageFrequency,
   type SourceDerivedSaveClause,
   type SourceDerivedSaveDamageCandidate,
 } from './spell-source-reader';
@@ -995,6 +996,26 @@ export function assertReviewedSpellBodyDigest(
   }
 }
 
+function reviewedEventFrequency(
+  frequency: Exclude<SourceDerivedDamageFrequency, { readonly kind: 'unavailable' }>,
+  evidence: PublicSourceRef,
+): EventFrequency {
+  switch (frequency.kind) {
+    case 'once_per_turn':
+      return { kind: 'once_per_turn', turn: frequency.turn, evidence };
+    case 'once_per_round':
+      return { kind: 'once_per_round', evidence };
+    case 'each_declared_event':
+      return { kind: 'each_declared_event' };
+    /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+       tsc probe verified that the never assignment rejects a new frequency. */
+    default: {
+      const unreachable: never = frequency;
+      throw new TypeError(`Unhandled source damage frequency ${String(unreachable)}.`);
+    }
+  }
+}
+
 function reviewedSaveClause(
   oracleKey: keyof typeof reviewedSpellBodySha256Oracle,
   key: string,
@@ -1079,15 +1100,6 @@ function reviewedSaveClause(
   ) {
     throw new TypeError(`${id} damage-roll slot groups disagree with the clause-local source rolls.`);
   }
-  const frequency: EventFrequency = sourceClause.frequency.kind === 'once_per_turn'
-    ? {
-        kind: 'once_per_turn',
-        turn: sourceClause.frequency.turn,
-        evidence,
-      }
-    : sourceClause.frequency.kind === 'once_per_round'
-      ? { kind: 'once_per_round', evidence }
-      : { kind: 'each_declared_event' };
   if (
     sourceClause.success.status === 'unavailable' ||
     sourceClause.fixed_save_dc.status === 'unavailable' ||
@@ -1138,6 +1150,9 @@ function reviewedSaveClause(
       throw new TypeError(`${id} unavailable successful-save roll transform disagrees with the source.`);
     }
     consumedSourceClauses.add(sourceClause);
+    const frequency: EventFrequency = sourceClause.frequency.kind === 'unavailable'
+      ? { kind: 'each_declared_event' }
+      : reviewedEventFrequency(sourceClause.frequency, evidence);
     return {
       id,
       effect_source: {
@@ -1166,6 +1181,7 @@ function reviewedSaveClause(
       duration: sourceClause.duration,
     };
   }
+  const frequency = reviewedEventFrequency(sourceClause.frequency, evidence);
   if (requirements === undefined) {
     throw new TypeError(`${id} has no independently reviewed damage requirements.`);
   }
