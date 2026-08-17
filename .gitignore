@@ -24,3 +24,4 @@ orchestration/logs/
 # tests/unit/tools/scraped-output-is-never-committed.test.ts, which asks
 # `git ls-files` what is actually tracked.
 scraped/
+.tmp/

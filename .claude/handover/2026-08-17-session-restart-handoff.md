@@ -87,3 +87,12 @@ raise vitest's internal timeout to force green.
 No deploy (D266/D286). No push/publish/outward. No #6150 upstream post
 (D275). decisions.md supervisor-only append-only. Licensing per D59.
 Forbidden paths to green unchanged. Codex out of credits → stop loudly.
+
+## Reboot-safe copies
+
+`/tmp` dies on reboot; the load-bearing scratchpad artifacts (lane briefs
+l-*.txt, R1/R2/R3 inventory finals, all three D278 review logs, the
+contaminated D283 gate log) are copied to `.tmp/handoff-2026-08-17/`
+(gitignored, survives reboot). Live lane LOGS still stream to /tmp —
+if the box reboots mid-lane, the lanes die with it; their committed
+worktree branches are then the only truth.
