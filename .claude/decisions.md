@@ -7,6 +7,18 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D294 — OWNER: all MAJOR self-review findings auto-block v1 (2026-08-17)
+
+Triage policy ruled: **"All MAJOR auto-block."** Any MAJOR-severity
+finding from the D286 self-review or future supervisor reviews joins the
+v1 blocker list immediately, without awaiting owner triage — the D270
+precedent generalized. Severity assignment follows the sweep taxonomy's
+existing MAJOR bar (wrong number, silent unknown, dead end, data-integrity
+lie); minor/polish findings queue normally. The owner sees the blocker
+list grow in reports rather than gating each addition. Declined:
+wrong-numbers-only auto-block (supervisor recommendation),
+everything-awaits-triage.
+
 ## D293 — OWNER: desktop tested; best-effort mobile (2026-08-17)
 
 Browser matrix ruled in the owner's words: **"Desktop tested, but do your
