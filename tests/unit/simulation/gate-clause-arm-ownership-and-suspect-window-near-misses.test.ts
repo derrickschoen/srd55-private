@@ -177,6 +177,30 @@ describe('gate/direct clause ownership near misses', () => {
     expect(atSaveStart[0]?.success.status).toBe('unavailable');
   });
 
+  it('drops a gate whose every signature matches some, not all, direct signatures', () => {
+    // Two DISTINCT signatures on the shared span (4d6 Fire and 2d8 Cold).
+    // Ownership requires every gate signature to match SOME direct signature
+    // (spell-source-reader.ts:1152-1155); a mutant tightening the inner
+    // `some` to `every` demands each gate signature match ALL direct
+    // candidates, which no signature can once two distinct ones exist, so the
+    // gate would wrongly survive deduplication.
+    const twoDamageGateSentence =
+      'The target makes a dexterity saving throw and takes 4d6 Fire damage and 2d8 Cold damage if it failed save, or has the Grappled condition until a Wisdom saving throw ends it.';
+    const body = [WISDOM_LEAD, twoDamageGateSentence, GRAPPLE_DAMAGE_SENTENCE].join(' ');
+    const coverage = deriveSaveDamageCoverageFromBodies(
+      new Map([['Probe Spell', body]]),
+    );
+    const saveStart = body.indexOf('dexterity saving throw');
+    const atSaveStart = coverage.candidates.filter(
+      (candidate) => candidate.save_start === saveStart,
+    );
+    expect(atSaveStart).toHaveLength(1);
+    expect(atSaveStart[0]?.failed_damage_signatures.length).toBe(2);
+    expect(coverage.counts.after_deduplication).toBe(
+      coverage.counts.before_deduplication - 1,
+    );
+  });
+
   it('keeps the gate clause when only the save ability disagrees', () => {
     const body = [
       CONSTITUTION_LEAD,

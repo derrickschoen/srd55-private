@@ -1,0 +1,51 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "mutate": [
+    "src/simulation/coverage.ts:1155-1159",
+    "src/simulation/coverage.ts:1662-1706",
+    "src/simulation/coverage.ts:1880-1914",
+    "src/simulation/coverage.ts:1957-1993",
+    "src/simulation/spell-source-reader.ts:208-222",
+    "src/simulation/spell-source-reader.ts:245-256",
+    "src/simulation/spell-source-reader.ts:272-280",
+    "src/simulation/spell-source-reader.ts:316",
+    "src/simulation/spell-source-reader.ts:340-365",
+    "src/simulation/spell-source-reader.ts:1107-1108",
+    "src/simulation/spell-source-reader.ts:1150-1177",
+    "src/simulation/probability.ts:181-185",
+    "src/simulation/probability.ts:378-381",
+    "src/simulation/contracts.ts:833-842",
+    "src/simulation/contracts.ts:1462-1471",
+    "src/simulation/contracts.ts:1731-1733"
+  ],
+  "mutator": {
+    "excludedMutations": [
+      "Regex"
+    ]
+  },
+  "testRunner": "vitest",
+  "vitest": {
+    "configFile": "vitest.config.ts"
+  },
+  "checkers": [
+    "typescript"
+  ],
+  "tsconfigFile": "tsconfig.json",
+  "coverageAnalysis": "perTest",
+  "reporters": [
+    "json",
+    "progress"
+  ],
+  "jsonReporter": {
+    "fileName": "reports/wave4-verification.json"
+  },
+  "thresholds": {
+    "high": 90,
+    "low": 70,
+    "break": null
+  },
+  "timeoutMS": 20000,
+  "concurrency": 12,
+  "tempDirName": ".stryker-tmp-wave4",
+  "cleanTempDir": true
+}
