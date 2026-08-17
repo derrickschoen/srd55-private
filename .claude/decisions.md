@@ -7,6 +7,22 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D280 — OWNER: the v1 mutation bar is WHOLE-src/ zero-unexplained (2026-08-17)
+
+Ruled: **"Whole src/ zero unexplained"** — the largest option, knowingly.
+Before v1, EVERY mutant across the entire app source (not just
+src/simulation) must be Killed, CompileError, proven-equivalent with a
+written proof, or a member of an explicitly excluded category (regex
+literals per the earlier ruling; message prose per D273/D274 as amended by
+D278's structure); NoCoverage mutants count as unexplained until either
+covered by tests or explicitly justified. This extends the campaign to
+catalog, commands, grants, sharing, rules, authoring, db, worker, builder,
+ui and the rest — a substantially larger undertaking than the simulation
+campaign, now on the v1 critical path per D279. Sequencing note: runs the
+same wave machinery (full run -> cluster -> near-miss lanes -> verify),
+and the D278 migration rewrites many guard sites first, so mutation waves
+per module follow that module's migration.
+
 ## D279 — OWNER: migration, mutation bar, AND simcore merge all block v1 (2026-08-17)
 
 Ruled: **"All three block."** The v1 gate now comprises: the 12+1
