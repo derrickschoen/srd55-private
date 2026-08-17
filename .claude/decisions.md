@@ -7,6 +7,29 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D278 — OWNER: unified Result + shared refusal union is THE precedent (2026-08-17)
+
+After the why-does-attunement-throw walkthrough (sqlite transaction() rolls
+back on throw — the mechanical reason; semantic refusals riding the error
+channel — the habit), ruled: **"Unified Result + shared union."** The single
+precedent everywhere:
+- EXPECTED refusals (slots full, revision conflict, archived, level-up
+  refusals, ...) are RETURNED: `Outcome<T> = {kind:'ok'; value} |
+  {kind:'refused'; refusal: Refusal}`, with `Refusal` one shared
+  discriminated union in one module (src/refusals/) compiled into BOTH the
+  worker and the UI — single source of truth by shared compilation, no
+  copying; exhaustive switches on both sides (D269a). A small wire-version
+  field covers PWA update-window skew.
+- THROWS are reserved for DEFECTS (bugs, corrupt data, forged inputs) —
+  D274 tagged classes, translated to the six generic RpcErrorCodes,
+  rendered as a generic failure surface.
+- Rollback: one internal helper lets a command abort its transaction on
+  refusal without exposing a throw past its handler.
+- The D276/D277 migration lanes implement this in the same pass:
+  each throw site is classified refusal->Result vs defect->tagged-throw.
+Declined: curated translation of thrown classes (smallest diff, kept the
+semantic wrongness), internal-only prose, stable class-name protocol.
+
 ## D277 — OWNER: error migration completes BEFORE the S7 repairs (2026-08-17)
 
 Start-order ruling for the three ready workstreams: **"Migrate first"** —
