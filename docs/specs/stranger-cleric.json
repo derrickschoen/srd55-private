@@ -1,0 +1,418 @@
+{
+  "id": "stranger-cleric",
+  "specNumber": 12,
+  "name": "The Stranger — a 2014 player builds a Cleric 1→5",
+  "stagingNote": "AUTHORED ON A main-BASED LANE, WHERE tests/browser/fixtures/mutt-specs/ DOES NOT EXIST. The ten landed mutt specs live on wt/walkthrough at tests/browser/fixtures/mutt-specs/*.json; this lane was scoped docs-only and may not add under tests/. This file is the spec in the landed fixture format, verbatim-movable to tests/browser/fixtures/mutt-specs/stranger-cleric.json by the walkthrough engine lane with no content edit. Specs lead, the engine follows (D265, D260.5).",
+  "blocking": true,
+  "blockingSource": "D265: one BLOCKING stranger spec joins the 11 mutt walkthroughs. D285 supplies its content. This is spec 12 of 12.",
+  "persona": {
+    "who": "A person who knows D&D 5e as it was published in 2014 and has never used this app.",
+    "knows": "2014 rules fluently — racial ability score increases, a Cleric who picks a Divine Domain at level 1, prepared spells equal to spellcasting modifier plus class level, backgrounds that give skills but no feat and no ability bonuses.",
+    "doesNotKnow": "The 2024 rules this app implements, and every convention of this UI.",
+    "playing": "A Cleric, straight class, character level 1 through 5 — prepared casting plus the domain machinery, on the guided path.",
+    "source": "D285, owner's ruling: persona is a 5e-2014 knower who does not know the 2024 rules, walking a Cleric 1→5 on the guided path.",
+    "whyThisMatters": "Every assertion below is about what the APP SHOWS, not about what the rules say. This spec's failures are dead ends and silent wrongness, not arithmetic. A screen that is correct and unexplained fails this spec."
+  },
+  "houseRuleToggles": {
+    "h4": false,
+    "h2": false,
+    "h3": false
+  },
+  "toggleNotes": {
+    "h4": "Unused: single class, no multiclass entry, no prerequisite to relax.",
+    "h2": "Unused: the background increases are +2 Wisdom / +1 Charisma and Acolyte's fixed ability list is Intelligence, Wisdom, Charisma (srd-5.2.1.txt:5006). No free-choice house rule needed.",
+    "h3": "Unused: the character has one spellcasting ability, Wisdom, from the Cleric class.",
+    "allOffIsThepoint": "D253.10 puts every walkthrough on a cold profile with all toggles OFF. A stranger must never have to find a toggle to finish a legal character."
+  },
+  "coldProfile": true,
+  "coldProfileNote": "A cold profile is load-bearing here, not boilerplate: this spec's subject is first contact. The run starts from no stored characters, no prior visit, and default settings (D253.10).",
+  "species": "Dwarf",
+  "speciesNote": "Chosen because it is the sharpest 2014 collision available in SRD 5.2.1. A 2014 player reaches for Hill Dwarf and expects +2 Constitution and +1 Wisdom. SRD 5.2.1's Dwarf grants Darkvision 120 feet, Dwarven Resilience, Dwarven Toughness and Stonecunning (species-descriptions.txt:52-71) — and NO ability score increase. There are no Dwarf subraces in SRD 5.2.1 either. Misstep 4 is built on exactly this gap.",
+  "background": "Acolyte",
+  "backgroundNote": "Acolyte: Ability Scores Intelligence, Wisdom, Charisma; Feat Magic Initiate (Cleric); Skill Proficiencies Insight and Religion (srd-5.2.1.txt:5006-5008). It is the classic 2014 cleric background, so the stranger picks it by instinct — and it is where the 2024 rules put the ability increases the stranger is looking for on the species, which is what makes misstep 4 legible rather than merely refused. Its skills also collide with the Cleric's own list, which is what makes misstep 1 reachable at level 1 (D270 records all S7 defects as level-1-reachable).",
+  "languages": [
+    "Common",
+    "Dwarvish",
+    "Elvish"
+  ],
+  "languagesSource": "Common plus two from the Standard Languages table (srd-5.2.1.txt:1214-1216; table at :1235-1250 — Common Sign Language, Draconic, Dwarvish, Elvish, Giant, Gnomish, Goblin, Halfling, Orc). Celestial was the first choice here and was REJECTED at authoring: it is a RARE language in SRD 5.2.1 (the Rare Languages prose is at :1253 and its table at :1262), not a Standard one, and nothing in this build grants a rare language.",
+  "abilityArray": {
+    "method": "standardArrayByClass",
+    "standardArray": {
+      "str": 14,
+      "dex": 8,
+      "con": 13,
+      "int": 10,
+      "wis": 15,
+      "cha": 12
+    },
+    "standardArraySource": "The SRD's own Standard Array by Class table, Cleric row: Str 14, Dex 8, Con 13, Int 10, Wis 15, Cha 12 (ability-score-generation.txt:42). Standard Array is one of the three offered generation methods (:19-20). The stranger uses the recommended row because it is the path of least resistance for someone who does not know the app — and because a spec that pins the SRD's own recommendation cannot be accused of a tuned array.",
+    "backgroundIncreases": {
+      "plusTwo": "wisdom",
+      "plusOne": "charisma",
+      "houseRule": null
+    },
+    "backgroundIncreasesSource": "A background lists three ability scores; increase one by 2 and another by 1, or all three by 1 (backgrounds.txt:48-51). Acolyte's three are Intelligence, Wisdom, Charisma.",
+    "final": {
+      "str": 14,
+      "dex": 8,
+      "con": 13,
+      "int": 10,
+      "wis": 17,
+      "cha": 13
+    },
+    "finalNote": "Wisdom 17 (+3), Constitution 13 (+1). Wisdom becomes 19 (+4) at level 4; see levels[4]."
+  },
+  "startingClass": "Cleric",
+  "levels": [
+    {
+      "order": 1,
+      "class": "Cleric",
+      "classLevel": 1,
+      "pick": {
+        "abilityBoosts": {
+          "plusTwo": "wisdom",
+          "plusOne": "charisma"
+        },
+        "backgroundSkills": [
+          "Insight",
+          "Religion"
+        ],
+        "backgroundSkillsSource": "Acolyte Skill Proficiencies: Insight and Religion (srd-5.2.1.txt:5008).",
+        "skills": [
+          "Medicine",
+          "Persuasion"
+        ],
+        "skillsSource": "Cleric Skill Proficiencies, Choose 2 from History, Insight, Medicine, Persuasion, Religion (class-core-traits.txt:77-78). Insight and Religion are both on this list AND both already granted by Acolyte — that collision is misstep 1, and Medicine/Persuasion is the recovery.",
+        "originFeat": "Magic Initiate (Cleric)",
+        "originFeatSource": "Acolyte's fixed feat (srd-5.2.1.txt:5007).",
+        "originFeatChoices": {
+          "ability": "Wisdom",
+          "abilitySource": "RAW choice of Intelligence, Wisdom or Charisma at feat selection (feats.txt:42); Wisdom matches the Cleric's own spellcasting ability, which is what a stranger will expect.",
+          "cantrips": [
+            "Thaumaturgy",
+            "Spare the Dying"
+          ],
+          "cantripsSource": "Two cantrips from the Cleric, Druid or Wizard spell list (feats.txt:42); Acolyte's feat pins the list to Cleric. Thaumaturgy (cleric-spell-list.txt:37), Spare the Dying (:36). Both distinct from the three class cantrips below, so the sheet shows five distinct cantrips at level 1 with two different sources.",
+          "levelOneSpell": "Guiding Bolt",
+          "levelOneSpellSource": "Level 1 Cleric spell (cleric-spell-list.txt:54). Always prepared; one free cast per Long Rest; also castable from slots (feats.txt:44). Chosen NOT to be Bless, because Life Domain makes Bless always-prepared at level 3 and the collision would muddy the level-3 assertions."
+        },
+        "divineOrder": "Protector",
+        "divineOrderSource": "Cleric level 1 Divine Order (class-level-tables.txt:67). Protector: proficiency with Martial weapons and training with Heavy armor (srd-5.2.1.txt:2306-2308). A 2014 player has no concept of Divine Order — it did not exist — so this is a choice the stranger meets cold, and Protector is the one a 2014 War/Life cleric instinct reaches for.",
+        "cantrips": [
+          "Sacred Flame",
+          "Guidance",
+          "Light"
+        ],
+        "cantripsNote": "3 known at Cleric 1 (class-level-tables.txt:67). Sacred Flame (cleric-spell-list.txt:34), Guidance (:28), Light (:30).",
+        "prepared": [
+          "Bless",
+          "Cure Wounds",
+          "Healing Word",
+          "Shield of Faith"
+        ],
+        "preparedNote": "4 prepared at Cleric 1 (class-level-tables.txt:67), level 1 only. Bless (cleric-spell-list.txt:44), Cure Wounds (:49), Healing Word (:56), Shield of Faith (:62). NOTE THE 2014 GAP: a 2014 player computes prepared = Wis mod + Cleric level = 3 + 1 = 4 and happens to get the same answer here; at level 5 the 2024 table says 9 and the 2014 formula says 9 as well only by coincidence of this array. The app must show the number's SOURCE (the class table) at every level, so agreement is never mistaken for the stranger's formula being what the app uses."
+      }
+    },
+    {
+      "order": 2,
+      "class": "Cleric",
+      "classLevel": 2,
+      "pick": {
+        "channelDivinity": "Turn Undead",
+        "channelDivinitySource": "Cleric level 2: Channel Divinity, 2 uses (class-level-tables.txt:68). Arrives automatically; no player choice is recorded, and the app must not present one.",
+        "prepared": [
+          "Bless",
+          "Cure Wounds",
+          "Healing Word",
+          "Shield of Faith",
+          "Command"
+        ],
+        "preparedNote": "5 prepared at Cleric 2 (class-level-tables.txt:68), still level 1 only. Command (cleric-spell-list.txt:45)."
+      }
+    },
+    {
+      "order": 3,
+      "class": "Cleric",
+      "classLevel": 3,
+      "pick": {
+        "subclass": "Life Domain",
+        "subclassSource": "Cleric Subclass is a LEVEL 3 feature (class-level-tables.txt:69). Life Domain is the SRD 5.2.1 Cleric subclass (subclasses.txt:52). This is where misstep 4's second half resolves: the stranger expected to choose a Divine Domain at level 1.",
+        "domainSpells": [
+          "Aid",
+          "Bless",
+          "Cure Wounds",
+          "Lesser Restoration"
+        ],
+        "domainSpellsSource": "Life Domain Spells, Cleric level 3 row: Aid, Bless, Cure Wounds, Lesser Restoration, thereafter always prepared (subclasses.txt:54-59; the feature's own wording at srd-5.2.1.txt:2445-2451).",
+        "subclassFeatures": [
+          "Disciple of Life",
+          "Preserve Life"
+        ],
+        "subclassFeaturesSource": "subclasses.txt:53, :63.",
+        "prepared": [
+          "Healing Word",
+          "Shield of Faith",
+          "Command",
+          "Spiritual Weapon",
+          "Silence",
+          "Prayer of Healing"
+        ],
+        "preparedNote": "6 prepared at Cleric 3 (class-level-tables.txt:69). Cleric 3 has level 2 slots, so level 2 Cleric spells qualify: Spiritual Weapon (cleric-spell-list.txt:90), Silence (:89), Prayer of Healing (:82). Bless and Cure Wounds LEAVE the chosen list because the domain now supplies them always-prepared — spending a prepared slot on a domain spell is the level-3 wasteful-duplicate case, and the app must say so at selection time rather than after. Domain spells do NOT count against the 6 (srd-5.2.1.txt:2446-2451)."
+      }
+    },
+    {
+      "order": 4,
+      "class": "Cleric",
+      "classLevel": 4,
+      "pick": {
+        "feat": "Ability Score Improvement",
+        "featSource": "Cleric level 4: Ability Score Improvement (class-level-tables.txt:70) — 'You gain the Ability Score Improvement feat or another feat of your choice for which you qualify' (srd-5.2.1.txt:2308-2310). The feat itself: increase one score by 2, or two scores by 1; cannot exceed 20 (feats.txt:64-67).",
+        "featChoice": {
+          "plusTwo": "wisdom"
+        },
+        "featChoiceNote": "Wisdom 17 → 19, modifier +3 → +4. This is a deliberate mid-journey number change: it must propagate to spell save DC, Wisdom-based attack rolls and every Wisdom skill on the sheet, each with its source shown.",
+        "cantrips": [
+          "Sacred Flame",
+          "Guidance",
+          "Light",
+          "Resistance"
+        ],
+        "cantripsNote": "4 known at Cleric 4 (class-level-tables.txt:70) — the count goes 3 → 4 here. Resistance (cleric-spell-list.txt:33). A 2014 player expects the Cleric cantrip count to rise at levels 4 and 10; it does, so this level must NOT surprise them, and any failure to offer the new cantrip pick is a dead end.",
+        "prepared": [
+          "Healing Word",
+          "Shield of Faith",
+          "Command",
+          "Spiritual Weapon",
+          "Silence",
+          "Prayer of Healing",
+          "Warding Bond"
+        ],
+        "preparedNote": "7 prepared at Cleric 4 (class-level-tables.txt:70). The seventh entry is reached THROUGH duplicateAttempts[1]: the stranger first tries Guiding Bolt, which Magic Initiate (Cleric) has kept always-prepared since level 1 (feats.txt:44). That pick is legal and merely wasteful, so the app warns and allows it; the stranger, having been told, backs off and takes Warding Bond (cleric-spell-list.txt:91) instead. The committed list is the one above. If the app allows Guiding Bolt with NO warning, the committed list is still legal and the run continues — that is a missing-warning gap and BATCHES per D251.1, it is not a HALT."
+      }
+    },
+    {
+      "order": 5,
+      "class": "Cleric",
+      "classLevel": 5,
+      "pick": {
+        "classFeature": "Sear Undead",
+        "classFeatureSource": "Cleric level 5: Sear Undead (class-level-tables.txt:71). Automatic; no choice.",
+        "domainSpells": [
+          "Aid",
+          "Bless",
+          "Cure Wounds",
+          "Lesser Restoration",
+          "Mass Healing Word",
+          "Revivify"
+        ],
+        "domainSpellsSource": "Life Domain Spells, Cleric level 5 row adds Mass Healing Word and Revivify (subclasses.txt:60). Both are level 3 Cleric spells (cleric-spell-list.txt:106, :114) and become castable at exactly this level, when the first level 3 slots appear.",
+        "prepared": [
+          "Healing Word",
+          "Shield of Faith",
+          "Command",
+          "Spiritual Weapon",
+          "Silence",
+          "Prayer of Healing",
+          "Spirit Guardians",
+          "Beacon of Hope",
+          "Warding Bond"
+        ],
+        "preparedNote": "9 prepared at Cleric 5 (class-level-tables.txt:71) — the count jumps 7 → 9, the only two-step jump in this range, and the one most likely to be read as a bug by someone doing 2014 arithmetic in their head. Spirit Guardians (cleric-spell-list.txt:120), Beacon of Hope (:97), Warding Bond (:91). The app must show 9 with its source as the class table, not as a formula."
+      }
+    }
+  ],
+  "cantrips": [
+    { "name": "Sacred Flame", "list": "Cleric" },
+    { "name": "Guidance", "list": "Cleric" },
+    { "name": "Light", "list": "Cleric" },
+    { "name": "Resistance", "list": "Cleric (gained at Cleric 4)" },
+    { "name": "Thaumaturgy", "list": "Magic Initiate (Cleric)" },
+    { "name": "Spare the Dying", "list": "Magic Initiate (Cleric)" }
+  ],
+  "preparedSpells": [
+    { "name": "Healing Word", "list": "Cleric" },
+    { "name": "Shield of Faith", "list": "Cleric" },
+    { "name": "Command", "list": "Cleric" },
+    { "name": "Spiritual Weapon", "list": "Cleric" },
+    { "name": "Silence", "list": "Cleric" },
+    { "name": "Prayer of Healing", "list": "Cleric" },
+    { "name": "Spirit Guardians", "list": "Cleric" },
+    { "name": "Beacon of Hope", "list": "Cleric" },
+    { "name": "Warding Bond", "list": "Cleric" },
+    { "name": "Aid", "list": "Cleric (Life Domain, always prepared)" },
+    { "name": "Bless", "list": "Cleric (Life Domain, always prepared)" },
+    { "name": "Cure Wounds", "list": "Cleric (Life Domain, always prepared)" },
+    { "name": "Lesser Restoration", "list": "Cleric (Life Domain, always prepared)" },
+    { "name": "Mass Healing Word", "list": "Cleric (Life Domain, always prepared)" },
+    { "name": "Revivify", "list": "Cleric (Life Domain, always prepared)" },
+    { "name": "Guiding Bolt", "list": "Magic Initiate (Cleric), always prepared" }
+  ],
+  "preparedSpellsAssertion": "Nine chosen entries (the Cleric 5 table count) plus six always-prepared Life Domain entries plus one always-prepared Magic Initiate entry. Sixteen rows, three distinct sources, each row showing which. A row without a source is a silent-unknown MAJOR (D294 taxonomy) even if the row itself is correct.",
+  "missteps": [
+    {
+      "id": "M1",
+      "name": "Duplicate skill pick",
+      "source": "D285(1): duplicate skill/Expertise pick refused clearly at selection time — the S7-04 shape. S7-04 is one of the five MAJOR sheet defects D270 put on the v1 blocker list, and it is reachable at level 1.",
+      "userDoes": "At the Cleric level 1 skill step, chooses Insight — which Acolyte already granted — as one of the two class skills.",
+      "appMustShow": [
+        "The pick is REFUSED AT SELECTION TIME, before the step is committed — not accepted-then-corrected, not flagged on the sheet afterwards.",
+        "A human-readable reason naming the SOURCE the character already has Insight from ('already granted by your Acolyte background'), not a code, not a bare 'invalid'.",
+        "The remaining eligible options (History, Medicine, Persuasion) still selectable, with Insight and Religion visibly ineligible rather than silently absent — a stranger must be able to see WHY the list is shorter than the class description says.",
+        "The step completable with Medicine and Persuasion, and the sheet afterwards showing four distinct skill proficiencies with two different sources (Acolyte: Insight, Religion; Cleric: Medicine, Persuasion)."
+      ],
+      "deadEnd": "Any of: the step accepts Insight and the sheet shows three skills or a duplicated row; the refusal blocks the step with no selectable alternative; the eligible list is silently filtered with no explanation of the omission; the refusal text names no source. Each is a HALT under D251.1 (a dead end or a wrong sheet number), and MAJOR findings auto-block v1 (D294).",
+      "negativeControl": "Run the same step with a character whose background is Soldier (skills Athletics, Intimidation — no overlap with the Cleric list). Insight must be freely selectable there. A refusal that fires for both is refusing the wrong thing."
+    },
+    {
+      "id": "M2",
+      "name": "Reload mid-level-up",
+      "source": "D285(2): reload mid-level-up with nothing lost and an obvious resume point. D265's spine already required a mid-journey reload; D285 pins WHERE and WHAT MUST SURVIVE.",
+      "userDoes": "Enters the level 3 level-up, chooses Life Domain, advances to the prepared-spell step, changes two prepared spells, and then reloads the browser before committing the level — the ordinary accident (a tab restore, a stray refresh), not a deliberate cancel.",
+      "appMustShow": [
+        "On reload, the character still exists and is not corrupted: it is either still at level 2 with the level-3 level-up UNCOMMITTED, or at level 3 with EXACTLY the choices made — never a partial level 3 (subclass applied, prepared list empty; or level counted, subclass missing).",
+        "An OBVIOUS RESUME POINT: on landing, the app names the in-progress level-up and offers to continue it, in a place a stranger reaches without searching — not a route the user must know to type, not a menu item three levels deep.",
+        "If the in-progress choices were retained, they are shown as retained, with the ones still outstanding named. If they were NOT retained, the app SAYS the level-up was not committed and starts it cleanly. Both are acceptable outcomes; a screen that shows the choices but has not stored them is not.",
+        "The sheet's numbers after resuming and committing are identical to the after-level-3 checkpoint below, digit for digit."
+      ],
+      "deadEnd": "Any of: the character is gone, archived, or unopenable; the level-up cannot be resumed OR restarted; the sheet shows level 3 with the subclass or its always-prepared spells missing; the app claims a state it did not persist. Half-applied level-ups are a data-integrity lie and a HALT.",
+      "negativeControl": "Reload at the same point on a character with no level-up in progress. No resume prompt may appear — a prompt that always appears proves nothing about the in-progress case."
+    },
+    {
+      "id": "M3",
+      "name": "Double import of their own backup",
+      "source": "D285(3): double import of their own backup detected without duplicates. D265 put the export→re-import round trip on every spec; this is its adversarial twin.",
+      "userDoes": "Exports a backup at level 5, imports it into the same profile, sees it succeed, is unsure it worked, and imports the SAME FILE a second time.",
+      "appMustShow": [
+        "The second import is DETECTED as already-present content, by identity and not by name — the character list must not gain a second row, and no catalog content may be duplicated behind it.",
+        "A plain statement of what was detected and what the app did: recognised, nothing changed. A stranger must be able to tell 'already imported' apart from 'import failed'; those two produce very different next actions.",
+        "If the app offers a duplicate-anyway path, it is an explicit opt-in that names what will be created — never the default.",
+        "The sheet after the second import is identical to the sheet before it: same HP, same slots, same cantrip and prepared lists with the same source attributions.",
+        "No FALSE-UNKNOWN warning on the recipient side. S7-05 (a false-UNKNOWN import warning) is one of the five MAJOR defects D270 put on the v1 blocker list; this step is where the stranger meets it."
+      ],
+      "deadEnd": "Any of: two characters in the list; a merged/renamed character; content silently duplicated in the catalog; an error the stranger cannot act on; a warning claiming something is unknown when the app has it. A duplicate is a data-integrity lie and a HALT; a false UNKNOWN is a MAJOR that auto-blocks (D294).",
+      "negativeControl": "Import a backup of a DIFFERENT character into the same profile. It must import as a new row. Detection that swallows a genuinely new import is worse than the bug it prevents."
+    },
+    {
+      "id": "M4",
+      "name": "2014-rules expectations: racial ASIs and a level-1 subclass",
+      "source": "D285(4): a 2014-rules expectation (racial ASIs, level-1 subclass) met with UI that shows where those went (background bonuses, level-3 subclass) instead of a dead end.",
+      "userDoes": [
+        "4a — At the species step, picks Dwarf and looks for +2 Constitution. Then looks for a Hill Dwarf subrace.",
+        "4b — At level 1, looks for the Divine Domain choice and does not find one. Considers the character unfinished and looks for the step they missed."
+      ],
+      "appMustShow": [
+        "4a — The Dwarf's traits as SRD 5.2.1 states them (Darkvision 120 feet, Dwarven Resilience, Dwarven Toughness, Stonecunning), and NO ability score increase, with the absence EXPLAINED rather than merely absent: the app points at the background step as where ability increases are chosen in these rules. The stranger must be able to get from 'where is my +2' to the Acolyte increase step without asking anyone.",
+          "4a — Subraces: the app states that this ruleset has no Dwarf subraces, rather than showing an empty picker or omitting the concept. An empty list is indistinguishable from a loading failure.",
+        "4b — At the level 1 review, the Cleric's subclass is shown as arriving at LEVEL 3, named as such, so the stranger can see the character is complete and the domain is ahead of them — not missing. 'Cleric Subclass — level 3' on the class progression is enough; silence is not.",
+        "4b — At level 3, the subclass step is presented as the thing that was promised at level 1, and the Life Domain always-prepared spells appear on the sheet attributed to the domain.",
+        "Every one of these is DISCLOSURE, not correction. The app is right and the stranger is wrong; the requirement is that the app makes that legible without a rulebook."
+      ],
+      "deadEnd": "Any of: the species step shows an ability-increase control that does nothing; an empty subrace picker; the level 1 review implies the character is incomplete with no statement of what arrives when; the stranger cannot reach the background ability-increase step from the species step. A stranger who cannot tell 'this ruleset differs' from 'this app is broken' has hit a dead end even though every number on the sheet is correct — which is precisely the failure D33 exists to name.",
+      "negativeControl": "None available by construction: this is an assertion about explanatory UI, and there is no build for which the explanation should be absent. Instead, the check is inverted — the explanatory text must name the SRD 5.2.1 rule it is explaining, and that citation is verified against the repo source, so a plausible-sounding invented explanation fails."
+    }
+  ],
+  "duplicateAttempts": [
+    {
+      "name": "Insight",
+      "onList": "Cleric class skills",
+      "expectWarningCategory": "conflicting_version",
+      "note": "Misstep M1 in the engine's duplicate-attempt vocabulary. This one is a REFUSAL, not a warning — the Cleric grants two skills and a duplicate would silently cost the character one. See missteps[0] for the full acceptance criteria; the category here is the closest existing member and the engine lane should confirm the taxonomy has a refusal-grade member rather than stretching a warning-grade one."
+    },
+    {
+      "name": "Guiding Bolt",
+      "onList": "Cleric",
+      "expectWarningCategory": "wasteful",
+      "note": "At Cleric 4 the stranger tries to prepare Guiding Bolt, which Magic Initiate (Cleric) has kept always-prepared since level 1 (feats.txt:44). Unlike the skill case this is legal and merely wasteful: the app must say so at selection time, name Magic Initiate as the existing source, and still allow the pick. Silence is a missing-warning gap and BATCHES per D251.1; it is not a HALT."
+    },
+    {
+      "name": "Bless",
+      "onList": "Cleric",
+      "expectWarningCategory": "wasteful",
+      "note": "At Cleric 3, immediately after taking Life Domain, the stranger tries to keep Bless in the chosen list. Life Domain makes it always-prepared (subclasses.txt:58-59), so the pick buys nothing. Same grade as Guiding Bolt: warn at selection, name the domain as the source, allow the pick."
+    }
+  ],
+  "checkpoints": [
+    {
+      "afterLevel": 1,
+      "slots": { "1": 2 },
+      "slotsDerivation": "Cleric Features table row 1: 2 level 1 slots (class-level-tables.txt:67).",
+      "hp": 10,
+      "hpDerivation": "Cleric 1: max d8 = 8 + Con mod +1 (Con 13) = 9, + 1 from Dwarven Toughness ('Your Hit Point maximum increases by 1, and it increases by 1 again whenever you gain a level', species-descriptions.txt:60-62) = 10.",
+      "cantripCount": 5,
+      "cantripCountDerivation": "Cleric 3 (class-level-tables.txt:67) + Magic Initiate 2 (feats.txt:42) = 5.",
+      "preparedCount": 4,
+      "spellSaveDc": 13,
+      "spellSaveDcDerivation": "8 + Proficiency Bonus 2 + Wisdom modifier 3 (Wis 17) = 13.",
+      "expectUnknowns": []
+    },
+    {
+      "afterLevel": 2,
+      "slots": { "1": 3 },
+      "slotsDerivation": "class-level-tables.txt:68.",
+      "hp": 17,
+      "hpDerivation": "10 + (Cleric d8 fixed 5 + Con 1) + 1 Dwarven Toughness = 17.",
+      "cantripCount": 5,
+      "preparedCount": 5,
+      "spellSaveDc": 13,
+      "expectUnknowns": []
+    },
+    {
+      "afterLevel": 3,
+      "slots": { "1": 4, "2": 2 },
+      "slotsDerivation": "class-level-tables.txt:69.",
+      "hp": 24,
+      "hpDerivation": "17 + 6 + 1 = 24.",
+      "cantripCount": 5,
+      "preparedCount": 6,
+      "preparedCountNote": "6 CHOSEN. The four Life Domain always-prepared spells are shown in addition and are NOT part of the 6.",
+      "spellSaveDc": 13,
+      "expectUnknowns": [],
+      "isReloadCheckpoint": true,
+      "isReloadCheckpointNote": "Misstep M2 happens inside this level-up. Every number here must be reproduced after the reload-and-resume, digit for digit."
+    },
+    {
+      "afterLevel": 4,
+      "slots": { "1": 4, "2": 3 },
+      "slotsDerivation": "class-level-tables.txt:70.",
+      "hp": 31,
+      "hpDerivation": "24 + 6 + 1 = 31.",
+      "cantripCount": 6,
+      "cantripCountDerivation": "Cleric 4 (class-level-tables.txt:70) + Magic Initiate 2 = 6. The class count rises 3 → 4 at this level.",
+      "preparedCount": 7,
+      "spellSaveDc": 14,
+      "spellSaveDcDerivation": "8 + PB 2 + Wis mod 4 (Wis 19 after the level 4 Ability Score Improvement, feats.txt:67) = 14. The DC CHANGING mid-journey is asserted deliberately: a sheet that shows 13 here has failed to propagate the feat.",
+      "expectUnknowns": []
+    },
+    {
+      "afterLevel": 5,
+      "slots": { "1": 4, "2": 3, "3": 2 },
+      "slotsDerivation": "class-level-tables.txt:71.",
+      "hp": 38,
+      "hpDerivation": "31 + 6 + 1 = 38.",
+      "cantripCount": 6,
+      "preparedCount": 9,
+      "preparedCountNote": "9 CHOSEN (class-level-tables.txt:71); the six Life Domain always-prepared spells and the one Magic Initiate always-prepared spell are additional. The 7 → 9 jump is asserted because it is the number a 2014 player will read as a bug.",
+      "spellSaveDc": 15,
+      "spellSaveDcDerivation": "8 + Proficiency Bonus 3 + Wisdom modifier 4 = 15. The DC moves 14 → 15 at this level because the proficiency bonus advances; a sheet still showing 14 has failed to advance it.",
+      "proficiencyBonus": 3,
+      "proficiencyBonusDerivation": "Cleric Features table row 5: +3 (class-level-tables.txt:71). Proficiency bonus is based on TOTAL character level (multiclassing.txt:70-76); this character is single-class, so the class table applies directly.",
+      "expectUnknowns": []
+    }
+  ],
+  "checkpointsNote": "Choices and sources are asserted at every level, not just sheet values — a silent substitution with identical numbers is a HALT (D253.7). For this spec the sources matter more than for any other: the persona's whole difficulty is not knowing where a number came from.",
+  "exportRoundTrip": {
+    "afterLevel": 5,
+    "freshProfile": true,
+    "assert": "Re-import into a FRESH PROFILE reproduces the final checkpoint exactly: slots, hp, spell save DC, proficiency bonus, and the complete cantrip and prepared-spell lists with their list attributions — including which entries are always-prepared and from which source. Any divergence is a HALT per D251.1.",
+    "source": "D265: the stranger spec's spine is cold profile, choices-and-sources every level, a mid-journey reload, then export → re-import into a fresh profile with identical sheet numbers. D262.11 put export/import on the v1 bar.",
+    "ordering": "The fresh-profile round trip is the LAST step. Misstep M3's double import happens BEFORE it, in the original profile, so a duplicate created there would still be visible when the fresh profile is compared."
+  },
+  "viewports": {
+    "tested": "desktop",
+    "bestEffort": "emulated mobile viewport",
+    "source": "D293 as addended by D295. This spec is the one where the mobile best-effort matters most — a stranger on a phone meets the same misstep recoveries — but per D293 no mobile result carries a tested claim and no mobile failure blocks v1. Mobile-viewport findings on this spec are REPORTED, with the desktop result stated separately in the same line so the two are never conflated."
+  },
+  "supervisorReviewNote": "D286: the supervisor walks this journey against the locally served production build itself, documents findings with screenshots and numbers, and keeps the record for the owner. The DEPLOY remains a hard stop awaiting explicit owner approval; D286 transferred the review labour, not the launch authority. Any MAJOR finding from that walk joins the v1 blocker list immediately without awaiting owner triage (D294).",
+  "licensing": "Every rules claim above cites SRD 5.2.1 material bundled in this repository under CC-BY-4.0. The 2014 rules the persona expects are described in this spec only as PLAYER EXPECTATIONS in our own words — no 2014 text is quoted, paraphrased from any book, or reproduced anywhere, and none may enter the app's explanatory UI either."
+}
