@@ -20,6 +20,9 @@ import {
   recordedSchemaPrefixImages,
 } from '../../helpers/catalog-data-migration-prefixes';
 import {
+  expectIdenticalDatabaseImages,
+} from '../../helpers/database-image-equality';
+import {
   getSqlite3,
   MemoryDatabaseStorage,
 } from '../../helpers/open-db';
@@ -73,12 +76,19 @@ describe('late schema-prefix catalog data migrations', () => {
         catalogDataMigrationProbeExecutions(),
         `${prefixId} reopen`,
       ).toBe(1);
-      expect(await lifecycle.exportBytes()).toEqual(firstOpenBytes);
+      expectIdenticalDatabaseImages(
+        await lifecycle.exportBytes(),
+        firstOpenBytes,
+        `${prefixId} reopen image`,
+      );
     }
     lifecycle.close();
-  // Green full-suite logs: 116544, 116128, 118497, 115166, 118239, 117369,
-  // 117344ms; 118497 x 1.5 = 177745.5, rounded up to 177800ms.
-  }, 177_800);
+  // Was 177_800ms, for a test that spent 140.5s of its 146s inside 37
+  // `expect(bytes).toEqual(bytes)` calls over 2.1MB images. That comparison is
+  // now `expectIdenticalDatabaseImages`, which proves the same bytes without
+  // the structural-equality walk, and the loop measures ~6s alone. 60_000ms is
+  // ten times the measured cost and still leaves room for a contended box.
+  }, 60_000);
 
   it('persists every restored prefix after candidate migration and not before', async () => {
     const storage = new MemoryDatabaseStorage(sqlite3);
