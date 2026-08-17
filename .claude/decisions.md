@@ -7,6 +7,15 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D279 — OWNER: migration, mutation bar, AND simcore merge all block v1 (2026-08-17)
+
+Ruled: **"All three block."** The v1 gate now comprises: the 12+1
+walkthrough/stranger specs (D264/D265), the five S7 repairs (D270), the
+completed D278 refusal/error migration (D277 sequences repairs after it),
+an explicit mutation-score bar (to be defined — next ruling), and
+wt/simcore's round-24 + two quiet rounds + merge to main (D271). Declined:
+migration-only blocking (supervisor recommendation), none, migration+bar.
+
 ## D278 — OWNER: unified Result + shared refusal union is THE precedent (2026-08-17)
 
 After the why-does-attunement-throw walkthrough (sqlite transaction() rolls
