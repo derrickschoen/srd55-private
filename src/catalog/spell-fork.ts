@@ -181,6 +181,7 @@ function prepareSrdSpellFork(
     });
     return {
       kind: 'spell',
+      visibility: 'listed',
       edition: rulesEdition,
       name,
       assertedKey: contentKey,

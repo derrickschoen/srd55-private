@@ -85,6 +85,7 @@ export function portableElfLibraryDocument(
     selected_content_keys: [contentKey],
     content: [{
       kind: 'species',
+      visibility: 'listed',
       content_key: contentKey,
       key_kind: 'asserted',
       fingerprint_scheme: CONTENT_FINGERPRINT_SCHEME_V2,

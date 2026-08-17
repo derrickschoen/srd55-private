@@ -44,6 +44,7 @@ import {
   type SpellRangeKind,
   type StandaloneSourceType,
 } from '../domain/enums';
+import { selectableCatalogContentSql } from './selectable-catalog-content';
 
 /**
  * A spell version plus its aggregated list and tag memberships.
@@ -265,7 +266,7 @@ export class CatalogQueries {
          LEFT JOIN catalog_content_identities AS identity
            ON identity.content_kind = 'class'
           AND identity.content_key = definition.content_key
-         WHERE identity.archived_at IS NULL
+         WHERE ${selectableCatalogContentSql('class', 'definition.content_key')}
          -- D133: class consumers remain bundled-only in v1.
          ORDER BY definition.name, definition.rules_edition, definition.id`,
         undefined,
@@ -284,7 +285,7 @@ export class CatalogQueries {
          LEFT JOIN catalog_content_identities AS identity
            ON identity.content_kind = 'subclass'
           AND identity.content_key = definition.content_key
-         WHERE identity.archived_at IS NULL
+         WHERE ${selectableCatalogContentSql('subclass', 'definition.content_key')}
          ORDER BY definition.class_definition_id, definition.name,
                   definition.rules_edition, definition.id`,
         undefined,
@@ -342,7 +343,7 @@ export class CatalogQueries {
          LEFT JOIN catalog_content_identities AS identity
            ON identity.content_kind = 'spell'
           AND identity.content_key = version.content_key
-         WHERE identity.archived_at IS NULL
+         WHERE ${selectableCatalogContentSql('spell', 'version.content_key')}
          ORDER BY version.level, version.display_name,
                   version.rules_edition, version.id`,
         undefined,
@@ -373,7 +374,7 @@ export class CatalogQueries {
        LEFT JOIN catalog_content_identities AS identity
          ON identity.content_kind = '${kind}'
         AND identity.content_key = definition.content_key
-       WHERE identity.archived_at IS NULL
+       WHERE ${selectableCatalogContentSql(kind, 'definition.content_key')}
        ORDER BY definition.name, definition.rules_edition, definition.id`,
       undefined,
       (row) => ({

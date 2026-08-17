@@ -411,7 +411,11 @@ function importedLibraryStateProjection(db: DatabaseContext) {
   const historicalLibrary = {
     ...withoutLifecycle,
     version: 2,
-    content: library.content.map(({ provenance: _provenance, ...entry }) => entry),
+    content: library.content.map(({
+      provenance: _provenance,
+      visibility: _visibility,
+      ...entry
+    }) => entry),
   };
   return {
     library: historicalLibrary,
@@ -490,8 +494,9 @@ describe('portable content manifests', () => {
     const contributions = feature.contributions ?? [];
     expect(Object.keys(entry).sort()).toEqual([
       'aggregate', 'content_key', 'fingerprint_digest', 'fingerprint_scheme',
-      'key_kind', 'kind', 'provenance',
+      'key_kind', 'kind', 'provenance', 'visibility',
     ]);
+    expect(entry.visibility).toBe('listed');
     expect(Object.keys(feature).sort()).toEqual([
       'class_level', 'contributions', 'description', 'effects', 'name', 'sort_order',
     ]);

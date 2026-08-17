@@ -6,6 +6,7 @@ import type {
 import type { HomebrewDraftItemUuid } from './ids';
 import type { CharacterLevel } from '../domain/enums';
 import type { ContentKey } from '../domain/ids';
+import type { CatalogContentVisibility } from '../catalog/content-visibility';
 import { characterLevels } from '../domain/enums';
 import { MULTICLASS_SPELLCASTER_TABLE } from '../rules/spell-slots';
 import { officialSpellKey } from '../catalog/catalog-key';
@@ -15,6 +16,7 @@ export interface BundledHomebrewCatalogEntry<
 > {
   /** Stable registry identity; unlike the published content key, it survives revisions. */
   readonly catalog_key: string;
+  readonly visibility: CatalogContentVisibility;
   /**
    * Append-only authored history, oldest first. Keeping prior drafts lets the
    * installer distinguish a shipped revision from unrelated same-key content.
@@ -624,14 +626,17 @@ const spellStudentV2 = spellStudentRevision(true);
 export const BUNDLED_HOMEBREW_CATALOG = Object.freeze([
   Object.freeze({
     catalog_key: 'veteran',
+    visibility: 'listed',
     revisions: Object.freeze([veteranV1, veteranV2, veteranV3] as const),
   }),
   Object.freeze({
     catalog_key: 'warrior-of-the-barbed-court',
+    visibility: 'listed',
     revisions: Object.freeze([barbedCourtV1, barbedCourtV2, barbedCourtV3, barbedCourtV4, barbedCourtV5] as const),
   }),
   Object.freeze({
     catalog_key: 'spell-student',
+    visibility: 'listed',
     revisions: Object.freeze([spellStudentV1, spellStudentV2] as const),
   }),
 ] as const satisfies readonly BundledHomebrewCatalogEntry<SubclassAuthoringDraft>[]);

@@ -13,6 +13,7 @@ import {
   CONTENT_FINGERPRINT_SCHEME_V2,
   isContentFingerprintScheme,
 } from './content-identity';
+import type { CatalogContentVisibility } from './content-visibility';
 import { assertedExternalContentKey } from './catalog-key';
 import { effectColumns } from './equipment-importer';
 import type {
@@ -450,6 +451,7 @@ export function portableSourceContentImportNode(
   aggregate: SourceAggregate,
   assertedKey: ContentKey,
   declaredAlias?: ContentKey,
+  visibility: CatalogContentVisibility = 'listed',
 ): ContentImportNode {
   const counters = emptySourceCounters();
   const build = (
@@ -475,6 +477,7 @@ export function portableSourceContentImportNode(
       remapped,
       nextKey,
       counters,
+      visibility,
     );
     return declaredAlias === undefined
       ? projection
@@ -492,6 +495,7 @@ export function portableSpeciesContentImportNodeV2(
   db: DatabaseContext,
   aggregate: SpeciesProjectorAggregateV2,
   assertedKey: ContentKey,
+  visibility: CatalogContentVisibility = 'listed',
 ): ContentImportNode<'species'> {
   const counters = emptySourceCounters();
   const build = (
@@ -506,6 +510,7 @@ export function portableSpeciesContentImportNodeV2(
     const projected = projectSpeciesContentAggregateV2(remapped);
     return {
       kind: 'species',
+      visibility,
       fingerprintScheme: CONTENT_FINGERPRINT_SCHEME_V2,
       edition: remapped.rules_edition,
       name: remapped.name,
@@ -548,9 +553,11 @@ function sourceProjection(
   aggregate: SourceAggregate,
   assertedKey: ContentKey,
   counters: MutableSourceContentImportCounters,
+  visibility: CatalogContentVisibility,
 ): ContentImportProjection {
   return {
     kind: aggregate.kind,
+    visibility,
     edition: aggregate.rules_edition,
     name: aggregate.name,
     assertedKey,
@@ -592,8 +599,14 @@ function sourceProjectionForDatabase(
   aggregate: SourceAggregate,
   assertedKey: ContentKey,
   counters: MutableSourceContentImportCounters,
+  visibility: CatalogContentVisibility,
 ): ContentImportProjection {
-  const projection = sourceProjection(aggregate, assertedKey, counters);
+  const projection = sourceProjection(
+    aggregate,
+    assertedKey,
+    counters,
+    visibility,
+  );
   const displayConflict = aggregate.kind === 'background'
     ? backgroundDisplayConflict(
         db,
@@ -626,13 +639,13 @@ export function sourceContentImportNodes(
   },
   counters: MutableSourceContentImportCounters,
 ): readonly ContentImportNode[] {
-  const aggregates: readonly SourceAggregate[] = [
-    ...records.classes.map((record) => record.aggregate),
-    ...records.feats.map((record) => record.aggregate),
-    ...records.species.map((record) => record.aggregate),
-    ...records.backgrounds.map((record) => record.aggregate),
+  const aggregates = [
+    ...records.classes.map((record) => record),
+    ...records.feats.map((record) => record),
+    ...records.species.map((record) => record),
+    ...records.backgrounds.map((record) => record),
   ];
-  return Object.freeze(aggregates.map((aggregate) => {
+  return Object.freeze(aggregates.map(({ aggregate, visibility }) => {
     const assertedKey = assertedExternalContentKey(
       aggregate.kind,
       aggregate.rules_edition,
@@ -647,7 +660,13 @@ export function sourceContentImportNodes(
         { ...aggregate, name },
         dependencies,
       ) as SourceAggregate;
-      return sourceProjectionForDatabase(db, renamed, nextKey, counters);
+      return sourceProjectionForDatabase(
+        db,
+        renamed,
+        nextKey,
+        counters,
+        visibility,
+      );
     };
     const reproject: NonNullable<ContentImportNode['reproject']> =
       ({ name, assertedKey: nextKey, dependencies }) =>

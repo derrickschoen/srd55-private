@@ -133,6 +133,7 @@ export const COLUMN_FACTS = {
     content_kind: { base: 'degraded', notNull: true },
     key_kind: { base: 'degraded', notNull: true },
     catalog_layer: { base: 'degraded', notNull: true },
+    visibility: { base: 'degraded', notNull: true },
     normalized_name: { base: 'degraded', notNull: true },
     created_at: { base: 'degraded', notNull: true },
     archived_at: { base: 'degraded', notNull: false },

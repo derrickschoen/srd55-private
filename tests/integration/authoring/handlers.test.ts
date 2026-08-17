@@ -496,6 +496,7 @@ describe('catalog authoring RPC handlers', () => {
     const hostileDocument: SubclassAuthoringDraft = { ...base, name: hostileName };
     const hostileCatalog = Object.freeze([Object.freeze({
       catalog_key: 'hostile-spell-student',
+      visibility: 'listed',
       revisions: Object.freeze([hostileDocument] as const),
     })] as const satisfies readonly BundledHomebrewCatalogEntry[]);
     const routedHandlers = handlers.map((handler): RpcHandler => {
@@ -1974,12 +1975,12 @@ describe('catalog authoring RPC handlers', () => {
     const subclassKey = 'expanded:test.owner:purge-subclass' as ContentKey;
     db.exec(
       `INSERT INTO catalog_content_identities (
-         content_key, content_kind, key_kind, catalog_layer, normalized_name,
-         archived_at
+         content_key, content_kind, key_kind, catalog_layer, visibility,
+         normalized_name, archived_at
        ) VALUES
-         (?, 'background', 'asserted', 'external', 'purge background',
+         (?, 'background', 'asserted', 'external', 'listed', 'purge background',
           '2042-08-13T14:15:16.000Z'),
-         (?, 'subclass', 'asserted', 'external', 'purge subclass',
+         (?, 'subclass', 'asserted', 'external', 'listed', 'purge subclass',
           '2042-08-13T14:15:16.000Z')`,
       [backgroundKey, subclassKey],
     );

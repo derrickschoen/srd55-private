@@ -13,6 +13,7 @@ import {
   type ContentFingerprintScheme,
   type ContentKind,
 } from './content-identity';
+import type { CatalogContentVisibility } from './content-visibility';
 import { projectStoredContentV1 } from './stored-content-projector-v1';
 import { projectStoredContentV2 } from './stored-content-projector-v2';
 import {
@@ -50,6 +51,7 @@ export interface ContentImportDependencyTarget {
 
 export interface ContentImportProjection<K extends ContentKind = ContentKind> {
   readonly kind: K;
+  readonly visibility: CatalogContentVisibility;
   readonly edition: string;
   readonly name: string;
   readonly assertedKey: ContentKey;
@@ -1321,6 +1323,7 @@ function evaluate(
             payload: projection.payload,
             assertedKey: projection.assertedKey,
             fingerprintScheme: projectionFingerprintScheme(projection),
+            visibility: projection.visibility,
           });
         }
         const installedKey = resolution.kind === 'missing'

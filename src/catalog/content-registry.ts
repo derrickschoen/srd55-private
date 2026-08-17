@@ -14,6 +14,7 @@ import {
   type ContentKind,
   type DerivedContentIdentityV1,
 } from './content-identity';
+import type { CatalogContentVisibility } from './content-visibility';
 import { recordContentProvenance } from './content-provenance';
 import {
   assertedExternalContentKeyFromDeclared,
@@ -689,17 +690,21 @@ export function registerDerivedContentIdentity<K extends ContentKind, P>(
     readonly edition: string;
     readonly name: string;
     readonly payload: P;
+    /** Raw external-import boundary; historical callers without this field are listed. */
+    readonly visibility?: CatalogContentVisibility;
   },
 ): DerivedContentIdentityV1<K, P> {
   const identity = deriveContentIdentityV1(input);
   db.transaction(() => {
     db.exec(
       `INSERT INTO catalog_content_identities (
-         content_key, content_kind, key_kind, catalog_layer, normalized_name
-       ) VALUES (?, ?, 'derived', 'external', ?)`,
+         content_key, content_kind, key_kind, catalog_layer, visibility,
+         normalized_name
+       ) VALUES (?, ?, 'derived', 'external', ?, ?)`,
       [
         identity.derivedKey,
         input.kind,
+        input.visibility ?? 'listed',
         identity.envelope.normalizedName,
       ],
     );
@@ -744,6 +749,8 @@ export function registerAssertedContentIdentity<K extends ContentKind, P>(
     readonly payload: P;
     readonly assertedKey: ContentKey;
     readonly fingerprintScheme?: ContentFingerprintScheme;
+    /** Raw external-import boundary; historical callers without this field are listed. */
+    readonly visibility?: CatalogContentVisibility;
   },
 ): DerivedContentIdentityV1<K, P> {
   if (!isAssertedExternalContentKey(input.assertedKey)) {
@@ -770,9 +777,15 @@ export function registerAssertedContentIdentity<K extends ContentKind, P>(
   try {
     db.exec(
       `INSERT INTO catalog_content_identities (
-         content_key, content_kind, key_kind, catalog_layer, normalized_name
-       ) VALUES (?, ?, 'asserted', 'external', ?)`,
-      [input.assertedKey, input.kind, identity.envelope.normalizedName],
+         content_key, content_kind, key_kind, catalog_layer, visibility,
+         normalized_name
+       ) VALUES (?, ?, 'asserted', 'external', ?, ?)`,
+      [
+        input.assertedKey,
+        input.kind,
+        input.visibility ?? 'listed',
+        identity.envelope.normalizedName,
+      ],
     );
   } catch {
     throw new ContentIdentityKeyRefusal('key_collision');
@@ -794,13 +807,15 @@ export function registerBundledStableContentIdentity(
     readonly kind: ContentKind;
     readonly contentKey: ContentKey;
     readonly normalizedName: string;
+    readonly visibility: CatalogContentVisibility;
   },
 ): void {
   db.exec(
     `INSERT INTO catalog_content_identities (
-       content_key, content_kind, key_kind, catalog_layer, normalized_name
-     ) VALUES (?, ?, 'bundled-stable', 'bundled', ?)`,
-    [input.contentKey, input.kind, input.normalizedName],
+       content_key, content_kind, key_kind, catalog_layer, visibility,
+       normalized_name
+     ) VALUES (?, ?, 'bundled-stable', 'bundled', ?, ?)`,
+    [input.contentKey, input.kind, input.visibility, input.normalizedName],
   );
   recordContentProvenance(db, {
     kind: input.kind,
@@ -818,6 +833,7 @@ export function ensureBundledStableContentIdentity(
     readonly kind: ContentKind;
     readonly contentKey: string;
     readonly normalizedName: string;
+    readonly visibility?: CatalogContentVisibility;
   },
 ): void {
   const existing = db.one(
@@ -831,6 +847,7 @@ export function ensureBundledStableContentIdentity(
     registerBundledStableContentIdentity(db, {
       ...input,
       contentKey: input.contentKey as ContentKey,
+      visibility: input.visibility ?? 'listed',
     });
     return;
   }
@@ -860,8 +877,9 @@ export function registerAssertedPlaceholderContentIdentity(
   try {
     db.exec(
       `INSERT INTO catalog_content_identities (
-         content_key, content_kind, key_kind, catalog_layer, normalized_name
-       ) VALUES (?, 'spell', 'asserted', 'external', ?)`,
+         content_key, content_kind, key_kind, catalog_layer, visibility,
+         normalized_name
+       ) VALUES (?, 'spell', 'asserted', 'external', 'listed', ?)`,
       [input.contentKey, input.normalizedName],
     );
   } catch {

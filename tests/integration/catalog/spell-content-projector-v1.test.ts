@@ -27,6 +27,7 @@ describe('stored spell content-v1 projection', () => {
     registerBundledStableContentIdentity(db, {
       kind: 'spell',
       contentKey: CONTENT_KEY,
+      visibility: 'listed',
       normalizedName: 'aetherlance',
     });
     const identityId = db.exec(

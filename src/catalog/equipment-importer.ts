@@ -22,6 +22,7 @@ import type {
   ContentImportProjection,
 } from './content-adoption';
 import { projectStoredContentV1 } from './stored-content-projector-v1';
+import type { CatalogContentVisibility } from './content-visibility';
 
 export interface EquipmentImportCounters {
   readonly weapons_created: number;
@@ -343,6 +344,7 @@ function projectionForAggregate(
   aggregate: EquipmentContentAggregate,
   assertedKey: ContentKey,
   counters: MutableEquipmentImportCounters,
+  visibility: CatalogContentVisibility,
 ): ContentImportProjection {
   const payload = aggregate.kind === 'weapon'
     ? projectWeaponContentV1(aggregate)
@@ -351,6 +353,7 @@ function projectionForAggregate(
       : projectItemContentV1(aggregate);
   return {
     kind: aggregate.kind,
+    visibility,
     edition: aggregate.rules_edition,
     name: aggregate.name,
     assertedKey,
@@ -409,6 +412,7 @@ export function portableEquipmentContentImportNode(
   aggregate: EquipmentContentAggregate,
   assertedKey: ContentKey,
   declaredAlias?: ContentKey,
+  visibility: CatalogContentVisibility = 'listed',
 ): ContentImportNode {
   const counters = emptyEquipmentCounters();
   const build = (name: string, nextKey: ContentKey): ContentImportProjection => {
@@ -416,6 +420,7 @@ export function portableEquipmentContentImportNode(
       { ...aggregate, name } as EquipmentContentAggregate,
       nextKey,
       counters,
+      visibility,
     );
     return declaredAlias === undefined
       ? projection
@@ -437,12 +442,18 @@ export function equipmentImportNodes(
   },
   counters: MutableEquipmentImportCounters,
 ): readonly ContentImportNode[] {
-  const aggregates: readonly EquipmentContentAggregate[] = [
-    ...records.weapons.map(weaponAggregate),
-    ...records.armors.map(armorAggregate),
-    ...records.items.map(itemAggregate),
+  const aggregates = [
+    ...records.weapons.map((record) => ({
+      aggregate: weaponAggregate(record), visibility: record.visibility,
+    })),
+    ...records.armors.map((record) => ({
+      aggregate: armorAggregate(record), visibility: record.visibility,
+    })),
+    ...records.items.map((record) => ({
+      aggregate: itemAggregate(record), visibility: record.visibility,
+    })),
   ];
-  return Object.freeze(aggregates.map((aggregate) => {
+  return Object.freeze(aggregates.map(({ aggregate, visibility }) => {
     const assertedKey = assertedExternalContentKey(
       aggregate.kind,
       aggregate.rules_edition,
@@ -451,11 +462,16 @@ export function equipmentImportNodes(
     const reproject: NonNullable<ContentImportNode['reproject']> =
       ({ name, assertedKey: nextKey }) => {
         const renamed = { ...aggregate, name } as EquipmentContentAggregate;
-        return projectionForAggregate(renamed, nextKey, counters);
+        return projectionForAggregate(renamed, nextKey, counters, visibility);
       };
     const node: ContentImportNode = Object.freeze({
       id: `${aggregate.kind}:${assertedKey}`,
-      projection: projectionForAggregate(aggregate, assertedKey, counters),
+      projection: projectionForAggregate(
+        aggregate,
+        assertedKey,
+        counters,
+        visibility,
+      ),
       reproject,
     });
     return node;

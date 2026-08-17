@@ -117,6 +117,7 @@ function portableElfLibraryDocument(
     selected_content_keys: [input.contentKey],
     content: [{
       kind: 'species',
+      visibility: 'listed',
       content_key: input.contentKey,
       key_kind: 'asserted',
       fingerprint_scheme: CONTENT_FINGERPRINT_SCHEME_V2,

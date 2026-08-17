@@ -996,9 +996,11 @@ describe('SRD spell extracts', () => {
     ).lastInsertId;
     db.exec(
       `INSERT INTO catalog_content_identities (
-         content_key, content_kind, key_kind, catalog_layer, normalized_name
+         content_key, content_kind, key_kind, catalog_layer, visibility,
+         normalized_name
        ) VALUES (
-         '2024:acid-arrow', 'spell', 'asserted', 'external', 'user acid arrow'
+         '2024:acid-arrow', 'spell', 'asserted', 'external', 'listed',
+         'user acid arrow'
        )`,
     );
     db.exec(

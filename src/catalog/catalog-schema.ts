@@ -92,6 +92,10 @@ import { isRecord } from '../worker/handler';
 import { isImportedContentKey } from './catalog-key';
 import { trimEqualCatalogLocator } from './catalog-field-values';
 import { normalizeContentIdentityName } from './content-identity';
+import {
+  catalogContentVisibilities,
+  type CatalogContentVisibility,
+} from './content-visibility';
 import type {
   ContentImportChoices,
   ContentImportPlanToken,
@@ -138,6 +142,7 @@ export const catalogRecordKinds = [
 export type CatalogRecordKind = (typeof catalogRecordKinds)[number];
 
 export interface CatalogRecord {
+  visibility: CatalogContentVisibility;
   identityKey: string;
   versionKey: string;
   name: string;
@@ -239,6 +244,7 @@ export interface CatalogSubclassFeature {
  */
 export interface CatalogSubclassRecord {
   kind: 'subclass';
+  visibility: CatalogContentVisibility;
   /**
    * The subclass's own content key, and it MUST be an imported key — three
    * parts with a dotted owner namespace in the middle. See
@@ -267,6 +273,7 @@ export interface CatalogSubclassRecord {
 
 export interface CatalogWeaponRecord {
   readonly kind: 'weapon';
+  readonly visibility: CatalogContentVisibility;
   readonly name: string;
   readonly edition: RulesEdition;
   readonly srdGroup: SrdWeaponGroup;
@@ -289,6 +296,7 @@ export interface CatalogWeaponRecord {
 
 export interface CatalogArmorRecord {
   readonly kind: 'armor';
+  readonly visibility: CatalogContentVisibility;
   readonly name: string;
   readonly edition: RulesEdition;
   readonly category: ArmorCategory;
@@ -301,6 +309,7 @@ export interface CatalogArmorRecord {
 
 export interface CatalogItemRecord {
   readonly kind: 'item';
+  readonly visibility: CatalogContentVisibility;
   readonly name: string;
   readonly edition: RulesEdition;
   readonly description: string;
@@ -443,6 +452,19 @@ function stringList(
   return [...value] as string[];
 }
 
+/** The sole compatibility default: a legacy import document is listed. */
+function catalogVisibility(value: unknown): CatalogContentVisibility {
+  if (value === undefined) return 'listed';
+  if (!isEnumValue(catalogContentVisibilities, value)) {
+    throw new CatalogFieldEnumError(
+      'visibility',
+      catalogContentVisibilities,
+      'optional',
+    );
+  }
+  return value;
+}
+
 function catalogRecord(value: unknown): CatalogRecord {
   if (!isRecord(value)) {
     throw new CatalogNonObjectRecordError();
@@ -506,6 +528,7 @@ function catalogRecord(value: unknown): CatalogRecord {
   }
 
   return {
+    visibility: catalogVisibility(value.visibility),
     identityKey: spellLocator(
       nonEmptyString(value.identityKey, 'identityKey'),
       'identityKey',
@@ -780,6 +803,7 @@ function catalogSubclassRecord(value: Record<string, unknown>): CatalogSubclassR
   }
   return {
     kind: 'subclass',
+    visibility: catalogVisibility(value.visibility),
     contentKey,
     parentClassKey: nonEmptyString(value.parentClassKey, 'parentClassKey'),
     name: nonEmptyString(value.name, 'name'),
@@ -1044,6 +1068,7 @@ function catalogWeaponRecord(value: Record<string, unknown>): CatalogWeaponRecor
   }
   return {
     kind: 'weapon',
+    visibility: catalogVisibility(value.visibility),
     name: nonEmptyString(value.name, 'name', WEAPON_TEXT_LIMITS.name),
     edition: catalogEdition(value.edition),
     srdGroup: group,
@@ -1104,6 +1129,7 @@ function catalogArmorRecord(value: Record<string, unknown>): CatalogArmorRecord 
   }
   return {
     kind: 'armor',
+    visibility: catalogVisibility(value.visibility),
     name: nonEmptyString(value.name, 'name', SHEET_TEXT_LIMITS.armor_name),
     edition: catalogEdition(value.edition),
     category,
@@ -1137,6 +1163,7 @@ function catalogItemRecord(value: Record<string, unknown>): CatalogItemRecord {
   }
   return {
     kind: 'item',
+    visibility: catalogVisibility(value.visibility),
     name: nonEmptyString(value.name, 'name', ORIGIN_TEXT_LIMITS.trait_name),
     edition: catalogEdition(value.edition),
     description: requiredString(

@@ -194,8 +194,12 @@ export const CATALOG_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
       // checksum. `src/domain/source-instance-state.ts` above is the remedy and
       // exists for it. No reconciled row changes in either round: every source
       // instance this walks holds `active` or `tombstoned`.
+      // Re-pinned for D299: the frozen registry source now writes an explicit
+      // `listed` visibility when this historical external-import boundary has
+      // no visibility field. Its reconciled aggregates and fingerprints are
+      // unchanged; only the newly required identity discriminator is written.
       checksum:
-        '52af2f598ab61b90647e05aa736963cb78d576631e680b481567953786b21d29',
+        '8f4e35cea9a7810c0f5b19541ac09bfba228add521f562917eb28120811a85e7',
       run: reconcileSpeciesLineageContentV2,
     }),
   ]);

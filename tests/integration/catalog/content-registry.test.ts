@@ -70,6 +70,7 @@ function bundled(
   registerBundledStableContentIdentity(db, {
     kind,
     contentKey: key,
+    visibility: 'listed',
     normalizedName: contentKey.replaceAll(':', ''),
   });
   return key;
@@ -177,8 +178,9 @@ describe('catalog content registry resolution', () => {
       expect(isAssertedExternalContentKey(contentKey), contentKey).toBe(true);
       expect(() => db.exec(
         `INSERT INTO catalog_content_identities
-           (content_key, content_kind, key_kind, catalog_layer, normalized_name)
-         VALUES (?, 'item', 'asserted', 'external', ?)`,
+           (content_key, content_kind, key_kind, catalog_layer, visibility,
+            normalized_name)
+         VALUES (?, 'item', 'asserted', 'external', 'listed', ?)`,
         [contentKey, `emitted${String(index)}`],
       ), contentKey).not.toThrow();
     }
@@ -198,8 +200,9 @@ describe('catalog content registry resolution', () => {
       expect(isAssertedExternalContentKey(contentKey), contentKey).toBe(false);
       expect(() => db.exec(
         `INSERT INTO catalog_content_identities
-           (content_key, content_kind, key_kind, catalog_layer, normalized_name)
-         VALUES (?, 'item', 'asserted', 'external', 'sql-only')`,
+           (content_key, content_kind, key_kind, catalog_layer, visibility,
+            normalized_name)
+         VALUES (?, 'item', 'asserted', 'external', 'listed', 'sql-only')`,
         [contentKey],
       ), contentKey).toThrow('catalog_content_identities_key_layer_check');
     }
@@ -518,45 +521,51 @@ describe('catalog registry controls', () => {
       {
         constraint: 'catalog_content_identities_content_kind_check',
         sql: `INSERT INTO catalog_content_identities
-          (content_key, content_kind, key_kind, catalog_layer, normalized_name)
-          VALUES ('bad:kind', 'vehicle', 'bundled-stable', 'bundled', 'bad')`,
+          (content_key, content_kind, key_kind, catalog_layer, visibility, normalized_name)
+          VALUES ('bad:kind', 'vehicle', 'bundled-stable', 'bundled', 'listed', 'bad')`,
       },
       {
         constraint: 'catalog_content_identities_key_kind_check',
         sql: `INSERT INTO catalog_content_identities
-          (content_key, content_kind, key_kind, catalog_layer, normalized_name)
-          VALUES ('bad:key-kind', 'feat', 'guessed', 'external', 'bad')`,
+          (content_key, content_kind, key_kind, catalog_layer, visibility, normalized_name)
+          VALUES ('bad:key-kind', 'feat', 'guessed', 'external', 'listed', 'bad')`,
       },
       {
         constraint: 'catalog_content_identities_catalog_layer_check',
         sql: `INSERT INTO catalog_content_identities
-          (content_key, content_kind, key_kind, catalog_layer, normalized_name)
-          VALUES ('bad:catalog-layer', 'feat', 'bundled-stable', 'local', 'bad')`,
+          (content_key, content_kind, key_kind, catalog_layer, visibility, normalized_name)
+          VALUES ('bad:catalog-layer', 'feat', 'bundled-stable', 'local', 'listed', 'bad')`,
+      },
+      {
+        constraint: 'catalog_content_identities_visibility_check',
+        sql: `INSERT INTO catalog_content_identities
+          (content_key, content_kind, key_kind, catalog_layer, visibility, normalized_name)
+          VALUES ('bad:visibility', 'feat', 'bundled-stable', 'bundled', 'private', 'bad')`,
       },
       {
         constraint: 'catalog_content_identities_normalized_name_check',
         sql: `INSERT INTO catalog_content_identities
-          (content_key, content_kind, key_kind, catalog_layer, normalized_name)
-          VALUES ('bad:name', 'feat', 'bundled-stable', 'bundled', '')`,
+          (content_key, content_kind, key_kind, catalog_layer, visibility, normalized_name)
+          VALUES ('bad:name', 'feat', 'bundled-stable', 'bundled', 'listed', '')`,
       },
       {
         constraint: 'catalog_content_identities_key_layer_check',
         sql: `INSERT INTO catalog_content_identities
-          (content_key, content_kind, key_kind, catalog_layer, normalized_name)
-          VALUES ('expanded:bad-layer', 'feat', 'asserted', 'bundled', 'bad')`,
+          (content_key, content_kind, key_kind, catalog_layer, visibility, normalized_name)
+          VALUES ('expanded:bad-layer', 'feat', 'asserted', 'bundled', 'listed', 'bad')`,
       },
       {
         constraint: 'catalog_content_identities_key_layer_check',
         sql: `INSERT INTO catalog_content_identities
-          (content_key, content_kind, key_kind, catalog_layer, normalized_name)
-          VALUES ('2024:content.v1:short', 'feat', 'derived', 'external', 'bad')`,
+          (content_key, content_kind, key_kind, catalog_layer, visibility, normalized_name)
+          VALUES ('2024:content.v1:short', 'feat', 'derived', 'external', 'listed', 'bad')`,
       },
       {
         constraint: 'catalog_content_identities_key_layer_check',
         sql: `INSERT INTO catalog_content_identities
-          (content_key, content_kind, key_kind, catalog_layer, normalized_name)
+          (content_key, content_kind, key_kind, catalog_layer, visibility, normalized_name)
           VALUES ('bad:edition:content.v1:${ABC_DIGEST}', 'feat',
-                  'derived', 'external', 'bad')`,
+                  'derived', 'external', 'listed', 'bad')`,
       },
       {
         constraint: 'catalog_content_fingerprints_content_kind_check',

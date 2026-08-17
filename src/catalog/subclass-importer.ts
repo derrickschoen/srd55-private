@@ -246,6 +246,7 @@ function subclassProjection(
   const projected = projectAuthoredContentAggregateV1(aggregate);
   return {
     kind: 'subclass',
+    visibility: record.visibility,
     edition: aggregate.rules_edition,
     name: aggregate.name,
     assertedKey,
