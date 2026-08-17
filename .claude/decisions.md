@@ -7,6 +7,17 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D286 — OWNER: supervisor performs the local review itself; deploy stays gated (2026-08-17)
+
+Asked what D266 approval consists of, the owner ruled: **"I don't have
+time to do it now. Do it yourself and just don't deploy."** The
+supervisor walks the D285 stranger journey (and the S7-informed sheet
+checks) against the locally served production build itself, documents
+findings with screenshots/numbers, and keeps the record ready for the
+owner. The DEPLOY remains a HARD-STOP outward action awaiting explicit
+owner approval — this ruling transfers the review labor, not the launch
+authority.
+
 ## D285 — OWNER: stranger spec persona and mandatory misstep recoveries (2026-08-17)
 
 The D265 blocking stranger spec gets its content: persona is a
