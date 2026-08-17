@@ -3,6 +3,18 @@ import type {
   CatalogRecord,
 } from './catalog-schema';
 
+export class CatalogTierMismatchError extends TypeError {
+  override readonly name = 'CatalogTierMismatchError' as const;
+  constructor(
+    readonly missing_count: number,
+    readonly unexpected_count: number,
+  ) {
+    super(
+      `Tier 2 catalog does not exactly match Tier 1 (${String(missing_count)} missing, ${String(unexpected_count)} unexpected).`,
+    );
+  }
+}
+
 export interface CatalogPublication {
   sourceBook: string;
   sourcePage: number | null;
@@ -114,9 +126,7 @@ export function normalizeCatalogRecords(
     const missing = expected.filter((key) => !actualSet.has(key));
     const unexpected = actual.filter((key) => !expectedSet.has(key));
     if (missing.length > 0 || unexpected.length > 0) {
-      throw new TypeError(
-        `Tier 2 catalog does not exactly match Tier 1 (${missing.length} missing, ${unexpected.length} unexpected).`,
-      );
+      throw new CatalogTierMismatchError(missing.length, unexpected.length);
     }
   }
 

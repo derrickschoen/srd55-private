@@ -72,6 +72,33 @@ export interface BundledContentRegistryProjectionHooksV1 {
   ) => void;
 }
 
+export class BundledRegistryRootNameError extends TypeError {
+  override readonly name = 'BundledRegistryRootNameError' as const;
+  constructor(
+    readonly kind: ContentKind,
+    readonly content_key: ContentKey,
+  ) {
+    super(`Bundled ${kind} '${content_key}' has inconsistent root names.`);
+  }
+}
+
+export class BundledRegistryUnknownKindError extends TypeError {
+  override readonly name = 'BundledRegistryUnknownKindError' as const;
+  constructor(readonly kind: string) {
+    super(`Bundled registry row has unknown kind '${kind}'.`);
+  }
+}
+
+export class BundledRegistryNormalizedNameMissingError extends TypeError {
+  override readonly name = 'BundledRegistryNormalizedNameMissingError' as const;
+  constructor(
+    readonly kind: ContentKind,
+    readonly content_key: ContentKey,
+  ) {
+    super(`Bundled ${kind} '${content_key}' has no authoritative normalized name.`);
+  }
+}
+
 const KIND_ORDER: Readonly<Record<ContentKind, number>> = Object.freeze({
   weapon: 0,
   armor: 1,
@@ -238,9 +265,7 @@ function inspectAggregateRoot(
   }
   const distinctNames = [...new Set(halves.flat())];
   if (distinctNames.length > 1) {
-    throw new TypeError(
-      `Bundled ${entry.kind} '${entry.contentKey}' has inconsistent root names.`,
-    );
+    throw new BundledRegistryRootNameError(entry.kind, entry.contentKey);
   }
   const presentHalves = halves.map((half) => half.length > 0);
   if (
@@ -268,7 +293,7 @@ function allBundledCandidates(
   )) {
     const kind = sqlString(row, 'content_kind');
     if (!isEnumValue(contentKinds, kind)) {
-      throw new TypeError(`Bundled registry row has unknown kind '${kind}'.`);
+      throw new BundledRegistryUnknownKindError(kind);
     }
     const entry = {
       kind,
@@ -378,8 +403,9 @@ function projectBundledIdentityV1(
     [entry.kind, entry.contentKey],
   );
   if (normalizedName === null || normalizedName === '') {
-    throw new TypeError(
-      `Bundled ${entry.kind} '${entry.contentKey}' has no authoritative normalized name.`,
+    throw new BundledRegistryNormalizedNameMissingError(
+      entry.kind,
+      entry.contentKey,
     );
   }
   const input = {

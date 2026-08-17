@@ -37,6 +37,23 @@ import {
   type InstalledTargetReferenceCertificate,
 } from './content-registry';
 
+export class ContentAdoptionTargetKindError extends TypeError {
+  override readonly name = 'ContentAdoptionTargetKindError' as const;
+  constructor(
+    readonly expected_kind: ContentKind,
+    readonly stored_kind: ContentKind,
+  ) {
+    super('Stored target kind does not match its adoption node.');
+  }
+}
+
+export class ContentImportPlanRollbackInvariantError extends Error {
+  override readonly name = 'ContentImportPlanRollbackInvariantError' as const;
+  constructor() {
+    super('Content import planner failed to roll back its simulation.');
+  }
+}
+
 export type ContentImportPlanToken = string & {
   readonly __contentImportPlanToken: unique symbol;
 };
@@ -745,7 +762,10 @@ function withLiveTargetSnapshot(
   try {
     const stored = entry.projection.projectStored(db, entry.targetContentKey);
     if (stored.kind !== entry.projection.kind) {
-      throw new TypeError('Stored target kind does not match its adoption node.');
+      throw new ContentAdoptionTargetKindError(
+        entry.projection.kind,
+        stored.kind,
+      );
     }
     const identity = deriveContentIdentityForScheme(
       projectionFingerprintScheme(entry.projection),
@@ -1422,7 +1442,7 @@ export function planContentImport(
     if (error instanceof PlanRollback) return error.evaluation.plan;
     throw error;
   }
-  throw new Error('Content import planner failed to roll back its simulation.');
+  throw new ContentImportPlanRollbackInvariantError();
 }
 
 export type ContentImportCommitResult =
