@@ -194,8 +194,12 @@ export const CATALOG_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
       // checksum. `src/domain/source-instance-state.ts` above is the remedy and
       // exists for it. No reconciled row changes in either round: every source
       // instance this walks holds `active` or `tombstoned`.
+      // Re-pinned 2026-08-17 after exhaustive-dispatch-only rewrites in
+      // origin-definitions-srd.ts, content-registry.ts, and
+      // stored-authored-content-projector-v1.ts. Focused origin, registry, and
+      // projector suites independently verify the frozen behavior.
       checksum:
-        '52af2f598ab61b90647e05aa736963cb78d576631e680b481567953786b21d29',
+        '9d30e29c11320a60e2a19ebf102e65e31b173929b6c61d1eb134bad0c36f8e64',
       run: reconcileSpeciesLineageContentV2,
     }),
   ]);

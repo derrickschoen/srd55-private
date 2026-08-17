@@ -724,13 +724,25 @@ export class ContentIdentityKeyRefusal extends Error {
   constructor(
     readonly reason: 'invalid_asserted_key' | 'name_key_mismatch' | 'key_collision',
   ) {
-    super(
-      reason === 'invalid_asserted_key'
-        ? 'The asserted content key is outside the portable slug grammar.'
-        : reason === 'name_key_mismatch'
-          ? 'The asserted content key is not derived from the aggregate name.'
-          : 'The asserted content key is already registered to different content.',
-    );
+    let message: string;
+    switch (reason) {
+      case 'invalid_asserted_key':
+        message = 'The asserted content key is outside the portable slug grammar.';
+        break;
+      case 'name_key_mismatch':
+        message = 'The asserted content key is not derived from the aggregate name.';
+        break;
+      case 'key_collision':
+        message = 'The asserted content key is already registered to different content.';
+        break;
+      /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+         tsc probe verified that the never assignment rejects a new reason. */
+      default: {
+        const unreachable: never = reason;
+        throw new TypeError(`Unhandled content identity refusal ${String(unreachable)}.`);
+      }
+    }
+    super(message);
     this.name = 'ContentIdentityKeyRefusal';
   }
 }
