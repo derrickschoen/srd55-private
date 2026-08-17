@@ -7,6 +7,17 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D290 — OWNER: licensing trio — CC-BY docs, anonymous externals, redact pastes (2026-08-17)
+
+Three publishing rulings: (1) our original public docs (reports, build
+analyses, design docs) are **CC-BY-4.0**, matching the SRD family and the
+existing docs/design precedent; (2) public Board reports do **NOT
+identify** the external d4 builds used for fidelity checking — methodology
+described, sources anonymous (stricter than the link-don't-quote
+recommendation); (3) issue reporters pasting non-redistributable rules
+text: **issue template warns; maintainers redact on sight; the report is
+kept.**
+
 ## D289 — OWNER: no cadence promise during pre-alpha (2026-08-17)
 
 Release cadence ruled: **"No promise in pre-alpha."** Gated increments
