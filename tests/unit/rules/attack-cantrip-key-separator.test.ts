@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { SpellAccessRoute } from '../../../src/access/spell-access-builder';
 import { recogniseAttackCantrips } from '../../../src/rules/attack-cantrips';
+import type {
+  SlotId,
+  SpellIdentityId,
+  SpellVersionId,
+} from '../../../src/domain/ids';
 
 /**
  * THE SEPARATOR IS A NUL, AND F14 CHANGED ONLY ITS SPELLING.
@@ -39,7 +44,7 @@ import { recogniseAttackCantrips } from '../../../src/rules/attack-cantrips';
 
 function route(overrides: Partial<SpellAccessRoute>): SpellAccessRoute {
   return {
-    spell_identity_id: 1,
+    spell_identity_id: 1 as SpellIdentityId,
     identity_name: 'True Strike',
     spell_name: 'True Strike',
     spell_catalog_layer: 'bundled',
@@ -51,11 +56,11 @@ function route(overrides: Partial<SpellAccessRoute>): SpellAccessRoute {
     save_dc: 15,
     origin: 'slot',
     casting_mode: 'at_will',
-    spell_version_id: 10,
+    spell_version_id: 10 as SpellVersionId,
     source_instance_id: 20,
     source_name: 'Arcane scholar',
     source_catalog_layer: 'bundled',
-    slot_id: 30,
+    slot_id: 30 as SlotId,
     slot_key: 'cantrip-1',
     selection_key: null,
     bucket: 'cantrip_known',
@@ -111,8 +116,8 @@ describe('the unrecognised-cantrip key', () => {
       source_name: 'Beta',
     };
     const found = recogniseAttackCantrips([
-      route({ ...shape, slot_id: 30 }),
-      route({ ...shape, slot_id: 31 }),
+      route({ ...shape, slot_id: 30 as SlotId }),
+      route({ ...shape, slot_id: 31 as SlotId }),
     ]);
     expect(found.unrecognised).toHaveLength(1);
   });

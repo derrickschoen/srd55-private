@@ -7,6 +7,530 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D295 — OWNER: deploy configs stay placeholder; mobile-viewport testing confirmed (2026-08-17)
+
+Deploy identity ruled: **"Placeholder until later"** — prepared wrangler
+configs carry PROJECT_NAME_TBD; the name/domain decision waits until
+deploy is near; zero outward surface. Same-day addendum to D293, owner's
+words: **"Maybe try with mobile sized viewport testing as well as full
+desktop"** — emulated mobile-viewport runs join the browser suites and
+the D286 self-review explicitly, alongside full desktop.
+
+## D294 — OWNER: all MAJOR self-review findings auto-block v1 (2026-08-17)
+
+Triage policy ruled: **"All MAJOR auto-block."** Any MAJOR-severity
+finding from the D286 self-review or future supervisor reviews joins the
+v1 blocker list immediately, without awaiting owner triage — the D270
+precedent generalized. Severity assignment follows the sweep taxonomy's
+existing MAJOR bar (wrong number, silent unknown, dead end, data-integrity
+lie); minor/polish findings queue normally. The owner sees the blocker
+list grow in reports rather than gating each addition. Declined:
+wrong-numbers-only auto-block (supervisor recommendation),
+everything-awaits-triage.
+
+## D293 — OWNER: desktop tested; best-effort mobile (2026-08-17)
+
+Browser matrix ruled in the owner's words: **"Desktop tested, but do your
+best to make it work for mobile."** Desktop Chromium/Firefox/Edge are the
+tested matrix; mobile (iOS Safari and Android alike) is a genuine
+engineering target, not a written-off tier — responsive layouts, touch
+interactions, storage-pressure resilience, and the capability probe's
+graceful paths all get real effort — but mobile carries no tested claim
+until device evidence exists. Practical consequences: mobile-viewport
+Playwright runs (emulated) join the suites where cheap; OPFS/probe
+fallbacks stay honest; no real-device gate blocks v1.
+
+## D292 — OWNER: homebrew v3 and d4 scorecard reactivate; party stays parked (2026-08-17)
+
+Parked-workstream ruling: **homebrew v3 adopt/author decisions** return
+to the question queue, and the **d4 scorecard** roadmap resumes
+(ceiling-mode comparison basis, extending toward all 89 builds — now with
+D291's ±1% bar as the fidelity line). **wt/party sync stays parked.**
+Both reactivated streams run behind the v1 gates in priority.
+
+## D291 — OWNER: docx fidelity bar is ±1% DPR per build (2026-08-17)
+
+"Tracks the DOCX" defined numerically: **aggregate damage-per-round
+within ±1% per build** against the docx reference; individual mechanics
+may drift provided each build's total holds the band. Sharpens D262's
+fidelity-ceiling acceptance into a pass/fail line for the simulator's
+fidelity checks. Declined: exact-where-modeled-with-gap-list (supervisor
+recommendation), ±5%, direction-only.
+
+## D290 — OWNER: licensing trio — CC-BY docs, anonymous externals, redact pastes (2026-08-17)
+
+Three publishing rulings: (1) our original public docs (reports, build
+analyses, design docs) are **CC-BY-4.0**, matching the SRD family and the
+existing docs/design precedent; (2) public Board reports do **NOT
+identify** the external d4 builds used for fidelity checking — methodology
+described, sources anonymous (stricter than the link-don't-quote
+recommendation); (3) issue reporters pasting non-redistributable rules
+text: **issue template warns; maintainers redact on sight; the report is
+kept.**
+
+## D289 — OWNER: no cadence promise during pre-alpha (2026-08-17)
+
+Release cadence ruled: **"No promise in pre-alpha."** Gated increments
+ship when ready; nothing is stated publicly about rhythm; the update
+prompt carries a changelog line only. Declined: publicly-stated
+ready-when-gated, scheduled+hotfixes, rare big releases.
+
+## D288 — OWNER: roll forward only (2026-08-17)
+
+Deployed-build recovery ruled: **"Roll forward only."** An older bundle is
+never republished (service-worker skew makes old-code/new-schema pairings
+unsafe); a bad build is superseded by an emergency repair build.
+Migrations carry no downgrade-safety obligation. Declined:
+downgrade-safe migrations, emergency stop screen, pull-the-build.
+
+## D287 — OWNER: telemetry is Cloudflare cookieless aggregates only (2026-08-17)
+
+Public-site telemetry ruled: **Cloudflare's built-in cookieless
+page/error aggregates only** — no client-side beacon code ships in the
+bundle, no character content, nothing per-user, no cookies. Declined:
+none-at-all, opt-in diagnostics, opt-out analytics.
+
+## D286 — OWNER: supervisor performs the local review itself; deploy stays gated (2026-08-17)
+
+Asked what D266 approval consists of, the owner ruled: **"I don't have
+time to do it now. Do it yourself and just don't deploy."** The
+supervisor walks the D285 stranger journey (and the S7-informed sheet
+checks) against the locally served production build itself, documents
+findings with screenshots/numbers, and keeps the record ready for the
+owner. The DEPLOY remains a HARD-STOP outward action awaiting explicit
+owner approval — this ruling transfers the review labor, not the launch
+authority.
+
+## D285 — OWNER: stranger spec persona and mandatory misstep recoveries (2026-08-17)
+
+The D265 blocking stranger spec gets its content: persona is a
+**5e-2014 knower who does not know the 2024 rules**, walking a **Cleric**
+1->5 (prepared casting + domain machinery on the guided path). The journey
+must DEMONSTRATE RECOVERY from all four: (1) duplicate skill/Expertise
+pick refused clearly at selection time (the S7-04 shape); (2) reload
+mid-level-up with nothing lost and an obvious resume point; (3) double
+import of their own backup detected without duplicates; (4) a 2014-rules
+expectation (racial ASIs, level-1 subclass) met with UI that shows where
+those went (background bonuses, level-3 subclass) instead of a dead end.
+Plus the D265 spine: cold profile, choices-and-sources every level,
+export -> re-import into a fresh profile with identical sheet numbers.
+
+## D284 — OWNER: second tab opens READ-ONLY (2026-08-17)
+
+Multi-tab contract ruled: **"Read-only second tab."** Today a second
+tab's OPFS SAH pool install fails with a raw error (accidental exclusive
+lock). At v1: the second tab detects the conflict and opens a READ-ONLY
+view — a snapshot of the database image with a persistent banner naming
+the owning tab; all writes happen only in the owner. Build: snapshot
+channel (BroadcastChannel or export-image handoff) + staleness handling
+(banner shows snapshot age; refresh action re-requests). Takeover when
+the owning tab is truly gone remains available via the existing
+stale-handle path. Declined: friendly refusal only (supervisor
+recommendation), full synchronized tabs, detect+warn.
+
+## D283 — OWNER: cold-boot verification stamp (2026-08-17)
+
+Cold-boot trade ruled: **"Verification stamp."** The full integrity suite
+(schema signature, quick_check, FK check, catalog digest) runs on first
+boot and whenever the stamp is invalid; the stamp persists (app
+version/build id + database image digest) and while it matches, boot
+skips the ~3s structure checks and ~1s digest for a ~1s warm-equivalent
+start. A corrupted-but-stamped image is caught later rather than at boot
+— accepted. Implementation notes: the stamp must bind to BOTH the build
+(schema may change per release) and the image bytes (digest already
+computed for export paths); any write invalidates lazily; stamp lives
+beside the image in OPFS. Declined: optimize-checks-directly (supervisor
+recommendation), read-only fast open, leave-for-v1.
+
+## D282 — OWNER: ordinary inputs judge killability; hardening stays at entries (2026-08-17)
+
+The long-standing hostility question (Q2) ruled: **"Ordinary + entry
+hardening."** Killability, reachability, and mutant equivalence are judged
+on ordinary constructible inputs — hostile Proxy/getter/intrinsic
+observations delivered through mocked internal seams do NOT count. The
+seven wave-3 contested equivalence claims STAND; D281's unreachable-arm
+deletions stand. The rounds-17-22 snapshot-once/captured-intrinsics
+posture CONTINUES at public entry points (defending against accidental
+exotic objects from in-bundle bugs — D263's accidents-yes boundary);
+interior code trusts the structured-clone RPC boundary, which strips
+getters/Proxies/prototypes by construction. Prototype-injection and
+doMock test seams remain legitimate testing technique. Declined:
+harden-until-moot everywhere, fully-out-of-scope (freezing entry
+hardening), hostile-counts.
+
+## D281 — OWNER: delete EVERYTHING unreachable, including defensive arms (2026-08-17)
+
+NoCoverage resolution ruled: **"Delete everything unreachable."** If no
+test can reach a code path through ordinary inputs, it is deleted — the
+PRE-ALPHA bias applied without the keep-and-justify carve-out the
+supervisor recommended. Defensive arms guarding future data (e.g. the
+contracts sameSourceRef weapon/character arms unreachable through any
+mintable source) are deleted too and re-added when the data that reaches
+them arrives; unreachable-today is unrepresentable-today, and the type
+system should say so. Reachable-but-untested code gets tests. Q2 note:
+this composes with the hostile-input question — "reachable" means
+ordinary constructible inputs, consistent with the campaign's equivalence
+convention pending that ruling.
+
+## D280 — OWNER: the v1 mutation bar is WHOLE-src/ zero-unexplained (2026-08-17)
+
+Ruled: **"Whole src/ zero unexplained"** — the largest option, knowingly.
+Before v1, EVERY mutant across the entire app source (not just
+src/simulation) must be Killed, CompileError, proven-equivalent with a
+written proof, or a member of an explicitly excluded category (regex
+literals per the earlier ruling; message prose per D273/D274 as amended by
+D278's structure); NoCoverage mutants count as unexplained until either
+covered by tests or explicitly justified. This extends the campaign to
+catalog, commands, grants, sharing, rules, authoring, db, worker, builder,
+ui and the rest — a substantially larger undertaking than the simulation
+campaign, now on the v1 critical path per D279. Sequencing note: runs the
+same wave machinery (full run -> cluster -> near-miss lanes -> verify),
+and the D278 migration rewrites many guard sites first, so mutation waves
+per module follow that module's migration.
+
+## D279 — OWNER: migration, mutation bar, AND simcore merge all block v1 (2026-08-17)
+
+Ruled: **"All three block."** The v1 gate now comprises: the 12+1
+walkthrough/stranger specs (D264/D265), the five S7 repairs (D270), the
+completed D278 refusal/error migration (D277 sequences repairs after it),
+an explicit mutation-score bar (to be defined — next ruling), and
+wt/simcore's round-24 + two quiet rounds + merge to main (D271). Declined:
+migration-only blocking (supervisor recommendation), none, migration+bar.
+
+## D278 — OWNER: unified Result + shared refusal union is THE precedent (2026-08-17)
+
+After the why-does-attunement-throw walkthrough (sqlite transaction() rolls
+back on throw — the mechanical reason; semantic refusals riding the error
+channel — the habit), ruled: **"Unified Result + shared union."** The single
+precedent everywhere:
+- EXPECTED refusals (slots full, revision conflict, archived, level-up
+  refusals, ...) are RETURNED: `Outcome<T> = {kind:'ok'; value} |
+  {kind:'refused'; refusal: Refusal}`, with `Refusal` one shared
+  discriminated union in one module (src/refusals/) compiled into BOTH the
+  worker and the UI — single source of truth by shared compilation, no
+  copying; exhaustive switches on both sides (D269a). A small wire-version
+  field covers PWA update-window skew.
+- THROWS are reserved for DEFECTS (bugs, corrupt data, forged inputs) —
+  D274 tagged classes, translated to the six generic RpcErrorCodes,
+  rendered as a generic failure surface.
+- Rollback: one internal helper lets a command abort its transaction on
+  refusal without exposing a throw past its handler.
+- The D276/D277 migration lanes implement this in the same pass:
+  each throw site is classified refusal->Result vs defect->tagged-throw.
+Declined: curated translation of thrown classes (smallest diff, kept the
+semantic wrongness), internal-only prose, stable class-name protocol.
+
+## D277 — OWNER: error migration completes BEFORE the S7 repairs (2026-08-17)
+
+Start-order ruling for the three ready workstreams: **"Migrate first"** —
+the D276 tagged-error migration proceeds module-by-module to completion,
+so the five S7 v1-blocking repairs (D270) are then built on the final
+error taxonomy rather than repairing guards that migration would rewrite.
+Wave-5 increment 5 (exhaustive-switch pass) slots into spare capacity.
+Options declined: S7-first-combined-where-overlapping (supervisor
+recommendation), S7 strictly first, all-parallel per-module judgment.
+
+## D276 — OWNER: migrate EVERYWHERE to tagged error classes now (2026-08-17)
+
+After the four-option deep dive, ruled: **"migrate everywhere to option
+a."** D274's tagged-class pattern (literal `name`, structured params,
+message derived in one place; class+params asserted per guard, exact
+message once per class) is to be applied across the whole codebase, not
+just src/simulation, starting now rather than after wave 5. Sequencing to
+avoid collisions: main-repo src/ modules migrate in parallel lanes
+immediately; src/simulation migrates after wave-5 increment 1 lands (same
+files). Also ruled: benchmark experiment — temp worktrees for Deno
+(with/without type checking), Bun+typia, and plain Bun, measuring speed
+and effectiveness against the current Node toolchain; report with real
+numbers.
+
+## D275 — OWNER: do not post the #6150 upstream comment (2026-08-17)
+
+Ruled "Don't post." The stryker-js #6150 confirmation comment (our vitest
+3.2.7 repro, misreport numbers, working patch) stays local. The
+auto-applied runner patch (scripts/patch-stryker-vitest-runner.mjs, pinned
+9.6.1) remains our fix; revisit only if the owner re-opens it.
+
+## D274 — OWNER: tagged error classes with derived messages; supersedes D273 (2026-08-16)
+
+The owner flagged bare `throw new TypeError('prose')` as a smell and asked
+for community research; ruled for the recommendation: **hand-rolled tagged
+error classes, zero dependencies** — literal `name` discriminant (the T4
+pattern: literal TYPE so a ""-mutant fails tsc), structured readonly
+params, message DERIVED from params in the constructor (one place). The
+contract: tests assert class + params at every guard; the exact formatted
+message is asserted ONCE per error class via its formatter. Expected
+refusals (the `string | null` failure-reason returns, status unions)
+graduate incrementally to plain discriminated Results per D269(a);
+invariant guards keep throwing, but typed. Serves D270's S7-04 fix
+(human-readable refusals from structured fields). Migration is its own
+workstream sequenced after wave 5. Declined: Result libraries
+(neverthrow/Effect — dependency weight), exact-message assertions on bare
+TypeErrors, status quo.
+
+## D273 — OWNER (superseded same day by D274): error/refusal message text is NOT contractual (2026-08-16)
+
+Q1 ruled: **"Not contractual."** Diagnostic prose in throws/refusals is not
+part of the tested contract — all message-text mutants (~100+ Survived and
+NoCoverage StringLiterals on diagnostic sites) are formally out of scope,
+and the honest mutation denominator shrinks accordingly. EXISTING message
+assertions stay (weakening assertions remains forbidden, and lanes may
+still use message identity to distinguish WHICH guard fired — that use is
+about guard selection, not message wording); no NEW message-wording
+assertions are written. Options declined: load-bearing-only codification
+(supervisor recommendation), error-ID codes, fully contractual.
+
+## D272 — OWNER: Kennel spec relaxes to max-assemblable SRD cantrips (2026-08-16)
+
+The Board B Kennel definition carries [Tasha]/[Xanathar]/[2024] cantrips a
+public SRD-only fixture cannot commit (D59). Ruled: **"Relax to
+max-assemblable"** — author spec 11 with SRD 5.2.1 cantrips only and assert
+the count actually reachable from the repo's SRD lists (verified at
+authoring), superseding D251.2's "exactly 18". Build skeleton (Human,
+custom background, Sorc3/Bard1/Cleric1/Druid1/Warlock1, double Magic
+Initiate, D252.6's Tome-if-SRD-verified) unchanged. Options declined: SRD
+substitutes keeping exactly-18; names-only non-SRD entries; replacing the
+archetype.
+
+## D271 — OWNER: round 24 is a fresh adversarial round over the post-round-23 delta (2026-08-16)
+
+Round 23's CLEAN (quiet 1 of 2) certified a tree that no longer exists —
+the mutation campaign landed six production changes since (D267 bounded
+counters + five wave-1 type refactors) plus ~15 test files. Ruled: **fresh
+adversarial round 24 scoped to those six production changes** (tests-only
+commits exempt). If CLEAN it counts as quiet 1 of 2 for the CURRENT tree;
+one more quiet round, then the wt/simcore -> main merge. Options declined:
+counting the campaign itself as round 24; merging now; holding for wave 5.
+
+## D270 — OWNER: all five S7 MAJOR sheet defects block v1 (2026-08-16)
+
+Presented with the reach analysis (S7-01 Alert/initiative, S7-02 finesse
+Str-default, S7-04 duplicate Expertise, all reachable at level 1; S7-05
+false-UNKNOWN import warning pulled in-bar by D265; S7-03 crit-range
+needing level 3+/homebrew) and four options (split by reach — supervisor
+recommendation, all five, disclosure-first, none), the owner ruled: **"All
+five block"** — the strict D33 reading. No wrong number ships anywhere:
+the next engine lanes are sheet-math repair — initiative as a typed,
+sourced additive model (Alert included); weapon-ability selection for
+finesse/ranged rows; crit threshold as a sourced character property
+consumed by the dice calculator; Expertise sibling-eligibility
+recomputation at selection time with a human-readable refusal; import
+gap-evaluation scoped to active revisions only. Supersedes the fix-wave
+scope question parked since sweep 7 landed.
+
+## D269 — OWNER: type-pattern directives from the 3a-3c walkthrough (2026-08-16)
+
+Three standing directives on how the domain gets typed, from the owner's
+responses to the ranked type improvements:
+(a) **Exhaustive discriminated switches are the house pattern** — "look for
+more solutions like this elsewhere." Where a shape is a closed set of
+alternatives, model it as a discriminated union and consume it with a switch
+tsc checks exhaustively. Corollary ruling: Failed/Success damage should NOT
+have separate shape definitions — one shared Damage signature type, passed
+into whichever arm calls for it; hunt for other duplicate near-identical
+shapes and unify them.
+(b) **Successful type-fix patterns are KB material** — keep a list in the KB
+so future sessions learn from worked examples, and consult it for new
+opportunities whenever it grows.
+(c) **Stateful domain values get a class with domain methods** ("if this was
+Java, a class with increment and decrement") — raw branded numbers are for
+immutable quantities; anything that changes over time gets an
+invariant-owning object like ResourceRecoverySession's bounded counter.
+
+## D268 — OWNER: save DC is always the formula 8 + PB + ability modifier (2026-08-16)
+
+Responding to the proposed `absent | fixed{dc} | unavailable` union for save
+DCs (item 3d): **"it is always a number, we may not know the result yet, but
+we know it is 8 + PB + ability modifier. We can replace the parts of the
+formula later on if we really don't have access to them yet."** Binding
+shape: a save DC is modeled as the structured formula (base 8 + proficiency
+bonus + spellcasting-ability modifier) whose PARTS may be unresolved, never
+as an absent/unavailable state. Resolution substitutes the parts when sheet
+data supplies them. Supersedes the union-arms proposal.
+
+## D267 — OWNER: resource pools are bounded counters, 0..sheet-derived maximum (2026-08-16)
+
+During the 2c (evidence-identity) walkthrough the owner ruled on the pool
+model: "We need to model the pools as having an upper limit just like spell
+slots. Max number is an integer that is calculated based on sheet data.
+Minimum is always 0. Can subtract when used (ie rage, sorcery points) can add
+any number when appropriate, but the number never exceeds the ceiling."
+Binding shape: every consumable resource (Rage uses, sorcery points, Channel
+Divinity, spell slots alike) carries a bounded level — floor 0, ceiling an
+integer derived from sheet data — with spend subtracting and recovery adding
+**clamped at the ceiling** (RAW: you regain up to your maximum). Supervisor
+default pending review (reversible): the level is a minted state object bound
+to its pool by reference identity; overspend below 0 THROWS (fail-closed —
+insufficient-resource spends are simulator logic errors, not clampable), while
+over-recovery CLAMPS (RAW-sanctioned). Replaces the `expendedUnits: unknown`
+per-call revalidation seam in recoveredResourceUnits. Queued at the head of
+the typing-improvement batch (2b survey).
+
+## D266 — OWNER: no Cloudflare deploy until local is approved; prepare only (2026-08-16)
+
+Asked to reconcile D260.7's future "mirror goes PUBLIC" with the repo
+being already world-readable since 2026-08-13 (verified: anonymous API,
+private:false). Ruled: **"no cloudflare deploy until i approve local.
+prepare for it but don't do it."** The publication event still ahead is
+the SITE deploy; it is gated on the owner approving the locally served
+build first. Deploy preparation (build output, staged wrangler configs)
+continues; the deploy itself is a HARD STOP outward-facing action, in
+line with D121/D127/D128. The repo's current public state, including
+.claude/, was not countermanded and stands as owner-ordered on
+2026-08-13.
+
+## D265 — OWNER: v1 acceptance gains a stranger spec AND an export round trip in every mutt spec (2026-08-16)
+
+The strongest option was chosen explicitly: (1) one BLOCKING stranger
+spec joins the 11 mutt walkthroughs — single-class 1→5, cold profile,
+choices-and-sources every level, a mid-journey reload, then export →
+re-import into a fresh profile with identical sheet numbers; (2) EVERY
+mutt spec appends an export→re-import final step after its last
+checkpoint. This gives D262.11 (export/import on the v1 bar) its
+acceptance-side teeth and puts the bar's own persona inside the gate.
+Cost accepted: touches every spec and lengthens every run. Specs lead;
+the walkthrough engine implements the step in its own lane (same
+sequencing as the three-toggle shape, D260.5).
+
+## D264 — OWNER: mutation testing runs in parallel with other work (2026-08-16)
+
+"This pc has a powerful ryzen 7900x. you can do mutation testing with
+recompiling in parallel with other things." Stryker runs (concurrency 6 on
+12c/24t) do NOT reserve the machine; dispatches, reviews, and authoring
+continue alongside them.
+
+Reconciliation with the one-suite-at-a-time rule, which this does not
+repeal: that rule exists because TIMING-SENSITIVE gate suites (full
+vitest/Playwright with measured per-test budgets) produce false timeout
+reds under load. Mutation testing plus non-suite work is now expressly
+fine. If a full gate suite must run while a mutation run is active and it
+fails only on known contention-prone timing tests, the existing lesson
+applies: discard and re-run on a quiet machine rather than blaming the
+lane — never re-pin a budget from a loaded run.
+
+## D263 — OWNER RULINGS: simcore type debt, tamper boundary, loop-state home (2026-08-16)
+
+Three rulings after the reboot recovery and simcore review round 19
+(5 High, all reproduced; valid-case controls all held).
+
+1. **Loop working state lives in a durable directory outside git**
+   (`~/.claude/loop-scratch/`). The reboot destroyed the tmpfs scratchpad —
+   briefs, dispatch logs, and two generated spec-input files survived only
+   because workflow journals happen to persist. Briefs, dispatch logs, and
+   generated intermediates go there from now on; git/`.claude/` remain the
+   durable record of decisions and results, not of working state.
+
+2. **The simcore type debt is repaired file-by-file, then confirmed by one
+   more adversarial round before merge.** Context: the lane is runtime-green
+   (179 sim tests pass) but `npm run build`'s `tsc -b` — the real merge
+   gate — fails with 20 errors across 11 round-N test files. The recorded
+   per-round gate line (`tsc -p tsconfig.app.json`) does not typecheck
+   tests; supervisor gate error, recorded at full length in the session.
+   Per-round file provenance is kept (no consolidation); no tsc exclusion.
+   The standing brief's "build OR tsc -p app-config" wording is void — the
+   compile gate for a lane with test changes is `tsc -b`.
+
+3. **Tamper-resistance boundary: accidents yes, self-sabotage no.** The sim
+   defends against our own future code mutating state by ACCIDENT (deep-freeze
+   what we hand out stays), but deliberate in-process attacks — prototype
+   reassignment, post-hoc mutation of returned objects — are inside the
+   documented caller-trust boundary, same status as round 18's structural-clone
+   limit. Round-19 findings 1 and 5 are real under any reading and are fixed
+   (an unregistered fold path that returns a number; recovery rows pinned to a
+   heading with no digest). Findings 2–4 are documented as boundary, not fixed.
+   Reviewers stop earning Highs for in-process self-attacks; the arms race ends.
+
+## D249 — OWNER: UI is designed by Claude first, through a four-stage pipeline (2026-08-14)
+
+Ruling on how UI work is produced, overriding the general "codex implements"
+default for UI only:
+
+1. **Claude design skills first.** The official `frontend-design` skill is
+   already installed and is the starting point, not an afterthought.
+2. **Fable plans** the UI, from several perspectives.
+3. **Opus creates** it.
+4. **Fable reviews** it, again from several perspectives.
+5. **codex `-p sol` is a second reviewer**, explicitly for diversity — a
+   different model family sees different failures.
+
+This is a standing authorization for Fable subagents on UI work specifically,
+which otherwise require asking first. It does not extend to non-UI work, where
+codex remains the implementer. Claude sonnet remains prohibited everywhere.
+
+## D248 — OWNER: fan out into worktrees as far as possible (2026-08-14)
+
+Asked what to do after the R3 and simulation merges. Ruled: **fan out into
+worktrees as much as possible**, each worktree proving all tests pass before it
+tries to merge back, each with its own database, using workflows where the work
+suits them.
+
+**Reconciliation with the one-suite-at-a-time amendment**, which this ruling
+does not repeal but does constrain: lanes fan out without limit and run
+FOCUSED tests themselves; separate databases remove the shared-fixture
+collisions; the supervisor still runs each full suite, and runs them SERIALLY
+on a quiet box. Parallelism therefore lives in the work, and serialization
+lives only in the timing-sensitive gate. A lane that self-gates a full suite
+while another does the same produces false timeouts, and that failure has
+already been observed twice.
+
+## D247 — OWNER: a first-landing subsystem is reviewed until clean, with no round cap (2026-08-14)
+
+The three-round review cap does not apply while a subsystem is landing for the
+first time. Prompted by the simulation core, whose first review round found
+three real defects including a refusal that silently became zero. The reasoning
+that governs future cases: early defects set the shape everything later builds
+on, so the code that most deserves review attention is exactly the code a round
+cap would cut short.
+
+## D246 — OWNER: the simulator's first shippable slice covers attacks, saves and resources (2026-08-14)
+
+Not the narrow weapon-attack-only slice. The first flag-gated release must
+carry ordinary attacks, saving-throw damage effects, AND the rounds /
+short-rest / long-rest resource budget — because settings that do not change
+the result are decoration, and a simulator that cannot model a save is not one
+an advanced user can trust.
+
+Cost accepted: longer to reach honestly, and saving-throw evidence is precisely
+where the first review round found a defect.
+
+## D245 — OWNER: a number ships only when every gap is provably zero (2026-08-14)
+
+When a character carries a mechanic the simulator cannot source, the result
+shows a number ONLY if every excluded mechanic is proved damage-neutral for the
+chosen routine. Otherwise it refuses and names the blockers. Rejected both the
+partial-number-with-caveats option and whole-result refusal.
+
+This is the strictest honest option and it creates real work: each exclusion
+needs a per-mechanic proof of neutrality, not an assumption. It also settles
+the review finding that an unsourced save-success clause could be labelled
+`none` and contribute zero — under this ruling, zero and unknown are different
+values and the second one is not printable.
+
+## F20 — parse boundary accepts unknown enum members in class feature effects (2026-08-14)
+
+Found while reviewing the R3 lane, and verified PRE-EXISTING on `main` — not
+introduced by that lane, so it did not block its merge. Executed probes against
+`parseSourceCatalogRecord('class', ...)` on `main`:
+
+```
+ACCEPTED {"effect_kind":"ability_increase","ability":"luck","amount":1}
+ACCEPTED {"effect_kind":"damage_resistance","damage_type":"radiant-ish"}
+ACCEPTED {"effect_kind":"extra_attack","weapon_scope":"siege_only"}
+```
+
+`ability`, `damage_type` and `weapon_scope` are closed vocabularies in the type
+system, and the parse boundary validates them only as text. D235 says a row
+conflicting with the declared types must be unstorable at write and must THROW
+at read; these three throw at neither.
+
+Belongs to the D235 reader sweep (task #20). The fix is the same shape the R3
+lane used for `feature_value_contributions`: validate the discriminated arm
+against its closed vocabulary with `isEnumValue`, at the boundary, before the
+value reaches a contract that claims it is narrow.
+
+Recorded here rather than left in a lane report because a known-bad that lives
+only in a review transcript is indistinguishable from one nobody found.
+
 ## D244 — OWNER: the private regression gate is a standalone runner the ritual invokes (2026-08-14)
 
 Follow-up to D239, which made the gate blocking. Asked where it runs. Ruled:
@@ -2497,3 +3021,333 @@ Kept for reference resolution: D16/D17 were renumbered at merge (unrelated
 entries, both kept); D32/D33 were written as D30/D31 on a branch and
 renumbered; two entries were written as F17 concurrently — the
 structured-values one became F18; D29 was renumbered from D27 at merge.
+
+## D250 — Six owner rulings, taken one at a time (2026-08-15)
+
+Asked via AskUserQuestion, one per prompt, at the owner's request. Verbatim
+outcomes:
+
+1. **Sim posture: HYBRID, refuse by default.** Refusals remain authoritative
+   per D245. A refused clause MAY additionally carry a clearly-labelled
+   ESTIMATE field; the composer must never silently consume an estimate — any
+   composed result that includes one is itself labelled estimated. Round 11
+   carries the design of that field.
+2. **Board B parallelism: YES.** Design/legality phases run alongside simcore
+   review rounds; only actual sim/suite runs serialize on the machine.
+3. **Publish: PUSH 9505e1e8 to the mirror AND create a public clean-room
+   variant of BUILD_CRAFT.md** (mechanics patterns only; must pass
+   cleanroom_lint.py; D59 boundary applies — gate outcomes may be public,
+   audit evidence may not). Both go out together.
+4. **Board A weighting ADOPTED as a standing ruling** for future boards:
+   DPR 20 / Prevented 15 / Spells 20 / Fun 20 / Novelty 15 / Skills 10.
+   To be recorded in the mutt contract as C19.
+5. **Resource-alias removal RATIFIED.** The capability stays deleted after
+   failing four consecutive rounds (inferred → declared → unproven evidence →
+   removed). Any future need triggers a fresh evidence-bound design, never a
+   revival of the old seam.
+6. **Machine priority: INTERLEAVE.** Simcore round 11 review (read-only, no
+   suite) runs while the Playwright walkthrough engine is written; browser
+   runs still serialize (one suite machine-wide, unique port). The Playwright
+   mutt runs remain the owner's explicit deliverable.
+
+## D251 — Six more owner rulings, asked one at a time (2026-08-15)
+
+1. **Walkthrough bug handling: SEVERITY SPLIT.** Dead ends and wrong sheet
+   numbers HALT the runs (they invalidate later walkthroughs) and become fix
+   lanes immediately; missing-warning gaps and cosmetics BATCH to the end of
+   all 11 runs.
+2. **The Cantrip Kennel is SCORED ON BOARD B** as a full competitor (sim +
+   judged axes), not a site-test vehicle or reference row.
+3. **AI guidance path: FULL PATH ON ONE BUILD.** The Cantrip Kennel gets an
+   end-to-end chat-guided creation run via the offline AI bridge; every other
+   build asserts the agent-reference panel facts only.
+4. **Push policy: ROUTINE AT EVERY MERGE.** `git push mirror main` returns to
+   being the merge ritual's final step, no per-batch approval. The D59
+   licensing gate remains a hard stop BEFORE anything lands in git.
+5. **The archetypes/concepts temp doc MERGES INTO the Board A report** —
+   one durable document, not two. Cleanroom lint re-run after the merge.
+6. **wt-party RETIRES NOW.** Audit for unlanded work; anything real becomes a
+   sync proposal per the party-sync cadence; then prune worktree and branch.
+
+## D252 — Eleven owner rulings from the five-perspective brainstorm (2026-08-15)
+
+Collated from 25 candidates (player / rules-lawyer / product-QA / sim-method /
+steward perspectives); duplicates merged; four decided by the supervisor
+without asking (private-pass artifacts stay private per D59; all 11
+walkthroughs rerun after the batch-fix wave; verify_citations.py joins the
+merge ritual; day-assumptions stated once per report). Asked one at a time:
+
+1. **Review stopping rule: clean = TWO consecutive quiet rounds** (zero
+   High/P1). **Board B sims run NOW** on current simcore; any build touched by
+   a later review finding gets a targeted re-run.
+2. **Board B rest cadence: Board A's day unchanged** (4 combats x 4 rounds,
+   short rests between all).
+3. **Measured stays PURE.** No labelled estimate ever feeds DPR/Prevented; a
+   dependent cell goes partly-UNAVAILABLE, stated plainly.
+4. **Prepared lists: TWO SCORED VARIANTS per Board B build** — a tuned
+   day-list and a general-purpose list; the delta is reported information.
+5. **Fun stays pure enjoyment; every build carries a separate unweighted
+   TABLE-LOAD note** (light/medium/heavy).
+6. **Kennel: C18 does NOT apply** — Pact of the Chain dropped for the Kennel;
+   Magic Initiate (Wizard) carries Find Familiar; Warlock 1 takes a different
+   invocation (Pact of the Tome if SRD-verified — three extra cantrips).
+   C18 unchanged for the Board A ten.
+7. **ALL FOUR house rules (H1-H4) become real labelled site toggles with sheet
+   disclosures** — H2/H3 toggle UI is v1 work, new app lane.
+8. **Walkthroughs verify EVERY level 1-7 on ALL builds.**
+9. **Sheet oracle: all deterministic values + HP STRICT** against the
+   supervisor's computed fixed-average; a site HP-policy difference itself
+   halts and gets ruled on.
+10. **v1-USABLE acceptance = green walkthroughs + the D251.3 AI-guided Kennel
+    run completing guided creation.** No human pass required.
+11. **Play cards/badges: NEITHER for now.** Boards stay analyst documents.
+12. **Board publishing ritual STANDING**: private report + clean-room public
+    variant + mirror push, every board, no per-board approval.
+
+## D253 — Round-2 collaborative brainstorm rulings (2026-08-15)
+
+Six perspectives (five Claude: DM / first-time user / maintenance-debt /
+lane-ops / adversarial-risk; plus codex as a different-model sixth), 26
+candidates collated, blockers asked one at a time:
+
+1. **Enemy saves: PIN A PER-TIER SAVE ROW into C1** (typical CR 5-6 mods,
+   e.g. Str +3 / Dex +1 / Con +3 / Int +0 / Wis +1 / Cha +0 at the level-6
+   row) before any Board B sim.
+2. **Enemy count: TWO-VARIANT DAY** — every combat scored as solo-boss AND
+   3-mook (total incoming stream unchanged), reported side by side.
+   **AND: wis-shepherd is CUT from Board B; no pre-2024 summon spells
+   anywhere on the board.**
+3. **A denied enemy turn credits Prevented at the enemy profile's expected
+   round output vs DEF_AC for the denied duration** — deterministic from C1.
+4. **Enemy targets the PC only; the familiar is PASSIVE** — Help/utility on
+   judged axes, zero measured contribution.
+5. **Unavailable measured axes enter the composite as an INTERVAL and the
+   rank as a RANGE** (axis at 0 vs at board-max). No exclusion, no
+   renormalizing, no silent zero.
+6. **Variant ranking: the GENERAL list is the official score and rank; the
+   tuned list is a +delta column.** One row per build.
+7. **Walkthroughs assert CHOICES AND SOURCES at every level**, not just sheet
+   values — a silent substitution with identical numbers is a HALT.
+8. **AI-bridge acceptance bar: STRUCTURED ACTIONS, CONFIRMED** — the bridge
+   emits next-step actions, Playwright validates each against the spec and
+   applies it; any wrong advice or dead end fails the acceptance.
+9. **D147's broad ignore-prereqs toggle is RETIRED**; the four labelled H1-H4
+   toggles replace it, with a migration note.
+10. **Toggles default OFF; every walkthrough starts from a COLD PROFILE; the
+    Kennel run includes one deliberate wrong-pick-and-recover sequence** —
+    a dead end on recovery is a HALT.
+11. **The halt→fix→rerun loop is UNCAPPED**, and **the toggle lane BUNDLES
+    #19's preparation-warning panel** (same planner disclosure surface).
+
+Supervisor-decided without asking (recorded for the register): mirror-history
+D59 audit runs as a lane; recurring defect shapes (fail-open, inverse bugs,
+unstaged files) become automated checks; handover docs get a session-death
+refresh; stale tirelocator files stay queued.
+
+## D254 — OWNER DIRECTIVE: recurring save-governed damage is MODELED AS A
+## CONDITION, not refused (2026-08-15)
+
+Verbatim model, given against the Searing Smite example: "The smite does
+damage first. It also applies the ongoing fire damage condition. It takes the
+damage at the start of the next turn because it has the condition. If it
+saves, the condition is removed. If it starts any turn with the condition,
+the condition deals the damage."
+
+So the event vocabulary gains CONDITIONS: applied by a hit or failed save;
+carrying a damage tick with a declared timing (start-of-turn / end-of-turn /
+delayed-one-tick); removed by a save (save-ends), a duration, or an external
+effect. In Monte Carlo this is a per-target state flag checked each round; in
+the analytic engine it is a geometric-series expectation over P(save-ends).
+Refusal remains only where even the condition model cannot express the source
+(GM-choice triggers). This supersedes the estimate-field design (D250.1) for
+every clause the condition model can express — model beats estimate.
+
+## D255 — OWNER RULING: Geas and Dream are OUT-OF-COMBAT spells (2026-08-15)
+
+Both verified from docs/srd/source/spell-descriptions.txt: Casting Time
+1 minute apiece — ten rounds, uncastable inside a 4-round combat. Dream
+additionally resolves during the target's sleep. The sim classifies both
+OUT-OF-COMBAT: a new category, distinct from `unavailable` — the engine is
+not refusing to price them; they are ruled outside the combat model's
+domain. They never appear in DPR/Prevented folds, never produce an
+unavailable cell, and their value (if any) lives on the judged axes.
+Combined with D254's condition model this empties the refusal list of its
+last two combat-facing holdouts: the 11-entry unavailability set becomes
+9 modelable conditions + 2 out-of-combat classifications.
+
+## D256 — OWNER RULINGS on the remaining unavailability survivors (2026-08-15)
+
+1. **Prismatic Spray is MODELED.** Random-table events join the condition-model
+   scope: Monte Carlo rolls the literal 1d8 per target (rerolling 8s for the
+   two-ray result); the analytic engine uses the verified 45/56 damaging-ray
+   closed form.
+2. **The casting-time sweep RUNS.** Every spell on both boards is classified
+   in-combat / out-of-combat from its casting time (the Geas/Dream D255 ruling
+   made systematic). No design may lean on an uncastable spell in a 4-round
+   combat.
+3. **Caster identity is MODELED via a PARTY: assume a Fighter, a Cleric and a
+   Wizard are the other party members.** Two-castings-of-one-clause
+   composition becomes representable (different casters are different
+   identities). Scope note: this introduces party context for identity and
+   composition purposes; it does not reopen C8's party-HP healing model
+   unless separately ruled.
+4. **Subclass Bonus Proficiencies — and anything else that affects
+   character-sheet numbers — MUST BE MODELED, not marked unknown.** College
+   of Lore's text is IN the full SRD ("Level 3: Bonus Proficiencies — You
+   gain proficiency with three skills of your choice"), only missing from the
+   subclasses.txt extract; the extract gets regenerated to carry subclass
+   feature TEXT, the app models it, and the walkthrough spec asserts three
+   Lore bonus skills instead of expectUnknowns. D33 'unknown' remains only
+   for values genuinely absent from source.
+
+## D257 — OWNER DESIGN: fixed-DC authority is enumerated rules + light
+## generalization + loud novelty (2026-08-15)
+
+Verbatim: "There are a finite number of these fixed dc spells. Ai can decode
+them all and include code rule for each so the code doesn't need to be as
+smart. Try to lightly generalize so new spells with the same wording get
+covered. New types of wording need new ai intervention."
+
+Implementation shape: (1) the reviewed oracle gains a per-clause fixed-DC
+column — every one of the 79 clauses decoded once by AI-with-source, 2
+non-null today — and that table is the AUTHORITY; (2) the scanner keeps a
+LIGHTLY generalized recognizer for the known phrasings so a new spell using
+the same wording auto-derives its row's candidate; (3) any DC-vocabulary
+wording outside the known forms REFUSES loudly (the round-13 burden
+inversion) — that refusal IS the "new ai intervention" trigger: a human/AI
+reads the spell, adds the rule and the oracle row. Extraction never silently
+overrides the table; disagreement between table and recognizer is a build
+failure, not a preference.
+
+## D258 — Four more rulings (2026-08-15)
+
+1. **Party NPCs are BUFF TARGETS ONLY** (extends D256.3): declared attack
+   profiles that buffs can modify — Bless/Faerie Fire become measured as the
+   delta on NPC output — but NPCs take no damage, make no decisions, and C8's
+   party-HP model stays closed.
+2. **Fable judges Board B** — same editorship as Board A, one-time
+   authorization: fable scores the judged axes with citations, the supervisor
+   verifies every composite arithmetically.
+3. **VTT phase 1 PROTOTYPES NOW, in parallel** — own worktree, own port;
+   shared board (grid, tokens, DM fog, dice log) as a Yjs doc over a
+   pluggable transport (Trystero default, manual-SDP fallback); no rules
+   integration in phase 1; touches nothing the walkthroughs need.
+4. **Queue triage:** #18 (DPR sim in-app UI), #20 (D235 reader sweep) and
+   #21 (Stryker threshold) SURVIVE. **#17 (errata triple-check) is KILLED** —
+   the errata dossier's existing two-pass record stands; no triple-check
+   deep-dive.
+
+## D259 — Correction to D257's census, and the registration-required design (2026-08-15)
+
+CORRECTION (supervisor's own error, caught by review round 14): D257 said the
+fixed-DC oracle has "2 non-null today". The oracle and the source census
+support exactly ONE non-null row — contact_other_plane: 15. Earthquake's
+DC 20 is check-owned and its row is null. The "2" was a stale figure from
+before Earthquake was decoded. decisions.md is append-only, so the wrong
+sentence stands above with this correction governing.
+
+DESIGN AMENDMENT, completing D257: rounds 12-14 each defeated the DC scanner
+with composed English that is lawful but off-corpus. Under D257 the answer is
+not a smarter parser — it is REGISTRATION-REQUIRED FOLDING: a clause may fold
+ONLY if it has rows in ALL reviewed oracles (kind, availability, fixed DC,
+grouping — the grouping oracle becomes TOTAL over all clauses, not partial
+with derived membership). An unregistered clause refuses by construction, so
+novel wording cannot fail open no matter what the parser misses; parsing is
+demoted entirely to a drift alarm over REGISTERED rows. New spells onboard by
+an AI-with-source decode pass that writes their rows — and per round 14's
+named process gap ("same-change oracle co-minting"), that decode pass must be
+SEPARATE from any parser change: oracle rows and parser code never land in
+the same change for the same clause.
+
+## D260 — Round-3 collaborative brainstorm rulings (2026-08-15)
+
+Five fresh Claude perspectives (VTT table-runner / deployment-infra /
+sim-matrix economics / release / next-session) plus codex sixth; 26
+candidates; duplicates merged; blockers asked one at a time:
+
+1. **NPC party profiles: DERIVED FROM SRD CLASSES at level 7** — standard-array
+   Fighter/Cleric/Wizard built from the class tables, cited like everything
+   else, appended to the contract beside the enemy save row.
+2. **VTT rooms: DM-AUTHORITATIVE DOC** — players send proposals; only the DM
+   client mutates the shared doc, on every transport. Kick = stop accepting a
+   peer.
+3. **VTT persistence: DM-LOCAL AUTOSAVE** — Yjs snapshots into the DM's
+   SQLite; DM refresh safe; full DM disconnect pauses the game; server
+   stateless.
+4. **Board B official composite: EQUAL-WEIGHT AVERAGE of the solo-boss and
+   3-mook day variants**; both columns still printed.
+5. **Toggles: H1 COLLAPSES INTO H4.** Three house-rule toggles ship (H4
+   Dex-for-Str prereqs incl. Paladin, H2 feat decoupling, H3 MI ability);
+   contract keeps H1 as history; disclosures name H4.
+6. **Cloudflare: CONFIGS ONLY, NO DEPLOY.** wrangler.toml + relay worker code
+   staged in-repo; nothing deploys until the owner acts. No paid plan.
+7. **Release scope: VTT ships AFTER v1** as its own milestone; **the mirror
+   goes PUBLIC when v1-usable is declared.**
+8. **Fog is TECHNICALLY SECRET** — the DM client sends players a filtered
+   doc; hidden state never leaves the DM. (Natural fit with ruling 2.)
+9. **Simcore registry: PUBLIC SRD CORE + PRIVATE ORACLE OVERLAYS** — Board B's
+   Xanathar/Tasha registrations and user imports live in overlay files that
+   never touch the public repo.
+
+Supervisor-decided without asking: simcore round briefs/findings become
+committed docs (private repo) rather than scratchpad-only; handover files get
+a refresh at the next quiescent point; the 11 walkthrough specs are the
+supervisor's next authoring task and their absence is a queue fact, not an
+owner decision.
+
+## D261 — OWNER AMENDMENT: one combat shape — a boss WITH three mooks (2026-08-15)
+
+Verbatim: "the one boss should have 3 mooks with him instead of splitting.
+Most fights have multiple enemies for action economy."
+
+This SUPERSEDES D253.2's two-variant day and D260.4's equal-weight average:
+every combat is ONE encounter containing a boss and three mooks — four
+bodies, real action economy, one official basis, one composite. The C1 total
+incoming stream is unchanged and is distributed across the four bodies with
+the split declared in the contract (supervisor to append with the C22 rows;
+boss carries the majority share, mooks the remainder). AoE and multi-target
+effects resolve against the real four-body group; single-target rotations
+choose targets. The side-by-side variant columns are retired before ever
+being produced — no sim ran under the superseded design.
+
+## D262 — Round-4 collaborative brainstorm rulings (2026-08-15)
+
+Codex (11 candidates) + Claude (8) collated to ten distinct questions;
+asked one at a time. Two AskUserQuestion rounds on the registry question
+were "explain more" — the ruling below was made after the under-the-hood
+explainer (parse-once + digest tripwire + who-operates framing).
+
+1. **v1 gate: PRIVATE-LIBRARY PASS BLOCKS v1.** The private-library
+   walkthrough pass (import + non-SRD paths) must complete before the mirror
+   flips public, even though its content never ships. Non-halting defect
+   policy was not amended — D251.1's severity split stands.
+2. **Post-v1 first lane: DPR SIM UI (#18)** — the in-app advanced-user
+   simulator precedes launch hardening, scorecard expansion, and VTT
+   phase 2.
+3. **Board B is a REDESIGN SIGNAL** — the report's job is to identify
+   underperforming mechanics/concepts and feed another design round, not to
+   crown builds. Structure the report for that reading.
+4. **Sim fidelity ceiling: CHASE THE DOCX** — fidelity is sufficient when
+   the sim tracks the external d4 methodology within tolerance; that
+   reference, not sensitivity tests or a fixed scope, is the stopping rule.
+5. **Private-pass corpus: known-tricky spells (Thorn Whip / Cloud of
+   Daggers / Armor of Agathys), non-SRD subclasses + feats, non-SRD species
+   + backgrounds.** Full class spell lists are explicitly NOT required.
+6. **AI-guided mode at public v1: POWER-USER SETUP** — documented as
+   bring-your-own-AI; the site guarantees the hooks (alt text, structured
+   actions), not the experience. The deterministic flow is the product.
+7. **Clean-room public depth: MAX LAWFUL DETAIL** — public board variants
+   publish everything the D59 gate permits per build, accepting a heavier
+   clean-room review each time.
+8. **VTT phase 2 negative scope: NO cloud accounts, NO voice/video, NO
+   hosted asset library.** Rules automation was offered as an exclusion and
+   NOT chosen — it is in bounds for phase 2.
+9. **Registry ops: AI-ASSISTED INTERNAL** — the decode+review registration
+   pipeline becomes a maintained internal tool (cheap SRD revisions and
+   private-library growth); user imports keep refusing with "sim
+   unavailable". Extends D260.9's overlay split with an operator.
+10. **KB target for v1: ALL BUNDLED MECHANICS** — every mechanical rule the
+    bundled SRD content can surface gets a KB entry; KB completeness is its
+    own release deliverable with its own audit (beyond the 127-entry sweep).
+11. **Persistence: EXPORT/IMPORT REQUIRED AT v1** — file save + re-import
+    joins the v1 bar; localStorage reload-safety alone is insufficient.

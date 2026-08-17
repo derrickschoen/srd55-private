@@ -10,6 +10,16 @@ import type {
 import type { CompletenessResult } from '../../../src/queries/character-completeness';
 import type { OperationHistory } from '../../../src/queries/operation-history';
 import type { CharacterCommandRpcResult } from '../../../src/commands/character-command-executor';
+import type {
+  CharacterClassLevelId,
+  CharacterId,
+  ClassDefinitionId,
+  FeatDefinitionId,
+  SlotId,
+  SpellVersionId,
+  SourceInstanceId,
+  SubclassDefinitionId,
+} from '../../../src/domain/ids';
 import { RpcError } from '../../../src/rpc/protocol';
 import {
   defaultGridFilters,
@@ -70,7 +80,7 @@ function slot(
   changes: Partial<WorkspaceSlot> = {},
 ): WorkspaceSlot {
   return {
-    id: 1,
+    id: 1 as SlotId,
     slot_key: 'wizard:cantrip:1',
     source: 'Wizard 1',
     source_type: 'class',
@@ -78,7 +88,7 @@ function slot(
     bucket: 'cantrip_known',
     level_min: 0,
     level_max: 0,
-    spell_id: 10,
+    spell_id: 10 as SpellVersionId,
     spell_name: 'Mage Hand',
     spell_catalog_layer: 'bundled',
     spell_level: 0,
@@ -114,7 +124,7 @@ function workspace(
     revision,
     report: {
       character: {
-        id: 7,
+        id: 7 as CharacterId,
         name: 'Persisted Planner',
         character_level: 1,
         proficiency_bonus: 2,
@@ -168,7 +178,7 @@ function workspace(
     slots: [
       slot(),
       slot({
-        id: 2,
+        id: 2 as SlotId,
         source: 'Cleric 1',
         label: 'Prepared 1',
         spell_id: null,
@@ -217,7 +227,7 @@ describe('planner catalog disclosure', () => {
           ...base,
           available_classes: [
             {
-              id: 2,
+              id: 2 as ClassDefinitionId,
               name: 'Wizard',
               catalog_layer: 'bundled',
               multiclass_entry: {
@@ -227,7 +237,7 @@ describe('planner catalog disclosure', () => {
               },
             },
             {
-              id: 3,
+              id: 3 as ClassDefinitionId,
               name: 'Rogue',
               catalog_layer: 'bundled',
               multiclass_entry: { status: 'eligible', refusal: null },
@@ -271,7 +281,7 @@ describe('planner catalog disclosure', () => {
           ...base,
           multiclass_prerequisite_house_rule: { status: 'on' },
           available_classes: [{
-            id: 2,
+            id: 2 as ClassDefinitionId,
             name: 'Wizard',
             catalog_layer: 'bundled',
             multiclass_entry: {
@@ -322,11 +332,14 @@ describe('planner catalog disclosure', () => {
       const rendered = interactiveElement(renderEditors({
         workspace: {
           ...base,
-          starting_class_resolution: { class_level_id: 1, warnings: [] },
+          starting_class_resolution: {
+            class_level_id: 1 as CharacterClassLevelId,
+            warnings: [],
+          },
           classes: [
             {
-              id: 1,
-              class_definition_id: 1,
+              id: 1 as CharacterClassLevelId,
+              class_definition_id: 1 as ClassDefinitionId,
               subclass_definition_id: null,
               level: 1,
               is_starting_class: true,
@@ -338,8 +351,8 @@ describe('planner catalog disclosure', () => {
               multiclass_prerequisite_warning: null,
             },
             {
-              id: 2,
-              class_definition_id: 2,
+              id: 2 as CharacterClassLevelId,
+              class_definition_id: 2 as ClassDefinitionId,
               subclass_definition_id: null,
               level: 1,
               is_starting_class: false,
@@ -420,7 +433,7 @@ describe('planner catalog disclosure', () => {
         const rendered = interactiveElement(renderWarnings({
           report: base.report,
           startingClassResolution: {
-            class_level_id: 1,
+            class_level_id: 1 as CharacterClassLevelId,
             warnings: [{ code: warning.code, message: warning.message }],
           },
           disabled: false,
@@ -519,8 +532,8 @@ describe('planner catalog disclosure', () => {
       const disclosed: Workspace = {
         ...base,
         classes: [{
-          id: 1,
-          class_definition_id: 1,
+          id: 1 as CharacterClassLevelId,
+          class_definition_id: 1 as ClassDefinitionId,
           subclass_definition_id: null,
           level: 1,
           is_starting_class: false,
@@ -528,11 +541,15 @@ describe('planner catalog disclosure', () => {
           catalog_layer: 'external',
           subclass_name: null,
           subclass_catalog_layer: null,
-          subclasses: [{ id: 9, name: hostileSubclass, catalog_layer: 'external' }],
+          subclasses: [{
+            id: 9 as SubclassDefinitionId,
+            name: hostileSubclass,
+            catalog_layer: 'external',
+          }],
           multiclass_prerequisite_warning: null,
         }],
         available_classes: [{
-          id: 2,
+          id: 2 as ClassDefinitionId,
           name: 'Fighter',
           catalog_layer: 'bundled',
           multiclass_entry: { status: 'eligible', refusal: null },
@@ -540,7 +557,7 @@ describe('planner catalog disclosure', () => {
         source_catalog: {
           ...base.source_catalog,
           feat: [{
-            id: 7,
+            id: 7 as FeatDefinitionId,
             content_key: 'expanded:content.feat:hostile',
             name: hostileSource,
             catalog_layer: 'external',
@@ -549,10 +566,10 @@ describe('planner catalog disclosure', () => {
           }],
         },
         removable_sources: [{
-          id: 70,
+          id: 70 as SourceInstanceId,
           parent_source_instance_id: null,
           source_type: 'feat',
-          source_definition_id: 7,
+          source_definition_id: 7 as FeatDefinitionId,
           display_name: hostileSource,
           catalog_layer: 'external',
         }],

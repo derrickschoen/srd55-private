@@ -5,6 +5,11 @@ import {
   spellKeySlug,
 } from '../../../src/rules/attack-cantrips';
 import { officialSpellKey } from '../../../src/catalog/catalog-key';
+import type {
+  SlotId,
+  SpellIdentityId,
+  SpellVersionId,
+} from '../../../src/domain/ids';
 
 /**
  * THE CANTRIPS ARE NOT IN THIS APPLICATION, so every fixture here is a
@@ -16,7 +21,7 @@ import { officialSpellKey } from '../../../src/catalog/catalog-key';
 
 function route(overrides: Partial<SpellAccessRoute>): SpellAccessRoute {
   return {
-    spell_identity_id: 1,
+    spell_identity_id: 1 as SpellIdentityId,
     identity_name: 'True Strike',
     spell_name: 'True Strike',
     spell_catalog_layer: 'bundled',
@@ -28,11 +33,11 @@ function route(overrides: Partial<SpellAccessRoute>): SpellAccessRoute {
     save_dc: 15,
     origin: 'slot',
     casting_mode: 'at_will',
-    spell_version_id: 10,
+    spell_version_id: 10 as SpellVersionId,
     source_instance_id: 20,
     source_name: 'Arcane scholar',
     source_catalog_layer: 'bundled',
-    slot_id: 30,
+    slot_id: 30 as SlotId,
     slot_key: 'cantrip-1',
     selection_key: null,
     bucket: 'cantrip_known',
@@ -133,9 +138,9 @@ describe('recognising the two cantrips', () => {
   it('keeps one entry per distinct source and ability, not per route', () => {
     // A prepared caster's cantrip can arrive on several routes from one source.
     const found = recogniseAttackCantrips([
-      route({ slot_id: 30 }),
-      route({ slot_id: 31 }),
-      route({ slot_id: 32, source_instance_id: 21 }),
+      route({ slot_id: 30 as SlotId }),
+      route({ slot_id: 31 as SlotId }),
+      route({ slot_id: 32 as SlotId, source_instance_id: 21 }),
     ]);
     expect(found.true_strike).toEqual({
       state: 'known',

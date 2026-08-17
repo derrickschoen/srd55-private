@@ -5,6 +5,7 @@ import {
   type DuplicateWarningRoute,
 } from '../../../src/duplicates/duplicate-warning-detector';
 import type { RulesEdition } from '../../../src/domain/enums';
+import type { SpellIdentityId, SpellVersionId } from '../../../src/domain/ids';
 
 function route(
   identity: number,
@@ -19,8 +20,8 @@ function route(
   selection = true,
 ): DuplicateWarningRoute {
   return {
-    spell_identity_id: identity,
-    spell_version_id: version,
+    spell_identity_id: identity as SpellIdentityId,
+    spell_version_id: version as SpellVersionId,
     identity_name: identityName,
     spell_name: spellName,
     spell_content_key: contentKey,

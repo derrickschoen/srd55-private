@@ -42,6 +42,10 @@ import { WeaponMasteryLookup } from '../rules/weapon-mastery-lookup';
 import { ClassProficiencyLookup } from './class-proficiency-lookup';
 import { catalogLayerDisclosure } from '../catalog/catalog-disclosure';
 import { selectableCatalogContentSql } from './selectable-catalog-content';
+import type {
+  CharacterWeaponId,
+  WeaponTemplateId,
+} from '../domain/ids';
 
 /**
  * The three things the attack derivation needs that are NOT weapon rows.
@@ -175,7 +179,7 @@ export class WeaponQueries {
        ORDER BY id`,
       [characterId],
       (row): CharacterWeapon => ({
-        id: sqlInteger(row, 'id'),
+        id: sqlInteger(row, 'id') as CharacterWeaponId,
         ...weaponProfile(row),
         // D27's column, read HERE and not in `weaponProfile`: the profile is the
         // set of columns the catalog and the character share, and this one is
@@ -223,7 +227,7 @@ export class WeaponQueries {
           throw new Error(`Unknown weapon group '${group}'.`);
         }
         return {
-          id: sqlInteger(row, 'id'),
+          id: sqlInteger(row, 'id') as WeaponTemplateId,
           content_key: sqlString(row, 'content_key'),
           srd_group: group as SrdWeaponGroup,
           catalog_layer: catalogLayerDisclosure(

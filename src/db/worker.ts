@@ -30,7 +30,7 @@ const filename = '/dnd-multiclass-spells.sqlite3';
 
 async function initialize(): Promise<DatabaseBoot> {
   const report = (stage: DatabaseBootStage): void => {
-    scope.postMessage(databaseBootProgress(stage));
+    scope.postMessage(databaseBootProgress(stage, performance.now()));
   };
   report('loading_engine');
   const sqlite3 = await sqlite3InitModule();

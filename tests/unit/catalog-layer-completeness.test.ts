@@ -38,8 +38,8 @@ const CONTRACT_SOURCES = CONTRACT_ROOTS.flatMap(typescriptModules).sort();
 const program = ts.createProgram({
   rootNames: CONTRACT_SOURCES.map((file) => join(repoRoot, file)),
   options: {
-    module: ts.ModuleKind.NodeNext,
-    moduleResolution: ts.ModuleResolutionKind.NodeNext,
+    module: ts.ModuleKind.ESNext,
+    moduleResolution: ts.ModuleResolutionKind.Bundler,
     skipLibCheck: true,
     target: ts.ScriptTarget.ESNext,
   },
@@ -219,11 +219,13 @@ function occurrences(file: string): readonly DisplayOccurrence[] {
     }
     const declarationName = declaration.name.text;
     const path: string[] = [];
+    const topLevelPropertiesSeen = new Set<string>();
     const visit = (node: ts.Node): void => {
       if (ts.isPropertySignature(node)) {
         const name = propertyName(source, node);
         if (name !== null) {
           path.push(name);
+          if (path.length === 1) topLevelPropertiesSeen.add(name);
           const catalogDisplay = isCatalogDisplayField(source, node, name);
           if (catalogDisplay) {
             const parentFields = new Set(containerProperties(source, node.parent));
@@ -244,6 +246,44 @@ function occurrences(file: string): readonly DisplayOccurrence[] {
       ts.forEachChild(node, visit);
     };
     visit(declaration);
+
+    // Intersection fragments contribute real fields without placing a
+    // PropertySignature inside the consuming alias's AST. Enumerate those
+    // top-level properties through the checker as well, so composing `name`
+    // cannot make a catalog-facing contract disappear from this guard.
+    const declarationType = ts.isInterfaceDeclaration(declaration)
+      ? checker.getDeclaredTypeOfSymbol(
+          checker.getSymbolAtLocation(declaration.name) ??
+            (() => { throw new Error(`Missing interface symbol in ${source.fileName}.`); })(),
+        )
+      : checker.getTypeAtLocation(declaration);
+    const fields = new Set(
+      checker.getPropertiesOfType(declarationType).map((property) => property.name),
+    );
+    for (const property of checker.getPropertiesOfType(declarationType)) {
+      const name = property.name;
+      if (topLevelPropertiesSeen.has(name) || name.endsWith('_name')) continue;
+      const hasCatalogLocator = fields.has('content_key') ||
+        fields.has('contentKey') ||
+        [...fields].some((field) =>
+          field.endsWith('_definition_id') || field.endsWith('_version_id') ||
+          field.endsWith('_source_id') || field.endsWith('_instance_id') ||
+          field.endsWith('DefinitionId') || field.endsWith('VersionId') ||
+          field.endsWith('SourceId')
+        );
+      const expectedLayers = expectedLayerFields(name);
+      const hasLayerPair = expectedLayers.some((field) => fields.has(field));
+      if (
+        (name === 'name' || name.endsWith('Name')) &&
+        (hasCatalogLocator || hasLayerPair)
+      ) {
+        found.push({
+          key: `${file}::${declarationName}::${name}`,
+          line: source.getLineAndCharacterOfPosition(declaration.getStart(source)).line + 1,
+          layered: hasLayerPair,
+        });
+      }
+    }
   }
   return found;
 }

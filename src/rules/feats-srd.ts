@@ -16,6 +16,11 @@ import featsExtract from '../../docs/srd/source/feats.txt?raw';
 import type { BindableValue } from '@sqlite.org/sqlite-wasm';
 import type { DatabaseContext } from '../db/database';
 import { normalizeContentIdentityName } from '../catalog/content-identity';
+import type {
+  HasContentKey,
+  HasName,
+  HasProvenance,
+} from '../catalog/content-contract-fragments';
 import { ensureBundledStableContentIdentity } from '../catalog/content-registry';
 import { rowContractError } from '../domain/contracts/rows';
 import type {
@@ -52,9 +57,8 @@ export type SrdFeatCategory =
   | 'Fighting Style'
   | 'Epic Boon';
 
-export interface SrdFeatDefinition {
+export type SrdFeatDefinition = HasContentKey & HasName & HasProvenance & {
   readonly content_key: BundledFeatContentKey & ContentKey;
-  readonly name: string;
   readonly catalog_layer: 'bundled';
   readonly source_category: SrdFeatCategory;
   readonly grouping: KnownFeatGrouping;
@@ -66,7 +70,7 @@ export interface SrdFeatDefinition {
   readonly prerequisites: readonly FeatPrerequisite[];
   readonly grant_rules: readonly GrantRuleObject[];
   readonly notes: string;
-}
+};
 
 const FEAT_PATTERN =
   /^=== (?<name>[^=\n]+) ===\n(?<category>Origin|General|Fighting Style|Epic Boon) Feat(?: \(Prerequisite: (?<prerequisites>[^)\n]+)\))?\n\n(?<benefit>[\s\S]*?)(?=\n\n=== (?:Origin|General|Fighting Style|Epic Boon) Feats ===|\n\n=== [^=\n]+ ===|(?![\s\S]))/gm;

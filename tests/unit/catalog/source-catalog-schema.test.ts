@@ -4,13 +4,19 @@ import type {
   SpeciesContentAggregate,
 } from '../../../src/authoring/contracts';
 import { parseCatalogDocuments } from '../../../src/catalog/catalog-schema';
+import { parseSourceCatalogRecord } from '../../../src/catalog/source-catalog-records';
 import {
   CONTENT_FINGERPRINT_SCHEME_V1,
+  deriveContentIdentityV1,
   type ContentFingerprintDigest,
 } from '../../../src/catalog/content-identity';
+import { projectClassContentV1 } from '../../../src/catalog/source-content-projector-v1';
 import { creatureSize, creatureType } from '../../../src/domain/enums';
 import type { ContentKey } from '../../../src/domain/ids';
-import { classProjectorV1Vector } from './fixtures/source-projector-v1-vectors';
+import {
+  classProjectorV1Vector,
+  featProjectorV1Vector,
+} from './fixtures/source-projector-v1-vectors';
 
 const digest = 'a'.repeat(64) as ContentFingerprintDigest;
 
@@ -57,6 +63,266 @@ function background(): BackgroundContentAggregate {
 }
 
 describe('class and origin catalog DTO bounds', () => {
+  it('runtime-validates every class aggregate root field instead of asserting its contract type', () => {
+    const invalidFields: readonly (readonly [string, unknown])[] = [
+      ['kind', 'feat'],
+      ['name', false],
+      ['rules_edition', 'future'],
+      ['spellcasting_ability', 1],
+      ['progression_type', 1],
+      ['caster_fraction', 1],
+      ['caster_rounding', 1],
+      ['prepares_or_knows', 1],
+      ['supports_ritual_casting', 1],
+      ['ritual_casting_mode', 1],
+      ['primary_ability_expression', 1],
+      ['notes', 1],
+      ['progressions', {}],
+      ['sheet_traits', []],
+      ['saving_throw_proficiencies', {}],
+      ['skill_options', {}],
+      ['armor_training', {}],
+      ['weapon_proficiencies', {}],
+      ['extra_attack_grants', {}],
+      ['martial_arts_dice', {}],
+      ['weapon_mastery_grants', {}],
+      ['weapon_mastery_counts', {}],
+      ['equipment_items', {}],
+      ['resources', {}],
+      ['resource_formulas', {}],
+      ['feature_effects', {}],
+      ['feature_value_contributions', {}],
+      ['named_features', {}],
+      ['stored_fields', {}],
+    ];
+    for (const [field, invalid] of invalidFields) {
+      expect(
+        () => parseSourceCatalogRecord('class', {
+          kind: 'class',
+          aggregate: { ...classProjectorV1Vector.aggregate, [field]: invalid },
+        }),
+        field,
+      ).toThrow();
+    }
+  });
+
+  it('runtime-validates every feat aggregate root field instead of asserting its contract type', () => {
+    const invalidFields: readonly (readonly [string, unknown])[] = [
+      ['kind', 'class'],
+      ['name', false],
+      ['rules_edition', 'future'],
+      ['category', 1],
+      ['min_level', '1'],
+      ['ability_points', '0'],
+      ['ability_increase_abilities', []],
+      ['ability_increase_maximum', '20'],
+      ['repeatable', 0],
+      ['prerequisites', {}],
+      ['grants', {}],
+      ['notes', false],
+      ['stored_fields', {}],
+    ];
+    for (const [field, invalid] of invalidFields) {
+      expect(
+        () => parseSourceCatalogRecord('feat', {
+          kind: 'feat',
+          aggregate: { ...featProjectorV1Vector.aggregate, [field]: invalid },
+        }),
+        field,
+      ).toThrow();
+    }
+  });
+
+  it('retains optional class contribution rows while explicitly refusing stored-only fields', () => {
+    const contribution = {
+      kind: 'feature_value_contribution',
+      contribution_key: 'fixture',
+      label: 'Fixture contribution',
+      target_kind: 'feature_dice_count',
+      target_key: 'sneak_attack',
+      op: 'add',
+      active_from_level: 1,
+      active_to_level: 20,
+      value: { kind: 'const', amount: 1 },
+      supersedes_ref: null,
+    };
+    const parsed = parseSourceCatalogRecord('class', {
+      kind: 'class',
+      aggregate: {
+        ...classProjectorV1Vector.aggregate,
+        feature_value_contributions: [contribution],
+      },
+    });
+    expect(parsed.aggregate.feature_value_contributions).toEqual([contribution]);
+    const baselineIdentity = deriveContentIdentityV1({
+      kind: 'class',
+      edition: classProjectorV1Vector.aggregate.rules_edition,
+      name: classProjectorV1Vector.aggregate.name,
+      payload: projectClassContentV1(classProjectorV1Vector.aggregate),
+    });
+    const contributionIdentity = deriveContentIdentityV1({
+      kind: 'class',
+      edition: parsed.aggregate.rules_edition,
+      name: parsed.aggregate.name,
+      payload: projectClassContentV1(parsed.aggregate),
+    });
+    expect(contributionIdentity.derivedKey).not.toBe(baselineIdentity.derivedKey);
+    expect(() => parseSourceCatalogRecord('class', {
+      kind: 'class',
+      aggregate: {
+        ...classProjectorV1Vector.aggregate,
+        feature_value_contributions: [{
+          ...contribution,
+          value: { kind: 'const', amount: Number.POSITIVE_INFINITY },
+        }],
+      },
+    })).toThrow(/value/);
+    expect(() => parseSourceCatalogRecord('class', {
+      kind: 'class',
+      aggregate: { ...classProjectorV1Vector.aggregate, stored_fields: {} },
+    })).toThrow(/stored-only/);
+    expect(() => parseSourceCatalogRecord('feat', {
+      kind: 'feat',
+      aggregate: { ...featProjectorV1Vector.aggregate, stored_fields: {} },
+    })).toThrow(/stored-only/);
+  });
+
+  it('refuses malformed class contribution rows at the catalog boundary', () => {
+    const validContribution = {
+      kind: 'feature_value_contribution',
+      contribution_key: 'fixture',
+      label: 'Fixture contribution',
+      target_kind: 'feature_dice_count',
+      target_key: 'sneak_attack',
+      op: 'add',
+      active_from_level: 1,
+      active_to_level: 20,
+      value: { kind: 'const', amount: 1 },
+      supersedes_ref: null,
+    };
+    const malformedRows: readonly unknown[] = [
+      {},
+      { kind: 'wrong' },
+      { ...validContribution, label: false, target_kind: 'not_real' },
+      { ...validContribution, contribution_key: '' },
+      { ...validContribution, target_key: 'not_real' },
+      { ...validContribution, op: 'multiply' },
+      { ...validContribution, active_from_level: 0 },
+      { ...validContribution, active_to_level: 99 },
+      { ...validContribution, active_from_level: 10, active_to_level: 9 },
+      { ...validContribution, value: { kind: 'const', amount: 1_001 } },
+      { ...validContribution, value: { kind: 'wrong' } },
+      { ...validContribution, supersedes_ref: {} },
+      { ...validContribution, supersedes_ref: {
+        content_key: 'expanded:class:fixture', contribution_key: '',
+      } },
+      { ...validContribution, resource_display_label: 'Not applicable' },
+    ];
+    for (const malformed of malformedRows) {
+      expect(() => parseSourceCatalogRecord('class', {
+        kind: 'class',
+        aggregate: {
+          ...classProjectorV1Vector.aggregate,
+          feature_value_contributions: [malformed],
+        },
+      }), JSON.stringify(malformed)).toThrow();
+    }
+  });
+
+  it('accepts both complete class contribution target arms', () => {
+    const contributions = [{
+      kind: 'feature_value_contribution',
+      contribution_key: 'fixture-dice',
+      label: 'Fixture dice',
+      target_kind: 'feature_dice_count',
+      target_key: 'sneak_attack',
+      op: 'add',
+      active_from_level: 1,
+      active_to_level: 20,
+      value: { kind: 'const', amount: 1 },
+      supersedes_ref: null,
+    }, {
+      kind: 'feature_value_contribution',
+      contribution_key: 'fixture-resource',
+      label: 'Fixture resource',
+      target_kind: 'resource_maximum',
+      target_key: 'expanded:class:fixture\u0000fixture-resource',
+      op: 'add',
+      active_from_level: 3,
+      active_to_level: 20,
+      value: {
+        kind: 'scale',
+        source: { kind: 'proficiency_bonus' },
+        multiply: 2,
+        round: 'floor',
+      },
+      supersedes_ref: {
+        content_key: 'expanded:class:fixture',
+        contribution_key: 'prior-resource',
+      },
+      resource_display_label: 'Fixture points',
+      resource_marking_shape: 'remaining',
+    }];
+    const parsed = parseSourceCatalogRecord('class', {
+      kind: 'class',
+      aggregate: {
+        ...classProjectorV1Vector.aggregate,
+        feature_value_contributions: contributions,
+      },
+    });
+    expect(parsed.aggregate.feature_value_contributions).toEqual(contributions);
+  });
+
+  it('accepts every stored value-expression arm through the class catalog boundary', () => {
+    const values = [
+      { kind: 'const', amount: -1_000 },
+      { kind: 'ref', source: { kind: 'ability_modifier', ability: 'wisdom' } },
+      {
+        kind: 'scale',
+        source: { kind: 'proficiency_bonus' },
+        divide: 2,
+        round: 'ceiling',
+      },
+      {
+        kind: 'table',
+        level_source: { kind: 'class_level', class_content_key: 'expanded:class:fixture' },
+        rows: [{ from: 1, to: 20, amount: 1_000 }],
+      },
+      {
+        kind: 'piecewise',
+        level_source: { kind: 'character_level' },
+        segments: [{ from: 1, to: 20, value: { kind: 'const', amount: 1 } }],
+      },
+      { kind: 'sum', terms: [{ kind: 'const', amount: 1 }] },
+      {
+        kind: 'clamp',
+        value: { kind: 'ref', source: { kind: 'character_level' } },
+        minimum: { kind: 'const', amount: 1 },
+        maximum: { kind: 'const', amount: 20 },
+      },
+    ];
+    for (const [index, value] of values.entries()) {
+      expect(() => parseSourceCatalogRecord('class', {
+        kind: 'class',
+        aggregate: {
+          ...classProjectorV1Vector.aggregate,
+          feature_value_contributions: [{
+            kind: 'feature_value_contribution',
+            contribution_key: `fixture-${String(index)}`,
+            label: 'Fixture contribution',
+            target_kind: 'feature_dice_count',
+            target_key: 'sneak_attack',
+            op: 'add',
+            active_from_level: 1,
+            active_to_level: 20,
+            value,
+            supersedes_ref: null,
+          }],
+        },
+      }), JSON.stringify(value)).not.toThrow();
+    }
+  });
+
   it('refuses unknown fields at record, aggregate, child, effect, and grant levels', () => {
     const cases = [
       { kind: 'species', aggregate: species(), future_root: true },

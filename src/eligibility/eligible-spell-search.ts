@@ -9,6 +9,7 @@ import {
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import type { RulesEdition, SpellSchool } from '../domain/enums';
+import type { SpellVersionId } from '../domain/ids';
 import {
   catalogLayerDisclosure,
   type CatalogLayerDisclosure,
@@ -30,7 +31,7 @@ import {
 } from './spell-selection-collection';
 
 export interface EligibleSpell {
-  id: number;
+  id: SpellVersionId;
   name: string;
   level: number;
   school: SpellSchool;
@@ -77,7 +78,7 @@ function decodeSlot(row: SqlRow): EligibilitySlot {
 
 function decodeCandidate(row: SqlRow): EligibleSpell {
   return {
-    id: sqlInteger(row, 'id'),
+    id: sqlInteger(row, 'id') as SpellVersionId,
     name: sqlString(row, 'display_name'),
     level: sqlInteger(row, 'level'),
     school: sqlSpellSchool(row, 'school'),

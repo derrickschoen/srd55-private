@@ -10,11 +10,12 @@ import {
   CHARACTER_SNAPSHOT_SCHEMA_VERSION,
 } from '../character/character-state';
 import type { SavePoint } from '../domain/read-models';
+import type { CharacterSavePointId } from '../domain/ids';
 import { CharacterNotFoundError } from './character-crud';
 
 function decodeSavePoint(row: SqlRow): SavePoint {
   return {
-    id: sqlInteger(row, 'id'),
+    id: sqlInteger(row, 'id') as CharacterSavePointId,
     label: sqlString(row, 'label'),
     created_at: sqlNullableString(row, 'created_at') ?? '',
   };

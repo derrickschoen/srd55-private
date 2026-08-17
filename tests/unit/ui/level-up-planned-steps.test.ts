@@ -345,7 +345,7 @@ function chooseRadio(view: HTMLElement, value: string): void {
 }
 
 const eligible: EligibleSpell = {
-  id: 91,
+  id: 91 as SpellVersionId,
   name: 'Thunderwave',
   level: 1,
   school: 'Evocation',

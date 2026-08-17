@@ -1,3 +1,4 @@
+import { expectIdenticalDatabaseImages } from '../../helpers/database-image-equality';
 import type { Database, Sqlite3Static } from '@sqlite.org/sqlite-wasm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { SpellAccessBuilder } from '../../../src/access/spell-access-builder';
@@ -359,7 +360,7 @@ describe('typed character spell section projection', () => {
       const afterBytes = sqlite3.capi.sqlite3_js_db_export(connection).slice();
 
       expect(second).toEqual(first);
-      expect(afterBytes).toEqual(beforeBytes);
+      expectIdenticalDatabaseImages(afterBytes, beforeBytes, 'sheet-spells read-only image');
       expect(
         persistedCharacterSheetSpellTableHashes(db, fixture.characterId),
       ).toEqual(beforeTables);

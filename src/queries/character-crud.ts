@@ -8,6 +8,7 @@ import {
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import type { CharacterRow } from '../domain/models';
+import type { CharacterId, CharacterRevision } from '../domain/ids';
 import {
   abilityAllocationMethods,
   isEnumValue,
@@ -56,7 +57,7 @@ function sqlAllocationMethod(
 
 function decodeCharacter(row: SqlRow): CharacterRow {
   return {
-    id: sqlInteger(row, 'id'),
+    id: sqlInteger(row, 'id') as CharacterId,
     name: sqlString(row, 'name'),
     strength: sqlInteger(row, 'strength'),
     dexterity: sqlInteger(row, 'dexterity'),
@@ -77,7 +78,7 @@ function decodeCharacter(row: SqlRow): CharacterRow {
       'rules_edition_preference',
     ) as RulesEdition,
     allow_legacy: sqlBoolean(row, 'allow_legacy'),
-    revision: sqlInteger(row, 'revision'),
+    revision: sqlInteger(row, 'revision') as CharacterRevision,
     alignment: sqlNullableString(row, 'alignment'),
     appearance: sqlNullableString(row, 'appearance'),
     backstory: sqlNullableString(row, 'backstory'),

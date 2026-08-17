@@ -17,6 +17,12 @@ import {
   type SlotBucket,
 } from '../domain/enums';
 import type { JsonValue } from '../domain/models';
+import type {
+  SlotId,
+  SpellIdentityId,
+  SpellVersionId,
+  WizardSpellbookEntryId,
+} from '../domain/ids';
 import {
   catalogLayerDisclosure,
   type CatalogLayerDisclosure,
@@ -59,7 +65,7 @@ interface CharacterRow {
 }
 
 interface SlotRouteRow {
-  readonly id: number;
+  readonly id: SlotId;
   readonly character_id: number;
   readonly source_instance_id: number;
   readonly fixed_spell_version_id: number | null;
@@ -75,8 +81,8 @@ interface SlotRouteRow {
   readonly sourceType: string;
   readonly sourceDefinitionId: number | null;
   readonly sourceConfig: string | null;
-  readonly routeSpellVersionId: number;
-  readonly spellIdentityId: number;
+  readonly routeSpellVersionId: SpellVersionId;
+  readonly spellIdentityId: SpellIdentityId;
   readonly spellName: string;
   readonly spellCatalogLayer: CatalogLayerDisclosure;
   readonly spellContentKey: string;
@@ -106,9 +112,9 @@ interface PreparedSlotRow {
 }
 
 interface SpellbookEntry {
-  readonly id: number;
-  readonly spellVersionId: number;
-  readonly spellIdentityId: number;
+  readonly id: WizardSpellbookEntryId;
+  readonly spellVersionId: SpellVersionId;
+  readonly spellIdentityId: SpellIdentityId;
   readonly spellName: string;
   readonly spellCatalogLayer: CatalogLayerDisclosure;
   readonly spellContentKey: string;
@@ -126,7 +132,7 @@ interface RitualCapability {
 }
 
 export interface SpellAccessRoute {
-  readonly spell_identity_id: number;
+  readonly spell_identity_id: SpellIdentityId;
   readonly identity_name: string;
   readonly spell_name: string;
   readonly spell_catalog_layer: CatalogLayerDisclosure;
@@ -138,11 +144,11 @@ export interface SpellAccessRoute {
   readonly save_dc: number | null;
   readonly origin: 'slot' | 'capability';
   readonly casting_mode: CastingMode;
-  readonly spell_version_id: number;
+  readonly spell_version_id: SpellVersionId;
   readonly source_instance_id: number;
   readonly source_name: string;
   readonly source_catalog_layer: CatalogLayerDisclosure;
-  readonly slot_id: number | null;
+  readonly slot_id: SlotId | null;
   readonly slot_key: string | null;
   readonly selection_key: string | null;
   readonly bucket: SlotBucket | null;
@@ -152,7 +158,7 @@ export interface SpellAccessRoute {
   readonly counts_against_limit: boolean;
   readonly free_cast: JsonValue | null;
   readonly spellcasting_ability: Ability | null;
-  readonly spellbook_entry_id?: number;
+  readonly spellbook_entry_id?: WizardSpellbookEntryId;
 }
 
 function decodeCharacter(row: SqlRow): CharacterRow {
@@ -174,7 +180,7 @@ function decodeSlotRoute(row: SqlRow): SlotRouteRow {
     throw new TypeError(`Unknown spell selection bucket ${bucket}.`);
   }
   return {
-    id: sqlInteger(row, 'id'),
+    id: sqlInteger(row, 'id') as SlotId,
     character_id: sqlInteger(row, 'character_id'),
     source_instance_id: sqlInteger(row, 'source_instance_id'),
     fixed_spell_version_id: sqlNullableInteger(
@@ -196,8 +202,8 @@ function decodeSlotRoute(row: SqlRow): SlotRouteRow {
     sourceType: sqlString(row, 'source_type'),
     sourceDefinitionId: sqlNullableInteger(row, 'source_definition_id'),
     sourceConfig: sqlNullableString(row, 'source_config'),
-    routeSpellVersionId: sqlInteger(row, 'route_spell_version_id'),
-    spellIdentityId: sqlInteger(row, 'spell_identity_id'),
+    routeSpellVersionId: sqlInteger(row, 'route_spell_version_id') as SpellVersionId,
+    spellIdentityId: sqlInteger(row, 'spell_identity_id') as SpellIdentityId,
     spellName: sqlString(row, 'spell_name'),
     spellCatalogLayer: catalogLayerDisclosure(
       sqlNullableString(row, 'spell_catalog_layer'),
@@ -244,9 +250,9 @@ function decodePreparedSlot(row: SqlRow): PreparedSlotRow {
 
 function decodeSpellbookEntry(row: SqlRow): SpellbookEntry {
   return {
-    id: sqlInteger(row, 'id'),
-    spellVersionId: sqlInteger(row, 'spell_version_id'),
-    spellIdentityId: sqlInteger(row, 'spell_identity_id'),
+    id: sqlInteger(row, 'id') as WizardSpellbookEntryId,
+    spellVersionId: sqlInteger(row, 'spell_version_id') as SpellVersionId,
+    spellIdentityId: sqlInteger(row, 'spell_identity_id') as SpellIdentityId,
     spellName: sqlString(row, 'spell_name'),
     spellCatalogLayer: catalogLayerDisclosure(
       sqlNullableString(row, 'spell_catalog_layer'),

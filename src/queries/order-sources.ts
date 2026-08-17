@@ -1,6 +1,7 @@
 import { sqlInteger, sqlNullableString, sqlString } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import type { OrderSource } from '../domain/read-models';
+import type { SourceInstanceId } from '../domain/ids';
 import { jsonRecord, type JsonRecord } from './source-config';
 import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 
@@ -27,7 +28,7 @@ export function orderSources(
         const order = config.divine_order as JsonRecord | undefined;
         const chosen = order?.chosen_option;
         return {
-          id: sqlInteger(row, 'id'),
+          id: sqlInteger(row, 'id') as SourceInstanceId,
           class_name: 'Cleric',
           display_name: sqlString(row, 'display_name'),
           order_name: 'Divine Order',
@@ -42,7 +43,7 @@ export function orderSources(
       const order = config.primal_order as JsonRecord | undefined;
       const chosen = order?.chosen_option;
       return {
-        id: sqlInteger(row, 'id'),
+        id: sqlInteger(row, 'id') as SourceInstanceId,
         class_name: 'Druid',
         display_name: sqlString(row, 'display_name'),
         order_name: 'Primal Order',

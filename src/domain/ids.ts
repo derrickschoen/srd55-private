@@ -1,5 +1,5 @@
 import type { core } from 'zod';
-import type { CharacterLevel } from './enums';
+import type { CharacterLevel, StandaloneSourceType } from './enums';
 
 /**
  * Branded identifier types.
@@ -9,13 +9,10 @@ import type { CharacterLevel } from './enums';
  * several read models today. Branding is how that confusion becomes a compile
  * error rather than a wrong row at runtime.
  *
- * SCOPE TODAY, PRECISELY. These brands reach the `$type<>()` annotations on the
- * build-time Drizzle columns and NOTHING ELSE. No runtime call site consumes a
- * branded id: `src/domain/read-models.ts` still declares bare `number`, so
- * passing a `spell_identity_id` where a `spell_version_id` belongs is still not
- * a compile error anywhere. What exists is the vocabulary and the schema-side
- * declaration. Threading it through the read models is the work these brands
- * were declared for and has not been done.
+ * SCOPE TODAY, PRECISELY. Every identifier in both `src/domain/models.ts` and
+ * `src/domain/read-models.ts` is branded. Read-model decoders establish those
+ * brands at the SQL boundary, matching branded Drizzle columns where their
+ * schema declarations expose them.
  *
  * The brand marker is Zod's, so a Drizzle column declared
  * `.$type<SpellVersionId>()` and a Zod schema declared
@@ -99,6 +96,8 @@ export type CharacterLevelFeatChoiceId = Brand<
   number,
   'CharacterLevelFeatChoiceId'
 >;
+/** `character_class_levels.id` — one held class on one character. */
+export type CharacterClassLevelId = Brand<number, 'CharacterClassLevelId'>;
 export type CharacterSheetAdjustmentId = Brand<
   number,
   'CharacterSheetAdjustmentId'
@@ -168,6 +167,33 @@ export type SubclassDefinitionId = Brand<number, 'SubclassDefinitionId'>;
 export type FeatDefinitionId = Brand<number, 'FeatDefinitionId'>;
 export type SpeciesDefinitionId = Brand<number, 'SpeciesDefinitionId'>;
 export type BackgroundDefinitionId = Brand<number, 'BackgroundDefinitionId'>;
+export interface StandaloneDefinitionIds {
+  readonly feat: FeatDefinitionId;
+  readonly species: SpeciesDefinitionId;
+  readonly background: BackgroundDefinitionId;
+}
+export type StandaloneDefinitionId =
+  StandaloneDefinitionIds[StandaloneSourceType];
+export type StandaloneDefinitionIdFor<
+  Type extends StandaloneSourceType,
+> = StandaloneDefinitionIds[Type];
+export type SourceDefinitionId =
+  | ClassDefinitionId
+  | SubclassDefinitionId
+  | StandaloneDefinitionId;
+
+/** Append-only command journal and audit-log row identities. */
+export type CharacterOperationId = Brand<number, 'CharacterOperationId'>;
+export type ChangeLogId = Brand<number, 'ChangeLogId'>;
+/** Polymorphic `change_log.entity_id`; its table is selected by `entity_type`. */
+export type AuditEntityId = Brand<number, 'AuditEntityId'>;
+/** `character_save_points.id`. */
+export type CharacterSavePointId = Brand<number, 'CharacterSavePointId'>;
+/** `warning_acknowledgements.id`. */
+export type WarningAcknowledgementId = Brand<
+  number,
+  'WarningAcknowledgementId'
+>;
 
 /**
  * The two class-feature catalog ids (D19).
