@@ -28,6 +28,20 @@ export default defineConfig({
     // Run BOTH unit and integration .test.ts under vitest. Browser tests are
     // .spec.ts under tests/browser and belong to Playwright (npm run test:browser).
     include: ['tests/**/*.test.ts', ...liveInclusions],
+    /**
+     * Derives the SRD spell-source parse ONCE, before any worker is forked,
+     * and hands the workers a file path and a key. It is a pure-parse cache
+     * and nothing else: the worker re-checks the key against the corpus it is
+     * actually holding, re-runs every freeze and every mint itself, and a
+     * change to either corpus file or to `spell-source-reader.ts` is a miss
+     * and a full re-derivation.
+     *
+     * Like the live-suite switch above, this adds no suite, excludes nothing
+     * and relaxes nothing — it only moves work that already ran 38 times into
+     * running once. The reasoning lives in the setup file; the guarantee lives
+     * in `src/simulation/spell-source-parse-cache.ts`.
+     */
+    globalSetup: ['tests/helpers/spell-source-parse-cache-global-setup.ts'],
     clearMocks: true,
   },
 });

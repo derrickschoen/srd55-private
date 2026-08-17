@@ -1262,9 +1262,33 @@ export function deriveSaveDamageCoverage(
   return deriveSaveDamageCoverageFromBodies(bodies);
 }
 
-export function deriveSaveDamageCoverageFromBodies(
+/**
+ * THE EXPENSIVE HALF, AND THE ONLY HALF THAT IS PURE DATA.
+ *
+ * `parseSaveDamageClauses` runs every regex in this file over every spell body;
+ * it is ~90% of the module-evaluation cost of `src/simulation/coverage.ts`.
+ * Everything it returns is plain JSON-representable data — no frozen objects,
+ * no minted evidence, no identities anyone downstream compares.
+ *
+ * `assembleSaveDamageCoverage` is the cheap half, and it is deliberately kept
+ * separate BECAUSE it mints: it freezes the candidate records and the counts.
+ * Freezing has to happen in the process that will use the values, so a cache
+ * may only ever store what `parseSaveDamageClauses` produced and must re-run
+ * the assembly itself. `deriveSaveDamageCoverageFromBodies` remains the single
+ * uncached composition of the two and is unchanged in behaviour.
+ */
+export type SaveDamageClauseParse = {
+  readonly clauses_by_heading: ReadonlyMap<
+    string,
+    readonly SourceDerivedSaveClause[]
+  >;
+  readonly raw_clause_count: number;
+  readonly broad_suspects: readonly BroadDamageSaveSuspect[];
+};
+
+export function parseSaveDamageClauses(
   bodies: ReadonlyMap<string, string>,
-): DerivedSaveDamageCoverage {
+): SaveDamageClauseParse {
   const clausesByHeading = new Map<string, readonly SourceDerivedSaveClause[]>();
   let rawCount = 0;
   for (const [heading, body] of bodies) {
@@ -1281,21 +1305,38 @@ export function deriveSaveDamageCoverageFromBodies(
         : [...direct, gate].sort((left, right) => left.start - right.start),
     );
   }
-  const candidates = [...clausesByHeading.entries()].flatMap(
+  return {
+    clauses_by_heading: clausesByHeading,
+    raw_clause_count: rawCount,
+    broad_suspects: [...bodies].flatMap(([heading, body]) =>
+      broadDamageSaveSuspects(heading, body),
+    ),
+  };
+}
+
+export function assembleSaveDamageCoverage(
+  bodies: ReadonlyMap<string, string>,
+  parse: SaveDamageClauseParse,
+): DerivedSaveDamageCoverage {
+  const candidates = [...parse.clauses_by_heading.entries()].flatMap(
     ([heading, clauses]) => clauses.map((clause) =>
       Object.freeze({ heading, ...clause }),
     ),
   );
   return {
     bodies,
-    clauses_by_heading: clausesByHeading,
+    clauses_by_heading: parse.clauses_by_heading,
     candidates,
     counts: Object.freeze({
-      before_deduplication: rawCount,
+      before_deduplication: parse.raw_clause_count,
       after_deduplication: candidates.length,
     }),
-    broad_suspects: [...bodies].flatMap(([heading, body]) =>
-      broadDamageSaveSuspects(heading, body),
-    ),
+    broad_suspects: parse.broad_suspects,
   };
+}
+
+export function deriveSaveDamageCoverageFromBodies(
+  bodies: ReadonlyMap<string, string>,
+): DerivedSaveDamageCoverage {
+  return assembleSaveDamageCoverage(bodies, parseSaveDamageClauses(bodies));
 }
