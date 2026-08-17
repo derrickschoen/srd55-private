@@ -33,9 +33,9 @@ function signatureText(heading: string): string[] {
     throw new Error(`No source candidate for ${heading}.`);
   }
   return candidate.failed_damage_signatures.map((signature) => [
-    signature.dice_count === null
-      ? String(signature.flat_modifier)
-      : `${String(signature.dice_count)}d${String(signature.die_size)}`,
+    signature.kind === 'flat'
+      ? String(signature.amount)
+      : `${String(signature.count)}d${String(signature.die)}`,
     signature.damage_type ?? '*',
   ].join(' '));
 }

@@ -20,6 +20,7 @@ import {
   type AttackDamageInstance,
   type AttackRollClauseId,
   type CriticalHitRule,
+  type DamageComponent,
   type DamageInstance,
   type DamageNeutralMechanicId,
   type DamageNeutralityEvidence,
@@ -45,7 +46,8 @@ import {
   spellBodyDigestInputsFromFullLayout,
   spellDescriptionsByHeading,
   spellDescriptionsFromFullLayout,
-  type FailedDamageSignature,
+  damageSignatureOf,
+  type DamageSignature,
   type SourceDerivedSaveClause,
   type SourceDerivedSaveDamageCandidate,
 } from './spell-source-reader';
@@ -402,8 +404,8 @@ type ReviewedSaveSuccessClause = {
 };
 
 type DamageSignatureSlot = readonly [
-  FailedDamageSignature,
-  ...FailedDamageSignature[],
+  DamageSignature,
+  ...DamageSignature[],
 ];
 
 type DamageRollSlotGroup = readonly [number, ...number[]];
@@ -437,26 +439,25 @@ const dice = (
   count: number,
   die: number,
   damageType: DamageType | null,
-): FailedDamageSignature => ({
+): DamageSignature => ({
+  kind: 'dice',
   damage_type: damageType,
-  dice_count: count,
-  die_size: die,
-  flat_modifier: null,
+  count,
+  die,
 });
 
 const flat = (
   modifier: number,
   damageType: DamageType,
-): FailedDamageSignature => ({
+): DamageSignature => ({
+  kind: 'flat',
   damage_type: damageType,
-  dice_count: null,
-  die_size: null,
-  flat_modifier: modifier,
+  amount: modifier,
 });
 
 const required = (
-  signature: FailedDamageSignature,
-  ...alternatives: readonly FailedDamageSignature[]
+  signature: DamageSignature,
+  ...alternatives: readonly DamageSignature[]
 ): DamageSignatureSlot => [signature, ...alternatives];
 
 function failedRollSlotGroups(
@@ -715,8 +716,9 @@ function sourceClauseMatchesDiscriminator(
       return clause.ability === discriminator.ability;
     case 'damage_signature':
       return clause.failed_damage_signatures.some((signature) =>
-        signature.dice_count === discriminator.dice_count &&
-        signature.die_size === discriminator.die_size &&
+        signature.kind === 'dice' &&
+        signature.count === discriminator.dice_count &&
+        signature.die === discriminator.die_size &&
         signature.damage_type === discriminator.damage_type,
       );
     case 'source_text':
@@ -725,30 +727,32 @@ function sourceClauseMatchesDiscriminator(
 }
 
 function sameDamageSignature(
-  left: FailedDamageSignature,
-  right: FailedDamageSignature,
+  left: DamageSignature,
+  right: DamageSignature,
 ): boolean {
-  return left.damage_type === right.damage_type &&
-    left.dice_count === right.dice_count &&
-    left.die_size === right.die_size &&
-    left.flat_modifier === right.flat_modifier;
+  if (left.damage_type !== right.damage_type || left.kind !== right.kind) {
+    return false;
+  }
+  switch (left.kind) {
+    case 'dice':
+      return right.kind === 'dice' &&
+        left.count === right.count &&
+        left.die === right.die;
+    case 'flat':
+      return right.kind === 'flat' && left.amount === right.amount;
+  }
 }
 
 function sourceDamageSlots(
   clause: SourceDerivedSaveClause,
   arm: 'failure' | 'success',
 ): readonly DamageSignatureSlot[] {
-  const bySlot = new Map<number, FailedDamageSignature[]>();
+  const bySlot = new Map<number, DamageSignature[]>();
   for (const occurrence of clause.damage_occurrences) {
     if (occurrence.arm !== arm) {
       continue;
     }
-    const signature: FailedDamageSignature = {
-      damage_type: occurrence.damage_type,
-      dice_count: occurrence.dice_count,
-      die_size: occurrence.die_size,
-      flat_modifier: occurrence.flat_modifier,
-    };
+    const signature = damageSignatureOf(occurrence);
     const slot = bySlot.get(occurrence.slot_index) ?? [];
     if (!slot.some((candidate) => sameDamageSignature(candidate, signature))) {
       slot.push(signature);
@@ -831,8 +835,8 @@ function damageSlotsAreBijective(
 }
 
 function damageSignaturesAreBijective(
-  declared: readonly FailedDamageSignature[],
-  sourced: readonly FailedDamageSignature[],
+  declared: readonly DamageSignature[],
+  sourced: readonly DamageSignature[],
 ): boolean {
   if (declared.length !== sourced.length) {
     return false;
@@ -841,7 +845,7 @@ function damageSignaturesAreBijective(
     if (index === declared.length) {
       return used.size === sourced.length;
     }
-    const signature = declared[index] as FailedDamageSignature;
+    const signature = declared[index] as DamageSignature;
     for (const [sourceIndex, candidate] of sourced.entries()) {
       if (!used.has(sourceIndex) && sameDamageSignature(signature, candidate)) {
         const next = new Set(used);
@@ -1777,33 +1781,62 @@ function damageMatchesSourceClause(
   if (damage.some((instance) => !sameSourceRef(instance.source, effect))) {
     return false;
   }
-  type SuppliedPool = {
+  /**
+   * A supplied pool carries the same two arms the declared signatures do, so
+   * the matcher below can never ask a flat pool for its die size.
+   */
+  type SuppliedAmount =
+    | { readonly kind: 'dice'; readonly die: number; readonly amount: number }
+    | { readonly kind: 'flat'; readonly amount: number };
+  type SuppliedPool = SuppliedAmount & {
     readonly instance_index: number;
     readonly damage_type: string;
-    readonly kind: 'dice' | 'flat';
-    readonly die: number | null;
-    readonly amount: number;
+  };
+  const suppliedAmount = (component: DamageComponent): SuppliedAmount => {
+    switch (component.kind) {
+      case 'dice':
+        return {
+          kind: 'dice',
+          die: component.pool.die,
+          amount: component.pool.count,
+        };
+      case 'flat':
+        return { kind: 'flat', amount: component.modifier };
+    }
   };
   const suppliedByKey = new Map<string, SuppliedPool>();
   for (const [instanceIndex, instance] of damage.entries()) {
     for (const component of instance.components) {
-      const kind = component.kind;
-      const die = kind === 'dice' ? component.pool.die : null;
-      const amount = kind === 'dice' ? component.pool.count : component.modifier;
-      const key = JSON.stringify([instanceIndex, instance.damage_type, kind, die]);
+      const supply = suppliedAmount(component);
+      const key = JSON.stringify([
+        instanceIndex,
+        instance.damage_type,
+        supply.kind,
+        supply.kind === 'dice' ? supply.die : null,
+      ]);
       const existing = suppliedByKey.get(key);
       suppliedByKey.set(key, {
+        ...supply,
         instance_index: instanceIndex,
         damage_type: instance.damage_type,
-        kind,
-        die,
-        amount: (existing?.amount ?? 0) + amount,
+        amount: (existing?.amount ?? 0) + supply.amount,
       });
     }
   }
   const supplied = [...suppliedByKey.values()];
-  const requiredAmount = (signature: FailedDamageSignature): number | null =>
-    signature.dice_count ?? signature.flat_modifier;
+  /**
+   * Never null now: a two-arm signature always carries exactly one amount.
+   * The old `dice_count ?? flat_modifier` could return null for the all-null
+   * record the parser never emitted, and the caller had to skip it.
+   */
+  const requiredAmount = (signature: DamageSignature): number => {
+    switch (signature.kind) {
+      case 'dice':
+        return signature.count;
+      case 'flat':
+        return signature.amount;
+    }
+  };
   const rollMatchesInstance = (
     slotGroup: DamageRollSlotGroup,
     instanceIndex: number,
@@ -1825,13 +1858,10 @@ function damageMatchesSourceClause(
       }
       for (const signature of slot) {
         const amount = requiredAmount(signature);
-        if (amount === null) {
-          continue;
-        }
         for (const [localIndex, pool] of instancePools.entries()) {
-          const kindMatches = signature.dice_count === null
-            ? pool.kind === 'flat' && signature.die_size === null
-            : pool.kind === 'dice' && signature.die_size === pool.die;
+          const kindMatches = signature.kind === 'dice'
+            ? pool.kind === 'dice' && signature.die === pool.die
+            : pool.kind === 'flat';
           const typeMatches = signature.damage_type === null ||
             signature.damage_type === pool.damage_type;
           if (kindMatches && typeMatches && (remaining[localIndex] ?? 0) >= amount) {

@@ -76,12 +76,18 @@ const COVERAGE_PATH = '../../../src/simulation/coverage';
  * signature contents are real Geas values so nothing downstream sees nonsense
  * in the cases that get past the guard.
  */
-type NearMissSignature = {
-  readonly damage_type: string;
-  readonly dice_count: number | null;
-  readonly die_size: number | null;
-  readonly flat_modifier: number | null;
-};
+type NearMissSignature =
+  | {
+      readonly kind: 'dice';
+      readonly damage_type: string;
+      readonly count: number;
+      readonly die: number;
+    }
+  | {
+      readonly kind: 'flat';
+      readonly damage_type: string;
+      readonly amount: number;
+    };
 
 type NearMissRequirements = {
   readonly failed: readonly (readonly NearMissSignature[])[];
@@ -90,9 +96,9 @@ type NearMissRequirements = {
 
 const PSYCHIC_5D10: NearMissSignature = {
   damage_type: 'Psychic',
-  dice_count: 5,
-  die_size: 10,
-  flat_modifier: null,
+  kind: 'dice',
+  count: 5,
+  die: 10,
 };
 
 const slot: readonly NearMissSignature[] = [PSYCHIC_5D10];

@@ -116,15 +116,15 @@ describe('gate-clause failed-damage arm selection', () => {
     expect(gate.failed_damage_signatures).toEqual([
       {
         damage_type: 'Fire',
-        dice_count: 4,
-        die_size: 6,
-        flat_modifier: null,
+        kind: 'dice',
+        count: 4,
+        die: 6,
       },
       {
         damage_type: 'Fire',
-        dice_count: 4,
-        die_size: 6,
-        flat_modifier: null,
+        kind: 'dice',
+        count: 4,
+        die: 6,
       },
     ]);
   });

@@ -86,12 +86,18 @@ type ClauseMap = ReadonlyMap<string, readonly SourceDerivedSaveClause[]>;
  * The reviewed requirement types are module-private, so an injected near miss
  * carries its own structurally-compatible shape.
  */
-type NearMissSignature = {
-  readonly damage_type: string;
-  readonly dice_count: number | null;
-  readonly die_size: number | null;
-  readonly flat_modifier: number | null;
-};
+type NearMissSignature =
+  | {
+      readonly kind: 'dice';
+      readonly damage_type: string;
+      readonly count: number;
+      readonly die: number;
+    }
+  | {
+      readonly kind: 'flat';
+      readonly damage_type: string;
+      readonly amount: number;
+    };
 
 type NearMissRequirements = {
   readonly failed: readonly (readonly NearMissSignature[])[];
@@ -102,16 +108,16 @@ type NearMissRequirements = {
 
 const PSYCHIC_5D10: NearMissSignature = {
   damage_type: 'Psychic',
-  dice_count: 5,
-  die_size: 10,
-  flat_modifier: null,
+  kind: 'dice',
+  count: 5,
+  die: 10,
 };
 
 const FIRE_1D6: NearMissSignature = {
   damage_type: 'Fire',
-  dice_count: 1,
-  die_size: 6,
-  flat_modifier: null,
+  kind: 'dice',
+  count: 1,
+  die: 6,
 };
 
 const GEAS_REQUIREMENTS_KEY = 'geas:recurring-damage';
@@ -132,14 +138,24 @@ const GEAS_GROUPING_ORACLE_MESSAGE =
 const INJECTED_TIMING_REASON =
   'Lane E injected timing unavailability for the unavailable-branch probes.';
 
+/**
+ * Every probe below builds a dice-arm occurrence, so the overrides are typed
+ * against that arm: `Partial<SourceDamageOccurrence>` distributes over the
+ * union and would let a caller half-convert a dice occurrence into a flat one.
+ */
+type DiceSourceDamageOccurrence = Extract<
+  SourceDamageOccurrence,
+  { readonly kind: 'dice' }
+>;
+
 function occurrence(
-  overrides: Partial<SourceDamageOccurrence>,
-): SourceDamageOccurrence {
+  overrides: Partial<DiceSourceDamageOccurrence>,
+): DiceSourceDamageOccurrence {
   return {
     damage_type: 'Psychic',
-    dice_count: 5,
-    die_size: 10,
-    flat_modifier: null,
+    kind: 'dice',
+    count: 5,
+    die: 10,
     arm: 'failure',
     timing: 'on_save_resolution',
     roll_transform: 'none',
@@ -421,8 +437,8 @@ describe('unavailable-source requirements and transform agreement', () => {
     occurrence({
       arm: 'success',
       damage_type: 'Fire',
-      dice_count: 1,
-      die_size: 6,
+      count: 1,
+      die: 6,
       roll_index: 1,
     }),
   ];
@@ -545,8 +561,8 @@ describe('unavailable-source requirements and transform agreement', () => {
             occurrence({
               arm: 'success',
               damage_type: 'Fire',
-              dice_count: 1,
-              die_size: 6,
+              count: 1,
+              die: 6,
               roll_index: 1,
               roll_transform: 'none',
             }),

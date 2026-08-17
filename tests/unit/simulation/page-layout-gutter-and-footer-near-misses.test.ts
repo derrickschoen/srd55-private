@@ -341,7 +341,7 @@ describe('damage source-range containment', () => {
     const span = 'Fire damage: each creature takes 2d8 Fire damage.';
 
     expect(sourceDamageSignatures(span)).toStrictEqual([
-      { dice_count: 2, die_size: 8, flat_modifier: null, damage_type: 'Fire' },
+      { kind: 'dice', count: 2, die: 8, damage_type: 'Fire' },
     ]);
   });
 
@@ -352,8 +352,8 @@ describe('damage source-range containment', () => {
     const span = 'Fire damage 2d10. The target takes 5d6 Fire damage.';
 
     expect(sourceDamageSignatures(span)).toStrictEqual([
-      { dice_count: 2, die_size: 10, flat_modifier: null, damage_type: 'Fire' },
-      { dice_count: 5, die_size: 6, flat_modifier: null, damage_type: 'Fire' },
+      { kind: 'dice', count: 2, die: 10, damage_type: 'Fire' },
+      { kind: 'dice', count: 5, die: 6, damage_type: 'Fire' },
     ]);
   });
 
@@ -363,8 +363,8 @@ describe('damage source-range containment', () => {
     const span = 'A creature takes 2d6 Fire damage, and then 4d8.';
 
     expect(sourceDamageSignatures(span)).toStrictEqual([
-      { dice_count: 2, die_size: 6, flat_modifier: null, damage_type: 'Fire' },
-      { dice_count: 4, die_size: 8, flat_modifier: null, damage_type: 'Fire' },
+      { kind: 'dice', count: 2, die: 6, damage_type: 'Fire' },
+      { kind: 'dice', count: 4, die: 8, damage_type: 'Fire' },
     ]);
   });
 });
@@ -377,7 +377,7 @@ describe('damage occurrence offsets', () => {
     const span = 'The creature takes 1d6 5 Fire damage.';
 
     expect(sourceDamageSignatures(span)).toStrictEqual([
-      { dice_count: 1, die_size: 6, flat_modifier: null, damage_type: 'Fire' },
+      { kind: 'dice', count: 1, die: 6, damage_type: 'Fire' },
     ]);
   });
 
@@ -387,8 +387,8 @@ describe('damage occurrence offsets', () => {
     const span = 'The target takes 2d6 Cold damage. It then takes 4 Fire damage.';
 
     expect(sourceDamageSignatures(span)).toStrictEqual([
-      { dice_count: 2, die_size: 6, flat_modifier: null, damage_type: 'Cold' },
-      { dice_count: null, die_size: null, flat_modifier: 4, damage_type: 'Fire' },
+      { kind: 'dice', count: 2, die: 6, damage_type: 'Cold' },
+      { kind: 'flat', amount: 4, damage_type: 'Fire' },
     ]);
   });
 
@@ -413,9 +413,8 @@ describe('damage occurrence offsets', () => {
       .toStrictEqual([[
         {
           damage_type: 'Fire',
-          dice_count: null,
-          die_size: null,
-          flat_modifier: 7,
+          kind: 'flat',
+          amount: 7,
           arm: 'failure',
           timing: 'on_save_resolution',
           roll_transform: 'none',

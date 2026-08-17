@@ -1,12 +1,30 @@
 import type { Ability, DamageType } from '../domain/enums';
 import type { SaveSuccessOutcome } from './contracts';
 
-export type FailedDamageSignature = {
-  readonly damage_type: DamageType | null;
-  readonly dice_count: number | null;
-  readonly die_size: number | null;
-  readonly flat_modifier: number | null;
-};
+/**
+ * One parsed damage amount. Two arms, because the SRD prints exactly two
+ * shapes: a dice expression (`2d6`) and a flat amount (`3 Fire damage`). The
+ * type of either can be absent from the printed clause ("damage of a chosen
+ * type"), so `damage_type` is nullable in BOTH arms; what is not
+ * representable is an amount that is neither dice nor flat, which the old
+ * four-nullable-field record allowed and no parser path ever produced.
+ *
+ * `count`/`die`/`amount` are plain numbers on purpose (D269a): branding them
+ * would change which inputs are accepted at runtime, and this union is a
+ * representation change only.
+ */
+export type DamageSignature =
+  | {
+      readonly kind: 'dice';
+      readonly damage_type: DamageType | null;
+      readonly count: number;
+      readonly die: number;
+    }
+  | {
+      readonly kind: 'flat';
+      readonly damage_type: DamageType | null;
+      readonly amount: number;
+    };
 
 export type SourceDamageArm = 'failure' | 'success';
 export type SourceDamageTiming =
@@ -50,7 +68,7 @@ export type SourceDerivedFixedSaveDc =
  * Components whose source ranges overlap, or whose sentence explicitly says
  * they are one roll, belong to one damage roll.
  */
-export type SourceDamageOccurrence = FailedDamageSignature & {
+export type SourceDamageOccurrence = DamageSignature & {
   readonly arm: SourceDamageArm;
   readonly timing: SourceDamageTiming;
   readonly roll_transform: SourceDamageRollTransform;
@@ -59,6 +77,31 @@ export type SourceDamageOccurrence = FailedDamageSignature & {
   readonly slot_index: number;
   readonly roll_index: number;
 };
+
+/**
+ * Drops an occurrence's clause-local placement, keeping only the amount and
+ * its type. One implementation, because both the reader's gate path and the
+ * coverage matcher need exactly this projection.
+ */
+export function damageSignatureOf(
+  occurrence: SourceDamageOccurrence,
+): DamageSignature {
+  switch (occurrence.kind) {
+    case 'dice':
+      return {
+        kind: 'dice',
+        damage_type: occurrence.damage_type,
+        count: occurrence.count,
+        die: occurrence.die,
+      };
+    case 'flat':
+      return {
+        kind: 'flat',
+        damage_type: occurrence.damage_type,
+        amount: occurrence.amount,
+      };
+  }
+}
 
 export type SourceDerivedSaveClause = {
   readonly span: string;
@@ -72,7 +115,7 @@ export type SourceDerivedSaveClause = {
   readonly duration: SourceDerivedDamageDuration;
   readonly timing_unavailable_reason: string | null;
   readonly repetitions: SourceDerivedDamageRepetitions;
-  readonly failed_damage_signatures: readonly FailedDamageSignature[];
+  readonly failed_damage_signatures: readonly DamageSignature[];
   readonly damage_occurrences: readonly SourceDamageOccurrence[];
 };
 
@@ -318,14 +361,14 @@ function rangeContains(
 
 export function sourceDamageSignatures(
   span: string,
-): readonly FailedDamageSignature[] {
+): readonly DamageSignature[] {
   return damageOccurrenceGroups(span).flatMap((group) => group.signatures);
 }
 
 type DamageOccurrenceGroup = {
   readonly start: number;
   readonly end: number;
-  readonly signatures: readonly FailedDamageSignature[];
+  readonly signatures: readonly DamageSignature[];
 };
 
 function damageOccurrenceGroups(span: string): readonly DamageOccurrenceGroup[] {
@@ -347,9 +390,9 @@ function damageOccurrenceGroups(span: string): readonly DamageOccurrenceGroup[] 
       start,
       end: start + (match[0]?.length ?? diceText.length),
       signatures: (types.length === 0 ? [null] : types).map((damageType) => ({
-        dice_count: Number(match[1]),
-        die_size: Number(match[2]),
-        flat_modifier: null,
+        kind: 'dice' as const,
+        count: Number(match[1]),
+        die: Number(match[2]),
         damage_type: damageType,
       })),
     });
@@ -364,9 +407,8 @@ function damageOccurrenceGroups(span: string): readonly DamageOccurrenceGroup[] 
         start: match.index ?? 0,
         end: (match.index ?? 0) + (match[0]?.length ?? 0),
         signatures: [{
-          dice_count: null,
-          die_size: null,
-          flat_modifier: Number(match[1]),
+          kind: 'flat',
+          amount: Number(match[1]),
           damage_type: match[2] as DamageType,
         }],
       });
@@ -391,23 +433,32 @@ function damageOccurrenceGroups(span: string): readonly DamageOccurrenceGroup[] 
       start: diceIndex,
       end: diceIndex + diceText.length,
       signatures: [{
-        dice_count: Number(match[2]),
-        die_size: Number(match[3]),
-        flat_modifier: null,
+        kind: 'dice',
+        count: Number(match[2]),
+        die: Number(match[3]),
         damage_type: match[1] as DamageType,
       }],
     });
   }
-  if (groups.length === 0 && /\d+d\d+[^.]{0,70}?damage of (?:the|a) [^.]+ type/iu.test(span)) {
-    const dice = /(\d+)d(\d+)/u.exec(span);
-    const start = dice?.index ?? 0;
+  // The guard sentence requires a literal `\d+d\d+` before it will accept the
+  // span, so the bare `(\d+)d(\d+)` re-scan below cannot fail once the guard
+  // passes: the guard's own match is a witness for it. The old code hedged
+  // with `dice === null ? null : ...` in every field, which was the ONLY
+  // parser path that could ever have produced an amount-less signature —
+  // dead, and now unrepresentable.
+  const ambiguousTypeDice =
+    groups.length === 0 &&
+    /\d+d\d+[^.]{0,70}?damage of (?:the|a) [^.]+ type/iu.test(span)
+      ? /(\d+)d(\d+)/u.exec(span)
+      : null;
+  if (ambiguousTypeDice !== null) {
     groups.push({
-      start,
-      end: start + (dice?.[0].length ?? 0),
+      start: ambiguousTypeDice.index,
+      end: ambiguousTypeDice.index + ambiguousTypeDice[0].length,
       signatures: [{
-        dice_count: dice === null ? null : Number(dice[1]),
-        die_size: dice === null ? null : Number(dice[2]),
-        flat_modifier: null,
+        kind: 'dice',
+        count: Number(ambiguousTypeDice[1]),
+        die: Number(ambiguousTypeDice[2]),
         damage_type: null,
       }],
     });
@@ -419,9 +470,9 @@ function damageOccurrenceGroups(span: string): readonly DamageOccurrenceGroup[] 
         start: dice.index,
         end: dice.index + dice[0].length,
         signatures: [{
-          dice_count: Number(dice[1]),
-          die_size: Number(dice[2]),
-          flat_modifier: null,
+          kind: 'dice',
+          count: Number(dice[1]),
+          die: Number(dice[2]),
           damage_type: null,
         }],
       });
@@ -996,7 +1047,7 @@ type DirectDamageOwnerBase = {
   readonly match: RegExpMatchArray;
   readonly start: number;
   readonly ability: Ability;
-  readonly failed_damage_signatures: readonly FailedDamageSignature[];
+  readonly failed_damage_signatures: readonly DamageSignature[];
 };
 
 type DirectDamageOwner =
@@ -1014,7 +1065,7 @@ function directDamageSaveClauses(body: string): SourceDerivedSaveClause[] {
   const matches = [...body.matchAll(explicitSave)];
   const owners: DirectDamageOwner[] = [];
   let inheritedAbility: Ability | null = null;
-  let inheritedDamageSignatures: readonly FailedDamageSignature[] = [];
+  let inheritedDamageSignatures: readonly DamageSignature[] = [];
   let inheritedDamageOccurrences: readonly SourceDamageOccurrence[] = [];
   for (const [index, match] of matches.entries()) {
     const start = body.lastIndexOf('.', match.index ?? 0) + 1;
@@ -1106,12 +1157,7 @@ function gateDamageSaveClause(body: string): SourceDerivedSaveClause | null {
       const damageOccurrences = sourceDamageOccurrences(span, start, 'gate');
       const failedDamageSignatures = damageOccurrences
         .filter((occurrence) => occurrence.arm === 'failure')
-        .map((occurrence) => ({
-          damage_type: occurrence.damage_type,
-          dice_count: occurrence.dice_count,
-          die_size: occurrence.die_size,
-          flat_modifier: occurrence.flat_modifier,
-        }));
+        .map(damageSignatureOf);
       return {
         span,
         start,
@@ -1133,13 +1179,20 @@ function gateDamageSaveClause(body: string): SourceDerivedSaveClause | null {
 }
 
 function sameSignature(
-  left: FailedDamageSignature,
-  right: FailedDamageSignature,
+  left: DamageSignature,
+  right: DamageSignature,
 ): boolean {
-  return left.damage_type === right.damage_type &&
-    left.dice_count === right.dice_count &&
-    left.die_size === right.die_size &&
-    left.flat_modifier === right.flat_modifier;
+  if (left.damage_type !== right.damage_type || left.kind !== right.kind) {
+    return false;
+  }
+  switch (left.kind) {
+    case 'dice':
+      return right.kind === 'dice' &&
+        left.count === right.count &&
+        left.die === right.die;
+    case 'flat':
+      return right.kind === 'flat' && left.amount === right.amount;
+  }
 }
 
 function sameClauseOwnership(

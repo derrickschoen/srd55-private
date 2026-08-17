@@ -87,9 +87,8 @@ describe('round 18 deeply immutable registered state', () => {
     const originalSignature = { ...signature };
     try {
       expect(() => Object.assign(signature, {
-        dice_count: null,
-        die_size: null,
-        flat_modifier: 1000,
+        kind: 'flat',
+        amount: 1000,
       })).toThrow(TypeError);
     } finally {
       if (!Object.isFrozen(signature)) {

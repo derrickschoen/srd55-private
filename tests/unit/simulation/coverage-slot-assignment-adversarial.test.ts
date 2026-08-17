@@ -196,7 +196,7 @@ describe('clause-local roll-slot grouping', () => {
     await expect(
       importCoverageWithOccurrences('Disintegrate', (o) => [
         ...o,
-        { ...firstOccurrence(o), slot_index: 2, dice_count: 3, die_size: 4 },
+        { ...firstOccurrence(o), slot_index: 2, kind: 'dice', count: 3, die: 4 },
       ]),
     ).rejects.toThrow(DISINTEGRATE_ROLL_GROUP_FAILURE);
   }, IMPORT_TIMEOUT_MS);
@@ -232,8 +232,8 @@ describe('bijective slot assignment against the reviewed declaration', () => {
     );
     const flameStrike = coverage.saveSuccessOutcomeEvidenceManifest.get(FLAME_STRIKE_ID);
     expect(flameStrike?.failed_damage_signature_slots).toStrictEqual([
-      [{ damage_type: 'Fire', dice_count: 5, die_size: 6, flat_modifier: null }],
-      [{ damage_type: 'Radiant', dice_count: 5, die_size: 6, flat_modifier: null }],
+      [{ kind: 'dice', damage_type: 'Fire', count: 5, die: 6 }],
+      [{ kind: 'dice', damage_type: 'Radiant', count: 5, die: 6 }],
     ]);
   }, IMPORT_TIMEOUT_MS);
 
@@ -248,9 +248,9 @@ describe('bijective slot assignment against the reviewed declaration', () => {
           index === 1
             ? {
                 ...occurrence,
-                dice_count: 10,
-                die_size: 6,
-                flat_modifier: null,
+                kind: 'dice',
+                count: 10,
+                die: 6,
               }
             : occurrence,
         ),
@@ -375,16 +375,20 @@ describe('supplied-pool matching inside the damage signature matcher', () => {
   });
 
   /**
-   * The subsumption proof for two mutants left standing on purpose:
-   * `signature.die_size === null` inside the flat arm, and `pool.kind ===
-   * 'dice'` inside the dice arm. Supplied pools carry `die === null` exactly
-   * when they are flat-kind, by construction. The reviewed signatures below
-   * supply the other half: a signature with no dice count never carries a die
-   * size, and a signature with a dice count always does. Together the two make
-   * both clauses redundant with the die-size comparison beside them, so no
-   * input can distinguish them.
+   * The subsumption proof for the one mutant still left standing on purpose:
+   * `pool.kind === 'dice'` inside the dice arm. Supplied pools carry a die
+   * exactly when they are dice-kind, by construction, so that clause is
+   * redundant with the die comparison beside it and no input distinguishes
+   * them.
+   *
+   * Its former partner — `signature.die_size === null` inside the flat arm —
+   * is GONE rather than proven: the two-arm `DamageSignature` cannot express a
+   * flat signature that also carries a die size, so there is no clause left to
+   * mutate. What this test still pins is the fact that made the clause
+   * redundant: every reviewed signature carries the amount fields of its own
+   * arm and no others.
    */
-  it('never reviews a damage signature whose dice count and die size disagree about being present', () => {
+  it('never reviews a damage signature carrying the other arm\'s amount fields', () => {
     let signatureCount = 0;
     for (const clause of saveSuccessOutcomeEvidenceManifest.values()) {
       const slots = [
@@ -394,7 +398,11 @@ describe('supplied-pool matching inside the damage signature matcher', () => {
       for (const slot of slots) {
         for (const signature of slot) {
           signatureCount += 1;
-          expect(signature.die_size === null).toBe(signature.dice_count === null);
+          expect(Object.keys(signature).sort()).toStrictEqual(
+            signature.kind === 'dice'
+              ? ['count', 'damage_type', 'die', 'kind']
+              : ['amount', 'damage_type', 'kind'],
+          );
         }
       }
     }

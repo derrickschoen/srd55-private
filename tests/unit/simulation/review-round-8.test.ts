@@ -65,7 +65,7 @@ describe('round 8 clause-local source evidence', () => {
       throw new Error('Missing Vitriolic Sphere source evidence.');
     }
     expect(clause.damage_occurrences.map((occurrence) => ({
-      amount: occurrence.dice_count,
+      amount: occurrence.kind === 'dice' ? occurrence.count : occurrence.amount,
       type: occurrence.damage_type,
       arm: occurrence.arm,
       timing: occurrence.timing,

@@ -866,22 +866,22 @@ describe('coverage vocabularies and bundled provenance', () => {
   it('uses independently reviewed required slots rather than extractor projections', () => {
     expect(reviewedSaveSuccessClauses.ice_storm.failed_damage_signature_slots)
       .toEqual([
-        [{ damage_type: 'Bludgeoning', dice_count: 2, die_size: 10, flat_modifier: null }],
-        [{ damage_type: 'Cold', dice_count: 4, die_size: 6, flat_modifier: null }],
+        [{ kind: 'dice', damage_type: 'Bludgeoning', count: 2, die: 10 }],
+        [{ kind: 'dice', damage_type: 'Cold', count: 4, die: 6 }],
       ]);
     expect(reviewedSaveSuccessClauses.flame_strike.failed_damage_signature_slots)
       .toEqual([
-        [{ damage_type: 'Fire', dice_count: 5, die_size: 6, flat_modifier: null }],
-        [{ damage_type: 'Radiant', dice_count: 5, die_size: 6, flat_modifier: null }],
+        [{ kind: 'dice', damage_type: 'Fire', count: 5, die: 6 }],
+        [{ kind: 'dice', damage_type: 'Radiant', count: 5, die: 6 }],
       ]);
     expect(reviewedSaveSuccessClauses.spirit_guardians.failed_damage_signature_slots)
       .toEqual([[
-        { damage_type: 'Radiant', dice_count: 3, die_size: 8, flat_modifier: null },
-        { damage_type: 'Necrotic', dice_count: 3, die_size: 8, flat_modifier: null },
+        { kind: 'dice', damage_type: 'Radiant', count: 3, die: 8 },
+        { kind: 'dice', damage_type: 'Necrotic', count: 3, die: 8 },
       ]]);
     expect(reviewedSaveSuccessClauses.vitriolic_sphere.success_damage_signature_slots)
       .toEqual([[
-        { damage_type: 'Acid', dice_count: 10, die_size: 4, flat_modifier: null },
+        { kind: 'dice', damage_type: 'Acid', count: 10, die: 4 },
       ]]);
     expect(reviewedSaveSuccessClauses.vitriolic_sphere.success_roll_transform)
       .toBe('floor_half');

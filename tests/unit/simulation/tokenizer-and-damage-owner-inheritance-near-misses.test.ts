@@ -75,9 +75,9 @@ function clauseAt(body: string, index: number): SourceDerivedSaveClause {
  */
 function fireOccurrence(start: number): SourceDamageOccurrence {
   return {
-    dice_count: 8,
-    die_size: 6,
-    flat_modifier: null,
+    kind: 'dice',
+    count: 8,
+    die: 6,
     damage_type: damageType('Fire'),
     arm: 'failure',
     // Nothing follows the dice group with "at the end of its next turn", so the
@@ -233,7 +233,7 @@ describe('damage-owner inheritance near misses', () => {
     expect(second.damage_occurrences[0]?.end).toBeLessThan(second.start);
 
     expect(second.failed_damage_signatures).toEqual([
-      { dice_count: 8, die_size: 6, flat_modifier: null, damage_type: damageType('Fire') },
+      { kind: 'dice', count: 8, die: 6, damage_type: damageType('Fire') },
     ]);
   });
 
@@ -241,7 +241,7 @@ describe('damage-owner inheritance near misses', () => {
     // Nothing precedes the first owner, so an implementation that always took
     // the inherited list would hand it an empty one.
     expect(clauseAt(INHERITED_OFFSETS_BODY, 0).failed_damage_signatures).toEqual([
-      { dice_count: 8, die_size: 6, flat_modifier: null, damage_type: damageType('Fire') },
+      { kind: 'dice', count: 8, die: 6, damage_type: damageType('Fire') },
     ]);
   });
 
@@ -251,7 +251,7 @@ describe('damage-owner inheritance near misses', () => {
     // 4d6 Cold is derived from this clause's own failed-save sentence, so the
     // inherited 8d6 Fire must not be substituted for it.
     expect(second.failed_damage_signatures).toEqual([
-      { dice_count: 4, die_size: 6, flat_modifier: null, damage_type: damageType('Cold') },
+      { kind: 'dice', count: 4, die: 6, damage_type: damageType('Cold') },
     ]);
   });
 
@@ -263,9 +263,9 @@ describe('damage-owner inheritance near misses', () => {
     // overwrite the published list with its own occurrences.
     expect(third.damage_occurrences).toEqual([
       {
-        dice_count: 3,
-        die_size: 6,
-        flat_modifier: null,
+        kind: 'dice',
+        count: 3,
+        die: 6,
         damage_type: damageType('Poison'),
         arm: 'failure',
         timing: 'on_save_resolution',

@@ -112,7 +112,7 @@ function syntheticCandidate(
     timing_unavailable_reason: null,
     repetitions: { status: 'available', minimum: 1, maximum: 1 },
     failed_damage_signatures: [
-      { damage_type: 'Fire', dice_count: 1, die_size: 6, flat_modifier: null },
+      { kind: 'dice', damage_type: 'Fire', count: 1, die: 6 },
     ],
     damage_occurrences: [],
   };

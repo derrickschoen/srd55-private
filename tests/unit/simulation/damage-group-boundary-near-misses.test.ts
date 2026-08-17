@@ -97,7 +97,7 @@ describe('damage-group merge and dedup at a shared start index', () => {
     const span = 'Fire damage is dealt: each target takes 2d6 damage';
 
     expect(sourceDamageSignatures(span)).toStrictEqual([
-      { dice_count: 2, die_size: 6, flat_modifier: null, damage_type: 'Fire' },
+      { kind: 'dice', count: 2, die: 6, damage_type: 'Fire' },
     ]);
   });
 
@@ -115,8 +115,8 @@ describe('damage-group merge and dedup at a shared start index', () => {
     expect(span.indexOf('2d6')).not.toBe(span.indexOf('3d8'));
 
     expect(sourceDamageSignatures(span)).toStrictEqual([
-      { dice_count: 2, die_size: 6, flat_modifier: null, damage_type: null },
-      { dice_count: 3, die_size: 8, flat_modifier: null, damage_type: 'Fire' },
+      { kind: 'dice', count: 2, die: 6, damage_type: null },
+      { kind: 'dice', count: 3, die: 8, damage_type: 'Fire' },
     ]);
   });
 
@@ -141,9 +141,65 @@ describe('damage-group merge and dedup at a shared start index', () => {
     expect(span.indexOf('3d8')).toBeLessThan(span.indexOf('4d10'));
 
     expect(sourceDamageSignatures(span)).toStrictEqual([
-      { dice_count: null, die_size: null, flat_modifier: 7, damage_type: 'Fire' },
-      { dice_count: 3, die_size: 8, flat_modifier: null, damage_type: 'Cold' },
-      { dice_count: 4, die_size: 10, flat_modifier: null, damage_type: 'Acid' },
+      { kind: 'flat', amount: 7, damage_type: 'Fire' },
+      { kind: 'dice', count: 3, die: 8, damage_type: 'Cold' },
+      { kind: 'dice', count: 4, die: 10, damage_type: 'Acid' },
+    ]);
+  });
+});
+
+/**
+ * One printed amount is one signature, and the two arms of `DamageSignature`
+ * are the only two shapes a signature can take. These probes pin which arm
+ * each printed shape produces.
+ */
+describe('damage-signature arms', () => {
+  /**
+   * "2d6 + 3 Fire damage" is TWO printed amounts, not one dice amount with a
+   * modifier folded into it. Hand derivation on
+   * "each target takes 2d6 + 3 Fire damage":
+   *
+   *   - the forward dice pattern reads `2d6`, with " Fire " between the dice
+   *     and the word "damage", so it contributes a Fire DICE group at the
+   *     index of "2d6";
+   *   - the flat pattern reads "3 Fire damage". Its guard rejects a flat
+   *     amount whose three preceding characters contain a `d` — here they are
+   *     " + ", so the FLAT group stands;
+   *   - the reverse pattern needs a dice expression after a type word and
+   *     there is none.
+   *
+   * "2d6" stands before "3", so source order is dice then flat.
+   */
+  it('reads a dice expression plus a flat amount as two signatures', () => {
+    const span = 'each target takes 2d6 + 3 Fire damage';
+    expect(span.indexOf('2d6')).toBeLessThan(span.indexOf('3 Fire'));
+
+    expect(sourceDamageSignatures(span)).toStrictEqual([
+      { kind: 'dice', count: 2, die: 6, damage_type: 'Fire' },
+      { kind: 'flat', amount: 3, damage_type: 'Fire' },
+    ]);
+  });
+
+  /**
+   * The ambiguous-type fallback. It only runs when the three ordinary
+   * patterns produced nothing, and the only way to reach it with prose that
+   * still says "damage of the ... type" is for the word "damage" to carry no
+   * word boundary in front of it: the forward pattern ends in `\bdamage`,
+   * while the fallback's guard sentence does not. Hence the deliberately
+   * run-together "2d6damage" below — synthetic, and the narrowest fixture
+   * that reaches the branch.
+   *
+   * What the branch must produce is a DICE signature with a null type: the
+   * amount is printed, the type is not. It cannot produce an amount-less
+   * signature — the guard sentence begins with a literal `\d+d\d+`, so the
+   * `(\d+)d(\d+)` re-scan inside the branch is guaranteed a match, which is
+   * why the old `dice === null ? null : ...` hedging in every field was dead.
+   */
+  it('reads an amount whose type the source leaves open as a null-type dice signature', () => {
+    const span = 'A target takes 2d6damage of the chosen type';
+
+    expect(sourceDamageSignatures(span)).toStrictEqual([
+      { kind: 'dice', count: 2, die: 6, damage_type: null },
     ]);
   });
 });
