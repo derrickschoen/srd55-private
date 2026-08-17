@@ -7,6 +7,19 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D298 — OWNER: v3 entries are lightweight test content, NOT Veteran-grade dossiers (2026-08-17)
+
+Clarifying D296/D297 scope: the intent of adopting all eight is "more types
+of non-copyrighted mechanics in the public repo so we can test. They don't
+need the attention that we gave to the Barbed Court and the Veteran."
+So: compact catalog entries + sim models sufficient to exercise each
+mechanic type (bonded riders, control locks, persistent riders,
+self-Inspiration, first-turn primitives, form packages, crit-range
+expansion, bounded pools) — no full-ceremony prose dossiers, no
+docx-fidelity pass. Consequence for D297(2): Cutting Chorus SHIPS for
+testing without a net-DPR claim; the d4-derived figure lands whenever d4
+expansion produces it, and only the CLAIM was ever blocked on it.
+
 ## D297 — OWNER: homebrew v3 sub-rulings — both Ambush chassis; Chorus cost from d4; cleric slot stays open (2026-08-17)
 
 Three sub-rulings completing D296: (1) Ambush Primitive ships on **both**
