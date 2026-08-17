@@ -114,6 +114,15 @@ import {
   historicalContributionGapForPortable,
 } from '../catalog/historical-contribution-gaps';
 import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
+import {
+  ShareCommittedImportResultMissingError,
+  ShareContentReferenceMissingError,
+  ShareDocumentIdentityPersistenceError,
+  ShareSelectedSpellVersionMissingError,
+  ShareSourceConfigShapeError,
+  ShareSpellCompatibilityInvariantError,
+  ShareStoredWeaponRangeKindError,
+} from './character-share-errors';
 
 /**
  * WHAT THE SHARER CHOOSES TO SEND. Every flag is OPT-IN and every default is
@@ -279,7 +288,7 @@ function jsonRecord(value: unknown): Record<string, unknown> {
     typeof decoded !== 'object' ||
     Array.isArray(decoded)
   ) {
-    throw new Error('Source config must be an object.');
+    throw new ShareSourceConfigShapeError();
   }
   return { ...(decoded as Record<string, unknown>) };
 }
@@ -351,7 +360,7 @@ function contentKey(
     [Number(id)],
   );
   if (key === null) {
-    throw new Error(`Missing ${table} reference ${String(id)}.`);
+    throw new ShareContentReferenceMissingError(table, String(id));
   }
   return String(key);
 }
@@ -383,9 +392,7 @@ function shareWeaponFromRow(row: Row): ShareWeapon {
   }
   const storedRangeKind = row.range_kind;
   if (!isWeaponRangeKind(storedRangeKind)) {
-    throw new TypeError(
-      `Unknown weapon range kind "${String(storedRangeKind)}".`,
-    );
+    throw new ShareStoredWeaponRangeKindError(String(storedRangeKind));
   }
   const range = weaponRangeFromStorage(
     storedRangeKind,
@@ -769,7 +776,7 @@ function localShareDocumentId(
       [characterId],
     );
     if (documentId === null) {
-      throw new Error('Character share identity could not be persisted.');
+      throw new ShareDocumentIdentityPersistenceError(characterId);
     }
     return documentId;
   });
@@ -954,7 +961,9 @@ export function exportCharacterShare(
       }
       const version = versions.get(Number(row.current_spell_version_id));
       if (version === undefined) {
-        throw new Error('A selected spell version does not exist.');
+        throw new ShareSelectedSpellVersionMissingError(
+          Number(row.current_spell_version_id),
+        );
       }
       return [
         {
@@ -1555,7 +1564,7 @@ function missingReferenceIssue(reference: ShareCatalogReference): ShareImportIss
         reference.contentName,
       );
     case 'spell':
-      throw new Error('Missing spells become placeholders, not compatibility issues.');
+      throw new ShareSpellCompatibilityInvariantError(reference.contentKey);
   }
 }
 
@@ -3395,7 +3404,9 @@ export function commitCharacterShareImport(
   });
   if (committed.kind !== 'committed') return committed;
   if (imported === null) {
-    throw new Error('Committed share import did not create a character.');
+    throw new ShareCommittedImportResultMissingError(
+      document.documentIdentity?.document_id ?? null,
+    );
   }
   return Object.freeze({ ...committed, result: imported });
 }
