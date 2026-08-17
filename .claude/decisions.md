@@ -7,6 +7,22 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D270 — OWNER: all five S7 MAJOR sheet defects block v1 (2026-08-16)
+
+Presented with the reach analysis (S7-01 Alert/initiative, S7-02 finesse
+Str-default, S7-04 duplicate Expertise, all reachable at level 1; S7-05
+false-UNKNOWN import warning pulled in-bar by D265; S7-03 crit-range
+needing level 3+/homebrew) and four options (split by reach — supervisor
+recommendation, all five, disclosure-first, none), the owner ruled: **"All
+five block"** — the strict D33 reading. No wrong number ships anywhere:
+the next engine lanes are sheet-math repair — initiative as a typed,
+sourced additive model (Alert included); weapon-ability selection for
+finesse/ranged rows; crit threshold as a sourced character property
+consumed by the dice calculator; Expertise sibling-eligibility
+recomputation at selection time with a human-readable refusal; import
+gap-evaluation scoped to active revisions only. Supersedes the fix-wave
+scope question parked since sweep 7 landed.
+
 ## D269 — OWNER: type-pattern directives from the 3a-3c walkthrough (2026-08-16)
 
 Three standing directives on how the domain gets typed, from the owner's
