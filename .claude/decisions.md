@@ -7,6 +7,13 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D275 — OWNER: do not post the #6150 upstream comment (2026-08-17)
+
+Ruled "Don't post." The stryker-js #6150 confirmation comment (our vitest
+3.2.7 repro, misreport numbers, working patch) stays local. The
+auto-applied runner patch (scripts/patch-stryker-vitest-runner.mjs, pinned
+9.6.1) remains our fix; revisit only if the owner re-opens it.
+
 ## D274 — OWNER: tagged error classes with derived messages; supersedes D273 (2026-08-16)
 
 The owner flagged bare `throw new TypeError('prose')` as a smell and asked
