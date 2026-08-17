@@ -7,6 +7,20 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D285 — OWNER: stranger spec persona and mandatory misstep recoveries (2026-08-17)
+
+The D265 blocking stranger spec gets its content: persona is a
+**5e-2014 knower who does not know the 2024 rules**, walking a **Cleric**
+1->5 (prepared casting + domain machinery on the guided path). The journey
+must DEMONSTRATE RECOVERY from all four: (1) duplicate skill/Expertise
+pick refused clearly at selection time (the S7-04 shape); (2) reload
+mid-level-up with nothing lost and an obvious resume point; (3) double
+import of their own backup detected without duplicates; (4) a 2014-rules
+expectation (racial ASIs, level-1 subclass) met with UI that shows where
+those went (background bonuses, level-3 subclass) instead of a dead end.
+Plus the D265 spine: cold profile, choices-and-sources every level,
+export -> re-import into a fresh profile with identical sheet numbers.
+
 ## D284 — OWNER: second tab opens READ-ONLY (2026-08-17)
 
 Multi-tab contract ruled: **"Read-only second tab."** Today a second
