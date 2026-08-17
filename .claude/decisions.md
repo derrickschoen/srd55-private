@@ -7,6 +7,18 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D293 — OWNER: desktop tested; best-effort mobile (2026-08-17)
+
+Browser matrix ruled in the owner's words: **"Desktop tested, but do your
+best to make it work for mobile."** Desktop Chromium/Firefox/Edge are the
+tested matrix; mobile (iOS Safari and Android alike) is a genuine
+engineering target, not a written-off tier — responsive layouts, touch
+interactions, storage-pressure resilience, and the capability probe's
+graceful paths all get real effort — but mobile carries no tested claim
+until device evidence exists. Practical consequences: mobile-viewport
+Playwright runs (emulated) join the suites where cheap; OPFS/probe
+fallbacks stay honest; no real-device gate blocks v1.
+
 ## D292 — OWNER: homebrew v3 and d4 scorecard reactivate; party stays parked (2026-08-17)
 
 Parked-workstream ruling: **homebrew v3 adopt/author decisions** return
