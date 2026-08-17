@@ -115,6 +115,19 @@ describe('project-owned source path guard near misses', () => {
     ).toBe(TRAVERSAL_MESSAGE);
   });
 
+  it('rejects a leading backslash even without a dedicated clause for it', () => {
+    // The guard used to open with `startsWith('\\')`. That clause is gone:
+    // every path starting with a backslash also CONTAINS one, so
+    // `includes('\\')` decides this case on its own. This probe is what makes
+    // the deletion safe to keep — a rewrite that narrowed `includes` to,
+    // say, an interior-only test would fail here.
+    expect(
+      thrownTypeErrorMessage(() =>
+        projectOwnedSourcePath('\\src/simulation/contracts.ts'),
+      ),
+    ).toBe(TRAVERSAL_MESSAGE);
+  });
+
   it('rejects an interior parent segment as a traversal', () => {
     // Only one of several '/'-separated segments is '..', so a guard that
     // demanded every segment be '..' would let this through, as would one

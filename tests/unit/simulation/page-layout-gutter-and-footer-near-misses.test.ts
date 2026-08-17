@@ -249,6 +249,30 @@ describe('two-column gutter geometry', () => {
   });
 });
 
+describe('pages with nothing printed on them', () => {
+  /**
+   * A reviewed page whose rows are all blank has no printed width to measure.
+   * `Math.max()` over an empty list is -Infinity, and the gutter search then
+   * increments -Infinity forever, so the un-guarded reader HANGS instead of
+   * reporting a corrupt page. The guard must fail loudly and name the page.
+   *
+   * The probe page is page 175 and its two rows are an empty string and a run
+   * of spaces — blank by `trim()`, which is the same test the reader applies.
+   *
+   * The negative control for this guard cannot run in-process: a vitest
+   * timeout cannot interrupt a synchronous loop. It runs as a subprocess with
+   * a kill timeout instead; see the increment-4 report.
+   */
+  it('rejects a reviewed page whose printed rows are all blank', () => {
+    const layout = completeLayout(['', '     ']);
+
+    const error = thrownBy(() => spellDescriptionsFromFullLayout(layout));
+
+    expect(error).toBeInstanceOf(TypeError);
+    expect(messageOf(error)).toBe('SRD spell page 175 has no printed rows.');
+  });
+});
+
 describe('page footer and out-of-range page handling', () => {
   it('rejects spell metadata on an out-of-range page whose footer prints first', () => {
     // Page 106's footer is line 0 of the page, and the metadata beneath it is

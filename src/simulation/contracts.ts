@@ -354,9 +354,11 @@ export function bundledSrdPath(value: unknown): BundledSrdPath {
 
 export function projectOwnedSourcePath(value: unknown): ProjectOwnedSourcePath {
   const path = nonemptyKey(value, 'Project-owned source path');
+  // No `startsWith('\\')` clause: `includes('\\')` below already rejects every
+  // path that begins with a backslash, so the clause could not change any
+  // verdict. The near-miss suite keeps probing backslash-leading paths.
   if (
     path.startsWith('/') ||
-    path.startsWith('\\') ||
     /^[A-Za-z]:[\\/]/u.test(path) ||
     path.includes('\\') ||
     path.split('/').some((segment) => segment === '..')

@@ -258,6 +258,12 @@ function splitSafe(line: string, column: number): boolean {
 
 function findGutter(lines: readonly string[], page: number): number {
   const nonBlank = lines.filter((line) => line.trim() !== '');
+  // An all-blank page makes `Math.max()` return -Infinity, and the column
+  // loop below then increments -Infinity forever: the process hangs instead
+  // of reporting a corrupt page. Fail loudly at the top instead.
+  if (nonBlank.length === 0) {
+    throw new TypeError(`SRD spell page ${String(page)} has no printed rows.`);
+  }
   const width = Math.max(...nonBlank.map((line) => line.length));
   const candidates: number[] = [];
   for (
