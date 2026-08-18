@@ -384,7 +384,11 @@ export const spell_versions = sqliteTable(
       table.rules_edition,
       table.level,
     ),
-    index('spell_versions_is_active_index').on(table.is_active),
+    index('spell_versions_active_level_name_index').on(
+      table.is_active,
+      table.level,
+      table.display_name,
+    ),
   ],
 );
 

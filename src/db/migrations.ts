@@ -49,6 +49,7 @@ import characterShareReceipts from '../../drizzle/0045_character_share_receipts.
 import recipientReplacementChoices from '../../drizzle/0046_recipient_replacement_choices.sql?raw';
 import sourceInstanceState from '../../drizzle/0047_source_instance_state.sql?raw';
 import catalogContentVisibility from '../../drizzle/0048_catalog_content_visibility.sql?raw';
+import spellVersionsActiveLevelNameIndex from '../../drizzle/0049_spell_versions_active_level_name_index.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -553,6 +554,14 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       'cc356151ad397f7fcc2c26410221a6f4782e4c0cd3811b9ab0c6d90e816ccfcb',
     resultSchemaChecksum:
       'e537c5d8acdc519c11dcb504de0614c62af70718d5b252420d877be16593e27e',
+  }),
+  Object.freeze({
+    id: '0049_spell_versions_active_level_name_index',
+    sql: spellVersionsActiveLevelNameIndex,
+    checksum:
+      '5ce856b3247875a0bcbed31a478cc98ea5d376564d19f5565f36df71b0b48f54',
+    resultSchemaChecksum:
+      '0b77b124caa0c018792c739b1ac102ff5ee2d2bb74642aee686838fe4d06fa2a',
   }),
 ]);
 
