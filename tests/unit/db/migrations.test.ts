@@ -249,6 +249,15 @@ const SCHEMA_BEFORE_CATALOG_CONTENT_VISIBILITY = DATABASE_MIGRATIONS
   .join('\n');
 const CATALOG_CONTENT_VISIBILITY_MIGRATION =
   DATABASE_MIGRATIONS[CATALOG_CONTENT_VISIBILITY_INDEX]!;
+const RELATIONSHIP_INDEXES_INDEX = DATABASE_MIGRATIONS.findIndex(
+  (entry) => entry.id === '0049_relationship_indexes',
+);
+const SCHEMA_BEFORE_RELATIONSHIP_INDEXES = DATABASE_MIGRATIONS
+  .slice(0, RELATIONSHIP_INDEXES_INDEX)
+  .map((entry) => entry.sql)
+  .join('\n');
+const RELATIONSHIP_INDEXES_MIGRATION =
+  DATABASE_MIGRATIONS[RELATIONSHIP_INDEXES_INDEX]!;
 
 /**
  * One character, three source instances (one of them deleted so the
@@ -3630,6 +3639,37 @@ describe('database migration chain', () => {
            'bundled', 'missing visibility'
          )`,
       )).toThrow(/catalog_content_identities\.visibility/);
+      db.exec(RELATIONSHIP_INDEXES_MIGRATION.sql);
+      expect(databaseSchemaSignature(db)).toBe(schemaSignature(schema));
+    } finally {
+      db.close();
+    }
+  });
+
+  it('0049 adds the measured relationship indexes to persisted images', () => {
+    const db = new sqlite3.oo1.DB(':memory:', 'c');
+    try {
+      db.exec(SCHEMA_BEFORE_RELATIONSHIP_INDEXES);
+      const indexNames = [
+        'character_source_instances_parent_index',
+        'spell_selection_slots_current_spell_version_index',
+        'spell_selection_slots_fixed_spell_version_index',
+        'spell_selection_slots_source_state_index',
+      ];
+      expect(db.selectValues(
+        `SELECT name FROM sqlite_schema
+         WHERE name IN (${indexNames.map(() => '?').join(', ')})`,
+        indexNames,
+      )).toEqual([]);
+
+      db.exec(RELATIONSHIP_INDEXES_MIGRATION.sql);
+
+      expect(db.selectValues(
+        `SELECT name FROM sqlite_schema
+         WHERE name IN (${indexNames.map(() => '?').join(', ')})
+         ORDER BY name`,
+        indexNames,
+      )).toEqual(indexNames);
       expect(databaseSchemaSignature(db)).toBe(schemaSignature(schema));
     } finally {
       db.close();
