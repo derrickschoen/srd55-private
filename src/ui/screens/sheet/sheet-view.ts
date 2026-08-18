@@ -679,7 +679,11 @@ function spellSection(
           label: [{ text: spell.name, free_text: true }],
           value: spellLevelText(spell),
           detail: plain(
-            `${spellMarkerText(spell)} · ${catalogLayerLabel(spell.catalog_layer)}`,
+            `${spellMarkerText(spell)}` +
+              (spell.selection_count === 1
+                ? ''
+                : ` · Selected ${String(spell.selection_count)} times`) +
+              ` · ${catalogLayerLabel(spell.catalog_layer)}`,
           ),
           disclosure: {
             summary: 'Read spell rules',

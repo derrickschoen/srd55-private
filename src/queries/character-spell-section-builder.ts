@@ -30,6 +30,10 @@ import type {
   SpellVersionId,
 } from '../domain/ids';
 import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
+import {
+  classifyDuplicateWarnings,
+  type DuplicateWarningAssessment,
+} from '../duplicates/duplicate-warning-detector';
 
 export type SheetSpellMarker = 'prepared' | 'known';
 
@@ -84,6 +88,8 @@ export interface SheetSpellbookEntry {
 
 export interface SheetSpell extends SheetSpellbookEntry {
   readonly marker: SheetSpellMarker;
+  /** Number of distinct persisted selection routes collapsed into this row. */
+  readonly selection_count: number;
 }
 
 export type SheetSpellGroup =
@@ -107,6 +113,11 @@ export type SheetSpellGroup =
 
 /** The typed value rendered by SS-2 from `CharacterSheet.spells`. */
 export type CharacterSpellSection = readonly SheetSpellGroup[];
+
+export interface CharacterSpellSectionProjection {
+  readonly section: CharacterSpellSection;
+  readonly duplicate_warnings: readonly DuplicateWarningAssessment[];
+}
 
 interface SpellFacts {
   readonly spell_version_id: SpellVersionId;
@@ -419,6 +430,10 @@ export class CharacterSpellSectionBuilder {
   }
 
   build(characterId: number): CharacterSpellSection {
+    return this.buildProjection(characterId).section;
+  }
+
+  buildProjection(characterId: number): CharacterSpellSectionProjection {
     const spellbook = this.spellbookAcquisitions(characterId);
     const hasStoredAssignment = this.db.scalar<number>(
       `SELECT 1
@@ -429,21 +444,27 @@ export class CharacterSpellSectionBuilder {
        LIMIT 1`,
       [characterId],
     );
-    const selected = hasStoredAssignment === null
+    const routes = hasStoredAssignment === null
       ? []
-      : this.#access
-          .buildForCharacter(characterId)
-          .map((route) => ({ route, marker: sheetSpellMarker(route) }))
-          .filter(
-            (
-              entry,
-            ): entry is {
-              readonly route: SpellAccessRoute;
-              readonly marker: SheetSpellMarker;
-            } => entry.marker !== null,
-          );
+      : this.#access.buildForCharacter(characterId);
+    const duplicateAssessments = classifyDuplicateWarnings(routes).filter(
+      (assessment) => assessment.category !== 'none',
+    );
+    const selected = routes
+      .map((route) => ({ route, marker: sheetSpellMarker(route) }))
+      .filter(
+        (
+          entry,
+        ): entry is {
+          readonly route: SpellAccessRoute;
+          readonly marker: SheetSpellMarker;
+        } => entry.marker !== null,
+      );
     if (selected.length === 0 && spellbook.length === 0) {
-      return [];
+      return {
+        section: [],
+        duplicate_warnings: duplicateAssessments,
+      };
     }
 
     const sourceIds = [
@@ -506,16 +527,25 @@ export class CharacterSpellSectionBuilder {
       const versionId = route.spell_version_id as SpellVersionId;
       const existing = group.spells.get(versionId);
       if (existing !== undefined) {
-        if (existing.marker === 'known' && marker === 'prepared') {
-          group.spells.set(versionId, { ...existing, marker });
-        }
+        group.spells.set(versionId, {
+          ...existing,
+          marker:
+            existing.marker === 'known' && marker === 'prepared'
+              ? marker
+              : existing.marker,
+          selection_count: existing.selection_count + 1,
+        });
         continue;
       }
       const spellFacts = facts.get(versionId);
       if (spellFacts === undefined) {
         throw new Error(`Missing sheet facts for spell version ${versionId}.`);
       }
-      group.spells.set(versionId, { ...spellFacts, marker });
+      group.spells.set(versionId, {
+        ...spellFacts,
+        marker,
+        selection_count: 1,
+      });
     }
 
     for (const entry of spellbook) {
@@ -551,7 +581,7 @@ export class CharacterSpellSectionBuilder {
       group.spellbook.set(entry.spell_version_id, spellFacts);
     }
 
-    return [...groups.values()].sort(compareGroups).map((group) => {
+    const section = [...groups.values()].sort(compareGroups).map((group) => {
       const common = {
         statistics: [...group.statistics.values()],
         spells: [...group.spells.values()].sort(compareSheetSpells),
@@ -574,6 +604,10 @@ export class CharacterSpellSectionBuilder {
         ...common,
       };
     });
+    return {
+      section,
+      duplicate_warnings: duplicateAssessments,
+    };
   }
 
   private spellbookAcquisitions(
