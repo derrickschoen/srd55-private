@@ -1,10 +1,11 @@
-import type { Database } from '@sqlite.org/sqlite-wasm';
+import type { Database, Sqlite3Static } from '@sqlite.org/sqlite-wasm';
 import { DatabaseContext } from '../../src/db/database';
 import {
   databaseHasOpenStatements,
   databaseIsInTransaction,
+  registerSqliteQueryEngine,
 } from '../../src/db/query';
-import { openSeededTestDatabase } from './open-db';
+import { getSqlite3, openSeededTestDatabase } from './open-db';
 
 export type SharedDbMode = 'ro' | 'rw';
 
@@ -16,6 +17,7 @@ export interface SharedDbLease {
 
 interface SharedDbWorkerState {
   connection: Database | null;
+  engine: Pick<Sqlite3Static, 'capi' | 'oo1'> | null;
   leaseActive: boolean;
   rebuildCount: number;
 }
@@ -29,6 +31,7 @@ const leaseSavepoint = 'dnd_shared_db_lease';
 function workerState(): SharedDbWorkerState {
   workerProcess.__dndSharedDbWorkerState ??= {
     connection: null,
+    engine: null,
     leaseActive: false,
     rebuildCount: 0,
   };
@@ -63,13 +66,22 @@ async function rebuild(
   );
   const connection = await openSeededTestDatabase();
   state.connection = connection;
+  state.engine = await getSqlite3();
   return connection;
 }
 
 async function readyConnection(state: SharedDbWorkerState): Promise<Database> {
   if (state.connection === null) {
     state.connection = await openSeededTestDatabase();
+    state.engine = await getSqlite3();
     return state.connection;
+  }
+  // This state lives on `process` and outlives a module graph, but the query
+  // engine registry in src/db/query.ts is module-local. A fresh graph in the
+  // same worker (Stryker reruns; any isolation change) must re-register the
+  // cached connection's own sqlite3 instance or capi lookups on it throw.
+  if (state.engine !== null) {
+    registerSqliteQueryEngine(state.engine);
   }
   const reason = poisonReason(state.connection);
   return reason === null
