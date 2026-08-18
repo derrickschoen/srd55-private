@@ -29,5 +29,8 @@ export default defineConfig({
     // .spec.ts under tests/browser and belong to Playwright (npm run test:browser).
     include: ['tests/**/*.test.ts', ...liveInclusions],
     clearMocks: true,
+    restoreMocks: true,
+    unstubGlobals: true,
+    unstubEnvs: true,
   },
 });
