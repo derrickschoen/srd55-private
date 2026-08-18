@@ -1,4 +1,3 @@
-import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseContext } from '../../../../src/db/database';
 import {
@@ -32,7 +31,10 @@ import {
   WeaponRangeKindError,
 } from '../../../../src/queries/weapons';
 import type { SlotBucket } from '../../../../src/domain/enums';
-import { openTestDatabase } from '../../../helpers/open-db';
+import {
+  acquireSharedDb,
+  type SharedDbLease,
+} from '../../../helpers/shared-db';
 import { registerFixtureContentIdentity } from '../../../helpers/content-identity';
 
 function thrownBy(run: () => unknown): unknown {
@@ -45,15 +47,15 @@ function thrownBy(run: () => unknown): unknown {
 }
 
 describe('query read-model tagged-error guards', () => {
-  let connection: Database;
   let db: DatabaseContext;
+  let lease: SharedDbLease;
 
   beforeEach(async () => {
-    connection = await openTestDatabase();
-    db = new DatabaseContext(connection);
+    lease = await acquireSharedDb({ mode: 'rw' });
+    db = lease.db;
   });
 
-  afterEach(() => connection.close());
+  afterEach(async () => lease.release());
 
   it('tags a corrupt character allocation method with its column and value', () => {
     const characterId = db.exec(

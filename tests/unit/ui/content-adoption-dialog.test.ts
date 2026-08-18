@@ -1,4 +1,3 @@
-import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, describe, expect, it } from 'vitest';
 import type {
   ContentImportChoices,
@@ -41,11 +40,14 @@ import {
   interactiveElement,
   type InteractiveTestElement,
 } from '../../fixtures/interactive-dom';
-import { openTestDatabase } from '../../helpers/open-db';
+import {
+  acquireSharedDb,
+  type SharedDbLease,
+} from '../../helpers/shared-db';
 
-const connections: Database[] = [];
-afterEach(() => {
-  for (const connection of connections.splice(0)) connection.close();
+const leases: SharedDbLease[] = [];
+afterEach(async () => {
+  for (const lease of leases.splice(0)) await lease.release();
 });
 
 function itemProjection(
@@ -210,9 +212,9 @@ function keydown(key: string, shiftKey = false): KeyboardEvent {
 
 describe('the D82 content-adoption dialog', () => {
   it('CI-8 discloses real planner counts, every match reason, and both collision labels', async () => {
-    const connection = await openTestDatabase();
-    connections.push(connection);
-    const db = new DatabaseContext(connection);
+    const lease = await acquireSharedDb({ mode: 'rw' });
+    leases.push(lease);
+    const db = lease.db;
 
     const exact = itemNode('exact', 'Exact Relic', { rule: 'exact' });
     const exactIdentity = deriveContentIdentityV1(exact.projection);
@@ -491,9 +493,9 @@ describe('the D82 content-adoption dialog', () => {
   });
 
   it('D108-CI8 traps focus and restores the invoker for Cancel, native cancel, and Escape', async () => {
-    const connection = await openTestDatabase();
-    connections.push(connection);
-    const db = new DatabaseContext(connection);
+    const lease = await acquireSharedDb({ mode: 'rw' });
+    leases.push(lease);
+    const db = lease.db;
     const plan = planContentImport(db, [itemNode(
       'modal-discipline', 'Modal Discipline', { rule: 'shared trap' },
     )]);
@@ -546,9 +548,9 @@ describe('the D82 content-adoption dialog', () => {
   });
 
   it('keeps lossless review rows on Match and replans before clone commit', async () => {
-    const connection = await openTestDatabase();
-    connections.push(connection);
-    const db = new DatabaseContext(connection);
+    const lease = await acquireSharedDb({ mode: 'rw' });
+    leases.push(lease);
+    const db = lease.db;
     const alias = '2014:item:road-mage' as ContentKey;
     bundledItem(
       db,
@@ -618,9 +620,9 @@ describe('the D82 content-adoption dialog', () => {
   });
 
   it('requires an explicit choice for same-name distinct rules before commit', async () => {
-    const connection = await openTestDatabase();
-    connections.push(connection);
-    const db = new DatabaseContext(connection);
+    const lease = await acquireSharedDb({ mode: 'rw' });
+    leases.push(lease);
+    const db = lease.db;
     commitNewItem(db, itemNode(
       'installed-collision',
       'Collision Relic',
@@ -692,9 +694,9 @@ describe('the D82 content-adoption dialog', () => {
   });
 
   it('drops an implicit Match when a stale refresh becomes a key collision', async () => {
-    const connection = await openTestDatabase();
-    connections.push(connection);
-    const db = new DatabaseContext(connection);
+    const lease = await acquireSharedDb({ mode: 'rw' });
+    leases.push(lease);
+    const db = lease.db;
     const alias = '2014:item:stale-review' as ContentKey;
     bundledItem(
       db,
@@ -757,9 +759,9 @@ describe('the D82 content-adoption dialog', () => {
   });
 
   it('CI-REVIEW-DEFAULT commits untouched defaults through the real plan token', async () => {
-    const connection = await openTestDatabase();
-    connections.push(connection);
-    const db = new DatabaseContext(connection);
+    const lease = await acquireSharedDb({ mode: 'rw' });
+    leases.push(lease);
+    const db = lease.db;
     const target = '2024:item:default-target' as ContentKey;
     const alias = '2014:legacy:default-target' as ContentKey;
     const payload = { rule: 'same' };

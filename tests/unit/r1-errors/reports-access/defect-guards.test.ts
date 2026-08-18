@@ -1,4 +1,3 @@
-import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   SpellAccessMissingCharacterClassError,
@@ -21,7 +20,7 @@ import {
   BuildReportUnsupportedCasterFractionError,
 } from '../../../../src/reports/build-report-errors';
 import { BuildReportBuilder } from '../../../../src/reports/build-report-builder';
-import { openTestDatabase } from '../../../helpers/open-db';
+import { acquireSharedDb } from '../../../helpers/shared-db';
 
 function defect(run: () => unknown): unknown {
   try {
@@ -35,11 +34,11 @@ function defect(run: () => unknown): unknown {
 async function withDatabase(
   run: (db: DatabaseContext) => void,
 ): Promise<void> {
-  const connection: Database = await openTestDatabase();
+  const lease = await acquireSharedDb({ mode: 'rw' });
   try {
-    run(new DatabaseContext(connection));
+    run(lease.db);
   } finally {
-    connection.close();
+    await lease.release();
   }
 }
 

@@ -1,4 +1,3 @@
-import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock(
@@ -39,7 +38,10 @@ import {
   MulticlassPrimaryAbilityAssessmentMissingError,
   MulticlassPrimaryAbilityQueries,
 } from '../../../../src/queries/multiclass-primary-ability';
-import { openTestDatabase } from '../../../helpers/open-db';
+import {
+  acquireSharedDb,
+  type SharedDbLease,
+} from '../../../helpers/shared-db';
 
 function thrownBy(run: () => unknown): unknown {
   try {
@@ -55,19 +57,19 @@ interface WorkspaceInternals {
 }
 
 describe('query assessment tagged-error guards', () => {
-  let connection: Database;
   let db: DatabaseContext;
+  let lease: SharedDbLease;
   let characterId: number;
 
   beforeEach(async () => {
-    connection = await openTestDatabase();
-    db = new DatabaseContext(connection);
+    lease = await acquireSharedDb({ mode: 'rw' });
+    db = lease.db;
     characterId = db.exec(
       "INSERT INTO characters (name) VALUES ('Missing assessment')",
     ).lastInsertId;
   });
 
-  afterEach(() => connection.close());
+  afterEach(async () => lease.release());
 
   it('tags a declared held-class prerequisite omitted by evaluation', () => {
     const error = thrownBy(() =>
