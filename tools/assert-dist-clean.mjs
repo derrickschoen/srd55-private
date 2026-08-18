@@ -250,7 +250,7 @@ for (const [required, expectedSha256] of LICENSE_REQUIRED) {
 }
 
 const index = readFileSync(byName.get('index.html'), 'utf8');
-if (!/<link\s+rel="manifest"\s+href="\.\/manifest\.webmanifest"\s*\/?>/.test(index)) {
+if (!/<link\s+rel="manifest"\s+href="\/manifest\.webmanifest"\s*\/?>/.test(index)) {
   fail(
     'PWA control failed: index.html does not link the emitted manifest.',
   );
