@@ -1,4 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  type MockInstance,
+  vi,
+} from 'vitest';
 import {
   LEVEL_UP_ATTR,
   LEVEL_UP_PANEL,
@@ -46,8 +54,8 @@ import {
   type InteractiveTestElement,
 } from '../../fixtures/interactive-dom';
 
-let createBackupHintSpy: ReturnType<
-  typeof vi.spyOn<typeof backupHintModule, 'createBackupHint'>
+let createBackupHintSpy: MockInstance<
+  typeof backupHintModule.createBackupHint
 >;
 
 let restoreDocument: (() => void) | undefined;
