@@ -7,6 +7,32 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D303 — OWNER: full SRD corpus repair; staged re-review; mutation lanes next wave (2026-08-17)
+
+Corpus audit verdict (read-only lane; structural catalogs intact, prose
+not): Telekinesis genuinely truncated at full:10720 /
+spell-descriptions.txt:8360; two slice losses in
+multiclass-entry-grants.txt (:108, :174); 601 PDF line-break hyphens
+preserved into 259/339 user-facing spell descriptions. Rulings:
+(1) **Full repair** — supervisor fetched the official PDF (SHA-256
+matches SOURCE.md provenance, verified by supervisor); repair lane
+recovers the Telekinesis tail, fixes both slices, de-hyphenates via a
+reviewable script, updates SOURCE.md hashes and its policy wording, and
+corrects kennel.json's wrong Tome note. (2) **Re-review is staged**:
+targeted re-verify of the five D286 MAJOR scenarios once fixes gate,
+THEN a full fresh stranger journey as the final pre-approval step after
+minors land. (3) **Mutation lanes (D280 leaf tests + sharding tooling)
+dispatch in the next refan wave**, after the merge train gates.
+
+**F20 — supervisor misreport, corrected.** My earlier surfaced finding
+"bundled SRD text truncated mid-sentence at line 4507 (Pact of the Tome)
+— possible corpus defect" was WRONG in its specifics: the text continues
+at canonical lines 4438-4453 in the other column of the same printed
+page; raw line order misled me, and kennel.json:61,239 propagated the
+error as "never resumes"/unverifiable. The audit I dispatched on the
+back of that wrong specific did, however, find the real defects above.
+The kennel.json note is being corrected by the repair lane.
+
 ## D302 — OWNER: merge-train shape, wave cadence, all D286 minors fixed now (2026-08-17)
 
 Four rulings: (1) **Batch gate** — the queued lane branches merge with
