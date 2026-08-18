@@ -7,6 +7,16 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D308 — OWNER: static mutants on for full audits, off for iteration re-runs (2026-08-18)
+
+Owner's words: "statics on for full audits, off for iteration re-runs."
+Full D280 campaign runs (fresh shard sweeps) keep static mutants enabled —
+they carried ~11% of survivors found (63 of 562 across shards 1–2),
+including module-level regex and error-string gaps. Fix-verify re-runs of a
+shard enable ignoreStatic plus the per-shard incremental cache, and must
+report the skipped static count as unmeasured, never as covered. Basis:
+statics are ~23% of mutants and ~97% of shard runtime (shard-003 planner).
+
 ## D307 — OWNER: stranger journey runs after the full queue lands (2026-08-18)
 
 The D303 fresh stranger journey (final pre-approval walkthrough) waits
