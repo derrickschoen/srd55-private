@@ -7,7 +7,8 @@ import type { RpcRequest, RpcResponse } from './rpc/protocol';
 import type { SqlRow } from './db/codecs';
 import {
   bootDatabaseWorkerWithRetry,
-  databaseBootFailureMessage,
+  classifyDatabaseBootFailure,
+  type DatabaseBootFailure,
 } from './db/database-worker-boot';
 import {
   databaseBootStageLabel,
@@ -369,13 +370,51 @@ const showBrowserBootHold = (): void => {
   root.setAttribute('aria-busy', 'false');
 };
 
-const startDatabaseBoot = (): void => {
-  if (databaseBootStarted) {
-    return;
-  }
-  // This is ordinary boot idempotence, not warning acknowledgement state. It
-  // is never persisted and never changes whether the notice is rendered.
-  databaseBootStarted = true;
+/**
+ * The blocked-tab shell. It is a SHELL rather than a status line because the
+ * tab is not going to recover on its own: the owning tab holds the OPFS pool
+ * for as long as it lives, so there is nothing to wait for and the only way
+ * forward is one of the two actions named here. A dead end — a bare "Failed:"
+ * with no statement of what is holding the database or what to do — is exactly
+ * what this replaces.
+ */
+const showBlockedByOtherTab = (
+  failure: Extract<
+    DatabaseBootFailure,
+    { kind: 'another_tab_holds_database' }
+  >,
+  retry: () => void,
+): void => {
+  const shell = document.createElement('main');
+  shell.className = 'error-shell';
+  shell.dataset.bootFailure = failure.kind;
+  const heading = document.createElement('h1');
+  heading.textContent = failure.headline;
+  const status = document.createElement('output');
+  status.id = 'status';
+  status.setAttribute('role', 'status');
+  status.value = failure.explanation;
+  status.dataset.ready = 'false';
+  const remedy = document.createElement('p');
+  remedy.textContent = failure.remedy;
+  const tryAgain = document.createElement('button');
+  tryAgain.type = 'button';
+  tryAgain.dataset.testid = 'retry-database-boot';
+  tryAgain.textContent = 'Try again';
+  tryAgain.addEventListener('click', retry);
+  shell.append(heading, status, remedy, tryAgain);
+  root.replaceChildren(shell);
+  root.setAttribute('aria-busy', 'false');
+};
+
+/**
+ * Separate from the idempotence guard below because it has a SECOND caller:
+ * the blocked-tab shell's Try again. Retrying is only meaningful after the
+ * worker is discarded — a worker whose pool install already failed will not
+ * try again on its own — so the retry terminates it first and this function
+ * re-activates a fresh one through `bootDatabaseWorkerWithRetry`.
+ */
+const runDatabaseBoot = (): void => {
   const bootStatus = showDatabaseBootStatus('Starting local database…');
   /**
    * The stage reports already drive the status text; recording them as
@@ -417,10 +456,28 @@ const startDatabaseBoot = (): void => {
     })
     .catch((error: unknown) => {
       databaseWorkerTransport.removeProgressListener(reportProgress);
-      bootStatus.value = `Failed: ${databaseBootFailureMessage(error)}`;
+      const failure = classifyDatabaseBootFailure(error);
+      if (failure.kind === 'another_tab_holds_database') {
+        showBlockedByOtherTab(failure, () => {
+          databaseWorkerTransport.terminate();
+          runDatabaseBoot();
+        });
+        return;
+      }
+      bootStatus.value = `Failed: ${failure.detail}`;
       bootStatus.dataset.ready = 'false';
       root.setAttribute('aria-busy', 'false');
     });
+};
+
+const startDatabaseBoot = (): void => {
+  if (databaseBootStarted) {
+    return;
+  }
+  // This is ordinary boot idempotence, not warning acknowledgement state. It
+  // is never persisted and never changes whether the notice is rendered.
+  databaseBootStarted = true;
+  runDatabaseBoot();
 };
 
 const canRenderRoute = (route: Router['current']): boolean => {

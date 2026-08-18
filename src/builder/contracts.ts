@@ -269,7 +269,7 @@ export type GuidedBuildStateResult =
 /* ----------------------------------------------------------------- errors */
 
 /**
- * `RpcErrorCode` is a CLOSED six-member union with no domain code, so a domain
+ * `RpcErrorCode` is a CLOSED transport-level union with no domain code, so a domain
  * refusal cannot have its own code. It rides `handler_error` with structured
  * `data`, following the `RevisionConflict` precedent already in the worker.
  *

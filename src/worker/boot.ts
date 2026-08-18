@@ -2,6 +2,7 @@ import type {
   DatabaseLifecycle,
   DatabaseVerificationMode,
 } from '../db/database-lifecycle';
+import { DatabaseStoragePoolLockedError } from '../db/storage-pool-lock';
 import { RpcError } from '../rpc/protocol';
 import type { HandlerContext, RuntimeEnvironment } from './handler';
 
@@ -61,6 +62,31 @@ export function bootDatabase(
       detail: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+/**
+ * The typed rejection for a request that arrives when the worker never got as
+ * far as a database at all.
+ *
+ * A pool-lock conflict is separated from `handler_error` here rather than in
+ * the UI because the code is what crosses the worker boundary: a structured
+ * clone of an `Error` subclass arrives on the main thread as a plain `Error`
+ * with its class and fields stripped, so a tag that only exists inside the
+ * worker cannot be read outside it.
+ *
+ * Note which failures are NOT dispatchable-while-degraded: `DatabaseBoot`
+ * degradation keeps the lifecycle — and therefore the storage handle — usable
+ * for export and reset. A locked pool has no lifecycle and no handle, so every
+ * method fails, including the recovery pair.
+ */
+export function bootFailureRejection(error: unknown): RpcError {
+  if (error instanceof DatabaseStoragePoolLockedError) {
+    return new RpcError('storage_pool_locked', error.message);
+  }
+  return new RpcError(
+    'handler_error',
+    error instanceof Error ? error.message : String(error),
+  );
 }
 
 /**
