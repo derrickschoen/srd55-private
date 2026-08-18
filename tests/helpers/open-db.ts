@@ -7,6 +7,7 @@ import {
   openDatabaseImage,
   type DatabaseStorage,
 } from '../../src/db/database-lifecycle';
+import { attachSqlTrace } from './sql-trace';
 
 let sqlitePromise: Promise<Sqlite3Static> | undefined;
 
@@ -20,6 +21,7 @@ export async function openTestDatabase(options: {
 } = {}): Promise<Database> {
   const sqlite3 = await getSqlite3();
   const db = new sqlite3.oo1.DB(':memory:', 'c');
+  attachSqlTrace(db, sqlite3);
   if (options.applySchema !== false) {
     db.exec(schema);
   }
@@ -42,6 +44,7 @@ export class MemoryDatabaseStorage implements DatabaseStorage {
       this.#bytes === null
         ? new this.sqlite3.oo1.DB(':memory:', 'c')
         : openDatabaseImage(this.sqlite3, this.#bytes, { readonly: false });
+    attachSqlTrace(db, this.sqlite3);
     this.#active = db;
     db.onclose = {
       before: (closing) => {
