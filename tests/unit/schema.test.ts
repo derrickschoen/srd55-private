@@ -1322,7 +1322,8 @@ const expectedNamedIndexes: Record<string, string> = {
     'spell_version_upcast_levels:spell_version_id,level:unique',
   spell_version_cantrip_upgrade_levels_spell_version_id_level_unique:
     'spell_version_cantrip_upgrade_levels:spell_version_id,level:unique',
-  spell_versions_is_active_index: 'spell_versions:is_active',
+  spell_versions_active_level_name_index:
+    'spell_versions:is_active,level,display_name',
   spell_versions_content_key_unique: 'spell_versions:content_key:unique',
   spell_versions_rules_edition_level_index:
     'spell_versions:rules_edition,level',

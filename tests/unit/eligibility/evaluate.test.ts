@@ -3,8 +3,10 @@ import { expect, it } from 'vitest';
 import { DatabaseContext } from '../../../src/db/database';
 import {
   eligibilityInvalidReasons,
+  loadSpellSelectionEligibilitySnapshot,
   SpellSelectionEligibility,
 } from '../../../src/eligibility/spell-selection-eligibility';
+import type { SpellVersionId } from '../../../src/domain/ids';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import { openTestDatabase } from '../../helpers/open-db';
 
@@ -156,6 +158,38 @@ it('persists unselected and valid refresh states without replacing the retained 
       [test.slotId],
     ),
   ).not.toBe('2000-01-01 00:00:00');
+  test.db.close();
+});
+
+it('evaluates a character-scoped version snapshot and rejects cross-character reuse', async () => {
+  const test = await fixture();
+  const versionId = spell(test.context, 'Snapshot Choice') as SpellVersionId;
+  const snapshot = loadSpellSelectionEligibilitySnapshot(
+    test.context,
+    test.characterId,
+    [versionId],
+  );
+  const constraint = {
+    spell_level_min: 0,
+    spell_level_max: 9,
+    allowed_spell_lists: [],
+    allowed_schools: [],
+    allowed_tags: [],
+    selection_collection: null,
+  } as const;
+
+  expect(test.eligibility.evaluateConstraintFromSnapshot(
+    test.characterId,
+    constraint,
+    versionId,
+    snapshot,
+  )).toEqual({ status: 'valid', reason: null });
+  expect(() => test.eligibility.evaluateConstraintFromSnapshot(
+    test.characterId + 1,
+    constraint,
+    versionId,
+    snapshot,
+  )).toThrow('The spell eligibility snapshot belongs to another character.');
   test.db.close();
 });
 

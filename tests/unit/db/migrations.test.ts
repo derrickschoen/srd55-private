@@ -249,6 +249,16 @@ const SCHEMA_BEFORE_CATALOG_CONTENT_VISIBILITY = DATABASE_MIGRATIONS
   .join('\n');
 const CATALOG_CONTENT_VISIBILITY_MIGRATION =
   DATABASE_MIGRATIONS[CATALOG_CONTENT_VISIBILITY_INDEX]!;
+const SPELL_VERSIONS_ACTIVE_LEVEL_NAME_INDEX = DATABASE_MIGRATIONS.findIndex(
+  (entry) => entry.id === '0049_spell_versions_active_level_name_index',
+);
+const SCHEMA_BEFORE_SPELL_VERSIONS_ACTIVE_LEVEL_NAME_INDEX =
+  DATABASE_MIGRATIONS
+    .slice(0, SPELL_VERSIONS_ACTIVE_LEVEL_NAME_INDEX)
+    .map((entry) => entry.sql)
+    .join('\n');
+const SPELL_VERSIONS_ACTIVE_LEVEL_NAME_INDEX_MIGRATION =
+  DATABASE_MIGRATIONS[SPELL_VERSIONS_ACTIVE_LEVEL_NAME_INDEX]!;
 
 /**
  * One character, three source instances (one of them deleted so the
@@ -3630,6 +3640,39 @@ describe('database migration chain', () => {
            'bundled', 'missing visibility'
          )`,
       )).toThrow(/catalog_content_identities\.visibility/);
+      expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
+        CATALOG_CONTENT_VISIBILITY_MIGRATION.resultSchemaChecksum,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it('0049 replaces the active-spell prefix index with the eligibility ordering index', () => {
+    const db = new sqlite3.oo1.DB(':memory:', 'c');
+    try {
+      db.exec(SCHEMA_BEFORE_SPELL_VERSIONS_ACTIVE_LEVEL_NAME_INDEX);
+      expect(db.selectValues(
+        `SELECT name FROM sqlite_schema
+         WHERE type = 'index'
+           AND name IN (
+             'spell_versions_is_active_index',
+             'spell_versions_active_level_name_index'
+           )
+         ORDER BY name`,
+      )).toEqual(['spell_versions_is_active_index']);
+
+      db.exec(SPELL_VERSIONS_ACTIVE_LEVEL_NAME_INDEX_MIGRATION.sql);
+
+      expect(db.selectValues(
+        `SELECT name FROM sqlite_schema
+         WHERE type = 'index'
+           AND name IN (
+             'spell_versions_is_active_index',
+             'spell_versions_active_level_name_index'
+           )
+         ORDER BY name`,
+      )).toEqual(['spell_versions_active_level_name_index']);
       expect(databaseSchemaSignature(db)).toBe(schemaSignature(schema));
     } finally {
       db.close();

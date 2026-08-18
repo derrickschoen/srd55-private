@@ -1779,7 +1779,7 @@ CREATE TABLE `spell_versions` (
 CREATE UNIQUE INDEX `spell_versions_content_key_unique` ON `spell_versions` (`content_key`);
 CREATE INDEX `spell_versions_spell_identity_id_rules_edition_index` ON `spell_versions` (`spell_identity_id`,`rules_edition`);
 CREATE INDEX `spell_versions_rules_edition_level_index` ON `spell_versions` (`rules_edition`,`level`);
-CREATE INDEX `spell_versions_is_active_index` ON `spell_versions` (`is_active`);
+CREATE INDEX `spell_versions_active_level_name_index` ON `spell_versions` (`is_active`,`level`,`display_name`);
 CREATE TABLE `subclass_definitions` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`content_key` VARCHAR NOT NULL,
