@@ -338,6 +338,106 @@ export interface StoredSpellContentRowsV1 {
   readonly cantripUpgradeLevels: readonly SqlRow[];
 }
 
+function placeholders(values: readonly unknown[]): string {
+  return values.map(() => '?').join(', ');
+}
+
+function groupChildRowsByVersionId(
+  rows: readonly SqlRow[],
+): ReadonlyMap<number, readonly SqlRow[]> {
+  const grouped = new Map<number, SqlRow[]>();
+  for (const row of rows) {
+    const versionId = sqlInteger(row, 'spell_version_id');
+    const existing = grouped.get(versionId);
+    if (existing === undefined) {
+      grouped.set(versionId, [row]);
+    } else {
+      existing.push(row);
+    }
+  }
+  return grouped;
+}
+
+/**
+ * Load a set of stored spell aggregates in seven statements: one parent join
+ * and one read for each owned child table. Projection remains per aggregate so
+ * corrupt rows still fail through the same read-boundary codec as a single
+ * spell read.
+ */
+export function loadStoredSpellContentRowsV1(
+  db: DatabaseContext,
+  contentKeys: readonly ContentKey[],
+): ReadonlyMap<ContentKey, StoredSpellContentRowsV1> {
+  const uniqueKeys = [...new Set(contentKeys.map((contentKey) => {
+    trimEqual(contentKey, 'content key');
+    return contentKey;
+  }))];
+  if (uniqueKeys.length === 0) return new Map();
+
+  const versions = db.allRaw(
+    `SELECT version.*, identity.content_key AS spell_identity_key
+     FROM spell_versions AS version
+     INNER JOIN spell_identities AS identity
+       ON identity.id = version.spell_identity_id
+     WHERE version.content_key IN (${placeholders(uniqueKeys)})`,
+    uniqueKeys,
+  );
+  const versionIds = versions.map((row) => sqlInteger(row, 'id'));
+  if (versionIds.length === 0) return new Map();
+
+  const spellLists = groupChildRowsByVersionId(db.allRaw(
+    `SELECT * FROM spell_list_memberships
+     WHERE spell_version_id IN (${placeholders(versionIds)})`,
+    versionIds,
+  ));
+  const tags = groupChildRowsByVersionId(db.allRaw(
+    `SELECT * FROM spell_version_tags
+     WHERE spell_version_id IN (${placeholders(versionIds)})`,
+    versionIds,
+  ));
+  const attackModes = groupChildRowsByVersionId(db.allRaw(
+    `SELECT * FROM spell_version_attack_modes
+     WHERE spell_version_id IN (${placeholders(versionIds)})`,
+    versionIds,
+  ));
+  const saveAbilities = groupChildRowsByVersionId(db.allRaw(
+    `SELECT * FROM spell_version_save_abilities
+     WHERE spell_version_id IN (${placeholders(versionIds)})`,
+    versionIds,
+  ));
+  const upcastLevels = groupChildRowsByVersionId(db.allRaw(
+    `SELECT * FROM spell_version_upcast_levels
+     WHERE spell_version_id IN (${placeholders(versionIds)})`,
+    versionIds,
+  ));
+  const cantripUpgradeLevels = groupChildRowsByVersionId(db.allRaw(
+    `SELECT * FROM spell_version_cantrip_upgrade_levels
+     WHERE spell_version_id IN (${placeholders(versionIds)})`,
+    versionIds,
+  ));
+  const versionsByKey = new Map(versions.map((row) => [
+    sqlString(row, 'content_key') as ContentKey,
+    row,
+  ]));
+  const loaded = new Map<ContentKey, StoredSpellContentRowsV1>();
+  for (const contentKey of uniqueKeys) {
+    const version = versionsByKey.get(contentKey);
+    if (version === undefined) continue;
+    const versionId = sqlInteger(version, 'id');
+    loaded.set(contentKey, {
+      version,
+      spellIdentityKey: sqlString(version, 'spell_identity_key'),
+      spellLists: spellLists.get(versionId) ?? [],
+      tags: tags.get(versionId) ?? [],
+      attackModes: attackModes.get(versionId) ?? [],
+      saveAbilities: saveAbilities.get(versionId) ?? [],
+      upcastLevels: upcastLevels.get(versionId) ?? [],
+      cantripUpgradeLevels: cantripUpgradeLevels.get(versionId) ?? [],
+    });
+  }
+  return loaded;
+}
+
 function membersFromRows<T>(
   rows: readonly SqlRow[],
   column: string,

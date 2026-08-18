@@ -14,8 +14,16 @@ import {
   type ContentKind,
 } from './content-identity';
 import type { CatalogContentVisibility } from './content-visibility';
-import { projectStoredContentV1 } from './stored-content-projector-v1';
+import {
+  projectStoredContentV1,
+  type StoredContentProjectionV1,
+} from './stored-content-projector-v1';
 import { projectStoredContentV2 } from './stored-content-projector-v2';
+import {
+  loadStoredSpellContentRowsV1,
+  projectStoredSpellRowsContentV1,
+  type StoredSpellContentRowsV1,
+} from './spell-content-projector-v1';
 import {
   catalogLayerDisclosure,
   type CatalogNamedDisclosure,
@@ -522,6 +530,71 @@ function deriveDependencyGraph(
     readonly canonicalJson: string;
   }>();
 
+  const externalReferences = new Map<string, ProjectionFingerprintReference>();
+  for (const node of nodes) {
+    for (const reference of projectionFingerprintReferences(node.projection.payload)) {
+      const referenceKey = contentFingerprintReferenceKey(reference);
+      if ((incomingByFingerprint.get(referenceKey) ?? []).length === 0) {
+        externalReferences.set(referenceKey, reference);
+      }
+    }
+  }
+  const resolvedExternalTargets = new Map(
+    [...externalReferences].map(([referenceKey, reference]) => [
+      referenceKey,
+      resolveFingerprintTarget(db, reference),
+    ]),
+  );
+  const externalSpellKeys = [...new Set(
+    [...externalReferences].flatMap(([referenceKey, reference]) => {
+      const contentKey = resolvedExternalTargets.get(referenceKey);
+      return reference.kind === 'spell' &&
+          reference.scheme === CONTENT_FINGERPRINT_SCHEME_V1 &&
+          contentKey !== null && contentKey !== undefined
+        ? [contentKey]
+        : [];
+    }),
+  )];
+  let storedSpellRows: ReadonlyMap<ContentKey, StoredSpellContentRowsV1>;
+  try {
+    storedSpellRows = loadStoredSpellContentRowsV1(db, externalSpellKeys);
+  } catch {
+    // Preserve the existing per-reference refusal boundary for damaged rows.
+    // Healthy batches take the seven-query path; a corrupt batch falls back to
+    // the single reader so only references to the corrupt aggregate refuse.
+    storedSpellRows = new Map();
+  }
+  const storedSpellProjections = new Map<ContentKey, StoredContentProjectionV1>();
+
+  const projectExternalReference = (
+    reference: ProjectionFingerprintReference,
+    contentKey: ContentKey,
+  ): StoredContentProjectionV1 => {
+    if (
+      reference.kind !== 'spell' ||
+      reference.scheme !== CONTENT_FINGERPRINT_SCHEME_V1
+    ) {
+      return reference.scheme === CONTENT_FINGERPRINT_SCHEME_V1
+        ? projectStoredContentV1(db, reference.kind, contentKey)
+        : projectStoredContentV2(db, reference.kind, contentKey);
+    }
+    const cached = storedSpellProjections.get(contentKey);
+    if (cached !== undefined) return cached;
+    const rows = storedSpellRows.get(contentKey);
+    if (rows === undefined) {
+      return projectStoredContentV1(db, 'spell', contentKey);
+    }
+    const projected = projectStoredSpellRowsContentV1(rows);
+    const stored: StoredContentProjectionV1 = Object.freeze({
+      kind: projected.kind,
+      edition: projected.aggregate.rules_edition,
+      name: projected.aggregate.name,
+      payload: projected.payload,
+    });
+    storedSpellProjections.set(contentKey, stored);
+    return stored;
+  };
+
   for (const node of nodes) {
     const dependencies = new Set<string>();
     const reviewEdges = new Set<string>();
@@ -538,15 +611,13 @@ function deriveDependencyGraph(
         unresolvedNodes.add(node.id);
         continue;
       }
-      const contentKey = resolveFingerprintTarget(db, reference);
+      const contentKey = resolvedExternalTargets.get(referenceKey) ?? null;
       if (contentKey === null) {
         unresolvedNodes.add(node.id);
         continue;
       }
       try {
-        const stored = reference.scheme === CONTENT_FINGERPRINT_SCHEME_V1
-          ? projectStoredContentV1(db, reference.kind, contentKey)
-          : projectStoredContentV2(db, reference.kind, contentKey);
+        const stored = projectExternalReference(reference, contentKey);
         const liveIdentity = deriveContentIdentityForScheme(reference.scheme, {
           kind: stored.kind,
           edition: stored.edition,

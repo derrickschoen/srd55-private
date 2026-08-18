@@ -29,7 +29,12 @@ import {
   reconcileCurrentContentFingerprintV1,
 } from './content-registry';
 import { projectStoredEquipmentContentV1 } from './equipment-content-projector-v1';
-import { projectStoredSpellContentV1 } from './spell-content-projector-v1';
+import {
+  loadStoredSpellContentRowsV1,
+  projectStoredSpellContentV1,
+  projectStoredSpellRowsContentV1,
+  type StoredSpellContentRowsV1,
+} from './spell-content-projector-v1';
 import {
   projectStoredClassContentV1,
   projectStoredFeatContentV1,
@@ -334,6 +339,7 @@ function ensureBundledRegistryRoot(
 function projectBundledIdentityV1(
   db: DatabaseContext,
   entry: BundledManifestEntryV1,
+  storedSpellRows: StoredSpellContentRowsV1 | undefined,
 ): DerivedContentIdentityV1<ContentKind, unknown> {
   const references = storedAuthoredRegistryReferencesV1(db);
   let projection: {
@@ -376,7 +382,9 @@ function projectBundledIdentityV1(
       projection = projectStoredFeatContentV1(db, entry.contentKey, references);
       break;
     case 'spell':
-      projection = projectStoredSpellContentV1(db, entry.contentKey);
+      projection = storedSpellRows === undefined
+        ? projectStoredSpellContentV1(db, entry.contentKey)
+        : projectStoredSpellRowsContentV1(storedSpellRows);
       break;
     case 'weapon':
       projection = projectStoredEquipmentContentV1(db, {
@@ -435,6 +443,11 @@ export function reconcileBundledContentRegistryWithStoredProjectionsV1(
 ): BundledContentRegistryProjectionResultV1 {
   return db.transaction(() => {
     const entries = allBundledCandidates(db);
+    const storedSpellRows = loadStoredSpellContentRowsV1(
+      db,
+      entries.filter((entry) => entry.kind === 'spell')
+        .map((entry) => entry.contentKey),
+    );
     const storedProjections: BundledStoredProjectionV1[] = [];
     let projected = 0;
     let orphaned = 0;
@@ -451,7 +464,13 @@ export function reconcileBundledContentRegistryWithStoredProjectionsV1(
             return 'orphaned' as const;
           }
           ensureBundledRegistryRoot(db, entry);
-          const identity = projectBundledIdentityV1(db, entry);
+          const identity = projectBundledIdentityV1(
+            db,
+            entry,
+            entry.kind === 'spell'
+              ? storedSpellRows.get(entry.contentKey)
+              : undefined,
+          );
           const fingerprint = identity.envelope.scheme === CONTENT_FINGERPRINT_SCHEME_V1
             ? reconcileCurrentContentFingerprintV1(db, {
                 kind: entry.kind,

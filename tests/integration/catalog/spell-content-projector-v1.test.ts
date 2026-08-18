@@ -2,9 +2,11 @@ import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { registerBundledStableContentIdentity } from '../../../src/catalog/content-registry';
 import {
+  loadStoredSpellContentRowsV1,
   SpellContentProjectionError,
   projectSpellDocumentV1,
   projectStoredSpellContentV1,
+  projectStoredSpellRowsContentV1,
 } from '../../../src/catalog/spell-content-projector-v1';
 import { deriveContentIdentityV1 } from '../../../src/catalog/content-identity';
 import { DatabaseContext } from '../../../src/db/database';
@@ -16,6 +18,7 @@ import {
 } from '../../unit/catalog/fixtures/spell-projector-v1-vectors';
 
 const CONTENT_KEY = 'expanded:aether-lance' as ContentKey;
+const SECOND_CONTENT_KEY = 'expanded:quiet-orb' as ContentKey;
 
 describe('stored spell content-v1 projection', () => {
   let connection: Database;
@@ -100,6 +103,52 @@ describe('stored spell content-v1 projection', () => {
     expect(storedIdentity.digest).toBe(documentIdentity.digest);
     expect(storedIdentity.derivedKey).toBe(documentIdentity.derivedKey);
     expect(stored.payload.spell_version_key).toBe(bandedSpellDocumentV1.versionKey);
+  });
+
+  it('batches multiple stored versions without changing projections or key order', () => {
+    registerBundledStableContentIdentity(db, {
+      kind: 'spell',
+      contentKey: SECOND_CONTENT_KEY,
+      visibility: 'listed',
+      normalizedName: 'quietorb',
+    });
+    const identityId = db.exec(
+      `INSERT INTO spell_identities (
+         content_key, canonical_name, normalized_name
+       ) VALUES ('quiet-orb', 'Quiet Orb', 'quiet orb')`,
+    ).lastInsertId;
+    const versionId = db.exec(
+      `INSERT INTO spell_versions (
+         content_key, spell_identity_id, display_name, rules_edition, level,
+         school
+       ) VALUES (?, ?, 'Quiet Orb', 'expanded', 1, 'Chronomancy')`,
+      [SECOND_CONTENT_KEY, identityId],
+    ).lastInsertId;
+    for (const value of ['Wizard', 'Bard']) {
+      db.exec(
+        `INSERT INTO spell_list_memberships (
+           spell_version_id, spell_list_key
+         ) VALUES (?, ?)`,
+        [versionId, value],
+      );
+    }
+    for (const value of ['utility', 'ritual']) {
+      db.exec(
+        'INSERT INTO spell_version_tags (spell_version_id, tag) VALUES (?, ?)',
+        [versionId, value],
+      );
+    }
+
+    const keys = [SECOND_CONTENT_KEY, CONTENT_KEY] as const;
+    const rowsByKey = loadStoredSpellContentRowsV1(db, keys);
+
+    expect([...rowsByKey.keys()]).toEqual(keys);
+    for (const contentKey of keys) {
+      const rows = rowsByKey.get(contentKey);
+      if (rows === undefined) throw new Error(`Missing batched rows for ${contentKey}.`);
+      expect(projectStoredSpellRowsContentV1(rows))
+        .toEqual(projectStoredSpellContentV1(db, contentKey));
+    }
   });
 
   it('moving a stored version to a different spell concept changes identity', () => {
