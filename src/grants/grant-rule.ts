@@ -9,6 +9,27 @@ import {
   type SlotBucket,
 } from '../domain/enums';
 import { FreeCast } from './free-cast';
+import {
+  GrantRuleActivationConflictError,
+  GrantRuleActiveConfigKeysError,
+  GrantRuleActiveConfigValuesError,
+  GrantRuleCapabilityCountError,
+  GrantRuleFieldError,
+  GrantRuleForbiddenBucketError,
+  GrantRuleFixedSpellReferenceRequiredError,
+  GrantRuleFreeCastEnumError,
+  GrantRuleFreeCastUsesError,
+  GrantRuleInputTypeError,
+  GrantRuleInvalidBucketError,
+  GrantRuleJsonParseError,
+  GrantRuleJsonShapeError,
+  GrantRuleKindError,
+  GrantRulePendingChoiceError,
+  GrantRuleQueryPredicateError,
+  GrantRuleSelectionCollectionError,
+  GrantSourceRuleDefinitionKeyConfigError,
+  GrantSourceRuleReferenceRequiredError,
+} from './grant-rule-errors';
 
 export interface ActiveIfConfig {
   readonly key: string;
@@ -136,28 +157,13 @@ function hasOwn(input: Record<string, unknown>, field: string): boolean {
   return Object.prototype.hasOwnProperty.call(input, field);
 }
 
-function shownValue(value: unknown): string {
-  if (Array.isArray(value)) {
-    return 'array';
-  }
-  if (value === null) {
-    return 'null';
-  }
-  if (value === undefined) {
-    return 'null';
-  }
-  return String(value);
-}
-
 function nonEmptyString(
   input: Record<string, unknown>,
   field: string,
 ): string {
   const value = input[field];
   if (typeof value !== 'string' || value.trim() === '') {
-    throw new TypeError(
-      `Grant rule field '${field}' must be a non-empty string.`,
-    );
+    throw new GrantRuleFieldError(null, field, 'non_empty_string');
   }
   return value.trim();
 }
@@ -172,9 +178,7 @@ function optionalNonEmptyString(
     return null;
   }
   if (typeof value !== 'string' || value.trim() === '') {
-    throw new TypeError(
-      `Grant rule '${ruleKey}' field '${field}' must be a non-empty string.`,
-    );
+    throw new GrantRuleFieldError(ruleKey, field, 'non_empty_string');
   }
   return value.trim();
 }
@@ -191,9 +195,7 @@ function positiveInteger(
     return null;
   }
   if (!Number.isSafeInteger(value) || (value as number) < 1) {
-    throw new TypeError(
-      `Grant rule '${ruleKey}' field '${field}' must be a positive integer.`,
-    );
+    throw new GrantRuleFieldError(ruleKey, field, 'positive_integer');
   }
   return value as number;
 }
@@ -206,9 +208,7 @@ function booleanValue(
 ): boolean {
   const value = input[field] === undefined ? defaultValue : input[field];
   if (typeof value !== 'boolean') {
-    throw new TypeError(
-      `Grant rule '${ruleKey}' field '${field}' must be boolean.`,
-    );
+    throw new GrantRuleFieldError(ruleKey, field, 'boolean');
   }
   return value;
 }
@@ -243,15 +243,11 @@ function stringList(
     return;
   }
   if (!Array.isArray(value) || (required && value.length === 0)) {
-    throw new TypeError(
-      `Grant rule '${ruleKey}' field '${field}' must be a non-empty string list.`,
-    );
+    throw new GrantRuleFieldError(ruleKey, field, 'non_empty_string_list');
   }
   for (const item of value) {
     if (typeof item !== 'string' || item.trim() === '') {
-      throw new TypeError(
-        `Grant rule '${ruleKey}' field '${field}' must contain only strings.`,
-      );
+      throw new GrantRuleFieldError(ruleKey, field, 'strings_only');
     }
   }
 }
@@ -265,30 +261,22 @@ function parseFreeCast(
     return null;
   }
   if (!isObject(value)) {
-    throw new TypeError(
-      `Grant rule '${ruleKey}' field 'free_cast' must be an object or null.`,
-    );
+    throw new GrantRuleFieldError(ruleKey, 'free_cast', 'object_or_null');
   }
 
   const uses = value.uses;
   if (!Number.isSafeInteger(uses) || (uses as number) < 1) {
-    throw new TypeError(
-      `Grant rule '${ruleKey}' free_cast.uses must be a positive integer.`,
-    );
+    throw new GrantRuleFreeCastUsesError(ruleKey);
   }
 
   const recovery = value.recovery;
   if (!isEnumValue(freeCastRecoveries, recovery)) {
-    throw new TypeError(
-      `Grant rule '${ruleKey}' has invalid free_cast.recovery '${shownValue(recovery)}'.`,
-    );
+    throw new GrantRuleFreeCastEnumError(ruleKey, 'recovery', recovery);
   }
 
   const poolScope = value.pool_scope;
   if (!isEnumValue(freeCastPoolScopes, poolScope)) {
-    throw new TypeError(
-      `Grant rule '${ruleKey}' has invalid free_cast.pool_scope '${shownValue(poolScope)}'.`,
-    );
+    throw new GrantRuleFreeCastEnumError(ruleKey, 'pool_scope', poolScope);
   }
 
   return new FreeCast(uses as number, recovery, poolScope);
@@ -309,9 +297,7 @@ function parseActiveIfConfig(
     keys[0] !== 'equals' ||
     keys[1] !== 'key'
   ) {
-    throw new TypeError(
-      `Grant rule '${ruleKey}' field 'active_if_config' must contain exactly key and equals.`,
-    );
+    throw new GrantRuleActiveConfigKeysError(ruleKey);
   }
 
   const key = value.key;
@@ -322,9 +308,7 @@ function parseActiveIfConfig(
     typeof equals !== 'string' ||
     equals.trim() === ''
   ) {
-    throw new TypeError(
-      `Grant rule '${ruleKey}' active_if_config key and equals must be non-empty strings.`,
-    );
+    throw new GrantRuleActiveConfigValuesError(ruleKey);
   }
 
   return Object.freeze({ key: key.trim(), equals: equals.trim() });
@@ -342,9 +326,7 @@ function validateKindFields(
       (!Number.isSafeInteger(id) || (id as number) < 1) &&
       (typeof key !== 'string' || key.trim() === '')
     ) {
-      throw new TypeError(
-        `Fixed-spell rule '${ruleKey}' requires spell_version_id or spell_version_key.`,
-      );
+      throw new GrantRuleFixedSpellReferenceRequiredError(ruleKey);
     }
   }
 
@@ -353,9 +335,7 @@ function validateKindFields(
   }
 
   if (input.selection_collection !== undefined && input.selection_collection !== null) {
-    throw new TypeError(
-      `Grant rule '${ruleKey}' may not constrain a selection collection.`,
-    );
+    throw new GrantRuleSelectionCollectionError(ruleKey);
   }
 
   if (kind === 'choice_from_query') {
@@ -365,9 +345,7 @@ function validateKindFields(
       hasOwn(input, 'level_min') ||
       hasOwn(input, 'level_max');
     if (!hasPredicate) {
-      throw new TypeError(
-        `Query rule '${ruleKey}' requires at least one predicate.`,
-      );
+      throw new GrantRuleQueryPredicateError(ruleKey);
     }
     stringList(input, 'schools', ruleKey);
     stringList(input, 'tags', ruleKey);
@@ -383,9 +361,7 @@ function validateKindFields(
       definitionKeyConfig !== null &&
       typeof definitionKeyConfig !== 'string'
     ) {
-      throw new TypeError(
-        `Grant-source rule '${ruleKey}' field 'definition_key_config' must be a string or null.`,
-      );
+      throw new GrantSourceRuleDefinitionKeyConfigError(ruleKey);
     }
     const hasDefinition =
       (Number.isSafeInteger(definitionId) && (definitionId as number) > 0) ||
@@ -393,9 +369,7 @@ function validateKindFields(
       (typeof definitionKeyConfig === 'string' &&
         definitionKeyConfig.trim() !== '');
     if (!hasDefinition) {
-      throw new TypeError(
-        `Grant-source rule '${ruleKey}' requires a source definition reference.`,
-      );
+      throw new GrantSourceRuleReferenceRequiredError(ruleKey);
     }
   }
 
@@ -413,9 +387,7 @@ function validateKindFields(
    */
   const pendingChoice = input.allows_pending_choice;
   if (pendingChoice !== undefined && typeof pendingChoice !== 'boolean') {
-    throw new TypeError(
-      `Grant rule '${ruleKey}' field 'allows_pending_choice' must be boolean.`,
-    );
+    throw new GrantRuleFieldError(ruleKey, 'allows_pending_choice', 'boolean');
   }
   if (
     pendingChoice === true &&
@@ -425,10 +397,7 @@ function validateKindFields(
       input.definition_key_config.trim() !== ''
     )
   ) {
-    throw new TypeError(
-      `Grant rule '${ruleKey}' may not allow a pending choice without ` +
-        'delegating its definition through definition_key_config.',
-    );
+    throw new GrantRulePendingChoiceError(ruleKey);
   }
 
   if (kind === 'capability') {
@@ -448,17 +417,17 @@ function validateKindFields(
       initialCount !== undefined &&
       (!Number.isSafeInteger(initialCount) || (initialCount as number) < 0)
     ) {
-      throw new TypeError(
-        `Grant rule '${ruleKey}' field 'initial_count' must be a non-negative integer.`,
+      throw new GrantRuleFieldError(
+        ruleKey,
+        'initial_count',
+        'non_negative_integer',
       );
     }
     if (
       countPerLevel !== undefined &&
       (!Number.isSafeInteger(countPerLevel) || (countPerLevel as number) < 1)
     ) {
-      throw new TypeError(
-        `Grant rule '${ruleKey}' field 'count_per_level' must be a positive integer.`,
-      );
+      throw new GrantRuleFieldError(ruleKey, 'count_per_level', 'positive_integer');
     }
   }
 
@@ -476,9 +445,7 @@ function validateKindFields(
       allowsToolInstead !== undefined &&
       typeof allowsToolInstead !== 'boolean'
     ) {
-      throw new TypeError(
-        `Grant rule '${ruleKey}' field 'allows_tool_instead' must be boolean.`,
-      );
+      throw new GrantRuleFieldError(ruleKey, 'allows_tool_instead', 'boolean');
     }
   }
 }
@@ -512,22 +479,18 @@ export class GrantRule {
 
   static fromObject(input: unknown): GrantRule {
     if (!isObject(input)) {
-      throw new TypeError('Grant rule input must be an object.');
+      throw new GrantRuleInputTypeError();
     }
 
     const rawKind = input.kind;
     if (!isEnumValue(grantRuleKinds, rawKind)) {
-      throw new TypeError(
-        `Unknown grant rule kind '${shownValue(rawKind)}'.`,
-      );
+      throw new GrantRuleKindError(rawKind);
     }
     const kind = rawKind;
     const ruleKey = nonEmptyString(input, 'rule_key');
 
     if (kind === 'capability' && hasOwn(input, 'count')) {
-      throw new TypeError(
-        `Capability rule '${ruleKey}' must not define count; capabilities do not mint slots.`,
-      );
+      throw new GrantRuleCapabilityCountError(ruleKey);
     }
 
     let count: number | null;
@@ -558,15 +521,11 @@ export class GrantRule {
     if (grantRuleRequiresBucket(kind)) {
       const candidate = nonEmptyString(input, 'bucket');
       if (!isEnumValue(slotBuckets, candidate)) {
-        throw new TypeError(
-          `Grant rule '${ruleKey}' has invalid bucket '${candidate}'.`,
-        );
+        throw new GrantRuleInvalidBucketError(ruleKey, candidate);
       }
       bucket = candidate;
     } else if (rawBucket !== undefined && rawBucket !== null) {
-      throw new TypeError(
-        `Grant rule '${ruleKey}' must not define a bucket.`,
-      );
+      throw new GrantRuleForbiddenBucketError(ruleKey);
     }
 
     const alwaysPrepared = booleanValue(
@@ -603,9 +562,7 @@ export class GrantRule {
       activeFromClassLevel !== null &&
       activeFromCharacterLevel !== null
     ) {
-      throw new TypeError(
-        `Grant rule '${ruleKey}' must not define both active_from_class_level and active_from_character_level.`,
-      );
+      throw new GrantRuleActivationConflictError(ruleKey);
     }
     const activeIfConfig = parseActiveIfConfig(input, ruleKey);
     const distinctConfigBy = optionalNonEmptyString(
@@ -684,15 +641,13 @@ export class GrantRule {
     try {
       decoded = JSON.parse(json);
     } catch (error) {
-      throw new TypeError(
-        `Grant rule JSON is invalid: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-        { cause: error },
+      throw new GrantRuleJsonParseError(
+        error instanceof Error ? error.message : String(error),
+        error,
       );
     }
     if (!isObject(decoded)) {
-      throw new TypeError('Grant rule JSON must decode to an object.');
+      throw new GrantRuleJsonShapeError();
     }
     return GrantRule.fromObject(decoded);
   }

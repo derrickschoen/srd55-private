@@ -52,6 +52,16 @@ import {
   ACTIVE_SOURCE_INSTANCE_STATE,
   TOMBSTONED_SOURCE_INSTANCE_STATE,
 } from '../domain/source-instance-state';
+import {
+  GrantDistinctConfigMissingError,
+  GrantGenerationSourceMissingError,
+  GrantSelectedSkillsConfigError,
+  GrantSourceChildConfigError,
+  GrantSourceConfigShapeError,
+  GrantSourceDefinitionResolutionError,
+  GrantSpellVersionReferenceError,
+  PlannedGrantRuleMissingError,
+} from './grant-rule-slot-generator-errors';
 
 type Attributes = Record<string, SqlValue>;
 type JsonContainer = Record<string, unknown> | unknown[];
@@ -189,9 +199,7 @@ export class GrantRuleSlotGenerator {
     this.db.transaction(() => {
       const source = this.#rules.findSource(sourceInstanceId);
       if (source === null) {
-        throw new TypeError(
-          `Source instance ${sourceInstanceId} does not exist.`,
-        );
+        throw new GrantGenerationSourceMissingError(sourceInstanceId);
       }
       if (source.state !== 'active') {
         this.deactivateSourceTree(sourceInstanceId);
@@ -216,9 +224,7 @@ export class GrantRuleSlotGenerator {
           ? {}
           : decodedConfig;
       if (!isRecord(normalizedConfig)) {
-        throw new TypeError(
-          `Grant source ${source.id} config must be an object.`,
-        );
+        throw new GrantSourceConfigShapeError(source.id);
       }
       const effectiveClassLevel = this.effectiveClassLevel(source);
       const plannedSpells = this.#planner.plan({
@@ -240,9 +246,7 @@ export class GrantRuleSlotGenerator {
       for (const planned of plannedSpells) {
         const rule = ruleByKey.get(planned.locator.rule_key);
         if (rule === undefined) {
-          throw new Error(
-            `Planned grant rule '${planned.locator.rule_key}' disappeared before generation.`,
-          );
+          throw new PlannedGrantRuleMissingError(planned.locator.rule_key);
         }
         if (planned.kind === 'slot_selection') {
           this.materializePlannedSlot(source, rule, planned);
@@ -284,10 +288,7 @@ export class GrantRuleSlotGenerator {
                   skill === null || isEnumValue(skills, skill),
               )
             ) {
-              throw new TypeError(
-                `Grant rule '${rule.ruleKey}' config 'selected_skills' ` +
-                  'must contain only known skills.',
-              );
+              throw new GrantSelectedSkillsConfigError(rule.ruleKey);
             }
             syncToolAlternativeSkillGrants(
               this.db,
@@ -383,9 +384,7 @@ export class GrantRuleSlotGenerator {
             spellVersionActivity,
           );
     if (planned.locked && version === null) {
-      throw new Error(
-        `Grant rule '${rule.ruleKey}' references a spell version that does not exist.`,
-      );
+      throw new GrantSpellVersionReferenceError(rule.ruleKey, 'missing');
     }
     const key = this.slotKey(
       source,
@@ -409,9 +408,7 @@ export class GrantRuleSlotGenerator {
       !version.is_active &&
       !existingReference
     ) {
-      throw new Error(
-        `Grant rule '${rule.ruleKey}' references an inactive spell version.`,
-      );
+      throw new GrantSpellVersionReferenceError(rule.ruleKey, 'inactive');
     }
 
     const data = ruleData(rule);
@@ -505,9 +502,7 @@ export class GrantRuleSlotGenerator {
       if (delegated && pendingAllowed && unchosen) {
         return [];
       }
-      throw new Error(
-        `Grant-source rule '${rule.ruleKey}' could not resolve its definition.`,
-      );
+      throw new GrantSourceDefinitionResolutionError(rule.ruleKey);
     }
 
     let childConfig: unknown = data.child_config ?? {};
@@ -522,9 +517,7 @@ export class GrantRuleSlotGenerator {
       childConfig === null ||
       typeof childConfig !== 'object'
     ) {
-      throw new TypeError(
-        `Grant-source rule '${rule.ruleKey}' child config must be an object.`,
-      );
+      throw new GrantSourceChildConfigError(rule.ruleKey);
     }
 
     const markers: string[] = [];
@@ -1026,8 +1019,9 @@ export class GrantRuleSlotGenerator {
       rule.distinctConfigBy,
     );
     if (value === null) {
-      throw new TypeError(
-        `Grant rule '${rule.ruleKey}' requires config '${rule.distinctConfigBy}'.`,
+      throw new GrantDistinctConfigMissingError(
+        rule.ruleKey,
+        rule.distinctConfigBy,
       );
     }
 

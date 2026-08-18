@@ -6,6 +6,21 @@ import {
   type DamageType,
 } from '../domain/enums';
 import { GrantRule, type GrantRuleObject } from './grant-rule';
+import {
+  ConfiguredChoiceAbilityOptionsError,
+  ConfiguredChoiceDeclaredDamageResistanceError,
+  ConfiguredChoiceDeclaredDarkvisionError,
+  ConfiguredChoiceExactKeysError,
+  ConfiguredChoiceNestedRuleError,
+  ConfiguredChoiceProjectedTraitError,
+  ConfiguredChoiceRepeatedMaterialRuleKeyError,
+  ConfiguredChoiceRepeatedOptionError,
+  ConfiguredChoiceRootContractError,
+  ConfiguredChoiceUnknownSheetFieldError,
+  ConfiguredChoiceValueError,
+  SourceGrantRuleKeyError,
+  SourceGrantRulesListError,
+} from './configured-choice-rule-errors';
 
 export const configuredChoiceUnknownSheetFields = [
   'walking_speed_feet',
@@ -78,7 +93,7 @@ export interface ConfiguredChoiceRuleObject {
 
 function record(value: unknown, label: string): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ConfiguredChoiceValueError(label, 'object');
   }
   return value as Record<string, unknown>;
 }
@@ -94,13 +109,13 @@ function exactKeys(
     actual.length !== expected.length ||
     actual.some((key, index) => key !== expected[index])
   ) {
-    throw new TypeError(`${label} must contain exactly ${expected.join(', ')}.`);
+    throw new ConfiguredChoiceExactKeysError(label, expected);
   }
 }
 
 function text(value: unknown, label: string): string {
   if (typeof value !== 'string' || value.trim() === '') {
-    throw new TypeError(`${label} must be non-empty text.`);
+    throw new ConfiguredChoiceValueError(label, 'non_empty_text');
   }
   return value.trim();
 }
@@ -108,14 +123,17 @@ function text(value: unknown, label: string): string {
 function path(value: unknown, label: string): string {
   const result = text(value, label);
   if (result.split('.').some((part) => part.trim() === '')) {
-    throw new TypeError(`${label} must be a non-empty dotted config path.`);
+    throw new ConfiguredChoiceValueError(label, 'dotted_path');
   }
   return result;
 }
 
 function list(value: unknown, label: string, allowEmpty = true): unknown[] {
   if (!Array.isArray(value) || (!allowEmpty && value.length === 0)) {
-    throw new TypeError(`${label} must be ${allowEmpty ? 'a' : 'a non-empty'} list.`);
+    throw new ConfiguredChoiceValueError(
+      label,
+      allowEmpty ? 'list' : 'non_empty_list',
+    );
   }
   return value;
 }
@@ -124,7 +142,7 @@ function uniqueStrings(value: unknown, label: string): readonly string[] {
   const entries = list(value, label).map((entry, index) =>
     text(entry, `${label}[${String(index)}]`));
   if (new Set(entries).size !== entries.length) {
-    throw new TypeError(`${label} must not contain duplicates.`);
+    throw new ConfiguredChoiceValueError(label, 'unique');
   }
   return Object.freeze(entries);
 }
@@ -134,7 +152,10 @@ function parseEffect(value: unknown, label: string): ConfiguredChoiceEffect {
   if (input.kind === 'speed') {
     exactKeys(input, ['kind', 'label', 'speed_bonus_feet'], label);
     if (!Number.isSafeInteger(input.speed_bonus_feet) || input.speed_bonus_feet === 0) {
-      throw new TypeError(`${label}.speed_bonus_feet must be a non-zero integer.`);
+      throw new ConfiguredChoiceValueError(
+        `${label}.speed_bonus_feet`,
+        'non_zero_integer',
+      );
     }
     return Object.freeze({
       kind: 'speed',
@@ -150,7 +171,7 @@ function parseEffect(value: unknown, label: string): ConfiguredChoiceEffect {
       damage_type: damageType(text(input.damage_type, `${label}.damage_type`)),
     });
   }
-  throw new TypeError(`${label}.kind is unsupported.`);
+  throw new ConfiguredChoiceValueError(`${label}.kind`, 'unsupported');
 }
 
 function parseReplaceableSpellChoice(
@@ -164,10 +185,10 @@ function parseReplaceableSpellChoice(
     'initial_spell_version_key', 'display_on_sheet',
   ], label);
   if (input.required !== true || input.display_on_sheet !== true) {
-    throw new TypeError(`${label} must be required and displayed on the sheet.`);
+    throw new ConfiguredChoiceValueError(label, 'required_and_displayed');
   }
   if (input.spell_level !== 0) {
-    throw new TypeError(`${label}.spell_level must be 0.`);
+    throw new ConfiguredChoiceValueError(`${label}.spell_level`, 'zero');
   }
   return Object.freeze({
     configKey: path(input.config_key, `${label}.config_key`),
@@ -207,9 +228,7 @@ export class ConfiguredChoiceRule {
       'options',
     ], 'Configured-choice rule');
     if (input.kind !== 'configured_choice' || input.required !== true) {
-      throw new TypeError(
-        'Configured-choice rule kind must be configured_choice and required must be true.',
-      );
+      throw new ConfiguredChoiceRootContractError();
     }
     const ruleKey = text(input.rule_key, 'Configured-choice rule.rule_key');
     const abilityChoice = input.ability_choice === null
@@ -225,9 +244,7 @@ export class ConfiguredChoiceRule {
             options.length === 0 ||
             options.some((option) => !isEnumValue(abilities, option))
           ) {
-            throw new TypeError(
-              'Configured-choice rule ability options must be supported abilities.',
-            );
+            throw new ConfiguredChoiceAbilityOptionsError();
           }
           return Object.freeze({
             configKey: path(
@@ -245,16 +262,14 @@ export class ConfiguredChoiceRule {
       unknownSheetFields.some((field) =>
         !(configuredChoiceUnknownSheetFields as readonly string[]).includes(field))
     ) {
-      throw new TypeError('Configured-choice rule has an unknown sheet field.');
+      throw new ConfiguredChoiceUnknownSheetFieldError();
     }
     const projectedTraitNames = uniqueStrings(
       input.projected_trait_names,
       'Configured-choice rule.projected_trait_names',
     );
     if (projectedTraitNames.length > 0 && unknownSheetFields.length === 0) {
-      throw new TypeError(
-        'A projected trait requires a structured unknown sheet field.',
-      );
+      throw new ConfiguredChoiceProjectedTraitError();
     }
 
     const optionValues = new Set<string>();
@@ -269,7 +284,7 @@ export class ConfiguredChoiceRule {
         ], label);
         const optionValue = text(option.value, `${label}.value`);
         if (optionValues.has(optionValue)) {
-          throw new TypeError(`Configured-choice rule repeats option '${optionValue}'.`);
+          throw new ConfiguredChoiceRepeatedOptionError(optionValue);
         }
         optionValues.add(optionValue);
         const sheet = record(option.sheet, `${label}.sheet`);
@@ -285,7 +300,10 @@ export class ConfiguredChoiceRule {
           darkvisionFeet !== null &&
           (!Number.isSafeInteger(darkvisionFeet) || (darkvisionFeet as number) <= 0)
         ) {
-          throw new TypeError(`${label}.sheet.darkvision_feet must be positive.`);
+          throw new ConfiguredChoiceValueError(
+            `${label}.sheet.darkvision_feet`,
+            'positive',
+          );
         }
         const effects = list(option.effects, `${label}.effects`).map(
           (effect, effectIndex) => parseEffect(
@@ -300,12 +318,12 @@ export class ConfiguredChoiceRule {
               `${label}.grants[${String(grantIndex)}]`,
             );
             if (grantRecord.kind === 'configured_choice') {
-              throw new TypeError('Configured-choice rules may not be nested.');
+              throw new ConfiguredChoiceNestedRuleError();
             }
             const parsed = GrantRule.fromObject(grant);
             if (materialRuleKeys.has(parsed.ruleKey)) {
-              throw new TypeError(
-                `Configured-choice rule repeats material rule_key '${parsed.ruleKey}'.`,
+              throw new ConfiguredChoiceRepeatedMaterialRuleKeyError(
+                parsed.ruleKey,
               );
             }
             materialRuleKeys.add(parsed.ruleKey);
@@ -329,14 +347,14 @@ export class ConfiguredChoiceRule {
       unknownSheetFields.includes('darkvision_feet') &&
       options.some((option) => option.darkvisionFeet === null)
     ) {
-      throw new TypeError('Every option must provide declared Darkvision.');
+      throw new ConfiguredChoiceDeclaredDarkvisionError();
     }
     if (
       unknownSheetFields.includes('damage_resistances') &&
       options.some((option) =>
         option.effects.filter((effect) => effect.kind === 'damage_resistance').length !== 1)
     ) {
-      throw new TypeError('Every option must provide one declared damage resistance.');
+      throw new ConfiguredChoiceDeclaredDamageResistanceError();
     }
 
     return new ConfiguredChoiceRule(
@@ -362,7 +380,7 @@ export type SourceGrantRule = GrantRule | ConfiguredChoiceRule;
 /** Closed source-rule parser; GrantRule keeps its material-only discriminants. */
 export function parseSourceGrantRules(value: unknown): readonly SourceGrantRule[] {
   if (!Array.isArray(value)) {
-    throw new TypeError('Source grant rules must be a list.');
+    throw new SourceGrantRulesListError();
   }
   const ruleKeys = new Set<string>();
   const rules = value.map((entry) => {
@@ -371,16 +389,14 @@ export function parseSourceGrantRules(value: unknown): readonly SourceGrantRule[
       ? ConfiguredChoiceRule.fromObject(input)
       : GrantRule.fromObject(input);
     if (ruleKeys.has(rule.ruleKey)) {
-      throw new TypeError(`Source grant rules repeat rule_key '${rule.ruleKey}'.`);
+      throw new SourceGrantRuleKeyError(rule.ruleKey);
     }
     ruleKeys.add(rule.ruleKey);
     if (rule instanceof ConfiguredChoiceRule) {
       for (const option of rule.options) {
         for (const grant of option.grants) {
           if (ruleKeys.has(grant.ruleKey)) {
-            throw new TypeError(
-              `Source grant rules repeat rule_key '${grant.ruleKey}'.`,
-            );
+            throw new SourceGrantRuleKeyError(grant.ruleKey);
           }
           ruleKeys.add(grant.ruleKey);
         }

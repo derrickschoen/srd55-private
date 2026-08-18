@@ -14,11 +14,15 @@ import {
 import lineageMigrationSource from './reconcile-species-lineage-content-v2.ts?raw';
 import lineageSeedSource from '../rules/origin-definitions-srd.ts?raw';
 import configuredChoiceSource from '../grants/configured-choice-rule.ts?raw';
+import configuredChoiceErrorsSource from '../grants/configured-choice-rule-errors.ts?raw';
 import grantRuleSource from '../grants/grant-rule.ts?raw';
+import grantRuleErrorsSource from '../grants/grant-rule-errors.ts?raw';
 import sourceRuleReaderSource from '../grants/source-rule-reader.ts?raw';
+import sourceRuleReaderErrorsSource from '../grants/source-rule-reader-errors.ts?raw';
 import sourceInstanceStateSource from '../domain/source-instance-state.ts?raw';
 import characterLevelSource from '../rules/character-level.ts?raw';
 import slotGeneratorSource from '../grants/grant-rule-slot-generator.ts?raw';
+import slotGeneratorErrorsSource from '../grants/grant-rule-slot-generator-errors.ts?raw';
 import grantPlannerSource from '../grants/grant-rule-planner.ts?raw';
 import skillGrantsSource from '../grants/skill-grants.ts?raw';
 import skillExpertiseGrantsSource from '../grants/skill-expertise-grants.ts?raw';
@@ -104,12 +108,24 @@ export const CATALOG_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
           bytes: configuredChoiceSource,
         }),
         Object.freeze({
+          path: 'src/grants/configured-choice-rule-errors.ts',
+          bytes: configuredChoiceErrorsSource,
+        }),
+        Object.freeze({
           path: 'src/grants/grant-rule.ts',
           bytes: grantRuleSource,
         }),
         Object.freeze({
+          path: 'src/grants/grant-rule-errors.ts',
+          bytes: grantRuleErrorsSource,
+        }),
+        Object.freeze({
           path: 'src/grants/source-rule-reader.ts',
           bytes: sourceRuleReaderSource,
+        }),
+        Object.freeze({
+          path: 'src/grants/source-rule-reader-errors.ts',
+          bytes: sourceRuleReaderErrorsSource,
         }),
         // D226 round 2: `source-rule-reader.ts`'s decode THROWS on a state
         // outside this array, so the array decides whether reconciliation
@@ -126,6 +142,10 @@ export const CATALOG_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
         Object.freeze({
           path: 'src/grants/grant-rule-slot-generator.ts',
           bytes: slotGeneratorSource,
+        }),
+        Object.freeze({
+          path: 'src/grants/grant-rule-slot-generator-errors.ts',
+          bytes: slotGeneratorErrorsSource,
         }),
         Object.freeze({
           path: 'src/grants/grant-rule-planner.ts',
@@ -194,12 +214,13 @@ export const CATALOG_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
       // checksum. `src/domain/source-instance-state.ts` above is the remedy and
       // exists for it. No reconciled row changes in either round: every source
       // instance this walks holds `active` or `tombstoned`.
-      // Re-pinned for D299: the frozen registry source now writes an explicit
-      // `listed` visibility when this historical external-import boundary has
-      // no visibility field. Its reconciled aggregates and fingerprints are
-      // unchanged; only the newly required identity discriminator is written.
+      // Re-pinned 2026-08-17 at the D299 + grants-migration merge: D299's
+      // registry source writes an explicit `listed` visibility at this
+      // historical import boundary, and the grants migration adds four
+      // sibling error modules as explicit sources. Reconciled rows are
+      // unchanged by both; the pin covers the combined source set.
       checksum:
-        '8f4e35cea9a7810c0f5b19541ac09bfba228add521f562917eb28120811a85e7',
+        'eff5b010f6ed5923bd35857f927d89a89282dbffe538067adf5a5558fe58158f',
       run: reconcileSpeciesLineageContentV2,
     }),
   ]);

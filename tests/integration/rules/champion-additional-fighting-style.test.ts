@@ -15,6 +15,19 @@ import { ensureBundledStableContentIdentity } from '../../../src/catalog/content
 import { normalizeContentIdentityName } from '../../../src/catalog/content-identity';
 import { openTestDatabase } from '../../helpers/open-db';
 import { raiseClassLevelForTest } from '../../helpers/class-levels';
+import {
+  GrantSourceDefinitionResolutionError,
+} from '../../../src/grants/grant-rule-slot-generator-errors';
+import { GrantRulePendingChoiceError } from '../../../src/grants/grant-rule-errors';
+
+function thrown(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return expect.fail('Expected an error, but the call returned.');
+}
 
 /**
  * CHAMPION LEVEL 7 — "ADDITIONAL FIGHTING STYLE".
@@ -392,7 +405,7 @@ describe('Champion level 7 additional Fighting Style', () => {
       db.scalar('SELECT id FROM background_definitions ORDER BY id LIMIT 1'),
     );
     expect(backgroundId).toBeGreaterThan(0);
-    expect(() =>
+    const error = thrown(() =>
       new AddSourceCommand(
         db,
         {
@@ -402,8 +415,11 @@ describe('Champion level 7 additional Fighting Style', () => {
           config: {},
         },
         integrity,
-      ).apply(characterId),
-    ).toThrow(/could not resolve its definition/u);
+      ).apply(characterId));
+    expect(error).toBeInstanceOf(GrantSourceDefinitionResolutionError);
+    expect(error).toMatchObject({
+      rule_key: expect.stringMatching(/-origin-feat$/u),
+    });
   });
 
   it('still refuses a delegating rule whose config PATH nothing writes', () => {
@@ -427,7 +443,7 @@ describe('Champion level 7 additional Fighting Style', () => {
       ],
     );
     fighterWithSubclass(subclass, 6);
-    expect(() =>
+    const error = thrown(() =>
       new LevelUpClassCommand(
         db,
         {
@@ -436,22 +452,26 @@ describe('Champion level 7 additional Fighting Style', () => {
           target_level: 7,
         },
         integrity,
-      ).apply(characterId),
-    ).toThrow(/could not resolve its definition/u);
+      ).apply(characterId));
+    expect(error).toBeInstanceOf(GrantSourceDefinitionResolutionError);
+    expect(error).toMatchObject({
+      rule_key: 'champion-additional-fighting-style',
+    });
   });
 
   it('refuses to build a pending-choice rule that delegates nothing', () => {
     // The declaration is meaningless without `definition_key_config`, so it is
     // refused at the type's own boundary rather than sitting in a seed.
-    expect(() =>
+    const error = thrown(() =>
       GrantRule.fromObject({
         kind: 'grant_source',
         rule_key: 'nowhere',
         source_type: 'feat',
         source_definition_key: '2024:feat:defense',
         allows_pending_choice: true,
-      }),
-    ).toThrow(/without delegating its definition/u);
+      }));
+    expect(error).toBeInstanceOf(GrantRulePendingChoiceError);
+    expect(error).toMatchObject({ rule_key: 'nowhere' });
   });
 
   /**
@@ -474,9 +494,13 @@ describe('Champion level 7 additional Fighting Style', () => {
        WHERE id = ?`,
       [source],
     );
-    expect(() =>
+    const error = thrown(() =>
       new GrantRuleSlotGenerator(db).generateForSource(source),
-    ).toThrow(/could not resolve its definition/u);
+    );
+    expect(error).toBeInstanceOf(GrantSourceDefinitionResolutionError);
+    expect(error).toMatchObject({
+      rule_key: 'champion-additional-fighting-style',
+    });
   });
 
   it('reports the unmade extra choice and stops once it is made (CHAMP-L7-NAGS)', () => {
