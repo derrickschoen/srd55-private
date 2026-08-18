@@ -1251,6 +1251,8 @@ const expectedNamedIndexes: Record<string, string> = {
     'character_class_levels:id,character_id:unique',
   character_source_instances_character_id_state_index:
     'character_source_instances:character_id,state',
+  character_source_instances_parent_index:
+    'character_source_instances:parent_source_instance_id',
   character_source_instances_id_character_id_unique:
     'character_source_instances:id,character_id:unique',
   character_source_instances_instance_uuid_unique:
@@ -1293,6 +1295,12 @@ const expectedNamedIndexes: Record<string, string> = {
     'spell_selection_slots:character_id,bucket',
   spell_selection_slots_character_id_state_index:
     'spell_selection_slots:character_id,state',
+  spell_selection_slots_current_spell_version_index:
+    'spell_selection_slots:current_spell_version_id',
+  spell_selection_slots_fixed_spell_version_index:
+    'spell_selection_slots:fixed_spell_version_id',
+  spell_selection_slots_source_state_index:
+    'spell_selection_slots:source_instance_id,state',
   wizard_spellbook_entries_character_id_state_index:
     'wizard_spellbook_entries:character_id,state',
   wizard_spellbook_entries_source_rule_ordinal_unique:
@@ -2010,6 +2018,37 @@ describe(`schema (${sourceLabel})`, () => {
     expect(columnsOf('spell_selection_slots')).toContain(
       'selection_eligibility',
     );
+  });
+
+  it('declares the measured reverse indexes with their exact partial predicates', () => {
+    const db = openDb(schemaSql);
+    expect(db.selectObjects(
+      `SELECT name, sql FROM sqlite_schema
+       WHERE name IN (
+         'character_source_instances_parent_index',
+         'spell_selection_slots_current_spell_version_index',
+         'spell_selection_slots_fixed_spell_version_index',
+         'spell_selection_slots_source_state_index'
+       )
+       ORDER BY name`,
+    )).toEqual([
+      {
+        name: 'character_source_instances_parent_index',
+        sql: 'CREATE INDEX `character_source_instances_parent_index` ON `character_source_instances` (`parent_source_instance_id`) WHERE parent_source_instance_id IS NOT NULL',
+      },
+      {
+        name: 'spell_selection_slots_current_spell_version_index',
+        sql: 'CREATE INDEX `spell_selection_slots_current_spell_version_index` ON `spell_selection_slots` (`current_spell_version_id`) WHERE current_spell_version_id IS NOT NULL',
+      },
+      {
+        name: 'spell_selection_slots_fixed_spell_version_index',
+        sql: 'CREATE INDEX `spell_selection_slots_fixed_spell_version_index` ON `spell_selection_slots` (`fixed_spell_version_id`) WHERE fixed_spell_version_id IS NOT NULL',
+      },
+      {
+        name: 'spell_selection_slots_source_state_index',
+        sql: 'CREATE INDEX `spell_selection_slots_source_state_index` ON `spell_selection_slots` (`source_instance_id`,`state`)',
+      },
+    ]);
   });
 
   it('accepts decode-only character legacy ranges and forbids invalid template pairs', () => {

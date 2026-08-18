@@ -50,6 +50,7 @@ import recipientReplacementChoices from '../../drizzle/0046_recipient_replacemen
 import sourceInstanceState from '../../drizzle/0047_source_instance_state.sql?raw';
 import catalogContentVisibility from '../../drizzle/0048_catalog_content_visibility.sql?raw';
 import spellVersionsActiveLevelNameIndex from '../../drizzle/0049_spell_versions_active_level_name_index.sql?raw';
+import relationshipIndexes from '../../drizzle/0050_relationship_indexes.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -562,6 +563,13 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       '5ce856b3247875a0bcbed31a478cc98ea5d376564d19f5565f36df71b0b48f54',
     resultSchemaChecksum:
       '0b77b124caa0c018792c739b1ac102ff5ee2d2bb74642aee686838fe4d06fa2a',
+  }),
+  Object.freeze({
+    id: '0050_relationship_indexes',
+    sql: relationshipIndexes,
+    checksum: '97d527b2b9faffea01e5797ed79af1c4037a6e2cc2978b6173f281e18e7fc884',
+    resultSchemaChecksum:
+      'df23f859719a0c42427a3085c98b39b713e07ea2fcdd55fac9b6c04e6e5951af',
   }),
 ]);
 
