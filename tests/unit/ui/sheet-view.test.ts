@@ -431,6 +431,7 @@ function spell(
     catalog_layer: 'bundled',
     level: { status: 'known', value: 1 as SpellLevel },
     marker: 'known',
+    selection_count: 1,
     reference: {
       edition: '2024',
       school: 'Abjuration',
@@ -655,6 +656,20 @@ describe('the character sheet is projected twice from one value', () => {
     ]);
     expect(group.spellbook_rows.map((row) => textOf(row.detail)).join(' '))
       .not.toMatch(/Prepared|Known/);
+  });
+
+  it('prints how many selections were collapsed into a duplicate spell row', () => {
+    const wizard = classSpellGroup(11, 'Wizard', [
+      spell(101, 'Repeated Spark', {
+        level: { status: 'known', value: 0 as SpellLevel },
+        selection_count: 3,
+      }),
+    ]);
+
+    const group = spellSectionOf(sheet({ spells: [wizard] })).spell_groups[0]!;
+    expect(group.rows.map((row) => textOf(row.detail))).toEqual([
+      'Known · Selected 3 times · SRD · bundled layer',
+    ]);
   });
 
   it('compact and appendix projections share class level name order', () => {

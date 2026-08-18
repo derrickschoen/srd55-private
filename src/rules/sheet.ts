@@ -372,6 +372,12 @@ export interface SheetWarning {
     | 'weapon_proficiency_qualifier_unread'
     /** Armour recorded that no class of this character's trains them in. */
     | 'armor_not_trained'
+    /** A spell selection consumes more than one limited choice. */
+    | 'duplicate_spell_wasteful'
+    /** Overlapping spell selections are recorded but do not both consume limits. */
+    | 'duplicate_spell_redundant_intentional'
+    /** More than one rules version of the same spell is selected. */
+    | 'duplicate_spell_conflicting_version'
     /** D96: a held class's sourced multiclass ability minimum is unmet. */
     | 'multiclass_primary_ability_unmet'
     /** D33: a held class's stored multiclass expression cannot be judged. */
