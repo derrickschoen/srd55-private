@@ -445,6 +445,7 @@ export const COLUMN_REFINEMENTS = {
   abilityAllocationMethodEnum,
   sourceTypeEnum,
   sourceInstanceStateEnum,
+  contentVisibilityEnum,
   slotBucketEnum,
   slotStateEnum,
   skillGrantStateEnum,

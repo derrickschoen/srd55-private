@@ -1664,7 +1664,7 @@ describe('database migration chain', () => {
       INSERT INTO catalog_data_migrations (id, scheme, checksum)
       VALUES (
         'retire_non_srd_bundled_subclasses_v1', 'content-v1',
-        'e30bd134e9173b51f925e977e3ac8f1e274e14bdf9a3c956c04c9a58b7fde8a4'
+        '69781850c8b75e9e83cffd421f278810986859af07d2366e2e44ac854259eb4a'
       );
       INSERT INTO catalog_content_fingerprints (
         content_kind, fingerprint_scheme, fingerprint_digest, canonical_json,
@@ -1693,7 +1693,7 @@ describe('database migration chain', () => {
     )).toContainEqual({
       id: 'retire_non_srd_bundled_subclasses_v1',
       scheme: 'content-v1',
-      checksum: 'e30bd134e9173b51f925e977e3ac8f1e274e14bdf9a3c956c04c9a58b7fde8a4',
+      checksum: '69781850c8b75e9e83cffd421f278810986859af07d2366e2e44ac854259eb4a',
     });
     expect(lifecycle.database.allRaw(
       `SELECT fingerprint_scheme, fingerprint_digest, canonical_json,

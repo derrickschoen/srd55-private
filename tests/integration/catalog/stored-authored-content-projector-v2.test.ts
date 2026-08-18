@@ -244,6 +244,7 @@ describe('stored authored content-v2 projector', () => {
       key_kind: 'asserted',
       fingerprint_scheme: CONTENT_FINGERPRINT_SCHEME_V2,
       fingerprint_digest: identity.digest,
+      visibility: 'listed',
       aggregate,
     }];
     expect(validatePortableContent(input)).toEqual(input);

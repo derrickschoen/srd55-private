@@ -648,6 +648,7 @@ describe('browser catalog schema', () => {
         parentClassKey: '2024:class:bard',
         name: 'Choir of the Unit Test',
         edition: '2024',
+        visibility: 'listed',
         features: [
           {
             classLevel: 3,

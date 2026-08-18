@@ -133,6 +133,7 @@ function catalogContentIdentityRow(): Record<string, unknown> {
     content_kind: 'species',
     key_kind: 'asserted',
     catalog_layer: 'external',
+    visibility: 'listed',
     normalized_name: 'archivedspecies',
     created_at: '2026-08-06T10:00:00.000Z',
     archived_at: null,

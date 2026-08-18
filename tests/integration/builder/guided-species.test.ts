@@ -1041,7 +1041,9 @@ describe('configured species choice and honest projection', () => {
         missing: ['option', 'spellcasting_ability'],
       }),
     ]));
-    expect(sheet.gaps).toEqual(expect.arrayContaining([
+    // D286 D-M3 moved pending player work from `gaps` to the dedicated
+    // `unfinished_choices` sheet field; the disclosure itself is unchanged.
+    expect(sheet.unfinished_choices).toEqual(expect.arrayContaining([
       expect.objectContaining({
         kind: 'required_source_choice',
         title: 'Elf — Elven Lineage not chosen',

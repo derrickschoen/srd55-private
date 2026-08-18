@@ -71,7 +71,7 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
   catalog_content_identities: {
     text: [
       'content_key', 'content_kind', 'key_kind', 'catalog_layer',
-      'normalized_name',
+      'visibility', 'normalized_name',
     ],
     numeric: ['archived_at', 'created_at'],
   },
@@ -787,7 +787,7 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
 const expectedNotNull: Record<string, string[]> = {
   catalog_content_identities: [
     'content_key', 'content_kind', 'key_kind', 'catalog_layer',
-    'normalized_name', 'created_at',
+    'visibility', 'normalized_name', 'created_at',
   ],
   catalog_content_fingerprints: [
     'content_kind', 'fingerprint_scheme', 'fingerprint_digest',

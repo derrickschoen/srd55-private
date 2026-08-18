@@ -46,6 +46,7 @@ function portableFeat(name: string, notes: string) {
     key_kind: 'asserted' as const,
     fingerprint_scheme: identity.envelope.scheme,
     fingerprint_digest: identity.digest,
+    visibility: 'listed' as const,
     aggregate,
     provenance: {
       origin_kind: 'authored_here' as const,

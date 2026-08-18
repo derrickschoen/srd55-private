@@ -1144,6 +1144,7 @@ const catalogContentIdentity =
   (values: Values): Write =>
   (db) => {
     insert(db, 'catalog_content_identities', {
+        visibility: 'listed',
       content_key: `2024:test.owner:${uid('archived-content')}`,
       content_kind: 'species',
       key_kind: 'asserted',
@@ -1158,6 +1159,7 @@ const catalogContentProvenance =
   (db) => {
     const contentKey = `2024:test.owner:${uid('provenance')}`;
     insert(db, 'catalog_content_identities', {
+        visibility: 'listed',
       content_key: contentKey,
       content_kind: 'species',
       key_kind: 'asserted',
@@ -1190,6 +1192,7 @@ const catalogContentArchiveMember =
     const contentKind = values.content_kind ?? 'species';
     const contentKey = `2024:test.owner:${uid('archive-member')}`;
     insert(db, 'catalog_content_identities', {
+        visibility: 'listed',
       content_key: contentKey,
       content_kind: contentKind,
       key_kind: 'asserted',
@@ -1218,6 +1221,7 @@ const catalogContentSupersession =
       [newKey, `${suffix}new`],
     ] as const) {
       insert(db, 'catalog_content_identities', {
+          visibility: 'listed',
         content_key: contentKey,
         content_kind: 'species',
         key_kind: 'asserted',
@@ -1245,6 +1249,7 @@ const catalogContentReplacementChoice =
       : `2024:test.owner:${suffix}-new`;
     for (const contentKey of new Set([oldKey, newKey])) {
       insert(db, 'catalog_content_identities', {
+          visibility: 'listed',
         content_key: contentKey,
         content_kind: 'species',
         key_kind: 'asserted',
@@ -1811,6 +1816,7 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
       (db) => {
         const key = `2024:test.owner:${uid('self-supersession')}`;
         insert(db, 'catalog_content_identities', {
+            visibility: 'listed',
           content_key: key,
           content_kind: 'species',
           key_kind: 'asserted',
@@ -4370,6 +4376,9 @@ const COVERED_ELSEWHERE = [
   'catalog_content_identities_key_kind_check',
   'catalog_content_identities_key_layer_check',
   'catalog_content_identities_normalized_name_check',
+  // D299: rejection of a non-vocabulary visibility value is exercised in
+  // content-registry.test.ts beside its sibling identity checks.
+  'catalog_content_identities_visibility_check',
   'catalog_content_match_decisions_content_kind_check',
   'catalog_content_match_decisions_decision_check',
   'catalog_content_match_decisions_digest_check',

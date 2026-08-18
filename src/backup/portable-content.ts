@@ -1260,7 +1260,10 @@ function validatedEntry(
   const kind = value.kind as ContentKind;
   exactKeys(value, [
     'kind', 'content_key', 'key_kind', 'fingerprint_scheme',
-    'fingerprint_digest', 'visibility', 'aggregate',
+    'fingerprint_digest', 'aggregate',
+    // D299: absent on every pre-visibility document; normalized to `listed`
+    // below. Requiring it here would refuse all historical shares/backups.
+    ...(Object.hasOwn(value, 'visibility') ? ['visibility'] : []),
     ...(kind === 'spell' ? ['spell_identity'] : []),
     ...(Object.hasOwn(value, 'provenance') ? ['provenance'] : []),
   ], `Portable content[${String(index)}]`);
