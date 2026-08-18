@@ -4,6 +4,18 @@ import {
   sharedCasterLevels,
 } from './progression-type';
 
+export class CasterProgressionTypeError extends TypeError {
+  override readonly name = 'CasterProgressionTypeError' as const;
+  constructor(
+    readonly class_name: string,
+    readonly progression_type: string,
+  ) {
+    super(
+      `Unknown progression type '${progression_type}' for ${class_name}.`,
+    );
+  }
+}
+
 export class CasterContribution {
   static readonly FULL = 'full';
   static readonly HALF_UP = 'half_up';
@@ -22,9 +34,7 @@ export class CasterContribution {
     progressionType: ProgressionType | string,
   ) {
     if (!isProgressionType(progressionType)) {
-      throw new TypeError(
-        `Unknown progression type '${progressionType}' for ${className}.`,
-      );
+      throw new CasterProgressionTypeError(className, progressionType);
     }
 
     this.progression = progressionType;

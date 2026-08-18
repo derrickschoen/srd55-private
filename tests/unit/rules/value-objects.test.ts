@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { AbilityScore } from '../../../src/rules/ability-score';
-import { AbilityScores } from '../../../src/rules/ability-scores';
+import {
+  AbilityScoreInputError,
+  AbilityScores,
+} from '../../../src/rules/ability-scores';
 import { AttackBonus } from '../../../src/rules/attack-bonus';
 import {
   contributesToSharedSlots,
@@ -9,6 +12,15 @@ import {
 } from '../../../src/rules/progression-type';
 import { SaveDC } from '../../../src/rules/save-dc';
 import { SpellLevel } from '../../../src/rules/spell-level';
+
+function defect(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return expect.fail('Expected a defect, but the call returned.');
+}
 
 describe('rules value objects', () => {
   it.each([
@@ -69,7 +81,7 @@ describe('rules value objects', () => {
   });
 
   it('rejects missing and non-digit score input at the named ability', () => {
-    expect(() =>
+    const missing = defect(() =>
       AbilityScores.fromArray({
         strength: 10,
         dexterity: 10,
@@ -77,8 +89,11 @@ describe('rules value objects', () => {
         intelligence: 10,
         wisdom: 10,
       }),
-    ).toThrow('Missing or invalid charisma ability score.');
-    expect(() =>
+    );
+    expect(missing).toBeInstanceOf(AbilityScoreInputError);
+    expect(missing).toMatchObject({ ability: 'charisma', value: undefined });
+
+    const invalid = defect(() =>
       AbilityScores.fromArray({
         strength: 10,
         dexterity: '10.0',
@@ -87,7 +102,9 @@ describe('rules value objects', () => {
         wisdom: 10,
         charisma: 10,
       }),
-    ).toThrow('Missing or invalid dexterity ability score.');
+    );
+    expect(invalid).toBeInstanceOf(AbilityScoreInputError);
+    expect(invalid).toMatchObject({ ability: 'dexterity', value: '10.0' });
   });
 
   it('puts shared contribution and preparation behavior on progression types', () => {

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { CasterContribution } from '../../../src/rules/caster-contribution';
+import {
+  CasterContribution,
+  CasterProgressionTypeError,
+} from '../../../src/rules/caster-contribution';
 import {
   casterLevel,
   maxPreparableLevelForClass,
@@ -8,6 +11,15 @@ import {
   slotsForCasterLevel,
 } from '../../../src/rules/spell-slots';
 import { proficiencyBonus } from '../../../src/rules/proficiency';
+
+function defect(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return expect.fail('Expected a defect, but the call returned.');
+}
 
 const full = (name: string, level: number) =>
   new CasterContribution(name, level, CasterContribution.FULL);
@@ -67,9 +79,14 @@ describe('per-class caster contribution', () => {
   });
 
   it('rejects unknown progression and negative class levels', () => {
-    expect(
-      () => new CasterContribution('Mystery', 3, 'wat'),
-    ).toThrow("Unknown progression type 'wat' for Mystery.");
+    const error = defect(() =>
+      new CasterContribution('Mystery', 3, 'wat'),
+    );
+    expect(error).toBeInstanceOf(CasterProgressionTypeError);
+    expect(error).toMatchObject({
+      class_name: 'Mystery',
+      progression_type: 'wat',
+    });
     expect(() => full('Wizard', -1)).toThrow(
       'Class level cannot be negative, got -1.',
     );

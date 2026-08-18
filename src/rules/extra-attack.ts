@@ -137,6 +137,14 @@ export interface AttacksPerAction {
   readonly unresolved: readonly ResolvedExtraAttackGrant[];
 }
 
+export class ExtraAttackUnhandledWeaponScopeError extends Error {
+  override readonly name =
+    'ExtraAttackUnhandledWeaponScopeError' as const;
+  constructor(readonly weapon_scope: string) {
+    super(`Unhandled extra attack weapon scope ${weapon_scope}.`);
+  }
+}
+
 /**
  * The sentence for a grant whose weapon this application cannot identify.
  *
@@ -184,8 +192,8 @@ function scopeUnresolved(grant: ExtraAttackGrant): readonly string[] {
        new scope is a compile error here rather than a silent application. */
     default: {
       const unreachable: never = grant.weapon_scope;
-      throw new Error(
-        `Unhandled extra attack weapon scope ${String(unreachable)}.`,
+      throw new ExtraAttackUnhandledWeaponScopeError(
+        String(unreachable),
       );
     }
   }
