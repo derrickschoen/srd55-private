@@ -61,6 +61,13 @@ export class SrdClassLevelFeaturesError extends Error {
   }
 }
 
+export class SubclassSpellcastingAbilityError extends TypeError {
+  override readonly name = 'SubclassSpellcastingAbilityError' as const;
+  constructor(readonly ability: string) {
+    super(`Subclass has unknown spellcasting ability '${ability}'.`);
+  }
+}
+
 const SECTION_MARKER =
   /^=== (?<className>[A-Za-z]+) Features table — printed page \d+ ===$/gm;
 const LEVEL_ROW = /^\s*(?<level>[1-9]|1\d|20)\s+\+[2-6](?:\s|$)/;
@@ -293,7 +300,7 @@ export function projectedSubclassFeatureSource(
     (row) => {
       const ability = sqlNullableString(row, 'spellcasting_ability');
       if (ability !== null && !isEnumValue(abilities, ability)) {
-        throw new TypeError(`Subclass has unknown spellcasting ability '${ability}'.`);
+        throw new SubclassSpellcastingAbilityError(ability);
       }
       return {
         content_key: contentKey,

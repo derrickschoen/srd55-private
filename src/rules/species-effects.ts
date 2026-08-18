@@ -154,15 +154,9 @@ export function summariseEffects(
         // sheet line beside resistances and speed — it changes the six scores
         // themselves, and `src/rules/ability-contributions.ts` is the ONE
         // resolver every score reader goes through (plan §3.4). Summing it
-        // here as well would apply it twice. The branch exists so the switch
-        // stays exhaustive: a fifth kind is a compile error, not a silent skip.
+        // here as well would apply it twice. The explicit branch documents
+        // that this known kind is intentionally ignored by this summary.
         break;
-      /* c8 ignore next 4 -- unreachable while the switch is exhaustive; kept so
-         a new enum member is a compile error here rather than a silent skip. */
-      default: {
-        const unreachable: never = kind;
-        throw new Error(`Unhandled effect kind ${String(unreachable)}.`);
-      }
     }
   }
 

@@ -26,36 +26,74 @@
 
 import extract from '../../docs/srd/source/ability-score-generation.txt?raw';
 
+export type SrdAbilityScoreGenerationSection =
+  | 'standard_array'
+  | 'point_cost';
+
+const SRD_ABILITY_SCORE_SECTION_MESSAGES: Readonly<
+  Record<SrdAbilityScoreGenerationSection, string>
+> = {
+  standard_array:
+    'SRD extract: Standard Array wording is absent or unrecognised.',
+  point_cost: 'SRD extract: Point Cost wording is absent or unrecognised.',
+};
+
+export class SrdAbilityScoreGenerationWordingError extends Error {
+  override readonly name = 'SrdAbilityScoreGenerationWordingError' as const;
+  constructor(readonly section: SrdAbilityScoreGenerationSection) {
+    super(SRD_ABILITY_SCORE_SECTION_MESSAGES[section]);
+  }
+}
+
+export class SrdStandardArrayShapeError extends Error {
+  override readonly name = 'SrdStandardArrayShapeError' as const;
+  constructor() {
+    super('SRD extract: Standard Array must list six integers.');
+  }
+}
+
+export class SrdPointCostDuplicateScoreError extends Error {
+  override readonly name = 'SrdPointCostDuplicateScoreError' as const;
+  constructor(readonly score: number) {
+    super(`SRD extract: point cost for score ${String(score)} appears twice.`);
+  }
+}
+
+export class SrdPointCostTableMissingError extends Error {
+  override readonly name = 'SrdPointCostTableMissingError' as const;
+  constructor() {
+    super(
+      'SRD extract: the Ability Score Point Costs table is absent or unrecognised.',
+    );
+  }
+}
+
 function normalized(source: string): string {
   return source.replace(/\s+/gu, ' ').trim();
 }
 
-function parseStandardArray(source: string): readonly number[] {
+export function parseStandardArray(source: string): readonly number[] {
   const match = normalized(source).match(
     /Standard Array\. Use the following six scores for your abilities: (?<scores>[\d, ]+)\./u,
   );
   const scores = match?.groups?.scores;
   if (scores === undefined) {
-    throw new Error(
-      'SRD extract: Standard Array wording is absent or unrecognised.',
-    );
+    throw new SrdAbilityScoreGenerationWordingError('standard_array');
   }
   const values = scores.split(', ').map(Number);
   if (values.length !== 6 || values.some((value) => !Number.isInteger(value))) {
-    throw new Error('SRD extract: Standard Array must list six integers.');
+    throw new SrdStandardArrayShapeError();
   }
   return values;
 }
 
-function parsePointBudget(source: string): number {
+export function parsePointBudget(source: string): number {
   const match = normalized(source).match(
     /Point Cost\. You have (?<points>\d+) points to spend on your ability scores\./u,
   );
   const points = match?.groups?.points;
   if (points === undefined) {
-    throw new Error(
-      'SRD extract: Point Cost wording is absent or unrecognised.',
-    );
+    throw new SrdAbilityScoreGenerationWordingError('point_cost');
   }
   return Number(points);
 }
@@ -64,7 +102,7 @@ function parsePointBudget(source: string): number {
  * The Ability Score Point Costs table is printed as two side-by-side
  * score/cost column pairs; each physical row carries two entries.
  */
-function parsePointCosts(source: string): ReadonlyMap<number, number> {
+export function parsePointCosts(source: string): ReadonlyMap<number, number> {
   const costs = new Map<number, number>();
   const rowPattern =
     /^\s+(?<leftScore>\d+)\s+(?<leftCost>\d+)\s+(?<rightScore>\d+)\s+(?<rightCost>\d+)\s*$/gmu;
@@ -78,17 +116,13 @@ function parsePointCosts(source: string): ReadonlyMap<number, number> {
       [Number(groups.rightScore), Number(groups.rightCost)],
     ] as const) {
       if (costs.has(score)) {
-        throw new Error(
-          `SRD extract: point cost for score ${score} appears twice.`,
-        );
+        throw new SrdPointCostDuplicateScoreError(score);
       }
       costs.set(score, cost);
     }
   }
   if (costs.size === 0) {
-    throw new Error(
-      'SRD extract: the Ability Score Point Costs table is absent or unrecognised.',
-    );
+    throw new SrdPointCostTableMissingError();
   }
   return costs;
 }
