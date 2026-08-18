@@ -1082,6 +1082,8 @@ const expectedNamedIndexes: Record<string, string> = {
     'catalog_content_provenance:received,origin_kind,content_kind',
   catalog_content_fingerprints_current_unique:
     'catalog_content_fingerprints:content_key:unique',
+  catalog_content_fingerprints_content_key_index:
+    'catalog_content_fingerprints:content_key',
   catalog_content_fingerprints_resolution_index:
     'catalog_content_fingerprints:content_kind,fingerprint_scheme,fingerprint_digest',
   catalog_content_aliases_resolution_index:

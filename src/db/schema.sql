@@ -220,6 +220,7 @@ CREATE TABLE `catalog_content_fingerprints` (
 );
 
 CREATE UNIQUE INDEX `catalog_content_fingerprints_current_unique` ON `catalog_content_fingerprints` (`content_key`) WHERE "catalog_content_fingerprints"."fingerprint_role" = 'current';
+CREATE INDEX `catalog_content_fingerprints_content_key_index` ON `catalog_content_fingerprints` (`content_key`);
 CREATE INDEX `catalog_content_fingerprints_resolution_index` ON `catalog_content_fingerprints` (`content_kind`,`fingerprint_scheme`,`fingerprint_digest`);
 CREATE TABLE `catalog_content_identities` (
 	`content_key` VARCHAR PRIMARY KEY NOT NULL,

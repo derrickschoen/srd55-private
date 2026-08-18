@@ -249,6 +249,15 @@ const SCHEMA_BEFORE_CATALOG_CONTENT_VISIBILITY = DATABASE_MIGRATIONS
   .join('\n');
 const CATALOG_CONTENT_VISIBILITY_MIGRATION =
   DATABASE_MIGRATIONS[CATALOG_CONTENT_VISIBILITY_INDEX]!;
+const FINGERPRINT_CONTENT_KEY_INDEX_INDEX = DATABASE_MIGRATIONS.findIndex(
+  (entry) => entry.id === '0049_fingerprint_content_key_index',
+);
+const SCHEMA_BEFORE_FINGERPRINT_CONTENT_KEY_INDEX = DATABASE_MIGRATIONS
+  .slice(0, FINGERPRINT_CONTENT_KEY_INDEX_INDEX)
+  .map((entry) => entry.sql)
+  .join('\n');
+const FINGERPRINT_CONTENT_KEY_INDEX_MIGRATION =
+  DATABASE_MIGRATIONS[FINGERPRINT_CONTENT_KEY_INDEX_INDEX]!;
 
 /**
  * One character, three source instances (one of them deleted so the
@@ -3630,6 +3639,80 @@ describe('database migration chain', () => {
            'bundled', 'missing visibility'
          )`,
       )).toThrow(/catalog_content_identities\.visibility/);
+      expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
+        CATALOG_CONTENT_VISIBILITY_MIGRATION.resultSchemaChecksum,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it('0049 adds the fingerprint content-key index without changing stored fingerprints', () => {
+    const db = new sqlite3.oo1.DB(':memory:', 'c');
+    try {
+      db.exec(SCHEMA_BEFORE_FINGERPRINT_CONTENT_KEY_INDEX);
+      db.exec(`
+        INSERT INTO catalog_content_identities (
+          content_key, content_kind, key_kind, catalog_layer, visibility,
+          normalized_name
+        ) VALUES (
+          'expanded:migration-fingerprint', 'feat', 'bundled-stable',
+          'bundled', 'listed', 'migration fingerprint'
+        );
+        INSERT INTO catalog_content_fingerprints (
+          content_kind, fingerprint_scheme, fingerprint_digest,
+          canonical_json, content_key, fingerprint_role
+        ) VALUES
+          (
+            'feat', 'content-v1',
+            '1111111111111111111111111111111111111111111111111111111111111111',
+            '{"version":1}', 'expanded:migration-fingerprint', 'current'
+          ),
+          (
+            'feat', 'content-v1',
+            '2222222222222222222222222222222222222222222222222222222222222222',
+            '{"version":0}', 'expanded:migration-fingerprint', 'compatible'
+          );
+      `);
+
+      db.exec(FINGERPRINT_CONTENT_KEY_INDEX_MIGRATION.sql);
+
+      expect(db.selectValue(
+        `SELECT sql FROM sqlite_schema
+         WHERE type = 'index'
+           AND name = 'catalog_content_fingerprints_content_key_index'`,
+      )).toBe(
+        'CREATE INDEX `catalog_content_fingerprints_content_key_index` ' +
+          'ON `catalog_content_fingerprints` (`content_key`)',
+      );
+      expect(db.selectObjects(
+        `SELECT fingerprint_digest, canonical_json, fingerprint_role
+         FROM catalog_content_fingerprints
+         WHERE content_key = 'expanded:migration-fingerprint'
+         ORDER BY fingerprint_role`,
+      )).toEqual([
+        {
+          fingerprint_digest:
+            '2222222222222222222222222222222222222222222222222222222222222222',
+          canonical_json: '{"version":0}',
+          fingerprint_role: 'compatible',
+        },
+        {
+          fingerprint_digest:
+            '1111111111111111111111111111111111111111111111111111111111111111',
+          canonical_json: '{"version":1}',
+          fingerprint_role: 'current',
+        },
+      ]);
+      expect(db.selectObjects(
+        `EXPLAIN QUERY PLAN
+         SELECT fingerprint_digest
+         FROM catalog_content_fingerprints
+         WHERE content_key = 'expanded:migration-fingerprint'`,
+      ).map((row) => String(row.detail))).toContain(
+        'SEARCH catalog_content_fingerprints USING INDEX ' +
+          'catalog_content_fingerprints_content_key_index (content_key=?)',
+      );
       expect(databaseSchemaSignature(db)).toBe(schemaSignature(schema));
     } finally {
       db.close();

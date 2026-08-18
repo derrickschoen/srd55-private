@@ -49,6 +49,7 @@ import characterShareReceipts from '../../drizzle/0045_character_share_receipts.
 import recipientReplacementChoices from '../../drizzle/0046_recipient_replacement_choices.sql?raw';
 import sourceInstanceState from '../../drizzle/0047_source_instance_state.sql?raw';
 import catalogContentVisibility from '../../drizzle/0048_catalog_content_visibility.sql?raw';
+import fingerprintContentKeyIndex from '../../drizzle/0049_fingerprint_content_key_index.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -553,6 +554,14 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       'cc356151ad397f7fcc2c26410221a6f4782e4c0cd3811b9ab0c6d90e816ccfcb',
     resultSchemaChecksum:
       'e537c5d8acdc519c11dcb504de0614c62af70718d5b252420d877be16593e27e',
+  }),
+  Object.freeze({
+    id: '0049_fingerprint_content_key_index',
+    sql: fingerprintContentKeyIndex,
+    checksum:
+      'a6214a4cd17ee5d82e489a830ec02824921178fad663ce0da58e408bc43372f7',
+    resultSchemaChecksum:
+      '890005ed17c3d7f9437199cc5a1325de511e40d256f90972a5cb6e9d6fdc3630',
   }),
 ]);
 
