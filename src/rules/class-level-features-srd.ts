@@ -35,6 +35,7 @@ export const classFeatureEntitlementKinds = [
   'expertise',
   'fighting_style_feature',
   'spellcasting_feature',
+  'subclass_choice',
 ] as const;
 export type ClassFeatureEntitlementKind =
   (typeof classFeatureEntitlementKinds)[number];
@@ -118,8 +119,12 @@ function featureColumns(
 }
 
 function entitlementForName(
+  className: string,
   name: string,
 ): ClassFeatureEntitlementKind | null {
+  if (name === `${className} Subclass`) {
+    return 'subclass_choice';
+  }
   switch (name) {
     case 'Ability Score Improvement':
       return 'ability_score_improvement';
@@ -201,7 +206,7 @@ function parseSection(section: TableSection): SrdClassLevelFeatures {
         feature_cell: featureCell,
         feature_names: featureNames,
         entitlements: featureNames
-          .map(entitlementForName)
+          .map((name) => entitlementForName(section.className, name))
           .filter(
             (
               entitlement,
@@ -264,6 +269,24 @@ export function epicBoonLevelsForClassName(
   className: string,
 ): ReadonlySet<number> | null {
   return levelsWithClassFeatureEntitlement(className, 'epic_boon');
+}
+
+export function subclassChoiceLevelForClassName(
+  className: string,
+): CharacterLevel | null {
+  const features = classLevelFeaturesForClassName(className);
+  if (features === null) {
+    return null;
+  }
+  const levels = features.levels.filter((entry) =>
+    entry.entitlements.includes('subclass_choice'),
+  );
+  if (levels.length !== 1) {
+    throw new SrdClassLevelFeaturesError(
+      `${className} must have exactly one named subclass choice, found ${String(levels.length)}.`,
+    );
+  }
+  return levels[0]!.class_level;
 }
 
 export interface ProjectedBundledClass {

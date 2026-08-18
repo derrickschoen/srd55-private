@@ -36,6 +36,7 @@ import {
   createClassChooser,
   guidedBuildPath as chooserGuidedBuildPath,
   hitDieLabel,
+  subclassTimingNote,
 } from '../../../src/ui/screens/guided-builder/class-chooser';
 import {
   renderGuidedBuildState,
@@ -205,6 +206,28 @@ async function refusedGuidedCreate(
 }
 
 describe('guided class chooser', () => {
+  it('renders a per-class subclass timing note on the class cards', () => {
+    const chooser = createClassChooser({
+      options: [
+        option('2024:class:cleric', 'Cleric', 8),
+        option('2024:class:fighter', 'Fighter', 10),
+      ],
+      createGuided: () => Promise.reject(new Error('not submitted')),
+      navigate: () => undefined,
+    });
+
+    expect(subclassTimingNote('Cleric')).toBe(
+      'A Cleric chooses its subclass at class level 3.',
+    );
+    expect(elementText(chooser.element)).toContain(
+      'A Cleric chooses its subclass at class level 3.',
+    );
+    expect(elementText(chooser.element)).toContain(
+      'A Fighter chooses its subclass at class level 3.',
+    );
+    chooser.cleanup();
+  });
+
   it('does not put a name input in the DOM until a class has been chosen', () => {
     const chooser = createClassChooser({
       options: [option('test:class:sentinel', 'Sentinel', 10)],
@@ -456,6 +479,28 @@ const speciesStepStubs = {
 };
 
 describe('guided species step', () => {
+  it('explains that background increases replace species increases and points to Score path', () => {
+    const step = createSpeciesStep({
+      ...speciesStepStubs,
+      characterId: 1,
+      options: [originOption('2024:species:dwarf', 'Dwarf')],
+      applyOrigin: () => Promise.reject(new Error('not submitted')),
+      navigate: () => undefined,
+    });
+    const note = interactiveElement(step.element).querySelector(
+      '.guided-species-ability-note',
+    );
+
+    expect(note).not.toBeNull();
+    expect(elementText(note! as unknown as Node)).toContain(
+      'ability score increases come from your background, not your species',
+    );
+    expect(elementText(note! as unknown as Node)).toContain(
+      'Score path shows the change, such as “base 15; after increases 17.”',
+    );
+    step.cleanup();
+  });
+
   it('census-pins only the still-unmodelled species choices', () => {
     expect([...SPECIES_UNMADE_CHOICES]).toEqual([
       [

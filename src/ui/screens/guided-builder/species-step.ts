@@ -243,6 +243,11 @@ function speciesCards(
       text:
         'Applying a species copies its printed traits, speed and effects onto the character. Any configured lineage remains saveable and can be completed by returning to this Species step.',
     }),
+    element('p', {
+      className: 'guided-species-ability-note',
+      text:
+        'In these rules, ability score increases come from your background, not your species. On the sheet, each ability’s Score path shows the change, such as “base 15; after increases 17.”',
+    }),
     ...(deps.options.length === 0
       ? [element('p', {
           className: 'guided-empty-catalog',
