@@ -15,8 +15,12 @@ describe('database boot timeline', () => {
     const phases = [
       timeline.observe(databaseBootProgress('loading_engine', 20)),
       timeline.observe(databaseBootProgress('opening_storage', 520)),
+      timeline.observe(databaseBootProgress('checking_saved_verification', 700)),
       timeline.observe(databaseBootProgress('checking_structure', 800)),
-      timeline.observe(databaseBootProgress('checking_bundled_rules', 900)),
+      timeline.observe(databaseBootProgress('checking_database_integrity', 850)),
+      timeline.observe(databaseBootProgress('checking_schema_compatibility', 875)),
+      timeline.observe(databaseBootProgress('applying_data_updates', 900)),
+      timeline.observe(databaseBootProgress('checking_bundled_rules', 950)),
       timeline.observe(databaseBootProgress('verifying_catalog_integrity', 2_400)),
       ...timeline.finish(3_000),
     ];
@@ -26,9 +30,13 @@ describe('database boot timeline', () => {
     ).toEqual([
       ['worker_startup', 20],
       ['loading_engine', 500],
-      ['opening_storage', 280],
-      ['checking_structure', 100],
-      ['checking_bundled_rules', 1_500],
+      ['opening_storage', 180],
+      ['checking_saved_verification', 100],
+      ['checking_structure', 50],
+      ['checking_database_integrity', 25],
+      ['checking_schema_compatibility', 25],
+      ['applying_data_updates', 50],
+      ['checking_bundled_rules', 1_450],
       ['verifying_catalog_integrity', 500],
       ['total', 2_900],
     ]);

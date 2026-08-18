@@ -15,7 +15,7 @@
  *
  * Usage:
  *   node tools/perf/database-boot-perf.mjs --url http://127.0.0.1:5321 \
- *     [--runs 5] [--dawdle-ms 0] [--label baseline]
+ *     [--runs 5] [--dawdle-ms 0] [--profile cold|warm] [--label baseline]
  */
 import { chromium } from '@playwright/test';
 
@@ -27,6 +27,7 @@ function parseArguments(argv) {
     url: 'http://127.0.0.1:5321',
     runs: 5,
     dawdleMs: 0,
+    profile: 'cold',
     label: 'run',
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -39,6 +40,7 @@ function parseArguments(argv) {
     if (flag === '--url') options.url = value;
     else if (flag === '--runs') options.runs = Number(value);
     else if (flag === '--dawdle-ms') options.dawdleMs = Number(value);
+    else if (flag === '--profile') options.profile = value;
     else if (flag === '--label') options.label = value;
     else throw new Error(`Unknown argument ${JSON.stringify(flag)}.`);
   }
@@ -47,6 +49,9 @@ function parseArguments(argv) {
   }
   if (!Number.isFinite(options.dawdleMs) || options.dawdleMs < 0) {
     throw new Error('--dawdle-ms must be a non-negative number.');
+  }
+  if (options.profile !== 'cold' && options.profile !== 'warm') {
+    throw new Error('--profile must be cold or warm.');
   }
   return options;
 }
@@ -67,6 +72,18 @@ async function measureOnce(browser, options) {
   const context = await browser.newContext();
   const page = await context.newPage();
   try {
+    if (options.profile === 'warm') {
+      await page.goto(options.url, { waitUntil: 'commit' });
+      await page.getByRole('link', { name: 'Create a character', exact: true })
+        .click({ timeout: 60_000 });
+      await page.locator('[data-class-option]').first().waitFor({
+        state: 'visible',
+        timeout: 60_000,
+      });
+      // Stamp creation is intentionally after readiness. Give its native
+      // export/hash/write time to finish before terminating the warm-up worker.
+      await page.waitForTimeout(500);
+    }
     await page.goto(options.url, { waitUntil: 'commit' });
     if (options.dawdleMs > 0) {
       await page.waitForTimeout(options.dawdleMs);
@@ -139,7 +156,11 @@ async function main() {
     'worker_startup',
     'loading_engine',
     'opening_storage',
+    'checking_saved_verification',
     'checking_structure',
+    'checking_database_integrity',
+    'checking_schema_compatibility',
+    'applying_data_updates',
     // A stamped boot (D283) reports this INSTEAD of checking_structure and
     // never reports verifying_catalog_integrity, so "(not reported)" against
     // those two is how a fast boot reads here.
@@ -150,7 +171,8 @@ async function main() {
   ];
   const createReady = results.map((result) => result.createReadyMs);
   process.stdout.write(
-    `\n[${options.label}] url=${options.url} runs=${String(options.runs)} ` +
+    `\n[${options.label}] url=${options.url} profile=${options.profile} ` +
+      `runs=${String(options.runs)} ` +
       `dawdle_ms=${String(options.dawdleMs)}\n`,
   );
   process.stdout.write(

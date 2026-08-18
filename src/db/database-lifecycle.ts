@@ -24,6 +24,7 @@ import {
   type CatalogDataMigration,
   validateCatalogDataMigrationRegistry,
 } from '../catalog/catalog-data-migrations';
+import type { DatabaseBootStage } from './database-boot-progress';
 
 /**
  * Every table an application database image must contain.
@@ -221,6 +222,8 @@ export class DatabaseLifecycle {
       DATABASE_MIGRATIONS,
     private readonly catalogDataMigrations: readonly CatalogDataMigration[] =
       CATALOG_DATA_MIGRATIONS,
+    private readonly onProgress: (stage: DatabaseBootStage) => void =
+      () => undefined,
   ) {}
 
   get database(): DatabaseContext {
@@ -266,12 +269,19 @@ export class DatabaseLifecycle {
       const isNewImage = !hasApplicationSchema(connection);
       const mode: DatabaseVerificationMode = isNewImage ? 'full' : verification;
       if (isNewImage) {
-        connection.exec(this.schema);
+        // OPFS makes each implicit SQLite transaction durable. Executing the
+        // generated schema statement-by-statement therefore paid hundreds of
+        // syncs before a first-time visitor could see the app. DDL is fully
+        // transactional in SQLite: one explicit transaction keeps the exact
+        // same schema and all-or-nothing failure semantics while making it one
+        // durable write instead of hundreds.
+        connection.transaction('IMMEDIATE', () => connection.exec(this.schema));
       } else {
         this.#migrateKnownSchema(connection);
       }
       this.#validateApplicationDatabase(connection, mode);
       const context = new DatabaseContext(connection);
+      this.onProgress('applying_data_updates');
       runCatalogDataMigrations(context, this.catalogDataMigrations);
       this.#applySeed(context, mode);
       this.#context = context;
@@ -420,8 +430,10 @@ export class DatabaseLifecycle {
     // ran correctly, and a build whose schema moved must not be able to open a
     // stale image just because a stamp survived the upgrade.
     if (verification === 'full') {
+      this.onProgress('checking_database_integrity');
       validateDatabaseConnectionCore(db);
     }
+    this.onProgress('checking_schema_compatibility');
     if (databaseSchemaSignature(db) !== this.#applicationSchemaSignature()) {
       throw new Error(
         'Database image schema does not match the application schema.',
