@@ -707,7 +707,7 @@ describe('class, feat, species and background catalog import', () => {
   it('requires review for an installed bundled class and refuses creation under D133', () => {
     const key = 'expanded:bundled-wayfarer' as ContentKey;
     registerBundledStableContentIdentity(db, {
-      kind: 'class', contentKey: key, normalizedName: 'wayfarer',
+      kind: 'class', contentKey: key, visibility: 'listed', normalizedName: 'wayfarer',
     });
     db.exec(
       `INSERT INTO class_definitions

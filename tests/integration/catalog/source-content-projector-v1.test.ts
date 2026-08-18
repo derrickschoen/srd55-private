@@ -49,6 +49,7 @@ beforeEach(async () => {
     registerBundledStableContentIdentity(db, {
       kind,
       contentKey: key,
+      visibility: 'listed',
       normalizedName,
     });
   }
@@ -202,7 +203,7 @@ describe('stored class and feat content-v1 projection', () => {
     const namedFeature = 'expanded:ci3b-named-feature' as ContentKey;
     for (const key of [weaponA, weaponB]) {
       registerBundledStableContentIdentity(db, {
-        kind: 'weapon', contentKey: key, normalizedName: key.endsWith('-a') ? 'weapona' : 'weaponb',
+        kind: 'weapon', contentKey: key, visibility: 'listed', normalizedName: key.endsWith('-a') ? 'weapona' : 'weaponb',
       });
       db.exec(
         `INSERT INTO weapon_templates (
@@ -216,7 +217,7 @@ describe('stored class and feat content-v1 projection', () => {
       );
     }
     registerBundledStableContentIdentity(db, {
-      kind: 'feat', contentKey: namedFeature, normalizedName: 'pactstrike',
+      kind: 'feat', contentKey: namedFeature, visibility: 'listed', normalizedName: 'pactstrike',
     });
     db.exec(
       `INSERT INTO class_definitions (

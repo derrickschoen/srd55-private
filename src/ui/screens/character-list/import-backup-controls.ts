@@ -704,7 +704,9 @@ export function createImportBackupControls(
         },
       });
       adoptionCleanup = rendered.cleanup;
-      announce('Review three bundled homebrew entries before importing.');
+      announce(
+        `Review ${String(plan.entries.length)} bundled homebrew entries before importing.`,
+      );
     }).catch((error: unknown) => {
       announceTransferFailure(status, error);
       bundledHomebrewButton.disabled = false;

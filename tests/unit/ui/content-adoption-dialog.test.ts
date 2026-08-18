@@ -61,6 +61,7 @@ function itemProjection(
   const assertedKey = assertedExternalContentKey('item', '2024', name);
   return {
     kind: 'item',
+    visibility: 'listed',
     edition: '2024',
     name,
     assertedKey,
@@ -135,7 +136,7 @@ function bundledItem(
     kind: 'item', edition: '2024', name, payload,
   });
   registerBundledStableContentIdentity(db, {
-    kind: 'item', contentKey, normalizedName: identity.envelope.normalizedName,
+    kind: 'item', contentKey, visibility: 'listed', normalizedName: identity.envelope.normalizedName,
   });
   insertItem(db, contentKey, name, payload);
   registerContentFingerprint(db, {
@@ -763,7 +764,7 @@ describe('the D82 content-adoption dialog', () => {
     const alias = '2014:legacy:default-target' as ContentKey;
     const payload = { rule: 'same' };
     registerBundledStableContentIdentity(db, {
-      kind: 'item', contentKey: target, normalizedName: 'defaulttarget',
+      kind: 'item', contentKey: target, visibility: 'listed', normalizedName: 'defaulttarget',
     });
     db.exec(
       `INSERT INTO item_definitions (
@@ -791,6 +792,7 @@ describe('the D82 content-adoption dialog', () => {
       dependencies: [],
       projection: {
         kind: 'item',
+        visibility: 'listed',
         edition: '2024',
         name: 'Default Target',
         assertedKey: assertedExternalContentKey('item', '2024', 'Default Target'),

@@ -41,7 +41,7 @@ export function registerFixtureContentIdentity(
     : 'external';
   const normalizedName = normalizeContentIdentityName(identity.name);
   const existing = db.oneRaw(
-    `SELECT content_kind, key_kind, catalog_layer, normalized_name
+    `SELECT content_kind, key_kind, catalog_layer, visibility, normalized_name
      FROM catalog_content_identities
      WHERE content_key = ?`,
     [identity.contentKey],
@@ -52,6 +52,7 @@ export function registerFixtureContentIdentity(
       existing.content_kind === identity.kind &&
       existing.key_kind === identity.keyKind &&
       existing.catalog_layer === catalogLayer &&
+      existing.visibility === 'listed' &&
       existing.normalized_name === normalizedName
     ) {
       return;
@@ -63,8 +64,9 @@ export function registerFixtureContentIdentity(
 
   db.exec(
     `INSERT INTO catalog_content_identities (
-       content_key, content_kind, key_kind, catalog_layer, normalized_name
-     ) VALUES (?, ?, ?, ?, ?)`,
+       content_key, content_kind, key_kind, catalog_layer, visibility,
+       normalized_name
+     ) VALUES (?, ?, ?, ?, 'listed', ?)`,
     [
       identity.contentKey,
       identity.kind,

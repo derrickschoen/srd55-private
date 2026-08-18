@@ -10,6 +10,7 @@ import {
   deriveContentIdentityV1,
   type ContentFingerprintDigest,
 } from '../catalog/content-identity';
+import { catalogContentIsUserFacing } from '../catalog/content-visibility';
 import type {
   ContentImportCommitResult,
   ContentImportEntryOutcome,
@@ -140,8 +141,22 @@ function lineageHead(
   kind: AuthoredContentKind,
   stableKey: ContentKey,
 ): ContentKey | null {
-  const published = new CatalogAuthoringService(db).list().published.filter(
-    (entry) => entry.content_kind === kind,
+  const published = db.all(
+    `SELECT identity.content_key, supersession.successor_content_key AS superseded_by
+     FROM catalog_content_identities AS identity
+     LEFT JOIN catalog_content_supersessions AS supersession
+       ON supersession.content_kind = identity.content_kind
+      AND supersession.superseded_content_key = identity.content_key
+     WHERE identity.content_kind = ?
+       AND identity.catalog_layer = 'external'
+       AND identity.archived_at IS NULL`,
+    [kind],
+    (row) => ({
+      content_key: String(row.content_key) as ContentKey,
+      superseded_by: row.superseded_by === null
+        ? null
+        : String(row.superseded_by) as ContentKey,
+    }),
   );
   const byKey = new Map(published.map((entry) => [entry.content_key, entry]));
   if (!byKey.has(stableKey)) return null;
@@ -267,6 +282,11 @@ function installEntry(
       throw new TypeError(`Bundled entry "${entry.catalog_key}" unexpectedly requires adoption review.`);
     }
     result = authoring.commitPublish({ token: preview.token, decisions: [] });
+    db.exec(
+      `UPDATE catalog_content_identities SET visibility = ?
+       WHERE content_kind = ? AND content_key = ?`,
+      [entry.visibility, revision.document.kind, result.content_key],
+    );
     recordContentProvenance(db, {
       kind: revision.document.kind,
       contentKey: result.content_key,
@@ -341,6 +361,12 @@ function outcomes(
   })));
 }
 
+function bundledCatalogContentBytes(
+  catalog: readonly BundledHomebrewCatalogEntry[],
+): readonly Omit<BundledHomebrewCatalogEntry, 'visibility'>[] {
+  return catalog.map(({ visibility: _visibility, ...entry }) => entry);
+}
+
 export function planBundledHomebrewInstall(
   db: DatabaseContext,
   catalog: readonly BundledHomebrewCatalogEntry[] = BUNDLED_HOMEBREW_CATALOG,
@@ -348,9 +374,18 @@ export function planBundledHomebrewInstall(
   try {
     const simulated = simulate(db, catalog);
     const plannedOutcomes = outcomes(simulated.results, simulated.entries);
-    const inputHash = sha256(canonicalJson(catalog));
+    const inputHash = sha256(canonicalJson(bundledCatalogContentBytes(catalog)));
     const targetHash = sha256(canonicalJson(plannedOutcomes));
-    const graphHash = sha256(canonicalJson(simulated.entries));
+    const graphHash = sha256(canonicalJson({
+      entries: simulated.entries,
+      visibility: catalog.map(({ catalog_key, visibility }) => ({
+        catalog_key,
+        visibility,
+      })),
+    }));
+    const listedEntries = simulated.entries.filter((_, index) =>
+      catalogContentIsUserFacing(catalog[index]!.visibility)
+    );
     const token = sha256(canonicalJson({ inputHash, targetHash, graphHash })) as ContentImportPlanToken;
     return Object.freeze({
       token,
@@ -358,7 +393,7 @@ export function planBundledHomebrewInstall(
       graphHash,
       targetHash,
       spellActivityChanges: Object.freeze([]),
-      incomingContent: Object.freeze(simulated.entries.map((entry) =>
+      incomingContent: Object.freeze(listedEntries.map((entry) =>
         externalContentDisclosure({
           id: `${entry.kind}:bundled:${entry.catalog_key}`,
           kind: entry.kind,
@@ -367,11 +402,11 @@ export function planBundledHomebrewInstall(
       )),
       reviews: Object.freeze([]),
       outcomes: plannedOutcomes,
-      entries: simulated.entries,
+      entries: Object.freeze(listedEntries),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const inputHash = sha256(canonicalJson(catalog));
+    const inputHash = sha256(canonicalJson(bundledCatalogContentBytes(catalog)));
     const entry = error instanceof BundledEntryInstallError ? error.entry : catalog[0];
     const kind = entry?.revisions.at(-1)?.kind ?? 'subclass';
     const catalogKey = entry?.catalog_key ?? 'unknown';

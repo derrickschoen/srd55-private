@@ -2309,6 +2309,7 @@ function restoreSpellDefinitions(
         id: `backup-spell:${contentKey}`,
         projection: Object.freeze({
           kind: 'spell' as const,
+          visibility: 'listed' as const,
           edition: projected.aggregate.rules_edition,
           name: projected.aggregate.name,
           assertedKey: contentKey,

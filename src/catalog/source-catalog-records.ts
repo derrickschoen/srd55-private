@@ -28,8 +28,14 @@ import {
 } from '../authoring/limits';
 import { isRecord } from '../worker/handler';
 import { GRANT_RULE_FIELDS, GrantRule } from '../grants/grant-rule';
-import { deriveContentIdentityV1 } from './content-identity';
-import { CONTENT_FINGERPRINT_SCHEME_V1 } from './content-identity';
+import {
+  CONTENT_FINGERPRINT_SCHEME_V1,
+  deriveContentIdentityV1,
+} from './content-identity';
+import {
+  catalogContentVisibilities,
+  type CatalogContentVisibility,
+} from './content-visibility';
 import { projectAuthoredContentAggregateV1 } from './stored-authored-content-projector-v1';
 import {
   projectClassContentV1,
@@ -47,18 +53,22 @@ export type SourceCatalogRecordKind = 'class' | 'feat' | 'species' | 'background
 
 export type CatalogClassRecord = {
   readonly kind: 'class';
+  readonly visibility: CatalogContentVisibility;
   readonly aggregate: ClassContentAggregateV1;
 };
 export type CatalogFeatRecord = {
   readonly kind: 'feat';
+  readonly visibility: CatalogContentVisibility;
   readonly aggregate: FeatContentAggregateV1;
 };
 export type CatalogSpeciesRecord = {
   readonly kind: 'species';
+  readonly visibility: CatalogContentVisibility;
   readonly aggregate: SpeciesContentAggregate;
 };
 export type CatalogBackgroundRecord = {
   readonly kind: 'background';
+  readonly visibility: CatalogContentVisibility;
   readonly aggregate: BackgroundContentAggregate;
 };
 export type CatalogSourceRecord =
@@ -93,6 +103,14 @@ function trimEqual(value: unknown, label: string): void {
 function string(value: unknown, label: string): string {
   if (typeof value !== 'string' || value.trim() === '') {
     throw new TypeError(`Catalog field '${label}' must be non-empty text.`);
+  }
+  return value;
+}
+
+function visibility(value: unknown): CatalogContentVisibility {
+  if (value === undefined) return 'listed';
+  if (!isEnumValue(catalogContentVisibilities, value)) {
+    throw new TypeError("Catalog field 'record.visibility' is invalid.");
   }
   return value;
 }
@@ -1041,7 +1059,8 @@ export function parseSourceCatalogRecord(
   kind: SourceCatalogRecordKind,
   value: Record<string, unknown>,
 ): CatalogSourceRecord {
-  exactKeys(value, 'record', ['kind', 'aggregate']);
+  exactKeys(value, 'record', ['kind', 'visibility', 'aggregate']);
+  const parsedVisibility = visibility(value.visibility);
   const base = baseAggregate(value.aggregate, kind);
   switch (kind) {
     case 'class': {
@@ -1092,7 +1111,7 @@ export function parseSourceCatalogRecord(
         name: aggregate.name,
         payload: projectClassContentV1(aggregate),
       });
-      return { kind, aggregate };
+      return { kind, visibility: parsedVisibility, aggregate };
     }
     case 'feat': {
       validateFeat(base.aggregate);
@@ -1123,7 +1142,7 @@ export function parseSourceCatalogRecord(
         name: aggregate.name,
         payload: projectFeatContentV1(aggregate),
       });
-      return { kind, aggregate };
+      return { kind, visibility: parsedVisibility, aggregate };
     }
     case 'species': {
       const grants = normalizedGrantList(base.aggregate.grants, 'aggregate.grants');
@@ -1134,7 +1153,7 @@ export function parseSourceCatalogRecord(
       } as unknown as SpeciesContentAggregate;
       const payload = projectAuthoredContentAggregateV1(aggregate).payload;
       deriveContentIdentityV1({ kind, edition: base.rulesEdition, name: base.name, payload });
-      return { kind, aggregate };
+      return { kind, visibility: parsedVisibility, aggregate };
     }
     case 'background': {
       const grants = normalizedGrantList(base.aggregate.grants, 'aggregate.grants');
@@ -1156,7 +1175,7 @@ export function parseSourceCatalogRecord(
       } as unknown as BackgroundContentAggregate;
       const payload = projectAuthoredContentAggregateV1(aggregate).payload;
       deriveContentIdentityV1({ kind, edition: base.rulesEdition, name: base.name, payload });
-      return { kind, aggregate };
+      return { kind, visibility: parsedVisibility, aggregate };
     }
   }
 }

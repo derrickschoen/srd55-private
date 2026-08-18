@@ -41,6 +41,7 @@ import { SpellSelectionService } from '../../../src/eligibility/spell-selection-
 import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
 import { eligibilityInvalidReasons } from '../../../src/eligibility/spell-selection-eligibility';
 import { sha256 } from '../../../src/crypto/sha256';
+import { CatalogQueries } from '../../../src/queries/catalog-queries';
 
 const connections: Database[] = [];
 
@@ -76,6 +77,47 @@ function veteranEntry(): BundledHomebrewCatalogEntry<SubclassAuthoringDraft> {
   if (entry === undefined) throw new Error('Veteran catalog entry is missing.');
   return entry;
 }
+
+it('keeps ui-hidden bundled content loadable while excluding it from user-facing catalogs', async () => {
+  const db = await database();
+  const hiddenCatalog = Object.freeze([Object.freeze({
+    ...spellStudentEntry(),
+    visibility: 'ui_hidden' as const,
+  })] as const satisfies readonly BundledHomebrewCatalogEntry[]);
+
+  const plan = planBundledHomebrewInstall(db, hiddenCatalog);
+  expect(plan.entries).toEqual([]);
+  expect(plan.incomingContent).toEqual([]);
+  const relistedCatalog = Object.freeze([Object.freeze({
+    ...spellStudentEntry(),
+    visibility: 'listed' as const,
+  })] as const satisfies readonly BundledHomebrewCatalogEntry[]);
+  expect(
+    commitBundledHomebrewInstall(db, plan.token, relistedCatalog).kind,
+  ).toBe('stale-plan');
+
+  const committed = commitBundledHomebrewInstall(db, plan.token, hiddenCatalog);
+  if (committed.kind !== 'committed' || committed.outcomes[0]?.kind !== 'create') {
+    throw new Error('Hidden bundled fixture did not install.');
+  }
+  const contentKey = committed.outcomes[0].contentKey;
+  expect(db.oneRaw(
+    `SELECT visibility FROM catalog_content_identities
+     WHERE content_kind = 'subclass' AND content_key = ?`,
+    [contentKey],
+  )).toEqual({ visibility: 'ui_hidden' });
+  expect(projectStoredAuthoredContentV1(db, {
+    kind: 'subclass',
+    contentKey,
+    references: storedAuthoredRegistryReferencesV1(db),
+  }).aggregate.name).toContain('Spell Student');
+  expect(new CatalogAuthoringService(db).list().published).not.toEqual(
+    expect.arrayContaining([expect.objectContaining({ content_key: contentKey })]),
+  );
+  expect(new CatalogQueries(db).read().subclasses).not.toEqual(
+    expect.arrayContaining([expect.objectContaining({ content_key: contentKey })]),
+  );
+});
 
 function installPortableOrigins(db: DatabaseContext): {
   readonly speciesKey: ContentKey;
@@ -266,7 +308,7 @@ describe('bundled authored-kind installer', () => {
     const firstPlan = planBundledHomebrewInstall(db);
     const historicalCatalog = BUNDLED_HOMEBREW_CATALOG.map((entry) =>
       Object.freeze({
-        ...entry,
+        catalog_key: entry.catalog_key,
         revisions: Object.freeze([entry.revisions[0]] as const),
       }));
     expect(sha256(canonicalJson(historicalCatalog))).toBe(
@@ -357,6 +399,7 @@ describe('bundled authored-kind installer', () => {
     }
     const v2 = Object.freeze([Object.freeze({
       catalog_key: entry.catalog_key,
+      visibility: 'listed',
       revisions: Object.freeze([first, second] as const),
     })] as const satisfies readonly BundledHomebrewCatalogEntry[]);
     const v3 = Object.freeze([entry] as const satisfies readonly BundledHomebrewCatalogEntry[]);
@@ -538,6 +581,7 @@ describe('bundled authored-kind installer', () => {
     const entries = BUNDLED_HOMEBREW_CATALOG.slice(0, 2);
     const v1 = entries.map((entry) => Object.freeze({
       catalog_key: entry.catalog_key,
+      visibility: 'listed' as const,
       revisions: Object.freeze([entry.revisions[0]] as const),
     }));
     const initialPlan = planBundledHomebrewInstall(db, v1);
@@ -646,10 +690,12 @@ describe('bundled authored-kind installer', () => {
     }
     const v1 = Object.freeze([Object.freeze({
       catalog_key: 'spell-student',
+      visibility: 'listed',
       revisions: Object.freeze([first] as const),
     })] as const satisfies readonly BundledHomebrewCatalogEntry[]);
     const v2 = Object.freeze([Object.freeze({
       catalog_key: 'spell-student',
+      visibility: 'listed',
       revisions: Object.freeze([first, revised] as const),
     })] as const satisfies readonly BundledHomebrewCatalogEntry[]);
     const initial = planBundledHomebrewInstall(db, v1);
@@ -854,6 +900,7 @@ describe('bundled authored-kind installer', () => {
     };
     const unrelatedCatalog = Object.freeze([Object.freeze({
       catalog_key: 'unrelated',
+      visibility: 'listed',
       revisions: Object.freeze([unrelated] as const),
     })] as const satisfies readonly BundledHomebrewCatalogEntry[]);
     const unrelatedPlan = planBundledHomebrewInstall(db, unrelatedCatalog);
@@ -862,6 +909,7 @@ describe('bundled authored-kind installer', () => {
 
     const refused = planBundledHomebrewInstall(db, [Object.freeze({
       catalog_key: 'spell-student',
+      visibility: 'listed',
       revisions: Object.freeze([first] as const),
     })]);
     expect(refused.outcomes).toEqual([
@@ -876,6 +924,7 @@ describe('bundled authored-kind installer', () => {
     }]);
     expect(commitBundledHomebrewInstall(db, refused.token, [Object.freeze({
       catalog_key: 'spell-student',
+      visibility: 'listed',
       revisions: Object.freeze([first] as const),
     })])).toMatchObject({ kind: 'refused', reason: 'entry_refused' });
     expect(db.scalar<number>('SELECT count(*) FROM catalog_content_identities')).toBe(roots);

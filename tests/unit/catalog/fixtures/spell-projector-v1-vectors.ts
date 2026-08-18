@@ -188,6 +188,7 @@ export const spellProjectorV1Vectors: readonly SpellProjectorVectorV1[] = [
 ];
 
 export const bandedSpellDocumentV1: NormalizedCatalogRecord = {
+  visibility: 'listed',
   identityKey: 'aether-lance',
   versionKey: 'expanded:aether-lance',
   name: 'Aether Lance',

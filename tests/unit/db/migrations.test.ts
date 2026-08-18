@@ -240,6 +240,15 @@ const SCHEMA_BEFORE_SOURCE_INSTANCE_STATE = DATABASE_MIGRATIONS
   .join('\n');
 const SOURCE_INSTANCE_STATE_MIGRATION =
   DATABASE_MIGRATIONS[SOURCE_INSTANCE_STATE_INDEX]!;
+const CATALOG_CONTENT_VISIBILITY_INDEX = DATABASE_MIGRATIONS.findIndex(
+  (entry) => entry.id === '0048_catalog_content_visibility',
+);
+const SCHEMA_BEFORE_CATALOG_CONTENT_VISIBILITY = DATABASE_MIGRATIONS
+  .slice(0, CATALOG_CONTENT_VISIBILITY_INDEX)
+  .map((entry) => entry.sql)
+  .join('\n');
+const CATALOG_CONTENT_VISIBILITY_MIGRATION =
+  DATABASE_MIGRATIONS[CATALOG_CONTENT_VISIBILITY_INDEX]!;
 
 /**
  * One character, three source instances (one of them deleted so the
@@ -842,10 +851,11 @@ describe('database migration chain', () => {
       )).toBe(1);
       expect(() => current.database.exec(
         `INSERT INTO catalog_content_identities (
-           content_key, content_kind, key_kind, catalog_layer, normalized_name
+           content_key, content_kind, key_kind, catalog_layer, visibility,
+           normalized_name
          ) VALUES (
            'expanded:forbidden-legacy', 'item', 'legacy-opaque', 'external',
-           'forbidden legacy'
+           'listed', 'forbidden legacy'
          )`,
       )).toThrow('catalog_content_identities_key_kind_check');
     } finally {
@@ -1079,10 +1089,11 @@ describe('database migration chain', () => {
       }
       expect(() => db.exec(
         `INSERT INTO catalog_content_identities (
-           content_key, content_kind, key_kind, catalog_layer, normalized_name
+           content_key, content_kind, key_kind, catalog_layer, visibility,
+           normalized_name
          ) VALUES (
            'expanded:legacy-rejected', 'feat', 'legacy-opaque', 'external',
-           'legacy rejected'
+           'listed', 'legacy rejected'
          )`,
       )).toThrow('catalog_content_identities_key_kind_check');
       expect(db.scalar<number>('SELECT count(*) FROM pragma_foreign_key_check')).toBe(0);
@@ -1964,11 +1975,12 @@ describe('database migration chain', () => {
       database.exec(schema);
       database.exec(`
         INSERT INTO catalog_content_identities (
-          content_key, content_kind, key_kind, catalog_layer, normalized_name
+          content_key, content_kind, key_kind, catalog_layer, visibility,
+          normalized_name
         ) VALUES
-          ('expanded:content.feat:origin-feat', 'feat', 'asserted', 'external', 'same named feat origin'),
-          ('expanded:content.feat:general-feat', 'feat', 'asserted', 'external', 'same named feat general'),
-          ('expanded:content.background:origin-scholar', 'background', 'asserted', 'external', 'origin scholar');
+          ('expanded:content.feat:origin-feat', 'feat', 'asserted', 'external', 'listed', 'same named feat origin'),
+          ('expanded:content.feat:general-feat', 'feat', 'asserted', 'external', 'listed', 'same named feat general'),
+          ('expanded:content.background:origin-scholar', 'background', 'asserted', 'external', 'listed', 'origin scholar');
         INSERT INTO feat_definitions (content_key, name, rules_edition, category)
         VALUES
           ('expanded:content.feat:origin-feat', 'Same Named Feat', 'expanded', 'origin'),
@@ -2026,10 +2038,11 @@ describe('database migration chain', () => {
       database.exec(schema);
       database.exec(`
         INSERT INTO catalog_content_identities (
-          content_key, content_kind, key_kind, catalog_layer, normalized_name
+          content_key, content_kind, key_kind, catalog_layer, visibility,
+          normalized_name
         ) VALUES
-          ('expanded:content.feat:replay-feat', 'feat', 'asserted', 'external', 'replay feat'),
-          ('expanded:content.background:replay-background', 'background', 'asserted', 'external', 'replay background');
+          ('expanded:content.feat:replay-feat', 'feat', 'asserted', 'external', 'listed', 'replay feat'),
+          ('expanded:content.background:replay-background', 'background', 'asserted', 'external', 'listed', 'replay background');
         INSERT INTO feat_definitions (content_key, name, rules_edition, category)
         VALUES ('expanded:content.feat:replay-feat', 'Replay Feat', 'expanded', 'origin');
         INSERT INTO background_templates (
@@ -3582,6 +3595,42 @@ describe('database migration chain', () => {
            WHERE name = 'r4_character_source_instances'`,
         ),
       ).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('0048 backfills listed visibility and requires every later stored identity to be explicit', () => {
+    const db = new sqlite3.oo1.DB(':memory:', 'c');
+    try {
+      db.exec(SCHEMA_BEFORE_CATALOG_CONTENT_VISIBILITY);
+      db.exec(
+        `INSERT INTO catalog_content_identities (
+           content_key, content_kind, key_kind, catalog_layer, normalized_name
+         ) VALUES (
+           'expanded:migration-visibility', 'feat', 'bundled-stable',
+           'bundled', 'migration visibility'
+         )`,
+      );
+
+      db.exec(CATALOG_CONTENT_VISIBILITY_MIGRATION.sql);
+
+      expect(db.selectObject(
+        `SELECT content_key, visibility FROM catalog_content_identities
+         WHERE content_key = 'expanded:migration-visibility'`,
+      )).toEqual({
+        content_key: 'expanded:migration-visibility',
+        visibility: 'listed',
+      });
+      expect(() => db.exec(
+        `INSERT INTO catalog_content_identities (
+           content_key, content_kind, key_kind, catalog_layer, normalized_name
+         ) VALUES (
+           'expanded:missing-visibility', 'feat', 'bundled-stable',
+           'bundled', 'missing visibility'
+         )`,
+      )).toThrow(/catalog_content_identities\.visibility/);
+      expect(databaseSchemaSignature(db)).toBe(schemaSignature(schema));
     } finally {
       db.close();
     }

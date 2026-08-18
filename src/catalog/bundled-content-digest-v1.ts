@@ -358,7 +358,9 @@ function bundledAggregates(db: DatabaseContext): readonly MutableAggregateV1[] {
     pushTableRow(
       aggregate,
       'catalog_content_identities',
-      canonicalRow(identity, new Set()),
+      // V1 proves bundled rules bytes. D299 visibility is independently
+      // closed by the schema and controls presentation, not rule semantics.
+      canonicalRow(identity, new Set(['visibility'])),
     );
     aggregates.set(aggregateLocator(rawKind, contentKey), aggregate);
   }
