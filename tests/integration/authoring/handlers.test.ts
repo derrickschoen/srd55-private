@@ -49,6 +49,9 @@ import {
 import type { SubclassAuthoringDraft } from '../../../src/authoring/contracts';
 import { CharacterListBuilder } from '../../../src/queries/character-list-builder';
 import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
+import {
+  CharacterSpellRulesEditionError,
+} from '../../../src/queries/character-spell-section-builder';
 import { createQueriesClient } from '../../../src/queries/client';
 import { parseRoute } from '../../../src/ui/router';
 import type { ScreenContext } from '../../../src/ui/screen';
@@ -63,6 +66,15 @@ const registry = createRpcRegistry({
   authoring: { handlers },
   queries: { handlers: queryHandlers },
 });
+
+function thrownBy(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return expect.fail('Expected the query to throw a defect, but it returned.');
+}
 
 afterEach(() => {
   harness?.close();
@@ -1082,8 +1094,11 @@ describe('catalog authoring RPC handlers', () => {
        WHERE id = ?`,
       [spellVersionId],
     );
-    expect(() => new CharacterSheetBuilder(rpc.context.db).build(uiCharacter.id))
-      .toThrow('Unknown spell rules edition future-edition.');
+    const editionError = thrownBy(() =>
+      new CharacterSheetBuilder(rpc.context.db).build(uiCharacter.id)
+    );
+    expect(editionError).toBeInstanceOf(CharacterSpellRulesEditionError);
+    expect(editionError).toMatchObject({ rules_edition: 'future-edition' });
     const unavailablePreview = await authoringClient.previewReplacement({
       old_content_key: old.content_key,
       new_content_key: incompatible.content_key,

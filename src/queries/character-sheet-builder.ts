@@ -120,6 +120,26 @@ import type { CharacterLevel } from '../domain/enums';
 import type { ClassLevel } from '../domain/ids';
 import type { PositiveInteger } from '../domain/class-resources';
 
+/** A stored Armor Class formula effect is missing required formula data. */
+export class CharacterSheetArmorClassFormulaPayloadError extends Error {
+  override readonly name =
+    'CharacterSheetArmorClassFormulaPayloadError' as const;
+  constructor(readonly effect_id: number) {
+    super(
+      `Armor Class formula effect ${String(effect_id)} has an incomplete payload.`,
+    );
+  }
+}
+
+/** A stored Armor Class bonus effect has no numeric bonus. */
+export class CharacterSheetArmorClassBonusPayloadError extends Error {
+  override readonly name =
+    'CharacterSheetArmorClassBonusPayloadError' as const;
+  constructor(readonly effect_id: number) {
+    super(`Armor Class bonus effect ${String(effect_id)} has no amount.`);
+  }
+}
+
 /**
  * THE CHARACTER SHEET, ASSEMBLED AND THROWN AWAY.
  *
@@ -1636,9 +1656,7 @@ function armorClassFormulas(
         effect.ability_1 === null ||
         effect.allows_shield === null
       ) {
-        throw new Error(
-          `Armor Class formula effect ${String(effect.id)} has an incomplete payload.`,
-        );
+        throw new CharacterSheetArmorClassFormulaPayloadError(effect.id);
       }
       return {
         kind: 'ability_formula',
@@ -1659,9 +1677,7 @@ function armorClassBonuses(
     .filter((effect) => effect.effect_kind === 'armor_class_bonus')
     .map((effect): ArmorClassBonusCandidate => {
       if (effect.amount === null) {
-        throw new Error(
-          `Armor Class bonus effect ${String(effect.id)} has no amount.`,
-        );
+        throw new CharacterSheetArmorClassBonusPayloadError(effect.id);
       }
       return { label: effect.label, amount: effect.amount };
     });
