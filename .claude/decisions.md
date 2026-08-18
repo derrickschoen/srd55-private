@@ -7,6 +7,19 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D302 — OWNER: merge-train shape, wave cadence, all D286 minors fixed now (2026-08-17)
+
+Four rulings: (1) **Batch gate** — the queued lane branches merge with
+per-merge tsc + narrow tests, then ONE solo quiet full suite gates the
+whole train; if red, bisect the merge commits. (2) **Drain → merge →
+refan** — when the current wave finishes, quiet the box, run the train
+plus the owed D283/D284 gates, then dispatch the next wave. (3) **All 11
+D286 minor findings are fixed now** (not deferred), including the
+cold-open ~4.4s and the 2014→2024 bridge notes; fix lanes dispatched
+(minors sweep, planner-mobile M-M1, cold-open perf, bridge notes).
+(4) **The train gates on vitest 3**; the vitest-4 upgrade (D300) merges
+last with its own gate — the instrument never changes mid-train.
+
 ## D301 — SUPERVISOR-VERIFIED: Kennel max-assemblable cantrips = 19, by source (2026-08-17)
 
 Owner directed: "Check yourself. Separate cantrips from classes with
