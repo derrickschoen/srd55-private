@@ -76,7 +76,10 @@ import {
 } from '../rules/eligible-character-effects';
 import { characterLevel } from '../rules/character-level';
 import { resolveSpeciesChoice } from '../builder/species-choice';
-import { requiredSourceChoiceItems } from './character-completeness';
+import {
+  CharacterCompletenessQueries,
+  type CompletenessItem,
+} from './character-completeness';
 import { MulticlassPrimaryAbilityQueries } from './multiclass-primary-ability';
 import { catalogLayerLabel } from '../catalog/catalog-disclosure';
 import {
@@ -367,8 +370,20 @@ export interface SheetGap {
     | 'expertise_proficiency_removed'
     | 'languages_and_tools_not_modelled'
     | 'weapon_reach_not_recorded'
-    | 'gear_not_itemised'
-    | 'required_source_choice';
+    | 'gear_not_itemised';
+  readonly title: string;
+  readonly detail: string;
+}
+
+/**
+ * One named piece of player work that remains unfinished.
+ *
+ * The completeness query owns the vocabulary and wording. The sheet carries
+ * only the fields it renders, so every surface describes the same obligation
+ * without making a second set of choice rules.
+ */
+export interface SheetUnfinishedChoice {
+  readonly kind: CompletenessItem['kind'];
   readonly title: string;
   readonly detail: string;
 }
@@ -470,6 +485,8 @@ export interface CharacterSheet {
   readonly hit_point_rolls: readonly SheetHitPointRoll[];
   /** The recorded package choices, D33's answer to a blank inventory (D65). */
   readonly equipment_packages: readonly SheetEquipmentPackage[];
+  /** Saveable unfinished work, read from the shared completeness vocabulary. */
+  readonly unfinished_choices: readonly SheetUnfinishedChoice[];
   /** Degradations of a specific derivation, from `src/rules/sheet.ts`. */
   readonly warnings: readonly SheetWarning[];
   readonly gaps: readonly SheetGap[];
@@ -896,6 +913,13 @@ export class CharacterSheetBuilder {
         return warning === null ? [] : [warning];
       },
     );
+    const unfinishedChoices = new CharacterCompletenessQueries(this.db)
+      .build(characterId)
+      .items.map((item): SheetUnfinishedChoice => ({
+        kind: item.kind,
+        title: item.title,
+        detail: item.detail,
+      }));
 
     const hitPoints = hitPointMaximum({ classes, scores, rolls: rolls.map });
     const eligibleEffectRows = readEligibleCharacterEffects(
@@ -1260,6 +1284,7 @@ export class CharacterSheetBuilder {
       // step uses — so the sheet's package line and the step cannot disagree
       // (D33, D65; plan §4).
       equipment_packages: recordedEquipmentPackages(this.db, characterId),
+      unfinished_choices: unfinishedChoices,
       // The warning sets are CONCATENATED and not merged with `gaps`: these
       // describe a degradation of THIS character's derivation (crossed armour
       // slots, an unmet Strength requirement, no or several starting classes, an
@@ -1306,11 +1331,6 @@ export class CharacterSheetBuilder {
       gaps: [
         ...sheetGaps(printedFeatures.has_language_or_tool_grant_text),
         ...expertiseGaps(this.db, characterId),
-        ...requiredSourceChoiceItems(this.db, characterId).map((item) => ({
-          kind: item.kind,
-          title: item.title,
-          detail: item.detail,
-        })),
       ],
     };
   }
