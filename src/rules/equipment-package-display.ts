@@ -7,6 +7,18 @@ import {
   type CatalogLayerDisclosure,
 } from '../catalog/catalog-disclosure';
 
+export class EquipmentItemKindError extends Error {
+  override readonly name = 'EquipmentItemKindError' as const;
+  constructor(
+    readonly item_name: string,
+    readonly item_kind: string,
+  ) {
+    super(
+      `Equipment item "${item_name}" carries unknown item_kind "${item_kind}".`,
+    );
+  }
+}
+
 /**
  * READ-TIME VIEWS OF THE SEEDED EQUIPMENT PACKAGES — dispatch E-B of
  * `docs/design/2026-07-29-starting-equipment.md` (§0c, §3.4, §4, §7).
@@ -105,9 +117,9 @@ export function readEquipmentPackageOptions(
     const option = String(row.option);
     const kindValue = String(row.item_kind);
     if (!isEnumValue(equipmentItemKinds, kindValue)) {
-      throw new Error(
-        `Equipment item "${String(row.item_name)}" carries unknown ` +
-          `item_kind "${kindValue}".`,
+      throw new EquipmentItemKindError(
+        String(row.item_name),
+        kindValue,
       );
     }
     const lines = grouped.get(option) ?? [];
