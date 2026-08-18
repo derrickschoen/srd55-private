@@ -4,6 +4,8 @@
   --planner-ink-soft: #625d55;
   --planner-accent: #6f2f1f;
   min-height: 100vh;
+  width: 100%;
+  max-width: 100%;
 }
 
 .planner-header {
@@ -57,6 +59,7 @@
 
 .planner-layout {
   display: grid;
+  width: 100%;
   max-width: 112rem;
   margin: 0 auto;
   grid-template-columns: minmax(0, 1fr) minmax(18rem, 23rem);
@@ -79,6 +82,8 @@
 }
 
 .planner-panel {
+  min-width: 0;
+  max-width: 100%;
   padding: 1rem;
   overflow: visible;
   border: 1px solid var(--planner-border);
@@ -407,6 +412,16 @@ textarea:disabled {
 }
 
 .grid-scroll {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.planner-table-scroll {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
   overflow-x: auto;
 }
 
@@ -877,6 +892,61 @@ textarea:disabled {
     align-items: stretch;
     flex-direction: column;
   }
+
+  .planner-layout {
+    gap: 1rem;
+    padding: 0.75rem 0.5rem 2rem;
+  }
+
+  .planner-header {
+    flex-wrap: wrap;
+    padding: 0.75rem 0.5rem;
+  }
+
+  .planner-panel {
+    padding: 0.75rem;
+  }
+
+  .multiclass-skill-form {
+    align-items: stretch;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .panel-heading,
+  .class-add,
+  .weapon-form-controls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
+@media screen {
+  .planner-shell,
+  .planner-header,
+  .planner-header > *,
+  .planner-layout,
+  .planner-primary,
+  .planner-sidebar,
+  .planner-error,
+  .placeholder-banner,
+  .planner-preview-warning,
+  .planner-panel,
+  .planner-panel > *,
+  .planner-panel details {
+    min-width: 0;
+  }
+
+  .planner-header h1,
+  .planner-error,
+  .placeholder-banner,
+  .planner-preview-warning,
+  .planner-panel :is(h2, h3, h4, h5, p, li, label, summary, dt, dd) {
+    overflow-wrap: anywhere;
+  }
+
+  .planner-panel :is(input, select, textarea, button) {
+    max-width: 100%;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -932,6 +1002,8 @@ textarea:disabled {
  * the facts the JSON block carries.
  */
 .build-reference-panel .reference-section {
+  min-width: 0;
+  max-width: 100%;
   margin-top: 0.6rem;
   padding: 0.4rem 0.6rem;
   border: 1px solid var(--planner-border);
@@ -950,12 +1022,16 @@ textarea:disabled {
 }
 
 .build-reference-panel .reference-scroll {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
   overflow-x: auto;
   margin-top: 0.6rem;
 }
 
 .build-reference-panel .reference-table {
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
   font-size: 0.78rem;
 }
@@ -989,6 +1065,7 @@ textarea:disabled {
 
 .weapon-table {
   width: 100%;
+  min-width: 42rem;
   border-collapse: collapse;
   margin-bottom: 0.75rem;
   font-size: 0.86rem;
@@ -1129,6 +1206,7 @@ textarea:disabled {
 }
 .item-table {
   width: 100%;
+  min-width: 34rem;
   border-collapse: collapse;
 }
 

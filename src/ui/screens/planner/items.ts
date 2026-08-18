@@ -368,7 +368,10 @@ export function renderItems(options: ItemsPanelOptions): HTMLElement {
       body.append(row);
     }
     table.append(caption, head, body);
-    section.append(table);
+    const scroller = document.createElement('div');
+    scroller.className = 'planner-table-scroll';
+    scroller.append(table);
+    section.append(scroller);
   }
 
   const modal = replacementModal(options);
