@@ -9,6 +9,7 @@ import { CharacterCommandExecutor } from '../../../src/commands/character-comman
 import type { CharacterArchivedRefusal } from '../../../src/commands/character-command-preflight';
 import { CharacterCommandFactory } from '../../../src/commands/character-command-factory';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
+import { CharacterCommandIntegrityError } from '../../../src/commands/integrity-errors';
 import { ChooseSpeciesLineageCommand } from '../../../src/commands/choose-species-lineage';
 import { RemoveSourceCommand } from '../../../src/commands/remove-source';
 import { ClearSlotCommand } from '../../../src/commands/set-slot/clear';
@@ -178,16 +179,19 @@ describe('character command factory and executor', () => {
       expect(await factory.make(characterId, payload)).toBeInstanceOf(expected);
     }
 
-    await expect(
-      factory.make(characterId + 1, protectedRestore),
-    ).rejects.toThrow(
-      'This internal character command is invalid or belongs to another character.',
-    );
-    await expect(
-      factory.make(characterId + 1, protectedHouseRuleRestore),
-    ).rejects.toThrow(
-      'This internal character command is invalid or belongs to another character.',
-    );
+    const restoreError = await factory
+      .make(characterId + 1, protectedRestore)
+      .catch((error: unknown) => error);
+    expect(restoreError).toBeInstanceOf(CharacterCommandIntegrityError);
+    expect(restoreError).toMatchObject({ character_id: characterId + 1 });
+
+    const houseRuleError = await factory
+      .make(characterId + 1, protectedHouseRuleRestore)
+      .catch((error: unknown) => error);
+    expect(houseRuleError).toBeInstanceOf(CharacterCommandIntegrityError);
+    expect(houseRuleError).toMatchObject({
+      character_id: characterId + 1,
+    });
     await expect(factory.make(characterId, {
       type: 'update_character_flavor',
       mode: 'restore',

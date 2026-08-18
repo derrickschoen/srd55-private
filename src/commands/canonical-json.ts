@@ -1,8 +1,12 @@
 import type { JsonValue } from '../domain/models';
+import {
+  CanonicalJsonCircularReferenceError,
+  CanonicalJsonUnsupportedValueError,
+} from './canonical-json-errors';
 
 function unsupportedJson(value: unknown): never {
-  throw new TypeError(
-    `Value is not JSON serializable: ${Object.prototype.toString.call(value)}.`,
+  throw new CanonicalJsonUnsupportedValueError(
+    Object.prototype.toString.call(value),
   );
 }
 
@@ -30,7 +34,7 @@ function canonicalize(
   }
 
   if (ancestors.has(value)) {
-    throw new TypeError('Value is not JSON serializable: circular reference.');
+    throw new CanonicalJsonCircularReferenceError();
   }
 
   const prototype = Object.getPrototypeOf(value);
