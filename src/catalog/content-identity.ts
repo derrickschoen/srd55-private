@@ -216,6 +216,7 @@ export interface StoredContentIdentityV1 {
 }
 
 const SHA256_LOWERCASE_HEX = /^[0-9a-f]{64}$/;
+const UTF16_SURROGATE_CODE_UNIT = /[\uD800-\uDFFF]/;
 
 function unsupportedCanonicalValue(value: unknown): never {
   throw new ContentIdentityCanonicalValueError(
@@ -223,7 +224,14 @@ function unsupportedCanonicalValue(value: unknown): never {
   );
 }
 
-function compareUnicodeCodePoints(left: string, right: string): number {
+export function compareUnicodeCodePoints(left: string, right: string): number {
+  if (
+    !UTF16_SURROGATE_CODE_UNIT.test(left) &&
+    !UTF16_SURROGATE_CODE_UNIT.test(right)
+  ) {
+    return left < right ? -1 : left > right ? 1 : 0;
+  }
+
   const leftCodePoints = Array.from(left, (value) => value.codePointAt(0)!);
   const rightCodePoints = Array.from(right, (value) => value.codePointAt(0)!);
   const length = Math.min(leftCodePoints.length, rightCodePoints.length);

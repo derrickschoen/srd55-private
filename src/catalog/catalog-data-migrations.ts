@@ -234,8 +234,11 @@ export const CATALOG_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
       // from the equivalent build-scoped snapshot path. Reconciliation still
       // calls the point-read API and its rows are unchanged; D226 freezes the
       // complete source module, so the pin moves with the added path anyway.
+      // Re-pinned 2026-08-18 after content identity's key comparator gained a
+      // semantics-preserving native fast path. The 444-aggregate digest oracle
+      // is unchanged; D226 freezes source bytes, so this checksum still moves.
       checksum:
-        'c6ceec272ab7366ff8f7a80ed5e96a1898b570351b2d68b62b7f1e073dfe12fc',
+        '608e8d15faa0a78cc148557d507e32ca703cbd12014bafc06112a00645acdbf6',
       run: reconcileSpeciesLineageContentV2,
     }),
   ]);

@@ -135,7 +135,9 @@ describe('catalog data-migration registry', () => {
       // pin covers the combined source set.
       // Re-pinned 2026-08-18 for the spell-eligibility snapshot path; the
       // migration still uses the unchanged point-read behavior.
-      checksum: 'c6ceec272ab7366ff8f7a80ed5e96a1898b570351b2d68b62b7f1e073dfe12fc',
+      // Re-pinned 2026-08-18 for content identity's semantics-preserving key
+      // comparator fast path; the aggregate digest stays unchanged.
+      checksum: '608e8d15faa0a78cc148557d507e32ca703cbd12014bafc06112a00645acdbf6',
     }]);
     expect(() =>
       validateCatalogDataMigrationRegistry(CATALOG_DATA_MIGRATIONS)
