@@ -113,7 +113,12 @@ describe('catalog data-migration registry', () => {
       // added `src/domain/source-instance-state.ts`, a module that exists to be
       // exactly this wide. Reconciliation's OUTPUT is unchanged in both rounds;
       // re-pinning is D226's accepted cost, not a way around the freeze.
-      checksum: '52af2f598ab61b90647e05aa736963cb78d576631e680b481567953786b21d29',
+      // Re-pinned 2026-08-18, completing the 2026-08-17 registry-side re-pin
+      // for inc5's exhaustive-dispatch-only rewrite of
+      // origin-definitions-srd.ts (commit 7a4c7c8b) — that commit moved the
+      // registry pin and its comment but missed this independent test pin.
+      // The recompute-from-bytes sibling test verifies this value.
+      checksum: '9d30e29c11320a60e2a19ebf102e65e31b173929b6c61d1eb134bad0c36f8e64',
     }]);
     expect(() =>
       validateCatalogDataMigrationRegistry(CATALOG_DATA_MIGRATIONS)
