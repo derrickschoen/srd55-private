@@ -40,7 +40,7 @@ import {
 
 /**
  * THE EQUIPMENT STEP (plan `docs/design/2026-07-29-starting-equipment.md`
- * §0c/§3/§4/§7, dispatch E-B), against the full application seed. These are
+ * §0c/§3/§4/§7, dispatch E-B), against the test-core application seed. These are
  * the fixtures §6's three E-B controls fire against:
  *
  *  - E-NO-GOLD-OFFERED: a Wizard is offered exactly ONE option — the seeded
@@ -71,7 +71,7 @@ afterEach(() => {
 });
 
 async function applicationDatabase(): Promise<RpcHarness> {
-  harness = await createSeededRpcHarness([]);
+  harness = await createSeededRpcHarness([], { profile: 'test-core' });
   return harness;
 }
 

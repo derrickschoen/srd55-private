@@ -4,6 +4,9 @@ import sqlite3InitModule, {
 } from '@sqlite.org/sqlite-wasm';
 import schema from '../../src/db/schema.sql?raw';
 import { applicationSeed } from '../../src/db/bootstrap';
+import type {
+  ApplicationSeedProfile,
+} from '../../src/db/application-seed-profile';
 import { DatabaseContext, prepareConnection } from '../../src/db/database';
 import {
   openDatabaseImage,
@@ -18,7 +21,9 @@ let sqlitePromise: Promise<Sqlite3Static> | undefined;
 // and stable for the worker. Keep the promise there so files assigned to the
 // same worker share one image build without sharing a database connection.
 const workerState = process as typeof process & {
-  __dndSeededDatabaseImagePromise?: Promise<Uint8Array>;
+  __dndSeededDatabaseImagePromises?: Partial<
+    Record<ApplicationSeedProfile, Promise<Uint8Array>>
+  >;
 };
 
 export function getSqlite3(): Promise<Sqlite3Static> {
@@ -41,18 +46,21 @@ export async function openTestDatabase(options: {
   return db;
 }
 
-async function seededDatabaseImage(): Promise<Uint8Array> {
-  workerState.__dndSeededDatabaseImagePromise ??= (async () => {
+async function seededDatabaseImage(
+  profile: ApplicationSeedProfile,
+): Promise<Uint8Array> {
+  workerState.__dndSeededDatabaseImagePromises ??= {};
+  workerState.__dndSeededDatabaseImagePromises[profile] ??= (async () => {
     const sqlite3 = await getSqlite3();
     const db = await openTestDatabase();
     try {
-      applicationSeed(new DatabaseContext(db));
+      applicationSeed(new DatabaseContext(db), 'full', profile);
       return sqlite3.capi.sqlite3_js_db_export(db).slice();
     } finally {
       db.close();
     }
   })();
-  return workerState.__dndSeededDatabaseImagePromise;
+  return workerState.__dndSeededDatabaseImagePromises[profile];
 }
 
 /**
@@ -60,9 +68,11 @@ async function seededDatabaseImage(): Promise<Uint8Array> {
  * worker. Tests must opt in explicitly; {@link openTestDatabase} remains the
  * fresh-schema path for database lifecycle and seeding tests.
  */
-export async function openSeededTestDatabase(): Promise<Database> {
+export async function openSeededTestDatabase(options: {
+  profile?: ApplicationSeedProfile;
+} = {}): Promise<Database> {
   const sqlite3 = await getSqlite3();
-  const bytes = (await seededDatabaseImage()).slice();
+  const bytes = (await seededDatabaseImage(options.profile ?? 'full')).slice();
   const db = openDatabaseImage(sqlite3, bytes, { readonly: false });
   prepareConnection(db);
   attachSqlTrace(db, sqlite3);

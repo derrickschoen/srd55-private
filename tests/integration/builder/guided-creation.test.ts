@@ -33,7 +33,7 @@ afterEach(() => {
 });
 
 async function realApplicationDatabase(): Promise<RpcHarness> {
-  harness = await createSeededRpcHarness([]);
+  harness = await createSeededRpcHarness([], { profile: 'test-core' });
   return harness;
 }
 

@@ -42,7 +42,7 @@ afterEach(() => {
 });
 
 async function applicationDatabase(): Promise<RpcHarness> {
-  const harness = await createSeededRpcHarness([]);
+  const harness = await createSeededRpcHarness([], { profile: 'test-core' });
   harnesses.push(harness);
   return harness;
 }

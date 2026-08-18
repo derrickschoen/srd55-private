@@ -33,7 +33,7 @@ import {
 
 /**
  * THE S-B PRODUCERS (skills-with-provenance §4 S-B), against the full
- * application seed and the real guided applies:
+ * test-core application seed and the real guided applies:
  *
  *  - the BACKGROUND writes its two printed skills as FILLED grants under its
  *    own marker-tagged source instance, normalised from prose to verified
@@ -56,7 +56,7 @@ afterEach(() => {
 });
 
 async function applicationDatabase(): Promise<RpcHarness> {
-  harness = await createSeededRpcHarness([]);
+  harness = await createSeededRpcHarness([], { profile: 'test-core' });
   return harness;
 }
 

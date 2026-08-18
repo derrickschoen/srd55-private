@@ -63,6 +63,9 @@ afterEach(() => {
   harness = undefined;
 });
 
+// Stays on the default 'full' seed profile: this file consumes the species
+// catalog's implicit Thaumaturgy reference, whose content key is not literal
+// under tests/ and therefore is not in the reproducible test-core keep-list.
 async function applicationDatabase(): Promise<RpcHarness> {
   harness = await createSeededRpcHarness([]);
   return harness;

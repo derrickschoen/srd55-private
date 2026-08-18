@@ -174,7 +174,7 @@ describe('guided build-state RPC registry contract', () => {
   });
 
   it('rejects a malformed params object as invalid_params through the registry', async () => {
-    harness = await createSeededRpcHarness(guidedHandlers);
+    harness = await createSeededRpcHarness(guidedHandlers, { profile: 'test-core' });
 
     await expect(
       rpcRegistry.dispatch(
@@ -192,7 +192,7 @@ describe('guided build-state RPC registry contract', () => {
   });
 
   it('returns the discriminated successful result through the registry', async () => {
-    harness = await createSeededRpcHarness(guidedHandlers);
+    harness = await createSeededRpcHarness(guidedHandlers, { profile: 'test-core' });
     const characterId = createCharacter(harness.context.db, 'RPC Classless');
 
     await expect(
