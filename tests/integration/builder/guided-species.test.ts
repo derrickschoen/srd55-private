@@ -63,6 +63,9 @@ afterEach(() => {
 });
 
 async function applicationDatabase(): Promise<RpcHarness> {
+  // This file consumes the species catalog's implicit Thaumaturgy reference,
+  // whose content key is not literal under tests/ and therefore is not in the
+  // reproducible test-core keep-list.
   harness = await createRpcHarness([]);
   return harness;
 }

@@ -1,4 +1,7 @@
 import { createApplicationLifecycle } from '../../src/db/bootstrap';
+import type {
+  ApplicationSeedProfile,
+} from '../../src/db/application-seed-profile';
 import { DatabaseContext } from '../../src/db/database';
 import {
   DatabaseLifecycle,
@@ -149,10 +152,15 @@ class SeededTestDatabaseLifecycle extends DatabaseLifecycle {
  */
 export async function createSeededRpcHarness(
   handlers: readonly RpcHandler[],
-  environment: RuntimeEnvironment = 'test',
+  options: {
+    readonly environment?: RuntimeEnvironment;
+    readonly profile?: ApplicationSeedProfile;
+  } = {},
 ): Promise<RpcHarness> {
   const sqlite3 = await getSqlite3();
-  const connection = await openSeededTestDatabase();
+  const connection = await openSeededTestDatabase({
+    profile: options.profile ?? 'full',
+  });
   const lifecycle = new SeededTestDatabaseLifecycle(sqlite3, connection);
-  return rpcHarness(lifecycle, handlers, environment);
+  return rpcHarness(lifecycle, handlers, options.environment ?? 'test');
 }
