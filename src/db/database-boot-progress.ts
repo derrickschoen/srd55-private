@@ -1,7 +1,11 @@
 export const databaseBootStages = [
   'loading_engine',
   'opening_storage',
+  'checking_saved_verification',
   'checking_structure',
+  'checking_database_integrity',
+  'checking_schema_compatibility',
+  'applying_data_updates',
   // D283. Reported INSTEAD of `checking_structure` when a verification stamp
   // for exactly these bytes was reproduced, so a fast boot is never silent:
   // the timeline shows a `reusing_verification` phase and, because the seed
@@ -37,8 +41,16 @@ export function databaseBootStageLabel(stage: DatabaseBootStage): string {
       return 'Loading database engine…';
     case 'opening_storage':
       return 'Opening local character storage…';
+    case 'checking_saved_verification':
+      return 'Checking the saved database verification…';
     case 'checking_structure':
       return 'Checking database structure…';
+    case 'checking_database_integrity':
+      return 'Checking database integrity…';
+    case 'checking_schema_compatibility':
+      return 'Checking database compatibility…';
+    case 'applying_data_updates':
+      return 'Applying database updates…';
     case 'reusing_verification':
       return 'Reusing the last verified database check…';
     case 'checking_bundled_rules':

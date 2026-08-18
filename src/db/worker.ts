@@ -59,6 +59,7 @@ async function initialize(): Promise<DatabaseBoot> {
   // halves are cheap: the build key is frozen constants, and the image digest
   // is one native SHA-256 over bytes the pool reads synchronously — tens of
   // milliseconds against the ~4s a reproduced stamp skips.
+  report('checking_saved_verification');
   const plan = await planBootVerification({
     store: opfsBootVerificationStampStore(navigator.storage, stampFilename),
     build: applicationBootVerificationBuildKey(),

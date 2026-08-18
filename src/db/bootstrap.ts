@@ -92,12 +92,11 @@ function namedDigestMismatch(pass: BundledContentDigestPassV1): string {
  * `tests/integration/rules/background-equipment.test.ts` seeds origins into a
  * database with no weapon catalog on purpose to prove it.
  */
-function seedApplication(
+function seedApplicationPass(
   db: DatabaseContext,
   onProgress: (stage: DatabaseBootStage) => void,
   verification: DatabaseVerificationMode,
 ): void {
-  onProgress('checking_bundled_rules');
   ensureBundledClassContent(db);
   ensureBundledSrdSubclassContent(db);
   ensureBundledClassResources(db);
@@ -200,6 +199,21 @@ function seedApplication(
   }
 }
 
+function seedApplication(
+  db: DatabaseContext,
+  onProgress: (stage: DatabaseBootStage) => void,
+  verification: DatabaseVerificationMode,
+): void {
+  onProgress('checking_bundled_rules');
+  // Each catalog owns its local atomicity, but on OPFS every outermost commit
+  // is a durable sync. One application-level transaction turns those nested
+  // transactions into savepoints and commits the complete healthy seed once.
+  // If a later catalog check throws, the whole partial seed rolls back before
+  // DatabaseLifecycle reports the failure through its existing recoverable
+  // boot path.
+  db.transaction(() => seedApplicationPass(db, onProgress, verification));
+}
+
 export function applicationSeed(
   db: DatabaseContext,
   verification: DatabaseVerificationMode = 'full',
@@ -253,5 +267,8 @@ export function createApplicationLifecycle(
     storage,
     schema,
     (db, verification) => seedApplication(db, onProgress, verification),
+    DATABASE_MIGRATIONS,
+    CATALOG_DATA_MIGRATIONS,
+    onProgress,
   );
 }

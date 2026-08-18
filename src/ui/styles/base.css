@@ -57,6 +57,19 @@ a {
   font-family: Georgia, "Times New Roman", serif;
 }
 
+.loading-phase-label {
+  margin: 0;
+  color: #62584c;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.dark .loading-phase-label {
+  color: #cfc6b6;
+}
+
 .error-shell [role="alert"] {
   max-width: 48rem;
   color: #8c1d18;

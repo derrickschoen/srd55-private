@@ -335,11 +335,16 @@ const showDatabaseBootStatus = (message: string): HTMLOutputElement => {
   shell.className = 'loading-shell';
   const heading = document.createElement('h1');
   heading.textContent = 'SRD-55';
+  const phaseLabel = document.createElement('p');
+  phaseLabel.id = 'loading-phase-label';
+  phaseLabel.className = 'loading-phase-label';
+  phaseLabel.textContent = 'Current startup phase';
   const output = document.createElement('output');
   output.id = 'status';
   output.setAttribute('role', 'status');
+  output.setAttribute('aria-labelledby', phaseLabel.id);
   output.value = message;
-  shell.append(heading, output);
+  shell.append(heading, phaseLabel, output);
   root.replaceChildren(shell);
   root.setAttribute('aria-busy', 'true');
   return output;

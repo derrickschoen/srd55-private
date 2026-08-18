@@ -64,6 +64,9 @@ describe('application seed wiring', () => {
     expect(openedLifecycle.isOpen).toBe(true);
     expect(seedHooks.validateSubclassSpellReferences).toHaveBeenCalledOnce();
     expect(seedHooks.reconcileLaterSeedStep).not.toHaveBeenCalled();
+    expect(
+      openedLifecycle.database.scalar('SELECT count(*) FROM class_definitions'),
+    ).toBe(0);
     expect(reported).toHaveBeenCalledWith(
       'Bundled content could not be seeded.',
       unresolved,
