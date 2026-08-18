@@ -15,7 +15,8 @@ proficiencies and saving throws only to the character who STARTED in them.
 
 LAYOUT: two-column. The right column begins at a DIFFERENT offset per class, so
 each slice below is calibrated to where that class's own heading starts rather
-than to one fixed column. Nothing is edited out.
+than to one fixed column. Two measured slice losses are repaired as recorded in
+`docs/srd/SOURCE.md`.
 
 === Barbarian (page line 1726, column 68) ===
 
@@ -106,6 +107,7 @@ As a Multiclass Character
 
   listed in the Paladin Features table. See the multi-
   classing rules in “Character Creation” to deter-
+  mine your available spell slots.
 
 
 === Ranger (page line 3439, column 62) ===
@@ -171,5 +173,4 @@ As a Multiclass Character
  ticlassing rules in “Character Creation” to deter-
  mine your available spell slots.
 
-izard Class Features
-
+Wizard Class Features
