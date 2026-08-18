@@ -1,4 +1,5 @@
 import type { DatabaseContext } from '../db/database';
+import { ok, type OkOutcome } from '../refusals/outcome';
 import type {
   AllocateAbilitiesCommand as AllocateAbilitiesPayload,
   CharacterCommandPayload,
@@ -42,7 +43,7 @@ export class AllocateAbilitiesCommand implements CommandImplementation {
     private readonly clock: CommandClock = systemClock,
   ) {}
 
-  apply(characterId: number): void {
+  apply(characterId: number): OkOutcome<void> {
     const { method, scores } = this.payload;
     for (const ability of abilities) {
       const score = scores[ability];
@@ -72,6 +73,7 @@ export class AllocateAbilitiesCommand implements CommandImplementation {
         characterId,
       ],
     );
+    return ok(undefined);
   }
 
   /**

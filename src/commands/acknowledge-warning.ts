@@ -1,6 +1,7 @@
 import { SpellAccessBuilder } from '../access/spell-access-builder';
 import { sqlNullableString, type RowCodec } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
+import { ok, type OkOutcome } from '../refusals/outcome';
 import {
   DuplicateWarningDetector,
 } from '../duplicates/duplicate-warning-detector';
@@ -61,7 +62,7 @@ export class AcknowledgeWarningCommand {
     this.#duplicates = duplicates ?? new DuplicateWarningDetector();
   }
 
-  async apply(characterId: number): Promise<void> {
+  async apply(characterId: number): Promise<OkOutcome<void>> {
     const fingerprint = warningFingerprint(
       this.payload.warning_fingerprint,
     );
@@ -75,10 +76,10 @@ export class AcknowledgeWarningCommand {
         this.payload as DeletePayload,
         this.integrity,
       );
-      await command.apply(characterId);
+      const applied = await command.apply(characterId);
       this.#delete = command;
       this.#characterId = characterId;
-      return;
+      return applied;
     }
 
     const active = this.#duplicates
@@ -127,6 +128,7 @@ export class AcknowledgeWarningCommand {
       this.#previous = previous;
     });
     this.#characterId = characterId;
+    return ok(undefined);
   }
 
   async inverse(): Promise<AcknowledgeWarningPayload> {

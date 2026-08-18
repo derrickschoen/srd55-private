@@ -12,6 +12,7 @@ import {
 import { auditCandidateDatabase } from '../../../src/db/candidate-audit';
 import { AddSourceCommand } from '../../../src/commands/add-source';
 import { CharacterCommandExecutor } from '../../../src/commands/character-command-executor';
+import { expectOkOutcome } from '../../helpers/outcome';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { CharacterCompletenessQueries } from '../../../src/queries/character-completeness';
 import {
@@ -1049,7 +1050,7 @@ describe('application database bootstrap', () => {
     );
     lifecycle.open();
     await lifecycle.replace(fixtureBytes);
-    const result = await new CharacterCommandExecutor(
+    const result = expectOkOutcome(await new CharacterCommandExecutor(
       lifecycle.database,
       new CharacterCommandIntegrity('monk-shield-lifecycle'),
     ).execute({
@@ -1070,7 +1071,7 @@ describe('application database bootstrap', () => {
           notes: null,
         },
       },
-    });
+    }));
     expect(result.preview_warnings).toEqual([
       {
         code: 'armor_class_reduced',

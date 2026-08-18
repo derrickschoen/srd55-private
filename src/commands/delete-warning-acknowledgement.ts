@@ -1,5 +1,6 @@
 import { sqlNullableString, type RowCodec } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
+import { ok, type OkOutcome } from '../refusals/outcome';
 import type { AcknowledgeWarningCommand as AcknowledgeWarningPayload } from '../domain/command-contracts';
 import type { CharacterCommandIntegrity } from './integrity';
 
@@ -49,7 +50,7 @@ export class DeleteWarningAcknowledgementCommand {
     private readonly integrity: CharacterCommandIntegrity,
   ) {}
 
-  async apply(characterId: number): Promise<void> {
+  async apply(characterId: number): Promise<OkOutcome<void>> {
     await this.integrity.assertValid(characterId, this.payload);
     const fingerprint = warningFingerprint(
       this.payload.warning_fingerprint,
@@ -74,6 +75,7 @@ export class DeleteWarningAcknowledgementCommand {
     );
     this.#characterId = characterId;
     this.#previous = previous;
+    return ok(undefined);
   }
 
   inverse(): AcknowledgeWarningPayload {

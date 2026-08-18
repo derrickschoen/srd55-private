@@ -36,6 +36,7 @@ import {
   databaseBootProgress,
   type DatabaseBootStage,
 } from './database-boot-progress';
+import { postRpcResponseWithCloneFailureFallback } from './worker-post';
 
 const scope = self as DedicatedWorkerGlobalScope;
 const filename = '/dnd-multiclass-spells.sqlite3';
@@ -137,7 +138,10 @@ async function respond(value: unknown): Promise<void> {
       response = rpcFailure(value.id, bootFailureRejection(error).toPayload());
     }
   }
-  scope.postMessage(response);
+  postRpcResponseWithCloneFailureFallback(
+    (value) => scope.postMessage(value),
+    response,
+  );
 }
 
 scope.addEventListener('message', (event: MessageEvent<unknown>) => {

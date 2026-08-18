@@ -33,6 +33,8 @@ import {
 } from '../../../src/sharing/character-share';
 import { handlers as guidedHandlers } from '../../../src/worker/handlers/guided';
 import { rpcRegistry } from '../../../src/worker/registry';
+import { expectOkOutcome } from '../../helpers/outcome';
+import type { Outcome } from '../../../src/refusals/outcome';
 import { openTestDatabase } from '../../helpers/open-db';
 import {
   createSeededRpcHarness,
@@ -125,7 +127,9 @@ async function allocateThroughRpc(
       `Ability allocation was refused: ${response.error.code} ${response.error.message}`,
     );
   }
-  return response.result as GuidedAllocateAbilitiesResult;
+  return expectOkOutcome(
+    response.result as Outcome<GuidedAllocateAbilitiesResult>,
+  );
 }
 
 function expectPersistedAllocation(
@@ -352,7 +356,7 @@ describe('allocation undo and pre-v8 snapshots', () => {
       new CharacterCommandIntegrity('allocation-undo-test-key'),
     );
 
-    const allocated = await executor.execute({
+    const allocated = expectOkOutcome(await executor.execute({
       character_id: characterId,
       operation_uuid: '30000000-0000-4000-8000-000000000001',
       expected_revision: 0,
@@ -361,14 +365,14 @@ describe('allocation undo and pre-v8 snapshots', () => {
         method: 'manual',
         scores: ALL_TENS,
       },
-    });
+    }));
     expectPersistedAllocation(db, characterId, 'manual', ALL_TENS);
 
-    await executor.undo({
+    expectOkOutcome(await executor.undo({
       character_id: characterId,
       operation_uuid: allocated.operation_uuid,
       expected_revision: 1,
-    });
+    }));
 
     expect(
       db.oneRaw(
@@ -457,12 +461,15 @@ describe('allocateGuidedAbilities direct real-database contract', () => {
         new CharacterCommandIntegrity('guided-abilities-test-key'),
       ),
     ).resolves.toEqual({
-      character_id: characterId,
-      current_step: stepAfterAbilities(),
-      warnings: [
-        { kind: 'non_standard_method', method: 'manual' },
-        { kind: 'weak_scores', at_least_plus_two: 0 },
-      ],
+      kind: 'ok',
+      value: {
+        character_id: characterId,
+        current_step: stepAfterAbilities(),
+        warnings: [
+          { kind: 'non_standard_method', method: 'manual' },
+          { kind: 'weak_scores', at_least_plus_two: 0 },
+        ],
+      },
     });
   });
 });

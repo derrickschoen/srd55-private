@@ -20,6 +20,9 @@ import type { Skill } from '../../../domain/enums';
 import type { CharacterRevision } from '../../../domain/ids';
 import type { EligibleSpell } from '../../../domain/read-models';
 import type { CharacterCommandRpcResult } from '../../../commands/character-command-executor';
+import type { DecodedOutcome } from '../../../refusals/outcome';
+import type { Refusal } from '../../../refusals/refusal';
+import { renderRefusal } from '../../../refusals/render';
 import type { CatalogNamedDisclosure } from '../../../catalog/catalog-disclosure';
 import type { CharacterSheet } from '../../../queries/character-sheet-builder';
 import { element, type Cleanup } from '../../dom';
@@ -75,12 +78,12 @@ export interface LevelUpWizardServices {
   readonly preview?: (
     expectedRevision: CharacterRevision,
     command: LevelUpPreviewCommand,
-  ) => Promise<LevelUpPreviewResult>;
+  ) => Promise<DecodedOutcome<LevelUpPreviewResult>>;
   readonly submit?: (
     expectedRevision: CharacterRevision,
     command: LevelUpPreviewCommand,
     operationUuid: string,
-  ) => Promise<CharacterCommandRpcResult>;
+  ) => Promise<DecodedOutcome<CharacterCommandRpcResult>>;
   readonly loadSheet?: () => Promise<CharacterSheet>;
   readonly reloadState?: () => void | Promise<void>;
   readonly randomUuid?: () => string;
@@ -117,6 +120,27 @@ function errorMessage(error: unknown): string {
 
 function isAmbiguousTransportError(error: unknown): boolean {
   return errorRecord(error)?.['code'] === 'transport_error';
+}
+
+function refusalIsStale(refusal: Refusal): boolean {
+  return refusal.kind === 'revision_conflict'
+    || refusal.kind === 'character_archived'
+    || (
+      refusal.kind === 'level_up_refused'
+      && (
+        refusal.reason === 'class_not_held'
+        || refusal.reason === 'level_not_adjacent'
+      )
+    );
+}
+
+function outcomeRefusalMessage<T>(outcome: Exclude<
+  DecodedOutcome<T>,
+  { readonly kind: 'ok' }
+>): string {
+  return renderRefusal(
+    outcome.kind === 'refused' ? outcome.refusal : outcome,
+  );
 }
 
 function titleCaseIdentifier(value: string): string {
@@ -350,9 +374,17 @@ function createTerminalEpicResolutionWizard(options: {
         void options.preview(
           options.state.character.revision,
           selectedCommand,
-        ).then((result) => {
+        ).then((outcome) => {
           if (generation !== previewGeneration) return;
-          preview = result;
+          if (outcome.kind !== 'ok') {
+            stale = outcome.kind === 'refused'
+              && refusalIsStale(outcome.refusal);
+            error = outcomeRefusalMessage(outcome);
+            showStep('review');
+            activeFrame?.alert?.focus();
+            return;
+          }
+          preview = outcome.value;
           error = null;
           showStep('review');
         }).catch((previewError: unknown) => {
@@ -388,7 +420,18 @@ function createTerminalEpicResolutionWizard(options: {
         options.state.character.revision,
         selectedCommand,
         confirmedOperationUuid,
-      ).then(async () => {
+      ).then(async (outcome) => {
+        if (outcome.kind !== 'ok') {
+          submitting = false;
+          clearSubmittingStatus(host);
+          stale = outcome.kind === 'refused'
+            && refusalIsStale(outcome.refusal);
+          operationUuid = null;
+          error = outcomeRefusalMessage(outcome);
+          showStep('review');
+          activeFrame?.alert?.focus();
+          return;
+        }
         const sheet = await options.loadSheet?.();
         if (sheet === undefined) {
           throw new Error('Fresh character sheet data was unavailable.');
@@ -884,16 +927,26 @@ export function createLevelUpWizard(options: {
     const reviewedDraft = draftReview();
     previewRequestFingerprint = fingerprint;
     error = null;
-    void options.preview(state.character.revision, command).then((result) => {
+    void options.preview(state.character.revision, command).then((outcome) => {
       if (
         generation !== previewGeneration ||
         draftFingerprint() !== fingerprint
       ) {
         return;
       }
+      if (outcome.kind !== 'ok') {
+        stale = outcome.kind === 'refused'
+          && refusalIsStale(outcome.refusal);
+        error = outcomeRefusalMessage(outcome);
+        if (currentStep === 'review') {
+          render(false);
+          frame?.alert?.focus();
+        }
+        return;
+      }
       previewCache = {
         draftFingerprint: fingerprint,
-        result,
+        result: outcome.value,
         draft: reviewedDraft,
       };
       error = null;
@@ -949,7 +1002,18 @@ export function createLevelUpWizard(options: {
       state.character.revision,
       command,
       confirmedOperationUuid,
-    ).then(async () => {
+    ).then(async (outcome) => {
+      if (outcome.kind !== 'ok') {
+        submitting = false;
+        clearSubmittingStatus(host);
+        stale = outcome.kind === 'refused'
+          && refusalIsStale(outcome.refusal);
+        operationUuid = null;
+        error = outcomeRefusalMessage(outcome);
+        render(false);
+        frame?.alert?.focus();
+        return;
+      }
       const sheet = await options.loadSheet?.();
       if (sheet === undefined) {
         throw new Error('Fresh character sheet data was unavailable.');

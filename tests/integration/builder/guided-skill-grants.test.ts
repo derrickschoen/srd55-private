@@ -573,7 +573,10 @@ describe('the fill RPC over species choice grants', () => {
     );
     expect(inside).toMatchObject({
       ok: true,
-      result: { character_id: characterId },
+      result: {
+        kind: 'ok',
+        value: { character_id: characterId },
+      },
     });
     expect(activeGrantedSkills(db, characterId)).toContain(plan.pool[0]);
   });

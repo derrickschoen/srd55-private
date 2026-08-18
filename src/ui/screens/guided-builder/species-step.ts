@@ -12,6 +12,8 @@ import type { GuidedApplyOriginResult } from '../../../builder/guided-creation';
 import type { Ability } from '../../../domain/enums';
 import { BUNDLED_ORIGIN_RULES_EDITION } from '../../../rules/origin-rules-edition';
 import { RpcError } from '../../../rpc/protocol';
+import type { DecodedOutcome } from '../../../refusals/outcome';
+import { renderRefusal } from '../../../refusals/render';
 import { clear, element, listen, type Cleanup } from '../../dom';
 import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
 import {
@@ -168,7 +170,7 @@ export interface SpeciesStepDeps {
     replaceableSpellVersionKey: string | undefined,
     operationUuid: string,
     expectedRevision: number,
-  ) => Promise<GuidedChooseSpeciesLineageResult>;
+  ) => Promise<DecodedOutcome<GuidedChooseSpeciesLineageResult>>;
   readonly navigate: (path: string, transition?: GuidedSpellTransition) => void;
 }
 
@@ -409,7 +411,19 @@ function choiceEditor(
         replaceableKey,
         crypto.randomUUID(),
         revision,
-      ).then(() => {
+      ).then((outcome) => {
+        if (outcome.kind !== 'ok') {
+          errorMount.append(element('p', {
+            className: 'guided-error',
+            text: renderRefusal(
+              outcome.kind === 'refused' ? outcome.refusal : outcome,
+            ),
+            attributes: { role: 'alert' },
+          }));
+          inFlight = false;
+          submit.disabled = false;
+          return;
+        }
         const announcement = `${selectedOption?.label ?? choice.label} selected for ${choice.label}.`;
         deps.navigate(guidedSpeciesChoicePath(deps.characterId), {
           focusKey,

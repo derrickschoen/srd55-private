@@ -6,7 +6,6 @@ import type {
   CharacterAuditWriter,
 } from '../../../src/commands/audit-log';
 import { CharacterCommandExecutor } from '../../../src/commands/character-command-executor';
-import type { CharacterArchivedRefusal } from '../../../src/commands/character-command-preflight';
 import { CharacterCommandFactory } from '../../../src/commands/character-command-factory';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { CharacterCommandIntegrityError } from '../../../src/commands/integrity-errors';
@@ -33,6 +32,7 @@ import type {
 import { CHARACTER_TEXT_LIMITS } from '../../../src/domain/character-limits';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import { openTestDatabase } from '../../helpers/open-db';
+import { expectOkOutcome } from '../../helpers/outcome';
 
 const key = 'X50-executor-integration-key';
 const firstOperation = '11111111-1111-4111-8111-111111111111';
@@ -225,12 +225,17 @@ describe('character command factory and executor', () => {
       ['2042-08-12T13:14:15.000Z', characterId],
     );
 
-    await expect(
-      new CharacterCommandExecutor(db, integrity).execute(request),
-    ).rejects.toMatchObject({
-      reason: 'character_archived',
-      currentRevision: 0,
-    } satisfies Partial<CharacterArchivedRefusal>);
+    const outcome = await new CharacterCommandExecutor(db, integrity)
+      .execute(request);
+    expect(outcome).toEqual({
+      kind: 'refused',
+      wire_version: 1,
+      refusal: {
+        kind: 'character_archived',
+        character_id: characterId,
+        current_revision: 0,
+      },
+    });
     expect(db.oneRaw(
       'SELECT wisdom, revision, archived_at FROM characters WHERE id = ?',
       [characterId],
@@ -260,7 +265,7 @@ describe('character command factory and executor', () => {
       clock: () => '2026-08-04T12:00:00.000Z',
       randomUuid: () => undoOperation,
     });
-    const result = await executor.execute({
+    const result = expectOkOutcome(await executor.execute({
       character_id: characterId,
       operation_uuid: firstOperation,
       expected_revision: 0,
@@ -272,7 +277,7 @@ describe('character command factory and executor', () => {
         notes: 'Ask about the brass key.',
         reason: 'One details save',
       },
-    });
+    }));
 
     expect(result).toMatchObject({
       inverse: {
@@ -355,11 +360,11 @@ describe('character command factory and executor', () => {
        WHERE operation_uuid = ?`,
       [frozenSignedInverse, firstOperation],
     );
-    const undo = await executor.undo({
+    const undo = expectOkOutcome(await executor.undo({
       character_id: characterId,
       operation_uuid: firstOperation,
       expected_revision: 1,
-    });
+    }));
     expect(undo).toEqual({
       status: 'refused',
       reason: 'legacy_operation',
@@ -392,7 +397,7 @@ describe('character command factory and executor', () => {
     const executor = new CharacterCommandExecutor(db, integrity, {
       randomUuid: () => undoOperation,
     });
-    await executor.execute({
+    expectOkOutcome(await executor.execute({
       character_id: characterId,
       operation_uuid: firstOperation,
       expected_revision: 0,
@@ -403,7 +408,7 @@ describe('character command factory and executor', () => {
         backstory: '\t \n',
         notes: '',
       },
-    });
+    }));
 
     expect(
       db.oneRaw(
@@ -431,7 +436,7 @@ describe('character command factory and executor', () => {
     );
     const executor = new CharacterCommandExecutor(db, integrity);
 
-    const result = await executor.execute({
+    const result = expectOkOutcome(await executor.execute({
       character_id: characterId,
       operation_uuid: firstOperation,
       expected_revision: 0,
@@ -439,7 +444,7 @@ describe('character command factory and executor', () => {
         type: 'update_character_flavor',
         alignment: 'Chaotic Good',
       },
-    });
+    }));
 
     const stored = db.oneRaw(
       `SELECT alignment, notes, revision FROM characters WHERE id = ?`,
@@ -471,7 +476,7 @@ describe('character command factory and executor', () => {
       [characterId],
     );
     const executor = new CharacterCommandExecutor(db, integrity);
-    const result = await executor.execute({
+    const result = expectOkOutcome(await executor.execute({
       character_id: characterId,
       operation_uuid: firstOperation,
       expected_revision: 0,
@@ -479,7 +484,7 @@ describe('character command factory and executor', () => {
         type: 'update_character_flavor',
         alignment: 'Lawful Good',
       },
-    });
+    }));
 
     expect(
       db.oneRaw(
@@ -494,11 +499,11 @@ describe('character command factory and executor', () => {
       notes: '',
     });
 
-    await executor.undo({
+    expectOkOutcome(await executor.undo({
       character_id: characterId,
       operation_uuid: firstOperation,
       expected_revision: 1,
-    });
+    }));
     const restored = db.oneRaw(
       `SELECT alignment, appearance, backstory, notes, revision
        FROM characters WHERE id = ?`,
@@ -596,7 +601,7 @@ describe('character command factory and executor', () => {
     const executor = new CharacterCommandExecutor(db, integrity);
     const astral = '🧙';
     const boundary = astral.repeat(CHARACTER_TEXT_LIMITS.backstory);
-    await executor.execute({
+    expectOkOutcome(await executor.execute({
       character_id: characterId,
       operation_uuid: firstOperation,
       expected_revision: 0,
@@ -607,7 +612,7 @@ describe('character command factory and executor', () => {
         backstory: boundary,
         notes: null,
       },
-    });
+    }));
     expect(
       db.scalar('SELECT backstory FROM characters WHERE id = ?', [characterId]),
     ).toBe(boundary);
@@ -642,7 +647,7 @@ describe('character command factory and executor', () => {
       clock: () => '2026-07-23T12:00:00.000Z',
       randomUuid: () => undoOperation,
     });
-    const result = await executor.execute({
+    const result = expectOkOutcome(await executor.execute({
       character_id: characterId,
       operation_uuid: firstOperation,
       expected_revision: 0,
@@ -652,7 +657,7 @@ describe('character command factory and executor', () => {
         score: 18,
         reason: 'Level-up choice',
       },
-    });
+    }));
 
     expect(result).toEqual({
       inverse: {
@@ -713,11 +718,11 @@ describe('character command factory and executor', () => {
       wisdom: 18,
     });
 
-    await executor.undo({
+    expectOkOutcome(await executor.undo({
       character_id: characterId,
       operation_uuid: result.operation_uuid,
       expected_revision: 1,
-    });
+    }));
     expect(
       db.oneRaw(
         'SELECT wisdom, revision FROM characters WHERE id = ?',
@@ -783,7 +788,7 @@ describe('character command factory and executor', () => {
       [characterId, sourceId, spellId],
     ).lastInsertId;
 
-    await new CharacterCommandExecutor(db, integrity).execute({
+    expectOkOutcome(await new CharacterCommandExecutor(db, integrity).execute({
       character_id: characterId,
       operation_uuid: firstOperation,
       expected_revision: 0,
@@ -791,7 +796,7 @@ describe('character command factory and executor', () => {
         type: 'update_character_rules',
         allow_legacy: true,
       },
-    });
+    }));
 
     expect(
       db.oneRaw(

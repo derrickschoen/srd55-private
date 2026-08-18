@@ -656,8 +656,7 @@ test('U1 direct level-up refuses untouched defaults, then one workspace edit ena
   expect(Number.isSafeInteger(character.classDefinitionId)).toBe(true);
 
   const refusal = await page.evaluate(async ({ id, classDefinitionId }) => {
-    try {
-      await window.appRpc.call('commands.execute', {
+    const outcome = await window.appRpc.call('commands.execute', {
         character_id: id,
         operation_uuid: crypto.randomUUID(),
         expected_revision: 0,
@@ -666,15 +665,22 @@ test('U1 direct level-up refuses untouched defaults, then one workspace edit ena
           class_definition_id: classDefinitionId,
           target_level: 2,
         },
-      });
-    } catch (error) {
-      return error !== null && typeof error === 'object'
-        ? (error as { data?: unknown }).data
-        : null;
+    });
+    if (
+      outcome === null
+      || typeof outcome !== 'object'
+      || !('kind' in outcome)
+      || outcome.kind !== 'refused'
+      || !('refusal' in outcome)
+    ) {
+      throw new Error('Expected level-up to return a refused Outcome.');
     }
-    return null;
+    return outcome.refusal;
   }, character);
-  expect(refusal).toEqual({ reason: 'incomplete_level_one' });
+  expect(refusal).toEqual({
+    kind: 'level_up_refused',
+    reason: 'incomplete_level_one',
+  });
   expect(await rows(page, 'characters')).toEqual([
     expect.objectContaining({
       id: character.id,

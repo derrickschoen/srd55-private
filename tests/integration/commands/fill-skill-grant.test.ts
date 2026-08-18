@@ -15,6 +15,7 @@ import { seedClassProgressions } from '../../../src/rules/class-progression-look
 import { raiseClassLevelForTest } from '../../helpers/class-levels';
 import { seedSheetContent } from '../../../src/rules/sheet-srd';
 import { openTestDatabase } from '../../helpers/open-db';
+import { expectOkOutcome } from '../../helpers/outcome';
 
 /**
  * THE FILL COMMAND (skills-with-provenance §3.3/§3.6, dispatch S-B), through
@@ -58,7 +59,7 @@ describe('fill_skill_grant through the real executor', () => {
     // at 1, removal is `remove: true`, and a higher fixture level is a
     // direct fixture write — see `raiseClassLevelForTest`.
     if (level === null) {
-      new UpdateClassCommand(
+      expectOkOutcome(new UpdateClassCommand(
         db,
         {
           type: 'update_class',
@@ -66,17 +67,17 @@ describe('fill_skill_grant through the real executor', () => {
           remove: true,
         },
         integrity,
-      ).apply(characterId);
+      ).apply(characterId));
       return;
     }
-    new UpdateClassCommand(
+    expectOkOutcome(new UpdateClassCommand(
       db,
       {
         type: 'update_class',
         class_definition_id: classId(name),
       },
       integrity,
-    ).apply(characterId);
+    ).apply(characterId));
     if (level > 1) {
       raiseClassLevelForTest(db, characterId, classId(name), level);
     }
@@ -111,12 +112,15 @@ describe('fill_skill_grant through the real executor', () => {
   }
 
   async function fill(grant: number, skill: Skill | null) {
-    return new CharacterCommandExecutor(db, integrity).execute({
+    return expectOkOutcome(await new CharacterCommandExecutor(
+      db,
+      integrity,
+    ).execute({
       character_id: characterId,
       operation_uuid: crypto.randomUUID(),
       expected_revision: revision(),
       command: { type: 'fill_skill_grant', grant_id: grant, skill },
-    });
+    }));
   }
 
   async function refusalOf(
@@ -255,7 +259,7 @@ describe('fill_skill_grant through the real executor', () => {
       },
       integrity,
     );
-    other.apply(otherId);
+    expectOkOutcome(other.apply(otherId));
     const foreignGrant = Number(
       db.scalar(
         `SELECT id FROM character_skill_grants WHERE character_id = ?
@@ -287,12 +291,12 @@ describe('fill_skill_grant through the real executor', () => {
     });
 
     // Execute the stored inverse of the clear: the fill comes back.
-    await new CharacterCommandExecutor(db, integrity).execute({
+    expectOkOutcome(await new CharacterCommandExecutor(db, integrity).execute({
       character_id: characterId,
       operation_uuid: crypto.randomUUID(),
       expected_revision: revision(),
       command: validateCharacterCommandPayload(cleared.inverse),
-    });
+    }));
     expect(grantRow(grant)).toMatchObject({ skill });
   });
 });
