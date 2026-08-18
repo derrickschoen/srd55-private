@@ -607,8 +607,9 @@ export function createEquipmentStep(deps: EquipmentStepDeps): EquipmentStep {
               className: 'guided-equipment-complete',
               attributes: { [EQUIPMENT_STEP_ATTR.complete]: '' },
               text:
-                'Both equipment packages are recorded. Every level 1 step ' +
-                'is complete.',
+                'Both equipment packages are recorded. Every guided level 1 ' +
+                'step is complete. Check the character card or planner for ' +
+                'choices outside this guided path.',
             }),
             ...(backupHint?.element === null ||
             backupHint?.element === undefined

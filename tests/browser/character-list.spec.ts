@@ -349,7 +349,8 @@ test('catalog, complete database, and character backup controls preserve durable
   expect(cancelDialog.message()).toContain('Create another copy?');
   await cancelDialog.dismiss();
   await expect(page.locator('.transfer-status')).toContainText(
-    'Character import cancelled. Nothing was changed.',
+    'Character import cancelled because this backup appears to match an ' +
+      'existing character. Nothing was changed.',
   );
   expect(
     await page.evaluate(() => window.staticApp.inspectRows('characters')),

@@ -604,7 +604,9 @@ function spellRulesDisclosure(
       'Current cantrip effect',
       current.status === 'recorded'
         ? `${current.value} at character level ${String(totalCharacterLevel)}`
-        : null,
+        : current.reason === 'character_level_unknown'
+          ? 'UNKNOWN — the character level is not recorded, so the current effect cannot be selected'
+          : 'UNKNOWN — this sheet needs explicit level (effect) pairs in the spell data; use the printed Effect rules below otherwise',
     );
   }
   fact('Effect', spell.reference.description);

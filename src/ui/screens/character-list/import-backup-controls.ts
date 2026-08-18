@@ -779,7 +779,10 @@ export function createImportBackupControls(
         }
         const prepared = await controller.prepareCharacterImport(file);
         if (!await controller.confirmCharacterCopy(prepared.document, characters)) {
-          return 'Character import cancelled. Nothing was changed.';
+          return (
+            'Character import cancelled because this backup appears to match ' +
+            'an existing character. Nothing was changed.'
+          );
         }
         const showAdoptionDialog = (plan: ContentImportPlan): void => {
           adoptionCleanup?.();

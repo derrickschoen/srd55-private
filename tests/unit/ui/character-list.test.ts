@@ -3,6 +3,8 @@ import type { CharacterRow } from '../../../src/domain/models';
 import type { CharacterSummary } from '../../../src/domain/read-models';
 import {
   CharacterListController,
+  cardHasOutstandingWork,
+  cardOutstandingLabel,
   catalogGapLabel,
   characterCardRouteActions,
   classSummary,
@@ -669,6 +671,11 @@ describe('character list behavior', () => {
     expect(outstandingLabel(0)).toBe('nothing outstanding');
     expect(outstandingLabel(1)).toBe('1 unfinished choice');
     expect(outstandingLabel(2)).toBe('2 unfinished choices');
+    expect(cardOutstandingLabel(0, false)).toBe('guided build unfinished');
+    expect(cardOutstandingLabel(0, true)).toBe('nothing outstanding');
+    expect(cardOutstandingLabel(1, false)).toBe('1 unfinished choice');
+    expect(cardHasOutstandingWork(0, false)).toBe(true);
+    expect(cardHasOutstandingWork(0, true)).toBe(false);
     expect(catalogGapLabel(1)).toBe('1 catalog gap');
     expect(catalogGapLabel(3)).toBe('3 catalog gaps');
     for (const label of [
@@ -1607,7 +1614,8 @@ describe('catalog and backup entry points', () => {
       expect(fixture.persisted.characters).toHaveLength(1);
       expect(persistedChanges).toBe(0);
       expect(elementText(controls.element)).toContain(
-        'Character import cancelled. Nothing was changed.',
+        'Character import cancelled because this backup appears to match ' +
+          'an existing character. Nothing was changed.',
       );
       controls.cleanup();
     } finally {
