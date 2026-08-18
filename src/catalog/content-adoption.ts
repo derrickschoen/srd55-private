@@ -288,7 +288,7 @@ function registryGraphHash(db: DatabaseContext): string {
   ] as const;
   const graph = tables.map((table) => ({
     table,
-    rows: db.allRaw(`SELECT * FROM ${table} ORDER BY 1, 2, 3, 4`),
+    rows: db.allRaw(`SELECT * FROM ${table} ORDER BY rowid`),
   }));
   return sha256(canonicalJson(graph));
 }
