@@ -34,6 +34,7 @@ import {
 import {
   createLevelUpWizard,
 } from '../../../src/ui/screens/level-up/level-up-wizard';
+import * as backupHintModule from '../../../src/ui/screens/guided-builder/backup-hint';
 import {
   returnToLevelUpLaunchSurface,
   screen,
@@ -45,15 +46,14 @@ import {
   type InteractiveTestElement,
 } from '../../fixtures/interactive-dom';
 
-const createBackupHintSpy = vi.hoisted(() => vi.fn());
-vi.mock('../../../src/ui/screens/guided-builder/backup-hint', () => ({
-  createBackupHint: createBackupHintSpy,
-}));
+let createBackupHintSpy: ReturnType<
+  typeof vi.spyOn<typeof backupHintModule, 'createBackupHint'>
+>;
 
 let restoreDocument: (() => void) | undefined;
 
 beforeEach(() => {
-  createBackupHintSpy.mockClear();
+  createBackupHintSpy = vi.spyOn(backupHintModule, 'createBackupHint');
   restoreDocument = installInteractiveDocument();
 });
 
