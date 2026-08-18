@@ -243,7 +243,8 @@ test('an unassisted sitting creates a caster through the current guided level 1 
 
   await expect(
     page.getByText(
-      'Both equipment packages are recorded. Every level 1 step is complete.',
+      'Both equipment packages are recorded. Every guided level 1 step is complete. ' +
+        'Check the character card or planner for choices outside this guided path.',
     ),
   ).toBeVisible();
   await expect(

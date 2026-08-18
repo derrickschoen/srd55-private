@@ -43,6 +43,9 @@
 }
 
 .brand-link {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
   color: #6d28d9;
   font-size: 0.75rem;
   font-weight: 700;
@@ -147,6 +150,8 @@
 }
 
 .advanced-create summary {
+  min-height: 2.75rem;
+  align-content: center;
   cursor: pointer;
   font-size: 0.875rem;
   font-weight: 700;
@@ -181,7 +186,7 @@
 .transfer-control input,
 .transfer-control select {
   width: 100%;
-  min-height: 2.6rem;
+  min-height: 2.75rem;
   border: 1px solid #a99d8c;
   border-radius: 0.45rem;
   padding: 0.55rem 0.7rem;
@@ -201,7 +206,7 @@
 .button-danger,
 .transfer-panel button {
   display: inline-flex;
-  min-height: 2.6rem;
+  min-height: 2.75rem;
   align-items: center;
   justify-content: center;
   border: 1px solid transparent;
@@ -298,9 +303,11 @@ select:disabled {
 
 .share-option {
   display: flex;
+  min-height: 2.75rem;
   align-items: center;
   gap: 0.45rem;
   font-size: 0.85rem;
+  cursor: pointer;
 }
 
 .share-actions {
@@ -339,6 +346,8 @@ select:disabled {
 }
 
 .transfer-panel summary {
+  min-height: 2.75rem;
+  align-content: center;
   cursor: pointer;
   font-weight: 700;
 }
@@ -482,7 +491,7 @@ select:disabled {
 
 @media (max-width: 38rem) {
   .header-title p {
-    display: none;
+    display: block;
   }
 
   .create-panel,

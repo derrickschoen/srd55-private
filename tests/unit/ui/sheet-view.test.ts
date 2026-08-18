@@ -1101,6 +1101,18 @@ describe('the character sheet is projected twice from one value', () => {
       status: 'unknown',
       reason: 'current_value_not_recorded',
     });
+
+    const levelFourRules = spellSectionOf(sheet({
+      total_level: 4,
+      spells: [classSpellGroup(11, 'Wizard', [fireBolt])],
+    })).spell_groups[0]?.rows[0]?.disclosure;
+    expect(textOf(levelFourRules?.detail ?? [])).toContain(
+      'Current cantrip effect: UNKNOWN — this sheet needs explicit level ' +
+        '(effect) pairs in the spell data; use the printed Effect rules below otherwise.',
+    );
+    expect(textOf(levelFourRules?.detail ?? [])).toContain(
+      'Effect: On a hit, the target takes 1d10 Fire damage.',
+    );
   });
 
   it('keeps hostile subclass prose inert, layer-disclosed, and out of facts', () => {

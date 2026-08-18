@@ -130,6 +130,7 @@ export interface SkillsStep {
 export function createSkillsStep(deps: SkillsStepDeps): SkillsStep {
   const cleanups: Cleanup[] = [];
   const controls: HTMLButtonElement[] = [];
+  const restoreChoiceDisabledStates: Array<() => void> = [];
   let inFlight = false;
 
   const errorMount = element('div', { className: 'guided-error-mount' });
@@ -174,6 +175,9 @@ export function createSkillsStep(deps: SkillsStepDeps): SkillsStep {
       );
       inFlight = false;
       setControlsDisabled(false);
+      for (const restoreDisabledState of restoreChoiceDisabledStates) {
+        restoreDisabledState();
+      }
     }
   };
 
@@ -271,11 +275,18 @@ export function createSkillsStep(deps: SkillsStepDeps): SkillsStep {
       options.catalogLayer,
     );
     fill.setAttribute('aria-describedby', disclosureId);
+    fill.disabled = true;
     if (options.available.length === 0) {
       select.disabled = true;
-      fill.disabled = true;
     } else {
       controls.push(fill);
+      const restoreDisabledState = (): void => {
+        fill.disabled = select.value === '' || inFlight;
+      };
+      restoreChoiceDisabledStates.push(restoreDisabledState);
+      cleanups.push(
+        listen(select, 'change', restoreDisabledState),
+      );
     }
     cleanups.push(
       listen(fill, 'click', () => {
