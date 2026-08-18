@@ -9,6 +9,18 @@ import {
   SpellSlotAssignmentFactory,
   spellSlotAssignmentFromReferences,
 } from '../../../src/access/spell-slot-assignment-factory';
+import {
+  SpellSlotAssignmentReferenceConflictError,
+} from '../../../src/access/spell-slot-assignment-errors';
+
+function defect(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return expect.fail('Expected a defect, but the call returned.');
+}
 
 describe('spell-slot assignment hydration', () => {
   it('hydrates exactly one fixed, selected, or empty assignment state', () => {
@@ -25,11 +37,16 @@ describe('spell-slot assignment hydration', () => {
   });
 
   it('rejects ambiguous references and non-positive persisted IDs', () => {
-    expect(() =>
+    const conflict = defect(() =>
       SpellSlotAssignmentFactory.fromReferences(12, 34),
-    ).toThrow(
-      'A spell slot cannot hold both a fixed grant and a user selection.',
     );
+    expect(conflict).toBeInstanceOf(
+      SpellSlotAssignmentReferenceConflictError,
+    );
+    expect(conflict).toMatchObject({
+      fixed_spell_version_id: 12,
+      current_spell_version_id: 34,
+    });
     expect(() => new FixedSpellGrant(0)).toThrow(
       'A fixed spell version ID must be positive.',
     );

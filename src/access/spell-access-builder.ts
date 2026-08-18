@@ -44,6 +44,10 @@ import { proficiencyBonus } from '../rules/proficiency';
 import { SpellSlotAssignment } from './spell-slot-assignment';
 import { deduplicateRoutes } from './route-key';
 import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
+import {
+  SpellAccessMissingCharacterClassError,
+  SpellAccessUnknownSelectionBucketError,
+} from './spell-access-errors';
 
 /**
  * The character as spell access computes with it: RESOLVED scores, not the six
@@ -177,7 +181,7 @@ function decodeCharacter(row: SqlRow): CharacterRow {
 function decodeSlotRoute(row: SqlRow): SlotRouteRow {
   const bucket = sqlString(row, 'bucket');
   if (!isEnumValue(slotBuckets, bucket)) {
-    throw new TypeError(`Unknown spell selection bucket ${bucket}.`);
+    throw new SpellAccessUnknownSelectionBucketError(bucket);
   }
   return {
     id: sqlInteger(row, 'id') as SlotId,
@@ -744,9 +748,7 @@ export class SpellAccessBuilder {
     const ability = specific.spellcasting_ability;
     const level = characterLevel(this.db, character.id);
     if (level === null) {
-      throw new Error(
-        'Spell access routes require at least one character class.',
-      );
+      throw new SpellAccessMissingCharacterClassError(character.id);
     }
     const proficiency =
       character.proficiencyBonusOverride ??
