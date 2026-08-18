@@ -961,7 +961,12 @@ describe('level-up wizard state RPC', () => {
     const plan = planBundledHomebrewInstall(harness.context.db);
     expect(commitBundledHomebrewInstall(harness.context.db, plan.token)).toMatchObject({
       kind: 'committed',
-      outcomes: [{ kind: 'create' }, { kind: 'create' }, { kind: 'create' }],
+      outcomes: [
+        { kind: 'create' }, { kind: 'create' }, { kind: 'create' },
+        { kind: 'create' }, { kind: 'create' }, { kind: 'create' },
+        { kind: 'create' }, { kind: 'create' }, { kind: 'create' },
+        { kind: 'create' }, { kind: 'create' }, { kind: 'create' },
+      ],
     });
     const rpc = new RpcClient(new RegistryTransport());
     const client = createQueriesClient(rpc);

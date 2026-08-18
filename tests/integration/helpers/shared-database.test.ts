@@ -101,6 +101,30 @@ describe('the per-worker shared seeded database lease', () => {
     warn.mockRestore();
   });
 
+  it('serves the cached connection to a fresh module graph without a rebuild', async () => {
+    const seeded = await acquireSharedDb({ mode: 'rw' });
+    await seeded.release();
+    const before = sharedDbRebuildCount();
+
+    // Stryker (and any isolation change) reuses the worker process with a
+    // fresh module graph, whose query-engine registry starts empty while the
+    // connection cached on `process` survives. Recreate that boundary.
+    vi.resetModules();
+    const freshSharedDb = await import('../../helpers/shared-db');
+    const freshQuery = await import('../../../src/db/query');
+
+    const lease = await freshSharedDb.acquireSharedDb({ mode: 'ro' });
+    try {
+      expect(freshQuery.databaseIsInTransaction(lease.connection)).toBe(false);
+      expect(
+        lease.db.scalar<number>('SELECT count(*) FROM characters'),
+      ).toBeGreaterThanOrEqual(0);
+    } finally {
+      await lease.release();
+    }
+    expect(freshSharedDb.sharedDbRebuildCount()).toBe(before);
+  });
+
   it('loudly rebuilds after a test leaks a prepared statement', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const before = sharedDbRebuildCount();

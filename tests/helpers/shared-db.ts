@@ -80,9 +80,11 @@ async function readyConnection(state: SharedDbWorkerState): Promise<Database> {
   // engine registry in src/db/query.ts is module-local. A fresh graph in the
   // same worker (Stryker reruns; any isolation change) must re-register the
   // cached connection's own sqlite3 instance or capi lookups on it throw.
-  if (state.engine !== null) {
-    registerSqliteQueryEngine(state.engine);
+  // `== null` also catches a pre-`engine` state object left by an older graph.
+  if (state.engine == null) {
+    return rebuild(state, 'before lease: connection has no recorded engine');
   }
+  registerSqliteQueryEngine(state.engine);
   const reason = poisonReason(state.connection);
   return reason === null
     ? state.connection

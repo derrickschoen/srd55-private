@@ -460,9 +460,10 @@ describe('catalog authoring RPC handlers', () => {
     expect(await authoring.installBundledHomebrew({ token: preview.token })).toMatchObject({
       kind: 'committed',
       outcomes: [
-        { kind: 'create' },
-        { kind: 'create' },
-        { kind: 'create' },
+        { kind: 'create' }, { kind: 'create' }, { kind: 'create' },
+        { kind: 'create' }, { kind: 'create' }, { kind: 'create' },
+        { kind: 'create' }, { kind: 'create' }, { kind: 'create' },
+        { kind: 'create' }, { kind: 'create' }, { kind: 'create' },
       ],
     });
     expect((await authoring.list()).published
