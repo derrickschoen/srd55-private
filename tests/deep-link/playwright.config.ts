@@ -1,6 +1,9 @@
 import { defineConfig } from '@playwright/test';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 const port = 4310;
 const origin = `http://127.0.0.1:${String(port)}`;
@@ -17,6 +20,9 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   webServer: {
+    // Playwright's webServer cwd is THIS config's directory by default;
+    // build and preview must run from the repo root or preview serves 404s.
+    cwd: repoRoot,
     command:
       `npm run build && npx vite preview --host 127.0.0.1 --port ${String(port)} ` +
       '--strictPort --configLoader runner',
