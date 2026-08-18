@@ -230,8 +230,12 @@ export const CATALOG_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
       // migration, and the catalog tagged-error migration: the pin covers the
       // combined source set (grants' four sibling error modules plus the
       // catalog lane's migrated modules). Reconciled rows unchanged by all.
+      // Re-pinned 2026-08-18 after spell eligibility split its point-read path
+      // from the equivalent build-scoped snapshot path. Reconciliation still
+      // calls the point-read API and its rows are unchanged; D226 freezes the
+      // complete source module, so the pin moves with the added path anyway.
       checksum:
-        'b38d1df5a4bd64ada0c4f86a87eae8f04c7217158a76b3ae7f65982433c26b21',
+        'c6ceec272ab7366ff8f7a80ed5e96a1898b570351b2d68b62b7f1e073dfe12fc',
       run: reconcileSpeciesLineageContentV2,
     }),
   ]);

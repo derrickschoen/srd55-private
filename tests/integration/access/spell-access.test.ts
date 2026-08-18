@@ -331,6 +331,73 @@ describe('persisted spell access routes', () => {
     ]);
   });
 
+  it('keeps persisted spell access for listed, hidden, archived, superseded, and missing-identity content', () => {
+    const characterId = character('Catalog-state access');
+    const classId = classDefinition('Catalog-state Class', 'intelligence');
+    classLevel(characterId, classId, 1);
+    const sourceId = source(
+      characterId,
+      'class',
+      classId,
+      'Catalog-state Class 1',
+    );
+    const fixtures = [
+      ['2024:c3-listed', 'A Listed C3'],
+      ['2024:c3-hidden', 'B Hidden C3'],
+      ['2024:c3-archived', 'C Archived C3'],
+      ['2024:c3-superseded', 'D Superseded C3'],
+      ['2024:c3-missing', 'E Missing Identity C3'],
+    ] as const;
+    for (const [index, [contentKey, name]] of fixtures.entries()) {
+      slot(
+        characterId,
+        sourceId,
+        spell(contentKey, name),
+        `catalog-state:${String(index + 1)}`,
+      );
+    }
+    db.exec(
+      `UPDATE catalog_content_identities
+       SET visibility = 'ui_hidden'
+       WHERE content_key = '2024:c3-hidden'`,
+    );
+    db.exec(
+      `UPDATE catalog_content_identities
+       SET archived_at = '2026-08-18T00:00:00.000Z'
+       WHERE content_key = '2024:c3-archived'`,
+    );
+    registerFixtureContentIdentity(db, {
+      kind: 'spell',
+      contentKey: '2024:c3-successor',
+      name: 'C3 Successor',
+      keyKind: 'bundled-stable',
+    });
+    db.exec(
+      `INSERT INTO catalog_content_supersessions (
+         content_kind, superseded_content_key, successor_content_key
+       ) VALUES ('spell', '2024:c3-superseded', '2024:c3-successor')`,
+    );
+    db.exec('PRAGMA foreign_keys = OFF');
+    db.exec(
+      `DELETE FROM catalog_content_identities
+       WHERE content_key = '2024:c3-missing'`,
+    );
+    db.exec('PRAGMA foreign_keys = ON');
+
+    expect(
+      builder.buildForCharacter(characterId).map((route) => ({
+        name: route.spell_name,
+        catalog_layer: route.spell_catalog_layer,
+      })),
+    ).toEqual([
+      { name: 'A Listed C3', catalog_layer: 'bundled' },
+      { name: 'B Hidden C3', catalog_layer: 'bundled' },
+      { name: 'C Archived C3', catalog_layer: 'bundled' },
+      { name: 'D Superseded C3', catalog_layer: 'bundled' },
+      { name: 'E Missing Identity C3', catalog_layer: 'unknown' },
+    ]);
+  });
+
   it('B2-DC resolves casting contributions inside the spell-access calculation', () => {
     const characterId = character('Contributed casting', {
       intelligence: 15,
