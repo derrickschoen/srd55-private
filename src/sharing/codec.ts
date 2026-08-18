@@ -28,6 +28,24 @@ import type { WeaponRange } from '../domain/weapon-range';
 
 type Tuple = readonly unknown[];
 
+/** A code-owned wire schema omits a field the codec requires. */
+export class ShareWireSchemaFieldMissingError extends Error {
+  override readonly name = 'ShareWireSchemaFieldMissingError' as const;
+
+  constructor(readonly field: string) {
+    super(`Wire schema has no ${field} field.`);
+  }
+}
+
+/** The weapon schema exposes a field the encoder does not implement. */
+export class ShareWeaponWireFieldUnhandledError extends Error {
+  override readonly name = 'ShareWeaponWireFieldUnhandledError' as const;
+
+  constructor(readonly field: string) {
+    super(`Unknown weapon wire field ${field}.`);
+  }
+}
+
 const WIRE_SCHEMA = SHARE_SCHEMAS[CURRENT_CHARACTER_SHARE_VERSION];
 
 function fieldKeys<Key extends string>(
@@ -36,13 +54,13 @@ function fieldKeys<Key extends string>(
   return fields.map((field) => field.key);
 }
 
-function fieldIndex<Key extends string>(
+export function fieldIndex<Key extends string>(
   fields: readonly WireField<Key>[],
   key: Key,
 ): number {
   const index = fields.findIndex((field) => field.key === key);
   if (index < 0) {
-    throw new Error(`Wire schema has no ${key} field.`);
+    throw new ShareWireSchemaFieldMissingError(key);
   }
   return index;
 }
@@ -312,7 +330,7 @@ function weaponRangeFromPositional(
   }
 }
 
-function weaponWireValue(
+export function weaponWireValue(
   weapon: ShareWeapon,
   field: string,
 ): unknown {
@@ -351,7 +369,7 @@ function weaponWireValue(
     case 'versatile_damage':
       return damageToPositional(weapon.versatile_damage);
     default:
-      throw new Error(`Unknown weapon wire field ${field}.`);
+      throw new ShareWeaponWireFieldUnhandledError(field);
   }
 }
 
