@@ -12,6 +12,13 @@ export const CONTENT_PROVENANCE_LIMITS = Object.freeze({
   attributionBytes: 4_096,
 });
 
+export class CatalogContentIdentityMissingError extends TypeError {
+  override readonly name = 'CatalogContentIdentityMissingError' as const;
+  constructor(readonly content_key: ContentKey) {
+    super(`Catalog content '${content_key}' has no identity.`);
+  }
+}
+
 export interface ContentProvenance {
   readonly origin_kind: CatalogContentOriginKind;
   readonly received: boolean;
@@ -70,7 +77,7 @@ export function storedContentProvenance(
     [kind, contentKey],
   );
   if (row === null) {
-    throw new TypeError(`Catalog content '${contentKey}' has no identity.`);
+    throw new CatalogContentIdentityMissingError(contentKey);
   }
   const origin = row.origin_kind === 'authored_here' ||
       row.origin_kind === 'built_in' || row.origin_kind === 'unknown'

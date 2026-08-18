@@ -11,6 +11,15 @@ import {
   type CatalogLayerDisclosure,
 } from './catalog-disclosure';
 
+export class RecordedSourceTypeError extends TypeError {
+  override readonly name = 'RecordedSourceTypeError' as const;
+  constructor(readonly source_instance_id: number) {
+    super(
+      `Source ${String(source_instance_id)} is not a standalone catalog source.`,
+    );
+  }
+}
+
 /**
  * Reads the immutable template key recorded when guided content was copied to
  * a character. Invalid or legacy config has no asserted provenance.
@@ -82,9 +91,7 @@ export function characterSourceCatalogResolution(
         sourceType !== 'species' &&
         sourceType !== 'background'
       ) {
-        throw new TypeError(
-          `Source ${String(sourceInstanceId)} is not a standalone catalog source.`,
-        );
+        throw new RecordedSourceTypeError(sourceInstanceId);
       }
       return {
         id: sqlInteger(row, 'id'),

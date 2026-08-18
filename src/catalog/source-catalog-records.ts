@@ -48,6 +48,34 @@ import {
   normalizedGrantSkill,
   normalizedGrantSourceType,
 } from './grant-domain-values';
+import {
+  SourceCatalogAbilityPointsError,
+  SourceCatalogAggregateKindError,
+  SourceCatalogBackgroundGrantKindError,
+  SourceCatalogDefinitionKeyConfigTypeError,
+  SourceCatalogEffectFieldError,
+  SourceCatalogExactListError,
+  SourceCatalogFieldIntegerRangeError,
+  SourceCatalogFieldInvalidError,
+  SourceCatalogFieldLengthError,
+  SourceCatalogFieldListLimitError,
+  SourceCatalogFieldOrderError,
+  SourceCatalogFieldTypeError,
+  SourceCatalogFieldWhitespaceError,
+  SourceCatalogFiniteJsonNumberError,
+  SourceCatalogFingerprintReferenceError,
+  SourceCatalogGrantDomainValueError,
+  SourceCatalogInertSourceDefinitionError,
+  SourceCatalogInvalidGrantRuleError,
+  SourceCatalogJsonSerializationError,
+  SourceCatalogMissingEffectPayloadError,
+  SourceCatalogNonZeroFieldError,
+  SourceCatalogRequiredFieldError,
+  SourceCatalogSourceKindMismatchError,
+  SourceCatalogStoredOnlyFieldError,
+  SourceCatalogStoreLocalFieldError,
+  SourceCatalogUnknownFieldError,
+} from './source-catalog-records-errors';
 
 export type SourceCatalogRecordKind = 'class' | 'feat' | 'species' | 'background';
 
@@ -78,7 +106,7 @@ export type CatalogSourceRecord =
   | CatalogBackgroundRecord;
 
 function record(value: unknown, label: string): Record<string, unknown> {
-  if (!isRecord(value)) throw new TypeError(`Catalog field '${label}' must be an object.`);
+  if (!isRecord(value)) throw new SourceCatalogFieldTypeError(label, 'object');
   return value;
 }
 
@@ -90,19 +118,19 @@ function exactKeys(
   const allowedKeys = new Set(allowed);
   const unknown = Object.keys(value).find((key) => !allowedKeys.has(key));
   if (unknown !== undefined) {
-    throw new TypeError(`Catalog field '${label}.${unknown}' is unknown.`);
+    throw new SourceCatalogUnknownFieldError(`${label}.${unknown}`);
   }
 }
 
 function trimEqual(value: unknown, label: string): void {
   if (typeof value === 'string' && value !== value.trim()) {
-    throw new TypeError(`Catalog field '${label}' contains surrounding whitespace.`);
+    throw new SourceCatalogFieldWhitespaceError(label);
   }
 }
 
 function string(value: unknown, label: string): string {
   if (typeof value !== 'string' || value.trim() === '') {
-    throw new TypeError(`Catalog field '${label}' must be non-empty text.`);
+    throw new SourceCatalogFieldTypeError(label, 'non_empty_text');
   }
   return value;
 }
@@ -118,34 +146,36 @@ function visibility(value: unknown): CatalogContentVisibility {
 function boundedText(value: unknown, label: string, maximum: number): string {
   const parsed = string(value, label);
   if (parsed.length > maximum) {
-    throw new TypeError(`Catalog field '${label}' must contain at most ${String(maximum)} characters.`);
+    throw new SourceCatalogFieldLengthError(label, maximum);
   }
   return parsed;
 }
 
 function boundedString(value: unknown, label: string, maximum: number): string {
   if (typeof value !== 'string' || value.length > maximum) {
-    throw new TypeError(`Catalog field '${label}' must contain at most ${String(maximum)} characters.`);
+    throw new SourceCatalogFieldLengthError(label, maximum);
   }
   return value;
 }
 
 function list(value: unknown, label: string, maximum: number): readonly unknown[] {
   if (!Array.isArray(value) || value.length > maximum) {
-    throw new TypeError(`Catalog field '${label}' must be a list of at most ${String(maximum)} entries.`);
+    throw new SourceCatalogFieldListLimitError(label, maximum);
   }
   return value;
 }
 
 function integer(value: unknown, label: string, minimum: number, maximum: number): number {
   if (!Number.isSafeInteger(value) || Number(value) < minimum || Number(value) > maximum) {
-    throw new TypeError(`Catalog field '${label}' must be an integer from ${String(minimum)} through ${String(maximum)}.`);
+    throw new SourceCatalogFieldIntegerRangeError(label, minimum, maximum);
   }
   return Number(value);
 }
 
 function boolean(value: unknown, label: string): boolean {
-  if (typeof value !== 'boolean') throw new TypeError(`Catalog field '${label}' must be boolean.`);
+  if (typeof value !== 'boolean') {
+    throw new SourceCatalogFieldTypeError(label, 'boolean');
+  }
   return value;
 }
 
@@ -176,7 +206,7 @@ function jsonValue(value: unknown, label: string): JsonValue {
   }
   if (typeof value === 'number') {
     if (!Number.isFinite(value)) {
-      throw new TypeError(`Catalog field '${label}' must contain finite JSON numbers.`);
+      throw new SourceCatalogFiniteJsonNumberError(label);
     }
     return value;
   }
@@ -240,7 +270,7 @@ function featureValueContribution(
     'resource_display_label', 'resource_marking_shape',
   ]);
   if (contribution.kind !== 'feature_value_contribution') {
-    throw new TypeError(`Catalog field '${label}.kind' is invalid.`);
+    throw new SourceCatalogFieldInvalidError(`${label}.kind`);
   }
   boundedText(
     contribution.contribution_key,
@@ -256,10 +286,10 @@ function featureValueContribution(
     contribution.target_kind !== 'feature_dice_count' &&
     contribution.target_kind !== 'resource_maximum'
   ) {
-    throw new TypeError(`Catalog field '${label}.target_kind' is invalid.`);
+    throw new SourceCatalogFieldInvalidError(`${label}.target_kind`);
   }
   if (contribution.op !== 'add') {
-    throw new TypeError(`Catalog field '${label}.op' is invalid.`);
+    throw new SourceCatalogFieldInvalidError(`${label}.op`);
   }
   const activeFrom = integer(
     contribution.active_from_level,
@@ -274,8 +304,9 @@ function featureValueContribution(
     AUTHORING_NUMERIC_LIMITS.maximumClassLevel,
   );
   if (activeFrom > activeTo) {
-    throw new TypeError(
-      `Catalog field '${label}.active_from_level' must not exceed active_to_level.`,
+    throw new SourceCatalogFieldOrderError(
+      `${label}.active_from_level`,
+      'active_to_level',
     );
   }
 
@@ -285,7 +316,7 @@ function featureValueContribution(
       'active_from_level', 'active_to_level', 'value', 'supersedes_ref',
     ]);
     if (!isEnumValue(featureValueKeys, contribution.target_key)) {
-      throw new TypeError(`Catalog field '${label}.target_key' is invalid.`);
+      throw new SourceCatalogFieldInvalidError(`${label}.target_key`);
     }
   } else {
     exactKeys(contribution, label, [
@@ -307,7 +338,9 @@ function featureValueContribution(
       contribution.resource_marking_shape !== 'boxes' &&
       contribution.resource_marking_shape !== 'remaining'
     ) {
-      throw new TypeError(`Catalog field '${label}.resource_marking_shape' is invalid.`);
+      throw new SourceCatalogFieldInvalidError(
+        `${label}.resource_marking_shape`,
+      );
     }
   }
 
@@ -315,7 +348,7 @@ function featureValueContribution(
   try {
     encodedValue = JSON.stringify(contribution.value);
   } catch (error) {
-    throw new TypeError(`Catalog field '${label}.value' must be valid JSON.`, { cause: error });
+    throw new SourceCatalogJsonSerializationError(`${label}.value`, error);
   }
   const parsedValue = decodeStoredValueExpression(encodedValue, `${label}.value`) as JsonValue;
 
@@ -327,9 +360,9 @@ function featureValueContribution(
     try {
       encodedSupersedes = JSON.stringify(contribution.supersedes_ref);
     } catch (error) {
-      throw new TypeError(
-        `Catalog field '${label}.supersedes_ref' must be valid JSON.`,
-        { cause: error },
+      throw new SourceCatalogJsonSerializationError(
+        `${label}.supersedes_ref`,
+        error,
       );
     }
     parsedSupersedes = decodeStoredSupersedesReference(
@@ -384,7 +417,9 @@ function featAbilityIncreaseAbilities(
     choices.length === 0 ||
     choices.some((ability) => !isEnumValue(abilities, ability))
   ) {
-    throw new TypeError("Catalog field 'aggregate.ability_increase_abilities' is invalid.");
+    throw new SourceCatalogFieldInvalidError(
+      'aggregate.ability_increase_abilities',
+    );
   }
   return choices.map((ability, index) => boundedText(
     ability,
@@ -398,7 +433,7 @@ function documentStoredFields(
   label: string,
 ): undefined {
   if (value !== undefined) {
-    throw new TypeError(`Catalog field '${label}' is stored-only and cannot appear in a document.`);
+    throw new SourceCatalogStoredOnlyFieldError(label);
   }
   return undefined;
 }
@@ -421,14 +456,14 @@ function fingerprint(
     !/^[0-9a-f]{64}$/u.test(parsed.digest) ||
     Object.keys(parsed).some((key) => !['kind', 'scheme', 'digest'].includes(key))
   ) {
-    throw new TypeError(`Catalog field '${label}' must be a content-v1 fingerprint reference.`);
+    throw new SourceCatalogFingerprintReferenceError(label);
   }
 }
 
 function edition(value: unknown): RulesEdition {
   const parsed = string(value, 'aggregate.rules_edition');
   if (!(rulesEditions as readonly string[]).includes(parsed)) {
-    throw new TypeError(`Catalog field 'aggregate.rules_edition' is invalid.`);
+    throw new SourceCatalogFieldInvalidError('aggregate.rules_edition');
   }
   return parsed as RulesEdition;
 }
@@ -436,7 +471,7 @@ function edition(value: unknown): RulesEdition {
 function baseAggregate(value: unknown, kind: SourceCatalogRecordKind) {
   const aggregate = record(value, 'aggregate');
   if (aggregate.kind !== kind) {
-    throw new TypeError(`Catalog aggregate.kind must be '${kind}'.`);
+    throw new SourceCatalogAggregateKindError(kind);
   }
   const name = string(aggregate.name, 'aggregate.name');
   const rulesEdition = edition(aggregate.rules_edition);
@@ -452,9 +487,7 @@ function normalizedGrant(value: unknown, label: string): AuthoringGrant {
     'source_definition_id', 'source_definition_key',
   ] as const) {
     if (grant[localLocator] !== undefined && grant[localLocator] !== null) {
-      throw new TypeError(
-        `Catalog field '${label}.${localLocator}' is store-local; use a content fingerprint reference.`,
-      );
+      throw new SourceCatalogStoreLocalFieldError(`${label}.${localLocator}`);
     }
   }
   for (const locator of [
@@ -469,12 +502,10 @@ function normalizedGrant(value: unknown, label: string): AuthoringGrant {
     grant.definition_key_config !== null &&
     typeof grant.definition_key_config !== 'string'
   ) {
-    throw new TypeError(`Catalog field '${label}.definition_key_config' must be string or null.`);
+    throw new SourceCatalogDefinitionKeyConfigTypeError(label);
   }
   if (grant.source_definition !== undefined && typeof grant.definition_key_config === 'string') {
-    throw new TypeError(
-      `Catalog field '${label}.source_definition' is inert when definition_key_config is present.`,
-    );
+    throw new SourceCatalogInertSourceDefinitionError(label);
   }
   if (grant.free_cast !== undefined && grant.free_cast !== null) {
     const freeCast = record(grant.free_cast, `${label}.free_cast`);
@@ -538,9 +569,7 @@ function normalizedGrant(value: unknown, label: string): AuthoringGrant {
     fingerprint(grant.source_definition, `${label}.source_definition`);
     const source = record(grant.source_definition, `${label}.source_definition`);
     if (source.kind !== grant.source_type) {
-      throw new TypeError(
-        `Catalog field '${label}.source_definition.kind' must match source_type.`,
-      );
+      throw new SourceCatalogSourceKindMismatchError(label);
     }
   }
   const candidate: Record<string, unknown> = { ...grant };
@@ -561,17 +590,34 @@ function normalizedGrant(value: unknown, label: string): AuthoringGrant {
         normalized.skills,
         `${label}.skills`,
         AUTHORING_LIST_LIMITS.queryValues,
-      ).map((entry, index) => normalizedGrantSkill(
-        entry,
-        `Catalog field '${label}.skills[${String(index)}]'`,
-        (message): never => { throw new TypeError(message); },
-      ));
+      ).map((entry, index) => {
+        const fieldLabel = `Catalog field '${label}.skills[${String(index)}]'`;
+        return normalizedGrantSkill(
+          entry,
+          fieldLabel,
+          (): never => {
+            throw new SourceCatalogGrantDomainValueError(
+              fieldLabel,
+              String(entry),
+              'skill',
+            );
+          },
+        );
+      });
     }
     if (normalized.source_type !== undefined) {
+      const fieldLabel = `Catalog field '${label}.source_type'`;
+      const sourceType = normalized.source_type;
       normalized.source_type = normalizedGrantSourceType(
-        normalized.source_type,
-        `Catalog field '${label}.source_type'`,
-        (message): never => { throw new TypeError(message); },
+        sourceType,
+        fieldLabel,
+        (): never => {
+          throw new SourceCatalogGrantDomainValueError(
+            fieldLabel,
+            String(sourceType),
+            'domain_source_type',
+          );
+        },
       );
     }
     if (grant.spell !== undefined) {
@@ -584,10 +630,7 @@ function normalizedGrant(value: unknown, label: string): AuthoringGrant {
     }
     return normalized as AuthoringGrant;
   } catch (error) {
-    throw new TypeError(
-      `Catalog field '${label}' is not a valid grant rule: ${error instanceof Error ? error.message : String(error)}`,
-      { cause: error },
-    );
+    throw new SourceCatalogInvalidGrantRuleError(label, error);
   }
 }
 
@@ -602,7 +645,7 @@ function normalizedGrantList(
 function validateEffect(value: unknown, label: string): void {
   const effect = record(value, label);
   if (!isEnumValue(characterEffectKinds, effect.kind)) {
-    throw new TypeError(`Catalog field '${label}.kind' is invalid.`);
+    throw new SourceCatalogFieldInvalidError(`${label}.kind`);
   }
   boundedText(effect.label, `${label}.label`, AUTHORING_TEXT_LIMITS.shortLabel);
   if (effect.notes !== null) {
@@ -615,30 +658,44 @@ function validateEffect(value: unknown, label: string): void {
   ]);
   const unknown = Object.keys(effect).find((key) => !allowed.has(key));
   if (unknown !== undefined) {
-    throw new TypeError(`Catalog field '${label}.${unknown}' is not valid for effect '${effect.kind}'.`);
+    throw new SourceCatalogEffectFieldError(
+      `${label}.${unknown}`,
+      effect.kind,
+    );
   }
   integer(effect.sort_order, `${label}.sort_order`, 1, AUTHORING_NUMERIC_LIMITS.maximumSortOrder);
   for (const field of definition.fields) {
     const valueAtField = effect[field.key];
     if (valueAtField === null || valueAtField === undefined) {
-      if (field.required) throw new TypeError(`Catalog field '${label}.${field.key}' is required.`);
+      if (field.required) {
+        throw new SourceCatalogRequiredFieldError(`${label}.${field.key}`);
+      }
       continue;
     }
     switch (field.control) {
       case 'integer':
         integer(valueAtField, `${label}.${field.key}`, field.minimum, field.maximum);
         if (field.non_zero && valueAtField === 0) {
-          throw new TypeError(`Catalog field '${label}.${field.key}' must be non-zero.`);
+          throw new SourceCatalogNonZeroFieldError(`${label}.${field.key}`);
         }
         break;
       case 'ability':
-        if (!isEnumValue(abilities, valueAtField)) throw new TypeError(`Catalog field '${label}.${field.key}' is invalid.`);
+        if (!isEnumValue(abilities, valueAtField)) {
+          throw new SourceCatalogFieldInvalidError(`${label}.${field.key}`);
+        }
         break;
       case 'weapon_scope':
-        if (!isEnumValue(extraAttackWeaponScopes, valueAtField)) throw new TypeError(`Catalog field '${label}.${field.key}' is invalid.`);
+        if (!isEnumValue(extraAttackWeaponScopes, valueAtField)) {
+          throw new SourceCatalogFieldInvalidError(`${label}.${field.key}`);
+        }
         break;
       case 'boolean':
-        if (typeof valueAtField !== 'boolean') throw new TypeError(`Catalog field '${label}.${field.key}' must be boolean.`);
+        if (typeof valueAtField !== 'boolean') {
+          throw new SourceCatalogFieldTypeError(
+            `${label}.${field.key}`,
+            'boolean',
+          );
+        }
         break;
       case 'damage_type':
         boundedText(valueAtField, `${label}.${field.key}`, AUTHORING_TEXT_LIMITS.openVocabulary);
@@ -648,7 +705,7 @@ function validateEffect(value: unknown, label: string): void {
   if (definition.at_least_one_of.length > 0 && definition.at_least_one_of.every(
     (field) => effect[field] === null || effect[field] === undefined,
   )) {
-    throw new TypeError(`Catalog field '${label}' is missing its effect payload.`);
+    throw new SourceCatalogMissingEffectPayloadError(label);
   }
 }
 
@@ -697,7 +754,11 @@ function validateBackground(aggregate: Record<string, unknown>): void {
   boolean(aggregate.repeatable, 'aggregate.repeatable');
   const suggested = list(aggregate.suggested_abilities, 'aggregate.suggested_abilities', 3);
   if (suggested.length !== 3 || suggested.some((ability) => !isEnumValue(abilities, ability))) {
-    throw new TypeError("Catalog field 'aggregate.suggested_abilities' must contain three abilities.");
+    throw new SourceCatalogExactListError(
+      'aggregate.suggested_abilities',
+      3,
+      'abilities',
+    );
   }
   fingerprint(aggregate.default_origin_feat, 'aggregate.default_origin_feat', 'feat');
   boundedText(
@@ -712,7 +773,11 @@ function validateBackground(aggregate: Record<string, unknown>): void {
   );
   const skillList = list(aggregate.skill_proficiencies, 'aggregate.skill_proficiencies', 2);
   if (skillList.length !== 2 || skillList.some((skill) => !isEnumValue(skills, skill))) {
-    throw new TypeError("Catalog field 'aggregate.skill_proficiencies' must contain two skills.");
+    throw new SourceCatalogExactListError(
+      'aggregate.skill_proficiencies',
+      2,
+      'skills',
+    );
   }
   if (aggregate.tool_reference_text !== null) {
     boundedText(aggregate.tool_reference_text, 'aggregate.tool_reference_text', AUTHORING_TEXT_LIMITS.toolReference);
@@ -732,7 +797,9 @@ function validateBackground(aggregate: Record<string, unknown>): void {
         if (item.kind === 'weapon' || item.kind === 'armor') {
           fingerprint(item.content, `aggregate.${option}[${String(index)}].content`, item.kind);
         } else if (item.kind !== 'gear' || item.content !== undefined) {
-          throw new TypeError(`Catalog field 'aggregate.${option}[${String(index)}].kind' is invalid.`);
+          throw new SourceCatalogFieldInvalidError(
+            `aggregate.${option}[${String(index)}].kind`,
+          );
         }
       });
   }
@@ -756,7 +823,7 @@ function validateClassEffect(value: unknown, label: string, named: boolean): voi
     boundedText(effect.name, `${label}.name`, AUTHORING_TEXT_LIMITS.name);
   }
   if (!isEnumValue(featureTemplateEffectKinds, effect.effect_kind)) {
-    throw new TypeError(`Catalog field '${label}.effect_kind' is invalid.`);
+    throw new SourceCatalogFieldInvalidError(`${label}.effect_kind`);
   }
   for (const field of ['damage_type', 'ability', 'ability_1', 'ability_2', 'weapon_scope'] as const) {
     if (effect[field] !== null && effect[field] !== undefined) {
@@ -809,7 +876,7 @@ function validateClassFormula(value: unknown, label: string): void {
       integer(formula.multiplier, `${label}.multiplier`, 1, AUTHORING_NUMERIC_LIMITS.maximumEffectMagnitude);
       break;
     default:
-      throw new TypeError(`Catalog field '${label}.kind' is invalid.`);
+      throw new SourceCatalogFieldInvalidError(`${label}.kind`);
   }
   integer(formula.minimum_class_level, `${label}.minimum_class_level`, 1, AUTHORING_NUMERIC_LIMITS.maximumClassLevel);
   if (kind === 'fixed_count') {
@@ -989,7 +1056,7 @@ function validateFeat(aggregate: Record<string, unknown>): void {
     !Number.isSafeInteger(aggregate.ability_points) ||
     ![0, 1, 2].includes(Number(aggregate.ability_points))
   ) {
-    throw new TypeError("Catalog field 'aggregate.ability_points' must be 0, 1, or 2.");
+    throw new SourceCatalogAbilityPointsError('aggregate.ability_points');
   }
   if (aggregate.ability_increase_maximum !== null) {
     integer(
@@ -1004,7 +1071,9 @@ function validateFeat(aggregate: Record<string, unknown>): void {
     choices !== null && choices !== 'any' &&
     (!Array.isArray(choices) || choices.length === 0 || choices.some((ability) => !isEnumValue(abilities, ability)))
   ) {
-    throw new TypeError("Catalog field 'aggregate.ability_increase_abilities' is invalid.");
+    throw new SourceCatalogFieldInvalidError(
+      'aggregate.ability_increase_abilities',
+    );
   }
   list(aggregate.prerequisites, 'aggregate.prerequisites', AUTHORING_LIST_LIMITS.grants)
     .forEach((value, index) => {
@@ -1017,7 +1086,7 @@ function validateFeat(aggregate: Record<string, unknown>): void {
         exactKeys(prerequisite, label, ['kind', 'abilities', 'minimum']);
         const abilityList = list(prerequisite.abilities, `${label}.abilities`, 6);
         if (abilityList.length === 0 || abilityList.some((ability) => !isEnumValue(abilities, ability))) {
-          throw new TypeError(`Catalog field '${label}.abilities' is invalid.`);
+          throw new SourceCatalogFieldInvalidError(`${label}.abilities`);
         }
         integer(
           prerequisite.minimum,
@@ -1026,7 +1095,7 @@ function validateFeat(aggregate: Record<string, unknown>): void {
           AUTHORING_NUMERIC_LIMITS.maximumAbilityScore,
         );
       } else {
-        throw new TypeError(`Catalog field '${label}.kind' is invalid.`);
+        throw new SourceCatalogFieldInvalidError(`${label}.kind`);
       }
     });
 }
@@ -1163,10 +1232,9 @@ export function parseSourceCatalogRecord(
       );
       if (invalidGrantIndex !== -1) {
         const invalidGrant = grants[invalidGrantIndex]!;
-        throw new TypeError(
-          `Catalog field 'aggregate.grants[${String(invalidGrantIndex)}].kind' ` +
-            `must be 'grant_source' for background content; received ` +
-            `'${invalidGrant.kind}'.`,
+        throw new SourceCatalogBackgroundGrantKindError(
+          invalidGrantIndex,
+          invalidGrant.kind,
         );
       }
       const aggregate = {

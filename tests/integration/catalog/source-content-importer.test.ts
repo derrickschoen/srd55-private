@@ -20,6 +20,12 @@ import { assertedExternalContentKey } from '../../../src/catalog/catalog-key';
 import {
   ExternalClassImportRefused,
 } from '../../../src/catalog/source-content-importer';
+import {
+  SourceCatalogBackgroundGrantKindError,
+  SourceCatalogFieldWhitespaceError,
+  SourceCatalogGrantDomainValueError,
+  SourceCatalogInvalidGrantRuleError,
+} from '../../../src/catalog/source-catalog-records-errors';
 import { projectClassContentV1 } from '../../../src/catalog/source-content-projector-v1';
 import { projectStoredEquipmentContentV1 } from '../../../src/catalog/equipment-content-projector-v1';
 import { projectAuthoredContentAggregateV1 } from '../../../src/catalog/stored-authored-content-projector-v1';
@@ -41,6 +47,15 @@ import { openTestDatabase } from '../../helpers/open-db';
 
 let connection: Database;
 let db: DatabaseContext;
+
+function refusal(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return expect.fail('Expected a refusal, but the call returned.');
+}
 
 beforeEach(async () => {
   connection = await openTestDatabase();
@@ -352,9 +367,21 @@ describe('class, feat, species and background catalog import', () => {
       }],
     };
 
-    expect(() => new CatalogImporter(db).import({
+    const error = refusal(() => new CatalogImporter(db).import({
       documents: [document('feat', aggregate)],
-    })).toThrow(/aggregate\.grants\[0\]\.skills\[0\].*Chronomancy.*not a skill/u);
+    }));
+    expect(error).toBeInstanceOf(SourceCatalogInvalidGrantRuleError);
+    expect(error).toMatchObject({
+      field: 'aggregate.grants[0]',
+      original_cause: expect.objectContaining({
+        name: 'SourceCatalogGrantDomainValueError',
+        field_label: "Catalog field 'aggregate.grants[0].skills[0]'",
+        value: 'Chronomancy',
+        expected: 'skill',
+      }),
+    });
+    expect((error as SourceCatalogInvalidGrantRuleError).original_cause)
+      .toBeInstanceOf(SourceCatalogGrantDomainValueError);
     expect(db.scalar<number>('SELECT count(*) FROM feat_definitions')).toBe(0);
   });
 
@@ -371,9 +398,21 @@ describe('class, feat, species and background catalog import', () => {
       }],
     };
 
-    expect(() => new CatalogImporter(db).import({
+    const error = refusal(() => new CatalogImporter(db).import({
       documents: [document('feat', aggregate)],
-    })).toThrow(/aggregate\.grants\[0\]\.source_type.*vehicle.*not a domain source type/u);
+    }));
+    expect(error).toBeInstanceOf(SourceCatalogInvalidGrantRuleError);
+    expect(error).toMatchObject({
+      field: 'aggregate.grants[0]',
+      original_cause: expect.objectContaining({
+        name: 'SourceCatalogGrantDomainValueError',
+        field_label: "Catalog field 'aggregate.grants[0].source_type'",
+        value: 'vehicle',
+        expected: 'domain_source_type',
+      }),
+    });
+    expect((error as SourceCatalogInvalidGrantRuleError).original_cause)
+      .toBeInstanceOf(SourceCatalogGrantDomainValueError);
     expect(db.scalar<number>('SELECT count(*) FROM feat_definitions')).toBe(0);
   });
 
@@ -407,11 +446,14 @@ describe('class, feat, species and background catalog import', () => {
       effects: [],
     };
 
-    expect(() => new CatalogImporter(db).import({
+    const error = refusal(() => new CatalogImporter(db).import({
       documents: [document('background', aggregate)],
-    })).toThrow(
-      /aggregate\.grants\[0\]\.kind.*grant_source.*skill_proficiency/u,
-    );
+    }));
+    expect(error).toBeInstanceOf(SourceCatalogBackgroundGrantKindError);
+    expect(error).toMatchObject({
+      grant_index: 0,
+      received_kind: 'skill_proficiency',
+    });
     expect(db.scalar<number>('SELECT count(*) FROM background_definitions')).toBe(0);
   });
 
@@ -428,9 +470,11 @@ describe('class, feat, species and background catalog import', () => {
       }],
     };
 
-    expect(() => new CatalogImporter(db).import({
+    const error = refusal(() => new CatalogImporter(db).import({
       documents: [document('feat', aggregate)],
-    })).toThrow(/aggregate\.grants\[0\]\.list.*surrounding whitespace/u);
+    }));
+    expect(error).toBeInstanceOf(SourceCatalogFieldWhitespaceError);
+    expect(error).toMatchObject({ field: 'aggregate.grants[0].list' });
     expect(db.scalar<number>('SELECT count(*) FROM feat_definitions')).toBe(0);
   });
 

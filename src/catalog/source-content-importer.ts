@@ -75,6 +75,39 @@ export class UnresolvedSourceContentReference extends Error {
   }
 }
 
+export class SourceContentGrantKeyWhitespaceError extends TypeError {
+  override readonly name = 'SourceContentGrantKeyWhitespaceError' as const;
+  constructor(readonly rule_key: string) {
+    super(`Grant rule key '${rule_key}' contains surrounding whitespace.`);
+  }
+}
+
+export type SourceContentGrantReference = 'spell' | 'source definition';
+
+export class SourceContentGrantReferenceError extends TypeError {
+  override readonly name = 'SourceContentGrantReferenceError' as const;
+  constructor(
+    readonly rule_key: string,
+    readonly reference: SourceContentGrantReference,
+  ) {
+    super(`Grant '${rule_key}' ${reference} reference is invalid.`);
+  }
+}
+
+export class SourceContentGrantKindMismatchError extends TypeError {
+  override readonly name = 'SourceContentGrantKindMismatchError' as const;
+  constructor(readonly rule_key: string) {
+    super(`Grant '${rule_key}' source definition kind must match source_type.`);
+  }
+}
+
+export class SourceContentResistanceDamageTypeError extends TypeError {
+  override readonly name = 'SourceContentResistanceDamageTypeError' as const;
+  constructor() {
+    super('Portable v2 species resistance effects must name a damage type.');
+  }
+}
+
 function timestamp(): string {
   return new Date().toISOString();
 }
@@ -110,13 +143,13 @@ function isReference(value: unknown): value is ContentFingerprintReference {
 
 function storedGrant(db: DatabaseContext, grant: AuthoringGrant): Readonly<Record<string, unknown>> {
   if (grant.rule_key !== grant.rule_key.trim()) {
-    throw new TypeError(`Grant rule key '${grant.rule_key}' contains surrounding whitespace.`);
+    throw new SourceContentGrantKeyWhitespaceError(grant.rule_key);
   }
   const stored: Record<string, unknown> = { ...grant };
   const spell = stored.spell;
   if (spell !== undefined) {
     if (!isReference(spell) || spell.kind !== 'spell') {
-      throw new TypeError(`Grant '${grant.rule_key}' spell reference is invalid.`);
+      throw new SourceContentGrantReferenceError(grant.rule_key, 'spell');
     }
     stored.spell_version_key = referenceKey(db, spell);
     delete stored.spell;
@@ -124,12 +157,13 @@ function storedGrant(db: DatabaseContext, grant: AuthoringGrant): Readonly<Recor
   const source = stored.source_definition;
   if (source !== undefined) {
     if (!isReference(source) || !['class', 'subclass', 'feat', 'species', 'background'].includes(source.kind)) {
-      throw new TypeError(`Grant '${grant.rule_key}' source definition reference is invalid.`);
+      throw new SourceContentGrantReferenceError(
+        grant.rule_key,
+        'source definition',
+      );
     }
     if (source.kind !== grant.source_type) {
-      throw new TypeError(
-        `Grant '${grant.rule_key}' source definition kind must match source_type.`,
-      );
+      throw new SourceContentGrantKindMismatchError(grant.rule_key);
     }
     stored.source_definition_key = referenceKey(db, source);
     delete stored.source_definition;
@@ -314,7 +348,7 @@ function insertSpeciesV2(
     ).lastInsertId;
     const effects = trait.effects.map((effect): AuthoringCharacterEffect => {
       if (effect.kind === 'damage_resistance' && effect.damage_type === null) {
-        throw new TypeError('Portable v2 species resistance effects must name a damage type.');
+        throw new SourceContentResistanceDamageTypeError();
       }
       return effect as AuthoringCharacterEffect;
     });

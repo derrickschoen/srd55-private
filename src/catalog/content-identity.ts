@@ -2,6 +2,17 @@ import type { Brand } from '../domain/ids';
 import type { ContentKey } from '../domain/ids';
 import { sha256 } from '../crypto/sha256';
 import { isCatalogKeyComponent } from './catalog-key';
+import {
+  ContentFingerprintSchemeUnsupportedError,
+  ContentIdentityAdjacentProjectionError,
+  ContentIdentityCanonicalValueError,
+  ContentIdentityCircularReferenceError,
+  ContentIdentityEditionError,
+  ContentIdentityEnvelopeTypeError,
+  ContentIdentityNameEmptyError,
+  ContentIdentityNumberError,
+  StoredContentIdentityDisagreementError,
+} from './content-identity-errors';
 
 /**
  * THE FROZEN CONTENT-V1 IDENTITY KERNEL.
@@ -109,7 +120,7 @@ export function deriveContentIdentityForScheme<K extends ContentKind, P>(
     case CONTENT_FINGERPRINT_SCHEME_V2:
       return deriveContentIdentityV2(input);
   }
-  throw new TypeError(`Unsupported content fingerprint scheme '${String(scheme)}'.`);
+  throw new ContentFingerprintSchemeUnsupportedError(String(scheme));
 }
 
 /**
@@ -120,11 +131,14 @@ export const adjacentContentFingerprintCompatibilityRegistry = Object.freeze(
   {
     'content-v2': (value: unknown): unknown => {
       if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-        throw new TypeError('A content-v1 envelope must be an object.');
+        throw new ContentIdentityEnvelopeTypeError();
       }
       const envelope = value as Readonly<Record<string, unknown>>;
       if (envelope.scheme !== CONTENT_FINGERPRINT_SCHEME_V1) {
-        throw new TypeError('Only content-v1 can project adjacently to content-v2.');
+        throw new ContentIdentityAdjacentProjectionError(
+          'content-v1',
+          'content-v2',
+        );
       }
       if (
         envelope.kind !== 'species' ||
@@ -204,8 +218,8 @@ export interface StoredContentIdentityV1 {
 const SHA256_LOWERCASE_HEX = /^[0-9a-f]{64}$/;
 
 function unsupportedCanonicalValue(value: unknown): never {
-  throw new TypeError(
-    `Value is not a canonical content identity value: ${Object.prototype.toString.call(value)}.`,
+  throw new ContentIdentityCanonicalValueError(
+    Object.prototype.toString.call(value),
   );
 }
 
@@ -228,9 +242,7 @@ function nestedAncestors(
   value: object,
 ): ReadonlySet<object> {
   if (ancestors.has(value)) {
-    throw new TypeError(
-      'Value is not a canonical content identity value: circular reference.',
-    );
+    throw new ContentIdentityCircularReferenceError();
   }
   const nested = new Set(ancestors);
   nested.add(value);
@@ -255,9 +267,7 @@ function serializeCanonicalValue(
   }
   if (typeof value === 'number') {
     if (!Number.isFinite(value) || !Number.isSafeInteger(value)) {
-      throw new TypeError(
-        'Canonical content identity numbers must be finite safe integers.',
-      );
+      throw new ContentIdentityNumberError();
     }
     return Object.is(value, -0) ? '0' : JSON.stringify(value);
   }
@@ -320,7 +330,7 @@ export function normalizeContentIdentityName(
     .toLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, '');
   if (normalized === '') {
-    throw new TypeError('Content identity names must not be empty.');
+    throw new ContentIdentityNameEmptyError();
   }
   return normalized as NormalizedContentName;
 }
@@ -406,9 +416,7 @@ export function deriveContentIdentityV1FromNormalizedName<
   readonly payload: P;
 }): DerivedContentIdentityV1<K, P> {
   if (!isCatalogKeyComponent(input.edition)) {
-    throw new TypeError(
-      `Content identity edition '${input.edition}' must be a valid catalog key component.`,
-    );
+    throw new ContentIdentityEditionError(input.edition);
   }
 
   const envelope: ContentIdentityEnvelopeV1<K, P> = Object.freeze({
@@ -455,9 +463,7 @@ export function deriveContentIdentityV2FromNormalizedName<
   readonly payload: P;
 }): DerivedContentIdentityV1<K, P> {
   if (!isCatalogKeyComponent(input.edition)) {
-    throw new TypeError(
-      `Content identity edition '${input.edition}' must be a valid catalog key component.`,
-    );
+    throw new ContentIdentityEditionError(input.edition);
   }
   const envelope = Object.freeze({
     scheme: CONTENT_FINGERPRINT_SCHEME_V2,
@@ -507,9 +513,7 @@ export function verifyStoredContentIdentityV1(input: {
     parsedKey.digest !== input.digest ||
     sha256(input.canonicalJson) !== input.digest
   ) {
-    throw new TypeError(
-      'Stored content-v1 canonical bytes, digest, and derived key do not agree.',
-    );
+    throw new StoredContentIdentityDisagreementError();
   }
 
   return Object.freeze({

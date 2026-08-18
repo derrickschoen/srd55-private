@@ -51,6 +51,48 @@ export const catalogContentMatchDecisions = ['match', 'clone'] as const;
 export type CatalogContentMatchDecision =
   (typeof catalogContentMatchDecisions)[number];
 
+export class ContentFingerprintInputDisagreementError extends TypeError {
+  override readonly name = 'ContentFingerprintInputDisagreementError' as const;
+  constructor() {
+    super('Content fingerprint scheme, digest, and canonical bytes do not agree.');
+  }
+}
+
+export class ContentFingerprintSchemeUnregisteredError extends TypeError {
+  override readonly name = 'ContentFingerprintSchemeUnregisteredError' as const;
+  constructor(readonly scheme: string) {
+    super('Cannot promote an unregistered fingerprint scheme.');
+  }
+}
+
+export class StoredContentMatchDecisionError extends TypeError {
+  override readonly name = 'StoredContentMatchDecisionError' as const;
+  constructor(readonly decision: string) {
+    super('Stored content match decision is outside its vocabulary.');
+  }
+}
+
+export class ContentDependencyDuplicateKeyError extends TypeError {
+  override readonly name = 'ContentDependencyDuplicateKeyError' as const;
+  constructor() {
+    super('Content dependency graph contains duplicate keys.');
+  }
+}
+
+export class ContentDependencyMissingError extends TypeError {
+  override readonly name = 'ContentDependencyMissingError' as const;
+  constructor(readonly dependency_key: string) {
+    super(`Content dependency graph is missing dependency "${dependency_key}".`);
+  }
+}
+
+export class ContentDependencyCycleError extends TypeError {
+  override readonly name = 'ContentDependencyCycleError' as const;
+  constructor() {
+    super('Content dependency graph contains a cycle; no content was projected.');
+  }
+}
+
 export interface ContentFingerprintCandidate {
   readonly scheme: ContentFingerprintScheme;
   readonly digest: ContentFingerprintDigest;
@@ -936,9 +978,7 @@ export function registerContentFingerprint(
     !Object.hasOwn(contentFingerprintSchemeRegistry, input.scheme) ||
     sha256(input.canonicalJson) !== input.digest
   ) {
-    throw new TypeError(
-      'Content fingerprint scheme, digest, and canonical bytes do not agree.',
-    );
+    throw new ContentFingerprintInputDisagreementError();
   }
   db.exec(
     `INSERT INTO catalog_content_fingerprints (
@@ -994,7 +1034,9 @@ export function reconcileCurrentContentFingerprint(
   },
 ): 'registered' | 'unchanged' | 'moved' {
   if (!Object.hasOwn(contentFingerprintSchemeRegistry, input.identity.envelope.scheme)) {
-    throw new TypeError('Cannot promote an unregistered fingerprint scheme.');
+    throw new ContentFingerprintSchemeUnregisteredError(
+      String(input.identity.envelope.scheme),
+    );
   }
   const currentRows = db.allRaw(
     `SELECT fingerprint_scheme, fingerprint_digest, canonical_json
@@ -1127,7 +1169,7 @@ export function rememberedContentMatchDecision(
   }
   const decision = sqlString(row, 'decision');
   if (decision !== 'match' && decision !== 'clone') {
-    throw new TypeError('Stored content match decision is outside its vocabulary.');
+    throw new StoredContentMatchDecisionError(decision);
   }
   return Object.freeze({
     decision,
@@ -1196,7 +1238,7 @@ export function projectContentGraphInDependencyOrder<T>(
 ): readonly T[] {
   const byKey = new Map(nodes.map((node) => [node.key, node]));
   if (byKey.size !== nodes.length) {
-    throw new TypeError('Content dependency graph contains duplicate keys.');
+    throw new ContentDependencyDuplicateKeyError();
   }
   const indegree = new Map<string, number>();
   const dependents = new Map<string, string[]>();
@@ -1204,9 +1246,7 @@ export function projectContentGraphInDependencyOrder<T>(
     indegree.set(node.key, node.dependencies.length);
     for (const dependency of node.dependencies) {
       if (!byKey.has(dependency)) {
-        throw new TypeError(
-          `Content dependency graph is missing dependency "${dependency}".`,
-        );
+        throw new ContentDependencyMissingError(dependency);
       }
       const children = dependents.get(dependency) ?? [];
       children.push(node.key);
@@ -1232,9 +1272,7 @@ export function projectContentGraphInDependencyOrder<T>(
     }
   }
   if (order.length !== nodes.length) {
-    throw new TypeError(
-      'Content dependency graph contains a cycle; no content was projected.',
-    );
+    throw new ContentDependencyCycleError();
   }
   return Object.freeze(order.map(project));
 }

@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   ContentIdentityCollision,
   ContentFingerprintPromotionRefusal,
+  ContentDependencyCycleError,
+  ContentFingerprintInputDisagreementError,
   forgetContentMatchDecision,
   projectContentGraphInDependencyOrder,
   registerBundledStableContentIdentity,
@@ -52,6 +54,15 @@ const HAND_PINNED_FEAT_KEY =
 
 let connection: Database;
 let db: DatabaseContext;
+
+function refusal(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return expect.fail('Expected a refusal, but the call returned.');
+}
 
 beforeEach(async () => {
   connection = await openTestDatabase();
@@ -443,7 +454,7 @@ describe('catalog registry controls', () => {
 
   it('refuses a cyclic dependency graph before projection or registry writes', () => {
     let projectionCount = 0;
-    expect(() =>
+    const error = refusal(() =>
       projectContentGraphInDependencyOrder(
         [
           { key: 'class', dependencies: ['subclass'] },
@@ -453,8 +464,9 @@ describe('catalog registry controls', () => {
           projectionCount += 1;
           return registerDerivedContentIdentity(db, HAND_PINNED_FEAT);
         },
-      ),
-    ).toThrow('contains a cycle');
+      ));
+    expect(error).toBeInstanceOf(ContentDependencyCycleError);
+    expect(error).toMatchObject({});
     expect(projectionCount).toBe(0);
     expect(
       db.scalar('SELECT count(*) FROM catalog_content_identities'),
@@ -650,7 +662,7 @@ describe('catalog registry controls', () => {
       ).toThrow(rejected.constraint);
     }
 
-    expect(() =>
+    const error = refusal(() =>
       registerContentFingerprint(db, {
         kind: 'feat',
         contentKey: target,
@@ -658,7 +670,8 @@ describe('catalog registry controls', () => {
         digest: ABC_DIGEST as ContentFingerprintDigest,
         canonicalJson: 'different' as CanonicalContentIdentityJson,
         role: 'current',
-      }),
-    ).toThrow('do not agree');
+      }));
+    expect(error).toBeInstanceOf(ContentFingerprintInputDisagreementError);
+    expect(error).toMatchObject({});
   });
 });

@@ -32,6 +32,18 @@ import storedProjectorSource from './stored-authored-content-projector-v1.ts?raw
 import contentIdentitySource from './content-identity.ts?raw';
 import contentRegistrySource from './content-registry.ts?raw';
 import { reconcileSpeciesLineageContentV2 } from './reconcile-species-lineage-content-v2';
+import {
+  CatalogDataMigrationChecksumMismatchError,
+  CatalogDataMigrationDuplicateIdError,
+  CatalogDataMigrationDuplicateSourcePathError,
+  CatalogDataMigrationForeignKeyError,
+  CatalogDataMigrationIdEmptyError,
+  CatalogDataMigrationMarkerDisagreementError,
+  CatalogDataMigrationMarkerMalformedError,
+  CatalogDataMigrationProjectorSchemeError,
+  CatalogDataMigrationSourcesEmptyError,
+  CatalogDataMigrationUnregisteredMarkerError,
+} from './catalog-data-migrations-errors';
 
 /**
  * One append-only semantic catalog migration.
@@ -88,7 +100,7 @@ export const CATALOG_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
         }),
       ]),
       checksum:
-        'e30bd134e9173b51f925e977e3ac8f1e274e14bdf9a3c956c04c9a58b7fde8a4',
+        '69781850c8b75e9e83cffd421f278810986859af07d2366e2e44ac854259eb4a',
       run: retireNonSrdBundledSubclassesV1,
     }),
     Object.freeze({
@@ -214,13 +226,12 @@ export const CATALOG_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
       // checksum. `src/domain/source-instance-state.ts` above is the remedy and
       // exists for it. No reconciled row changes in either round: every source
       // instance this walks holds `active` or `tombstoned`.
-      // Re-pinned 2026-08-17 at the D299 + grants-migration merge: D299's
-      // registry source writes an explicit `listed` visibility at this
-      // historical import boundary, and the grants migration adds four
-      // sibling error modules as explicit sources. Reconciled rows are
-      // unchanged by both; the pin covers the combined source set.
+      // Re-pinned 2026-08-17 at the merge of D299, the grants tagged-error
+      // migration, and the catalog tagged-error migration: the pin covers the
+      // combined source set (grants' four sibling error modules plus the
+      // catalog lane's migrated modules). Reconciled rows unchanged by all.
       checksum:
-        'eff5b010f6ed5923bd35857f927d89a89282dbffe538067adf5a5558fe58158f',
+        'a22a6d885d10ce2add3a8819539e1bf4da4b9dd39aac3e77e64131e56e438074',
       run: reconcileSpeciesLineageContentV2,
     }),
   ]);
@@ -247,7 +258,7 @@ function appliedCatalogDataMigrations(
       typeof scheme !== 'string' ||
       typeof checksum !== 'string'
     ) {
-      throw new Error('Catalog data-migration marker is malformed.');
+      throw new CatalogDataMigrationMarkerMalformedError();
     }
     return { id, scheme, checksum };
   });
@@ -259,12 +270,10 @@ export function validateCatalogDataMigrationRegistry(
   const ids = new Set<string>();
   for (const migration of migrations) {
     if (migration.id.length === 0) {
-      throw new Error('Catalog data-migration id must not be empty.');
+      throw new CatalogDataMigrationIdEmptyError();
     }
     if (ids.has(migration.id)) {
-      throw new Error(
-        `Duplicate catalog data-migration id "${migration.id}".`,
-      );
+      throw new CatalogDataMigrationDuplicateIdError(migration.id);
     }
     ids.add(migration.id);
 
@@ -274,30 +283,26 @@ export function validateCatalogDataMigrationRegistry(
         migration.projectorScheme,
       )
     ) {
-      throw new Error(
-        `Catalog data migration "${migration.id}" uses unknown projector ` +
-          `scheme "${String(migration.projectorScheme)}".`,
+      throw new CatalogDataMigrationProjectorSchemeError(
+        migration.id,
+        String(migration.projectorScheme),
       );
     }
 
     if (migration.sources.length === 0) {
-      throw new Error(
-        `Catalog data migration "${migration.id}" has no checksum sources.`,
-      );
+      throw new CatalogDataMigrationSourcesEmptyError(migration.id);
     }
     const paths = migration.sources.map(({ path }) => path);
     if (new Set(paths).size !== paths.length) {
-      throw new Error(
-        `Catalog data migration "${migration.id}" has duplicate checksum ` +
-          'source paths.',
-      );
+      throw new CatalogDataMigrationDuplicateSourcePathError(migration.id);
     }
 
     const actual = catalogDataMigrationChecksum(migration.sources);
     if (actual !== migration.checksum) {
-      throw new Error(
-        `Catalog data migration "${migration.id}" source checksum mismatch: ` +
-          `expected ${migration.checksum}, got ${actual}.`,
+      throw new CatalogDataMigrationChecksumMismatchError(
+        migration.id,
+        migration.checksum,
+        actual,
       );
     }
   }
@@ -331,19 +336,13 @@ export function runCatalogDataMigrations(
   for (const marker of appliedCatalogDataMigrations(db)) {
     const migration = registered.get(marker.id);
     if (migration === undefined) {
-      throw new Error(
-        `Applied catalog data migration "${marker.id}" is not registered by ` +
-          'this application.',
-      );
+      throw new CatalogDataMigrationUnregisteredMarkerError(marker.id);
     }
     if (
       marker.scheme !== migration.projectorScheme ||
       marker.checksum !== migration.checksum
     ) {
-      throw new Error(
-        `Applied catalog data migration "${marker.id}" does not match the ` +
-          'registered projector scheme and checksum.',
-      );
+      throw new CatalogDataMigrationMarkerDisagreementError(marker.id);
     }
     applied.set(marker.id, marker);
   }
@@ -358,9 +357,9 @@ export function runCatalogDataMigrations(
 
       const foreignKeyProblem = foreignKeyFailure(transaction);
       if (foreignKeyProblem !== null) {
-        throw new Error(
-          `Catalog data migration "${migration.id}" foreign-key check ` +
-            `failed for ${foreignKeyProblem}.`,
+        throw new CatalogDataMigrationForeignKeyError(
+          migration.id,
+          foreignKeyProblem,
         );
       }
 

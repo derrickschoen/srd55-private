@@ -4,6 +4,7 @@ import { CatalogImporter } from '../../../src/catalog/catalog-importer';
 import { reconcileBundledContentRegistryV1 } from '../../../src/catalog/bundled-content-registry-v1';
 import { exportCharacterBackup } from '../../../src/backup/character-backup';
 import {
+  BundledSrdSpellNotFoundError,
   FORK_NAME_REQUIRED_MESSAGE,
   type ForkSpellCommitResult,
   forkSrdSpell,
@@ -44,6 +45,15 @@ import { openTestDatabase } from '../../helpers/open-db';
 
 const connections: Database[] = [];
 let harness: RpcHarness | undefined;
+
+function refusal(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return expect.fail('Expected a refusal, but the call returned.');
+}
 
 afterEach(() => {
   for (const connection of connections.splice(0)) {
@@ -88,6 +98,17 @@ function importedRecord(versionKey: string, name: string): string {
 }
 
 describe('bundled spell forks', () => {
+  it('tags a forged missing bundled source key', async () => {
+    const db = await seededDatabase();
+    const error = refusal(() => planSrdSpellFork(db, {
+      sourceContentKey: '2024:not-a-bundled-spell',
+    }));
+    expect(error).toBeInstanceOf(BundledSrdSpellNotFoundError);
+    expect(error).toMatchObject({
+      source_content_key: '2024:not-a-bundled-spell',
+    });
+  });
+
   it('plans and commits an external Fireball fallback with a receipt through public catalog RPC', async () => {
     harness = await createRpcHarness(handlers);
     seedSpellContent(harness.context.db);
