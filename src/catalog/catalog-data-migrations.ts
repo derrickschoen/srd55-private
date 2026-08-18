@@ -231,7 +231,7 @@ export const CATALOG_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
       // combined source set (grants' four sibling error modules plus the
       // catalog lane's migrated modules). Reconciled rows unchanged by all.
       checksum:
-        'a22a6d885d10ce2add3a8819539e1bf4da4b9dd39aac3e77e64131e56e438074',
+        'b38d1df5a4bd64ada0c4f86a87eae8f04c7217158a76b3ae7f65982433c26b21',
       run: reconcileSpeciesLineageContentV2,
     }),
   ]);

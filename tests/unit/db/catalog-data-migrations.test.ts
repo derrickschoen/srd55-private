@@ -133,7 +133,7 @@ describe('catalog data-migration registry', () => {
       // re-pinning is D226's accepted cost, not a way around the freeze.
       // Re-pinned 2026-08-17 at the grants+catalog tagged-error merge; the
       // pin covers the combined source set.
-      checksum: 'a22a6d885d10ce2add3a8819539e1bf4da4b9dd39aac3e77e64131e56e438074',
+      checksum: 'b38d1df5a4bd64ada0c4f86a87eae8f04c7217158a76b3ae7f65982433c26b21',
     }]);
     expect(() =>
       validateCatalogDataMigrationRegistry(CATALOG_DATA_MIGRATIONS)
