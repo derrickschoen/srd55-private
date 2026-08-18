@@ -78,6 +78,95 @@ function veteranEntry(): BundledHomebrewCatalogEntry<SubclassAuthoringDraft> {
   return entry;
 }
 
+const v3MechanicsCards = Object.freeze([
+  {
+    card: 'Long Grudge',
+    fixtures: [{
+      catalogKey: 'long-grudge',
+      name: 'Oath of the Long Grudge',
+      parent: 'Paladin',
+      featureNames: ['Long Grudge'],
+      mechanicFragment: 'bonded target',
+    }],
+  },
+  {
+    card: 'Anchor Point',
+    fixtures: [{
+      catalogKey: 'anchor-point',
+      name: 'Anchor Point',
+      parent: 'Fighter',
+      featureNames: ['Anchor Point'],
+      mechanicFragment: 'Speed 0',
+    }],
+  },
+  {
+    card: 'Patient Volley',
+    fixtures: [{
+      catalogKey: 'patient-volley',
+      name: 'Patient Volley',
+      parent: 'Ranger',
+      featureNames: ['Patient Volley'],
+      mechanicFragment: 'immediately preceding turn',
+    }],
+  },
+  {
+    card: 'Cutting Chorus',
+    fixtures: [{
+      catalogKey: 'cutting-chorus',
+      name: 'College of the Cutting Chorus',
+      parent: 'Bard',
+      featureNames: ['Cutting Chorus', 'Extra Attack'],
+      mechanicFragment: 'Inspiration dice',
+    }],
+  },
+  {
+    card: 'Ambush Primitive',
+    fixtures: [{
+      catalogKey: 'vanward-conclave',
+      name: 'Vanward Conclave',
+      parent: 'Ranger',
+      featureNames: ['Ambush Primitive'],
+      mechanicFragment: 'target that has not acted',
+    }, {
+      catalogKey: 'cold-open',
+      name: 'Cold Open',
+      parent: 'Rogue',
+      featureNames: ['Ambush Primitive'],
+      mechanicFragment: 'target that has not acted',
+    }],
+  },
+  {
+    card: 'Broken Tooth',
+    fixtures: [{
+      catalogKey: 'broken-tooth',
+      name: 'Circle of the Broken Tooth',
+      parent: 'Druid',
+      featureNames: ['Broken Tooth Form'],
+      mechanicFragment: 'temporary Hit Points',
+    }],
+  },
+  {
+    card: 'Cutting Momentum',
+    fixtures: [{
+      catalogKey: 'cutting-momentum',
+      name: 'Cutting Momentum',
+      parent: 'Fighter',
+      featureNames: ['Cutting Momentum'],
+      mechanicFragment: '18–20',
+    }],
+  },
+  {
+    card: 'Broken Tempo',
+    fixtures: [{
+      catalogKey: 'broken-tempo',
+      name: 'Discipline of the Broken Tempo',
+      parent: 'Fighter',
+      featureNames: ['Broken Tempo'],
+      mechanicFragment: 'Proficiency Bonus',
+    }],
+  },
+] as const);
+
 it('keeps ui-hidden bundled content loadable while excluding it from user-facing catalogs', async () => {
   const db = await database();
   const hiddenCatalog = Object.freeze([Object.freeze({
@@ -119,6 +208,101 @@ it('keeps ui-hidden bundled content loadable while excluding it from user-facing
   );
   // Same long-running-integration timeout every sibling in this file declares.
 }, 20_000);
+
+it.each(v3MechanicsCards)(
+  'loads the $card card programmatically without exposing its fixtures in user-facing surfaces',
+  async ({ card, fixtures }) => {
+    const db = await database();
+    const catalog = BUNDLED_HOMEBREW_CATALOG.filter((entry) =>
+      fixtures.some((fixture) => fixture.catalogKey === entry.catalog_key)
+    );
+    expect(catalog.map((entry) => entry.catalog_key)).toEqual(
+      fixtures.map((fixture) => fixture.catalogKey),
+    );
+    expect(catalog.every((entry) => entry.visibility === 'ui_hidden')).toBe(true);
+
+    const plan = planBundledHomebrewInstall(db, catalog);
+    expect(plan.entries).toEqual([]);
+    expect(plan.incomingContent).toEqual([]);
+    expect(plan.outcomes).toHaveLength(fixtures.length);
+    const committed = commitBundledHomebrewInstall(db, plan.token, catalog);
+    if (committed.kind !== 'committed') {
+      throw new Error(`${card} fixtures did not install.`);
+    }
+    expect(committed.outcomes).toHaveLength(fixtures.length);
+
+    const installedKeys: ContentKey[] = [];
+    for (const [index, fixture] of fixtures.entries()) {
+      const outcome = committed.outcomes[index];
+      if (outcome?.kind !== 'create') {
+        throw new Error(`${fixture.name} was not created.`);
+      }
+      installedKeys.push(outcome.contentKey);
+      expect(db.oneRaw(
+        `SELECT identity.visibility, parent.name AS parent_name
+           FROM catalog_content_identities AS identity
+           JOIN subclass_definitions AS subclass
+             ON subclass.content_key = identity.content_key
+           JOIN class_definitions AS parent
+             ON parent.id = subclass.class_definition_id
+          WHERE identity.content_kind = 'subclass'
+            AND identity.content_key = ?`,
+        [outcome.contentKey],
+      )).toEqual({ visibility: 'ui_hidden', parent_name: fixture.parent });
+
+      const projected = projectStoredAuthoredContentV1(db, {
+        kind: 'subclass',
+        contentKey: outcome.contentKey,
+        references: storedAuthoredRegistryReferencesV1(db),
+      }).aggregate;
+      expect(projected.name).toBe(fixture.name);
+      expect(projected.features.map((feature) => feature.name)).toEqual(
+        fixture.featureNames,
+      );
+      expect(projected.features.map((feature) => feature.description).join('\n'))
+        .toContain(fixture.mechanicFragment);
+
+      if (fixture.catalogKey === 'cutting-chorus') {
+        expect(projected.features.find((feature) => feature.name === 'Extra Attack')?.effects)
+          .toEqual([expect.objectContaining({
+            kind: 'extra_attack',
+            attack_count: 2,
+            weapon_scope: 'any_weapon',
+          })]);
+      }
+      if (fixture.catalogKey === 'broken-tempo') {
+        expect(projected.features[0]?.contributions).toEqual([
+          expect.objectContaining({
+            contribution_key: 'maneuver-dice',
+            target: expect.objectContaining({
+              kind: 'resource_maximum',
+              resource: expect.objectContaining({
+                display_label: 'Maneuver Dice',
+                marking_shape: 'remaining',
+              }),
+            }),
+            value: {
+              kind: 'ref',
+              source: { kind: 'proficiency_bonus' },
+            },
+          }),
+        ]);
+      }
+    }
+
+    expect(new CatalogAuthoringService(db).list().published).not.toEqual(
+      expect.arrayContaining(installedKeys.map((contentKey) =>
+        expect.objectContaining({ content_key: contentKey })
+      )),
+    );
+    expect(new CatalogQueries(db).read().subclasses).not.toEqual(
+      expect.arrayContaining(installedKeys.map((contentKey) =>
+        expect.objectContaining({ content_key: contentKey })
+      )),
+    );
+  },
+  20_000,
+);
 
 function installPortableOrigins(db: DatabaseContext): {
   readonly speciesKey: ContentKey;
@@ -300,23 +484,26 @@ describe('bundled authored-kind installer', () => {
     }]);
   }, 20_000);
 
-  it('publishes all three entries atomically through drafts and is an exact-fingerprint no-op on repeat', async () => {
+  it('publishes every entry atomically through drafts and is an exact-fingerprint no-op on repeat', async () => {
     // Measured alone at 4.62s; 20s retains contention headroom.
     const db = await database();
     const beforeRoots = db.scalar<number>(
       "SELECT count(*) FROM catalog_content_identities WHERE catalog_layer = 'external'",
     );
     const firstPlan = planBundledHomebrewInstall(db);
-    const historicalCatalog = BUNDLED_HOMEBREW_CATALOG.map((entry) =>
-      Object.freeze({
+    const historicalCatalog = BUNDLED_HOMEBREW_CATALOG.slice(0, 3).map(
+      (entry) => Object.freeze({
         catalog_key: entry.catalog_key,
         revisions: Object.freeze([entry.revisions[0]] as const),
-      }));
+      }),
+    );
     expect(sha256(canonicalJson(historicalCatalog))).toBe(
       '8d36536109be8768e2c274958b1ee9eb70a74cb37a988c7f27e88eebb0d8d84a',
     );
+    // Deliberate aggregate-set re-pin: the historical three-entry hash above
+    // remains byte-exact while this current input adds the nine v3 fixtures.
     expect(firstPlan.inputHash).toBe(
-      '9fc3cfc48447cef1376cd0e87849e9f2548d1f50fad194874f7c55676a1e03a1',
+      '389d2de38c031a9c192f7c3ae7ea87edae66cfc1fe6ccc5c7741256a2ba19550',
     );
 
     expect(firstPlan.entries.map((entry) => [entry.name, entry.outcome, entry.error])).toEqual([
@@ -332,10 +519,40 @@ describe('bundled authored-kind installer', () => {
       }, {
         kind: 'create',
         contentKey: '2024:content.subclass:warrior-of-the-barbed-court-bundled-revision-5',
-      }, { kind: 'create' }],
+      }, {
+        kind: 'create',
+        contentKey: '2024:content.subclass:spell-student-bundled-revision-2',
+      }, {
+        kind: 'create',
+        contentKey: '2024:content.subclass:oath-of-the-long-grudge',
+      }, {
+        kind: 'create',
+        contentKey: '2024:content.subclass:anchor-point',
+      }, {
+        kind: 'create',
+        contentKey: '2024:content.subclass:patient-volley',
+      }, {
+        kind: 'create',
+        contentKey: '2024:content.subclass:college-of-the-cutting-chorus',
+      }, {
+        kind: 'create',
+        contentKey: '2024:content.subclass:vanward-conclave',
+      }, {
+        kind: 'create',
+        contentKey: '2024:content.subclass:cold-open',
+      }, {
+        kind: 'create',
+        contentKey: '2024:content.subclass:circle-of-the-broken-tooth',
+      }, {
+        kind: 'create',
+        contentKey: '2024:content.subclass:cutting-momentum',
+      }, {
+        kind: 'create',
+        contentKey: '2024:content.subclass:discipline-of-the-broken-tempo',
+      }],
     });
     expect(db.scalar<number>("SELECT count(*) FROM catalog_content_identities WHERE catalog_layer = 'external'"))
-      .toBe((beforeRoots ?? 0) + 10);
+      .toBe((beforeRoots ?? 0) + 19);
     expect(db.allRaw(
       `SELECT superseded_content_key, successor_content_key
        FROM catalog_content_supersessions WHERE content_kind = 'subclass'`,
@@ -378,15 +595,20 @@ describe('bundled authored-kind installer', () => {
     ]);
     expect(commitBundledHomebrewInstall(db, secondPlan.token)).toMatchObject({
       kind: 'committed',
-      outcomes: [{ kind: 'match' }, { kind: 'match' }, { kind: 'match' }],
+      outcomes: [
+        { kind: 'match' }, { kind: 'match' }, { kind: 'match' },
+        { kind: 'match' }, { kind: 'match' }, { kind: 'match' },
+        { kind: 'match' }, { kind: 'match' }, { kind: 'match' },
+        { kind: 'match' }, { kind: 'match' }, { kind: 'match' },
+      ],
     });
     expect(db.scalar<number>('SELECT count(*) FROM catalog_content_identities')).toBe(rootsAfterFirst);
     expect(db.scalar<number>('SELECT count(*) FROM catalog_content_supersessions')).toBe(7);
     expect(db.scalar<number>('SELECT count(*) FROM catalog_content_drafts')).toBe(0);
-    // The full install publishes one document per bundled revision (11 as of
-    // barbedCourtV5) plus the repeat no-op pass; 2.7s at 8 revisions grew to
-    // 9.2s at 10 when run alone, and the old 20s budget trips under full-suite
-    // parallelism. Assertions above are unchanged.
+    // The full install publishes one document per bundled revision (19 with
+    // the nine v3 mechanics fixtures) plus the repeat no-op pass. The exact
+    // catalog assertions above include every fixture; the old 20s budget trips
+    // under full-suite parallelism.
   }, 45_000);
 
   it('upgrades Veteran v2 to v3 while retaining the v2 character bytes and exposing replacement review', async () => {
