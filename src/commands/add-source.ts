@@ -5,6 +5,7 @@ import {
 import type { CharacterCommandIntegrity } from './integrity';
 import type { SqlRow } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
+import { ok, type OkOutcome } from '../refusals/outcome';
 import { characterLevel } from '../rules/character-level';
 import type {
   AddSourceCommand as AddSourcePayload,
@@ -141,7 +142,7 @@ export class AddSourceCommand {
     this.#generator = generator ?? new GrantRuleSlotGenerator(db);
   }
 
-  apply(characterId: number): void {
+  apply(characterId: number): OkOutcome<void> {
     this.db.transaction(() => {
       const sourceType = this.sourceType();
       const definitionId = this.payload.source_definition_id;
@@ -200,6 +201,7 @@ export class AddSourceCommand {
       ).lastInsertId;
       this.#generator.generateForSource(sourceId);
     });
+    return ok(undefined);
   }
 
   private sourceType(): AddableSourceType {

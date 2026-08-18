@@ -57,9 +57,7 @@ test('commands.execute persists, replays, reports conflicts, and survives reload
         allow_legacy: true,
       },
     });
-    let conflict: unknown;
-    try {
-      await window.appRpc.call('commands.execute', {
+    const conflict = await window.appRpc.call('commands.execute', {
         character_id: character.id,
         operation_uuid: '60606060-6060-4060-8060-606060606060',
         expected_revision: 0,
@@ -68,34 +66,31 @@ test('commands.execute persists, replays, reports conflicts, and survives reload
           ability: 'wisdom',
           score: 20,
         },
-      });
-    } catch (error) {
-      conflict =
-        error !== null && typeof error === 'object'
-          ? {
-              message: String((error as Error).message),
-              data: (error as { data?: unknown }).data,
-            }
-          : error;
-    }
+    });
     return { first, replay, conflict };
   });
 
   expect(result).toEqual({
     first: {
-      operation_uuid: '50505050-5050-4050-8050-505050505050',
-      revision: 1,
-      idempotent_replay: false,
+      kind: 'ok',
+      value: {
+        operation_uuid: '50505050-5050-4050-8050-505050505050',
+        revision: 1,
+        idempotent_replay: false,
+      },
     },
     replay: {
-      operation_uuid: '50505050-5050-4050-8050-505050505050',
-      revision: 1,
-      idempotent_replay: true,
+      kind: 'ok',
+      value: {
+        operation_uuid: '50505050-5050-4050-8050-505050505050',
+        revision: 1,
+        idempotent_replay: true,
+      },
     },
     conflict: {
-      message:
-        'This character changed in another tab. Reload before trying again.',
-      data: { current_revision: 1 },
+      kind: 'refused',
+      wire_version: 1,
+      refusal: { kind: 'revision_conflict', expected: 0, actual: 1 },
     },
   });
   expect(

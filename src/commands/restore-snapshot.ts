@@ -3,6 +3,7 @@ import {
   type CharacterStateSnapshot,
 } from '../character/character-state';
 import type { DatabaseContext } from '../db/database';
+import { ok, type OkOutcome } from '../refusals/outcome';
 import type { CharacterCommandIntegrity } from './integrity';
 import type { StoredRestoreSnapshotInverse as RestoreSnapshotPayload } from './stored-inverses';
 
@@ -22,12 +23,13 @@ export class RestoreSnapshotCommand {
     this.#state = state ?? new CharacterState(db);
   }
 
-  async apply(characterId: number): Promise<void> {
+  async apply(characterId: number): Promise<OkOutcome<void>> {
     await this.integrity.assertValid(characterId, this.payload);
     const before = this.#state.capture(characterId);
     this.#state.restore(characterId, this.payload.snapshot);
     this.#before = before;
     this.#characterId = characterId;
+    return ok(undefined);
   }
 
   async inverse(): Promise<RestoreSnapshotPayload> {

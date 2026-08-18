@@ -1,0 +1,15 @@
+id: no-discarded-character-command-execute
+language: TypeScript
+severity: error
+message: CharacterCommandExecutor.execute() returns an Outcome that must be consumed.
+rule:
+  any:
+    - pattern:
+        context: $EXECUTOR.execute($$$ARGS);
+        selector: expression_statement
+    - pattern:
+        context: await $EXECUTOR.execute($$$ARGS);
+        selector: expression_statement
+constraints:
+  EXECUTOR:
+    regex: (?i)executor

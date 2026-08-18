@@ -1,4 +1,5 @@
 import type { DatabaseContext } from '../db/database';
+import { ok, type OkOutcome } from '../refusals/outcome';
 import { encodeBoolean, rowId } from '../db/codecs';
 import type {
   UpdateCharacterRulesCommand as UpdateCharacterRulesPayload,
@@ -20,7 +21,7 @@ export class UpdateCharacterRulesCommand {
       eligibility ?? new SpellSelectionEligibility(db);
   }
 
-  apply(characterId: number): void {
+  apply(characterId: number): OkOutcome<void> {
     if (typeof this.payload.allow_legacy !== 'boolean') {
       throw new TypeError('allow_legacy must be a boolean.');
     }
@@ -55,6 +56,7 @@ export class UpdateCharacterRulesCommand {
         this.#eligibility.refresh(slotId);
       }
     });
+    return ok(undefined);
   }
 
   inverse(): UpdateCharacterRulesPayload {

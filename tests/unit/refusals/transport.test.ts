@@ -14,6 +14,9 @@ import {
   UnmintedRefusalDefect,
   type Refusal,
 } from '../../../src/refusals/refusal';
+import { postWithCloneFailureFallback } from '../../../src/db/worker-post';
+import { postRpcResponseWithCloneFailureFallback } from '../../../src/db/worker-post';
+import { rpcSuccess, type RpcResponse } from '../../../src/rpc/protocol';
 
 type TransportHandler = (
   request: unknown,
@@ -24,6 +27,11 @@ interface TestTransport {
   readonly close: () => void;
 }
 
+type TransportPoster = (
+  post: (value: unknown) => void,
+  response: unknown,
+) => void;
+
 function isString(value: unknown): value is string {
   return typeof value === 'string';
 }
@@ -32,22 +40,41 @@ function errorName(error: unknown): string {
   return error instanceof Error ? error.name : 'UnknownError';
 }
 
-function createRealCloneTransport(handler: TransportHandler): TestTransport {
+function isRpcResponse(value: unknown): value is RpcResponse {
+  if (
+    value === null
+    || typeof value !== 'object'
+    || !('id' in value)
+    || !Number.isSafeInteger(value.id)
+    || !('ok' in value)
+    || typeof value.ok !== 'boolean'
+  ) return false;
+  return value.ok ? 'result' in value : 'error' in value;
+}
+
+function createRealCloneTransport(
+  handler: TransportHandler,
+  poster: TransportPoster = (post, response) => {
+    postWithCloneFailureFallback(
+      post,
+      response,
+      (error) => ({
+        kind: 'transport_error',
+        error_name: errorName(error),
+      }),
+    );
+  },
+): TestTransport {
   const channel = new MessageChannel();
   let requestQueue: Promise<void> = Promise.resolve();
 
   channel.port2.addEventListener('message', (event: MessageEvent<unknown>) => {
     const task = requestQueue.then(async () => {
       const response = await handler(event.data);
-      try {
-        channel.port2.postMessage(response);
-      } catch (error) {
-        if (errorName(error) !== 'DataCloneError') throw error;
-        channel.port2.postMessage({
-          kind: 'transport_error',
-          error_name: errorName(error),
-        });
-      }
+      poster(
+        (value) => channel.port2.postMessage(value),
+        response,
+      );
     });
     requestQueue = task.catch(() => undefined);
   });
@@ -175,19 +202,30 @@ describe('Outcome structured-clone transport', () => {
   it('handles an injected non-cloneable response and keeps serving', async () => {
     const transport = createRealCloneTransport((request) =>
       request === 'non-cloneable'
-        ? { kind: 'ok', value: () => 'cannot cross the channel' }
-        : ok('served after clone failure'),
+        ? rpcSuccess(41, { value: () => 'cannot cross the channel' })
+        : rpcSuccess(42, ok('served after clone failure')),
+      (post, response) => {
+        if (!isRpcResponse(response)) {
+          throw new Error('Injected handler did not return an RPC response.');
+        }
+        postRpcResponseWithCloneFailureFallback(post, response);
+      },
     );
 
     try {
       await expect(transport.exchange('non-cloneable')).resolves.toEqual({
-        kind: 'transport_error',
-        error_name: 'DataCloneError',
+        id: 41,
+        ok: false,
+        error: {
+          code: 'transport_error',
+          message: expect.stringContaining('cloned'),
+        },
       });
       const received = await transport.exchange('cloneable');
-      expect(decodeOutcome(received, isString)).toEqual({
-        kind: 'ok',
-        value: 'served after clone failure',
+      expect(received).toEqual({
+        id: 42,
+        ok: true,
+        result: { kind: 'ok', value: 'served after clone failure' },
       });
     } finally {
       transport.close();

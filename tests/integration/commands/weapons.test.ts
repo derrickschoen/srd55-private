@@ -19,6 +19,7 @@ import {
 import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
 import { seedWeaponContent } from '../../../src/rules/weapons-srd';
 import { openTestDatabase } from '../../helpers/open-db';
+import { expectOkOutcome } from '../../helpers/outcome';
 
 const key = 'W1-weapon-command-integrity-key';
 
@@ -56,12 +57,12 @@ describe('weapon commands', () => {
     const revision = Number(
       db.scalar('SELECT revision FROM characters WHERE id = ?', [forCharacter]),
     );
-    return executor.execute({
+    return expectOkOutcome(await executor.execute({
       character_id: forCharacter,
       operation_uuid: operationUuid(),
       expected_revision: revision,
       command,
-    });
+    }));
   }
 
   function queries(): WeaponQueries {

@@ -5,6 +5,7 @@ import {
 import type { CharacterCommandIntegrity } from './integrity';
 import { sqlInteger, sqlString } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
+import { ok, type OkOutcome } from '../refusals/outcome';
 import type {
   RemoveSourceCommand as RemoveSourcePayload,
 } from '../domain/command-contracts';
@@ -35,7 +36,7 @@ export class RemoveSourceCommand {
     this.#generator = generator ?? new GrantRuleSlotGenerator(db);
   }
 
-  apply(characterId: number): void {
+  apply(characterId: number): OkOutcome<void> {
     this.db.transaction(() => {
       const source = this.db.one(
         `SELECT id, source_type
@@ -77,6 +78,7 @@ export class RemoveSourceCommand {
         deleteSourceTreeEffects(this.db, sourceId);
       }
     });
+    return ok(undefined);
   }
 
   async inverse(): Promise<StoredCharacterSnapshotInverse> {

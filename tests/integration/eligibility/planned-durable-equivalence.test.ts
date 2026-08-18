@@ -13,11 +13,12 @@ import { EligibleSpellSearch } from '../../../src/eligibility/eligible-spell-sea
 import { GrantRuleSlotGenerator } from '../../../src/grants/grant-rule-slot-generator';
 import { LevelUpPlannedEligibleSpells } from '../../../src/queries/level-up-planned-eligible-spells';
 import { openTestDatabase } from '../../helpers/open-db';
-import { LevelUpClassCommand, LevelUpRefusal } from '../../../src/commands/level-up-class';
+import { LevelUpClassCommand } from '../../../src/commands/level-up-class';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { AllocateAbilitiesCommand } from '../../../src/commands/allocate-abilities';
 import { CharacterState } from '../../../src/character/character-state';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
+import { expectOkOutcome } from '../../helpers/outcome';
 
 describe('planned and durable spell eligibility', () => {
   let connection: Database;
@@ -36,7 +37,7 @@ describe('planned and durable spell eligibility', () => {
     const characterId = db.exec(
       "INSERT INTO characters (name) VALUES ('Equivalence Wizard')",
     ).lastInsertId;
-    new AllocateAbilitiesCommand(db, {
+    expectOkOutcome(new AllocateAbilitiesCommand(db, {
       type: 'allocate_abilities',
       method: 'manual',
       scores: {
@@ -47,7 +48,7 @@ describe('planned and durable spell eligibility', () => {
         wisdom: 10,
         charisma: 10,
       },
-    }).apply(characterId);
+    }).apply(characterId));
     registerFixtureContentIdentity(db, {
       kind: 'class', contentKey: 'class:equivalence-wizard',
       name: 'Equivalence Wizard', keyKind: 'bundled-stable',
@@ -150,7 +151,7 @@ describe('planned and durable spell eligibility', () => {
 
     const selected = planned[0];
     if (selected === undefined) throw new Error('Expected an offered spell.');
-    new LevelUpClassCommand(
+    expectOkOutcome(new LevelUpClassCommand(
       db,
       {
         type: 'level_up_class',
@@ -172,7 +173,7 @@ describe('planned and durable spell eligibility', () => {
         },
       },
       new CharacterCommandIntegrity('planned-durable-test-key'),
-    ).apply(characterId);
+    ).apply(characterId));
     expect(
       new EligibleSpellSearch(db).search(characterId, slotId, 'Ward'),
     ).toEqual(planned);
@@ -197,9 +198,7 @@ describe('planned and durable spell eligibility', () => {
     expect(nextPlanned).toEqual([]);
     const state = new CharacterState(db);
     const beforeRefusal = state.capture(characterId);
-    let refusal: unknown;
-    try {
-      new LevelUpClassCommand(
+    const refusal = new LevelUpClassCommand(
         db,
         {
           type: 'level_up_class',
@@ -222,12 +221,10 @@ describe('planned and durable spell eligibility', () => {
         },
         new CharacterCommandIntegrity('planned-durable-test-key'),
       ).apply(characterId);
-    } catch (error) {
-      refusal = error;
-    }
-    expect(refusal).toBeInstanceOf(LevelUpRefusal);
     expect(refusal).toMatchObject({
-      data: {
+      kind: 'refused',
+      refusal: {
+        kind: 'level_up_refused',
         reason: 'planned_subchoice_refused',
         issue: 'spell_not_eligible',
       },

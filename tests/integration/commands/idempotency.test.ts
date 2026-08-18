@@ -2,10 +2,10 @@ import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CharacterCommandExecutor } from '../../../src/commands/character-command-executor';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
-import { RevisionConflict } from '../../../src/commands/revision-conflict';
 import { DatabaseContext } from '../../../src/db/database';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import { openTestDatabase } from '../../helpers/open-db';
+import { expectOkOutcome } from '../../helpers/outcome';
 
 const operationA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const operationB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -35,13 +35,13 @@ describe('command idempotency and stale-slot merge guards', () => {
   afterEach(() => connection.close());
 
   it('replays a UUID exactly once despite a different command and changed revision', async () => {
-    const first = await executor.execute({
+    const first = expectOkOutcome(await executor.execute({
       character_id: characterId,
       operation_uuid: operationA,
       expected_revision: 0,
       command: { type: 'update_ability', ability: 'wisdom', score: 16 },
-    });
-    await executor.execute({
+    }));
+    expectOkOutcome(await executor.execute({
       character_id: characterId,
       operation_uuid: operationB,
       expected_revision: 1,
@@ -50,7 +50,7 @@ describe('command idempotency and stale-slot merge guards', () => {
         ability: 'intelligence',
         score: 14,
       },
-    });
+    }));
     const persistedBefore = {
       character: db.oneRaw('SELECT * FROM characters WHERE id = ?', [
         characterId,
@@ -59,7 +59,7 @@ describe('command idempotency and stale-slot merge guards', () => {
       audit: db.allRaw('SELECT * FROM change_log ORDER BY id'),
     };
 
-    const replay = await executor.execute({
+    const replay = expectOkOutcome(await executor.execute({
       character_id: characterId,
       operation_uuid: operationA,
       expected_revision: Number.MAX_SAFE_INTEGER,
@@ -67,7 +67,7 @@ describe('command idempotency and stale-slot merge guards', () => {
         type: 'update_character_rules',
         allow_legacy: true,
       },
-    });
+    }));
 
     expect(replay).toEqual({
       inverse: first.inverse,
@@ -113,24 +113,23 @@ describe('command idempotency and stale-slot merge guards', () => {
   });
 
   it('rejects replay across characters without changing either character', async () => {
-    await executor.execute({
+    expectOkOutcome(await executor.execute({
       character_id: characterId,
       operation_uuid: operationA,
       expected_revision: 0,
       command: { type: 'update_ability', ability: 'wisdom', score: 16 },
-    });
+    }));
 
-    await expect(
-      executor.execute({
+    expect(await executor.execute({
         character_id: otherCharacterId,
         operation_uuid: operationA,
         expected_revision: 0,
         command: { type: 'update_ability', ability: 'wisdom', score: 20 },
-      }),
-    ).rejects.toEqual(expect.objectContaining({
-      name: 'RevisionConflict',
-      currentRevision: 0,
-    }));
+    })).toEqual({
+      kind: 'refused',
+      wire_version: 1,
+      refusal: { kind: 'revision_conflict', expected: 0, actual: 0 },
+    });
     expect(
       db.oneRaw(
         'SELECT wisdom, revision FROM characters WHERE id = ?',
@@ -179,12 +178,12 @@ describe('command idempotency and stale-slot merge guards', () => {
     const firstSlotId = slotIds[0]!;
     const secondSlotId = slotIds[1]!;
 
-    const cleared = await executor.execute({
+    const cleared = expectOkOutcome(await executor.execute({
       character_id: characterId,
       operation_uuid: operationA,
       expected_revision: 0,
       command: { type: 'set_slot', slot_id: firstSlotId, mode: 'clear' },
-    });
+    }));
     expect(cleared.inverse).toMatchObject({
       type: 'set_slot',
       slot_id: firstSlotId,
@@ -212,22 +211,24 @@ describe('command idempotency and stale-slot merge guards', () => {
         ),
       ),
     ).toEqual(cleared.inverse);
-    const merged = await executor.execute({
+    const merged = expectOkOutcome(await executor.execute({
       character_id: characterId,
       operation_uuid: operationB,
       expected_revision: 0,
       command: { type: 'set_slot', slot_id: secondSlotId, mode: 'clear' },
-    });
+    }));
     expect(merged.revision).toBe(2);
 
-    await expect(
-      executor.execute({
+    expect(await executor.execute({
         character_id: characterId,
         operation_uuid: operationC,
         expected_revision: 0,
         command: { type: 'set_slot', slot_id: firstSlotId, mode: 'clear' },
-      }),
-    ).rejects.toBeInstanceOf(RevisionConflict);
+    })).toEqual({
+      kind: 'refused',
+      wire_version: 1,
+      refusal: { kind: 'revision_conflict', expected: 0, actual: 2 },
+    });
 
     expect(
       db.allRaw(

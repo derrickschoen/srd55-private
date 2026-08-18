@@ -7,8 +7,3 @@ export interface AttunementOccupant {
   readonly item_id: number;
   readonly name: string;
 }
-
-export interface AttunementSlotsFullData {
-  readonly reason: 'attunement_slots_full';
-  readonly occupants: readonly AttunementOccupant[];
-}

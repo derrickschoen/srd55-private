@@ -17,6 +17,7 @@ import {
 } from '../handler';
 import { characterCommandRpcError } from '../character-command-errors';
 import { COMMAND_INTEGRITY_KEY } from './commands';
+import { ok, type Outcome } from '../../refusals/outcome';
 
 const LEVEL_UP_PREVIEW_ROLLBACK = new Error(
   'Rollback successful level-up preview.',
@@ -69,32 +70,45 @@ function newOutstandingChoices(
 async function previewLevelUp(
   db: DatabaseContext,
   params: LevelUpPreviewParams,
-): Promise<LevelUpPreviewResult> {
+): Promise<Outcome<LevelUpPreviewResult>> {
   const preflight = new CharacterCommandPreflight(
     db,
     new CharacterCommandIntegrity(COMMAND_INTEGRITY_KEY),
   );
-  const prepared = await preflight.prepare(params);
+  const preparedOutcome = await preflight.prepare(params);
+  if (preparedOutcome.kind === 'refused') return preparedOutcome;
+  const prepared = preparedOutcome.value;
   const before = new CharacterSheetBuilder(db).build(params.character_id);
   const beforeCompleteness = new CharacterCompletenessQueries(db).build(
     params.character_id,
   );
-  let result: LevelUpPreviewResult | null = null;
+  let result: Outcome<LevelUpPreviewResult> | null = null;
 
   try {
     db.transaction(() => {
-      preflight.assertExpectedRevision(params, prepared.payload);
+      const revision = preflight.assertExpectedRevision(
+        params,
+        prepared.payload,
+      );
+      if (revision.kind === 'refused') {
+        result = revision;
+        throw LEVEL_UP_PREVIEW_ROLLBACK;
+      }
       const applied = prepared.command.apply(params.character_id);
       if (applied instanceof Promise) {
         throw new Error(
           `Command ${prepared.payload.type} cannot preview asynchronously inside SQLite.`,
         );
       }
+      if (applied.kind === 'refused') {
+        result = applied;
+        throw LEVEL_UP_PREVIEW_ROLLBACK;
+      }
       const after = new CharacterSheetBuilder(db).build(params.character_id);
       const afterCompleteness = new CharacterCompletenessQueries(db).build(
         params.character_id,
       );
-      result = {
+      result = ok({
         before,
         after,
         new_outstanding_choices: newOutstandingChoices(
@@ -102,7 +116,7 @@ async function previewLevelUp(
           [...afterCompleteness.items, ...afterCompleteness.catalog_gaps],
         ),
         command_fingerprint: canonicalJson(prepared.payload),
-      };
+      });
       throw LEVEL_UP_PREVIEW_ROLLBACK;
     });
   } catch (error) {

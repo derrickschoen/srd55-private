@@ -17,6 +17,7 @@ import {
   interactiveElement,
   type InteractiveTestElement,
 } from '../../fixtures/interactive-dom';
+import { ok } from '../../../src/refusals/outcome';
 
 /**
  * THE SKILLS STEP'S DOM (S-C): the already-granted display, the ADDRESSED
@@ -117,7 +118,7 @@ function acolyteFighterState(): GuidedSkillsStepState {
 function stepWith(
   state: GuidedSkillsStepState,
   fill = vi.fn(() =>
-    Promise.resolve({ character_id: 7, current_step: 'skills' as const }),
+    Promise.resolve(ok({ character_id: 7, current_step: 'skills' as const })),
   ),
   navigate = vi.fn(),
 ) {

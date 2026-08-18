@@ -41,6 +41,7 @@ import {
   type SqlRow,
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
+import { ok, type Outcome } from '../refusals/outcome';
 import {
   abilities,
   abilityAllocationMethods,
@@ -656,7 +657,7 @@ export function guidedBuildState(
 /**
  * A DOMAIN refusal, distinct from an unexpected failure. The worker handler
  * translates it to `handler_error` with structured `data` (the seam's
- * `GuidedRefusalData`), following the `RevisionConflict` precedent — a bare
+ * `GuidedRefusalData`) until that endpoint is migrated to `Outcome`; a bare
  * SQL or generator failure stays a bare `handler_error` with no reason.
  */
 export class GuidedCreationRefusal extends Error {
@@ -830,7 +831,7 @@ export function createGuidedCharacter(
     const definition = gateBundledClass(db, params.class_content_key);
     const crud = new CharacterCrud(db);
     const created = crud.create({ name: params.name });
-    new UpdateClassCommand(
+    const applied = new UpdateClassCommand(
       db,
       {
         type: 'update_class',
@@ -838,6 +839,7 @@ export function createGuidedCharacter(
       },
       integrity,
     ).apply(created.id);
+    void applied.value;
     return crud.get(created.id);
   });
 }
@@ -1977,8 +1979,8 @@ export async function allocateGuidedAbilities(
   db: DatabaseContext,
   params: GuidedAllocateAbilitiesParams,
   integrity: CharacterCommandIntegrity,
-): Promise<GuidedAllocateAbilitiesResult> {
-  await new CharacterCommandExecutor(db, integrity).execute({
+): Promise<Outcome<GuidedAllocateAbilitiesResult>> {
+  const executed = await new CharacterCommandExecutor(db, integrity).execute({
     character_id: params.character_id,
     operation_uuid: params.operation_uuid,
     expected_revision: params.expected_revision,
@@ -1988,6 +1990,7 @@ export async function allocateGuidedAbilities(
       scores: params.scores,
     },
   });
+  if (executed.kind === 'refused') return executed;
 
   // The atomic allocation above is the completion boundary. Its durable
   // values supersede the UI-only draft, which must not reappear on a later
@@ -2009,13 +2012,13 @@ export async function allocateGuidedAbilities(
     });
   }
 
-  return {
+  return ok({
     character_id: params.character_id,
     current_step: deriveBuildStep(
       readGuidedStepEvidence(db, params.character_id),
     ),
     warnings,
-  };
+  });
 }
 
 /* --------------------------------------------- S-B: the skills fill command */
@@ -2202,8 +2205,8 @@ export async function fillGuidedSkillGrant(
   db: DatabaseContext,
   params: GuidedFillSkillGrantParams,
   integrity: CharacterCommandIntegrity,
-): Promise<GuidedFillSkillGrantResult> {
-  await new CharacterCommandExecutor(db, integrity).execute({
+): Promise<Outcome<GuidedFillSkillGrantResult>> {
+  const executed = await new CharacterCommandExecutor(db, integrity).execute({
     character_id: params.character_id,
     operation_uuid: params.operation_uuid,
     expected_revision: params.expected_revision,
@@ -2213,13 +2216,14 @@ export async function fillGuidedSkillGrant(
       skill: params.skill,
     },
   });
+  if (executed.kind === 'refused') return executed;
 
-  return {
+  return ok({
     character_id: params.character_id,
     current_step: deriveBuildStep(
       readGuidedStepEvidence(db, params.character_id),
     ),
-  };
+  });
 }
 
 export function guidedExpertiseStepState(
