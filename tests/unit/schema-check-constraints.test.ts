@@ -2,6 +2,7 @@ import sqlite3InitModule, {
   type Database,
   type Sqlite3Static,
 } from '@sqlite.org/sqlite-wasm';
+import { registerSqliteQueryEngine } from '../../src/db/query';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ContentKind } from '../../src/catalog/content-identity';
 import { DatabaseContext } from '../../src/db/database';
@@ -4391,6 +4392,7 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
 
     beforeAll(async () => {
       sqlite3 = await sqlite3InitModule();
+      registerSqliteQueryEngine(sqlite3);
       db = new sqlite3.oo1.DB(':memory:', 'c');
       openDatabases.push(db);
       db.exec(schemaSql);

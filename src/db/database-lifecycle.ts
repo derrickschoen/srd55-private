@@ -25,6 +25,7 @@ import {
   validateCatalogDataMigrationRegistry,
 } from '../catalog/catalog-data-migrations';
 import type { DatabaseBootStage } from './database-boot-progress';
+import { registerSqliteQueryEngine } from './query';
 
 /**
  * Every table an application database image must contain.
@@ -224,7 +225,9 @@ export class DatabaseLifecycle {
       CATALOG_DATA_MIGRATIONS,
     private readonly onProgress: (stage: DatabaseBootStage) => void =
       () => undefined,
-  ) {}
+  ) {
+    registerSqliteQueryEngine(sqlite3);
+  }
 
   get database(): DatabaseContext {
     if (this.#context === null || !this.#context.isOpen) {
