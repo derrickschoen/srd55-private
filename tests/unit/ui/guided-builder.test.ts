@@ -58,7 +58,7 @@ import {
   interactiveElement,
 } from '../../fixtures/interactive-dom';
 import {
-  createRpcHarness,
+  createSeededRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
 
@@ -298,7 +298,7 @@ describe('guided class chooser', () => {
   });
 
   it('explains the real homebrew-class refusal honestly and does not navigate', async () => {
-    harness = await createRpcHarness([]);
+    harness = await createSeededRpcHarness([]);
     const contentKey = '2024:test.homebrew:homebrew-refusal';
     registerFixtureContentIdentity(harness.context.db, {
       kind: 'class', contentKey, name: 'Homebrew Refusal Class',
@@ -327,7 +327,7 @@ describe('guided class chooser', () => {
   });
 
   it('explains the real absent-class refusal honestly and does not navigate', async () => {
-    harness = await createRpcHarness([]);
+    harness = await createSeededRpcHarness([]);
     const contentKey = 'test:class:absent-refusal';
     const navigations: string[] = [];
     const chooser = createClassChooser({

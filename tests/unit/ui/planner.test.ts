@@ -50,7 +50,7 @@ import {
   interactiveElement,
 } from '../../fixtures/interactive-dom';
 import { handlers as queryHandlers } from '../../../src/worker/handlers/queries';
-import { createRpcHarness } from '../../helpers/rpc-harness';
+import { createSeededRpcHarness } from '../../helpers/rpc-harness';
 import { createBuildReportFixture } from '../../integration/reports/build-report-fixture';
 
 const NOOP_EDITOR_ACTIONS: PlannerEditorActions = {
@@ -452,7 +452,7 @@ describe('planner catalog disclosure', () => {
   });
 
   it('returns a persisted external spell layer through the live workspace RPC', async () => {
-    const harness = await createRpcHarness(queryHandlers);
+    const harness = await createSeededRpcHarness(queryHandlers);
     try {
       const fixture = createBuildReportFixture(harness.context.db);
       const response = await harness.call<

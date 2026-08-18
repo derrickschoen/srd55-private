@@ -35,6 +35,7 @@ import { guidedSpeciesChoiceState } from '../../../src/builder/species-choice';
 import { rpcRegistry } from '../../../src/worker/registry';
 import {
   createRpcHarness,
+  createSeededRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
 import {
@@ -63,6 +64,11 @@ afterEach(() => {
 });
 
 async function applicationDatabase(): Promise<RpcHarness> {
+  harness = await createSeededRpcHarness([]);
+  return harness;
+}
+
+async function freshApplicationDatabase(): Promise<RpcHarness> {
   harness = await createRpcHarness([]);
   return harness;
 }
@@ -1854,7 +1860,7 @@ describe('configured species choice and honest projection', () => {
 
 describe('bundled species definition seed', () => {
   it('is idempotent across repeated application boot seeds', async () => {
-    const rpcHarness = await applicationDatabase();
+    const rpcHarness = await freshApplicationDatabase();
     const db = rpcHarness.context.db;
     const before = db.allRaw(
       `SELECT id, content_key, name, rules_edition, grant_rules
@@ -1917,7 +1923,7 @@ describe('bundled species definition seed', () => {
   });
 
   it('yields the bundled name-and-edition slot to a homebrew definition', async () => {
-    const rpcHarness = await applicationDatabase();
+    const rpcHarness = await freshApplicationDatabase();
     const db = rpcHarness.context.db;
     const elf = speciesNamed(db, 'Elf');
     const bundledSlot = db.allRaw(

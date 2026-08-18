@@ -14,7 +14,6 @@ import type {
   LevelUpClassCommand as LevelUpClassPayload,
 } from '../../../src/domain/command-contracts';
 import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
-import { applicationSeed } from '../../../src/db/bootstrap';
 import { BUNDLED_HOMEBREW_CATALOG } from '../../../src/authoring/bundled-homebrew-catalog';
 import {
   commitBundledHomebrewInstall,
@@ -24,11 +23,11 @@ import { GrantRuleSlotGenerator } from '../../../src/grants/grant-rule-slot-gene
 import { LevelUpPlannedEligibleSpells } from '../../../src/queries/level-up-planned-eligible-spells';
 import { CharacterCompletenessQueries } from '../../../src/queries/character-completeness';
 import { EligibleSpellSearch } from '../../../src/eligibility/eligible-spell-search';
-import { openTestDatabase } from '../../helpers/open-db';
+import { openSeededTestDatabase } from '../../helpers/open-db';
 import { raiseClassLevelForTest } from '../../helpers/class-levels';
 import { LEVEL_UP_RPC } from '../../../src/builder/level-up-wizard';
 import { rpcRegistry } from '../../../src/worker/registry';
-import { createRpcHarness } from '../../helpers/rpc-harness';
+import { createSeededRpcHarness } from '../../helpers/rpc-harness';
 
 /**
  * THE ONE LEVELLING PATH (straight-class level-up plan §3/§8b, reduced by
@@ -178,9 +177,8 @@ describe('level_up_class', () => {
   }
 
   beforeEach(async () => {
-    connection = await openTestDatabase();
+    connection = await openSeededTestDatabase();
     db = new DatabaseContext(connection);
-    applicationSeed(db);
     integrity = new CharacterCommandIntegrity('level-up-class-test-key');
     // Constitution 14 (+2), so the computed hit points move with a real
     // modifier rather than a zero that hides a dropped term.
@@ -1038,7 +1036,7 @@ describe('level_up_class', () => {
 
   // Measured alone at 2.59s; 20s retains contention headroom.
   it('resolves published Spell Student by logical locator before its source row exists', async () => {
-    const harness = await createRpcHarness([]);
+    const harness = await createSeededRpcHarness([]);
     try {
       db = harness.context.db;
       integrity = new CharacterCommandIntegrity('level-up-class-rpc-test-key');

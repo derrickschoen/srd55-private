@@ -14,7 +14,7 @@ import {
   handlers as commandHandlers,
 } from '../../../src/worker/handlers/commands';
 import {
-  createRpcHarness,
+  createSeededRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
 import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
@@ -32,7 +32,7 @@ describe('internal operation undo RPC', () => {
   let characterId: number;
 
   beforeEach(async () => {
-    harness = await createRpcHarness(commandHandlers);
+    harness = await createSeededRpcHarness(commandHandlers);
     characterId = harness.context.db.exec(
       `INSERT INTO characters (name, alignment)
        VALUES ('Undo RPC Hero', 'Neutral')`,
