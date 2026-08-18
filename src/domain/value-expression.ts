@@ -5,6 +5,7 @@ import {
   type CharacterLevel,
 } from './enums';
 import type { ClassLevel, ContentKey } from './ids';
+import { ValueExpressionUnhandledError } from './value-expression-errors';
 
 export type NonEmpty<T> = readonly [T, ...T[]];
 
@@ -187,7 +188,10 @@ function decodeValueSource(value: unknown): ValueSource | null {
        sentinel turns a new source kind into a compile error here. */
     default: {
       const unreachable: never = kind;
-      throw new Error(`Unhandled value source kind ${String(unreachable)}.`);
+      throw new ValueExpressionUnhandledError(
+        'value source kind',
+        String(unreachable),
+      );
     }
   }
 }
@@ -207,7 +211,10 @@ function decodeLevelSource(value: unknown): LevelSource | null {
        source decision rather than silently becoming eligible. */
     default: {
       const unreachable: never = decoded;
-      throw new Error(`Unhandled level source ${String(unreachable)}.`);
+      throw new ValueExpressionUnhandledError(
+        'level source',
+        String(unreachable),
+      );
     }
   }
 }
@@ -407,8 +414,9 @@ function decodeExpression(
        sentinel turns a new expression kind into a compile error here. */
     default: {
       const unreachable: never = kind;
-      throw new Error(
-        `Unhandled value expression kind ${String(unreachable)}.`,
+      throw new ValueExpressionUnhandledError(
+        'value expression kind',
+        String(unreachable),
       );
     }
   }
@@ -470,7 +478,10 @@ function resolveSource(
        silently resolve as a plausible number. */
     default: {
       const unreachable: never = source;
-      throw new Error(`Unhandled value source ${String(unreachable)}.`);
+      throw new ValueExpressionUnhandledError(
+        'value source',
+        String(unreachable),
+      );
     }
   }
 }
@@ -603,8 +614,9 @@ export function evaluateValue(
        cannot become a silent no-op. */
     default: {
       const unreachable: never = expression;
-      throw new Error(
-        `Unhandled value expression ${String(unreachable)}.`,
+      throw new ValueExpressionUnhandledError(
+        'value expression',
+        String(unreachable),
       );
     }
   }

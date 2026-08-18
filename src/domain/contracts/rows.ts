@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { InferSelectModel } from 'drizzle-orm';
+import { RowColumnFactsMissingError } from './rows-errors';
 import {
   COLUMN_FACTS,
   type AnyColumnKey,
@@ -1571,7 +1572,7 @@ function columnSchema(table: RowContractTable, column: string): z.ZodType {
   ];
   /* c8 ignore next 3 -- unreachable: the caller iterates COLUMN_FACTS[table]. */
   if (fact === undefined) {
-    throw new Error(`No column facts for ${table}.${column}.`);
+    throw new RowColumnFactsMissingError(table, column);
   }
   // A degraded column always has either a JSON classification or a refinement
   // (compile-enforced above); an integer column falls back to what drizzle-zod

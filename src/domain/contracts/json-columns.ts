@@ -4,6 +4,7 @@ import {
   type FactTable,
 } from './generated/column-facts';
 import { abilities, isEnumValue } from '../enums';
+import { JsonColumnFactsMissingError } from './json-columns-errors';
 
 /**
  * WHICH TEXT COLUMNS HOLD SERIALIZED JSON, AND WHAT SHAPE EACH READER NEEDS.
@@ -227,7 +228,7 @@ export function jsonColumnLocation(key: JsonColumnKey): {
   const column = key.slice(separator + 1);
   /* c8 ignore next 3 -- unreachable: the keys are compile-checked above. */
   if (!Object.hasOwn(COLUMN_FACTS, table)) {
-    throw new Error(`No column facts for ${key}.`);
+    throw new JsonColumnFactsMissingError(key);
   }
   return { table, column };
 }

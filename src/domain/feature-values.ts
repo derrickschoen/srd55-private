@@ -7,6 +7,7 @@ import type {
 } from './computed';
 import { sourceRefKey } from './computed';
 import type { ContentKey } from './ids';
+import { FeatureValueTargetUnhandledError } from './feature-values-errors';
 
 export const featureValueKeys = ['sneak_attack'] as const;
 export type FeatureValueKey = (typeof featureValueKeys)[number];
@@ -96,9 +97,7 @@ function sameTarget(
        so cross-target supersession can never become plausible. */
     default: {
       const unreachable: never = left;
-      throw new Error(
-        `Unhandled feature value target ${String(unreachable)}.`,
-      );
+      throw new FeatureValueTargetUnhandledError(String(unreachable));
     }
   }
 }
