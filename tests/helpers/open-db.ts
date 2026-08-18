@@ -7,12 +7,16 @@ import {
   openDatabaseImage,
   type DatabaseStorage,
 } from '../../src/db/database-lifecycle';
+import { registerSqliteQueryEngine } from '../../src/db/query';
 import { attachSqlTrace } from './sql-trace';
 
 let sqlitePromise: Promise<Sqlite3Static> | undefined;
 
 export function getSqlite3(): Promise<Sqlite3Static> {
-  sqlitePromise ??= sqlite3InitModule();
+  sqlitePromise ??= sqlite3InitModule().then((sqlite3) => {
+    registerSqliteQueryEngine(sqlite3);
+    return sqlite3;
+  });
   return sqlitePromise;
 }
 

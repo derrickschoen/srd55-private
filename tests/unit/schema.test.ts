@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { schemaSources } from '../helpers/schema-sources';
 import { DatabaseContext } from '../../src/db/database';
+import { registerSqliteQueryEngine } from '../../src/db/query';
 import { registerFixtureContentIdentity } from '../helpers/content-identity';
 import preDrizzleSchema from '../fixtures/schema-pre-drizzle.sql?raw';
 
@@ -1935,6 +1936,7 @@ function foreignKeys(db: Database, table: string): string[] {
 
 beforeAll(async () => {
   sqlite3 = await sqlite3InitModule();
+  registerSqliteQueryEngine(sqlite3);
 });
 
 afterAll(() => {

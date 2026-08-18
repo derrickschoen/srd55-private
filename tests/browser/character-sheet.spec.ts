@@ -3,6 +3,7 @@ import type { Database } from '@sqlite.org/sqlite-wasm';
 import type { Locator, Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { DatabaseContext } from '../../src/db/database';
+import { registerSqliteQueryEngine } from '../../src/db/query';
 import {
   TABLE_SCOPES,
   type TablesWithRole,
@@ -208,6 +209,7 @@ function assignSpell(
 
 async function sheetImage(): Promise<SheetImage> {
   const sqlite3 = await sqlite3InitModule();
+  registerSqliteQueryEngine(sqlite3);
   const connection = new sqlite3.oo1.DB(':memory:', 'c');
   connection.exec(schema);
   const db = new DatabaseContext(connection);
@@ -484,6 +486,7 @@ async function sheetImage(): Promise<SheetImage> {
 
 async function retirementSheetImage(): Promise<RetirementSheetImage> {
   const sqlite3 = await sqlite3InitModule();
+  registerSqliteQueryEngine(sqlite3);
   const connection = new sqlite3.oo1.DB(':memory:', 'c');
   connection.exec(schema);
   const db = new DatabaseContext(connection);
@@ -495,6 +498,7 @@ async function retirementSheetImage(): Promise<RetirementSheetImage> {
 
 async function resourceShapeImage(): Promise<SheetImage> {
   const sqlite3 = await sqlite3InitModule();
+  registerSqliteQueryEngine(sqlite3);
   const connection = new sqlite3.oo1.DB(':memory:', 'c');
   connection.exec(schema);
   const db = new DatabaseContext(connection);
@@ -541,6 +545,7 @@ async function resourceShapeImage(): Promise<SheetImage> {
 
 async function monkShieldImage(): Promise<SheetImage> {
   const sqlite3 = await sqlite3InitModule();
+  registerSqliteQueryEngine(sqlite3);
   const connection = new sqlite3.oo1.DB(':memory:', 'c');
   connection.exec(schema);
   const db = new DatabaseContext(connection);
@@ -583,6 +588,7 @@ async function monkShieldImage(): Promise<SheetImage> {
 
 async function armadilloArmorImage(): Promise<SheetImage> {
   const sqlite3 = await sqlite3InitModule();
+  registerSqliteQueryEngine(sqlite3);
   const connection = new sqlite3.oo1.DB(':memory:', 'c');
   connection.exec(schema);
   const db = new DatabaseContext(connection);
@@ -617,6 +623,7 @@ async function armadilloArmorImage(): Promise<SheetImage> {
 
 async function armadilloItemsImage(): Promise<SheetImage> {
   const sqlite3 = await sqlite3InitModule();
+  registerSqliteQueryEngine(sqlite3);
   const connection = new sqlite3.oo1.DB(':memory:', 'c');
   connection.exec(schema);
   const db = new DatabaseContext(connection);
@@ -650,6 +657,7 @@ async function armadilloItemsImage(): Promise<SheetImage> {
 
 async function abilityOverrideImage(): Promise<SheetImage> {
   const sqlite3 = await sqlite3InitModule();
+  registerSqliteQueryEngine(sqlite3);
   const connection = new sqlite3.oo1.DB(':memory:', 'c');
   connection.exec(schema);
   const db = new DatabaseContext(connection);
@@ -697,6 +705,7 @@ async function abilityOverrideImage(): Promise<SheetImage> {
 
 async function featureValueSheetImage(): Promise<FeatureValueSheetImage> {
   const sqlite3 = await sqlite3InitModule();
+  registerSqliteQueryEngine(sqlite3);
   const connection = new sqlite3.oo1.DB(':memory:', 'c');
   connection.exec(schema);
   const db = new DatabaseContext(connection);

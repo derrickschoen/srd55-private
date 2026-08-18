@@ -1,6 +1,7 @@
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import { readFileSync } from 'node:fs';
 import { DatabaseContext } from '../../src/db/database';
+import { registerSqliteQueryEngine } from '../../src/db/query';
 import {
   addClassLevel,
   createBuildReportFixture,
@@ -21,6 +22,7 @@ const schema = readFileSync(
 
 async function plannerFixture() {
   const sqlite3 = await sqlite3InitModule();
+  registerSqliteQueryEngine(sqlite3);
   const connection = new sqlite3.oo1.DB(':memory:', 'c');
   connection.exec(schema);
   const db = new DatabaseContext(connection);
@@ -40,6 +42,7 @@ async function plannerFixture() {
 
 async function mobilePlannerFixture() {
   const sqlite3 = await sqlite3InitModule();
+  registerSqliteQueryEngine(sqlite3);
   const connection = new sqlite3.oo1.DB(':memory:', 'c');
   connection.exec(schema);
   const db = new DatabaseContext(connection);
@@ -65,6 +68,7 @@ async function mobilePlannerFixture() {
 
 async function contributionPlannerFixture() {
   const sqlite3 = await sqlite3InitModule();
+  registerSqliteQueryEngine(sqlite3);
   const connection = new sqlite3.oo1.DB(':memory:', 'c');
   connection.exec(schema);
   const db = new DatabaseContext(connection);
@@ -92,6 +96,7 @@ async function contributionPlannerFixture() {
 
 async function attunementPlannerFixture() {
   const sqlite3 = await sqlite3InitModule();
+  registerSqliteQueryEngine(sqlite3);
   const connection = new sqlite3.oo1.DB(':memory:', 'c');
   connection.exec(schema);
   const db = new DatabaseContext(connection);
@@ -121,6 +126,7 @@ async function attunementPlannerFixture() {
 
 async function catalogItemPlannerFixture() {
   const sqlite3 = await sqlite3InitModule();
+  registerSqliteQueryEngine(sqlite3);
   const connection = new sqlite3.oo1.DB(':memory:', 'c');
   connection.exec(schema);
   const db = new DatabaseContext(connection);

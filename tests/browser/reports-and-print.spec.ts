@@ -2,6 +2,7 @@ import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import type { Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { DatabaseContext } from '../../src/db/database';
+import { registerSqliteQueryEngine } from '../../src/db/query';
 import { createBuildReportFixture } from '../integration/reports/build-report-fixture';
 import { expect, test } from './fixtures/parallel-test';
 
@@ -18,6 +19,7 @@ interface FixtureImage {
 
 async function fixtureImage(): Promise<FixtureImage> {
   const sqlite3 = await sqlite3InitModule();
+  registerSqliteQueryEngine(sqlite3);
   const connection = new sqlite3.oo1.DB(':memory:', 'c');
   connection.exec(schema);
   const db = new DatabaseContext(connection);

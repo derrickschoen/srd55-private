@@ -12,8 +12,10 @@ import {
 } from '../src/catalog/bundled-content-digest-v1.expected';
 import { canonicalContentIdentityJson } from '../src/catalog/content-identity';
 import { sha256 } from '../src/crypto/sha256';
+import { registerSqliteQueryEngine } from '../src/db/query';
 
 const sqlite3 = await sqlite3InitModule();
+registerSqliteQueryEngine(sqlite3);
 const connection = new sqlite3.oo1.DB(':memory:', 'c');
 try {
   prepareConnection(connection);
