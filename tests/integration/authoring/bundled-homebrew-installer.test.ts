@@ -117,7 +117,8 @@ it('keeps ui-hidden bundled content loadable while excluding it from user-facing
   expect(new CatalogQueries(db).read().subclasses).not.toEqual(
     expect.arrayContaining([expect.objectContaining({ content_key: contentKey })]),
   );
-});
+  // Same long-running-integration timeout every sibling in this file declares.
+}, 20_000);
 
 function installPortableOrigins(db: DatabaseContext): {
   readonly speciesKey: ContentKey;
