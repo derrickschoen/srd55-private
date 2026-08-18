@@ -28,6 +28,9 @@ export default defineConfig({
     // Run BOTH unit and integration .test.ts under vitest. Browser tests are
     // .spec.ts under tests/browser and belong to Playwright (npm run test:browser).
     include: ['tests/**/*.test.ts', ...liveInclusions],
+    // Shared workers require every test to restore mocks, globals, environments,
+    // native-prototype mutations, and scoped module mocks at its suite boundary.
+    isolate: false,
     clearMocks: true,
     restoreMocks: true,
     unstubGlobals: true,
