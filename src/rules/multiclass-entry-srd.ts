@@ -21,7 +21,7 @@
  * is diffable against the extract, and a value that is not in the extract
  * cannot reach the database.
  *
- * FOUR HAZARDS IN THIS EXTRACT, EACH MEASURED AND EACH BREAKING A DIFFERENT
+ * THREE HAZARDS IN THIS EXTRACT, EACH MEASURED AND EACH BREAKING A DIFFERENT
  * NAIVE PARSER:
  *
  *  1. HYPHENATION ACROSS LINE BREAKS. Every one of the four Martial grants is
@@ -30,7 +30,7 @@
  *     the weapon category `Mar`. `class-traits-srd.ts` has no dehyphenation step
  *     because `class-core-traits.txt` never needed one; this file needs it.
  *  2. BLANK LINES INSIDE SINGLE SENTENCES. Cleric L53-57, Druid L62-66, Fighter
- *     L75-79, Paladin L105-109 and Wizard L169-172 all break mid-sentence. The
+ *     L75-79, Paladin L105-110 and Wizard L170-173 all break mid-sentence. The
  *     Druid's grant sentence alone spans L62-66 with two interior blanks. A
  *     blank line is NOT a record separator here.
  *  3. THE BULLET GLYPHS ARE MISSING FOR TWO CLASSES. Cleric and Wizard carry
@@ -39,11 +39,6 @@
  *     and the cut lands right of the bullet column. So "count the bullets" is
  *     not a safe parse, and the Cleric's trait list runs into its level-1
  *     features sentence as one unbulleted block.
- *  4. THE SLICES ARE LOSSY AT BOTH EDGES. L174 reads `izard Class Features` —
- *     the `W` clipped by the same offset — and the Paladin's second bullet stops
- *     mid-word at L108. The file's own header says "Nothing is edited out"; that
- *     is not literally true, and no parse here may depend on it.
- *
  * THE ANSWER IS TO READ ONE SENTENCE, NOT ONE LINE. Each class's block is
  * joined into a single string with hyphens closed up, and the GRANT SENTENCE is
  * then the text between `Traits table:` (or `Gain the Hit Point Die`) and the

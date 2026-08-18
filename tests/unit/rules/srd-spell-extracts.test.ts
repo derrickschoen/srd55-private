@@ -530,6 +530,30 @@ describe('SRD spell extracts', () => {
     ).toBe(true);
   });
 
+  it('ships reflowed prose while preserving lexical compound hyphens', () => {
+    const spells = new Map(
+      parseSrdSpellDescriptions().map((spell) => [spell.name, spell.description]),
+    );
+    expect(
+      [...spells.values()].filter((description) =>
+        /[A-Za-z]-[ \t]*\n(?:[ \t]*\n)*[ \t]*[a-z]/u.test(description),
+      ),
+    ).toEqual([]);
+    expect(spells.get('Contact Other Plane')).toContain('long-dead sage');
+    expect(spells.get('Flame Strike')).toContain('40-foot-high Cylinder');
+    expect(spells.get('Magnificent Mansion')).toContain('nine-course banquet');
+    expect(spells.get('Wall of Stone')).toContain('10-foot-by-20-foot panels');
+  });
+
+  it('includes the repaired Telekinesis sentence tail', () => {
+    const telekinesis = parseSrdSpellDescriptions().find(
+      (spell) => spell.name === 'Telekinesis',
+    );
+    expect(telekinesis?.description).toMatch(
+      /opening a door or a container, stowing or retrieving an item\s+from an open container, or pouring the contents from a vial\./u,
+    );
+  });
+
   it('parses every list row with per-list extract counts and the one known omission', () => {
     const memberships = parseSrdSpellListMemberships();
     const descriptions = new Set(EXPECTED_SPELL_NAMES);
