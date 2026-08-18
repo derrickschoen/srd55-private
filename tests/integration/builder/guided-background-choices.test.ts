@@ -28,7 +28,7 @@ import {
 import backgroundsExtract from '../../../docs/srd/source/backgrounds.txt?raw';
 import { rpcRegistry } from '../../../src/worker/registry';
 import {
-  createRpcHarness,
+  createSeededRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
 import { createCharacter } from '../reports/build-report-fixture';
@@ -42,7 +42,7 @@ afterEach(() => {
 });
 
 async function applicationDatabase(): Promise<RpcHarness> {
-  const harness = await createRpcHarness([]);
+  const harness = await createSeededRpcHarness([]);
   harnesses.push(harness);
   return harness;
 }

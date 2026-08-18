@@ -1,8 +1,6 @@
 import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseContext } from '../../../src/db/database';
-import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
-import { seedSheetContent } from '../../../src/rules/sheet-srd';
 import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
 import { CharacterNotFoundError } from '../../../src/queries/character-crud';
 import { sheetSections } from '../../../src/ui/screens/sheet/sheet-view';
@@ -12,7 +10,7 @@ import {
 } from '../../../src/queries/print-appendix-preferences';
 import { characterEffects } from '../../../src/rules/origins';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
-import { openTestDatabase } from '../../helpers/open-db';
+import { openSeededTestDatabase } from '../../helpers/open-db';
 
 /**
  * THE SHEET, AGAINST A REAL DATABASE, WITH HAND-COMPUTED EXPECTATIONS.
@@ -56,10 +54,8 @@ describe('the derived character sheet', () => {
   }
 
   beforeEach(async () => {
-    connection = await openTestDatabase();
+    connection = await openSeededTestDatabase();
     db = new DatabaseContext(connection);
-    seedClassProgressions(db);
-    seedSheetContent(db);
     builder = new CharacterSheetBuilder(db);
     // Strength 15 (+2), Dexterity 14 (+2), Constitution 13 (+1),
     // Intelligence 12 (+1), Wisdom 11 (+0), Charisma 8 (−1).

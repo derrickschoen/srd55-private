@@ -24,7 +24,7 @@ import {
   interactiveElement,
 } from '../../fixtures/interactive-dom';
 import {
-  createRpcHarness,
+  createSeededRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
 import { createCharacter } from '../reports/build-report-fixture';
@@ -44,7 +44,7 @@ afterEach(() => {
 });
 
 async function applicationDatabase(): Promise<RpcHarness> {
-  harness = await createRpcHarness([]);
+  harness = await createSeededRpcHarness([]);
   return harness;
 }
 

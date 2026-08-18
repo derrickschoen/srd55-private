@@ -4,10 +4,7 @@ import { DatabaseContext } from '../../../src/db/database';
 import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
 import { WeaponQueries } from '../../../src/queries/weapons';
 import { AbilityScores } from '../../../src/rules/ability-scores';
-import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
-import { seedSheetContent } from '../../../src/rules/sheet-srd';
-import { seedWeaponContent } from '../../../src/rules/weapons-srd';
-import { openTestDatabase } from '../../helpers/open-db';
+import { openSeededTestDatabase } from '../../helpers/open-db';
 
 /**
  * THE TWO SCREENS, ABOUT ONE WEAPON, ON ONE CHARACTER.
@@ -115,11 +112,8 @@ describe('the sheet and the weapons panel agree about one weapon', () => {
   }
 
   beforeEach(async () => {
-    connection = await openTestDatabase();
+    connection = await openSeededTestDatabase();
     db = new DatabaseContext(connection);
-    seedClassProgressions(db);
-    seedSheetContent(db);
-    seedWeaponContent(db);
     characterId = db.exec(
       `INSERT INTO characters
          (name, strength, dexterity, constitution, intelligence, wisdom,
