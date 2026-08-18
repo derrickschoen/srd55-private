@@ -7,6 +7,35 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D307 — OWNER: stranger journey runs after the full queue lands (2026-08-18)
+
+The D303 fresh stranger journey (final pre-approval walkthrough) waits
+until homebrew v3 ui_hidden entries and D278 increment 4 are merged, so
+one walkthrough covers everything. The approval gate moves later; interim
+merges get spot-checks only.
+
+## D306 — OWNER: per-worker pre-seeded image lane approved, next wave (2026-08-18)
+
+The test-scaffolding cost (476k seed INSERTs + per-test schema DDL) may
+be attacked with a per-worker pre-seeded database image cloned per test.
+Constraints: opt-in helper path; seed, migration, digest, and corruption
+tests stay on the fresh-DDL path; image-equivalence provable.
+
+## D305 — OWNER: D280 mutation lanes take the box after the DB-perf trials (2026-08-18)
+
+Once the three trial lanes (idx5, builders, relgrowth) drain and merge,
+the next dispatch is the D280 leaf mutation tests + Stryker sharding
+tooling, ahead of inc5→simcore round 24, D278 increment 4, and homebrew
+v3.
+
+## D304 — OWNER: real index migration mechanism before any index lands (2026-08-18)
+
+Wipe-and-rebuild of persisted images that fail the schema signature is
+NOT the path, despite D60. A proper additive-index migration step in the
+database lifecycle must exist before any CREATE INDEX changes schema.sql.
+The mechanism is needed eventually anyway; build it now. Index trial
+evidence may still be gathered without landing schema changes.
+
 ## D303 — OWNER: full SRD corpus repair; staged re-review; mutation lanes next wave (2026-08-17)
 
 Corpus audit verdict (read-only lane; structural catalogs intact, prose
