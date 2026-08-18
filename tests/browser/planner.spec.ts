@@ -259,7 +259,13 @@ test('planner contains expanded reference tables within a mobile viewport', asyn
         display_name: 'Cleric 1',
         config: JSON.stringify({
           spellcasting_ability: 'wisdom',
-          divine_order: { chosen_option: 'Thaumaturge' },
+          divine_order: {
+            chosen_option: 'Thaumaturge',
+            // The configured-choice machinery records the granting list when
+            // the chosen option is the definition's bonus (update-source-config
+            // :258); this write long predates the D286 planner fix.
+            chosen_list: 'Cleric',
+          },
         }),
       }),
     );
@@ -448,7 +454,9 @@ test('planner editors, history, focus, keyboard, and responsive state persist', 
   await page.setViewportSize({ width: 375, height: 760 });
   await expect(page.locator('.planner-layout')).toHaveCSS(
     'grid-template-columns',
-    '351px',
+    // 375px viewport minus the 16px total padding the D286 M-M1 fix left
+    // after shrinking the planner gutters (was 24px -> 351px).
+    '359px',
   );
   await expect(page.getByText('No slots match these filters')).toBeVisible();
 
