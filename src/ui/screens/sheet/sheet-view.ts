@@ -1281,6 +1281,18 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
   }
   sections.push({ caption: 'Character', rows: identity });
 
+  if (sheet.unfinished_choices.length > 0) {
+    sections.push({
+      caption: 'Unfinished choices',
+      rows: sheet.unfinished_choices.map((choice, index) => ({
+        id: `unfinished_choice:${choice.kind}:${String(index)}`,
+        label: [{ text: choice.title, free_text: true }],
+        value: 'Unfinished',
+        detail: [{ text: choice.detail, free_text: true }],
+      })),
+    });
+  }
+
   const core: SheetRow[] = [
     numberRow(sheet.proficiency_bonus, true),
     numberRow(sheet.hit_point_maximum, false),
@@ -1950,6 +1962,7 @@ export function sheetFacts(sheet: CharacterSheet): Record<string, unknown> {
     weapon_proficiency_verdicts: sheet.proficiencies.weapons.map(
       (weapon) => weapon.verdict.kind,
     ),
+    unfinished_choices: sheet.unfinished_choices.map((choice) => choice.kind),
     warnings: sheet.warnings.map((warning) => warning.code),
     gaps: sheet.gaps.map((gap) => gap.kind),
   };

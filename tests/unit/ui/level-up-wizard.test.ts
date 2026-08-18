@@ -365,6 +365,7 @@ function sheet(options: {
     },
     hit_point_rolls: [],
     equipment_packages: [],
+    unfinished_choices: [],
     warnings: [],
     gaps: [],
   };
