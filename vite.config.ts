@@ -220,7 +220,10 @@ function forbidDrizzleAtRuntime(): Plugin {
 }
 
 const core = {
-  base: './',
+  // History routes are served through the host's SPA fallback. Assets must be
+  // rooted at the deployment origin so an entry document returned for a route
+  // such as /characters/1 does not request /characters/assets/index-*.js.
+  base: '/',
   cacheDir: process.env.STATIC_APP_CACHE_DIR ?? checkoutCacheDir,
   plugins: [forbidDrizzleAtRuntime()],
   worker: {
