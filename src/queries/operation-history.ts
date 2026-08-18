@@ -8,6 +8,14 @@ import {
 import type { DatabaseContext } from '../db/database';
 import type { JsonValue } from '../domain/models';
 
+/** A stored undo envelope has the right kind but an invalid action. */
+export class OperationHistoryEnvelopeError extends Error {
+  override readonly name = 'OperationHistoryEnvelopeError' as const;
+  constructor() {
+    super('Stored operation history envelope is invalid.');
+  }
+}
+
 export interface OperationDto {
   readonly id: number;
   readonly operation_uuid: string;
@@ -51,7 +59,7 @@ function historyAction(value: string): OperationDto['history_action'] {
   ) {
     const action = (parsed as Record<string, unknown>).action;
     if (action === 'undo' || action === 'redo') return action;
-    throw new Error('Stored operation history envelope is invalid.');
+    throw new OperationHistoryEnvelopeError();
   }
   return 'command';
 }
