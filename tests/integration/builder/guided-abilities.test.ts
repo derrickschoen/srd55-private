@@ -35,7 +35,7 @@ import { handlers as guidedHandlers } from '../../../src/worker/handlers/guided'
 import { rpcRegistry } from '../../../src/worker/registry';
 import { openTestDatabase } from '../../helpers/open-db';
 import {
-  createRpcHarness,
+  createSeededRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
 
@@ -144,7 +144,7 @@ function expectPersistedAllocation(
 
 describe('B1-ALLOC: allocation uses an explicit persisted signal', () => {
   it('distinguishes allocated all-10s from a fresh character with the same six scores', async () => {
-    harness = await createRpcHarness(guidedHandlers);
+    harness = await createSeededRpcHarness(guidedHandlers);
     const allocatedId = await guidedCharacter(harness, 'Allocated Tens');
     const freshId = await guidedCharacter(harness, 'Fresh Tens');
 
@@ -186,7 +186,7 @@ describe('B1-ALLOC: allocation uses an explicit persisted signal', () => {
 
 describe('M3-DRAFT: in-progress ability input uses durable per-character UI state', () => {
   it('round-trips the method and six scores without completing or revising the character, then clears on allocation', async () => {
-    harness = await createRpcHarness(guidedHandlers);
+    harness = await createSeededRpcHarness(guidedHandlers);
     const characterId = await guidedCharacter(harness, 'Drafted Scores');
     const scores: GuidedAbilityScores = {
       strength: 8,
@@ -269,7 +269,7 @@ describe('B1-BLOCK: warnings accompany successful allocations as result data', (
 
   for (const journey of journeys) {
     it(`${journey.name}: writes the signal and advances while returning the warning`, async () => {
-      harness = await createRpcHarness(guidedHandlers);
+      harness = await createSeededRpcHarness(guidedHandlers);
       const characterId = await guidedCharacter(
         harness,
         `Warning ${journey.name}`,
@@ -441,7 +441,7 @@ describe('allocation undo and pre-v8 snapshots', () => {
 
 describe('allocateGuidedAbilities direct real-database contract', () => {
   it('returns warning data after committing rather than using a refusal channel', async () => {
-    harness = await createRpcHarness([]);
+    harness = await createSeededRpcHarness([]);
     const characterId = await guidedCharacter(harness, 'Direct Allocation');
 
     await expect(

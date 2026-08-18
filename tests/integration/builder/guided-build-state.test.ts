@@ -11,7 +11,7 @@ import { rpcRegistry } from '../../../src/worker/registry';
 import { handlers as guidedHandlers } from '../../../src/worker/handlers/guided';
 import { openTestDatabase } from '../../helpers/open-db';
 import {
-  createRpcHarness,
+  createSeededRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
 import {
@@ -174,7 +174,7 @@ describe('guided build-state RPC registry contract', () => {
   });
 
   it('rejects a malformed params object as invalid_params through the registry', async () => {
-    harness = await createRpcHarness(guidedHandlers);
+    harness = await createSeededRpcHarness(guidedHandlers);
 
     await expect(
       rpcRegistry.dispatch(
@@ -192,7 +192,7 @@ describe('guided build-state RPC registry contract', () => {
   });
 
   it('returns the discriminated successful result through the registry', async () => {
-    harness = await createRpcHarness(guidedHandlers);
+    harness = await createSeededRpcHarness(guidedHandlers);
     const characterId = createCharacter(harness.context.db, 'RPC Classless');
 
     await expect(

@@ -28,7 +28,7 @@ import {
 } from '../../browser/fixtures/level-up-characters';
 import { raiseClassLevelForTest } from '../../helpers/class-levels';
 import {
-  createRpcHarness,
+  createSeededRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
 
@@ -66,7 +66,7 @@ describe('level-up rollback preview RPC', () => {
   let requestId: number;
 
   beforeEach(async () => {
-    harness = await createRpcHarness([]);
+    harness = await createSeededRpcHarness([]);
     requestId = 0;
   });
 

@@ -27,7 +27,7 @@ import {
 import { skillFromLabel } from '../../../src/rules/skills';
 import { rpcRegistry } from '../../../src/worker/registry';
 import {
-  createRpcHarness,
+  createSeededRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
 
@@ -56,7 +56,7 @@ afterEach(() => {
 });
 
 async function applicationDatabase(): Promise<RpcHarness> {
-  harness = await createRpcHarness([]);
+  harness = await createSeededRpcHarness([]);
   return harness;
 }
 

@@ -5,7 +5,6 @@ import { DatabaseContext } from '../../../src/db/database';
 import type { SlotBucket } from '../../../src/domain/enums';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import { openTestDatabase } from '../../helpers/open-db';
-import { applicationSeed } from '../../../src/db/bootstrap';
 import { BUNDLED_HOMEBREW_CATALOG } from '../../../src/authoring/bundled-homebrew-catalog';
 import {
   commitBundledHomebrewInstall,
@@ -13,7 +12,7 @@ import {
 } from '../../../src/authoring/bundled-homebrew-installer';
 import type { BuildReportResult } from '../../../src/reports/build-report-builder';
 import { rpcRegistry } from '../../../src/worker/registry';
-import { createRpcHarness } from '../../helpers/rpc-harness';
+import { createSeededRpcHarness } from '../../helpers/rpc-harness';
 
 interface SpellOptions {
   readonly level?: number;
@@ -654,10 +653,9 @@ describe('persisted spell access routes', () => {
 
   // Measured alone at 2.47s; 20s retains contention headroom.
   it('resolves the published Spell Student ability and proficiency override', async () => {
-    const harness = await createRpcHarness([]);
+    const harness = await createSeededRpcHarness([]);
     try {
       db = harness.context.db;
-      applicationSeed(db);
       const catalog = BUNDLED_HOMEBREW_CATALOG.filter(
         (entry) => entry.catalog_key === 'spell-student',
       );

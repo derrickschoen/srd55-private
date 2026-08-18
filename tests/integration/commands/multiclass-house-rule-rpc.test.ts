@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { handlers as commandHandlers } from '../../../src/worker/handlers/commands';
 import {
-  createRpcHarness,
+  createSeededRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
 
@@ -10,7 +10,7 @@ describe('multiclass prerequisite house rule through commands.execute', () => {
   let characterId: number;
 
   beforeEach(async () => {
-    harness = await createRpcHarness(commandHandlers);
+    harness = await createSeededRpcHarness(commandHandlers);
     characterId = harness.context.db.exec(
       `INSERT INTO characters (
          name, intelligence, wisdom, ability_allocation_method

@@ -33,6 +33,7 @@ import { raiseClassLevelForTest } from '../../helpers/class-levels';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import {
   createRpcHarness,
+  createSeededRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
 import {
@@ -142,6 +143,9 @@ const EXPECTED_SUBCLASS_VARIANTS = [
   },
 ] as const;
 
+const SEED_REPAIR_TEST_NAME =
+  'names stored subclass arrivals, discloses their layer and text state, and reports then repairs a missing promised row';
+
 /**
  * W-A's three state assertions and their negative-control candidates:
  *
@@ -226,8 +230,10 @@ describe('level-up wizard state RPC', () => {
     }
   }
 
-  beforeEach(async () => {
-    harness = await createRpcHarness(queryHandlers);
+  beforeEach(async ({ task }) => {
+    harness = task.name === SEED_REPAIR_TEST_NAME
+      ? await createRpcHarness(queryHandlers)
+      : await createSeededRpcHarness(queryHandlers);
     integrity = new CharacterCommandIntegrity('level-up-state-test-key');
   });
 
@@ -275,7 +281,7 @@ describe('level-up wizard state RPC', () => {
 
   // Measured alone with the production bundled-homebrew publisher at 3.6s;
   // 20s retains more than the required 1.5x contention headroom.
-  it('names stored subclass arrivals, discloses their layer and text state, and reports then repairs a missing promised row', () => {
+  it(SEED_REPAIR_TEST_NAME, () => {
     const targetFeatures = (
       characterId: number,
       definitionId: number,
