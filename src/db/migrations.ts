@@ -51,6 +51,7 @@ import sourceInstanceState from '../../drizzle/0047_source_instance_state.sql?ra
 import catalogContentVisibility from '../../drizzle/0048_catalog_content_visibility.sql?raw';
 import spellVersionsActiveLevelNameIndex from '../../drizzle/0049_spell_versions_active_level_name_index.sql?raw';
 import relationshipIndexes from '../../drizzle/0050_relationship_indexes.sql?raw';
+import fingerprintContentKeyIndex from '../../drizzle/0051_fingerprint_content_key_index.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -570,6 +571,14 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
     checksum: '97d527b2b9faffea01e5797ed79af1c4037a6e2cc2978b6173f281e18e7fc884',
     resultSchemaChecksum:
       'df23f859719a0c42427a3085c98b39b713e07ea2fcdd55fac9b6c04e6e5951af',
+  }),
+  Object.freeze({
+    id: '0051_fingerprint_content_key_index',
+    sql: fingerprintContentKeyIndex,
+    checksum:
+      'a6214a4cd17ee5d82e489a830ec02824921178fad663ce0da58e408bc43372f7',
+    resultSchemaChecksum:
+      '3b19cac16e39ab7a1023fc140a366318048334472e91fe358b5dbe74f0d9c003',
   }),
 ]);
 
