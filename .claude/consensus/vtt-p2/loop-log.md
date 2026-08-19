@@ -264,3 +264,21 @@ vitest + tsc for increments; full suite + build gate before wt/vtt→main).
   recorded). Next: increment 4b (spell manifest + mechanics), claimed
   by this session.
 
+## A11 — increment 4b-i: spell foundations + manifest + first batch (lane-wt/vtt3a)
+
+- Preceded by an honest codex infeasibility stop: 4b as one dispatch =
+  155+ spells with missing reducer foundations. Supervisor accepted the
+  finding and sub-chunked (foundations + burn-down manifest + batches).
+- Delivered: slots/upcast/components/casting economy, extended typed
+  effect union, 175-row cited manifest (33 implemented: all 20 cantrips
+  + 13 diverse L1; 142 pending, count pinned and may never increase),
+  typed partial residuals instead of silent fallbacks.
+- Supervisor verified: combat 234/234, sim unchanged 176/176, tsc both
+  clean, manifest recounted, Fire Bolt checked word-for-word at its
+  cited lines; own control (range 120->60) run against the COMMITTED
+  tree, killed by named test. Codex ledger: higher-slot, false
+  burn-down, d10->d8, slot-count controls killed.
+- Full wt/vtt gate GREEN 6,170/6,170 (.tmp-gate-4bi.log).
+- Status: CLOSED round 1. Next: 4b-ii (remaining 30 L1 spells), claimed
+  by this session.
+
