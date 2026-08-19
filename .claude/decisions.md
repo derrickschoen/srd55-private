@@ -7,6 +7,54 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D317 — OWNER: third brainstorm round — persistence, bridge, campaign mechanics (2026-08-19)
+
+Third blind collab round (codex 12 + Claude 12, merged 21). Rulings:
+
+1. **RNG after undo: DETERMINISTIC BRANCH STREAM** — new branch derives a
+   fresh seeded stream from (state, branch id); no rerolling known
+   outcomes; replay stays exact.
+2. **Autosave durability: BROWSER + FILE MIRROR VIA BRIDGE** — every
+   revision also appends to a disk file through the localhost bridge;
+   browser primary, file survives browser wipes.
+3. **Save/replay format: MIGRATE A VERSION WINDOW** — schema-versioned,
+   migrations across a bounded window.
+4. **Window crash: HARD PAUSE + REOPEN RECOVERS** — authority in the
+   DM-side session; no worker holds it; rehydrate from the store.
+5. **ADJUDICATED in player view: LABEL + VISIBLE CONSEQUENCE** —
+   reasoning stays DM-side.
+6. **Bridge failure in session one: EXPORT AND ABORT** — a failed
+   session is a bug report, not something to play through. No silent
+   controller fallback.
+7. **Round plans are PROGRAMS** (owner's direction, verbatim intent):
+   "Make the round plan more like a Claude workflow where it can contain
+   code and branch if/then and go down priority lists." Re-consult unit
+   when a plan runs dry: that monster's remaining round. Supervisor
+   design note: typed reducer-validated decision DSL (branches,
+   priority lists), not arbitrary executable code.
+8. **Art look: PIXEL-ART SILHOUETTES** — procedurally assembled sprites.
+9. **Difficulty parameter: EXPECTED LENGTH + RESOURCE PRESSURE**,
+   validated against sim math.
+10. **Encounter revision: TARGETED REGEN + MANUAL PATCH**, full
+    revalidation either way, provenance records which.
+11. **Replay bundle: CANONICAL FLEET SCHEMA NOW** — model id, effort,
+    build, load tag, latency, tokens first-class from increment 10.
+12. **Discord live check: AFTER THE LOCAL PLAYTEST** (credentials wait).
+13. **Spell batches: SAMPLE-VERIFY (5 random rows word-for-word) PER
+    BATCH + FULL-MANIFEST AUDIT AT INCREMENT-4 CLOSE.**
+14. **First-session DM bridge model: TERRA MEDIUM.**
+15. **No playtest target date — it lands when the gates clear.**
+16. **Supervisor sessions: CONSOLIDATE TO THE ORIGINAL SESSION** (the
+    one carrying D313-D317 context); the 15:27 session stands down via
+    loop-log notice.
+17. **KB entries: CO-GENERATE NOW** — each batch emits rule id + SRD
+    locator + one-line guidance per row alongside the tests.
+18. **Starter statblocks: PARALLEL LANE NOW** (8-12 CR 1/4-3, cited,
+    validated) — also unblocks all-AI soaks sooner.
+19. **Undo UX: SIMPLE UNDO-LAST + HISTORY BEHIND DISCLOSURE.**
+20. **Playtest: RESUMABLE, SOLO FIRST** — presentation polish deferred.
+21. **TTS narration: POST-PLAYTEST BACKLOG CANDIDATE.**
+
 ## D316 — OWNER: art is procedural-only, CC-BY; Discord Shape 2 disliked, Shape 3 under investigation (2026-08-19)
 
 1. **Bundled art: PURE PROCEDURAL ONLY.** All VTT art comes from the
