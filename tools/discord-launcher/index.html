@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Discord Activity launcher spike</title>
+    <style>
+      :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+      body { display: grid; min-height: 100vh; margin: 0; place-items: center; background: #18191c; color: #f2f3f5; }
+      main { max-width: 42rem; padding: 2rem; border: 1px solid #3f4147; border-radius: 1rem; background: #232428; }
+      code { color: #b5bac1; }
+      #relay[data-state="ok"] { color: #23a55a; }
+      #relay[data-state="error"] { color: #f23f42; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>activity client stub alive</h1>
+      <p>This disposable page proves same-origin HTTP and WebSocket routing.</p>
+      <p id="relay">relay: connecting</p>
+    </main>
+    <script type="module">
+      const status = document.querySelector('#relay');
+      const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const socket = new WebSocket(`${protocol}//${location.host}/relay`);
+      socket.addEventListener('open', () => socket.send(JSON.stringify({ v: 1, type: 'stub.ping', requestId: 'browser-stub' })));
+      socket.addEventListener('message', ({ data }) => {
+        const envelope = JSON.parse(data);
+        status.textContent = envelope.requestId === 'browser-stub' ? 'relay: echo alive' : 'relay: unexpected echo';
+        status.dataset.state = envelope.requestId === 'browser-stub' ? 'ok' : 'error';
+      });
+      socket.addEventListener('error', () => { status.textContent = 'relay: unavailable'; status.dataset.state = 'error'; });
+    </script>
+  </body>
+</html>
