@@ -18,7 +18,7 @@ export type EncounterCommand =
       readonly type: 'move';
       readonly actor: CombatantId;
       readonly path: readonly GridCell[];
-      readonly cause: 'voluntary';
+      readonly cause: 'voluntary' | 'reactions_resolved';
     }
   | {
       readonly type: 'attack';
@@ -30,6 +30,22 @@ export type EncounterCommand =
       readonly attackerCanSeeTarget: boolean;
       readonly targetCanSeeAttacker: boolean;
       readonly damage: DamageRequest;
+    }
+  | {
+      readonly type: 'opportunity_attack';
+      readonly actor: CombatantId;
+      readonly target: CombatantId;
+      readonly attackBonus: number;
+      readonly criticalFloor: number;
+      readonly rollMode: RollMode;
+      readonly attackerCanSeeTarget: boolean;
+      readonly targetCanSeeAttacker: boolean;
+      readonly damage: DamageRequest;
+    }
+  | {
+      readonly type: 'decline_reaction';
+      readonly actor: CombatantId;
+      readonly mover: CombatantId;
     }
   | {
       readonly type: 'force_save';
@@ -119,8 +135,23 @@ export type EncounterEvent =
       readonly amount: number;
       readonly hitPointsBefore: number;
       readonly hitPointsAfter: number;
-      readonly lifeState: 'living' | 'dying' | 'dead';
+      readonly lifeState: 'living' | 'dying' | 'stable' | 'dead';
       readonly massiveDamage: boolean;
+    })
+  | (SequencedEvent & {
+      readonly type: 'death_save_resolved';
+      readonly visibility: 'dm_only';
+      readonly combatant: CombatantId;
+      readonly roll: number;
+      readonly outcome: 'failure' | 'success' | 'natural_1' | 'natural_20';
+      readonly successes: number;
+      readonly failures: number;
+      readonly lifeState: 'living' | 'dying' | 'stable' | 'dead';
+    })
+  | (SequencedEvent & {
+      readonly type: 'reaction_declined';
+      readonly combatant: CombatantId;
+      readonly mover: CombatantId;
     })
   | (SequencedEvent & {
       readonly type: 'healing_applied';
