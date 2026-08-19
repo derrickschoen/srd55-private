@@ -239,3 +239,28 @@ vitest + tsc for increments; full suite + build gate before wt/vtt→main).
   pending that gate. Next: increment 4 (spell engine + templates) — still
   claimed by this session unless released here.
 
+## A10 — increment 4a: AoE geometry kernel (lane-wt/vtt3a)
+
+- Round 1: codex delivered six SRD shapes + D315.3 product rules +
+  hand-derived fixtures; supervisor verified 147/147 but its
+  origin-inclusion mutant (cone origin forced included) SURVIVED.
+- Round 2: the mutant exposed a REAL bug (Emanation circle exclusion);
+  codex fixed it and pinned per-shape origin semantics (Sphere/Cylinder
+  always included per SRD — supervisor verified the Sphere text at
+  srd-5.2.1.txt:12078-12084 right column).
+- F19 RECURRENCE (supervisor error, full length): the round-2
+  implementation was UNCOMMITTED when the supervisor ran its mutant and
+  restored via `git checkout`, reverting templates.ts to round 1 while
+  round-2 tests survived; the mismatch was committed, merged, and the
+  full gate caught it (4 failures). A second error compounded it: the
+  recovery merge was piped through `tail`, its --ff-only refusal was
+  swallowed, and a gate re-ran on the stale tree before the mistake was
+  caught by reading the log. Codex reapplied via session resume;
+  the restore was committed BEFORE the re-run mutant control.
+- Final state: combat 160/160, sim unchanged 176/176, tsc both clean,
+  supervisor mutant killed against the COMMITTED tree, full wt/vtt gate
+  GREEN 6,096/6,096 (.tmp-gate-4a3.log).
+- Status: CLOSED round 2 (with two supervisor process failures
+  recorded). Next: increment 4b (spell manifest + mechanics), claimed
+  by this session.
+
