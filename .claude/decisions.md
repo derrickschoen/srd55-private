@@ -26,6 +26,9 @@ The supervision loop's forward thread is now the VTT. Rulings, verbatim intent:
 
 D260.8/D260.2 fog rules and the phase-2 negative scope (no cloud accounts, no
 voice/video, no hosted asset library; rules automation IN bounds) stand.
+Supersedes D262.2's ordering (DPR sim UI before VTT phase 2): VTT phase 2 is
+now the active forward thread; D262.2's lane-priority clause is void, the rest
+of D262 stands.
 
 Same tick (housekeeping, executed): all done `dnd-*` worktrees deleted with
 their branches — 8 merged to main (dracres, grantper, grantskill, minors,
