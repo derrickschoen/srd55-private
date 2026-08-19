@@ -21,6 +21,7 @@ import {
   type ArmorClassFormulaCandidate,
   type EquippedArmor,
   type SheetResourceClassInput,
+  type SheetResourceMaximum,
 } from '../../../src/rules/sheet';
 import { characterLevel } from '../../../src/rules/character-level';
 import type { ExtraAttackGrant } from '../../../src/rules/extra-attack';
@@ -740,6 +741,110 @@ describe('armor class', () => {
     allows_shield,
   });
 
+  it.each([
+    {
+      name: 'an unequal higher total',
+      formulas: [
+        formula('Lower species shell', 'species', 'dexterity', null, true),
+        formula('Raised feat shell', 'feat', 'dexterity', null, true, 12),
+      ],
+      shield: null,
+      winner: ['Raised feat shell', 'feat', 12],
+      excluded: [],
+      tieBreak: null,
+    },
+    {
+      name: 'equal totals from different sources',
+      formulas: [
+        formula('Class shell', 'class', 'dexterity', null, true),
+        formula('Species shell', 'species', 'dexterity', null, true),
+      ],
+      shield: null,
+      winner: ['Species shell', 'species', 10],
+      excluded: [],
+      tieBreak: {
+        rule: 'source_precedence_then_label',
+        losers: [
+          ['Class shell', 'class', 10],
+          ['Unarmoured', 'manual', 10],
+        ],
+      },
+    },
+    {
+      name: 'equal totals and source with distinct labels',
+      formulas: [
+        formula('Zulu shell', 'class', 'dexterity', null, true),
+        formula('Alpha shell', 'class', 'dexterity', null, true),
+      ],
+      shield: null,
+      winner: ['Alpha shell', 'class', 10],
+      excluded: [],
+      tieBreak: {
+        rule: 'source_precedence_then_label',
+        losers: [
+          ['Zulu shell', 'class', 10],
+          ['Unarmoured', 'manual', 10],
+        ],
+      },
+    },
+    {
+      name: 'equal totals, source, and labels',
+      formulas: [
+        formula('Same shell', 'class', 'dexterity', null, true),
+        formula('Same shell', 'class', 'strength', null, true),
+      ],
+      shield: null,
+      winner: ['Same shell', 'class', 10],
+      excluded: [],
+      tieBreak: {
+        rule: 'source_precedence_then_label',
+        losers: [
+          ['Same shell', 'class', 10],
+          ['Unarmoured', 'manual', 10],
+        ],
+      },
+    },
+    {
+      name: 'an ineligible tied formula',
+      formulas: [
+        formula('Shieldless shell', 'species', 'dexterity', null, false),
+      ],
+      shield: template('Shield'),
+      winner: ['Unarmoured', 'manual', 10],
+      excluded: [['Shieldless shell', 'shield_not_allowed']],
+      tieBreak: null,
+    },
+  ])('pins winner, exclusions, and tie metadata for $name', ({
+    formulas,
+    shield,
+    winner,
+    excluded,
+    tieBreak,
+  }) => {
+    const result = armorClass({ scores: scores({}), formulas, shield });
+    const projected = (entry: typeof result.winner) => [
+      entry.formula.label,
+      entry.formula.source,
+      entry.total,
+    ];
+
+    expect(projected(result.winner)).toEqual(winner);
+    expect(
+      result.excluded.map((entry) => [
+        entry.formula.label,
+        entry.reason.kind,
+      ]),
+    ).toEqual(excluded);
+    expect(
+      result.tie_break === null
+        ? null
+        : {
+            rule: result.tie_break.rule,
+            losers: result.tie_break.losers.map(projected),
+          },
+    ).toEqual(tieBreak);
+  });
+
   it('is 10 + Dexterity with no armour', () => {
     // `sheet-math.txt`: "Without armor or a shield, your base Armor Class is 10
     // plus your Dexterity modifier." Dexterity 16 is +3, so 13.
@@ -1291,6 +1396,436 @@ describe('extra attack across a multiclass', () => {
 });
 
 describe('sheet resource maxima', () => {
+  const resourceMechanics = (entry: SheetResourceMaximum) =>
+    entry.status === 'computed'
+      ? entry
+      : {
+          status: entry.status,
+          id: entry.id,
+          kind: entry.kind,
+          class_name: entry.class_name,
+          reason: entry.reason,
+        };
+
+  it.each([
+    { classLevel: 0, maximum: 1, expected: 'absent' },
+    { classLevel: 1, maximum: -1, expected: 'absent' },
+    { classLevel: 1, maximum: 0, expected: 'omitted' },
+    { classLevel: 1, maximum: 1, expected: 'computed' },
+    { classLevel: 20, maximum: 1, expected: 'computed' },
+    { classLevel: 21, maximum: 1, expected: 'absent' },
+    { classLevel: 1.5, maximum: 1, expected: 'absent' },
+    { classLevel: 1, maximum: 1.5, expected: 'absent' },
+    { classLevel: '1', maximum: 1, expected: 'absent' },
+    { classLevel: 1, maximum: '1', expected: 'absent' },
+  ])(
+    'pins class-level/resource-maximum boundaries: level=$classLevel maximum=$maximum',
+    ({ classLevel, maximum, expected }) => {
+      const actual = resolveSheetResources([
+        resourceClass(41, 'Boundary Barbarian', classLevel, {
+          catalog: {
+            status: 'recorded',
+            expected_ladder_kinds: ['rage'],
+            expected_formula_kinds: [],
+            has_unmodelled_feature_maxima: false,
+          },
+          ladder_rows: [{ resource_kind: 'rage', maximum }],
+        }),
+      ], PRESENT_ABILITIES);
+
+      if (expected === 'omitted') {
+        expect(actual).toEqual([]);
+      } else if (expected === 'computed') {
+        expect(actual).toEqual([
+          {
+            status: 'computed',
+            id: 'resource:41:rage',
+            kind: 'rage',
+            class_definition_id: 41,
+            class_name: 'Boundary Barbarian',
+            class_level: classLevel,
+            spell_level: null,
+            maximum: 1,
+            computation: { kind: 'level_table', class_level: classLevel },
+          },
+        ]);
+      } else {
+        expect(actual.map(resourceMechanics)).toEqual([{
+          status: 'absent',
+          id: 'resource:41:rage',
+          kind: 'rage',
+          class_name: 'Boundary Barbarian',
+          reason: 'resource_level_row_missing_or_invalid',
+        }]);
+      }
+    },
+  );
+
+  it('selects the requested ladder kind instead of the first stored row', () => {
+    expect(resolveSheetResources([
+      resourceClass(42, 'Ordered Barbarian', 3, {
+        catalog: {
+          status: 'recorded',
+          expected_ladder_kinds: ['rage'],
+          expected_formula_kinds: [],
+          has_unmodelled_feature_maxima: false,
+        },
+        ladder_rows: [
+          { resource_kind: 'focus_points', maximum: 99 },
+          { resource_kind: 'rage', maximum: 3 },
+        ],
+      }),
+    ], PRESENT_ABILITIES)).toEqual([{
+      status: 'computed',
+      id: 'resource:42:rage',
+      kind: 'rage',
+      class_definition_id: 42,
+      class_name: 'Ordered Barbarian',
+      class_level: 3,
+      spell_level: null,
+      maximum: 3,
+      computation: { kind: 'level_table', class_level: 3 },
+    }]);
+  });
+
+  const baseSpellResource = (
+    progressionType: unknown,
+    slots: unknown,
+    pactSlots: unknown = [],
+    classLevel: unknown = 1,
+  ): SheetResourceClassInput => resourceClass(51, 'Boundary caster', classLevel, {
+    base_spellcasting: {
+      progression_type: progressionType,
+      progression_row: { status: 'present', slots, pact_slots: pactSlots },
+    },
+  });
+  const invalidBaseSpellResult = [{
+    status: 'absent',
+    id: 'resource:51:base-spell-progression-absent',
+    kind: null,
+    class_name: 'Boundary caster',
+    reason: 'spell_progression_missing_or_invalid',
+  }] as const;
+
+  it.each([
+    { slots: '{', valid: false },
+    { slots: 'null', valid: false },
+    { slots: '1', valid: false },
+    { slots: '[1]', valid: false },
+    { slots: '{}', valid: false },
+    { slots: '{"0":1}', valid: false },
+    { slots: '{"1":0}', valid: false },
+    { slots: '{"1":1.5}', valid: false },
+    { slots: '{"1":"1"}', valid: false },
+    { slots: '{"10":1}', valid: false },
+    { slots: '{"1":1}', valid: true, spellLevel: 1 },
+    { slots: '{"9":1}', valid: true, spellLevel: 9 },
+  ])('pins the stored shared-slot decoder for $slots', ({
+    slots,
+    valid,
+    spellLevel,
+  }) => {
+    const actual = resolveSheetResources(
+      [baseSpellResource('full', slots)],
+      PRESENT_ABILITIES,
+    );
+
+    expect(actual.map(resourceMechanics)).toEqual(valid
+      ? [{
+          status: 'computed',
+          id: `resource:spell-slot:${String(spellLevel)}`,
+          kind: 'spell_slot',
+          class_definition_id: null,
+          class_name: null,
+          class_level: null,
+          spell_level: spellLevel,
+          maximum: 1,
+          computation: {
+            kind: 'shared_spell_slots',
+            effective_caster_level: 1,
+          },
+        }]
+      : invalidBaseSpellResult);
+  });
+
+  it.each([
+    { pact: '{', valid: false },
+    { pact: 'null', valid: false },
+    { pact: '[]', valid: false },
+    { pact: '{}', valid: false },
+    { pact: '{"count":1}', valid: false },
+    { pact: '{"count":1,"level":1,"extra":1}', valid: false },
+    { pact: '{"count":0,"level":1}', valid: false },
+    { pact: '{"count":1.5,"level":1}', valid: false },
+    { pact: '{"count":1,"level":0}', valid: false },
+    { pact: '{"count":1,"level":6}', valid: false },
+    { pact: '{"count":1,"level":1}', valid: true, spellLevel: 1 },
+    { pact: '{"count":1,"level":5}', valid: true, spellLevel: 5 },
+  ])('pins the stored Pact shape for $pact', ({ pact, valid, spellLevel }) => {
+    const actual = resolveSheetResources(
+      [baseSpellResource('pact', '[]', pact)],
+      PRESENT_ABILITIES,
+    );
+
+    expect(actual.map(resourceMechanics)).toEqual(valid
+      ? [{
+          status: 'computed',
+          id: 'resource:pact-slot',
+          kind: 'pact_slot',
+          class_definition_id: 51,
+          class_name: 'Boundary caster',
+          class_level: 1,
+          spell_level: spellLevel,
+          maximum: 1,
+          computation: {
+            kind: 'pact_magic',
+            class_level: 1,
+            spell_level: spellLevel,
+          },
+        }]
+      : [{
+          status: 'absent',
+          id: 'resource:51:base-spell-progression-absent',
+          kind: null,
+          class_name: 'Boundary caster',
+          reason: 'spell_progression_missing_or_invalid',
+        }]);
+  });
+
+  it.each([
+    { fraction: null, rounding: null, level: 1, slots: '{}', expected: [] },
+    { fraction: '1', rounding: null, level: 1, slots: '{"1":1}', expectedLevel: 1 },
+    { fraction: '1/2', rounding: 'up', level: 1, slots: '{"1":1}', expectedLevel: 1 },
+    { fraction: '1/2', rounding: 'down', level: 1, slots: '{}', expected: [] },
+    { fraction: '1/2', rounding: 'down', level: 2, slots: '{"1":1}', expectedLevel: 1 },
+    { fraction: '1/3', rounding: 'up', level: 1, slots: '{"1":1}', expectedLevel: 1 },
+    { fraction: '1/3', rounding: 'down', level: 3, slots: '{"1":1}', expectedLevel: 1 },
+  ])(
+    'pins subclass caster fraction $fraction/$rounding at level $level',
+    ({ fraction, rounding, level, slots, ...expectation }) => {
+      const actual = resolveSheetResources([
+        resourceClass(61, 'Subclass caster', level, {
+          subclass_spellcasting: {
+            caster_fraction: fraction,
+            caster_rounding: rounding,
+            progression_row: { status: 'present', slots, pact_slots: null },
+          },
+        }),
+      ], PRESENT_ABILITIES);
+
+      if ('expected' in expectation) {
+        expect(actual).toEqual(expectation.expected);
+      } else {
+        expect(actual).toEqual([{
+          status: 'computed',
+          id: 'resource:spell-slot:1',
+          kind: 'spell_slot',
+          class_definition_id: null,
+          class_name: null,
+          class_level: null,
+          spell_level: 1,
+          maximum: 2,
+          computation: {
+            kind: 'shared_spell_slots',
+            effective_caster_level: expectation.expectedLevel,
+          },
+        }]);
+      }
+    },
+  );
+
+  it.each([
+    [null, 'up'],
+    ['1', 'up'],
+    ['1/2', null],
+    ['1/2', 'sideways'],
+    ['1/3', null],
+    ['1/3', 'sideways'],
+    ['1/4', 'down'],
+  ] as const)(
+    'rejects the invalid subclass caster pair %s/%s',
+    (fraction, rounding) => {
+      expect(resolveSheetResources([
+        resourceClass(62, 'Broken subclass caster', 3, {
+          subclass_spellcasting: {
+            caster_fraction: fraction,
+            caster_rounding: rounding,
+            progression_row: {
+              status: 'present',
+              slots: '{"1":2}',
+              pact_slots: null,
+            },
+          },
+        }),
+      ], PRESENT_ABILITIES).map(resourceMechanics)).toEqual([{
+        status: 'absent',
+        id: 'resource:62:subclass-spell-progression-absent',
+        kind: null,
+        class_name: 'Broken subclass caster',
+        reason: 'spell_progression_missing_or_invalid',
+      }]);
+    },
+  );
+
+  it.each([
+    {
+      name: 'zero spellcasting contributions',
+      classes: [],
+      expected: [],
+    },
+    {
+      name: 'one base contribution',
+      classes: [resourceClass(71, 'Wizard', 2, {
+        base_spellcasting: {
+          progression_type: 'full',
+          progression_row: {
+            status: 'present',
+            slots: '{"1":3}',
+            pact_slots: '[]',
+          },
+        },
+      })],
+      expected: [[
+        'computed', 'resource:spell-slot:1', 'spell_slot', null, null, null, 1, 3,
+        'shared_spell_slots', 2,
+      ]],
+    },
+    {
+      name: 'many base contributions',
+      classes: [
+        resourceClass(71, 'Wizard', 2, {
+          base_spellcasting: {
+            progression_type: 'full',
+            progression_row: {
+              status: 'present', slots: '{"1":3}', pact_slots: '[]',
+            },
+          },
+        }),
+        resourceClass(72, 'Cleric', 1, {
+          base_spellcasting: {
+            progression_type: 'full',
+            progression_row: {
+              status: 'present', slots: '{"1":2}', pact_slots: '[]',
+            },
+          },
+        }),
+      ],
+      expected: [
+        ['computed', 'resource:spell-slot:1', 'spell_slot', null, null, null, 1, 4,
+          'shared_spell_slots', 3],
+        ['computed', 'resource:spell-slot:2', 'spell_slot', null, null, null, 2, 2,
+          'shared_spell_slots', 3],
+      ],
+    },
+    {
+      name: 'one subclass contribution',
+      classes: [resourceClass(73, 'Fighter', 3, {
+        subclass_spellcasting: {
+          caster_fraction: '1/2',
+          caster_rounding: 'up',
+          progression_row: {
+            status: 'present', slots: '{"1":3}', pact_slots: null,
+          },
+        },
+      })],
+      expected: [[
+        'computed', 'resource:spell-slot:1', 'spell_slot', null, null, null, 1, 3,
+        'shared_spell_slots', 2,
+      ]],
+    },
+    {
+      name: 'many subclass contributions',
+      classes: [
+        resourceClass(73, 'Fighter', 1, {
+          subclass_spellcasting: {
+            caster_fraction: '1/2', caster_rounding: 'up',
+            progression_row: {
+              status: 'present', slots: '{"1":2}', pact_slots: null,
+            },
+          },
+        }),
+        resourceClass(74, 'Rogue', 1, {
+          subclass_spellcasting: {
+            caster_fraction: '1/2', caster_rounding: 'up',
+            progression_row: {
+              status: 'present', slots: '{"1":2}', pact_slots: null,
+            },
+          },
+        }),
+      ],
+      expected: [[
+        'computed', 'resource:spell-slot:1', 'spell_slot', null, null, null, 1, 3,
+        'shared_spell_slots', 2,
+      ]],
+    },
+    {
+      name: 'one Pact contribution',
+      classes: [resourceClass(75, 'Warlock', 3, {
+        base_spellcasting: {
+          progression_type: 'pact',
+          progression_row: {
+            status: 'present', slots: '[]', pact_slots: '{"count":2,"level":2}',
+          },
+        },
+      })],
+      expected: [[
+        'computed', 'resource:pact-slot', 'pact_slot', 75, 'Warlock', 3, 2, 2,
+        'pact_magic', 3,
+      ]],
+    },
+    {
+      name: 'many Pact contributions',
+      classes: [
+        resourceClass(75, 'Warlock', 3, {
+          base_spellcasting: {
+            progression_type: 'pact',
+            progression_row: {
+              status: 'present', slots: '[]', pact_slots: '{"count":2,"level":2}',
+            },
+          },
+        }),
+        resourceClass(76, 'Hexbinder', 2, {
+          base_spellcasting: {
+            progression_type: 'pact',
+            progression_row: {
+              status: 'present', slots: '[]', pact_slots: '{"count":2,"level":1}',
+            },
+          },
+        }),
+      ],
+      expected: [[
+        'computed', 'resource:pact-slot', 'pact_slot', null, null, 5, 3, 2,
+        'pact_magic', 5,
+      ]],
+    },
+  ])('pins the complete $name result', ({ classes, expected }) => {
+    // `docs/srd/source/multiclassing.txt:77-97` adds the contributing class
+    // levels, applies the stated half-level rounding, then reads the resulting
+    // effective level from the Multiclass Spellcaster table.
+    const actual = resolveSheetResources(classes, PRESENT_ABILITIES).map((entry) =>
+      entry.status === 'absent'
+        ? [entry.status, entry.id, entry.kind, entry.class_name, entry.reason]
+        : [
+            entry.status,
+            entry.id,
+            entry.kind,
+            entry.class_definition_id,
+            entry.class_name,
+            entry.class_level,
+            entry.spell_level,
+            entry.maximum,
+            entry.computation.kind,
+            entry.computation.kind === 'shared_spell_slots'
+              ? entry.computation.effective_caster_level
+              : entry.computation.kind === 'pact_magic'
+                ? entry.computation.class_level
+                : null,
+          ],
+    );
+
+    expect(actual).toEqual(expected);
+  });
+
   it('uses each owning class level and keeps Channel Divinity class-qualified', () => {
     const resources = resolveSheetResources(
       [
