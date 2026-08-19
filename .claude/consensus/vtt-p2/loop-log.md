@@ -198,3 +198,23 @@ vitest + tsc for increments; full suite + build gate before wt/vtt→main).
   marks. Two docs lanes opened alongside A6 because they contend for nothing —
   no suite, no build, no shared files. The `lane-wt/mutshard` merge gate is
   deliberately NOT started: it needs a quiet box and A6 is CPU-heavy.
+
+## A6 — increment 3a: encounter state / conditions / effects (lane-wt/vtt3a)
+
+- Round 1: FINDING by supervisor — plausible-wrong-value control
+  (Paralyzed hitsWithinFeetAreCritical 5->10) SURVIVED codex's gate;
+  manifest coverage proved structure, not values. Returned to codex.
+- Round 2: independent literal expectation tables added (+18 tests,
+  combat 99/99). Supervisor re-verified: the 5->10 mutant killed by
+  "Paralyzed pins every mechanics literal, including the 5-foot
+  critical-hit distance"; second value mutant (Petrified
+  weightMultiplier 10->5) also killed; restored green. Paralyzed row
+  checked word-for-word against srd-5.2.1.txt:11952-11963. Sim suite
+  176/176 with zero tools/sim diff; tsc both configs exit 0.
+- Ledger: mutations 17, 19-23 killed by named tests (codex-run,
+  re-run in round 2); 18/24 deferred to 3b by design.
+- Status: CLOSED round 2. Merged to wt/vtt; full gate launched
+  (.tmp-gate-3a.log). Next dispatch: 3b (controllers, reaction
+  policies, death-save flow, visibility, coordinator; mutations 17-24
+  complete there).
+
