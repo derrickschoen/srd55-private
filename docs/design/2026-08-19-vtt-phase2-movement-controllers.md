@@ -1337,6 +1337,54 @@ become evidence for DM authority, filtered fog, movement, or controllers.
 
 ## 12. Dispatchable increment plan
 
+### Amendments (2026-08-19, post-D315)
+
+D313–D315 replace the scope and ordering of increments 3 onward. Increments 1
+and 2 are landed and remain unchanged. The file lists in section 10 and the
+Phase-2 exit criteria in section 13 remain historical architecture context;
+where they are narrower than this amended map, the increment 10 gate below is
+the binding playable exit.
+
+The later rulings contradict or refine sections 1–11 in these places; the old
+text is intentionally not rewritten:
+
+- Sections 1.4, 7.3, and 8 describe a browser-only/manual agent exchange and
+  explicitly exclude a local AI bridge. D313.2 requires a localhost companion
+  process for the codex DM. Encounter authority remains in the browser; the
+  bridge exchanges proposals, plans, narration, and projections only.
+- Sections 5.1 and 10 defer a bundled monster catalog and omit monster death-save
+  policy. D314.4 and D315.5 require a bundled SRD starter set now and a
+  statblock `usesDeathSaves` flag, false for ordinary monsters.
+- Section 6 defers spells, full action economy, area effects, and conditions.
+  D314.6–8 and D315.1–5 require them for the first playable skirmish.
+- Sections 7.1 and 7.3 give agent controllers filtered combatant projections.
+  That remains correct for an AI controlling a PC; the codex DM is a separate
+  round-planning bridge consumer and receives the full DM projection under
+  D313.3.
+- Section 8 makes snapshots optional and describes DM controls as the primary
+  window with a secondary table presentation. D314.2/12 and D315.9–11 instead
+  require event-sourced persistence at every revision, the player projection
+  as the owner's primary view, and a separate local DM window.
+- Section 9 remains correct that remote player browsers are seams only, but
+  D315.18 additionally requires Discord-ready command/projection envelopes.
+  Those envelopes do not decide whether Discord will be built.
+
+Two specification edges are recorded rather than attributed to the SRD. The
+bundled SRD 5.2.1 says a grid square is 5 feet, grid range follows the shortest
+route, an area has a point of origin, and a Sphere extends in straight lines by
+its radius; Total Cover can exclude locations. It does not specify snapping an
+origin to grid intersections or a touch-any-part square rule. Those two grid
+behaviors are therefore binding product rules from D315.3, not claimed SRD
+quotations. Also, D315.8 says both “pause” and “play continues” for an
+ADJUDICATED override. This map resolves that operationally: apply the override
+without pre-approval, then pause before dispatching the next controller request
+while the DM highlight permits interrupt or undo.
+
+Explicitly out of scope for this map: the all-AI soak fleet, the model/effort
+study, spatial merge-back into the sim, walkthrough reconciliation, and the
+Discord decision dossier or a Discord integration. Do not add preparatory work
+for those items beyond the transport-neutral envelopes required by D315.18.
+
 ### Increment 1 — portable movement and range kernel
 
 Files: `src/combat/values.ts`, `src/combat/grid.ts`,
@@ -1373,64 +1421,377 @@ Independent gate: shared-resolution unit tests, complete sim suite, pinned
 outputs/draw counts, typecheck, and mutations 9–11. A partial migration cannot
 land because it would create the forbidden fork.
 
-### Increment 3 — combatant profiles, bindings, and pure encounter reducer
+### Increment 3 — complete encounter state, controllers, and effect lifecycle
 
-Files: id additions; `src/combat/combatant.ts`, `statblock.ts`, `events.ts`,
-`encounter.ts`; `src/vtt/character-combatant.ts`; unit/integration tests.
-
-Work:
-
-- add branded identities;
-- implement validated monster statblocks and character sheet/workspace
-  projection;
-- bind one combatant profile to one combat token;
-- implement encounter setup, initiative, turn movement budget, legal actions,
-  stepwise OA continuation, attacks, HP changes, end turn, and event logging;
-  and
-- serialize deterministic snapshots for test replay.
-
-Independent gate: encounter/unit/integration Vitest, sim suite unchanged,
-typecheck, and the unknown-value negative control. No controller or UI is
-needed to exercise the reducer.
-
-### Increment 4 — controller implementations and local coordinator
-
-Files: `src/vtt/controllers/*`, `src/vtt/visibility.ts`,
-`src/vtt/turn-coordinator.ts`, and controller/visibility tests.
+Scope: branded combatant/token/statblock ids; character and monster projections;
+the pure encounter reducer and events; all three controller implementations,
+registry, visibility projections, reaction policies, and local coordinator.
 
 Work:
 
-- implement the one Controller interface, registry, replacement cancellation,
-  AlgorithmController, AgentController, ManualAgentExchange, and
-  HumanController;
-- implement JSON-safe viewer projections and agent contract decoding;
-- run the asynchronous local turn/reaction loop around the pure reducer; and
-- verify controllers cannot inject derived values or apply stale actions.
+- validate one rules profile and board token per combatant; add
+  `usesDeathSaves` to statblocks and keep it false in every ordinary starter
+  monster;
+- implement initiative and enforce one active PC at a time, split movement,
+  attacks and saves, action/bonus-action/reaction resources,
+  Dash/Disengage/Dodge, HP, healing, massive damage, stabilization, and end of
+  turn;
+- source the full SRD condition and Exhaustion inventory into one coverage
+  manifest, encode every mechanical clause in typed state, and prove that no
+  listed condition falls through to narration or an untyped modifier;
+- make effects reducer-owned records with source, targets, duration clock,
+  concentration ownership, stacking identity, repeated-save timing, and
+  deterministic expiry. Controllers choose actions but cannot create, tick,
+  or remove effects directly;
+- automatically roll PC death saves on that PC's turn, expose the result only
+  in the DM projection by default, make ordinary monsters die at 0 HP, and let
+  the statblock flag opt a later named monster into the PC lifecycle;
+- implement one `Controller` interface for human, deterministic algorithm, and
+  agent-controlled combatants, including stale-response rejection and swaps at
+  action boundaries; and
+- store per-PC standing reaction policies whose result is use, decline, or
+  prompt. Create a durable HumanController prompt only when policy evaluation
+  is ambiguous.
 
-Independent gate: controller/visibility Vitest, deterministic replay, mutations
-12–15, typecheck, and all earlier gates.
+Independent gate: table-driven unit tests cover every condition-manifest row,
+every effect timing edge, the full PC and monster 0-HP matrices, one-PC
+initiative enforcement, reaction policy/prompt behavior, controller swapping,
+visibility serialization, and deterministic event output. Run targeted
+combat/VTT tests, the unchanged sim suite, and typecheck; all increment 1–2
+gates remain green.
 
-### Increment 5 — DM-local VTT UI and future remote authorization seams
+Negative controls, continuing section 11.6's numbering:
 
-Files: `src/vtt/local-session.ts`, `presentation.ts`,
-`remote-contracts.ts`, changes to `src/vtt/model.ts`, `app.ts`, `styles.css`, and
-`tests/browser/vtt-encounter.spec.ts`. Add `encounter-snapshot.ts` and database
-wiring only if D260.3 is explicitly included in this dispatch.
+17. `inactive_pc_action_accepted`: accept a valid action from a non-active PC.
+18. `ambiguous_reaction_auto_declined`: turn an undecided reaction policy into
+    decline instead of creating a prompt.
+19. `incapacitated_keeps_actions`: leave action availability enabled while the
+    relevant SRD condition forbids it.
+20. `exhaustion_uses_wrong_level`: apply the adjacent Exhaustion level's
+    mechanics while keeping state otherwise valid.
+21. `concentration_allows_two`: add a second concentration effect without
+    ending the first.
+22. `repeated_save_at_wrong_boundary`: move a repeated save from its sourced
+    turn boundary to the other boundary.
+23. `effect_expires_one_turn_late`: retain an effect for one extra matching
+    duration tick.
+24. `ordinary_monster_rolls_death_save`: enter the death-save lifecycle at 0 HP
+    when `usesDeathSaves` is false.
+
+The gate records a named killing test for mutations 17–24. No UI or codex
+bridge is needed to exercise this increment.
+
+### Increment 4 — complete reference-party spell engine and exact templates
+
+Scope: every spell the D260 level-7 reference party could currently prepare,
+not merely its saved loadouts and not the entire SRD catalog.
 
 Work:
 
-- make local DM encounter setup/execution the Phase 2 path;
-- wire all UI action input through HumanController;
-- expose controller assignment and mid-encounter replacement;
-- render DM and technically-secret table projections;
-- add only the future remote authorization/publisher interfaces; and
-- leave `RelayTransport` type-only and add no remote-player implementation.
+- generate a reviewable coverage manifest from the reference-party classes,
+  levels, grants, and bundled SRD lists; every row must map to an executable
+  typed spell definition with no `unsupported`, manual-resolution, or plausible
+  fallback branch;
+- implement target selection, attack/save/damage/healing, slot and component
+  costs, upcasting, movement and terrain interactions, summons or choices, and
+  all other mechanics required by those manifest rows through the shared
+  reducer and increment 3's effect lifecycle;
+- implement the SRD Cone, Cube, Cylinder, Emanation, Line, and Sphere geometries
+  from continuous feet-space, including point-of-origin and Total Cover rules;
+- for grid placement, snap placeable centers to grid intersections and include
+  a square when the exact template touches any part of it, as the explicit
+  D315.3 product rule. A creature is affected when any occupied square is in
+  the computed set; and
+- drive drag preview and confirmed resolution from the same pure affected-cell
+  function so the preview cannot approximate or redraw the template.
 
-Independent gate: thin Playwright encounter test, existing Phase 1 browser
-smoke, full Vitest and sim suites, typecheck, build/dist-clean check, and
-mutation 16. No server, cloud account, voice/video feature, hosted asset
-library, relay implementation, or player browser is accepted in this
-increment.
+Before implementation claims SRD behavior, add verified KB entries citing the
+bundled source for each shape and label the intersection/touch rule as D315.3.
+
+Independent gate: the manifest has zero uncovered level-appropriate options;
+each row has at least one mechanics test and each parameterized family has
+boundary tests. Geometry fixtures cover all six shapes, walls/Total Cover,
+large creatures, board edges, tangency, and drag-preview parity. Run targeted
+spell/effect/geometry tests, typecheck, build, and every earlier gate.
+
+25. `level_appropriate_spell_marked_manual`: route one manifest row to an
+    adjudication/manual fallback.
+26. `higher_slot_uses_base_effect`: consume a higher slot but retain the base
+    spell's scalable value.
+27. `sphere_center_forced_to_cell_center`: replace an allowed intersection with
+    the adjacent square center.
+28. `tangent_square_excluded`: exclude a square whose boundary is exactly
+    touched by the template.
+29. `preview_confirm_cell_mismatch`: use a rounded preview while confirmation
+    uses exact geometry.
+30. `total_cover_location_included`: include a geometrically covered location
+    whose lines from the origin are all blocked by Total Cover.
+
+The gate records the named killing tests for mutations 25–30.
+
+### Increment 5 — event-sourced autosave, resume, undo, and DM memory
+
+Scope: one durable local event store for every encounter and coordinator state
+transition. A snapshot may be a derived cache only; it is not the authority.
+
+Work:
+
+- turn controller-request issuance, policy-resolved reactions, human prompts,
+  responses, cancellations, and reducer applications into revisioned durable
+  transitions so there is no transient pending-request state outside the log;
+- persist every revision with the action/event payload, serializable RNG state,
+  active head, pending controller request, controller identity, and codex
+  session id before dispatching the next side effect;
+- resume at any revision in the middle of a turn or monster round without
+  repeating a roll or applying a response twice;
+- implement undo as an appended head/void-branch transition. Never delete the
+  undone events: the DM-context projection shows the revision history and marks
+  abandoned branches void for reconciliation; and
+- keep schema versions and migrations in the existing local browser database
+  architecture, with deterministic import/export for a saved session.
+
+Independent gate: crash/reload probes run after every transition kind,
+including an unresolved reaction prompt and an in-flight external request;
+replay reproduces reducer state, RNG continuation, request ids, projections,
+and DM history byte-for-byte. Undo/redo and stale late-response tests run with
+targeted persistence tests, typecheck, build, and earlier gates.
+
+31. `autosave_coalesces_revisions`: persist only the later of two reducer
+    revisions.
+32. `pending_request_not_persisted`: save encounter state without its unresolved
+    controller request.
+33. `rng_resumes_from_seed`: reconstruct from the initial seed instead of the
+    stored current RNG state.
+34. `codex_session_id_regenerated`: create a new session id during resume.
+35. `undo_deletes_branch`: remove undone events instead of marking the branch
+    void.
+36. `resume_reissues_request_id`: assign a new id to the same pending request
+    and accept both responses.
+
+The gate records the named killing tests for mutations 31–36.
+
+### Increment 6 — player-primary board and separate local DM window
+
+Scope: the owner's main screen is the technically filtered player projection;
+the full DM projection and all DM chrome live in a separate local window.
+
+Work:
+
+- host encounter authority in the DM-local session and send only projection
+  objects across the local window channel. The player window submits typed
+  HumanController decisions; neither window directly edits encounter state;
+- render the active PC prominently and expose only that PC's legal movement,
+  full action economy, spell choices, reaction prompts, exact-template drag
+  preview, and confirm controls;
+- keep fog, hidden HP, tactics, hidden PC death-save results, and other secrets
+  absent from the player projection object, not merely concealed by CSS;
+- give the separate DM window the full projection, interrupt/resume and undo,
+  pending-request status, revision history, controller assignment, and hidden
+  rolls; and
+- auto-apply an explicit DM override as an `ADJUDICATED` event with reasoning,
+  then pause before the next controller request and highlight the affected log
+  entry and board state until the owner resumes or undoes it.
+
+Remote player ingress and relay behavior remain unimplemented.
+
+Independent gate: a two-window Playwright flow completes representative turns
+for each reference PC, reactions, one area spell, a hidden death save, an
+ADJUDICATED override, interrupt, undo, and reload. Serialized sentinel tests
+prove player secrecy. Run the browser smoke, full unit/sim suites, typecheck,
+build/dist-clean check, and earlier gates.
+
+37. `player_projection_contains_hidden_roll`: serialize a hidden death-save
+    result into the owner view.
+38. `player_window_contains_dm_control`: expose undo or override controls in the
+    player window.
+39. `wrong_pc_highlighted`: highlight the next initiative entry while retaining
+    the real active actor.
+40. `aoe_preview_bypasses_controller`: let confirmation mutate the reducer
+    without a HumanController decision.
+41. `adjudicated_event_unmarked`: apply an override as an ordinary rules event.
+42. `adjudication_dispatches_next_request`: continue controller dispatch before
+    the required highlight/interrupt pause.
+
+The gate records the named killing tests for mutations 37–42.
+
+### Increment 7 — localhost codex DM bridge and round plans
+
+Scope: the D313 companion process, full-DM round planning, narration, validation
+mode, and transport-neutral command/projection envelopes. Browser state remains
+authoritative.
+
+Work:
+
+- implement a localhost Node bridge that resumes the persisted codex session,
+  receives the full DM projection plus visible revision history, and can return
+  only decoded plans, actions, narration, or explicit adjudication proposals;
+- request one plan containing intents for every living monster at the start of
+  each round. Execute locally until an intent becomes illegal because its
+  target, path, visibility, resources, effects, reaction outcome, adjudication,
+  or revision changed; then stop and re-consult the same session with the
+  invalidation and current history;
+- keep the codex DM autonomous between PC turns while allowing the owner to
+  interrupt, undo, or replace a controller at the persisted action boundary;
+- support four selectable narration voices: cinematic with visible rolls,
+  terse tactical, rules-explicit, and terse rule-citing validation;
+- require each validation-mode line to contain structured `ruleId` and
+  `srdLocator` fields plus one short human sentence. Narration cannot mutate a
+  number; unmodeled mechanics enter only through a reasoned `ADJUDICATED`
+  proposal validated and applied by the reducer; and
+- define versioned, idempotent command/projection envelopes with encounter and
+  request ids, expected revision, reply/chunk sequencing, expiry/defer metadata,
+  visibility class, and bounded render parts. The Discord adapter contract must
+  acknowledge or defer within 3 seconds, treat interaction tokens as valid for
+  at most 15 minutes, split ordinary content at 2,000 characters, and keep up
+  to 10 rich embeds within 6,000 aggregate characters, per the official Discord
+  [interaction](https://docs.discord.com/developers/interactions/receiving-and-responding)
+  and [message](https://docs.discord.com/developers/resources/message)
+  documentation checked on 2026-08-19. No Discord transport is implemented.
+
+Independent gate: use a fake exchange plus one opt-in local bridge contract
+probe to prove session resume, exactly one initial round request, ordered intent
+execution, invalidation re-consult, stale-plan refusal, all four narration
+schemas, validation citations, adjudication isolation, and envelope chunking at
+every boundary. Run targeted bridge tests, typecheck, build, and earlier gates.
+
+43. `one_call_per_monster`: request separate initial plans for each monster.
+44. `stale_round_intent_executes`: execute an intent after its expected revision
+    or legality was invalidated.
+45. `reconsult_starts_new_session`: lose the stored codex session id on
+    invalidation.
+46. `dm_bridge_receives_player_projection`: omit a fog-hidden DM fact from the
+    bridge request.
+47. `narration_changes_damage`: accept a numeric state change from a narration
+    field.
+48. `validation_line_missing_locator`: accept a validation line with a rule id
+    but no SRD locator.
+49. `discord_content_unsplit_2001`: serialize one 2,001-character ordinary
+    message part.
+50. `expired_interaction_token_reused`: address a follow-up with transport
+    metadata older than 15 minutes.
+
+The gate records the named killing tests for mutations 43–50.
+
+### Increment 8 — clean-license themed starter art
+
+Scope: a bundled drawn/procedural starter set for the reference PCs, starter
+monsters, one-room maps, terrain, tokens, and fog styling. No hosted asset
+library or runtime fetch is introduced.
+
+Work:
+
+- survey and select redistributable CC0/CC-BY drawn asset sets, preferring
+  coherent map tiles and token/icon families; procedural assets use checked-in
+  source and fixed generation inputs;
+- create stable asset ids and a manifest containing source URL, author where
+  required, license/version, modifications, attribution text, and every bundled
+  output; and
+- wire the board renderer and encounter-package schema to asset ids while
+  retaining a deterministic procedural fallback for fixture rendering.
+
+Independent gate: D59 authorization evidence exists for every committed source
+and generated output; required CC-BY attribution is present in repo and dist;
+the build performs no network fetch; asset ids resolve; a fixed fixture renders
+deterministically in both projections; visual review covers token distinction,
+terrain legibility, fog, active-PC focus, and ADJUDICATED highlighting.
+
+51. `asset_without_authorization`: add a manifest row with provenance but no
+    redistribution license.
+52. `ccby_attribution_omitted`: bundle a CC-BY asset without its required
+    attribution output.
+53. `asset_id_resolves_by_filename`: make a renamed file silently break a
+    stable manifest id.
+54. `fixture_fetches_remote_texture`: resolve one approved fixture asset over
+    the network at runtime.
+
+The gate records the named killing checks for mutations 51–54.
+
+### Increment 9 — codex-generated, approved encounter fixtures
+
+Scope: the first skirmish is the D260 level-7 reference party against 4–6
+monsters in one room for roughly 3–5 rounds, using a bundled SRD 5.2.1 starter
+roster of about 8–12 validated CR 1/4–3 statblocks.
+
+Work:
+
+- decode the starter statblocks from the bundled SRD source with attribution;
+  do not derive them from sim benchmark tuples or silently fill absent fields;
+- add a generation request whose required `difficulty` is chosen anew by the
+  owner for each prompt;
+- have the codex DM return one complete, versioned package: roster, map and
+  asset ids, placement, terrain, fog, DM-only tactics notes, generation prompt,
+  and provenance/session metadata;
+- validate all references and mechanics, render both projections, and present
+  the whole package for owner approval; and
+- on approval, persist the exact package as a content-addressed reproducible
+  fixture ready for the supervisor-owned commit. Sessions refer to the fixture
+  identity; regeneration is never used to reproduce a bug.
+
+Independent gate: schema/property tests reject incomplete packages, unknown
+statblocks/assets, illegal placement, invalid terrain/fog, and missing
+difficulty. An approved fixture reloads byte-equivalently offline, starts a
+legal encounter, preserves DM-only tactics, and remains unchanged if the same
+prompt later generates different output. Run attribution, fixture, board,
+bridge, build, and earlier gates.
+
+55. `difficulty_defaults_medium`: omit the request parameter and inject a fixed
+    difficulty.
+56. `generation_package_omits_fog`: accept an otherwise valid package without
+    its fog field.
+57. `unknown_roster_statblock_accepted`: accept an id outside the validated
+    bundled/homebrew sources.
+58. `unapproved_package_persisted`: write a generated package into the approved
+    fixture store before owner approval.
+59. `approved_fixture_regenerated_on_load`: call the DM again instead of loading
+    the saved bytes.
+60. `tactics_leak_to_player_projection`: serialize the fixture's tactics notes
+    into the owner view.
+
+The gate records the named killing tests for mutations 55–60.
+
+### Increment 10 — deterministic replay telemetry and playable exit
+
+Scope: complete local telemetry is active before the first human playtest, not
+added after evidence has already been lost.
+
+Work:
+
+- record every event/revision and RNG pre/post state, plus every controller
+  request, policy result, prompt, response, round plan, invalidation,
+  adjudication, narration line, and undo/void transition;
+- attach controller kind/id, request and encounter revisions, codex session id,
+  latency, token counts, and ordered transcript links without allowing clocks or
+  usage metadata to influence reducer output;
+- provide a replay command that starts from the approved encounter fixture,
+  consumes no live RNG or controller, verifies every revision/projection hash,
+  and pinpoints the first divergent field; and
+- export a local, versioned replay bundle that contains the fixture identity,
+  event store, RNG trace, controller transcripts, prompts/responses, latency,
+  token counts, and licensing/protocol versions needed to inspect the session.
+
+Independent gate: run a scripted 3–5-round reference skirmish through movement,
+weapons, spells/AoE, conditions, concentration, reactions, a death-save branch,
+round-plan invalidation, adjudication, undo, and resume. Offline replay must
+reproduce every reducer state and viewer projection. Corruption tests must
+identify the first bad RNG, event, or transcript record. Then run all unit,
+integration, sim, browser, typecheck, build/dist-clean, licensing, fixture, and
+mutations 1–66 gates.
+
+61. `telemetry_omits_rng_transition`: drop one RNG pre/post record while keeping
+    events intact.
+62. `controller_response_misattributed`: attach a valid response to the prior
+    request id.
+63. `latency_changes_replay_hash`: include wall-clock telemetry in authoritative
+    reducer hashing.
+64. `replay_calls_live_controller`: request one decision instead of consuming
+    the recorded transcript.
+65. `void_branch_replayed_as_live`: apply an undone branch while reconstructing
+    the active head.
+66. `projection_divergence_ignored`: accept equal reducer state when a player or
+    DM projection hash differs.
+
+The first owner playtest is authorized only after this gate records a named
+killing test for mutations 61–66 and all earlier increment gates remain green.
 
 ## 13. Phase-2 exit criteria
 
