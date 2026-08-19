@@ -7,6 +7,7 @@ import {
   type SqlRow,
 } from '../../db/codecs';
 import type { DatabaseContext } from '../../db/database';
+import { ok, type OkOutcome } from '../../refusals/outcome';
 import type {
   SetSlotCommand as SetSlotPayload,
   SlotRestoreState,
@@ -118,7 +119,7 @@ export abstract class SetSlotModeCommand<Mode extends SlotMode> {
       eligibility ?? new SpellSelectionEligibility(db);
   }
 
-  apply(characterId: number): void {
+  apply(characterId: number): OkOutcome<void> {
     const slot = this.db.one(
       `SELECT id, character_id, fixed_spell_version_id,
               current_spell_version_id, spell_level_min, spell_level_max,
@@ -150,6 +151,7 @@ export abstract class SetSlotModeCommand<Mode extends SlotMode> {
 
     this.#characterId = characterId;
     this.#previous = previous;
+    return ok(undefined);
   }
 
   protected persist(

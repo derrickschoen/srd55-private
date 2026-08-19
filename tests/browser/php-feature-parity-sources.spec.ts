@@ -10,6 +10,7 @@ import {
   install,
   operation,
   rejectedRpc,
+  refusedRpc,
   restoreSavePoint,
   rows,
   rpc,
@@ -817,7 +818,7 @@ test('merges a stale slot edit only when intervening operations left that slot u
     230,
   );
   expect(merged.revision).toBe(2);
-  const collision = await rejectedRpc(page, 'commands.execute', {
+  const collision = await refusedRpc(page, 'commands.execute', {
     character_id: workspaceImage.ids.character,
     operation_uuid: operation(231),
     expected_revision: 0,
@@ -829,9 +830,9 @@ test('merges a stale slot edit only when intervening operations left that slot u
     },
   });
   expect(collision).toMatchObject({
-    message:
-      'This character changed in another tab. Reload before trying again.',
-    data: { current_revision: 2 },
+    kind: 'revision_conflict',
+    expected: 0,
+    actual: 2,
   });
   const slots = await rows(page, 'spell_selection_slots');
   expect(

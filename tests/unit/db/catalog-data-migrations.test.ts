@@ -137,7 +137,10 @@ describe('catalog data-migration registry', () => {
       // migration still uses the unchanged point-read behavior.
       // Re-pinned 2026-08-18 for content identity's semantics-preserving key
       // comparator fast path; the aggregate digest stays unchanged.
-      checksum: '608e8d15faa0a78cc148557d507e32ca703cbd12014bafc06112a00645acdbf6',
+      // Re-pinned 2026-08-19 with the registry for the skill-grants
+      // orphan-revival fix (f8287123) — see the registry comment for the
+      // deliberate rows-changed justification.
+      checksum: 'df6a2abf6d0c6f59c176527dede98c119c6bc2227b0595b08600d593999473d2',
     }]);
     expect(() =>
       validateCatalogDataMigrationRegistry(CATALOG_DATA_MIGRATIONS)

@@ -32,9 +32,16 @@ export interface ExpectedBundledAggregateDigestV1 {
  * subclass aggregates embedding granted-spell text (draconic-sorcery,
  * fiend-patron, life-domain, oath-of-devotion). 0 added, 0 removed; all
  * 181 non-spell/non-subclass aggregates byte-identical.
+ *
+ * Re-pinned 2026-08-19 for D303-M1. EXACTLY ONE aggregate moved —
+ * 2024:subclass:draconic-sorcery — because its already-seeded level-3
+ * Draconic Resilience heading now owns the two SRD-parsed sheet effects:
+ * Sorcerer-level HP +1 and unarmoured 10 + DEX + CHA. The candidate delta was
+ * reviewed row by row against `docs/srd/source/draconic-resilience.txt`; the
+ * other 443 aggregate digests remain byte-identical.
  */
 export const EXPECTED_BUNDLED_CONTENT_DIGEST_V1 =
-  '3aeec741bc602f9e031d6d1e08a9c03fd50419391030522a895b732dffbdaf33' as const;
+  'df17e8173291e3042464a8ffdc8aa8d84530067b60acba9f479b3233d37bb384' as const;
 
 export const EXPECTED_BUNDLED_AGGREGATE_DIGESTS_V1 = Object.freeze([
   Object.freeze({"catalog_layer":"bundled","kind":"weapon","contentKey":"2024:weapon:battleaxe","name":"Battleaxe","digest":"749cd0ee7ef968dfd554a92e7b26637a15791a37c990652f70c0177422d925f9"}),
@@ -459,7 +466,7 @@ export const EXPECTED_BUNDLED_AGGREGATE_DIGESTS_V1 = Object.freeze([
   Object.freeze({"catalog_layer":"bundled","kind":"subclass","contentKey":"2024:subclass:champion","name":"Champion","digest":"66521a0940f5737a2d4c3d223c55cc48bdfe1e8f37d3cba94bb86796ccbffbce"}),
   Object.freeze({"catalog_layer":"bundled","kind":"subclass","contentKey":"2024:subclass:circle-of-the-land","name":"Circle of the Land","digest":"07b77cc364405c2461991508555458efbdf0252279a092fb4d10ad455650ec8f"}),
   Object.freeze({"catalog_layer":"bundled","kind":"subclass","contentKey":"2024:subclass:college-of-lore","name":"College of Lore","digest":"31c6e9332508fd8459fa0a5a39fd864f31704867417db731bd1e3c253f9292d0"}),
-  Object.freeze({"catalog_layer":"bundled","kind":"subclass","contentKey":"2024:subclass:draconic-sorcery","name":"Draconic Sorcery","digest":"144a8b3c7fb79ef24d94e00a8727e84708acf4c4e9f994302d831a5b0a1cfeda"}),
+  Object.freeze({"catalog_layer":"bundled","kind":"subclass","contentKey":"2024:subclass:draconic-sorcery","name":"Draconic Sorcery","digest":"2d6d9d38cdb5b9e903b5cba6acfcd0de2e4139d08e69d48679a9e9d7f2817d85"}),
   Object.freeze({"catalog_layer":"bundled","kind":"subclass","contentKey":"2024:subclass:evoker","name":"Evoker","digest":"e796bc2f1bfe5730cfe06d87f3dce09e8ff306ea15249f50cbbb6bb9626eb1b2"}),
   Object.freeze({"catalog_layer":"bundled","kind":"subclass","contentKey":"2024:subclass:fiend-patron","name":"Fiend Patron","digest":"39ce923b90360d90e0b0d561de55d32098c6582fb048e84bfcaaaf1ac784a464"}),
   Object.freeze({"catalog_layer":"bundled","kind":"subclass","contentKey":"2024:subclass:hunter","name":"Hunter","digest":"5d652560e45389fbfacfc7bd2b87530132f5f21b1b360be76a651473b8ec7493"}),

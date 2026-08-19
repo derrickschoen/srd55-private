@@ -577,6 +577,14 @@
     margin-top: 0.75rem;
   }
 
+  .guided-spell-choice {
+    position: relative;
+  }
+
+  .guided-spell-choice:focus-within {
+    z-index: 31;
+  }
+
   .guided-spell-choice-label {
     display: block;
     margin-bottom: 0.3rem;
@@ -691,6 +699,17 @@
 
   .guided-skill-choice-empty {
     grid-column: auto;
+  }
+
+  .guided-spell-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .guided-spell-change {
+    grid-column: 1;
+    grid-row: auto;
+    width: 100%;
+    max-width: 100%;
   }
 
   .guided-skill-clear {

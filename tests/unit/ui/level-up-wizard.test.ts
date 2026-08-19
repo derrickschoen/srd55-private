@@ -30,6 +30,9 @@ import type {
   ClassDefinitionId,
   ClassLevel,
   ContentKey,
+  GrantOrdinal,
+  GrantRuleKey,
+  SourceInstanceId,
   SubclassDefinitionId,
 } from '../../../src/domain/ids';
 import type { CharacterLevel } from '../../../src/domain/enums';
@@ -53,6 +56,11 @@ import {
   interactiveElement,
   type InteractiveTestElement,
 } from '../../fixtures/interactive-dom';
+import { ok, refused } from '../../../src/refusals/outcome';
+import {
+  levelUpRefused,
+  revisionConflictRefusal,
+} from '../../../src/refusals/refusal';
 
 let createBackupHintSpy: MockInstance<
   typeof backupHintModule.createBackupHint
@@ -448,7 +456,9 @@ describe('W-ROUTE-EXACT level-up route', () => {
     const state = ready({
       classes: [classOption({ id: 11 }), classOption({ id: 12 })],
     });
-    const call = vi.fn().mockResolvedValue(state);
+    const call = vi.fn((method: string) => Promise.resolve(
+      method === LEVEL_UP_RPC.progress ? null : state,
+    ));
     const navigate = vi.fn();
     const root = document.createElement('div');
     const cleanup = await screen.render({
@@ -459,18 +469,29 @@ describe('W-ROUTE-EXACT level-up route', () => {
       registerNavigationGuard: () => () => undefined,
     });
 
-    expect(call).toHaveBeenCalledOnce();
-    expect(call).toHaveBeenCalledWith(LEVEL_UP_RPC.state, {
-      character_id: 7,
-    });
+    expect(call.mock.calls.slice(0, 2)).toEqual([
+      [LEVEL_UP_RPC.state, { character_id: 7 }],
+      [LEVEL_UP_RPC.progress, { character_id: 7 }],
+    ]);
     expect(typeof cleanup).toBe('function');
     expect(elementText(document.activeElement as unknown as Node)).toBe(
       'Level up — Fixture Mage',
     );
     chooseRadio(root, '11');
     click(root, LEVEL_UP_ATTR.next);
+    await vi.waitFor(() => {
+      expect(root.querySelector(`[${LEVEL_UP_ATTR.back}]`)).not.toBeNull();
+    });
     click(root, LEVEL_UP_ATTR.back);
-    expect(call).toHaveBeenCalledOnce();
+    await vi.waitFor(() => {
+      expect(root.querySelector(`[${LEVEL_UP_ATTR.classOption}]`)).not.toBeNull();
+    });
+    expect(call.mock.calls.map(([method]) => method)).toEqual([
+      LEVEL_UP_RPC.state,
+      LEVEL_UP_RPC.progress,
+      LEVEL_UP_RPC.saveProgress,
+      LEVEL_UP_RPC.saveProgress,
+    ]);
     cleanup?.();
   });
 });
@@ -1450,15 +1471,15 @@ describe('W-E review, atomic confirm, and complete', () => {
         }],
       },
     };
-    const submit = vi.fn().mockResolvedValue({
+    const submit = vi.fn().mockResolvedValue(ok({
       operation_uuid: 'level-up-operation',
       revision: 5,
       idempotent_replay: false,
-    });
+    }));
     const wizard = createLevelUpWizard({
       state: ready({ classes: [selectedClass], totalLevel: 2 }),
       cancel: () => undefined,
-      preview: vi.fn().mockResolvedValue(preview(before, after)),
+      preview: vi.fn().mockResolvedValue(ok(preview(before, after))),
       submit,
       loadSheet: vi.fn().mockResolvedValue({
         ...after,
@@ -1520,12 +1541,12 @@ describe('W-E review, atomic confirm, and complete', () => {
         totalLevel: 2,
       }),
       cancel: () => undefined,
-      preview: vi.fn().mockResolvedValue(preview(before, after)),
-      submit: vi.fn().mockResolvedValue({
+      preview: vi.fn().mockResolvedValue(ok(preview(before, after))),
+      submit: vi.fn().mockResolvedValue(ok({
         operation_uuid: 'level-up-operation',
         revision: 5,
         idempotent_replay: false,
-      }),
+      })),
       loadSheet: vi.fn().mockResolvedValue(after),
       randomUuid: () => '62626262-6262-4262-8262-626262626262',
     });
@@ -1557,24 +1578,25 @@ describe('W-E review, atomic confirm, and complete', () => {
   it('W-LU2-REFUSAL renders every structured locator field and clears aria-busy', async () => {
     const before = sheet({ totalLevel: 1, classLevel: 1, hp: 9 });
     const after = sheet({ totalLevel: 2, classLevel: 2, hp: 16 });
-    const refusal = Object.assign(new Error('Generic locator refusal.'), {
-      data: {
+    const refusal = levelUpRefused({
         reason: 'planned_subchoice_refused',
         subchoice_kind: 'spell',
         index: 2,
         issue: 'spell_not_eligible',
         locator: {
-          source: { kind: 'existing_source', source_instance_id: 47 },
-          rule_key: 'wizard-spellbook',
-          ordinal: 8,
+          source: {
+            kind: 'existing_source',
+            source_instance_id: 47 as SourceInstanceId,
+          },
+          rule_key: 'wizard-spellbook' as GrantRuleKey,
+          ordinal: 8 as GrantOrdinal,
         },
-      },
     });
     const wizard = createLevelUpWizard({
       state: ready(),
       cancel: () => undefined,
-      preview: vi.fn().mockResolvedValue(preview(before, after)),
-      submit: vi.fn().mockRejectedValue(refusal),
+      preview: vi.fn().mockResolvedValue(ok(preview(before, after))),
+      submit: vi.fn().mockResolvedValue(refused(refusal)),
       loadSheet: vi.fn().mockResolvedValue(after),
       randomUuid: () => '63636363-6363-4363-8363-636363636363',
     });
@@ -1586,11 +1608,10 @@ describe('W-E review, atomic confirm, and complete', () => {
     await settle();
 
     const text = elementText(wizard.element);
-    expect(text).toContain('subchoice_kind: spell');
-    expect(text).toContain('index: 2');
-    expect(text).toContain('issue: spell_not_eligible');
+    expect(text).toContain('Level-up spell choice 2 was refused');
+    expect(text).toContain('spell_not_eligible');
     expect(text).toContain(
-      'locator: source=existing_source(47), rule_key=wizard-spellbook, ordinal=8',
+      'existing_source#47/wizard-spellbook/8',
     );
     expect(text).not.toContain('Generic locator refusal');
     expect(wizard.element.getAttribute('aria-busy')).toBe('false');
@@ -1610,17 +1631,17 @@ describe('W-E review, atomic confirm, and complete', () => {
       hp: 14,
       speciesHp: 2,
     });
-    const previewCall = vi.fn().mockResolvedValue(preview(before, after));
+    const previewCall = vi.fn().mockResolvedValue(ok(preview(before, after)));
     const ambiguous = Object.assign(new Error('Worker response was lost.'), {
       code: 'transport_error',
     });
     const submit = vi.fn()
       .mockRejectedValueOnce(ambiguous)
-      .mockResolvedValueOnce({
+      .mockResolvedValueOnce(ok({
         operation_uuid: 'level-up-operation',
         revision: 5,
         idempotent_replay: true,
-      });
+      }));
     const loadSheet = vi.fn().mockResolvedValue(after);
     const wizard = createLevelUpWizard({
       state: ready(),
@@ -1686,7 +1707,7 @@ describe('W-E review, atomic confirm, and complete', () => {
   it('invalidates Review when an earlier class edit changes the draft fingerprint', async () => {
     const before = sheet({ totalLevel: 1, classLevel: 1, hp: 9 });
     const after = sheet({ totalLevel: 2, classLevel: 2, hp: 16 });
-    const previewCall = vi.fn().mockResolvedValue(preview(before, after));
+    const previewCall = vi.fn().mockResolvedValue(ok(preview(before, after)));
     const wizard = createLevelUpWizard({
       state: ready({
         classes: [classOption({ id: 11 }), classOption({ id: 12, name: 'Fighter' })],
@@ -1717,15 +1738,14 @@ describe('W-E review, atomic confirm, and complete', () => {
   it('W-STALE keeps the draft, refuses blind retry, and offers explicit state reload', async () => {
     const before = sheet({ totalLevel: 1, classLevel: 1, hp: 9 });
     const after = sheet({ totalLevel: 2, classLevel: 2, hp: 16 });
-    const submit = vi.fn().mockRejectedValue(Object.assign(
-      new Error('This character changed in another tab.'),
-      { data: { current_revision: 5 } },
+    const submit = vi.fn().mockResolvedValue(refused(
+      revisionConflictRefusal(4 as CharacterRevision, 5 as CharacterRevision),
     ));
     const reloadState = vi.fn();
     const wizard = createLevelUpWizard({
       state: ready(),
       cancel: () => undefined,
-      preview: vi.fn().mockResolvedValue(preview(before, after)),
+      preview: vi.fn().mockResolvedValue(ok(preview(before, after))),
       submit,
       loadSheet: vi.fn().mockResolvedValue(after),
       reloadState,
@@ -1740,7 +1760,9 @@ describe('W-E review, atomic confirm, and complete', () => {
 
     expect(submit).toHaveBeenCalledOnce();
     expect(currentRailStep(wizard.element)).toBe('review');
-    expect(elementText(wizard.element)).toContain('changed elsewhere');
+    expect(elementText(wizard.element)).toContain(
+      'changed from revision 4 to 5',
+    );
     expect(wizard.element.querySelector(`[${LEVEL_UP_ATTR.confirm}]`)).toBeNull();
     const reload = interactiveElement(wizard.element).querySelector(
       '[data-level-up-reload-state]',
@@ -1757,7 +1779,7 @@ describe('W-E review, atomic confirm, and complete', () => {
     const after = sheet({ totalLevel: 2, classLevel: 2, hp: 16 });
     const previewCall = vi.fn()
       .mockRejectedValueOnce(new Error('Temporary preview failure.'))
-      .mockResolvedValueOnce(preview(before, after));
+      .mockResolvedValueOnce(ok(preview(before, after)));
     const wizard = createLevelUpWizard({
       state: ready(),
       cancel: () => undefined,
@@ -1781,7 +1803,7 @@ describe('W-E review, atomic confirm, and complete', () => {
     const after = sheet({ totalLevel: 2, classLevel: 2, hp: 16 });
     const previewCall = vi.fn()
       .mockRejectedValueOnce(new Error('Temporary ordinary preview failure.'))
-      .mockResolvedValueOnce(preview(before, after));
+      .mockResolvedValueOnce(ok(preview(before, after)));
     const wizard = createLevelUpWizard({
       state: ready(),
       cancel: () => undefined,
@@ -1821,9 +1843,11 @@ describe('W-E review, atomic confirm, and complete', () => {
     const wizard = createLevelUpWizard({
       state,
       cancel: () => undefined,
-      preview: vi.fn().mockRejectedValue(Object.assign(
-        new Error('Stale Epic preview.'),
-        { data: { current_revision: 21 } },
+      preview: vi.fn().mockResolvedValue(refused(
+        revisionConflictRefusal(
+          20 as CharacterRevision,
+          21 as CharacterRevision,
+        ),
       )),
       reloadState,
     });
@@ -1859,7 +1883,7 @@ describe('W-E review, atomic confirm, and complete', () => {
     };
     const previewCall = vi.fn()
       .mockRejectedValueOnce(new Error('Temporary Epic preview failure.'))
-      .mockResolvedValueOnce(preview(unchanged, unchanged));
+      .mockResolvedValueOnce(ok(preview(unchanged, unchanged)));
     const wizard = createLevelUpWizard({
       state,
       cancel: () => undefined,
@@ -1899,15 +1923,15 @@ describe('W-E review, atomic confirm, and complete', () => {
         catalogLayer: 'external',
       })]),
     };
-    const submit = vi.fn().mockResolvedValue({
+    const submit = vi.fn().mockResolvedValue(ok({
       operation_uuid: 'level-up-operation',
       revision: 21,
       idempotent_replay: false,
-    });
+    }));
     const wizard = createLevelUpWizard({
       state,
       cancel: () => undefined,
-      preview: vi.fn().mockResolvedValue(preview(unchanged, unchanged)),
+      preview: vi.fn().mockResolvedValue(ok(preview(unchanged, unchanged))),
       submit,
       loadSheet: vi.fn().mockResolvedValue(unchanged),
       randomUuid: () => '30303030-3030-4030-8030-303030303030',

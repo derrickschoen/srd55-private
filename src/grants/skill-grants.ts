@@ -250,8 +250,7 @@ export function syncToolAlternativeSkillGrants(
   for (const row of existing) {
     if (
       selectedSkills[row.ordinal - 1] !== null &&
-      selectedSkills[row.ordinal - 1] !== undefined &&
-      row.state === 'active'
+      selectedSkills[row.ordinal - 1] !== undefined
     ) {
       continue;
     }

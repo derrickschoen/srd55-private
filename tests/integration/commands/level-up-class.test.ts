@@ -4,7 +4,6 @@ import { CharacterCommandExecutor } from '../../../src/commands/character-comman
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import {
   LevelUpClassCommand,
-  LevelUpRefusal,
 } from '../../../src/commands/level-up-class';
 import { UpdateClassCommand } from '../../../src/commands/update-class';
 import { CharacterState } from '../../../src/character/character-state';
@@ -28,6 +27,8 @@ import { raiseClassLevelForTest } from '../../helpers/class-levels';
 import { LEVEL_UP_RPC } from '../../../src/builder/level-up-wizard';
 import { rpcRegistry } from '../../../src/worker/registry';
 import { createSeededRpcHarness } from '../../helpers/rpc-harness';
+import type { LevelUpRefused } from '../../../src/refusals/refusal';
+import { expectOkOutcome } from '../../helpers/outcome';
 
 /**
  * THE ONE LEVELLING PATH (straight-class level-up plan §3/§8b, reduced by
@@ -71,23 +72,22 @@ describe('level_up_class', () => {
   }
 
   function enterClass(name: string): void {
-    new UpdateClassCommand(
+    expectOkOutcome(new UpdateClassCommand(
       db,
       { type: 'update_class', class_definition_id: classId(name) },
       integrity,
-    ).apply(characterId);
+    ).apply(characterId));
   }
 
   function levelUp(
     payload: Omit<LevelUpClassPayload, 'type'>,
-  ): LevelUpClassCommand {
+  ): void {
     const command = new LevelUpClassCommand(
       db,
       { type: 'level_up_class', ...payload },
       integrity,
     );
-    command.apply(characterId);
-    return command;
+    expectOkOutcome(command.apply(characterId));
   }
 
   function asiChoice(
@@ -141,16 +141,21 @@ describe('level_up_class', () => {
 
   function refusalOf(
     payload: Omit<LevelUpClassPayload, 'type'>,
-  ): LevelUpRefusal {
-    try {
-      levelUp(payload);
-    } catch (error) {
-      if (error instanceof LevelUpRefusal) {
-        return error;
-      }
-      throw error;
+  ): LevelUpRefused {
+    const outcome = new LevelUpClassCommand(
+      db,
+      { type: 'level_up_class', ...payload },
+      integrity,
+    ).apply(characterId);
+    expect(outcome.kind).toBe('refused');
+    if (outcome.kind !== 'refused') {
+      throw new Error('Expected level-up to be refused.');
     }
-    throw new Error('Expected a LevelUpRefusal and none was raised.');
+    expect(outcome.refusal.kind).toBe('level_up_refused');
+    if (outcome.refusal.kind !== 'level_up_refused') {
+      throw new Error(`Expected level_up_refused, received ${outcome.refusal.kind}.`);
+    }
+    return outcome.refusal;
   }
 
   function storedLevel(name: string): number | null {
@@ -204,7 +209,7 @@ describe('level_up_class', () => {
       target_level: 2,
     });
 
-    expect(refusal.data).toEqual({ reason: 'incomplete_level_one' });
+    expect(refusal).toMatchObject({ reason: 'incomplete_level_one' });
     expect(storedLevel('Fighter')).toBe(1);
     expect(stateBytes()).toEqual(before);
   });
@@ -216,7 +221,7 @@ describe('level_up_class', () => {
       class_definition_id: classId('Wizard'),
       target_level: 2,
     });
-    expect(refusal.data).toEqual({ reason: 'class_not_held' });
+    expect(refusal).toMatchObject({ reason: 'class_not_held' });
     // Nothing was written: no Wizard row appeared and the Fighter is intact.
     expect(storedLevel('Wizard')).toBeNull();
     expect(storedLevel('Fighter')).toBe(1);
@@ -231,14 +236,14 @@ describe('level_up_class', () => {
       class_definition_id: classId('Fighter'),
       target_level: 7,
     });
-    expect(skip.data).toEqual({ reason: 'level_not_adjacent' });
+    expect(skip).toMatchObject({ reason: 'level_not_adjacent' });
     // Standing still is not levelling either: the CURRENT level is refused
     // too, so the guard is adjacency, not an upper bound.
     const still = refusalOf({
       class_definition_id: classId('Fighter'),
       target_level: 2,
     });
-    expect(still.data).toEqual({ reason: 'level_not_adjacent' });
+    expect(still).toMatchObject({ reason: 'level_not_adjacent' });
     expect(storedLevel('Fighter')).toBe(2);
     expect(stateBytes()).toEqual(before);
   });
@@ -365,7 +370,7 @@ describe('level_up_class', () => {
       class_definition_id: classId('Fighter'),
       target_level: 6,
     });
-    expect(refusal.data).toEqual({ reason: 'ability_increase_required' });
+    expect(refusal).toMatchObject({ reason: 'ability_increase_required' });
     expect(storedLevel('Fighter')).toBe(5);
     expect(stateBytes()).toEqual(beforeRefusal);
 
@@ -461,7 +466,7 @@ describe('level_up_class', () => {
     const beforeBytes = stateBytes();
 
     const executor = new CharacterCommandExecutor(db, integrity);
-    const result = await executor.execute({
+    const result = expectOkOutcome(await executor.execute({
       character_id: characterId,
       operation_uuid: crypto.randomUUID(),
       expected_revision: Number(
@@ -475,7 +480,7 @@ describe('level_up_class', () => {
         target_level: 4,
         feat_choice: asiChoice([{ ability: 'strength', amount: 2 }]),
       },
-    });
+    }));
     expect(storedLevel('Fighter')).toBe(4);
     expect(
       db.scalar(
@@ -489,7 +494,7 @@ describe('level_up_class', () => {
     });
     expect(result.inverse).not.toHaveProperty('integrity');
 
-    await executor.undo({
+    expectOkOutcome(await executor.undo({
       character_id: characterId,
       operation_uuid: result.operation_uuid,
       expected_revision: Number(
@@ -497,7 +502,7 @@ describe('level_up_class', () => {
           characterId,
         ]),
       ),
-    });
+    }));
     expect(state.capture(characterId)).toEqual(before);
     expect(stateBytes()).toEqual(beforeBytes);
   });
@@ -595,7 +600,7 @@ describe('level_up_class', () => {
     ).toBeNull();
 
     const executor = new CharacterCommandExecutor(db, integrity);
-    const resolved = await executor.execute({
+    const resolved = expectOkOutcome(await executor.execute({
       character_id: characterId,
       operation_uuid: crypto.randomUUID(),
       expected_revision: 0,
@@ -604,7 +609,7 @@ describe('level_up_class', () => {
         character_level_feat_choice_id: choiceId,
         feat_choice: featChoice('2024:feat:boon-of-fate'),
       },
-    });
+    }));
     expect(
       db.oneRaw(
         `SELECT choice.feat_source_instance_id, effect.maximum
@@ -615,11 +620,11 @@ describe('level_up_class', () => {
         [choiceId],
       ),
     ).toMatchObject({ maximum: 30 });
-    await executor.undo({
+    expectOkOutcome(await executor.undo({
       character_id: characterId,
       operation_uuid: resolved.operation_uuid,
       expected_revision: 1,
-    });
+    }));
     expect(
       db.scalar(
         'SELECT feat_source_instance_id FROM character_level_feat_choices WHERE id = ?',
@@ -719,7 +724,10 @@ describe('level_up_class', () => {
     const offered = planned[0];
     if (offered === undefined) throw new Error('No Bard spell was offered.');
 
-    const result = await new CharacterCommandExecutor(db, integrity).execute({
+    const result = expectOkOutcome(await new CharacterCommandExecutor(
+      db,
+      integrity,
+    ).execute({
       character_id: characterId,
       operation_uuid: crypto.randomUUID(),
       expected_revision: 0,
@@ -756,7 +764,7 @@ describe('level_up_class', () => {
           }],
         },
       },
-    });
+    }));
 
     expect(result.revision).toBe(1);
     expect(storedLevel('Bard')).toBe(2);
@@ -810,7 +818,10 @@ describe('level_up_class', () => {
     if (replacement === undefined) {
       throw new Error('No Bard replacement spell was offered.');
     }
-    const replaced = await new CharacterCommandExecutor(db, integrity).execute({
+    const replaced = expectOkOutcome(await new CharacterCommandExecutor(
+      db,
+      integrity,
+    ).execute({
       character_id: characterId,
       operation_uuid: crypto.randomUUID(),
       expected_revision: 1,
@@ -833,7 +844,7 @@ describe('level_up_class', () => {
           }],
         },
       },
-    });
+    }));
     expect(replaced.revision).toBe(2);
     expect(
       db.scalar(
@@ -909,9 +920,7 @@ describe('level_up_class', () => {
     const bardSourceId = sourceId('Bard');
     const before = stateBytes();
 
-    let refusal: unknown;
-    try {
-      levelUp({
+    const refusal = refusalOf({
         class_definition_id: classId('Fighter'),
         target_level: 4,
         feat_choice: featChoice('2024:feat:skilled'),
@@ -953,18 +962,13 @@ describe('level_up_class', () => {
             mode: 'new',
           }],
         },
-      });
-    } catch (error) {
-      refusal = error;
-    }
+    });
 
     expect(refusal).toMatchObject({
-      data: {
-        reason: 'planned_subchoice_refused',
-        subchoice_kind: 'spell',
-        index: 0,
-        issue: 'locator_not_found',
-      },
+      reason: 'planned_subchoice_refused',
+      subchoice_kind: 'spell',
+      index: 0,
+      issue: 'locator_not_found',
     });
     expect(stateBytes()).toEqual(before);
   });

@@ -7,6 +7,41 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D311 — OWNER: fix campaign scope is the top-12 files; minors first, then owner v1 review (2026-08-19)
+
+From the D310 triage (1,013 real gaps): the fix wave covers the **top-12
+hotspot files (~870 survivors)** in one wave of pattern-driven test lanes,
+guided by the triage doc's kill shapes; re-verify per shard via D308 --rerun.
+Declined: grants-cluster-only, all-1,013. Same session: the three D303
+journey minors get a fix lane NOW; the owner does their local v1 review
+(D266 gate) after the minors land — before the fix campaign completes.
+
+## D310 — OWNER: survivor campaign is triage-first (2026-08-18)
+
+Before any D280 survivor-fix lanes dispatch, one triage lane classifies the
+full merged survivor list (real test gap / equivalent mutant / low-value)
+with per-file counts; the owner rules on fix scope from that report.
+Declined: straight-to-hotspots, exhaustive-everything. Also ruled the same
+session: main→wt/simcore syncs may run autonomously (gated, conflicts stop);
+the threads-vs-forks pool A/B stays queued for an idle window.
+
+## D309 — OWNER: stranger journey and survivor fixes interleave (2026-08-18)
+
+Amends D307's sequencing: once the inc4 merge gate is green, the D303
+stranger journey runs WHILE D280 survivor-fix lanes work the hotspot files
+in parallel worktrees — neither waits for the other. Owner picked
+"Interleave" over journey-first and fixes-first.
+
+## D308 — OWNER: static mutants on for full audits, off for iteration re-runs (2026-08-18)
+
+Owner's words: "statics on for full audits, off for iteration re-runs."
+Full D280 campaign runs (fresh shard sweeps) keep static mutants enabled —
+they carried ~11% of survivors found (63 of 562 across shards 1–2),
+including module-level regex and error-string gaps. Fix-verify re-runs of a
+shard enable ignoreStatic plus the per-shard incremental cache, and must
+report the skipped static count as unmeasured, never as covered. Basis:
+statics are ~23% of mutants and ~97% of shard runtime (shard-003 planner).
+
 ## D307 — OWNER: stranger journey runs after the full queue lands (2026-08-18)
 
 The D303 fresh stranger journey (final pre-approval walkthrough) waits

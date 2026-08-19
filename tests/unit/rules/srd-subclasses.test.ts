@@ -12,6 +12,10 @@ import {
 } from '../../../src/rules/srd-subclasses';
 import { SRD_ATTRIBUTION_NOTICE } from '../../../src/rules/srd-attribution';
 import { parseSrdSpellDescriptions } from '../../../src/rules/spells-srd';
+import {
+  parseSrdDraconicResilience,
+  SrdDraconicResilienceError,
+} from '../../../src/rules/draconic-resilience-srd';
 
 const SOURCE_URL = new URL(
   '../../../docs/srd/source/subclasses.txt',
@@ -22,6 +26,13 @@ const FULL_SOURCE_URL = new URL(
   import.meta.url,
 );
 const SOURCE = readFileSync(SOURCE_URL, 'utf8');
+const DRACONIC_RESILIENCE_SOURCE = readFileSync(
+  new URL(
+    '../../../docs/srd/source/draconic-resilience.txt',
+    import.meta.url,
+  ),
+  'utf8',
+);
 
 const EXPECTED_ATTRIBUTION_PREAMBLE = `This work includes material from the System Reference Document 5.2.1
 ("SRD 5.2.1") by Wizards of the Coast LLC, available at
@@ -383,6 +394,40 @@ function sourceSection(start: string, end: string): string {
     throw new Error(`Mutation anchors are absent: ${start} -> ${end}.`);
   }
   return SOURCE.slice(startAt, endAt);
+}
+
+interface TinySourceEdit {
+  readonly from: string;
+  readonly to: string;
+}
+
+function withTinySourceEdit(
+  edit: TinySourceEdit,
+  source: string = SOURCE,
+): string {
+  const occurrences = source.split(edit.from).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `Tiny source edit must have exactly one anchor, found ${String(occurrences)}: ${JSON.stringify(edit.from)}.`,
+    );
+  }
+  return source.replace(edit.from, edit.to);
+}
+
+function parserFailure(source: string): {
+  readonly error_name: string;
+  readonly message: string;
+} {
+  let caught: unknown;
+  try {
+    parseSrdSubclasses(source);
+  } catch (error) {
+    caught = error;
+  }
+  if (!(caught instanceof Error)) {
+    throw new Error('Expected subclass parser to throw an Error.');
+  }
+  return { error_name: caught.name, message: caught.message };
 }
 
 function withoutChampion(): string {
@@ -795,6 +840,130 @@ describe('SRD subclass manifest', () => {
 });
 
 describe('SRD subclass parser rejections', () => {
+  it.each([
+    {
+      stage: 'truncated-section',
+      edit: {
+        from: ' Level 14: Overchannel\n',
+        to: '',
+      },
+      message: /Wizard has 4 feature headings, expected 5/u,
+    },
+    {
+      stage: 'split-name',
+      edit: {
+        from: 'Open Hand\n',
+        to: '',
+      },
+      message:
+        /Monk subclass name is "Warrior of the", expected "Warrior of the Open Hand"/u,
+    },
+    {
+      stage: 'duplicate-table',
+      edit: {
+        from: '   Life Domain Spells\n',
+        to: '   Life Domain Spells\n   Life Domain Spells\n',
+      },
+      message: /Cleric contains more than one spell table/u,
+    },
+    {
+      stage: 'duplicate-level',
+      edit: {
+        from: '         5       Mass Healing Word, Revivify',
+        to: '         3       Mass Healing Word, Revivify',
+      },
+      message: /life_domain repeats level 3/u,
+    },
+    {
+      stage: 'empty-spell-name',
+      edit: {
+        from: 'Aid, Bless, Cure Wounds,',
+        to: 'Aid,, Bless, Cure Wounds,',
+      },
+      message: /malformed spell row at level 3/u,
+    },
+    {
+      stage: 'misplaced-header',
+      edit: {
+        from: '   Life Domain Spells\n   Cleric        Prepared Spells\n',
+        to: '   Cleric        Prepared Spells\n   Life Domain Spells\n',
+      },
+      message: /spell-table header "Cleric Prepared Spells" appears before a table title/u,
+    },
+    {
+      stage: 'open-continuation',
+      edit: {
+        from: '         9       Greater Restoration, Mass Cure Wounds\n',
+        to: '         9       Greater Restoration, Mass Cure Wounds,\n',
+      },
+      message: /Cleric spell table ends with an incomplete row/u,
+    },
+  ])('rejects the tiny $stage staged-parser fixture', ({ stage, edit, message }) => {
+    const failure = parserFailure(withTinySourceEdit(edit));
+
+    expect({ stage, error_name: failure.error_name }).toEqual({
+      stage,
+      error_name: 'SrdSubclassesError',
+    });
+    expect(failure.message).toMatch(message);
+  });
+
+  it.each([
+    {
+      tag: 'feature-count:Wizard:4-of-5',
+      edit: { from: ' Level 14: Overchannel\n', to: '' },
+      expected_count: /Wizard has 4 feature headings, expected 5/u,
+    },
+    {
+      tag: 'spell-count:life-domain:9-of-10',
+      edit: {
+        from: 'Greater Restoration, Mass Cure Wounds',
+        to: 'Greater Restoration',
+      },
+      expected_count: /life_domain has 9 spell entries, expected 10/u,
+    },
+    {
+      tag: 'spell-count:circle-land:23-of-24',
+      edit: {
+        from: 'Acid Splash, Ray of Sickness, Web',
+        to: 'Acid Splash, Ray of Sickness',
+      },
+      expected_count: /circle_of_the_land has 23 spell entries, expected 24/u,
+    },
+  ])('tags count corruption as $tag', ({ tag, edit, expected_count }) => {
+    const failure = parserFailure(withTinySourceEdit(edit));
+
+    expect({ tag, error_name: failure.error_name }).toEqual({
+      tag,
+      error_name: 'SrdSubclassesError',
+    });
+    expect(failure.message).toMatch(expected_count);
+  });
+
+  it('tags count redistribution between Circle lands without changing the total', () => {
+    const withoutTropicalWeb = withTinySourceEdit({
+      from: 'Acid Splash, Ray of Sickness, Web',
+      to: 'Acid Splash, Ray of Sickness',
+    });
+    const redistributed = withTinySourceEdit(
+      {
+        from: 'Blur, Burning Hands, Fire Bolt',
+        to: 'Blur, Burning Hands, Fire Bolt, Web',
+      },
+      withoutTropicalWeb,
+    );
+    const failure = parserFailure(redistributed);
+
+    expect({
+      tag: 'land-spell-count:Arid:7-of-6:Tropical:5-of-6',
+      error_name: failure.error_name,
+    }).toEqual({
+      tag: 'land-spell-count:Arid:7-of-6:Tropical:5-of-6',
+      error_name: 'SrdSubclassesError',
+    });
+    expect(failure.message).toMatch(/Arid Land has 7 spells, expected 6/u);
+  });
+
   it('rejects a truncated wrapped subclass heading', () => {
     expect(() =>
       parseSrdSubclasses(SOURCE.replace('   Path of the Berserker\n', '')),
@@ -1089,5 +1258,41 @@ describe('SRD subclass parser rejections', () => {
     expect(() =>
       parseSrdSubclasses(SOURCE.replace('Aid, Bless', 'Aid, Chronomancy')),
     ).toThrow(/unregistered spell "Chronomancy"/u);
+  });
+
+  it('parses both Draconic Resilience sheet effects from the 2024 wording', () => {
+    expect(parseSrdDraconicResilience()).toEqual({
+      class_name: 'Sorcerer',
+      subclass_name: 'Draconic Sorcery',
+      class_level: 3,
+      name: 'Draconic Resilience',
+      effects: [
+        {
+          kind: 'hp_modifier',
+          label: 'Draconic Resilience',
+          hit_points_flat: 0,
+          hit_points_per_level: 1,
+        },
+        {
+          kind: 'armor_class_formula',
+          label: 'Draconic Resilience',
+          base: 10,
+          ability_1: 'dexterity',
+          ability_2: 'charisma',
+          allows_shield: false,
+        },
+      ],
+    });
+  });
+
+  it('rejects the 2014 Draconic Resilience AC formula', () => {
+    expect(() =>
+      parseSrdDraconicResilience(
+        DRACONIC_RESILIENCE_SOURCE.replace(
+          /10 plus your Dexterity and Charisma\s+modifiers/u,
+          '13 plus your Dexterity modifier',
+        ),
+      ),
+    ).toThrow(SrdDraconicResilienceError);
   });
 });

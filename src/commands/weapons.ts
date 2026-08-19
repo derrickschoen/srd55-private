@@ -1,4 +1,5 @@
 import type { DatabaseContext } from '../db/database';
+import { ok, type OkOutcome } from '../refusals/outcome';
 import type { SqlValue } from '@sqlite.org/sqlite-wasm';
 import type {
   AddWeaponCommand as AddWeaponPayload,
@@ -340,7 +341,7 @@ export class AddWeaponCommand implements ResolvesInverseAfterApply {
     private readonly payload: AddWeaponPayload,
   ) {}
 
-  apply(characterId: number): void {
+  apply(characterId: number): OkOutcome<void> {
     const timestamp = new Date().toISOString();
     const values = weaponValues(this.payload.weapon);
     const masterySelected = this.payload.mastery_selected === true;
@@ -390,6 +391,7 @@ export class AddWeaponCommand implements ResolvesInverseAfterApply {
         this.payload.weapon.effects,
       );
     }
+    return ok(undefined);
   }
 
   inverse(): RemoveWeaponPayload {
@@ -411,7 +413,7 @@ export class UpdateWeaponCommand implements ResolvesInverseAfterApply {
     private readonly payload: UpdateWeaponPayload,
   ) {}
 
-  apply(characterId: number): void {
+  apply(characterId: number): OkOutcome<void> {
     const existing = readWeapon(this.db, characterId, this.payload.weapon_id);
     const previous: WeaponFields = {
       ...fieldsFromRow(existing),
@@ -479,6 +481,7 @@ export class UpdateWeaponCommand implements ResolvesInverseAfterApply {
         this.payload.weapon.effects,
       );
     }
+    return ok(undefined);
   }
 
   inverse(): UpdateWeaponPayload {
@@ -504,7 +507,7 @@ export class RemoveWeaponCommand implements ResolvesInverseAfterApply {
     private readonly payload: RemoveWeaponPayload,
   ) {}
 
-  apply(characterId: number): void {
+  apply(characterId: number): OkOutcome<void> {
     const existing = readWeapon(this.db, characterId, this.payload.weapon_id);
     this.#removed = {
       type: 'add_weapon',
@@ -524,6 +527,7 @@ export class RemoveWeaponCommand implements ResolvesInverseAfterApply {
       'DELETE FROM character_weapons WHERE character_id = ? AND id = ?',
       [characterId, this.payload.weapon_id],
     );
+    return ok(undefined);
   }
 
   inverse(): AddWeaponPayload {
@@ -545,7 +549,7 @@ export class SetWeaponMasteryCommand implements ResolvesInverseAfterApply {
     private readonly payload: SetWeaponMasteryPayload,
   ) {}
 
-  apply(characterId: number): void {
+  apply(characterId: number): OkOutcome<void> {
     const existing = readWeapon(this.db, characterId, this.payload.weapon_id);
     if (this.payload.selected && existing.mastery_property === null) {
       throw new TypeError(
@@ -568,6 +572,7 @@ export class SetWeaponMasteryCommand implements ResolvesInverseAfterApply {
         this.payload.weapon_id,
       ],
     );
+    return ok(undefined);
   }
 
   inverse(): SetWeaponMasteryPayload {

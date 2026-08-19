@@ -8,6 +8,7 @@ import { GUIDED_SPECIES_SOURCE_MARKER } from '../../../src/domain/source-markers
 import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
 import { AbilityScores } from '../../../src/rules/ability-scores';
 import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
+import { ensureBundledSrdSubclassContent } from '../../../src/rules/srd-subclass-content';
 import { readEligibleCharacterEffects } from '../../../src/rules/eligible-character-effects';
 import {
   armorClass,
@@ -22,7 +23,10 @@ import {
   decodeShareFragment,
   encodeShareFragment,
 } from '../../../src/sharing/codec';
-import { openTestDatabase } from '../../helpers/open-db';
+import {
+  openSeededTestDatabase,
+  openTestDatabase,
+} from '../../helpers/open-db';
 
 const connections: Database[] = [];
 const integrity = new CharacterCommandIntegrity(
@@ -34,6 +38,7 @@ async function database(): Promise<DatabaseContext> {
   connections.push(connection);
   const db = new DatabaseContext(connection);
   seedClassProgressions(db);
+  ensureBundledSrdSubclassContent(db);
   seedSheetContent(db);
   return db;
 }
@@ -54,7 +59,10 @@ function sourceId(
 
 function guidedCharacter(
   db: DatabaseContext,
-  classContentKey: '2024:class:barbarian' | '2024:class:monk',
+  classContentKey:
+    | '2024:class:barbarian'
+    | '2024:class:monk'
+    | '2024:class:sorcerer',
   name: string,
 ): number {
   return createGuidedCharacter(
@@ -135,6 +143,163 @@ afterEach(() => {
 });
 
 describe('Armor Class mutation controls', () => {
+  it('applies Draconic Resilience to the D303 Sorcerer 3 / Warlock 2 sheet and scales only with Sorcerer level', async () => {
+    const connection = await openSeededTestDatabase();
+    connections.push(connection);
+    const db = new DatabaseContext(connection);
+    const characterId = guidedCharacter(
+      db,
+      '2024:class:sorcerer',
+      'D303 Draconic Warlock',
+    );
+    const sorcererId = classId(db, 'Sorcerer');
+    const warlockId = classId(db, 'Warlock');
+    const draconicId = Number(
+      db.scalar(
+        `SELECT id FROM subclass_definitions
+         WHERE content_key = '2024:subclass:draconic-sorcery'`,
+      ),
+    );
+
+    // D303's relevant ability spread: DEX 14, CON 12, CHA 16. The remaining
+    // scores are pinned too so this is a whole character rather than a
+    // modifier-only fixture.
+    db.exec(
+      `UPDATE characters
+       SET strength = 8, dexterity = 14, constitution = 12,
+           intelligence = 10, wisdom = 13, charisma = 16
+       WHERE id = ?`,
+      [characterId],
+    );
+    db.exec(
+      `UPDATE character_class_levels SET level = 3
+       WHERE character_id = ? AND class_definition_id = ?`,
+      [characterId, sorcererId],
+    );
+    new UpdateClassCommand(
+      db,
+      {
+        type: 'update_class',
+        class_definition_id: sorcererId,
+        subclass_definition_id: draconicId,
+      },
+      integrity,
+    ).apply(characterId);
+    new UpdateClassCommand(
+      db,
+      { type: 'update_class', class_definition_id: warlockId },
+      integrity,
+    ).apply(characterId);
+    db.exec(
+      `UPDATE character_class_levels SET level = 2
+       WHERE character_id = ? AND class_definition_id = ?`,
+      [characterId, warlockId],
+    );
+    new UpdateClassCommand(
+      db,
+      { type: 'update_class', class_definition_id: warlockId },
+      integrity,
+    ).apply(characterId);
+
+    const builder = new CharacterSheetBuilder(db);
+    const levelThree = builder.build(characterId);
+    // Class HP: Sorcerer 3 = 7 + 5 + 5; Warlock 2 = 6 + 6; subtotal 29.
+    // Draconic Resilience at Sorcerer 3 contributes 3, for maximum 32.
+    expect(levelThree.class_hit_points_subtotal.value).toBe(29);
+    expect(levelThree.species_hit_points?.value).toBe(3);
+    expect(levelThree.species_hit_points?.label).toBe('Feature hit points');
+    expect(levelThree.hit_point_maximum.value).toBe(32);
+    expect(levelThree.armor_class).toMatchObject({
+      value: 15,
+      winner: {
+        label: 'Draconic Resilience',
+        source: 'subclass',
+        expression: '10 + DEX + CHA',
+        total: 15,
+      },
+    });
+    expect(
+      readEligibleCharacterEffects(db, characterId, 'display'),
+    ).toMatchObject([
+      {
+        effect_kind: 'hp_modifier',
+        hit_points_flat: 3,
+        hit_points_per_level: null,
+        source_type: 'subclass',
+        label: 'Draconic Resilience',
+      },
+      {
+        effect_kind: 'armor_class_formula',
+        base: 10,
+        ability_1: 'dexterity',
+        ability_2: 'charisma',
+        allows_shield: false,
+        source_type: 'subclass',
+        label: 'Draconic Resilience',
+      },
+    ]);
+
+    // Wearing body armor makes the scales formula ineligible, even when it
+    // would beat the armor's 11 + DEX value.
+    db.exec(
+      `INSERT INTO character_armor (
+         character_id, slot, name, category, armor_class, dex_bonus
+       ) VALUES (?, 'worn', 'Leather Armor', 'light', 11, 'full')`,
+      [characterId],
+    );
+    const armored = builder.build(characterId).armor_class;
+    expect(armored.value).toBe(13);
+    expect(armored.winner.label).toBe('Leather Armor');
+    expect(
+      armored.excluded.find(
+        (entry) => entry.formula.label === 'Draconic Resilience',
+      ),
+    ).toMatchObject({
+      formula: { label: 'Draconic Resilience' },
+      reason: { kind: 'wearing_armor', armor_name: 'Leather Armor' },
+    });
+    db.exec(
+      `DELETE FROM character_armor
+       WHERE character_id = ? AND slot = 'worn'`,
+      [characterId],
+    );
+
+    // A second eligible unarmored formula competes for the one base formula;
+    // it does not stack with Draconic Resilience.
+    db.exec(
+      `INSERT INTO character_effects (
+         character_id, sort_order, effect_kind, base, ability_1, ability_2,
+         allows_shield, label
+       ) VALUES (?, 99, 'armor_class_formula', 10, 'dexterity', 'wisdom', 0,
+                 'Fixture Unarmored Defense')`,
+      [characterId],
+    );
+    const competing = builder.build(characterId).armor_class;
+    expect(competing.value).toBe(15);
+    expect(competing.winner.label).toBe('Draconic Resilience');
+
+    // Another Sorcerer level changes the class subtotal by 5 and the feature
+    // contribution by exactly 1. Warlock levels never enter that multiplier.
+    db.exec(
+      `UPDATE character_class_levels SET level = 4
+       WHERE character_id = ? AND class_definition_id = ?`,
+      [characterId, sorcererId],
+    );
+    new UpdateClassCommand(
+      db,
+      {
+        type: 'update_class',
+        class_definition_id: sorcererId,
+        subclass_definition_id: draconicId,
+      },
+      integrity,
+    ).apply(characterId);
+    const levelFour = builder.build(characterId);
+    expect(levelFour.class_hit_points_subtotal.value).toBe(34);
+    expect(levelFour.species_hit_points?.value).toBe(4);
+    expect(levelFour.hit_point_maximum.value).toBe(38);
+  });
+
   it('excludes a tombstoned source even if a legacy effect row survives', async () => {
     const db = await database();
     const characterId = guidedCharacter(

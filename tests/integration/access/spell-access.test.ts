@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SpellAccessBuilder } from '../../../src/access/spell-access-builder';
 import { DatabaseContext } from '../../../src/db/database';
 import type { SlotBucket } from '../../../src/domain/enums';
+import { GrantRule } from '../../../src/grants/grant-rule';
+import { SourceRuleReader } from '../../../src/grants/source-rule-reader';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import { openTestDatabase } from '../../helpers/open-db';
 import { BUNDLED_HOMEBREW_CATALOG } from '../../../src/authoring/bundled-homebrew-catalog';
@@ -990,5 +992,344 @@ describe('persisted spell access routes', () => {
       routes.some((route) => route.spell_version_id === inactiveId),
     ).toBe(false);
     expect(persistedAccessState(characterId)).toEqual(before);
+  });
+
+  it('table-drives malformed source config and the configured-ability fallback boundary', () => {
+    const characterId = character('Configured ability matrix', {
+      intelligence: 16,
+      wisdom: 14,
+    });
+    const classId = classDefinition('Ability fallback class', 'intelligence');
+    classLevel(characterId, classId, 1);
+    const featId = featDefinition('Ability config feat');
+    const cases: readonly {
+      readonly label: string;
+      readonly sourceType: 'class' | 'feat';
+      readonly definitionId: number;
+      readonly stored: string | null;
+      readonly expectedAbility: 'intelligence' | 'wisdom' | null;
+    }[] = [
+      { label: 'null-config', sourceType: 'feat', definitionId: featId, stored: null, expectedAbility: null },
+      { label: 'blank-config', sourceType: 'feat', definitionId: featId, stored: '', expectedAbility: null },
+      { label: 'json-null', sourceType: 'feat', definitionId: featId, stored: 'null', expectedAbility: null },
+      { label: 'array-config', sourceType: 'feat', definitionId: featId, stored: '[]', expectedAbility: null },
+      { label: 'scalar-config', sourceType: 'feat', definitionId: featId, stored: '"scalar"', expectedAbility: null },
+      { label: 'missing-path', sourceType: 'feat', definitionId: featId, stored: '{}', expectedAbility: null },
+      { label: 'non-string-path', sourceType: 'feat', definitionId: featId, stored: '{"spellcasting_ability":2}', expectedAbility: null },
+      { label: 'blank-path', sourceType: 'feat', definitionId: featId, stored: '{"spellcasting_ability":""}', expectedAbility: null },
+      { label: 'known-case-folded', sourceType: 'feat', definitionId: featId, stored: '{"spellcasting_ability":"WISDOM"}', expectedAbility: 'wisdom' },
+      { label: 'unknown-configured', sourceType: 'class', definitionId: classId, stored: '{"spellcasting_ability":"chronomancy"}', expectedAbility: null },
+      { label: 'class-null-fallback', sourceType: 'class', definitionId: classId, stored: null, expectedAbility: 'intelligence' },
+      { label: 'class-array-fallback', sourceType: 'class', definitionId: classId, stored: '[]', expectedAbility: 'intelligence' },
+      { label: 'class-blank-path-fallback', sourceType: 'class', definitionId: classId, stored: '{"spellcasting_ability":""}', expectedAbility: 'intelligence' },
+    ];
+
+    for (const fixture of cases) {
+      const sourceId = source(
+        characterId,
+        fixture.sourceType,
+        fixture.definitionId,
+        fixture.label,
+      );
+      db.exec('UPDATE character_source_instances SET config = ? WHERE id = ?', [
+        fixture.stored,
+        sourceId,
+      ]);
+      const versionId = spell(
+        `fixture:config:${fixture.label}`,
+        `Config ${fixture.label}`,
+        { level: 0 },
+      );
+      slot(characterId, sourceId, versionId, `config:${fixture.label}`, {
+        fixed: true,
+        withSlots: false,
+      });
+    }
+
+    class ConfigIsolationReader extends SourceRuleReader {
+      override activeRulesForSource(): [] {
+        return [];
+      }
+    }
+    const configBuilder = new SpellAccessBuilder(
+      db,
+      undefined,
+      new ConfigIsolationReader(db),
+    );
+    expect(configBuilder.buildForCharacter(characterId).map((route) => ({
+      name: route.source_name,
+      ability: route.spellcasting_ability,
+      modifier: route.ability_modifier,
+      attack: route.attack_bonus,
+      dc: route.save_dc,
+    }))).toEqual(
+      [...cases]
+        .sort((left, right) => `Config ${left.label}`.localeCompare(`Config ${right.label}`))
+        .map((fixture) => ({
+          name: fixture.label,
+          ability: fixture.expectedAbility,
+          modifier: fixture.expectedAbility === 'intelligence'
+            ? 3
+            : fixture.expectedAbility === 'wisdom'
+              ? 2
+              : null,
+          attack: fixture.expectedAbility === 'intelligence'
+            ? 5
+            : fixture.expectedAbility === 'wisdom'
+              ? 4
+              : null,
+          dc: fixture.expectedAbility === 'intelligence'
+            ? 13
+            : fixture.expectedAbility === 'wisdom'
+              ? 12
+              : null,
+        })),
+    );
+  });
+
+  it('sorts exact route keys across prefixes, origins, selection keys, and equal keys', () => {
+    const characterId = character('Route sorting matrix');
+    const classId = classDefinition('Sorting class', null, [{
+      kind: 'capability',
+      rule_key: 'sorting-rituals',
+      capability_key: 'sorting-rituals',
+      collection: 'wizard_spellbook',
+      access_mode: 'ritual_only',
+      tags: ['ritual'],
+    }]);
+    classLevel(characterId, classId, 1);
+    const sourceA = source(characterId, 'class', classId, 'Source A');
+    const alpha = spell('fixture:sort:alpha', 'Alpha', { level: 0 });
+    const alphabet = spell('fixture:sort:alphabet', 'Alphabet', { level: 0 });
+    const beta = spell('fixture:sort:beta', 'Beta', { level: 0 });
+    const equalOne = spell('fixture:sort:equal-one', 'Equal', { ritual: true });
+    const equalTwo = spell('fixture:sort:equal-two', 'Equal', { ritual: true });
+    const origin = spell('fixture:sort:origin', 'Origin', { ritual: true });
+
+    const betaId = slot(characterId, sourceA, beta, 'sort:beta', { fixed: true });
+    const alphaLongId = slot(characterId, sourceA, alpha, 'sort:a-long', { fixed: true });
+    const alphabetId = slot(characterId, sourceA, alphabet, 'sort:alphabet', { fixed: true });
+    const alphaShortId = slot(characterId, sourceA, alpha, 'sort:a', { fixed: true });
+    const originSlotId = slot(characterId, sourceA, origin, 'sort:origin', { fixed: true });
+    for (const [index, versionId] of [equalOne, equalTwo, origin].entries()) {
+      db.exec(
+        `INSERT INTO wizard_spellbook_entries (
+           character_id, source_instance_id, rule_key, ordinal,
+           spell_version_id, spell_level_min, spell_level_max,
+           state, selection_eligibility
+         ) VALUES (?, ?, 'sorting-book', ?, ?, 0, 9, 'active', 'valid')`,
+        [characterId, sourceA, index + 1, versionId],
+      );
+    }
+
+    expect(builder.buildForCharacter(characterId).map((route) => ({
+      spell: route.spell_name,
+      origin: route.origin,
+      selection: route.selection_key,
+      slot: route.slot_id,
+      version: route.spell_version_id,
+    }))).toEqual([
+      { spell: 'Alpha', origin: 'slot', selection: 'sort:a', slot: alphaShortId, version: alpha },
+      { spell: 'Alpha', origin: 'slot', selection: 'sort:a-long', slot: alphaLongId, version: alpha },
+      { spell: 'Alphabet', origin: 'slot', selection: 'sort:alphabet', slot: alphabetId, version: alphabet },
+      { spell: 'Beta', origin: 'slot', selection: 'sort:beta', slot: betaId, version: beta },
+      { spell: 'Equal', origin: 'capability', selection: null, slot: null, version: equalOne },
+      { spell: 'Equal', origin: 'capability', selection: null, slot: null, version: equalTwo },
+      { spell: 'Origin', origin: 'capability', selection: null, slot: null, version: origin },
+      { spell: 'Origin', origin: 'slot', selection: 'sort:origin', slot: originSlotId, version: origin },
+    ]);
+  });
+
+  it('returns an exact empty result for a leveled character with no slot or ritual rows', () => {
+    const characterId = character('Empty access matrix');
+    const classId = classDefinition('Empty access class', null);
+    classLevel(characterId, classId, 1);
+    source(characterId, 'class', classId, 'Empty access class');
+
+    expect(builder.buildForCharacter(characterId)).toEqual([]);
+  });
+
+  it('filters ritual capabilities at every structural field', () => {
+    const characterId = character('Capability filter matrix', {
+      intelligence: 16,
+    });
+    const valid = {
+      kind: 'capability',
+      rule_key: 'valid-ritual',
+      capability_key: 'valid-ritual',
+      collection: 'wizard_spellbook',
+      access_mode: 'ritual_only',
+      tags: ['ritual'],
+    };
+    const wizardId = classDefinition('Wizard', 'intelligence', [valid]);
+    classLevel(characterId, wizardId, 1);
+    const validSourceId = source(characterId, 'class', wizardId, 'Valid ritual source');
+
+    const nearMisses: readonly Record<string, unknown>[] = [
+      {
+        kind: 'fixed_spell',
+        rule_key: 'wrong-kind',
+        spell_version_key: 'fixture:wrong-kind',
+        bucket: 'automatic',
+        capability_key: 'wrong-kind',
+        collection: 'wizard_spellbook',
+        access_mode: 'ritual_only',
+        tags: ['ritual'],
+      },
+      { ...valid, rule_key: 'wrong-collection', capability_key: 'wrong-collection', collection: 'other_collection' },
+      { ...valid, rule_key: 'wrong-mode', capability_key: 'wrong-mode', access_mode: 'with_slots' },
+      { ...valid, rule_key: 'missing-tag', capability_key: 'missing-tag', tags: ['divination'] },
+    ];
+    for (const [index, rule] of nearMisses.entries()) {
+      const definitionId = featDefinition(`Near miss ${String(index)}`, [rule]);
+      source(characterId, 'feat', definitionId, `Near miss ${String(index)}`);
+    }
+
+    const versionId = spell('fixture:capability-filter', 'Capability Filter Ritual', {
+      ritual: true,
+    });
+    const entryId = db.exec(
+      `INSERT INTO wizard_spellbook_entries (
+         character_id, source_instance_id, rule_key, ordinal,
+         spell_version_id, spell_level_min, spell_level_max,
+         state, selection_eligibility
+       ) VALUES (?, ?, 'fixture-book', 1, ?, 0, 9, 'active', 'valid')`,
+      [characterId, validSourceId, versionId],
+    ).lastInsertId;
+
+    expect(builder.buildForCharacter(characterId)).toEqual([
+      expect.objectContaining({
+        origin: 'capability',
+        spell_version_id: versionId,
+        spellbook_entry_id: entryId,
+        source_instance_id: validSourceId,
+        source_name: 'Valid ritual source',
+      }),
+    ]);
+  });
+
+  it('rejects a capability whose decoded tags field is not a list', () => {
+    const characterId = character('Malformed capability tags', { intelligence: 16 });
+    const wizardId = classDefinition('Malformed capability class', 'intelligence');
+    classLevel(characterId, wizardId, 1);
+    const sourceId = source(characterId, 'class', wizardId, 'Malformed capability source');
+    const versionId = spell('fixture:malformed-capability', 'Malformed Capability Ritual', {
+      ritual: true,
+    });
+    db.exec(
+      `INSERT INTO wizard_spellbook_entries (
+         character_id, source_instance_id, rule_key, ordinal,
+         spell_version_id, spell_level_min, spell_level_max,
+         state, selection_eligibility
+       ) VALUES (?, ?, 'malformed-capability-book', 1, ?, 0, 9, 'active', 'valid')`,
+      [characterId, sourceId, versionId],
+    );
+
+    class MalformedCapabilityReader extends SourceRuleReader {
+      override activeRulesForSource(): GrantRule[] {
+        return [{
+          kind: 'capability',
+          toObject: () => ({
+            collection: 'wizard_spellbook',
+            access_mode: 'ritual_only',
+            tags: null,
+          }),
+        } as unknown as GrantRule];
+      }
+    }
+
+    const malformedBuilder = new SpellAccessBuilder(
+      db,
+      undefined,
+      new MalformedCapabilityReader(db),
+    );
+    expect(malformedBuilder.buildForCharacter(characterId)).toEqual([]);
+  });
+
+  it('pins prepared ritual suppression for active, override, invalid, and fixed assignments', () => {
+    const characterId = character('Prepared ritual matrix', { intelligence: 16 });
+    const capability = {
+      kind: 'capability',
+      rule_key: 'prepared-matrix-ritual',
+      capability_key: 'prepared-matrix-ritual',
+      collection: 'wizard_spellbook',
+      access_mode: 'ritual_only',
+      tags: ['ritual'],
+    };
+    const wizardId = classDefinition('Wizard', 'intelligence', [capability]);
+    classLevel(characterId, wizardId, 3);
+    const wizardSourceId = source(characterId, 'class', wizardId, 'Prepared matrix Wizard');
+
+    const activePrepared = spell('fixture:prepared:active', 'Active Prepared', { ritual: true, lists: ['Wizard'] });
+    const overridePrepared = spell('fixture:prepared:override', 'Override Prepared', { ritual: true, lists: ['Wizard'] });
+    const invalidPrepared = spell('fixture:prepared:invalid', 'Invalid Prepared', { ritual: true, lists: ['Wizard'] });
+    const fixedPrepared = spell('fixture:prepared:fixed', 'Fixed Prepared', { ritual: true, lists: ['Wizard'] });
+    const outsideCollection = spell('fixture:prepared:outside-collection', 'Outside Collection', { lists: ['Wizard'] });
+    const overrideOutsideCollection = spell('fixture:prepared:override-outside-collection', 'Override Outside Collection', { lists: ['Wizard'] });
+    for (const [index, versionId] of [
+      activePrepared,
+      overridePrepared,
+      invalidPrepared,
+      fixedPrepared,
+    ].entries()) {
+      db.exec(
+        `INSERT INTO wizard_spellbook_entries (
+           character_id, source_instance_id, rule_key, ordinal,
+           spell_version_id, spell_level_min, spell_level_max,
+           state, selection_eligibility
+         ) VALUES (?, ?, 'prepared-matrix-book', ?, ?, 0, 9, 'active', 'valid')`,
+        [characterId, wizardSourceId, index + 1, versionId],
+      );
+    }
+
+    const activeSlot = slot(characterId, wizardSourceId, activePrepared, 'prepared:active', {
+      bucket: 'prepared',
+      lists: ['Wizard'],
+    });
+    const overrideSlot = slot(characterId, wizardSourceId, overridePrepared, 'prepared:override', {
+      bucket: 'prepared',
+      state: 'kept_override',
+      lists: ['Cleric'],
+    });
+    slot(characterId, wizardSourceId, invalidPrepared, 'prepared:invalid', {
+      bucket: 'prepared',
+      lists: ['Cleric'],
+    });
+    const fixedSlot = slot(characterId, wizardSourceId, fixedPrepared, 'prepared:fixed', {
+      bucket: 'prepared',
+      fixed: true,
+      lists: ['Wizard'],
+    });
+    const outsideCollectionSlot = slot(
+      characterId,
+      wizardSourceId,
+      outsideCollection,
+      'prepared:outside-collection',
+      { bucket: 'prepared', lists: ['Wizard'] },
+    );
+    const overrideOutsideCollectionSlot = slot(
+      characterId,
+      wizardSourceId,
+      overrideOutsideCollection,
+      'prepared:override-outside-collection',
+      { bucket: 'prepared', state: 'kept_override', lists: ['Wizard'] },
+    );
+    db.exec(
+      `UPDATE spell_selection_slots SET selection_collection = 'wizard_spellbook'
+       WHERE id IN (?, ?)`,
+      [outsideCollectionSlot, overrideOutsideCollectionSlot],
+    );
+
+    expect(builder.buildForCharacter(characterId).map((route) => ({
+      spell: route.spell_name,
+      origin: route.origin,
+      slot: route.slot_id,
+    }))).toEqual([
+      { spell: 'Active Prepared', origin: 'slot', slot: activeSlot },
+      { spell: 'Fixed Prepared', origin: 'capability', slot: null },
+      { spell: 'Fixed Prepared', origin: 'slot', slot: fixedSlot },
+      { spell: 'Invalid Prepared', origin: 'capability', slot: null },
+      { spell: 'Override Prepared', origin: 'slot', slot: overrideSlot },
+    ]);
   });
 });

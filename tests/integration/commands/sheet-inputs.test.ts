@@ -11,6 +11,7 @@ import type {
 import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
 import { registerAssertedFixtureContentIdentity } from '../../helpers/content-identity';
 import { openTestDatabase } from '../../helpers/open-db';
+import { expectOkOutcome } from '../../helpers/outcome';
 
 const key = 'S1-sheet-command-integrity-key';
 
@@ -72,12 +73,12 @@ describe('sheet input commands', () => {
     const revision = Number(
       db.scalar('SELECT revision FROM characters WHERE id = ?', [characterId]),
     );
-    return executor.execute({
+    return expectOkOutcome(await executor.execute({
       character_id: characterId,
       operation_uuid: operationUuid(),
       expected_revision: revision,
       command,
-    });
+    }));
   }
 
   function armorRows() {
@@ -237,7 +238,7 @@ describe('sheet input commands', () => {
     );
     monkFormula();
     const operation = operationUuid();
-    const result = await executor.execute({
+    const result = expectOkOutcome(await executor.execute({
       character_id: characterId,
       operation_uuid: operation,
       expected_revision: 0,
@@ -254,7 +255,7 @@ describe('sheet input commands', () => {
           stealth_disadvantage: false,
         }),
       },
-    });
+    }));
 
     expect(result.preview_warnings).toEqual([
       {
@@ -271,7 +272,7 @@ describe('sheet input commands', () => {
     expect(sheet.armor_class.excluded.map((entry) => entry.formula.label))
       .toContain('Monk Unarmored Defense');
 
-    const replay = await executor.execute({
+    const replay = expectOkOutcome(await executor.execute({
       character_id: characterId,
       operation_uuid: operation,
       expected_revision: 999,
@@ -280,7 +281,7 @@ describe('sheet input commands', () => {
         ability: 'wisdom',
         score: 20,
       },
-    });
+    }));
     expect(replay.idempotent_replay).toBe(true);
     expect(replay.preview_warnings).toBeUndefined();
   });

@@ -1260,13 +1260,14 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
             : `Hit die d${String(entry.hit_die)}`
         }. ${
           entry.is_starting_class
-            ? 'This is the starting class, so it contributes the level 1 hit point maximum.'
-            : 'Not the starting class.'
-        } Saving throws: ${
-          entry.saving_throws.length === 0
-            ? 'none recorded'
-            : entry.saving_throws.join(', ')
-        }.`,
+            ? 'This is the starting class, so it contributes the level 1 hit point maximum. ' +
+              `Saving throw proficiencies: ${
+                entry.saving_throws.length === 0
+                  ? 'none recorded'
+                  : entry.saving_throws.join(', ')
+              }.`
+            : 'Not the starting class, so multiclass entry grants no saving throw proficiencies.'
+        }`,
       ),
     });
   }

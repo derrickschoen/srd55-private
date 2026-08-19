@@ -2070,13 +2070,16 @@ test('a Monk equipping Shell Shield walks from AC 16 to 15 with a strict-reducti
         };
       },
       {
-        preview_warnings?: readonly {
-          code: string;
-          message: string;
-          item_name: string;
-          previous_armor_class: number;
-          new_armor_class: number;
-        }[];
+        readonly kind: 'ok';
+        readonly value: {
+          preview_warnings?: readonly {
+            code: string;
+            message: string;
+            item_name: string;
+            previous_armor_class: number;
+            new_armor_class: number;
+          }[];
+        };
       }
     >('commands.execute', {
       character_id: characterId,
@@ -2097,7 +2100,7 @@ test('a Monk equipping Shell Shield walks from AC 16 to 15 with a strict-reducti
         },
       },
     }), image.characterId);
-  expect(result.preview_warnings).toEqual([
+  expect(result.value.preview_warnings).toEqual([
     {
       code: 'armor_class_reduced',
       message: 'Equipping Shell Shield reduces Armor Class from 16 to 15.',

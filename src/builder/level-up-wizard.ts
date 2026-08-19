@@ -321,6 +321,18 @@ export interface LevelUpStateParams {
   readonly character_id: CharacterId;
 }
 
+/** Reload-safe navigation state for an in-progress level-up wizard. */
+export interface LevelUpWizardProgress {
+  readonly character_revision: CharacterRevision;
+  readonly selected_class_content_key: ContentKey;
+  readonly current_step: LevelUpStep;
+}
+
+export interface SaveLevelUpWizardProgressParams {
+  readonly character_id: CharacterId;
+  readonly progress: LevelUpWizardProgress | null;
+}
+
 /** One durable D70 warning, repeated here without re-deriving its prose. */
 interface LevelUpPermanentWarningBase {
   readonly kind: string;
@@ -572,8 +584,28 @@ export interface LevelUpPreviewResult {
   readonly command_fingerprint: string;
 }
 
+export function isLevelUpPreviewResult(
+  value: unknown,
+): value is LevelUpPreviewResult {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  return Object.keys(candidate).length === 4
+    && candidate['before'] !== null
+    && typeof candidate['before'] === 'object'
+    && !Array.isArray(candidate['before'])
+    && candidate['after'] !== null
+    && typeof candidate['after'] === 'object'
+    && !Array.isArray(candidate['after'])
+    && Array.isArray(candidate['new_outstanding_choices'])
+    && typeof candidate['command_fingerprint'] === 'string';
+}
+
 export const LEVEL_UP_RPC = Object.freeze({
   state: 'queries.characters.levelUpState',
+  progress: 'queries.characters.levelUpProgress',
+  saveProgress: 'queries.characters.saveLevelUpProgress',
   plannedEligibleSpells:
     'queries.characters.levelUpPlannedEligibleSpells',
   preview: 'queries.characters.previewLevelUp',

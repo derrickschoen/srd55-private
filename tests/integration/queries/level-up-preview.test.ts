@@ -31,6 +31,9 @@ import {
   createSeededRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
+import type { Outcome } from '../../../src/refusals/outcome';
+import type { Refusal } from '../../../src/refusals/refusal';
+import { expectOkOutcome } from '../../helpers/outcome';
 
 interface AcceptanceFixture {
   readonly characterId: number;
@@ -122,6 +125,19 @@ describe('level-up rollback preview RPC', () => {
     return response.error;
   }
 
+  function outcomeOf<T>(response: RpcResponse): Outcome<T> {
+    return resultOf<Outcome<T>>(response);
+  }
+
+  function refusalOf(response: RpcResponse): Refusal {
+    const outcome = outcomeOf<unknown>(response);
+    expect(outcome.kind).toBe('refused');
+    if (outcome.kind !== 'refused') {
+      throw new Error('Expected a refused outcome.');
+    }
+    return outcome.refusal;
+  }
+
   function spellVersionId(name: string): number {
     const id = harness.context.db.scalar<number>(
       `SELECT id FROM spell_versions
@@ -146,11 +162,11 @@ describe('level-up rollback preview RPC', () => {
       [characterId],
     );
     const wizardId = classId('Wizard');
-    new UpdateClassCommand(
+    expectOkOutcome(new UpdateClassCommand(
       db,
       { type: 'update_class', class_definition_id: wizardId },
       new CharacterCommandIntegrity('level-up-preview-fixture-key'),
-    ).apply(characterId);
+    ).apply(characterId));
     const dwarfKey = String(
       db.scalar(
         `SELECT content_key FROM species_templates
@@ -352,7 +368,9 @@ describe('level-up rollback preview RPC', () => {
       expected_revision: fixture.expectedRevision,
       command: fixture.command,
     });
-    const preview = resultOf<LevelUpPreviewResult>(previewResponse);
+    const preview = expectOkOutcome(outcomeOf<LevelUpPreviewResult>(
+      previewResponse,
+    ));
     expect(databaseRows()).toEqual(beforeRows);
     expect(preview.before).toEqual(beforeSheet);
     expect(preview.after.total_level).toBe(2);
@@ -366,7 +384,9 @@ describe('level-up rollback preview RPC', () => {
       expected_revision: fixture.expectedRevision,
       command: fixture.command,
     });
-    const commit = resultOf<{ readonly revision: number }>(commitResponse);
+    const commit = expectOkOutcome(outcomeOf<{ readonly revision: number }>(
+      commitResponse,
+    ));
     expect(commit.revision).toBe(fixture.expectedRevision + 1);
     expect(
       new CharacterSheetBuilder(harness.context.db).build(fixture.characterId),
@@ -425,9 +445,11 @@ describe('level-up rollback preview RPC', () => {
       expected_revision: fixture.expectedRevision,
       command: fixture.command,
     });
-    expect(errorOf(stalePreview)).toEqual(errorOf(staleConfirm));
-    expect(errorOf(stalePreview).data).toEqual({
-      current_revision: fixture.expectedRevision + 1,
+    expect(refusalOf(stalePreview)).toEqual(refusalOf(staleConfirm));
+    expect(refusalOf(stalePreview)).toEqual({
+      kind: 'revision_conflict',
+      expected: fixture.expectedRevision,
+      actual: fixture.expectedRevision + 1,
     });
   });
 
@@ -447,11 +469,11 @@ describe('level-up rollback preview RPC', () => {
     });
 
     const wizard = new CharacterCrud(db).create({ name: 'Nonadjacent' }).id;
-    new UpdateClassCommand(
+    expectOkOutcome(new UpdateClassCommand(
       db,
       { type: 'update_class', class_definition_id: wizardId },
       new CharacterCommandIntegrity('refusal-fixture-key'),
-    ).apply(wizard);
+    ).apply(wizard));
     db.exec(
       `UPDATE characters SET ability_allocation_method = 'manual'
        WHERE id = ?`,
@@ -470,11 +492,11 @@ describe('level-up rollback preview RPC', () => {
 
     const fighter = new CharacterCrud(db).create({ name: 'ASI Refusal' }).id;
     const fighterId = classId('Fighter');
-    new UpdateClassCommand(
+    expectOkOutcome(new UpdateClassCommand(
       db,
       { type: 'update_class', class_definition_id: fighterId },
       new CharacterCommandIntegrity('refusal-fixture-key'),
-    ).apply(fighter);
+    ).apply(fighter));
     db.exec(
       `UPDATE characters SET ability_allocation_method = 'manual'
        WHERE id = ?`,
@@ -495,11 +517,11 @@ describe('level-up rollback preview RPC', () => {
     const unallocated = new CharacterCrud(db).create({
       name: 'Unallocated Fighter',
     }).id;
-    new UpdateClassCommand(
+    expectOkOutcome(new UpdateClassCommand(
       db,
       { type: 'update_class', class_definition_id: fighterId },
       new CharacterCommandIntegrity('refusal-fixture-key'),
-    ).apply(unallocated);
+    ).apply(unallocated));
     const beforeUnallocated = databaseRows();
     const incomplete = await dispatch('commands.execute', {
       character_id: unallocated,
@@ -513,15 +535,15 @@ describe('level-up rollback preview RPC', () => {
     });
 
     expect([
-      errorOf(classNotHeld).data,
-      errorOf(nonadjacent).data,
-      errorOf(missingFeat).data,
-      errorOf(incomplete).data,
+      refusalOf(classNotHeld),
+      refusalOf(nonadjacent),
+      refusalOf(missingFeat),
+      refusalOf(incomplete),
     ]).toEqual([
-      { reason: 'class_not_held' },
-      { reason: 'level_not_adjacent' },
-      { reason: 'ability_increase_required' },
-      { reason: 'incomplete_level_one' },
+      { kind: 'level_up_refused', reason: 'class_not_held' },
+      { kind: 'level_up_refused', reason: 'level_not_adjacent' },
+      { kind: 'level_up_refused', reason: 'ability_increase_required' },
+      { kind: 'level_up_refused', reason: 'incomplete_level_one' },
     ]);
     expect(databaseRows()).toEqual(beforeUnallocated);
   });
@@ -550,7 +572,8 @@ describe('level-up rollback preview RPC', () => {
       expected_revision: fixture.expectedRevision,
       command: invalidCommand,
     });
-    expect(errorOf(preview).data).toMatchObject({
+    expect(refusalOf(preview)).toMatchObject({
+      kind: 'level_up_refused',
       reason: 'planned_subchoice_refused',
       subchoice_kind: 'spell',
       issue: 'locator_not_found',
@@ -563,7 +586,7 @@ describe('level-up rollback preview RPC', () => {
       expected_revision: fixture.expectedRevision,
       command: invalidCommand,
     });
-    expect(errorOf(confirm).data).toEqual(errorOf(preview).data);
+    expect(refusalOf(confirm)).toEqual(refusalOf(preview));
     expect(databaseRows()).toEqual(before);
   });
 
