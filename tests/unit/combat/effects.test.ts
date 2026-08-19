@@ -14,6 +14,7 @@ import {
   dieSides,
   effectStackingIdentity,
 } from '../../../src/combat/values';
+import type { EncounterCommand, EncounterEvent } from '../../../src/combat/events';
 import { monsterProfile, placedToken, playerProfile } from './fixtures';
 
 const fire = damageType('Fire');
@@ -74,6 +75,85 @@ function reachTargetTurn(
   return reduceEncounter(state, { type: 'end_turn', actor: source.id }, () => 0.5);
 }
 
+function concentrationDamage(amount: number) {
+  return {
+    terms: [{ type: fire, dice: { count: 0, sides: dieSides(6), modifier: amount } }],
+    critical: false,
+    responses: [],
+  } as const;
+}
+
+function concentrationAttack(
+  actor: CombatantProfile,
+  target: CombatantProfile,
+  amount: number,
+): Extract<EncounterCommand, { readonly type: 'attack' }> {
+  return {
+    type: 'attack',
+    actor: actor.id,
+    target: target.id,
+    attackBonus: 100,
+    criticalFloor: 20,
+    rollMode: 'normal',
+    attackerCanSeeTarget: true,
+    targetCanSeeAttacker: true,
+    damage: concentrationDamage(amount),
+  };
+}
+
+function rngForD20Faces(faces: readonly number[]): () => number {
+  let index = 0;
+  return () => {
+    const face = faces[index];
+    if (face === undefined) throw new Error('Test RNG exhausted.');
+    index += 1;
+    return (face - 0.5) / 20;
+  };
+}
+
+function runConcentrationDamage(
+  damageAmount: number,
+  constitutionSaveBonus: number,
+  saveFace: number,
+): { readonly effectCount: number; readonly save: Extract<EncounterEvent, { readonly type: 'save_resolved' }> } {
+  const concentrator = monsterProfile('concentration-holder', {
+    hitPoints: 200,
+    initiativeBonus: 10,
+    constitutionSaveBonus,
+  });
+  const attacker = playerProfile('concentration-attacker', { initiativeBonus: 0 });
+  const initial = createEncounter({
+    bounds: { columns: 4, rows: 1 },
+    combatants: [concentrator, attacker],
+    tokens: [placedToken(concentrator, 0), placedToken(attacker, 3)],
+  });
+  let state = reduceEncounter(initial, { type: 'roll_initiative' }, () => 0.5).state;
+  state = apply(
+    state,
+    concentrator,
+    conditionEffect(attacker, 'Deafened', {
+      concentration: true,
+      identity: 'spell:concentration-dc',
+    }),
+  ).state;
+  state = reduceEncounter(
+    state,
+    { type: 'end_turn', actor: concentrator.id },
+    () => 0.5,
+  ).state;
+  const result = reduceEncounter(
+    state,
+    concentrationAttack(attacker, concentrator, damageAmount),
+    rngForD20Faces([11, saveFace]),
+  );
+  const save = result.events.find(
+    (event): event is Extract<EncounterEvent, { readonly type: 'save_resolved' }> =>
+      event.type === 'save_resolved',
+  );
+  if (save === undefined) throw new Error('Missing concentration saving throw.');
+  return { effectCount: result.state.effects.length, save };
+}
+
 describe('reducer-owned effect lifecycle', () => {
   it('enforces at most one concentration effect per caster by ending the first', () => {
     const fixture = setup();
@@ -99,15 +179,26 @@ describe('reducer-owned effect lifecycle', () => {
 
     expect(result.state.effects).toHaveLength(1);
     expect(result.state.effects[0]).toMatchObject({
+      id: 'effect:2',
+      createdRevision: 3,
       concentrationOwner: fixture.source.id,
       payload: { kind: 'condition', condition: 'Deafened' },
     });
-    expect(result.events).toContainEqual({
-      sequence: expect.any(Number),
-      type: 'effect_ended',
-      effectId: firstId,
-      reason: 'concentration_replaced',
-    });
+    expect(result.events).toEqual([
+      {
+        sequence: 6,
+        type: 'effect_ended',
+        effectId: firstId,
+        reason: 'concentration_replaced',
+      },
+      {
+        sequence: 7,
+        type: 'effect_applied',
+        effectId: 'effect:2',
+        source: fixture.source.id,
+        targets: [fixture.target.id],
+      },
+    ]);
   });
 
   it.each(['start', 'end'] as const)(
@@ -134,8 +225,28 @@ describe('reducer-owned effect lifecycle', () => {
       const targetStart = reachTargetTurn(applied.state, fixture.source);
       const startSaves = targetStart.events.filter((event) => event.type === 'save_resolved');
 
+      expect(applied.state.effects[0]?.repeatedSave).toEqual({
+        timing: {
+          combatant: fixture.target.id,
+          boundary,
+          source: 'docs/srd/source/spell-descriptions.txt:test-fixture',
+        },
+        ability: 'wisdom',
+        dc: 30,
+        rollMode: 'normal',
+        onSuccess: 'remove_target',
+      });
+
       if (boundary === 'start') {
-        expect(startSaves).toHaveLength(1);
+        expect(startSaves).toMatchObject([
+          {
+            sequence: 7,
+            target: fixture.target.id,
+            ability: 'wisdom',
+            save: { outcome: 'failure', total: 11 },
+            effectId: applied.state.effects[0]?.id,
+          },
+        ]);
       } else {
         expect(startSaves).toHaveLength(0);
         const targetEnd = reduceEncounter(
@@ -143,7 +254,15 @@ describe('reducer-owned effect lifecycle', () => {
           { type: 'end_turn', actor: fixture.target.id },
           () => 0.5,
         );
-        expect(targetEnd.events.filter((event) => event.type === 'save_resolved')).toHaveLength(1);
+        expect(targetEnd.events.filter((event) => event.type === 'save_resolved')).toMatchObject([
+          {
+            sequence: 8,
+            target: fixture.target.id,
+            ability: 'wisdom',
+            save: { outcome: 'failure', total: 11 },
+            effectId: applied.state.effects[0]?.id,
+          },
+        ]);
       }
     },
   );
@@ -169,10 +288,27 @@ describe('reducer-owned effect lifecycle', () => {
       );
       const targetStart = reachTargetTurn(applied.state, fixture.source);
 
+      expect(applied.state.effects[0]?.duration).toEqual({
+        kind: 'turn_boundaries',
+        timing: {
+          combatant: fixture.target.id,
+          boundary,
+          source: 'docs/srd/full/srd-5.2.1.txt:test-fixture',
+        },
+        remaining: 1,
+      });
+
       if (boundary === 'start') {
         expect(targetStart.state.effects).toHaveLength(0);
         expect(targetStart.events).toContainEqual({
-          sequence: expect.any(Number),
+          sequence: 7,
+          type: 'effect_clock_ticked',
+          effectId: applied.state.effects[0]?.id,
+          boundary,
+          remaining: 0,
+        });
+        expect(targetStart.events).toContainEqual({
+          sequence: 8,
           type: 'effect_ended',
           effectId: applied.state.effects[0]?.id,
           reason: 'duration_expired',
@@ -185,9 +321,19 @@ describe('reducer-owned effect lifecycle', () => {
           () => 0.5,
         );
         expect(targetEnd.state.effects).toHaveLength(0);
-        expect(targetEnd.events.some(
-          (event) => event.type === 'effect_ended' && event.reason === 'duration_expired',
-        )).toBe(true);
+        expect(targetEnd.events).toContainEqual({
+          sequence: 8,
+          type: 'effect_clock_ticked',
+          effectId: applied.state.effects[0]?.id,
+          boundary,
+          remaining: 0,
+        });
+        expect(targetEnd.events).toContainEqual({
+          sequence: 9,
+          type: 'effect_ended',
+          effectId: applied.state.effects[0]?.id,
+          reason: 'duration_expired',
+        });
       }
     },
   );
@@ -216,6 +362,19 @@ describe('reducer-owned effect lifecycle', () => {
       },
     });
 
+    expect(applied.state.effects[0]?.payload).toEqual({
+      kind: 'ongoing_damage',
+      timing: {
+        combatant: fixture.target.id,
+        boundary: 'start',
+        source: 'D254; docs/srd/source/spell-descriptions.txt',
+      },
+      damage: {
+        terms: [{ type: fire, dice: { count: 0, sides: dieSides(6), modifier: 3 } }],
+        critical: false,
+        responses: [],
+      },
+    });
     expect(
       applied.events.filter((event) => event.type === 'damage_applied'),
     ).toHaveLength(0);
@@ -285,6 +444,7 @@ describe('reducer-owned effect lifecycle', () => {
       exhaustion('exhaustion:second'),
     );
 
+    expect(first.state.effects[0]?.payload).toEqual({ kind: 'exhaustion', level: 3 });
     expect(combatantConditions(first.state, fixture.target.id)).toEqual([
       { name: 'Exhaustion', level: 3 },
     ]);
@@ -310,10 +470,52 @@ describe('reducer-owned effect lifecycle', () => {
     const first = run();
     const second = run();
 
-    expect(first.state.effects.map((effect) => effect.id)).toEqual(['effect:1']);
+    expect(first.state.nextEffectSequence).toBe(2);
+    expect(first.state.effects).toMatchObject([{ id: 'effect:1', createdRevision: 2 }]);
+    expect(first.events).toEqual([
+      {
+        sequence: 5,
+        type: 'effect_applied',
+        effectId: 'effect:1',
+        source: first.state.effects[0]?.source,
+        targets: first.state.effects[0]?.targets,
+      },
+    ]);
     expect(JSON.stringify(first.events)).toBe(JSON.stringify(second.events));
     expect(first.events).toEqual(second.events);
   });
+
+  it.each([
+    ['minimum DC 10', 1, 0, 10, 0, 9],
+    ['half damage rounded down to DC 11', 23, 0, 11, 0, 10],
+    ['maximum DC 30', 100, 10, 20, 10, 19],
+  ] as const)(
+    'pins concentration damage checks at the %s boundary',
+    (
+      _boundary,
+      damageAmount,
+      successBonus,
+      successFace,
+      failureBonus,
+      failureFace,
+    ) => {
+      const success = runConcentrationDamage(damageAmount, successBonus, successFace);
+      const failure = runConcentrationDamage(damageAmount, failureBonus, failureFace);
+
+      expect(success.save.save).toMatchObject({
+        outcome: 'success',
+        roll: { faces: [successFace], chosen: successFace },
+        total: successFace + successBonus,
+      });
+      expect(success.effectCount).toBe(1);
+      expect(failure.save.save).toMatchObject({
+        outcome: 'failure',
+        roll: { faces: [failureFace], chosen: failureFace },
+        total: failureFace + failureBonus,
+      });
+      expect(failure.effectCount).toBe(0);
+    },
+  );
 
   it('removes condition-immune targets inside the reducer and stores no empty effect', () => {
     const source = playerProfile('immune-source', { initiativeBonus: 10 });

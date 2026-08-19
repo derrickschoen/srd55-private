@@ -81,6 +81,183 @@ const expectedClauseKinds: Readonly<Record<ConditionName, readonly MechanicalCla
   ],
 };
 
+const expectedMechanicsCases = [
+  [
+    'Blinded pins every mechanics literal',
+    'Blinded',
+    {
+      kind: 'blinded',
+      cannotSee: true,
+      automaticallyFailsSightChecks: true,
+      attacksBy: 'disadvantage',
+      attacksAgainst: 'advantage',
+    },
+  ],
+  [
+    'Charmed pins every mechanics literal',
+    'Charmed',
+    {
+      kind: 'charmed',
+      cannotHarmSource: true,
+      sourceSocialChecks: 'advantage',
+    },
+  ],
+  [
+    'Deafened pins every mechanics literal',
+    'Deafened',
+    {
+      kind: 'deafened',
+      cannotHear: true,
+      automaticallyFailsHearingChecks: true,
+    },
+  ],
+  [
+    'Exhaustion pins every mechanics literal',
+    'Exhaustion',
+    {
+      kind: 'exhaustion',
+      cumulative: true,
+      deathLevel: 6,
+      d20PenaltyPerLevel: -2,
+      speedPenaltyFeetPerLevel: -5,
+      longRestLevelsRemoved: 1,
+    },
+  ],
+  [
+    'Frightened pins every mechanics literal',
+    'Frightened',
+    {
+      kind: 'frightened',
+      checksAndAttacksWhileSourceVisible: 'disadvantage',
+      cannotWillinglyApproachSource: true,
+    },
+  ],
+  [
+    'Grappled pins every mechanics literal',
+    'Grappled',
+    {
+      kind: 'grappled',
+      speed: 0,
+      attacksAgainstNonSource: 'disadvantage',
+      grapplerExtraMovementCostPerFoot: 1,
+      tinyOrTwoSizesSmallerExempt: true,
+    },
+  ],
+  [
+    'Incapacitated pins every mechanics literal',
+    'Incapacitated',
+    {
+      kind: 'incapacitated',
+      actions: false,
+      bonusActions: false,
+      reactions: false,
+      breaksConcentration: true,
+      canSpeak: false,
+      initiative: 'disadvantage',
+    },
+  ],
+  [
+    'Invisible pins every mechanics literal',
+    'Invisible',
+    {
+      kind: 'invisible',
+      initiative: 'advantage',
+      cannotBeTargetedBySightRequirement: true,
+      carriedEquipmentConcealed: true,
+      attacksBy: 'advantage',
+      attacksAgainst: 'disadvantage',
+      seenCreatureIgnoresAttackBenefit: true,
+    },
+  ],
+  [
+    'Paralyzed pins every mechanics literal, including the 5-foot critical-hit distance',
+    'Paralyzed',
+    {
+      kind: 'paralyzed',
+      incapacitated: true,
+      speed: 0,
+      automaticallyFailsSaves: ['strength', 'dexterity'],
+      attacksAgainst: 'advantage',
+      hitsWithinFeetAreCritical: 5,
+    },
+  ],
+  [
+    'Petrified pins every mechanics literal',
+    'Petrified',
+    {
+      kind: 'petrified',
+      inanimateTransformation: true,
+      nonmagicalEquipmentTransformed: true,
+      weightMultiplier: 10,
+      stopsAging: true,
+      incapacitated: true,
+      speed: 0,
+      attacksAgainst: 'advantage',
+      automaticallyFailsSaves: ['strength', 'dexterity'],
+      allDamage: 'resistant',
+      conditionImmunity: 'Poisoned',
+    },
+  ],
+  [
+    'Poisoned pins every mechanics literal',
+    'Poisoned',
+    {
+      kind: 'poisoned',
+      attacksAndAbilityChecks: 'disadvantage',
+    },
+  ],
+  [
+    'Prone pins every mechanics literal',
+    'Prone',
+    {
+      kind: 'prone',
+      movement: 'crawl_or_spend_half_speed_to_end',
+      cannotRiseAtSpeedZero: true,
+      attacksBy: 'disadvantage',
+      attacksAgainstWithinFeet: 'advantage',
+      attacksAgainstBeyondFeet: 'disadvantage',
+      distanceFeet: 5,
+    },
+  ],
+  [
+    'Restrained pins every mechanics literal',
+    'Restrained',
+    {
+      kind: 'restrained',
+      speed: 0,
+      attacksBy: 'disadvantage',
+      attacksAgainst: 'advantage',
+      dexteritySaves: 'disadvantage',
+    },
+  ],
+  [
+    'Stunned pins every mechanics literal',
+    'Stunned',
+    {
+      kind: 'stunned',
+      incapacitated: true,
+      automaticallyFailsSaves: ['strength', 'dexterity'],
+      attacksAgainst: 'advantage',
+    },
+  ],
+  [
+    'Unconscious pins every mechanics literal',
+    'Unconscious',
+    {
+      kind: 'unconscious',
+      incapacitated: true,
+      prone: true,
+      dropsHeldItems: true,
+      remainsProneWhenEnded: true,
+      speed: 0,
+      attacksAgainst: 'advantage',
+      automaticallyFailsSaves: ['strength', 'dexterity'],
+      hitsWithinFeetAreCritical: 5,
+      unaware: true,
+    },
+  ],
+] as const;
+
 describe('SRD condition coverage manifest', () => {
   it('contains exactly the fifteen SRD inventory rows in source order', () => {
     expect(conditionCoverageManifest).toHaveLength(15);
@@ -109,6 +286,11 @@ describe('SRD condition coverage manifest', () => {
       ).toBe(true);
     },
   );
+
+  it.each(expectedMechanicsCases)('%s', (_testName, condition, expectedMechanics) => {
+    const row = conditionCoverageManifest.find((candidate) => candidate.condition === condition);
+    expect(row?.mechanics).toEqual(expectedMechanics);
+  });
 
   it.each([
     [1, -2, -5, false],

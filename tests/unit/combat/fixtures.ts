@@ -17,6 +17,7 @@ export function monsterProfile(
     readonly attacksPerAction?: number;
     readonly usesDeathSaves?: boolean;
     readonly conditionImmunities?: readonly string[];
+    readonly constitutionSaveBonus?: number;
   } = {},
 ): CombatantProfile {
   const statblock = monsterStatblock({
@@ -29,7 +30,7 @@ export function monsterProfile(
     savingThrowBonuses: {
       strength: 0,
       dexterity: 0,
-      constitution: 0,
+      constitution: options.constitutionSaveBonus ?? 0,
       intelligence: 0,
       wisdom: 0,
       charisma: 0,
