@@ -25,3 +25,4 @@ orchestration/logs/
 # `git ls-files` what is actually tracked.
 scraped/
 .tmp/
+tools/discord-launcher/.env
