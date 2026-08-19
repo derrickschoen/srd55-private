@@ -7,6 +7,15 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D311 — OWNER: fix campaign scope is the top-12 files; minors first, then owner v1 review (2026-08-19)
+
+From the D310 triage (1,013 real gaps): the fix wave covers the **top-12
+hotspot files (~870 survivors)** in one wave of pattern-driven test lanes,
+guided by the triage doc's kill shapes; re-verify per shard via D308 --rerun.
+Declined: grants-cluster-only, all-1,013. Same session: the three D303
+journey minors get a fix lane NOW; the owner does their local v1 review
+(D266 gate) after the minors land — before the fix campaign completes.
+
 ## D310 — OWNER: survivor campaign is triage-first (2026-08-18)
 
 Before any D280 survivor-fix lanes dispatch, one triage lane classifies the
