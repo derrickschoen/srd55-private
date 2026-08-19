@@ -59,6 +59,22 @@ export const GUIDED_LEVEL_ONE_STEP_ORDER: readonly BuildStep[] = Object.freeze([
   'equipment',
 ]);
 
+function isBuildStep(value: unknown): value is BuildStep {
+  switch (value) {
+    case 'class':
+    case 'abilities':
+    case 'species':
+    case 'background':
+    case 'skills':
+    case 'expertise':
+    case 'spells':
+    case 'equipment':
+      return true;
+    default:
+      return false;
+  }
+}
+
 /* ------------------------------------------------------------- catalogues */
 
 /**
@@ -236,6 +252,49 @@ export interface GuidedChooseSpeciesLineageResult {
   readonly resolution: SpeciesChoiceResolution;
 }
 
+export function isGuidedChooseSpeciesLineageResult(
+  value: unknown,
+): value is GuidedChooseSpeciesLineageResult {
+  if (!hasExactKeys(value, [
+    'character_id',
+    'current_step',
+    'revision',
+    'resolution',
+  ])) return false;
+  const candidate = value as Record<string, unknown>;
+  return Number.isSafeInteger(candidate['character_id'])
+    && isBuildStep(candidate['current_step'])
+    && Number.isSafeInteger(candidate['revision'])
+    && isSpeciesChoiceResolution(candidate['resolution']);
+}
+
+function isSpeciesChoiceResolution(
+  value: unknown,
+): value is SpeciesChoiceResolution {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  switch (candidate['kind']) {
+    case 'no_species':
+      return true;
+    case 'complete':
+      return Number.isSafeInteger(candidate['source_instance_id'])
+        && typeof candidate['source_name'] === 'string'
+        && Array.isArray(candidate['choices']);
+    case 'incomplete':
+      return Number.isSafeInteger(candidate['source_instance_id'])
+        && typeof candidate['source_name'] === 'string'
+        && Array.isArray(candidate['missing'])
+        && Array.isArray(candidate['choices']);
+    case 'unresolvable':
+      return typeof candidate['source_name'] === 'string'
+        && typeof candidate['reason'] === 'string';
+    default:
+      return false;
+  }
+}
+
 /* ---------------------------------------------------------------- results */
 
 /**
@@ -270,8 +329,8 @@ export type GuidedBuildStateResult =
 
 /**
  * `RpcErrorCode` is a CLOSED transport-level union with no domain code, so a domain
- * refusal cannot have its own code. It rides `handler_error` with structured
- * `data`, following the `RevisionConflict` precedent already in the worker.
+ * refusal cannot have its own code. These not-yet-migrated guided refusals
+ * ride `handler_error` with structured `data`.
  *
  * `invalid_name` is NOT here. Name validation happens in parameter validation,
  * and the registry turns a validator failure into `invalid_params` before the
@@ -556,6 +615,36 @@ export interface GuidedAllocateAbilitiesResult {
   readonly character_id: number;
   readonly current_step: BuildStep;
   readonly warnings: readonly GuidedAbilityWarning[];
+}
+
+export function isGuidedAllocateAbilitiesResult(
+  value: unknown,
+): value is GuidedAllocateAbilitiesResult {
+  if (!hasExactKeys(value, ['character_id', 'current_step', 'warnings'])) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  return Number.isSafeInteger(candidate['character_id'])
+    && isBuildStep(candidate['current_step'])
+    && Array.isArray(candidate['warnings'])
+    && candidate['warnings'].every(isGuidedAbilityWarning);
+}
+
+function isGuidedAbilityWarning(value: unknown): value is GuidedAbilityWarning {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  switch (candidate['kind']) {
+    case 'non_standard_method':
+      return candidate['method'] === 'standard_array'
+        || candidate['method'] === 'point_buy'
+        || candidate['method'] === 'manual';
+    case 'weak_scores':
+      return Number.isSafeInteger(candidate['at_least_plus_two']);
+    default:
+      return false;
+  }
 }
 
 /**
@@ -975,6 +1064,15 @@ export interface GuidedFillSkillGrantParams {
 export interface GuidedFillSkillGrantResult {
   readonly character_id: number;
   readonly current_step: BuildStep;
+}
+
+export function isGuidedFillSkillGrantResult(
+  value: unknown,
+): value is GuidedFillSkillGrantResult {
+  if (!hasExactKeys(value, ['character_id', 'current_step'])) return false;
+  const candidate = value as Record<string, unknown>;
+  return Number.isSafeInteger(candidate['character_id'])
+    && isBuildStep(candidate['current_step']);
 }
 
 /** §3.6's exact-keys validator for the fill params. */

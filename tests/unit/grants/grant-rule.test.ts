@@ -1,7 +1,10 @@
 import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FreeCast } from '../../../src/grants/free-cast';
-import { GrantRule } from '../../../src/grants/grant-rule';
+import {
+  GrantRule,
+  grantRuleConsumesConfig,
+} from '../../../src/grants/grant-rule';
 import {
   GrantRuleActiveConfigKeysError,
   GrantRuleActiveConfigValuesError,
@@ -12,9 +15,11 @@ import {
   GrantRuleFreeCastEnumError,
   GrantRuleFreeCastUsesError,
   GrantRuleInvalidBucketError,
+  GrantRuleInputTypeError,
   GrantRuleJsonParseError,
   GrantRuleJsonShapeError,
   GrantRuleKindError,
+  GrantRulePendingChoiceError,
   GrantRuleQueryPredicateError,
   GrantRuleSelectionCollectionError,
   GrantSourceRuleDefinitionKeyConfigError,
@@ -31,6 +36,28 @@ function thrown(run: () => unknown): unknown {
     return error;
   }
   return expect.fail('Expected an error, but the call returned.');
+}
+
+type ErrorConstructor = abstract new (...args: never[]) => Error;
+
+function expectStructuredError(
+  run: () => unknown,
+  errorClass: ErrorConstructor,
+  fields: Readonly<Record<string, unknown>> = {},
+): void {
+  const error = thrown(run);
+  expect(error).toBeInstanceOf(errorClass);
+  expect(error).toMatchObject(fields);
+}
+
+function fixedRule(overrides: Record<string, unknown> = {}) {
+  return {
+    kind: 'fixed_spell',
+    rule_key: 'fixed-contract',
+    bucket: 'automatic',
+    spell_version_id: 1,
+    ...overrides,
+  };
 }
 
 describe('GrantRule', () => {
@@ -366,6 +393,391 @@ describe('GrantRule', () => {
       child_config_config: 'origin_feat_config',
       count: 1,
     });
+  });
+
+  it('classifies every config-consuming field by exact value shape', () => {
+    const cases: ReadonlyArray<readonly [string, Record<string, unknown>, boolean]> = [
+      ['unknown future field', { future_config: true }, true],
+      ['ordinary mechanical fields', {
+        kind: 'choice_from_list', rule_key: 'list', count: 1,
+        bucket: 'known', list: 'Wizard',
+      }, false],
+      ['nullable active config absent', { active_if_config: null }, false],
+      ['active config present', {
+        active_if_config: { key: 'order', equals: 'Scholar' },
+      }, true],
+      ['nullable distinct path absent', { distinct_config_by: undefined }, false],
+      ['distinct path present', { distinct_config_by: 'chosen_list' }, true],
+      ['literal list', { list: 'Wizard' }, false],
+      ['config list path', { list: '$config.chosen_list' }, true],
+      ['config marker only at suffix', { list: 'Wizard$config.' }, false],
+      ['pending choice false', { allows_pending_choice: false }, false],
+      ['pending choice true', { allows_pending_choice: true }, true],
+      ['tool alternative false', { allows_tool_instead: false }, false],
+      ['tool alternative true', { allows_tool_instead: true }, true],
+      ['empty object', {}, false],
+    ];
+
+    for (const [label, input, expected] of cases) {
+      expect(grantRuleConsumesConfig(input), label).toBe(expected);
+    }
+  });
+
+  it('clones nested lists and objects across input, output, array, and JSON boundaries', () => {
+    const input = {
+      kind: 'choice_from_query',
+      rule_key: 'clone-query',
+      count: 1,
+      bucket: 'known',
+      schools: ['Illusion'],
+      tags: ['ritual'],
+      active_if_config: { key: 'path.option', equals: 'Moon' },
+      extension: { nested: [{ exact: 3 }] },
+    };
+    const parsed = GrantRule.fromArray(input);
+    input.schools[0] = 'Evocation';
+    input.active_if_config.equals = 'Sun';
+    input.extension.nested[0]!.exact = 99;
+
+    expect(parsed.toObject()).toEqual({
+      kind: 'choice_from_query',
+      rule_key: 'clone-query',
+      count: 1,
+      bucket: 'known',
+      schools: ['Illusion'],
+      tags: ['ritual'],
+      active_if_config: { key: 'path.option', equals: 'Moon' },
+      extension: { nested: [{ exact: 3 }] },
+      always_prepared: false,
+      with_slots: true,
+      free_cast: null,
+      level_min: 0,
+      level_max: 9,
+    });
+
+    const output = parsed.toArray();
+    const outputExtension = Object.fromEntries(
+      Object.entries(output),
+    ).extension as {
+      nested: Array<{ exact: number }>;
+    };
+    outputExtension.nested[0]!.exact = 7;
+    expect(parsed.toObject()).toMatchObject({
+      extension: { nested: [{ exact: 3 }] },
+    });
+    expect(GrantRule.fromJson(parsed.toJson()).toJSON()).toEqual(
+      parsed.toObject(),
+    );
+  });
+
+  it('pins scalar field contracts one invalid value at a time', () => {
+    const invalid: ReadonlyArray<readonly [
+      string,
+      unknown,
+      ErrorConstructor,
+      Readonly<Record<string, unknown>>,
+    ]> = [
+      ['null input', null, GrantRuleInputTypeError, {}],
+      ['array input', [], GrantRuleInputTypeError, {}],
+      ['scalar input', 'fixed_spell', GrantRuleInputTypeError, {}],
+      ['missing kind', { rule_key: 'x' }, GrantRuleKindError, { value: undefined }],
+      ['null kind', { kind: null, rule_key: 'x' }, GrantRuleKindError, { value: null }],
+      ['blank rule key', fixedRule({ rule_key: ' ' }), GrantRuleFieldError, {
+        rule_key: null, field: 'rule_key', expected: 'non_empty_string',
+      }],
+      ['numeric rule key', fixedRule({ rule_key: 1 }), GrantRuleFieldError, {
+        rule_key: null, field: 'rule_key', expected: 'non_empty_string',
+      }],
+      ['zero count', {
+        kind: 'choice_from_list', rule_key: 'list', count: 0,
+        bucket: 'known', list: 'Wizard',
+      }, GrantRuleFieldError, {
+        rule_key: 'list', field: 'count', expected: 'positive_integer',
+      }],
+      ['fractional count', {
+        kind: 'choice_from_list', rule_key: 'list', count: 1.5,
+        bucket: 'known', list: 'Wizard',
+      }, GrantRuleFieldError, {
+        rule_key: 'list', field: 'count', expected: 'positive_integer',
+      }],
+      ['always prepared string', fixedRule({ always_prepared: 'false' }),
+        GrantRuleFieldError, {
+          rule_key: 'fixed-contract', field: 'always_prepared', expected: 'boolean',
+        }],
+      ['with slots null', fixedRule({ with_slots: null }), GrantRuleFieldError, {
+        rule_key: 'fixed-contract', field: 'with_slots', expected: 'boolean',
+      }],
+      ['blank distinct path', fixedRule({ distinct_config_by: ' ' }),
+        GrantRuleFieldError, {
+          rule_key: 'fixed-contract', field: 'distinct_config_by',
+          expected: 'non_empty_string',
+        }],
+      ['selection list null', {
+        kind: 'choice_from_list', rule_key: 'list', count: 1,
+        bucket: 'known', list: null,
+      }, GrantRuleFieldError, {
+        rule_key: null, field: 'list', expected: 'non_empty_string',
+      }],
+      ['selection list blank', {
+        kind: 'choice_from_list', rule_key: 'list', count: 1,
+        bucket: 'known', list: ' ',
+      }, GrantRuleFieldError, {
+        rule_key: null, field: 'list', expected: 'non_empty_string',
+      }],
+    ];
+
+    for (const [label, input, errorClass, fields] of invalid) {
+      expectStructuredError(
+        () => GrantRule.fromObject(input),
+        errorClass,
+        fields,
+      );
+      expect(label).not.toBe('');
+    }
+
+    expect(GrantRule.fromObject(fixedRule({
+      rule_key: '  trimmed-key  ',
+      distinct_config_by: '  nested.choice  ',
+    }))).toMatchObject({
+      ruleKey: 'trimmed-key',
+      count: 1,
+      alwaysPrepared: false,
+      withSlots: true,
+      distinctConfigBy: 'nested.choice',
+    });
+  });
+
+  it('pins spell and activation levels at every lower and upper boundary', () => {
+    for (const [levelMin, levelMax] of [[0, 0], [1, 9], [9, 9]] as const) {
+      expect(GrantRule.fromObject({
+        kind: 'choice_from_query',
+        rule_key: `levels-${levelMin}-${levelMax}`,
+        count: 1,
+        bucket: 'known',
+        level_min: levelMin,
+        level_max: levelMax,
+      }).toObject()).toMatchObject({ level_min: levelMin, level_max: levelMax });
+    }
+    for (const [field, value] of [
+      ['level_min', -1],
+      ['level_min', 1.5],
+      ['level_max', 10],
+      ['level_max', '9'],
+    ] as const) {
+      const error = thrown(() => GrantRule.fromObject({
+        kind: 'choice_from_query', rule_key: 'bad-level', count: 1,
+        bucket: 'known', [field]: value,
+      }));
+      expect(error).toBeInstanceOf(RangeError);
+    }
+
+    for (const activeLevel of [1, 20] as const) {
+      expect(GrantRule.fromObject(fixedRule({
+        active_from_character_level: activeLevel,
+      })).activeFromCharacterLevel).toBe(activeLevel);
+    }
+    expectStructuredError(
+      () => GrantRule.fromObject(fixedRule({ active_from_character_level: 0 })),
+      GrantRuleFieldError,
+      {
+        rule_key: 'fixed-contract', field: 'active_from_character_level',
+        expected: 'positive_integer',
+      },
+    );
+    expect(thrown(() => GrantRule.fromObject(fixedRule({
+      active_from_character_level: 21,
+    })))).toBeInstanceOf(RangeError);
+  });
+
+  it('pins active-config object keys and independently blank values', () => {
+    const invalid: ReadonlyArray<readonly [unknown, ErrorConstructor]> = [
+      [[], GrantRuleActiveConfigKeysError],
+      [{}, GrantRuleActiveConfigKeysError],
+      [{ key: 'choice' }, GrantRuleActiveConfigKeysError],
+      [{ key: 'choice', equals: 'Moon', extra: true }, GrantRuleActiveConfigKeysError],
+      [{ key: 1, equals: 'Moon' }, GrantRuleActiveConfigValuesError],
+      [{ key: 'choice', equals: 1 }, GrantRuleActiveConfigValuesError],
+      [{ key: ' ', equals: 'Moon' }, GrantRuleActiveConfigValuesError],
+      [{ key: 'choice', equals: ' ' }, GrantRuleActiveConfigValuesError],
+    ];
+    for (const [activeIfConfig, errorClass] of invalid) {
+      expectStructuredError(
+        () => GrantRule.fromObject(fixedRule({ active_if_config: activeIfConfig })),
+        errorClass,
+        { rule_key: 'fixed-contract' },
+      );
+    }
+    expect(GrantRule.fromObject(fixedRule({
+      active_if_config: { key: '  path.choice  ', equals: '  Moon  ' },
+    })).activeIfConfig).toEqual({ key: 'path.choice', equals: 'Moon' });
+  });
+
+  it('pins required and forbidden kind-specific payloads', () => {
+    const cases: ReadonlyArray<readonly [
+      string,
+      unknown,
+      ErrorConstructor,
+      Readonly<Record<string, unknown>>,
+    ]> = [
+      ['fixed missing reference', {
+        kind: 'fixed_spell', rule_key: 'fixed', bucket: 'automatic',
+      }, GrantRuleFixedSpellReferenceRequiredError, { rule_key: 'fixed' }],
+      ['list missing list', {
+        kind: 'choice_from_list', rule_key: 'list', count: 1, bucket: 'known',
+      }, GrantRuleFieldError, {
+        rule_key: null, field: 'list', expected: 'non_empty_string',
+      }],
+      ['query missing predicate', {
+        kind: 'choice_from_query', rule_key: 'query', count: 1, bucket: 'known',
+      }, GrantRuleQueryPredicateError, { rule_key: 'query' }],
+      ['source missing type', {
+        kind: 'grant_source', rule_key: 'source', source_definition_id: 1,
+      }, GrantRuleFieldError, {
+        rule_key: null, field: 'source_type', expected: 'non_empty_string',
+      }],
+      ['capability missing key', {
+        kind: 'capability', rule_key: 'capability', collection: 'spellbook',
+        access_mode: 'ritual', tags: ['ritual'],
+      }, GrantRuleFieldError, {
+        rule_key: null, field: 'capability_key', expected: 'non_empty_string',
+      }],
+      ['spellbook acquisition config blank', {
+        kind: 'spellbook_acquisition', rule_key: 'book', count: 1,
+        bucket: 'spellbook', list: 'Wizard', acquisitions_config: ' ',
+      }, GrantRuleFieldError, {
+        rule_key: null, field: 'acquisitions_config', expected: 'non_empty_string',
+      }],
+      ['fighting style missing key', {
+        kind: 'fighting_style', rule_key: 'style',
+      }, GrantRuleFieldError, {
+        rule_key: null, field: 'style_key', expected: 'non_empty_string',
+      }],
+      ['weapon mastery missing pool', {
+        kind: 'weapon_mastery', rule_key: 'mastery', count: 1,
+      }, GrantRuleFieldError, {
+        rule_key: null, field: 'selection_pool', expected: 'non_empty_string',
+      }],
+      ['skill alternative wrong type', {
+        kind: 'skill_proficiency', rule_key: 'skill', count: 1,
+        allows_tool_instead: 1,
+      }, GrantRuleFieldError, {
+        rule_key: 'skill', field: 'allows_tool_instead', expected: 'boolean',
+      }],
+    ];
+    for (const [label, input, errorClass, fields] of cases) {
+      expectStructuredError(
+        () => GrantRule.fromObject(input),
+        errorClass,
+        fields,
+      );
+      expect(label).not.toBe('');
+    }
+  });
+
+  it('pins source references, pending-choice declaration, and bucket ownership', () => {
+    const references = [
+      { source_definition_id: 1 },
+      { source_definition_key: '2024:feat:magic-initiate' },
+      { definition_key_config: 'origin.feat.key' },
+    ];
+    for (const reference of references) {
+      expect(GrantRule.fromObject({
+        kind: 'grant_source', rule_key: 'source', source_type: 'feat',
+        ...reference,
+      }).toObject()).toMatchObject({
+        kind: 'grant_source', rule_key: 'source', source_type: 'feat',
+        count: 1,
+      });
+    }
+    for (const sourceDefinitionId of [0, -1, 1.5, '1']) {
+      expectStructuredError(
+        () => GrantRule.fromObject({
+          kind: 'grant_source', rule_key: 'source', source_type: 'feat',
+          source_definition_id: sourceDefinitionId,
+        }),
+        GrantSourceRuleReferenceRequiredError,
+        { rule_key: 'source' },
+      );
+    }
+    expect(GrantRule.fromObject({
+      kind: 'grant_source', rule_key: 'pending', source_type: 'feat',
+      definition_key_config: 'origin.feat.key', allows_pending_choice: true,
+    }).toObject()).toMatchObject({
+      definition_key_config: 'origin.feat.key', allows_pending_choice: true,
+    });
+    for (const input of [
+      fixedRule({ allows_pending_choice: true }),
+      {
+        kind: 'grant_source', rule_key: 'pending', source_type: 'feat',
+        source_definition_key: '2024:feat:magic-initiate',
+        allows_pending_choice: true,
+      },
+    ]) {
+      expectStructuredError(
+        () => GrantRule.fromObject(input),
+        GrantRulePendingChoiceError,
+        { rule_key: input.rule_key },
+      );
+    }
+    expectStructuredError(
+      () => GrantRule.fromObject(fixedRule({ allows_pending_choice: 'yes' })),
+      GrantRuleFieldError,
+      {
+        rule_key: 'fixed-contract', field: 'allows_pending_choice',
+        expected: 'boolean',
+      },
+    );
+    expectStructuredError(
+      () => GrantRule.fromObject({
+        kind: 'fighting_style', rule_key: 'style', style_key: 'archery',
+        bucket: 'known',
+      }),
+      GrantRuleForbiddenBucketError,
+      { rule_key: 'style' },
+    );
+    expectStructuredError(
+      () => GrantRule.fromObject({
+        kind: 'choice_from_list', rule_key: 'list', count: 1, list: 'Wizard',
+      }),
+      GrantRuleFieldError,
+      { rule_key: null, field: 'bucket', expected: 'non_empty_string' },
+    );
+  });
+
+  it('pins spellbook initial and per-level count boundaries', () => {
+    const rule = (initialCount: unknown, countPerLevel: unknown) => ({
+      kind: 'spellbook_acquisition',
+      rule_key: 'book',
+      count: 2,
+      bucket: 'spellbook',
+      list: 'Wizard',
+      initial_count: initialCount,
+      count_per_level: countPerLevel,
+    });
+    expect(GrantRule.fromObject(rule(0, 1)).toObject()).toMatchObject({
+      initial_count: 0,
+      count_per_level: 1,
+    });
+    for (const initialCount of [-1, 1.5, '0']) {
+      expectStructuredError(
+        () => GrantRule.fromObject(rule(initialCount, 1)),
+        GrantRuleFieldError,
+        {
+          rule_key: 'book', field: 'initial_count',
+          expected: 'non_negative_integer',
+        },
+      );
+    }
+    for (const countPerLevel of [0, -1, 1.5, '1']) {
+      expectStructuredError(
+        () => GrantRule.fromObject(rule(0, countPerLevel)),
+        GrantRuleFieldError,
+        {
+          rule_key: 'book', field: 'count_per_level',
+          expected: 'positive_integer',
+        },
+      );
+    }
   });
 
   it('rejects malformed and obsolete contracts before any row is stored', () => {

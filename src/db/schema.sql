@@ -756,6 +756,7 @@ CREATE TABLE `character_source_instances` (
 
 CREATE UNIQUE INDEX `character_source_instances_instance_uuid_unique` ON `character_source_instances` (`instance_uuid`);
 CREATE INDEX `character_source_instances_character_id_state_index` ON `character_source_instances` (`character_id`,`state`);
+CREATE INDEX `character_source_instances_parent_index` ON `character_source_instances` (`parent_source_instance_id`) WHERE parent_source_instance_id IS NOT NULL;
 CREATE UNIQUE INDEX `character_source_instances_id_character_id_unique` ON `character_source_instances` (`id`,`character_id`);
 CREATE TABLE `character_species` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
@@ -1652,6 +1653,9 @@ CREATE TABLE `spell_selection_slots` (
 CREATE UNIQUE INDEX `spell_selection_slots_character_id_slot_key_unique` ON `spell_selection_slots` (`character_id`,`slot_key`);
 CREATE INDEX `spell_selection_slots_character_id_state_index` ON `spell_selection_slots` (`character_id`,`state`);
 CREATE INDEX `spell_selection_slots_character_id_bucket_index` ON `spell_selection_slots` (`character_id`,`bucket`);
+CREATE INDEX `spell_selection_slots_source_state_index` ON `spell_selection_slots` (`source_instance_id`,`state`);
+CREATE INDEX `spell_selection_slots_fixed_spell_version_index` ON `spell_selection_slots` (`fixed_spell_version_id`) WHERE fixed_spell_version_id IS NOT NULL;
+CREATE INDEX `spell_selection_slots_current_spell_version_index` ON `spell_selection_slots` (`current_spell_version_id`) WHERE current_spell_version_id IS NOT NULL;
 CREATE INDEX `slots_character_collection_index` ON `spell_selection_slots` (`character_id`,`selection_collection`);
 CREATE TABLE `spell_version_attack_modes` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
@@ -1780,7 +1784,7 @@ CREATE TABLE `spell_versions` (
 CREATE UNIQUE INDEX `spell_versions_content_key_unique` ON `spell_versions` (`content_key`);
 CREATE INDEX `spell_versions_spell_identity_id_rules_edition_index` ON `spell_versions` (`spell_identity_id`,`rules_edition`);
 CREATE INDEX `spell_versions_rules_edition_level_index` ON `spell_versions` (`rules_edition`,`level`);
-CREATE INDEX `spell_versions_is_active_index` ON `spell_versions` (`is_active`);
+CREATE INDEX `spell_versions_active_level_name_index` ON `spell_versions` (`is_active`,`level`,`display_name`);
 CREATE TABLE `subclass_definitions` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`content_key` VARCHAR NOT NULL,

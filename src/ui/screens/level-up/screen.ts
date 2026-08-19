@@ -34,11 +34,19 @@ async function render(context: ScreenContext): Promise<() => void> {
 
   const mountFreshState = async (): Promise<void> => {
     context.root.replaceChildren(renderLevelUpLoading());
-    const state = await queries.levelUpState(characterId);
+    const [state, initialProgress] = await Promise.all([
+      queries.levelUpState(characterId),
+      queries.levelUpProgress(characterId),
+    ]);
     if (disposed) return;
     wizardCleanup?.();
     const wizard = createLevelUpWizard({
       state,
+      initialProgress,
+      saveProgress: (progress) => queries.saveLevelUpProgress({
+        character_id: characterId,
+        progress,
+      }),
       searchPlannedSpells: (params) =>
         queries.levelUpPlannedEligibleSpells(params),
       preview: (expectedRevision, command) => queries.previewLevelUp({
@@ -55,14 +63,20 @@ async function render(context: ScreenContext): Promise<() => void> {
         ),
       loadSheet: () => queries.sheet(characterId),
       reloadState: mountFreshState,
-      cancel: () => returnToLevelUpLaunchSurface({
-        historyState: window.history.state,
-        currentOrigin: window.location.origin,
-        back: () => window.history.back(),
-        fallback: () => context.router.navigate(
-          `/characters/${String(characterId)}/sheet`,
-        ),
-      }),
+      cancel: () => {
+        const leaveLevelUp = (): void => returnToLevelUpLaunchSurface({
+          historyState: window.history.state,
+          currentOrigin: window.location.origin,
+          back: () => window.history.back(),
+          fallback: () => context.router.navigate(
+            `/characters/${String(characterId)}/sheet`,
+          ),
+        });
+        void queries.saveLevelUpProgress({
+          character_id: characterId,
+          progress: null,
+        }).then(leaveLevelUp, leaveLevelUp);
+      },
     });
     wizardCleanup = wizard.cleanup;
     context.root.replaceChildren(wizard.element);

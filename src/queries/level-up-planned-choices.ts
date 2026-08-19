@@ -9,6 +9,7 @@ import type {
 import type { LevelFeatSelection } from '../domain/command-contracts';
 import { levelUpSpellReplacementAllowed } from '../commands/level-up-spell-replacement';
 import type { DatabaseContext } from '../db/database';
+import type { LevelFeatDefinitionFromDatabase } from '../commands/level-feat-choice';
 import { sqlInteger, sqlNullableString, sqlString } from '../db/codecs';
 import {
   catalogLayerDisclosure,
@@ -160,6 +161,7 @@ export class LevelUpPlannedChoicesQuery {
     featCatalogLayer: CatalogLayerDisclosure,
     selection: LevelFeatSelection,
     plan: FeatApplicationPlan,
+    definition: LevelFeatDefinitionFromDatabase,
   ): LevelUpPlannedChoiceProjection {
     const source: PlannedGrantSource = { kind: 'selected_feat' };
     const held = new Set(activeGrantedSkills(this.db, context.character_id));
@@ -190,6 +192,7 @@ export class LevelUpPlannedChoicesQuery {
         featName,
         featCatalogLayer,
         null,
+        definition,
       ),
     };
   }
@@ -232,8 +235,15 @@ export class LevelUpPlannedChoicesQuery {
     label: string,
     sourceCatalogLayer: CatalogLayerDisclosure,
     durableSourceId: SourceInstanceId | null,
+    preloadedFeatDefinition?: LevelFeatDefinitionFromDatabase,
   ): readonly LevelUpPlannedSpellProjection[] {
-    const plan = [...this.#spells.planSource(context, source)].sort(
+    const plan = [
+      ...this.#spells.planSource(
+        context,
+        source,
+        preloadedFeatDefinition,
+      ),
+    ].sort(
       (left, right) => {
         const rank = (grant: PlannedSpellGrant): number =>
           grant.kind === 'slot_selection' &&

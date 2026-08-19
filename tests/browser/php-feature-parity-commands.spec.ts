@@ -13,6 +13,7 @@ import {
   operation,
   ready,
   rejectedRpc,
+  refusedRpc,
   restoreSavePoint,
   rows,
   rpc,
@@ -688,17 +689,16 @@ test('rejects stale revisions and replays an operation idempotently', async ({
     15,
   );
   expect(replay).toEqual({ ...first, idempotent_replay: true });
-  const stale = await rejectedRpc(page, 'commands.execute', {
+  const stale = await refusedRpc(page, 'commands.execute', {
     character_id: workspaceImage.ids.character,
     operation_uuid: operation(150),
     expected_revision: 0,
     command: { type: 'update_ability', ability: 'wisdom', score: 18 },
   });
   expect(stale).toEqual({
-    code: 'handler_error',
-    message:
-      'This character changed in another tab. Reload before trying again.',
-    data: { current_revision: 1 },
+    kind: 'revision_conflict',
+    expected: 0,
+    actual: 1,
   });
   expect(
     forCharacter(

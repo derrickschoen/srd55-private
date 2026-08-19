@@ -1,4 +1,5 @@
 import { expectIdenticalDatabaseImages } from '../../helpers/database-image-equality';
+import { expectOkOutcome } from '../../helpers/outcome';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type {
   Database,
@@ -249,8 +250,27 @@ const SCHEMA_BEFORE_CATALOG_CONTENT_VISIBILITY = DATABASE_MIGRATIONS
   .join('\n');
 const CATALOG_CONTENT_VISIBILITY_MIGRATION =
   DATABASE_MIGRATIONS[CATALOG_CONTENT_VISIBILITY_INDEX]!;
+const SPELL_VERSIONS_ACTIVE_LEVEL_NAME_INDEX = DATABASE_MIGRATIONS.findIndex(
+  (entry) => entry.id === '0049_spell_versions_active_level_name_index',
+);
+const SCHEMA_BEFORE_SPELL_VERSIONS_ACTIVE_LEVEL_NAME_INDEX =
+  DATABASE_MIGRATIONS
+    .slice(0, SPELL_VERSIONS_ACTIVE_LEVEL_NAME_INDEX)
+    .map((entry) => entry.sql)
+    .join('\n');
+const SPELL_VERSIONS_ACTIVE_LEVEL_NAME_INDEX_MIGRATION =
+  DATABASE_MIGRATIONS[SPELL_VERSIONS_ACTIVE_LEVEL_NAME_INDEX]!;
+const RELATIONSHIP_INDEXES_INDEX = DATABASE_MIGRATIONS.findIndex(
+  (entry) => entry.id === '0050_relationship_indexes',
+);
+const SCHEMA_BEFORE_RELATIONSHIP_INDEXES = DATABASE_MIGRATIONS
+  .slice(0, RELATIONSHIP_INDEXES_INDEX)
+  .map((entry) => entry.sql)
+  .join('\n');
+const RELATIONSHIP_INDEXES_MIGRATION =
+  DATABASE_MIGRATIONS[RELATIONSHIP_INDEXES_INDEX]!;
 const FINGERPRINT_CONTENT_KEY_INDEX_INDEX = DATABASE_MIGRATIONS.findIndex(
-  (entry) => entry.id === '0049_fingerprint_content_key_index',
+  (entry) => entry.id === '0051_fingerprint_content_key_index',
 );
 const SCHEMA_BEFORE_FINGERPRINT_CONTENT_KEY_INDEX = DATABASE_MIGRATIONS
   .slice(0, FINGERPRINT_CONTENT_KEY_INDEX_INDEX)
@@ -1205,14 +1225,15 @@ describe('database migration chain', () => {
       // A pre-0034 save-point id now reaches the typed not-found refusal. It
       // cannot parse/replay stale raw ids and therefore cannot surface an FK
       // failure after the migration.
-      expect(new CharacterCommandExecutor(
+      const restoreOutcome = new CharacterCommandExecutor(
         db,
         new CharacterCommandIntegrity('ci4b-migration-test-integrity'),
       ).restoreSavePoint({
         character_id: 108,
         save_point_id: 221,
         expected_revision: 0,
-      })).toEqual({
+      });
+      expect(expectOkOutcome(restoreOutcome)).toEqual({
         status: 'refused',
         reason: 'save_point_not_found',
         current_revision: 0,
@@ -3647,7 +3668,72 @@ describe('database migration chain', () => {
     }
   });
 
-  it('0049 adds the fingerprint content-key index without changing stored fingerprints', () => {
+  it('0049 replaces the active-spell prefix index with the eligibility ordering index', () => {
+    const db = new sqlite3.oo1.DB(':memory:', 'c');
+    try {
+      db.exec(SCHEMA_BEFORE_SPELL_VERSIONS_ACTIVE_LEVEL_NAME_INDEX);
+      expect(db.selectValues(
+        `SELECT name FROM sqlite_schema
+         WHERE type = 'index'
+           AND name IN (
+             'spell_versions_is_active_index',
+             'spell_versions_active_level_name_index'
+           )
+         ORDER BY name`,
+      )).toEqual(['spell_versions_is_active_index']);
+
+      db.exec(SPELL_VERSIONS_ACTIVE_LEVEL_NAME_INDEX_MIGRATION.sql);
+
+      expect(db.selectValues(
+        `SELECT name FROM sqlite_schema
+         WHERE type = 'index'
+           AND name IN (
+             'spell_versions_is_active_index',
+             'spell_versions_active_level_name_index'
+           )
+         ORDER BY name`,
+      )).toEqual(['spell_versions_active_level_name_index']);
+      expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
+        SPELL_VERSIONS_ACTIVE_LEVEL_NAME_INDEX_MIGRATION.resultSchemaChecksum,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it('0050 adds the measured relationship indexes to persisted images', () => {
+    const db = new sqlite3.oo1.DB(':memory:', 'c');
+    try {
+      db.exec(SCHEMA_BEFORE_RELATIONSHIP_INDEXES);
+      const indexNames = [
+        'character_source_instances_parent_index',
+        'spell_selection_slots_current_spell_version_index',
+        'spell_selection_slots_fixed_spell_version_index',
+        'spell_selection_slots_source_state_index',
+      ];
+      expect(db.selectValues(
+        `SELECT name FROM sqlite_schema
+         WHERE name IN (${indexNames.map(() => '?').join(', ')})`,
+        indexNames,
+      )).toEqual([]);
+
+      db.exec(RELATIONSHIP_INDEXES_MIGRATION.sql);
+
+      expect(db.selectValues(
+        `SELECT name FROM sqlite_schema
+         WHERE name IN (${indexNames.map(() => '?').join(', ')})
+         ORDER BY name`,
+        indexNames,
+      )).toEqual(indexNames);
+      expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
+        RELATIONSHIP_INDEXES_MIGRATION.resultSchemaChecksum,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it('0051 adds the fingerprint content-key index without changing stored fingerprints', () => {
     const db = new sqlite3.oo1.DB(':memory:', 'c');
     try {
       db.exec(SCHEMA_BEFORE_FINGERPRINT_CONTENT_KEY_INDEX);

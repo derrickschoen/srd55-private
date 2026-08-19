@@ -103,62 +103,85 @@ function entry(
   detail.textContent = item.detail;
   const remedy = document.createElement('p');
   remedy.className = 'outstanding-remedy';
-  if (item.kind === 'required_source_choice') {
-    const link = document.createElement('a');
-    link.setAttribute('href', guidedSpeciesChoicePath(characterId));
-    link.dataset.routerLink = 'true';
-    link.textContent = item.remedy;
-    remedy.append(link);
-  } else if (
-    item.kind === 'fighting_style_choice' ||
-    (item.kind === 'weapon_mastery_choice' &&
-      item.remedy_action === 'guided_equipment')
-  ) {
-    const link = document.createElement('a');
-    link.setAttribute('href', guidedBuildPath(characterId));
-    link.dataset.routerLink = 'true';
-    link.textContent = item.remedy;
-    remedy.append(link);
-  } else if (
-    item.kind === 'weapon_mastery_choice' &&
-    item.remedy_action === 'import_catalog'
-  ) {
-    const link = document.createElement('a');
-    link.setAttribute('href', CATALOG_IMPORT_ROUTE);
-    link.dataset.routerLink = 'true';
-    link.className = 'button-secondary';
-    link.textContent = 'Import or repair Fighter Weapon Mastery rules data';
-    remedy.append(link);
-  } else if (
-    item.kind === 'wizard_spellbook_incomplete' ||
-    item.kind === 'wizard_preparation_out_of_book'
-  ) {
-    const link = document.createElement('a');
-    link.setAttribute(
-      'href',
-      guidedSpellRepairPath(
-        characterId,
-        item.kind === 'wizard_spellbook_incomplete'
-          ? 'spellbook_acquisition'
-          : 'slot_selection',
-        item.kind === 'wizard_spellbook_incomplete'
-          ? item.acquisition_id
-          : item.slot_id,
-      ),
-    );
-    link.dataset.routerLink = 'true';
-    link.className = 'button-secondary';
-    link.textContent = item.remedy;
-    remedy.append(link);
-  } else if (item.kind === 'catalog_gap') {
-    const link = document.createElement('a');
-    link.setAttribute('href', CATALOG_IMPORT_ROUTE);
-    link.dataset.routerLink = 'true';
-    link.className = 'button-secondary';
-    link.textContent = 'Import a catalog with eligible spells';
-    remedy.append(link);
-  } else {
-    remedy.textContent = item.remedy;
+  switch (item.kind) {
+    case 'required_source_choice': {
+      const link = document.createElement('a');
+      link.setAttribute('href', guidedSpeciesChoicePath(characterId));
+      link.dataset.routerLink = 'true';
+      link.textContent = item.remedy;
+      remedy.append(link);
+      break;
+    }
+    case 'fighting_style_choice': {
+      const link = document.createElement('a');
+      link.setAttribute('href', guidedBuildPath(characterId));
+      link.dataset.routerLink = 'true';
+      link.textContent = item.remedy;
+      remedy.append(link);
+      break;
+    }
+    case 'weapon_mastery_choice': {
+      const link = document.createElement('a');
+      link.setAttribute(
+        'href',
+        item.remedy_action === 'guided_equipment'
+          ? guidedBuildPath(characterId)
+          : CATALOG_IMPORT_ROUTE,
+      );
+      link.dataset.routerLink = 'true';
+      link.textContent = item.remedy_action === 'guided_equipment'
+        ? item.remedy
+        : 'Import or repair Fighter Weapon Mastery rules data';
+      if (item.remedy_action === 'import_catalog') {
+        link.className = 'button-secondary';
+      }
+      remedy.append(link);
+      break;
+    }
+    case 'wizard_spellbook_incomplete':
+    case 'wizard_preparation_out_of_book': {
+      const link = document.createElement('a');
+      link.setAttribute(
+        'href',
+        guidedSpellRepairPath(
+          characterId,
+          item.kind === 'wizard_spellbook_incomplete'
+            ? 'spellbook_acquisition'
+            : 'slot_selection',
+          item.kind === 'wizard_spellbook_incomplete'
+            ? item.acquisition_id
+            : item.slot_id,
+        ),
+      );
+      link.dataset.routerLink = 'true';
+      link.className = 'button-secondary';
+      link.textContent = item.remedy;
+      remedy.append(link);
+      break;
+    }
+    case 'catalog_gap': {
+      const link = document.createElement('a');
+      link.setAttribute('href', CATALOG_IMPORT_ROUTE);
+      link.dataset.routerLink = 'true';
+      link.className = 'button-secondary';
+      link.textContent = 'Import a catalog with eligible spells';
+      remedy.append(link);
+      break;
+    }
+    case 'unfilled_choices':
+    case 'unchosen_option':
+    case 'no_class':
+    case 'orphan_hit_point_roll':
+    case 'unfilled_skill_grants':
+    case 'expertise_grant':
+      remedy.textContent = item.remedy;
+      break;
+    /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+       tsc probe verified that the never assignment rejects a new finding. */
+    default: {
+      const unreachable: never = item;
+      throw new TypeError(`Unhandled completeness finding ${String(unreachable)}.`);
+    }
   }
   listItem.append(heading, detail, remedy);
   if (item.kind === 'unfilled_skill_grants') {

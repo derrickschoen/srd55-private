@@ -201,7 +201,57 @@ describe('persisted class progression catalog', () => {
     expect(db.scalar('SELECT count(*) FROM subclass_definitions')).toBe(12);
     expect(db.scalar('SELECT count(*) FROM subclass_progressions')).toBe(0);
     expect(db.scalar('SELECT count(*) FROM subclass_features')).toBe(58);
-    expect(db.scalar('SELECT count(*) FROM subclass_feature_effects')).toBe(0);
+    expect(db.scalar('SELECT count(*) FROM subclass_feature_effects')).toBe(2);
+
+    expect(
+      db.allRaw(
+        `SELECT class.name AS class_name, subclass.name AS subclass_name,
+                feature.class_level, feature.name, effect.sort_order,
+                effect.effect_kind, effect.hit_points_flat,
+                effect.hit_points_per_level, effect.base, effect.ability_1,
+                effect.ability_2, effect.allows_shield, effect.label
+           FROM subclass_feature_effects AS effect
+           JOIN subclass_features AS feature
+             ON feature.id = effect.subclass_feature_id
+           JOIN subclass_definitions AS subclass
+             ON subclass.id = feature.subclass_definition_id
+           JOIN class_definitions AS class
+             ON class.id = subclass.class_definition_id
+          ORDER BY class.name, subclass.name, feature.sort_order,
+                   effect.sort_order`,
+      ),
+    ).toEqual([
+      {
+        class_name: 'Sorcerer',
+        subclass_name: 'Draconic Sorcery',
+        class_level: 3,
+        name: 'Draconic Resilience',
+        sort_order: 1,
+        effect_kind: 'hp_modifier',
+        hit_points_flat: 0,
+        hit_points_per_level: 1,
+        base: null,
+        ability_1: null,
+        ability_2: null,
+        allows_shield: null,
+        label: 'Draconic Resilience',
+      },
+      {
+        class_name: 'Sorcerer',
+        subclass_name: 'Draconic Sorcery',
+        class_level: 3,
+        name: 'Draconic Resilience',
+        sort_order: 2,
+        effect_kind: 'armor_class_formula',
+        hit_points_flat: null,
+        hit_points_per_level: null,
+        base: 10,
+        ability_1: 'dexterity',
+        ability_2: 'charisma',
+        allows_shield: 0,
+        label: 'Draconic Resilience',
+      },
+    ]);
 
     const classCoverage = db.allRaw(`
       SELECT class.name, count(*) AS rows, min(class_level) AS first_level,

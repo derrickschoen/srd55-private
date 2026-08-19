@@ -12,7 +12,6 @@ import type {
 import type { HomebrewDraftItemUuid } from '../../../src/authoring/ids';
 import { authoringFingerprintReference } from '../../../src/authoring/species-publisher';
 import { assertedExternalContentKey } from '../../../src/catalog/catalog-key';
-import { applicationSeed } from '../../../src/db/bootstrap';
 import { DatabaseContext } from '../../../src/db/database';
 import type { ContentKey } from '../../../src/domain/ids';
 import { RpcError } from '../../../src/rpc/protocol';
@@ -28,7 +27,7 @@ import {
   interactiveElement,
   type InteractiveTestElement,
 } from '../../fixtures/interactive-dom';
-import { openTestDatabase } from '../../helpers/open-db';
+import { openSeededTestDatabase } from '../../helpers/open-db';
 
 const connections: Database[] = [];
 let uuidSequence = 0;
@@ -39,10 +38,9 @@ afterEach(() => {
 });
 
 async function fixture(): Promise<{ readonly db: DatabaseContext; readonly service: CatalogAuthoringService }> {
-  const connection = await openTestDatabase();
+  const connection = await openSeededTestDatabase();
   connections.push(connection);
   const db = new DatabaseContext(connection);
-  applicationSeed(db);
   return {
     db,
     service: new CatalogAuthoringService(db, {

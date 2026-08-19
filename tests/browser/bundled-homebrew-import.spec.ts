@@ -10,6 +10,10 @@ interface CommandResult {
   readonly revision: number;
 }
 
+type CommandOutcome<T> =
+  | { readonly kind: 'ok'; readonly value: T }
+  | { readonly kind: 'refused'; readonly refusal: unknown };
+
 interface BuildReportResult {
   readonly caster: {
     readonly caster_level: number;
@@ -180,7 +184,7 @@ test('imports bundled homebrew through publish, applies derived third-caster slo
           readonly target_level: 2;
         };
       },
-      CharacterRow
+      CommandOutcome<CommandResult>
     >('commands.execute', {
       character_id: characterId,
       operation_uuid: crypto.randomUUID(),
@@ -191,10 +195,13 @@ test('imports bundled homebrew through publish, applies derived third-caster slo
         target_level: 2,
       },
     });
+    if (afterTwo.kind !== 'ok') {
+      throw new Error('Level 2 was unexpectedly refused.');
+    }
     await window.appRpc.call('commands.execute', {
       character_id: characterId,
       operation_uuid: crypto.randomUUID(),
-      expected_revision: afterTwo.revision,
+      expected_revision: afterTwo.value.revision,
       command: {
         type: 'level_up_class',
         class_definition_id: classId,
@@ -397,7 +404,10 @@ test('Veteran v3 sheet values and the v2-to-v3 replacement review are visible', 
       targetLevel: number,
       subclassContentKey?: string,
     ): Promise<CharacterRow> => {
-      const result = await window.appRpc.call<Record<string, unknown>, CommandResult>(
+      const result = await window.appRpc.call<
+        Record<string, unknown>,
+        CommandOutcome<CommandResult>
+      >(
         'commands.execute',
         {
           character_id: current.id,
@@ -423,7 +433,10 @@ test('Veteran v3 sheet values and the v2-to-v3 replacement review are visible', 
           },
         },
       );
-      return { id: current.id, revision: result.revision };
+      if (result.kind !== 'ok') {
+        throw new Error(`Level ${String(targetLevel)} was unexpectedly refused.`);
+      }
+      return { id: current.id, revision: result.value.revision };
     };
     let current = await create('Veteran v3 sheet oracle');
     for (let level = 2; level <= 8; level += 1) {
@@ -462,7 +475,7 @@ test('Veteran v3 sheet values and the v2-to-v3 replacement review are visible', 
     for (let level = 9; level <= 13; level += 1) {
       const updated = await window.appRpc.call<
         Record<string, unknown>,
-        CommandResult
+        CommandOutcome<CommandResult>
       >('commands.execute', {
         character_id: fixture.characterId,
         operation_uuid: crypto.randomUUID(),
@@ -483,7 +496,10 @@ test('Veteran v3 sheet values and the v2-to-v3 replacement review are visible', 
             : {}),
         },
       });
-      revision = updated.revision;
+      if (updated.kind !== 'ok') {
+        throw new Error(`Level ${String(level)} was unexpectedly refused.`);
+      }
+      revision = updated.value.revision;
     }
   }, {
     characterId: characters.v3CharacterId,

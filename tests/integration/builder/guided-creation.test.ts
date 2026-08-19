@@ -19,7 +19,7 @@ import {
   interactiveElement,
 } from '../../fixtures/interactive-dom';
 import {
-  createRpcHarness,
+  createSeededRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
@@ -33,7 +33,7 @@ afterEach(() => {
 });
 
 async function realApplicationDatabase(): Promise<RpcHarness> {
-  harness = await createRpcHarness([]);
+  harness = await createSeededRpcHarness([], { profile: 'test-core' });
   return harness;
 }
 

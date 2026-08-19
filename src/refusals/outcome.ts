@@ -29,6 +29,8 @@ export interface IncompatibleRefusal {
   readonly wire_version: number | null;
 }
 
+export type DecodedOutcome<T> = KnownOutcome<T> | IncompatibleRefusal;
+
 export function ok<T>(value: T): OkOutcome<T> {
   return { kind: 'ok', value };
 }

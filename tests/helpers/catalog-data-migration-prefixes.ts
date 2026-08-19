@@ -58,7 +58,9 @@ export const RECORDED_SCHEMA_PREFIX_IDS = [
   '0046_recipient_replacement_choices',
   '0047_source_instance_state',
   '0048_catalog_content_visibility',
-  '0049_fingerprint_content_key_index',
+  '0049_spell_versions_active_level_name_index',
+  '0050_relationship_indexes',
+  '0051_fingerprint_content_key_index',
 ] as const;
 
 export const PREFIX_MIGRATION_ID = 'test_catalog_prefix_probe';

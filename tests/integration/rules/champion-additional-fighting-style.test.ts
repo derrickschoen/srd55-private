@@ -13,7 +13,10 @@ import { guidedRequiredFighterChoicesState } from '../../../src/builder/required
 import { CharacterCompletenessQueries } from '../../../src/queries/character-completeness';
 import { ensureBundledStableContentIdentity } from '../../../src/catalog/content-registry';
 import { normalizeContentIdentityName } from '../../../src/catalog/content-identity';
-import { openTestDatabase } from '../../helpers/open-db';
+import {
+  openSeededTestDatabase,
+  openTestDatabase,
+} from '../../helpers/open-db';
 import { raiseClassLevelForTest } from '../../helpers/class-levels';
 import {
   GrantSourceDefinitionResolutionError,
@@ -28,6 +31,9 @@ function thrown(run: () => unknown): unknown {
   }
   return expect.fail('Expected an error, but the call returned.');
 }
+
+const SEED_ASSERTION_TEST_NAME =
+  'seeds the rule on Champion and nowhere else (CHAMP-L7-GRANTED)';
 
 /**
  * CHAMPION LEVEL 7 — "ADDITIONAL FIGHTING STYLE".
@@ -169,10 +175,12 @@ describe('Champion level 7 additional Fighting Style', () => {
       .items.map((item) => item.title);
   }
 
-  beforeEach(async () => {
-    connection = await openTestDatabase();
+  beforeEach(async ({ task }) => {
+    connection = task.name === SEED_ASSERTION_TEST_NAME
+      ? await openTestDatabase()
+      : await openSeededTestDatabase();
     db = new DatabaseContext(connection);
-    applicationSeed(db);
+    if (task.name === SEED_ASSERTION_TEST_NAME) applicationSeed(db);
     integrity = new CharacterCommandIntegrity('champion-l7-test-key');
     characterId = db.exec(
       `INSERT INTO characters (
@@ -183,7 +191,7 @@ describe('Champion level 7 additional Fighting Style', () => {
 
   afterEach(() => connection.close());
 
-  it('seeds the rule on Champion and nowhere else (CHAMP-L7-GRANTED)', () => {
+  it(SEED_ASSERTION_TEST_NAME, () => {
     const stored: unknown = JSON.parse(
       String(
         db.scalar(

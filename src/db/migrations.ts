@@ -49,7 +49,9 @@ import characterShareReceipts from '../../drizzle/0045_character_share_receipts.
 import recipientReplacementChoices from '../../drizzle/0046_recipient_replacement_choices.sql?raw';
 import sourceInstanceState from '../../drizzle/0047_source_instance_state.sql?raw';
 import catalogContentVisibility from '../../drizzle/0048_catalog_content_visibility.sql?raw';
-import fingerprintContentKeyIndex from '../../drizzle/0049_fingerprint_content_key_index.sql?raw';
+import spellVersionsActiveLevelNameIndex from '../../drizzle/0049_spell_versions_active_level_name_index.sql?raw';
+import relationshipIndexes from '../../drizzle/0050_relationship_indexes.sql?raw';
+import fingerprintContentKeyIndex from '../../drizzle/0051_fingerprint_content_key_index.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -556,12 +558,27 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       'e537c5d8acdc519c11dcb504de0614c62af70718d5b252420d877be16593e27e',
   }),
   Object.freeze({
-    id: '0049_fingerprint_content_key_index',
+    id: '0049_spell_versions_active_level_name_index',
+    sql: spellVersionsActiveLevelNameIndex,
+    checksum:
+      '5ce856b3247875a0bcbed31a478cc98ea5d376564d19f5565f36df71b0b48f54',
+    resultSchemaChecksum:
+      '0b77b124caa0c018792c739b1ac102ff5ee2d2bb74642aee686838fe4d06fa2a',
+  }),
+  Object.freeze({
+    id: '0050_relationship_indexes',
+    sql: relationshipIndexes,
+    checksum: '97d527b2b9faffea01e5797ed79af1c4037a6e2cc2978b6173f281e18e7fc884',
+    resultSchemaChecksum:
+      'df23f859719a0c42427a3085c98b39b713e07ea2fcdd55fac9b6c04e6e5951af',
+  }),
+  Object.freeze({
+    id: '0051_fingerprint_content_key_index',
     sql: fingerprintContentKeyIndex,
     checksum:
       'a6214a4cd17ee5d82e489a830ec02824921178fad663ce0da58e408bc43372f7',
     resultSchemaChecksum:
-      '890005ed17c3d7f9437199cc5a1325de511e40d256f90972a5cb6e9d6fdc3630',
+      '3b19cac16e39ab7a1023fc140a366318048334472e91fe358b5dbe74f0d9c003',
   }),
 ]);
 

@@ -4,6 +4,7 @@ import {
 } from '../character/character-state';
 import { sqlInteger, sqlNullableString } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
+import { ok, type OkOutcome } from '../refusals/outcome';
 import type {
   UpdateAbilityCommand as UpdateAbilityPayload,
 } from '../domain/command-contracts';
@@ -34,7 +35,7 @@ export class UpdateAbilityCommand {
     private readonly clock: CommandClock = systemClock,
   ) {}
 
-  apply(characterId: number): void {
+  apply(characterId: number): OkOutcome<void> {
     const { ability, score } = this.payload;
     if (!isAbility(ability)) {
       throw new Error('Unknown ability score.');
@@ -79,6 +80,7 @@ export class UpdateAbilityCommand {
        WHERE id = ?`,
       [score, this.clock(), characterId],
     );
+    return ok(undefined);
   }
 
   inverse(): StoredCommandInverse {

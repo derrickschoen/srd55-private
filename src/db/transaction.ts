@@ -1,4 +1,5 @@
 import type { Database } from '@sqlite.org/sqlite-wasm';
+import { databaseIsInTransaction } from './query';
 
 export type TransactionMode = 'DEFERRED' | 'IMMEDIATE' | 'EXCLUSIVE';
 
@@ -15,7 +16,7 @@ export class TransactionRunner {
     callback: () => T,
     mode: TransactionMode = 'IMMEDIATE',
   ): T {
-    const nested = this.#depth > 0;
+    const nested = this.#depth > 0 || databaseIsInTransaction(this.db);
     this.#depth += 1;
     try {
       return nested

@@ -71,6 +71,7 @@ export interface BundledContentRegistryProjectionResultV1 {
 }
 
 export interface BundledContentRegistryProjectionHooksV1 {
+  readonly includeEntry?: (entry: BundledManifestEntryV1) => boolean;
   readonly afterKind?: (
     kind: ContentKind,
     storedProjections: readonly BundledStoredProjectionV1[],
@@ -442,7 +443,9 @@ export function reconcileBundledContentRegistryWithStoredProjectionsV1(
   hooks: BundledContentRegistryProjectionHooksV1 = Object.freeze({}),
 ): BundledContentRegistryProjectionResultV1 {
   return db.transaction(() => {
-    const entries = allBundledCandidates(db);
+    const entries = allBundledCandidates(db).filter(
+      hooks.includeEntry ?? (() => true),
+    );
     const storedSpellRows = loadStoredSpellContentRowsV1(
       db,
       entries.filter((entry) => entry.kind === 'spell')

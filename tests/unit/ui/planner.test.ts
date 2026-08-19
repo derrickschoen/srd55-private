@@ -9,7 +9,6 @@ import type {
 } from '../../../src/domain/read-models';
 import type { CompletenessResult } from '../../../src/queries/character-completeness';
 import type { OperationHistory } from '../../../src/queries/operation-history';
-import type { CharacterCommandRpcResult } from '../../../src/commands/character-command-executor';
 import type {
   CharacterClassLevelId,
   CharacterId,
@@ -20,7 +19,6 @@ import type {
   SourceInstanceId,
   SubclassDefinitionId,
 } from '../../../src/domain/ids';
-import { RpcError } from '../../../src/rpc/protocol';
 import {
   defaultGridFilters,
   filterAndSortSlots,
@@ -50,8 +48,14 @@ import {
   interactiveElement,
 } from '../../fixtures/interactive-dom';
 import { handlers as queryHandlers } from '../../../src/worker/handlers/queries';
-import { createRpcHarness } from '../../helpers/rpc-harness';
+import { createSeededRpcHarness } from '../../helpers/rpc-harness';
 import { createBuildReportFixture } from '../../integration/reports/build-report-fixture';
+import { ok, refused } from '../../../src/refusals/outcome';
+import {
+  attunementSlotsFullRefusal,
+  revisionConflictRefusal,
+} from '../../../src/refusals/refusal';
+import type { CharacterItemId, CharacterRevision } from '../../../src/domain/ids';
 
 const NOOP_EDITOR_ACTIONS: PlannerEditorActions = {
   updateFlavor: () => undefined,
@@ -452,7 +456,7 @@ describe('planner catalog disclosure', () => {
   });
 
   it('returns a persisted external spell layer through the live workspace RPC', async () => {
-    const harness = await createRpcHarness(queryHandlers);
+    const harness = await createSeededRpcHarness(queryHandlers);
     try {
       const fixture = createBuildReportFixture(harness.context.db);
       const response = await harness.call<
@@ -862,12 +866,12 @@ describe('planner persisted workflow', () => {
           expectedRevision: 4,
         });
         persisted = { ...persisted, revision: 5, wisdom: 10 };
-        return {
+        return ok({
           status: 'applied',
           operation_uuid: 'save-point-restore-operation',
           revision: 5,
           idempotent_replay: false,
-        };
+        });
       },
     };
     const session = new PlannerSession(7, queries, commands);
@@ -925,15 +929,15 @@ describe('planner persisted workflow', () => {
         _characterId: number,
         expectedRevision: number,
         command: CharacterCommandPayload,
-      ): Promise<CharacterCommandRpcResult> => {
+      ) => {
         expect(expectedRevision).toBe(persisted.revision);
         const operationUuid = `operation-${String(nextOperation += 1)}`;
         inverses.set(operationUuid, apply(command));
-        return {
+        return ok({
           operation_uuid: operationUuid,
           revision: persisted.revision,
           idempotent_replay: false,
-        };
+        });
       },
       undo: async (_characterId, expectedRevision, operationUuid) => {
         expect(expectedRevision).toBe(persisted.revision);
@@ -941,12 +945,12 @@ describe('planner persisted workflow', () => {
         if (command === undefined) throw new Error('Missing test inverse.');
         const nextUuid = `operation-${String(nextOperation += 1)}`;
         inverses.set(nextUuid, apply(command));
-        return {
+        return ok({
           status: 'applied',
           operation_uuid: nextUuid,
           revision: persisted.revision,
           idempotent_replay: false,
-        };
+        });
       },
       restoreSavePoint: unexpectedSavePointRestore,
     };
@@ -1047,11 +1051,11 @@ describe('planner persisted workflow', () => {
         const operationUuid = `refresh-operation-${String(nextOperation += 1)}`;
         inverses.set(operationUuid, apply(command));
         latestOperation = { uuid: operationUuid, action: 'command' };
-        return {
+        return ok({
           operation_uuid: operationUuid,
           revision: persisted.revision,
           idempotent_replay: false,
-        };
+        });
       },
       undo: async (_characterId, expectedRevision, operationUuid) => {
         expect(expectedRevision).toBe(persisted.revision);
@@ -1063,12 +1067,12 @@ describe('planner persisted workflow', () => {
           uuid: nextUuid,
           action: latestOperation?.action === 'undo' ? 'redo' : 'undo',
         };
-        return {
+        return ok({
           status: 'applied',
           operation_uuid: nextUuid,
           revision: persisted.revision,
           idempotent_replay: false,
-        };
+        });
       },
       restoreSavePoint: unexpectedSavePointRestore,
     };
@@ -1137,11 +1141,10 @@ describe('planner persisted workflow', () => {
     };
     const commands: PlannerCommandClient = {
       execute: async () => {
-        throw new RpcError(
-          'handler_error',
-          'This character changed in another tab. Reload before trying again.',
-          { current_revision: 5 },
-        );
+        return refused(revisionConflictRefusal(
+          4 as CharacterRevision,
+          5 as CharacterRevision,
+        ));
       },
       undo: unexpectedUndo,
       restoreSavePoint: unexpectedSavePointRestore,
@@ -1159,7 +1162,7 @@ describe('planner persisted workflow', () => {
 
     expect(session.stale).toBe(true);
     expect(session.error).toBe(
-      'This character changed in another tab. Reload before trying again.',
+      'This character changed from revision 4 to 5. Reload before trying again.',
     );
     expect(durable).toEqual({
       revision: 4,
@@ -1179,18 +1182,11 @@ describe('planner persisted workflow', () => {
     };
     const commands: PlannerCommandClient = {
       execute: async () => {
-        throw new RpcError(
-          'handler_error',
-          'All three attunement slots are occupied.',
-          {
-            reason: 'attunement_slots_full',
-            occupants: [
-              { slot: 1, item_id: 10, name: 'Crown' },
-              { slot: 2, item_id: 20, name: 'Cloak' },
-              { slot: 3, item_id: 30, name: 'Ring' },
-            ],
-          },
-        );
+        return refused(attunementSlotsFullRefusal(3, [
+          { slot: 1, item_id: 10 as CharacterItemId, name: 'Crown' },
+          { slot: 2, item_id: 20 as CharacterItemId, name: 'Cloak' },
+          { slot: 3, item_id: 30 as CharacterItemId, name: 'Ring' },
+        ]));
       },
       undo: unexpectedUndo,
       restoreSavePoint: unexpectedSavePointRestore,
@@ -1403,7 +1399,7 @@ describe('completeness panel wording', () => {
       createSavePoint: async () => workspace(0, 10, false),
     };
     const commands: PlannerCommandClient = {
-      execute: async () => ({
+      execute: async () => ok({
         operation_uuid: 'completeness-operation',
         revision: 1,
         idempotent_replay: false,
@@ -1433,7 +1429,7 @@ describe('completeness panel wording', () => {
       createSavePoint: async () => workspace(0, 10, false),
     };
     const commands: PlannerCommandClient = {
-      execute: async () => ({
+      execute: async () => ok({
         operation_uuid: 'armor-operation',
         revision: 1,
         idempotent_replay: false,
@@ -1520,7 +1516,7 @@ describe('completeness panel wording', () => {
       createSavePoint: async () => workspace(0, 10, false),
     };
     const commands: PlannerCommandClient = {
-      execute: async () => ({
+      execute: async () => ok({
         operation_uuid: 'fallback-operation',
         revision: 1,
         idempotent_replay: false,

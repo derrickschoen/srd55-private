@@ -19,8 +19,8 @@ import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { CharacterCommandExecutor } from '../../../src/commands/character-command-executor';
 import {
   ChooseSpeciesLineageCommand,
-  type SpeciesLineageRefusalReason,
 } from '../../../src/commands/choose-species-lineage';
+import type { SpeciesLineageRefusalReason } from '../../../src/refusals/refusal';
 import { AllocateAbilitiesCommand } from '../../../src/commands/allocate-abilities';
 import { applicationSeed } from '../../../src/db/bootstrap';
 import type { DatabaseContext } from '../../../src/db/database';
@@ -35,6 +35,7 @@ import { guidedSpeciesChoiceState } from '../../../src/builder/species-choice';
 import { rpcRegistry } from '../../../src/worker/registry';
 import {
   createRpcHarness,
+  createSeededRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
 import {
@@ -54,6 +55,7 @@ import {
   elementText,
   installInteractiveDocument,
 } from '../../fixtures/interactive-dom';
+import { expectOkOutcome } from '../../helpers/outcome';
 
 let harness: RpcHarness | undefined;
 
@@ -62,7 +64,15 @@ afterEach(() => {
   harness = undefined;
 });
 
+// Stays on the default 'full' seed profile: this file consumes the species
+// catalog's implicit Thaumaturgy reference, whose content key is not literal
+// under tests/ and therefore is not in the reproducible test-core keep-list.
 async function applicationDatabase(): Promise<RpcHarness> {
+  harness = await createSeededRpcHarness([]);
+  return harness;
+}
+
+async function freshApplicationDatabase(): Promise<RpcHarness> {
   harness = await createRpcHarness([]);
   return harness;
 }
@@ -101,7 +111,7 @@ function createClassedCharacter(db: DatabaseContext, name: string): number {
     },
     new CharacterCommandIntegrity('guided-species-test-key'),
   ).id;
-  new AllocateAbilitiesCommand(db, {
+  expectOkOutcome(new AllocateAbilitiesCommand(db, {
     type: 'allocate_abilities',
     method: 'standard_array',
     scores: {
@@ -112,7 +122,7 @@ function createClassedCharacter(db: DatabaseContext, name: string): number {
       wisdom: 10,
       charisma: 8,
     },
-  }).apply(characterId);
+  }).apply(characterId));
   return characterId;
 }
 
@@ -838,7 +848,7 @@ describe('configured species choice and honest projection', () => {
   const operation = (suffix: string) =>
     `00000000-0000-4000-8000-${suffix.padStart(12, '0')}`;
 
-  async function choose(
+  async function chooseOutcome(
     db: DatabaseContext,
     characterId: number,
     option: string,
@@ -865,6 +875,26 @@ describe('configured species choice and honest projection', () => {
     });
   }
 
+  async function choose(
+    db: DatabaseContext,
+    characterId: number,
+    option: string,
+    ability: Ability,
+    expectedRevision: number,
+    suffix: string,
+    replaceableSpellVersionKey?: string,
+  ) {
+    return expectOkOutcome(await chooseOutcome(
+      db,
+      characterId,
+      option,
+      ability,
+      expectedRevision,
+      suffix,
+      replaceableSpellVersionKey,
+    ));
+  }
+
   async function expectChoiceRefusal(
     db: DatabaseContext,
     characterId: number,
@@ -872,9 +902,17 @@ describe('configured species choice and honest projection', () => {
     suffix: string,
   ): Promise<void> {
     const before = new CharacterState(db).capture(characterId);
-    await expect(
-      choose(db, characterId, 'Drow', 'charisma', 0, suffix),
-    ).rejects.toMatchObject({ reason });
+    expect(await chooseOutcome(
+      db,
+      characterId,
+      'Drow',
+      'charisma',
+      0,
+      suffix,
+    )).toMatchObject({
+      kind: 'refused',
+      refusal: { kind: 'species_lineage_refused', reason },
+    });
     expect(new CharacterState(db).capture(characterId)).toEqual(before);
   }
 
@@ -1330,21 +1368,56 @@ describe('configured species choice and honest projection', () => {
       db,
       new CharacterCommandIntegrity('guided-lineage-command-test-key'),
     );
-    const undone = await executor.undo({
+    const undone = expectOkOutcome(await executor.undo({
       character_id: characterId,
       operation_uuid: applied.operation_uuid,
       expected_revision: 1,
-    });
+    }));
     expect(undone.status).toBe('applied');
     expect(lineageFootprint(db, characterId)).toEqual(before);
     if (undone.status !== 'applied') throw new Error('Lineage undo was refused.');
-    const redone = await executor.undo({
+    const redone = expectOkOutcome(await executor.undo({
       character_id: characterId,
       operation_uuid: undone.operation_uuid,
       expected_revision: 2,
-    });
+    }));
     expect(redone.status).toBe('applied');
     expect(lineageFootprint(db, characterId)).toEqual(after);
+  });
+
+  it('rolls back config, effects, and generated slots on a late replaceable-spell refusal', async () => {
+    const rpcHarness = await applicationDatabase();
+    const db = rpcHarness.context.db;
+    const characterId = createClassedCharacter(db, 'Late Lineage Refusal');
+    applyGuidedOrigin(db, {
+      character_id: characterId,
+      kind: 'species',
+      content_key: speciesNamed(db, 'Elf').content_key,
+    });
+    const before = new CharacterState(db).capture(characterId);
+
+    const outcome = await chooseOutcome(
+      db,
+      characterId,
+      'High Elf',
+      'intelligence',
+      0,
+      '203',
+      'missing:spell-version',
+    );
+
+    expect(outcome).toMatchObject({
+      kind: 'refused',
+      refusal: {
+        kind: 'species_lineage_refused',
+        reason: 'invalid_replaceable_spell',
+      },
+    });
+    expect(new CharacterState(db).capture(characterId)).toEqual(before);
+    expect(db.scalar<number>(
+      'SELECT count(*) FROM character_operations WHERE character_id = ?',
+      [characterId],
+    )).toBe(0);
   });
 
   it('rolls config and effects back when the existing generator pipeline fails', async () => {
@@ -1563,10 +1636,13 @@ describe('configured species choice and honest projection', () => {
       expect(choiceResponse).toMatchObject({
         ok: true,
         result: {
-          character_id: characterId,
-          current_step: 'background',
-          revision: 1,
-          resolution: { kind: 'complete' },
+          kind: 'ok',
+          value: {
+            character_id: characterId,
+            current_step: 'background',
+            revision: 1,
+            resolution: { kind: 'complete' },
+          },
         },
       });
 
@@ -1628,7 +1704,7 @@ describe('configured species choice and honest projection', () => {
       .sort();
 
     expect(spellNames()).toEqual(['Dancing Lights']);
-    await executor.execute({
+    expectOkOutcome(await executor.execute({
       character_id: characterId,
       operation_uuid: operation('402'),
       expected_revision: 1,
@@ -1637,9 +1713,9 @@ describe('configured species choice and honest projection', () => {
         class_definition_id: classId,
         target_level: 2,
       },
-    });
+    }));
     expect(spellNames()).toEqual(['Dancing Lights']);
-    await executor.execute({
+    expectOkOutcome(await executor.execute({
       character_id: characterId,
       operation_uuid: operation('403'),
       expected_revision: 2,
@@ -1648,9 +1724,9 @@ describe('configured species choice and honest projection', () => {
         class_definition_id: classId,
         target_level: 3,
       },
-    });
+    }));
     expect(spellNames()).toEqual(['Dancing Lights', 'Faerie Fire']);
-    await executor.execute({
+    expectOkOutcome(await executor.execute({
       character_id: characterId,
       operation_uuid: operation('404'),
       expected_revision: 3,
@@ -1665,8 +1741,8 @@ describe('configured species choice and honest projection', () => {
           ability_increases: [{ ability: 'strength', amount: 2 }],
         },
       },
-    });
-    const fifth = await executor.execute({
+    }));
+    const fifth = expectOkOutcome(await executor.execute({
       character_id: characterId,
       operation_uuid: operation('405'),
       expected_revision: 4,
@@ -1675,13 +1751,13 @@ describe('configured species choice and honest projection', () => {
         class_definition_id: classId,
         target_level: 5,
       },
-    });
+    }));
     expect(spellNames()).toEqual(['Dancing Lights', 'Darkness', 'Faerie Fire']);
-    const undo = await executor.undo({
+    const undo = expectOkOutcome(await executor.undo({
       character_id: characterId,
       operation_uuid: fifth.operation_uuid,
       expected_revision: 5,
-    });
+    }));
     expect(undo.status).toBe('applied');
     expect(spellNames()).toEqual(['Dancing Lights', 'Faerie Fire']);
   });
@@ -1721,7 +1797,7 @@ describe('configured species choice and honest projection', () => {
       .map((route) => route.spell_name)
       .sort();
 
-    await executor.execute({
+    expectOkOutcome(await executor.execute({
       character_id: characterId,
       operation_uuid: operation('452'),
       expected_revision: 1,
@@ -1729,14 +1805,14 @@ describe('configured species choice and honest projection', () => {
         type: 'update_class',
         class_definition_id: removedClassId,
       },
-    });
+    }));
     expect(Number(db.scalar(
       'SELECT SUM(level) FROM character_class_levels WHERE character_id = ?',
       [characterId],
     ))).toBe(5);
     expect(spellNames()).toEqual(['Dancing Lights', 'Darkness', 'Faerie Fire']);
 
-    await executor.execute({
+    expectOkOutcome(await executor.execute({
       character_id: characterId,
       operation_uuid: operation('453'),
       expected_revision: 2,
@@ -1745,7 +1821,7 @@ describe('configured species choice and honest projection', () => {
         class_definition_id: removedClassId,
         remove: true,
       },
-    });
+    }));
     expect(Number(db.scalar(
       'SELECT SUM(level) FROM character_class_levels WHERE character_id = ?',
       [characterId],
@@ -1779,12 +1855,27 @@ describe('configured species choice and honest projection', () => {
       content_key: speciesNamed(db, 'Elf').content_key,
     });
     const before = new CharacterState(db).capture(characterId);
-    await expect(choose(db, characterId, 'Moon Elf', 'wisdom', 0, '501'))
-      .rejects.toMatchObject({ reason: 'invalid_option' });
-    await expect(choose(db, characterId, 'Drow', 'strength', 0, '502'))
-      .rejects.toMatchObject({ reason: 'invalid_spellcasting_ability' });
-    await expect(choose(db, characterId, 'Drow', 'charisma', 1, '503'))
-      .rejects.toThrow();
+    expect(await chooseOutcome(
+      db, characterId, 'Moon Elf', 'wisdom', 0, '501',
+    )).toMatchObject({
+      kind: 'refused',
+      refusal: { kind: 'species_lineage_refused', reason: 'invalid_option' },
+    });
+    expect(await chooseOutcome(
+      db, characterId, 'Drow', 'strength', 0, '502',
+    )).toMatchObject({
+      kind: 'refused',
+      refusal: {
+        kind: 'species_lineage_refused',
+        reason: 'invalid_spellcasting_ability',
+      },
+    });
+    expect(await chooseOutcome(
+      db, characterId, 'Drow', 'charisma', 1, '503',
+    )).toMatchObject({
+      kind: 'refused',
+      refusal: { kind: 'revision_conflict', expected: 1, actual: 0 },
+    });
     expect(new CharacterState(db).capture(characterId)).toEqual(before);
 
     const response = await rpcRegistry.dispatch({
@@ -1854,7 +1945,7 @@ describe('configured species choice and honest projection', () => {
 
 describe('bundled species definition seed', () => {
   it('is idempotent across repeated application boot seeds', async () => {
-    const rpcHarness = await applicationDatabase();
+    const rpcHarness = await freshApplicationDatabase();
     const db = rpcHarness.context.db;
     const before = db.allRaw(
       `SELECT id, content_key, name, rules_edition, grant_rules
@@ -1917,7 +2008,7 @@ describe('bundled species definition seed', () => {
   });
 
   it('yields the bundled name-and-edition slot to a homebrew definition', async () => {
-    const rpcHarness = await applicationDatabase();
+    const rpcHarness = await freshApplicationDatabase();
     const db = rpcHarness.context.db;
     const elf = speciesNamed(db, 'Elf');
     const bundledSlot = db.allRaw(

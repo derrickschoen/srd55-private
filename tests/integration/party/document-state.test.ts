@@ -23,6 +23,7 @@ import { handlers } from '../../../src/worker/handlers/party';
 import { rpcRegistry } from '../../../src/worker/registry';
 import {
   createRpcHarness,
+  createSeededRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
 
@@ -61,7 +62,7 @@ async function save(value: PartyDocumentState) {
 
 describe('party publication and observation index', () => {
   it('PARTY-INDEX-NULLS-STAY-NULL stores unknown facts as null without schema defaults', async () => {
-    harness = await createRpcHarness(handlers);
+    harness = await createSeededRpcHarness(handlers);
     const saved = await save(state());
     expect(saved).toEqual({ id: 1, ok: true, result: state() });
 
@@ -83,7 +84,7 @@ describe('party publication and observation index', () => {
   });
 
   it('enforces the closed observation vocabulary in SQLite, including the semicolon-bearing state', async () => {
-    harness = await createRpcHarness(handlers);
+    harness = await createSeededRpcHarness(handlers);
     harness.context.db.exec(
       `INSERT INTO party_document_states
          (forge, repository, path, document_kind, observation_state)
@@ -104,7 +105,7 @@ describe('party publication and observation index', () => {
   });
 
   it('PARTY-INDEX-NOT-CHARACTER-TRUTH rebinds one publication path to the newest clone without mutating character truth', async () => {
-    harness = await createRpcHarness(handlers);
+    harness = await createSeededRpcHarness(handlers);
     const first = harness.context.db.exec(
       "INSERT INTO characters (name, revision) VALUES ('Old Ash', 4)",
     ).lastInsertId;
@@ -137,7 +138,7 @@ describe('party publication and observation index', () => {
   });
 
   it('supports the primary library and multiple named subset rows in one repository', async () => {
-    harness = await createRpcHarness(handlers);
+    harness = await createSeededRpcHarness(handlers);
     await save(state({
       path: 'library/party-library.json' as RepositoryPath,
       documentKind: 'library',
@@ -163,7 +164,7 @@ describe('party publication and observation index', () => {
 
   describe('PARTY-NO-FALSE-FRESHNESS', () => {
     it('PUBLISHED-WITHOUT-REVISION refuses an invented publish success', async () => {
-      harness = await createRpcHarness(handlers);
+      harness = await createSeededRpcHarness(handlers);
 
       const result = await save(state({
         observationState: 'Published at revision N from this device',
@@ -179,7 +180,7 @@ describe('party publication and observation index', () => {
     });
 
     it('FAILURE-CANNOT-ASSERT-PUBLISH refuses a publish revision during failure', async () => {
-      harness = await createRpcHarness(handlers);
+      harness = await createSeededRpcHarness(handlers);
       await save(state({
         lastPublishedLocalRevision: 7,
         observationState: 'Published at revision N from this device',
@@ -206,7 +207,7 @@ describe('party publication and observation index', () => {
     });
 
     it('SUCCESSFUL-TIME-REWIND refuses a regressing success timestamp', async () => {
-      harness = await createRpcHarness(handlers);
+      harness = await createSeededRpcHarness(handlers);
       const latestSuccessfulAt = '2026-08-02T12:05:00.000Z';
       await save(state({
         lastSuccessfulRefreshAt: latestSuccessfulAt,
@@ -234,7 +235,7 @@ describe('party publication and observation index', () => {
     });
 
     it('FAILED-ATTEMPT-PRESERVES-SUCCESS accepts unchanged proved freshness', async () => {
-      harness = await createRpcHarness(handlers);
+      harness = await createSeededRpcHarness(handlers);
       const successfulAt = '2026-08-02T12:00:00.000Z';
       await save(state({
         lastSuccessfulRefreshAt: successfulAt,
@@ -259,7 +260,7 @@ describe('party publication and observation index', () => {
   });
 
   it('PARTY-ROSTER-NEWEST-IMPORTED-CLONE imports twice and binds exactly one row to the second clone', async () => {
-    harness = await createRpcHarness(handlers);
+    harness = await createSeededRpcHarness(handlers);
     const sourceId = harness.context.db.exec(
       "INSERT INTO characters (name, revision) VALUES ('Published Ash', 7)",
     ).lastInsertId;
@@ -300,7 +301,7 @@ describe('party publication and observation index', () => {
   });
 
   it('PARTY-INDEX-CLONE-NO-BINDING leaves an imported D62 clone unbound', async () => {
-    harness = await createRpcHarness(handlers);
+    harness = await createSeededRpcHarness(handlers);
     const originalId = harness.context.db.exec(
       "INSERT INTO characters (name) VALUES ('Published Ash')",
     ).lastInsertId;
@@ -349,7 +350,7 @@ describe('party publication and observation index', () => {
   });
 
   it('registers only the two observation methods and rejects surplus input keys', async () => {
-    harness = await createRpcHarness(handlers);
+    harness = await createSeededRpcHarness(handlers);
     expect(rpcRegistry.methods).toEqual(
       expect.arrayContaining([
         PARTY_RPC.listDocumentStates,

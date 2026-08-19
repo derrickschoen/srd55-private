@@ -7,6 +7,178 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D314 — OWNER: brainstorm-round rulings — the skirmish, all-AI tables, and the queue (2026-08-19)
+
+Collaborative brainstorm (Claude 15 candidates + codex 15, blind, collated to
+20) answered one at a time. Rulings:
+
+1. **First playtest = skirmish**: 3-4 PCs vs 4-6 monsters, one room, fight to
+   the finish (~3-5 rounds).
+2. **Owner plays from the player projection** (fog/hidden HP concealed);
+   codex alone holds DM secrets. The presentation view becomes the owner's
+   main screen.
+3. **PCs = the D260 level-7 SRD reference party.**
+4. **Monsters: bundled SRD 5.2.1 starter set, CR ¼–3** (~8-12 classics),
+   decoded from the repo SRD text. CC-BY, shippable.
+5. **Encounter authoring: the codex DM generates the encounter from a prompt;
+   owner approves.** (Not a setup form, not a fixture.)
+6. **Action economy: FULL KIT including spells** in session one — attack
+   rolls, saves, areas, slots, Dash/Disengage/Dodge, reactions.
+7. **Conditions: the full SRD condition list mechanically enforced**,
+   including exhaustion levels.
+8. **Death: PCs get full death-save/stabilization/massive-damage rules;
+   ordinary monsters die at 0 HP.**
+9. **Unmodeled rules: the codex DM adjudicates, tagged ADJUDICATED** in the
+   combat log with reasoning; invented numbers enter engine state only as
+   explicit DM overrides, never silently.
+10. **DM autonomy: fully autonomous between PC turns**; owner can interrupt
+    and undo via DM controls.
+11. **Narration: four selectable voices** — cinematic with visible rolls,
+    terse tactical, rules-explicit, and a terse rule-citing validation mode
+    for engine testing.
+12. **Autosave required** for the first session (pulls D260.3 into scope);
+    codex DM session id persists with the snapshot so resume restores the DM.
+13. **Post-playtest direction: supervised all-AI tables.** AI plays DM and
+    PCs; tables run as self-play soaks; the supervisor mines logs for bugs
+    and improvements without human intervention. Plus a model/effort study:
+    sweep gpt-5.6 luna/terra/sol effort levels, then rate sol vs Fable vs
+    Opus on high effort for speed vs quality — thorough enough to maybe build
+    a luna low/medium complexity classifier that routes per-decision. Also:
+    write a skill backed by a KB for running D&D DM/PC interactions
+    intelligently. This replaces D262.2's DPR-sim-UI-first ordering.
+14. **Discord: undecided — owner needs a full decision dossier** (concrete
+    flows, worked examples, architecture, effort/cost per shape) before
+    ruling. Dossier is a queued deliverable.
+15. **Sim spatial merge-back: after all-AI tables run.**
+16. **Visual bar: THEMED before the owner plays** — token portraits, map
+    textures, fog styling are an increment before the first session.
+17. **Mutation campaign: one more kill wave on the four hotspots**
+    (attack-profiles 105, srd-subclass-content 111, srd-subclasses 104,
+    skill-grants 46), then the campaign pauses.
+18. **Order-dependence repair: parallel background lane**; official gate
+    stays the ordered run meanwhile.
+19. **v1 review + deploy: formally deferred behind the VTT** (D266 gate
+    parked; preview stays up).
+20. **Stragglers: finish all three now** — walkthrough specs 11-12, s7
+    findings doc merge, trial-idx5 merge gate.
+
+Scope note: rulings 6, 7, 8, 12, 16 substantially grow the playable target
+beyond the phase-2 plan's increments 3-5 (spell system, full conditions,
+death saves, autosave, theming, DM-generated encounters, player projection
+as primary view). The phase-2 plan gets an amended increment map through the
+consensus loop before increment 3 dispatches.
+
+## D313 — OWNER: playable target — owner plays the PCs, codex CLI runs as the DM (2026-08-19)
+
+The owner wants to play the PCs in the VTT with the codex CLI app running as
+the DM. Clarified by AskUserQuestion, owner's selections:
+
+1. **DM scope: monsters + narration.** Codex controls every enemy tactically
+   AND narrates — scene descriptions, fog reveals, flavor in the combat log.
+   Rules stay engine-enforced (narration never adjudicates numbers).
+2. **Bridge: local bridge process.** A node script on localhost that the
+   browser talks to and that drives codex CLI (session resume across turns).
+   Zero cloud, zero accounts. This refines D312.3's "runs entirely in the DM's
+   browser": one local companion process is in bounds; the encounter authority
+   stays in the browser.
+3. **DM vision: full DM projection.** The codex DM sees fog-hidden tokens and
+   all state — it IS the DM. (Player-side agent controllers keep filtered
+   projections per the phase-2 plan.)
+4. **Sequencing: plan order.** Increments 2–5 land as approved, then the DM
+   bridge is increment 6. No thin-slice reorder.
+
+## D312 — OWNER: the loop moves the VTT forward (2026-08-19)
+
+The supervision loop's forward thread is now the VTT. Rulings, verbatim intent:
+
+1. The VTT is a **superset of the rules engine used by the sim** — one engine,
+   not a fork. It adds what the sim lacks, movement modelling first; if the
+   movement mechanics work out, they may be merged back into the sim.
+2. **Pluggable controllers**: any enemy or any PC can be driven by (a) a code
+   algorithm, (b) a codex AI agent, or (c) a human. The controller boundary is
+   an interface from day one.
+3. **Draft 1 runs entirely in the DM's browser** and is screen-shared. No
+   multi-browser requirement for v1.
+4. **Provision in the code** — seams, not implementations — for player
+   browsers in later versions: showing the map, moving their own characters,
+   making attacks. (The existing transport interface + RelayTransport seam in
+   wt/vtt phase 1 satisfies the transport half of this.)
+
+D260.8/D260.2 fog rules and the phase-2 negative scope (no cloud accounts, no
+voice/video, no hosted asset library; rules automation IN bounds) stand.
+Supersedes D262.2's ordering (DPR sim UI before VTT phase 2): VTT phase 2 is
+now the active forward thread; D262.2's lane-priority clause is void, the rest
+of D262 stands.
+
+Same tick (housekeeping, executed): all done `dnd-*` worktrees deleted with
+their branches — 8 merged to main (dracres, grantper, grantskill, minors,
+mutspeed, ruleskill, sgorphan, sheetkill), 7 verified fully contained in
+wt/simcore (4 bench worktrees, lane-b, lane-c, lane-inc5).
+
+## D311 — OWNER: fix campaign scope is the top-12 files; minors first, then owner v1 review (2026-08-19)
+
+From the D310 triage (1,013 real gaps): the fix wave covers the **top-12
+hotspot files (~870 survivors)** in one wave of pattern-driven test lanes,
+guided by the triage doc's kill shapes; re-verify per shard via D308 --rerun.
+Declined: grants-cluster-only, all-1,013. Same session: the three D303
+journey minors get a fix lane NOW; the owner does their local v1 review
+(D266 gate) after the minors land — before the fix campaign completes.
+
+## D310 — OWNER: survivor campaign is triage-first (2026-08-18)
+
+Before any D280 survivor-fix lanes dispatch, one triage lane classifies the
+full merged survivor list (real test gap / equivalent mutant / low-value)
+with per-file counts; the owner rules on fix scope from that report.
+Declined: straight-to-hotspots, exhaustive-everything. Also ruled the same
+session: main→wt/simcore syncs may run autonomously (gated, conflicts stop);
+the threads-vs-forks pool A/B stays queued for an idle window.
+
+## D309 — OWNER: stranger journey and survivor fixes interleave (2026-08-18)
+
+Amends D307's sequencing: once the inc4 merge gate is green, the D303
+stranger journey runs WHILE D280 survivor-fix lanes work the hotspot files
+in parallel worktrees — neither waits for the other. Owner picked
+"Interleave" over journey-first and fixes-first.
+
+## D308 — OWNER: static mutants on for full audits, off for iteration re-runs (2026-08-18)
+
+Owner's words: "statics on for full audits, off for iteration re-runs."
+Full D280 campaign runs (fresh shard sweeps) keep static mutants enabled —
+they carried ~11% of survivors found (63 of 562 across shards 1–2),
+including module-level regex and error-string gaps. Fix-verify re-runs of a
+shard enable ignoreStatic plus the per-shard incremental cache, and must
+report the skipped static count as unmeasured, never as covered. Basis:
+statics are ~23% of mutants and ~97% of shard runtime (shard-003 planner).
+
+## D307 — OWNER: stranger journey runs after the full queue lands (2026-08-18)
+
+The D303 fresh stranger journey (final pre-approval walkthrough) waits
+until homebrew v3 ui_hidden entries and D278 increment 4 are merged, so
+one walkthrough covers everything. The approval gate moves later; interim
+merges get spot-checks only.
+
+## D306 — OWNER: per-worker pre-seeded image lane approved, next wave (2026-08-18)
+
+The test-scaffolding cost (476k seed INSERTs + per-test schema DDL) may
+be attacked with a per-worker pre-seeded database image cloned per test.
+Constraints: opt-in helper path; seed, migration, digest, and corruption
+tests stay on the fresh-DDL path; image-equivalence provable.
+
+## D305 — OWNER: D280 mutation lanes take the box after the DB-perf trials (2026-08-18)
+
+Once the three trial lanes (idx5, builders, relgrowth) drain and merge,
+the next dispatch is the D280 leaf mutation tests + Stryker sharding
+tooling, ahead of inc5→simcore round 24, D278 increment 4, and homebrew
+v3.
+
+## D304 — OWNER: real index migration mechanism before any index lands (2026-08-18)
+
+Wipe-and-rebuild of persisted images that fail the schema signature is
+NOT the path, despite D60. A proper additive-index migration step in the
+database lifecycle must exist before any CREATE INDEX changes schema.sql.
+The mechanism is needed eventually anyway; build it now. Index trial
+evidence may still be gathered without landing schema changes.
+
 ## D303 — OWNER: full SRD corpus repair; staged re-review; mutation lanes next wave (2026-08-17)
 
 Corpus audit verdict (read-only lane; structural catalogs intact, prose

@@ -5,17 +5,16 @@ import {
   CharacterSheetBuilder,
   type CharacterSheet,
 } from '../../../src/queries/character-sheet-builder';
-import { applicationSeed } from '../../../src/db/bootstrap';
 import { BUNDLED_HOMEBREW_CATALOG } from '../../../src/authoring/bundled-homebrew-catalog';
 import {
   commitBundledHomebrewInstall,
   planBundledHomebrewInstall,
 } from '../../../src/authoring/bundled-homebrew-installer';
 import type { SheetResourceMaximum } from '../../../src/rules/sheet';
-import { openTestDatabase } from '../../helpers/open-db';
+import { openSeededTestDatabase } from '../../helpers/open-db';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import { rpcRegistry } from '../../../src/worker/registry';
-import { createRpcHarness } from '../../helpers/rpc-harness';
+import { createSeededRpcHarness } from '../../helpers/rpc-harness';
 import { sheetSections } from '../../../src/ui/screens/sheet/sheet-view';
 import {
   classFormulaResourceKinds,
@@ -28,9 +27,8 @@ describe('character sheet resource projection', () => {
   let builder: CharacterSheetBuilder;
 
   beforeEach(async () => {
-    connection = await openTestDatabase();
+    connection = await openSeededTestDatabase();
     db = new DatabaseContext(connection);
-    applicationSeed(db);
     builder = new CharacterSheetBuilder(db);
   });
 
@@ -157,7 +155,7 @@ describe('character sheet resource projection', () => {
 
   // Measured alone at 2.78s; 20s retains contention headroom.
   it('combines shared slots, guards a sole published subclass caster, and keeps Pact slots separate', async () => {
-    const harness = await createRpcHarness([]);
+    const harness = await createSeededRpcHarness([]);
     try {
       db = harness.context.db;
       const multiclass = character('Spell resources', [

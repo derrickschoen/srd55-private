@@ -1,10 +1,12 @@
-import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseContext } from '../../../src/db/database';
 import { BuildReportBuilder } from '../../../src/reports/build-report-builder';
 import { SRD_ATTRIBUTION_NOTICE } from '../../../src/rules/srd-attribution';
 import { renderBuildReport } from '../../../src/ui/screens/build-report/build-report';
-import { openTestDatabase } from '../../helpers/open-db';
+import {
+  acquireSharedDb,
+  type SharedDbLease,
+} from '../../helpers/shared-db';
 import {
   createBuildReportFixture,
   persistedReportTableHashes,
@@ -21,16 +23,16 @@ function attributionText(markup: string): string {
 }
 
 describe('read-only report presentation', () => {
-  let connection: Database;
   let db: DatabaseContext;
+  let lease: SharedDbLease;
 
   beforeEach(async () => {
-    connection = await openTestDatabase();
-    db = new DatabaseContext(connection);
+    lease = await acquireSharedDb({ mode: 'rw' });
+    db = lease.db;
   });
 
-  afterEach(() => {
-    connection.close();
+  afterEach(async () => {
+    await lease.release();
   });
 
   it('renders classless level and proficiency as undetermined on the build report', () => {

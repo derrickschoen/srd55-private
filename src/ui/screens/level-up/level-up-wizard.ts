@@ -10,6 +10,7 @@ import {
   type LevelUpPlannedSkillProjection,
   type LevelUpPlannedSpellProjection,
   type LevelUpWarningPresentation,
+  type LevelUpWizardProgress,
   type LevelUpPreviewCommand,
   type LevelUpPreviewResult,
   type LevelUpStateResult,
@@ -20,6 +21,9 @@ import type { Skill } from '../../../domain/enums';
 import type { CharacterRevision } from '../../../domain/ids';
 import type { EligibleSpell } from '../../../domain/read-models';
 import type { CharacterCommandRpcResult } from '../../../commands/character-command-executor';
+import type { DecodedOutcome } from '../../../refusals/outcome';
+import type { Refusal } from '../../../refusals/refusal';
+import { renderRefusal } from '../../../refusals/render';
 import type { CatalogNamedDisclosure } from '../../../catalog/catalog-disclosure';
 import type { CharacterSheet } from '../../../queries/character-sheet-builder';
 import { element, type Cleanup } from '../../dom';
@@ -72,15 +76,19 @@ export interface LevelUpWizardController {
 }
 
 export interface LevelUpWizardServices {
+  readonly initialProgress?: LevelUpWizardProgress | null;
+  readonly saveProgress?: (
+    progress: LevelUpWizardProgress | null,
+  ) => Promise<unknown>;
   readonly preview?: (
     expectedRevision: CharacterRevision,
     command: LevelUpPreviewCommand,
-  ) => Promise<LevelUpPreviewResult>;
+  ) => Promise<DecodedOutcome<LevelUpPreviewResult>>;
   readonly submit?: (
     expectedRevision: CharacterRevision,
     command: LevelUpPreviewCommand,
     operationUuid: string,
-  ) => Promise<CharacterCommandRpcResult>;
+  ) => Promise<DecodedOutcome<CharacterCommandRpcResult>>;
   readonly loadSheet?: () => Promise<CharacterSheet>;
   readonly reloadState?: () => void | Promise<void>;
   readonly randomUuid?: () => string;
@@ -117,6 +125,27 @@ function errorMessage(error: unknown): string {
 
 function isAmbiguousTransportError(error: unknown): boolean {
   return errorRecord(error)?.['code'] === 'transport_error';
+}
+
+function refusalIsStale(refusal: Refusal): boolean {
+  return refusal.kind === 'revision_conflict'
+    || refusal.kind === 'character_archived'
+    || (
+      refusal.kind === 'level_up_refused'
+      && (
+        refusal.reason === 'class_not_held'
+        || refusal.reason === 'level_not_adjacent'
+      )
+    );
+}
+
+function outcomeRefusalMessage<T>(outcome: Exclude<
+  DecodedOutcome<T>,
+  { readonly kind: 'ok' }
+>): string {
+  return renderRefusal(
+    outcome.kind === 'refused' ? outcome.refusal : outcome,
+  );
 }
 
 function titleCaseIdentifier(value: string): string {
@@ -350,9 +379,17 @@ function createTerminalEpicResolutionWizard(options: {
         void options.preview(
           options.state.character.revision,
           selectedCommand,
-        ).then((result) => {
+        ).then((outcome) => {
           if (generation !== previewGeneration) return;
-          preview = result;
+          if (outcome.kind !== 'ok') {
+            stale = outcome.kind === 'refused'
+              && refusalIsStale(outcome.refusal);
+            error = outcomeRefusalMessage(outcome);
+            showStep('review');
+            activeFrame?.alert?.focus();
+            return;
+          }
+          preview = outcome.value;
           error = null;
           showStep('review');
         }).catch((previewError: unknown) => {
@@ -388,7 +425,19 @@ function createTerminalEpicResolutionWizard(options: {
         options.state.character.revision,
         selectedCommand,
         confirmedOperationUuid,
-      ).then(async () => {
+      ).then(async (outcome) => {
+        if (outcome.kind !== 'ok') {
+          submitting = false;
+          clearSubmittingStatus(host);
+          stale = outcome.kind === 'refused'
+            && refusalIsStale(outcome.refusal);
+          operationUuid = null;
+          error = outcomeRefusalMessage(outcome);
+          showStep('review');
+          activeFrame?.alert?.focus();
+          return;
+        }
+        await options.saveProgress?.(null);
         const sheet = await options.loadSheet?.();
         if (sheet === undefined) {
           throw new Error('Fresh character sheet data was unavailable.');
@@ -517,6 +566,7 @@ export function createLevelUpWizard(options: {
       ...(options.loadSheet === undefined ? {} : { loadSheet: options.loadSheet }),
       ...(options.reloadState === undefined ? {} : { reloadState: options.reloadState }),
       ...(options.randomUuid === undefined ? {} : { randomUuid: options.randomUuid }),
+      ...(options.saveProgress === undefined ? {} : { saveProgress: options.saveProgress }),
     });
   }
   if (options.state.kind !== 'ready') {
@@ -533,7 +583,15 @@ export function createLevelUpWizard(options: {
   const state = options.state;
   const guideable = guideableOptions(state);
   const initiallySelected = guideable.length === 1 ? guideable[0] : undefined;
-  let selectedClassId = initiallySelected?.class_definition_id ?? null;
+  const restoredClass = options.initialProgress?.character_revision ===
+      state.character.revision
+    ? guideable.find(
+        (candidate) => candidate.content_key ===
+          options.initialProgress?.selected_class_content_key,
+      )
+    : undefined;
+  let selectedClassId = restoredClass?.class_definition_id ??
+    initiallySelected?.class_definition_id ?? null;
   let pendingEpicPath: PendingEpicPath | null =
     state.pending_epic_resolution === null ? 'next_level' : null;
   let subclassDraft: SubclassDraft = { kind: 'decide_later' };
@@ -552,6 +610,7 @@ export function createLevelUpWizard(options: {
   let submitting = false;
   let stale = false;
   let completion: Completion | null = null;
+  let transitionPending = false;
   const host = element('div', { className: 'level-up-route' });
 
   const selectedClass = (): LevelUpGuideableClassOption | null =>
@@ -621,11 +680,25 @@ export function createLevelUpWizard(options: {
             option.subclass_definition_id ===
             selectedSubclassId,
         );
-    const featChoice = levelFeatDraft?.kind === 'selected'
-      ? levelFeatDraft.application.selection
-      : levelFeatDraft?.kind === 'defer_epic_boon'
-        ? { kind: 'defer_epic_boon' as const }
-        : undefined;
+    let featChoice: LevelUpPreviewCommand['feat_choice'] | undefined;
+    if (levelFeatDraft === null) {
+      featChoice = undefined;
+    } else {
+      switch (levelFeatDraft.kind) {
+        case 'selected':
+          featChoice = levelFeatDraft.application.selection;
+          break;
+        case 'defer_epic_boon':
+          featChoice = { kind: 'defer_epic_boon' };
+          break;
+        /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+           tsc probe verified that the never assignment rejects a new draft. */
+        default: {
+          const unreachable: never = levelFeatDraft;
+          throw new TypeError(`Unhandled feat step draft ${String(unreachable)}.`);
+        }
+      }
+    }
     const projection = plannedProjection();
     const hasPlannedWork =
       projection.skills.length > 0 ||
@@ -677,6 +750,15 @@ export function createLevelUpWizard(options: {
       ...(planned.spells.length > 0 ? ['spells' as const] : []),
     ]);
   };
+
+  if (
+    restoredClass !== undefined &&
+    options.initialProgress !== null &&
+    options.initialProgress !== undefined &&
+    applicableSteps().includes(options.initialProgress.current_step)
+  ) {
+    currentStep = options.initialProgress.current_step;
+  }
 
   const isEpicResolutionPass = (): boolean =>
     pendingEpicPath === 'resolve_now' && state.pending_epic_resolution !== null;
@@ -857,11 +939,39 @@ export function createLevelUpWizard(options: {
     invalidatePreview();
   };
 
+  const persistTransition = (
+    step: LevelUpStep,
+    afterSave: () => void,
+  ): void => {
+    const selected = selectedClass();
+    if (options.saveProgress === undefined || selected === null) {
+      afterSave();
+      return;
+    }
+    if (transitionPending) return;
+    transitionPending = true;
+    void options.saveProgress({
+      character_revision: state.character.revision,
+      selected_class_content_key: selected.content_key,
+      current_step: step,
+    }).then(() => {
+      transitionPending = false;
+      afterSave();
+    }).catch((saveError: unknown) => {
+      transitionPending = false;
+      showError(
+        `Level-up progress could not be saved: ${errorMessage(saveError)}`,
+      );
+    });
+  };
+
   const moveTo = (step: LevelUpStep): void => {
-    currentStep = step;
-    error = null;
-    render(false);
-    frame?.stepHeading.focus();
+    persistTransition(step, () => {
+      currentStep = step;
+      error = null;
+      render(false);
+      frame?.stepHeading.focus();
+    });
   };
 
   const showError = (message: string): void => {
@@ -884,16 +994,26 @@ export function createLevelUpWizard(options: {
     const reviewedDraft = draftReview();
     previewRequestFingerprint = fingerprint;
     error = null;
-    void options.preview(state.character.revision, command).then((result) => {
+    void options.preview(state.character.revision, command).then((outcome) => {
       if (
         generation !== previewGeneration ||
         draftFingerprint() !== fingerprint
       ) {
         return;
       }
+      if (outcome.kind !== 'ok') {
+        stale = outcome.kind === 'refused'
+          && refusalIsStale(outcome.refusal);
+        error = outcomeRefusalMessage(outcome);
+        if (currentStep === 'review') {
+          render(false);
+          frame?.alert?.focus();
+        }
+        return;
+      }
       previewCache = {
         draftFingerprint: fingerprint,
-        result,
+        result: outcome.value,
         draft: reviewedDraft,
       };
       error = null;
@@ -949,7 +1069,19 @@ export function createLevelUpWizard(options: {
       state.character.revision,
       command,
       confirmedOperationUuid,
-    ).then(async () => {
+    ).then(async (outcome) => {
+      if (outcome.kind !== 'ok') {
+        submitting = false;
+        clearSubmittingStatus(host);
+        stale = outcome.kind === 'refused'
+          && refusalIsStale(outcome.refusal);
+        operationUuid = null;
+        error = outcomeRefusalMessage(outcome);
+        render(false);
+        frame?.alert?.focus();
+        return;
+      }
+      await options.saveProgress?.(null);
       const sheet = await options.loadSheet?.();
       if (sheet === undefined) {
         throw new Error('Fresh character sheet data was unavailable.');

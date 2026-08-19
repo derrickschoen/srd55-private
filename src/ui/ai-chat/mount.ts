@@ -233,14 +233,24 @@ async function ask(panel: Panel, token: string, message: string): Promise<void> 
       if (!isAiFrame(frame)) {
         continue;
       }
-      if (frame.t === 'delta') {
-        panel.output.append(document.createTextNode(frame.text));
-      } else if (frame.t === 'error') {
-        panel.status.textContent = frame.error.message;
-        done = true;
-      } else {
-        panel.status.textContent = 'Done.';
-        done = true;
+      switch (frame.t) {
+        case 'delta':
+          panel.output.append(document.createTextNode(frame.text));
+          break;
+        case 'error':
+          panel.status.textContent = frame.error.message;
+          done = true;
+          break;
+        case 'done':
+          panel.status.textContent = 'Done.';
+          done = true;
+          break;
+        /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+           tsc probe verified that the never assignment rejects a new frame. */
+        default: {
+          const unreachable: never = frame;
+          throw new TypeError(`Unhandled AI frame ${String(unreachable)}.`);
+        }
       }
     }
   }

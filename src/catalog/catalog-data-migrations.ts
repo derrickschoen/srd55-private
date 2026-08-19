@@ -230,8 +230,25 @@ export const CATALOG_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
       // migration, and the catalog tagged-error migration: the pin covers the
       // combined source set (grants' four sibling error modules plus the
       // catalog lane's migrated modules). Reconciled rows unchanged by all.
+      // Re-pinned 2026-08-18 after spell eligibility split its point-read path
+      // from the equivalent build-scoped snapshot path. Reconciliation still
+      // calls the point-read API and its rows are unchanged; D226 freezes the
+      // complete source module, so the pin moves with the added path anyway.
+      // Re-pinned 2026-08-18 after content identity's key comparator gained a
+      // semantics-preserving native fast path. The 444-aggregate digest oracle
+      // is unchanged; D226 freezes source bytes, so this checksum still moves.
+      // Re-pinned 2026-08-19 for the skill-grants orphan-revival bug fix
+      // (f8287123): a revived tool-alternative row's stale state check made
+      // the sync immediately re-orphan it. This is NOT rows-unchanged: replay
+      // on an affected image now yields active rows where the buggy code
+      // yielded orphaned — the corrected output. The idempotency and rollback
+      // sibling tests verify the fixed behavior.
+      // 2026-08-19 merge recompute (wt/simcore -> main): both parents re-pinned
+      // over different frozen sources (main: skill-grants revival fix; simcore:
+      // configured-choice-rule work); recomputed over the merged bytes via
+      // catalogDataMigrationChecksum(entry.sources) per the D226 procedure.
       checksum:
-        'b38d1df5a4bd64ada0c4f86a87eae8f04c7217158a76b3ae7f65982433c26b21',
+        'e649951df8c8177c80ebc6363c6bbc4902e7c82d8e1e7c5a0749ede307b25125',
       run: reconcileSpeciesLineageContentV2,
     }),
   ]);

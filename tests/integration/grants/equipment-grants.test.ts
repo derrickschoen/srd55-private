@@ -19,6 +19,14 @@ import {
   EquipmentGrantRefusal,
 } from '../../../src/grants/equipment-grants';
 import {
+  EquipmentClassSourceMissingError,
+  EquipmentGrantedRowContractError,
+  EquipmentPackageContentMissingError,
+  EquipmentTemplateLinkMissingError,
+  EquipmentTemplateMissingError,
+  EquipmentWeaponGroupError,
+} from '../../../src/grants/equipment-grants-errors';
+import {
   exportCharacterShare,
   importCharacterShare,
 } from '../../../src/sharing/character-share';
@@ -27,7 +35,7 @@ import {
   encodeShareFragment,
 } from '../../../src/sharing/codec';
 import {
-  createRpcHarness,
+  createSeededRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
 
@@ -62,7 +70,7 @@ afterEach(() => {
 });
 
 async function applicationDatabase(): Promise<RpcHarness> {
-  harness = await createRpcHarness([]);
+  harness = await createSeededRpcHarness([]);
   return harness;
 }
 
@@ -313,6 +321,8 @@ describe('the equipment mint (E-A, reduced by D69)', () => {
       refusal = error as EquipmentGrantRefusal;
     }
     expect(refusal).toBeInstanceOf(EquipmentGrantRefusal);
+    expect(refusal?.name).toBe('EquipmentGrantRefusal');
+    expect(refusal?.reason).toBe('armor_slot_occupied');
     expect(refusal?.data).toEqual({
       reason: 'armor_slot_occupied',
       slot: 'worn',
@@ -344,6 +354,231 @@ describe('the equipment mint (E-A, reduced by D69)', () => {
     applyEquipmentPackageChoice(db, choice);
     expect(ownedWeaponNames(db, characterId)).toEqual(first);
     expect(ownedArmorNames(db, characterId)).toHaveLength(1);
+  });
+
+  it('pins missing package content and missing active class source by structured fields', async () => {
+    const db = (await applicationDatabase()).context.db;
+    const { characterId, contentKey } = createWithClass(db, 'Fighter', 'Missing package probes');
+
+    let missingContent: unknown;
+    try {
+      applyEquipmentPackageChoice(db, {
+        character_id: characterId,
+        content_key: 'fixture:missing-class-content',
+        kind: 'class',
+        option: 'a',
+      });
+    } catch (error) {
+      missingContent = error;
+    }
+    expect(missingContent).toBeInstanceOf(EquipmentPackageContentMissingError);
+    expect(missingContent).toMatchObject({
+      name: 'EquipmentPackageContentMissingError',
+      content_kind: 'class',
+      content_key: 'fixture:missing-class-content',
+    });
+
+    const sourceId = classSourceInstanceId(db, characterId);
+    db.exec("UPDATE character_source_instances SET state = 'tombstoned' WHERE id = ?", [sourceId]);
+    let missingSource: unknown;
+    try {
+      applyEquipmentPackageChoice(db, {
+        character_id: characterId,
+        content_key: contentKey,
+        kind: 'class',
+        option: 'a',
+      });
+    } catch (error) {
+      missingSource = error;
+    }
+    expect(missingSource).toBeInstanceOf(EquipmentClassSourceMissingError);
+    expect(missingSource).toMatchObject({
+      name: 'EquipmentClassSourceMissingError',
+      character_id: characterId,
+      content_key: contentKey,
+    });
+    expect(ownedWeaponNames(db, characterId)).toEqual([]);
+    expect(ownedArmorNames(db, characterId)).toEqual([]);
+  });
+
+  it('normalizes every nullable, blank, scalar, array, and object stored config shape', async () => {
+    const db = (await applicationDatabase()).context.db;
+    const cases: readonly {
+      readonly stored: string | null;
+      readonly retained: Readonly<Record<string, unknown>>;
+    }[] = [
+      { stored: null, retained: {} },
+      { stored: '', retained: {} },
+      { stored: 'null', retained: {} },
+      { stored: '[]', retained: {} },
+      { stored: '"scalar"', retained: {} },
+      { stored: '{"other":{"value":7}}', retained: { other: { value: 7 } } },
+    ];
+
+    for (const [index, fixture] of cases.entries()) {
+      const { characterId, contentKey } = createWithClass(
+        db,
+        'Wizard',
+        `Config shape ${String(index)}`,
+      );
+      const sourceId = classSourceInstanceId(db, characterId);
+      db.exec('UPDATE character_source_instances SET config = ? WHERE id = ?', [
+        fixture.stored,
+        sourceId,
+      ]);
+
+      applyEquipmentPackageChoice(db, {
+        character_id: characterId,
+        content_key: contentKey,
+        kind: 'class',
+        option: 'b',
+      });
+
+      const stored = db.scalar<string>(
+        'SELECT config FROM character_source_instances WHERE id = ?',
+        [sourceId],
+      );
+      expect(typeof stored).toBe('string');
+      expect(JSON.parse(String(stored))).toEqual({
+        ...fixture.retained,
+        [EQUIPMENT_CHOICE_CONFIG_KEY]: { kind: 'class', option: 'b' },
+      });
+      expect(ownedWeaponNames(db, characterId)).toEqual([]);
+      expect(ownedArmorNames(db, characterId)).toEqual([]);
+    }
+  });
+
+  it('dispatches a shield to the shield slot and pins its complete minted row', async () => {
+    const db = (await applicationDatabase()).context.db;
+    const { characterId, contentKey } = createWithClass(db, 'Fighter', 'Shield dispatch');
+    const shieldId = Number(db.scalar(
+      "SELECT id FROM armor_templates WHERE category = 'shield'",
+    ));
+    db.exec(
+      `UPDATE class_equipment_items
+       SET item_name = 'Shield', armor_template_id = ?
+       WHERE class_definition_id = (
+         SELECT id FROM class_definitions WHERE content_key = ?
+       ) AND option = 'a' AND item_kind = 'armor'`,
+      [shieldId, contentKey],
+    );
+
+    applyEquipmentPackageChoice(db, {
+      character_id: characterId,
+      content_key: contentKey,
+      kind: 'class',
+      option: 'a',
+    });
+
+    expect(db.allRaw(
+      `SELECT slot, name, category, armor_class, dex_bonus,
+              dex_bonus_max, strength_requirement, stealth_disadvantage
+       FROM character_armor WHERE character_id = ?`,
+      [characterId],
+    )).toEqual([{
+      slot: 'shield',
+      name: 'Shield',
+      category: 'shield',
+      armor_class: 2,
+      dex_bonus: 'none',
+      dex_bonus_max: null,
+      strength_requirement: null,
+      stealth_disadvantage: 0,
+    }]);
+  });
+
+  it('pins missing links, missing templates, invalid weapon groups, and row-contract defects', async () => {
+    const scenarios: readonly {
+      readonly label: string;
+      readonly mutate: (db: DatabaseContext, contentKey: string) => void;
+      readonly expected: new (...parameters: never[]) => Error;
+      readonly fields: Readonly<Record<string, unknown>>;
+    }[] = [
+      {
+        label: 'missing-link',
+        mutate: (fixtureDb, contentKey) => {
+          fixtureDb.exec('PRAGMA ignore_check_constraints = ON');
+          fixtureDb.exec(
+            `UPDATE class_equipment_items SET weapon_template_id = NULL
+             WHERE class_definition_id = (
+               SELECT id FROM class_definitions WHERE content_key = ?
+             ) AND option = 'a' AND item_kind = 'weapon'`,
+            [contentKey],
+          );
+        },
+        expected: EquipmentTemplateLinkMissingError,
+        fields: { equipment_kind: 'weapon' },
+      },
+      {
+        label: 'missing-template',
+        mutate: (fixtureDb, contentKey) => {
+          fixtureDb.exec('PRAGMA foreign_keys = OFF');
+          fixtureDb.exec(
+            `UPDATE class_equipment_items SET weapon_template_id = 999999
+             WHERE class_definition_id = (
+               SELECT id FROM class_definitions WHERE content_key = ?
+             ) AND option = 'a' AND item_kind = 'weapon'`,
+            [contentKey],
+          );
+        },
+        expected: EquipmentTemplateMissingError,
+        fields: { equipment_kind: 'weapon', template_id: 999_999 },
+      },
+      {
+        label: 'invalid-group',
+        mutate: (fixtureDb) => {
+          fixtureDb.exec('PRAGMA ignore_check_constraints = ON');
+          fixtureDb.exec("UPDATE weapon_templates SET srd_group = 'future_group' WHERE name = 'Dagger'");
+        },
+        expected: EquipmentWeaponGroupError,
+        fields: { template_name: 'Dagger', srd_group: 'future_group' },
+      },
+      {
+        label: 'invalid-row-contract',
+        mutate: (fixtureDb) => {
+          fixtureDb.exec('PRAGMA ignore_check_constraints = ON');
+          fixtureDb.exec("UPDATE weapon_templates SET damage_dice = NULL WHERE name = 'Dagger'");
+        },
+        expected: EquipmentGrantedRowContractError,
+        fields: { table: 'character_weapons', item_name: 'Daggers' },
+      },
+      {
+        label: 'invalid-armor-row-contract',
+        mutate: (fixtureDb) => {
+          fixtureDb.exec('PRAGMA ignore_check_constraints = ON');
+          fixtureDb.exec("UPDATE armor_templates SET category = 'future_armor' WHERE name = 'Leather Armor'");
+        },
+        expected: EquipmentGrantedRowContractError,
+        fields: { table: 'character_armor', item_name: 'Leather Armor' },
+      },
+    ];
+
+    for (const fixture of scenarios) {
+      harness?.close();
+      harness = undefined;
+      const db = (await applicationDatabase()).context.db;
+      const { characterId, contentKey } = createWithClass(
+        db,
+        'Bard',
+        `Equipment defect ${fixture.label}`,
+      );
+      fixture.mutate(db, contentKey);
+      let thrown: unknown;
+      try {
+        applyEquipmentPackageChoice(db, {
+          character_id: characterId,
+          content_key: contentKey,
+          kind: 'class',
+          option: 'a',
+        });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown, fixture.label).toBeInstanceOf(fixture.expected);
+      expect(thrown, fixture.label).toMatchObject(fixture.fields);
+      expect(ownedWeaponNames(db, characterId), fixture.label).toEqual([]);
+      expect(ownedArmorNames(db, characterId), fixture.label).toEqual([]);
+    }
   });
 });
 
@@ -383,6 +618,119 @@ function nonMagicInitiateFeat(db: DatabaseContext): string {
 }
 
 describe('the background arm (E-A, reduced by D69)', () => {
+  it('selects background option A versus B exactly, including quantity expansion', async () => {
+    const db = (await applicationDatabase()).context.db;
+    const backgroundKey = weaponBearingBackground(db);
+    expect(backgroundKey).toBe('2024:background:criminal');
+
+    const optionACharacter = createWithClass(db, 'Fighter', 'Background option A').characterId;
+    applyEquipmentPackageChoice(db, {
+      character_id: optionACharacter,
+      content_key: backgroundKey,
+      kind: 'background',
+      option: 'a',
+    });
+    expect(ownedWeaponNames(db, optionACharacter)).toEqual(['Dagger', 'Dagger']);
+    expect(ownedArmorNames(db, optionACharacter)).toEqual([]);
+    const optionASource = Number(db.scalar(
+      `SELECT id FROM character_source_instances
+       WHERE character_id = ? AND source_type = 'background'`,
+      [optionACharacter],
+    ));
+    expect(recordedChoice(db, optionASource)).toEqual({
+      kind: 'background',
+      option: 'a',
+    });
+
+    const optionBCharacter = createWithClass(db, 'Fighter', 'Background option B').characterId;
+    applyEquipmentPackageChoice(db, {
+      character_id: optionBCharacter,
+      content_key: backgroundKey,
+      kind: 'background',
+      option: 'b',
+    });
+    expect(ownedWeaponNames(db, optionBCharacter)).toEqual([]);
+    expect(ownedArmorNames(db, optionBCharacter)).toEqual([]);
+    const optionBSource = Number(db.scalar(
+      `SELECT id FROM character_source_instances
+       WHERE character_id = ? AND source_type = 'background'`,
+      [optionBCharacter],
+    ));
+    expect(recordedChoice(db, optionBSource)).toEqual({
+      kind: 'background',
+      option: 'b',
+    });
+  });
+
+  it('accepts current weapon and armor fingerprints and refuses a drifted weapon exactly', async () => {
+    const db = (await applicationDatabase()).context.db;
+    const backgroundKey = weaponBearingBackground(db);
+
+    const validCharacter = createWithClass(db, 'Fighter', 'Valid background dependency').characterId;
+    applyEquipmentPackageChoice(db, {
+      character_id: validCharacter,
+      content_key: backgroundKey,
+      kind: 'background',
+      option: 'a',
+    });
+    expect(ownedWeaponNames(db, validCharacter)).toEqual(['Dagger', 'Dagger']);
+
+    const shieldId = Number(db.scalar("SELECT id FROM armor_templates WHERE category = 'shield'"));
+    db.exec('PRAGMA ignore_check_constraints = ON');
+    db.exec(
+      `UPDATE background_equipment_items
+       SET item_kind = 'armor', item_name = 'Shield',
+           weapon_template_id = NULL, armor_template_id = ?
+       WHERE background_template_id = (
+         SELECT id FROM background_templates WHERE content_key = ?
+       ) AND option = 'a' AND sort_order = 2`,
+      [shieldId, backgroundKey],
+    );
+    const armorCharacter = createWithClass(db, 'Fighter', 'Valid armor dependency').characterId;
+    applyEquipmentPackageChoice(db, {
+      character_id: armorCharacter,
+      content_key: backgroundKey,
+      kind: 'background',
+      option: 'a',
+    });
+    expect(db.allRaw(
+      'SELECT slot, name, category, armor_class FROM character_armor WHERE character_id = ?',
+      [armorCharacter],
+    )).toEqual([{
+      slot: 'shield',
+      name: 'Shield',
+      category: 'shield',
+      armor_class: 2,
+    }]);
+
+    db.exec("UPDATE weapon_templates SET damage_type = 'Force' WHERE name = 'Dagger'");
+    const driftCharacter = createWithClass(db, 'Fighter', 'Drifted background dependency').characterId;
+    let refusal: unknown;
+    try {
+      applyEquipmentPackageChoice(db, {
+        character_id: driftCharacter,
+        content_key: backgroundKey,
+        kind: 'background',
+        option: 'a',
+      });
+    } catch (error) {
+      refusal = error;
+    }
+    expect(refusal).toBeInstanceOf(EquipmentGrantRefusal);
+    expect(refusal).toMatchObject({
+      name: 'EquipmentGrantRefusal',
+      reason: 'equipment_dependency_drift',
+      data: {
+        reason: 'equipment_dependency_drift',
+        content_key: '2024:weapon:dagger',
+        dependency_kind: 'weapon',
+        item: 'Daggers',
+      },
+    });
+    expect(ownedWeaponNames(db, driftCharacter)).toEqual([]);
+    expect(ownedArmorNames(db, driftCharacter)).toEqual([]);
+  });
+
   it('the record-only applyOrigin path gets an instance PRODUCED, marker-tagged, to carry the recorded choice', async () => {
     const db = (await applicationDatabase()).context.db;
     const { characterId } = createWithClass(db, 'Fighter', 'Ferro');

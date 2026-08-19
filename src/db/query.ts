@@ -18,35 +18,45 @@ export interface ExecuteResult {
   lastInsertId: number;
 }
 
-export type SqliteLastInsertRowIdApi = Pick<
+export type SqliteQueryEngineApi = Pick<
   Sqlite3Static['capi'],
-  'sqlite3_last_insert_rowid'
+  | 'sqlite3_get_autocommit'
+  | 'sqlite3_last_insert_rowid'
+  | 'sqlite3_next_stmt'
 >;
 
-const lastInsertRowIdApiByDatabasePrototype = new WeakMap<
+const queryEngineApiByDatabasePrototype = new WeakMap<
   object,
-  SqliteLastInsertRowIdApi
+  SqliteQueryEngineApi
 >();
 
 export function registerSqliteQueryEngine(
   sqlite3: Pick<Sqlite3Static, 'capi' | 'oo1'>,
 ): void {
-  lastInsertRowIdApiByDatabasePrototype.set(
+  queryEngineApiByDatabasePrototype.set(
     sqlite3.oo1.DB.prototype,
     sqlite3.capi,
   );
 }
 
-export function lastInsertRowIdApiFor(
+export function queryEngineApiFor(
   db: Database,
-): SqliteLastInsertRowIdApi {
+): SqliteQueryEngineApi {
   let prototype: object | null = Object.getPrototypeOf(db) as object | null;
   while (prototype !== null) {
-    const registered = lastInsertRowIdApiByDatabasePrototype.get(prototype);
+    const registered = queryEngineApiByDatabasePrototype.get(prototype);
     if (registered !== undefined) return registered;
     prototype = Object.getPrototypeOf(prototype) as object | null;
   }
   throw new Error('SQLite query engine is not registered for this connection.');
+}
+
+export function databaseIsInTransaction(db: Database): boolean {
+  return queryEngineApiFor(db).sqlite3_get_autocommit(db) === 0;
+}
+
+export function databaseHasOpenStatements(db: Database): boolean {
+  return queryEngineApiFor(db).sqlite3_next_stmt(db, 0) !== 0;
 }
 
 function bindings(bind: QueryBindings | undefined): BindingSpec | undefined {
@@ -66,7 +76,7 @@ export function execute(
   const pointer = db.pointer;
   const lastInsertId = pointer === undefined
     ? undefined
-    : lastInsertRowIdApiFor(db).sqlite3_last_insert_rowid(pointer);
+    : queryEngineApiFor(db).sqlite3_last_insert_rowid(pointer);
   return {
     changes: Number(db.changes()),
     lastInsertId: lastInsertId === undefined ? 0 : Number(lastInsertId),

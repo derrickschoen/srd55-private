@@ -18,7 +18,6 @@ import {
   planContentImport,
 } from '../../../src/catalog/content-adoption';
 import { registerContentAlias } from '../../../src/catalog/content-registry';
-import { applicationSeed } from '../../../src/db/bootstrap';
 import { DatabaseContext } from '../../../src/db/database';
 import type { ContentKey } from '../../../src/domain/ids';
 import { RpcError } from '../../../src/rpc/protocol';
@@ -34,7 +33,7 @@ import {
   interactiveElement,
   type InteractiveTestElement,
 } from '../../fixtures/interactive-dom';
-import { openTestDatabase } from '../../helpers/open-db';
+import { openSeededTestDatabase } from '../../helpers/open-db';
 
 type TestSubclassFormOptions = Omit<
   Parameters<typeof renderSubclassFormBase>[0],
@@ -62,10 +61,9 @@ async function fixture(): Promise<{
   readonly service: CatalogAuthoringService;
   readonly db: DatabaseContext;
 }> {
-  const connection = await openTestDatabase();
+  const connection = await openSeededTestDatabase();
   connections.push(connection);
   const db = new DatabaseContext(connection);
-  applicationSeed(db);
   return {
     db,
     service: new CatalogAuthoringService(db, {

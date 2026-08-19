@@ -166,11 +166,24 @@ function characterReference(
       refusal: 'archived_reference',
     });
   }
-  const definitionTable = identity.kind === 'species'
-    ? 'species_definitions'
-    : identity.kind === 'background'
-      ? 'background_definitions'
-      : 'subclass_definitions';
+  let definitionTable: 'species_definitions' | 'background_definitions' | 'subclass_definitions';
+  switch (identity.kind) {
+    case 'species':
+      definitionTable = 'species_definitions';
+      break;
+    case 'background':
+      definitionTable = 'background_definitions';
+      break;
+    case 'subclass':
+      definitionTable = 'subclass_definitions';
+      break;
+    /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+       tsc probe verified that the never assignment rejects a new kind. */
+    default: {
+      const unreachable: never = identity.kind;
+      throw new TypeError(`Unhandled authored content kind ${String(unreachable)}.`);
+    }
+  }
   const referenced = identity.kind === 'subclass'
     ? db.scalar<number>(
         `SELECT 1
@@ -324,11 +337,24 @@ function nonRefusedOutcome(plan: ContentImportPlan): Exclude<
 }
 
 function targetName(db: DatabaseContext, kind: AuthoredContentKind, key: ContentKey): string {
-  const table = kind === 'species'
-    ? 'species_definitions'
-    : kind === 'background'
-      ? 'background_definitions'
-      : 'subclass_definitions';
+  let table: 'species_definitions' | 'background_definitions' | 'subclass_definitions';
+  switch (kind) {
+    case 'species':
+      table = 'species_definitions';
+      break;
+    case 'background':
+      table = 'background_definitions';
+      break;
+    case 'subclass':
+      table = 'subclass_definitions';
+      break;
+    /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+       tsc probe verified that the never assignment rejects a new kind. */
+    default: {
+      const unreachable: never = kind;
+      throw new TypeError(`Unhandled authored content kind ${String(unreachable)}.`);
+    }
+  }
   const name = db.scalar<string>(`SELECT name FROM ${table} WHERE content_key = ?`, [key]);
   if (name === null) {
     throw new ReferenceRetargetError('The resolved target aggregate is missing.', {

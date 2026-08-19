@@ -422,9 +422,11 @@ function placeholders(values: readonly unknown[]): string {
   return values.map(() => '?').join(', ');
 }
 
-function hasBundledSpellCardinality(db: DatabaseContext): boolean {
-  const spells = parseSrdSpellDescriptions();
-  const memberships = parseSrdSpellListMemberships();
+function hasBundledSpellCardinality(
+  db: DatabaseContext,
+  source: ValidatedBundledSpellSource,
+): boolean {
+  const { spells, memberships } = source;
   const keys = spells.map((spell) => spell.content_key);
   const present = Number(
     db.scalar(
@@ -445,7 +447,9 @@ function hasBundledSpellCardinality(db: DatabaseContext): boolean {
          FROM spell_list_memberships AS membership
          INNER JOIN spell_versions AS version
            ON version.id = membership.spell_version_id
-         WHERE version.provenance = 'srd'`,
+         WHERE version.provenance = 'srd'
+           AND version.content_key IN (${placeholders(keys)})`,
+        keys,
       ) ?? 0,
     ) === memberships.length
   );
@@ -454,6 +458,7 @@ function hasBundledSpellCardinality(db: DatabaseContext): boolean {
 export interface BundledSpellSeedSources {
   readonly descriptionExtract?: string;
   readonly listExtracts?: Readonly<Partial<Record<SrdSpellList, string>>>;
+  readonly includedContentKeys?: ReadonlySet<ContentKey>;
 }
 
 export type BundledSpellSeedRefusalReason =
@@ -499,21 +504,32 @@ class BundledSpellSeedEntryRefusal extends Error {
 function bundledSpellSource(
   sources: BundledSpellSeedSources = Object.freeze({}),
 ): ValidatedBundledSpellSource {
-  const spells = parseSrdSpellDescriptions(sources.descriptionExtract);
-  const memberships = parseSrdSpellListMemberships(sources.listExtracts);
-  const byName = new Map(spells.map((spell) => [spell.name, spell]));
+  const parsedSpells = parseSrdSpellDescriptions(sources.descriptionExtract);
+  const parsedMemberships = parseSrdSpellListMemberships(sources.listExtracts);
+  const byName = new Map(parsedSpells.map((spell) => [spell.name, spell]));
+  const includedNames = new Set(parsedSpells
+    .filter((spell) =>
+      sources.includedContentKeys?.has(spell.content_key as ContentKey) ?? true
+    )
+    .map((spell) => spell.name));
   const membershipsByName = new Map<string, SrdSpellListMembership[]>();
-  for (const membership of memberships) {
+  for (const membership of parsedMemberships) {
     if (!byName.has(membership.spell_name)) {
       throw new SrdSpellError(
         `${membership.spell_list_key} lists ${membership.spell_name}, which has no description.`,
       );
     }
-    membershipsByName.set(membership.spell_name, [
-      ...(membershipsByName.get(membership.spell_name) ?? []),
-      membership,
-    ]);
+    if (includedNames.has(membership.spell_name)) {
+      membershipsByName.set(membership.spell_name, [
+        ...(membershipsByName.get(membership.spell_name) ?? []),
+        membership,
+      ]);
+    }
   }
+  const spells = parsedSpells.filter((spell) => includedNames.has(spell.name));
+  const memberships = parsedMemberships.filter((membership) =>
+    includedNames.has(membership.spell_name)
+  );
   return Object.freeze({ spells, memberships, membershipsByName });
 }
 
@@ -942,10 +958,11 @@ export function ensureBundledSpellContent(
  */
 export function installMissingBundledSpellContent(
   db: DatabaseContext,
+  sources: BundledSpellSeedSources = Object.freeze({}),
 ): void {
-  const source = bundledSpellSource();
+  const source = bundledSpellSource(sources);
   repairBundledSpellIdentityRegistrations(db, source.spells);
-  if (hasBundledSpellCardinality(db)) {
+  if (hasBundledSpellCardinality(db, source)) {
     return;
   }
   const timestamp = new Date().toISOString();
@@ -972,6 +989,43 @@ export function installMissingBundledSpellContent(
   });
 }
 
+/** Remove projection-only bundled spells from a fresh test-profile image. */
+export function removeBundledSpellContent(
+  db: DatabaseContext,
+  contentKeys: ReadonlySet<ContentKey>,
+): void {
+  db.transaction(() => {
+    for (const contentKey of contentKeys) {
+      const identityId = db.scalar<number>(
+        `SELECT spell_identity_id FROM spell_versions
+         WHERE content_key = ? AND provenance = 'srd'`,
+        [contentKey],
+      );
+      db.exec(
+        `DELETE FROM spell_versions
+         WHERE content_key = ? AND provenance = 'srd'`,
+        [contentKey],
+      );
+      if (identityId !== null) {
+        db.exec(
+          `DELETE FROM spell_identities
+           WHERE id = ?
+             AND NOT EXISTS (
+               SELECT 1 FROM spell_versions WHERE spell_identity_id = ?
+             )`,
+          [identityId, identityId],
+        );
+      }
+      db.exec(
+        `DELETE FROM catalog_content_identities
+         WHERE content_kind = 'spell' AND content_key = ?
+           AND key_kind = 'bundled-stable' AND catalog_layer = 'bundled'`,
+        [contentKey],
+      );
+    }
+  });
+}
+
 /**
  * Seed only keys owned by this bundle.
  *
@@ -983,7 +1037,7 @@ export function installMissingBundledSpellContent(
 export function seedSpellContent(db: DatabaseContext): void {
   const source = bundledSpellSource();
   repairBundledSpellIdentityRegistrations(db, source.spells);
-  if (hasBundledSpellCardinality(db)) {
+  if (hasBundledSpellCardinality(db, source)) {
     return;
   }
 

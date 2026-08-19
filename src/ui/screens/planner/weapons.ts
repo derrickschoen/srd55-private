@@ -583,7 +583,8 @@ function renderForm(
       rebuild();
     });
     fields.append(labelled('Damage kind', damageKind, 'weapon-damage-kind'));
-    if (draft.damage.kind === 'dice') {
+    switch (draft.damage.kind) {
+      case 'dice': {
       const damage = textInput(
         'weapon-damage-dice',
         draft.damage.dice,
@@ -593,7 +594,9 @@ function renderForm(
         draft = { ...draft, damage: { kind: 'dice', dice: damage.value } };
       });
       fields.append(labelled('Damage dice', damage, 'weapon-damage-dice'));
-    } else if (draft.damage.kind === 'flat') {
+        break;
+      }
+      case 'flat': {
       const damage = numberInput('weapon-damage-flat', draft.damage.amount);
       damage.addEventListener('input', () => {
         draft = {
@@ -602,7 +605,9 @@ function renderForm(
         };
       });
       fields.append(labelled('Flat damage', damage, 'weapon-damage-flat'));
-    } else if (draft.damage.kind === 'custom') {
+        break;
+      }
+      case 'custom': {
       const damage = textInput(
         'weapon-damage-custom',
         draft.damage.text,
@@ -612,6 +617,16 @@ function renderForm(
         draft = { ...draft, damage: { kind: 'custom', text: damage.value } };
       });
       fields.append(labelled('Custom damage', damage, 'weapon-damage-custom'));
+        break;
+      }
+      case 'not_recorded':
+        break;
+      /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+         tsc probe verified that the never assignment rejects a new kind. */
+      default: {
+        const unreachable: never = draft.damage;
+        throw new TypeError(`Unhandled weapon damage ${String(unreachable)}.`);
+      }
     }
 
     const damageType = textInput(
@@ -669,7 +684,8 @@ function renderForm(
         'weapon-versatile-damage-kind',
       ),
     );
-    if (draft.versatile_damage.kind === 'dice') {
+    switch (draft.versatile_damage.kind) {
+      case 'dice': {
       const versatile = textInput(
         'weapon-versatile-dice',
         draft.versatile_damage.dice,
@@ -684,7 +700,9 @@ function renderForm(
       fields.append(
         labelled('Versatile damage dice', versatile, 'weapon-versatile-dice'),
       );
-    } else if (draft.versatile_damage.kind === 'flat') {
+        break;
+      }
+      case 'flat': {
       const versatile = numberInput(
         'weapon-versatile-flat',
         draft.versatile_damage.amount,
@@ -705,7 +723,9 @@ function renderForm(
           'weapon-versatile-flat',
         ),
       );
-    } else if (draft.versatile_damage.kind === 'custom') {
+        break;
+      }
+      case 'custom': {
       const versatile = textInput(
         'weapon-versatile-custom',
         draft.versatile_damage.text,
@@ -724,6 +744,16 @@ function renderForm(
           'weapon-versatile-custom',
         ),
       );
+        break;
+      }
+      case 'not_applicable':
+        break;
+      /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+         tsc probe verified that the never assignment rejects a new kind. */
+      default: {
+        const unreachable: never = draft.versatile_damage;
+        throw new TypeError(`Unhandled versatile damage ${String(unreachable)}.`);
+      }
     }
 
     const toggles = document.createElement('fieldset');

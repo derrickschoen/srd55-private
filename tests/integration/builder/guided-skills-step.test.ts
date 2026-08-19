@@ -31,7 +31,7 @@ import {
   interactiveElement,
 } from '../../fixtures/interactive-dom';
 import {
-  createRpcHarness,
+  createSeededRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
 
@@ -45,7 +45,7 @@ import {
  * rebuilds exactly that count on the new table, and the Acolyte-Fighter test
  * here is the one it must make fail.
  *
- * Everything runs against the full application seed through the REAL guided
+ * Everything runs against the test-core application seed through the REAL guided
  * applies and the REAL RPC surface, never hand-planted rows.
  */
 let harness: RpcHarness | undefined;
@@ -63,7 +63,7 @@ afterEach(() => {
 });
 
 async function applicationDatabase(): Promise<RpcHarness> {
-  harness = await createRpcHarness([]);
+  harness = await createSeededRpcHarness([], { profile: 'test-core' });
   return harness;
 }
 

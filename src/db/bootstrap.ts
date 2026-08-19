@@ -25,6 +25,7 @@ import { ensureBundledSheetContent } from '../rules/sheet-srd';
 import {
   ensureBundledSpellContent,
   installMissingBundledSpellContent,
+  removeBundledSpellContent,
   type BundledSpellSeedResult,
 } from '../rules/spells-srd';
 import { ensureBundledClassEquipment } from '../rules/class-equipment-srd';
@@ -41,6 +42,11 @@ import {
 } from '../catalog/bundled-content-digest-v1';
 import type { DatabaseBootStage } from './database-boot-progress';
 import type { DatabaseContext } from './database';
+import {
+  applicationSeedSpellContentKeys,
+  testCoreProjectionSpellContentKeys,
+  type ApplicationSeedProfile,
+} from './application-seed-profile';
 
 function hasNoCurrentFingerprints(pass: BundledContentDigestPassV1): boolean {
   return pass.aggregates.every((aggregate) =>
@@ -96,6 +102,7 @@ function seedApplicationPass(
   db: DatabaseContext,
   onProgress: (stage: DatabaseBootStage) => void,
   verification: DatabaseVerificationMode,
+  profile: ApplicationSeedProfile,
 ): void {
   ensureBundledClassContent(db);
   ensureBundledSrdSubclassContent(db);
@@ -118,7 +125,7 @@ function seedApplicationPass(
   // same digest again is the second of the ~4s the stamp exists to give back.
   // The two passes below are NOT digest work — they operate on stored
   // relations and user rows — and stay on every boot.
-  if (verification === 'stamped') {
+  if (profile === 'full' && verification === 'stamped') {
     assertBundledSrdSubclassSpellReferences(db);
     reconcileLegacyLevelFeatChoices(db);
     return;
@@ -129,8 +136,10 @@ function seedApplicationPass(
   // trivially incomplete database skips canonicalization and enters the same
   // repair path directly; equal-count substitutions and byte drift still take
   // the digest and remain tamper-evident on every plausible healthy boot.
-  onProgress('verifying_catalog_integrity');
-  const digestPass = bundledContentCouldMatchBuildV1(db)
+  if (profile === 'full') {
+    onProgress('verifying_catalog_integrity');
+  }
+  const digestPass = profile === 'full' && bundledContentCouldMatchBuildV1(db)
     ? bundledContentDigestPassV1(db)
     : undefined;
   if (
@@ -153,7 +162,14 @@ function seedApplicationPass(
   // Install absent spell roots before the general projector pass. Present
   // roots, including drifted rows, remain untouched for reconciliation to
   // observe and the source-wins verifier to name/repair.
-  installMissingBundledSpellContent(db);
+  const keptSpellContentKeys = applicationSeedSpellContentKeys(profile);
+  const projectedSpellContentKeys = keptSpellContentKeys === undefined
+    ? undefined
+    : testCoreProjectionSpellContentKeys(db);
+  const spellSources = projectedSpellContentKeys === undefined
+    ? Object.freeze({})
+    : Object.freeze({ includedContentKeys: projectedSpellContentKeys });
+  installMissingBundledSpellContent(db, spellSources);
   // D84 runs only after every definition/template half and dependency catalog
   // is present, so all nine stored projectors observe the same graph runtime
   // consumers do. Spell is the first reconciled kind: its projection is the
@@ -165,9 +181,17 @@ function seedApplicationPass(
   const registryPass = reconcileBundledContentRegistryWithStoredProjectionsV1(
     db,
     {
+      includeEntry: (entry) =>
+        entry.kind !== 'spell' ||
+        projectedSpellContentKeys === undefined ||
+        projectedSpellContentKeys.has(entry.contentKey),
       afterKind: (kind, storedProjections) => {
         if (kind === 'spell') {
-          spells = ensureBundledSpellContent(db, storedProjections);
+          spells = ensureBundledSpellContent(
+            db,
+            storedProjections,
+            spellSources,
+          );
           assertBundledSrdSubclassSpellReferences(db);
           reconcileLegacyLevelFeatChoices(db);
         }
@@ -190,11 +214,27 @@ function seedApplicationPass(
       `${String(registry.refused)} refused.`,
     );
   }
-  const verifiedDigest = bundledContentDigestPassV1(db);
-  if (!bundledContentDigestMatchesBuildV1(verifiedDigest)) {
+  const verifiedDigest = profile === 'full'
+    ? bundledContentDigestPassV1(db)
+    : undefined;
+  if (
+    verifiedDigest !== undefined &&
+    !bundledContentDigestMatchesBuildV1(verifiedDigest)
+  ) {
     console.warn(
       'Bundled content remains different from this build after named ' +
         `verification: ${namedDigestMismatch(verifiedDigest)}.`,
+    );
+  }
+  if (
+    keptSpellContentKeys !== undefined &&
+    projectedSpellContentKeys !== undefined
+  ) {
+    removeBundledSpellContent(
+      db,
+      new Set([...projectedSpellContentKeys].filter(
+        (contentKey) => !keptSpellContentKeys.has(contentKey),
+      )),
     );
   }
 }
@@ -203,6 +243,7 @@ function seedApplication(
   db: DatabaseContext,
   onProgress: (stage: DatabaseBootStage) => void,
   verification: DatabaseVerificationMode,
+  profile: ApplicationSeedProfile = 'full',
 ): void {
   onProgress('checking_bundled_rules');
   // Each catalog owns its local atomicity, but on OPFS every outermost commit
@@ -211,14 +252,17 @@ function seedApplication(
   // If a later catalog check throws, the whole partial seed rolls back before
   // DatabaseLifecycle reports the failure through its existing recoverable
   // boot path.
-  db.transaction(() => seedApplicationPass(db, onProgress, verification));
+  db.transaction(() =>
+    seedApplicationPass(db, onProgress, verification, profile)
+  );
 }
 
 export function applicationSeed(
   db: DatabaseContext,
   verification: DatabaseVerificationMode = 'full',
+  profile: ApplicationSeedProfile = 'full',
 ): void {
-  seedApplication(db, () => undefined, verification);
+  seedApplication(db, () => undefined, verification, profile);
 }
 
 /**

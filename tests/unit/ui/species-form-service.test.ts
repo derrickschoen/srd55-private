@@ -1,4 +1,3 @@
-import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AuthoringClient } from '../../../src/authoring/client';
 import {
@@ -34,7 +33,10 @@ import {
   interactiveElement,
   type InteractiveTestElement,
 } from '../../fixtures/interactive-dom';
-import { openTestDatabase } from '../../helpers/open-db';
+import {
+  acquireSharedDb,
+  type SharedDbLease,
+} from '../../helpers/shared-db';
 import { seedSpellContent } from '../../../src/rules/spells-srd';
 
 type TestSpeciesFormOptions = Omit<
@@ -51,18 +53,18 @@ function renderSpeciesForm(options: TestSpeciesFormOptions) {
   });
 }
 
-const connections: Database[] = [];
+const leases: SharedDbLease[] = [];
 let uuidSequence = 0;
 
-afterEach(() => {
-  for (const connection of connections.splice(0)) connection.close();
+afterEach(async () => {
+  for (const lease of leases.splice(0)) await lease.release();
   uuidSequence = 0;
 });
 
 async function authoringService(): Promise<CatalogAuthoringService> {
-  const connection = await openTestDatabase();
-  connections.push(connection);
-  return new CatalogAuthoringService(new DatabaseContext(connection), {
+  const lease = await acquireSharedDb({ mode: 'rw' });
+  leases.push(lease);
+  return new CatalogAuthoringService(lease.db, {
     randomUuid: () => `ha7-service-${String(++uuidSequence)}`,
     now: () => '2042-08-06T12:00:00.000Z',
   });
@@ -459,11 +461,11 @@ describe('HA-7 service-driven refusal and terminal paths', () => {
     }
     const targetKey = 'expanded:alternate.owner:adoption-incoming-species' as ContentKey;
     const targetNode = portableSourceContentImportNode(
-      new DatabaseContext(connections[0]!),
+      leases[0]!.db,
       firstPreview.aggregate,
       targetKey,
     );
-    const db = new DatabaseContext(connections[0]!);
+    const db = leases[0]!.db;
     const targetPlan = planContentImport(db, [targetNode]);
     expect(commitContentImport(db, {
       nodes: [targetNode],

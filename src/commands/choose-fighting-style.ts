@@ -3,6 +3,7 @@ import {
   type CharacterStateSnapshot,
 } from '../character/character-state';
 import type { DatabaseContext } from '../db/database';
+import { ok, type OkOutcome } from '../refusals/outcome';
 import type {
   ChooseFightingStyleCommand as ChooseFightingStylePayload,
 } from '../domain/command-contracts';
@@ -50,7 +51,7 @@ export class ChooseFightingStyleCommand {
     this.#generator = generator ?? new GrantRuleSlotGenerator(db);
   }
 
-  apply(characterId: number): void {
+  apply(characterId: number): OkOutcome<void> {
     this.db.transaction(() => {
       const choices = guidedRequiredFighterChoicesState(this.db, characterId);
       if (choices.fighter === null) {
@@ -140,6 +141,7 @@ export class ChooseFightingStyleCommand {
       this.#before = before;
       this.#characterId = characterId;
     });
+    return ok(undefined);
   }
 
   /**

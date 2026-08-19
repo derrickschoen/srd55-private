@@ -169,11 +169,24 @@ function unprovableWarning(
 ): MulticlassPrimaryAbilityWarning & {
   readonly kind: 'multiclass_primary_ability_unprovable';
 } {
-  const reason = evaluation.reason === 'missing_expression'
-    ? 'has no stored primary-ability expression'
-    : evaluation.reason === 'invalid_expression'
-      ? 'has a stored primary-ability expression this application cannot read'
-      : `has incomplete score evidence (${scoreEvidence(evaluation.scores)})`;
+  let reason: string;
+  switch (evaluation.reason) {
+    case 'missing_expression':
+      reason = 'has no stored primary-ability expression';
+      break;
+    case 'invalid_expression':
+      reason = 'has a stored primary-ability expression this application cannot read';
+      break;
+    case 'missing_score':
+      reason = `has incomplete score evidence (${scoreEvidence(evaluation.scores)})`;
+      break;
+    /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+       tsc probe verified that the never assignment rejects a new reason. */
+    default: {
+      const unreachable: never = evaluation.reason;
+      throw new TypeError(`Unhandled primary ability reason ${String(unreachable)}.`);
+    }
+  }
   return {
     kind: 'multiclass_primary_ability_unprovable',
     class_definition_id: row.class_definition_id,

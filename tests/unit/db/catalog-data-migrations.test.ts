@@ -133,7 +133,14 @@ describe('catalog data-migration registry', () => {
       // re-pinning is D226's accepted cost, not a way around the freeze.
       // Re-pinned 2026-08-17 at the grants+catalog tagged-error merge; the
       // pin covers the combined source set.
-      checksum: 'b38d1df5a4bd64ada0c4f86a87eae8f04c7217158a76b3ae7f65982433c26b21',
+      // Re-pinned 2026-08-18 for the spell-eligibility snapshot path; the
+      // migration still uses the unchanged point-read behavior.
+      // Re-pinned 2026-08-18 for content identity's semantics-preserving key
+      // comparator fast path; the aggregate digest stays unchanged.
+      // Re-pinned 2026-08-19 with the registry for the skill-grants
+      // orphan-revival fix (f8287123) — see the registry comment for the
+      // deliberate rows-changed justification.
+      checksum: 'e649951df8c8177c80ebc6363c6bbc4902e7c82d8e1e7c5a0749ede307b25125',
     }]);
     expect(() =>
       validateCatalogDataMigrationRegistry(CATALOG_DATA_MIGRATIONS)
