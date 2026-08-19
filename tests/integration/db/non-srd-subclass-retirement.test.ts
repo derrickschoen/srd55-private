@@ -22,6 +22,7 @@ import { DatabaseContext } from '../../../src/db/database';
 import { DatabaseLifecycle } from '../../../src/db/database-lifecycle';
 import type { ContentKey } from '../../../src/domain/ids';
 import { getSqlite3, MemoryDatabaseStorage } from '../../helpers/open-db';
+import { expectOkOutcome } from '../../helpers/outcome';
 
 const lifecycles: DatabaseLifecycle[] = [];
 let sqlite3: Sqlite3Static;
@@ -513,7 +514,7 @@ describe('one-time non-SRD bundled subclass retirement', () => {
       operation_uuid: '44444444-4444-4444-8444-444444444444',
       expected_revision: 4 as never,
     });
-    expect(undo).toMatchObject({ status: 'applied', revision: 5 });
+    expect(expectOkOutcome(undo)).toMatchObject({ status: 'applied', revision: 5 });
     expect(db.scalar('SELECT notes FROM characters WHERE id = ?', [survivorId]))
       .toBe('Before safe history entry');
 

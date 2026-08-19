@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ok } from '../../../src/refusals/outcome';
 import {
   LEVEL_UP_ATTR,
   LEVEL_UP_PANEL,
@@ -525,17 +526,17 @@ describe('W-LU2-DRAFT planned Skills, Expertise, and Spells', () => {
     };
     const before = sheet(1);
     const after = sheet(2);
-    const preview = vi.fn().mockResolvedValue({
+    const preview = vi.fn().mockResolvedValue(ok({
       before,
       after,
       new_outstanding_choices: [],
       command_fingerprint: 'server-reviewed-planned-command',
-    });
-    const submit = vi.fn().mockResolvedValue({
+    }));
+    const submit = vi.fn().mockResolvedValue(ok({
       operation_uuid: 'level-up-operation',
       revision: 5,
       idempotent_replay: false,
-    });
+    }));
     const wizard = createLevelUpWizard({
       state: ready(),
       cancel: () => undefined,

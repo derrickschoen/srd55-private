@@ -1,4 +1,5 @@
 import { expectIdenticalDatabaseImages } from '../../helpers/database-image-equality';
+import { expectOkOutcome } from '../../helpers/outcome';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type {
   Database,
@@ -1215,14 +1216,15 @@ describe('database migration chain', () => {
       // A pre-0034 save-point id now reaches the typed not-found refusal. It
       // cannot parse/replay stale raw ids and therefore cannot surface an FK
       // failure after the migration.
-      expect(new CharacterCommandExecutor(
+      const restoreOutcome = new CharacterCommandExecutor(
         db,
         new CharacterCommandIntegrity('ci4b-migration-test-integrity'),
       ).restoreSavePoint({
         character_id: 108,
         save_point_id: 221,
         expected_revision: 0,
-      })).toEqual({
+      });
+      expect(expectOkOutcome(restoreOutcome)).toEqual({
         status: 'refused',
         reason: 'save_point_not_found',
         current_revision: 0,
