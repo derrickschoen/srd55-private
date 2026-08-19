@@ -6,7 +6,8 @@
 // (nc=1) to prove a shared resource is actually being shared and actually
 // runs out, rather than trusting the printed board numbers.
 import { describe, expect, it } from 'vitest';
-import { domination, fiend, lore, monk, mulberry32, sorcwiz, veteran } from './sim';
+import { mulberry32 } from '../../src/combat/random';
+import { domination, fiend, lore, monk, sorcwiz, veteran } from './sim';
 import { constRng, sampleMeanPerRound } from './test-helpers';
 
 describe('caster day ray totals never exceed the Long-Rest slot budget (F1)', () => {

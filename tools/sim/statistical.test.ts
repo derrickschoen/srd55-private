@@ -4,7 +4,8 @@
 // (the d20-vs-AC micro-check) or a directional/relative-magnitude invariant
 // that must hold for structural reasons regardless of the exact numbers.
 import { describe, expect, it } from 'vitest';
-import { champion, devotion, domination, monk, mulberry32, thief, veteran } from './sim';
+import { mulberry32 } from '../../src/combat/random';
+import { champion, devotion, domination, monk, thief, veteran } from './sim';
 import { differsBySigma, sampleMeanPerRound } from './test-helpers';
 
 describe('known-probability micro-check: a lone d20 test against a fixed AC', () => {

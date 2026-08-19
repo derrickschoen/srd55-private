@@ -1,7 +1,8 @@
 // Shared test utilities: deterministic Rng builders and statistical sampling
 // helpers. Not a test file itself (no `*.test.ts` suffix), so vitest won't
 // collect it, but it's colocated with the suite for easy adjustment.
-import type { CombatResult, Level, Rng } from './sim';
+import type { Rng } from '../../src/combat/random';
+import type { CombatResult, Level } from './sim';
 
 /** An Rng that always returns the same value in [0,1). */
 export function constRng(x: number): Rng {
