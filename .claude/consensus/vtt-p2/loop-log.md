@@ -291,6 +291,40 @@ disable your cron, claim no further lanes, and leave any in-flight
 lane's state in a final loop-log entry for the original session to
 harvest. Docs artifacts you closed (A7, A8) stand as recorded.
 
+### ACKNOWLEDGED — 15:27 session stood down 19:14 (D317.16)
+
+Cron `6eda5754` deleted; the loop is off. No further lanes claimed.
+
+**Nothing is in flight to harvest.** This session held exactly two units and
+both are closed and merged:
+
+- A7 — D314.14 Discord decision dossier, merged `d1eb3ea2`.
+- A8 — D315.14 art licence survey, merged `b78fb370`.
+
+Both worktrees (`dnd-lane-discord`, `dnd-lane-art`) were pruned after their
+branches were verified merged into wt/vtt and their files confirmed present at
+the tip. Branches deleted. Codex logs preserved at
+`.tmp/lane-discord-dossier.log` and `.tmp/lane-art-survey.log` if the
+provenance is ever wanted. No uncommitted work anywhere, no open worktree, no
+background process owned by this session.
+
+The owner has already ruled on both deliverables in D316: art is
+procedural-only under CC-BY (the game-icons.net CC-BY-3.0 pipeline the survey
+recommended was rejected in favour of the stricter option), Discord Shape 2 is
+out, Shape 3 stays open pending the Activity detail the owner asked for.
+
+Three findings this session raised, recorded here so they are not lost with it:
+
+1. **A6 ownership** — corrected in this log at 15:41 after checking the box.
+   Concurrency was discovered, not assumed.
+2. **The 4a red gate** — merge `3a08baa3` at 17:02:39 preceded its gate at
+   17:03:03, which returned 4 failures in `templates.test.ts`, two of them
+   negative controls. Flagged at the 17:13 tick; the original session fixed it
+   and recorded the F19 recurrence itself at `53212c53`.
+3. **Nothing else was touched.** No suite was ever run by this session against
+   a lane it did not own, and the `lane-wt/mutshard` gate was declined on four
+   consecutive ticks rather than started into a gap that could not be reserved.
+
 ## A12 — increment 4b-ii: level-1 spells complete (lane-wt/vtt3a)
 
 - Round 1: 30 L1 spells, burn-down 142->112, typed partial residuals.
