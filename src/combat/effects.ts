@@ -1,6 +1,7 @@
 import type { Ability } from '../domain/enums';
 import type { ConditionName, ExhaustionLevel } from './conditions';
 import type { DamageRequest, RollMode } from './resolution';
+import type { AreaTemplate } from './templates';
 import type {
   CombatantId,
   EffectStackingIdentity,
@@ -106,6 +107,119 @@ export type EffectPayload =
       readonly kind: 'illusion';
       readonly modes: readonly ('sound' | 'image')[];
       readonly maximumCubeFeet: number;
+    }
+  | {
+      readonly kind: 'condition_bundle';
+      readonly conditions: readonly Exclude<ConditionName, 'Exhaustion'>[];
+    }
+  | {
+      readonly kind: 'alarm_ward';
+      readonly placement: AreaTemplate | 'selected_when_cast';
+      readonly maximumCubeFeet: number;
+      readonly audibleRangeFeet: number;
+      readonly mentalRangeFeet: number;
+    }
+  | {
+      readonly kind: 'commanded_action';
+      readonly options: readonly ('approach' | 'drop' | 'flee' | 'grovel' | 'halt')[];
+    }
+  | {
+      readonly kind: 'language_comprehension';
+      readonly secondsPerPage: number;
+      readonly decodesSecretMessages: false;
+    }
+  | {
+      readonly kind: 'environmental_water';
+      readonly placement: AreaTemplate | 'selected_when_cast';
+      readonly gallons: number;
+      readonly gallonsPerSlot: number;
+      readonly cubeFeet: number;
+      readonly cubeFeetPerSlot: number;
+    }
+  | {
+      readonly kind: 'detection_sense';
+      readonly detects: 'creature_types_and_hallow' | 'magic' | 'poison_and_disease';
+      readonly radiusFeet: number;
+    }
+  | {
+      readonly kind: 'appearance_illusion';
+      readonly maximumHeightChangeFeet: number;
+      readonly investigationAgainstSpellDc: true;
+    }
+  | {
+      readonly kind: 'bonus_action_dash';
+      readonly immediateDash: true;
+    }
+  | {
+      readonly kind: 'falling_protection';
+      readonly descentFeetPerRound: number;
+      readonly preventsLandingDamage: true;
+    }
+  | {
+      readonly kind: 'summoned_familiar';
+      readonly forms: readonly string[];
+      readonly telepathyFeet: number;
+    }
+  | {
+      readonly kind: 'floating_disk';
+      readonly diameterFeet: number;
+      readonly heightFeet: number;
+      readonly capacityPounds: number;
+      readonly followDistanceFeet: number;
+      readonly maximumDistanceFeet: number;
+    }
+  | {
+      readonly kind: 'obscured_area';
+      readonly placement: AreaTemplate | 'selected_when_cast';
+      readonly radiusFeet: number;
+      readonly obscurement: 'heavy';
+      readonly dispersedByStrongWind: true;
+    }
+  | {
+      readonly kind: 'magic_identification';
+      readonly identifiesPropertiesChargesAndSpells: true;
+    }
+  | {
+      readonly kind: 'illusory_script';
+      readonly truesightReadsHiddenMessage: true;
+    }
+  | {
+      readonly kind: 'jump_movement';
+      readonly jumpFeet: number;
+      readonly movementCostFeet: number;
+      readonly usesPerTurn: 1;
+    }
+  | {
+      readonly kind: 'base_armor_class';
+      readonly base: number;
+      readonly addsDexterityModifier: true;
+      readonly requiresUnarmored: true;
+    }
+  | {
+      readonly kind: 'food_purification';
+      readonly placement: AreaTemplate | 'selected_when_cast';
+      readonly radiusFeet: number;
+      readonly removesPoisonAndRot: true;
+    }
+  | {
+      readonly kind: 'image_illusion';
+      readonly placement: AreaTemplate | 'selected_when_cast';
+      readonly maximumCubeFeet: number;
+      readonly movableByMagicAction: true;
+      readonly investigationAgainstSpellDc: true;
+    }
+  | {
+      readonly kind: 'sleep_sequence';
+      readonly initial: 'Incapacitated';
+      readonly failedRepeat: 'Unconscious';
+    }
+  | {
+      readonly kind: 'unseen_servant';
+      readonly armorClass: number;
+      readonly hitPoints: number;
+      readonly strength: number;
+      readonly moveFeetPerBonusAction: number;
+      readonly maximumDistanceFeet: number;
     }
   | {
       readonly kind: 'minor_magic';

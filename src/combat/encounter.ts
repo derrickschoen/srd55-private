@@ -10,6 +10,7 @@ import {
 import type { CombatantProfile, CombatToken } from './combatant';
 import type {
   EffectApplication,
+  EffectPayload,
   EncounterEffect,
   TurnBoundary,
 } from './effects';
@@ -40,9 +41,10 @@ import {
 import { spellDefinition } from './spells/definitions';
 import { validateSpellSlotCapacities } from './spells/resources';
 import type { EffectData, ScaledDice, SpellCastCommand, SpellDefinition } from './spells/types';
-import { affectedCells, creatureOccupiesAffectedCell } from './templates';
+import { affectedCells, creatureOccupiesAffectedCell, type AreaTemplate } from './templates';
 import {
   armorClass,
+  damageType,
   difficultyClass,
   dieSides,
   encounterEffectId,
@@ -275,7 +277,7 @@ function replaceCombatant(
   };
 }
 
-function appliedCondition(effect: EncounterEffect): AppliedCondition | null {
+function appliedConditions(effect: EncounterEffect): readonly AppliedCondition[] {
   switch (effect.payload.kind) {
     case 'ability_check_modifier':
     case 'armor_class_modifier':
@@ -298,16 +300,41 @@ function appliedCondition(effect: EncounterEffect): AppliedCondition | null {
     case 'light_source':
     case 'minor_magic':
     case 'object_repair':
+    case 'alarm_ward':
+    case 'appearance_illusion':
+    case 'base_armor_class':
+    case 'bonus_action_dash':
+    case 'commanded_action':
+    case 'detection_sense':
+    case 'environmental_water':
+    case 'falling_protection':
+    case 'floating_disk':
+    case 'food_purification':
+    case 'image_illusion':
+    case 'illusory_script':
+    case 'jump_movement':
+    case 'language_comprehension':
+    case 'magic_identification':
+    case 'obscured_area':
+    case 'summoned_familiar':
+    case 'unseen_servant':
     case 'ongoing_damage':
-      return null;
+      return [];
+    case 'condition_bundle':
+      return effect.payload.conditions.map((condition) =>
+        condition === 'Charmed' || condition === 'Frightened' || condition === 'Grappled'
+          ? { name: condition, source: effect.source }
+          : { name: condition });
+    case 'sleep_sequence':
+      return [{ name: effect.payload.initial }];
     case 'exhaustion':
-      return { name: 'Exhaustion', level: effect.payload.level };
+      return [{ name: 'Exhaustion', level: effect.payload.level }];
     case 'condition':
       switch (effect.payload.condition) {
         case 'Charmed':
         case 'Frightened':
         case 'Grappled':
-          return { name: effect.payload.condition, source: effect.source };
+          return [{ name: effect.payload.condition, source: effect.source }];
         case 'Blinded':
         case 'Deafened':
         case 'Incapacitated':
@@ -319,7 +346,7 @@ function appliedCondition(effect: EncounterEffect): AppliedCondition | null {
         case 'Restrained':
         case 'Stunned':
         case 'Unconscious':
-          return { name: effect.payload.condition };
+          return [{ name: effect.payload.condition }];
       }
   }
 }
@@ -334,10 +361,11 @@ export function combatantConditions(
   let exhaustionLevels = 0;
   for (const effect of state.effects) {
     if (!effect.targets.includes(id)) continue;
-    const condition = appliedCondition(effect);
-    if (condition?.name === 'Exhaustion') {
-      exhaustionLevels += condition.level;
-    } else if (condition !== null) {
+    for (const condition of appliedConditions(effect)) {
+      if (condition.name === 'Exhaustion') {
+        exhaustionLevels += condition.level;
+        continue;
+      }
       const key =
         'source' in condition
           ? `${condition.name}:${condition.source}`
@@ -1171,7 +1199,30 @@ function cloneEffectApplication(
       case 'light_source':
       case 'minor_magic':
       case 'object_repair':
+      case 'alarm_ward':
+      case 'appearance_illusion':
+      case 'base_armor_class':
+      case 'bonus_action_dash':
+      case 'detection_sense':
+      case 'environmental_water':
+      case 'falling_protection':
+      case 'floating_disk':
+      case 'food_purification':
+      case 'image_illusion':
+      case 'illusory_script':
+      case 'jump_movement':
+      case 'language_comprehension':
+      case 'magic_identification':
+      case 'obscured_area':
+      case 'sleep_sequence':
+      case 'unseen_servant':
         return { ...application.payload };
+      case 'commanded_action':
+        return { ...application.payload, options: [...application.payload.options] };
+      case 'condition_bundle':
+        return { ...application.payload, conditions: [...application.payload.conditions] };
+      case 'summoned_familiar':
+        return { ...application.payload, forms: [...application.payload.forms] };
       case 'damage_rider':
         return {
           ...application.payload,
@@ -1475,8 +1526,14 @@ function scaledDiceExpression(
 function spendSpellCastingCost(
   context: ReductionContext,
   definition: SpellDefinition,
-  actor: CombatantId,
+  command: SpellCastCommand,
 ): void {
+  const actor = command.actor;
+  if (command.castAsRitual) {
+    if (definition.ritual !== true) throw new EncounterRuleError(`${definition.name} cannot be cast as a ritual.`);
+    if (context.state.activeCombatant !== null) throw new EncounterRuleError('A ritual cannot resolve as a turn action.');
+    return;
+  }
   switch (definition.castingTime) {
     case 'action':
       assertActiveActor(context, actor);
@@ -1502,8 +1559,9 @@ function spendSpellCastingCost(
       return;
     }
     case 'minute':
+    case 'hour':
       if (context.state.activeCombatant !== null) {
-        throw new EncounterRuleError(`${definition.name} requires 1 minute and cannot resolve as a turn action.`);
+        throw new EncounterRuleError(`${definition.name} has a long casting time and cannot resolve as a turn action.`);
       }
       return;
   }
@@ -1514,6 +1572,10 @@ function spendSpellSlot(
   definition: SpellDefinition,
   command: SpellCastCommand,
 ): void {
+  if (command.castAsRitual) {
+    if (command.slotLevel !== null) throw new EncounterRuleError('A ritual cast does not expend a spell slot.');
+    return;
+  }
   if (definition.level === 0) {
     if (command.slotLevel !== null) throw new EncounterRuleError('Cantrips do not expend spell slots.');
     return;
@@ -1546,16 +1608,29 @@ function spendSpellSlot(
   });
 }
 
-function areaTargets(
+function placedAreaTargets(
   state: EncounterState,
-  definition: SpellDefinition,
+  spellName: string,
+  rangeFeet: number,
+  shape: AreaTemplate['shape'],
+  expectedSizeFeet: number,
   command: SpellCastCommand,
 ): readonly CombatantId[] {
-  if (command.area === null || definition.targeting.kind !== 'area') {
-    throw new EncounterRuleError(`${definition.name} requires an area placement.`);
+  if (command.area === null) {
+    throw new EncounterRuleError(`${spellName} requires an area placement.`);
   }
-  if (command.area.shape !== definition.targeting.shape) {
-    throw new EncounterRuleError(`${definition.name} requires a ${definition.targeting.shape} template.`);
+  if (command.area.shape !== shape) {
+    throw new EncounterRuleError(`${spellName} requires a ${shape} template.`);
+  }
+  const submittedSize = command.area.shape === 'sphere'
+    ? command.area.template.radius
+    : command.area.shape === 'cone'
+      ? command.area.template.length
+      : command.area.shape === 'cube'
+        ? command.area.template.size
+        : null;
+  if (submittedSize !== expectedSizeFeet) {
+    throw new EncounterRuleError(`${spellName} requires a ${expectedSizeFeet}-foot ${shape} template.`);
   }
   const actorCell = token(state, command.actor).position;
   const origin = command.area.template.origin;
@@ -1565,8 +1640,8 @@ function areaTargets(
   const maximumY = minimumY + 5;
   const horizontal = Math.max(minimumX - origin.x, 0, origin.x - maximumX);
   const vertical = Math.max(minimumY - origin.y, 0, origin.y - maximumY);
-  if (Math.max(horizontal, vertical) > definition.targeting.rangeFeet) {
-    throw new EncounterRuleError(`${definition.name} area origin is out of range.`);
+  if (Math.max(horizontal, vertical) > rangeFeet) {
+    throw new EncounterRuleError(`${spellName} area origin is out of range.`);
   }
   const cells = affectedCells(
     { bounds: state.bounds, blockedCells: state.blockedCells },
@@ -1577,6 +1652,25 @@ function areaTargets(
     const occupied = [token(state, subject.profile.id).position];
     return creatureOccupiesAffectedCell(occupied, cells) ? [subject.profile.id] : [];
   });
+}
+
+function areaTargets(
+  state: EncounterState,
+  definition: SpellDefinition,
+  command: SpellCastCommand,
+): readonly CombatantId[] {
+  if (definition.targeting.kind !== 'area') {
+    throw new EncounterRuleError(`${definition.name} does not use area targeting.`);
+  }
+  return placedAreaTargets(
+    state,
+    definition.name,
+    definition.targeting.rangeFeet,
+    definition.targeting.shape,
+    definition.targeting.baseSizeFeet + definition.targeting.sizePerSlotFeet *
+      ((command.slotLevel ?? definition.level) - definition.level),
+    command,
+  );
 }
 
 function validateTargetRange(
@@ -1631,6 +1725,105 @@ function selectedSpellTargets(
   }
 }
 
+function cloneAreaTemplate(template: AreaTemplate): AreaTemplate {
+  switch (template.shape) {
+    case 'cone':
+      return { ...template, template: { ...template.template, origin: { ...template.template.origin }, direction: { ...template.template.direction } } };
+    case 'cube':
+      return { ...template, template: { ...template.template, origin: { ...template.template.origin }, center: { ...template.template.center }, axis: { ...template.template.axis } } };
+    case 'cylinder':
+      return { ...template, template: { ...template.template, origin: { ...template.template.origin } } };
+    case 'emanation':
+      return { ...template, template: { ...template.template, origin: { ...template.template.origin } } };
+    case 'sphere':
+      return { ...template, template: { ...template.template, origin: { ...template.template.origin } } };
+    case 'line':
+      return { ...template, template: { ...template.template, origin: { ...template.template.origin }, direction: { ...template.template.direction } } };
+  }
+}
+
+function resolvedSpellEffectPayload(
+  definition: SpellDefinition,
+  command: SpellCastCommand,
+  payload: EffectPayload,
+): EffectPayload {
+  const selectedArea = (): AreaTemplate => {
+    if (command.area === null) throw new EncounterRuleError(`${definition.name} requires an area placement.`);
+    return cloneAreaTemplate(command.area);
+  };
+  const slotDelta = definition.level === 0 || command.castAsRitual
+    ? 0
+    : (command.slotLevel as number) - definition.level;
+  switch (payload.kind) {
+    case 'damage_reduction':
+      return payload.damageType === 'chosen_when_cast'
+        ? { ...payload, damageType: command.selectedOption ?? 'Acid' }
+        : payload;
+    case 'ability_check_modifier':
+      return payload.skill === 'chosen_when_cast'
+        ? { ...payload, skill: command.selectedOption ?? 'Arcana' }
+        : payload;
+    case 'alarm_ward':
+    case 'food_purification':
+    case 'image_illusion':
+      return payload.placement === 'selected_when_cast'
+        ? { ...payload, placement: selectedArea() }
+        : payload;
+    case 'environmental_water':
+      return {
+        ...payload,
+        placement: payload.placement === 'selected_when_cast' ? selectedArea() : payload.placement,
+        gallons: payload.gallons + payload.gallonsPerSlot * slotDelta,
+        cubeFeet: payload.cubeFeet + payload.cubeFeetPerSlot * slotDelta,
+      };
+    case 'obscured_area':
+      return {
+        ...payload,
+        placement: payload.placement === 'selected_when_cast' ? selectedArea() : payload.placement,
+        radiusFeet: payload.radiusFeet +
+          (definition.targeting.kind === 'area' ? definition.targeting.sizePerSlotFeet * slotDelta : 0),
+      };
+    case 'condition':
+    case 'condition_bundle':
+    case 'exhaustion':
+    case 'ongoing_damage':
+    case 'armor_class_modifier':
+    case 'attack_roll_modifier':
+    case 'saving_throw_modifier':
+    case 'd20_test_modifier':
+    case 'movement_modifier':
+    case 'damage_rider':
+    case 'cannot_regain_hit_points':
+    case 'opportunity_attacks_disabled':
+    case 'light_source':
+    case 'conjured_hand':
+    case 'communication_link':
+    case 'illusion':
+    case 'commanded_action':
+    case 'language_comprehension':
+    case 'detection_sense':
+    case 'appearance_illusion':
+    case 'bonus_action_dash':
+    case 'falling_protection':
+    case 'summoned_familiar':
+    case 'floating_disk':
+    case 'magic_identification':
+    case 'illusory_script':
+    case 'jump_movement':
+    case 'base_armor_class':
+    case 'sleep_sequence':
+    case 'unseen_servant':
+    case 'minor_magic':
+    case 'object_repair':
+    case 'attack_roll_mode_modifier':
+    case 'creature_type_protection':
+    case 'sanctuary':
+    case 'magic_missile_immunity':
+    case 'shield_defense':
+      return payload;
+  }
+}
+
 function effectApplication(
   definition: SpellDefinition,
   command: SpellCastCommand,
@@ -1642,12 +1835,7 @@ function effectApplication(
     ? command.actor
     : actualTargets[0] as CombatantId;
   const boundary: TurnBoundary = data.expiresAt.endsWith('_start') ? 'start' : 'end';
-  const payload =
-    data.payload.kind === 'damage_reduction' && data.payload.damageType === 'chosen_when_cast'
-      ? { ...data.payload, damageType: command.selectedOption ?? 'Acid' }
-      : data.payload.kind === 'ability_check_modifier' && data.payload.skill === 'chosen_when_cast'
-        ? { ...data.payload, skill: command.selectedOption ?? 'Arcana' }
-      : data.payload;
+  const payload = resolvedSpellEffectPayload(definition, command, data.payload);
   return {
     targets: actualTargets,
     duration: data.durationRounds === null
@@ -1732,7 +1920,7 @@ function resolveSpellAttack(
   command: SpellCastCommand,
   target: CombatantId,
   damage: ScaledDice,
-  damageType: DamageType,
+  spellDamageType: DamageType,
   rider: EffectData | null,
 ): void {
   const advantageEffects = context.state.effects.filter((effect) =>
@@ -1750,7 +1938,7 @@ function resolveSpellAttack(
   let result: ReturnType<typeof resolveDamage> | null = null;
   if (attack.outcome !== 'miss') {
     const baseRequest: DamageRequest = {
-      terms: [{ type: damageType, dice: scaledDiceExpression(definition, damage, command) }],
+      terms: [{ type: spellDamageType, dice: scaledDiceExpression(definition, damage, command) }],
       critical: attack.outcome === 'critical',
       responses: [],
     };
@@ -1766,19 +1954,82 @@ function resolveSpellAttack(
   emit(context, { type: 'attack_resolved', actor: command.actor, target, attack, damage: result });
 }
 
+function selectedSpellDamageType(
+  definition: SpellDefinition,
+  command: SpellCastCommand,
+  configured: DamageType | readonly DamageType[],
+): DamageType {
+  if (!Array.isArray(configured)) return configured as DamageType;
+  if (command.selectedOption === null) {
+    throw new EncounterRuleError(`${definition.name} requires a damage type selection.`);
+  }
+  const selected = damageType(command.selectedOption);
+  if (!configured.includes(selected)) {
+    throw new EncounterRuleError(`${definition.name} does not allow ${command.selectedOption} damage.`);
+  }
+  return selected;
+}
+
 function processSpellCast(context: ReductionContext, command: SpellCastCommand): void {
   const definition = spellDefinition(command.spellId);
   if (definition === null) throw new EncounterRuleError(`Spell ${command.spellId} is not implemented.`);
   const targets = selectedSpellTargets(context.state, definition, command);
-  spendSpellCastingCost(context, definition, command.actor);
+  spendSpellCastingCost(context, definition, command);
   spendSpellSlot(context, definition, command);
   emit(context, { type: 'spell_cast', caster: command.actor, spellId: definition.id, slotLevel: command.slotLevel, targets });
 
   const operation = definition.operation;
   switch (operation.kind) {
     case 'attack_damage':
-      for (const target of targets) resolveSpellAttack(context, definition, command, target, operation.dice, operation.damageType, operation.rider);
+      for (const target of targets) {
+        resolveSpellAttack(
+          context,
+          definition,
+          command,
+          target,
+          operation.dice,
+          selectedSpellDamageType(definition, command, operation.damageType),
+          operation.rider,
+        );
+      }
       return;
+    case 'attack_then_save_damage': {
+      const primary = targets[0] as CombatantId;
+      const burstTargets = placedAreaTargets(
+        context.state,
+        definition.name,
+        definition.targeting.kind === 'single' ? definition.targeting.rangeFeet : 0,
+        operation.burstShape,
+        operation.burstRadiusFeet,
+        command,
+      );
+      if (!burstTargets.includes(primary)) {
+        throw new EncounterRuleError(`${definition.name} burst must include its primary target.`);
+      }
+      resolveSpellAttack(
+        context,
+        definition,
+        command,
+        primary,
+        operation.attackDice,
+        operation.attackDamageType,
+        null,
+      );
+      const rolled = resolveDamage({
+        terms: [{ type: operation.saveDamageType, dice: scaledDiceExpression(definition, operation.saveDice, command) }],
+        critical: false,
+        responses: [],
+      }, context.rng);
+      for (const target of burstTargets) {
+        const save = resolveTargetSave(context, command.actor, target, operation.saveAbility, command.saveDc, 'normal', null);
+        const amount = save.outcome === 'failure'
+          ? rolled.total
+          : operation.onSaveSuccess === 'half' ? Math.floor(rolled.total / 2) : 0;
+        applyDamage(context, command.actor, target, amount);
+        concentrationCheck(context, target, amount);
+      }
+      return;
+    }
     case 'save_damage': {
       const roll = resolveDamage({
         terms: [{ type: operation.damageType, dice: scaledDiceExpression(definition, operation.dice, command) }],
@@ -1829,7 +2080,10 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
       applySpellEffect(context, definition, command, operation.effect, targets);
       return;
     case 'save_effect': {
-      const failed = targets.filter((target) =>
+      const eligible = operation.excludeCaster
+        ? targets.filter((target) => target !== command.actor)
+        : targets;
+      const failed = eligible.filter((target) =>
         resolveTargetSave(context, command.actor, target, operation.ability, command.saveDc, operation.rollMode, null).outcome === 'failure');
       applySpellEffect(context, definition, command, operation.effect, failed);
       return;
@@ -1879,8 +2133,14 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
       return;
     }
     case 'utility':
-      emit(context, { type: 'spell_utility_resolved', caster: command.actor, spellId: definition.id, capability: operation.effect.kind });
-      if (operation.durationRounds !== null || operation.concentration) {
+      emit(context, {
+        type: 'spell_utility_resolved',
+        caster: command.actor,
+        spellId: definition.id,
+        capability: operation.effect.kind,
+        effect: resolvedSpellEffectPayload(definition, command, operation.effect),
+      });
+      if (operation.durationRounds !== null || operation.concentration || operation.stateful === true) {
         applySpellEffect(context, definition, command, {
           payload: operation.effect,
           target: 'self',
