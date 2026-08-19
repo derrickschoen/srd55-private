@@ -7,6 +7,25 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D313 — OWNER: playable target — owner plays the PCs, codex CLI runs as the DM (2026-08-19)
+
+The owner wants to play the PCs in the VTT with the codex CLI app running as
+the DM. Clarified by AskUserQuestion, owner's selections:
+
+1. **DM scope: monsters + narration.** Codex controls every enemy tactically
+   AND narrates — scene descriptions, fog reveals, flavor in the combat log.
+   Rules stay engine-enforced (narration never adjudicates numbers).
+2. **Bridge: local bridge process.** A node script on localhost that the
+   browser talks to and that drives codex CLI (session resume across turns).
+   Zero cloud, zero accounts. This refines D312.3's "runs entirely in the DM's
+   browser": one local companion process is in bounds; the encounter authority
+   stays in the browser.
+3. **DM vision: full DM projection.** The codex DM sees fog-hidden tokens and
+   all state — it IS the DM. (Player-side agent controllers keep filtered
+   projections per the phase-2 plan.)
+4. **Sequencing: plan order.** Increments 2–5 land as approved, then the DM
+   bridge is increment 6. No thin-slice reorder.
+
 ## D312 — OWNER: the loop moves the VTT forward (2026-08-19)
 
 The supervision loop's forward thread is now the VTT. Rulings, verbatim intent:
