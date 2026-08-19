@@ -291,3 +291,17 @@ disable your cron, claim no further lanes, and leave any in-flight
 lane's state in a final loop-log entry for the original session to
 harvest. Docs artifacts you closed (A7, A8) stand as recorded.
 
+## A12 — increment 4b-ii: level-1 spells complete (lane-wt/vtt3a)
+
+- Round 1: 30 L1 spells, burn-down 142->112, typed partial residuals.
+  Supervisor verified suites + D317.13 sample (5 rows field-for-field
+  at cited lines), but its own control (Thunderwave push 10->5)
+  SURVIVED — operation sub-fields were unpinned.
+- Round 2: exact pins for every targeting/operation literal across all
+  63 implemented rows (+64 tests, combat 422/422). Supervisor re-ran
+  its mutant against the COMMITTED tree: killed by named test.
+- Full wt/vtt gate GREEN 385 files / 6,358 tests (.tmp-gate-4bii.log).
+- Status: CLOSED round 2. Next spell batch: 4b-iii (L2, 45 rows) after
+  statblock lane harvest; KB co-generation (D317.17) joins from
+  4b-iii onward.
+
