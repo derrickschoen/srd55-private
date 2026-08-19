@@ -79,3 +79,19 @@ vitest + tsc for increments; full suite + build gate before wt/vtt→main).
   (sim ties succeed); codex tested the correct mutant (<=DC) and said so.
 - Status: CLOSED round 1. Full wt/vtt gate launched post-merge; result to be
   read from .tmp-gate-inc2.log before any main merge.
+
+## A5 — phase-2 increment-map amendment (lane-wt/vttplan)
+
+- Candidate: docs-only amendment rebuilding increments 3-10 from
+  D313/D314/D315; codex-authored.
+- Round 1 review (supervisor): full-diff read. All 17 in-scope D315 rulings
+  traced to increments; out-of-scope items excluded as briefed; section 1-11
+  contradictions flagged not rewritten; SRD grid wording checked and the
+  intersection/touch rules honestly labeled product rules (D315.3); D315.8
+  pause-vs-continue resolved operationally; mutations 17-66 continue the
+  ledger. No blocking findings.
+- Dispatch note (not a plan defect): increment 3 is large; the supervisor may
+  sub-chunk its dispatch (3a state/conditions/effects, 3b controllers/
+  policies/death flow) with the combined gate unchanged.
+- Status: CLOSED round 1. Merged to wt/vtt. Increment 3 is now dispatchable.
+
