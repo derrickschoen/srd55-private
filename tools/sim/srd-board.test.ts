@@ -2,6 +2,7 @@
 // These assertions are relational or independently structural; none is a
 // board-output golden regenerated from the simulator itself.
 import { describe, expect, it } from 'vitest';
+import { mulberry32, type Rng } from '../../src/combat/random';
 import {
   berserker,
   berserkerThrown,
@@ -18,14 +19,12 @@ import {
   hunterRanged,
   lifeDomain,
   loreCollege,
-  mulberry32,
   openHand,
   openHandThrown,
   thief,
   thiefShortbow,
   type CombatResult,
   type Level,
-  type Rng,
 } from './sim';
 import { sampleMeanPerRound } from './test-helpers';
 import { constRng } from './test-helpers';

@@ -20,6 +20,7 @@
 // exhaustion (the regressed run just leaves values unread) and an all-miss
 // damage total is identical either way. The draw count is what actually moves.
 import { describe, expect, it, vi } from 'vitest';
+import type { Rng } from '../../src/combat/random';
 import {
   champion,
   championRanged,
@@ -29,7 +30,6 @@ import {
   sorcwiz,
   thiefRanged,
   veteran,
-  type Rng,
 } from './sim';
 import {
   ALWAYS_MIN,

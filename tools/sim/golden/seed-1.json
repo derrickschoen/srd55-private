@@ -1,0 +1,1105 @@
+{
+  "seed": 1,
+  "cases": [
+    {
+      "name": "sim.devotion",
+      "level": 3,
+      "combats": 4,
+      "result": {
+        "dealt": 208,
+        "prevented": 0
+      },
+      "draws": 80
+    },
+    {
+      "name": "sim.devotion",
+      "level": 17,
+      "combats": 4,
+      "result": {
+        "dealt": 1096,
+        "prevented": 0
+      },
+      "draws": 256
+    },
+    {
+      "name": "sim.devotionThrown",
+      "level": 3,
+      "combats": 4,
+      "result": {
+        "dealt": 112,
+        "prevented": 0
+      },
+      "draws": 37
+    },
+    {
+      "name": "sim.devotionThrown",
+      "level": 17,
+      "combats": 4,
+      "result": {
+        "dealt": 502,
+        "prevented": 0
+      },
+      "draws": 106
+    },
+    {
+      "name": "sim.domination",
+      "level": 3,
+      "combats": 4,
+      "result": {
+        "dealt": 190,
+        "prevented": 17
+      },
+      "draws": 80
+    },
+    {
+      "name": "sim.domination",
+      "level": 17,
+      "combats": 4,
+      "result": {
+        "dealt": 827,
+        "prevented": 217
+      },
+      "draws": 246
+    },
+    {
+      "name": "sim.champion",
+      "level": 3,
+      "combats": 4,
+      "result": {
+        "dealt": 168,
+        "prevented": 0
+      },
+      "draws": 64
+    },
+    {
+      "name": "sim.champion",
+      "level": 17,
+      "combats": 4,
+      "result": {
+        "dealt": 1249,
+        "prevented": 0
+      },
+      "draws": 288
+    },
+    {
+      "name": "sim.championRanged",
+      "level": 3,
+      "combats": 4,
+      "result": {
+        "dealt": 125,
+        "prevented": 0
+      },
+      "draws": 67
+    },
+    {
+      "name": "sim.championRanged",
+      "level": 17,
+      "combats": 4,
+      "result": {
+        "dealt": 898,
+        "prevented": 0
+      },
+      "draws": 252
+    },
+    {
+      "name": "sim.thief",
+      "level": 3,
+      "combats": 4,
+      "result": {
+        "dealt": 270,
+        "prevented": 0
+      },
+      "draws": 145
+    },
+    {
+      "name": "sim.thief",
+      "level": 17,
+      "combats": 4,
+      "result": {
+        "dealt": 978,
+        "prevented": 0
+      },
+      "draws": 324
+    },
+    {
+      "name": "sim.berserker",
+      "level": 3,
+      "combats": 4,
+      "result": {
+        "dealt": 285,
+        "prevented": 95
+      },
+      "draws": 179
+    },
+    {
+      "name": "sim.berserker",
+      "level": 17,
+      "combats": 4,
+      "result": {
+        "dealt": 1214,
+        "prevented": 451
+      },
+      "draws": 495
+    },
+    {
+      "name": "sim.berserkerThrown",
+      "level": 3,
+      "combats": 4,
+      "result": {
+        "dealt": 283,
+        "prevented": 0
+      },
+      "draws": 112
+    },
+    {
+      "name": "sim.berserkerThrown",
+      "level": 17,
+      "combats": 4,
+      "result": {
+        "dealt": 992,
+        "prevented": 0
+      },
+      "draws": 233
+    },
+    {
+      "name": "sim.openHand",
+      "level": 3,
+      "combats": 4,
+      "result": {
+        "dealt": 177,
+        "prevented": 0
+      },
+      "draws": 87
+    },
+    {
+      "name": "sim.openHand",
+      "level": 17,
+      "combats": 4,
+      "result": {
+        "dealt": 1175,
+        "prevented": 0
+      },
+      "draws": 285
+    },
+    {
+      "name": "sim.openHandThrown",
+      "level": 3,
+      "combats": 4,
+      "result": {
+        "dealt": 93,
+        "prevented": 0
+      },
+      "draws": 45
+    },
+    {
+      "name": "sim.openHandThrown",
+      "level": 17,
+      "combats": 4,
+      "result": {
+        "dealt": 470,
+        "prevented": 0
+      },
+      "draws": 108
+    },
+    {
+      "name": "sim.hunter",
+      "level": 3,
+      "combats": 4,
+      "result": {
+        "dealt": 308,
+        "prevented": 0
+      },
+      "draws": 107
+    },
+    {
+      "name": "sim.hunter",
+      "level": 17,
+      "combats": 4,
+      "result": {
+        "dealt": 800,
+        "prevented": 48
+      },
+      "draws": 231
+    },
+    {
+      "name": "sim.hunterRanged",
+      "level": 3,
+      "combats": 4,
+      "result": {
+        "dealt": 133,
+        "prevented": 0
+      },
+      "draws": 43
+    },
+    {
+      "name": "sim.hunterRanged",
+      "level": 17,
+      "combats": 4,
+      "result": {
+        "dealt": 595,
+        "prevented": 62
+      },
+      "draws": 166
+    },
+    {
+      "name": "sim.veteran",
+      "level": 3,
+      "combats": 4,
+      "result": {
+        "dealt": 400,
+        "prevented": 0
+      },
+      "draws": 197
+    },
+    {
+      "name": "sim.veteran",
+      "level": 17,
+      "combats": 4,
+      "result": {
+        "dealt": 1853,
+        "prevented": 131
+      },
+      "draws": 646
+    },
+    {
+      "name": "sim.monk",
+      "level": 3,
+      "combats": 4,
+      "result": {
+        "dealt": 207,
+        "prevented": 70
+      },
+      "draws": 220
+    },
+    {
+      "name": "sim.monk",
+      "level": 17,
+      "combats": 4,
+      "result": {
+        "dealt": 2117,
+        "prevented": 389
+      },
+      "draws": 560
+    },
+    {
+      "name": "sim.thiefShortbow",
+      "level": 3,
+      "combats": 4,
+      "result": {
+        "dealt": 209,
+        "prevented": 0
+      },
+      "draws": 74
+    },
+    {
+      "name": "sim.thiefShortbow",
+      "level": 17,
+      "combats": 4,
+      "result": {
+        "dealt": 785,
+        "prevented": 0
+      },
+      "draws": 230
+    },
+    {
+      "name": "sim.thiefRanged",
+      "level": 3,
+      "combats": 4,
+      "result": {
+        "dealt": 278,
+        "prevented": 0
+      },
+      "draws": 129
+    },
+    {
+      "name": "sim.thiefRanged",
+      "level": 17,
+      "combats": 4,
+      "result": {
+        "dealt": 1003,
+        "prevented": 0
+      },
+      "draws": 310
+    },
+    {
+      "name": "sim.fiend",
+      "level": 3,
+      "combats": 4,
+      "result": {
+        "dealt": 233,
+        "prevented": 0
+      },
+      "draws": 88
+    },
+    {
+      "name": "sim.fiend",
+      "level": 17,
+      "combats": 4,
+      "result": {
+        "dealt": 681,
+        "prevented": 0
+      },
+      "draws": 287
+    },
+    {
+      "name": "sim.fiendPatron",
+      "level": 3,
+      "combats": 4,
+      "result": {
+        "dealt": 130,
+        "prevented": 0
+      },
+      "draws": 40
+    },
+    {
+      "name": "sim.fiendPatron",
+      "level": 17,
+      "combats": 4,
+      "result": {
+        "dealt": 817,
+        "prevented": 529
+      },
+      "draws": 320
+    },
+    {
+      "name": "sim.lifeDomain",
+      "level": 3,
+      "combats": 4,
+      "result": {
+        "dealt": 33,
+        "prevented": 104
+      },
+      "draws": 32
+    },
+    {
+      "name": "sim.lifeDomain",
+      "level": 17,
+      "combats": 4,
+      "result": {
+        "dealt": 1034,
+        "prevented": 416
+      },
+      "draws": 318
+    },
+    {
+      "name": "sim.circleLand",
+      "level": 3,
+      "combats": 4,
+      "result": {
+        "dealt": 90,
+        "prevented": 31
+      },
+      "draws": 55
+    },
+    {
+      "name": "sim.circleLand",
+      "level": 17,
+      "combats": 4,
+      "result": {
+        "dealt": 426,
+        "prevented": 66
+      },
+      "draws": 172
+    },
+    {
+      "name": "sim.evoker",
+      "level": 3,
+      "combats": 4,
+      "result": {
+        "dealt": 75,
+        "prevented": 0
+      },
+      "draws": 49
+    },
+    {
+      "name": "sim.evoker",
+      "level": 17,
+      "combats": 4,
+      "result": {
+        "dealt": 612,
+        "prevented": 567
+      },
+      "draws": 170
+    },
+    {
+      "name": "sim.draconic",
+      "level": 3,
+      "combats": 4,
+      "result": {
+        "dealt": 116,
+        "prevented": 20
+      },
+      "draws": 55
+    },
+    {
+      "name": "sim.draconic",
+      "level": 17,
+      "combats": 4,
+      "result": {
+        "dealt": 640,
+        "prevented": 0
+      },
+      "draws": 197
+    },
+    {
+      "name": "sim.sorcwiz",
+      "level": 11,
+      "combats": 4,
+      "result": {
+        "dealt": 1193,
+        "prevented": 0
+      },
+      "draws": 379
+    },
+    {
+      "name": "sim.sorcwiz",
+      "level": 17,
+      "combats": 4,
+      "result": {
+        "dealt": 2116,
+        "prevented": 0
+      },
+      "draws": 635
+    },
+    {
+      "name": "sim.lore",
+      "level": 11,
+      "combats": 4,
+      "result": {
+        "dealt": 781,
+        "prevented": 88
+      },
+      "draws": 368
+    },
+    {
+      "name": "sim.lore",
+      "level": 17,
+      "combats": 4,
+      "result": {
+        "dealt": 2171,
+        "prevented": 94
+      },
+      "draws": 726
+    },
+    {
+      "name": "sim.loreCollege",
+      "level": 3,
+      "combats": 4,
+      "result": {
+        "dealt": 67,
+        "prevented": 18
+      },
+      "draws": 99
+    },
+    {
+      "name": "sim.loreCollege",
+      "level": 17,
+      "combats": 4,
+      "result": {
+        "dealt": 2171,
+        "prevented": 94
+      },
+      "draws": 726
+    },
+    {
+      "name": "homebrew.Oath of the Long Grudge",
+      "level": 5,
+      "result": {
+        "dealt": 12,
+        "prevented": 0,
+        "trace": {
+          "triggers": 3,
+          "criticalTriggers": 1,
+          "speedZeroTurns": 0,
+          "reactionLockedTurns": 0,
+          "inspirationSpent": 0,
+          "opportunityCost": 0,
+          "extraAttackDamage": 0,
+          "accuracyDamage": 0,
+          "tempHp": 0,
+          "poolRemaining": 0,
+          "secondWindRegains": 0,
+          "criticalRegains": 0,
+          "roundOneDamage": 0,
+          "bondTargetId": 1,
+          "bondRoundsRemaining": 7,
+          "patientEligibleTurns": 0,
+          "extraAttackActive": false,
+          "shapeActive": false,
+          "attackModifier": 0
+        }
+      },
+      "draws": 10
+    },
+    {
+      "name": "homebrew.Oath of the Long Grudge",
+      "level": 17,
+      "result": {
+        "dealt": 19,
+        "prevented": 0,
+        "trace": {
+          "triggers": 3,
+          "criticalTriggers": 1,
+          "speedZeroTurns": 0,
+          "reactionLockedTurns": 0,
+          "inspirationSpent": 0,
+          "opportunityCost": 0,
+          "extraAttackDamage": 0,
+          "accuracyDamage": 0,
+          "tempHp": 0,
+          "poolRemaining": 0,
+          "secondWindRegains": 0,
+          "criticalRegains": 0,
+          "roundOneDamage": 0,
+          "bondTargetId": 1,
+          "bondRoundsRemaining": 7,
+          "patientEligibleTurns": 0,
+          "extraAttackActive": false,
+          "shapeActive": false,
+          "attackModifier": 0
+        }
+      },
+      "draws": 10
+    },
+    {
+      "name": "homebrew.Anchor Point",
+      "level": 5,
+      "result": {
+        "dealt": 16,
+        "prevented": 0,
+        "trace": {
+          "triggers": 3,
+          "criticalTriggers": 1,
+          "speedZeroTurns": 3,
+          "reactionLockedTurns": 3,
+          "inspirationSpent": 0,
+          "opportunityCost": 0,
+          "extraAttackDamage": 0,
+          "accuracyDamage": 0,
+          "tempHp": 0,
+          "poolRemaining": 0,
+          "secondWindRegains": 0,
+          "criticalRegains": 0,
+          "roundOneDamage": 0,
+          "bondTargetId": null,
+          "bondRoundsRemaining": 0,
+          "patientEligibleTurns": 0,
+          "extraAttackActive": false,
+          "shapeActive": false,
+          "attackModifier": 0
+        }
+      },
+      "draws": 10
+    },
+    {
+      "name": "homebrew.Anchor Point",
+      "level": 17,
+      "result": {
+        "dealt": 22,
+        "prevented": 0,
+        "trace": {
+          "triggers": 3,
+          "criticalTriggers": 0,
+          "speedZeroTurns": 3,
+          "reactionLockedTurns": 3,
+          "inspirationSpent": 0,
+          "opportunityCost": 0,
+          "extraAttackDamage": 0,
+          "accuracyDamage": 0,
+          "tempHp": 0,
+          "poolRemaining": 0,
+          "secondWindRegains": 0,
+          "criticalRegains": 0,
+          "roundOneDamage": 0,
+          "bondTargetId": null,
+          "bondRoundsRemaining": 0,
+          "patientEligibleTurns": 0,
+          "extraAttackActive": false,
+          "shapeActive": false,
+          "attackModifier": 0
+        }
+      },
+      "draws": 15
+    },
+    {
+      "name": "homebrew.Patient Volley",
+      "level": 5,
+      "result": {
+        "dealt": 16,
+        "prevented": 0,
+        "trace": {
+          "triggers": 3,
+          "criticalTriggers": 1,
+          "speedZeroTurns": 0,
+          "reactionLockedTurns": 0,
+          "inspirationSpent": 0,
+          "opportunityCost": 0,
+          "extraAttackDamage": 0,
+          "accuracyDamage": 0,
+          "tempHp": 0,
+          "poolRemaining": 0,
+          "secondWindRegains": 0,
+          "criticalRegains": 0,
+          "roundOneDamage": 0,
+          "bondTargetId": null,
+          "bondRoundsRemaining": 0,
+          "patientEligibleTurns": 3,
+          "extraAttackActive": false,
+          "shapeActive": false,
+          "attackModifier": 0
+        }
+      },
+      "draws": 10
+    },
+    {
+      "name": "homebrew.Patient Volley",
+      "level": 17,
+      "result": {
+        "dealt": 30,
+        "prevented": 0,
+        "trace": {
+          "triggers": 3,
+          "criticalTriggers": 1,
+          "speedZeroTurns": 0,
+          "reactionLockedTurns": 0,
+          "inspirationSpent": 0,
+          "opportunityCost": 0,
+          "extraAttackDamage": 0,
+          "accuracyDamage": 0,
+          "tempHp": 0,
+          "poolRemaining": 0,
+          "secondWindRegains": 0,
+          "criticalRegains": 0,
+          "roundOneDamage": 0,
+          "bondTargetId": null,
+          "bondRoundsRemaining": 0,
+          "patientEligibleTurns": 3,
+          "extraAttackActive": false,
+          "shapeActive": false,
+          "attackModifier": 0
+        }
+      },
+      "draws": 14
+    },
+    {
+      "name": "homebrew.College of the Cutting Chorus",
+      "level": 5,
+      "result": {
+        "dealt": 0,
+        "prevented": 0,
+        "trace": {
+          "triggers": 0,
+          "criticalTriggers": 0,
+          "speedZeroTurns": 0,
+          "reactionLockedTurns": 0,
+          "inspirationSpent": 3,
+          "opportunityCost": 0,
+          "extraAttackDamage": 0,
+          "accuracyDamage": 0,
+          "tempHp": 0,
+          "poolRemaining": 1,
+          "secondWindRegains": 0,
+          "criticalRegains": 0,
+          "roundOneDamage": 0,
+          "bondTargetId": null,
+          "bondRoundsRemaining": 0,
+          "patientEligibleTurns": 0,
+          "extraAttackActive": false,
+          "shapeActive": false,
+          "attackModifier": 0
+        }
+      },
+      "draws": 18
+    },
+    {
+      "name": "homebrew.College of the Cutting Chorus",
+      "level": 17,
+      "result": {
+        "dealt": 23,
+        "prevented": 0,
+        "trace": {
+          "triggers": 0,
+          "criticalTriggers": 0,
+          "speedZeroTurns": 0,
+          "reactionLockedTurns": 0,
+          "inspirationSpent": 5,
+          "opportunityCost": 9,
+          "extraAttackDamage": 23,
+          "accuracyDamage": 0,
+          "tempHp": 0,
+          "poolRemaining": 0,
+          "secondWindRegains": 0,
+          "criticalRegains": 0,
+          "roundOneDamage": 0,
+          "bondTargetId": null,
+          "bondRoundsRemaining": 0,
+          "patientEligibleTurns": 0,
+          "extraAttackActive": true,
+          "shapeActive": false,
+          "attackModifier": 0
+        }
+      },
+      "draws": 31
+    },
+    {
+      "name": "homebrew.Vanward Conclave",
+      "level": 5,
+      "result": {
+        "dealt": 1,
+        "prevented": 0,
+        "trace": {
+          "triggers": 1,
+          "criticalTriggers": 0,
+          "speedZeroTurns": 0,
+          "reactionLockedTurns": 0,
+          "inspirationSpent": 0,
+          "opportunityCost": 0,
+          "extraAttackDamage": 0,
+          "accuracyDamage": 0,
+          "tempHp": 0,
+          "poolRemaining": 0,
+          "secondWindRegains": 0,
+          "criticalRegains": 0,
+          "roundOneDamage": 1,
+          "bondTargetId": null,
+          "bondRoundsRemaining": 0,
+          "patientEligibleTurns": 0,
+          "extraAttackActive": false,
+          "shapeActive": false,
+          "attackModifier": 0
+        }
+      },
+      "draws": 7
+    },
+    {
+      "name": "homebrew.Vanward Conclave",
+      "level": 17,
+      "result": {
+        "dealt": 14,
+        "prevented": 0,
+        "trace": {
+          "triggers": 1,
+          "criticalTriggers": 0,
+          "speedZeroTurns": 0,
+          "reactionLockedTurns": 0,
+          "inspirationSpent": 0,
+          "opportunityCost": 0,
+          "extraAttackDamage": 0,
+          "accuracyDamage": 0,
+          "tempHp": 0,
+          "poolRemaining": 0,
+          "secondWindRegains": 0,
+          "criticalRegains": 0,
+          "roundOneDamage": 14,
+          "bondTargetId": null,
+          "bondRoundsRemaining": 0,
+          "patientEligibleTurns": 0,
+          "extraAttackActive": false,
+          "shapeActive": false,
+          "attackModifier": 0
+        }
+      },
+      "draws": 9
+    },
+    {
+      "name": "homebrew.Cold Open",
+      "level": 5,
+      "result": {
+        "dealt": 4,
+        "prevented": 0,
+        "trace": {
+          "triggers": 1,
+          "criticalTriggers": 0,
+          "speedZeroTurns": 0,
+          "reactionLockedTurns": 0,
+          "inspirationSpent": 0,
+          "opportunityCost": 0,
+          "extraAttackDamage": 0,
+          "accuracyDamage": 0,
+          "tempHp": 0,
+          "poolRemaining": 0,
+          "secondWindRegains": 0,
+          "criticalRegains": 0,
+          "roundOneDamage": 4,
+          "bondTargetId": null,
+          "bondRoundsRemaining": 0,
+          "patientEligibleTurns": 0,
+          "extraAttackActive": false,
+          "shapeActive": false,
+          "attackModifier": 0
+        }
+      },
+      "draws": 13
+    },
+    {
+      "name": "homebrew.Cold Open",
+      "level": 17,
+      "result": {
+        "dealt": 16,
+        "prevented": 0,
+        "trace": {
+          "triggers": 1,
+          "criticalTriggers": 0,
+          "speedZeroTurns": 0,
+          "reactionLockedTurns": 0,
+          "inspirationSpent": 0,
+          "opportunityCost": 0,
+          "extraAttackDamage": 0,
+          "accuracyDamage": 0,
+          "tempHp": 0,
+          "poolRemaining": 0,
+          "secondWindRegains": 0,
+          "criticalRegains": 0,
+          "roundOneDamage": 16,
+          "bondTargetId": null,
+          "bondRoundsRemaining": 0,
+          "patientEligibleTurns": 0,
+          "extraAttackActive": false,
+          "shapeActive": false,
+          "attackModifier": 0
+        }
+      },
+      "draws": 15
+    },
+    {
+      "name": "homebrew.Circle of the Broken Tooth",
+      "level": 5,
+      "result": {
+        "dealt": 44,
+        "prevented": 0,
+        "trace": {
+          "triggers": 0,
+          "criticalTriggers": 0,
+          "speedZeroTurns": 0,
+          "reactionLockedTurns": 0,
+          "inspirationSpent": 0,
+          "opportunityCost": 0,
+          "extraAttackDamage": 0,
+          "accuracyDamage": 0,
+          "tempHp": 5,
+          "poolRemaining": 0,
+          "secondWindRegains": 0,
+          "criticalRegains": 0,
+          "roundOneDamage": 0,
+          "bondTargetId": null,
+          "bondRoundsRemaining": 0,
+          "patientEligibleTurns": 0,
+          "extraAttackActive": false,
+          "shapeActive": true,
+          "attackModifier": 6
+        }
+      },
+      "draws": 13
+    },
+    {
+      "name": "homebrew.Circle of the Broken Tooth",
+      "level": 17,
+      "result": {
+        "dealt": 68,
+        "prevented": 0,
+        "trace": {
+          "triggers": 0,
+          "criticalTriggers": 0,
+          "speedZeroTurns": 0,
+          "reactionLockedTurns": 0,
+          "inspirationSpent": 0,
+          "opportunityCost": 0,
+          "extraAttackDamage": 0,
+          "accuracyDamage": 0,
+          "tempHp": 17,
+          "poolRemaining": 0,
+          "secondWindRegains": 0,
+          "criticalRegains": 0,
+          "roundOneDamage": 0,
+          "bondTargetId": null,
+          "bondRoundsRemaining": 0,
+          "patientEligibleTurns": 0,
+          "extraAttackActive": false,
+          "shapeActive": true,
+          "attackModifier": 11
+        }
+      },
+      "draws": 13
+    },
+    {
+      "name": "homebrew.Cutting Momentum",
+      "level": 5,
+      "result": {
+        "dealt": 6,
+        "prevented": 0,
+        "trace": {
+          "triggers": 3,
+          "criticalTriggers": 1,
+          "speedZeroTurns": 0,
+          "reactionLockedTurns": 0,
+          "inspirationSpent": 0,
+          "opportunityCost": 0,
+          "extraAttackDamage": 0,
+          "accuracyDamage": 0,
+          "tempHp": 0,
+          "poolRemaining": 0,
+          "secondWindRegains": 0,
+          "criticalRegains": 0,
+          "roundOneDamage": 0,
+          "bondTargetId": null,
+          "bondRoundsRemaining": 0,
+          "patientEligibleTurns": 0,
+          "extraAttackActive": false,
+          "shapeActive": false,
+          "attackModifier": 0
+        }
+      },
+      "draws": 6
+    },
+    {
+      "name": "homebrew.Cutting Momentum",
+      "level": 17,
+      "result": {
+        "dealt": 9,
+        "prevented": 0,
+        "trace": {
+          "triggers": 3,
+          "criticalTriggers": 1,
+          "speedZeroTurns": 0,
+          "reactionLockedTurns": 0,
+          "inspirationSpent": 0,
+          "opportunityCost": 0,
+          "extraAttackDamage": 0,
+          "accuracyDamage": 0,
+          "tempHp": 0,
+          "poolRemaining": 0,
+          "secondWindRegains": 0,
+          "criticalRegains": 0,
+          "roundOneDamage": 0,
+          "bondTargetId": null,
+          "bondRoundsRemaining": 0,
+          "patientEligibleTurns": 0,
+          "extraAttackActive": false,
+          "shapeActive": false,
+          "attackModifier": 0
+        }
+      },
+      "draws": 9
+    },
+    {
+      "name": "homebrew.Discipline of the Broken Tempo",
+      "level": 5,
+      "result": {
+        "dealt": 12,
+        "prevented": 0,
+        "trace": {
+          "triggers": 3,
+          "criticalTriggers": 1,
+          "speedZeroTurns": 0,
+          "reactionLockedTurns": 0,
+          "inspirationSpent": 0,
+          "opportunityCost": 0,
+          "extraAttackDamage": 0,
+          "accuracyDamage": 0,
+          "tempHp": 0,
+          "poolRemaining": 2,
+          "secondWindRegains": 1,
+          "criticalRegains": 1,
+          "roundOneDamage": 0,
+          "bondTargetId": null,
+          "bondRoundsRemaining": 0,
+          "patientEligibleTurns": 0,
+          "extraAttackActive": false,
+          "shapeActive": false,
+          "attackModifier": 0
+        }
+      },
+      "draws": 10
+    },
+    {
+      "name": "homebrew.Discipline of the Broken Tempo",
+      "level": 17,
+      "result": {
+        "dealt": 21,
+        "prevented": 0,
+        "trace": {
+          "triggers": 3,
+          "criticalTriggers": 2,
+          "speedZeroTurns": 0,
+          "reactionLockedTurns": 0,
+          "inspirationSpent": 0,
+          "opportunityCost": 0,
+          "extraAttackDamage": 0,
+          "accuracyDamage": 0,
+          "tempHp": 0,
+          "poolRemaining": 4,
+          "secondWindRegains": 0,
+          "criticalRegains": 1,
+          "roundOneDamage": 0,
+          "bondTargetId": null,
+          "bondRoundsRemaining": 0,
+          "patientEligibleTurns": 0,
+          "extraAttackActive": false,
+          "shapeActive": false,
+          "attackModifier": 0
+        }
+      },
+      "draws": 14
+    },
+    {
+      "name": "homebrew.Patient Volley + Vanward declared stack",
+      "level": 5,
+      "result": {
+        "dealt": 22,
+        "prevented": 0,
+        "trace": {
+          "triggers": 1,
+          "criticalTriggers": 0,
+          "speedZeroTurns": 0,
+          "reactionLockedTurns": 0,
+          "inspirationSpent": 0,
+          "opportunityCost": 0,
+          "extraAttackDamage": 0,
+          "accuracyDamage": 0,
+          "tempHp": 0,
+          "poolRemaining": 0,
+          "secondWindRegains": 0,
+          "criticalRegains": 0,
+          "roundOneDamage": 6,
+          "bondTargetId": null,
+          "bondRoundsRemaining": 0,
+          "patientEligibleTurns": 0,
+          "extraAttackActive": false,
+          "shapeActive": false,
+          "attackModifier": 0
+        }
+      },
+      "draws": 11
+    },
+    {
+      "name": "homebrew.Patient Volley + Vanward declared stack",
+      "level": 17,
+      "result": {
+        "dealt": 43,
+        "prevented": 0,
+        "trace": {
+          "triggers": 1,
+          "criticalTriggers": 0,
+          "speedZeroTurns": 0,
+          "reactionLockedTurns": 0,
+          "inspirationSpent": 0,
+          "opportunityCost": 0,
+          "extraAttackDamage": 0,
+          "accuracyDamage": 0,
+          "tempHp": 0,
+          "poolRemaining": 0,
+          "secondWindRegains": 0,
+          "criticalRegains": 0,
+          "roundOneDamage": 25,
+          "bondTargetId": null,
+          "bondRoundsRemaining": 0,
+          "patientEligibleTurns": 0,
+          "extraAttackActive": false,
+          "shapeActive": false,
+          "attackModifier": 0
+        }
+      },
+      "draws": 15
+    }
+  ]
+}

@@ -5,7 +5,7 @@
 // whatever the code produces." Both produced identical sequences for every
 // seed checked during development (1, 31, 42, 12345).
 import { describe, expect, it } from 'vitest';
-import { mulberry32 } from './sim';
+import { mulberry32 } from '../../src/combat/random';
 
 function referenceMulberry32(seed: number): () => number {
   let a = seed;
