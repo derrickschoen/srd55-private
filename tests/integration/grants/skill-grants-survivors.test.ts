@@ -286,6 +286,37 @@ describe('skill grant survivor state tables', () => {
     });
   });
 
+  it('revives an orphaned tool-alternative skill without re-orphaning it', () => {
+    const owner = source('feat');
+    const grantId = grant(
+      owner,
+      'tools-or-skills',
+      1,
+      'nature',
+      'orphaned',
+    );
+
+    syncToolAlternativeSkillGrants(
+      db,
+      owner,
+      'tools-or-skills',
+      1,
+      ['nature'],
+    );
+
+    expect(db.oneRaw(
+      `SELECT id, skill, state, orphan_reason_code, orphaned_at
+       FROM character_skill_grants WHERE id = ?`,
+      [grantId],
+    )).toEqual({
+      id: grantId,
+      skill: 'nature',
+      state: 'active',
+      orphan_reason_code: null,
+      orphaned_at: null,
+    });
+  });
+
   it('reconciles class entitlements across insert, revive, collision, orphan, and absent definitions', () => {
     const classId = classDefinition(
       'Two-skill class',
