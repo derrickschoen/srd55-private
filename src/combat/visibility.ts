@@ -65,9 +65,15 @@ function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
     case 'movement_completed':
     case 'death_save_resolved':
     case 'resource_spent':
+    case 'spell_slot_spent':
+    case 'temporary_hit_points_changed':
     case 'stance_started':
     case 'turn_ended':
       return [event.combatant];
+    case 'spell_cast':
+      return [event.caster, ...event.targets];
+    case 'spell_utility_resolved':
+      return [event.caster];
     case 'reaction_declined':
       return [event.combatant, event.mover];
     case 'initiative_ordered':

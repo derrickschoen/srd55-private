@@ -27,7 +27,7 @@ import {
   type MovementWorld,
   type TurnMovement,
 } from './movement';
-import type { Rng } from './random';
+import { rollDice, type Rng } from './random';
 import {
   resolveAttackRoll,
   resolveDamage,
@@ -37,9 +37,16 @@ import {
   type DamageResponse,
   type RollMode,
 } from './resolution';
+import { spellDefinition } from './spells/definitions';
+import { validateSpellSlotCapacities } from './spells/resources';
+import type { EffectData, ScaledDice, SpellCastCommand, SpellDefinition } from './spells/types';
+import { affectedCells, creatureOccupiesAffectedCell } from './templates';
 import {
+  armorClass,
   difficultyClass,
+  dieSides,
   encounterEffectId,
+  effectStackingIdentity,
   feet,
   type CombatantId,
   type DamageType,
@@ -73,6 +80,14 @@ export interface EncounterCombatantState {
   readonly life: LifeState;
   readonly deathSaves: DeathSaveState | null;
   readonly turn: TurnResources;
+  readonly temporaryHitPoints: number;
+  readonly spellSlots: readonly SpellSlotState[];
+}
+
+export interface SpellSlotState {
+  readonly level: number;
+  readonly maximum: number;
+  readonly remaining: number;
 }
 
 export interface InitiativeEntry {
@@ -221,6 +236,10 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
       life: 'living',
       deathSaves: null,
       turn: EMPTY_TURN,
+      temporaryHitPoints: 0,
+      spellSlots: validateSpellSlotCapacities(profile.rules.spellSlots).map(
+        (slot) => ({ ...slot, remaining: slot.maximum }),
+      ),
     })),
     tokens: setup.tokens.map((token) => ({ ...token, position: { ...token.position } })),
     initiative: [],
@@ -258,6 +277,27 @@ function replaceCombatant(
 
 function appliedCondition(effect: EncounterEffect): AppliedCondition | null {
   switch (effect.payload.kind) {
+    case 'ability_check_modifier':
+    case 'armor_class_modifier':
+    case 'attack_roll_modifier':
+    case 'attack_roll_mode_modifier':
+    case 'cannot_regain_hit_points':
+    case 'creature_type_protection':
+    case 'd20_test_modifier':
+    case 'damage_reduction':
+    case 'damage_rider':
+    case 'magic_missile_immunity':
+    case 'movement_modifier':
+    case 'opportunity_attacks_disabled':
+    case 'sanctuary':
+    case 'saving_throw_modifier':
+    case 'shield_defense':
+    case 'communication_link':
+    case 'conjured_hand':
+    case 'illusion':
+    case 'light_source':
+    case 'minor_magic':
+    case 'object_repair':
     case 'ongoing_damage':
       return null;
     case 'exhaustion':
@@ -327,7 +367,55 @@ function effectiveSpeed(state: EncounterState, id: CombatantId): number {
   const base = combatant(state, id).profile.rules.speed;
   const penalty = conditionSpeedPenaltyFeet(combatantConditions(state, id));
   if (penalty === Number.NEGATIVE_INFINITY) return 0;
-  return Math.max(0, base + penalty);
+  const spellDelta = state.effects.reduce(
+    (total, effect) =>
+      effect.targets.includes(id) && effect.payload.kind === 'movement_modifier'
+        ? total + effect.payload.speedDeltaFeet
+        : total,
+    0,
+  );
+  return Math.max(0, base + penalty + spellDelta);
+}
+
+function effectiveArmorClass(state: EncounterState, id: CombatantId): ReturnType<typeof armorClass> {
+  const base = combatant(state, id).profile.rules.armorClass;
+  const total = state.effects.reduce<number>((sum, effect) => {
+    if (!effect.targets.includes(id)) return sum;
+    if (effect.payload.kind === 'armor_class_modifier') return sum + effect.payload.amount;
+    if (effect.payload.kind === 'shield_defense') return sum + effect.payload.armorClassBonus;
+    return sum;
+  }, base);
+  return armorClass(total);
+}
+
+function effectDiceModifier(
+  state: EncounterState,
+  id: CombatantId,
+  test: 'attack_roll' | 'saving_throw',
+  rng: Rng,
+): number {
+  return state.effects.reduce((total, effect) => {
+    if (!effect.targets.includes(id)) return total;
+    const payload = effect.payload;
+    if (payload.kind === 'd20_test_modifier' && payload.tests.includes(test)) {
+      return total + payload.sign * rollDice(rng, {
+        count: payload.count,
+        sides: dieSides(payload.sides),
+        modifier: 0,
+      }).total;
+    }
+    if (
+      (test === 'attack_roll' && payload.kind === 'attack_roll_modifier') ||
+      (test === 'saving_throw' && payload.kind === 'saving_throw_modifier')
+    ) {
+      return total + payload.sign * rollDice(rng, {
+        count: payload.count,
+        sides: dieSides(payload.sides),
+        modifier: 0,
+      }).total;
+    }
+    return total;
+  }, 0);
 }
 
 function combineRollModes(modes: readonly RollMode[]): RollMode {
@@ -345,6 +433,15 @@ function attackRollMode(
   >,
 ): RollMode {
   const modes: RollMode[] = [command.rollMode];
+  for (const effect of state.effects) {
+    if (
+      effect.targets.includes(command.target) &&
+      effect.payload.kind === 'attack_roll_mode_modifier' &&
+      effect.payload.appliesTo === 'next_attack_against_target'
+    ) {
+      modes.push(effect.payload.mode);
+    }
+  }
   const actorClauses = conditionMechanicalState(
     combatantConditions(state, command.actor),
   ).clauses;
@@ -542,14 +639,16 @@ function applyDamage(
   }
   const before = combatant(context.state, target);
   if (before.life === 'dead' || amount === 0) return;
-  const hitPointsAfter = Math.max(0, before.hitPoints - amount);
+  const absorbed = Math.min(before.temporaryHitPoints, amount);
+  const hitPointDamage = amount - absorbed;
+  const hitPointsAfter = Math.max(0, before.hitPoints - hitPointDamage);
   let life: LifeState = before.life;
   let deathSaves = before.deathSaves;
   let massiveDamage = false;
   if (before.hitPoints === 0) {
     massiveDamage =
       before.profile.rules.usesDeathSaves &&
-      amount >= before.profile.rules.hitPointMaximum;
+      hitPointDamage >= before.profile.rules.hitPointMaximum;
     if (massiveDamage) {
       life = 'dead';
       deathSaves = null;
@@ -569,7 +668,7 @@ function applyDamage(
       }
     }
   } else if (hitPointsAfter === 0) {
-    const remainder = amount - before.hitPoints;
+    const remainder = hitPointDamage - before.hitPoints;
     massiveDamage =
       before.profile.rules.usesDeathSaves &&
       remainder >= before.profile.rules.hitPointMaximum;
@@ -580,13 +679,19 @@ function applyDamage(
         : 'dead';
     deathSaves = life === 'dying' ? { successes: 0, failures: 0 } : null;
   }
-  const after = { ...before, hitPoints: hitPointsAfter, life, deathSaves };
+  const after = {
+    ...before,
+    hitPoints: hitPointsAfter,
+    temporaryHitPoints: before.temporaryHitPoints - absorbed,
+    life,
+    deathSaves,
+  };
   context.state = replaceCombatant(context.state, after);
   emit(context, {
     type: 'damage_applied',
     source,
     target,
-    amount,
+    amount: hitPointDamage,
     hitPointsBefore: before.hitPoints,
     hitPointsAfter,
     lifeState: life,
@@ -674,7 +779,8 @@ function resolveTargetSave(
         {
           bonus:
             subject.profile.rules.savingThrowBonuses[ability] +
-            exhaustionPenalty(combatantConditions(context.state, target)),
+            exhaustionPenalty(combatantConditions(context.state, target)) +
+            effectDiceModifier(context.state, target, 'saving_throw', context.rng),
           dc: difficultyClass(dc),
           rollMode: saveRollMode(context.state, target, ability, mode),
         },
@@ -1045,7 +1151,39 @@ function cloneEffectApplication(
     switch (application.payload.kind) {
       case 'condition':
       case 'exhaustion':
+      case 'ability_check_modifier':
+      case 'armor_class_modifier':
+      case 'attack_roll_modifier':
+      case 'attack_roll_mode_modifier':
+      case 'cannot_regain_hit_points':
+      case 'creature_type_protection':
+      case 'd20_test_modifier':
+      case 'damage_reduction':
+      case 'magic_missile_immunity':
+      case 'movement_modifier':
+      case 'opportunity_attacks_disabled':
+      case 'sanctuary':
+      case 'saving_throw_modifier':
+      case 'shield_defense':
+      case 'communication_link':
+      case 'conjured_hand':
+      case 'illusion':
+      case 'light_source':
+      case 'minor_magic':
+      case 'object_repair':
         return { ...application.payload };
+      case 'damage_rider':
+        return {
+          ...application.payload,
+          damage: {
+            ...application.payload.damage,
+            terms: application.payload.damage.terms.map((term) => ({
+              ...term,
+              dice: { ...term.dice },
+            })),
+            responses: application.payload.damage.responses.map((response) => ({ ...response })),
+          },
+        };
       case 'ongoing_damage':
         return {
           ...application.payload,
@@ -1217,6 +1355,10 @@ function processAttack(
     if (!reactor.turn.reactionAvailable) {
       throw new EncounterRuleError(`Combatant ${command.actor} has no Reaction available.`);
     }
+    if (context.state.effects.some((effect) =>
+      effect.targets.includes(command.actor) && effect.payload.kind === 'opportunity_attacks_disabled')) {
+      throw new EncounterRuleError(`Combatant ${command.actor} cannot make Opportunity Attacks.`);
+    }
     if (context.state.activeCombatant !== command.target) {
       throw new EncounterRuleError('An Opportunity Attack must target the active mover.');
     }
@@ -1249,13 +1391,23 @@ function processAttack(
     {
       attackBonus:
         command.attackBonus +
-        exhaustionPenalty(combatantConditions(context.state, command.actor)),
-      targetArmorClass: combatant(context.state, command.target).profile.rules.armorClass,
+        exhaustionPenalty(combatantConditions(context.state, command.actor)) +
+        effectDiceModifier(context.state, command.actor, 'attack_roll', context.rng),
+      targetArmorClass: effectiveArmorClass(context.state, command.target),
       rollMode: attackRollMode(context.state, command),
       criticalFloor: command.criticalFloor,
     },
     context.rng,
   );
+  const consumedAdvantage = new Set(
+    context.state.effects
+      .filter((effect) =>
+        effect.targets.includes(command.target) &&
+        effect.payload.kind === 'attack_roll_mode_modifier' &&
+        effect.payload.appliesTo === 'next_attack_against_target')
+      .map((effect) => effect.id),
+  );
+  endEffects(context, consumedAdvantage, 'duration_expired');
   let damageResult: ReturnType<typeof resolveDamage> | null = null;
   if (attack.outcome !== 'miss') {
     const criticalWithin = conditionMechanicalState(
@@ -1292,6 +1444,455 @@ function processAttack(
   });
 }
 
+function cantripUpgradeCount(casterLevel: number): number {
+  if (!Number.isSafeInteger(casterLevel) || casterLevel < 1 || casterLevel > 20) {
+    throw new EncounterRuleError('Caster level must be an integer from 1 through 20.');
+  }
+  if (casterLevel >= 17) return 3;
+  if (casterLevel >= 11) return 2;
+  if (casterLevel >= 5) return 1;
+  return 0;
+}
+
+function scaledDiceExpression(
+  definition: SpellDefinition,
+  scaling: ScaledDice,
+  command: SpellCastCommand,
+): { readonly count: number; readonly sides: ReturnType<typeof dieSides>; readonly modifier: number } {
+  const slotDelta = definition.level === 0
+    ? 0
+    : (command.slotLevel as number) - definition.level;
+  const cantripDelta = scaling.cantripUpgrade
+    ? cantripUpgradeCount(command.casterLevel)
+    : 0;
+  return {
+    count: scaling.baseCount + scaling.perSlotCount * slotDelta + cantripDelta,
+    sides: dieSides(scaling.sides),
+    modifier: scaling.modifier + scaling.perSlotModifier * slotDelta,
+  };
+}
+
+function spendSpellCastingCost(
+  context: ReductionContext,
+  definition: SpellDefinition,
+  actor: CombatantId,
+): void {
+  switch (definition.castingTime) {
+    case 'action':
+      assertActiveActor(context, actor);
+      spendAction(context, actor, `Cast ${definition.name}`);
+      return;
+    case 'bonus_action':
+      assertActiveActor(context, actor);
+      spendCost(context, actor, 'bonus_action', `Cast ${definition.name}`);
+      return;
+    case 'reaction': {
+      const subject = combatant(context.state, actor);
+      if (subject.life !== 'living' || isIncapacitated(combatantConditions(context.state, actor))) {
+        throw new EncounterRuleError(`Combatant ${actor} cannot cast a Reaction spell.`);
+      }
+      if (!subject.turn.reactionAvailable) {
+        throw new EncounterRuleError(`Combatant ${actor} has no Reaction available.`);
+      }
+      context.state = replaceCombatant(context.state, {
+        ...subject,
+        turn: { ...subject.turn, reactionAvailable: false },
+      });
+      emit(context, { type: 'resource_spent', combatant: actor, resource: 'reaction', purpose: `Cast ${definition.name}` });
+      return;
+    }
+    case 'minute':
+      if (context.state.activeCombatant !== null) {
+        throw new EncounterRuleError(`${definition.name} requires 1 minute and cannot resolve as a turn action.`);
+      }
+      return;
+  }
+}
+
+function spendSpellSlot(
+  context: ReductionContext,
+  definition: SpellDefinition,
+  command: SpellCastCommand,
+): void {
+  if (definition.level === 0) {
+    if (command.slotLevel !== null) throw new EncounterRuleError('Cantrips do not expend spell slots.');
+    return;
+  }
+  if (
+    command.slotLevel === null ||
+    !Number.isSafeInteger(command.slotLevel) ||
+    command.slotLevel < definition.level ||
+    command.slotLevel > 9
+  ) {
+    throw new EncounterRuleError(`${definition.name} requires a slot of level ${definition.level} or higher.`);
+  }
+  const subject = combatant(context.state, command.actor);
+  const slot = subject.spellSlots.find((candidate) => candidate.level === command.slotLevel);
+  if (slot === undefined || slot.remaining < 1) {
+    throw new EncounterRuleError(`Combatant ${command.actor} has no level-${command.slotLevel} spell slot remaining.`);
+  }
+  const remaining = slot.remaining - 1;
+  context.state = replaceCombatant(context.state, {
+    ...subject,
+    spellSlots: subject.spellSlots.map((candidate) =>
+      candidate.level === command.slotLevel ? { ...candidate, remaining } : candidate,
+    ),
+  });
+  emit(context, {
+    type: 'spell_slot_spent',
+    combatant: command.actor,
+    slotLevel: command.slotLevel,
+    remaining,
+  });
+}
+
+function areaTargets(
+  state: EncounterState,
+  definition: SpellDefinition,
+  command: SpellCastCommand,
+): readonly CombatantId[] {
+  if (command.area === null || definition.targeting.kind !== 'area') {
+    throw new EncounterRuleError(`${definition.name} requires an area placement.`);
+  }
+  if (command.area.shape !== definition.targeting.shape) {
+    throw new EncounterRuleError(`${definition.name} requires a ${definition.targeting.shape} template.`);
+  }
+  const actorCell = token(state, command.actor).position;
+  const origin = command.area.template.origin;
+  const minimumX = actorCell.column * 5;
+  const maximumX = minimumX + 5;
+  const minimumY = actorCell.row * 5;
+  const maximumY = minimumY + 5;
+  const horizontal = Math.max(minimumX - origin.x, 0, origin.x - maximumX);
+  const vertical = Math.max(minimumY - origin.y, 0, origin.y - maximumY);
+  if (Math.max(horizontal, vertical) > definition.targeting.rangeFeet) {
+    throw new EncounterRuleError(`${definition.name} area origin is out of range.`);
+  }
+  const cells = affectedCells(
+    { bounds: state.bounds, blockedCells: state.blockedCells },
+    command.area,
+  );
+  return state.combatants.flatMap((subject): readonly CombatantId[] => {
+    if (subject.life === 'dead') return [];
+    const occupied = [token(state, subject.profile.id).position];
+    return creatureOccupiesAffectedCell(occupied, cells) ? [subject.profile.id] : [];
+  });
+}
+
+function validateTargetRange(
+  state: EncounterState,
+  actor: CombatantId,
+  target: CombatantId,
+  rangeFeet: number,
+): void {
+  if (combatant(state, target).life === 'dead') {
+    throw new EncounterRuleError('A dead combatant is not a legal spell target.');
+  }
+  if (gridDistance(token(state, actor).position, token(state, target).position) > rangeFeet) {
+    throw new EncounterRuleError(`Spell target ${target} is out of range.`);
+  }
+}
+
+function selectedSpellTargets(
+  state: EncounterState,
+  definition: SpellDefinition,
+  command: SpellCastCommand,
+): readonly CombatantId[] {
+  const targeting = definition.targeting;
+  switch (targeting.kind) {
+    case 'self':
+      if (command.targets.length !== 0) throw new EncounterRuleError('A Self spell does not select targets.');
+      return [command.actor];
+    case 'single':
+      if (command.targets.length !== 1) throw new EncounterRuleError(`${definition.name} requires one target.`);
+      validateTargetRange(state, command.actor, command.targets[0] as CombatantId, targeting.rangeFeet);
+      return command.targets;
+    case 'multiple': {
+      const slotDelta = definition.level === 0 ? 0 : (command.slotLevel as number) - definition.level;
+      const maximum = targeting.baseMaximum + targeting.additionalPerSlot * slotDelta;
+      const operation = definition.operation;
+      const requiresEveryDart = operation.kind === 'magic_missiles';
+      if (command.targets.length < 1 || command.targets.length > maximum) {
+        throw new EncounterRuleError(`${definition.name} allows at most ${maximum} targets.`);
+      }
+      if (requiresEveryDart && command.targets.length !== maximum) {
+        throw new EncounterRuleError(`${definition.name} requires one target allocation per dart.`);
+      }
+      if (!requiresEveryDart) assertUnique(command.targets, 'Spell targets');
+      for (const target of command.targets) validateTargetRange(state, command.actor, target, targeting.rangeFeet);
+      return command.targets;
+    }
+    case 'area':
+      if (command.targets.length !== 0) throw new EncounterRuleError('Area spell targets come from its exact template.');
+      return areaTargets(state, definition, command);
+    case 'utility':
+      if (command.targets.length !== 0) throw new EncounterRuleError('This utility spell does not target a combatant.');
+      return [command.actor];
+  }
+}
+
+function effectApplication(
+  definition: SpellDefinition,
+  command: SpellCastCommand,
+  data: EffectData,
+  targets: readonly CombatantId[],
+): EffectApplication {
+  const actualTargets = data.target === 'self' ? [command.actor] : targets;
+  const timingCombatant = data.expiresAt.startsWith('source_')
+    ? command.actor
+    : actualTargets[0] as CombatantId;
+  const boundary: TurnBoundary = data.expiresAt.endsWith('_start') ? 'start' : 'end';
+  const payload =
+    data.payload.kind === 'damage_reduction' && data.payload.damageType === 'chosen_when_cast'
+      ? { ...data.payload, damageType: command.selectedOption ?? 'Acid' }
+      : data.payload.kind === 'ability_check_modifier' && data.payload.skill === 'chosen_when_cast'
+        ? { ...data.payload, skill: command.selectedOption ?? 'Arcana' }
+      : data.payload;
+  return {
+    targets: actualTargets,
+    duration: data.durationRounds === null
+      ? { kind: 'permanent' }
+      : {
+          kind: 'turn_boundaries',
+          timing: { combatant: timingCombatant, boundary, source: definition.source },
+          remaining: data.durationRounds,
+        },
+    concentration: data.concentration,
+    stackingIdentity: effectStackingIdentity(`spell:${definition.id}`),
+    stacking: 'replace_same_source',
+    repeatedSave: null,
+    payload,
+  };
+}
+
+function applySpellEffect(
+  context: ReductionContext,
+  definition: SpellDefinition,
+  command: SpellCastCommand,
+  data: EffectData,
+  targets: readonly CombatantId[],
+): void {
+  if (targets.length === 0 && data.target === 'targets') return;
+  applyEffect(context, command.actor, effectApplication(definition, command, data, targets));
+}
+
+function applyHealing(
+  context: ReductionContext,
+  source: CombatantId,
+  target: CombatantId,
+  amount: number,
+): void {
+  const before = combatant(context.state, target);
+  if (before.life === 'dead') throw new EncounterRuleError('A dead creature cannot regain Hit Points.');
+  if (context.state.effects.some((candidate) =>
+    candidate.targets.includes(target) && candidate.payload.kind === 'cannot_regain_hit_points')) return;
+  const hitPoints = Math.min(before.profile.rules.hitPointMaximum, before.hitPoints + amount);
+  context.state = replaceCombatant(context.state, {
+    ...before,
+    hitPoints,
+    life: hitPoints > 0 ? 'living' : before.life,
+    deathSaves: hitPoints > 0 ? null : before.deathSaves,
+  });
+  emit(context, {
+    type: 'healing_applied', source, target, amount: hitPoints - before.hitPoints,
+    hitPointsBefore: before.hitPoints, hitPointsAfter: hitPoints,
+  });
+}
+
+function pushAway(
+  state: EncounterState,
+  source: CombatantId,
+  target: CombatantId,
+  feetToPush: number,
+): EncounterState {
+  const from = token(state, source).position;
+  const subjectToken = token(state, target);
+  const columnStep = Math.sign(subjectToken.position.column - from.column);
+  const rowStep = Math.sign(subjectToken.position.row - from.row);
+  if (columnStep === 0 && rowStep === 0) return state;
+  let position = subjectToken.position;
+  const occupied = new Set(state.tokens.filter((entry) => entry.combatantId !== target).map((entry) => cellKey(entry.position)));
+  const blocked = new Set(state.blockedCells.map(cellKey));
+  for (let distance = 0; distance < feetToPush; distance += 5) {
+    const candidate = { column: position.column + columnStep, row: position.row + rowStep };
+    if (!isCellInside(state.bounds, candidate) || blocked.has(cellKey(candidate)) || occupied.has(cellKey(candidate))) break;
+    position = candidate;
+  }
+  return {
+    ...state,
+    tokens: state.tokens.map((entry) =>
+      entry.combatantId === target ? { ...entry, position } : entry,
+    ),
+  };
+}
+
+function resolveSpellAttack(
+  context: ReductionContext,
+  definition: SpellDefinition,
+  command: SpellCastCommand,
+  target: CombatantId,
+  damage: ScaledDice,
+  damageType: DamageType,
+  rider: EffectData | null,
+): void {
+  const advantageEffects = context.state.effects.filter((effect) =>
+    effect.targets.includes(target) &&
+    effect.payload.kind === 'attack_roll_mode_modifier' &&
+    effect.payload.appliesTo === 'next_attack_against_target');
+  const attack = resolveAttackRoll({
+    attackBonus: command.attackBonus + effectDiceModifier(context.state, command.actor, 'attack_roll', context.rng),
+    targetArmorClass: effectiveArmorClass(context.state, target),
+    rollMode: combineRollModes(['normal', ...advantageEffects.map((effect) =>
+      effect.payload.kind === 'attack_roll_mode_modifier' ? effect.payload.mode : 'normal')]),
+    criticalFloor: 20,
+  }, context.rng);
+  endEffects(context, new Set(advantageEffects.map((effect) => effect.id)), 'duration_expired');
+  let result: ReturnType<typeof resolveDamage> | null = null;
+  if (attack.outcome !== 'miss') {
+    const baseRequest: DamageRequest = {
+      terms: [{ type: damageType, dice: scaledDiceExpression(definition, damage, command) }],
+      critical: attack.outcome === 'critical',
+      responses: [],
+    };
+    const request: DamageRequest = {
+      ...baseRequest,
+      responses: targetDamageResponses(context.state, target, baseRequest),
+    };
+    result = resolveDamage(request, context.rng);
+    applyDamage(context, command.actor, target, result.total, request.critical);
+    concentrationCheck(context, target, result.total);
+    if (rider !== null) applySpellEffect(context, definition, command, rider, [target]);
+  }
+  emit(context, { type: 'attack_resolved', actor: command.actor, target, attack, damage: result });
+}
+
+function processSpellCast(context: ReductionContext, command: SpellCastCommand): void {
+  const definition = spellDefinition(command.spellId);
+  if (definition === null) throw new EncounterRuleError(`Spell ${command.spellId} is not implemented.`);
+  const targets = selectedSpellTargets(context.state, definition, command);
+  spendSpellCastingCost(context, definition, command.actor);
+  spendSpellSlot(context, definition, command);
+  emit(context, { type: 'spell_cast', caster: command.actor, spellId: definition.id, slotLevel: command.slotLevel, targets });
+
+  const operation = definition.operation;
+  switch (operation.kind) {
+    case 'attack_damage':
+      for (const target of targets) resolveSpellAttack(context, definition, command, target, operation.dice, operation.damageType, operation.rider);
+      return;
+    case 'save_damage': {
+      const roll = resolveDamage({
+        terms: [{ type: operation.damageType, dice: scaledDiceExpression(definition, operation.dice, command) }],
+        critical: false,
+        responses: [],
+      }, context.rng);
+      for (const target of targets) {
+        const save = resolveTargetSave(context, command.actor, target, operation.ability, command.saveDc, 'normal', null);
+        const rawAmount = save.outcome === 'failure'
+          ? roll.total
+          : operation.onSuccess === 'half' ? Math.floor(roll.total / 2) : 0;
+        const baseRequest: DamageRequest = {
+          terms: [{ type: operation.damageType, dice: { count: 0, sides: dieSides(operation.dice.sides), modifier: rawAmount } }],
+          critical: false,
+          responses: [],
+        };
+        const responseRequest: DamageRequest = {
+          ...baseRequest,
+          responses: targetDamageResponses(context.state, target, baseRequest),
+        };
+        const adjusted = resolveDamage(responseRequest, context.rng).total;
+        applyDamage(context, command.actor, target, adjusted);
+        concentrationCheck(context, target, adjusted);
+        if (save.outcome === 'failure' && operation.riderOnFailure !== null) {
+          applySpellEffect(context, definition, command, operation.riderOnFailure, [target]);
+        }
+        if (save.outcome === 'failure' && operation.pushFeetOnFailure > 0) {
+          context.state = pushAway(context.state, command.actor, target, operation.pushFeetOnFailure);
+        }
+      }
+      return;
+    }
+    case 'healing': {
+      const rolled = rollDice(context.rng, scaledDiceExpression(definition, operation.dice, command));
+      const amount = rolled.total + (operation.addSpellcastingModifier ? command.spellcastingModifier : 0);
+      for (const target of targets) applyHealing(context, command.actor, target, Math.max(0, amount));
+      return;
+    }
+    case 'temporary_hit_points': {
+      const rolled = rollDice(context.rng, scaledDiceExpression(definition, operation.dice, command));
+      const subject = combatant(context.state, command.actor);
+      const after = Math.max(subject.temporaryHitPoints, rolled.total);
+      context.state = replaceCombatant(context.state, { ...subject, temporaryHitPoints: after });
+      emit(context, { type: 'temporary_hit_points_changed', combatant: command.actor, before: subject.temporaryHitPoints, after });
+      return;
+    }
+    case 'effect':
+      applySpellEffect(context, definition, command, operation.effect, targets);
+      return;
+    case 'save_effect': {
+      const failed = targets.filter((target) =>
+        resolveTargetSave(context, command.actor, target, operation.ability, command.saveDc, operation.rollMode, null).outcome === 'failure');
+      applySpellEffect(context, definition, command, operation.effect, failed);
+      return;
+    }
+    case 'magic_missiles':
+      for (const target of targets) {
+        const immune = context.state.effects.some((candidate) =>
+          candidate.targets.includes(target) &&
+          (candidate.payload.kind === 'magic_missile_immunity' || candidate.payload.kind === 'shield_defense'));
+        if (immune) continue;
+        const baseRequest: DamageRequest = {
+          terms: [{ type: operation.damageType, dice: scaledDiceExpression(definition, operation.dice, command) }],
+          critical: false,
+          responses: [],
+        };
+        const result = resolveDamage({
+          ...baseRequest,
+          responses: targetDamageResponses(context.state, target, baseRequest),
+        }, context.rng);
+        applyDamage(context, command.actor, target, result.total);
+        concentrationCheck(context, target, result.total);
+      }
+      return;
+    case 'stabilize': {
+      const target = combatant(context.state, targets[0] as CombatantId);
+      if (target.hitPoints !== 0 || target.life === 'dead') throw new EncounterRuleError('Spare the Dying requires a living creature at 0 Hit Points.');
+      context.state = replaceCombatant(context.state, { ...target, life: 'stable', deathSaves: null });
+      return;
+    }
+    case 'weapon_attack': {
+      if (command.weaponAttack === null) throw new EncounterRuleError('True Strike requires a weapon attack profile.');
+      const extra = scaledDiceExpression(definition, operation.extraDamage, command);
+      const target = targets[0] as CombatantId;
+      const attack = resolveAttackRoll({ attackBonus: command.attackBonus, targetArmorClass: effectiveArmorClass(context.state, target), rollMode: 'normal', criticalFloor: 20 }, context.rng);
+      let result: ReturnType<typeof resolveDamage> | null = null;
+      if (attack.outcome !== 'miss') {
+        result = resolveDamage({
+          terms: [
+            { type: command.weaponAttack.damageType, dice: { count: command.weaponAttack.damageCount, sides: dieSides(command.weaponAttack.damageSides), modifier: command.weaponAttack.damageModifier } },
+            { type: operation.extraDamageType, dice: extra },
+          ],
+          critical: attack.outcome === 'critical', responses: [],
+        }, context.rng);
+        applyDamage(context, command.actor, target, result.total, attack.outcome === 'critical');
+      }
+      emit(context, { type: 'attack_resolved', actor: command.actor, target, attack, damage: result });
+      return;
+    }
+    case 'utility':
+      emit(context, { type: 'spell_utility_resolved', caster: command.actor, spellId: definition.id, capability: operation.effect.kind });
+      if (operation.durationRounds !== null || operation.concentration) {
+        applySpellEffect(context, definition, command, {
+          payload: operation.effect,
+          target: 'self',
+          concentration: operation.concentration,
+          durationRounds: operation.durationRounds,
+          expiresAt: 'source_start',
+        }, [command.actor]);
+      }
+      return;
+  }
+}
+
 function nextLivingInitiativeIndex(state: EncounterState, current: number): number {
   for (let offset = 1; offset <= state.initiative.length; offset += 1) {
     const index = (current + offset) % state.initiative.length;
@@ -1303,6 +1904,9 @@ function nextLivingInitiativeIndex(state: EncounterState, current: number): numb
 
 function processCommand(context: ReductionContext, command: EncounterCommand): void {
   switch (command.type) {
+    case 'cast_spell':
+      processSpellCast(context, command);
+      return;
     case 'roll_initiative': {
       if (context.state.initiative.length > 0) {
         throw new EncounterRuleError('Initiative has already been rolled.');
@@ -1476,26 +2080,7 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
       if (!Number.isSafeInteger(command.amount) || command.amount < 0) {
         throw new EncounterRuleError('Healing must be a non-negative safe integer.');
       }
-      const before = combatant(context.state, command.target);
-      if (before.life === 'dead') throw new EncounterRuleError('A dead creature cannot regain Hit Points.');
-      const hitPoints = Math.min(
-        before.profile.rules.hitPointMaximum,
-        before.hitPoints + command.amount,
-      );
-      context.state = replaceCombatant(context.state, {
-        ...before,
-        hitPoints,
-        life: hitPoints > 0 ? 'living' : before.life,
-        deathSaves: hitPoints > 0 ? null : before.deathSaves,
-      });
-      emit(context, {
-        type: 'healing_applied',
-        source: command.actor,
-        target: command.target,
-        amount: hitPoints - before.hitPoints,
-        hitPointsBefore: before.hitPoints,
-        hitPointsAfter: hitPoints,
-      });
+      applyHealing(context, command.actor, command.target, command.amount);
       return;
     }
     case 'apply_effect':

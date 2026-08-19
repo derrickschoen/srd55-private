@@ -39,6 +39,15 @@ export interface CombatRulesProfile {
   }[];
   readonly conditionImmunities: readonly string[];
   readonly usesDeathSaves: boolean;
+  /** Reducer-owned expendable spell slots; absent levels are unavailable. */
+  readonly spellSlots: readonly SpellSlotCapacity[];
+}
+
+export type SpellSlotLevel = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+
+export interface SpellSlotCapacity {
+  readonly level: SpellSlotLevel;
+  readonly maximum: number;
 }
 
 export type CombatantProfile =
@@ -68,6 +77,7 @@ export interface CombatToken {
 export interface CharacterCombatantIdentity {
   readonly combatantId: string;
   readonly tokenId: string;
+  readonly spellSlots?: readonly SpellSlotCapacity[];
 }
 
 export type CharacterCombatSheet = Pick<
@@ -147,6 +157,7 @@ export function characterCombatantProfile(
       })),
       conditionImmunities: [],
       usesDeathSaves: true,
+      spellSlots: identity.spellSlots ?? [],
     },
   };
 }
@@ -177,6 +188,7 @@ export function monsterCombatantProfile(
       damageResponses: statblock.damageResponses,
       conditionImmunities: statblock.conditionImmunities,
       usesDeathSaves: statblock.usesDeathSaves,
+      spellSlots: [],
     },
   };
 }
