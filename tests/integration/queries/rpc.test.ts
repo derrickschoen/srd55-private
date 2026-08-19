@@ -162,6 +162,8 @@ describe('typed query RPC integration', () => {
       'queries.eligibleSpells.search',
       'queries.characters.levelUpPlannedEligibleSpells',
       'queries.characters.levelUpState',
+      'queries.characters.levelUpProgress',
+      'queries.characters.saveLevelUpProgress',
       'queries.savePoints.create',
       'queries.characters.sheet',
       'queries.characters.setPrintAppendixPreference',

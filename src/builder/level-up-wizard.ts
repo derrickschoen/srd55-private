@@ -321,6 +321,18 @@ export interface LevelUpStateParams {
   readonly character_id: CharacterId;
 }
 
+/** Reload-safe navigation state for an in-progress level-up wizard. */
+export interface LevelUpWizardProgress {
+  readonly character_revision: CharacterRevision;
+  readonly selected_class_content_key: ContentKey;
+  readonly current_step: LevelUpStep;
+}
+
+export interface SaveLevelUpWizardProgressParams {
+  readonly character_id: CharacterId;
+  readonly progress: LevelUpWizardProgress | null;
+}
+
 /** One durable D70 warning, repeated here without re-deriving its prose. */
 interface LevelUpPermanentWarningBase {
   readonly kind: string;
@@ -592,6 +604,8 @@ export function isLevelUpPreviewResult(
 
 export const LEVEL_UP_RPC = Object.freeze({
   state: 'queries.characters.levelUpState',
+  progress: 'queries.characters.levelUpProgress',
+  saveProgress: 'queries.characters.saveLevelUpProgress',
   plannedEligibleSpells:
     'queries.characters.levelUpPlannedEligibleSpells',
   preview: 'queries.characters.previewLevelUp',
