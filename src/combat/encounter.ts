@@ -46,7 +46,12 @@ import {
   type EncounterEffectId,
 } from './values';
 
-export type LifeState = 'living' | 'dying' | 'dead';
+export type LifeState = 'living' | 'dying' | 'stable' | 'dead';
+
+export interface DeathSaveState {
+  readonly successes: number;
+  readonly failures: number;
+}
 
 export type ActionResource =
   | { readonly kind: 'available' }
@@ -66,6 +71,7 @@ export interface EncounterCombatantState {
   readonly profile: CombatantProfile;
   readonly hitPoints: number;
   readonly life: LifeState;
+  readonly deathSaves: DeathSaveState | null;
   readonly turn: TurnResources;
 }
 
@@ -82,6 +88,8 @@ export interface EncounterState {
   readonly nextEffectSequence: number;
   readonly bounds: GridBounds;
   readonly blockedCells: readonly GridCell[];
+  readonly foggedCells: readonly GridCell[];
+  readonly dmNotes: readonly string[];
   readonly combatants: readonly EncounterCombatantState[];
   readonly tokens: readonly CombatToken[];
   readonly initiative: readonly InitiativeEntry[];
@@ -89,11 +97,14 @@ export interface EncounterState {
   readonly activeInitiativeIndex: number | null;
   readonly round: number;
   readonly effects: readonly EncounterEffect[];
+  readonly eventLog: readonly EncounterEvent[];
 }
 
 export interface EncounterSetup {
   readonly bounds: GridBounds;
   readonly blockedCells?: readonly GridCell[];
+  readonly foggedCells?: readonly GridCell[];
+  readonly dmNotes?: readonly string[];
   readonly combatants: readonly CombatantProfile[];
   readonly tokens: readonly CombatToken[];
 }
@@ -183,6 +194,18 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
       throw new EncounterRuleError('A token cannot start in a blocked cell.');
     }
   }
+  const foggedCells = setup.foggedCells ?? [];
+  assertUnique(foggedCells.map(cellKey), 'Fogged cells');
+  for (const cell of foggedCells) {
+    if (!isCellInside(setup.bounds, cell)) {
+      throw new EncounterRuleError('Fogged cells must be inside the encounter grid.');
+    }
+  }
+  for (const note of setup.dmNotes ?? []) {
+    if (note.trim().length === 0) {
+      throw new EncounterRuleError('DM notes must be non-empty.');
+    }
+  }
 
   return {
     revision: 0,
@@ -190,10 +213,13 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
     nextEffectSequence: 1,
     bounds: { ...setup.bounds },
     blockedCells: blockedCells.map((cell) => ({ ...cell })),
+    foggedCells: foggedCells.map((cell) => ({ ...cell })),
+    dmNotes: [...(setup.dmNotes ?? [])],
     combatants: setup.combatants.map((profile) => ({
       profile,
       hitPoints: profile.rules.hitPointMaximum,
       life: 'living',
+      deathSaves: null,
       turn: EMPTY_TURN,
     })),
     tokens: setup.tokens.map((token) => ({ ...token, position: { ...token.position } })),
@@ -202,6 +228,7 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
     activeInitiativeIndex: null,
     round: 0,
     effects: [],
+    eventLog: [],
   };
 }
 
@@ -312,7 +339,10 @@ function combineRollModes(modes: readonly RollMode[]): RollMode {
 
 function attackRollMode(
   state: EncounterState,
-  command: Extract<EncounterCommand, { readonly type: 'attack' }>,
+  command: Extract<
+    EncounterCommand,
+    { readonly type: 'attack' | 'opportunity_attack' }
+  >,
 ): RollMode {
   const modes: RollMode[] = [command.rollMode];
   const actorClauses = conditionMechanicalState(
@@ -448,13 +478,15 @@ function emit(
   context: ReductionContext,
   event: UnsequencedEvent<EncounterEvent>,
 ): void {
-  context.events.push({
+  const emitted = {
     ...event,
     sequence: context.state.nextEventSequence,
-  } as EncounterEvent);
+  } as EncounterEvent;
+  context.events.push(emitted);
   context.state = {
     ...context.state,
     nextEventSequence: context.state.nextEventSequence + 1,
+    eventLog: [...context.state.eventLog, emitted],
   };
 }
 
@@ -489,11 +521,21 @@ function endConcentration(
   );
 }
 
+// Bundled SRD 5.2.1, docs/srd/full/srd-5.2.1.txt:1084-1120.
+const DEATH_SAVE_NATURAL_ONE = 1;
+const DEATH_SAVE_NATURAL_TWENTY = 20;
+const DEATH_SAVE_SUCCESS_FLOOR = 10;
+const DEATH_SAVE_RESOLUTION_COUNT = 3;
+const DEATH_SAVE_SINGLE_MARK = 1;
+const NATURAL_ONE_FAILURES = 2;
+const NATURAL_TWENTY_HIT_POINTS = 1;
+
 function applyDamage(
   context: ReductionContext,
   source: CombatantId,
   target: CombatantId,
   amount: number,
+  critical = false,
 ): void {
   if (!Number.isSafeInteger(amount) || amount < 0) {
     throw new EncounterRuleError('Damage must be a non-negative safe integer.');
@@ -502,8 +544,31 @@ function applyDamage(
   if (before.life === 'dead' || amount === 0) return;
   const hitPointsAfter = Math.max(0, before.hitPoints - amount);
   let life: LifeState = before.life;
+  let deathSaves = before.deathSaves;
   let massiveDamage = false;
-  if (hitPointsAfter === 0 && before.hitPoints > 0) {
+  if (before.hitPoints === 0) {
+    massiveDamage =
+      before.profile.rules.usesDeathSaves &&
+      amount >= before.profile.rules.hitPointMaximum;
+    if (massiveDamage) {
+      life = 'dead';
+      deathSaves = null;
+    } else if (before.profile.rules.usesDeathSaves) {
+      const failures =
+        (deathSaves?.failures ?? 0) +
+        (critical ? NATURAL_ONE_FAILURES : DEATH_SAVE_SINGLE_MARK);
+      if (failures >= DEATH_SAVE_RESOLUTION_COUNT) {
+        life = 'dead';
+        deathSaves = null;
+      } else {
+        life = 'dying';
+        deathSaves = {
+          successes: deathSaves?.successes ?? 0,
+          failures,
+        };
+      }
+    }
+  } else if (hitPointsAfter === 0) {
     const remainder = amount - before.hitPoints;
     massiveDamage =
       before.profile.rules.usesDeathSaves &&
@@ -513,8 +578,9 @@ function applyDamage(
       : before.profile.rules.usesDeathSaves
         ? 'dying'
         : 'dead';
+    deathSaves = life === 'dying' ? { successes: 0, failures: 0 } : null;
   }
-  const after = { ...before, hitPoints: hitPointsAfter, life };
+  const after = { ...before, hitPoints: hitPointsAfter, life, deathSaves };
   context.state = replaceCombatant(context.state, after);
   emit(context, {
     type: 'damage_applied',
@@ -527,6 +593,65 @@ function applyDamage(
     massiveDamage,
   });
   if (life !== 'living') endConcentration(context, target, 'concentration_broken');
+}
+
+function resolveDeathSave(context: ReductionContext, id: CombatantId): void {
+  const before = combatant(context.state, id);
+  if (
+    before.life !== 'dying' ||
+    before.hitPoints !== 0 ||
+    !before.profile.rules.usesDeathSaves
+  ) {
+    return;
+  }
+  const roll = rollD20(context.rng, 'normal').chosen;
+  const prior = before.deathSaves ?? { successes: 0, failures: 0 };
+  let successes = prior.successes;
+  let failures = prior.failures;
+  let life: LifeState = 'dying';
+  let hitPoints = 0;
+  let outcome: Extract<
+    EncounterEvent,
+    { readonly type: 'death_save_resolved' }
+  >['outcome'];
+
+  if (roll === DEATH_SAVE_NATURAL_ONE) {
+    failures += NATURAL_ONE_FAILURES;
+    outcome = 'natural_1';
+  } else if (roll === DEATH_SAVE_NATURAL_TWENTY) {
+    hitPoints = NATURAL_TWENTY_HIT_POINTS;
+    life = 'living';
+    outcome = 'natural_20';
+  } else if (roll >= DEATH_SAVE_SUCCESS_FLOOR) {
+    successes += DEATH_SAVE_SINGLE_MARK;
+    outcome = 'success';
+  } else {
+    failures += DEATH_SAVE_SINGLE_MARK;
+    outcome = 'failure';
+  }
+
+  if (life === 'dying' && successes >= DEATH_SAVE_RESOLUTION_COUNT) {
+    life = 'stable';
+  }
+  if (life === 'dying' && failures >= DEATH_SAVE_RESOLUTION_COUNT) {
+    life = 'dead';
+  }
+  context.state = replaceCombatant(context.state, {
+    ...before,
+    hitPoints,
+    life,
+    deathSaves: life === 'dying' ? { successes, failures } : null,
+  });
+  emit(context, {
+    type: 'death_save_resolved',
+    visibility: 'dm_only',
+    combatant: id,
+    roll,
+    outcome,
+    successes,
+    failures,
+    lifeState: life,
+  });
 }
 
 function resolveTargetSave(
@@ -719,7 +844,8 @@ function processMove(
       hostile: true,
     }));
   const cause =
-    command.cause === 'voluntary' && subject.turn.disengaging
+    (command.cause === 'voluntary' && subject.turn.disengaging) ||
+    command.cause === 'reactions_resolved'
       ? 'disengaged'
       : command.cause;
   const plan = planMovement(movementWorld(context.state), {
@@ -1011,6 +1137,7 @@ function applyEffect(
         ...subject,
         hitPoints: 0,
         life: 'dead',
+        deathSaves: null,
         turn: EMPTY_TURN,
       });
       endConcentration(context, target, 'concentration_broken');
@@ -1035,11 +1162,13 @@ function applyEffect(
 function startTurn(context: ReductionContext, id: CombatantId, round: number): void {
   context.state = { ...context.state, activeCombatant: id, round };
   processBoundary(context, id, 'start');
-  const subject = combatant(context.state, id);
+  const beforeSave = combatant(context.state, id);
   const speed = feet(effectiveSpeed(context.state, id));
-  const incapacitated = isIncapacitated(combatantConditions(context.state, id));
+  const incapacitated =
+    beforeSave.life !== 'living' ||
+    isIncapacitated(combatantConditions(context.state, id));
   context.state = replaceCombatant(context.state, {
-    ...subject,
+    ...beforeSave,
     turn: {
       action: incapacitated ? { kind: 'spent' } : { kind: 'available' },
       bonusActionAvailable: !incapacitated,
@@ -1050,6 +1179,117 @@ function startTurn(context: ReductionContext, id: CombatantId, round: number): v
     },
   });
   emit(context, { type: 'turn_started', combatant: id, round });
+  resolveDeathSave(context, id);
+  const afterSave = combatant(context.state, id);
+  if (afterSave.life === 'living' && beforeSave.life === 'dying') {
+    context.state = replaceCombatant(context.state, {
+      ...afterSave,
+      turn: {
+        action: { kind: 'available' },
+        bonusActionAvailable: true,
+        reactionAvailable: true,
+        movement: startTurnMovement(feet(effectiveSpeed(context.state, id))),
+        disengaging: false,
+        dodging: false,
+      },
+    });
+  }
+}
+
+function processAttack(
+  context: ReductionContext,
+  command: Extract<
+    EncounterCommand,
+    { readonly type: 'attack' | 'opportunity_attack' }
+  >,
+): void {
+  if (command.type === 'attack') {
+    assertActiveActor(context, command.actor);
+    beginAttack(context, command.actor);
+  } else {
+    const reactor = combatant(context.state, command.actor);
+    if (
+      reactor.life !== 'living' ||
+      isIncapacitated(combatantConditions(context.state, command.actor))
+    ) {
+      throw new EncounterRuleError(`Combatant ${command.actor} cannot react.`);
+    }
+    if (!reactor.turn.reactionAvailable) {
+      throw new EncounterRuleError(`Combatant ${command.actor} has no Reaction available.`);
+    }
+    if (context.state.activeCombatant !== command.target) {
+      throw new EncounterRuleError('An Opportunity Attack must target the active mover.');
+    }
+    if (
+      gridDistance(
+        token(context.state, command.actor).position,
+        token(context.state, command.target).position,
+      ) > reactor.profile.rules.reach
+    ) {
+      throw new EncounterRuleError('An Opportunity Attack reactor is out of reach.');
+    }
+    context.state = replaceCombatant(context.state, {
+      ...reactor,
+      turn: { ...reactor.turn, reactionAvailable: false },
+    });
+    emit(context, {
+      type: 'resource_spent',
+      combatant: command.actor,
+      resource: 'reaction',
+      purpose: 'Opportunity Attack',
+    });
+  }
+  if (combatant(context.state, command.target).life === 'dead') {
+    throw new EncounterRuleError('A dead combatant cannot be attacked.');
+  }
+  if (cannotHarmTarget(context.state, command.actor, command.target)) {
+    throw new EncounterRuleError('The Charmed condition prohibits harming this target.');
+  }
+  const attack = resolveAttackRoll(
+    {
+      attackBonus:
+        command.attackBonus +
+        exhaustionPenalty(combatantConditions(context.state, command.actor)),
+      targetArmorClass: combatant(context.state, command.target).profile.rules.armorClass,
+      rollMode: attackRollMode(context.state, command),
+      criticalFloor: command.criticalFloor,
+    },
+    context.rng,
+  );
+  let damageResult: ReturnType<typeof resolveDamage> | null = null;
+  if (attack.outcome !== 'miss') {
+    const criticalWithin = conditionMechanicalState(
+      combatantConditions(context.state, command.target),
+    ).clauses.some(
+      (clause) =>
+        clause.kind === 'critical_if_hit_within' &&
+        gridDistance(
+          token(context.state, command.actor).position,
+          token(context.state, command.target).position,
+        ) <= clause.feet,
+    );
+    const request = {
+      ...command.damage,
+      critical: attack.outcome === 'critical' || criticalWithin,
+      responses: targetDamageResponses(context.state, command.target, command.damage),
+    };
+    damageResult = resolveDamage(request, context.rng);
+    applyDamage(
+      context,
+      command.actor,
+      command.target,
+      damageResult.total,
+      request.critical,
+    );
+    concentrationCheck(context, command.target, damageResult.total);
+  }
+  emit(context, {
+    type: 'attack_resolved',
+    actor: command.actor,
+    target: command.target,
+    attack,
+    damage: damageResult,
+  });
 }
 
 function nextLivingInitiativeIndex(state: EncounterState, current: number): number {
@@ -1121,53 +1361,23 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
     case 'move':
       processMove(context, command);
       return;
-    case 'attack': {
-      assertActiveActor(context, command.actor);
-      if (combatant(context.state, command.target).life === 'dead') {
-        throw new EncounterRuleError('A dead combatant cannot be attacked.');
+    case 'attack':
+    case 'opportunity_attack': {
+      processAttack(context, command);
+      return;
+    }
+    case 'decline_reaction': {
+      const reactor = combatant(context.state, command.actor);
+      if (reactor.life !== 'living' || !reactor.turn.reactionAvailable) {
+        throw new EncounterRuleError(`Combatant ${command.actor} cannot decline this Reaction.`);
       }
-      if (cannotHarmTarget(context.state, command.actor, command.target)) {
-        throw new EncounterRuleError('The Charmed condition prohibits harming this target.');
-      }
-      beginAttack(context, command.actor);
-      const attack = resolveAttackRoll(
-        {
-          attackBonus:
-            command.attackBonus +
-            exhaustionPenalty(combatantConditions(context.state, command.actor)),
-          targetArmorClass: combatant(context.state, command.target).profile.rules.armorClass,
-          rollMode: attackRollMode(context.state, command),
-          criticalFloor: command.criticalFloor,
-        },
-        context.rng,
-      );
-      let damageResult: ReturnType<typeof resolveDamage> | null = null;
-      if (attack.outcome !== 'miss') {
-        const criticalWithin = conditionMechanicalState(
-          combatantConditions(context.state, command.target),
-        ).clauses.some(
-          (clause) =>
-            clause.kind === 'critical_if_hit_within' &&
-            gridDistance(
-              token(context.state, command.actor).position,
-              token(context.state, command.target).position,
-            ) <= clause.feet,
-        );
-        const request = {
-          ...command.damage,
-          critical: attack.outcome === 'critical' || criticalWithin,
-          responses: targetDamageResponses(context.state, command.target, command.damage),
-        };
-        damageResult = resolveDamage(request, context.rng);
-        applyDamage(context, command.actor, command.target, damageResult.total);
-        concentrationCheck(context, command.target, damageResult.total);
+      if (context.state.activeCombatant !== command.mover) {
+        throw new EncounterRuleError('A declined Reaction must name the active mover.');
       }
       emit(context, {
-        type: 'attack_resolved',
-        actor: command.actor,
-        target: command.target,
-        attack,
-        damage: damageResult,
+        type: 'reaction_declined',
+        combatant: command.actor,
+        mover: command.mover,
       });
       return;
     }
@@ -1276,6 +1486,7 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
         ...before,
         hitPoints,
         life: hitPoints > 0 ? 'living' : before.life,
+        deathSaves: hitPoints > 0 ? null : before.deathSaves,
       });
       emit(context, {
         type: 'healing_applied',
@@ -1297,7 +1508,12 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
       endConcentration(context, command.actor, 'concentration_ended');
       return;
     case 'end_turn': {
-      assertActiveActor(context, command.actor);
+      if (context.state.activeCombatant !== command.actor) {
+        throw new EncounterRuleError(`Combatant ${command.actor} is not the active combatant.`);
+      }
+      if (combatant(context.state, command.actor).life === 'dead') {
+        throw new EncounterRuleError(`Combatant ${command.actor} cannot end a turn while dead.`);
+      }
       const currentIndex = context.state.activeInitiativeIndex;
       if (currentIndex === null) throw new EncounterRuleError('Initiative is not active.');
       processBoundary(context, command.actor, 'end');
