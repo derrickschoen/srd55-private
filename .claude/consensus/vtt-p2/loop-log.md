@@ -58,3 +58,24 @@ vitest + tsc for increments; full suite + build gate before wt/vtt→main).
 - 2026-08-19: A1 authored+reviewed+closed; A2 authored+verified+closed+merged;
   unit log created retroactively at owner's direction (protocol formalized
   mid-unit; prior rounds recorded above with their deviations, not reinterpreted).
+
+## A4 — increment 2: shared resolver (lane-wt/vttres)
+
+- Candidate: lane commit merged to wt/vtt (see merge "increment 2 — shared
+  resolver, golden-verified"). Codex-implemented after one environment stall
+  (EROFS on the supervisor's read-only node_modules symlink; fixed with a real
+  npm ci, session resumed — codex's stop was correct behavior).
+- Round 1 review (supervisor, BEFORE merge): read resolution.ts/random.ts in
+  full; verified advantage = two sequential draws, strict <DC saves, crit
+  doubles dice not modifier, parameterized floors/thresholds. Register
+  #2/#4/#5/#24/#27 all discharged by the golden-parity design (fixtures
+  captured pre-change, exact outputs AND exact draw counts, 4 seeds,
+  280 calls, 45,811 draws).
+- Verified (supervisor, own runs): sim 176/176, combat 28/28, tsc app+node
+  exit 0; own negative control (rollDie value skew, distinct from ledger)
+  killed by all 4 golden tests, restored green. Ledger 9-13: codex-run,
+  named tests recorded in lane log.
+- Deviation accepted: mutation 10's briefed name was logically inverted
+  (sim ties succeed); codex tested the correct mutant (<=DC) and said so.
+- Status: CLOSED round 1. Full wt/vtt gate launched post-merge; result to be
+  read from .tmp-gate-inc2.log before any main merge.
