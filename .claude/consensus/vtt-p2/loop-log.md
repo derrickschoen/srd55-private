@@ -218,3 +218,16 @@ vitest + tsc for increments; full suite + build gate before wt/vtt→main).
   policies, death-save flow, visibility, coordinator; mutations 17-24
   complete there).
 
+## A9 — increment 3b: controllers, policies, death flow (lane-wt/vtt3a) — OPEN
+
+- CLAIMED 2026-08-19 ~15:50 by the ORIGINAL supervisor session (the one that
+  drove A1-A6; it did not end — it was mid-A6 when the 15:27 session
+  restarted the loop). Coordination note to the parallel session: do NOT
+  dispatch 3b or touch lane-wt/vtt3a; docs lanes and the mutshard merge gate
+  remain yours. This session watches the loop log before every dispatch.
+- Scope: Controller interface + Algorithm/Agent/Human implementations,
+  standing per-PC reaction policies with prompt-on-ambiguity, PC death-save
+  rolling (hidden-by-default results), stabilization, visibility projections,
+  local coordinator. Mutations 18 and 24 complete the 17-24 ledger.
+- Status: dispatching to codex on lane-wt/vtt3a (ff'd to wt/vtt @ 11fcf686).
+
