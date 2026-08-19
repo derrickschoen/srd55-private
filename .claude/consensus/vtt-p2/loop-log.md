@@ -122,7 +122,22 @@ vitest + tsc for increments; full suite + build gate before wt/vtt→main).
   brief asks for the others), an exit-cost column, and an UNVERIFIED section.
 - Review treatment: this is an owner deliverable, not a gated code artifact —
   review for honesty and sourcing, not for tests.
-- Status: IN FLIGHT. Round 0.
+- Round 1 review (supervisor): structure checked against the brief, every
+  section present. Every D-number citation I sampled resolves correctly against
+  decisions.md (D260.1/2/3/6/8, D262.8, D312.3-4, D313.1-2, D314.1/2/6-8/12,
+  D315.1-7/9-11/18). The four cited seam files exist
+  (src/vtt/{sync.ts,transports/{transport,manual,trystero}.ts}).
+- The load-bearing finding is REAL and I verified it at source: the research doc
+  prescribes moving Yjs sync to y-websocket, while the phase-2 plan line 1179
+  says `src/vtt/sync.ts`: no Phase 2 encounter authority. Read as full-document
+  Yjs replication that would violate D260.2/D260.8. Reconciled as WebSocket
+  transport, not shared authoritative state.
+- Honest where it counts: ranks Shape 3 last, calls it a trap by name, and says
+  Shape 2 is a trap if sold as a live VTT. The worked rounds are concrete enough
+  to be uncomfortable (Shape 2 turns one drag into several commands and images).
+  UNVERIFIED table catches that the research's 25-member/50-tester limits are
+  Activity-specific and do NOT transfer to bots.
+- Status: CLOSED round 1. Merged to wt/vtt (d1eb3ea2). No blocking findings.
 
 ## A8 — D315.14 clean-license art survey (lane-wt/art)
 
@@ -133,7 +148,28 @@ vitest + tsc for increments; full suite + build gate before wt/vtt→main).
   a D59 public-mirror verdict per asset, and an honest assessment of
   AI-generated imagery's provenance problem. Ambiguous licensing is a
   rejection, not an accepted risk. No asset files are downloaded or committed.
-- Status: IN FLIGHT. Round 0.
+- Round 1 review (supervisor): all six briefed sections present. Recommends one
+  external family only (per-icon Game-icons.net SVGs as token medallions) with
+  the room/terrain/fog/focus/ADJUDICATED states drawn by a checked-in
+  deterministic project renderer — fewer families, better coherence, less
+  provenance surface. Rejects Dungeon Scrawl (Pro entitlement + BY-NC layers
+  unprovable), Watabou (no immutable generator provenance), and DCSS unless
+  every file is pinned to the clean export and checked against its own
+  unknown-license list. That last one is a real trap correctly caught: "most
+  tiles are CC0" is not authorization for a particular file.
+- I verified the central D59 blocker MYSELF: game-icons.net is CC-BY-3.0 with
+  PER-ICON authorship, and this repo ships CC-BY-4.0 only — `find` returns
+  docs/licenses/CC-BY-4.0.txt as the sole licence text and NOTICE.md contains
+  zero occurrences of "3.0". So no SVG may land until the 3.0 legal code,
+  per-icon credits and dist emission exist. Consistent with the build's own
+  "2 licence texts bundled".
+- Also correctly separates MIT-on-source from the licence of committed art
+  OUTPUTS, which is the kind of gap that ships silently.
+- AI imagery rejected for this increment on provenance, not taste: no provider,
+  account or generation entitlement is selected, and "AI-generated" is not a
+  license. Distinguishes provider contract terms from a third-party-rights
+  warranty, and copyrightability from permission.
+- Status: CLOSED round 1. Merged to wt/vtt (b78fb370). No blocking findings.
 
 ## Tick history
 
