@@ -108,7 +108,27 @@ vitest + tsc for increments; full suite + build gate before wt/vtt→main).
   green, tools/sim unchanged-green with no sim file edits, both tsc configs
   exit 0, plus an independent negative control distinct from the lane's own
   ledger for mutations 17, 19-23.
-- Status: IN FLIGHT. Round 0 — no candidate frozen yet.
+- **A6 IS NOT OWNED BY THIS SESSION.** Correction to the entry above, written
+  15:41 after checking the box rather than assuming: another live Claude session
+  is supervising this lane and was mid-round-2 while this session's tick ran.
+  Evidence, all read from disk: round 1 IS committed on the lane (1ef4a6c4,
+  3,678 insertions across 12 files) with codex's own report of combat 81/81,
+  sim 176/176 unchanged, both tsc green, 15 manifest rows, mutations 17/19-23
+  killed, "Deviations: none". Then that other supervisor ran its OWN verification
+  (.tmp-v1/.tmp-v2 at 15:34, .tmp-ctl/.tmp-ctl2 at 15:35) and found a surviving
+  mutation: Paralyzed `hitsWithinFeetAreCritical` 5 -> 10 leaves all 81 tests
+  green. It dispatched a round-2 fix requiring an independently-written
+  value-pinning expectation table, and that codex was still appending to
+  .tmp-lane.log at 15:40:49 — three seconds before this check.
+- That finding is exactly failure lesson 7: the manifest coverage test proved
+  STRUCTURE, not VALUES, so a well-formed wrong number survived. It is a good
+  catch by whoever made it and it is NOT this session's to close.
+- ACTION TAKEN HERE: this session stops driving A6 entirely. Its tick prompt was
+  rewritten to forbid gating, merging, committing into, or dispatching against
+  `dnd-lane-vtt3a`, and to re-check ownership before touching any lane. Two
+  supervisors gating one worktree would race the suite against a mutation cycle
+  — the exact serialization rule in supervision.md failure lesson 20.
+- Status: IN FLIGHT under a DIFFERENT session, round 2. Not this session's unit.
 
 ## A7 — D314.14 Discord decision dossier (lane-wt/discord)
 
