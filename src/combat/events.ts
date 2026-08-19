@@ -7,7 +7,7 @@ import type {
   RollMode,
   SavingThrowResult,
 } from './resolution';
-import type { EffectApplication, TurnBoundary } from './effects';
+import type { EffectApplication, EffectPayload, TurnBoundary } from './effects';
 import type { SpellCastCommand } from './spells/types';
 import type { CombatantId, EncounterEffectId, Feet } from './values';
 
@@ -227,6 +227,7 @@ export type EncounterEvent =
       readonly caster: CombatantId;
       readonly spellId: string;
       readonly capability: string;
+      readonly effect: EffectPayload;
     })
   | (SequencedEvent & {
       readonly type: 'turn_ended';

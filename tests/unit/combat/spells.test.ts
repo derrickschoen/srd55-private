@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { EffectPayload } from '../../../src/combat/effects';
 import {
   parseSrdSpellDescriptions,
   parseSrdSpellList,
@@ -22,7 +23,10 @@ import {
 import { referencePartySpellSlots } from '../../../src/combat/spells/resources';
 import type {
   SpellCastCommand,
+  SpellCastingTime,
   SpellDefinition,
+  EffectData,
+  ScaledDice,
   SpellLevel,
 } from '../../../src/combat/spells/types';
 import { monsterProfile, placedToken, playerProfile } from './fixtures';
@@ -35,8 +39,8 @@ const EXPECTED_LEVEL_TOTALS: Readonly<Record<SpellLevel, number>> = {
   4: 30,
 };
 const EXPECTED_MANIFEST_TOTAL = 175;
-const EXPECTED_IMPLEMENTED = 33;
-const EXPECTED_PENDING = 142;
+const EXPECTED_IMPLEMENTED = 63;
+const EXPECTED_PENDING = 112;
 
 interface ValuePin {
   readonly id: string;
@@ -83,6 +87,496 @@ const VALUE_PINS: readonly ValuePin[] = [
   { id: 'shield', level: 1, operation: 'effect', rangeFeet: 0, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:6937' },
   { id: 'shield-of-faith', level: 1, operation: 'effect', rangeFeet: 60, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:6956' },
   { id: 'thunderwave', level: 1, operation: 'save_damage', rangeFeet: 0, baseDice: [2, 8], perSlotCount: 1, source: 'spell-descriptions.txt:7868' },
+  { id: 'alarm', level: 1, operation: 'utility', rangeFeet: 30, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:70' },
+  { id: 'chromatic-orb', level: 1, operation: 'attack_damage', rangeFeet: 90, baseDice: [3, 8], perSlotCount: 1, source: 'spell-descriptions.txt:1079' },
+  { id: 'color-spray', level: 1, operation: 'save_effect', rangeFeet: 0, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:1193' },
+  { id: 'command', level: 1, operation: 'save_effect', rangeFeet: 60, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:1209' },
+  { id: 'comprehend-languages', level: 1, operation: 'utility', rangeFeet: 0, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:1304' },
+  { id: 'create-or-destroy-water', level: 1, operation: 'utility', rangeFeet: 30, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:1797' },
+  { id: 'detect-evil-and-good', level: 1, operation: 'utility', rangeFeet: 0, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:2068' },
+  { id: 'detect-magic', level: 1, operation: 'utility', rangeFeet: 0, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:2085' },
+  { id: 'detect-poison-and-disease', level: 1, operation: 'utility', rangeFeet: 0, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:2103' },
+  { id: 'disguise-self', level: 1, operation: 'utility', rangeFeet: 0, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:2185' },
+  { id: 'expeditious-retreat', level: 1, operation: 'effect', rangeFeet: 0, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:2810' },
+  { id: 'feather-fall', level: 1, operation: 'effect', rangeFeet: 60, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:2964' },
+  { id: 'find-familiar', level: 1, operation: 'utility', rangeFeet: 10, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:2979' },
+  { id: 'floating-disk', level: 1, operation: 'utility', rangeFeet: 30, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:3335' },
+  { id: 'fog-cloud', level: 1, operation: 'utility', rangeFeet: 120, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:3396' },
+  { id: 'grease', level: 1, operation: 'save_effect', rangeFeet: 60, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:3883' },
+  { id: 'hideous-laughter', level: 1, operation: 'save_effect', rangeFeet: 30, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:4294' },
+  { id: 'ice-knife', level: 1, operation: 'attack_then_save_damage', rangeFeet: 60, baseDice: [2, 6], perSlotCount: 1, source: 'spell-descriptions.txt:4430' },
+  { id: 'identify', level: 1, operation: 'utility', rangeFeet: 5, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:4476' },
+  { id: 'illusory-script', level: 1, operation: 'utility', rangeFeet: 5, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:4495' },
+  { id: 'jump', level: 1, operation: 'effect', rangeFeet: 5, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:4710' },
+  { id: 'longstrider', level: 1, operation: 'effect', rangeFeet: 5, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:4904' },
+  { id: 'mage-armor', level: 1, operation: 'effect', rangeFeet: 5, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:4920' },
+  { id: 'protection-from-evil-and-good', level: 1, operation: 'effect', rangeFeet: 5, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:6337' },
+  { id: 'purify-food-and-drink', level: 1, operation: 'utility', rangeFeet: 10, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:6369' },
+  { id: 'ray-of-sickness', level: 1, operation: 'attack_damage', rangeFeet: 60, baseDice: [2, 8], perSlotCount: 1, source: 'spell-descriptions.txt:6456' },
+  { id: 'sanctuary', level: 1, operation: 'effect', rangeFeet: 30, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:6662' },
+  { id: 'silent-image', level: 1, operation: 'utility', rangeFeet: 60, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:7042' },
+  { id: 'sleep', level: 1, operation: 'save_effect', rangeFeet: 60, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:7103' },
+  { id: 'unseen-servant', level: 1, operation: 'utility', rangeFeet: 60, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:8131' },
+];
+
+interface BatchNumericPin {
+  readonly id: string;
+  readonly mechanics: readonly number[];
+  readonly source: string;
+}
+
+/** Independent numeric oracle transcribed from the cited SRD entries, never from reducer output. */
+const LEVEL_ONE_BATCH_NUMERIC_PINS: readonly BatchNumericPin[] = [
+  { id: 'alarm', mechanics: [30, 20, 0, 20, 60, 5280, 4800], source: 'spell-descriptions.txt:70' },
+  { id: 'chromatic-orb', mechanics: [90, 3, 8, 0, 1, 0], source: 'spell-descriptions.txt:1079' },
+  { id: 'color-spray', mechanics: [0, 15, 0, 2], source: 'spell-descriptions.txt:1193' },
+  { id: 'command', mechanics: [60, 1, 1, 1], source: 'spell-descriptions.txt:1209' },
+  { id: 'comprehend-languages', mechanics: [60, 600], source: 'spell-descriptions.txt:1304' },
+  { id: 'create-or-destroy-water', mechanics: [30, 30, 5, 10, 10, 30, 5], source: 'spell-descriptions.txt:1797' },
+  { id: 'detect-evil-and-good', mechanics: [30, 100], source: 'spell-descriptions.txt:2068' },
+  { id: 'detect-magic', mechanics: [30, 100], source: 'spell-descriptions.txt:2085' },
+  { id: 'detect-poison-and-disease', mechanics: [30, 100], source: 'spell-descriptions.txt:2103' },
+  { id: 'disguise-self', mechanics: [1, 600], source: 'spell-descriptions.txt:2185' },
+  { id: 'expeditious-retreat', mechanics: [100], source: 'spell-descriptions.txt:2810' },
+  { id: 'feather-fall', mechanics: [60, 5, 0, 60, 10], source: 'spell-descriptions.txt:2964' },
+  { id: 'find-familiar', mechanics: [10, 100], source: 'spell-descriptions.txt:2979' },
+  { id: 'floating-disk', mechanics: [30, 3, 3, 500, 20, 100, 600], source: 'spell-descriptions.txt:3335' },
+  { id: 'fog-cloud', mechanics: [120, 20, 20, 20, 600], source: 'spell-descriptions.txt:3396' },
+  { id: 'grease', mechanics: [60, 10, 0, 10], source: 'spell-descriptions.txt:3883' },
+  { id: 'hideous-laughter', mechanics: [30, 1, 1, 10], source: 'spell-descriptions.txt:4294' },
+  { id: 'ice-knife', mechanics: [60, 1, 10, 0, 0, 0, 2, 6, 0, 1, 0, 5], source: 'spell-descriptions.txt:4430' },
+  { id: 'identify', mechanics: [5], source: 'spell-descriptions.txt:4476' },
+  { id: 'illusory-script', mechanics: [5, 144000], source: 'spell-descriptions.txt:4495' },
+  { id: 'jump', mechanics: [5, 1, 1, 30, 10, 1, 10], source: 'spell-descriptions.txt:4710' },
+  { id: 'longstrider', mechanics: [5, 1, 1, 10, 600], source: 'spell-descriptions.txt:4904' },
+  { id: 'mage-armor', mechanics: [5, 13, 4800], source: 'spell-descriptions.txt:4920' },
+  { id: 'protection-from-evil-and-good', mechanics: [5, 100], source: 'spell-descriptions.txt:6337' },
+  { id: 'purify-food-and-drink', mechanics: [10, 5, 0, 5], source: 'spell-descriptions.txt:6369' },
+  { id: 'ray-of-sickness', mechanics: [60, 2, 8, 0, 1, 0, 2], source: 'spell-descriptions.txt:6456' },
+  { id: 'sanctuary', mechanics: [30, 10], source: 'spell-descriptions.txt:6662' },
+  { id: 'silent-image', mechanics: [60, 15, 0, 15, 100], source: 'spell-descriptions.txt:7042' },
+  { id: 'sleep', mechanics: [60, 5, 0, 10], source: 'spell-descriptions.txt:7103' },
+  { id: 'unseen-servant', mechanics: [60, 10, 1, 2, 15, 60, 600], source: 'spell-descriptions.txt:8131' },
+];
+
+function numericLeaves(value: unknown): readonly number[] {
+  if (typeof value === 'number') return [value];
+  if (value === null || typeof value !== 'object') return [];
+  return Object.values(value).flatMap(numericLeaves);
+}
+
+interface BatchComponentPin {
+  readonly id: string;
+  readonly castingTime: SpellCastingTime;
+  readonly components: 'V' | 'VS' | 'VM' | 'SM' | 'VSM';
+  readonly material: string | null;
+  readonly consumed: boolean;
+  readonly ritual?: true;
+  readonly source: string;
+}
+
+/** Independent component/casting-time oracle transcribed from the cited SRD entries. */
+const LEVEL_ONE_BATCH_COMPONENT_PINS: readonly BatchComponentPin[] = [
+  { id: 'alarm', castingTime: 'minute', components: 'VSM', material: 'a bell and silver wire', consumed: false, ritual: true, source: 'spell-descriptions.txt:70' },
+  { id: 'chromatic-orb', castingTime: 'action', components: 'VSM', material: 'a diamond worth 50+ GP', consumed: false, source: 'spell-descriptions.txt:1079' },
+  { id: 'color-spray', castingTime: 'action', components: 'VSM', material: 'a pinch of colorful sand', consumed: false, source: 'spell-descriptions.txt:1193' },
+  { id: 'command', castingTime: 'action', components: 'V', material: null, consumed: false, source: 'spell-descriptions.txt:1209' },
+  { id: 'comprehend-languages', castingTime: 'action', components: 'VSM', material: 'a pinch of soot and salt', consumed: false, ritual: true, source: 'spell-descriptions.txt:1304' },
+  { id: 'create-or-destroy-water', castingTime: 'action', components: 'VSM', material: 'a mix of water and sand', consumed: false, source: 'spell-descriptions.txt:1797' },
+  { id: 'detect-evil-and-good', castingTime: 'action', components: 'VS', material: null, consumed: false, source: 'spell-descriptions.txt:2068' },
+  { id: 'detect-magic', castingTime: 'action', components: 'VS', material: null, consumed: false, ritual: true, source: 'spell-descriptions.txt:2085' },
+  { id: 'detect-poison-and-disease', castingTime: 'action', components: 'VSM', material: 'a yew leaf', consumed: false, ritual: true, source: 'spell-descriptions.txt:2103' },
+  { id: 'disguise-self', castingTime: 'action', components: 'VS', material: null, consumed: false, source: 'spell-descriptions.txt:2185' },
+  { id: 'expeditious-retreat', castingTime: 'bonus_action', components: 'VS', material: null, consumed: false, source: 'spell-descriptions.txt:2810' },
+  { id: 'feather-fall', castingTime: 'reaction', components: 'VM', material: 'a small feather or piece of down', consumed: false, source: 'spell-descriptions.txt:2964' },
+  { id: 'find-familiar', castingTime: 'hour', components: 'VSM', material: 'burning incense worth 10+ GP', consumed: true, ritual: true, source: 'spell-descriptions.txt:2979' },
+  { id: 'floating-disk', castingTime: 'action', components: 'VSM', material: 'a drop of mercury', consumed: false, ritual: true, source: 'spell-descriptions.txt:3335' },
+  { id: 'fog-cloud', castingTime: 'action', components: 'VS', material: null, consumed: false, source: 'spell-descriptions.txt:3396' },
+  { id: 'grease', castingTime: 'action', components: 'VSM', material: 'a bit of pork rind or butter', consumed: false, source: 'spell-descriptions.txt:3883' },
+  { id: 'hideous-laughter', castingTime: 'action', components: 'VSM', material: 'a tart and a feather', consumed: false, source: 'spell-descriptions.txt:4294' },
+  { id: 'ice-knife', castingTime: 'action', components: 'SM', material: 'a drop of water or a piece of ice', consumed: false, source: 'spell-descriptions.txt:4430' },
+  { id: 'identify', castingTime: 'minute', components: 'VSM', material: 'a pearl worth 100+ GP', consumed: false, ritual: true, source: 'spell-descriptions.txt:4476' },
+  { id: 'illusory-script', castingTime: 'minute', components: 'SM', material: 'ink worth 10+ GP', consumed: true, ritual: true, source: 'spell-descriptions.txt:4495' },
+  { id: 'jump', castingTime: 'bonus_action', components: 'VSM', material: 'a grasshopper\'s hind leg', consumed: false, source: 'spell-descriptions.txt:4710' },
+  { id: 'longstrider', castingTime: 'action', components: 'VSM', material: 'a pinch of dirt', consumed: false, source: 'spell-descriptions.txt:4904' },
+  { id: 'mage-armor', castingTime: 'action', components: 'VSM', material: 'a piece of cured leather', consumed: false, source: 'spell-descriptions.txt:4920' },
+  { id: 'protection-from-evil-and-good', castingTime: 'action', components: 'VSM', material: 'a flask of Holy Water worth 25+ GP', consumed: true, source: 'spell-descriptions.txt:6337' },
+  { id: 'purify-food-and-drink', castingTime: 'action', components: 'VS', material: null, consumed: false, ritual: true, source: 'spell-descriptions.txt:6369' },
+  { id: 'ray-of-sickness', castingTime: 'action', components: 'VS', material: null, consumed: false, source: 'spell-descriptions.txt:6456' },
+  { id: 'sanctuary', castingTime: 'bonus_action', components: 'VSM', material: 'a shard of glass from a mirror', consumed: false, source: 'spell-descriptions.txt:6662' },
+  { id: 'silent-image', castingTime: 'action', components: 'VSM', material: 'a bit of fleece', consumed: false, source: 'spell-descriptions.txt:7042' },
+  { id: 'sleep', castingTime: 'action', components: 'VSM', material: 'a pinch of sand or rose petals', consumed: false, source: 'spell-descriptions.txt:7103' },
+  { id: 'unseen-servant', castingTime: 'action', components: 'VSM', material: 'a bit of string and of wood', consumed: false, ritual: true, source: 'spell-descriptions.txt:8131' },
+];
+
+function componentCode(definition: SpellDefinition): BatchComponentPin['components'] {
+  const code = `${definition.components.verbal ? 'V' : ''}${definition.components.somatic ? 'S' : ''}${definition.components.material === null ? '' : 'M'}`;
+  if (code === 'V' || code === 'VS' || code === 'VM' || code === 'SM' || code === 'VSM') return code;
+  throw new Error(`Unexpected component combination ${code}.`);
+}
+
+interface CompleteMechanicsPin {
+  readonly id: string;
+  readonly source: string;
+  readonly targeting: SpellDefinition['targeting'];
+  readonly operation: SpellDefinition['operation'];
+}
+
+function pinnedDice(
+  baseCount: number,
+  sides: number,
+  options: {
+    readonly modifier?: number;
+    readonly perSlotCount?: number;
+    readonly perSlotModifier?: number;
+    readonly cantripUpgrade?: boolean;
+  } = {},
+): ScaledDice {
+  return {
+    baseCount,
+    sides,
+    modifier: options.modifier ?? 0,
+    perSlotCount: options.perSlotCount ?? 0,
+    perSlotModifier: options.perSlotModifier ?? 0,
+    cantripUpgrade: options.cantripUpgrade ?? false,
+  };
+}
+
+function pinnedEffect(
+  payload: EffectPayload,
+  options: {
+    readonly target?: 'self' | 'targets';
+    readonly concentration?: boolean;
+    readonly durationRounds?: number | null;
+    readonly expiresAt?: EffectData['expiresAt'];
+  } = {},
+): EffectData {
+  return {
+    payload,
+    target: options.target ?? 'targets',
+    concentration: options.concentration ?? false,
+    durationRounds: options.durationRounds ?? 1,
+    expiresAt: options.expiresAt ?? 'source_start',
+  };
+}
+
+/** Exact SRD-transcribed mechanics oracle: no definition operation leaf is projected away. */
+const COMPLETE_MECHANICS_PINS: readonly CompleteMechanicsPin[] = [
+  {
+    id: 'acid-splash', source: 'spell-descriptions.txt:37-51',
+    targeting: { kind: 'area', rangeFeet: 60, shape: 'sphere', baseSizeFeet: 5, sizePerSlotFeet: 0 },
+    operation: { kind: 'save_damage', ability: 'dexterity', onSuccess: 'none', damageType: damageType('Acid'), dice: pinnedDice(1, 6, { cantripUpgrade: true }), riderOnFailure: null, pushFeetOnFailure: 0 },
+  },
+  {
+    id: 'chill-touch', source: 'spell-descriptions.txt:1066',
+    targeting: { kind: 'single', rangeFeet: 5, willing: false },
+    operation: { kind: 'attack_damage', attackKind: 'melee', damageType: damageType('Necrotic'), dice: pinnedDice(1, 10, { cantripUpgrade: true }), rider: pinnedEffect({ kind: 'cannot_regain_hit_points' }) },
+  },
+  {
+    id: 'dancing-lights', source: 'spell-descriptions.txt:1906',
+    targeting: { kind: 'utility', rangeFeet: 120 },
+    operation: { kind: 'utility', effect: { kind: 'light_source', brightFeet: 0, dimFeet: 10, maximumLights: 4, moveFeetPerBonusAction: 60 }, concentration: true, durationRounds: 10 },
+  },
+  {
+    id: 'elementalism', source: 'spell-descriptions.txt:2630',
+    targeting: { kind: 'utility', rangeFeet: 30 },
+    operation: { kind: 'utility', effect: { kind: 'minor_magic', spell: 'Elementalism', options: ['beckon_air', 'beckon_earth', 'beckon_fire', 'beckon_water', 'sculpt_element'], maximumActive: 1 }, concentration: false, durationRounds: null },
+  },
+  {
+    id: 'fire-bolt', source: 'spell-descriptions.txt:3184-3200',
+    targeting: { kind: 'single', rangeFeet: 120, willing: false },
+    operation: { kind: 'attack_damage', attackKind: 'ranged', damageType: damageType('Fire'), dice: pinnedDice(1, 10, { cantripUpgrade: true }), rider: null },
+  },
+  {
+    id: 'guidance', source: 'spell-descriptions.txt:4000',
+    targeting: { kind: 'single', rangeFeet: 5, willing: true },
+    operation: { kind: 'effect', effect: pinnedEffect({ kind: 'ability_check_modifier', count: 1, sides: 4, sign: 1, skill: 'chosen_when_cast' }, { concentration: true, durationRounds: 10 }) },
+  },
+  {
+    id: 'light', source: 'spell-descriptions.txt:4816',
+    targeting: { kind: 'utility', rangeFeet: 5 },
+    operation: { kind: 'utility', effect: { kind: 'light_source', brightFeet: 20, dimFeet: 20, maximumLights: 1, moveFeetPerBonusAction: 0 }, concentration: false, durationRounds: 600 },
+  },
+  {
+    id: 'mage-hand', source: 'spell-descriptions.txt:4931',
+    targeting: { kind: 'utility', rangeFeet: 30 },
+    operation: { kind: 'utility', effect: { kind: 'conjured_hand', maximumDistanceFeet: 30, moveFeetPerAction: 30, carryPounds: 10 }, concentration: false, durationRounds: 10 },
+  },
+  {
+    id: 'mending', source: 'spell-descriptions.txt:5322',
+    targeting: { kind: 'utility', rangeFeet: 5 },
+    operation: { kind: 'utility', effect: { kind: 'object_repair', maximumBreakFeet: 1, restoresMagic: false }, concentration: false, durationRounds: null },
+  },
+  {
+    id: 'message', source: 'spell-descriptions.txt:5341',
+    targeting: { kind: 'single', rangeFeet: 120, willing: false },
+    operation: { kind: 'utility', effect: { kind: 'communication_link', rangeFeet: 120, permitsReply: true, blockedByMagicalSilence: true }, concentration: false, durationRounds: 1 },
+  },
+  {
+    id: 'minor-illusion', source: 'spell-descriptions.txt:5420',
+    targeting: { kind: 'utility', rangeFeet: 30 },
+    operation: { kind: 'utility', effect: { kind: 'illusion', modes: ['sound', 'image'], maximumCubeFeet: 5 }, concentration: false, durationRounds: 10 },
+  },
+  {
+    id: 'poison-spray', source: 'spell-descriptions.txt:5925',
+    targeting: { kind: 'single', rangeFeet: 30, willing: false },
+    operation: { kind: 'attack_damage', attackKind: 'ranged', damageType: damageType('Poison'), dice: pinnedDice(1, 12, { cantripUpgrade: true }), rider: null },
+  },
+  {
+    id: 'prestidigitation', source: 'spell-descriptions.txt:6034',
+    targeting: { kind: 'utility', rangeFeet: 10 },
+    operation: { kind: 'utility', effect: { kind: 'minor_magic', spell: 'Prestidigitation', options: ['sensory', 'fire_play', 'clean_or_soil', 'minor_sensation', 'magic_mark', 'minor_creation'], maximumActive: 3 }, concentration: false, durationRounds: 600 },
+  },
+  {
+    id: 'ray-of-frost', source: 'spell-descriptions.txt:6427',
+    targeting: { kind: 'single', rangeFeet: 60, willing: false },
+    operation: { kind: 'attack_damage', attackKind: 'ranged', damageType: damageType('Cold'), dice: pinnedDice(1, 8, { cantripUpgrade: true }), rider: pinnedEffect({ kind: 'movement_modifier', speedDeltaFeet: -10 }) },
+  },
+  {
+    id: 'resistance', source: 'spell-descriptions.txt:6540',
+    targeting: { kind: 'single', rangeFeet: 5, willing: true },
+    operation: { kind: 'effect', effect: pinnedEffect({ kind: 'damage_reduction', damageType: 'chosen_when_cast', count: 1, sides: 4, oncePerTurn: true }, { concentration: true, durationRounds: 10 }) },
+  },
+  {
+    id: 'sacred-flame', source: 'spell-descriptions.txt:6645',
+    targeting: { kind: 'single', rangeFeet: 60, willing: false },
+    operation: { kind: 'save_damage', ability: 'dexterity', onSuccess: 'none', damageType: damageType('Radiant'), dice: pinnedDice(1, 8, { cantripUpgrade: true }), riderOnFailure: null, pushFeetOnFailure: 0 },
+  },
+  {
+    id: 'shocking-grasp', source: 'spell-descriptions.txt:7006',
+    targeting: { kind: 'single', rangeFeet: 5, willing: false },
+    operation: { kind: 'attack_damage', attackKind: 'melee', damageType: damageType('Lightning'), dice: pinnedDice(1, 8, { cantripUpgrade: true }), rider: pinnedEffect({ kind: 'opportunity_attacks_disabled' }) },
+  },
+  {
+    id: 'spare-the-dying', source: 'spell-descriptions.txt:7181',
+    targeting: { kind: 'single', rangeFeet: 30, willing: true },
+    operation: { kind: 'stabilize' },
+  },
+  {
+    id: 'thaumaturgy', source: 'spell-descriptions.txt:7842',
+    targeting: { kind: 'utility', rangeFeet: 30 },
+    operation: { kind: 'utility', effect: { kind: 'minor_magic', spell: 'Thaumaturgy', options: ['altered_eyes', 'booming_voice', 'fire_play', 'invisible_hand', 'phantom_sound', 'tremors'], maximumActive: 3 }, concentration: false, durationRounds: 10 },
+  },
+  {
+    id: 'true-strike', source: 'spell-descriptions.txt:8079',
+    targeting: { kind: 'single', rangeFeet: 5, willing: false },
+    operation: { kind: 'weapon_attack', extraDamage: pinnedDice(0, 6, { cantripUpgrade: true }), extraDamageType: damageType('Radiant') },
+  },
+  {
+    id: 'bane', source: 'spell-descriptions.txt:670',
+    targeting: { kind: 'multiple', rangeFeet: 30, baseMaximum: 3, additionalPerSlot: 1 },
+    operation: { kind: 'save_effect', ability: 'charisma', rollMode: 'normal', effect: pinnedEffect({ kind: 'd20_test_modifier', tests: ['attack_roll', 'saving_throw'], count: 1, sides: 4, sign: -1 }, { concentration: true, durationRounds: 10 }) },
+  },
+  {
+    id: 'charm-person', source: 'spell-descriptions.txt:1046',
+    targeting: { kind: 'multiple', rangeFeet: 30, baseMaximum: 1, additionalPerSlot: 1 },
+    operation: { kind: 'save_effect', ability: 'wisdom', rollMode: 'advantage', effect: pinnedEffect({ kind: 'condition', condition: 'Charmed' }, { durationRounds: 600 }) },
+  },
+  {
+    id: 'bless', source: 'spell-descriptions.txt:824',
+    targeting: { kind: 'multiple', rangeFeet: 30, baseMaximum: 3, additionalPerSlot: 1 },
+    operation: { kind: 'effect', effect: pinnedEffect({ kind: 'd20_test_modifier', tests: ['attack_roll', 'saving_throw'], count: 1, sides: 4, sign: 1 }, { concentration: true, durationRounds: 10 }) },
+  },
+  {
+    id: 'burning-hands', source: 'spell-descriptions.txt:924',
+    targeting: { kind: 'area', rangeFeet: 0, shape: 'cone', baseSizeFeet: 15, sizePerSlotFeet: 0 },
+    operation: { kind: 'save_damage', ability: 'dexterity', onSuccess: 'half', damageType: damageType('Fire'), dice: pinnedDice(3, 6, { perSlotCount: 1 }), riderOnFailure: null, pushFeetOnFailure: 0 },
+  },
+  {
+    id: 'cure-wounds', source: 'spell-descriptions.txt:1895',
+    targeting: { kind: 'single', rangeFeet: 5, willing: true },
+    operation: { kind: 'healing', dice: pinnedDice(2, 8, { perSlotCount: 2 }), addSpellcastingModifier: true },
+  },
+  {
+    id: 'false-life', source: 'spell-descriptions.txt:2930',
+    targeting: { kind: 'self' },
+    operation: { kind: 'temporary_hit_points', dice: pinnedDice(2, 4, { modifier: 4, perSlotModifier: 5 }) },
+  },
+  {
+    id: 'guiding-bolt', source: 'spell-descriptions.txt:4011',
+    targeting: { kind: 'single', rangeFeet: 120, willing: false },
+    operation: { kind: 'attack_damage', attackKind: 'ranged', damageType: damageType('Radiant'), dice: pinnedDice(4, 6, { perSlotCount: 1 }), rider: pinnedEffect({ kind: 'attack_roll_mode_modifier', mode: 'advantage', appliesTo: 'next_attack_against_target' }) },
+  },
+  {
+    id: 'healing-word', source: 'spell-descriptions.txt:4169',
+    targeting: { kind: 'single', rangeFeet: 60, willing: true },
+    operation: { kind: 'healing', dice: pinnedDice(2, 4, { perSlotCount: 2 }), addSpellcastingModifier: true },
+  },
+  {
+    id: 'inflict-wounds', source: 'spell-descriptions.txt:4593',
+    targeting: { kind: 'single', rangeFeet: 5, willing: false },
+    operation: { kind: 'save_damage', ability: 'constitution', onSuccess: 'half', damageType: damageType('Necrotic'), dice: pinnedDice(2, 10, { perSlotCount: 1 }), riderOnFailure: null, pushFeetOnFailure: 0 },
+  },
+  {
+    id: 'magic-missile', source: 'spell-descriptions.txt:5033',
+    targeting: { kind: 'multiple', rangeFeet: 120, baseMaximum: 3, additionalPerSlot: 1 },
+    operation: { kind: 'magic_missiles', baseDarts: 3, additionalPerSlot: 1, damageType: damageType('Force'), dice: pinnedDice(1, 4, { modifier: 1 }) },
+  },
+  {
+    id: 'shield', source: 'spell-descriptions.txt:6937',
+    targeting: { kind: 'self' },
+    operation: { kind: 'effect', effect: pinnedEffect({ kind: 'shield_defense', armorClassBonus: 5, magicMissileImmune: true }, { target: 'self', durationRounds: 1 }) },
+  },
+  {
+    id: 'shield-of-faith', source: 'spell-descriptions.txt:6956',
+    targeting: { kind: 'single', rangeFeet: 60, willing: true },
+    operation: { kind: 'effect', effect: pinnedEffect({ kind: 'armor_class_modifier', amount: 2 }, { concentration: true, durationRounds: 100 }) },
+  },
+  {
+    id: 'thunderwave', source: 'spell-descriptions.txt:7868',
+    targeting: { kind: 'area', rangeFeet: 0, shape: 'cube', baseSizeFeet: 15, sizePerSlotFeet: 0 },
+    operation: { kind: 'save_damage', ability: 'constitution', onSuccess: 'half', damageType: damageType('Thunder'), dice: pinnedDice(2, 8, { perSlotCount: 1 }), riderOnFailure: null, pushFeetOnFailure: 10 },
+  },
+  {
+    id: 'alarm', source: 'spell-descriptions.txt:70',
+    targeting: { kind: 'area', rangeFeet: 30, shape: 'cube', baseSizeFeet: 20, sizePerSlotFeet: 0 },
+    operation: { kind: 'utility', effect: { kind: 'alarm_ward', placement: 'selected_when_cast', maximumCubeFeet: 20, audibleRangeFeet: 60, mentalRangeFeet: 5280 }, concentration: false, durationRounds: 4800 },
+  },
+  {
+    id: 'chromatic-orb', source: 'spell-descriptions.txt:1079',
+    targeting: { kind: 'single', rangeFeet: 90, willing: false },
+    operation: { kind: 'attack_damage', attackKind: 'ranged', damageType: [damageType('Acid'), damageType('Cold'), damageType('Fire'), damageType('Lightning'), damageType('Poison'), damageType('Thunder')], dice: pinnedDice(3, 8, { perSlotCount: 1 }), rider: null },
+  },
+  {
+    id: 'color-spray', source: 'spell-descriptions.txt:1193',
+    targeting: { kind: 'area', rangeFeet: 0, shape: 'cone', baseSizeFeet: 15, sizePerSlotFeet: 0 },
+    operation: { kind: 'save_effect', ability: 'constitution', rollMode: 'normal', effect: pinnedEffect({ kind: 'condition', condition: 'Blinded' }, { durationRounds: 2, expiresAt: 'source_end' }) },
+  },
+  {
+    id: 'command', source: 'spell-descriptions.txt:1209',
+    targeting: { kind: 'multiple', rangeFeet: 60, baseMaximum: 1, additionalPerSlot: 1 },
+    operation: { kind: 'save_effect', ability: 'wisdom', rollMode: 'normal', effect: pinnedEffect({ kind: 'commanded_action', options: ['approach', 'drop', 'flee', 'grovel', 'halt'] }, { durationRounds: 1, expiresAt: 'target_end' }) },
+  },
+  {
+    id: 'comprehend-languages', source: 'spell-descriptions.txt:1304',
+    targeting: { kind: 'self' },
+    operation: { kind: 'utility', effect: { kind: 'language_comprehension', secondsPerPage: 60, decodesSecretMessages: false }, concentration: false, durationRounds: 600 },
+  },
+  {
+    id: 'create-or-destroy-water', source: 'spell-descriptions.txt:1797',
+    targeting: { kind: 'area', rangeFeet: 30, shape: 'cube', baseSizeFeet: 30, sizePerSlotFeet: 5 },
+    operation: { kind: 'utility', effect: { kind: 'environmental_water', placement: 'selected_when_cast', gallons: 10, gallonsPerSlot: 10, cubeFeet: 30, cubeFeetPerSlot: 5 }, concentration: false, durationRounds: null },
+  },
+  {
+    id: 'detect-evil-and-good', source: 'spell-descriptions.txt:2068',
+    targeting: { kind: 'self' },
+    operation: { kind: 'utility', effect: { kind: 'detection_sense', detects: 'creature_types_and_hallow', radiusFeet: 30 }, concentration: true, durationRounds: 100 },
+  },
+  {
+    id: 'detect-magic', source: 'spell-descriptions.txt:2085',
+    targeting: { kind: 'self' },
+    operation: { kind: 'utility', effect: { kind: 'detection_sense', detects: 'magic', radiusFeet: 30 }, concentration: true, durationRounds: 100 },
+  },
+  {
+    id: 'detect-poison-and-disease', source: 'spell-descriptions.txt:2103',
+    targeting: { kind: 'self' },
+    operation: { kind: 'utility', effect: { kind: 'detection_sense', detects: 'poison_and_disease', radiusFeet: 30 }, concentration: true, durationRounds: 100 },
+  },
+  {
+    id: 'disguise-self', source: 'spell-descriptions.txt:2185',
+    targeting: { kind: 'self' },
+    operation: { kind: 'utility', effect: { kind: 'appearance_illusion', maximumHeightChangeFeet: 1, investigationAgainstSpellDc: true }, concentration: false, durationRounds: 600 },
+  },
+  {
+    id: 'expeditious-retreat', source: 'spell-descriptions.txt:2810',
+    targeting: { kind: 'self' },
+    operation: { kind: 'effect', effect: pinnedEffect({ kind: 'bonus_action_dash', immediateDash: true }, { target: 'self', concentration: true, durationRounds: 100 }) },
+  },
+  {
+    id: 'feather-fall', source: 'spell-descriptions.txt:2964',
+    targeting: { kind: 'multiple', rangeFeet: 60, baseMaximum: 5, additionalPerSlot: 0 },
+    operation: { kind: 'effect', effect: pinnedEffect({ kind: 'falling_protection', descentFeetPerRound: 60, preventsLandingDamage: true }, { durationRounds: 10 }) },
+  },
+  {
+    id: 'find-familiar', source: 'spell-descriptions.txt:2979',
+    targeting: { kind: 'utility', rangeFeet: 10 },
+    operation: { kind: 'utility', effect: { kind: 'summoned_familiar', forms: ['Bat', 'Cat', 'Frog', 'Hawk', 'Lizard', 'Octopus', 'Owl', 'Rat', 'Raven', 'Spider', 'Weasel', 'other CR 0 Beast'], telepathyFeet: 100 }, concentration: false, durationRounds: null, stateful: true },
+  },
+  {
+    id: 'floating-disk', source: 'spell-descriptions.txt:3335',
+    targeting: { kind: 'utility', rangeFeet: 30 },
+    operation: { kind: 'utility', effect: { kind: 'floating_disk', diameterFeet: 3, heightFeet: 3, capacityPounds: 500, followDistanceFeet: 20, maximumDistanceFeet: 100 }, concentration: false, durationRounds: 600 },
+  },
+  {
+    id: 'fog-cloud', source: 'spell-descriptions.txt:3396',
+    targeting: { kind: 'area', rangeFeet: 120, shape: 'sphere', baseSizeFeet: 20, sizePerSlotFeet: 20 },
+    operation: { kind: 'utility', effect: { kind: 'obscured_area', placement: 'selected_when_cast', radiusFeet: 20, obscurement: 'heavy', dispersedByStrongWind: true }, concentration: true, durationRounds: 600 },
+  },
+  {
+    id: 'grease', source: 'spell-descriptions.txt:3883',
+    targeting: { kind: 'area', rangeFeet: 60, shape: 'cube', baseSizeFeet: 10, sizePerSlotFeet: 0 },
+    operation: { kind: 'save_effect', ability: 'dexterity', rollMode: 'normal', effect: pinnedEffect({ kind: 'condition', condition: 'Prone' }, { durationRounds: 10, expiresAt: 'target_end' }) },
+  },
+  {
+    id: 'hideous-laughter', source: 'spell-descriptions.txt:4294',
+    targeting: { kind: 'multiple', rangeFeet: 30, baseMaximum: 1, additionalPerSlot: 1 },
+    operation: { kind: 'save_effect', ability: 'wisdom', rollMode: 'normal', effect: pinnedEffect({ kind: 'condition_bundle', conditions: ['Prone', 'Incapacitated'] }, { concentration: true, durationRounds: 10, expiresAt: 'target_end' }) },
+  },
+  {
+    id: 'ice-knife', source: 'spell-descriptions.txt:4430',
+    targeting: { kind: 'single', rangeFeet: 60, willing: false },
+    operation: { kind: 'attack_then_save_damage', attackKind: 'ranged', attackDamageType: damageType('Piercing'), attackDice: pinnedDice(1, 10), saveAbility: 'dexterity', saveDamageType: damageType('Cold'), saveDice: pinnedDice(2, 6, { perSlotCount: 1 }), onSaveSuccess: 'none', burstShape: 'sphere', burstRadiusFeet: 5 },
+  },
+  {
+    id: 'identify', source: 'spell-descriptions.txt:4476',
+    targeting: { kind: 'utility', rangeFeet: 5 },
+    operation: { kind: 'utility', effect: { kind: 'magic_identification', identifiesPropertiesChargesAndSpells: true }, concentration: false, durationRounds: null },
+  },
+  {
+    id: 'illusory-script', source: 'spell-descriptions.txt:4495',
+    targeting: { kind: 'utility', rangeFeet: 5 },
+    operation: { kind: 'utility', effect: { kind: 'illusory_script', truesightReadsHiddenMessage: true }, concentration: false, durationRounds: 144000 },
+  },
+  {
+    id: 'jump', source: 'spell-descriptions.txt:4710',
+    targeting: { kind: 'multiple', rangeFeet: 5, baseMaximum: 1, additionalPerSlot: 1 },
+    operation: { kind: 'effect', effect: pinnedEffect({ kind: 'jump_movement', jumpFeet: 30, movementCostFeet: 10, usesPerTurn: 1 }, { durationRounds: 10 }) },
+  },
+  {
+    id: 'longstrider', source: 'spell-descriptions.txt:4904',
+    targeting: { kind: 'multiple', rangeFeet: 5, baseMaximum: 1, additionalPerSlot: 1 },
+    operation: { kind: 'effect', effect: pinnedEffect({ kind: 'movement_modifier', speedDeltaFeet: 10 }, { durationRounds: 600 }) },
+  },
+  {
+    id: 'mage-armor', source: 'spell-descriptions.txt:4920',
+    targeting: { kind: 'single', rangeFeet: 5, willing: true },
+    operation: { kind: 'effect', effect: pinnedEffect({ kind: 'base_armor_class', base: 13, addsDexterityModifier: true, requiresUnarmored: true }, { durationRounds: 4800 }) },
+  },
+  {
+    id: 'protection-from-evil-and-good', source: 'spell-descriptions.txt:6337',
+    targeting: { kind: 'single', rangeFeet: 5, willing: true },
+    operation: { kind: 'effect', effect: pinnedEffect({ kind: 'creature_type_protection', creatureTypes: ['Aberration', 'Celestial', 'Elemental', 'Fey', 'Fiend', 'Undead'] }, { concentration: true, durationRounds: 100 }) },
+  },
+  {
+    id: 'purify-food-and-drink', source: 'spell-descriptions.txt:6369',
+    targeting: { kind: 'area', rangeFeet: 10, shape: 'sphere', baseSizeFeet: 5, sizePerSlotFeet: 0 },
+    operation: { kind: 'utility', effect: { kind: 'food_purification', placement: 'selected_when_cast', radiusFeet: 5, removesPoisonAndRot: true }, concentration: false, durationRounds: null },
+  },
+  {
+    id: 'ray-of-sickness', source: 'spell-descriptions.txt:6456',
+    targeting: { kind: 'single', rangeFeet: 60, willing: false },
+    operation: { kind: 'attack_damage', attackKind: 'ranged', damageType: damageType('Poison'), dice: pinnedDice(2, 8, { perSlotCount: 1 }), rider: pinnedEffect({ kind: 'condition', condition: 'Poisoned' }, { durationRounds: 2, expiresAt: 'source_end' }) },
+  },
+  {
+    id: 'sanctuary', source: 'spell-descriptions.txt:6662',
+    targeting: { kind: 'single', rangeFeet: 30, willing: true },
+    operation: { kind: 'effect', effect: pinnedEffect({ kind: 'sanctuary', saveAbility: 'wisdom' }, { durationRounds: 10 }) },
+  },
+  {
+    id: 'silent-image', source: 'spell-descriptions.txt:7042',
+    targeting: { kind: 'area', rangeFeet: 60, shape: 'cube', baseSizeFeet: 15, sizePerSlotFeet: 0 },
+    operation: { kind: 'utility', effect: { kind: 'image_illusion', placement: 'selected_when_cast', maximumCubeFeet: 15, movableByMagicAction: true, investigationAgainstSpellDc: true }, concentration: true, durationRounds: 100 },
+  },
+  {
+    id: 'sleep', source: 'spell-descriptions.txt:7103',
+    targeting: { kind: 'area', rangeFeet: 60, shape: 'sphere', baseSizeFeet: 5, sizePerSlotFeet: 0 },
+    operation: { kind: 'save_effect', ability: 'wisdom', rollMode: 'normal', effect: pinnedEffect({ kind: 'sleep_sequence', initial: 'Incapacitated', failedRepeat: 'Unconscious' }, { concentration: true, durationRounds: 10, expiresAt: 'target_end' }), excludeCaster: true },
+  },
+  {
+    id: 'unseen-servant', source: 'spell-descriptions.txt:8131',
+    targeting: { kind: 'utility', rangeFeet: 60 },
+    operation: { kind: 'utility', effect: { kind: 'unseen_servant', armorClass: 10, hitPoints: 1, strength: 2, moveFeetPerBonusAction: 15, maximumDistanceFeet: 60 }, concentration: false, durationRounds: 600 },
+  },
 ];
 
 function definitionRange(definition: SpellDefinition): number {
@@ -98,6 +592,8 @@ function operationDice(definition: SpellDefinition): readonly [number, number] |
     case 'temporary_hit_points':
     case 'magic_missiles':
       return [operation.dice.baseCount, operation.dice.sides];
+    case 'attack_then_save_damage':
+      return [operation.saveDice.baseCount, operation.saveDice.sides];
     case 'weapon_attack':
       return [operation.extraDamage.baseCount, operation.extraDamage.sides];
     case 'effect':
@@ -116,6 +612,8 @@ function operationPerSlot(definition: SpellDefinition): number {
     case 'healing':
     case 'temporary_hit_points':
       return operation.dice.perSlotCount;
+    case 'attack_then_save_damage':
+      return operation.saveDice.perSlotCount;
     case 'magic_missiles':
       return operation.dice.perSlotCount;
     case 'weapon_attack':
@@ -128,17 +626,27 @@ function operationPerSlot(definition: SpellDefinition): number {
   }
 }
 
-function areaFor(id: string): SpellCastCommand['area'] {
-  if (id === 'acid-splash') {
+function areaFor(definition: SpellDefinition, slotLevel: number | null): SpellCastCommand['area'] {
+  if (definition.id === 'ice-knife') {
     return { shape: 'sphere', template: { origin: feetPoint(10, 10), radius: feet(5) } };
   }
-  if (id === 'burning-hands') {
-    return { shape: 'cone', template: { origin: feetPoint(5, 5), direction: { x: 1, y: 0 }, length: feet(15), includeOrigin: false } };
+  if (definition.targeting.kind !== 'area') return null;
+  const size = definition.targeting.baseSizeFeet + definition.targeting.sizePerSlotFeet *
+    ((slotLevel ?? definition.level) - definition.level);
+  switch (definition.targeting.shape) {
+    case 'sphere':
+      return { shape: 'sphere', template: { origin: feetPoint(10, 10), radius: feet(size) } };
+    case 'cone':
+      return { shape: 'cone', template: { origin: feetPoint(5, 5), direction: { x: 1, y: 0 }, length: feet(size), includeOrigin: false } };
+    case 'cube': {
+      const center = Math.ceil((size / 2) / 5) * 5;
+      return { shape: 'cube', template: { origin: feetPoint(center - size / 2, center), center: feetPoint(center, center), axis: { x: 1, y: 0 }, size: feet(size), includeOrigin: false } };
+    }
+    case 'line':
+    case 'cylinder':
+    case 'emanation':
+      throw new Error(`No level-1 batch fixture for ${definition.targeting.shape}.`);
   }
-  if (id === 'thunderwave') {
-    return { shape: 'cube', template: { origin: feetPoint(2.5, 5), center: feetPoint(10, 5), axis: { x: 1, y: 0 }, size: feet(15), includeOrigin: false } };
-  }
-  return null;
 }
 
 function castCommand(
@@ -160,16 +668,19 @@ function castCommand(
     actor: caster.id,
     spellId: definition.id,
     slotLevel,
+    castAsRitual: false,
     casterLevel: 7,
     attackBonus: 100,
     saveDc: 100,
     spellcastingModifier: 3,
     targets,
-    area: areaFor(definition.id),
+    area: areaFor(definition, slotLevel),
     weaponAttack: definition.id === 'true-strike'
       ? { attackBonus: 100, damageType: damageType('Slashing'), damageCount: 1, damageSides: 8, damageModifier: 3 }
       : null,
-    selectedOption: definition.id === 'resistance' ? 'Fire' : definition.id === 'guidance' ? 'Arcana' : null,
+    selectedOption: definition.id === 'resistance' || definition.id === 'chromatic-orb'
+      ? 'Fire'
+      : definition.id === 'guidance' ? 'Arcana' : null,
   };
 }
 
@@ -193,7 +704,7 @@ function fixture(definition: SpellDefinition): {
     combatants: [caster, target],
     tokens: [placedToken(caster, 0, 1), placedToken(target, 1, 1)],
   });
-  if (definition.castingTime !== 'minute') {
+  if (definition.castingTime !== 'minute' && definition.castingTime !== 'hour') {
     state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
   }
   if (definition.operation.kind === 'healing') {
@@ -246,7 +757,7 @@ describe('reference-party spell manifest', () => {
     }
   });
 
-  it('pins the burn-down at exactly 33 implemented and 142 pending rows', () => {
+  it('pins the burn-down at exactly 63 implemented and 112 pending rows', () => {
     expect(SPELL_MANIFEST.filter((row) => row.status === 'implemented')).toHaveLength(EXPECTED_IMPLEMENTED);
     expect(SPELL_MANIFEST.filter((row) => row.status === 'pending')).toHaveLength(EXPECTED_PENDING);
     expect(IMPLEMENTED_SPELL_DEFINITIONS).toHaveLength(EXPECTED_IMPLEMENTED);
@@ -264,6 +775,22 @@ describe('reference-party spell manifest', () => {
 });
 
 describe('spell foundations and implemented value pins', () => {
+  it('has one exhaustive mechanics pin for every implemented definition', () => {
+    expect(COMPLETE_MECHANICS_PINS).toHaveLength(EXPECTED_IMPLEMENTED);
+    expect(COMPLETE_MECHANICS_PINS.map((pin) => pin.id).sort()).toEqual(
+      IMPLEMENTED_SPELL_DEFINITIONS.map((definition) => definition.id).sort(),
+    );
+  });
+
+  it.each(COMPLETE_MECHANICS_PINS)('$id pins every targeting and operation literal from $source', (pin) => {
+    const definition = spellDefinition(pin.id);
+    if (definition === null) throw new Error(`Missing definition ${pin.id}.`);
+    expect({ targeting: definition.targeting, operation: definition.operation }).toEqual({
+      targeting: pin.targeting,
+      operation: pin.operation,
+    });
+  });
+
   it('uses the two independently printed level-7 full-caster slot rows: 4/3/3/1', () => {
     // docs/srd/source/class-level-tables.txt:73,311.
     expect(referencePartySpellSlots('Cleric')).toEqual([
@@ -293,6 +820,89 @@ describe('spell foundations and implemented value pins', () => {
       baseDice: pin.baseDice,
       perSlotCount: pin.perSlotCount,
     });
+  });
+
+  it.each(LEVEL_ONE_BATCH_NUMERIC_PINS)('$id pins every numeric mechanic from $source', (pin) => {
+    const definition = spellDefinition(pin.id);
+    if (definition === null) throw new Error(`Missing definition ${pin.id}.`);
+    expect(numericLeaves({
+      targeting: definition.targeting,
+      operation: definition.operation,
+    })).toEqual(pin.mechanics);
+  });
+
+  it.each(LEVEL_ONE_BATCH_COMPONENT_PINS)('$id pins casting time and components from $source', (pin) => {
+    const definition = spellDefinition(pin.id);
+    if (definition === null) throw new Error(`Missing definition ${pin.id}.`);
+    expect({
+      castingTime: definition.castingTime,
+      components: componentCode(definition),
+      material: definition.components.material?.text ?? null,
+      consumed: definition.components.material?.consumed ?? false,
+      ritual: definition.ritual === true,
+    }).toEqual({
+      castingTime: pin.castingTime,
+      components: pin.components,
+      material: pin.material,
+      consumed: pin.consumed,
+      ritual: pin.ritual === true,
+    });
+  });
+
+  it('Fog Cloud rejects a wrong radius before spending its action or slot', () => {
+    // Fog Cloud, docs/srd/source/spell-descriptions.txt:3396: 20-foot radius.
+    const definition = spellDefinition('fog-cloud');
+    if (definition === null) throw new Error('Fog Cloud definition missing.');
+    const { caster, target, state } = fixture(definition);
+    const command = castCommand(definition, caster, target);
+    const wrongRadius = {
+      ...command,
+      area: { shape: 'sphere' as const, template: { origin: feetPoint(10, 10), radius: feet(15) } },
+    };
+    expect(() => reduceEncounter(state, wrongRadius, () => 0.5)).toThrow(
+      'requires a 20-foot sphere template',
+    );
+    expect(state.combatants.find((subject) => subject.profile.id === caster.id)?.turn.action).toEqual({ kind: 'available' });
+    expect(state.combatants.find((subject) => subject.profile.id === caster.id)?.spellSlots[0]?.remaining).toBe(4);
+  });
+
+  it('level-2 Fog Cloud validates and stores its 40-foot upcast radius', () => {
+    // Fog Cloud, docs/srd/source/spell-descriptions.txt:3396: +20-foot radius per slot level.
+    const definition = spellDefinition('fog-cloud');
+    if (definition === null) throw new Error('Fog Cloud definition missing.');
+    const { caster, target, state } = fixture(definition);
+    const result = reduceEncounter(state, castCommand(definition, caster, target, 2), () => 0.5);
+    const fog = result.state.effects.find((candidate) => candidate.payload.kind === 'obscured_area');
+    expect(fog?.payload).toMatchObject({ kind: 'obscured_area', radiusFeet: 40 });
+  });
+
+  it('level-2 Create or Destroy Water resolves 20 gallons and a 35-foot cube', () => {
+    // Create or Destroy Water, docs/srd/source/spell-descriptions.txt:1797: +10 gallons or +5 feet per slot level.
+    const definition = spellDefinition('create-or-destroy-water');
+    if (definition === null) throw new Error('Create or Destroy Water definition missing.');
+    const { caster, target, state } = fixture(definition);
+    const result = reduceEncounter(state, castCommand(definition, caster, target, 2), () => 0.5);
+    const utility = result.events.find((event) =>
+      event.type === 'spell_utility_resolved' && event.spellId === definition.id);
+    expect(utility?.type === 'spell_utility_resolved' ? utility.effect : null).toMatchObject({
+      kind: 'environmental_water',
+      gallons: 20,
+      cubeFeet: 35,
+    });
+  });
+
+  it('Alarm can be cast as a ritual without expending a spell slot', () => {
+    // Alarm, docs/srd/source/spell-descriptions.txt:70: Casting Time 1 minute or Ritual.
+    const definition = spellDefinition('alarm');
+    if (definition === null) throw new Error('Alarm definition missing.');
+    const { caster, target, state } = fixture(definition);
+    const command = {
+      ...castCommand(definition, caster, target, null),
+      castAsRitual: true,
+    };
+    const result = reduceEncounter(state, command, () => 0.5);
+    expect(result.state.combatants.find((subject) => subject.profile.id === caster.id)?.spellSlots[0]?.remaining).toBe(4);
+    expect(result.state.effects.some((candidate) => candidate.payload.kind === 'alarm_ward')).toBe(true);
   });
 
   it('stores V/S/M flags, material text, and consumption as definition data', () => {
@@ -387,11 +997,13 @@ describe('every implemented spell executes through the encounter reducer', () =>
         expect(afterCaster?.turn.reactionAvailable).toBe(false);
         break;
       case 'minute':
+      case 'hour':
         expect(result.state.activeCombatant).toBeNull();
         break;
     }
     switch (definition.operation.kind) {
       case 'attack_damage':
+      case 'attack_then_save_damage':
       case 'save_damage':
       case 'magic_missiles':
       case 'weapon_attack':

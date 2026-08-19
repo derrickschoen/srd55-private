@@ -4,7 +4,7 @@ import type { AreaTemplate } from '../templates';
 import type { CombatantId, DamageType } from '../values';
 
 export type SpellLevel = 0 | 1 | 2 | 3 | 4;
-export type SpellCastingTime = 'action' | 'bonus_action' | 'reaction' | 'minute';
+export type SpellCastingTime = 'action' | 'bonus_action' | 'reaction' | 'minute' | 'hour';
 export type SpellClassList = 'Cleric' | 'Wizard';
 
 export interface SpellComponentsData {
@@ -42,6 +42,8 @@ export type SpellTargeting =
       readonly kind: 'area';
       readonly rangeFeet: number;
       readonly shape: AreaTemplate['shape'];
+      readonly baseSizeFeet: number;
+      readonly sizePerSlotFeet: number;
     }
   | {
       readonly kind: 'utility';
@@ -60,9 +62,21 @@ export type SpellOperation =
   | {
       readonly kind: 'attack_damage';
       readonly attackKind: 'melee' | 'ranged';
-      readonly damageType: DamageType;
+      readonly damageType: DamageType | readonly DamageType[];
       readonly dice: ScaledDice;
       readonly rider: EffectData | null;
+    }
+  | {
+      readonly kind: 'attack_then_save_damage';
+      readonly attackKind: 'ranged';
+      readonly attackDamageType: DamageType;
+      readonly attackDice: ScaledDice;
+      readonly saveAbility: Ability;
+      readonly saveDamageType: DamageType;
+      readonly saveDice: ScaledDice;
+      readonly onSaveSuccess: 'none' | 'half';
+      readonly burstShape: 'sphere';
+      readonly burstRadiusFeet: number;
     }
   | {
       readonly kind: 'save_damage';
@@ -91,6 +105,7 @@ export type SpellOperation =
       readonly ability: Ability;
       readonly rollMode: 'normal' | 'advantage' | 'disadvantage';
       readonly effect: EffectData;
+      readonly excludeCaster?: true;
     }
   | {
       readonly kind: 'magic_missiles';
@@ -114,10 +129,25 @@ export type SpellOperation =
           | 'communication_link'
           | 'illusion'
           | 'minor_magic'
-          | 'object_repair';
+          | 'object_repair'
+          | 'alarm_ward'
+          | 'language_comprehension'
+          | 'environmental_water'
+          | 'detection_sense'
+          | 'appearance_illusion'
+          | 'summoned_familiar'
+          | 'floating_disk'
+          | 'obscured_area'
+          | 'magic_identification'
+          | 'illusory_script'
+          | 'food_purification'
+          | 'image_illusion'
+          | 'unseen_servant';
       }>;
       readonly concentration: boolean;
       readonly durationRounds: number | null;
+      /** Instantaneous creations that remain encounter state use a permanent effect. */
+      readonly stateful?: true;
     };
 
 export interface SpellDefinition {
@@ -126,6 +156,7 @@ export interface SpellDefinition {
   readonly level: SpellLevel;
   readonly source: string;
   readonly castingTime: SpellCastingTime;
+  readonly ritual?: true;
   readonly components: SpellComponentsData;
   readonly targeting: SpellTargeting;
   readonly operation: SpellOperation;
@@ -136,6 +167,7 @@ export interface SpellCastCommand {
   readonly actor: CombatantId;
   readonly spellId: string;
   readonly slotLevel: number | null;
+  readonly castAsRitual: boolean;
   readonly casterLevel: number;
   readonly attackBonus: number;
   readonly saveDc: number;
