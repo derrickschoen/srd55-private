@@ -6,6 +6,7 @@ import {
   type CharacterCombatSheet,
   type CombatantProfile,
   type CombatToken,
+  type SpellSlotCapacity,
 } from '../../../src/combat/combatant';
 import { monsterStatblock } from '../../../src/combat/statblock';
 
@@ -115,11 +116,13 @@ export function playerProfile(
     readonly hitPoints?: number;
     readonly initiativeBonus?: number;
     readonly attacksPerAction?: number;
+    readonly spellSlots?: readonly SpellSlotCapacity[];
   } = {},
 ): CombatantProfile {
   return characterCombatantProfile(characterSheet(key, options), {
     combatantId: `combatant:${key}`,
     tokenId: `token:${key}`,
+    ...(options.spellSlots === undefined ? {} : { spellSlots: options.spellSlots }),
   });
 }
 

@@ -8,12 +8,14 @@ import type {
   SavingThrowResult,
 } from './resolution';
 import type { EffectApplication, TurnBoundary } from './effects';
+import type { SpellCastCommand } from './spells/types';
 import type { CombatantId, EncounterEffectId, Feet } from './values';
 
 export type ActionCost = 'action' | 'bonus_action' | 'none';
 
 export type EncounterCommand =
   | { readonly type: 'roll_initiative' }
+  | SpellCastCommand
   | {
       readonly type: 'move';
       readonly actor: CombatantId;
@@ -200,6 +202,31 @@ export type EncounterEvent =
       readonly effectId: EncounterEffectId;
       readonly boundary: TurnBoundary;
       readonly remaining: number;
+    })
+  | (SequencedEvent & {
+      readonly type: 'spell_cast';
+      readonly caster: CombatantId;
+      readonly spellId: string;
+      readonly slotLevel: number | null;
+      readonly targets: readonly CombatantId[];
+    })
+  | (SequencedEvent & {
+      readonly type: 'spell_slot_spent';
+      readonly combatant: CombatantId;
+      readonly slotLevel: number;
+      readonly remaining: number;
+    })
+  | (SequencedEvent & {
+      readonly type: 'temporary_hit_points_changed';
+      readonly combatant: CombatantId;
+      readonly before: number;
+      readonly after: number;
+    })
+  | (SequencedEvent & {
+      readonly type: 'spell_utility_resolved';
+      readonly caster: CombatantId;
+      readonly spellId: string;
+      readonly capability: string;
     })
   | (SequencedEvent & {
       readonly type: 'turn_ended';
