@@ -339,3 +339,19 @@ Three findings this session raised, recorded here so they are not lost with it:
   statblock lane harvest; KB co-generation (D317.17) joins from
   4b-iii onward.
 
+## A13 — starter monster roster (lane-wt/statblocks)
+
+- 9 SRD statblocks CR 1/4-2 with per-field citations, typed absences,
+  usesDeathSaves false, KB entries per D317.17/18.
+- Supervisor verified: lane 247/247; Ogre field-for-field at
+  srd-5.2.1.txt:20448+ (right column); own HP control (68->70) killed
+  against committed tree. Codex ledger: AC/damage-die/DEX controls.
+- Cross-merge with 4b-ii tripped the Sanctuary manifest-status pin —
+  the pin catching real semantic drift; one-line mechanical resolution
+  (pending->implemented), combat 435/435.
+- Full gate GREEN 386 files / 6,371 tests (.tmp-gate-sb.log).
+- Status: CLOSED round 1. Roster gap noted for increment 9: no CR 1 or
+  CR 3 entries yet (9 of the 8-12 target); generator constrained to
+  the decoded roster until extended.
+- Next: 4b-iii (45 L2 spells + KB co-generation), claimed here.
+
