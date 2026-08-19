@@ -86,6 +86,7 @@ interface CircleArea {
   readonly kind: 'circle';
   readonly center: Point;
   readonly radius: number;
+  readonly excludedPoint: Point | null;
 }
 
 interface PolygonArea {
@@ -109,11 +110,19 @@ function point(value: FeetPoint): Point {
   return { x: value.x, y: value.y };
 }
 
-function positive(value: Feet, label: string): number {
-  if (value <= 0) {
-    throw new RangeError(`${label} must be greater than 0 feet.`);
+function nonNegative(value: Feet, label: string): number {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new RangeError(`${label} must be a finite, non-negative distance.`);
   }
   return value;
+}
+
+function positive(value: Feet, label: string): number {
+  const checked = nonNegative(value, label);
+  if (checked === 0) {
+    throw new RangeError(`${label} must be greater than 0 feet.`);
+  }
+  return checked;
 }
 
 function unit(value: Direction): Point {
@@ -493,10 +502,13 @@ function enumerateAffectedCells(
       if (blockedKeys.has(cellKey(cell))) continue;
       const rectangle = rectangleForCell(cell);
       const intersections = cellIntersectionPoints(area, rectangle);
-      const excludedPoint = area.kind === 'polygon' ? area.excludedPoint : null;
+      const excludedPoint = area.excludedPoint;
       const geometricallyIncluded =
         area.kind === 'circle'
-          ? circleIntersectsRectangle(area, rectangle)
+          ? circleIntersectsRectangle(area, rectangle) &&
+            intersections.length > 0 &&
+            (excludedPoint === null ||
+              intersections.some((candidate) => !samePoint(candidate, excludedPoint)))
           : intersections.length > 0 &&
             (excludedPoint === null ||
               intersections.some((candidate) => !samePoint(candidate, excludedPoint)));
@@ -605,6 +617,7 @@ export function cylinderAffectedCells(
     kind: 'circle',
     center: origin,
     radius: positive(template.radius, 'Cylinder radius'),
+    excludedPoint: null,
   });
 }
 
@@ -617,11 +630,12 @@ export function emanationAffectedCells(
   template: EmanationTemplate,
 ): readonly GridCell[] {
   const origin = point(template.origin);
-  const radius = positive(template.radius, 'Emanation distance');
+  const radius = nonNegative(template.radius, 'Emanation distance');
   return enumerateAffectedCells(grid, origin, {
     kind: 'circle',
     center: origin,
     radius,
+    excludedPoint: template.includeOrigin ? null : origin,
   });
 }
 
@@ -672,6 +686,7 @@ export function sphereAffectedCells(
     kind: 'circle',
     center: origin,
     radius: positive(template.radius, 'Sphere radius'),
+    excludedPoint: null,
   });
 }
 
