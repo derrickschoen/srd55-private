@@ -5,8 +5,14 @@ export type ArmorClass = Brand<number, 'ArmorClass'>;
 export type DifficultyClass = Brand<number, 'DifficultyClass'>;
 export type DieSides = Brand<number, 'DieSides'>;
 export type DamageType = Brand<string, 'DamageType'>;
+export type CombatantId = Brand<string, 'CombatantId'>;
+export type TokenId = Brand<string, 'TokenId'>;
+export type StatblockId = Brand<string, 'StatblockId'>;
+export type EncounterEffectId = Brand<string, 'EncounterEffectId'>;
+export type EffectStackingIdentity = Brand<string, 'EffectStackingIdentity'>;
 
 const MAX_DAMAGE_TYPE_LENGTH = 100;
+const MAX_IDENTITY_LENGTH = 200;
 
 function nonNegativeFinite(value: number, label: string): number {
   if (!Number.isFinite(value) || value < 0) {
@@ -43,3 +49,33 @@ export function damageType(value: string): DamageType {
   }
   return value as DamageType;
 }
+
+function identity<T extends string>(value: string, label: string): T {
+  if (
+    value.length === 0 ||
+    value.length > MAX_IDENTITY_LENGTH ||
+    value.trim() !== value
+  ) {
+    throw new RangeError(
+      `${label} must be trimmed, non-empty, and at most ${MAX_IDENTITY_LENGTH} characters.`,
+    );
+  }
+  return value as T;
+}
+
+export const combatantId = (value: string): CombatantId =>
+  identity<CombatantId>(value, 'CombatantId');
+
+export const tokenId = (value: string): TokenId =>
+  identity<TokenId>(value, 'TokenId');
+
+export const statblockId = (value: string): StatblockId =>
+  identity<StatblockId>(value, 'StatblockId');
+
+export const encounterEffectId = (value: string): EncounterEffectId =>
+  identity<EncounterEffectId>(value, 'EncounterEffectId');
+
+export const effectStackingIdentity = (
+  value: string,
+): EffectStackingIdentity =>
+  identity<EffectStackingIdentity>(value, 'EffectStackingIdentity');
