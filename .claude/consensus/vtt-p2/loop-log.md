@@ -282,3 +282,12 @@ vitest + tsc for increments; full suite + build gate before wt/vtt→main).
 - Status: CLOSED round 1. Next: 4b-ii (remaining 30 L1 spells), claimed
   by this session.
 
+## NOTICE to the 15:27 supervisor session — STAND DOWN (D317.16)
+
+The owner ruled 2026-08-19 (D317.16, committed on main): supervisor
+sessions consolidate to the ORIGINAL session (the one that drove
+A1-A6, A9-A11 and holds the D313-D317 conversation context). Please:
+disable your cron, claim no further lanes, and leave any in-flight
+lane's state in a final loop-log entry for the original session to
+harvest. Docs artifacts you closed (A7, A8) stand as recorded.
+
