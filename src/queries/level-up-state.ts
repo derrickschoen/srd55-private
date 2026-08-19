@@ -958,7 +958,7 @@ export class LevelUpStateQuery {
         effect.effect_kind === 'hp_modifier' &&
         (effect.hit_points_per_level ?? 0) !== 0,
     );
-    const levelScaledEffects = hpEffects.map((effect) => {
+    const characterLevelScaledEffects = hpEffects.map((effect) => {
       const currentContribution = effectHitPoints([effect], currentTotal);
       const projectedContribution = effectHitPoints([effect], targetTotal);
       return {
@@ -968,8 +968,17 @@ export class LevelUpStateQuery {
         change: projectedContribution - currentContribution,
       };
     });
-    const speciesValue = sheet.species_hit_points?.value;
-    if (speciesValue === null) {
+    const classLevelScaledEffects = this.#classLevelHitPointEffects(
+      selected,
+      selected.current_level,
+      classLevel(selected.current_level + 1, 'Projected class level'),
+    );
+    const levelScaledEffects = [
+      ...characterLevelScaledEffects,
+      ...classLevelScaledEffects,
+    ];
+    const effectValue = sheet.species_hit_points?.value;
+    if (effectValue === null) {
       return {
         kind: 'unknown',
         reason: 'undetermined_level_scaled_effect',
@@ -1005,6 +1014,73 @@ export class LevelUpStateQuery {
           }
         : { kind: 'pending_choice', choices: pendingChoices },
     };
+  }
+
+  /**
+   * Class/subclass template HP formulas use their owning class level.
+   *
+   * Generated character effects hold the CURRENT evaluated amount as a flat
+   * value, so the ordinary total-character-level preview above must not guess
+   * how that flat number changes. This query returns the still-typed template
+   * formula and evaluates its one-level delta from the same source data the
+   * synchronizer will materialize after the command succeeds.
+   */
+  #classLevelHitPointEffects(
+    selected: HeldClassRow,
+    currentLevel: ClassLevel,
+    targetLevel: ClassLevel,
+  ): readonly {
+    readonly label: string;
+    readonly current_contribution: number;
+    readonly projected_contribution: number;
+    readonly change: number;
+  }[] {
+    const rows = this.db.all(
+      `SELECT effect.name AS label, effect.class_level AS active_from_level,
+              effect.hit_points_flat, effect.hit_points_per_level
+         FROM class_feature_effects AS effect
+        WHERE effect.class_definition_id = ?
+          AND effect.effect_kind = 'hp_modifier'
+          AND effect.class_level <= ?
+       UNION ALL
+       SELECT effect.label, feature.class_level AS active_from_level,
+              effect.hit_points_flat, effect.hit_points_per_level
+         FROM subclass_feature_effects AS effect
+         JOIN subclass_features AS feature
+           ON feature.id = effect.subclass_feature_id
+        WHERE feature.subclass_definition_id = ?
+          AND effect.effect_kind = 'hp_modifier'
+          AND feature.class_level <= ?
+       ORDER BY active_from_level, label`,
+      [
+        selected.class_definition_id,
+        targetLevel,
+        selected.current_subclass?.subclass_definition_id ?? -1,
+        targetLevel,
+      ],
+      (row) => ({
+        label: sqlString(row, 'label'),
+        activeFromLevel: classLevel(
+          sqlInteger(row, 'active_from_level'),
+          'Hit point effect activation level',
+        ),
+        flat: sqlNullableInteger(row, 'hit_points_flat') ?? 0,
+        perLevel: sqlNullableInteger(row, 'hit_points_per_level') ?? 0,
+      }),
+    );
+    return rows.map((effect) => {
+      const currentContribution = effect.activeFromLevel <= currentLevel
+        ? effect.flat + effect.perLevel * currentLevel
+        : 0;
+      const projectedContribution =
+        effect.flat + effect.perLevel * targetLevel;
+      return {
+        label: effect.label,
+        current_contribution: currentContribution,
+        projected_contribution: projectedContribution,
+        change: projectedContribution - currentContribution,
+      };
+    });
   }
 
   #projectedFeatCharacter(

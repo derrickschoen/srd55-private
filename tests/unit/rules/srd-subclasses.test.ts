@@ -12,6 +12,10 @@ import {
 } from '../../../src/rules/srd-subclasses';
 import { SRD_ATTRIBUTION_NOTICE } from '../../../src/rules/srd-attribution';
 import { parseSrdSpellDescriptions } from '../../../src/rules/spells-srd';
+import {
+  parseSrdDraconicResilience,
+  SrdDraconicResilienceError,
+} from '../../../src/rules/draconic-resilience-srd';
 
 const SOURCE_URL = new URL(
   '../../../docs/srd/source/subclasses.txt',
@@ -22,6 +26,13 @@ const FULL_SOURCE_URL = new URL(
   import.meta.url,
 );
 const SOURCE = readFileSync(SOURCE_URL, 'utf8');
+const DRACONIC_RESILIENCE_SOURCE = readFileSync(
+  new URL(
+    '../../../docs/srd/source/draconic-resilience.txt',
+    import.meta.url,
+  ),
+  'utf8',
+);
 
 const EXPECTED_ATTRIBUTION_PREAMBLE = `This work includes material from the System Reference Document 5.2.1
 ("SRD 5.2.1") by Wizards of the Coast LLC, available at
@@ -1089,5 +1100,41 @@ describe('SRD subclass parser rejections', () => {
     expect(() =>
       parseSrdSubclasses(SOURCE.replace('Aid, Bless', 'Aid, Chronomancy')),
     ).toThrow(/unregistered spell "Chronomancy"/u);
+  });
+
+  it('parses both Draconic Resilience sheet effects from the 2024 wording', () => {
+    expect(parseSrdDraconicResilience()).toEqual({
+      class_name: 'Sorcerer',
+      subclass_name: 'Draconic Sorcery',
+      class_level: 3,
+      name: 'Draconic Resilience',
+      effects: [
+        {
+          kind: 'hp_modifier',
+          label: 'Draconic Resilience',
+          hit_points_flat: 0,
+          hit_points_per_level: 1,
+        },
+        {
+          kind: 'armor_class_formula',
+          label: 'Draconic Resilience',
+          base: 10,
+          ability_1: 'dexterity',
+          ability_2: 'charisma',
+          allows_shield: false,
+        },
+      ],
+    });
+  });
+
+  it('rejects the 2014 Draconic Resilience AC formula', () => {
+    expect(() =>
+      parseSrdDraconicResilience(
+        DRACONIC_RESILIENCE_SOURCE.replace(
+          /10 plus your Dexterity and Charisma\s+modifiers/u,
+          '13 plus your Dexterity modifier',
+        ),
+      ),
+    ).toThrow(SrdDraconicResilienceError);
   });
 });

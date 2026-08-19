@@ -974,14 +974,17 @@ export class CharacterSheetBuilder {
       }),
     );
     const effects = summariseEffects(effectRows);
-    const hasSpeciesHitPoints =
+    const hasEffectHitPoints =
       effects.hitPointsFlat !== 0 || effects.hitPointsPerLevel !== 0;
-    const speciesHp =
+    const effectHp =
       totalLevel === null
         ? effects.hitPointsPerLevel === 0
           ? effects.hitPointsFlat
           : null
         : effectHitPoints(effectRows, totalLevel);
+    const hitPointEffectsAreSpeciesOnly = eligibleEffectRows
+      .filter((effect) => effect.effect_kind === 'hp_modifier')
+      .every((effect) => effect.source_type === 'species');
     const baseSpeed = this.db.one(
       `SELECT base_speed_feet FROM character_species WHERE character_id = ?`,
       [characterId],
@@ -1110,31 +1113,34 @@ export class CharacterSheetBuilder {
           'The starting class contributes its full hit die at level 1; every ' +
           'other level adds the recorded roll, or the printed fixed value ' +
           '(die / 2 + 1) when nothing was rolled. The Constitution modifier ' +
-          'is added per level. Species hit points are shown separately.',
+          'is added per level. Feature hit point adjustments are shown separately.',
       },
       species_hit_points:
-        !hasSpeciesHitPoints
+        !hasEffectHitPoints
           ? null
           : {
               id: 'species_hit_points',
-              label: 'Species hit points',
-              value: speciesHp,
+              label: hitPointEffectsAreSpeciesOnly
+                ? 'Species hit points'
+                : 'Feature hit points',
+              value: effectHp,
               formula:
-                speciesHp === null
-                  ? 'Undetermined because this species effect scales with a character level that is undetermined.'
-                  : 'A species trait adds these on top of the class total. Shown ' +
-                    'apart because the two come from different sources.',
+                effectHp === null
+                  ? 'Undetermined because a feature effect scales with a character level that is undetermined.'
+                  : hitPointEffectsAreSpeciesOnly
+                    ? 'A species trait adds these on top of the class total. Shown apart because the two come from different sources.'
+                    : 'Feature effects add these on top of the class total. Shown apart so their contribution remains visible.',
             },
       hit_point_maximum: {
         id: 'hit_point_maximum',
         label: 'Hit point maximum',
-        value: speciesHp === null ? null : hitPoints.maximum + speciesHp,
+        value: effectHp === null ? null : hitPoints.maximum + effectHp,
         formula:
-          speciesHp === null
-            ? 'Undetermined because a level-scaled species contribution is undetermined.'
-            : hasSpeciesHitPoints
-              ? 'The class hit points subtotal plus the separately shown species contribution.'
-              : 'The class hit points subtotal; this character has no separate species hit point contribution.',
+          effectHp === null
+            ? 'Undetermined because a level-scaled feature contribution is undetermined.'
+            : hasEffectHitPoints
+              ? 'The class hit points subtotal plus the separately shown feature contribution.'
+              : 'The class hit points subtotal; this character has no separate feature hit point contribution.',
       },
       armor_class: {
         id: 'armor_class',
