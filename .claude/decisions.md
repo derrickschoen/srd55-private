@@ -7,6 +7,13 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D309 — OWNER: stranger journey and survivor fixes interleave (2026-08-18)
+
+Amends D307's sequencing: once the inc4 merge gate is green, the D303
+stranger journey runs WHILE D280 survivor-fix lanes work the hotspot files
+in parallel worktrees — neither waits for the other. Owner picked
+"Interleave" over journey-first and fixes-first.
+
 ## D308 — OWNER: static mutants on for full audits, off for iteration re-runs (2026-08-18)
 
 Owner's words: "statics on for full audits, off for iteration re-runs."
