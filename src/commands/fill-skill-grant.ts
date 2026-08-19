@@ -1,4 +1,5 @@
 import type { DatabaseContext } from '../db/database';
+import { ok, type OkOutcome } from '../refusals/outcome';
 import type {
   CharacterCommandPayload,
   FillSkillGrantCommand as FillSkillGrantPayload,
@@ -31,7 +32,7 @@ export class FillSkillGrantCommand {
     private readonly payload: FillSkillGrantPayload,
   ) {}
 
-  apply(characterId: number): void {
+  apply(characterId: number): OkOutcome<void> {
     fillSkillGrant(
       this.db,
       characterId,
@@ -39,6 +40,7 @@ export class FillSkillGrantCommand {
       this.payload.skill,
     );
     reconcileCharacterSkillExpertise(this.db, characterId);
+    return ok(undefined);
   }
 
   /**

@@ -48,6 +48,29 @@ import { isAssertedExternalContentKey } from '../../catalog/catalog-key';
 import { decodeClassResourceFormula } from '../class-resources';
 import { abilities, isEnumValue } from '../enums';
 import { FEATURE_VALUE_CONTRIBUTION_LIMITS } from './feature-value-storage-limits';
+import {
+  RowRulesActiveLevelBandError,
+  RowRulesBoundedJsonTextError,
+  RowRulesBoundedNonEmptyListError,
+  RowRulesBoundedNonEmptyTextError,
+  RowRulesClampOrderError,
+  RowRulesClassLevelError,
+  RowRulesContributionTargetConfigurationError,
+  RowRulesExactStorageKeysError,
+  RowRulesExpressionBandSequenceError,
+  RowRulesExpressionLimitError,
+  RowRulesExpressionRoundError,
+  RowRulesJsonParseError,
+  RowRulesKnownAbilityError,
+  RowRulesLevelBandOrderError,
+  RowRulesNullableBoundedJsonTextError,
+  RowRulesPositiveIntegerError,
+  RowRulesSafeIntegerRangeError,
+  RowRulesStorageObjectError,
+  RowRulesUnsupportedContributionTargetKindError,
+  RowRulesValueExpressionKindError,
+  RowRulesValueSourceKindError,
+} from './row-rules-errors';
 
 /** A row as it arrives from JSON: keys are strings, values are not yet trusted. */
 type UntrustedRow = Readonly<Record<string, unknown>>;
@@ -68,7 +91,7 @@ function storageCodePointLength(value: string): number {
 
 function storageObject(value: unknown, label: string): StorageJsonObject {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new RowRulesStorageObjectError(label);
   }
   return value as StorageJsonObject;
 }
@@ -84,12 +107,7 @@ function exactStorageKeys(
   const missing = required.find((key) => !Object.hasOwn(value, key));
   const extra = keys.find((key) => !allowed.has(key));
   if (missing !== undefined || extra !== undefined) {
-    throw new TypeError(
-      `${label} must contain exactly ${required.join(', ')}` +
-        (optional.length === 0
-          ? '.'
-          : ` with optional ${optional.join(', ')}.`),
-    );
+    throw new RowRulesExactStorageKeysError(label, required, optional);
   }
 }
 
@@ -98,10 +116,10 @@ function expressionInteger(value: unknown, label: string): number {
     !Number.isSafeInteger(value) ||
     Math.abs(Number(value)) > FEATURE_VALUE_CONTRIBUTION_LIMITS.magnitude
   ) {
-    throw new TypeError(
-      `${label} must be a safe integer from ` +
-        `${String(-FEATURE_VALUE_CONTRIBUTION_LIMITS.magnitude)} to ` +
-        `${String(FEATURE_VALUE_CONTRIBUTION_LIMITS.magnitude)}.`,
+    throw new RowRulesSafeIntegerRangeError(
+      label,
+      -FEATURE_VALUE_CONTRIBUTION_LIMITS.magnitude,
+      FEATURE_VALUE_CONTRIBUTION_LIMITS.magnitude,
     );
   }
   return Number(value);
@@ -110,14 +128,14 @@ function expressionInteger(value: unknown, label: string): number {
 function positiveExpressionInteger(value: unknown, label: string): number {
   const decoded = expressionInteger(value, label);
   if (decoded < 1) {
-    throw new TypeError(`${label} must be a positive integer.`);
+    throw new RowRulesPositiveIntegerError(label);
   }
   return decoded;
 }
 
 function expressionClassLevel(value: unknown, label: string): number {
   if (!Number.isSafeInteger(value) || Number(value) < 1 || Number(value) > 20) {
-    throw new TypeError(`${label} must be a class level from 1 to 20.`);
+    throw new RowRulesClassLevelError(label, 1, 20);
   }
   return Number(value);
 }
@@ -136,7 +154,10 @@ function decodeValueSource(
       storageCodePointLength(source.class_content_key) >
         FEATURE_VALUE_CONTRIBUTION_LIMITS.keyCodePoints
     ) {
-      throw new TypeError(`${label}.class_content_key must be bounded non-empty text.`);
+      throw new RowRulesBoundedNonEmptyTextError(
+        `${label}.class_content_key`,
+        FEATURE_VALUE_CONTRIBUTION_LIMITS.keyCodePoints,
+      );
     }
     return source;
   }
@@ -151,12 +172,13 @@ function decodeValueSource(
   if (!levelOnly && source.kind === 'ability_modifier') {
     exactStorageKeys(source, ['kind', 'ability'], [], label);
     if (!isEnumValue(abilities, source.ability)) {
-      throw new TypeError(`${label}.ability must be a known ability.`);
+      throw new RowRulesKnownAbilityError(`${label}.ability`);
     }
     return source;
   }
-  throw new TypeError(
-    `${label}.kind is not a supported ${levelOnly ? 'level source' : 'value source'}.`,
+  throw new RowRulesValueSourceKindError(
+    label,
+    levelOnly ? 'level' : 'value',
   );
 }
 
@@ -172,7 +194,10 @@ function decodeExpressionBands(
     value.length < 1 ||
     value.length > FEATURE_VALUE_CONTRIBUTION_LIMITS.expressionListEntries
   ) {
-    throw new TypeError(`${label} must be a bounded non-empty list.`);
+    throw new RowRulesBoundedNonEmptyListError(
+      label,
+      FEATURE_VALUE_CONTRIBUTION_LIMITS.expressionListEntries,
+    );
   }
   const bands = value.map((entry, index) => {
     const bandLabel = `${label}[${String(index)}]`;
@@ -186,7 +211,7 @@ function decodeExpressionBands(
     const from = expressionClassLevel(band.from, `${bandLabel}.from`);
     const to = expressionClassLevel(band.to, `${bandLabel}.to`);
     if (from > to) {
-      throw new TypeError(`${bandLabel}.from must not exceed its to level.`);
+      throw new RowRulesLevelBandOrderError(bandLabel);
     }
     if (nestedValues) {
       decodeValueExpressionNode(band.value, `${bandLabel}.value`, state, depth + 1);
@@ -202,7 +227,7 @@ function decodeExpressionBands(
       previous === undefined || current === undefined ||
       Number(current.from) !== Number(previous.to) + 1
     ) {
-      throw new TypeError(`${label} must be ordered, contiguous, and non-overlapping.`);
+      throw new RowRulesExpressionBandSequenceError(label);
     }
   }
   return bands;
@@ -215,11 +240,19 @@ function decodeValueExpressionNode(
   depth: number,
 ): StorageJsonObject {
   if (depth > FEATURE_VALUE_CONTRIBUTION_LIMITS.expressionDepth) {
-    throw new TypeError(`${label} exceeds the expression depth limit.`);
+    throw new RowRulesExpressionLimitError(
+      label,
+      'depth',
+      FEATURE_VALUE_CONTRIBUTION_LIMITS.expressionDepth,
+    );
   }
   state.nodes += 1;
   if (state.nodes > FEATURE_VALUE_CONTRIBUTION_LIMITS.expressionNodes) {
-    throw new TypeError(`${label} exceeds the expression breadth limit.`);
+    throw new RowRulesExpressionLimitError(
+      label,
+      'breadth',
+      FEATURE_VALUE_CONTRIBUTION_LIMITS.expressionNodes,
+    );
   }
   const expression = storageObject(value, label);
   switch (expression.kind) {
@@ -240,7 +273,7 @@ function decodeValueExpressionNode(
       );
       decodeValueSource(expression.source, `${label}.source`, false);
       if (expression.round !== 'floor' && expression.round !== 'ceiling') {
-        throw new TypeError(`${label}.round must be floor or ceiling.`);
+        throw new RowRulesExpressionRoundError(label);
       }
       if (Object.hasOwn(expression, 'multiply')) {
         positiveExpressionInteger(expression.multiply, `${label}.multiply`);
@@ -278,7 +311,10 @@ function decodeValueExpressionNode(
         expression.terms.length >
           FEATURE_VALUE_CONTRIBUTION_LIMITS.expressionListEntries
       ) {
-        throw new TypeError(`${label}.terms must be a bounded non-empty list.`);
+        throw new RowRulesBoundedNonEmptyListError(
+          `${label}.terms`,
+          FEATURE_VALUE_CONTRIBUTION_LIMITS.expressionListEntries,
+        );
       }
       expression.terms.forEach((term, index) => {
         decodeValueExpressionNode(
@@ -318,12 +354,12 @@ function decodeValueExpressionNode(
         minimum?.kind === 'const' && maximum?.kind === 'const' &&
         Number(minimum.amount) > Number(maximum.amount)
       ) {
-        throw new TypeError(`${label}.minimum must not exceed maximum.`);
+        throw new RowRulesClampOrderError(label);
       }
       return expression;
     }
     default:
-      throw new TypeError(`${label}.kind is not a supported value expression.`);
+      throw new RowRulesValueExpressionKindError(label, expression.kind);
   }
 }
 
@@ -343,13 +379,16 @@ export function decodeStoredValueExpression(
     encodedBytes(valueJson) < 1 ||
     encodedBytes(valueJson) > FEATURE_VALUE_CONTRIBUTION_LIMITS.valueJsonBytes
   ) {
-    throw new TypeError(`${label} must be bounded JSON text.`);
+    throw new RowRulesBoundedJsonTextError(
+      label,
+      FEATURE_VALUE_CONTRIBUTION_LIMITS.valueJsonBytes,
+    );
   }
   let decoded: unknown;
   try {
     decoded = JSON.parse(valueJson) as unknown;
   } catch (error) {
-    throw new TypeError(`${label} must be valid JSON.`, { cause: error });
+    throw new RowRulesJsonParseError(label, error);
   }
   return decodeValueExpressionNode(decoded, label, { nodes: 0 }, 0);
 }
@@ -367,13 +406,16 @@ export function decodeStoredSupersedesReference(
     encodedBytes(value) >
       FEATURE_VALUE_CONTRIBUTION_LIMITS.supersedesJsonBytes
   ) {
-    throw new TypeError(`${label} must be null or bounded JSON text.`);
+    throw new RowRulesNullableBoundedJsonTextError(
+      label,
+      FEATURE_VALUE_CONTRIBUTION_LIMITS.supersedesJsonBytes,
+    );
   }
   let decoded: unknown;
   try {
     decoded = JSON.parse(value) as unknown;
   } catch (error) {
-    throw new TypeError(`${label} must be valid JSON.`, { cause: error });
+    throw new RowRulesJsonParseError(label, error);
   }
   const reference = storageObject(decoded, label);
   exactStorageKeys(
@@ -389,7 +431,10 @@ export function decodeStoredSupersedesReference(
       storageCodePointLength(member) >
         FEATURE_VALUE_CONTRIBUTION_LIMITS.keyCodePoints
     ) {
-      throw new TypeError(`${label}.${field} must be bounded non-empty text.`);
+      throw new RowRulesBoundedNonEmptyTextError(
+        `${label}.${field}`,
+        FEATURE_VALUE_CONTRIBUTION_LIMITS.keyCodePoints,
+      );
     }
   }
   return reference;
@@ -407,14 +452,20 @@ export function featureValueContributionInvariantError(
       storageCodePointLength(row.contribution_key) >
         FEATURE_VALUE_CONTRIBUTION_LIMITS.keyCodePoints
     ) {
-      throw new TypeError('contribution_key must be bounded non-empty text.');
+      throw new RowRulesBoundedNonEmptyTextError(
+        'contribution_key',
+        FEATURE_VALUE_CONTRIBUTION_LIMITS.keyCodePoints,
+      );
     }
     if (
       typeof row.label !== 'string' || storageCodePointLength(row.label) < 1 ||
       storageCodePointLength(row.label) >
         FEATURE_VALUE_CONTRIBUTION_LIMITS.keyCodePoints
     ) {
-      throw new TypeError('label must be bounded non-empty text.');
+      throw new RowRulesBoundedNonEmptyTextError(
+        'label',
+        FEATURE_VALUE_CONTRIBUTION_LIMITS.keyCodePoints,
+      );
     }
     if (
       !Number.isSafeInteger(row.active_from_level) ||
@@ -423,7 +474,12 @@ export function featureValueContributionInvariantError(
       Number(row.active_to_level) > 20 ||
       Number(row.active_from_level) > Number(row.active_to_level)
     ) {
-      throw new TypeError('active level band must be ordered within 1 through 20.');
+      throw new RowRulesActiveLevelBandError(
+        row.active_from_level,
+        row.active_to_level,
+        1,
+        20,
+      );
     }
     if (row.target_kind === 'feature_dice_count') {
       if (
@@ -431,8 +487,8 @@ export function featureValueContributionInvariantError(
         row.resource_display_label !== null ||
         row.resource_marking_shape !== null
       ) {
-        throw new TypeError(
-          'feature_dice_count requires target_key sneak_attack, op add, and no resource display configuration.',
+        throw new RowRulesContributionTargetConfigurationError(
+          'feature_dice_count',
         );
       }
     } else if (row.target_kind === 'resource_maximum') {
@@ -449,12 +505,12 @@ export function featureValueContributionInvariantError(
         (row.resource_marking_shape !== 'boxes' &&
           row.resource_marking_shape !== 'remaining')
       ) {
-        throw new TypeError(
-          'resource_maximum requires a bounded target_key, op add, and complete display configuration.',
+        throw new RowRulesContributionTargetConfigurationError(
+          'resource_maximum',
         );
       }
     } else {
-      throw new TypeError('target_kind is not supported.');
+      throw new RowRulesUnsupportedContributionTargetKindError(row.target_kind);
     }
     decodeStoredValueExpression(row.value_json, `${label}.value_json`);
     decodeStoredSupersedesReference(

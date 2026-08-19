@@ -13,6 +13,10 @@ import type {
   SelectionEligibility,
   SpellSchool,
 } from '../domain/enums';
+import type {
+  CharacterId,
+  SpellVersionId,
+} from '../domain/ids';
 import {
   spellSelectionConstraint,
   type SpellSelectionConstraint,
@@ -46,8 +50,8 @@ export interface EligibilitySlot extends StoredSpellSelectionConstraint {
   current_spell_version_id: number | null;
 }
 
-interface SpellVersion {
-  id: number;
+export interface SpellSelectionVersionFacts {
+  id: SpellVersionId;
   spellIdentityId: number;
   rulesEdition: string;
   level: number;
@@ -55,20 +59,55 @@ interface SpellVersion {
   isActive: boolean;
 }
 
+export interface SpellSelectionEligibilitySnapshot {
+  readonly characterId: CharacterId;
+  readonly legacyAllowed: boolean;
+  readonly versions: ReadonlyMap<SpellVersionId, SpellSelectionVersionFacts>;
+}
+
 interface RefreshableSlot extends EligibilitySlot {
   selectionEligibility: SelectionEligibility;
   selectionInvalidReason: string | null;
 }
 
-function decodeVersion(row: SqlRow): SpellVersion {
+function decodeVersion(row: SqlRow): SpellSelectionVersionFacts {
   return {
-    id: sqlInteger(row, 'id'),
+    id: sqlInteger(row, 'id') as SpellVersionId,
     spellIdentityId: sqlInteger(row, 'spell_identity_id'),
     rulesEdition: sqlString(row, 'rules_edition'),
     level: sqlInteger(row, 'level'),
     school: sqlSpellSchool(row, 'school'),
     isActive: sqlBoolean(row, 'is_active'),
   };
+}
+
+export function loadSpellSelectionEligibilitySnapshot(
+  db: DatabaseContext,
+  characterId: number,
+  spellVersionIds: readonly SpellVersionId[],
+): SpellSelectionEligibilitySnapshot {
+  const distinctIds = [...new Set(spellVersionIds)];
+  const versions = distinctIds.length === 0
+    ? []
+    : db.all(
+        `SELECT id, spell_identity_id, rules_edition, level, school, is_active
+         FROM spell_versions
+         WHERE id IN (${distinctIds.map(() => '?').join(', ')})
+         ORDER BY id`,
+        distinctIds,
+        decodeVersion,
+      );
+  const legacyAllowed = Number(
+    db.scalar(
+      'SELECT allow_legacy FROM characters WHERE id = ?',
+      [characterId],
+    ) ?? 0,
+  ) === 1;
+  return Object.freeze({
+    characterId: characterId as CharacterId,
+    legacyAllowed,
+    versions: new Map(versions.map((version) => [version.id, version])),
+  });
 }
 
 function decodeSlot(row: SqlRow): RefreshableSlot {
@@ -135,9 +174,8 @@ export class SpellSelectionEligibility {
       decodeVersion,
     );
     if (version === null || !version.isActive) {
-      return invalid(eligibilityInvalidReasons.inactive);
+      return this.#evaluateDecodedConstraint(constraint, version, false);
     }
-
     const legacyAllowed =
       Number(
         this.db.scalar(
@@ -145,6 +183,39 @@ export class SpellSelectionEligibility {
           [characterId],
         ) ?? 0,
       ) === 1;
+    return this.#evaluateDecodedConstraint(
+      constraint,
+      version,
+      legacyAllowed,
+    );
+  }
+
+  evaluateConstraintFromSnapshot(
+    characterId: number,
+    constraint: SpellSelectionConstraint,
+    spellVersionId: SpellVersionId,
+    snapshot: SpellSelectionEligibilitySnapshot,
+  ): SpellSelectionEvaluation {
+    if (snapshot.characterId !== characterId) {
+      throw new TypeError(
+        'The spell eligibility snapshot belongs to another character.',
+      );
+    }
+    return this.#evaluateDecodedConstraint(
+      constraint,
+      snapshot.versions.get(spellVersionId) ?? null,
+      snapshot.legacyAllowed,
+    );
+  }
+
+  #evaluateDecodedConstraint(
+    constraint: SpellSelectionConstraint,
+    version: SpellSelectionVersionFacts | null,
+    legacyAllowed: boolean,
+  ): SpellSelectionEvaluation {
+    if (version === null || !version.isActive) {
+      return invalid(eligibilityInvalidReasons.inactive);
+    }
     if (version.rulesEdition === '2014' && !legacyAllowed) {
       return invalid(eligibilityInvalidReasons.legacy);
     }

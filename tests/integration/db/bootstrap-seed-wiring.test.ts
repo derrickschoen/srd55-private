@@ -1,32 +1,58 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createApplicationLifecycle } from '../../../src/db/bootstrap';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 import type { DatabaseLifecycle } from '../../../src/db/database-lifecycle';
 import { getSqlite3, MemoryDatabaseStorage } from '../../helpers/open-db';
 
-const seedHooks = vi.hoisted(() => ({
+const seedHooks = {
   validateSubclassSpellReferences: vi.fn(),
   reconcileLaterSeedStep: vi.fn(),
-}));
+};
 
-vi.mock('../../../src/rules/srd-subclass-content', async (importOriginal) => {
-  const actual = await importOriginal<
-    typeof import('../../../src/rules/srd-subclass-content')
-  >();
-  return {
-    ...actual,
-    assertBundledSrdSubclassSpellReferences:
-      seedHooks.validateSubclassSpellReferences,
-  };
+type BootstrapModule = typeof import('../../../src/db/bootstrap');
+
+let createApplicationLifecycle: BootstrapModule['createApplicationLifecycle'];
+
+beforeAll(async () => {
+  vi.doMock('../../../src/rules/srd-subclass-content', async (importOriginal) => {
+    const actual = await importOriginal<
+      typeof import('../../../src/rules/srd-subclass-content')
+    >();
+    return {
+      ...actual,
+      assertBundledSrdSubclassSpellReferences:
+        seedHooks.validateSubclassSpellReferences,
+    };
+  });
+  vi.doMock(
+    '../../../src/rules/legacy-level-feat-choices',
+    async (importOriginal) => {
+      const actual = await importOriginal<
+        typeof import('../../../src/rules/legacy-level-feat-choices')
+      >();
+      return {
+        ...actual,
+        reconcileLegacyLevelFeatChoices: seedHooks.reconcileLaterSeedStep,
+      };
+    },
+  );
+  // bootstrap is commonly cached by earlier integration files in a shared
+  // worker. Reload only this deliberate seed-hook mock boundary.
+  vi.resetModules();
+  ({ createApplicationLifecycle } = await import('../../../src/db/bootstrap'));
 });
 
-vi.mock('../../../src/rules/legacy-level-feat-choices', async (importOriginal) => {
-  const actual = await importOriginal<
-    typeof import('../../../src/rules/legacy-level-feat-choices')
-  >();
-  return {
-    ...actual,
-    reconcileLegacyLevelFeatChoices: seedHooks.reconcileLaterSeedStep,
-  };
+afterAll(() => {
+  vi.doUnmock('../../../src/rules/srd-subclass-content');
+  vi.doUnmock('../../../src/rules/legacy-level-feat-choices');
+  // Evict bootstrap compiled against the two hooks before another file uses it.
+  vi.resetModules();
 });
 
 let lifecycle: DatabaseLifecycle | undefined;
@@ -64,6 +90,9 @@ describe('application seed wiring', () => {
     expect(openedLifecycle.isOpen).toBe(true);
     expect(seedHooks.validateSubclassSpellReferences).toHaveBeenCalledOnce();
     expect(seedHooks.reconcileLaterSeedStep).not.toHaveBeenCalled();
+    expect(
+      openedLifecycle.database.scalar('SELECT count(*) FROM class_definitions'),
+    ).toBe(0);
     expect(reported).toHaveBeenCalledWith(
       'Bundled content could not be seeded.',
       unresolved,

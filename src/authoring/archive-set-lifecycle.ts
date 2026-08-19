@@ -13,6 +13,7 @@ import {
   catalogLayerDisclosure,
   type CatalogLayerDisclosure,
 } from '../catalog/catalog-disclosure';
+import { userFacingCatalogVisibilitySql } from '../queries/selectable-catalog-content';
 import { isEnumValue, rulesEditions, type RulesEdition } from '../domain/enums';
 import type { CharacterId, CharacterRevision, ContentKey } from '../domain/ids';
 import type {
@@ -516,7 +517,11 @@ export class HomebrewArchiveSetService {
 
   listArchived(): readonly ArchivedHomebrewSet[] {
     const rows = this.db.all(
-      `${contentQuery('identity.archived_at IS NOT NULL')}
+      `${contentQuery(
+        `identity.archived_at IS NOT NULL AND ${
+          userFacingCatalogVisibilitySql('identity.visibility')
+        }`,
+      )}
        ORDER BY identity.archived_at DESC, identity.content_kind,
                 identity.normalized_name, identity.content_key`,
       undefined,

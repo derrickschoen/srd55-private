@@ -42,6 +42,8 @@ import {
 import type { Skill } from '../../../domain/enums';
 import { SKILL_LABELS } from '../../../rules/skills';
 import { RpcError } from '../../../rpc/protocol';
+import type { DecodedOutcome } from '../../../refusals/outcome';
+import { renderRefusal } from '../../../refusals/render';
 import { clear, element, listen, type Cleanup } from '../../dom';
 import { characterListLink, guidedShell } from './guided-builder';
 import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
@@ -118,7 +120,7 @@ export interface SkillsStepDeps {
     grantId: number,
     skill: Skill | null,
     operationUuid: string,
-  ) => Promise<GuidedFillSkillGrantResult>;
+  ) => Promise<DecodedOutcome<GuidedFillSkillGrantResult>>;
   readonly navigate: (path: string) => void;
 }
 
@@ -130,6 +132,7 @@ export interface SkillsStep {
 export function createSkillsStep(deps: SkillsStepDeps): SkillsStep {
   const cleanups: Cleanup[] = [];
   const controls: HTMLButtonElement[] = [];
+  const restoreChoiceDisabledStates: Array<() => void> = [];
   let inFlight = false;
 
   const errorMount = element('div', { className: 'guided-error-mount' });
@@ -162,7 +165,22 @@ export function createSkillsStep(deps: SkillsStepDeps): SkillsStep {
     setError(null);
     setControlsDisabled(true);
     try {
-      await deps.fillSkillGrant(grantId, skill, crypto.randomUUID());
+      const outcome = await deps.fillSkillGrant(
+        grantId,
+        skill,
+        crypto.randomUUID(),
+      );
+      if (outcome.kind !== 'ok') {
+        setError(renderRefusal(
+          outcome.kind === 'refused' ? outcome.refusal : outcome,
+        ));
+        inFlight = false;
+        setControlsDisabled(false);
+        for (const restoreDisabledState of restoreChoiceDisabledStates) {
+          restoreDisabledState();
+        }
+        return;
+      }
       // The grant is written; the build route re-derives the step from the
       // database — this same step with the choice recorded, or whatever
       // comes next once every class ordinal is filled.
@@ -174,6 +192,9 @@ export function createSkillsStep(deps: SkillsStepDeps): SkillsStep {
       );
       inFlight = false;
       setControlsDisabled(false);
+      for (const restoreDisabledState of restoreChoiceDisabledStates) {
+        restoreDisabledState();
+      }
     }
   };
 
@@ -271,11 +292,18 @@ export function createSkillsStep(deps: SkillsStepDeps): SkillsStep {
       options.catalogLayer,
     );
     fill.setAttribute('aria-describedby', disclosureId);
+    fill.disabled = true;
     if (options.available.length === 0) {
       select.disabled = true;
-      fill.disabled = true;
     } else {
       controls.push(fill);
+      const restoreDisabledState = (): void => {
+        fill.disabled = select.value === '' || inFlight;
+      };
+      restoreChoiceDisabledStates.push(restoreDisabledState);
+      cleanups.push(
+        listen(select, 'change', restoreDisabledState),
+      );
     }
     cleanups.push(
       listen(fill, 'click', () => {

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ok } from '../../../src/refusals/outcome';
 import {
   LEVEL_UP_ATTR,
   LEVEL_UP_PANEL,
@@ -280,6 +281,7 @@ function sheet(level: number): CharacterSheet {
     },
     hit_point_rolls: [],
     equipment_packages: [],
+    unfinished_choices: [],
     warnings: [],
     gaps: [],
   };
@@ -524,17 +526,17 @@ describe('W-LU2-DRAFT planned Skills, Expertise, and Spells', () => {
     };
     const before = sheet(1);
     const after = sheet(2);
-    const preview = vi.fn().mockResolvedValue({
+    const preview = vi.fn().mockResolvedValue(ok({
       before,
       after,
       new_outstanding_choices: [],
       command_fingerprint: 'server-reviewed-planned-command',
-    });
-    const submit = vi.fn().mockResolvedValue({
+    }));
+    const submit = vi.fn().mockResolvedValue(ok({
       operation_uuid: 'level-up-operation',
       revision: 5,
       idempotent_replay: false,
-    });
+    }));
     const wizard = createLevelUpWizard({
       state: ready(),
       cancel: () => undefined,
@@ -876,6 +878,8 @@ describe('W-LU2-DRAFT planned Skills, Expertise, and Spells', () => {
   it('searches the exact locator and revision while the RPC spy stays command-free', async () => {
     const calls = vi.fn(async (method: string, params: unknown) => {
       if (method === LEVEL_UP_RPC.state) return ready();
+      if (method === LEVEL_UP_RPC.progress) return null;
+      if (method === LEVEL_UP_RPC.saveProgress) return null;
       if (method === LEVEL_UP_RPC.plannedEligibleSpells) return [eligible];
       throw new Error(`Unexpected durable RPC ${method}: ${JSON.stringify(params)}`);
     });
@@ -891,11 +895,23 @@ describe('W-LU2-DRAFT planned Skills, Expertise, and Spells', () => {
       registerNavigationGuard: () => () => undefined,
     });
     click(root, LEVEL_UP_ATTR.next);
+    await vi.waitFor(() => {
+      expect(root.querySelector('h2')?.textContent).toBe('Review level gains');
+    });
     click(root, LEVEL_UP_ATTR.next);
+    await vi.waitFor(() => {
+      expect(root.querySelector(`[${LEVEL_UP_ATTR.skillChoice}]`)).not.toBeNull();
+    });
     chooseSelect(root, LEVEL_UP_ATTR.skillChoice, 'arcana');
     click(root, LEVEL_UP_ATTR.next);
+    await vi.waitFor(() => {
+      expect(root.querySelector(`[${LEVEL_UP_ATTR.expertiseChoice}]`)).not.toBeNull();
+    });
     chooseSelect(root, LEVEL_UP_ATTR.expertiseChoice, 'arcana');
     click(root, LEVEL_UP_ATTR.next);
+    await vi.waitFor(() => {
+      expect(root.querySelector('.spell-picker-input')).not.toBeNull();
+    });
     const input = interactiveElement(root).querySelector('.spell-picker-input');
     input?.dispatchEvent(new Event('focus'));
     await Promise.resolve();
@@ -910,6 +926,39 @@ describe('W-LU2-DRAFT planned Skills, Expertise, and Spells', () => {
 
     expect(calls.mock.calls).toEqual([
       [LEVEL_UP_RPC.state, { character_id: 7 }],
+      [LEVEL_UP_RPC.progress, { character_id: 7 }],
+      [LEVEL_UP_RPC.saveProgress, {
+        character_id: 7,
+        progress: {
+          character_revision: 4,
+          selected_class_content_key: 'test:class:wizard',
+          current_step: 'gains',
+        },
+      }],
+      [LEVEL_UP_RPC.saveProgress, {
+        character_id: 7,
+        progress: {
+          character_revision: 4,
+          selected_class_content_key: 'test:class:wizard',
+          current_step: 'skills',
+        },
+      }],
+      [LEVEL_UP_RPC.saveProgress, {
+        character_id: 7,
+        progress: {
+          character_revision: 4,
+          selected_class_content_key: 'test:class:wizard',
+          current_step: 'expertise',
+        },
+      }],
+      [LEVEL_UP_RPC.saveProgress, {
+        character_id: 7,
+        progress: {
+          character_revision: 4,
+          selected_class_content_key: 'test:class:wizard',
+          current_step: 'spells',
+        },
+      }],
       [LEVEL_UP_RPC.plannedEligibleSpells, {
         character_id: 7,
         expected_revision: 4,

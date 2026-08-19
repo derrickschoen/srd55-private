@@ -13,12 +13,22 @@ import type {
 } from '../../../src/domain/command-contracts';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import { openTestDatabase } from '../../helpers/open-db';
+import { ConfiguredSpellListResolutionError } from '../../../src/grants/grant-rule-planner';
 
 type SourceType = 'class' | 'feat' | 'species' | 'background';
 type DefinitionTable =
   | 'feat_definitions'
   | 'species_definitions'
   | 'background_definitions';
+
+function thrown(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return expect.fail('Expected an error, but the call returned.');
+}
 
 describe('character rule and source commands', () => {
   let connection: Database;
@@ -529,7 +539,7 @@ describe('character rule and source commands', () => {
     const characterId = character();
     const empty = state.capture(characterId);
 
-    expect(() =>
+    const error = thrown(() =>
       add(characterId, {
         type: 'add_source',
         source_type: 'class',
@@ -537,8 +547,9 @@ describe('character rule and source commands', () => {
         config: {
           level: 1,
         },
-      }),
-    ).toThrow('A configured spell list could not be resolved.');
+      }));
+    expect(error).toBeInstanceOf(ConfiguredSpellListResolutionError);
+    expect(error).toMatchObject({});
     expect(state.capture(characterId)).toEqual(empty);
     expect(
       db.oneRaw(

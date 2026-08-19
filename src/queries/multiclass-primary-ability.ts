@@ -8,6 +8,32 @@ import {
 } from '../rules/multiclass-prerequisite-gate';
 import { CharacterNotFoundError } from './character-crud';
 
+export type MulticlassPrimaryAbilityMissingAssessmentContext =
+  | 'declared_prerequisite'
+  | 'held_class';
+
+const MISSING_ASSESSMENT_MESSAGES: Readonly<
+  Record<MulticlassPrimaryAbilityMissingAssessmentContext, string>
+> = {
+  declared_prerequisite:
+    'declared a multiclass prerequisite but was not evaluated',
+  held_class: 'has no multiclass prerequisite assessment',
+};
+
+/** A held class is absent from the assessment set that was meant to cover it. */
+export class MulticlassPrimaryAbilityAssessmentMissingError extends Error {
+  override readonly name =
+    'MulticlassPrimaryAbilityAssessmentMissingError' as const;
+  constructor(
+    readonly class_definition_id: number,
+    readonly context: MulticlassPrimaryAbilityMissingAssessmentContext,
+  ) {
+    super(
+      `Held class ${String(class_definition_id)} ${MISSING_ASSESSMENT_MESSAGES[context]}.`,
+    );
+  }
+}
+
 export type MulticlassPrimaryAbilityAssessment =
   | (MulticlassPrerequisiteClass & {
       readonly status: 'not_applicable';
@@ -60,8 +86,9 @@ export class MulticlassPrimaryAbilityQueries {
       }
       const assessment = evaluated.get(row.class_definition_id);
       if (assessment === undefined) {
-        throw new Error(
-          `Held class ${String(row.class_definition_id)} declared a multiclass prerequisite but was not evaluated.`,
+        throw new MulticlassPrimaryAbilityAssessmentMissingError(
+          row.class_definition_id,
+          'declared_prerequisite',
         );
       }
       return assessment;
@@ -77,8 +104,9 @@ export function multiclassAssessmentForClass(
     (entry) => entry.class_definition_id === classDefinitionId,
   );
   if (assessment === undefined) {
-    throw new Error(
-      `Held class ${String(classDefinitionId)} has no multiclass prerequisite assessment.`,
+    throw new MulticlassPrimaryAbilityAssessmentMissingError(
+      classDefinitionId,
+      'held_class',
     );
   }
   return assessment;

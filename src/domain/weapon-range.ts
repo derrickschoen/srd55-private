@@ -1,3 +1,8 @@
+import {
+  WeaponRangeStorageError,
+  WeaponRangeV1PairClassificationError,
+} from './weapon-range-errors';
+
 /** The storage discriminator for a weapon's tagged range. */
 export const weaponRangeKinds = ['none', 'ranged', 'legacy'] as const;
 export type WeaponRangeKind = (typeof weaponRangeKinds)[number];
@@ -44,7 +49,7 @@ export function weaponRangeFromStorage(
   switch (kind) {
     case 'none':
       if (near_feet !== null || far_feet !== null) {
-        throw new TypeError('A none weapon range cannot carry distances.');
+        throw new WeaponRangeStorageError(kind, near_feet, far_feet);
       }
       return { kind };
     case 'ranged':
@@ -52,7 +57,7 @@ export function weaponRangeFromStorage(
         near_feet === null ||
         (far_feet !== null && far_feet < near_feet)
       ) {
-        throw new TypeError('A ranged weapon range has invalid distances.');
+        throw new WeaponRangeStorageError(kind, near_feet, far_feet);
       }
       return { kind, near_feet, far_feet };
     case 'legacy':
@@ -60,7 +65,7 @@ export function weaponRangeFromStorage(
         far_feet === null ||
         (near_feet !== null && far_feet >= near_feet)
       ) {
-        throw new TypeError('A legacy weapon range has invalid distances.');
+        throw new WeaponRangeStorageError(kind, near_feet, far_feet);
       }
       return { kind, near_feet, far_feet };
   }
@@ -85,7 +90,10 @@ export function weaponRangeFromV1Pair(
     };
   }
   if (range_long_feet === null) {
-    throw new TypeError('The v1 weapon range pair is not classifiable.');
+    throw new WeaponRangeV1PairClassificationError(
+      range_normal_feet,
+      range_long_feet,
+    );
   }
   return {
     kind: 'legacy',

@@ -63,6 +63,63 @@ export interface BundledContentDigestMismatchV1 {
   readonly reason: 'changed' | 'missing' | 'unexpected';
 }
 
+export class BundledDigestStoredValueError extends TypeError {
+  override readonly name = 'BundledDigestStoredValueError' as const;
+  constructor(readonly column: string) {
+    super(`Bundled digest cannot canonicalize ${column}'s stored value.`);
+  }
+}
+
+export type BundledDigestKindSource = 'stored' | 'pinned';
+
+export class BundledDigestUnknownKindError extends TypeError {
+  override readonly name = 'BundledDigestUnknownKindError' as const;
+  constructor(
+    readonly kind: string,
+    readonly source: BundledDigestKindSource,
+  ) {
+    super(
+      source === 'stored'
+        ? `Bundled digest found unknown kind '${kind}'.`
+        : `Pinned bundled digest has unknown kind '${kind}'.`,
+    );
+  }
+}
+
+export class BundledDigestFingerprintIdentityMissingError extends TypeError {
+  override readonly name = 'BundledDigestFingerprintIdentityMissingError' as const;
+  constructor(
+    readonly kind: ContentKind,
+    readonly content_key: string,
+  ) {
+    super(`Bundled digest fingerprint ${kind} '${content_key}' has no identity.`);
+  }
+}
+
+export class BundledDigestRowIdentityMissingError extends TypeError {
+  override readonly name = 'BundledDigestRowIdentityMissingError' as const;
+  constructor(
+    readonly table: string,
+    readonly kind: ContentKind,
+    readonly content_key: string,
+  ) {
+    super(
+      `Bundled digest ${table} row has no ${kind} identity ` +
+        `for '${content_key}'.`,
+    );
+  }
+}
+
+export class BundledDigestNameMismatchError extends TypeError {
+  override readonly name = 'BundledDigestNameMismatchError' as const;
+  constructor(
+    readonly kind: ContentKind,
+    readonly content_key: string,
+  ) {
+    super(`Bundled digest ${kind} '${content_key}' has inconsistent names.`);
+  }
+}
+
 const BUNDLED_IDENTITY_FILTER =
   "registry.key_kind = 'bundled-stable' AND registry.catalog_layer = 'bundled'";
 
@@ -315,9 +372,7 @@ function canonicalRow(row: SqlRow, omitted: ReadonlySet<string>): SqlRow {
       continue;
     }
     if (typeof value === 'bigint' || value instanceof Uint8Array) {
-      throw new TypeError(
-        `Bundled digest cannot canonicalize ${column}'s stored value.`,
-      );
+      throw new BundledDigestStoredValueError(column);
     }
     normalized[column] = value;
   }
@@ -346,7 +401,7 @@ function bundledAggregates(db: DatabaseContext): readonly MutableAggregateV1[] {
   for (const identity of identities) {
     const rawKind = sqlString(identity, 'content_kind');
     if (!isEnumValue(contentKinds, rawKind)) {
-      throw new TypeError(`Bundled digest found unknown kind '${rawKind}'.`);
+      throw new BundledDigestUnknownKindError(rawKind, 'stored');
     }
     const contentKey = sqlString(identity, 'content_key') as ContentKey;
     const aggregate: MutableAggregateV1 = {
@@ -358,7 +413,9 @@ function bundledAggregates(db: DatabaseContext): readonly MutableAggregateV1[] {
     pushTableRow(
       aggregate,
       'catalog_content_identities',
-      canonicalRow(identity, new Set()),
+      // V1 proves bundled rules bytes. D299 visibility is independently
+      // closed by the schema and controls presentation, not rule semantics.
+      canonicalRow(identity, new Set(['visibility'])),
     );
     aggregates.set(aggregateLocator(rawKind, contentKey), aggregate);
   }
@@ -376,13 +433,14 @@ function bundledAggregates(db: DatabaseContext): readonly MutableAggregateV1[] {
   )) {
     const rawKind = sqlString(fingerprint, 'content_kind');
     if (!isEnumValue(contentKinds, rawKind)) {
-      throw new TypeError(`Bundled digest found unknown kind '${rawKind}'.`);
+      throw new BundledDigestUnknownKindError(rawKind, 'stored');
     }
     const contentKey = sqlString(fingerprint, 'content_key');
     const aggregate = aggregates.get(aggregateLocator(rawKind, contentKey));
     if (aggregate === undefined) {
-      throw new TypeError(
-        `Bundled digest fingerprint ${rawKind} '${contentKey}' has no identity.`,
+      throw new BundledDigestFingerprintIdentityMissingError(
+        rawKind,
+        contentKey,
       );
     }
     pushTableRow(
@@ -400,17 +458,16 @@ function bundledAggregates(db: DatabaseContext): readonly MutableAggregateV1[] {
         aggregateLocator(slice.kind, contentKey),
       );
       if (aggregate === undefined) {
-        throw new TypeError(
-          `Bundled digest ${slice.table} row has no ${slice.kind} identity ` +
-            `for '${contentKey}'.`,
+        throw new BundledDigestRowIdentityMissingError(
+          slice.table,
+          slice.kind,
+          contentKey,
         );
       }
       if (slice.nameColumn !== undefined) {
         const name = sqlString(row, slice.nameColumn);
         if (aggregate.name !== undefined && aggregate.name !== name) {
-          throw new TypeError(
-            `Bundled digest ${slice.kind} '${contentKey}' has inconsistent names.`,
-          );
+          throw new BundledDigestNameMismatchError(slice.kind, contentKey);
         }
         aggregate.name = name;
       }
@@ -513,7 +570,7 @@ export function bundledContentDigestMismatchesV1(
   }
   for (const pinned of expected.values()) {
     if (!isEnumValue(contentKinds, pinned.kind)) {
-      throw new TypeError(`Pinned bundled digest has unknown kind '${pinned.kind}'.`);
+      throw new BundledDigestUnknownKindError(pinned.kind, 'pinned');
     }
     mismatches.push({
       catalog_layer: 'bundled',

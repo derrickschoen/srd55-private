@@ -22,7 +22,10 @@ import { GrantRule, type GrantRuleObject } from '../grants/grant-rule';
 import type { JsonObject } from '../domain/models';
 import type { ClassLevel } from '../domain/ids';
 import { characterLevel } from '../rules/character-level';
-import { planLevelFeatSelection } from '../commands/level-feat-choice';
+import {
+  planLevelFeatSelection,
+  type LevelFeatDefinitionFromDatabase,
+} from '../commands/level-feat-choice';
 import {
   asiLevelsForClassName,
   epicBoonLevelsForClassName,
@@ -203,6 +206,7 @@ export class LevelUpPlannedEligibleSpells {
   planSource(
     params: LevelUpPlannedSpellPlanParams,
     source: PlannedGrantSource,
+    preloadedFeatDefinition?: LevelFeatDefinitionFromDatabase,
   ): readonly PlannedSpellGrant[] {
     const revision = this.db.scalar<number>(
       'SELECT revision FROM characters WHERE id = ?',
@@ -253,13 +257,19 @@ export class LevelUpPlannedEligibleSpells {
       );
     }
 
-    return this.planFor(params, source, held);
+    return this.planFor(
+      params,
+      source,
+      held,
+      preloadedFeatDefinition,
+    );
   }
 
   private planFor(
     params: LevelUpPlannedSpellPlanParams,
     source: PlannedGrantSource,
     held: HeldClassPlan,
+    preloadedFeatDefinition?: LevelFeatDefinitionFromDatabase,
   ) {
     if (source.kind === 'selected_class') {
       return this.#planner.plan({
@@ -353,6 +363,9 @@ export class LevelUpPlannedEligibleSpells {
       targetClassLevel: params.target_class_level,
       targetSubclassContentKey:
         params.subclass_content_key ?? held.subclass_content_key,
+      ...(preloadedFeatDefinition === undefined
+        ? {}
+        : { preloadedDefinition: preloadedFeatDefinition }),
       ...(isEpicBoonLevel ? { requiredGrouping: 'epic_boon' } : {}),
     });
     if (featPlan.eligibility.status !== 'qualified') return [];

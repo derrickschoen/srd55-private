@@ -8,7 +8,7 @@ import {
   handlers as queryHandlers,
 } from '../../../src/worker/handlers/queries';
 import {
-  createRpcHarness,
+  createSeededRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
 import {
@@ -34,7 +34,7 @@ describe('completeness RPCs', () => {
   });
 
   it('returns the character result and the batch counts without writing anything', async () => {
-    harness = await createRpcHarness(queryHandlers);
+    harness = await createSeededRpcHarness(queryHandlers);
     const fixture = createBuildReportFixture(harness.context.db);
     const before = persistedReportTableHashes(
       harness.context.db,
@@ -84,7 +84,7 @@ describe('completeness RPCs', () => {
   });
 
   it('reports an unknown character as an error rather than a plausible result', async () => {
-    harness = await createRpcHarness(queryHandlers);
+    harness = await createSeededRpcHarness(queryHandlers);
 
     expect(
       await harness.call('queries.characters.completeness', {
@@ -97,7 +97,7 @@ describe('completeness RPCs', () => {
   });
 
   it('rejects malformed params for both methods', async () => {
-    harness = await createRpcHarness(queryHandlers);
+    harness = await createSeededRpcHarness(queryHandlers);
 
     expect(
       await harness.call('queries.characters.completeness', {}),

@@ -49,6 +49,9 @@ import {
 import type { SubclassAuthoringDraft } from '../../../src/authoring/contracts';
 import { CharacterListBuilder } from '../../../src/queries/character-list-builder';
 import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
+import {
+  CharacterSpellRulesEditionError,
+} from '../../../src/queries/character-spell-section-builder';
 import { createQueriesClient } from '../../../src/queries/client';
 import { parseRoute } from '../../../src/ui/router';
 import type { ScreenContext } from '../../../src/ui/screen';
@@ -63,6 +66,15 @@ const registry = createRpcRegistry({
   authoring: { handlers },
   queries: { handlers: queryHandlers },
 });
+
+function thrownBy(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return expect.fail('Expected the query to throw a defect, but it returned.');
+}
 
 afterEach(() => {
   harness?.close();
@@ -448,9 +460,10 @@ describe('catalog authoring RPC handlers', () => {
     expect(await authoring.installBundledHomebrew({ token: preview.token })).toMatchObject({
       kind: 'committed',
       outcomes: [
-        { kind: 'create' },
-        { kind: 'create' },
-        { kind: 'create' },
+        { kind: 'create' }, { kind: 'create' }, { kind: 'create' },
+        { kind: 'create' }, { kind: 'create' }, { kind: 'create' },
+        { kind: 'create' }, { kind: 'create' }, { kind: 'create' },
+        { kind: 'create' }, { kind: 'create' }, { kind: 'create' },
       ],
     });
     expect((await authoring.list()).published
@@ -496,6 +509,7 @@ describe('catalog authoring RPC handlers', () => {
     const hostileDocument: SubclassAuthoringDraft = { ...base, name: hostileName };
     const hostileCatalog = Object.freeze([Object.freeze({
       catalog_key: 'hostile-spell-student',
+      visibility: 'listed',
       revisions: Object.freeze([hostileDocument] as const),
     })] as const satisfies readonly BundledHomebrewCatalogEntry[]);
     const routedHandlers = handlers.map((handler): RpcHandler => {
@@ -1081,8 +1095,11 @@ describe('catalog authoring RPC handlers', () => {
        WHERE id = ?`,
       [spellVersionId],
     );
-    expect(() => new CharacterSheetBuilder(rpc.context.db).build(uiCharacter.id))
-      .toThrow('Unknown spell rules edition future-edition.');
+    const editionError = thrownBy(() =>
+      new CharacterSheetBuilder(rpc.context.db).build(uiCharacter.id)
+    );
+    expect(editionError).toBeInstanceOf(CharacterSpellRulesEditionError);
+    expect(editionError).toMatchObject({ rules_edition: 'future-edition' });
     const unavailablePreview = await authoringClient.previewReplacement({
       old_content_key: old.content_key,
       new_content_key: incompatible.content_key,
@@ -1974,12 +1991,12 @@ describe('catalog authoring RPC handlers', () => {
     const subclassKey = 'expanded:test.owner:purge-subclass' as ContentKey;
     db.exec(
       `INSERT INTO catalog_content_identities (
-         content_key, content_kind, key_kind, catalog_layer, normalized_name,
-         archived_at
+         content_key, content_kind, key_kind, catalog_layer, visibility,
+         normalized_name, archived_at
        ) VALUES
-         (?, 'background', 'asserted', 'external', 'purge background',
+         (?, 'background', 'asserted', 'external', 'listed', 'purge background',
           '2042-08-13T14:15:16.000Z'),
-         (?, 'subclass', 'asserted', 'external', 'purge subclass',
+         (?, 'subclass', 'asserted', 'external', 'listed', 'purge subclass',
           '2042-08-13T14:15:16.000Z')`,
       [backgroundKey, subclassKey],
     );

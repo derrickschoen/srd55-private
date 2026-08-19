@@ -1,3 +1,5 @@
+import { SubclassFeatureDescriptionEmptyError } from './subclass-feature-description-errors';
+
 declare const headingOnlyDescriptionBrand: unique symbol;
 declare const nonEmptySubclassFeatureDescriptionBrand: unique symbol;
 
@@ -26,7 +28,7 @@ export function nonEmptySubclassFeatureDescription(
   value: string,
 ): NonEmptySubclassFeatureDescription {
   if (value.length === 0) {
-    throw new TypeError('Subclass feature description must be non-empty.');
+    throw new SubclassFeatureDescriptionEmptyError();
   }
   return value as NonEmptySubclassFeatureDescription;
 }

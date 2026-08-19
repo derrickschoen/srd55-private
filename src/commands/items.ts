@@ -1,5 +1,7 @@
 import type { SqlValue } from '@sqlite.org/sqlite-wasm';
 import type { DatabaseContext } from '../db/database';
+import { ok, refused, type OkOutcome, type Outcome } from '../refusals/outcome';
+import { attunementSlotsFullRefusal } from '../refusals/refusal';
 import type {
   AddItemCommand as AddItemPayload,
   AttuneItemCommand as AttuneItemPayload,
@@ -14,8 +16,8 @@ import {
   attunementSlots,
   type AttunementOccupant,
   type AttunementSlot,
-  type AttunementSlotsFullData,
 } from '../domain/attunement';
+import type { CharacterItemId } from '../domain/ids';
 import { rowContractError } from '../domain/contracts/rows';
 import type { ResolvesInverseAfterApply } from './weapons';
 import {
@@ -151,19 +153,6 @@ function occupants(
   });
 }
 
-export class AttunementSlotsFull extends Error {
-  readonly data: AttunementSlotsFullData;
-
-  constructor(occupyingItems: readonly AttunementOccupant[]) {
-    super('All three attunement slots are occupied.');
-    this.name = 'AttunementSlotsFull';
-    this.data = {
-      reason: 'attunement_slots_full',
-      occupants: occupyingItems,
-    };
-  }
-}
-
 function readItem(
   db: DatabaseContext,
   characterId: number,
@@ -213,7 +202,7 @@ export class AddItemCommand implements ResolvesInverseAfterApply {
     private readonly payload: AddItemPayload,
   ) {}
 
-  apply(characterId: number): void {
+  apply(characterId: number): OkOutcome<void> {
     const timestamp = new Date().toISOString();
     const values = itemValues(this.payload.item);
     assertItemRow(values, characterId, timestamp);
@@ -257,6 +246,7 @@ export class AddItemCommand implements ResolvesInverseAfterApply {
         this.#itemId,
       );
     }
+    return ok(undefined);
   }
 
   inverse(): RemoveItemPayload {
@@ -278,7 +268,7 @@ export class UpdateItemCommand implements ResolvesInverseAfterApply {
     private readonly payload: UpdateItemPayload,
   ) {}
 
-  apply(characterId: number): void {
+  apply(characterId: number): OkOutcome<void> {
     const existing = readItem(this.db, characterId, this.payload.item_id);
     this.#previous = {
       ...fieldsFromRow(existing),
@@ -329,6 +319,7 @@ export class UpdateItemCommand implements ResolvesInverseAfterApply {
         ],
       );
     }
+    return ok(undefined);
   }
 
   inverse(): UpdateItemPayload {
@@ -354,7 +345,7 @@ export class RemoveItemCommand implements ResolvesInverseAfterApply {
     private readonly payload: RemoveItemPayload,
   ) {}
 
-  apply(characterId: number): void {
+  apply(characterId: number): OkOutcome<void> {
     const existing = readItem(this.db, characterId, this.payload.item_id);
     const attunementSlot = itemAttunementSlot(
       this.db,
@@ -381,6 +372,7 @@ export class RemoveItemCommand implements ResolvesInverseAfterApply {
       'DELETE FROM character_items WHERE character_id = ? AND id = ?',
       [characterId, this.payload.item_id],
     );
+    return ok(undefined);
   }
 
   inverse(): AddItemPayload {
@@ -400,7 +392,7 @@ export class AttuneItemCommand implements ResolvesInverseAfterApply {
     private readonly payload: AttuneItemPayload,
   ) {}
 
-  apply(characterId: number): void {
+  apply(characterId: number): Outcome<void> {
     readItem(this.db, characterId, this.payload.item_id);
     if (itemAttunementSlot(this.db, characterId, this.payload.item_id) !== null) {
       throw new TypeError('Item already holds an attunement slot.');
@@ -410,9 +402,17 @@ export class AttuneItemCommand implements ResolvesInverseAfterApply {
       (slot) => !held.some((occupant) => occupant.slot === slot),
     );
     if (free === undefined) {
-      throw new AttunementSlotsFull(held);
+      return refused(attunementSlotsFullRefusal(
+        attunementSlots.length,
+        held.map((occupant) => ({
+          slot: occupant.slot,
+          item_id: occupant.item_id as CharacterItemId,
+          name: occupant.name,
+        })),
+      ));
     }
     restoreSlot(this.db, characterId, free, this.payload.item_id);
+    return ok(undefined);
   }
 
   inverse(): UnattuneItemPayload {
@@ -431,7 +431,7 @@ export class UnattuneItemCommand implements ResolvesInverseAfterApply {
     private readonly payload: UnattuneItemPayload,
   ) {}
 
-  apply(characterId: number): void {
+  apply(characterId: number): OkOutcome<void> {
     readItem(this.db, characterId, this.payload.item_id);
     const slot = itemAttunementSlot(this.db, characterId, this.payload.item_id);
     if (slot === null) {
@@ -444,6 +444,7 @@ export class UnattuneItemCommand implements ResolvesInverseAfterApply {
        WHERE character_id = ?`,
       [characterId],
     );
+    return ok(undefined);
   }
 
   inverse(): RestoreAttunementSlotPayload {
@@ -467,13 +468,14 @@ export class RestoreAttunementSlotCommand implements ResolvesInverseAfterApply {
     private readonly payload: RestoreAttunementSlotPayload,
   ) {}
 
-  apply(characterId: number): void {
+  apply(characterId: number): OkOutcome<void> {
     restoreSlot(
       this.db,
       characterId,
       this.payload.slot,
       this.payload.item_id,
     );
+    return ok(undefined);
   }
 
   inverse(): UnattuneItemPayload {
@@ -490,7 +492,7 @@ export class ReplaceAttunedItemCommand implements ResolvesInverseAfterApply {
     private readonly payload: ReplaceAttunedItemPayload,
   ) {}
 
-  apply(characterId: number): void {
+  apply(characterId: number): OkOutcome<void> {
     readItem(this.db, characterId, this.payload.item_id);
     readItem(this.db, characterId, this.payload.replaced_item_id);
     if (itemAttunementSlot(this.db, characterId, this.payload.item_id) !== null) {
@@ -510,6 +512,7 @@ export class ReplaceAttunedItemCommand implements ResolvesInverseAfterApply {
        WHERE character_id = ? AND ${slotColumn(slot)} = ?`,
       [this.payload.item_id, characterId, this.payload.replaced_item_id],
     );
+    return ok(undefined);
   }
 
   inverse(): ReplaceAttunedItemPayload {

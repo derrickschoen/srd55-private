@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { handlers as commandHandlers } from '../../../src/worker/handlers/commands';
 import {
-  createRpcHarness,
+  createSeededRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
 
@@ -10,7 +10,7 @@ describe('multiclass prerequisite house rule through commands.execute', () => {
   let characterId: number;
 
   beforeEach(async () => {
-    harness = await createRpcHarness(commandHandlers);
+    harness = await createSeededRpcHarness(commandHandlers);
     characterId = harness.context.db.exec(
       `INSERT INTO characters (
          name, intelligence, wisdom, ability_allocation_method
@@ -42,7 +42,10 @@ describe('multiclass prerequisite house rule through commands.execute', () => {
         subclass_definition_id: null,
       },
     });
-    expect(first).toMatchObject({ ok: true, result: { revision: 1 } });
+    expect(first).toMatchObject({
+      ok: true,
+      result: { kind: 'ok', value: { revision: 1 } },
+    });
 
     const blocked = await harness.call('commands.execute', {
       character_id: characterId,
@@ -79,7 +82,10 @@ describe('multiclass prerequisite house rule through commands.execute', () => {
         waive: true,
       },
     });
-    expect(toggled).toMatchObject({ ok: true, result: { revision: 2 } });
+    expect(toggled).toMatchObject({
+      ok: true,
+      result: { kind: 'ok', value: { revision: 2 } },
+    });
     expect(
       harness.context.db.oneRaw(
         `SELECT rule_key, value, note
@@ -103,7 +109,10 @@ describe('multiclass prerequisite house rule through commands.execute', () => {
         subclass_definition_id: null,
       },
     });
-    expect(admitted).toMatchObject({ ok: true, result: { revision: 3 } });
+    expect(admitted).toMatchObject({
+      ok: true,
+      result: { kind: 'ok', value: { revision: 3 } },
+    });
     expect(
       harness.context.db.scalar<number>(
         `SELECT count(*) FROM character_class_levels
@@ -143,7 +152,10 @@ describe('multiclass prerequisite house rule through commands.execute', () => {
           waive: true,
         },
       }),
-    ).toMatchObject({ ok: true, result: { revision: 1 } });
+    ).toMatchObject({
+      ok: true,
+      result: { kind: 'ok', value: { revision: 1 } },
+    });
 
     expect(
       await harness.call('commands.undo', {
@@ -151,7 +163,13 @@ describe('multiclass prerequisite house rule through commands.execute', () => {
         operation_uuid: operationUuid,
         expected_revision: 1,
       }),
-    ).toMatchObject({ ok: true, result: { status: 'applied', revision: 2 } });
+    ).toMatchObject({
+      ok: true,
+      result: {
+        kind: 'ok',
+        value: { status: 'applied', revision: 2 },
+      },
+    });
     expect(
       harness.context.db.oneRaw(
         `SELECT value, note, created_at, updated_at

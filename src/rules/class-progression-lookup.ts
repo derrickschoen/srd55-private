@@ -19,6 +19,37 @@ import {
   type SpellSlotCounts,
 } from './spell-slots';
 
+export class ClassDefinitionPersistenceError extends Error {
+  override readonly name = 'ClassDefinitionPersistenceError' as const;
+  constructor(readonly class_name: string) {
+    super(`Failed to persist class definition ${class_name}.`);
+  }
+}
+
+export class CharacterClassMembershipError extends Error {
+  override readonly name = 'CharacterClassMembershipError' as const;
+  constructor(
+    readonly character_id: number,
+    readonly class_definition_id: number,
+  ) {
+    super(
+      `Character ${String(character_id)} does not have class ${String(class_definition_id)}.`,
+    );
+  }
+}
+
+export class ClassProgressionRowMissingError extends Error {
+  override readonly name = 'ClassProgressionRowMissingError' as const;
+  constructor(
+    readonly class_definition_id: number,
+    readonly class_level: number,
+  ) {
+    super(
+      `Class ${String(class_definition_id)} has no progression row at level ${String(class_level)}.`,
+    );
+  }
+}
+
 interface ClassSeed {
   readonly ability: Ability | null;
   readonly type: ProgressionType;
@@ -394,7 +425,7 @@ function upsertClass(
     [contentKey],
   );
   if (id === null) {
-    throw new Error(`Failed to persist class definition ${name}.`);
+    throw new ClassDefinitionPersistenceError(name);
   }
   return id;
 }
@@ -649,9 +680,7 @@ export class ClassProgressionLookup {
       [characterId, classDefinitionId],
     );
     if (classLevel === null) {
-      throw new Error(
-        `Character ${characterId} does not have class ${classDefinitionId}.`,
-      );
+      throw new CharacterClassMembershipError(characterId, classDefinitionId);
     }
 
     const preparedCount = this.db.scalar<number>(
@@ -661,8 +690,9 @@ export class ClassProgressionLookup {
       [classDefinitionId, classLevel],
     );
     if (preparedCount === null) {
-      throw new Error(
-        `Class ${classDefinitionId} has no progression row at level ${classLevel}.`,
+      throw new ClassProgressionRowMissingError(
+        classDefinitionId,
+        classLevel,
       );
     }
 

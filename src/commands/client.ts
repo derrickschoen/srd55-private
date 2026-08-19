@@ -10,6 +10,17 @@ import type {
   RestoreCharacterSavePointResult,
   UndoCharacterOperationResult,
 } from './character-command-executor';
+import {
+  isCharacterCommandRpcResult,
+  isRestoreCharacterSavePointResult,
+  isUndoCharacterOperationResult,
+} from './character-command-executor';
+import { decodeOutcome } from '../refusals/decode';
+import type {
+  DecodedOutcome,
+} from '../refusals/outcome';
+
+export type CommandClientOutcome<T> = DecodedOutcome<T>;
 
 export interface CommandsClient {
   execute(
@@ -17,17 +28,17 @@ export interface CommandsClient {
     expectedRevision: number,
     command: CharacterCommandPayload,
     operationUuid?: string,
-  ): Promise<CharacterCommandRpcResult>;
+  ): Promise<CommandClientOutcome<CharacterCommandRpcResult>>;
   undo(
     characterId: number,
     expectedRevision: number,
     operationUuid: string,
-  ): Promise<UndoCharacterOperationResult>;
+  ): Promise<CommandClientOutcome<UndoCharacterOperationResult>>;
   restoreSavePoint(
     characterId: number,
     savePointId: number,
     expectedRevision: number,
-  ): Promise<RestoreCharacterSavePointResult>;
+  ): Promise<CommandClientOutcome<RestoreCharacterSavePointResult>>;
 }
 
 export function createCommandsClient(rpc: RpcClient): CommandsClient {
@@ -44,10 +55,10 @@ export function createCommandsClient(rpc: RpcClient): CommandsClient {
         expected_revision: expectedRevision,
         command,
       };
-      return rpc.call<CharacterCommandRequest, CharacterCommandRpcResult>(
+      return rpc.call<CharacterCommandRequest, unknown>(
         'commands.execute',
         request,
-      );
+      ).then((value) => decodeOutcome(value, isCharacterCommandRpcResult));
     },
     undo: (
       characterId: number,
@@ -61,8 +72,10 @@ export function createCommandsClient(rpc: RpcClient): CommandsClient {
       };
       return rpc.call<
         UndoCharacterOperationRequest,
-        UndoCharacterOperationResult
-      >('commands.undo', request);
+        unknown
+      >('commands.undo', request).then((value) =>
+        decodeOutcome(value, isUndoCharacterOperationResult)
+      );
     },
     restoreSavePoint: (
       characterId: number,
@@ -76,8 +89,10 @@ export function createCommandsClient(rpc: RpcClient): CommandsClient {
       };
       return rpc.call<
         RestoreCharacterSavePointRequest,
-        RestoreCharacterSavePointResult
-      >('commands.restoreSavePoint', request);
+        unknown
+      >('commands.restoreSavePoint', request).then((value) =>
+        decodeOutcome(value, isRestoreCharacterSavePointResult)
+      );
     },
   });
 }

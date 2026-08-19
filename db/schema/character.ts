@@ -354,6 +354,9 @@ export const character_source_instances = sqliteTable(
       table.character_id,
       table.state,
     ),
+    index('character_source_instances_parent_index')
+      .on(table.parent_source_instance_id)
+      .where(sql`parent_source_instance_id IS NOT NULL`),
     // Composite-FK companion: the target of spell_selection_slots'
     // (source_instance_id, character_id) reference, which is what stops a slot
     // from being attached to another character's source instance.
@@ -654,6 +657,16 @@ export const spell_selection_slots = sqliteTable(
       table.character_id,
       table.bucket,
     ),
+    index('spell_selection_slots_source_state_index').on(
+      table.source_instance_id,
+      table.state,
+    ),
+    index('spell_selection_slots_fixed_spell_version_index')
+      .on(table.fixed_spell_version_id)
+      .where(sql`fixed_spell_version_id IS NOT NULL`),
+    index('spell_selection_slots_current_spell_version_index')
+      .on(table.current_spell_version_id)
+      .where(sql`current_spell_version_id IS NOT NULL`),
     index('slots_character_collection_index').on(
       table.character_id,
       table.selection_collection,

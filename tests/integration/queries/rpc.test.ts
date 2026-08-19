@@ -17,6 +17,7 @@ import {
 } from '../../../src/worker/handlers/queries';
 import {
   createRpcHarness,
+  createSeededRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
 import {
@@ -93,7 +94,7 @@ describe('typed query RPC integration', () => {
   });
 
   it('validates character CRUD envelopes and persists create/delete through one surface', async () => {
-    harness = await createRpcHarness(queryHandlers);
+    harness = await createSeededRpcHarness(queryHandlers);
     const created = await harness.call<{ name: string }, { id: number }>(
       'queries.characters.create',
       { name: 'RPC Hero' },
@@ -161,6 +162,8 @@ describe('typed query RPC integration', () => {
       'queries.eligibleSpells.search',
       'queries.characters.levelUpPlannedEligibleSpells',
       'queries.characters.levelUpState',
+      'queries.characters.levelUpProgress',
+      'queries.characters.saveLevelUpProgress',
       'queries.savePoints.create',
       'queries.characters.sheet',
       'queries.characters.setPrintAppendixPreference',
@@ -170,7 +173,7 @@ describe('typed query RPC integration', () => {
   });
 
   it('exposes workspace, catalog, eligibility, report, sheet, and history as serializable DTOs', async () => {
-    harness = await createRpcHarness(queryHandlers);
+    harness = await createSeededRpcHarness(queryHandlers);
     const fixture = createBuildReportFixture(harness.context.db);
     const slotId = Number(
       harness.context.db.scalar(
@@ -380,7 +383,7 @@ describe('typed query RPC integration', () => {
   });
 
   it('persists save points without exposing their snapshot bytes through query RPCs', async () => {
-    harness = await createRpcHarness(queryHandlers);
+    harness = await createSeededRpcHarness(queryHandlers);
     const created = await harness.call<
       { name: string },
       { id: number }

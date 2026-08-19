@@ -15,6 +15,7 @@ import { DatabaseContext } from '../../../src/db/database';
 import { eligibilityInvalidReasons } from '../../../src/eligibility/spell-selection-eligibility';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import { openTestDatabase } from '../../helpers/open-db';
+import { expectOkOutcome } from '../../helpers/outcome';
 
 const integrityKey = 'C41-command-integrity-key';
 const oldTimestamp = '2000-01-01T00:00:00.000Z';
@@ -283,7 +284,7 @@ describe('update_ability command', () => {
     );
     const executor = new CharacterCommandExecutor(test.db, test.integrity);
 
-    const result = await executor.execute({
+    const result = expectOkOutcome(await executor.execute({
       character_id: test.characterId,
       operation_uuid: crypto.randomUUID(),
       expected_revision: 0,
@@ -292,7 +293,7 @@ describe('update_ability command', () => {
         ability: 'wisdom',
         score: 18,
       },
-    });
+    }));
 
     expect(result.inverse).toMatchObject({
       type: 'internal_snapshot_restore',
@@ -315,11 +316,11 @@ describe('update_ability command', () => {
       ),
     ).toBe(1);
 
-    await executor.undo({
+    expectOkOutcome(await executor.undo({
       character_id: test.characterId,
       operation_uuid: result.operation_uuid,
       expected_revision: 1,
-    });
+    }));
     expect(
       test.db.oneRaw(
         `SELECT wisdom, ability_allocation_method, revision

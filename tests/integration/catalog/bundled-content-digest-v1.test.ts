@@ -90,8 +90,9 @@ describe('D229 bundled content digest boot verification', () => {
     const contentKey = '2024:feat:nameless-digest-control';
     db.exec(
       `INSERT INTO catalog_content_identities (
-         content_key, content_kind, key_kind, catalog_layer, normalized_name
-       ) VALUES (?, 'feat', 'bundled-stable', 'bundled', 'nameless digest control')`,
+         content_key, content_kind, key_kind, catalog_layer, visibility,
+         normalized_name
+       ) VALUES (?, 'feat', 'bundled-stable', 'bundled', 'listed', 'nameless digest control')`,
       [contentKey],
     );
     try {

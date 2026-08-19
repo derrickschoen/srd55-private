@@ -16,7 +16,10 @@ import type {
   RestoreCharacterSavePointResult,
   UndoCharacterOperationResult,
 } from '../../../commands/character-command-executor';
-import { createCommandsClient } from '../../../commands/client';
+import {
+  createCommandsClient,
+  type CommandClientOutcome,
+} from '../../../commands/client';
 import type {
   CompletenessResult,
 } from '../../../queries/character-completeness';
@@ -56,15 +59,13 @@ import type {
   ItemFields,
   WeaponFields,
 } from '../../../domain/command-contracts';
-import type {
-  AttunementOccupant,
-  AttunementSlot,
-} from '../../../domain/attunement';
 import {
   activateAttunementReplacementModal, renderItems, type AttunementReplacement,
   type PlannerItemActions,
 } from './items';
 import { HOMEBREW_ROUTE } from '../homebrew/homebrew-library';
+import type { Refusal } from '../../../refusals/refusal';
+import { renderRefusal } from '../../../refusals/render';
 
 export interface PlannerCommandClient {
   execute(
@@ -72,17 +73,17 @@ export interface PlannerCommandClient {
     expectedRevision: number,
     command: CharacterCommandPayload,
     operationUuid?: string,
-  ): Promise<CharacterCommandRpcResult>;
+  ): Promise<CommandClientOutcome<CharacterCommandRpcResult>>;
   undo(
     characterId: number,
     expectedRevision: number,
     operationUuid: string,
-  ): Promise<UndoCharacterOperationResult>;
+  ): Promise<CommandClientOutcome<UndoCharacterOperationResult>>;
   restoreSavePoint(
     characterId: number,
     savePointId: number,
     expectedRevision: number,
-  ): Promise<RestoreCharacterSavePointResult>;
+  ): Promise<CommandClientOutcome<RestoreCharacterSavePointResult>>;
 }
 
 export interface PlannerQueryClient
@@ -134,11 +135,25 @@ export class PlannerSession {
     this.previewWarnings = [];
     let applied = false;
     try {
-      const result = await this.commands.execute(
+      const outcome = await this.commands.execute(
         this.characterId,
         this.workspace.revision,
         command,
       );
+      if (outcome.kind !== 'ok') {
+        if (outcome.kind === 'refused') {
+          const replacement = attunementReplacement(outcome.refusal, command);
+          if (replacement !== null) {
+            this.attunementReplacement = replacement;
+            return false;
+          }
+          this.#recordSharedRefusal(outcome.refusal);
+        } else {
+          this.error = renderRefusal(outcome);
+        }
+        return false;
+      }
+      const result = outcome.value;
       applied = true;
       this.#undo.length = 0;
       this.#undo.push(result.operation_uuid);
@@ -150,11 +165,6 @@ export class PlannerSession {
     } catch (error) {
       if (applied) {
         this.#recordCommittedRefreshFailure();
-        return false;
-      }
-      const replacement = attunementReplacement(error, command);
-      if (replacement !== null) {
-        this.attunementReplacement = replacement;
         return false;
       }
       this.#recordError(error, 'The change could not be saved.');
@@ -178,11 +188,21 @@ export class PlannerSession {
     this.previewWarnings = [];
     let applied = false;
     try {
-      const result = await this.commands.undo(
+      const outcome = await this.commands.undo(
         this.characterId,
         this.workspace.revision,
         operationUuid,
       );
+      if (outcome.kind !== 'ok') {
+        this.#undo.push(operationUuid);
+        if (outcome.kind === 'refused') {
+          this.#recordSharedRefusal(outcome.refusal);
+        } else {
+          this.error = renderRefusal(outcome);
+        }
+        return false;
+      }
+      const result = outcome.value;
       if (result.status === 'refused') {
         if (result.reason === 'revision_mismatch') {
           this.#undo.push(operationUuid);
@@ -220,11 +240,21 @@ export class PlannerSession {
     this.previewWarnings = [];
     let applied = false;
     try {
-      const result = await this.commands.undo(
+      const outcome = await this.commands.undo(
         this.characterId,
         this.workspace.revision,
         operationUuid,
       );
+      if (outcome.kind !== 'ok') {
+        this.#redo.push(operationUuid);
+        if (outcome.kind === 'refused') {
+          this.#recordSharedRefusal(outcome.refusal);
+        } else {
+          this.error = renderRefusal(outcome);
+        }
+        return false;
+      }
+      const result = outcome.value;
       if (result.status === 'refused') {
         if (result.reason === 'revision_mismatch') {
           this.#redo.push(operationUuid);
@@ -285,11 +315,20 @@ export class PlannerSession {
     this.previewWarnings = [];
     let applied = false;
     try {
-      const result = await this.commands.restoreSavePoint(
+      const outcome = await this.commands.restoreSavePoint(
         this.characterId,
         id,
         this.workspace.revision,
       );
+      if (outcome.kind !== 'ok') {
+        if (outcome.kind === 'refused') {
+          this.#recordSharedRefusal(outcome.refusal);
+        } else {
+          this.error = renderRefusal(outcome);
+        }
+        return false;
+      }
+      const result = outcome.value;
       if (result.status === 'refused') {
         this.#recordSavePointRefusal(result);
         return false;
@@ -362,6 +401,16 @@ export class PlannerSession {
     }
   }
 
+  #recordSharedRefusal(refusal: Refusal): void {
+    this.error = renderRefusal(refusal);
+    if (
+      refusal.kind === 'revision_conflict'
+      || refusal.kind === 'character_archived'
+    ) {
+      this.stale = true;
+    }
+  }
+
   #recordUndoRefusal(
     refusal: Extract<UndoCharacterOperationResult, { status: 'refused' }>,
     fallback: string,
@@ -395,42 +444,17 @@ export class PlannerSession {
 }
 
 function attunementReplacement(
-  error: unknown,
+  refusal: Refusal,
   command: CharacterCommandPayload,
 ): AttunementReplacement | null {
   if (
     command.type !== 'attune_item' ||
-    !(error instanceof RpcError) ||
-    error.code !== 'handler_error' ||
-    error.data === null ||
-    typeof error.data !== 'object' ||
-    Array.isArray(error.data) ||
-    error.data.reason !== 'attunement_slots_full' ||
-    !Array.isArray(error.data.occupants)
+    refusal.kind !== 'attunement_slots_full'
   ) {
     return null;
   }
-  const occupants: AttunementOccupant[] = [];
-  for (const value of error.data.occupants) {
-    if (
-      value === null ||
-      typeof value !== 'object' ||
-      Array.isArray(value) ||
-      ![1, 2, 3].includes(Number(value.slot)) ||
-      !Number.isSafeInteger(value.item_id) ||
-      Number(value.item_id) < 1 ||
-      typeof value.name !== 'string'
-    ) {
-      return null;
-    }
-    occupants.push({
-      slot: Number(value.slot) as AttunementSlot,
-      item_id: Number(value.item_id),
-      name: value.name,
-    });
-  }
-  return occupants.length === 3
-    ? { item_id: command.item_id, occupants }
+  return refusal.occupants.length === refusal.limit
+    ? { item_id: command.item_id, occupants: refusal.occupants }
     : null;
 }
 

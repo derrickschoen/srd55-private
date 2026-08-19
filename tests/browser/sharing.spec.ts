@@ -2,6 +2,7 @@ import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import { readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { DatabaseContext } from '../../src/db/database';
+import { registerSqliteQueryEngine } from '../../src/db/query';
 import { CatalogImporter } from '../../src/catalog/catalog-importer';
 import { expect, test } from './fixtures/parallel-test';
 
@@ -12,6 +13,7 @@ const schema = readFileSync(
 
 async function authoredShareImage(): Promise<readonly number[]> {
   const sqlite3 = await sqlite3InitModule();
+  registerSqliteQueryEngine(sqlite3);
   const connection = new sqlite3.oo1.DB(':memory:', 'c');
   connection.exec(schema);
   const db = new DatabaseContext(connection);

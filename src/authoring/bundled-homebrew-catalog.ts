@@ -1,11 +1,13 @@
 import type {
   HomebrewDraft,
   SubclassAuthoringDraft,
+  SubclassAuthoringDraftFeature,
   SubclassAuthoringDraftProgressionRow,
 } from './contracts';
 import type { HomebrewDraftItemUuid } from './ids';
 import type { CharacterLevel } from '../domain/enums';
 import type { ContentKey } from '../domain/ids';
+import type { CatalogContentVisibility } from '../catalog/content-visibility';
 import { characterLevels } from '../domain/enums';
 import { MULTICLASS_SPELLCASTER_TABLE } from '../rules/spell-slots';
 import { officialSpellKey } from '../catalog/catalog-key';
@@ -15,6 +17,7 @@ export interface BundledHomebrewCatalogEntry<
 > {
   /** Stable registry identity; unlike the published content key, it survives revisions. */
   readonly catalog_key: string;
+  readonly visibility: CatalogContentVisibility;
   /**
    * Append-only authored history, oldest first. Keeping prior drafts lets the
    * installer distinguish a shipped revision from unrelated same-key content.
@@ -621,17 +624,251 @@ function spellStudentRevision(
 const spellStudentV1 = spellStudentRevision(false);
 const spellStudentV2 = spellStudentRevision(true);
 
+function lightweightTestMechanicsSubclass(input: {
+  readonly fixtureKey: string;
+  readonly name: string;
+  readonly parentClassKey: ContentKey;
+  readonly referenceText: string;
+  readonly features: readonly Omit<
+    SubclassAuthoringDraftFeature,
+    'draft_item_uuid'
+  >[];
+}): SubclassAuthoringDraft {
+  return Object.freeze<SubclassAuthoringDraft>({
+    kind: 'subclass',
+    document_version: 1,
+    name: input.name,
+    rules_edition: '2024',
+    reference_text: input.referenceText,
+    parent_class_content_key: input.parentClassKey,
+    progression: { mode: 'inherit_parent' },
+    features: Object.freeze(input.features.map((feature, index) => Object.freeze({
+      ...feature,
+      draft_item_uuid: itemUuid(
+        `bundled-${input.fixtureKey}-feature-${String(index + 1)}`,
+      ),
+    }))),
+  });
+}
+
+const longGrudgeV1 = lightweightTestMechanicsSubclass({
+  fixtureKey: 'long-grudge',
+  name: 'Oath of the Long Grudge',
+  parentClassKey: '2024:class:paladin' as ContentKey,
+  referenceText: 'A compact, UI-hidden mechanics fixture, not a complete subclass schedule. Level 5 is the first validated snapshot; it does not establish the original acquisition level.',
+  features: [{
+    class_level: 5,
+    name: 'Long Grudge',
+    description: 'The fixture tracks one bonded target. Once on each of your turns, the first qualifying hit against that target deals one extra damage die: d6 at level 5, d8 at level 11, and d10 at level 17. A critical hit doubles the rider dice. Bond application, lifetime, damage type, and attack restrictions are intentionally unspecified.',
+    effects: Object.freeze([]),
+  }],
+});
+
+const anchorPointV1 = lightweightTestMechanicsSubclass({
+  fixtureKey: 'anchor-point',
+  name: 'Anchor Point',
+  parentClassKey: '2024:class:fighter' as ContentKey,
+  referenceText: 'A compact, UI-hidden subclass carrier for a recovered feat mechanic. This carrier exists because bundled homebrew authoring does not yet publish feats; it does not assert that Anchor Point is a subclass or establish an acquisition level.',
+  features: [{
+    class_level: 5,
+    name: 'Anchor Point',
+    description: 'On the first qualifying hit each turn, the target takes a damage rider, has Speed 0, and cannot take reactions for that turn. The rider is 1d8 at levels 5 and 11, then 2d8 at level 17; a critical hit doubles the rider dice. Attack restrictions, damage type, and exact control-effect end timing are intentionally unspecified.',
+    effects: Object.freeze([]),
+  }],
+});
+
+const patientVolleyV1 = lightweightTestMechanicsSubclass({
+  fixtureKey: 'patient-volley',
+  name: 'Patient Volley',
+  parentClassKey: '2024:class:ranger' as ContentKey,
+  referenceText: 'A compact, UI-hidden Ranger mechanics fixture. The exact owning content kind and acquisition level are not recovered; level 5 is only the first validated snapshot.',
+  features: [{
+    class_level: 5,
+    name: 'Patient Volley',
+    description: 'The rider is eligible against a target that has not acted on the first turn, or when the attacker hit on the immediately preceding turn. On an eligible turn, the first qualifying hit deals the rider once: 1d8 at level 5 and 2d8 at levels 11 and 17. A critical hit doubles the rider dice. A later turn remembers whether any attack hit on the preceding turn, even if that turn was ineligible.',
+    effects: Object.freeze([]),
+  }],
+});
+
+const cuttingChorusV1 = lightweightTestMechanicsSubclass({
+  fixtureKey: 'cutting-chorus',
+  name: 'College of the Cutting Chorus',
+  parentClassKey: '2024:class:bard' as ContentKey,
+  referenceText: 'A compact, UI-hidden mechanics fixture, not a complete subclass schedule. It intentionally makes no net-damage claim.',
+  features: [{
+    class_level: 5,
+    name: 'Cutting Chorus',
+    description: 'Before making an attack roll, you can spend one of your own Inspiration dice and add it to that roll. This fixture permits one self-use per turn at levels 5 and 6 and two per turn at levels 11 and 17. Qualifying attack types and unrecovered replenishment interactions are intentionally unspecified.',
+    effects: Object.freeze([]),
+  }, {
+    class_level: 6,
+    name: 'Extra Attack',
+    description: 'You can attack twice, instead of once, whenever you take the Attack action on your turn.',
+    effects: Object.freeze([Object.freeze({
+      kind: 'extra_attack' as const,
+      draft_item_uuid: itemUuid('bundled-cutting-chorus-extra-attack'),
+      label: 'Cutting Chorus Extra Attack',
+      notes: null,
+      attack_count: 2,
+      weapon_scope: 'any_weapon' as const,
+    })]),
+  }],
+});
+
+function ambushPrimitiveV1(input: {
+  readonly fixtureKey: 'vanward-conclave' | 'cold-open';
+  readonly name: 'Vanward Conclave' | 'Cold Open';
+  readonly parentClassKey: ContentKey;
+  readonly dieSize: 'd8' | 'd6';
+}): SubclassAuthoringDraft {
+  return lightweightTestMechanicsSubclass({
+    fixtureKey: input.fixtureKey,
+    name: input.name,
+    parentClassKey: input.parentClassKey,
+    referenceText: 'One of two compact, UI-hidden carriers for the shared Ambush Primitive. Level 5 is the first validated snapshot; this fixture does not supply the remainder of a subclass schedule.',
+    features: [{
+      class_level: 5,
+      name: 'Ambush Primitive',
+      description: `Only on the first turn, the first qualifying hit against a target that has not acted deals ${input.dieSize} rider dice. The rider uses one die at level 5, two at level 11, and three at level 17; a critical hit doubles those dice. The primitive is then spent for the combat. Damage type, attack restrictions, reset timing, and initiative ties are intentionally unspecified.`,
+      effects: Object.freeze([]),
+    }],
+  });
+}
+
+const vanwardConclaveV1 = ambushPrimitiveV1({
+  fixtureKey: 'vanward-conclave',
+  name: 'Vanward Conclave',
+  parentClassKey: '2024:class:ranger' as ContentKey,
+  dieSize: 'd8',
+});
+
+const coldOpenV1 = ambushPrimitiveV1({
+  fixtureKey: 'cold-open',
+  name: 'Cold Open',
+  parentClassKey: '2024:class:rogue' as ContentKey,
+  dieSize: 'd6',
+});
+
+const brokenToothV1 = lightweightTestMechanicsSubclass({
+  fixtureKey: 'broken-tooth',
+  name: 'Circle of the Broken Tooth',
+  parentClassKey: '2024:class:druid' as ContentKey,
+  referenceText: 'A compact, UI-hidden Wild Shape package fixture, not a complete subclass schedule. Level 5 is the first validated snapshot and does not establish acquisition timing.',
+  features: [{
+    class_level: 5,
+    name: 'Broken Tooth Form',
+    description: 'While this test form is active, it supplies two natural-weapon attacks using Wisdom for the attack and damage rolls. Each attack deals one die plus Wisdom: d8 at level 5, d10 at level 11, and d12 at level 17. Entering the form grants temporary Hit Points equal to Druid level. Action, duration, uses, damage type, and interaction with another form are intentionally unspecified.',
+    effects: Object.freeze([]),
+  }],
+});
+
+const cuttingMomentumV1 = lightweightTestMechanicsSubclass({
+  fixtureKey: 'cutting-momentum',
+  name: 'Cutting Momentum',
+  parentClassKey: '2024:class:fighter' as ContentKey,
+  referenceText: 'A compact, UI-hidden Fighter mechanics fixture. The exact owning content kind and acquisition level are not recovered; level 5 is only the first validated snapshot.',
+  features: [{
+    class_level: 5,
+    name: 'Cutting Momentum',
+    description: 'The first qualifying hit each turn deals 2 extra damage, increasing to 3 at level 13. If that first hit is a critical hit, later attacks in the same turn score a critical hit on an 18–20 roll. The expanded range ends with that turn. Attack restrictions, damage type, and interactions with other critical-range modifiers are intentionally unspecified.',
+    effects: Object.freeze([]),
+  }],
+});
+
+const brokenTempoV1 = lightweightTestMechanicsSubclass({
+  fixtureKey: 'broken-tempo',
+  name: 'Discipline of the Broken Tempo',
+  parentClassKey: '2024:class:fighter' as ContentKey,
+  referenceText: 'A compact, UI-hidden Fighter mechanics fixture. The exact owning content kind and acquisition level are not recovered; level 5 is only the first validated snapshot.',
+  features: [{
+    class_level: 5,
+    name: 'Broken Tempo',
+    description: 'The maneuver-die pool has a maximum equal to Proficiency Bonus. Once per turn on a qualifying hit, one die can be spent for extra damage: d6 at level 5, d8 at level 11, and d10 at level 17; a critical hit doubles the spent die. Using Second Wind restores one expended die, and one critical hit per combat can also restore one expended die, each only up to the pool maximum. Normal recovery, damage type, and reset timing are intentionally unspecified.',
+    effects: Object.freeze([]),
+    contributions: Object.freeze([Object.freeze({
+      kind: 'feature_value_contribution' as const,
+      draft_item_uuid: itemUuid('bundled-broken-tempo-maneuver-pool'),
+      contribution_key: 'maneuver-dice',
+      label: 'Maneuver Dice',
+      target: Object.freeze({
+        kind: 'resource_maximum' as const,
+        display_label: 'Maneuver Dice',
+        marking_shape: 'remaining' as const,
+      }),
+      op: 'add' as const,
+      active_from_level: 5,
+      active_to_level: 20,
+      value: Object.freeze({
+        kind: 'preserved' as const,
+        expression: Object.freeze({
+          kind: 'ref' as const,
+          source: Object.freeze({ kind: 'proficiency_bonus' as const }),
+        }),
+      }),
+      supersedes_contribution_key: null,
+    })]),
+  }],
+});
+
 export const BUNDLED_HOMEBREW_CATALOG = Object.freeze([
   Object.freeze({
     catalog_key: 'veteran',
+    visibility: 'listed',
     revisions: Object.freeze([veteranV1, veteranV2, veteranV3] as const),
   }),
   Object.freeze({
     catalog_key: 'warrior-of-the-barbed-court',
+    visibility: 'listed',
     revisions: Object.freeze([barbedCourtV1, barbedCourtV2, barbedCourtV3, barbedCourtV4, barbedCourtV5] as const),
   }),
   Object.freeze({
     catalog_key: 'spell-student',
+    visibility: 'listed',
     revisions: Object.freeze([spellStudentV1, spellStudentV2] as const),
+  }),
+  Object.freeze({
+    catalog_key: 'long-grudge',
+    visibility: 'ui_hidden',
+    revisions: Object.freeze([longGrudgeV1] as const),
+  }),
+  Object.freeze({
+    catalog_key: 'anchor-point',
+    visibility: 'ui_hidden',
+    revisions: Object.freeze([anchorPointV1] as const),
+  }),
+  Object.freeze({
+    catalog_key: 'patient-volley',
+    visibility: 'ui_hidden',
+    revisions: Object.freeze([patientVolleyV1] as const),
+  }),
+  Object.freeze({
+    catalog_key: 'cutting-chorus',
+    visibility: 'ui_hidden',
+    revisions: Object.freeze([cuttingChorusV1] as const),
+  }),
+  Object.freeze({
+    catalog_key: 'vanward-conclave',
+    visibility: 'ui_hidden',
+    revisions: Object.freeze([vanwardConclaveV1] as const),
+  }),
+  Object.freeze({
+    catalog_key: 'cold-open',
+    visibility: 'ui_hidden',
+    revisions: Object.freeze([coldOpenV1] as const),
+  }),
+  Object.freeze({
+    catalog_key: 'broken-tooth',
+    visibility: 'ui_hidden',
+    revisions: Object.freeze([brokenToothV1] as const),
+  }),
+  Object.freeze({
+    catalog_key: 'cutting-momentum',
+    visibility: 'ui_hidden',
+    revisions: Object.freeze([cuttingMomentumV1] as const),
+  }),
+  Object.freeze({
+    catalog_key: 'broken-tempo',
+    visibility: 'ui_hidden',
+    revisions: Object.freeze([brokenTempoV1] as const),
   }),
 ] as const satisfies readonly BundledHomebrewCatalogEntry<SubclassAuthoringDraft>[]);

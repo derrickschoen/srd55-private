@@ -30,6 +30,68 @@ import type {
   SpellVersionId,
 } from '../domain/ids';
 import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
+import {
+  classifyDuplicateWarnings,
+  type DuplicateWarningAssessment,
+} from '../duplicates/duplicate-warning-detector';
+
+/** A stored spell level is neither a real level nor the placeholder sentinel. */
+export class CharacterSpellLevelError extends Error {
+  override readonly name = 'CharacterSpellLevelError' as const;
+  constructor(readonly spell_level: number) {
+    super(
+      `Spell level ${String(spell_level)} is outside 0..9 and is not a placeholder.`,
+    );
+  }
+}
+
+/** A stored spell names a rules edition this build cannot decode. */
+export class CharacterSpellRulesEditionError extends TypeError {
+  override readonly name = 'CharacterSpellRulesEditionError' as const;
+  constructor(readonly rules_edition: string) {
+    super(`Unknown spell rules edition ${rules_edition}.`);
+  }
+}
+
+/** A forged selection route reaches a bucket absent from the exhaustive set. */
+export class CharacterSpellSelectionBucketError extends TypeError {
+  override readonly name = 'CharacterSpellSelectionBucketError' as const;
+  constructor(readonly bucket: unknown) {
+    super(`Unhandled spell selection bucket ${String(bucket)}.`);
+  }
+}
+
+/** An evaluated route records an ability but omits one of its derived numbers. */
+export class CharacterSpellRouteStatisticsError extends Error {
+  override readonly name = 'CharacterSpellRouteStatisticsError' as const;
+  constructor(readonly spell_version_id: number) {
+    super(
+      `Evaluated spell route ${String(spell_version_id)} has an ability but incomplete statistics.`,
+    );
+  }
+}
+
+export type CharacterSpellFactsDestination = 'selected_spell' | 'spellbook';
+
+const CHARACTER_SPELL_FACTS_DESTINATIONS: Readonly<
+  Record<CharacterSpellFactsDestination, string>
+> = {
+  selected_spell: 'spell',
+  spellbook: 'spellbook',
+};
+
+/** A selected or spellbook version has no corresponding sheet projection row. */
+export class CharacterSpellFactsMissingError extends Error {
+  override readonly name = 'CharacterSpellFactsMissingError' as const;
+  constructor(
+    readonly spell_version_id: number,
+    readonly destination: CharacterSpellFactsDestination,
+  ) {
+    super(
+      `Missing sheet facts for ${CHARACTER_SPELL_FACTS_DESTINATIONS[destination]} version ${String(spell_version_id)}.`,
+    );
+  }
+}
 
 export type SheetSpellMarker = 'prepared' | 'known';
 
@@ -84,6 +146,8 @@ export interface SheetSpellbookEntry {
 
 export interface SheetSpell extends SheetSpellbookEntry {
   readonly marker: SheetSpellMarker;
+  /** Number of distinct persisted selection routes collapsed into this row. */
+  readonly selection_count: number;
 }
 
 export type SheetSpellGroup =
@@ -107,6 +171,11 @@ export type SheetSpellGroup =
 
 /** The typed value rendered by SS-2 from `CharacterSheet.spells`. */
 export type CharacterSpellSection = readonly SheetSpellGroup[];
+
+export interface CharacterSpellSectionProjection {
+  readonly section: CharacterSpellSection;
+  readonly duplicate_warnings: readonly DuplicateWarningAssessment[];
+}
 
 interface SpellFacts {
   readonly spell_version_id: SpellVersionId;
@@ -160,12 +229,12 @@ function spellLevel(value: number): SheetSpellLevel {
   if (Number.isInteger(value) && value >= 0 && value <= 9) {
     return { status: 'known', value: value as SpellLevel };
   }
-  throw new Error(`Spell level ${value} is outside 0..9 and is not a placeholder.`);
+  throw new CharacterSpellLevelError(value);
 }
 
 function rulesEdition(value: string): RulesEdition {
   if (!isEnumValue(rulesEditions, value)) {
-    throw new TypeError(`Unknown spell rules edition ${value}.`);
+    throw new CharacterSpellRulesEditionError(value);
   }
   return value;
 }
@@ -212,7 +281,7 @@ function markerForBucket(
       return null;
   }
   const unhandled: never = bucket;
-  throw new TypeError(`Unhandled spell selection bucket ${String(unhandled)}.`);
+  throw new CharacterSpellSelectionBucketError(unhandled);
 }
 
 /** Selects only the evaluated, slot-backed assignments D149 labels. */
@@ -303,9 +372,7 @@ function statisticForRoute(
     };
   }
   if (route.save_dc === null || route.attack_bonus === null) {
-    throw new Error(
-      `Evaluated spell route ${route.spell_version_id} has an ability but incomplete statistics.`,
-    );
+    throw new CharacterSpellRouteStatisticsError(route.spell_version_id);
   }
   return {
     status: 'computed',
@@ -419,6 +486,10 @@ export class CharacterSpellSectionBuilder {
   }
 
   build(characterId: number): CharacterSpellSection {
+    return this.buildProjection(characterId).section;
+  }
+
+  buildProjection(characterId: number): CharacterSpellSectionProjection {
     const spellbook = this.spellbookAcquisitions(characterId);
     const hasStoredAssignment = this.db.scalar<number>(
       `SELECT 1
@@ -429,21 +500,27 @@ export class CharacterSpellSectionBuilder {
        LIMIT 1`,
       [characterId],
     );
-    const selected = hasStoredAssignment === null
+    const routes = hasStoredAssignment === null
       ? []
-      : this.#access
-          .buildForCharacter(characterId)
-          .map((route) => ({ route, marker: sheetSpellMarker(route) }))
-          .filter(
-            (
-              entry,
-            ): entry is {
-              readonly route: SpellAccessRoute;
-              readonly marker: SheetSpellMarker;
-            } => entry.marker !== null,
-          );
+      : this.#access.buildForCharacter(characterId);
+    const duplicateAssessments = classifyDuplicateWarnings(routes).filter(
+      (assessment) => assessment.category !== 'none',
+    );
+    const selected = routes
+      .map((route) => ({ route, marker: sheetSpellMarker(route) }))
+      .filter(
+        (
+          entry,
+        ): entry is {
+          readonly route: SpellAccessRoute;
+          readonly marker: SheetSpellMarker;
+        } => entry.marker !== null,
+      );
     if (selected.length === 0 && spellbook.length === 0) {
-      return [];
+      return {
+        section: [],
+        duplicate_warnings: duplicateAssessments,
+      };
     }
 
     const sourceIds = [
@@ -506,16 +583,25 @@ export class CharacterSpellSectionBuilder {
       const versionId = route.spell_version_id as SpellVersionId;
       const existing = group.spells.get(versionId);
       if (existing !== undefined) {
-        if (existing.marker === 'known' && marker === 'prepared') {
-          group.spells.set(versionId, { ...existing, marker });
-        }
+        group.spells.set(versionId, {
+          ...existing,
+          marker:
+            existing.marker === 'known' && marker === 'prepared'
+              ? marker
+              : existing.marker,
+          selection_count: existing.selection_count + 1,
+        });
         continue;
       }
       const spellFacts = facts.get(versionId);
       if (spellFacts === undefined) {
-        throw new Error(`Missing sheet facts for spell version ${versionId}.`);
+        throw new CharacterSpellFactsMissingError(versionId, 'selected_spell');
       }
-      group.spells.set(versionId, { ...spellFacts, marker });
+      group.spells.set(versionId, {
+        ...spellFacts,
+        marker,
+        selection_count: 1,
+      });
     }
 
     for (const entry of spellbook) {
@@ -544,14 +630,15 @@ export class CharacterSpellSectionBuilder {
       }
       const spellFacts = facts.get(entry.spell_version_id);
       if (spellFacts === undefined) {
-        throw new Error(
-          `Missing sheet facts for spellbook version ${entry.spell_version_id}.`,
+        throw new CharacterSpellFactsMissingError(
+          entry.spell_version_id,
+          'spellbook',
         );
       }
       group.spellbook.set(entry.spell_version_id, spellFacts);
     }
 
-    return [...groups.values()].sort(compareGroups).map((group) => {
+    const section = [...groups.values()].sort(compareGroups).map((group) => {
       const common = {
         statistics: [...group.statistics.values()],
         spells: [...group.spells.values()].sort(compareSheetSpells),
@@ -574,6 +661,10 @@ export class CharacterSpellSectionBuilder {
         ...common,
       };
     });
+    return {
+      section,
+      duplicate_warnings: duplicateAssessments,
+    };
   }
 
   private spellbookAcquisitions(

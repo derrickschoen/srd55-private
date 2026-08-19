@@ -2,6 +2,14 @@ export interface JsonRecord {
   readonly [key: string]: unknown;
 }
 
+/** Decoded source configuration is JSON, but not the required record shape. */
+export class SourceConfigurationShapeError extends TypeError {
+  override readonly name = 'SourceConfigurationShapeError' as const;
+  constructor() {
+    super('Source configuration must be a JSON object.');
+  }
+}
+
 export function jsonRecord(value: string | null): JsonRecord {
   if (value === null || value === '') {
     return {};
@@ -12,7 +20,7 @@ export function jsonRecord(value: string | null): JsonRecord {
     Array.isArray(decoded) ||
     typeof decoded !== 'object'
   ) {
-    throw new TypeError('Source configuration must be a JSON object.');
+    throw new SourceConfigurationShapeError();
   }
   return decoded as JsonRecord;
 }

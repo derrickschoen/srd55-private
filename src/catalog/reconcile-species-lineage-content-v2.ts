@@ -10,6 +10,20 @@ import {
   deriveContentIdentityV2FromNormalizedName,
   type NormalizedContentName,
 } from './content-identity';
+
+export class BundledSpeciesIdentityMissingError extends Error {
+  override readonly name = 'BundledSpeciesIdentityMissingError' as const;
+  constructor(readonly content_key: string) {
+    super(`Bundled species '${content_key}' has no identity.`);
+  }
+}
+
+export class UnexpectedLineageSourceError extends Error {
+  override readonly name = 'UnexpectedLineageSourceError' as const;
+  constructor(readonly content_key: string) {
+    super(`Unexpected lineage source '${content_key}'.`);
+  }
+}
 import { reconcileCurrentContentFingerprint } from './content-registry';
 import {
   projectStoredSpeciesContentV2,
@@ -51,7 +65,7 @@ export function reconcileSpeciesLineageContentV2(db: DatabaseContext): void {
       [definition.content_key],
     );
     if (normalizedName === null) {
-      throw new Error(`Bundled species '${definition.content_key}' has no identity.`);
+      throw new BundledSpeciesIdentityMissingError(definition.content_key);
     }
     const identity = deriveContentIdentityV2FromNormalizedName({
       kind: 'species',
@@ -85,7 +99,7 @@ export function reconcileSpeciesLineageContentV2(db: DatabaseContext): void {
   const generator = new GrantRuleSlotGenerator(db);
   for (const source of sources) {
     if (!LINEAGE_KEYS.has(source.contentKey)) {
-      throw new Error(`Unexpected lineage source '${source.contentKey}'.`);
+      throw new UnexpectedLineageSourceError(source.contentKey);
     }
     generator.generateForSource(source.id);
   }

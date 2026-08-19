@@ -61,6 +61,8 @@ import {
   STANDARD_ARRAY,
 } from '../../../rules/ability-score-generation-srd';
 import { RpcError } from '../../../rpc/protocol';
+import type { DecodedOutcome } from '../../../refusals/outcome';
+import { renderRefusal } from '../../../refusals/render';
 import { clear, element, listen, type Cleanup } from '../../dom';
 import { characterListLink, guidedShell } from './guided-builder';
 
@@ -97,7 +99,7 @@ export interface AbilitiesStepDeps {
     method: AbilityAllocationMethod,
     scores: GuidedAbilityScores,
     operationUuid: string,
-  ) => Promise<GuidedAllocateAbilitiesResult>;
+  ) => Promise<DecodedOutcome<GuidedAllocateAbilitiesResult>>;
   readonly navigate: (path: string) => void;
 }
 
@@ -406,11 +408,19 @@ export function createAbilitiesStep(deps: AbilitiesStepDeps): AbilitiesStep {
     submit.disabled = true;
     try {
       await draftSaveQueue;
-      await deps.allocateAbilities(
+      const outcome = await deps.allocateAbilities(
         method,
         { ...entries[method] },
         crypto.randomUUID(),
       );
+      if (outcome.kind !== 'ok') {
+        setError(renderRefusal(
+          outcome.kind === 'refused' ? outcome.refusal : outcome,
+        ));
+        inFlight = false;
+        submit.disabled = false;
+        return;
+      }
       // Allocation is recorded; the build route re-derives the step from the
       // database and renders whatever comes next (species, per D55's order).
       deps.navigate(guidedBuildPath(deps.characterId));

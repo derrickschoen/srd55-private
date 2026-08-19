@@ -61,6 +61,12 @@ re-proved against their sources by `kb_verify.py`; your memory is not.
 | how do grapple and shove work 2024; contested athletics acrobatics check or saving throw; grapple shove save dc; monk dexterity grapple shove dc | Grapple and Shove are OPTIONS of the Unarmed Strike that force a SAVE against a DC (Strength-based by default) — not 2014 contested Athletics/Acrobatics checks — and Monk Dexterous Attacks may use Dexterity for the DC. | R-COMBAT-027 | R_COMBAT.md |
 | monk martial arts die 1d6; replace or add to weapon damage; does the martial arts die scale with monk class level or total character level; 1d8 at monk 5 | Roll the Martial Arts die (1d6; 1d8 at Monk 5) IN PLACE OF the normal damage of Unarmed Strikes or Monk weapons; the die scales with MONK class levels, not total character level. | R-COMBAT-028 | R_COMBAT.md |
 | can a monk use dexterity with a quarterstaff; dexterous attacks dex instead of strength for attack and damage rolls of unarmed strikes and monk weapons | Dexterous Attacks lets a Monk use Dexterity instead of Strength for the attack and damage rolls of Unarmed Strikes and Monk weapons — a feature override of the R-COMBAT-008 melee-uses-Strength default. | R-COMBAT-029 | R_COMBAT.md |
+| how does the ready action work prepare an action with a trigger readied action | On your turn take Ready: declare a perceivable trigger and the single action (or move up to your Speed) you will take; releasing it costs your Reaction and must happen before the start of your next turn. | R-COMBAT-030 | R_COMBAT.md |
+| does a readied action interrupt its trigger when does a readied reaction resolve | It never interrupts; you take your Reaction right after the trigger finishes, or ignore the trigger and keep the Reaction. | R-COMBAT-031 | R_COMBAT.md |
+| can I ready a spell readied spell slot lost concentration casting time | Only a spell with a casting time of an action; the slot is expended when you ready it, holding it requires Concentration up to the start of your next turn, and broken Concentration wastes the spell. | R-COMBAT-032 | R_COMBAT.md |
+| can I ready a bonus action prepare a bonus action with a trigger healing word misty step | No; Ready accepts only an action or movement, and no rule grants a Bonus Action in response to a trigger, so bonus-action spells cannot be readied at all. | R-COMBAT-033 | R_COMBAT.md |
+| when can I take a bonus action how many per turn off turn | One per turn, only on your own turn, and only when a rule explicitly grants one. | R-COMBAT-034 | R_COMBAT.md |
+| how many reactions per round when do reactions refresh | One; once taken you cannot take another until the start of your next turn, and it is usable on your turn or another creature's. | R-COMBAT-035 | R_COMBAT.md |
 | which origin feat does each background grant; acolyte criminal sage soldier feat; can a background choose any origin feat | A background grants one SPECIFIED Origin feat, not a choice: Acolyte = Magic Initiate (Cleric), Criminal = Alert, Sage = Magic Initiate (Wizard), Soldier = Savage Attacker. | R-FEAT-001 | R_FEATS.md |
 | magic initiate which spell lists cantrips; magic initiate spellcasting ability int wis cha; is magic initiate ability forced by list | Magic Initiate: learn two cantrips from the Cleric, Druid, or Wizard spell list, and the feat's spellcasting ability is Intelligence, Wisdom, or Charisma — chosen FREELY when the feat is selected, not forced by the list. | R-FEAT-002 | R_FEATS.md |
 | magic initiate level 1 spell free cast per day; magic initiate spell always prepared; can magic initiate spell use spell slots; recharge short or long rest | Magic Initiate's level 1 spell is always prepared, castable ONCE without a spell slot per Long Rest, and ALSO castable with any spell slots the character has. | R-FEAT-003 | R_FEATS.md |
@@ -192,6 +198,12 @@ Read before asserting anything in these areas.
 - **R-COMBAT-027** — 2014 recall: opposed Athletics vs Athletics/Acrobatics checks instead of a save DC, or computing a Monk's Grapple/Shove DC from Strength when Dexterity is higher. The general Unarmed Strike DC formula (8 + Str mod + PB, target's Str or Dex save) is NOT in this extract — do not quote it until a new extract lands.
 - **R-COMBAT-028** — Scaling the die by total character level (the R-SPELL-001 cantrip rule bleeding over — a Monk 1 / X 6 sheet gets 1d8 instead of 1d6), or adding the die on top of the weapon's own damage die instead of substituting. Companion span proven present: 'This die changes as you gain Monk levels,'.
 - **R-COMBAT-029** — Statting a Monk's quarterstaff with Strength via the R-COMBAT-008 default because it lacks Finesse — the substitution comes from the class feature, not a weapon property, and applies only while Martial Arts conditions hold (no armor, no Shield, unarmed or only Monk weapons).
+- **R-COMBAT-030** — Letting the released response differ from the declared one, or using a non-perceivable trigger such as unspoken intent.
+- **R-COMBAT-031** — Resolving the readied action before or during the trigger, interrupt-style, e.g. shooting an enemy before their declared attack lands.
+- **R-COMBAT-032** — Refunding the slot when the trigger never occurs, or keeping a prior Concentration spell running while holding a readied spell.
+- **R-COMBAT-033** — Allowing Healing Word or Misty Step to be readied because they seem smaller than a full action.
+- **R-COMBAT-034** — Granting a bonus action on another creature's turn as part of a Reaction or readied action.
+- **R-COMBAT-035** — Refreshing the Reaction at the end of the round instead of at the start of your own next turn.
 - **R-FEAT-001** — Treating the background feat as 'choose any Origin feat' (a 2024 PHB variant framing), or picking the wrong pinned list for a Magic Initiate background — Acolyte is Cleric, Sage is Wizard; verify against the 'Feat: ...' lines in backgrounds.txt. Quote spans a column hyphen-wrap ('Ori- gin'), so it is contiguous only in that hyphenated form.
 - **R-FEAT-002** — Keying the ability to the list (Cleric→Wis, Wizard→Int) as the class would — the feat lets a Paladin Acolyte run its Cleric-list spells on Charisma. Also do not offer Bard/Sorcerer/Warlock lists; only Cleric, Druid, or Wizard.
 - **R-FEAT-003** — Forgetting the slot-casting clause: a Fighter gets exactly 1/day, but a Wizard Acolyte can additionally burn slots on it. The free use recharges on LONG Rest only, not Short. It does not count against a class's prepared-spell limit (see R-SPELL-012).
@@ -273,7 +285,7 @@ Read before asserting anything in these areas.
 | `GLOSSARY.md` | 12 |
 | `R_ABILITIES.md` | 5 |
 | `R_CLASSES.md` | 6 |
-| `R_COMBAT.md` | 29 |
+| `R_COMBAT.md` | 35 |
 | `R_FEATS.md` | 6 |
 | `R_GEAR.md` | 6 |
 | `R_MULTICLASS.md` | 14 |
@@ -288,5 +300,5 @@ Read before asserting anything in these areas.
 2. `grep -i '^Q:.*<keyword>' .ai/kb/*.md` — topic entries.
 3. Not here? Go to the SOURCE, not to memory. Then ADD the entry.
 
-127 entries, 124 with recorded traps.
+133 entries, 130 with recorded traps.
 

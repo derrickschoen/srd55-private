@@ -43,6 +43,7 @@ describe('spell page parser', () => {
     expect(record).toEqual({
       identityKey: 'scraped-lanternfall',
       versionKey: '2024:scraped.wikidot:lanternfall',
+      visibility: 'listed',
       name: 'Lanternfall',
       edition: '2024',
       level: 2,

@@ -8,6 +8,13 @@ import {
   isEnumValue,
 } from '../domain/enums';
 
+export class ClassFeatureEffectUnhandledKindError extends Error {
+  override readonly name = 'ClassFeatureEffectUnhandledKindError' as const;
+  constructor(readonly effect_kind: string) {
+    super(`Unhandled class feature effect kind ${effect_kind}.`);
+  }
+}
+
 /**
  * WHAT A CLASS FEATURE'S MECHANICAL EFFECT ACTUALLY DOES.
  *
@@ -97,8 +104,8 @@ export function classFeatureEffect(
        a new enum member is a compile error here rather than a silent skip. */
     default: {
       const unreachable: never = kind;
-      throw new Error(
-        `Unhandled class feature effect kind ${String(unreachable)}.`,
+      throw new ClassFeatureEffectUnhandledKindError(
+        String(unreachable),
       );
     }
   }

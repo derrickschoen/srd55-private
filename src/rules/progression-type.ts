@@ -3,6 +3,13 @@ import {
   type ProgressionType,
 } from '../domain/enums';
 
+export class ProgressionClassLevelIntegerError extends TypeError {
+  override readonly name = 'ProgressionClassLevelIntegerError' as const;
+  constructor(readonly class_level: number) {
+    super('Class level must be an integer.');
+  }
+}
+
 export function isProgressionType(value: unknown): value is ProgressionType {
   return (
     typeof value === 'string' &&
@@ -15,7 +22,7 @@ export function sharedCasterLevels(
   classLevel: number,
 ): number {
   if (!Number.isSafeInteger(classLevel)) {
-    throw new TypeError('Class level must be an integer.');
+    throw new ProgressionClassLevelIntegerError(classLevel);
   }
   if (classLevel < 0) {
     throw new RangeError(
@@ -51,7 +58,7 @@ export function maxPreparableLevel(
   classLevel: number,
 ): number {
   if (!Number.isSafeInteger(classLevel)) {
-    throw new TypeError('Class level must be an integer.');
+    throw new ProgressionClassLevelIntegerError(classLevel);
   }
 
   switch (progression) {

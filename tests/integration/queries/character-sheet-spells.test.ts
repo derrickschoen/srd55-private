@@ -1,3 +1,4 @@
+import { expectIdenticalDatabaseImages } from '../../helpers/database-image-equality';
 import type { Database, Sqlite3Static } from '@sqlite.org/sqlite-wasm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { SpellAccessBuilder } from '../../../src/access/spell-access-builder';
@@ -8,8 +9,18 @@ import {
   type SheetSpellGroup,
 } from '../../../src/queries/character-spell-section-builder';
 import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
+import { CharacterListBuilder } from '../../../src/queries/character-list-builder';
 import { BuildReportBuilder } from '../../../src/reports/build-report-builder';
 import { getSqlite3, openTestDatabase } from '../../helpers/open-db';
+import {
+  addClassLevel,
+  createCharacter,
+  createSlot,
+  createSource,
+  createSpell,
+} from '../reports/build-report-fixture';
+import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
+import { sheetFacts } from '../../../src/ui/screens/sheet/sheet-view';
 import {
   createCharacterSheetSpellsFixture,
   createSheetSpellRetirementFixture,
@@ -54,6 +65,97 @@ function spellbookNames(
 ): string[] {
   return group.spellbook.map((spell) => spell.name);
 }
+
+describe('duplicate spell selections on the sheet', () => {
+  it('keeps every selected cantrip count and surfaces the list-card warnings', async () => {
+    const connection = await openTestDatabase();
+    const db = new DatabaseContext(connection);
+    try {
+      seedClassProgressions(db);
+      const characterId = createCharacter(db, 'Duplicate Picks', {
+        wisdom: 16,
+      });
+      const clericId = addClassLevel(db, characterId, 'Cleric', 1);
+      db.exec(
+        `UPDATE character_class_levels
+         SET is_starting_class = 1
+         WHERE character_id = ? AND class_definition_id = ?`,
+        [characterId, clericId],
+      );
+      const sourceId = createSource(
+        db,
+        characterId,
+        'class',
+        clericId,
+        'Cleric 1',
+        { spellcasting_ability: 'wisdom' },
+      );
+      const repeatedCantrip = createSpell(db, 'Repeated Spark', { level: 0 });
+      const repeatedSpell = createSpell(db, 'Repeated Ward', { level: 1 });
+
+      for (let ordinal = 1; ordinal <= 3; ordinal += 1) {
+        createSlot(
+          db,
+          characterId,
+          sourceId,
+          repeatedCantrip,
+          `cleric-cantrip:${String(ordinal)}`,
+          ordinal,
+          {
+            bucket: 'cantrip_known',
+            levelMin: 0,
+            levelMax: 0,
+            withSlots: false,
+          },
+        );
+      }
+      for (let ordinal = 1; ordinal <= 2; ordinal += 1) {
+        createSlot(
+          db,
+          characterId,
+          sourceId,
+          repeatedSpell,
+          `cleric-prepared:${String(ordinal)}`,
+          ordinal,
+          { bucket: 'prepared', levelMin: 1, levelMax: 1 },
+        );
+      }
+
+      const sheet = new CharacterSheetBuilder(db).build(characterId);
+      const cleric = classGroup(sheet.spells, 'Cleric');
+      const cantrip = cleric.spells.find(
+        (spell) => spell.spell_version_id === repeatedCantrip,
+      );
+      const card = new CharacterListBuilder(db).build().find(
+        (candidate) => candidate.id === characterId,
+      );
+      const sheetDuplicateWarnings = sheet.warnings.filter((warning) =>
+        warning.code.startsWith('duplicate_spell_'),
+      );
+      const structuredWarnings = sheetFacts(sheet).warnings;
+      const structuredDuplicateWarnings = Array.isArray(structuredWarnings)
+        ? structuredWarnings.filter(
+            (warning): warning is string =>
+              typeof warning === 'string' &&
+              warning.startsWith('duplicate_spell_'),
+          )
+        : [];
+
+      expect(cantrip).toMatchObject({ selection_count: 3 });
+      expect(card?.warning_count).toBe(2);
+      expect(sheetDuplicateWarnings.map((warning) => warning.code)).toEqual([
+        'duplicate_spell_wasteful',
+        'duplicate_spell_wasteful',
+      ]);
+      expect(sheetDuplicateWarnings).toHaveLength(card?.warning_count ?? -1);
+      expect(structuredDuplicateWarnings).toEqual(
+        sheetDuplicateWarnings.map((warning) => warning.code),
+      );
+    } finally {
+      connection.close();
+    }
+  });
+});
 
 describe('typed character spell section projection', () => {
   let sqlite3: Sqlite3Static;
@@ -324,6 +426,7 @@ describe('typed character spell section projection', () => {
       catalog_layer: 'external',
       level: { status: 'known', value: 1 },
       marker: 'prepared',
+      selection_count: 2,
       reference: {
         edition: '2014',
         school: 'Chronomancy',
@@ -359,7 +462,7 @@ describe('typed character spell section projection', () => {
       const afterBytes = sqlite3.capi.sqlite3_js_db_export(connection).slice();
 
       expect(second).toEqual(first);
-      expect(afterBytes).toEqual(beforeBytes);
+      expectIdenticalDatabaseImages(afterBytes, beforeBytes, 'sheet-spells read-only image');
       expect(
         persistedCharacterSheetSpellTableHashes(db, fixture.characterId),
       ).toEqual(beforeTables);

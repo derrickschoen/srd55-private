@@ -15,6 +15,13 @@ export interface PactMagicSlots {
   readonly level: number;
 }
 
+export class CasterLevelIntegerError extends TypeError {
+  override readonly name = 'CasterLevelIntegerError' as const;
+  constructor(readonly caster_level: number) {
+    super('Caster level must be an integer.');
+  }
+}
+
 /**
  * SRD 5.2.1's Multiclass Spellcaster table, indexed by caster level minus one.
  *
@@ -79,7 +86,7 @@ export function casterLevel(
 
 export function slotsForCasterLevel(level: number): SpellSlotCounts {
   if (!Number.isSafeInteger(level)) {
-    throw new TypeError('Caster level must be an integer.');
+    throw new CasterLevelIntegerError(level);
   }
   if (level < 1) {
     return {};

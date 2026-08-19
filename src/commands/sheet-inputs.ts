@@ -1,5 +1,6 @@
 import { rowId, sqlInteger, type RowCodec } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
+import { ok, type OkOutcome } from '../refusals/outcome';
 import type { SqlValue } from '@sqlite.org/sqlite-wasm';
 import type {
   ArmorFields,
@@ -176,7 +177,7 @@ export class SetArmorCommand implements ResolvesInverseAfterApply {
     private readonly payload: SetArmorPayload,
   ) {}
 
-  apply(characterId: number): void {
+  apply(characterId: number): OkOutcome<void> {
     this.#previous = this.db.one(
       `SELECT ${ARMOR_COLUMNS.join(', ')}
        FROM character_armor
@@ -194,7 +195,7 @@ export class SetArmorCommand implements ResolvesInverseAfterApply {
     );
     const armor = this.payload.armor;
     if (armor === null) {
-      return;
+      return ok(undefined);
     }
     const timestamp = new Date().toISOString();
     const values: Record<string, SqlValue> = {
@@ -220,6 +221,7 @@ export class SetArmorCommand implements ResolvesInverseAfterApply {
         timestamp,
       ],
     );
+    return ok(undefined);
   }
 
   inverse(): SetArmorPayload {
@@ -245,7 +247,7 @@ export class SetHitPointRollCommand implements ResolvesInverseAfterApply {
     private readonly payload: SetHitPointRollPayload,
   ) {}
 
-  apply(characterId: number): void {
+  apply(characterId: number): OkOutcome<void> {
     const key: SqlValue[] = [
       characterId,
       this.payload.class_name,
@@ -267,7 +269,7 @@ export class SetHitPointRollCommand implements ResolvesInverseAfterApply {
     if (value === null) {
       // An ABSENT ROW, not a stored zero: no roll means "use the printed fixed
       // value", which `fixedHitPointsPerLevel` supplies live.
-      return;
+      return ok(undefined);
     }
     const timestamp = new Date().toISOString();
     const values: Record<string, SqlValue> = {
@@ -289,6 +291,7 @@ export class SetHitPointRollCommand implements ResolvesInverseAfterApply {
        ) VALUES (?, ?, ?, ?, ?, ?)`,
       [...key, value, timestamp, timestamp],
     );
+    return ok(undefined);
   }
 
   inverse(): SetHitPointRollPayload {

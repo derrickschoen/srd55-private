@@ -1,15 +1,15 @@
 import { canonicalJson } from './canonical-json';
+import {
+  CharacterCommandIntegrityError,
+  CommandIntegrityCharacterIdError,
+  CommandIntegrityKeyRequiredError,
+} from './integrity-errors';
 
 type CommandRecord = Readonly<Record<string, unknown>>;
 
-const invalidIntegrityMessage =
-  'This internal character command is invalid or belongs to another character.';
-
 function requireKey(key: unknown): asserts key is string {
   if (typeof key !== 'string' || key === '') {
-    throw new Error(
-      'APP_KEY is required to sign internal character commands.',
-    );
+    throw new CommandIntegrityKeyRequiredError();
   }
 }
 
@@ -37,7 +37,7 @@ function bytesFromHex(value: string): ArrayBuffer {
 
 function assertCharacterId(characterId: number): void {
   if (!Number.isSafeInteger(characterId)) {
-    throw new TypeError('characterId must be an integer.');
+    throw new CommandIntegrityCharacterIdError(characterId);
   }
 }
 
@@ -107,7 +107,7 @@ export class CharacterCommandIntegrity {
     command: object,
   ): Promise<void> {
     if (!(await this.isValid(characterId, command))) {
-      throw new TypeError(invalidIntegrityMessage);
+      throw new CharacterCommandIntegrityError(characterId);
     }
   }
 }

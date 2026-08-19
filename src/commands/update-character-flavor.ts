@@ -1,5 +1,6 @@
 import { sqlNullableString, type RowCodec } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
+import { ok, type OkOutcome } from '../refusals/outcome';
 import { CHARACTER_TEXT_LIMITS } from '../domain/character-limits';
 import type {
   CharacterFlavorValues,
@@ -66,7 +67,7 @@ export class UpdateCharacterFlavorCommand {
     validateFlavor(payload);
   }
 
-  apply(characterId: number): void {
+  apply(characterId: number): OkOutcome<void> {
     this.db.transaction(() => {
       const previous = this.db.one(
         `SELECT alignment, appearance, backstory, notes
@@ -111,6 +112,7 @@ export class UpdateCharacterFlavorCommand {
         ],
       );
     });
+    return ok(undefined);
   }
 
   inverse(): never {

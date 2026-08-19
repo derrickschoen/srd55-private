@@ -69,6 +69,20 @@ async function expectHorizontallyContained(
   );
 }
 
+async function chooseGuidedSpellWithKeyboard(
+  page: Page,
+  label: string,
+  spellName: string,
+): Promise<void> {
+  const input = page.getByRole('combobox', { name: label });
+  await input.fill(spellName);
+  await expect(
+    page.getByRole('option', { name: new RegExp(`^${spellName}\\b`, 'u') }),
+  ).toBeVisible();
+  await input.press('Enter');
+  await expect(input).toHaveCount(0);
+}
+
 test('a phone-width guided journey keeps the first level 1 screens and controls usable', async ({
   page,
 }) => {
@@ -457,6 +471,111 @@ test('Elf Wizard skills finish top to bottom and spell choices stay labelled and
   await expect.poll(() => announcedMessages(page)).toContain(
     'Choose a replacement for Mage Hand in Wizard cantrip 1 of 3.',
   );
+});
+
+test.describe('mobile multiclass spell search', () => {
+  test.use({
+    hasTouch: true,
+    isMobile: true,
+    viewport: { width: 390, height: 844 },
+  });
+
+  test('touch taps every visible multiclass spell result in sequence', async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    await resetHome(page);
+
+    await page.getByRole('link', { name: 'Create a character' }).click();
+    await page.getByRole('button', { name: /^Sorcerer\b/u }).click();
+    await page.getByLabel('Character name').fill('Touch Multiclass');
+    await page.getByRole('button', { name: 'Create character' }).click();
+    await page.getByLabel('Strength', { exact: true }).selectOption('8');
+    await page.getByLabel('Dexterity', { exact: true }).selectOption('14');
+    await page.getByLabel('Constitution', { exact: true }).selectOption('13');
+    await page.getByLabel('Intelligence', { exact: true }).selectOption('10');
+    await page.getByLabel('Wisdom', { exact: true }).selectOption('12');
+    await page.getByLabel('Charisma', { exact: true }).selectOption('15');
+    await page.getByRole('button', { name: 'Set ability scores' }).click();
+    await page.getByRole('button', { name: 'Choose Orc' }).click();
+    await page.getByRole('radio', { name: 'Acolyte' }).check();
+    await page.getByLabel('Ability receiving +2').selectOption('charisma');
+    await page.getByLabel('Ability receiving +1').selectOption('wisdom');
+    await page.getByLabel('Origin feat').selectOption('2024:feat:magic-initiate');
+    await page.getByLabel('Magic Initiate spell list').selectOption('Cleric');
+    await page.getByLabel('Magic Initiate spellcasting ability')
+      .selectOption('charisma');
+    await page.getByRole('button', { name: 'Apply background' }).click();
+    await page.getByLabel('Sorcerer skill 1').selectOption('arcana');
+    await page.getByRole('button', { name: 'Choose Sorcerer skill 1' }).click();
+    await expect(page.getByRole('button', { name: 'Clear Arcana' })).toBeVisible();
+    await page.getByLabel('Sorcerer skill 2').selectOption('deception');
+    const chooseSecondSkill = page.getByRole('button', {
+      name: 'Choose Sorcerer skill 2',
+    });
+    await expect(chooseSecondSkill).toBeEnabled();
+    await chooseSecondSkill.click();
+
+    for (const [label, spellName] of [
+      ['Sorcerer cantrip 1 of 4', 'Fire Bolt'],
+      ['Sorcerer cantrip 2 of 4', 'Mage Hand'],
+      ['Sorcerer cantrip 3 of 4', 'Minor Illusion'],
+      ['Sorcerer cantrip 4 of 4', 'Ray of Frost'],
+      ['Sorcerer prepared spell 1 of 2', 'Mage Armor'],
+      ['Sorcerer prepared spell 2 of 2', 'Shield'],
+      ['Magic Initiate — Cleric cantrip 1 of 2', 'Guidance'],
+      ['Magic Initiate — Cleric cantrip 2 of 2', 'Sacred Flame'],
+      ['Magic Initiate — Cleric known spell 1 of 1', 'Healing Word'],
+    ] as const) {
+      await chooseGuidedSpellWithKeyboard(page, label, spellName);
+    }
+
+    const equipmentChoices = page.getByRole('button', {
+      name: 'Take this package',
+    });
+    let remainingEquipmentChoices = await equipmentChoices.count();
+    while (remainingEquipmentChoices > 0) {
+      await expect(equipmentChoices.first()).toBeEnabled();
+      await equipmentChoices.first().click();
+      remainingEquipmentChoices -= 1;
+      await expect(equipmentChoices).toHaveCount(remainingEquipmentChoices);
+    }
+    const character = (
+      await page.evaluate(() => window.staticApp.inspectRows('characters'))
+    ).find((row) => row['name'] === 'Touch Multiclass');
+    const characterId = Number(character?.['id']);
+    expect(Number.isSafeInteger(characterId)).toBe(true);
+
+    await page.goto(`/characters/${String(characterId)}`);
+    await expect(page.locator('#planner-status')).toHaveAttribute(
+      'data-ready',
+      'true',
+      { timeout: 35_000 },
+    );
+    await page.getByRole('combobox', { name: 'Class to add' }).selectOption({
+      label: 'Warlock',
+    });
+    await page.getByRole('button', { name: 'Add class' }).tap();
+    await page.goto(`/characters/${String(characterId)}/build/levels/1`);
+    await expect(page.getByRole('heading', { name: 'Choose level 1 spells' }))
+      .toBeVisible();
+
+    for (const [label, spellName] of [
+      ['Warlock cantrip 1 of 2', 'Eldritch Blast'],
+      ['Warlock prepared spell 1 of 2', 'Hex'],
+      ['Warlock cantrip 2 of 2', 'Chill Touch'],
+      ['Warlock prepared spell 2 of 2', 'Charm Person'],
+    ] as const) {
+      const input = page.getByRole('combobox', { name: label });
+      await input.fill(spellName);
+      const option = page.getByRole('option', {
+        name: new RegExp(`^${spellName}\\b`, 'u'),
+      });
+      await expect(option).toBeVisible();
+      await option.tap({ timeout: 2_500 });
+      await expect(input).toHaveCount(0);
+    }
+  });
 });
 
 test('the empty-database front door chooses class first, persists once named, and survives reload without a planner escape', async ({

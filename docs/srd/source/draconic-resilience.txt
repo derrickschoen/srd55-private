@@ -1,0 +1,20 @@
+This work includes material from the System Reference Document 5.2.1
+("SRD 5.2.1") by Wizards of the Coast LLC, available at
+https://www.dndbeyond.com/srd. The SRD 5.2.1 is licensed under the Creative
+Commons Attribution 4.0 International License, available at
+https://creativecommons.org/licenses/by/4.0/legalcode.
+
+--- Verbatim extract: Draconic Sorcery's level-3 Draconic Resilience feature.
+    SRD 5.2.1 page 69, sliced by character at the column boundary, with PDF
+    line wrapping and discretionary hyphenation removed. ---
+
+=== Sorcerer: Draconic Sorcery (page 69) ===
+
+Level 3: Draconic Resilience
+The magic in your body manifests physical traits of your draconic gift. Your
+Hit Point maximum increases by 3, and it increases by 1 whenever you gain
+another Sorcerer level.
+
+Parts of you are also covered by dragon-like scales. While you aren’t wearing
+armor, your base Armor Class equals 10 plus your Dexterity and Charisma
+modifiers.

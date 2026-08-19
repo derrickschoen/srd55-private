@@ -262,6 +262,7 @@ export function parseSpellPage(
   }
 
   const record: CatalogRecord = {
+    visibility: 'listed',
     // NAMESPACED, NOT OFFICIAL. `officialSpellKey` would mint the two-part
     // `2024:lanternfall`, which is the grammar this project's own bundled
     // content uses — so an imported scraped row would be indistinguishable from

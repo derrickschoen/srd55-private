@@ -219,6 +219,82 @@ function bonusFor(profile: AttackProfile, ability: string): number {
 }
 
 describe('the plain weapon attack', () => {
+  it.each([
+    {
+      name: 'proficient',
+      proficiency: { kind: 'proficient', via: ['Fighter'] } as const,
+      proficiencyBonus: 3,
+      expected: [
+        ['strength', 7, 4],
+        ['dexterity', 5, 2],
+      ],
+    },
+    {
+      name: 'not proficient',
+      proficiency: { kind: 'not_proficient' } as const,
+      proficiencyBonus: 3,
+      expected: [
+        ['strength', 4, 4],
+        ['dexterity', 2, 2],
+      ],
+    },
+    {
+      name: 'proficient with an absent bonus',
+      proficiency: { kind: 'proficient', via: ['Fighter'] } as const,
+      proficiencyBonus: null,
+      expected: [
+        ['strength', null, 4],
+        ['dexterity', null, 2],
+      ],
+    },
+  ])('pins attack and damage arithmetic when $name', ({
+    proficiency,
+    proficiencyBonus,
+    expected,
+  }) => {
+    const profile = profileOf(
+      build({
+        scores: scores({ strength: 18, dexterity: 14 }),
+        proficiencyBonus,
+        weapons: [{ ...LONGSWORD, proficiency }],
+      }),
+      'normal',
+    );
+
+    expect(
+      profile.abilities.state === 'unavailable'
+        ? []
+        : profile.abilities.options.map((entry) => [
+            entry.ability,
+            entry.attack_bonus,
+            entry.damage_modifier,
+          ]),
+    ).toEqual(expected);
+  });
+
+  it.each([
+    ['ranged', 'recorded', ['dexterity', 'strength']],
+    ['melee', 'recorded', ['strength', 'dexterity']],
+    [null, 'undecided', ['strength', 'dexterity']],
+  ] as const)(
+    'orders the %s attack-kind options as %s',
+    (attackKind, expectedState, expectedAbilities) => {
+      const profile = profileOf(
+        build({
+          weapons: [{ ...LONGSWORD, attack_kind: attackKind }],
+        }),
+        'normal',
+      );
+
+      expect(profile.abilities.state).toBe(expectedState);
+      expect(
+        profile.abilities.state === 'unavailable'
+          ? []
+          : profile.abilities.options.map((entry) => entry.ability),
+      ).toEqual(expectedAbilities);
+    },
+  );
+
   it('computes both printed formulas by hand', () => {
     // `sheet-math.txt`: "Melee attack bonus = Strength modifier + Proficiency
     // Bonus / Ranged attack bonus = Dexterity modifier + Proficiency Bonus".
@@ -984,7 +1060,18 @@ describe('a multiclass spellcasting ability it cannot settle', () => {
         { source_name: 'Magic Initiate', spellcasting_ability: 'intelligence' },
       ]),
     });
-    expect(profileOf(result, 'true_strike').abilities.state).toBe('fixed');
+    const abilities = profileOf(result, 'true_strike').abilities;
+    expect(abilities).toMatchObject({
+      state: 'fixed',
+      options: [
+        {
+          ability: 'intelligence',
+          attack_bonus: 3,
+          damage_modifier: 0,
+        },
+      ],
+    });
+    expect(abilities.state === 'unavailable' ? [] : abilities.options).toHaveLength(1);
     expect(result.warnings).toEqual([]);
   });
 
@@ -1035,6 +1122,46 @@ describe('an unrecognised catalog key', () => {
 });
 
 describe('weapon effects', () => {
+  it.each([
+    {
+      name: 'an any-weapon effect without a weapon id',
+      weapon_scope: 'any_weapon' as const,
+      character_weapon_id: null,
+      warningCodes: [],
+    },
+    {
+      name: 'a bonded effect with its weapon id',
+      weapon_scope: 'one_bonded_weapon' as const,
+      character_weapon_id: LONGSWORD.id,
+      warningCodes: [],
+    },
+    {
+      name: 'a bonded effect without its weapon id',
+      weapon_scope: 'one_bonded_weapon' as const,
+      character_weapon_id: null,
+      warningCodes: ['inert_weapon_effect'],
+    },
+  ])('emits the exact inert-effect warning set for $name', ({
+    weapon_scope,
+    character_weapon_id,
+    warningCodes,
+  }) => {
+    const result = build({
+      effects: [
+        {
+          id: 99,
+          effect_kind: 'weapon_attack_bonus',
+          amount: 1,
+          weapon_scope,
+          character_weapon_id,
+          label: 'Boundary effect',
+        },
+      ],
+    });
+
+    expect(result.warnings.map((warning) => warning.code)).toEqual(warningCodes);
+  });
+
   it('applies a +1 weapon to every existing profile and every ability option', () => {
     const effects: readonly EligibleWeaponEffect[] = [
       {

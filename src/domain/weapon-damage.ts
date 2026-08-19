@@ -1,3 +1,8 @@
+import {
+  LegacyWeaponDamageColumnTypeError,
+  type LegacyWeaponDamageColumn,
+} from './weapon-damage-errors';
+
 /**
  * A weapon's recorded damage.
  *
@@ -65,15 +70,13 @@ export function versatileWeaponDamageFromLegacy(
 
 function legacyRowText(
   row: Readonly<Record<string, unknown>>,
-  column: 'damage_dice' | 'versatile_damage_dice',
+  column: LegacyWeaponDamageColumn,
 ): string | null {
   const value = row[column];
   if (value === null || typeof value === 'string') {
     return value;
   }
-  throw new TypeError(
-    `Legacy weapon row ${column} must be a string or null.`,
-  );
+  throw new LegacyWeaponDamageColumnTypeError(column);
 }
 
 function damageColumns(

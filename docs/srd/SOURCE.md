@@ -1,9 +1,10 @@
 # Where the bundled SRD material came from
 
-Reference material in `docs/srd/source/` is extracted verbatim from the
-official SRD 5.2.1 PDF. This file records the provenance so any value in this
-repository can be traced back to a document, rather than to somebody's memory
-of the rules.
+Reference material in `docs/srd/source/` is extracted from the official SRD
+5.2.1 PDF under a **verbatim-with-line-break-dehyphenation-and-slice-repairs**
+policy. This file records the provenance and the complete, bounded transform
+set so any value in this repository can be traced to the document or to a named
+corpus repair rather than to somebody's memory of the rules.
 
 ## The source document
 
@@ -26,6 +27,7 @@ without carrying them in every clone.
 curl -sSLO https://media.dndbeyond.com/compendium-images/srd/5.2/SRD_CC_v5.2.1.pdf
 sha256sum SRD_CC_v5.2.1.pdf     # must match the table above
 pdftotext -layout SRD_CC_v5.2.1.pdf srd.txt
+node scripts/srd/dehyphenate.mjs --write
 sha256sum docs/srd/source/*.txt # each must match the per-extract table below
 ```
 
@@ -36,6 +38,30 @@ and becomes fabricated data downstream. Both mistakes were made and caught here.
 
 `pdftotext` is poppler-utils. `-layout` matters: without it the PDF's two-column
 pages interleave and the weapon table becomes unreadable.
+
+### Bounded text transforms
+
+The corpus is verbatim except for layout removal and these reviewed repairs:
+
+- `source/spell-descriptions.txt` reflows the 601 discretionary PDF line
+  breaks preserved in 259 spell descriptions. The script removes 597
+  discretionary hyphen characters and retains four lexical compound hyphens:
+  `long-dead`, `40-foot-high`, `nine-course`, and `10-foot-by-20-foot`.
+  Component fields are outside this prose transform. Running the script again
+  is a no-op and reports zero remaining description line breaks.
+- `source/multiclass-entry-grants.txt` restores the Paladin continuation
+  `mine your available spell slots.` from canonical full-text lines 3198-3200
+  and the clipped `W` in `Wizard Class Features` from line 4622.
+- Telekinesis is truncated in the PDF itself, not by `pdftotext` or the column
+  slice: rendered printed page 168 visibly ends after `simple tool,`. The
+  owner-approved corpus repair in both the full text and the spell-description
+  extract restores the omitted sentence tail: `opening a door or a container,
+  stowing or retrieving an item from an open container, or pouring the contents
+  from a vial.`
+
+No spelling, punctuation, genuine hyphenated compound, or rules wording is
+otherwise normalized. Attribution notices and extract/layout headings are
+repository metadata rather than source-document prose.
 
 | Extract | Source | Page | SHA-256 |
 |---|---|---|---|
@@ -52,6 +78,7 @@ pages interleave and the weapon table becomes unreadable.
 | `source/backgrounds.txt` | All four backgrounds — the five parts each, plus the prose describing them | 83 | `6993612280d0d255d5b702945f4da9448fbd3966ef5b47b8e196e0e0cc837a06` |
 | `source/feats.txt` | Complete Feat Descriptions section — introductory rules and all 17 feats, with PDF line wrapping and discretionary hyphenation removed | 87-88 | `96af9e58dffa92f66d6cca8311ebcbc56ec599c137efb32823da7f0a4e32747a` |
 | `source/subclasses.txt` | All twelve subclass names and levelled feature headings, plus the Life Domain, Circle of the Land, Oath of Devotion, Draconic Sorcery and Fiend Patron spell tables; feature prose omitted under D152 | 30, 35, 40, 46, 49, 52, 56-57, 61, 64, 69-70, 76, 82 | `2745c4437a6a314da408f057aa5ed2f092ea6961324841a70cac8799cf747816` |
+| `source/draconic-resilience.txt` | Draconic Sorcery's level-3 Draconic Resilience feature — Sorcerer-level Hit Point scaling and unarmoured Armor Class formula | 69 | `4eb91b329d74e693655264375ce503ef278036a519112e3e22728817720df5a3` |
 | `source/weapon-attack-cantrips.txt` | True Strike and Shillelagh, the two cantrips that rewrite a weapon attack (D14) | 157, 163 | `372b4358275937d204601ca0ae645db90a7aa32ce76821863e8a5e25f3341880` |
 | `source/attack-class-features.txt` | Martial Arts (all three benefits, die progression) and every Extra Attack grant, plus the multiclass rule (D15) | 24, 27, 47, 49, 55, 57 | `ee6b151bead045d30518c9698f991d49fd9790420a8eb62c5b8068b107bd5d59` |
 | `source/extra-attack-other-sources.txt` | Thirsting Blade and Devouring Blade — Extra Attack granted by an INVOCATION, and scoped to one weapon (D19) | 68, 69, 24 | `828a1c9829b77622b734326d79b5877d7f424489ff72035bafd1542f4e74328c` |
@@ -59,7 +86,7 @@ pages interleave and the weapon table becomes unreadable.
 | `source/ability-score-generation.txt` | Ability-score generation: Standard Array, Random Generation, and Point Cost, including the complete point-cost and Standard Array by Class tables | 21 | `0999337da9d793311c72fb5198cd7e3f23c6fc72e1dbdd6a6adc6f72d4c6b441` |
 | `source/sheet-math.txt` | Passive Perception, Level 1 Hit Points by Class, Fixed Hit Points by Class, Initiative, unarmoured Armor Class | 21-23 | `bbdb97493386a773512cfe379bd5be82430eb49f212902ca7180be54933373c9` |
 | `source/multiclassing.txt` | Multiclassing: Hit Points and Hit Dice, Proficiency Bonus, proficiencies, Armor Class and Extra Attack | 24-25 | `e815c8d2cbd7cebffd1a471353476095393a810c91be4319e2f096a22a4505a7` |
-| `source/multiclass-entry-grants.txt` | The "As a Multiclass Character" clause of all twelve classes — the SUBSET a second class grants (D28) | 27-72 | `c0397f4114b33a64f6a8d198ba5e088393c035b8e137fbf482129a2b495e47b9` |
+| `source/multiclass-entry-grants.txt` | The "As a Multiclass Character" clause of all twelve classes — the SUBSET a second class grants (D28) | 27-72 | `e6d995788b8bea27d3fcf927482d1069155eaff10141a99d150f4039b026dc63` |
 | `source/domain-vocabularies.txt` | Schools of Magic, conditions, creature types, damage types and size categories | 104, 179-180, 188 | `d555d3eb9fb517d88585e8a4efcedd3ef7ad675450ecc2155567989ab35b2626` |
 | `source/bard-spell-list.txt` | Complete Bard Spell List | 33-35 | `7cdca733e61177a5d73606c918b905647bf793681ab9a648577c09c1f40ad9ad` |
 | `source/cleric-spell-list.txt` | Complete Cleric Spell List | 38-40 | `8a91ee63ab3ee4ef39c54e066c3ba255cdfb6a2ef39ab7391d8d92e051d2a547` |
@@ -69,7 +96,7 @@ pages interleave and the weapon table becomes unreadable.
 | `source/sorcerer-spell-list.txt` | Complete Sorcerer Spell List | 67-69 | `2f5571a173d92e4ca53e931009564483fa2fbe91e2b140871d2c3f5e106ea394` |
 | `source/warlock-spell-list.txt` | Complete Warlock Spell List | 74-76 | `43d0c57d27e3580d8f2ff6b0174fb778f1eb43251ec91e182f126fcbb14621e1` |
 | `source/wizard-spell-list.txt` | Complete Wizard Spell List | 79-82 | `8400870a0b7a789fc9f8cf94ea5e9faed9c1682c9bfa9bcc9fd4ee748a713926` |
-| `source/spell-descriptions.txt` | Complete Spell Descriptions section, enumerating 339 unique spell headings | 107-175 | `4f7e4d4df2eb62b47a38e70be5a6c09de084e40886069937ca2c048590470750` |
+| `source/spell-descriptions.txt` | Complete Spell Descriptions section, enumerating 339 unique spell headings | 107-175 | `81c213de67213734b27d65c791b18686770ed3404dd0443d346ec72290057829` |
 | `source/unarmored-defense.txt` | Unarmored Defense — the Barbarian and Monk level-1 features, whose second ability AND shield clause differ (D75) | 29, 50 | `7e225c919bd6c225c106352d2292560ddf1791711b458dd342581896aba56af5` |
 
 ### Why there is a checksum PER EXTRACT, and not only for the PDF
@@ -169,14 +196,14 @@ previously believed here:
 
 ## The complete text, committed
 
-`docs/srd/full/srd-5.2.1.txt` is the ENTIRE `pdftotext -layout` output of the
-document above, byte for byte after its notice header, committed 2026-07-30 at
-the owner's direction ("we will need it all"). The PDF was re-fetched that day
-and its SHA-256 matched this file's table exactly before conversion. Committed
-file SHA-256: `7c53ca15f0d3dafbae54fb0eab10fc60a51af180b8b86254ce006a12e5bbe207`
-(2,146,889 bytes; re-pinned 2026-08-13 when the file's attribution header
-was corrected from the 5.2 statement to the 5.2.1 statement — the six-byte
-delta is exactly that header correction, the SRD body is unchanged).
+`docs/srd/full/srd-5.2.1.txt` is the entire `pdftotext -layout` output of the
+document above after its notice header, plus the bounded Telekinesis repair
+recorded above. It was committed 2026-07-30 at the owner's direction ("we will
+need it all"). The PDF was re-fetched that day and its SHA-256 matched this
+file's table exactly before conversion. Committed file SHA-256:
+`d2425fa863247509c9af77cd4856e254a9ad4216661b948fc99daa67db69c918`
+(2,147,059 bytes; re-pinned 2026-08-17 for the Telekinesis repair and the
+header's corresponding provenance correction).
 
 Two-column pages interleave their columns on each line in that file, so the
 extracts in `source/` remain the readable, column-sliced references and every

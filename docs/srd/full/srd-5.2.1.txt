@@ -9,8 +9,9 @@ https://creativecommons.org/licenses/by/4.0/legalcode.
 Derived exactly as docs/srd/SOURCE.md records: the PDF at the URL in that
 file (SHA-256 8974902d109d6e63672d7c490bde9ccf052410503d9cfa768237154fbc5e3d87,
 re-fetched and re-verified 2026-07-30) converted with `pdftotext -layout`.
-Everything after the line of equals signs below is that output, byte for
-byte, page breaks preserved as form feeds. Two-column pages interleave their
+Everything after the line of equals signs below is that output with the
+documented Telekinesis truncation repair, page breaks preserved as form feeds.
+Two-column pages interleave their
 columns on each line; the curated files in docs/srd/source/ remain the
 readable, column-sliced extracts, and this file is the complete reference
 they are sliced from, so that any future slice can be checked against a
@@ -10718,6 +10719,8 @@ committed source rather than a download.
         You can exert fine control on objects with your
                                                                • “Linked object” means you possess an object taken
       telekinetic grip, such as manipulating a simple tool,
+      opening a door or a container, stowing or retrieving an item
+      from an open container, or pouring the contents from a vial.
                                                                  from the desired destination within the last six
       Telepathic Bond                                            months, such as a book from a wizard’s library.
       Level 5 Divination (Bard, Wizard)                        • “Very familiar” is a place you have visited often,

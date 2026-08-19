@@ -1,0 +1,12 @@
+id: no-discarded-command-apply
+language: TypeScript
+severity: error
+message: Command apply() returns an Outcome that must be consumed.
+rule:
+  any:
+    - pattern:
+        context: $COMMAND.apply($$$ARGS);
+        selector: expression_statement
+    - pattern:
+        context: await $COMMAND.apply($$$ARGS);
+        selector: expression_statement

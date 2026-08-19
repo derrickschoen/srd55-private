@@ -7,13 +7,19 @@ import type { RpcRequest, RpcResponse } from './rpc/protocol';
 import type { SqlRow } from './db/codecs';
 import {
   bootDatabaseWorkerWithRetry,
-  databaseBootFailureMessage,
+  classifyDatabaseBootFailure,
+  type DatabaseBootFailure,
 } from './db/database-worker-boot';
 import {
   databaseBootStageLabel,
   isDatabaseBootProgress,
   type DatabaseBootProgress,
 } from './db/database-boot-progress';
+import {
+  databaseBootMeasureName,
+  DatabaseBootTimeline,
+  type DatabaseBootPhase,
+} from './db/database-boot-timeline';
 import type { SystemInfo } from './worker/handlers/system';
 import { Application } from './ui/app';
 import { Router } from './ui/router';
@@ -107,6 +113,17 @@ class DatabaseWorkerTransport implements RpcTransport {
     (progress: DatabaseBootProgress) => void
   >();
   #worker: Worker | undefined;
+  #activatedAtMs: number | undefined;
+
+  /**
+   * The main-thread instant of the most recent `new Worker(...)`, which is the
+   * zero point the worker's own stage clock is offset from. Undefined until the
+   * capability decision releases activation — the same condition that makes
+   * every other member of this class inert.
+   */
+  get activatedAtMs(): number | undefined {
+    return this.#activatedAtMs;
+  }
 
   readonly #onWorkerMessage = (event: MessageEvent<unknown>): void => {
     if (isDatabaseBootProgress(event.data)) {
@@ -122,6 +139,7 @@ class DatabaseWorkerTransport implements RpcTransport {
     if (this.#worker !== undefined) {
       return;
     }
+    this.#activatedAtMs = performance.now();
     const worker = new Worker(new URL('./db/worker.ts', import.meta.url), {
       type: 'module',
     });
@@ -318,11 +336,16 @@ const showDatabaseBootStatus = (message: string): HTMLOutputElement => {
   shell.className = 'loading-shell';
   const heading = document.createElement('h1');
   heading.textContent = 'SRD-55';
+  const phaseLabel = document.createElement('p');
+  phaseLabel.id = 'loading-phase-label';
+  phaseLabel.className = 'loading-phase-label';
+  phaseLabel.textContent = 'Current startup phase';
   const output = document.createElement('output');
   output.id = 'status';
   output.setAttribute('role', 'status');
+  output.setAttribute('aria-labelledby', phaseLabel.id);
   output.value = message;
-  shell.append(heading, output);
+  shell.append(heading, phaseLabel, output);
   root.replaceChildren(shell);
   root.setAttribute('aria-busy', 'true');
   return output;
@@ -347,20 +370,82 @@ const showBrowserBootHold = (): void => {
   root.setAttribute('aria-busy', 'false');
 };
 
-const startDatabaseBoot = (): void => {
-  if (databaseBootStarted) {
-    return;
-  }
-  // This is ordinary boot idempotence, not warning acknowledgement state. It
-  // is never persisted and never changes whether the notice is rendered.
-  databaseBootStarted = true;
+/**
+ * The blocked-tab shell. It is a SHELL rather than a status line because the
+ * tab is not going to recover on its own: the owning tab holds the OPFS pool
+ * for as long as it lives, so there is nothing to wait for and the only way
+ * forward is one of the two actions named here. A dead end — a bare "Failed:"
+ * with no statement of what is holding the database or what to do — is exactly
+ * what this replaces.
+ */
+const showBlockedByOtherTab = (
+  failure: Extract<
+    DatabaseBootFailure,
+    { kind: 'another_tab_holds_database' }
+  >,
+  retry: () => void,
+): void => {
+  const shell = document.createElement('main');
+  shell.className = 'error-shell';
+  shell.dataset.bootFailure = failure.kind;
+  const heading = document.createElement('h1');
+  heading.textContent = failure.headline;
+  const status = document.createElement('output');
+  status.id = 'status';
+  status.setAttribute('role', 'status');
+  status.value = failure.explanation;
+  status.dataset.ready = 'false';
+  const remedy = document.createElement('p');
+  remedy.textContent = failure.remedy;
+  const tryAgain = document.createElement('button');
+  tryAgain.type = 'button';
+  tryAgain.dataset.testid = 'retry-database-boot';
+  tryAgain.textContent = 'Try again';
+  tryAgain.addEventListener('click', retry);
+  shell.append(heading, status, remedy, tryAgain);
+  root.replaceChildren(shell);
+  root.setAttribute('aria-busy', 'false');
+};
+
+/**
+ * Separate from the idempotence guard below because it has a SECOND caller:
+ * the blocked-tab shell's Try again. Retrying is only meaningful after the
+ * worker is discarded — a worker whose pool install already failed will not
+ * try again on its own — so the retry terminates it first and this function
+ * re-activates a fresh one through `bootDatabaseWorkerWithRetry`.
+ */
+const runDatabaseBoot = (): void => {
   const bootStatus = showDatabaseBootStatus('Starting local database…');
+  /**
+   * The stage reports already drive the status text; recording them as
+   * `performance` measures as well is what makes the boot's internal split —
+   * wasm, OPFS pool, schema, catalog seed — a number rather than an inference
+   * from a status the user happened to see.
+   */
+  const recordPhase = (phase: DatabaseBootPhase): void => {
+    performance.measure(databaseBootMeasureName(phase), {
+      start: phase.startMs,
+      end: phase.endMs,
+    });
+  };
+  let timeline: DatabaseBootTimeline | undefined;
   const reportProgress = (progress: DatabaseBootProgress): void => {
     bootStatus.value = databaseBootStageLabel(progress.stage);
+    // `loading_engine` is the first thing a worker reports, so it is also the
+    // signal that a RESTARTED worker has begun again — the retry path would
+    // otherwise fold two boots into one timeline whose phases interleave.
+    if (progress.stage === 'loading_engine' || timeline === undefined) {
+      const activatedAtMs = databaseWorkerTransport.activatedAtMs;
+      timeline = new DatabaseBootTimeline(activatedAtMs ?? performance.now());
+    }
+    recordPhase(timeline.observe(progress));
   };
   databaseWorkerTransport.addProgressListener(reportProgress);
   void bootDatabaseWorkerWithRetry(databaseWorkerTransport, system.info)
     .then(() => {
+      for (const phase of timeline?.finish(performance.now()) ?? []) {
+        recordPhase(phase);
+      }
       databaseWorkerTransport.removeProgressListener(reportProgress);
       databaseReady = true;
       if (application === undefined) {
@@ -371,10 +456,28 @@ const startDatabaseBoot = (): void => {
     })
     .catch((error: unknown) => {
       databaseWorkerTransport.removeProgressListener(reportProgress);
-      bootStatus.value = `Failed: ${databaseBootFailureMessage(error)}`;
+      const failure = classifyDatabaseBootFailure(error);
+      if (failure.kind === 'another_tab_holds_database') {
+        showBlockedByOtherTab(failure, () => {
+          databaseWorkerTransport.terminate();
+          runDatabaseBoot();
+        });
+        return;
+      }
+      bootStatus.value = `Failed: ${failure.detail}`;
       bootStatus.dataset.ready = 'false';
       root.setAttribute('aria-busy', 'false');
     });
+};
+
+const startDatabaseBoot = (): void => {
+  if (databaseBootStarted) {
+    return;
+  }
+  // This is ordinary boot idempotence, not warning acknowledgement state. It
+  // is never persisted and never changes whether the notice is rendered.
+  databaseBootStarted = true;
+  runDatabaseBoot();
 };
 
 const canRenderRoute = (route: Router['current']): boolean => {

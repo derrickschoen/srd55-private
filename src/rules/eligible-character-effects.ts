@@ -55,6 +55,65 @@ import {
  */
 import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 
+export type EligibleWeaponEffectPayload =
+  | 'attack_ability_override'
+  | 'weapon_bonus';
+
+const ELIGIBLE_WEAPON_EFFECT_PAYLOAD_PHRASES: Readonly<
+  Record<EligibleWeaponEffectPayload, string>
+> = {
+  attack_ability_override: 'attack ability override',
+  weapon_bonus: 'weapon bonus',
+};
+
+export class EligibleWeaponEffectPayloadError extends TypeError {
+  override readonly name = 'EligibleWeaponEffectPayloadError' as const;
+  constructor(
+    readonly label: string,
+    readonly payload: EligibleWeaponEffectPayload,
+  ) {
+    super(
+      `${label} has an incomplete ${ELIGIBLE_WEAPON_EFFECT_PAYLOAD_PHRASES[payload]} payload.`,
+    );
+  }
+}
+
+export class CharacterEffectKindError extends Error {
+  override readonly name = 'CharacterEffectKindError' as const;
+  constructor(readonly effect_kind: string) {
+    super(`Unknown character effect kind '${effect_kind}'.`);
+  }
+}
+
+export class CharacterEffectAbilityError extends Error {
+  override readonly name = 'CharacterEffectAbilityError' as const;
+  constructor(
+    readonly ability: string,
+    readonly column: string,
+  ) {
+    super(`Unknown ability '${ability}' in ${column}.`);
+  }
+}
+
+export type CharacterEffectEnumField = 'source_type' | 'weapon_scope';
+
+const CHARACTER_EFFECT_ENUM_LABELS: Readonly<
+  Record<CharacterEffectEnumField, string>
+> = {
+  source_type: 'source type',
+  weapon_scope: 'weapon scope',
+};
+
+export class CharacterEffectEnumError extends Error {
+  override readonly name = 'CharacterEffectEnumError' as const;
+  constructor(
+    readonly field: CharacterEffectEnumField,
+    readonly value: string,
+  ) {
+    super(`Unknown effect ${CHARACTER_EFFECT_ENUM_LABELS[field]} '${value}'.`);
+  }
+}
+
 export type EligibleCharacterEffectOrder = 'acquisition' | 'display';
 
 export interface EligibleCharacterEffect {
@@ -206,8 +265,9 @@ export function readEligibleWeaponEffects(
       switch (effect.effect_kind) {
         case 'attack_ability_override':
           if (effect.ability === null || effect.weapon_scope === null) {
-            throw new TypeError(
-              `${effect.label} has an incomplete attack ability override payload.`,
+            throw new EligibleWeaponEffectPayloadError(
+              effect.label,
+              'attack_ability_override',
             );
           }
           return [{
@@ -221,8 +281,9 @@ export function readEligibleWeaponEffects(
         case 'weapon_attack_bonus':
         case 'weapon_damage_bonus':
           if (effect.amount === null || effect.weapon_scope === null) {
-            throw new TypeError(
-              `${effect.label} has an incomplete weapon bonus payload.`,
+            throw new EligibleWeaponEffectPayloadError(
+              effect.label,
+              'weapon_bonus',
             );
           }
           return [{
@@ -251,7 +312,7 @@ function requiredCharacterEffectKind(
 ): CharacterEffectKind {
   const kind = sqlString(row, 'effect_kind');
   if (!isEnumValue(characterEffectKinds, kind)) {
-    throw new Error(`Unknown character effect kind '${kind}'.`);
+    throw new CharacterEffectKindError(kind);
   }
   return kind;
 }
@@ -265,7 +326,7 @@ function nullableAbility(
     return null;
   }
   if (!isEnumValue(abilities, ability)) {
-    throw new Error(`Unknown ability '${ability}' in ${column}.`);
+    throw new CharacterEffectAbilityError(ability, column);
   }
   return ability;
 }
@@ -278,7 +339,7 @@ function nullableSourceType(
     return null;
   }
   if (!isEnumValue(domainSourceTypes, sourceType)) {
-    throw new Error(`Unknown effect source type '${sourceType}'.`);
+    throw new CharacterEffectEnumError('source_type', sourceType);
   }
   return sourceType;
 }
@@ -291,7 +352,7 @@ function nullableWeaponScope(
     return null;
   }
   if (!isEnumValue(extraAttackWeaponScopes, scope)) {
-    throw new Error(`Unknown effect weapon scope '${scope}'.`);
+    throw new CharacterEffectEnumError('weapon_scope', scope);
   }
   return scope;
 }

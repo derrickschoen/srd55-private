@@ -504,10 +504,11 @@ describe('catalog import persistence', () => {
     ).lastInsertId;
     test.db.exec(
       `INSERT INTO catalog_content_identities (
-         content_key, content_kind, key_kind, catalog_layer, normalized_name
+         content_key, content_kind, key_kind, catalog_layer, visibility,
+         normalized_name
        ) VALUES (
          'expanded:local.test:user-spell', 'spell', 'asserted', 'external',
-         'user spell'
+         'listed', 'user spell'
        )`,
     );
     test.db.exec(

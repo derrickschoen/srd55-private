@@ -34,6 +34,19 @@ export class CharacterNotFoundError extends Error {
   }
 }
 
+/** A persisted character row contains an allocation method outside its CHECK. */
+export class CharacterAllocationMethodError extends Error {
+  override readonly name = 'CharacterAllocationMethodError' as const;
+  constructor(
+    readonly column: string,
+    readonly allocation_method: string,
+  ) {
+    super(
+      `Character column ${column} holds unknown allocation method ${JSON.stringify(allocation_method)}.`,
+    );
+  }
+}
+
 /**
  * The CHECK constraint closes this vocabulary, so an unknown value here is
  * stored corruption — thrown rather than passed through, because a method the
@@ -48,9 +61,7 @@ function sqlAllocationMethod(
     return null;
   }
   if (!isEnumValue(abilityAllocationMethods, value)) {
-    throw new Error(
-      `Character column ${column} holds unknown allocation method ${JSON.stringify(value)}.`,
-    );
+    throw new CharacterAllocationMethodError(column, value);
   }
   return value;
 }

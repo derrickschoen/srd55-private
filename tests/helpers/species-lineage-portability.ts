@@ -1,7 +1,7 @@
 import {
   LIBRARY_EXPORT_FORMAT,
   LIBRARY_EXPORT_VERSION,
-  type LibraryExportDocument,
+  type CurrentLibraryExportDocument,
 } from '../../src/backup/portable-content';
 import {
   applyGuidedOrigin,
@@ -55,7 +55,7 @@ export function portableElfLibraryDocument(
     readonly name?: string;
     readonly oversized?: boolean;
   } = {},
-): LibraryExportDocument {
+): CurrentLibraryExportDocument {
   const contentKey = options.contentKey ?? PORTABLE_ELF_KEY;
   const name = options.name ?? 'Portable Elf';
   const stored = projectStoredPortableContentV2(
@@ -85,6 +85,7 @@ export function portableElfLibraryDocument(
     selected_content_keys: [contentKey],
     content: [{
       kind: 'species',
+      visibility: 'listed',
       content_key: contentKey,
       key_kind: 'asserted',
       fingerprint_scheme: CONTENT_FINGERPRINT_SCHEME_V2,

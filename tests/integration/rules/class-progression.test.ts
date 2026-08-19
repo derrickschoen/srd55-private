@@ -2,6 +2,8 @@ import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseContext } from '../../../src/db/database';
 import {
+  CharacterClassMembershipError,
+  ClassProgressionRowMissingError,
   ClassProgressionLookup,
   seedClassProgressions,
 } from '../../../src/rules/class-progression-lookup';
@@ -22,6 +24,15 @@ import {
   srdSubclassClassNames,
 } from '../../../src/rules/srd-subclasses';
 import { openTestDatabase } from '../../helpers/open-db';
+
+function defect(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return expect.fail('Expected a class-progression defect, but it returned.');
+}
 
 function expectedSrdFixedSpellRule(
   subclassName: string,
@@ -190,7 +201,57 @@ describe('persisted class progression catalog', () => {
     expect(db.scalar('SELECT count(*) FROM subclass_definitions')).toBe(12);
     expect(db.scalar('SELECT count(*) FROM subclass_progressions')).toBe(0);
     expect(db.scalar('SELECT count(*) FROM subclass_features')).toBe(58);
-    expect(db.scalar('SELECT count(*) FROM subclass_feature_effects')).toBe(0);
+    expect(db.scalar('SELECT count(*) FROM subclass_feature_effects')).toBe(2);
+
+    expect(
+      db.allRaw(
+        `SELECT class.name AS class_name, subclass.name AS subclass_name,
+                feature.class_level, feature.name, effect.sort_order,
+                effect.effect_kind, effect.hit_points_flat,
+                effect.hit_points_per_level, effect.base, effect.ability_1,
+                effect.ability_2, effect.allows_shield, effect.label
+           FROM subclass_feature_effects AS effect
+           JOIN subclass_features AS feature
+             ON feature.id = effect.subclass_feature_id
+           JOIN subclass_definitions AS subclass
+             ON subclass.id = feature.subclass_definition_id
+           JOIN class_definitions AS class
+             ON class.id = subclass.class_definition_id
+          ORDER BY class.name, subclass.name, feature.sort_order,
+                   effect.sort_order`,
+      ),
+    ).toEqual([
+      {
+        class_name: 'Sorcerer',
+        subclass_name: 'Draconic Sorcery',
+        class_level: 3,
+        name: 'Draconic Resilience',
+        sort_order: 1,
+        effect_kind: 'hp_modifier',
+        hit_points_flat: 0,
+        hit_points_per_level: 1,
+        base: null,
+        ability_1: null,
+        ability_2: null,
+        allows_shield: null,
+        label: 'Draconic Resilience',
+      },
+      {
+        class_name: 'Sorcerer',
+        subclass_name: 'Draconic Sorcery',
+        class_level: 3,
+        name: 'Draconic Resilience',
+        sort_order: 2,
+        effect_kind: 'armor_class_formula',
+        hit_points_flat: null,
+        hit_points_per_level: null,
+        base: 10,
+        ability_1: 'dexterity',
+        ability_2: 'charisma',
+        allows_shield: 0,
+        label: 'Draconic Resilience',
+      },
+    ]);
 
     const classCoverage = db.allRaw(`
       SELECT class.name, count(*) AS rows, min(class_level) AS first_level,
@@ -667,9 +728,14 @@ describe('persisted class progression catalog', () => {
     ).lastInsertId;
     const lookup = new ClassProgressionLookup(db);
 
-    expect(() =>
+    const error = defect(() =>
       lookup.preparedCountForCharacterClass(characterId, wizardId),
-    ).toThrow(`Character ${characterId} does not have class ${wizardId}.`);
+    );
+    expect(error).toBeInstanceOf(CharacterClassMembershipError);
+    expect(error).toMatchObject({
+      character_id: characterId,
+      class_definition_id: wizardId,
+    });
     expect(
       db.scalar(
         'SELECT count(*) FROM character_class_levels WHERE character_id = ?',
@@ -693,9 +759,14 @@ describe('persisted class progression catalog', () => {
     );
     const lookup = new ClassProgressionLookup(db);
 
-    expect(() =>
+    const error = defect(() =>
       lookup.preparedCountForCharacterClass(characterId, wizardId),
-    ).toThrow(`Class ${wizardId} has no progression row at level 21.`);
+    );
+    expect(error).toBeInstanceOf(ClassProgressionRowMissingError);
+    expect(error).toMatchObject({
+      class_definition_id: wizardId,
+      class_level: 21,
+    });
     expect(
       db.scalar(
         `SELECT level FROM character_class_levels

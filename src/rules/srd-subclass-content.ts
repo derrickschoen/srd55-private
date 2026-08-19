@@ -26,6 +26,55 @@ import {
   HEADING_ONLY_DESCRIPTION,
   type HeadingOnlyDescription,
 } from '../domain/subclass-feature-description';
+import {
+  parseSrdDraconicResilience,
+  type SrdDraconicResilienceEffect,
+} from './draconic-resilience-srd';
+
+export type BundledSubclassGrantRulesShape =
+  | 'json_text_or_null'
+  | 'decoded_array';
+
+const BUNDLED_SUBCLASS_GRANT_RULES_SHAPE_MESSAGES: Readonly<
+  Record<BundledSubclassGrantRulesShape, string>
+> = {
+  json_text_or_null:
+    'Bundled subclass grant rules must be JSON text or null.',
+  decoded_array: 'Bundled subclass grant rules must decode to an array.',
+};
+
+export class BundledSubclassGrantRulesShapeError extends TypeError {
+  override readonly name = 'BundledSubclassGrantRulesShapeError' as const;
+  constructor(readonly expected: BundledSubclassGrantRulesShape) {
+    super(BUNDLED_SUBCLASS_GRANT_RULES_SHAPE_MESSAGES[expected]);
+  }
+}
+
+export class BundledSubclassPersistenceError extends Error {
+  override readonly name = 'BundledSubclassPersistenceError' as const;
+  constructor(readonly content_key: string) {
+    super(`Failed to persist bundled subclass ${content_key}.`);
+  }
+}
+
+export class SrdSubclassGrantRulesArrayError extends TypeError {
+  override readonly name = 'SrdSubclassGrantRulesArrayError' as const;
+  constructor(readonly subclass_content_key: string) {
+    super(`SRD subclass ${subclass_content_key} grant rules are not an array.`);
+  }
+}
+
+export class SrdSubclassMissingSpellError extends Error {
+  override readonly name = 'SrdSubclassMissingSpellError' as const;
+  constructor(
+    readonly subclass_content_key: string,
+    readonly spell_version_key: unknown,
+  ) {
+    super(
+      `SRD subclass ${subclass_content_key} references missing spell ${String(spell_version_key)}.`,
+    );
+  }
+}
 
 export interface BundledSubclassFeatureHeading {
   readonly name: string;
@@ -34,12 +83,17 @@ export interface BundledSubclassFeatureHeading {
   readonly sort_position: number;
 }
 
+export interface BundledSubclassFeature
+  extends BundledSubclassFeatureHeading {
+  readonly effects: readonly SrdDraconicResilienceEffect[];
+}
+
 export interface BundledSubclassSeed {
   readonly class_name: string;
   readonly subclass_name: string;
   readonly content_key: string;
   readonly spellcasting_ability: Ability | null;
-  readonly features: readonly BundledSubclassFeatureHeading[];
+  readonly features: readonly BundledSubclassFeature[];
   readonly grant_rules: readonly GrantRuleObject[] | null;
 }
 
@@ -99,6 +153,7 @@ function srdSubclassSeeds(): readonly BundledSubclassSeed[] {
     return cachedSeeds;
   }
   const manifest = parseSrdSubclasses();
+  const draconicResilience = parseSrdDraconicResilience();
   cachedSeeds = Object.freeze(
     srdSubclassClassNames.map((className) => {
       const definition = manifest.by_class[className];
@@ -108,7 +163,18 @@ function srdSubclassSeeds(): readonly BundledSubclassSeed[] {
         content_key: subclassContentKey(definition.subclass_name),
         spellcasting_ability:
           SRD_SUBCLASS_SPELLCASTING_ABILITIES[className],
-        features: definition.features,
+        features: Object.freeze(
+          definition.features.map((feature) => Object.freeze({
+            ...feature,
+            effects:
+              definition.class_name === draconicResilience.class_name &&
+              definition.subclass_name === draconicResilience.subclass_name &&
+              feature.class_level === draconicResilience.class_level &&
+              feature.name === draconicResilience.name
+                ? draconicResilience.effects
+                : Object.freeze([]),
+          })),
+        ),
         grant_rules: grantRulesFor(definition),
       });
     }),
@@ -144,11 +210,11 @@ function normalizedStoredRules(value: unknown): string | null {
     return null;
   }
   if (typeof value !== 'string') {
-    throw new TypeError('Bundled subclass grant rules must be JSON text or null.');
+    throw new BundledSubclassGrantRulesShapeError('json_text_or_null');
   }
   const decoded: unknown = JSON.parse(value);
   if (!Array.isArray(decoded)) {
-    throw new TypeError('Bundled subclass grant rules must decode to an array.');
+    throw new BundledSubclassGrantRulesShapeError('decoded_array');
   }
   return encodedRules(normalizedRuleObjects(decoded));
 }
@@ -196,10 +262,10 @@ function sameDefinition(
 function hasExactFeatures(
   db: DatabaseContext,
   subclassId: number,
-  expected: readonly BundledSubclassFeatureHeading[],
+  expected: readonly BundledSubclassFeature[],
 ): boolean {
   const stored = db.allRaw(
-    `SELECT class_level, sort_order, name, description
+    `SELECT id, class_level, sort_order, name, description
        FROM subclass_features
       WHERE subclass_definition_id = ?
       ORDER BY sort_order`,
@@ -209,25 +275,70 @@ function hasExactFeatures(
     stored.length === expected.length &&
     stored.every((row, index) => {
       const feature = expected[index];
-      return (
-        feature !== undefined &&
-        row.class_level === feature.class_level &&
-        row.sort_order === feature.sort_position + 1 &&
-        row.name === feature.name &&
-        row.description === HEADING_ONLY_DESCRIPTION
+      if (
+        feature === undefined ||
+        row.class_level !== feature.class_level ||
+        row.sort_order !== feature.sort_position + 1 ||
+        row.name !== feature.name ||
+        row.description !== HEADING_ONLY_DESCRIPTION
+      ) {
+        return false;
+      }
+      const effects = db.allRaw(
+        `SELECT effect_kind, damage_type, hit_points_flat,
+                hit_points_per_level, speed_bonus_feet, ability, amount,
+                maximum, base, ability_1, ability_2, allows_shield,
+                weapon_scope, attack_count, label, notes
+           FROM subclass_feature_effects
+          WHERE subclass_feature_id = ?
+          ORDER BY sort_order`,
+        [Number(row.id)],
       );
-    }) &&
-    Number(
-      db.scalar(
-        `SELECT count(*)
-           FROM subclass_feature_effects AS effect
-           JOIN subclass_features AS feature
-             ON feature.id = effect.subclass_feature_id
-          WHERE feature.subclass_definition_id = ?`,
-        [subclassId],
-      ) ?? 0,
-    ) === 0
+      return (
+        effects.length === feature.effects.length &&
+        effects.every((effect, effectIndex) => {
+          const expectedEffect = feature.effects[effectIndex];
+          return expectedEffect !== undefined &&
+            sameBundledSubclassEffect(effect, expectedEffect);
+        })
+      );
+    })
   );
+}
+
+function sameBundledSubclassEffect(
+  row: Record<string, unknown>,
+  effect: SrdDraconicResilienceEffect,
+): boolean {
+  const common =
+    row['effect_kind'] === effect.kind &&
+    row['damage_type'] === null &&
+    row['speed_bonus_feet'] === null &&
+    row['ability'] === null &&
+    row['amount'] === null &&
+    row['maximum'] === null &&
+    row['weapon_scope'] === null &&
+    row['attack_count'] === null &&
+    row['label'] === effect.label &&
+    row['notes'] === null;
+  switch (effect.kind) {
+    case 'hp_modifier':
+      return common &&
+        row['hit_points_flat'] === effect.hit_points_flat &&
+        row['hit_points_per_level'] === effect.hit_points_per_level &&
+        row['base'] === null &&
+        row['ability_1'] === null &&
+        row['ability_2'] === null &&
+        row['allows_shield'] === null;
+    case 'armor_class_formula':
+      return common &&
+        row['hit_points_flat'] === null &&
+        row['hit_points_per_level'] === null &&
+        row['base'] === effect.base &&
+        row['ability_1'] === effect.ability_1 &&
+        row['ability_2'] === effect.ability_2 &&
+        row['allows_shield'] === Number(effect.allows_shield);
+  }
 }
 
 /** Exact guard shared by every heading-only bundled subclass aggregate. */
@@ -318,7 +429,7 @@ function upsertDefinition(
     [seed.content_key],
   );
   if (subclassId === null) {
-    throw new Error(`Failed to persist bundled subclass ${seed.content_key}.`);
+    throw new BundledSubclassPersistenceError(seed.content_key);
   }
   return subclassId;
 }
@@ -326,7 +437,7 @@ function upsertDefinition(
 function replaceOwnedDescendants(
   db: DatabaseContext,
   subclassId: number,
-  features: readonly BundledSubclassFeatureHeading[],
+  features: readonly BundledSubclassFeature[],
   description: HeadingOnlyDescription,
   timestamp: string,
 ): void {
@@ -338,7 +449,7 @@ function replaceOwnedDescendants(
     subclassId,
   ]);
   for (const feature of features) {
-    db.exec(
+    const featureId = db.exec(
       `INSERT INTO subclass_features (
          subclass_definition_id, class_level, sort_order, name, description,
          created_at, updated_at
@@ -352,7 +463,48 @@ function replaceOwnedDescendants(
         timestamp,
         timestamp,
       ],
-    );
+    ).lastInsertId;
+    for (const [effectIndex, effect] of feature.effects.entries()) {
+      insertBundledSubclassEffect(
+        db,
+        featureId,
+        effectIndex + 1,
+        effect,
+        timestamp,
+      );
+    }
+  }
+}
+
+function insertBundledSubclassEffect(
+  db: DatabaseContext,
+  featureId: number,
+  sortOrder: number,
+  effect: SrdDraconicResilienceEffect,
+  timestamp: string,
+): void {
+  switch (effect.kind) {
+    case 'hp_modifier':
+      db.exec(
+        `INSERT INTO subclass_feature_effects (
+           subclass_feature_id, sort_order, effect_kind, hit_points_flat,
+           hit_points_per_level, label, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [featureId, sortOrder, effect.kind, effect.hit_points_flat,
+          effect.hit_points_per_level, effect.label, timestamp, timestamp],
+      );
+      return;
+    case 'armor_class_formula':
+      db.exec(
+        `INSERT INTO subclass_feature_effects (
+           subclass_feature_id, sort_order, effect_kind, base, ability_1,
+           ability_2, allows_shield, label, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [featureId, sortOrder, effect.kind, effect.base, effect.ability_1,
+          effect.ability_2, Number(effect.allows_shield), effect.label,
+          timestamp, timestamp],
+      );
+      return;
   }
 }
 
@@ -404,9 +556,7 @@ export function assertBundledSrdSubclassSpellReferences(
     }
     const decoded: unknown = JSON.parse(json);
     if (!Array.isArray(decoded)) {
-      throw new TypeError(
-        `SRD subclass ${seed.content_key} grant rules are not an array.`,
-      );
+      throw new SrdSubclassGrantRulesArrayError(seed.content_key);
     }
     for (const input of decoded) {
       const rule = GrantRule.fromObject(input);
@@ -421,8 +571,9 @@ export function assertBundledSrdSubclassSpellReferences(
           [spellVersionKey],
         ) === null
       ) {
-        throw new Error(
-          `SRD subclass ${seed.content_key} references missing spell ${String(spellVersionKey)}.`,
+        throw new SrdSubclassMissingSpellError(
+          seed.content_key,
+          spellVersionKey,
         );
       }
     }

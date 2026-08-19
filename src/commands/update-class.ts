@@ -11,6 +11,7 @@ import {
   type RowCodec,
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
+import { ok, type OkOutcome } from '../refusals/outcome';
 import { characterLevel } from '../rules/character-level';
 import {
   reconcileCharacterLevelDependentSources,
@@ -321,7 +322,7 @@ export class UpdateClassCommand {
    * leaving level-moving power here would re-open §1's bug with no control
    * on the path.
    */
-  apply(characterId: number): void {
+  apply(characterId: number): OkOutcome<void> {
     this.db.transaction(() => {
       const before = this.#state.capture(characterId);
       const classId = this.payload.class_definition_id;
@@ -426,6 +427,7 @@ export class UpdateClassCommand {
       this.#before = before;
       this.#characterId = characterId;
     });
+    return ok(undefined);
   }
 
   async inverse(): Promise<StoredCharacterSnapshotInverse> {

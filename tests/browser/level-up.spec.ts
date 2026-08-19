@@ -621,6 +621,63 @@ test('starting-class provenance stays first and level up names the new-class pat
   });
 });
 
+test('reloading the Gains step restores the selected held class and wizard progress', async ({
+  page,
+}) => {
+  const character = await createCharacter(
+    page,
+    'Reloaded Multiclass',
+    'Wizard',
+    { intelligence: 13, wisdom: 13 },
+  );
+  await page.goto(`/characters/${String(character.id)}`);
+  await expect(page.locator('#planner-status')).toHaveAttribute(
+    'data-ready',
+    'true',
+    { timeout: 35_000 },
+  );
+  await page.getByRole('combobox', { name: 'Class to add' }).selectOption({
+    label: 'Cleric',
+  });
+  await page.getByRole('button', { name: 'Add class' }).click();
+
+  await page.goto(`/characters/${String(character.id)}/level-up`);
+  const wizard = page.getByRole('radio', { name: 'Wizard 1 → 2' });
+  await wizard.check();
+  await page.getByRole('button', { name: 'Next' }).click();
+  await expect(page.getByRole('heading', { name: 'Review level gains' }))
+    .toBeFocused();
+  const persistedProgress = await page.evaluate(async (characterId) => {
+    const rows = await window.staticApp.inspectRows(
+      'character_rule_overrides',
+      { character_id: characterId },
+    );
+    const characters = await window.staticApp.inspectRows(
+      'characters',
+      { id: characterId },
+    );
+    const progress = rows.find(
+      (row) => row['rule_key'] === 'level_up_wizard_progress_v1',
+    );
+    return {
+      revision: Number(characters[0]?.['revision']),
+      value: JSON.parse(String(progress?.['value'])),
+    };
+  }, character.id);
+  expect(persistedProgress.value).toEqual({
+    character_revision: persistedProgress.revision,
+    selected_class_content_key: '2024:class:wizard',
+    current_step: 'gains',
+  });
+
+  await page.reload();
+
+  await expect(page.getByRole('heading', { name: 'Review level gains' }))
+    .toBeVisible();
+  await page.getByRole('button', { name: 'Back' }).click();
+  await expect(wizard).toBeChecked();
+});
+
 test('U1 direct level-up refuses untouched defaults, then one workspace edit enables the wizard', async ({
   page,
 }) => {
@@ -656,8 +713,7 @@ test('U1 direct level-up refuses untouched defaults, then one workspace edit ena
   expect(Number.isSafeInteger(character.classDefinitionId)).toBe(true);
 
   const refusal = await page.evaluate(async ({ id, classDefinitionId }) => {
-    try {
-      await window.appRpc.call('commands.execute', {
+    const outcome = await window.appRpc.call('commands.execute', {
         character_id: id,
         operation_uuid: crypto.randomUUID(),
         expected_revision: 0,
@@ -666,15 +722,22 @@ test('U1 direct level-up refuses untouched defaults, then one workspace edit ena
           class_definition_id: classDefinitionId,
           target_level: 2,
         },
-      });
-    } catch (error) {
-      return error !== null && typeof error === 'object'
-        ? (error as { data?: unknown }).data
-        : null;
+    });
+    if (
+      outcome === null
+      || typeof outcome !== 'object'
+      || !('kind' in outcome)
+      || outcome.kind !== 'refused'
+      || !('refusal' in outcome)
+    ) {
+      throw new Error('Expected level-up to return a refused Outcome.');
     }
-    return null;
+    return outcome.refusal;
   }, character);
-  expect(refusal).toEqual({ reason: 'incomplete_level_one' });
+  expect(refusal).toEqual({
+    kind: 'level_up_refused',
+    reason: 'incomplete_level_one',
+  });
   expect(await rows(page, 'characters')).toEqual([
     expect.objectContaining({
       id: character.id,

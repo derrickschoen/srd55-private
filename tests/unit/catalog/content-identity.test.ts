@@ -9,12 +9,25 @@ import {
   contentIdentityOptional,
   contentIdentitySequence,
   contentIdentitySet,
+  deriveContentIdentityForScheme,
   deriveContentIdentityV1,
   normalizeContentIdentityName,
   parseDerivedContentKeyV1,
   verifyStoredContentIdentityV1,
+  type ContentFingerprintScheme,
   type NormalizedContentName,
 } from '../../../src/catalog/content-identity';
+import {
+  ContentFingerprintSchemeUnsupportedError,
+  ContentIdentityAdjacentProjectionError,
+  ContentIdentityCanonicalValueError,
+  ContentIdentityCircularReferenceError,
+  ContentIdentityEditionError,
+  ContentIdentityEnvelopeTypeError,
+  ContentIdentityNameEmptyError,
+  ContentIdentityNumberError,
+  StoredContentIdentityDisagreementError,
+} from '../../../src/catalog/content-identity-errors';
 import {
   isSpellVersionKey,
   normalizeCatalogKeyComponent,
@@ -23,6 +36,15 @@ import type {
   CharacterId,
   PartyPublicationId,
 } from '../../../src/domain/ids';
+
+function refusal(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return expect.fail('Expected a refusal, but the call returned.');
+}
 
 describe('CI-NAME-REMOVE', () => {
   it('removes punctuation and separators instead of hyphenating them', () => {
@@ -52,9 +74,9 @@ describe('CI-NAME-REMOVE', () => {
   });
 
   it('refuses a name with no retained letters or numbers', () => {
-    expect(() => normalizeContentIdentityName('— + 👁️ —')).toThrow(
-      'Content identity names must not be empty',
-    );
+    const error = refusal(() => normalizeContentIdentityName('— + 👁️ —'));
+    expect(error).toBeInstanceOf(ContentIdentityNameEmptyError);
+    expect(error).toMatchObject({});
   });
 
   it('keeps the legacy and v1 name components nominally distinct', () => {
@@ -194,21 +216,22 @@ describe('canonical content identity values', () => {
       1.5,
       Number.MAX_SAFE_INTEGER + 1,
     ]) {
-      expect(() => canonicalContentIdentityJson({ value })).toThrow(
-        'finite safe integers',
-      );
+      const error = refusal(() => canonicalContentIdentityJson({ value }));
+      expect(error).toBeInstanceOf(ContentIdentityNumberError);
+      expect(error).toMatchObject({});
     }
-    expect(() =>
-      canonicalContentIdentityJson({ missing: undefined }),
-    ).toThrow('canonical content identity value');
-    expect(() => canonicalContentIdentityJson(new Date(0))).toThrow(
-      'canonical content identity value',
-    );
+    const undefinedError = refusal(() =>
+      canonicalContentIdentityJson({ missing: undefined }));
+    expect(undefinedError).toBeInstanceOf(ContentIdentityCanonicalValueError);
+    expect(undefinedError).toMatchObject({ value_tag: '[object Undefined]' });
+    const dateError = refusal(() => canonicalContentIdentityJson(new Date(0)));
+    expect(dateError).toBeInstanceOf(ContentIdentityCanonicalValueError);
+    expect(dateError).toMatchObject({ value_tag: '[object Date]' });
     const circular: Record<string, unknown> = {};
     circular.self = circular;
-    expect(() => canonicalContentIdentityJson(circular)).toThrow(
-      'circular reference',
-    );
+    const circularError = refusal(() => canonicalContentIdentityJson(circular));
+    expect(circularError).toBeInstanceOf(ContentIdentityCircularReferenceError);
+    expect(circularError).toMatchObject({});
   });
 });
 
@@ -261,13 +284,42 @@ describe('the content fingerprint schemes and derived key grammar', () => {
   });
 
   it('refuses an edition outside the existing key-component grammar', () => {
-    expect(() =>
+    const error = refusal(() =>
       deriveContentIdentityV1({
         kind: 'feat',
         edition: '2024 revised',
         name: 'Iron Will',
         payload: {},
-      }),
-    ).toThrow('valid catalog key component');
+      }));
+    expect(error).toBeInstanceOf(ContentIdentityEditionError);
+    expect(error).toMatchObject({ edition: '2024 revised' });
+  });
+
+  it('tags forged scheme, adjacent-envelope, and stored-identity defects', () => {
+    const schemeError = refusal(() => deriveContentIdentityForScheme(
+      'content-v9' as ContentFingerprintScheme,
+      { kind: 'feat', edition: '2024', name: 'Fixture', payload: {} },
+    ));
+    expect(schemeError).toBeInstanceOf(ContentFingerprintSchemeUnsupportedError);
+    expect(schemeError).toMatchObject({ scheme: 'content-v9' });
+
+    const projector = adjacentContentFingerprintCompatibilityRegistry['content-v2'];
+    const envelopeError = refusal(() => projector(null));
+    expect(envelopeError).toBeInstanceOf(ContentIdentityEnvelopeTypeError);
+    expect(envelopeError).toMatchObject({});
+    const adjacencyError = refusal(() => projector({ scheme: 'content-v2' }));
+    expect(adjacencyError).toBeInstanceOf(ContentIdentityAdjacentProjectionError);
+    expect(adjacencyError).toMatchObject({
+      source_scheme: 'content-v1',
+      target_scheme: 'content-v2',
+    });
+
+    const storedError = refusal(() => verifyStoredContentIdentityV1({
+      canonicalJson: '{}',
+      digest: 'bad',
+      derivedKey: 'bad',
+    }));
+    expect(storedError).toBeInstanceOf(StoredContentIdentityDisagreementError);
+    expect(storedError).toMatchObject({});
   });
 });

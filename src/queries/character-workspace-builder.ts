@@ -71,6 +71,35 @@ import {
 } from '../rules/multiclass-prerequisite-house-rule';
 import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 
+/** Source configuration names an ability outside the known mechanical set. */
+export class CharacterWorkspaceSpellcastingAbilityError extends Error {
+  override readonly name =
+    'CharacterWorkspaceSpellcastingAbilityError' as const;
+  constructor(readonly spellcasting_ability: unknown) {
+    super(
+      `Unknown spellcasting ability '${String(spellcasting_ability)}'.`,
+    );
+  }
+}
+
+/** The entry assessment omitted a class option supplied to it. */
+export class CharacterWorkspaceClassAssessmentMissingError extends TypeError {
+  override readonly name =
+    'CharacterWorkspaceClassAssessmentMissingError' as const;
+  constructor(readonly class_definition_id: number) {
+    super(`Class ${String(class_definition_id)} was not assessed.`);
+  }
+}
+
+/** A stored standalone source carries a source-type discriminant we cannot map. */
+export class CharacterWorkspaceStandaloneSourceTypeError extends TypeError {
+  override readonly name =
+    'CharacterWorkspaceStandaloneSourceTypeError' as const;
+  constructor(readonly source_type: string) {
+    super(`Unknown standalone source type '${source_type}'.`);
+  }
+}
+
 interface SlotWithOrder extends WorkspaceSlot {
   readonly sort_order: number;
 }
@@ -189,7 +218,7 @@ function configuredAbility(sourceConfig: string | null): Ability | null {
   }
   const normalized = String(ability).toLowerCase();
   if (!abilities.includes(normalized as Ability)) {
-    throw new Error(`Unknown spellcasting ability '${String(ability)}'.`);
+    throw new CharacterWorkspaceSpellcastingAbilityError(ability);
   }
   return normalized as Ability;
 }
@@ -515,7 +544,7 @@ export class CharacterWorkspaceBuilder {
     return options.map((option) => {
       const assessment = assessments.get(option.id);
       if (assessment === undefined) {
-        throw new TypeError(`Class ${String(option.id)} was not assessed.`);
+        throw new CharacterWorkspaceClassAssessmentMissingError(option.id);
       }
       switch (assessment.status) {
         case 'not_applicable':
@@ -783,7 +812,7 @@ export class CharacterWorkspaceBuilder {
                 sourceDefinitionId as BackgroundDefinitionId | null,
             };
         }
-        throw new TypeError(`Unknown standalone source type '${sourceType}'.`);
+        throw new CharacterWorkspaceStandaloneSourceTypeError(sourceType);
       },
     );
   }

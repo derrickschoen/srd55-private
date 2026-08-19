@@ -1,10 +1,44 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import checkedIn from '../../src/db/schema.sql?raw';
-import {
-  composePrelude,
-  composeSchemaSql,
-  SCHEMA_NOTES,
-} from '../../scripts/compose-schema';
+
+type SchemaComposer = typeof import('../../scripts/compose-schema');
+
+let composePrelude: SchemaComposer['composePrelude'];
+let composeSchemaSql: SchemaComposer['composeSchemaSql'];
+let SCHEMA_NOTES: SchemaComposer['SCHEMA_NOTES'];
+
+const drizzlePrototypeProperties = [
+  [Array.prototype, 'random'],
+  [String.prototype, 'trimChar'],
+  [String.prototype, 'squashSpaces'],
+  [String.prototype, 'camelCase'],
+  [String.prototype, 'capitalise'],
+  [String.prototype, 'concatIf'],
+  [String.prototype, 'snake_case'],
+] as const;
+const originalPrototypeDescriptors = drizzlePrototypeProperties.map(
+  ([prototype, property]) => Object.getOwnPropertyDescriptor(prototype, property),
+);
+
+beforeAll(async () => {
+  // drizzle-kit/api installs enumerable helpers on native prototypes merely by
+  // being imported. Load the build-time composer inside this suite so its
+  // unavoidable process-global side effect has a matching restoration boundary.
+  ({ composePrelude, composeSchemaSql, SCHEMA_NOTES } = await import(
+    '../../scripts/compose-schema'
+  ));
+});
+
+afterAll(() => {
+  drizzlePrototypeProperties.forEach(([prototype, property], index) => {
+    const descriptor = originalPrototypeDescriptors[index];
+    if (descriptor === undefined) {
+      Reflect.deleteProperty(prototype, property);
+    } else {
+      Object.defineProperty(prototype, property, descriptor);
+    }
+  });
+});
 
 /**
  * A GENERATION-FRESHNESS DIFF — explicitly NOT a correctness check.

@@ -8,7 +8,12 @@ import type { CharacterCommandIntegrity } from './integrity';
 import {
   CharacterCommandPayloadValidator,
 } from './payload-validator';
-import { RevisionConflict } from './revision-conflict';
+import type { CharacterId, CharacterRevision } from '../domain/ids';
+import { ok, refused, type Outcome } from '../refusals/outcome';
+import {
+  characterArchivedRefusal,
+  revisionConflictRefusal,
+} from '../refusals/refusal';
 
 export interface CharacterCommandPreflightRequest {
   readonly character_id: number;
@@ -24,15 +29,6 @@ export interface PreparedCharacterCommand {
 export interface CharacterCommandPreflightOptions {
   readonly factory?: CharacterCommandFactory;
   readonly validator?: CharacterCommandPayloadValidator;
-}
-
-export class CharacterArchivedRefusal extends Error {
-  readonly reason = 'character_archived' as const;
-
-  constructor(readonly currentRevision: number) {
-    super('Archived characters cannot be changed.');
-    this.name = 'CharacterArchivedRefusal';
-  }
 }
 
 /**
@@ -61,9 +57,10 @@ export class CharacterCommandPreflight {
 
   async prepare(
     request: CharacterCommandPreflightRequest,
-  ): Promise<PreparedCharacterCommand> {
-    this.assertExpectedRevision(request, request.command);
-    return this.preparePayload(request.character_id, request.command);
+  ): Promise<Outcome<PreparedCharacterCommand>> {
+    const revision = this.assertExpectedRevision(request, request.command);
+    if (revision.kind === 'refused') return revision;
+    return ok(await this.preparePayload(request.character_id, request.command));
   }
 
   /**
@@ -86,8 +83,10 @@ export class CharacterCommandPreflight {
       'character_id' | 'expected_revision'
     >,
     input: unknown,
-  ): void {
-    const currentRevision = this.currentMutableRevision(request.character_id);
+  ): Outcome<void> {
+    const mutableRevision = this.currentMutableRevision(request.character_id);
+    if (mutableRevision.kind === 'refused') return mutableRevision;
+    const currentRevision = mutableRevision.value;
     if (
       currentRevision !== request.expected_revision &&
       !this.canMergeStaleSlotCommand(
@@ -97,8 +96,12 @@ export class CharacterCommandPreflight {
         currentRevision,
       )
     ) {
-      throw new RevisionConflict(currentRevision);
+      return refused(revisionConflictRefusal(
+        request.expected_revision as CharacterRevision,
+        currentRevision,
+      ));
     }
+    return ok(undefined);
   }
 
   currentRevision(characterId: number): number {
@@ -112,7 +115,9 @@ export class CharacterCommandPreflight {
     return Number(revision);
   }
 
-  private currentMutableRevision(characterId: number): number {
+  private currentMutableRevision(
+    characterId: number,
+  ): Outcome<CharacterRevision> {
     const character = this.db.oneRaw(
       'SELECT revision, archived_at FROM characters WHERE id = ?',
       [characterId],
@@ -122,9 +127,12 @@ export class CharacterCommandPreflight {
     }
     const revision = Number(character.revision);
     if (character.archived_at !== null) {
-      throw new CharacterArchivedRefusal(revision);
+      return refused(characterArchivedRefusal(
+        characterId as CharacterId,
+        revision as CharacterRevision,
+      ));
     }
-    return revision;
+    return ok(revision as CharacterRevision);
   }
 
   private canMergeStaleSlotCommand(

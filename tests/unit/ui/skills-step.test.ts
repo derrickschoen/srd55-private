@@ -17,6 +17,7 @@ import {
   interactiveElement,
   type InteractiveTestElement,
 } from '../../fixtures/interactive-dom';
+import { ok } from '../../../src/refusals/outcome';
 
 /**
  * THE SKILLS STEP'S DOM (S-C): the already-granted display, the ADDRESSED
@@ -117,7 +118,7 @@ function acolyteFighterState(): GuidedSkillsStepState {
 function stepWith(
   state: GuidedSkillsStepState,
   fill = vi.fn(() =>
-    Promise.resolve({ character_id: 7, current_step: 'skills' as const }),
+    Promise.resolve(ok({ character_id: 7, current_step: 'skills' as const })),
   ),
   navigate = vi.fn(),
 ) {
@@ -194,6 +195,7 @@ describe('the addressed fill', () => {
       selector(SKILL_STEP_ATTR.select, '22'),
     );
     select!.value = 'perception';
+    select!.dispatchEvent(new Event('change'));
     second!
       .querySelector(selector(SKILL_STEP_ATTR.fill, '22'))!
       .click();
@@ -205,7 +207,7 @@ describe('the addressed fill', () => {
     step.cleanup();
   });
 
-  it('does nothing on an empty selection, and held skills are absent from the lists', () => {
+  it('disables an empty selection until a skill is chosen, and held skills are absent', () => {
     const { step, fill } = stepWith(acolyteFighterState());
     const view = interactiveElement(step.element);
     const options = view
@@ -215,8 +217,19 @@ describe('the addressed fill', () => {
     expect(options).not.toContain('insight');
     expect(options).toContain('athletics');
 
-    view.querySelector(selector(SKILL_STEP_ATTR.fill, '21'))!.click();
+    const fillButton = view.querySelector(
+      selector(SKILL_STEP_ATTR.fill, '21'),
+    ) as InteractiveTestElement;
+    expect(fillButton.disabled).toBe(true);
+    fillButton.click();
     expect(fill).not.toHaveBeenCalled();
+
+    const select = view.querySelector(
+      selector(SKILL_STEP_ATTR.select, '21'),
+    ) as InteractiveTestElement;
+    select.value = 'athletics';
+    select.dispatchEvent(new Event('change'));
+    expect(fillButton.disabled).toBe(false);
     step.cleanup();
   });
 
@@ -245,6 +258,7 @@ describe('the addressed fill', () => {
     const view = interactiveElement(step.element);
     const select = view.querySelector(selector(SKILL_STEP_ATTR.select, '21'));
     select!.value = 'athletics';
+    select!.dispatchEvent(new Event('change'));
     const button = view.querySelector(
       selector(SKILL_STEP_ATTR.fill, '21'),
     ) as InteractiveTestElement;

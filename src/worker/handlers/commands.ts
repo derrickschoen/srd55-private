@@ -14,6 +14,7 @@ import {
   type RpcHandler,
 } from '../handler';
 import { characterCommandRpcError } from '../character-command-errors';
+import { ok } from '../../refusals/outcome';
 
 export const COMMAND_INTEGRITY_KEY =
   'dnd-multiclass-spells-static-command-integrity-v1';
@@ -83,7 +84,9 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
           context.db,
           new CharacterCommandIntegrity(COMMAND_INTEGRITY_KEY),
         ).execute(params);
-        return characterCommandRpcResult(result);
+        return result.kind === 'refused'
+          ? result
+          : ok(characterCommandRpcResult(result.value));
       } catch (error) {
         const translated = characterCommandRpcError(error);
         if (translated !== null) throw translated;

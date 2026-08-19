@@ -9,9 +9,7 @@ import {
   CharacterCompletenessQueries,
   type UnfilledSkillGrantsItem,
 } from '../../../src/queries/character-completeness';
-import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
-import { seedSheetContent } from '../../../src/rules/sheet-srd';
-import { openTestDatabase } from '../../helpers/open-db';
+import { openSeededTestDatabase } from '../../helpers/open-db';
 import { raiseClassLevelForTest } from '../../helpers/class-levels';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 
@@ -147,11 +145,9 @@ describe('skill grants as outstanding items', () => {
   }
 
   beforeEach(async () => {
-    connection = await openTestDatabase();
+    connection = await openSeededTestDatabase();
     db = new DatabaseContext(connection);
     integrity = new CharacterCommandIntegrity('skill-completeness-test-key');
-    seedClassProgressions(db);
-    seedSheetContent(db);
     characterId = db.exec(
       `INSERT INTO characters (name) VALUES ('Dipper')`,
     ).lastInsertId;

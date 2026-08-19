@@ -36,7 +36,12 @@
     <div id="app" aria-busy="true">
       <main class="loading-shell">
         <h1>SRD-55</h1>
-        <output id="status" role="status">Starting local database…</output>
+        <p id="loading-phase-label" class="loading-phase-label">
+          Current startup phase
+        </p>
+        <output id="status" role="status" aria-labelledby="loading-phase-label">
+          Starting local database…
+        </output>
       </main>
     </div>
     <footer class="site-footer">

@@ -2,9 +2,16 @@ import type { Sqlite3Static } from '@sqlite.org/sqlite-wasm';
 import schema from './schema.sql?raw';
 import {
   DatabaseLifecycle,
-  type DatabaseSeed,
   type DatabaseStorage,
+  type DatabaseVerificationMode,
 } from './database-lifecycle';
+import { DATABASE_MIGRATIONS } from './migrations';
+import {
+  CATALOG_DATA_MIGRATIONS,
+} from '../catalog/catalog-data-migrations';
+import { sha256 } from '../crypto/sha256';
+import type { BootVerificationBuildKey } from './boot-verification-stamp';
+import { EXPECTED_BUNDLED_CONTENT_DIGEST_V1 } from '../catalog/bundled-content-digest-v1.expected';
 import { ensureBundledClassContent } from '../rules/class-progression-lookup';
 import {
   assertBundledSrdSubclassSpellReferences,
@@ -18,6 +25,7 @@ import { ensureBundledSheetContent } from '../rules/sheet-srd';
 import {
   ensureBundledSpellContent,
   installMissingBundledSpellContent,
+  removeBundledSpellContent,
   type BundledSpellSeedResult,
 } from '../rules/spells-srd';
 import { ensureBundledClassEquipment } from '../rules/class-equipment-srd';
@@ -34,6 +42,11 @@ import {
 } from '../catalog/bundled-content-digest-v1';
 import type { DatabaseBootStage } from './database-boot-progress';
 import type { DatabaseContext } from './database';
+import {
+  applicationSeedSpellContentKeys,
+  testCoreProjectionSpellContentKeys,
+  type ApplicationSeedProfile,
+} from './application-seed-profile';
 
 function hasNoCurrentFingerprints(pass: BundledContentDigestPassV1): boolean {
   return pass.aggregates.every((aggregate) =>
@@ -85,11 +98,12 @@ function namedDigestMismatch(pass: BundledContentDigestPassV1): string {
  * `tests/integration/rules/background-equipment.test.ts` seeds origins into a
  * database with no weapon catalog on purpose to prove it.
  */
-function seedApplication(
+function seedApplicationPass(
   db: DatabaseContext,
   onProgress: (stage: DatabaseBootStage) => void,
+  verification: DatabaseVerificationMode,
+  profile: ApplicationSeedProfile,
 ): void {
-  onProgress('checking_bundled_rules');
   ensureBundledClassContent(db);
   ensureBundledSrdSubclassContent(db);
   ensureBundledClassResources(db);
@@ -106,14 +120,26 @@ function seedApplication(
   // the instance config, at grant generation — never at seed time.
   ensureBundledBackgroundDefinitions(db);
   ensureBundledFeatContent(db);
+  // D283. A reproduced stamp already binds this build's pinned corpus digest
+  // to these exact image bytes, so canonicalizing 444 aggregates to reach the
+  // same digest again is the second of the ~4s the stamp exists to give back.
+  // The two passes below are NOT digest work — they operate on stored
+  // relations and user rows — and stay on every boot.
+  if (profile === 'full' && verification === 'stamped') {
+    assertBundledSrdSubclassSpellReferences(db);
+    reconcileLegacyLevelFeatChoices(db);
+    return;
+  }
   // A one-row aggregate-count gate runs before the digest and the spell source
   // parser/cardinality repair. A healthy database therefore takes the digest
   // without parsing four source extracts or querying 339 registrations. A
   // trivially incomplete database skips canonicalization and enters the same
   // repair path directly; equal-count substitutions and byte drift still take
   // the digest and remain tamper-evident on every plausible healthy boot.
-  onProgress('verifying_catalog_integrity');
-  const digestPass = bundledContentCouldMatchBuildV1(db)
+  if (profile === 'full') {
+    onProgress('verifying_catalog_integrity');
+  }
+  const digestPass = profile === 'full' && bundledContentCouldMatchBuildV1(db)
     ? bundledContentDigestPassV1(db)
     : undefined;
   if (
@@ -136,7 +162,14 @@ function seedApplication(
   // Install absent spell roots before the general projector pass. Present
   // roots, including drifted rows, remain untouched for reconciliation to
   // observe and the source-wins verifier to name/repair.
-  installMissingBundledSpellContent(db);
+  const keptSpellContentKeys = applicationSeedSpellContentKeys(profile);
+  const projectedSpellContentKeys = keptSpellContentKeys === undefined
+    ? undefined
+    : testCoreProjectionSpellContentKeys(db);
+  const spellSources = projectedSpellContentKeys === undefined
+    ? Object.freeze({})
+    : Object.freeze({ includedContentKeys: projectedSpellContentKeys });
+  installMissingBundledSpellContent(db, spellSources);
   // D84 runs only after every definition/template half and dependency catalog
   // is present, so all nine stored projectors observe the same graph runtime
   // consumers do. Spell is the first reconciled kind: its projection is the
@@ -148,9 +181,17 @@ function seedApplication(
   const registryPass = reconcileBundledContentRegistryWithStoredProjectionsV1(
     db,
     {
+      includeEntry: (entry) =>
+        entry.kind !== 'spell' ||
+        projectedSpellContentKeys === undefined ||
+        projectedSpellContentKeys.has(entry.contentKey),
       afterKind: (kind, storedProjections) => {
         if (kind === 'spell') {
-          spells = ensureBundledSpellContent(db, storedProjections);
+          spells = ensureBundledSpellContent(
+            db,
+            storedProjections,
+            spellSources,
+          );
           assertBundledSrdSubclassSpellReferences(db);
           reconcileLegacyLevelFeatChoices(db);
         }
@@ -173,17 +214,87 @@ function seedApplication(
       `${String(registry.refused)} refused.`,
     );
   }
-  const verifiedDigest = bundledContentDigestPassV1(db);
-  if (!bundledContentDigestMatchesBuildV1(verifiedDigest)) {
+  const verifiedDigest = profile === 'full'
+    ? bundledContentDigestPassV1(db)
+    : undefined;
+  if (
+    verifiedDigest !== undefined &&
+    !bundledContentDigestMatchesBuildV1(verifiedDigest)
+  ) {
     console.warn(
       'Bundled content remains different from this build after named ' +
         `verification: ${namedDigestMismatch(verifiedDigest)}.`,
     );
   }
+  if (
+    keptSpellContentKeys !== undefined &&
+    projectedSpellContentKeys !== undefined
+  ) {
+    removeBundledSpellContent(
+      db,
+      new Set([...projectedSpellContentKeys].filter(
+        (contentKey) => !keptSpellContentKeys.has(contentKey),
+      )),
+    );
+  }
 }
 
-export const applicationSeed: DatabaseSeed = (db) =>
-  seedApplication(db, () => undefined);
+function seedApplication(
+  db: DatabaseContext,
+  onProgress: (stage: DatabaseBootStage) => void,
+  verification: DatabaseVerificationMode,
+  profile: ApplicationSeedProfile = 'full',
+): void {
+  onProgress('checking_bundled_rules');
+  // Each catalog owns its local atomicity, but on OPFS every outermost commit
+  // is a durable sync. One application-level transaction turns those nested
+  // transactions into savepoints and commits the complete healthy seed once.
+  // If a later catalog check throws, the whole partial seed rolls back before
+  // DatabaseLifecycle reports the failure through its existing recoverable
+  // boot path.
+  db.transaction(() =>
+    seedApplicationPass(db, onProgress, verification, profile)
+  );
+}
+
+export function applicationSeed(
+  db: DatabaseContext,
+  verification: DatabaseVerificationMode = 'full',
+  profile: ApplicationSeedProfile = 'full',
+): void {
+  seedApplication(db, () => undefined, verification, profile);
+}
+
+/**
+ * The build half of the D283 verification stamp key.
+ *
+ * Every field is already a frozen build constant — no new version string to
+ * bump, and therefore none to forget. `schemaChecksum` is the migration
+ * registry's target, so it moves with the schema by construction;
+ * `bundledContentDigest` is the pinned whole-corpus digest, which is the very
+ * value the catalog pass would otherwise recompute; the migration registry
+ * checksum is derived from each migration's own frozen id and checksum, so a
+ * new data migration invalidates every stamp in the wild.
+ */
+export function applicationBootVerificationBuildKey():
+  BootVerificationBuildKey {
+  const target = DATABASE_MIGRATIONS.at(-1);
+  if (target === undefined) {
+    throw new TypeError('Database migration registry is empty.');
+  }
+  return {
+    schemaChecksum: target.resultSchemaChecksum,
+    bundledContentDigest: EXPECTED_BUNDLED_CONTENT_DIGEST_V1,
+    catalogDataMigrationsChecksum: sha256(
+      JSON.stringify(
+        CATALOG_DATA_MIGRATIONS.map((migration) => [
+          migration.id,
+          migration.checksum,
+        ]),
+      ),
+    ),
+  };
+}
 
 /**
  * Composition root for the application database. Everything that boots a real
@@ -199,6 +310,9 @@ export function createApplicationLifecycle(
     sqlite3,
     storage,
     schema,
-    (db) => seedApplication(db, onProgress),
+    (db, verification) => seedApplication(db, onProgress, verification),
+    DATABASE_MIGRATIONS,
+    CATALOG_DATA_MIGRATIONS,
+    onProgress,
   );
 }

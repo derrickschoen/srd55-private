@@ -2,6 +2,7 @@ import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import type { Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { DatabaseContext } from '../../src/db/database';
+import { registerSqliteQueryEngine } from '../../src/db/query';
 import type { Ability } from '../../src/domain/enums';
 import { abilities } from '../../src/domain/enums';
 import type { Workspace } from '../../src/domain/read-models';
@@ -29,6 +30,7 @@ async function plannerImage(): Promise<{
   characterId: number;
 }> {
   const sqlite3 = await sqlite3InitModule();
+  registerSqliteQueryEngine(sqlite3);
   const connection = new sqlite3.oo1.DB(':memory:', 'c');
   connection.exec(schema);
   const db = new DatabaseContext(connection);

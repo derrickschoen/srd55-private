@@ -39,6 +39,10 @@ import {
   type ContentKind,
 } from '../catalog/content-identity';
 import {
+  catalogContentVisibilities,
+  type CatalogContentVisibility,
+} from '../catalog/content-visibility';
+import {
   effectColumns,
   portableEquipmentContentImportNode,
   type EffectColumns,
@@ -128,6 +132,8 @@ export interface PortableContentAggregate {
   readonly key_kind: 'asserted';
   readonly fingerprint_scheme: ContentFingerprintScheme;
   readonly fingerprint_digest: ContentFingerprintDigest;
+  /** Missing historical input is normalized to listed at this boundary. */
+  readonly visibility?: CatalogContentVisibility;
   readonly aggregate: PortableContentAggregateValue;
   readonly spell_identity?: PortableSpellIdentityMetadata;
   /** Absent only on a historical v18/v6/v2-or-earlier document. */
@@ -137,6 +143,7 @@ export interface PortableContentAggregate {
 /** Newly emitted portable content always carries an honest provenance value. */
 export interface CurrentPortableContentAggregate extends PortableContentAggregate {
   readonly provenance: ContentProvenance;
+  readonly visibility: CatalogContentVisibility;
 }
 
 export interface PortableContentSupersession {
@@ -693,6 +700,7 @@ interface LocalPortableEntry {
   readonly kind: ContentKind;
   readonly localContentKey: ContentKey;
   readonly portableContentKey: ContentKey;
+  readonly visibility: CatalogContentVisibility;
   readonly aggregate: PortableContentAggregateValue;
   readonly spellIdentity?: PortableSpellIdentityMetadata;
   readonly dependencies: readonly {
@@ -779,12 +787,19 @@ function localPortableEntry(
   contentKey: ContentKey,
 ): LocalPortableEntry {
   const registry = db.oneRaw(
-    `SELECT key_kind, catalog_layer FROM catalog_content_identities
+    `SELECT key_kind, catalog_layer, visibility FROM catalog_content_identities
      WHERE content_kind = ? AND content_key = ?`,
     [kind, contentKey],
   );
   if (registry === null || registry.catalog_layer !== 'external') {
     throw new BackupValidationError(`Portable content root '${contentKey}' is not external ${kind} content.`);
+  }
+  if (!catalogContentVisibilities.includes(
+    String(registry.visibility) as CatalogContentVisibility,
+  )) {
+    throw new BackupValidationError(
+      `Portable content root '${contentKey}' has invalid visibility.`,
+    );
   }
   const stored = db.oneRaw(
     `SELECT fingerprint_scheme, fingerprint_digest, canonical_json
@@ -837,6 +852,7 @@ function localPortableEntry(
     kind,
     localContentKey: contentKey,
     portableContentKey,
+    visibility: String(registry.visibility) as CatalogContentVisibility,
     aggregate,
     ...(spellIdentity === undefined ? {} : { spellIdentity }),
     dependencies: Object.freeze(dependencies),
@@ -1018,6 +1034,7 @@ export function exportPortableContentClosure(
           key_kind: 'asserted' as const,
           fingerprint_scheme: identity.envelope.scheme,
           fingerprint_digest: identity.digest,
+          visibility: local.visibility,
           aggregate,
           provenance: storedContentProvenance(
             db,
@@ -1244,6 +1261,9 @@ function validatedEntry(
   exactKeys(value, [
     'kind', 'content_key', 'key_kind', 'fingerprint_scheme',
     'fingerprint_digest', 'aggregate',
+    // D299: absent on every pre-visibility document; normalized to `listed`
+    // below. Requiring it here would refuse all historical shares/backups.
+    ...(Object.hasOwn(value, 'visibility') ? ['visibility'] : []),
     ...(kind === 'spell' ? ['spell_identity'] : []),
     ...(Object.hasOwn(value, 'provenance') ? ['provenance'] : []),
   ], `Portable content[${String(index)}]`);
@@ -1257,6 +1277,16 @@ function validatedEntry(
   }
   if (value.key_kind !== 'asserted') {
     throw new BackupValidationError(`Portable content[${String(index)}].key_kind must be asserted.`);
+  }
+  const visibility = value.visibility === undefined
+    ? 'listed'
+    : value.visibility;
+  if (!catalogContentVisibilities.includes(
+    visibility as CatalogContentVisibility,
+  )) {
+    throw new BackupValidationError(
+      `Portable content[${String(index)}].visibility is invalid.`,
+    );
   }
   if (!isContentFingerprintScheme(value.fingerprint_scheme)) {
     throw new BackupValidationError(`Portable content[${String(index)}] uses an unsupported fingerprint scheme.`);
@@ -1314,6 +1344,7 @@ function validatedEntry(
     key_kind: 'asserted',
     fingerprint_scheme: scheme,
     fingerprint_digest: value.fingerprint_digest as ContentFingerprintDigest,
+    visibility: visibility as CatalogContentVisibility,
     aggregate,
     ...(provenance === undefined ? {} : { provenance }),
     ...(spellIdentity === undefined ? {} : { spell_identity: spellIdentity }),
@@ -1917,6 +1948,8 @@ function portableNode(
         db,
         entry.aggregate as SourceAggregate,
         assertedKey,
+        undefined,
+        entry.visibility,
       ));
     case 'species':
       return withScheme(entry.fingerprint_scheme === CONTENT_FINGERPRINT_SCHEME_V2
@@ -1924,11 +1957,14 @@ function portableNode(
             db,
             entry.aggregate as SpeciesProjectorAggregateV2,
             assertedKey,
+            entry.visibility,
           )
         : portableSourceContentImportNode(
             db,
             entry.aggregate as SourceAggregate,
             assertedKey,
+            undefined,
+            entry.visibility,
           ));
     case 'weapon':
     case 'armor':
@@ -1936,6 +1972,8 @@ function portableNode(
       return withScheme(portableEquipmentContentImportNode(
         entry.aggregate as EquipmentContentAggregate,
         assertedKey,
+        undefined,
+        entry.visibility,
       ));
     case 'subclass':
     case 'spell': {
@@ -1948,8 +1986,8 @@ function portableNode(
         );
       }
       const build = (
-          name: string,
-          nextKey: ContentKey,
+        name: string,
+        nextKey: ContentKey,
         dependencies: ReadonlyMap<string, ContentImportDependencyTarget>,
       ): ContentImportProjection => {
         const aggregate = remapProjectionFingerprintReferences(
@@ -1970,6 +2008,7 @@ function portableNode(
           : null;
         return {
           kind: entry.kind,
+          visibility: entry.visibility ?? 'listed',
           edition: current.edition,
           name: current.name,
           assertedKey: nextKey,
@@ -2029,6 +2068,7 @@ export function portableSubclassContentImportNode(
     key_kind: 'asserted',
     fingerprint_scheme: identity.envelope.scheme,
     fingerprint_digest: identity.digest,
+    visibility: 'listed',
     aggregate,
     provenance: {
       origin_kind: 'authored_here', received: false, local_derivation: false,

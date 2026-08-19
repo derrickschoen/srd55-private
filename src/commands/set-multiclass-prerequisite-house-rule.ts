@@ -1,4 +1,5 @@
 import type { DatabaseContext } from '../db/database';
+import { ok, type OkOutcome } from '../refusals/outcome';
 import type {
   RestoreMulticlassPrerequisiteHouseRuleCommand as RestorePayload,
   SetMulticlassPrerequisiteHouseRuleCommand as SetPayload,
@@ -32,7 +33,7 @@ export class SetMulticlassPrerequisiteHouseRuleCommand {
     private readonly integrity: CharacterCommandIntegrity,
   ) {}
 
-  apply(characterId: number): void {
+  apply(characterId: number): OkOutcome<void> {
     assertCharacter(this.db, characterId);
     this.#previous = captureMulticlassPrerequisiteHouseRule(
       this.db,
@@ -44,6 +45,7 @@ export class SetMulticlassPrerequisiteHouseRuleCommand {
       characterId,
       this.payload.waive,
     );
+    return ok(undefined);
   }
 
   async inverse(): Promise<RestorePayload> {
@@ -69,7 +71,7 @@ export class RestoreMulticlassPrerequisiteHouseRuleCommand {
     private readonly integrity: CharacterCommandIntegrity,
   ) {}
 
-  apply(characterId: number): void {
+  apply(characterId: number): OkOutcome<void> {
     assertCharacter(this.db, characterId);
     this.#previous = captureMulticlassPrerequisiteHouseRule(
       this.db,
@@ -81,6 +83,7 @@ export class RestoreMulticlassPrerequisiteHouseRuleCommand {
       characterId,
       this.payload.state,
     );
+    return ok(undefined);
   }
 
   async inverse(): Promise<RestorePayload> {

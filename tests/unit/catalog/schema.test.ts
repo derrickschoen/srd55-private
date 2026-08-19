@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CatalogTierMismatchError,
   normalizeCatalogRecords,
 } from '../../../src/catalog/catalog-normalize';
 import {
@@ -7,6 +8,36 @@ import {
   parseCatalogDocuments,
   parseDescriptionDocuments,
 } from '../../../src/catalog/catalog-schema';
+import {
+  CatalogDocumentJsonParseError,
+  CatalogFieldEnumError,
+  CatalogFieldIntegerRangeError,
+  CatalogFieldLengthError,
+  CatalogFieldNullableIntegerRangeError,
+  CatalogFieldRowCountError,
+  CatalogFieldTypeError,
+  CatalogFieldWhitespaceError,
+  CatalogRangeKindError,
+  CatalogShieldDexBonusError,
+  CatalogTierTwoDescriptionConflictError,
+} from '../../../src/catalog/catalog-schema-errors';
+
+/**
+ * THE REFUSAL ITSELF, NOT ITS SENTENCE (D274/D276).
+ *
+ * Returns the thrown value so a test can assert the CLASS and the PARAMETERS
+ * that produced the message. The exact sentence each class formats is asserted
+ * once, in `catalog-schema-errors.test.ts`; asserting it again here would tie
+ * every guard to prose that only one test should own.
+ */
+function refusal(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return expect.fail('Expected the catalog parser to refuse, but it returned.');
+}
 
 function record(overrides: Record<string, unknown> = {}) {
   return {
@@ -122,11 +153,17 @@ describe('browser catalog schema', () => {
       }],
     });
     expect([...parsed.kinds]).toEqual(['item']);
-    expect(() => parseCatalogDocuments([JSON.stringify([{
+    const missingMaximum = refusal(() => parseCatalogDocuments([JSON.stringify([{
       ...item,
       effects: [{ ...item.effects[0], maximum: null }],
-    }])])).toThrow('effects[0].maximum');
-    expect(() => parseCatalogDocuments([JSON.stringify([{
+    }])]));
+    expect(missingMaximum).toBeInstanceOf(CatalogFieldIntegerRangeError);
+    expect(missingMaximum).toMatchObject({
+      field: 'effects[0].maximum',
+      minimum: 1,
+      maximum: 30,
+    });
+    const legacyRange = refusal(() => parseCatalogDocuments([JSON.stringify([{
       kind: 'weapon',
       name: 'Broken',
       edition: 'expanded',
@@ -146,46 +183,53 @@ describe('browser catalog schema', () => {
       range: { kind: 'legacy', nearFeet: null, farFeet: 60 },
       masteryProperty: 'Vex',
       otherProperties: null,
-    }])])).toThrow("'range.kind'");
+    }])]));
+    expect(legacyRange).toBeInstanceOf(CatalogRangeKindError);
   });
 
   it.each([
-    ['hit_points_flat', {
+    ['hit_points_flat', 'effects[0].hitPointsFlat', 'nullable', {
       kind: 'hp_modifier', hitPointsFlat: 1001, hitPointsPerLevel: null,
       label: 'HP', notes: null,
     }],
-    ['hit_points_per_level', {
+    ['hit_points_per_level', 'effects[0].hitPointsPerLevel', 'nullable', {
       kind: 'hp_modifier', hitPointsFlat: null, hitPointsPerLevel: 1001,
       label: 'HP per level', notes: null,
     }],
-    ['speed_bonus_feet', {
+    ['speed_bonus_feet', 'effects[0].speedBonusFeet', 'required', {
       kind: 'speed', speedBonusFeet: 1001, label: 'Speed', notes: null,
     }],
-    ['ability_increase amount', {
+    ['ability_increase amount', 'effects[0].amount', 'required', {
       kind: 'ability_increase', ability: 'strength', amount: 1001, maximum: 20,
       label: 'Increase', notes: null,
     }],
-    ['armor_class_bonus amount', {
+    ['armor_class_bonus amount', 'effects[0].amount', 'required', {
       kind: 'armor_class_bonus', amount: 1001, label: 'AC', notes: null,
     }],
-    ['armor_class_formula base', {
+    ['armor_class_formula base', 'effects[0].base', 'required', {
       kind: 'armor_class_formula', base: 1001, ability1: 'dexterity',
       ability2: null, allowsShield: true, label: 'Formula', notes: null,
     }],
-    ['weapon_attack_bonus amount', {
+    ['weapon_attack_bonus amount', 'effects[0].amount', 'required', {
       kind: 'weapon_attack_bonus', amount: 1001, weaponScope: 'any_weapon',
       label: 'Attack', notes: null,
     }],
-    ['weapon_damage_bonus amount', {
+    ['weapon_damage_bonus amount', 'effects[0].amount', 'required', {
       kind: 'weapon_damage_bonus', amount: 1001, weaponScope: 'any_weapon',
       label: 'Damage', notes: null,
     }],
   ] as const)(
     'refuses item effect $0 magnitude 1001',
-    (_label, effect) => {
-      expect(() => parseEquipment(itemRecord({ effects: [effect] }))).toThrow(
-        '1000',
+    (_label, field, nullability, effect) => {
+      const error = refusal(
+        () => parseEquipment(itemRecord({ effects: [effect] })),
       );
+      expect(error).toBeInstanceOf(
+        nullability === 'nullable'
+          ? CatalogFieldNullableIntegerRangeError
+          : CatalogFieldIntegerRangeError,
+      );
+      expect(error).toMatchObject({ field, maximum: 1000 });
     },
   );
 
@@ -207,16 +251,21 @@ describe('browser catalog schema', () => {
       label: 'Exact negative magnitude',
       notes: null,
     });
-    expect(() => parseEquipment(itemRecord({
+    expect(refusal(() => parseEquipment(itemRecord({
       effects: [speedEffect(-1001)],
-    }))).toThrow('1000');
+    })))).toMatchObject({
+      name: 'CatalogFieldIntegerRangeError',
+      field: 'effects[0].speedBonusFeet',
+      minimum: -1000,
+      maximum: 1000,
+    });
     expect(() => parseEquipment(itemRecord({
       effects: [speedEffect(-1000)],
     }))).not.toThrow();
   });
 
   it('refuses item effect count 201', () => {
-    expect(() => parseEquipment(itemRecord({
+    const error = refusal(() => parseEquipment(itemRecord({
       effects: Array.from({ length: 201 }, () => ({
         kind: 'ability_override',
         ability: 'strength',
@@ -224,27 +273,41 @@ describe('browser catalog schema', () => {
         label: 'Counted effect',
         notes: null,
       })),
-    }))).toThrow('200');
+    })));
+    expect(error).toBeInstanceOf(CatalogFieldRowCountError);
+    expect(error).toMatchObject({ field: 'effects', maximum_rows: 200 });
   });
 
   it.each([
-    ['name', itemRecord({ name: 'n'.repeat(121) })],
-    ['description', itemRecord({ description: 'd'.repeat(4001) })],
-    ['effect label', itemRecord({ effects: [{
+    ['name', 'name', 120, itemRecord({ name: 'n'.repeat(121) })],
+    ['description', 'description', 4000, itemRecord({
+      description: 'd'.repeat(4001),
+    })],
+    ['effect label', 'effects[0].label', 120, itemRecord({ effects: [{
       kind: 'ability_override', ability: 'strength', maximum: 20,
       label: 'l'.repeat(121), notes: null,
     }] })],
-    ['effect notes', itemRecord({ effects: [{
+    ['effect notes', 'effects[0].notes', 2000, itemRecord({ effects: [{
       kind: 'ability_override', ability: 'strength', maximum: 20,
       label: 'Notes', notes: 'n'.repeat(2001),
     }] })],
-    ['effect damage type', itemRecord({ effects: [{
-      kind: 'damage_resistance', damageType: 'd'.repeat(121),
-      label: 'Resistance', notes: null,
-    }] })],
-  ] as const)('refuses item $0 above its authoritative text bound', (_label, item) => {
-    expect(() => parseEquipment(item)).toThrow('characters');
-  });
+    ['effect damage type', 'effects[0].damageType', 120, itemRecord({
+      effects: [{
+        kind: 'damage_resistance', damageType: 'd'.repeat(121),
+        label: 'Resistance', notes: null,
+      }],
+    })],
+  ] as const)(
+    'refuses item $0 above its authoritative text bound',
+    (_label, field, maximumLength, item) => {
+      const error = refusal(() => parseEquipment(item));
+      expect(error).toBeInstanceOf(CatalogFieldLengthError);
+      expect(error).toMatchObject({
+        field,
+        maximum_length: maximumLength,
+      });
+    },
+  );
 
   it('accepts item effect count and text fields exactly at every boundary', () => {
     const effects = Array.from({ length: 200 }, (_, index) => index === 0
@@ -269,29 +332,44 @@ describe('browser catalog schema', () => {
   });
 
   it.each([
-    ['121-character name', weaponRecord({ name: 'n'.repeat(121) })],
-    ['41-character damage dice', weaponRecord({
+    ['121-character name', 'name', 120, weaponRecord({
+      name: 'n'.repeat(121),
+    })],
+    ['41-character damage dice', 'damage.dice', 40, weaponRecord({
       damage: { kind: 'dice', dice: 'd'.repeat(41) },
     })],
-    ['41-character custom damage', weaponRecord({
+    ['41-character custom damage', 'damage.text', 40, weaponRecord({
       damage: { kind: 'custom', text: 'd'.repeat(41) },
     })],
-    ['41-character versatile damage dice', weaponRecord({
-      versatileDamage: { kind: 'dice', dice: 'd'.repeat(41) },
+    [
+      '41-character versatile damage dice',
+      'versatileDamage.dice',
+      40,
+      weaponRecord({ versatileDamage: { kind: 'dice', dice: 'd'.repeat(41) } }),
+    ],
+    [
+      '41-character versatile custom damage',
+      'versatileDamage.text',
+      40,
+      weaponRecord({ versatileDamage: { kind: 'custom', text: 'd'.repeat(41) } }),
+    ],
+    ['41-character damage type', 'damageType', 40, weaponRecord({
+      damageType: 'd'.repeat(41),
     })],
-    ['41-character versatile custom damage', weaponRecord({
-      versatileDamage: { kind: 'custom', text: 'd'.repeat(41) },
-    })],
-    ['41-character damage type', weaponRecord({ damageType: 'd'.repeat(41) })],
-    ['41-character ammunition kind', weaponRecord({
+    ['41-character ammunition kind', 'ammunitionKind', 40, weaponRecord({
       ammunitionKind: 'a'.repeat(41),
     })],
-    ['501-character properties', weaponRecord({
+    ['501-character properties', 'otherProperties', 500, weaponRecord({
       otherProperties: 'p'.repeat(501),
     })],
-  ] as const)('refuses weapon $0 above WEAPON_TEXT_LIMITS', (_label, weapon) => {
-    expect(() => parseEquipment(weapon)).toThrow('characters');
-  });
+  ] as const)(
+    'refuses weapon $0 above WEAPON_TEXT_LIMITS',
+    (_label, field, maximumLength, weapon) => {
+      const error = refusal(() => parseEquipment(weapon));
+      expect(error).toBeInstanceOf(CatalogFieldLengthError);
+      expect(error).toMatchObject({ field, maximum_length: maximumLength });
+    },
+  );
 
   it('accepts every weapon text field exactly at WEAPON_TEXT_LIMITS', () => {
     expect(() => parseEquipment(weaponRecord({
@@ -309,37 +387,46 @@ describe('browser catalog schema', () => {
   });
 
   it('refuses a 121-character armor name and accepts 120 exactly', () => {
-    expect(() => parseEquipment(armorRecord({
+    const error = refusal(() => parseEquipment(armorRecord({
       name: 'n'.repeat(121),
-    }))).toThrow('120 characters');
+    })));
+    expect(error).toBeInstanceOf(CatalogFieldLengthError);
+    expect(error).toMatchObject({ field: 'name', maximum_length: 120 });
     expect(() => parseEquipment(armorRecord({
       name: 'n'.repeat(120),
     }))).not.toThrow();
   });
 
   it('refuses armorClass 0 and accepts armorClass 1 exactly', () => {
-    expect(() => parseEquipment(armorRecord({ armorClass: 0 }))).toThrow(
-      'armorClass',
-    );
+    expect(refusal(() => parseEquipment(armorRecord({ armorClass: 0 }))))
+      .toMatchObject({
+        name: 'CatalogFieldIntegerRangeError',
+        field: 'armorClass',
+        minimum: 1,
+      });
     expect(() => parseEquipment(armorRecord({ armorClass: 1 }))).not.toThrow();
   });
 
   it('refuses strengthRequirement 0 and accepts 1 exactly', () => {
-    expect(() => parseEquipment(armorRecord({
+    expect(refusal(() => parseEquipment(armorRecord({
       strengthRequirement: 0,
-    }))).toThrow('strengthRequirement');
+    })))).toMatchObject({
+      name: 'CatalogFieldNullableIntegerRangeError',
+      field: 'strengthRequirement',
+      minimum: 1,
+    });
     expect(() => parseEquipment(armorRecord({
       strengthRequirement: 1,
     }))).not.toThrow();
   });
 
   it('refuses a shield Dexterity bonus and accepts none exactly', () => {
-    expect(() => parseEquipment(armorRecord({
+    expect(refusal(() => parseEquipment(armorRecord({
       category: 'shield',
       dexBonus: 'full',
       dexBonusMax: null,
       strengthRequirement: null,
-    }))).toThrow('shield');
+    })))).toBeInstanceOf(CatalogShieldDexBonusError);
     expect(() => parseEquipment(armorRecord({
       category: 'shield',
       dexBonus: 'none',
@@ -368,46 +455,113 @@ describe('browser catalog schema', () => {
   });
 
   it('rejects malformed containers and every required field shape before import', () => {
-    const cases: Array<[unknown, string]> = [
-      [{ record: {} }, 'must contain a JSON list'],
-      [[1], 'contains a non-object record'],
-      [[record({ identityKey: ' ' })], "'identityKey'"],
-      [[record({ versionKey: null })], "'versionKey'"],
-      [[record({ name: 1 })], "'name'"],
-      [[record({ name: '---' })], 'Content identity names must not be empty'],
-      [[record({ edition: 2024 })], "'edition'"],
-      [[record({ edition: '2030' })], "'edition' must be one of"],
-      [[record({ level: -1 })], "'level'"],
-      [[record({ level: 10 })], "'level'"],
-      [[record({ school: '\t' })], "'school'"],
-      [[record({ concentration: 0 })], "'concentration'"],
-      [[record({ ritual: 'false' })], "'ritual'"],
+    const cases: Array<[unknown, Record<string, unknown>]> = [
+      [{ record: {} }, {
+        name: 'CatalogDocumentNotAListError', tier: 1, document_number: 1,
+      }],
+      [[1], { name: 'CatalogNonObjectRecordError' }],
+      [[record({ identityKey: ' ' })], {
+        name: 'CatalogFieldTypeError',
+        field: 'identityKey',
+        expected: 'non_empty_string',
+      }],
+      [[record({ versionKey: null })], {
+        name: 'CatalogFieldTypeError',
+        field: 'versionKey',
+        expected: 'non_empty_string',
+      }],
+      [[record({ name: 1 })], {
+        name: 'CatalogFieldTypeError',
+        field: 'name',
+        expected: 'non_empty_string',
+      }],
+      [[record({ edition: 2024 })], {
+        name: 'CatalogFieldTypeError',
+        field: 'edition',
+        expected: 'non_empty_string',
+      }],
+      [[record({ edition: '2030' })], {
+        name: 'CatalogFieldEnumError', field: 'edition', presence: 'required',
+      }],
+      [[record({ level: -1 })], {
+        name: 'CatalogFieldIntegerRangeError',
+        field: 'level',
+        minimum: 0,
+        maximum: 9,
+      }],
+      [[record({ level: 10 })], {
+        name: 'CatalogFieldIntegerRangeError',
+        field: 'level',
+        minimum: 0,
+        maximum: 9,
+      }],
+      [[record({ school: '\t' })], {
+        name: 'CatalogFieldTypeError',
+        field: 'school',
+        expected: 'non_empty_string',
+      }],
+      [[record({ concentration: 0 })], {
+        name: 'CatalogFieldTypeError',
+        field: 'concentration',
+        expected: 'boolean',
+      }],
+      [[record({ ritual: 'false' })], {
+        name: 'CatalogFieldTypeError', field: 'ritual', expected: 'boolean',
+      }],
       // OMISSION, not merely the wrong type — `JSON.stringify` drops an
       // `undefined` value, so these two documents carry no such key at all.
       // This is the premise F13's removal of the prose fallback rests on: the
       // importer never sees an ABSENT boolean to infer from, because a document
       // missing one is refused before it gets there.
-      [[record({ concentration: undefined })], "'concentration'"],
-      [[record({ ritual: undefined })], "'ritual'"],
-      [[record({ attackModes: 'ranged_spell' })], "'attackModes'"],
-      [[record({ saveAbilities: [1] })], "'saveAbilities'"],
-      [[record({ spellLists: null })], "'spellLists'"],
-      [[record({ sourceBooks: [''] })], "'sourceBooks'"],
-      [
-        [record({ effectReliabilityCategory: 'luck' })],
-        "'effectReliabilityCategory' must be one of",
-      ],
+      [[record({ concentration: undefined })], {
+        name: 'CatalogFieldTypeError',
+        field: 'concentration',
+        expected: 'boolean',
+      }],
+      [[record({ ritual: undefined })], {
+        name: 'CatalogFieldTypeError', field: 'ritual', expected: 'boolean',
+      }],
+      [[record({ attackModes: 'ranged_spell' })], {
+        name: 'CatalogFieldTypeError', field: 'attackModes', expected: 'list',
+      }],
+      [[record({ saveAbilities: [1] })], {
+        name: 'CatalogFieldTypeError',
+        field: 'saveAbilities',
+        expected: 'non_empty_string_items',
+      }],
+      [[record({ spellLists: null })], {
+        name: 'CatalogFieldTypeError', field: 'spellLists', expected: 'list',
+      }],
+      [[record({ sourceBooks: [''] })], {
+        name: 'CatalogFieldTypeError',
+        field: 'sourceBooks',
+        expected: 'non_empty_string_items',
+      }],
+      [[record({ effectReliabilityCategory: 'luck' })], {
+        name: 'CatalogFieldEnumError',
+        field: 'effectReliabilityCategory',
+        presence: 'required',
+      }],
     ];
 
-    for (const [value, message] of cases) {
+    for (const [value, expected] of cases) {
       expect(
-        () => parseCatalogDocuments([JSON.stringify(value)]),
+        refusal(() => parseCatalogDocuments([JSON.stringify(value)])),
         JSON.stringify(value),
-      ).toThrow(message);
+      ).toMatchObject(expected);
     }
-    expect(() => parseCatalogDocuments(['{'])).toThrow(
-      'Invalid Tier 1 catalog document 1 JSON',
-    );
+    // Not this module's refusal: the identity kernel refuses a name that
+    // normalizes away, and it owns both that class and that sentence.
+    expect(() => parseCatalogDocuments([
+      JSON.stringify([record({ name: '---' })]),
+    ])).toThrow('Content identity names must not be empty');
+    expect(refusal(() => parseCatalogDocuments(['{']))).toMatchObject({
+      name: 'CatalogDocumentJsonParseError',
+      tier: 1,
+      document_number: 1,
+    });
+    expect(refusal(() => parseCatalogDocuments(['{'])))
+      .toBeInstanceOf(CatalogDocumentJsonParseError);
     expect(
       isCatalogImportParams({
         documents: [JSON.stringify([record()])],
@@ -417,21 +571,28 @@ describe('browser catalog schema', () => {
   });
 
   it('refuses surrounding whitespace on every spell locator at parse time', () => {
-    for (const value of [
-      record({ identityKey: ' test-spell' }),
-      record({ versionKey: '2024:test-spell ' }),
-      record({ spellLists: [' Wizard'] }),
-    ]) {
-      expect(() => parseCatalogDocuments([JSON.stringify([value])]))
-        .toThrow('contains surrounding whitespace');
+    for (const [field, value] of [
+      ['identityKey', record({ identityKey: ' test-spell' })],
+      ['versionKey', record({ versionKey: '2024:test-spell ' })],
+      // The whole field, not the entry: the locator guard runs over the
+      // already-decoded list and names the field the document wrote.
+      ['spellLists', record({ spellLists: [' Wizard'] })],
+    ] as const) {
+      const error = refusal(
+        () => parseCatalogDocuments([JSON.stringify([value])]),
+      );
+      expect(error, field).toBeInstanceOf(CatalogFieldWhitespaceError);
+      expect(error, field).toMatchObject({ field });
     }
   });
 
   it('refuses surrounding whitespace on Tier 2 version keys at parse time', () => {
-    expect(() => parseDescriptionDocuments([JSON.stringify([{
+    const error = refusal(() => parseDescriptionDocuments([JSON.stringify([{
       versionKey: ' 2024:test-spell',
       _description: 'Description.',
-    }])])).toThrow('contains surrounding whitespace');
+    }])]));
+    expect(error).toBeInstanceOf(CatalogFieldWhitespaceError);
+    expect(error).toMatchObject({ field: 'versionKey' });
   });
 
   it('refuses spell names that normalize to an empty identity name at parse time', () => {
@@ -487,6 +648,7 @@ describe('browser catalog schema', () => {
         parentClassKey: '2024:class:bard',
         name: 'Choir of the Unit Test',
         edition: '2024',
+        visibility: 'listed',
         features: [
           {
             classLevel: 3,
@@ -557,9 +719,14 @@ describe('browser catalog schema', () => {
       ],
     };
 
-    expect(() => parseCatalogDocuments([JSON.stringify([subclass])])).toThrow(
-      "Catalog field 'features[0].description' must be a non-empty string.",
+    const error = refusal(
+      () => parseCatalogDocuments([JSON.stringify([subclass])]),
     );
+    expect(error).toBeInstanceOf(CatalogFieldTypeError);
+    expect(error).toMatchObject({
+      field: 'features[0].description',
+      expected: 'non_empty_string',
+    });
   });
 
   it('merges split publications and pivots and chooses canonical names by edition', () => {
@@ -652,7 +819,7 @@ describe('browser catalog schema', () => {
         }),
       ]),
     );
-    expect(() =>
+    const mismatch = refusal(() =>
       normalizeCatalogRecords(
         records,
         parseDescriptionDocuments([
@@ -663,11 +830,13 @@ describe('browser catalog schema', () => {
             },
           ]),
         ]),
-      ),
-    ).toThrow(
-      'Tier 2 catalog does not exactly match Tier 1 (1 missing, 0 unexpected).',
-    );
-    expect(() =>
+      ));
+    expect(mismatch).toBeInstanceOf(CatalogTierMismatchError);
+    expect(mismatch).toMatchObject({
+      missing_count: 1,
+      unexpected_count: 0,
+    });
+    const conflict = refusal(() =>
       parseDescriptionDocuments([
         JSON.stringify([
           {
@@ -680,6 +849,8 @@ describe('browser catalog schema', () => {
           },
         ]),
       ]),
-    ).toThrow('Tier 2 has conflicting descriptions for 2024:test-spell.');
+    );
+    expect(conflict).toBeInstanceOf(CatalogTierTwoDescriptionConflictError);
+    expect(conflict).toMatchObject({ version_key: '2024:test-spell' });
   });
 });

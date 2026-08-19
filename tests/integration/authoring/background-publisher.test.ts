@@ -418,6 +418,7 @@ describe('HA-4 background publisher', () => {
     registerBundledStableContentIdentity(db, {
       kind: 'feat',
       contentKey: duplicateKey,
+      visibility: 'listed',
       normalizedName: normalizeContentIdentityName(selectedName),
     });
     db.exec(

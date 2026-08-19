@@ -68,7 +68,7 @@ function distWith(files: Record<string, string>): string {
   };
   complete['index.html'] =
     `${complete['index.html'] ?? ''}\n` +
-    '<link rel="manifest" href="./manifest.webmanifest" />';
+    '<link rel="manifest" href="/manifest.webmanifest" />';
   const assets: BuildAsset[] = Object.entries(complete).map(
     ([fileName, source]) => ({ fileName, source }),
   );

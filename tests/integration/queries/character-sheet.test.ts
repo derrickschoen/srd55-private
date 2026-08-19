@@ -1,17 +1,16 @@
 import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseContext } from '../../../src/db/database';
-import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
-import { seedSheetContent } from '../../../src/rules/sheet-srd';
 import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
 import { CharacterNotFoundError } from '../../../src/queries/character-crud';
+import { sheetSections } from '../../../src/ui/screens/sheet/sheet-view';
 import {
   PRINT_APPENDIX_PREFERENCE_KEYS,
   PrintAppendixPreferenceQueries,
 } from '../../../src/queries/print-appendix-preferences';
 import { characterEffects } from '../../../src/rules/origins';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
-import { openTestDatabase } from '../../helpers/open-db';
+import { openSeededTestDatabase } from '../../helpers/open-db';
 
 /**
  * THE SHEET, AGAINST A REAL DATABASE, WITH HAND-COMPUTED EXPECTATIONS.
@@ -55,10 +54,8 @@ describe('the derived character sheet', () => {
   }
 
   beforeEach(async () => {
-    connection = await openTestDatabase();
+    connection = await openSeededTestDatabase();
     db = new DatabaseContext(connection);
-    seedClassProgressions(db);
-    seedSheetContent(db);
     builder = new CharacterSheetBuilder(db);
     // Strength 15 (+2), Dexterity 14 (+2), Constitution 13 (+1),
     // Intelligence 12 (+1), Wisdom 11 (+0), Charisma 8 (−1).
@@ -85,6 +82,32 @@ describe('the derived character sheet', () => {
 
     expect(sheet.total_level).toBeNull();
     expect(sheet.proficiency_bonus.value).toBeNull();
+  });
+
+  it('discloses an unfinished level-1 class choice on the sheet', () => {
+    db.exec(
+      `DELETE FROM character_class_levels WHERE character_id = ?`,
+      [characterId],
+    );
+    addClass('Cleric', 1, true);
+    db.exec(
+      `INSERT INTO character_source_instances (
+         character_id, instance_uuid, source_type, source_definition_id,
+         display_name, config, acquired_at_character_level, state
+       ) VALUES (
+         ?, 'sheet-unfinished-cleric-1', 'class', ?, 'Cleric 1',
+         '{"level":1}', 1, 'active'
+       )`,
+      [characterId, classId('Cleric')],
+    );
+
+    const output = JSON.stringify(sheetSections(builder.build(characterId)));
+
+    expect(output).toContain('Unfinished choices');
+    expect(output).toContain('Cleric 1 — Divine Order not chosen');
+    expect(output).toContain(
+      'Divine Order is unchosen, so this source has granted no spells yet.',
+    );
   });
 
   it('projects all four flavor fields losslessly as one nested object', () => {

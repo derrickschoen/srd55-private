@@ -48,10 +48,11 @@ import {
   UpdateItemCommand,
 } from './items';
 import type { StoredCommandInverse } from './stored-inverses';
+import type { Outcome } from '../refusals/outcome';
 
 export interface ConstructedCharacterCommand {
   readonly actionType: string;
-  apply(characterId: number): void | Promise<void>;
+  apply(characterId: number): Outcome<void> | Promise<Outcome<void>>;
   inverse(): StoredCommandInverse | Promise<StoredCommandInverse>;
   /**
    * Opt-in marker: this command's inverse is only knowable AFTER `apply()`, so

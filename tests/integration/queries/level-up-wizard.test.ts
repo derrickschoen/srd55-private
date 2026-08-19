@@ -33,6 +33,7 @@ import { raiseClassLevelForTest } from '../../helpers/class-levels';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import {
   createRpcHarness,
+  createSeededRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
 import {
@@ -142,6 +143,9 @@ const EXPECTED_SUBCLASS_VARIANTS = [
   },
 ] as const;
 
+const SEED_REPAIR_TEST_NAME =
+  'names stored subclass arrivals, discloses their layer and text state, and reports then repairs a missing promised row';
+
 /**
  * W-A's three state assertions and their negative-control candidates:
  *
@@ -226,8 +230,10 @@ describe('level-up wizard state RPC', () => {
     }
   }
 
-  beforeEach(async () => {
-    harness = await createRpcHarness(queryHandlers);
+  beforeEach(async ({ task }) => {
+    harness = task.name === SEED_REPAIR_TEST_NAME
+      ? await createRpcHarness(queryHandlers)
+      : await createSeededRpcHarness(queryHandlers);
     integrity = new CharacterCommandIntegrity('level-up-state-test-key');
   });
 
@@ -275,7 +281,7 @@ describe('level-up wizard state RPC', () => {
 
   // Measured alone with the production bundled-homebrew publisher at 3.6s;
   // 20s retains more than the required 1.5x contention headroom.
-  it('names stored subclass arrivals, discloses their layer and text state, and reports then repairs a missing promised row', () => {
+  it(SEED_REPAIR_TEST_NAME, () => {
     const targetFeatures = (
       characterId: number,
       definitionId: number,
@@ -828,12 +834,139 @@ describe('level-up wizard state RPC', () => {
     });
   });
 
+  it('batches listed and missing-identity feat candidates while excluding hidden, archived, and superseded definitions', () => {
+    const characterId = createCharacter('Feat catalogue states');
+    const fighterDefinitionId = enterClass(characterId, 'Fighter');
+    raiseClassLevelForTest(
+      harness.context.db,
+      characterId,
+      fighterDefinitionId,
+      5,
+    );
+
+    const fixtures = [
+      ['expanded:perf.fixture:listed-c2', 'Listed C2'],
+      ['expanded:perf.fixture:hidden-c2', 'Hidden C2'],
+      ['expanded:perf.fixture:archived-c2', 'Archived C2'],
+      ['expanded:perf.fixture:superseded-c2', 'Superseded C2'],
+      ['expanded:perf.fixture:missing-c2', 'Missing Identity C2'],
+    ] as const;
+    for (const [contentKey, name] of fixtures) {
+      registerFixtureContentIdentity(harness.context.db, {
+        kind: 'feat',
+        contentKey,
+        name,
+        keyKind: 'asserted',
+      });
+      harness.context.db.exec(
+        `INSERT INTO feat_definitions (
+           content_key, name, rules_edition, category, ability_points,
+           repeatable, prerequisites, grant_rules
+         ) VALUES (?, ?, 'expanded', 'general', 0, 0, '[]', '[]')`,
+        [contentKey, name],
+      );
+    }
+    harness.context.db.exec(
+      `UPDATE catalog_content_identities
+       SET visibility = 'ui_hidden'
+       WHERE content_key = 'expanded:perf.fixture:hidden-c2'`,
+    );
+    harness.context.db.exec(
+      `UPDATE catalog_content_identities
+       SET archived_at = '2026-08-18T00:00:00.000Z'
+       WHERE content_key = 'expanded:perf.fixture:archived-c2'`,
+    );
+    registerFixtureContentIdentity(harness.context.db, {
+      kind: 'feat',
+      contentKey: 'expanded:perf.fixture:successor-c2',
+      name: 'Successor C2',
+      keyKind: 'asserted',
+    });
+    harness.context.db.exec(
+      `INSERT INTO catalog_content_supersessions (
+         content_kind, superseded_content_key, successor_content_key
+       ) VALUES (
+         'feat', 'expanded:perf.fixture:superseded-c2',
+         'expanded:perf.fixture:successor-c2'
+       )`,
+    );
+    harness.context.db.exec('PRAGMA foreign_keys = OFF');
+    harness.context.db.exec(
+      `DELETE FROM catalog_content_identities
+       WHERE content_key = 'expanded:perf.fixture:missing-c2'`,
+    );
+    harness.context.db.exec('PRAGMA foreign_keys = ON');
+
+    const state = new LevelUpStateQuery(harness.context.db).build(characterId);
+    if (state.kind !== 'ready') {
+      throw new Error('Feat catalogue state fixture did not return ready state.');
+    }
+    const option = state.class_options[0];
+    if (option?.guideability !== 'guideable') {
+      throw new Error('Feat catalogue state fixture was not guideable.');
+    }
+    expect(
+      option.feat_occurrence?.candidates
+        .filter((candidate) =>
+          candidate.definition.content_key.startsWith('expanded:perf.fixture:')
+        )
+        .map((candidate) => ({
+          content_key: candidate.definition.content_key,
+          catalog_layer: candidate.catalog_layer,
+        })),
+    ).toEqual([
+      {
+        content_key: 'expanded:perf.fixture:listed-c2',
+        catalog_layer: 'external',
+      },
+      {
+        content_key: 'expanded:perf.fixture:missing-c2',
+        catalog_layer: 'unknown',
+      },
+    ]);
+  });
+
+  it('fails the batched level-up catalogue on a malformed selectable feat row', () => {
+    const characterId = createCharacter('Malformed feat catalogue');
+    const fighterDefinitionId = enterClass(characterId, 'Fighter');
+    raiseClassLevelForTest(
+      harness.context.db,
+      characterId,
+      fighterDefinitionId,
+      5,
+    );
+    registerFixtureContentIdentity(harness.context.db, {
+      kind: 'feat',
+      contentKey: 'expanded:perf.fixture:malformed-c2',
+      name: 'Malformed C2',
+      keyKind: 'asserted',
+    });
+    harness.context.db.exec(
+      `INSERT INTO feat_definitions (
+         content_key, name, rules_edition, category, ability_points,
+         repeatable, prerequisites, grant_rules
+       ) VALUES (
+         'expanded:perf.fixture:malformed-c2', 'Malformed C2', 'expanded',
+         'not-a-feat-grouping', 0, 0, '[]', '[]'
+       )`,
+    );
+
+    expect(() =>
+      new LevelUpStateQuery(harness.context.db).build(characterId)
+    ).toThrow('The selected feat has an unsupported grouping.');
+  });
+
   // Measured alone at 3.9s; 20s retains contention headroom.
   it('offers only current external subclass revisions and makes the lineage row the selection boundary', async () => {
     const plan = planBundledHomebrewInstall(harness.context.db);
     expect(commitBundledHomebrewInstall(harness.context.db, plan.token)).toMatchObject({
       kind: 'committed',
-      outcomes: [{ kind: 'create' }, { kind: 'create' }, { kind: 'create' }],
+      outcomes: [
+        { kind: 'create' }, { kind: 'create' }, { kind: 'create' },
+        { kind: 'create' }, { kind: 'create' }, { kind: 'create' },
+        { kind: 'create' }, { kind: 'create' }, { kind: 'create' },
+        { kind: 'create' }, { kind: 'create' }, { kind: 'create' },
+      ],
     });
     const rpc = new RpcClient(new RegistryTransport());
     const client = createQueriesClient(rpc);

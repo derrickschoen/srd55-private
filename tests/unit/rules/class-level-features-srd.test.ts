@@ -6,6 +6,7 @@ import {
   featFeatureEvidenceForProjectedClasses,
   parseSrdClassLevelFeatures,
   SrdClassLevelFeaturesError,
+  subclassChoiceLevelForClassName,
 } from '../../../src/rules/class-level-features-srd';
 import type { ContentKey } from '../../../src/domain/ids';
 
@@ -32,6 +33,22 @@ const TABLE_EXPERTISE_LEVELS: Readonly<Record<string, readonly number[]>> = {
   Bard: [2, 9],
   Ranger: [9],
   Rogue: [1, 6],
+};
+
+/** Hand-checked against each named Subclass entry in the source tables. */
+const SUBCLASS_CHOICE_LEVELS: Readonly<Record<string, number>> = {
+  Barbarian: 3,
+  Bard: 3,
+  Cleric: 3,
+  Druid: 3,
+  Fighter: 3,
+  Monk: 3,
+  Paladin: 3,
+  Ranger: 3,
+  Rogue: 3,
+  Sorcerer: 3,
+  Warlock: 3,
+  Wizard: 3,
 };
 
 describe('SRD class level feature cells', () => {
@@ -85,6 +102,13 @@ describe('SRD class level feature cells', () => {
     }
   });
 
+  it.each(Object.entries(SUBCLASS_CHOICE_LEVELS))(
+    'pins %s subclass choice to its named SRD table row',
+    (className, expected) => {
+      expect(subclassChoiceLevelForClassName(className)).toBe(expected);
+    },
+  );
+
   it('derives only the Expertise occurrences whose table cell names it', () => {
     for (const entry of parsed) {
       const actual = entry.levels
@@ -99,6 +123,7 @@ describe('SRD class level feature cells', () => {
   it('distinguishes an unknown class from a known class with no occurrence', () => {
     expect(asiLevelsForClassName('Chronomancer')).toBeNull();
     expect(epicBoonLevelsForClassName('Chronomancer')).toBeNull();
+    expect(subclassChoiceLevelForClassName('Chronomancer')).toBeNull();
     expect(
       parsed
         .find((entry) => entry.class_name === 'Wizard')

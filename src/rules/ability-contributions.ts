@@ -60,6 +60,55 @@ import type {
 import { readEligibleCharacterEffects } from './eligible-character-effects';
 import type { EligibleCharacterEffect } from './eligible-character-effects';
 
+export class AbilityOverrideTermOrderError extends TypeError {
+  override readonly name = 'AbilityOverrideTermOrderError' as const;
+  constructor(
+    readonly candidate_count: number,
+    readonly term_count: number,
+  ) {
+    super('Ability override term order diverged from its candidates.');
+  }
+}
+
+export class AbilityOverrideUnhandledStatusError extends TypeError {
+  override readonly name = 'AbilityOverrideUnhandledStatusError' as const;
+  constructor(readonly status: string) {
+    super(`Unhandled ability override status ${status}.`);
+  }
+}
+
+export class AbilityOverrideWinnerMissingError extends TypeError {
+  override readonly name = 'AbilityOverrideWinnerMissingError' as const;
+  constructor(
+    readonly effect_id: number,
+    readonly set_to: number,
+  ) {
+    super('An ability override has no winning candidate.');
+  }
+}
+
+export type IncompleteAbilityEffectKind = 'increase' | 'override';
+
+const ABILITY_EFFECT_LABELS: Readonly<
+  Record<IncompleteAbilityEffectKind, string>
+> = {
+  increase: 'increase',
+  override: 'override',
+};
+
+export class AbilityEffectIncompletePayloadError extends Error {
+  override readonly name = 'AbilityEffectIncompletePayloadError' as const;
+  constructor(
+    readonly effect_kind: IncompleteAbilityEffectKind,
+    readonly effect_id: number,
+  ) {
+    super(
+      `Ability ${ABILITY_EFFECT_LABELS[effect_kind]} effect ` +
+        `${String(effect_id)} has an incomplete payload.`,
+    );
+  }
+}
+
 /**
  * Resolves the six abilities from base scores and contributions.
  *
@@ -110,8 +159,9 @@ export function resolveAbilities(
     const resolvedOverrides = ownOverrides.map((override, index) => {
       const term = overrideComputation.terms[index];
       if (term === undefined) {
-        throw new TypeError(
-          'Ability override term order diverged from its candidates.',
+        throw new AbilityOverrideTermOrderError(
+          ownOverrides.length,
+          overrideComputation.terms.length,
         );
       }
       return { ...override, outcome: outcomeForTermStatus(term.status) };
@@ -158,8 +208,8 @@ function outcomeForTermStatus(
       return 'floored_by_increased_score';
     default: {
       const unreachable: never = status;
-      throw new TypeError(
-        `Unhandled ability override status ${String(unreachable)}.`,
+      throw new AbilityOverrideUnhandledStatusError(
+        String(unreachable),
       );
     }
   }
@@ -173,7 +223,10 @@ function overrideTermStatus(
   if (override.set_to <= increased) return 'floored_by_increased_score';
   /* c8 ignore next 3 -- a non-floored override is itself a winner candidate. */
   if (winner === null) {
-    throw new TypeError('An ability override has no winning candidate.');
+    throw new AbilityOverrideWinnerMissingError(
+      override.effect_id,
+      override.set_to,
+    );
   }
   if (override.effect_id === winner.effect_id) return 'applied';
   if (override.set_to === winner.set_to) return 'applied_equal';
@@ -235,9 +288,7 @@ function abilityContributionsFrom(
       ) {
         // Unreachable behind the kind-scoped character_effects CHECKs. Throwing
         // keeps a malformed contribution from silently changing no score.
-        throw new Error(
-          `Ability increase effect ${String(effect.id)} has an incomplete payload.`,
-        );
+        throw new AbilityEffectIncompletePayloadError('increase', effect.id);
       }
       return {
         ability: effect.ability,
@@ -264,9 +315,7 @@ function abilityOverridesFrom(
     .filter((effect) => effect.effect_kind === 'ability_override')
     .map((effect): AbilityOverrideCandidate => {
       if (effect.ability === null || effect.maximum === null) {
-        throw new Error(
-          `Ability override effect ${String(effect.id)} has an incomplete payload.`,
-        );
+        throw new AbilityEffectIncompletePayloadError('override', effect.id);
       }
       return {
         effect_id: effect.id,

@@ -73,6 +73,8 @@ describe('stored authored content-v2 projector', () => {
     expect(current.filter((row) => row.fingerprint_role === 'current')).toEqual([
       { fingerprint_scheme: 'content-v2', fingerprint_role: 'current' },
     ]);
+    // The projector owns and wraps this failure, so its message is the only
+    // surviving evidence of the nested grant parser's refusal at this boundary.
     expect(() => projectStoredAuthoredContentV1(lifecycle.database, {
       kind: 'species',
       contentKey: '2024:species:elf' as ContentKey,
@@ -242,6 +244,7 @@ describe('stored authored content-v2 projector', () => {
       key_kind: 'asserted',
       fingerprint_scheme: CONTENT_FINGERPRINT_SCHEME_V2,
       fingerprint_digest: identity.digest,
+      visibility: 'listed',
       aggregate,
     }];
     expect(validatePortableContent(input)).toEqual(input);

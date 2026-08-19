@@ -27,9 +27,12 @@ import {
   catalogLayerDisclosure,
   type CatalogLayerDisclosure,
 } from '../catalog/catalog-disclosure';
-import { SpellSelectionEligibility } from '../eligibility/spell-selection-eligibility';
 import {
-  effectiveSelectionCollectionForSlot,
+  loadSpellSelectionEligibilitySnapshot,
+  SpellSelectionEligibility,
+  type SpellSelectionEligibilitySnapshot,
+} from '../eligibility/spell-selection-eligibility';
+import {
   evaluateSelectionCollectionConstraint,
 } from '../eligibility/spell-selection-collection';
 import { spellSelectionConstraint } from '../eligibility/spell-selection-constraint';
@@ -44,6 +47,10 @@ import { proficiencyBonus } from '../rules/proficiency';
 import { SpellSlotAssignment } from './spell-slot-assignment';
 import { deduplicateRoutes } from './route-key';
 import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
+import {
+  SpellAccessMissingCharacterClassError,
+  SpellAccessUnknownSelectionBucketError,
+} from './spell-access-errors';
 
 /**
  * The character as spell access computes with it: RESOLVED scores, not the six
@@ -76,6 +83,7 @@ interface SlotRouteRow {
   readonly allowed_schools: string | null;
   readonly allowed_tags: string | null;
   readonly selection_collection: string | null;
+  readonly effectiveSelectionCollection: string | null;
   readonly state: string;
   readonly sourceName: string;
   readonly sourceType: string;
@@ -131,6 +139,11 @@ interface RitualCapability {
   readonly spellcasting_ability: Ability | null;
 }
 
+interface SlotRoutesResult {
+  readonly routes: readonly SpellAccessRoute[];
+  readonly eligibilitySnapshot: SpellSelectionEligibilitySnapshot | null;
+}
+
 export interface SpellAccessRoute {
   readonly spell_identity_id: SpellIdentityId;
   readonly identity_name: string;
@@ -177,7 +190,7 @@ function decodeCharacter(row: SqlRow): CharacterRow {
 function decodeSlotRoute(row: SqlRow): SlotRouteRow {
   const bucket = sqlString(row, 'bucket');
   if (!isEnumValue(slotBuckets, bucket)) {
-    throw new TypeError(`Unknown spell selection bucket ${bucket}.`);
+    throw new SpellAccessUnknownSelectionBucketError(bucket);
   }
   return {
     id: sqlInteger(row, 'id') as SlotId,
@@ -197,6 +210,10 @@ function decodeSlotRoute(row: SqlRow): SlotRouteRow {
     allowed_schools: sqlNullableString(row, 'allowed_schools'),
     allowed_tags: sqlNullableString(row, 'allowed_tags'),
     selection_collection: sqlNullableString(row, 'selection_collection'),
+    effectiveSelectionCollection: sqlNullableString(
+      row,
+      'effective_selection_collection',
+    ),
     state: sqlString(row, 'state'),
     sourceName: sqlString(row, 'source_name'),
     sourceType: sqlString(row, 'source_type'),
@@ -379,20 +396,30 @@ export class SpellAccessBuilder {
       proficiencyBonusOverride: row.proficiencyBonusOverride,
     };
 
+    const slotResult = this.slotRoutes(character);
     return deduplicateRoutes([
-      ...this.slotRoutes(character),
-      ...this.wizardRoutes(character),
+      ...slotResult.routes,
+      ...this.wizardRoutes(character, slotResult.eligibilitySnapshot),
     ]).sort(compareRoutes);
   }
 
-  private slotRoutes(character: Character): SpellAccessRoute[] {
+  private slotRoutes(character: Character): SlotRoutesResult {
     const rows = this.db.all(
       `SELECT slot.id, slot.character_id, slot.source_instance_id,
               slot.fixed_spell_version_id,
               slot.current_spell_version_id, slot.spell_level_min,
               slot.spell_level_max, slot.allowed_spell_lists,
               slot.allowed_schools, slot.allowed_tags,
-              slot.selection_collection, slot.state, slot.slot_key,
+              slot.selection_collection,
+              CASE
+                WHEN slot.selection_collection IS NOT NULL
+                  THEN slot.selection_collection
+                WHEN slot.rule_key = 'wizard-prepared'
+                 AND source_class.content_key = '2024:class:wizard'
+                  THEN 'wizard_spellbook'
+                ELSE NULL
+              END AS effective_selection_collection,
+              slot.state, slot.slot_key,
               slot.bucket, slot.always_prepared, slot.with_slots,
               slot.counts_against_limit,
               slot.free_cast, source.display_name AS source_name,
@@ -410,6 +437,7 @@ export class SpellAccessBuilder {
        FROM spell_selection_slots AS slot
        INNER JOIN character_source_instances AS source
          ON source.id = slot.source_instance_id
+        AND source.character_id = slot.character_id
        INNER JOIN spell_versions AS version
          ON version.id = COALESCE(
            slot.fixed_spell_version_id,
@@ -452,6 +480,15 @@ export class SpellAccessBuilder {
       decodeSlotRoute,
     );
 
+    if (rows.length === 0) {
+      return { routes: [], eligibilitySnapshot: null };
+    }
+    const eligibilitySnapshot = loadSpellSelectionEligibilitySnapshot(
+      this.db,
+      character.id,
+      rows.map((row) => row.routeSpellVersionId),
+    );
+
     const routes: SpellAccessRoute[] = [];
     for (const row of rows) {
       SpellSlotAssignment.fromReferences(
@@ -460,11 +497,7 @@ export class SpellAccessBuilder {
       );
       const constraint = {
         ...spellSelectionConstraint(row),
-        selection_collection: effectiveSelectionCollectionForSlot(
-          this.db,
-          character.id,
-          row.id,
-        ),
+        selection_collection: row.effectiveSelectionCollection,
       };
       if (
         constraint.selection_collection !== null &&
@@ -474,16 +507,19 @@ export class SpellAccessBuilder {
           constraint,
           row.routeSpellVersionId,
           this.#eligibility,
+          eligibilitySnapshot,
         ).status !== 'valid'
       ) {
         continue;
       }
       if (
         row.state !== 'kept_override' &&
-        this.#eligibility.evaluate({
-          ...row,
-          selection_collection: null,
-        }).status !== 'valid'
+        this.#eligibility.evaluateConstraintFromSnapshot(
+          character.id,
+          { ...constraint, selection_collection: null },
+          row.routeSpellVersionId,
+          eligibilitySnapshot,
+        ).status !== 'valid'
       ) {
         continue;
       }
@@ -519,10 +555,13 @@ export class SpellAccessBuilder {
         }),
       );
     }
-    return routes;
+    return { routes, eligibilitySnapshot };
   }
 
-  private wizardRoutes(character: Character): SpellAccessRoute[] {
+  private wizardRoutes(
+    character: Character,
+    eligibilitySnapshot: SpellSelectionEligibilitySnapshot | null,
+  ): SpellAccessRoute[] {
     const preparedVersionIds = new Set(
       this.db
         .all(
@@ -569,7 +608,16 @@ export class SpellAccessBuilder {
         .filter(
           (slot) =>
             slot.state === 'kept_override' ||
-            this.#eligibility.evaluate(slot).status === 'valid',
+            (
+              eligibilitySnapshot !== null &&
+              slot.current_spell_version_id !== null &&
+              this.#eligibility.evaluateConstraintFromSnapshot(
+                character.id,
+                spellSelectionConstraint(slot),
+                slot.current_spell_version_id as SpellVersionId,
+                eligibilitySnapshot,
+              ).status === 'valid'
+            ),
         )
         .map((slot) => slot.current_spell_version_id as number),
     );
@@ -744,9 +792,7 @@ export class SpellAccessBuilder {
     const ability = specific.spellcasting_ability;
     const level = characterLevel(this.db, character.id);
     if (level === null) {
-      throw new Error(
-        'Spell access routes require at least one character class.',
-      );
+      throw new SpellAccessMissingCharacterClassError(character.id);
     }
     const proficiency =
       character.proficiencyBonusOverride ??

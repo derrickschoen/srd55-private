@@ -1,3 +1,4 @@
+import { expectIdenticalDatabaseImages } from '../../helpers/database-image-equality';
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { Sqlite3Static } from '@sqlite.org/sqlite-wasm';
 import schema from '../../../src/db/schema.sql?raw';
@@ -45,7 +46,7 @@ describe('late quarantined schema-prefix candidates', () => {
       lifecycle.validateBytes(candidateInput);
 
       expect(catalogDataMigrationProbeExecutions(), prefixId).toBe(1);
-      expect(candidateInput).toEqual(prefixBytes);
+      expectIdenticalDatabaseImages(candidateInput, prefixBytes, `${prefixId} candidate input image`);
     }
     lifecycle.close();
   // Measured at ~44s alone on 2026-08-03; grows with every migration.

@@ -222,10 +222,25 @@ describe('W-FEAT-17 feat candidate cards', () => {
   });
 
   it('generates exact Magic Initiate configuration and ability controls only from returned applications', () => {
-    const cleric = application({
+    const clericBase = application({
       key: '2024:feat:magic-initiate',
       config: { chosen_list: 'Cleric', spellcasting_ability: 'wisdom' },
     });
+    const cleric: LevelUpFeatApplication = {
+      ...clericBase,
+      plan: {
+        ...clericBase.plan,
+        grant_rules: [{
+          kind: 'choice_from_list',
+          rule_key: 'magic-initiate-cantrips',
+          count: 2,
+          bucket: 'cantrip_known',
+          list: '$config.chosen_list',
+          level_min: 0,
+          level_max: 0,
+        }],
+      },
+    };
     const wizard = application({
       key: '2024:feat:magic-initiate',
       config: { chosen_list: 'Wizard', spellcasting_ability: 'intelligence' },
@@ -269,6 +284,11 @@ describe('W-FEAT-17 feat candidate cards', () => {
       'Chosen List “Druid” has already been used for this repeatable feat.',
     );
     expect(elementText(view.element)).not.toContain('spell locator');
+    expect(elementText(view.element)).toMatch(
+      /Choose 2\s+Cleric\s+spells of cantrip/u,
+    );
+    expect(elementText(view.element)).not.toContain('$config.chosen_list');
+    expect(elementText(view.element)).not.toContain('magic-initiate-cantrips');
     view.cleanup();
   });
 });
@@ -323,7 +343,6 @@ describe('W-FEAT-COVERAGE application plan presentation', () => {
     expect(text).toContain('Sentinel applied effect');
     expect(text).toContain('Wisdom +1, maximum 20');
     expect(text).toContain('Choices and proficiencies');
-    expect(text).toContain('Stable grant label: skilled-sentinel');
     expect(text).toContain('Choose 3 skill proficiencies');
     expect(text).toContain('a tool proficiency may be chosen instead');
     expect(text).toContain('Sourced text benefits');
@@ -338,6 +357,8 @@ describe('W-FEAT-COVERAGE application plan presentation', () => {
       'Kind choice_from_list',
       'Rule Key',
       'Allows Tool Instead',
+      'Stable grant label',
+      'skilled-sentinel',
     ]) {
       expect(text).not.toContain(codecPhrase);
     }

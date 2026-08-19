@@ -108,7 +108,22 @@ test('cold boot reports the real database stages before readiness', async ({
     document.addEventListener('DOMContentLoaded', record);
   });
 
-  await page.goto('/');
+  const entryPattern = /\/(?:src\/main\.ts|assets\/index-[^/]+\.js)$/;
+  let releaseEntry = (): void => {};
+  const entryHeld = new Promise<void>((resolve) => {
+    releaseEntry = resolve;
+  });
+  await page.route(entryPattern, async (route) => {
+    await entryHeld;
+    await route.continue();
+  });
+  const navigation = page.goto('/');
+  await expect(
+    page.getByText('Current startup phase', { exact: true }),
+  ).toBeVisible();
+  releaseEntry();
+  await navigation;
+  await page.unroute(entryPattern);
   await expect(page.locator('#status')).toHaveAttribute(
     'data-ready',
     'true',

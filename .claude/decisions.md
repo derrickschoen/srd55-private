@@ -7,6 +7,656 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D312 — OWNER: the loop moves the VTT forward (2026-08-19)
+
+The supervision loop's forward thread is now the VTT. Rulings, verbatim intent:
+
+1. The VTT is a **superset of the rules engine used by the sim** — one engine,
+   not a fork. It adds what the sim lacks, movement modelling first; if the
+   movement mechanics work out, they may be merged back into the sim.
+2. **Pluggable controllers**: any enemy or any PC can be driven by (a) a code
+   algorithm, (b) a codex AI agent, or (c) a human. The controller boundary is
+   an interface from day one.
+3. **Draft 1 runs entirely in the DM's browser** and is screen-shared. No
+   multi-browser requirement for v1.
+4. **Provision in the code** — seams, not implementations — for player
+   browsers in later versions: showing the map, moving their own characters,
+   making attacks. (The existing transport interface + RelayTransport seam in
+   wt/vtt phase 1 satisfies the transport half of this.)
+
+D260.8/D260.2 fog rules and the phase-2 negative scope (no cloud accounts, no
+voice/video, no hosted asset library; rules automation IN bounds) stand.
+
+Same tick (housekeeping, executed): all done `dnd-*` worktrees deleted with
+their branches — 8 merged to main (dracres, grantper, grantskill, minors,
+mutspeed, ruleskill, sgorphan, sheetkill), 7 verified fully contained in
+wt/simcore (4 bench worktrees, lane-b, lane-c, lane-inc5).
+
+## D311 — OWNER: fix campaign scope is the top-12 files; minors first, then owner v1 review (2026-08-19)
+
+From the D310 triage (1,013 real gaps): the fix wave covers the **top-12
+hotspot files (~870 survivors)** in one wave of pattern-driven test lanes,
+guided by the triage doc's kill shapes; re-verify per shard via D308 --rerun.
+Declined: grants-cluster-only, all-1,013. Same session: the three D303
+journey minors get a fix lane NOW; the owner does their local v1 review
+(D266 gate) after the minors land — before the fix campaign completes.
+
+## D310 — OWNER: survivor campaign is triage-first (2026-08-18)
+
+Before any D280 survivor-fix lanes dispatch, one triage lane classifies the
+full merged survivor list (real test gap / equivalent mutant / low-value)
+with per-file counts; the owner rules on fix scope from that report.
+Declined: straight-to-hotspots, exhaustive-everything. Also ruled the same
+session: main→wt/simcore syncs may run autonomously (gated, conflicts stop);
+the threads-vs-forks pool A/B stays queued for an idle window.
+
+## D309 — OWNER: stranger journey and survivor fixes interleave (2026-08-18)
+
+Amends D307's sequencing: once the inc4 merge gate is green, the D303
+stranger journey runs WHILE D280 survivor-fix lanes work the hotspot files
+in parallel worktrees — neither waits for the other. Owner picked
+"Interleave" over journey-first and fixes-first.
+
+## D308 — OWNER: static mutants on for full audits, off for iteration re-runs (2026-08-18)
+
+Owner's words: "statics on for full audits, off for iteration re-runs."
+Full D280 campaign runs (fresh shard sweeps) keep static mutants enabled —
+they carried ~11% of survivors found (63 of 562 across shards 1–2),
+including module-level regex and error-string gaps. Fix-verify re-runs of a
+shard enable ignoreStatic plus the per-shard incremental cache, and must
+report the skipped static count as unmeasured, never as covered. Basis:
+statics are ~23% of mutants and ~97% of shard runtime (shard-003 planner).
+
+## D307 — OWNER: stranger journey runs after the full queue lands (2026-08-18)
+
+The D303 fresh stranger journey (final pre-approval walkthrough) waits
+until homebrew v3 ui_hidden entries and D278 increment 4 are merged, so
+one walkthrough covers everything. The approval gate moves later; interim
+merges get spot-checks only.
+
+## D306 — OWNER: per-worker pre-seeded image lane approved, next wave (2026-08-18)
+
+The test-scaffolding cost (476k seed INSERTs + per-test schema DDL) may
+be attacked with a per-worker pre-seeded database image cloned per test.
+Constraints: opt-in helper path; seed, migration, digest, and corruption
+tests stay on the fresh-DDL path; image-equivalence provable.
+
+## D305 — OWNER: D280 mutation lanes take the box after the DB-perf trials (2026-08-18)
+
+Once the three trial lanes (idx5, builders, relgrowth) drain and merge,
+the next dispatch is the D280 leaf mutation tests + Stryker sharding
+tooling, ahead of inc5→simcore round 24, D278 increment 4, and homebrew
+v3.
+
+## D304 — OWNER: real index migration mechanism before any index lands (2026-08-18)
+
+Wipe-and-rebuild of persisted images that fail the schema signature is
+NOT the path, despite D60. A proper additive-index migration step in the
+database lifecycle must exist before any CREATE INDEX changes schema.sql.
+The mechanism is needed eventually anyway; build it now. Index trial
+evidence may still be gathered without landing schema changes.
+
+## D303 — OWNER: full SRD corpus repair; staged re-review; mutation lanes next wave (2026-08-17)
+
+Corpus audit verdict (read-only lane; structural catalogs intact, prose
+not): Telekinesis genuinely truncated at full:10720 /
+spell-descriptions.txt:8360; two slice losses in
+multiclass-entry-grants.txt (:108, :174); 601 PDF line-break hyphens
+preserved into 259/339 user-facing spell descriptions. Rulings:
+(1) **Full repair** — supervisor fetched the official PDF (SHA-256
+matches SOURCE.md provenance, verified by supervisor); repair lane
+recovers the Telekinesis tail, fixes both slices, de-hyphenates via a
+reviewable script, updates SOURCE.md hashes and its policy wording, and
+corrects kennel.json's wrong Tome note. (2) **Re-review is staged**:
+targeted re-verify of the five D286 MAJOR scenarios once fixes gate,
+THEN a full fresh stranger journey as the final pre-approval step after
+minors land. (3) **Mutation lanes (D280 leaf tests + sharding tooling)
+dispatch in the next refan wave**, after the merge train gates.
+
+**F20 — supervisor misreport, corrected.** My earlier surfaced finding
+"bundled SRD text truncated mid-sentence at line 4507 (Pact of the Tome)
+— possible corpus defect" was WRONG in its specifics: the text continues
+at canonical lines 4438-4453 in the other column of the same printed
+page; raw line order misled me, and kennel.json:61,239 propagated the
+error as "never resumes"/unverifiable. The audit I dispatched on the
+back of that wrong specific did, however, find the real defects above.
+The kennel.json note is being corrected by the repair lane.
+
+## D302 — OWNER: merge-train shape, wave cadence, all D286 minors fixed now (2026-08-17)
+
+Four rulings: (1) **Batch gate** — the queued lane branches merge with
+per-merge tsc + narrow tests, then ONE solo quiet full suite gates the
+whole train; if red, bisect the merge commits. (2) **Drain → merge →
+refan** — when the current wave finishes, quiet the box, run the train
+plus the owed D283/D284 gates, then dispatch the next wave. (3) **All 11
+D286 minor findings are fixed now** (not deferred), including the
+cold-open ~4.4s and the 2014→2024 bridge notes; fix lanes dispatched
+(minors sweep, planner-mobile M-M1, cold-open perf, bridge notes).
+(4) **The train gates on vitest 3**; the vitest-4 upgrade (D300) merges
+last with its own gate — the instrument never changes mid-train.
+
+## D301 — SUPERVISOR-VERIFIED: Kennel max-assemblable cantrips = 19, by source (2026-08-17)
+
+Owner directed: "Check yourself. Separate cantrips from classes with
+cantrips from other sources (feats, species, backgrounds)." Verified
+independently from docs/srd/source (not the spec lane's claim):
+
+- **From classes: 15.** Class-table cantrip columns: Sorcerer L3 = 4,
+  Bard L1 = 2, Cleric L1 = 3, Druid L1 = 2, Warlock L1 = 2 (13), plus
+  Divine Order Thaumaturge +1 Cleric cantrip (full corpus :2309) and
+  Primal Order Magician +1 Druid cantrip (:2562). Multiclass keeps
+  per-class counts (multiclassing.txt:66-69).
+- **From feats: 4.** Magic Initiate grants two cantrips (feats.txt),
+  Repeatable with a different list each time — Wizard (via Sage) +
+  Druid (via Human Versatile) = 4.
+- **From species directly: 0** (Human Versatile supplies a feat ROUTE,
+  not a cantrip). **From backgrounds directly: 0** (Sage likewise).
+
+All 19 names sit on their claimed SRD lists (each checked, incl. Message
+and Resistance under the Druid "Cantrips (Level 0)" heading, lines 29/32);
+19 distinct. This is the verification D272 required at authoring; the
+kennel.json assertion "EXACTLY 19" is CONFIRMED. D251.2's "exactly 18"
+stays superseded (per D272).
+
+## D300 — OWNER: vitest 4 upgrade approved conditional on clean assessment (2026-08-17)
+
+The `onTaskUpdate` false-failure class (exit 1 with 0 test failures under
+load) is birpc's hardcoded 60s RPC timeout; vitest 3.x exposes no setting
+and upstream's fix (timeout disabled, PR #8297) ships only in vitest 4.
+Owner ruled: **upgrade to vitest 4 if the read-only assessment lane shows
+small blast radius and Stryker/simcore-patch compatibility**; if blocked,
+return to the owner (patch-package of 3.2.7 was NOT approved). Until the
+upgrade lands and is gated, the parallel-suite protocol stands: parallel
+runs advisory only, official gates solo-quiet. Also ruled the same
+session: plan files stay UNTRACKED (reboot-safe copies to .tmp/ instead).
+
+## D299 — OWNER: content needs a ui-hidden marking (2026-08-17)
+
+Owner, in the D298 context of lightweight test content: "We need a way to
+mark things as ui hidden." Taken for now (reversible default, D7): a
+closed visibility discriminant on homebrew/bundled catalog content —
+`visibility: 'listed' | 'ui_hidden'` — where `ui_hidden` entries are
+excluded from every user-facing browse/pick surface but remain fully
+loadable by tests, the simulator, and direct programmatic access; the
+absence of a value means `listed` only at the IMPORT boundary (stored rows
+always carry the explicit value). Seam: the discriminant lives with the
+content schema so an unhandled visibility arm fails tsc at each listing
+site. Cost to flip: rename/widen the union; no data loss. The eight D296
+entries land as `ui_hidden` first; flipping one to `listed` is a
+deliberate later act.
+
+## D298 — OWNER: v3 entries are lightweight test content, NOT Veteran-grade dossiers (2026-08-17)
+
+Clarifying D296/D297 scope: the intent of adopting all eight is "more types
+of non-copyrighted mechanics in the public repo so we can test. They don't
+need the attention that we gave to the Barbed Court and the Veteran."
+So: compact catalog entries + sim models sufficient to exercise each
+mechanic type (bonded riders, control locks, persistent riders,
+self-Inspiration, first-turn primitives, form packages, crit-range
+expansion, bounded pools) — no full-ceremony prose dossiers, no
+docx-fidelity pass. Consequence for D297(2): Cutting Chorus SHIPS for
+testing without a net-DPR claim; the d4-derived figure lands whenever d4
+expansion produces it, and only the CLAIM was ever blocked on it.
+
+## D297 — OWNER: homebrew v3 sub-rulings — both Ambush chassis; Chorus cost from d4; cleric slot stays open (2026-08-17)
+
+Three sub-rulings completing D296: (1) Ambush Primitive ships on **both**
+chassis — Vanward Conclave (Ranger) and Cold Open (Rogue); Cold Open's
+unpreserved measured delta must be re-run before its dossier cites numbers.
+(2) Cutting Chorus's displaced-ally opportunity cost is **re-derived from
+the d4 scorecard builds** (party-average attacks over the 89-build set),
+NOT the provisional 65%/1d8+3 proxy — the Chorus dossier's net-DPR figure
+is therefore blocked behind d4 expansion (D292); the mechanic's authoring
+can proceed, its net claim cannot. (3) The cleric damage slot **stays
+open** — a recorded open item, no commissioned candidates.
+
+## D296 — OWNER: ALL EIGHT homebrew v3 entries adopted for full authoring (2026-08-17)
+
+Presented with the reconstructed v3 packet (eight entries, sim-validated per
+tools/sim/2026-08-12-homebrew-validation-plan.md, measured numbers the
+deliverable per the park-time record), the owner selected **all eight**:
+Long Grudge, Anchor Point, Patient Volley, Cutting Chorus, Ambush Primitive
+(Vanward/Cold Open), Broken Tooth, Cutting Momentum, Broken Tempo. Each
+advances to a full prose dossier + app content behind the v1 gates (D292).
+Entries that measured over claim (Anchor Point, Patient Volley, Vanward,
+Broken Tooth, Broken Tempo) are adopted as MEASURED — authoring works from
+the simulated numbers, not the stale claims. Open sub-rulings still owed:
+Ambush chassis cardinality, Cutting Chorus ally-attack opportunity cost,
+the named-open cleric damage slot.
+
+## D295 — OWNER: deploy configs stay placeholder; mobile-viewport testing confirmed (2026-08-17)
+
+Deploy identity ruled: **"Placeholder until later"** — prepared wrangler
+configs carry PROJECT_NAME_TBD; the name/domain decision waits until
+deploy is near; zero outward surface. Same-day addendum to D293, owner's
+words: **"Maybe try with mobile sized viewport testing as well as full
+desktop"** — emulated mobile-viewport runs join the browser suites and
+the D286 self-review explicitly, alongside full desktop.
+
+## D294 — OWNER: all MAJOR self-review findings auto-block v1 (2026-08-17)
+
+Triage policy ruled: **"All MAJOR auto-block."** Any MAJOR-severity
+finding from the D286 self-review or future supervisor reviews joins the
+v1 blocker list immediately, without awaiting owner triage — the D270
+precedent generalized. Severity assignment follows the sweep taxonomy's
+existing MAJOR bar (wrong number, silent unknown, dead end, data-integrity
+lie); minor/polish findings queue normally. The owner sees the blocker
+list grow in reports rather than gating each addition. Declined:
+wrong-numbers-only auto-block (supervisor recommendation),
+everything-awaits-triage.
+
+## D293 — OWNER: desktop tested; best-effort mobile (2026-08-17)
+
+Browser matrix ruled in the owner's words: **"Desktop tested, but do your
+best to make it work for mobile."** Desktop Chromium/Firefox/Edge are the
+tested matrix; mobile (iOS Safari and Android alike) is a genuine
+engineering target, not a written-off tier — responsive layouts, touch
+interactions, storage-pressure resilience, and the capability probe's
+graceful paths all get real effort — but mobile carries no tested claim
+until device evidence exists. Practical consequences: mobile-viewport
+Playwright runs (emulated) join the suites where cheap; OPFS/probe
+fallbacks stay honest; no real-device gate blocks v1.
+
+## D292 — OWNER: homebrew v3 and d4 scorecard reactivate; party stays parked (2026-08-17)
+
+Parked-workstream ruling: **homebrew v3 adopt/author decisions** return
+to the question queue, and the **d4 scorecard** roadmap resumes
+(ceiling-mode comparison basis, extending toward all 89 builds — now with
+D291's ±1% bar as the fidelity line). **wt/party sync stays parked.**
+Both reactivated streams run behind the v1 gates in priority.
+
+## D291 — OWNER: docx fidelity bar is ±1% DPR per build (2026-08-17)
+
+"Tracks the DOCX" defined numerically: **aggregate damage-per-round
+within ±1% per build** against the docx reference; individual mechanics
+may drift provided each build's total holds the band. Sharpens D262's
+fidelity-ceiling acceptance into a pass/fail line for the simulator's
+fidelity checks. Declined: exact-where-modeled-with-gap-list (supervisor
+recommendation), ±5%, direction-only.
+
+## D290 — OWNER: licensing trio — CC-BY docs, anonymous externals, redact pastes (2026-08-17)
+
+Three publishing rulings: (1) our original public docs (reports, build
+analyses, design docs) are **CC-BY-4.0**, matching the SRD family and the
+existing docs/design precedent; (2) public Board reports do **NOT
+identify** the external d4 builds used for fidelity checking — methodology
+described, sources anonymous (stricter than the link-don't-quote
+recommendation); (3) issue reporters pasting non-redistributable rules
+text: **issue template warns; maintainers redact on sight; the report is
+kept.**
+
+## D289 — OWNER: no cadence promise during pre-alpha (2026-08-17)
+
+Release cadence ruled: **"No promise in pre-alpha."** Gated increments
+ship when ready; nothing is stated publicly about rhythm; the update
+prompt carries a changelog line only. Declined: publicly-stated
+ready-when-gated, scheduled+hotfixes, rare big releases.
+
+## D288 — OWNER: roll forward only (2026-08-17)
+
+Deployed-build recovery ruled: **"Roll forward only."** An older bundle is
+never republished (service-worker skew makes old-code/new-schema pairings
+unsafe); a bad build is superseded by an emergency repair build.
+Migrations carry no downgrade-safety obligation. Declined:
+downgrade-safe migrations, emergency stop screen, pull-the-build.
+
+## D287 — OWNER: telemetry is Cloudflare cookieless aggregates only (2026-08-17)
+
+Public-site telemetry ruled: **Cloudflare's built-in cookieless
+page/error aggregates only** — no client-side beacon code ships in the
+bundle, no character content, nothing per-user, no cookies. Declined:
+none-at-all, opt-in diagnostics, opt-out analytics.
+
+## D286 — OWNER: supervisor performs the local review itself; deploy stays gated (2026-08-17)
+
+Asked what D266 approval consists of, the owner ruled: **"I don't have
+time to do it now. Do it yourself and just don't deploy."** The
+supervisor walks the D285 stranger journey (and the S7-informed sheet
+checks) against the locally served production build itself, documents
+findings with screenshots/numbers, and keeps the record ready for the
+owner. The DEPLOY remains a HARD-STOP outward action awaiting explicit
+owner approval — this ruling transfers the review labor, not the launch
+authority.
+
+## D285 — OWNER: stranger spec persona and mandatory misstep recoveries (2026-08-17)
+
+The D265 blocking stranger spec gets its content: persona is a
+**5e-2014 knower who does not know the 2024 rules**, walking a **Cleric**
+1->5 (prepared casting + domain machinery on the guided path). The journey
+must DEMONSTRATE RECOVERY from all four: (1) duplicate skill/Expertise
+pick refused clearly at selection time (the S7-04 shape); (2) reload
+mid-level-up with nothing lost and an obvious resume point; (3) double
+import of their own backup detected without duplicates; (4) a 2014-rules
+expectation (racial ASIs, level-1 subclass) met with UI that shows where
+those went (background bonuses, level-3 subclass) instead of a dead end.
+Plus the D265 spine: cold profile, choices-and-sources every level,
+export -> re-import into a fresh profile with identical sheet numbers.
+
+## D284 — OWNER: second tab opens READ-ONLY (2026-08-17)
+
+Multi-tab contract ruled: **"Read-only second tab."** Today a second
+tab's OPFS SAH pool install fails with a raw error (accidental exclusive
+lock). At v1: the second tab detects the conflict and opens a READ-ONLY
+view — a snapshot of the database image with a persistent banner naming
+the owning tab; all writes happen only in the owner. Build: snapshot
+channel (BroadcastChannel or export-image handoff) + staleness handling
+(banner shows snapshot age; refresh action re-requests). Takeover when
+the owning tab is truly gone remains available via the existing
+stale-handle path. Declined: friendly refusal only (supervisor
+recommendation), full synchronized tabs, detect+warn.
+
+## D283 — OWNER: cold-boot verification stamp (2026-08-17)
+
+Cold-boot trade ruled: **"Verification stamp."** The full integrity suite
+(schema signature, quick_check, FK check, catalog digest) runs on first
+boot and whenever the stamp is invalid; the stamp persists (app
+version/build id + database image digest) and while it matches, boot
+skips the ~3s structure checks and ~1s digest for a ~1s warm-equivalent
+start. A corrupted-but-stamped image is caught later rather than at boot
+— accepted. Implementation notes: the stamp must bind to BOTH the build
+(schema may change per release) and the image bytes (digest already
+computed for export paths); any write invalidates lazily; stamp lives
+beside the image in OPFS. Declined: optimize-checks-directly (supervisor
+recommendation), read-only fast open, leave-for-v1.
+
+## D282 — OWNER: ordinary inputs judge killability; hardening stays at entries (2026-08-17)
+
+The long-standing hostility question (Q2) ruled: **"Ordinary + entry
+hardening."** Killability, reachability, and mutant equivalence are judged
+on ordinary constructible inputs — hostile Proxy/getter/intrinsic
+observations delivered through mocked internal seams do NOT count. The
+seven wave-3 contested equivalence claims STAND; D281's unreachable-arm
+deletions stand. The rounds-17-22 snapshot-once/captured-intrinsics
+posture CONTINUES at public entry points (defending against accidental
+exotic objects from in-bundle bugs — D263's accidents-yes boundary);
+interior code trusts the structured-clone RPC boundary, which strips
+getters/Proxies/prototypes by construction. Prototype-injection and
+doMock test seams remain legitimate testing technique. Declined:
+harden-until-moot everywhere, fully-out-of-scope (freezing entry
+hardening), hostile-counts.
+
+## D281 — OWNER: delete EVERYTHING unreachable, including defensive arms (2026-08-17)
+
+NoCoverage resolution ruled: **"Delete everything unreachable."** If no
+test can reach a code path through ordinary inputs, it is deleted — the
+PRE-ALPHA bias applied without the keep-and-justify carve-out the
+supervisor recommended. Defensive arms guarding future data (e.g. the
+contracts sameSourceRef weapon/character arms unreachable through any
+mintable source) are deleted too and re-added when the data that reaches
+them arrives; unreachable-today is unrepresentable-today, and the type
+system should say so. Reachable-but-untested code gets tests. Q2 note:
+this composes with the hostile-input question — "reachable" means
+ordinary constructible inputs, consistent with the campaign's equivalence
+convention pending that ruling.
+
+## D280 — OWNER: the v1 mutation bar is WHOLE-src/ zero-unexplained (2026-08-17)
+
+Ruled: **"Whole src/ zero unexplained"** — the largest option, knowingly.
+Before v1, EVERY mutant across the entire app source (not just
+src/simulation) must be Killed, CompileError, proven-equivalent with a
+written proof, or a member of an explicitly excluded category (regex
+literals per the earlier ruling; message prose per D273/D274 as amended by
+D278's structure); NoCoverage mutants count as unexplained until either
+covered by tests or explicitly justified. This extends the campaign to
+catalog, commands, grants, sharing, rules, authoring, db, worker, builder,
+ui and the rest — a substantially larger undertaking than the simulation
+campaign, now on the v1 critical path per D279. Sequencing note: runs the
+same wave machinery (full run -> cluster -> near-miss lanes -> verify),
+and the D278 migration rewrites many guard sites first, so mutation waves
+per module follow that module's migration.
+
+## D279 — OWNER: migration, mutation bar, AND simcore merge all block v1 (2026-08-17)
+
+Ruled: **"All three block."** The v1 gate now comprises: the 12+1
+walkthrough/stranger specs (D264/D265), the five S7 repairs (D270), the
+completed D278 refusal/error migration (D277 sequences repairs after it),
+an explicit mutation-score bar (to be defined — next ruling), and
+wt/simcore's round-24 + two quiet rounds + merge to main (D271). Declined:
+migration-only blocking (supervisor recommendation), none, migration+bar.
+
+## D278 — OWNER: unified Result + shared refusal union is THE precedent (2026-08-17)
+
+After the why-does-attunement-throw walkthrough (sqlite transaction() rolls
+back on throw — the mechanical reason; semantic refusals riding the error
+channel — the habit), ruled: **"Unified Result + shared union."** The single
+precedent everywhere:
+- EXPECTED refusals (slots full, revision conflict, archived, level-up
+  refusals, ...) are RETURNED: `Outcome<T> = {kind:'ok'; value} |
+  {kind:'refused'; refusal: Refusal}`, with `Refusal` one shared
+  discriminated union in one module (src/refusals/) compiled into BOTH the
+  worker and the UI — single source of truth by shared compilation, no
+  copying; exhaustive switches on both sides (D269a). A small wire-version
+  field covers PWA update-window skew.
+- THROWS are reserved for DEFECTS (bugs, corrupt data, forged inputs) —
+  D274 tagged classes, translated to the six generic RpcErrorCodes,
+  rendered as a generic failure surface.
+- Rollback: one internal helper lets a command abort its transaction on
+  refusal without exposing a throw past its handler.
+- The D276/D277 migration lanes implement this in the same pass:
+  each throw site is classified refusal->Result vs defect->tagged-throw.
+Declined: curated translation of thrown classes (smallest diff, kept the
+semantic wrongness), internal-only prose, stable class-name protocol.
+
+## D277 — OWNER: error migration completes BEFORE the S7 repairs (2026-08-17)
+
+Start-order ruling for the three ready workstreams: **"Migrate first"** —
+the D276 tagged-error migration proceeds module-by-module to completion,
+so the five S7 v1-blocking repairs (D270) are then built on the final
+error taxonomy rather than repairing guards that migration would rewrite.
+Wave-5 increment 5 (exhaustive-switch pass) slots into spare capacity.
+Options declined: S7-first-combined-where-overlapping (supervisor
+recommendation), S7 strictly first, all-parallel per-module judgment.
+
+## D276 — OWNER: migrate EVERYWHERE to tagged error classes now (2026-08-17)
+
+After the four-option deep dive, ruled: **"migrate everywhere to option
+a."** D274's tagged-class pattern (literal `name`, structured params,
+message derived in one place; class+params asserted per guard, exact
+message once per class) is to be applied across the whole codebase, not
+just src/simulation, starting now rather than after wave 5. Sequencing to
+avoid collisions: main-repo src/ modules migrate in parallel lanes
+immediately; src/simulation migrates after wave-5 increment 1 lands (same
+files). Also ruled: benchmark experiment — temp worktrees for Deno
+(with/without type checking), Bun+typia, and plain Bun, measuring speed
+and effectiveness against the current Node toolchain; report with real
+numbers.
+
+## D275 — OWNER: do not post the #6150 upstream comment (2026-08-17)
+
+Ruled "Don't post." The stryker-js #6150 confirmation comment (our vitest
+3.2.7 repro, misreport numbers, working patch) stays local. The
+auto-applied runner patch (scripts/patch-stryker-vitest-runner.mjs, pinned
+9.6.1) remains our fix; revisit only if the owner re-opens it.
+
+## D274 — OWNER: tagged error classes with derived messages; supersedes D273 (2026-08-16)
+
+The owner flagged bare `throw new TypeError('prose')` as a smell and asked
+for community research; ruled for the recommendation: **hand-rolled tagged
+error classes, zero dependencies** — literal `name` discriminant (the T4
+pattern: literal TYPE so a ""-mutant fails tsc), structured readonly
+params, message DERIVED from params in the constructor (one place). The
+contract: tests assert class + params at every guard; the exact formatted
+message is asserted ONCE per error class via its formatter. Expected
+refusals (the `string | null` failure-reason returns, status unions)
+graduate incrementally to plain discriminated Results per D269(a);
+invariant guards keep throwing, but typed. Serves D270's S7-04 fix
+(human-readable refusals from structured fields). Migration is its own
+workstream sequenced after wave 5. Declined: Result libraries
+(neverthrow/Effect — dependency weight), exact-message assertions on bare
+TypeErrors, status quo.
+
+## D273 — OWNER (superseded same day by D274): error/refusal message text is NOT contractual (2026-08-16)
+
+Q1 ruled: **"Not contractual."** Diagnostic prose in throws/refusals is not
+part of the tested contract — all message-text mutants (~100+ Survived and
+NoCoverage StringLiterals on diagnostic sites) are formally out of scope,
+and the honest mutation denominator shrinks accordingly. EXISTING message
+assertions stay (weakening assertions remains forbidden, and lanes may
+still use message identity to distinguish WHICH guard fired — that use is
+about guard selection, not message wording); no NEW message-wording
+assertions are written. Options declined: load-bearing-only codification
+(supervisor recommendation), error-ID codes, fully contractual.
+
+## D272 — OWNER: Kennel spec relaxes to max-assemblable SRD cantrips (2026-08-16)
+
+The Board B Kennel definition carries [Tasha]/[Xanathar]/[2024] cantrips a
+public SRD-only fixture cannot commit (D59). Ruled: **"Relax to
+max-assemblable"** — author spec 11 with SRD 5.2.1 cantrips only and assert
+the count actually reachable from the repo's SRD lists (verified at
+authoring), superseding D251.2's "exactly 18". Build skeleton (Human,
+custom background, Sorc3/Bard1/Cleric1/Druid1/Warlock1, double Magic
+Initiate, D252.6's Tome-if-SRD-verified) unchanged. Options declined: SRD
+substitutes keeping exactly-18; names-only non-SRD entries; replacing the
+archetype.
+
+## D271 — OWNER: round 24 is a fresh adversarial round over the post-round-23 delta (2026-08-16)
+
+Round 23's CLEAN (quiet 1 of 2) certified a tree that no longer exists —
+the mutation campaign landed six production changes since (D267 bounded
+counters + five wave-1 type refactors) plus ~15 test files. Ruled: **fresh
+adversarial round 24 scoped to those six production changes** (tests-only
+commits exempt). If CLEAN it counts as quiet 1 of 2 for the CURRENT tree;
+one more quiet round, then the wt/simcore -> main merge. Options declined:
+counting the campaign itself as round 24; merging now; holding for wave 5.
+
+## D270 — OWNER: all five S7 MAJOR sheet defects block v1 (2026-08-16)
+
+Presented with the reach analysis (S7-01 Alert/initiative, S7-02 finesse
+Str-default, S7-04 duplicate Expertise, all reachable at level 1; S7-05
+false-UNKNOWN import warning pulled in-bar by D265; S7-03 crit-range
+needing level 3+/homebrew) and four options (split by reach — supervisor
+recommendation, all five, disclosure-first, none), the owner ruled: **"All
+five block"** — the strict D33 reading. No wrong number ships anywhere:
+the next engine lanes are sheet-math repair — initiative as a typed,
+sourced additive model (Alert included); weapon-ability selection for
+finesse/ranged rows; crit threshold as a sourced character property
+consumed by the dice calculator; Expertise sibling-eligibility
+recomputation at selection time with a human-readable refusal; import
+gap-evaluation scoped to active revisions only. Supersedes the fix-wave
+scope question parked since sweep 7 landed.
+
+## D269 — OWNER: type-pattern directives from the 3a-3c walkthrough (2026-08-16)
+
+Three standing directives on how the domain gets typed, from the owner's
+responses to the ranked type improvements:
+(a) **Exhaustive discriminated switches are the house pattern** — "look for
+more solutions like this elsewhere." Where a shape is a closed set of
+alternatives, model it as a discriminated union and consume it with a switch
+tsc checks exhaustively. Corollary ruling: Failed/Success damage should NOT
+have separate shape definitions — one shared Damage signature type, passed
+into whichever arm calls for it; hunt for other duplicate near-identical
+shapes and unify them.
+(b) **Successful type-fix patterns are KB material** — keep a list in the KB
+so future sessions learn from worked examples, and consult it for new
+opportunities whenever it grows.
+(c) **Stateful domain values get a class with domain methods** ("if this was
+Java, a class with increment and decrement") — raw branded numbers are for
+immutable quantities; anything that changes over time gets an
+invariant-owning object like ResourceRecoverySession's bounded counter.
+
+## D268 — OWNER: save DC is always the formula 8 + PB + ability modifier (2026-08-16)
+
+Responding to the proposed `absent | fixed{dc} | unavailable` union for save
+DCs (item 3d): **"it is always a number, we may not know the result yet, but
+we know it is 8 + PB + ability modifier. We can replace the parts of the
+formula later on if we really don't have access to them yet."** Binding
+shape: a save DC is modeled as the structured formula (base 8 + proficiency
+bonus + spellcasting-ability modifier) whose PARTS may be unresolved, never
+as an absent/unavailable state. Resolution substitutes the parts when sheet
+data supplies them. Supersedes the union-arms proposal.
+
+## D267 — OWNER: resource pools are bounded counters, 0..sheet-derived maximum (2026-08-16)
+
+During the 2c (evidence-identity) walkthrough the owner ruled on the pool
+model: "We need to model the pools as having an upper limit just like spell
+slots. Max number is an integer that is calculated based on sheet data.
+Minimum is always 0. Can subtract when used (ie rage, sorcery points) can add
+any number when appropriate, but the number never exceeds the ceiling."
+Binding shape: every consumable resource (Rage uses, sorcery points, Channel
+Divinity, spell slots alike) carries a bounded level — floor 0, ceiling an
+integer derived from sheet data — with spend subtracting and recovery adding
+**clamped at the ceiling** (RAW: you regain up to your maximum). Supervisor
+default pending review (reversible): the level is a minted state object bound
+to its pool by reference identity; overspend below 0 THROWS (fail-closed —
+insufficient-resource spends are simulator logic errors, not clampable), while
+over-recovery CLAMPS (RAW-sanctioned). Replaces the `expendedUnits: unknown`
+per-call revalidation seam in recoveredResourceUnits. Queued at the head of
+the typing-improvement batch (2b survey).
+
+## D266 — OWNER: no Cloudflare deploy until local is approved; prepare only (2026-08-16)
+
+Asked to reconcile D260.7's future "mirror goes PUBLIC" with the repo
+being already world-readable since 2026-08-13 (verified: anonymous API,
+private:false). Ruled: **"no cloudflare deploy until i approve local.
+prepare for it but don't do it."** The publication event still ahead is
+the SITE deploy; it is gated on the owner approving the locally served
+build first. Deploy preparation (build output, staged wrangler configs)
+continues; the deploy itself is a HARD STOP outward-facing action, in
+line with D121/D127/D128. The repo's current public state, including
+.claude/, was not countermanded and stands as owner-ordered on
+2026-08-13.
+
+## D265 — OWNER: v1 acceptance gains a stranger spec AND an export round trip in every mutt spec (2026-08-16)
+
+The strongest option was chosen explicitly: (1) one BLOCKING stranger
+spec joins the 11 mutt walkthroughs — single-class 1→5, cold profile,
+choices-and-sources every level, a mid-journey reload, then export →
+re-import into a fresh profile with identical sheet numbers; (2) EVERY
+mutt spec appends an export→re-import final step after its last
+checkpoint. This gives D262.11 (export/import on the v1 bar) its
+acceptance-side teeth and puts the bar's own persona inside the gate.
+Cost accepted: touches every spec and lengthens every run. Specs lead;
+the walkthrough engine implements the step in its own lane (same
+sequencing as the three-toggle shape, D260.5).
+
+## D264 — OWNER: mutation testing runs in parallel with other work (2026-08-16)
+
+"This pc has a powerful ryzen 7900x. you can do mutation testing with
+recompiling in parallel with other things." Stryker runs (concurrency 6 on
+12c/24t) do NOT reserve the machine; dispatches, reviews, and authoring
+continue alongside them.
+
+Reconciliation with the one-suite-at-a-time rule, which this does not
+repeal: that rule exists because TIMING-SENSITIVE gate suites (full
+vitest/Playwright with measured per-test budgets) produce false timeout
+reds under load. Mutation testing plus non-suite work is now expressly
+fine. If a full gate suite must run while a mutation run is active and it
+fails only on known contention-prone timing tests, the existing lesson
+applies: discard and re-run on a quiet machine rather than blaming the
+lane — never re-pin a budget from a loaded run.
+
+## D263 — OWNER RULINGS: simcore type debt, tamper boundary, loop-state home (2026-08-16)
+
+Three rulings after the reboot recovery and simcore review round 19
+(5 High, all reproduced; valid-case controls all held).
+
+1. **Loop working state lives in a durable directory outside git**
+   (`~/.claude/loop-scratch/`). The reboot destroyed the tmpfs scratchpad —
+   briefs, dispatch logs, and two generated spec-input files survived only
+   because workflow journals happen to persist. Briefs, dispatch logs, and
+   generated intermediates go there from now on; git/`.claude/` remain the
+   durable record of decisions and results, not of working state.
+
+2. **The simcore type debt is repaired file-by-file, then confirmed by one
+   more adversarial round before merge.** Context: the lane is runtime-green
+   (179 sim tests pass) but `npm run build`'s `tsc -b` — the real merge
+   gate — fails with 20 errors across 11 round-N test files. The recorded
+   per-round gate line (`tsc -p tsconfig.app.json`) does not typecheck
+   tests; supervisor gate error, recorded at full length in the session.
+   Per-round file provenance is kept (no consolidation); no tsc exclusion.
+   The standing brief's "build OR tsc -p app-config" wording is void — the
+   compile gate for a lane with test changes is `tsc -b`.
+
+3. **Tamper-resistance boundary: accidents yes, self-sabotage no.** The sim
+   defends against our own future code mutating state by ACCIDENT (deep-freeze
+   what we hand out stays), but deliberate in-process attacks — prototype
+   reassignment, post-hoc mutation of returned objects — are inside the
+   documented caller-trust boundary, same status as round 18's structural-clone
+   limit. Round-19 findings 1 and 5 are real under any reading and are fixed
+   (an unregistered fold path that returns a number; recovery rows pinned to a
+   heading with no digest). Findings 2–4 are documented as boundary, not fixed.
+   Reviewers stop earning Highs for in-process self-attacks; the arms race ends.
+
 ## D249 — OWNER: UI is designed by Claude first, through a four-stage pipeline (2026-08-14)
 
 Ruling on how UI work is produced, overriding the general "codex implements"
@@ -2803,3 +3453,118 @@ failure, not a preference.
    #21 (Stryker threshold) SURVIVE. **#17 (errata triple-check) is KILLED** —
    the errata dossier's existing two-pass record stands; no triple-check
    deep-dive.
+
+## D259 — Correction to D257's census, and the registration-required design (2026-08-15)
+
+CORRECTION (supervisor's own error, caught by review round 14): D257 said the
+fixed-DC oracle has "2 non-null today". The oracle and the source census
+support exactly ONE non-null row — contact_other_plane: 15. Earthquake's
+DC 20 is check-owned and its row is null. The "2" was a stale figure from
+before Earthquake was decoded. decisions.md is append-only, so the wrong
+sentence stands above with this correction governing.
+
+DESIGN AMENDMENT, completing D257: rounds 12-14 each defeated the DC scanner
+with composed English that is lawful but off-corpus. Under D257 the answer is
+not a smarter parser — it is REGISTRATION-REQUIRED FOLDING: a clause may fold
+ONLY if it has rows in ALL reviewed oracles (kind, availability, fixed DC,
+grouping — the grouping oracle becomes TOTAL over all clauses, not partial
+with derived membership). An unregistered clause refuses by construction, so
+novel wording cannot fail open no matter what the parser misses; parsing is
+demoted entirely to a drift alarm over REGISTERED rows. New spells onboard by
+an AI-with-source decode pass that writes their rows — and per round 14's
+named process gap ("same-change oracle co-minting"), that decode pass must be
+SEPARATE from any parser change: oracle rows and parser code never land in
+the same change for the same clause.
+
+## D260 — Round-3 collaborative brainstorm rulings (2026-08-15)
+
+Five fresh Claude perspectives (VTT table-runner / deployment-infra /
+sim-matrix economics / release / next-session) plus codex sixth; 26
+candidates; duplicates merged; blockers asked one at a time:
+
+1. **NPC party profiles: DERIVED FROM SRD CLASSES at level 7** — standard-array
+   Fighter/Cleric/Wizard built from the class tables, cited like everything
+   else, appended to the contract beside the enemy save row.
+2. **VTT rooms: DM-AUTHORITATIVE DOC** — players send proposals; only the DM
+   client mutates the shared doc, on every transport. Kick = stop accepting a
+   peer.
+3. **VTT persistence: DM-LOCAL AUTOSAVE** — Yjs snapshots into the DM's
+   SQLite; DM refresh safe; full DM disconnect pauses the game; server
+   stateless.
+4. **Board B official composite: EQUAL-WEIGHT AVERAGE of the solo-boss and
+   3-mook day variants**; both columns still printed.
+5. **Toggles: H1 COLLAPSES INTO H4.** Three house-rule toggles ship (H4
+   Dex-for-Str prereqs incl. Paladin, H2 feat decoupling, H3 MI ability);
+   contract keeps H1 as history; disclosures name H4.
+6. **Cloudflare: CONFIGS ONLY, NO DEPLOY.** wrangler.toml + relay worker code
+   staged in-repo; nothing deploys until the owner acts. No paid plan.
+7. **Release scope: VTT ships AFTER v1** as its own milestone; **the mirror
+   goes PUBLIC when v1-usable is declared.**
+8. **Fog is TECHNICALLY SECRET** — the DM client sends players a filtered
+   doc; hidden state never leaves the DM. (Natural fit with ruling 2.)
+9. **Simcore registry: PUBLIC SRD CORE + PRIVATE ORACLE OVERLAYS** — Board B's
+   Xanathar/Tasha registrations and user imports live in overlay files that
+   never touch the public repo.
+
+Supervisor-decided without asking: simcore round briefs/findings become
+committed docs (private repo) rather than scratchpad-only; handover files get
+a refresh at the next quiescent point; the 11 walkthrough specs are the
+supervisor's next authoring task and their absence is a queue fact, not an
+owner decision.
+
+## D261 — OWNER AMENDMENT: one combat shape — a boss WITH three mooks (2026-08-15)
+
+Verbatim: "the one boss should have 3 mooks with him instead of splitting.
+Most fights have multiple enemies for action economy."
+
+This SUPERSEDES D253.2's two-variant day and D260.4's equal-weight average:
+every combat is ONE encounter containing a boss and three mooks — four
+bodies, real action economy, one official basis, one composite. The C1 total
+incoming stream is unchanged and is distributed across the four bodies with
+the split declared in the contract (supervisor to append with the C22 rows;
+boss carries the majority share, mooks the remainder). AoE and multi-target
+effects resolve against the real four-body group; single-target rotations
+choose targets. The side-by-side variant columns are retired before ever
+being produced — no sim ran under the superseded design.
+
+## D262 — Round-4 collaborative brainstorm rulings (2026-08-15)
+
+Codex (11 candidates) + Claude (8) collated to ten distinct questions;
+asked one at a time. Two AskUserQuestion rounds on the registry question
+were "explain more" — the ruling below was made after the under-the-hood
+explainer (parse-once + digest tripwire + who-operates framing).
+
+1. **v1 gate: PRIVATE-LIBRARY PASS BLOCKS v1.** The private-library
+   walkthrough pass (import + non-SRD paths) must complete before the mirror
+   flips public, even though its content never ships. Non-halting defect
+   policy was not amended — D251.1's severity split stands.
+2. **Post-v1 first lane: DPR SIM UI (#18)** — the in-app advanced-user
+   simulator precedes launch hardening, scorecard expansion, and VTT
+   phase 2.
+3. **Board B is a REDESIGN SIGNAL** — the report's job is to identify
+   underperforming mechanics/concepts and feed another design round, not to
+   crown builds. Structure the report for that reading.
+4. **Sim fidelity ceiling: CHASE THE DOCX** — fidelity is sufficient when
+   the sim tracks the external d4 methodology within tolerance; that
+   reference, not sensitivity tests or a fixed scope, is the stopping rule.
+5. **Private-pass corpus: known-tricky spells (Thorn Whip / Cloud of
+   Daggers / Armor of Agathys), non-SRD subclasses + feats, non-SRD species
+   + backgrounds.** Full class spell lists are explicitly NOT required.
+6. **AI-guided mode at public v1: POWER-USER SETUP** — documented as
+   bring-your-own-AI; the site guarantees the hooks (alt text, structured
+   actions), not the experience. The deterministic flow is the product.
+7. **Clean-room public depth: MAX LAWFUL DETAIL** — public board variants
+   publish everything the D59 gate permits per build, accepting a heavier
+   clean-room review each time.
+8. **VTT phase 2 negative scope: NO cloud accounts, NO voice/video, NO
+   hosted asset library.** Rules automation was offered as an exclusion and
+   NOT chosen — it is in bounds for phase 2.
+9. **Registry ops: AI-ASSISTED INTERNAL** — the decode+review registration
+   pipeline becomes a maintained internal tool (cheap SRD revisions and
+   private-library growth); user imports keep refusing with "sim
+   unavailable". Extends D260.9's overlay split with an operator.
+10. **KB target for v1: ALL BUNDLED MECHANICS** — every mechanical rule the
+    bundled SRD content can surface gets a KB entry; KB completeness is its
+    own release deliverable with its own audit (beyond the 127-entry sweep).
+11. **Persistence: EXPORT/IMPORT REQUIRED AT v1** — file save + re-import
+    joins the v1 bar; localStorage reload-safety alone is insufficient.

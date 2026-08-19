@@ -21,6 +21,7 @@ import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { DatabaseContext } from '../../src/db/database';
+import { registerSqliteQueryEngine } from '../../src/db/query';
 import { createBuildReportFixture } from '../integration/reports/build-report-fixture';
 import { expect, test } from './fixtures/parallel-test';
 
@@ -37,6 +38,7 @@ const PANEL = '[data-ai-bridge="AI_BRIDGE_SENTINEL"]';
 
 async function plannerImage(): Promise<{ bytes: number[]; characterId: number }> {
   const sqlite3 = await sqlite3InitModule();
+  registerSqliteQueryEngine(sqlite3);
   const connection = new sqlite3.oo1.DB(':memory:', 'c');
   connection.exec(schema);
   const db = new DatabaseContext(connection);

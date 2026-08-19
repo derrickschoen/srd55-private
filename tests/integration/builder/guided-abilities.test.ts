@@ -33,9 +33,11 @@ import {
 } from '../../../src/sharing/character-share';
 import { handlers as guidedHandlers } from '../../../src/worker/handlers/guided';
 import { rpcRegistry } from '../../../src/worker/registry';
+import { expectOkOutcome } from '../../helpers/outcome';
+import type { Outcome } from '../../../src/refusals/outcome';
 import { openTestDatabase } from '../../helpers/open-db';
 import {
-  createRpcHarness,
+  createSeededRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
 
@@ -125,7 +127,9 @@ async function allocateThroughRpc(
       `Ability allocation was refused: ${response.error.code} ${response.error.message}`,
     );
   }
-  return response.result as GuidedAllocateAbilitiesResult;
+  return expectOkOutcome(
+    response.result as Outcome<GuidedAllocateAbilitiesResult>,
+  );
 }
 
 function expectPersistedAllocation(
@@ -144,7 +148,7 @@ function expectPersistedAllocation(
 
 describe('B1-ALLOC: allocation uses an explicit persisted signal', () => {
   it('distinguishes allocated all-10s from a fresh character with the same six scores', async () => {
-    harness = await createRpcHarness(guidedHandlers);
+    harness = await createSeededRpcHarness(guidedHandlers, { profile: 'test-core' });
     const allocatedId = await guidedCharacter(harness, 'Allocated Tens');
     const freshId = await guidedCharacter(harness, 'Fresh Tens');
 
@@ -186,7 +190,7 @@ describe('B1-ALLOC: allocation uses an explicit persisted signal', () => {
 
 describe('M3-DRAFT: in-progress ability input uses durable per-character UI state', () => {
   it('round-trips the method and six scores without completing or revising the character, then clears on allocation', async () => {
-    harness = await createRpcHarness(guidedHandlers);
+    harness = await createSeededRpcHarness(guidedHandlers, { profile: 'test-core' });
     const characterId = await guidedCharacter(harness, 'Drafted Scores');
     const scores: GuidedAbilityScores = {
       strength: 8,
@@ -269,7 +273,7 @@ describe('B1-BLOCK: warnings accompany successful allocations as result data', (
 
   for (const journey of journeys) {
     it(`${journey.name}: writes the signal and advances while returning the warning`, async () => {
-      harness = await createRpcHarness(guidedHandlers);
+      harness = await createSeededRpcHarness(guidedHandlers, { profile: 'test-core' });
       const characterId = await guidedCharacter(
         harness,
         `Warning ${journey.name}`,
@@ -352,7 +356,7 @@ describe('allocation undo and pre-v8 snapshots', () => {
       new CharacterCommandIntegrity('allocation-undo-test-key'),
     );
 
-    const allocated = await executor.execute({
+    const allocated = expectOkOutcome(await executor.execute({
       character_id: characterId,
       operation_uuid: '30000000-0000-4000-8000-000000000001',
       expected_revision: 0,
@@ -361,14 +365,14 @@ describe('allocation undo and pre-v8 snapshots', () => {
         method: 'manual',
         scores: ALL_TENS,
       },
-    });
+    }));
     expectPersistedAllocation(db, characterId, 'manual', ALL_TENS);
 
-    await executor.undo({
+    expectOkOutcome(await executor.undo({
       character_id: characterId,
       operation_uuid: allocated.operation_uuid,
       expected_revision: 1,
-    });
+    }));
 
     expect(
       db.oneRaw(
@@ -441,7 +445,7 @@ describe('allocation undo and pre-v8 snapshots', () => {
 
 describe('allocateGuidedAbilities direct real-database contract', () => {
   it('returns warning data after committing rather than using a refusal channel', async () => {
-    harness = await createRpcHarness([]);
+    harness = await createSeededRpcHarness([], { profile: 'test-core' });
     const characterId = await guidedCharacter(harness, 'Direct Allocation');
 
     await expect(
@@ -457,12 +461,15 @@ describe('allocateGuidedAbilities direct real-database contract', () => {
         new CharacterCommandIntegrity('guided-abilities-test-key'),
       ),
     ).resolves.toEqual({
-      character_id: characterId,
-      current_step: stepAfterAbilities(),
-      warnings: [
-        { kind: 'non_standard_method', method: 'manual' },
-        { kind: 'weak_scores', at_least_plus_two: 0 },
-      ],
+      kind: 'ok',
+      value: {
+        character_id: characterId,
+        current_step: stepAfterAbilities(),
+        warnings: [
+          { kind: 'non_standard_method', method: 'manual' },
+          { kind: 'weak_scores', at_least_plus_two: 0 },
+        ],
+      },
     });
   });
 });

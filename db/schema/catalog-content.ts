@@ -19,6 +19,10 @@ import type {
   NormalizedContentName,
 } from '../../src/catalog/content-identity';
 import { contentKinds } from '../../src/catalog/content-identity';
+import {
+  catalogContentVisibilities,
+  type CatalogContentVisibility,
+} from '../../src/catalog/content-visibility';
 import { datetime, oneOf, sqlText, tinyint1, varchar } from './columns';
 
 export const catalogContentOriginKinds = [
@@ -83,6 +87,7 @@ export const catalog_content_identities = sqliteTable(
     content_kind: varchar<ContentKind>()('content_kind').notNull(),
     key_kind: varchar<CatalogContentKeyKind>()('key_kind').notNull(),
     catalog_layer: varchar<CatalogContentLayer>()('catalog_layer').notNull(),
+    visibility: varchar<CatalogContentVisibility>()('visibility').notNull(),
     normalized_name: varchar<NormalizedContentName>()(
       'normalized_name',
     ).notNull(),
@@ -103,6 +108,10 @@ export const catalog_content_identities = sqliteTable(
     check(
       'catalog_content_identities_catalog_layer_check',
       sql`${table.catalog_layer} IN ('bundled', 'external')`,
+    ),
+    check(
+      'catalog_content_identities_visibility_check',
+      oneOf('visibility', catalogContentVisibilities),
     ),
     check(
       'catalog_content_identities_normalized_name_check',

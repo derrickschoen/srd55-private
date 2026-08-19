@@ -6,6 +6,7 @@ import {
 } from '../db/codecs';
 import {
   SpellSelectionEligibility,
+  type SpellSelectionEligibilitySnapshot,
   type SpellSelectionEvaluation,
 } from './spell-selection-eligibility';
 import {
@@ -13,6 +14,7 @@ import {
   type SpellSelectionConstraint,
 } from './spell-selection-constraint';
 import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
+import type { SpellVersionId } from '../domain/ids';
 
 export const WIZARD_SPELLBOOK_COLLECTION = 'wizard_spellbook';
 export const WIZARD_OUT_OF_BOOK_REASON =
@@ -131,13 +133,21 @@ export function evaluateSelectionCollectionConstraint(
   constraint: SpellSelectionConstraint,
   spellVersionId: number,
   eligibility = new SpellSelectionEligibility(db),
+  snapshot?: SpellSelectionEligibilitySnapshot,
 ): SpellSelectionEvaluation {
   const collection = constraint.selection_collection;
-  const base = eligibility.evaluateConstraint(
-    characterId,
-    { ...constraint, selection_collection: null },
-    spellVersionId,
-  );
+  const base = snapshot === undefined
+    ? eligibility.evaluateConstraint(
+        characterId,
+        { ...constraint, selection_collection: null },
+        spellVersionId,
+      )
+    : eligibility.evaluateConstraintFromSnapshot(
+        characterId,
+        { ...constraint, selection_collection: null },
+        spellVersionId as SpellVersionId,
+        snapshot,
+      );
   if (base.status !== 'valid' || collection === null) return base;
   return spellBelongsToSelectionCollection(
     db,

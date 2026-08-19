@@ -45,6 +45,20 @@ export interface GrantRulePlanInput {
   readonly effective_character_level?: CharacterLevel | null;
 }
 
+export class PlannedSpellConstraintListError extends TypeError {
+  override readonly name = 'PlannedSpellConstraintListError' as const;
+  constructor() {
+    super('Planned spell constraint lists must be strings.');
+  }
+}
+
+export class ConfiguredSpellListResolutionError extends TypeError {
+  override readonly name = 'ConfiguredSpellListResolutionError' as const;
+  constructor() {
+    super('A configured spell list could not be resolved.');
+  }
+}
+
 function valueAtPath(value: unknown, path: string): unknown {
   let current = value;
   for (const part of path.split('.')) {
@@ -69,7 +83,7 @@ function stringList(value: unknown): readonly string[] {
     !Array.isArray(value) ||
     !value.every((item) => typeof item === 'string')
   ) {
-    throw new TypeError('Planned spell constraint lists must be strings.');
+    throw new PlannedSpellConstraintListError();
   }
   return Object.freeze([...value]);
 }
@@ -83,7 +97,7 @@ function resolvedList(data: Readonly<Record<string, unknown>>, config: JsonObjec
     ? valueAtPath(config, raw.slice('$config.'.length))
     : raw;
   if (typeof resolved !== 'string' || resolved.trim() === '') {
-    throw new TypeError('A configured spell list could not be resolved.');
+    throw new ConfiguredSpellListResolutionError();
   }
   return Object.freeze([resolved.trim()]);
 }

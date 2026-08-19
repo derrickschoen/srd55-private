@@ -4,6 +4,16 @@ import { AbilityScore } from './ability-score';
 
 export type AbilityScoreInput = Readonly<Record<string, unknown>>;
 
+export class AbilityScoreInputError extends TypeError {
+  override readonly name = 'AbilityScoreInputError' as const;
+  constructor(
+    readonly ability: Ability,
+    readonly value: unknown,
+  ) {
+    super(`Missing or invalid ${ability} ability score.`);
+  }
+}
+
 export class AbilityScores {
   readonly strength: AbilityScore;
   readonly dexterity: AbilityScore;
@@ -56,7 +66,7 @@ export class AbilityScores {
     const validDigitString =
       typeof value === 'string' && /^[0-9]+$/.test(value);
     if (!validInteger && !validDigitString) {
-      throw new TypeError(`Missing or invalid ${ability} ability score.`);
+      throw new AbilityScoreInputError(ability, value);
     }
 
     return new AbilityScore(Number(value));

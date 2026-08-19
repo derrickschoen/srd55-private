@@ -2,19 +2,24 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CharacterState } from '../../../src/character/character-state';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import type {
+  CharacterCommandRequest,
   RestoreCharacterSavePointRequest,
   UndoCharacterOperationRequest,
 } from '../../../src/domain/command-contracts';
 import type {
+  CharacterCommandResult,
   RestoreCharacterSavePointResult,
   UndoCharacterOperationResult,
 } from '../../../src/commands/character-command-executor';
+import type { Outcome } from '../../../src/refusals/outcome';
+import type { RpcResponse } from '../../../src/rpc/protocol';
+import { expectOkOutcome } from '../../helpers/outcome';
 import {
   COMMAND_INTEGRITY_KEY,
   handlers as commandHandlers,
 } from '../../../src/worker/handlers/commands';
 import {
-  createRpcHarness,
+  createSeededRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
 import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
@@ -32,7 +37,7 @@ describe('internal operation undo RPC', () => {
   let characterId: number;
 
   beforeEach(async () => {
-    harness = await createRpcHarness(commandHandlers);
+    harness = await createSeededRpcHarness(commandHandlers);
     characterId = harness.context.db.exec(
       `INSERT INTO characters (name, alignment)
        VALUES ('Undo RPC Hero', 'Neutral')`,
@@ -41,8 +46,24 @@ describe('internal operation undo RPC', () => {
 
   afterEach(() => harness.close());
 
+  function unwrapOutcomeResponse<T>(
+    response: RpcResponse<Outcome<T>>,
+  ): RpcResponse<T> {
+    if (!response.ok) return response;
+    return { ...response, result: expectOkOutcome(response.result) };
+  }
+
+  async function execute(
+    request: CharacterCommandRequest,
+  ): Promise<RpcResponse<CharacterCommandResult>> {
+    return unwrapOutcomeResponse(await harness.call<
+      CharacterCommandRequest,
+      Outcome<CharacterCommandResult>
+    >('commands.execute', request));
+  }
+
   async function writeFlavor(notes?: string) {
-    return harness.call('commands.execute', {
+    return execute({
       character_id: characterId,
       operation_uuid: flavorOperation,
       expected_revision: 0,
@@ -54,18 +75,18 @@ describe('internal operation undo RPC', () => {
     });
   }
 
-  function undo(request: UndoCharacterOperationRequest) {
-    return harness.call<
+  async function undo(request: UndoCharacterOperationRequest) {
+    return unwrapOutcomeResponse(await harness.call<
       UndoCharacterOperationRequest,
-      UndoCharacterOperationResult
-    >('commands.undo', request);
+      Outcome<UndoCharacterOperationResult>
+    >('commands.undo', request));
   }
 
-  function restoreSavePoint(request: RestoreCharacterSavePointRequest) {
-    return harness.call<
+  async function restoreSavePoint(request: RestoreCharacterSavePointRequest) {
+    return unwrapOutcomeResponse(await harness.call<
       RestoreCharacterSavePointRequest,
-      RestoreCharacterSavePointResult
-    >('commands.restoreSavePoint', request);
+      Outcome<RestoreCharacterSavePointResult>
+    >('commands.restoreSavePoint', request));
   }
 
   function featDefinition(
@@ -153,7 +174,7 @@ describe('internal operation undo RPC', () => {
     const before = state.capture(characterId);
     const operationUuid = operation(201);
 
-    const executed = await harness.call('commands.execute', {
+    const executed = await execute({
       character_id: characterId,
       operation_uuid: operationUuid,
       expected_revision: 0,
@@ -186,7 +207,7 @@ describe('internal operation undo RPC', () => {
     const before = state.capture(characterId);
     const operationUuid = operation(202);
 
-    const executed = await harness.call('commands.execute', {
+    const executed = await execute({
       character_id: characterId,
       operation_uuid: operationUuid,
       expected_revision: 0,
@@ -241,7 +262,7 @@ describe('internal operation undo RPC', () => {
     const before = state.capture(characterId);
     const operationUuid = operation(203);
 
-    const executed = await harness.call('commands.execute', {
+    const executed = await execute({
       character_id: characterId,
       operation_uuid: operationUuid,
       expected_revision: 0,
@@ -295,7 +316,7 @@ describe('internal operation undo RPC', () => {
     const before = state.capture(characterId);
     const operationUuid = operation(204);
 
-    const executed = await harness.call('commands.execute', {
+    const executed = await execute({
       character_id: characterId,
       operation_uuid: operationUuid,
       expected_revision: 0,
@@ -447,7 +468,7 @@ describe('internal operation undo RPC', () => {
 
   it('refuses an older stack top after compensation and only follows the operation that produced the current revision', async () => {
     await writeFlavor();
-    await harness.call('commands.execute', {
+    await execute({
       character_id: characterId,
       operation_uuid: operation(1),
       expected_revision: 1,
@@ -571,7 +592,7 @@ describe('internal operation undo RPC', () => {
   it('refuses the revision-0 flavor inverse at revision 10 because it is not latest', async () => {
     await writeFlavor();
     for (let revision = 1; revision < 10; revision += 1) {
-      const result = await harness.call('commands.execute', {
+      const result = await execute({
         character_id: characterId,
         operation_uuid: operation(revision),
         expected_revision: revision,
@@ -687,7 +708,7 @@ describe('internal operation undo RPC', () => {
        VALUES (?, 'Before experiment', ?, ?)`,
       [characterId, JSON.stringify(snapshot), snapshot.schema_version],
     ).lastInsertId;
-    await harness.call('commands.execute', {
+    await execute({
       character_id: characterId,
       operation_uuid: operation(100),
       expected_revision: 0,

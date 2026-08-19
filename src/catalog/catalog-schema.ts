@@ -51,10 +51,51 @@ import {
   type CatalogFeatRecord,
   type CatalogSpeciesRecord,
 } from './source-catalog-records';
+import {
+  CatalogArmorDexBonusDisagreementError,
+  CatalogDamageKindError,
+  CatalogDocumentJsonParseError,
+  CatalogDocumentNotAListError,
+  CatalogExtraAttackCountError,
+  CatalogExtraAttackWeaponScopeError,
+  CatalogFieldEnumError,
+  CatalogFieldIntegerRangeError,
+  CatalogFieldInvalidError,
+  CatalogFieldLengthError,
+  CatalogFieldNonZeroError,
+  CatalogFieldNotAnAbilityError,
+  CatalogFieldNullableIntegerRangeError,
+  CatalogFieldNullableNonNegativeIntegerError,
+  CatalogFieldRowCountError,
+  CatalogFieldTypeError,
+  CatalogFieldWhitespaceError,
+  CatalogHpModifierPayloadError,
+  CatalogImportedContentKeyError,
+  CatalogLevelListDuplicateError,
+  CatalogLevelListRangeError,
+  CatalogNonObjectRecordError,
+  CatalogRangeKindError,
+  CatalogRangeOrderError,
+  CatalogShieldDexBonusError,
+  CatalogSubclassDuplicateFeatureError,
+  CatalogSubclassFeaturesRequiredError,
+  CatalogTierOneRequiredError,
+  CatalogTierOneSubclassConflictError,
+  CatalogTierTwoDescriptionConflictError,
+  CatalogTierTwoDescriptionEmptyError,
+  CatalogTierTwoRecordError,
+  CatalogUnhandledKindError,
+  CatalogUpcastScaleRetiredError,
+  type CatalogDocumentTier,
+} from './catalog-schema-errors';
 import { isRecord } from '../worker/handler';
 import { isImportedContentKey } from './catalog-key';
 import { trimEqualCatalogLocator } from './catalog-field-values';
 import { normalizeContentIdentityName } from './content-identity';
+import {
+  catalogContentVisibilities,
+  type CatalogContentVisibility,
+} from './content-visibility';
 import type {
   ContentImportChoices,
   ContentImportPlanToken,
@@ -101,6 +142,7 @@ export const catalogRecordKinds = [
 export type CatalogRecordKind = (typeof catalogRecordKinds)[number];
 
 export interface CatalogRecord {
+  visibility: CatalogContentVisibility;
   identityKey: string;
   versionKey: string;
   name: string;
@@ -202,6 +244,7 @@ export interface CatalogSubclassFeature {
  */
 export interface CatalogSubclassRecord {
   kind: 'subclass';
+  visibility: CatalogContentVisibility;
   /**
    * The subclass's own content key, and it MUST be an imported key — three
    * parts with a dotted owner namespace in the middle. See
@@ -230,6 +273,7 @@ export interface CatalogSubclassRecord {
 
 export interface CatalogWeaponRecord {
   readonly kind: 'weapon';
+  readonly visibility: CatalogContentVisibility;
   readonly name: string;
   readonly edition: RulesEdition;
   readonly srdGroup: SrdWeaponGroup;
@@ -252,6 +296,7 @@ export interface CatalogWeaponRecord {
 
 export interface CatalogArmorRecord {
   readonly kind: 'armor';
+  readonly visibility: CatalogContentVisibility;
   readonly name: string;
   readonly edition: RulesEdition;
   readonly category: ArmorCategory;
@@ -264,6 +309,7 @@ export interface CatalogArmorRecord {
 
 export interface CatalogItemRecord {
   readonly kind: 'item';
+  readonly visibility: CatalogContentVisibility;
   readonly name: string;
   readonly edition: RulesEdition;
   readonly description: string;
@@ -312,14 +358,18 @@ export interface ForkSpellParams {
   readonly name?: string;
 }
 
-function parseJsonDocument(document: string, label: string): unknown {
+function parseJsonDocument(
+  document: string,
+  tier: CatalogDocumentTier,
+  documentNumber: number,
+): unknown {
   try {
     return JSON.parse(document) as unknown;
   } catch (error) {
-    throw new TypeError(
-      `Invalid ${label} JSON: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
+    throw new CatalogDocumentJsonParseError(
+      tier,
+      documentNumber,
+      error instanceof Error ? error.message : String(error),
     );
   }
 }
@@ -330,9 +380,7 @@ function textLength(
   maximumLength: number | undefined,
 ): string {
   if (maximumLength !== undefined && value.length > maximumLength) {
-    throw new TypeError(
-      `Catalog field '${field}' must contain at most ${String(maximumLength)} characters.`,
-    );
+    throw new CatalogFieldLengthError(field, maximumLength);
   }
   return value;
 }
@@ -343,16 +391,14 @@ function nonEmptyString(
   maximumLength?: number,
 ): string {
   if (typeof value !== 'string' || value.trim() === '') {
-    throw new TypeError(
-      `Catalog field '${field}' must be a non-empty string.`,
-    );
+    throw new CatalogFieldTypeError(field, 'non_empty_string');
   }
   return textLength(value, field, maximumLength);
 }
 
 function spellLocator(value: string, field: string): string {
-  return trimEqualCatalogLocator(value, field, (message) => {
-    throw new TypeError(message);
+  return trimEqualCatalogLocator(value, field, () => {
+    throw new CatalogFieldWhitespaceError(field);
   });
 }
 
@@ -371,9 +417,7 @@ function nullableString(
     return null;
   }
   if (typeof value !== 'string') {
-    throw new TypeError(
-      `Catalog field '${field}' must be a string or null.`,
-    );
+    throw new CatalogFieldTypeError(field, 'nullable_string');
   }
   return textLength(value, field, maximumLength);
 }
@@ -384,7 +428,7 @@ function requiredString(
   maximumLength?: number,
 ): string {
   if (typeof value !== 'string') {
-    throw new TypeError(`Catalog field '${field}' must be a string.`);
+    throw new CatalogFieldTypeError(field, 'string');
   }
   return textLength(value, field, maximumLength);
 }
@@ -398,21 +442,32 @@ function stringList(
     return [];
   }
   if (!Array.isArray(value)) {
-    throw new TypeError(`Catalog field '${field}' must be a list.`);
+    throw new CatalogFieldTypeError(field, 'list');
   }
   for (const item of value) {
     if (typeof item !== 'string' || item.trim() === '') {
-      throw new TypeError(
-        `Catalog field '${field}' must contain non-empty strings.`,
-      );
+      throw new CatalogFieldTypeError(field, 'non_empty_string_items');
     }
   }
   return [...value] as string[];
 }
 
+/** The sole compatibility default: a legacy import document is listed. */
+function catalogVisibility(value: unknown): CatalogContentVisibility {
+  if (value === undefined) return 'listed';
+  if (!isEnumValue(catalogContentVisibilities, value)) {
+    throw new CatalogFieldEnumError(
+      'visibility',
+      catalogContentVisibilities,
+      'optional',
+    );
+  }
+  return value;
+}
+
 function catalogRecord(value: unknown): CatalogRecord {
   if (!isRecord(value)) {
-    throw new TypeError('Catalog document contains a non-object record.');
+    throw new CatalogNonObjectRecordError();
   }
 
   const level = value.level;
@@ -421,21 +476,21 @@ function catalogRecord(value: unknown): CatalogRecord {
     Number(level) < SPELL_LEVEL_MIN ||
     Number(level) > SPELL_LEVEL_MAX
   ) {
-    throw new TypeError(
-      "Catalog field 'level' must be an integer from 0 through 9.",
+    throw new CatalogFieldIntegerRangeError(
+      'level',
+      SPELL_LEVEL_MIN,
+      SPELL_LEVEL_MAX,
     );
   }
   for (const field of ['concentration', 'ritual'] as const) {
     if (typeof value[field] !== 'boolean') {
-      throw new TypeError(`Catalog field '${field}' must be boolean.`);
+      throw new CatalogFieldTypeError(field, 'boolean');
     }
   }
 
   const edition = nonEmptyString(value.edition, 'edition');
   if (!rulesEditions.includes(edition as RulesEdition)) {
-    throw new TypeError(
-      `Catalog field 'edition' must be one of ${rulesEditions.join(', ')}.`,
-    );
+    throw new CatalogFieldEnumError('edition', rulesEditions);
   }
   const reliability =
     value.effectReliabilityCategory === undefined
@@ -449,8 +504,9 @@ function catalogRecord(value: unknown): CatalogRecord {
       reliability as EffectReliabilityCategory,
     )
   ) {
-    throw new TypeError(
-      `Catalog field 'effectReliabilityCategory' must be one of ${effectReliabilityCategories.join(', ')}.`,
+    throw new CatalogFieldEnumError(
+      'effectReliabilityCategory',
+      effectReliabilityCategories,
     );
   }
   const sourcePage = value.sourcePage;
@@ -459,21 +515,20 @@ function catalogRecord(value: unknown): CatalogRecord {
     sourcePage !== null &&
     (!Number.isSafeInteger(sourcePage) || Number(sourcePage) < 0)
   ) {
-    throw new TypeError(
-      "Catalog field 'sourcePage' must be a non-negative integer or null.",
-    );
+    throw new CatalogFieldNullableNonNegativeIntegerError('sourcePage');
   }
   if (value.healing !== undefined && typeof value.healing !== 'boolean') {
-    throw new TypeError("Catalog field 'healing' must be boolean.");
+    throw new CatalogFieldTypeError('healing', 'boolean');
   }
   if (
     value.requiresModForEffect !== undefined &&
     typeof value.requiresModForEffect !== 'boolean'
   ) {
-    throw new TypeError("Catalog field 'requiresModForEffect' must be boolean.");
+    throw new CatalogFieldTypeError('requiresModForEffect', 'boolean');
   }
 
   return {
+    visibility: catalogVisibility(value.visibility),
     identityKey: spellLocator(
       nonEmptyString(value.identityKey, 'identityKey'),
       'identityKey',
@@ -536,7 +591,7 @@ function levelList(
     return [];
   }
   if (!Array.isArray(raw)) {
-    throw new TypeError(`Catalog field '${field}' must be a list.`);
+    throw new CatalogFieldTypeError(field, 'list');
   }
   const levels: number[] = [];
   for (const level of raw as unknown[]) {
@@ -545,14 +600,10 @@ function levelList(
       Number(level) < 1 ||
       Number(level) > highest
     ) {
-      throw new TypeError(
-        `Catalog field '${field}' must contain integers from 1 through ${String(highest)}.`,
-      );
+      throw new CatalogLevelListRangeError(field, 1, highest);
     }
     if (levels.includes(Number(level))) {
-      throw new TypeError(
-        `Catalog field '${field}' repeats level ${String(level)}.`,
-      );
+      throw new CatalogLevelListDuplicateError(field, Number(level));
     }
     levels.push(Number(level));
   }
@@ -598,9 +649,7 @@ function upcast(value: Record<string, unknown>): {
   cantripUpgradeSummary: string | null;
 } {
   if (value.upcastScale !== undefined && value.upcastScale !== null) {
-    throw new TypeError(
-      "Catalog field 'upcastScale' no longer exists: upcasting is measured in spell slot levels only, so 'upcastLevels' is 1 through 9, and a cantrip's character-level ladder is 'cantripUpgradeLevels', 1 through 20.",
-    );
+    throw new CatalogUpcastScaleRetiredError();
   }
 
   return {
@@ -633,9 +682,7 @@ function boundedInteger(
     Number(value) < low ||
     Number(value) > high
   ) {
-    throw new TypeError(
-      `Catalog field '${field}' must be an integer from ${low} through ${high}.`,
-    );
+    throw new CatalogFieldIntegerRangeError(field, low, high);
   }
   return Number(value);
 }
@@ -663,28 +710,26 @@ function catalogFeatureEffect(
     return null;
   }
   if (!isRecord(value)) {
-    throw new TypeError(
-      `Catalog field '${label}.effect' must be an object or null.`,
-    );
+    throw new CatalogFieldTypeError(`${label}.effect`, 'nullable_object');
   }
   const kind = value.kind;
   if (!isEnumValue(classFeatureEffectKinds, kind)) {
-    throw new TypeError(
-      `Catalog field '${label}.effect.kind' must be one of ${classFeatureEffectKinds.join(', ')}.`,
+    throw new CatalogFieldEnumError(
+      `${label}.effect.kind`,
+      classFeatureEffectKinds,
     );
   }
   switch (kind) {
     case 'extra_attack': {
       const attackCount = value.attackCount;
       if (!Number.isInteger(attackCount) || Number(attackCount) < 2) {
-        throw new TypeError(
-          `Catalog field '${label}.effect.attackCount' must be an integer of 2 or more; it is the TOTAL attacks the Attack action gives, never an increment.`,
-        );
+        throw new CatalogExtraAttackCountError(label);
       }
       const weaponScope = value.weaponScope;
       if (!isEnumValue(extraAttackWeaponScopes, weaponScope)) {
-        throw new TypeError(
-          `Catalog field '${label}.effect.weaponScope' must be one of ${extraAttackWeaponScopes.join(', ')}; it has no default, because defaulting it would widen a one-weapon grant to every weapon.`,
+        throw new CatalogExtraAttackWeaponScopeError(
+          label,
+          extraAttackWeaponScopes,
         );
       }
       return {
@@ -698,8 +743,9 @@ function catalogFeatureEffect(
        document field. */
     default: {
       const unreachable: never = kind;
-      throw new Error(
-        `Unhandled class feature effect kind ${String(unreachable)}.`,
+      throw new CatalogUnhandledKindError(
+        'class feature effect kind',
+        String(unreachable),
       );
     }
   }
@@ -710,7 +756,7 @@ function catalogSubclassFeature(
   label: string,
 ): CatalogSubclassFeature {
   if (!isRecord(value)) {
-    throw new TypeError(`Catalog field '${label}' must be an object.`);
+    throw new CatalogFieldTypeError(label, 'object');
   }
   return {
     // 1..20 is `subclass_features_class_level_check`, retyped rather than
@@ -729,21 +775,15 @@ function catalogSubclassFeature(
 function catalogSubclassRecord(value: Record<string, unknown>): CatalogSubclassRecord {
   const contentKey = nonEmptyString(value.contentKey, 'contentKey');
   if (!isImportedContentKey(contentKey)) {
-    throw new TypeError(
-      `Catalog field 'contentKey' must be an imported content key of the form <edition>:<owner.namespace>:<name>; '${contentKey}' is not, and bundled keys such as '2024:subclass:champion' are refused by that shape on purpose.`,
-    );
+    throw new CatalogImportedContentKeyError(contentKey);
   }
   const edition = nonEmptyString(value.edition, 'edition');
   if (!isEnumValue(rulesEditions, edition)) {
-    throw new TypeError(
-      `Catalog field 'edition' must be one of ${rulesEditions.join(', ')}.`,
-    );
+    throw new CatalogFieldEnumError('edition', rulesEditions);
   }
   const features = value.features;
   if (!Array.isArray(features) || features.length === 0) {
-    throw new TypeError(
-      `Catalog field 'features' must be a non-empty list for subclass '${contentKey}'.`,
-    );
+    throw new CatalogSubclassFeaturesRequiredError(contentKey);
   }
   const parsed = features.map((feature, index) =>
     catalogSubclassFeature(feature, `features[${index}]`),
@@ -754,14 +794,16 @@ function catalogSubclassRecord(value: Record<string, unknown>): CatalogSubclassR
   const names = new Set<string>();
   for (const feature of parsed) {
     if (names.has(feature.name)) {
-      throw new TypeError(
-        `Subclass '${contentKey}' lists the feature '${feature.name}' twice; feature names are unique within a subclass.`,
+      throw new CatalogSubclassDuplicateFeatureError(
+        contentKey,
+        feature.name,
       );
     }
     names.add(feature.name);
   }
   return {
     kind: 'subclass',
+    visibility: catalogVisibility(value.visibility),
     contentKey,
     parentClassKey: nonEmptyString(value.parentClassKey, 'parentClassKey'),
     name: nonEmptyString(value.name, 'name'),
@@ -773,16 +815,14 @@ function catalogSubclassRecord(value: Record<string, unknown>): CatalogSubclassR
 function catalogEdition(value: unknown): RulesEdition {
   const edition = nonEmptyString(value, 'edition');
   if (!isEnumValue(rulesEditions, edition)) {
-    throw new TypeError(
-      `Catalog field 'edition' must be one of ${rulesEditions.join(', ')}.`,
-    );
+    throw new CatalogFieldEnumError('edition', rulesEditions);
   }
   return edition;
 }
 
 function catalogBoolean(value: unknown, field: string): boolean {
   if (typeof value !== 'boolean') {
-    throw new TypeError(`Catalog field '${field}' must be boolean.`);
+    throw new CatalogFieldTypeError(field, 'boolean');
   }
   return value;
 }
@@ -799,9 +839,7 @@ function catalogNullableInteger(
     Number(value) < minimum ||
     Number(value) > maximum
   ) {
-    throw new TypeError(
-      `Catalog field '${field}' must be null or an integer from ${String(minimum)} through ${String(maximum)}.`,
-    );
+    throw new CatalogFieldNullableIntegerRangeError(field, minimum, maximum);
   }
   return Number(value);
 }
@@ -812,7 +850,7 @@ function catalogDamage(
   versatile: boolean,
 ): WeaponDamage | VersatileWeaponDamage {
   if (!isRecord(value)) {
-    throw new TypeError(`Catalog field '${field}' must be an object.`);
+    throw new CatalogFieldTypeError(field, 'object');
   }
   switch (value.kind) {
     case 'dice':
@@ -849,18 +887,16 @@ function catalogDamage(
       if (versatile) return { kind: 'not_applicable' };
       break;
   }
-  throw new TypeError(
-    `Catalog field '${field}.kind' is not valid for this damage value.`,
-  );
+  throw new CatalogDamageKindError(field);
 }
 
 function catalogRange(value: unknown): WritableWeaponRange {
   if (!isRecord(value)) {
-    throw new TypeError("Catalog field 'range' must be an object.");
+    throw new CatalogFieldTypeError('range', 'object');
   }
   if (value.kind === 'none') return { kind: 'none' };
   if (value.kind !== 'ranged') {
-    throw new TypeError("Catalog field 'range.kind' must be none or ranged.");
+    throw new CatalogRangeKindError();
   }
   const near = boundedInteger(
     value.nearFeet,
@@ -875,7 +911,7 @@ function catalogRange(value: unknown): WritableWeaponRange {
     WEAPON_RANGE_MAX_FEET,
   );
   if (far !== null && far < near) {
-    throw new TypeError("Catalog field 'range.farFeet' must not be less than nearFeet.");
+    throw new CatalogRangeOrderError();
   }
   return { kind: 'ranged', near_feet: near, far_feet: far };
 }
@@ -886,12 +922,10 @@ function catalogItemEffect(
 ): AuthoringCharacterEffect {
   const field = `effects[${String(index)}]`;
   if (!isRecord(value)) {
-    throw new TypeError(`Catalog field '${field}' must be an object.`);
+    throw new CatalogFieldTypeError(field, 'object');
   }
   if (!isEnumValue(characterEffectKinds, value.kind)) {
-    throw new TypeError(
-      `Catalog field '${field}.kind' must be one of ${characterEffectKinds.join(', ')}.`,
-    );
+    throw new CatalogFieldEnumError(`${field}.kind`, characterEffectKinds);
   }
   const common = {
     sort_order: index + 1,
@@ -915,21 +949,21 @@ function catalogItemEffect(
   const nonZeroInteger = (key: string): number => {
     const parsed = integer(key, -ORIGIN_EFFECT_MAGNITUDE_MAX);
     if (parsed === 0) {
-      throw new TypeError(`Catalog field '${field}.${key}' must be non-zero.`);
+      throw new CatalogFieldNonZeroError(`${field}.${key}`);
     }
     return parsed;
   };
   const ability = (key: string) => {
     const parsed = nonEmptyString(value[key], `${field}.${key}`);
     if (!isEnumValue(abilities, parsed)) {
-      throw new TypeError(`Catalog field '${field}.${key}' is not an ability.`);
+      throw new CatalogFieldNotAnAbilityError(`${field}.${key}`);
     }
     return parsed;
   };
   const weaponScope = () => {
     const parsed = nonEmptyString(value.weaponScope, `${field}.weaponScope`);
     if (!isEnumValue(extraAttackWeaponScopes, parsed)) {
-      throw new TypeError(`Catalog field '${field}.weaponScope' is invalid.`);
+      throw new CatalogFieldInvalidError(`${field}.weaponScope`);
     }
     return parsed;
   };
@@ -958,7 +992,7 @@ function catalogItemEffect(
         ORIGIN_EFFECT_MAGNITUDE_MAX,
       );
       if (hit_points_flat === null && hit_points_per_level === null) {
-        throw new TypeError(`Catalog field '${field}' needs an HP modifier payload.`);
+        throw new CatalogHpModifierPayloadError(field);
       }
       return { ...common, kind: value.kind, hit_points_flat, hit_points_per_level };
     }
@@ -1027,13 +1061,14 @@ function catalogWeaponRecord(value: Record<string, unknown>): CatalogWeaponRecor
     WEAPON_TEXT_LIMITS.mastery_property,
   );
   if (!isEnumValue(srdWeaponGroups, group)) {
-    throw new TypeError("Catalog field 'srdGroup' is invalid.");
+    throw new CatalogFieldInvalidError('srdGroup');
   }
   if (!isEnumValue(weaponMasteryProperties, mastery)) {
-    throw new TypeError("Catalog field 'masteryProperty' is invalid.");
+    throw new CatalogFieldInvalidError('masteryProperty');
   }
   return {
     kind: 'weapon',
+    visibility: catalogVisibility(value.visibility),
     name: nonEmptyString(value.name, 'name', WEAPON_TEXT_LIMITS.name),
     edition: catalogEdition(value.edition),
     srdGroup: group,
@@ -1075,10 +1110,10 @@ function catalogArmorRecord(value: Record<string, unknown>): CatalogArmorRecord 
   const category = nonEmptyString(value.category, 'category');
   const dexBonus = nonEmptyString(value.dexBonus, 'dexBonus');
   if (!isEnumValue(armorCategories, category)) {
-    throw new TypeError("Catalog field 'category' is invalid.");
+    throw new CatalogFieldInvalidError('category');
   }
   if (!isEnumValue(armorDexBonuses, dexBonus)) {
-    throw new TypeError("Catalog field 'dexBonus' is invalid.");
+    throw new CatalogFieldInvalidError('dexBonus');
   }
   const dexBonusMax = catalogNullableInteger(
     value.dexBonusMax,
@@ -1087,15 +1122,14 @@ function catalogArmorRecord(value: Record<string, unknown>): CatalogArmorRecord 
     SHEET_ARMOR_MAX.dex_bonus_max,
   );
   if ((dexBonus === 'capped') !== (dexBonusMax !== null)) {
-    throw new TypeError("Catalog fields 'dexBonus' and 'dexBonusMax' disagree.");
+    throw new CatalogArmorDexBonusDisagreementError();
   }
   if (category === 'shield' && dexBonus !== 'none') {
-    throw new TypeError(
-      "Catalog field 'dexBonus' must be 'none' when category is 'shield'.",
-    );
+    throw new CatalogShieldDexBonusError();
   }
   return {
     kind: 'armor',
+    visibility: catalogVisibility(value.visibility),
     name: nonEmptyString(value.name, 'name', SHEET_TEXT_LIMITS.armor_name),
     edition: catalogEdition(value.edition),
     category,
@@ -1122,15 +1156,14 @@ function catalogArmorRecord(value: Record<string, unknown>): CatalogArmorRecord 
 
 function catalogItemRecord(value: Record<string, unknown>): CatalogItemRecord {
   if (!Array.isArray(value.effects)) {
-    throw new TypeError("Catalog field 'effects' must be a list.");
+    throw new CatalogFieldTypeError('effects', 'list');
   }
   if (value.effects.length > EQUIPMENT_EFFECT_COUNT_MAX) {
-    throw new TypeError(
-      `Catalog field 'effects' must not contain more than ${String(EQUIPMENT_EFFECT_COUNT_MAX)} rows.`,
-    );
+    throw new CatalogFieldRowCountError('effects', EQUIPMENT_EFFECT_COUNT_MAX);
   }
   return {
     kind: 'item',
+    visibility: catalogVisibility(value.visibility),
     name: nonEmptyString(value.name, 'name', ORIGIN_TEXT_LIMITS.trait_name),
     edition: catalogEdition(value.edition),
     description: requiredString(
@@ -1163,15 +1196,13 @@ function catalogItemRecord(value: Record<string, unknown>): CatalogItemRecord {
  */
 function catalogRecordKind(value: unknown): CatalogRecordKind {
   if (!isRecord(value)) {
-    throw new TypeError('Catalog document contains a non-object record.');
+    throw new CatalogNonObjectRecordError();
   }
   if (value.kind === undefined || value.kind === null) {
     return 'spell';
   }
   if (!isEnumValue(catalogRecordKinds, value.kind)) {
-    throw new TypeError(
-      `Catalog field 'kind' must be one of ${catalogRecordKinds.join(', ')} when present.`,
-    );
+    throw new CatalogFieldEnumError('kind', catalogRecordKinds, 'optional');
   }
   return value.kind;
 }
@@ -1180,7 +1211,7 @@ export function parseCatalogDocuments(
   documents: readonly string[],
 ): CatalogDocumentRecords {
   if (documents.length === 0) {
-    throw new TypeError('At least one Tier 1 catalog document is required.');
+    throw new CatalogTierOneRequiredError();
   }
   const spells: CatalogRecord[] = [];
   const subclasses: CatalogSubclassRecord[] = [];
@@ -1193,14 +1224,9 @@ export function parseCatalogDocuments(
   const backgrounds: CatalogBackgroundRecord[] = [];
   const kinds = new Set<CatalogRecordKind>();
   documents.forEach((document, index) => {
-    const decoded = parseJsonDocument(
-      document,
-      `Tier 1 catalog document ${index + 1}`,
-    );
+    const decoded = parseJsonDocument(document, 1, index + 1);
     if (!Array.isArray(decoded)) {
-      throw new TypeError(
-        `Tier 1 catalog document ${index + 1} must contain a JSON list.`,
-      );
+      throw new CatalogDocumentNotAListError(1, index + 1);
     }
     /**
      * AN EMPTY DOCUMENT DECLARES `spell`, AND IT DECLARES IT PER DOCUMENT.
@@ -1256,8 +1282,9 @@ export function parseCatalogDocuments(
            this parser drops on the floor. */
         default: {
           const unreachable: never = kind;
-          throw new Error(
-            `Unhandled catalog record kind ${String(unreachable)}.`,
+          throw new CatalogUnhandledKindError(
+            'catalog record kind',
+            String(unreachable),
           );
         }
       }
@@ -1274,9 +1301,7 @@ export function parseCatalogDocuments(
     const encoded = JSON.stringify(record);
     const previous = seen.get(record.contentKey);
     if (previous !== undefined && previous !== encoded) {
-      throw new TypeError(
-        `Tier 1 carries two different subclasses under the key '${record.contentKey}'.`,
-      );
+      throw new CatalogTierOneSubclassConflictError(record.contentKey);
     }
     seen.set(record.contentKey, encoded);
   }
@@ -1309,39 +1334,26 @@ export function parseDescriptionDocuments(
 
   const byVersion = new Map<string, string>();
   documents.forEach((document, index) => {
-    const decoded = parseJsonDocument(
-      document,
-      `Tier 2 catalog document ${index + 1}`,
-    );
+    const decoded = parseJsonDocument(document, 2, index + 1);
     if (!Array.isArray(decoded)) {
-      throw new TypeError(
-        `Tier 2 catalog document ${index + 1} must contain a JSON list.`,
-      );
+      throw new CatalogDocumentNotAListError(2, index + 1);
     }
     for (const value of decoded) {
       if (!isRecord(value)) {
-        throw new TypeError(
-          `Tier 2 catalog document ${index + 1} contains a non-object record.`,
-        );
+        throw new CatalogTierTwoRecordError(index + 1, 'non_object');
       }
       const rawVersionKey = value.versionKey;
       if (typeof rawVersionKey !== 'string' || rawVersionKey.trim() === '') {
-        throw new TypeError(
-          `Tier 2 catalog document ${index + 1} contains an invalid versionKey.`,
-        );
+        throw new CatalogTierTwoRecordError(index + 1, 'invalid_version_key');
       }
       const versionKey = spellLocator(rawVersionKey, 'versionKey');
       const description = value._description;
       if (typeof description !== 'string' || description.trim() === '') {
-        throw new TypeError(
-          `Tier 2 description for ${versionKey} must be a non-empty string.`,
-        );
+        throw new CatalogTierTwoDescriptionEmptyError(versionKey);
       }
       const existing = byVersion.get(versionKey);
       if (existing !== undefined && existing !== description) {
-        throw new TypeError(
-          `Tier 2 has conflicting descriptions for ${versionKey}.`,
-        );
+        throw new CatalogTierTwoDescriptionConflictError(versionKey);
       }
       byVersion.set(versionKey, description);
     }

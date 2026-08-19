@@ -6,17 +6,20 @@ import {
   type GuidedAbilityDraft,
   type GuidedAllocateAbilitiesParams,
   type GuidedAllocateAbilitiesResult,
+  isGuidedAllocateAbilitiesResult,
   type GuidedApplyEquipmentParams,
   type GuidedBuildStateParams,
   type GuidedBuildStateResult,
   type GuidedChooseSpeciesLineageParams,
   type GuidedChooseSpeciesLineageResult,
+  isGuidedChooseSpeciesLineageResult,
   type GuidedClassOption,
   type GuidedCreateParams,
   type GuidedEquipmentStepState,
   type GuidedRequiredFighterChoicesState,
   type GuidedFillSkillGrantParams,
   type GuidedFillSkillGrantResult,
+  isGuidedFillSkillGrantResult,
   type GuidedExpertiseStepState,
   type GuidedFillExpertiseGrantParams,
   type GuidedSpellsStepState,
@@ -71,9 +74,14 @@ import {
   type LevelUpPlannedEligibleSpellsResult,
   type LevelUpPreviewParams,
   type LevelUpPreviewResult,
+  isLevelUpPreviewResult,
+  type LevelUpWizardProgress,
+  type SaveLevelUpWizardProgressParams,
   type LevelUpStateParams,
   type LevelUpStateResult,
 } from '../builder/level-up-wizard';
+import { decodeOutcome } from '../refusals/decode';
+import type { DecodedOutcome } from '../refusals/outcome';
 
 export interface QueriesClient extends CatalogClient {
   listCharacters(): Promise<CharacterSummary[]>;
@@ -93,7 +101,13 @@ export interface QueriesClient extends CatalogClient {
     params: LevelUpPlannedEligibleSpellsParams,
   ): Promise<LevelUpPlannedEligibleSpellsResult>;
   levelUpState(characterId: number): Promise<LevelUpStateResult>;
-  previewLevelUp(params: LevelUpPreviewParams): Promise<LevelUpPreviewResult>;
+  levelUpProgress(characterId: number): Promise<LevelUpWizardProgress | null>;
+  saveLevelUpProgress(
+    params: SaveLevelUpWizardProgressParams,
+  ): Promise<LevelUpWizardProgress | null>;
+  previewLevelUp(
+    params: LevelUpPreviewParams,
+  ): Promise<DecodedOutcome<LevelUpPreviewResult>>;
   createSavePoint(
     characterId: number,
     label: string,
@@ -112,7 +126,7 @@ export interface QueriesClient extends CatalogClient {
   ): Promise<GuidedSpeciesChoiceStateResult>;
   chooseSpeciesLineage(
     params: GuidedChooseSpeciesLineageParams,
-  ): Promise<GuidedChooseSpeciesLineageResult>;
+  ): Promise<DecodedOutcome<GuidedChooseSpeciesLineageResult>>;
   abilityDraft(characterId: number): Promise<GuidedAbilityDraft | null>;
   saveAbilityDraft(
     params: GuidedSaveAbilityDraftParams,
@@ -130,7 +144,7 @@ export interface QueriesClient extends CatalogClient {
   ): Promise<GuidedApplyOriginResult>;
   allocateAbilities(
     params: GuidedAllocateAbilitiesParams,
-  ): Promise<GuidedAllocateAbilitiesResult>;
+  ): Promise<DecodedOutcome<GuidedAllocateAbilitiesResult>>;
   backgroundChoiceOptions(): Promise<GuidedBackgroundChoiceOptions>;
   applyBackground(
     params: GuidedApplyBackgroundParams,
@@ -138,7 +152,7 @@ export interface QueriesClient extends CatalogClient {
   skillsStep(characterId: number): Promise<GuidedSkillsStepState>;
   fillSkillGrant(
     params: GuidedFillSkillGrantParams,
-  ): Promise<GuidedFillSkillGrantResult>;
+  ): Promise<DecodedOutcome<GuidedFillSkillGrantResult>>;
   expertiseStep(characterId: number): Promise<GuidedExpertiseStepState>;
   fillExpertiseGrant(
     params: GuidedFillExpertiseGrantParams,
@@ -231,11 +245,21 @@ export function createQueriesClient(rpc: RpcClient): QueriesClient {
         LEVEL_UP_RPC.state,
         characterParams(characterId) as LevelUpStateParams,
       ),
+    levelUpProgress: (characterId: number) =>
+      rpc.call<LevelUpStateParams, LevelUpWizardProgress | null>(
+        LEVEL_UP_RPC.progress,
+        characterParams(characterId) as LevelUpStateParams,
+      ),
+    saveLevelUpProgress: (params: SaveLevelUpWizardProgressParams) =>
+      rpc.call<
+        SaveLevelUpWizardProgressParams,
+        LevelUpWizardProgress | null
+      >(LEVEL_UP_RPC.saveProgress, params),
     previewLevelUp: (params: LevelUpPreviewParams) =>
-      rpc.call<LevelUpPreviewParams, LevelUpPreviewResult>(
+      rpc.call<LevelUpPreviewParams, unknown>(
         LEVEL_UP_RPC.preview,
         params,
-      ),
+      ).then((value) => decodeOutcome(value, isLevelUpPreviewResult)),
     createSavePoint: (characterId: number, label: string) =>
       rpc.call<
         { character_id: number; label: string },
@@ -289,8 +313,10 @@ export function createQueriesClient(rpc: RpcClient): QueriesClient {
     chooseSpeciesLineage: (params: GuidedChooseSpeciesLineageParams) =>
       rpc.call<
         GuidedChooseSpeciesLineageParams,
-        GuidedChooseSpeciesLineageResult
-      >(GUIDED_RPC.chooseSpeciesLineage, params),
+        unknown
+      >(GUIDED_RPC.chooseSpeciesLineage, params).then((value) =>
+        decodeOutcome(value, isGuidedChooseSpeciesLineageResult)
+      ),
     abilityDraft: (characterId: number) =>
       rpc.call<GuidedBuildStateParams, GuidedAbilityDraft | null>(
         GUIDED_RPC.abilityDraft,
@@ -330,10 +356,10 @@ export function createQueriesClient(rpc: RpcClient): QueriesClient {
         },
       ),
     allocateAbilities: (params: GuidedAllocateAbilitiesParams) =>
-      rpc.call<GuidedAllocateAbilitiesParams, GuidedAllocateAbilitiesResult>(
+      rpc.call<GuidedAllocateAbilitiesParams, unknown>(
         GUIDED_RPC.allocateAbilities,
         params,
-      ),
+      ).then((value) => decodeOutcome(value, isGuidedAllocateAbilitiesResult)),
     backgroundChoiceOptions: () =>
       rpc.call<Record<string, never>, GuidedBackgroundChoiceOptions>(
         BACKGROUND_RPC.choiceOptions,
@@ -350,10 +376,10 @@ export function createQueriesClient(rpc: RpcClient): QueriesClient {
         characterParams(characterId),
       ),
     fillSkillGrant: (params: GuidedFillSkillGrantParams) =>
-      rpc.call<GuidedFillSkillGrantParams, GuidedFillSkillGrantResult>(
+      rpc.call<GuidedFillSkillGrantParams, unknown>(
         GUIDED_RPC.fillSkillGrant,
         params,
-      ),
+      ).then((value) => decodeOutcome(value, isGuidedFillSkillGrantResult)),
     expertiseStep: (characterId: number) =>
       rpc.call<GuidedBuildStateParams, GuidedExpertiseStepState>(
         GUIDED_RPC.expertiseStep,
