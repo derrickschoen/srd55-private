@@ -241,16 +241,62 @@ function materialRulesForLineage(
   return rules;
 }
 
+type ConfiguredSpeciesSlug = 'elf' | 'gnome' | 'tiefling';
+
+function configuredUnknownSheetFields(
+  speciesSlug: ConfiguredSpeciesSlug,
+): readonly ('walking_speed_feet' | 'darkvision_feet' | 'damage_resistances')[] {
+  switch (speciesSlug) {
+    case 'elf':
+      return ['walking_speed_feet', 'darkvision_feet'];
+    case 'tiefling':
+      return ['damage_resistances'];
+    case 'gnome':
+      return [];
+    /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+       tsc probe verified that the never assignment rejects a new species. */
+    default: {
+      const unreachable: never = speciesSlug;
+      throw new TypeError(`Unhandled configured species ${String(unreachable)}.`);
+    }
+  }
+}
+
+function configuredLineageEffects(
+  speciesSlug: ConfiguredSpeciesSlug,
+  lineage: LineageOption,
+): GrantRuleSeed[] {
+  switch (speciesSlug) {
+    case 'elf':
+      return lineage.option === 'Wood Elf'
+        ? [{ kind: 'speed', label: 'Wood Elf Speed', speed_bonus_feet: 5 }]
+        : [];
+    case 'tiefling':
+      return [{
+        kind: 'damage_resistance',
+        label: `${lineage.option} Legacy`,
+        damage_type: lineage.option === 'Abyssal'
+          ? 'Poison'
+          : lineage.option === 'Chthonic'
+            ? 'Necrotic'
+            : 'Fire',
+      }];
+    case 'gnome':
+      return [];
+    /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+       tsc probe verified that the never assignment rejects a new species. */
+    default: {
+      const unreachable: never = speciesSlug;
+      throw new TypeError(`Unhandled configured species ${String(unreachable)}.`);
+    }
+  }
+}
+
 function configuredChoiceRule(
-  speciesSlug: 'elf' | 'gnome' | 'tiefling',
+  speciesSlug: ConfiguredSpeciesSlug,
   label: string,
   lineages: readonly LineageOption[],
 ): GrantRuleSeed {
-  const unknownSheetFields = speciesSlug === 'elf'
-    ? ['walking_speed_feet', 'darkvision_feet']
-    : speciesSlug === 'tiefling'
-      ? ['damage_resistances']
-      : [];
   return {
     kind: 'configured_choice',
     rule_key: `${speciesSlug}-lineage`,
@@ -261,22 +307,10 @@ function configuredChoiceRule(
       config_key: 'spellcasting_ability',
       options: ['intelligence', 'wisdom', 'charisma'],
     },
-    unknown_sheet_fields: unknownSheetFields,
+    unknown_sheet_fields: configuredUnknownSheetFields(speciesSlug),
     projected_trait_names: speciesSlug === 'elf' ? ['Darkvision'] : [],
     options: lineages.map((lineage) => {
-      const effects = speciesSlug === 'elf' && lineage.option === 'Wood Elf'
-        ? [{ kind: 'speed', label: 'Wood Elf Speed', speed_bonus_feet: 5 }]
-        : speciesSlug === 'tiefling'
-          ? [{
-              kind: 'damage_resistance',
-              label: `${lineage.option} Legacy`,
-              damage_type: lineage.option === 'Abyssal'
-                ? 'Poison'
-                : lineage.option === 'Chthonic'
-                  ? 'Necrotic'
-                  : 'Fire',
-            }]
-          : [];
+      const effects = configuredLineageEffects(speciesSlug, lineage);
       return {
         value: lineage.option,
         label: lineage.option,

@@ -337,11 +337,24 @@ export class HomebrewArchiveSetService {
   #purgeCharacters(
     content: ContentLifecycleRow,
   ): readonly ArchiveSetCharacter[] {
-    const definitionTable = content.kind === 'species'
-      ? 'species_definitions'
-      : content.kind === 'background'
-      ? 'background_definitions'
-      : 'subclass_definitions';
+    let definitionTable: 'species_definitions' | 'background_definitions' | 'subclass_definitions';
+    switch (content.kind) {
+      case 'species':
+        definitionTable = 'species_definitions';
+        break;
+      case 'background':
+        definitionTable = 'background_definitions';
+        break;
+      case 'subclass':
+        definitionTable = 'subclass_definitions';
+        break;
+      /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+         tsc probe verified that the never assignment rejects a new kind. */
+      default: {
+        const unreachable: never = content.kind;
+        throw new TypeError(`Unhandled authored content kind ${String(unreachable)}.`);
+      }
+    }
     const subclassAttachment = content.kind === 'subclass'
       ? `UNION
          SELECT level.character_id
@@ -781,14 +794,24 @@ export class HomebrewArchiveSetService {
           );
         });
 
-        if (contentKind === 'species') {
-          this.#deleteContentGraph('species_templates');
-          this.#deleteContentGraph('species_definitions');
-        } else if (contentKind === 'background') {
-          this.#deleteContentGraph('background_templates');
-          this.#deleteContentGraph('background_definitions');
-        } else {
-          this.#deleteContentGraph('subclass_definitions');
+        switch (contentKind) {
+          case 'species':
+            this.#deleteContentGraph('species_templates');
+            this.#deleteContentGraph('species_definitions');
+            break;
+          case 'background':
+            this.#deleteContentGraph('background_templates');
+            this.#deleteContentGraph('background_definitions');
+            break;
+          case 'subclass':
+            this.#deleteContentGraph('subclass_definitions');
+            break;
+          /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+             tsc probe verified that the never assignment rejects a new kind. */
+          default: {
+            const unreachable: never = contentKind;
+            throw new TypeError(`Unhandled authored content kind ${String(unreachable)}.`);
+          }
         }
         for (const table of [
           'catalog_content_archive_members',

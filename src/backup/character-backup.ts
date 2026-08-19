@@ -2335,11 +2335,22 @@ function restoreSpellDefinitions(
   );
   const plan = planContentImport(db, nodes);
   const committed = commitContentImport(db, { nodes, token: plan.token });
-  const protocolOutcomes = committed.kind === 'committed'
-    ? committed.outcomes
-    : committed.kind === 'refused'
-      ? committed.outcomes
-      : committed.freshPlan.outcomes;
+  let protocolOutcomes: readonly ContentImportEntryOutcome[];
+  switch (committed.kind) {
+    case 'committed':
+    case 'refused':
+      protocolOutcomes = committed.outcomes;
+      break;
+    case 'stale-plan':
+      protocolOutcomes = committed.freshPlan.outcomes;
+      break;
+    /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+       tsc probe verified that the never assignment rejects a new result. */
+    default: {
+      const unreachable: never = committed;
+      throw new TypeError(`Unhandled content import result ${String(unreachable)}.`);
+    }
+  }
   const outcomes = protocolOutcomes.map(characterBackupSpellOutcome);
   if (committed.kind !== 'committed') {
     throw new BackupValidationError(

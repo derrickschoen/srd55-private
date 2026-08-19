@@ -1179,6 +1179,12 @@ function projectBackground(
       case 'weapon':
       case 'armor':
         return { ...stored, kind: item.kind, quantity: item.quantity, printed_name: item.printed_name, content: item.content };
+      /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+         tsc probe verified that the never assignment rejects a new kind. */
+      default: {
+        const unreachable: never = item;
+        throw new TypeError(`Unhandled background equipment ${String(unreachable)}.`);
+      }
     }
   };
   const payload: BackgroundProjectorPayloadV1 = {

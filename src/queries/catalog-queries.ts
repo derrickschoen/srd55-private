@@ -363,11 +363,24 @@ export class CatalogQueries {
       | 'species_definitions'
       | 'background_definitions',
   ): Array<DefinitionRow & { readonly catalog_layer: CatalogLayerDisclosure }> {
-    const kind: BundledSourceKind = table === 'feat_definitions'
-      ? 'feat'
-      : table === 'species_definitions'
-        ? 'species'
-        : 'background';
+    let kind: BundledSourceKind;
+    switch (table) {
+      case 'feat_definitions':
+        kind = 'feat';
+        break;
+      case 'species_definitions':
+        kind = 'species';
+        break;
+      case 'background_definitions':
+        kind = 'background';
+        break;
+      /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+         tsc probe verified that the never assignment rejects a new table. */
+      default: {
+        const unreachable: never = table;
+        throw new TypeError(`Unhandled definition table ${String(unreachable)}.`);
+      }
+    }
     return this.db.all(
       `SELECT definition.*, identity.catalog_layer
        FROM ${table} AS definition
