@@ -27,9 +27,11 @@ describe('level-up wizard seam', () => {
     ]);
   });
 
-  it('pins the three read/preview RPC names', () => {
+  it('pins the read, progress, and preview RPC names', () => {
     expect(LEVEL_UP_RPC).toEqual({
       state: 'queries.characters.levelUpState',
+      progress: 'queries.characters.levelUpProgress',
+      saveProgress: 'queries.characters.saveLevelUpProgress',
       plannedEligibleSpells:
         'queries.characters.levelUpPlannedEligibleSpells',
       preview: 'queries.characters.previewLevelUp',

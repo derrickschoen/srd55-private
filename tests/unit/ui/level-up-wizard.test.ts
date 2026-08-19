@@ -456,7 +456,9 @@ describe('W-ROUTE-EXACT level-up route', () => {
     const state = ready({
       classes: [classOption({ id: 11 }), classOption({ id: 12 })],
     });
-    const call = vi.fn().mockResolvedValue(state);
+    const call = vi.fn((method: string) => Promise.resolve(
+      method === LEVEL_UP_RPC.progress ? null : state,
+    ));
     const navigate = vi.fn();
     const root = document.createElement('div');
     const cleanup = await screen.render({
@@ -467,18 +469,29 @@ describe('W-ROUTE-EXACT level-up route', () => {
       registerNavigationGuard: () => () => undefined,
     });
 
-    expect(call).toHaveBeenCalledOnce();
-    expect(call).toHaveBeenCalledWith(LEVEL_UP_RPC.state, {
-      character_id: 7,
-    });
+    expect(call.mock.calls.slice(0, 2)).toEqual([
+      [LEVEL_UP_RPC.state, { character_id: 7 }],
+      [LEVEL_UP_RPC.progress, { character_id: 7 }],
+    ]);
     expect(typeof cleanup).toBe('function');
     expect(elementText(document.activeElement as unknown as Node)).toBe(
       'Level up — Fixture Mage',
     );
     chooseRadio(root, '11');
     click(root, LEVEL_UP_ATTR.next);
+    await vi.waitFor(() => {
+      expect(root.querySelector(`[${LEVEL_UP_ATTR.back}]`)).not.toBeNull();
+    });
     click(root, LEVEL_UP_ATTR.back);
-    expect(call).toHaveBeenCalledOnce();
+    await vi.waitFor(() => {
+      expect(root.querySelector(`[${LEVEL_UP_ATTR.classOption}]`)).not.toBeNull();
+    });
+    expect(call.mock.calls.map(([method]) => method)).toEqual([
+      LEVEL_UP_RPC.state,
+      LEVEL_UP_RPC.progress,
+      LEVEL_UP_RPC.saveProgress,
+      LEVEL_UP_RPC.saveProgress,
+    ]);
     cleanup?.();
   });
 });

@@ -1800,6 +1800,36 @@ describe('the character sheet is projected twice from one value', () => {
     expect(knownClasses[0]?.hit_die).toBe(10);
   });
 
+  it('does not present a non-starting class\'s catalog saves as granted proficiencies', () => {
+    const value = sheet({
+      classes: [
+        {
+          class_name: 'Sorcerer',
+          level: 3,
+          hit_die: 6,
+          is_starting_class: true,
+          subclass_name: null,
+          saving_throws: ['constitution', 'charisma'],
+        },
+        {
+          class_name: 'Warlock',
+          level: 2,
+          hit_die: 8,
+          is_starting_class: false,
+          subclass_name: null,
+          saving_throws: ['charisma', 'wisdom'],
+        },
+      ],
+    });
+
+    expect(textOf(row(value, 'class:Sorcerer').detail)).toBe(
+      'Hit die d6. This is the starting class, so it contributes the level 1 hit point maximum. Saving throw proficiencies: constitution, charisma.',
+    );
+    expect(textOf(row(value, 'class:Warlock').detail)).toBe(
+      'Hit die d8. Not the starting class, so multiclass entry grants no saving throw proficiencies.',
+    );
+  });
+
   it('says the speed is not recorded rather than printing nothing', () => {
     const value = sheet({
       walking_speed: {

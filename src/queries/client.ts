@@ -75,6 +75,8 @@ import {
   type LevelUpPreviewParams,
   type LevelUpPreviewResult,
   isLevelUpPreviewResult,
+  type LevelUpWizardProgress,
+  type SaveLevelUpWizardProgressParams,
   type LevelUpStateParams,
   type LevelUpStateResult,
 } from '../builder/level-up-wizard';
@@ -99,6 +101,10 @@ export interface QueriesClient extends CatalogClient {
     params: LevelUpPlannedEligibleSpellsParams,
   ): Promise<LevelUpPlannedEligibleSpellsResult>;
   levelUpState(characterId: number): Promise<LevelUpStateResult>;
+  levelUpProgress(characterId: number): Promise<LevelUpWizardProgress | null>;
+  saveLevelUpProgress(
+    params: SaveLevelUpWizardProgressParams,
+  ): Promise<LevelUpWizardProgress | null>;
   previewLevelUp(
     params: LevelUpPreviewParams,
   ): Promise<DecodedOutcome<LevelUpPreviewResult>>;
@@ -239,6 +245,16 @@ export function createQueriesClient(rpc: RpcClient): QueriesClient {
         LEVEL_UP_RPC.state,
         characterParams(characterId) as LevelUpStateParams,
       ),
+    levelUpProgress: (characterId: number) =>
+      rpc.call<LevelUpStateParams, LevelUpWizardProgress | null>(
+        LEVEL_UP_RPC.progress,
+        characterParams(characterId) as LevelUpStateParams,
+      ),
+    saveLevelUpProgress: (params: SaveLevelUpWizardProgressParams) =>
+      rpc.call<
+        SaveLevelUpWizardProgressParams,
+        LevelUpWizardProgress | null
+      >(LEVEL_UP_RPC.saveProgress, params),
     previewLevelUp: (params: LevelUpPreviewParams) =>
       rpc.call<LevelUpPreviewParams, unknown>(
         LEVEL_UP_RPC.preview,

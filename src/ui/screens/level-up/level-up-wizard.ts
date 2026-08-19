@@ -10,6 +10,7 @@ import {
   type LevelUpPlannedSkillProjection,
   type LevelUpPlannedSpellProjection,
   type LevelUpWarningPresentation,
+  type LevelUpWizardProgress,
   type LevelUpPreviewCommand,
   type LevelUpPreviewResult,
   type LevelUpStateResult,
@@ -75,6 +76,10 @@ export interface LevelUpWizardController {
 }
 
 export interface LevelUpWizardServices {
+  readonly initialProgress?: LevelUpWizardProgress | null;
+  readonly saveProgress?: (
+    progress: LevelUpWizardProgress | null,
+  ) => Promise<unknown>;
   readonly preview?: (
     expectedRevision: CharacterRevision,
     command: LevelUpPreviewCommand,
@@ -432,6 +437,7 @@ function createTerminalEpicResolutionWizard(options: {
           activeFrame?.alert?.focus();
           return;
         }
+        await options.saveProgress?.(null);
         const sheet = await options.loadSheet?.();
         if (sheet === undefined) {
           throw new Error('Fresh character sheet data was unavailable.');
@@ -560,6 +566,7 @@ export function createLevelUpWizard(options: {
       ...(options.loadSheet === undefined ? {} : { loadSheet: options.loadSheet }),
       ...(options.reloadState === undefined ? {} : { reloadState: options.reloadState }),
       ...(options.randomUuid === undefined ? {} : { randomUuid: options.randomUuid }),
+      ...(options.saveProgress === undefined ? {} : { saveProgress: options.saveProgress }),
     });
   }
   if (options.state.kind !== 'ready') {
@@ -576,7 +583,15 @@ export function createLevelUpWizard(options: {
   const state = options.state;
   const guideable = guideableOptions(state);
   const initiallySelected = guideable.length === 1 ? guideable[0] : undefined;
-  let selectedClassId = initiallySelected?.class_definition_id ?? null;
+  const restoredClass = options.initialProgress?.character_revision ===
+      state.character.revision
+    ? guideable.find(
+        (candidate) => candidate.content_key ===
+          options.initialProgress?.selected_class_content_key,
+      )
+    : undefined;
+  let selectedClassId = restoredClass?.class_definition_id ??
+    initiallySelected?.class_definition_id ?? null;
   let pendingEpicPath: PendingEpicPath | null =
     state.pending_epic_resolution === null ? 'next_level' : null;
   let subclassDraft: SubclassDraft = { kind: 'decide_later' };
@@ -595,6 +610,7 @@ export function createLevelUpWizard(options: {
   let submitting = false;
   let stale = false;
   let completion: Completion | null = null;
+  let transitionPending = false;
   const host = element('div', { className: 'level-up-route' });
 
   const selectedClass = (): LevelUpGuideableClassOption | null =>
@@ -720,6 +736,15 @@ export function createLevelUpWizard(options: {
       ...(planned.spells.length > 0 ? ['spells' as const] : []),
     ]);
   };
+
+  if (
+    restoredClass !== undefined &&
+    options.initialProgress !== null &&
+    options.initialProgress !== undefined &&
+    applicableSteps().includes(options.initialProgress.current_step)
+  ) {
+    currentStep = options.initialProgress.current_step;
+  }
 
   const isEpicResolutionPass = (): boolean =>
     pendingEpicPath === 'resolve_now' && state.pending_epic_resolution !== null;
@@ -900,11 +925,39 @@ export function createLevelUpWizard(options: {
     invalidatePreview();
   };
 
+  const persistTransition = (
+    step: LevelUpStep,
+    afterSave: () => void,
+  ): void => {
+    const selected = selectedClass();
+    if (options.saveProgress === undefined || selected === null) {
+      afterSave();
+      return;
+    }
+    if (transitionPending) return;
+    transitionPending = true;
+    void options.saveProgress({
+      character_revision: state.character.revision,
+      selected_class_content_key: selected.content_key,
+      current_step: step,
+    }).then(() => {
+      transitionPending = false;
+      afterSave();
+    }).catch((saveError: unknown) => {
+      transitionPending = false;
+      showError(
+        `Level-up progress could not be saved: ${errorMessage(saveError)}`,
+      );
+    });
+  };
+
   const moveTo = (step: LevelUpStep): void => {
-    currentStep = step;
-    error = null;
-    render(false);
-    frame?.stepHeading.focus();
+    persistTransition(step, () => {
+      currentStep = step;
+      error = null;
+      render(false);
+      frame?.stepHeading.focus();
+    });
   };
 
   const showError = (message: string): void => {
@@ -1014,6 +1067,7 @@ export function createLevelUpWizard(options: {
         frame?.alert?.focus();
         return;
       }
+      await options.saveProgress?.(null);
       const sheet = await options.loadSheet?.();
       if (sheet === undefined) {
         throw new Error('Fresh character sheet data was unavailable.');

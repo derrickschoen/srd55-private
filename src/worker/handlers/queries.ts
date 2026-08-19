@@ -16,9 +16,15 @@ import { SavePointQueries } from '../../queries/save-points';
 import { LevelUpPlannedEligibleSpells } from '../../queries/level-up-planned-eligible-spells';
 import { LevelUpStateQuery } from '../../queries/level-up-state';
 import {
+  readLevelUpWizardProgress,
+  saveLevelUpWizardProgress,
+} from '../../queries/level-up-progress';
+import {
   LEVEL_UP_RPC,
+  LEVEL_UP_STEP_ORDER,
   type LevelUpPlannedEligibleSpellsParams,
   type PlannedGrantSource,
+  type SaveLevelUpWizardProgressParams,
 } from '../../builder/level-up-wizard';
 import { BuildReportBuilder } from '../../reports/build-report-builder';
 import {
@@ -66,6 +72,37 @@ function exactKeys(
 
 function positiveInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && Number(value) >= 1;
+}
+
+export function isSaveLevelUpWizardProgressParams(
+  params: unknown,
+): params is SaveLevelUpWizardProgressParams {
+  if (
+    !isRecord(params) ||
+    !exactKeys(params, ['character_id', 'progress']) ||
+    !positiveInteger(params.character_id)
+  ) {
+    return false;
+  }
+  if (params.progress === null) return true;
+  if (
+    !isRecord(params.progress) ||
+    !exactKeys(params.progress, [
+      'character_revision',
+      'selected_class_content_key',
+      'current_step',
+    ])
+  ) {
+    return false;
+  }
+  return Number.isSafeInteger(params.progress.character_revision) &&
+    Number(params.progress.character_revision) >= 0 &&
+    typeof params.progress.selected_class_content_key === 'string' &&
+    params.progress.selected_class_content_key.trim() !== '' &&
+    typeof params.progress.current_step === 'string' &&
+    (LEVEL_UP_STEP_ORDER as readonly string[]).includes(
+      params.progress.current_step,
+    );
 }
 
 function plannedGrantSource(
@@ -293,6 +330,17 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
     isCharacterParams,
     (context, params) =>
       new LevelUpStateQuery(context.db).build(params.character_id),
+  ),
+  defineRpcHandler(
+    LEVEL_UP_RPC.progress,
+    isCharacterParams,
+    (context, params) =>
+      readLevelUpWizardProgress(context.db, params.character_id),
+  ),
+  defineRpcHandler(
+    LEVEL_UP_RPC.saveProgress,
+    isSaveLevelUpWizardProgressParams,
+    (context, params) => saveLevelUpWizardProgress(context.db, params),
   ),
   defineRpcHandler(
     'queries.savePoints.create',

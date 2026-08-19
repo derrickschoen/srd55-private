@@ -878,6 +878,8 @@ describe('W-LU2-DRAFT planned Skills, Expertise, and Spells', () => {
   it('searches the exact locator and revision while the RPC spy stays command-free', async () => {
     const calls = vi.fn(async (method: string, params: unknown) => {
       if (method === LEVEL_UP_RPC.state) return ready();
+      if (method === LEVEL_UP_RPC.progress) return null;
+      if (method === LEVEL_UP_RPC.saveProgress) return null;
       if (method === LEVEL_UP_RPC.plannedEligibleSpells) return [eligible];
       throw new Error(`Unexpected durable RPC ${method}: ${JSON.stringify(params)}`);
     });
@@ -893,11 +895,23 @@ describe('W-LU2-DRAFT planned Skills, Expertise, and Spells', () => {
       registerNavigationGuard: () => () => undefined,
     });
     click(root, LEVEL_UP_ATTR.next);
+    await vi.waitFor(() => {
+      expect(root.querySelector('h2')?.textContent).toBe('Review level gains');
+    });
     click(root, LEVEL_UP_ATTR.next);
+    await vi.waitFor(() => {
+      expect(root.querySelector(`[${LEVEL_UP_ATTR.skillChoice}]`)).not.toBeNull();
+    });
     chooseSelect(root, LEVEL_UP_ATTR.skillChoice, 'arcana');
     click(root, LEVEL_UP_ATTR.next);
+    await vi.waitFor(() => {
+      expect(root.querySelector(`[${LEVEL_UP_ATTR.expertiseChoice}]`)).not.toBeNull();
+    });
     chooseSelect(root, LEVEL_UP_ATTR.expertiseChoice, 'arcana');
     click(root, LEVEL_UP_ATTR.next);
+    await vi.waitFor(() => {
+      expect(root.querySelector('.spell-picker-input')).not.toBeNull();
+    });
     const input = interactiveElement(root).querySelector('.spell-picker-input');
     input?.dispatchEvent(new Event('focus'));
     await Promise.resolve();
@@ -912,6 +926,39 @@ describe('W-LU2-DRAFT planned Skills, Expertise, and Spells', () => {
 
     expect(calls.mock.calls).toEqual([
       [LEVEL_UP_RPC.state, { character_id: 7 }],
+      [LEVEL_UP_RPC.progress, { character_id: 7 }],
+      [LEVEL_UP_RPC.saveProgress, {
+        character_id: 7,
+        progress: {
+          character_revision: 4,
+          selected_class_content_key: 'test:class:wizard',
+          current_step: 'gains',
+        },
+      }],
+      [LEVEL_UP_RPC.saveProgress, {
+        character_id: 7,
+        progress: {
+          character_revision: 4,
+          selected_class_content_key: 'test:class:wizard',
+          current_step: 'skills',
+        },
+      }],
+      [LEVEL_UP_RPC.saveProgress, {
+        character_id: 7,
+        progress: {
+          character_revision: 4,
+          selected_class_content_key: 'test:class:wizard',
+          current_step: 'expertise',
+        },
+      }],
+      [LEVEL_UP_RPC.saveProgress, {
+        character_id: 7,
+        progress: {
+          character_revision: 4,
+          selected_class_content_key: 'test:class:wizard',
+          current_step: 'spells',
+        },
+      }],
       [LEVEL_UP_RPC.plannedEligibleSpells, {
         character_id: 7,
         expected_revision: 4,
