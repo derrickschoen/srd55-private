@@ -7,6 +7,83 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D315 — OWNER: follow-up round rulings — spell engine, effect authority, the table loop (2026-08-19)
+
+Second collaborative brainstorm (Claude 15 + codex 15 blind, merged to 18 +
+one same-day finding), asked one at a time. Rulings:
+
+1. **Spell engine scope: EVERY LEVEL-APPROPRIATE PARTY OPTION** — any spell
+   the reference party could prepare works mechanically, so re-preparation
+   between sessions needs no engine work. (Not just prepared loadouts; not
+   the whole catalogue.)
+2. **Engine owns the FULL effect lifecycle** — sources, durations,
+   concentration, repeated saves, stacking, expiry all live in the reducer;
+   codex only chooses actions. Deterministic, replayable, testable.
+3. **AoE: EXACT TEMPLATES + PREVIEW** — engine computes affected cells per
+   SRD geometry with a visual preview before confirm. Owner addendum,
+   verbatim intent: sphere centers are placeable at different points in/on a
+   square (grid intersections) to catch the most enemies, and a radius that
+   touches any part of a square affects the creature in it — double-check
+   community common practice; verify wording against the repo's bundled SRD
+   grid rules when the increment is specced. The preview should show
+   coverage as the center is dragged.
+4. **Reactions: STANDING POLICIES + PROMPT ON AMBIGUITY** — per-PC defaults
+   (e.g. always-OA, ask-for-Shield); pause only when the policy doesn't
+   decide.
+5. **Death saves: ENGINE ROLLS, RESULT HIDDEN FROM PLAYERS BY DEFAULT** —
+   auto-rolled on the downed PC's turn; the DM projection sees the result,
+   the player view does not. All monsters still die at 0 (D314.8); statblock
+   carries a death-saves flag for later named monsters.
+6. **Multi-PC input: ONE PC AT A TIME IN INITIATIVE ORDER** — the board
+   highlights the active PC; no party-planner queue.
+7. **Monster turns: CODEX PLANS A ROUND AT ONCE** — one codex call per round
+   produces all monster intents; the engine executes and re-consults only
+   when a plan is invalidated. (Latency control chosen over per-turn calls.)
+8. **ADJUDICATED overrides: AUTO-APPLY, PAUSE + HIGHLIGHT** — override lands
+   immediately, play continues, the log and board flag it loudly; owner can
+   interrupt/undo.
+9. **Undo vs DM memory: REVISION-HISTORY IN CONTEXT** — one codex session
+   keeps a visible revision history; undone branches stay in context marked
+   void.
+10. **Autosave: EVERY REDUCER REVISION, INCLUDING PENDING REQUESTS** —
+    event-sourced with RNG state and the codex session id; resume lands
+    mid-round exactly; undo and ruling 9's history fall out of the same
+    store.
+11. **DM controls: SEPARATE LOCAL DM WINDOW** — second browser window with
+    the full DM projection (this is also where hidden death-save results and
+    ADJUDICATED highlights surface); the player view carries no DM chrome.
+12. **Encounter artifact: COMPLETE PACKAGE, SAVED AS FIXTURE** — roster +
+    map + placement + terrain + fog + tactics notes as one reviewable JSON;
+    approval commits it so bugs reproduce. Refines D314.5, which is
+    hereby amended (generated AND persisted).
+13. **Difficulty: OWNER CHOOSES PER PROMPT** — a parameter of each
+    generation request, not a fixed target.
+14. **Art: DRAWN/PROCEDURAL WITH CLEAN LICENSING preferred** — owner is
+    unsure of AI-image access; supervisor to survey CC0/CC-BY sets (e.g.
+    Kenney CC0 tiles, game-icons.net CC-BY) and present candidates. Bundled
+    assets must pass D59 for the public repo.
+15. **Validation-mode citations: STRUCTURED FIELDS + SHORT EXPLANATION** —
+    machine fields (rule id + SRD source locator) plus one human sentence
+    per line; mineable by the soak program and readable by eye.
+16. **Telemetry: FULL DETERMINISTIC REPLAY from the first playtest** —
+    events, RNG state, per-controller transcripts, prompts/responses,
+    latency, token counts.
+17. **Soak fleet: MANY PARALLEL TABLES, CONTINUOUS.** The owner challenged
+    and corrected the supervisor's premise: "gates need a quiet machine" is
+    evidence about GATES under CPU-heavy codex lanes, not about API-bound
+    table sessions. Tables run around the clock; gates keep their usual lock
+    windows; latency samples get a load-level tag.
+18. **DM bridge: FULL DISCORD-READY ENVELOPES NOW** — command/projection
+    schemas designed against Discord's actual constraints (interaction
+    tokens, message limits) before the dossier ruling, so no rewrite either
+    way.
+19. **Walkthrough engine/spec reconciliation: QUEUED LANE, AFTER VTT
+    increments** — the same-day finding (engine zod schema rejects all 12
+    rich mutt specs, pre-existing) waits; specs are committed and stable.
+
+Scope note: rulings 1-3 and 5-12 are binding inputs to the phase-2 increment
+map amendment D314 already requires before increment 3 dispatches.
+
 ## D314 — OWNER: brainstorm-round rulings — the skirmish, all-AI tables, and the queue (2026-08-19)
 
 Collaborative brainstorm (Claude 15 candidates + codex 15, blind, collated to
