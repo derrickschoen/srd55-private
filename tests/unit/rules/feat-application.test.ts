@@ -53,6 +53,33 @@ function definition(name: string): SrdFeatDefinition {
   return found;
 }
 
+function homebrewDefinition(
+  notes: string,
+): FeatDefinitionForApplication {
+  return {
+    ...definition('Alert'),
+    content_key: 'homebrew:feat:boundary-fixture' as ContentKey,
+    name: 'Boundary Fixture',
+    notes,
+  };
+}
+
+function applicationError(run: () => unknown): {
+  readonly name: string;
+  readonly message: string;
+} {
+  let caught: unknown;
+  try {
+    run();
+  } catch (error) {
+    caught = error;
+  }
+  if (!(caught instanceof Error)) {
+    throw new Error('Expected feat application to throw an Error.');
+  }
+  return { name: caught.name, message: caught.message };
+}
+
 function selectedAbility(
   feat: SrdFeatDefinition,
 ): Ability {
@@ -258,6 +285,92 @@ const APPLICATION_ORACLE = {
 } as const;
 
 describe('LU-0 feat application coverage', () => {
+  it.each([
+    {
+      name: 'ignores empty and metadata-only paragraphs',
+      notes:
+        '\n\n  You gain the following benefits.  \n\n  Repeatable. Choose again.  \n\n',
+      expected: [],
+    },
+    {
+      name: 'trims paragraph whitespace and retains a multiline continuation',
+      notes:
+        '  You gain the following benefits.  \n\n  Gift of Flame. First line.\nContinuation line.  \n\n  Repeatable. Choose again.  ',
+      expected: [
+        {
+          benefit_key: 'gift-of-flame',
+          label: 'Gift of Flame',
+          text: 'Gift of Flame. First line.\nContinuation line.',
+          gap: 'homebrew_benefit_text_only',
+        },
+      ],
+    },
+    {
+      name: 'accepts lowercase connector words inside a title-cased heading',
+      notes: 'Gift and Flame. One paragraph.',
+      expected: [
+        {
+          benefit_key: 'gift-and-flame',
+          label: 'Gift and Flame',
+          text: 'Gift and Flame. One paragraph.',
+          gap: 'homebrew_benefit_text_only',
+        },
+      ],
+    },
+    {
+      name: 'does not promote an ordinary sentence beginning with lowercase text',
+      notes: 'gift of Flame. This is prose, not a benefit heading.',
+      expected: [
+        {
+          benefit_key: 'boundary-fixture',
+          label: 'Boundary Fixture',
+          text: 'gift of Flame. This is prose, not a benefit heading.',
+          gap: 'homebrew_benefit_text_only',
+        },
+      ],
+    },
+    {
+      name: 'promotes a heading at the exact forty-character boundary',
+      notes: 'ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMN. Boundary benefit.',
+      expected: [
+        {
+          benefit_key: 'abcdefghijklmnopqrstuvwxyzabcdefghijklmn',
+          label: 'ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMN',
+          text: 'ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMN. Boundary benefit.',
+          gap: 'homebrew_benefit_text_only',
+        },
+      ],
+    },
+    {
+      name: 'does not promote a heading beyond the forty-character boundary',
+      notes: 'ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNO. Boundary prose.',
+      expected: [
+        {
+          benefit_key: 'boundary-fixture',
+          label: 'Boundary Fixture',
+          text: 'ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNO. Boundary prose.',
+          gap: 'homebrew_benefit_text_only',
+        },
+      ],
+    },
+  ])('$name', ({ notes, expected }) => {
+    const feat = homebrewDefinition(notes);
+    const plan = buildFeatApplicationPlan({
+      definition: feat,
+      character: character(),
+      config: {},
+      ability_increases: [],
+    });
+
+    expect(plan.text_benefits).toEqual(expected);
+    expect(featBenefitCoverage(feat)).toEqual(
+      expected.map(({ benefit_key }) => ({
+        benefit_key,
+        classifications: ['text'],
+      })),
+    );
+  });
+
   it('matches the hand-authored 17-row source-to-vocabulary oracle', () => {
     const feats = bundledFeatDefinitions();
     expect(feats.map((feat) => feat.name)).toEqual(
@@ -433,9 +546,460 @@ describe('LU-0 feat application coverage', () => {
       }),
     ).toThrow(/effect coverage disagrees/);
   });
+
+  it.each([
+    {
+      name: 'one ability by two',
+      ability_increases: [{ ability: 'strength' as const, amount: 2 }],
+      expected: [
+        {
+          effect_kind: 'ability_increase',
+          ability: 'strength',
+          amount: 2,
+          maximum: 20,
+          label: 'Ability Score Improvement: Ability Score Increase',
+          notes: null,
+        },
+      ],
+    },
+    {
+      name: 'two distinct abilities by one',
+      ability_increases: [
+        { ability: 'strength' as const, amount: 1 },
+        { ability: 'dexterity' as const, amount: 1 },
+      ],
+      expected: [
+        {
+          effect_kind: 'ability_increase',
+          ability: 'strength',
+          amount: 1,
+          maximum: 20,
+          label: 'Ability Score Improvement: Ability Score Increase',
+          notes: null,
+        },
+        {
+          effect_kind: 'ability_increase',
+          ability: 'dexterity',
+          amount: 1,
+          maximum: 20,
+          label: 'Ability Score Improvement: Ability Score Increase',
+          notes: null,
+        },
+      ],
+    },
+  ])('emits the exact sourced ASI shape for $name', ({ ability_increases, expected }) => {
+    const plan = buildFeatApplicationPlan({
+      definition: definition('Ability Score Improvement'),
+      character: character(),
+      config: {},
+      ability_increases,
+    });
+
+    expect(plan.effects).toEqual(expected);
+  });
+
+  it.each([
+    { name: 'spends zero points', ability_increases: [] },
+    {
+      name: 'spends only one point',
+      ability_increases: [{ ability: 'strength' as const, amount: 1 }],
+    },
+    {
+      name: 'spends three points in one increase',
+      ability_increases: [{ ability: 'strength' as const, amount: 3 }],
+    },
+    {
+      name: 'uses a two-plus-zero split',
+      ability_increases: [
+        { ability: 'strength' as const, amount: 2 },
+        { ability: 'dexterity' as const, amount: 0 },
+      ],
+    },
+    {
+      name: 'uses three one-point increases',
+      ability_increases: [
+        { ability: 'strength' as const, amount: 1 },
+        { ability: 'dexterity' as const, amount: 1 },
+        { ability: 'constitution' as const, amount: 1 },
+      ],
+    },
+  ])('rejects the one-step-illegal ASI shape that $name', ({ ability_increases }) => {
+    expect(
+      applicationError(() =>
+        buildFeatApplicationPlan({
+          definition: definition('Ability Score Improvement'),
+          character: character(),
+          config: {},
+          ability_increases,
+        }),
+      ),
+    ).toEqual({
+      name: 'FeatApplicationError',
+      message:
+        'Feat application: Ability Score Improvement ability increases do not spend its point budget.',
+    });
+  });
+
+  it('pins the legal one-point cap boundary and rejects a repeated ASI ability', () => {
+    const grappler = definition('Grappler');
+    expect(
+      buildFeatApplicationPlan({
+        definition: grappler,
+        character: character({
+          ability_scores: {
+            ...character().ability_scores,
+            strength: 19,
+          },
+        }),
+        config: {},
+        ability_increases: [{ ability: 'strength', amount: 1 }],
+      }).effects,
+    ).toEqual([
+      {
+        effect_kind: 'ability_increase',
+        ability: 'strength',
+        amount: 1,
+        maximum: 20,
+        label: 'Grappler: Ability Score Increase',
+        notes: null,
+      },
+    ]);
+
+    expect(
+      applicationError(() =>
+        buildFeatApplicationPlan({
+          definition: definition('Ability Score Improvement'),
+          character: character(),
+          config: {},
+          ability_increases: [
+            { ability: 'strength', amount: 1 },
+            { ability: 'strength', amount: 1 },
+          ],
+        }),
+      ),
+    ).toEqual({
+      name: 'FeatApplicationError',
+      message:
+        'Feat application: Ability Score Improvement has an invalid or repeated ability choice.',
+    });
+  });
+
+  it.each([
+    {
+      name: 'omits the one required point',
+      ability_increases: [],
+      projected_character: character(),
+      message:
+        'Feat application: Grappler ability increases do not spend its point budget.',
+    },
+    {
+      name: 'spends two points',
+      ability_increases: [{ ability: 'strength' as const, amount: 2 }],
+      projected_character: character(),
+      message:
+        'Feat application: Grappler ability increases do not spend its point budget.',
+    },
+    {
+      name: 'selects an unknown current score',
+      ability_increases: [{ ability: 'strength' as const, amount: 1 }],
+      projected_character: character({
+        ability_scores: {
+          ...character().ability_scores,
+          strength: null,
+        },
+      }),
+      message:
+        'Feat application: Grappler cannot prove the selected ability score.',
+    },
+  ])('rejects the one-step-illegal Grappler ASI shape that $name', ({
+    ability_increases,
+    projected_character,
+    message,
+  }) => {
+    expect(
+      applicationError(() =>
+        buildFeatApplicationPlan({
+          definition: definition('Grappler'),
+          character: projected_character,
+          config: {},
+          ability_increases,
+        }),
+      ),
+    ).toEqual({ name: 'FeatApplicationError', message });
+  });
+
+  it.each([
+    { name: 'empty selection', selected_skills: [] },
+    { name: 'one skill', selected_skills: ['arcana'] },
+    { name: 'three open slots', selected_skills: [null, null, null] },
+    {
+      name: 'three distinct skills',
+      selected_skills: ['arcana', 'history', 'insight'],
+    },
+  ])('accepts the exact Skilled config shape for $name', ({ selected_skills }) => {
+    const plan = buildFeatApplicationPlan({
+      definition: definition('Skilled'),
+      character: character(),
+      config: { selected_skills },
+      ability_increases: [],
+    });
+
+    expect(plan.config).toEqual({ selected_skills });
+    expect(plan.grant_rules.map((rule) => rule.kind)).toEqual([
+      'skill_proficiency',
+    ]);
+  });
+
+  it.each([
+    { name: 'is missing the field', config: {} },
+    {
+      name: 'has an extra field',
+      config: { selected_skills: ['arcana'], extra: true },
+    },
+  ])('rejects Skilled config that $name', ({ config }) => {
+    expect(
+      applicationError(() =>
+        buildFeatApplicationPlan({
+          definition: definition('Skilled'),
+          character: character(),
+          config,
+          ability_increases: [],
+        }),
+      ),
+    ).toEqual({
+      name: 'FeatApplicationError',
+      message:
+        'Feat application: Skilled config must contain exactly selected_skills.',
+    });
+  });
+
+  it.each([
+    { name: 'is not an array', selected_skills: 'arcana' },
+    {
+      name: 'contains four entries',
+      selected_skills: ['arcana', 'history', 'insight', 'medicine'],
+    },
+    {
+      name: 'duplicates a skill',
+      selected_skills: ['arcana', 'arcana'],
+    },
+    { name: 'contains an unknown skill', selected_skills: ['chronomancy'] },
+    { name: 'contains a non-string value', selected_skills: [7] },
+  ])('rejects Skilled selected_skills that $name', ({ selected_skills }) => {
+    expect(
+      applicationError(() =>
+        buildFeatApplicationPlan({
+          definition: definition('Skilled'),
+          character: character(),
+          config: { selected_skills },
+          ability_increases: [],
+        }),
+      ),
+    ).toEqual({
+      name: 'FeatApplicationError',
+      message:
+        'Feat application: Skilled selections must be up to three distinct skills or nulls.',
+    });
+  });
+
+  it.each([
+    {
+      name: 'is missing chosen_list',
+      config: { spellcasting_ability: 'intelligence' },
+    },
+    {
+      name: 'is missing spellcasting_ability',
+      config: { chosen_list: 'Wizard' },
+    },
+    {
+      name: 'has an extra field',
+      config: {
+        chosen_list: 'Wizard',
+        spellcasting_ability: 'intelligence',
+        extra: true,
+      },
+    },
+    {
+      name: 'uses an unknown list',
+      config: {
+        chosen_list: 'Sorcerer',
+        spellcasting_ability: 'intelligence',
+      },
+    },
+    {
+      name: 'uses an unsupported casting ability',
+      config: {
+        chosen_list: 'Wizard',
+        spellcasting_ability: 'strength',
+      },
+    },
+    {
+      name: 'uses a non-string list',
+      config: { chosen_list: 7, spellcasting_ability: 'intelligence' },
+    },
+  ])('rejects Magic Initiate config that $name', ({ config }) => {
+    expect(
+      applicationError(() =>
+        buildFeatApplicationPlan({
+          definition: definition('Magic Initiate'),
+          character: character(),
+          config,
+          ability_increases: [],
+        }),
+      ),
+    ).toEqual({
+      name: 'FeatApplicationError',
+      message:
+        'Feat application: Magic Initiate requires one supported list and casting ability.',
+    });
+  });
+
+  it('rejects config on a feat with no configuration vocabulary', () => {
+    expect(
+      applicationError(() =>
+        buildFeatApplicationPlan({
+          definition: definition('Alert'),
+          character: character(),
+          config: { selected_skills: [] },
+          ability_increases: [],
+        }),
+      ),
+    ).toEqual({
+      name: 'FeatApplicationError',
+      message: 'Feat application: Alert does not accept feat configuration.',
+    });
+  });
+
+  it('rejects a Magic Initiate definition missing its sourced Spell Change row', () => {
+    const initiate = definition('Magic Initiate');
+    const withoutSpellChange: FeatDefinitionForApplication = {
+      ...initiate,
+      notes: initiate.notes.replace(
+        /\n\nSpell Change\.[\s\S]*?(?=\n\nRepeatable\.)/u,
+        '',
+      ),
+    };
+    expect(withoutSpellChange.notes).not.toContain('Spell Change.');
+
+    expect(
+      applicationError(() =>
+        featSpellReplacementEntitlement(withoutSpellChange),
+      ),
+    ).toEqual({
+      name: 'FeatApplicationError',
+      message:
+        'Feat application: Magic Initiate is missing its sourced Spell Change benefit.',
+    });
+
+    expect(
+      applicationError(() =>
+        buildFeatApplicationPlan({
+          definition: withoutSpellChange,
+          character: character(),
+          config: configFor(initiate),
+          ability_increases: [],
+        }),
+      ),
+    ).toEqual({
+      name: 'FeatApplicationError',
+      message:
+        'Feat application: Magic Initiate source benefits no longer match its exhaustive coverage decision.',
+    });
+  });
+
+  it('rejects a bundled grant-rule list with the right count but wrong kinds', () => {
+    const skilledRule = definition('Skilled').grant_rules[0];
+    if (skilledRule === undefined) {
+      throw new Error('Skilled fixture is missing its grant rule.');
+    }
+    const initiate: FeatDefinitionForApplication = {
+      ...definition('Magic Initiate'),
+      grant_rules: [skilledRule, skilledRule],
+    };
+
+    expect(
+      applicationError(() =>
+        buildFeatApplicationPlan({
+          definition: initiate,
+          character: character(),
+          config: configFor(definition('Magic Initiate')),
+          ability_increases: [],
+        }),
+      ),
+    ).toEqual({
+      name: 'FeatApplicationError',
+      message:
+        "Feat application: Magic Initiate grant rules do not match LU-0's safe vocabulary mapping.",
+    });
+  });
 });
 
 describe('typed feat eligibility', () => {
+  it.each([
+    {
+      name: 'both alternatives are missing',
+      strength: 12,
+      dexterity: 12,
+      expected: {
+        status: 'unmet',
+        reasons: [
+          {
+            kind: 'ability_score_minimum',
+            abilities: ['strength', 'dexterity'],
+            minimum: 13,
+            actual: [12, 12],
+          },
+        ],
+      },
+    },
+    {
+      name: 'first alternative equals the minimum',
+      strength: 13,
+      dexterity: 12,
+      expected: { status: 'qualified', reasons: [] },
+    },
+    {
+      name: 'second alternative exceeds the minimum',
+      strength: 12,
+      dexterity: 14,
+      expected: { status: 'qualified', reasons: [] },
+    },
+    {
+      name: 'one alternative is unknown and the other is below',
+      strength: null,
+      dexterity: 12,
+      expected: {
+        status: 'unprovable',
+        reasons: [
+          {
+            kind: 'ability_score_unknown',
+            abilities: ['strength', 'dexterity'],
+            minimum: 13,
+          },
+        ],
+      },
+    },
+    {
+      name: 'one alternative is unknown but the other qualifies',
+      strength: null,
+      dexterity: 13,
+      expected: { status: 'qualified', reasons: [] },
+    },
+  ])('evaluates the Grappler prerequisite when $name', ({ strength, dexterity, expected }) => {
+    expect(
+      evaluateFeatEligibility(
+        definition('Grappler'),
+        character({
+          ability_scores: {
+            ...character().ability_scores,
+            strength,
+            dexterity,
+          },
+        }),
+      ),
+    ).toEqual(expected);
+  });
+
   it('returns qualified, unmet and unprovable without a fallback', () => {
     const grappler = definition('Grappler');
     expect(
@@ -595,6 +1159,69 @@ describe('typed feat eligibility', () => {
     ).toBe('unprovable');
   });
 
+  it('reports exact Magic Initiate repeat-config outcomes at each boundary', () => {
+    const initiate = definition('Magic Initiate');
+    const active = (chosen_list: string) => ({
+      feat_content_key: initiate.content_key,
+      config: { chosen_list, spellcasting_ability: 'wisdom' },
+    });
+
+    expect(
+      evaluateFeatEligibility(
+        initiate,
+        character({
+          active_feats: [active('Cleric'), active('Druid'), active('Wizard')],
+        }),
+      ),
+    ).toEqual({
+      status: 'unmet',
+      reasons: [
+        {
+          kind: 'repeat_configuration_unavailable',
+          field: 'chosen_list',
+        },
+      ],
+    });
+    expect(
+      evaluateFeatEligibility(
+        initiate,
+        character({ active_feats: [active('Wizard')] }),
+        { chosen_list: 'Wizard', spellcasting_ability: 'charisma' },
+      ),
+    ).toEqual({
+      status: 'unmet',
+      reasons: [
+        {
+          kind: 'repeat_configuration_already_used',
+          field: 'chosen_list',
+          value: 'Wizard',
+        },
+      ],
+    });
+    expect(
+      evaluateFeatEligibility(
+        initiate,
+        character({
+          active_feats: [
+            {
+              feat_content_key: initiate.content_key,
+              config: { chosen_list: 'Sorcerer' },
+            },
+          ],
+        }),
+        { chosen_list: 'Cleric', spellcasting_ability: 'wisdom' },
+      ),
+    ).toEqual({
+      status: 'unprovable',
+      reasons: [
+        {
+          kind: 'repeat_configuration_unprovable',
+          field: 'chosen_list',
+        },
+      ],
+    });
+  });
+
   it('decodes only the typed ability option union', () => {
     expect(decodeAbilityIncreaseAbilities(null)).toBeNull();
     expect(decodeAbilityIncreaseAbilities('"any"')).toBe('any');
@@ -612,6 +1239,12 @@ describe('typed feat eligibility', () => {
     ).toThrow(/distinct/);
     expect(() => decodeAbilityIncreaseAbilities(['strength'])).toThrow(
       /stored as JSON text/,
+    );
+    expect(() => decodeAbilityIncreaseAbilities('{')).toThrow(
+      /must be valid JSON/,
+    );
+    expect(() => decodeAbilityIncreaseAbilities('[]')).toThrow(
+      /distinct non-empty ability list/,
     );
   });
 
