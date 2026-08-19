@@ -7,6 +7,15 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D310 — OWNER: survivor campaign is triage-first (2026-08-18)
+
+Before any D280 survivor-fix lanes dispatch, one triage lane classifies the
+full merged survivor list (real test gap / equivalent mutant / low-value)
+with per-file counts; the owner rules on fix scope from that report.
+Declined: straight-to-hotspots, exhaustive-everything. Also ruled the same
+session: main→wt/simcore syncs may run autonomously (gated, conflicts stop);
+the threads-vs-forks pool A/B stays queued for an idle window.
+
 ## D309 — OWNER: stranger journey and survivor fixes interleave (2026-08-18)
 
 Amends D307's sequencing: once the inc4 merge gate is green, the D303
