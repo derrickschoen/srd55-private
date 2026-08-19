@@ -27,7 +27,7 @@ import {
   encodeShareFragment,
 } from '../../../src/sharing/codec';
 import {
-  createRpcHarness,
+  createSeededRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
 
@@ -62,7 +62,7 @@ afterEach(() => {
 });
 
 async function applicationDatabase(): Promise<RpcHarness> {
-  harness = await createRpcHarness([]);
+  harness = await createSeededRpcHarness([]);
   return harness;
 }
 

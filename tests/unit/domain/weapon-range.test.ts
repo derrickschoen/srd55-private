@@ -3,6 +3,16 @@ import {
   weaponRangeFromStorage,
   weaponRangeFromV1Pair,
 } from '../../../src/domain/weapon-range';
+import { WeaponRangeStorageError } from '../../../src/domain/weapon-range-errors';
+
+function thrown(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return expect.fail('Expected the range decoder to throw, but it returned.');
+}
 
 const V1_RANGE_BOUNDARIES = [
   [
@@ -57,8 +67,12 @@ describe('weapon range boundary mapping', () => {
       near_feet: 20,
       far_feet: 20,
     });
-    expect(() => weaponRangeFromStorage('legacy', 20, 20)).toThrow(
-      /legacy weapon range has invalid distances/,
-    );
+    const error = thrown(() => weaponRangeFromStorage('legacy', 20, 20));
+    expect(error).toBeInstanceOf(WeaponRangeStorageError);
+    expect(error).toMatchObject({
+      kind: 'legacy',
+      near_feet: 20,
+      far_feet: 20,
+    });
   });
 });

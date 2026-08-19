@@ -6,6 +6,7 @@ import type {
   ResolveLevelFeatChoiceCommand as ResolveLevelFeatChoicePayload,
 } from '../domain/command-contracts';
 import type { DatabaseContext } from '../db/database';
+import { ok, type OkOutcome } from '../refusals/outcome';
 import { sqlInteger, sqlNullableInteger, sqlString } from '../db/codecs';
 import { characterLevel } from '../rules/character-level';
 import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
@@ -33,7 +34,7 @@ export class ResolveLevelFeatChoiceCommand {
     this.#generator = generator ?? new GrantRuleSlotGenerator(db);
   }
 
-  apply(characterId: number): void {
+  apply(characterId: number): OkOutcome<void> {
     const choice = this.db.one(
       `SELECT clfc.id, clfc.choice_kind, clfc.feat_source_instance_id
        FROM character_level_feat_choices clfc
@@ -82,6 +83,7 @@ export class ResolveLevelFeatChoiceCommand {
       this.#before = before;
       this.#characterId = characterId;
     });
+    return ok(undefined);
   }
 
   async inverse(): Promise<StoredCharacterSnapshotInverse> {

@@ -2,6 +2,8 @@ import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseContext } from '../../../src/db/database';
 import {
+  CharacterClassMembershipError,
+  ClassProgressionRowMissingError,
   ClassProgressionLookup,
   seedClassProgressions,
 } from '../../../src/rules/class-progression-lookup';
@@ -22,6 +24,15 @@ import {
   srdSubclassClassNames,
 } from '../../../src/rules/srd-subclasses';
 import { openTestDatabase } from '../../helpers/open-db';
+
+function defect(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return expect.fail('Expected a class-progression defect, but it returned.');
+}
 
 function expectedSrdFixedSpellRule(
   subclassName: string,
@@ -667,9 +678,14 @@ describe('persisted class progression catalog', () => {
     ).lastInsertId;
     const lookup = new ClassProgressionLookup(db);
 
-    expect(() =>
+    const error = defect(() =>
       lookup.preparedCountForCharacterClass(characterId, wizardId),
-    ).toThrow(`Character ${characterId} does not have class ${wizardId}.`);
+    );
+    expect(error).toBeInstanceOf(CharacterClassMembershipError);
+    expect(error).toMatchObject({
+      character_id: characterId,
+      class_definition_id: wizardId,
+    });
     expect(
       db.scalar(
         'SELECT count(*) FROM character_class_levels WHERE character_id = ?',
@@ -693,9 +709,14 @@ describe('persisted class progression catalog', () => {
     );
     const lookup = new ClassProgressionLookup(db);
 
-    expect(() =>
+    const error = defect(() =>
       lookup.preparedCountForCharacterClass(characterId, wizardId),
-    ).toThrow(`Class ${wizardId} has no progression row at level 21.`);
+    );
+    expect(error).toBeInstanceOf(ClassProgressionRowMissingError);
+    expect(error).toMatchObject({
+      class_definition_id: wizardId,
+      class_level: 21,
+    });
     expect(
       db.scalar(
         `SELECT level FROM character_class_levels

@@ -19,6 +19,20 @@ import {
 import { activeGrantedSkills, resolveSkillGrants } from './skill-grants';
 import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 
+export class StoredExpertiseGrantSkillError extends TypeError {
+  override readonly name = 'StoredExpertiseGrantSkillError' as const;
+  constructor(readonly skill: string) {
+    super(`Unknown stored Expertise skill '${skill}'.`);
+  }
+}
+
+export class StoredExpertiseGrantStateError extends TypeError {
+  override readonly name = 'StoredExpertiseGrantStateError' as const;
+  constructor(readonly state: string) {
+    super(`Unknown Expertise grant state '${state}'.`);
+  }
+}
+
 export const EXPERTISE_GRANT_ORPHAN_REASONS = Object.freeze({
   sourceRemoved: 'source_removed',
   entitlementRemoved: 'entitlement_removed',
@@ -41,11 +55,11 @@ export interface SkillExpertiseGrantRow {
 const expertiseGrantRow: RowCodec<SkillExpertiseGrantRow> = (row) => {
   const skill = sqlNullableString(row, 'skill');
   if (skill !== null && !isEnumValue(skills, skill)) {
-    throw new TypeError(`Unknown stored Expertise skill '${skill}'.`);
+    throw new StoredExpertiseGrantSkillError(skill);
   }
   const state = sqlString(row, 'state');
   if (!isEnumValue(skillGrantStates, state)) {
-    throw new TypeError(`Unknown Expertise grant state '${state}'.`);
+    throw new StoredExpertiseGrantStateError(state);
   }
   return {
     id: sqlInteger(row, 'id'),

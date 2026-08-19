@@ -56,7 +56,10 @@ import type {
   SubclassFeatureValueContribution,
 } from './contracts';
 import { catalogLayerDisclosure } from '../catalog/catalog-disclosure';
-import { selectableCatalogContentSql } from '../queries/selectable-catalog-content';
+import {
+  selectableCatalogContentSql,
+  userFacingCatalogVisibilitySql,
+} from '../queries/selectable-catalog-content';
 import type {
   AuthoringCharacterEffect,
   AuthoringDraftCharacterEffect,
@@ -772,6 +775,7 @@ export class CatalogAuthoringService {
         AND supersession.superseded_content_key = identity.content_key
        WHERE identity.catalog_layer = 'external'
          AND identity.archived_at IS NULL
+         AND ${userFacingCatalogVisibilitySql('identity.visibility')}
          AND identity.content_kind IN ('species', 'background', 'subclass')
          AND (
            species.content_key IS NOT NULL

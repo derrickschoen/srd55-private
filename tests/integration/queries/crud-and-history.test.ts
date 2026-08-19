@@ -208,10 +208,10 @@ describe('character CRUD, catalog, save points, and operation history', () => {
 
   it('returns deterministic decoded catalog DTOs without mutating catalog rows', () => {
     registerBundledStableContentIdentity(db, {
-      kind: 'class', contentKey: '2024:class:wizard' as ContentKey, normalizedName: 'querymage',
+      kind: 'class', contentKey: '2024:class:wizard' as ContentKey, visibility: 'listed', normalizedName: 'querymage',
     });
     registerBundledStableContentIdentity(db, {
-      kind: 'feat', contentKey: '2024:feat:alert' as ContentKey, normalizedName: 'queryfeat',
+      kind: 'feat', contentKey: '2024:feat:alert' as ContentKey, visibility: 'listed', normalizedName: 'queryfeat',
     });
     const classId = db.exec(
       `INSERT INTO class_definitions (

@@ -1,10 +1,9 @@
 import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseContext } from '../../../src/db/database';
-import { applicationSeed } from '../../../src/db/bootstrap';
 import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
 import { sheetFacts, sheetSections } from '../../../src/ui/screens/sheet/sheet-view';
-import { openTestDatabase } from '../../helpers/open-db';
+import { openSeededTestDatabase } from '../../helpers/open-db';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import classLevelTables from '../../../docs/srd/source/class-level-tables.txt?raw';
 import veteranPlayer from '../../../docs/homebrew/cc-by/veteran-player.md?raw';
@@ -40,9 +39,8 @@ describe('character sheet feature-value projection', () => {
   let builder: CharacterSheetBuilder;
 
   beforeEach(async () => {
-    connection = await openTestDatabase();
+    connection = await openSeededTestDatabase();
     db = new DatabaseContext(connection);
-    applicationSeed(db);
     builder = new CharacterSheetBuilder(db);
   });
 

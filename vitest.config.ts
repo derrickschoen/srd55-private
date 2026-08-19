@@ -42,6 +42,12 @@ export default defineConfig({
      * in `src/simulation/spell-source-parse-cache.ts`.
      */
     globalSetup: ['tests/helpers/spell-source-parse-cache-global-setup.ts'],
+    // Shared workers require every test to restore mocks, globals, environments,
+    // native-prototype mutations, and scoped module mocks at its suite boundary.
+    isolate: false,
     clearMocks: true,
+    restoreMocks: true,
+    unstubGlobals: true,
+    unstubEnvs: true,
   },
 });

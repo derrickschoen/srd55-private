@@ -6,6 +6,20 @@ const KEY_COMPONENT = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const OWNER_NAMESPACE =
   /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\.[a-z0-9]+(?:-[a-z0-9]+)*)+$/;
 
+export class CatalogKeyComponentEmptyError extends TypeError {
+  override readonly name = 'CatalogKeyComponentEmptyError' as const;
+  constructor() {
+    super('Catalog key components must not be empty.');
+  }
+}
+
+export class AssertedContentOwnerNamespaceError extends TypeError {
+  override readonly name = 'AssertedContentOwnerNamespaceError' as const;
+  constructor(readonly owner_namespace: string) {
+    super(`Asserted content owner namespace '${owner_namespace}' is invalid.`);
+  }
+}
+
 /**
  * A component produced by the legacy slug normalizer.
  *
@@ -32,7 +46,7 @@ export function normalizeCatalogKeyComponent(
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
   if (normalized === '') {
-    throw new TypeError('Catalog key components must not be empty.');
+    throw new CatalogKeyComponentEmptyError();
   }
   return normalized as LegacyCatalogKeyComponent;
 }
@@ -154,9 +168,7 @@ export function assertedExternalContentKey(
     .map(normalizeCatalogKeyComponent)
     .join('.');
   if (!OWNER_NAMESPACE.test(normalizedOwner)) {
-    throw new TypeError(
-      `Asserted content owner namespace '${normalizedOwner}' is invalid.`,
-    );
+    throw new AssertedContentOwnerNamespaceError(normalizedOwner);
   }
   return `${normalizeCatalogKeyComponent(edition)}:${normalizedOwner}:${normalizeCatalogKeyComponent(name)}` as ContentKey;
 }

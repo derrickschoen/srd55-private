@@ -19,6 +19,21 @@ type UndoResult =
 
 type SavePointRestoreResult = UndoResult;
 
+type CommandOutcome<T> =
+  | { readonly kind: 'ok'; readonly value: T }
+  | {
+      readonly kind: 'refused';
+      readonly wire_version: number;
+      readonly refusal: Readonly<Record<string, unknown>>;
+    };
+
+function outcomeValue<T>(outcome: CommandOutcome<T>): T {
+  if (outcome.kind === 'refused') {
+    throw new Error(`Command was refused: ${JSON.stringify(outcome.refusal)}`);
+  }
+  return outcome.value;
+}
+
 export async function ready(page: Page): Promise<void> {
   // The four-worker pool measured the slowest parity caller at 39.4s; 100s
   // gives this load-sensitive readiness wait at least 2.5x pool headroom.
@@ -101,12 +116,16 @@ export async function execute(
   command: Record<string, unknown>,
   index: number,
 ): Promise<CommandResult> {
-  return rpc<CommandResult>(page, 'commands.execute', {
+  return outcomeValue(await rpc<CommandOutcome<CommandResult>>(
+    page,
+    'commands.execute',
+    {
     character_id: characterId,
     operation_uuid: operation(index),
     expected_revision: expectedRevision,
     command,
-  });
+    },
+  ));
 }
 
 export async function undo(
@@ -115,11 +134,15 @@ export async function undo(
   expectedRevision: number,
   operationUuid: string,
 ): Promise<UndoResult> {
-  return rpc<UndoResult>(page, 'commands.undo', {
+  return outcomeValue(await rpc<CommandOutcome<UndoResult>>(
+    page,
+    'commands.undo',
+    {
     character_id: characterId,
     operation_uuid: operationUuid,
     expected_revision: expectedRevision,
-  });
+    },
+  ));
 }
 
 export async function restoreSavePoint(
@@ -128,11 +151,27 @@ export async function restoreSavePoint(
   savePointId: number,
   expectedRevision: number,
 ): Promise<SavePointRestoreResult> {
-  return rpc<SavePointRestoreResult>(page, 'commands.restoreSavePoint', {
+  return outcomeValue(await rpc<CommandOutcome<SavePointRestoreResult>>(
+    page,
+    'commands.restoreSavePoint',
+    {
     character_id: characterId,
     save_point_id: savePointId,
     expected_revision: expectedRevision,
-  });
+    },
+  ));
+}
+
+export async function refusedRpc(
+  page: Page,
+  method: string,
+  params: Record<string, unknown>,
+): Promise<Readonly<Record<string, unknown>>> {
+  const outcome = await rpc<CommandOutcome<unknown>>(page, method, params);
+  if (outcome.kind !== 'refused') {
+    throw new Error('Expected the command to be refused.');
+  }
+  return outcome.refusal;
 }
 
 export function forCharacter(allRows: Row[], characterId: number): Row[] {

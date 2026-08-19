@@ -27,6 +27,51 @@ import {
   type HeadingOnlyDescription,
 } from '../domain/subclass-feature-description';
 
+export type BundledSubclassGrantRulesShape =
+  | 'json_text_or_null'
+  | 'decoded_array';
+
+const BUNDLED_SUBCLASS_GRANT_RULES_SHAPE_MESSAGES: Readonly<
+  Record<BundledSubclassGrantRulesShape, string>
+> = {
+  json_text_or_null:
+    'Bundled subclass grant rules must be JSON text or null.',
+  decoded_array: 'Bundled subclass grant rules must decode to an array.',
+};
+
+export class BundledSubclassGrantRulesShapeError extends TypeError {
+  override readonly name = 'BundledSubclassGrantRulesShapeError' as const;
+  constructor(readonly expected: BundledSubclassGrantRulesShape) {
+    super(BUNDLED_SUBCLASS_GRANT_RULES_SHAPE_MESSAGES[expected]);
+  }
+}
+
+export class BundledSubclassPersistenceError extends Error {
+  override readonly name = 'BundledSubclassPersistenceError' as const;
+  constructor(readonly content_key: string) {
+    super(`Failed to persist bundled subclass ${content_key}.`);
+  }
+}
+
+export class SrdSubclassGrantRulesArrayError extends TypeError {
+  override readonly name = 'SrdSubclassGrantRulesArrayError' as const;
+  constructor(readonly subclass_content_key: string) {
+    super(`SRD subclass ${subclass_content_key} grant rules are not an array.`);
+  }
+}
+
+export class SrdSubclassMissingSpellError extends Error {
+  override readonly name = 'SrdSubclassMissingSpellError' as const;
+  constructor(
+    readonly subclass_content_key: string,
+    readonly spell_version_key: unknown,
+  ) {
+    super(
+      `SRD subclass ${subclass_content_key} references missing spell ${String(spell_version_key)}.`,
+    );
+  }
+}
+
 export interface BundledSubclassFeatureHeading {
   readonly name: string;
   readonly class_level: CharacterLevel;
@@ -144,11 +189,11 @@ function normalizedStoredRules(value: unknown): string | null {
     return null;
   }
   if (typeof value !== 'string') {
-    throw new TypeError('Bundled subclass grant rules must be JSON text or null.');
+    throw new BundledSubclassGrantRulesShapeError('json_text_or_null');
   }
   const decoded: unknown = JSON.parse(value);
   if (!Array.isArray(decoded)) {
-    throw new TypeError('Bundled subclass grant rules must decode to an array.');
+    throw new BundledSubclassGrantRulesShapeError('decoded_array');
   }
   return encodedRules(normalizedRuleObjects(decoded));
 }
@@ -318,7 +363,7 @@ function upsertDefinition(
     [seed.content_key],
   );
   if (subclassId === null) {
-    throw new Error(`Failed to persist bundled subclass ${seed.content_key}.`);
+    throw new BundledSubclassPersistenceError(seed.content_key);
   }
   return subclassId;
 }
@@ -404,9 +449,7 @@ export function assertBundledSrdSubclassSpellReferences(
     }
     const decoded: unknown = JSON.parse(json);
     if (!Array.isArray(decoded)) {
-      throw new TypeError(
-        `SRD subclass ${seed.content_key} grant rules are not an array.`,
-      );
+      throw new SrdSubclassGrantRulesArrayError(seed.content_key);
     }
     for (const input of decoded) {
       const rule = GrantRule.fromObject(input);
@@ -421,8 +464,9 @@ export function assertBundledSrdSubclassSpellReferences(
           [spellVersionKey],
         ) === null
       ) {
-        throw new Error(
-          `SRD subclass ${seed.content_key} references missing spell ${String(spellVersionKey)}.`,
+        throw new SrdSubclassMissingSpellError(
+          seed.content_key,
+          spellVersionKey,
         );
       }
     }

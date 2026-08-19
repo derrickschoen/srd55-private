@@ -29,6 +29,39 @@ import {
 import { SRD_ARCANE_RECOVERY_DESCRIPTION } from './class-resources-srd';
 import { historicalContributionGapForInstalledSubclass } from '../catalog/historical-contribution-gaps';
 
+export class StoredFeatureValueTargetError extends TypeError {
+  override readonly name = 'StoredFeatureValueTargetError' as const;
+  constructor(readonly target_key: string) {
+    super(`Unknown stored feature-value target ${target_key}.`);
+  }
+}
+
+export type StoredContributionOwner =
+  | 'feature_value'
+  | 'authored_resource';
+
+const STORED_SUPERSEDES_REFERENCE_MESSAGES: Readonly<
+  Record<StoredContributionOwner, string>
+> = {
+  feature_value: 'Stored feature-value supersedes_ref is not text.',
+  authored_resource: 'Stored authored-resource supersedes_ref is not text.',
+};
+
+export class StoredContributionSupersedesReferenceError extends TypeError {
+  override readonly name =
+    'StoredContributionSupersedesReferenceError' as const;
+  constructor(readonly owner: StoredContributionOwner) {
+    super(STORED_SUPERSEDES_REFERENCE_MESSAGES[owner]);
+  }
+}
+
+export class AuthoredResourceMarkingShapeError extends TypeError {
+  override readonly name = 'AuthoredResourceMarkingShapeError' as const;
+  constructor(readonly marking_shape: string) {
+    super(`Unknown authored resource marking shape ${marking_shape}.`);
+  }
+}
+
 export interface FeatureValueClassInput {
   readonly class_definition_id: number;
   readonly class_content_key: ContentKey;
@@ -197,11 +230,11 @@ function row(
   const contributionKey = sqlString(value, 'contribution_key');
   const targetKey = sqlString(value, 'target_key');
   if (!isFeatureValueKey(targetKey)) {
-    throw new TypeError(`Unknown stored feature-value target ${targetKey}.`);
+    throw new StoredFeatureValueTargetError(targetKey);
   }
   const supersedes = value.supersedes_ref;
   if (supersedes !== null && typeof supersedes !== 'string') {
-    throw new TypeError('Stored feature-value supersedes_ref is not text.');
+    throw new StoredContributionSupersedesReferenceError('feature_value');
   }
   return {
     content_key: contentKey,
@@ -447,11 +480,13 @@ function authoredResourceRows(
       (stored): ActiveAuthoredResourceContribution => {
         const markingShape = sqlString(stored, 'resource_marking_shape');
         if (markingShape !== 'boxes' && markingShape !== 'remaining') {
-          throw new TypeError(`Unknown authored resource marking shape ${markingShape}.`);
+          throw new AuthoredResourceMarkingShapeError(markingShape);
         }
         const supersedes = stored.supersedes_ref;
         if (supersedes !== null && typeof supersedes !== 'string') {
-          throw new TypeError('Stored authored-resource supersedes_ref is not text.');
+          throw new StoredContributionSupersedesReferenceError(
+            'authored_resource',
+          );
         }
         return {
           content_key: subclass.content_key,

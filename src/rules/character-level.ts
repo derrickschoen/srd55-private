@@ -5,6 +5,13 @@ export interface CharacterLevelOptions {
   readonly excludingClassDefinitionId?: number;
 }
 
+export class CharacterLevelIdRequiredError extends TypeError {
+  override readonly name = 'CharacterLevelIdRequiredError' as const;
+  constructor() {
+    super('A character id is required for a database level read.');
+  }
+}
+
 function isClassLevelList(
   source: DatabaseContext | readonly number[],
 ): source is readonly number[] {
@@ -36,7 +43,7 @@ export function characterLevel(
   }
 
   if (characterId === undefined) {
-    throw new TypeError('A character id is required for a database level read.');
+    throw new CharacterLevelIdRequiredError();
   }
 
   const excludedClassDefinitionId =

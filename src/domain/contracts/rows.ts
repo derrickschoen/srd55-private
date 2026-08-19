@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { InferSelectModel } from 'drizzle-orm';
+import { RowColumnFactsMissingError } from './rows-errors';
 import {
   COLUMN_FACTS,
   type AnyColumnKey,
@@ -79,6 +80,7 @@ import {
   CONTENT_FINGERPRINT_SCHEME_V2,
   contentKinds,
 } from '../../catalog/content-identity';
+import { catalogContentVisibilities } from '../../catalog/content-visibility';
 import {
   catalogContentAliasKinds,
   catalogContentFingerprintRoles,
@@ -404,6 +406,7 @@ const damageTypeEnum = z.enum(damageTypes);
 const creatureTypeEnum = z.enum(creatureTypes);
 const creatureSizeEnum = z.enum(creatureSizes);
 const contentKindEnum = z.enum(contentKinds);
+const contentVisibilityEnum = z.enum(catalogContentVisibilities);
 const authoredContentKindEnum = z.enum(authoredContentKinds);
 const contentKeyKindEnum = z.enum(catalogContentKeyKinds);
 const contentLayerEnum = z.enum(catalogContentLayers);
@@ -442,6 +445,7 @@ export const COLUMN_REFINEMENTS = {
   abilityAllocationMethodEnum,
   sourceTypeEnum,
   sourceInstanceStateEnum,
+  contentVisibilityEnum,
   slotBucketEnum,
   slotStateEnum,
   skillGrantStateEnum,
@@ -692,6 +696,7 @@ const REFINEMENTS = {
   'catalog_content_identities.content_kind': contentKindEnum,
   'catalog_content_identities.key_kind': contentKeyKindEnum,
   'catalog_content_identities.catalog_layer': contentLayerEnum,
+  'catalog_content_identities.visibility': contentVisibilityEnum,
   'catalog_content_identities.normalized_name': nonEmptyText,
   'catalog_content_identities.created_at': sqlTimestamp,
   'catalog_content_identities.archived_at': sqlTimestamp,
@@ -1571,7 +1576,7 @@ function columnSchema(table: RowContractTable, column: string): z.ZodType {
   ];
   /* c8 ignore next 3 -- unreachable: the caller iterates COLUMN_FACTS[table]. */
   if (fact === undefined) {
-    throw new Error(`No column facts for ${table}.${column}.`);
+    throw new RowColumnFactsMissingError(table, column);
   }
   // A degraded column always has either a JSON classification or a refinement
   // (compile-enforced above); an integer column falls back to what drizzle-zod

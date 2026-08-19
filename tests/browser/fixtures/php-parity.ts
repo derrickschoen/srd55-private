@@ -2,6 +2,7 @@ import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import { readFileSync } from 'node:fs';
 import { sqlInteger, sqlNullableInteger } from '../../../src/db/codecs';
 import { DatabaseContext } from '../../../src/db/database';
+import { registerSqliteQueryEngine } from '../../../src/db/query';
 import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
 import {
   createBuildReportFixture,
@@ -21,7 +22,10 @@ const schema = readFileSync(
   'utf8',
 );
 
-const sqlite3Promise = sqlite3InitModule();
+const sqlite3Promise = sqlite3InitModule().then((sqlite3) => {
+  registerSqliteQueryEngine(sqlite3);
+  return sqlite3;
+});
 
 export interface FixtureImage<TIds extends object> {
   readonly bytes: number[];

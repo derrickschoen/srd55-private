@@ -1,12 +1,16 @@
-# Tagged error taxonomy (D274/D276)
+# Tagged defect and refusal taxonomy (D274/D276/D278)
 
-D274 replaced prose-only refusals with hand-rolled tagged error classes whose
-messages are DERIVED from constructor parameters, and D276 extended that from
-one module to everywhere. This document is the mechanical rule set later lanes
-follow, plus the inventory that says how much is left.
+D274 replaced prose-only failures with structured data whose messages are
+derived from their parameters, and D276 extended that work from one module to
+everywhere. D278 subsequently separated the two semantic channels: expected
+policy refusals return `Outcome<T>` with a member of the shared `Refusal` union
+in `src/refusals/`; thrown tagged classes are reserved for defects. This
+document is the mechanical rule set later lanes follow, plus the inventory that
+says how much is left.
 
-Zero dependencies. No error library, no `zod`, no `Result` type. A class
-extending `TypeError` (or `Error`) and nothing else.
+Zero dependencies. No error library and no `zod`. Refusals use the hand-rolled
+`Outcome<T>` type; defects use a class extending `TypeError` (or `Error`) and
+nothing else.
 
 ## 1. The shape
 
@@ -87,10 +91,15 @@ and "an integer from X through Y" are different CONTRACTS a caller may want to
 branch on — not merely different wording. Prefer a parameter for a suffix;
 prefer a class for a different contract.
 
-## 3. Where the classes live
+## 3. Where defects and refusals live
+
+All policy refusals live in the shared discriminated union under
+`src/refusals/`. They are constructed by its exact factories, returned through
+`Outcome<T>`, decoded at the client boundary, and rendered there from kind and
+parameters. Do not add another thrown policy-refusal class.
 
 **Match the module, do not centralize.** This codebase already declares ~70
-error classes and every one of them is co-located with the code that throws it
+defect classes and every one of them is co-located with the code that throws it
 and exported from there (`ShareValidationError` in `src/sharing/schema.ts`,
 `ContentIdentityCollision` in `src/catalog/content-registry.ts`). There is no
 `src/errors/` and one must not be created: a central barrel would import from
@@ -113,14 +122,26 @@ folder — that is the central barrel again, one level down.
 `<Domain><Subject><Failure>Error`, PascalCase, ending in `Error`. The domain
 prefix is the module's subject (`Catalog…`, `Share…`, `Srd…`), not the file
 name. Existing classes ending in `Refusal` (`SkillGrantRefusal`,
-`LevelUpRefusal`) keep that suffix — it marks a POLICY refusal of well-formed
-input, as against malformed input — and new policy refusals may use it.
+`LevelUpRefusal`) are migration targets: their data moves into `src/refusals/`
+and their callers return `Outcome<T>`. New policy refusals are union arms, not
+classes. Names ending in `Error` remain for defects.
 
 Do not encode the guard's line, function, or field in the class name. The field
 is a parameter; that is the whole idea. `CatalogFieldTypeError` is right;
 `CatalogSpellLevelFieldTypeError` is a class that will be written 300 times.
 
-## 5. The test contract
+### D278 classification of command payload reasons
+
+`malformed_planned_subchoice` and `invalid_character_flavor` remain **DEFECTS**,
+not policy refusals. Both describe malformed command input caught by
+`CharacterCommandPayloadValidator`: the former reports an invalid planned
+subchoice wire shape, while the latter reports a NUL in a flavor field. The UI
+has no recovery branch for either reason; repository search finds them only in
+the validator, the worker's generic `handler_error` translation, and transport
+or integration assertions. The level-up UI does handle
+`planned_subchoice_refused`, which is a different, well-formed policy refusal.
+
+## 5. The tagged-defect test contract
 
 Three assertions, in three places, and they do not overlap:
 

@@ -23,24 +23,9 @@ import {
 import type { CharacterCommandIntegrity } from './integrity';
 import type { StoredCharacterSnapshotInverse } from './stored-inverses';
 import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
-
-export type SpeciesLineageRefusalReason =
-  | 'guided_species_source_missing'
-  | 'wrong_source_kind'
-  | 'configured_choice_unavailable'
-  | 'invalid_option'
-  | 'invalid_spellcasting_ability'
-  | 'invalid_replaceable_spell';
-
-export class SpeciesLineageRefusal extends Error {
-  constructor(
-    readonly reason: SpeciesLineageRefusalReason,
-    message: string,
-  ) {
-    super(message);
-    this.name = 'SpeciesLineageRefusal';
-  }
-}
+import { ok, refused, type Outcome } from '../refusals/outcome';
+import { speciesLineageRefused } from '../refusals/refusal';
+import { runCommandTransaction } from '../refusals/transaction-outcome';
 
 interface SpeciesChoiceSource {
   readonly id: number;
@@ -123,8 +108,8 @@ export class ChooseSpeciesLineageCommand {
     this.#generator = generator ?? configuredChoiceSlotGenerator(db);
   }
 
-  apply(characterId: number): void {
-    this.db.transaction(() => {
+  apply(characterId: number): Outcome<void> {
+    return runCommandTransaction(this.db, () => {
       const source = this.db.one(
         `SELECT source.id, source.source_type, source.config,
                 definition.grant_rules
@@ -147,23 +132,14 @@ export class ChooseSpeciesLineageCommand {
         }),
       );
       if (source === null) {
-        throw new SpeciesLineageRefusal(
-          'guided_species_source_missing',
-          'This character has no active guided species source.',
-        );
+        return refused(speciesLineageRefused('guided_species_source_missing'));
       }
       if (source.source_type !== 'species') {
-        throw new SpeciesLineageRefusal(
-          'wrong_source_kind',
-          'The guided species marker does not identify a species source.',
-        );
+        return refused(speciesLineageRefused('wrong_source_kind'));
       }
       const rules = configuredRules(source);
       if (rules.length !== 1) {
-        throw new SpeciesLineageRefusal(
-          'configured_choice_unavailable',
-          'The guided species does not expose one resolvable configured choice.',
-        );
+        return refused(speciesLineageRefused('configured_choice_unavailable'));
       }
       const rule = rules.find(
         (candidate) => candidate instanceof ConfiguredChoiceRule,
@@ -175,19 +151,13 @@ export class ChooseSpeciesLineageCommand {
         (candidate) => candidate.value === this.payload.chosen_option,
       );
       if (option === undefined) {
-        throw new SpeciesLineageRefusal(
-          'invalid_option',
-          `Choose one of ${rule.options.map((candidate) => candidate.label).join(', ')}.`,
-        );
+        return refused(speciesLineageRefused('invalid_option'));
       }
       if (
         rule.abilityChoice === null ||
         !rule.abilityChoice.options.includes(this.payload.spellcasting_ability)
       ) {
-        throw new SpeciesLineageRefusal(
-          'invalid_spellcasting_ability',
-          'Choose one of the configured spellcasting abilities.',
-        );
+        return refused(speciesLineageRefused('invalid_spellcasting_ability'));
       }
 
       const before = this.#state.capture(characterId);
@@ -208,10 +178,7 @@ export class ChooseSpeciesLineageCommand {
       const replaceable = option.replaceableSpellChoice;
       if (replaceable === null) {
         if (this.payload.replaceable_spell_version_key !== undefined) {
-          throw new SpeciesLineageRefusal(
-            'invalid_replaceable_spell',
-            'This configured option has no replaceable spell choice.',
-          );
+          return refused(speciesLineageRefused('invalid_replaceable_spell'));
         }
       } else {
         setAtPath(
@@ -244,10 +211,7 @@ export class ChooseSpeciesLineageCommand {
           [characterId, source.id, replaceableSpellRuleKey(rule.ruleKey)],
         );
         if (spellVersionId === null || slotId === null) {
-          throw new SpeciesLineageRefusal(
-            'invalid_replaceable_spell',
-            'The selected replaceable spell is unavailable.',
-          );
+          return refused(speciesLineageRefused('invalid_replaceable_spell'));
         }
         try {
           assignSpellSelection(this.db, {
@@ -255,16 +219,14 @@ export class ChooseSpeciesLineageCommand {
             spell_version_id: Number(spellVersionId),
             address: { kind: 'slot_selection', id: Number(slotId) },
           });
-        } catch (error) {
-          throw new SpeciesLineageRefusal(
-            'invalid_replaceable_spell',
-            error instanceof Error ? error.message : String(error),
-          );
+        } catch {
+          return refused(speciesLineageRefused('invalid_replaceable_spell'));
         }
       }
 
       this.#before = before;
       this.#characterId = characterId;
+      return ok(undefined);
     });
   }
 

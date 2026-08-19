@@ -10,9 +10,7 @@ import { LevelUpStateQuery } from '../../../src/queries/level-up-state';
 import {
   MulticlassPrimaryAbilityQueries,
 } from '../../../src/queries/multiclass-primary-ability';
-import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
-import { seedSheetContent } from '../../../src/rules/sheet-srd';
-import { openTestDatabase } from '../../helpers/open-db';
+import { openSeededTestDatabase } from '../../helpers/open-db';
 import { registerAssertedFixtureContentIdentity } from '../../helpers/content-identity';
 import { GrantRuleSlotGenerator } from '../../../src/grants/grant-rule-slot-generator';
 
@@ -45,10 +43,8 @@ describe('shared multiclass primary-ability query seam', () => {
   }
 
   beforeEach(async () => {
-    connection = await openTestDatabase();
+    connection = await openSeededTestDatabase();
     db = new DatabaseContext(connection);
-    seedClassProgressions(db);
-    seedSheetContent(db);
     characterId = db.exec(
       `INSERT INTO characters (
          name, ability_allocation_method,

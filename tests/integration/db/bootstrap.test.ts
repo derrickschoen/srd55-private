@@ -12,6 +12,7 @@ import {
 import { auditCandidateDatabase } from '../../../src/db/candidate-audit';
 import { AddSourceCommand } from '../../../src/commands/add-source';
 import { CharacterCommandExecutor } from '../../../src/commands/character-command-executor';
+import { expectOkOutcome } from '../../helpers/outcome';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { CharacterCompletenessQueries } from '../../../src/queries/character-completeness';
 import {
@@ -22,6 +23,7 @@ import {
 import {
   assertBundledSrdSubclassSpellReferences,
   hasBundledSrdSubclassContent,
+  SrdSubclassMissingSpellError,
 } from '../../../src/rules/srd-subclass-content';
 import {
   bundledSubclassDefinitionContentKeys,
@@ -49,6 +51,15 @@ const LONG_ROAD_SUBCLASS_DOCUMENT = readFileSync(
 );
 const LONG_ROAD_SUBCLASS_KEY =
   '2024:longroad.homebrew:college-of-the-long-road';
+
+function defect(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return expect.fail('Expected a bundled-content defect, but it returned.');
+}
 
 const SRD_CLASSES = [
   'Barbarian',
@@ -789,9 +800,14 @@ describe('application database bootstrap', () => {
         WHERE content_key = '2024:subclass:life-domain'`,
     );
 
-    expect(() =>
+    const error = defect(() =>
       assertBundledSrdSubclassSpellReferences(lifecycle.database),
-    ).toThrow('2024:missing-subclass-spell');
+    );
+    expect(error).toBeInstanceOf(SrdSubclassMissingSpellError);
+    expect(error).toMatchObject({
+      subclass_content_key: '2024:subclass:life-domain',
+      spell_version_key: '2024:missing-subclass-spell',
+    });
   });
 
   // Full-suite ms: postswap-vitest.log=3356, digest-vitest6.log=4516,
@@ -1034,7 +1050,7 @@ describe('application database bootstrap', () => {
     );
     lifecycle.open();
     await lifecycle.replace(fixtureBytes);
-    const result = await new CharacterCommandExecutor(
+    const result = expectOkOutcome(await new CharacterCommandExecutor(
       lifecycle.database,
       new CharacterCommandIntegrity('monk-shield-lifecycle'),
     ).execute({
@@ -1055,7 +1071,7 @@ describe('application database bootstrap', () => {
           notes: null,
         },
       },
-    });
+    }));
     expect(result.preview_warnings).toEqual([
       {
         code: 'armor_class_reduced',

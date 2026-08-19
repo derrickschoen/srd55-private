@@ -26,7 +26,7 @@ import {
   interactiveElement,
   type InteractiveTestElement,
 } from '../../fixtures/interactive-dom';
-import { openTestDatabase } from '../../helpers/open-db';
+import { acquireSharedDb } from '../../helpers/shared-db';
 
 type TestSpeciesFormOptions = Omit<
   Parameters<typeof renderSpeciesFormBase>[0],
@@ -600,7 +600,7 @@ describe('HA-7 species authoring form', () => {
   });
 
   it('round-trips ordered custom vocabulary and every species grant/effect variant through save, reload, and rehydration', async () => {
-    const connection = await openTestDatabase();
+    const lease = await acquireSharedDb({ mode: 'rw' });
     const restoreDocument = installInteractiveDocument();
     try {
       const effects: SpeciesAuthoringDraft['traits'][number]['effects'] = [
@@ -625,7 +625,7 @@ describe('HA-7 species authoring form', () => {
           effects,
         }],
       };
-      const database = new DatabaseContext(connection);
+      const database = lease.db;
       let uuid = 0;
       const service = new CatalogAuthoringService(database, {
         randomUuid: () => `ha7-round-trip-${String(++uuid)}`,
@@ -712,7 +712,7 @@ describe('HA-7 species authoring form', () => {
       secondCleanup();
     } finally {
       restoreDocument();
-      connection.close();
+      await lease.release();
     }
   });
 

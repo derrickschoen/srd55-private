@@ -47,6 +47,22 @@ import type {
   WeaponTemplateId,
 } from '../domain/ids';
 
+/** A stored weapon profile carries an unknown range discriminant. */
+export class WeaponRangeKindError extends TypeError {
+  override readonly name = 'WeaponRangeKindError' as const;
+  constructor(readonly range_kind: string) {
+    super(`Unknown weapon range kind "${range_kind}".`);
+  }
+}
+
+/** A stored weapon template carries an unknown SRD grouping value. */
+export class WeaponGroupError extends Error {
+  override readonly name = 'WeaponGroupError' as const;
+  constructor(readonly weapon_group: string) {
+    super(`Unknown weapon group '${weapon_group}'.`);
+  }
+}
+
 /**
  * The three things the attack derivation needs that are NOT weapon rows.
  *
@@ -133,7 +149,7 @@ function attackKind(row: SqlRow): WeaponAttackKind | null {
 function weaponProfile(row: SqlRow): WeaponProfile {
   const rangeKind = sqlString(row, 'range_kind');
   if (!isWeaponRangeKind(rangeKind)) {
-    throw new TypeError(`Unknown weapon range kind "${rangeKind}".`);
+    throw new WeaponRangeKindError(rangeKind);
   }
   return {
     name: sqlString(row, 'name'),
@@ -224,7 +240,7 @@ export class WeaponQueries {
       (row): WeaponTemplate => {
         const group = sqlString(row, 'srd_group');
         if (!isEnumValue(srdWeaponGroups, group)) {
-          throw new Error(`Unknown weapon group '${group}'.`);
+          throw new WeaponGroupError(group);
         }
         return {
           id: sqlInteger(row, 'id') as WeaponTemplateId,

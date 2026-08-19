@@ -29,6 +29,13 @@ const USER_CONTENT_OWNER = 'local.dnd-wt';
 export const FORK_NAME_REQUIRED_MESSAGE =
   'A copied spell must have a different name from its source.';
 
+export class BundledSrdSpellNotFoundError extends Error {
+  override readonly name = 'BundledSrdSpellNotFoundError' as const;
+  constructor(readonly source_content_key: string) {
+    super('Bundled SRD spell not found.');
+  }
+}
+
 export interface ForkSpellParams {
   readonly sourceContentKey: string;
   readonly name?: string;
@@ -147,7 +154,7 @@ function prepareSrdSpellFork(
     [params.sourceContentKey],
   );
   if (source === null) {
-    throw new Error('Bundled SRD spell not found.');
+    throw new BundledSrdSpellNotFoundError(params.sourceContentKey);
   }
 
   const sourceName = String(source.display_name);
@@ -181,6 +188,7 @@ function prepareSrdSpellFork(
     });
     return {
       kind: 'spell',
+      visibility: 'listed',
       edition: rulesEdition,
       name,
       assertedKey: contentKey,

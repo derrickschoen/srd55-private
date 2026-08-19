@@ -11,6 +11,7 @@ import {
 } from '../../helpers/content-identity';
 import { openTestDatabase } from '../../helpers/open-db';
 import { ItemQueries } from '../../../src/queries/items';
+import { expectOkOutcome } from '../../helpers/outcome';
 
 const integrityKey = 'AC-2b-item-command-integrity-key';
 
@@ -35,7 +36,7 @@ describe('item commands and effect ownership', () => {
 
   afterEach(() => connection.close());
 
-  async function run(command: CharacterCommandPayload) {
+  async function runOutcome(command: CharacterCommandPayload) {
     operation += 1;
     return executor.execute({
       character_id: characterId,
@@ -48,6 +49,10 @@ describe('item commands and effect ownership', () => {
       ),
       command,
     });
+  }
+
+  async function run(command: CharacterCommandPayload) {
+    return expectOkOutcome(await runOutcome(command));
   }
 
   it('picker query copies a definition and effects into severed character rows', async () => {
@@ -370,12 +375,15 @@ describe('item commands and effect ownership', () => {
       await run({ type: 'attune_item', item_id: itemId! });
     }
 
-    await expect(
-      run({ type: 'attune_item', item_id: itemIds[3]! }),
-    ).rejects.toMatchObject({
-      name: 'AttunementSlotsFull',
-      data: {
-        reason: 'attunement_slots_full',
+    expect(await runOutcome({
+      type: 'attune_item',
+      item_id: itemIds[3]!,
+    })).toEqual({
+      kind: 'refused',
+      wire_version: 1,
+      refusal: {
+        kind: 'attunement_slots_full',
+        limit: 3,
         occupants: [
           { slot: 1, item_id: itemIds[0], name: 'Crown' },
           { slot: 2, item_id: itemIds[1], name: 'Cloak' },

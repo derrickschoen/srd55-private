@@ -21,13 +21,14 @@ import { foldAutomaticDamageEvent } from '../../../src/simulation/probability';
 import {
   deriveSaveDamageCoverageFromBodies,
   sourceFixedSaveDc,
-  spellBodyDigestInputsByHeading,
+  spellBodyDigestInputsFromFullLayout,
   spellDescriptionsByHeading,
 } from '../../../src/simulation/spell-source-reader';
 
 const spellExtract = readFileSync('docs/srd/source/spell-descriptions.txt', 'utf8');
+const fullSrd = readFileSync('docs/srd/full/srd-5.2.1.txt', 'utf8');
 const spellBodies = spellDescriptionsByHeading(spellExtract);
-const spellBodyDigestInputs = spellBodyDigestInputsByHeading(spellExtract);
+const spellBodyDigestInputs = spellBodyDigestInputsFromFullLayout(fullSrd);
 
 function occurrences(body: string): readonly (readonly [number, number])[] {
   return deriveSaveDamageCoverageFromBodies(new Map([['Round 15', body]]))

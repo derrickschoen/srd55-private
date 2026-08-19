@@ -28,6 +28,12 @@ import {
   weaponRangeFromV1Pair,
   type WeaponRange,
 } from '../../domain/weapon-range';
+import { assertShareWireSchemaRequiredFields } from './wire-schema-errors';
+
+export {
+  assertShareWireSchemaRequiredFields,
+  ShareWireSchemaRequiredFieldError,
+} from './wire-schema-errors';
 
 /**
  * Any change to tuple field order, meaning, membership, or accepted value
@@ -813,9 +819,11 @@ function migrateV12ToV13(document: unknown): unknown {
   const effectKindIndex = WIRE_SCHEMA_V12.tuples.effect.fields.findIndex(
     (field) => field.key === 'kind',
   );
-  if (effectsIndex < 0 || versionIndex < 0 || effectKindIndex < 0) {
-    throw new TypeError('wire v12 schema is missing a required field.');
-  }
+  assertShareWireSchemaRequiredFields(12, {
+    effects: effectsIndex,
+    version: versionIndex,
+    'effect.kind': effectKindIndex,
+  });
   const effects = document[effectsIndex];
   if (effects !== null && !Array.isArray(effects)) {
     throw new TypeError('wire effects must be null or a list.');
@@ -869,9 +877,11 @@ function migrateV13ToV14(document: unknown): unknown {
   const spellbookIndex = WIRE_SCHEMA_V13.tuples.root.fields.findIndex(
     (field) => field.key === 'spellbook',
   );
-  if (versionIndex < 0 || selectionsIndex < 0 || spellbookIndex < 0) {
-    throw new TypeError('wire v13 schema is missing a required field.');
-  }
+  assertShareWireSchemaRequiredFields(13, {
+    version: versionIndex,
+    selections: selectionsIndex,
+    spellbook: spellbookIndex,
+  });
   const selections = document[selectionsIndex];
   const spellbook = document[spellbookIndex];
   if (!Array.isArray(selections) || !Array.isArray(spellbook)) {
@@ -923,9 +933,7 @@ function migrateV14ToV15(document: unknown): unknown {
   const versionIndex = WIRE_SCHEMA_V14.tuples.root.fields.findIndex(
     (field) => field.key === 'version',
   );
-  if (versionIndex < 0) {
-    throw new TypeError('wire v14 schema is missing the version field.');
-  }
+  assertShareWireSchemaRequiredFields(14, { version: versionIndex });
   migrated[versionIndex] = 15;
   return migrated;
 }
@@ -947,9 +955,7 @@ function migrateV15ToV16(document: unknown): unknown {
   const versionIndex = WIRE_SCHEMA_V15.tuples.root.fields.findIndex(
     (field) => field.key === 'version',
   );
-  if (versionIndex < 0) {
-    throw new TypeError('wire v15 schema is missing the version field.');
-  }
+  assertShareWireSchemaRequiredFields(15, { version: versionIndex });
   migrated[versionIndex] = 16;
   return migrated;
 }
@@ -993,9 +999,7 @@ function migrateV17ToV18(document: unknown): unknown {
   const versionIndex = WIRE_SCHEMA_V17.tuples.root.fields.findIndex(
     (field) => field.key === 'version',
   );
-  if (versionIndex < 0) {
-    throw new TypeError('wire v17 schema is missing the version field.');
-  }
+  assertShareWireSchemaRequiredFields(17, { version: versionIndex });
   migrated[versionIndex] = 18;
   return migrated;
 }
@@ -1012,7 +1016,7 @@ function migrateV19ToV20(document: unknown): unknown {
   const versionIndex = WIRE_SCHEMA_V19.tuples.root.fields.findIndex(
     (field) => field.key === 'version',
   );
-  if (versionIndex < 0) throw new TypeError('wire v19 schema is missing the version field.');
+  assertShareWireSchemaRequiredFields(19, { version: versionIndex });
   migrated[versionIndex] = 20;
   return migrated;
 }

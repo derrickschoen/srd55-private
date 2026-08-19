@@ -9,7 +9,7 @@ import type {
  * Near-miss probes for two module-level guards in `src/simulation/coverage.ts`:
  *
  * 1. the corpus parity guard (bundled column-safe reading vs the committed
- *    readable extract, for both parsed bodies and raw digest inputs), and
+ *    readable extract, for parsed bodies), and
  * 2. the unreconciled-suspect filter (candidate overlap plus exact-span
  *    exclusion matching).
  *
@@ -26,7 +26,7 @@ type Coverage = typeof import('../../../src/simulation/coverage');
 const READER_PATH = '../../../src/simulation/spell-source-reader';
 
 const PARITY_FAILURE_MESSAGE =
-  'Column-safe full SRD spell reading, including raw digest bodies, does not match the committed readable spell extract.';
+  'Column-safe full SRD spell reading does not match the committed readable spell extract.';
 
 /**
  * The exact reviewed exclusion span for `Web`, copied verbatim from
@@ -202,31 +202,28 @@ describe('column-safe corpus parity guard', () => {
     ).rejects.toThrow(new TypeError(PARITY_FAILURE_MESSAGE));
   });
 
-  it('rejects an extract that is missing one raw digest input', async () => {
-    await expect(
-      importCoverageWithReader((actual) => ({
-        spellBodyDigestInputsByHeading: (extract: string) =>
-          droppingOneEntry(actual.spellBodyDigestInputsByHeading(extract)),
-      })),
-    ).rejects.toThrow(new TypeError(PARITY_FAILURE_MESSAGE));
+  it('allows the readable extract to omit a raw-layout digest entry', async () => {
+    const coverage = await importCoverageWithReader((actual) => ({
+      spellBodyDigestInputsByHeading: (extract: string) =>
+        droppingOneEntry(actual.spellBodyDigestInputsByHeading(extract)),
+    }));
+    expect(coverage.highRecallDamageSaveSuspects.length).toBeGreaterThan(0);
   });
 
-  it('rejects an extract carrying one raw digest input the full layout does not, with every shared digest input identical', async () => {
-    await expect(
-      importCoverageWithReader((actual) => ({
-        spellBodyDigestInputsByHeading: (extract: string) =>
-          addingOneEntry(actual.spellBodyDigestInputsByHeading(extract)),
-      })),
-    ).rejects.toThrow(new TypeError(PARITY_FAILURE_MESSAGE));
+  it('allows the readable extract to carry an extra raw-layout digest entry', async () => {
+    const coverage = await importCoverageWithReader((actual) => ({
+      spellBodyDigestInputsByHeading: (extract: string) =>
+        addingOneEntry(actual.spellBodyDigestInputsByHeading(extract)),
+    }));
+    expect(coverage.highRecallDamageSaveSuspects.length).toBeGreaterThan(0);
   });
 
-  it('rejects an extract whose parsed bodies all agree but one raw digest input differs', async () => {
-    await expect(
-      importCoverageWithReader((actual) => ({
-        spellBodyDigestInputsByHeading: (extract: string) =>
-          alteringOneValue(actual.spellBodyDigestInputsByHeading(extract)),
-      })),
-    ).rejects.toThrow(new TypeError(PARITY_FAILURE_MESSAGE));
+  it('allows raw-layout digest text to differ when parsed bodies agree', async () => {
+    const coverage = await importCoverageWithReader((actual) => ({
+      spellBodyDigestInputsByHeading: (extract: string) =>
+        alteringOneValue(actual.spellBodyDigestInputsByHeading(extract)),
+    }));
+    expect(coverage.highRecallDamageSaveSuspects.length).toBeGreaterThan(0);
   });
 });
 

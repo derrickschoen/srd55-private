@@ -5,6 +5,14 @@ import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 
 const ASI_CONTENT_KEY = '2024:feat:ability-score-improvement';
 
+export class AbilityScoreImprovementFeatMissingError extends Error {
+  override readonly name =
+    'AbilityScoreImprovementFeatMissingError' as const;
+  constructor() {
+    super('The bundled Ability Score Improvement feat is missing.');
+  }
+}
+
 function timestamp(): string {
   return new Date().toISOString();
 }
@@ -63,7 +71,7 @@ export function reconcileLegacyLevelFeatChoices(db: DatabaseContext): void {
     [ASI_CONTENT_KEY],
   );
   if (asiDefinition === null) {
-    throw new Error('The bundled Ability Score Improvement feat is missing.');
+    throw new AbilityScoreImprovementFeatMissingError();
   }
 
   db.transaction(() => {

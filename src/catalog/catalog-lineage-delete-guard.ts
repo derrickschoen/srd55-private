@@ -3,6 +3,20 @@ import type { DatabaseContext } from '../db/database';
 const LINEAGE_DELETE_GUARD =
   'catalog_content_supersessions_refuse_delete_before_delete';
 
+export class CatalogLineageDeleteTransactionError extends Error {
+  override readonly name = 'CatalogLineageDeleteTransactionError' as const;
+  constructor(readonly transaction_depth: number) {
+    super('Catalog lineage deletion requires one outermost transaction.');
+  }
+}
+
+export class CatalogLineageDeleteGuardMissingError extends Error {
+  override readonly name = 'CatalogLineageDeleteGuardMissingError' as const;
+  constructor(readonly guard_name: string) {
+    super('Catalog supersession delete guard is missing.');
+  }
+}
+
 /**
  * The one seam allowed to suspend 0039's lineage-delete guard.
  *
@@ -17,9 +31,7 @@ export function withCatalogLineageDeleteGuardSuspended<T>(
   operation: () => T,
 ): T {
   if (db.transactionDepth !== 1) {
-    throw new Error(
-      'Catalog lineage deletion requires one outermost transaction.',
-    );
+    throw new CatalogLineageDeleteTransactionError(db.transactionDepth);
   }
   const guardSql = db.scalar<string>(
     `SELECT sql FROM sqlite_schema
@@ -27,7 +39,7 @@ export function withCatalogLineageDeleteGuardSuspended<T>(
     [LINEAGE_DELETE_GUARD],
   );
   if (guardSql === null) {
-    throw new Error('Catalog supersession delete guard is missing.');
+    throw new CatalogLineageDeleteGuardMissingError(LINEAGE_DELETE_GUARD);
   }
 
   db.exec(`DROP TRIGGER ${LINEAGE_DELETE_GUARD}`);

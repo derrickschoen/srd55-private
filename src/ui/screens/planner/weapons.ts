@@ -472,7 +472,10 @@ function renderList(
   }
 
   table.append(caption, head, body);
-  return table;
+  const scroller = document.createElement('div');
+  scroller.className = 'planner-table-scroll';
+  scroller.append(table);
+  return scroller;
 }
 
 function renderForm(

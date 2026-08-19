@@ -11,6 +11,11 @@ import {
 import { CONTENT_FINGERPRINT_SCHEME_V1 } from '../../../src/catalog/content-identity';
 import { sha256 } from '../../../src/crypto/sha256';
 import {
+  CatalogDataMigrationChecksumMismatchError,
+  CatalogDataMigrationMarkerDisagreementError,
+  CatalogDataMigrationUnregisteredMarkerError,
+} from '../../../src/catalog/catalog-data-migrations-errors';
+import {
   DatabaseContext,
   prepareConnection,
 } from '../../../src/db/database';
@@ -21,6 +26,15 @@ import {
 } from '../../helpers/open-db';
 
 let sqlite3: Sqlite3Static;
+
+function refusal(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return expect.fail('Expected a refusal, but the call returned.');
+}
 
 beforeEach(async () => {
   sqlite3 = await getSqlite3();
@@ -71,7 +85,7 @@ describe('catalog data-migration registry', () => {
         'src/catalog/retire-non-srd-bundled-subclasses-v1.ts',
         'src/catalog/catalog-lineage-delete-guard.ts',
       ],
-      checksum: 'e30bd134e9173b51f925e977e3ac8f1e274e14bdf9a3c956c04c9a58b7fde8a4',
+      checksum: '69781850c8b75e9e83cffd421f278810986859af07d2366e2e44ac854259eb4a',
     }, {
       id: 'reconcile_species_lineage_content_v2',
       projectorScheme: 'content-v2',
@@ -79,11 +93,15 @@ describe('catalog data-migration registry', () => {
         'src/catalog/reconcile-species-lineage-content-v2.ts',
         'src/rules/origin-definitions-srd.ts',
         'src/grants/configured-choice-rule.ts',
+        'src/grants/configured-choice-rule-errors.ts',
         'src/grants/grant-rule.ts',
+        'src/grants/grant-rule-errors.ts',
         'src/grants/source-rule-reader.ts',
+        'src/grants/source-rule-reader-errors.ts',
         'src/domain/source-instance-state.ts',
         'src/rules/character-level.ts',
         'src/grants/grant-rule-slot-generator.ts',
+        'src/grants/grant-rule-slot-generator-errors.ts',
         'src/grants/grant-rule-planner.ts',
         'src/grants/skill-grants.ts',
         'src/grants/skill-expertise-grants.ts',
@@ -113,12 +131,11 @@ describe('catalog data-migration registry', () => {
       // added `src/domain/source-instance-state.ts`, a module that exists to be
       // exactly this wide. Reconciliation's OUTPUT is unchanged in both rounds;
       // re-pinning is D226's accepted cost, not a way around the freeze.
-      // Re-pinned 2026-08-18, completing the 2026-08-17 registry-side re-pin
-      // for inc5's exhaustive-dispatch-only rewrite of
-      // origin-definitions-srd.ts (commit 7a4c7c8b) — that commit moved the
-      // registry pin and its comment but missed this independent test pin.
-      // The recompute-from-bytes sibling test verifies this value.
-      checksum: '9d30e29c11320a60e2a19ebf102e65e31b173929b6c61d1eb134bad0c36f8e64',
+      // MERGE 2026-08-18 (main→wt/simcore): both parents re-pinned this over
+      // different source states (inc5's exhaustive-dispatch rewrite vs main's
+      // tagged-error/eligibility/comparator waves); recomputed over the MERGED
+      // frozen sources by the designed procedure, with the registry pin.
+      checksum: 'd4f3f5d6976e134682541a193e898d7f6672ee172228b00becd3db00e90855b7',
     }]);
     expect(() =>
       validateCatalogDataMigrationRegistry(CATALOG_DATA_MIGRATIONS)
@@ -135,11 +152,15 @@ describe('catalog data-migration registry', () => {
       }],
     };
 
-    expect(() =>
-      validateCatalogDataMigrationRegistry([edited]),
-    ).toThrow(
-      'Catalog data migration "frozen_source" source checksum mismatch',
-    );
+    const error = refusal(() => validateCatalogDataMigrationRegistry([edited]));
+    expect(error).toBeInstanceOf(CatalogDataMigrationChecksumMismatchError);
+    expect(error).toMatchObject({
+      migration_id: 'frozen_source',
+      expected_checksum: edited.checksum,
+      actual_checksum: sha256(JSON.stringify(edited.sources.map(
+        ({ path, bytes }) => [path, bytes],
+      ))),
+    });
   });
 
   it('refuses changed guard-module bytes until the retirement checksum is re-pinned', () => {
@@ -152,10 +173,17 @@ describe('catalog data-migration registry', () => {
           : source),
     };
 
-    expect(() => validateCatalogDataMigrationRegistry([edited])).toThrow(
-      'Catalog data migration "retire_non_srd_bundled_subclasses_v1" ' +
-        'source checksum mismatch',
-    );
+    const error = refusal(() => validateCatalogDataMigrationRegistry([edited]));
+    expect(error).toBeInstanceOf(CatalogDataMigrationChecksumMismatchError);
+    expect(error).toMatchObject({
+      migration_id: 'retire_non_srd_bundled_subclasses_v1',
+      expected_checksum: edited.checksum,
+      actual_checksum: sha256(JSON.stringify(
+        [...edited.sources]
+          .sort((left, right) => left.path.localeCompare(right.path))
+          .map(({ path, bytes }) => [path, bytes]),
+      )),
+    });
   });
 
   // Measured 2.1s alone; 20s leaves headroom for full-suite contention.
@@ -247,10 +275,9 @@ describe('catalog data-migration registry', () => {
     try {
       runCatalogDataMigrations(db, [original]);
 
-      expect(() => runCatalogDataMigrations(db, [edited])).toThrow(
-        'Applied catalog data migration "checksum_fixture" does not match ' +
-          'the registered projector scheme and checksum.',
-      );
+      const error = refusal(() => runCatalogDataMigrations(db, [edited]));
+      expect(error).toBeInstanceOf(CatalogDataMigrationMarkerDisagreementError);
+      expect(error).toMatchObject({ migration_id: 'checksum_fixture' });
       expect(editedExecutions).toBe(0);
       expect(db.allRaw('SELECT name FROM characters')).toEqual([
         { name: 'Original run' },
@@ -278,10 +305,9 @@ describe('catalog data-migration registry', () => {
         [checksum],
       );
 
-      expect(() => runCatalogDataMigrations(db, [])).toThrow(
-        'Applied catalog data migration "removed_fixture" is not registered ' +
-          'by this application.',
-      );
+      const error = refusal(() => runCatalogDataMigrations(db, []));
+      expect(error).toBeInstanceOf(CatalogDataMigrationUnregisteredMarkerError);
+      expect(error).toMatchObject({ migration_id: 'removed_fixture' });
     } finally {
       db.close();
     }

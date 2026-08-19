@@ -166,6 +166,25 @@ type SpellBodyForms = {
   readonly digest_input: string;
 };
 
+const LEXICAL_LINE_BREAK_HYPHENS = new Set([
+  'foot-by',
+  'foot-high',
+  'long-dead',
+  'nine-course',
+]);
+
+function parseFlattenedSpellBody(digestInput: string): string {
+  return digestInput.replace(
+    /([A-Za-z]+)-\s+([a-z][A-Za-z]*)/gu,
+    (_match: string, left: string, right: string) => {
+      const compound = `${left}-${right}`;
+      return LEXICAL_LINE_BREAK_HYPHENS.has(compound.toLowerCase())
+        ? compound
+        : `${left}${right}`;
+    },
+  );
+}
+
 function headingsFromReadingOrderLines(
   lines: readonly string[],
 ): ReadonlyMap<string, SpellBodyForms> {
@@ -193,7 +212,7 @@ function headingsFromReadingOrderLines(
       (lines[headingIndex] ?? '').trim(),
       {
         digest_input: digestInput,
-        parsed: digestInput.replace(/-\s+/gu, ''),
+        parsed: parseFlattenedSpellBody(digestInput),
       },
     ];
   }));
@@ -256,6 +275,8 @@ function splitSafe(line: string, column: number): boolean {
   return true;
 }
 
+const MAX_SINGLE_COLUMN_OVERFLOW_ROWS = 2;
+
 function findGutter(lines: readonly string[], page: number): number {
   const nonBlank = lines.filter((line) => line.trim() !== '');
   // An all-blank page makes `Math.max()` return -Infinity, and the column
@@ -265,28 +286,53 @@ function findGutter(lines: readonly string[], page: number): number {
     throw new TypeError(`SRD spell page ${String(page)} has no printed rows.`);
   }
   const width = Math.max(...nonBlank.map((line) => line.length));
-  const candidates: number[] = [];
+  let fewestUnsafeRows = Number.POSITIVE_INFINITY;
+  let candidates: number[] = [];
   for (
     let column = Math.floor(width * 0.35);
     column <= Math.floor(width * 0.65);
     column += 1
   ) {
-    if (nonBlank.every((line) => splitSafe(line, column))) {
+    const unsafeRows = nonBlank.filter((line) => !splitSafe(line, column)).length;
+    if (unsafeRows < fewestUnsafeRows) {
+      fewestUnsafeRows = unsafeRows;
+      candidates = [column];
+    } else if (unsafeRows === fewestUnsafeRows) {
       candidates.push(column);
     }
   }
   const gutter = candidates[Math.floor(candidates.length / 2)];
-  if (gutter === undefined) {
+  if (
+    gutter === undefined ||
+    fewestUnsafeRows > MAX_SINGLE_COLUMN_OVERFLOW_ROWS
+  ) {
     throw new TypeError(`SRD spell page ${String(page)} has no safe two-column gutter.`);
   }
   return gutter;
 }
 
+function splitLayoutRow(
+  line: string,
+  gutter: number,
+): readonly [left: string, right: string] {
+  if (splitSafe(line, gutter)) {
+    return [line.slice(0, gutter), line.slice(gutter)];
+  }
+
+  const firstPrintedColumn = line.search(/\S/u);
+  return firstPrintedColumn >= gutter ? ['', line] : [line, ''];
+}
+
 /**
  * Reconstructs printed spell pages from the complete `pdftotext -layout`
- * corpus. Every physical row is sliced at a measured whitespace-only gutter
- * before either column is flattened, so neighbouring prose can never be read
- * as one sentence.
+ * corpus. Ordinary physical rows are sliced at a measured whitespace-only
+ * gutter before either column is flattened. The corrected corpus also carries
+ * two explicitly reflowed Telekinesis rows on page 168: those rows cross the
+ * printed gutter because they contain only repaired left-column prose. A page
+ * may carry at most two such rows, and each is assigned whole to the column in
+ * which its first printed character occurs. The independent parsed-body
+ * parity check in `coverage.ts` remains the final proof that an overflow row
+ * was assigned to the same spell as the readable extract.
  */
 function spellBodyFormsFromFullLayout(
   fullLayout: string,
@@ -312,9 +358,10 @@ function spellBodyFormsFromFullLayout(
     seenPages.push(page);
     const pageLines = lines.slice(0, footerIndex);
     const gutter = findGutter(pageLines, page);
+    const splitRows = pageLines.map((line) => splitLayoutRow(line, gutter));
     readingOrder.push(
-      ...pageLines.map((line) => line.slice(0, gutter)),
-      ...pageLines.map((line) => line.slice(gutter)),
+      ...splitRows.map(([left]) => left),
+      ...splitRows.map(([, right]) => right),
     );
   }
   if (

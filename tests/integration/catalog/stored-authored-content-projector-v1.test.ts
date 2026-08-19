@@ -90,6 +90,7 @@ function registerBundled(
   registerBundledStableContentIdentity(db, {
     kind,
     contentKey,
+    visibility: 'listed',
     normalizedName: `ci3a${kind}`,
   });
 }
@@ -150,6 +151,7 @@ function registerRoot(
   registerBundledStableContentIdentity(db, {
     kind: aggregate.kind,
     contentKey,
+    visibility: 'listed',
     normalizedName: `ci3avector${index}`,
   });
   return contentKey;
@@ -250,6 +252,7 @@ function seedBackground(contentKey: ContentKey, aggregate: BackgroundContentAggr
     registerBundledStableContentIdentity(db, {
       kind: 'feat',
       contentKey: aggregate.default_origin_feat_content_key,
+      visibility: 'listed',
       normalizedName: 'ci3a-background-feat',
     });
   }
@@ -1142,6 +1145,7 @@ describe('stored authored content-v1 projection', () => {
     registerBundledStableContentIdentity(db, {
       kind: 'species',
       contentKey: collisionTarget,
+      visibility: 'listed',
       normalizedName: 'ci3acollision',
     });
     registerContentFingerprint(db, {

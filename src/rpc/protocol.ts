@@ -8,6 +8,13 @@ export interface RpcRequest<P = unknown> {
   params: P;
 }
 
+/**
+ * D278: `RpcError` is the DEFECT-AND-ENVIRONMENT channel, never the refusal
+ * channel. Expected, user-recoverable policy outcomes travel as `Refusal`
+ * VALUES inside successful responses (`src/refusals/`). Every member here is
+ * either a protocol/programming defect or a boot-time environmental failure
+ * (`schema_mismatch`, `storage_pool_locked`) in which command code never ran.
+ */
 export type RpcErrorCode =
   | 'invalid_request'
   | 'unknown_method'
@@ -19,7 +26,15 @@ export type RpcErrorCode =
    * worker booted degraded. Only the recovery methods
    * (`system.exportDatabase`, `system.reset`) are dispatchable.
    */
-  | 'schema_mismatch';
+  | 'schema_mismatch'
+  /**
+   * Another tab of this origin holds the exclusive OPFS SyncAccessHandle pool,
+   * so this tab's worker never opened a database and NO method is dispatchable
+   * — not even the recovery methods, which need the storage handle the other
+   * tab is holding. Distinct from `handler_error` because the remedy is a user
+   * action (close the other tab) rather than a repair of stored data.
+   */
+  | 'storage_pool_locked';
 
 export interface RpcErrorPayload {
   code: RpcErrorCode;

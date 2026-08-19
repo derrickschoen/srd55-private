@@ -1,15 +1,39 @@
 import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterAll, describe, expect, it } from 'vitest';
 import { canonicalJson } from '../../../src/commands/canonical-json';
+import {
+  CanonicalJsonCircularReferenceError,
+  CanonicalJsonUnsupportedValueError,
+} from '../../../src/commands/canonical-json-errors';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
+import {
+  CharacterCommandIntegrityError,
+  CommandIntegrityKeyRequiredError,
+} from '../../../src/commands/integrity-errors';
 import { DatabaseContext } from '../../../src/db/database';
 import schema from '../../../src/db/schema.sql?raw';
 import { getSqlite3 } from '../../helpers/open-db';
 
 const key = 'mutation-contract-secret';
-const invalidMessage =
-  'This internal character command is invalid or belongs to another character.';
 const openDatabases: Database[] = [];
+
+function defect(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return expect.fail('Expected a defect, but the call returned.');
+}
+
+async function rejected(run: () => Promise<unknown>): Promise<unknown> {
+  try {
+    await run();
+  } catch (error) {
+    return error;
+  }
+  return expect.fail('Expected a defect, but the promise resolved.');
+}
 
 async function openDb(): Promise<DatabaseContext> {
   const sqlite3 = await getSqlite3();
@@ -42,12 +66,15 @@ describe('canonical command JSON', () => {
       '{"a":{"a":[{"x":null,"y":true},{"first":1,"second":2}],"b":2},"z":"é/"}',
     );
 
-    expect(() => canonicalJson({ value: Number.NaN })).toThrow(
-      'Value is not JSON serializable',
-    );
+    const unsupported = defect(() => canonicalJson({ value: Number.NaN }));
+    expect(unsupported).toBeInstanceOf(CanonicalJsonUnsupportedValueError);
+    expect(unsupported).toMatchObject({ value_tag: '[object Number]' });
+
     const circular: Record<string, unknown> = {};
     circular.self = circular;
-    expect(() => canonicalJson(circular)).toThrow('circular reference');
+    expect(defect(() => canonicalJson(circular))).toBeInstanceOf(
+      CanonicalJsonCircularReferenceError,
+    );
   });
 });
 
@@ -112,21 +139,31 @@ describe('destructive inverse integrity', () => {
     ).resolves.toBeUndefined();
 
     const storedState = stored.state as Record<string, unknown>;
-    await expect(
+    const tampered = await rejected(() =>
       integrity.assertValid(characterId, {
         ...stored,
         state: { ...storedState, state: 'discarded' },
       }),
-    ).rejects.toThrow(invalidMessage);
-    await expect(
+    );
+    expect(tampered).toBeInstanceOf(CharacterCommandIntegrityError);
+    expect(tampered).toMatchObject({ character_id: characterId });
+
+    const anotherCharacter = await rejected(() =>
       integrity.assertValid(characterId + 1, stored),
-    ).rejects.toThrow(invalidMessage);
-    await expect(
+    );
+    expect(anotherCharacter).toBeInstanceOf(CharacterCommandIntegrityError);
+    expect(anotherCharacter).toMatchObject({
+      character_id: characterId + 1,
+    });
+
+    const anotherKey = await rejected(() =>
       new CharacterCommandIntegrity('different-key').assertValid(
         characterId,
         stored,
       ),
-    ).rejects.toThrow(invalidMessage);
+    );
+    expect(anotherKey).toBeInstanceOf(CharacterCommandIntegrityError);
+    expect(anotherKey).toMatchObject({ character_id: characterId });
 
     expect(
       database.allRaw(
@@ -146,29 +183,37 @@ describe('destructive inverse integrity', () => {
   });
 
   it('requires a non-empty key and rejects missing or malformed signatures', async () => {
-    expect(() => new CharacterCommandIntegrity('')).toThrow(
-      'APP_KEY is required to sign internal character commands.',
+    expect(defect(() => new CharacterCommandIntegrity(''))).toBeInstanceOf(
+      CommandIntegrityKeyRequiredError,
     );
 
     const integrity = new CharacterCommandIntegrity(key);
-    await expect(
+    const missing = await rejected(() =>
       integrity.assertValid(42, { type: 'restore_snapshot' }),
-    ).rejects.toThrow(invalidMessage);
-    await expect(
+    );
+    expect(missing).toBeInstanceOf(CharacterCommandIntegrityError);
+    expect(missing).toMatchObject({ character_id: 42 });
+
+    const malformed = await rejected(() =>
       integrity.assertValid(42, {
         type: 'restore_snapshot',
         integrity: 'not-a-signature',
       }),
-    ).rejects.toThrow(invalidMessage);
+    );
+    expect(malformed).toBeInstanceOf(CharacterCommandIntegrityError);
+    expect(malformed).toMatchObject({ character_id: 42 });
+
     const signed = await integrity.attach(42, {
       type: 'restore_snapshot',
       snapshot: {},
     });
-    await expect(
+    const uppercase = await rejected(() =>
       integrity.assertValid(42, {
         ...signed,
         integrity: signed.integrity.toUpperCase(),
       }),
-    ).rejects.toThrow(invalidMessage);
+    );
+    expect(uppercase).toBeInstanceOf(CharacterCommandIntegrityError);
+    expect(uppercase).toMatchObject({ character_id: 42 });
   });
 });

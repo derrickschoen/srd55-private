@@ -170,17 +170,37 @@ function renderEffects(plan: FeatApplicationPlan): HTMLElement {
   ]);
 }
 
-function previewGrant(rule: GrantRuleObject): HTMLLIElement {
+function configuredGrantList(
+  list: unknown,
+  config: JsonObject,
+): string | null {
+  if (typeof list !== 'string') {
+    return null;
+  }
+  const match = /^\$config\.([a-z][a-z0-9_]*)$/u.exec(list);
+  if (match === null) {
+    return list;
+  }
+  const key = match[1];
+  if (key === undefined) {
+    return 'configured spell list';
+  }
+  const value = config[key];
+  return typeof value === 'string' && value.trim() !== ''
+    ? value
+    : 'configured spell list';
+}
+
+function previewGrant(rule: GrantRuleObject, config: JsonObject): HTMLLIElement {
   const normalized = GrantRule.fromObject(rule).toObject();
   const kind = normalized.kind;
   const ruleKey = normalized.rule_key;
   if (typeof kind !== 'string' || typeof ruleKey !== 'string') {
     throw new TypeError('A planned feat grant has no stable label or kind.');
   }
-  const item = renderPublishPreviewGrant(normalized as AuthoringGrant);
-  const label = element('p', { text: `Stable grant label: ${ruleKey}` });
-  item.append(label);
-  return item;
+  const list = configuredGrantList(normalized.list, config);
+  const displayed = list === null ? normalized : { ...normalized, list };
+  return renderPublishPreviewGrant(displayed as AuthoringGrant);
 }
 
 function renderGrantRules(plan: FeatApplicationPlan): HTMLElement {
@@ -191,7 +211,7 @@ function renderGrantRules(plan: FeatApplicationPlan): HTMLElement {
       : [element(
           'ol',
           {},
-          plan.grant_rules.map(previewGrant),
+          plan.grant_rules.map((rule) => previewGrant(rule, plan.config)),
         )]),
   ]);
 }

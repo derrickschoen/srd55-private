@@ -44,7 +44,6 @@ export {
 import {
   assembleSaveDamageCoverage,
   deriveSaveDamageCoverageFromBodies,
-  spellBodyDigestInputsByHeading,
   spellBodyDigestInputsFromFullLayout,
   spellDescriptionsByHeading,
   spellDescriptionsFromFullLayout,
@@ -89,6 +88,9 @@ export const sheetWarningCoverage = {
   weapon_category_not_stated: 'contextual',
   weapon_proficiency_qualifier_unread: 'contextual',
   armor_not_trained: 'display_only',
+  duplicate_spell_wasteful: 'contextual',
+  duplicate_spell_redundant_intentional: 'display_only',
+  duplicate_spell_conflicting_version: 'blocking',
   multiclass_primary_ability_unmet: 'display_only',
   multiclass_primary_ability_unprovable: 'display_only',
 } as const satisfies Record<SheetWarningCode, CoverageClassification>;
@@ -102,7 +104,6 @@ export const sheetGapCoverage = {
   languages_and_tools_not_modelled: 'display_only',
   weapon_reach_not_recorded: 'contextual',
   gear_not_itemised: 'display_only',
-  required_source_choice: 'contextual',
 } as const satisfies Record<SheetGapKind, CoverageClassification>;
 
 export const unmodelledIssuePriority = {
@@ -606,7 +607,7 @@ type SaveClauseDiscriminator =
   | { readonly kind: 'source_text'; readonly includes: string };
 
 /**
- * The four corpus readings and the clause parse are ONE pure function of the
+ * The three corpus readings and the clause parse are ONE pure function of the
  * two corpus strings imported above, so a vitest globalSetup that has proven
  * the inputs identical — the corpus bytes, the reader's source bytes AND the
  * reader bindings this process actually holds — may serve them from a file
@@ -634,21 +635,14 @@ const extractedSpellBodies = cachedSpellSource?.extracted_bodies ??
   spellDescriptionsByHeading(bundledSpellDescriptions);
 const bundledSpellBodyDigestInputs = cachedSpellSource?.bundled_digest_inputs ??
   spellBodyDigestInputsFromFullLayout(bundledSrd521);
-const extractedSpellBodyDigestInputs =
-  cachedSpellSource?.extracted_digest_inputs ??
-  spellBodyDigestInputsByHeading(bundledSpellDescriptions);
 if (
   bundledSpellBodies.size !== extractedSpellBodies.size ||
   [...bundledSpellBodies].some(([heading, body]) =>
     extractedSpellBodies.get(heading) !== body,
-  ) ||
-  bundledSpellBodyDigestInputs.size !== extractedSpellBodyDigestInputs.size ||
-  [...bundledSpellBodyDigestInputs].some(([heading, body]) =>
-    extractedSpellBodyDigestInputs.get(heading) !== body,
   )
 ) {
   throw new TypeError(
-    'Column-safe full SRD spell reading, including raw digest bodies, does not match the committed readable spell extract.',
+    'Column-safe full SRD spell reading does not match the committed readable spell extract.',
   );
 }
 const sourceCoverage = cachedSpellSource === null

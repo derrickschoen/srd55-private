@@ -254,6 +254,14 @@ export interface AttackProfileResult {
   readonly has_extra_attack: boolean;
 }
 
+export class ShillelaghCharacterLevelUndeterminedError extends Error {
+  override readonly name =
+    'ShillelaghCharacterLevelUndeterminedError' as const;
+  constructor() {
+    super('A Shillelagh profile requires a determined character level.');
+  }
+}
+
 /** The fields of a character's weapon this derivation reads. */
 export interface AttackProfileWeapon {
   readonly id: number;
@@ -790,9 +798,7 @@ function shillelaghProfile(
     input.classes.map((entry) => entry.level),
   );
   if (totalLevel === null) {
-    throw new Error(
-      'A Shillelagh profile requires a determined character level.',
-    );
+    throw new ShillelaghCharacterLevelUndeterminedError();
   }
   const strength = option(
     input,

@@ -169,6 +169,24 @@ export class StoredAuthoredContentProjectionError extends TypeError {
   }
 }
 
+export type StoredAuthoredContentJsonSubject = 'value' | 'slot_table';
+
+export class StoredAuthoredContentJsonError extends TypeError {
+  override readonly name = 'StoredAuthoredContentJsonError' as const;
+  constructor(
+    readonly field: string,
+    readonly subject: StoredAuthoredContentJsonSubject,
+    readonly original_cause: unknown,
+  ) {
+    super(
+      `Stored content-v1 projection failed: ${field}${
+        subject === 'slot_table' ? ' slot table' : ''
+      } is invalid JSON.`,
+      { cause: original_cause },
+    );
+  }
+}
+
 function projectionError(message: string, options?: ErrorOptions): never {
   throw new StoredAuthoredContentProjectionError(message, options);
 }
@@ -383,7 +401,7 @@ function jsonArray(text: string | null, label: string): readonly unknown[] {
   try {
     decoded = JSON.parse(text);
   } catch (error) {
-    throw new TypeError(`Stored content-v1 projection failed: ${label} is invalid JSON.`, { cause: error });
+    throw new StoredAuthoredContentJsonError(label, 'value', error);
   }
   if (!Array.isArray(decoded)) {
     return projectionError(`${label} must be a JSON array.`);
@@ -1819,7 +1837,7 @@ function slotCounts(text: string | null, label: string): SubclassContentProgress
   try {
     decoded = JSON.parse(text);
   } catch (error) {
-    throw new TypeError(`Stored content-v1 projection failed: ${label} slot table is invalid JSON.`, { cause: error });
+    throw new StoredAuthoredContentJsonError(label, 'slot_table', error);
   }
   const counts = [0, 0, 0, 0, 0, 0, 0, 0, 0];
   if (Array.isArray(decoded)) {

@@ -14,6 +14,7 @@ import {
   type ContentKind,
   type DerivedContentIdentityV1,
 } from './content-identity';
+import type { CatalogContentVisibility } from './content-visibility';
 import { recordContentProvenance } from './content-provenance';
 import {
   assertedExternalContentKeyFromDeclared,
@@ -49,6 +50,48 @@ export type CatalogContentAliasKind =
 export const catalogContentMatchDecisions = ['match', 'clone'] as const;
 export type CatalogContentMatchDecision =
   (typeof catalogContentMatchDecisions)[number];
+
+export class ContentFingerprintInputDisagreementError extends TypeError {
+  override readonly name = 'ContentFingerprintInputDisagreementError' as const;
+  constructor() {
+    super('Content fingerprint scheme, digest, and canonical bytes do not agree.');
+  }
+}
+
+export class ContentFingerprintSchemeUnregisteredError extends TypeError {
+  override readonly name = 'ContentFingerprintSchemeUnregisteredError' as const;
+  constructor(readonly scheme: string) {
+    super('Cannot promote an unregistered fingerprint scheme.');
+  }
+}
+
+export class StoredContentMatchDecisionError extends TypeError {
+  override readonly name = 'StoredContentMatchDecisionError' as const;
+  constructor(readonly decision: string) {
+    super('Stored content match decision is outside its vocabulary.');
+  }
+}
+
+export class ContentDependencyDuplicateKeyError extends TypeError {
+  override readonly name = 'ContentDependencyDuplicateKeyError' as const;
+  constructor() {
+    super('Content dependency graph contains duplicate keys.');
+  }
+}
+
+export class ContentDependencyMissingError extends TypeError {
+  override readonly name = 'ContentDependencyMissingError' as const;
+  constructor(readonly dependency_key: string) {
+    super(`Content dependency graph is missing dependency "${dependency_key}".`);
+  }
+}
+
+export class ContentDependencyCycleError extends TypeError {
+  override readonly name = 'ContentDependencyCycleError' as const;
+  constructor() {
+    super('Content dependency graph contains a cycle; no content was projected.');
+  }
+}
 
 export interface ContentFingerprintCandidate {
   readonly scheme: ContentFingerprintScheme;
@@ -689,17 +732,21 @@ export function registerDerivedContentIdentity<K extends ContentKind, P>(
     readonly edition: string;
     readonly name: string;
     readonly payload: P;
+    /** Raw external-import boundary; historical callers without this field are listed. */
+    readonly visibility?: CatalogContentVisibility;
   },
 ): DerivedContentIdentityV1<K, P> {
   const identity = deriveContentIdentityV1(input);
   db.transaction(() => {
     db.exec(
       `INSERT INTO catalog_content_identities (
-         content_key, content_kind, key_kind, catalog_layer, normalized_name
-       ) VALUES (?, ?, 'derived', 'external', ?)`,
+         content_key, content_kind, key_kind, catalog_layer, visibility,
+         normalized_name
+       ) VALUES (?, ?, 'derived', 'external', ?, ?)`,
       [
         identity.derivedKey,
         input.kind,
+        input.visibility ?? 'listed',
         identity.envelope.normalizedName,
       ],
     );
@@ -756,6 +803,8 @@ export function registerAssertedContentIdentity<K extends ContentKind, P>(
     readonly payload: P;
     readonly assertedKey: ContentKey;
     readonly fingerprintScheme?: ContentFingerprintScheme;
+    /** Raw external-import boundary; historical callers without this field are listed. */
+    readonly visibility?: CatalogContentVisibility;
   },
 ): DerivedContentIdentityV1<K, P> {
   if (!isAssertedExternalContentKey(input.assertedKey)) {
@@ -782,9 +831,15 @@ export function registerAssertedContentIdentity<K extends ContentKind, P>(
   try {
     db.exec(
       `INSERT INTO catalog_content_identities (
-         content_key, content_kind, key_kind, catalog_layer, normalized_name
-       ) VALUES (?, ?, 'asserted', 'external', ?)`,
-      [input.assertedKey, input.kind, identity.envelope.normalizedName],
+         content_key, content_kind, key_kind, catalog_layer, visibility,
+         normalized_name
+       ) VALUES (?, ?, 'asserted', 'external', ?, ?)`,
+      [
+        input.assertedKey,
+        input.kind,
+        input.visibility ?? 'listed',
+        identity.envelope.normalizedName,
+      ],
     );
   } catch {
     throw new ContentIdentityKeyRefusal('key_collision');
@@ -806,13 +861,15 @@ export function registerBundledStableContentIdentity(
     readonly kind: ContentKind;
     readonly contentKey: ContentKey;
     readonly normalizedName: string;
+    readonly visibility: CatalogContentVisibility;
   },
 ): void {
   db.exec(
     `INSERT INTO catalog_content_identities (
-       content_key, content_kind, key_kind, catalog_layer, normalized_name
-     ) VALUES (?, ?, 'bundled-stable', 'bundled', ?)`,
-    [input.contentKey, input.kind, input.normalizedName],
+       content_key, content_kind, key_kind, catalog_layer, visibility,
+       normalized_name
+     ) VALUES (?, ?, 'bundled-stable', 'bundled', ?, ?)`,
+    [input.contentKey, input.kind, input.visibility, input.normalizedName],
   );
   recordContentProvenance(db, {
     kind: input.kind,
@@ -830,6 +887,7 @@ export function ensureBundledStableContentIdentity(
     readonly kind: ContentKind;
     readonly contentKey: string;
     readonly normalizedName: string;
+    readonly visibility?: CatalogContentVisibility;
   },
 ): void {
   const existing = db.one(
@@ -843,6 +901,7 @@ export function ensureBundledStableContentIdentity(
     registerBundledStableContentIdentity(db, {
       ...input,
       contentKey: input.contentKey as ContentKey,
+      visibility: input.visibility ?? 'listed',
     });
     return;
   }
@@ -872,8 +931,9 @@ export function registerAssertedPlaceholderContentIdentity(
   try {
     db.exec(
       `INSERT INTO catalog_content_identities (
-         content_key, content_kind, key_kind, catalog_layer, normalized_name
-       ) VALUES (?, 'spell', 'asserted', 'external', ?)`,
+         content_key, content_kind, key_kind, catalog_layer, visibility,
+         normalized_name
+       ) VALUES (?, 'spell', 'asserted', 'external', 'listed', ?)`,
       [input.contentKey, input.normalizedName],
     );
   } catch {
@@ -930,9 +990,7 @@ export function registerContentFingerprint(
     !Object.hasOwn(contentFingerprintSchemeRegistry, input.scheme) ||
     sha256(input.canonicalJson) !== input.digest
   ) {
-    throw new TypeError(
-      'Content fingerprint scheme, digest, and canonical bytes do not agree.',
-    );
+    throw new ContentFingerprintInputDisagreementError();
   }
   db.exec(
     `INSERT INTO catalog_content_fingerprints (
@@ -988,7 +1046,9 @@ export function reconcileCurrentContentFingerprint(
   },
 ): 'registered' | 'unchanged' | 'moved' {
   if (!Object.hasOwn(contentFingerprintSchemeRegistry, input.identity.envelope.scheme)) {
-    throw new TypeError('Cannot promote an unregistered fingerprint scheme.');
+    throw new ContentFingerprintSchemeUnregisteredError(
+      String(input.identity.envelope.scheme),
+    );
   }
   const currentRows = db.allRaw(
     `SELECT fingerprint_scheme, fingerprint_digest, canonical_json
@@ -1121,7 +1181,7 @@ export function rememberedContentMatchDecision(
   }
   const decision = sqlString(row, 'decision');
   if (decision !== 'match' && decision !== 'clone') {
-    throw new TypeError('Stored content match decision is outside its vocabulary.');
+    throw new StoredContentMatchDecisionError(decision);
   }
   return Object.freeze({
     decision,
@@ -1190,7 +1250,7 @@ export function projectContentGraphInDependencyOrder<T>(
 ): readonly T[] {
   const byKey = new Map(nodes.map((node) => [node.key, node]));
   if (byKey.size !== nodes.length) {
-    throw new TypeError('Content dependency graph contains duplicate keys.');
+    throw new ContentDependencyDuplicateKeyError();
   }
   const indegree = new Map<string, number>();
   const dependents = new Map<string, string[]>();
@@ -1198,9 +1258,7 @@ export function projectContentGraphInDependencyOrder<T>(
     indegree.set(node.key, node.dependencies.length);
     for (const dependency of node.dependencies) {
       if (!byKey.has(dependency)) {
-        throw new TypeError(
-          `Content dependency graph is missing dependency "${dependency}".`,
-        );
+        throw new ContentDependencyMissingError(dependency);
       }
       const children = dependents.get(dependency) ?? [];
       children.push(node.key);
@@ -1226,9 +1284,7 @@ export function projectContentGraphInDependencyOrder<T>(
     }
   }
   if (order.length !== nodes.length) {
-    throw new TypeError(
-      'Content dependency graph contains a cycle; no content was projected.',
-    );
+    throw new ContentDependencyCycleError();
   }
   return Object.freeze(order.map(project));
 }

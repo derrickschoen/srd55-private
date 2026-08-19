@@ -51,6 +51,7 @@ function itemProjection(
     assertedExternalContentKey('item', '2024', name);
   return {
     kind: 'item',
+    visibility: 'listed',
     edition: '2024',
     name,
     assertedKey,
@@ -117,6 +118,7 @@ function bundledTarget(
   registerBundledStableContentIdentity(db, {
     kind: 'item',
     contentKey,
+    visibility: 'listed',
     normalizedName: name.toLowerCase(),
   });
   db.exec(
@@ -154,6 +156,7 @@ describe('D82 two-phase content adoption controls', () => {
       dependencies: [],
       projection: {
         kind: 'spell',
+        visibility: 'listed',
         edition: stored.aggregate.rules_edition,
         name: stored.aggregate.name,
         assertedKey: assertedExternalContentKey('spell', '2024', stored.aggregate.name),
@@ -588,6 +591,7 @@ describe('D82 two-phase content adoption controls', () => {
       // Deliberately no caller-supplied dependency declaration.
       projection: {
         kind: 'background',
+        visibility: 'listed',
         edition: stored.edition,
         name: stored.name,
         payload: stored.payload,

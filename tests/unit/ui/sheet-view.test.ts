@@ -106,6 +106,34 @@ describe('multiclass house-rule provenance', () => {
   });
 });
 
+describe('unfinished choice disclosure', () => {
+  it('prints the named unfinished choice while exposing only its closed kind as structured data', () => {
+    const value = sheet({
+      unfinished_choices: [{
+        kind: 'unchosen_option',
+        title: 'Cleric 1 — Divine Order not chosen',
+        detail:
+          'Divine Order is unchosen, so this source has granted no spells yet.',
+      }],
+    });
+
+    const disclosure = row(
+      value,
+      'unfinished_choice:unchosen_option:0',
+    );
+    expect(disclosure.label).toEqual([{
+      text: 'Cleric 1 — Divine Order not chosen',
+      free_text: true,
+    }]);
+    expect(disclosure.value).toBe('Unfinished');
+    expect(textOf(disclosure.detail)).toBe(
+      'Divine Order is unchosen, so this source has granted no spells yet.',
+    );
+    expect(sheetFacts(value).unfinished_choices).toEqual(['unchosen_option']);
+    expect(JSON.stringify(sheetFacts(value))).not.toContain('Cleric 1');
+  });
+});
+
 /**
  * D4, ON THE SHEET.
  *
@@ -360,6 +388,7 @@ function sheet(changes: Partial<CharacterSheet> = {}): CharacterSheet {
         ],
       },
     ],
+    unfinished_choices: [],
     warnings: [],
     gaps: SHEET_GAPS,
     ...changes,
@@ -431,6 +460,7 @@ function spell(
     catalog_layer: 'bundled',
     level: { status: 'known', value: 1 as SpellLevel },
     marker: 'known',
+    selection_count: 1,
     reference: {
       edition: '2024',
       school: 'Abjuration',
@@ -655,6 +685,20 @@ describe('the character sheet is projected twice from one value', () => {
     ]);
     expect(group.spellbook_rows.map((row) => textOf(row.detail)).join(' '))
       .not.toMatch(/Prepared|Known/);
+  });
+
+  it('prints how many selections were collapsed into a duplicate spell row', () => {
+    const wizard = classSpellGroup(11, 'Wizard', [
+      spell(101, 'Repeated Spark', {
+        level: { status: 'known', value: 0 as SpellLevel },
+        selection_count: 3,
+      }),
+    ]);
+
+    const group = spellSectionOf(sheet({ spells: [wizard] })).spell_groups[0]!;
+    expect(group.rows.map((row) => textOf(row.detail))).toEqual([
+      'Known · Selected 3 times · SRD · bundled layer',
+    ]);
   });
 
   it('compact and appendix projections share class level name order', () => {
@@ -1057,6 +1101,18 @@ describe('the character sheet is projected twice from one value', () => {
       status: 'unknown',
       reason: 'current_value_not_recorded',
     });
+
+    const levelFourRules = spellSectionOf(sheet({
+      total_level: 4,
+      spells: [classSpellGroup(11, 'Wizard', [fireBolt])],
+    })).spell_groups[0]?.rows[0]?.disclosure;
+    expect(textOf(levelFourRules?.detail ?? [])).toContain(
+      'Current cantrip effect: UNKNOWN — this sheet needs explicit level ' +
+        '(effect) pairs in the spell data; use the printed Effect rules below otherwise.',
+    );
+    expect(textOf(levelFourRules?.detail ?? [])).toContain(
+      'Effect: On a hit, the target takes 1d10 Fire damage.',
+    );
   });
 
   it('keeps hostile subclass prose inert, layer-disclosed, and out of facts', () => {
@@ -1387,6 +1443,10 @@ describe('the character sheet is projected twice from one value', () => {
       // E-B: the recorded package prints as a "What is recorded" row; the
       // JSON carries only its closed-vocabulary kind and option letter.
       equipment_packages: () => ids.has('equipment:class'),
+      unfinished_choices: () =>
+        (parsed.unfinished_choices as string[]).every((kind, index) =>
+          ids.has(`unfinished_choice:${kind}:${String(index)}`),
+        ),
       // Warnings are rendered as their own alert region rather than as rows,
       // because they must not be reachable only by scrolling past the number
       // they degrade. The browser spec asserts the region; here the claim is

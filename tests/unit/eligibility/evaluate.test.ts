@@ -3,14 +3,20 @@ import { expect, it } from 'vitest';
 import { DatabaseContext } from '../../../src/db/database';
 import {
   eligibilityInvalidReasons,
+  loadSpellSelectionEligibilitySnapshot,
   SpellSelectionEligibility,
 } from '../../../src/eligibility/spell-selection-eligibility';
+import type { SpellVersionId } from '../../../src/domain/ids';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
-import { openTestDatabase } from '../../helpers/open-db';
+import {
+  acquireSharedDb,
+  type SharedDbLease,
+} from '../../helpers/shared-db';
 
 interface Fixture {
   db: Database;
   context: DatabaseContext;
+  lease: SharedDbLease;
   eligibility: SpellSelectionEligibility;
   characterId: number;
   sourceId: number;
@@ -20,8 +26,9 @@ interface Fixture {
 async function fixture(
   slotOverrides: Record<string, string | number | null> = {},
 ): Promise<Fixture> {
-  const db = await openTestDatabase();
-  const context = new DatabaseContext(db);
+  const lease = await acquireSharedDb({ mode: 'rw' });
+  const db = lease.connection;
+  const context = lease.db;
   const characterId = context.exec(
     "INSERT INTO characters (name) VALUES ('Eligibility Test')",
   ).lastInsertId;
@@ -45,6 +52,7 @@ async function fixture(
   return {
     db,
     context,
+    lease,
     eligibility: new SpellSelectionEligibility(context),
     characterId,
     sourceId,
@@ -156,7 +164,39 @@ it('persists unselected and valid refresh states without replacing the retained 
       [test.slotId],
     ),
   ).not.toBe('2000-01-01 00:00:00');
-  test.db.close();
+  await test.lease.release();
+});
+
+it('evaluates a character-scoped version snapshot and rejects cross-character reuse', async () => {
+  const test = await fixture();
+  const versionId = spell(test.context, 'Snapshot Choice') as SpellVersionId;
+  const snapshot = loadSpellSelectionEligibilitySnapshot(
+    test.context,
+    test.characterId,
+    [versionId],
+  );
+  const constraint = {
+    spell_level_min: 0,
+    spell_level_max: 9,
+    allowed_spell_lists: [],
+    allowed_schools: [],
+    allowed_tags: [],
+    selection_collection: null,
+  } as const;
+
+  expect(test.eligibility.evaluateConstraintFromSnapshot(
+    test.characterId,
+    constraint,
+    versionId,
+    snapshot,
+  )).toEqual({ status: 'valid', reason: null });
+  expect(() => test.eligibility.evaluateConstraintFromSnapshot(
+    test.characterId + 1,
+    constraint,
+    versionId,
+    snapshot,
+  )).toThrow('The spell eligibility snapshot belongs to another character.');
+  await test.lease.release();
 });
 
 it('persists each active, legacy, level, list, school, and conjunctive-tag failure reason', async () => {
@@ -232,7 +272,7 @@ it('persists each active, legacy, level, list, school, and conjunctive-tag failu
       selection_invalid_reason: reason,
     });
   }
-  test.db.close();
+  await test.lease.release();
 });
 
 it('accepts legacy identity-list membership and rejects unsupported collections without overwriting state', async () => {
@@ -286,5 +326,5 @@ it('accepts legacy identity-list membership and rejects unsupported collections 
     selection_eligibility: 'valid',
     selection_invalid_reason: null,
   });
-  test.db.close();
+  await test.lease.release();
 });

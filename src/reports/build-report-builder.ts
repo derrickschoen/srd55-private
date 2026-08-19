@@ -69,6 +69,12 @@ import {
   type CatalogLayerDisclosure,
 } from '../catalog/catalog-disclosure';
 import { characterCatalogDisclosures } from '../queries/character-catalog-disclosures';
+import {
+  type BuildReportAbilitySource,
+  BuildReportRitualRouteSpellbookEntryError,
+  BuildReportUnknownAbilityError,
+  BuildReportUnsupportedCasterFractionError,
+} from './build-report-errors';
 
 interface Character {
   readonly id: CharacterId;
@@ -177,13 +183,16 @@ export type BuildReportResult = Omit<
 const wizardExplanation =
   '“In my book” marks the Wizard spells recorded in this character’s spellbook. Wizard preparation choices are drawn from those entries; fixed always-prepared grants do not consume spellbook or preparation capacity. A spell can therefore appear both in the book and as prepared. An unprepared ritual-tagged spell in the book appears as ritual-only access; that route is not a selection, consumes no preparation capacity, and is ignored by duplicate-waste checks. Unprepared non-ritual book spells are not castable.';
 
-function decodeAbility(value: string | null, label: string): Ability | null {
+function decodeAbility(
+  value: string | null,
+  source: BuildReportAbilitySource,
+): Ability | null {
   if (value === null) {
     return null;
   }
   const normalized = value.toLowerCase();
   if (!isEnumValue(abilities, normalized)) {
-    throw new Error(`Unknown ${label} '${value}'.`);
+    throw new BuildReportUnknownAbilityError(source, value);
   }
   return normalized;
 }
@@ -217,11 +226,11 @@ function decodeClassRow(row: SqlRow): ClassRow {
     classLevel: sqlInteger(row, 'class_level'),
     classAbility: decodeAbility(
       sqlNullableString(row, 'class_spellcasting_ability'),
-      'class spellcasting ability',
+      'class',
     ),
     subclassAbility: decodeAbility(
       sqlNullableString(row, 'subclass_spellcasting_ability'),
-      'subclass spellcasting ability',
+      'subclass',
     ),
     baseProgressionType: sqlString(row, 'progression_type'),
     subclassFraction: sqlNullableString(row, 'subclass_caster_fraction'),
@@ -266,9 +275,7 @@ function fractionType(fraction: string, rounding: string | null): string {
   if (fraction === '1/3' && rounding === 'down') {
     return CasterContribution.THIRD_DOWN;
   }
-  throw new Error(
-    `Unsupported caster fraction ${fraction} rounded ${rounding ?? ''}.`,
-  );
+  throw new BuildReportUnsupportedCasterFractionError(fraction, rounding);
 }
 
 function decodeSlotTable(value: string | null): Record<number, number> {
@@ -729,8 +736,8 @@ export class BuildReportBuilder {
       .filter((route) => route.casting_mode === 'ritual_only')
       .map((route): RitualOnlySpell => {
         if (route.spellbook_entry_id === undefined) {
-          throw new Error(
-            `Ritual-only route ${route.spell_version_id} has no spellbook entry.`,
+          throw new BuildReportRitualRouteSpellbookEntryError(
+            route.spell_version_id,
           );
         }
         return {
@@ -899,7 +906,7 @@ export class BuildReportBuilder {
         const value = (config as Record<string, unknown>)
           .spellcasting_ability;
         if (typeof value === 'string' && value !== '') {
-          return decodeAbility(value, 'configured spellcasting ability');
+          return decodeAbility(value, 'configured');
         }
       }
     }

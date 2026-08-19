@@ -29,7 +29,7 @@ import {
   interactiveElement,
 } from '../../fixtures/interactive-dom';
 import {
-  createRpcHarness,
+  createSeededRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
 
@@ -153,7 +153,7 @@ async function fillAllSkills(
 
 describe('GF-2 guided Expertise and spell adoption', () => {
   it('places Rogue Expertise after every skill source and fills sourced grants', async () => {
-    harness = await createRpcHarness([]);
+    harness = await createSeededRpcHarness([], { profile: 'test-core' });
     const db = harness.context.db;
     const characterId = await characterReadyForSkills(db, 'Rogue');
 
@@ -254,7 +254,7 @@ describe('GF-2 guided Expertise and spell adoption', () => {
   });
 
   it('records every level-1 Wizard spell choice through the shared durable assignment writer', async () => {
-    harness = await createRpcHarness([]);
+    harness = await createSeededRpcHarness([], { profile: 'test-core' });
     const db = harness.context.db;
     const characterId = await characterReadyForSkills(db, 'Wizard');
     await fillAllSkills(db, characterId);

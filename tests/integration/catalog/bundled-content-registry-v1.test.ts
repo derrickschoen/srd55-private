@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  BundledRegistryRootNameError,
   bundledContentManifestV1,
   reconcileBundledContentRegistryV1,
   reconcileBundledContentRegistryWithStoredProjectionsV1,
@@ -16,6 +17,15 @@ import type { DatabaseLifecycle } from '../../../src/db/database-lifecycle';
 import type { ContentKey } from '../../../src/domain/ids';
 import { ensureBundledSpellContent } from '../../../src/rules/spells-srd';
 import { getSqlite3, MemoryDatabaseStorage } from '../../helpers/open-db';
+
+function refusal(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return expect.fail('Expected a refusal, but the call returned.');
+}
 
 const INDEPENDENT_ROOT_ANCHORS = [
   // These root names are hand-pinned against their stated provenance, while
@@ -536,9 +546,12 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
        ) VALUES ('2024:species:dragonborn', 'Not Dragonborn', '2024', 0)`,
     );
 
-    expect(() => reconcileBundledContentRegistryV1(db)).toThrow(
-      "Bundled species '2024:species:dragonborn' has inconsistent root names.",
-    );
+    const error = refusal(() => reconcileBundledContentRegistryV1(db));
+    expect(error).toBeInstanceOf(BundledRegistryRootNameError);
+    expect(error).toMatchObject({
+      kind: 'species',
+      content_key: '2024:species:dragonborn',
+    });
   });
 
   it('reprojects bundled content with its authoritative stored normalized name', () => {

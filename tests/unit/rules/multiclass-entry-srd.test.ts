@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import entryGrantsExtract from '../../../docs/srd/source/multiclass-entry-grants.txt?raw';
 import {
   multiclassSkillColumns,
   parseSrdMulticlassEntryGrants,
@@ -99,8 +100,7 @@ const EXPECTED: Readonly<Record<string, ExpectedRow>> = {
   Sorcerer: { weapons: [], armor: [], skill: 'none:0', tools: [] },
   // L153-155.
   Warlock: { weapons: [], armor: ['light'], skill: 'none:0', tools: [] },
-  // L166-167, the other bullet-clipped block, and the one whose next line reads
-  // `izard Class Features` with the W sliced off.
+  // L167-168, the other bullet-clipped block.
   Wizard: { weapons: [], armor: [], skill: 'none:0', tools: [] },
 };
 
@@ -206,6 +206,15 @@ describe('the multiclass entry grants, parsed from the extract', () => {
     const source = parsed.flatMap((grant) => [...grant.weapon_categories]);
     expect(source).not.toContain('Mar');
     expect(new Set(source)).toEqual(new Set(['martial']));
+  });
+
+  it('retains both repaired slice edges from the canonical full text', () => {
+    expect(entryGrantsExtract).toContain(
+      'classing rules in “Character Creation” to deter-\n' +
+        '  mine your available spell slots.',
+    );
+    expect(entryGrantsExtract).toContain('\nWizard Class Features\n');
+    expect(entryGrantsExtract).not.toContain('\nizard Class Features\n');
   });
 });
 

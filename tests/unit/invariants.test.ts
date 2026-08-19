@@ -14,6 +14,7 @@ import {
   sqlString,
 } from '../../src/db/codecs';
 import { registerFixtureContentIdentity } from '../helpers/content-identity';
+import { registerSqliteQueryEngine } from '../../src/db/query';
 
 const triggerMessage =
   'a spell slot cannot hold both a fixed grant and a user selection';
@@ -106,6 +107,7 @@ function caughtErrorMessage(action: () => void): string {
 
 beforeAll(async () => {
   sqlite3 = await sqlite3InitModule();
+  registerSqliteQueryEngine(sqlite3);
 });
 
 afterAll(() => {

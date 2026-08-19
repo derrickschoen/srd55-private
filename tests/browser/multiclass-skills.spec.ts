@@ -2,6 +2,7 @@ import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import type { Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { DatabaseContext } from '../../src/db/database';
+import { registerSqliteQueryEngine } from '../../src/db/query';
 import { registerBrowserFixtureContentIdentity } from './fixtures/content-identity';
 import { expect, test } from './fixtures/parallel-test';
 
@@ -61,6 +62,7 @@ async function multiclassImage(options: {
   readonly count?: number;
 }): Promise<MulticlassImage> {
   const sqlite3 = await sqlite3InitModule();
+  registerSqliteQueryEngine(sqlite3);
   const connection = new sqlite3.oo1.DB(':memory:', 'c');
   connection.exec(schema);
   const db = new DatabaseContext(connection);

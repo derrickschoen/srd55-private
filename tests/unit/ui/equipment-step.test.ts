@@ -460,7 +460,10 @@ describe('the recorded and completed states', () => {
       fighterChoices(true),
     );
     expect(elementText(step.element)).toContain(
-      'Every level 1 step is complete',
+      'Every guided level 1 step is complete',
+    );
+    expect(elementText(step.element)).toContain(
+      'choices outside this guided path',
     );
     step.cleanup();
   });
@@ -511,7 +514,10 @@ describe('the recorded and completed states', () => {
       selector(EQUIPMENT_STEP_ATTR.complete),
     );
     expect(elementText(notice! as unknown as Node)).toContain(
-      'Every level 1 step is complete',
+      'Every guided level 1 step is complete',
+    );
+    expect(elementText(notice! as unknown as Node)).toContain(
+      'Check the character card or planner',
     );
     step.cleanup();
   });

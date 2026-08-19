@@ -4,6 +4,9 @@ import {
   UnassignedSpellSlot,
   UserSpellSelection,
 } from './spell-slot-assignment';
+import {
+  SpellSlotAssignmentReferenceConflictError,
+} from './spell-slot-assignment-errors';
 
 export class SpellSlotAssignmentFactory {
   static fromReferences(
@@ -14,8 +17,9 @@ export class SpellSlotAssignmentFactory {
       fixedSpellVersionId !== null &&
       currentSpellVersionId !== null
     ) {
-      throw new TypeError(
-        'A spell slot cannot hold both a fixed grant and a user selection.',
+      throw new SpellSlotAssignmentReferenceConflictError(
+        fixedSpellVersionId,
+        currentSpellVersionId,
       );
     }
 

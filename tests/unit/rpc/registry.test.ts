@@ -8,7 +8,7 @@ import {
   createSystemHandlers,
 } from '../../../src/worker/handlers/system';
 import {
-  createRpcHarness,
+  createSeededRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
 
@@ -50,7 +50,7 @@ describe('RPC registry', () => {
         typeof (params as { value?: unknown }).value === 'string',
       (_context, params) => ({ echoed: params.value }),
     );
-    harness = await createRpcHarness([echo]);
+    harness = await createSeededRpcHarness([echo]);
     const registry = createRpcRegistry({
       './handlers/example.ts': { handlers: [echo] },
     });

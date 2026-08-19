@@ -7,6 +7,189 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D310 — OWNER: survivor campaign is triage-first (2026-08-18)
+
+Before any D280 survivor-fix lanes dispatch, one triage lane classifies the
+full merged survivor list (real test gap / equivalent mutant / low-value)
+with per-file counts; the owner rules on fix scope from that report.
+Declined: straight-to-hotspots, exhaustive-everything. Also ruled the same
+session: main→wt/simcore syncs may run autonomously (gated, conflicts stop);
+the threads-vs-forks pool A/B stays queued for an idle window.
+
+## D309 — OWNER: stranger journey and survivor fixes interleave (2026-08-18)
+
+Amends D307's sequencing: once the inc4 merge gate is green, the D303
+stranger journey runs WHILE D280 survivor-fix lanes work the hotspot files
+in parallel worktrees — neither waits for the other. Owner picked
+"Interleave" over journey-first and fixes-first.
+
+## D308 — OWNER: static mutants on for full audits, off for iteration re-runs (2026-08-18)
+
+Owner's words: "statics on for full audits, off for iteration re-runs."
+Full D280 campaign runs (fresh shard sweeps) keep static mutants enabled —
+they carried ~11% of survivors found (63 of 562 across shards 1–2),
+including module-level regex and error-string gaps. Fix-verify re-runs of a
+shard enable ignoreStatic plus the per-shard incremental cache, and must
+report the skipped static count as unmeasured, never as covered. Basis:
+statics are ~23% of mutants and ~97% of shard runtime (shard-003 planner).
+
+## D307 — OWNER: stranger journey runs after the full queue lands (2026-08-18)
+
+The D303 fresh stranger journey (final pre-approval walkthrough) waits
+until homebrew v3 ui_hidden entries and D278 increment 4 are merged, so
+one walkthrough covers everything. The approval gate moves later; interim
+merges get spot-checks only.
+
+## D306 — OWNER: per-worker pre-seeded image lane approved, next wave (2026-08-18)
+
+The test-scaffolding cost (476k seed INSERTs + per-test schema DDL) may
+be attacked with a per-worker pre-seeded database image cloned per test.
+Constraints: opt-in helper path; seed, migration, digest, and corruption
+tests stay on the fresh-DDL path; image-equivalence provable.
+
+## D305 — OWNER: D280 mutation lanes take the box after the DB-perf trials (2026-08-18)
+
+Once the three trial lanes (idx5, builders, relgrowth) drain and merge,
+the next dispatch is the D280 leaf mutation tests + Stryker sharding
+tooling, ahead of inc5→simcore round 24, D278 increment 4, and homebrew
+v3.
+
+## D304 — OWNER: real index migration mechanism before any index lands (2026-08-18)
+
+Wipe-and-rebuild of persisted images that fail the schema signature is
+NOT the path, despite D60. A proper additive-index migration step in the
+database lifecycle must exist before any CREATE INDEX changes schema.sql.
+The mechanism is needed eventually anyway; build it now. Index trial
+evidence may still be gathered without landing schema changes.
+
+## D303 — OWNER: full SRD corpus repair; staged re-review; mutation lanes next wave (2026-08-17)
+
+Corpus audit verdict (read-only lane; structural catalogs intact, prose
+not): Telekinesis genuinely truncated at full:10720 /
+spell-descriptions.txt:8360; two slice losses in
+multiclass-entry-grants.txt (:108, :174); 601 PDF line-break hyphens
+preserved into 259/339 user-facing spell descriptions. Rulings:
+(1) **Full repair** — supervisor fetched the official PDF (SHA-256
+matches SOURCE.md provenance, verified by supervisor); repair lane
+recovers the Telekinesis tail, fixes both slices, de-hyphenates via a
+reviewable script, updates SOURCE.md hashes and its policy wording, and
+corrects kennel.json's wrong Tome note. (2) **Re-review is staged**:
+targeted re-verify of the five D286 MAJOR scenarios once fixes gate,
+THEN a full fresh stranger journey as the final pre-approval step after
+minors land. (3) **Mutation lanes (D280 leaf tests + sharding tooling)
+dispatch in the next refan wave**, after the merge train gates.
+
+**F20 — supervisor misreport, corrected.** My earlier surfaced finding
+"bundled SRD text truncated mid-sentence at line 4507 (Pact of the Tome)
+— possible corpus defect" was WRONG in its specifics: the text continues
+at canonical lines 4438-4453 in the other column of the same printed
+page; raw line order misled me, and kennel.json:61,239 propagated the
+error as "never resumes"/unverifiable. The audit I dispatched on the
+back of that wrong specific did, however, find the real defects above.
+The kennel.json note is being corrected by the repair lane.
+
+## D302 — OWNER: merge-train shape, wave cadence, all D286 minors fixed now (2026-08-17)
+
+Four rulings: (1) **Batch gate** — the queued lane branches merge with
+per-merge tsc + narrow tests, then ONE solo quiet full suite gates the
+whole train; if red, bisect the merge commits. (2) **Drain → merge →
+refan** — when the current wave finishes, quiet the box, run the train
+plus the owed D283/D284 gates, then dispatch the next wave. (3) **All 11
+D286 minor findings are fixed now** (not deferred), including the
+cold-open ~4.4s and the 2014→2024 bridge notes; fix lanes dispatched
+(minors sweep, planner-mobile M-M1, cold-open perf, bridge notes).
+(4) **The train gates on vitest 3**; the vitest-4 upgrade (D300) merges
+last with its own gate — the instrument never changes mid-train.
+
+## D301 — SUPERVISOR-VERIFIED: Kennel max-assemblable cantrips = 19, by source (2026-08-17)
+
+Owner directed: "Check yourself. Separate cantrips from classes with
+cantrips from other sources (feats, species, backgrounds)." Verified
+independently from docs/srd/source (not the spec lane's claim):
+
+- **From classes: 15.** Class-table cantrip columns: Sorcerer L3 = 4,
+  Bard L1 = 2, Cleric L1 = 3, Druid L1 = 2, Warlock L1 = 2 (13), plus
+  Divine Order Thaumaturge +1 Cleric cantrip (full corpus :2309) and
+  Primal Order Magician +1 Druid cantrip (:2562). Multiclass keeps
+  per-class counts (multiclassing.txt:66-69).
+- **From feats: 4.** Magic Initiate grants two cantrips (feats.txt),
+  Repeatable with a different list each time — Wizard (via Sage) +
+  Druid (via Human Versatile) = 4.
+- **From species directly: 0** (Human Versatile supplies a feat ROUTE,
+  not a cantrip). **From backgrounds directly: 0** (Sage likewise).
+
+All 19 names sit on their claimed SRD lists (each checked, incl. Message
+and Resistance under the Druid "Cantrips (Level 0)" heading, lines 29/32);
+19 distinct. This is the verification D272 required at authoring; the
+kennel.json assertion "EXACTLY 19" is CONFIRMED. D251.2's "exactly 18"
+stays superseded (per D272).
+
+## D300 — OWNER: vitest 4 upgrade approved conditional on clean assessment (2026-08-17)
+
+The `onTaskUpdate` false-failure class (exit 1 with 0 test failures under
+load) is birpc's hardcoded 60s RPC timeout; vitest 3.x exposes no setting
+and upstream's fix (timeout disabled, PR #8297) ships only in vitest 4.
+Owner ruled: **upgrade to vitest 4 if the read-only assessment lane shows
+small blast radius and Stryker/simcore-patch compatibility**; if blocked,
+return to the owner (patch-package of 3.2.7 was NOT approved). Until the
+upgrade lands and is gated, the parallel-suite protocol stands: parallel
+runs advisory only, official gates solo-quiet. Also ruled the same
+session: plan files stay UNTRACKED (reboot-safe copies to .tmp/ instead).
+
+## D299 — OWNER: content needs a ui-hidden marking (2026-08-17)
+
+Owner, in the D298 context of lightweight test content: "We need a way to
+mark things as ui hidden." Taken for now (reversible default, D7): a
+closed visibility discriminant on homebrew/bundled catalog content —
+`visibility: 'listed' | 'ui_hidden'` — where `ui_hidden` entries are
+excluded from every user-facing browse/pick surface but remain fully
+loadable by tests, the simulator, and direct programmatic access; the
+absence of a value means `listed` only at the IMPORT boundary (stored rows
+always carry the explicit value). Seam: the discriminant lives with the
+content schema so an unhandled visibility arm fails tsc at each listing
+site. Cost to flip: rename/widen the union; no data loss. The eight D296
+entries land as `ui_hidden` first; flipping one to `listed` is a
+deliberate later act.
+
+## D298 — OWNER: v3 entries are lightweight test content, NOT Veteran-grade dossiers (2026-08-17)
+
+Clarifying D296/D297 scope: the intent of adopting all eight is "more types
+of non-copyrighted mechanics in the public repo so we can test. They don't
+need the attention that we gave to the Barbed Court and the Veteran."
+So: compact catalog entries + sim models sufficient to exercise each
+mechanic type (bonded riders, control locks, persistent riders,
+self-Inspiration, first-turn primitives, form packages, crit-range
+expansion, bounded pools) — no full-ceremony prose dossiers, no
+docx-fidelity pass. Consequence for D297(2): Cutting Chorus SHIPS for
+testing without a net-DPR claim; the d4-derived figure lands whenever d4
+expansion produces it, and only the CLAIM was ever blocked on it.
+
+## D297 — OWNER: homebrew v3 sub-rulings — both Ambush chassis; Chorus cost from d4; cleric slot stays open (2026-08-17)
+
+Three sub-rulings completing D296: (1) Ambush Primitive ships on **both**
+chassis — Vanward Conclave (Ranger) and Cold Open (Rogue); Cold Open's
+unpreserved measured delta must be re-run before its dossier cites numbers.
+(2) Cutting Chorus's displaced-ally opportunity cost is **re-derived from
+the d4 scorecard builds** (party-average attacks over the 89-build set),
+NOT the provisional 65%/1d8+3 proxy — the Chorus dossier's net-DPR figure
+is therefore blocked behind d4 expansion (D292); the mechanic's authoring
+can proceed, its net claim cannot. (3) The cleric damage slot **stays
+open** — a recorded open item, no commissioned candidates.
+
+## D296 — OWNER: ALL EIGHT homebrew v3 entries adopted for full authoring (2026-08-17)
+
+Presented with the reconstructed v3 packet (eight entries, sim-validated per
+tools/sim/2026-08-12-homebrew-validation-plan.md, measured numbers the
+deliverable per the park-time record), the owner selected **all eight**:
+Long Grudge, Anchor Point, Patient Volley, Cutting Chorus, Ambush Primitive
+(Vanward/Cold Open), Broken Tooth, Cutting Momentum, Broken Tempo. Each
+advances to a full prose dossier + app content behind the v1 gates (D292).
+Entries that measured over claim (Anchor Point, Patient Volley, Vanward,
+Broken Tooth, Broken Tempo) are adopted as MEASURED — authoring works from
+the simulated numbers, not the stale claims. Open sub-rulings still owed:
+Ambush chassis cardinality, Cutting Chorus ally-attack opportunity cost,
+the named-open cleric damage slot.
+
 ## D295 — OWNER: deploy configs stay placeholder; mobile-viewport testing confirmed (2026-08-17)
 
 Deploy identity ruled: **"Placeholder until later"** — prepared wrangler

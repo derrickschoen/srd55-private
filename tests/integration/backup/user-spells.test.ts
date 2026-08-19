@@ -69,8 +69,9 @@ function seedReferencedSpell(
   );
   db.exec(
     `INSERT INTO catalog_content_identities (
-       content_key, content_kind, key_kind, catalog_layer, normalized_name
-     ) VALUES (?, 'spell', ?, ?, ?)`,
+       content_key, content_kind, key_kind, catalog_layer, visibility,
+       normalized_name
+     ) VALUES (?, 'spell', ?, ?, 'listed', ?)`,
     [
       contentKey,
       provenance === 'srd' ? 'bundled-stable' : 'asserted',

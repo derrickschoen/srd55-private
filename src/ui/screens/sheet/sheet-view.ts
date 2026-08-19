@@ -604,7 +604,9 @@ function spellRulesDisclosure(
       'Current cantrip effect',
       current.status === 'recorded'
         ? `${current.value} at character level ${String(totalCharacterLevel)}`
-        : null,
+        : current.reason === 'character_level_unknown'
+          ? 'UNKNOWN — the character level is not recorded, so the current effect cannot be selected'
+          : 'UNKNOWN — this sheet needs explicit level (effect) pairs in the spell data; use the printed Effect rules below otherwise',
     );
   }
   fact('Effect', spell.reference.description);
@@ -679,7 +681,11 @@ function spellSection(
           label: [{ text: spell.name, free_text: true }],
           value: spellLevelText(spell),
           detail: plain(
-            `${spellMarkerText(spell)} · ${catalogLayerLabel(spell.catalog_layer)}`,
+            `${spellMarkerText(spell)}` +
+              (spell.selection_count === 1
+                ? ''
+                : ` · Selected ${String(spell.selection_count)} times`) +
+              ` · ${catalogLayerLabel(spell.catalog_layer)}`,
           ),
           disclosure: {
             summary: 'Read spell rules',
@@ -1280,6 +1286,18 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
     });
   }
   sections.push({ caption: 'Character', rows: identity });
+
+  if (sheet.unfinished_choices.length > 0) {
+    sections.push({
+      caption: 'Unfinished choices',
+      rows: sheet.unfinished_choices.map((choice, index) => ({
+        id: `unfinished_choice:${choice.kind}:${String(index)}`,
+        label: [{ text: choice.title, free_text: true }],
+        value: 'Unfinished',
+        detail: [{ text: choice.detail, free_text: true }],
+      })),
+    });
+  }
 
   const core: SheetRow[] = [
     numberRow(sheet.proficiency_bonus, true),
@@ -1950,6 +1968,7 @@ export function sheetFacts(sheet: CharacterSheet): Record<string, unknown> {
     weapon_proficiency_verdicts: sheet.proficiencies.weapons.map(
       (weapon) => weapon.verdict.kind,
     ),
+    unfinished_choices: sheet.unfinished_choices.map((choice) => choice.kind),
     warnings: sheet.warnings.map((warning) => warning.code),
     gaps: sheet.gaps.map((gap) => gap.kind),
   };

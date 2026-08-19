@@ -748,13 +748,12 @@ describe('coverage vocabularies and bundled provenance', () => {
       'languages_and_tools_not_modelled',
       'no_class_feature_text',
       'partial_subclass_catalog',
-      'required_source_choice',
       'weapon_reach_not_recorded',
     ]);
     for (const gap of SHEET_GAPS) {
       expect(sheetGapCoverage).toHaveProperty(gap.kind);
     }
-    expect(Object.keys(sheetWarningCoverage)).toHaveLength(14);
+    expect(Object.keys(sheetWarningCoverage)).toHaveLength(17);
   });
 
   it('has one priority and compact message for every closed issue kind', () => {

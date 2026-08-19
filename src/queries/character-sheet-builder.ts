@@ -76,7 +76,10 @@ import {
 } from '../rules/eligible-character-effects';
 import { characterLevel } from '../rules/character-level';
 import { resolveSpeciesChoice } from '../builder/species-choice';
-import { requiredSourceChoiceItems } from './character-completeness';
+import {
+  CharacterCompletenessQueries,
+  type CompletenessItem,
+} from './character-completeness';
 import { MulticlassPrimaryAbilityQueries } from './multiclass-primary-ability';
 import { catalogLayerLabel } from '../catalog/catalog-disclosure';
 import {
@@ -106,6 +109,9 @@ import {
   type CharacterSpellSection,
 } from './character-spell-section-builder';
 import type {
+  DuplicateWarningAssessment,
+} from '../duplicates/duplicate-warning-detector';
+import type {
   CatalogLayerDisclosure,
   CharacterCatalogDisclosure,
 } from '../catalog/catalog-disclosure';
@@ -119,6 +125,26 @@ import {
 import type { CharacterLevel } from '../domain/enums';
 import type { ClassLevel } from '../domain/ids';
 import type { PositiveInteger } from '../domain/class-resources';
+
+/** A stored Armor Class formula effect is missing required formula data. */
+export class CharacterSheetArmorClassFormulaPayloadError extends Error {
+  override readonly name =
+    'CharacterSheetArmorClassFormulaPayloadError' as const;
+  constructor(readonly effect_id: number) {
+    super(
+      `Armor Class formula effect ${String(effect_id)} has an incomplete payload.`,
+    );
+  }
+}
+
+/** A stored Armor Class bonus effect has no numeric bonus. */
+export class CharacterSheetArmorClassBonusPayloadError extends Error {
+  override readonly name =
+    'CharacterSheetArmorClassBonusPayloadError' as const;
+  constructor(readonly effect_id: number) {
+    super(`Armor Class bonus effect ${String(effect_id)} has no amount.`);
+  }
+}
 
 /**
  * THE CHARACTER SHEET, ASSEMBLED AND THROWN AWAY.
@@ -344,8 +370,20 @@ export interface SheetGap {
     | 'expertise_proficiency_removed'
     | 'languages_and_tools_not_modelled'
     | 'weapon_reach_not_recorded'
-    | 'gear_not_itemised'
-    | 'required_source_choice';
+    | 'gear_not_itemised';
+  readonly title: string;
+  readonly detail: string;
+}
+
+/**
+ * One named piece of player work that remains unfinished.
+ *
+ * The completeness query owns the vocabulary and wording. The sheet carries
+ * only the fields it renders, so every surface describes the same obligation
+ * without making a second set of choice rules.
+ */
+export interface SheetUnfinishedChoice {
+  readonly kind: CompletenessItem['kind'];
   readonly title: string;
   readonly detail: string;
 }
@@ -447,6 +485,8 @@ export interface CharacterSheet {
   readonly hit_point_rolls: readonly SheetHitPointRoll[];
   /** The recorded package choices, D33's answer to a blank inventory (D65). */
   readonly equipment_packages: readonly SheetEquipmentPackage[];
+  /** Saveable unfinished work, read from the shared completeness vocabulary. */
+  readonly unfinished_choices: readonly SheetUnfinishedChoice[];
   /** Degradations of a specific derivation, from `src/rules/sheet.ts`. */
   readonly warnings: readonly SheetWarning[];
   readonly gaps: readonly SheetGap[];
@@ -538,6 +578,32 @@ function distinctWarnings(
     seen.add(key);
     return true;
   });
+}
+
+function duplicateSpellWarning(
+  assessment: DuplicateWarningAssessment,
+): SheetWarning | null {
+  switch (assessment.category) {
+    case 'wasteful':
+      return {
+        code: 'duplicate_spell_wasteful',
+        message: assessment.explanation,
+      };
+    case 'redundant_intentional':
+      return {
+        code: 'duplicate_spell_redundant_intentional',
+        message: assessment.explanation,
+      };
+    case 'conflicting_version':
+      return {
+        code: 'duplicate_spell_conflicting_version',
+        message: assessment.explanation,
+      };
+    case 'none':
+      return null;
+  }
+  const unhandled: never = assessment.category;
+  return unhandled;
 }
 
 /**
@@ -839,7 +905,21 @@ export class CharacterSheetBuilder {
         valueContext,
       ),
     ];
-    const spells = this.#spells.build(characterId);
+    const spellProjection = this.#spells.buildProjection(characterId);
+    const spells = spellProjection.section;
+    const spellWarnings = spellProjection.duplicate_warnings.flatMap(
+      (assessment) => {
+        const warning = duplicateSpellWarning(assessment);
+        return warning === null ? [] : [warning];
+      },
+    );
+    const unfinishedChoices = new CharacterCompletenessQueries(this.db)
+      .build(characterId)
+      .items.map((item): SheetUnfinishedChoice => ({
+        kind: item.kind,
+        title: item.title,
+        detail: item.detail,
+      }));
 
     const hitPoints = hitPointMaximum({ classes, scores, rolls: rolls.map });
     const eligibleEffectRows = readEligibleCharacterEffects(
@@ -1204,6 +1284,7 @@ export class CharacterSheetBuilder {
       // step uses — so the sheet's package line and the step cannot disagree
       // (D33, D65; plan §4).
       equipment_packages: recordedEquipmentPackages(this.db, characterId),
+      unfinished_choices: unfinishedChoices,
       // The warning sets are CONCATENATED and not merged with `gaps`: these
       // describe a degradation of THIS character's derivation (crossed armour
       // slots, an unmet Strength requirement, no or several starting classes, an
@@ -1218,38 +1299,38 @@ export class CharacterSheetBuilder {
       // saves — which is the very thing the filter was written to prevent and a
       // review measured it still happening.
       //
-      // Deduplicated across the WHOLE list rather than between two named arms,
-      // on `code`+`message` and not on `code`: two weapons that are both not
-      // proficient are two facts and print twice; the same sentence about the
-      // same subject is one fact, and a page saying it twice reads as two
-      // different problems. Order is preserved, so each survivor still sits
-      // where the arm that produced it put it.
-      warnings: distinctWarnings([
-        ...stored.warnings,
-        ...hitPoints.warnings,
-        ...ac.warnings,
-        ...saves.warnings,
-        ...proficiencies.warnings,
-        ...multiclassPrerequisites.flatMap((assessment): SheetWarning[] =>
-          assessment.warning === null
-            ? []
-            : [{
-                code: assessment.warning.kind,
-                message:
-                  `${assessment.warning.title} — ${catalogLayerLabel(
-                    assessment.warning.class_catalog_layer,
-                  )}. ${assessment.warning.detail} ${assessment.warning.remedy}`,
-              }]
-        ),
-      ]),
+      // Derivation warnings are deduplicated across all of their arms rather
+      // than between two named arms, on `code`+`message` and not on `code`: two
+      // weapons that are both not proficient are two facts and print twice;
+      // the same sentence about the same subject is one fact. Spell duplicate
+      // assessments stay outside that filter because each assessment is one
+      // warning on the list card, even if imported identities share text.
+      warnings: [
+        ...distinctWarnings([
+          ...stored.warnings,
+          ...hitPoints.warnings,
+          ...ac.warnings,
+          ...saves.warnings,
+          ...proficiencies.warnings,
+          ...multiclassPrerequisites.flatMap((assessment): SheetWarning[] =>
+            assessment.warning === null
+              ? []
+              : [{
+                  code: assessment.warning.kind,
+                  message:
+                    `${assessment.warning.title} — ${catalogLayerLabel(
+                      assessment.warning.class_catalog_layer,
+                    )}. ${assessment.warning.detail} ${assessment.warning.remedy}`,
+                }]
+          ),
+        ]),
+        // One assessment is one list-card warning. Keep that cardinality here
+        // even if two imported spell identities happen to share display text.
+        ...spellWarnings,
+      ],
       gaps: [
         ...sheetGaps(printedFeatures.has_language_or_tool_grant_text),
         ...expertiseGaps(this.db, characterId),
-        ...requiredSourceChoiceItems(this.db, characterId).map((item) => ({
-          kind: item.kind,
-          title: item.title,
-          detail: item.detail,
-        })),
       ],
     };
   }
@@ -1636,9 +1717,7 @@ function armorClassFormulas(
         effect.ability_1 === null ||
         effect.allows_shield === null
       ) {
-        throw new Error(
-          `Armor Class formula effect ${String(effect.id)} has an incomplete payload.`,
-        );
+        throw new CharacterSheetArmorClassFormulaPayloadError(effect.id);
       }
       return {
         kind: 'ability_formula',
@@ -1659,9 +1738,7 @@ function armorClassBonuses(
     .filter((effect) => effect.effect_kind === 'armor_class_bonus')
     .map((effect): ArmorClassBonusCandidate => {
       if (effect.amount === null) {
-        throw new Error(
-          `Armor Class bonus effect ${String(effect.id)} has no amount.`,
-        );
+        throw new CharacterSheetArmorClassBonusPayloadError(effect.id);
       }
       return { label: effect.label, amount: effect.amount };
     });

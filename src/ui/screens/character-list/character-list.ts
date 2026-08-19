@@ -87,6 +87,22 @@ export function outstandingLabel(count: number): string {
     : `${count} unfinished ${count === 1 ? 'choice' : 'choices'}`;
 }
 
+export function cardHasOutstandingWork(
+  count: number,
+  levelOneComplete: boolean,
+): boolean {
+  return count > 0 || !levelOneComplete;
+}
+
+export function cardOutstandingLabel(
+  count: number,
+  levelOneComplete: boolean,
+): string {
+  return count === 0 && !levelOneComplete
+    ? 'guided build unfinished'
+    : outstandingLabel(count);
+}
+
 export interface CharacterCardRouteAction {
   readonly label: 'Resume build' | 'Level Up' | 'Open workspace';
   readonly href: string;
@@ -463,10 +479,16 @@ function renderCards(
       badges.push(
         element('span', {
           className:
-            counts.outstanding_count > 0
+            cardHasOutstandingWork(
+              counts.outstanding_count,
+              character.level_one_complete,
+            )
               ? 'status-badge status-outstanding'
               : 'status-badge status-settled',
-          text: outstandingLabel(counts.outstanding_count),
+          text: cardOutstandingLabel(
+            counts.outstanding_count,
+            character.level_one_complete,
+          ),
         }),
       );
       if (counts.catalog_gap_count > 0) {

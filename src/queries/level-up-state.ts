@@ -73,7 +73,10 @@ import {
   buildFeatApplicationPlan,
   evaluateFeatEligibility,
 } from '../rules/feat-application';
-import { levelFeatDefinitionFromDatabase } from '../commands/level-feat-choice';
+import {
+  selectableLevelFeatDefinitionsFromDatabase,
+  type LevelFeatDefinitionFromDatabase,
+} from '../commands/level-feat-choice';
 import {
   readEligibleCharacterEffects,
 } from '../rules/eligible-character-effects';
@@ -333,6 +336,13 @@ export class LevelUpStateQuery {
       this.db,
     ).build(character.id);
     const held = this.#heldClasses(character.id, prerequisiteAssessments);
+    let selectableFeatDefinitions:
+      readonly LevelFeatDefinitionFromDatabase[] | undefined;
+    const featDefinitions = (): readonly LevelFeatDefinitionFromDatabase[] => {
+      selectableFeatDefinitions ??=
+        selectableLevelFeatDefinitionsFromDatabase(this.db);
+      return selectableFeatDefinitions;
+    };
     const warnings = new CharacterCompletenessQueries(this.db)
       .build(character.id);
     const total = held.length === 0
@@ -370,6 +380,7 @@ export class LevelUpStateQuery {
       character,
       held,
       featEligibilityLevel,
+      featDefinitions,
     );
 
     if (total >= 20) {
@@ -438,6 +449,7 @@ export class LevelUpStateQuery {
         currentTotal,
         targetTotal,
         sheet,
+        featDefinitions,
       ),
     );
     const options = eligibleHeldClasses.map((entry): LevelUpClassOption => {
@@ -613,6 +625,7 @@ export class LevelUpStateQuery {
     character: CharacterRow,
     held: readonly HeldClassRow[],
     totalLevel: CharacterLevel,
+    featDefinitions: () => readonly LevelFeatDefinitionFromDatabase[],
   ): LevelUpPendingEpicResolution | null {
     const deferred = this.#deferredEpicBoons(character.id);
     const selected = deferred[0];
@@ -631,7 +644,11 @@ export class LevelUpStateQuery {
       warning: levelUpWarningPresentation(
         LEVEL_UP_WARNING_KEYS.epicBoonDeferred,
       ),
-      candidates: this.#featCandidates(projected, 'epic_boon'),
+      candidates: this.#featCandidates(
+        projected,
+        'epic_boon',
+        featDefinitions(),
+      ),
       applicable_steps: ['epic_boon', 'review', 'complete'],
     };
   }
@@ -669,6 +686,7 @@ export class LevelUpStateQuery {
     currentTotal: CharacterLevel,
     targetTotal: CharacterLevel,
     sheet: ReturnType<CharacterSheetBuilder['build']>,
+    featDefinitions: () => readonly LevelFeatDefinitionFromDatabase[],
   ): LevelUpGuideableClassOption {
     const targetLevel = classLevel(
       selected.current_level + 1,
@@ -704,6 +722,7 @@ export class LevelUpStateQuery {
             candidates: this.#featCandidates(
               projected,
               occurrenceKind,
+              featDefinitions(),
               {
                 character_id: character.id,
                 expected_revision: character.revision,
@@ -1046,19 +1065,10 @@ export class LevelUpStateQuery {
   #featCandidates(
     projected: ProjectedFeatCharacter,
     occurrence: 'asi_level_feat' | 'epic_boon',
+    definitions: readonly LevelFeatDefinitionFromDatabase[],
     choiceContext?: LevelUpPlannedChoiceContext,
   ): readonly LevelUpFeatCandidate[] {
-    return this.db.all(
-      `SELECT definition.content_key
-       FROM feat_definitions AS definition
-       WHERE ${selectableCatalogContentSql('feat', 'definition.content_key')}
-       ORDER BY definition.id`,
-      undefined,
-      (row) => sqlString(row, 'content_key'),
-    )
-      .map((contentKey) =>
-        levelFeatDefinitionFromDatabase(this.db, contentKey)
-      )
+    return definitions
       .filter(
         (definition) =>
           occurrence === 'asi_level_feat' ||
@@ -1084,6 +1094,7 @@ export class LevelUpStateQuery {
                     definition.catalog_layer,
                     application.selection,
                     application.plan,
+                    definition,
                   ),
               })),
         };

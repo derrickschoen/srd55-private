@@ -29,7 +29,12 @@ import {
   reconcileCurrentContentFingerprintV1,
 } from './content-registry';
 import { projectStoredEquipmentContentV1 } from './equipment-content-projector-v1';
-import { projectStoredSpellContentV1 } from './spell-content-projector-v1';
+import {
+  loadStoredSpellContentRowsV1,
+  projectStoredSpellContentV1,
+  projectStoredSpellRowsContentV1,
+  type StoredSpellContentRowsV1,
+} from './spell-content-projector-v1';
 import {
   projectStoredClassContentV1,
   projectStoredFeatContentV1,
@@ -66,10 +71,38 @@ export interface BundledContentRegistryProjectionResultV1 {
 }
 
 export interface BundledContentRegistryProjectionHooksV1 {
+  readonly includeEntry?: (entry: BundledManifestEntryV1) => boolean;
   readonly afterKind?: (
     kind: ContentKind,
     storedProjections: readonly BundledStoredProjectionV1[],
   ) => void;
+}
+
+export class BundledRegistryRootNameError extends TypeError {
+  override readonly name = 'BundledRegistryRootNameError' as const;
+  constructor(
+    readonly kind: ContentKind,
+    readonly content_key: ContentKey,
+  ) {
+    super(`Bundled ${kind} '${content_key}' has inconsistent root names.`);
+  }
+}
+
+export class BundledRegistryUnknownKindError extends TypeError {
+  override readonly name = 'BundledRegistryUnknownKindError' as const;
+  constructor(readonly kind: string) {
+    super(`Bundled registry row has unknown kind '${kind}'.`);
+  }
+}
+
+export class BundledRegistryNormalizedNameMissingError extends TypeError {
+  override readonly name = 'BundledRegistryNormalizedNameMissingError' as const;
+  constructor(
+    readonly kind: ContentKind,
+    readonly content_key: ContentKey,
+  ) {
+    super(`Bundled ${kind} '${content_key}' has no authoritative normalized name.`);
+  }
 }
 
 const KIND_ORDER: Readonly<Record<ContentKind, number>> = Object.freeze({
@@ -238,9 +271,7 @@ function inspectAggregateRoot(
   }
   const distinctNames = [...new Set(halves.flat())];
   if (distinctNames.length > 1) {
-    throw new TypeError(
-      `Bundled ${entry.kind} '${entry.contentKey}' has inconsistent root names.`,
-    );
+    throw new BundledRegistryRootNameError(entry.kind, entry.contentKey);
   }
   const presentHalves = halves.map((half) => half.length > 0);
   if (
@@ -268,7 +299,7 @@ function allBundledCandidates(
   )) {
     const kind = sqlString(row, 'content_kind');
     if (!isEnumValue(contentKinds, kind)) {
-      throw new TypeError(`Bundled registry row has unknown kind '${kind}'.`);
+      throw new BundledRegistryUnknownKindError(kind);
     }
     const entry = {
       kind,
@@ -309,6 +340,7 @@ function ensureBundledRegistryRoot(
 function projectBundledIdentityV1(
   db: DatabaseContext,
   entry: BundledManifestEntryV1,
+  storedSpellRows: StoredSpellContentRowsV1 | undefined,
 ): DerivedContentIdentityV1<ContentKind, unknown> {
   const references = storedAuthoredRegistryReferencesV1(db);
   let projection: {
@@ -351,7 +383,9 @@ function projectBundledIdentityV1(
       projection = projectStoredFeatContentV1(db, entry.contentKey, references);
       break;
     case 'spell':
-      projection = projectStoredSpellContentV1(db, entry.contentKey);
+      projection = storedSpellRows === undefined
+        ? projectStoredSpellContentV1(db, entry.contentKey)
+        : projectStoredSpellRowsContentV1(storedSpellRows);
       break;
     case 'weapon':
       projection = projectStoredEquipmentContentV1(db, {
@@ -378,8 +412,9 @@ function projectBundledIdentityV1(
     [entry.kind, entry.contentKey],
   );
   if (normalizedName === null || normalizedName === '') {
-    throw new TypeError(
-      `Bundled ${entry.kind} '${entry.contentKey}' has no authoritative normalized name.`,
+    throw new BundledRegistryNormalizedNameMissingError(
+      entry.kind,
+      entry.contentKey,
     );
   }
   const input = {
@@ -408,7 +443,14 @@ export function reconcileBundledContentRegistryWithStoredProjectionsV1(
   hooks: BundledContentRegistryProjectionHooksV1 = Object.freeze({}),
 ): BundledContentRegistryProjectionResultV1 {
   return db.transaction(() => {
-    const entries = allBundledCandidates(db);
+    const entries = allBundledCandidates(db).filter(
+      hooks.includeEntry ?? (() => true),
+    );
+    const storedSpellRows = loadStoredSpellContentRowsV1(
+      db,
+      entries.filter((entry) => entry.kind === 'spell')
+        .map((entry) => entry.contentKey),
+    );
     const storedProjections: BundledStoredProjectionV1[] = [];
     let projected = 0;
     let orphaned = 0;
@@ -425,7 +467,13 @@ export function reconcileBundledContentRegistryWithStoredProjectionsV1(
             return 'orphaned' as const;
           }
           ensureBundledRegistryRoot(db, entry);
-          const identity = projectBundledIdentityV1(db, entry);
+          const identity = projectBundledIdentityV1(
+            db,
+            entry,
+            entry.kind === 'spell'
+              ? storedSpellRows.get(entry.contentKey)
+              : undefined,
+          );
           const fingerprint = identity.envelope.scheme === CONTENT_FINGERPRINT_SCHEME_V1
             ? reconcileCurrentContentFingerprintV1(db, {
                 kind: entry.kind,

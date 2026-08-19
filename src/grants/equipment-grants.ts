@@ -24,6 +24,17 @@ import {
   weaponProficiencyCategoryOf,
 } from '../rules/weapon-template-fold';
 import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
+import {
+  EquipmentArmorSlotError,
+  EquipmentBackgroundDefinitionMissingError,
+  EquipmentBackgroundProjectionKindError,
+  EquipmentClassSourceMissingError,
+  EquipmentGrantedRowContractError,
+  EquipmentPackageContentMissingError,
+  EquipmentTemplateLinkMissingError,
+  EquipmentTemplateMissingError,
+  EquipmentWeaponGroupError,
+} from './equipment-grants-errors';
 
 /**
  * THE STARTING-EQUIPMENT MINT — the runtime the seam's
@@ -117,7 +128,7 @@ function grantableItems(
           params.content_key as ContentKey,
         );
         if (projection.kind !== 'background') {
-          throw new Error('Stored background projection returned another content kind.');
+          throw new EquipmentBackgroundProjectionKindError();
         }
         const aggregate = projection.aggregate as BackgroundContentAggregate;
         return params.option === 'a'
@@ -144,9 +155,9 @@ function grantableItems(
           ),
         ];
   if (typeof ownerId !== 'number') {
-    throw new Error(
-      `No ${params.kind} exists for content key "${params.content_key}", ` +
-        'so its equipment package cannot be resolved.',
+    throw new EquipmentPackageContentMissingError(
+      params.kind,
+      params.content_key,
     );
   }
   return db.allRaw(
@@ -241,11 +252,9 @@ function recordingSourceInstanceId(
       [params.character_id, ACTIVE_SOURCE_INSTANCE_STATE, params.content_key],
     );
     if (typeof classInstance !== 'number') {
-      throw new Error(
-        `Character ${params.character_id} has no active class source ` +
-          `instance for "${params.content_key}" to record the equipment ` +
-          'choice on. The wizard requires a class before anything else ' +
-          'happens (D42).',
+      throw new EquipmentClassSourceMissingError(
+        params.character_id,
+        params.content_key,
       );
     }
     return classInstance;
@@ -276,10 +285,7 @@ function recordingSourceInstanceId(
     [params.content_key],
   );
   if (typeof definitionId !== 'number' || typeof displayName !== 'string') {
-    throw new Error(
-      `The background "${params.content_key}" has no definition in this ` +
-        'database, so its equipment choice cannot be recorded.',
-    );
+    throw new EquipmentBackgroundDefinitionMissingError(params.content_key);
   }
   const now = timestamp();
   return db.exec(
@@ -384,28 +390,22 @@ function mintWeapons(
   item: GrantableItem,
 ): void {
   if (item.weapon_template_id === null) {
-    throw new Error(
-      `Equipment item "${item.item_name}" is classified as a weapon but ` +
-        'links no weapon template — the payload CHECK should have refused ' +
-        'the seed.',
-    );
+    throw new EquipmentTemplateLinkMissingError(item.item_name, 'weapon');
   }
   const template = db.oneRaw(
     'SELECT * FROM weapon_templates WHERE id = ?',
     [item.weapon_template_id],
   );
   if (template === null) {
-    throw new Error(
-      `Weapon template ${item.weapon_template_id} for "${item.item_name}" ` +
-        'does not exist.',
+    throw new EquipmentTemplateMissingError(
+      'weapon',
+      item.weapon_template_id,
+      item.item_name,
     );
   }
   const group = String(template.srd_group);
   if (!isEnumValue(srdWeaponGroups, group)) {
-    throw new Error(
-      `Weapon template "${String(template.name)}" carries unknown ` +
-        `srd_group "${group}".`,
-    );
+    throw new EquipmentWeaponGroupError(String(template.name), group);
   }
   const now = timestamp();
   const row: Record<string, unknown> = {
@@ -426,7 +426,11 @@ function mintWeapons(
     `Granted character_weapons row for "${item.item_name}"`,
   );
   if (contract !== null) {
-    throw new Error(contract);
+    throw new EquipmentGrantedRowContractError(
+      'character_weapons',
+      { id: 1, ...row },
+      item.item_name,
+    );
   }
   const columns = Object.keys(row);
   for (let count = 0; count < item.quantity; count += 1) {
@@ -455,25 +459,23 @@ function mintArmor(
   item: GrantableItem,
 ): void {
   if (item.armor_template_id === null) {
-    throw new Error(
-      `Equipment item "${item.item_name}" is classified as armor but links ` +
-        'no armor template — the payload CHECK should have refused the seed.',
-    );
+    throw new EquipmentTemplateLinkMissingError(item.item_name, 'armor');
   }
   const template = db.oneRaw(
     'SELECT * FROM armor_templates WHERE id = ?',
     [item.armor_template_id],
   );
   if (template === null) {
-    throw new Error(
-      `Armor template ${item.armor_template_id} for "${item.item_name}" ` +
-        'does not exist.',
+    throw new EquipmentTemplateMissingError(
+      'armor',
+      item.armor_template_id,
+      item.item_name,
     );
   }
   const slot: ArmorSlot =
     String(template.category) === 'shield' ? 'shield' : 'worn';
   if (!isEnumValue(armorSlots, slot)) {
-    throw new Error(`Unknown armor slot "${String(slot)}".`);
+    throw new EquipmentArmorSlotError(String(slot));
   }
   for (let count = 0; count < item.quantity; count += 1) {
     // THE COLLISION REFUSAL (§3, pinned): `character_armor` is UNIQUE on
@@ -518,7 +520,11 @@ function mintArmor(
       `Granted character_armor row for "${item.item_name}"`,
     );
     if (contract !== null) {
-      throw new Error(contract);
+      throw new EquipmentGrantedRowContractError(
+        'character_armor',
+        { id: 1, ...row },
+        item.item_name,
+      );
     }
     const columns = Object.keys(row);
     db.exec(

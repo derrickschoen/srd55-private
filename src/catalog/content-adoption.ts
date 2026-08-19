@@ -13,8 +13,17 @@ import {
   type ContentFingerprintScheme,
   type ContentKind,
 } from './content-identity';
-import { projectStoredContentV1 } from './stored-content-projector-v1';
+import type { CatalogContentVisibility } from './content-visibility';
+import {
+  projectStoredContentV1,
+  type StoredContentProjectionV1,
+} from './stored-content-projector-v1';
 import { projectStoredContentV2 } from './stored-content-projector-v2';
+import {
+  loadStoredSpellContentRowsV1,
+  projectStoredSpellRowsContentV1,
+  type StoredSpellContentRowsV1,
+} from './spell-content-projector-v1';
 import {
   catalogLayerDisclosure,
   type CatalogNamedDisclosure,
@@ -37,6 +46,23 @@ import {
   type InstalledTargetReferenceCertificate,
 } from './content-registry';
 
+export class ContentAdoptionTargetKindError extends TypeError {
+  override readonly name = 'ContentAdoptionTargetKindError' as const;
+  constructor(
+    readonly expected_kind: ContentKind,
+    readonly stored_kind: ContentKind,
+  ) {
+    super('Stored target kind does not match its adoption node.');
+  }
+}
+
+export class ContentImportPlanRollbackInvariantError extends Error {
+  override readonly name = 'ContentImportPlanRollbackInvariantError' as const;
+  constructor() {
+    super('Content import planner failed to roll back its simulation.');
+  }
+}
+
 export type ContentImportPlanToken = string & {
   readonly __contentImportPlanToken: unique symbol;
 };
@@ -50,6 +76,7 @@ export interface ContentImportDependencyTarget {
 
 export interface ContentImportProjection<K extends ContentKind = ContentKind> {
   readonly kind: K;
+  readonly visibility: CatalogContentVisibility;
   readonly edition: string;
   readonly name: string;
   readonly assertedKey: ContentKey;
@@ -269,7 +296,7 @@ function registryGraphHash(db: DatabaseContext): string {
   ] as const;
   const graph = tables.map((table) => ({
     table,
-    rows: db.allRaw(`SELECT * FROM ${table} ORDER BY 1, 2, 3, 4`),
+    rows: db.allRaw(`SELECT * FROM ${table} ORDER BY rowid`),
   }));
   return sha256(canonicalJson(graph));
 }
@@ -503,6 +530,71 @@ function deriveDependencyGraph(
     readonly canonicalJson: string;
   }>();
 
+  const externalReferences = new Map<string, ProjectionFingerprintReference>();
+  for (const node of nodes) {
+    for (const reference of projectionFingerprintReferences(node.projection.payload)) {
+      const referenceKey = contentFingerprintReferenceKey(reference);
+      if ((incomingByFingerprint.get(referenceKey) ?? []).length === 0) {
+        externalReferences.set(referenceKey, reference);
+      }
+    }
+  }
+  const resolvedExternalTargets = new Map(
+    [...externalReferences].map(([referenceKey, reference]) => [
+      referenceKey,
+      resolveFingerprintTarget(db, reference),
+    ]),
+  );
+  const externalSpellKeys = [...new Set(
+    [...externalReferences].flatMap(([referenceKey, reference]) => {
+      const contentKey = resolvedExternalTargets.get(referenceKey);
+      return reference.kind === 'spell' &&
+          reference.scheme === CONTENT_FINGERPRINT_SCHEME_V1 &&
+          contentKey !== null && contentKey !== undefined
+        ? [contentKey]
+        : [];
+    }),
+  )];
+  let storedSpellRows: ReadonlyMap<ContentKey, StoredSpellContentRowsV1>;
+  try {
+    storedSpellRows = loadStoredSpellContentRowsV1(db, externalSpellKeys);
+  } catch {
+    // Preserve the existing per-reference refusal boundary for damaged rows.
+    // Healthy batches take the seven-query path; a corrupt batch falls back to
+    // the single reader so only references to the corrupt aggregate refuse.
+    storedSpellRows = new Map();
+  }
+  const storedSpellProjections = new Map<ContentKey, StoredContentProjectionV1>();
+
+  const projectExternalReference = (
+    reference: ProjectionFingerprintReference,
+    contentKey: ContentKey,
+  ): StoredContentProjectionV1 => {
+    if (
+      reference.kind !== 'spell' ||
+      reference.scheme !== CONTENT_FINGERPRINT_SCHEME_V1
+    ) {
+      return reference.scheme === CONTENT_FINGERPRINT_SCHEME_V1
+        ? projectStoredContentV1(db, reference.kind, contentKey)
+        : projectStoredContentV2(db, reference.kind, contentKey);
+    }
+    const cached = storedSpellProjections.get(contentKey);
+    if (cached !== undefined) return cached;
+    const rows = storedSpellRows.get(contentKey);
+    if (rows === undefined) {
+      return projectStoredContentV1(db, 'spell', contentKey);
+    }
+    const projected = projectStoredSpellRowsContentV1(rows);
+    const stored: StoredContentProjectionV1 = Object.freeze({
+      kind: projected.kind,
+      edition: projected.aggregate.rules_edition,
+      name: projected.aggregate.name,
+      payload: projected.payload,
+    });
+    storedSpellProjections.set(contentKey, stored);
+    return stored;
+  };
+
   for (const node of nodes) {
     const dependencies = new Set<string>();
     const reviewEdges = new Set<string>();
@@ -519,15 +611,13 @@ function deriveDependencyGraph(
         unresolvedNodes.add(node.id);
         continue;
       }
-      const contentKey = resolveFingerprintTarget(db, reference);
+      const contentKey = resolvedExternalTargets.get(referenceKey) ?? null;
       if (contentKey === null) {
         unresolvedNodes.add(node.id);
         continue;
       }
       try {
-        const stored = reference.scheme === CONTENT_FINGERPRINT_SCHEME_V1
-          ? projectStoredContentV1(db, reference.kind, contentKey)
-          : projectStoredContentV2(db, reference.kind, contentKey);
+        const stored = projectExternalReference(reference, contentKey);
         const liveIdentity = deriveContentIdentityForScheme(reference.scheme, {
           kind: stored.kind,
           edition: stored.edition,
@@ -745,7 +835,10 @@ function withLiveTargetSnapshot(
   try {
     const stored = entry.projection.projectStored(db, entry.targetContentKey);
     if (stored.kind !== entry.projection.kind) {
-      throw new TypeError('Stored target kind does not match its adoption node.');
+      throw new ContentAdoptionTargetKindError(
+        entry.projection.kind,
+        stored.kind,
+      );
     }
     const identity = deriveContentIdentityForScheme(
       projectionFingerprintScheme(entry.projection),
@@ -1321,6 +1414,7 @@ function evaluate(
             payload: projection.payload,
             assertedKey: projection.assertedKey,
             fingerprintScheme: projectionFingerprintScheme(projection),
+            visibility: projection.visibility,
           });
         }
         const installedKey = resolution.kind === 'missing'
@@ -1422,7 +1516,7 @@ export function planContentImport(
     if (error instanceof PlanRollback) return error.evaluation.plan;
     throw error;
   }
-  throw new Error('Content import planner failed to roll back its simulation.');
+  throw new ContentImportPlanRollbackInvariantError();
 }
 
 export type ContentImportCommitResult =

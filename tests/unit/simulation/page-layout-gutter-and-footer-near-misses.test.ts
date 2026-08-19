@@ -247,6 +247,36 @@ describe('two-column gutter geometry', () => {
       `${SPELL_METADATA_LINE} ${bodyLine(6)}`,
     );
   });
+
+  it('keeps two reflowed left-column rows whole instead of slicing their prose', () => {
+    const firstOverflow = 'L'.repeat(30);
+    const secondOverflow = 'M'.repeat(30);
+    const descriptions = spellDescriptionsFromFullLayout(
+      completeLayout([SPLIT_SAFE_PROBE, firstOverflow, secondOverflow]),
+    );
+
+    expect(descriptions.get('Spell 339')).toBe(
+      `${SPELL_METADATA_LINE} ${bodyLine(339)} ` +
+        `ALPHA${' '.repeat(8)}B  C  D  QQ ` +
+        `${firstOverflow} ${secondOverflow} OMEGARIGHTXYZ`,
+    );
+  });
+
+  it('rejects a page with more than the two reviewed single-column overflow rows', () => {
+    const layout = completeLayout([
+      SPLIT_SAFE_PROBE,
+      'L'.repeat(30),
+      'M'.repeat(30),
+      'N'.repeat(30),
+    ]);
+
+    const error = thrownBy(() => spellDescriptionsFromFullLayout(layout));
+
+    expect(error).toBeInstanceOf(TypeError);
+    expect(messageOf(error)).toBe(
+      'SRD spell page 175 has no safe two-column gutter.',
+    );
+  });
 });
 
 describe('pages with nothing printed on them', () => {

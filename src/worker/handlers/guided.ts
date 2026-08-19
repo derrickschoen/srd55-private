@@ -65,7 +65,6 @@ import { SkillGrantRefusal } from '../../grants/skill-grants';
 import { SkillExpertiseGrantRefusal } from '../../grants/skill-expertise-grants';
 import { CharacterCommandIntegrity } from '../../commands/integrity';
 import { CharacterCommandExecutor } from '../../commands/character-command-executor';
-import { RevisionConflict } from '../../commands/revision-conflict';
 import { abilities, skills } from '../../domain/enums';
 import { RpcError } from '../../rpc/protocol';
 import {
@@ -79,6 +78,7 @@ import {
   resolveSpeciesChoice,
 } from '../../builder/species-choice';
 import { characterCommandRpcError } from '../character-command-errors';
+import { ok } from '../../refusals/outcome';
 import {
   guidedRequiredFighterChoicesState,
 } from '../../builder/required-fighter-choices';
@@ -301,9 +301,9 @@ function isGuidedSaveAbilityDraftParams(
 
 /**
  * The one translation from a domain refusal to the wire, shared by every
- * guided mutation so `createGuided` and `applyOrigin` cannot drift on the
- * `RevisionConflict` precedent: refusals become `handler_error` with the
- * seam's structured `GuidedRefusalData`; anything else stays bare.
+ * not-yet-migrated guided mutation so `createGuided` and `applyOrigin` cannot
+ * drift: refusals become `handler_error` with the seam's structured
+ * `GuidedRefusalData`; anything else stays bare.
  */
 function translatingRefusals<T>(operation: () => T): T {
   try {
@@ -386,16 +386,17 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
                 }),
           },
         });
+        if (result.kind === 'refused') return result;
         const state = guidedBuildState(context.db, params.character_id);
         if (state.kind !== 'ready') {
           throw new Error('The character disappeared after choosing a lineage.');
         }
-        return {
+        return ok({
           character_id: params.character_id,
           current_step: state.current_step,
-          revision: result.revision,
+          revision: result.value.revision,
           resolution: resolveSpeciesChoice(context.db, params.character_id),
-        };
+        });
       } catch (error) {
         const translated = characterCommandRpcError(error);
         if (translated !== null) throw translated;
@@ -463,10 +464,8 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
   ),
   /**
    * WARNINGS NEVER SURFACE HERE AS ERRORS (D49): `allocateGuidedAbilities`
-   * carries them inside the successful result, and this handler adds only the
-   * `RevisionConflict` translation every executor-riding method owes — the
-   * same structured `handler_error` `commands.execute` emits, so the two
-   * paths cannot drift on the precedent.
+   * carries them inside the `Outcome` success value. Executor refusals pass
+   * through unchanged; defects still use the RPC error channel.
    */
   defineRpcHandler(
     GUIDED_RPC.allocateAbilities,
@@ -479,11 +478,6 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
           new CharacterCommandIntegrity(COMMAND_INTEGRITY_KEY),
         );
       } catch (error) {
-        if (error instanceof RevisionConflict) {
-          throw new RpcError('handler_error', error.message, {
-            current_revision: error.currentRevision,
-          });
-        }
         throw error;
       }
     },
@@ -531,9 +525,8 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
   ),
   /**
    * The S-B fill command (§3.6). Rides the executor like `allocateAbilities`,
-   * so it owes the same `RevisionConflict` translation; its DOMAIN refusals —
-   * the seam's `SkillGrantRefusalReason`, each naming the skill at issue —
-   * ride `translatingRefusals`' `SkillGrantRefusal` arm.
+   * so executor refusals pass through as `Outcome`; its not-yet-migrated
+   * `SkillGrantRefusal` cases still ride `translatingRefusals`.
    */
   /**
    * The E-B equipment-step read: both sources' offerable options (gold-only
@@ -578,11 +571,6 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
           throw new RpcError('handler_error', error.message, {
             reason: error.reason,
             skill: error.skill,
-          });
-        }
-        if (error instanceof RevisionConflict) {
-          throw new RpcError('handler_error', error.message, {
-            current_revision: error.currentRevision,
           });
         }
         throw error;

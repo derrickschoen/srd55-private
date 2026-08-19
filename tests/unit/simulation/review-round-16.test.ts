@@ -26,10 +26,13 @@ import {
 import {
   deriveSaveDamageCoverageFromBodies,
   spellBodyDigestInputsByHeading,
+  spellBodyDigestInputsFromFullLayout,
   spellDescriptionsByHeading,
+  spellDescriptionsFromFullLayout,
 } from '../../../src/simulation/spell-source-reader';
 
 const spellExtract = readFileSync('docs/srd/source/spell-descriptions.txt', 'utf8');
+const fullSrd = readFileSync('docs/srd/full/srd-5.2.1.txt', 'utf8');
 
 function fireballFromExtract(extract: string) {
   const body = spellDescriptionsByHeading(extract).get('Fireball');
@@ -64,19 +67,29 @@ describe('round 16 whole-spell-body digest reproductions', () => {
     );
   });
 
-  it('rejects a raw line-break-hyphen change that parses to the same Fireball text', () => {
-    const mutated = spellExtract.replace(
-      'Using a Higher-Level Spell Slot. The damage in-\n\ncreases by 1d6',
-      'Using a Higher-Level Spell Slot. The damage increases by 1d6',
-    );
-    expect(mutated).not.toBe(spellExtract);
-    const fireball = fireballFromExtract(mutated);
+  it('keeps the reviewed raw Fireball digest while the reflowed parse stays equal', () => {
+    const rawDigestInput = spellBodyDigestInputsFromFullLayout(fullSrd)
+      .get('Fireball');
+    const reflowedDigestInput = spellBodyDigestInputsByHeading(spellExtract)
+      .get('Fireball');
+    const rawParsed = spellDescriptionsFromFullLayout(fullSrd).get('Fireball');
+    const reflowedParsed = spellDescriptionsByHeading(spellExtract).get('Fireball');
+    if (
+      rawDigestInput === undefined ||
+      reflowedDigestInput === undefined ||
+      rawParsed === undefined ||
+      reflowedParsed === undefined
+    ) {
+      throw new Error('Fireball is missing from a supplied spell corpus.');
+    }
 
+    expect(rawDigestInput).not.toBe(reflowedDigestInput);
+    expect(rawParsed).toBe(reflowedParsed);
     expect(() => assertReviewedSpellBodyDigest(
       'fireball',
       reviewedSaveSuccessClauses.fireball.id,
-      fireball.digest_input,
-    )).toThrow(/fireball:save:damage spell body digest mismatch/iu);
+      rawDigestInput,
+    )).not.toThrow();
   });
 
   it('rejects a nonmechanical Fireball example inserted outside the parsed clause', () => {

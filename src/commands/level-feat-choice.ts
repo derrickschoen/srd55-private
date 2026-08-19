@@ -1,5 +1,10 @@
 import type { DatabaseContext } from '../db/database';
-import { sqlInteger, sqlNullableString, sqlString } from '../db/codecs';
+import {
+  sqlInteger,
+  sqlNullableString,
+  sqlString,
+  type SqlRow,
+} from '../db/codecs';
 import type {
   LevelFeatSelection,
 } from '../domain/command-contracts';
@@ -96,30 +101,15 @@ function prerequisites(value: string | null): readonly FeatPrerequisite[] {
   });
 }
 
-export function levelFeatDefinitionFromDatabase(
-  db: DatabaseContext,
-  contentKey: string,
-): FeatDefinitionForApplication & {
+export type LevelFeatDefinitionFromDatabase = FeatDefinitionForApplication & {
   readonly id: number;
   readonly catalog_layer: CatalogLayerDisclosure;
-} {
-  const row = db.oneRaw(
-    `SELECT definition.id, definition.content_key, definition.name,
-            definition.category, definition.min_level,
-            definition.ability_points, definition.ability_increase_abilities,
-            definition.ability_increase_maximum, definition.repeatable,
-            definition.prerequisites, definition.grant_rules,
-            definition.notes, identity.catalog_layer
-     FROM feat_definitions AS definition
-     LEFT JOIN catalog_content_identities AS identity
-       ON identity.content_kind = 'feat'
-      AND identity.content_key = definition.content_key
-     WHERE definition.content_key = ?`,
-    [contentKey],
-  );
-  if (row === null) {
-    throw new TypeError('The selected feat definition is unavailable.');
-  }
+};
+
+function decodeLevelFeatDefinition(
+  row: SqlRow,
+  contentKey: string,
+): LevelFeatDefinitionFromDatabase {
   if (!isEnumValue(featGroupings, row.category)) {
     throw new TypeError('The selected feat has an unsupported grouping.');
   }
@@ -160,6 +150,67 @@ export function levelFeatDefinitionFromDatabase(
     ),
     notes: sqlNullableString(row, 'notes') ?? '',
   };
+}
+
+export function levelFeatDefinitionFromDatabase(
+  db: DatabaseContext,
+  contentKey: string,
+): LevelFeatDefinitionFromDatabase {
+  const row = db.oneRaw(
+    `SELECT definition.id, definition.content_key, definition.name,
+            definition.category, definition.min_level,
+            definition.ability_points, definition.ability_increase_abilities,
+            definition.ability_increase_maximum, definition.repeatable,
+            definition.prerequisites, definition.grant_rules,
+            definition.notes, identity.catalog_layer
+     FROM feat_definitions AS definition
+     LEFT JOIN catalog_content_identities AS identity
+       ON identity.content_kind = 'feat'
+      AND identity.content_key = definition.content_key
+     WHERE definition.content_key = ?`,
+    [contentKey],
+  );
+  if (row === null) {
+    throw new TypeError('The selected feat definition is unavailable.');
+  }
+  return decodeLevelFeatDefinition(row, contentKey);
+}
+
+/** One fully decoded, fresh-choice feat catalogue for a single read build. */
+export function selectableLevelFeatDefinitionsFromDatabase(
+  db: DatabaseContext,
+): readonly LevelFeatDefinitionFromDatabase[] {
+  return db.all(
+    `WITH disqualified(content_key) AS MATERIALIZED (
+       SELECT content_key
+       FROM catalog_content_identities
+       WHERE content_kind = ?
+         AND NOT (archived_at IS NULL AND visibility IN ('listed'))
+       UNION
+       SELECT superseded_content_key
+       FROM catalog_content_supersessions
+       WHERE content_kind = ?
+     )
+     SELECT definition.id, definition.content_key, definition.name,
+            definition.category, definition.min_level,
+            definition.ability_points, definition.ability_increase_abilities,
+            definition.ability_increase_maximum, definition.repeatable,
+            definition.prerequisites, definition.grant_rules,
+            definition.notes, identity.catalog_layer
+     FROM feat_definitions AS definition
+     LEFT JOIN catalog_content_identities AS identity
+       ON identity.content_kind = 'feat'
+      AND identity.content_key = definition.content_key
+     LEFT JOIN disqualified
+       ON disqualified.content_key = definition.content_key
+     WHERE disqualified.content_key IS NULL
+     ORDER BY definition.id`,
+    ['feat', 'feat'],
+    (row) => decodeLevelFeatDefinition(
+      row,
+      sqlString(row, 'content_key'),
+    ),
+  );
 }
 
 function projectedClasses(
@@ -263,16 +314,22 @@ export interface ApplyLevelFeatSelectionInput {
   readonly targetClassLevel: number | null;
   readonly targetSubclassContentKey: string | null;
   readonly requiredGrouping?: KnownFeatGrouping;
+  /** Build-scoped decoded row; command/RPC callers deliberately omit it. */
+  readonly preloadedDefinition?: LevelFeatDefinitionFromDatabase;
 }
 
 function preparedLevelFeatSelection(
   db: DatabaseContext,
   input: ApplyLevelFeatSelectionInput,
 ) {
-  const definition = levelFeatDefinitionFromDatabase(
-    db,
-    input.selection.feat_content_key,
-  );
+  const definition = input.preloadedDefinition ??
+    levelFeatDefinitionFromDatabase(
+      db,
+      input.selection.feat_content_key,
+    );
+  if (definition.content_key !== input.selection.feat_content_key) {
+    throw new TypeError('The preloaded feat definition does not match the selection.');
+  }
   if (
     input.requiredGrouping !== undefined &&
     definition.grouping !== input.requiredGrouping

@@ -6,6 +6,16 @@ import type {
 import { parseCatalogDocuments } from '../../../src/catalog/catalog-schema';
 import { parseSourceCatalogRecord } from '../../../src/catalog/source-catalog-records';
 import {
+  SourceCatalogDefinitionKeyConfigTypeError,
+  SourceCatalogFieldIntegerRangeError,
+  SourceCatalogFieldLengthError,
+  SourceCatalogFieldListLimitError,
+  SourceCatalogFieldWhitespaceError,
+  SourceCatalogSourceKindMismatchError,
+  SourceCatalogStoredOnlyFieldError,
+  SourceCatalogStoreLocalFieldError,
+} from '../../../src/catalog/source-catalog-records-errors';
+import {
   CONTENT_FINGERPRINT_SCHEME_V1,
   deriveContentIdentityV1,
   type ContentFingerprintDigest,
@@ -22,6 +32,15 @@ const digest = 'a'.repeat(64) as ContentFingerprintDigest;
 
 function sourceDocument(kind: string, aggregate: object): string {
   return JSON.stringify([{ kind, aggregate }]);
+}
+
+function refusal(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return expect.fail('Expected a refusal, but the call returned.');
 }
 
 function species(): SpeciesContentAggregate {
@@ -177,14 +196,18 @@ describe('class and origin catalog DTO bounds', () => {
         }],
       },
     })).toThrow(/value/);
-    expect(() => parseSourceCatalogRecord('class', {
+    const classStoredError = refusal(() => parseSourceCatalogRecord('class', {
       kind: 'class',
       aggregate: { ...classProjectorV1Vector.aggregate, stored_fields: {} },
-    })).toThrow(/stored-only/);
-    expect(() => parseSourceCatalogRecord('feat', {
+    }));
+    expect(classStoredError).toBeInstanceOf(SourceCatalogStoredOnlyFieldError);
+    expect(classStoredError).toMatchObject({ field: 'aggregate.stored_fields' });
+    const featStoredError = refusal(() => parseSourceCatalogRecord('feat', {
       kind: 'feat',
       aggregate: { ...featProjectorV1Vector.aggregate, stored_fields: {} },
-    })).toThrow(/stored-only/);
+    }));
+    expect(featStoredError).toBeInstanceOf(SourceCatalogStoredOnlyFieldError);
+    expect(featStoredError).toMatchObject({ field: 'aggregate.stored_fields' });
   });
 
   it('refuses malformed class contribution rows at the catalog boundary', () => {
@@ -361,13 +384,24 @@ describe('class and origin catalog DTO bounds', () => {
       progressions: [progression],
     };
     expect(parseCatalogDocuments([sourceDocument('class', atBoundary)]).classes).toHaveLength(1);
-    expect(() => parseCatalogDocuments([sourceDocument('class', {
+    const countError = refusal(() => parseCatalogDocuments([sourceDocument('class', {
       ...atBoundary,
       progressions: [{ ...progression, cantrips_known: 1_001 }],
-    })])).toThrow(/cantrips_known/);
-    expect(() => parseCatalogDocuments([sourceDocument('class', {
+    })]));
+    expect(countError).toBeInstanceOf(SourceCatalogFieldIntegerRangeError);
+    expect(countError).toMatchObject({
+      field: 'aggregate.progressions[0].cantrips_known',
+      minimum: 0,
+      maximum: 1_000,
+    });
+    const notesError = refusal(() => parseCatalogDocuments([sourceDocument('class', {
       ...atBoundary, notes: 'n'.repeat(4_001),
-    })])).toThrow(/aggregate.notes/);
+    })]));
+    expect(notesError).toBeInstanceOf(SourceCatalogFieldLengthError);
+    expect(notesError).toMatchObject({
+      field: 'aggregate.notes',
+      maximum_length: 4_000,
+    });
   });
 
   it('accepts the 20-row class progression boundary and refuses row 21', () => {
@@ -382,21 +416,32 @@ describe('class and origin catalog DTO bounds', () => {
     expect(parseCatalogDocuments([sourceDocument('class', {
       ...classProjectorV1Vector.aggregate, progressions,
     })]).classes).toHaveLength(1);
-    expect(() => parseCatalogDocuments([sourceDocument('class', {
+    const error = refusal(() => parseCatalogDocuments([sourceDocument('class', {
       ...classProjectorV1Vector.aggregate,
       progressions: [...progressions, progressions[19]],
-    })])).toThrow(/at most 20 entries/);
+    })]));
+    expect(error).toBeInstanceOf(SourceCatalogFieldListLimitError);
+    expect(error).toMatchObject({
+      field: 'aggregate.progressions',
+      maximum_entries: 20,
+    });
   });
 
   it('accepts species speed 10000 and refuses 10001 from the shared authoring limit', () => {
     expect(parseCatalogDocuments([sourceDocument('species', species())]).species).toHaveLength(1);
-    expect(() => parseCatalogDocuments([sourceDocument('species', {
+    const error = refusal(() => parseCatalogDocuments([sourceDocument('species', {
       ...species(), walking_speed_feet: 10_001,
-    })])).toThrow(/walking_speed_feet/);
+    })]));
+    expect(error).toBeInstanceOf(SourceCatalogFieldIntegerRangeError);
+    expect(error).toMatchObject({
+      field: 'aggregate.walking_speed_feet',
+      minimum: 1,
+      maximum: 10_000,
+    });
   });
 
   it('refuses an origin effect magnitude 1001 at the catalog boundary', () => {
-    expect(() => parseCatalogDocuments([sourceDocument('species', {
+    const error = refusal(() => parseCatalogDocuments([sourceDocument('species', {
       ...species(),
       traits: [{
         sort_order: 1,
@@ -407,20 +452,32 @@ describe('class and origin catalog DTO bounds', () => {
           speed_bonus_feet: 1_001,
         }],
       }],
-    })])).toThrow(/speed_bonus_feet/);
+    })]));
+    expect(error).toBeInstanceOf(SourceCatalogFieldIntegerRangeError);
+    expect(error).toMatchObject({
+      field: 'aggregate.traits[0].effects[0].speed_bonus_feet',
+      minimum: -1_000,
+      maximum: 1_000,
+    });
   });
 
   it('refuses background equipment quantity zero', () => {
-    expect(() => parseCatalogDocuments([sourceDocument('background', {
+    const error = refusal(() => parseCatalogDocuments([sourceDocument('background', {
       ...background(),
       equipment_option_a: [{
         kind: 'gear', sort_order: 1, quantity: 0, printed_name: 'Nothing',
       }],
-    })])).toThrow(/quantity/);
+    })]));
+    expect(error).toBeInstanceOf(SourceCatalogFieldIntegerRangeError);
+    expect(error).toMatchObject({
+      field: 'aggregate.equipment_option_a[0].quantity',
+      minimum: 1,
+      maximum: 10_000,
+    });
   });
 
   it('refuses a class progression grant with a whitespace-padded locator', () => {
-    expect(() => parseCatalogDocuments([sourceDocument('class', {
+    const error = refusal(() => parseCatalogDocuments([sourceDocument('class', {
       ...classProjectorV1Vector.aggregate,
       progressions: [{
         class_level: 1,
@@ -439,11 +496,15 @@ describe('class and origin catalog DTO bounds', () => {
           with_slots: true,
         }],
       }],
-    })])).toThrow(/surrounding whitespace/);
+    })]));
+    expect(error).toBeInstanceOf(SourceCatalogFieldWhitespaceError);
+    expect(error).toMatchObject({
+      field: 'aggregate.progressions[0].grant_rules[0].rule_key',
+    });
   });
 
   it('refuses definition_key_config false before projection', () => {
-    expect(() => parseCatalogDocuments([sourceDocument('class', {
+    const error = refusal(() => parseCatalogDocuments([sourceDocument('class', {
       ...classProjectorV1Vector.aggregate,
       progressions: [{
         class_level: 1,
@@ -459,14 +520,18 @@ describe('class and origin catalog DTO bounds', () => {
           definition_key_config: false,
         }],
       }],
-    })])).toThrow(/definition_key_config/);
+    })]));
+    expect(error).toBeInstanceOf(SourceCatalogDefinitionKeyConfigTypeError);
+    expect(error).toMatchObject({
+      field: 'aggregate.progressions[0].grant_rules[0]',
+    });
   });
 
   it('refuses every whitespace-padded runtime config-path locator', () => {
     for (const field of [
       'definition_key_config', 'child_config_config', 'distinct_config_by',
     ] as const) {
-      expect(() => parseCatalogDocuments([sourceDocument('class', {
+      const error = refusal(() => parseCatalogDocuments([sourceDocument('class', {
         ...classProjectorV1Vector.aggregate,
         progressions: [{
           class_level: 1, cantrips_known: 0, prepared_count: 0,
@@ -477,9 +542,13 @@ describe('class and origin catalog DTO bounds', () => {
             [field]: ' padded ',
           }],
         }],
-      })])).toThrow(/surrounding whitespace/);
+      })]));
+      expect(error).toBeInstanceOf(SourceCatalogFieldWhitespaceError);
+      expect(error).toMatchObject({
+        field: `aggregate.progressions[0].grant_rules[0].${field}`,
+      });
     }
-    expect(() => parseCatalogDocuments([sourceDocument('class', {
+    const activeError = refusal(() => parseCatalogDocuments([sourceDocument('class', {
       ...classProjectorV1Vector.aggregate,
       progressions: [{
         class_level: 1, cantrips_known: 0, prepared_count: 0,
@@ -490,11 +559,15 @@ describe('class and origin catalog DTO bounds', () => {
           active_if_config: { key: ' padded ', equals: 'yes' },
         }],
       }],
-    })])).toThrow(/surrounding whitespace/);
+    })]));
+    expect(activeError).toBeInstanceOf(SourceCatalogFieldWhitespaceError);
+    expect(activeError).toMatchObject({
+      field: 'aggregate.progressions[0].grant_rules[0].active_if_config.key',
+    });
   });
 
   it('refuses a store-local grant id instead of hashing it', () => {
-    expect(() => parseCatalogDocuments([sourceDocument('class', {
+    const error = refusal(() => parseCatalogDocuments([sourceDocument('class', {
       ...classProjectorV1Vector.aggregate,
       progressions: [{
         class_level: 1,
@@ -510,11 +583,15 @@ describe('class and origin catalog DTO bounds', () => {
           bucket: 'prepared',
         }],
       }],
-    })])).toThrow(/store-local/);
+    })]));
+    expect(error).toBeInstanceOf(SourceCatalogStoreLocalFieldError);
+    expect(error).toMatchObject({
+      field: 'aggregate.progressions[0].grant_rules[0].spell_version_id',
+    });
   });
 
   it('refuses a source fingerprint whose kind disagrees with source_type', () => {
-    expect(() => parseCatalogDocuments([sourceDocument('class', {
+    const error = refusal(() => parseCatalogDocuments([sourceDocument('class', {
       ...classProjectorV1Vector.aggregate,
       progressions: [{
         class_level: 1,
@@ -532,6 +609,10 @@ describe('class and origin catalog DTO bounds', () => {
           },
         }],
       }],
-    })])).toThrow(/must match source_type/);
+    })]));
+    expect(error).toBeInstanceOf(SourceCatalogSourceKindMismatchError);
+    expect(error).toMatchObject({
+      field: 'aggregate.progressions[0].grant_rules[0]',
+    });
   });
 });

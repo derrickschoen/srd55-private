@@ -3,6 +3,16 @@ import {
   decodeStoredSupersedesReference,
   decodeStoredValueExpression,
 } from '../../../src/domain/contracts/row-rules';
+import {
+  RowRulesBoundedNonEmptyListError,
+  RowRulesClampOrderError,
+  RowRulesExactStorageKeysError,
+  RowRulesExpressionBandSequenceError,
+  RowRulesExpressionLimitError,
+  RowRulesPositiveIntegerError,
+  RowRulesSafeIntegerRangeError,
+  RowRulesValueSourceKindError,
+} from '../../../src/domain/contracts/row-rules-errors';
 import { rowContractError } from '../../../src/domain/contracts/rows';
 
 const classLevelSource = {
@@ -12,6 +22,15 @@ const classLevelSource = {
 
 function encoded(value: unknown): string {
   return JSON.stringify(value);
+}
+
+function defect(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return expect.fail('Expected a row-rules defect, but the call returned.');
 }
 
 function contributionRow(
@@ -101,20 +120,109 @@ describe('migration-0042 storage-layer value expression decoder', () => {
   });
 
   it.each([
-    ['division by zero', { kind: 'scale', source: classLevelSource, divide: 0, round: 'ceiling' }],
-    ['negative multiplication', { kind: 'scale', source: classLevelSource, multiply: -1, round: 'ceiling' }],
-    ['an unsafe stored magnitude', { kind: 'const', amount: Number.MAX_SAFE_INTEGER }],
-    ['an empty sum', { kind: 'sum', terms: [] }],
-    ['an empty table', { kind: 'table', level_source: classLevelSource, rows: [] }],
-    ['a table with a gap', { kind: 'table', level_source: classLevelSource, rows: [{ from: 1, to: 2, amount: 1 }, { from: 4, to: 5, amount: 2 }] }],
-    ['a table with an overlap', { kind: 'table', level_source: classLevelSource, rows: [{ from: 1, to: 4, amount: 1 }, { from: 4, to: 5, amount: 2 }] }],
-    ['a non-level table source', { kind: 'table', level_source: { kind: 'proficiency_bonus' }, rows: [{ from: 1, to: 20, amount: 1 }] }],
-    ['an exact-key violation', { kind: 'const', amount: 1, fallback: 0 }],
-    ['an inverted constant clamp', { kind: 'clamp', value: { kind: 'const', amount: 3 }, minimum: { kind: 'const', amount: 4 }, maximum: { kind: 'const', amount: 2 } }],
-  ])('refuses %s', (_label, expression) => {
-    expect(() =>
-      decodeStoredValueExpression(encoded(expression), 'expression')
-    ).toThrow();
+    [
+      'division by zero',
+      {
+        kind: 'scale',
+        source: classLevelSource,
+        divide: 0,
+        round: 'ceiling',
+      },
+      RowRulesPositiveIntegerError,
+      { label: 'expression.divide' },
+    ],
+    [
+      'negative multiplication',
+      {
+        kind: 'scale',
+        source: classLevelSource,
+        multiply: -1,
+        round: 'ceiling',
+      },
+      RowRulesPositiveIntegerError,
+      { label: 'expression.multiply' },
+    ],
+    [
+      'an unsafe stored magnitude',
+      { kind: 'const', amount: Number.MAX_SAFE_INTEGER },
+      RowRulesSafeIntegerRangeError,
+      { label: 'expression.amount', minimum: -1000, maximum: 1000 },
+    ],
+    [
+      'an empty sum',
+      { kind: 'sum', terms: [] },
+      RowRulesBoundedNonEmptyListError,
+      { label: 'expression.terms', maximum_entries: 100 },
+    ],
+    [
+      'an empty table',
+      { kind: 'table', level_source: classLevelSource, rows: [] },
+      RowRulesBoundedNonEmptyListError,
+      { label: 'expression.rows', maximum_entries: 100 },
+    ],
+    [
+      'a table with a gap',
+      {
+        kind: 'table',
+        level_source: classLevelSource,
+        rows: [
+          { from: 1, to: 2, amount: 1 },
+          { from: 4, to: 5, amount: 2 },
+        ],
+      },
+      RowRulesExpressionBandSequenceError,
+      { label: 'expression.rows' },
+    ],
+    [
+      'a table with an overlap',
+      {
+        kind: 'table',
+        level_source: classLevelSource,
+        rows: [
+          { from: 1, to: 4, amount: 1 },
+          { from: 4, to: 5, amount: 2 },
+        ],
+      },
+      RowRulesExpressionBandSequenceError,
+      { label: 'expression.rows' },
+    ],
+    [
+      'a non-level table source',
+      {
+        kind: 'table',
+        level_source: { kind: 'proficiency_bonus' },
+        rows: [{ from: 1, to: 20, amount: 1 }],
+      },
+      RowRulesValueSourceKindError,
+      { label: 'expression.level_source', source_kind: 'level' },
+    ],
+    [
+      'an exact-key violation',
+      { kind: 'const', amount: 1, fallback: 0 },
+      RowRulesExactStorageKeysError,
+      {
+        label: 'expression',
+        required_keys: ['kind', 'amount'],
+        optional_keys: [],
+      },
+    ],
+    [
+      'an inverted constant clamp',
+      {
+        kind: 'clamp',
+        value: { kind: 'const', amount: 3 },
+        minimum: { kind: 'const', amount: 4 },
+        maximum: { kind: 'const', amount: 2 },
+      },
+      RowRulesClampOrderError,
+      { label: 'expression' },
+    ],
+  ] as const)('refuses %s', (_label, expression, errorClass, params) => {
+    const error = defect(() =>
+      decodeStoredValueExpression(encoded(expression), 'expression'),
+    );
+    expect(error).toBeInstanceOf(errorClass);
+    expect(error).toMatchObject(params);
   });
 
   it('accepts a bound-less clamp but still refuses malformed clamp keys', () => {
@@ -125,12 +233,18 @@ describe('migration-0042 storage-layer value expression decoder', () => {
     expect(
       decodeStoredValueExpression(encoded(boundless), 'boundless clamp'),
     ).toEqual(boundless);
-    expect(() =>
+    const error = defect(() =>
       decodeStoredValueExpression(
         encoded({ ...boundless, fallback: { kind: 'const', amount: 0 } }),
         'malformed clamp',
-      )
-    ).toThrow(/exactly/u);
+      ),
+    );
+    expect(error).toBeInstanceOf(RowRulesExactStorageKeysError);
+    expect(error).toMatchObject({
+      label: 'malformed clamp',
+      required_keys: ['kind', 'value'],
+      optional_keys: ['minimum', 'maximum'],
+    });
   });
 
   it('refuses expression breadth and depth beyond the storage limits', () => {
@@ -140,15 +254,31 @@ describe('migration-0042 storage-layer value expression decoder', () => {
     };
     let deep: unknown = { kind: 'const', amount: 1 };
     for (let depth = 0; depth < 9; depth += 1) {
-      deep = { kind: 'clamp', value: deep, minimum: { kind: 'const', amount: 0 } };
+      deep = {
+        kind: 'clamp',
+        value: deep,
+        minimum: { kind: 'const', amount: 0 },
+      };
     }
 
-    expect(() => decodeStoredValueExpression(encoded(broad), 'broad')).toThrow(
-      /breadth/u,
+    const breadthError = defect(() =>
+      decodeStoredValueExpression(encoded(broad), 'broad'),
     );
-    expect(() => decodeStoredValueExpression(encoded(deep), 'deep')).toThrow(
-      /depth/u,
+    expect(breadthError).toBeInstanceOf(RowRulesExpressionLimitError);
+    expect(breadthError).toMatchObject({
+      label: 'broad.terms[99]',
+      limit: 'breadth',
+      maximum: 100,
+    });
+    const depthError = defect(() =>
+      decodeStoredValueExpression(encoded(deep), 'deep'),
     );
+    expect(depthError).toBeInstanceOf(RowRulesExpressionLimitError);
+    expect(depthError).toMatchObject({
+      label: `deep${'.value'.repeat(9)}`,
+      limit: 'depth',
+      maximum: 8,
+    });
   });
 
   it('decodes only fully-qualified exact supersession references', () => {
@@ -159,18 +289,30 @@ describe('migration-0042 storage-layer value expression decoder', () => {
     expect(decodeStoredSupersedesReference(encoded(reference), 'ref')).toEqual(
       reference,
     );
-    expect(() =>
+    const extraKeyError = defect(() =>
       decodeStoredSupersedesReference(
         encoded({ ...reference, owner_id: 7 }),
         'ref',
-      )
-    ).toThrow(/exactly/u);
-    expect(() =>
+      ),
+    );
+    expect(extraKeyError).toBeInstanceOf(RowRulesExactStorageKeysError);
+    expect(extraKeyError).toMatchObject({
+      label: 'ref',
+      required_keys: ['content_key', 'contribution_key'],
+      optional_keys: [],
+    });
+    const missingKeyError = defect(() =>
       decodeStoredSupersedesReference(
         encoded({ contribution_key: 'sneak-attack' }),
         'ref',
-      )
-    ).toThrow(/exactly/u);
+      ),
+    );
+    expect(missingKeyError).toBeInstanceOf(RowRulesExactStorageKeysError);
+    expect(missingKeyError).toMatchObject({
+      label: 'ref',
+      required_keys: ['content_key', 'contribution_key'],
+      optional_keys: [],
+    });
   });
 });
 

@@ -43,7 +43,6 @@ import type {
 import {
   LEVEL_UP_REFUSAL_REASONS,
   LEVEL_UP_SUBCLASS_LEVEL,
-  type LevelUpRefusalData,
   type LevelUpRefusalReason,
   type LevelUpSubchoiceRefusalIssue,
 } from '../builder/level-up';
@@ -67,27 +66,20 @@ import {
   reconcileCharacterLevelDependentSources,
 } from '../grants/character-level-source-reconciliation';
 import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
+import { ok, refused, type Outcome, type RefusedOutcome } from '../refusals/outcome';
+import { levelUpRefused } from '../refusals/refusal';
+import { runCommandTransaction } from '../refusals/transaction-outcome';
+import type {
+  GrantOrdinal,
+  GrantRuleKey,
+  SourceInstanceId,
+} from '../domain/ids';
 
-/**
- * The named refusal, carrying the seam's `LevelUpRefusalData` so a surface
- * can discriminate on `reason` without string-matching a message — the
- * `SkillGrantRefusal` / `EquipmentGrantRefusal` shape.
- */
-export class LevelUpRefusal extends Error {
-  readonly reason: LevelUpRefusalReason;
-
-  constructor(message: string, readonly data: LevelUpRefusalData) {
-    super(message);
-    this.name = 'LevelUpRefusal';
-    this.reason = data.reason;
-  }
-}
-
-function refuse(reason: LevelUpRefusalReason, message: string): never {
+function refuse(reason: LevelUpRefusalReason): RefusedOutcome {
   if (reason === LEVEL_UP_REFUSAL_REASONS.plannedSubchoiceRefused) {
     throw new Error('A planned subchoice refusal requires locator data.');
   }
-  throw new LevelUpRefusal(message, { reason });
+  return refused(levelUpRefused({ reason }));
 }
 
 function refuseSubchoice(
@@ -95,15 +87,24 @@ function refuseSubchoice(
   index: number,
   issue: LevelUpSubchoiceRefusalIssue,
   locator: LevelUpPlannedGrantLocator,
-  message: string,
-): never {
-  throw new LevelUpRefusal(message, {
+): RefusedOutcome {
+  const source = locator.source.kind === 'existing_source'
+    ? {
+        kind: 'existing_source' as const,
+        source_instance_id: locator.source.source_instance_id as SourceInstanceId,
+      }
+    : { kind: locator.source.kind };
+  return refused(levelUpRefused({
     reason: LEVEL_UP_REFUSAL_REASONS.plannedSubchoiceRefused,
     subchoice_kind: kind,
     index,
     issue,
-    locator,
-  });
+    locator: {
+      source,
+      rule_key: locator.rule_key as GrantRuleKey,
+      ordinal: locator.ordinal as GrantOrdinal,
+    },
+  }));
 }
 
 function sourceIdFor(
@@ -171,7 +172,7 @@ export class LevelUpClassCommand {
     this.#generator = generator ?? new GrantRuleSlotGenerator(db);
   }
 
-  apply(characterId: number): void {
+  apply(characterId: number): Outcome<void> {
     const classId = this.payload.class_definition_id;
     const definition = this.db.one(
       'SELECT id, name, spellcasting_ability FROM class_definitions WHERE id = ?',
@@ -206,10 +207,7 @@ export class LevelUpClassCommand {
       }),
     );
     if (held === null) {
-      refuse(
-        LEVEL_UP_REFUSAL_REASONS.classNotHeld,
-        `This character has no ${definition.name} levels to advance.`,
-      );
+      return refuse(LEVEL_UP_REFUSAL_REASONS.classNotHeld);
     }
 
     // B1: every command caller, including `commands.execute`, must cross the
@@ -221,10 +219,7 @@ export class LevelUpClassCommand {
       [characterId],
     );
     if (allocationMethod === null) {
-      refuse(
-        LEVEL_UP_REFUSAL_REASONS.incompleteLevelOne,
-        'Ability scores must be completed before leveling up.',
-      );
+      return refuse(LEVEL_UP_REFUSAL_REASONS.incompleteLevelOne);
     }
 
     // L-ADJACENT: one level at a time. Levelling 2 → 7 in one command would
@@ -232,11 +227,7 @@ export class LevelUpClassCommand {
     // obligation in between.
     const targetLevel = this.payload.target_level;
     if (targetLevel !== held.level + 1) {
-      refuse(
-        LEVEL_UP_REFUSAL_REASONS.levelNotAdjacent,
-        `A ${definition.name} at level ${String(held.level)} can only advance ` +
-          `to level ${String(held.level + 1)}, not ${String(targetLevel)}.`,
-      );
+      return refuse(LEVEL_UP_REFUSAL_REASONS.levelNotAdjacent);
     }
     const otherLevels = characterLevel(this.db, characterId, {
       excludingClassDefinitionId: classId,
@@ -286,10 +277,7 @@ export class LevelUpClassCommand {
       isAsiLevel &&
       (featChoice === null || featChoice.kind !== 'feat')
     ) {
-      refuse(
-        LEVEL_UP_REFUSAL_REASONS.abilityIncreaseRequired,
-        `${definition.name} level ${String(targetLevel)} requires a feat choice.`,
-      );
+      return refuse(LEVEL_UP_REFUSAL_REASONS.abilityIncreaseRequired);
     }
     if (isEpicBoonLevel && featChoice === null) {
       throw new TypeError(
@@ -303,7 +291,7 @@ export class LevelUpClassCommand {
       );
     }
     // ---- One transaction (§8b). -------------------------------------------
-    this.db.transaction(() => {
+    return runCommandTransaction(this.db, () => {
       const before = this.#state.capture(characterId);
       const timestamp = new Date().toISOString();
       this.db.exec(
@@ -367,15 +355,17 @@ export class LevelUpClassCommand {
         this.#generator,
       );
 
-      this.applyPlannedSubchoices(
+      const planned = this.applyPlannedSubchoices(
         characterId,
         classId,
         subclassId,
         featSourceId,
       );
+      if (planned.kind === 'refused') return planned;
 
       this.#before = before;
       this.#characterId = characterId;
+      return ok(undefined);
     });
   }
 
@@ -384,16 +374,16 @@ export class LevelUpClassCommand {
     classDefinitionId: number,
     subclassDefinitionId: number | null,
     featSourceId: number | null,
-  ): void {
+  ): Outcome<void> {
     const planned = this.payload.planned_subchoices;
     if (planned === undefined) {
-      return;
+      return ok(undefined);
     }
     const resolveSource = (
       locator: LevelUpPlannedGrantLocator,
       kind: 'skill' | 'expertise' | 'spell',
       index: number,
-    ): number => {
+    ): Outcome<number> => {
       const sourceId = sourceIdFor(
         this.db,
         characterId,
@@ -403,19 +393,20 @@ export class LevelUpClassCommand {
         featSourceId,
       );
       if (sourceId === null) {
-        refuseSubchoice(
+        return refuseSubchoice(
           kind,
           index,
           'source_not_available',
           locator,
-          'The planned subchoice source is not active for this character.',
         );
       }
-      return Number(sourceId);
+      return ok(Number(sourceId));
     };
 
-    planned.skills.forEach((choice, index) => {
-      const sourceId = resolveSource(choice.locator, 'skill', index);
+    for (const [index, choice] of planned.skills.entries()) {
+      const source = resolveSource(choice.locator, 'skill', index);
+      if (source.kind === 'refused') return source;
+      const sourceId = source.value;
       const grantId = this.logicalRowId(
         'character_skill_grants',
         characterId,
@@ -423,12 +414,11 @@ export class LevelUpClassCommand {
         choice.locator,
       );
       if (grantId === null) {
-        refuseSubchoice(
+        return refuseSubchoice(
           'skill',
           index,
           'locator_not_found',
           choice.locator,
-          'The planned skill locator did not resolve to an active grant.',
         );
       }
       const generatedSelection = this.db.scalar<string>(
@@ -440,30 +430,31 @@ export class LevelUpClassCommand {
         choice.locator.source.kind === 'selected_feat' &&
         generatedSelection === choice.skill
       ) {
-        return;
+        continue;
       }
       try {
         fillSkillGrant(this.db, characterId, grantId, choice.skill);
       } catch (error) {
         if (error instanceof SkillGrantRefusal) {
-          refuseSubchoice(
+          return refuseSubchoice(
             'skill',
             index,
             refusalIssue(error),
             choice.locator,
-            error.message,
           );
         }
         throw error;
       }
-    });
+    }
 
     // Expertise is offered after every skill choice (D90). Reconciliation at
     // this boundary revives any preserved Expertise whose proficiency was
     // restored by one of the fills above.
     reconcileCharacterSkillExpertise(this.db, characterId);
-    planned.expertise.forEach((choice, index) => {
-      const sourceId = resolveSource(choice.locator, 'expertise', index);
+    for (const [index, choice] of planned.expertise.entries()) {
+      const source = resolveSource(choice.locator, 'expertise', index);
+      if (source.kind === 'refused') return source;
+      const sourceId = source.value;
       const grantId = this.logicalRowId(
         'character_skill_expertise_grants',
         characterId,
@@ -471,12 +462,11 @@ export class LevelUpClassCommand {
         choice.locator,
       );
       if (grantId === null) {
-        refuseSubchoice(
+        return refuseSubchoice(
           'expertise',
           index,
           'locator_not_found',
           choice.locator,
-          'The planned Expertise locator did not resolve to an active grant.',
         );
       }
       try {
@@ -488,27 +478,29 @@ export class LevelUpClassCommand {
         );
       } catch (error) {
         if (error instanceof SkillExpertiseGrantRefusal) {
-          refuseSubchoice(
+          return refuseSubchoice(
             'expertise',
             index,
             refusalIssue(error),
             choice.locator,
-            error.message,
           );
         }
         throw error;
       }
-    });
+    }
 
-    planned.spells.forEach((choice, index) => {
-      const sourceId = resolveSource(choice.locator, 'spell', index);
-      this.applyPlannedSpell(
+    for (const [index, choice] of planned.spells.entries()) {
+      const source = resolveSource(choice.locator, 'spell', index);
+      if (source.kind === 'refused') return source;
+      const applied = this.applyPlannedSpell(
         characterId,
-        sourceId,
+        source.value,
         choice,
         index,
       );
-    });
+      if (applied.kind === 'refused') return applied;
+    }
+    return ok(undefined);
   }
 
   private withPlannedFeatSkills(
@@ -553,7 +545,7 @@ export class LevelUpClassCommand {
     sourceId: number,
     choice: LevelUpPlannedSpellChoice,
     index: number,
-  ): void {
+  ): Outcome<void> {
     const address = choice.kind === 'slot_selection'
       ? this.db.oneRaw(
           `SELECT id, fixed_spell_version_id, current_spell_version_id
@@ -582,24 +574,22 @@ export class LevelUpClassCommand {
           ],
         );
     if (address === null) {
-      refuseSubchoice(
+      return refuseSubchoice(
         'spell',
         index,
         'locator_not_found',
         choice.locator,
-        'The planned spell locator did not resolve to an active occurrence.',
       );
     }
     const occupied =
       address.fixed_spell_version_id !== null ||
       address.current_spell_version_id !== null;
     if (choice.kind === 'slot_selection' && choice.mode === 'new' && occupied) {
-      refuseSubchoice(
+      return refuseSubchoice(
         'spell',
         index,
         'expected_unfilled',
         choice.locator,
-        'A new spell choice must address an unfilled occurrence.',
       );
     }
     if (
@@ -607,12 +597,11 @@ export class LevelUpClassCommand {
       choice.mode === 'replace' &&
       !occupied
     ) {
-      refuseSubchoice(
+      return refuseSubchoice(
         'spell',
         index,
         'expected_filled',
         choice.locator,
-        'A spell replacement must address a filled occurrence.',
       );
     }
     if (
@@ -625,21 +614,19 @@ export class LevelUpClassCommand {
         choice.locator.ordinal,
       )
     ) {
-      refuseSubchoice(
+      return refuseSubchoice(
         'spell',
         index,
         'spell_not_eligible',
         choice.locator,
-        'This source has no spell-replacement entitlement on this class level.',
       );
     }
     if (choice.kind === 'spellbook_acquisition' && occupied) {
-      refuseSubchoice(
+      return refuseSubchoice(
         'spell',
         index,
         'expected_unfilled',
         choice.locator,
-        'A spellbook acquisition must address an unfilled occurrence.',
       );
     }
     try {
@@ -663,14 +650,14 @@ export class LevelUpClassCommand {
         });
       }
     } catch (error) {
-      refuseSubchoice(
+      return refuseSubchoice(
         'spell',
         index,
         'spell_not_eligible',
         choice.locator,
-        error instanceof Error ? error.message : 'Spell selection was refused.',
       );
     }
+    return ok(undefined);
   }
 
   /**

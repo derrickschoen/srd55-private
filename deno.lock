@@ -1,0 +1,32 @@
+{
+  "version": "5",
+  "specifiers": {
+    "jsr:@deno/installer-shell-setup@*": "0.3.4"
+  },
+  "jsr": {
+    "@deno/installer-shell-setup@0.3.4": {
+      "integrity": "48665d1a737d487cce6874bc97bba70a5aeffa7053aca3f60df93c6fab8963b4"
+    }
+  },
+  "workspace": {
+    "packageJson": {
+      "dependencies": [
+        "npm:@playwright/test@^1.61.1",
+        "npm:@sqlite.org/sqlite-wasm@3.53.0-build1",
+        "npm:@stryker-mutator/core@9.6.1",
+        "npm:@stryker-mutator/typescript-checker@9.6.1",
+        "npm:@stryker-mutator/vitest-runner@9.6.1",
+        "npm:@types/node@24",
+        "npm:@types/qrcode@^1.5.6",
+        "npm:drizzle-kit@~0.31.10",
+        "npm:drizzle-orm@~0.45.2",
+        "npm:drizzle-zod@~0.8.3",
+        "npm:qrcode@^1.5.4",
+        "npm:typescript@^5.9.0",
+        "npm:vite@7",
+        "npm:vitest@^3.2.0",
+        "npm:zod@4.4.3"
+      ]
+    }
+  }
+}

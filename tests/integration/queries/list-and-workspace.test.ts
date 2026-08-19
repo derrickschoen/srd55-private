@@ -179,6 +179,7 @@ describe('character list and workspace query builders', () => {
     registerBundledStableContentIdentity(db, {
       kind: 'feat',
       contentKey: '2024:feat:magic-initiate' as ContentKey,
+      visibility: 'listed',
       normalizedName: 'magicinitiate',
     });
     db.exec(

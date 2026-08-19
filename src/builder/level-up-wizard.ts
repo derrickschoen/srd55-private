@@ -572,6 +572,24 @@ export interface LevelUpPreviewResult {
   readonly command_fingerprint: string;
 }
 
+export function isLevelUpPreviewResult(
+  value: unknown,
+): value is LevelUpPreviewResult {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  return Object.keys(candidate).length === 4
+    && candidate['before'] !== null
+    && typeof candidate['before'] === 'object'
+    && !Array.isArray(candidate['before'])
+    && candidate['after'] !== null
+    && typeof candidate['after'] === 'object'
+    && !Array.isArray(candidate['after'])
+    && Array.isArray(candidate['new_outstanding_choices'])
+    && typeof candidate['command_fingerprint'] === 'string';
+}
+
 export const LEVEL_UP_RPC = Object.freeze({
   state: 'queries.characters.levelUpState',
   plannedEligibleSpells:

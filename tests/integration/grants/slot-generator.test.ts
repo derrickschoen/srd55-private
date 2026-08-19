@@ -6,8 +6,18 @@ import { SpellSelectionService } from '../../../src/eligibility/spell-selection-
 import { GrantRuleSlotGenerator } from '../../../src/grants/grant-rule-slot-generator';
 import { openTestDatabase } from '../../helpers/open-db';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
+import { GrantSpellVersionReferenceError } from '../../../src/grants/grant-rule-slot-generator-errors';
 
 type Rule = Record<string, unknown>;
+
+function thrown(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return expect.fail('Expected an error, but the call returned.');
+}
 
 describe('grant-rule slot generation', () => {
   let connection: Database;
@@ -689,9 +699,12 @@ describe('grant-rule slot generation', () => {
     ]);
     const sourceId = source(character(), definitionId);
 
-    expect(() => generator.generateForSource(sourceId)).toThrow(
-      "Grant rule 'inactive-fixed' references an inactive spell version.",
-    );
+    const error = thrown(() => generator.generateForSource(sourceId));
+    expect(error).toBeInstanceOf(GrantSpellVersionReferenceError);
+    expect(error).toMatchObject({
+      rule_key: 'inactive-fixed',
+      issue: 'inactive',
+    });
     expect(db.scalar('SELECT count(*) FROM spell_selection_slots')).toBe(0);
 
     db.exec('UPDATE spell_versions SET is_active = 1 WHERE id = ?', [

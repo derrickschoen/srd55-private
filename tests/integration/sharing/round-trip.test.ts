@@ -17,6 +17,7 @@ import { UpdateClassCommand } from '../../../src/commands/update-class';
 import type { SqlRow } from '../../../src/db/codecs';
 import { DatabaseContext } from '../../../src/db/database';
 import { GrantRuleSlotGenerator } from '../../../src/grants/grant-rule-slot-generator';
+import { GrantSourceDefinitionResolutionError } from '../../../src/grants/grant-rule-slot-generator-errors';
 import { CharacterWorkspaceBuilder } from '../../../src/queries/character-workspace-builder';
 import { resolveCharacterAbilities } from '../../../src/rules/ability-contributions';
 import { RpcClient, type RpcTransport } from '../../../src/rpc/client';
@@ -31,6 +32,15 @@ import {
   importCharacterShare,
   previewCharacterShare,
 } from '../../../src/sharing/character-share';
+
+function thrown(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return expect.fail('Expected an error, but the call returned.');
+}
 import { createShareClient } from '../../../src/sharing/client';
 import {
   decodeShareFragment,
@@ -1268,12 +1278,14 @@ describe('minimal character sharing', () => {
       preferences: [],
       overrides: [],
     };
-    expect(() => importCharacterShare(target, document)).toThrow(
-      /could not resolve its definition/,
-    );
-    expect(() => previewCharacterShare(target, document)).toThrow(
-      /could not resolve its definition/,
-    );
+    for (const run of [
+      () => importCharacterShare(target, document),
+      () => previewCharacterShare(target, document),
+    ]) {
+      const error = thrown(run);
+      expect(error).toBeInstanceOf(GrantSourceDefinitionResolutionError);
+      expect(error).toMatchObject({ rule_key: 'missing-child' });
+    }
   });
 
   it('preserves subclass acquisition timing across its descendant tree', async () => {

@@ -2,9 +2,36 @@ import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FreeCast } from '../../../src/grants/free-cast';
 import { GrantRule } from '../../../src/grants/grant-rule';
+import {
+  GrantRuleActiveConfigKeysError,
+  GrantRuleActiveConfigValuesError,
+  GrantRuleCapabilityCountError,
+  GrantRuleFieldError,
+  GrantRuleForbiddenBucketError,
+  GrantRuleFixedSpellReferenceRequiredError,
+  GrantRuleFreeCastEnumError,
+  GrantRuleFreeCastUsesError,
+  GrantRuleInvalidBucketError,
+  GrantRuleJsonParseError,
+  GrantRuleJsonShapeError,
+  GrantRuleKindError,
+  GrantRuleQueryPredicateError,
+  GrantRuleSelectionCollectionError,
+  GrantSourceRuleDefinitionKeyConfigError,
+  GrantSourceRuleReferenceRequiredError,
+} from '../../../src/grants/grant-rule-errors';
 import { DatabaseContext } from '../../../src/db/database';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import { openTestDatabase } from '../../helpers/open-db';
+
+function thrown(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return expect.fail('Expected an error, but the call returned.');
+}
 
 describe('GrantRule', () => {
   let connection: Database;
@@ -343,17 +370,17 @@ describe('GrantRule', () => {
 
   it('rejects malformed and obsolete contracts before any row is stored', () => {
     const malformed: ReadonlyArray<
-      readonly [string, unknown, string]
+      readonly [string, unknown, Error | string]
     > = [
       [
         'obsolete school choice',
         { kind: 'choice_from_school', rule_key: 'old' },
-        "Unknown grant rule kind 'choice_from_school'.",
+        new GrantRuleKindError('choice_from_school'),
       ],
       [
         'obsolete nested source',
         { kind: 'nested_source', rule_key: 'old' },
-        "Unknown grant rule kind 'nested_source'.",
+        new GrantRuleKindError('nested_source'),
       ],
       [
         'missing rule key',
@@ -362,7 +389,7 @@ describe('GrantRule', () => {
           bucket: 'automatic',
           spell_version_id: 1,
         },
-        "Grant rule field 'rule_key' must be a non-empty string.",
+        new GrantRuleFieldError(null, 'rule_key', 'non_empty_string'),
       ],
       [
         'fixed count',
@@ -383,7 +410,7 @@ describe('GrantRule', () => {
           bucket: 'known',
           list: 'Wizard',
         },
-        "Grant rule 'list' field 'count' must be a positive integer.",
+        new GrantRuleFieldError('list', 'count', 'positive_integer'),
       ],
       [
         'invalid bucket',
@@ -394,7 +421,7 @@ describe('GrantRule', () => {
           bucket: 'sometimes',
           list: 'Wizard',
         },
-        "Grant rule 'list' has invalid bucket 'sometimes'.",
+        new GrantRuleInvalidBucketError('list', 'sometimes'),
       ],
       [
         'capability count',
@@ -407,7 +434,7 @@ describe('GrantRule', () => {
           access_mode: 'ritual_only',
           tags: ['ritual'],
         },
-        "Capability rule 'capability' must not define count; capabilities do not mint slots.",
+        new GrantRuleCapabilityCountError('capability'),
       ],
       [
         'capability bucket',
@@ -420,7 +447,7 @@ describe('GrantRule', () => {
           access_mode: 'ritual_only',
           tags: ['ritual'],
         },
-        "Grant rule 'capability' must not define a bucket.",
+        new GrantRuleForbiddenBucketError('capability'),
       ],
       [
         'invalid boolean',
@@ -431,7 +458,7 @@ describe('GrantRule', () => {
           spell_version_id: 1,
           always_prepared: null,
         },
-        "Grant rule 'fixed' field 'always_prepared' must be boolean.",
+        new GrantRuleFieldError('fixed', 'always_prepared', 'boolean'),
       ],
       [
         'invalid active level',
@@ -442,7 +469,7 @@ describe('GrantRule', () => {
           spell_version_id: 1,
           active_from_class_level: 0,
         },
-        "Grant rule 'fixed' field 'active_from_class_level' must be a positive integer.",
+        new GrantRuleFieldError('fixed', 'active_from_class_level', 'positive_integer'),
       ],
       [
         'inverted levels',
@@ -464,7 +491,7 @@ describe('GrantRule', () => {
           count: 1,
           bucket: 'known',
         },
-        "Query rule 'query' requires at least one predicate.",
+        new GrantRuleQueryPredicateError('query'),
       ],
       [
         'query malformed tags',
@@ -475,7 +502,7 @@ describe('GrantRule', () => {
           bucket: 'known',
           tags: [' '],
         },
-        "Grant rule 'query' field 'tags' must contain only strings.",
+        new GrantRuleFieldError('query', 'tags', 'strings_only'),
       ],
       [
         'selection collection',
@@ -487,7 +514,7 @@ describe('GrantRule', () => {
           list: 'Wizard',
           selection_collection: 'other',
         },
-        "Grant rule 'list' may not constrain a selection collection.",
+        new GrantRuleSelectionCollectionError('list'),
       ],
       [
         'missing fixed reference',
@@ -497,7 +524,7 @@ describe('GrantRule', () => {
           bucket: 'automatic',
           spell_version_id: 0,
         },
-        "Fixed-spell rule 'fixed' requires spell_version_id or spell_version_key.",
+        new GrantRuleFixedSpellReferenceRequiredError('fixed'),
       ],
       [
         'missing source reference',
@@ -507,7 +534,7 @@ describe('GrantRule', () => {
           source_type: 'feat',
           definition_key_config: ' ',
         },
-        "Grant-source rule 'source' requires a source definition reference.",
+        new GrantSourceRuleReferenceRequiredError('source'),
       ],
       [
         'invalid definition key config type',
@@ -518,7 +545,7 @@ describe('GrantRule', () => {
           source_definition_key: '2024:feat:magic-initiate',
           definition_key_config: false,
         },
-        "Grant-source rule 'source' field 'definition_key_config' must be a string or null.",
+        new GrantSourceRuleDefinitionKeyConfigError('source'),
       ],
       [
         'missing capability tags',
@@ -530,7 +557,7 @@ describe('GrantRule', () => {
           access_mode: 'ritual_only',
           tags: [],
         },
-        "Grant rule 'capability' field 'tags' must be a non-empty string list.",
+        new GrantRuleFieldError('capability', 'tags', 'non_empty_string_list'),
       ],
       [
         'missing spellbook count',
@@ -540,7 +567,7 @@ describe('GrantRule', () => {
           bucket: 'spellbook',
           list: 'Wizard',
         },
-        "Grant rule 'book' field 'count' must be a positive integer.",
+        new GrantRuleFieldError('book', 'count', 'positive_integer'),
       ],
       [
         'free cast scalar',
@@ -551,7 +578,7 @@ describe('GrantRule', () => {
           spell_version_id: 1,
           free_cast: 'once',
         },
-        "Grant rule 'fixed' field 'free_cast' must be an object or null.",
+        new GrantRuleFieldError('fixed', 'free_cast', 'object_or_null'),
       ],
       [
         'free cast uses',
@@ -566,7 +593,7 @@ describe('GrantRule', () => {
             pool_scope: 'per_spell',
           },
         },
-        "Grant rule 'fixed' free_cast.uses must be a positive integer.",
+        new GrantRuleFreeCastUsesError('fixed'),
       ],
       [
         'free cast recovery',
@@ -581,7 +608,7 @@ describe('GrantRule', () => {
             pool_scope: 'per_spell',
           },
         },
-        "Grant rule 'fixed' has invalid free_cast.recovery 'lunchtime'.",
+        new GrantRuleFreeCastEnumError('fixed', 'recovery', 'lunchtime'),
       ],
       [
         'free cast pool',
@@ -596,7 +623,7 @@ describe('GrantRule', () => {
             pool_scope: [],
           },
         },
-        "Grant rule 'fixed' has invalid free_cast.pool_scope 'array'.",
+        new GrantRuleFreeCastEnumError('fixed', 'pool_scope', []),
       ],
       [
         'activation extra field',
@@ -612,7 +639,7 @@ describe('GrantRule', () => {
             or: 'two',
           },
         },
-        "Grant rule 'conditional' field 'active_if_config' must contain exactly key and equals.",
+        new GrantRuleActiveConfigKeysError('conditional'),
       ],
       [
         'activation empty key',
@@ -624,23 +651,34 @@ describe('GrantRule', () => {
           list: 'Wizard',
           active_if_config: { key: ' ', equals: 'one' },
         },
-        "Grant rule 'conditional' active_if_config key and equals must be non-empty strings.",
+        new GrantRuleActiveConfigValuesError('conditional'),
       ],
     ];
 
-    for (const [label, input, message] of malformed) {
-      expect(
-        () => persist([input]),
-        `${label} should fail validation`,
-      ).toThrowError(message);
+    for (const [label, input, expected] of malformed) {
+      const error = thrown(() => persist([input]));
+      if (typeof expected === 'string') {
+        expect(error, `${label} should fail validation`).toBeInstanceOf(RangeError);
+        expect(error).toMatchObject({ message: expected });
+      } else {
+        expect(error, `${label} should fail validation`).toBeInstanceOf(
+          expected.constructor,
+        );
+        expect(error).toMatchObject(expected);
+      }
       expect(
         db.scalar<number>('SELECT count(*) FROM feat_definitions'),
         `${label} must not persist a definition`,
       ).toBe(0);
     }
 
-    for (const json of ['{', 'null', '[]']) {
-      expect(() => GrantRule.fromJson(json)).toThrow(TypeError);
+    const invalidJson = thrown(() => GrantRule.fromJson('{'));
+    expect(invalidJson).toBeInstanceOf(GrantRuleJsonParseError);
+    expect(invalidJson).toMatchObject({ reason: expect.any(String) });
+    for (const json of ['null', '[]']) {
+      const error = thrown(() => GrantRule.fromJson(json));
+      expect(error).toBeInstanceOf(GrantRuleJsonShapeError);
+      expect(error).toMatchObject({});
       expect(db.scalar<number>('SELECT count(*) FROM feat_definitions')).toBe(0);
     }
     expect(

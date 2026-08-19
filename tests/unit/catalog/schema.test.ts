@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CatalogTierMismatchError,
   normalizeCatalogRecords,
 } from '../../../src/catalog/catalog-normalize';
 import {
@@ -647,6 +648,7 @@ describe('browser catalog schema', () => {
         parentClassKey: '2024:class:bard',
         name: 'Choir of the Unit Test',
         edition: '2024',
+        visibility: 'listed',
         features: [
           {
             classLevel: 3,
@@ -817,7 +819,7 @@ describe('browser catalog schema', () => {
         }),
       ]),
     );
-    expect(() =>
+    const mismatch = refusal(() =>
       normalizeCatalogRecords(
         records,
         parseDescriptionDocuments([
@@ -828,10 +830,12 @@ describe('browser catalog schema', () => {
             },
           ]),
         ]),
-      ),
-    ).toThrow(
-      'Tier 2 catalog does not exactly match Tier 1 (1 missing, 0 unexpected).',
-    );
+      ));
+    expect(mismatch).toBeInstanceOf(CatalogTierMismatchError);
+    expect(mismatch).toMatchObject({
+      missing_count: 1,
+      unexpected_count: 0,
+    });
     const conflict = refusal(() =>
       parseDescriptionDocuments([
         JSON.stringify([

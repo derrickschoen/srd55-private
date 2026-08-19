@@ -1,7 +1,12 @@
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import { readFileSync } from 'node:fs';
 import { DatabaseContext } from '../../src/db/database';
-import { createBuildReportFixture } from '../integration/reports/build-report-fixture';
+import { registerSqliteQueryEngine } from '../../src/db/query';
+import {
+  addClassLevel,
+  createBuildReportFixture,
+  createSource,
+} from '../integration/reports/build-report-fixture';
 import { registerBrowserFixtureContentIdentity } from './fixtures/content-identity';
 import {
   announcedMessages,
@@ -17,6 +22,7 @@ const schema = readFileSync(
 
 async function plannerFixture() {
   const sqlite3 = await sqlite3InitModule();
+  registerSqliteQueryEngine(sqlite3);
   const connection = new sqlite3.oo1.DB(':memory:', 'c');
   connection.exec(schema);
   const db = new DatabaseContext(connection);
@@ -34,8 +40,35 @@ async function plannerFixture() {
   return { bytes, fixture };
 }
 
+async function mobilePlannerFixture() {
+  const sqlite3 = await sqlite3InitModule();
+  registerSqliteQueryEngine(sqlite3);
+  const connection = new sqlite3.oo1.DB(':memory:', 'c');
+  connection.exec(schema);
+  const db = new DatabaseContext(connection);
+  const fixture = createBuildReportFixture(db);
+  const clericDefinitionId = addClassLevel(
+    db,
+    fixture.characterId,
+    'Cleric',
+    1,
+  );
+  createSource(
+    db,
+    fixture.characterId,
+    'class',
+    clericDefinitionId,
+    'Cleric 1',
+    { spellcasting_ability: 'wisdom' },
+  );
+  const bytes = Array.from(sqlite3.capi.sqlite3_js_db_export(connection));
+  connection.close();
+  return { bytes, characterId: fixture.characterId };
+}
+
 async function contributionPlannerFixture() {
   const sqlite3 = await sqlite3InitModule();
+  registerSqliteQueryEngine(sqlite3);
   const connection = new sqlite3.oo1.DB(':memory:', 'c');
   connection.exec(schema);
   const db = new DatabaseContext(connection);
@@ -63,6 +96,7 @@ async function contributionPlannerFixture() {
 
 async function attunementPlannerFixture() {
   const sqlite3 = await sqlite3InitModule();
+  registerSqliteQueryEngine(sqlite3);
   const connection = new sqlite3.oo1.DB(':memory:', 'c');
   connection.exec(schema);
   const db = new DatabaseContext(connection);
@@ -92,6 +126,7 @@ async function attunementPlannerFixture() {
 
 async function catalogItemPlannerFixture() {
   const sqlite3 = await sqlite3InitModule();
+  registerSqliteQueryEngine(sqlite3);
   const connection = new sqlite3.oo1.DB(':memory:', 'c');
   connection.exec(schema);
   const db = new DatabaseContext(connection);
@@ -134,6 +169,113 @@ async function persistedCharacter(
     window.staticApp.inspectRows('characters', { id: 1 }),
   );
 }
+
+test('planner contains expanded reference tables within a mobile viewport', async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  const { bytes, characterId } = await mobilePlannerFixture();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  await expect(page.locator('#status')).toHaveAttribute(
+    'data-ready',
+    'true',
+    { timeout: 40_000 },
+  );
+  await page.evaluate(
+    (database) => window.staticApp.replaceDatabase(Uint8Array.from(database)),
+    bytes,
+  );
+  // Re-enter the character list through the client router so it queries the
+  // replacement image, then open the planner without a document reload. The
+  // production-reload boot path is a separate contract from this layout test.
+  await page.getByRole('link', { name: 'Licences and attribution' }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Licences and attribution' }),
+  ).toBeVisible();
+  await page.getByRole('link', { name: 'Back to characters' }).click();
+  await expect(page.getByRole('heading', { name: 'R40 Golden' })).toBeVisible();
+  await page.getByRole('link', { name: 'Open workspace' }).click();
+  await expect(page.locator('#planner-status')).toHaveAttribute(
+    'data-ready',
+    'true',
+    { timeout: 40_000 },
+  );
+
+  const pageWidth = async (): Promise<{
+    readonly scrollWidth: number;
+    readonly viewportWidth: number;
+  }> =>
+    page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      viewportWidth: window.innerWidth,
+    }));
+
+  await expect.poll(pageWidth).toEqual({
+    scrollWidth: 390,
+    viewportWidth: 390,
+  });
+
+  const referenceSections = page.locator(
+    '.build-reference-panel details.reference-section',
+  );
+  expect(await referenceSections.count()).toBeGreaterThan(0);
+  await referenceSections.evaluateAll((sections) => {
+    for (const section of sections) {
+      if (!(section instanceof HTMLDetailsElement)) {
+        throw new Error('Build reference section is not a details element.');
+      }
+      section.open = true;
+    }
+  });
+  await expect
+    .poll(() =>
+      referenceSections.evaluateAll((sections) =>
+        sections.every(
+          (section) =>
+            section instanceof HTMLDetailsElement && section.open,
+        ),
+      ),
+    )
+    .toBe(true);
+  await expect.poll(pageWidth).toEqual({
+    scrollWidth: 390,
+    viewportWidth: 390,
+  });
+  expect(
+    await page.locator('.reference-scroll').evaluateAll((scrollers) =>
+      scrollers.some((scroller) => scroller.scrollWidth > scroller.clientWidth),
+    ),
+  ).toBe(true);
+
+  const divineOrder = page.getByLabel('Divine Order option for Cleric 1');
+  await expect(divineOrder).toBeEnabled();
+  await divineOrder.selectOption('Thaumaturge');
+  await expect(divineOrder).toHaveValue('Thaumaturge');
+  await expect
+    .poll(() =>
+      page.evaluate((id) =>
+        window.staticApp.inspectRows('character_source_instances', {
+          character_id: id,
+          source_type: 'class',
+        }), characterId),
+    )
+    .toContainEqual(
+      expect.objectContaining({
+        display_name: 'Cleric 1',
+        config: JSON.stringify({
+          spellcasting_ability: 'wisdom',
+          divine_order: {
+            chosen_option: 'Thaumaturge',
+            // The configured-choice machinery records the granting list when
+            // the chosen option is the definition's bonus (update-source-config
+            // :258); this write long predates the D286 planner fix.
+            chosen_list: 'Cleric',
+          },
+        }),
+      }),
+    );
+});
 
 test('update_character_flavor saves all four with one revision and disables its button while saving', async ({
   page,
@@ -318,7 +460,9 @@ test('planner editors, history, focus, keyboard, and responsive state persist', 
   await page.setViewportSize({ width: 375, height: 760 });
   await expect(page.locator('.planner-layout')).toHaveCSS(
     'grid-template-columns',
-    '351px',
+    // 375px viewport minus the 16px total padding the D286 M-M1 fix left
+    // after shrinking the planner gutters (was 24px -> 351px).
+    '359px',
   );
   await expect(page.getByText('No slots match these filters')).toBeVisible();
 

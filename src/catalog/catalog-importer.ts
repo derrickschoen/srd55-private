@@ -423,6 +423,7 @@ export class CatalogImporter {
       const projected = projectSpellDocumentV1(renamed);
       return {
         kind: 'spell',
+        visibility: renamed.visibility,
         edition: renamed.edition,
         name: renamed.name,
         assertedKey: nextKey,

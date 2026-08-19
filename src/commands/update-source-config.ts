@@ -11,6 +11,7 @@ import {
   type RowCodec,
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
+import { ok, type OkOutcome } from '../refusals/outcome';
 import type {
   UpdateSourceConfigCommand as UpdateSourceConfigPayload,
 } from '../domain/command-contracts';
@@ -102,7 +103,7 @@ export class UpdateSourceConfigCommand {
     this.#generator = generator ?? new GrantRuleSlotGenerator(db);
   }
 
-  apply(characterId: number): void {
+  apply(characterId: number): OkOutcome<void> {
     this.db.transaction(() => {
       const source = this.db.one(
         `SELECT id, parent_source_instance_id, source_type,
@@ -144,6 +145,7 @@ export class UpdateSourceConfigCommand {
       }
       this.updateMagicInitiate(characterId, source, config);
     });
+    return ok(undefined);
   }
 
   private updateMagicInitiate(

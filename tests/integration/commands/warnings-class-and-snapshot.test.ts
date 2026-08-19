@@ -7,6 +7,7 @@ import {
 } from '../../../src/character/character-state';
 import { AcknowledgeWarningCommand } from '../../../src/commands/acknowledge-warning';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
+import { CharacterCommandIntegrityError } from '../../../src/commands/integrity-errors';
 import { RestoreSnapshotCommand } from '../../../src/commands/restore-snapshot';
 import { UpdateClassCommand } from '../../../src/commands/update-class';
 import { DatabaseContext } from '../../../src/db/database';
@@ -787,9 +788,11 @@ describe('warning, class, and snapshot commands', () => {
     );
     const before = new CharacterState(db).capture(characterId);
 
-    await expect(command.apply(characterId)).rejects.toThrow(
-      'This internal character command is invalid or belongs to another character.',
-    );
+    const error = await command
+      .apply(characterId)
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(CharacterCommandIntegrityError);
+    expect(error).toMatchObject({ character_id: characterId });
     expect(new CharacterState(db).capture(characterId)).toEqual(before);
   });
 });

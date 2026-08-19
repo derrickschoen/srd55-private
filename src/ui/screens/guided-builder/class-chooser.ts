@@ -25,6 +25,7 @@ import {
 } from '../../../builder/contracts';
 import type { CharacterRow } from '../../../domain/models';
 import { RpcError } from '../../../rpc/protocol';
+import { subclassChoiceLevelForClassName } from '../../../rules/class-level-features-srd';
 import { clear, element, listen, type Cleanup } from '../../dom';
 import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
 import { characterListLink, guidedShell } from './guided-builder';
@@ -45,6 +46,13 @@ export function guidedBuildPath(characterId: number): string {
 /** D33: an absent hit die is said to be unknown, never guessed at. */
 export function hitDieLabel(hitDie: number | null): string {
   return hitDie === null ? 'Hit die: unknown' : `Hit die: d${hitDie}`;
+}
+
+export function subclassTimingNote(className: string): string {
+  const level = subclassChoiceLevelForClassName(className);
+  return level === null
+    ? `Subclass timing is not recorded for ${className}.`
+    : `A ${className} chooses its subclass at class level ${String(level)}.`;
 }
 
 /**
@@ -246,7 +254,8 @@ export function createClassChooser(deps: ClassChooserDeps): ClassChooser {
             'data-class-option': option.content_key,
             'aria-pressed': 'false',
             'aria-label': option.name,
-            'aria-describedby': `${idStem}-hit-die ${idStem}-catalog-layer`,
+            'aria-describedby':
+              `${idStem}-hit-die ${idStem}-subclass ${idStem}-catalog-layer`,
           },
         },
         [
@@ -258,6 +267,11 @@ export function createClassChooser(deps: ClassChooserDeps): ClassChooser {
             className: 'guided-class-hit-die',
             text: hitDieLabel(option.hit_die),
             attributes: { id: `${idStem}-hit-die` },
+          }),
+          element('span', {
+            className: 'guided-class-subclass-note',
+            text: subclassTimingNote(option.name),
+            attributes: { id: `${idStem}-subclass` },
           }),
           element('span', {
             className: 'catalog-layer-disclosure',
