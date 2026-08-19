@@ -10,6 +10,14 @@ export interface GridBounds {
   readonly rows: number;
 }
 
+/**
+ * Shared obstacle representation for movement and template sight lines.
+ * A blocked cell is an impassable, opaque 5-foot square.
+ */
+export interface GridObstacles {
+  readonly blockedCells: readonly GridCell[];
+}
+
 function isWholeNumber(value: number): boolean {
   return Number.isSafeInteger(value);
 }

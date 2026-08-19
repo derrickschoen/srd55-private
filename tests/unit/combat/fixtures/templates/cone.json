@@ -1,0 +1,67 @@
+{
+  "shape": "cone",
+  "cases": [
+    {
+      "name": "cone exact tangency, board edge, and Large footprint",
+      "bounds": { "columns": 3, "rows": 3 },
+      "blockedCells": [],
+      "template": {
+        "origin": { "x": 0, "y": 5 },
+        "direction": { "x": 1, "y": 0 },
+        "length": 10,
+        "includeOrigin": false
+      },
+      "expectedCells": [
+        { "column": 0, "row": 0 },
+        { "column": 1, "row": 0 },
+        { "column": 2, "row": 0 },
+        { "column": 0, "row": 1 },
+        { "column": 1, "row": 1 },
+        { "column": 2, "row": 1 },
+        { "column": 1, "row": 2 },
+        { "column": 2, "row": 2 }
+      ],
+      "tangentIncluded": { "column": 2, "row": 2 },
+      "outsideExcluded": { "column": 0, "row": 2 },
+      "creatures": [
+        {
+          "id": "large-partial",
+          "occupiedCells": [
+            { "column": 0, "row": 2 },
+            { "column": 1, "row": 2 }
+          ],
+          "affected": true
+        },
+        {
+          "id": "large-outside",
+          "occupiedCells": [
+            { "column": 0, "row": 2 }
+          ],
+          "affected": false
+        }
+      ]
+    },
+    {
+      "name": "cone locations behind a full-height Total Cover wall",
+      "bounds": { "columns": 5, "rows": 3 },
+      "blockedCells": [
+        { "column": 1, "row": 0 },
+        { "column": 1, "row": 1 },
+        { "column": 1, "row": 2 }
+      ],
+      "template": {
+        "origin": { "x": 0, "y": 5 },
+        "direction": { "x": 1, "y": 0 },
+        "length": 25,
+        "includeOrigin": false
+      },
+      "expectedCells": [
+        { "column": 0, "row": 0 },
+        { "column": 0, "row": 1 }
+      ],
+      "tangentIncluded": { "column": 0, "row": 0 },
+      "outsideExcluded": { "column": 2, "row": 1 },
+      "creatures": []
+    }
+  ]
+}
