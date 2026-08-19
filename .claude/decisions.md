@@ -7,6 +7,67 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D314 — OWNER: brainstorm-round rulings — the skirmish, all-AI tables, and the queue (2026-08-19)
+
+Collaborative brainstorm (Claude 15 candidates + codex 15, blind, collated to
+20) answered one at a time. Rulings:
+
+1. **First playtest = skirmish**: 3-4 PCs vs 4-6 monsters, one room, fight to
+   the finish (~3-5 rounds).
+2. **Owner plays from the player projection** (fog/hidden HP concealed);
+   codex alone holds DM secrets. The presentation view becomes the owner's
+   main screen.
+3. **PCs = the D260 level-7 SRD reference party.**
+4. **Monsters: bundled SRD 5.2.1 starter set, CR ¼–3** (~8-12 classics),
+   decoded from the repo SRD text. CC-BY, shippable.
+5. **Encounter authoring: the codex DM generates the encounter from a prompt;
+   owner approves.** (Not a setup form, not a fixture.)
+6. **Action economy: FULL KIT including spells** in session one — attack
+   rolls, saves, areas, slots, Dash/Disengage/Dodge, reactions.
+7. **Conditions: the full SRD condition list mechanically enforced**,
+   including exhaustion levels.
+8. **Death: PCs get full death-save/stabilization/massive-damage rules;
+   ordinary monsters die at 0 HP.**
+9. **Unmodeled rules: the codex DM adjudicates, tagged ADJUDICATED** in the
+   combat log with reasoning; invented numbers enter engine state only as
+   explicit DM overrides, never silently.
+10. **DM autonomy: fully autonomous between PC turns**; owner can interrupt
+    and undo via DM controls.
+11. **Narration: four selectable voices** — cinematic with visible rolls,
+    terse tactical, rules-explicit, and a terse rule-citing validation mode
+    for engine testing.
+12. **Autosave required** for the first session (pulls D260.3 into scope);
+    codex DM session id persists with the snapshot so resume restores the DM.
+13. **Post-playtest direction: supervised all-AI tables.** AI plays DM and
+    PCs; tables run as self-play soaks; the supervisor mines logs for bugs
+    and improvements without human intervention. Plus a model/effort study:
+    sweep gpt-5.6 luna/terra/sol effort levels, then rate sol vs Fable vs
+    Opus on high effort for speed vs quality — thorough enough to maybe build
+    a luna low/medium complexity classifier that routes per-decision. Also:
+    write a skill backed by a KB for running D&D DM/PC interactions
+    intelligently. This replaces D262.2's DPR-sim-UI-first ordering.
+14. **Discord: undecided — owner needs a full decision dossier** (concrete
+    flows, worked examples, architecture, effort/cost per shape) before
+    ruling. Dossier is a queued deliverable.
+15. **Sim spatial merge-back: after all-AI tables run.**
+16. **Visual bar: THEMED before the owner plays** — token portraits, map
+    textures, fog styling are an increment before the first session.
+17. **Mutation campaign: one more kill wave on the four hotspots**
+    (attack-profiles 105, srd-subclass-content 111, srd-subclasses 104,
+    skill-grants 46), then the campaign pauses.
+18. **Order-dependence repair: parallel background lane**; official gate
+    stays the ordered run meanwhile.
+19. **v1 review + deploy: formally deferred behind the VTT** (D266 gate
+    parked; preview stays up).
+20. **Stragglers: finish all three now** — walkthrough specs 11-12, s7
+    findings doc merge, trial-idx5 merge gate.
+
+Scope note: rulings 6, 7, 8, 12, 16 substantially grow the playable target
+beyond the phase-2 plan's increments 3-5 (spell system, full conditions,
+death saves, autosave, theming, DM-generated encounters, player projection
+as primary view). The phase-2 plan gets an amended increment map through the
+consensus loop before increment 3 dispatches.
+
 ## D313 — OWNER: playable target — owner plays the PCs, codex CLI runs as the DM (2026-08-19)
 
 The owner wants to play the PCs in the VTT with the codex CLI app running as
