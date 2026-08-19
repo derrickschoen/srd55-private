@@ -1,0 +1,177 @@
+import type { Ability } from '../domain/enums';
+import type { GridCell } from './grid';
+import type {
+  AttackRollResult,
+  DamageRequest,
+  DamageResult,
+  RollMode,
+  SavingThrowResult,
+} from './resolution';
+import type { EffectApplication, TurnBoundary } from './effects';
+import type { CombatantId, EncounterEffectId, Feet } from './values';
+
+export type ActionCost = 'action' | 'bonus_action' | 'none';
+
+export type EncounterCommand =
+  | { readonly type: 'roll_initiative' }
+  | {
+      readonly type: 'move';
+      readonly actor: CombatantId;
+      readonly path: readonly GridCell[];
+      readonly cause: 'voluntary';
+    }
+  | {
+      readonly type: 'attack';
+      readonly actor: CombatantId;
+      readonly target: CombatantId;
+      readonly attackBonus: number;
+      readonly criticalFloor: number;
+      readonly rollMode: RollMode;
+      readonly attackerCanSeeTarget: boolean;
+      readonly targetCanSeeAttacker: boolean;
+      readonly damage: DamageRequest;
+    }
+  | {
+      readonly type: 'force_save';
+      readonly actor: CombatantId;
+      readonly target: CombatantId;
+      readonly ability: Ability;
+      readonly dc: number;
+      readonly rollMode: RollMode;
+      readonly damage: DamageRequest;
+      readonly onSuccess: 'none' | 'half';
+      readonly cost: ActionCost;
+    }
+  | {
+      readonly type: 'dash' | 'disengage' | 'dodge';
+      readonly actor: CombatantId;
+    }
+  | {
+      readonly type: 'spend_bonus_action' | 'spend_reaction';
+      readonly actor: CombatantId;
+      readonly purpose: string;
+    }
+  | {
+      readonly type: 'heal';
+      readonly actor: CombatantId;
+      readonly target: CombatantId;
+      readonly amount: number;
+      readonly cost: ActionCost;
+    }
+  | {
+      readonly type: 'apply_effect';
+      readonly actor: CombatantId;
+      readonly effect: EffectApplication;
+      readonly cost: ActionCost;
+    }
+  | {
+      readonly type: 'end_concentration';
+      readonly actor: CombatantId;
+    }
+  | { readonly type: 'end_turn'; readonly actor: CombatantId };
+
+interface SequencedEvent {
+  readonly sequence: number;
+}
+
+export type EncounterEvent =
+  | (SequencedEvent & {
+      readonly type: 'initiative_rolled';
+      readonly combatant: CombatantId;
+      readonly faces: readonly number[];
+      readonly total: number;
+    })
+  | (SequencedEvent & {
+      readonly type: 'initiative_ordered';
+      readonly order: readonly CombatantId[];
+    })
+  | (SequencedEvent & {
+      readonly type: 'turn_started';
+      readonly combatant: CombatantId;
+      readonly round: number;
+    })
+  | (SequencedEvent & {
+      readonly type: 'movement_completed';
+      readonly combatant: CombatantId;
+      readonly path: readonly GridCell[];
+      readonly spent: Feet;
+      readonly remaining: Feet;
+    })
+  | (SequencedEvent & {
+      readonly type: 'attack_resolved';
+      readonly actor: CombatantId;
+      readonly target: CombatantId;
+      readonly attack: AttackRollResult;
+      readonly damage: DamageResult | null;
+    })
+  | (SequencedEvent & {
+      readonly type: 'save_resolved';
+      readonly source: CombatantId;
+      readonly target: CombatantId;
+      readonly ability: Ability;
+      readonly save: SavingThrowResult;
+      readonly effectId: EncounterEffectId | null;
+    })
+  | (SequencedEvent & {
+      readonly type: 'damage_applied';
+      readonly source: CombatantId;
+      readonly target: CombatantId;
+      readonly amount: number;
+      readonly hitPointsBefore: number;
+      readonly hitPointsAfter: number;
+      readonly lifeState: 'living' | 'dying' | 'dead';
+      readonly massiveDamage: boolean;
+    })
+  | (SequencedEvent & {
+      readonly type: 'healing_applied';
+      readonly source: CombatantId;
+      readonly target: CombatantId;
+      readonly amount: number;
+      readonly hitPointsBefore: number;
+      readonly hitPointsAfter: number;
+    })
+  | (SequencedEvent & {
+      readonly type: 'resource_spent';
+      readonly combatant: CombatantId;
+      readonly resource: 'action' | 'bonus_action' | 'reaction';
+      readonly purpose: string;
+    })
+  | (SequencedEvent & {
+      readonly type: 'stance_started';
+      readonly combatant: CombatantId;
+      readonly stance: 'disengaging' | 'dodging';
+    })
+  | (SequencedEvent & {
+      readonly type: 'effect_applied';
+      readonly effectId: EncounterEffectId;
+      readonly source: CombatantId;
+      readonly targets: readonly CombatantId[];
+    })
+  | (SequencedEvent & {
+      readonly type: 'effect_target_removed';
+      readonly effectId: EncounterEffectId;
+      readonly target: CombatantId;
+      readonly reason: 'save_succeeded' | 'condition_immunity';
+    })
+  | (SequencedEvent & {
+      readonly type: 'effect_ended';
+      readonly effectId: EncounterEffectId;
+      readonly reason:
+        | 'duration_expired'
+        | 'concentration_replaced'
+        | 'concentration_ended'
+        | 'concentration_broken'
+        | 'no_targets'
+        | 'stacking_replaced';
+    })
+  | (SequencedEvent & {
+      readonly type: 'effect_clock_ticked';
+      readonly effectId: EncounterEffectId;
+      readonly boundary: TurnBoundary;
+      readonly remaining: number;
+    })
+  | (SequencedEvent & {
+      readonly type: 'turn_ended';
+      readonly combatant: CombatantId;
+      readonly round: number;
+    });
