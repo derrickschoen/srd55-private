@@ -237,8 +237,14 @@ export const CATALOG_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
       // Re-pinned 2026-08-18 after content identity's key comparator gained a
       // semantics-preserving native fast path. The 444-aggregate digest oracle
       // is unchanged; D226 freezes source bytes, so this checksum still moves.
+      // Re-pinned 2026-08-19 for the skill-grants orphan-revival bug fix
+      // (f8287123): a revived tool-alternative row's stale state check made
+      // the sync immediately re-orphan it. This is NOT rows-unchanged: replay
+      // on an affected image now yields active rows where the buggy code
+      // yielded orphaned — the corrected output. The idempotency and rollback
+      // sibling tests verify the fixed behavior.
       checksum:
-        '608e8d15faa0a78cc148557d507e32ca703cbd12014bafc06112a00645acdbf6',
+        'df6a2abf6d0c6f59c176527dede98c119c6bc2227b0595b08600d593999473d2',
       run: reconcileSpeciesLineageContentV2,
     }),
   ]);
