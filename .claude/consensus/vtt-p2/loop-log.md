@@ -95,3 +95,50 @@ vitest + tsc for increments; full suite + build gate before wt/vtt→main).
   policies/death flow) with the combined gate unchanged.
 - Status: CLOSED round 1. Merged to wt/vtt. Increment 3 is now dispatchable.
 
+
+## A6 — increment 3a: encounter state, conditions, effect lifecycle (lane-wt/vtt3a)
+
+- Dispatched 2026-08-19 ~15:05 by the prior supervisor session (job c68ffdd0),
+  which then ended. Lane survived the session death and is still producing:
+  src/combat/{combatant,statblock,events,encounter,conditions,effects}.ts plus
+  tests/unit/combat/{combatant,conditions,effects,encounter}.test.ts + fixtures.
+- Brief carried the 3a/3b split from A5's dispatch note. Controllers, reaction
+  policies, death-save flow and any UI are 3b and explicitly out of scope.
+- Gate owed on completion (supervisor-run, NOT delegated): tests/unit/combat
+  green, tools/sim unchanged-green with no sim file edits, both tsc configs
+  exit 0, plus an independent negative control distinct from the lane's own
+  ledger for mutations 17, 19-23.
+- Status: IN FLIGHT. Round 0 — no candidate frozen yet.
+
+## A7 — D314.14 Discord decision dossier (lane-wt/discord)
+
+- Docs-only. Deliverable: docs/design/2026-08-19-discord-vtt-decision-dossier.md.
+- Owner is UNDECIDED on Discord and ruled (D314.14) that a full dossier —
+  concrete flows, worked examples, architecture, effort/cost per shape —
+  precedes any ruling. Factual base is the completed research doc
+  docs/research/2026-08-19-discord-vtt-feasibility.md; the dossier builds on it.
+- Brief requires per-shape rulings-contradicted analysis by D-number (the
+  Activity WebRTC ban vs the no-server design goal is the known headline; the
+  brief asks for the others), an exit-cost column, and an UNVERIFIED section.
+- Review treatment: this is an owner deliverable, not a gated code artifact —
+  review for honesty and sourcing, not for tests.
+- Status: IN FLIGHT. Round 0.
+
+## A8 — D315.14 clean-license art survey (lane-wt/art)
+
+- Docs-only. Deliverable: docs/design/2026-08-19-vtt-art-license-survey.md.
+  Feeds increment 8, which D314.16 places BEFORE the owner's first session.
+- Brief requires exact license + version per candidate, redistribution checked
+  separately for repo and dist, a manifest schema that kills mutations 51-54,
+  a D59 public-mirror verdict per asset, and an honest assessment of
+  AI-generated imagery's provenance problem. Ambiguous licensing is a
+  rejection, not an accepted risk. No asset files are downloaded or committed.
+- Status: IN FLIGHT. Round 0.
+
+## Tick history
+
+- 2026-08-19 15:27: loop restarted after the prior supervisor session ended
+  with A6 mid-flight. Cron reinstated at 30-minute cadence off the :00/:30
+  marks. Two docs lanes opened alongside A6 because they contend for nothing —
+  no suite, no build, no shared files. The `lane-wt/mutshard` merge gate is
+  deliberately NOT started: it needs a quiet box and A6 is CPU-heavy.
