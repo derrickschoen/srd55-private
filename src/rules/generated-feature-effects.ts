@@ -6,12 +6,23 @@ import {
   type SqlRow,
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
-import { characterEffectKinds } from '../domain/enums';
+import {
+  characterEffectKinds,
+  isEnumValue,
+  type CharacterEffectKind,
+} from '../domain/enums';
+
+export class GeneratedFeatureEffectKindError extends Error {
+  override readonly name = 'GeneratedFeatureEffectKindError' as const;
+  constructor(readonly effect_kind: string) {
+    super(`Generated feature effect has unknown kind ${effect_kind}.`);
+  }
+}
 
 interface GeneratedEffect {
   readonly id: number;
   readonly label: string;
-  readonly effect_kind: string;
+  readonly effect_kind: CharacterEffectKind;
   readonly damage_type: string | null;
   readonly hit_points_flat: number | null;
   readonly hit_points_per_level: number | null;
@@ -28,10 +39,14 @@ interface GeneratedEffect {
 }
 
 function generatedEffect(row: SqlRow): GeneratedEffect {
+  const effectKind = sqlString(row, 'effect_kind');
+  if (!isEnumValue(characterEffectKinds, effectKind)) {
+    throw new GeneratedFeatureEffectKindError(effectKind);
+  }
   return {
     id: sqlInteger(row, 'id'),
     label: sqlString(row, 'label'),
-    effect_kind: sqlString(row, 'effect_kind'),
+    effect_kind: effectKind,
     damage_type: sqlNullableString(row, 'damage_type'),
     hit_points_flat: sqlNullableInteger(row, 'hit_points_flat'),
     hit_points_per_level: sqlNullableInteger(row, 'hit_points_per_level'),
@@ -46,6 +61,43 @@ function generatedEffect(row: SqlRow): GeneratedEffect {
     weapon_scope: sqlNullableString(row, 'weapon_scope'),
     notes: sqlNullableString(row, 'notes'),
   };
+}
+
+/**
+ * Class-owned per-level HP formulas scale from the owning class's level.
+ *
+ * The character effect table's public per-level field means TOTAL character
+ * level. Copying a subclass template through unchanged would therefore turn a
+ * Sorcerer-level formula into a multiclass-level formula. Synchronization is
+ * the boundary that knows the owning class level, so it evaluates the class
+ * formula once and stores the resulting flat contribution. The exhaustive
+ * switch makes a new effect kind a compile error until its materialization
+ * behavior is chosen explicitly.
+ */
+function materializeClassLevelEffect(
+  effect: GeneratedEffect,
+  classLevel: number,
+): GeneratedEffect {
+  switch (effect.effect_kind) {
+    case 'hp_modifier':
+      return {
+        ...effect,
+        hit_points_flat:
+          (effect.hit_points_flat ?? 0) +
+          (effect.hit_points_per_level ?? 0) * classLevel,
+        hit_points_per_level: null,
+      };
+    case 'damage_resistance':
+    case 'speed':
+    case 'ability_increase':
+    case 'ability_override':
+    case 'armor_class_bonus':
+    case 'armor_class_formula':
+    case 'attack_ability_override':
+    case 'weapon_attack_bonus':
+    case 'weapon_damage_bonus':
+      return effect;
+  }
 }
 
 const PAYLOAD_SELECT = `
@@ -142,7 +194,7 @@ export function syncAutomaticClassEffects(
      ORDER BY effect.class_level, effect.name, effect.id`,
     [classDefinitionId, classLevel, ...characterEffectKinds],
     generatedEffect,
-  );
+  ).map((effect) => materializeClassLevelEffect(effect, classLevel));
   insertGeneratedEffects(
     db,
     characterId,
@@ -187,7 +239,7 @@ export function syncAutomaticSubclassEffects(
      ORDER BY feature.sort_order, effect.sort_order, effect.id`,
     [subclassDefinitionId, classLevel, ...characterEffectKinds],
     generatedEffect,
-  );
+  ).map((effect) => materializeClassLevelEffect(effect, classLevel));
   insertGeneratedEffects(
     db,
     characterId,
