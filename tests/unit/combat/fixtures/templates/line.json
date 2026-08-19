@@ -64,6 +64,51 @@
       "tangentIncluded": { "column": 0, "row": 2 },
       "outsideExcluded": { "column": 2, "row": 1 },
       "creatures": []
+    },
+    {
+      "name": "diagonal line with excluded origin removes southwest apex-only square",
+      "bounds": { "columns": 4, "rows": 4 },
+      "blockedCells": [],
+      "template": {
+        "origin": { "x": 10, "y": 10 },
+        "direction": { "x": 1, "y": 1 },
+        "length": 5,
+        "width": 5,
+        "includeOrigin": false
+      },
+      "expectedCells": [
+        { "column": 2, "row": 1 },
+        { "column": 1, "row": 2 },
+        { "column": 2, "row": 2 },
+        { "column": 3, "row": 2 },
+        { "column": 2, "row": 3 }
+      ],
+      "tangentIncluded": { "column": 2, "row": 1 },
+      "outsideExcluded": { "column": 1, "row": 1 },
+      "creatures": []
+    },
+    {
+      "name": "diagonal line with included origin adds southwest apex-only square",
+      "bounds": { "columns": 4, "rows": 4 },
+      "blockedCells": [],
+      "template": {
+        "origin": { "x": 10, "y": 10 },
+        "direction": { "x": 1, "y": 1 },
+        "length": 5,
+        "width": 5,
+        "includeOrigin": true
+      },
+      "expectedCells": [
+        { "column": 1, "row": 1 },
+        { "column": 2, "row": 1 },
+        { "column": 1, "row": 2 },
+        { "column": 2, "row": 2 },
+        { "column": 3, "row": 2 },
+        { "column": 2, "row": 3 }
+      ],
+      "tangentIncluded": { "column": 1, "row": 1 },
+      "outsideExcluded": { "column": 0, "row": 0 },
+      "creatures": []
     }
   ]
 }

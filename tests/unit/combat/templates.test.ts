@@ -34,7 +34,7 @@ const caseFields = {
   bounds: z.object({ columns: z.number().int(), rows: z.number().int() }).strict(),
   blockedCells: z.array(cellSchema),
   expectedCells: z.array(cellSchema),
-  tangentIncluded: cellSchema,
+  tangentIncluded: cellSchema.nullable(),
   outsideExcluded: cellSchema,
   creatures: z.array(creatureSchema),
 };
@@ -215,13 +215,44 @@ function cellKey(cell: { readonly column: number; readonly row: number }): strin
   return `${cell.column},${cell.row}`;
 }
 
+function expectOriginPair(
+  shape: LoadedFixture['shape'],
+  excludedName: string,
+  includedName: string,
+): void {
+  const excluded = fixtures.find(
+    (candidate) => candidate.shape === shape && candidate.fixture.name === excludedName,
+  );
+  const included = fixtures.find(
+    (candidate) => candidate.shape === shape && candidate.fixture.name === includedName,
+  );
+  expect(excluded).toBeDefined();
+  expect(included).toBeDefined();
+  if (excluded === undefined || included === undefined) {
+    throw new Error(`${shape} origin fixture pair is incomplete.`);
+  }
+  const excludedCells = affectedCells(gridForFixture(excluded), areaForFixture(excluded));
+  const includedCells = affectedCells(gridForFixture(included), areaForFixture(included));
+  expect(excludedCells).toEqual(excluded.fixture.expectedCells);
+  expect(includedCells).toEqual(included.fixture.expectedCells);
+  expect(included.fixture.tangentIncluded).not.toBeNull();
+  if (included.fixture.tangentIncluded === null) {
+    throw new Error(`${shape} included-origin fixture lacks its origin-only square.`);
+  }
+  expect(excluded.fixture.outsideExcluded).toEqual(included.fixture.tangentIncluded);
+  expect(new Set(excludedCells.map(cellKey)).has(cellKey(included.fixture.tangentIncluded))).toBe(false);
+  expect(new Set(includedCells.map(cellKey)).has(cellKey(included.fixture.tangentIncluded))).toBe(true);
+}
+
 describe('continuous SRD template fixtures', () => {
   for (const loaded of fixtures) {
     it(`${loaded.shape}: ${loaded.fixture.name}`, () => {
       const cells = affectedCells(gridForFixture(loaded), areaForFixture(loaded));
       expect(cells).toEqual(loaded.fixture.expectedCells);
       const keys = new Set(cells.map(cellKey));
-      expect(keys.has(cellKey(loaded.fixture.tangentIncluded))).toBe(true);
+      if (loaded.fixture.tangentIncluded !== null) {
+        expect(keys.has(cellKey(loaded.fixture.tangentIncluded))).toBe(true);
+      }
       expect(keys.has(cellKey(loaded.fixture.outsideExcluded))).toBe(false);
       for (const creature of loaded.fixture.creatures) {
         expect(
@@ -253,7 +284,9 @@ describe('template placement contracts and shared consumers', () => {
     for (const loaded of fixtures.filter((candidate) => candidate.fixture.blockedCells.length === 0)) {
       const cells = affectedCells(gridForFixture(loaded), areaForFixture(loaded));
       const keys = new Set(cells.map(cellKey));
-      expect(keys.has(cellKey(loaded.fixture.tangentIncluded)), loaded.shape).toBe(true);
+      if (loaded.fixture.tangentIncluded !== null) {
+        expect(keys.has(cellKey(loaded.fixture.tangentIncluded)), loaded.shape).toBe(true);
+      }
       expect(keys.has(cellKey(loaded.fixture.outsideExcluded)), loaded.shape).toBe(false);
     }
   });
@@ -292,6 +325,51 @@ describe('template placement contracts and shared consumers', () => {
     expect(affectedCells(gridForFixture(line), areaForFixture(line))).toEqual(
       line.fixture.expectedCells,
     );
+  });
+
+  it('origin inclusion mutant: cone always-included origin is killed', () => {
+    expectOriginPair(
+      'cone',
+      'cone excluded origin removes apex-only western squares',
+      'cone included origin adds both apex-only western squares',
+    );
+  });
+
+  it('origin inclusion mutant: cube always-included origin is killed', () => {
+    expectOriginPair(
+      'cube',
+      'cube excluded corner origin removes its diagonal-only square',
+      'cube included corner origin adds its diagonal-only square',
+    );
+  });
+
+  it('origin inclusion mutant: emanation always-included origin is killed', () => {
+    expectOriginPair(
+      'emanation',
+      'zero-distance emanation with excluded origin touches no square',
+      'zero-distance emanation with included origin touches four squares',
+    );
+  });
+
+  it('origin inclusion mutant: line always-included origin is killed', () => {
+    expectOriginPair(
+      'line',
+      'diagonal line with excluded origin removes southwest apex-only square',
+      'diagonal line with included origin adds southwest apex-only square',
+    );
+  });
+
+  it('SRD fixed-origin Cylinder and Sphere keep their included centers', () => {
+    for (const shape of ['cylinder', 'sphere'] as const) {
+      const loaded = fixtures.find(
+        (candidate) => candidate.shape === shape && candidate.fixture.blockedCells.length === 0,
+      );
+      expect(loaded).toBeDefined();
+      if (loaded === undefined) throw new Error(`${shape} fixture inventory is incomplete.`);
+      expect(affectedCells(gridForFixture(loaded), areaForFixture(loaded))).toEqual(
+        loaded.fixture.expectedCells,
+      );
+    }
   });
 
   it('validates every shape-specific public function without a second geometry path', () => {

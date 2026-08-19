@@ -58,6 +58,31 @@
       "tangentIncluded": { "column": 0, "row": 2 },
       "outsideExcluded": { "column": 2, "row": 1 },
       "creatures": []
+    },
+    {
+      "name": "zero-distance emanation with excluded origin touches no square",
+      "bounds": { "columns": 4, "rows": 4 },
+      "blockedCells": [],
+      "template": { "origin": { "x": 10, "y": 10 }, "radius": 0, "includeOrigin": false },
+      "expectedCells": [],
+      "tangentIncluded": null,
+      "outsideExcluded": { "column": 1, "row": 1 },
+      "creatures": []
+    },
+    {
+      "name": "zero-distance emanation with included origin touches four squares",
+      "bounds": { "columns": 4, "rows": 4 },
+      "blockedCells": [],
+      "template": { "origin": { "x": 10, "y": 10 }, "radius": 0, "includeOrigin": true },
+      "expectedCells": [
+        { "column": 1, "row": 1 },
+        { "column": 2, "row": 1 },
+        { "column": 1, "row": 2 },
+        { "column": 2, "row": 2 }
+      ],
+      "tangentIncluded": { "column": 1, "row": 1 },
+      "outsideExcluded": { "column": 0, "row": 0 },
+      "creatures": []
     }
   ]
 }

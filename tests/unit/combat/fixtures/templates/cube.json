@@ -67,6 +67,71 @@
       "tangentIncluded": { "column": 0, "row": 2 },
       "outsideExcluded": { "column": 2, "row": 1 },
       "creatures": []
+    },
+    {
+      "name": "cube excluded corner origin removes its diagonal-only square",
+      "bounds": { "columns": 5, "rows": 5 },
+      "blockedCells": [],
+      "template": {
+        "origin": { "x": 5, "y": 5 },
+        "center": { "x": 10, "y": 10 },
+        "axis": { "x": 1, "y": 0 },
+        "size": 10,
+        "includeOrigin": false
+      },
+      "expectedCells": [
+        { "column": 1, "row": 0 },
+        { "column": 2, "row": 0 },
+        { "column": 3, "row": 0 },
+        { "column": 0, "row": 1 },
+        { "column": 1, "row": 1 },
+        { "column": 2, "row": 1 },
+        { "column": 3, "row": 1 },
+        { "column": 0, "row": 2 },
+        { "column": 1, "row": 2 },
+        { "column": 2, "row": 2 },
+        { "column": 3, "row": 2 },
+        { "column": 0, "row": 3 },
+        { "column": 1, "row": 3 },
+        { "column": 2, "row": 3 },
+        { "column": 3, "row": 3 }
+      ],
+      "tangentIncluded": { "column": 3, "row": 3 },
+      "outsideExcluded": { "column": 0, "row": 0 },
+      "creatures": []
+    },
+    {
+      "name": "cube included corner origin adds its diagonal-only square",
+      "bounds": { "columns": 5, "rows": 5 },
+      "blockedCells": [],
+      "template": {
+        "origin": { "x": 5, "y": 5 },
+        "center": { "x": 10, "y": 10 },
+        "axis": { "x": 1, "y": 0 },
+        "size": 10,
+        "includeOrigin": true
+      },
+      "expectedCells": [
+        { "column": 0, "row": 0 },
+        { "column": 1, "row": 0 },
+        { "column": 2, "row": 0 },
+        { "column": 3, "row": 0 },
+        { "column": 0, "row": 1 },
+        { "column": 1, "row": 1 },
+        { "column": 2, "row": 1 },
+        { "column": 3, "row": 1 },
+        { "column": 0, "row": 2 },
+        { "column": 1, "row": 2 },
+        { "column": 2, "row": 2 },
+        { "column": 3, "row": 2 },
+        { "column": 0, "row": 3 },
+        { "column": 1, "row": 3 },
+        { "column": 2, "row": 3 },
+        { "column": 3, "row": 3 }
+      ],
+      "tangentIncluded": { "column": 0, "row": 0 },
+      "outsideExcluded": { "column": 4, "row": 4 },
+      "creatures": []
     }
   ]
 }
