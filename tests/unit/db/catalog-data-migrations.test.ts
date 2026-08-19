@@ -140,7 +140,7 @@ describe('catalog data-migration registry', () => {
       // Re-pinned 2026-08-19 with the registry for the skill-grants
       // orphan-revival fix (f8287123) — see the registry comment for the
       // deliberate rows-changed justification.
-      checksum: 'df6a2abf6d0c6f59c176527dede98c119c6bc2227b0595b08600d593999473d2',
+      checksum: 'e649951df8c8177c80ebc6363c6bbc4902e7c82d8e1e7c5a0749ede307b25125',
     }]);
     expect(() =>
       validateCatalogDataMigrationRegistry(CATALOG_DATA_MIGRATIONS)

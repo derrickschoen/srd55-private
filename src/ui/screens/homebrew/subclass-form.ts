@@ -866,7 +866,8 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
             change: changeGrant,
           }),
         );
-        if (grant.kind === 'fixed_spell') {
+        switch (grant.kind) {
+          case 'fixed_spell': {
           const prepared = element('input', {
             attributes: { id: `${prefix}-prepared`, type: 'checkbox' },
           });
@@ -875,7 +876,9 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
           card.append(
             ...labelledControl('Always prepared', prepared.id, prepared),
           );
-        } else if (grant.kind === 'choice_from_list') {
+            break;
+          }
+          case 'choice_from_list': {
           const bucket = element('select', {
             attributes: {
               id: `${prefix}-bucket`,
@@ -925,7 +928,9 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
             ...labelledControl('Minimum spell level (optional)', minimum.id, minimum),
             ...labelledControl('Maximum spell level (optional)', maximum.id, maximum),
           );
-        } else {
+            break;
+          }
+          case 'choice_from_query': {
           const bucket = element('select', {
             attributes: {
               id: `${prefix}-bucket`,
@@ -993,6 +998,14 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
             ...labelledControl('Minimum spell level (optional)', minimum.id, minimum),
             ...labelledControl('Maximum spell level (optional)', maximum.id, maximum),
           );
+            break;
+          }
+          /* c8 ignore next 5 -- unreachable after the preserved grant returns;
+             an extra-variant tsc probe verified that a new spell grant fails. */
+          default: {
+            const unreachable: never = grant;
+            throw new TypeError(`Unhandled subclass spell grant ${String(unreachable)}.`);
+          }
         }
         card.append(createOrderedCardControls({
           collectionKey: `subclass-progression-${String(rowIndex)}-grants`,
@@ -1588,7 +1601,8 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
               input.addEventListener('input', () => onChange(nullableInteger(input.value)));
               return labelledControl(label, input.id, input);
             };
-            if (contribution.value.kind === 'constant') {
+            switch (contribution.value.kind) {
+              case 'constant': {
               contributionCard.append(...numberInput(
                 'amount',
                 'Amount',
@@ -1598,7 +1612,9 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
                   value: { kind: 'constant', amount },
                 }),
               ));
-            } else if (contribution.value.kind === 'class_level_scale') {
+                break;
+              }
+              case 'class_level_scale': {
               const scaleValue = contribution.value;
               contributionCard.append(
                 ...numberInput('multiply', 'Multiply class level by', scaleValue.multiply, (multiply) => replaceContribution({
@@ -1641,7 +1657,9 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
                 },
               }));
               contributionCard.append(...labelledControl('Rounding', rounding.id, rounding));
-            } else {
+                break;
+              }
+              case 'breakpoint_table': {
               for (const [rowIndex, breakpoint] of contribution.value.rows.entries()) {
                 const rowMount = element('div', { className: 'subclass-breakpoint-row' });
                 for (const [field, text] of [
@@ -1707,6 +1725,14 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
                 render();
               });
               contributionCard.append(addRow);
+                break;
+              }
+              /* c8 ignore next 5 -- unreachable after preserved is excluded;
+                 an extra-variant tsc probe verified that a new value fails. */
+              default: {
+                const unreachable: never = contribution.value;
+                throw new TypeError(`Unhandled contribution value ${String(unreachable)}.`);
+              }
             }
           }
 

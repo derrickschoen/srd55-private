@@ -149,13 +149,25 @@ function add(
   );
 }
 
+function rollModeCircumstance(mode: RollMode): -1 | 0 | 1 {
+  switch (mode) {
+    case 'advantage':
+      return 1;
+    case 'disadvantage':
+      return -1;
+    case 'normal':
+      return 0;
+    /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+       tsc probe verified that the never assignment rejects a new mode. */
+    default: {
+      const unreachable: never = mode;
+      throw new TypeError(`Unhandled roll mode ${String(unreachable)}.`);
+    }
+  }
+}
+
 function effectiveMode(config: DiceConfig): RollMode {
-  const circumstance =
-    config.rollMode === 'advantage'
-      ? 1
-      : config.rollMode === 'disadvantage'
-        ? -1
-        : 0;
+  const circumstance = rollModeCircumstance(config.rollMode);
   const net = circumstance + (config.luckyFeat ? 1 : 0);
   return net > 0 ? 'advantage' : net < 0 ? 'disadvantage' : 'normal';
 }
@@ -700,30 +712,42 @@ export function seededRoll(
       break;
     }
     const multiplier = attack.outcome === 'critical' ? 2 : 1;
-    const rolled =
-      config.profile === 'sorcerous-burst'
-        ? sorcerousRoll(
+    let rolled: ReturnType<typeof ordinaryRoll>;
+    switch (config.profile) {
+      case 'sorcerous-burst':
+        rolled = sorcerousRoll(
             config.sorcerousBaseDice * multiplier,
             config,
             random,
-          )
-        : config.profile === 'chromatic-orb'
-          ? ordinaryRoll(
-              (config.chromaticSlotLevel + 2) * multiplier,
-              8,
-              0,
-              'spell',
-              config,
-              random,
-            )
-          : ordinaryRoll(
-              config.basicDice * multiplier,
-              config.basicDieSize,
-              config.damageModifier,
-              'weapon',
-              config,
-              random,
-            );
+          );
+        break;
+      case 'chromatic-orb':
+        rolled = ordinaryRoll(
+          (config.chromaticSlotLevel + 2) * multiplier,
+          8,
+          0,
+          'spell',
+          config,
+          random,
+        );
+        break;
+      case 'basic':
+        rolled = ordinaryRoll(
+          config.basicDice * multiplier,
+          config.basicDieSize,
+          config.damageModifier,
+          'weapon',
+          config,
+          random,
+        );
+        break;
+      /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+         tsc probe verified that the never assignment rejects a new profile. */
+      default: {
+        const unreachable: never = config.profile;
+        throw new TypeError(`Unhandled damage profile ${String(unreachable)}.`);
+      }
+    }
     const values = rolled.damageDice.map((die) => die.value);
     const matched =
       config.profile === 'chromatic-orb' &&
@@ -1132,11 +1156,7 @@ export function renderDiceHelper(
       config[key] = input.checked;
     }
     const netAdvantage =
-      (config.rollMode === 'advantage'
-        ? 1
-        : config.rollMode === 'disadvantage'
-          ? -1
-          : 0) + (config.luckyFeat ? 1 : 0);
+      rollModeCircumstance(config.rollMode) + (config.luckyFeat ? 1 : 0);
     const tripleAdvantageEligible =
       config.profile !== 'basic' ||
       ['dexterity', 'intelligence', 'wisdom', 'charisma'].includes(
@@ -1256,12 +1276,22 @@ export function renderDiceHelper(
         ).toFixed(2),
       ),
     );
-    if (kind === 'sorcerous-burst') {
-      profileNote.textContent = `${config.sorcerousBaseDice}d8 base · ${exact.expectedSorcerousExtraDice.toFixed(2)} expected added d8s · critical doubles base dice, not the cap.`;
-    } else if (kind === 'chromatic-orb') {
-      profileNote.textContent = `${config.chromaticSlotLevel + 2}d8 · ${percent(exact.chanceToLeap)} chance the first attack both hits and leaps · at most ${config.chromaticSlotLevel} leap${config.chromaticSlotLevel === 1 ? '' : 's'}.`;
-    } else {
-      profileNote.textContent = '';
+    switch (kind) {
+      case 'sorcerous-burst':
+        profileNote.textContent = `${config.sorcerousBaseDice}d8 base · ${exact.expectedSorcerousExtraDice.toFixed(2)} expected added d8s · critical doubles base dice, not the cap.`;
+        break;
+      case 'chromatic-orb':
+        profileNote.textContent = `${config.chromaticSlotLevel + 2}d8 · ${percent(exact.chanceToLeap)} chance the first attack both hits and leaps · at most ${config.chromaticSlotLevel} leap${config.chromaticSlotLevel === 1 ? '' : 's'}.`;
+        break;
+      case 'basic':
+        profileNote.textContent = '';
+        break;
+      /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+         tsc probe verified that the never assignment rejects a new profile. */
+      default: {
+        const unreachable: never = kind;
+        throw new TypeError(`Unhandled damage profile ${String(unreachable)}.`);
+      }
     }
     live.replaceChildren();
     live.hidden = true;

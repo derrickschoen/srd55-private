@@ -340,33 +340,62 @@ function insertItem(
   return aggregate.effects.length;
 }
 
+function equipmentPayload(
+  aggregate: EquipmentContentAggregate,
+): ContentImportProjection['payload'] {
+  switch (aggregate.kind) {
+    case 'weapon':
+      return projectWeaponContentV1(aggregate);
+    case 'armor':
+      return projectArmorContentV1(aggregate);
+    case 'item':
+      return projectItemContentV1(aggregate);
+    /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+       tsc probe verified that the never assignment rejects a new kind. */
+    default: {
+      const unreachable: never = aggregate;
+      throw new TypeError(`Unhandled equipment aggregate ${String(unreachable)}.`);
+    }
+  }
+}
+
+function equipmentDefinitionTable(
+  kind: EquipmentContentAggregate['kind'],
+): 'weapon_templates' | 'armor_templates' | 'item_definitions' {
+  switch (kind) {
+    case 'weapon':
+      return 'weapon_templates';
+    case 'armor':
+      return 'armor_templates';
+    case 'item':
+      return 'item_definitions';
+    /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+       tsc probe verified that the never assignment rejects a new kind. */
+    default: {
+      const unreachable: never = kind;
+      throw new TypeError(`Unhandled equipment aggregate kind ${String(unreachable)}.`);
+    }
+  }
+}
+
 function projectionForAggregate(
   aggregate: EquipmentContentAggregate,
   assertedKey: ContentKey,
   counters: MutableEquipmentImportCounters,
   visibility: CatalogContentVisibility,
 ): ContentImportProjection {
-  const payload = aggregate.kind === 'weapon'
-    ? projectWeaponContentV1(aggregate)
-    : aggregate.kind === 'armor'
-      ? projectArmorContentV1(aggregate)
-      : projectItemContentV1(aggregate);
   return {
     kind: aggregate.kind,
     visibility,
     edition: aggregate.rules_edition,
     name: aggregate.name,
     assertedKey,
-    payload,
+    payload: equipmentPayload(aggregate),
     projectStored: (database, contentKey) =>
       projectStoredContentV1(database, aggregate.kind, contentKey),
     install: (database, contentKey, _projection, phase) => {
       const existing = database.scalar<number>(
-        `SELECT 1 FROM ${aggregate.kind === 'weapon'
-          ? 'weapon_templates'
-          : aggregate.kind === 'armor'
-            ? 'armor_templates'
-            : 'item_definitions'} WHERE content_key = ?`,
+        `SELECT 1 FROM ${equipmentDefinitionTable(aggregate.kind)} WHERE content_key = ?`,
         [contentKey],
       ) === 1;
       if (existing) {

@@ -100,7 +100,20 @@ async function render(context: ScreenContext): Promise<() => void> {
       speciesRequested &&
       speciesChoiceState?.kind === 'ready' &&
       speciesChoiceState.resolution.kind !== 'no_species';
-    if (state.kind === 'ready' && state.current_step === 'abilities') {
+    switch (state.kind) {
+      case 'not_found':
+        view = renderGuidedBuildState(state);
+        break;
+      case 'ready': {
+        const effectiveStep =
+          canEditRecordedSpecies && state.current_step !== 'abilities'
+            ? 'species'
+            : spellRepairAddress !== null &&
+                (state.current_step === 'class' || state.current_step === 'background')
+              ? 'spells'
+              : state.current_step;
+        switch (effectiveStep) {
+          case 'abilities': {
       // The abilities step (B1). The character row supplies the BASE scores
       // the inputs prefill from (plan §3.5 — never a resolved total) and the
       // revision the atomic allocation command requires.
@@ -129,10 +142,9 @@ async function render(context: ScreenContext): Promise<() => void> {
       });
       view = step.element;
       cleanups.push(step.cleanup);
-    } else if (
-      state.kind === 'ready' &&
-      (state.current_step === 'species' || canEditRecordedSpecies)
-    ) {
+            break;
+          }
+          case 'species': {
       // The live post-class steps (A4 species, A5 background). Every other
       // derived step still renders one of the pinned pure panels.
       const step = createSpeciesStep({
@@ -168,7 +180,9 @@ async function render(context: ScreenContext): Promise<() => void> {
       });
       view = step.element;
       cleanups.push(step.cleanup);
-    } else if (state.kind === 'ready' && state.current_step === 'skills') {
+            break;
+          }
+          case 'skills': {
       // S-C: the skills step. One read supplies everything it renders,
       // including the revision every addressed fill/clear command requires;
       // each successful write re-navigates and this screen re-derives.
@@ -188,7 +202,9 @@ async function render(context: ScreenContext): Promise<() => void> {
       });
       view = step.element;
       cleanups.push(step.cleanup);
-    } else if (state.kind === 'ready' && state.current_step === 'equipment') {
+            break;
+          }
+          case 'equipment': {
       // E-B: the equipment step — the last step, so it also renders the
       // recorded/complete state (the derivation has no "done" member and a
       // finished character rests here). One read supplies both sources'
@@ -246,7 +262,9 @@ async function render(context: ScreenContext): Promise<() => void> {
       });
       view = step.element;
       cleanups.push(step.cleanup);
-    } else if (state.kind === 'ready' && state.current_step === 'expertise') {
+            break;
+          }
+          case 'expertise': {
       const expertiseState = await client.expertiseStep(characterId);
       const step = createExpertiseStep({
         characterId,
@@ -263,10 +281,9 @@ async function render(context: ScreenContext): Promise<() => void> {
       });
       view = step.element;
       cleanups.push(step.cleanup);
-    } else if (
-      state.kind === 'ready' &&
-      (state.current_step === 'spells' || spellRepairAddress !== null)
-    ) {
+            break;
+          }
+          case 'spells': {
       const spellsState = await client.spellsStep(characterId);
       const step = createSpellsStep({
         characterId,
@@ -295,7 +312,9 @@ async function render(context: ScreenContext): Promise<() => void> {
       });
       view = step.element;
       cleanups.push(step.cleanup);
-    } else if (state.kind === 'ready' && state.current_step === 'background') {
+            break;
+          }
+          case 'background': {
       // B3: the step gathers the whole choice — background, player-assigned
       // increases, player-chosen Origin feat (D61) — and applies it through
       // one `applyBackground` transaction, so its options carry the printed
@@ -308,8 +327,26 @@ async function render(context: ScreenContext): Promise<() => void> {
       });
       view = step.element;
       cleanups.push(step.cleanup);
-    } else {
-      view = renderGuidedBuildState(state);
+            break;
+          }
+          case 'class':
+            view = renderGuidedBuildState(state);
+            break;
+          /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+             tsc probe verified that the never assignment rejects a new step. */
+          default: {
+            const unreachable: never = effectiveStep;
+            throw new TypeError(`Unhandled guided build step ${String(unreachable)}.`);
+          }
+        }
+        break;
+      }
+      /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+         tsc probe verified that the never assignment rejects a new state. */
+      default: {
+        const unreachable: never = state;
+        throw new TypeError(`Unhandled guided build state ${String(unreachable)}.`);
+      }
     }
     document.title = 'Guided character builder';
   }

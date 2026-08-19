@@ -1727,44 +1727,59 @@ function resolveSpellSlotSection(
         entry.subclass_spellcasting.caster_fraction,
         entry.subclass_spellcasting.caster_rounding,
       );
-      if (subclassType === 'invalid') {
-        absence ??= spellAbsence(
-          "'s subclass has a missing or invalid spell progression type.",
-          entry,
-          'subclass',
-        );
-      } else if (subclassType !== 'none') {
-        if (
-          classLevel === null ||
-          entry.subclass_spellcasting.progression_row.status === 'missing'
-        ) {
+      switch (subclassType) {
+        case 'invalid':
           absence ??= spellAbsence(
-            "'s subclass has a missing or invalid progression row at its current class level.",
+            "'s subclass has a missing or invalid spell progression type.",
             entry,
             'subclass',
           );
-        } else {
-          const contribution = new CasterContribution(
-            `${entry.class_name} subclass`,
-            classLevel,
-            subclassType,
-          );
-          const exact = decodedSlots(
-            entry.subclass_spellcasting.progression_row.slots,
-          );
+          break;
+        case 'none':
+          break;
+        case 'full':
+        case 'half_up':
+        case 'half_down':
+        case 'third_up':
+        case 'third_down':
           if (
-            exact.status === 'invalid' ||
-            (Object.keys(exact.value).length > 0) !==
-              (contribution.casterLevels() > 0)
+            classLevel === null ||
+            entry.subclass_spellcasting.progression_row.status === 'missing'
           ) {
             absence ??= spellAbsence(
-              "'s subclass has missing or invalid shared spell-slot content.",
+              "'s subclass has a missing or invalid progression row at its current class level.",
               entry,
               'subclass',
             );
           } else {
-            sharedSubclass.push(contribution);
+            const contribution = new CasterContribution(
+              `${entry.class_name} subclass`,
+              classLevel,
+              subclassType,
+            );
+            const exact = decodedSlots(
+              entry.subclass_spellcasting.progression_row.slots,
+            );
+            if (
+              exact.status === 'invalid' ||
+              (Object.keys(exact.value).length > 0) !==
+                (contribution.casterLevels() > 0)
+            ) {
+              absence ??= spellAbsence(
+                "'s subclass has missing or invalid shared spell-slot content.",
+                entry,
+                'subclass',
+              );
+            } else {
+              sharedSubclass.push(contribution);
+            }
           }
+          break;
+        /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+           tsc probe verified that the never assignment rejects a new type. */
+        default: {
+          const unreachable: never = subclassType;
+          throw new TypeError(`Unhandled subclass progression ${String(unreachable)}.`);
         }
       }
     }

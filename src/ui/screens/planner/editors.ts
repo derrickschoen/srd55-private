@@ -5,6 +5,7 @@ import {
 } from '../../../domain/enums';
 import type {
   CharacterClass,
+  ClassEntryOption,
   SourceDefinition,
   Workspace,
 } from '../../../domain/read-models';
@@ -536,6 +537,24 @@ function renderSources(
   return section;
 }
 
+function classEntryLabel(entry: ClassEntryOption): string {
+  switch (entry.multiclass_entry.status) {
+    case 'blocked':
+      return `${entry.name} — unavailable`;
+    case 'waived':
+      return `${entry.name} — house rule: prerequisites waived`;
+    case 'eligible':
+    case 'not_applicable':
+      return entry.name;
+    /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+       tsc probe verified that the never assignment rejects a new status. */
+    default: {
+      const unreachable: never = entry.multiclass_entry;
+      throw new TypeError(`Unhandled multiclass entry ${String(unreachable)}.`);
+    }
+  }
+}
+
 function renderClasses(
   workspace: Workspace,
   actions: PlannerEditorActions,
@@ -644,11 +663,7 @@ function renderClasses(
     option('', 'Choose a class…', true),
     ...catalogSelectGroups(available.map((entry) => ({
       value: String(entry.id),
-      label: entry.multiclass_entry.status === 'blocked'
-        ? `${entry.name} — unavailable`
-        : entry.multiclass_entry.status === 'waived'
-          ? `${entry.name} — house rule: prerequisites waived`
-        : entry.name,
+      label: classEntryLabel(entry),
       catalogLayer: entry.catalog_layer,
       disabled: entry.multiclass_entry.status === 'blocked',
     }))),

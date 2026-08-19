@@ -693,7 +693,8 @@ export function renderSpeciesForm(options: SpeciesFormOptions): Cleanup {
             changeGrant(grantIndex, grant, 'rule_key', ruleKey.value));
           card.append(...labelledControl('Stable grant label', ruleKey.id, ruleKey));
         }
-        if (grant.kind === 'fixed_spell') {
+        switch (grant.kind) {
+          case 'fixed_spell': {
           const prepared = element('input', {
             attributes: { id: `${prefix}-prepared`, type: 'checkbox' },
           });
@@ -703,7 +704,9 @@ export function renderSpeciesForm(options: SpeciesFormOptions): Cleanup {
           card.append(
             ...labelledControl('Always prepared', prepared.id, prepared),
           );
-        } else if (grant.kind === 'choice_from_list') {
+            break;
+          }
+          case 'choice_from_list': {
           const count = element('input', {
             attributes: {
               id: `${prefix}-count`, type: 'number', min: '1', step: '1', required: '',
@@ -748,7 +751,9 @@ export function renderSpeciesForm(options: SpeciesFormOptions): Cleanup {
             ...labelledControl('Minimum spell level (optional)', minimum.id, minimum),
             ...labelledControl('Maximum spell level (optional)', maximum.id, maximum),
           );
-        } else if (grant.kind === 'choice_from_query') {
+            break;
+          }
+          case 'choice_from_query': {
           const schoolsInput = element('textarea', {
             attributes: {
               id: `${prefix}-schools`,
@@ -823,7 +828,9 @@ export function renderSpeciesForm(options: SpeciesFormOptions): Cleanup {
             ...labelledControl('Minimum spell level (optional)', minimum.id, minimum),
             ...labelledControl('Maximum spell level (optional)', maximum.id, maximum),
           );
-        } else {
+            break;
+          }
+          case 'skill_proficiency': {
           const count = element('input', {
             attributes: {
               id: `${prefix}-count`, type: 'number', min: '1', step: '1', required: '',
@@ -858,6 +865,14 @@ export function renderSpeciesForm(options: SpeciesFormOptions): Cleanup {
             );
           }
           card.append(...labelledControl('Number of skills to choose', count.id, count), choices);
+            break;
+          }
+          /* c8 ignore next 5 -- unreachable while exhaustive; an extra-variant
+             tsc probe verified that the never assignment rejects a new grant. */
+          default: {
+            const unreachable: never = grant;
+            throw new TypeError(`Unhandled species grant ${String(unreachable)}.`);
+          }
         }
         card.append(createOrderedCardControls({
           collectionKey: 'species-grants',

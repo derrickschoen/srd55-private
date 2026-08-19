@@ -243,8 +243,12 @@ export const CATALOG_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
       // on an affected image now yields active rows where the buggy code
       // yielded orphaned — the corrected output. The idempotency and rollback
       // sibling tests verify the fixed behavior.
+      // 2026-08-19 merge recompute (wt/simcore -> main): both parents re-pinned
+      // over different frozen sources (main: skill-grants revival fix; simcore:
+      // configured-choice-rule work); recomputed over the merged bytes via
+      // catalogDataMigrationChecksum(entry.sources) per the D226 procedure.
       checksum:
-        'df6a2abf6d0c6f59c176527dede98c119c6bc2227b0595b08600d593999473d2',
+        'e649951df8c8177c80ebc6363c6bbc4902e7c82d8e1e7c5a0749ede307b25125',
       run: reconcileSpeciesLineageContentV2,
     }),
   ]);

@@ -48,7 +48,7 @@ function usage() {
   node scripts/mutation-shard.mjs plan [--shards N]
   node scripts/mutation-shard.mjs run --shard K [--shards N] [--concurrency N] [--chunk-files N] [--rerun]
   node scripts/mutation-shard.mjs run-all [--shards N] [--concurrency N] [--chunk-files N] [--rerun]
-  node scripts/mutation-shard.mjs merge [--shards N]
+  node scripts/mutation-shard.mjs merge [--shards N] [--rerun]
 
 The default shard count is ${DEFAULT_SHARD_COUNT}. Shard numbers are one-based.
 Run concurrency defaults to stryker.config.json (${BASE_CONCURRENCY} today) and can
@@ -58,7 +58,10 @@ acquire the shared box lock as class long once per chunk and release it between
 chunks, so invoke them directly rather than wrapping the runner itself. Omit the
 flag to retain the unwrapped single-invocation behavior.
 --rerun is the D308 iteration mode: enables ignoreStatic on top of the
-per-shard incremental cache. Full audits omit it — static mutants stay on.
+per-shard incremental cache. Rerun reports live below each shard's rerun/
+directory; the incremental cache remains at the shard root. Full audits omit
+the flag and stay at the legacy shard-root paths. merge selects exactly the
+requested layer and refuses incomplete or mixed layers.
 Reports are stored under reports/mutation-shards/ and the merged report is
 written to mutation-report.json.`);
 }
@@ -126,8 +129,8 @@ function parseArguments(argv) {
   if (!['run', 'run-all'].includes(command) && chunkFiles !== undefined) {
     fail('--chunk-files is only valid with the run and run-all commands.');
   }
-  if (!['run', 'run-all'].includes(command) && rerun) {
-    fail('--rerun is only valid with the run and run-all commands.');
+  if (!['run', 'run-all', 'merge'].includes(command) && rerun) {
+    fail('--rerun is only valid with the run, run-all, and merge commands.');
   }
   if (['run', 'run-all'].includes(command) && concurrency === undefined) {
     const environmentConcurrency = process.env[CONCURRENCY_ENV];
@@ -308,14 +311,17 @@ async function createManifest(shardCount) {
   return { config, manifest };
 }
 
-function shardPaths(shard) {
-  const directory = resolve(ARTIFACT_ROOT, shard.name);
+function shardPaths(shard, rerun = false, artifactRoot = ARTIFACT_ROOT) {
+  const shardDirectory = resolve(artifactRoot, shard.name);
+  const directory = rerun ? resolve(shardDirectory, 'rerun') : shardDirectory;
   return {
+    shardDirectory,
     directory,
     config: resolve(directory, 'stryker.config.json'),
     rawSources: resolve(directory, 'raw-sources.json'),
     report: resolve(directory, 'mutation.json'),
-    incremental: resolve(directory, 'incremental.json'),
+    // Audit and rerun layers intentionally share incremental state (D308).
+    incremental: resolve(shardDirectory, 'incremental.json'),
     metadata: resolve(directory, 'run.json'),
     vitestConfig: resolve(directory, 'vitest.config.mjs'),
   };
@@ -510,7 +516,7 @@ async function runShard(
     fail(`Shard ${shardIndex} has no files; use no more than ${manifest.totalFiles} shards.`);
   }
 
-  const paths = shardPaths(shard);
+  const paths = shardPaths(shard, rerun);
   await mkdir(paths.directory, { recursive: true });
   await rm(paths.report, { force: true });
   await rm(paths.metadata, { force: true });
@@ -725,6 +731,60 @@ function mergeTestFiles(target, incoming) {
   }
 }
 
+function namespaceShardReport(report, namespace, label = namespace) {
+  const normalizedTestFiles = {};
+  mergeTestFiles(normalizedTestFiles, report.testFiles);
+
+  const definitionsById = new Map();
+  const testFiles = {};
+  for (const [fileName, testFile] of Object.entries(normalizedTestFiles)) {
+    const namespacedFileName = `${namespace}:${fileName}`;
+    const tests = testFile.tests.map((test) => {
+      const rawId = String(test.id);
+      const definition = stableStringify({ fileName, test });
+      const existing = definitionsById.get(rawId);
+      if (existing !== undefined && existing !== definition) {
+        fail(`Conflicting definition for test id ${rawId} within ${label}.`);
+      }
+      definitionsById.set(rawId, definition);
+      return { ...test, id: `${namespace}:${rawId}` };
+    });
+    testFiles[namespacedFileName] = { ...testFile, tests };
+  }
+
+  const namespaceReferences = (references, mutantId, property) => {
+    if (references === undefined) {
+      return undefined;
+    }
+    return references.map((id) => {
+      const rawId = String(id);
+      if (!definitionsById.has(rawId)) {
+        fail(`${label} mutant ${mutantId} has unknown ${property} test id ${rawId}.`);
+      }
+      return `${namespace}:${rawId}`;
+    });
+  };
+  const files = Object.fromEntries(
+    Object.entries(report.files).map(([fileName, fileResult]) => [
+      fileName,
+      {
+        ...fileResult,
+        mutants: fileResult.mutants.map((mutant) => ({
+          ...mutant,
+          coveredBy: namespaceReferences(mutant.coveredBy, mutant.id, 'coveredBy'),
+          killedBy: namespaceReferences(mutant.killedBy, mutant.id, 'killedBy'),
+        })),
+      },
+    ]),
+  );
+
+  return {
+    ...report,
+    files,
+    ...(Object.keys(testFiles).length > 0 ? { testFiles } : {}),
+  };
+}
+
 function sumPerformance(target, performance) {
   if (performance === undefined) {
     return target;
@@ -810,7 +870,66 @@ function formatDuration(runtimeMs) {
     .join(' ');
 }
 
-async function mergeReports(manifest) {
+async function loadReportLayer(manifest, rerun, artifactRoot) {
+  const layerName = rerun ? 'rerun' : 'audit';
+  const available = [];
+  const unavailable = [];
+  const loaded = new Map();
+
+  for (const shard of manifest.shards) {
+    const paths = shardPaths(shard, rerun, artifactRoot);
+    const [metadataText, reportText] = await Promise.all([
+      readFile(paths.metadata, 'utf8').catch(() => undefined),
+      readFile(paths.report, 'utf8').catch(() => undefined),
+    ]);
+    const missing = [
+      ...(metadataText === undefined ? ['run.json'] : []),
+      ...(reportText === undefined ? ['mutation.json'] : []),
+    ];
+    if (missing.length > 0) {
+      unavailable.push(`${shard.name} (missing ${missing.join(' and ')})`);
+      continue;
+    }
+
+    let metadata;
+    let report;
+    try {
+      metadata = JSON.parse(metadataText);
+      report = JSON.parse(reportText);
+    } catch (error) {
+      unavailable.push(
+        `${shard.name} (invalid JSON: ${error instanceof Error ? error.message : String(error)})`,
+      );
+      continue;
+    }
+    if ((metadata.rerun === true) !== rerun) {
+      unavailable.push(
+        `${shard.name} (run.json marks ${metadata.rerun === true ? 'rerun' : 'audit'})`,
+      );
+      continue;
+    }
+    available.push(shard.name);
+    loaded.set(shard.name, { metadata, report });
+  }
+
+  if (unavailable.length > 0) {
+    fail(
+      `Missing requested ${layerName} layer for ${unavailable.join(', ')}. ` +
+        `Shards with the ${layerName} layer: ${available.length > 0 ? available.join(', ') : 'none'}.`,
+    );
+  }
+  return loaded;
+}
+
+async function mergeReports(
+  manifest,
+  {
+    rerun = false,
+    artifactRoot = ARTIFACT_ROOT,
+    aggregatePath = AGGREGATE_PATH,
+    write = true,
+  } = {},
+) {
   const files = {};
   const testFiles = {};
   const shardRuntimesMs = {};
@@ -821,12 +940,10 @@ async function mergeReports(manifest) {
   let framework;
   let system;
   let performance;
+  const reportLayer = await loadReportLayer(manifest, rerun, artifactRoot);
 
   for (const shard of manifest.shards) {
-    const paths = shardPaths(shard);
-    const metadata = JSON.parse(
-      await readFile(paths.metadata, 'utf8').catch(() => fail(`Missing run metadata for ${shard.name}.`)),
-    );
+    const { metadata, report } = reportLayer.get(shard.name);
     if (metadata.exitCode !== 0 || metadata.signal !== null) {
       fail(`${shard.name} did not complete successfully; re-run it before merging.`);
     }
@@ -847,9 +964,6 @@ async function mergeReports(manifest) {
       rerunShards.push(shard.name);
     }
 
-    const report = JSON.parse(
-      await readFile(paths.report, 'utf8').catch(() => fail(`Missing JSON mutation report for ${shard.name}.`)),
-    );
     schemaVersion ??= report.schemaVersion;
     thresholds ??= report.thresholds;
     framework ??= report.framework;
@@ -861,10 +975,11 @@ async function mergeReports(manifest) {
       fail(`${shard.name} has thresholds that differ from prior shards.`);
     }
     performance = sumPerformance(performance, report.performance);
-    mergeTestFiles(testFiles, report.testFiles);
+    const namespacedReport = namespaceShardReport(report, shard.name, `${shard.name} report`);
+    mergeTestFiles(testFiles, namespacedReport.testFiles);
 
     const reportedFileNames = [];
-    for (const [fileName, fileResult] of Object.entries(report.files)) {
+    for (const [fileName, fileResult] of Object.entries(namespacedReport.files)) {
       const normalizedName = normalizeReportFileName(fileName, report.projectRoot);
       reportedFileNames.push(normalizedName);
       if (!shard.files.includes(normalizedName)) {
@@ -913,6 +1028,7 @@ async function mergeReports(manifest) {
     config: {
       sharding: {
         shardCount: manifest.shardCount,
+        reportLayer: rerun ? 'rerun' : 'audit',
         manifestFingerprint: manifest.fingerprint,
         fileListHash: manifest.fileListHash,
         runs: shardRunSettings,
@@ -941,11 +1057,15 @@ async function mergeReports(manifest) {
       fullAudit: rerunShards.length === 0,
     },
   };
-  await writeJsonAtomic(AGGREGATE_PATH, aggregate);
-  console.log(`\nMerged ${allMutants.length} mutants from ${manifest.shardCount} shards into mutation-report.json.`);
+  if (write) {
+    await writeJsonAtomic(aggregatePath, aggregate);
+  }
   console.log(
-    `Killed ${statusTotals.Killed}; Survived ${statusTotals.Survived}; ` +
-      `NoCoverage ${statusTotals.NoCoverage}; CompileError ${statusTotals.CompileError}; ` +
+    `\nMerged ${allMutants.length} mutants from ${manifest.shardCount} shards` +
+      `${write ? ` into ${slashPath(relative(PROJECT_ROOT, aggregatePath))}` : ' (dry run)'}.`,
+  );
+  console.log(
+    `${STATUS_NAMES.map((status) => `${status} ${statusTotals[status]}`).join('; ')}; ` +
       `score ${mutationScore === null ? 'n/a' : `${mutationScore.toFixed(2)}%`}.`,
   );
   if (rerunShards.length > 0) {
@@ -958,6 +1078,7 @@ async function mergeReports(manifest) {
   for (const shard of manifest.shards) {
     console.log(`${shard.name}: ${formatDuration(shardRuntimesMs[shard.name])}`);
   }
+  return aggregate;
 }
 
 async function main() {
@@ -996,13 +1117,17 @@ async function main() {
         options.rerun,
       );
     }
-    await mergeReports(manifest);
+    await mergeReports(manifest, { rerun: options.rerun });
   } else {
-    await mergeReports(manifest);
+    await mergeReports(manifest, { rerun: options.rerun });
   }
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : error);
-  process.exitCode = 1;
-});
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : error);
+    process.exitCode = 1;
+  });
+}
+
+export { mergeReports, namespaceShardReport, parseArguments, shardPaths };
