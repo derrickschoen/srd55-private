@@ -7,6 +7,31 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D312 — OWNER: the loop moves the VTT forward (2026-08-19)
+
+The supervision loop's forward thread is now the VTT. Rulings, verbatim intent:
+
+1. The VTT is a **superset of the rules engine used by the sim** — one engine,
+   not a fork. It adds what the sim lacks, movement modelling first; if the
+   movement mechanics work out, they may be merged back into the sim.
+2. **Pluggable controllers**: any enemy or any PC can be driven by (a) a code
+   algorithm, (b) a codex AI agent, or (c) a human. The controller boundary is
+   an interface from day one.
+3. **Draft 1 runs entirely in the DM's browser** and is screen-shared. No
+   multi-browser requirement for v1.
+4. **Provision in the code** — seams, not implementations — for player
+   browsers in later versions: showing the map, moving their own characters,
+   making attacks. (The existing transport interface + RelayTransport seam in
+   wt/vtt phase 1 satisfies the transport half of this.)
+
+D260.8/D260.2 fog rules and the phase-2 negative scope (no cloud accounts, no
+voice/video, no hosted asset library; rules automation IN bounds) stand.
+
+Same tick (housekeeping, executed): all done `dnd-*` worktrees deleted with
+their branches — 8 merged to main (dracres, grantper, grantskill, minors,
+mutspeed, ruleskill, sgorphan, sheetkill), 7 verified fully contained in
+wt/simcore (4 bench worktrees, lane-b, lane-c, lane-inc5).
+
 ## D311 — OWNER: fix campaign scope is the top-12 files; minors first, then owner v1 review (2026-08-19)
 
 From the D310 triage (1,013 real gaps): the fix wave covers the **top-12
