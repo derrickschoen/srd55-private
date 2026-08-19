@@ -229,5 +229,13 @@ vitest + tsc for increments; full suite + build gate before wt/vtt→main).
   standing per-PC reaction policies with prompt-on-ambiguity, PC death-save
   rolling (hidden-by-default results), stabilization, visibility projections,
   local coordinator. Mutations 18 and 24 complete the 17-24 ledger.
-- Status: dispatching to codex on lane-wt/vtt3a (ff'd to wt/vtt @ 11fcf686).
+- Status: CLOSED round 1. Codex delivered controllers.ts/coordinator.ts/
+  visibility.ts + three suites; supervisor verified combat 128/128, sim
+  unchanged 176/176, tsc clean; death-save clauses checked word-for-word
+  against srd-5.2.1.txt:1101-1113; supervisor control nat-1 failures 2->1
+  killed by named tests (crit-damage clause shares the constant). Ledger
+  17-24 complete (M18/M24 + three codex wrong-value controls). Merged to
+  wt/vtt; full gate launched (.tmp-gate-3b.log). Increment 3 is COMPLETE
+  pending that gate. Next: increment 4 (spell engine + templates) — still
+  claimed by this session unless released here.
 
