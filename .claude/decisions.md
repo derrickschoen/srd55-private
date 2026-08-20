@@ -9,9 +9,9 @@
 
 ## D318 — OWNER: soak fleet uses private builds; non-SRD mechanics get a gap register and clean-room equivalents (2026-08-19)
 
-Owner directives, 2026-08-19 (verbatim intent; "Colby builds" recorded
-as heard, interpreted as the private d4 repo's PC builds — correct the
-name here if that reading is wrong):
+Owner directives, 2026-08-19 (verbatim intent; "Colby builds" =
+the private d4 repo's 89 Colby-method builds in builds/fixtures/ —
+name verified against that repo's own docs):
 
 1. **Half of the VTT all-AI soak runs use the PRIVATE repo's builds for
    the PC party**; the other half stay on the D260 SRD reference party.
