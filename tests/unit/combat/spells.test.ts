@@ -39,8 +39,8 @@ const EXPECTED_LEVEL_TOTALS: Readonly<Record<SpellLevel, number>> = {
   4: 30,
 };
 const EXPECTED_MANIFEST_TOTAL = 175;
-const EXPECTED_IMPLEMENTED = 145;
-const EXPECTED_PENDING = 30;
+const EXPECTED_IMPLEMENTED = 175;
+const EXPECTED_PENDING = 0;
 const EXPECTED_CANTRIP_AND_LEVEL_ONE_IMPLEMENTED = 63;
 
 interface ValuePin {
@@ -601,6 +601,12 @@ function operationDice(definition: SpellDefinition): readonly [number, number] |
       return [operation.saveDice.baseCount, operation.saveDice.sides];
     case 'attack_damage_over_time':
       return [operation.initialDice.baseCount, operation.initialDice.sides];
+    case 'save_multi_damage':
+      return operation.terms[0] === undefined ? null : [operation.terms[0].dice.baseCount, operation.terms[0].dice.sides];
+    case 'save_damage_over_time':
+      return [operation.initialDice.baseCount, operation.initialDice.sides];
+    case 'save_damage_and_effect':
+      return [operation.dice.baseCount, operation.dice.sides];
     case 'attack_rays':
     case 'summoned_weapon_attack':
     case 'lifedrain_attack':
@@ -636,6 +642,12 @@ function operationPerSlot(definition: SpellDefinition): number {
       return operation.saveDice.perSlotCount;
     case 'attack_damage_over_time':
       return operation.initialDice.perSlotCount;
+    case 'save_multi_damage':
+      return operation.terms[0]?.dice.perSlotCount ?? 0;
+    case 'save_damage_over_time':
+      return operation.initialDice.perSlotCount;
+    case 'save_damage_and_effect':
+      return operation.dice.perSlotCount;
     case 'attack_rays':
       return operation.dice.perSlotCount;
     case 'summoned_weapon_attack':
@@ -800,19 +812,19 @@ describe('reference-party spell manifest', () => {
     }
   });
 
-  it('pins the burn-down at exactly 145 implemented and 30 pending rows', () => {
+  it('closes increment 4 with exactly 175 implemented and zero pending rows', () => {
     expect(SPELL_MANIFEST.filter((row) => row.status === 'implemented')).toHaveLength(EXPECTED_IMPLEMENTED);
     expect(SPELL_MANIFEST.filter((row) => row.status === 'pending')).toHaveLength(EXPECTED_PENDING);
     expect(IMPLEMENTED_SPELL_DEFINITIONS).toHaveLength(EXPECTED_IMPLEMENTED);
     expect(() => assertSpellManifestBurnDown(SPELL_MANIFEST, spellDefinition)).not.toThrow();
   });
 
-  it('burn-down rejects marking a pending row implemented without a definition', () => {
-    const pendingIndex = SPELL_MANIFEST.findIndex((row) => row.status === 'pending');
+  it('closed manifest rejects marking any implemented row pending', () => {
+    const pendingIndex = 0;
     const mutated: SpellManifestRow[] = SPELL_MANIFEST.map((row, index) =>
-      index === pendingIndex ? { ...row, status: 'implemented' } : row);
+      index === pendingIndex ? { ...row, status: 'pending' } : row);
     expect(() => assertSpellManifestBurnDown(mutated, spellDefinition)).toThrow(
-      'has no definition',
+      'is not closed',
     );
   });
 });

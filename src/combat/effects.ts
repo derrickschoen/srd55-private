@@ -650,6 +650,242 @@ export type EffectPayload =
       readonly transitionCost: 'bonus_action';
     }
   | {
+      readonly kind: 'arcane_eye';
+      readonly darkvisionFeet: number;
+      readonly moveFeetPerBonusAction: number;
+      readonly minimumOpeningInches: number;
+      readonly invisible: true;
+      readonly invulnerable: true;
+    }
+  | {
+      readonly kind: 'aura_of_life';
+      readonly radiusFeet: number;
+      readonly resistanceType: 'Necrotic';
+      readonly preventsHitPointMaximumReduction: true;
+      readonly startTurnHealingAtZero: number;
+    }
+  | {
+      readonly kind: 'banishment';
+      readonly condition: 'Incapacitated';
+      readonly nativePlaneCreatureTypes: readonly ('Aberration' | 'Celestial' | 'Elemental' | 'Fey' | 'Fiend')[];
+      readonly permanentAfterRounds: number;
+    }
+  | {
+      readonly kind: 'black_tentacles_area';
+      readonly placement: AreaTemplate | 'selected_when_cast';
+      readonly squareFeet: number;
+      readonly difficultTerrain: true;
+      readonly saveAbility: 'strength';
+      readonly damageCount: number;
+      readonly damageSides: number;
+      readonly damageType: 'Bludgeoning';
+      readonly failureCondition: 'Restrained';
+      readonly escapeCheckSkill: 'Athletics';
+      readonly oncePerTurn: true;
+    }
+  | {
+      readonly kind: 'charm_monster';
+      readonly condition: 'Charmed';
+      readonly hostileSaveMode: 'advantage';
+      readonly attitude: 'Friendly';
+      readonly endsWhenDamagedByCasterOrAllies: true;
+      readonly targetKnowsAfterward: true;
+    }
+  | {
+      readonly kind: 'confusion_area';
+      readonly placement: AreaTemplate | 'selected_when_cast';
+      readonly behaviorDieSides: number;
+      readonly directionDieSides: number;
+      readonly bonusActionsAllowed: false;
+      readonly reactionsAllowed: false;
+    }
+  | {
+      readonly kind: 'conjure_minor_elementals';
+      readonly radiusFeet: number;
+      readonly damageTypes: readonly ('Acid' | 'Cold' | 'Fire' | 'Lightning')[];
+      readonly damageCount: number;
+      readonly damageSides: number;
+      readonly damagePerSlotCount: number;
+      readonly difficultTerrainForEnemies: true;
+    }
+  | {
+      readonly kind: 'control_water';
+      readonly placement: AreaTemplate | 'selected_when_cast';
+      readonly cubeFeet: number;
+      readonly modes: readonly ('flood' | 'part_water' | 'redirect_flow' | 'whirlpool')[];
+      readonly floodRiseFeet: number;
+      readonly capsizePercent: number;
+      readonly whirlpoolMinimumSquareFeet: number;
+      readonly whirlpoolMinimumDepthFeet: number;
+      readonly whirlpoolBaseFeet: number;
+      readonly whirlpoolTopFeet: number;
+      readonly whirlpoolHeightFeet: number;
+      readonly pullRadiusFeet: number;
+      readonly pullFeet: number;
+      readonly damageCount: number;
+      readonly damageSides: number;
+      readonly onSuccess: 'half';
+    }
+  | {
+      readonly kind: 'death_ward';
+      readonly replacementHitPoints: number;
+      readonly negatesInstantDeath: true;
+      readonly consumedOnTrigger: true;
+    }
+  | {
+      readonly kind: 'dimension_door';
+      readonly maximumDistanceFeet: number;
+      readonly maximumPassengers: number;
+      readonly passengerStartFeet: number;
+      readonly passengerDestinationFeet: number;
+      readonly failureDamageCount: number;
+      readonly failureDamageSides: number;
+      readonly failureDamageType: 'Force';
+    }
+  | {
+      readonly kind: 'divination';
+      readonly forecastDays: number;
+      readonly noAnswerChancePerExtraCastingPercent: number;
+    }
+  | {
+      readonly kind: 'fabricate';
+      readonly standardCubeFeet: number;
+      readonly connectedCubes: number;
+      readonly mineralCubeFeet: number;
+      readonly requiresArtisanToolProficiencyForSkilledItems: true;
+      readonly createsCreaturesOrMagicItems: false;
+    }
+  | {
+      readonly kind: 'faithful_hound';
+      readonly maximumSeparationFeet: number;
+      readonly triggerRadiusFeet: number;
+      readonly truesightFeet: number;
+      readonly biteReachFeet: number;
+      readonly saveAbility: 'dexterity';
+      readonly damageCount: number;
+      readonly damageSides: number;
+      readonly damageType: 'Force';
+      readonly moveFeetPerMagicAction: number;
+    }
+  | {
+      readonly kind: 'fire_shield';
+      readonly brightFeet: number;
+      readonly dimFeet: number;
+      readonly resistanceTypes: readonly ('Cold' | 'Fire')[];
+      readonly retaliationReachFeet: number;
+      readonly retaliationDamageCount: number;
+      readonly retaliationDamageSides: number;
+      readonly retaliationDamageTypes: readonly ('Fire' | 'Cold')[];
+    }
+  | {
+      readonly kind: 'freedom_of_movement';
+      readonly ignoresDifficultTerrain: true;
+      readonly preventsMagicalSpeedReduction: true;
+      readonly preventedConditions: readonly ('Paralyzed' | 'Restrained')[];
+      readonly swimSpeedEqualsSpeed: true;
+      readonly nonmagicalEscapeMovementFeet: number;
+    }
+  | {
+      readonly kind: 'guardian_of_faith';
+      readonly size: 'Large';
+      readonly triggerRadiusFeet: number;
+      readonly saveAbility: 'dexterity';
+      readonly damage: number;
+      readonly damageType: 'Radiant';
+      readonly onSuccess: 'half';
+      readonly maximumTotalDamage: number;
+    }
+  | {
+      readonly kind: 'hallucinatory_terrain';
+      readonly placement: AreaTemplate | 'selected_when_cast';
+      readonly cubeFeet: number;
+      readonly sensoryModes: readonly ('visual' | 'sound' | 'smell')[];
+      readonly tactileUnchanged: true;
+      readonly investigationAgainstSpellDc: true;
+    }
+  | {
+      readonly kind: 'ice_storm_terrain';
+      readonly placement: AreaTemplate | 'selected_when_cast';
+      readonly difficultTerrain: true;
+    }
+  | {
+      readonly kind: 'locate_creature';
+      readonly radiusFeet: number;
+      readonly familiarityDistanceFeet: number;
+      readonly blockedByLead: true;
+      readonly failsForDifferentForm: true;
+    }
+  | {
+      readonly kind: 'phantasmal_killer';
+      readonly disadvantagedTests: readonly ('ability_check' | 'attack_roll')[];
+      readonly repeatSaveAbility: 'wisdom';
+      readonly repeatDamageCount: number;
+      readonly repeatDamageSides: number;
+      readonly repeatDamagePerSlotCount: number;
+      readonly repeatDamageType: 'Psychic';
+    }
+  | {
+      readonly kind: 'polymorph';
+      readonly formType: 'Beast';
+      readonly maximumChallengeRating: 'target_cr_or_level';
+      readonly temporaryHitPoints: 'beast_hit_points';
+      readonly endsAtTemporaryHitPoints: number;
+      readonly canSpeak: false;
+      readonly canCastSpells: false;
+      readonly gearMelds: true;
+    }
+  | {
+      readonly kind: 'private_sanctum';
+      readonly placement: AreaTemplate | 'selected_when_cast';
+      readonly minimumCubeFeet: number;
+      readonly maximumCubeFeet: number;
+      readonly cubeFeetPerSlot: number;
+      readonly protections: readonly ('sound' | 'vision' | 'divination_sensors' | 'divination_targeting' | 'teleportation' | 'planar_travel')[];
+      readonly permanentAfterDailyCastings: number;
+    }
+  | {
+      readonly kind: 'resilient_sphere';
+      readonly maximumSize: 'Large';
+      readonly blocksPhysicalObjectsEnergyAndSpells: true;
+      readonly immuneToDamage: true;
+      readonly rollSpeedMultiplier: 0.5;
+      readonly destroyedBy: 'Disintegrate';
+    }
+  | {
+      readonly kind: 'secret_chest';
+      readonly chestDimensionsFeet: readonly [number, number, number];
+      readonly capacityCubicFeet: number;
+      readonly recallDistanceFeet: number;
+      readonly riskBeginsAfterDays: number;
+      readonly dailyEndChancePercent: number;
+      readonly chestMinimumGp: number;
+      readonly replicaMinimumGp: number;
+    }
+  | {
+      readonly kind: 'stone_shape';
+      readonly maximumDimensionFeet: number;
+      readonly maximumHinges: number;
+      readonly permitsLatch: true;
+    }
+  | {
+      readonly kind: 'damage_resistances';
+      readonly damageTypes: readonly ('Bludgeoning' | 'Piercing' | 'Slashing')[];
+    }
+  | {
+      readonly kind: 'wall_of_fire';
+      readonly placement: AreaTemplate | 'selected_when_cast';
+      readonly maximumLengthFeet: number;
+      readonly heightFeet: number;
+      readonly thicknessFeet: number;
+      readonly ringDiameterFeet: number;
+      readonly damagingSideDistanceFeet: number;
+      readonly damageCount: number;
+      readonly damageSides: number;
+      readonly damagePerSlotCount: number;
+      readonly damageType: 'Fire';
+      readonly opaque: true;
+    }
+  | {
       readonly kind: 'minor_magic';
       readonly spell: 'Elementalism' | 'Prestidigitation' | 'Thaumaturgy';
       readonly options: readonly string[];

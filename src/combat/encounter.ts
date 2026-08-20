@@ -381,7 +381,36 @@ function appliedConditions(effect: EncounterEffect): readonly AppliedCondition[]
     case 'vampiric_touch':
     case 'water_breathing':
     case 'water_walk':
+    case 'arcane_eye':
+    case 'aura_of_life':
+    case 'black_tentacles_area':
+    case 'confusion_area':
+    case 'conjure_minor_elementals':
+    case 'control_water':
+    case 'death_ward':
+    case 'dimension_door':
+    case 'divination':
+    case 'fabricate':
+    case 'faithful_hound':
+    case 'fire_shield':
+    case 'freedom_of_movement':
+    case 'guardian_of_faith':
+    case 'hallucinatory_terrain':
+    case 'ice_storm_terrain':
+    case 'locate_creature':
+    case 'phantasmal_killer':
+    case 'polymorph':
+    case 'private_sanctum':
+    case 'resilient_sphere':
+    case 'secret_chest':
+    case 'stone_shape':
+    case 'damage_resistances':
+    case 'wall_of_fire':
       return [];
+    case 'banishment':
+      return [{ name: effect.payload.condition }];
+    case 'charm_monster':
+      return [{ name: effect.payload.condition, source: effect.source }];
     case 'hypnotic_pattern':
       return effect.payload.conditions.map((condition) =>
         condition === 'Charmed' ? { name: condition, source: effect.source } : { name: condition });
@@ -1359,6 +1388,33 @@ function cloneEffectApplication(
       case 'vampiric_touch':
       case 'water_breathing':
       case 'water_walk':
+      case 'arcane_eye':
+      case 'aura_of_life':
+      case 'banishment':
+      case 'black_tentacles_area':
+      case 'charm_monster':
+      case 'confusion_area':
+      case 'conjure_minor_elementals':
+      case 'control_water':
+      case 'death_ward':
+      case 'dimension_door':
+      case 'divination':
+      case 'fabricate':
+      case 'faithful_hound':
+      case 'fire_shield':
+      case 'freedom_of_movement':
+      case 'guardian_of_faith':
+      case 'hallucinatory_terrain':
+      case 'ice_storm_terrain':
+      case 'locate_creature':
+      case 'phantasmal_killer':
+      case 'polymorph':
+      case 'private_sanctum':
+      case 'resilient_sphere':
+      case 'secret_chest':
+      case 'stone_shape':
+      case 'damage_resistances':
+      case 'wall_of_fire':
         return { ...application.payload };
       case 'commanded_action':
         return { ...application.payload, options: [...application.payload.options] };
@@ -1980,6 +2036,11 @@ function resolvedSpellEffectPayload(
     case 'sleet_storm_area':
     case 'stinking_cloud_area':
     case 'tiny_hut':
+    case 'black_tentacles_area':
+    case 'confusion_area':
+    case 'control_water':
+    case 'hallucinatory_terrain':
+    case 'ice_storm_terrain':
       return payload.placement === 'selected_when_cast'
         ? { ...payload, placement: selectedArea() }
         : payload;
@@ -2004,6 +2065,22 @@ function resolvedSpellEffectPayload(
         storedSpellMaximumLevel: payload.storedSpellMaximumLevel + slotDelta,
       };
     case 'spirit_guardians_area':
+      return {
+        ...payload,
+        placement: payload.placement === 'selected_when_cast' ? selectedArea() : payload.placement,
+        damageCount: payload.damageCount + payload.damagePerSlotCount * slotDelta,
+      };
+    case 'conjure_minor_elementals':
+      return { ...payload, damageCount: payload.damageCount + payload.damagePerSlotCount * slotDelta };
+    case 'phantasmal_killer':
+      return { ...payload, repeatDamageCount: payload.repeatDamageCount + payload.repeatDamagePerSlotCount * slotDelta };
+    case 'private_sanctum':
+      return {
+        ...payload,
+        placement: payload.placement === 'selected_when_cast' ? selectedArea() : payload.placement,
+        maximumCubeFeet: payload.maximumCubeFeet + payload.cubeFeetPerSlot * slotDelta,
+      };
+    case 'wall_of_fire':
       return {
         ...payload,
         placement: payload.placement === 'selected_when_cast' ? selectedArea() : payload.placement,
@@ -2102,6 +2179,24 @@ function resolvedSpellEffectPayload(
     case 'vampiric_touch':
     case 'water_breathing':
     case 'water_walk':
+    case 'arcane_eye':
+    case 'aura_of_life':
+    case 'banishment':
+    case 'charm_monster':
+    case 'death_ward':
+    case 'dimension_door':
+    case 'divination':
+    case 'fabricate':
+    case 'faithful_hound':
+    case 'fire_shield':
+    case 'freedom_of_movement':
+    case 'guardian_of_faith':
+    case 'locate_creature':
+    case 'polymorph':
+    case 'resilient_sphere':
+    case 'secret_chest':
+    case 'stone_shape':
+    case 'damage_resistances':
       return payload;
   }
 }
@@ -2285,6 +2380,27 @@ function removeSpellConditions(
   for (const effect of matching) removeEffectTarget(context, effect.id, target, 'condition_removed');
 }
 
+function applySpellDamageAmount(
+  context: ReductionContext,
+  source: CombatantId,
+  target: CombatantId,
+  type: DamageType,
+  sides: number,
+  rawAmount: number,
+): void {
+  const baseRequest: DamageRequest = {
+    terms: [{ type, dice: { count: 0, sides: dieSides(sides), modifier: rawAmount } }],
+    critical: false,
+    responses: [],
+  };
+  const adjusted = resolveDamage({
+    ...baseRequest,
+    responses: targetDamageResponses(context.state, target, baseRequest),
+  }, context.rng).total;
+  applyDamage(context, source, target, adjusted);
+  concentrationCheck(context, target, adjusted);
+}
+
 function processSpellCast(context: ReductionContext, command: SpellCastCommand): void {
   const definition = spellDefinition(command.spellId);
   if (definition === null) throw new EncounterRuleError(`Spell ${command.spellId} is not implemented.`);
@@ -2404,18 +2520,7 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
         const rawAmount = save.outcome === 'failure'
           ? roll.total
           : operation.onSuccess === 'half' ? Math.floor(roll.total / 2) : 0;
-        const baseRequest: DamageRequest = {
-          terms: [{ type: operation.damageType, dice: { count: 0, sides: dieSides(operation.dice.sides), modifier: rawAmount } }],
-          critical: false,
-          responses: [],
-        };
-        const responseRequest: DamageRequest = {
-          ...baseRequest,
-          responses: targetDamageResponses(context.state, target, baseRequest),
-        };
-        const adjusted = resolveDamage(responseRequest, context.rng).total;
-        applyDamage(context, command.actor, target, adjusted);
-        concentrationCheck(context, target, adjusted);
+        applySpellDamageAmount(context, command.actor, target, operation.damageType, operation.dice.sides, rawAmount);
         if (save.outcome === 'failure' && operation.riderOnFailure !== null) {
           applySpellEffect(context, definition, command, operation.riderOnFailure, [target]);
         }
@@ -2423,6 +2528,71 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
           context.state = pushAway(context.state, command.actor, target, operation.pushFeetOnFailure);
         }
       }
+      return;
+    }
+    case 'save_multi_damage': {
+      const rolled = operation.terms.map((term) => ({
+        type: term.damageType,
+        sides: term.dice.sides,
+        total: resolveDamage({
+          terms: [{ type: term.damageType, dice: scaledDiceExpression(definition, term.dice, command) }],
+          critical: false,
+          responses: [],
+        }, context.rng).total,
+      }));
+      for (const target of targets) {
+        const save = resolveTargetSave(context, command.actor, target, operation.ability, command.saveDc, 'normal', null);
+        for (const term of rolled) {
+          const amount = save.outcome === 'failure'
+            ? term.total
+            : operation.onSuccess === 'half' ? Math.floor(term.total / 2) : 0;
+          applySpellDamageAmount(context, command.actor, target, term.type, term.sides, amount);
+        }
+      }
+      if (operation.effect !== null) applySpellEffect(context, definition, command, operation.effect, [command.actor]);
+      return;
+    }
+    case 'save_damage_over_time': {
+      const initial = resolveDamage({
+        terms: [{ type: operation.damageType, dice: scaledDiceExpression(definition, operation.initialDice, command) }],
+        critical: false,
+        responses: [],
+      }, context.rng);
+      for (const target of targets) {
+        const save = resolveTargetSave(context, command.actor, target, operation.ability, command.saveDc, 'normal', null);
+        const amount = save.outcome === 'failure' ? initial.total : Math.floor(initial.total / 2);
+        applySpellDamageAmount(context, command.actor, target, operation.damageType, operation.initialDice.sides, amount);
+        if (save.outcome === 'failure') {
+          applySpellEffect(context, definition, command, {
+            payload: {
+              kind: 'ongoing_damage',
+              damage: {
+                terms: [{ type: operation.damageType, dice: scaledDiceExpression(definition, operation.laterDice, command) }],
+                critical: false,
+                responses: [],
+              },
+              timing: { combatant: target, boundary: 'end', source: definition.source },
+            },
+            target: 'targets', concentration: false, durationRounds: 1, expiresAt: 'target_end',
+          }, [target]);
+        }
+      }
+      return;
+    }
+    case 'save_damage_and_effect': {
+      const rolled = resolveDamage({
+        terms: [{ type: operation.damageType, dice: scaledDiceExpression(definition, operation.dice, command) }],
+        critical: false,
+        responses: [],
+      }, context.rng);
+      for (const target of targets) {
+        const save = resolveTargetSave(context, command.actor, target, operation.ability, command.saveDc, 'normal', null);
+        const amount = save.outcome === 'failure'
+          ? rolled.total
+          : operation.onSuccess === 'half' ? Math.floor(rolled.total / 2) : 0;
+        applySpellDamageAmount(context, command.actor, target, operation.damageType, operation.dice.sides, amount);
+      }
+      applySpellEffect(context, definition, command, operation.effect, [command.actor]);
       return;
     }
     case 'healing': {
