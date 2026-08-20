@@ -7,6 +7,36 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D320 — OWNER: DM-speed experiment program; shared enemy initiative; JS turn-programs (2026-08-20)
+
+Owner directives, 2026-08-20 (verbatim intent):
+
+1. **Collaboratively brainstorm and design EXPERIMENTS** to make AI
+   steering faster on terra medium without sacrificing quality:
+   prompting changes, skills, and/or an algorithm that "handles the
+   basics" so the model only steers.
+2. **terra medium vs luna medium HEAD-TO-HEAD** on those experiments to
+   measure the speed/quality trade directly.
+3. **Experiment with different INITIATIVE SYSTEMS** to measure their
+   effect on AI speed.
+4. **Stated intention (binding): ALL ENEMIES ACT ON ONE SHARED
+   INITIATIVE** so the DM plans all their turns at once.
+5. **JS TURN-PROGRAMS**: codex is code-tuned, so the AI DM and the AI
+   PC controller should output JS code describing how the turn goes,
+   including conditionals on play state (enemy dies / gets crowd-
+   controlled). Iterate, mine recurring patterns into permanently
+   stored code the model calls with parameters. The VTT gains the
+   ability to accept and interpret such code into character actions.
+
+Supervisor reconciliation note (amends D317.7's "never executable code
+strings", which the owner hereby overrides in substance): JS becomes
+the plan SURFACE LANGUAGE, executed in a sandboxed deterministic
+interpreter with NO ambient authority — its entire API is the typed
+action/query surface, every emitted action still validates through the
+reducer, execution is step- and time-bounded, and replay captures the
+program + its trace. Security and determinism guarantees carry over;
+only the syntax the model writes changes.
+
 ## D319 — OWNER: soak spend confirmed, VTT lands on main, program triggered (2026-08-20)
 
 1. **Soak fleet: CONTINUOUS AS RULED** — confirmed against measured
