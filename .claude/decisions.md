@@ -7,6 +7,15 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D324 — OWNER: naming style, Discord prep, report delivery (2026-08-20)
+
+1. **spike-vtt everywhere** — one form in all contexts: lowercase,
+   hyphenated. No styled "Spike" display variant.
+2. **Discord prep: BOTH shapes in parallel lanes** (B1 bot adapter and A1
+   Activity), each to the credential wall, when capacity allows.
+3. **Tranche visual reports delivered as Claude artifact links** (private
+   hosted page, URL handed to the owner).
+
 ## D323 — OWNER: never defer waiting for the owner (2026-08-20)
 
 Verbatim: "Don't defer anything waiting for me." Every previously
