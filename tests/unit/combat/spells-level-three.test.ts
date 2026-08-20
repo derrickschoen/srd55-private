@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { SpellSlotLevel } from '../../../src/combat/combatant';
 import type { EffectPayload } from '../../../src/combat/effects';
 import { createEncounter, reduceEncounter } from '../../../src/combat/encounter';
 import { IMPLEMENTED_SPELL_DEFINITIONS, spellDefinition } from '../../../src/combat/spells/definitions';
@@ -23,12 +24,14 @@ function effect(payload: EffectPayload, options: {
   readonly target?: 'self' | 'targets'; readonly concentration?: boolean;
   readonly durationRounds?: number | null; readonly expiresAt?: EffectData['expiresAt'];
   readonly repeatedSave?: EffectData['repeatedSave']; readonly durationRoundsPerSlot?: number;
+  readonly slotDurationTiers?: EffectData['slotDurationTiers'];
 } = {}): EffectData {
   return {
     payload, target: options.target ?? 'targets', concentration: options.concentration ?? false,
     durationRounds: options.durationRounds ?? 1, expiresAt: options.expiresAt ?? 'source_start',
     ...(options.repeatedSave === undefined ? {} : { repeatedSave: options.repeatedSave }),
     ...(options.durationRoundsPerSlot === undefined ? {} : { durationRoundsPerSlot: options.durationRoundsPerSlot }),
+    ...(options.slotDurationTiers === undefined ? {} : { slotDurationTiers: options.slotDurationTiers }),
   };
 }
 
@@ -36,10 +39,10 @@ function effect(payload: EffectPayload, options: {
 const LEVEL_THREE_PINS: readonly LevelThreePin[] = [
   { id: 'animate-dead', source: 'spell-descriptions.txt:219', targeting: { kind: 'utility', rangeFeet: 10 }, operation: { kind: 'utility', effect: { kind: 'summoned_undead', forms: ['Skeleton', 'Zombie'], createdCreatures: 1, createdCreaturesPerSlot: 2, reassertedCreatures: 4, reassertedCreaturesPerSlot: 2, commandRangeFeet: 60, controlDurationRounds: 14400 }, concentration: false, durationRounds: null, stateful: true } },
   { id: 'beacon-of-hope', source: 'spell-descriptions.txt:726', targeting: { kind: 'all_in_range', rangeFeet: 30 }, operation: { kind: 'effect', effect: effect({ kind: 'beacon_of_hope', wisdomSaveMode: 'advantage', deathSaveMode: 'advantage', maximizesHealing: true }, { concentration: true, durationRounds: 10 }) } },
-  { id: 'bestow-curse', source: 'spell-descriptions.txt:753', targeting: { kind: 'single', rangeFeet: 5, willing: false }, operation: { kind: 'save_effect', ability: 'wisdom', rollMode: 'normal', effect: effect({ kind: 'bestow_curse', options: ['ability_disadvantage', 'attacks_against_caster_disadvantage', 'forced_dodge', 'extra_necrotic_damage'], extraDamageCount: 1, extraDamageSides: 8 }, { concentration: true, durationRounds: 10, durationRoundsPerSlot: 90 }) } },
+  { id: 'bestow-curse', source: 'spell-descriptions.txt:753', targeting: { kind: 'single', rangeFeet: 5, willing: false }, operation: { kind: 'save_effect', ability: 'wisdom', rollMode: 'normal', effect: effect({ kind: 'bestow_curse', options: ['ability_disadvantage', 'attacks_against_caster_disadvantage', 'forced_dodge', 'extra_necrotic_damage'], extraDamageCount: 1, extraDamageSides: 8 }, { concentration: true, durationRounds: 10, slotDurationTiers: [{ minimumSlot: 4, durationRounds: 100, concentration: true }, { minimumSlot: 5, durationRounds: 4800, concentration: false }, { minimumSlot: 7, durationRounds: 14400, concentration: false }, { minimumSlot: 9, durationRounds: null, concentration: false }] }) } },
   { id: 'blink', source: 'spell-descriptions.txt:878', targeting: { kind: 'self' }, operation: { kind: 'effect', effect: effect({ kind: 'blink', dieSides: 6, etherealMinimum: 4, etherealVisionFeet: 60, returnSpaceFeet: 10 }, { target: 'self', durationRounds: 10 }) } },
-  { id: 'clairvoyance', source: 'spell-descriptions.txt:1121', targeting: { kind: 'utility', rangeFeet: 5280 }, operation: { kind: 'utility', effect: { kind: 'clairvoyance_sensor', rangeFeet: 5280, senses: ['hearing', 'seeing'], switchCost: 'bonus_action' }, concentration: true, durationRounds: 100 } },
-  { id: 'counterspell', source: 'spell-descriptions.txt:1767', targeting: { kind: 'single', rangeFeet: 60, willing: false }, operation: { kind: 'reaction_save_cancel', ability: 'constitution' } },
+  { id: 'clairvoyance', source: 'spell-descriptions.txt:1121', targeting: { kind: 'utility', rangeFeet: 5280 }, operation: { kind: 'utility', effect: { kind: 'clairvoyance_sensor', rangeFeet: 5280, senses: ['hearing', 'seeing'], switchCost: 'bonus_action', locationEligibility: 'familiar_or_obvious', intangible: true, invulnerable: true }, concentration: true, durationRounds: 100 } },
+  { id: 'counterspell', source: 'spell-descriptions.txt:1767', targeting: { kind: 'single', rangeFeet: 60, willing: false }, operation: { kind: 'reaction_save_cancel', ability: 'constitution', trigger: 'visible_creature_casts_spell_with_components' } },
   { id: 'create-food-and-water', source: 'spell-descriptions.txt:1781', targeting: { kind: 'utility', rangeFeet: 30 }, operation: { kind: 'utility', effect: { kind: 'created_food_and_water', foodPounds: 45, waterGallons: 30, foodSpoilsAfterRounds: 14400 }, concentration: false, durationRounds: null, stateful: true } },
   { id: 'daylight', source: 'spell-descriptions.txt:1967', targeting: { kind: 'area', rangeFeet: 60, shape: 'sphere', baseSizeFeet: 60, sizePerSlotFeet: 0 }, operation: { kind: 'utility', effect: { kind: 'daylight_area', placement: 'selected_when_cast', brightRadiusFeet: 60, additionalDimFeet: 60, dispelsDarknessSpellLevelAtMost: 3 }, concentration: false, durationRounds: 600 } },
   { id: 'dispel-magic', source: 'spell-descriptions.txt:2268', targeting: { kind: 'single', rangeFeet: 120, willing: false }, operation: { kind: 'dispel_magic', baseAutomaticLevel: 3, checkDcBase: 10 } },
@@ -58,16 +61,16 @@ const LEVEL_THREE_PINS: readonly LevelThreePin[] = [
   { id: 'nondetection', source: 'spell-descriptions.txt:5647', targeting: { kind: 'single', rangeFeet: 5, willing: true }, operation: { kind: 'effect', effect: effect({ kind: 'nondetection', blocksDivinationTargeting: true, blocksMagicalScryingSensors: true, maximumObjectDimensionFeet: 10 }, { durationRounds: 4800 }) } },
   { id: 'phantom-steed', source: 'spell-descriptions.txt:5758', targeting: { kind: 'utility', rangeFeet: 30 }, operation: { kind: 'utility', effect: { kind: 'phantom_steed', speedFeet: 100, travelMilesPerHour: 13, equipmentVanishDistanceFeet: 10, fadeRounds: 10 }, concentration: false, durationRounds: 600 } },
   { id: 'protection-from-energy', source: 'spell-descriptions.txt:6322', targeting: { kind: 'single', rangeFeet: 5, willing: true }, operation: { kind: 'effect', effect: effect({ kind: 'energy_protection', damageTypes: ['Acid', 'Cold', 'Fire', 'Lightning', 'Thunder'], selectedDamageType: 'chosen_when_cast' }, { concentration: true, durationRounds: 600 }) } },
-  { id: 'remove-curse', source: 'spell-descriptions.txt:6499', targeting: { kind: 'single', rangeFeet: 5, willing: true }, operation: { kind: 'remove_curse' } },
-  { id: 'revivify', source: 'spell-descriptions.txt:6604', targeting: { kind: 'single', rangeFeet: 5, willing: true, allowDead: true }, operation: { kind: 'revive', hitPoints: 1, maximumDeathAgeRounds: 10 } },
+  { id: 'remove-curse', source: 'spell-descriptions.txt:6499', targeting: { kind: 'single', rangeFeet: 5, willing: false }, operation: { kind: 'remove_curse' } },
+  { id: 'revivify', source: 'spell-descriptions.txt:6604', targeting: { kind: 'single', rangeFeet: 5, willing: false, allowDead: true }, operation: { kind: 'revive', hitPoints: 1, maximumDeathAgeRounds: 10 } },
   { id: 'sending', source: 'spell-descriptions.txt:6825', targeting: { kind: 'remote', range: 'unlimited' }, operation: { kind: 'utility', effect: { kind: 'sending', maximumWords: 25, crossPlaneFailurePercent: 5, recipientBlockRounds: 4800 }, concentration: false, durationRounds: null } },
   { id: 'sleet-storm', source: 'spell-descriptions.txt:7119', targeting: { kind: 'area', rangeFeet: 150, shape: 'cylinder', baseSizeFeet: 20, sizePerSlotFeet: 0, secondarySizeFeet: 40 }, operation: { kind: 'utility', effect: { kind: 'sleet_storm_area', placement: 'selected_when_cast', radiusFeet: 20, heightFeet: 40, obscurement: 'heavy', difficultTerrain: true, saveAbility: 'dexterity', failureCondition: 'Prone', failureBreaksConcentration: true }, concentration: true, durationRounds: 10 } },
   { id: 'slow', source: 'spell-descriptions.txt:7140', targeting: { kind: 'area_selected', rangeFeet: 120, shape: 'cube', baseSizeFeet: 40, sizePerSlotFeet: 0, baseMaximum: 6, additionalPerSlot: 0 }, operation: { kind: 'save_effect', ability: 'wisdom', rollMode: 'normal', effect: effect({ kind: 'slow', speedMultiplier: 0.5, armorClassPenalty: 2, dexteritySavePenalty: 2, reactionsAllowed: false, actionOrBonusOnly: true, attacksPerAction: 1, somaticSpellFailurePercent: 25 }, { concentration: true, durationRounds: 10, expiresAt: 'target_end', repeatedSave: { ability: 'wisdom', rollMode: 'normal', timing: 'target_end' } }) } },
   { id: 'speak-with-dead', source: 'spell-descriptions.txt:7214', targeting: { kind: 'utility', rangeFeet: 10 }, operation: { kind: 'utility', effect: { kind: 'speak_with_dead', maximumQuestions: 5, sameCorpseLockoutRounds: 144000 }, concentration: false, durationRounds: 100 } },
-  { id: 'spirit-guardians', source: 'spell-descriptions.txt:7324', targeting: { kind: 'area', rangeFeet: 0, shape: 'emanation', baseSizeFeet: 15, sizePerSlotFeet: 0 }, operation: { kind: 'utility', effect: { kind: 'spirit_guardians_area', placement: 'selected_when_cast', radiusFeet: 15, speedMultiplier: 0.5, damageTypes: ['Radiant', 'Necrotic'], damageCount: 3, damageSides: 8, damagePerSlotCount: 1, saveAbility: 'wisdom', onSuccess: 'half', oncePerTurn: true }, concentration: true, durationRounds: 100 } },
+  { id: 'spirit-guardians', source: 'spell-descriptions.txt:7324', targeting: { kind: 'area', rangeFeet: 0, shape: 'emanation', baseSizeFeet: 15, sizePerSlotFeet: 0 }, operation: { kind: 'utility', effect: { kind: 'spirit_guardians_area', placement: 'selected_when_cast', radiusFeet: 15, speedMultiplier: 0.5, damageTypeByCasterAlignment: { goodOrNeutral: 'Radiant', evil: 'Necrotic' }, damageCount: 3, damageSides: 8, damagePerSlotCount: 1, saveAbility: 'wisdom', onSuccess: 'half', oncePerTurn: true }, concentration: true, durationRounds: 100 } },
   { id: 'stinking-cloud', source: 'spell-descriptions.txt:7391', targeting: { kind: 'area', rangeFeet: 90, shape: 'sphere', baseSizeFeet: 20, sizePerSlotFeet: 0 }, operation: { kind: 'utility', effect: { kind: 'stinking_cloud_area', placement: 'selected_when_cast', radiusFeet: 20, obscurement: 'heavy', dispersedByStrongWind: true, saveAbility: 'constitution', failureCondition: 'Poisoned', actionsAllowedOnFailure: false }, concentration: true, durationRounds: 10 } },
   { id: 'tiny-hut', source: 'spell-descriptions.txt:7908', targeting: { kind: 'area', rangeFeet: 0, shape: 'emanation', baseSizeFeet: 10, sizePerSlotFeet: 0 }, operation: { kind: 'utility', effect: { kind: 'tiny_hut', placement: 'selected_when_cast', radiusFeet: 10, blocksOutsideCreaturesAndObjects: true, blocksSpellLevelAtMost: 3, opaqueFromOutside: true, transparentFromInside: true }, concentration: false, durationRounds: 4800 } },
-  { id: 'tongues', source: 'spell-descriptions.txt:7932', targeting: { kind: 'single', rangeFeet: 5, willing: true }, operation: { kind: 'effect', effect: effect({ kind: 'universal_language', understandsSpokenAndSigned: true, understoodByAnyLanguageSpeaker: true }, { durationRounds: 600 }) } },
+  { id: 'tongues', source: 'spell-descriptions.txt:7932', targeting: { kind: 'single', rangeFeet: 5, willing: false }, operation: { kind: 'effect', effect: effect({ kind: 'universal_language', understandsSpokenAndSigned: true, understoodByAnyLanguageSpeaker: true }, { durationRounds: 600 }) } },
   { id: 'vampiric-touch', source: 'spell-descriptions.txt:8158', targeting: { kind: 'single', rangeFeet: 5, willing: false }, operation: { kind: 'lifedrain_attack', damageType: damageType('Necrotic'), dice: dice(3, 6, { perSlotCount: 1 }), healingDivisor: 2, effect: effect({ kind: 'vampiric_touch', repeatAttackCost: 'magic_action' }, { target: 'self', concentration: true, durationRounds: 10 }) } },
   { id: 'water-breathing', source: 'spell-descriptions.txt:8415', targeting: { kind: 'multiple', rangeFeet: 30, baseMaximum: 10, additionalPerSlot: 0, willing: true }, operation: { kind: 'effect', effect: effect({ kind: 'water_breathing', retainsNormalRespiration: true }, { durationRounds: 14400 }) } },
   { id: 'water-walk', source: 'spell-descriptions.txt:8429', targeting: { kind: 'multiple', rangeFeet: 30, baseMaximum: 10, additionalPerSlot: 0, willing: true }, operation: { kind: 'effect', effect: effect({ kind: 'water_walk', surfaces: ['water', 'acid', 'mud', 'snow', 'quicksand', 'lava'], transitionCost: 'bonus_action' }, { durationRounds: 600 }) } },
@@ -209,6 +212,28 @@ describe('level-3 spell mechanics pins', () => {
     expect(circle?.duration).toMatchObject({ kind: 'turn_boundaries', remaining: 1200 });
   });
 
+  it.each([
+    { slot: 3, duration: { kind: 'turn_boundaries', remaining: 10 }, concentrates: true },
+    { slot: 4, duration: { kind: 'turn_boundaries', remaining: 100 }, concentrates: true },
+    { slot: 5, duration: { kind: 'turn_boundaries', remaining: 4800 }, concentrates: false },
+    { slot: 6, duration: { kind: 'turn_boundaries', remaining: 4800 }, concentrates: false },
+    { slot: 7, duration: { kind: 'turn_boundaries', remaining: 14400 }, concentrates: false },
+    { slot: 8, duration: { kind: 'turn_boundaries', remaining: 14400 }, concentrates: false },
+    { slot: 9, duration: { kind: 'permanent' }, concentrates: false },
+  ] as const)('Bestow Curse slot $slot uses its exact SRD duration and concentration tier', ({ slot, duration, concentrates }) => {
+    const result = castBestowCurse(slot);
+    const curse = result.state.effects.find((candidate) => candidate.payload.kind === 'bestow_curse');
+    expect(curse?.duration.kind).toBe(duration.kind);
+    if (duration.kind === 'turn_boundaries') {
+      expect(curse?.duration.kind === 'turn_boundaries' ? curse.duration.remaining : null).toBe(duration.remaining);
+      expect(curse?.duration.kind === 'turn_boundaries' ? curse.duration.timing.boundary : null).toBe('start');
+      expect(curse?.duration.kind === 'turn_boundaries' ? curse.duration.timing.source : null).toBe('docs/srd/source/spell-descriptions.txt:753');
+    } else {
+      expect(curse?.duration).toEqual({ kind: 'permanent' });
+    }
+    expect(curse?.concentrationOwner !== null).toBe(concentrates);
+  });
+
   it('level-4 Major Image becomes permanent and loses concentration', () => {
     const image = castLevelFour('major-image').state.effects.find((candidate) => candidate.payload.kind === 'major_image');
     expect(image?.duration).toEqual({ kind: 'permanent' });
@@ -231,6 +256,27 @@ function castLevelFour(id: string): ReturnType<typeof reduceEncounter> {
     type: 'cast_spell', actor: caster.id, spellId: id, slotLevel: 4, castAsRitual: false,
     casterLevel: 7, attackBonus: 100, saveDc: 100, spellcastingModifier: 3,
     targets: selectsTarget ? [target.id] : [], area: levelThreeArea(definition), weaponAttack: null, selectedOption: null,
+  }, () => 0.5);
+}
+
+function castBestowCurse(slot: SpellSlotLevel): ReturnType<typeof reduceEncounter> {
+  const definition = spellDefinition('bestow-curse');
+  if (definition === null) throw new Error('Missing bestow-curse definition.');
+  const caster = playerProfile(`bestow-curse-${slot}-caster`, {
+    initiativeBonus: 20,
+    spellSlots: [{ level: slot, maximum: 1 }],
+  });
+  const target = monsterProfile(`bestow-curse-${slot}-target`, { initiativeBonus: 0 });
+  let state = createEncounter({
+    bounds: { columns: 20, rows: 20 },
+    combatants: [caster, target],
+    tokens: [placedToken(caster, 0, 1), placedToken(target, 1, 1)],
+  });
+  state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+  return reduceEncounter(state, {
+    type: 'cast_spell', actor: caster.id, spellId: definition.id, slotLevel: slot, castAsRitual: false,
+    casterLevel: 7, attackBonus: 100, saveDc: 100, spellcastingModifier: 3,
+    targets: [target.id], area: null, weaponAttack: null, selectedOption: null,
   }, () => 0.5);
 }
 
