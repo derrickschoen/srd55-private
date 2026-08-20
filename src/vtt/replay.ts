@@ -17,6 +17,8 @@ import {
 } from './session-persistence';
 import {
   VTT_FLEET_SCHEMA_VERSION,
+  emptyFleetTelemetry,
+  modelFleetTelemetry,
   type FleetTelemetry,
 } from './fleet-telemetry';
 import {
@@ -35,7 +37,7 @@ export {
   type FleetTokenCounts,
 } from './fleet-telemetry';
 
-export const VTT_REPLAY_SCHEMA_VERSION = 3 as const;
+export const VTT_REPLAY_SCHEMA_VERSION = 4 as const;
 export const VTT_REPLAY_MINIMUM_SCHEMA_VERSION = 1 as const;
 
 export interface ReplayControllerIdentity {
@@ -292,6 +294,8 @@ const V1_TO_V2_SOURCE = 'vtt-replay-v1-to-v2:add-format-and-fleet-schema=vtt-det
 const V1_TO_V2_CHECKSUM = '97a0f335d4928ab6cd2720452ea6f53230780f17cd5a1059fea2cfdb34b68b97';
 const V2_TO_V3_SOURCE = 'vtt-replay-v2-to-v3:add-gap-reports=[]:1';
 const V2_TO_V3_CHECKSUM = '9c7f6016f360115db5e718408a2e2b42f7757604a95e7284f4dcb8453ee1f1c3';
+const V3_TO_V4_SOURCE = 'vtt-replay-v3-to-v4:add-fleet-correction-attempts-null-and-fleet-schema=2:1';
+const V3_TO_V4_CHECKSUM = '97854870631f51f4cc89cdcd3164ad086ff2954a574428bd8d54692eaccaa9e1';
 
 export const VTT_REPLAY_MIGRATIONS = Object.freeze([
   Object.freeze({
@@ -317,6 +321,29 @@ export const VTT_REPLAY_MIGRATIONS = Object.freeze([
       ...bundle,
       schemaVersion: 3,
       gapReports: [],
+    }),
+  }),
+  Object.freeze({
+    id: 'vtt_replay_v3_to_v4',
+    from: 3,
+    to: 4,
+    source: V3_TO_V4_SOURCE,
+    checksum: V3_TO_V4_CHECKSUM,
+    migrate: (bundle: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> => ({
+      ...bundle,
+      schemaVersion: 4,
+      fleetSchemaVersion: 2,
+      transcripts: Array.isArray(bundle.transcripts)
+        ? bundle.transcripts.map((transcript) => record(transcript) && record(transcript.fleet)
+          ? {
+              ...transcript,
+              fleet: {
+                ...transcript.fleet,
+                correctionAttempts: typeof transcript.fleet.modelId === 'string' ? 0 : null,
+              },
+            }
+          : transcript)
+        : bundle.transcripts,
     }),
   }),
 ]);
@@ -450,7 +477,37 @@ function assertEqual(
 
 function validateTranscripts(transcripts: readonly ReplayTranscriptRecord[]): void {
   const requests = new Map<string, ReplayTranscriptRecord>();
+  const fleetKeys = [
+    'buildId',
+    'commit',
+    'correctionAttempts',
+    'latencyMs',
+    'loadLevelTag',
+    'modelId',
+    'reasoningEffort',
+    'tokenCounts',
+  ];
   for (const [index, transcript] of transcripts.entries()) {
+    if (canonicalJson(Object.keys(transcript.fleet).sort()) !== canonicalJson(fleetKeys)) {
+      throw new ReplayDivergenceError('transcript', index, 'fleet', fleetKeys, Object.keys(transcript.fleet));
+    }
+    try {
+      if (transcript.fleet.modelId === null) {
+        if (canonicalJson(transcript.fleet) !== canonicalJson(emptyFleetTelemetry())) {
+          throw new TypeError('Human telemetry must use the empty fleet record.');
+        }
+      } else {
+        modelFleetTelemetry(transcript.fleet);
+      }
+    } catch (error: unknown) {
+      throw new ReplayDivergenceError(
+        'transcript',
+        index,
+        'fleet',
+        'valid fleet telemetry',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
     assertEqual('transcript', index, 'sequence', index + 1, transcript.sequence);
     assertEqual(
       'transcript',

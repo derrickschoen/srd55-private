@@ -42,6 +42,7 @@ interface MutableReplayBundle {
     fleet: {
       latencyMs: number | null;
       tokenCounts: { input: number; cachedInput: number; output: number; reasoning: number } | null;
+      correctionAttempts: number | null;
     };
   }>;
 }
@@ -256,10 +257,28 @@ describe('increment 10 deterministic replay and playable exit', () => {
     expect(proof.authoritativeHash).toBe(gate.proof.authoritativeHash);
   });
 
+  it('CORRECTION-ATTEMPTS are schema-validated telemetry and remain non-authoritative', () => {
+    const gate = recordScriptedReferenceSkirmish();
+    const candidate = mutable(gate.bundle);
+    const modeled = candidate.transcripts.find((entry) => entry.fleet.correctionAttempts !== null);
+    if (modeled === undefined) throw new Error('Missing correction telemetry.');
+    modeled.fleet.correctionAttempts = 2;
+    expect(replayBundle(candidate as unknown as ReplayBundle).authoritativeHash).toBe(
+      gate.proof.authoritativeHash,
+    );
+    modeled.fleet.correctionAttempts = null;
+    expectDivergence(
+      () => replayBundle(candidate as unknown as ReplayBundle),
+      'transcript',
+      candidate.transcripts.indexOf(modeled),
+      'fleet',
+    );
+  });
+
   it('OWN-BUNDLE-VERSION-OUTSIDE-WINDOW is refused while the adjacent migration remains exact', () => {
     const gate = recordScriptedReferenceSkirmish();
     expect(decodeReplayBundle(exportReplayBundleV1ForMigrationTest(gate.bundle))).toEqual(gate.bundle);
-    for (const version of [0, 4]) {
+    for (const version of [0, 5]) {
       const candidate = mutable(gate.bundle);
       candidate.schemaVersion = version;
       expect(() => decodeReplayBundle(JSON.stringify(candidate))).toThrow('outside the migration window');
@@ -275,6 +294,7 @@ describe('increment 10 deterministic replay and playable exit', () => {
       loadLevelTag: null,
       latencyMs: null,
       tokenCounts: null,
+      correctionAttempts: null,
     });
   });
 

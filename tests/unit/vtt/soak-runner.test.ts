@@ -162,6 +162,7 @@ describe('headless VTT soak runner', () => {
       modelId: 'gpt-5.6-terra',
       reasoningEffort: 'medium',
       tokenCounts: { input: 101, cachedInput: 17, output: 23, reasoning: 7 },
+      correctionAttempts: 0,
     });
     expect(summary.tables[0]?.bridgeTelemetry[0]?.latencyMs).toBeGreaterThanOrEqual(0);
     expect(lifecycle.map((event) => event.kind)).toEqual(['spawned', 'terminated']);
@@ -180,6 +181,39 @@ describe('headless VTT soak runner', () => {
     expect(replayBundle(bundle, TEST_APPROVED_FIRST_SKIRMISH_FIXTURE)).toEqual(
       summary.tables[0]?.proof,
     );
+  }, 30_000);
+
+  it('records one correction after the scripted bridge returns a strict-invalid plan first', async () => {
+    const outDirectory = await mkdtemp(join(tmpdir(), 'vtt-soak-real-correction-'));
+    temporaryDirectories.push(outDirectory);
+    const lifecycle: { readonly kind: string; readonly pid: number }[] = [];
+    const summary = await runVttSoak({
+      tables: 1,
+      seed: 317_602,
+      rounds: 1,
+      outDirectory,
+      packFile: 'tests/fixtures/external-party-pack-valid.json',
+      bridge: { mode: 'real' },
+      ...DEFAULT_EXECUTION,
+    }, {
+      codexBinary: FAKE_CODEX,
+      bridgeEnvironment: {
+        FAKE_CODEX_MODE: 'malformed_once',
+        FAKE_CODEX_STATE_FILE: join(outDirectory, 'fake-codex-state'),
+      },
+      onBridgeLifecycle: (event) => lifecycle.push(event),
+    });
+
+    expect(summary.tables[0]).toMatchObject({ status: 'completed', exitCode: 0, abortReason: null });
+    expect(summary.tables[0]?.bridgeTelemetry.map((entry) => entry.correctionAttempts)).toEqual([0, 1]);
+    const bundle = decodeReplayBundle(
+      await readFile(join(outDirectory, 'table-0000.replay.json'), 'utf8'),
+    );
+    expect(bundle.transcripts
+      .filter((record) => record.controller.kind === 'agent')
+      .every((record) => record.fleet.correctionAttempts === 1)).toBe(true);
+    expect(lifecycle.map((event) => event.kind)).toEqual(['spawned', 'terminated']);
+    await expectProcessGone(lifecycle[0]!.pid);
   }, 30_000);
 
   it('exports an aborted replay and kills the bridge process group after a request timeout', async () => {

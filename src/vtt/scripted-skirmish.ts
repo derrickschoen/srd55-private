@@ -57,6 +57,7 @@ const AGENT_FLEET = modelFleetTelemetry({
   loadLevelTag: 'reference-skirmish',
   latencyMs: 17,
   tokenCounts: { input: 120, cachedInput: 80, output: 32, reasoning: 16 },
+  correctionAttempts: 0,
 });
 
 const SYSTEM_CONTROLLER: ReplayControllerIdentity = {
@@ -576,7 +577,7 @@ export function recordScriptedReferenceSkirmish(
     revisions: store.revisions(sessionId),
     transcripts: recorder.records(),
     build: { buildId: 'vtt-phase2-increment-10', commit: 'supervisor-owned' },
-    protocolVersions: ['dm-bridge:1', 'encounter-package:1', 'vtt-session:2'],
+    protocolVersions: ['dm-bridge:2', 'encounter-package:1', 'vtt-session:2'],
     licensingVersions: ['SRD-5.2.1-CC-BY-4.0', 'starter-art-CC-BY-4.0'],
     gapReports: [],
   });

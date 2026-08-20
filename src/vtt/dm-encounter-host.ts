@@ -177,7 +177,11 @@ export class DmEncounterHost {
     this.#store = store;
     if (options.bridge !== undefined) {
       this.#mirror.connect(options.bridge);
-      this.#roundPlanSession = new DmRoundPlanSession(options.bridge, options.dmModel);
+      this.#roundPlanSession = new DmRoundPlanSession(
+        options.bridge,
+        options.dmModel,
+        (error) => this.exportAndAbortAfterBridgeFailure(error),
+      );
     }
     const agentController = this.#roundPlanSession === null
       ? undefined
@@ -284,7 +288,11 @@ export class DmEncounterHost {
 
   connectDmBridge(bridge: DmBridgeConnection, model?: DmBridgeModelConfig): void {
     this.#mirror.connect(bridge);
-    this.#roundPlanSession = new DmRoundPlanSession(bridge, model);
+    this.#roundPlanSession = new DmRoundPlanSession(
+      bridge,
+      model,
+      (error) => this.exportAndAbortAfterBridgeFailure(error),
+    );
     for (const subject of this.#coordinator.state().combatants) {
       if (subject.profile.kind !== 'monster' || subject.life !== 'living') continue;
       this.#coordinator.replaceController(
@@ -325,7 +333,13 @@ export class DmEncounterHost {
         const step = this.#coordinator.step();
         await Promise.resolve();
         this.#publish();
-        const result = await step;
+        let result;
+        try {
+          result = await step;
+        } catch (error: unknown) {
+          if (this.#bridgeFailureGuard?.report() !== null) return;
+          throw error;
+        }
         this.#publish();
         if (result.kind === 'refused') return;
       }

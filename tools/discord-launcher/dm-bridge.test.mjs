@@ -72,12 +72,34 @@ process.stdout.write(JSON.stringify({ type: 'item.completed', item: { type: 'age
       kind: 'round_plan_request',
       codexSessionId: 'codex:persisted-cli-session',
       model: { model: 'gpt-5.6-terra', reasoningEffort: 'medium' },
+      correctionAttempt: 0,
+      replyContract: {
+        schemaVersion: 1,
+        jsonSchema: { type: 'object', additionalProperties: false },
+        canonicalExample: { kind: 'round_plan' },
+        maximumCorrectionAttempts: 2,
+      },
     });
     assert.ok(reply && typeof reply === 'object' && 'args' in reply && Array.isArray(reply.args));
     assert.deepEqual(reply.args.slice(-3), ['resume', 'codex:persisted-cli-session', '-']);
     assert.ok('input' in reply && typeof reply.input === 'string');
     assert.match(reply.input, /"kind":"round_plan_request"/);
+    assert.match(reply.input, /No other fields are permitted/);
+    assert.match(reply.input, /"additionalProperties":false/);
+    assert.match(reply.input, /Canonical valid example/);
     assert.doesNotMatch(reply.input, /claude/i);
+    const correctionPrompt = dmBridgeLibInternals.roundPlanPrompt({
+      kind: 'round_plan_correction_request',
+      validatorError: 'round plan contains unexpected field commands.',
+      replyContract: {
+        schemaVersion: 1,
+        jsonSchema: { type: 'object', additionalProperties: false },
+        canonicalExample: { kind: 'round_plan' },
+        maximumCorrectionAttempts: 2,
+      },
+    });
+    assert.match(correctionPrompt, /previous reply failed strict validation/);
+    assert.match(correctionPrompt, /round plan contains unexpected field commands\./);
     assert.equal(
       await exchange.createSession({ model: 'gpt-5.6-terra', reasoningEffort: 'medium' }),
       '019c-fake-codex-thread',
@@ -98,6 +120,15 @@ test('bridge fleet telemetry decodes first-class usage fields from Codex JSON ev
     output: 30,
     reasoning: 12,
   });
+  assert.equal(dmBridgeLibInternals.fleetTelemetry({
+    model: { model: 'gpt-5.6-terra', reasoningEffort: 'medium' },
+    correctionAttempt: 2,
+  }, 42, {
+    input: 120,
+    cachedInput: 80,
+    output: 30,
+    reasoning: 12,
+  }).correctionAttempts, 2);
 });
 
 test('file mirror appends, de-duplicates, and replays a contiguous revision stream', async () => {
@@ -218,6 +249,7 @@ test('localhost process uses the fake transcript for exchange and the append-onl
         loadLevelTag: 'interactive',
         latencyMs: body.telemetry.latencyMs,
         tokenCounts: { input: 0, cachedInput: 0, output: 0, reasoning: 0 },
+        correctionAttempts: 0,
       });
       assert.ok(Number.isFinite(body.telemetry.latencyMs) && body.telemetry.latencyMs >= 0);
     }

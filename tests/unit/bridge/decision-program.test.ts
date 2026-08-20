@@ -6,12 +6,18 @@ import { damageType, dieSides } from '../../../src/combat/values';
 import { projectDmBoard, projectPlayerBoard } from '../../../src/vtt/encounter-projections';
 import {
   DmRoundPlanSession,
+  RoundPlanCorrectionExhaustedError,
   StaleRoundPlanError,
 } from '../../../src/vtt/dm-bridge/decision-program';
 import type {
   DmBridgeExchange,
   DmBridgeRequest,
   RoundPlan,
+} from '../../../src/vtt/dm-bridge/contracts';
+import {
+  DM_BRIDGE_PROTOCOL_VERSION,
+  ROUND_PLAN_REPLY_CONTRACT,
+  decodeRoundPlan,
 } from '../../../src/vtt/dm-bridge/contracts';
 import {
   codexSessionId,
@@ -110,12 +116,33 @@ function planFor(
 ): RoundPlan {
   return {
     kind: 'round_plan',
-    protocolVersion: 1,
+    protocolVersion: DM_BRIDGE_PROTOCOL_VERSION,
     encounterId: request.encounterId,
     requestId: request.requestId,
     expectedRevision: request.expectedRevision,
     round: request.round,
     monsters: programs,
+  };
+}
+
+function malformedCommandsPlan(request: DmBridgeRequest): unknown {
+  const monsterIds = request.kind === 'round_plan_request'
+    ? request.livingMonsterIds
+    : request.kind === 'monster_reconsult_request'
+      ? [request.monsterId]
+      : request.requestedMonsterIds;
+  return {
+    kind: 'round_plan',
+    protocolVersion: DM_BRIDGE_PROTOCOL_VERSION,
+    encounterId: request.encounterId,
+    requestId: request.requestId,
+    expectedRevision: request.expectedRevision,
+    round: request.round,
+    monsters: monsterIds.map((monsterId) => ({
+      monsterId,
+      program: { kind: 'action', action: { kind: 'use_action', action: 'end_turn' } },
+    })),
+    commands: [{ type: 'end_turn', actor: 'combatant:bridge-a' }],
   };
 }
 
@@ -152,6 +179,78 @@ describe('typed DM round decision programs', () => {
       livingMonsterIds: [f.monsterA.id, f.monsterB.id],
     });
     expect(JSON.stringify(exchange.requests[0])).toContain('hidden bridge tactic sentinel');
+    expect(exchange.requests[0]).toMatchObject({
+      protocolVersion: 2,
+      correctionAttempt: 0,
+      replyContract: {
+        schemaVersion: 1,
+        maximumCorrectionAttempts: 2,
+        jsonSchema: { additionalProperties: false },
+      },
+    });
+    expect(exchange.requests[0]?.replyContract).toBe(ROUND_PLAN_REPLY_CONTRACT);
+  });
+
+  it('MALFORMED-THEN-CORRECTED reuses the same session with the exact validator error and generated schema', async () => {
+    const f = fixture();
+    const exchange = new FakeExchange((request, index) => index === 0
+      ? malformedCommandsPlan(request)
+      : planFor(request, [f.monsterA, f.monsterB].map((monster) => ({
+          monsterId: monster.id,
+          program: { kind: 'action', action: { kind: 'use_action', action: 'end_turn' } },
+        }))));
+
+    await expect(
+      new DmRoundPlanSession(exchange).startRound(context(f.state), new AbortController().signal),
+    ).resolves.toMatchObject({ kind: 'round_plan', round: 2 });
+
+    expect(exchange.requests).toHaveLength(2);
+    expect(exchange.requests[1]).toMatchObject({
+      kind: 'round_plan_correction_request',
+      correctionAttempt: 1,
+      originalRequestId: exchange.requests[0]?.requestId,
+      validatorError: 'round plan contains unexpected field commands.',
+      requestedMonsterIds: [f.monsterA.id, f.monsterB.id],
+      replyContract: { schemaVersion: 1, maximumCorrectionAttempts: 2 },
+    });
+    expect(exchange.requests.map((request) => request.codexSessionId)).toEqual([
+      codexSessionId('codex:persisted-session-77'),
+      codexSessionId('codex:persisted-session-77'),
+    ]);
+  });
+
+  it('EXHAUSTED-CORRECTIONS aborts only after two same-session correction attempts', async () => {
+    const f = fixture();
+    const aborts: RoundPlanCorrectionExhaustedError[] = [];
+    const exchange = new FakeExchange((request) => malformedCommandsPlan(request));
+    const session = new DmRoundPlanSession(
+      exchange,
+      undefined,
+      (error) => aborts.push(error),
+    );
+
+    await expect(
+      session.startRound(context(f.state), new AbortController().signal),
+    ).rejects.toThrow('failed after 2 corrections');
+    expect(exchange.requests.map((request) => request.correctionAttempt)).toEqual([0, 1, 2]);
+    expect(new Set(exchange.requests.map((request) => request.codexSessionId))).toEqual(
+      new Set([codexSessionId('codex:persisted-session-77')]),
+    );
+    expect(aborts).toHaveLength(1);
+    expect(aborts[0]).toBeInstanceOf(RoundPlanCorrectionExhaustedError);
+  });
+
+  it('malformed_plan_accepted keeps the strict decoder closed against command-array envelopes', async () => {
+    const f = fixture();
+    const exchange = new FakeExchange((request) => malformedCommandsPlan(request));
+    await expect(
+      new DmRoundPlanSession(exchange).startRound(context(f.state), new AbortController().signal),
+    ).rejects.toThrow('round plan contains unexpected field commands.');
+    const request = exchange.requests[0];
+    if (request === undefined) throw new Error('Strict decoder control needs the original request.');
+    expect(() => decodeRoundPlan(malformedCommandsPlan(request), request)).toThrow(
+      'round plan contains unexpected field commands.',
+    );
   });
 
   it('DSL-DEAD-TARGET-BRANCH resolves a dead target through the else branch without re-consult', async () => {

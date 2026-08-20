@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 
 const chunks = [];
 for await (const chunk of process.stdin) chunks.push(chunk);
@@ -23,10 +23,13 @@ if (isResume && process.env.FAKE_CODEX_MODE === 'hang') {
     item: { type: 'agent_message', text: JSON.stringify({ kind: 'session_ready' }) },
   })}\n`);
 } else {
-  const request = JSON.parse(input.slice(input.indexOf('\n') + 1));
+  const requestMarker = '\nRequest:\n';
+  const request = JSON.parse(input.slice(input.lastIndexOf(requestMarker) + requestMarker.length));
   const monsterIds = request.kind === 'round_plan_request'
     ? request.livingMonsterIds
-    : [request.monsterId];
+    : request.kind === 'monster_reconsult_request'
+      ? [request.monsterId]
+      : request.requestedMonsterIds;
   const monsterIdSet = new Set(monsterIds);
   const nonMonsterControllers = request.projection.controllers.filter(
     (controller) => !monsterIdSet.has(controller.combatantId),
@@ -35,7 +38,7 @@ if (isResume && process.env.FAKE_CODEX_MODE === 'hang') {
     process.stderr.write('Scripted soak requires AlgorithmController on every PC.\n');
     process.exitCode = 9;
   } else {
-    const reply = {
+    let reply = {
       kind: 'round_plan',
       protocolVersion: request.protocolVersion,
       encounterId: request.encounterId,
@@ -47,6 +50,25 @@ if (isResume && process.env.FAKE_CODEX_MODE === 'hang') {
         program: { kind: 'action', action: { kind: 'use_action', action: 'end_turn' } },
       })),
     };
+    if (
+      process.env.FAKE_CODEX_MODE === 'malformed_once' &&
+      process.env.FAKE_CODEX_STATE_FILE !== undefined
+    ) {
+      let alreadyMalformed = false;
+      try {
+        await readFile(process.env.FAKE_CODEX_STATE_FILE, 'utf8');
+        alreadyMalformed = true;
+      } catch (error) {
+        if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) throw error;
+      }
+      if (!alreadyMalformed) {
+        await writeFile(process.env.FAKE_CODEX_STATE_FILE, 'malformed', 'utf8');
+        reply = {
+          ...reply,
+          commands: [{ type: 'end_turn', actor: monsterIds[0] }],
+        };
+      }
+    }
     process.stdout.write(`${JSON.stringify({
       type: 'item.completed',
       item: { type: 'agent_message', text: JSON.stringify(reply) },
