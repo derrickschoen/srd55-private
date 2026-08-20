@@ -7,6 +7,19 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D319 — OWNER: soak spend confirmed, VTT lands on main, program triggered (2026-08-20)
+
+1. **Soak fleet: CONTINUOUS AS RULED** — confirmed against measured
+   cost (~5 terra-medium calls per 5-round table, 33-88k input each,
+   heavily cached). Codex-out-of-credits remains the loud stop.
+2. **wt/vtt LANDS ON MAIN NOW** — full phase-2 merge including the
+   0051 migration renumber (trial-idx5 playbook); full gate on main
+   before anything else proceeds.
+3. **The post-playtest program is TRIGGERED by the AI tables** —
+   model/effort study, DM/PC KB skill, and sim merge-back start on the
+   accumulating canonical bundles; the owner's personal session
+   happens independently whenever they are free.
+
 ## D318 — OWNER: soak fleet uses private builds; non-SRD mechanics get a gap register and clean-room equivalents (2026-08-19)
 
 Owner directives, 2026-08-19 (verbatim intent; "Colby builds" =
