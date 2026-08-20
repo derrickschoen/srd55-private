@@ -1,5 +1,7 @@
 # D&D character builder (pre-alpha)
 
+The virtual tabletop component of this project is named **spike-vtt**.
+
 A local-first web app for building and leveling D&D characters against the
 SRD 5.2.1 ruleset, with the rules engine expressed in the type system so a
 wrong program fails to compile rather than producing a plausible wrong
