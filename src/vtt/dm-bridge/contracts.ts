@@ -11,28 +11,45 @@ import type { DmBoardProjection } from '../encounter-projections';
 import type { SessionHistoryEntry } from '../session-persistence';
 import {
   DM_BRIDGE_PROTOCOL_VERSION,
+  ROUND_PLAN_JS_REPLY_CONTRACT,
   ROUND_PLAN_REPLY_CONTRACT,
+  decodeJsRoundPlanSourceStructure,
   decodeRoundPlanStructure,
+  roundPlanReplyContract,
   type DecisionProgram,
+  type JsRoundPlanSourceReply,
   type MonsterRoundProgram,
   type PlanAction,
   type RoundPlan,
   type RoundPlanReplyContract,
+  type RoundPlanSurface,
   type StatePredicate,
   type TargetSelector,
 } from './round-plan-contract';
+import {
+  interpretJsTurnProgram,
+  type JsTurnProgramExecution,
+  type JsTurnProgramLimits,
+} from './js-turn-program';
 
 export {
   DM_BRIDGE_PROTOCOL_VERSION,
   MAX_ROUND_PLAN_CORRECTIONS,
   ROUND_PLAN_CANONICAL_EXAMPLE,
+  ROUND_PLAN_JS_REPLY_CONTRACT,
   ROUND_PLAN_REPLY_CONTRACT,
   ROUND_PLAN_REPLY_JSON_SCHEMA,
+  roundPlanReplyContract,
   type DecisionProgram,
+  type JsMonsterProgramSource,
+  type JsProgramRoundPlanReplyContract,
+  type JsRoundPlanSourceReply,
+  type JsonAstRoundPlanReplyContract,
   type MonsterRoundProgram,
   type PlanAction,
   type RoundPlan,
   type RoundPlanReplyContract,
+  type RoundPlanSurface,
   type StatePredicate,
   type TargetSelector,
 } from './round-plan-contract';
@@ -99,7 +116,7 @@ export interface AdjudicationProposal {
     | { readonly kind: 'relocate'; readonly to: GridCell };
 }
 
-export type DmBridgeReply = RoundPlan | Narration | AdjudicationProposal;
+export type DmBridgeReply = RoundPlan | JsRoundPlanSourceReply | Narration | AdjudicationProposal;
 
 export interface RoundPlanRequest {
   readonly kind: 'round_plan_request';
@@ -113,6 +130,7 @@ export interface RoundPlanRequest {
   readonly projection: DmBoardProjection;
   readonly history: readonly SessionHistoryEntry[];
   readonly livingMonsterIds: readonly CombatantId[];
+  readonly surface: RoundPlanSurface;
   readonly replyContract: RoundPlanReplyContract;
   readonly correctionAttempt: 0;
 }
@@ -131,6 +149,7 @@ export interface MonsterReconsultRequest {
   readonly monsterId: CombatantId;
   readonly invalidation: string;
   readonly scope: 'monster_remaining_round';
+  readonly surface: RoundPlanSurface;
   readonly replyContract: RoundPlanReplyContract;
   readonly correctionAttempt: 0;
 }
@@ -149,6 +168,7 @@ export interface RoundPlanCorrectionRequest {
   readonly history: readonly SessionHistoryEntry[];
   readonly requestedMonsterIds: readonly CombatantId[];
   readonly validatorError: string;
+  readonly surface: RoundPlanSurface;
   readonly replyContract: RoundPlanReplyContract;
   readonly correctionAttempt: 1 | 2;
 }
@@ -282,6 +302,78 @@ export function decodeRoundPlan(
     round: request.round,
     monsters,
   };
+}
+
+export interface JsProgramArtifact extends JsTurnProgramExecution {
+  readonly monsterId: CombatantId;
+}
+
+export interface DecodedRoundPlanReply {
+  readonly plan: RoundPlan;
+  readonly jsPrograms: readonly JsProgramArtifact[];
+}
+
+function expectedMonsterIds(
+  request: RoundPlanRequest | MonsterReconsultRequest | RoundPlanCorrectionRequest,
+): readonly CombatantId[] {
+  return request.kind === 'round_plan_request'
+    ? request.livingMonsterIds
+    : request.kind === 'monster_reconsult_request'
+      ? [request.monsterId]
+      : request.requestedMonsterIds;
+}
+
+function validateJsEnvelope(
+  input: JsRoundPlanSourceReply,
+  request: RoundPlanRequest | MonsterReconsultRequest | RoundPlanCorrectionRequest,
+): void {
+  if (
+    input.protocolVersion !== DM_BRIDGE_PROTOCOL_VERSION ||
+    input.encounterId !== request.encounterId ||
+    input.requestId !== request.requestId ||
+    input.expectedRevision !== request.expectedRevision ||
+    input.round !== request.round
+  ) {
+    throw new TypeError('JS round plan envelope is stale or malformed.');
+  }
+  const expected = expectedMonsterIds(request);
+  if (
+    input.monsters.length !== expected.length ||
+    new Set(input.monsters.map((entry) => entry.monsterId)).size !== input.monsters.length ||
+    expected.some((id) => !input.monsters.some((entry) => entry.monsterId === id))
+  ) {
+    throw new TypeError('JS round plan must contain exactly one source program for each requested monster.');
+  }
+}
+
+export function decodeRoundPlanReply(
+  value: unknown,
+  request: RoundPlanRequest | MonsterReconsultRequest | RoundPlanCorrectionRequest,
+  limits: JsTurnProgramLimits = {},
+): DecodedRoundPlanReply {
+  if (request.replyContract.surface !== request.surface) {
+    throw new TypeError('Round plan surface and reply contract disagree.');
+  }
+  if (request.surface === 'json_ast') return { plan: decodeRoundPlan(value, request), jsPrograms: [] };
+  const input = decodeJsRoundPlanSourceStructure(value);
+  validateJsEnvelope(input, request);
+  const jsPrograms = input.monsters.map((entry): JsProgramArtifact => ({
+    monsterId: entry.monsterId,
+    ...interpretJsTurnProgram(entry.source, request.projection.encounter, entry.monsterId, limits),
+  }));
+  const plan = decodeRoundPlan({
+    kind: 'round_plan',
+    protocolVersion: input.protocolVersion,
+    encounterId: input.encounterId,
+    requestId: input.requestId,
+    expectedRevision: input.expectedRevision,
+    round: input.round,
+    monsters: jsPrograms.map((artifact) => ({
+      monsterId: artifact.monsterId,
+      program: artifact.emittedDecisionProgram,
+    })),
+  }, request);
+  return { plan, jsPrograms };
 }
 
 export function adjudicationCommand(

@@ -6,6 +6,10 @@ import {
   type CombatantId,
   type EncounterSessionId,
 } from '../../combat/values';
+import {
+  JS_TURN_PROGRAM_CANONICAL_EXAMPLE,
+  JS_TURN_PROGRAM_GRAMMAR,
+} from './js-turn-program';
 
 export const DM_BRIDGE_PROTOCOL_VERSION = 2 as const;
 export const ROUND_PLAN_CONTRACT_SCHEMA_VERSION = 1 as const;
@@ -69,6 +73,23 @@ export interface RoundPlan {
   readonly expectedRevision: number;
   readonly round: number;
   readonly monsters: readonly MonsterRoundProgram[];
+}
+
+export type RoundPlanSurface = 'json_ast' | 'js_program';
+
+export interface JsMonsterProgramSource {
+  readonly monsterId: CombatantId;
+  readonly source: string;
+}
+
+export interface JsRoundPlanSourceReply {
+  readonly kind: 'js_round_plan';
+  readonly protocolVersion: typeof DM_BRIDGE_PROTOCOL_VERSION;
+  readonly encounterId: EncounterSessionId;
+  readonly requestId: string;
+  readonly expectedRevision: number;
+  readonly round: number;
+  readonly monsters: readonly JsMonsterProgramSource[];
 }
 
 const trimmedString = z.string().trim().min(1);
@@ -163,6 +184,19 @@ const roundPlanSchema: z.ZodType<RoundPlan> = z.strictObject({
   })),
 });
 
+const jsRoundPlanSourceSchema: z.ZodType<JsRoundPlanSourceReply> = z.strictObject({
+  kind: z.literal('js_round_plan'),
+  protocolVersion: z.literal(DM_BRIDGE_PROTOCOL_VERSION),
+  encounterId: encounterSessionIdSchema,
+  requestId: trimmedString,
+  expectedRevision: nonNegativeInteger,
+  round: nonNegativeInteger,
+  monsters: z.array(z.strictObject({
+    monsterId: combatantIdSchema,
+    source: z.string().min(1).max(100_000),
+  })),
+});
+
 function issuePath(path: readonly PropertyKey[]): string {
   return path.reduce<string>((result, segment) =>
     typeof segment === 'number' ? `${result}[${String(segment)}]` : `${result}.${String(segment)}`,
@@ -181,6 +215,12 @@ function validatorMessage(error: z.ZodError): string {
 
 export function decodeRoundPlanStructure(value: unknown): RoundPlan {
   const result = roundPlanSchema.safeParse(value);
+  if (!result.success) throw new TypeError(validatorMessage(result.error));
+  return result.data;
+}
+
+export function decodeJsRoundPlanSourceStructure(value: unknown): JsRoundPlanSourceReply {
+  const result = jsRoundPlanSourceSchema.safeParse(value);
   if (!result.success) throw new TypeError(validatorMessage(result.error));
   return result.data;
 }
@@ -209,16 +249,41 @@ export const ROUND_PLAN_CANONICAL_EXAMPLE: RoundPlan = decodeRoundPlanStructure(
   }],
 });
 
-export interface RoundPlanReplyContract {
+interface RoundPlanReplyContractBase {
   readonly schemaVersion: typeof ROUND_PLAN_CONTRACT_SCHEMA_VERSION;
-  readonly jsonSchema: typeof ROUND_PLAN_REPLY_JSON_SCHEMA;
-  readonly canonicalExample: RoundPlan;
   readonly maximumCorrectionAttempts: typeof MAX_ROUND_PLAN_CORRECTIONS;
 }
 
-export const ROUND_PLAN_REPLY_CONTRACT: RoundPlanReplyContract = Object.freeze({
+export interface JsonAstRoundPlanReplyContract extends RoundPlanReplyContractBase {
+  readonly surface: 'json_ast';
+  readonly jsonSchema: typeof ROUND_PLAN_REPLY_JSON_SCHEMA;
+  readonly canonicalExample: RoundPlan;
+}
+
+export interface JsProgramRoundPlanReplyContract extends RoundPlanReplyContractBase {
+  readonly surface: 'js_program';
+  readonly grammar: typeof JS_TURN_PROGRAM_GRAMMAR;
+  readonly canonicalExample: typeof JS_TURN_PROGRAM_CANONICAL_EXAMPLE;
+}
+
+export type RoundPlanReplyContract = JsonAstRoundPlanReplyContract | JsProgramRoundPlanReplyContract;
+
+export const ROUND_PLAN_REPLY_CONTRACT: JsonAstRoundPlanReplyContract = Object.freeze({
+  surface: 'json_ast',
   schemaVersion: ROUND_PLAN_CONTRACT_SCHEMA_VERSION,
   jsonSchema: ROUND_PLAN_REPLY_JSON_SCHEMA,
   canonicalExample: ROUND_PLAN_CANONICAL_EXAMPLE,
   maximumCorrectionAttempts: MAX_ROUND_PLAN_CORRECTIONS,
 });
+
+export const ROUND_PLAN_JS_REPLY_CONTRACT: JsProgramRoundPlanReplyContract = Object.freeze({
+  surface: 'js_program',
+  schemaVersion: ROUND_PLAN_CONTRACT_SCHEMA_VERSION,
+  grammar: JS_TURN_PROGRAM_GRAMMAR,
+  canonicalExample: JS_TURN_PROGRAM_CANONICAL_EXAMPLE,
+  maximumCorrectionAttempts: MAX_ROUND_PLAN_CORRECTIONS,
+});
+
+export function roundPlanReplyContract(surface: RoundPlanSurface): RoundPlanReplyContract {
+  return surface === 'json_ast' ? ROUND_PLAN_REPLY_CONTRACT : ROUND_PLAN_JS_REPLY_CONTRACT;
+}

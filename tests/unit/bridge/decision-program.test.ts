@@ -232,8 +232,10 @@ describe('typed DM round decision programs', () => {
     expect(JSON.stringify(exchange.requests[0])).toContain('hidden bridge tactic sentinel');
     expect(exchange.requests[0]).toMatchObject({
       protocolVersion: 2,
+      surface: 'json_ast',
       correctionAttempt: 0,
       replyContract: {
+        surface: 'json_ast',
         schemaVersion: 1,
         maximumCorrectionAttempts: 2,
         jsonSchema: { additionalProperties: false },
