@@ -565,3 +565,23 @@ Three findings this session raised, recorded here so they are not lost with it:
   reference-only runs, parallel batch scale-out, private-side Colby
   converter + gap register wiring (D318.1/.3).
 
+## A25 — D321 execution wave 1: shared initiative + 37-monster sweep
+
+- Shared-enemy initiative (D320.4): typed modes (per_combatant /
+  shared_enemy default / side_alternating), block contiguity + within-
+  block determinism + mode serialization all control-pinned; supervisor
+  verified 1,440 + sim + tsc. Gate green after the scratch-log
+  sentinel caught the tracked-tmp slip (third instance; .tmp-* now
+  ignored on every lane via sync — durable fix verified by ls-files).
+- Monster sweep batch 1 (D321.14 refined): 37 SRD monsters in four
+  CR-scaled themed families (goblinoid/undead/mercenary/beasts) with
+  honest SRD-gap notes; supervisor verified 1,352 + Wight field-for-
+  field + own Dire Wolf AC control. Cross-merge broke two stale
+  fixtures (narration KB pair, unbuildable-high probe) — reconciled to
+  the new truth (high buildable at 4,200 XP; KB-derived fixture).
+- Final gate GREEN 405 files / 7,437 tests (.tmp-gate-sweep2.log).
+- In flight: JS mini-interpreter (E05 arm), pilot fleet (3/3 clean
+  tables so far). Next: steering split + delta projections, then
+  tranche-1 experiments; adventure-slot/rest-workflow increments per
+  D321.11-13 queue behind the D320 prerequisites.
+
