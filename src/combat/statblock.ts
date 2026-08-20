@@ -23,7 +23,7 @@ import {
   type StatblockId,
 } from './values';
 
-export type ChallengeRating = '1/4' | '1/2' | 1 | 2 | 3;
+export type ChallengeRating = '1/8' | '1/4' | '1/2' | 1 | 2 | 3;
 export type MovementKind = 'walk' | 'burrow' | 'climb' | 'fly' | 'swim';
 export type SenseKind = 'blindsight' | 'darkvision' | 'tremorsense' | 'truesight';
 
@@ -78,15 +78,20 @@ export interface MonsterClassification {
 
 export interface MonsterChallenge {
   readonly rating: ChallengeRating;
-  readonly experiencePoints: 50 | 100 | 200 | 450 | 700;
+  readonly experiencePoints: 25 | 50 | 100 | 200 | 450 | 700;
   readonly proficiencyBonus: 2;
 }
+
+export type MonsterDamageTrigger =
+  | { readonly kind: 'always' }
+  | { readonly kind: 'attack_roll_advantage' }
+  | { readonly kind: 'charge'; readonly minimumStraightFeet: number; readonly maximumTargetSize: CreatureSize };
 
 export interface MonsterDamageTerm {
   readonly average: number;
   readonly dice: MonsterDice;
   readonly type: DomainDamageType;
-  readonly trigger: 'always' | 'attack_roll_advantage';
+  readonly trigger: MonsterDamageTrigger;
 }
 
 export type MonsterAttackDelivery =
@@ -101,20 +106,59 @@ export interface MonsterAttackAction {
   readonly attackBonus: number;
   readonly delivery: MonsterAttackDelivery;
   readonly damage: readonly MonsterDamageTerm[];
-  readonly onHit: null | {
-    readonly kind: 'condition';
-    readonly condition: 'Prone';
-    readonly maximumTargetSize: CreatureSize;
-    readonly savingThrow: null;
+  readonly attackRollAdvantage: null | {
+    readonly kind: 'target_grappled_by_attacker';
   };
+  readonly onHit: readonly MonsterOnHitEffect[];
 }
+
+export interface MonsterSavingThrow {
+  readonly ability: Ability;
+  readonly dc: number;
+}
+
+export interface MonsterEffectTarget {
+  readonly maximumSize: CreatureSize | null;
+  readonly excludedKinds: readonly ('Undead' | 'Elf')[];
+}
+
+export type MonsterEffectDuration =
+  | 'until_escape'
+  | 'until_end_of_target_next_turn'
+  | 'until_start_of_monster_next_turn';
+
+export type MonsterOnHitEffect =
+  | {
+    readonly kind: 'condition';
+    readonly condition: 'Frightened' | 'Grappled' | 'Paralyzed' | 'Prone';
+    readonly trigger: MonsterDamageTrigger;
+    readonly target: MonsterEffectTarget;
+    readonly savingThrow: MonsterSavingThrow | null;
+    readonly escapeDc: number | null;
+    readonly duration: MonsterEffectDuration | null;
+  }
+  | { readonly kind: 'hit_point_maximum_reduction'; readonly amount: 'damage_taken' }
+  | { readonly kind: 'raises_as_zombie'; readonly targetKind: 'Humanoid'; readonly delayHours: 24; readonly controllerLimit: 12; readonly preventedBy: readonly ['restored_to_life', 'body_destroyed'] };
 
 export interface MonsterMultiattackAction {
   readonly kind: 'multiattack';
   readonly id: string;
   readonly count: number;
-  readonly attackIds: readonly string[];
-  readonly combination: 'any';
+  readonly actionIds: readonly string[];
+  readonly combination: 'any' | 'fixed' | 'one_attack_may_be_replaced';
+}
+
+export interface MonsterSavingThrowAction {
+  readonly kind: 'saving_throw';
+  readonly id: string;
+  readonly name: string;
+  readonly savingThrow: MonsterSavingThrow;
+  readonly target: MonsterEffectTarget & { readonly rangeFeet: number };
+  readonly failure: {
+    readonly damage: readonly MonsterDamageTerm[];
+    readonly effects: readonly MonsterOnHitEffect[];
+  };
+  readonly success: { readonly kind: 'none' };
 }
 
 export interface MonsterSpellReference {
@@ -133,23 +177,42 @@ export interface MonsterSpellcastingAction {
   readonly spells: readonly MonsterSpellReference[];
 }
 
-export type MonsterAction = MonsterAttackAction | MonsterMultiattackAction | MonsterSpellcastingAction;
+export type MonsterAction = MonsterAttackAction | MonsterMultiattackAction | MonsterSavingThrowAction | MonsterSpellcastingAction;
 
 export type MonsterTrait =
   | { readonly kind: 'pack_tactics'; readonly allyDistanceFeet: 5; readonly blockedByCondition: 'Incapacitated'; readonly appliesTo: 'attack_rolls' }
-  | { readonly kind: 'undead_fortitude'; readonly saveAbility: 'constitution'; readonly dcBase: 5; readonly addDamageTaken: true; readonly excludedDamageType: 'Radiant'; readonly excludedCriticalHits: true; readonly successHitPoints: 1 };
+  | { readonly kind: 'undead_fortitude'; readonly saveAbility: 'constitution'; readonly dcBase: 5; readonly addDamageTaken: true; readonly excludedDamageType: 'Radiant'; readonly excludedCriticalHits: true; readonly successHitPoints: 1 }
+  | { readonly kind: 'abduct'; readonly extraMovementCostWhileGrappling: false }
+  | { readonly kind: 'aura_of_authority'; readonly emanationFeet: number; readonly grantsAdvantageOn: readonly ['attack_rolls', 'saving_throws']; readonly blockedByCondition: 'Incapacitated' }
+  | { readonly kind: 'bloodied_frenzy'; readonly grantsAdvantageOn: readonly ['attack_rolls', 'saving_throws'] }
+  | { readonly kind: 'bloodied_fury'; readonly grantsAdvantageOn: readonly ['attack_rolls'] }
+  | { readonly kind: 'incorporeal_movement'; readonly difficultTerrain: true; readonly endingInObjectDamage: MonsterDamageTerm }
+  | { readonly kind: 'running_leap'; readonly runningStartFeet: number; readonly longJumpFeet: number }
+  | { readonly kind: 'stench'; readonly emanationFeet: number; readonly savingThrow: MonsterSavingThrow; readonly condition: 'Poisoned'; readonly duration: 'until_start_of_monster_next_turn'; readonly successImmunityHours: 24 }
+  | { readonly kind: 'sunlight_sensitivity'; readonly disadvantageOn: readonly ['ability_checks', 'attack_rolls'] };
 
 export type MonsterBonusAction =
   | { readonly kind: 'nimble_escape'; readonly actions: readonly ['Disengage', 'Hide'] }
+  | { readonly kind: 'cunning_action'; readonly actions: readonly ['Dash', 'Disengage', 'Hide'] }
+  | MonsterSavingThrowAction
   | MonsterSpellcastingAction;
 
-export type MonsterReaction = {
-  readonly kind: 'parry';
-  readonly trigger: 'hit_by_melee_attack';
-  readonly requiresHoldingWeapon: true;
-  readonly armorClassBonus: 2;
-  readonly appliesToTriggeringAttackOnly: true;
-};
+export type MonsterReaction =
+  | {
+    readonly kind: 'parry';
+    readonly trigger: 'hit_by_melee_attack';
+    readonly requiresHoldingWeapon: true;
+    readonly armorClassBonus: 2;
+    readonly appliesToTriggeringAttackOnly: true;
+  }
+  | {
+    readonly kind: 'redirect_attack';
+    readonly trigger: 'targeted_by_visible_attack_roll';
+    readonly allyDistanceFeet: number;
+    readonly maximumAllySize: CreatureSize;
+    readonly swapsPlaces: true;
+    readonly allyBecomesTarget: true;
+  };
 
 export interface MonsterSourceDetailsInput {
   readonly source: readonly SourceSpan[];
@@ -266,17 +329,47 @@ function validateSpell(reference: MonsterSpellReference): MonsterSpellReference 
   return reference;
 }
 
+function validateDamageTerm(term: MonsterDamageTerm, label: string): MonsterDamageTerm {
+  nonNegativeInteger(term.average, `${label} damage average`);
+  validateDice(term.dice, `${label} damage`);
+  domainDamageType(term.type);
+  if (term.trigger.kind === 'charge') {
+    positiveInteger(term.trigger.minimumStraightFeet, `${label} charge distance`);
+    creatureSize(term.trigger.maximumTargetSize);
+  }
+  return term;
+}
+
+function validateEffect(effect: MonsterOnHitEffect, label: string): MonsterOnHitEffect {
+  switch (effect.kind) {
+    case 'condition':
+      conditionType(effect.condition);
+      if (effect.trigger.kind === 'charge') {
+        positiveInteger(effect.trigger.minimumStraightFeet, `${label} condition charge distance`);
+        creatureSize(effect.trigger.maximumTargetSize);
+      }
+      if (effect.target.maximumSize !== null) creatureSize(effect.target.maximumSize);
+      if (effect.savingThrow !== null) {
+        abilities.includes(effect.savingThrow.ability);
+        positiveInteger(effect.savingThrow.dc, `${label} save DC`);
+      }
+      if (effect.escapeDc !== null) positiveInteger(effect.escapeDc, `${label} escape DC`);
+      return effect;
+    case 'hit_point_maximum_reduction':
+      return effect;
+    case 'raises_as_zombie':
+      return effect;
+  }
+}
+
 function validateAction<T extends MonsterAction | MonsterBonusAction>(action: T): T {
   switch (action.kind) {
     case 'attack':
       nonEmptyText(action.id, 'Attack id');
       nonEmptyText(action.name, 'Attack name');
       finiteInteger(action.attackBonus, `${action.name} attack bonus`);
-      for (const term of action.damage) {
-        nonNegativeInteger(term.average, `${action.name} damage average`);
-        validateDice(term.dice, `${action.name} damage`);
-        domainDamageType(term.type);
-      }
+      action.damage.forEach((term) => validateDamageTerm(term, action.name));
+      action.onHit.forEach((effect) => validateEffect(effect, action.name));
       switch (action.delivery.kind) {
         case 'melee':
           positiveInteger(action.delivery.reachFeet, `${action.name} reach`);
@@ -295,7 +388,19 @@ function validateAction<T extends MonsterAction | MonsterBonusAction>(action: T)
     case 'multiattack':
       nonEmptyText(action.id, 'Multiattack id');
       positiveInteger(action.count, 'Multiattack count');
-      if (action.attackIds.length === 0) throw new RangeError('Multiattack must name at least one attack.');
+      if (action.actionIds.length === 0) throw new RangeError('Multiattack must name at least one action.');
+      if (action.combination === 'fixed' && action.actionIds.length !== action.count) {
+        throw new RangeError('Fixed Multiattack must list each action in order.');
+      }
+      return action;
+    case 'saving_throw':
+      nonEmptyText(action.id, 'Saving throw action id');
+      nonEmptyText(action.name, 'Saving throw action name');
+      positiveInteger(action.savingThrow.dc, `${action.name} save DC`);
+      positiveInteger(action.target.rangeFeet, `${action.name} range`);
+      if (action.target.maximumSize !== null) creatureSize(action.target.maximumSize);
+      action.failure.damage.forEach((term) => validateDamageTerm(term, action.name));
+      action.failure.effects.forEach((effect) => validateEffect(effect, action.name));
       return action;
     case 'spellcasting':
       nonEmptyText(action.id, 'Spellcasting id');
@@ -304,6 +409,8 @@ function validateAction<T extends MonsterAction | MonsterBonusAction>(action: T)
       action.spells.forEach(validateSpell);
       return action;
     case 'nimble_escape':
+      return action;
+    case 'cunning_action':
       return action;
   }
 }
@@ -328,7 +435,7 @@ function validateSourceDetails(input: MonsterSourceDetailsInput | undefined, spe
   creatureType(input.classification.type);
   nonEmptyText(input.classification.alignment, 'Alignment');
   const experienceByChallenge: Readonly<Record<ChallengeRating, MonsterChallenge['experiencePoints']>> = {
-    '1/4': 50, '1/2': 100, 1: 200, 2: 450, 3: 700,
+    '1/8': 25, '1/4': 50, '1/2': 100, 1: 200, 2: 450, 3: 700,
   };
   if (input.challenge.experiencePoints !== experienceByChallenge[input.challenge.rating]) {
     throw new RangeError('Monster XP must match its Challenge Rating.');
@@ -344,9 +451,9 @@ function validateSourceDetails(input: MonsterSourceDetailsInput | undefined, spe
     finiteInteger(line.saveBonus, `${ability} save bonus`);
   }
   const actions = input.actions.map((action) => validateAction(action));
-  const attackIds = new Set(actions.filter((action): action is MonsterAttackAction => action.kind === 'attack').map(({ id }) => id));
+  const actionIds = new Set(actions.filter((action) => action.kind !== 'multiattack').map(({ id }) => id));
   for (const action of actions) {
-    if (action.kind === 'multiattack' && action.attackIds.some((id) => !attackIds.has(id))) throw new RangeError('Multiattack references an unknown attack.');
+    if (action.kind === 'multiattack' && action.actionIds.some((id) => !actionIds.has(id))) throw new RangeError('Multiattack references an unknown action.');
   }
   const decodedDamageResponses: MonsterSourceDetails['damageResponses'] = input.damageResponses.kind === 'absent'
     ? absent(nonEmptyText(input.damageResponses.note, 'Damage responses absence note'))

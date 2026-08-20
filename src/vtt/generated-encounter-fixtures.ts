@@ -23,6 +23,7 @@ import {
 } from '../combat/encounter';
 import type { GridCell } from '../combat/grid';
 import { mulberry32, type SerializableRng } from '../combat/random';
+import type { ChallengeRating } from '../combat/statblock';
 import { STARTER_MONSTER_ROSTER } from '../combat/statblocks/roster';
 import {
   combatantId,
@@ -183,8 +184,9 @@ function cellKey(cell: GridCell): string {
   return `${String(cell.column)},${String(cell.row)}`;
 }
 
-function challengeNumber(value: '1/4' | '1/2' | 1 | 2 | 3): number {
+function challengeNumber(value: ChallengeRating): number {
   switch (value) {
+    case '1/8': return 0.125;
     case '1/4': return 0.25;
     case '1/2': return 0.5;
     case 1: return 1;
