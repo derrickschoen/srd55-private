@@ -2808,6 +2808,76 @@ function nextLivingInitiativeIndex(state: EncounterState, current: number): numb
 
 function processCommand(context: ReductionContext, command: EncounterCommand): void {
   switch (command.type) {
+    case 'adjudicate': {
+      if (command.reasoning.trim().length === 0) {
+        throw new EncounterRuleError('An adjudication requires DM reasoning.');
+      }
+      const subject = combatant(context.state, command.target);
+      if (command.consequence.kind === 'hit_point_delta') {
+        if (!Number.isSafeInteger(command.consequence.amount)) {
+          throw new EncounterRuleError('An adjudicated Hit Point delta must be a safe integer.');
+        }
+        const before = subject.hitPoints;
+        const after = Math.max(
+          0,
+          Math.min(subject.profile.rules.hitPointMaximum, before + command.consequence.amount),
+        );
+        const life = after > 0
+          ? 'living'
+          : subject.profile.rules.usesDeathSaves
+            ? 'dying'
+            : 'dead';
+        context.state = replaceCombatant(context.state, {
+          ...subject,
+          hitPoints: after,
+          life,
+          deathSaves: life === 'dying'
+            ? subject.deathSaves ?? { successes: 0, failures: 0 }
+            : null,
+        });
+        emit(context, {
+          type: 'adjudicated',
+          target: command.target,
+          reasoning: command.reasoning.trim(),
+          consequence: { kind: 'hit_points', before, after, lifeState: life },
+        });
+        return;
+      }
+      const consequence = command.consequence;
+      if (!isCellInside(context.state.bounds, consequence.to)) {
+        throw new EncounterRuleError('An adjudicated destination is outside the encounter grid.');
+      }
+      if (
+        context.state.blockedCells.some((cell) => cellKey(cell) === cellKey(consequence.to)) ||
+        context.state.tokens.some(
+          (candidate) =>
+            candidate.combatantId !== command.target &&
+            cellKey(candidate.position) === cellKey(consequence.to),
+        )
+      ) {
+        throw new EncounterRuleError('An adjudicated destination must be unoccupied and unblocked.');
+      }
+      const existing = token(context.state, command.target);
+      context.state = {
+        ...context.state,
+        tokens: context.state.tokens.map((candidate) =>
+          candidate.combatantId === command.target
+            ? { ...candidate, position: { ...consequence.to } }
+            : candidate,
+        ),
+      };
+      emit(context, {
+        type: 'adjudicated',
+        target: command.target,
+        reasoning: command.reasoning.trim(),
+        consequence: {
+          kind: 'position',
+          from: { ...existing.position },
+          to: { ...consequence.to },
+        },
+      });
+      return;
+    }
     case 'cast_spell':
       processSpellCast(context, command);
       return;

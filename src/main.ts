@@ -44,6 +44,22 @@ import {
   showBrowserSupportNotice,
 } from './pwa/browser-support-notice';
 
+const launchUrl = new URL(location.href);
+const localEncounterLaunch =
+  launchUrl.pathname.replace(/\/+$/, '') === '/vtt' &&
+  launchUrl.searchParams.get('encounter') === 'reference';
+
+if (localEncounterLaunch) {
+  const encounterRoot = document.querySelector<HTMLElement>('#app');
+  if (encounterRoot === null) throw new Error('Application root #app is missing.');
+  const view = launchUrl.searchParams.get('view') === 'dm' ? 'dm' : 'player';
+  const sessionId = launchUrl.searchParams.get('session') ?? 'reference-encounter';
+  void import('./vtt/encounter-app').then(({ mountEncounterVtt }) => {
+    const mounted = mountEncounterVtt(encounterRoot, { view, sessionId });
+    window.addEventListener('pagehide', () => mounted.close(), { once: true });
+  });
+} else {
+
 const persistenceStatus =
   document.querySelector<HTMLOutputElement>('#persistence-status');
 const browserStorage =
@@ -595,3 +611,4 @@ void browserCapability.initial.then((initialOutcome) => {
     }
   });
 });
+}

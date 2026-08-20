@@ -407,6 +407,8 @@ export function replaySessionRevisions(
       case 'controller_replaced':
       case 'reaction_policy_resolved':
       case 'controller_response_refused':
+      case 'coordinator_paused':
+      case 'coordinator_resumed':
         if (parent === null || parent === undefined) {
           throw new Error('A coordinator revision requires a parent.');
         }

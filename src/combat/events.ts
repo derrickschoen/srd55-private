@@ -17,6 +17,14 @@ export type EncounterCommand =
   | { readonly type: 'roll_initiative' }
   | SpellCastCommand
   | {
+      readonly type: 'adjudicate';
+      readonly target: CombatantId;
+      readonly reasoning: string;
+      readonly consequence:
+        | { readonly kind: 'hit_point_delta'; readonly amount: number }
+        | { readonly kind: 'relocate'; readonly to: GridCell };
+    }
+  | {
       readonly type: 'move';
       readonly actor: CombatantId;
       readonly path: readonly GridCell[];
@@ -93,6 +101,23 @@ interface SequencedEvent {
 }
 
 export type EncounterEvent =
+  | (SequencedEvent & {
+      readonly type: 'adjudicated';
+      readonly target: CombatantId;
+      readonly reasoning: string;
+      readonly consequence:
+        | {
+            readonly kind: 'hit_points';
+            readonly before: number;
+            readonly after: number;
+            readonly lifeState: 'living' | 'dying' | 'stable' | 'dead';
+          }
+        | {
+            readonly kind: 'position';
+            readonly from: GridCell;
+            readonly to: GridCell;
+          };
+    })
   | (SequencedEvent & {
       readonly type: 'initiative_rolled';
       readonly combatant: CombatantId;
