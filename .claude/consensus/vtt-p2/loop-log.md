@@ -400,3 +400,22 @@ Three findings this session raised, recorded here so they are not lost with it:
   independent full-manifest audit (fresh-session auditor) is the last
   gate before increment 4 formally closes. Claimed here.
 
+## A17 — INCREMENT 4 CLOSED: audited 175-spell manifest (lane-wt/vtt3a)
+
+- Close audit arc: fresh-session audit filed 34 CRITICAL + 28 MAJOR +
+  minors + a systemic 135-row Wizard-citation offset (the implementer's
+  1,318 green literal pins had pinned its own interpretation — the
+  structural lesson of this increment). Fix round: 65/66 upheld,
+  ray-of-frost contest ruled FOR the implementer by a second fresh
+  auditor and the supervisor's own text check. Round 3: three residual
+  rows fixed; supervisor verified each against its cited SRD line
+  directly (arbitration by verification at the round cap).
+- Final state: 175/175 implemented, zero pending, KB 175/175, honest
+  typed partials throughout, citation-integrity test anchors every
+  definition AND class-list locator. Combat 1,322 tests.
+- Full gate GREEN 390 files / 7,258 tests (.tmp-gate-4close.log).
+- Status: INCREMENT 4 CLOSED. Next: increment 5 (event-sourced
+  autosave: D317.1 branch-stream RNG, D317.2 file mirror via bridge,
+  D317.10 every-revision persistence, D315.9-10 revision-history undo),
+  claimed by this session.
+
