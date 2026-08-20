@@ -1945,6 +1945,21 @@ CREATE TABLE `subclass_progressions` (
 );
 
 CREATE UNIQUE INDEX `subclass_progressions_subclass_definition_id_class_level_unique` ON `subclass_progressions` (`subclass_definition_id`,`class_level`);
+CREATE TABLE `vtt_session_revisions` (
+	`session_id` VARCHAR NOT NULL,
+	`revision` integer NOT NULL,
+	`schema_version` integer NOT NULL,
+	`payload_json` VARCHAR NOT NULL,
+	`payload_checksum` VARCHAR NOT NULL,
+	PRIMARY KEY(`session_id`, `revision`),
+	CONSTRAINT "vtt_session_revisions_session_id_check" CHECK(length("vtt_session_revisions"."session_id") > 0),
+	CONSTRAINT "vtt_session_revisions_revision_check" CHECK(typeof(`revision`) = 'integer' AND `revision` >= 1),
+	CONSTRAINT "vtt_session_revisions_schema_version_check" CHECK("vtt_session_revisions"."schema_version" IN (1, 2)),
+	CONSTRAINT "vtt_session_revisions_payload_json_check" CHECK(json_valid("vtt_session_revisions"."payload_json")),
+	CONSTRAINT "vtt_session_revisions_payload_checksum_check" CHECK(length("vtt_session_revisions"."payload_checksum") = 64
+        AND "vtt_session_revisions"."payload_checksum" NOT GLOB '*[^0-9a-f]*')
+);
+
 CREATE TABLE `warning_acknowledgements` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,

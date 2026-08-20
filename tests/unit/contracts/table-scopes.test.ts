@@ -194,6 +194,8 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'subclass_feature_value_contributions',
       'subclass_features',
       'subclass_progressions',
+      // Increment 5's event stream is whole-database state only.
+      'vtt_session_revisions',
       'warning_acknowledgements',
       'weapon_templates',
       'wizard_spellbook_entries',

@@ -276,11 +276,38 @@ export class AgentController implements Controller {
 export interface ControllerAssignment {
   readonly combatantId: CombatantId;
   readonly controller: Controller;
+  readonly controllerId?: string;
 }
 
 interface RegistryEntry {
   readonly controller: Controller;
   readonly generation: number;
+  readonly controllerId: string;
+  readonly kind: ControllerKind;
+}
+
+export type ControllerKind = 'human' | 'algorithm' | 'agent' | 'custom';
+
+export interface ControllerIdentity {
+  readonly combatantId: CombatantId;
+  readonly controllerId: string;
+  readonly kind: ControllerKind;
+  readonly generation: number;
+}
+
+function controllerKind(controller: Controller): ControllerKind {
+  if (controller instanceof HumanController) return 'human';
+  if (controller instanceof AlgorithmController) return 'algorithm';
+  if (controller instanceof AgentController) return 'agent';
+  return 'custom';
+}
+
+function defaultControllerId(
+  combatantId: CombatantId,
+  kind: ControllerKind,
+  generation: number,
+): string {
+  return `${combatantId}:${kind}:${generation}`;
 }
 
 export class ControllerRegistry {
@@ -295,6 +322,14 @@ export class ControllerRegistry {
       this.#entries.set(assignment.combatantId, {
         controller: assignment.controller,
         generation: 0,
+        controllerId:
+          assignment.controllerId ??
+          defaultControllerId(
+            assignment.combatantId,
+            controllerKind(assignment.controller),
+            0,
+          ),
+        kind: controllerKind(assignment.controller),
       });
     }
   }
@@ -311,12 +346,32 @@ export class ControllerRegistry {
     return entry.generation;
   }
 
-  replace(combatantId: CombatantId, controller: Controller): void {
+  identities(): readonly ControllerIdentity[] {
+    return [...this.#entries.entries()]
+      .map(([combatantId, entry]) => ({
+        combatantId,
+        controllerId: entry.controllerId,
+        kind: entry.kind,
+        generation: entry.generation,
+      }))
+      .sort((left, right) => left.combatantId.localeCompare(right.combatantId));
+  }
+
+  replace(
+    combatantId: CombatantId,
+    controller: Controller,
+    controllerId?: string,
+  ): void {
     const current = this.#entries.get(combatantId);
     if (current === undefined) throw new Error(`No controller assigned to ${combatantId}.`);
+    const generation = current.generation + 1;
+    const kind = controllerKind(controller);
     this.#entries.set(combatantId, {
       controller,
-      generation: current.generation + 1,
+      generation,
+      controllerId:
+        controllerId ?? defaultControllerId(combatantId, kind, generation),
+      kind,
     });
     for (const listener of this.#replaceListeners) listener(combatantId);
   }
