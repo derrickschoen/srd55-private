@@ -247,7 +247,7 @@ export class SqliteBrowserSessionStore implements BrowserSessionStore {
   }
 }
 
-function projections(state: EncounterState): PersistedProjections {
+export function projectPersistedProjections(state: EncounterState): PersistedProjections {
   return {
     dm: projectEncounter(state, { kind: 'dm' }),
     players: state.combatants
@@ -303,7 +303,7 @@ function decodeRevision(value: unknown): SessionRevision {
   return revision;
 }
 
-function branchRng(
+export function deriveBranchRng(
   target: SessionRevision,
   branchId: EncounterBranchId,
 ): SerializableRng {
@@ -374,7 +374,7 @@ export function replaySessionRevisions(
           parent.coordinatorState,
           'head-move coordinator state',
         );
-        const expected = branchRng(parent, revision.branchId).snapshot();
+        const expected = deriveBranchRng(parent, revision.branchId).snapshot();
         requireCanonicalEqual(revision.rngState, expected, 'head-move RNG state');
         break;
       }
@@ -426,7 +426,7 @@ export function replaySessionRevisions(
     }
     requireCanonicalEqual(
       revision.projections,
-      projections(revision.encounterState),
+      projectPersistedProjections(revision.encounterState),
       'projections',
     );
     byRevision.set(revision.revision, revision);
@@ -542,7 +542,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
     if (source === undefined || target === undefined) {
       throw new Error('Head move target does not exist.');
     }
-    this.#rng = branchRng(target, requestedBranchId);
+    this.#rng = deriveBranchRng(target, requestedBranchId);
     const appended = this.#append({
       parentRevision: target.revision,
       branchId: requestedBranchId,
@@ -600,7 +600,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       coordinatorState: input.coordinatorState,
       controllers: input.controllers,
       codexSessionId: input.codexSessionId,
-      projections: projections(input.encounterState),
+      projections: projectPersistedProjections(input.encounterState),
     };
     const persisted: SessionRevision = {
       ...body,

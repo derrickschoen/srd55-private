@@ -6,6 +6,10 @@ import {
   type DmBridgeModelConfig,
   type DmBridgeRequest,
 } from './contracts';
+import {
+  modelFleetTelemetry,
+  type FleetTelemetry,
+} from '../fleet-telemetry';
 
 export interface BridgeFetchResponse {
   readonly ok: boolean;
@@ -64,6 +68,7 @@ export class LocalhostDmBridgeClient implements DmBridgeExchange, MirrorSink {
     private readonly baseUrl: string,
     private readonly fetch: BridgeFetch,
     private readonly onFailure: (error: unknown) => void,
+    private readonly onTelemetry: (telemetry: FleetTelemetry) => void = () => undefined,
   ) {
     const parsed = new URL(baseUrl);
     if (parsed.protocol !== 'http:' || (parsed.hostname !== '127.0.0.1' && parsed.hostname !== 'localhost')) {
@@ -84,6 +89,7 @@ export class LocalhostDmBridgeClient implements DmBridgeExchange, MirrorSink {
       if (typeof body !== 'object' || body === null || Array.isArray(body) || !('reply' in body)) {
         throw new TypeError('DM bridge exchange response is malformed.');
       }
+      if ('telemetry' in body) this.onTelemetry(decodeBridgeFleetTelemetry(body.telemetry));
       return body.reply;
     } catch (error) {
       this.onFailure(error);
@@ -142,4 +148,46 @@ export class LocalhostDmBridgeClient implements DmBridgeExchange, MirrorSink {
   async flushMirror(): Promise<void> {
     await this.#mirrorQueue;
   }
+}
+
+function decodeBridgeFleetTelemetry(value: unknown): FleetTelemetry {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new TypeError('DM bridge fleet telemetry is malformed.');
+  }
+  const input = value as Readonly<Record<string, unknown>>;
+  const tokenCounts = input.tokenCounts;
+  if (
+    typeof input.modelId !== 'string' ||
+    typeof input.reasoningEffort !== 'string' ||
+    (input.buildId !== null && typeof input.buildId !== 'string') ||
+    (input.commit !== null && typeof input.commit !== 'string') ||
+    (input.loadLevelTag !== null && typeof input.loadLevelTag !== 'string') ||
+    typeof input.latencyMs !== 'number' ||
+    typeof tokenCounts !== 'object' || tokenCounts === null || Array.isArray(tokenCounts)
+  ) {
+    throw new TypeError('DM bridge fleet telemetry is malformed.');
+  }
+  const counts = tokenCounts as Readonly<Record<string, unknown>>;
+  if (
+    typeof counts.input !== 'number' ||
+    typeof counts.cachedInput !== 'number' ||
+    typeof counts.output !== 'number' ||
+    typeof counts.reasoning !== 'number'
+  ) {
+    throw new TypeError('DM bridge fleet token counts are malformed.');
+  }
+  return modelFleetTelemetry({
+    modelId: input.modelId,
+    reasoningEffort: input.reasoningEffort as FleetTelemetry['reasoningEffort'],
+    buildId: input.buildId as string | null,
+    commit: input.commit as string | null,
+    loadLevelTag: input.loadLevelTag as string | null,
+    latencyMs: input.latencyMs,
+    tokenCounts: {
+      input: counts.input,
+      cachedInput: counts.cachedInput,
+      output: counts.output,
+      reasoning: counts.reasoning,
+    },
+  });
 }

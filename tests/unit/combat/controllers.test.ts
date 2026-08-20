@@ -106,6 +106,31 @@ describe('one Controller contract and stale response rejection', () => {
     expect(coordinator.state()).toBe(fixture.state);
   });
 
+  it('M13-AGENT-CHANGES-ACTOR refuses a response whose action belongs to another combatant', async () => {
+    const fixture = startedPair();
+    const wrongActor = new AgentController({
+      exchange: async (request) => ({
+        protocolVersion: 1,
+        requestId: request.requestId,
+        encounterRevision: request.encounterRevision,
+        action: { type: 'end_turn', actor: fixture.other.id },
+      }),
+    });
+    const coordinator = new TurnCoordinator(
+      fixture.state,
+      new ControllerRegistry([
+        { combatantId: fixture.active.id, controller: wrongActor },
+        { combatantId: fixture.other.id, controller: new AlgorithmController() },
+      ]),
+      () => 0.5,
+    );
+    await expect(coordinator.step()).resolves.toMatchObject({
+      kind: 'refused',
+      state: fixture.state,
+    });
+    expect(coordinator.state()).toBe(fixture.state);
+  });
+
   it('controller swap aborts the old prompt and reissues at the action boundary', async () => {
     const fixture = startedPair();
     const oldHuman = new HumanController();
