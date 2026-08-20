@@ -6,6 +6,7 @@ import type {
   PersistedCoordinatorState,
 } from '../combat/coordinator';
 import {
+  isEncounterConfig,
   reduceEncounter,
   type EncounterState,
 } from '../combat/encounter';
@@ -286,6 +287,7 @@ function decodeRevision(value: unknown): SessionRevision {
     !isRecord(value.transition) ||
     typeof value.transition.kind !== 'string' ||
     !isRecord(value.encounterState) ||
+    !isEncounterConfig(value.encounterState.config) ||
     !isRecord(value.rngState) ||
     !isRecord(value.coordinatorState) ||
     !Array.isArray(value.controllers) ||
@@ -307,8 +309,9 @@ export function deriveBranchRng(
   target: SessionRevision,
   branchId: EncounterBranchId,
 ): SerializableRng {
+  const { config: _config, ...mechanicalState } = target.encounterState;
   const digest = sha256(canonicalJson({
-    encounterState: target.encounterState,
+    encounterState: mechanicalState,
     parentRngState: target.rngState,
     branchId,
   }));

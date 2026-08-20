@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { ControllerRequest } from '../../../src/combat/controllers';
-import { createEncounter, type EncounterState } from '../../../src/combat/encounter';
+import {
+  createEncounter,
+  type EncounterState,
+  type InitiativeMode,
+} from '../../../src/combat/encounter';
 import type { EncounterCommand } from '../../../src/combat/events';
 import { damageType, dieSides } from '../../../src/combat/values';
 import { projectDmBoard, projectPlayerBoard } from '../../../src/vtt/encounter-projections';
@@ -71,6 +75,7 @@ function context(state: EncounterState) {
     codexSessionId: codexSessionId('codex:persisted-session-77'),
     projection: board(state),
     history: [],
+    initiativeMode: state.config.initiativeMode,
   };
 }
 
@@ -158,6 +163,52 @@ class FakeExchange implements DmBridgeExchange {
 }
 
 describe('typed DM round decision programs', () => {
+  it.each([
+    ['per_combatant', 2, 1],
+    ['shared_enemy', 1, 2],
+    ['side_alternating', 1, 2],
+  ] as const)(
+    'issues correctly timed %s round-plan requests before enemy activations',
+    async (initiativeMode: InitiativeMode, expectedRequests, expectedBatchSize) => {
+      const f = fixture();
+      const firstState: EncounterState = {
+        ...f.state,
+        config: { initiativeMode },
+        activeCombatant: f.monsterA.id,
+      };
+      const secondState: EncounterState = {
+        ...firstState,
+        revision: firstState.revision + 1,
+        activeCombatant: f.monsterB.id,
+      };
+      const exchange = new FakeExchange((request) => {
+        if (request.kind !== 'round_plan_request') {
+          throw new Error('Timing fixture unexpectedly requested a correction or reconsult.');
+        }
+        return planFor(request, request.livingMonsterIds.map((monsterId) => ({
+          monsterId,
+          program: { kind: 'action', action: { kind: 'use_action', action: 'end_turn' } },
+        })));
+      });
+      const session = new DmRoundPlanSession(exchange);
+      await session.choose(
+        controllerRequest(firstState, f.monsterA.id, [{ type: 'end_turn', actor: f.monsterA.id }]),
+        context(firstState),
+        new AbortController().signal,
+      );
+      await session.choose(
+        controllerRequest(secondState, f.monsterB.id, [{ type: 'end_turn', actor: f.monsterB.id }]),
+        context(secondState),
+        new AbortController().signal,
+      );
+
+      expect(exchange.requests).toHaveLength(expectedRequests);
+      expect(exchange.requests.map((request) =>
+        request.kind === 'round_plan_request' ? request.livingMonsterIds.length : 0,
+      )).toEqual(Array.from({ length: expectedRequests }, () => expectedBatchSize));
+    },
+  );
+
   it('M43-ONE-INITIAL-ROUND-REQUEST resumes the persisted session and plans all living monsters once', async () => {
     const f = fixture();
     const exchange = new FakeExchange((request) => planFor(request, [f.monsterA, f.monsterB].map((monster) => ({

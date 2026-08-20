@@ -17,6 +17,7 @@ import { runVttReplayCommand } from '../../../tools/vtt-replay';
 
 interface MutableReplayBundle {
   schemaVersion: number;
+  encounterConfig: { initiativeMode: 'per_combatant' | 'shared_enemy' | 'side_alternating' };
   gapReports: Array<{
     packEntry: string;
     featurePath: string;
@@ -122,6 +123,19 @@ describe('increment 10 deterministic replay and playable exit', () => {
     );
   });
 
+  it('mode_not_serialized refuses to reconstruct a shared_enemy bundle as per_combatant', () => {
+    const gate = recordScriptedReferenceSkirmish(0x320_004, 'engine:hit-points', 'shared_enemy');
+    expect(gate.bundle.encounterConfig).toEqual({ initiativeMode: 'shared_enemy' });
+    const candidate = mutable(gate.bundle);
+    candidate.encounterConfig = { initiativeMode: 'per_combatant' };
+    expectDivergence(
+      () => replayBundle(candidate as unknown as ReplayBundle, TEST_APPROVED_FIRST_SKIRMISH_FIXTURE),
+      'bundle',
+      0,
+      'encounterConfig.initiativeMode',
+    );
+  });
+
   it('gap_report_swallowed rejects a replay after a non-engine adjudication gap is dropped', () => {
     const gate = recordScriptedReferenceSkirmish(0x317010, 'external:unmapped-mechanic');
     expect(gate.bundle.gapReports).toContainEqual(expect.objectContaining({
@@ -142,9 +156,11 @@ describe('increment 10 deterministic replay and playable exit', () => {
   it('M62-CONTROLLER-RESPONSE-MISATTRIBUTED rejects a valid response linked to the prior request', () => {
     const gate = recordScriptedReferenceSkirmish();
     const candidate = mutable(gate.bundle);
-    const requests = candidate.transcripts.filter((entry) => entry.kind === 'controller_request');
-    const second = requests[1];
+    const requests = gate.bundle.transcripts.filter((entry) => entry.kind === 'controller_request');
     const first = requests[0];
+    const second = requests.find(
+      (entry) => entry.controller.controllerId !== first?.controller.controllerId,
+    );
     if (first?.requestId === null || first?.requestId === undefined || second?.requestId === null || second?.requestId === undefined) {
       throw new Error('Scripted transcript needs two requests.');
     }
@@ -278,7 +294,7 @@ describe('increment 10 deterministic replay and playable exit', () => {
   it('OWN-BUNDLE-VERSION-OUTSIDE-WINDOW is refused while the adjacent migration remains exact', () => {
     const gate = recordScriptedReferenceSkirmish();
     expect(decodeReplayBundle(exportReplayBundleV1ForMigrationTest(gate.bundle))).toEqual(gate.bundle);
-    for (const version of [0, 5]) {
+    for (const version of [0, 6]) {
       const candidate = mutable(gate.bundle);
       candidate.schemaVersion = version;
       expect(() => decodeReplayBundle(JSON.stringify(candidate))).toThrow('outside the migration window');
