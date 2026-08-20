@@ -441,3 +441,22 @@ Three findings this session raised, recorded here so they are not lost with it:
 - Status: CLOSED round 2. Next: increment 6 (player-primary board +
   separate DM window), claimed by this session.
 
+## A19 — INCREMENT 6 CLOSED: dual-window UI (lane-wt/vtt3a)
+
+- Player-primary board + separate DM window per D313/D314.2/D315.8/.11,
+  D317.4/.5/.19/.20; projections-only channel; secrets absent from the
+  player object; two-window Playwright flow green.
+- Round 2 FINDING by supervisor: a wiring-level leak mutant (full DM
+  projection cast into the host snapshot player slot) survived the
+  UNIT suite — only the browser flow caught it. (Supervisor process
+  note, honest: the first mutant attempt "killed" via a syntax crash
+  and was nearly miscounted as a kill; the clean rerun exposed the
+  gap.) Fix: HOST-WIRING-PLAYER-SECRECY unit sentinel (absence of
+  hidden sentinels + presence of player facts). Supervisor re-ran the
+  exact mutant vs the committed tree: killed in 12ms.
+- Ledger: plan 37-42 + codex monster-HP-boundary + supervisor wiring
+  mutant, all killed by named tests.
+- Full gate GREEN 393 files / 7,292 tests (.tmp-gate-6.log).
+- Status: CLOSED round 2. Next: increment 7 (localhost codex DM
+  bridge), claimed by this session.
+
