@@ -31,12 +31,14 @@ export type SpellTargeting =
       readonly kind: 'single';
       readonly rangeFeet: number;
       readonly willing: boolean;
+      readonly allowDead?: true;
     }
   | {
       readonly kind: 'multiple';
       readonly rangeFeet: number;
       readonly baseMaximum: number;
       readonly additionalPerSlot: number;
+      readonly willing?: boolean;
     }
   | {
       readonly kind: 'area';
@@ -44,7 +46,20 @@ export type SpellTargeting =
       readonly shape: AreaTemplate['shape'];
       readonly baseSizeFeet: number;
       readonly sizePerSlotFeet: number;
+      readonly secondarySizeFeet?: number;
     }
+  | {
+      readonly kind: 'area_selected';
+      readonly rangeFeet: number;
+      readonly shape: AreaTemplate['shape'];
+      readonly baseSizeFeet: number;
+      readonly sizePerSlotFeet: number;
+      readonly secondarySizeFeet?: number;
+      readonly baseMaximum: number;
+      readonly additionalPerSlot: number;
+    }
+  | { readonly kind: 'all_in_range'; readonly rangeFeet: number }
+  | { readonly kind: 'remote'; readonly range: 'unlimited' }
   | {
       readonly kind: 'utility';
       readonly rangeFeet: number;
@@ -61,6 +76,7 @@ export interface EffectData {
     readonly rollMode: 'normal' | 'advantage' | 'disadvantage';
     readonly timing: 'target_end';
   };
+  readonly durationRoundsPerSlot?: number;
 }
 
 export type SpellOperation =
@@ -164,6 +180,28 @@ export type SpellOperation =
       readonly effect: EffectData;
     }
   | {
+      readonly kind: 'reaction_save_cancel';
+      readonly ability: Ability;
+    }
+  | {
+      readonly kind: 'dispel_magic';
+      readonly baseAutomaticLevel: number;
+      readonly checkDcBase: number;
+    }
+  | {
+      readonly kind: 'revive';
+      readonly hitPoints: number;
+      readonly maximumDeathAgeRounds: number;
+    }
+  | { readonly kind: 'remove_curse' }
+  | {
+      readonly kind: 'lifedrain_attack';
+      readonly damageType: DamageType;
+      readonly dice: ScaledDice;
+      readonly healingDivisor: number;
+      readonly effect: EffectData;
+    }
+  | {
       readonly kind: 'magic_missiles';
       readonly baseDarts: number;
       readonly additionalPerSlot: number;
@@ -212,10 +250,28 @@ export type SpellOperation =
           | 'object_unlock'
           | 'teleport'
           | 'rope_trick'
-          | 'silence_area';
+          | 'silence_area'
+          | 'summoned_undead'
+          | 'clairvoyance_sensor'
+          | 'created_food_and_water'
+          | 'daylight_area'
+          | 'glyph_of_warding'
+          | 'magic_circle'
+          | 'major_image'
+          | 'meld_into_stone'
+          | 'phantom_steed'
+          | 'sending'
+          | 'sleet_storm_area'
+          | 'speak_with_dead'
+          | 'spirit_guardians_area'
+          | 'stinking_cloud_area'
+          | 'tiny_hut';
       }>;
       readonly concentration: boolean;
       readonly durationRounds: number | null;
+      readonly durationRoundsPerSlot?: number;
+      readonly becomesPermanentAtSlot?: number;
+      readonly losesConcentrationAtSlot?: number;
       /** Instantaneous creations that remain encounter state use a permanent effect. */
       readonly stateful?: true;
     };

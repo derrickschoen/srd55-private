@@ -195,6 +195,7 @@ export type EncounterEvent =
         | 'concentration_ended'
         | 'concentration_broken'
         | 'no_targets'
+        | 'dispelled'
         | 'stacking_replaced';
     })
   | (SequencedEvent & {

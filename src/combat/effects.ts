@@ -426,6 +426,230 @@ export type EffectPayload =
       readonly saveAbility: 'charisma';
     }
   | {
+      readonly kind: 'summoned_undead';
+      readonly forms: readonly ('Skeleton' | 'Zombie')[];
+      readonly createdCreatures: number;
+      readonly createdCreaturesPerSlot: number;
+      readonly reassertedCreatures: number;
+      readonly reassertedCreaturesPerSlot: number;
+      readonly commandRangeFeet: number;
+      readonly controlDurationRounds: number;
+    }
+  | {
+      readonly kind: 'beacon_of_hope';
+      readonly wisdomSaveMode: 'advantage';
+      readonly deathSaveMode: 'advantage';
+      readonly maximizesHealing: true;
+    }
+  | {
+      readonly kind: 'bestow_curse';
+      readonly options: readonly ('ability_disadvantage' | 'attacks_against_caster_disadvantage' | 'forced_dodge' | 'extra_necrotic_damage')[];
+      readonly extraDamageCount: number;
+      readonly extraDamageSides: number;
+    }
+  | {
+      readonly kind: 'blink';
+      readonly dieSides: number;
+      readonly etherealMinimum: number;
+      readonly etherealVisionFeet: number;
+      readonly returnSpaceFeet: number;
+    }
+  | {
+      readonly kind: 'clairvoyance_sensor';
+      readonly rangeFeet: number;
+      readonly senses: readonly ('hearing' | 'seeing')[];
+      readonly switchCost: 'bonus_action';
+    }
+  | {
+      readonly kind: 'created_food_and_water';
+      readonly foodPounds: number;
+      readonly waterGallons: number;
+      readonly foodSpoilsAfterRounds: number;
+    }
+  | {
+      readonly kind: 'daylight_area';
+      readonly placement: AreaTemplate | 'selected_when_cast';
+      readonly brightRadiusFeet: number;
+      readonly additionalDimFeet: number;
+      readonly dispelsDarknessSpellLevelAtMost: number;
+    }
+  | {
+      readonly kind: 'flight';
+      readonly speedFeet: number;
+      readonly canHover: true;
+      readonly fallsWhenEffectEnds: true;
+    }
+  | {
+      readonly kind: 'gaseous_form';
+      readonly flySpeedFeet: number;
+      readonly canHover: true;
+      readonly physicalResistanceTypes: readonly ('Bludgeoning' | 'Piercing' | 'Slashing')[];
+      readonly proneImmune: true;
+      readonly physicalSaveMode: 'advantage';
+      readonly canAttackOrCast: false;
+    }
+  | {
+      readonly kind: 'glyph_of_warding';
+      readonly placement: AreaTemplate | 'selected_when_cast';
+      readonly maximumDiameterFeet: number;
+      readonly movementBreakDistanceFeet: number;
+      readonly explosiveRadiusFeet: number;
+      readonly explosiveDamageTypes: readonly ('Acid' | 'Cold' | 'Fire' | 'Lightning' | 'Thunder')[];
+      readonly explosiveDamageCount: number;
+      readonly explosiveDamageSides: number;
+      readonly explosiveDamagePerSlotCount: number;
+      readonly storedSpellMaximumLevel: number;
+    }
+  | {
+      readonly kind: 'haste';
+      readonly speedMultiplier: 2;
+      readonly armorClassBonus: number;
+      readonly dexteritySaveMode: 'advantage';
+      readonly extraActionOptions: readonly ('attack_once' | 'dash' | 'disengage' | 'hide' | 'utilize')[];
+      readonly lethargyCondition: 'Incapacitated';
+      readonly lethargySpeedFeet: 0;
+      readonly lethargyRounds: number;
+    }
+  | {
+      readonly kind: 'hypnotic_pattern';
+      readonly conditions: readonly ('Charmed' | 'Incapacitated')[];
+      readonly speedFeet: 0;
+      readonly endsOnDamage: true;
+      readonly wakeAction: true;
+    }
+  | {
+      readonly kind: 'fear';
+      readonly condition: 'Frightened';
+      readonly dropsHeldObjects: true;
+      readonly forcedAction: 'dash_away';
+      readonly repeatSaveAbility: 'wisdom';
+      readonly repeatSaveRequiresNoLineOfSight: true;
+    }
+  | {
+      readonly kind: 'magic_circle';
+      readonly placement: AreaTemplate | 'selected_when_cast';
+      readonly radiusFeet: number;
+      readonly heightFeet: number;
+      readonly creatureTypes: readonly ('Celestial' | 'Elemental' | 'Fey' | 'Fiend' | 'Undead')[];
+      readonly reversible: true;
+    }
+  | {
+      readonly kind: 'major_image';
+      readonly placement: AreaTemplate | 'selected_when_cast';
+      readonly maximumCubeFeet: number;
+      readonly sensoryModes: readonly ('visual' | 'sound' | 'smell' | 'temperature')[];
+      readonly movableByMagicAction: true;
+      readonly investigationAgainstSpellDc: true;
+    }
+  | {
+      readonly kind: 'meld_into_stone';
+      readonly exitMovementFeet: number;
+      readonly partialDestructionDamageCount: number;
+      readonly partialDestructionDamageSides: number;
+      readonly totalDestructionDamage: number;
+      readonly expelledCondition: 'Prone';
+    }
+  | {
+      readonly kind: 'nondetection';
+      readonly blocksDivinationTargeting: true;
+      readonly blocksMagicalScryingSensors: true;
+      readonly maximumObjectDimensionFeet: number;
+    }
+  | {
+      readonly kind: 'phantom_steed';
+      readonly speedFeet: number;
+      readonly travelMilesPerHour: number;
+      readonly equipmentVanishDistanceFeet: number;
+      readonly fadeRounds: number;
+    }
+  | {
+      readonly kind: 'energy_protection';
+      readonly damageTypes: readonly ('Acid' | 'Cold' | 'Fire' | 'Lightning' | 'Thunder')[];
+      readonly selectedDamageType: string;
+    }
+  | {
+      readonly kind: 'sending';
+      readonly maximumWords: number;
+      readonly crossPlaneFailurePercent: number;
+      readonly recipientBlockRounds: number;
+    }
+  | {
+      readonly kind: 'sleet_storm_area';
+      readonly placement: AreaTemplate | 'selected_when_cast';
+      readonly radiusFeet: number;
+      readonly heightFeet: number;
+      readonly obscurement: 'heavy';
+      readonly difficultTerrain: true;
+      readonly saveAbility: 'dexterity';
+      readonly failureCondition: 'Prone';
+      readonly failureBreaksConcentration: true;
+    }
+  | {
+      readonly kind: 'slow';
+      readonly speedMultiplier: 0.5;
+      readonly armorClassPenalty: number;
+      readonly dexteritySavePenalty: number;
+      readonly reactionsAllowed: false;
+      readonly actionOrBonusOnly: true;
+      readonly attacksPerAction: 1;
+      readonly somaticSpellFailurePercent: number;
+    }
+  | {
+      readonly kind: 'speak_with_dead';
+      readonly maximumQuestions: number;
+      readonly sameCorpseLockoutRounds: number;
+    }
+  | {
+      readonly kind: 'spirit_guardians_area';
+      readonly placement: AreaTemplate | 'selected_when_cast';
+      readonly radiusFeet: number;
+      readonly speedMultiplier: 0.5;
+      readonly damageTypes: readonly ('Radiant' | 'Necrotic')[];
+      readonly damageCount: number;
+      readonly damageSides: number;
+      readonly damagePerSlotCount: number;
+      readonly saveAbility: 'wisdom';
+      readonly onSuccess: 'half';
+      readonly oncePerTurn: true;
+    }
+  | {
+      readonly kind: 'stinking_cloud_area';
+      readonly placement: AreaTemplate | 'selected_when_cast';
+      readonly radiusFeet: number;
+      readonly obscurement: 'heavy';
+      readonly dispersedByStrongWind: true;
+      readonly saveAbility: 'constitution';
+      readonly failureCondition: 'Poisoned';
+      readonly actionsAllowedOnFailure: false;
+    }
+  | {
+      readonly kind: 'tiny_hut';
+      readonly placement: AreaTemplate | 'selected_when_cast';
+      readonly radiusFeet: number;
+      readonly blocksOutsideCreaturesAndObjects: true;
+      readonly blocksSpellLevelAtMost: number;
+      readonly opaqueFromOutside: true;
+      readonly transparentFromInside: true;
+    }
+  | {
+      readonly kind: 'universal_language';
+      readonly understandsSpokenAndSigned: true;
+      readonly understoodByAnyLanguageSpeaker: true;
+    }
+  | {
+      readonly kind: 'vampiric_touch';
+      readonly repeatAttackCost: 'magic_action';
+    }
+  | {
+      readonly kind: 'water_breathing';
+      readonly retainsNormalRespiration: true;
+    }
+  | {
+      readonly kind: 'water_walk';
+      readonly surfaces: readonly ('water' | 'acid' | 'mud' | 'snow' | 'quicksand' | 'lava')[];
+      readonly transitionCost: 'bonus_action';
+    }
+  | {
       readonly kind: 'minor_magic';
       readonly spell: 'Elementalism' | 'Prestidigitation' | 'Thaumaturgy';
       readonly options: readonly string[];

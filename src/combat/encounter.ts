@@ -353,7 +353,40 @@ function appliedConditions(effect: EncounterEffect): readonly AppliedCondition[]
     case 'warding_bond':
     case 'truth_zone':
     case 'ongoing_damage':
+    case 'summoned_undead':
+    case 'beacon_of_hope':
+    case 'bestow_curse':
+    case 'blink':
+    case 'clairvoyance_sensor':
+    case 'created_food_and_water':
+    case 'daylight_area':
+    case 'flight':
+    case 'gaseous_form':
+    case 'glyph_of_warding':
+    case 'haste':
+    case 'magic_circle':
+    case 'major_image':
+    case 'meld_into_stone':
+    case 'nondetection':
+    case 'phantom_steed':
+    case 'energy_protection':
+    case 'sending':
+    case 'sleet_storm_area':
+    case 'slow':
+    case 'speak_with_dead':
+    case 'spirit_guardians_area':
+    case 'stinking_cloud_area':
+    case 'tiny_hut':
+    case 'universal_language':
+    case 'vampiric_touch':
+    case 'water_breathing':
+    case 'water_walk':
       return [];
+    case 'hypnotic_pattern':
+      return effect.payload.conditions.map((condition) =>
+        condition === 'Charmed' ? { name: condition, source: effect.source } : { name: condition });
+    case 'fear':
+      return [{ name: 'Frightened', source: effect.source }];
     case 'web_area':
       return [{ name: 'Restrained' }];
     case 'condition_bundle':
@@ -1296,6 +1329,36 @@ function cloneEffectApplication(
       case 'warding_bond':
       case 'web_area':
       case 'truth_zone':
+      case 'summoned_undead':
+      case 'beacon_of_hope':
+      case 'bestow_curse':
+      case 'blink':
+      case 'clairvoyance_sensor':
+      case 'created_food_and_water':
+      case 'daylight_area':
+      case 'flight':
+      case 'gaseous_form':
+      case 'glyph_of_warding':
+      case 'haste':
+      case 'hypnotic_pattern':
+      case 'fear':
+      case 'magic_circle':
+      case 'major_image':
+      case 'meld_into_stone':
+      case 'nondetection':
+      case 'phantom_steed':
+      case 'energy_protection':
+      case 'sending':
+      case 'sleet_storm_area':
+      case 'slow':
+      case 'speak_with_dead':
+      case 'spirit_guardians_area':
+      case 'stinking_cloud_area':
+      case 'tiny_hut':
+      case 'universal_language':
+      case 'vampiric_touch':
+      case 'water_breathing':
+      case 'water_walk':
         return { ...application.payload };
       case 'commanded_action':
         return { ...application.payload, options: [...application.payload.options] };
@@ -1696,6 +1759,7 @@ function placedAreaTargets(
   shape: AreaTemplate['shape'],
   expectedSizeFeet: number,
   command: SpellCastCommand,
+  expectedSecondarySizeFeet: number | null = null,
 ): readonly CombatantId[] {
   if (command.area === null) {
     throw new EncounterRuleError(`${spellName} requires an area placement.`);
@@ -1716,6 +1780,16 @@ function placedAreaTargets(
             : command.area.template.radius;
   if (submittedSize !== expectedSizeFeet) {
     throw new EncounterRuleError(`${spellName} requires a ${expectedSizeFeet}-foot ${shape} template.`);
+  }
+  if (expectedSecondarySizeFeet !== null) {
+    const submittedSecondary = command.area.shape === 'line'
+      ? command.area.template.width
+      : command.area.shape === 'cylinder'
+        ? command.area.template.height
+        : null;
+    if (submittedSecondary !== expectedSecondarySizeFeet) {
+      throw new EncounterRuleError(`${spellName} requires a ${expectedSecondarySizeFeet}-foot secondary ${shape} dimension.`);
+    }
   }
   const actorCell = token(state, command.actor).position;
   const origin = command.area.template.origin;
@@ -1744,7 +1818,7 @@ function areaTargets(
   definition: SpellDefinition,
   command: SpellCastCommand,
 ): readonly CombatantId[] {
-  if (definition.targeting.kind !== 'area') {
+  if (definition.targeting.kind !== 'area' && definition.targeting.kind !== 'area_selected') {
     throw new EncounterRuleError(`${definition.name} does not use area targeting.`);
   }
   return placedAreaTargets(
@@ -1755,6 +1829,7 @@ function areaTargets(
     definition.targeting.baseSizeFeet + definition.targeting.sizePerSlotFeet *
       ((command.slotLevel ?? definition.level) - definition.level),
     command,
+    definition.targeting.secondarySizeFeet ?? null,
   );
 }
 
@@ -1763,8 +1838,9 @@ function validateTargetRange(
   actor: CombatantId,
   target: CombatantId,
   rangeFeet: number,
+  allowDead = false,
 ): void {
-  if (combatant(state, target).life === 'dead') {
+  if (!allowDead && combatant(state, target).life === 'dead') {
     throw new EncounterRuleError('A dead combatant is not a legal spell target.');
   }
   if (gridDistance(token(state, actor).position, token(state, target).position) > rangeFeet) {
@@ -1784,7 +1860,7 @@ function selectedSpellTargets(
       return [command.actor];
     case 'single':
       if (command.targets.length !== 1) throw new EncounterRuleError(`${definition.name} requires one target.`);
-      validateTargetRange(state, command.actor, command.targets[0] as CombatantId, targeting.rangeFeet);
+      validateTargetRange(state, command.actor, command.targets[0] as CombatantId, targeting.rangeFeet, targeting.allowDead === true);
       return command.targets;
     case 'multiple': {
       const slotDelta = definition.level === 0 ? 0 : (command.slotLevel as number) - definition.level;
@@ -1804,6 +1880,28 @@ function selectedSpellTargets(
     case 'area':
       if (command.targets.length !== 0) throw new EncounterRuleError('Area spell targets come from its exact template.');
       return areaTargets(state, definition, command);
+    case 'area_selected': {
+      const inArea = areaTargets(state, definition, command);
+      const slotDelta = (command.slotLevel as number) - definition.level;
+      const maximum = targeting.baseMaximum + targeting.additionalPerSlot * slotDelta;
+      if (command.targets.length < 1 || command.targets.length > maximum) {
+        throw new EncounterRuleError(`${definition.name} allows at most ${maximum} selected area targets.`);
+      }
+      assertUnique(command.targets, 'Spell targets');
+      if (command.targets.some((target) => !inArea.includes(target))) {
+        throw new EncounterRuleError(`${definition.name} selected targets must occupy its exact template.`);
+      }
+      return command.targets;
+    }
+    case 'all_in_range':
+      if (command.targets.length < 1) throw new EncounterRuleError(`${definition.name} requires at least one target.`);
+      assertUnique(command.targets, 'Spell targets');
+      for (const target of command.targets) validateTargetRange(state, command.actor, target, targeting.rangeFeet);
+      return command.targets;
+    case 'remote':
+      if (command.targets.length !== 1) throw new EncounterRuleError(`${definition.name} requires one remote target.`);
+      if (combatant(state, command.targets[0] as CombatantId).life === 'dead') throw new EncounterRuleError('A dead combatant is not a legal spell target.');
+      return command.targets;
     case 'utility':
       if (command.targets.length !== 0) throw new EncounterRuleError('This utility spell does not target a combatant.');
       return [command.actor];
@@ -1876,6 +1974,12 @@ function resolvedSpellEffectPayload(
     case 'silence_area':
     case 'web_area':
     case 'truth_zone':
+    case 'daylight_area':
+    case 'magic_circle':
+    case 'major_image':
+    case 'sleet_storm_area':
+    case 'stinking_cloud_area':
+    case 'tiny_hut':
       return payload.placement === 'selected_when_cast'
         ? { ...payload, placement: selectedArea() }
         : payload;
@@ -1886,6 +1990,32 @@ function resolvedSpellEffectPayload(
         radiusFeet: payload.radiusFeet +
           (definition.targeting.kind === 'area' ? definition.targeting.sizePerSlotFeet * slotDelta : 0),
       };
+    case 'summoned_undead':
+      return {
+        ...payload,
+        createdCreatures: payload.createdCreatures + payload.createdCreaturesPerSlot * slotDelta,
+        reassertedCreatures: payload.reassertedCreatures + payload.reassertedCreaturesPerSlot * slotDelta,
+      };
+    case 'glyph_of_warding':
+      return {
+        ...payload,
+        placement: payload.placement === 'selected_when_cast' ? selectedArea() : payload.placement,
+        explosiveDamageCount: payload.explosiveDamageCount + payload.explosiveDamagePerSlotCount * slotDelta,
+        storedSpellMaximumLevel: payload.storedSpellMaximumLevel + slotDelta,
+      };
+    case 'spirit_guardians_area':
+      return {
+        ...payload,
+        placement: payload.placement === 'selected_when_cast' ? selectedArea() : payload.placement,
+        damageCount: payload.damageCount + payload.damagePerSlotCount * slotDelta,
+      };
+    case 'energy_protection': {
+      const selected = command.selectedOption;
+      if (selected === null || !payload.damageTypes.includes(selected as 'Acid' | 'Cold' | 'Fire' | 'Lightning' | 'Thunder')) {
+        throw new EncounterRuleError(`${definition.name} requires a listed energy damage type.`);
+      }
+      return { ...payload, selectedDamageType: selected };
+    }
     case 'condition':
     case 'condition_bundle':
     case 'exhaustion':
@@ -1952,6 +2082,26 @@ function resolvedSpellEffectPayload(
     case 'sanctuary':
     case 'magic_missile_immunity':
     case 'shield_defense':
+    case 'beacon_of_hope':
+    case 'bestow_curse':
+    case 'blink':
+    case 'clairvoyance_sensor':
+    case 'created_food_and_water':
+    case 'flight':
+    case 'gaseous_form':
+    case 'haste':
+    case 'hypnotic_pattern':
+    case 'fear':
+    case 'meld_into_stone':
+    case 'nondetection':
+    case 'phantom_steed':
+    case 'sending':
+    case 'slow':
+    case 'speak_with_dead':
+    case 'universal_language':
+    case 'vampiric_touch':
+    case 'water_breathing':
+    case 'water_walk':
       return payload;
   }
 }
@@ -1968,14 +2118,20 @@ function effectApplication(
     : actualTargets[0] as CombatantId;
   const boundary: TurnBoundary = data.expiresAt.endsWith('_start') ? 'start' : 'end';
   const payload = resolvedSpellEffectPayload(definition, command, data.payload);
+  const slotDelta = definition.level === 0 || command.castAsRitual
+    ? 0
+    : (command.slotLevel as number) - definition.level;
+  const durationRounds = data.durationRounds === null
+    ? null
+    : data.durationRounds + (data.durationRoundsPerSlot ?? 0) * slotDelta;
   return {
     targets: actualTargets,
-    duration: data.durationRounds === null
+    duration: durationRounds === null
       ? { kind: 'permanent' }
       : {
           kind: 'turn_boundaries',
           timing: { combatant: timingCombatant, boundary, source: definition.source },
-          remaining: data.durationRounds,
+          remaining: durationRounds,
         },
     concentration: data.concentration,
     stackingIdentity: effectStackingIdentity(`spell:${definition.id}`),
@@ -2329,6 +2485,49 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
         );
       }
       return;
+    case 'reaction_save_cancel':
+      for (const target of targets) {
+        resolveTargetSave(context, command.actor, target, operation.ability, command.saveDc, 'normal', null);
+      }
+      return;
+    case 'dispel_magic': {
+      const automaticLevel = Math.max(operation.baseAutomaticLevel, command.slotLevel as number);
+      const matching = context.state.effects.filter((candidate) => {
+        if (!candidate.targets.some((target) => targets.includes(target))) return false;
+        const identity = String(candidate.stackingIdentity);
+        if (!identity.startsWith('spell:')) return false;
+        const affected = spellDefinition(identity.slice('spell:'.length));
+        return affected !== null && affected.level <= automaticLevel;
+      });
+      endEffects(context, new Set(matching.map((candidate) => candidate.id)), 'dispelled');
+      return;
+    }
+    case 'remove_curse': {
+      const matching = context.state.effects.filter((candidate) =>
+        candidate.targets.some((target) => targets.includes(target)) && candidate.payload.kind === 'bestow_curse');
+      endEffects(context, new Set(matching.map((candidate) => candidate.id)), 'dispelled');
+      return;
+    }
+    case 'revive':
+      for (const target of targets) {
+        const subject = combatant(context.state, target);
+        if (subject.life !== 'dead') throw new EncounterRuleError(`${definition.name} requires a dead creature.`);
+        context.state = replaceCombatant(context.state, {
+          ...subject, life: 'living', hitPoints: operation.hitPoints, deathSaves: null,
+        });
+      }
+      return;
+    case 'lifedrain_attack': {
+      const target = targets[0] as CombatantId;
+      const before = combatant(context.state, target).hitPoints;
+      const attack = resolveSpellAttack(context, definition, command, target, operation.dice, operation.damageType, null);
+      if (attack.outcome !== 'miss') {
+        const dealt = before - combatant(context.state, target).hitPoints;
+        applyHealing(context, command.actor, command.actor, Math.floor(dealt / operation.healingDivisor));
+      }
+      applySpellEffect(context, definition, command, operation.effect, [command.actor]);
+      return;
+    }
     case 'attack_rays':
       for (const target of targets) {
         resolveSpellAttack(context, definition, command, target, operation.dice, operation.damageType, null);
@@ -2397,11 +2596,19 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
         effect: resolvedSpellEffectPayload(definition, command, operation.effect),
       });
       if (operation.durationRounds !== null || operation.concentration || operation.stateful === true) {
+        const slotLevel = command.slotLevel ?? definition.level;
+        const becomesPermanent = operation.becomesPermanentAtSlot !== undefined && slotLevel >= operation.becomesPermanentAtSlot;
+        const losesConcentration = operation.losesConcentrationAtSlot !== undefined && slotLevel >= operation.losesConcentrationAtSlot;
+        const slotDelta = definition.level === 0 ? 0 : slotLevel - definition.level;
         applySpellEffect(context, definition, command, {
           payload: operation.effect,
           target: 'self',
-          concentration: operation.concentration,
-          durationRounds: operation.durationRounds,
+          concentration: losesConcentration ? false : operation.concentration,
+          durationRounds: becomesPermanent
+            ? null
+            : operation.durationRounds === null
+              ? null
+              : operation.durationRounds + (operation.durationRoundsPerSlot ?? 0) * slotDelta,
           expiresAt: 'source_start',
         }, [command.actor]);
       }
