@@ -49,7 +49,10 @@ misclicks corrected in-round). Rulings:
     in addition to the SRD's rest recovery rules.
 13. **Storage: MULTIPLE LOCAL ADVENTURE SLOTS** + per-slot export.
 14. **Roster: BIG SWEEP NOW** — decode a broad SRD monster slice
-    (30-50 statblocks) in batches.
+    (30-50 statblocks) in batches. Owner refinement (2026-08-20):
+    **THEMED FAMILIES SCALED ACROSS CR RATINGS** — each family spans
+    low-to-mid CR so an adventure can scale one theme up or down
+    (e.g. goblinoid warband from CR 1/4 skirmisher to its chief).
 15. **DM memory (corrected): SEARCHABLE REPLAY + GENERATED
     SUMMARIES** per adventure slot.
 16. **Continuity: OWNER APPROVES AN ARC, AI CONTINUES** within it;
