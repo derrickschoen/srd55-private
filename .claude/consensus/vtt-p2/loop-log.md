@@ -474,3 +474,27 @@ Three findings this session raised, recorded here so they are not lost with it:
 - Status: CLOSED round 1. Next: increment 8 (pixel-art procedural
   renderer, D316.1/D317.8), claimed by this session.
 
+## A21 — INCREMENT 8 CLOSED: pixel-art starter set (lane-wt/vtt3a)
+
+- 13 procedural silhouette tokens + 12 room/terrain/fog/UI assets,
+  CC-BY-4.0 self-attributed (NOTICE + dist licence emission), stable
+  ids, fixture-board preview supervisor-rasterized and visually
+  reviewed (D316.1/D317.8 pixel-silhouette look confirmed).
+- RULE VIOLATION recorded at full length: the increment-8 dispatch went
+  out WITHOUT the COMMON RULES preamble; codex's local ~/.codex
+  consensus skill then ran SIX `claude -p --model sonnet` reviews
+  (log lines 6811-85162) — supervisor brief error; memorialized in
+  project memory (dispatch-preamble-is-load-bearing); those reviews
+  carry no protocol weight; no recurrence in later rounds (log grep
+  monitored).
+- Round 2 FINDING: determinism hashes pinned committed bytes only —
+  the generator could drift silently (supervisor palette mutant
+  survived). Fix: regenerate-and-compare test, all 25 SVGs + preview
+  byte-equal; mutant killed vs committed tree.
+- Gate follow-up: dist-guard fixture 9->10 for the third licence text
+  (tests/unit/ai-bridge — another out-of-brief suite; inc-9 brief
+  carries it).
+- Full gate GREEN 399 files / 7,339 tests (.tmp-gate-8b.log).
+- Status: CLOSED round 2. Next: increment 9 (encounter generation),
+  claimed by this session.
+
