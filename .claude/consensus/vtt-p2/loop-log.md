@@ -368,3 +368,15 @@ Three findings this session raised, recorded here so they are not lost with it:
 - Full gate GREEN 388 files / 6,617 tests (.tmp-gate-4biii.log).
 - Status: CLOSED round 1. Next: 4b-iv (37 L3 spells), claimed here.
 
+## A15 — increment 4b-iv: level-3 spells (lane-wt/vtt3a)
+
+- 37 L3 spells incl. Fireball-class AoE through exact templates;
+  burn-down 67->30 (145/175, L0-L3 complete); KB 145 entries;
+  36 typed partials.
+- Supervisor verified: combat 837/837, sim unchanged, tsc clean,
+  Fireball 150ft/20ft/8d6 vs text, own 8d6->6d6 control killed vs
+  committed tree. Codex ledger incl. first cross-batch regression pin.
+- Full gate GREEN 389 files / 6,773 tests (.tmp-gate-4biv.log).
+- Status: CLOSED round 1. Next: 4b-v (30 L4 spells, closes the
+  manifest) then the D317.13 full-manifest audit; claimed here.
+
