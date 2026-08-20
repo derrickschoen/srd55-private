@@ -11,21 +11,25 @@ import {
   DEFAULT_DM_MODEL_CONFIG,
   DM_BRIDGE_PROTOCOL_VERSION,
   MAX_ROUND_PLAN_CORRECTIONS,
-  ROUND_PLAN_REPLY_CONTRACT,
-  decodeRoundPlan,
+  decodeRoundPlanReply,
+  roundPlanReplyContract,
+  type DecodedRoundPlanReply,
   type DecisionProgram,
   type DmBridgeExchange,
   type DmBridgeModelConfig,
   type DmBridgeRequest,
+  type JsProgramArtifact,
   type MonsterReconsultRequest,
   type MonsterRoundProgram,
   type PlanAction,
   type RoundPlan,
   type RoundPlanCorrectionRequest,
   type RoundPlanRequest,
+  type RoundPlanSurface,
   type StatePredicate,
   type TargetSelector,
 } from './contracts';
+import type { JsTurnProgramLimits } from './js-turn-program';
 
 export class StaleRoundPlanError extends Error {
   override readonly name = 'StaleRoundPlanError' as const;
@@ -170,6 +174,7 @@ export interface RoundPlanContext {
 
 export class DmRoundPlanSession {
   readonly #plans = new Map<string, RoundPlan>();
+  readonly #jsPrograms = new Map<string, JsProgramArtifact>();
   readonly #initialRequests = new Map<string, Promise<RoundPlan>>();
   #requestSequence = 1;
 
@@ -177,17 +182,19 @@ export class DmRoundPlanSession {
     private readonly exchange: DmBridgeExchange,
     private readonly model: DmBridgeModelConfig = DEFAULT_DM_MODEL_CONFIG,
     private readonly onCorrectionExhausted: (error: RoundPlanCorrectionExhaustedError) => void = () => undefined,
+    private readonly surface: RoundPlanSurface = 'json_ast',
+    private readonly jsLimits: JsTurnProgramLimits = {},
   ) {}
 
   async #validatedExchange(
     request: RoundPlanRequest | MonsterReconsultRequest,
     signal: AbortSignal,
-  ): Promise<RoundPlan> {
+  ): Promise<DecodedRoundPlanReply> {
     let current: DmBridgeRequest = request;
     for (let correctionAttempt = 0; correctionAttempt <= MAX_ROUND_PLAN_CORRECTIONS; correctionAttempt += 1) {
       const reply = await this.exchange.exchange(current, signal);
       try {
-        return decodeRoundPlan(reply, current);
+        return decodeRoundPlanReply(reply, current, this.jsLimits);
       } catch (error: unknown) {
         const validatorError = error instanceof Error ? error.message : String(error);
         if (correctionAttempt === MAX_ROUND_PLAN_CORRECTIONS) {
@@ -216,7 +223,8 @@ export class DmRoundPlanSession {
           history: request.history,
           requestedMonsterIds,
           validatorError,
-          replyContract: ROUND_PLAN_REPLY_CONTRACT,
+          surface: request.surface,
+          replyContract: roundPlanReplyContract(request.surface),
           correctionAttempt: nextAttempt === 1 ? 1 : 2,
         };
         current = correction;
@@ -254,12 +262,17 @@ export class DmRoundPlanSession {
       projection: context.projection,
       history: context.history,
       livingMonsterIds: perCombatant ? [actor] : livingMonsterIds,
-      replyContract: ROUND_PLAN_REPLY_CONTRACT,
+      surface: this.surface,
+      replyContract: roundPlanReplyContract(this.surface),
       correctionAttempt: 0,
     };
     const pending = this.#validatedExchange(request, signal)
-      .then((plan) => {
+      .then((decoded) => {
+        const plan = decoded.plan;
         this.#plans.set(key, plan);
+        for (const artifact of decoded.jsPrograms) {
+          this.#jsPrograms.set(`${String(plan.round)}:${artifact.monsterId}`, artifact);
+        }
         return plan;
       })
       .finally(() => this.#initialRequests.delete(key));
@@ -308,12 +321,17 @@ export class DmRoundPlanSession {
         monsterId: request.actorId,
         invalidation: 'Decision program has no legal expressible action in the current reducer action set.',
         scope: 'monster_remaining_round' as const,
-        replyContract: ROUND_PLAN_REPLY_CONTRACT,
+        surface: this.surface,
+        replyContract: roundPlanReplyContract(this.surface),
         correctionAttempt: 0 as const,
       };
       const replacement = await this.#validatedExchange(reconsult, signal);
-      monster = replacement.monsters[0];
+      monster = replacement.plan.monsters[0];
       if (monster === undefined) throw new RoundPlanDryError('Re-consult returned no monster program.');
+      const replacementArtifact = replacement.jsPrograms[0];
+      if (replacementArtifact !== undefined) {
+        this.#jsPrograms.set(`${String(state.round)}:${replacementArtifact.monsterId}`, replacementArtifact);
+      }
       plan = {
         ...plan,
         expectedRevision: state.revision,
@@ -339,6 +357,10 @@ export class DmRoundPlanSession {
       if (monster !== undefined) return monster;
     }
     return null;
+  }
+
+  jsProgramArtifact(round: number, monsterId: CombatantId): JsProgramArtifact | null {
+    return this.#jsPrograms.get(`${String(round)}:${monsterId}`) ?? null;
   }
 
   #requestId(encounterId: EncounterSessionId, round: number, suffix: string): string {

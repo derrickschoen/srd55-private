@@ -18,6 +18,7 @@ const INCREMENT_NINE_LEDGER_PATH = 'docs/audits/2026-08-20-vtt-increment-9-mutat
 const INCREMENT_TEN_LEDGER_PATH = 'docs/audits/2026-08-20-vtt-increment-10-mutation-ledger.md';
 const SOAK_PARTY_LEDGER_PATH = 'docs/audits/2026-08-20-vtt-soak-party-wiring-mutation-ledger.md';
 const LIVE_PLAN_CORRECTION_LEDGER_PATH = 'docs/audits/2026-08-20-vtt-live-plan-correction-mutation-ledger.md';
+const JS_TURN_PROGRAM_LEDGER_PATH = 'docs/audits/2026-08-20-js-turn-program-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
 function ledger(): MutationLedger {
@@ -99,5 +100,18 @@ describe('phase-2 mutation ledger manifest', () => {
     expect(ledger).toContain('`malformed_plan_accepted`');
     expect(ledger).toContain('malformed_plan_accepted keeps the strict decoder closed');
     expect(ledger).toContain('Restored `z.strictObject`');
+  });
+
+  it('JS-TURN-PROGRAM-MUTATION-LEDGER pins all required controls and both own controls', () => {
+    const ledger = readFileSync(JS_TURN_PROGRAM_LEDGER_PATH, 'utf8');
+    for (const name of [
+      'forbidden_construct_executes',
+      'step_budget_ignored',
+      'interpreter_bypasses_validation',
+      'projection_order_changes_query',
+      'js_source_missing_from_replay',
+    ]) {
+      expect(ledger).toContain(`\`${name}\``);
+    }
   });
 });
