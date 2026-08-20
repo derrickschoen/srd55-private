@@ -43,6 +43,10 @@ misclicks corrected in-round). Rulings:
 12. **Between encounters (corrected): EXPLICIT TRANSITION/REST
     WORKFLOW** — PC HP/slots/conditions/consumables carry through
     typed, replayable SRD rest steps; monsters fresh by nature.
+    Owner addendum (2026-08-20): rests EXPIRE DURATION-BOUND
+    CONDITIONS/EFFECTS by elapsed time — short rest advances the
+    clock 1 hour (600 rounds), long rest 8 hours (4,800 rounds) —
+    in addition to the SRD's rest recovery rules.
 13. **Storage: MULTIPLE LOCAL ADVENTURE SLOTS** + per-slot export.
 14. **Roster: BIG SWEEP NOW** — decode a broad SRD monster slice
     (30-50 statblocks) in batches.
