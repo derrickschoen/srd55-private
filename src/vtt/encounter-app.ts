@@ -1,10 +1,15 @@
 import { canonicalJson } from '../commands/canonical-json';
+import { starterArtDataUri } from '../assets/starter-art-resolver';
 import './styles.css';
 import { HumanController, type ControllerRequest } from '../combat/controllers';
 import type { EncounterCommand } from '../combat/events';
 import { previewAffectedCells } from '../combat/templates';
 import type { CombatantId } from '../combat/values';
 import { DmEncounterHost } from './dm-encounter-host';
+import {
+  encounterBoardRenderModel,
+  type EncounterBoardProjectionShape,
+} from './encounter-board';
 import type {
   DmBoardProjection,
   PlayerBoardProjection,
@@ -16,6 +21,7 @@ import {
   playerDecisionMessage,
 } from './local-window-channel';
 import { LocalStorageBrowserSessionStore } from './local-session-store';
+import { REFERENCE_ENCOUNTER_ART } from './reference-encounter-art';
 
 const HEARTBEAT_INTERVAL_MS = 250;
 const HEARTBEAT_TIMEOUT_MS = 1_000;
@@ -82,38 +88,52 @@ function actionKey(action: EncounterCommand): string {
 }
 
 function renderBoard(
-  projection: Pick<PlayerBoardProjection, 'bounds' | 'combatants' | 'highlightedCombatant' | 'adjudicatedTargets'>,
+  projection: EncounterBoardProjectionShape,
   preview: ReadonlySet<string> = new Set(),
 ): HTMLDivElement {
   const board = element('div', { className: 'encounter-board' });
   board.style.setProperty('--encounter-columns', String(projection.bounds.columns));
-  const byCell = new Map<string, PlayerBoardProjection['combatants'][number]>(
-    projection.combatants.map((combatant) => [
-      `${combatant.position.column},${combatant.position.row}`,
-      combatant,
-    ] as const),
-  );
-  const adjudicated = new Set(projection.adjudicatedTargets);
-  for (let row = 0; row < projection.bounds.rows; row += 1) {
-    for (let column = 0; column < projection.bounds.columns; column += 1) {
-      const key = `${column},${row}`;
-      const combatant = byCell.get(key);
-      const cell = element('div', { className: 'encounter-cell' });
-      cell.dataset.cell = key;
-      if (preview.has(key)) cell.dataset.preview = 'true';
-      if (combatant !== undefined) {
-        const token = element('div', {
-          className: 'encounter-token',
-          text: combatant.name,
-        });
-        token.dataset.combatantId = combatant.id;
-        token.dataset.active = String(combatant.id === projection.highlightedCombatant);
-        token.dataset.adjudicated = String(adjudicated.has(combatant.id));
-        token.dataset.kind = combatant.kind;
-        cell.append(token);
-      }
-      board.append(cell);
+  board.dataset.artPackage = REFERENCE_ENCOUNTER_ART.id;
+  for (const model of encounterBoardRenderModel(projection, REFERENCE_ENCOUNTER_ART)) {
+    const cell = element('div', { className: 'encounter-cell' });
+    cell.dataset.cell = model.key;
+    if (preview.has(model.key)) cell.dataset.preview = 'true';
+    for (const layer of model.layers) {
+      const image = element('img', { className: `encounter-art-layer encounter-art-${layer.role}` });
+      image.alt = '';
+      image.setAttribute('aria-hidden', 'true');
+      image.src = starterArtDataUri(layer.assetId);
+      image.dataset.assetId = layer.assetId;
+      cell.append(image);
     }
+    if (model.token !== null) {
+      const token = element('div', { className: 'encounter-token' });
+      token.dataset.combatantId = model.token.id;
+      token.dataset.active = String(model.token.focusAssetId !== null);
+      token.dataset.adjudicated = String(model.token.adjudicatedAssetId !== null);
+      token.dataset.kind = model.token.kind;
+      token.dataset.assetId = model.token.assetId;
+      const sprite = element('img', { className: 'encounter-token-sprite' });
+      sprite.alt = '';
+      sprite.setAttribute('aria-hidden', 'true');
+      sprite.src = starterArtDataUri(model.token.assetId);
+      token.append(sprite);
+      for (const [role, assetId] of [
+        ['focus', model.token.focusAssetId],
+        ['adjudicated', model.token.adjudicatedAssetId],
+      ] as const) {
+        if (assetId === null) continue;
+        const overlay = element('img', { className: `encounter-token-overlay encounter-token-${role}` });
+        overlay.alt = '';
+        overlay.setAttribute('aria-hidden', 'true');
+        overlay.src = starterArtDataUri(assetId);
+        overlay.dataset.assetId = assetId;
+        token.append(overlay);
+      }
+      token.append(element('span', { className: 'encounter-token-label', text: model.token.name }));
+      cell.append(token);
+    }
+    board.append(cell);
   }
   return board;
 }
@@ -475,6 +495,7 @@ class DmEncounterView {
       combatants: projection.encounter.combatants,
       highlightedCombatant: projection.encounter.activeCombatant,
       adjudicatedTargets: projection.adjudicatedTargets,
+      foggedCells: projection.encounter.dmOnly.foggedCells,
     };
     this.#shell.append(renderBoard(playerShape));
 
