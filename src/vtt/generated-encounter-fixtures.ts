@@ -829,7 +829,7 @@ export function encounterStateFromApprovedFixture(
   });
 }
 
-const fixtureTurnActions: TurnLegalActions = (_state, actor) => ({
+export const approvedFixtureTurnLegalActions: TurnLegalActions = (_state, actor) => ({
   actions: [{ type: 'end_turn', actor }],
 });
 
@@ -852,7 +852,7 @@ export function approvedFixtureSession(
   return {
     fixtureId: fixture.fixtureId,
     coordinator: new TurnCoordinator(state, registry, rng, {
-      turnLegalActions: fixtureTurnActions,
+      turnLegalActions: approvedFixtureTurnLegalActions,
     }),
   };
 }

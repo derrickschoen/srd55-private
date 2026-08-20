@@ -367,13 +367,65 @@ export interface JsonAstRoundPlanReplyContract extends RoundPlanReplyContractBas
   readonly canonicalExample: RoundPlan;
 }
 
+export const E01_ROUND_PLAN_CONTRACT_ID = 'round-plan-json-ast:v1' as const;
+
+export const E01_PROMPT_VARIANTS = [
+  'duplicated-full-contract',
+  'contract-once-by-id',
+  'compact-grammar',
+] as const;
+
+export type E01PromptVariant = (typeof E01_PROMPT_VARIANTS)[number];
+
+export const ROUND_PLAN_COMPACT_JSON_GRAMMAR = [
+  'RoundPlan={kind:"round_plan",protocolVersion:2,encounterId:string,requestId:string,expectedRevision:uint,round:uint,monsters:Monster[]}',
+  'Monster={monsterId:string,program:Program}',
+  'Program={kind:"action",action:Action}|{kind:"if",predicate:Predicate,then:Program,else:Program}|{kind:"priority",choices:Program[1..20]}',
+  'Action={kind:"attack"|"force_save"|"move_toward",target:Target}|{kind:"retreat_toward",destination:{column:uint,row:uint}}|{kind:"use_action",action:"dash"|"disengage"|"dodge"|"end_turn"}',
+  'Target={kind:"combatant",combatantId:string}|{kind:"nearest_enemy"}',
+  'Predicate={kind:"life_is",combatantId:string,value:"living"|"dying"|"stable"|"dead"}|{kind:"hp_percent_below",combatantId:string,percent:(0,100]}|{kind:"distance_at_most",left:string,right:string,feet:number>=0}|{kind:"not",predicate:Predicate}|{kind:"all"|"any",predicates:Predicate[1..20]}',
+  'Objects are strict: no unlisted fields. Recursive Program/Predicate depth is at most 20.',
+].join('\n');
+
+interface E01RoundPlanReplyContractBase extends RoundPlanReplyContractBase {
+  readonly surface: 'json_ast';
+  readonly contractId: typeof E01_ROUND_PLAN_CONTRACT_ID;
+  readonly promptVariant: E01PromptVariant;
+}
+
+export interface E01FullRoundPlanReplyContract extends E01RoundPlanReplyContractBase {
+  readonly delivery: 'full';
+  readonly jsonSchema: typeof ROUND_PLAN_REPLY_JSON_SCHEMA;
+  readonly canonicalExample: RoundPlan;
+}
+
+export interface E01ReferencedRoundPlanReplyContract extends E01RoundPlanReplyContractBase {
+  readonly promptVariant: 'contract-once-by-id';
+  readonly delivery: 'reference';
+}
+
+export interface E01CompactRoundPlanReplyContract extends E01RoundPlanReplyContractBase {
+  readonly promptVariant: 'compact-grammar';
+  readonly delivery: 'compact';
+  readonly grammar: typeof ROUND_PLAN_COMPACT_JSON_GRAMMAR;
+  readonly canonicalExample: RoundPlan;
+}
+
+export type E01RoundPlanReplyContract =
+  | E01FullRoundPlanReplyContract
+  | E01ReferencedRoundPlanReplyContract
+  | E01CompactRoundPlanReplyContract;
+
 export interface JsProgramRoundPlanReplyContract extends RoundPlanReplyContractBase {
   readonly surface: 'js_program';
   readonly grammar: typeof JS_TURN_PROGRAM_GRAMMAR;
   readonly canonicalExample: typeof JS_TURN_PROGRAM_CANONICAL_EXAMPLE;
 }
 
-export type RoundPlanReplyContract = JsonAstRoundPlanReplyContract | JsProgramRoundPlanReplyContract;
+export type RoundPlanReplyContract =
+  | JsonAstRoundPlanReplyContract
+  | JsProgramRoundPlanReplyContract
+  | E01RoundPlanReplyContract;
 
 export const ROUND_PLAN_REPLY_CONTRACT: JsonAstRoundPlanReplyContract = Object.freeze({
   surface: 'json_ast',
@@ -390,6 +442,48 @@ export const ROUND_PLAN_JS_REPLY_CONTRACT: JsProgramRoundPlanReplyContract = Obj
   canonicalExample: JS_TURN_PROGRAM_CANONICAL_EXAMPLE,
   maximumCorrectionAttempts: MAX_ROUND_PLAN_CORRECTIONS,
 });
+
+/**
+ * E01 changes only prompt delivery. Every arm is rooted in the same strict
+ * schema, canonical example, contract id, and production decoder above.
+ */
+export function e01RoundPlanReplyContract(
+  variant: E01PromptVariant,
+  callIndex: number,
+): E01RoundPlanReplyContract {
+  if (!Number.isSafeInteger(callIndex) || callIndex < 0) {
+    throw new RangeError('E01 contract callIndex must be a non-negative safe integer.');
+  }
+  const common = {
+    surface: 'json_ast' as const,
+    schemaVersion: ROUND_PLAN_CONTRACT_SCHEMA_VERSION,
+    maximumCorrectionAttempts: MAX_ROUND_PLAN_CORRECTIONS,
+    contractId: E01_ROUND_PLAN_CONTRACT_ID,
+  };
+  if (variant === 'compact-grammar') {
+    return Object.freeze({
+      ...common,
+      promptVariant: variant,
+      delivery: 'compact' as const,
+      grammar: ROUND_PLAN_COMPACT_JSON_GRAMMAR,
+      canonicalExample: ROUND_PLAN_CANONICAL_EXAMPLE,
+    });
+  }
+  if (variant === 'contract-once-by-id' && callIndex > 0) {
+    return Object.freeze({
+      ...common,
+      promptVariant: variant,
+      delivery: 'reference' as const,
+    });
+  }
+  return Object.freeze({
+    ...common,
+    promptVariant: variant,
+    delivery: 'full' as const,
+    jsonSchema: ROUND_PLAN_REPLY_JSON_SCHEMA,
+    canonicalExample: ROUND_PLAN_CANONICAL_EXAMPLE,
+  });
+}
 
 export function roundPlanReplyContract(surface: RoundPlanSurface): RoundPlanReplyContract {
   return surface === 'json_ast' ? ROUND_PLAN_REPLY_CONTRACT : ROUND_PLAN_JS_REPLY_CONTRACT;

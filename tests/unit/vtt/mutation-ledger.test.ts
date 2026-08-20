@@ -20,6 +20,7 @@ const SOAK_PARTY_LEDGER_PATH = 'docs/audits/2026-08-20-vtt-soak-party-wiring-mut
 const LIVE_PLAN_CORRECTION_LEDGER_PATH = 'docs/audits/2026-08-20-vtt-live-plan-correction-mutation-ledger.md';
 const JS_TURN_PROGRAM_LEDGER_PATH = 'docs/audits/2026-08-20-js-turn-program-mutation-ledger.md';
 const E04_E06_LEDGER_PATH = 'docs/audits/2026-08-20-e04-e06-engine-prerequisites-mutation-ledger.md';
+const E01_EXPERIMENT_LEDGER_PATH = 'docs/audits/2026-08-20-e01-experiment-orchestrator-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
 function ledger(): MutationLedger {
@@ -123,6 +124,18 @@ describe('phase-2 mutation ledger manifest', () => {
       'delta_skips_hash_check',
       'trigger_policy_ignored',
       'override_order_nondeterministic',
+    ]) {
+      expect(ledger).toContain(`\`${name}\``);
+    }
+  });
+
+  it('E01-EXPERIMENT-MUTATION-LEDGER pins the three required controls and shared-validator control', () => {
+    const ledger = readFileSync(E01_EXPERIMENT_LEDGER_PATH, 'utf8');
+    for (const name of [
+      'arms_unpaired',
+      'shuffle_uses_wallclock',
+      'report_drops_aborted_tables',
+      'contract_variant_changes_validator',
     ]) {
       expect(ledger).toContain(`\`${name}\``);
     }
