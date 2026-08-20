@@ -50,7 +50,69 @@ function hiddenDeathSaveState() {
   return state;
 }
 
+function hostBoundaryHiddenState() {
+  const base = referenceEncounterSetup();
+  const setup = {
+    ...base,
+    dmNotes: ['DM tactics sentinel: ash-owl waits behind the eastern screen.'],
+    tokens: base.tokens.map((token) =>
+      token.combatantId === REFERENCE_MONSTER_ID
+        ? { ...token, position: { column: 8, row: 1 } }
+        : token,
+    ),
+  };
+  const rng = mulberry32(8102);
+  let state = createEncounter(setup);
+  state = reduceEncounter(state, { type: 'roll_initiative' }, rng).state;
+  state = reduceEncounter(state, {
+    type: 'adjudicate',
+    target: REFERENCE_FIGHTER_ID,
+    reasoning: 'DM reasoning sentinel: basalt-raven caused the collapse.',
+    consequence: { kind: 'hit_point_delta', amount: -999 },
+  }, rng).state;
+  for (const actor of [
+    REFERENCE_FIGHTER_ID,
+    REFERENCE_CLERIC_ID,
+    combatantId('combatant:wizard'),
+    REFERENCE_MONSTER_ID,
+  ]) {
+    state = reduceEncounter(state, { type: 'end_turn', actor }, rng).state;
+  }
+  return state;
+}
+
 describe('increment 6 projection boundary', () => {
+  it('HOST-WIRING-PLAYER-SECRECY serializes only the filtered player half of a DM host snapshot', () => {
+    const host = new DmEncounterHost(
+      'session:host-wiring-secrecy',
+      new MemoryBrowserSessionStore(),
+      { initialState: hostBoundaryHiddenState() },
+    );
+    const player = host.snapshot().player;
+    const serialized = serializePlayerBoard(player);
+
+    expect(player.audience).toBe('player');
+    expect(player.combatants.map((combatant) => combatant.name)).toEqual([
+      'Reference Fighter',
+      'Reference Cleric',
+      'Reference Wizard',
+    ]);
+    expect(player.events).toContainEqual(expect.objectContaining({
+      type: 'adjudicated',
+      target: REFERENCE_FIGHTER_ID,
+      consequence: expect.objectContaining({ kind: 'hit_points', after: 0 }),
+    }));
+    expect(serialized).toContain('Reference Fighter');
+    expect(serialized).toContain('"round":2');
+    expect(serialized).not.toContain('death_save_resolved');
+    expect(serialized).not.toContain('combatant:training-brute');
+    expect(serialized).not.toContain('DM tactics sentinel: ash-owl');
+    expect(serialized).not.toContain('DM reasoning sentinel: basalt-raven');
+    expect(serialized).not.toContain('dmOnly');
+    expect(serialized).not.toContain('history');
+    host.close();
+  });
+
   it('M37-HIDDEN-ROLL-ABSENT serializes no hidden death-save result or DM facts', () => {
     const projection = projectPlayerBoard(
       hiddenDeathSaveState(),

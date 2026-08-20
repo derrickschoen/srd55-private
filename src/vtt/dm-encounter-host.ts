@@ -10,7 +10,10 @@ import {
   TurnCoordinator,
   type PersistedCoordinatorState,
 } from '../combat/coordinator';
-import { createEncounter } from '../combat/encounter';
+import {
+  createEncounter,
+  type EncounterState,
+} from '../combat/encounter';
 import type { EncounterCommand } from '../combat/events';
 import { mulberry32, type SerializableRng } from '../combat/random';
 import {
@@ -131,7 +134,11 @@ export class DmEncounterHost {
   #pump: Promise<void> | null = null;
   #closed = false;
 
-  constructor(sessionKey: string, store: BrowserSessionStore) {
+  constructor(
+    sessionKey: string,
+    store: BrowserSessionStore,
+    options: { readonly initialState?: EncounterState } = {},
+  ) {
     this.sessionId = encounterSessionId(sessionKey);
     this.#store = store;
     const existing = store.revisions(this.sessionId);
@@ -142,7 +149,7 @@ export class DmEncounterHost {
       this.#registry = built.registry;
       this.#humans = built.humans;
       this.#rng = mulberry32(0x315006);
-      const state = createEncounter(setup);
+      const state = options.initialState ?? createEncounter(setup);
       this.#journal = EncounterSessionJournal.create({
         sessionId: this.sessionId,
         branchId: encounterBranchId('branch:reference-main'),
