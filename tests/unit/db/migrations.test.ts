@@ -269,6 +269,15 @@ const SCHEMA_BEFORE_RELATIONSHIP_INDEXES = DATABASE_MIGRATIONS
   .join('\n');
 const RELATIONSHIP_INDEXES_MIGRATION =
   DATABASE_MIGRATIONS[RELATIONSHIP_INDEXES_INDEX]!;
+const VTT_SESSION_REVISIONS_INDEX = DATABASE_MIGRATIONS.findIndex(
+  (entry) => entry.id === '0051_vtt_session_revisions',
+);
+const SCHEMA_BEFORE_VTT_SESSION_REVISIONS = DATABASE_MIGRATIONS
+  .slice(0, VTT_SESSION_REVISIONS_INDEX)
+  .map((entry) => entry.sql)
+  .join('\n');
+const VTT_SESSION_REVISIONS_MIGRATION =
+  DATABASE_MIGRATIONS[VTT_SESSION_REVISIONS_INDEX]!;
 
 /**
  * One character, three source instances (one of them deleted so the
@@ -3716,6 +3725,39 @@ describe('database migration chain', () => {
          ORDER BY name`,
         indexNames,
       )).toEqual(indexNames);
+      expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
+        RELATIONSHIP_INDEXES_MIGRATION.resultSchemaChecksum,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it('0051 adds the append-only VTT session revision stream', () => {
+    const db = new sqlite3.oo1.DB(':memory:', 'c');
+    try {
+      db.exec(SCHEMA_BEFORE_VTT_SESSION_REVISIONS);
+      expect(db.selectValue(
+        `SELECT count(*) FROM sqlite_schema
+         WHERE type = 'table' AND name = 'vtt_session_revisions'`,
+      )).toBe(0);
+
+      db.exec(VTT_SESSION_REVISIONS_MIGRATION.sql);
+
+      expect(db.selectObjects(
+        `SELECT name, type, "notnull" AS required, pk
+         FROM pragma_table_info('vtt_session_revisions')
+         ORDER BY cid`,
+      )).toEqual([
+        { name: 'session_id', type: 'VARCHAR', required: 1, pk: 1 },
+        { name: 'revision', type: 'INTEGER', required: 1, pk: 2 },
+        { name: 'schema_version', type: 'INTEGER', required: 1, pk: 0 },
+        { name: 'payload_json', type: 'VARCHAR', required: 1, pk: 0 },
+        { name: 'payload_checksum', type: 'VARCHAR', required: 1, pk: 0 },
+      ]);
+      expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
+        VTT_SESSION_REVISIONS_MIGRATION.resultSchemaChecksum,
+      );
       expect(databaseSchemaSignature(db)).toBe(schemaSignature(schema));
     } finally {
       db.close();

@@ -67,7 +67,7 @@ describe('pre-Drizzle database images', () => {
     // is why the counts are asserted rather than left as a surprise: the
     // fixture still declares the eight Laravel-only tables that were dropped,
     // leaving 30 tables shared with the generated artifact. The generated
-    // artifact now declares 87 tables, so the old image is also short of 57
+    // artifact now declares 88 tables, so the old image is also short of 58
     // `applicationTables` and fails EARLIER, not less.
     //
     // These are COUNTS, not an equivalence proof, and do not claim to be one.
@@ -78,7 +78,7 @@ describe('pre-Drizzle database images', () => {
     const tableCount = (sql: string) =>
       [...sql.matchAll(/CREATE TABLE/g)].length;
     expect(tableCount(preDrizzleSchema)).toBe(38);
-    expect(tableCount(schema)).toBe(87);
+    expect(tableCount(schema)).toBe(88);
   });
 
   it('rejects a pre-Drizzle image at open instead of half-working', async () => {
@@ -95,7 +95,7 @@ describe('pre-Drizzle database images', () => {
     // actually short of. Both paths produce the same recoverable
     // `schema_mismatch` status, which is what the next test depends on.
     expect(boot.detail).toContain(
-      // All 56 current application tables absent from the frozen fixture, in
+      // All 58 current application tables absent from the frozen fixture, in
       // the order the missing-table check reports them.
       'Database image is missing application tables: armor_templates, ' +
         'background_equipment_items, ' +
@@ -135,7 +135,7 @@ describe('pre-Drizzle database images', () => {
         'spell_version_cantrip_upgrade_levels, ' +
         'spell_version_upcast_levels, ' +
         'subclass_feature_effects, subclass_feature_value_contributions, ' +
-        'subclass_features, weapon_templates.',
+        'subclass_features, vtt_session_revisions, weapon_templates.',
     );
   });
 

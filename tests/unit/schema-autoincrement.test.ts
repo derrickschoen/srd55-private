@@ -182,6 +182,8 @@ const naturalKeyTables = [
   // One lineage receipt per character; character_id is both identity and FK.
   'character_share_receipts',
   'party_document_states',
+  // One append-only stream position per session; both columns form the key.
+  'vtt_session_revisions',
 ] as const;
 
 let sqlite3: Sqlite3Static;
