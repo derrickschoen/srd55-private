@@ -7,6 +7,52 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D321 — OWNER: fourth brainstorm round — experiment governance, adventures, AI-only mandate (2026-08-20)
+
+Fourth blind collab round (codex 12 + Claude 12, merged 17; two
+misclicks corrected in-round). Rulings:
+
+1. **Experiment budget: STAGE-GATED TRANCHES** — E01-E07 first; owner
+   reads results before E08-E10 unlock.
+2. **E10 winner: SOAK PROBATION before default** (~100 clean tables,
+   zero replay/sandbox failures); owner gets the report.
+3. **Capacity: D320 MAJORITY, CORRECTNESS TRICKLE** — one queued
+   correctness item at a time rides quiet windows (hotspot wave first).
+4. **v1 release review REOPENS IN PARALLEL** — D286 stranger-journey
+   walk as a trickle item; deploy remains a hard owner stop.
+5. **Soak fleet: SMALL PILOT NOW** (2-3 tables/day) until the E-series
+   winner, then scale to continuous.
+6. **JS sandbox: HAND-ROLLED MINI-INTERPRETER** — restricted AST,
+   typed API as the entire environment, deterministic, step/time
+   bounded.
+7. **Steering override bounds: E06 TESTS BOTH** (bounded vocabulary vs
+   full-plan replacement) and the data decides.
+8. **Pattern library: METRIC THRESHOLDS + SUPERVISOR REVIEW** per
+   promotion; owner sees the changelog.
+9. **PC/DM CONTROLLER symmetry: FULL** — one turn-program pipeline
+   both sides — BUT (owner principle, stated mid-round, verbatim):
+   "monsters and pcs are fundamentally different." Controller
+   architecture is shared; ENTITY models stay separate (PCs =
+   full-rules characters w/ death saves, spells, sheet pipeline;
+   monsters = statblocks, die at 0, block-planned on shared
+   initiative). No entity-model merging, ever.
+10. **Model routing: BY TASK CLASS LOOP-WIDE** once E08 data exists
+    (luna bounded/mechanical, terra judgment, sol hardest).
+11. **Next product: LINKED MINI-ADVENTURES** (2-4 encounters, story
+    thread).
+12. **Between encounters (corrected): EXPLICIT TRANSITION/REST
+    WORKFLOW** — PC HP/slots/conditions/consumables carry through
+    typed, replayable SRD rest steps; monsters fresh by nature.
+13. **Storage: MULTIPLE LOCAL ADVENTURE SLOTS** + per-slot export.
+14. **Roster: BIG SWEEP NOW** — decode a broad SRD monster slice
+    (30-50 statblocks) in batches.
+15. **DM memory (corrected): SEARCHABLE REPLAY + GENERATED
+    SUMMARIES** per adventure slot.
+16. **Continuity: OWNER APPROVES AN ARC, AI CONTINUES** within it;
+    every encounter still package-validated.
+17. **Owner has no time for a personal session: GET AS FAR AS
+    POSSIBLE AI-ONLY.** The AI-only program is the mainline.
+
 ## D320 — OWNER: DM-speed experiment program; shared enemy initiative; JS turn-programs (2026-08-20)
 
 Owner directives, 2026-08-20 (verbatim intent):
