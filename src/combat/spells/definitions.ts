@@ -59,6 +59,7 @@ function effect(
     readonly durationRounds?: number | null;
     readonly expiresAt?: EffectData['expiresAt'];
     readonly repeatedSave?: EffectData['repeatedSave'];
+    readonly durationRoundsPerSlot?: number;
   } = {},
 ): EffectData {
   return {
@@ -68,6 +69,7 @@ function effect(
     durationRounds: options.durationRounds ?? 1,
     expiresAt: options.expiresAt ?? 'source_start',
     ...(options.repeatedSave === undefined ? {} : { repeatedSave: options.repeatedSave }),
+    ...(options.durationRoundsPerSlot === undefined ? {} : { durationRoundsPerSlot: options.durationRoundsPerSlot }),
   };
 }
 
@@ -657,7 +659,7 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     id: 'gust-of-wind', name: 'Gust of Wind', level: 2,
     source: 'docs/srd/source/spell-descriptions.txt:4027',
     castingTime: 'action', components: material('a legume seed'),
-    targeting: { kind: 'area', rangeFeet: 0, shape: 'line', baseSizeFeet: 60, sizePerSlotFeet: 0 },
+    targeting: { kind: 'area', rangeFeet: 0, shape: 'line', baseSizeFeet: 60, sizePerSlotFeet: 0, secondarySizeFeet: 10 },
     operation: { kind: 'save_push', ability: 'strength', pushFeetOnFailure: 15, effect: effect({ kind: 'gust_of_wind_area', placement: 'selected_when_cast', widthFeet: 10, movementCostMultiplierTowardSource: 2, dispersesGas: true, unprotectedFlameExtinguished: true }, { target: 'self', concentration: true, durationRounds: 10 }) },
   },
   {
@@ -834,6 +836,227 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     castingTime: 'action', components: VS,
     targeting: { kind: 'area', rangeFeet: 60, shape: 'sphere', baseSizeFeet: 15, sizePerSlotFeet: 0 },
     operation: { kind: 'save_effect', ability: 'charisma', rollMode: 'normal', effect: effect({ kind: 'truth_zone', placement: 'selected_when_cast', radiusFeet: 15, saveAbility: 'charisma' }, { durationRounds: 100 }) },
+  },
+  {
+    id: 'animate-dead', name: 'Animate Dead', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:219', castingTime: 'minute', components: material('a drop of blood, a piece of flesh, and a pinch of bone dust'),
+    targeting: { kind: 'utility', rangeFeet: 10 },
+    operation: { kind: 'utility', effect: { kind: 'summoned_undead', forms: ['Skeleton', 'Zombie'], createdCreatures: 1, createdCreaturesPerSlot: 2, reassertedCreatures: 4, reassertedCreaturesPerSlot: 2, commandRangeFeet: 60, controlDurationRounds: 14400 }, concentration: false, durationRounds: null, stateful: true },
+  },
+  {
+    id: 'beacon-of-hope', name: 'Beacon of Hope', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:726', castingTime: 'action', components: VS,
+    targeting: { kind: 'all_in_range', rangeFeet: 30 },
+    operation: { kind: 'effect', effect: effect({ kind: 'beacon_of_hope', wisdomSaveMode: 'advantage', deathSaveMode: 'advantage', maximizesHealing: true }, { concentration: true, durationRounds: 10 }) },
+  },
+  {
+    id: 'bestow-curse', name: 'Bestow Curse', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:753', castingTime: 'action', components: VS,
+    targeting: { kind: 'single', rangeFeet: 5, willing: false },
+    operation: { kind: 'save_effect', ability: 'wisdom', rollMode: 'normal', effect: effect({ kind: 'bestow_curse', options: ['ability_disadvantage', 'attacks_against_caster_disadvantage', 'forced_dodge', 'extra_necrotic_damage'], extraDamageCount: 1, extraDamageSides: 8 }, { concentration: true, durationRounds: 10, durationRoundsPerSlot: 90 }) },
+  },
+  {
+    id: 'blink', name: 'Blink', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:878', castingTime: 'action', components: VS,
+    targeting: { kind: 'self' },
+    operation: { kind: 'effect', effect: effect({ kind: 'blink', dieSides: 6, etherealMinimum: 4, etherealVisionFeet: 60, returnSpaceFeet: 10 }, { target: 'self', durationRounds: 10 }) },
+  },
+  {
+    id: 'clairvoyance', name: 'Clairvoyance', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:1121', castingTime: 'ten_minutes', components: material('a focus worth 100+ GP, either a jeweled horn for hearing or a glass eye for seeing'),
+    targeting: { kind: 'utility', rangeFeet: 5280 },
+    operation: { kind: 'utility', effect: { kind: 'clairvoyance_sensor', rangeFeet: 5280, senses: ['hearing', 'seeing'], switchCost: 'bonus_action' }, concentration: true, durationRounds: 100 },
+  },
+  {
+    id: 'counterspell', name: 'Counterspell', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:1767', castingTime: 'reaction', components: S,
+    targeting: { kind: 'single', rangeFeet: 60, willing: false },
+    operation: { kind: 'reaction_save_cancel', ability: 'constitution' },
+  },
+  {
+    id: 'create-food-and-water', name: 'Create Food and Water', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:1781', castingTime: 'action', components: VS,
+    targeting: { kind: 'utility', rangeFeet: 30 },
+    operation: { kind: 'utility', effect: { kind: 'created_food_and_water', foodPounds: 45, waterGallons: 30, foodSpoilsAfterRounds: 14400 }, concentration: false, durationRounds: null, stateful: true },
+  },
+  {
+    id: 'daylight', name: 'Daylight', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:1967', castingTime: 'action', components: VS,
+    targeting: { kind: 'area', rangeFeet: 60, shape: 'sphere', baseSizeFeet: 60, sizePerSlotFeet: 0 },
+    operation: { kind: 'utility', effect: { kind: 'daylight_area', placement: 'selected_when_cast', brightRadiusFeet: 60, additionalDimFeet: 60, dispelsDarknessSpellLevelAtMost: 3 }, concentration: false, durationRounds: 600 },
+  },
+  {
+    id: 'dispel-magic', name: 'Dispel Magic', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:2268', castingTime: 'action', components: VS,
+    targeting: { kind: 'single', rangeFeet: 120, willing: false },
+    operation: { kind: 'dispel_magic', baseAutomaticLevel: 3, checkDcBase: 10 },
+  },
+  {
+    id: 'fear', name: 'Fear', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:2945', castingTime: 'action', components: material('a white feather'),
+    targeting: { kind: 'area', rangeFeet: 0, shape: 'cone', baseSizeFeet: 30, sizePerSlotFeet: 0 },
+    operation: { kind: 'save_effect', ability: 'wisdom', rollMode: 'normal', effect: effect({ kind: 'fear', condition: 'Frightened', dropsHeldObjects: true, forcedAction: 'dash_away', repeatSaveAbility: 'wisdom', repeatSaveRequiresNoLineOfSight: true }, { concentration: true, durationRounds: 10 }) },
+  },
+  {
+    id: 'fireball', name: 'Fireball', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:3160', castingTime: 'action', components: material('a ball of bat guano and sulfur'),
+    targeting: { kind: 'area', rangeFeet: 150, shape: 'sphere', baseSizeFeet: 20, sizePerSlotFeet: 0 },
+    operation: { kind: 'save_damage', ability: 'dexterity', onSuccess: 'half', damageType: damageType('Fire'), dice: dice(8, 6, { perSlotCount: 1 }), riderOnFailure: null, pushFeetOnFailure: 0 },
+  },
+  {
+    id: 'fly', name: 'Fly', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:3375', castingTime: 'action', components: material('a feather'),
+    targeting: { kind: 'multiple', rangeFeet: 5, baseMaximum: 1, additionalPerSlot: 1, willing: true },
+    operation: { kind: 'effect', effect: effect({ kind: 'flight', speedFeet: 60, canHover: true, fallsWhenEffectEnds: true }, { concentration: true, durationRounds: 100 }) },
+  },
+  {
+    id: 'gaseous-form', name: 'Gaseous Form', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:3590', castingTime: 'action', components: material('a bit of gauze'),
+    targeting: { kind: 'multiple', rangeFeet: 5, baseMaximum: 1, additionalPerSlot: 1, willing: true },
+    operation: { kind: 'effect', effect: effect({ kind: 'gaseous_form', flySpeedFeet: 10, canHover: true, physicalResistanceTypes: ['Bludgeoning', 'Piercing', 'Slashing'], proneImmune: true, physicalSaveMode: 'advantage', canAttackOrCast: false }, { concentration: true, durationRounds: 600 }) },
+  },
+  {
+    id: 'glyph-of-warding', name: 'Glyph of Warding', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:3802', castingTime: 'hour', components: material('powdered diamond worth 200+ GP', true),
+    targeting: { kind: 'area', rangeFeet: 5, shape: 'sphere', baseSizeFeet: 5, sizePerSlotFeet: 0 },
+    operation: { kind: 'utility', effect: { kind: 'glyph_of_warding', placement: 'selected_when_cast', maximumDiameterFeet: 10, movementBreakDistanceFeet: 10, explosiveRadiusFeet: 20, explosiveDamageTypes: ['Acid', 'Cold', 'Fire', 'Lightning', 'Thunder'], explosiveDamageCount: 5, explosiveDamageSides: 8, explosiveDamagePerSlotCount: 1, storedSpellMaximumLevel: 3 }, concentration: false, durationRounds: null, stateful: true },
+  },
+  {
+    id: 'haste', name: 'Haste', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:4143', castingTime: 'action', components: material('a shaving of licorice root'),
+    targeting: { kind: 'single', rangeFeet: 30, willing: true },
+    operation: { kind: 'effect', effect: effect({ kind: 'haste', speedMultiplier: 2, armorClassBonus: 2, dexteritySaveMode: 'advantage', extraActionOptions: ['attack_once', 'dash', 'disengage', 'hide', 'utilize'], lethargyCondition: 'Incapacitated', lethargySpeedFeet: 0, lethargyRounds: 1 }, { concentration: true, durationRounds: 10 }) },
+  },
+  {
+    id: 'hypnotic-pattern', name: 'Hypnotic Pattern', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:4410', castingTime: 'action', components: materialWith('a pinch of confetti', { verbal: false, somatic: true }),
+    targeting: { kind: 'area', rangeFeet: 120, shape: 'cube', baseSizeFeet: 30, sizePerSlotFeet: 0 },
+    operation: { kind: 'save_effect', ability: 'wisdom', rollMode: 'normal', effect: effect({ kind: 'hypnotic_pattern', conditions: ['Charmed', 'Incapacitated'], speedFeet: 0, endsOnDamage: true, wakeAction: true }, { concentration: true, durationRounds: 10 }) },
+  },
+  {
+    id: 'lightning-bolt', name: 'Lightning Bolt', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:4831', castingTime: 'action', components: material('a bit of fur and a crystal rod'),
+    targeting: { kind: 'area', rangeFeet: 0, shape: 'line', baseSizeFeet: 100, sizePerSlotFeet: 0, secondarySizeFeet: 5 },
+    operation: { kind: 'save_damage', ability: 'dexterity', onSuccess: 'half', damageType: damageType('Lightning'), dice: dice(8, 6, { perSlotCount: 1 }), riderOnFailure: null, pushFeetOnFailure: 0 },
+  },
+  {
+    id: 'magic-circle', name: 'Magic Circle', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:4952', castingTime: 'minute', components: material('salt and powdered silver worth 100+ GP', true),
+    targeting: { kind: 'area', rangeFeet: 10, shape: 'cylinder', baseSizeFeet: 10, sizePerSlotFeet: 0, secondarySizeFeet: 20 },
+    operation: { kind: 'utility', effect: { kind: 'magic_circle', placement: 'selected_when_cast', radiusFeet: 10, heightFeet: 20, creatureTypes: ['Celestial', 'Elemental', 'Fey', 'Fiend', 'Undead'], reversible: true }, concentration: false, durationRounds: 600, durationRoundsPerSlot: 600 },
+  },
+  {
+    id: 'major-image', name: 'Major Image', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:5150', castingTime: 'action', components: material('a bit of fleece'),
+    targeting: { kind: 'area', rangeFeet: 120, shape: 'cube', baseSizeFeet: 20, sizePerSlotFeet: 0 },
+    operation: { kind: 'utility', effect: { kind: 'major_image', placement: 'selected_when_cast', maximumCubeFeet: 20, sensoryModes: ['visual', 'sound', 'smell', 'temperature'], movableByMagicAction: true, investigationAgainstSpellDc: true }, concentration: true, durationRounds: 100, becomesPermanentAtSlot: 4, losesConcentrationAtSlot: 4 },
+  },
+  {
+    id: 'mass-healing-word', name: 'Mass Healing Word', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:5226', castingTime: 'bonus_action', components: V,
+    targeting: { kind: 'multiple', rangeFeet: 60, baseMaximum: 6, additionalPerSlot: 0 },
+    operation: { kind: 'healing', dice: dice(2, 4, { perSlotCount: 1 }), addSpellcastingModifier: true },
+  },
+  {
+    id: 'meld-into-stone', name: 'Meld into Stone', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:5289', castingTime: 'action', ritual: true, components: VS,
+    targeting: { kind: 'self' },
+    operation: { kind: 'utility', effect: { kind: 'meld_into_stone', exitMovementFeet: 5, partialDestructionDamageCount: 6, partialDestructionDamageSides: 6, totalDestructionDamage: 50, expelledCondition: 'Prone' }, concentration: false, durationRounds: 4800 },
+  },
+  {
+    id: 'nondetection', name: 'Nondetection', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:5647', castingTime: 'action', components: material('a pinch of diamond dust worth 25+ GP', true),
+    targeting: { kind: 'single', rangeFeet: 5, willing: true },
+    operation: { kind: 'effect', effect: effect({ kind: 'nondetection', blocksDivinationTargeting: true, blocksMagicalScryingSensors: true, maximumObjectDimensionFeet: 10 }, { durationRounds: 4800 }) },
+  },
+  {
+    id: 'phantom-steed', name: 'Phantom Steed', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:5758', castingTime: 'minute', ritual: true, components: VS,
+    targeting: { kind: 'utility', rangeFeet: 30 },
+    operation: { kind: 'utility', effect: { kind: 'phantom_steed', speedFeet: 100, travelMilesPerHour: 13, equipmentVanishDistanceFeet: 10, fadeRounds: 10 }, concentration: false, durationRounds: 600 },
+  },
+  {
+    id: 'protection-from-energy', name: 'Protection from Energy', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:6322', castingTime: 'action', components: VS,
+    targeting: { kind: 'single', rangeFeet: 5, willing: true },
+    operation: { kind: 'effect', effect: effect({ kind: 'energy_protection', damageTypes: ['Acid', 'Cold', 'Fire', 'Lightning', 'Thunder'], selectedDamageType: 'chosen_when_cast' }, { concentration: true, durationRounds: 600 }) },
+  },
+  {
+    id: 'remove-curse', name: 'Remove Curse', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:6499', castingTime: 'action', components: VS,
+    targeting: { kind: 'single', rangeFeet: 5, willing: true }, operation: { kind: 'remove_curse' },
+  },
+  {
+    id: 'revivify', name: 'Revivify', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:6604', castingTime: 'action', components: material('a diamond worth 300+ GP', true),
+    targeting: { kind: 'single', rangeFeet: 5, willing: true, allowDead: true },
+    operation: { kind: 'revive', hitPoints: 1, maximumDeathAgeRounds: 10 },
+  },
+  {
+    id: 'sending', name: 'Sending', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:6825', castingTime: 'action', components: material('a copper wire'),
+    targeting: { kind: 'remote', range: 'unlimited' },
+    operation: { kind: 'utility', effect: { kind: 'sending', maximumWords: 25, crossPlaneFailurePercent: 5, recipientBlockRounds: 4800 }, concentration: false, durationRounds: null },
+  },
+  {
+    id: 'sleet-storm', name: 'Sleet Storm', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:7119', castingTime: 'action', components: material('a miniature umbrella'),
+    targeting: { kind: 'area', rangeFeet: 150, shape: 'cylinder', baseSizeFeet: 20, sizePerSlotFeet: 0, secondarySizeFeet: 40 },
+    operation: { kind: 'utility', effect: { kind: 'sleet_storm_area', placement: 'selected_when_cast', radiusFeet: 20, heightFeet: 40, obscurement: 'heavy', difficultTerrain: true, saveAbility: 'dexterity', failureCondition: 'Prone', failureBreaksConcentration: true }, concentration: true, durationRounds: 10 },
+  },
+  {
+    id: 'slow', name: 'Slow', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:7140', castingTime: 'action', components: material('a drop of molasses'),
+    targeting: { kind: 'area_selected', rangeFeet: 120, shape: 'cube', baseSizeFeet: 40, sizePerSlotFeet: 0, baseMaximum: 6, additionalPerSlot: 0 },
+    operation: { kind: 'save_effect', ability: 'wisdom', rollMode: 'normal', effect: effect({ kind: 'slow', speedMultiplier: 0.5, armorClassPenalty: 2, dexteritySavePenalty: 2, reactionsAllowed: false, actionOrBonusOnly: true, attacksPerAction: 1, somaticSpellFailurePercent: 25 }, { concentration: true, durationRounds: 10, expiresAt: 'target_end', repeatedSave: { ability: 'wisdom', rollMode: 'normal', timing: 'target_end' } }) },
+  },
+  {
+    id: 'speak-with-dead', name: 'Speak with Dead', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:7214', castingTime: 'action', components: material('burning incense'),
+    targeting: { kind: 'utility', rangeFeet: 10 },
+    operation: { kind: 'utility', effect: { kind: 'speak_with_dead', maximumQuestions: 5, sameCorpseLockoutRounds: 144000 }, concentration: false, durationRounds: 100 },
+  },
+  {
+    id: 'spirit-guardians', name: 'Spirit Guardians', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:7324', castingTime: 'action', components: material('a prayer scroll'),
+    targeting: { kind: 'area', rangeFeet: 0, shape: 'emanation', baseSizeFeet: 15, sizePerSlotFeet: 0 },
+    operation: { kind: 'utility', effect: { kind: 'spirit_guardians_area', placement: 'selected_when_cast', radiusFeet: 15, speedMultiplier: 0.5, damageTypes: ['Radiant', 'Necrotic'], damageCount: 3, damageSides: 8, damagePerSlotCount: 1, saveAbility: 'wisdom', onSuccess: 'half', oncePerTurn: true }, concentration: true, durationRounds: 100 },
+  },
+  {
+    id: 'stinking-cloud', name: 'Stinking Cloud', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:7391', castingTime: 'action', components: material('a rotten egg'),
+    targeting: { kind: 'area', rangeFeet: 90, shape: 'sphere', baseSizeFeet: 20, sizePerSlotFeet: 0 },
+    operation: { kind: 'utility', effect: { kind: 'stinking_cloud_area', placement: 'selected_when_cast', radiusFeet: 20, obscurement: 'heavy', dispersedByStrongWind: true, saveAbility: 'constitution', failureCondition: 'Poisoned', actionsAllowedOnFailure: false }, concentration: true, durationRounds: 10 },
+  },
+  {
+    id: 'tiny-hut', name: 'Tiny Hut', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:7908', castingTime: 'minute', ritual: true, components: material('a crystal bead'),
+    targeting: { kind: 'area', rangeFeet: 0, shape: 'emanation', baseSizeFeet: 10, sizePerSlotFeet: 0 },
+    operation: { kind: 'utility', effect: { kind: 'tiny_hut', placement: 'selected_when_cast', radiusFeet: 10, blocksOutsideCreaturesAndObjects: true, blocksSpellLevelAtMost: 3, opaqueFromOutside: true, transparentFromInside: true }, concentration: false, durationRounds: 4800 },
+  },
+  {
+    id: 'tongues', name: 'Tongues', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:7932', castingTime: 'action', components: materialWith('a miniature ziggurat', { verbal: true, somatic: false }),
+    targeting: { kind: 'single', rangeFeet: 5, willing: true },
+    operation: { kind: 'effect', effect: effect({ kind: 'universal_language', understandsSpokenAndSigned: true, understoodByAnyLanguageSpeaker: true }, { durationRounds: 600 }) },
+  },
+  {
+    id: 'vampiric-touch', name: 'Vampiric Touch', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:8158', castingTime: 'action', components: VS,
+    targeting: { kind: 'single', rangeFeet: 5, willing: false },
+    operation: { kind: 'lifedrain_attack', damageType: damageType('Necrotic'), dice: dice(3, 6, { perSlotCount: 1 }), healingDivisor: 2, effect: effect({ kind: 'vampiric_touch', repeatAttackCost: 'magic_action' }, { target: 'self', concentration: true, durationRounds: 10 }) },
+  },
+  {
+    id: 'water-breathing', name: 'Water Breathing', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:8415', castingTime: 'action', ritual: true, components: material('a short reed'),
+    targeting: { kind: 'multiple', rangeFeet: 30, baseMaximum: 10, additionalPerSlot: 0, willing: true },
+    operation: { kind: 'effect', effect: effect({ kind: 'water_breathing', retainsNormalRespiration: true }, { durationRounds: 14400 }) },
+  },
+  {
+    id: 'water-walk', name: 'Water Walk', level: 3,
+    source: 'docs/srd/source/spell-descriptions.txt:8429', castingTime: 'action', ritual: true, components: material('a piece of cork'),
+    targeting: { kind: 'multiple', rangeFeet: 30, baseMaximum: 10, additionalPerSlot: 0, willing: true },
+    operation: { kind: 'effect', effect: effect({ kind: 'water_walk', surfaces: ['water', 'acid', 'mud', 'snow', 'quicksand', 'lava'], transitionCost: 'bonus_action' }, { durationRounds: 600 }) },
   },
 ] as const;
 

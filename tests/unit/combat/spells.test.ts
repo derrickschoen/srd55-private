@@ -39,8 +39,8 @@ const EXPECTED_LEVEL_TOTALS: Readonly<Record<SpellLevel, number>> = {
   4: 30,
 };
 const EXPECTED_MANIFEST_TOTAL = 175;
-const EXPECTED_IMPLEMENTED = 108;
-const EXPECTED_PENDING = 67;
+const EXPECTED_IMPLEMENTED = 145;
+const EXPECTED_PENDING = 30;
 const EXPECTED_CANTRIP_AND_LEVEL_ONE_IMPLEMENTED = 63;
 
 interface ValuePin {
@@ -583,7 +583,9 @@ const COMPLETE_MECHANICS_PINS: readonly CompleteMechanicsPin[] = [
 ];
 
 function definitionRange(definition: SpellDefinition): number {
-  return definition.targeting.kind === 'self' ? 0 : definition.targeting.rangeFeet;
+  return definition.targeting.kind === 'self' || definition.targeting.kind === 'remote'
+    ? 0
+    : definition.targeting.rangeFeet;
 }
 
 function operationDice(definition: SpellDefinition): readonly [number, number] | null {
@@ -601,6 +603,7 @@ function operationDice(definition: SpellDefinition): readonly [number, number] |
       return [operation.initialDice.baseCount, operation.initialDice.sides];
     case 'attack_rays':
     case 'summoned_weapon_attack':
+    case 'lifedrain_attack':
       return [operation.dice.baseCount, operation.dice.sides];
     case 'weapon_attack':
       return [operation.extraDamage.baseCount, operation.extraDamage.sides];
@@ -610,6 +613,10 @@ function operationDice(definition: SpellDefinition): readonly [number, number] |
     case 'remove_condition':
     case 'remove_condition_and_effect':
     case 'save_branch_effect':
+    case 'reaction_save_cancel':
+    case 'dispel_magic':
+    case 'remove_curse':
+    case 'revive':
     case 'save_effect':
     case 'stabilize':
     case 'utility':
@@ -632,6 +639,7 @@ function operationPerSlot(definition: SpellDefinition): number {
     case 'attack_rays':
       return operation.dice.perSlotCount;
     case 'summoned_weapon_attack':
+    case 'lifedrain_attack':
       return operation.dice.perSlotCount;
     case 'magic_missiles':
       return operation.dice.perSlotCount;
@@ -644,6 +652,10 @@ function operationPerSlot(definition: SpellDefinition): number {
     case 'remove_condition':
     case 'remove_condition_and_effect':
     case 'save_branch_effect':
+    case 'reaction_save_cancel':
+    case 'dispel_magic':
+    case 'remove_curse':
+    case 'revive':
     case 'save_effect':
     case 'stabilize':
     case 'utility':
@@ -668,7 +680,7 @@ function areaFor(definition: SpellDefinition, slotLevel: number | null): SpellCa
       return { shape: 'cube', template: { origin: feetPoint(center - size / 2, center), center: feetPoint(center, center), axis: { x: 1, y: 0 }, size: feet(size), includeOrigin: false } };
     }
     case 'line':
-      return { shape: 'line', template: { origin: feetPoint(5, 5), direction: { x: 1, y: 0 }, length: feet(size), width: feet(10), includeOrigin: false } };
+      return { shape: 'line', template: { origin: feetPoint(5, 5), direction: { x: 1, y: 0 }, length: feet(size), width: feet(definition.targeting.secondarySizeFeet ?? 10), includeOrigin: false } };
     case 'cylinder':
     case 'emanation':
       throw new Error(`No level-1 batch fixture for ${definition.targeting.shape}.`);
@@ -788,7 +800,7 @@ describe('reference-party spell manifest', () => {
     }
   });
 
-  it('pins the burn-down at exactly 108 implemented and 67 pending rows', () => {
+  it('pins the burn-down at exactly 145 implemented and 30 pending rows', () => {
     expect(SPELL_MANIFEST.filter((row) => row.status === 'implemented')).toHaveLength(EXPECTED_IMPLEMENTED);
     expect(SPELL_MANIFEST.filter((row) => row.status === 'pending')).toHaveLength(EXPECTED_PENDING);
     expect(IMPLEMENTED_SPELL_DEFINITIONS).toHaveLength(EXPECTED_IMPLEMENTED);
@@ -1044,6 +1056,7 @@ describe('every implemented cantrip and level-1 spell executes through the encou
       case 'magic_missiles':
       case 'weapon_attack':
       case 'summoned_weapon_attack':
+      case 'lifedrain_attack':
         expect(afterTarget?.hitPoints).toBeLessThan(beforeTarget?.hitPoints ?? 0);
         break;
       case 'healing':
@@ -1057,6 +1070,9 @@ describe('every implemented cantrip and level-1 spell executes through the encou
       case 'save_push':
       case 'remove_condition_and_effect':
       case 'save_branch_effect':
+      case 'reaction_save_cancel':
+      case 'dispel_magic':
+      case 'revive':
       case 'save_effect':
         expect(result.state.effects.length).toBeGreaterThan(0);
         break;
@@ -1067,6 +1083,7 @@ describe('every implemented cantrip and level-1 spell executes through the encou
         expect(result.events.some((event) => event.type === 'spell_utility_resolved')).toBe(true);
         break;
       case 'remove_condition':
+      case 'remove_curse':
         expect(result.events.some((event) => event.type === 'spell_cast')).toBe(true);
         break;
     }
