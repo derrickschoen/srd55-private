@@ -1,0 +1,28 @@
+
+ RUN  v4.1.10 /home/vagrant/PhpstormProjects/dnd-lane-statblocks
+
+[spell-source-parse-cache] reused /tmp/dnd-srd-spell-source-parse-cache/817c02b5d316a41e.json
+ ❯ tests/unit/combat/statblocks.test.ts (0 test)
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/unit/combat/statblocks.test.ts [ tests/unit/combat/statblocks.test.ts ]
+RangeError: Hit Point dice must produce the listed average.
+ ❯ monsterStatblock src/combat/statblock.ts:391:51
+    389|     const dice = sourceDetails.hitPointDice.value;
+    390|     const sourcedAverage = Math.floor(dice.count * (dice.sides + 1) / …
+    391|     if (sourcedAverage !== hitPointMaximum) throw new RangeError('Hit …
+       |                                                   ^
+    392|   }
+    393|   if (sourceDetails.abilities.kind === 'present') {
+ ❯ src/combat/statblocks/monsters.ts:126:21
+ ❯ src/combat/statblocks/roster.ts:2:1
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  no tests
+   Start at  19:54:38
+   Duration  672ms (transform 41ms, setup 0ms, import 0ms, tests 0ms, environment 0ms)
+
