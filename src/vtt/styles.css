@@ -34,40 +34,92 @@
   position: relative;
   width: 3rem;
   height: 3rem;
-  border: 1px solid #31394c;
-  background: #1a1f2c;
+  overflow: hidden;
+  border: 1px solid #3e4658;
+  background: #292d35;
 }
 
 .encounter-cell[data-preview='true'] {
-  background: #604d12;
   box-shadow: inset 0 0 0 2px #f1c75b;
+}
+
+.encounter-art-layer,
+.encounter-token-sprite,
+.encounter-token-overlay {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.encounter-art-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.encounter-art-floor { z-index: 0; }
+.encounter-art-wall,
+.encounter-art-door { z-index: 1; }
+.encounter-art-terrain { z-index: 2; }
+.encounter-art-fog {
+  z-index: 3;
+  opacity: 0.72;
+}
+
+.encounter-cell[data-preview='true']::after {
+  position: absolute;
+  z-index: 8;
+  inset: 0;
+  border: 2px solid #f1c75b;
+  background: rgb(241 199 91 / 24%);
+  content: '';
+  pointer-events: none;
 }
 
 .encounter-token {
   position: absolute;
-  inset: 0.2rem;
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-  border-radius: 0.45rem;
-  border: 2px solid #8290ad;
-  background: #293249;
-  font-size: 0.62rem;
+  z-index: 5;
+  inset: 0.08rem;
+  display: block;
+  border: 0;
+  background: transparent;
   text-align: center;
 }
 
-.encounter-token[data-kind='monster'] {
-  background: #552c35;
+.encounter-token-sprite,
+.encounter-token-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
 }
 
-.encounter-token[data-active='true'] {
-  border-color: #6ff3a2;
-  box-shadow: 0 0 0 3px #1a8e52;
+.encounter-token-label {
+  position: absolute;
+  z-index: 4;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  overflow: hidden;
+  padding: 0.05rem 0.1rem;
+  background: rgb(8 10 15 / 84%);
+  color: #fff;
+  font: 700 0.48rem/1.1 system-ui, sans-serif;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.encounter-token[data-adjudicated='true'] {
-  border-color: #ffb454;
-  box-shadow: 0 0 0 4px #b34a1c;
+.encounter-token-focus {
+  z-index: 2;
+  filter: drop-shadow(0 0 2px #58f09a);
+}
+
+.encounter-token-adjudicated {
+  z-index: 3;
+  opacity: 0.82;
+  filter: drop-shadow(0 0 2px #ffad42);
 }
 
 .active-pc-panel,

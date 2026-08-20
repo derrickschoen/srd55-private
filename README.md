@@ -17,6 +17,10 @@ Three licenses cover this repository, split by what each file is:
   homebrew documents in `docs/homebrew/cc-by/` — is licensed under the
   Creative Commons Attribution 4.0 International License; the required
   attribution statement is in [NOTICE.md](NOTICE.md).
+- **Project-original art** — the procedural starter-art outputs in
+  `public/assets/art/` and their visual-review preview — is licensed under
+  Creative Commons Attribution 4.0 International. Its exact self-attribution
+  notice and generation provenance are in [NOTICE.md](NOTICE.md).
 - **OGL material** — `docs/homebrew/ogl/` holds Open Game License 1.0a
   source material and derivations; the license text and its Section 15
   chain live in that folder, and its text never crosses into the CC-BY

@@ -128,6 +128,10 @@ const LICENSE_REQUIRED = [
     'licenses/CC-BY-4.0.txt',
     '9ba9550ad48438d0836ddab3da480b3b69ffa0aac7b7878b5a0039e7ab429411',
   ],
+  [
+    'licenses/STARTER-ART-NOTICE.txt',
+    'd09f1227f09d079dadd77abb1d586c53cc4c5539ecf6e56626f5b90e78c477c2',
+  ],
 ];
 
 function walk(dir) {
