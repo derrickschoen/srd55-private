@@ -30,6 +30,17 @@ import {
   type TargetSelector,
 } from './contracts';
 import type { JsTurnProgramLimits } from './js-turn-program';
+import { canonicalJson } from '../../commands/canonical-json';
+import {
+  E06_TRIGGER_POLICY,
+  buildAlgorithmRoundPlan,
+  resolveSteeringPlan,
+  steeringConsultReason,
+  steeringRequestContract,
+  steeringTriggerEvents,
+  type SteeringCoordinatorMode,
+  type SteeringTelemetry,
+} from './steering';
 
 export class StaleRoundPlanError extends Error {
   override readonly name = 'StaleRoundPlanError' as const;
@@ -177,6 +188,7 @@ export class DmRoundPlanSession {
   readonly #jsPrograms = new Map<string, JsProgramArtifact>();
   readonly #initialRequests = new Map<string, Promise<RoundPlan>>();
   #requestSequence = 1;
+  #previousSteeringProjection: DmVisibleEncounterState | null = null;
 
   constructor(
     private readonly exchange: DmBridgeExchange,
@@ -184,6 +196,8 @@ export class DmRoundPlanSession {
     private readonly onCorrectionExhausted: (error: RoundPlanCorrectionExhaustedError) => void = () => undefined,
     private readonly surface: RoundPlanSurface = 'json_ast',
     private readonly jsLimits: JsTurnProgramLimits = {},
+    private readonly steeringMode: SteeringCoordinatorMode = { kind: 'full_model' },
+    private readonly onSteeringTelemetry: (telemetry: SteeringTelemetry) => void = () => undefined,
   ) {}
 
   async #validatedExchange(
@@ -239,7 +253,7 @@ export class DmRoundPlanSession {
     actor: CombatantId | null,
   ): Promise<{ readonly key: string; readonly plan: RoundPlan }> {
     const projection = requireFullDmProjection(context.projection);
-    const perCombatant = context.initiativeMode === 'per_combatant' && actor !== null;
+    const perCombatant = this.steeringMode.kind === 'full_model' && context.initiativeMode === 'per_combatant' && actor !== null;
     const key = perCombatant
       ? `${String(projection.round)}:${actor}`
       : `${String(projection.round)}:enemy_block`;
@@ -250,6 +264,61 @@ export class DmRoundPlanSession {
     const livingMonsterIds = projection.combatants
       .filter((candidate) => candidate.kind === 'monster' && candidate.life === 'living')
       .map((candidate) => candidate.id);
+    if (this.steeringMode.kind !== 'full_model') {
+      const requestId = this.#requestId(context.encounterId, projection.round, 'steering');
+      const proposed = buildAlgorithmRoundPlan({
+        encounterId: context.encounterId,
+        requestId,
+        state: projection,
+        livingMonsterIds,
+      });
+      const policy = this.steeringMode.kind === 'algorithm_triggered'
+        ? this.steeringMode.policy
+        : E06_TRIGGER_POLICY;
+      const reason = steeringConsultReason({
+        mode: this.steeringMode,
+        round: projection.round,
+        topActionGapPercent: proposed.topActionGapPercent,
+        events: steeringTriggerEvents(this.#previousSteeringProjection, projection, policy.retreatHitPointPercent),
+      });
+      this.#previousSteeringProjection = structuredClone(projection);
+      if (reason === null) {
+        const proposalSize = new TextEncoder().encode(canonicalJson(proposed.plan)).length;
+        this.onSteeringTelemetry({
+          proposalSize,
+          replyKind: 'not_consulted',
+          overrideCount: 0,
+          consultReason: null,
+        });
+        this.#plans.set(key, proposed.plan);
+        return { key, plan: proposed.plan };
+      }
+      const request = {
+        kind: 'steering_round_request' as const,
+        protocolVersion: DM_BRIDGE_PROTOCOL_VERSION,
+        encounterId: context.encounterId,
+        requestId,
+        expectedRevision: projection.revision,
+        round: projection.round,
+        codexSessionId: context.codexSessionId,
+        model: this.model,
+        projection: context.projection,
+        history: context.history,
+        proposal: proposed.plan,
+        consultReason: reason,
+        replyContract: steeringRequestContract(),
+        correctionAttempt: 0 as const,
+      };
+      const pending = resolveSteeringPlan({ request, exchange: this.exchange, signal })
+        .then((resolved) => {
+          this.onSteeringTelemetry(resolved.telemetry);
+          this.#plans.set(key, resolved.plan);
+          return resolved.plan;
+        })
+        .finally(() => this.#initialRequests.delete(key));
+      this.#initialRequests.set(key, pending);
+      return { key, plan: await pending };
+    }
     const request: RoundPlanRequest = {
       kind: 'round_plan_request',
       protocolVersion: DM_BRIDGE_PROTOCOL_VERSION,

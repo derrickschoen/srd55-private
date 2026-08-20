@@ -19,6 +19,7 @@ const INCREMENT_TEN_LEDGER_PATH = 'docs/audits/2026-08-20-vtt-increment-10-mutat
 const SOAK_PARTY_LEDGER_PATH = 'docs/audits/2026-08-20-vtt-soak-party-wiring-mutation-ledger.md';
 const LIVE_PLAN_CORRECTION_LEDGER_PATH = 'docs/audits/2026-08-20-vtt-live-plan-correction-mutation-ledger.md';
 const JS_TURN_PROGRAM_LEDGER_PATH = 'docs/audits/2026-08-20-js-turn-program-mutation-ledger.md';
+const E04_E06_LEDGER_PATH = 'docs/audits/2026-08-20-e04-e06-engine-prerequisites-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
 function ledger(): MutationLedger {
@@ -110,6 +111,18 @@ describe('phase-2 mutation ledger manifest', () => {
       'interpreter_bypasses_validation',
       'projection_order_changes_query',
       'js_source_missing_from_replay',
+    ]) {
+      expect(ledger).toContain(`\`${name}\``);
+    }
+  });
+
+  it('E04-E06-MUTATION-LEDGER pins the three required controls and the deterministic-set control', () => {
+    const ledger = readFileSync(E04_E06_LEDGER_PATH, 'utf8');
+    for (const name of [
+      'override_invents_action',
+      'delta_skips_hash_check',
+      'trigger_policy_ignored',
+      'override_order_nondeterministic',
     ]) {
       expect(ledger).toContain(`\`${name}\``);
     }

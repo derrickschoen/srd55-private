@@ -2,6 +2,8 @@ import type { EncounterCommand } from './events';
 import { gridDistance } from './grid';
 import type { CombatantId } from './values';
 import type { VisibleEncounterState } from './visibility';
+import type { DmVisibleEncounterState } from './visibility';
+import type { DecisionProgram } from '../vtt/dm-bridge/round-plan-contract';
 
 export interface LegalActionSummary {
   readonly actions: readonly EncounterCommand[];
@@ -148,6 +150,61 @@ function algorithmRank(
 }
 
 export class AlgorithmController implements Controller {
+  proposeRoundProgram(
+    state: DmVisibleEncounterState,
+    actorId: CombatantId,
+  ): AlgorithmRoundProposal {
+    const actor = state.combatants.find((candidate) => candidate.id === actorId);
+    if (actor === undefined || actor.kind !== 'monster' || actor.life !== 'living') {
+      throw new TypeError('Algorithm round proposals require a living monster in the DM projection.');
+    }
+    const enemies = state.combatants
+      .filter((candidate) => candidate.kind !== actor.kind && candidate.life !== 'dead')
+      .sort((left, right) => {
+        const distance = gridDistance(actor.position, left.position) - gridDistance(actor.position, right.position);
+        return distance || left.id.localeCompare(right.id);
+      });
+    const nearest = enemies[0];
+    const choices: DecisionProgram[] = [];
+    const scores: number[] = [];
+    for (const enemy of enemies) {
+      const distance = gridDistance(actor.position, enemy.position);
+      choices.push({
+        kind: 'action',
+        action: { kind: 'attack', target: { kind: 'combatant', combatantId: enemy.id } },
+      });
+      scores.push(100 - distance);
+      choices.push({
+        kind: 'action',
+        action: { kind: 'force_save', target: { kind: 'combatant', combatantId: enemy.id } },
+      });
+      scores.push(96 - distance);
+    }
+    if (nearest !== undefined) {
+      choices.push({
+        kind: 'action',
+        action: { kind: 'move_toward', target: { kind: 'combatant', combatantId: nearest.id } },
+      });
+      scores.push(50 - gridDistance(actor.position, nearest.position));
+    }
+    choices.push(
+      { kind: 'action', action: { kind: 'use_action', action: 'dodge' } },
+      { kind: 'action', action: { kind: 'use_action', action: 'end_turn' } },
+    );
+    scores.push(20, 0);
+    const ranked = choices.map((program, index) => ({ program, score: scores[index] ?? 0 }))
+      .sort((left, right) => right.score - left.score || JSON.stringify(left.program).localeCompare(JSON.stringify(right.program)));
+    const top = ranked[0]?.score ?? 0;
+    const second = ranked[1]?.score ?? top;
+    return {
+      program: {
+        kind: 'priority',
+        choices: ranked.map((candidate) => candidate.program),
+      },
+      topActionGapPercent: top === 0 ? 0 : Math.abs(top - second) * 100 / Math.abs(top),
+    };
+  }
+
   async choose(
     request: ControllerRequest,
     signal: AbortSignal,
@@ -171,6 +228,11 @@ export class AlgorithmController implements Controller {
       action,
     };
   }
+}
+
+export interface AlgorithmRoundProposal {
+  readonly program: DecisionProgram;
+  readonly topActionGapPercent: number;
 }
 
 export interface AgentControllerRequest {

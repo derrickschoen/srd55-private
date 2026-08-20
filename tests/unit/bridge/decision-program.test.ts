@@ -135,7 +135,9 @@ function malformedCommandsPlan(request: DmBridgeRequest): unknown {
     ? request.livingMonsterIds
     : request.kind === 'monster_reconsult_request'
       ? [request.monsterId]
-      : request.requestedMonsterIds;
+      : request.kind === 'round_plan_correction_request'
+        ? request.requestedMonsterIds
+        : request.proposal.monsters.map((entry) => entry.monsterId);
   return {
     kind: 'round_plan',
     protocolVersion: DM_BRIDGE_PROTOCOL_VERSION,

@@ -77,6 +77,50 @@ export interface RoundPlan {
 
 export type RoundPlanSurface = 'json_ast' | 'js_program';
 
+export type SteeringStance = 'aggressive' | 'defensive' | 'retreat';
+
+export type SteeringOverride =
+  | {
+      readonly kind: 'retarget';
+      readonly monsterId: CombatantId;
+      readonly target: TargetSelector;
+    }
+  | {
+      readonly kind: 'stance_change';
+      readonly monsterId: CombatantId;
+      readonly stance: SteeringStance;
+    }
+  | {
+      readonly kind: 'priority_reorder';
+      readonly monsterId: CombatantId;
+      readonly order: readonly number[];
+    }
+  | {
+      readonly kind: 'special_ability_invocation';
+      readonly monsterId: CombatantId;
+      readonly ability: 'force_save';
+      readonly target: TargetSelector;
+    };
+
+interface SteeringReplyIdentity {
+  readonly protocolVersion: typeof DM_BRIDGE_PROTOCOL_VERSION;
+  readonly encounterId: EncounterSessionId;
+  readonly requestId: string;
+  readonly expectedRevision: number;
+  readonly round: number;
+}
+
+export type SteeringReply =
+  | (SteeringReplyIdentity & { readonly kind: 'steering_approve' })
+  | (SteeringReplyIdentity & {
+      readonly kind: 'steering_overrides';
+      readonly overrides: readonly SteeringOverride[];
+    })
+  | (SteeringReplyIdentity & {
+      readonly kind: 'steering_replacement';
+      readonly replacement: RoundPlan;
+    });
+
 export interface JsMonsterProgramSource {
   readonly monsterId: CombatantId;
   readonly source: string;
@@ -197,6 +241,52 @@ const jsRoundPlanSourceSchema: z.ZodType<JsRoundPlanSourceReply> = z.strictObjec
   })),
 });
 
+const steeringIdentitySchema = {
+  protocolVersion: z.literal(DM_BRIDGE_PROTOCOL_VERSION),
+  encounterId: encounterSessionIdSchema,
+  requestId: trimmedString,
+  expectedRevision: nonNegativeInteger,
+  round: nonNegativeInteger,
+};
+
+const steeringOverrideSchema: z.ZodType<SteeringOverride> = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('retarget'),
+    monsterId: combatantIdSchema,
+    target: targetSelectorSchema,
+  }),
+  z.strictObject({
+    kind: z.literal('stance_change'),
+    monsterId: combatantIdSchema,
+    stance: z.enum(['aggressive', 'defensive', 'retreat']),
+  }),
+  z.strictObject({
+    kind: z.literal('priority_reorder'),
+    monsterId: combatantIdSchema,
+    order: z.array(nonNegativeInteger).min(1).max(20),
+  }),
+  z.strictObject({
+    kind: z.literal('special_ability_invocation'),
+    monsterId: combatantIdSchema,
+    ability: z.literal('force_save'),
+    target: targetSelectorSchema,
+  }),
+]);
+
+const steeringReplySchema: z.ZodType<SteeringReply> = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('steering_approve'), ...steeringIdentitySchema }),
+  z.strictObject({
+    kind: z.literal('steering_overrides'),
+    ...steeringIdentitySchema,
+    overrides: z.array(steeringOverrideSchema).max(100),
+  }),
+  z.strictObject({
+    kind: z.literal('steering_replacement'),
+    ...steeringIdentitySchema,
+    replacement: roundPlanSchema,
+  }),
+]);
+
 function issuePath(path: readonly PropertyKey[]): string {
   return path.reduce<string>((result, segment) =>
     typeof segment === 'number' ? `${result}[${String(segment)}]` : `${result}.${String(segment)}`,
@@ -224,6 +314,23 @@ export function decodeJsRoundPlanSourceStructure(value: unknown): JsRoundPlanSou
   if (!result.success) throw new TypeError(validatorMessage(result.error));
   return result.data;
 }
+
+export function decodeDecisionProgramStructure(value: unknown): DecisionProgram {
+  const result = programSchema(0).safeParse(value);
+  if (!result.success) throw new TypeError(validatorMessage(result.error));
+  return result.data;
+}
+
+export function decodeSteeringReplyStructure(value: unknown): SteeringReply {
+  const result = steeringReplySchema.safeParse(value);
+  if (!result.success) throw new TypeError(validatorMessage(result.error));
+  return result.data;
+}
+
+export const STEERING_REPLY_JSON_SCHEMA = Object.freeze(z.toJSONSchema(steeringReplySchema, {
+  io: 'input',
+  reused: 'ref',
+}));
 
 export const ROUND_PLAN_REPLY_JSON_SCHEMA = Object.freeze(z.toJSONSchema(roundPlanSchema, {
   io: 'input',

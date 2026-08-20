@@ -13,8 +13,10 @@ import {
   DM_BRIDGE_PROTOCOL_VERSION,
   ROUND_PLAN_JS_REPLY_CONTRACT,
   ROUND_PLAN_REPLY_CONTRACT,
+  STEERING_REPLY_JSON_SCHEMA,
   decodeJsRoundPlanSourceStructure,
   decodeRoundPlanStructure,
+  decodeSteeringReplyStructure,
   roundPlanReplyContract,
   type DecisionProgram,
   type JsRoundPlanSourceReply,
@@ -24,6 +26,9 @@ import {
   type RoundPlanReplyContract,
   type RoundPlanSurface,
   type StatePredicate,
+  type SteeringOverride,
+  type SteeringReply,
+  type SteeringStance,
   type TargetSelector,
 } from './round-plan-contract';
 import {
@@ -39,6 +44,7 @@ export {
   ROUND_PLAN_JS_REPLY_CONTRACT,
   ROUND_PLAN_REPLY_CONTRACT,
   ROUND_PLAN_REPLY_JSON_SCHEMA,
+  STEERING_REPLY_JSON_SCHEMA,
   roundPlanReplyContract,
   type DecisionProgram,
   type JsMonsterProgramSource,
@@ -51,6 +57,9 @@ export {
   type RoundPlanReplyContract,
   type RoundPlanSurface,
   type StatePredicate,
+  type SteeringOverride,
+  type SteeringReply,
+  type SteeringStance,
   type TargetSelector,
 } from './round-plan-contract';
 export const DEFAULT_DM_MODEL = 'gpt-5.6-terra' as const;
@@ -173,7 +182,39 @@ export interface RoundPlanCorrectionRequest {
   readonly correctionAttempt: 1 | 2;
 }
 
-export type DmBridgeRequest = RoundPlanRequest | MonsterReconsultRequest | RoundPlanCorrectionRequest;
+export type SteeringConsultReason =
+  | 'every_round'
+  | 'round_one'
+  | 'near_tie_top_actions'
+  | 'combatant_down_or_dead'
+  | 'control_change'
+  | 'retreat_threshold';
+
+export interface SteeringRoundRequest {
+  readonly kind: 'steering_round_request';
+  readonly protocolVersion: typeof DM_BRIDGE_PROTOCOL_VERSION;
+  readonly encounterId: EncounterSessionId;
+  readonly requestId: string;
+  readonly expectedRevision: number;
+  readonly round: number;
+  readonly codexSessionId: CodexSessionId;
+  readonly model: DmBridgeModelConfig;
+  readonly projection: DmBoardProjection;
+  readonly history: readonly SessionHistoryEntry[];
+  readonly proposal: RoundPlan;
+  readonly consultReason: SteeringConsultReason;
+  readonly replyContract: {
+    readonly schemaVersion: 1;
+    readonly jsonSchema: typeof STEERING_REPLY_JSON_SCHEMA;
+  };
+  readonly correctionAttempt: 0;
+}
+
+export type DmBridgeRequest =
+  | RoundPlanRequest
+  | MonsterReconsultRequest
+  | RoundPlanCorrectionRequest
+  | SteeringRoundRequest;
 
 export interface DmBridgeExchange {
   exchange(request: DmBridgeRequest, signal: AbortSignal): Promise<unknown>;
@@ -266,7 +307,7 @@ function validateProgramVocabulary(program: DecisionProgram, projection: DmVisib
 
 export function decodeRoundPlan(
   value: unknown,
-  request: RoundPlanRequest | MonsterReconsultRequest | RoundPlanCorrectionRequest,
+  request: RoundPlanRequest | MonsterReconsultRequest | RoundPlanCorrectionRequest | SteeringRoundRequest,
 ): RoundPlan {
   const input = decodeRoundPlanStructure(value);
   if (
@@ -285,7 +326,9 @@ export function decodeRoundPlan(
     ? request.livingMonsterIds
     : request.kind === 'monster_reconsult_request'
       ? [request.monsterId]
-      : request.requestedMonsterIds;
+      : request.kind === 'round_plan_correction_request'
+        ? request.requestedMonsterIds
+        : request.proposal.monsters.map((entry) => entry.monsterId);
   if (
     monsters.length !== expected.length ||
     new Set(monsters.map((entry) => entry.monsterId)).size !== monsters.length ||
@@ -302,6 +345,26 @@ export function decodeRoundPlan(
     round: request.round,
     monsters,
   };
+}
+
+export function decodeSteeringReply(
+  value: unknown,
+  request: SteeringRoundRequest,
+): SteeringReply {
+  const reply = decodeSteeringReplyStructure(value);
+  if (
+    reply.protocolVersion !== request.protocolVersion ||
+    reply.encounterId !== request.encounterId ||
+    reply.requestId !== request.requestId ||
+    reply.expectedRevision !== request.expectedRevision ||
+    reply.round !== request.round
+  ) {
+    throw new TypeError('Steering reply envelope is stale or malformed.');
+  }
+  if (reply.kind === 'steering_replacement') {
+    decodeRoundPlan(reply.replacement, request);
+  }
+  return reply;
 }
 
 export interface JsProgramArtifact extends JsTurnProgramExecution {
