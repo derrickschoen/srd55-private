@@ -363,8 +363,21 @@ function roundPlanPrompt(request) {
     }
     correction = `The previous reply failed strict validation with exactly this error: ${input.validatorError}`;
   }
-  const contractInstructions = 'jsonSchema' in contract
+  const contractInstructions = contract.delivery === 'reference'
     ? [
+        `Use the strict JSON reply contract already established in this session as ${String(contract.contractId)}.`,
+        'Return only a JSON object accepted by that unchanged contract.',
+      ]
+    : contract.delivery === 'compact'
+      ? [
+          `Contract ${String(contract.contractId)} compact JSON grammar:`,
+          String(contract.grammar),
+          'Canonical valid example:',
+          JSON.stringify(object(contract.canonicalExample, 'request.replyContract.canonicalExample')),
+          'The production strict validator remains authoritative.',
+        ]
+      : 'jsonSchema' in contract
+        ? [
         'The reply MUST validate against this exact JSON Schema:',
         JSON.stringify(object(contract.jsonSchema, 'request.replyContract.jsonSchema')),
         ...('canonicalExample' in contract
@@ -374,13 +387,16 @@ function roundPlanPrompt(request) {
             ]
           : []),
         'No other fields are permitted at the envelope or at any nested object level.',
-      ]
-    : [
-        'The reply MUST use this restricted program grammar:',
-        String(contract.grammar),
-        'Canonical valid example:',
-        String(contract.canonicalExample),
-      ];
+          ...(typeof contract.contractId === 'string'
+            ? [`Remember this unchanged contract as ${contract.contractId} for later requests in this session.`]
+            : []),
+        ]
+        : [
+            'The reply MUST use this restricted program grammar:',
+            String(contract.grammar),
+            'Canonical valid example:',
+            String(contract.canonicalExample),
+          ];
   return [
     'You are the DM decision engine. Return exactly one JSON object and no markdown.',
     ...contractInstructions,
