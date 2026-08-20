@@ -123,6 +123,30 @@ export type SpellOperation =
       readonly pushFeetOnFailure: number;
     }
   | {
+      readonly kind: 'save_multi_damage';
+      readonly ability: Ability;
+      readonly onSuccess: 'none' | 'half';
+      readonly terms: readonly { readonly damageType: DamageType; readonly dice: ScaledDice }[];
+      readonly effect: EffectData | null;
+    }
+  | {
+      readonly kind: 'save_damage_over_time';
+      readonly ability: Ability;
+      readonly onSuccess: 'half_initial';
+      readonly damageType: DamageType;
+      readonly initialDice: ScaledDice;
+      readonly laterDice: ScaledDice;
+      readonly laterTiming: 'target_end';
+    }
+  | {
+      readonly kind: 'save_damage_and_effect';
+      readonly ability: Ability;
+      readonly onSuccess: 'none' | 'half';
+      readonly damageType: DamageType;
+      readonly dice: ScaledDice;
+      readonly effect: EffectData;
+    }
+  | {
       readonly kind: 'healing';
       readonly dice: ScaledDice;
       readonly addSpellcastingModifier: boolean;
@@ -265,7 +289,18 @@ export type SpellOperation =
           | 'speak_with_dead'
           | 'spirit_guardians_area'
           | 'stinking_cloud_area'
-          | 'tiny_hut';
+          | 'tiny_hut'
+          | 'arcane_eye'
+          | 'control_water'
+          | 'dimension_door'
+          | 'divination'
+          | 'fabricate'
+          | 'faithful_hound'
+          | 'guardian_of_faith'
+          | 'hallucinatory_terrain'
+          | 'private_sanctum'
+          | 'secret_chest'
+          | 'stone_shape';
       }>;
       readonly concentration: boolean;
       readonly durationRounds: number | null;
