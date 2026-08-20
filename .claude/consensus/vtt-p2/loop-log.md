@@ -419,3 +419,25 @@ Three findings this session raised, recorded here so they are not lost with it:
   D317.10 every-revision persistence, D315.9-10 revision-history undo),
   claimed by this session.
 
+## A18 — INCREMENT 5 CLOSED: event store, branch-stream RNG (lane-wt/vtt3a)
+
+- Delivered per D317.10/.1/.2/.3/.4 + D315.9-10: every-revision
+  persistence incl. pending requests + RNG + codex session id;
+  deterministic branch streams on undo; void-branch history; MirrorSink
+  contract (bridge implements in inc 7; never authority); versioned
+  0051_vtt_session_revisions migration (renumbers at the main merge —
+  known collision, trial-idx5 playbook); hard-pause byte-exact
+  rehydration.
+- First full gate FAILED usefully: 7 schema-inventory suites rejected
+  the new table (the brief's allowed-test list had excluded them —
+  brief gap, not implementer fault; lesson: schema-touching increments
+  carry the inventory suite from the start). Honest extensions landed
+  (88 tables, non-AUTOINCREMENT composite key, 5 CHECK behavioral
+  tests, 0051 chain coverage); supervisor verified 1,439/1,439.
+- Ledger: plan 31-36 + two codex branch-stream controls + supervisor's
+  drop-queue MirrorSink control, all killed by named tests vs committed
+  trees.
+- Full gate GREEN 391 files / 7,283 tests (.tmp-gate-5b.log).
+- Status: CLOSED round 2. Next: increment 6 (player-primary board +
+  separate DM window), claimed by this session.
+
