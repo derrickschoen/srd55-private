@@ -27,8 +27,21 @@ import {
   DeferredMirrorSink,
   EncounterSessionJournal,
   type BrowserSessionStore,
+  type MirrorSink,
   type SessionResume,
 } from './session-persistence';
+import {
+  BridgeFailureGuard,
+  type BridgeAbortReport,
+} from './dm-bridge/client';
+import {
+  DmRoundPlanController,
+  DmRoundPlanSession,
+} from './dm-bridge/decision-program';
+import type {
+  DmBridgeExchange,
+  DmBridgeModelConfig,
+} from './dm-bridge/contracts';
 import {
   projectDmBoard,
   projectPlayerBoard,
@@ -50,13 +63,18 @@ const INITIAL_COORDINATOR_STATE: PersistedCoordinatorState = {
   pause: null,
 };
 
-function controllerForKind(kind: ControllerKind): Controller {
+function controllerForKind(
+  kind: ControllerKind,
+  agentController?: () => Controller,
+): Controller {
   switch (kind) {
     case 'human':
       return new HumanController();
     case 'algorithm':
       return new AlgorithmController();
     case 'agent':
+      if (agentController !== undefined) return agentController();
+      throw new Error('Local host needs its DM bridge before restoring an agent controller.');
     case 'custom':
       throw new Error(`Local increment-6 host cannot restore a ${kind} controller.`);
   }
@@ -64,6 +82,7 @@ function controllerForKind(kind: ControllerKind): Controller {
 
 function registryFromIdentities(
   identities: readonly ControllerIdentity[],
+  agentController?: (combatantId: CombatantId) => Controller,
 ): {
   readonly registry: ControllerRegistry;
   readonly humans: ReadonlyMap<CombatantId, HumanController>;
@@ -71,7 +90,10 @@ function registryFromIdentities(
   const controllers = new Map<CombatantId, Controller>();
   const registry = new ControllerRegistry(
     identities.map((identity) => {
-      const controller = controllerForKind(identity.kind);
+      const controller = controllerForKind(
+        identity.kind,
+        agentController === undefined ? undefined : () => agentController(identity.combatantId),
+      );
       controllers.set(identity.combatantId, controller);
       return {
         combatantId: identity.combatantId,
@@ -82,7 +104,10 @@ function registryFromIdentities(
   );
   for (const identity of identities) {
     for (let generation = 1; generation <= identity.generation; generation += 1) {
-      const controller = controllerForKind(identity.kind);
+      const controller = controllerForKind(
+        identity.kind,
+        agentController === undefined ? undefined : () => agentController(identity.combatantId),
+      );
       controllers.set(identity.combatantId, controller);
       registry.replace(
         identity.combatantId,
@@ -101,11 +126,11 @@ function registryFromIdentities(
   };
 }
 
-function newIdentities(): readonly ControllerIdentity[] {
+function newIdentities(monsterKind: 'human' | 'agent' = 'human'): readonly ControllerIdentity[] {
   return [...REFERENCE_PLAYER_IDS, encounterSessionMonsterId()].map((combatantId) => ({
     combatantId,
-    controllerId: `${combatantId}:human:local`,
-    kind: 'human' as const,
+    controllerId: `${combatantId}:${combatantId === encounterSessionMonsterId() ? monsterKind : 'human'}:local`,
+    kind: combatantId === encounterSessionMonsterId() ? monsterKind : 'human' as const,
     generation: 0,
   })).sort((left, right) => left.combatantId.localeCompare(right.combatantId));
 }
@@ -121,6 +146,8 @@ export interface DmEncounterHostSnapshot {
   readonly player: PlayerBoardProjection;
 }
 
+export interface DmBridgeConnection extends DmBridgeExchange, MirrorSink {}
+
 export class DmEncounterHost {
   readonly sessionId: EncounterSessionId;
   readonly #store: BrowserSessionStore;
@@ -133,19 +160,36 @@ export class DmEncounterHost {
   #rng: SerializableRng;
   #pump: Promise<void> | null = null;
   #closed = false;
+  #bridgeFailureGuard: BridgeFailureGuard | null = null;
+  #roundPlanSession: DmRoundPlanSession | null = null;
 
   constructor(
     sessionKey: string,
     store: BrowserSessionStore,
-    options: { readonly initialState?: EncounterState } = {},
+    options: {
+      readonly initialState?: EncounterState;
+      readonly bridge?: DmBridgeConnection;
+      readonly dmModel?: DmBridgeModelConfig;
+      readonly codexSessionId?: ReturnType<typeof codexSessionId>;
+    } = {},
   ) {
     this.sessionId = encounterSessionId(sessionKey);
     this.#store = store;
+    if (options.bridge !== undefined) {
+      this.#mirror.connect(options.bridge);
+      this.#roundPlanSession = new DmRoundPlanSession(options.bridge, options.dmModel);
+    }
+    const agentController = this.#roundPlanSession === null
+      ? undefined
+      : (combatantId: CombatantId) => new DmRoundPlanController(
+          this.#roundPlanSession!,
+          () => this.#roundPlanContext(combatantId),
+        );
     const existing = store.revisions(this.sessionId);
     if (existing.length === 0) {
       const setup = referenceEncounterSetup();
-      const identities = newIdentities();
-      const built = registryFromIdentities(identities);
+      const identities = newIdentities(options.bridge === undefined ? 'human' : 'agent');
+      const built = registryFromIdentities(identities, agentController);
       this.#registry = built.registry;
       this.#humans = built.humans;
       this.#rng = mulberry32(0x315006);
@@ -156,7 +200,7 @@ export class DmEncounterHost {
         encounterState: state,
         coordinatorState: INITIAL_COORDINATOR_STATE,
         controllers: this.#registry.identities(),
-        codexSessionId: codexSessionId('codex:increment-6-local'),
+        codexSessionId: options.codexSessionId ?? codexSessionId('codex:increment-6-local'),
         rng: this.#rng,
         store,
         mirror: this.#mirror,
@@ -166,12 +210,12 @@ export class DmEncounterHost {
         encounterState: state,
         coordinatorState: INITIAL_COORDINATOR_STATE,
         controllers: identities,
-        codexSessionId: codexSessionId('codex:increment-6-local'),
+        codexSessionId: options.codexSessionId ?? codexSessionId('codex:increment-6-local'),
         rng: this.#rng,
       });
     } else {
       const resumed = EncounterSessionJournal.resume(this.sessionId, store, this.#mirror);
-      const built = registryFromIdentities(resumed.controllers);
+      const built = registryFromIdentities(resumed.controllers, agentController);
       this.#registry = built.registry;
       this.#humans = built.humans;
       this.#journal = resumed.journal;
@@ -191,9 +235,23 @@ export class DmEncounterHost {
     });
   }
 
+  #roundPlanContext(_combatantId: CombatantId) {
+    return {
+      encounterId: this.sessionId,
+      codexSessionId: this.#journal.codexSessionId(),
+      projection: this.snapshot().dm,
+      history: this.#journal.history(),
+    };
+  }
+
   snapshot(): DmEncounterHostSnapshot {
     const coordinator = this.#coordinator.coordinatorState();
     const history = this.#journal.history();
+    const player = projectPlayerBoard(
+      this.#coordinator.state(),
+      coordinator,
+      REFERENCE_PLAYER_IDS,
+    );
     return {
       dm: projectDmBoard({
         state: this.#coordinator.state(),
@@ -201,11 +259,7 @@ export class DmEncounterHost {
         controllers: this.#registry.identities(),
         history,
       }),
-      player: projectPlayerBoard(
-        this.#coordinator.state(),
-        coordinator,
-        REFERENCE_PLAYER_IDS,
-      ),
+      player: this.#closed ? { ...player, authorityStatus: 'hard_paused' } : player,
     };
   }
 
@@ -222,6 +276,45 @@ export class DmEncounterHost {
 
   start(): void {
     void this.#pumpCoordinator();
+  }
+
+  connectBridgeMirror(sink: MirrorSink): void {
+    this.#mirror.connect(sink);
+  }
+
+  connectDmBridge(bridge: DmBridgeConnection, model?: DmBridgeModelConfig): void {
+    this.#mirror.connect(bridge);
+    this.#roundPlanSession = new DmRoundPlanSession(bridge, model);
+    for (const subject of this.#coordinator.state().combatants) {
+      if (subject.profile.kind !== 'monster' || subject.life !== 'living') continue;
+      this.#coordinator.replaceController(
+        subject.profile.id,
+        new DmRoundPlanController(
+          this.#roundPlanSession,
+          () => this.#roundPlanContext(subject.profile.id),
+        ),
+        `${subject.profile.id}:agent:dm-bridge`,
+      );
+    }
+    this.#publish();
+  }
+
+  exportAndAbortAfterBridgeFailure(error: unknown): BridgeAbortReport {
+    this.#bridgeFailureGuard ??= new BridgeFailureGuard(
+      this.sessionId,
+      this.#store,
+      () => {
+        this.#mirror.disconnect();
+        this.#coordinator.interrupt();
+        this.#closed = true;
+        this.#publish();
+      },
+    );
+    return this.#bridgeFailureGuard.abort(error);
+  }
+
+  bridgeFailureReport(): BridgeAbortReport | null {
+    return this.#bridgeFailureGuard?.report() ?? null;
   }
 
   async #pumpCoordinator(): Promise<void> {

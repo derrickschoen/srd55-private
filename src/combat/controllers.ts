@@ -33,6 +33,7 @@ export interface ControllerDecision {
 }
 
 export interface Controller {
+  readonly controllerKind?: ControllerKind;
   choose(
     request: ControllerRequest,
     signal: AbortSignal,
@@ -296,6 +297,7 @@ export interface ControllerIdentity {
 }
 
 function controllerKind(controller: Controller): ControllerKind {
+  if (controller.controllerKind !== undefined) return controller.controllerKind;
   if (controller instanceof HumanController) return 'human';
   if (controller instanceof AlgorithmController) return 'algorithm';
   if (controller instanceof AgentController) return 'agent';

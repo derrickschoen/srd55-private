@@ -509,6 +509,10 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
     return this.#rng;
   }
 
+  codexSessionId(): CodexSessionId {
+    return this.#latest().codexSessionId;
+  }
+
   record(input: {
     readonly transition: DurableCoordinatorTransition;
     readonly encounterState: EncounterState;

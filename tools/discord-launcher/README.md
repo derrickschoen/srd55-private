@@ -6,6 +6,24 @@ versioned WebSocket echo relay, and either a Cloudflare or ngrok tunnel. It does
 not implement the Discord Embedded App SDK client, authentication of relay
 peers, encounter state, or the increment-7 relay protocol.
 
+## Local Codex DM bridge
+
+`codex-dm-bridge.mjs` is the localhost-only companion for the VTT. The browser
+remains encounter authority; the process exchanges typed DM requests and
+appends browser-authored revisions to a file mirror. Its production exchange
+spawns the `codex` CLI directly with the persisted session id. It contains no
+Claude integration.
+
+```sh
+DM_BRIDGE_PORT=43173 \
+DM_BRIDGE_DATA_DIR=/path/to/private/vtt-mirror \
+node tools/discord-launcher/codex-dm-bridge.mjs
+```
+
+Contract tests set `DM_BRIDGE_TRANSCRIPT` to a finite JSON transcript. In that
+mode the process never invokes an LLM; every unexpected request or session-id
+change fails the exchange.
+
 ## Run it
 
 Node 24 and either `~/.local/bin/cloudflared` or `/usr/local/bin/ngrok` are
