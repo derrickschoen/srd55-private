@@ -542,3 +542,26 @@ Three findings this session raised, recorded here so they are not lost with it:
   builds (D318), model/effort study, Discord ruling, sim spatial
   merge-back, walkthrough reconciliation, mutation hotspot wave.
 
+## A24 — SOAK FLEET WIRING + FIRST LIVE AI-ONLY PLAYTEST (lane-wt/vtt3a)
+
+- D318 public half: external party-pack v1 (engine vocabulary only,
+  D59 wall), GapReport emission at load+play into replay bundles,
+  headless soak runner with 50/50 alternation, executable real-bridge
+  mode (terra medium defaults, export-and-abort, orphan-free teardown).
+- FIRST LIVE TABLE (run-001): ABORTED round 1 — the real DM emitted a
+  "commands" array instead of the typed AST. Export-and-abort + the
+  exchange cache turned it into a precise bug report (D317.6 proven
+  live). Fix: single Zod contract drives decoder + JSON schema +
+  canonical example embedded in the prompt; bounded 2-attempt
+  correction loop with telemetry; malformed_plan_accepted control.
+- SECOND LIVE TABLE (run-002, seed 20260820): COMPLETED — 5 rounds,
+  5 DM calls, ~5.4s avg latency, ZERO corrections, 135 revisions
+  replayed offline byte-for-byte, zero gap reports (SRD-pure party).
+- Supervisor verified every suite run + the replay itself; zero claude
+  invocations across all soak dispatches. Gate follow-up: ledger doc
+  pathspec miss (2nd occurrence — supervisor switches to git add -A +
+  status read). Final gate GREEN 404 files / 7,396 tests.
+- Queued next: outcome fields in the soak summary, --pack optional for
+  reference-only runs, parallel batch scale-out, private-side Colby
+  converter + gap register wiring (D318.1/.3).
+
