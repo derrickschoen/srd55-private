@@ -16,32 +16,43 @@ export interface PlayerVisibleCombatant {
   readonly id: CombatantId;
   readonly name: string;
   readonly kind: 'player_character' | 'monster';
-  readonly hitPoints: number;
+  /** Exact Hit Points are present only for the viewing PC. */
+  readonly hitPoints?: number;
   readonly life: LifeState;
   readonly position: GridCell;
   readonly active: boolean;
 }
 
 export interface DmVisibleCombatant extends PlayerVisibleCombatant {
+  readonly hitPoints: number;
   readonly rules: CombatRulesProfile;
   readonly deathSaves: DeathSaveState | null;
 }
 
-interface VisibleEncounterBase {
+export type PlayerVisibleEncounterEvent =
+  | Exclude<EncounterEvent, Extract<EncounterEvent, { readonly type: 'adjudicated' }>>
+  | {
+      readonly sequence: number;
+      readonly type: 'adjudicated';
+      readonly target: CombatantId;
+      readonly consequence: Extract<EncounterEvent, { readonly type: 'adjudicated' }>['consequence'];
+    };
+
+interface VisibleEncounterBase<Event> {
   readonly revision: number;
   readonly round: number;
   readonly activeCombatant: CombatantId | null;
   readonly bounds: EncounterState['bounds'];
   readonly blockedCells: readonly GridCell[];
-  readonly recentEvents: readonly EncounterEvent[];
+  readonly recentEvents: readonly Event[];
 }
 
-export interface PlayerVisibleEncounterState extends VisibleEncounterBase {
+export interface PlayerVisibleEncounterState extends VisibleEncounterBase<PlayerVisibleEncounterEvent> {
   readonly viewer: 'player';
   readonly combatants: readonly PlayerVisibleCombatant[];
 }
 
-export interface DmVisibleEncounterState extends VisibleEncounterBase {
+export interface DmVisibleEncounterState extends VisibleEncounterBase<EncounterEvent> {
   readonly viewer: 'dm';
   readonly combatants: readonly DmVisibleCombatant[];
   readonly dmOnly: {
@@ -60,6 +71,8 @@ function cellKey(cell: GridCell): string {
 
 function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
   switch (event.type) {
+    case 'adjudicated':
+      return [event.target];
     case 'initiative_rolled':
     case 'turn_started':
     case 'movement_completed':
@@ -98,14 +111,24 @@ function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
 function playerEvents(
   events: readonly EncounterEvent[],
   visibleIds: ReadonlySet<CombatantId>,
-): readonly EncounterEvent[] {
-  return events.flatMap((event): readonly EncounterEvent[] => {
+): readonly PlayerVisibleEncounterEvent[] {
+  return events.flatMap((event): readonly PlayerVisibleEncounterEvent[] => {
     if ('visibility' in event && event.visibility === 'dm_only') return [];
     if (event.type === 'effect_ended' || event.type === 'effect_clock_ticked') {
       return [];
     }
     if (event.type === 'initiative_ordered') {
       return [{ ...event, order: event.order.filter((id) => visibleIds.has(id)) }];
+    }
+    if (event.type === 'adjudicated') {
+      return visibleIds.has(event.target)
+        ? [{
+            sequence: event.sequence,
+            type: 'adjudicated',
+            target: event.target,
+            consequence: event.consequence,
+          }]
+        : [];
     }
     return eventCombatants(event).every((id) => visibleIds.has(id)) ? [event] : [];
   });
@@ -176,7 +199,7 @@ export function projectEncounter(
         id: subject.profile.id,
         name: subject.profile.name,
         kind: subject.profile.kind,
-        hitPoints: subject.hitPoints,
+        ...(isViewer ? { hitPoints: subject.hitPoints } : {}),
         life: subject.life,
         position: { ...token.position },
         active: state.activeCombatant === subject.profile.id,

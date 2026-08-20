@@ -51,6 +51,7 @@ const INITIAL_COORDINATOR_STATE: PersistedCoordinatorState = {
   pendingRequest: null,
   pendingCommand: null,
   continuation: { kind: 'idle' },
+  pause: null,
 };
 
 function pair() {

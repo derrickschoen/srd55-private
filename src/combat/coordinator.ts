@@ -1,4 +1,5 @@
 import {
+  ControllerRequestCancelledError,
   StaleControllerResponseError,
   evaluateOpportunityAttackPolicy,
   type ControllerDecision,
@@ -61,7 +62,12 @@ export interface PersistedCoordinatorState {
   readonly pendingRequest: ControllerRequest | null;
   readonly pendingCommand: EncounterCommand | null;
   readonly continuation: CoordinatorContinuation;
+  readonly pause: CoordinatorPause | null;
 }
+
+export type CoordinatorPause =
+  | { readonly kind: 'interrupted' }
+  | { readonly kind: 'adjudicated'; readonly eventSequence: number };
 
 export type DurableCoordinatorTransition =
   | { readonly kind: 'controller_request_issued'; readonly request: ControllerRequest }
@@ -83,7 +89,9 @@ export type DurableCoordinatorTransition =
       readonly kind: 'controller_response_refused';
       readonly command: EncounterCommand;
       readonly reason: string;
-    };
+    }
+  | { readonly kind: 'coordinator_paused'; readonly pause: CoordinatorPause }
+  | { readonly kind: 'coordinator_resumed'; readonly pause: CoordinatorPause };
 
 export interface CoordinatorPersistence {
   record(input: {
@@ -202,6 +210,7 @@ export class TurnCoordinator {
   #pendingRequest: ControllerRequest | null;
   #pendingCommand: EncounterCommand | null;
   #continuation: CoordinatorContinuation;
+  #pause: CoordinatorPause | null;
   readonly #pendingAbort = new Map<CombatantId, AbortController>();
   readonly #policies = new Map<CombatantId, StandingReactionPolicy>();
   readonly #turnLegalActions: TurnLegalActions;
@@ -219,6 +228,7 @@ export class TurnCoordinator {
     this.#pendingRequest = options.resume?.pendingRequest ?? null;
     this.#pendingCommand = options.resume?.pendingCommand ?? null;
     this.#continuation = options.resume?.continuation ?? IDLE;
+    this.#pause = options.resume?.pause ?? null;
     this.#persistence = options.persistence;
     this.#turnLegalActions =
       options.turnLegalActions ??
@@ -272,7 +282,44 @@ export class TurnCoordinator {
       pendingRequest: this.#pendingRequest,
       pendingCommand: this.#pendingCommand,
       continuation: this.#continuation,
+      pause: this.#pause,
     };
+  }
+
+  pauseState(): CoordinatorPause | null {
+    return this.#pause;
+  }
+
+  #cancelPendingRequest(): void {
+    const request = this.#pendingRequest;
+    if (request === null) return;
+    this.#pendingRequest = null;
+    this.#record({ kind: 'controller_request_cancelled', request });
+    this.#pendingAbort.get(request.actorId)?.abort();
+  }
+
+  interrupt(): void {
+    if (this.#pause !== null) return;
+    this.#cancelPendingRequest();
+    this.#pause = { kind: 'interrupted' };
+    this.#record({ kind: 'coordinator_paused', pause: this.#pause });
+  }
+
+  resume(): void {
+    const pause = this.#pause;
+    if (pause === null) return;
+    this.#pause = null;
+    this.#record({ kind: 'coordinator_resumed', pause });
+  }
+
+  adjudicate(
+    command: Extract<EncounterCommand, { readonly type: 'adjudicate' }>,
+  ): CoordinatorStep {
+    this.#cancelPendingRequest();
+    const eventSequence = this.#state.nextEventSequence;
+    this.#pause = { kind: 'adjudicated', eventSequence };
+    const reduction = this.#apply(command, this.#continuation);
+    return { kind: 'applied', state: this.#state, events: reduction.events };
   }
 
   setStandingReactionPolicy(
@@ -562,6 +609,9 @@ export class TurnCoordinator {
 
   async step(): Promise<CoordinatorStep> {
     try {
+      if (this.#pause !== null) {
+        return { kind: 'refused', state: this.#state, reason: 'Coordinator is paused.' };
+      }
       if (this.#continuation.kind === 'movement') return await this.#continueMovement();
       if (this.#continuation.kind === 'turn') return await this.#continueTurn();
       if (this.#state.initiative.length === 0) {
@@ -588,6 +638,9 @@ export class TurnCoordinator {
         error instanceof StaleControllerResponseError
       ) {
         return { kind: 'refused', state: this.#state, reason: error.message };
+      }
+      if (error instanceof ControllerRequestCancelledError && this.#pause !== null) {
+        return { kind: 'refused', state: this.#state, reason: 'Coordinator is paused.' };
       }
       throw error;
     }

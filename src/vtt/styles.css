@@ -11,6 +11,94 @@
   font-family: Georgia, 'Times New Roman', serif;
 }
 
+.encounter-shell {
+  max-width: 78rem;
+  margin: 0 auto;
+  padding: 1.5rem;
+  color: #edf0f7;
+  background: #11131a;
+  min-height: 100vh;
+}
+
+.encounter-board {
+  --encounter-columns: 10;
+  display: grid;
+  grid-template-columns: repeat(var(--encounter-columns), 3rem);
+  width: fit-content;
+  border: 2px solid #78839d;
+  touch-action: none;
+  user-select: none;
+}
+
+.encounter-cell {
+  position: relative;
+  width: 3rem;
+  height: 3rem;
+  border: 1px solid #31394c;
+  background: #1a1f2c;
+}
+
+.encounter-cell[data-preview='true'] {
+  background: #604d12;
+  box-shadow: inset 0 0 0 2px #f1c75b;
+}
+
+.encounter-token {
+  position: absolute;
+  inset: 0.2rem;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 0.45rem;
+  border: 2px solid #8290ad;
+  background: #293249;
+  font-size: 0.62rem;
+  text-align: center;
+}
+
+.encounter-token[data-kind='monster'] {
+  background: #552c35;
+}
+
+.encounter-token[data-active='true'] {
+  border-color: #6ff3a2;
+  box-shadow: 0 0 0 3px #1a8e52;
+}
+
+.encounter-token[data-adjudicated='true'] {
+  border-color: #ffb454;
+  box-shadow: 0 0 0 4px #b34a1c;
+}
+
+.active-pc-panel,
+.encounter-controls,
+.dm-pending-request,
+.dm-adjudication,
+.dm-controller-assignments {
+  margin: 1rem 0;
+  padding: 0.8rem;
+  border: 1px solid #3e4961;
+  background: #171b26;
+}
+
+.encounter-controls button,
+.dm-pending-request button,
+.dm-adjudication button {
+  margin: 0.25rem;
+}
+
+.dm-adjudication,
+.dm-controller-assignments {
+  display: grid;
+  gap: 0.5rem;
+  max-width: 32rem;
+}
+
+.encounter-log [data-event-type='adjudicated'] {
+  color: #ffb454;
+  font-weight: 800;
+}
+
 .vtt-shell [hidden] {
   display: none !important;
 }
