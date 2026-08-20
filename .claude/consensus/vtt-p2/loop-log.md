@@ -516,3 +516,29 @@ Three findings this session raised, recorded here so they are not lost with it:
 - Status: CLOSED round 2. Next: INCREMENT 10 (telemetry + playable
   exit), the final increment, claimed by this session.
 
+## A23 — INCREMENT 10 CLOSED: PHASE 2 COMPLETE, PLAYABLE EXIT GREEN
+
+- Canonical fleet-schema replay bundles (D317.11/.16), offline replay
+  command with first-divergence pinpointing, scripted four-round
+  skirmish through every mechanic family replayed byte-for-byte,
+  ledger-manifest over all 66 named killing tests.
+- Supervisor verified the full matrix (1,530 unit + 176 sim + browser
+  + tsc) and killed its own ledger-manifest control vs the committed
+  tree. Zero claude invocations. Ledger: plan 61-66 + two codex
+  controls.
+- PLAYABLE-EXIT GATE GREEN: 402 files / 7,375 tests (.tmp-gate-10.log).
+- Phase-2 increments 1-10 are ALL CLOSED. The VTT is at the D313/D314
+  playable target: owner plays the reference party from the player
+  projection, codex (terra medium) DMs via the bridge, full spell kit
+  (audited 175-row manifest), conditions, death saves, exact AoE
+  templates, event-sourced autosave with branch-stream undo, pixel-art
+  board, generated encounters awaiting REAL owner approval, full
+  deterministic replay.
+- Awaiting the owner: the first playtest session. Launch runbook:
+  tools/discord-launcher/README.md (screen-share Shape 1) + the DM
+  bridge process; the first generated encounter package will present
+  for genuine owner approval through the attestation flow.
+- Remaining post-playtest program (not phase 2): soak fleet w/ Colby
+  builds (D318), model/effort study, Discord ruling, sim spatial
+  merge-back, walkthrough reconciliation, mutation hotspot wave.
+
