@@ -73,6 +73,13 @@ export const BUNDLED_LICENSE_FILES: readonly BundledLicenseFile[] =
       sha256:
         '9ba9550ad48438d0836ddab3da480b3b69ffa0aac7b7878b5a0039e7ab429411',
     }),
+    Object.freeze({
+      fileName: 'licenses/STARTER-ART-NOTICE.txt',
+      sourcePath: 'docs/licenses/STARTER-ART-NOTICE.txt',
+      literal: 'Starter Pixel Art and Ink Room',
+      sha256:
+        'd09f1227f09d079dadd77abb1d586c53cc4c5539ecf6e56626f5b90e78c477c2',
+    }),
   ]);
 
 export interface BundledLicenseAsset {
