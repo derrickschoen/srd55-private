@@ -460,3 +460,17 @@ Three findings this session raised, recorded here so they are not lost with it:
 - Status: CLOSED round 2. Next: increment 7 (localhost codex DM
   bridge), claimed by this session.
 
+## A20 — INCREMENT 7 CLOSED: codex DM bridge (lane-wt/vtt3a)
+
+- Decision-program round plans (typed JSON AST per D317.7), terra-medium
+  default, four voices with KB-cited validation lines, export-and-abort,
+  Discord-ready envelopes (types+tests only), MirrorSink file stream.
+- Supervisor verified: 1,372/1,372 + node --test process tests, sim
+  unchanged, tsc clean; SUPERVISOR ran the live probe codex omitted
+  (real codex --json emits thread.started/thread_id — parse contract
+  proven against the actual CLI); own expiry-removal mutant killed vs
+  committed tree. Ledger: plan 43-50 + two codex DSL controls.
+- Full gate GREEN 397 files / 7,323 tests (.tmp-gate-7.log).
+- Status: CLOSED round 1. Next: increment 8 (pixel-art procedural
+  renderer, D316.1/D317.8), claimed by this session.
+
