@@ -356,7 +356,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
 });
 
 describe('table scope classification', () => {
-  it('classifies all 87 tables exactly once', () => {
+  it('classifies all 88 tables exactly once', () => {
     const names = Object.keys(TABLE_SCOPES);
     // 30 Laravel-derived tables — 38 until the eight Laravel-only
     // infrastructure ones were dropped — plus the four native weapon tables,
@@ -376,9 +376,11 @@ describe('table scope classification', () => {
     // Migration 0042 adds the two owner-specific contribution tables, and
     // 0044 adds one registry-only provenance table while 0045 adds the
     // character-owned share-lineage receipt table. Migration 0046 adds the
-    // recipient's durable replacement-choice table.
-    expect(names).toHaveLength(87);
-    expect(new Set(names).size).toBe(87);
+    // recipient's durable replacement-choice table. Migration 0051 adds the
+    // ONE whole-database-only VTT revision stream table explicitly listed in
+    // the application-table oracle above.
+    expect(names).toHaveLength(88);
+    expect(new Set(names).size).toBe(88);
     expect([...names].sort()).toEqual([...APPLICATION_TABLES].sort());
   });
 

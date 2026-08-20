@@ -1292,6 +1292,19 @@ const partyDocumentState =
     });
   };
 
+const vttSessionRevision =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'vtt_session_revisions', {
+      session_id: uid('vtt-session'),
+      revision: 1,
+      schema_version: 2,
+      payload_json: '{"state":"persisted"}',
+      payload_checksum: 'ab'.repeat(32),
+      ...values,
+    });
+  };
+
 interface ConstraintCase {
   readonly constraint: string;
   /** Writes that MUST be refused, each with the corruption it would have made. */
@@ -1618,6 +1631,61 @@ function authoredCharacterEffectConstraintCases(
 }
 
 const CONSTRAINT_CASES: readonly ConstraintCase[] = [
+  {
+    constraint: 'vtt_session_revisions_session_id_check',
+    rejects: [[
+      'an empty session id',
+      vttSessionRevision({ session_id: '' }),
+    ]],
+    accepts: [[
+      'a non-empty session id',
+      vttSessionRevision({ session_id: 'session-001' }),
+    ]],
+  },
+  {
+    constraint: 'vtt_session_revisions_revision_check',
+    rejects: [
+      ['revision zero', vttSessionRevision({ revision: 0 })],
+      ['a fractional revision', vttSessionRevision({ revision: 1.5 })],
+    ],
+    accepts: [[
+      'the first revision',
+      vttSessionRevision({ revision: 1 }),
+    ]],
+  },
+  {
+    constraint: 'vtt_session_revisions_schema_version_check',
+    rejects: [
+      ['schema version zero', vttSessionRevision({ schema_version: 0 })],
+      ['schema version three', vttSessionRevision({ schema_version: 3 })],
+    ],
+    accepts: [
+      ['schema version one', vttSessionRevision({ schema_version: 1 })],
+      ['schema version two', vttSessionRevision({ schema_version: 2 })],
+    ],
+  },
+  {
+    constraint: 'vtt_session_revisions_payload_json_check',
+    rejects: [[
+      'malformed payload JSON',
+      vttSessionRevision({ payload_json: '{' }),
+    ]],
+    accepts: [[
+      'a valid object payload',
+      vttSessionRevision({ payload_json: '{"revision":1}' }),
+    ]],
+  },
+  {
+    constraint: 'vtt_session_revisions_payload_checksum_check',
+    rejects: [
+      ['a 63-character checksum', vttSessionRevision({ payload_checksum: 'a'.repeat(63) })],
+      ['an uppercase checksum', vttSessionRevision({ payload_checksum: 'A'.repeat(64) })],
+    ],
+    accepts: [[
+      '64 lowercase hexadecimal characters',
+      vttSessionRevision({ payload_checksum: '0123456789abcdef'.repeat(4) }),
+    ]],
+  },
   {
     constraint: 'character_share_receipts_local_document_id_check',
     rejects: [[

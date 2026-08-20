@@ -26,3 +26,4 @@ orchestration/logs/
 scraped/
 .tmp/
 tools/discord-launcher/.env
+__pycache__/
