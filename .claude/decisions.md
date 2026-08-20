@@ -7,6 +7,20 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D323 — OWNER: never defer waiting for the owner (2026-08-20)
+
+Verbatim: "Don't defer anything waiting for me." Every previously
+owner-gated item advances to the owner-action boundary instead of parking:
+Discord Shape 3 prep proceeds against fake ingress up to the credential
+wall; E08–E10 proceed after tranche 1 (the visual report is still
+produced, but is informational, not a gate); playtest-gated polish
+proceeds AI-only. Unchanged hard stops (these are rule boundaries, not
+deferrals): no push/publish/deploy; registrations (domains/npm/GitHub
+names) are owner-only outward actions; decisions.md rulings owner-only.
+Same day: VTT named **spike-vtt** (README, main `d0044815`); full rename
+sweep is part of "the rest later" — under this ruling that means it
+proceeds when convenient, not that it waits for the owner.
+
 ## D322 — OWNER: fifth brainstorm round — oracle design, arcs, fleet ops (2026-08-20)
 
 Fifth blind collab round (codex 12 + Claude 10, merged 15). Rulings:
