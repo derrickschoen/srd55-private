@@ -51,7 +51,8 @@ import sourceInstanceState from '../../drizzle/0047_source_instance_state.sql?ra
 import catalogContentVisibility from '../../drizzle/0048_catalog_content_visibility.sql?raw';
 import spellVersionsActiveLevelNameIndex from '../../drizzle/0049_spell_versions_active_level_name_index.sql?raw';
 import relationshipIndexes from '../../drizzle/0050_relationship_indexes.sql?raw';
-import vttSessionRevisions from '../../drizzle/0051_vtt_session_revisions.sql?raw';
+import fingerprintContentKeyIndex from '../../drizzle/0051_fingerprint_content_key_index.sql?raw';
+import vttSessionRevisions from '../../drizzle/0052_vtt_session_revisions.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -573,12 +574,20 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       'df23f859719a0c42427a3085c98b39b713e07ea2fcdd55fac9b6c04e6e5951af',
   }),
   Object.freeze({
-    id: '0051_vtt_session_revisions',
+    id: '0051_fingerprint_content_key_index',
+    sql: fingerprintContentKeyIndex,
+    checksum:
+      'a6214a4cd17ee5d82e489a830ec02824921178fad663ce0da58e408bc43372f7',
+    resultSchemaChecksum:
+      '3b19cac16e39ab7a1023fc140a366318048334472e91fe358b5dbe74f0d9c003',
+  }),
+  Object.freeze({
+    id: '0052_vtt_session_revisions',
     sql: vttSessionRevisions,
     checksum:
       'd7b97d832265c0674ed8a69919c757956fb7d764b2bb80677c31cf8f947f6e5a',
     resultSchemaChecksum:
-      '223e00fc0391d55a3c01a0975361388121b46f4e882fc07eec046030302bbcce',
+      '7f077932131554b2d79e4df635453cc3e2f63611d804d780e396d01cdcaa767a',
   }),
 ]);
 

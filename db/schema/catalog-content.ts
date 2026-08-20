@@ -394,6 +394,9 @@ export const catalog_content_fingerprints = sqliteTable(
     uniqueIndex('catalog_content_fingerprints_current_unique')
       .on(table.content_key)
       .where(sql`${table.fingerprint_role} = 'current'`),
+    index('catalog_content_fingerprints_content_key_index').on(
+      table.content_key,
+    ),
     index('catalog_content_fingerprints_resolution_index').on(
       table.content_kind,
       table.fingerprint_scheme,

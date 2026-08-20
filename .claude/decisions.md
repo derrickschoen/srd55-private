@@ -7,6 +7,252 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D319 — OWNER: soak spend confirmed, VTT lands on main, program triggered (2026-08-20)
+
+1. **Soak fleet: CONTINUOUS AS RULED** — confirmed against measured
+   cost (~5 terra-medium calls per 5-round table, 33-88k input each,
+   heavily cached). Codex-out-of-credits remains the loud stop.
+2. **wt/vtt LANDS ON MAIN NOW** — full phase-2 merge including the
+   0051 migration renumber (trial-idx5 playbook); full gate on main
+   before anything else proceeds.
+3. **The post-playtest program is TRIGGERED by the AI tables** —
+   model/effort study, DM/PC KB skill, and sim merge-back start on the
+   accumulating canonical bundles; the owner's personal session
+   happens independently whenever they are free.
+
+## D318 — OWNER: soak fleet uses private builds; non-SRD mechanics get a gap register and clean-room equivalents (2026-08-19)
+
+Owner directives, 2026-08-19 (verbatim intent; "Colby builds" =
+the private d4 repo's 89 Colby-method builds in builds/fixtures/ —
+name verified against that repo's own docs):
+
+1. **Half of the VTT all-AI soak runs use the PRIVATE repo's builds for
+   the PC party**; the other half stay on the D260 SRD reference party.
+   D59 unchanged: private content is loaded locally at runtime and
+   never crosses into the public repo or its artifacts.
+2. **A mechanics-gap sentinel watches for anything not describable
+   using only the SRD** (spells and otherwise) — at build-import time
+   (a private build's feature fails to map onto SRD-describable engine
+   primitives) and at play time (ADJUDICATED events whose subject is a
+   non-SRD mechanic).
+3. **The gap list lives in the private repo**
+   (~/PhpstormProjects/dnd-d4-builds-code-test), one entry per
+   mechanic: what it is, which build surfaced it, what engine
+   capability it demands.
+4. **Each gap gets a CLEAN-ROOM HOMEBREW EQUIVALENT** — an original
+   mechanic (no copyrighted text, names, or numbers) exercising the
+   SAME engine capability closely enough that green tests on the
+   equivalent give confidence the VTT can represent the whole game.
+   Equivalents are public-repo-safe by construction and join the
+   combat test suite.
+
+Scope note: wiring lands with the soak-fleet program (post-playtest,
+D314.13/D317); the sentinel's import-time half belongs to the
+private-build-to-combatant adapter when it is built. The public spell
+manifest's typed partials are implementation gaps, not license gaps,
+and stay separate from this register.
+
+## D317 — OWNER: third brainstorm round — persistence, bridge, campaign mechanics (2026-08-19)
+
+Third blind collab round (codex 12 + Claude 12, merged 21). Rulings:
+
+1. **RNG after undo: DETERMINISTIC BRANCH STREAM** — new branch derives a
+   fresh seeded stream from (state, branch id); no rerolling known
+   outcomes; replay stays exact.
+2. **Autosave durability: BROWSER + FILE MIRROR VIA BRIDGE** — every
+   revision also appends to a disk file through the localhost bridge;
+   browser primary, file survives browser wipes.
+3. **Save/replay format: MIGRATE A VERSION WINDOW** — schema-versioned,
+   migrations across a bounded window.
+4. **Window crash: HARD PAUSE + REOPEN RECOVERS** — authority in the
+   DM-side session; no worker holds it; rehydrate from the store.
+5. **ADJUDICATED in player view: LABEL + VISIBLE CONSEQUENCE** —
+   reasoning stays DM-side.
+6. **Bridge failure in session one: EXPORT AND ABORT** — a failed
+   session is a bug report, not something to play through. No silent
+   controller fallback.
+7. **Round plans are PROGRAMS** (owner's direction, verbatim intent):
+   "Make the round plan more like a Claude workflow where it can contain
+   code and branch if/then and go down priority lists." Re-consult unit
+   when a plan runs dry: that monster's remaining round. Supervisor
+   design note: typed reducer-validated decision DSL (branches,
+   priority lists), not arbitrary executable code.
+8. **Art look: PIXEL-ART SILHOUETTES** — procedurally assembled sprites.
+9. **Difficulty parameter: EXPECTED LENGTH + RESOURCE PRESSURE**,
+   validated against sim math.
+10. **Encounter revision: TARGETED REGEN + MANUAL PATCH**, full
+    revalidation either way, provenance records which.
+11. **Replay bundle: CANONICAL FLEET SCHEMA NOW** — model id, effort,
+    build, load tag, latency, tokens first-class from increment 10.
+12. **Discord live check: AFTER THE LOCAL PLAYTEST** (credentials wait).
+13. **Spell batches: SAMPLE-VERIFY (5 random rows word-for-word) PER
+    BATCH + FULL-MANIFEST AUDIT AT INCREMENT-4 CLOSE.**
+14. **First-session DM bridge model: TERRA MEDIUM.**
+15. **No playtest target date — it lands when the gates clear.**
+16. **Supervisor sessions: CONSOLIDATE TO THE ORIGINAL SESSION** (the
+    one carrying D313-D317 context); the 15:27 session stands down via
+    loop-log notice.
+17. **KB entries: CO-GENERATE NOW** — each batch emits rule id + SRD
+    locator + one-line guidance per row alongside the tests.
+18. **Starter statblocks: PARALLEL LANE NOW** (8-12 CR 1/4-3, cited,
+    validated) — also unblocks all-AI soaks sooner.
+19. **Undo UX: SIMPLE UNDO-LAST + HISTORY BEHIND DISCLOSURE.**
+20. **Playtest: RESUMABLE, SOLO FIRST** — presentation polish deferred.
+21. **TTS narration: POST-PLAYTEST BACKLOG CANDIDATE.**
+
+## D316 — OWNER: art is procedural-only, CC-BY; Discord Shape 2 disliked, Shape 3 under investigation (2026-08-19)
+
+1. **Bundled art: PURE PROCEDURAL ONLY.** All VTT art comes from the
+   project's own checked-in deterministic renderer. No external icon
+   families — the game-icons.net CC-BY-3.0 pipeline is rejected. No AI-art
+   overlay seam. The procedurally generated art is licensed CC-BY (with the
+   repo's CC-BY-4.0), owner's words: "Just license the art generated by
+   Claude procedurally under cc-by."
+2. **Discord (amends the D314.14 thread): the owner dislikes Shape 2**
+   (bot-relay). Shape 1 remains the playable-skirmish default. Shape 3
+   (Activity) is NOT rejected: the owner asked for full detail on it,
+   an explanation of why it cannot run as a local Node.js server, prior
+   art for shared state in Activities, and how such apps are usually
+   hosted — research delivered in-session 2026-08-19; ruling still open.
+
+## D315 — OWNER: follow-up round rulings — spell engine, effect authority, the table loop (2026-08-19)
+
+Second collaborative brainstorm (Claude 15 + codex 15 blind, merged to 18 +
+one same-day finding), asked one at a time. Rulings:
+
+1. **Spell engine scope: EVERY LEVEL-APPROPRIATE PARTY OPTION** — any spell
+   the reference party could prepare works mechanically, so re-preparation
+   between sessions needs no engine work. (Not just prepared loadouts; not
+   the whole catalogue.)
+2. **Engine owns the FULL effect lifecycle** — sources, durations,
+   concentration, repeated saves, stacking, expiry all live in the reducer;
+   codex only chooses actions. Deterministic, replayable, testable.
+3. **AoE: EXACT TEMPLATES + PREVIEW** — engine computes affected cells per
+   SRD geometry with a visual preview before confirm. Owner addendum,
+   verbatim intent: sphere centers are placeable at different points in/on a
+   square (grid intersections) to catch the most enemies, and a radius that
+   touches any part of a square affects the creature in it — double-check
+   community common practice; verify wording against the repo's bundled SRD
+   grid rules when the increment is specced. The preview should show
+   coverage as the center is dragged.
+4. **Reactions: STANDING POLICIES + PROMPT ON AMBIGUITY** — per-PC defaults
+   (e.g. always-OA, ask-for-Shield); pause only when the policy doesn't
+   decide.
+5. **Death saves: ENGINE ROLLS, RESULT HIDDEN FROM PLAYERS BY DEFAULT** —
+   auto-rolled on the downed PC's turn; the DM projection sees the result,
+   the player view does not. All monsters still die at 0 (D314.8); statblock
+   carries a death-saves flag for later named monsters.
+6. **Multi-PC input: ONE PC AT A TIME IN INITIATIVE ORDER** — the board
+   highlights the active PC; no party-planner queue.
+7. **Monster turns: CODEX PLANS A ROUND AT ONCE** — one codex call per round
+   produces all monster intents; the engine executes and re-consults only
+   when a plan is invalidated. (Latency control chosen over per-turn calls.)
+8. **ADJUDICATED overrides: AUTO-APPLY, PAUSE + HIGHLIGHT** — override lands
+   immediately, play continues, the log and board flag it loudly; owner can
+   interrupt/undo.
+9. **Undo vs DM memory: REVISION-HISTORY IN CONTEXT** — one codex session
+   keeps a visible revision history; undone branches stay in context marked
+   void.
+10. **Autosave: EVERY REDUCER REVISION, INCLUDING PENDING REQUESTS** —
+    event-sourced with RNG state and the codex session id; resume lands
+    mid-round exactly; undo and ruling 9's history fall out of the same
+    store.
+11. **DM controls: SEPARATE LOCAL DM WINDOW** — second browser window with
+    the full DM projection (this is also where hidden death-save results and
+    ADJUDICATED highlights surface); the player view carries no DM chrome.
+12. **Encounter artifact: COMPLETE PACKAGE, SAVED AS FIXTURE** — roster +
+    map + placement + terrain + fog + tactics notes as one reviewable JSON;
+    approval commits it so bugs reproduce. Refines D314.5, which is
+    hereby amended (generated AND persisted).
+13. **Difficulty: OWNER CHOOSES PER PROMPT** — a parameter of each
+    generation request, not a fixed target.
+14. **Art: DRAWN/PROCEDURAL WITH CLEAN LICENSING preferred** — owner is
+    unsure of AI-image access; supervisor to survey CC0/CC-BY sets (e.g.
+    Kenney CC0 tiles, game-icons.net CC-BY) and present candidates. Bundled
+    assets must pass D59 for the public repo.
+15. **Validation-mode citations: STRUCTURED FIELDS + SHORT EXPLANATION** —
+    machine fields (rule id + SRD source locator) plus one human sentence
+    per line; mineable by the soak program and readable by eye.
+16. **Telemetry: FULL DETERMINISTIC REPLAY from the first playtest** —
+    events, RNG state, per-controller transcripts, prompts/responses,
+    latency, token counts.
+17. **Soak fleet: MANY PARALLEL TABLES, CONTINUOUS.** The owner challenged
+    and corrected the supervisor's premise: "gates need a quiet machine" is
+    evidence about GATES under CPU-heavy codex lanes, not about API-bound
+    table sessions. Tables run around the clock; gates keep their usual lock
+    windows; latency samples get a load-level tag.
+18. **DM bridge: FULL DISCORD-READY ENVELOPES NOW** — command/projection
+    schemas designed against Discord's actual constraints (interaction
+    tokens, message limits) before the dossier ruling, so no rewrite either
+    way.
+19. **Walkthrough engine/spec reconciliation: QUEUED LANE, AFTER VTT
+    increments** — the same-day finding (engine zod schema rejects all 12
+    rich mutt specs, pre-existing) waits; specs are committed and stable.
+
+Scope note: rulings 1-3 and 5-12 are binding inputs to the phase-2 increment
+map amendment D314 already requires before increment 3 dispatches.
+
+## D314 — OWNER: brainstorm-round rulings — the skirmish, all-AI tables, and the queue (2026-08-19)
+
+Collaborative brainstorm (Claude 15 candidates + codex 15, blind, collated to
+20) answered one at a time. Rulings:
+
+1. **First playtest = skirmish**: 3-4 PCs vs 4-6 monsters, one room, fight to
+   the finish (~3-5 rounds).
+2. **Owner plays from the player projection** (fog/hidden HP concealed);
+   codex alone holds DM secrets. The presentation view becomes the owner's
+   main screen.
+3. **PCs = the D260 level-7 SRD reference party.**
+4. **Monsters: bundled SRD 5.2.1 starter set, CR ¼–3** (~8-12 classics),
+   decoded from the repo SRD text. CC-BY, shippable.
+5. **Encounter authoring: the codex DM generates the encounter from a prompt;
+   owner approves.** (Not a setup form, not a fixture.)
+6. **Action economy: FULL KIT including spells** in session one — attack
+   rolls, saves, areas, slots, Dash/Disengage/Dodge, reactions.
+7. **Conditions: the full SRD condition list mechanically enforced**,
+   including exhaustion levels.
+8. **Death: PCs get full death-save/stabilization/massive-damage rules;
+   ordinary monsters die at 0 HP.**
+9. **Unmodeled rules: the codex DM adjudicates, tagged ADJUDICATED** in the
+   combat log with reasoning; invented numbers enter engine state only as
+   explicit DM overrides, never silently.
+10. **DM autonomy: fully autonomous between PC turns**; owner can interrupt
+    and undo via DM controls.
+11. **Narration: four selectable voices** — cinematic with visible rolls,
+    terse tactical, rules-explicit, and a terse rule-citing validation mode
+    for engine testing.
+12. **Autosave required** for the first session (pulls D260.3 into scope);
+    codex DM session id persists with the snapshot so resume restores the DM.
+13. **Post-playtest direction: supervised all-AI tables.** AI plays DM and
+    PCs; tables run as self-play soaks; the supervisor mines logs for bugs
+    and improvements without human intervention. Plus a model/effort study:
+    sweep gpt-5.6 luna/terra/sol effort levels, then rate sol vs Fable vs
+    Opus on high effort for speed vs quality — thorough enough to maybe build
+    a luna low/medium complexity classifier that routes per-decision. Also:
+    write a skill backed by a KB for running D&D DM/PC interactions
+    intelligently. This replaces D262.2's DPR-sim-UI-first ordering.
+14. **Discord: undecided — owner needs a full decision dossier** (concrete
+    flows, worked examples, architecture, effort/cost per shape) before
+    ruling. Dossier is a queued deliverable.
+15. **Sim spatial merge-back: after all-AI tables run.**
+16. **Visual bar: THEMED before the owner plays** — token portraits, map
+    textures, fog styling are an increment before the first session.
+17. **Mutation campaign: one more kill wave on the four hotspots**
+    (attack-profiles 105, srd-subclass-content 111, srd-subclasses 104,
+    skill-grants 46), then the campaign pauses.
+18. **Order-dependence repair: parallel background lane**; official gate
+    stays the ordered run meanwhile.
+19. **v1 review + deploy: formally deferred behind the VTT** (D266 gate
+    parked; preview stays up).
+20. **Stragglers: finish all three now** — walkthrough specs 11-12, s7
+    findings doc merge, trial-idx5 merge gate.
+
+Scope note: rulings 6, 7, 8, 12, 16 substantially grow the playable target
+beyond the phase-2 plan's increments 3-5 (spell system, full conditions,
+death saves, autosave, theming, DM-generated encounters, player projection
+as primary view). The phase-2 plan gets an amended increment map through the
+consensus loop before increment 3 dispatches.
+
 ## D313 — OWNER: playable target — owner plays the PCs, codex CLI runs as the DM (2026-08-19)
 
 The owner wants to play the PCs in the VTT with the codex CLI app running as
