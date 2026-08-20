@@ -7,6 +7,38 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D318 — OWNER: soak fleet uses private builds; non-SRD mechanics get a gap register and clean-room equivalents (2026-08-19)
+
+Owner directives, 2026-08-19 (verbatim intent; "Colby builds" recorded
+as heard, interpreted as the private d4 repo's PC builds — correct the
+name here if that reading is wrong):
+
+1. **Half of the VTT all-AI soak runs use the PRIVATE repo's builds for
+   the PC party**; the other half stay on the D260 SRD reference party.
+   D59 unchanged: private content is loaded locally at runtime and
+   never crosses into the public repo or its artifacts.
+2. **A mechanics-gap sentinel watches for anything not describable
+   using only the SRD** (spells and otherwise) — at build-import time
+   (a private build's feature fails to map onto SRD-describable engine
+   primitives) and at play time (ADJUDICATED events whose subject is a
+   non-SRD mechanic).
+3. **The gap list lives in the private repo**
+   (~/PhpstormProjects/dnd-d4-builds-code-test), one entry per
+   mechanic: what it is, which build surfaced it, what engine
+   capability it demands.
+4. **Each gap gets a CLEAN-ROOM HOMEBREW EQUIVALENT** — an original
+   mechanic (no copyrighted text, names, or numbers) exercising the
+   SAME engine capability closely enough that green tests on the
+   equivalent give confidence the VTT can represent the whole game.
+   Equivalents are public-repo-safe by construction and join the
+   combat test suite.
+
+Scope note: wiring lands with the soak-fleet program (post-playtest,
+D314.13/D317); the sentinel's import-time half belongs to the
+private-build-to-combatant adapter when it is built. The public spell
+manifest's typed partials are implementation gaps, not license gaps,
+and stay separate from this register.
+
 ## D317 — OWNER: third brainstorm round — persistence, bridge, campaign mechanics (2026-08-19)
 
 Third blind collab round (codex 12 + Claude 12, merged 21). Rulings:
