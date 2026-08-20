@@ -288,10 +288,17 @@ function combatantIds(predicate: StatePredicate): readonly CombatantId[] {
 
 function programCombatantIds(program: DecisionProgram): readonly CombatantId[] {
   switch (program.kind) {
-    case 'action':
-      return 'target' in program.action && program.action.target.kind === 'combatant'
+    case 'action': {
+      const actionIds = 'target' in program.action && program.action.target.kind === 'combatant'
         ? [program.action.target.combatantId]
         : [];
+      const riderIds = (program.riders ?? []).flatMap((rider) =>
+        'target' in rider.followUpAction && rider.followUpAction.target.kind === 'combatant'
+          ? [rider.followUpAction.target.combatantId]
+          : [],
+      );
+      return [...actionIds, ...riderIds];
+    }
     case 'if':
       return [
         ...combatantIds(program.predicate),
