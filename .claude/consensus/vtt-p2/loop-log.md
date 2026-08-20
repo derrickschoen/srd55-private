@@ -585,3 +585,16 @@ Three findings this session raised, recorded here so they are not lost with it:
   tranche-1 experiments; adventure-slot/rest-workflow increments per
   D321.11-13 queue behind the D320 prerequisites.
 
+## A26 — D320 ENGINE PREREQUISITES COMPLETE; TRANCHE 1 IGNITES
+
+- JS mini-interpreter (A25 tail) + steering split + delta projections
+  all landed and gated; final gate GREEN 409 files / 7,479 tests
+  (.tmp-gate-steer.log). Every E01-E07 dependency now exists.
+- Supervisor controls across the wave: time-budget-disable (killed by
+  injected-clock test), Dire Wolf AC, plus codex ledgers (forbidden
+  constructs, override typing, delta hash check, trigger policy,
+  override-order determinism). Zero claude invocations since A21.
+- E01 (schema payload size, 144 tables, 3 arms x 24 paired seeds x 2
+  sessions) is the tranche opener; its winner parameterizes E02.
+  Tranche report to the owner before E08-E10 unlock (D321.1).
+
