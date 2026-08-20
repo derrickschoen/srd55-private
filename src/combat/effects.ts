@@ -52,6 +52,10 @@ export type EffectPayload =
       readonly amount: number;
     }
   | {
+      readonly kind: 'hit_point_maximum_modifier';
+      readonly amount: number;
+    }
+  | {
       readonly kind: 'attack_roll_modifier' | 'saving_throw_modifier' | 'ability_check_modifier';
       readonly count: number;
       readonly sides: number;
@@ -172,8 +176,10 @@ export type EffectPayload =
       readonly kind: 'obscured_area';
       readonly placement: AreaTemplate | 'selected_when_cast';
       readonly radiusFeet: number;
-      readonly obscurement: 'heavy';
-      readonly dispersedByStrongWind: true;
+      readonly obscurement: 'heavy' | 'magical_darkness';
+      readonly dispersedByStrongWind: boolean;
+      readonly blocksDarkvision?: true;
+      readonly suppressesLightSpellLevelAtMost?: number;
     }
   | {
       readonly kind: 'magic_identification';
@@ -220,6 +226,204 @@ export type EffectPayload =
       readonly strength: number;
       readonly moveFeetPerBonusAction: number;
       readonly maximumDistanceFeet: number;
+    }
+  | {
+      readonly kind: 'condition_choice';
+      readonly conditions: readonly ('Blinded' | 'Deafened')[];
+    }
+  | {
+      readonly kind: 'form_alteration';
+      readonly options: readonly ('aquatic_adaptation' | 'change_appearance' | 'natural_weapons')[];
+      readonly naturalWeaponCount: number;
+      readonly naturalWeaponSides: number;
+    }
+  | {
+      readonly kind: 'arcane_lock';
+      readonly passwordRangeFeet: number;
+      readonly passwordUnlockRounds: number;
+    }
+  | {
+      readonly kind: 'magic_aura';
+      readonly options: readonly ('mask' | 'false_aura')[];
+      readonly permanentAfterDailyCastings: number;
+    }
+  | {
+      readonly kind: 'augury';
+      readonly forecastMinutes: number;
+      readonly noAnswerChancePerExtraCastingPercent: number;
+    }
+  | {
+      readonly kind: 'attacks_against_target_roll_mode';
+      readonly mode: 'disadvantage';
+      readonly bypassedBy: readonly ('Blindsight' | 'Truesight')[];
+    }
+  | {
+      readonly kind: 'calm_emotions';
+      readonly options: readonly ('suppress_charmed_frightened' | 'indifferent')[];
+    }
+  | {
+      readonly kind: 'darkvision';
+      readonly rangeFeet: number;
+    }
+  | {
+      readonly kind: 'detect_thoughts';
+      readonly radiusFeet: number;
+      readonly probeSaveAbility: 'wisdom';
+      readonly escapeCheckAbility: 'intelligence';
+      readonly escapeCheckSkill: 'Arcana';
+    }
+  | {
+      readonly kind: 'granted_breath';
+      readonly damageTypes: readonly string[];
+      readonly coneFeet: number;
+      readonly saveAbility: 'dexterity';
+      readonly onSuccess: 'half';
+      readonly dice: { readonly baseCount: number; readonly sides: number; readonly perSlotCount: number };
+    }
+  | {
+      readonly kind: 'ability_check_advantage';
+      readonly ability: 'chosen_when_cast';
+    }
+  | {
+      readonly kind: 'size_alteration';
+      readonly options: readonly ('enlarge' | 'reduce')[];
+      readonly sizeCategoryDelta: 1;
+      readonly damageDieCount: number;
+      readonly damageDieSides: number;
+    }
+  | {
+      readonly kind: 'trap_detection';
+      readonly rangeFeet: number;
+      readonly revealsLocation: false;
+    }
+  | {
+      readonly kind: 'flaming_sphere';
+      readonly placement: AreaTemplate | 'selected_when_cast';
+      readonly diameterFeet: number;
+      readonly damageCount: number;
+      readonly damageSides: number;
+      readonly damagePerSlotCount: number;
+      readonly moveFeetPerBonusAction: number;
+      readonly brightFeet: number;
+      readonly dimFeet: number;
+    }
+  | {
+      readonly kind: 'corpse_preservation';
+      readonly preventsDecayAndUndeath: true;
+    }
+  | {
+      readonly kind: 'gust_of_wind_area';
+      readonly placement: AreaTemplate | 'selected_when_cast';
+      readonly widthFeet: number;
+      readonly movementCostMultiplierTowardSource: 2;
+      readonly dispersesGas: true;
+      readonly unprotectedFlameExtinguished: true;
+    }
+  | {
+      readonly kind: 'levitation';
+      readonly initialRiseFeet: number;
+      readonly maximumWeightPounds: number;
+      readonly altitudeChangeFeetPerTurn: number;
+    }
+  | {
+      readonly kind: 'object_location';
+      readonly radiusFeet: number;
+      readonly familiarityDistanceFeet: number;
+      readonly blockedByLead: true;
+    }
+  | {
+      readonly kind: 'magic_mouth';
+      readonly maximumWords: number;
+      readonly maximumMessageRounds: number;
+      readonly triggerRadiusFeet: number;
+    }
+  | {
+      readonly kind: 'object_unlock';
+      readonly arcaneLockSuppressionRounds: number;
+      readonly audibleRangeFeet: number;
+      readonly unlocksOneLock: true;
+    }
+  | {
+      readonly kind: 'magic_weapon';
+      readonly baseBonus: number;
+      readonly levelThreeBonus: number;
+      readonly levelSixBonus: number;
+    }
+  | {
+      readonly kind: 'location_tracking';
+      readonly samePlaneOnly: true;
+      readonly negatesHiddenAndInvisibleBenefits: true;
+    }
+  | {
+      readonly kind: 'mirror_images';
+      readonly duplicates: number;
+      readonly interceptionDieSides: number;
+      readonly interceptionMinimum: number;
+    }
+  | {
+      readonly kind: 'teleport';
+      readonly maximumDistanceFeet: number;
+      readonly requiresVisibleUnoccupiedSpace: true;
+    }
+  | {
+      readonly kind: 'poison_protection';
+      readonly saveMode: 'advantage';
+      readonly resistanceType: 'Poison';
+    }
+  | {
+      readonly kind: 'ray_enfeeblement';
+      readonly branch: 'success' | 'failure';
+      readonly damagePenaltyCount: number;
+      readonly damagePenaltySides: number;
+    }
+  | {
+      readonly kind: 'rope_trick';
+      readonly portalWidthFeet: number;
+      readonly portalHeightFeet: number;
+      readonly maximumCreatures: number;
+    }
+  | {
+      readonly kind: 'see_invisibility';
+      readonly seesEtherealPlane: true;
+    }
+  | {
+      readonly kind: 'silence_area';
+      readonly placement: AreaTemplate | 'selected_when_cast';
+      readonly radiusFeet: number;
+      readonly thunderImmune: true;
+      readonly verbalComponentsImpossible: true;
+    }
+  | {
+      readonly kind: 'spider_climb';
+      readonly climbSpeedEqualsSpeed: true;
+      readonly handsFree: true;
+    }
+  | {
+      readonly kind: 'spiritual_weapon';
+      readonly moveFeetPerBonusAction: number;
+      readonly attackReachFeet: number;
+    }
+  | {
+      readonly kind: 'warding_bond';
+      readonly maximumDistanceFeet: number;
+      readonly armorClassBonus: number;
+      readonly savingThrowBonus: number;
+      readonly resistanceToAllDamage: true;
+      readonly mirrorsDamageToSource: true;
+    }
+  | {
+      readonly kind: 'web_area';
+      readonly placement: AreaTemplate | 'selected_when_cast';
+      readonly cubeFeet: number;
+      readonly flatDepthFeet: number;
+      readonly fireDamageCount: number;
+      readonly fireDamageSides: number;
+    }
+  | {
+      readonly kind: 'truth_zone';
+      readonly placement: AreaTemplate | 'selected_when_cast';
+      readonly radiusFeet: number;
+      readonly saveAbility: 'charisma';
     }
   | {
       readonly kind: 'minor_magic';

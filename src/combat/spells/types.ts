@@ -4,7 +4,7 @@ import type { AreaTemplate } from '../templates';
 import type { CombatantId, DamageType } from '../values';
 
 export type SpellLevel = 0 | 1 | 2 | 3 | 4;
-export type SpellCastingTime = 'action' | 'bonus_action' | 'reaction' | 'minute' | 'hour';
+export type SpellCastingTime = 'action' | 'bonus_action' | 'reaction' | 'minute' | 'ten_minutes' | 'hour';
 export type SpellClassList = 'Cleric' | 'Wizard';
 
 export interface SpellComponentsData {
@@ -56,6 +56,11 @@ export interface EffectData {
   readonly concentration: boolean;
   readonly durationRounds: number | null;
   readonly expiresAt: 'source_start' | 'source_end' | 'target_start' | 'target_end';
+  readonly repeatedSave?: {
+    readonly ability: Ability;
+    readonly rollMode: 'normal' | 'advantage' | 'disadvantage';
+    readonly timing: 'target_end';
+  };
 }
 
 export type SpellOperation =
@@ -77,6 +82,20 @@ export type SpellOperation =
       readonly onSaveSuccess: 'none' | 'half';
       readonly burstShape: 'sphere';
       readonly burstRadiusFeet: number;
+    }
+  | {
+      readonly kind: 'attack_damage_over_time';
+      readonly attackKind: 'ranged';
+      readonly damageType: DamageType;
+      readonly initialDice: ScaledDice;
+      readonly missDamage: 'half_initial';
+      readonly laterDice: ScaledDice;
+      readonly laterTiming: 'target_end';
+    }
+  | {
+      readonly kind: 'hit_point_maximum_increase';
+      readonly baseAmount: number;
+      readonly additionalPerSlot: number;
     }
   | {
       readonly kind: 'save_damage';
@@ -106,6 +125,43 @@ export type SpellOperation =
       readonly rollMode: 'normal' | 'advantage' | 'disadvantage';
       readonly effect: EffectData;
       readonly excludeCaster?: true;
+    }
+  | {
+      readonly kind: 'save_push';
+      readonly ability: Ability;
+      readonly pushFeetOnFailure: number;
+      readonly effect: EffectData;
+    }
+  | {
+      readonly kind: 'remove_condition';
+      readonly conditions: readonly ('Blinded' | 'Deafened' | 'Paralyzed' | 'Poisoned')[];
+    }
+  | {
+      readonly kind: 'remove_condition_and_effect';
+      readonly condition: 'Poisoned';
+      readonly effect: EffectData;
+    }
+  | {
+      readonly kind: 'save_branch_effect';
+      readonly ability: Ability;
+      readonly successEffect: EffectData;
+      readonly failureEffect: EffectData;
+    }
+  | {
+      readonly kind: 'attack_rays';
+      readonly baseRays: number;
+      readonly additionalPerSlot: number;
+      readonly damageType: DamageType;
+      readonly dice: ScaledDice;
+    }
+  | {
+      readonly kind: 'summoned_weapon_attack';
+      readonly damageType: DamageType;
+      readonly dice: ScaledDice;
+      readonly addSpellcastingModifier: true;
+      readonly attackReachFeet: number;
+      readonly moveFeetPerBonusAction: number;
+      readonly effect: EffectData;
     }
   | {
       readonly kind: 'magic_missiles';
@@ -142,7 +198,21 @@ export type SpellOperation =
           | 'illusory_script'
           | 'food_purification'
           | 'image_illusion'
-          | 'unseen_servant';
+          | 'unseen_servant'
+          | 'form_alteration'
+          | 'arcane_lock'
+          | 'magic_aura'
+          | 'augury'
+          | 'detect_thoughts'
+          | 'trap_detection'
+          | 'flaming_sphere'
+          | 'corpse_preservation'
+          | 'object_location'
+          | 'magic_mouth'
+          | 'object_unlock'
+          | 'teleport'
+          | 'rope_trick'
+          | 'silence_area';
       }>;
       readonly concentration: boolean;
       readonly durationRounds: number | null;

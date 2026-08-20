@@ -318,8 +318,44 @@ function appliedConditions(effect: EncounterEffect): readonly AppliedCondition[]
     case 'obscured_area':
     case 'summoned_familiar':
     case 'unseen_servant':
+    case 'hit_point_maximum_modifier':
+    case 'condition_choice':
+    case 'form_alteration':
+    case 'arcane_lock':
+    case 'magic_aura':
+    case 'augury':
+    case 'attacks_against_target_roll_mode':
+    case 'calm_emotions':
+    case 'darkvision':
+    case 'detect_thoughts':
+    case 'granted_breath':
+    case 'ability_check_advantage':
+    case 'size_alteration':
+    case 'trap_detection':
+    case 'flaming_sphere':
+    case 'corpse_preservation':
+    case 'gust_of_wind_area':
+    case 'levitation':
+    case 'object_location':
+    case 'magic_mouth':
+    case 'object_unlock':
+    case 'magic_weapon':
+    case 'location_tracking':
+    case 'mirror_images':
+    case 'teleport':
+    case 'poison_protection':
+    case 'ray_enfeeblement':
+    case 'rope_trick':
+    case 'see_invisibility':
+    case 'silence_area':
+    case 'spider_climb':
+    case 'spiritual_weapon':
+    case 'warding_bond':
+    case 'truth_zone':
     case 'ongoing_damage':
       return [];
+    case 'web_area':
+      return [{ name: 'Restrained' }];
     case 'condition_bundle':
       return effect.payload.conditions.map((condition) =>
         condition === 'Charmed' || condition === 'Frightened' || condition === 'Grappled'
@@ -655,6 +691,14 @@ const DEATH_SAVE_SINGLE_MARK = 1;
 const NATURAL_ONE_FAILURES = 2;
 const NATURAL_TWENTY_HIT_POINTS = 1;
 
+function effectiveHitPointMaximum(state: EncounterState, target: CombatantId): number {
+  const base = combatant(state, target).profile.rules.hitPointMaximum;
+  return state.effects.reduce((maximum, candidate) =>
+    candidate.targets.includes(target) && candidate.payload.kind === 'hit_point_maximum_modifier'
+      ? maximum + candidate.payload.amount
+      : maximum, base);
+}
+
 function applyDamage(
   context: ReductionContext,
   source: CombatantId,
@@ -666,6 +710,7 @@ function applyDamage(
     throw new EncounterRuleError('Damage must be a non-negative safe integer.');
   }
   const before = combatant(context.state, target);
+  const hitPointMaximum = effectiveHitPointMaximum(context.state, target);
   if (before.life === 'dead' || amount === 0) return;
   const absorbed = Math.min(before.temporaryHitPoints, amount);
   const hitPointDamage = amount - absorbed;
@@ -676,7 +721,7 @@ function applyDamage(
   if (before.hitPoints === 0) {
     massiveDamage =
       before.profile.rules.usesDeathSaves &&
-      hitPointDamage >= before.profile.rules.hitPointMaximum;
+      hitPointDamage >= hitPointMaximum;
     if (massiveDamage) {
       life = 'dead';
       deathSaves = null;
@@ -699,7 +744,7 @@ function applyDamage(
     const remainder = hitPointDamage - before.hitPoints;
     massiveDamage =
       before.profile.rules.usesDeathSaves &&
-      remainder >= before.profile.rules.hitPointMaximum;
+      remainder >= hitPointMaximum;
     life = massiveDamage
       ? 'dead'
       : before.profile.rules.usesDeathSaves
@@ -1031,7 +1076,7 @@ function removeEffectTarget(
   context: ReductionContext,
   effectId: EncounterEffectId,
   target: CombatantId,
-  reason: 'save_succeeded' | 'condition_immunity',
+  reason: 'save_succeeded' | 'condition_immunity' | 'condition_removed',
 ): void {
   const effect = context.state.effects.find((candidate) => candidate.id === effectId);
   if (effect === undefined || !effect.targets.includes(target)) return;
@@ -1216,6 +1261,41 @@ function cloneEffectApplication(
       case 'obscured_area':
       case 'sleep_sequence':
       case 'unseen_servant':
+      case 'hit_point_maximum_modifier':
+      case 'condition_choice':
+      case 'form_alteration':
+      case 'arcane_lock':
+      case 'magic_aura':
+      case 'augury':
+      case 'attacks_against_target_roll_mode':
+      case 'calm_emotions':
+      case 'darkvision':
+      case 'detect_thoughts':
+      case 'granted_breath':
+      case 'ability_check_advantage':
+      case 'size_alteration':
+      case 'trap_detection':
+      case 'flaming_sphere':
+      case 'corpse_preservation':
+      case 'gust_of_wind_area':
+      case 'levitation':
+      case 'object_location':
+      case 'magic_mouth':
+      case 'object_unlock':
+      case 'magic_weapon':
+      case 'location_tracking':
+      case 'mirror_images':
+      case 'teleport':
+      case 'poison_protection':
+      case 'ray_enfeeblement':
+      case 'rope_trick':
+      case 'see_invisibility':
+      case 'silence_area':
+      case 'spider_climb':
+      case 'spiritual_weapon':
+      case 'warding_bond':
+      case 'web_area':
+      case 'truth_zone':
         return { ...application.payload };
       case 'commanded_action':
         return { ...application.payload, options: [...application.payload.options] };
@@ -1559,6 +1639,7 @@ function spendSpellCastingCost(
       return;
     }
     case 'minute':
+    case 'ten_minutes':
     case 'hour':
       if (context.state.activeCombatant !== null) {
         throw new EncounterRuleError(`${definition.name} has a long casting time and cannot resolve as a turn action.`);
@@ -1628,7 +1709,11 @@ function placedAreaTargets(
       ? command.area.template.length
       : command.area.shape === 'cube'
         ? command.area.template.size
-        : null;
+        : command.area.shape === 'line'
+          ? command.area.template.length
+          : command.area.shape === 'cylinder'
+            ? command.area.template.radius
+            : command.area.template.radius;
   if (submittedSize !== expectedSizeFeet) {
     throw new EncounterRuleError(`${spellName} requires a ${expectedSizeFeet}-foot ${shape} template.`);
   }
@@ -1705,12 +1790,12 @@ function selectedSpellTargets(
       const slotDelta = definition.level === 0 ? 0 : (command.slotLevel as number) - definition.level;
       const maximum = targeting.baseMaximum + targeting.additionalPerSlot * slotDelta;
       const operation = definition.operation;
-      const requiresEveryDart = operation.kind === 'magic_missiles';
+      const requiresEveryDart = operation.kind === 'magic_missiles' || operation.kind === 'attack_rays';
       if (command.targets.length < 1 || command.targets.length > maximum) {
         throw new EncounterRuleError(`${definition.name} allows at most ${maximum} targets.`);
       }
       if (requiresEveryDart && command.targets.length !== maximum) {
-        throw new EncounterRuleError(`${definition.name} requires one target allocation per dart.`);
+        throw new EncounterRuleError(`${definition.name} requires one target allocation per projectile.`);
       }
       if (!requiresEveryDart) assertUnique(command.targets, 'Spell targets');
       for (const target of command.targets) validateTargetRange(state, command.actor, target, targeting.rangeFeet);
@@ -1776,6 +1861,24 @@ function resolvedSpellEffectPayload(
         gallons: payload.gallons + payload.gallonsPerSlot * slotDelta,
         cubeFeet: payload.cubeFeet + payload.cubeFeetPerSlot * slotDelta,
       };
+    case 'condition_choice': {
+      const selected = command.selectedOption;
+      if (selected !== 'Blinded' && selected !== 'Deafened') {
+        throw new EncounterRuleError(`${definition.name} requires Blinded or Deafened selection.`);
+      }
+      if (!payload.conditions.includes(selected)) {
+        throw new EncounterRuleError(`${definition.name} does not allow ${selected}.`);
+      }
+      return { kind: 'condition', condition: selected };
+    }
+    case 'gust_of_wind_area':
+    case 'flaming_sphere':
+    case 'silence_area':
+    case 'web_area':
+    case 'truth_zone':
+      return payload.placement === 'selected_when_cast'
+        ? { ...payload, placement: selectedArea() }
+        : payload;
     case 'obscured_area':
       return {
         ...payload,
@@ -1788,6 +1891,7 @@ function resolvedSpellEffectPayload(
     case 'exhaustion':
     case 'ongoing_damage':
     case 'armor_class_modifier':
+    case 'hit_point_maximum_modifier':
     case 'attack_roll_modifier':
     case 'saving_throw_modifier':
     case 'd20_test_modifier':
@@ -1813,6 +1917,34 @@ function resolvedSpellEffectPayload(
     case 'base_armor_class':
     case 'sleep_sequence':
     case 'unseen_servant':
+    case 'form_alteration':
+    case 'arcane_lock':
+    case 'magic_aura':
+    case 'augury':
+    case 'attacks_against_target_roll_mode':
+    case 'calm_emotions':
+    case 'darkvision':
+    case 'detect_thoughts':
+    case 'granted_breath':
+    case 'ability_check_advantage':
+    case 'size_alteration':
+    case 'trap_detection':
+    case 'corpse_preservation':
+    case 'levitation':
+    case 'object_location':
+    case 'magic_mouth':
+    case 'object_unlock':
+    case 'magic_weapon':
+    case 'location_tracking':
+    case 'mirror_images':
+    case 'teleport':
+    case 'poison_protection':
+    case 'ray_enfeeblement':
+    case 'rope_trick':
+    case 'see_invisibility':
+    case 'spider_climb':
+    case 'spiritual_weapon':
+    case 'warding_bond':
     case 'minor_magic':
     case 'object_repair':
     case 'attack_roll_mode_modifier':
@@ -1848,7 +1980,15 @@ function effectApplication(
     concentration: data.concentration,
     stackingIdentity: effectStackingIdentity(`spell:${definition.id}`),
     stacking: 'replace_same_source',
-    repeatedSave: null,
+    repeatedSave: data.repeatedSave === undefined
+      ? null
+      : {
+          timing: { combatant: actualTargets[0] as CombatantId, boundary: 'end', source: definition.source },
+          ability: data.repeatedSave.ability,
+          dc: command.saveDc,
+          rollMode: data.repeatedSave.rollMode,
+          onSuccess: 'remove_target',
+        },
     payload,
   };
 }
@@ -1861,6 +2001,12 @@ function applySpellEffect(
   targets: readonly CombatantId[],
 ): void {
   if (targets.length === 0 && data.target === 'targets') return;
+  if (data.repeatedSave !== undefined && data.target === 'targets') {
+    for (const target of targets) {
+      applyEffect(context, command.actor, effectApplication(definition, command, data, [target]));
+    }
+    return;
+  }
   applyEffect(context, command.actor, effectApplication(definition, command, data, targets));
 }
 
@@ -1874,7 +2020,7 @@ function applyHealing(
   if (before.life === 'dead') throw new EncounterRuleError('A dead creature cannot regain Hit Points.');
   if (context.state.effects.some((candidate) =>
     candidate.targets.includes(target) && candidate.payload.kind === 'cannot_regain_hit_points')) return;
-  const hitPoints = Math.min(before.profile.rules.hitPointMaximum, before.hitPoints + amount);
+  const hitPoints = Math.min(effectiveHitPointMaximum(context.state, target), before.hitPoints + amount);
   context.state = replaceCombatant(context.state, {
     ...before,
     hitPoints,
@@ -1922,7 +2068,7 @@ function resolveSpellAttack(
   damage: ScaledDice,
   spellDamageType: DamageType,
   rider: EffectData | null,
-): void {
+): ReturnType<typeof resolveAttackRoll> {
   const advantageEffects = context.state.effects.filter((effect) =>
     effect.targets.includes(target) &&
     effect.payload.kind === 'attack_roll_mode_modifier' &&
@@ -1952,6 +2098,7 @@ function resolveSpellAttack(
     if (rider !== null) applySpellEffect(context, definition, command, rider, [target]);
   }
   emit(context, { type: 'attack_resolved', actor: command.actor, target, attack, damage: result });
+  return attack;
 }
 
 function selectedSpellDamageType(
@@ -1968,6 +2115,18 @@ function selectedSpellDamageType(
     throw new EncounterRuleError(`${definition.name} does not allow ${command.selectedOption} damage.`);
   }
   return selected;
+}
+
+function removeSpellConditions(
+  context: ReductionContext,
+  target: CombatantId,
+  conditions: readonly string[],
+): void {
+  const matching = context.state.effects.filter((candidate) =>
+    candidate.targets.includes(target) &&
+    candidate.payload.kind === 'condition' &&
+    conditions.includes(candidate.payload.condition));
+  for (const effect of matching) removeEffectTarget(context, effect.id, target, 'condition_removed');
 }
 
 function processSpellCast(context: ReductionContext, command: SpellCastCommand): void {
@@ -2030,6 +2189,54 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
       }
       return;
     }
+    case 'attack_damage_over_time': {
+      const target = targets[0] as CombatantId;
+      const attack = resolveSpellAttack(
+        context,
+        definition,
+        command,
+        target,
+        operation.initialDice,
+        operation.damageType,
+        null,
+      );
+      if (attack.outcome === 'miss') {
+        const rolled = rollDice(context.rng, scaledDiceExpression(definition, operation.initialDice, command));
+        const amount = Math.floor(rolled.total / 2);
+        applyDamage(context, command.actor, target, amount);
+        concentrationCheck(context, target, amount);
+        return;
+      }
+      applySpellEffect(context, definition, command, {
+        payload: {
+          kind: 'ongoing_damage',
+          damage: {
+            terms: [{ type: operation.damageType, dice: scaledDiceExpression(definition, operation.laterDice, command) }],
+            critical: false,
+            responses: [],
+          },
+          timing: { combatant: target, boundary: 'end', source: definition.source },
+        },
+        target: 'targets',
+        concentration: false,
+        durationRounds: 1,
+        expiresAt: 'target_end',
+      }, [target]);
+      return;
+    }
+    case 'hit_point_maximum_increase': {
+      const slotDelta = (command.slotLevel as number) - definition.level;
+      const amount = operation.baseAmount + operation.additionalPerSlot * slotDelta;
+      applySpellEffect(context, definition, command, {
+        payload: { kind: 'hit_point_maximum_modifier', amount },
+        target: 'targets', concentration: false, durationRounds: 4800, expiresAt: 'source_start',
+      }, targets);
+      for (const target of targets) {
+        const subject = combatant(context.state, target);
+        context.state = replaceCombatant(context.state, { ...subject, hitPoints: subject.hitPoints + amount });
+      }
+      return;
+    }
     case 'save_damage': {
       const roll = resolveDamage({
         terms: [{ type: operation.damageType, dice: scaledDiceExpression(definition, operation.dice, command) }],
@@ -2086,6 +2293,55 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
       const failed = eligible.filter((target) =>
         resolveTargetSave(context, command.actor, target, operation.ability, command.saveDc, operation.rollMode, null).outcome === 'failure');
       applySpellEffect(context, definition, command, operation.effect, failed);
+      return;
+    }
+    case 'save_push': {
+      for (const target of targets) {
+        const save = resolveTargetSave(context, command.actor, target, operation.ability, command.saveDc, 'normal', null);
+        if (save.outcome === 'failure') {
+          context.state = pushAway(context.state, command.actor, target, operation.pushFeetOnFailure);
+        }
+      }
+      applySpellEffect(context, definition, command, operation.effect, targets);
+      return;
+    }
+    case 'remove_condition': {
+      const selected = command.selectedOption;
+      if (selected === null || !operation.conditions.includes(selected as 'Blinded' | 'Deafened' | 'Paralyzed' | 'Poisoned')) {
+        throw new EncounterRuleError(`${definition.name} requires a removable condition selection.`);
+      }
+      for (const target of targets) removeSpellConditions(context, target, [selected]);
+      return;
+    }
+    case 'remove_condition_and_effect':
+      for (const target of targets) removeSpellConditions(context, target, [operation.condition]);
+      applySpellEffect(context, definition, command, operation.effect, targets);
+      return;
+    case 'save_branch_effect':
+      for (const target of targets) {
+        const save = resolveTargetSave(context, command.actor, target, operation.ability, command.saveDc, 'normal', null);
+        applySpellEffect(
+          context,
+          definition,
+          command,
+          save.outcome === 'success' ? operation.successEffect : operation.failureEffect,
+          [target],
+        );
+      }
+      return;
+    case 'attack_rays':
+      for (const target of targets) {
+        resolveSpellAttack(context, definition, command, target, operation.dice, operation.damageType, null);
+      }
+      return;
+    case 'summoned_weapon_attack': {
+      const target = targets[0] as CombatantId;
+      const diceWithModifier = {
+        ...operation.dice,
+        modifier: operation.dice.modifier + command.spellcastingModifier,
+      };
+      resolveSpellAttack(context, definition, command, target, diceWithModifier, operation.damageType, null);
+      applySpellEffect(context, definition, command, operation.effect, [command.actor]);
       return;
     }
     case 'magic_missiles':
