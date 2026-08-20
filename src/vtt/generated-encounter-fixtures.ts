@@ -38,6 +38,7 @@ import {
   REFERENCE_PLAYER_IDS,
   referenceEncounterSetup,
 } from './reference-encounter';
+import { partySourceSchema } from './party-pack';
 
 const nonEmptyTextSchema = z.string().min(1).refine(
   (value) => value.trim() === value,
@@ -57,7 +58,7 @@ export const encounterDifficultyRequestSchema = z.strictObject({
 
 export const encounterGenerationRequestSchema = z.strictObject({
   schemaVersion: z.literal(1),
-  partySource: z.enum(['reference', 'private']),
+  partySource: partySourceSchema,
   difficulty: encounterDifficultyRequestSchema,
   brief: nonEmptyTextSchema,
 });
@@ -292,8 +293,8 @@ function requestIsBuildable(request: EncounterGenerationRequest): boolean {
 
 export function decodeEncounterGenerationRequest(value: unknown): EncounterGenerationRequest {
   const request = encounterGenerationRequestSchema.parse(value);
-  if (request.partySource === 'private') {
-    throw new Error('Private party loading is not implemented in increment 9.');
+  if (request.partySource !== 'reference') {
+    throw new Error(`External party pack ${request.partySource.packFile} requires the party-pack file loader.`);
   }
   if (!requestIsBuildable(request)) {
     throw new Error(`unbuildable_difficulty: ${request.difficulty.pressure}`);
@@ -469,8 +470,8 @@ export function validateGeneratedEncounterPackage(value: unknown): {
   readonly assessment: EncounterDifficultyAssessment;
 } {
   const decoded = packageShapeSchema.parse(value);
-  if (decoded.request.partySource === 'private') {
-    throw new Error('Private party loading is not implemented in increment 9.');
+  if (decoded.request.partySource !== 'reference') {
+    throw new Error(`External party pack ${decoded.request.partySource.packFile} requires the party-pack file loader.`);
   }
   return { package: decoded, assessment: validatePackageMechanics(decoded) };
 }

@@ -265,7 +265,38 @@ function fleetTelemetry(request, latencyMs, tokenCounts) {
     loadLevelTag: process.env.DM_BRIDGE_LOAD_LEVEL ?? 'interactive',
     latencyMs,
     tokenCounts,
+    correctionAttempts: Number.isSafeInteger(input.correctionAttempt) && input.correctionAttempt >= 0
+      ? input.correctionAttempt
+      : 0,
   };
+}
+
+function roundPlanPrompt(request) {
+  const input = object(request, 'request');
+  const contract = object(input.replyContract, 'request.replyContract');
+  object(contract.jsonSchema, 'request.replyContract.jsonSchema');
+  object(contract.canonicalExample, 'request.replyContract.canonicalExample');
+  if (contract.schemaVersion !== 1 || contract.maximumCorrectionAttempts !== 2) {
+    throw new TypeError('request.replyContract version or correction bound is unsupported');
+  }
+  let correction = 'This is the initial reply for this request.';
+  if (input.kind === 'round_plan_correction_request') {
+    if (typeof input.validatorError !== 'string' || input.validatorError.length === 0) {
+      throw new TypeError('correction request requires the validator error');
+    }
+    correction = `The previous reply failed strict validation with exactly this error: ${input.validatorError}`;
+  }
+  return [
+    'You are the DM decision engine. Return exactly one JSON object and no markdown.',
+    'The reply MUST validate against this exact JSON Schema:',
+    JSON.stringify(contract.jsonSchema),
+    'Canonical valid example (replace envelope ids/revision/round and requested monster ids with this request values):',
+    JSON.stringify(contract.canonicalExample),
+    'No other fields are permitted at the envelope or at any nested object level.',
+    correction,
+    'Request:',
+    JSON.stringify(input),
+  ].join('\n');
 }
 
 function runCodexProcess(binary, args, options) {
@@ -335,10 +366,7 @@ export class CodexCliExchange {
       'resume', requestSessionId(input),
       '-',
     ];
-    const prompt = [
-      'You are the DM decision engine. Return exactly one JSON value matching the requested typed reply. No markdown.',
-      JSON.stringify(input),
-    ].join('\n');
+    const prompt = roundPlanPrompt(input);
     const result = await runCodexProcess(this.codexBin, args, {
       cwd: this.cwd,
       input: prompt,
@@ -383,6 +411,7 @@ export const dmBridgeLibInternals = {
   parseCodexThreadId,
   parseCodexUsage,
   requestSessionId,
+  roundPlanPrompt,
   runCodexProcess,
   safeStreamName,
 };

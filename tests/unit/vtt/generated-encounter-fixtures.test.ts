@@ -351,11 +351,11 @@ describe('increment 9 generated and approved encounter fixtures', () => {
     })).toThrow('Unknown starter-art asset id');
   });
 
-  it('OWN-PRIVATE-PARTY-SILENTLY-ACCEPTED carries the seam but refuses unavailable private loading', async () => {
+  it('OWN-EXTERNAL-PACK-BYPASSES-LOADER carries the file seam and requires the loader path', async () => {
     let calls = 0;
     await expect(generateEncounterCandidate({
       ...TEST_APPROVED_FIRST_SKIRMISH_REQUEST,
-      partySource: 'private',
+      partySource: { packFile: '/tmp/generic-party-pack.json' },
     }, {
       generate: async ({ request, prompt }) => {
         calls += 1;
@@ -365,7 +365,7 @@ describe('increment 9 generated and approved encounter fixtures', () => {
           generationPrompt: prompt,
         };
       },
-    })).rejects.toThrow('Private party loading is not implemented in increment 9');
+    })).rejects.toThrow('External party pack /tmp/generic-party-pack.json requires the party-pack file loader');
     expect(calls).toBe(0);
   });
 

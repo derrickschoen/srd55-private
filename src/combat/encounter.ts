@@ -2812,6 +2812,9 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
       if (command.reasoning.trim().length === 0) {
         throw new EncounterRuleError('An adjudication requires DM reasoning.');
       }
+      if (command.subject.trim().length === 0 || command.subject.length > 200) {
+        throw new EncounterRuleError('An adjudication subject must be non-empty and at most 200 characters.');
+      }
       const subject = combatant(context.state, command.target);
       if (command.consequence.kind === 'hit_point_delta') {
         if (!Number.isSafeInteger(command.consequence.amount)) {
@@ -2838,6 +2841,7 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
         emit(context, {
           type: 'adjudicated',
           target: command.target,
+          subject: command.subject,
           reasoning: command.reasoning.trim(),
           consequence: { kind: 'hit_points', before, after, lifeState: life },
         });
@@ -2869,6 +2873,7 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
       emit(context, {
         type: 'adjudicated',
         target: command.target,
+        subject: command.subject,
         reasoning: command.reasoning.trim(),
         consequence: {
           kind: 'position',

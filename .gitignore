@@ -27,3 +27,4 @@ scraped/
 .tmp/
 tools/discord-launcher/.env
 __pycache__/
+.vtt-soak-out/

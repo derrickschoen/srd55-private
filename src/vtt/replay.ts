@@ -17,8 +17,16 @@ import {
 } from './session-persistence';
 import {
   VTT_FLEET_SCHEMA_VERSION,
+  emptyFleetTelemetry,
+  modelFleetTelemetry,
   type FleetTelemetry,
 } from './fleet-telemetry';
+import {
+  adjudicationSubjectGap,
+  deduplicateGapReports,
+  gapReportSchema,
+  type GapReport,
+} from './srd-gap-report';
 
 export {
   VTT_FLEET_SCHEMA_VERSION,
@@ -29,7 +37,7 @@ export {
   type FleetTokenCounts,
 } from './fleet-telemetry';
 
-export const VTT_REPLAY_SCHEMA_VERSION = 2 as const;
+export const VTT_REPLAY_SCHEMA_VERSION = 4 as const;
 export const VTT_REPLAY_MINIMUM_SCHEMA_VERSION = 1 as const;
 
 export interface ReplayControllerIdentity {
@@ -106,6 +114,7 @@ export interface ReplayBundle {
   };
   readonly protocolVersions: readonly string[];
   readonly licensingVersions: readonly string[];
+  readonly gapReports: readonly GapReport[];
   readonly revisions: readonly ReplayRevisionRecord[];
   readonly transcripts: readonly ReplayTranscriptRecord[];
 }
@@ -126,7 +135,7 @@ export class ReplayDivergenceError extends Error {
   override readonly name = 'ReplayDivergenceError' as const;
 
   constructor(
-    readonly source: 'bundle' | 'fixture' | 'rng' | 'event' | 'state' | 'projection' | 'transcript',
+    readonly source: 'bundle' | 'fixture' | 'rng' | 'event' | 'state' | 'projection' | 'transcript' | 'gap_report',
     readonly recordIndex: number,
     readonly field: string,
     readonly expected: unknown,
@@ -230,6 +239,17 @@ function replayRevisionRecords(revisions: readonly SessionRevision[]): readonly 
   });
 }
 
+function adjudicationGapsFromRevisions(revisions: readonly SessionRevision[]): readonly GapReport[] {
+  return revisions.flatMap((revision) => {
+    if (revision.transition.kind !== 'reducer_applied') return [];
+    return revision.transition.events.flatMap((event) => {
+      if (event.type !== 'adjudicated') return [];
+      const gap = adjudicationSubjectGap({ target: event.target, subject: event.subject });
+      return gap === null ? [] : [gap];
+    });
+  });
+}
+
 export function createReplayBundle(input: {
   readonly fixture: ApprovedEncounterFixture;
   readonly revisions: readonly SessionRevision[];
@@ -237,6 +257,7 @@ export function createReplayBundle(input: {
   readonly build: ReplayBundle['build'];
   readonly protocolVersions: readonly string[];
   readonly licensingVersions: readonly string[];
+  readonly gapReports: readonly GapReport[];
 }): ReplayBundle {
   const fixture = decodeApprovedEncounterFixture(input.fixture);
   if (input.revisions.length === 0) throw new Error('Replay bundle needs at least one revision.');
@@ -254,6 +275,10 @@ export function createReplayBundle(input: {
     build: structuredClone(input.build),
     protocolVersions: [...input.protocolVersions],
     licensingVersions: [...input.licensingVersions],
+    gapReports: deduplicateGapReports([
+      ...input.gapReports,
+      ...adjudicationGapsFromRevisions(input.revisions),
+    ]),
     revisions: replayRevisionRecords(input.revisions),
     transcripts: structuredClone(input.transcripts),
   };
@@ -267,20 +292,61 @@ function record(value: unknown): value is Readonly<Record<string, unknown>> {
 
 const V1_TO_V2_SOURCE = 'vtt-replay-v1-to-v2:add-format-and-fleet-schema=vtt-deterministic-replay:1';
 const V1_TO_V2_CHECKSUM = '97a0f335d4928ab6cd2720452ea6f53230780f17cd5a1059fea2cfdb34b68b97';
+const V2_TO_V3_SOURCE = 'vtt-replay-v2-to-v3:add-gap-reports=[]:1';
+const V2_TO_V3_CHECKSUM = '9c7f6016f360115db5e718408a2e2b42f7757604a95e7284f4dcb8453ee1f1c3';
+const V3_TO_V4_SOURCE = 'vtt-replay-v3-to-v4:add-fleet-correction-attempts-null-and-fleet-schema=2:1';
+const V3_TO_V4_CHECKSUM = '97854870631f51f4cc89cdcd3164ad086ff2954a574428bd8d54692eaccaa9e1';
 
-export const VTT_REPLAY_MIGRATIONS = Object.freeze([Object.freeze({
-  id: 'vtt_replay_v1_to_v2',
-  from: 1,
-  to: 2,
-  source: V1_TO_V2_SOURCE,
-  checksum: V1_TO_V2_CHECKSUM,
-  migrate: (bundle: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> => ({
-    ...bundle,
-    format: 'vtt-deterministic-replay',
-    schemaVersion: 2,
-    fleetSchemaVersion: 1,
+export const VTT_REPLAY_MIGRATIONS = Object.freeze([
+  Object.freeze({
+    id: 'vtt_replay_v1_to_v2',
+    from: 1,
+    to: 2,
+    source: V1_TO_V2_SOURCE,
+    checksum: V1_TO_V2_CHECKSUM,
+    migrate: (bundle: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> => ({
+      ...bundle,
+      format: 'vtt-deterministic-replay',
+      schemaVersion: 2,
+      fleetSchemaVersion: 1,
+    }),
   }),
-})]);
+  Object.freeze({
+    id: 'vtt_replay_v2_to_v3',
+    from: 2,
+    to: 3,
+    source: V2_TO_V3_SOURCE,
+    checksum: V2_TO_V3_CHECKSUM,
+    migrate: (bundle: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> => ({
+      ...bundle,
+      schemaVersion: 3,
+      gapReports: [],
+    }),
+  }),
+  Object.freeze({
+    id: 'vtt_replay_v3_to_v4',
+    from: 3,
+    to: 4,
+    source: V3_TO_V4_SOURCE,
+    checksum: V3_TO_V4_CHECKSUM,
+    migrate: (bundle: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> => ({
+      ...bundle,
+      schemaVersion: 4,
+      fleetSchemaVersion: 2,
+      transcripts: Array.isArray(bundle.transcripts)
+        ? bundle.transcripts.map((transcript) => record(transcript) && record(transcript.fleet)
+          ? {
+              ...transcript,
+              fleet: {
+                ...transcript.fleet,
+                correctionAttempts: typeof transcript.fleet.modelId === 'string' ? 0 : null,
+              },
+            }
+          : transcript)
+        : bundle.transcripts,
+    }),
+  }),
+]);
 
 export function validateReplayMigrationRegistry(): void {
   let expected: number = VTT_REPLAY_MINIMUM_SCHEMA_VERSION;
@@ -326,6 +392,7 @@ function migrateReplayBundle(value: unknown): ReplayBundle {
     !record(migrated.build) ||
     !Array.isArray(migrated.protocolVersions) ||
     !Array.isArray(migrated.licensingVersions) ||
+    !Array.isArray(migrated.gapReports) ||
     !Array.isArray(migrated.revisions) ||
     !Array.isArray(migrated.transcripts)
   ) {
@@ -344,6 +411,7 @@ export function exportReplayBundleV1ForMigrationTest(bundle: ReplayBundle): stri
     format: _format,
     fleetSchemaVersion: _fleetSchemaVersion,
     schemaVersion: _schemaVersion,
+    gapReports: _gapReports,
     ...body
   } = bundle;
   return canonicalJson({ ...body, schemaVersion: 1 });
@@ -409,7 +477,37 @@ function assertEqual(
 
 function validateTranscripts(transcripts: readonly ReplayTranscriptRecord[]): void {
   const requests = new Map<string, ReplayTranscriptRecord>();
+  const fleetKeys = [
+    'buildId',
+    'commit',
+    'correctionAttempts',
+    'latencyMs',
+    'loadLevelTag',
+    'modelId',
+    'reasoningEffort',
+    'tokenCounts',
+  ];
   for (const [index, transcript] of transcripts.entries()) {
+    if (canonicalJson(Object.keys(transcript.fleet).sort()) !== canonicalJson(fleetKeys)) {
+      throw new ReplayDivergenceError('transcript', index, 'fleet', fleetKeys, Object.keys(transcript.fleet));
+    }
+    try {
+      if (transcript.fleet.modelId === null) {
+        if (canonicalJson(transcript.fleet) !== canonicalJson(emptyFleetTelemetry())) {
+          throw new TypeError('Human telemetry must use the empty fleet record.');
+        }
+      } else {
+        modelFleetTelemetry(transcript.fleet);
+      }
+    } catch (error: unknown) {
+      throw new ReplayDivergenceError(
+        'transcript',
+        index,
+        'fleet',
+        'valid fleet telemetry',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
     assertEqual('transcript', index, 'sequence', index + 1, transcript.sequence);
     assertEqual(
       'transcript',
@@ -454,6 +552,30 @@ function validateTranscripts(transcripts: readonly ReplayTranscriptRecord[]): vo
   }
 }
 
+function adjudicationGaps(bundle: ReplayBundle): readonly GapReport[] {
+  return adjudicationGapsFromRevisions(bundle.revisions.map((entry) => entry.revision));
+}
+
+function validateGapReports(bundle: ReplayBundle): void {
+  const decoded = bundle.gapReports.map((report, index) => {
+    const result = gapReportSchema.safeParse(report);
+    if (!result.success) {
+      throw new ReplayDivergenceError(
+        'gap_report', index, 'gapReports', 'valid GapReport', report,
+      );
+    }
+    return result.data;
+  });
+  const present = new Set(decoded.map((report) => JSON.stringify(report)));
+  for (const required of deduplicateGapReports(adjudicationGaps(bundle))) {
+    if (!present.has(JSON.stringify(required))) {
+      throw new ReplayDivergenceError(
+        'gap_report', -1, 'gapReports', required, 'missing',
+      );
+    }
+  }
+}
+
 function activeRevisionNumbers(records: readonly ReplayRevisionRecord[]): ReadonlySet<number> {
   const byRevision = new Map(
     records.map((recordEntry) => [recordEntry.revision.revision, recordEntry.revision] as const),
@@ -480,6 +602,7 @@ function authoritativeReplayValue(bundle: ReplayBundle): unknown {
     build: bundle.build,
     protocolVersions: bundle.protocolVersions,
     licensingVersions: bundle.licensingVersions,
+    gapReports: bundle.gapReports,
     revisions: bundle.revisions.map((recordEntry) => ({
       revision: recordEntry.revision,
       void: recordEntry.void,
@@ -517,6 +640,7 @@ export function replayBundle(
     assertEqual('fixture', -1, 'fixture.sha256', fixture.approval.packageSha256, bundle.fixture.sha256);
   }
   validateTranscripts(bundle.transcripts);
+  validateGapReports(bundle);
   if (bundle.revisions.length === 0) {
     throw new ReplayDivergenceError('bundle', -1, 'revisions.length', 'at least 1', 0);
   }

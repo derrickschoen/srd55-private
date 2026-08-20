@@ -1,4 +1,4 @@
-export const VTT_FLEET_SCHEMA_VERSION = 1 as const;
+export const VTT_FLEET_SCHEMA_VERSION = 2 as const;
 
 export type FleetReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
@@ -18,6 +18,7 @@ export interface FleetTelemetry {
   readonly loadLevelTag: string | null;
   readonly latencyMs: number | null;
   readonly tokenCounts: FleetTokenCounts | null;
+  readonly correctionAttempts: number | null;
 }
 
 function nonNegativeInteger(value: number, label: string): number {
@@ -43,6 +44,7 @@ export function emptyFleetTelemetry(): FleetTelemetry {
     loadLevelTag: null,
     latencyMs: null,
     tokenCounts: null,
+    correctionAttempts: null,
   };
 }
 
@@ -62,6 +64,10 @@ export function modelFleetTelemetry(input: FleetTelemetry): FleetTelemetry {
     throw new TypeError('Model telemetry requires a non-negative finite latency.');
   }
   if (input.tokenCounts === null) throw new TypeError('Model telemetry requires token counts.');
+  if (input.correctionAttempts === null) {
+    throw new TypeError('Model telemetry requires a correction-attempt count.');
+  }
+  nonNegativeInteger(input.correctionAttempts, 'fleet.correctionAttempts');
   nonNegativeInteger(input.tokenCounts.input, 'fleet.tokenCounts.input');
   nonNegativeInteger(input.tokenCounts.cachedInput, 'fleet.tokenCounts.cachedInput');
   nonNegativeInteger(input.tokenCounts.output, 'fleet.tokenCounts.output');

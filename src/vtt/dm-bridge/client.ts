@@ -163,6 +163,7 @@ function decodeBridgeFleetTelemetry(value: unknown): FleetTelemetry {
     (input.commit !== null && typeof input.commit !== 'string') ||
     (input.loadLevelTag !== null && typeof input.loadLevelTag !== 'string') ||
     typeof input.latencyMs !== 'number' ||
+    typeof input.correctionAttempts !== 'number' ||
     typeof tokenCounts !== 'object' || tokenCounts === null || Array.isArray(tokenCounts)
   ) {
     throw new TypeError('DM bridge fleet telemetry is malformed.');
@@ -183,6 +184,7 @@ function decodeBridgeFleetTelemetry(value: unknown): FleetTelemetry {
     commit: input.commit as string | null,
     loadLevelTag: input.loadLevelTag as string | null,
     latencyMs: input.latencyMs,
+    correctionAttempts: input.correctionAttempts,
     tokenCounts: {
       input: counts.input,
       cachedInput: counts.cachedInput,

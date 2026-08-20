@@ -84,7 +84,7 @@ export function decodeNarration(value: unknown): Narration {
 
 export function decodeAdjudicationProposal(value: unknown): AdjudicationProposal {
   const input = dmBridgeContractInternals.record(value, 'adjudication proposal');
-  dmBridgeContractInternals.exactKeys(input, ['kind', 'target', 'reasoning', 'consequence'], 'adjudication proposal');
+  dmBridgeContractInternals.exactKeys(input, ['kind', 'target', 'subject', 'reasoning', 'consequence'], 'adjudication proposal');
   if (input.kind !== 'adjudication_proposal') throw new TypeError('Adjudication proposal kind is required.');
   const consequence = dmBridgeContractInternals.record(input.consequence, 'adjudication consequence');
   const kind = dmBridgeContractInternals.string(consequence.kind, 'adjudication consequence.kind');
@@ -93,6 +93,7 @@ export function decodeAdjudicationProposal(value: unknown): AdjudicationProposal
     return {
       kind: 'adjudication_proposal',
       target: combatantId(dmBridgeContractInternals.string(input.target, 'adjudication target')),
+      subject: dmBridgeContractInternals.string(input.subject, 'adjudication subject'),
       reasoning: sentence(input.reasoning, 'adjudication reasoning'),
       consequence: { kind, amount: dmBridgeContractInternals.finiteNumber(consequence.amount, 'adjudication amount') },
     };
@@ -102,6 +103,7 @@ export function decodeAdjudicationProposal(value: unknown): AdjudicationProposal
     return {
       kind: 'adjudication_proposal',
       target: combatantId(dmBridgeContractInternals.string(input.target, 'adjudication target')),
+      subject: dmBridgeContractInternals.string(input.subject, 'adjudication subject'),
       reasoning: sentence(input.reasoning, 'adjudication reasoning'),
       consequence: { kind, to: dmBridgeContractInternals.gridCell(consequence.to, 'adjudication destination') },
     };

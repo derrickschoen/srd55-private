@@ -16,6 +16,8 @@ interface MutationLedger {
 const LEDGER_PATH = 'docs/audits/2026-08-20-vtt-phase2-mutation-ledger.json';
 const INCREMENT_NINE_LEDGER_PATH = 'docs/audits/2026-08-20-vtt-increment-9-mutation-ledger.md';
 const INCREMENT_TEN_LEDGER_PATH = 'docs/audits/2026-08-20-vtt-increment-10-mutation-ledger.md';
+const SOAK_PARTY_LEDGER_PATH = 'docs/audits/2026-08-20-vtt-soak-party-wiring-mutation-ledger.md';
+const LIVE_PLAN_CORRECTION_LEDGER_PATH = 'docs/audits/2026-08-20-vtt-live-plan-correction-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
 function ledger(): MutationLedger {
@@ -78,5 +80,24 @@ describe('phase-2 mutation ledger manifest', () => {
     }
     expect(incrementTen).toContain('| Own `token_counts_influence_reducer`');
     expect(incrementTen).toContain('| Own `bundle_version_outside_window_accepted`');
+  });
+
+  it('SOAK-PARTY-MUTATION-LEDGER pins all required controls and the own control', () => {
+    const ledger = readFileSync(SOAK_PARTY_LEDGER_PATH, 'utf8');
+    for (const name of [
+      'gap_report_swallowed',
+      'fifty_fifty_skewed',
+      'pack_smuggles_raw_text',
+      'duplicate_engine_id_accepted',
+    ]) {
+      expect(ledger).toContain(`\`${name}\``);
+    }
+  });
+
+  it('LIVE-PLAN-CORRECTION-MUTATION-LEDGER pins the strict malformed-plan control', () => {
+    const ledger = readFileSync(LIVE_PLAN_CORRECTION_LEDGER_PATH, 'utf8');
+    expect(ledger).toContain('`malformed_plan_accepted`');
+    expect(ledger).toContain('malformed_plan_accepted keeps the strict decoder closed');
+    expect(ledger).toContain('Restored `z.strictObject`');
   });
 });

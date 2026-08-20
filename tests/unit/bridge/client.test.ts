@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { createEncounter, reduceEncounter } from '../../../src/combat/encounter';
 import { codexSessionId, encounterSessionId } from '../../../src/combat/values';
-import type { DmBridgeRequest } from '../../../src/vtt/dm-bridge/contracts';
+import {
+  DM_BRIDGE_PROTOCOL_VERSION,
+  type DmBridgeRequest,
+} from '../../../src/vtt/dm-bridge/contracts';
 import { DmEncounterHost } from '../../../src/vtt/dm-encounter-host';
 import {
   LocalhostDmBridgeClient,
@@ -42,7 +45,7 @@ describe('localhost bridge client and failure containment', () => {
         requests.push(request);
         return {
           kind: 'round_plan',
-          protocolVersion: 1,
+          protocolVersion: DM_BRIDGE_PROTOCOL_VERSION,
           encounterId: request.encounterId,
           requestId: request.requestId,
           expectedRevision: request.expectedRevision,
@@ -70,6 +73,52 @@ describe('localhost bridge client and failure containment', () => {
     });
     expect(host.snapshot().dm.encounter.activeCombatant).toBe(REFERENCE_FIGHTER_ID);
     expect(mirrored.map((revision) => revision.transition.kind)).toContain('reducer_applied');
+    host.close();
+  });
+
+  it('HOST-CORRECTION-EXHAUSTION exports and aborts after two malformed same-session corrections', async () => {
+    let state = reduceEncounter(
+      createEncounter(referenceEncounterSetup()),
+      { type: 'roll_initiative' },
+      () => 0.5,
+    ).state;
+    for (const actor of [REFERENCE_FIGHTER_ID, REFERENCE_CLERIC_ID, REFERENCE_WIZARD_ID]) {
+      state = reduceEncounter(state, { type: 'end_turn', actor }, () => 0.5).state;
+    }
+    const requests: DmBridgeRequest[] = [];
+    const store = new MemoryBrowserSessionStore();
+    const bridge = {
+      append(_revision: SessionRevision) {},
+      async exchange(request: DmBridgeRequest) {
+        requests.push(request);
+        return {
+          kind: 'round_plan',
+          requestId: request.requestId,
+          expectedRevision: request.expectedRevision,
+          commands: [{ type: 'end_turn', actor: REFERENCE_MONSTER_ID }],
+        };
+      },
+    };
+    const host = new DmEncounterHost('session:host-correction-exhaustion', store, {
+      initialState: state,
+      bridge,
+      codexSessionId: codexSessionId('019c-correction-session'),
+    });
+    host.start();
+    for (let attempt = 0; attempt < 20 && host.bridgeFailureReport() === null; attempt += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(requests.map((request) => request.correctionAttempt)).toEqual([0, 1, 2]);
+    expect(new Set(requests.map((request) => request.codexSessionId))).toEqual(
+      new Set([codexSessionId('019c-correction-session')]),
+    );
+    expect(host.bridgeFailureReport()).toMatchObject({
+      kind: 'bridge_export_and_abort',
+      error: expect.stringContaining('failed after 2 corrections'),
+    });
+    expect(host.bridgeFailureReport()?.exportedSession).toContain('"kind":"coordinator_paused"');
+    expect(host.snapshot().player.authorityStatus).toBe('hard_paused');
     host.close();
   });
 
@@ -149,6 +198,7 @@ describe('localhost bridge client and failure containment', () => {
         loadLevelTag: 'playable-exit',
         latencyMs: 42,
         tokenCounts: { input: 120, cachedInput: 80, output: 30, reasoning: 12 },
+        correctionAttempts: 1,
       },
     });
     const client = new LocalhostDmBridgeClient(
@@ -170,6 +220,7 @@ describe('localhost bridge client and failure containment', () => {
       loadLevelTag: 'playable-exit',
       latencyMs: 42,
       tokenCounts: { input: 120, cachedInput: 80, output: 30, reasoning: 12 },
+      correctionAttempts: 1,
     }]);
   });
 });

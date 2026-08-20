@@ -85,6 +85,7 @@ describe('DM narration and adjudication contracts', () => {
     const proposal = decodeAdjudicationProposal({
       kind: 'adjudication_proposal',
       target: REFERENCE_MONSTER_ID,
+      subject: 'engine:hit-points',
       reasoning: 'A genuinely unmodeled mechanism requires an explicit override.',
       consequence: { kind: 'hit_point_delta', amount: -3 },
     });
@@ -92,12 +93,14 @@ describe('DM narration and adjudication contracts', () => {
     expect(proposal).toEqual({
       kind: 'adjudication_proposal',
       target: REFERENCE_MONSTER_ID,
+      subject: 'engine:hit-points',
       reasoning: 'A genuinely unmodeled mechanism requires an explicit override.',
       consequence: { kind: 'hit_point_delta', amount: -3 },
     });
     expect(adjudicationCommand(proposal, projection)).toEqual({
       type: 'adjudicate',
       target: REFERENCE_MONSTER_ID,
+      subject: 'engine:hit-points',
       reasoning: proposal.reasoning,
       consequence: proposal.consequence,
     });
