@@ -9,7 +9,10 @@ import {
   type CombatantId,
 } from '../../../src/combat/values';
 import { projectDmBoard } from '../../../src/vtt/encounter-projections';
-import { DmRoundPlanSession } from '../../../src/vtt/dm-bridge/decision-program';
+import {
+  DmRoundPlanSession,
+  RoundPlanDryError,
+} from '../../../src/vtt/dm-bridge/decision-program';
 import {
   DM_BRIDGE_PROTOCOL_VERSION,
   ROUND_PLAN_JS_REPLY_CONTRACT,
@@ -149,7 +152,7 @@ describe('JS round-plan protocol and replay integration', () => {
 
   it('a js_program plan drives a fake-exchange table and replays source plus emitted DecisionProgram byte-for-byte', async () => {
     const f = fixture();
-    const source = 'const target = nearestEnemy(); emit(priority(attack(target), endTurn()));';
+    const source = 'const target = nearestEnemy(); emit(focusFire(target));';
     const exchange = new FakeJsExchange(source);
     const session = new DmRoundPlanSession(exchange, undefined, undefined, 'js_program');
     const legalAttack = attack(f.monster.id, f.player.id);
@@ -175,6 +178,7 @@ describe('JS round-plan protocol and replay integration', () => {
         kind: 'priority',
         choices: [
           { kind: 'action', action: { kind: 'attack' } },
+          { kind: 'action', action: { kind: 'move_toward' } },
           { kind: 'action', action: { kind: 'use_action', action: 'end_turn' } },
         ],
       },
@@ -234,6 +238,20 @@ describe('JS round-plan protocol and replay integration', () => {
       'round plan.monsters[0].program.action.destination.column',
     );
     expect(exchange.requests.map((request) => request.correctionAttempt)).toEqual([0, 1, 2]);
+  });
+
+  it('rider_searched_independently never considers a fixed rider follow-up when the attached attack is illegal', async () => {
+    const f = fixture();
+    const source = 'const target = nearestEnemy(); emit(attack(target, riderOnCrit(endTurn())));';
+    const exchange = new FakeJsExchange(source);
+    const session = new DmRoundPlanSession(exchange, undefined, undefined, 'js_program');
+
+    await expect(session.choose(
+      controllerRequest(f.state, f.monster.id, [{ type: 'end_turn', actor: f.monster.id }]),
+      context(f.state),
+      new AbortController().signal,
+    )).rejects.toThrowError(RoundPlanDryError);
+    expect(exchange.requests).toHaveLength(2);
   });
 
   it('js_source_missing_from_replay keeps both source and validated output in the authoritative transcript', async () => {

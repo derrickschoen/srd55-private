@@ -19,6 +19,7 @@ const INCREMENT_TEN_LEDGER_PATH = 'docs/audits/2026-08-20-vtt-increment-10-mutat
 const SOAK_PARTY_LEDGER_PATH = 'docs/audits/2026-08-20-vtt-soak-party-wiring-mutation-ledger.md';
 const LIVE_PLAN_CORRECTION_LEDGER_PATH = 'docs/audits/2026-08-20-vtt-live-plan-correction-mutation-ledger.md';
 const JS_TURN_PROGRAM_LEDGER_PATH = 'docs/audits/2026-08-20-js-turn-program-mutation-ledger.md';
+const TURN_PROGRAM_LIBRARY_LEDGER_PATH = 'docs/audits/2026-08-20-turn-program-library-mutation-ledger.md';
 const E04_E06_LEDGER_PATH = 'docs/audits/2026-08-20-e04-e06-engine-prerequisites-mutation-ledger.md';
 const E01_EXPERIMENT_LEDGER_PATH = 'docs/audits/2026-08-20-e01-experiment-orchestrator-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
@@ -115,6 +116,18 @@ describe('phase-2 mutation ledger manifest', () => {
     ]) {
       expect(ledger).toContain(`\`${name}\``);
     }
+  });
+
+  it('TURN-PROGRAM-LIBRARY-MUTATION-LEDGER pins both required controls and the fraction control', () => {
+    const ledger = readFileSync(TURN_PROGRAM_LIBRARY_LEDGER_PATH, 'utf8');
+    for (const name of [
+      'helper_bypasses_validation',
+      'rider_searched_independently',
+      'fraction_hp_not_scaled',
+    ]) {
+      expect(ledger).toContain(`\`${name}\``);
+    }
+    expect(ledger).toContain('| exit 1 | exit 0 |');
   });
 
   it('E04-E06-MUTATION-LEDGER pins the three required controls and the deterministic-set control', () => {

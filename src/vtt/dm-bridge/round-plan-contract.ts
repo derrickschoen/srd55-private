@@ -50,8 +50,17 @@ export type PlanAction =
       readonly action: 'dash' | 'disengage' | 'dodge' | 'end_turn';
     };
 
+export interface StandingConditionalRider {
+  readonly kind: 'on_critical_hit';
+  readonly followUpAction: PlanAction;
+}
+
 export type DecisionProgram =
-  | { readonly kind: 'action'; readonly action: PlanAction }
+  | {
+      readonly kind: 'action';
+      readonly action: PlanAction;
+      readonly riders?: readonly StandingConditionalRider[] | undefined;
+    }
   | {
       readonly kind: 'if';
       readonly predicate: StatePredicate;
@@ -162,6 +171,11 @@ const planActionSchema: z.ZodType<PlanAction> = z.discriminatedUnion('kind', [
   }),
 ]);
 
+const standingConditionalRiderSchema: z.ZodType<StandingConditionalRider> = z.strictObject({
+  kind: z.literal('on_critical_hit'),
+  followUpAction: planActionSchema,
+});
+
 const predicateSchemas: Array<z.ZodType<StatePredicate> | undefined> = [];
 function predicateSchema(depth: number): z.ZodType<StatePredicate> {
   const cached = predicateSchemas[depth];
@@ -202,7 +216,11 @@ function programSchema(depth: number): z.ZodType<DecisionProgram> {
     ? z.never()
     : z.lazy(() => programSchema(depth + 1));
   const schema: z.ZodType<DecisionProgram> = z.discriminatedUnion('kind', [
-    z.strictObject({ kind: z.literal('action'), action: planActionSchema }),
+    z.strictObject({
+      kind: z.literal('action'),
+      action: planActionSchema,
+      riders: z.array(standingConditionalRiderSchema).min(1).max(20).optional(),
+    }),
     z.strictObject({
       kind: z.literal('if'),
       predicate: predicateSchema(0),
@@ -380,8 +398,9 @@ export type E01PromptVariant = (typeof E01_PROMPT_VARIANTS)[number];
 export const ROUND_PLAN_COMPACT_JSON_GRAMMAR = [
   'RoundPlan={kind:"round_plan",protocolVersion:2,encounterId:string,requestId:string,expectedRevision:uint,round:uint,monsters:Monster[]}',
   'Monster={monsterId:string,program:Program}',
-  'Program={kind:"action",action:Action}|{kind:"if",predicate:Predicate,then:Program,else:Program}|{kind:"priority",choices:Program[1..20]}',
+  'Program={kind:"action",action:Action,riders?:Rider[1..20]}|{kind:"if",predicate:Predicate,then:Program,else:Program}|{kind:"priority",choices:Program[1..20]}',
   'Action={kind:"attack"|"force_save"|"move_toward",target:Target}|{kind:"retreat_toward",destination:{column:uint,row:uint}}|{kind:"use_action",action:"dash"|"disengage"|"dodge"|"end_turn"}',
+  'Rider={kind:"on_critical_hit",followUpAction:Action}; riders are fixed follow-ups and are never independent priority choices.',
   'Target={kind:"combatant",combatantId:string}|{kind:"nearest_enemy"}',
   'Predicate={kind:"life_is",combatantId:string,value:"living"|"dying"|"stable"|"dead"}|{kind:"hp_percent_below",combatantId:string,percent:(0,100]}|{kind:"distance_at_most",left:string,right:string,feet:number>=0}|{kind:"not",predicate:Predicate}|{kind:"all"|"any",predicates:Predicate[1..20]}',
   'Objects are strict: no unlisted fields. Recursive Program/Predicate depth is at most 20.',

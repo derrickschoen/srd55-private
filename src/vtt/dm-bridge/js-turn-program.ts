@@ -1,7 +1,14 @@
 import { gridDistance } from '../../combat/grid';
 import type { DmVisibleCombatant, DmVisibleEncounterState } from '../../combat/visibility';
 import type { CombatantId } from '../../combat/values';
-import type { DecisionProgram } from './round-plan-contract';
+import type {
+  DecisionProgram,
+  StandingConditionalRider,
+} from './round-plan-contract';
+import {
+  TURN_PROGRAM_LIBRARY_DOC,
+  expandTurnProgramLibraryCall,
+} from './turn-program-library';
 
 export const JS_TURN_PROGRAM_GRAMMAR = String.raw`program     ::= statement*
 statement   ::= "const" identifier "=" expression ";"
@@ -23,7 +30,11 @@ and calls to the documented API are accepted. Programs emit one plan with emit(.
 API: nearestEnemy(), lowestHp([combatants]), alliesWithin(feet), enemiesWithin(feet),
 hpPercent(combatant), distanceTo(combatant), attack(combatant), forceSave(combatant),
 move(combatant), retreat(column,row), dash(), disengage(), dodge(), endTurn(),
-priority(program,...), emit(program). No ambient JavaScript objects are available.`;
+priority(program,...), emit(program). attack(combatant, riderOnCrit(action)) attaches
+a fixed conditional follow-up. Cell selectors are strict {column, row} objects.
+No ambient JavaScript objects are available.
+
+${TURN_PROGRAM_LIBRARY_DOC}`;
 
 export const JS_TURN_PROGRAM_CANONICAL_EXAMPLE = `const target = nearestEnemy();
 if (target !== null) {
@@ -468,6 +479,7 @@ export function parseJsTurnProgram(source: string): JsTurnProgramAst {
 
 const COMBATANT_REFERENCE = Symbol('combatant-reference');
 const DECISION_PROGRAM_VALUE = Symbol('decision-program-value');
+const STANDING_RIDER_VALUE = Symbol('standing-rider-value');
 
 interface CombatantReference {
   readonly [COMBATANT_REFERENCE]: true;
@@ -477,6 +489,11 @@ interface CombatantReference {
 interface DecisionProgramValue {
   readonly [DECISION_PROGRAM_VALUE]: true;
   readonly program: DecisionProgram;
+}
+
+interface StandingRiderValue {
+  readonly [STANDING_RIDER_VALUE]: true;
+  readonly rider: StandingConditionalRider;
 }
 
 interface RuntimeArray extends ReadonlyArray<RuntimeValue> {}
@@ -489,6 +506,7 @@ type RuntimeValue =
   | string | number | boolean | null
   | CombatantReference
   | DecisionProgramValue
+  | StandingRiderValue
   | RuntimeArray
   | RuntimeObject;
 
@@ -682,6 +700,27 @@ class Interpreter {
 
   #call(expression: JsTurnProgramCallExpression, scope: Scope): RuntimeValue {
     const args = expression.arguments.map((argument) => this.#expression(argument, scope));
+    const libraryExpansion = expandTurnProgramLibraryCall(expression.callee, args, {
+      actorId: this.#actor.id,
+      target: (value, api) => {
+        const selected = this.#subject(value as RuntimeValue | undefined, api);
+        return {
+          selector: { kind: 'combatant', combatantId: selected.id },
+          combatantId: selected.id,
+        };
+      },
+      cell: (value, api) => this.#cell(value as RuntimeValue | undefined, api),
+      number: (value, label) => this.#number(value as RuntimeValue | undefined, label),
+      action: (value, api) => {
+        const program = this.#program(value as RuntimeValue | undefined, api);
+        if (program.kind !== 'action') {
+          throw new JsTurnProgramRuntimeError(`${api} followUpAction must be an action.`);
+        }
+        return program.action;
+      },
+    });
+    if (libraryExpansion?.kind === 'program') return this.#programValue(libraryExpansion.program);
+    if (libraryExpansion?.kind === 'rider') return this.#riderValue(libraryExpansion.rider);
     switch (expression.callee) {
       case 'nearestEnemy':
         this.#arity(expression.callee, args, 0);
@@ -706,7 +745,7 @@ class Interpreter {
         this.#arity(expression.callee, args, 1);
         return gridDistance(this.#actor.position, this.#subject(args[0], 'distanceTo').position);
       }
-      case 'attack': return this.#targetAction(expression.callee, args, 'attack');
+      case 'attack': return this.#attack(args);
       case 'forceSave': return this.#targetAction(expression.callee, args, 'force_save');
       case 'move': return this.#targetAction(expression.callee, args, 'move_toward');
       case 'retreat': {
@@ -806,6 +845,23 @@ class Interpreter {
     return value;
   }
 
+  #cell(value: RuntimeValue | undefined, api: string): { readonly column: number; readonly row: number } {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      throw new JsTurnProgramRuntimeError(`${api} requires a cell selector object.`);
+    }
+    const keys = Object.keys(value);
+    if (keys.length !== 2 || !keys.includes('column') || !keys.includes('row')) {
+      throw new JsTurnProgramRuntimeError(`${api} cell selector requires exactly column and row.`);
+    }
+    const cell = value as RuntimeObject;
+    const column = this.#number(cell.column, `${api} cell selector column`);
+    const row = this.#number(cell.row, `${api} cell selector row`);
+    if (!Number.isSafeInteger(column) || column < 0 || !Number.isSafeInteger(row) || row < 0) {
+      throw new JsTurnProgramRuntimeError(`${api} cell selector coordinates must be non-negative safe integers.`);
+    }
+    return { column, row };
+  }
+
   #program(value: RuntimeValue | undefined, api: string): DecisionProgram {
     if (
       typeof value !== 'object' || value === null || Array.isArray(value) ||
@@ -818,6 +874,34 @@ class Interpreter {
 
   #programValue(program: DecisionProgram): DecisionProgramValue {
     return Object.freeze({ [DECISION_PROGRAM_VALUE]: true as const, program });
+  }
+
+  #riderValue(rider: StandingConditionalRider): StandingRiderValue {
+    return Object.freeze({ [STANDING_RIDER_VALUE]: true as const, rider });
+  }
+
+  #rider(value: RuntimeValue | undefined, api: string): StandingConditionalRider {
+    if (
+      typeof value !== 'object' || value === null || Array.isArray(value) ||
+      !(STANDING_RIDER_VALUE in value) || value[STANDING_RIDER_VALUE] !== true
+    ) {
+      throw new JsTurnProgramRuntimeError(`${api} requires a standing conditional rider.`);
+    }
+    return value.rider;
+  }
+
+  #attack(args: readonly RuntimeValue[]): DecisionProgramValue {
+    if (args.length !== 1 && args.length !== 2) {
+      throw new JsTurnProgramRuntimeError(`attack expects 1 or 2 arguments; received ${String(args.length)}.`);
+    }
+    const subject = this.#subject(args[0], 'attack');
+    const action = {
+      kind: 'attack' as const,
+      target: { kind: 'combatant' as const, combatantId: subject.id },
+    };
+    return args.length === 1
+      ? this.#programValue({ kind: 'action', action })
+      : this.#programValue({ kind: 'action', action, riders: [this.#rider(args[1], 'attack')] });
   }
 
   #targetAction(
