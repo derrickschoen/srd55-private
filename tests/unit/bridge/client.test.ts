@@ -136,4 +136,40 @@ describe('localhost bridge client and failure containment', () => {
       new AbortController().signal,
     )).resolves.toBe('019c-fake-persisted-thread');
   });
+
+  it('FLEET-TELEMETRY accepts canonical model usage from the bridge response', async () => {
+    const telemetry: unknown[] = [];
+    const bridgeFetch: BridgeFetch = async () => response(true, 200, {
+      reply: { kind: 'round_plan' },
+      telemetry: {
+        modelId: 'gpt-5.6-terra',
+        reasoningEffort: 'medium',
+        buildId: 'bridge-build-17',
+        commit: 'abc123',
+        loadLevelTag: 'playable-exit',
+        latencyMs: 42,
+        tokenCounts: { input: 120, cachedInput: 80, output: 30, reasoning: 12 },
+      },
+    });
+    const client = new LocalhostDmBridgeClient(
+      'http://127.0.0.1:43173',
+      bridgeFetch,
+      () => undefined,
+      (value) => telemetry.push(value),
+    );
+    const request = {
+      kind: 'round_plan_request',
+      model: { model: 'gpt-5.6-terra', reasoningEffort: 'medium' },
+    } as unknown as DmBridgeRequest;
+    await client.exchange(request, new AbortController().signal);
+    expect(telemetry).toEqual([{
+      modelId: 'gpt-5.6-terra',
+      reasoningEffort: 'medium',
+      buildId: 'bridge-build-17',
+      commit: 'abc123',
+      loadLevelTag: 'playable-exit',
+      latencyMs: 42,
+      tokenCounts: { input: 120, cachedInput: 80, output: 30, reasoning: 12 },
+    }]);
+  });
 });

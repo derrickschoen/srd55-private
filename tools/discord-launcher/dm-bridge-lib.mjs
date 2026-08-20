@@ -89,6 +89,20 @@ export class ScriptedCodexExchange {
     return entry.reply;
   }
 
+  async exchangeWithTelemetry(request) {
+    const started = Date.now();
+    const reply = await this.exchange(request);
+    return {
+      reply,
+      telemetry: fleetTelemetry(request, Date.now() - started, {
+        input: 0,
+        cachedInput: 0,
+        output: 0,
+        reasoning: 0,
+      }),
+    };
+  }
+
   assertComplete() {
     if (this.index !== this.entries.length) throw new Error(`scripted transcript has ${this.entries.length - this.index} unused entries`);
   }
@@ -197,8 +211,66 @@ function parseCodexThreadId(stdout) {
   throw new Error('codex CLI returned no persistent thread id');
 }
 
+function usageCandidate(value) {
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const found = usageCandidate(entry);
+      if (found !== null) return found;
+    }
+    return null;
+  }
+  if (typeof value !== 'object' || value === null) return null;
+  const input = value.input_tokens ?? value.inputTokens;
+  const output = value.output_tokens ?? value.outputTokens;
+  if (Number.isSafeInteger(input) && input >= 0 && Number.isSafeInteger(output) && output >= 0) {
+    const cached = value.cached_input_tokens ?? value.cachedInputTokens ?? 0;
+    const reasoning = value.reasoning_tokens ?? value.reasoningTokens ?? 0;
+    return {
+      input,
+      cachedInput: Number.isSafeInteger(cached) && cached >= 0 ? cached : 0,
+      output,
+      reasoning: Number.isSafeInteger(reasoning) && reasoning >= 0 ? reasoning : 0,
+    };
+  }
+  for (const entry of Object.values(value)) {
+    const found = usageCandidate(entry);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
+function parseCodexUsage(stdout) {
+  let latest = null;
+  for (const line of stdout.split('\n').filter(Boolean)) {
+    try {
+      latest = usageCandidate(JSON.parse(line)) ?? latest;
+    } catch {
+      continue;
+    }
+  }
+  return latest ?? { input: 0, cachedInput: 0, output: 0, reasoning: 0 };
+}
+
+function fleetTelemetry(request, latencyMs, tokenCounts) {
+  const input = object(request, 'request');
+  const model = object(input.model, 'request.model');
+  if (typeof model.model !== 'string' || typeof model.reasoningEffort !== 'string') {
+    throw new TypeError('request.model is malformed');
+  }
+  return {
+    modelId: model.model,
+    reasoningEffort: model.reasoningEffort,
+    buildId: process.env.DM_BRIDGE_BUILD_ID ?? 'local-dm-bridge',
+    commit: process.env.DM_BRIDGE_COMMIT ?? 'unknown-local-commit',
+    loadLevelTag: process.env.DM_BRIDGE_LOAD_LEVEL ?? 'interactive',
+    latencyMs,
+    tokenCounts,
+  };
+}
+
 function runCodexProcess(binary, args, options) {
   return new Promise((resolve, reject) => {
+    const started = Date.now();
     const child = spawn(binary, args, {
       cwd: options.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -225,7 +297,7 @@ function runCodexProcess(binary, args, options) {
     child.stderr.on('data', (chunk) => { stderr = append(stderr, chunk); });
     child.once('error', (error) => finish(() => reject(error)));
     child.once('exit', (code, signal) => finish(() => {
-      if (code === 0) resolve({ stdout, stderr });
+      if (code === 0) resolve({ stdout, stderr, latencyMs: Date.now() - started });
       else reject(new Error(`codex CLI exited with code ${code ?? 'null'} signal ${signal ?? 'none'}: ${stderr}`));
     }));
     const timeout = setTimeout(() => {
@@ -246,6 +318,10 @@ export class CodexCliExchange {
   }
 
   async exchange(request) {
+    return (await this.exchangeWithTelemetry(request)).reply;
+  }
+
+  async exchangeWithTelemetry(request) {
     const input = object(request, 'request');
     const model = object(input.model, 'request.model');
     if (typeof model.model !== 'string' || typeof model.reasoningEffort !== 'string') throw new TypeError('request.model is malformed');
@@ -268,7 +344,10 @@ export class CodexCliExchange {
       input: prompt,
       timeoutMs: this.timeoutMs,
     });
-    return parseCodexJsonLines(result.stdout);
+    return {
+      reply: parseCodexJsonLines(result.stdout),
+      telemetry: fleetTelemetry(request, result.latencyMs, parseCodexUsage(result.stdout)),
+    };
   }
 
   async createSession(model) {
@@ -296,4 +375,14 @@ export async function loadTranscript(path) {
   return JSON.parse(await readFile(resolve(path), 'utf8'));
 }
 
-export const dmBridgeLibInternals = { canonical, findAgentText, parseCodexJsonLines, parseCodexThreadId, requestSessionId, runCodexProcess, safeStreamName };
+export const dmBridgeLibInternals = {
+  canonical,
+  findAgentText,
+  fleetTelemetry,
+  parseCodexJsonLines,
+  parseCodexThreadId,
+  parseCodexUsage,
+  requestSessionId,
+  runCodexProcess,
+  safeStreamName,
+};

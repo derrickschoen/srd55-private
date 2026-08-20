@@ -17,7 +17,9 @@ const transcriptPath = process.env.DM_BRIDGE_TRANSCRIPT;
 const rawExchange = transcriptPath === undefined
   ? new CodexCliExchange({ cwd: process.cwd() })
   : new ScriptedCodexExchange(await loadTranscript(transcriptPath));
-const exchange = new FileExchangeCache(resolve(dataDirectory, 'exchange-cache'), rawExchange);
+const exchange = new FileExchangeCache(resolve(dataDirectory, 'exchange-cache'), {
+  exchange: (request) => rawExchange.exchangeWithTelemetry(request),
+});
 const sessionExchange = new FileExchangeCache(
   resolve(dataDirectory, 'session-cache'),
   {
@@ -88,7 +90,7 @@ const server = createServer(async (request, response) => {
   }
   try {
     if (request.url === '/dm/session') return json(response, 200, { reply: await sessionExchange.exchangeRequest(body) }, origin);
-    if (request.url === '/dm/exchange') return json(response, 200, { reply: await exchange.exchangeRequest(body) }, origin);
+    if (request.url === '/dm/exchange') return json(response, 200, await exchange.exchangeRequest(body), origin);
     if (request.url === '/dm/mirror') return json(response, 200, { result: await mirror.append(body) }, origin);
     return json(response, 404, { error: 'not_found' }, origin);
   } catch (error) {

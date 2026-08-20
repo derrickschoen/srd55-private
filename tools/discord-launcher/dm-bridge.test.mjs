@@ -5,7 +5,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { CodexCliExchange, FileExchangeCache, FileRevisionMirror, ScriptedCodexExchange } from './dm-bridge-lib.mjs';
+import { CodexCliExchange, FileExchangeCache, FileRevisionMirror, ScriptedCodexExchange, dmBridgeLibInternals } from './dm-bridge-lib.mjs';
 
 async function availablePort() {
   const server = createServer();
@@ -85,6 +85,19 @@ process.stdout.write(JSON.stringify({ type: 'item.completed', item: { type: 'age
   } finally {
     await rm(directory, { recursive: true });
   }
+});
+
+test('bridge fleet telemetry decodes first-class usage fields from Codex JSON events', () => {
+  const stdout = JSON.stringify({
+    type: 'turn.completed',
+    usage: { input_tokens: 120, cached_input_tokens: 80, output_tokens: 30, reasoning_tokens: 12 },
+  });
+  assert.deepEqual(dmBridgeLibInternals.parseCodexUsage(stdout), {
+    input: 120,
+    cachedInput: 80,
+    output: 30,
+    reasoning: 12,
+  });
 });
 
 test('file mirror appends, de-duplicates, and replays a contiguous revision stream', async () => {
@@ -191,10 +204,22 @@ test('localhost process uses the fake transcript for exchange and the append-onl
           requestId,
           encounterId: 'encounter:process-cache',
           codexSessionId: 'codex:persisted-process-session',
+          model: { model: 'gpt-5.6-terra', reasoningEffort: 'medium' },
         }),
       });
       assert.equal(response.status, 200);
-      assert.deepEqual(await response.json(), { reply: { kind: 'round_plan', marker } });
+      const body = await response.json();
+      assert.deepEqual(body.reply, { kind: 'round_plan', marker });
+      assert.deepEqual(body.telemetry, {
+        modelId: 'gpt-5.6-terra',
+        reasoningEffort: 'medium',
+        buildId: 'local-dm-bridge',
+        commit: 'unknown-local-commit',
+        loadLevelTag: 'interactive',
+        latencyMs: body.telemetry.latencyMs,
+        tokenCounts: { input: 0, cachedInput: 0, output: 0, reasoning: 0 },
+      });
+      assert.ok(Number.isFinite(body.telemetry.latencyMs) && body.telemetry.latencyMs >= 0);
     }
     const repeated = await fetch(`http://127.0.0.1:${port}/dm/exchange`, {
       method: 'POST',
@@ -204,6 +229,7 @@ test('localhost process uses the fake transcript for exchange and the append-onl
         requestId: 'request:1',
         encounterId: 'encounter:process-cache',
         codexSessionId: 'codex:persisted-process-session',
+        model: { model: 'gpt-5.6-terra', reasoningEffort: 'medium' },
       }),
     });
     assert.equal(repeated.status, 200);
