@@ -108,7 +108,9 @@ function requestedMonsterIds(request: DmBridgeRequest): readonly CombatantId[] {
     ? request.livingMonsterIds
     : request.kind === 'monster_reconsult_request'
       ? [request.monsterId]
-      : request.requestedMonsterIds;
+      : request.kind === 'round_plan_correction_request'
+        ? request.requestedMonsterIds
+        : request.proposal.monsters.map((entry) => entry.monsterId);
 }
 
 function jsReply(request: DmBridgeRequest, source: string): unknown {

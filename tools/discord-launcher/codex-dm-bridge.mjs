@@ -4,6 +4,7 @@ import {
   CodexCliExchange,
   FileExchangeCache,
   FileRevisionMirror,
+  ProjectionReconstructor,
   ScriptedCodexExchange,
   loadTranscript,
 } from './dm-bridge-lib.mjs';
@@ -17,6 +18,7 @@ if (!Number.isSafeInteger(requestTimeoutMs) || requestTimeoutMs < 1) {
 const maxBodyBytes = 16 * 1024 * 1024;
 const dataDirectory = resolve(process.env.DM_BRIDGE_DATA_DIR ?? '.vtt-dm-bridge');
 const mirror = new FileRevisionMirror(dataDirectory);
+const projectionReconstructor = new ProjectionReconstructor();
 const transcriptPath = process.env.DM_BRIDGE_TRANSCRIPT;
 const rawExchange = transcriptPath === undefined
   ? new CodexCliExchange({
@@ -98,7 +100,11 @@ const server = createServer(async (request, response) => {
   }
   try {
     if (request.url === '/dm/session') return json(response, 200, { reply: await sessionExchange.exchangeRequest(body) }, origin);
-    if (request.url === '/dm/exchange') return json(response, 200, await exchange.exchangeRequest(body), origin);
+    if (request.url === '/dm/exchange') {
+      const reconstructed = projectionReconstructor.reconstruct(body);
+      if (reconstructed.kind === 'full_projection_required') return json(response, 200, reconstructed, origin);
+      return json(response, 200, await exchange.exchangeRequest(reconstructed.request), origin);
+    }
     if (request.url === '/dm/mirror') return json(response, 200, { result: await mirror.append(body) }, origin);
     return json(response, 404, { error: 'not_found' }, origin);
   } catch (error) {

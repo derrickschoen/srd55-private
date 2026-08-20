@@ -42,6 +42,7 @@ import type {
   DmBridgeExchange,
   DmBridgeModelConfig,
 } from './dm-bridge/contracts';
+import type { SteeringCoordinatorMode, SteeringTelemetry } from './dm-bridge/steering';
 import {
   projectDmBoard,
   projectPlayerBoard,
@@ -162,6 +163,8 @@ export class DmEncounterHost {
   #closed = false;
   #bridgeFailureGuard: BridgeFailureGuard | null = null;
   #roundPlanSession: DmRoundPlanSession | null = null;
+  readonly #steeringMode: SteeringCoordinatorMode;
+  readonly #onSteeringTelemetry: (telemetry: SteeringTelemetry) => void;
 
   constructor(
     sessionKey: string,
@@ -171,16 +174,24 @@ export class DmEncounterHost {
       readonly bridge?: DmBridgeConnection;
       readonly dmModel?: DmBridgeModelConfig;
       readonly codexSessionId?: ReturnType<typeof codexSessionId>;
+      readonly steeringMode?: SteeringCoordinatorMode;
+      readonly onSteeringTelemetry?: (telemetry: SteeringTelemetry) => void;
     } = {},
   ) {
     this.sessionId = encounterSessionId(sessionKey);
     this.#store = store;
+    this.#steeringMode = options.steeringMode ?? { kind: 'full_model' };
+    this.#onSteeringTelemetry = options.onSteeringTelemetry ?? (() => undefined);
     if (options.bridge !== undefined) {
       this.#mirror.connect(options.bridge);
       this.#roundPlanSession = new DmRoundPlanSession(
         options.bridge,
         options.dmModel,
         (error) => this.exportAndAbortAfterBridgeFailure(error),
+        'json_ast',
+        {},
+        this.#steeringMode,
+        this.#onSteeringTelemetry,
       );
     }
     const agentController = this.#roundPlanSession === null
@@ -293,6 +304,10 @@ export class DmEncounterHost {
       bridge,
       model,
       (error) => this.exportAndAbortAfterBridgeFailure(error),
+      'json_ast',
+      {},
+      this.#steeringMode,
+      this.#onSteeringTelemetry,
     );
     for (const subject of this.#coordinator.state().combatants) {
       if (subject.profile.kind !== 'monster' || subject.life !== 'living') continue;
