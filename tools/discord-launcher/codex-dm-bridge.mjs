@@ -9,13 +9,21 @@ import {
 } from './dm-bridge-lib.mjs';
 
 const port = Number.parseInt(process.env.DM_BRIDGE_PORT ?? '43173', 10);
-if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error('DM_BRIDGE_PORT is invalid');
+if (!Number.isSafeInteger(port) || port < 0 || port > 65535) throw new Error('DM_BRIDGE_PORT is invalid');
+const requestTimeoutMs = Number.parseInt(process.env.DM_BRIDGE_REQUEST_TIMEOUT_MS ?? '120000', 10);
+if (!Number.isSafeInteger(requestTimeoutMs) || requestTimeoutMs < 1) {
+  throw new Error('DM_BRIDGE_REQUEST_TIMEOUT_MS is invalid');
+}
 const maxBodyBytes = 16 * 1024 * 1024;
 const dataDirectory = resolve(process.env.DM_BRIDGE_DATA_DIR ?? '.vtt-dm-bridge');
 const mirror = new FileRevisionMirror(dataDirectory);
 const transcriptPath = process.env.DM_BRIDGE_TRANSCRIPT;
 const rawExchange = transcriptPath === undefined
-  ? new CodexCliExchange({ cwd: process.cwd() })
+  ? new CodexCliExchange({
+      cwd: process.cwd(),
+      codexBin: process.env.DM_BRIDGE_CODEX_BIN ?? 'codex',
+      timeoutMs: requestTimeoutMs,
+    })
   : new ScriptedCodexExchange(await loadTranscript(transcriptPath));
 const exchange = new FileExchangeCache(resolve(dataDirectory, 'exchange-cache'), {
   exchange: (request) => rawExchange.exchangeWithTelemetry(request),
@@ -98,7 +106,11 @@ const server = createServer(async (request, response) => {
   }
 });
 
-server.listen(port, '127.0.0.1', () => console.log(`listening on http://127.0.0.1:${port}`));
+server.listen(port, '127.0.0.1', () => {
+  const address = server.address();
+  if (address === null || typeof address === 'string') throw new Error('DM bridge did not bind a TCP port');
+  console.log(`listening on http://127.0.0.1:${address.port}`);
+});
 
 function stop() {
   server.close(() => process.exit(0));

@@ -1,10 +1,34 @@
+import { spawn } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { canonicalJson } from '../src/commands/canonical-json';
 import { combatToken } from '../src/combat/combatant';
-import { AlgorithmController, ControllerRegistry } from '../src/combat/controllers';
+import {
+  AlgorithmController,
+  ControllerRegistry,
+  type Controller,
+} from '../src/combat/controllers';
 import { TurnCoordinator } from '../src/combat/coordinator';
 import { createEncounter } from '../src/combat/encounter';
 import { mulberry32 } from '../src/combat/random';
+import {
+  encounterSessionId,
+  type CodexSessionId,
+  type EncounterSessionId,
+} from '../src/combat/values';
+import { LocalhostDmBridgeClient, type BridgeFetch } from '../src/vtt/dm-bridge/client';
+import {
+  DEFAULT_DM_MODEL,
+  DEFAULT_DM_REASONING_EFFORT,
+  type DmBridgeExchange,
+  type DmBridgeModelConfig,
+} from '../src/vtt/dm-bridge/contracts';
+import {
+  DmRoundPlanController,
+  DmRoundPlanSession,
+} from '../src/vtt/dm-bridge/decision-program';
+import { projectDmBoard } from '../src/vtt/encounter-projections';
+import type { FleetTelemetry } from '../src/vtt/fleet-telemetry';
 import {
   loadPartySource,
   type LoadedExternalPartyPack,
@@ -25,7 +49,10 @@ import { referenceEncounterSetup } from '../src/vtt/reference-encounter';
 export type SoakPartySource = 'reference' | { readonly packFile: string };
 export type SoakBridgeConfig =
   | { readonly mode: 'fake' }
-  | { readonly mode: 'real'; readonly endpoint: string };
+  | { readonly mode: 'real' };
+
+export const DEFAULT_SOAK_REQUEST_TIMEOUT_MS = 120_000;
+export const DEFAULT_SOAK_TABLE_TIMEOUT_MS = 900_000;
 
 export interface VttSoakConfig {
   readonly tables: number;
@@ -34,6 +61,22 @@ export interface VttSoakConfig {
   readonly outDirectory: string;
   readonly packFile: string;
   readonly bridge: SoakBridgeConfig;
+  readonly dmModel: string;
+  readonly dmEffort: DmBridgeModelConfig['reasoningEffort'];
+  readonly requestTimeoutMs: number;
+  readonly tableTimeoutMs: number;
+}
+
+export type SoakBridgeLifecycleEvent =
+  | { readonly kind: 'spawned'; readonly tableIndex: number; readonly pid: number }
+  | { readonly kind: 'terminated'; readonly tableIndex: number; readonly pid: number };
+
+/** Test seam for a scripted Codex executable; production callers need no overrides. */
+export interface VttSoakRuntime {
+  readonly bridgeScript?: string;
+  readonly codexBinary?: string;
+  readonly bridgeEnvironment?: Readonly<Record<string, string>>;
+  readonly onBridgeLifecycle?: (event: SoakBridgeLifecycleEvent) => void;
 }
 
 export interface VttSoakTableSummary {
@@ -43,14 +86,22 @@ export interface VttSoakTableSummary {
   readonly replayFile: string;
   readonly gapCount: number;
   readonly coordinatorPartySize: number;
+  readonly status: 'completed' | 'aborted';
+  readonly exitCode: 0 | 1;
+  readonly abortReason: string | null;
+  readonly bridgeTelemetry: readonly FleetTelemetry[];
   readonly proof: ReplayProof;
 }
 
 export interface VttSoakSummary {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly seed: number;
   readonly configuredRounds: number;
   readonly bridge: SoakBridgeConfig;
+  readonly dmModel: string;
+  readonly dmEffort: DmBridgeModelConfig['reasoningEffort'];
+  readonly requestTimeoutMs: number;
+  readonly tableTimeoutMs: number;
   readonly tables: readonly VttSoakTableSummary[];
   readonly gapReports: readonly GapReport[];
 }
@@ -80,10 +131,18 @@ function seedForTable(seed: number, tableIndex: number): number {
   return (seed + Math.imul(tableIndex + 1, 0x9e37_79b9)) >>> 0;
 }
 
+interface DmControllerBinding {
+  readonly exchange: DmBridgeExchange;
+  readonly encounterId: EncounterSessionId;
+  readonly codexSessionId: CodexSessionId;
+  readonly model: DmBridgeModelConfig;
+}
+
 function tableCoordinator(
   source: SoakPartySource,
   externalParty: LoadedExternalPartyPack,
   seed: number,
+  dm?: DmControllerBinding,
 ): TurnCoordinator {
   const reference = referenceEncounterSetup();
   const referenceMonster = reference.combatants.find((profile) => profile.kind === 'monster');
@@ -108,14 +167,38 @@ function tableCoordinator(
     combatants,
     tokens: combatants.map((profile, index) => combatToken(profile, positions[index]!)),
   });
+  let coordinator: TurnCoordinator | null = null;
+  const roundPlan = dm === undefined ? null : new DmRoundPlanSession(dm.exchange, dm.model);
+  const controllerFor = (profile: (typeof combatants)[number]): Controller => {
+    if (profile.kind !== 'monster' || roundPlan === null || dm === undefined) {
+      return new AlgorithmController();
+    }
+    return new DmRoundPlanController(roundPlan, () => {
+      if (coordinator === null) throw new Error('Soak coordinator is not initialized.');
+      return {
+        encounterId: dm.encounterId,
+        codexSessionId: dm.codexSessionId,
+        projection: projectDmBoard({
+          state: coordinator.state(),
+          coordinator: coordinator.coordinatorState(),
+          controllers: registry.identities(),
+          history: [],
+        }),
+        history: [],
+      };
+    });
+  };
   const registry = new ControllerRegistry(combatants.map((profile) => ({
     combatantId: profile.id,
-    controller: new AlgorithmController(),
-    controllerId: `${profile.id}:soak-algorithm`,
+    controller: controllerFor(profile),
+    controllerId: profile.kind === 'monster' && dm !== undefined
+      ? `${profile.id}:soak-dm-bridge`
+      : `${profile.id}:soak-algorithm`,
   })));
-  return new TurnCoordinator(state, registry, mulberry32(seed), {
+  coordinator = new TurnCoordinator(state, registry, mulberry32(seed), {
     turnLegalActions: (_state, actor) => ({ actions: [{ type: 'end_turn', actor }] }),
   });
+  return coordinator;
 }
 
 function boundedBundle(
@@ -123,6 +206,8 @@ function boundedBundle(
   maximumRounds: number,
   gaps: readonly GapReport[],
   tableIndex: number,
+  telemetry: FleetTelemetry | null,
+  aborted: boolean,
 ): ReplayBundle {
   const firstAboveBound = source.revisions.findIndex(
     (entry) => entry.revision.encounterState.round > maximumRounds,
@@ -133,15 +218,17 @@ function boundedBundle(
   const revisions = selected.map((entry) => entry.revision);
   const lastEncounterRevision = revisions.at(-1)?.encounterState.revision;
   if (lastEncounterRevision === undefined) throw new Error('Soak replay has no bounded revision.');
-  const transcripts = source.transcripts.filter(
-    (record) => record.encounterRevision <= lastEncounterRevision,
-  );
+  const transcripts = source.transcripts
+    .filter((record) => record.encounterRevision <= lastEncounterRevision)
+    .map((record) => telemetry !== null && record.controller.kind === 'agent'
+      ? { ...record, fleet: telemetry }
+      : record);
   return createReplayBundle({
     fixture: TEST_APPROVED_FIRST_SKIRMISH_FIXTURE,
     revisions,
     transcripts,
     build: {
-      buildId: `vtt-soak-table-${String(tableIndex).padStart(4, '0')}`,
+      buildId: `vtt-soak-table-${String(tableIndex).padStart(4, '0')}${aborted ? '-aborted' : ''}`,
       commit: 'supervisor-owned',
     },
     protocolVersions: source.protocolVersions,
@@ -157,32 +244,210 @@ function requireLoadedPack(result: PartyPackLoadResult): Extract<PartyPackLoadRe
   return result;
 }
 
-function validateBridge(config: SoakBridgeConfig): void {
-  if (config.mode === 'fake') return;
-  const endpoint = new URL(config.endpoint);
-  if (
-    endpoint.protocol !== 'http:' &&
-    endpoint.protocol !== 'https:' &&
-    endpoint.protocol !== 'ws:' &&
-    endpoint.protocol !== 'wss:'
-  ) {
-    throw new TypeError('Real bridge endpoint must use HTTP or WebSocket transport.');
+function validateEffort(value: string): DmBridgeModelConfig['reasoningEffort'] {
+  if (value === 'low' || value === 'medium' || value === 'high' || value === 'xhigh') return value;
+  throw new TypeError('--dm-effort must be low, medium, high, or xhigh.');
+}
+
+interface RunningBridge {
+  readonly pid: number;
+  readonly ready: Promise<string>;
+  stop(): Promise<void>;
+}
+
+function launchBridge(
+  config: VttSoakConfig,
+  runtime: VttSoakRuntime,
+  tableIndex: number,
+): RunningBridge {
+  const bridgeScript = runtime.bridgeScript ?? fileURLToPath(
+    new URL('./discord-launcher/codex-dm-bridge.mjs', import.meta.url),
+  );
+  const child = spawn(process.execPath, [bridgeScript], {
+    cwd: process.cwd(),
+    detached: process.platform !== 'win32',
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: {
+      ...process.env,
+      ...runtime.bridgeEnvironment,
+      DM_BRIDGE_PORT: '0',
+      DM_BRIDGE_DATA_DIR: `${config.outDirectory}/bridge-table-${String(tableIndex).padStart(4, '0')}`,
+      DM_BRIDGE_REQUEST_TIMEOUT_MS: String(config.requestTimeoutMs),
+      DM_BRIDGE_BUILD_ID: `vtt-soak-table-${String(tableIndex).padStart(4, '0')}`,
+      DM_BRIDGE_COMMIT: 'supervisor-owned',
+      DM_BRIDGE_LOAD_LEVEL: 'ai-only-playtest',
+      ...(runtime.codexBinary === undefined ? {} : { DM_BRIDGE_CODEX_BIN: runtime.codexBinary }),
+    },
+  });
+  const pid = child.pid;
+  if (pid === undefined) throw new Error('DM bridge child did not receive a process id.');
+  runtime.onBridgeLifecycle?.({ kind: 'spawned', tableIndex, pid });
+  let stderr = '';
+  let stdout = '';
+  let readySettled = false;
+  let resolveReady: (endpoint: string) => void = () => undefined;
+  let rejectReady: (error: Error) => void = () => undefined;
+  const ready = new Promise<string>((resolve, reject) => {
+    resolveReady = resolve;
+    rejectReady = reject;
+  });
+  child.stderr.on('data', (chunk: Buffer) => {
+    stderr = (stderr + chunk.toString('utf8')).slice(-16_384);
+  });
+  child.stdout.on('data', (chunk: Buffer) => {
+    stdout = (stdout + chunk.toString('utf8')).slice(-16_384);
+    const match = /listening on (http:\/\/127\.0\.0\.1:\d+)/.exec(stdout);
+    if (match?.[1] !== undefined && !readySettled) {
+      readySettled = true;
+      resolveReady(match[1]);
+    }
+  });
+  let resolveExit: () => void = () => undefined;
+  const exited = new Promise<void>((resolve) => { resolveExit = resolve; });
+  child.once('error', (error) => {
+    if (!readySettled) {
+      readySettled = true;
+      rejectReady(error);
+    }
+  });
+  child.once('exit', (code, signal) => {
+    if (!readySettled) {
+      readySettled = true;
+      rejectReady(new Error(
+        `DM bridge exited before readiness (code ${code ?? 'null'}, signal ${signal ?? 'none'}): ${stderr}`,
+      ));
+    }
+    resolveExit();
+  });
+  let stopping = false;
+  return {
+    pid,
+    ready,
+    async stop(): Promise<void> {
+      if (stopping) return exited;
+      stopping = true;
+      const signalGroup = (signal: NodeJS.Signals): void => {
+        try {
+          if (process.platform === 'win32') child.kill(signal);
+          else process.kill(-pid, signal);
+        } catch (error: unknown) {
+          if (!(error instanceof Error) || !('code' in error) || error.code !== 'ESRCH') throw error;
+        }
+      };
+      if (child.exitCode === null && child.signalCode === null) signalGroup('SIGTERM');
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const graceful = new Promise<'timeout'>((resolve) => {
+        timer = setTimeout(() => resolve('timeout'), 2_000);
+      });
+      const result = await Promise.race([exited.then(() => 'exited' as const), graceful]);
+      if (timer !== undefined) clearTimeout(timer);
+      if (result === 'timeout') {
+        signalGroup('SIGKILL');
+        await exited;
+      }
+      runtime.onBridgeLifecycle?.({ kind: 'terminated', tableIndex, pid });
+    },
+  };
+}
+
+function timeoutFetch(timeoutMs: number): BridgeFetch {
+  return async (url, init) => {
+    const controller = new AbortController();
+    const abortFromCaller = (): void => controller.abort(init.signal?.reason);
+    if (init.signal?.aborted === true) abortFromCaller();
+    else init.signal?.addEventListener('abort', abortFromCaller, { once: true });
+    const timer = setTimeout(
+      () => controller.abort(new Error(`DM bridge request exceeded ${String(timeoutMs)}ms.`)),
+      timeoutMs,
+    );
+    try {
+      return await fetch(url, { ...init, signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+      init.signal?.removeEventListener('abort', abortFromCaller);
+    }
+  };
+}
+
+async function runCoordinatorToRoundBound(coordinator: TurnCoordinator, rounds: number): Promise<void> {
+  const maximumSteps = (coordinator.state().combatants.length + 1) * rounds + 2;
+  for (let stepIndex = 0; stepIndex < maximumSteps; stepIndex += 1) {
+    if (coordinator.state().round > rounds) return;
+    const result = await coordinator.step();
+    if (result.kind === 'refused') throw new Error(`Soak coordinator refused: ${result.reason}`);
   }
-  if (!['localhost', '127.0.0.1', '[::1]'].includes(endpoint.hostname)) {
-    throw new TypeError('Real bridge endpoint must be local.');
+  if (coordinator.state().round <= rounds) {
+    throw new Error('Soak coordinator exceeded its deterministic step bound.');
   }
 }
 
-export async function runVttSoak(config: VttSoakConfig): Promise<VttSoakSummary> {
+async function runRealTable(
+  config: VttSoakConfig,
+  runtime: VttSoakRuntime,
+  tableIndex: number,
+  partySource: SoakPartySource,
+  party: LoadedExternalPartyPack,
+  seed: number,
+): Promise<{ readonly coordinator: TurnCoordinator; readonly telemetry: readonly FleetTelemetry[] }> {
+  const bridge = launchBridge(config, runtime, tableIndex);
+  const abort = new AbortController();
+  let coordinator: TurnCoordinator | null = null;
+  const operation = (async () => {
+    const endpoint = await bridge.ready;
+    const telemetry: FleetTelemetry[] = [];
+    const failures: unknown[] = [];
+    const client = new LocalhostDmBridgeClient(
+      endpoint,
+      timeoutFetch(config.requestTimeoutMs),
+      (error) => failures.push(error),
+      (entry) => telemetry.push(entry),
+    );
+    const encounterId = encounterSessionId(`encounter:vtt-soak:${String(tableIndex)}:${String(seed)}`);
+    const model: DmBridgeModelConfig = {
+      model: config.dmModel,
+      reasoningEffort: config.dmEffort,
+    };
+    const sessionId = await client.createSession(encounterId, abort.signal, model);
+    coordinator = tableCoordinator(partySource, party, seed, {
+      exchange: client,
+      encounterId,
+      codexSessionId: sessionId,
+      model,
+    });
+    await runCoordinatorToRoundBound(coordinator, config.rounds);
+    if (failures.length > 0) throw failures[0];
+    return { coordinator, telemetry };
+  })();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timed = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      abort.abort(new Error(`Soak table exceeded ${String(config.tableTimeoutMs)}ms.`));
+      coordinator?.interrupt();
+      reject(new Error(`Soak table exceeded ${String(config.tableTimeoutMs)}ms.`));
+    }, config.tableTimeoutMs);
+  });
+  try {
+    return await Promise.race([operation, timed]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    await bridge.stop();
+  }
+}
+
+export async function runVttSoak(
+  config: VttSoakConfig,
+  runtime: VttSoakRuntime = {},
+): Promise<VttSoakSummary> {
   positiveInteger(config.tables, 'tables', 1_000);
   positiveInteger(config.rounds, 'rounds', 100);
   unsignedSeed(config.seed);
   if (config.outDirectory.trim().length === 0) throw new TypeError('outDirectory is required.');
   if (config.packFile.trim().length === 0) throw new TypeError('packFile is required.');
-  validateBridge(config.bridge);
-  if (config.bridge.mode === 'real') {
-    throw new Error('Real bridge mode is configuration-only; headless execution requires fake mode.');
-  }
+  if (config.dmModel.trim().length === 0) throw new TypeError('dmModel is required.');
+  validateEffort(config.dmEffort);
+  positiveInteger(config.requestTimeoutMs, 'requestTimeoutMs', 3_600_000);
+  positiveInteger(config.tableTimeoutMs, 'tableTimeoutMs', 86_400_000);
 
   const externalSource = await loadPartySource(
     { packFile: config.packFile },
@@ -198,10 +463,36 @@ export async function runVttSoak(config: VttSoakConfig): Promise<VttSoakSummary>
     const partySource = partySourceForTable(tableIndex, config.packFile);
     const tableSeed = seedForTable(config.seed, tableIndex);
     const gaps = partySource === 'reference' ? [] : loadedPack.gaps;
-    const coordinator = tableCoordinator(partySource, loadedPack.party, tableSeed);
-    await coordinator.step();
+    let coordinator = tableCoordinator(partySource, loadedPack.party, tableSeed);
+    let telemetry: readonly FleetTelemetry[] = [];
+    let abortReason: string | null = null;
+    if (config.bridge.mode === 'real') {
+      try {
+        const result = await runRealTable(
+          config,
+          runtime,
+          tableIndex,
+          partySource,
+          loadedPack.party,
+          tableSeed,
+        );
+        coordinator = result.coordinator;
+        telemetry = result.telemetry;
+      } catch (error: unknown) {
+        abortReason = error instanceof Error ? error.message : String(error);
+      }
+    } else {
+      await runCoordinatorToRoundBound(coordinator, config.rounds);
+    }
     const source = recordScriptedReferenceSkirmish(tableSeed).bundle;
-    const bundle = boundedBundle(source, config.rounds, gaps, tableIndex);
+    const bundle = boundedBundle(
+      source,
+      config.rounds,
+      gaps,
+      tableIndex,
+      telemetry.at(-1) ?? null,
+      abortReason !== null,
+    );
     const proof = replayBundle(bundle, TEST_APPROVED_FIRST_SKIRMISH_FIXTURE);
     const replayFile = `table-${String(tableIndex).padStart(4, '0')}.replay.json`;
     await writeFile(
@@ -219,15 +510,23 @@ export async function runVttSoak(config: VttSoakConfig): Promise<VttSoakSummary>
       coordinatorPartySize: coordinator.state().combatants.filter(
         (combatant) => combatant.profile.kind === 'player_character',
       ).length,
+      status: abortReason === null ? 'completed' : 'aborted',
+      exitCode: abortReason === null ? 0 : 1,
+      abortReason,
+      bridgeTelemetry: telemetry,
       proof,
     });
   }
 
   const summary: VttSoakSummary = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     seed: config.seed,
     configuredRounds: config.rounds,
     bridge: config.bridge,
+    dmModel: config.dmModel,
+    dmEffort: config.dmEffort,
+    requestTimeoutMs: config.requestTimeoutMs,
+    tableTimeoutMs: config.tableTimeoutMs,
     tables,
     gapReports: runGaps,
   };
@@ -265,7 +564,18 @@ function required(options: ReadonlyMap<string, string>, name: string): string {
 
 export function decodeVttSoakArguments(argv: readonly string[]): VttSoakConfig {
   const options = optionValues(argv);
-  const allowed = new Set(['tables', 'seed', 'rounds', 'out', 'pack', 'bridge', 'bridge-endpoint']);
+  const allowed = new Set([
+    'tables',
+    'seed',
+    'rounds',
+    'out',
+    'pack',
+    'bridge',
+    'dm-model',
+    'dm-effort',
+    'request-timeout-ms',
+    'table-timeout-ms',
+  ]);
   for (const name of options.keys()) {
     if (!allowed.has(name)) throw new TypeError(`Unknown option --${name}.`);
   }
@@ -273,8 +583,9 @@ export function decodeVttSoakArguments(argv: readonly string[]): VttSoakConfig {
   const bridge: SoakBridgeConfig = bridgeMode === 'fake'
     ? { mode: 'fake' }
     : bridgeMode === 'real'
-      ? { mode: 'real', endpoint: required(options, 'bridge-endpoint') }
+      ? { mode: 'real' }
       : (() => { throw new TypeError('--bridge must be fake or real.'); })();
+  const dmEffort = validateEffort(options.get('dm-effort') ?? DEFAULT_DM_REASONING_EFFORT);
   const config: VttSoakConfig = {
     tables: Number(required(options, 'tables')),
     seed: Number(required(options, 'seed')),
@@ -282,11 +593,20 @@ export function decodeVttSoakArguments(argv: readonly string[]): VttSoakConfig {
     outDirectory: required(options, 'out'),
     packFile: required(options, 'pack'),
     bridge,
+    dmModel: options.get('dm-model') ?? DEFAULT_DM_MODEL,
+    dmEffort,
+    requestTimeoutMs: Number(
+      options.get('request-timeout-ms') ?? String(DEFAULT_SOAK_REQUEST_TIMEOUT_MS),
+    ),
+    tableTimeoutMs: Number(
+      options.get('table-timeout-ms') ?? String(DEFAULT_SOAK_TABLE_TIMEOUT_MS),
+    ),
   };
   positiveInteger(config.tables, 'tables', 1_000);
   positiveInteger(config.rounds, 'rounds', 100);
   unsignedSeed(config.seed);
-  validateBridge(config.bridge);
+  positiveInteger(config.requestTimeoutMs, 'requestTimeoutMs', 3_600_000);
+  positiveInteger(config.tableTimeoutMs, 'tableTimeoutMs', 86_400_000);
   return config;
 }
 
@@ -301,6 +621,7 @@ if (
   try {
     const summary = await runVttSoak(decodeVttSoakArguments(process.argv.slice(2)));
     process.stdout.write(`${canonicalJson(summary)}\n`);
+    if (summary.tables.some((table) => table.exitCode !== 0)) process.exitCode = 1;
   } catch (error: unknown) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 1;
