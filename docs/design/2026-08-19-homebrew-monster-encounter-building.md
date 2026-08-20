@@ -2,8 +2,8 @@
 
 Date: 2026-08-19  
 Status: reference design  
-Rule-source boundary: SRD 5.2.1 and the Lazy GM's 5e Monster Builder Resource
-Document only
+Numeric rule-source boundary: SRD 5.2.1, the Lazy GM's 5e Monster Builder
+Resource Document, and project simulation derivations only
 
 ## 1. Purpose and consumers
 
@@ -38,11 +38,16 @@ Rules, formulas, tables, and numeric game guidance below come only from:
 - the bundled SRD 5.2.1; and
 - the Lazy GM's 5e Monster Builder Resource Document (LGMRD).
 
-Project files are used only to describe this application's scope, roster, and
-types. All other advice is original synthesis. No material from the Dungeon
-Master's Guide, Xanathar's Guide to Everything, or third-party blogs is used.
-Where the licensed sources do not answer a commonly expected question, section
-8 records the gap instead of filling it from memory.
+Project files are used only to describe this application's scope, roster,
+types, and simulation-derived calibration. Qualitative encounter-design methods
+in sections 2.7 and 4 are fresh clean-room restatements of the ideas digest
+identified in section 7.1. Those methods carry no imported tables, formulas,
+statblocks, or numeric constants; their source URLs are retained only as further
+reading. No
+material from the Dungeon Master's Guide or Xanathar's Guide to Everything is
+used. Where the licensed numeric sources and project simulation do not answer a
+question, section 8 records the gap and a calibration experiment instead of
+filling it from memory.
 
 ## 2. Encounter building with SRD 5.2.1
 
@@ -182,6 +187,34 @@ creatures are the roster's maximum 4–6-creature package: 2,700 XP and total CR
 The validator must return an explicit `unbuildable_difficulty` result in those
 cases. It must not silently underfill a requested category.
 
+### 2.7 Interpreting an encounter estimate
+
+The arithmetic is a warning instrument, not an outcome guarantee (EM-001).
+Start with opponents and circumstances that belong in the fiction, then use the
+warning to decide whether to expose the danger, alter the situation, or prepare
+a survivable failure path (EM-002, EM-006). Across a campaign, deliberate
+contrast is useful: routine victories, uncertain struggles, and threats the
+characters should avoid teach more than forcing every scene toward the same
+label (EM-005).
+
+Calibration belongs to the actual party. Teamwork, available options, player
+experience, equipment, and resources already spent can all move observed
+pressure away from a generic estimate (EM-003). Enemy count must therefore be
+recorded separately from summed XP or CR: additional bodies provide more
+targeting choices, positions, and chances to affect the fight (EM-004). Section
+6 extends that observation into simulated opportunity counts.
+
+For homebrew evaluation, durability and offense cannot be judged as isolated
+advantages. Staying active creates further chances to apply the creature's
+offense, so the simulator should measure total harm delivered before the
+creature is neutralized (EM-007). Statistical trends inferred from a thin part
+of a benchmark remain hypotheses; an extreme observation is not a new baseline
+until broader simulation supports it (EM-008).
+
+Further reading: [Sly Flourish encounter building](https://slyflourish.com/5e_encounter_building.html),
+[The Finished Book monster analysis](https://tomedunn.github.io/the-finished-book/monsters/monster-manual-2024/),
+and [Blog of Holding monster statistics](https://www.blogofholding.com/?p=8469).
+
 ## 3. Lazy Encounter Benchmark cross-check
 
 The LGMRD benchmark is a warning gauge, not a replacement XP system. For party
@@ -297,6 +330,33 @@ Myrmidon, Sentinel, and Champion chassis at CR 1/8, 1/2, 2, 4, 7, 11, and 15
 (`lgmrd-monster-builder.md:164-384`). They are useful authored starting points,
 not extra rows in the project's SRD starter roster.
 
+Use those rows as an envelope around a purpose, not as the purpose itself.
+Decide first what danger the creature represents and what it attempts during
+play, then select statistics and actions that make that behavior possible
+(MS-001). Every creature still needs a dependable ordinary action so it remains
+operable when its signature tool is unavailable (MS-005).
+
+Review offense and defense separately before considering their interaction
+(MS-002). A glass-cannon or tank variation should exchange strength on one axis
+for a weakness on another rather than lifting the entire chassis (MS-007).
+Reliable traits count in the same evaluation as printed attack and defense
+values; prose that repeatedly changes accuracy, output, avoidance, or endurance
+is not mechanically free (MS-003). Prefer durability that behaves consistently
+over protection that becomes overwhelming or irrelevant depending on whether a
+party owns a particular answer (MS-008).
+
+Finally, treat the row as a starting hypothesis and tune against party-specific
+simulation and play evidence (MS-004). When comparison data suggests that
+offense and basic defenses change at different rates across tiers, investigate
+each axis independently instead of inflating every statistic together (MS-006).
+Do not extrapolate a numeric adjustment from either qualitative observation;
+section 6.4 defines the required calibration work.
+
+Further reading: [Angry GM monster building](https://theangrygm.com/monster-building-202/),
+[Giffyglyph making monsters](https://giffyglyph.com/monstermaker/grimoire/2.1.2/en/making_monsters.html),
+[The Finished Book monster analysis](https://tomedunn.github.io/the-finished-book/monsters/monster-manual-2024/),
+and [Blog of Holding monster statistics](https://www.blogofholding.com/?p=8469).
+
 ### 4.2 Roles
 
 Roles are tactical descriptions, not new rules and not CR modifiers. The source
@@ -313,6 +373,24 @@ expressly treats them as flexible labels (`lgmrd-monster-builder.md:505-513`).
 | Skirmisher | mobility, disengagement, and repositioning, often with lighter defenses | start where movement matters and provide routes through the map |
 
 Sources by role: `lgmrd-monster-builder.md:515-595`.
+
+A role is useful only when it tells the GM what the creature tries to accomplish
+on its turn (RL-001), and the statblock must supply the access, movement,
+protection, control, or range that the label promises (RL-002). Compose roles
+that create opportunities for each other: a blocker can preserve an exposed
+ranged threat, while forced movement can deliver a target to a close-range
+attacker (RL-003).
+
+Keep the encounter's role vocabulary within the GM's working capacity; variety
+is lost when overload reduces every statblock to its default attack (RL-004).
+For recurring factions, repeat a recognizable family mechanic while giving
+specialists different jobs (RL-005). An intelligent leader's choice and
+placement of allies should cover its weaknesses or exploit known party habits,
+making planning visible through the roster itself (RL-006).
+
+Further reading: [Angry GM monster building](https://theangrygm.com/monster-building-202/),
+[Giffyglyph encounter building](https://giffyglyph.com/monstermaker/grimoire/2.1.2/en/building_an_encounter.html),
+and [The Monsters Know intelligent tactics](https://www.themonstersknow.com/intelligent-enemy-tactics/).
 
 ### 4.3 Bosses, minions, and encounter composition
 
@@ -335,6 +413,46 @@ should make the boss's role clearer, create movement choices, and give PCs
 targets they can remove. Do not invent one-hit minion behavior: neither licensed
 source establishes a universal one-hit rule.
 
+#### Boss progressions and alternative chassis
+
+Prefer a small dramatic script to a catalogue of interchangeable powers: an
+entrance that establishes the threat, a way to answer encirclement, and a
+thematic escalation when the conflict turns against the boss (BM-001). A phase
+change must alter player decisions through movement, priorities, cover,
+hazards, or role; merely restoring endurance does not create a new scene
+(BM-002).
+
+A visible, consistently applied phase boundary may clear control effects that
+would otherwise suppress the boss for the remainder of the encounter. This
+keeps those effects valuable within the phase while preventing an early success
+from removing the entire climax (BM-003). An alternative chassis represents the
+boss as linked components with separate endurance and activity. Disabling a
+component then removes some of the boss's presence and makes progress visible
+before final defeat (BM-004). Both are authored mechanics requiring simulation,
+not implicit benefits attached to the word “boss.”
+
+Lair activity should express the villain's preparation and nature, allowing the
+location to participate without lengthening the boss's main action menu
+(BM-008). Treat legendary or otherwise elite offense as a separate aggregation
+risk when combining such creatures; a printed encounter signal does not prove
+that several offense-weighted elites behave like ordinary peers (BM-007).
+
+#### Minion patterns
+
+Low-endurance followers can add obstruction, motion, and spectacle without
+turning the end of the fight into prolonged cleanup. Keep their procedure
+uniform enough to run as a group (BM-005). Their identity and job must follow
+from the boss: they might screen an approach, work a location feature, threaten
+an exposed character, or compensate for a known weakness (BM-006). “Minion”
+does not authorize a hidden hit-point rule or a free budget adjustment.
+
+Further reading: [Sly Flourish action-oriented monsters](https://slyflourish.com/action_oriented_monsters.html),
+[Giffyglyph elites and solos](https://giffyglyph.com/monstermaker/grimoire/2.1.2/en/minions_elites_solos.html),
+[Angry GM paragon boss design](https://theangrygm.com/return-of-the-son-of-the-dd-boss-fight-now-in-5e/),
+[Kobold Press boss fights](https://koboldpress.com/boss-fights-the-duelist/),
+[The Monsters Know encounter construction](https://www.themonstersknow.com/thoughts-constructing-encounters/),
+and [The Finished Book monster analysis](https://tomedunn.github.io/the-finished-book/monsters/monster-manual-2024/).
+
 ### 4.4 Encounter prompt checklist
 
 For a set piece, the codex DM considers the licensed checklist below and chooses
@@ -355,6 +473,137 @@ The checklist is reproduced under CC-BY-4.0 from
 The prompt should normally select two or three creature types, state each role,
 give every terrain element a playable purpose, and keep DM-only tactics out of
 the player projection.
+
+### 4.5 Action economy and realized pressure
+
+Compare each side's material opportunities, not only its strongest attack.
+Additional useful turns improve the ability to reposition, recover after a
+miss, impose control, and finish a vulnerable target (AE-001). Initiative also
+changes realized output: an actor that moves before it is disabled has a better
+chance to complete its plan, so initiative behavior belongs in simulation
+evidence for elite threats (AE-007).
+
+A solo can remain responsive by acting or moving between character turns rather
+than concentrating all influence into its scheduled turn (AE-002, AE-004).
+Another model treats a solo as linked functional components sharing a body;
+lost components reduce both endurance and available activity as the party makes
+progress (AE-003). Either design changes pressure and must be represented as
+explicit mechanics, never as an unrecorded boss privilege.
+
+Minions can raise the enemy's opportunity count, occupy routes, and demand
+attention without importing the endurance or decision burden of standard foes
+(AE-005). Reinforcements and waves provide a conditional version of the same
+control, but arrival must follow a player-visible cause such as an alarm,
+summoning act, or nearby reserve (AE-006). Section 6 records opportunity counts
+and requires simulation before any of these patterns receives numeric tuning.
+
+Further reading: [Sly Flourish encounter building](https://slyflourish.com/5e_encounter_building.html),
+[Sly Flourish action-oriented monsters](https://slyflourish.com/action_oriented_monsters.html),
+[Angry GM paragon boss design](https://theangrygm.com/return-of-the-son-of-the-dd-boss-fight-now-in-5e/),
+[Giffyglyph elites and solos](https://giffyglyph.com/monstermaker/grimoire/2.1.2/en/minions_elites_solos.html),
+[Lazy GM monster building](https://slyflourish.com/lazy_5e_monster_building_resource_document.html),
+and [The Finished Book monster analysis](https://tomedunn.github.io/the-finished-book/monsters/monster-manual-2024/).
+
+### 4.6 Pacing and encounter exit
+
+Match preparation and procedure to the scene's importance. A minor fight should
+not inherit the map detail, role variety, and layered hazards reserved for a set
+piece unless those elements earn their table time (PC-001). Introduce a
+creature family's shared behavior in a clear encounter before combining it with
+new specialists, so later complexity tests learned knowledge rather than pure
+surprise (PC-002).
+
+Write likely exit behavior before play. Surrender, flight, dispersal, or the
+fall of a commander may bring a settled conflict to a prompt close before every
+pool is exhausted (PC-003). Waves can keep a large battle legible and let later
+pressure respond to demonstrated party capability without rewriting creatures
+already present (PC-004). The trigger and possible arrivals remain visible
+fictional facts, not secret balance corrections.
+
+An environmental escalation that threatens every side can move a stalled fight
+toward resolution, provided the characters can influence or stop it (PC-005).
+A climax is defined by consequence, novelty, and visible change rather than by
+budget alone; a benchmark-ordinary encounter may still close an important arc
+(PC-006).
+
+Further reading: [Angry GM practical encounter design](https://theangrygm.com/how-to-f-cr-practical-example-2/),
+[Lazy GM monster building](https://slyflourish.com/lazy_5e_monster_building_resource_document.html),
+and [Sly Flourish zone effects](https://slyflourish.com/zone_effects.html).
+
+### 4.7 Telegraphing dangerous changes
+
+Before an exceptional attack resolves, reveal its source, threatened space, and
+timing so the threat becomes a positioning problem rather than unavoidable
+punishment (TG-001). The map must contain a credible response: escape, cover,
+interruption, or another way to change the outcome (TG-002).
+
+Charging the attack should cost the monster some immediately useful activity,
+opening a real window in which the party can move, interfere, or press an
+advantage (TG-003). A temporary exposed component can turn that window into an
+active team objective (TG-004). Across encounters, repeat recognizable faction
+or creature-family signals while varying their application; correctly reading
+a learned pattern should confer tactical value (TG-005).
+
+Further reading: [Giffyglyph overkill attacks](https://giffyglyph.com/monstermaker/grimoire/2.1.2/en/overkill_attacks.html)
+and [Angry GM monster building](https://theangrygm.com/monster-building-202/).
+
+### 4.8 Terrain and objectives
+
+Define each side's purpose before treating extermination as the default.
+Delaying, escaping, capturing, protecting, stealing, or interrupting produce
+different movement and target choices (TO-001). A win condition should remain
+independent of enemy survival, so surviving opponents may withdraw, pursue
+another aim, or cease to matter after the objective resolves (TO-005). An active
+threat or deadline keeps the alternative objective from becoming ordinary
+attrition under another name (TO-006).
+
+Build the location as if its inhabitants selected or prepared it. Routes,
+observation, concealment, bottlenecks, and hazards should support their method
+(TO-002). A site's structure, scars, contents, and vertical spaces can reveal
+history while shaping movement, cover, and control (TO-003). Include a
+meaningful non-attack interaction—operating a mechanism, relocating an object,
+extracting a captive, or altering a danger—that competes for combat attention
+(TO-004).
+
+Prefer a broad environmental rule that applies to everyone, with its uneven
+advantages emerging through the creatures' individual traits (TO-007).
+Difficulty can change because a side gains or loses access to its plan:
+favorable ground and complementary
+allies strengthen it, while broken formation or unsuitable terrain weaken it
+(TO-008). There is no licensed numeric XP adjustment for those relationships;
+section 6.4 leaves the value to simulation.
+
+Further reading: [The Monsters Know encounter construction](https://www.themonstersknow.com/thoughts-constructing-encounters/),
+[D&D Beyond tactical encounters](https://www.dndbeyond.com/posts/794-new-players-guide-how-to-build-tactical-encounters),
+[Lazy GM monster building](https://slyflourish.com/lazy_5e_monster_building_resource_document.html),
+[Sly Flourish zone effects](https://slyflourish.com/zone_effects.html),
+and [Angry GM choosing enemies](https://theangrygm.com/the-angry-guide-to-akicking-combats-part-1-picking-your-enemies/).
+
+### 4.9 Table-running representation
+
+Put related attacks and the information needed to resolve them together, so the
+creature's intended behavior survives contact with the table (TR-001). When a
+broad spell catalogue contributes little flexibility during the expected
+scene, replace it with self-contained thematic actions rather than requiring
+lookup and option scanning (TR-002). Use fixed results for routine monster
+procedures when an extra roll creates work but no meaningful suspense (TR-003).
+
+For hordes, pool or average repetitive resolution while retaining individual
+figures wherever location has player-facing consequences (TR-004). Abstraction
+removes bookkeeping; it must not erase targets, routes, or effects the players
+can perceive.
+
+Attach a compact tactical script to each encounter role: objective, preferred
+target, opening approach, fallback, and exit condition (TR-005). The script's
+adaptability follows the creature's intelligence. An instinctive foe can repeat
+a successful pattern; a clever foe can recognize weakness, remember prior
+contact, and prepare a response (TR-006).
+
+Further reading: [D&D Beyond statblock design](https://www.dndbeyond.com/posts/1890-preview-the-new-stat-block-design-in-the-2024),
+[Sly Flourish action-oriented monsters](https://slyflourish.com/action_oriented_monsters.html),
+[Lazy GM monster building](https://slyflourish.com/lazy_5e_monster_building_resource_document.html),
+[Sly Flourish running hordes](https://slyflourish.com/running_hordes.html),
+and [The Monsters Know intelligent tactics](https://www.themonstersknow.com/intelligent-enemy-tactics/).
 
 ## 5. Mapping a homebrew monster to `src/combat/statblock.ts`
 
@@ -437,18 +686,20 @@ type EncounterDifficultyRequest = {
 };
 ```
 
-The round values come from increment 9's first-skirmish scope. Pressure maps to
-non-overlapping XP bands derived from the SRD ceilings:
+The round values come from increment 9's first-skirmish scope
+(`docs/design/2026-08-19-vtt-phase2-movement-controllers.md:1709-1747`).
+Pressure maps to non-overlapping XP bands derived only from the SRD ceilings:
 
 | Requested pressure | Project XP band |
 |---|---|
-| `low` | `0 < encounter XP <= Low budget` |
+| `low` | `encounter XP <= Low budget` |
 | `moderate` | `Low budget < encounter XP <= Moderate budget` |
 | `high` | `Moderate budget < encounter XP <= High budget` |
 
-The lower bounds are project classification, not SRD text; the SRD defines only
-the ceilings. This banding prevents one underfilled encounter from being called
-all three difficulties.
+The exclusive lower boundary for each higher band is derived from the preceding
+SRD ceiling. The SRD does not itself define these non-overlapping bands. The
+project classification prevents an underfilled encounter from receiving every
+difficulty label.
 
 The deterministic validator:
 
@@ -468,44 +719,54 @@ does not define easy, medium, or hard measurements.
 The simulation is authoritative for expected length and observed resource use;
 XP and CR are proposal heuristics.
 
-For length, accept a candidate when
-`Math.floor(simulatedExpectedTerminalRound + 0.5)` equals `request.rounds`.
-This positive-number half-up rule is project calibration. The fixture stores
-the unrounded expectation and simulation version, so later calibration drift is
-visible.
+For length, store the complete simulated terminal-round distribution and its
+expectation. No rounding tolerance or acceptance interval is licensed. The
+validator therefore reports round evidence but cannot claim that a candidate
+matches `request.rounds` until the rounds experiment in section 6.4 derives a
+versioned classification rule.
 
-For an initial resource-pressure calibration, compute only from resources the
-simulator can prove it modeled:
+For resource pressure, compute only dimensions the simulator can prove it
+modeled:
 
 ```text
 hpLossFraction       = expected unrecovered party HP loss at encounter end / starting party HP
 healingSpendFraction = expected healing resources spent / available healing resources
 limitedSpendFraction = expected limited-use resources spent / available limited-use resources
-resourcePressure     = max(all present fractions)
 ```
 
-Zero-denominator components are typed absent, not zero. If every component is
-absent, validation refuses rather than claiming a pressure. The initial
-project-owned bands are:
+When a denominator is unavailable or the party has no resource of that kind,
+the component is typed absent. If every component is absent, validation refuses
+rather than claiming pressure. Do not collapse the vector into a scalar or map
+it to Low, Moderate, or High until the pressure experiment in section 6.4 has
+derived and versioned the aggregation and cut points.
 
-| Requested pressure | Simulated `resourcePressure` |
-|---|---:|
-| `low` | `0 through 1/3` |
-| `moderate` | `over 1/3 through 2/3` |
-| `high` | `over 2/3 through 1` |
-
-These fractions are a proposed product calibration, not licensed game numbers.
-They must live in versioned configuration, not be described as SRD thresholds.
 The simulator also reports knockout probability, death probability, party-win
 probability, and unsupported mechanics separately; those safety signals are
-never compressed into the resource score. D245's existing honesty rule still
+never compressed into the resource vector. D245's existing honesty rule still
 applies: an unmodeled load-bearing mechanic makes the numeric result unavailable.
 
-A package is eligible for owner approval only when the XP band, requested-round
-gate, and simulated resource band all pass. A Lazy danger flag is displayed in
-the approval evidence but is not an automatic rejection. Store the exact
-request, arithmetic, simulation inputs/version/result, cross-check, and owner
-decision with the content-addressed package.
+#### Material-opportunity evidence
+
+Record party and enemy material opportunities by round. A material opportunity
+is a scheduled or triggered chance to damage, move, protect, heal, control, or
+advance an objective; purely cosmetic triggers do not count. Preserve the
+source of each opportunity—normal turn, off-turn boss activity, reaction,
+minion, reinforcement, hazard, or objective interaction—and record whether it
+resolved before its actor was neutralized.
+
+This evidence sharpens `{ rounds, pressure }`: more opportunities can increase
+pressure even when nominal XP and peak attack damage are unchanged, while early
+initiative can increase the share of scheduled activity that actually resolves.
+For component bosses, record how the available opportunity schedule changes as
+components are disabled. No opportunity ratio is a difficulty multiplier until
+the paired simulation in section 6.4 derives one.
+
+Until the rounds and pressure calibration TODOs are complete, a candidate may
+pass the deterministic XP gate but is not eligible for final owner approval as
+a verified `{ rounds, pressure }` fixture. Store the exact request, arithmetic,
+simulation inputs and version, terminal-round distribution, resource vector,
+opportunity evidence, safety outputs, Lazy cross-check, and owner decision with
+the content-addressed package.
 
 ### 6.3 Generator prompt contract
 
@@ -525,6 +786,54 @@ fields must reference an approved statblock; prose cannot override the typed
 mechanics. The validator, simulation, projections, and owner approval occur
 after generation.
 
+The prompt also states each side's objective, encounter exit conditions,
+reinforcement causes, telegraphed threats and responses, and a compact tactical
+script for every role. A boss proposal must enumerate every scheduled and
+off-turn opportunity; a minion or phase rule must be explicit typed mechanics.
+The generator may propose those relationships but may not attach an uncited
+number or convert one into XP, CR, rounds, or pressure.
+
+### 6.4 TODO(sim-calibration) experiments
+
+These experiments close numeric gaps; the qualitative methods in section 4 do
+not supply their results.
+
+- **TODO(sim-calibration: rounds):** For every buildable starter-roster package
+  and supported party snapshot, run the simulator across its registered random
+  seeds. Persist the terminal-round distribution. Have the owner label which
+  request-round values each distribution satisfies, then derive acceptance
+  intervals from those labels. Validate the resulting rule on held-out roster
+  packages before placing it in versioned configuration.
+- **TODO(sim-calibration: pressure):** From the same runs, persist each resource
+  fraction, knockout and death outcomes, win outcome, and pre-encounter resource
+  state. Obtain owner Low/Moderate/High labels without showing a proposed
+  formula, fit candidate aggregation rules and boundaries, and select only a
+  rule that holds on held-out packages. Keep safety probabilities beside the
+  label rather than absorbing them into it.
+- **TODO(sim-calibration: action economy and initiative):** Construct paired
+  encounters with the same party, XP, benchmark DPR, benchmark endurance, map,
+  and tactics while varying enemy material-opportunity schedules, initiative
+  ordering, and off-turn activity. Compare realized opportunities,
+  terminal-round distributions, resource vectors, and safety outcomes. Derive
+  an adjustment only if the paired effect is stable across roster compositions.
+- **TODO(sim-calibration: bosses and minions):** Compare a standard group with
+  explicit solo-phase, linked-component, lair-activity, and low-endurance-minion
+  variants while holding the licensed chassis totals fixed wherever the model
+  permits. Measure whether phase clearing, component loss, and minion removal
+  change realized opportunities and total harm. Derive endurance, activity, and
+  budget treatment separately; do not assume a universal one-hit minion.
+- **TODO(sim-calibration: waves, terrain, and objectives):** Simulate paired
+  maps and scripts that vary reinforcement timing, access to role strengths,
+  symmetric environmental effects, interactive objects, and non-extermination
+  goals. Add objective completion and time-to-objective to the result. Derive no
+  XP or pressure adjustment unless the effect replicates across encounter
+  families.
+- **TODO(sim-calibration: homebrew stat axes):** Starting from each licensed
+  quick-table chassis, vary offense, defense, reliable traits, initiative, and
+  conditional protection independently and in combinations. Measure total harm
+  before neutralization as well as terminal and safety outcomes. Use the result
+  to test tradeoffs and extrapolation, not to claim an official CR calculator.
+
 ## 7. Licensing and public-repository safety
 
 ### 7.1 Source inventory
@@ -533,10 +842,17 @@ after generation.
 |---|---|---|---|
 | System Reference Document 5.2.1 | `docs/srd/full/srd-5.2.1.txt`; 2,147,059 bytes; SHA-256 `d2425fa863247509c9af77cd4856e254a9ad4216661b948fc99daa67db69c918`; upstream provenance in `docs/srd/SOURCE.md:9-22` | CR meaning; encounter budgets and procedure; troubleshooting; statblock, XP, and PB conventions | Creative Commons Attribution 4.0 International (CC-BY-4.0) |
 | The Lazy GM's 5e Monster Builder Resource Document, updated 2024-01-18, by Scott Fitzgerald Gray, Teos Abadía, and Michael E. Shea | `/home/vagrant/.claude/jobs/c68ffdd0/tmp/lgmrd-monster-builder.md`; 127,651 bytes; SHA-256 `63d334e8430803ab8970d3d675e4acd51950a3d385a100610fe7da8bef8da666`; [Crit.Tech LGMRD repository](https://github.com/crit-tech/LGMRD) | quick-monster table and formulas; generic chassis; roles; bosses/minions; encounter checklist and combinations; Lazy benchmark | Creative Commons Attribution 4.0 International (CC-BY-4.0) |
+| Clean-room encounter and monster design ideas digest | `/home/vagrant/.claude/jobs/c68ffdd0/tmp/ideas-digest.md:5-92` | nonnumeric relationships restated in fresh language in sections 2.7 and 4; source URLs retained as further reading | No source prose, tables, formulas, statblocks, or numeric benchmarks reproduced; underlying sources retain their own terms |
 
 Relevant SRD spans are
 `docs/srd/full/srd-5.2.1.txt:11426-11448,12950-13039,16505-16744`. Relevant
 LGMRD spans are `lgmrd-monster-builder.md:1-17,33-384,505-930`.
+
+The digest's licensing note points to the
+[Giffyglyph Monster Maker FAQ](https://giffyglyph.com/monstermaker/grimoire/2.1.2/en/FAQ.html).
+This guide uses the digest's independently phrased, nonnumeric relationships;
+it does not reproduce Monster Maker rules or infer redistribution permission
+from the link.
 
 ### 7.2 Required SRD 5.2.1 attribution
 
@@ -562,47 +878,65 @@ CC-BY material is allowed when attribution remains intact
 (`.claude/decisions.md:2663-2669`). This document contains only:
 
 - attributed CC-BY-4.0 source material;
-- facts about this repository's own code and owner request; and
-- original project synthesis and proposed validator policy.
+- facts about this repository's own code and owner request;
+- independently worded descriptions of nonnumeric methods delivered through the
+  clean-room digest, with source URLs retained as factual further-reading links;
+  and
+- original project synthesis, simulation TODOs, and proposed validator policy.
 
 Accordingly, this document and derivatives that preserve both required notices
-are public-repository-safe under D59. This conclusion does not authorize adding
-material from an unlisted source.
+are public-repository-safe under D59. The digest does not authorize copying the
+linked pages, importing their numbers, or treating a link as a license. This
+conclusion does not authorize adding material from an unlisted source.
 
 ## 8. Explicit gaps and non-sources
 
-The two licensed sources do **not** cleanly provide the following, so this
-document does not invent them:
+The clean-room digest closes several **conceptual** gaps. Sections 2.7 and
+4.5–4.9 now explain how to reason about enemy opportunities, responsive solos,
+component bosses, minion jobs, encounter exits, waves, telegraphs, terrain,
+objectives, and table procedure. Section 4.1 also explains the interaction of
+offense, defense, reliable traits, and initiative. These are design
+relationships only; none supplies a numeric adjustment.
 
-1. The 2014 DMG's Easy/Medium/Hard/Deadly XP thresholds or its creature-count
-   multipliers. They do not appear here.
-2. An official offensive-CR/defensive-CR procedure for deriving CR from AC, HP,
+The following gaps remain:
+
+1. The 2014 DMG's Easy/Medium/Hard/Deadly XP thresholds and creature-count
+   multipliers are absent. This document neither reproduces nor reconstructs
+   them. Enemy-count and action-schedule effects remain
+   **TODO(sim-calibration: action economy and initiative)** in section 6.4.
+2. No official offensive-CR/defensive-CR procedure here derives CR from AC, HP,
    accuracy, DPR, save DC, or special features. The LGMRD quick table is an
-   attributed third-party benchmark, not an official CR calculator.
-3. A daily adventuring XP budget, prescribed encounter count per day, or rest
-   schedule for encounter building.
-4. A licensed numeric conversion from Low/Moderate/High to expected rounds,
-   resource-spend percentages, knockout chance, death chance, or win chance.
-   Section 6's round and fractional-resource gates are explicitly original
-   project calibration.
-5. A three-character hard-combination table in the LGMRD. Its combination
-   tables cover four, five, and six characters; the three-PC case uses the SRD
+   attributed third-party benchmark, not an official CR calculator. Tradeoff
+   evidence remains **TODO(sim-calibration: homebrew stat axes)**.
+3. No source provides a daily adventuring XP budget, prescribed encounter count
+   per day, or rest schedule for this guide.
+4. No licensed numeric conversion maps Low/Moderate/High to expected rounds,
+   resource-spend fractions, knockout chance, death chance, or win chance. The
+   prior provisional rounding and fractional bands have been removed. The
+   required derivations are **TODO(sim-calibration: rounds)** and
+   **TODO(sim-calibration: pressure)**.
+5. The LGMRD has no hard-combination row for three characters. Its rows cover
+   four, five, and six characters; the three-PC case continues to use the SRD
    budget and Lazy benchmark only.
-6. A universal one-hit minion rule, a precise boss action-economy adjustment, or
-   a numeric CR cost for monster roles.
-7. A prescribed XP adjustment for terrain, cover, hazards, surprise, unusual
-   objectives, or favorable positioning. Those factors are warnings and design
-   inputs, then simulation inputs where modeled.
-8. A reconciliation rule for disagreements among the SRD budget, the LGMRD
+6. There is no universal one-hit minion rule, phase-transition value, precise
+   boss opportunity adjustment, or numeric CR cost for roles. The guide now
+   supplies qualitative boss and minion patterns, while their values remain
+   **TODO(sim-calibration: bosses and minions)**.
+7. There is no prescribed XP adjustment for terrain, cover, hazards, surprise,
+   objectives, favorable positioning, reinforcement timing, or waves. The guide
+   now supplies methods for using them, while their values remain
+   **TODO(sim-calibration: waves, terrain, and objectives)**.
+8. No source reconciles disagreements among the SRD budget, the LGMRD
    hard-combination table, and the Lazy benchmark. The level-7 six-CR-2 example
-   demonstrates that disagreement; simulation evidence and owner approval are
+   demonstrates the disagreement; simulation evidence and owner approval remain
    the project resolution.
-9. Enough CR in the current 4–6-creature starter roster to satisfy every
-   requested pressure. Moderate and High for four PCs and High for three PCs are
-   impossible under the proposed non-overlapping XP bands.
-10. D317.9's full local decision text. Only the owner-supplied
+9. The current 4–6-creature starter roster lacks enough CR to satisfy every
+   requested pressure. Moderate and High for four PCs and High for three PCs
+   remain impossible under the non-overlapping SRD-derived XP bands.
+10. D317.9's full local decision text is absent. Only the owner-supplied
     `{ rounds, pressure }` meaning is available in this lane.
-11. A current typed storage/provenance model for homebrew CR above 3 or for
-    owner-authored detailed statblocks, nor general typed actions for save
-    effects, recharge abilities, or legendary actions. Section 5 identifies the
-    required type replacement but does not specify a persistence schema.
+11. The project lacks a typed storage and provenance model for homebrew CR above
+    3 and owner-authored detailed statblocks, as well as general typed actions
+    for save effects, recharge abilities, and legendary actions. Section 5
+    identifies the required type replacement but does not specify a persistence
+    schema.
