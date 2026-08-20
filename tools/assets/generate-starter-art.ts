@@ -6,9 +6,6 @@ import { combatantId } from '../../src/combat/values';
 import { encounterBoardRenderModel } from '../../src/vtt/encounter-board';
 import { REFERENCE_ENCOUNTER_ART } from '../../src/vtt/reference-encounter-art';
 
-const repositoryRoot = resolve(import.meta.dirname, '../..');
-const checkOnly = process.argv.includes('--check');
-
 function svgData(value: string): string {
   return `data:image/svg+xml;base64,${Buffer.from(value, 'utf8').toString('base64')}`;
 }
@@ -81,22 +78,51 @@ function previewSvg(): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="560" viewBox="0 0 1240 560" data-generator="starter-pixel-art" data-generator-version="1.0.0"><defs>${definitions}</defs><style>text{font-family:ui-monospace,monospace}.title{font-size:22px;font-weight:700}.heading{font-size:16px;font-weight:700}.label{font-size:9px;text-anchor:middle}image{image-rendering:pixelated}</style><rect width="1240" height="560" fill="#11131a"/><text x="28" y="30" class="title" fill="#edf0f7">Starter Pixel Art — deterministic fixture preview</text><g data-sprite-inventory="13">${inventory}</g>${boardPreview('Player', base, 86, 205)}${boardPreview('DM', { ...base, foggedCells: [{ column: 8, row: 1 }, { column: 8, row: 2 }] }, 690, 205)}<metadata>pure-procedural-only; cc-by-4.0; focus.active-pc; event.adjudicated; fog.hidden; terrain; one-room; player-projection; dm-projection</metadata></svg>\n`;
 }
 
-function materialize(path: string, bytes: string): void {
-  const absolute = resolve(repositoryRoot, path);
-  if (checkOnly) {
-    const current = readFileSync(absolute, 'utf8');
-    if (current !== bytes) throw new Error(`Generated starter art drifted: ${path}.`);
-    return;
+export interface StarterArtGenerationOptions {
+  readonly outputRoot: string;
+  readonly checkOnly: boolean;
+}
+
+export interface StarterArtGenerationResult {
+  readonly assetCount: number;
+  readonly previewCount: 1;
+}
+
+export function generateStarterArt(
+  options: StarterArtGenerationOptions,
+): StarterArtGenerationResult {
+  const materialize = (path: string, generatedBytes: string): void => {
+    const absolute = resolve(options.outputRoot, path);
+    if (options.checkOnly) {
+      const current = readFileSync(absolute, 'utf8');
+      if (current !== generatedBytes) {
+        throw new Error(`Generated starter art drifted: ${path}.`);
+      }
+      return;
+    }
+    mkdirSync(resolve(absolute, '..'), { recursive: true });
+    writeFileSync(absolute, generatedBytes, 'utf8');
+  };
+
+  for (const asset of STARTER_ART_MANIFEST.assets) {
+    materialize(`public/${asset.output.path}`, renderStarterArtSvg(asset.id));
   }
-  mkdirSync(resolve(absolute, '..'), { recursive: true });
-  writeFileSync(absolute, bytes, 'utf8');
+  materialize('docs/design/assets-preview/starter-art-board.svg', previewSvg());
+
+  return Object.freeze({
+    assetCount: STARTER_ART_MANIFEST.assets.length,
+    previewCount: 1,
+  });
 }
 
-for (const asset of STARTER_ART_MANIFEST.assets) {
-  materialize(`public/${asset.output.path}`, renderStarterArtSvg(asset.id));
+const invokedPath = process.argv[1] === undefined ? null : resolve(process.argv[1]);
+if (invokedPath === resolve(import.meta.filename)) {
+  const checkOnly = process.argv.includes('--check');
+  const result = generateStarterArt({
+    outputRoot: resolve(import.meta.dirname, '../..'),
+    checkOnly,
+  });
+  process.stdout.write(
+    `${checkOnly ? 'verified' : 'generated'} ${String(result.assetCount)} starter-art assets and one preview\n`,
+  );
 }
-materialize('docs/design/assets-preview/starter-art-board.svg', previewSvg());
-
-process.stdout.write(
-  `${checkOnly ? 'verified' : 'generated'} ${String(STARTER_ART_MANIFEST.assets.length)} starter-art assets and one preview\n`,
-);

@@ -1,5 +1,11 @@
 import { createHash } from 'node:crypto';
-import { readFileSync, readdirSync } from 'node:fs';
+import {
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -20,6 +26,7 @@ import {
   BUNDLED_LICENSE_FILES,
   bundledLicenseAssets,
 } from '../../../tools/licenses/bundled-license-files';
+import { generateStarterArt } from '../../../tools/assets/generate-starter-art';
 import {
   EXPECTED_FIXED_INPUTS_SHA256,
   EXPECTED_PREVIEW_SHA256,
@@ -118,6 +125,27 @@ describe('procedural starter-art manifest and deterministic outputs', () => {
       digest.update('\0');
     }
     expect(digest.digest('hex')).toBe(EXPECTED_SPRITE_INVENTORY_SHA256);
+  });
+
+  it('runs the checked-in generator in isolation and matches every committed output byte', () => {
+    const outputRoot = mkdtempSync(join(tmpdir(), 'srd55-starter-art-generator-'));
+    try {
+      const result = generateStarterArt({ outputRoot, checkOnly: false });
+      expect(result).toEqual({ assetCount: 25, previewCount: 1 });
+
+      for (const entry of STARTER_ART_MANIFEST.assets) {
+        expect(
+          readFileSync(join(outputRoot, 'public', entry.output.path)),
+          `generator drift for ${entry.id}`,
+        ).toEqual(bytes(`public/${entry.output.path}`));
+      }
+      expect(
+        readFileSync(join(outputRoot, 'docs/design/assets-preview/starter-art-board.svg')),
+        'preview generator drift, including palette and presentation inputs',
+      ).toEqual(bytes('docs/design/assets-preview/starter-art-board.svg'));
+    } finally {
+      rmSync(outputRoot, { recursive: true, force: true });
+    }
   });
 
   it('M53-ASSET-ID-RESOLVES-BY-FILENAME keeps stable-id rendering through an output rename', () => {
