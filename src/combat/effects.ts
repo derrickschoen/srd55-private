@@ -168,6 +168,7 @@ export type EffectPayload =
       readonly kind: 'floating_disk';
       readonly diameterFeet: number;
       readonly heightFeet: number;
+      readonly thicknessInches: number;
       readonly capacityPounds: number;
       readonly followDistanceFeet: number;
       readonly maximumDistanceFeet: number;
@@ -179,7 +180,7 @@ export type EffectPayload =
       readonly obscurement: 'heavy' | 'magical_darkness';
       readonly dispersedByStrongWind: boolean;
       readonly blocksDarkvision?: true;
-      readonly suppressesLightSpellLevelAtMost?: number;
+      readonly dispelsLightSpellLevelAtMost?: number;
     }
   | {
       readonly kind: 'magic_identification';
@@ -283,6 +284,7 @@ export type EffectPayload =
   | {
       readonly kind: 'ability_check_advantage';
       readonly ability: 'chosen_when_cast';
+      readonly excludedAbility?: 'constitution';
     }
   | {
       readonly kind: 'size_alteration';
@@ -392,6 +394,7 @@ export type EffectPayload =
       readonly radiusFeet: number;
       readonly thunderImmune: true;
       readonly verbalComponentsImpossible: true;
+      readonly creaturesInsideAreDeafened: true;
     }
   | {
       readonly kind: 'spider_climb';
@@ -459,6 +462,9 @@ export type EffectPayload =
       readonly rangeFeet: number;
       readonly senses: readonly ('hearing' | 'seeing')[];
       readonly switchCost: 'bonus_action';
+      readonly locationEligibility: 'familiar_or_obvious';
+      readonly intangible: true;
+      readonly invulnerable: true;
     }
   | {
       readonly kind: 'created_food_and_water';
@@ -604,7 +610,10 @@ export type EffectPayload =
       readonly placement: AreaTemplate | 'selected_when_cast';
       readonly radiusFeet: number;
       readonly speedMultiplier: 0.5;
-      readonly damageTypes: readonly ('Radiant' | 'Necrotic')[];
+      readonly damageTypeByCasterAlignment: Readonly<{
+        goodOrNeutral: 'Radiant';
+        evil: 'Necrotic';
+      }>;
       readonly damageCount: number;
       readonly damageSides: number;
       readonly damagePerSlotCount: number;
@@ -656,6 +665,9 @@ export type EffectPayload =
       readonly minimumOpeningInches: number;
       readonly invisible: true;
       readonly invulnerable: true;
+      readonly hovers: true;
+      readonly seesEveryDirection: true;
+      readonly blockedBySolidBarriers: true;
     }
   | {
       readonly kind: 'aura_of_life';
@@ -725,6 +737,9 @@ export type EffectPayload =
       readonly damageCount: number;
       readonly damageSides: number;
       readonly onSuccess: 'half';
+      readonly saveAbility: 'strength';
+      readonly escapeCheckAbility: 'strength';
+      readonly escapeCheckSkill: 'Athletics';
     }
   | {
       readonly kind: 'death_ward';
@@ -741,6 +756,7 @@ export type EffectPayload =
       readonly failureDamageCount: number;
       readonly failureDamageSides: number;
       readonly failureDamageType: 'Force';
+      readonly passengerMustBeWilling: true;
     }
   | {
       readonly kind: 'divination';
@@ -766,6 +782,9 @@ export type EffectPayload =
       readonly damageSides: number;
       readonly damageType: 'Force';
       readonly moveFeetPerMagicAction: number;
+      readonly triggerMinimumSize: 'Small';
+      readonly intangible: true;
+      readonly invulnerable: true;
     }
   | {
       readonly kind: 'fire_shield';
@@ -794,6 +813,7 @@ export type EffectPayload =
       readonly damageType: 'Radiant';
       readonly onSuccess: 'half';
       readonly maximumTotalDamage: number;
+      readonly invulnerable: true;
     }
   | {
       readonly kind: 'hallucinatory_terrain';
@@ -833,6 +853,7 @@ export type EffectPayload =
       readonly canSpeak: false;
       readonly canCastSpells: false;
       readonly gearMelds: true;
+      readonly retainedStatistics: readonly ('alignment' | 'personality' | 'creature_type' | 'hit_points' | 'hit_point_dice')[];
     }
   | {
       readonly kind: 'private_sanctum';
@@ -857,12 +878,13 @@ export type EffectPayload =
       readonly capacityCubicFeet: number;
       readonly recallDistanceFeet: number;
       readonly riskBeginsAfterDays: number;
-      readonly dailyEndChancePercent: number;
+      readonly dailyCumulativeChancePerDayPercent: number;
       readonly chestMinimumGp: number;
       readonly replicaMinimumGp: number;
     }
   | {
       readonly kind: 'stone_shape';
+      readonly maximumObjectSize: 'Medium';
       readonly maximumDimensionFeet: number;
       readonly maximumHinges: number;
       readonly permitsLatch: true;
@@ -884,12 +906,13 @@ export type EffectPayload =
       readonly damagePerSlotCount: number;
       readonly damageType: 'Fire';
       readonly opaque: true;
+      readonly requiresSolidSurface: true;
     }
   | {
       readonly kind: 'minor_magic';
       readonly spell: 'Elementalism' | 'Prestidigitation' | 'Thaumaturgy';
       readonly options: readonly string[];
-      readonly maximumActive: number;
+      readonly maximumActive: number | null;
     }
   | {
       readonly kind: 'object_repair';
@@ -916,6 +939,7 @@ export type EffectPayload =
       readonly kind: 'shield_defense';
       readonly armorClassBonus: number;
       readonly magicMissileImmune: true;
+      readonly trigger: 'hit_by_attack_or_targeted_by_magic_missile';
     };
 
 export interface EffectApplication {

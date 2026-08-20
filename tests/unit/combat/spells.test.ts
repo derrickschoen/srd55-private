@@ -141,7 +141,7 @@ const LEVEL_ONE_BATCH_NUMERIC_PINS: readonly BatchNumericPin[] = [
   { id: 'expeditious-retreat', mechanics: [100], source: 'spell-descriptions.txt:2810' },
   { id: 'feather-fall', mechanics: [60, 5, 0, 60, 10], source: 'spell-descriptions.txt:2964' },
   { id: 'find-familiar', mechanics: [10, 100], source: 'spell-descriptions.txt:2979' },
-  { id: 'floating-disk', mechanics: [30, 3, 3, 500, 20, 100, 600], source: 'spell-descriptions.txt:3335' },
+  { id: 'floating-disk', mechanics: [30, 3, 3, 1, 500, 20, 100, 600], source: 'spell-descriptions.txt:3335' },
   { id: 'fog-cloud', mechanics: [120, 20, 20, 20, 600], source: 'spell-descriptions.txt:3396' },
   { id: 'grease', mechanics: [60, 10, 0, 10], source: 'spell-descriptions.txt:3883' },
   { id: 'hideous-laughter', mechanics: [30, 1, 1, 10], source: 'spell-descriptions.txt:4294' },
@@ -283,7 +283,7 @@ const COMPLETE_MECHANICS_PINS: readonly CompleteMechanicsPin[] = [
   {
     id: 'elementalism', source: 'spell-descriptions.txt:2630',
     targeting: { kind: 'utility', rangeFeet: 30 },
-    operation: { kind: 'utility', effect: { kind: 'minor_magic', spell: 'Elementalism', options: ['beckon_air', 'beckon_earth', 'beckon_fire', 'beckon_water', 'sculpt_element'], maximumActive: 1 }, concentration: false, durationRounds: null },
+    operation: { kind: 'utility', effect: { kind: 'minor_magic', spell: 'Elementalism', options: ['beckon_air', 'beckon_earth', 'beckon_fire', 'beckon_water', 'sculpt_element'], maximumActive: null }, concentration: false, durationRounds: null },
   },
   {
     id: 'fire-bolt', source: 'spell-descriptions.txt:3184-3200',
@@ -348,11 +348,11 @@ const COMPLETE_MECHANICS_PINS: readonly CompleteMechanicsPin[] = [
   {
     id: 'shocking-grasp', source: 'spell-descriptions.txt:7006',
     targeting: { kind: 'single', rangeFeet: 5, willing: false },
-    operation: { kind: 'attack_damage', attackKind: 'melee', damageType: damageType('Lightning'), dice: pinnedDice(1, 8, { cantripUpgrade: true }), rider: pinnedEffect({ kind: 'opportunity_attacks_disabled' }) },
+    operation: { kind: 'attack_damage', attackKind: 'melee', damageType: damageType('Lightning'), dice: pinnedDice(1, 8, { cantripUpgrade: true }), rider: pinnedEffect({ kind: 'opportunity_attacks_disabled' }, { expiresAt: 'target_start' }) },
   },
   {
     id: 'spare-the-dying', source: 'spell-descriptions.txt:7181',
-    targeting: { kind: 'single', rangeFeet: 30, willing: true },
+    targeting: { kind: 'single', rangeFeet: 30, willing: false, rangeByCasterLevel: [{ minimumLevel: 1, rangeFeet: 15 }, { minimumLevel: 5, rangeFeet: 30 }, { minimumLevel: 11, rangeFeet: 60 }, { minimumLevel: 17, rangeFeet: 120 }] },
     operation: { kind: 'stabilize' },
   },
   {
@@ -373,7 +373,7 @@ const COMPLETE_MECHANICS_PINS: readonly CompleteMechanicsPin[] = [
   {
     id: 'charm-person', source: 'spell-descriptions.txt:1046',
     targeting: { kind: 'multiple', rangeFeet: 30, baseMaximum: 1, additionalPerSlot: 1 },
-    operation: { kind: 'save_effect', ability: 'wisdom', rollMode: 'advantage', effect: pinnedEffect({ kind: 'condition', condition: 'Charmed' }, { durationRounds: 600 }) },
+    operation: { kind: 'save_effect', ability: 'wisdom', rollMode: 'normal', effect: pinnedEffect({ kind: 'condition', condition: 'Charmed' }, { durationRounds: 600 }) },
   },
   {
     id: 'bless', source: 'spell-descriptions.txt:824',
@@ -387,7 +387,7 @@ const COMPLETE_MECHANICS_PINS: readonly CompleteMechanicsPin[] = [
   },
   {
     id: 'cure-wounds', source: 'spell-descriptions.txt:1895',
-    targeting: { kind: 'single', rangeFeet: 5, willing: true },
+    targeting: { kind: 'single', rangeFeet: 5, willing: false },
     operation: { kind: 'healing', dice: pinnedDice(2, 8, { perSlotCount: 2 }), addSpellcastingModifier: true },
   },
   {
@@ -398,11 +398,11 @@ const COMPLETE_MECHANICS_PINS: readonly CompleteMechanicsPin[] = [
   {
     id: 'guiding-bolt', source: 'spell-descriptions.txt:4011',
     targeting: { kind: 'single', rangeFeet: 120, willing: false },
-    operation: { kind: 'attack_damage', attackKind: 'ranged', damageType: damageType('Radiant'), dice: pinnedDice(4, 6, { perSlotCount: 1 }), rider: pinnedEffect({ kind: 'attack_roll_mode_modifier', mode: 'advantage', appliesTo: 'next_attack_against_target' }) },
+    operation: { kind: 'attack_damage', attackKind: 'ranged', damageType: damageType('Radiant'), dice: pinnedDice(4, 6, { perSlotCount: 1 }), rider: pinnedEffect({ kind: 'attack_roll_mode_modifier', mode: 'advantage', appliesTo: 'next_attack_against_target' }, { durationRounds: 2, expiresAt: 'source_end' }) },
   },
   {
     id: 'healing-word', source: 'spell-descriptions.txt:4169',
-    targeting: { kind: 'single', rangeFeet: 60, willing: true },
+    targeting: { kind: 'single', rangeFeet: 60, willing: false },
     operation: { kind: 'healing', dice: pinnedDice(2, 4, { perSlotCount: 2 }), addSpellcastingModifier: true },
   },
   {
@@ -418,11 +418,11 @@ const COMPLETE_MECHANICS_PINS: readonly CompleteMechanicsPin[] = [
   {
     id: 'shield', source: 'spell-descriptions.txt:6937',
     targeting: { kind: 'self' },
-    operation: { kind: 'effect', effect: pinnedEffect({ kind: 'shield_defense', armorClassBonus: 5, magicMissileImmune: true }, { target: 'self', durationRounds: 1 }) },
+    operation: { kind: 'effect', effect: pinnedEffect({ kind: 'shield_defense', armorClassBonus: 5, magicMissileImmune: true, trigger: 'hit_by_attack_or_targeted_by_magic_missile' }, { target: 'self', durationRounds: 1 }) },
   },
   {
     id: 'shield-of-faith', source: 'spell-descriptions.txt:6956',
-    targeting: { kind: 'single', rangeFeet: 60, willing: true },
+    targeting: { kind: 'single', rangeFeet: 60, willing: false },
     operation: { kind: 'effect', effect: pinnedEffect({ kind: 'armor_class_modifier', amount: 2 }, { concentration: true, durationRounds: 100 }) },
   },
   {
@@ -498,7 +498,7 @@ const COMPLETE_MECHANICS_PINS: readonly CompleteMechanicsPin[] = [
   {
     id: 'floating-disk', source: 'spell-descriptions.txt:3335',
     targeting: { kind: 'utility', rangeFeet: 30 },
-    operation: { kind: 'utility', effect: { kind: 'floating_disk', diameterFeet: 3, heightFeet: 3, capacityPounds: 500, followDistanceFeet: 20, maximumDistanceFeet: 100 }, concentration: false, durationRounds: 600 },
+    operation: { kind: 'utility', effect: { kind: 'floating_disk', diameterFeet: 3, heightFeet: 3, thicknessInches: 1, capacityPounds: 500, followDistanceFeet: 20, maximumDistanceFeet: 100 }, concentration: false, durationRounds: 600 },
   },
   {
     id: 'fog-cloud', source: 'spell-descriptions.txt:3396',
@@ -507,7 +507,7 @@ const COMPLETE_MECHANICS_PINS: readonly CompleteMechanicsPin[] = [
   },
   {
     id: 'grease', source: 'spell-descriptions.txt:3883',
-    targeting: { kind: 'area', rangeFeet: 60, shape: 'cube', baseSizeFeet: 10, sizePerSlotFeet: 0 },
+    targeting: { kind: 'area', rangeFeet: 60, shape: 'cube', baseSizeFeet: 10, sizePerSlotFeet: 0, surface: 'ground_square' },
     operation: { kind: 'save_effect', ability: 'dexterity', rollMode: 'normal', effect: pinnedEffect({ kind: 'condition', condition: 'Prone' }, { durationRounds: 10, expiresAt: 'target_end' }) },
   },
   {
@@ -532,7 +532,7 @@ const COMPLETE_MECHANICS_PINS: readonly CompleteMechanicsPin[] = [
   },
   {
     id: 'jump', source: 'spell-descriptions.txt:4710',
-    targeting: { kind: 'multiple', rangeFeet: 5, baseMaximum: 1, additionalPerSlot: 1 },
+    targeting: { kind: 'multiple', rangeFeet: 5, baseMaximum: 1, additionalPerSlot: 1, willing: true },
     operation: { kind: 'effect', effect: pinnedEffect({ kind: 'jump_movement', jumpFeet: 30, movementCostFeet: 10, usesPerTurn: 1 }, { durationRounds: 10 }) },
   },
   {
@@ -562,7 +562,7 @@ const COMPLETE_MECHANICS_PINS: readonly CompleteMechanicsPin[] = [
   },
   {
     id: 'sanctuary', source: 'spell-descriptions.txt:6662',
-    targeting: { kind: 'single', rangeFeet: 30, willing: true },
+    targeting: { kind: 'single', rangeFeet: 30, willing: false },
     operation: { kind: 'effect', effect: pinnedEffect({ kind: 'sanctuary', saveAbility: 'wisdom' }, { durationRounds: 10 }) },
   },
   {

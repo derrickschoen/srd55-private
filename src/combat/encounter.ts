@@ -2216,9 +2216,18 @@ function effectApplication(
   const slotDelta = definition.level === 0 || command.castAsRitual
     ? 0
     : (command.slotLevel as number) - definition.level;
-  const durationRounds = data.durationRounds === null
-    ? null
-    : data.durationRounds + (data.durationRoundsPerSlot ?? 0) * slotDelta;
+  const slotLevel = command.slotLevel ?? definition.level;
+  const durationTier = data.slotDurationTiers
+    ?.reduce<NonNullable<EffectData['slotDurationTiers']>[number] | undefined>(
+      (highest, candidate) => candidate.minimumSlot <= slotLevel &&
+        (highest === undefined || candidate.minimumSlot > highest.minimumSlot) ? candidate : highest,
+      undefined,
+    );
+  const durationRounds = durationTier !== undefined
+    ? durationTier.durationRounds
+    : data.durationRounds === null
+      ? null
+      : data.durationRounds + (data.durationRoundsPerSlot ?? 0) * slotDelta;
   return {
     targets: actualTargets,
     duration: durationRounds === null
@@ -2228,7 +2237,7 @@ function effectApplication(
           timing: { combatant: timingCombatant, boundary, source: definition.source },
           remaining: durationRounds,
         },
-    concentration: data.concentration,
+    concentration: durationTier?.concentration ?? data.concentration,
     stackingIdentity: effectStackingIdentity(`spell:${definition.id}`),
     stacking: 'replace_same_source',
     repeatedSave: data.repeatedSave === undefined
@@ -2616,8 +2625,10 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
       const eligible = operation.excludeCaster
         ? targets.filter((target) => target !== command.actor)
         : targets;
-      const failed = eligible.filter((target) =>
-        resolveTargetSave(context, command.actor, target, operation.ability, command.saveDc, operation.rollMode, null).outcome === 'failure');
+      const failed = operation.willingTargetSkipsSave === true && command.selectedOption === 'willing'
+        ? eligible
+        : eligible.filter((target) =>
+          resolveTargetSave(context, command.actor, target, operation.ability, command.saveDc, operation.rollMode, null).outcome === 'failure');
       applySpellEffect(context, definition, command, operation.effect, failed);
       return;
     }

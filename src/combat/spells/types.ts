@@ -32,6 +32,10 @@ export type SpellTargeting =
       readonly rangeFeet: number;
       readonly willing: boolean;
       readonly allowDead?: true;
+      readonly rangeByCasterLevel?: readonly {
+        readonly minimumLevel: number;
+        readonly rangeFeet: number;
+      }[];
     }
   | {
       readonly kind: 'multiple';
@@ -47,6 +51,7 @@ export type SpellTargeting =
       readonly baseSizeFeet: number;
       readonly sizePerSlotFeet: number;
       readonly secondarySizeFeet?: number;
+      readonly surface?: 'ground_square';
     }
   | {
       readonly kind: 'area_selected';
@@ -77,6 +82,11 @@ export interface EffectData {
     readonly timing: 'target_end';
   };
   readonly durationRoundsPerSlot?: number;
+  readonly slotDurationTiers?: readonly {
+    readonly minimumSlot: number;
+    readonly durationRounds: number | null;
+    readonly concentration: boolean;
+  }[];
 }
 
 export type SpellOperation =
@@ -165,6 +175,7 @@ export type SpellOperation =
       readonly rollMode: 'normal' | 'advantage' | 'disadvantage';
       readonly effect: EffectData;
       readonly excludeCaster?: true;
+      readonly willingTargetSkipsSave?: true;
     }
   | {
       readonly kind: 'save_push';
@@ -206,6 +217,7 @@ export type SpellOperation =
   | {
       readonly kind: 'reaction_save_cancel';
       readonly ability: Ability;
+      readonly trigger?: 'visible_creature_casts_spell_with_components';
     }
   | {
       readonly kind: 'dispel_magic';

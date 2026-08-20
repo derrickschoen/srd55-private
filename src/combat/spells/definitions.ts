@@ -60,6 +60,7 @@ function effect(
     readonly expiresAt?: EffectData['expiresAt'];
     readonly repeatedSave?: EffectData['repeatedSave'];
     readonly durationRoundsPerSlot?: number;
+    readonly slotDurationTiers?: EffectData['slotDurationTiers'];
   } = {},
 ): EffectData {
   return {
@@ -70,6 +71,7 @@ function effect(
     expiresAt: options.expiresAt ?? 'source_start',
     ...(options.repeatedSave === undefined ? {} : { repeatedSave: options.repeatedSave }),
     ...(options.durationRoundsPerSlot === undefined ? {} : { durationRoundsPerSlot: options.durationRoundsPerSlot }),
+    ...(options.slotDurationTiers === undefined ? {} : { slotDurationTiers: options.slotDurationTiers }),
   };
 }
 
@@ -107,7 +109,7 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     source: 'docs/srd/source/spell-descriptions.txt:2630',
     castingTime: 'action', components: VS,
     targeting: { kind: 'utility', rangeFeet: 30 },
-    operation: { kind: 'utility', effect: { kind: 'minor_magic', spell: 'Elementalism', options: ['beckon_air', 'beckon_earth', 'beckon_fire', 'beckon_water', 'sculpt_element'], maximumActive: 1 }, concentration: false, durationRounds: null },
+    operation: { kind: 'utility', effect: { kind: 'minor_magic', spell: 'Elementalism', options: ['beckon_air', 'beckon_earth', 'beckon_fire', 'beckon_water', 'sculpt_element'], maximumActive: null }, concentration: false, durationRounds: null },
   },
   {
     id: 'fire-bolt', name: 'Fire Bolt', level: 0,
@@ -198,13 +200,13 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     source: 'docs/srd/source/spell-descriptions.txt:7006',
     castingTime: 'action', components: VS,
     targeting: { kind: 'single', rangeFeet: 5, willing: false },
-    operation: { kind: 'attack_damage', attackKind: 'melee', damageType: damageType('Lightning'), dice: cantripDamage(1, 8), rider: effect({ kind: 'opportunity_attacks_disabled' }) },
+    operation: { kind: 'attack_damage', attackKind: 'melee', damageType: damageType('Lightning'), dice: cantripDamage(1, 8), rider: effect({ kind: 'opportunity_attacks_disabled' }, { expiresAt: 'target_start' }) },
   },
   {
     id: 'spare-the-dying', name: 'Spare the Dying', level: 0,
     source: 'docs/srd/source/spell-descriptions.txt:7181',
     castingTime: 'action', components: VS,
-    targeting: { kind: 'single', rangeFeet: 30, willing: true },
+    targeting: { kind: 'single', rangeFeet: 30, willing: false, rangeByCasterLevel: [{ minimumLevel: 1, rangeFeet: 15 }, { minimumLevel: 5, rangeFeet: 30 }, { minimumLevel: 11, rangeFeet: 60 }, { minimumLevel: 17, rangeFeet: 120 }] },
     operation: { kind: 'stabilize' },
   },
   {
@@ -233,7 +235,7 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     source: 'docs/srd/source/spell-descriptions.txt:1046',
     castingTime: 'action', components: VS,
     targeting: { kind: 'multiple', rangeFeet: 30, baseMaximum: 1, additionalPerSlot: 1 },
-    operation: { kind: 'save_effect', ability: 'wisdom', rollMode: 'advantage', effect: effect({ kind: 'condition', condition: 'Charmed' }, { durationRounds: 600 }) },
+    operation: { kind: 'save_effect', ability: 'wisdom', rollMode: 'normal', effect: effect({ kind: 'condition', condition: 'Charmed' }, { durationRounds: 600 }) },
   },
   {
     id: 'bless', name: 'Bless', level: 1,
@@ -253,7 +255,7 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     id: 'cure-wounds', name: 'Cure Wounds', level: 1,
     source: 'docs/srd/source/spell-descriptions.txt:1895',
     castingTime: 'action', components: VS,
-    targeting: { kind: 'single', rangeFeet: 5, willing: true },
+    targeting: { kind: 'single', rangeFeet: 5, willing: false },
     operation: { kind: 'healing', dice: dice(2, 8, { perSlotCount: 2 }), addSpellcastingModifier: true },
   },
   {
@@ -268,13 +270,13 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     source: 'docs/srd/source/spell-descriptions.txt:4011',
     castingTime: 'action', components: VS,
     targeting: { kind: 'single', rangeFeet: 120, willing: false },
-    operation: { kind: 'attack_damage', attackKind: 'ranged', damageType: damageType('Radiant'), dice: dice(4, 6, { perSlotCount: 1 }), rider: effect({ kind: 'attack_roll_mode_modifier', mode: 'advantage', appliesTo: 'next_attack_against_target' }) },
+    operation: { kind: 'attack_damage', attackKind: 'ranged', damageType: damageType('Radiant'), dice: dice(4, 6, { perSlotCount: 1 }), rider: effect({ kind: 'attack_roll_mode_modifier', mode: 'advantage', appliesTo: 'next_attack_against_target' }, { durationRounds: 2, expiresAt: 'source_end' }) },
   },
   {
     id: 'healing-word', name: 'Healing Word', level: 1,
     source: 'docs/srd/source/spell-descriptions.txt:4169',
     castingTime: 'bonus_action', components: V,
-    targeting: { kind: 'single', rangeFeet: 60, willing: true },
+    targeting: { kind: 'single', rangeFeet: 60, willing: false },
     operation: { kind: 'healing', dice: dice(2, 4, { perSlotCount: 2 }), addSpellcastingModifier: true },
   },
   {
@@ -296,13 +298,13 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     source: 'docs/srd/source/spell-descriptions.txt:6937',
     castingTime: 'reaction', components: VS,
     targeting: { kind: 'self' },
-    operation: { kind: 'effect', effect: effect({ kind: 'shield_defense', armorClassBonus: 5, magicMissileImmune: true }, { target: 'self', durationRounds: 1 }) },
+    operation: { kind: 'effect', effect: effect({ kind: 'shield_defense', armorClassBonus: 5, magicMissileImmune: true, trigger: 'hit_by_attack_or_targeted_by_magic_missile' }, { target: 'self', durationRounds: 1 }) },
   },
   {
     id: 'shield-of-faith', name: 'Shield of Faith', level: 1,
     source: 'docs/srd/source/spell-descriptions.txt:6956',
     castingTime: 'bonus_action', components: material('a prayer scroll'),
-    targeting: { kind: 'single', rangeFeet: 60, willing: true },
+    targeting: { kind: 'single', rangeFeet: 60, willing: false },
     operation: { kind: 'effect', effect: effect({ kind: 'armor_class_modifier', amount: 2 }, { concentration: true, durationRounds: 100 }) },
   },
   {
@@ -408,7 +410,7 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     source: 'docs/srd/source/spell-descriptions.txt:3335',
     castingTime: 'action', ritual: true, components: material('a drop of mercury'),
     targeting: { kind: 'utility', rangeFeet: 30 },
-    operation: { kind: 'utility', effect: { kind: 'floating_disk', diameterFeet: 3, heightFeet: 3, capacityPounds: 500, followDistanceFeet: 20, maximumDistanceFeet: 100 }, concentration: false, durationRounds: 600 },
+    operation: { kind: 'utility', effect: { kind: 'floating_disk', diameterFeet: 3, heightFeet: 3, thicknessInches: 1, capacityPounds: 500, followDistanceFeet: 20, maximumDistanceFeet: 100 }, concentration: false, durationRounds: 600 },
   },
   {
     id: 'fog-cloud', name: 'Fog Cloud', level: 1,
@@ -421,7 +423,7 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     id: 'grease', name: 'Grease', level: 1,
     source: 'docs/srd/source/spell-descriptions.txt:3883',
     castingTime: 'action', components: material('a bit of pork rind or butter'),
-    targeting: { kind: 'area', rangeFeet: 60, shape: 'cube', baseSizeFeet: 10, sizePerSlotFeet: 0 },
+    targeting: { kind: 'area', rangeFeet: 60, shape: 'cube', baseSizeFeet: 10, sizePerSlotFeet: 0, surface: 'ground_square' },
     operation: { kind: 'save_effect', ability: 'dexterity', rollMode: 'normal', effect: effect({ kind: 'condition', condition: 'Prone' }, { durationRounds: 10, expiresAt: 'target_end' }) },
   },
   {
@@ -456,7 +458,7 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     id: 'jump', name: 'Jump', level: 1,
     source: 'docs/srd/source/spell-descriptions.txt:4710',
     castingTime: 'bonus_action', components: material('a grasshopper\'s hind leg'),
-    targeting: { kind: 'multiple', rangeFeet: 5, baseMaximum: 1, additionalPerSlot: 1 },
+    targeting: { kind: 'multiple', rangeFeet: 5, baseMaximum: 1, additionalPerSlot: 1, willing: true },
     operation: { kind: 'effect', effect: effect({ kind: 'jump_movement', jumpFeet: 30, movementCostFeet: 10, usesPerTurn: 1 }, { durationRounds: 10 }) },
   },
   {
@@ -498,7 +500,7 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     id: 'sanctuary', name: 'Sanctuary', level: 1,
     source: 'docs/srd/source/spell-descriptions.txt:6662',
     castingTime: 'bonus_action', components: material('a shard of glass from a mirror'),
-    targeting: { kind: 'single', rangeFeet: 30, willing: true },
+    targeting: { kind: 'single', rangeFeet: 30, willing: false },
     operation: { kind: 'effect', effect: effect({ kind: 'sanctuary', saveAbility: 'wisdom' }, { durationRounds: 10 }) },
   },
   {
@@ -597,7 +599,7 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     source: 'docs/srd/source/spell-descriptions.txt:1929',
     castingTime: 'action', components: materialWith('bat fur and a piece of coal', { verbal: true, somatic: false }),
     targeting: { kind: 'area', rangeFeet: 60, shape: 'sphere', baseSizeFeet: 15, sizePerSlotFeet: 0 },
-    operation: { kind: 'utility', effect: { kind: 'obscured_area', placement: 'selected_when_cast', radiusFeet: 15, obscurement: 'magical_darkness', dispersedByStrongWind: false, blocksDarkvision: true, suppressesLightSpellLevelAtMost: 2 }, concentration: true, durationRounds: 100 },
+    operation: { kind: 'utility', effect: { kind: 'obscured_area', placement: 'selected_when_cast', radiusFeet: 15, obscurement: 'magical_darkness', dispersedByStrongWind: false, blocksDarkvision: true, dispelsLightSpellLevelAtMost: 2 }, concentration: true, durationRounds: 100 },
   },
   {
     id: 'darkvision', name: 'Darkvision', level: 2,
@@ -625,7 +627,7 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     source: 'docs/srd/source/spell-descriptions.txt:2660',
     castingTime: 'action', components: material('fur or a feather'),
     targeting: { kind: 'multiple', rangeFeet: 5, baseMaximum: 1, additionalPerSlot: 1 },
-    operation: { kind: 'effect', effect: effect({ kind: 'ability_check_advantage', ability: 'chosen_when_cast' }, { concentration: true, durationRounds: 600 }) },
+    operation: { kind: 'effect', effect: effect({ kind: 'ability_check_advantage', ability: 'chosen_when_cast', excludedAbility: 'constitution' }, { concentration: true, durationRounds: 600 }) },
   },
   {
     id: 'enlarge-reduce', name: 'Enlarge/Reduce', level: 2,
@@ -687,7 +689,7 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     id: 'lesser-restoration', name: 'Lesser Restoration', level: 2,
     source: 'docs/srd/source/spell-descriptions.txt:4774',
     castingTime: 'bonus_action', components: VS,
-    targeting: { kind: 'single', rangeFeet: 5, willing: true },
+    targeting: { kind: 'single', rangeFeet: 5, willing: false },
     operation: { kind: 'remove_condition', conditions: ['Blinded', 'Deafened', 'Paralyzed', 'Poisoned'] },
   },
   {
@@ -750,7 +752,7 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     id: 'protection-from-poison', name: 'Protection from Poison', level: 2,
     source: 'docs/srd/source/spell-descriptions.txt:6359',
     castingTime: 'action', components: VS,
-    targeting: { kind: 'single', rangeFeet: 5, willing: true },
+    targeting: { kind: 'single', rangeFeet: 5, willing: false },
     operation: { kind: 'remove_condition_and_effect', condition: 'Poisoned', effect: effect({ kind: 'poison_protection', saveMode: 'advantage', resistanceType: 'Poison' }, { durationRounds: 600 }) },
   },
   {
@@ -793,13 +795,13 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     source: 'docs/srd/source/spell-descriptions.txt:7026',
     castingTime: 'action', ritual: true, components: VS,
     targeting: { kind: 'area', rangeFeet: 120, shape: 'sphere', baseSizeFeet: 20, sizePerSlotFeet: 0 },
-    operation: { kind: 'utility', effect: { kind: 'silence_area', placement: 'selected_when_cast', radiusFeet: 20, thunderImmune: true, verbalComponentsImpossible: true }, concentration: true, durationRounds: 100 },
+    operation: { kind: 'utility', effect: { kind: 'silence_area', placement: 'selected_when_cast', radiusFeet: 20, thunderImmune: true, verbalComponentsImpossible: true, creaturesInsideAreDeafened: true }, concentration: true, durationRounds: 100 },
   },
   {
     id: 'spider-climb', name: 'Spider Climb', level: 2,
     source: 'docs/srd/source/spell-descriptions.txt:7278',
     castingTime: 'action', components: material('a drop of bitumen and a spider'),
-    targeting: { kind: 'multiple', rangeFeet: 5, baseMaximum: 1, additionalPerSlot: 1 },
+    targeting: { kind: 'multiple', rangeFeet: 5, baseMaximum: 1, additionalPerSlot: 1, willing: true },
     operation: { kind: 'effect', effect: effect({ kind: 'spider_climb', climbSpeedEqualsSpeed: true, handsFree: true }, { concentration: true, durationRounds: 600 }) },
   },
   {
@@ -828,14 +830,14 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     source: 'docs/srd/source/spell-descriptions.txt:8453',
     castingTime: 'action', components: material('a bit of spiderweb'),
     targeting: { kind: 'area', rangeFeet: 60, shape: 'cube', baseSizeFeet: 20, sizePerSlotFeet: 0 },
-    operation: { kind: 'save_effect', ability: 'dexterity', rollMode: 'normal', effect: effect({ kind: 'web_area', placement: 'selected_when_cast', cubeFeet: 20, flatDepthFeet: 5, fireDamageCount: 2, fireDamageSides: 4 }, { concentration: true, durationRounds: 600 }) },
+    operation: { kind: 'effect', effect: effect({ kind: 'web_area', placement: 'selected_when_cast', cubeFeet: 20, flatDepthFeet: 5, fireDamageCount: 2, fireDamageSides: 4 }, { target: 'self', concentration: true, durationRounds: 600 }) },
   },
   {
     id: 'zone-of-truth', name: 'Zone of Truth', level: 2,
     source: 'docs/srd/source/spell-descriptions.txt:8699',
     castingTime: 'action', components: VS,
     targeting: { kind: 'area', rangeFeet: 60, shape: 'sphere', baseSizeFeet: 15, sizePerSlotFeet: 0 },
-    operation: { kind: 'save_effect', ability: 'charisma', rollMode: 'normal', effect: effect({ kind: 'truth_zone', placement: 'selected_when_cast', radiusFeet: 15, saveAbility: 'charisma' }, { durationRounds: 100 }) },
+    operation: { kind: 'effect', effect: effect({ kind: 'truth_zone', placement: 'selected_when_cast', radiusFeet: 15, saveAbility: 'charisma' }, { target: 'self', durationRounds: 100 }) },
   },
   {
     id: 'animate-dead', name: 'Animate Dead', level: 3,
@@ -853,7 +855,7 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     id: 'bestow-curse', name: 'Bestow Curse', level: 3,
     source: 'docs/srd/source/spell-descriptions.txt:753', castingTime: 'action', components: VS,
     targeting: { kind: 'single', rangeFeet: 5, willing: false },
-    operation: { kind: 'save_effect', ability: 'wisdom', rollMode: 'normal', effect: effect({ kind: 'bestow_curse', options: ['ability_disadvantage', 'attacks_against_caster_disadvantage', 'forced_dodge', 'extra_necrotic_damage'], extraDamageCount: 1, extraDamageSides: 8 }, { concentration: true, durationRounds: 10, durationRoundsPerSlot: 90 }) },
+    operation: { kind: 'save_effect', ability: 'wisdom', rollMode: 'normal', effect: effect({ kind: 'bestow_curse', options: ['ability_disadvantage', 'attacks_against_caster_disadvantage', 'forced_dodge', 'extra_necrotic_damage'], extraDamageCount: 1, extraDamageSides: 8 }, { concentration: true, durationRounds: 10, slotDurationTiers: [{ minimumSlot: 4, durationRounds: 100, concentration: true }, { minimumSlot: 5, durationRounds: 4800, concentration: false }, { minimumSlot: 7, durationRounds: 14400, concentration: false }, { minimumSlot: 9, durationRounds: null, concentration: false }] }) },
   },
   {
     id: 'blink', name: 'Blink', level: 3,
@@ -865,13 +867,13 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     id: 'clairvoyance', name: 'Clairvoyance', level: 3,
     source: 'docs/srd/source/spell-descriptions.txt:1121', castingTime: 'ten_minutes', components: material('a focus worth 100+ GP, either a jeweled horn for hearing or a glass eye for seeing'),
     targeting: { kind: 'utility', rangeFeet: 5280 },
-    operation: { kind: 'utility', effect: { kind: 'clairvoyance_sensor', rangeFeet: 5280, senses: ['hearing', 'seeing'], switchCost: 'bonus_action' }, concentration: true, durationRounds: 100 },
+    operation: { kind: 'utility', effect: { kind: 'clairvoyance_sensor', rangeFeet: 5280, senses: ['hearing', 'seeing'], switchCost: 'bonus_action', locationEligibility: 'familiar_or_obvious', intangible: true, invulnerable: true }, concentration: true, durationRounds: 100 },
   },
   {
     id: 'counterspell', name: 'Counterspell', level: 3,
     source: 'docs/srd/source/spell-descriptions.txt:1767', castingTime: 'reaction', components: S,
     targeting: { kind: 'single', rangeFeet: 60, willing: false },
-    operation: { kind: 'reaction_save_cancel', ability: 'constitution' },
+    operation: { kind: 'reaction_save_cancel', ability: 'constitution', trigger: 'visible_creature_casts_spell_with_components' },
   },
   {
     id: 'create-food-and-water', name: 'Create Food and Water', level: 3,
@@ -984,12 +986,12 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
   {
     id: 'remove-curse', name: 'Remove Curse', level: 3,
     source: 'docs/srd/source/spell-descriptions.txt:6499', castingTime: 'action', components: VS,
-    targeting: { kind: 'single', rangeFeet: 5, willing: true }, operation: { kind: 'remove_curse' },
+    targeting: { kind: 'single', rangeFeet: 5, willing: false }, operation: { kind: 'remove_curse' },
   },
   {
     id: 'revivify', name: 'Revivify', level: 3,
     source: 'docs/srd/source/spell-descriptions.txt:6604', castingTime: 'action', components: material('a diamond worth 300+ GP', true),
-    targeting: { kind: 'single', rangeFeet: 5, willing: true, allowDead: true },
+    targeting: { kind: 'single', rangeFeet: 5, willing: false, allowDead: true },
     operation: { kind: 'revive', hitPoints: 1, maximumDeathAgeRounds: 10 },
   },
   {
@@ -1020,7 +1022,7 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     id: 'spirit-guardians', name: 'Spirit Guardians', level: 3,
     source: 'docs/srd/source/spell-descriptions.txt:7324', castingTime: 'action', components: material('a prayer scroll'),
     targeting: { kind: 'area', rangeFeet: 0, shape: 'emanation', baseSizeFeet: 15, sizePerSlotFeet: 0 },
-    operation: { kind: 'utility', effect: { kind: 'spirit_guardians_area', placement: 'selected_when_cast', radiusFeet: 15, speedMultiplier: 0.5, damageTypes: ['Radiant', 'Necrotic'], damageCount: 3, damageSides: 8, damagePerSlotCount: 1, saveAbility: 'wisdom', onSuccess: 'half', oncePerTurn: true }, concentration: true, durationRounds: 100 },
+    operation: { kind: 'utility', effect: { kind: 'spirit_guardians_area', placement: 'selected_when_cast', radiusFeet: 15, speedMultiplier: 0.5, damageTypeByCasterAlignment: { goodOrNeutral: 'Radiant', evil: 'Necrotic' }, damageCount: 3, damageSides: 8, damagePerSlotCount: 1, saveAbility: 'wisdom', onSuccess: 'half', oncePerTurn: true }, concentration: true, durationRounds: 100 },
   },
   {
     id: 'stinking-cloud', name: 'Stinking Cloud', level: 3,
@@ -1037,7 +1039,7 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
   {
     id: 'tongues', name: 'Tongues', level: 3,
     source: 'docs/srd/source/spell-descriptions.txt:7932', castingTime: 'action', components: materialWith('a miniature ziggurat', { verbal: true, somatic: false }),
-    targeting: { kind: 'single', rangeFeet: 5, willing: true },
+    targeting: { kind: 'single', rangeFeet: 5, willing: false },
     operation: { kind: 'effect', effect: effect({ kind: 'universal_language', understandsSpokenAndSigned: true, understoodByAnyLanguageSpeaker: true }, { durationRounds: 600 }) },
   },
   {
@@ -1062,7 +1064,7 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     id: 'arcane-eye', name: 'Arcane Eye', level: 4,
     source: 'docs/srd/source/spell-descriptions.txt:398', castingTime: 'action', components: material('a bit of bat fur'),
     targeting: { kind: 'utility', rangeFeet: 30 },
-    operation: { kind: 'utility', effect: { kind: 'arcane_eye', darkvisionFeet: 30, moveFeetPerBonusAction: 30, minimumOpeningInches: 1, invisible: true, invulnerable: true }, concentration: true, durationRounds: 600 },
+    operation: { kind: 'utility', effect: { kind: 'arcane_eye', darkvisionFeet: 30, moveFeetPerBonusAction: 30, minimumOpeningInches: 1, invisible: true, invulnerable: true, hovers: true, seesEveryDirection: true, blockedBySolidBarriers: true }, concentration: true, durationRounds: 600 },
   },
   {
     id: 'aura-of-life', name: 'Aura of Life', level: 4,
@@ -1079,7 +1081,7 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
   {
     id: 'black-tentacles', name: 'Black Tentacles', level: 4,
     source: 'docs/srd/source/spell-descriptions.txt:784', castingTime: 'action', components: material('a tentacle'),
-    targeting: { kind: 'area', rangeFeet: 90, shape: 'cube', baseSizeFeet: 20, sizePerSlotFeet: 0 },
+    targeting: { kind: 'area', rangeFeet: 90, shape: 'cube', baseSizeFeet: 20, sizePerSlotFeet: 0, surface: 'ground_square' },
     operation: { kind: 'save_damage_and_effect', ability: 'strength', onSuccess: 'none', damageType: damageType('Bludgeoning'), dice: dice(3, 6), effect: effect({ kind: 'black_tentacles_area', placement: 'selected_when_cast', squareFeet: 20, difficultTerrain: true, saveAbility: 'strength', damageCount: 3, damageSides: 6, damageType: 'Bludgeoning', failureCondition: 'Restrained', escapeCheckSkill: 'Athletics', oncePerTurn: true }, { target: 'self', concentration: true, durationRounds: 10 }) },
   },
   {
@@ -1110,23 +1112,23 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     id: 'control-water', name: 'Control Water', level: 4,
     source: 'docs/srd/source/spell-descriptions.txt:1660', castingTime: 'action', components: material('a mixture of water and dust'),
     targeting: { kind: 'area', rangeFeet: 300, shape: 'cube', baseSizeFeet: 100, sizePerSlotFeet: 0 },
-    operation: { kind: 'utility', effect: { kind: 'control_water', placement: 'selected_when_cast', cubeFeet: 100, modes: ['flood', 'part_water', 'redirect_flow', 'whirlpool'], floodRiseFeet: 20, capsizePercent: 25, whirlpoolMinimumSquareFeet: 50, whirlpoolMinimumDepthFeet: 25, whirlpoolBaseFeet: 5, whirlpoolTopFeet: 50, whirlpoolHeightFeet: 25, pullRadiusFeet: 25, pullFeet: 10, damageCount: 2, damageSides: 8, onSuccess: 'half' }, concentration: true, durationRounds: 100 },
+    operation: { kind: 'utility', effect: { kind: 'control_water', placement: 'selected_when_cast', cubeFeet: 100, modes: ['flood', 'part_water', 'redirect_flow', 'whirlpool'], floodRiseFeet: 20, capsizePercent: 25, whirlpoolMinimumSquareFeet: 50, whirlpoolMinimumDepthFeet: 25, whirlpoolBaseFeet: 5, whirlpoolTopFeet: 50, whirlpoolHeightFeet: 25, pullRadiusFeet: 25, pullFeet: 10, damageCount: 2, damageSides: 8, onSuccess: 'half', saveAbility: 'strength', escapeCheckAbility: 'strength', escapeCheckSkill: 'Athletics' }, concentration: true, durationRounds: 100 },
   },
   {
     id: 'death-ward', name: 'Death Ward', level: 4,
     source: 'docs/srd/source/spell-descriptions.txt:1992', castingTime: 'action', components: VS,
-    targeting: { kind: 'single', rangeFeet: 5, willing: true },
+    targeting: { kind: 'single', rangeFeet: 5, willing: false },
     operation: { kind: 'effect', effect: effect({ kind: 'death_ward', replacementHitPoints: 1, negatesInstantDeath: true, consumedOnTrigger: true }, { durationRounds: 4800 }) },
   },
   {
     id: 'dimension-door', name: 'Dimension Door', level: 4,
     source: 'docs/srd/source/spell-descriptions.txt:2156', castingTime: 'action', components: V,
     targeting: { kind: 'utility', rangeFeet: 500 },
-    operation: { kind: 'utility', effect: { kind: 'dimension_door', maximumDistanceFeet: 500, maximumPassengers: 1, passengerStartFeet: 5, passengerDestinationFeet: 5, failureDamageCount: 4, failureDamageSides: 6, failureDamageType: 'Force' }, concentration: false, durationRounds: null },
+    operation: { kind: 'utility', effect: { kind: 'dimension_door', maximumDistanceFeet: 500, maximumPassengers: 1, passengerStartFeet: 5, passengerDestinationFeet: 5, failureDamageCount: 4, failureDamageSides: 6, failureDamageType: 'Force', passengerMustBeWilling: true }, concentration: false, durationRounds: null },
   },
   {
     id: 'divination', name: 'Divination', level: 4,
-    source: 'docs/srd/source/spell-descriptions.txt:2313', castingTime: 'action', ritual: true, components: material('incense worth 25+ GP', true),
+    source: 'docs/srd/source/spell-descriptions.txt:2312', castingTime: 'action', ritual: true, components: material('incense worth 25+ GP', true),
     targeting: { kind: 'utility', rangeFeet: 0 },
     operation: { kind: 'utility', effect: { kind: 'divination', forecastDays: 7, noAnswerChancePerExtraCastingPercent: 25 }, concentration: false, durationRounds: null },
   },
@@ -1140,7 +1142,7 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     id: 'faithful-hound', name: 'Faithful Hound', level: 4,
     source: 'docs/srd/source/spell-descriptions.txt:2902', castingTime: 'action', components: material('a silver whistle'),
     targeting: { kind: 'utility', rangeFeet: 30 },
-    operation: { kind: 'utility', effect: { kind: 'faithful_hound', maximumSeparationFeet: 300, triggerRadiusFeet: 30, truesightFeet: 30, biteReachFeet: 5, saveAbility: 'dexterity', damageCount: 4, damageSides: 8, damageType: 'Force', moveFeetPerMagicAction: 30 }, concentration: false, durationRounds: 4800, stateful: true },
+    operation: { kind: 'utility', effect: { kind: 'faithful_hound', maximumSeparationFeet: 300, triggerRadiusFeet: 30, truesightFeet: 30, biteReachFeet: 5, saveAbility: 'dexterity', damageCount: 4, damageSides: 8, damageType: 'Force', moveFeetPerMagicAction: 30, triggerMinimumSize: 'Small', intangible: true, invulnerable: true }, concentration: false, durationRounds: 4800, stateful: true },
   },
   {
     id: 'fire-shield', name: 'Fire Shield', level: 4,
@@ -1157,14 +1159,14 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
   {
     id: 'greater-invisibility', name: 'Greater Invisibility', level: 4,
     source: 'docs/srd/source/spell-descriptions.txt:3898', castingTime: 'action', components: VS,
-    targeting: { kind: 'single', rangeFeet: 5, willing: true },
+    targeting: { kind: 'single', rangeFeet: 5, willing: false },
     operation: { kind: 'effect', effect: effect({ kind: 'condition', condition: 'Invisible' }, { concentration: true, durationRounds: 10 }) },
   },
   {
     id: 'guardian-of-faith', name: 'Guardian of Faith', level: 4,
     source: 'docs/srd/source/spell-descriptions.txt:3927', castingTime: 'action', components: V,
     targeting: { kind: 'utility', rangeFeet: 30 },
-    operation: { kind: 'utility', effect: { kind: 'guardian_of_faith', size: 'Large', triggerRadiusFeet: 10, saveAbility: 'dexterity', damage: 20, damageType: 'Radiant', onSuccess: 'half', maximumTotalDamage: 60 }, concentration: false, durationRounds: 4800, stateful: true },
+    operation: { kind: 'utility', effect: { kind: 'guardian_of_faith', size: 'Large', triggerRadiusFeet: 10, saveAbility: 'dexterity', damage: 20, damageType: 'Radiant', onSuccess: 'half', maximumTotalDamage: 60, invulnerable: true }, concentration: false, durationRounds: 4800, stateful: true },
   },
   {
     id: 'hallucinatory-terrain', name: 'Hallucinatory Terrain', level: 4,
@@ -1194,7 +1196,7 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     id: 'polymorph', name: 'Polymorph', level: 4,
     source: 'docs/srd/source/spell-descriptions.txt:5939', castingTime: 'action', components: material('a caterpillar cocoon'),
     targeting: { kind: 'single', rangeFeet: 60, willing: false },
-    operation: { kind: 'save_effect', ability: 'wisdom', rollMode: 'normal', effect: effect({ kind: 'polymorph', formType: 'Beast', maximumChallengeRating: 'target_cr_or_level', temporaryHitPoints: 'beast_hit_points', endsAtTemporaryHitPoints: 0, canSpeak: false, canCastSpells: false, gearMelds: true }, { concentration: true, durationRounds: 600 }) },
+    operation: { kind: 'save_effect', ability: 'wisdom', rollMode: 'normal', effect: effect({ kind: 'polymorph', formType: 'Beast', maximumChallengeRating: 'target_cr_or_level', temporaryHitPoints: 'beast_hit_points', endsAtTemporaryHitPoints: 0, canSpeak: false, canCastSpells: false, gearMelds: true, retainedStatistics: ['alignment', 'personality', 'creature_type', 'hit_points', 'hit_point_dice'] }, { concentration: true, durationRounds: 600 }) },
   },
   {
     id: 'private-sanctum', name: 'Private Sanctum', level: 4,
@@ -1206,19 +1208,19 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     id: 'resilient-sphere', name: 'Resilient Sphere', level: 4,
     source: 'docs/srd/source/spell-descriptions.txt:6513', castingTime: 'action', components: material('a glass sphere'),
     targeting: { kind: 'single', rangeFeet: 30, willing: false },
-    operation: { kind: 'save_effect', ability: 'dexterity', rollMode: 'normal', effect: effect({ kind: 'resilient_sphere', maximumSize: 'Large', blocksPhysicalObjectsEnergyAndSpells: true, immuneToDamage: true, rollSpeedMultiplier: 0.5, destroyedBy: 'Disintegrate' }, { concentration: true, durationRounds: 10 }) },
+    operation: { kind: 'save_effect', ability: 'dexterity', rollMode: 'normal', willingTargetSkipsSave: true, effect: effect({ kind: 'resilient_sphere', maximumSize: 'Large', blocksPhysicalObjectsEnergyAndSpells: true, immuneToDamage: true, rollSpeedMultiplier: 0.5, destroyedBy: 'Disintegrate' }, { concentration: true, durationRounds: 10 }) },
   },
   {
     id: 'secret-chest', name: 'Secret Chest', level: 4,
     source: 'docs/srd/source/spell-descriptions.txt:6755', castingTime: 'action', components: material('a chest, 3 feet by 2 feet by 2 feet, constructed from rare materials worth 5,000+ GP, and a Tiny replica of the chest made from the same materials worth 50+ GP'),
     targeting: { kind: 'utility', rangeFeet: 5 },
-    operation: { kind: 'utility', effect: { kind: 'secret_chest', chestDimensionsFeet: [3, 2, 2], capacityCubicFeet: 12, recallDistanceFeet: 5, riskBeginsAfterDays: 60, dailyEndChancePercent: 5, chestMinimumGp: 5000, replicaMinimumGp: 50 }, concentration: false, durationRounds: null, stateful: true },
+    operation: { kind: 'utility', effect: { kind: 'secret_chest', chestDimensionsFeet: [3, 2, 2], capacityCubicFeet: 12, recallDistanceFeet: 5, riskBeginsAfterDays: 60, dailyCumulativeChancePerDayPercent: 5, chestMinimumGp: 5000, replicaMinimumGp: 50 }, concentration: false, durationRounds: null, stateful: true },
   },
   {
     id: 'stone-shape', name: 'Stone Shape', level: 4,
     source: 'docs/srd/source/spell-descriptions.txt:7413', castingTime: 'action', components: material('soft clay'),
     targeting: { kind: 'utility', rangeFeet: 5 },
-    operation: { kind: 'utility', effect: { kind: 'stone_shape', maximumDimensionFeet: 5, maximumHinges: 2, permitsLatch: true }, concentration: false, durationRounds: null, stateful: true },
+    operation: { kind: 'utility', effect: { kind: 'stone_shape', maximumObjectSize: 'Medium', maximumDimensionFeet: 5, maximumHinges: 2, permitsLatch: true }, concentration: false, durationRounds: null, stateful: true },
   },
   {
     id: 'stoneskin', name: 'Stoneskin', level: 4,
@@ -1236,7 +1238,7 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     id: 'wall-of-fire', name: 'Wall of Fire', level: 4,
     source: 'docs/srd/source/spell-descriptions.txt:8217', castingTime: 'action', components: material('a piece of charcoal'),
     targeting: { kind: 'area', rangeFeet: 120, shape: 'line', baseSizeFeet: 60, sizePerSlotFeet: 0, secondarySizeFeet: 1 },
-    operation: { kind: 'save_damage_and_effect', ability: 'dexterity', onSuccess: 'half', damageType: damageType('Fire'), dice: dice(5, 8, { perSlotCount: 1 }), effect: effect({ kind: 'wall_of_fire', placement: 'selected_when_cast', maximumLengthFeet: 60, heightFeet: 20, thicknessFeet: 1, ringDiameterFeet: 20, damagingSideDistanceFeet: 10, damageCount: 5, damageSides: 8, damagePerSlotCount: 1, damageType: 'Fire', opaque: true }, { target: 'self', concentration: true, durationRounds: 10 }) },
+    operation: { kind: 'save_damage_and_effect', ability: 'dexterity', onSuccess: 'half', damageType: damageType('Fire'), dice: dice(5, 8, { perSlotCount: 1 }), effect: effect({ kind: 'wall_of_fire', placement: 'selected_when_cast', maximumLengthFeet: 60, heightFeet: 20, thicknessFeet: 1, ringDiameterFeet: 20, damagingSideDistanceFeet: 10, damageCount: 5, damageSides: 8, damagePerSlotCount: 1, damageType: 'Fire', opaque: true, requiresSolidSurface: true }, { target: 'self', concentration: true, durationRounds: 10 }) },
   },
 ] as const;
 

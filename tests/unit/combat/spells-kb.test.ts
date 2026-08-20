@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { IMPLEMENTED_SPELL_DEFINITIONS } from '../../../src/combat/spells/definitions';
 import { SPELL_KB_ENTRIES } from '../../../src/combat/spells/kb/entries';
+import { SPELL_MANIFEST } from '../../../src/combat/spells/manifest';
 
 const SPELL_DESCRIPTION_LINES = readFileSync(
   'docs/srd/source/spell-descriptions.txt',
@@ -65,4 +66,32 @@ describe('spell knowledge-base completeness', () => {
       ).toBe(true);
     },
   );
+
+  it.each(SPELL_MANIFEST)('$id class-list locators name the exact spell row', (row) => {
+    for (const membership of row.memberships) {
+      const matched = /^(docs\/srd\/source\/(?:cleric|wizard)-spell-list\.txt):(\d+)$/u.exec(membership.source);
+      if (matched === null) throw new Error(`Invalid class-list locator: ${membership.source}`);
+      const path = matched[1];
+      const line = matched[2];
+      if (path === undefined || line === undefined) throw new Error(`Invalid class-list locator: ${membership.source}`);
+      const lines = readFileSync(path, 'utf8').split('\n');
+      const cited = lines[Number(line) - 1]?.trim() ?? '';
+      expect(cited, `${row.id} cites ${membership.source}`).toContain(row.name);
+    }
+  });
+
+  it.each([
+    { id: 'hold-person', requiredResidual: 'visible-target filtering' },
+    { id: 'disguise-self', requiredResidual: 'same-basic-limb-arrangement restriction' },
+    { id: 'sending', requiredResidual: 'a creature the caster has met or one described by someone who met it' },
+  ] as const)('$id honestly records its SRD targeting residual', ({ id, requiredResidual }) => {
+    const row = SPELL_MANIFEST.find((candidate) => candidate.id === id);
+    expect(row?.partial).toContain(requiredResidual);
+  });
+
+  it('Sending KB guidance pins the SRD recipient-identity rule without inventing a name requirement', () => {
+    const entry = SPELL_KB_ENTRIES.find((candidate) => candidate.spellId === 'sending');
+    expect(entry?.rulingGuidance).toContain('a creature you met or one described by someone who met it');
+    expect(entry?.rulingGuidance).not.toContain('named');
+  });
 });
