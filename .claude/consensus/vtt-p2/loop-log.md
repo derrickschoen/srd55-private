@@ -380,3 +380,23 @@ Three findings this session raised, recorded here so they are not lost with it:
 - Status: CLOSED round 1. Next: 4b-v (30 L4 spells, closes the
   manifest) then the D317.13 full-manifest audit; claimed here.
 
+## A16 — increment 4b-v: spell manifest complete (lane-wt/vtt3a)
+
+- 30 L4 spells; burn-down 30->0. 175/175 implemented, KB 175/175,
+  28 typed partials remain (L4 families). Completeness test flipped
+  to the increment-close invariant (any pending row fails = plan
+  mutation 25 form).
+- Round 2: supervisor's 5-row sample caught a wrong citation
+  (Polymorph pointed into Locate Creature). Fix + a citation-integrity
+  test anchoring all 175 rows to their named headers (+-1 line by
+  design; supervisor proved a 50-line offset fails). Mechanics
+  unchanged by the fix.
+- Supervisor verified: combat 1,135/1,135, sim unchanged, tsc clean,
+  own Fireball 8d6->6d6 control killed earlier vs committed tree.
+  Codex ledger: M25, M26 (Blight), Ice Storm height, Vitriolic dice,
+  Arcane Eye duration + two cross-batch regression pins.
+- Full gate GREEN 390 files / 7,071 tests (.tmp-gate-4bv.log).
+- Status: CLOSED round 2. Increment 4 code-complete; the D317.13
+  independent full-manifest audit (fresh-session auditor) is the last
+  gate before increment 4 formally closes. Claimed here.
+
