@@ -1,0 +1,59 @@
+{
+  "shape": "sphere",
+  "cases": [
+    {
+      "name": "sphere exact tangency, board edge, and Large footprint",
+      "bounds": { "columns": 4, "rows": 4 },
+      "blockedCells": [],
+      "template": { "origin": { "x": 5, "y": 5 }, "radius": 5 },
+      "expectedCells": [
+        { "column": 0, "row": 0 },
+        { "column": 1, "row": 0 },
+        { "column": 2, "row": 0 },
+        { "column": 0, "row": 1 },
+        { "column": 1, "row": 1 },
+        { "column": 2, "row": 1 },
+        { "column": 0, "row": 2 },
+        { "column": 1, "row": 2 }
+      ],
+      "tangentIncluded": { "column": 2, "row": 1 },
+      "outsideExcluded": { "column": 2, "row": 2 },
+      "creatures": [
+        {
+          "id": "large-partial",
+          "occupiedCells": [
+            { "column": 1, "row": 2 },
+            { "column": 2, "row": 2 }
+          ],
+          "affected": true
+        },
+        {
+          "id": "large-outside",
+          "occupiedCells": [
+            { "column": 2, "row": 2 },
+            { "column": 3, "row": 3 }
+          ],
+          "affected": false
+        }
+      ]
+    },
+    {
+      "name": "sphere locations behind a full-height Total Cover wall",
+      "bounds": { "columns": 5, "rows": 3 },
+      "blockedCells": [
+        { "column": 1, "row": 0 },
+        { "column": 1, "row": 1 },
+        { "column": 1, "row": 2 }
+      ],
+      "template": { "origin": { "x": 0, "y": 5 }, "radius": 30 },
+      "expectedCells": [
+        { "column": 0, "row": 0 },
+        { "column": 0, "row": 1 },
+        { "column": 0, "row": 2 }
+      ],
+      "tangentIncluded": { "column": 0, "row": 2 },
+      "outsideExcluded": { "column": 2, "row": 1 },
+      "creatures": []
+    }
+  ]
+}

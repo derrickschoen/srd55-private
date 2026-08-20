@@ -79,6 +79,16 @@ re-proved against their sources by `kb_verify.py`; your memory is not.
 | which mastery property does each weapon have; can you choose a weapon's mastery property; greatsword graze greataxe cleave longsword sap rapier vex maul topple longbow slow dagger nick | Each weapon has exactly ONE fixed mastery property assigned by the Weapons table — the wielder picks which WEAPONS to master, never which property a weapon gets: Greatsword/Glaive=Graze, Greataxe/Halberd=Cleave, Longsword/Mace/Flail=Sap, Rapier/Shortsword/Handaxe=Vex, Maul/Quarterstaff/Battleaxe=Topple, Longbow/Whip/Club=Slow, Dagger/Scimitar/Sickle=Nick, Pike/Greatclub/Warhammer=Push. | R-GEAR-004 | R_GEAR.md |
 | versatile weapon damage one handed vs two handed; longsword 1d8 or 1d10; quarterstaff spear battleaxe warhammer trident versatile die; versatile vs two-handed property difference | A Versatile weapon deals its base die one-handed and the parenthesized die when swung with two hands: Quarterstaff/Spear 1d6→1d8; Longsword/Battleaxe/Warhammer/War Pick/Trident 1d8→1d10 — while a Two-Handed weapon like a Greatsword can never be used one-handed and a Longsword always can at 1d8. | R-GEAR-005 | R_GEAR.md |
 | heavy armor strength requirement chain mail splint plate; can low str wear plate armor; str 13 str 15 armor threshold; penalty for not meeting armor strength requirement | Heavy armor carries a Strength column: Chain Mail requires Str 13, Splint and Plate require Str 15, Ring Mail has none, and no Light or Medium armor has one — a character below the score can still wear it but triggers the SRD's unmet-Strength penalty rather than making the build illegal. | R-GEAR-006 | R_GEAR.md |
+| how many feet does one square represent on the combat grid | Each square on the combat grid represents 5 feet. | R-MOVE-001 | R_MOVEMENT.md |
+| are diagonal squares adjacent on the combat grid; eight-way or four-way grid movement | A square is adjacent when it is orthogonally or diagonally adjacent, so the square grid uses eight-way adjacency. | R-MOVE-002 | R_MOVEMENT.md |
+| how is distance counted on the square grid; shortest route or manhattan distance | Count grid distance by the shortest route between the spaces. | R-MOVE-003 | R_MOVEMENT.md |
+| how much movement does entering a difficult terrain square cost on the grid | Entering a Difficult Terrain square costs 2 squares, which is 10 feet on the 5-foot grid. | R-MOVE-004 | R_MOVEMENT.md |
+| when does leaving reach provoke an Opportunity Attack; must the reactor see the mover | A creature can make an Opportunity Attack when a creature it can see leaves its reach. | R-MOVE-005 | R_MOVEMENT.md |
+| does an Opportunity Attack happen before or after the creature leaves reach | The Opportunity Attack occurs immediately before the creature leaves reach. | R-MOVE-006 | R_MOVEMENT.md |
+| does Disengage prevent Opportunity Attacks and for how long | Taking the Disengage action makes your movement not provoke Opportunity Attacks for the rest of the current turn. | R-MOVE-007 | R_MOVEMENT.md |
+| do teleportation and forced movement provoke Opportunity Attacks | Teleportation does not provoke; neither does movement imposed without using the mover's movement, action, Bonus Action, or Reaction. | R-MOVE-008 | R_MOVEMENT.md |
+| what happens when a ranged target is beyond normal range but within long range | An attack beyond normal range but within long range is legal with Disadvantage. | R-MOVE-009 | R_MOVEMENT.md |
+| can a ranged attack target a creature beyond long range | A ranged attack cannot target beyond its long range. | R-MOVE-010 | R_MOVEMENT.md |
 | paladin ranger half caster multiclass spell slots round up or down; does a 1-level paladin dip give slots | HALF, ROUNDED UP. Paladin 1 or Ranger 1 contributes a FULL caster level, same as a Wizard dip. | R-MC-001 | R_MULTICLASS.md |
 | which classes count full toward multiclass spell slots caster level | Bard, Cleric, Druid, Sorcerer, Wizard — every level counts. | R-MC-002 | R_MULTICLASS.md |
 | can multiclass slots be higher level than any spell you know or prepare; what are the extra slots for | Yes, and they are usable only to UPCAST spells you actually prepare. Five 1-level full-caster dips = caster level 5 (slots 4/3/2) while preparing only 1st-level spells. | R-MC-003 | R_MULTICLASS.md |
@@ -216,6 +226,16 @@ Read before asserting anything in these areas.
 - **R-GEAR-004** — Treating the mastery property as chosen per character rather than fixed per weapon, or recalling the 2014 weapons table (which had no Mastery column) and concluding weapons have none. The property effects themselves are R-COMBAT-018..025; this entry is the weapon-to-property map they lacked.
 - **R-GEAR-005** — Using the versatile die while a shield or second weapon occupies the other hand, or confusing Versatile with Two-Handed. Recall also mangles specific rows: this gap's own draft cited 'Quarterstaff ... Versatile (1d10) Sap' but the table reads 'Quarterstaff 1d6 Bludgeoning Versatile (1d8) Topple'. The Versatile/Two-Handed rule-text definitions are NOT in this extract — that sentence needs a separate source or a CHECK.
 - **R-GEAR-006** — Applying a Str requirement to Medium armor (all Medium Strength cells are '—'), giving a Str 11 character Plate with no consequence, or rejecting the sheet outright. The penalty itself (10-foot Speed reduction, as sheet.ts implements) is NOT in armor-table.txt — only the thresholds are; stating the consequence in the KB needs the armor rules text as a separate source or a CHECK.
+- **R-MOVE-001** — Pricing an ordinary adjacent square as 10 feet instead of 5.
+- **R-MOVE-002** — Using four-way adjacency or Manhattan distance so a diagonal costs two squares.
+- **R-MOVE-003** — Counting diagonal movement as separate horizontal and vertical legs.
+- **R-MOVE-004** — Charging only 5 feet to enter Difficult Terrain, or multiplying the cost again for overlapping sources.
+- **R-MOVE-005** — Triggering when a creature enters reach, or triggering for a creature the reactor cannot see.
+- **R-MOVE-006** — Moving the creature first and resolving the Opportunity Attack afterward.
+- **R-MOVE-007** — Suppressing only the first Opportunity Attack or only the next movement step.
+- **R-MOVE-008** — Treating every effect commonly called forced movement alike; movement using the mover's action, Bonus Action, Reaction, or Speed can still provoke.
+- **R-MOVE-009** — Treating the whole long range as normal range.
+- **R-MOVE-010** — Allowing the attack with Disadvantage beyond long range.
 - **R-MC-001** — 2014 rules rounded DOWN and recall reproduces that. "Paladin dip is slot-dead" is WRONG. This exact error was asserted in a design doc and shipped to three agent lanes before being caught.
 - **R-MC-003** — Assuming a 3rd-level slot lets you cast 3rd-level spells. It does not — it upcasts 1st-level spells.
 - **R-MC-004** — Assuming one save DC across a multiclass caster. Each class's spells use that class's ability.
@@ -288,6 +308,7 @@ Read before asserting anything in these areas.
 | `R_COMBAT.md` | 35 |
 | `R_FEATS.md` | 6 |
 | `R_GEAR.md` | 6 |
+| `R_MOVEMENT.md` | 10 |
 | `R_MULTICLASS.md` | 14 |
 | `R_RESTS.md` | 16 |
 | `R_SHEET.md` | 6 |
@@ -300,5 +321,5 @@ Read before asserting anything in these areas.
 2. `grep -i '^Q:.*<keyword>' .ai/kb/*.md` — topic entries.
 3. Not here? Go to the SOURCE, not to memory. Then ADD the entry.
 
-133 entries, 130 with recorded traps.
+143 entries, 140 with recorded traps.
 

@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dnd-lane.invalid/schemas/external-party-pack-v1.json",
+  "title": "External Party Pack",
+  "description": "A public, engine-vocabulary-only party interchange format. It contains no narration, feature prose, or source-product fields.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "partyId", "allowPartial", "members"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "partyId": { "type": "string", "pattern": "^party:[a-z0-9][a-z0-9-]{0,79}$" },
+    "allowPartial": { "type": "boolean" },
+    "members": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 5,
+      "items": { "$ref": "#/$defs/member" }
+    }
+  },
+  "$defs": {
+    "abilityScores": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"],
+      "properties": {
+        "strength": { "type": "integer", "minimum": 1, "maximum": 30 },
+        "dexterity": { "type": "integer", "minimum": 1, "maximum": 30 },
+        "constitution": { "type": "integer", "minimum": 1, "maximum": 30 },
+        "intelligence": { "type": "integer", "minimum": 1, "maximum": 30 },
+        "wisdom": { "type": "integer", "minimum": 1, "maximum": 30 },
+        "charisma": { "type": "integer", "minimum": 1, "maximum": 30 }
+      }
+    },
+    "saveBonuses": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"],
+      "properties": {
+        "strength": { "type": "integer", "minimum": -30, "maximum": 30 },
+        "dexterity": { "type": "integer", "minimum": -30, "maximum": 30 },
+        "constitution": { "type": "integer", "minimum": -30, "maximum": 30 },
+        "intelligence": { "type": "integer", "minimum": -30, "maximum": 30 },
+        "wisdom": { "type": "integer", "minimum": -30, "maximum": 30 },
+        "charisma": { "type": "integer", "minimum": -30, "maximum": 30 }
+      }
+    },
+    "class": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["classId", "level"],
+      "properties": {
+        "classId": {
+          "enum": ["Barbarian", "Bard", "Cleric", "Druid", "Fighter", "Monk", "Paladin", "Ranger", "Rogue", "Sorcerer", "Warlock", "Wizard"]
+        },
+        "level": { "type": "integer", "minimum": 1, "maximum": 20 }
+      }
+    },
+    "damage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["damageTypeId", "count", "sides", "modifier"],
+      "properties": {
+        "damageTypeId": {
+          "enum": ["Acid", "Bludgeoning", "Cold", "Fire", "Force", "Lightning", "Necrotic", "Piercing", "Poison", "Psychic", "Radiant", "Slashing", "Thunder"]
+        },
+        "count": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "sides": { "enum": [4, 6, 8, 10, 12, 20] },
+        "modifier": { "type": "integer", "minimum": -30, "maximum": 30 }
+      }
+    },
+    "attack": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attackId", "kind", "attackBonus", "criticalFloor", "reachFeet", "rangeFeet", "damage"],
+      "properties": {
+        "attackId": { "type": "string", "pattern": "^attack:[a-z0-9][a-z0-9-]{0,79}$" },
+        "kind": { "enum": ["melee", "ranged"] },
+        "attackBonus": { "type": "integer", "minimum": -30, "maximum": 30 },
+        "criticalFloor": { "type": "integer", "minimum": 2, "maximum": 20 },
+        "reachFeet": { "type": "integer", "minimum": 0, "maximum": 1000 },
+        "rangeFeet": { "type": "integer", "minimum": 0, "maximum": 1000 },
+        "damage": { "type": "array", "minItems": 1, "maxItems": 20, "items": { "$ref": "#/$defs/damage" } }
+      }
+    },
+    "spellSlot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "maximum"],
+      "properties": {
+        "level": { "type": "integer", "minimum": 1, "maximum": 9 },
+        "maximum": { "type": "integer", "minimum": 1, "maximum": 99 }
+      }
+    },
+    "startingCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["effectId", "conditionId"],
+      "properties": {
+        "effectId": { "type": "string", "pattern": "^effect:[a-z0-9][a-z0-9:-]{0,119}$" },
+        "conditionId": {
+          "enum": ["Blinded", "Charmed", "Deafened", "Exhaustion", "Frightened", "Grappled", "Incapacitated", "Invisible", "Paralyzed", "Petrified", "Poisoned", "Prone", "Restrained", "Stunned", "Unconscious"]
+        }
+      }
+    },
+    "member": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["combatantId", "tokenId", "characterId", "classes", "abilities", "armorClass", "hitPointMaximum", "walkingSpeedFeet", "initiativeBonus", "savingThrowBonuses", "attacksPerAction", "spellSlots", "attacks", "spellSelections", "startingConditions"],
+      "properties": {
+        "combatantId": { "type": "string", "pattern": "^combatant:[a-z0-9][a-z0-9-]{0,79}$" },
+        "tokenId": { "type": "string", "pattern": "^token:[a-z0-9][a-z0-9-]{0,79}$" },
+        "characterId": { "type": "integer", "minimum": 1 },
+        "classes": { "type": "array", "minItems": 1, "maxItems": 12, "items": { "$ref": "#/$defs/class" } },
+        "abilities": { "$ref": "#/$defs/abilityScores" },
+        "armorClass": { "type": "integer", "minimum": 1, "maximum": 50 },
+        "hitPointMaximum": { "type": "integer", "minimum": 1, "maximum": 100000 },
+        "walkingSpeedFeet": { "type": "integer", "minimum": 0, "maximum": 1000 },
+        "initiativeBonus": { "type": "integer", "minimum": -30, "maximum": 30 },
+        "savingThrowBonuses": { "$ref": "#/$defs/saveBonuses" },
+        "attacksPerAction": { "type": "integer", "minimum": 1, "maximum": 20 },
+        "spellSlots": { "type": "array", "maxItems": 9, "items": { "$ref": "#/$defs/spellSlot" } },
+        "attacks": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/attack" } },
+        "spellSelections": { "type": "array", "items": { "type": "string" } },
+        "startingConditions": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/startingCondition" } }
+      }
+    }
+  }
+}

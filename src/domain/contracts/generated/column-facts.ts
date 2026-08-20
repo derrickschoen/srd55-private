@@ -1037,6 +1037,13 @@ export const COLUMN_FACTS = {
     created_at: { base: 'degraded', notNull: false },
     updated_at: { base: 'degraded', notNull: false },
   },
+  vtt_session_revisions: {
+    session_id: { base: 'degraded', notNull: true },
+    revision: { base: 'integer', notNull: true },
+    schema_version: { base: 'integer', notNull: true },
+    payload_json: { base: 'degraded', notNull: true },
+    payload_checksum: { base: 'degraded', notNull: true },
+  },
   warning_acknowledgements: {
     id: { base: 'integer', notNull: true },
     character_id: { base: 'integer', notNull: true },

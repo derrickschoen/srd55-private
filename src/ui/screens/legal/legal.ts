@@ -1,4 +1,5 @@
 import { srdAttributionSegments } from '../../../rules/srd-attribution';
+import { STARTER_ART_ATTRIBUTION } from '../../../assets/attribution';
 
 /**
  * Where the build puts the two licence texts it ships. Emitted by the
@@ -11,6 +12,7 @@ import { srdAttributionSegments } from '../../../rules/srd-attribution';
  * the one page whose job is to make the licences readable.
  */
 const CC_BY_LEGALCODE_HREF = './licenses/CC-BY-4.0.txt';
+const STARTER_ART_NOTICE_HREF = './licenses/STARTER-ART-NOTICE.txt';
 const MIT_LICENSE_HREF = './LICENSE.txt';
 
 function escapeHtml(value: unknown): string {
@@ -56,6 +58,15 @@ export function renderLegalPage(): string {
             linked: <a href="${CC_BY_LEGALCODE_HREF}"
             data-testid="cc-by-legalcode">read the bundled CC-BY-4.0
             legalcode</a>.</p>
+        </section>
+
+        <section class="legal-section">
+          <h2>Project-original starter art</h2>
+          <p data-testid="starter-art-attribution">${escapeHtml(STARTER_ART_ATTRIBUTION)}</p>
+          <p>The exact notice travels with this app:
+            <a href="${STARTER_ART_NOTICE_HREF}"
+            data-testid="starter-art-notice">read the bundled starter-art
+            notice</a>. The complete CC-BY-4.0 terms are linked above.</p>
         </section>
 
         <section class="legal-section">

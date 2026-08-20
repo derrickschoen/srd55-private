@@ -3,7 +3,15 @@
 // level-3/6/11/17 SRD board: the design document fixes levels 5/11/17 and an
 // attack distribution of 60% normal hit, 5% critical hit, and 35% miss.
 
-import type { CombatResult, Rng } from './sim';
+import { rollDie, type Rng } from '../../src/combat/random';
+import {
+  classifyAttackRoll,
+  resolveAttackRoll,
+  resolveDamage,
+  rollD20,
+} from '../../src/combat/resolution';
+import { armorClass, damageType, dieSides } from '../../src/combat/values';
+import type { CombatResult } from './sim';
 
 export type ValidationLevel = 5 | 11 | 17;
 export type ChorusLevel = ValidationLevel | 6;
@@ -66,24 +74,44 @@ function emptyTrace(): HomebrewTrace {
   };
 }
 
-function randInt(rng: Rng, sides: number): number {
-  return Math.floor(rng() * sides) + 1;
-}
+const HOMEBREW_DAMAGE = damageType('Homebrew validation damage');
 
-function dice(rng: Rng, count: number, sides: number): number {
-  let total = 0;
-  for (let i = 0; i < count; i++) total += randInt(rng, sides);
-  return total;
+function damageDice(
+  rng: Rng,
+  count: number,
+  sides: number,
+  critical = false,
+  modifier = 0,
+): number {
+  return resolveDamage(
+    {
+      terms: [
+        {
+          type: HOMEBREW_DAMAGE,
+          dice: { count, sides: dieSides(sides), modifier },
+        },
+      ],
+      critical,
+      responses: [],
+    },
+    rng,
+  ).total;
 }
 
 /** A raw d20 with the design's fixed 65% hit rate: 8-19 hit, 20 crits. */
-function attack(rng: Rng, criticalFloor = 20, advantage = false): AttackOutcome {
-  const first = randInt(rng, 20);
-  const roll = advantage ? Math.max(first, randInt(rng, 20)) : first;
+function fixedThresholdAttack(rng: Rng, criticalFloor = 20, advantage = false): AttackOutcome {
+  const result = resolveAttackRoll(
+    {
+      hitFloor: 8,
+      rollMode: advantage ? 'advantage' : 'normal',
+      criticalFloor,
+    },
+    rng,
+  );
   return {
-    roll,
-    hit: roll >= 8,
-    critical: roll >= criticalFloor,
+    roll: result.roll.chosen,
+    hit: result.outcome !== 'miss',
+    critical: result.outcome === 'critical',
   };
 }
 
@@ -95,7 +123,7 @@ function attacksForFighter(level: ValidationLevel): number {
 }
 
 function riderDamage(rng: Rng, count: number, sides: number, critical: boolean): number {
-  return dice(rng, count * (critical ? 2 : 1), sides);
+  return damageDice(rng, count, sides, critical);
 }
 
 /** Oath of the Long Grudge: two-attack paladin, bond rider contribution only. */
@@ -109,7 +137,7 @@ export function longGrudge(rng: Rng, level: ValidationLevel): HomebrewResult {
   for (let round = 0; round < 3; round++) {
     let used = false;
     for (let i = 0; i < 2; i++) {
-      const outcome = attack(rng);
+      const outcome = fixedThresholdAttack(rng);
       if (bond.roundsRemaining > 0 && bond.targetId === targetId && !used && outcome.hit) {
         used = true;
         trace.triggers++;
@@ -142,7 +170,7 @@ export function anchorPoint(
     let speedZero = false;
     let reactionsLocked = false;
     for (let i = 0; i < attacksPerTurn; i++) {
-      const outcome = attack(rng);
+      const outcome = fixedThresholdAttack(rng);
       if (!used && outcome.hit) {
         used = true;
         speedZero = true;
@@ -171,7 +199,7 @@ export function patientVolley(rng: Rng, level: ValidationLevel): HomebrewResult 
     let hitThisTurn = false;
     let used = false;
     for (let i = 0; i < 2; i++) {
-      const outcome = attack(rng);
+      const outcome = fixedThresholdAttack(rng);
       hitThisTurn ||= outcome.hit;
       if (eligible && !used && outcome.hit) {
         used = true;
@@ -195,18 +223,31 @@ interface BoostedAttack {
 function boostedRapierAttack(rng: Rng, inspirationSides: number): BoostedAttack {
   // The homebrew die is rolled before the attack roll, as specified. A
   // natural 1 remains a miss; only a natural 20 is a critical hit.
-  const inspiration = randInt(rng, inspirationSides);
-  const roll = randInt(rng, 20);
-  const baseHit = roll >= 8;
-  const boostedHit = roll !== 1 && roll + inspiration >= 8;
-  const critical = roll === 20;
-  const damage = boostedHit ? dice(rng, critical ? 2 : 1, 8) + 3 : 0;
+  const inspiration = rollDie(rng, dieSides(inspirationSides));
+  const roll = rollD20(rng, 'normal');
+  const base = classifyAttackRoll(
+    { hitFloor: 8, rollMode: 'normal', criticalFloor: 20 },
+    roll,
+  );
+  const boosted = classifyAttackRoll(
+    {
+      attackBonus: inspiration,
+      targetArmorClass: armorClass(8),
+      rollMode: 'normal',
+      criticalFloor: 20,
+    },
+    roll,
+  );
+  const baseHit = base.outcome !== 'miss';
+  const boostedHit = boosted.outcome !== 'miss';
+  const critical = boosted.outcome === 'critical';
+  const damage = boostedHit ? damageDice(rng, 1, 8, critical, 3) : 0;
   return { baseHit, boostedHit, critical, damage };
 }
 
 function unboostedRapierAttack(rng: Rng): BoostedAttack {
-  const outcome = attack(rng);
-  const damage = outcome.hit ? dice(rng, outcome.critical ? 2 : 1, 8) + 3 : 0;
+  const outcome = fixedThresholdAttack(rng);
+  const damage = outcome.hit ? damageDice(rng, 1, 8, outcome.critical, 3) : 0;
   return {
     baseHit: outcome.hit,
     boostedHit: outcome.hit,
@@ -300,7 +341,7 @@ export function vanwardConclave(rng: Rng, level: ValidationLevel): HomebrewResul
   let dealt = 0;
   for (let round = 0; round < 3; round++) {
     for (let i = 0; i < 2; i++) {
-      const outcome = attack(rng);
+      const outcome = fixedThresholdAttack(rng);
       const added = applyAmbushPrimitive(
         rng,
         state,
@@ -327,7 +368,7 @@ export function coldOpen(rng: Rng, level: ValidationLevel): HomebrewResult {
   for (let round = 0; round < 3; round++) {
     let vex = false;
     for (let i = 0; i < 2; i++) {
-      const outcome = attack(rng, 20, i === 0 || vex);
+      const outcome = fixedThresholdAttack(rng, 20, i === 0 || vex);
       const added = applyAmbushPrimitive(
         rng,
         state,
@@ -359,7 +400,7 @@ export function vanwardPatientStack(rng: Rng, level: ValidationLevel): HomebrewR
     let hitThisTurn = false;
     let patientSpent = false;
     for (let i = 0; i < 2; i++) {
-      const outcome = attack(rng);
+      const outcome = fixedThresholdAttack(rng);
       hitThisTurn ||= outcome.hit;
       let added = 0;
       if (eligible && !patientSpent && outcome.hit) {
@@ -396,9 +437,9 @@ export function brokenTooth(rng: Rng, level: ValidationLevel): HomebrewResult {
   let dealt = 0;
   for (let round = 0; round < 3; round++) {
     for (let i = 0; i < 2; i++) {
-      const outcome = attack(rng);
+      const outcome = fixedThresholdAttack(rng);
       if (outcome.hit) {
-        dealt += dice(rng, outcome.critical ? 2 : 1, sides) + wisdom;
+        dealt += damageDice(rng, 1, sides, outcome.critical, wisdom);
       }
     }
   }
@@ -414,7 +455,7 @@ export function cuttingMomentum(rng: Rng, level: ValidationLevel): HomebrewResul
     let firstHit = true;
     let criticalFloor = 20;
     for (let i = 0; i < attacksForFighter(level); i++) {
-      const outcome = attack(rng, criticalFloor);
+      const outcome = fixedThresholdAttack(rng, criticalFloor);
       if (!outcome.hit) continue;
       if (firstHit) {
         firstHit = false;
@@ -428,7 +469,7 @@ export function cuttingMomentum(rng: Rng, level: ValidationLevel): HomebrewResul
         // Only the extra greatsword weapon dice caused by the expanded range
         // are marginal damage. Ordinary natural-20 critical damage belongs to
         // the chassis and is intentionally excluded.
-        dealt += dice(rng, 2, 6);
+        dealt += damageDice(rng, 2, 6);
       }
     }
   }
@@ -447,7 +488,7 @@ export function brokenTempo(rng: Rng, level: ValidationLevel): HomebrewResult {
   for (let round = 0; round < 3; round++) {
     let spentThisTurn = false;
     for (let i = 0; i < attacksForFighter(level); i++) {
-      const outcome = attack(rng);
+      const outcome = fixedThresholdAttack(rng);
       if (!outcome.hit) continue;
       if (!spentThisTurn && pool > 0) {
         spentThisTurn = true;

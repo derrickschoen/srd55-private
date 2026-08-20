@@ -25,3 +25,6 @@ orchestration/logs/
 # `git ls-files` what is actually tracked.
 scraped/
 .tmp/
+tools/discord-launcher/.env
+__pycache__/
+.vtt-soak-out/

@@ -1,6 +1,7 @@
 // Category 3: identity tests — structural properties that must hold
 // regardless of what the dice do this run.
 import { describe, expect, it } from 'vitest';
+import { mulberry32 } from '../../src/combat/random';
 import {
   champion,
   championRanged,
@@ -10,7 +11,6 @@ import {
   fiend,
   fiendPatron,
   monk,
-  mulberry32,
   sorcwiz,
   veteran,
 } from './sim';

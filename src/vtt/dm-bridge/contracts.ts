@@ -1,0 +1,303 @@
+import type { EncounterCommand } from '../../combat/events';
+import type { GridCell } from '../../combat/grid';
+import type { DmVisibleEncounterState } from '../../combat/visibility';
+import {
+  combatantId,
+  type CodexSessionId,
+  type CombatantId,
+  type EncounterSessionId,
+} from '../../combat/values';
+import type { DmBoardProjection } from '../encounter-projections';
+import type { SessionHistoryEntry } from '../session-persistence';
+import {
+  DM_BRIDGE_PROTOCOL_VERSION,
+  ROUND_PLAN_REPLY_CONTRACT,
+  decodeRoundPlanStructure,
+  type DecisionProgram,
+  type MonsterRoundProgram,
+  type PlanAction,
+  type RoundPlan,
+  type RoundPlanReplyContract,
+  type StatePredicate,
+  type TargetSelector,
+} from './round-plan-contract';
+
+export {
+  DM_BRIDGE_PROTOCOL_VERSION,
+  MAX_ROUND_PLAN_CORRECTIONS,
+  ROUND_PLAN_CANONICAL_EXAMPLE,
+  ROUND_PLAN_REPLY_CONTRACT,
+  ROUND_PLAN_REPLY_JSON_SCHEMA,
+  type DecisionProgram,
+  type MonsterRoundProgram,
+  type PlanAction,
+  type RoundPlan,
+  type RoundPlanReplyContract,
+  type StatePredicate,
+  type TargetSelector,
+} from './round-plan-contract';
+export const DEFAULT_DM_MODEL = 'gpt-5.6-terra' as const;
+export const DEFAULT_DM_REASONING_EFFORT = 'medium' as const;
+
+export interface DmBridgeModelConfig {
+  readonly model: string;
+  readonly reasoningEffort: 'low' | 'medium' | 'high' | 'xhigh';
+}
+
+export const DEFAULT_DM_MODEL_CONFIG: DmBridgeModelConfig = {
+  model: DEFAULT_DM_MODEL,
+  reasoningEffort: DEFAULT_DM_REASONING_EFFORT,
+};
+
+export type NarrationVoice =
+  | 'cinematic_visible_rolls'
+  | 'terse_tactical'
+  | 'rules_explicit'
+  | 'terse_rule_citing_validation';
+
+export interface ValidationLine {
+  readonly ruleId: string;
+  readonly srdLocator: string;
+  readonly sentence: string;
+}
+
+export type Narration =
+  | {
+      readonly kind: 'narration';
+      readonly voice: 'cinematic_visible_rolls';
+      readonly sentence: string;
+      readonly visibleRolls: readonly {
+        readonly label: string;
+        readonly faces: readonly number[];
+        readonly total: number;
+      }[];
+    }
+  | {
+      readonly kind: 'narration';
+      readonly voice: 'terse_tactical';
+      readonly sentence: string;
+    }
+  | {
+      readonly kind: 'narration';
+      readonly voice: 'rules_explicit';
+      readonly sentence: string;
+      readonly rules: readonly ValidationLine[];
+    }
+  | {
+      readonly kind: 'narration';
+      readonly voice: 'terse_rule_citing_validation';
+      readonly lines: readonly ValidationLine[];
+    };
+
+export interface AdjudicationProposal {
+  readonly kind: 'adjudication_proposal';
+  readonly target: CombatantId;
+  readonly subject: string;
+  readonly reasoning: string;
+  readonly consequence:
+    | { readonly kind: 'hit_point_delta'; readonly amount: number }
+    | { readonly kind: 'relocate'; readonly to: GridCell };
+}
+
+export type DmBridgeReply = RoundPlan | Narration | AdjudicationProposal;
+
+export interface RoundPlanRequest {
+  readonly kind: 'round_plan_request';
+  readonly protocolVersion: typeof DM_BRIDGE_PROTOCOL_VERSION;
+  readonly encounterId: EncounterSessionId;
+  readonly requestId: string;
+  readonly expectedRevision: number;
+  readonly round: number;
+  readonly codexSessionId: CodexSessionId;
+  readonly model: DmBridgeModelConfig;
+  readonly projection: DmBoardProjection;
+  readonly history: readonly SessionHistoryEntry[];
+  readonly livingMonsterIds: readonly CombatantId[];
+  readonly replyContract: RoundPlanReplyContract;
+  readonly correctionAttempt: 0;
+}
+
+export interface MonsterReconsultRequest {
+  readonly kind: 'monster_reconsult_request';
+  readonly protocolVersion: typeof DM_BRIDGE_PROTOCOL_VERSION;
+  readonly encounterId: EncounterSessionId;
+  readonly requestId: string;
+  readonly expectedRevision: number;
+  readonly round: number;
+  readonly codexSessionId: CodexSessionId;
+  readonly model: DmBridgeModelConfig;
+  readonly projection: DmBoardProjection;
+  readonly history: readonly SessionHistoryEntry[];
+  readonly monsterId: CombatantId;
+  readonly invalidation: string;
+  readonly scope: 'monster_remaining_round';
+  readonly replyContract: RoundPlanReplyContract;
+  readonly correctionAttempt: 0;
+}
+
+export interface RoundPlanCorrectionRequest {
+  readonly kind: 'round_plan_correction_request';
+  readonly protocolVersion: typeof DM_BRIDGE_PROTOCOL_VERSION;
+  readonly encounterId: EncounterSessionId;
+  readonly requestId: string;
+  readonly originalRequestId: string;
+  readonly expectedRevision: number;
+  readonly round: number;
+  readonly codexSessionId: CodexSessionId;
+  readonly model: DmBridgeModelConfig;
+  readonly projection: DmBoardProjection;
+  readonly history: readonly SessionHistoryEntry[];
+  readonly requestedMonsterIds: readonly CombatantId[];
+  readonly validatorError: string;
+  readonly replyContract: RoundPlanReplyContract;
+  readonly correctionAttempt: 1 | 2;
+}
+
+export type DmBridgeRequest = RoundPlanRequest | MonsterReconsultRequest | RoundPlanCorrectionRequest;
+
+export interface DmBridgeExchange {
+  exchange(request: DmBridgeRequest, signal: AbortSignal): Promise<unknown>;
+}
+
+function record(value: unknown, label: string): Readonly<Record<string, unknown>> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object.`);
+  }
+  return value as Readonly<Record<string, unknown>>;
+}
+
+function exactKeys(
+  value: Readonly<Record<string, unknown>>,
+  allowed: readonly string[],
+  label: string,
+): void {
+  const allowedSet = new Set(allowed);
+  const unexpected = Object.keys(value).find((key) => !allowedSet.has(key));
+  if (unexpected !== undefined) throw new TypeError(`${label} contains unexpected field ${unexpected}.`);
+}
+
+function finiteNumber(value: unknown, label: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new TypeError(`${label} must be a finite number.`);
+  }
+  return value;
+}
+
+function integer(value: unknown, label: string): number {
+  const decoded = finiteNumber(value, label);
+  if (!Number.isSafeInteger(decoded) || decoded < 0) {
+    throw new TypeError(`${label} must be a non-negative safe integer.`);
+  }
+  return decoded;
+}
+
+function string(value: unknown, label: string): string {
+  if (typeof value !== 'string' || value.trim() !== value || value.length === 0) {
+    throw new TypeError(`${label} must be a non-empty trimmed string.`);
+  }
+  return value;
+}
+
+function gridCell(value: unknown, label: string): GridCell {
+  const input = record(value, label);
+  exactKeys(input, ['column', 'row'], label);
+  return { column: integer(input.column, `${label}.column`), row: integer(input.row, `${label}.row`) };
+}
+
+function combatantIds(predicate: StatePredicate): readonly CombatantId[] {
+  switch (predicate.kind) {
+    case 'life_is':
+    case 'hp_percent_below':
+      return [predicate.combatantId];
+    case 'distance_at_most':
+      return [predicate.left, predicate.right];
+    case 'not':
+      return combatantIds(predicate.predicate);
+    case 'all':
+    case 'any':
+      return predicate.predicates.flatMap(combatantIds);
+  }
+}
+
+function programCombatantIds(program: DecisionProgram): readonly CombatantId[] {
+  switch (program.kind) {
+    case 'action':
+      return 'target' in program.action && program.action.target.kind === 'combatant'
+        ? [program.action.target.combatantId]
+        : [];
+    case 'if':
+      return [
+        ...combatantIds(program.predicate),
+        ...programCombatantIds(program.then),
+        ...programCombatantIds(program.else),
+      ];
+    case 'priority':
+      return program.choices.flatMap(programCombatantIds);
+  }
+}
+
+function validateProgramVocabulary(program: DecisionProgram, projection: DmVisibleEncounterState): void {
+  const visibleIds = new Set(projection.combatants.map((subject) => subject.id));
+  const missing = programCombatantIds(program).find((id) => !visibleIds.has(id));
+  if (missing !== undefined) {
+    throw new TypeError(`Decision program references combatant ${missing} outside the DM projection.`);
+  }
+}
+
+export function decodeRoundPlan(
+  value: unknown,
+  request: RoundPlanRequest | MonsterReconsultRequest | RoundPlanCorrectionRequest,
+): RoundPlan {
+  const input = decodeRoundPlanStructure(value);
+  if (
+    input.kind !== 'round_plan' ||
+    input.protocolVersion !== DM_BRIDGE_PROTOCOL_VERSION ||
+    input.encounterId !== request.encounterId ||
+    input.requestId !== request.requestId ||
+    input.expectedRevision !== request.expectedRevision ||
+    input.round !== request.round
+  ) {
+    throw new TypeError('Round plan envelope is stale or malformed.');
+  }
+  const monsters = input.monsters;
+  for (const entry of monsters) validateProgramVocabulary(entry.program, request.projection.encounter);
+  const expected = request.kind === 'round_plan_request'
+    ? request.livingMonsterIds
+    : request.kind === 'monster_reconsult_request'
+      ? [request.monsterId]
+      : request.requestedMonsterIds;
+  if (
+    monsters.length !== expected.length ||
+    new Set(monsters.map((entry) => entry.monsterId)).size !== monsters.length ||
+    expected.some((id) => !monsters.some((entry) => entry.monsterId === id))
+  ) {
+    throw new TypeError('Round plan must contain exactly one program for each requested monster.');
+  }
+  return {
+    kind: 'round_plan',
+    protocolVersion: DM_BRIDGE_PROTOCOL_VERSION,
+    encounterId: request.encounterId,
+    requestId: request.requestId,
+    expectedRevision: request.expectedRevision,
+    round: request.round,
+    monsters,
+  };
+}
+
+export function adjudicationCommand(
+  proposal: AdjudicationProposal,
+  projection: DmVisibleEncounterState,
+): Extract<EncounterCommand, { readonly type: 'adjudicate' }> {
+  if (!projection.combatants.some((subject) => subject.id === proposal.target)) {
+    throw new TypeError('Adjudication target is outside the full DM projection.');
+  }
+  return {
+    type: 'adjudicate',
+    target: proposal.target,
+    subject: proposal.subject,
+    reasoning: proposal.reasoning,
+    consequence: proposal.consequence,
+  };
+}
+
+export const dmBridgeContractInternals = { record, exactKeys, finiteNumber, integer, string, gridCell };

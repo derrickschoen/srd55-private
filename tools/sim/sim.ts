@@ -1,3 +1,23 @@
+import { rollDie, type Rng } from '../../src/combat/random';
+import {
+  classifyAttackRoll,
+  resolveAttackRoll,
+  resolveDamage,
+  resolveSavingThrow,
+  rollD20,
+  type AttackRollResult,
+  type D20Roll,
+} from '../../src/combat/resolution';
+import {
+  armorClass,
+  damageType,
+  dieSides,
+  difficultyClass,
+} from '../../src/combat/values';
+
+export { mulberry32 } from '../../src/combat/random';
+export type { Rng } from '../../src/combat/random';
+
 // DPR + support-channel Monte Carlo sim for the homebrew subclasses and the
 // complete twelve-subclass SRD 5.2.1 board.
 //
@@ -213,24 +233,6 @@
 //   picture (Formation is Cha-mod/LR support movement; Dominion is 10 min,
 //   1/LR + level-5-slot reload).
 
-// --- RNG ---------------------------------------------------------------------
-// Every build takes an injectable Rng (uniform [0,1)) so tests can pin the
-// sequence. mulberry32 provides reproducible runs.
-
-export type Rng = () => number;
-
-/** Small seeded PRNG (mulberry32) for reproducible runs and tests. */
-export function mulberry32(seed: number): Rng {
-  let a = seed >>> 0;
-  return function rng(): number {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
 export type Level = 3 | 6 | 11 | 17;
 
 export interface CombatResult {
@@ -276,25 +278,47 @@ export const ENEMY: Record<Level, readonly [number, number, number, number, numb
 // Typical defender AC the prevented damage is sampled against (front-liner).
 export const DEF_AC: Record<Level, number> = { 3: 17, 6: 18, 11: 19, 17: 20 };
 
-function randInt(rng: Rng, s: number): number {
-  return Math.floor(rng() * s) + 1;
-}
+const SIMULATION_DAMAGE = damageType('Simulation damage');
 
-function d(rng: Rng, n: number, s: number): number {
-  let total = 0;
-  for (let i = 0; i < n; i++) total += randInt(rng, s);
-  return total;
+function damage(rng: Rng, count: number, sides: number): number {
+  return resolveDamage(
+    {
+      terms: [
+        {
+          type: SIMULATION_DAMAGE,
+          dice: { count, sides: dieSides(sides), modifier: 0 },
+        },
+      ],
+      critical: false,
+      responses: [],
+    },
+    rng,
+  ).total;
 }
 
 function rr(rng: Rng, s: number): number {
   // Deuces Are Wild: reroll a 2 once (Veteran damage dice only).
-  const v = randInt(rng, s);
-  return v === 2 ? randInt(rng, s) : v;
+  const sides = dieSides(s);
+  const v = rollDie(rng, sides);
+  return v === 2 ? rollDie(rng, sides) : v;
 }
 
-function roll(rng: Rng, adv: boolean): number {
-  const r = randInt(rng, 20);
-  return adv ? Math.max(r, randInt(rng, 20)) : r;
+function resolveSimAttack(
+  rng: Rng,
+  attackBonus: number,
+  targetArmorClass: number,
+  advantage: boolean,
+  criticalFloor = 20,
+): AttackRollResult {
+  return resolveAttackRoll(
+    {
+      attackBonus,
+      targetArmorClass: armorClass(targetArmorClass),
+      rollMode: advantage ? 'advantage' : 'normal',
+      criticalFloor,
+    },
+    rng,
+  );
 }
 
 function enemyTurnDamage(rng: Rng, L: Level): number {
@@ -302,10 +326,10 @@ function enemyTurnDamage(rng: Rng, L: Level): number {
   const [natk, th, dn, ds, fl] = ENEMY[L];
   let dmg = 0;
   for (let i = 0; i < natk; i++) {
-    const r = randInt(rng, 20);
-    const crit = r === 20;
-    if (r === 1 || (r + th < DEF_AC[L] && !crit)) continue;
-    dmg += d(rng, dn * (crit ? 2 : 1), ds) + fl;
+    const outcome = resolveSimAttack(rng, th, DEF_AC[L], false);
+    const crit = outcome.outcome === 'critical';
+    if (outcome.outcome === 'miss') continue;
+    dmg += damage(rng, dn * (crit ? 2 : 1), ds) + fl;
   }
   return dmg;
 }
@@ -313,7 +337,7 @@ function enemyTurnDamage(rng: Rng, L: Level): number {
 function enemyHitDamage(rng: Rng, L: Level): number {
   // Sample the damage of one enemy hit (for an attack negated by an AC bump).
   const [, , dn, ds, fl] = ENEMY[L];
-  return d(rng, dn, ds) + fl;
+  return damage(rng, dn, ds) + fl;
 }
 
 // Divine Smite queues, shared by both paladins. Dice count = slot level + 1;
@@ -348,12 +372,15 @@ function cantripDice(L: Level): number {
   return L < 5 ? 1 : L < 11 ? 2 : L < 17 ? 3 : 4;
 }
 
-function saveFails(rng: Rng, dc: number, bonus = 2): boolean {
-  return randInt(rng, 20) + bonus < dc;
+function savingThrowFails(rng: Rng, dc: number, bonus = 2): boolean {
+  return resolveSavingThrow(
+    { bonus, dc: difficultyClass(dc), rollMode: 'normal' },
+    rng,
+  ).outcome === 'failure';
 }
 
-function saveForHalf(rng: Rng, dc: number, damage: number, bonus = 2): number {
-  return saveFails(rng, dc, bonus) ? damage : Math.floor(damage / 2);
+function damageAfterSave(rng: Rng, dc: number, rolledDamage: number, bonus = 2): number {
+  return savingThrowFails(rng, dc, bonus) ? rolledDamage : Math.floor(rolledDamage / 2);
 }
 
 /** Greedy Arcane/Natural Recovery allocation, capped at level-5 slots. */
@@ -396,15 +423,15 @@ export function devotion(rng: Rng, L: Level, nc: number): CombatResult {
         const nickAttack = i === attacks - 1;
         const advantage = vex;
         vex = false; // Vex applies to this next attack, hit or miss.
-        const r = roll(rng, advantage);
-        const crit = r === 20;
-        if (r === 1 || (r + hit + (nickAttack ? 0 : 3) < ac && !crit)) continue;
-        dealt += d(rng, crit ? 2 : 1, 6) + mod + d(rng, rad * (crit ? 2 : 1), 8);
+        const outcome = resolveSimAttack(rng, hit + (nickAttack ? 0 : 3), ac, advantage);
+        const crit = outcome.outcome === 'critical';
+        if (outcome.outcome === 'miss') continue;
+        dealt += damage(rng, crit ? 2 : 1, 6) + mod + damage(rng, rad * (crit ? 2 : 1), 8);
         if (!nickAttack) vex = true; // Sacred shortsword also has Vex.
         if (smiteAvailable) {
           smiteAvailable = false;
           const sm = qq.shift() as number;
-          dealt += d(rng, sm * (crit ? 2 : 1), 8);
+          dealt += damage(rng, sm * (crit ? 2 : 1), 8);
         }
       }
     }
@@ -440,18 +467,18 @@ export function devotionThrown(rng: Rng, L: Level, nc: number): CombatResult {
         javelins--;
         const sacred = sacredJavelin;
         sacredJavelin = false;
-        const r = roll(rng, false);
-        const crit = r === 20;
-        if (r === 1 || (r + baseHit + (sacred ? 3 : 0) < AC[L] && !crit)) continue;
+        const outcome = resolveSimAttack(rng, baseHit + (sacred ? 3 : 0), AC[L], false);
+        const crit = outcome.outcome === 'critical';
+        if (outcome.outcome === 'miss') continue;
         dealt +=
-          d(rng, crit ? 2 : 1, 6) +
+          damage(rng, crit ? 2 : 1, 6) +
           abilityMod(L) +
           wb +
-          d(rng, radiantDice * (crit ? 2 : 1), 8);
+          damage(rng, radiantDice * (crit ? 2 : 1), 8);
         if (smiteAvailable) {
           smiteAvailable = false;
           const smiteDice = smites.shift() as number;
-          dealt += d(rng, smiteDice * (crit ? 2 : 1), 8);
+          dealt += damage(rng, smiteDice * (crit ? 2 : 1), 8);
         }
       }
     }
@@ -510,21 +537,21 @@ export function domination(
       }
       const hits: boolean[] = [];
       for (let i = 0; i < natk; i++) {
-        const r = roll(rng, adv);
-        const crit = r === 20;
-        if (r === 1 || (r + hit < ac && !crit)) continue;
-        dealt += d(rng, crit ? 2 : 1, 6) + mod + d(rng, rad * (crit ? 2 : 1), 8);
+        const outcome = resolveSimAttack(rng, hit, ac, adv);
+        const crit = outcome.outcome === 'critical';
+        if (outcome.outcome === 'miss') continue;
+        dealt += damage(rng, crit ? 2 : 1, 6) + mod + damage(rng, rad * (crit ? 2 : 1), 8);
         hits.push(crit);
       }
       if (!command && qq.length > 0 && hits.length > 0) {
         const sm = qq.shift() as number;
-        dealt += d(rng, sm * (hits.some(Boolean) ? 2 : 1), 8);
+        dealt += damage(rng, sm * (hits.some(Boolean) ? 2 : 1), 8);
         if (policy !== 'smite' && !voiceOn && cd > 0) {
           cd -= 1; // Voice of Domination activates on this smite
           voiceOn = true;
         }
       } else if (command) {
-        if (randInt(rng, 20) + 2 < dc) {
+        if (savingThrowFails(rng, dc)) {
           advNext = true;
           prevented += enemyTurnDamage(rng, L);
         }
@@ -572,18 +599,15 @@ function championCore(rng: Rng, L: Level, nc: number, ranged: boolean): CombatRe
       let i = 0;
       while (i < n) {
         const adv = (ma && L >= 13) || (ranged && vex);
-        let r = roll(rng, adv);
-        let crit = r >= cm;
-        let miss = r === 1 || (r + hit < ac && !crit);
-        if (miss && hi) {
+        let outcome = resolveSimAttack(rng, hit, ac, adv, cm);
+        if (outcome.outcome === 'miss' && hi) {
           // F18: reroll one missed attack with Heroic Inspiration
           hi = false;
-          r = roll(rng, adv);
-          crit = r >= cm;
-          miss = r === 1 || (r + hit < ac && !crit);
+          outcome = resolveSimAttack(rng, hit, ac, adv, cm);
         }
+        const crit = outcome.outcome === 'critical';
         ma = false;
-        if (miss) {
+        if (outcome.outcome === 'miss') {
           if (!ranged) dealt += abil; // Graze (F5: ability modifier only)
           ma = true;
           vex = false;
@@ -591,7 +615,7 @@ function championCore(rng: Rng, L: Level, nc: number, ranged: boolean): CombatRe
           continue;
         }
         if (ranged) {
-          const weaponRoll = (): number => d(rng, crit ? 2 : 1, 6);
+          const weaponRoll = (): number => damage(rng, crit ? 2 : 1, 6);
           let weaponDamage = weaponRoll();
           if (!savageUsed) {
             weaponDamage = Math.max(weaponDamage, weaponRoll());
@@ -603,7 +627,9 @@ function championCore(rng: Rng, L: Level, nc: number, ranged: boolean): CombatRe
           const rolls = crit ? 4 : 2;
           const weaponRoll = (): number => {
             let total = 0;
-            for (let k = 0; k < rolls; k++) total += Math.max(randInt(rng, 6), 3);
+            for (let k = 0; k < rolls; k++) {
+              total += Math.max(rollDie(rng, dieSides(6)), 3);
+            }
             return total;
           };
           let weaponDamage = weaponRoll();
@@ -647,24 +673,24 @@ export function thief(rng: Rng, L: Level, nc: number): CombatResult {
         let h1 = false;
         for (let i = 0; i < 2; i++) {
           const adv = i === 0 || h1;
-          const r = roll(rng, adv);
-          const crit = r === 20;
-          const ok = r > 1 && (r + hit >= ac || crit);
+          const outcome = resolveSimAttack(rng, hit, ac, adv);
+          const crit = outcome.outcome === 'critical';
+          const ok = outcome.outcome !== 'miss';
           if (i === 0) h1 = ok;
           if (ok) {
-            dealt += d(rng, crit ? 2 : 1, 6) + (i === 0 ? mod : wb);
+            dealt += damage(rng, crit ? 2 : 1, 6) + (i === 0 ? mod : wb);
             if (!got) {
-              dealt += d(rng, crit ? sa * 2 : sa, 6);
+              dealt += damage(rng, crit ? sa * 2 : sa, 6);
               got = true;
             }
           }
         }
       }
       if (rng() < 0.25) {
-        const r = roll(rng, false);
-        const crit = r === 20;
-        if (r > 1 && (r + hit >= ac || crit)) {
-          dealt += d(rng, crit ? 2 : 1, 6) + mod + d(rng, crit ? sa * 2 : sa, 6);
+        const outcome = resolveSimAttack(rng, hit, ac, false);
+        const crit = outcome.outcome === 'critical';
+        if (outcome.outcome !== 'miss') {
+          dealt += damage(rng, crit ? 2 : 1, 6) + mod + damage(rng, crit ? sa * 2 : sa, 6);
         }
       }
     }
@@ -696,33 +722,33 @@ export function berserker(rng: Rng, L: Level, nc: number): CombatResult {
       let frenzyPending = true;
       for (let i = 0; i < attacks; i++) {
         const brutal = L >= 9 && i === 1;
-        const r = roll(rng, !brutal);
-        const crit = r === 20;
-        if (r === 1 || (r + hit < AC[L] && !crit)) {
+        const outcome = resolveSimAttack(rng, hit, AC[L], !brutal);
+        const crit = outcome.outcome === 'critical';
+        if (outcome.outcome === 'miss') {
           dealt += abilityMod(L); // Graze: ability modifier, not item bonus
           continue;
         }
-        dealt += d(rng, crit ? 4 : 2, 6) + flat + rage;
+        dealt += damage(rng, crit ? 4 : 2, 6) + flat + rage;
         if (frenzyPending) {
-          dealt += d(rng, frenzyDice * (crit ? 2 : 1), 6);
+          dealt += damage(rng, frenzyDice * (crit ? 2 : 1), 6);
           frenzyPending = false;
         }
-        if (brutal) dealt += d(rng, (L >= 17 ? 2 : 1) * (crit ? 2 : 1), 10);
+        if (brutal) dealt += damage(rng, (L >= 17 ? 2 : 1) * (crit ? 2 : 1), 10);
       }
 
       let retaliated = false;
       for (let i = 0; i < enemyAttacks; i++) {
-        const er = roll(rng, true); // Reckless grants the enemy Advantage
-        const crit = er === 20;
-        if (er === 1 || (er + enemyToHit < barbarianAC && !crit)) continue;
-        const incoming = d(rng, enemyDice * (crit ? 2 : 1), enemyDie) + enemyFlat;
+        const enemyOutcome = resolveSimAttack(rng, enemyToHit, barbarianAC, true);
+        const crit = enemyOutcome.outcome === 'critical';
+        if (enemyOutcome.outcome === 'miss') continue;
+        const incoming = damage(rng, enemyDice * (crit ? 2 : 1), enemyDie) + enemyFlat;
         prevented += incoming - Math.floor(incoming / 2); // Rage resistance, damage taken rounds down
         if (L >= 10 && !retaliated) {
           retaliated = true;
-          const rr_ = roll(rng, false);
-          const reactionCrit = rr_ === 20;
-          if (rr_ > 1 && (rr_ + hit >= AC[L] || reactionCrit)) {
-            dealt += d(rng, reactionCrit ? 4 : 2, 6) + flat + rage;
+          const reactionOutcome = resolveSimAttack(rng, hit, AC[L], false);
+          const reactionCrit = reactionOutcome.outcome === 'critical';
+          if (reactionOutcome.outcome !== 'miss') {
+            dealt += damage(rng, reactionCrit ? 4 : 2, 6) + flat + rage;
           } else {
             dealt += abilityMod(L); // Graze also applies to this weapon attack
           }
@@ -758,21 +784,21 @@ export function berserkerThrown(rng: Rng, L: Level, nc: number): CombatResult {
         const brutal = L >= 9 && i === attackActionAttacks - 1;
         const advantage = !brutal || vex; // advantage sources combine by OR
         vex = false;
-        const r = roll(rng, advantage); // Reckless has no melee-only restriction
-        const crit = r === 20;
-        if (r === 1 || (r + hit < AC[L] && !crit)) continue;
+        const outcome = resolveSimAttack(rng, hit, AC[L], advantage);
+        const crit = outcome.outcome === 'critical';
+        if (outcome.outcome === 'miss') continue;
         vex = true;
         const isLightExtra = lightExtraAttacks === 1 && i === totalAttacks - 1;
         dealt +=
-          d(rng, crit ? 2 : 1, 6) +
+          damage(rng, crit ? 2 : 1, 6) +
           wb +
           rage +
           (isLightExtra ? 0 : abilityMod(L));
         if (frenzyPending) {
-          dealt += d(rng, rage * (crit ? 2 : 1), 6);
+          dealt += damage(rng, rage * (crit ? 2 : 1), 6);
           frenzyPending = false;
         }
-        if (brutal) dealt += d(rng, (L >= 17 ? 2 : 1) * (crit ? 2 : 1), 10);
+        if (brutal) dealt += damage(rng, (L >= 17 ? 2 : 1) * (crit ? 2 : 1), 10);
       }
     }
   }
@@ -800,7 +826,7 @@ export function openHand(rng: Rng, L: Level, nc: number): CombatResult {
       if (L >= 17 && palmSet) {
         actionAttacks -= 1;
         palmSet = false;
-        dealt += saveForHalf(rng, dc, d(rng, 10, 12));
+        dealt += damageAfterSave(rng, dc, damage(rng, 10, 12));
       }
       const flurry = focus > 0;
       if (flurry) focus -= 1;
@@ -810,11 +836,11 @@ export function openHand(rng: Rng, L: Level, nc: number): CombatResult {
       let nextAdvantage = false;
       let stunningAvailable = L >= 5 && L < 17 && focus > 0;
       const strike = (isFlurry: boolean): void => {
-        const r = roll(rng, stunned || toppled || nextAdvantage);
+        const outcome = resolveSimAttack(rng, hit, AC[L], stunned || toppled || nextAdvantage);
         nextAdvantage = false;
-        const crit = r === 20;
-        if (r === 1 || (r + hit < AC[L] && !crit)) return;
-        dealt += d(rng, crit ? 2 : 1, martialDie) + mod;
+        const crit = outcome.outcome === 'critical';
+        if (outcome.outcome === 'miss') return;
+        dealt += damage(rng, crit ? 2 : 1, martialDie) + mod;
         if (L >= 17 && !palmSet && focus >= 4) {
           focus -= 4;
           palmSet = true;
@@ -823,10 +849,10 @@ export function openHand(rng: Rng, L: Level, nc: number): CombatResult {
           focus -= 1;
           stunningAvailable = false;
           // Failure stuns; success still grants Advantage to the next attack.
-          stunned = saveFails(rng, dc);
+          stunned = savingThrowFails(rng, dc);
           if (!stunned) nextAdvantage = true;
         }
-        if (isFlurry && !toppled && saveFails(rng, dc)) toppled = true;
+        if (isFlurry && !toppled && savingThrowFails(rng, dc)) toppled = true;
       };
       for (let i = 0; i < actionAttacks; i++) strike(false);
       for (let i = 0; i < flurryAttacks; i++) strike(true);
@@ -858,19 +884,19 @@ export function openHandThrown(rng: Rng, L: Level, nc: number): CombatResult {
       let stunningAdvantage = false;
       let stunAvailable = L >= 5 && focus > 0;
       for (let i = 0; i < attacks; i++) {
-        const r = roll(rng, vex || stunned || stunningAdvantage);
+        const outcome = resolveSimAttack(rng, hit, AC[L], vex || stunned || stunningAdvantage);
         vex = false;
         stunningAdvantage = false;
-        const crit = r === 20;
-        if (r === 1 || (r + hit < AC[L] && !crit)) continue;
+        const crit = outcome.outcome === 'critical';
+        if (outcome.outcome === 'miss') continue;
         vex = true;
-        dealt += d(rng, (crit ? 2 : 1), martialDie) + abilityMod(L) + wb;
+        dealt += damage(rng, (crit ? 2 : 1), martialDie) + abilityMod(L) + wb;
         if (stunAvailable) {
           focus -= 1;
           stunAvailable = false;
           // Failure leaves the target Stunned until our next turn; success
           // grants Advantage only to the next attack before then.
-          stunned = saveFails(rng, dc);
+          stunned = savingThrowFails(rng, dc);
           if (!stunned) stunningAdvantage = true;
         }
       }
@@ -901,20 +927,20 @@ export function hunter(rng: Rng, L: Level, nc: number): CombatResult {
       let hitMarked = false;
       for (let i = 0; i < attacks; i++) {
         const nickAttack = i === attacks - 1;
-        const r = roll(rng, L >= 17 || vex); // Precise Hunter at L17
+        const outcome = resolveSimAttack(rng, hit, AC[L], L >= 17 || vex);
         vex = false; // the next attack consumed any carried Vex
-        const crit = r === 20;
-        const ok = r > 1 && (r + hit >= AC[L] || crit);
+        const crit = outcome.outcome === 'critical';
+        const ok = outcome.outcome !== 'miss';
         if (!ok) continue;
         if (!nickAttack) vex = true; // shortsword; Nick itself grants no Vex
         hitMarked = true;
-        dealt += d(rng, crit ? 2 : 1, 6) + flat + d(rng, crit ? 2 : 1, 6);
+        dealt += damage(rng, crit ? 2 : 1, 6) + flat + damage(rng, crit ? 2 : 1, 6);
         if (colossusPending) {
-          dealt += d(rng, crit ? 2 : 1, 8);
+          dealt += damage(rng, crit ? 2 : 1, 8);
           colossusPending = false;
         }
       }
-      if (L >= 11 && hitMarked) prevented += d(rng, 1, 6);
+      if (L >= 11 && hitMarked) prevented += damage(rng, 1, 6);
     }
   }
   return { dealt, prevented };
@@ -936,21 +962,21 @@ export function hunterRanged(rng: Rng, L: Level, nc: number): CombatResult {
       let colossusPending = true;
       let hitMarked = false;
       for (let i = 0; i < attacks; i++) {
-        const r = roll(rng, L >= 17);
-        const crit = r === 20;
-        if (r === 1 || (r + hit < AC[L] && !crit)) continue;
+        const outcome = resolveSimAttack(rng, hit, AC[L], L >= 17);
+        const crit = outcome.outcome === 'critical';
+        if (outcome.outcome === 'miss') continue;
         hitMarked = true;
         dealt +=
-          d(rng, crit ? 2 : 1, 8) +
+          damage(rng, crit ? 2 : 1, 8) +
           abilityMod(L) +
           wb +
-          d(rng, crit ? 2 : 1, 6); // Hunter's Mark
+          damage(rng, crit ? 2 : 1, 6); // Hunter's Mark
         if (colossusPending) {
-          dealt += d(rng, crit ? 2 : 1, 8);
+          dealt += damage(rng, crit ? 2 : 1, 8);
           colossusPending = false;
         }
       }
-      if (L >= 11 && hitMarked) prevented += d(rng, 1, 6);
+      if (L >= 11 && hitMarked) prevented += damage(rng, 1, 6);
     }
   }
   return { dealt, prevented };
@@ -992,9 +1018,9 @@ export function veteran(rng: Rng, L: Level, nc: number, ranged = false): CombatR
       let h1 = false;
       for (let i = 0; i < 2; i++) {
         const adv = ranged ? i === 1 && h1 : i === 0 || h1;
-        const r = roll(rng, adv);
-        const crit = r >= cm;
-        const ok = r > 1 && (r + hit >= ac || crit);
+        const outcome = resolveSimAttack(rng, hit, ac, adv, cm);
+        const crit = outcome.outcome === 'critical';
+        const ok = outcome.outcome !== 'miss';
         if (i === 0) h1 = ok;
         if (ok) {
           const rolls = crit ? 2 : 1;
@@ -1024,16 +1050,14 @@ export function veteran(rng: Rng, L: Level, nc: number, ranged = false): CombatR
         // N4: Veteran Reflexes is a Reaction — at most one use per round.
         let reactionFree = true;
         for (let k = 0; k < enatk; k++) {
-          const r = randInt(rng, 20);
-          const crit = r === 20;
-          const total = r + eth;
-          const wouldHit = r !== 1 && (total >= vac || crit);
-          if (!wouldHit) continue;
-          if (!crit && total < vac + prof && reflexes > 0 && reactionFree) {
+          const outcome = resolveSimAttack(rng, eth, vac, false);
+          const crit = outcome.outcome === 'critical';
+          if (outcome.outcome === 'miss') continue;
+          if (!crit && outcome.total < vac + prof && reflexes > 0 && reactionFree) {
             // Veteran Reflexes flips this hit into a miss.
             reflexes -= 1;
             reactionFree = false;
-            prevented += d(rng, edn, eds) + efl;
+            prevented += damage(rng, edn, eds) + efl;
           }
         }
       }
@@ -1134,18 +1158,18 @@ export function monk(rng: Rng, L: Level, nc: number, initManifest = false): Comb
       }
       const adv = hands && L >= 17;
       for (let i = 0; i < n; i++) {
-        const r = roll(rng, adv);
-        const crit = r === 20;
-        if (r === 1 || (r + hit < ac && !crit)) continue;
-        dealt += d(rng, crit ? 2 : 1, md) + flat + (hands ? rider : 0);
+        const outcome = resolveSimAttack(rng, hit, ac, adv);
+        const crit = outcome.outcome === 'critical';
+        if (outcome.outcome === 'miss') continue;
+        dealt += damage(rng, crit ? 2 : 1, md) + flat + (hands ? rider : 0);
       }
       if (spent && L >= 3) {
         // Court Cantrip on Focus spend
-        const r = roll(rng, adv);
-        const crit = r === 20;
-        if (r > 1 && (r + wis + prof >= ac || crit)) {
+        const outcome = resolveSimAttack(rng, wis + prof, ac, adv);
+        const crit = outcome.outcome === 'critical';
+        if (outcome.outcome !== 'miss') {
           const nd = ({ 3: 1, 6: 2, 11: 3, 17: 4 } as const)[L];
-          dealt += d(rng, nd * (crit ? 2 : 1), 8) + (hands ? rider : 0);
+          dealt += damage(rng, nd * (crit ? 2 : 1), 8) + (hands ? rider : 0);
         }
       }
       // --- return fire ---
@@ -1158,32 +1182,41 @@ export function monk(rng: Rng, L: Level, nc: number, initManifest = false): Comb
           // Goad defiance: attack an ally at Disadvantage. Credit the damage
           // the Disadvantage removed (paired rolls vs the front-liner AC).
           for (let k = 0; k < enatk; k++) {
-            const r1 = randInt(rng, 20);
-            const r2 = randInt(rng, 20);
-            const crit1 = r1 === 20;
-            const hitsNormal = r1 !== 1 && (r1 + eth >= DEF_AC[L] || crit1);
-            const low = Math.min(r1, r2);
-            const hitsDisadv = low !== 1 && (low + eth >= DEF_AC[L] || low === 20);
+            const disadvantaged = rollD20(rng, 'disadvantage');
+            const first = disadvantaged.faces[0] as number;
+            const request = {
+              attackBonus: eth,
+              targetArmorClass: armorClass(DEF_AC[L]),
+              rollMode: 'normal' as const,
+              criticalFloor: 20,
+            };
+            const normal = classifyAttackRoll(request, {
+              mode: 'normal',
+              faces: [first],
+              chosen: first,
+            });
+            const actual = classifyAttackRoll(request, disadvantaged);
+            const crit1 = normal.outcome === 'critical';
+            const hitsNormal = normal.outcome !== 'miss';
+            const hitsDisadv = actual.outcome !== 'miss';
             if (hitsNormal && !hitsDisadv) {
-              prevented += d(rng, edn * (crit1 ? 2 : 1), eds) + efl; // N5: crit-aware
+              prevented += damage(rng, edn * (crit1 ? 2 : 1), eds) + efl; // N5: crit-aware
             }
           }
           continue;
         }
         if (enemy === 'B' && rng() < 0.5) continue; // B is on an ally (unmodeled)
         for (let k = 0; k < enatk; k++) {
-          const r = randInt(rng, 20);
-          const crit = r === 20;
-          const total = r + eth;
-          const wouldHit = r !== 1 && (total >= monkAC || crit);
-          if (!wouldHit) continue;
-          const inShieldBand = !crit && total < monkAC + 5; // [AC, AC+4], crits pierce
+          const outcome = resolveSimAttack(rng, eth, monkAC, false);
+          const crit = outcome.outcome === 'critical';
+          if (outcome.outcome === 'miss') continue;
+          const inShieldBand = !crit && outcome.total < monkAC + 5; // [AC, AC+4], crits pierce
           // Resource priority: an already-active Shield blocks band hits for
           // free; then Mirror Image duplicates (free, expire with the combat);
           // the Long-Rest Shield pool is spent last.
           if (shieldActive && inShieldBand) {
             // N2: an active Shield blocks every band hit for the rest of the round.
-            prevented += d(rng, edn, eds) + efl;
+            prevented += damage(rng, edn, eds) + efl;
             continue;
           }
           if (images > 0) {
@@ -1191,11 +1224,11 @@ export function monk(rng: Rng, L: Level, nc: number, initManifest = false): Comb
             // the hit to a duplicate, destroying it (N1).
             let diverted = false;
             for (let im = 0; im < images; im++) {
-              if (randInt(rng, 6) >= 3) diverted = true;
+              if (rollDie(rng, dieSides(6)) >= 3) diverted = true;
             }
             if (diverted) {
               images -= 1;
-              prevented += d(rng, edn * (crit ? 2 : 1), eds) + efl; // N5: crit-aware
+              prevented += damage(rng, edn * (crit ? 2 : 1), eds) + efl; // N5: crit-aware
               continue;
             }
           }
@@ -1205,16 +1238,16 @@ export function monk(rng: Rng, L: Level, nc: number, initManifest = false): Comb
             shields -= 1;
             reactionFree = false;
             shieldActive = true;
-            prevented += d(rng, edn, eds) + efl;
+            prevented += damage(rng, edn, eds) + efl;
             continue;
           }
-          const dmg = d(rng, edn * (crit ? 2 : 1), eds) + efl;
+          const dmg = damage(rng, edn * (crit ? 2 : 1), eds) + efl;
           if (shieldUp && hands) {
-            dealt += d(rng, 2, 8); // Rebuking Shield retaliation (N3: while upgraded)
+            dealt += damage(rng, 2, 8); // Rebuking Shield retaliation (N3: while upgraded)
           }
           if (hands) {
             const dc = Math.max(10, Math.floor(dmg / 2));
-            if (randInt(rng, 20) + 2 < dc) {
+            if (savingThrowFails(rng, dc)) {
               hands = false;
               shieldUp = false; // N3: the shield ends with the manifestation
             }
@@ -1241,14 +1274,14 @@ export function thiefShortbow(rng: Rng, L: Level, nc: number): CombatResult {
     for (let rnd = 0; rnd < 4; rnd++) {
       const turns = L >= 17 && rnd === 0 ? 2 : 1;
       for (let turn = 0; turn < turns; turn++) {
-        const r = roll(rng, true); // Steady Aim
-        const crit = r === 20;
-        if (r === 1 || (r + hit < AC[L] && !crit)) continue;
+        const outcome = resolveSimAttack(rng, hit, AC[L], true);
+        const crit = outcome.outcome === 'critical';
+        if (outcome.outcome === 'miss') continue;
         dealt +=
-          d(rng, crit ? 2 : 1, 6) +
+          damage(rng, crit ? 2 : 1, 6) +
           abilityMod(L) +
           wb +
-          d(rng, sneakDice * (crit ? 2 : 1), 6);
+          damage(rng, sneakDice * (crit ? 2 : 1), 6);
       }
     }
   }
@@ -1278,14 +1311,14 @@ export function thiefRanged(rng: Rng, L: Level, nc: number): CombatResult {
       for (let t = 0; t < turns; t++) {
         let got = false;
         for (let i = 0; i < 2; i++) {
-          const r = roll(rng, vex);
-          const crit = r === 20;
-          const ok = r > 1 && (r + hit >= ac || crit);
+          const outcome = resolveSimAttack(rng, hit, ac, vex);
+          const crit = outcome.outcome === 'critical';
+          const ok = outcome.outcome !== 'miss';
           vex = ok; // Vex: a hit grants advantage on the next attack
           if (ok) {
-            dealt += d(rng, crit ? 2 : 1, 6) + (i === 0 ? mod : wb);
+            dealt += damage(rng, crit ? 2 : 1, 6) + (i === 0 ? mod : wb);
             if (!got) {
-              dealt += d(rng, crit ? sa * 2 : sa, 6);
+              dealt += damage(rng, crit ? sa * 2 : sa, 6);
               got = true;
             }
           }
@@ -1333,9 +1366,9 @@ export function fiend(
         let drunk = false;
         const hits: boolean[] = [];
         for (let i = 0; i < natk; i++) {
-          const r = roll(rng, dark);
-          const crit = r === 20;
-          if (r === 1 || (r + hit < ac && !crit)) continue;
+          const outcome = resolveSimAttack(rng, hit, ac, dark);
+          const crit = outcome.outcome === 'critical';
+          if (outcome.outcome === 'miss') continue;
           const dice: Array<[number, number]> = [[2, 6]];
           if (!dark) dice.push([1, 6]); // Hex
           if (L >= 9 && !drunk) {
@@ -1344,7 +1377,7 @@ export function fiend(
           }
           // F24: crits roll doubled dice; flat bonuses are not doubled.
           const diceTotal = dice.reduce(
-            (sum, [n_, s_]) => sum + d(rng, n_ * (crit ? 2 : 1), s_),
+            (sum, [n_, s_]) => sum + damage(rng, n_ * (crit ? 2 : 1), s_),
             0,
           );
           dealt += diceTotal + cha + wb;
@@ -1354,17 +1387,17 @@ export function fiend(
           // F7: Eldritch Smite requires Warlock 5+
           sq -= 1;
           const sm = 1 + slvl; // Eldritch Smite dice
-          dealt += d(rng, sm * (hits.some(Boolean) ? 2 : 1), 8);
+          dealt += damage(rng, sm * (hits.some(Boolean) ? 2 : 1), 8);
         }
       } else {
         if (sq > 0 && !hexCastThisTurn) {
           sq -= 1;
           for (let v = 0; v < slvl + 1; v++) {
             // Scorching Ray: 3 rays at level 2, +1 per higher slot.
-            const r = roll(rng, false);
-            const crit = r === 20;
-            if (r > 1 && (r + hit >= ac || crit)) {
-              dealt += d(rng, crit ? 4 : 2, 6) + d(rng, crit ? 2 : 1, 6);
+            const outcome = resolveSimAttack(rng, hit, ac, false);
+            const crit = outcome.outcome === 'critical';
+            if (outcome.outcome !== 'miss') {
+              dealt += damage(rng, crit ? 4 : 2, 6) + damage(rng, crit ? 2 : 1, 6);
             }
           }
         } else {
@@ -1373,10 +1406,10 @@ export function fiend(
           // it cannot also spend a slot on Scorching Ray.
           const beams = L < 5 ? 1 : L < 11 ? 2 : L < 17 ? 3 : 4;
           for (let b = 0; b < beams; b++) {
-            const r = roll(rng, false);
-            const crit = r === 20;
-            if (r > 1 && (r + hit >= ac || crit)) {
-              dealt += d(rng, crit ? 2 : 1, 10) + cha + d(rng, crit ? 2 : 1, 6);
+            const outcome = resolveSimAttack(rng, hit, ac, false);
+            const crit = outcome.outcome === 'critical';
+            if (outcome.outcome !== 'miss') {
+              dealt += damage(rng, crit ? 2 : 1, 10) + cha + damage(rng, crit ? 2 : 1, 6);
             }
           }
         }
@@ -1410,16 +1443,16 @@ export function fiendPatron(rng: Rng, L: Level, nc: number): CombatResult {
     for (let rnd = 0; rnd < 4; rnd++) {
       let hurlUsed = false;
       for (let i = 0; i < beams; i++) {
-        const r = roll(rng, false);
-        const crit = r === 20;
-        if (r === 1 || (r + hit < AC[L] && !crit)) continue;
-        dealt += d(rng, crit ? 2 : 1, 10) + abilityMod(L) + d(rng, crit ? 2 : 1, 6);
+        const outcome = resolveSimAttack(rng, hit, AC[L], false);
+        const crit = outcome.outcome === 'critical';
+        if (outcome.outcome === 'miss') continue;
+        dealt += damage(rng, crit ? 2 : 1, 10) + abilityMod(L) + damage(rng, crit ? 2 : 1, 6);
         if (hurlReady && !hurlUsed) {
           hurlReady = false;
           hurlUsed = true;
-          const hurled = saveFails(rng, dc);
+          const hurled = savingThrowFails(rng, dc);
           if (hurled) {
-            dealt += d(rng, 8, 10);
+            dealt += damage(rng, 8, 10);
             prevented += enemyTurnDamage(rng, L);
           }
           if (slots > 0) {
@@ -1461,8 +1494,8 @@ export function lifeDomain(rng: Rng, L: Level, nc: number): CombatResult {
     for (let rnd = 0; rnd < 4; rnd++) {
       if (spiritSlot > 0) {
         for (let tick = 0; tick < 2; tick++) {
-          const spiritDamage = d(rng, spiritSlot, 8); // 3d8 + 1d8/slot above 3
-          dealt += saveForHalf(rng, dc, spiritDamage);
+          const spiritDamage = damage(rng, spiritSlot, 8); // 3d8 + 1d8/slot above 3
+          dealt += damageAfterSave(rng, dc, spiritDamage);
         }
       }
       const preserveRound = spiritSlot > 0 ? 1 : 0;
@@ -1473,14 +1506,14 @@ export function lifeDomain(rng: Rng, L: Level, nc: number): CombatResult {
           divineIntervention = false;
           // Divine Intervention casts a level-5 Cleric spell without a slot;
           // Flame Strike is 10d6, Dexterity save for half.
-          dealt += saveForHalf(rng, dc, d(rng, 10, 6));
+          dealt += damageAfterSave(rng, dc, damage(rng, 10, 6));
         } else {
-          const sacred = d(rng, cantripDice(L), 8);
-          if (saveFails(rng, dc)) dealt += sacred + (L >= 7 ? abilityMod(L) : 0);
+          const sacred = damage(rng, cantripDice(L), 8);
+          if (savingThrowFails(rng, dc)) dealt += sacred + (L >= 7 ? abilityMod(L) : 0);
         }
       }
       if (canHeal && rnd === (spiritSlot > 0 ? 2 : 1)) {
-        const wordDice = L >= 17 ? 8 : d(rng, 2, 4);
+        const wordDice = L >= 17 ? 8 : damage(rng, 2, 4);
         prevented += wordDice + abilityMod(L) + 3; // Disciple: 2 + slot level
         if (L >= 6) prevented += 3; // Blessed Healer: 2 + slot level
       }
@@ -1492,7 +1525,7 @@ export function lifeDomain(rng: Rng, L: Level, nc: number): CombatResult {
 function aridSpellDamage(rng: Rng, slot: number): number {
   // Arid Circle supplies Burning Hands at 3 and Fireball at 5. Use Fireball
   // whenever the slot supports it; otherwise upcast Burning Hands.
-  return slot >= 3 ? d(rng, 8 + slot - 3, 6) : d(rng, 3 + slot - 1, 6);
+  return slot >= 3 ? damage(rng, 8 + slot - 3, 6) : damage(rng, 3 + slot - 1, 6);
 }
 
 export function circleLand(rng: Rng, L: Level, nc: number): CombatResult {
@@ -1514,18 +1547,19 @@ export function circleLand(rng: Rng, L: Level, nc: number): CombatResult {
   for (let c = 0; c < nc; c++) {
     for (let rnd = 0; rnd < 4; rnd++) {
       if (rnd === 0) {
-        dealt += saveForHalf(rng, dc, d(rng, landDice, 6));
-        prevented += d(rng, landDice, 6);
+        dealt += damageAfterSave(rng, dc, damage(rng, landDice, 6));
+        prevented += damage(rng, landDice, 6);
         continue;
       }
       const slot = slots.shift();
       if (slot !== undefined) {
-        dealt += saveForHalf(rng, dc, aridSpellDamage(rng, slot));
+        dealt += damageAfterSave(rng, dc, aridSpellDamage(rng, slot));
       } else {
-        const r = roll(rng, false);
-        if (r > 1 && (r + proficiency(L) + abilityMod(L) >= AC[L] || r === 20)) {
+        const outcome = resolveSimAttack(rng, proficiency(L) + abilityMod(L), AC[L], false);
+        const crit = outcome.outcome === 'critical';
+        if (outcome.outcome !== 'miss') {
           dealt +=
-            d(rng, cantripDice(L) * (r === 20 ? 2 : 1), 10) +
+            damage(rng, cantripDice(L) * (crit ? 2 : 1), 10) +
             (L >= 7 ? abilityMod(L) : 0); // Elemental Fury: Potent Spellcasting
         }
       }
@@ -1563,19 +1597,19 @@ export function evoker(rng: Rng, L: Level, nc: number): CombatResult {
     for (let rnd = 0; rnd < 4; rnd++) {
       const slot = slots.shift();
       if (slot === undefined) {
-        const rolled = d(rng, cantripDice(L), 6); // Acid Splash
-        dealt += saveFails(rng, dc) ? rolled : Math.floor(rolled / 2); // Potent Cantrip
+        const rolled = damage(rng, cantripDice(L), 6); // Acid Splash
+        dealt += savingThrowFails(rng, dc) ? rolled : Math.floor(rolled / 2); // Potent Cantrip
         continue;
       }
       const dice = slot >= 3 ? 8 + slot - 3 : 3 + slot - 1;
       const useOverchannel = overchannel && slot <= 5;
       if (useOverchannel) overchannel = false;
-      const rolled = useOverchannel ? dice * 6 : d(rng, dice, 6);
+      const rolled = useOverchannel ? dice * 6 : damage(rng, dice, 6);
       const spellDamage = rolled + (L >= 10 ? abilityMod(L) : 0);
-      dealt += saveForHalf(rng, dc, spellDamage);
+      dealt += damageAfterSave(rng, dc, spellDamage);
       if (L >= 6) {
         // Without Sculpt the ally would save normally and take full/half.
-        prevented += saveForHalf(rng, dc, spellDamage);
+        prevented += damageAfterSave(rng, dc, spellDamage);
       }
     }
   }
@@ -1593,14 +1627,27 @@ function chromaticOrb(
   let amplified = 0;
   let leaps = 0;
   for (let target = 0; target <= slot; target++) {
-    const r = roll(rng, advantage);
-    const crit = r === 20;
-    if (r === 1 || (r + proficiency(L) + abilityMod(L) < AC[L] && !crit)) break;
-    const faces: number[] = [];
-    for (let i = 0; i < dice * (crit ? 2 : 1); i++) faces.push(randInt(rng, 8));
-    const damage = faces.reduce((sum, face) => sum + face, 0);
-    if (target === 0) dealt += damage;
-    else amplified += damage;
+    const outcome = resolveSimAttack(rng, proficiency(L) + abilityMod(L), AC[L], advantage);
+    const crit = outcome.outcome === 'critical';
+    if (outcome.outcome === 'miss') break;
+    const result = resolveDamage(
+      {
+        terms: [
+          {
+            type: SIMULATION_DAMAGE,
+            dice: { count: dice, sides: dieSides(8), modifier: 0 },
+          },
+        ],
+        critical: crit,
+        responses: [],
+      },
+      rng,
+    );
+    const term = result.terms[0];
+    if (term === undefined) throw new Error('Chromatic Orb damage term is missing.');
+    const faces = term.roll.faces;
+    if (target === 0) dealt += result.total;
+    else amplified += result.total;
     const hasPair = new Set(faces).size < faces.length;
     if (!hasPair) break;
     leaps += 1;
@@ -1668,24 +1715,24 @@ export function draconic(rng: Rng, L: Level, nc: number): CombatResult {
       // Fire Bolt below is the action. With no slot, this is the action Fire
       // Bolt and the block below is a second, Quickened Fire Bolt.
       if (slot !== undefined && slot >= 3) {
-        const rolled = d(rng, 8 + slot - 3, 6) + (L >= 6 ? abilityMod(L) : 0);
-        dealt += saveForHalf(rng, dc, rolled);
+        const rolled = damage(rng, 8 + slot - 3, 6) + (L >= 6 ? abilityMod(L) : 0);
+        dealt += damageAfterSave(rng, dc, rolled);
       } else if (slot !== undefined) {
         const orb = chromaticOrb(rng, L, slot, innate);
         dealt += orb.dealt + (orb.dealt > 0 && L >= 6 ? abilityMod(L) : 0);
         prevented += orb.prevented;
       } else {
-        const r = roll(rng, innate);
-        const crit = r === 20;
-        if (r > 1 && (r + proficiency(L) + abilityMod(L) >= AC[L] || crit)) {
-          dealt += d(rng, cantripDice(L) * (crit ? 2 : 1), 10) + (L >= 6 ? abilityMod(L) : 0);
+        const outcome = resolveSimAttack(rng, proficiency(L) + abilityMod(L), AC[L], innate);
+        const crit = outcome.outcome === 'critical';
+        if (outcome.outcome !== 'miss') {
+          dealt += damage(rng, cantripDice(L) * (crit ? 2 : 1), 10) + (L >= 6 ? abilityMod(L) : 0);
         }
       }
       if (casting.bonusAction !== 'none') {
-        const r = roll(rng, innate);
-        const crit = r === 20;
-        if (r > 1 && (r + proficiency(L) + abilityMod(L) >= AC[L] || crit)) {
-          dealt += d(rng, cantripDice(L) * (crit ? 2 : 1), 10) + (L >= 6 ? abilityMod(L) : 0);
+        const outcome = resolveSimAttack(rng, proficiency(L) + abilityMod(L), AC[L], innate);
+        const crit = outcome.outcome === 'critical';
+        if (outcome.outcome !== 'miss') {
+          dealt += damage(rng, cantripDice(L) * (crit ? 2 : 1), 10) + (L >= 6 ? abilityMod(L) : 0);
         }
       }
     }
@@ -1724,17 +1771,17 @@ export function sorcwiz(rng: Rng, L: Level, nc: number): CombatResult | null {
       const rays = queue.length > 0 ? (queue.shift() as number) : 0;
       if (rays > 0) {
         for (let i = 0; i < rays; i++) {
-          const r = roll(rng, adv);
-          const crit = r === 20;
-          if (r > 1 && (r + hit >= ac || crit)) {
-            dealt += d(rng, crit ? 4 : 2, 6) + d(rng, rider * (crit ? 2 : 1), 8);
+          const outcome = resolveSimAttack(rng, hit, ac, adv);
+          const crit = outcome.outcome === 'critical';
+          if (outcome.outcome !== 'miss') {
+            dealt += damage(rng, crit ? 4 : 2, 6) + damage(rng, rider * (crit ? 2 : 1), 8);
           }
         }
       } else {
-        const r = roll(rng, adv);
-        const crit = r === 20;
-        if (r > 1 && (r + hit >= ac || crit)) {
-          dealt += d(rng, fb * (crit ? 2 : 1), 10) + d(rng, rider * (crit ? 2 : 1), 8);
+        const outcome = resolveSimAttack(rng, hit, ac, adv);
+        const crit = outcome.outcome === 'critical';
+        if (outcome.outcome !== 'miss') {
+          dealt += damage(rng, fb * (crit ? 2 : 1), 10) + damage(rng, rider * (crit ? 2 : 1), 8);
         }
       }
     }
@@ -1763,29 +1810,29 @@ export function lore(rng: Rng, L: Level, nc: number): CombatResult | null {
       const rays = queue.length > 0 ? (queue.shift() as number) : 0;
       if (rays > 0) {
         for (let i = 0; i < rays; i++) {
-          const r = roll(rng, false);
-          const crit = r === 20;
-          if (r > 1 && (r + hit >= ac || crit)) {
-            dealt += d(rng, crit ? 4 : 2, 6) + d(rng, rider * (crit ? 2 : 1), 8);
+          const outcome = resolveSimAttack(rng, hit, ac, false);
+          const crit = outcome.outcome === 'critical';
+          if (outcome.outcome !== 'miss') {
+            dealt += damage(rng, crit ? 4 : 2, 6) + damage(rng, rider * (crit ? 2 : 1), 8);
           }
         }
       } else {
-        const r = roll(rng, false);
-        const crit = r === 20;
-        if (r > 1 && (r + hit >= ac || crit)) {
-          dealt += d(rng, fireBoltDice * (crit ? 2 : 1), 10) + d(rng, rider * (crit ? 2 : 1), 8);
+        const outcome = resolveSimAttack(rng, hit, ac, false);
+        const crit = outcome.outcome === 'critical';
+        if (outcome.outcome !== 'miss') {
+          dealt += damage(rng, fireBoltDice * (crit ? 2 : 1), 10) + damage(rng, rider * (crit ? 2 : 1), 8);
         }
       }
 
       const [enemyAttacks, enemyToHit, enemyDice, enemyDie, enemyFlat] = ENEMY[L];
       let cuttingWordsAvailable = true;
       for (let a = 0; a < enemyAttacks; a++) {
-        const enemyRoll = randInt(rng, 20);
-        const enemyCrit = enemyRoll === 20;
-        if (enemyRoll === 1 || (enemyRoll + enemyToHit < DEF_AC[L] && !enemyCrit)) continue;
-        const incoming = d(rng, enemyDice * (enemyCrit ? 2 : 1), enemyDie) + enemyFlat;
+        const outcome = resolveSimAttack(rng, enemyToHit, DEF_AC[L], false);
+        const enemyCrit = outcome.outcome === 'critical';
+        if (outcome.outcome === 'miss') continue;
+        const incoming = damage(rng, enemyDice * (enemyCrit ? 2 : 1), enemyDie) + enemyFlat;
         if (cuttingWordsAvailable) {
-          prevented += Math.min(incoming, randInt(rng, inspirationDie));
+          prevented += Math.min(incoming, rollDie(rng, dieSides(inspirationDie)));
           cuttingWordsAvailable = false;
         }
       }
@@ -1815,32 +1862,47 @@ export function loreCollege(rng: Rng, L: Level, nc: number): CombatResult {
       const slot = slots.shift();
       let mocked = false;
       if (slot !== undefined && L >= 6 && slot >= 3) {
-        dealt += saveForHalf(rng, dc, d(rng, 8 + slot - 3, 6));
+        dealt += damageAfterSave(rng, dc, damage(rng, 8 + slot - 3, 6));
       } else if (slot !== undefined) {
-        dealt += saveForHalf(rng, dc, d(rng, 2 + slot, 6));
+        dealt += damageAfterSave(rng, dc, damage(rng, 2 + slot, 6));
       } else {
-        mocked = saveFails(rng, dc);
-        if (mocked) dealt += d(rng, cantripDice(L), 6);
+        mocked = savingThrowFails(rng, dc);
+        if (mocked) dealt += damage(rng, cantripDice(L), 6);
       }
 
       const [enemyAttacks, enemyToHit, enemyDice, enemyDie, enemyFlat] = ENEMY[L];
       let reactionFree = cuttingWords > 0;
       for (let a = 0; a < enemyAttacks; a++) {
-        const first = randInt(rng, 20);
-        const normalCrit = first === 20;
-        const normalHit = first !== 1 && (first + enemyToHit >= DEF_AC[L] || normalCrit);
-        let actual = first;
-        if (mocked && a === 0) actual = Math.min(first, randInt(rng, 20));
-        const actualCrit = actual === 20;
-        const actualHit = actual !== 1 && (actual + enemyToHit >= DEF_AC[L] || actualCrit);
+        const firstRoll = rollD20(rng, 'normal');
+        const request = {
+          attackBonus: enemyToHit,
+          targetArmorClass: armorClass(DEF_AC[L]),
+          rollMode: 'normal' as const,
+          criticalFloor: 20,
+        };
+        const normal = classifyAttackRoll(request, firstRoll);
+        let actualRoll: D20Roll = firstRoll;
+        if (mocked && a === 0) {
+          const secondRoll = rollD20(rng, 'normal');
+          actualRoll = {
+            mode: 'disadvantage',
+            faces: [firstRoll.chosen, secondRoll.chosen],
+            chosen: Math.min(firstRoll.chosen, secondRoll.chosen),
+          };
+        }
+        const actual = classifyAttackRoll(request, actualRoll);
+        const normalCrit = normal.outcome === 'critical';
+        const normalHit = normal.outcome !== 'miss';
+        const actualCrit = actual.outcome === 'critical';
+        const actualHit = actual.outcome !== 'miss';
         if (normalHit && !actualHit) {
-          prevented += d(rng, enemyDice * (normalCrit ? 2 : 1), enemyDie) + enemyFlat;
+          prevented += damage(rng, enemyDice * (normalCrit ? 2 : 1), enemyDie) + enemyFlat;
           continue;
         }
         if (!actualHit) continue;
-        const incoming = d(rng, enemyDice * (actualCrit ? 2 : 1), enemyDie) + enemyFlat;
+        const incoming = damage(rng, enemyDice * (actualCrit ? 2 : 1), enemyDie) + enemyFlat;
         if (reactionFree) {
-          prevented += Math.min(incoming, randInt(rng, inspirationDie));
+          prevented += Math.min(incoming, rollDie(rng, dieSides(inspirationDie)));
           cuttingWords -= 1;
           reactionFree = false;
         }

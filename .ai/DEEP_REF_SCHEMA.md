@@ -126,7 +126,7 @@ used to be hand-maintained in at least four places that did not know about each
 other, and adding a table told you nothing about whether it belonged in
 snapshots, backups, shares, both or neither.
 
-`TABLE_SCOPES` (`:173`) classifies EVERY table with:
+`TABLE_SCOPES` (`:175`) classifies EVERY table with:
 
 | Field | Meaning |
 |---|---|
@@ -151,10 +151,10 @@ Two mechanisms make this stick, and they are worth knowing by name:
    without that column is `Type 'true' is not assignable to type 'false'`. That
    fact previously lived only in a reviewer's head.
 
-Derived from the classification: `SnapshotTable` (`:1222`), `BackupTable` (`:1224`),
-`ShareTable` (`:1225`), and the ordered constants `CHARACTER_STATE_TABLES`
-(`:1435`), `DELETE_ORDER` (`:1520`), `BACKUP_TABLES` (`:1587`), `SHARE_TABLES`
-(`:1680`).
+Derived from the classification: `SnapshotTable` (`:1232`), `BackupTable` (`:1234`),
+`ShareTable` (`:1235`), and the ordered constants `CHARACTER_STATE_TABLES`
+(`:1446`), `DELETE_ORDER` (`:1531`), `BACKUP_TABLES` (`:1598`), `SHARE_TABLES`
+(`:1691`).
 
 **Classification is not the same as working.** That was Q8's bug, and D24 records
 the discipline that replaced it: each arm gets its own test — a column-for-column

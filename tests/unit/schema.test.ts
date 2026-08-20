@@ -374,6 +374,10 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
     text: ['slots', 'grant_rules'],
     numeric: ['created_at', 'updated_at'],
   },
+  vtt_session_revisions: {
+    integer: ['revision', 'schema_version'],
+    text: ['session_id', 'payload_json', 'payload_checksum'],
+  },
   warning_acknowledgements: {
     integer: ['id', 'character_id'],
     text: ['warning_fingerprint', 'note'],
@@ -827,6 +831,10 @@ const expectedNotNull: Record<string, string[]> = {
   ],
   party_document_states: [
     'forge', 'repository', 'path', 'document_kind', 'observation_state',
+  ],
+  vtt_session_revisions: [
+    'session_id', 'revision', 'schema_version', 'payload_json',
+    'payload_checksum',
   ],
   // `damage_dice`, `damage_type` and `mastery_property` are NULLABLE here and
   // NOT NULL on the template: a half-entered user weapon is a first-class
