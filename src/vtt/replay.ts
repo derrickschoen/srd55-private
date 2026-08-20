@@ -1,5 +1,10 @@
 import { canonicalJson } from '../commands/canonical-json';
-import { reduceEncounter, type EncounterState } from '../combat/encounter';
+import {
+  isEncounterConfig,
+  reduceEncounter,
+  type EncounterConfig,
+  type EncounterState,
+} from '../combat/encounter';
 import { restoreMulberry32, type SerializableRngState } from '../combat/random';
 import { sha256 } from '../crypto/sha256';
 import {
@@ -37,7 +42,7 @@ export {
   type FleetTokenCounts,
 } from './fleet-telemetry';
 
-export const VTT_REPLAY_SCHEMA_VERSION = 4 as const;
+export const VTT_REPLAY_SCHEMA_VERSION = 5 as const;
 export const VTT_REPLAY_MINIMUM_SCHEMA_VERSION = 1 as const;
 
 export interface ReplayControllerIdentity {
@@ -103,6 +108,7 @@ export interface ReplayBundle {
   readonly format: 'vtt-deterministic-replay';
   readonly schemaVersion: typeof VTT_REPLAY_SCHEMA_VERSION;
   readonly fleetSchemaVersion: typeof VTT_FLEET_SCHEMA_VERSION;
+  readonly encounterConfig: EncounterConfig;
   readonly fixture: {
     readonly fixtureId: EncounterFixtureId;
     readonly sha256: string;
@@ -261,10 +267,17 @@ export function createReplayBundle(input: {
 }): ReplayBundle {
   const fixture = decodeApprovedEncounterFixture(input.fixture);
   if (input.revisions.length === 0) throw new Error('Replay bundle needs at least one revision.');
+  const encounterConfig = input.revisions[0]!.encounterState.config;
+  if (input.revisions.some(
+    (revision) => canonicalJson(revision.encounterState.config) !== canonicalJson(encounterConfig),
+  )) {
+    throw new Error('Replay bundle encounter configuration changed during the session.');
+  }
   const bundle: ReplayBundle = {
     format: 'vtt-deterministic-replay',
     schemaVersion: VTT_REPLAY_SCHEMA_VERSION,
     fleetSchemaVersion: VTT_FLEET_SCHEMA_VERSION,
+    encounterConfig: structuredClone(encounterConfig),
     fixture: {
       fixtureId: fixture.fixtureId,
       sha256: fixture.approval.packageSha256,
@@ -296,6 +309,20 @@ const V2_TO_V3_SOURCE = 'vtt-replay-v2-to-v3:add-gap-reports=[]:1';
 const V2_TO_V3_CHECKSUM = '9c7f6016f360115db5e718408a2e2b42f7757604a95e7284f4dcb8453ee1f1c3';
 const V3_TO_V4_SOURCE = 'vtt-replay-v3-to-v4:add-fleet-correction-attempts-null-and-fleet-schema=2:1';
 const V3_TO_V4_CHECKSUM = '97854870631f51f4cc89cdcd3164ad086ff2954a574428bd8d54692eaccaa9e1';
+const V4_TO_V5_SOURCE = 'vtt-replay-v4-to-v5:add-encounter-config-from-first-revision-or-per-combatant:1';
+const V4_TO_V5_CHECKSUM = 'c0375bd900a13afe5a87cbc9c75028780c0b323a84bbe78b782084e18785d4d8';
+
+function migratedEncounterConfig(bundle: Readonly<Record<string, unknown>>): EncounterConfig {
+  const revisions = bundle.revisions;
+  if (Array.isArray(revisions)) {
+    const first = revisions[0];
+    if (record(first) && record(first.revision) && record(first.revision.encounterState)) {
+      const candidate = first.revision.encounterState.config;
+      if (isEncounterConfig(candidate)) return candidate;
+    }
+  }
+  return { initiativeMode: 'per_combatant' };
+}
 
 export const VTT_REPLAY_MIGRATIONS = Object.freeze([
   Object.freeze({
@@ -346,6 +373,18 @@ export const VTT_REPLAY_MIGRATIONS = Object.freeze([
         : bundle.transcripts,
     }),
   }),
+  Object.freeze({
+    id: 'vtt_replay_v4_to_v5',
+    from: 4,
+    to: 5,
+    source: V4_TO_V5_SOURCE,
+    checksum: V4_TO_V5_CHECKSUM,
+    migrate: (bundle: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> => ({
+      ...bundle,
+      schemaVersion: 5,
+      encounterConfig: migratedEncounterConfig(bundle),
+    }),
+  }),
 ]);
 
 export function validateReplayMigrationRegistry(): void {
@@ -388,6 +427,7 @@ function migrateReplayBundle(value: unknown): ReplayBundle {
     migrated.format !== 'vtt-deterministic-replay' ||
     migrated.schemaVersion !== VTT_REPLAY_SCHEMA_VERSION ||
     migrated.fleetSchemaVersion !== VTT_FLEET_SCHEMA_VERSION ||
+    !isEncounterConfig(migrated.encounterConfig) ||
     !record(migrated.fixture) ||
     !record(migrated.build) ||
     !Array.isArray(migrated.protocolVersions) ||
@@ -412,6 +452,7 @@ export function exportReplayBundleV1ForMigrationTest(bundle: ReplayBundle): stri
     fleetSchemaVersion: _fleetSchemaVersion,
     schemaVersion: _schemaVersion,
     gapReports: _gapReports,
+    encounterConfig: _encounterConfig,
     ...body
   } = bundle;
   return canonicalJson({ ...body, schemaVersion: 1 });
@@ -598,6 +639,7 @@ function activeRevisionNumbers(records: readonly ReplayRevisionRecord[]): Readon
 
 function authoritativeReplayValue(bundle: ReplayBundle): unknown {
   return {
+    encounterConfig: bundle.encounterConfig,
     fixture: bundle.fixture,
     build: bundle.build,
     protocolVersions: bundle.protocolVersions,
@@ -634,6 +676,11 @@ export function replayBundle(
   ) {
     throw new ReplayDivergenceError('bundle', -1, 'schemaVersion', VTT_REPLAY_SCHEMA_VERSION, bundle.schemaVersion);
   }
+  if (!isEncounterConfig(bundle.encounterConfig)) {
+    throw new ReplayDivergenceError(
+      'bundle', -1, 'encounterConfig', 'valid encounter configuration', bundle.encounterConfig,
+    );
+  }
   const fixture = fixtureValue === undefined ? null : decodeApprovedEncounterFixture(fixtureValue);
   if (fixture !== null) {
     assertEqual('fixture', -1, 'fixture.fixtureId', fixture.fixtureId, bundle.fixture.fixtureId);
@@ -651,6 +698,9 @@ export function replayBundle(
   let rounds = 0;
   for (const [index, replayRecord] of bundle.revisions.entries()) {
     const revision = replayRecord.revision;
+    assertEqual(
+      'bundle', index, 'encounterConfig', bundle.encounterConfig, revision.encounterState.config,
+    );
     assertEqual('bundle', index, 'revision.revision', index + 1, revision.revision);
     assertEqual('bundle', index, 'void', !active.has(revision.revision), replayRecord.void);
     const prior = bundle.revisions[index - 1]?.revision;
@@ -665,7 +715,7 @@ export function replayBundle(
         }
         expectedState = fixture === null
           ? revision.encounterState
-          : encounterStateFromApprovedFixture(fixture);
+          : encounterStateFromApprovedFixture(fixture, bundle.encounterConfig);
         expectedRng = revision.rngState;
         break;
       case 'head_moved': {

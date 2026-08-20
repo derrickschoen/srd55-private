@@ -97,9 +97,41 @@ export interface InitiativeEntry {
   readonly total: number;
   readonly roll: number;
   readonly bonus: number;
+  /** Combatants sharing this value occupy one contiguous initiative slot. */
+  readonly slot: number;
+}
+
+export const INITIATIVE_MODES = [
+  'per_combatant',
+  'shared_enemy',
+  'side_alternating',
+] as const;
+
+export type InitiativeMode = (typeof INITIATIVE_MODES)[number];
+
+export interface EncounterConfig {
+  readonly initiativeMode: InitiativeMode;
+}
+
+export const DEFAULT_ENCOUNTER_CONFIG: EncounterConfig = Object.freeze({
+  initiativeMode: 'shared_enemy',
+});
+
+export function isInitiativeMode(value: unknown): value is InitiativeMode {
+  return typeof value === 'string' && INITIATIVE_MODES.includes(value as InitiativeMode);
+}
+
+export function isEncounterConfig(value: unknown): value is EncounterConfig {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    isInitiativeMode(Reflect.get(value, 'initiativeMode'))
+  );
 }
 
 export interface EncounterState {
+  readonly config: EncounterConfig;
   readonly revision: number;
   readonly nextEventSequence: number;
   readonly nextEffectSequence: number;
@@ -118,6 +150,7 @@ export interface EncounterState {
 }
 
 export interface EncounterSetup {
+  readonly config?: EncounterConfig;
   readonly bounds: GridBounds;
   readonly blockedCells?: readonly GridCell[];
   readonly foggedCells?: readonly GridCell[];
@@ -160,6 +193,10 @@ function assertUnique<T>(values: readonly T[], label: string): void {
 
 /** Establishes the one-profile/one-token invariant before any event can run. */
 export function createEncounter(setup: EncounterSetup): EncounterState {
+  const config = setup.config ?? DEFAULT_ENCOUNTER_CONFIG;
+  if (!isEncounterConfig(config)) {
+    throw new EncounterRuleError('Encounter configuration has an invalid initiative mode.');
+  }
   if (
     !Number.isSafeInteger(setup.bounds.columns) ||
     !Number.isSafeInteger(setup.bounds.rows) ||
@@ -225,6 +262,7 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
   }
 
   return {
+    config: { ...config },
     revision: 0,
     nextEventSequence: 1,
     nextEffectSequence: 1,
@@ -2806,6 +2844,131 @@ function nextLivingInitiativeIndex(state: EncounterState, current: number): numb
   throw new EncounterRuleError('No living combatant remains in initiative.');
 }
 
+type InitiativeEntryDraft = Omit<InitiativeEntry, 'slot'>;
+
+interface InitiativeSlotDraft {
+  readonly entries: readonly InitiativeEntryDraft[];
+  readonly total: number;
+  readonly bonus: number;
+  readonly tieBreaker: CombatantId;
+}
+
+function initiativeBonusFor(
+  state: EncounterState,
+  subject: EncounterCombatantState,
+): number {
+  return subject.profile.rules.initiativeBonus + exhaustionPenalty(
+    combatantConditions(state, subject.profile.id),
+  );
+}
+
+function initiativeRollModeFor(
+  state: EncounterState,
+  subject: EncounterCombatantState,
+): RollMode {
+  const modes: RollMode[] = ['normal'];
+  for (const clause of conditionMechanicalState(
+    combatantConditions(state, subject.profile.id),
+  ).clauses) {
+    if (clause.kind === 'roll_mode' && clause.roll === 'initiative') modes.push(clause.mode);
+  }
+  return combineRollModes(modes);
+}
+
+function rollIndividualInitiative(
+  context: ReductionContext,
+  subject: EncounterCombatantState,
+): InitiativeSlotDraft {
+  const roll = rollD20(context.rng, initiativeRollModeFor(context.state, subject));
+  const bonus = initiativeBonusFor(context.state, subject);
+  const entry: InitiativeEntryDraft = {
+    combatant: subject.profile.id,
+    total: roll.chosen + bonus,
+    roll: roll.chosen,
+    bonus,
+  };
+  emit(context, {
+    type: 'initiative_rolled',
+    combatant: subject.profile.id,
+    faces: roll.faces,
+    total: entry.total,
+  });
+  return {
+    entries: [entry],
+    total: entry.total,
+    bonus,
+    tieBreaker: subject.profile.id,
+  };
+}
+
+function rollEnemyInitiativeBlock(
+  context: ReductionContext,
+  monsters: readonly EncounterCombatantState[],
+): InitiativeSlotDraft | null {
+  const ordered = [...monsters].sort((left, right) => {
+    const bonusDifference =
+      initiativeBonusFor(context.state, right) - initiativeBonusFor(context.state, left);
+    return bonusDifference || left.profile.id.localeCompare(right.profile.id);
+  });
+  const representative = ordered[0];
+  if (representative === undefined) return null;
+  const bonus = initiativeBonusFor(context.state, representative);
+  const roll = rollD20(
+    context.rng,
+    initiativeRollModeFor(context.state, representative),
+  );
+  const total = roll.chosen + bonus;
+  emit(context, {
+    type: 'initiative_block_rolled',
+    combatants: ordered.map((subject) => subject.profile.id),
+    faces: roll.faces,
+    total,
+    bonus,
+  });
+  return {
+    entries: ordered.map((subject) => ({
+      combatant: subject.profile.id,
+      total,
+      roll: roll.chosen,
+      bonus,
+    })),
+    total,
+    bonus,
+    tieBreaker: representative.profile.id,
+  };
+}
+
+function sortInitiativeSlots(slots: readonly InitiativeSlotDraft[]): InitiativeSlotDraft[] {
+  return [...slots].sort(
+    (left, right) =>
+      right.total - left.total ||
+      right.bonus - left.bonus ||
+      left.tieBreaker.localeCompare(right.tieBreaker),
+  );
+}
+
+function rollInitiativeSlots(context: ReductionContext): readonly InitiativeSlotDraft[] {
+  if (context.state.config.initiativeMode === 'per_combatant') {
+    return sortInitiativeSlots(
+      context.state.combatants.map((subject) => rollIndividualInitiative(context, subject)),
+    );
+  }
+  const players = context.state.combatants.filter(
+    (subject) => subject.profile.kind === 'player_character',
+  );
+  const monsters = context.state.combatants.filter(
+    (subject) => subject.profile.kind === 'monster',
+  );
+  const playerSlots = sortInitiativeSlots(
+    players.map((subject) => rollIndividualInitiative(context, subject)),
+  );
+  const enemySlot = rollEnemyInitiativeBlock(context, monsters);
+  if (context.state.config.initiativeMode === 'side_alternating') {
+    return enemySlot === null ? playerSlots : [...playerSlots, enemySlot];
+  }
+  return sortInitiativeSlots(enemySlot === null ? playerSlots : [...playerSlots, enemySlot]);
+}
+
 function processCommand(context: ReductionContext, command: EncounterCommand): void {
   switch (command.type) {
     case 'adjudicate': {
@@ -2890,34 +3053,9 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
       if (context.state.initiative.length > 0) {
         throw new EncounterRuleError('Initiative has already been rolled.');
       }
-      const initiative = context.state.combatants.map((subject) => {
-        const conditions = combatantConditions(context.state, subject.profile.id);
-        const modes: RollMode[] = ['normal'];
-        for (const clause of conditionMechanicalState(conditions).clauses) {
-          if (clause.kind === 'roll_mode' && clause.roll === 'initiative') modes.push(clause.mode);
-        }
-        const roll = rollD20(context.rng, combineRollModes(modes));
-        const bonus =
-          subject.profile.rules.initiativeBonus + exhaustionPenalty(conditions);
-        const entry = {
-          combatant: subject.profile.id,
-          total: roll.chosen + bonus,
-          roll: roll.chosen,
-          bonus,
-        };
-        emit(context, {
-          type: 'initiative_rolled',
-          combatant: subject.profile.id,
-          faces: roll.faces,
-          total: entry.total,
-        });
-        return entry;
-      });
-      initiative.sort(
-        (left, right) =>
-          right.total - left.total ||
-          right.bonus - left.bonus ||
-          left.combatant.localeCompare(right.combatant),
+      const slots = rollInitiativeSlots(context);
+      const initiative = slots.flatMap((slot, slotIndex) =>
+        slot.entries.map((entry) => ({ ...entry, slot: slotIndex })),
       );
       context.state = {
         ...context.state,
@@ -2935,7 +3073,11 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
           },
         })),
       };
-      emit(context, { type: 'initiative_ordered', order: initiative.map((entry) => entry.combatant) });
+      emit(context, {
+        type: 'initiative_ordered',
+        order: initiative.map((entry) => entry.combatant),
+        slots: slots.map((slot) => slot.entries.map((entry) => entry.combatant)),
+      });
       const first = initiative[0];
       if (first === undefined) throw new EncounterRuleError('Initiative order is empty.');
       startTurn(context, first.combatant, 1);

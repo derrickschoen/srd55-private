@@ -127,8 +127,16 @@ export type EncounterEvent =
       readonly total: number;
     })
   | (SequencedEvent & {
+      readonly type: 'initiative_block_rolled';
+      readonly combatants: readonly CombatantId[];
+      readonly faces: readonly number[];
+      readonly total: number;
+      readonly bonus: number;
+    })
+  | (SequencedEvent & {
       readonly type: 'initiative_ordered';
       readonly order: readonly CombatantId[];
+      readonly slots: readonly (readonly CombatantId[])[];
     })
   | (SequencedEvent & {
       readonly type: 'turn_started';

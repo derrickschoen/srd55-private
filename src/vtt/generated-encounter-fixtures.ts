@@ -17,6 +17,8 @@ import {
 } from '../combat/combatant';
 import {
   createEncounter,
+  DEFAULT_ENCOUNTER_CONFIG,
+  type EncounterConfig,
   type EncounterState,
 } from '../combat/encounter';
 import type { GridCell } from '../combat/grid';
@@ -771,7 +773,10 @@ function encounterProfiles(encounterPackage: GeneratedEncounterPackage): readonl
   return [...referencePcs, ...monsters];
 }
 
-export function encounterStateFromApprovedFixture(fixtureValue: unknown): EncounterState {
+export function encounterStateFromApprovedFixture(
+  fixtureValue: unknown,
+  config: EncounterConfig = DEFAULT_ENCOUNTER_CONFIG,
+): EncounterState {
   const fixture = decodeApprovedEncounterFixture(fixtureValue);
   const encounterPackage = fixture.package;
   const profiles = encounterProfiles(encounterPackage);
@@ -782,6 +787,7 @@ export function encounterStateFromApprovedFixture(fixtureValue: unknown): Encoun
     return combatToken(profile, placement.cell);
   });
   return createEncounter({
+    config,
     bounds: {
       columns: encounterPackage.layout.map.columns,
       rows: encounterPackage.layout.map.rows,

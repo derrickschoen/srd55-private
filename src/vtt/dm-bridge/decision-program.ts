@@ -1,6 +1,7 @@
 import type { ControllerDecision, ControllerRequest } from '../../combat/controllers';
 import type { Controller } from '../../combat/controllers';
 import type { EncounterCommand } from '../../combat/events';
+import type { InitiativeMode } from '../../combat/encounter';
 import { gridDistance } from '../../combat/grid';
 import type { DmVisibleCombatant, DmVisibleEncounterState } from '../../combat/visibility';
 import type { CombatantId, EncounterSessionId, CodexSessionId } from '../../combat/values';
@@ -164,11 +165,12 @@ export interface RoundPlanContext {
   readonly codexSessionId: CodexSessionId;
   readonly projection: DmBoardProjection;
   readonly history: readonly SessionHistoryEntry[];
+  readonly initiativeMode: InitiativeMode;
 }
 
 export class DmRoundPlanSession {
-  readonly #plans = new Map<number, RoundPlan>();
-  readonly #initialRequests = new Map<number, Promise<RoundPlan>>();
+  readonly #plans = new Map<string, RoundPlan>();
+  readonly #initialRequests = new Map<string, Promise<RoundPlan>>();
   #requestSequence = 1;
 
   constructor(
@@ -223,12 +225,23 @@ export class DmRoundPlanSession {
     throw new Error('Round plan correction loop exceeded its static bound.');
   }
 
-  async startRound(context: RoundPlanContext, signal: AbortSignal): Promise<RoundPlan> {
+  async #startPlan(
+    context: RoundPlanContext,
+    signal: AbortSignal,
+    actor: CombatantId | null,
+  ): Promise<{ readonly key: string; readonly plan: RoundPlan }> {
     const projection = requireFullDmProjection(context.projection);
-    const existing = this.#plans.get(projection.round);
-    if (existing !== undefined) return existing;
-    const inFlight = this.#initialRequests.get(projection.round);
-    if (inFlight !== undefined) return inFlight;
+    const perCombatant = context.initiativeMode === 'per_combatant' && actor !== null;
+    const key = perCombatant
+      ? `${String(projection.round)}:${actor}`
+      : `${String(projection.round)}:enemy_block`;
+    const existing = this.#plans.get(key);
+    if (existing !== undefined) return { key, plan: existing };
+    const inFlight = this.#initialRequests.get(key);
+    if (inFlight !== undefined) return { key, plan: await inFlight };
+    const livingMonsterIds = projection.combatants
+      .filter((candidate) => candidate.kind === 'monster' && candidate.life === 'living')
+      .map((candidate) => candidate.id);
     const request: RoundPlanRequest = {
       kind: 'round_plan_request',
       protocolVersion: DM_BRIDGE_PROTOCOL_VERSION,
@@ -240,20 +253,22 @@ export class DmRoundPlanSession {
       model: this.model,
       projection: context.projection,
       history: context.history,
-      livingMonsterIds: projection.combatants
-        .filter((candidate) => candidate.kind === 'monster' && candidate.life === 'living')
-        .map((candidate) => candidate.id),
+      livingMonsterIds: perCombatant ? [actor] : livingMonsterIds,
       replyContract: ROUND_PLAN_REPLY_CONTRACT,
       correctionAttempt: 0,
     };
     const pending = this.#validatedExchange(request, signal)
       .then((plan) => {
-        this.#plans.set(plan.round, plan);
+        this.#plans.set(key, plan);
         return plan;
       })
-      .finally(() => this.#initialRequests.delete(projection.round));
-    this.#initialRequests.set(projection.round, pending);
-    return pending;
+      .finally(() => this.#initialRequests.delete(key));
+    this.#initialRequests.set(key, pending);
+    return { key, plan: await pending };
+  }
+
+  async startRound(context: RoundPlanContext, signal: AbortSignal): Promise<RoundPlan> {
+    return (await this.#startPlan(context, signal, null)).plan;
   }
 
   async choose(
@@ -269,7 +284,9 @@ export class DmRoundPlanSession {
     ) {
       throw new StaleRoundPlanError('Controller request is stale or is not based on the full DM projection.');
     }
-    let plan = await this.startRound(context, signal);
+    const started = await this.#startPlan(context, signal, request.actorId);
+    const planKey = started.key;
+    let plan = started.plan;
     if (plan.round !== state.round || plan.expectedRevision > state.revision) {
       throw new StaleRoundPlanError('Round plan is stale for the current encounter revision.');
     }
@@ -304,7 +321,7 @@ export class DmRoundPlanSession {
           candidate.monsterId === monster!.monsterId ? monster! : candidate,
         ),
       };
-      this.#plans.set(state.round, plan);
+      this.#plans.set(planKey, plan);
       action = executeProgram(monster.program, request.actorId, state, request.legalActions.actions);
       if (action === null) throw new RoundPlanDryError('Re-consulted monster program is still dry.');
     }
@@ -316,7 +333,12 @@ export class DmRoundPlanSession {
   }
 
   program(round: number, monsterId: CombatantId): MonsterRoundProgram | null {
-    return this.#plans.get(round)?.monsters.find((candidate) => candidate.monsterId === monsterId) ?? null;
+    for (const [key, plan] of this.#plans) {
+      if (!key.startsWith(`${String(round)}:`)) continue;
+      const monster = plan.monsters.find((candidate) => candidate.monsterId === monsterId);
+      if (monster !== undefined) return monster;
+    }
+    return null;
   }
 
   #requestId(encounterId: EncounterSessionId, round: number, suffix: string): string {

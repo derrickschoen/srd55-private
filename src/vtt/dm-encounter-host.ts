@@ -245,6 +245,7 @@ export class DmEncounterHost {
       codexSessionId: this.#journal.codexSessionId(),
       projection: this.snapshot().dm,
       history: this.#journal.history(),
+      initiativeMode: this.#coordinator.state().config.initiativeMode,
     };
   }
 

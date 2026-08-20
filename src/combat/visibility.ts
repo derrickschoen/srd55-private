@@ -83,6 +83,8 @@ function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
     case 'stance_started':
     case 'turn_ended':
       return [event.combatant];
+    case 'initiative_block_rolled':
+      return event.combatants;
     case 'spell_cast':
       return [event.caster, ...event.targets];
     case 'spell_utility_resolved':
@@ -118,7 +120,13 @@ function playerEvents(
       return [];
     }
     if (event.type === 'initiative_ordered') {
-      return [{ ...event, order: event.order.filter((id) => visibleIds.has(id)) }];
+      return [{
+        ...event,
+        order: event.order.filter((id) => visibleIds.has(id)),
+        slots: event.slots
+          .map((slot) => slot.filter((id) => visibleIds.has(id)))
+          .filter((slot) => slot.length > 0),
+      }];
     }
     if (event.type === 'adjudicated') {
       return visibleIds.has(event.target)

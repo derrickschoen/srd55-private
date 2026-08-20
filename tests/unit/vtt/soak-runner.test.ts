@@ -18,6 +18,7 @@ const DEFAULT_EXECUTION = {
   dmEffort: 'medium' as const,
   requestTimeoutMs: 2_000,
   tableTimeoutMs: 10_000,
+  initiativeMode: 'shared_enemy' as const,
 };
 
 function processExists(pid: number): boolean {
@@ -115,6 +116,7 @@ describe('headless VTT soak runner', () => {
       dmEffort: 'medium',
       requestTimeoutMs: 120_000,
       tableTimeoutMs: 900_000,
+      initiativeMode: 'shared_enemy',
     });
     expect(decodeVttSoakArguments([
       '--tables=1',
@@ -127,12 +129,22 @@ describe('headless VTT soak runner', () => {
       '--dm-effort=high',
       '--request-timeout-ms=321',
       '--table-timeout-ms=654',
+      '--initiative=side_alternating',
     ])).toMatchObject({
       dmModel: 'stand-in-model',
       dmEffort: 'high',
       requestTimeoutMs: 321,
       tableTimeoutMs: 654,
+      initiativeMode: 'side_alternating',
     });
+    expect(decodeVttSoakArguments([
+      '--tables=1',
+      '--seed=2',
+      '--rounds=3',
+      '--out=/tmp/vtt-soak-per-combatant',
+      '--pack=tests/fixtures/external-party-pack-valid.json',
+      '--initiative=per_combatant',
+    ]).initiativeMode).toBe('per_combatant');
   });
 
   it('spawns and connects the real bridge to a scripted Codex binary, records telemetry, and tears it down', async () => {
@@ -232,6 +244,7 @@ describe('headless VTT soak runner', () => {
       dmEffort: 'medium',
       requestTimeoutMs: 75,
       tableTimeoutMs: 2_000,
+      initiativeMode: 'shared_enemy',
     }, {
       codexBinary: FAKE_CODEX,
       bridgeEnvironment: {
@@ -271,6 +284,7 @@ describe('headless VTT soak runner', () => {
       dmEffort: 'medium',
       requestTimeoutMs: 2_000,
       tableTimeoutMs: 75,
+      initiativeMode: 'shared_enemy',
     }, {
       codexBinary: FAKE_CODEX,
       bridgeEnvironment: { FAKE_CODEX_MODE: 'hang' },
