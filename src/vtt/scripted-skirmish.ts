@@ -183,13 +183,16 @@ export interface ScriptedSkirmishGateResult {
  * Deterministic playable-exit gate. It uses only the checked-in test-approved
  * fixture, a fake DM transcript, scripted human decisions, and serializable RNG.
  */
-export function recordScriptedReferenceSkirmish(): ScriptedSkirmishGateResult {
+export function recordScriptedReferenceSkirmish(
+  seed = 0x317010,
+  adjudicationSubject = 'engine:hit-points',
+): ScriptedSkirmishGateResult {
   const store = new MemoryBrowserSessionStore();
   const mirror = new MemoryMirrorSink();
   const recorder = new ReplayTranscriptRecorder();
   const sessionId = encounterSessionId('encounter:increment-10-scripted-gate');
   let state = encounterStateFromApprovedFixture(TEST_APPROVED_FIRST_SKIRMISH_FIXTURE);
-  let rng: SerializableRng = mulberry32(0x317010);
+  let rng: SerializableRng = mulberry32(seed);
   const controllers = durableIdentities(state);
   let journal = EncounterSessionJournal.create({
     sessionId,
@@ -418,12 +421,14 @@ export function recordScriptedReferenceSkirmish(): ScriptedSkirmishGateResult {
       systemReduction({
         type: 'adjudicate',
         target: target.profile.id,
+        subject: adjudicationSubject,
         reasoning: 'Scripted void branch one.',
         consequence: { kind: 'hit_point_delta', amount: -1 },
       });
       systemReduction({
         type: 'adjudicate',
         target: target.profile.id,
+        subject: adjudicationSubject,
         reasoning: 'Scripted void branch two.',
         consequence: { kind: 'hit_point_delta', amount: -1 },
       });
@@ -503,6 +508,7 @@ export function recordScriptedReferenceSkirmish(): ScriptedSkirmishGateResult {
         systemReduction({
           type: 'adjudicate',
           target: fighter,
+          subject: 'engine:position',
           reasoning: 'Place the scripted reactor at the declared reaction window.',
           consequence: { kind: 'relocate', to: reactionCell },
         });
@@ -531,6 +537,7 @@ export function recordScriptedReferenceSkirmish(): ScriptedSkirmishGateResult {
         systemReduction({
           type: 'adjudicate',
           target: wizard.profile.id,
+          subject: adjudicationSubject,
           reasoning: 'Scripted playable-exit death-save branch.',
           consequence: { kind: 'hit_point_delta', amount: -wizard.profile.rules.hitPointMaximum },
         });
@@ -544,6 +551,7 @@ export function recordScriptedReferenceSkirmish(): ScriptedSkirmishGateResult {
         systemReduction({
           type: 'adjudicate',
           target: active,
+          subject: adjudicationSubject,
           reasoning: 'Resume the scripted PC after the observed death save.',
           consequence: { kind: 'hit_point_delta', amount: 5 },
         });
@@ -570,6 +578,7 @@ export function recordScriptedReferenceSkirmish(): ScriptedSkirmishGateResult {
     build: { buildId: 'vtt-phase2-increment-10', commit: 'supervisor-owned' },
     protocolVersions: ['dm-bridge:1', 'encounter-package:1', 'vtt-session:2'],
     licensingVersions: ['SRD-5.2.1-CC-BY-4.0', 'starter-art-CC-BY-4.0'],
+    gapReports: [],
   });
   return {
     bundle,

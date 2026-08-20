@@ -19,6 +19,7 @@ export type EncounterCommand =
   | {
       readonly type: 'adjudicate';
       readonly target: CombatantId;
+      readonly subject: string;
       readonly reasoning: string;
       readonly consequence:
         | { readonly kind: 'hit_point_delta'; readonly amount: number }
@@ -104,6 +105,7 @@ export type EncounterEvent =
   | (SequencedEvent & {
       readonly type: 'adjudicated';
       readonly target: CombatantId;
+      readonly subject: string;
       readonly reasoning: string;
       readonly consequence:
         | {

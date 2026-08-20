@@ -36,6 +36,7 @@ function hiddenDeathSaveState() {
   state = reduceEncounter(state, {
     type: 'adjudicate',
     target: REFERENCE_FIGHTER_ID,
+    subject: 'engine:hit-points',
     reasoning: 'DM-only reason sentinel 9f59',
     consequence: { kind: 'hit_point_delta', amount: -999 },
   }, rng).state;
@@ -67,6 +68,7 @@ function hostBoundaryHiddenState() {
   state = reduceEncounter(state, {
     type: 'adjudicate',
     target: REFERENCE_FIGHTER_ID,
+    subject: 'engine:hit-points',
     reasoning: 'DM reasoning sentinel: basalt-raven caused the collapse.',
     consequence: { kind: 'hit_point_delta', amount: -999 },
   }, rng).state;
@@ -244,6 +246,7 @@ describe('increment 6 projection boundary', () => {
     host.adjudicate({
       type: 'adjudicate',
       target: REFERENCE_MONSTER_ID,
+      subject: 'engine:hit-points',
       reasoning: 'The terrain ruling changes the visible damage.',
       consequence: { kind: 'hit_point_delta', amount: -1 },
     });

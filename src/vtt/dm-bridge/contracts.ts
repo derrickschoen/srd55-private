@@ -127,6 +127,7 @@ export type Narration =
 export interface AdjudicationProposal {
   readonly kind: 'adjudication_proposal';
   readonly target: CombatantId;
+  readonly subject: string;
   readonly reasoning: string;
   readonly consequence:
     | { readonly kind: 'hit_point_delta'; readonly amount: number }
@@ -427,6 +428,7 @@ export function adjudicationCommand(
   return {
     type: 'adjudicate',
     target: proposal.target,
+    subject: proposal.subject,
     reasoning: proposal.reasoning,
     consequence: proposal.consequence,
   };

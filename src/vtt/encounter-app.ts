@@ -549,6 +549,7 @@ class DmEncounterView {
       this.#host.adjudicate({
         type: 'adjudicate',
         target: target.value as CombatantId,
+        subject: 'engine:manual-adjudication',
         reasoning: reasoning.value,
         consequence: { kind: 'hit_point_delta', amount: Number(delta.value) },
       });

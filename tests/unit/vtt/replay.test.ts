@@ -17,6 +17,12 @@ import { runVttReplayCommand } from '../../../tools/vtt-replay';
 
 interface MutableReplayBundle {
   schemaVersion: number;
+  gapReports: Array<{
+    packEntry: string;
+    featurePath: string;
+    requestedCapability: string;
+    engineRefusalReason: string;
+  }>;
   revisions: Array<{
     void: boolean;
     rng: { pre: { draws: number }; post: { draws: number } };
@@ -112,6 +118,23 @@ describe('increment 10 deterministic replay and playable exit', () => {
       'rng',
       index,
       'rng.post.draws',
+    );
+  });
+
+  it('gap_report_swallowed rejects a replay after a non-engine adjudication gap is dropped', () => {
+    const gate = recordScriptedReferenceSkirmish(0x317010, 'external:unmapped-mechanic');
+    expect(gate.bundle.gapReports).toContainEqual(expect.objectContaining({
+      featurePath: 'adjudicated.subject',
+      requestedCapability: 'adjudication:external-mechanic',
+      engineRefusalReason: 'non_engine_adjudication_subject',
+    }));
+    const candidate = mutable(gate.bundle);
+    candidate.gapReports = [];
+    expectDivergence(
+      () => replayBundle(candidate as unknown as ReplayBundle),
+      'gap_report',
+      -1,
+      'gapReports',
     );
   });
 
@@ -236,7 +259,7 @@ describe('increment 10 deterministic replay and playable exit', () => {
   it('OWN-BUNDLE-VERSION-OUTSIDE-WINDOW is refused while the adjacent migration remains exact', () => {
     const gate = recordScriptedReferenceSkirmish();
     expect(decodeReplayBundle(exportReplayBundleV1ForMigrationTest(gate.bundle))).toEqual(gate.bundle);
-    for (const version of [0, 3]) {
+    for (const version of [0, 4]) {
       const candidate = mutable(gate.bundle);
       candidate.schemaVersion = version;
       expect(() => decodeReplayBundle(JSON.stringify(candidate))).toThrow('outside the migration window');
