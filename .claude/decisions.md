@@ -7,6 +7,49 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D322 — OWNER: fifth brainstorm round — oracle design, arcs, fleet ops (2026-08-20)
+
+Fifth blind collab round (codex 12 + Claude 10, merged 15). Rulings:
+
+1. **Regret backfill: COLLECT ALL, BACKFILL, THEN SELECT** — E-series
+   tables collect continuously with rollout inputs captured; winners
+   declared only once tactical regret computes.
+2. **Tranche results: A VISUAL REPORT PAGE** — charts per experiment
+   plus the recommendation; owner replies go/no-go for E08-E10.
+3. **Oracle utility: LEXICOGRAPHIC** — win/survive, then HP
+   differential, then resources.
+4. **Oracle continuations: DETERMINISTIC ALGORITHM CONTROLLER** plays
+   all simulated playouts.
+5. **Oracle cost (owner's design, verbatim intent): "Top k, 64,
+   escalation if really needed. Also collapse probably equivalent.
+   Evaluate combinations mostly disregarding order of execution. Keep
+   some fixed follow up actions based on conditions (ex. Divine smite
+   after crit)."** — top-K candidates at 64 rollouts with escalation;
+   probable-equivalence collapsing; turn actions scored as
+   order-insensitive combinations; standing conditional riders (e.g.
+   smite-on-crit) kept as fixed follow-ups rather than searched.
+6. **Arc approval: FULL PACKAGES UPFRONT** — every encounter of the
+   adventure fully generated and validated before the owner sees the
+   arc; approval covers the whole set.
+7. **DM summaries: IMMUTABLE ENCOUNTER RECAPS + ROLLING ARC SUMMARY**
+   in the adventure slot and replay bundle.
+8. **Private-arm scheduling: ADAPTIVE GAP-SEEKING** — matchups chase
+   unexercised mechanics (fastest gap-register fill).
+9. **Gap builds: RUN IF VIABLE, QUARANTINE BLOCKING GAPS.**
+10. **Narration: VALIDATION VOICE in experiments, MIXED VOICES in
+    soaks.**
+11. **Pattern library: SEED HAND-AUTHORED GENERIC HELPERS** (focus-
+    fire, retreat-threshold, flank, smite-on-crit rider) before E09
+    mining; mining measures growth beyond the seed.
+12. **Correctness trickle after hotspots: WALKTHROUGH RECONCILIATION
+    FIRST, then the D286 stranger walk, then sim merge-back**; fleet-
+    surfaced correctness failures preempt all.
+13. **E11/E12: FOLD INTO TRANCHE 1.**
+14. **Fleet: AUTO-PAUSE a config after 3 consecutive aborts + flag
+    the owner; other configs continue.**
+15. **Gap review: BATCHED SUMMARIES, each entry with a proposed
+    clean-room equivalent attached.**
+
 ## D321 — OWNER: fourth brainstorm round — experiment governance, adventures, AI-only mandate (2026-08-20)
 
 Fourth blind collab round (codex 12 + Claude 12, merged 17; two
