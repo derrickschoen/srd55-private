@@ -8,18 +8,22 @@ import {
   decodeAdjudicationProposal,
   decodeNarration,
 } from '../../../src/vtt/dm-bridge/narration';
+import { SPELL_KB_ENTRIES } from '../../../src/combat/spells/kb/entries';
+import { STARTER_MONSTER_KB } from '../../../src/combat/statblocks/kb/entries';
 import { referenceEncounterSetup, REFERENCE_MONSTER_ID } from '../../../src/vtt/reference-encounter';
 
+const SPELL_KB_ENTRY = SPELL_KB_ENTRIES[0];
 const SPELL_CITATION = {
-  ruleId: 'R-SPELL-119',
-  srdLocator: 'docs/srd/source/spell-descriptions.txt:3160',
-  sentence: 'Fireball uses its checked sphere and damage definition.',
+  ruleId: SPELL_KB_ENTRY.ruleId,
+  srdLocator: SPELL_KB_ENTRY.srdLocator,
+  sentence: SPELL_KB_ENTRY.rulingGuidance,
 } as const;
 
+const MONSTER_KB_ENTRY = STARTER_MONSTER_KB[0];
 const MONSTER_CITATION = {
-  ruleId: 'R-MONSTER-004',
-  srdLocator: 'docs/srd/full/srd-5.2.1.txt:20448-20469',
-  sentence: 'The Ogre chooses its listed weapon by distance.',
+  ruleId: MONSTER_KB_ENTRY.ruleId,
+  srdLocator: MONSTER_KB_ENTRY.srdLocator,
+  sentence: MONSTER_KB_ENTRY.rulingGuidance,
 } as const;
 
 describe('DM narration and adjudication contracts', () => {
