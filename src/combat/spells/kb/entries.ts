@@ -152,7 +152,7 @@ export const SPELL_KB_ENTRIES = [
   entry('R-SPELL-132', 'protection-from-energy', '6322', 'Choose Acid, Cold, Fire, Lightning, or Thunder resistance for the willing touched target.'),
   entry('R-SPELL-133', 'remove-curse', '6499', 'End all curses on the touched creature; cursed-item handling instead breaks the owner’s attunement.'),
   entry('R-SPELL-134', 'revivify', '6604', 'Consume the diamond to return an eligible creature dead no longer than one minute with 1 HP.'),
-  entry('R-SPELL-135', 'sending', '6825', 'Send at most 25 words at unlimited range, with 5 percent cross-plane failure and an eight-hour recipient block.'),
+  entry('R-SPELL-135', 'sending', '6825', 'Send at most 25 words to a creature you met or one described by someone who met it, with the cross-plane failure rule.'),
   entry('R-SPELL-136', 'sleet-storm', '7119', 'Place the exact 20-foot-radius, 40-foot-high cylinder with heavy obscurement, difficult terrain, and Prone saves.'),
   entry('R-SPELL-137', 'slow', '7140', 'Choose up to six creatures in the exact 40-foot cube and apply the listed penalties after failed Wisdom saves.'),
   entry('R-SPELL-138', 'speak-with-dead', '7214', 'Ask the eligible corpse up to five questions during ten minutes, respecting the ten-day repeat lockout.'),
