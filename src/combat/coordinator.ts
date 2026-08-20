@@ -2,6 +2,7 @@ import {
   StaleControllerResponseError,
   evaluateOpportunityAttackPolicy,
   type ControllerDecision,
+  type ControllerIdentity,
   type ControllerRegistry,
   type ControllerRequest,
   type LegalActionSummary,
@@ -34,6 +35,65 @@ export type ReactionLegalActions = (
   { readonly type: 'opportunity_attack' }
 >[];
 
+interface CoordinatedMovementStep {
+  readonly to: GridCell;
+  readonly reactors: readonly CombatantId[];
+}
+
+export type CoordinatorContinuation =
+  | { readonly kind: 'idle' }
+  | {
+      readonly kind: 'turn';
+      readonly actor: CombatantId;
+      readonly legalActions: LegalActionSummary;
+    }
+  | {
+      readonly kind: 'movement';
+      readonly actor: CombatantId;
+      readonly steps: readonly CoordinatedMovementStep[];
+      readonly stepIndex: number;
+      readonly reactorIndex: number;
+      readonly pendingPath: readonly GridCell[];
+    };
+
+export interface PersistedCoordinatorState {
+  readonly requestSequence: number;
+  readonly pendingRequest: ControllerRequest | null;
+  readonly pendingCommand: EncounterCommand | null;
+  readonly continuation: CoordinatorContinuation;
+}
+
+export type DurableCoordinatorTransition =
+  | { readonly kind: 'controller_request_issued'; readonly request: ControllerRequest }
+  | { readonly kind: 'controller_response_received'; readonly decision: ControllerDecision }
+  | { readonly kind: 'controller_request_cancelled'; readonly request: ControllerRequest }
+  | { readonly kind: 'controller_replaced'; readonly combatantId: CombatantId }
+  | {
+      readonly kind: 'reaction_policy_resolved';
+      readonly actor: CombatantId;
+      readonly decision: 'use' | 'decline';
+      readonly command: EncounterCommand;
+    }
+  | {
+      readonly kind: 'reducer_applied';
+      readonly command: EncounterCommand;
+      readonly events: readonly EncounterEvent[];
+    }
+  | {
+      readonly kind: 'controller_response_refused';
+      readonly command: EncounterCommand;
+      readonly reason: string;
+    };
+
+export interface CoordinatorPersistence {
+  record(input: {
+    readonly transition: DurableCoordinatorTransition;
+    readonly encounterState: EncounterState;
+    readonly coordinatorState: PersistedCoordinatorState;
+    readonly controllers: readonly ControllerIdentity[];
+  }): void;
+}
+
 export interface CoordinatorOptions {
   readonly turnLegalActions?: TurnLegalActions;
   readonly reactionLegalActions?: ReactionLegalActions;
@@ -41,6 +101,9 @@ export interface CoordinatorOptions {
     CombatantId,
     StandingReactionPolicy
   >;
+  readonly persistence?: CoordinatorPersistence;
+  readonly resume?: PersistedCoordinatorState;
+  readonly expectedControllers?: readonly ControllerIdentity[];
 }
 
 export type CoordinatorStep =
@@ -88,11 +151,6 @@ function movementWorld(state: EncounterState): MovementWorld<CombatantId> {
   };
 }
 
-interface CoordinatedMovementStep {
-  readonly to: GridCell;
-  readonly reactors: readonly CombatantId[];
-}
-
 function coordinatedMovementSteps(
   state: EncounterState,
   command: Extract<EncounterCommand, { readonly type: 'move' }>,
@@ -136,13 +194,19 @@ function coordinatedMovementSteps(
   }));
 }
 
+const IDLE: CoordinatorContinuation = { kind: 'idle' };
+
 export class TurnCoordinator {
   #state: EncounterState;
-  #requestSequence = 1;
-  readonly #pending = new Map<CombatantId, AbortController>();
+  #requestSequence: number;
+  #pendingRequest: ControllerRequest | null;
+  #pendingCommand: EncounterCommand | null;
+  #continuation: CoordinatorContinuation;
+  readonly #pendingAbort = new Map<CombatantId, AbortController>();
   readonly #policies = new Map<CombatantId, StandingReactionPolicy>();
   readonly #turnLegalActions: TurnLegalActions;
   readonly #reactionLegalActions: ReactionLegalActions;
+  readonly #persistence: CoordinatorPersistence | undefined;
 
   constructor(
     initialState: EncounterState,
@@ -151,6 +215,11 @@ export class TurnCoordinator {
     options: CoordinatorOptions = {},
   ) {
     this.#state = initialState;
+    this.#requestSequence = options.resume?.requestSequence ?? 1;
+    this.#pendingRequest = options.resume?.pendingRequest ?? null;
+    this.#pendingCommand = options.resume?.pendingCommand ?? null;
+    this.#continuation = options.resume?.continuation ?? IDLE;
+    this.#persistence = options.persistence;
     this.#turnLegalActions =
       options.turnLegalActions ??
       ((_state, actor) => ({ actions: [{ type: 'end_turn', actor }] }));
@@ -158,14 +227,52 @@ export class TurnCoordinator {
     for (const [id, policy] of options.standingReactionPolicies ?? []) {
       this.#policies.set(id, policy);
     }
-    this.registry.onReplace((id) => this.#pending.get(id)?.abort());
+    this.registry.onReplace((id) => {
+      const request = this.#pendingRequest;
+      const abort = this.#pendingAbort.get(id);
+      if (request !== null && request.actorId === id) {
+        this.#pendingRequest = null;
+        this.#record({ kind: 'controller_request_cancelled', request });
+      } else {
+        this.#record({ kind: 'controller_replaced', combatantId: id });
+      }
+      abort?.abort();
+    });
     for (const subject of initialState.combatants) {
       this.registry.controllerFor(subject.profile.id);
+    }
+    if (
+      options.resume !== undefined &&
+      (
+        options.expectedControllers === undefined ||
+        this.registry.identities().length !== options.expectedControllers.length ||
+        this.registry.identities().some((actual, index) => {
+          const expected = options.expectedControllers?.[index];
+          return (
+            expected === undefined ||
+            actual.combatantId !== expected.combatantId ||
+            actual.controllerId !== expected.controllerId ||
+            actual.kind !== expected.kind ||
+            actual.generation !== expected.generation
+          );
+        })
+      )
+    ) {
+      throw new Error('Resumed controller identities do not match the durable revision.');
     }
   }
 
   state(): EncounterState {
     return this.#state;
+  }
+
+  coordinatorState(): PersistedCoordinatorState {
+    return {
+      requestSequence: this.#requestSequence,
+      pendingRequest: this.#pendingRequest,
+      pendingCommand: this.#pendingCommand,
+      continuation: this.#continuation,
+    };
   }
 
   setStandingReactionPolicy(
@@ -176,8 +283,21 @@ export class TurnCoordinator {
     else this.#policies.set(combatantId, policy);
   }
 
-  replaceController(combatantId: CombatantId, controller: Parameters<ControllerRegistry['replace']>[1]): void {
-    this.registry.replace(combatantId, controller);
+  replaceController(
+    combatantId: CombatantId,
+    controller: Parameters<ControllerRegistry['replace']>[1],
+    controllerId?: string,
+  ): void {
+    this.registry.replace(combatantId, controller, controllerId);
+  }
+
+  #record(transition: DurableCoordinatorTransition): void {
+    this.#persistence?.record({
+      transition,
+      encounterState: this.#state,
+      coordinatorState: this.coordinatorState(),
+      controllers: this.registry.identities(),
+    });
   }
 
   #nextRequestId(kind: ControllerRequest['kind'], actor: CombatantId): string {
@@ -194,30 +314,43 @@ export class TurnCoordinator {
   ): Promise<ControllerDecision> {
     for (;;) {
       const generation = this.registry.generationFor(actor);
-      const requestId = this.#nextRequestId(kind, actor);
-      const common = {
-        requestId,
-        encounterRevision: this.#state.revision,
-        actorId: actor,
-        visibleState: projectEncounter(this.#state, {
-          kind: 'player',
-          combatantId: actor,
-        }),
-        legalActions,
-      };
-      const request: ControllerRequest = kind === 'turn'
-        ? { ...common, kind }
-        : {
-            ...common,
-            kind,
-            moverId:
-              mover ??
-              (() => {
-                throw new Error('Reaction request requires a mover.');
-              })(),
-          };
+      const resumed = this.#pendingRequest;
+      let request: ControllerRequest;
+      if (
+        resumed !== null &&
+        resumed.kind === kind &&
+        resumed.actorId === actor &&
+        (kind === 'turn' || (resumed.kind === 'reaction' && resumed.moverId === mover))
+      ) {
+        request = resumed;
+      } else {
+        const common = {
+          requestId: this.#nextRequestId(kind, actor),
+          encounterRevision: this.#state.revision,
+          actorId: actor,
+          visibleState: projectEncounter(this.#state, {
+            kind: 'player' as const,
+            combatantId: actor,
+          }),
+          legalActions,
+        };
+        request = kind === 'turn'
+          ? { ...common, kind }
+          : {
+              ...common,
+              kind,
+              moverId:
+                mover ??
+                (() => {
+                  throw new Error('Reaction request requires a mover.');
+                })(),
+            };
+        this.#pendingRequest = request;
+        this.#record({ kind: 'controller_request_issued', request });
+      }
+
       const abort = new AbortController();
-      this.#pending.set(actor, abort);
+      this.#pendingAbort.set(actor, abort);
       try {
         const decision = await this.registry.controllerFor(actor).choose(request, abort.signal);
         if (generation !== this.registry.generationFor(actor)) continue;
@@ -228,82 +361,211 @@ export class TurnCoordinator {
         ) {
           throw new StaleControllerResponseError('Controller response is stale.');
         }
+        this.#pendingRequest = null;
+        this.#pendingCommand = decision.action;
+        this.#record({ kind: 'controller_response_received', decision });
         return decision;
       } catch (error: unknown) {
-        if (generation !== this.registry.generationFor(actor)) {
-          continue;
-        }
+        if (generation !== this.registry.generationFor(actor)) continue;
         throw error;
       } finally {
-        if (this.#pending.get(actor) === abort) this.#pending.delete(actor);
+        if (this.#pendingAbort.get(actor) === abort) this.#pendingAbort.delete(actor);
       }
     }
   }
 
-  #apply(command: EncounterCommand): EncounterReduction {
+  #apply(
+    command: EncounterCommand,
+    continuation: CoordinatorContinuation,
+  ): EncounterReduction {
     const reduction = reduceEncounter(this.#state, command, this.rng);
     this.#state = reduction.state;
+    this.#pendingCommand = null;
+    this.#continuation = continuation;
+    this.#record({
+      kind: 'reducer_applied',
+      command,
+      events: reduction.events,
+    });
     return reduction;
   }
 
   #isListedAction(
-    decision: ControllerDecision,
+    command: EncounterCommand,
     legalActions: LegalActionSummary,
   ): boolean {
     return legalActions.actions.some(
-      (candidate) => commandKey(candidate) === commandKey(decision.action),
+      (candidate) => commandKey(candidate) === commandKey(command),
     );
   }
 
-  async #resolveReactionWindow(
-    reactors: readonly CombatantId[],
-    mover: CombatantId,
-  ): Promise<readonly EncounterEvent[]> {
+  #refuseAccepted(command: EncounterCommand, reason: string): CoordinatorStep {
+    this.#pendingCommand = null;
+    this.#continuation = IDLE;
+    this.#record({ kind: 'controller_response_refused', command, reason });
+    return { kind: 'refused', state: this.#state, reason };
+  }
+
+  async #continueMovement(): Promise<CoordinatorStep> {
     const events: EncounterEvent[] = [];
-    for (const reactor of reactors) {
-      if (combatant(this.#state, mover).life !== 'living') break;
-      if (!combatant(this.#state, reactor).turn.reactionAvailable) continue;
-      const opportunityAttacks = this.#reactionLegalActions(
-        this.#state,
-        reactor,
-        mover,
-      );
-      const decline: Extract<
-        EncounterCommand,
-        { readonly type: 'decline_reaction' }
-      > = { type: 'decline_reaction', actor: reactor, mover };
-      const legalActions = { actions: [...opportunityAttacks, decline] };
-      const policy = evaluateOpportunityAttackPolicy(this.#policies.get(reactor) ?? null);
-      let action: EncounterCommand;
-      if (policy === 'decline') {
-        action = decline;
-      } else if (policy === 'use') {
-        const selected = opportunityAttacks[0];
-        if (selected === undefined) {
-          throw new EncounterRuleError('Standing use policy has no legal Opportunity Attack.');
-        }
-        action = selected;
-      } else {
-        const decision = await this.#decision(
-          'reaction',
-          reactor,
-          legalActions,
-          mover,
-        );
-        if (!this.#isListedAction(decision, legalActions)) {
-          throw new EncounterRuleError('Controller selected an unlisted Reaction.');
-        }
-        action = decision.action;
+    for (;;) {
+      if (this.#continuation.kind !== 'movement') {
+        return { kind: 'applied', state: this.#state, events };
       }
-      events.push(...this.#apply(action).events);
+      const continuation = this.#continuation;
+      const movementStep = continuation.steps[continuation.stepIndex];
+      if (movementStep === undefined) {
+        if (continuation.pendingPath.length > 0) {
+          events.push(...this.#apply({
+            type: 'move',
+            actor: continuation.actor,
+            path: continuation.pendingPath,
+            cause: 'reactions_resolved',
+          }, IDLE).events);
+        } else {
+          this.#continuation = IDLE;
+        }
+        return { kind: 'applied', state: this.#state, events };
+      }
+
+      if (movementStep.reactors.length > 0 && continuation.pendingPath.length > 0) {
+        events.push(...this.#apply({
+          type: 'move',
+          actor: continuation.actor,
+          path: continuation.pendingPath,
+          cause: 'reactions_resolved',
+        }, { ...continuation, pendingPath: [] }).events);
+        continue;
+      }
+
+      const reactor = movementStep.reactors[continuation.reactorIndex];
+      if (reactor !== undefined) {
+        const nextContinuation: CoordinatorContinuation = {
+          ...continuation,
+          reactorIndex: continuation.reactorIndex + 1,
+        };
+        if (
+          combatant(this.#state, continuation.actor).life !== 'living' ||
+          !combatant(this.#state, reactor).turn.reactionAvailable
+        ) {
+          this.#continuation = nextContinuation;
+          continue;
+        }
+        const opportunityAttacks = this.#reactionLegalActions(
+          this.#state,
+          reactor,
+          continuation.actor,
+        );
+        const decline: Extract<
+          EncounterCommand,
+          { readonly type: 'decline_reaction' }
+        > = {
+          type: 'decline_reaction',
+          actor: reactor,
+          mover: continuation.actor,
+        };
+        const legalActions = { actions: [...opportunityAttacks, decline] };
+        let action = this.#pendingCommand;
+        if (action === null) {
+          const policy = evaluateOpportunityAttackPolicy(this.#policies.get(reactor) ?? null);
+          if (policy === 'decline') {
+            action = decline;
+            this.#pendingCommand = action;
+            this.#record({
+              kind: 'reaction_policy_resolved',
+              actor: reactor,
+              decision: policy,
+              command: action,
+            });
+          } else if (policy === 'use') {
+            const selected = opportunityAttacks[0];
+            if (selected === undefined) {
+              throw new EncounterRuleError(
+                'Standing use policy has no legal Opportunity Attack.',
+              );
+            }
+            action = selected;
+            this.#pendingCommand = action;
+            this.#record({
+              kind: 'reaction_policy_resolved',
+              actor: reactor,
+              decision: policy,
+              command: action,
+            });
+          } else {
+            action = (await this.#decision(
+              'reaction',
+              reactor,
+              legalActions,
+              continuation.actor,
+            )).action;
+          }
+        }
+        if (!this.#isListedAction(action, legalActions)) {
+          return this.#refuseAccepted(action, 'Controller selected an unlisted Reaction.');
+        }
+        events.push(...this.#apply(action, nextContinuation).events);
+        if (combatant(this.#state, continuation.actor).life !== 'living') {
+          this.#continuation = IDLE;
+          return { kind: 'applied', state: this.#state, events };
+        }
+        continue;
+      }
+
+      this.#continuation = {
+        ...continuation,
+        stepIndex: continuation.stepIndex + 1,
+        reactorIndex: 0,
+        pendingPath: [...continuation.pendingPath, movementStep.to],
+      };
     }
-    return events;
+  }
+
+  async #continueTurn(): Promise<CoordinatorStep> {
+    if (this.#continuation.kind !== 'turn') {
+      throw new Error('Turn continuation is unavailable.');
+    }
+    const { actor, legalActions } = this.#continuation;
+    let action = this.#pendingCommand;
+    if (action === null) {
+      action = (await this.#decision('turn', actor, legalActions)).action;
+    }
+    if (!this.#isListedAction(action, legalActions)) {
+      return this.#refuseAccepted(action, 'Controller selected an unlisted action.');
+    }
+    if ('actor' in action && action.actor !== actor) {
+      return this.#refuseAccepted(
+        action,
+        'Controller action belongs to a different combatant.',
+      );
+    }
+    if (action.type !== 'move') {
+      const reduction = this.#apply(action, IDLE);
+      return { kind: 'applied', state: this.#state, events: reduction.events };
+    }
+    const steps = coordinatedMovementSteps(this.#state, action);
+    if (!steps.some((step) => step.reactors.length > 0)) {
+      const reduction = this.#apply(action, IDLE);
+      return { kind: 'applied', state: this.#state, events: reduction.events };
+    }
+    this.#pendingCommand = null;
+    this.#continuation = {
+      kind: 'movement',
+      actor,
+      steps,
+      stepIndex: 0,
+      reactorIndex: 0,
+      pendingPath: [],
+    };
+    return this.#continueMovement();
   }
 
   async step(): Promise<CoordinatorStep> {
     try {
+      if (this.#continuation.kind === 'movement') return await this.#continueMovement();
+      if (this.#continuation.kind === 'turn') return await this.#continueTurn();
       if (this.#state.initiative.length === 0) {
-        const reduction = this.#apply({ type: 'roll_initiative' });
+        const reduction = this.#apply({ type: 'roll_initiative' }, IDLE);
         return { kind: 'applied', state: this.#state, events: reduction.events };
       }
       const actor = this.#state.activeCombatant;
@@ -311,69 +573,15 @@ export class TurnCoordinator {
         return { kind: 'refused', state: this.#state, reason: 'No active combatant.' };
       }
       if (combatant(this.#state, actor).life !== 'living') {
-        const reduction = this.#apply({ type: 'end_turn', actor });
+        const reduction = this.#apply({ type: 'end_turn', actor }, IDLE);
         return { kind: 'applied', state: this.#state, events: reduction.events };
       }
-      const legalActions = this.#turnLegalActions(this.#state, actor);
-      const decision = await this.#decision('turn', actor, legalActions);
-      if (!this.#isListedAction(decision, legalActions)) {
-        return {
-          kind: 'refused',
-          state: this.#state,
-          reason: 'Controller selected an unlisted action.',
-        };
-      }
-      if ('actor' in decision.action && decision.action.actor !== actor) {
-        return {
-          kind: 'refused',
-          state: this.#state,
-          reason: 'Controller action belongs to a different combatant.',
-        };
-      }
-      const events: EncounterEvent[] = [];
-      if (decision.action.type === 'move') {
-        const steps = coordinatedMovementSteps(this.#state, decision.action);
-        const hasReactionWindow = steps.some((step) => step.reactors.length > 0);
-        if (!hasReactionWindow) {
-          events.push(...this.#apply(decision.action).events);
-        } else {
-          let pendingPath: GridCell[] = [];
-          for (const movementStep of steps) {
-            if (movementStep.reactors.length > 0) {
-              if (pendingPath.length > 0) {
-                events.push(...this.#apply({
-                  type: 'move',
-                  actor,
-                  path: pendingPath,
-                  cause: 'reactions_resolved',
-                }).events);
-                pendingPath = [];
-              }
-              events.push(
-                ...await this.#resolveReactionWindow(
-                  movementStep.reactors,
-                  actor,
-                ),
-              );
-              if (combatant(this.#state, actor).life !== 'living') {
-                return { kind: 'applied', state: this.#state, events };
-              }
-            }
-            pendingPath.push(movementStep.to);
-          }
-          if (pendingPath.length > 0) {
-            events.push(...this.#apply({
-              type: 'move',
-              actor,
-              path: pendingPath,
-              cause: 'reactions_resolved',
-            }).events);
-          }
-        }
-      } else {
-        events.push(...this.#apply(decision.action).events);
-      }
-      return { kind: 'applied', state: this.#state, events };
+      this.#continuation = {
+        kind: 'turn',
+        actor,
+        legalActions: this.#turnLegalActions(this.#state, actor),
+      };
+      return await this.#continueTurn();
     } catch (error: unknown) {
       if (
         error instanceof EncounterRuleError ||

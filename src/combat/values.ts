@@ -10,6 +10,9 @@ export type TokenId = Brand<string, 'TokenId'>;
 export type StatblockId = Brand<string, 'StatblockId'>;
 export type EncounterEffectId = Brand<string, 'EncounterEffectId'>;
 export type EffectStackingIdentity = Brand<string, 'EffectStackingIdentity'>;
+export type EncounterSessionId = Brand<string, 'EncounterSessionId'>;
+export type EncounterBranchId = Brand<string, 'EncounterBranchId'>;
+export type CodexSessionId = Brand<string, 'CodexSessionId'>;
 
 const MAX_DAMAGE_TYPE_LENGTH = 100;
 const MAX_IDENTITY_LENGTH = 200;
@@ -79,3 +82,12 @@ export const effectStackingIdentity = (
   value: string,
 ): EffectStackingIdentity =>
   identity<EffectStackingIdentity>(value, 'EffectStackingIdentity');
+
+export const encounterSessionId = (value: string): EncounterSessionId =>
+  identity<EncounterSessionId>(value, 'EncounterSessionId');
+
+export const encounterBranchId = (value: string): EncounterBranchId =>
+  identity<EncounterBranchId>(value, 'EncounterBranchId');
+
+export const codexSessionId = (value: string): CodexSessionId =>
+  identity<CodexSessionId>(value, 'CodexSessionId');
