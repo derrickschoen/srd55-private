@@ -355,3 +355,16 @@ Three findings this session raised, recorded here so they are not lost with it:
   the decoded roster until extended.
 - Next: 4b-iii (45 L2 spells + KB co-generation), claimed here.
 
+## A14 — increment 4b-iii: level-2 spells + KB (lane-wt/vtt3a)
+
+- 45 L2 spells; burn-down 112->67 (L0-L2 complete, 108/175). KB live:
+  108 entries + completeness test. 41 typed partials. Deviations
+  recorded (reducer-side line validation; Lesser Restoration status
+  sync).
+- Supervisor verified: combat 681/681, sim unchanged, tsc clean,
+  5-row SRD sample at cited lines, own Silence-radius control killed
+  vs committed tree. Codex ledger: Acid Arrow die, Gust width, Aid
+  scaling, KB-deletion killed.
+- Full gate GREEN 388 files / 6,617 tests (.tmp-gate-4biii.log).
+- Status: CLOSED round 1. Next: 4b-iv (37 L3 spells), claimed here.
+
