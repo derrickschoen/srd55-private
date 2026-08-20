@@ -39,8 +39,9 @@ const EXPECTED_LEVEL_TOTALS: Readonly<Record<SpellLevel, number>> = {
   4: 30,
 };
 const EXPECTED_MANIFEST_TOTAL = 175;
-const EXPECTED_IMPLEMENTED = 63;
-const EXPECTED_PENDING = 112;
+const EXPECTED_IMPLEMENTED = 108;
+const EXPECTED_PENDING = 67;
+const EXPECTED_CANTRIP_AND_LEVEL_ONE_IMPLEMENTED = 63;
 
 interface ValuePin {
   readonly id: string;
@@ -249,6 +250,7 @@ function pinnedEffect(
     readonly concentration?: boolean;
     readonly durationRounds?: number | null;
     readonly expiresAt?: EffectData['expiresAt'];
+    readonly repeatedSave?: EffectData['repeatedSave'];
   } = {},
 ): EffectData {
   return {
@@ -257,6 +259,7 @@ function pinnedEffect(
     concentration: options.concentration ?? false,
     durationRounds: options.durationRounds ?? 1,
     expiresAt: options.expiresAt ?? 'source_start',
+    ...(options.repeatedSave === undefined ? {} : { repeatedSave: options.repeatedSave }),
   };
 }
 
@@ -594,9 +597,19 @@ function operationDice(definition: SpellDefinition): readonly [number, number] |
       return [operation.dice.baseCount, operation.dice.sides];
     case 'attack_then_save_damage':
       return [operation.saveDice.baseCount, operation.saveDice.sides];
+    case 'attack_damage_over_time':
+      return [operation.initialDice.baseCount, operation.initialDice.sides];
+    case 'attack_rays':
+    case 'summoned_weapon_attack':
+      return [operation.dice.baseCount, operation.dice.sides];
     case 'weapon_attack':
       return [operation.extraDamage.baseCount, operation.extraDamage.sides];
     case 'effect':
+    case 'hit_point_maximum_increase':
+    case 'save_push':
+    case 'remove_condition':
+    case 'remove_condition_and_effect':
+    case 'save_branch_effect':
     case 'save_effect':
     case 'stabilize':
     case 'utility':
@@ -614,11 +627,23 @@ function operationPerSlot(definition: SpellDefinition): number {
       return operation.dice.perSlotCount;
     case 'attack_then_save_damage':
       return operation.saveDice.perSlotCount;
+    case 'attack_damage_over_time':
+      return operation.initialDice.perSlotCount;
+    case 'attack_rays':
+      return operation.dice.perSlotCount;
+    case 'summoned_weapon_attack':
+      return operation.dice.perSlotCount;
     case 'magic_missiles':
       return operation.dice.perSlotCount;
     case 'weapon_attack':
       return operation.extraDamage.perSlotCount;
+    case 'hit_point_maximum_increase':
+      return operation.additionalPerSlot;
     case 'effect':
+    case 'save_push':
+    case 'remove_condition':
+    case 'remove_condition_and_effect':
+    case 'save_branch_effect':
     case 'save_effect':
     case 'stabilize':
     case 'utility':
@@ -643,6 +668,7 @@ function areaFor(definition: SpellDefinition, slotLevel: number | null): SpellCa
       return { shape: 'cube', template: { origin: feetPoint(center - size / 2, center), center: feetPoint(center, center), axis: { x: 1, y: 0 }, size: feet(size), includeOrigin: false } };
     }
     case 'line':
+      return { shape: 'line', template: { origin: feetPoint(5, 5), direction: { x: 1, y: 0 }, length: feet(size), width: feet(10), includeOrigin: false } };
     case 'cylinder':
     case 'emanation':
       throw new Error(`No level-1 batch fixture for ${definition.targeting.shape}.`);
@@ -653,14 +679,16 @@ function castCommand(
   definition: SpellDefinition,
   caster: ReturnType<typeof playerProfile>,
   target: ReturnType<typeof monsterProfile>,
-  slotLevel: number | null = definition.level === 0 ? null : 1,
+  slotLevel: number | null = definition.level === 0 ? null : definition.level,
 ): SpellCastCommand {
   const operation = definition.operation;
   let targets = definition.targeting.kind === 'single' ? [target.id] : [];
   if (definition.targeting.kind === 'multiple') {
     const count = operation.kind === 'magic_missiles'
       ? operation.baseDarts + operation.additionalPerSlot * ((slotLevel as number) - definition.level)
-      : 1;
+      : operation.kind === 'attack_rays'
+        ? operation.baseRays + operation.additionalPerSlot * ((slotLevel as number) - definition.level)
+        : 1;
     targets = Array.from({ length: count }, () => target.id);
   }
   return {
@@ -680,7 +708,10 @@ function castCommand(
       : null,
     selectedOption: definition.id === 'resistance' || definition.id === 'chromatic-orb'
       ? 'Fire'
-      : definition.id === 'guidance' ? 'Arcana' : null,
+      : definition.id === 'guidance' ? 'Arcana'
+        : definition.id === 'blindness-deafness' ? 'Blinded'
+          : definition.id === 'lesser-restoration' ? 'Poisoned'
+            : null,
   };
 }
 
@@ -704,7 +735,7 @@ function fixture(definition: SpellDefinition): {
     combatants: [caster, target],
     tokens: [placedToken(caster, 0, 1), placedToken(target, 1, 1)],
   });
-  if (definition.castingTime !== 'minute' && definition.castingTime !== 'hour') {
+  if (definition.castingTime !== 'minute' && definition.castingTime !== 'ten_minutes' && definition.castingTime !== 'hour') {
     state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
   }
   if (definition.operation.kind === 'healing') {
@@ -757,7 +788,7 @@ describe('reference-party spell manifest', () => {
     }
   });
 
-  it('pins the burn-down at exactly 63 implemented and 112 pending rows', () => {
+  it('pins the burn-down at exactly 108 implemented and 67 pending rows', () => {
     expect(SPELL_MANIFEST.filter((row) => row.status === 'implemented')).toHaveLength(EXPECTED_IMPLEMENTED);
     expect(SPELL_MANIFEST.filter((row) => row.status === 'pending')).toHaveLength(EXPECTED_PENDING);
     expect(IMPLEMENTED_SPELL_DEFINITIONS).toHaveLength(EXPECTED_IMPLEMENTED);
@@ -775,10 +806,10 @@ describe('reference-party spell manifest', () => {
 });
 
 describe('spell foundations and implemented value pins', () => {
-  it('has one exhaustive mechanics pin for every implemented definition', () => {
-    expect(COMPLETE_MECHANICS_PINS).toHaveLength(EXPECTED_IMPLEMENTED);
+  it('has one exhaustive mechanics pin for every implemented cantrip and level-1 definition', () => {
+    expect(COMPLETE_MECHANICS_PINS).toHaveLength(EXPECTED_CANTRIP_AND_LEVEL_ONE_IMPLEMENTED);
     expect(COMPLETE_MECHANICS_PINS.map((pin) => pin.id).sort()).toEqual(
-      IMPLEMENTED_SPELL_DEFINITIONS.map((definition) => definition.id).sort(),
+      IMPLEMENTED_SPELL_DEFINITIONS.filter((definition) => definition.level <= 1).map((definition) => definition.id).sort(),
     );
   });
 
@@ -972,7 +1003,7 @@ describe('spell foundations and implemented value pins', () => {
   });
 });
 
-describe('every implemented spell executes through the encounter reducer', () => {
+describe('every implemented cantrip and level-1 spell executes through the encounter reducer', () => {
   it.each(VALUE_PINS)('$id executes its typed $operation mechanics', (pin) => {
     const definition = spellDefinition(pin.id);
     if (definition === null) throw new Error(`Missing definition ${pin.id}.`);
@@ -983,8 +1014,10 @@ describe('every implemented spell executes through the encounter reducer', () =>
     const afterTarget = result.state.combatants.find((subject) => subject.profile.id === target.id);
 
     expect(result.events.some((event) => event.type === 'spell_cast' && event.spellId === definition.id)).toBe(true);
-    if (definition.level === 1) {
-      expect(afterCaster?.spellSlots.find((slot) => slot.level === 1)?.remaining).toBe(3);
+    if (definition.level > 0) {
+      expect(afterCaster?.spellSlots.find((slot) => slot.level === definition.level)?.remaining).toBe(
+        definition.level === 1 ? 3 : 2,
+      );
     }
     switch (definition.castingTime) {
       case 'action':
@@ -997,16 +1030,20 @@ describe('every implemented spell executes through the encounter reducer', () =>
         expect(afterCaster?.turn.reactionAvailable).toBe(false);
         break;
       case 'minute':
+      case 'ten_minutes':
       case 'hour':
         expect(result.state.activeCombatant).toBeNull();
         break;
     }
     switch (definition.operation.kind) {
       case 'attack_damage':
+      case 'attack_damage_over_time':
+      case 'attack_rays':
       case 'attack_then_save_damage':
       case 'save_damage':
       case 'magic_missiles':
       case 'weapon_attack':
+      case 'summoned_weapon_attack':
         expect(afterTarget?.hitPoints).toBeLessThan(beforeTarget?.hitPoints ?? 0);
         break;
       case 'healing':
@@ -1016,6 +1053,10 @@ describe('every implemented spell executes through the encounter reducer', () =>
         expect(afterCaster?.temporaryHitPoints).toBeGreaterThan(0);
         break;
       case 'effect':
+      case 'hit_point_maximum_increase':
+      case 'save_push':
+      case 'remove_condition_and_effect':
+      case 'save_branch_effect':
       case 'save_effect':
         expect(result.state.effects.length).toBeGreaterThan(0);
         break;
@@ -1024,6 +1065,9 @@ describe('every implemented spell executes through the encounter reducer', () =>
         break;
       case 'utility':
         expect(result.events.some((event) => event.type === 'spell_utility_resolved')).toBe(true);
+        break;
+      case 'remove_condition':
+        expect(result.events.some((event) => event.type === 'spell_cast')).toBe(true);
         break;
     }
   });

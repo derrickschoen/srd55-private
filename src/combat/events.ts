@@ -184,7 +184,7 @@ export type EncounterEvent =
       readonly type: 'effect_target_removed';
       readonly effectId: EncounterEffectId;
       readonly target: CombatantId;
-      readonly reason: 'save_succeeded' | 'condition_immunity';
+      readonly reason: 'save_succeeded' | 'condition_immunity' | 'condition_removed';
     })
   | (SequencedEvent & {
       readonly type: 'effect_ended';
