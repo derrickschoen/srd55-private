@@ -162,6 +162,7 @@ describe('phase-2 mutation ledger manifest', () => {
       'comparator_hp_before_win',
       'rollout_rng_shared',
       'collapse_ignores_movement_order',
+      'resource_score_inflated',
     ]) {
       expect(ledger).toContain(`\`${name}\``);
       expect(tests).toContain(name);

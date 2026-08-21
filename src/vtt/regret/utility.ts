@@ -34,6 +34,19 @@ export function compareUtility(left: TerminalUtility, right: TerminalUtility): n
   );
 }
 
+export interface UtilityCandidate<Identity> {
+  readonly identity: Identity;
+  readonly utility: TerminalUtility;
+}
+
+export function bestUtilityCandidate<Identity>(
+  candidates: readonly UtilityCandidate<Identity>[],
+): UtilityCandidate<Identity> | null {
+  return candidates.reduce<UtilityCandidate<Identity> | null>((best, candidate) =>
+    best === null || compareUtility(candidate.utility, best.utility) > 0 ? candidate : best,
+  null);
+}
+
 function sideResourceTotal(
   state: EncounterState,
   side: EncounterState['combatants'][number]['profile']['kind'],

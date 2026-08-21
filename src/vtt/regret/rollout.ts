@@ -32,6 +32,7 @@ import {
 } from './equivalence';
 import { regretReactionLegalActions, regretTurnLegalActions } from './legal-actions';
 import {
+  bestUtilityCandidate,
   compareUtility,
   scalarizeUtility,
   terminalUtility,
@@ -490,9 +491,10 @@ export async function evaluateCapture(capture: RolloutInputCapture): Promise<Cap
       rollout,
     });
   }
-  const best = candidateResults.reduce<CandidateRolloutResult | null>((current, candidate) =>
-    current === null || compareUtility(candidate.utility, current.utility) > 0 ? candidate : current,
-  null);
+  const best = bestUtilityCandidate(candidateResults.map((candidate) => ({
+    identity: candidate,
+    utility: candidate.utility,
+  })));
   const bestUtility = best !== null && compareUtility(best.utility, selectedRollout.utility) > 0
     ? best.utility
     : selectedRollout.utility;

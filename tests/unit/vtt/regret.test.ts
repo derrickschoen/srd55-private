@@ -6,13 +6,16 @@ import { sha256 } from '../../../src/crypto/sha256';
 import { referenceEncounterSetup } from '../../../src/vtt/reference-encounter';
 import type { RolloutInputCapture } from '../../../src/vtt/experiment-telemetry';
 import {
+  bestUtilityCandidate,
   collapseEquivalentCandidates,
   compareUtility,
   reconstructEncounterState,
   rolloutPrograms,
   RolloutStateHashMismatchError,
+  terminalUtility,
   type RankedRoundCandidate,
 } from '../../../src/vtt/regret';
+import type { EncounterState, SpellSlotState } from '../../../src/combat/encounter';
 import type { MonsterRoundProgram } from '../../../src/vtt/dm-bridge/contracts';
 
 const MONSTER = combatantId('combatant:training-brute');
@@ -67,6 +70,19 @@ function capture(): RolloutInputCapture {
   };
 }
 
+function withFighterSlots(
+  state: EncounterState,
+  spellSlots: readonly SpellSlotState[],
+): EncounterState {
+  return {
+    ...state,
+    combatants: state.combatants.map((combatant) =>
+      combatant.profile.kind === 'player_character'
+        ? { ...combatant, spellSlots: combatant.profile.id === FIGHTER ? spellSlots : [] }
+        : combatant),
+  };
+}
+
 describe('VTT regret rollout oracle', () => {
   it('state-hash refusal rejects a capture whose serialized decision state was changed', () => {
     const valid = capture();
@@ -98,6 +114,36 @@ describe('VTT regret rollout oracle', () => {
       { outcome: 2, sideHitPoints: 10, remainingResources: 2 },
       { outcome: 2, sideHitPoints: 10, remainingResources: 1 },
     )).toBeGreaterThan(0);
+  });
+
+  it('resource_score_exact weights a real encounter slot inventory by level times remaining', () => {
+    const state = withFighterSlots(reconstructEncounterState(capture()), [
+      { level: 1, maximum: 4, remaining: 2 },
+      { level: 2, maximum: 3, remaining: 1 },
+      { level: 3, maximum: 2, remaining: 0 },
+    ]);
+
+    expect(terminalUtility(state, 'player_character').remainingResources).toBe(4);
+  });
+
+  it('resource_score_inflated cannot make exhausted slot tiers the best tied candidate', () => {
+    const state = reconstructEncounterState(capture());
+    const retainedLevelThree = withFighterSlots(state, [
+      { level: 3, maximum: 1, remaining: 1 },
+    ]);
+    const exhaustedFiveTiers = withFighterSlots(state, [
+      { level: 1, maximum: 1, remaining: 0 },
+      { level: 2, maximum: 1, remaining: 0 },
+      { level: 3, maximum: 1, remaining: 0 },
+      { level: 4, maximum: 1, remaining: 0 },
+      { level: 5, maximum: 1, remaining: 0 },
+    ]);
+    const best = bestUtilityCandidate([
+      { identity: 'retained-level-three', utility: terminalUtility(retainedLevelThree, 'player_character') },
+      { identity: 'exhausted-five-tiers', utility: terminalUtility(exhaustedFiveTiers, 'player_character') },
+    ]);
+
+    expect(best?.identity).toBe('retained-level-three');
   });
 
   it('collapse_ignores_movement_order collapses action-order equivalents but preserves movement-sensitive order', () => {
