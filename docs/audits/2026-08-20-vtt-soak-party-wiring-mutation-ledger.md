@@ -9,5 +9,7 @@
 | Required `unknown_spell_id_dropped` | `tests/unit/vtt/party-pack.test.ts` — `unknown_spell_id_dropped refuses an unknown v2 spell id even when partial loading is allowed` | Killed; loader returned `loaded` with the reference removed under mutation, then restored |
 | Required `slots_not_decremented` | `tests/unit/vtt/party-pack.test.ts` — `slots_not_decremented wires a referenced v2 spell through the existing resolver and spends its slot` | Killed; remaining stayed at 4 under mutation, then restored |
 | Required `v1_rejected` | `tests/unit/vtt/party-pack.test.ts` — `v1_rejected keeps unchanged v1 packs inside the loader version window` | Killed; v1 header was refused under mutation, then restored |
+| Round 2 `spell_save_dc_decremented` | `tests/unit/vtt/party-pack.test.ts` — `pack_spell_save_dc_boundary drives failure below DC and success at DC through encounter resolution` | Killed; a total of 14 changed from failure against DC 15 to success against mutated DC 14, then restored |
+| Round 2 `spell_attack_bonus_decremented` | `tests/unit/vtt/party-pack.test.ts` — `pack_spell_attack_bonus_boundary drives miss below AC and hit at AC through encounter resolution` | Killed; the AC 17 boundary changed from hit at total 17 to miss at mutated total 16, then restored |
 
 All mutations were restored before the authorized suites ran. No expectation was generated from mutated output.

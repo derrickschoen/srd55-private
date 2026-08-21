@@ -62,7 +62,7 @@ function v2Member(index: number): ExternalPartyPackV2['members'][number] {
             spellSaveDc: 15,
             spellAttackBonus: 7,
             preparedSpellIds: ['magic-missile'],
-            knownSpellIds: [],
+            knownSpellIds: ['sacred-flame', 'fire-bolt'],
             spellSlots: [{ level: 1 as const, count: 4, recharge: 'long_rest' as const }],
           },
         }),
@@ -162,7 +162,7 @@ describe('external party-pack boundary', () => {
       maximum: 4,
       remaining: 3,
     });
-    expect(() => loadedPartySpellCastCommand(caster, 'fire-bolt', {
+    expect(() => loadedPartySpellCastCommand(caster, 'ray-of-frost', {
       slotLevel: null,
       castAsRitual: false,
       targets: [target.profile.id],
@@ -170,6 +170,88 @@ describe('external party-pack boundary', () => {
       weaponAttack: null,
       selectedOption: null,
     })).toThrow(expect.objectContaining({ reason: 'spell_not_referenced' }));
+  });
+
+  it('pack_spell_save_dc_boundary drives failure below DC and success at DC through encounter resolution', () => {
+    const resolveAtD20 = (d20: 12 | 13) => {
+      const loaded = loadExternalPartyPack(pack());
+      expect(loaded.status).toBe('loaded');
+      if (loaded.status !== 'loaded') throw new Error('Valid v2 caster pack was refused.');
+      const caster = loaded.party.members[0]!;
+      const target = loaded.party.members[1]!;
+      let state = createEncounter({
+        bounds: { columns: 4, rows: 3 },
+        combatants: [caster.profile, target.profile],
+        tokens: [
+          combatToken(caster.profile, { column: 0, row: 1 }),
+          combatToken(target.profile, { column: 1, row: 1 }),
+        ],
+      });
+      state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+      const result = reduceEncounter(state, loadedPartySpellCastCommand(caster, 'sacred-flame', {
+        slotLevel: null,
+        castAsRitual: false,
+        targets: [target.profile.id],
+        area: null,
+        weaponAttack: null,
+        selectedOption: null,
+      }), () => (d20 - 1) / 20);
+      const save = result.events.find((event) => event.type === 'save_resolved');
+      if (save?.type !== 'save_resolved') throw new Error('Sacred Flame emitted no saving throw.');
+      return save.save;
+    };
+
+    expect(resolveAtD20(12)).toEqual({
+      outcome: 'failure',
+      roll: { mode: 'normal', faces: [12], chosen: 12 },
+      total: 14,
+    });
+    expect(resolveAtD20(13)).toEqual({
+      outcome: 'success',
+      roll: { mode: 'normal', faces: [13], chosen: 13 },
+      total: 15,
+    });
+  });
+
+  it('pack_spell_attack_bonus_boundary drives miss below AC and hit at AC through encounter resolution', () => {
+    const resolveAtD20 = (d20: 9 | 10) => {
+      const loaded = loadExternalPartyPack(pack());
+      expect(loaded.status).toBe('loaded');
+      if (loaded.status !== 'loaded') throw new Error('Valid v2 caster pack was refused.');
+      const caster = loaded.party.members[0]!;
+      const target = loaded.party.members[1]!;
+      let state = createEncounter({
+        bounds: { columns: 4, rows: 3 },
+        combatants: [caster.profile, target.profile],
+        tokens: [
+          combatToken(caster.profile, { column: 0, row: 1 }),
+          combatToken(target.profile, { column: 1, row: 1 }),
+        ],
+      });
+      state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+      const result = reduceEncounter(state, loadedPartySpellCastCommand(caster, 'fire-bolt', {
+        slotLevel: null,
+        castAsRitual: false,
+        targets: [target.profile.id],
+        area: null,
+        weaponAttack: null,
+        selectedOption: null,
+      }), () => (d20 - 1) / 20);
+      const attack = result.events.find((event) => event.type === 'attack_resolved');
+      if (attack?.type !== 'attack_resolved') throw new Error('Fire Bolt emitted no attack roll.');
+      return attack.attack;
+    };
+
+    expect(resolveAtD20(10)).toEqual({
+      outcome: 'hit',
+      roll: { mode: 'normal', faces: [10], chosen: 10 },
+      total: 17,
+    });
+    expect(resolveAtD20(9)).toEqual({
+      outcome: 'miss',
+      roll: { mode: 'normal', faces: [9], chosen: 9 },
+      total: 16,
+    });
   });
 
   it('unknown_spell_id_dropped refuses an unknown v2 spell id even when partial loading is allowed', () => {
