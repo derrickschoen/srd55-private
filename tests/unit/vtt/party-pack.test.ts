@@ -15,6 +15,38 @@ import {
 } from '../../../src/vtt/party-pack';
 import { monsterProfile, placedToken } from '../combat/fixtures';
 
+function jsonObject(value: unknown, path: string): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new TypeError(`Expected ${path} to be a JSON object.`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function jsonArray(value: unknown, path: string): readonly unknown[] {
+  if (!Array.isArray(value)) throw new TypeError(`Expected ${path} to be a JSON array.`);
+  return value;
+}
+
+function jsonStringArray(value: unknown, path: string): readonly string[] {
+  return jsonArray(value, path).map((entry, index) => {
+    if (typeof entry !== 'string') {
+      throw new TypeError(`Expected ${path}[${String(index)}] to be a string.`);
+    }
+    return entry;
+  });
+}
+
+function zodFeatureEffectKinds(source: string): readonly string[] {
+  const declaration = /const featureEffectSchema = z\.discriminatedUnion\('kind', \[([\s\S]*?)\]\)\.superRefine/u.exec(source);
+  const unionBody = declaration?.[1];
+  if (unionBody === undefined) throw new TypeError('Could not find the feature-effect Zod union.');
+  return [...unionBody.matchAll(/\bkind:\s*z\.literal\('([^']+)'\)/gu)].map((match) => {
+    const kind = match[1];
+    if (kind === undefined) throw new TypeError('Feature-effect kind capture was empty.');
+    return kind;
+  });
+}
+
 function memberBase(index: number): Omit<ExternalPartyPackV2['members'][number], 'spellcasting'> {
   return {
     combatantId: `combatant:pack-member-${String(index)}`,
@@ -1046,7 +1078,7 @@ describe('external party-pack boundary', () => {
     });
   });
 
-  it('refuses malformed JSON with a typed report and publishes a closed JSON schema', () => {
+  it('schema_missing_variant refuses malformed JSON and pins the complete Zod union in the public schema', () => {
     expect(loadExternalPartyPackBytes('{')).toEqual({
       status: 'refused',
       refusal: { kind: 'external_party_pack_refusal', reason: 'invalid_json' },
@@ -1057,9 +1089,9 @@ describe('external party-pack boundary', () => {
         engineRefusalReason: 'invalid_party_pack_structure',
       }],
     });
-    const schema: unknown = JSON.parse(
+    const schema = jsonObject(JSON.parse(
       readFileSync('docs/specs/external-party-pack.schema.json', 'utf8'),
-    );
+    ), 'schema');
     expect(schema).toMatchObject({
       oneOf: [
         { properties: { schemaVersion: { const: 1 } } },
@@ -1080,5 +1112,57 @@ describe('external party-pack boundary', () => {
         },
       },
     });
+
+    const zodKinds = zodFeatureEffectKinds(readFileSync('src/vtt/party-pack.ts', 'utf8'));
+    const definitions = jsonObject(schema.$defs, 'schema.$defs');
+    const featureEffect = jsonObject(definitions.featureEffect, 'schema.$defs.featureEffect');
+    const featureEffectProperties = jsonObject(
+      featureEffect.properties,
+      'schema.$defs.featureEffect.properties',
+    );
+    const kindProperty = jsonObject(
+      featureEffectProperties.kind,
+      'schema.$defs.featureEffect.properties.kind',
+    );
+    const schemaKinds = jsonStringArray(
+      kindProperty.enum,
+      'schema.$defs.featureEffect.properties.kind.enum',
+    );
+    const referencedKinds = jsonArray(
+      featureEffect.oneOf,
+      'schema.$defs.featureEffect.oneOf',
+    ).map((branch, index) => {
+      const reference = jsonObject(
+        branch,
+        `schema.$defs.featureEffect.oneOf[${String(index)}]`,
+      ).$ref;
+      if (typeof reference !== 'string' || !reference.startsWith('#/$defs/')) {
+        throw new TypeError('Every feature-effect branch must reference a schema definition.');
+      }
+      const definitionName = reference.slice('#/$defs/'.length);
+      const definition = jsonObject(
+        definitions[definitionName],
+        `schema.$defs.${definitionName}`,
+      );
+      const properties = jsonObject(
+        definition.properties,
+        `schema.$defs.${definitionName}.properties`,
+      );
+      const kind = jsonObject(
+        properties.kind,
+        `schema.$defs.${definitionName}.properties.kind`,
+      ).const;
+      if (typeof kind !== 'string') {
+        throw new TypeError(`Expected schema.$defs.${definitionName}.properties.kind.const.`);
+      }
+      return kind;
+    });
+    const sortedZodKinds = [...zodKinds].sort();
+
+    expect(new Set(zodKinds).size).toBe(zodKinds.length);
+    expect(new Set(schemaKinds).size).toBe(schemaKinds.length);
+    expect(new Set(referencedKinds).size).toBe(referencedKinds.length);
+    expect([...schemaKinds].sort()).toEqual(sortedZodKinds);
+    expect([...referencedKinds].sort()).toEqual(sortedZodKinds);
   });
 });

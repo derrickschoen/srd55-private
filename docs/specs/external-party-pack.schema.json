@@ -183,8 +183,38 @@
       }
     },
     "featureEffect": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "enum": [
+            "damage_rider",
+            "once_per_turn_damage_rider",
+            "slot_spend_damage_rider",
+            "first_hit_damage_rider",
+            "bonus_action_attack_grant",
+            "extra_attack_count_override",
+            "action_surge",
+            "attack_roll_modifier",
+            "attack_roll_mode",
+            "armor_class_modifier",
+            "saving_throw_modifier",
+            "skill_modifier",
+            "temporary_hit_points",
+            "condition_application",
+            "exhaustion_application",
+            "movement_modifier"
+          ]
+        }
+      },
       "oneOf": [
         { "$ref": "#/$defs/damageRiderEffect" },
+        { "$ref": "#/$defs/oncePerTurnDamageRiderEffect" },
+        { "$ref": "#/$defs/slotSpendDamageRiderEffect" },
+        { "$ref": "#/$defs/firstHitDamageRiderEffect" },
+        { "$ref": "#/$defs/bonusActionAttackGrantEffect" },
+        { "$ref": "#/$defs/extraAttackCountOverrideEffect" },
+        { "$ref": "#/$defs/actionSurgeEffect" },
         { "$ref": "#/$defs/attackRollModifierEffect" },
         { "$ref": "#/$defs/attackRollModeEffect" },
         { "$ref": "#/$defs/armorClassModifierEffect" },
@@ -205,6 +235,99 @@
         "trigger": { "enum": ["on_hit", "on_crit"] },
         "resourcePoolId": { "type": "string", "pattern": "^resource:[a-z0-9][a-z0-9-]{0,79}$" },
         "damage": { "type": "array", "minItems": 1, "maxItems": 20, "items": { "$ref": "#/$defs/damage" } }
+      }
+    },
+    "oncePerTurnDamageRiderEffect": {
+      "type": "object", "additionalProperties": false,
+      "required": ["effectId", "kind", "trigger", "oncePerTurnGate", "qualifyingGates", "damage"],
+      "properties": {
+        "effectId": { "type": "string", "pattern": "^effect:[a-z0-9][a-z0-9:-]{0,119}$" },
+        "kind": { "const": "once_per_turn_damage_rider" },
+        "trigger": { "const": "on_hit" },
+        "oncePerTurnGate": { "const": "first_hit_this_turn" },
+        "qualifyingGates": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": { "enum": ["advantage_on_attack", "ally_adjacent_to_target"] }
+        },
+        "resourcePoolId": { "type": "string", "pattern": "^resource:[a-z0-9][a-z0-9-]{0,79}$" },
+        "damage": { "type": "array", "minItems": 1, "maxItems": 20, "items": { "$ref": "#/$defs/damage" } }
+      }
+    },
+    "slotSpendDamageRiderEffect": {
+      "type": "object", "additionalProperties": false,
+      "required": ["effectId", "kind", "trigger", "spendGate", "criticalGate", "damageTypeId", "baseCount", "countPerSlotLevel", "sides", "modifier"],
+      "properties": {
+        "effectId": { "type": "string", "pattern": "^effect:[a-z0-9][a-z0-9:-]{0,119}$" },
+        "kind": { "const": "slot_spend_damage_rider" },
+        "trigger": { "const": "on_hit" },
+        "spendGate": { "const": "slot_spent" },
+        "criticalGate": { "const": "crit_confirmed" },
+        "damageTypeId": {
+          "enum": ["Acid", "Bludgeoning", "Cold", "Fire", "Force", "Lightning", "Necrotic", "Piercing", "Poison", "Psychic", "Radiant", "Slashing", "Thunder"]
+        },
+        "baseCount": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "countPerSlotLevel": { "type": "integer", "minimum": 1, "maximum": 20 },
+        "sides": { "enum": [4, 6, 8, 10, 12, 20] },
+        "modifier": { "type": "integer", "minimum": -30, "maximum": 30 }
+      }
+    },
+    "firstHitDamageRiderEffect": {
+      "type": "object", "additionalProperties": false,
+      "required": ["effectId", "kind", "trigger", "gate", "damageTypeId", "amount"],
+      "properties": {
+        "effectId": { "type": "string", "pattern": "^effect:[a-z0-9][a-z0-9:-]{0,119}$" },
+        "kind": { "const": "first_hit_damage_rider" },
+        "trigger": { "const": "on_hit" },
+        "gate": { "const": "first_hit_this_turn" },
+        "damageTypeId": {
+          "enum": ["Acid", "Bludgeoning", "Cold", "Fire", "Force", "Lightning", "Necrotic", "Piercing", "Poison", "Psychic", "Radiant", "Slashing", "Thunder"]
+        },
+        "amount": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "resourcePoolId": { "type": "string", "pattern": "^resource:[a-z0-9][a-z0-9-]{0,79}$" }
+      }
+    },
+    "bonusActionAttackGrantEffect": {
+      "type": "object", "additionalProperties": false,
+      "required": ["effectId", "kind", "attackCount"],
+      "properties": {
+        "effectId": { "type": "string", "pattern": "^effect:[a-z0-9][a-z0-9:-]{0,119}$" },
+        "kind": { "const": "bonus_action_attack_grant" },
+        "attackCount": { "type": "integer", "minimum": 1, "maximum": 20 },
+        "resourcePoolId": { "type": "string", "pattern": "^resource:[a-z0-9][a-z0-9-]{0,79}$" }
+      }
+    },
+    "extraAttackCountOverrideEffect": {
+      "type": "object", "additionalProperties": false,
+      "required": ["effectId", "kind", "levels"],
+      "properties": {
+        "effectId": { "type": "string", "pattern": "^effect:[a-z0-9][a-z0-9:-]{0,119}$" },
+        "kind": { "const": "extra_attack_count_override" },
+        "levels": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["minimumLevel", "attackCount"],
+            "properties": {
+              "minimumLevel": { "type": "integer", "minimum": 1, "maximum": 20 },
+              "attackCount": { "type": "integer", "minimum": 1, "maximum": 20 }
+            }
+          }
+        }
+      }
+    },
+    "actionSurgeEffect": {
+      "type": "object", "additionalProperties": false,
+      "required": ["effectId", "kind", "resourcePoolId"],
+      "properties": {
+        "effectId": { "type": "string", "pattern": "^effect:[a-z0-9][a-z0-9:-]{0,119}$" },
+        "kind": { "const": "action_surge" },
+        "resourcePoolId": { "type": "string", "pattern": "^resource:[a-z0-9][a-z0-9-]{0,79}$" }
       }
     },
     "attackRollModifierEffect": {
