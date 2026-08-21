@@ -7,6 +7,15 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D326 — OWNER: Colby soaks start at 16; fixture fixes collaborative (2026-08-21)
+
+1. **The 50% Colby soak arm starts NOW with the 16 runnable builds**
+   (D325.1's two prerequisites landed; more builds join as they flip).
+2. **Data-quality fixture issues: collaborate to fix them** — codex/
+   supervisor resolve what they can with documented reasoning; the
+   hardest residue is batched to the owner. Verbatim: "Collaborate to
+   try to fix them. Save me the ones you struggle with the most."
+
 ## D325 — OWNER: Colby prerequisites, oracle scope, BFRD (2026-08-20)
 
 1. **Colby soaks start only after BOTH the pack-v2 caster slice AND the
