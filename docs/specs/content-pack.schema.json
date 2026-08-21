@@ -403,6 +403,7 @@
       "properties": {
         "kind": {
           "enum": [
+            "persistent_area",
             "attack_damage",
             "attack_then_save_damage",
             "attack_damage_over_time",
@@ -436,6 +437,9 @@
         }
       },
       "oneOf": [
+        {
+          "$ref": "#/$defs/operation-persistent_area"
+        },
         {
           "$ref": "#/$defs/operation-attack_damage"
         },
@@ -604,7 +608,8 @@
             "attack_damage_type_choice",
             "resource_die_maneuver",
             "exploding_spell_damage_die",
-            "elemental_fury"
+            "elemental_fury",
+            "persistent_area"
           ]
         }
       },
@@ -689,6 +694,9 @@
         },
         {
           "$ref": "#/$defs/feature-elemental_fury"
+        },
+        {
+          "$ref": "#/$defs/feature-persistent_area"
         }
       ]
     },
@@ -967,6 +975,24 @@
           }
         }
       ]
+    },
+    "operation-persistent_area": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "origin", "shape", "durationRounds", "concentration", "targetFilter", "includeOwner", "difficultTerrain", "movableFeet", "hooks", "initialEffects"],
+      "properties": {
+        "kind": { "const": "persistent_area" },
+        "origin": { "enum": ["selected_when_cast", "anchored_to_caster"] },
+        "shape": { "type": ["object", "null"] },
+        "durationRounds": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+        "concentration": { "type": "boolean" },
+        "targetFilter": { "enum": ["all", "allies", "enemies", "selected"] },
+        "includeOwner": { "type": "boolean" },
+        "difficultTerrain": { "type": "boolean" },
+        "movableFeet": { "type": ["integer", "null"], "minimum": 1, "maximum": 100000 },
+        "hooks": { "type": "array", "maxItems": 16, "items": { "type": "object" } },
+        "initialEffects": { "type": "array", "maxItems": 16, "items": { "type": "object" } }
+      }
     },
     "operation-attack_damage": {
       "type": "object",
@@ -1687,6 +1713,21 @@
           "properties": {
             "kind": {
               "const": "elemental_fury"
+            }
+          }
+        }
+      ]
+    },
+    "feature-persistent_area": {
+      "allOf": [
+        {
+          "$ref": "external-party-pack.schema.json#/$defs/featureEffect"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "persistent_area"
             }
           }
         }

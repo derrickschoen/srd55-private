@@ -1,4 +1,5 @@
 import type { Ability } from '../domain/enums';
+import { canonicalJson } from '../commands/canonical-json';
 import {
   importedSpellDefinition,
   type LoadedContentPack,
@@ -34,6 +35,15 @@ import {
   type MovementWorld,
   type TurnMovement,
 } from './movement';
+import {
+  fixedOrigin,
+  feetShape,
+  persistentAreaContains,
+  type PersistentArea,
+  type PersistentAreaEffectSpec,
+  type PersistentAreaHook,
+  type PersistentAreaInput,
+} from './persistent-areas';
 import { rollDice, type Rng } from './random';
 import {
   resolveAttackRoll,
@@ -47,7 +57,7 @@ import {
 } from './resolution';
 import { spellDefinition } from './spells/definitions';
 import { validateSpellSlotCapacities } from './spells/resources';
-import type { EffectData, ScaledDice, SpellCastCommand, SpellDefinition } from './spells/types';
+import type { EffectData, ScaledDice, SpellCastCommand, SpellDefinition, SpellPersistentAreaEffectSpec } from './spells/types';
 import { affectedCells, creatureOccupiesAffectedCell, type AreaTemplate } from './templates';
 import {
   armorClass,
@@ -57,10 +67,12 @@ import {
   encounterEffectId,
   effectStackingIdentity,
   feet,
+  persistentAreaId,
   type CombatantId,
   type DamageType,
   type EncounterEffectId,
   type LimitedResourcePoolId,
+  type PersistentAreaId,
 } from './values';
 
 export type LifeState = 'living' | 'dying' | 'stable' | 'dead';
@@ -169,6 +181,9 @@ export interface EncounterState {
   readonly activeInitiativeIndex: number | null;
   readonly round: number;
   readonly effects: readonly EncounterEffect[];
+  /** Creation-sequenced areas; reducers never depend on insertion order. */
+  readonly persistentAreas: readonly PersistentArea[];
+  readonly nextPersistentAreaSequence: number;
   readonly eventLog: readonly EncounterEvent[];
   /** Exact imported records plus their reducer-ready projections. */
   readonly contentPacks?: readonly LoadedContentPack[];
@@ -365,6 +380,8 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
     activeInitiativeIndex: null,
     round: 0,
     effects: initialEffects,
+    persistentAreas: [],
+    nextPersistentAreaSequence: 1,
     eventLog: [],
     ...(setup.contentPacks === undefined
       ? {}
@@ -414,7 +431,6 @@ function appliedConditions(effect: EncounterEffect): readonly AppliedCondition[]
     case 'd20_test_modifier':
     case 'damage_reduction':
     case 'damage_rider':
-    case 'moonbeam_area':
     case 'bonus_action_attack_grant':
     case 'extra_attack_count_override':
     case 'action_surge':
@@ -1017,6 +1033,9 @@ function endConcentration(
   owner: CombatantId,
   reason: 'concentration_replaced' | 'concentration_ended' | 'concentration_broken',
 ): void {
+  const areaIds = context.state.persistentAreas
+    .filter((area) => area.owner === owner && area.duration.kind === 'concentration')
+    .map((area) => area.id);
   endEffects(
     context,
     new Set(
@@ -1026,6 +1045,7 @@ function endConcentration(
     ),
     reason,
   );
+  for (const areaId of areaIds) endPersistentArea(context, areaId, reason);
 }
 
 // Bundled SRD 5.2.1, docs/srd/full/srd-5.2.1.txt:1084-1120.
@@ -1453,9 +1473,268 @@ function movementWorld(state: EncounterState): MovementWorld<CombatantId> {
           combatant(state, candidate.combatantId).life !== 'dead' &&
           cellKey(candidate.position) === cellKey(to),
       );
-      return { kind: 'enterable', cost: feet(5), canEnd: !occupied };
+      const difficult = state.persistentAreas.some((area) => {
+        if (!area.difficultTerrain) return false;
+        const origin = area.origin;
+        const anchor = origin.kind === 'anchored'
+          ? state.tokens.find((candidate) => candidate.combatantId === origin.combatant)?.position ?? null
+          : null;
+        return persistentAreaContains(area, to, anchor, state);
+      });
+      return { kind: 'enterable', cost: feet(difficult ? 10 : 5), canEnd: !occupied };
     },
   };
+}
+
+const AREA_HOOK_ORDER: Readonly<Record<PersistentAreaHook, number>> = {
+  on_enter: 0,
+  on_start_of_turn_inside: 1,
+  on_end_of_turn_inside: 2,
+  on_exit: 3,
+};
+
+function orderedAreas(state: EncounterState): readonly PersistentArea[] {
+  return [...state.persistentAreas].sort((left, right) =>
+    left.sequence - right.sequence || String(left.id).localeCompare(String(right.id)));
+}
+
+function areaTargetEligible(state: EncounterState, area: PersistentArea, target: CombatantId): boolean {
+  switch (area.targetFilter.kind) {
+    case 'all': return true;
+    case 'selected': return area.targetFilter.combatants.includes(target);
+    case 'allies': return combatant(state, target).profile.kind === combatant(state, area.owner).profile.kind;
+    case 'enemies': return combatant(state, target).profile.kind !== combatant(state, area.owner).profile.kind;
+  }
+}
+
+function areaMembers(state: EncounterState, area: PersistentArea): readonly CombatantId[] {
+  const origin = area.origin;
+  const anchor = origin.kind === 'anchored'
+    ? state.tokens.find((candidate) => candidate.combatantId === origin.combatant)?.position ?? null
+    : null;
+  return state.combatants
+    .filter((subject) => subject.life !== 'dead')
+    .filter((subject) => areaTargetEligible(state, area, subject.profile.id))
+    .flatMap((subject): readonly CombatantId[] => {
+      const placed = state.tokens.find((candidate) => candidate.combatantId === subject.profile.id);
+      return placed !== undefined && persistentAreaContains(area, placed.position, anchor, state)
+        ? [subject.profile.id]
+        : [];
+    })
+    .sort((left, right) => String(left).localeCompare(String(right)));
+}
+
+function endPersistentArea(
+  context: ReductionContext,
+  areaId: PersistentAreaId,
+  reason: Extract<EncounterEvent, { readonly type: 'persistent_area_ended' }>['reason'],
+): void {
+  if (!context.state.persistentAreas.some((area) => area.id === areaId)) return;
+  endEffects(
+    context,
+    new Set(context.state.effects.filter((effect) => effect.areaSource === areaId).map((effect) => effect.id)),
+    reason,
+  );
+  context.state = {
+    ...context.state,
+    persistentAreas: context.state.persistentAreas.filter((area) => area.id !== areaId),
+  };
+  emit(context, { type: 'persistent_area_ended', areaId, reason });
+}
+
+function areaTurnIdentity(state: EncounterState): string {
+  return `${String(state.round)}:${String(state.activeCombatant ?? 'none')}`;
+}
+
+function consumeAreaTurnKey(
+  context: ReductionContext,
+  area: PersistentArea,
+  hook: PersistentAreaHook,
+  target: CombatantId,
+): boolean {
+  const turn = areaTurnIdentity(context.state);
+  const key = `${turn}:${String(target)}`;
+  const currentKeys = area.consumedTurnKeys.filter((candidate) => candidate.startsWith(`${turn}:`));
+  if (currentKeys.includes(key)) return false;
+  context.state = {
+    ...context.state,
+    persistentAreas: context.state.persistentAreas.map((candidate) => candidate.id === area.id
+      ? { ...candidate, consumedTurnKeys: [...currentKeys, key].sort() }
+      : candidate),
+  };
+  void hook;
+  return true;
+}
+
+function applyPersistentAreaEffect(
+  context: ReductionContext,
+  area: PersistentArea,
+  hook: PersistentAreaHook,
+  target: CombatantId,
+  spec: PersistentAreaEffectSpec,
+  hookIndex: number,
+): void {
+  if (combatant(context.state, target).life === 'dead') return;
+  let saveSucceeded = false;
+  if (spec.kind === 'save_gated') {
+    saveSucceeded = resolveTargetSave(
+      context,
+      area.owner,
+      target,
+      spec.ability,
+      spec.dc,
+      spec.rollMode,
+      null,
+    ).outcome === 'success';
+  }
+  if (spec.payload.kind === 'damage') {
+    const result = resolveDamage({
+      ...spec.payload.damage,
+      responses: targetDamageResponses(context.state, target, spec.payload.damage),
+    }, context.rng);
+    const amount = saveSucceeded
+      ? spec.kind === 'save_gated' && spec.onSuccess === 'half' ? Math.floor(result.total / 2) : 0
+      : result.total;
+    applyDamage(context, area.owner, target, amount);
+    concentrationCheck(context, target, amount);
+    return;
+  }
+  if (saveSucceeded) return;
+  const lifetime = spec.payload.lifetime;
+  if (lifetime.kind === 'save_ends' && spec.kind !== 'save_gated') {
+    throw new EncounterRuleError('A save-ends area effect requires a save gate.');
+  }
+  const duration = lifetime.kind === 'fixed_rounds'
+    ? {
+        kind: 'turn_boundaries' as const,
+        timing: { combatant: target, boundary: lifetime.boundary, source: `persistent-area:${String(area.id)}` },
+        remaining: lifetime.rounds,
+      }
+    : { kind: 'permanent' as const };
+  const repeatedSave = lifetime.kind === 'save_ends' && spec.kind === 'save_gated'
+    ? {
+        timing: { combatant: target, boundary: lifetime.boundary, source: `persistent-area:${String(area.id)}` },
+        ability: spec.ability,
+        dc: spec.dc,
+        rollMode: spec.rollMode,
+        onSuccess: 'remove_target' as const,
+      }
+    : null;
+  applyEffect(context, area.owner, {
+    targets: [target],
+    duration,
+    concentration: false,
+    stackingIdentity: effectStackingIdentity(`area:${String(area.id)}:${hook}:${String(hookIndex)}:${String(target)}`),
+    stacking: 'replace_same_source',
+    repeatedSave,
+    payload: spec.payload.payload,
+    areaSource: area.id,
+    ...(lifetime.kind === 'while_inside' ? { areaMembershipBound: true as const } : {}),
+  });
+}
+
+function triggerPersistentAreaHook(
+  context: ReductionContext,
+  areaId: PersistentAreaId,
+  hook: PersistentAreaHook,
+  target: CombatantId,
+): void {
+  const area = context.state.persistentAreas.find((candidate) => candidate.id === areaId);
+  if (area === undefined || !areaTargetEligible(context.state, area, target)) return;
+  const specs = area.hooks
+    .map((spec, index) => ({ spec, index }))
+    .filter(({ spec }) => spec.hook === hook)
+    .sort((left, right) => AREA_HOOK_ORDER[left.spec.hook] - AREA_HOOK_ORDER[right.spec.hook] || left.index - right.index);
+  for (const { spec, index } of specs) {
+    const refreshed = context.state.persistentAreas.find((candidate) => candidate.id === areaId);
+    if (refreshed === undefined) return;
+    if (spec.frequency === 'once_per_turn' && !consumeAreaTurnKey(context, refreshed, hook, target)) continue;
+    emit(context, { type: 'persistent_area_triggered', areaId, hook, target });
+    applyPersistentAreaEffect(context, refreshed, hook, target, spec.effect, index);
+  }
+}
+
+/**
+ * Re-evaluates areas in creation order and creatures by CombatantId. This is
+ * the single membership ordering used by movement, area movement, and replay.
+ */
+function reevaluatePersistentAreaMembership(context: ReductionContext): void {
+  for (const snapshot of orderedAreas(context.state)) {
+    const area = context.state.persistentAreas.find((candidate) => candidate.id === snapshot.id);
+    if (area === undefined) continue;
+    const members = areaMembers(context.state, area);
+    const entered = members.filter((member) => !area.members.includes(member));
+    const exited = area.members.filter((member) => !members.includes(member));
+    if (entered.length === 0 && exited.length === 0) continue;
+    context.state = {
+      ...context.state,
+      persistentAreas: context.state.persistentAreas.map((candidate) => candidate.id === area.id
+        ? { ...candidate, members }
+        : candidate),
+    };
+    emit(context, { type: 'persistent_area_membership_changed', areaId: area.id, entered, exited });
+    const transitions = [...entered.map((target) => ({ target, hook: 'on_enter' as const })),
+      ...exited.map((target) => ({ target, hook: 'on_exit' as const }))]
+      .sort((left, right) => String(left.target).localeCompare(String(right.target)) ||
+        AREA_HOOK_ORDER[left.hook] - AREA_HOOK_ORDER[right.hook]);
+    for (const transition of transitions) {
+      if (transition.hook === 'on_exit') {
+        endEffects(
+          context,
+          new Set(context.state.effects.filter((effect) =>
+            effect.areaSource === area.id && effect.areaMembershipBound === true && effect.targets.includes(transition.target))
+            .map((effect) => effect.id)),
+          'no_targets',
+        );
+      }
+      triggerPersistentAreaHook(context, area.id, transition.hook, transition.target);
+    }
+  }
+}
+
+function validatePersistentAreaInput(state: EncounterState, actor: CombatantId, input: PersistentAreaInput): void {
+  if (input.owner !== actor) throw new EncounterRuleError('A persistent area must be owned by its acting combatant.');
+  combatant(state, input.owner);
+  if (!Number.isSafeInteger(input.duration.remaining) || input.duration.remaining < 1) {
+    throw new EncounterRuleError('Persistent-area duration must be a positive number of rounds.');
+  }
+  if (input.origin.kind === 'anchored') {
+    token(state, input.origin.combatant);
+    if (input.movable !== null) throw new EncounterRuleError('An anchored persistent area cannot also be moved independently.');
+  }
+  if (input.targetFilter.kind === 'selected') {
+    assertUnique(input.targetFilter.combatants, 'Persistent-area selected targets');
+    for (const target of input.targetFilter.combatants) combatant(state, target);
+  }
+  for (const hook of input.hooks) {
+    if (hook.effect.payload.kind === 'effect' && hook.effect.payload.lifetime.kind === 'fixed_rounds' &&
+      (!Number.isSafeInteger(hook.effect.payload.lifetime.rounds) || hook.effect.payload.lifetime.rounds < 1)) {
+      throw new EncounterRuleError('A fixed persistent-area effect duration must be positive.');
+    }
+    if (hook.effect.kind === 'save_gated') difficultyClass(hook.effect.dc);
+  }
+}
+
+function createPersistentArea(context: ReductionContext, actor: CombatantId, input: PersistentAreaInput): PersistentAreaId {
+  validatePersistentAreaInput(context.state, actor, input);
+  if (input.duration.kind === 'concentration') endConcentration(context, actor, 'concentration_replaced');
+  const sequence = context.state.nextPersistentAreaSequence;
+  const id = persistentAreaId(`area:${String(sequence)}`);
+  const area: PersistentArea = {
+    ...structuredClone(input),
+    id,
+    sequence,
+    members: [],
+    consumedTurnKeys: [],
+  };
+  context.state = {
+    ...context.state,
+    nextPersistentAreaSequence: sequence + 1,
+    persistentAreas: [...context.state.persistentAreas, area],
+  };
+  emit(context, { type: 'persistent_area_created', areaId: id, owner: actor });
+  reevaluatePersistentAreaMembership(context);
+  return id;
 }
 
 function processMove(
@@ -1498,16 +1777,21 @@ function processMove(
   if (plan.steps.some((step) => step.beforeLeaving.length > 0)) {
     throw new EncounterRuleError('Movement has an unresolved Opportunity Attack window.');
   }
-  const destination = command.path.at(-1) ?? actorToken.position;
-  context.state = {
-    ...context.state,
-    tokens: context.state.tokens.map((candidate) =>
-      candidate.combatantId === command.actor
-        ? { ...candidate, position: { ...destination } }
-        : candidate,
-    ),
-  };
-  const movement = spendMovement(subject.turn.movement, plan.totalCost);
+  const traversed: GridCell[] = [];
+  let spent = feet(0);
+  for (const step of plan.steps) {
+    context.state = {
+      ...context.state,
+      tokens: context.state.tokens.map((candidate) => candidate.combatantId === command.actor
+        ? { ...candidate, position: { ...step.to } }
+        : candidate),
+    };
+    traversed.push({ ...step.to });
+    spent = feet(spent + step.cost);
+    reevaluatePersistentAreaMembership(context);
+    if (combatant(context.state, command.actor).life !== 'living') break;
+  }
+  const movement = spendMovement(subject.turn.movement, spent);
   context.state = replaceCombatant(context.state, {
     ...combatant(context.state, command.actor),
     turn: { ...combatant(context.state, command.actor).turn, movement },
@@ -1515,8 +1799,8 @@ function processMove(
   emit(context, {
     type: 'movement_completed',
     combatant: command.actor,
-    path: command.path.map((cell) => ({ ...cell })),
-    spent: plan.totalCost,
+    path: traversed,
+    spent,
     remaining: movement.remaining,
   });
 }
@@ -1556,53 +1840,17 @@ function processBoundary(
   subjectId: CombatantId,
   boundary: TurnBoundary,
 ): void {
+  reevaluatePersistentAreaMembership(context);
+  const areaHook: PersistentAreaHook = boundary === 'start'
+    ? 'on_start_of_turn_inside'
+    : 'on_end_of_turn_inside';
+  for (const area of orderedAreas(context.state)) {
+    if (area.members.includes(subjectId)) triggerPersistentAreaHook(context, area.id, areaHook, subjectId);
+  }
   const effectIds = context.state.effects.map((effect) => effect.id);
   for (const effectId of effectIds) {
     const effect = context.state.effects.find((candidate) => candidate.id === effectId);
     if (effect === undefined) continue;
-
-    if (
-      effect.payload.kind === 'moonbeam_area' &&
-      effect.payload.placement !== 'selected_when_cast' &&
-      combatant(context.state, subjectId).life !== 'dead' &&
-      boundary === 'end' &&
-      creatureOccupiesAffectedCell(
-        [token(context.state, subjectId).position],
-        affectedCells(
-          { bounds: context.state.bounds, blockedCells: context.state.blockedCells },
-          effect.payload.placement,
-        ),
-      )
-    ) {
-      if (effect.payload.saveDc === 'resolved_when_cast') {
-        throw new EncounterRuleError('Moonbeam save DC must resolve when cast.');
-      }
-      const save = resolveTargetSave(
-        context,
-        effect.source,
-        subjectId,
-        effect.payload.saveAbility,
-        effect.payload.saveDc,
-        'normal',
-        effect.id,
-      );
-      const rolled = resolveDamage({
-        terms: [{
-          type: damageType(effect.payload.damageType),
-          dice: { count: effect.payload.damageCount, sides: dieSides(effect.payload.damageSides), modifier: 0 },
-        }],
-        critical: false,
-        responses: [],
-      }, context.rng);
-      applySpellDamageAmount(
-        context,
-        effect.source,
-        subjectId,
-        damageType(effect.payload.damageType),
-        effect.payload.damageSides,
-        save.outcome === 'failure' ? rolled.total : Math.floor(rolled.total / 2),
-      );
-    }
 
     if (
       effect.targets.includes(subjectId) &&
@@ -1672,6 +1920,23 @@ function processBoundary(
               ? { ...candidate, duration: { ...candidate.duration, remaining } }
               : candidate,
           ),
+        };
+      }
+    }
+  }
+  if (boundary === 'start') {
+    for (const snapshot of orderedAreas(context.state)) {
+      const area = context.state.persistentAreas.find((candidate) => candidate.id === snapshot.id);
+      if (area === undefined || area.owner !== subjectId) continue;
+      const remaining = area.duration.remaining - 1;
+      if (remaining === 0) {
+        endPersistentArea(context, area.id, 'duration_expired');
+      } else {
+        context.state = {
+          ...context.state,
+          persistentAreas: context.state.persistentAreas.map((candidate) => candidate.id === area.id
+            ? { ...candidate, duration: { ...candidate.duration, remaining } }
+            : candidate),
         };
       }
     }
@@ -1872,7 +2137,6 @@ function cloneEffectApplication(
       case 'stone_shape':
       case 'damage_resistances':
       case 'wall_of_fire':
-      case 'moonbeam_area':
         return { ...application.payload };
       case 'commanded_action':
         return { ...application.payload, options: [...application.payload.options] };
@@ -1989,6 +2253,8 @@ function applyEffect(
     stacking: owned.stacking,
     repeatedSave: owned.repeatedSave,
     payload: owned.payload,
+    ...(owned.areaSource === undefined ? {} : { areaSource: owned.areaSource }),
+    ...(owned.areaMembershipBound === undefined ? {} : { areaMembershipBound: true }),
   };
   context.state = {
     ...context.state,
@@ -3085,13 +3351,6 @@ function resolvedSpellEffectPayload(
         placement: payload.placement === 'selected_when_cast' ? selectedArea() : payload.placement,
         damageCount: payload.damageCount + payload.damagePerSlotCount * slotDelta,
       };
-    case 'moonbeam_area':
-      return {
-        ...payload,
-        placement: payload.placement === 'selected_when_cast' ? selectedArea() : payload.placement,
-        saveDc: command.saveDc,
-        damageCount: payload.damageCount + payload.damagePerSlotCount * slotDelta,
-      };
     case 'energy_protection': {
       const selected = command.selectedOption;
       if (selected === null || !payload.damageTypes.includes(selected as 'Acid' | 'Cold' | 'Fire' | 'Lightning' | 'Thunder')) {
@@ -3457,6 +3716,40 @@ function applySpellDamageAmount(
   concentrationCheck(context, target, adjusted);
 }
 
+function resolvedPersistentAreaSpellEffect(
+  definition: SpellDefinition,
+  command: SpellCastCommand,
+  spec: SpellPersistentAreaEffectSpec,
+): PersistentAreaEffectSpec {
+  const payload = spec.payload.kind === 'damage'
+    ? {
+        kind: 'damage' as const,
+        damage: {
+          terms: [{
+            type: spec.payload.damageType,
+            dice: scaledDiceExpression(definition, spec.payload.dice, command),
+          }],
+          critical: false,
+          responses: [],
+        },
+      }
+    : {
+        kind: 'effect' as const,
+        payload: structuredClone(spec.payload.payload),
+        lifetime: structuredClone(spec.payload.lifetime),
+      };
+  return spec.kind === 'automatic'
+    ? { kind: 'automatic', payload }
+    : {
+        kind: 'save_gated',
+        ability: spec.ability,
+        dc: command.saveDc,
+        rollMode: spec.rollMode,
+        onSuccess: spec.onSuccess,
+        payload,
+      };
+}
+
 function processSpellCast(context: ReductionContext, command: SpellCastCommand): void {
   const definition = spellDefinition(command.spellId) ??
     importedSpellDefinition(context.state.contentPacks, command.spellId);
@@ -3468,6 +3761,58 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
 
   const operation = definition.operation;
   switch (operation.kind) {
+    case 'persistent_area': {
+      const selected = [...new Set([
+        ...(operation.includeOwner ? [command.actor] : []),
+        ...targets,
+      ])].sort((left, right) => String(left).localeCompare(String(right)));
+      const targetFilter = operation.targetFilter === 'selected'
+        ? { kind: 'selected' as const, combatants: selected }
+        : { kind: operation.targetFilter };
+      if (operation.origin === 'selected_when_cast' && command.area === null) {
+        throw new EncounterRuleError(`${definition.name} requires an area placement.`);
+      }
+      if (operation.origin === 'anchored_to_caster' && operation.shape === null) {
+        throw new EncounterRuleError(`${definition.name} requires an anchored area shape.`);
+      }
+      const input: PersistentAreaInput = {
+        owner: command.actor,
+        origin: operation.origin === 'selected_when_cast'
+          ? fixedOrigin(command.area as AreaTemplate)
+          : { kind: 'anchored', combatant: command.actor },
+        shape: operation.origin === 'selected_when_cast'
+          ? feetShape(command.area as AreaTemplate)
+          : structuredClone(operation.shape as NonNullable<typeof operation.shape>),
+        duration: {
+          kind: operation.concentration ? 'concentration' : 'rounds',
+          remaining: operation.durationRounds,
+        },
+        targetFilter,
+        difficultTerrain: operation.difficultTerrain,
+        hooks: operation.hooks.map((hook) => ({
+          hook: hook.hook,
+          frequency: hook.frequency,
+          effect: resolvedPersistentAreaSpellEffect(definition, command, hook.effect),
+        })),
+        movable: operation.movableFeet === null ? null : { maximumFeet: feet(operation.movableFeet) },
+      };
+      const areaId = createPersistentArea(context, command.actor, input);
+      for (const initial of operation.initialEffects) {
+        const area = context.state.persistentAreas.find((candidate) => candidate.id === areaId);
+        if (area === undefined) break;
+        for (const target of selected.filter((candidate) => !initial.excludeOwner || candidate !== command.actor)) {
+          applyPersistentAreaEffect(
+            context,
+            area,
+            'on_enter',
+            target,
+            resolvedPersistentAreaSpellEffect(definition, command, initial.effect),
+            operation.hooks.length,
+          );
+        }
+      }
+      return;
+    }
     case 'attack_damage':
       for (const target of targets) {
         resolveSpellAttack(
@@ -4163,6 +4508,7 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
           to: { ...consequence.to },
         },
       });
+      reevaluatePersistentAreaMembership(context);
       return;
     }
     case 'cast_spell':
@@ -4205,6 +4551,56 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
     case 'move':
       processMove(context, command);
       return;
+    case 'create_persistent_area': {
+      if (command.cost !== 'reaction') assertActiveActor(context, command.actor);
+      spendCost(context, command.actor, command.cost, 'Create persistent area');
+      if (command.featureEffectId !== undefined) {
+        const feature = featureEffect(context.state, command.actor, command.featureEffectId);
+        if (feature.payload.kind !== 'persistent_area') {
+          throw new EncounterRuleError(`Effect ${command.featureEffectId} does not create a persistent area.`);
+        }
+        if (feature.resourcePoolId !== null) {
+          spendLimitedResource(context, command.actor, feature.resourcePoolId, `Effect ${feature.id}`);
+        }
+        const { origin: declaredOrigin, ...declaredArea } = feature.payload.area;
+        const { owner: _owner, origin: submittedOrigin, ...submittedArea } = command.area;
+        if (
+          canonicalJson(declaredArea) !== canonicalJson(submittedArea) ||
+          (declaredOrigin === 'self' &&
+            (submittedOrigin.kind !== 'anchored' || submittedOrigin.combatant !== command.actor)) ||
+          (declaredOrigin === 'selected' && submittedOrigin.kind !== 'fixed')
+        ) {
+          throw new EncounterRuleError(`Effect ${command.featureEffectId} persistent-area declaration was altered.`);
+        }
+      }
+      createPersistentArea(context, command.actor, command.area);
+      return;
+    }
+    case 'move_persistent_area': {
+      assertActiveActor(context, command.actor);
+      const area = context.state.persistentAreas.find((candidate) => candidate.id === command.areaId);
+      if (area === undefined) throw new EncounterRuleError(`Unknown persistent area ${command.areaId}.`);
+      if (area.owner !== command.actor || area.origin.kind !== 'fixed' || area.movable === null) {
+        throw new EncounterRuleError(`Persistent area ${command.areaId} is not movable by ${command.actor}.`);
+      }
+      const distance = Math.hypot(
+        command.origin.point.x - area.origin.point.x,
+        command.origin.point.y - area.origin.point.y,
+      );
+      if (distance > area.movable.maximumFeet) {
+        throw new EncounterRuleError(`Persistent area ${command.areaId} moved farther than allowed.`);
+      }
+      spendAction(context, command.actor, `Move persistent area ${command.areaId}`);
+      context.state = {
+        ...context.state,
+        persistentAreas: context.state.persistentAreas.map((candidate) => candidate.id === area.id
+          ? { ...candidate, origin: structuredClone(command.origin) }
+          : candidate),
+      };
+      emit(context, { type: 'persistent_area_moved', areaId: area.id, owner: command.actor, origin: command.origin });
+      reevaluatePersistentAreaMembership(context);
+      return;
+    }
     case 'attack':
     case 'opportunity_attack': {
       processAttack(context, command);

@@ -628,7 +628,7 @@ const COMPLETE_MECHANICS_PINS: readonly CompleteMechanicsPin[] = [
   {
     id: 'entangle', source: 'spell-descriptions.txt:2729-2756',
     targeting: { kind: 'area', rangeFeet: 90, shape: 'cube', baseSizeFeet: 20, sizePerSlotFeet: 0, surface: 'ground_square' },
-    operation: { kind: 'save_effect', ability: 'strength', rollMode: 'normal', excludeCaster: true, effect: pinnedEffect({ kind: 'condition', condition: 'Restrained' }, { concentration: true, durationRounds: 10 }) },
+    operation: { kind: 'persistent_area', origin: 'selected_when_cast', shape: null, durationRounds: 10, concentration: true, targetFilter: 'all', includeOwner: false, difficultTerrain: true, movableFeet: null, hooks: [], initialEffects: [{ excludeOwner: true, effect: { kind: 'save_gated', ability: 'strength', rollMode: 'normal', onSuccess: 'none', payload: { kind: 'effect', payload: { kind: 'condition', condition: 'Restrained' }, lifetime: { kind: 'area_duration' } } } }] },
   },
   {
     id: 'dissonant-whispers', source: 'spell-descriptions.txt:2289-2312',
@@ -651,6 +651,13 @@ function definitionRange(definition: SpellDefinition): number {
 function operationDice(definition: SpellDefinition): readonly [number, number] | null {
   const operation = definition.operation;
   switch (operation.kind) {
+    case 'persistent_area': {
+      const damage = [...operation.hooks.map((hook) => hook.effect), ...operation.initialEffects.map((initial) => initial.effect)]
+        .find((spec) => spec.payload.kind === 'damage');
+      return damage?.payload.kind === 'damage'
+        ? [damage.payload.dice.baseCount, damage.payload.dice.sides]
+        : null;
+    }
     case 'attack_damage':
     case 'save_damage':
     case 'healing':
@@ -697,6 +704,11 @@ function operationDice(definition: SpellDefinition): readonly [number, number] |
 function operationPerSlot(definition: SpellDefinition): number {
   const operation = definition.operation;
   switch (operation.kind) {
+    case 'persistent_area': {
+      const damage = [...operation.hooks.map((hook) => hook.effect), ...operation.initialEffects.map((initial) => initial.effect)]
+        .find((spec) => spec.payload.kind === 'damage');
+      return damage?.payload.kind === 'damage' ? damage.payload.dice.perSlotCount : 0;
+    }
     case 'attack_damage':
     case 'save_damage':
     case 'healing':

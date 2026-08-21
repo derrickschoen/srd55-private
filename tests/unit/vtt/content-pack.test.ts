@@ -96,6 +96,36 @@ function importedSpellCommand(
 }
 
 describe('content-pack v1', () => {
+  it('loads a typed persistent-area spell operation and refuses malformed nested area specs', () => {
+    const operation = {
+      kind: 'persistent_area', origin: 'anchored_to_caster',
+      shape: { kind: 'emanation', radius: 10 }, durationRounds: 10, concentration: true,
+      targetFilter: 'enemies', includeOwner: false, difficultTerrain: false, movableFeet: null,
+      hooks: [{
+        hook: 'on_start_of_turn_inside', frequency: 'once_per_turn',
+        effect: {
+          kind: 'save_gated', ability: 'wisdom', rollMode: 'normal', onSuccess: 'none',
+          payload: { kind: 'effect', payload: { kind: 'condition', condition: 'Frightened' }, lifetime: { kind: 'save_ends', boundary: 'end' } },
+        },
+      }],
+      initialEffects: [],
+    };
+    const candidate = fixture() as { spells: Array<{ operation: unknown }> };
+    candidate.spells[0]!.operation = operation;
+    const result = loadContentPack(candidate);
+    expect(result.status).toBe('loaded');
+    if (result.status !== 'loaded') throw new Error('Typed persistent-area operation was refused.');
+    expect(result.content.spells[0]?.definition.operation).toEqual(operation);
+
+    const malformed = structuredClone(candidate) as {
+      spells: Array<{ operation: { hooks: Array<{ effect: { payload: { lifetime?: unknown } } }> } }>;
+    };
+    delete malformed.spells[0]!.operation.hooks[0]!.effect.payload.lifetime;
+    expect(loadContentPack(malformed)).toMatchObject({
+      status: 'refused', refusal: { reason: 'malformed_record', path: ['spells', 0, 'operation'] },
+    });
+  });
+
   it('loads original homebrew examples for every executable content kind with surfaced provenance', () => {
     const content = loaded();
     expect(content.provenance).toEqual({

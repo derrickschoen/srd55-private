@@ -8,8 +8,9 @@ import type {
   SavingThrowResult,
 } from './resolution';
 import type { EffectApplication, EffectPayload, TurnBoundary } from './effects';
+import type { PersistentAreaInput, PersistentAreaOrigin } from './persistent-areas';
 import type { SpellCastCommand } from './spells/types';
-import type { CombatantId, EncounterEffectId, Feet, LimitedResourcePoolId } from './values';
+import type { CombatantId, EncounterEffectId, Feet, LimitedResourcePoolId, PersistentAreaId } from './values';
 
 export type ActionCost = 'action' | 'bonus_action' | 'reaction' | 'none';
 
@@ -30,6 +31,19 @@ export type EncounterCommand =
       readonly actor: CombatantId;
       readonly path: readonly GridCell[];
       readonly cause: 'voluntary' | 'reactions_resolved';
+    }
+  | {
+      readonly type: 'create_persistent_area';
+      readonly actor: CombatantId;
+      readonly area: PersistentAreaInput;
+      readonly cost: ActionCost;
+      readonly featureEffectId?: EncounterEffectId;
+    }
+  | {
+      readonly type: 'move_persistent_area';
+      readonly actor: CombatantId;
+      readonly areaId: PersistentAreaId;
+      readonly origin: Extract<PersistentAreaOrigin, { readonly kind: 'fixed' }>;
     }
   | {
       readonly type: 'attack';
@@ -189,6 +203,34 @@ export type EncounterEvent =
       readonly path: readonly GridCell[];
       readonly spent: Feet;
       readonly remaining: Feet;
+    })
+  | (SequencedEvent & {
+      readonly type: 'persistent_area_created';
+      readonly areaId: PersistentAreaId;
+      readonly owner: CombatantId;
+    })
+  | (SequencedEvent & {
+      readonly type: 'persistent_area_moved';
+      readonly areaId: PersistentAreaId;
+      readonly owner: CombatantId;
+      readonly origin: Extract<PersistentAreaOrigin, { readonly kind: 'fixed' }>;
+    })
+  | (SequencedEvent & {
+      readonly type: 'persistent_area_membership_changed';
+      readonly areaId: PersistentAreaId;
+      readonly entered: readonly CombatantId[];
+      readonly exited: readonly CombatantId[];
+    })
+  | (SequencedEvent & {
+      readonly type: 'persistent_area_triggered';
+      readonly areaId: PersistentAreaId;
+      readonly hook: 'on_enter' | 'on_start_of_turn_inside' | 'on_end_of_turn_inside' | 'on_exit';
+      readonly target: CombatantId;
+    })
+  | (SequencedEvent & {
+      readonly type: 'persistent_area_ended';
+      readonly areaId: PersistentAreaId;
+      readonly reason: 'duration_expired' | 'concentration_replaced' | 'concentration_ended' | 'concentration_broken';
     })
   | (SequencedEvent & {
       readonly type: 'attack_resolved';

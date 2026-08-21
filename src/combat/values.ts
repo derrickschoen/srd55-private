@@ -9,6 +9,7 @@ export type CombatantId = Brand<string, 'CombatantId'>;
 export type TokenId = Brand<string, 'TokenId'>;
 export type StatblockId = Brand<string, 'StatblockId'>;
 export type EncounterEffectId = Brand<string, 'EncounterEffectId'>;
+export type PersistentAreaId = Brand<string, 'PersistentAreaId'>;
 export type EffectStackingIdentity = Brand<string, 'EffectStackingIdentity'>;
 export type LimitedResourcePoolId = Brand<string, 'LimitedResourcePoolId'>;
 export type EncounterSessionId = Brand<string, 'EncounterSessionId'>;
@@ -78,6 +79,9 @@ export const statblockId = (value: string): StatblockId =>
 
 export const encounterEffectId = (value: string): EncounterEffectId =>
   identity<EncounterEffectId>(value, 'EncounterEffectId');
+
+export const persistentAreaId = (value: string): PersistentAreaId =>
+  identity<PersistentAreaId>(value, 'PersistentAreaId');
 
 export const effectStackingIdentity = (
   value: string,

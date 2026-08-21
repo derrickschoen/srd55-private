@@ -3,6 +3,7 @@ import { canonicalJson } from '../../../src/commands/canonical-json';
 import { sha256 } from '../../../src/crypto/sha256';
 import {
   authoritativeReplayHash,
+  createReplayBundle,
   decodeReplayBundle,
   emptyFleetTelemetry,
   exportReplayBundle,
@@ -11,6 +12,13 @@ import {
   ReplayDivergenceError,
   type ReplayBundle,
 } from '../../../src/vtt/replay';
+import { encounterStateFromApprovedFixture } from '../../../src/vtt/generated-encounter-fixtures';
+import { EncounterSessionJournal, MemoryBrowserSessionStore, MemoryMirrorSink } from '../../../src/vtt/session-persistence';
+import { reduceEncounter } from '../../../src/combat/encounter';
+import type { EncounterCommand } from '../../../src/combat/events';
+import { mulberry32 } from '../../../src/combat/random';
+import { feetPoint } from '../../../src/combat/templates';
+import { codexSessionId, encounterBranchId, encounterSessionId, feet } from '../../../src/combat/values';
 import { recordScriptedReferenceSkirmish } from '../../../src/vtt/scripted-skirmish';
 import { TEST_APPROVED_FIRST_SKIRMISH_FIXTURE } from '../../../src/vtt/test-approved-first-skirmish';
 import { runVttReplayCommand } from '../../../tools/vtt-replay';
@@ -69,6 +77,58 @@ function expectDivergence(
 }
 
 describe('increment 10 deterministic replay and playable exit', () => {
+  it('replays two overlapping persistent areas byte-exactly in stable creation order', () => {
+    const store = new MemoryBrowserSessionStore();
+    const mirror = new MemoryMirrorSink();
+    const sessionId = encounterSessionId('encounter:persistent-area-replay');
+    const rng = mulberry32(0x330_088);
+    const coordinatorState = {
+      requestSequence: 1,
+      pendingRequest: null,
+      pendingCommand: null,
+      continuation: { kind: 'idle' as const },
+      pause: null,
+    };
+    let state = encounterStateFromApprovedFixture(TEST_APPROVED_FIRST_SKIRMISH_FIXTURE);
+    const journal = EncounterSessionJournal.create({
+      sessionId, branchId: encounterBranchId('branch:persistent-area-replay'), encounterState: state,
+      coordinatorState, controllers: [], codexSessionId: codexSessionId('codex:persistent-area-replay'),
+      rng, store, mirror,
+    });
+    const record = (command: EncounterCommand): void => {
+      const reduction = reduceEncounter(state, command, rng);
+      state = reduction.state;
+      journal.record({
+        transition: { kind: 'reducer_applied', command, events: reduction.events },
+        encounterState: state, coordinatorState, controllers: [],
+      });
+    };
+    record({ type: 'roll_initiative' });
+    const owner = state.activeCombatant;
+    if (owner === null) throw new Error('Persistent-area replay fixture has no active combatant.');
+    for (const x of [20, 25]) {
+      record({
+        type: 'create_persistent_area', actor: owner, cost: 'none',
+        area: {
+          owner, origin: { kind: 'fixed', point: feetPoint(x, 20) },
+          shape: { kind: 'sphere', radius: feet(10) }, duration: { kind: 'rounds', remaining: 3 },
+          targetFilter: { kind: 'all' }, difficultTerrain: false, hooks: [], movable: null,
+        },
+      });
+    }
+    const bundle = createReplayBundle({
+      fixture: TEST_APPROVED_FIRST_SKIRMISH_FIXTURE, revisions: store.revisions(sessionId), transcripts: [],
+      build: { buildId: 'persistent-area-test', commit: 'test' }, protocolVersions: ['persistent-area:1'],
+      licensingVersions: ['SRD-5.2.1-CC-BY-4.0'], gapReports: [],
+    });
+    const decoded = decodeReplayBundle(exportReplayBundle(bundle));
+    expect(canonicalJson(decoded)).toBe(canonicalJson(bundle));
+    expect(replayBundle(decoded, TEST_APPROVED_FIRST_SKIRMISH_FIXTURE).finalStateHash).toBe(
+      bundle.revisions.at(-1)?.stateHash,
+    );
+    expect(state.persistentAreas.map((area) => area.sequence)).toEqual([1, 2]);
+  });
+
   it('PLAYABLE-EXIT replays the four-round scripted skirmish offline byte-for-byte', () => {
     const gate = recordScriptedReferenceSkirmish();
     const replayed = replayBundle(gate.bundle, TEST_APPROVED_FIRST_SKIRMISH_FIXTURE);

@@ -1,5 +1,11 @@
 import type { Ability } from '../../domain/enums';
 import type { EffectApplication, EffectPayload } from '../effects';
+import type {
+  PersistentAreaAppliedPayload,
+  PersistentAreaEffectLifetime,
+  PersistentAreaHook,
+  PersistentAreaShape,
+} from '../persistent-areas';
 import type { AreaTemplate } from '../templates';
 import type { CombatantId, DamageType, LimitedResourcePoolId } from '../values';
 
@@ -90,7 +96,45 @@ export interface EffectData {
   }[];
 }
 
+export type SpellPersistentAreaEffectSpec =
+  | {
+      readonly kind: 'automatic';
+      readonly payload:
+        | { readonly kind: 'damage'; readonly damageType: DamageType; readonly dice: ScaledDice }
+        | { readonly kind: 'effect'; readonly payload: PersistentAreaAppliedPayload; readonly lifetime: PersistentAreaEffectLifetime };
+    }
+  | {
+      readonly kind: 'save_gated';
+      readonly ability: Ability;
+      readonly rollMode: 'normal' | 'advantage' | 'disadvantage';
+      readonly onSuccess: 'none' | 'half';
+      readonly payload:
+        | { readonly kind: 'damage'; readonly damageType: DamageType; readonly dice: ScaledDice }
+        | { readonly kind: 'effect'; readonly payload: PersistentAreaAppliedPayload; readonly lifetime: PersistentAreaEffectLifetime };
+    };
+
 export type SpellOperation =
+  | {
+      readonly kind: 'persistent_area';
+      readonly origin: 'selected_when_cast' | 'anchored_to_caster';
+      /** Required for anchored areas; selected areas take their exact cast template. */
+      readonly shape: PersistentAreaShape | null;
+      readonly durationRounds: number;
+      readonly concentration: boolean;
+      readonly targetFilter: 'all' | 'allies' | 'enemies' | 'selected';
+      readonly includeOwner: boolean;
+      readonly difficultTerrain: boolean;
+      readonly movableFeet: number | null;
+      readonly hooks: readonly {
+        readonly hook: PersistentAreaHook;
+        readonly frequency: 'once_per_turn' | 'every_trigger';
+        readonly effect: SpellPersistentAreaEffectSpec;
+      }[];
+      readonly initialEffects: readonly {
+        readonly excludeOwner: boolean;
+        readonly effect: SpellPersistentAreaEffectSpec;
+      }[];
+    }
   | {
       readonly kind: 'attack_damage';
       readonly attackKind: 'melee' | 'ranged';
@@ -378,6 +422,7 @@ export type SpellOperation =
 
 /** Runtime inventory for serializers of the closed operation union above. */
 export const SPELL_OPERATION_KINDS = [
+  'persistent_area',
   'attack_damage',
   'attack_then_save_damage',
   'attack_damage_over_time',

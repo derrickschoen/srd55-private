@@ -1,5 +1,5 @@
 import type { EffectPayload } from '../effects';
-import { damageType } from '../values';
+import { damageType, feet } from '../values';
 import type {
   EffectData,
   ScaledDice,
@@ -783,7 +783,22 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     source: 'docs/srd/source/spell-descriptions.txt:5582-5611',
     castingTime: 'action', components: material('a moonseed leaf'),
     targeting: { kind: 'area', rangeFeet: 120, shape: 'cylinder', baseSizeFeet: 5, sizePerSlotFeet: 0, secondarySizeFeet: 40 },
-    operation: { kind: 'save_damage_and_effect', ability: 'constitution', onSuccess: 'half', damageType: damageType('Radiant'), dice: dice(2, 10, { perSlotCount: 1 }), effect: effect({ kind: 'moonbeam_area', placement: 'selected_when_cast', saveAbility: 'constitution', saveDc: 'resolved_when_cast', onSuccess: 'half', damageType: 'Radiant', damageCount: 2, damageSides: 10, damagePerSlotCount: 1, moveFeetPerMagicAction: 60, dimLight: true, oncePerTurn: true }, { target: 'self', concentration: true, durationRounds: 10 }) },
+    operation: {
+      kind: 'persistent_area', origin: 'selected_when_cast', shape: null,
+      durationRounds: 10, concentration: true, targetFilter: 'all', includeOwner: false,
+      difficultTerrain: false, movableFeet: 60, initialEffects: [],
+      hooks: (['on_enter', 'on_end_of_turn_inside'] as const).map((hook) => ({
+        hook,
+        frequency: 'once_per_turn' as const,
+        effect: {
+          kind: 'save_gated' as const,
+          ability: 'constitution' as const,
+          rollMode: 'normal' as const,
+          onSuccess: 'half' as const,
+          payload: { kind: 'damage' as const, damageType: damageType('Radiant'), dice: dice(2, 10, { perSlotCount: 1 }) },
+        },
+      })),
+    },
   },
   {
     id: 'prayer-of-healing', name: 'Prayer of Healing', level: 2,
@@ -1303,7 +1318,22 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     source: 'docs/srd/source/spell-descriptions.txt:2729-2756',
     castingTime: 'action', components: VS,
     targeting: { kind: 'area', rangeFeet: 90, shape: 'cube', baseSizeFeet: 20, sizePerSlotFeet: 0, surface: 'ground_square' },
-    operation: { kind: 'save_effect', ability: 'strength', rollMode: 'normal', excludeCaster: true, effect: effect({ kind: 'condition', condition: 'Restrained' }, { concentration: true, durationRounds: 10 }) },
+    operation: {
+      kind: 'persistent_area', origin: 'selected_when_cast', shape: null,
+      durationRounds: 10, concentration: true, targetFilter: 'all', includeOwner: false,
+      difficultTerrain: true, movableFeet: null, hooks: [],
+      initialEffects: [{
+        excludeOwner: true,
+        effect: {
+          kind: 'save_gated', ability: 'strength', rollMode: 'normal', onSuccess: 'none',
+          payload: {
+            kind: 'effect',
+            payload: { kind: 'condition', condition: 'Restrained' },
+            lifetime: { kind: 'area_duration' },
+          },
+        },
+      }],
+    },
   },
   {
     id: 'dissonant-whispers', name: 'Dissonant Whispers', level: 1,
@@ -1324,7 +1354,21 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     source: 'docs/srd/source/spell-descriptions.txt:5688-5696',
     castingTime: 'action', components: material('ashes from burned mistletoe'),
     targeting: { kind: 'all_in_range', rangeFeet: 30 },
-    operation: { kind: 'effect', effect: effect({ kind: 'skill_modifier', skill: 'stealth', amount: 10 }, { concentration: true, durationRounds: 600 }) },
+    operation: {
+      kind: 'persistent_area', origin: 'anchored_to_caster', shape: { kind: 'emanation', radius: feet(30) },
+      durationRounds: 600, concentration: true, targetFilter: 'selected', includeOwner: true,
+      difficultTerrain: false, movableFeet: null, initialEffects: [],
+      hooks: [{
+        hook: 'on_enter', frequency: 'every_trigger',
+        effect: {
+          kind: 'automatic',
+          payload: {
+            kind: 'effect', payload: { kind: 'skill_modifier', skill: 'stealth', amount: 10 },
+            lifetime: { kind: 'while_inside' },
+          },
+        },
+      }],
+    },
   },
   {
     id: 'hold-monster', name: 'Hold Monster', level: 5,

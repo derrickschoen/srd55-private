@@ -240,8 +240,12 @@ describe('D318.1 spell batch 2 boundaries', () => {
       level: 2,
       targeting: { kind: 'all_in_range', rangeFeet: 30 },
       operation: {
-        kind: 'effect',
-        effect: { concentration: true, durationRounds: 600, payload: { kind: 'skill_modifier', skill: 'stealth', amount: 10 } },
+        kind: 'persistent_area', origin: 'anchored_to_caster', concentration: true, durationRounds: 600,
+        shape: { kind: 'emanation', radius: feet(30) },
+        hooks: [{
+          hook: 'on_enter', frequency: 'every_trigger',
+          effect: { kind: 'automatic', payload: { kind: 'effect', payload: { kind: 'skill_modifier', skill: 'stealth', amount: 10 }, lifetime: { kind: 'while_inside' } } },
+        }],
       },
     });
     const caster = casterFor('trace-caster', 2);
@@ -254,7 +258,17 @@ describe('D318.1 spell batch 2 boundaries', () => {
     ).state;
     expect(effectiveSkillModifier(result, caster.id, 'stealth')).toBe(10);
     expect(effectiveSkillModifier(result, beneficiary.id, 'stealth')).toBe(10);
-    expect(result.effects[0]?.concentrationOwner).toBe(caster.id);
+    expect(result.persistentAreas[0]?.owner).toBe(caster.id);
+    expect(result.persistentAreas[0]?.duration.kind).toBe('concentration');
+    let moving = reduceEncounter(result, { type: 'end_turn', actor: caster.id }, () => 0.5).state;
+    moving = reduceEncounter(moving, {
+      type: 'move', actor: beneficiary.id, path: [{ column: 7, row: 0 }], cause: 'reactions_resolved',
+    }, () => 0.5).state;
+    expect(effectiveSkillModifier(moving, beneficiary.id, 'stealth')).toBe(0);
+    moving = reduceEncounter(moving, {
+      type: 'move', actor: beneficiary.id, path: [{ column: 6, row: 0 }], cause: 'reactions_resolved',
+    }, () => 0.5).state;
+    expect(effectiveSkillModifier(moving, beneficiary.id, 'stealth')).toBe(10);
 
     const outside = startedEncounter(caster, beneficiary, 7);
     expect(() => reduceEncounter(
@@ -274,13 +288,17 @@ describe('D318.1 spell batch 2 boundaries', () => {
     ).state;
     expect(combatantConditions(failed, target.id)).toContainEqual({ name: 'Restrained' });
     expect(combatantConditions(failed, caster.id)).not.toContainEqual({ name: 'Restrained' });
-
     const exactDc = reduceEncounter(
       startedEncounter(caster, target),
       cast(caster, 'entangle', 1, { area: cube20() }),
       () => 0.45,
     ).state;
     expect(combatantConditions(exactDc, target.id)).not.toContainEqual({ name: 'Restrained' });
+    const terrain = reduceEncounter(exactDc, { type: 'end_turn', actor: caster.id }, () => 0.5).state;
+    const terrainMove = reduceEncounter(terrain, {
+      type: 'move', actor: target.id, path: [{ column: 3, row: 0 }], cause: 'reactions_resolved',
+    }, () => 0.5);
+    expect(terrainMove.events).toContainEqual(expect.objectContaining({ type: 'movement_completed', spent: feet(10) }));
   });
 
   it('Dissonant Whispers pins 3d6 Psychic, DC-1 full damage, and exact-DC half damage', () => {

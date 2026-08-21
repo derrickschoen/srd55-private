@@ -44,6 +44,10 @@ function actionLabel(action: EncounterCommand): string {
         ? 'Move'
         : `Move to ${destination.column},${destination.row}`;
     }
+    case 'create_persistent_area':
+      return 'Create persistent area';
+    case 'move_persistent_area':
+      return 'Move persistent area';
     case 'attack':
       return 'Attack';
     case 'opportunity_attack':

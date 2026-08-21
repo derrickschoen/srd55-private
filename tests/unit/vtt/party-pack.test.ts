@@ -8,6 +8,7 @@ import {
   loadExternalPartyPack,
   loadExternalPartyPackBytes,
   loadedPartyAttackCommand,
+  loadedPartyEffectCommand,
   loadedPartySpellCastCommand,
   loadedPartyTurnLegalActions,
   type ExternalPartyPackV1,
@@ -238,6 +239,36 @@ function sequenceRng(values: readonly number[], fallback = 0): () => number {
 }
 
 describe('external party-pack boundary', () => {
+  it('loads the v2 persistent-area effect vocabulary and refuses malformed hook payloads', () => {
+    const candidate = structuredClone(pack());
+    candidate.members[0]!.effects = [{
+      effectId: 'effect:homebrew-aura', kind: 'persistent_area', trigger: 'action', origin: 'self',
+      shape: { kind: 'emanation', radiusFeet: 10 }, duration: { kind: 'concentration', rounds: 10 },
+      targetFilter: 'allies', difficultTerrain: false, movableFeet: null,
+      hooks: [{
+        hook: 'on_enter', frequency: 'every_trigger',
+        effect: { kind: 'automatic', payload: { kind: 'skill_modifier', skillId: 'stealth', amount: 2, lifetime: { kind: 'while_inside' } } },
+      }],
+    }];
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Typed persistent-area feature was refused.');
+    expect(loaded.party.members[0]?.effects[0]?.payload).toMatchObject({
+      kind: 'persistent_area', area: { origin: 'self', shape: { kind: 'emanation', radius: 10 } },
+    });
+    expect(loadedPartyEffectCommand(loaded.party.members[0]!, 'effect:homebrew-aura', [])).toMatchObject({
+      type: 'create_persistent_area', area: { origin: { kind: 'anchored' } },
+    });
+
+    const malformed = structuredClone(candidate) as {
+      members: Array<{ effects?: Array<{ hooks: Array<{ effect: { payload: { lifetime?: unknown } } }> }> }>;
+    };
+    delete malformed.members[0]!.effects![0]!.hooks[0]!.effect.payload.lifetime;
+    expect(loadExternalPartyPack(malformed)).toMatchObject({
+      status: 'refused', refusal: { reason: 'gaps_not_allowed' },
+    });
+  });
+
   it('loads generated valid 3-5 member packs into branded combat profiles', () => {
     for (let count = 3; count <= 5; count += 1) {
       for (let sample = 0; sample < 20; sample += 1) {
