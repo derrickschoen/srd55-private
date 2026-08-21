@@ -17,6 +17,7 @@ import {
   decodeRoundPlanReply,
   e01RoundPlanReplyContract,
   e02RoundPlanReplyContract,
+  e03RoundPlanReplyContract,
   E02_SHARED_INSTRUCTIONS,
   type DecodedRoundPlanReply,
   type DmBridgeExchange,
@@ -26,6 +27,8 @@ import {
   type E01RoundPlanReplyContract,
   type E02CompactRoundPlanReplyContract,
   type E02PromptVariant,
+  type E03CompactRoundPlanReplyContract,
+  type E03PromptVariant,
   type MonsterRoundProgram,
   type RoundPlan,
   type RoundPlanCorrectionRequest,
@@ -51,8 +54,8 @@ import {
 } from '../src/vtt/generated-encounter-fixtures';
 import { TEST_APPROVED_FIRST_SKIRMISH_FIXTURE } from '../src/vtt/test-approved-first-skirmish';
 
-export type ExperimentId = 'E01' | 'E02';
-export type ExperimentArmId = E01PromptVariant | E02PromptVariant;
+export type ExperimentId = 'E01' | 'E02' | 'E03';
+export type ExperimentArmId = E01PromptVariant | E02PromptVariant | E03PromptVariant;
 
 export interface ExperimentArmDefinition {
   readonly id: ExperimentArmId;
@@ -67,11 +70,19 @@ export interface E02ExperimentArmDefinition extends ExperimentArmDefinition {
   readonly exampleCount: 0 | 1 | 3;
 }
 
+export interface E03ExperimentArmDefinition extends ExperimentArmDefinition {
+  readonly id: E03PromptVariant;
+  readonly instructions: string;
+  readonly exampleBlock: string;
+  readonly workedExamples: readonly [RoundPlan, RoundPlan, RoundPlan];
+  readonly exampleCount: 3;
+}
+
 export interface ExperimentDefinition {
   readonly id: ExperimentId;
   readonly version: '1';
   readonly hypothesis: string;
-  readonly arms: readonly ExperimentArmDefinition[] | readonly E02ExperimentArmDefinition[];
+  readonly arms: readonly ExperimentArmDefinition[] | readonly E02ExperimentArmDefinition[] | readonly E03ExperimentArmDefinition[];
   readonly seedCount: 24;
   readonly replicates: 2;
   readonly rounds: 5;
@@ -140,6 +151,41 @@ const E02_SAVE_ACTION_EXAMPLE = e02Example('save-action', [{
   program: { kind: 'action', action: { kind: 'force_save', target: { kind: 'nearest_enemy' } } },
 }]);
 
+const E03_SHARED_WORKED_EXAMPLES = Object.freeze([
+  E02_MULTI_MONSTER_FALLBACK_EXAMPLE,
+  E02_MOVEMENT_EXAMPLE,
+  E02_SAVE_ACTION_EXAMPLE,
+] as const);
+
+export const E03_TWO_SENTENCE_IMPERATIVE =
+  'Act as the DM decision engine and return exactly one JSON object matching the supplied compact grammar, three worked examples, request envelope, and current projection. Include exactly one program for every requested living monster, use only visible identifiers and listed fields, and emit no markdown or surrounding text.';
+
+export const E03_VALIDATION_FAILURE_EXPLAINER = `Validation failures mean the reply could not be decoded as the required round-plan object, even when the text looked close to the requested form. Return one JSON object only: do not add markdown fences, headings, commentary, trailing prose, or multiple candidate objects. JSON syntax must be complete, with quoted property names and strings, balanced braces and brackets, commas only between entries, and no trailing commas.
+
+The top-level object must contain exactly the fields shown by the compact grammar. The kind and protocol version are fixed. Copy encounterId, requestId, expectedRevision, and round from the request without changing their spelling, type, or value. Stale envelope values fail because they could apply a plan to a different encounter revision. Do not add convenience fields, explanations, confidence values, or aliases; every object is strict and unlisted properties are rejected.
+
+The monsters array must contain exactly one entry for each requested living monster and no entry for any other combatant. Copy each requested monsterId exactly. Missing entries, duplicate entries, reordered identities with mismatched programs, player identifiers, and identifiers absent from the visible projection all fail validation. Each monster entry must have one program object.
+
+A program must use one of the grammar's three shapes. An action program contains kind and action, with riders only where the grammar permits them. An if program contains one predicate, one then program, and one else program. A priority program contains a nonempty choices array. Do not merge fields from different shapes. Required nested objects must be objects rather than strings, shorthand labels, or null. Arrays must respect their stated minimum and maximum lengths, and recursive programs and predicates must remain within the depth bound.
+
+Actions, targets, riders, and predicates must use only the listed variants and their exact fields. Numeric values must satisfy the stated integer, range, and nonnegative constraints. A combatant reference must name an identifier available in the supplied projection. A destination must provide the required numeric column and row. A rider is a fixed follow-up attached to its action program, not a separate choice.
+
+If a correction request includes a validator error, preserve the current request envelope and change only what is needed to satisfy that error and the same unchanged contract. Recheck the entire object after the correction, because repairing one field does not excuse a second invalid field. The production validator is authoritative; the grammar and examples illustrate its accepted structure but do not relax it.`;
+
+export const E03_TACTICAL_ADVICE_FORBIDDEN_PHRASES = Object.freeze([
+  'focus fire',
+  'attack the weakest',
+  'target the lowest',
+  'target the highest',
+  'prioritize enemies',
+  'lowest hit points',
+  'highest threat',
+  'retreat when',
+  'use dodge',
+  'save resources',
+  'spend resources',
+] as const);
+
 function exampleBlock(examples: readonly RoundPlan[]): string {
   return examples.length === 0
     ? E02_ZERO_EXAMPLE_BLOCK
@@ -159,6 +205,21 @@ function e02Arm(
     exampleBlock: exampleBlock(workedExamples),
     workedExamples: Object.freeze([...workedExamples]),
     exampleCount,
+  });
+}
+
+function e03Arm(
+  id: E03PromptVariant,
+  description: string,
+  instructions: string,
+): E03ExperimentArmDefinition {
+  return Object.freeze({
+    id,
+    description,
+    instructions,
+    exampleBlock: exampleBlock(E03_SHARED_WORKED_EXAMPLES),
+    workedExamples: E03_SHARED_WORKED_EXAMPLES,
+    exampleCount: 3,
   });
 }
 
@@ -191,6 +252,20 @@ export const EXPERIMENT_REGISTRY = Object.freeze({
         3,
       ),
     ] satisfies readonly E02ExperimentArmDefinition[]),
+    seedCount: 24,
+    replicates: 2,
+    rounds: 5,
+    enemyCount: 4,
+  }),
+  E03: Object.freeze({
+    id: 'E03',
+    version: '1',
+    hypothesis: 'Terse contract text reduces latency and reasoning tokens without hurting tactical interpretation.',
+    arms: Object.freeze([
+      e03Arm('two-sentence-imperative', 'Use a two-sentence imperative instruction block.', E03_TWO_SENTENCE_IMPERATIVE),
+      e03Arm('current-instructions', 'Retain the current instruction block.', E02_SHARED_INSTRUCTIONS),
+      e03Arm('validation-failure-explainer', 'Explain common validation failures without tactical advice.', E03_VALIDATION_FAILURE_EXPLAINER),
+    ] satisfies readonly E03ExperimentArmDefinition[]),
     seedCount: 24,
     replicates: 2,
     rounds: 5,
@@ -261,7 +336,7 @@ export function buildExperimentSchedule(id: ExperimentId): readonly ExperimentSc
         schedule.push({
           experimentId: id,
           armId,
-          ...(id === 'E02' ? { fixtureId: experimentFixtureId(id) } : {}),
+          ...(id === 'E02' || id === 'E03' ? { fixtureId: experimentFixtureId(id) } : {}),
           seed,
           replicate,
           batchId: replicate === 1 ? 'batch-1' : 'batch-2',
@@ -321,6 +396,14 @@ function isE02ArmDefinition(
   return 'workedExamples' in arm;
 }
 
+function isE03ArmDefinition(
+  arm: ExperimentArmDefinition,
+): arm is E03ExperimentArmDefinition {
+  return arm.id === 'two-sentence-imperative' ||
+    arm.id === 'current-instructions' ||
+    arm.id === 'validation-failure-explainer';
+}
+
 function isE01PromptVariant(value: ExperimentArmId): value is E01PromptVariant {
   return value === 'duplicated-full-contract' ||
     value === 'contract-once-by-id' ||
@@ -335,17 +418,29 @@ function e02ArmDefinition(armId: ExperimentArmId): E02ExperimentArmDefinition {
   return arm;
 }
 
+function e03ArmDefinition(armId: ExperimentArmId): E03ExperimentArmDefinition {
+  const arm = EXPERIMENT_REGISTRY.E03.arms.find((candidate) => candidate.id === armId);
+  if (arm === undefined || !isE03ArmDefinition(arm)) {
+    throw new TypeError(`E03 arm ${armId} is not registered.`);
+  }
+  return arm;
+}
+
 function replyContract(
   experimentId: ExperimentId,
   armId: ExperimentArmId,
   callIndex: number,
-): E01RoundPlanReplyContract | E02CompactRoundPlanReplyContract {
+): E01RoundPlanReplyContract | E02CompactRoundPlanReplyContract | E03CompactRoundPlanReplyContract {
   if (experimentId === 'E01') {
     if (!isE01PromptVariant(armId)) throw new TypeError(`E01 arm ${armId} is not registered.`);
     return e01RoundPlanReplyContract(armId, callIndex);
   }
-  const arm = e02ArmDefinition(armId);
-  return e02RoundPlanReplyContract(arm.id, arm.workedExamples);
+  if (experimentId === 'E02') {
+    const arm = e02ArmDefinition(armId);
+    return e02RoundPlanReplyContract(arm.id, arm.workedExamples);
+  }
+  const arm = e03ArmDefinition(armId);
+  return e03RoundPlanReplyContract(arm.id, arm.instructions, arm.workedExamples);
 }
 
 function promptHash(id: ExperimentId, armId: ExperimentArmId): string {
@@ -377,13 +472,19 @@ export function preregisterExperiment(config: VttExperimentConfig): ExperimentPr
     initiativeConfiguration: 'shared_enemy;deterministic-within-side-order',
     primaryMetrics: definition.id === 'E01'
       ? ['completedRoundsPerHour', 'normalizedTacticalRegret']
-      : ['completedRoundsPerHour', 'normalizedTacticalRegret', 'firstPassValidity'],
+      : definition.id === 'E02'
+        ? ['completedRoundsPerHour', 'normalizedTacticalRegret', 'firstPassValidity']
+        : ['completedRoundsPerHour', 'normalizedTacticalRegret'],
     secondaryMetrics: definition.id === 'E01'
       ? ['latencyMs', 'tokenCounts', 'correctionRate', 'reconsultRate', 'round5HpDifferential']
-      : ['latencyMs', 'inputTokens', 'cachedInputTokens', 'outputTokens', 'reasoningTokens', 'correctionRate', 'reconsultRate', 'targetSanity'],
+      : definition.id === 'E02'
+        ? ['latencyMs', 'inputTokens', 'cachedInputTokens', 'outputTokens', 'reasoningTokens', 'correctionRate', 'reconsultRate', 'targetSanity']
+        : ['latencyMs', 'inputTokens', 'cachedInputTokens', 'outputTokens', 'reasoningTokens', 'correctionRate', 'dryProgramRate', 'reconsultRate', 'round5HpDifferential'],
     noninferiorityMargins: definition.id === 'E01'
       ? { normalizedTacticalRegret: 0.02, correctionPercentagePoints: 2 }
-      : { normalizedTacticalRegret: 0.02, minimumFirstPassValidity: 0.99 },
+      : definition.id === 'E02'
+        ? { normalizedTacticalRegret: 0.02, minimumFirstPassValidity: 0.99 }
+        : { normalizedTacticalRegret: 0.02, minimumMedianLatencyImprovement: 0.10 },
     timeouts: { requestMs: config.requestTimeoutMs, tableMs: config.tableTimeoutMs },
     candidateTurnK: config.candidateTurnK,
     exclusions: [],
@@ -663,9 +764,17 @@ class RecordingExperimentExchange implements DmBridgeExchange {
       latencyMs: fleet?.latencyMs ?? finished - started,
       estimatedCallCostUsd: null,
       promptComponents: {
-        instructions: component(instructions, this.entry.experimentId === 'E01' ? 'e01-terse-v1' : 'e02-shared-v1'),
+        instructions: component(
+          instructions,
+          this.entry.experimentId === 'E01'
+            ? 'e01-terse-v1'
+            : this.entry.experimentId === 'E02' ? 'e02-shared-v1' : `e03-${this.entry.armId}-v1`,
+        ),
         schemaGrammar: component(schemaGrammar, contract.contractId),
-        examples: component(example, this.entry.experimentId === 'E01' ? 'round-plan-canonical-v1' : 'e02-worked-examples-v1'),
+        examples: component(
+          example,
+          this.entry.experimentId === 'E01' ? 'round-plan-canonical-v1' : this.entry.experimentId === 'E02' ? 'e02-worked-examples-v1' : 'e03-three-worked-examples-v1',
+        ),
         skills: component('', null),
         library: component('', null),
         projection: component(projection, 'dm-full-v1'),
@@ -972,8 +1081,12 @@ export async function runE01Table(
     initiativeOrder: state?.initiative.map((initiative) => initiative.combatant) ?? [],
     promptVariant: entry.armId,
     schemaVariant: entry.experimentId === 'E01' ? 'round-plan-json-ast-v1' : 'compact-grammar-v1',
-    exampleCount: entry.experimentId === 'E01' ? 1 : e02ArmDefinition(entry.armId).exampleCount,
-    instructionVersion: entry.experimentId === 'E01' ? 'e01-terse-v1' : 'e02-shared-v1',
+    exampleCount: entry.experimentId === 'E01'
+      ? 1
+      : entry.experimentId === 'E02' ? e02ArmDefinition(entry.armId).exampleCount : 3,
+    instructionVersion: entry.experimentId === 'E01'
+      ? 'e01-terse-v1'
+      : entry.experimentId === 'E02' ? 'e02-shared-v1' : `e03-${entry.armId}-v1`,
     skillSetVersion: 'none-v1',
     planSurface: 'json_ast',
     projectionMode: 'full',
@@ -1049,6 +1162,7 @@ export async function runE01Table(
 }
 
 export const runE02Table = runE01Table;
+export const runE03Table = runE01Table;
 
 export interface VttExperimentRuntime {
   readonly runTable?: (
@@ -1172,8 +1286,8 @@ export function decodeVttExperimentArguments(argv: readonly string[]): VttExperi
   ]);
   for (const name of values.keys()) if (!allowed.has(name)) throw new TypeError(`Unknown option --${name}.`);
   const experiment = optionText(values, 'experiment');
-  if (experiment !== 'E01' && experiment !== 'E02') {
-    throw new TypeError('--experiment must name a registered experiment (E01 or E02).');
+  if (experiment !== 'E01' && experiment !== 'E02' && experiment !== 'E03') {
+    throw new TypeError('--experiment must name a registered experiment (E01, E02, or E03).');
   }
   const effort = optionText(values, 'effort', DEFAULT_DM_REASONING_EFFORT);
   if (effort !== 'low' && effort !== 'medium' && effort !== 'high' && effort !== 'xhigh') {

@@ -23,6 +23,7 @@ const TURN_PROGRAM_LIBRARY_LEDGER_PATH = 'docs/audits/2026-08-20-turn-program-li
 const E04_E06_LEDGER_PATH = 'docs/audits/2026-08-20-e04-e06-engine-prerequisites-mutation-ledger.md';
 const E01_EXPERIMENT_LEDGER_PATH = 'docs/audits/2026-08-20-e01-experiment-orchestrator-mutation-ledger.md';
 const E02_EXPERIMENT_LEDGER_PATH = 'docs/audits/2026-08-21-e02-worked-example-experiment-mutation-ledger.md';
+const E03_EXPERIMENT_LEDGER_PATH = 'docs/audits/2026-08-21-e03-instruction-length-experiment-mutation-ledger.md';
 const PARTY_EFFECTS_LEDGER_PATH = 'docs/audits/2026-08-20-party-pack-v2-effects-mutation-ledger.md';
 const EFFECT_FAMILIES_LEDGER_PATH = 'docs/audits/2026-08-21-party-pack-effect-families-mutation-ledger.md';
 const PARTY_MULTISOURCE_LEDGER_PATH = 'docs/audits/2026-08-21-party-pack-multisource-mutation-ledger.md';
@@ -196,6 +197,18 @@ describe('phase-2 mutation ledger manifest', () => {
       'arms_share_examples',
       'e02_reuses_e01_digest',
       'seed_pairing_broken',
+    ]) {
+      expect(ledger).toContain(`\`${name}\``);
+    }
+    expect(ledger.match(/exit 1/gu)).toHaveLength(3);
+  });
+
+  it('E03-EXPERIMENT-MUTATION-LEDGER pins all three required controls', () => {
+    const ledger = readFileSync(E03_EXPERIMENT_LEDGER_PATH, 'utf8');
+    for (const name of [
+      'explainer_contains_tactics',
+      'shared_block_varies',
+      'e03_digest_collides',
     ]) {
       expect(ledger).toContain(`\`${name}\``);
     }
