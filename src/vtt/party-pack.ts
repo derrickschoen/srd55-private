@@ -102,6 +102,12 @@ const v2SpellSlotSchema = z.strictObject({
   recharge: z.literal('long_rest'),
 });
 
+const pactSpellSlotSchema = z.strictObject({
+  level: spellSlotLevelSchema,
+  count: integerSchema.min(1).max(99),
+  recharge: z.literal('short_rest'),
+});
+
 const resourceSpellUseSchema = z.strictObject({
   spellId: z.string(),
   resourcePoolId: resourcePoolIdSchema,
@@ -285,24 +291,36 @@ const v1MemberSchema = z.strictObject({
   spellSelections: z.array(manifestSpellIdSchema).max(SPELL_MANIFEST.length),
 });
 
-const spellcastingSchema = z.strictObject({
+const spellcastingSourceShape = {
   ability: z.enum(abilities),
   spellSaveDc: integerSchema.min(1).max(50),
   spellAttackBonus: modifierSchema,
   preparedSpellIds: z.array(manifestSpellIdSchema).max(SPELL_MANIFEST.length),
   knownSpellIds: z.array(manifestSpellIdSchema).max(SPELL_MANIFEST.length),
-  spellSlots: z.array(v2SpellSlotSchema).max(9),
   resourceSpellUses: z.array(resourceSpellUseSchema).max(SPELL_MANIFEST.length).optional(),
+} as const;
+
+const spellcastingSourceSchema = z.strictObject(spellcastingSourceShape);
+
+const legacySpellcastingSchema = z.strictObject({
+  ...spellcastingSourceShape,
+  spellSlots: z.array(v2SpellSlotSchema).max(9),
 });
 
-const spellcastingInputSchema = z.strictObject({
+const spellcastingSourceInputShape = {
   ability: z.enum(abilities),
   spellSaveDc: integerSchema.min(1).max(50),
   spellAttackBonus: modifierSchema,
   preparedSpellIds: z.array(z.string()).max(SPELL_MANIFEST.length),
   knownSpellIds: z.array(z.string()).max(SPELL_MANIFEST.length),
-  spellSlots: z.array(v2SpellSlotSchema).max(9),
   resourceSpellUses: z.array(resourceSpellUseSchema).max(SPELL_MANIFEST.length).optional(),
+} as const;
+
+const spellcastingSourceInputSchema = z.strictObject(spellcastingSourceInputShape);
+
+const legacySpellcastingInputSchema = z.strictObject({
+  ...spellcastingSourceInputShape,
+  spellSlots: z.array(v2SpellSlotSchema).max(9),
 });
 
 const v2MemberCoreSchema = z.strictObject(memberBaseShape);
@@ -310,10 +328,23 @@ const v2MemberCoreSchema = z.strictObject(memberBaseShape);
 const v2MemberSchema = z.strictObject({
   ...memberBaseShape,
   ...memberSharedShape,
-  spellcasting: spellcastingSchema.optional(),
+  spellcasting: z.union([
+    legacySpellcastingSchema,
+    z.array(spellcastingSourceSchema).min(1).max(4),
+  ]).optional(),
+  sharedSpellSlots: z.array(v2SpellSlotSchema).max(9).optional(),
+  pactSpellSlots: z.array(pactSpellSlotSchema).max(9).optional(),
   effects: z.array(featureEffectSchema).max(100).optional(),
   resources: z.array(resourcePoolSchema).max(100).optional(),
   passives: passivesSchema.optional(),
+}).superRefine((member, context) => {
+  if (Array.isArray(member.spellcasting) && member.sharedSpellSlots === undefined) {
+    context.addIssue({
+      code: 'custom',
+      path: ['sharedSpellSlots'],
+      message: 'Array-form spellcasting sources require member-level sharedSpellSlots.',
+    });
+  }
 });
 
 const externalPartyPackV1Schema = z.strictObject({
@@ -374,7 +405,7 @@ export interface LoadedPartyCondition {
   readonly condition: ConditionName;
 }
 
-export interface LoadedPartySpellcasting {
+export interface LoadedPartySpellcastingSource {
   readonly ability: Ability;
   readonly spellSaveDc: number;
   readonly spellAttackBonus: number;
@@ -382,11 +413,6 @@ export interface LoadedPartySpellcasting {
   readonly casterLevel: number;
   readonly preparedSpells: readonly SpellManifestRow[];
   readonly knownSpells: readonly SpellManifestRow[];
-  readonly spellSlots: readonly {
-    readonly level: z.infer<typeof spellSlotLevelSchema>;
-    readonly maximum: number;
-    readonly recharge: 'long_rest';
-  }[];
   readonly resourceSpellUses: readonly {
     readonly spellId: string;
     readonly resourcePoolId: ReturnType<typeof limitedResourcePoolId>;
@@ -398,7 +424,12 @@ export interface LoadedPartyMember {
   readonly profile: Extract<CombatantProfile, { readonly kind: 'player_character' }>;
   readonly attacks: readonly LoadedPartyAttack[];
   readonly spells: readonly SpellManifestRow[];
-  readonly spellcasting: LoadedPartySpellcasting | null;
+  readonly spellcasting: readonly LoadedPartySpellcastingSource[];
+  readonly sharedSpellSlots: readonly {
+    readonly level: z.infer<typeof spellSlotLevelSchema>;
+    readonly maximum: number;
+    readonly recharge: 'long_rest';
+  }[];
   readonly startingConditions: readonly LoadedPartyCondition[];
   readonly effects: readonly CombatFeatureEffect[];
 }
@@ -412,6 +443,8 @@ export type PartyPackRefusalReason =
   | 'invalid_json'
   | 'invalid_structure'
   | 'unknown_spell_id'
+  | 'too_many_spellcasting_sources'
+  | 'pact_slots_unmodelled'
   | 'unsupported_effect_shape'
   | 'gaps_not_allowed'
   | 'no_mappable_members';
@@ -484,6 +517,8 @@ const V1_MEMBER_FIELDS = new Set([
 const V2_MEMBER_FIELDS = new Set([
   ...SHARED_MEMBER_FIELDS,
   'spellcasting',
+  'sharedSpellSlots',
+  'pactSpellSlots',
   'effects',
   'resources',
   'passives',
@@ -492,14 +527,17 @@ const CLASS_FIELDS = new Set(['classId', 'level']);
 const ABILITY_FIELDS = new Set<string>(abilities);
 const SPELL_SLOT_FIELDS = new Set(['level', 'maximum']);
 const V2_SPELL_SLOT_FIELDS = new Set(['level', 'count', 'recharge']);
-const SPELLCASTING_FIELDS = new Set([
+const SPELLCASTING_SOURCE_FIELDS = new Set([
   'ability',
   'spellSaveDc',
   'spellAttackBonus',
   'preparedSpellIds',
   'knownSpellIds',
-  'spellSlots',
   'resourceSpellUses',
+]);
+const LEGACY_SPELLCASTING_FIELDS = new Set([
+  ...SPELLCASTING_SOURCE_FIELDS,
+  'spellSlots',
 ]);
 const RESOURCE_SPELL_USE_FIELDS = new Set(['spellId', 'resourcePoolId']);
 const ATTACK_FIELDS = new Set([
@@ -625,21 +663,35 @@ function sanitizedSpellcasting(
   value: unknown,
   partyEntry: string,
   memberIndex: number,
+  sourceIndex: number | null,
+  legacy: boolean,
   gaps: GapReport[],
 ): unknown {
-  const prefix = ['members', memberIndex, 'spellcasting'] as const;
-  const sanitized = sanitizedRecord(value, SPELLCASTING_FIELDS, partyEntry, prefix, gaps);
+  const prefix: readonly PropertyKey[] = sourceIndex === null
+    ? ['members', memberIndex, 'spellcasting']
+    : ['members', memberIndex, 'spellcasting', sourceIndex];
+  const sanitized = sanitizedRecord(
+    value,
+    legacy ? LEGACY_SPELLCASTING_FIELDS : SPELLCASTING_SOURCE_FIELDS,
+    partyEntry,
+    prefix,
+    gaps,
+  );
   const input = record(sanitized);
   if (input === null) return sanitized;
   return {
     ...input,
-    spellSlots: sanitizedArrayRecords(
-      input.spellSlots,
-      V2_SPELL_SLOT_FIELDS,
-      partyEntry,
-      [...prefix, 'spellSlots'],
-      gaps,
-    ),
+    ...(legacy
+      ? {
+          spellSlots: sanitizedArrayRecords(
+            input.spellSlots,
+            V2_SPELL_SLOT_FIELDS,
+            partyEntry,
+            [...prefix, 'spellSlots'],
+            gaps,
+          ),
+        }
+      : {}),
     ...(Object.hasOwn(input, 'resourceSpellUses')
       ? {
           resourceSpellUses: sanitizedArrayRecords(
@@ -766,7 +818,7 @@ function loadedMember(
   member: ExternalPartyPackMember,
   spells: readonly SpellManifestRow[],
   spellSlots: readonly { readonly level: z.infer<typeof spellSlotLevelSchema>; readonly maximum: number }[],
-  spellcasting: LoadedPartySpellcasting | null,
+  spellcasting: readonly LoadedPartySpellcastingSource[],
 ): LoadedPartyMember {
   const extensions = v2MemberExtensions(member);
   const passive = extensions.passives;
@@ -822,6 +874,10 @@ function loadedMember(
     attacks: member.attacks.map(loadedAttack),
     spells,
     spellcasting,
+    sharedSpellSlots: spellSlots.map((capacity) => ({
+      ...capacity,
+      recharge: 'long_rest',
+    })),
     startingConditions: member.startingConditions.map((condition) => ({
       effectId: encounterEffectId(condition.effectId),
       condition: condition.conditionId,
@@ -833,10 +889,12 @@ function loadedMember(
 export class PartySpellcastingError extends Error {
   override readonly name = 'PartySpellcastingError' as const;
 
-  constructor(readonly reason: 'spellcasting_unavailable' | 'spell_not_referenced') {
+  constructor(readonly reason: 'spellcasting_unavailable' | 'spell_not_referenced' | 'ambiguous_spell_source') {
     super(reason === 'spellcasting_unavailable'
       ? 'The loaded party member has no v2 spellcasting capability.'
-      : 'The requested spell is not referenced by the loaded party member.');
+      : reason === 'spell_not_referenced'
+        ? 'The requested spell is not referenced by the loaded party member.'
+        : 'The requested spell is referenced by multiple spellcasting sources.');
   }
 }
 
@@ -954,11 +1012,16 @@ export function loadedPartySpellCastCommand(
   spellId: string,
   details: LoadedPartySpellCastDetails,
 ): SpellCastCommand {
-  const spellcasting = member.spellcasting;
-  if (spellcasting === null) throw new PartySpellcastingError('spellcasting_unavailable');
-  if (!member.spells.some((spell) => spell.id === spellId)) {
+  if (member.spellcasting.length === 0) throw new PartySpellcastingError('spellcasting_unavailable');
+  const matchingSources = member.spellcasting.filter((source) =>
+    source.preparedSpells.some((spell) => spell.id === spellId) ||
+    source.knownSpells.some((spell) => spell.id === spellId));
+  if (matchingSources.length === 0 || !member.spells.some((spell) => spell.id === spellId)) {
     throw new PartySpellcastingError('spell_not_referenced');
   }
+  if (matchingSources.length > 1) throw new PartySpellcastingError('ambiguous_spell_source');
+  const spellcasting = matchingSources[0];
+  if (spellcasting === undefined) throw new PartySpellcastingError('spell_not_referenced');
   const resourceUse = details.resourcePoolId === undefined
     ? undefined
     : spellcasting.resourceSpellUses.find((use) =>
@@ -1038,6 +1101,8 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
 
   const gaps: GapReport[] = [...rootGaps];
   let unknownSpellId = false;
+  let tooManySpellcastingSources = false;
+  let pactSlotsNeeded = false;
   let unsupportedEffectShape: string | null = null;
   const mapped: Array<{
     readonly member: ExternalPartyPackMember;
@@ -1046,7 +1111,7 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
       readonly level: z.infer<typeof spellSlotLevelSchema>;
       readonly maximum: number;
     }[];
-    readonly spellcasting: LoadedPartySpellcasting | null;
+    readonly spellcasting: readonly LoadedPartySpellcastingSource[];
   }> = [];
 
   for (const [index, memberValue] of header.data.members.entries()) {
@@ -1061,6 +1126,14 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
       : entryFallback;
     const memberFields = header.data.schemaVersion === 1 ? V1_MEMBER_FIELDS : V2_MEMBER_FIELDS;
     gaps.push(...unexpectedFieldGaps(memberInput, memberFields, entry, ['members', index]));
+    if (header.data.schemaVersion === 2 && Object.hasOwn(memberInput, 'pactSpellSlots')) {
+      pactSlotsNeeded = true;
+      gaps.push(issueGap(
+        entry,
+        ['members', index, 'pactSpellSlots'],
+        'capability_not_implemented',
+      ));
+    }
     const core = header.data.schemaVersion === 1
       ? v1MemberCoreSchema.safeParse(parsedV1Core(memberInput, entry, index, gaps))
       : v2MemberCoreSchema.safeParse(parsedBase(memberInput, entry, index, gaps));
@@ -1128,14 +1201,10 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
       )));
     }
 
-    let preparedSpellIds: string[] = [];
-    let knownSpellIds: string[] = [];
-    let loadedSpellcasting: LoadedPartySpellcasting | null = null;
-    let spellReferences: readonly {
-      readonly value: unknown;
-      readonly path: readonly PropertyKey[];
-    }[] = [];
-    let parsedSpellcasting: z.infer<typeof spellcastingInputSchema> | null = null;
+    let loadedSpellcasting: LoadedPartySpellcastingSource[] = [];
+    let parsedSpellcasting: z.infer<typeof spellcastingSourceInputSchema>[] = [];
+    const spells: SpellManifestRow[] = [];
+    const spellIds: string[] = [];
     if (header.data.schemaVersion === 1) {
       const spellInput = Array.isArray(memberInput.spellSelections) ? memberInput.spellSelections : [];
       if (!Array.isArray(memberInput.spellSelections)) {
@@ -1144,94 +1213,196 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
       if (spellInput.length > SPELL_MANIFEST.length) {
         gaps.push(issueGap(entry, ['members', index, 'spellSelections'], 'value_not_in_engine_vocabulary'));
       }
-      spellReferences = spellInput.slice(0, SPELL_MANIFEST.length).map((spell, spellIndex) => ({
-        value: spell,
-        path: ['members', index, 'spellSelections', spellIndex],
-      }));
+      for (const [spellIndex, spellValue] of spellInput.slice(0, SPELL_MANIFEST.length).entries()) {
+        const spell = typeof spellValue === 'string'
+          ? SPELL_MANIFEST.find((candidate) => candidate.id === spellValue)
+          : undefined;
+        if (spell === undefined) {
+          if (typeof spellValue === 'string') unknownSpellId = true;
+          gaps.push(issueGap(
+            entry,
+            ['members', index, 'spellSelections', spellIndex],
+            'value_not_in_engine_vocabulary',
+          ));
+        } else if (spell.status !== 'implemented') {
+          gaps.push(issueGap(
+            entry,
+            ['members', index, 'spellSelections', spellIndex],
+            'manifest_spell_not_implemented',
+          ));
+        } else if (spellIds.includes(spell.id)) {
+          gaps.push(issueGap(
+            entry,
+            ['members', index, 'spellSelections', spellIndex],
+            'value_not_in_engine_vocabulary',
+          ));
+        } else {
+          spellIds.push(spell.id);
+          spells.push(spell);
+        }
+      }
     } else if (Object.hasOwn(memberInput, 'spellcasting')) {
-      const parsed = spellcastingInputSchema.safeParse(sanitizedSpellcasting(
-        memberInput.spellcasting,
-        entry,
-        index,
-        gaps,
-      ));
-      if (!parsed.success) {
-        gaps.push(...parsed.error.issues.map((issue) => issueGap(
+      const legacy = !Array.isArray(memberInput.spellcasting);
+      const sourceInputs: readonly unknown[] = Array.isArray(memberInput.spellcasting)
+        ? memberInput.spellcasting
+        : [memberInput.spellcasting];
+      if (sourceInputs.length > 4) {
+        tooManySpellcastingSources = true;
+        gaps.push(issueGap(
           entry,
-          ['members', index, 'spellcasting', ...issue.path],
-          issue.code === 'unrecognized_keys'
-            ? 'field_not_in_engine_vocabulary'
-            : 'value_not_in_engine_vocabulary',
-        )));
+          ['members', index, 'spellcasting'],
+          'value_not_in_engine_vocabulary',
+        ));
         continue;
       }
-      parsedSpellcasting = parsed.data;
-      spellReferences = [
-        ...parsed.data.preparedSpellIds.map((spell, spellIndex) => ({
-          value: spell,
-          path: ['members', index, 'spellcasting', 'preparedSpellIds', spellIndex],
-        })),
-        ...parsed.data.knownSpellIds.map((spell, spellIndex) => ({
-          value: spell,
-          path: ['members', index, 'spellcasting', 'knownSpellIds', spellIndex],
-        })),
-      ];
-      spellSlots = parsed.data.spellSlots.filter((capacity, capacityIndex, capacities) => {
-        const first = capacities.findIndex((candidate) => candidate.level === capacity.level);
-        if (first === capacityIndex) return true;
-        gaps.push(issueGap(
-          entry,
-          ['members', index, 'spellcasting', 'spellSlots', capacityIndex, 'level'],
-          'value_not_in_engine_vocabulary',
-        ));
-        return false;
-      }).map((capacity) => ({ level: capacity.level, maximum: capacity.count }));
-    }
-    const spells: SpellManifestRow[] = [];
-    const spellIds: string[] = [];
-    for (const reference of spellReferences) {
-      const spellValue = reference.value;
-      const spell = typeof spellValue === 'string'
-        ? SPELL_MANIFEST.find((candidate) => candidate.id === spellValue)
-        : undefined;
-      if (spell === undefined) {
-        if (typeof spellValue === 'string') unknownSpellId = true;
-        gaps.push(issueGap(entry, reference.path, 'value_not_in_engine_vocabulary'));
-      } else if (spell.status !== 'implemented') {
-        gaps.push(issueGap(entry, reference.path, 'manifest_spell_not_implemented'));
-      } else if (spellIds.includes(spell.id)) {
-        gaps.push(issueGap(entry, reference.path, 'value_not_in_engine_vocabulary'));
-      } else {
-        spellIds.push(spell.id);
-        spells.push(spell);
+      if (sourceInputs.length === 0) {
+        gaps.push(issueGap(entry, ['members', index, 'spellcasting']));
+        continue;
       }
-    }
-    if (parsedSpellcasting !== null) {
-      preparedSpellIds = parsedSpellcasting.preparedSpellIds.filter((id, preparedIndex, ids) =>
-        spellIds.includes(id) && ids.indexOf(id) === preparedIndex);
-      knownSpellIds = parsedSpellcasting.knownSpellIds.filter((id, knownIndex, ids) =>
-        spellIds.includes(id) && ids.indexOf(id) === knownIndex);
-      const preparedSet = new Set(preparedSpellIds);
-      knownSpellIds = knownSpellIds.filter((id, knownIndex) => {
-        if (!preparedSet.has(id)) return true;
-        gaps.push(issueGap(
-          entry,
-          ['members', index, 'spellcasting', 'knownSpellIds', knownIndex],
-          'value_not_in_engine_vocabulary',
+
+      if (legacy) {
+        const parsed = legacySpellcastingInputSchema.safeParse(sanitizedSpellcasting(
+          sourceInputs[0], entry, index, null, true, gaps,
         ));
-        return false;
-      });
-      const preparedSpells = preparedSpellIds.flatMap((id) =>
-        spells.filter((spell) => spell.id === id));
-      const knownSpells = knownSpellIds.flatMap((id) =>
-        spells.filter((spell) => spell.id === id));
-      const resourceSpellUses = (parsedSpellcasting.resourceSpellUses ?? []).filter(
-        (use, useIndex, uses) => {
-          if (!spellIds.includes(use.spellId)) {
+        if (!parsed.success) {
+          gaps.push(...parsed.error.issues.map((issue) => issueGap(
+            entry,
+            ['members', index, 'spellcasting', ...issue.path],
+            issue.code === 'unrecognized_keys'
+              ? 'field_not_in_engine_vocabulary'
+              : 'value_not_in_engine_vocabulary',
+          )));
+          continue;
+        }
+        parsedSpellcasting = [{
+          ability: parsed.data.ability,
+          spellSaveDc: parsed.data.spellSaveDc,
+          spellAttackBonus: parsed.data.spellAttackBonus,
+          preparedSpellIds: parsed.data.preparedSpellIds,
+          knownSpellIds: parsed.data.knownSpellIds,
+          ...(parsed.data.resourceSpellUses === undefined
+            ? {}
+            : { resourceSpellUses: parsed.data.resourceSpellUses }),
+        }];
+        spellSlots = parsed.data.spellSlots.filter((capacity, capacityIndex, capacities) => {
+          const first = capacities.findIndex((candidate) => candidate.level === capacity.level);
+          if (first === capacityIndex) return true;
+          gaps.push(issueGap(
+            entry,
+            ['members', index, 'spellcasting', 'spellSlots', capacityIndex, 'level'],
+            'value_not_in_engine_vocabulary',
+          ));
+          return false;
+        }).map((capacity) => ({ level: capacity.level, maximum: capacity.count }));
+      } else {
+        const sharedSlots = z.array(v2SpellSlotSchema).max(9).safeParse(sanitizedArrayRecords(
+          memberInput.sharedSpellSlots,
+          V2_SPELL_SLOT_FIELDS,
+          entry,
+          ['members', index, 'sharedSpellSlots'],
+          gaps,
+        ));
+        if (!sharedSlots.success) {
+          gaps.push(...sharedSlots.error.issues.map((issue) => issueGap(
+            entry,
+            ['members', index, 'sharedSpellSlots', ...issue.path],
+            issue.code === 'unrecognized_keys'
+              ? 'field_not_in_engine_vocabulary'
+              : 'value_not_in_engine_vocabulary',
+          )));
+          continue;
+        }
+        spellSlots = sharedSlots.data.filter((capacity, capacityIndex, capacities) => {
+          const first = capacities.findIndex((candidate) => candidate.level === capacity.level);
+          if (first === capacityIndex) return true;
+          gaps.push(issueGap(
+            entry,
+            ['members', index, 'sharedSpellSlots', capacityIndex, 'level'],
+            'value_not_in_engine_vocabulary',
+          ));
+          return false;
+        }).map((capacity) => ({ level: capacity.level, maximum: capacity.count }));
+
+        for (const [sourceIndex, sourceInput] of sourceInputs.entries()) {
+          const parsed = spellcastingSourceInputSchema.safeParse(sanitizedSpellcasting(
+            sourceInput, entry, index, sourceIndex, false, gaps,
+          ));
+          if (!parsed.success) {
+            gaps.push(...parsed.error.issues.map((issue) => issueGap(
+              entry,
+              ['members', index, 'spellcasting', sourceIndex, ...issue.path],
+              issue.code === 'unrecognized_keys'
+                ? 'field_not_in_engine_vocabulary'
+                : 'value_not_in_engine_vocabulary',
+            )));
+          } else {
+            parsedSpellcasting.push(parsed.data);
+          }
+        }
+        if (parsedSpellcasting.length !== sourceInputs.length) continue;
+      }
+    } else if (Object.hasOwn(memberInput, 'sharedSpellSlots')) {
+      gaps.push(issueGap(
+        entry,
+        ['members', index, 'sharedSpellSlots'],
+        'value_not_in_engine_vocabulary',
+      ));
+    }
+
+    if (header.data.schemaVersion === 2) {
+      const normalizedSources: z.infer<typeof spellcastingSourceInputSchema>[] = [];
+      for (const [sourceIndex, source] of parsedSpellcasting.entries()) {
+        const sourcePrefix: readonly PropertyKey[] = Array.isArray(memberInput.spellcasting)
+          ? ['members', index, 'spellcasting', sourceIndex]
+          : ['members', index, 'spellcasting'];
+        const sourceSpellIds: string[] = [];
+        const references = [
+          ...source.preparedSpellIds.map((value, spellIndex) => ({
+            value,
+            path: [...sourcePrefix, 'preparedSpellIds', spellIndex],
+          })),
+          ...source.knownSpellIds.map((value, spellIndex) => ({
+            value,
+            path: [...sourcePrefix, 'knownSpellIds', spellIndex],
+          })),
+        ];
+        for (const reference of references) {
+          const spell = SPELL_MANIFEST.find((candidate) => candidate.id === reference.value);
+          if (spell === undefined) {
+            unknownSpellId = true;
+            gaps.push(issueGap(entry, reference.path, 'value_not_in_engine_vocabulary'));
+          } else if (spell.status !== 'implemented') {
+            gaps.push(issueGap(entry, reference.path, 'manifest_spell_not_implemented'));
+          } else if (sourceSpellIds.includes(spell.id)) {
+            gaps.push(issueGap(entry, reference.path, 'value_not_in_engine_vocabulary'));
+          } else {
+            sourceSpellIds.push(spell.id);
+            if (!spellIds.includes(spell.id)) {
+              spellIds.push(spell.id);
+              spells.push(spell);
+            }
+          }
+        }
+
+        const preparedSpellIds = source.preparedSpellIds.filter((id, preparedIndex, ids) =>
+          sourceSpellIds.includes(id) && ids.indexOf(id) === preparedIndex);
+        const preparedSet = new Set(preparedSpellIds);
+        const knownSpellIds = source.knownSpellIds.filter((id, knownIndex, ids) => {
+          if (!sourceSpellIds.includes(id) || ids.indexOf(id) !== knownIndex) return false;
+          if (!preparedSet.has(id)) return true;
+          gaps.push(issueGap(
+            entry,
+            [...sourcePrefix, 'knownSpellIds', knownIndex],
+            'value_not_in_engine_vocabulary',
+          ));
+          return false;
+        });
+        const resourceSpellUses = (source.resourceSpellUses ?? []).filter((use, useIndex, uses) => {
+          if (!sourceSpellIds.includes(use.spellId)) {
             if (!SPELL_MANIFEST.some((spell) => spell.id === use.spellId)) unknownSpellId = true;
             gaps.push(issueGap(
               entry,
-              ['members', index, 'spellcasting', 'resourceSpellUses', useIndex, 'spellId'],
+              [...sourcePrefix, 'resourceSpellUses', useIndex, 'spellId'],
               'value_not_in_engine_vocabulary',
             ));
             return false;
@@ -1241,34 +1412,35 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           if (first === useIndex) return true;
           gaps.push(issueGap(
             entry,
-            ['members', index, 'spellcasting', 'resourceSpellUses', useIndex],
+            [...sourcePrefix, 'resourceSpellUses', useIndex],
             'value_not_in_engine_vocabulary',
           ));
           return false;
-        },
-      );
-      parsedSpellcasting = {
-        ...parsedSpellcasting,
-        ...(parsedSpellcasting.resourceSpellUses === undefined ? {} : { resourceSpellUses }),
-      };
-      loadedSpellcasting = {
-        ability: parsedSpellcasting.ability,
-        spellSaveDc: parsedSpellcasting.spellSaveDc,
-        spellAttackBonus: parsedSpellcasting.spellAttackBonus,
-        spellcastingModifier: Math.floor((core.data.abilities[parsedSpellcasting.ability] - 10) / 2),
-        casterLevel: totalLevel,
-        preparedSpells,
-        knownSpells,
-        spellSlots: spellSlots.map((capacity) => ({
-          level: capacity.level,
-          maximum: capacity.maximum,
-          recharge: 'long_rest',
-        })),
-        resourceSpellUses: resourceSpellUses.map((use) => ({
-          spellId: use.spellId,
-          resourcePoolId: limitedResourcePoolId(use.resourcePoolId),
-        })),
-      };
+        });
+        const normalized = {
+          ...source,
+          preparedSpellIds,
+          knownSpellIds,
+          ...(source.resourceSpellUses === undefined ? {} : { resourceSpellUses }),
+        };
+        normalizedSources.push(normalized);
+        loadedSpellcasting.push({
+          ability: source.ability,
+          spellSaveDc: source.spellSaveDc,
+          spellAttackBonus: source.spellAttackBonus,
+          spellcastingModifier: Math.floor((core.data.abilities[source.ability] - 10) / 2),
+          casterLevel: totalLevel,
+          preparedSpells: preparedSpellIds.flatMap((id) =>
+            spells.filter((spell) => spell.id === id)),
+          knownSpells: knownSpellIds.flatMap((id) =>
+            spells.filter((spell) => spell.id === id)),
+          resourceSpellUses: resourceSpellUses.map((use) => ({
+            spellId: use.spellId,
+            resourcePoolId: limitedResourcePoolId(use.resourcePoolId),
+          })),
+        });
+      }
+      parsedSpellcasting = normalizedSources;
     }
 
     const conditionsInput = Array.isArray(memberInput.startingConditions) ? memberInput.startingConditions : [];
@@ -1435,28 +1607,34 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
         }
         return valid;
       });
-      if (parsedSpellcasting !== null && loadedSpellcasting !== null) {
-        const resourceSpellUses = (parsedSpellcasting.resourceSpellUses ?? []).filter((use, useIndex) => {
+      parsedSpellcasting = parsedSpellcasting.map((source, sourceIndex) => {
+        const sourcePrefix: readonly PropertyKey[] = Array.isArray(memberInput.spellcasting)
+          ? ['members', index, 'spellcasting', sourceIndex]
+          : ['members', index, 'spellcasting'];
+        const resourceSpellUses = (source.resourceSpellUses ?? []).filter((use, useIndex) => {
           if (resourceIds.has(use.resourcePoolId)) return true;
           gaps.push(issueGap(
             entry,
-            ['members', index, 'spellcasting', 'resourceSpellUses', useIndex, 'resourcePoolId'],
+            [...sourcePrefix, 'resourceSpellUses', useIndex, 'resourcePoolId'],
             'value_not_in_engine_vocabulary',
           ));
           return false;
         });
-        parsedSpellcasting = {
-          ...parsedSpellcasting,
-          ...(parsedSpellcasting.resourceSpellUses === undefined ? {} : { resourceSpellUses }),
+        const loadedSource = loadedSpellcasting[sourceIndex];
+        if (loadedSource !== undefined) {
+          loadedSpellcasting[sourceIndex] = {
+            ...loadedSource,
+            resourceSpellUses: resourceSpellUses.map((use) => ({
+              spellId: use.spellId,
+              resourcePoolId: limitedResourcePoolId(use.resourcePoolId),
+            })),
+          };
+        }
+        return {
+          ...source,
+          ...(source.resourceSpellUses === undefined ? {} : { resourceSpellUses }),
         };
-        loadedSpellcasting = {
-          ...loadedSpellcasting,
-          resourceSpellUses: resourceSpellUses.map((use) => ({
-            spellId: use.spellId,
-            resourcePoolId: limitedResourcePoolId(use.resourcePoolId),
-          })),
-        };
-      }
+      });
     }
 
     const reconstructed: ExternalPartyPackMember = header.data.schemaVersion === 1
@@ -1474,19 +1652,15 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           ...(Object.hasOwn(memberInput, 'effects') ? { effects } : {}),
           ...(Object.hasOwn(memberInput, 'resources') ? { resources } : {}),
           ...(passives === undefined ? {} : { passives }),
-          ...(parsedSpellcasting === null
+          ...(parsedSpellcasting.length === 0
             ? {}
             : {
-                spellcasting: {
-                  ...parsedSpellcasting,
-                  preparedSpellIds,
-                  knownSpellIds,
-                  spellSlots: spellSlots.map((capacity) => ({
-                    level: capacity.level,
-                    count: capacity.maximum,
-                    recharge: 'long_rest' as const,
-                  })),
-                },
+                spellcasting: parsedSpellcasting,
+                sharedSpellSlots: spellSlots.map((capacity) => ({
+                  level: capacity.level,
+                  count: capacity.maximum,
+                  recharge: 'long_rest' as const,
+                })),
               }),
         });
     mapped.push({
@@ -1510,6 +1684,8 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
 
   const allGaps = deduplicateGapReports(gaps);
   if (unknownSpellId) return refusal('unknown_spell_id', allGaps);
+  if (tooManySpellcastingSources) return refusal('too_many_spellcasting_sources', allGaps);
+  if (pactSlotsNeeded) return refusal('pact_slots_unmodelled', allGaps);
   if (unsupportedEffectShape !== null) {
     return refusal('unsupported_effect_shape', allGaps, unsupportedEffectShape);
   }

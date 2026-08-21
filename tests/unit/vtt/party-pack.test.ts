@@ -79,6 +79,20 @@ function pack(count = 3, allowPartial = false): ExternalPartyPackV2 {
   }) as ExternalPartyPackV2;
 }
 
+function objectSpellcasting(member: ExternalPartyPackV2['members'][number]) {
+  const spellcasting = member.spellcasting;
+  if (spellcasting === undefined || Array.isArray(spellcasting)) {
+    throw new TypeError('Expected the legacy object-form spellcasting fixture.');
+  }
+  return spellcasting;
+}
+
+function spellcastingSources(member: ExternalPartyPackV2['members'][number]) {
+  const spellcasting = member.spellcasting;
+  if (spellcasting === undefined) return [];
+  return Array.isArray(spellcasting) ? spellcasting : [spellcasting];
+}
+
 function v1Pack(): ExternalPartyPackV1 {
   return externalPartyPackSchema.parse({
     schemaVersion: 1,
@@ -106,7 +120,7 @@ function effectPack(): ExternalPartyPackV2 {
     resourcePoolId: 'resource:precise-strikes',
     damage: [{ damageTypeId: 'Force', count: 1, sides: 6, modifier: 0 }],
   }];
-  candidate.members[0]!.spellcasting!.resourceSpellUses = [{
+  objectSpellcasting(candidate.members[0]!).resourceSpellUses = [{
     spellId: 'magic-missile',
     resourcePoolId: 'resource:precise-strikes',
   }];
@@ -134,8 +148,8 @@ describe('external party-pack boundary', () => {
         );
         expect(result.party.members.flatMap((entry) => entry.spells.map((spell) => spell.id)))
           .toEqual(candidate.members.flatMap((entry) => [
-            ...(entry.spellcasting?.preparedSpellIds ?? []),
-            ...(entry.spellcasting?.knownSpellIds ?? []),
+            ...spellcastingSources(entry).flatMap((source) => source.preparedSpellIds),
+            ...spellcastingSources(entry).flatMap((source) => source.knownSpellIds),
           ]));
       }
     }
@@ -179,14 +193,16 @@ describe('external party-pack boundary', () => {
     if (result.status !== 'loaded') throw new Error('Valid v2 caster pack was refused.');
     const caster = result.party.members[0]!;
     const target = result.party.members[1]!;
-    expect(caster.spellcasting).toMatchObject({
+    expect(caster.spellcasting[0]).toMatchObject({
       ability: 'intelligence',
       spellSaveDc: 15,
       spellAttackBonus: 7,
       spellcastingModifier: 3,
       casterLevel: 7,
-      spellSlots: [{ level: 1, maximum: 4, recharge: 'long_rest' }],
     });
+    expect(caster.sharedSpellSlots).toEqual([
+      { level: 1, maximum: 4, recharge: 'long_rest' },
+    ]);
     let state = createEncounter({
       bounds: { columns: 4, rows: 3 },
       combatants: [caster.profile, target.profile],
@@ -224,6 +240,154 @@ describe('external party-pack boundary', () => {
       weaponAttack: null,
       selectedOption: null,
     })).toThrow(expect.objectContaining({ reason: 'spell_not_referenced' }));
+  });
+
+  it('wrong_source_dc uses each prepared spell source and per_source_slots share one member pool', () => {
+    const candidate = structuredClone(pack());
+    const casterInput = candidate.members[0]!;
+    casterInput.classes = [
+      { classId: 'Wizard', level: 3 },
+      { classId: 'Cleric', level: 4 },
+    ];
+    casterInput.spellcasting = [
+      {
+        ability: 'intelligence',
+        spellSaveDc: 15,
+        spellAttackBonus: 7,
+        preparedSpellIds: ['inflict-wounds'],
+        knownSpellIds: [],
+      },
+      {
+        ability: 'wisdom',
+        spellSaveDc: 13,
+        spellAttackBonus: 5,
+        preparedSpellIds: ['charm-person'],
+        knownSpellIds: [],
+      },
+    ];
+    casterInput.sharedSpellSlots = [{ level: 1, count: 2, recharge: 'long_rest' }];
+
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Two-source caster pack was refused.');
+    const caster = loaded.party.members[0]!;
+    const target = loaded.party.members[1]!;
+    expect(caster.spellcasting.map((source) => [source.ability, source.spellSaveDc])).toEqual([
+      ['intelligence', 15],
+      ['wisdom', 13],
+    ]);
+    let state = createEncounter({
+      bounds: { columns: 4, rows: 3 },
+      combatants: [caster.profile, target.profile],
+      tokens: [
+        combatToken(caster.profile, { column: 0, row: 1 }),
+        combatToken(target.profile, { column: 1, row: 1 }),
+      ],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+
+    const first = reduceEncounter(state, loadedPartySpellCastCommand(caster, 'inflict-wounds', {
+      slotLevel: 1,
+      castAsRitual: false,
+      targets: [target.profile.id],
+      area: null,
+      weaponAttack: null,
+      selectedOption: null,
+    }), () => 0.5);
+    expect(first.events).toContainEqual(expect.objectContaining({
+      type: 'save_resolved',
+      save: expect.objectContaining({ outcome: 'failure', total: 14 }),
+    }));
+    expect(first.state.combatants[0]?.spellSlots[0]?.remaining).toBe(1);
+
+    state = reduceEncounter(
+      first.state,
+      { type: 'end_turn', actor: caster.profile.id },
+      () => 0.5,
+    ).state;
+    state = reduceEncounter(
+      state,
+      { type: 'end_turn', actor: target.profile.id },
+      () => 0.5,
+    ).state;
+    const second = reduceEncounter(state, loadedPartySpellCastCommand(caster, 'charm-person', {
+      slotLevel: 1,
+      castAsRitual: false,
+      targets: [target.profile.id],
+      area: null,
+      weaponAttack: null,
+      selectedOption: null,
+    }), () => 0.6);
+    expect(second.events).toContainEqual(expect.objectContaining({
+      type: 'save_resolved',
+      save: expect.objectContaining({ outcome: 'success', total: 13 }),
+    }));
+    expect(second.state.combatants[0]?.spellSlots).toEqual([{
+      level: 1,
+      maximum: 2,
+      remaining: 0,
+    }]);
+  });
+
+  it('object_form_rejected accepts legacy object bytes and normalizes them to one source', () => {
+    const candidate = pack();
+    const result = loadExternalPartyPackBytes(JSON.stringify(candidate));
+
+    expect(result.status).toBe('loaded');
+    if (result.status !== 'loaded') throw new Error('Object-form v2 caster pack was refused.');
+    const source = result.party.members[0]?.spellcasting[0];
+    expect(result.party.members[0]?.spellcasting).toHaveLength(1);
+    expect(source).toMatchObject({
+      ability: 'intelligence',
+      spellSaveDc: 15,
+      spellAttackBonus: 7,
+      preparedSpells: [{ id: 'magic-missile' }],
+    });
+    expect(result.party.pack.schemaVersion).toBe(2);
+    if (result.party.pack.schemaVersion !== 2) throw new Error('V2 pack changed schema version.');
+    const normalized = result.party.pack.members[0]?.spellcasting;
+    expect(Array.isArray(normalized)).toBe(true);
+    expect(result.party.pack.members[0]).toMatchObject({
+      sharedSpellSlots: [{ level: 1, count: 4, recharge: 'long_rest' }],
+    });
+  });
+
+  it('refuses more than four spellcasting sources with a typed reason', () => {
+    const candidate = structuredClone(pack());
+    const member = candidate.members[0]!;
+    const source = objectSpellcasting(member);
+    member.spellcasting = Array.from({ length: 5 }, () => ({
+      ability: source.ability,
+      spellSaveDc: source.spellSaveDc,
+      spellAttackBonus: source.spellAttackBonus,
+      preparedSpellIds: source.preparedSpellIds,
+      knownSpellIds: source.knownSpellIds,
+    }));
+    member.sharedSpellSlots = [{ level: 1, count: 4, recharge: 'long_rest' }];
+
+    expect(loadExternalPartyPack(candidate)).toMatchObject({
+      status: 'refused',
+      refusal: { reason: 'too_many_spellcasting_sources' },
+      gaps: [{ featurePath: 'members.0.spellcasting' }],
+    });
+  });
+
+  it('refuses pact-slot need with the typed unmodelled-boundary reason', () => {
+    const candidate = structuredClone(pack());
+    candidate.members[0]!.pactSpellSlots = [{
+      level: 2,
+      count: 2,
+      recharge: 'short_rest',
+    }];
+
+    expect(loadExternalPartyPack(candidate)).toMatchObject({
+      status: 'refused',
+      refusal: { reason: 'pact_slots_unmodelled' },
+      gaps: [{
+        featurePath: 'members.0.pactSpellSlots',
+        engineRefusalReason: 'capability_not_implemented',
+      }],
+    });
   });
 
   it('pack_spell_save_dc_boundary drives failure below DC and success at DC through encounter resolution', () => {
@@ -514,7 +678,7 @@ describe('external party-pack boundary', () => {
 
   it('unknown_spell_id_dropped refuses an unknown v2 spell id even when partial loading is allowed', () => {
     const candidate = structuredClone(pack(3, true));
-    candidate.members[0]!.spellcasting!.preparedSpellIds = ['not-in-the-175-spell-manifest'];
+    objectSpellcasting(candidate.members[0]!).preparedSpellIds = ['not-in-the-175-spell-manifest'];
 
     expect(loadExternalPartyPack(candidate)).toMatchObject({
       status: 'refused',
@@ -530,7 +694,7 @@ describe('external party-pack boundary', () => {
     expect(result.status).toBe('loaded');
     if (result.status !== 'loaded') throw new Error('Legacy v1 pack was refused.');
     expect(result.party.pack).toEqual(legacy);
-    expect(result.party.members[0]?.spellcasting).toBeNull();
+    expect(result.party.members[0]?.spellcasting).toEqual([]);
     expect(result.party.members[0]?.profile.rules.spellSlots).toEqual([{ level: 1, maximum: 4 }]);
     expect(result.party.members[0]?.spells.map((spell) => spell.id)).toEqual(['magic-missile']);
   });
@@ -618,6 +782,20 @@ describe('external party-pack boundary', () => {
         { properties: { schemaVersion: { const: 1 } } },
         { properties: { schemaVersion: { const: 2 } } },
       ],
+      $defs: {
+        memberV2: {
+          properties: {
+            spellcasting: {
+              oneOf: [
+                { $ref: '#/$defs/legacySpellcasting' },
+                { type: 'array', minItems: 1, maxItems: 4 },
+              ],
+            },
+            sharedSpellSlots: { type: 'array', maxItems: 9 },
+            pactSpellSlots: { type: 'array', maxItems: 9 },
+          },
+        },
+      },
     });
   });
 });

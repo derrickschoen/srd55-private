@@ -124,7 +124,20 @@
         "resourcePoolId": { "type": "string", "pattern": "^resource:[a-z0-9][a-z0-9-]{0,79}$" }
       }
     },
-    "spellcasting": {
+    "spellcastingSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ability", "spellSaveDc", "spellAttackBonus", "preparedSpellIds", "knownSpellIds"],
+      "properties": {
+        "ability": { "enum": ["strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"] },
+        "spellSaveDc": { "type": "integer", "minimum": 1, "maximum": 50 },
+        "spellAttackBonus": { "type": "integer", "minimum": -30, "maximum": 30 },
+        "preparedSpellIds": { "type": "array", "maxItems": 175, "items": { "type": "string" } },
+        "knownSpellIds": { "type": "array", "maxItems": 175, "items": { "type": "string" } },
+        "resourceSpellUses": { "type": "array", "maxItems": 175, "items": { "$ref": "#/$defs/resourceSpellUse" } }
+      }
+    },
+    "legacySpellcasting": {
       "type": "object",
       "additionalProperties": false,
       "required": ["ability", "spellSaveDc", "spellAttackBonus", "preparedSpellIds", "knownSpellIds", "spellSlots"],
@@ -136,6 +149,16 @@
         "knownSpellIds": { "type": "array", "maxItems": 175, "items": { "type": "string" } },
         "spellSlots": { "type": "array", "maxItems": 9, "items": { "$ref": "#/$defs/v2SpellSlot" } },
         "resourceSpellUses": { "type": "array", "maxItems": 175, "items": { "$ref": "#/$defs/resourceSpellUse" } }
+      }
+    },
+    "pactSpellSlot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "count", "recharge"],
+      "properties": {
+        "level": { "type": "integer", "minimum": 1, "maximum": 9 },
+        "count": { "type": "integer", "minimum": 1, "maximum": 99 },
+        "recharge": { "const": "short_rest" }
       }
     },
     "startingCondition": {
@@ -359,6 +382,15 @@
     "memberV2": {
       "type": "object",
       "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "required": ["spellcasting"],
+            "properties": { "spellcasting": { "type": "array" } }
+          },
+          "then": { "required": ["sharedSpellSlots"] }
+        }
+      ],
       "required": ["combatantId", "tokenId", "characterId", "classes", "abilities", "armorClass", "hitPointMaximum", "walkingSpeedFeet", "initiativeBonus", "savingThrowBonuses", "attacksPerAction", "attacks", "startingConditions"],
       "properties": {
         "combatantId": { "type": "string", "pattern": "^combatant:[a-z0-9][a-z0-9-]{0,79}$" },
@@ -373,7 +405,24 @@
         "savingThrowBonuses": { "$ref": "#/$defs/saveBonuses" },
         "attacksPerAction": { "type": "integer", "minimum": 1, "maximum": 20 },
         "attacks": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/attack" } },
-        "spellcasting": { "$ref": "#/$defs/spellcasting" },
+        "spellcasting": {
+          "oneOf": [
+            { "$ref": "#/$defs/legacySpellcasting" },
+            {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 4,
+              "items": { "$ref": "#/$defs/spellcastingSource" }
+            }
+          ]
+        },
+        "sharedSpellSlots": { "type": "array", "maxItems": 9, "items": { "$ref": "#/$defs/v2SpellSlot" } },
+        "pactSpellSlots": {
+          "description": "Declares a separately recharging Pact Magic pool. The current party-pack loader refuses this field with pact_slots_unmodelled instead of merging it into sharedSpellSlots.",
+          "type": "array",
+          "maxItems": 9,
+          "items": { "$ref": "#/$defs/pactSpellSlot" }
+        },
         "startingConditions": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/startingCondition" } },
         "effects": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/featureEffect" } },
         "resources": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/resourcePool" } },
