@@ -9,9 +9,9 @@ import type {
 } from './resolution';
 import type { EffectApplication, EffectPayload, TurnBoundary } from './effects';
 import type { SpellCastCommand } from './spells/types';
-import type { CombatantId, EncounterEffectId, Feet } from './values';
+import type { CombatantId, EncounterEffectId, Feet, LimitedResourcePoolId } from './values';
 
-export type ActionCost = 'action' | 'bonus_action' | 'none';
+export type ActionCost = 'action' | 'bonus_action' | 'reaction' | 'none';
 
 export type EncounterCommand =
   | { readonly type: 'roll_initiative' }
@@ -90,6 +90,15 @@ export type EncounterCommand =
       readonly actor: CombatantId;
       readonly effect: EffectApplication;
       readonly cost: ActionCost;
+      readonly resourcePoolId?: LimitedResourcePoolId;
+    }
+  | {
+      readonly type: 'grant_temporary_hit_points';
+      readonly actor: CombatantId;
+      readonly target: CombatantId;
+      readonly amount: number;
+      readonly cost: ActionCost;
+      readonly resourcePoolId?: LimitedResourcePoolId;
     }
   | {
       readonly type: 'end_concentration';
@@ -202,6 +211,13 @@ export type EncounterEvent =
       readonly type: 'resource_spent';
       readonly combatant: CombatantId;
       readonly resource: 'action' | 'bonus_action' | 'reaction';
+      readonly purpose: string;
+    })
+  | (SequencedEvent & {
+      readonly type: 'limited_resource_spent';
+      readonly combatant: CombatantId;
+      readonly resourcePoolId: LimitedResourcePoolId;
+      readonly remaining: number;
       readonly purpose: string;
     })
   | (SequencedEvent & {

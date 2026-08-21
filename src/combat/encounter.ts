@@ -53,6 +53,7 @@ import {
   type CombatantId,
   type DamageType,
   type EncounterEffectId,
+  type LimitedResourcePoolId,
 } from './values';
 
 export type LifeState = 'living' | 'dying' | 'stable' | 'dead';
@@ -84,12 +85,20 @@ export interface EncounterCombatantState {
   readonly turn: TurnResources;
   readonly temporaryHitPoints: number;
   readonly spellSlots: readonly SpellSlotState[];
+  readonly limitedResources?: readonly LimitedResourceState[];
 }
 
 export interface SpellSlotState {
   readonly level: number;
   readonly maximum: number;
   readonly remaining: number;
+}
+
+export interface LimitedResourceState {
+  readonly id: LimitedResourcePoolId;
+  readonly maximum: number;
+  readonly remaining: number;
+  readonly recharge: 'short_rest' | 'long_rest';
 }
 
 export interface InitiativeEntry {
@@ -261,11 +270,48 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
     }
   }
 
+  for (const profile of setup.combatants) {
+    const limitedResources = profile.rules.limitedResources ?? [];
+    assertUnique(limitedResources.map((pool) => pool.id), `Resource pool ids for ${profile.id}`);
+    for (const pool of limitedResources) {
+      if (!Number.isSafeInteger(pool.maximum) || pool.maximum < 1) {
+        throw new EncounterRuleError(`Resource pool ${pool.id} maximum must be a positive safe integer.`);
+      }
+    }
+    const resourceIds = new Set(limitedResources.map((pool) => pool.id));
+    for (const effect of profile.rules.featureEffects ?? []) {
+      if (effect.resourcePoolId !== null && !resourceIds.has(effect.resourcePoolId)) {
+        throw new EncounterRuleError(`Effect ${effect.id} references unknown resource pool ${effect.resourcePoolId}.`);
+      }
+    }
+  }
+
+  const initialEffects: EncounterEffect[] = [];
+  let nextEffectSequence = 1;
+  for (const profile of setup.combatants) {
+    for (const feature of profile.rules.featureEffects ?? []) {
+      if (feature.trigger !== 'always_on' || feature.payload.kind === 'temporary_hit_points') continue;
+      initialEffects.push({
+        id: encounterEffectId(`effect:${String(nextEffectSequence)}`),
+        source: profile.id,
+        targets: [profile.id],
+        createdRevision: 0,
+        duration: { kind: 'permanent' },
+        concentrationOwner: null,
+        stackingIdentity: effectStackingIdentity(`feature:${feature.id}`),
+        stacking: 'coexist',
+        repeatedSave: null,
+        payload: feature.payload,
+      });
+      nextEffectSequence += 1;
+    }
+  }
+
   return {
     config: { ...config },
     revision: 0,
     nextEventSequence: 1,
-    nextEffectSequence: 1,
+    nextEffectSequence,
     bounds: { ...setup.bounds },
     blockedCells: blockedCells.map((cell) => ({ ...cell })),
     foggedCells: foggedCells.map((cell) => ({ ...cell })),
@@ -276,17 +322,26 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
       life: 'living',
       deathSaves: null,
       turn: EMPTY_TURN,
-      temporaryHitPoints: 0,
+      temporaryHitPoints: Math.max(0, ...(profile.rules.featureEffects ?? [])
+        .filter((effect) => effect.trigger === 'always_on' && effect.payload.kind === 'temporary_hit_points')
+        .map((effect) => effect.payload.kind === 'temporary_hit_points' ? effect.payload.amount : 0)),
       spellSlots: validateSpellSlotCapacities(profile.rules.spellSlots).map(
         (slot) => ({ ...slot, remaining: slot.maximum }),
       ),
+      ...(profile.rules.limitedResources === undefined
+        ? {}
+        : {
+            limitedResources: profile.rules.limitedResources.map(
+              (pool) => ({ ...pool, remaining: pool.maximum }),
+            ),
+          }),
     })),
     tokens: setup.tokens.map((token) => ({ ...token, position: { ...token.position } })),
     initiative: [],
     activeCombatant: null,
     activeInitiativeIndex: null,
     round: 0,
-    effects: [],
+    effects: initialEffects,
     eventLog: [],
   };
 }
@@ -1019,7 +1074,7 @@ function spendAction(
 function spendCost(
   context: ReductionContext,
   actor: CombatantId,
-  cost: 'action' | 'bonus_action' | 'none',
+  cost: 'action' | 'bonus_action' | 'reaction' | 'none',
   purpose: string,
 ): void {
   switch (cost) {
@@ -1040,8 +1095,54 @@ function spendCost(
         turn: { ...subject.turn, bonusActionAvailable: false },
       });
       emit(context, { type: 'resource_spent', combatant: actor, resource: 'bonus_action', purpose });
+      return;
+    }
+    case 'reaction': {
+      const subject = combatant(context.state, actor);
+      if (subject.life !== 'living' || isIncapacitated(combatantConditions(context.state, actor))) {
+        throw new EncounterRuleError(`Combatant ${actor} cannot react.`);
+      }
+      if (!subject.turn.reactionAvailable) {
+        throw new EncounterRuleError(`Combatant ${actor} has no Reaction available.`);
+      }
+      context.state = replaceCombatant(context.state, {
+        ...subject,
+        turn: { ...subject.turn, reactionAvailable: false },
+      });
+      emit(context, { type: 'resource_spent', combatant: actor, resource: 'reaction', purpose });
+      return;
     }
   }
+}
+
+function spendLimitedResource(
+  context: ReductionContext,
+  actor: CombatantId,
+  resourcePoolId: LimitedResourcePoolId,
+  purpose: string,
+): void {
+  const subject = combatant(context.state, actor);
+  const limitedResources = subject.limitedResources ?? [];
+  const pool = limitedResources.find((candidate) => candidate.id === resourcePoolId);
+  if (pool === undefined) {
+    throw new EncounterRuleError(`Combatant ${actor} has no resource pool ${resourcePoolId}.`);
+  }
+  if (pool.remaining < 1) {
+    throw new EncounterRuleError(`Resource pool ${resourcePoolId} is empty.`);
+  }
+  const remaining = pool.remaining - 1;
+  context.state = replaceCombatant(context.state, {
+    ...subject,
+    limitedResources: limitedResources.map((candidate) =>
+      candidate.id === resourcePoolId ? { ...candidate, remaining } : candidate),
+  });
+  emit(context, {
+    type: 'limited_resource_spent',
+    combatant: actor,
+    resourcePoolId,
+    remaining,
+    purpose,
+  });
 }
 
 function beginAttack(context: ReductionContext, actor: CombatantId): void {
@@ -1708,8 +1809,23 @@ function processAttack(
           token(context.state, command.target).position,
         ) <= clause.feet,
     );
+    const triggeredRiders = (combatant(context.state, command.actor).profile.rules.featureEffects ?? []).filter(
+      (effect) =>
+        effect.payload.kind === 'damage_rider' &&
+        effect.payload.appliesTo === 'weapon_attack_by_target' &&
+        (effect.trigger === 'on_hit' ||
+          (effect.trigger === 'on_crit' && attack.outcome === 'critical')),
+    );
+    for (const rider of triggeredRiders) {
+      if (rider.resourcePoolId !== null) {
+        spendLimitedResource(context, command.actor, rider.resourcePoolId, `Effect ${rider.id}`);
+      }
+    }
+    const riderTerms = triggeredRiders.flatMap((effect) =>
+      effect.payload.kind === 'damage_rider' ? effect.payload.damage.terms : []);
     const request = {
       ...command.damage,
+      terms: [...command.damage.terms, ...riderTerms],
       critical: attack.outcome === 'critical' || criticalWithin,
       responses: targetDamageResponses(context.state, command.target, command.damage),
     };
@@ -1811,11 +1927,17 @@ function spendSpellSlot(
   command: SpellCastCommand,
 ): void {
   if (command.castAsRitual) {
+    if (command.resourcePoolId !== undefined) {
+      throw new EncounterRuleError('A ritual cast cannot spend a limited resource pool.');
+    }
     if (command.slotLevel !== null) throw new EncounterRuleError('A ritual cast does not expend a spell slot.');
     return;
   }
   if (definition.level === 0) {
     if (command.slotLevel !== null) throw new EncounterRuleError('Cantrips do not expend spell slots.');
+    if (command.resourcePoolId !== undefined) {
+      spendLimitedResource(context, command.actor, command.resourcePoolId, `Cast ${definition.name}`);
+    }
     return;
   }
   if (
@@ -1825,6 +1947,10 @@ function spendSpellSlot(
     command.slotLevel > 9
   ) {
     throw new EncounterRuleError(`${definition.name} requires a slot of level ${definition.level} or higher.`);
+  }
+  if (command.resourcePoolId !== undefined) {
+    spendLimitedResource(context, command.actor, command.resourcePoolId, `Cast ${definition.name}`);
+    return;
   }
   const subject = combatant(context.state, command.actor);
   const slot = subject.spellSlots.find((candidate) => candidate.level === command.slotLevel);
@@ -2331,6 +2457,25 @@ function applyHealing(
   });
 }
 
+function grantTemporaryHitPoints(
+  context: ReductionContext,
+  target: CombatantId,
+  amount: number,
+): void {
+  if (!Number.isSafeInteger(amount) || amount < 0) {
+    throw new EncounterRuleError('Temporary Hit Points must be a non-negative safe integer.');
+  }
+  const subject = combatant(context.state, target);
+  const after = Math.max(subject.temporaryHitPoints, amount);
+  context.state = replaceCombatant(context.state, { ...subject, temporaryHitPoints: after });
+  emit(context, {
+    type: 'temporary_hit_points_changed',
+    combatant: target,
+    before: subject.temporaryHitPoints,
+    after,
+  });
+}
+
 function pushAway(
   state: EncounterState,
   source: CombatantId,
@@ -2650,10 +2795,7 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
     }
     case 'temporary_hit_points': {
       const rolled = rollDice(context.rng, scaledDiceExpression(definition, operation.dice, command));
-      const subject = combatant(context.state, command.actor);
-      const after = Math.max(subject.temporaryHitPoints, rolled.total);
-      context.state = replaceCombatant(context.state, { ...subject, temporaryHitPoints: after });
-      emit(context, { type: 'temporary_hit_points_changed', combatant: command.actor, before: subject.temporaryHitPoints, after });
+      grantTemporaryHitPoints(context, command.actor, rolled.total);
       return;
     }
     case 'effect':
@@ -3205,9 +3347,25 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
       return;
     }
     case 'apply_effect':
-      assertActiveActor(context, command.actor);
+      if (command.cost !== 'reaction') assertActiveActor(context, command.actor);
       spendCost(context, command.actor, command.cost, 'Apply effect');
+      if (command.resourcePoolId !== undefined) {
+        spendLimitedResource(context, command.actor, command.resourcePoolId, 'Apply effect');
+      }
       applyEffect(context, command.actor, command.effect);
+      return;
+    case 'grant_temporary_hit_points':
+      if (command.cost !== 'reaction') assertActiveActor(context, command.actor);
+      spendCost(context, command.actor, command.cost, 'Grant temporary Hit Points');
+      if (command.resourcePoolId !== undefined) {
+        spendLimitedResource(
+          context,
+          command.actor,
+          command.resourcePoolId,
+          'Grant temporary Hit Points',
+        );
+      }
+      grantTemporaryHitPoints(context, command.target, command.amount);
       return;
     case 'end_concentration':
       assertActiveActor(context, command.actor);

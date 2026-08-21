@@ -76,6 +76,8 @@ function actionLabel(action: EncounterCommand): string {
       return 'Heal';
     case 'apply_effect':
       return 'Apply effect';
+    case 'grant_temporary_hit_points':
+      return 'Grant temporary Hit Points';
     case 'end_concentration':
       return 'End concentration';
     case 'adjudicate':

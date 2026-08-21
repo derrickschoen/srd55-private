@@ -115,6 +115,15 @@
         "recharge": { "const": "long_rest" }
       }
     },
+    "resourceSpellUse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["spellId", "resourcePoolId"],
+      "properties": {
+        "spellId": { "type": "string" },
+        "resourcePoolId": { "type": "string", "pattern": "^resource:[a-z0-9][a-z0-9-]{0,79}$" }
+      }
+    },
     "spellcasting": {
       "type": "object",
       "additionalProperties": false,
@@ -125,7 +134,8 @@
         "spellAttackBonus": { "type": "integer", "minimum": -30, "maximum": 30 },
         "preparedSpellIds": { "type": "array", "maxItems": 175, "items": { "type": "string" } },
         "knownSpellIds": { "type": "array", "maxItems": 175, "items": { "type": "string" } },
-        "spellSlots": { "type": "array", "maxItems": 9, "items": { "$ref": "#/$defs/v2SpellSlot" } }
+        "spellSlots": { "type": "array", "maxItems": 9, "items": { "$ref": "#/$defs/v2SpellSlot" } },
+        "resourceSpellUses": { "type": "array", "maxItems": 175, "items": { "$ref": "#/$defs/resourceSpellUse" } }
       }
     },
     "startingCondition": {
@@ -136,6 +146,191 @@
         "effectId": { "type": "string", "pattern": "^effect:[a-z0-9][a-z0-9:-]{0,119}$" },
         "conditionId": {
           "enum": ["Blinded", "Charmed", "Deafened", "Exhaustion", "Frightened", "Grappled", "Incapacitated", "Invisible", "Paralyzed", "Petrified", "Poisoned", "Prone", "Restrained", "Stunned", "Unconscious"]
+        }
+      }
+    },
+    "resourcePool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resourcePoolId", "maximum", "recharge"],
+      "properties": {
+        "resourcePoolId": { "type": "string", "pattern": "^resource:[a-z0-9][a-z0-9-]{0,79}$" },
+        "maximum": { "type": "integer", "minimum": 1, "maximum": 999 },
+        "recharge": { "enum": ["short_rest", "long_rest"] }
+      }
+    },
+    "featureEffect": {
+      "oneOf": [
+        { "$ref": "#/$defs/damageRiderEffect" },
+        { "$ref": "#/$defs/attackRollModifierEffect" },
+        { "$ref": "#/$defs/attackRollModeEffect" },
+        { "$ref": "#/$defs/armorClassModifierEffect" },
+        { "$ref": "#/$defs/savingThrowModifierEffect" },
+        { "$ref": "#/$defs/skillModifierEffect" },
+        { "$ref": "#/$defs/temporaryHitPointsEffect" },
+        { "$ref": "#/$defs/conditionApplicationEffect" },
+        { "$ref": "#/$defs/exhaustionApplicationEffect" },
+        { "$ref": "#/$defs/movementModifierEffect" }
+      ]
+    },
+    "damageRiderEffect": {
+      "type": "object", "additionalProperties": false,
+      "required": ["effectId", "kind", "trigger", "damage"],
+      "properties": {
+        "effectId": { "type": "string", "pattern": "^effect:[a-z0-9][a-z0-9:-]{0,119}$" },
+        "kind": { "const": "damage_rider" },
+        "trigger": { "enum": ["on_hit", "on_crit"] },
+        "resourcePoolId": { "type": "string", "pattern": "^resource:[a-z0-9][a-z0-9-]{0,79}$" },
+        "damage": { "type": "array", "minItems": 1, "maxItems": 20, "items": { "$ref": "#/$defs/damage" } }
+      }
+    },
+    "attackRollModifierEffect": {
+      "type": "object", "additionalProperties": false,
+      "required": ["effectId", "kind", "trigger", "count", "sides", "sign"],
+      "properties": {
+        "effectId": { "type": "string", "pattern": "^effect:[a-z0-9][a-z0-9:-]{0,119}$" },
+        "kind": { "const": "attack_roll_modifier" },
+        "trigger": { "enum": ["always_on", "action", "bonus_action", "reaction"] },
+        "resourcePoolId": { "type": "string", "pattern": "^resource:[a-z0-9][a-z0-9-]{0,79}$" },
+        "count": { "type": "integer", "minimum": 1, "maximum": 20 },
+        "sides": { "enum": [4, 6, 8, 10, 12, 20] },
+        "sign": { "enum": [-1, 1] }
+      }
+    },
+    "attackRollModeEffect": {
+      "type": "object", "additionalProperties": false,
+      "required": ["effectId", "kind", "trigger", "mode"],
+      "properties": {
+        "effectId": { "type": "string", "pattern": "^effect:[a-z0-9][a-z0-9:-]{0,119}$" },
+        "kind": { "const": "attack_roll_mode" },
+        "trigger": { "enum": ["action", "bonus_action", "reaction"] },
+        "resourcePoolId": { "type": "string", "pattern": "^resource:[a-z0-9][a-z0-9-]{0,79}$" },
+        "mode": { "enum": ["advantage", "disadvantage"] }
+      }
+    },
+    "armorClassModifierEffect": {
+      "type": "object", "additionalProperties": false,
+      "required": ["effectId", "kind", "trigger", "amount"],
+      "properties": {
+        "effectId": { "type": "string", "pattern": "^effect:[a-z0-9][a-z0-9:-]{0,119}$" },
+        "kind": { "const": "armor_class_modifier" },
+        "trigger": { "enum": ["always_on", "action", "bonus_action", "reaction"] },
+        "resourcePoolId": { "type": "string", "pattern": "^resource:[a-z0-9][a-z0-9-]{0,79}$" },
+        "amount": { "type": "integer", "minimum": -30, "maximum": 30 }
+      }
+    },
+    "savingThrowModifierEffect": {
+      "type": "object", "additionalProperties": false,
+      "required": ["effectId", "kind", "trigger", "count", "sides", "sign"],
+      "properties": {
+        "effectId": { "type": "string", "pattern": "^effect:[a-z0-9][a-z0-9:-]{0,119}$" },
+        "kind": { "const": "saving_throw_modifier" },
+        "trigger": { "enum": ["always_on", "action", "bonus_action", "reaction"] },
+        "resourcePoolId": { "type": "string", "pattern": "^resource:[a-z0-9][a-z0-9-]{0,79}$" },
+        "count": { "type": "integer", "minimum": 1, "maximum": 20 },
+        "sides": { "enum": [4, 6, 8, 10, 12, 20] },
+        "sign": { "enum": [-1, 1] }
+      }
+    },
+    "skillModifierEffect": {
+      "type": "object", "additionalProperties": false,
+      "required": ["effectId", "kind", "trigger", "skillId", "count", "sides", "sign"],
+      "properties": {
+        "effectId": { "type": "string", "pattern": "^effect:[a-z0-9][a-z0-9:-]{0,119}$" },
+        "kind": { "const": "skill_modifier" },
+        "trigger": { "enum": ["always_on", "action", "bonus_action", "reaction"] },
+        "resourcePoolId": { "type": "string", "pattern": "^resource:[a-z0-9][a-z0-9-]{0,79}$" },
+        "skillId": { "enum": ["acrobatics", "animal_handling", "arcana", "athletics", "deception", "history", "insight", "intimidation", "investigation", "medicine", "nature", "perception", "performance", "persuasion", "religion", "sleight_of_hand", "stealth", "survival"] },
+        "count": { "type": "integer", "minimum": 1, "maximum": 20 },
+        "sides": { "enum": [4, 6, 8, 10, 12, 20] },
+        "sign": { "enum": [-1, 1] }
+      }
+    },
+    "temporaryHitPointsEffect": {
+      "type": "object", "additionalProperties": false,
+      "required": ["effectId", "kind", "trigger", "amount"],
+      "properties": {
+        "effectId": { "type": "string", "pattern": "^effect:[a-z0-9][a-z0-9:-]{0,119}$" },
+        "kind": { "const": "temporary_hit_points" },
+        "trigger": { "enum": ["always_on", "action", "bonus_action", "reaction"] },
+        "resourcePoolId": { "type": "string", "pattern": "^resource:[a-z0-9][a-z0-9-]{0,79}$" },
+        "amount": { "type": "integer", "minimum": 0, "maximum": 100000 }
+      }
+    },
+    "conditionApplicationEffect": {
+      "type": "object", "additionalProperties": false,
+      "required": ["effectId", "kind", "trigger", "conditionId"],
+      "properties": {
+        "effectId": { "type": "string", "pattern": "^effect:[a-z0-9][a-z0-9:-]{0,119}$" },
+        "kind": { "const": "condition_application" },
+        "trigger": { "enum": ["always_on", "action", "bonus_action", "reaction"] },
+        "resourcePoolId": { "type": "string", "pattern": "^resource:[a-z0-9][a-z0-9-]{0,79}$" },
+        "conditionId": { "enum": ["Blinded", "Charmed", "Deafened", "Frightened", "Grappled", "Incapacitated", "Invisible", "Paralyzed", "Petrified", "Poisoned", "Prone", "Restrained", "Stunned", "Unconscious"] }
+      }
+    },
+    "exhaustionApplicationEffect": {
+      "type": "object", "additionalProperties": false,
+      "required": ["effectId", "kind", "trigger", "level"],
+      "properties": {
+        "effectId": { "type": "string", "pattern": "^effect:[a-z0-9][a-z0-9:-]{0,119}$" },
+        "kind": { "const": "exhaustion_application" },
+        "trigger": { "enum": ["always_on", "action", "bonus_action", "reaction"] },
+        "resourcePoolId": { "type": "string", "pattern": "^resource:[a-z0-9][a-z0-9-]{0,79}$" },
+        "level": { "type": "integer", "minimum": 1, "maximum": 6 }
+      }
+    },
+    "movementModifierEffect": {
+      "type": "object", "additionalProperties": false,
+      "required": ["effectId", "kind", "trigger", "speedDeltaFeet"],
+      "properties": {
+        "effectId": { "type": "string", "pattern": "^effect:[a-z0-9][a-z0-9:-]{0,119}$" },
+        "kind": { "const": "movement_modifier" },
+        "trigger": { "enum": ["always_on", "action", "bonus_action", "reaction"] },
+        "resourcePoolId": { "type": "string", "pattern": "^resource:[a-z0-9][a-z0-9-]{0,79}$" },
+        "speedDeltaFeet": { "type": "integer", "minimum": -30, "maximum": 30 }
+      }
+    },
+    "passives": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "armorClassBonus": { "type": "integer", "minimum": -30, "maximum": 30 },
+        "initiativeBonus": { "type": "integer", "minimum": -30, "maximum": 30 },
+        "savingThrowBonuses": {
+          "type": "object", "additionalProperties": false,
+          "properties": {
+            "strength": { "type": "integer", "minimum": -30, "maximum": 30 },
+            "dexterity": { "type": "integer", "minimum": -30, "maximum": 30 },
+            "constitution": { "type": "integer", "minimum": -30, "maximum": 30 },
+            "intelligence": { "type": "integer", "minimum": -30, "maximum": 30 },
+            "wisdom": { "type": "integer", "minimum": -30, "maximum": 30 },
+            "charisma": { "type": "integer", "minimum": -30, "maximum": 30 }
+          }
+        },
+        "skillBonuses": {
+          "type": "array", "maxItems": 18,
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["skillId", "bonus"],
+            "properties": {
+              "skillId": { "enum": ["acrobatics", "animal_handling", "arcana", "athletics", "deception", "history", "insight", "intimidation", "investigation", "medicine", "nature", "perception", "performance", "persuasion", "religion", "sleight_of_hand", "stealth", "survival"] },
+              "bonus": { "type": "integer", "minimum": -30, "maximum": 30 }
+            }
+          }
+        },
+        "speedAdjustmentFeet": { "type": "integer", "minimum": -30, "maximum": 30 },
+        "damageResponses": {
+          "type": "array", "maxItems": 13,
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["damageTypeId", "response"],
+            "properties": {
+              "damageTypeId": { "enum": ["Acid", "Bludgeoning", "Cold", "Fire", "Force", "Lightning", "Necrotic", "Piercing", "Poison", "Psychic", "Radiant", "Slashing", "Thunder"] },
+              "response": { "enum": ["resistant", "vulnerable", "immune"] }
+            }
+          }
+        },
+        "conditionImmunities": {
+          "type": "array", "maxItems": 15,
+          "items": { "enum": ["Blinded", "Charmed", "Deafened", "Exhaustion", "Frightened", "Grappled", "Incapacitated", "Invisible", "Paralyzed", "Petrified", "Poisoned", "Prone", "Restrained", "Stunned", "Unconscious"] }
         }
       }
     },
@@ -179,7 +374,10 @@
         "attacksPerAction": { "type": "integer", "minimum": 1, "maximum": 20 },
         "attacks": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/attack" } },
         "spellcasting": { "$ref": "#/$defs/spellcasting" },
-        "startingConditions": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/startingCondition" } }
+        "startingConditions": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/startingCondition" } },
+        "effects": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/featureEffect" } },
+        "resources": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/resourcePool" } },
+        "passives": { "$ref": "#/$defs/passives" }
       }
     }
   }

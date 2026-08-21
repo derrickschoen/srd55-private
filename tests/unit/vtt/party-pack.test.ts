@@ -6,6 +6,7 @@ import {
   externalPartyPackSchema,
   loadExternalPartyPack,
   loadExternalPartyPackBytes,
+  loadedPartyAttackCommand,
   loadedPartySpellCastCommand,
   type ExternalPartyPackV1,
   type ExternalPartyPackV2,
@@ -91,6 +92,27 @@ function v1Pack(): ExternalPartyPackV1 {
   }) as ExternalPartyPackV1;
 }
 
+function effectPack(): ExternalPartyPackV2 {
+  const candidate = structuredClone(pack());
+  candidate.members[0]!.resources = [{
+    resourcePoolId: 'resource:precise-strikes',
+    maximum: 1,
+    recharge: 'short_rest',
+  }];
+  candidate.members[0]!.effects = [{
+    effectId: 'effect:precise-strike-damage',
+    kind: 'damage_rider',
+    trigger: 'on_hit',
+    resourcePoolId: 'resource:precise-strikes',
+    damage: [{ damageTypeId: 'Force', count: 1, sides: 6, modifier: 0 }],
+  }];
+  candidate.members[0]!.spellcasting!.resourceSpellUses = [{
+    spellId: 'magic-missile',
+    resourcePoolId: 'resource:precise-strikes',
+  }];
+  return candidate;
+}
+
 describe('external party-pack boundary', () => {
   it('loads generated valid 3-5 member packs into branded combat profiles', () => {
     for (let count = 3; count <= 5; count += 1) {
@@ -117,6 +139,38 @@ describe('external party-pack boundary', () => {
           ]));
       }
     }
+  });
+
+  it('loads the complete initial closed effect-shape inventory into reducer-ready payloads', () => {
+    const candidate = structuredClone(pack());
+    candidate.members[0]!.effects = [
+      { effectId: 'effect:inventory-damage', kind: 'damage_rider', trigger: 'on_hit', damage: [{ damageTypeId: 'Force', count: 1, sides: 6, modifier: 0 }] },
+      { effectId: 'effect:inventory-attack-die', kind: 'attack_roll_modifier', trigger: 'always_on', count: 1, sides: 4, sign: 1 },
+      { effectId: 'effect:inventory-attack-mode', kind: 'attack_roll_mode', trigger: 'action', mode: 'advantage' },
+      { effectId: 'effect:inventory-ac', kind: 'armor_class_modifier', trigger: 'always_on', amount: 1 },
+      { effectId: 'effect:inventory-save', kind: 'saving_throw_modifier', trigger: 'always_on', count: 1, sides: 4, sign: 1 },
+      { effectId: 'effect:inventory-skill', kind: 'skill_modifier', trigger: 'always_on', skillId: 'perception', count: 1, sides: 4, sign: 1 },
+      { effectId: 'effect:inventory-temp-hp', kind: 'temporary_hit_points', trigger: 'bonus_action', amount: 7 },
+      { effectId: 'effect:inventory-condition', kind: 'condition_application', trigger: 'action', conditionId: 'Prone' },
+      { effectId: 'effect:inventory-exhaustion', kind: 'exhaustion_application', trigger: 'action', level: 1 },
+      { effectId: 'effect:inventory-speed', kind: 'movement_modifier', trigger: 'always_on', speedDeltaFeet: 10 },
+    ];
+    const loaded = loadExternalPartyPack(candidate);
+
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Closed effect inventory was refused.');
+    expect(loaded.party.members[0]!.effects.map((effect) => effect.payload.kind)).toEqual([
+      'damage_rider',
+      'attack_roll_modifier',
+      'attack_roll_mode_modifier',
+      'armor_class_modifier',
+      'saving_throw_modifier',
+      'ability_check_modifier',
+      'temporary_hit_points',
+      'condition',
+      'exhaustion',
+      'movement_modifier',
+    ]);
   });
 
   it('slots_not_decremented wires a referenced v2 spell through the existing resolver and spends its slot', () => {
@@ -251,6 +305,210 @@ describe('external party-pack boundary', () => {
       outcome: 'miss',
       roll: { mode: 'normal', faces: [9], chosen: 9 },
       total: 16,
+    });
+  });
+
+  it('rider_never_fires makes an on_hit typed rider change the synthetic encounter outcome', () => {
+    const loaded = loadExternalPartyPack(effectPack());
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Effects-bearing v2 pack was refused.');
+    const actor = loaded.party.members[0]!;
+    const target = loaded.party.members[1]!;
+    let state = createEncounter({
+      bounds: { columns: 3, rows: 2 },
+      combatants: [actor.profile, target.profile],
+      tokens: [
+        combatToken(actor.profile, { column: 0, row: 0 }),
+        combatToken(target.profile, { column: 1, row: 0 }),
+      ],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    expect(state.activeCombatant).toBe(actor.profile.id);
+
+    const result = reduceEncounter(
+      state,
+      loadedPartyAttackCommand(actor, actor.attacks[0]!.attackId, target.profile.id),
+      () => 0.5,
+    );
+
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'attack_resolved',
+      damage: expect.objectContaining({ total: 12 }),
+    }));
+    expect(result.state.combatants[1]?.hitPoints).toBe(20);
+  });
+
+  it('pool_not_decremented spends a rider pool and refuses the same hit when the pool is empty', () => {
+    const loaded = loadExternalPartyPack(effectPack());
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Effects-bearing v2 pack was refused.');
+    const actor = loaded.party.members[0]!;
+    const target = loaded.party.members[1]!;
+    let state = createEncounter({
+      bounds: { columns: 3, rows: 2 },
+      combatants: [actor.profile, target.profile],
+      tokens: [
+        combatToken(actor.profile, { column: 0, row: 0 }),
+        combatToken(target.profile, { column: 1, row: 0 }),
+      ],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    const attack = loadedPartyAttackCommand(actor, actor.attacks[0]!.attackId, target.profile.id);
+    const spent = reduceEncounter(state, attack, () => 0.5);
+
+    expect(spent.state.combatants[0]?.limitedResources).toEqual([{
+      id: 'resource:precise-strikes',
+      maximum: 1,
+      remaining: 0,
+      recharge: 'short_rest',
+    }]);
+    expect(spent.events).toContainEqual(expect.objectContaining({
+      type: 'limited_resource_spent',
+      resourcePoolId: 'resource:precise-strikes',
+      remaining: 0,
+    }));
+
+    const empty = {
+      ...state,
+      combatants: state.combatants.map((subject) =>
+        subject.profile.id === actor.profile.id
+          ? {
+              ...subject,
+              limitedResources: (subject.limitedResources ?? []).map((pool) => ({ ...pool, remaining: 0 })),
+            }
+          : subject),
+    };
+    expect(() => reduceEncounter(empty, attack, () => 0.5)).toThrow(
+      'Resource pool resource:precise-strikes is empty.',
+    );
+  });
+
+  it('named resource pools can fuel spellcasting without changing existing slot pools', () => {
+    const loaded = loadExternalPartyPack(effectPack());
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Effects-bearing v2 pack was refused.');
+    const caster = loaded.party.members[0]!;
+    const target = loaded.party.members[1]!;
+    let state = createEncounter({
+      bounds: { columns: 3, rows: 2 },
+      combatants: [caster.profile, target.profile],
+      tokens: [
+        combatToken(caster.profile, { column: 0, row: 0 }),
+        combatToken(target.profile, { column: 1, row: 0 }),
+      ],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    const result = reduceEncounter(state, loadedPartySpellCastCommand(caster, 'magic-missile', {
+      slotLevel: 1,
+      castAsRitual: false,
+      targets: [target.profile.id, target.profile.id, target.profile.id],
+      area: null,
+      weaponAttack: null,
+      selectedOption: null,
+      resourcePoolId: 'resource:precise-strikes',
+    }), () => 0);
+
+    expect(result.state.combatants[0]?.spellSlots).toContainEqual({
+      level: 1,
+      maximum: 4,
+      remaining: 4,
+    });
+    expect(result.state.combatants[0]?.limitedResources?.[0]?.remaining).toBe(0);
+    expect(() => loadedPartySpellCastCommand(caster, 'sacred-flame', {
+      slotLevel: null,
+      castAsRitual: false,
+      targets: [target.profile.id],
+      area: null,
+      weaponAttack: null,
+      selectedOption: null,
+      resourcePoolId: 'resource:precise-strikes',
+    })).toThrow('Spell sacred-flame is not declared for loaded resource pool resource:precise-strikes.');
+  });
+
+  it('passive_off_by_one applies AC and save passives exactly at their success boundaries', () => {
+    const candidate = structuredClone(pack());
+    candidate.members[1]!.passives = {
+      armorClassBonus: 1,
+      savingThrowBonuses: { dexterity: 1 },
+    };
+
+    const resolveAttackAt = (d20: 11 | 12) => {
+      const loaded = loadExternalPartyPack(candidate);
+      expect(loaded.status).toBe('loaded');
+      if (loaded.status !== 'loaded') throw new Error('Passive-bearing v2 pack was refused.');
+      const actor = loaded.party.members[0]!;
+      const target = loaded.party.members[1]!;
+      expect(target.profile.rules.armorClass).toBe(18);
+      let state = createEncounter({
+        bounds: { columns: 3, rows: 2 },
+        combatants: [actor.profile, target.profile],
+        tokens: [
+          combatToken(actor.profile, { column: 0, row: 0 }),
+          combatToken(target.profile, { column: 1, row: 0 }),
+        ],
+      });
+      state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+      const result = reduceEncounter(
+        state,
+        loadedPartyAttackCommand(actor, actor.attacks[0]!.attackId, target.profile.id),
+        () => (d20 - 1) / 20,
+      );
+      return result.events.find((event) => event.type === 'attack_resolved');
+    };
+
+    expect(resolveAttackAt(11)).toMatchObject({ attack: { outcome: 'miss', total: 17 } });
+    expect(resolveAttackAt(12)).toMatchObject({ attack: { outcome: 'hit', total: 18 } });
+
+    const resolveSaveAt = (d20: 11 | 12) => {
+      const loaded = loadExternalPartyPack(candidate);
+      expect(loaded.status).toBe('loaded');
+      if (loaded.status !== 'loaded') throw new Error('Passive-bearing v2 pack was refused.');
+      const caster = loaded.party.members[0]!;
+      const target = loaded.party.members[1]!;
+      expect(target.profile.rules.savingThrowBonuses.dexterity).toBe(3);
+      let state = createEncounter({
+        bounds: { columns: 3, rows: 2 },
+        combatants: [caster.profile, target.profile],
+        tokens: [
+          combatToken(caster.profile, { column: 0, row: 0 }),
+          combatToken(target.profile, { column: 1, row: 0 }),
+        ],
+      });
+      state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+      const result = reduceEncounter(state, loadedPartySpellCastCommand(caster, 'sacred-flame', {
+        slotLevel: null,
+        castAsRitual: false,
+        targets: [target.profile.id],
+        area: null,
+        weaponAttack: null,
+        selectedOption: null,
+      }), () => (d20 - 1) / 20);
+      return result.events.find((event) => event.type === 'save_resolved');
+    };
+
+    expect(resolveSaveAt(11)).toMatchObject({ save: { outcome: 'failure', total: 14 } });
+    expect(resolveSaveAt(12)).toMatchObject({ save: { outcome: 'success', total: 15 } });
+  });
+
+  it('out_of_union_accepted refuses an unknown effect kind and names the unsupported shape', () => {
+    const candidate = structuredClone(pack(3, true)) as unknown as {
+      members: Array<Record<string, unknown>>;
+    };
+    candidate.members[0]!.effects = [{
+      effectId: 'effect:unsupported-teleport-strike',
+      kind: 'teleport_strike',
+      trigger: 'on_hit',
+      distanceFeet: 30,
+    }];
+
+    expect(loadExternalPartyPack(candidate)).toMatchObject({
+      status: 'refused',
+      refusal: {
+        kind: 'external_party_pack_refusal',
+        reason: 'unsupported_effect_shape',
+        unsupportedShape: 'teleport_strike',
+      },
+      gaps: [{ engineRefusalReason: 'capability_not_implemented' }],
     });
   });
 
