@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "partyId": "party:generic-soak-fixture",
   "allowPartial": false,
   "members": [
@@ -15,9 +15,7 @@
       "initiativeBonus": 1,
       "savingThrowBonuses": { "strength": 7, "dexterity": 1, "constitution": 6, "intelligence": 0, "wisdom": 1, "charisma": -1 },
       "attacksPerAction": 2,
-      "spellSlots": [],
       "attacks": [{ "attackId": "attack:longsword", "kind": "melee", "attackBonus": 7, "criticalFloor": 20, "reachFeet": 5, "rangeFeet": 5, "damage": [{ "damageTypeId": "Slashing", "count": 1, "sides": 8, "modifier": 4 }] }],
-      "spellSelections": [],
       "startingConditions": []
     },
     {
@@ -32,9 +30,15 @@
       "initiativeBonus": 0,
       "savingThrowBonuses": { "strength": 1, "dexterity": 0, "constitution": 2, "intelligence": 0, "wisdom": 7, "charisma": 4 },
       "attacksPerAction": 1,
-      "spellSlots": [{ "level": 1, "maximum": 4 }, { "level": 2, "maximum": 3 }, { "level": 3, "maximum": 3 }, { "level": 4, "maximum": 1 }],
       "attacks": [{ "attackId": "attack:mace", "kind": "melee", "attackBonus": 4, "criticalFloor": 20, "reachFeet": 5, "rangeFeet": 5, "damage": [{ "damageTypeId": "Bludgeoning", "count": 1, "sides": 6, "modifier": 1 }] }],
-      "spellSelections": ["guidance", "healing-word"],
+      "spellcasting": {
+        "ability": "wisdom",
+        "spellSaveDc": 15,
+        "spellAttackBonus": 7,
+        "preparedSpellIds": ["guidance", "healing-word"],
+        "knownSpellIds": [],
+        "spellSlots": [{ "level": 1, "count": 4, "recharge": "long_rest" }, { "level": 2, "count": 3, "recharge": "long_rest" }, { "level": 3, "count": 3, "recharge": "long_rest" }, { "level": 4, "count": 1, "recharge": "long_rest" }]
+      },
       "startingConditions": []
     },
     {
@@ -49,9 +53,15 @@
       "initiativeBonus": 2,
       "savingThrowBonuses": { "strength": -1, "dexterity": 2, "constitution": 2, "intelligence": 7, "wisdom": 4, "charisma": 0 },
       "attacksPerAction": 1,
-      "spellSlots": [{ "level": 1, "maximum": 4 }, { "level": 2, "maximum": 3 }, { "level": 3, "maximum": 3 }, { "level": 4, "maximum": 1 }],
       "attacks": [{ "attackId": "attack:quarterstaff", "kind": "melee", "attackBonus": 2, "criticalFloor": 20, "reachFeet": 5, "rangeFeet": 5, "damage": [{ "damageTypeId": "Bludgeoning", "count": 1, "sides": 6, "modifier": -1 }] }],
-      "spellSelections": ["fire-bolt", "magic-missile", "shatter"],
+      "spellcasting": {
+        "ability": "intelligence",
+        "spellSaveDc": 15,
+        "spellAttackBonus": 7,
+        "preparedSpellIds": ["magic-missile", "shatter"],
+        "knownSpellIds": ["fire-bolt"],
+        "spellSlots": [{ "level": 1, "count": 4, "recharge": "long_rest" }, { "level": 2, "count": 3, "recharge": "long_rest" }, { "level": 3, "count": 3, "recharge": "long_rest" }, { "level": 4, "count": 1, "recharge": "long_rest" }]
+      },
       "startingConditions": []
     }
   ]

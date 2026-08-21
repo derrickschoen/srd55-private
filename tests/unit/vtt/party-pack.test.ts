@@ -1,13 +1,17 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { combatToken } from '../../../src/combat/combatant';
+import { createEncounter, reduceEncounter } from '../../../src/combat/encounter';
 import {
   externalPartyPackSchema,
   loadExternalPartyPack,
   loadExternalPartyPackBytes,
-  type ExternalPartyPack,
+  loadedPartySpellCastCommand,
+  type ExternalPartyPackV1,
+  type ExternalPartyPackV2,
 } from '../../../src/vtt/party-pack';
 
-function member(index: number): ExternalPartyPack['members'][number] {
+function memberBase(index: number): Omit<ExternalPartyPackV2['members'][number], 'spellcasting'> {
   return {
     combatantId: `combatant:pack-member-${String(index)}`,
     tokenId: `token:pack-member-${String(index)}`,
@@ -34,7 +38,6 @@ function member(index: number): ExternalPartyPack['members'][number] {
       charisma: -1,
     },
     attacksPerAction: index % 2 === 0 ? 2 : 1,
-    spellSlots: index % 2 === 0 ? [] : [{ level: 1, maximum: 4 }],
     attacks: [{
       attackId: `attack:pack-member-${String(index)}`,
       kind: 'melee',
@@ -44,18 +47,48 @@ function member(index: number): ExternalPartyPack['members'][number] {
       rangeFeet: 5,
       damage: [{ damageTypeId: 'Slashing', count: 1, sides: 8, modifier: 3 }],
     }],
-    spellSelections: index % 2 === 0 ? [] : ['fire-bolt'],
     startingConditions: [],
   };
 }
 
-function pack(count = 3, allowPartial = false): ExternalPartyPack {
+function v2Member(index: number): ExternalPartyPackV2['members'][number] {
+  return {
+    ...memberBase(index),
+    ...(index % 2 === 0
+      ? {}
+      : {
+          spellcasting: {
+            ability: 'intelligence' as const,
+            spellSaveDc: 15,
+            spellAttackBonus: 7,
+            preparedSpellIds: ['magic-missile'],
+            knownSpellIds: ['sacred-flame', 'fire-bolt'],
+            spellSlots: [{ level: 1 as const, count: 4, recharge: 'long_rest' as const }],
+          },
+        }),
+  };
+}
+
+function pack(count = 3, allowPartial = false): ExternalPartyPackV2 {
   return externalPartyPackSchema.parse({
-    schemaVersion: 1,
+    schemaVersion: 2,
     partyId: 'party:generic-soak-fixture',
     allowPartial,
-    members: Array.from({ length: count }, (_value, index) => member(index + 1)),
-  });
+    members: Array.from({ length: count }, (_value, index) => v2Member(index + 1)),
+  }) as ExternalPartyPackV2;
+}
+
+function v1Pack(): ExternalPartyPackV1 {
+  return externalPartyPackSchema.parse({
+    schemaVersion: 1,
+    partyId: 'party:legacy-soak-fixture',
+    allowPartial: false,
+    members: Array.from({ length: 3 }, (_value, index) => ({
+      ...memberBase(index + 1),
+      spellSlots: index % 2 === 0 ? [{ level: 1, maximum: 4 }] : [],
+      spellSelections: index % 2 === 0 ? ['magic-missile'] : [],
+    })),
+  }) as ExternalPartyPackV1;
 }
 
 describe('external party-pack boundary', () => {
@@ -78,9 +111,170 @@ describe('external party-pack boundary', () => {
           candidate.members.map((entry) => entry.armorClass),
         );
         expect(result.party.members.flatMap((entry) => entry.spells.map((spell) => spell.id)))
-          .toEqual(candidate.members.flatMap((entry) => entry.spellSelections));
+          .toEqual(candidate.members.flatMap((entry) => [
+            ...(entry.spellcasting?.preparedSpellIds ?? []),
+            ...(entry.spellcasting?.knownSpellIds ?? []),
+          ]));
       }
     }
+  });
+
+  it('slots_not_decremented wires a referenced v2 spell through the existing resolver and spends its slot', () => {
+    const result = loadExternalPartyPack(pack());
+    expect(result.status).toBe('loaded');
+    if (result.status !== 'loaded') throw new Error('Valid v2 caster pack was refused.');
+    const caster = result.party.members[0]!;
+    const target = result.party.members[1]!;
+    expect(caster.spellcasting).toMatchObject({
+      ability: 'intelligence',
+      spellSaveDc: 15,
+      spellAttackBonus: 7,
+      spellcastingModifier: 3,
+      casterLevel: 7,
+      spellSlots: [{ level: 1, maximum: 4, recharge: 'long_rest' }],
+    });
+    let state = createEncounter({
+      bounds: { columns: 4, rows: 3 },
+      combatants: [caster.profile, target.profile],
+      tokens: [
+        combatToken(caster.profile, { column: 0, row: 1 }),
+        combatToken(target.profile, { column: 1, row: 1 }),
+      ],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    const cast = reduceEncounter(state, loadedPartySpellCastCommand(caster, 'magic-missile', {
+      slotLevel: 1,
+      castAsRitual: false,
+      targets: [target.profile.id, target.profile.id, target.profile.id],
+      area: null,
+      weaponAttack: null,
+      selectedOption: null,
+    }), () => 0);
+
+    expect(cast.events).toContainEqual(expect.objectContaining({
+      type: 'spell_cast',
+      caster: caster.profile.id,
+      spellId: 'magic-missile',
+      slotLevel: 1,
+    }));
+    expect(cast.state.combatants[0]?.spellSlots).toContainEqual({
+      level: 1,
+      maximum: 4,
+      remaining: 3,
+    });
+    expect(() => loadedPartySpellCastCommand(caster, 'ray-of-frost', {
+      slotLevel: null,
+      castAsRitual: false,
+      targets: [target.profile.id],
+      area: null,
+      weaponAttack: null,
+      selectedOption: null,
+    })).toThrow(expect.objectContaining({ reason: 'spell_not_referenced' }));
+  });
+
+  it('pack_spell_save_dc_boundary drives failure below DC and success at DC through encounter resolution', () => {
+    const resolveAtD20 = (d20: 12 | 13) => {
+      const loaded = loadExternalPartyPack(pack());
+      expect(loaded.status).toBe('loaded');
+      if (loaded.status !== 'loaded') throw new Error('Valid v2 caster pack was refused.');
+      const caster = loaded.party.members[0]!;
+      const target = loaded.party.members[1]!;
+      let state = createEncounter({
+        bounds: { columns: 4, rows: 3 },
+        combatants: [caster.profile, target.profile],
+        tokens: [
+          combatToken(caster.profile, { column: 0, row: 1 }),
+          combatToken(target.profile, { column: 1, row: 1 }),
+        ],
+      });
+      state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+      const result = reduceEncounter(state, loadedPartySpellCastCommand(caster, 'sacred-flame', {
+        slotLevel: null,
+        castAsRitual: false,
+        targets: [target.profile.id],
+        area: null,
+        weaponAttack: null,
+        selectedOption: null,
+      }), () => (d20 - 1) / 20);
+      const save = result.events.find((event) => event.type === 'save_resolved');
+      if (save?.type !== 'save_resolved') throw new Error('Sacred Flame emitted no saving throw.');
+      return save.save;
+    };
+
+    expect(resolveAtD20(12)).toEqual({
+      outcome: 'failure',
+      roll: { mode: 'normal', faces: [12], chosen: 12 },
+      total: 14,
+    });
+    expect(resolveAtD20(13)).toEqual({
+      outcome: 'success',
+      roll: { mode: 'normal', faces: [13], chosen: 13 },
+      total: 15,
+    });
+  });
+
+  it('pack_spell_attack_bonus_boundary drives miss below AC and hit at AC through encounter resolution', () => {
+    const resolveAtD20 = (d20: 9 | 10) => {
+      const loaded = loadExternalPartyPack(pack());
+      expect(loaded.status).toBe('loaded');
+      if (loaded.status !== 'loaded') throw new Error('Valid v2 caster pack was refused.');
+      const caster = loaded.party.members[0]!;
+      const target = loaded.party.members[1]!;
+      let state = createEncounter({
+        bounds: { columns: 4, rows: 3 },
+        combatants: [caster.profile, target.profile],
+        tokens: [
+          combatToken(caster.profile, { column: 0, row: 1 }),
+          combatToken(target.profile, { column: 1, row: 1 }),
+        ],
+      });
+      state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+      const result = reduceEncounter(state, loadedPartySpellCastCommand(caster, 'fire-bolt', {
+        slotLevel: null,
+        castAsRitual: false,
+        targets: [target.profile.id],
+        area: null,
+        weaponAttack: null,
+        selectedOption: null,
+      }), () => (d20 - 1) / 20);
+      const attack = result.events.find((event) => event.type === 'attack_resolved');
+      if (attack?.type !== 'attack_resolved') throw new Error('Fire Bolt emitted no attack roll.');
+      return attack.attack;
+    };
+
+    expect(resolveAtD20(10)).toEqual({
+      outcome: 'hit',
+      roll: { mode: 'normal', faces: [10], chosen: 10 },
+      total: 17,
+    });
+    expect(resolveAtD20(9)).toEqual({
+      outcome: 'miss',
+      roll: { mode: 'normal', faces: [9], chosen: 9 },
+      total: 16,
+    });
+  });
+
+  it('unknown_spell_id_dropped refuses an unknown v2 spell id even when partial loading is allowed', () => {
+    const candidate = structuredClone(pack(3, true));
+    candidate.members[0]!.spellcasting!.preparedSpellIds = ['not-in-the-175-spell-manifest'];
+
+    expect(loadExternalPartyPack(candidate)).toMatchObject({
+      status: 'refused',
+      refusal: { kind: 'external_party_pack_refusal', reason: 'unknown_spell_id' },
+      gaps: [{ engineRefusalReason: 'value_not_in_engine_vocabulary' }],
+    });
+  });
+
+  it('v1_rejected keeps unchanged v1 packs inside the loader version window', () => {
+    const legacy = v1Pack();
+    const result = loadExternalPartyPack(legacy);
+
+    expect(result.status).toBe('loaded');
+    if (result.status !== 'loaded') throw new Error('Legacy v1 pack was refused.');
+    expect(result.party.pack).toEqual(legacy);
+    expect(result.party.members[0]?.spellcasting).toBeNull();
+    expect(result.party.members[0]?.profile.rules.spellSlots).toEqual([{ level: 1, maximum: 4 }]);
+    expect(result.party.members[0]?.spells.map((spell) => spell.id)).toEqual(['magic-missile']);
   });
 
   it('gap_report_swallowed reports and strips every out-of-vocabulary feature', () => {
@@ -162,9 +356,10 @@ describe('external party-pack boundary', () => {
       readFileSync('docs/specs/external-party-pack.schema.json', 'utf8'),
     );
     expect(schema).toMatchObject({
-      type: 'object',
-      additionalProperties: false,
-      properties: { schemaVersion: { const: 1 } },
+      oneOf: [
+        { properties: { schemaVersion: { const: 1 } } },
+        { properties: { schemaVersion: { const: 2 } } },
+      ],
     });
   });
 });
