@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { canonicalJson } from '../src/commands/canonical-json';
 import { ControllerRegistry, AlgorithmController, type Controller } from '../src/combat/controllers';
 import { TurnCoordinator } from '../src/combat/coordinator';
-import { createEncounter, reduceEncounter } from '../src/combat/encounter';
+import { createEncounter, reduceEncounter, type EncounterState } from '../src/combat/encounter';
 import type { EncounterCommand } from '../src/combat/events';
 import { mulberry32 } from '../src/combat/random';
 import { encounterSessionId, type EncounterSessionId } from '../src/combat/values';
@@ -20,6 +20,7 @@ import {
   type DmBridgeModelConfig,
   type DmBridgeRequest,
   type E01PromptVariant,
+  type MonsterRoundProgram,
   type RoundPlanCorrectionRequest,
   type RoundPlanRequest,
 } from '../src/vtt/dm-bridge/contracts';
@@ -32,6 +33,7 @@ import {
   VTT_EXPERIMENT_SCHEMA_VERSION,
   type ExperimentCallRecord,
   type ExperimentTableRecord,
+  type ExperimentTableRecordV2,
   type PromptComponentTelemetry,
   type RolloutInputCapture,
 } from '../src/vtt/experiment-telemetry';
@@ -151,6 +153,7 @@ export interface VttExperimentConfig {
   readonly reasoningEffort: DmBridgeModelConfig['reasoningEffort'];
   readonly requestTimeoutMs: number;
   readonly tableTimeoutMs: number;
+  readonly candidateTurnK: number;
 }
 
 export interface ExperimentPreregistration {
@@ -173,6 +176,7 @@ export interface ExperimentPreregistration {
   readonly secondaryMetrics: readonly string[];
   readonly noninferiorityMargins: Readonly<Record<string, number>>;
   readonly timeouts: { readonly requestMs: number; readonly tableMs: number };
+  readonly candidateTurnK: number;
   readonly exclusions: readonly string[];
   readonly infrastructureRerunRule: string;
   readonly analysisCodeDigest: string;
@@ -204,12 +208,13 @@ export function preregisterExperiment(config: VttExperimentConfig): ExperimentPr
     promptComponentHashes: Object.fromEntries(
       definition.arms.map((arm) => [arm.id, promptHash(arm.id)]),
     ) as Readonly<Record<E01PromptVariant, string>>,
-    controllerConfiguration: 'dm-full-model-round-plan;pc-algorithm;fresh-session-per-table',
+    controllerConfiguration: `dm-full-model-round-plan;pc-algorithm;fresh-session-per-table;candidate-turn-k=${String(config.candidateTurnK)}`,
     initiativeConfiguration: 'shared_enemy;deterministic-within-side-order',
     primaryMetrics: ['completedRoundsPerHour', 'normalizedTacticalRegret'],
     secondaryMetrics: ['latencyMs', 'tokenCounts', 'correctionRate', 'reconsultRate', 'round5HpDifferential'],
     noninferiorityMargins: { normalizedTacticalRegret: 0.02, correctionPercentagePoints: 2 },
     timeouts: { requestMs: config.requestTimeoutMs, tableMs: config.tableTimeoutMs },
+    candidateTurnK: config.candidateTurnK,
     exclusions: [],
     infrastructureRerunRule: 'Only an infrastructure-classified failure may rerun, once, under identical manifest bytes.',
     analysisCodeDigest: sha256('E01-analysis-v1:linear-interpolated-quartiles:aborts-retained'),
@@ -362,8 +367,25 @@ function programMetrics(decoded: DecodedRoundPlanReply | null): {
   };
 }
 
+interface DecisionCaptureContext {
+  readonly serializedEncounterState: string;
+  readonly stateHash: string;
+  readonly candidateTurnK: number;
+  readonly candidateTurns: readonly {
+    readonly monsterId: MonsterRoundProgram['monsterId'];
+    readonly candidates: readonly {
+      readonly rank: number;
+      readonly score: number;
+      readonly stableSortKey: string;
+      readonly program: MonsterRoundProgram['program'];
+    }[];
+  }[];
+  readonly selectedTurnPrograms: readonly MonsterRoundProgram[] | null;
+}
+
 class RecordingE01Exchange implements DmBridgeExchange {
   readonly calls: ExperimentCallRecord[] = [];
+  readonly decisionCaptureContexts = new Map<string, DecisionCaptureContext>();
   #callIndex = 0;
 
   constructor(
@@ -371,6 +393,8 @@ class RecordingE01Exchange implements DmBridgeExchange {
     private readonly telemetry: FleetTelemetry[],
     private readonly entry: ExperimentScheduleEntry,
     private readonly bridgeDataDirectory: string,
+    private readonly encounterState: () => EncounterState,
+    private readonly candidateTurnK: number,
   ) {}
 
   async exchange(request: DmBridgeRequest, signal: AbortSignal): Promise<unknown> {
@@ -386,6 +410,22 @@ class RecordingE01Exchange implements DmBridgeExchange {
     const parentCallId = wire.kind === 'round_plan_correction_request'
       ? this.calls.find((call) => call.requestId === wire.originalRequestId)?.logicalCallId ?? null
       : null;
+    // Session persistence's exportSavedSession uses canonicalJson for its
+    // durable bytes. Experiment state capture deliberately reuses that exact
+    // serializer instead of defining a parallel EncounterState encoding.
+    const decisionState = this.encounterState();
+    const stateHash = sha256(canonicalJson(decisionState));
+    const serializedEncounterState = canonicalJson(decisionState);
+    const actorIds = wire.kind === 'monster_reconsult_request'
+      ? [wire.monsterId]
+      : wire.kind === 'round_plan_request' ? [...wire.livingMonsterIds] : [...wire.requestedMonsterIds];
+    const candidateController = new AlgorithmController();
+    const candidateTurns = actorIds.map((monsterId) => ({
+      monsterId,
+      candidates: candidateController
+        .enumerateTurnPrograms(wire.projection.encounter, monsterId, this.candidateTurnK)
+        .map((candidate, index) => ({ ...candidate, rank: index + 1 })),
+    }));
     const started = Date.now();
     const startedAt = new Date(started).toISOString();
     const beforeTelemetry = this.telemetry.length;
@@ -417,7 +457,6 @@ class RecordingE01Exchange implements DmBridgeExchange {
       ? canonicalJson(contract.canonicalExample)
       : '';
     const metrics = programMetrics(decoded);
-    const stateHash = sha256(canonicalJson(wire.projection.encounter));
     const legalActions = wire.projection.pendingRequest?.legalActions ?? [];
     const failed = exchangeError ?? validationError;
     const call: ExperimentCallRecord = {
@@ -432,7 +471,7 @@ class RecordingE01Exchange implements DmBridgeExchange {
       requestKind: wire.kind,
       attemptIndex: wire.correctionAttempt,
       round: wire.round,
-      actorIds: wire.kind === 'monster_reconsult_request' ? [wire.monsterId] : wire.kind === 'round_plan_request' ? [...wire.livingMonsterIds] : [...wire.requestedMonsterIds],
+      actorIds,
       livingMonsterIds: wire.projection.encounter.combatants.filter((subject) => subject.kind === 'monster' && subject.life === 'living').map((subject) => subject.id),
       startedAt,
       finishedAt: new Date(finished).toISOString(),
@@ -538,6 +577,13 @@ class RecordingE01Exchange implements DmBridgeExchange {
       replayProof: null,
     };
     this.calls.push(call);
+    this.decisionCaptureContexts.set(logicalCallId, {
+      serializedEncounterState,
+      stateHash,
+      candidateTurnK: this.candidateTurnK,
+      candidateTurns,
+      selectedTurnPrograms: decoded?.plan.monsters ?? null,
+    });
     if (exchangeError !== null) throw exchangeError;
     return reply;
   }
@@ -564,7 +610,7 @@ export async function runE01Table(
   entry: ExperimentScheduleEntry,
   config: VttExperimentConfig,
   preregistration: ExperimentPreregistration,
-): Promise<ExperimentTableRecord> {
+): Promise<ExperimentTableRecordV2> {
   const wallStarted = Date.now();
   const bridge = launchBridge(config, entry);
   const abort = new AbortController();
@@ -583,7 +629,17 @@ export async function runE01Table(
     const model = { model: config.model, reasoningEffort: config.reasoningEffort };
     const sessionId = await client.createSession(encounterId, abort.signal, model);
     const bridgeDirectory = `${config.outDirectory}/bridge/table-${String(entry.tableIndex).padStart(4, '0')}`;
-    recording = new RecordingE01Exchange(client, telemetry, entry, bridgeDirectory);
+    recording = new RecordingE01Exchange(
+      client,
+      telemetry,
+      entry,
+      bridgeDirectory,
+      () => {
+        if (coordinator === null) throw new Error('Experiment coordinator is not initialized.');
+        return coordinator.state();
+      },
+      config.candidateTurnK,
+    );
     const session = new DmRoundPlanSession(recording, model);
     const state = fourEnemyState();
     let registry: ControllerRegistry;
@@ -678,14 +734,25 @@ export async function runE01Table(
     };
   });
   const captures: RolloutInputCapture[] = finalizedCalls
-    .filter((call) => call.phase === 'initial_plan' && call.validationResult === 'valid')
-    .map((call) => ({
-      logicalCallId: call.logicalCallId,
-      stateHash: call.preStateHash,
-      legalActionSetHash: call.legalActionSetHash,
-      selectedAction: call.emittedAction,
-      input: { projection: call.sourceProjection, parsedProgram: call.parsedOrCompiled },
-    }));
+    .filter((call) => call.validationResult === 'valid')
+    .map((call): RolloutInputCapture | null => {
+      const context = recording?.decisionCaptureContexts.get(call.logicalCallId);
+      if (context === undefined || context.selectedTurnPrograms === null) return null;
+      return {
+        logicalCallId: call.logicalCallId,
+        stateHash: context.stateHash,
+        legalActionSetHash: call.legalActionSetHash,
+        selectedAction: context.selectedTurnPrograms.map((selected) => ({ ...selected })),
+        input: { projection: call.sourceProjection, parsedProgram: call.parsedOrCompiled },
+        serializedEncounterState: context.serializedEncounterState,
+        candidateTurnK: context.candidateTurnK,
+        candidateTurns: context.candidateTurns.map((turnSet) => ({
+          ...turnSet,
+          candidates: turnSet.candidates.map((candidate) => ({ ...candidate })),
+        })),
+      };
+    })
+    .filter((capture): capture is RolloutInputCapture => capture !== null);
   if (!config.skipRegret) computeTacticalRegretFromCaptures(captures);
   const wallMs = Date.now() - wallStarted;
   const correctionCount = finalizedCalls.filter((call) => call.phase === 'correction').length;
@@ -695,7 +762,7 @@ export async function runE01Table(
   const playerHp = state?.combatants.filter((subject) => subject.profile.kind === 'player_character').reduce((sum, subject) => sum + subject.hitPoints, 0) ?? 0;
   const fixtureDigest = sha256(canonicalJson(fourEnemyState()));
   const partyDigest = sha256(canonicalJson(fourEnemyState().combatants.filter((subject) => subject.profile.kind === 'player_character').map((subject) => subject.profile)));
-  return decodeExperimentTableRecord({
+  const record = decodeExperimentTableRecord({
     schemaVersion: VTT_EXPERIMENT_SCHEMA_VERSION,
     programVersion: preregistration.programVersion,
     experimentId: entry.experimentId,
@@ -714,7 +781,13 @@ export async function runE01Table(
     enemyCountStratum: 4,
     partySource: 'reference',
     partyDigest,
-    configurationManifestDigest: sha256(canonicalJson({ armId: entry.armId, model: config.model, effort: config.reasoningEffort, rounds: 5 })),
+    configurationManifestDigest: sha256(canonicalJson({
+      armId: entry.armId,
+      model: config.model,
+      effort: config.reasoningEffort,
+      rounds: 5,
+      candidateTurnK: config.candidateTurnK,
+    })),
     controllerSide: 'dm',
     controllerMode: 'full_model_round_plan',
     modelId: config.model,
@@ -793,6 +866,10 @@ export async function runE01Table(
       regretStatus: 'deferred',
     },
   });
+  if (record.schemaVersion !== VTT_EXPERIMENT_SCHEMA_VERSION) {
+    throw new Error('Current experiment writer produced a legacy table record.');
+  }
+  return record;
 }
 
 export interface VttExperimentRuntime {
@@ -903,7 +980,17 @@ function positiveInteger(value: string, label: string): number {
 
 export function decodeVttExperimentArguments(argv: readonly string[]): VttExperimentConfig {
   const values = options(argv);
-  const allowed = new Set(['experiment', 'out', 'skip-regret', 'codex-bin', 'model', 'effort', 'request-timeout-ms', 'table-timeout-ms']);
+  const allowed = new Set([
+    'experiment',
+    'out',
+    'skip-regret',
+    'codex-bin',
+    'model',
+    'effort',
+    'request-timeout-ms',
+    'table-timeout-ms',
+    'candidate-turn-k',
+  ]);
   for (const name of values.keys()) if (!allowed.has(name)) throw new TypeError(`Unknown option --${name}.`);
   const experiment = optionText(values, 'experiment');
   if (experiment !== 'E01') throw new TypeError('--experiment must name a registered experiment (currently E01).');
@@ -920,6 +1007,7 @@ export function decodeVttExperimentArguments(argv: readonly string[]): VttExperi
     reasoningEffort: effort,
     requestTimeoutMs: positiveInteger(optionText(values, 'request-timeout-ms', '120000'), '--request-timeout-ms'),
     tableTimeoutMs: positiveInteger(optionText(values, 'table-timeout-ms', '900000'), '--table-timeout-ms'),
+    candidateTurnK: positiveInteger(optionText(values, 'candidate-turn-k', '64'), '--candidate-turn-k'),
   };
 }
 

@@ -1,6 +1,8 @@
 import { z } from 'zod';
+import { decisionProgramSchema } from './dm-bridge/round-plan-contract';
 
-export const VTT_EXPERIMENT_SCHEMA_VERSION = 1 as const;
+export const VTT_EXPERIMENT_SCHEMA_VERSION = 2 as const;
+export const VTT_EXPERIMENT_MINIMUM_SCHEMA_VERSION = 1 as const;
 
 const text = z.string().min(1);
 const nullableText = text.nullable();
@@ -132,7 +134,7 @@ export const experimentCallRecordSchema = z.strictObject({
   replayProof: z.unknown().nullable(),
 });
 
-export const rolloutInputCaptureSchema = z.strictObject({
+export const rolloutInputCaptureV1Schema = z.strictObject({
   logicalCallId: text,
   stateHash: digest,
   legalActionSetHash: digest,
@@ -140,7 +142,35 @@ export const rolloutInputCaptureSchema = z.strictObject({
   input: z.unknown(),
 });
 
-export const experimentQualityBlockSchema = z.strictObject({
+const selectedTurnProgramSchema = z.strictObject({
+  monsterId: text,
+  program: decisionProgramSchema,
+});
+
+const rankedCandidateTurnSchema = z.strictObject({
+  rank: z.number().int().positive(),
+  score: z.number().finite(),
+  stableSortKey: text,
+  program: decisionProgramSchema,
+});
+
+const candidateTurnSetSchema = z.strictObject({
+  monsterId: text,
+  candidates: z.array(rankedCandidateTurnSchema),
+});
+
+export const rolloutInputCaptureSchema = z.strictObject({
+  logicalCallId: text,
+  stateHash: digest,
+  legalActionSetHash: digest,
+  selectedAction: z.array(selectedTurnProgramSchema),
+  input: z.unknown(),
+  serializedEncounterState: text,
+  candidateTurnK: z.number().int().positive(),
+  candidateTurns: z.array(candidateTurnSetSchema),
+});
+
+const experimentQualityBlockShape = {
   rolloutOracleVersion: nullableText,
   rolloutHorizon: nullableNonNegative,
   rolloutCount: nullableNonNegative,
@@ -166,12 +196,20 @@ export const experimentQualityBlockSchema = z.strictObject({
   dimensionScores: z.array(z.number().finite()),
   disagreementStatus: nullableText,
   adjudicationStatus: nullableText,
-  rolloutInputCaptures: z.array(rolloutInputCaptureSchema),
   regretStatus: z.enum(['deferred', 'computed']),
+} satisfies z.ZodRawShape;
+
+export const experimentQualityBlockV1Schema = z.strictObject({
+  ...experimentQualityBlockShape,
+  rolloutInputCaptures: z.array(rolloutInputCaptureV1Schema),
 });
 
-export const experimentTableRecordSchema = z.strictObject({
-  schemaVersion: z.literal(VTT_EXPERIMENT_SCHEMA_VERSION),
+export const experimentQualityBlockSchema = z.strictObject({
+  ...experimentQualityBlockShape,
+  rolloutInputCaptures: z.array(rolloutInputCaptureSchema),
+});
+
+const experimentTableRecordShape = {
   programVersion: text,
   experimentId: text,
   experimentVersion: text,
@@ -238,6 +276,17 @@ export const experimentTableRecordSchema = z.strictObject({
   idleWaitMs: nonNegative,
   estimatedTableCostUsd: nullableNonNegative,
   calls: z.array(experimentCallRecordSchema),
+} satisfies z.ZodRawShape;
+
+export const experimentTableRecordV1Schema = z.strictObject({
+  schemaVersion: z.literal(1),
+  ...experimentTableRecordShape,
+  quality: experimentQualityBlockV1Schema,
+});
+
+export const experimentTableRecordSchema = z.strictObject({
+  schemaVersion: z.literal(VTT_EXPERIMENT_SCHEMA_VERSION),
+  ...experimentTableRecordShape,
   quality: experimentQualityBlockSchema,
 });
 
@@ -245,10 +294,30 @@ export type PromptComponentTelemetry = z.infer<typeof promptComponentTelemetrySc
 export type ExperimentCallRecord = z.infer<typeof experimentCallRecordSchema>;
 export type RolloutInputCapture = z.infer<typeof rolloutInputCaptureSchema>;
 export type ExperimentQualityBlock = z.infer<typeof experimentQualityBlockSchema>;
-export type ExperimentTableRecord = z.infer<typeof experimentTableRecordSchema>;
+export type ExperimentTableRecordV1 = z.infer<typeof experimentTableRecordV1Schema>;
+export type ExperimentTableRecordV2 = z.infer<typeof experimentTableRecordSchema>;
+export type ExperimentTableRecord = ExperimentTableRecordV1 | ExperimentTableRecordV2;
 
 export function decodeExperimentTableRecord(value: unknown): ExperimentTableRecord {
-  return experimentTableRecordSchema.parse(value);
+  if (typeof value !== 'object' || value === null || !('schemaVersion' in value)) {
+    throw new TypeError('Experiment table has no schema version.');
+  }
+  const version = value.schemaVersion;
+  if (
+    typeof version !== 'number' ||
+    !Number.isSafeInteger(version) ||
+    version < VTT_EXPERIMENT_MINIMUM_SCHEMA_VERSION ||
+    version > VTT_EXPERIMENT_SCHEMA_VERSION
+  ) {
+    throw new Error('Experiment table is outside the supported schema-version window.');
+  }
+  switch (version) {
+    case 1:
+      return experimentTableRecordV1Schema.parse(value);
+    case VTT_EXPERIMENT_SCHEMA_VERSION:
+      return experimentTableRecordSchema.parse(value);
+  }
+  throw new Error('Experiment table schema-version dispatch is incomplete.');
 }
 
 export interface DistributionSummary {

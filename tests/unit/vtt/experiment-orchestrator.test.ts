@@ -1,7 +1,9 @@
+import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { canonicalJson } from '../../../src/commands/canonical-json';
 import {
   decodeRoundPlanStructure,
   e01RoundPlanReplyContract,
@@ -11,6 +13,7 @@ import {
   computeTacticalRegretFromCaptures,
   decodeExperimentTableRecord,
   type ExperimentTableRecord,
+  type ExperimentTableRecordV2,
 } from '../../../src/vtt/experiment-telemetry';
 import {
   buildExperimentSchedule,
@@ -24,7 +27,8 @@ import {
 
 const FAKE_CODEX = 'tests/fixtures/fake-codex-dm.mjs';
 let directory = '';
-let liveRecord: ExperimentTableRecord;
+let liveRecord: ExperimentTableRecordV2;
+let repeatedRecord: ExperimentTableRecordV2;
 
 function config(outDirectory: string): VttExperimentConfig {
   return {
@@ -36,6 +40,30 @@ function config(outDirectory: string): VttExperimentConfig {
     reasoningEffort: 'medium',
     requestTimeoutMs: 2_000,
     tableTimeoutMs: 15_000,
+    candidateTurnK: 64,
+  };
+}
+
+function digest(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+function legacyV1Record(record: ExperimentTableRecordV2): unknown {
+  return {
+    ...structuredClone(record),
+    schemaVersion: 1,
+    quality: {
+      ...structuredClone(record.quality),
+      rolloutInputCaptures: record.quality.rolloutInputCaptures.map((capture) => {
+        const {
+          serializedEncounterState: _serializedEncounterState,
+          candidateTurnK: _candidateTurnK,
+          candidateTurns: _candidateTurns,
+          ...legacy
+        } = capture;
+        return legacy;
+      }),
+    },
   };
 }
 
@@ -46,6 +74,12 @@ beforeAll(async () => {
   const first = buildExperimentSchedule('E01')[0];
   if (first === undefined) throw new Error('E01 schedule is empty.');
   liveRecord = await runE01Table(first, execution, preregistration);
+  const repeatedExecution = config(join(directory, 'repeat'));
+  repeatedRecord = await runE01Table(
+    first,
+    repeatedExecution,
+    preregisterExperiment(repeatedExecution),
+  );
 }, 30_000);
 
 afterAll(async () => {
@@ -93,6 +127,72 @@ describe('E01 experiment registry and orchestration', () => {
     expect(liveRecord.calls.every((call) => call.fullStateHash.length === 64)).toBe(true);
     expect(liveRecord.quality.regretStatus).toBe('deferred');
     expect(liveRecord.quality.rolloutInputCaptures).toHaveLength(5);
+    expect(liveRecord.schemaVersion).toBe(2);
+    expect(liveRecord.quality.rolloutInputCaptures.every((capture) =>
+      capture.selectedAction.length === 4 &&
+      capture.candidateTurnK === 64 &&
+      capture.candidateTurns.length === 4 &&
+      capture.candidateTurns.every((turnSet) =>
+        turnSet.candidates.length > 0 &&
+        turnSet.candidates.length <= capture.candidateTurnK &&
+        turnSet.candidates.every((candidate, index) =>
+          candidate.rank === index + 1 &&
+          candidate.stableSortKey === canonicalJson(candidate.program),
+        ),
+      ),
+    )).toBe(true);
+  });
+
+  it('state_capture_lossy: captured EncounterState round-trips byte-exact through the session serializer', () => {
+    for (const capture of liveRecord.quality.rolloutInputCaptures) {
+      const reconstructed: unknown = JSON.parse(capture.serializedEncounterState);
+      const call = liveRecord.calls.find((candidate) =>
+        candidate.logicalCallId === capture.logicalCallId);
+      expect(canonicalJson(reconstructed)).toBe(capture.serializedEncounterState);
+      expect(digest(capture.serializedEncounterState)).toBe(capture.stateHash);
+      expect(capture.stateHash).toBe(call?.fullStateHash);
+      expect(reconstructed).toMatchObject({
+        config: { initiativeMode: 'shared_enemy' },
+        revision: expect.any(Number),
+        nextEventSequence: expect.any(Number),
+        nextEffectSequence: expect.any(Number),
+        bounds: expect.any(Object),
+        blockedCells: expect.any(Array),
+        foggedCells: expect.any(Array),
+        dmNotes: expect.any(Array),
+        combatants: expect.any(Array),
+        tokens: expect.any(Array),
+        initiative: expect.any(Array),
+        activeCombatant: expect.toSatisfy((value: unknown) =>
+          value === null || typeof value === 'string'),
+        activeInitiativeIndex: expect.toSatisfy((value: unknown) =>
+          value === null || typeof value === 'number'),
+        round: expect.any(Number),
+        effects: expect.any(Array),
+        eventLog: expect.any(Array),
+      });
+    }
+  });
+
+  it('candidate_order_unstable: candidate enumeration is identical across two synthetic table runs', () => {
+    expect(repeatedRecord.quality.rolloutInputCaptures.map((capture) => capture.candidateTurns))
+      .toEqual(liveRecord.quality.rolloutInputCaptures.map((capture) => capture.candidateTurns));
+  });
+
+  it('v1_unreadable: the version-window reader loads both legacy v1 and current v2 tables', () => {
+    const legacy = decodeExperimentTableRecord(legacyV1Record(liveRecord));
+    const current = decodeExperimentTableRecord(structuredClone(liveRecord));
+    expect(legacy.schemaVersion).toBe(1);
+    expect(current.schemaVersion).toBe(2);
+    expect(legacy.quality.rolloutInputCaptures).toHaveLength(5);
+    expect(current.quality.rolloutInputCaptures).toHaveLength(5);
+  });
+
+  it('keeps representative inline v2 table captures below the sidecar threshold', () => {
+    const legacyBytes = Buffer.byteLength(canonicalJson(legacyV1Record(liveRecord)));
+    const currentBytes = Buffer.byteLength(canonicalJson(liveRecord));
+    expect(currentBytes).toBeGreaterThan(legacyBytes);
+    expect(currentBytes).toBeLessThan(5 * 1024 * 1024);
   });
 
   it('report_drops_aborted_tables: aggregate denominators and token totals retain aborted tables', () => {
@@ -143,7 +243,13 @@ describe('E01 experiment registry and orchestration', () => {
       skipRegret: true,
       model: 'gpt-5.6-terra',
       reasoningEffort: 'medium',
+      candidateTurnK: 64,
     });
+    expect(decodeVttExperimentArguments([
+      '--experiment', 'E01',
+      '--out', '/tmp/e01',
+      '--candidate-turn-k', '7',
+    ]).candidateTurnK).toBe(7);
     expect(decodeVttExperimentArguments([
       '--experiment', 'E01',
       '--out', '/tmp/e01',
