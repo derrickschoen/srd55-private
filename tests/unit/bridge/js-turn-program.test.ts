@@ -146,4 +146,32 @@ describe('restricted JS turn-program parser and interpreter', () => {
       action: { target: { combatantId: 'combatant:js-program-player-a' } },
     });
   });
+
+  it('emits explicit selectable programs for granted Bonus Action attacks and Action Surge', () => {
+    const result = interpretJsTurnProgram(
+      'const target = nearestEnemy(); emit(priority(bonusAttack(target), actionSurge(), attack(target)));',
+      projection(),
+      ACTOR,
+    );
+    expect(result.emittedDecisionProgram).toEqual({
+      kind: 'priority',
+      choices: [
+        {
+          kind: 'action',
+          action: {
+            kind: 'bonus_attack',
+            target: { kind: 'combatant', combatantId: 'combatant:js-program-player-a' },
+          },
+        },
+        { kind: 'action', action: { kind: 'use_action', action: 'action_surge' } },
+        {
+          kind: 'action',
+          action: {
+            kind: 'attack',
+            target: { kind: 'combatant', combatantId: 'combatant:js-program-player-a' },
+          },
+        },
+      ],
+    });
+  });
 });

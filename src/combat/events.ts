@@ -41,6 +41,11 @@ export type EncounterCommand =
       readonly attackerCanSeeTarget: boolean;
       readonly targetCanSeeAttacker: boolean;
       readonly damage: DamageRequest;
+      readonly bonusActionGrantEffectId?: EncounterEffectId;
+      readonly riderSelections?: readonly {
+        readonly effectId: EncounterEffectId;
+        readonly slotLevel: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+      }[];
     }
   | {
       readonly type: 'opportunity_attack';
@@ -77,6 +82,11 @@ export type EncounterCommand =
       readonly type: 'spend_bonus_action' | 'spend_reaction';
       readonly actor: CombatantId;
       readonly purpose: string;
+    }
+  | {
+      readonly type: 'activate_action_surge';
+      readonly actor: CombatantId;
+      readonly effectId: EncounterEffectId;
     }
   | {
       readonly type: 'heal';

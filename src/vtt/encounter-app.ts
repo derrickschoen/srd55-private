@@ -72,6 +72,8 @@ function actionLabel(action: EncounterCommand): string {
       return action.purpose;
     case 'spend_reaction':
       return action.purpose;
+    case 'activate_action_surge':
+      return 'Action Surge';
     case 'heal':
       return 'Heal';
     case 'apply_effect':

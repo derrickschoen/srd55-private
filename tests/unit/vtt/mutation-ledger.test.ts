@@ -23,6 +23,7 @@ const TURN_PROGRAM_LIBRARY_LEDGER_PATH = 'docs/audits/2026-08-20-turn-program-li
 const E04_E06_LEDGER_PATH = 'docs/audits/2026-08-20-e04-e06-engine-prerequisites-mutation-ledger.md';
 const E01_EXPERIMENT_LEDGER_PATH = 'docs/audits/2026-08-20-e01-experiment-orchestrator-mutation-ledger.md';
 const PARTY_EFFECTS_LEDGER_PATH = 'docs/audits/2026-08-20-party-pack-v2-effects-mutation-ledger.md';
+const EFFECT_FAMILIES_LEDGER_PATH = 'docs/audits/2026-08-21-party-pack-effect-families-mutation-ledger.md';
 const PARTY_MULTISOURCE_LEDGER_PATH = 'docs/audits/2026-08-21-party-pack-multisource-mutation-ledger.md';
 const REGRET_ORACLE_LEDGER_PATH = 'docs/audits/2026-08-21-vtt-regret-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
@@ -106,6 +107,19 @@ describe('phase-2 mutation ledger manifest', () => {
     expect(ledger).toContain('`malformed_plan_accepted`');
     expect(ledger).toContain('malformed_plan_accepted keeps the strict decoder closed');
     expect(ledger).toContain('Restored `z.strictObject`');
+  });
+
+  it('EFFECT-FAMILIES-MUTATION-LEDGER pins all four required controls to named killing tests', () => {
+    const ledger = readFileSync(EFFECT_FAMILIES_LEDGER_PATH, 'utf8');
+    for (const name of [
+      'rider_fires_twice_per_turn',
+      'smite_dice_not_doubled_on_crit',
+      'bonus_attack_always_legal',
+      'rider_condition_ignored',
+    ]) {
+      expect(ledger).toContain(`\`${name}\``);
+      expect(ledger).not.toContain(`| \`${name}\` | Pending execution`);
+    }
   });
 
   it('JS-TURN-PROGRAM-MUTATION-LEDGER pins all required controls and both own controls', () => {

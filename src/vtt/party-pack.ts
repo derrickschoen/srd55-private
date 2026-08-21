@@ -1,11 +1,14 @@
 import { z } from 'zod';
 import type { CombatantProfile } from '../combat/combatant';
+import type { TurnLegalActions } from '../combat/coordinator';
 import { conditionNames, type ConditionName } from '../combat/conditions';
 import {
+  damageRiderGates,
   type CombatFeatureEffect,
   type EffectApplication,
 } from '../combat/effects';
 import type { EncounterCommand } from '../combat/events';
+import { gridDistance } from '../combat/grid';
 import type { SpellCastCommand } from '../combat/spells/types';
 import { SPELL_MANIFEST, type SpellManifestRow } from '../combat/spells/manifest';
 import {
@@ -144,6 +147,12 @@ const nonExhaustionConditionNames = conditionNames.filter(
 
 const FEATURE_EFFECT_KINDS = [
   'damage_rider',
+  'once_per_turn_damage_rider',
+  'slot_spend_damage_rider',
+  'first_hit_damage_rider',
+  'bonus_action_attack_grant',
+  'extra_attack_count_override',
+  'action_surge',
   'attack_roll_modifier',
   'attack_roll_mode',
   'armor_class_modifier',
@@ -161,6 +170,55 @@ const featureEffectSchema = z.discriminatedUnion('kind', [
     kind: z.literal('damage_rider'),
     trigger: damageRiderTriggerSchema,
     damage: z.array(effectDamageSchema).min(1).max(20),
+  }),
+  z.strictObject({
+    ...featureEffectBaseShape,
+    kind: z.literal('once_per_turn_damage_rider'),
+    trigger: z.literal('on_hit'),
+    oncePerTurnGate: z.literal(damageRiderGates[2]),
+    qualifyingGates: z.array(z.enum([
+      damageRiderGates[0],
+      damageRiderGates[1],
+    ])).min(1).max(2),
+    damage: z.array(effectDamageSchema).min(1).max(20),
+  }),
+  z.strictObject({
+    ...featureEffectBaseShape,
+    kind: z.literal('slot_spend_damage_rider'),
+    trigger: z.literal('on_hit'),
+    spendGate: z.literal(damageRiderGates[4]),
+    criticalGate: z.literal(damageRiderGates[3]),
+    damageTypeId: z.enum(damageTypes),
+    baseCount: integerSchema.min(0).max(100),
+    countPerSlotLevel: integerSchema.min(1).max(20),
+    sides: dieSidesSchema,
+    modifier: modifierSchema,
+  }),
+  z.strictObject({
+    ...featureEffectBaseShape,
+    kind: z.literal('first_hit_damage_rider'),
+    trigger: z.literal('on_hit'),
+    gate: z.literal(damageRiderGates[2]),
+    damageTypeId: z.enum(damageTypes),
+    amount: integerSchema.min(0).max(100_000),
+  }),
+  z.strictObject({
+    ...featureEffectBaseShape,
+    kind: z.literal('bonus_action_attack_grant'),
+    attackCount: integerSchema.min(1).max(20),
+  }),
+  z.strictObject({
+    ...featureEffectBaseShape,
+    kind: z.literal('extra_attack_count_override'),
+    levels: z.array(z.strictObject({
+      minimumLevel: classLevelSchema,
+      attackCount: integerSchema.min(1).max(20),
+    })).min(1).max(20),
+  }),
+  z.strictObject({
+    ...featureEffectBaseShape,
+    kind: z.literal('action_surge'),
+    resourcePoolId: resourcePoolIdSchema,
   }),
   z.strictObject({
     ...featureEffectBaseShape,
@@ -226,8 +284,31 @@ const featureEffectSchema = z.discriminatedUnion('kind', [
     speedDeltaFeet: modifierSchema,
   }),
 ]).superRefine((effect, context) => {
-  if (effect.trigger === 'always_on' && effect.resourcePoolId !== undefined) {
+  if (
+    'trigger' in effect &&
+    effect.trigger === 'always_on' &&
+    effect.resourcePoolId !== undefined
+  ) {
     context.addIssue({ code: 'custom', message: 'Always-on effects cannot spend a limited resource.' });
+  }
+  if (
+    effect.kind === 'extra_attack_count_override' &&
+    (effect.resourcePoolId !== undefined ||
+      new Set(effect.levels.map((level) => level.minimumLevel)).size !== effect.levels.length)
+  ) {
+    context.addIssue({ code: 'custom', message: 'Extra Attack overrides require unique levels and no resource.' });
+  }
+  if (
+    effect.kind === 'slot_spend_damage_rider' &&
+    effect.resourcePoolId !== undefined
+  ) {
+    context.addIssue({ code: 'custom', message: 'Slot-spend riders use spell slots, not limited resources.' });
+  }
+  if (
+    effect.kind === 'once_per_turn_damage_rider' &&
+    new Set(effect.qualifyingGates).size !== effect.qualifyingGates.length
+  ) {
+    context.addIssue({ code: 'custom', message: 'Once-per-turn rider gates must be unique.' });
   }
 });
 
@@ -746,10 +827,13 @@ function loadedAttack(attack: ExternalPartyPackAttack): LoadedPartyAttack {
   };
 }
 
-function loadedFeatureEffect(effect: ExternalPartyPackEffect): CombatFeatureEffect {
+function loadedFeatureEffect(
+  effect: ExternalPartyPackEffect,
+  totalLevel: number,
+): CombatFeatureEffect {
   const common = {
     id: encounterEffectId(effect.effectId),
-    trigger: effect.trigger,
+    trigger: 'trigger' in effect ? effect.trigger : 'always_on' as const,
     resourcePoolId: effect.resourcePoolId === undefined
       ? null
       : limitedResourcePoolId(effect.resourcePoolId),
@@ -775,6 +859,77 @@ function loadedFeatureEffect(effect: ExternalPartyPackEffect): CombatFeatureEffe
           appliesTo: 'weapon_attack_by_target',
         },
       };
+    case 'once_per_turn_damage_rider':
+      return {
+        ...common,
+        payload: {
+          kind: 'damage_rider',
+          damage: {
+            terms: effect.damage.map((term) => ({
+              type: damageType(term.damageTypeId),
+              dice: { count: term.count, sides: dieSides(term.sides), modifier: term.modifier },
+            })),
+            critical: false,
+            responses: [],
+          },
+          appliesTo: 'weapon_attack_by_target',
+          gating: {
+            kind: 'once_per_turn',
+            oncePerTurnGate: effect.oncePerTurnGate,
+            qualifyingGates: effect.qualifyingGates,
+          },
+        },
+      };
+    case 'slot_spend_damage_rider':
+      return {
+        ...common,
+        payload: {
+          kind: 'damage_rider',
+          damage: {
+            terms: [{
+              type: damageType(effect.damageTypeId),
+              dice: { count: 0, sides: dieSides(effect.sides), modifier: effect.modifier },
+            }],
+            critical: false,
+            responses: [],
+          },
+          appliesTo: 'weapon_attack_by_target',
+          gating: {
+            kind: 'slot_spend',
+            spendGate: effect.spendGate,
+            criticalGate: effect.criticalGate,
+            baseCount: effect.baseCount,
+            countPerSlotLevel: effect.countPerSlotLevel,
+          },
+        },
+      };
+    case 'first_hit_damage_rider':
+      return {
+        ...common,
+        payload: {
+          kind: 'damage_rider',
+          damage: {
+            terms: [{
+              type: damageType(effect.damageTypeId),
+              dice: { count: 0, sides: dieSides(6), modifier: effect.amount },
+            }],
+            critical: false,
+            responses: [],
+          },
+          appliesTo: 'weapon_attack_by_target',
+          gating: { kind: 'first_hit_this_turn', gate: effect.gate },
+        },
+      };
+    case 'bonus_action_attack_grant':
+      return { ...common, payload: { kind: 'bonus_action_attack_grant', attackCount: effect.attackCount } };
+    case 'extra_attack_count_override': {
+      const attackCount = [...effect.levels]
+        .filter((level) => level.minimumLevel <= totalLevel)
+        .sort((left, right) => right.minimumLevel - left.minimumLevel)[0]?.attackCount ?? 1;
+      return { ...common, payload: { kind: 'extra_attack_count_override', attackCount } };
+    }
+    case 'action_surge':
+      return { ...common, payload: { kind: 'action_surge', perShortRest: true } };
     case 'attack_roll_modifier':
       return { ...common, payload: { kind: 'attack_roll_modifier', count: effect.count, sides: effect.sides, sign: effect.sign } };
     case 'attack_roll_mode':
@@ -828,7 +983,8 @@ function loadedMember(
       member.savingThrowBonuses[ability] + (passive?.savingThrowBonuses?.[ability] ?? 0),
     ]),
   ) as Record<Ability, number>;
-  const effects = extensions.effects.map(loadedFeatureEffect);
+  const totalLevel = member.classes.reduce((sum, heldClass) => sum + heldClass.level, 0);
+  const effects = extensions.effects.map((effect) => loadedFeatureEffect(effect, totalLevel));
   const skillBonuses = Object.fromEntries(
     (passive?.skillBonuses ?? []).map((entry) => [entry.skillId, entry.bonus]),
   ) as Partial<Record<Skill, number>>;
@@ -921,6 +1077,13 @@ export function loadedPartyAttackCommand(
   member: LoadedPartyMember,
   attackId: string,
   target: Extract<EncounterCommand, { readonly type: 'attack' }>['target'],
+  options: {
+    readonly bonusActionGrantEffectId?: EncounterEffectId;
+    readonly riderSelections?: readonly {
+      readonly effectId: EncounterEffectId;
+      readonly slotLevel: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+    }[];
+  } = {},
 ): Extract<EncounterCommand, { readonly type: 'attack' }> {
   const attack = member.attacks.find((candidate) => candidate.attackId === attackId);
   if (attack === undefined) throw new PartyAttackError();
@@ -941,6 +1104,86 @@ export function loadedPartyAttackCommand(
       critical: false,
       responses: [],
     },
+    ...(options.bonusActionGrantEffectId === undefined
+      ? {}
+      : { bonusActionGrantEffectId: options.bonusActionGrantEffectId }),
+    ...(options.riderSelections === undefined
+      ? {}
+      : { riderSelections: options.riderSelections }),
+  };
+}
+
+function loadedMemberPosition(state: Parameters<TurnLegalActions>[0], id: ReturnType<typeof combatantId>) {
+  const found = state.tokens.find((candidate) => candidate.combatantId === id);
+  if (found === undefined) throw new Error(`Loaded party combatant ${id} has no token.`);
+  return found.position;
+}
+
+/** Enumerates reducer-valid attacks and feature actions for loaded v2 party members. */
+export function loadedPartyTurnLegalActions(
+  members: readonly LoadedPartyMember[],
+): TurnLegalActions {
+  const byId = new Map(members.map((member) => [member.profile.id, member] as const));
+  return (state, actor) => {
+    const member = byId.get(actor);
+    if (member === undefined) return { actions: [{ type: 'end_turn', actor }] };
+    const acting = state.combatants.find((candidate) => candidate.profile.id === actor);
+    if (acting === undefined) throw new Error(`Loaded party combatant ${actor} is absent from the encounter.`);
+    const targets = state.combatants.filter((candidate) =>
+      candidate.profile.kind !== acting.profile.kind && candidate.life !== 'dead');
+    const smites = member.effects.filter((effect) =>
+      effect.payload.kind === 'damage_rider' && effect.payload.gating?.kind === 'slot_spend');
+    const riderChoices = [undefined, ...smites.flatMap((effect) =>
+      acting.spellSlots
+        .filter((slot) => slot.remaining > 0 && slot.level >= 1 && slot.level <= 9)
+        .map((slot) => [{ effectId: effect.id, slotLevel: slot.level as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 }]))];
+    const commands = (
+      bonusActionGrantEffectId?: EncounterEffectId,
+    ): Extract<EncounterCommand, { readonly type: 'attack' }>[] =>
+      targets.flatMap((target) => member.attacks.flatMap((attack) => {
+        const distance = gridDistance(
+          loadedMemberPosition(state, actor),
+          loadedMemberPosition(state, target.profile.id),
+        );
+        const inRange = attack.kind === 'melee'
+          ? distance <= attack.reach
+          : distance <= attack.range;
+        if (!inRange) return [];
+        return riderChoices.map((riderSelections) => loadedPartyAttackCommand(
+          member,
+          attack.attackId,
+          target.profile.id,
+          {
+            ...(bonusActionGrantEffectId === undefined ? {} : { bonusActionGrantEffectId }),
+            ...(riderSelections === undefined ? {} : { riderSelections }),
+          },
+        ));
+      }));
+
+    const actions: EncounterCommand[] = [];
+    if (acting.turn.action.kind !== 'spent') actions.push(...commands());
+    for (const effect of member.effects) {
+      if (effect.payload.kind === 'bonus_action_attack_grant') {
+        const pool = effect.resourcePoolId === null
+          ? null
+          : (acting.limitedResources ?? []).find((candidate) => candidate.id === effect.resourcePoolId);
+        const continuing = (acting.turn.bonusAttacksRemaining ?? 0) > 0 &&
+          acting.turn.bonusAttackGrantEffectId === effect.id;
+        if (continuing || (acting.turn.bonusActionAvailable && (pool === null || (pool?.remaining ?? 0) > 0))) {
+          actions.push(...commands(effect.id));
+        }
+      }
+      if (effect.payload.kind === 'action_surge' && acting.turn.action.kind === 'spent') {
+        const pool = effect.resourcePoolId === null
+          ? null
+          : (acting.limitedResources ?? []).find((candidate) => candidate.id === effect.resourcePoolId);
+        if ((pool?.remaining ?? 0) > 0) {
+          actions.push({ type: 'activate_action_surge', actor, effectId: effect.id });
+        }
+      }
+    }
+    actions.push({ type: 'end_turn', actor });
+    return { actions };
   };
 }
 
@@ -1597,11 +1840,18 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
 
       const resourceIds = new Set(resources.map((pool) => pool.resourcePoolId));
       effects = effects.filter((effect, effectIndex) => {
-        const valid = effect.resourcePoolId === undefined || resourceIds.has(effect.resourcePoolId);
+        const referencedPool = effect.resourcePoolId === undefined
+          ? undefined
+          : resources.find((pool) => pool.resourcePoolId === effect.resourcePoolId);
+        const valid = (effect.resourcePoolId === undefined || referencedPool !== undefined) &&
+          (effect.kind !== 'action_surge' || referencedPool?.recharge === 'short_rest') &&
+          (effect.kind !== 'extra_attack_count_override' ||
+            effect.levels.some((level) => level.minimumLevel <= totalLevel));
         if (!valid) {
           gaps.push(issueGap(
             entry,
-            ['members', index, 'effects', effectIndex, 'resourcePoolId'],
+            ['members', index, 'effects', effectIndex,
+              effect.kind === 'extra_attack_count_override' ? 'levels' : 'resourcePoolId'],
             'value_not_in_engine_vocabulary',
           ));
         }

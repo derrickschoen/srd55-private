@@ -9,6 +9,7 @@ import {
 } from './conditions';
 import type { CombatantProfile, CombatToken } from './combatant';
 import type {
+  CombatFeatureEffect,
   EffectApplication,
   EffectPayload,
   EncounterEffect,
@@ -71,6 +72,9 @@ export type ActionResource =
 export interface TurnResources {
   readonly action: ActionResource;
   readonly bonusActionAvailable: boolean;
+  readonly bonusAttacksRemaining?: number;
+  readonly bonusAttackGrantEffectId?: EncounterEffectId | null;
+  readonly usedDamageRiderEffectIds?: readonly EncounterEffectId[];
   readonly reactionAvailable: boolean;
   readonly movement: TurnMovement;
   readonly disengaging: boolean;
@@ -381,6 +385,9 @@ function appliedConditions(effect: EncounterEffect): readonly AppliedCondition[]
     case 'd20_test_modifier':
     case 'damage_reduction':
     case 'damage_rider':
+    case 'bonus_action_attack_grant':
+    case 'extra_attack_count_override':
+    case 'action_surge':
     case 'magic_missile_immunity':
     case 'movement_modifier':
     case 'opportunity_attacks_disabled':
@@ -1145,12 +1152,74 @@ function spendLimitedResource(
   });
 }
 
-function beginAttack(context: ReductionContext, actor: CombatantId): void {
+function featureEffect(
+  state: EncounterState,
+  actor: CombatantId,
+  effectId: EncounterEffectId,
+): CombatFeatureEffect {
+  const effect = (combatant(state, actor).profile.rules.featureEffects ?? [])
+    .find((candidate) => candidate.id === effectId);
+  if (effect === undefined) {
+    throw new EncounterRuleError(`Combatant ${actor} has no feature effect ${effectId}.`);
+  }
+  return effect;
+}
+
+function attacksPerAction(subject: EncounterCombatantState): number {
+  const overrides = (subject.profile.rules.featureEffects ?? []).flatMap((effect) =>
+    effect.payload.kind === 'extra_attack_count_override'
+      ? [effect.payload.attackCount]
+      : []);
+  return overrides.length === 0
+    ? subject.profile.rules.attacksPerAction
+    : Math.max(...overrides);
+}
+
+function beginAttack(
+  context: ReductionContext,
+  command: Extract<EncounterCommand, { readonly type: 'attack' }>,
+): void {
+  const actor = command.actor;
   assertCanUseActions(context, actor);
-  const subject = combatant(context.state, actor);
+  let subject = combatant(context.state, actor);
+  if (command.bonusActionGrantEffectId !== undefined) {
+    const grant = featureEffect(context.state, actor, command.bonusActionGrantEffectId);
+    if (grant.payload.kind !== 'bonus_action_attack_grant') {
+      throw new EncounterRuleError(`Effect ${grant.id} does not grant Bonus Action attacks.`);
+    }
+    if ((subject.turn.bonusAttacksRemaining ?? 0) > 0) {
+      if (subject.turn.bonusAttackGrantEffectId !== grant.id) {
+        throw new EncounterRuleError(`Combatant ${actor} is already resolving another Bonus Action attack grant.`);
+      }
+      context.state = replaceCombatant(context.state, {
+        ...subject,
+        turn: {
+          ...subject.turn,
+          bonusAttacksRemaining: (subject.turn.bonusAttacksRemaining ?? 0) - 1,
+          bonusAttackGrantEffectId:
+            subject.turn.bonusAttacksRemaining === 1 ? null : grant.id,
+        },
+      });
+      return;
+    }
+    spendCost(context, actor, 'bonus_action', `Effect ${grant.id}`);
+    if (grant.resourcePoolId !== null) {
+      spendLimitedResource(context, actor, grant.resourcePoolId, `Effect ${grant.id}`);
+    }
+    subject = combatant(context.state, actor);
+    context.state = replaceCombatant(context.state, {
+      ...subject,
+      turn: {
+        ...subject.turn,
+        bonusAttacksRemaining: grant.payload.attackCount - 1,
+        bonusAttackGrantEffectId: grant.payload.attackCount === 1 ? null : grant.id,
+      },
+    });
+    return;
+  }
   switch (subject.turn.action.kind) {
     case 'available': {
-      const remaining = subject.profile.rules.attacksPerAction - 1;
+      const remaining = attacksPerAction(subject) - 1;
       context.state = replaceCombatant(context.state, {
         ...subject,
         turn: {
@@ -1433,6 +1502,9 @@ function cloneEffectApplication(
       case 'creature_type_protection':
       case 'd20_test_modifier':
       case 'damage_reduction':
+      case 'bonus_action_attack_grant':
+      case 'extra_attack_count_override':
+      case 'action_surge':
       case 'magic_missile_immunity':
       case 'movement_modifier':
       case 'opportunity_attacks_disabled':
@@ -1723,6 +1795,58 @@ function startTurn(context: ReductionContext, id: CombatantId, round: number): v
   }
 }
 
+function hasAdjacentAlly(
+  state: EncounterState,
+  actor: CombatantId,
+  target: CombatantId,
+): boolean {
+  const acting = combatant(state, actor);
+  return state.combatants.some((candidate) =>
+    candidate.profile.id !== actor &&
+    candidate.profile.kind === acting.profile.kind &&
+    candidate.life === 'living' &&
+    gridDistance(token(state, candidate.profile.id).position, token(state, target).position) <= 5);
+}
+
+function selectedSlotLevel(
+  command: Extract<EncounterCommand, { readonly type: 'attack' }>,
+  effectId: EncounterEffectId,
+): 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | null {
+  const selections = command.riderSelections ?? [];
+  if (new Set(selections.map((selection) => selection.effectId)).size !== selections.length) {
+    throw new EncounterRuleError('Attack rider selections must name unique effects.');
+  }
+  return selections.find((selection) => selection.effectId === effectId)?.slotLevel ?? null;
+}
+
+function spendRiderSpellSlot(
+  context: ReductionContext,
+  actor: CombatantId,
+  slotLevel: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9,
+  effectId: EncounterEffectId,
+): void {
+  const subject = combatant(context.state, actor);
+  const slot = subject.spellSlots.find((candidate) => candidate.level === slotLevel);
+  if (slot === undefined || slot.remaining < 1) {
+    throw new EncounterRuleError(`Combatant ${actor} has no level-${String(slotLevel)} spell slot remaining.`);
+  }
+  const remaining = slot.remaining - 1;
+  context.state = replaceCombatant(context.state, {
+    ...subject,
+    spellSlots: subject.spellSlots.map((candidate) =>
+      candidate.level === slotLevel ? { ...candidate, remaining } : candidate),
+  });
+  emit(context, { type: 'spell_slot_spent', combatant: actor, slotLevel, remaining });
+  const refreshed = combatant(context.state, actor);
+  context.state = replaceCombatant(context.state, {
+    ...refreshed,
+    turn: {
+      ...refreshed.turn,
+      usedDamageRiderEffectIds: [...(refreshed.turn.usedDamageRiderEffectIds ?? []), effectId],
+    },
+  });
+}
+
 function processAttack(
   context: ReductionContext,
   command: Extract<
@@ -1732,7 +1856,7 @@ function processAttack(
 ): void {
   if (command.type === 'attack') {
     assertActiveActor(context, command.actor);
-    beginAttack(context, command.actor);
+    beginAttack(context, command);
   } else {
     const reactor = combatant(context.state, command.actor);
     if (
@@ -1809,20 +1933,73 @@ function processAttack(
           token(context.state, command.target).position,
         ) <= clause.feet,
     );
-    const triggeredRiders = (combatant(context.state, command.actor).profile.rules.featureEffects ?? []).filter(
-      (effect) =>
-        effect.payload.kind === 'damage_rider' &&
-        effect.payload.appliesTo === 'weapon_attack_by_target' &&
-        (effect.trigger === 'on_hit' ||
-          (effect.trigger === 'on_crit' && attack.outcome === 'critical')),
-    );
+    const attacking = combatant(context.state, command.actor);
+    const triggeredRiders = (attacking.profile.rules.featureEffects ?? []).filter((effect) => {
+      if (
+        effect.payload.kind !== 'damage_rider' ||
+        effect.payload.appliesTo !== 'weapon_attack_by_target' ||
+        (effect.trigger !== 'on_hit' && !(effect.trigger === 'on_crit' && attack.outcome === 'critical'))
+      ) return false;
+      const gating = effect.payload.gating ?? { kind: 'unconditional' as const };
+      switch (gating.kind) {
+        case 'unconditional':
+          return true;
+        case 'once_per_turn':
+          return !(attacking.turn.usedDamageRiderEffectIds ?? []).includes(effect.id) &&
+            gating.qualifyingGates.some((gate) => {
+              switch (gate) {
+                case 'advantage_on_attack': return attack.roll.mode === 'advantage';
+                case 'ally_adjacent_to_target':
+                  return hasAdjacentAlly(context.state, command.actor, command.target);
+              }
+            });
+        case 'first_hit_this_turn':
+          return !(attacking.turn.usedDamageRiderEffectIds ?? []).includes(effect.id);
+        case 'slot_spend':
+          return command.type === 'attack' && selectedSlotLevel(command, effect.id) !== null;
+      }
+    });
     for (const rider of triggeredRiders) {
+      if (rider.payload.kind !== 'damage_rider') continue;
+      const gating = rider.payload.gating ?? { kind: 'unconditional' as const };
+      if (gating.kind === 'slot_spend') {
+        if (command.type !== 'attack') {
+          throw new EncounterRuleError('An Opportunity Attack cannot select a slot-spend rider.');
+        }
+        const slotLevel = selectedSlotLevel(command, rider.id);
+        if (slotLevel === null) throw new EncounterRuleError(`Effect ${rider.id} requires a selected spell slot.`);
+        spendRiderSpellSlot(context, command.actor, slotLevel, rider.id);
+      } else if (gating.kind === 'once_per_turn' || gating.kind === 'first_hit_this_turn') {
+        const current = combatant(context.state, command.actor);
+        context.state = replaceCombatant(context.state, {
+          ...current,
+          turn: {
+            ...current.turn,
+            usedDamageRiderEffectIds: [...(current.turn.usedDamageRiderEffectIds ?? []), rider.id],
+          },
+        });
+      }
       if (rider.resourcePoolId !== null) {
         spendLimitedResource(context, command.actor, rider.resourcePoolId, `Effect ${rider.id}`);
       }
     }
-    const riderTerms = triggeredRiders.flatMap((effect) =>
-      effect.payload.kind === 'damage_rider' ? effect.payload.damage.terms : []);
+    const riderTerms = triggeredRiders.flatMap((effect) => {
+      if (effect.payload.kind !== 'damage_rider') return [];
+      const payload = effect.payload;
+      return payload.gating?.kind === 'slot_spend' && command.type === 'attack'
+          ? payload.damage.terms.map((term) => ({
+              ...term,
+              dice: {
+                ...term.dice,
+                count: payload.gating?.kind === 'slot_spend'
+                  ? payload.gating.baseCount +
+                    payload.gating.countPerSlotLevel *
+                    (selectedSlotLevel(command, effect.id) ?? 0)
+                  : term.dice.count,
+              },
+            }))
+          : payload.damage.terms;
+    });
     const request = {
       ...command.damage,
       terms: [...command.damage.terms, ...riderTerms],
@@ -2268,6 +2445,9 @@ function resolvedSpellEffectPayload(
     case 'd20_test_modifier':
     case 'movement_modifier':
     case 'damage_rider':
+    case 'bonus_action_attack_grant':
+    case 'extra_attack_count_override':
+    case 'action_surge':
     case 'cannot_regain_hit_points':
     case 'opportunity_attacks_disabled':
     case 'light_source':
@@ -3334,6 +3514,24 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
         combatant: command.actor,
         resource: 'reaction',
         purpose: command.purpose,
+      });
+      return;
+    }
+    case 'activate_action_surge': {
+      const subject = assertActiveActor(context, command.actor);
+      assertCanUseActions(context, command.actor);
+      const effect = featureEffect(context.state, command.actor, command.effectId);
+      if (effect.payload.kind !== 'action_surge' || effect.resourcePoolId === null) {
+        throw new EncounterRuleError(`Effect ${effect.id} does not grant a resource-fueled extra action.`);
+      }
+      if (subject.turn.action.kind !== 'spent') {
+        throw new EncounterRuleError(`Combatant ${command.actor} must spend its current action before gaining another.`);
+      }
+      spendLimitedResource(context, command.actor, effect.resourcePoolId, `Effect ${effect.id}`);
+      const refreshed = combatant(context.state, command.actor);
+      context.state = replaceCombatant(context.state, {
+        ...refreshed,
+        turn: { ...refreshed.turn, action: { kind: 'available' } },
       });
       return;
     }
