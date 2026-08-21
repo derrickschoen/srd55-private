@@ -7,6 +7,7 @@ import { canonicalJson } from '../../../src/commands/canonical-json';
 import {
   decodeRoundPlanStructure,
   e01RoundPlanReplyContract,
+  e03RoundPlanReplyContract,
 } from '../../../src/vtt/dm-bridge/round-plan-contract';
 import {
   aggregateExperimentRecords,
@@ -19,9 +20,11 @@ import {
   buildExperimentSchedule,
   decodeVttExperimentArguments,
   EXPERIMENT_REGISTRY,
+  E03_TACTICAL_ADVICE_FORBIDDEN_PHRASES,
   preregisterExperiment,
   runE01Table,
   runE02Table,
+  runE03Table,
   runVttExperiment,
   seededArmOrder,
   type VttExperimentConfig,
@@ -32,8 +35,9 @@ let directory = '';
 let liveRecord: ExperimentTableRecordV2;
 let repeatedRecord: ExperimentTableRecordV2;
 let e02Record: ExperimentTableRecordV2;
+let e03Record: ExperimentTableRecordV2;
 
-function config(outDirectory: string, experimentId: 'E01' | 'E02' = 'E01'): VttExperimentConfig {
+function config(outDirectory: string, experimentId: 'E01' | 'E02' | 'E03' = 'E01'): VttExperimentConfig {
   return {
     experimentId,
     outDirectory,
@@ -90,6 +94,14 @@ beforeAll(async () => {
     firstE02,
     e02Execution,
     preregisterExperiment(e02Execution),
+  );
+  const e03Execution = config(join(directory, 'e03'), 'E03');
+  const firstE03 = buildExperimentSchedule('E03')[0];
+  if (firstE03 === undefined) throw new Error('E03 schedule is empty.');
+  e03Record = await runE03Table(
+    firstE03,
+    e03Execution,
+    preregisterExperiment(e03Execution),
   );
 }, 30_000);
 
@@ -169,6 +181,121 @@ describe('E02 worked-example experiment registration', () => {
       '--out', '/tmp/e02',
       '--skip-regret',
     ])).toMatchObject({ experimentId: 'E02', skipRegret: true });
+  });
+});
+
+function instructionWordCount(value: string): number {
+  return value.match(/\b[\p{L}\p{N}][\p{L}\p{N}'’-]*\b/gu)?.length ?? 0;
+}
+
+function sentenceCount(value: string): number {
+  return value.match(/[.!?]+(?=\s|$)/gu)?.length ?? 0;
+}
+
+describe('E03 instruction-length experiment registration', () => {
+  it('pins the three instruction arms and their preregistered length bounds', () => {
+    const arms = EXPERIMENT_REGISTRY.E03.arms;
+    expect(arms.map((arm) => arm.id)).toEqual([
+      'two-sentence-imperative',
+      'current-instructions',
+      'validation-failure-explainer',
+    ]);
+    expect(arms.map((arm) => arm.description)).toEqual([
+      'Use a two-sentence imperative instruction block.',
+      'Retain the current instruction block.',
+      'Explain common validation failures without tactical advice.',
+    ]);
+    expect(sentenceCount(arms[0]?.instructions ?? '')).toBeLessThanOrEqual(2);
+    expect(instructionWordCount(arms[2]?.instructions ?? '')).toBeGreaterThanOrEqual(350);
+    expect(instructionWordCount(arms[2]?.instructions ?? '')).toBeLessThanOrEqual(450);
+    expect(arms[1]?.instructions).toBe(
+      'You are the DM decision engine. Return exactly one JSON object and no markdown.',
+    );
+  });
+
+  it('explainer_contains_tactics: rejects every pinned tactical-advice phrase from the explanatory arm', () => {
+    expect(E03_TACTICAL_ADVICE_FORBIDDEN_PHRASES).toEqual([
+      'focus fire',
+      'attack the weakest',
+      'target the lowest',
+      'target the highest',
+      'prioritize enemies',
+      'lowest hit points',
+      'highest threat',
+      'retreat when',
+      'use dodge',
+      'save resources',
+      'spend resources',
+    ]);
+    const explainer = EXPERIMENT_REGISTRY.E03.arms[2]?.instructions.toLowerCase() ?? '';
+    expect(E03_TACTICAL_ADVICE_FORBIDDEN_PHRASES.filter((phrase) => explainer.includes(phrase))).toEqual([]);
+  });
+
+  it('shared_block_varies: keeps grammar, examples, state surface, AST surface, fixture, and round limit byte-identical', () => {
+    const arms = EXPERIMENT_REGISTRY.E03.arms;
+    const contracts = arms.map((arm) => e03RoundPlanReplyContract(
+      arm.id,
+      arm.instructions,
+      arm.workedExamples,
+    ));
+    const sharedContractBytes = contracts.map(({ instructions: _instructions, promptVariant: _promptVariant, ...shared }) => canonicalJson(shared));
+    expect(new Set(sharedContractBytes).size).toBe(1);
+    expect(new Set(arms.map((arm) => arm.exampleBlock)).size).toBe(1);
+    expect(arms.map((arm) => arm.exampleCount)).toEqual([3, 3, 3]);
+
+    const schedule = buildExperimentSchedule('E03');
+    expect(schedule).toHaveLength(144);
+    for (let index = 0; index < schedule.length; index += 3) {
+      const group = schedule.slice(index, index + 3);
+      expect(new Set(group.map((entry) => entry.pairId)).size).toBe(1);
+      expect(new Set(group.map((entry) => entry.seed)).size).toBe(1);
+      expect(new Set(group.map((entry) => entry.fixtureId)).size).toBe(1);
+      expect(new Set(group.map((entry) => entry.armId))).toEqual(new Set([
+        'two-sentence-imperative',
+        'current-instructions',
+        'validation-failure-explainer',
+      ]));
+    }
+    expect(EXPERIMENT_REGISTRY.E03.rounds).toBe(5);
+    expect(new Set(contracts.map((contract) => contract.surface))).toEqual(new Set(['json_ast']));
+  });
+
+  it('e03_digest_collides: preregistration is stable and distinct from E01 and E02', () => {
+    const first = preregisterExperiment(config('/tmp/e03-first', 'E03'));
+    const second = preregisterExperiment(config('/tmp/e03-second', 'E03'));
+    const e01 = preregisterExperiment(config('/tmp/e01-control'));
+    const e02 = preregisterExperiment(config('/tmp/e02-control', 'E02'));
+    expect(first.digest).toBe(second.digest);
+    expect(first.digest).not.toBe(e01.digest);
+    expect(first.digest).not.toBe(e02.digest);
+    expect(first.promptComponentHashes).not.toEqual(e01.promptComponentHashes);
+    expect(first.promptComponentHashes).not.toEqual(e02.promptComponentHashes);
+  });
+
+  it('emits capture v2 on a synthetic no-LLM E03 table', () => {
+    expect(() => decodeExperimentTableRecord(e03Record)).not.toThrow();
+    expect(e03Record).toMatchObject({
+      schemaVersion: 2,
+      experimentId: 'E03',
+      schemaVariant: 'compact-grammar-v1',
+      exampleCount: 3,
+      status: 'completed',
+      completedRounds: 5,
+      replayProofPassed: true,
+    });
+    expect(e03Record.calls).toHaveLength(5);
+    expect(e03Record.quality.rolloutInputCaptures).toHaveLength(5);
+    expect(e03Record.calls.every((call) => call.promptComponents.schemaGrammar.bytes > 0)).toBe(true);
+    expect(e03Record.calls.every((call) => call.promptComponents.examples.version === 'e03-three-worked-examples-v1')).toBe(true);
+    expect(e03Record.calls.every((call) => call.promptComponents.instructions.version?.startsWith('e03-') === true)).toBe(true);
+  });
+
+  it('accepts E03 on the otherwise unchanged CLI', () => {
+    expect(decodeVttExperimentArguments([
+      '--experiment', 'E03',
+      '--out', '/tmp/e03',
+      '--skip-regret',
+    ])).toMatchObject({ experimentId: 'E03', skipRegret: true });
   });
 });
 

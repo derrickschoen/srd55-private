@@ -407,6 +407,14 @@ export const E02_PROMPT_VARIANTS = [
 
 export type E02PromptVariant = (typeof E02_PROMPT_VARIANTS)[number];
 
+export const E03_PROMPT_VARIANTS = [
+  'two-sentence-imperative',
+  'current-instructions',
+  'validation-failure-explainer',
+] as const;
+
+export type E03PromptVariant = (typeof E03_PROMPT_VARIANTS)[number];
+
 export const E02_SHARED_INSTRUCTIONS =
   'You are the DM decision engine. Return exactly one JSON object and no markdown.' as const;
 
@@ -455,6 +463,16 @@ export interface E02CompactRoundPlanReplyContract extends RoundPlanReplyContract
   readonly workedExamples: readonly RoundPlan[];
 }
 
+export interface E03CompactRoundPlanReplyContract extends RoundPlanReplyContractBase {
+  readonly surface: 'json_ast';
+  readonly contractId: typeof E01_ROUND_PLAN_CONTRACT_ID;
+  readonly promptVariant: E03PromptVariant;
+  readonly delivery: 'compact';
+  readonly grammar: typeof ROUND_PLAN_COMPACT_JSON_GRAMMAR;
+  readonly instructions: string;
+  readonly workedExamples: readonly [RoundPlan, RoundPlan, RoundPlan];
+}
+
 export type E01RoundPlanReplyContract =
   | E01FullRoundPlanReplyContract
   | E01ReferencedRoundPlanReplyContract
@@ -470,7 +488,8 @@ export type RoundPlanReplyContract =
   | JsonAstRoundPlanReplyContract
   | JsProgramRoundPlanReplyContract
   | E01RoundPlanReplyContract
-  | E02CompactRoundPlanReplyContract;
+  | E02CompactRoundPlanReplyContract
+  | E03CompactRoundPlanReplyContract;
 
 export const ROUND_PLAN_REPLY_CONTRACT: JsonAstRoundPlanReplyContract = Object.freeze({
   surface: 'json_ast',
@@ -544,6 +563,24 @@ export function e02RoundPlanReplyContract(
     grammar: ROUND_PLAN_COMPACT_JSON_GRAMMAR,
     instructions: E02_SHARED_INSTRUCTIONS,
     workedExamples: Object.freeze([...workedExamples]),
+  });
+}
+
+export function e03RoundPlanReplyContract(
+  variant: E03PromptVariant,
+  instructions: string,
+  workedExamples: readonly [RoundPlan, RoundPlan, RoundPlan],
+): E03CompactRoundPlanReplyContract {
+  return Object.freeze({
+    surface: 'json_ast',
+    schemaVersion: ROUND_PLAN_CONTRACT_SCHEMA_VERSION,
+    maximumCorrectionAttempts: MAX_ROUND_PLAN_CORRECTIONS,
+    contractId: E01_ROUND_PLAN_CONTRACT_ID,
+    promptVariant: variant,
+    delivery: 'compact',
+    grammar: ROUND_PLAN_COMPACT_JSON_GRAMMAR,
+    instructions,
+    workedExamples: Object.freeze([...workedExamples]) as readonly [RoundPlan, RoundPlan, RoundPlan],
   });
 }
 
