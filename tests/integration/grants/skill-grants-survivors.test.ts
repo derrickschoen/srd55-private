@@ -633,4 +633,409 @@ describe('skill grant survivor state tables', () => {
     ))).toMatchObject({ reason: 'skill_already_held', skill: 'history' });
     expect(rows(other)).toEqual([]);
   });
+
+  it('pins each tool-alternative row transition and leaves a true no-op untouched', () => {
+    // Type-level lifecycle contract: active rows carry the selected skill;
+    // omitted ordinals become orphaned; every stale lifecycle field is cleared
+    // when an addressed row is made active again.
+    const owner = source('feat');
+    const firstId = grant(owner, 'tools-or-skills', 1, 'arcana');
+    const secondId = grant(owner, 'tools-or-skills', 2, 'history');
+    db.exec(
+      "UPDATE character_skill_grants SET updated_at = '2000-01-01T00:00:00.000Z' WHERE id = ?",
+      [firstId],
+    );
+
+    syncToolAlternativeSkillGrants(db, owner, 'tools-or-skills', 2, [
+      'arcana',
+      'history',
+    ]);
+    expect(db.scalar(
+      'SELECT updated_at FROM character_skill_grants WHERE id = ?',
+      [firstId],
+    )).toBe('2000-01-01T00:00:00.000Z');
+
+    db.exec(
+      `UPDATE character_skill_grants
+       SET state = 'orphaned', orphan_reason_code = NULL,
+           orphaned_at = NULL, updated_at = '2001-01-01T00:00:00.000Z'
+       WHERE id = ?`,
+      [firstId],
+    );
+    syncToolAlternativeSkillGrants(db, owner, 'tools-or-skills', 2, [
+      'arcana',
+      'history',
+    ]);
+    expect(db.oneRaw(
+      `SELECT state, skill, orphan_reason_code, orphaned_at
+       FROM character_skill_grants WHERE id = ?`,
+      [firstId],
+    )).toEqual({
+      state: 'active',
+      skill: 'arcana',
+      orphan_reason_code: null,
+      orphaned_at: null,
+    });
+
+    db.exec(
+      `UPDATE character_skill_grants
+       SET orphan_reason_code = 'stale_reason', orphaned_at = NULL
+       WHERE id = ?`,
+      [firstId],
+    );
+    syncToolAlternativeSkillGrants(db, owner, 'tools-or-skills', 2, [
+      'arcana',
+      'history',
+    ]);
+    expect(db.scalar(
+      'SELECT orphan_reason_code FROM character_skill_grants WHERE id = ?',
+      [firstId],
+    )).toBeNull();
+
+    db.exec(
+      `UPDATE character_skill_grants
+       SET orphaned_at = '2002-01-01T00:00:00.000Z'
+       WHERE id = ?`,
+      [firstId],
+    );
+    syncToolAlternativeSkillGrants(db, owner, 'tools-or-skills', 2, [
+      'arcana',
+      'history',
+    ]);
+    expect(db.scalar(
+      'SELECT orphaned_at FROM character_skill_grants WHERE id = ?',
+      [firstId],
+    )).toBeNull();
+
+    syncToolAlternativeSkillGrants(db, owner, 'tools-or-skills', 2, ['arcana']);
+    expect(db.oneRaw(
+      `SELECT state, orphan_reason_code FROM character_skill_grants
+       WHERE id = ?`,
+      [secondId],
+    )).toEqual({
+      state: 'orphaned',
+      orphan_reason_code: 'rule_no_longer_active',
+    });
+  });
+
+  it('gates class reconciliation by source kind and preserves no-op timestamps', () => {
+    // Type-level source contract: only a class source with a definition can
+    // mint class_skill ordinals; active desired and orphaned stale rows are
+    // reconciliation no-ops, including their timestamps.
+    const classId = classDefinition('One-skill class', { count: 1 }, ['arcana']);
+    ownClass(classId, true);
+
+    const wrongKind = source('feat', classId);
+    grant(wrongKind, SKILL_GRANT_KEYS.classSkill, 1, null);
+    syncClassSkillGrants(db, wrongKind);
+    expect(rows(wrongKind)).toEqual([
+      expect.objectContaining({
+        state: 'orphaned',
+        orphan_reason_code: 'rule_no_longer_active',
+      }),
+    ]);
+
+    const owner = source('class', classId);
+    const activeId = grant(owner, SKILL_GRANT_KEYS.classSkill, 1, null);
+    const orphanedId = grant(
+      owner,
+      SKILL_GRANT_KEYS.classSkill,
+      2,
+      null,
+      'orphaned',
+    );
+    db.exec(
+      `UPDATE character_skill_grants SET updated_at =
+       CASE id WHEN ? THEN '2003-01-01T00:00:00.000Z'
+               ELSE '2004-01-01T00:00:00.000Z' END
+       WHERE id IN (?, ?)`,
+      [activeId, activeId, orphanedId],
+    );
+    syncClassSkillGrants(db, owner);
+    expect(db.allRaw(
+      `SELECT id, state, updated_at FROM character_skill_grants
+       WHERE id IN (?, ?) ORDER BY id`,
+      [activeId, orphanedId],
+    )).toEqual([
+      {
+        id: activeId,
+        state: 'active',
+        updated_at: '2003-01-01T00:00:00.000Z',
+      },
+      {
+        id: orphanedId,
+        state: 'orphaned',
+        updated_at: '2004-01-01T00:00:00.000Z',
+      },
+    ]);
+  });
+
+  it('uses the multiclass any-skill pool rather than the starting-class flag', () => {
+    // Type-level entitlement contract: entered classes read the multiclass
+    // count/pool columns, not the starting-class skill_choice_from_any column.
+    const classId = classDefinition('Any-skill multiclass', {
+      count: 1,
+      fromAny: false,
+      multiclassCount: 1,
+      multiclassPool: 'any',
+    }, ['arcana']);
+    ownClass(classId, false);
+    const owner = source('class', classId);
+
+    syncClassSkillGrants(db, owner);
+    const unfilled = resolveSkillGrants(db, characterId).unfilledClassGrants;
+    expect(unfilled).toHaveLength(1);
+    expect(unfilled[0]).toMatchObject({
+      source_instance_id: owner.id,
+      grant_key: SKILL_GRANT_KEYS.multiclassSkill,
+      ordinal: 1,
+      available: [...skills],
+    });
+  });
+
+  it('sorts held skills and excludes filled, orphaned, and definitionless grants', () => {
+    // ResolvedSkillGrants is a closed projection contract: `skills` is sorted
+    // and unique, while only active, unfilled, class-owned rows are outstanding.
+    const background = source('background');
+    grant(background, 'printed', 1, 'history');
+    grant(background, 'printed', 2, 'arcana');
+
+    const definitionless = source('class');
+    grant(definitionless, SKILL_GRANT_KEYS.classSkill, 1, null);
+    const orphaned = source('class');
+    grant(orphaned, SKILL_GRANT_KEYS.classSkill, 1, null, 'orphaned');
+
+    const classId = classDefinition('Filled class', { count: 1 }, ['nature']);
+    ownClass(classId, true);
+    const filled = source('class', classId);
+    grant(filled, SKILL_GRANT_KEYS.classSkill, 1, 'nature');
+
+    const resolved = resolveSkillGrants(db, characterId);
+    expect(resolved.skills).toEqual(['arcana', 'history', 'nature']);
+    expect(resolved.unfilledClassGrants).toEqual([]);
+    expect(classSkillGrantsFilled(db, characterId)).toBe(true);
+  });
+
+  it('matches an authored species pool by both rule kind and rule key', () => {
+    // GrantRule's closed kind plus stable rule_key identify one authored pool;
+    // a different skill rule cannot supply the addressed grant's choices.
+    const definitionId = speciesDefinition(
+      'Two-rule species',
+      'fixture:species:two-skill-rules',
+      [
+        {
+          kind: 'skill_proficiency',
+          rule_key: 'other-pool',
+          count: 1,
+          skills: ['nature'],
+        },
+        {
+          kind: 'skill_proficiency',
+          rule_key: 'target-pool',
+          count: 1,
+          skills: ['history'],
+        },
+      ],
+    );
+    const owner = source('species', definitionId);
+    const grantId = grant(owner, 'target-pool', 1, null);
+
+    expect(unfilledSpeciesSkillGrants(db, characterId)).toEqual([{
+      grant_id: grantId,
+      source_instance_id: owner.id,
+      grant_key: 'target-pool',
+      ordinal: 1,
+      available: ['history'],
+    }]);
+  });
+
+  it('proves an external row cannot carry a bundled-stable species key', () => {
+    // Schema contract: bundled-stable keys and catalog layer are correlated.
+    // This proves the state needed to distinguish the bundled-layer predicate
+    // cannot reach speciesSkillPool through a valid persisted row.
+    speciesDefinition('Bundled Human', '2024:species:human');
+    expect(() => db.exec(
+      `UPDATE catalog_content_identities SET catalog_layer = 'external'
+       WHERE content_kind = 'species' AND content_key = '2024:species:human'`,
+    )).toThrowError(/catalog_content_identities_key_layer_check/);
+  });
+
+  it('refuses non-tool rules and preserves the structured refusal name', () => {
+    // GrantRule contract: a skill rule only opens the all-skills pool when the
+    // literal allows_tool_instead flag is true, and refusals retain their name.
+    const featId = featDefinition('Non-tool feat', [
+      {
+        kind: 'skill_proficiency',
+        rule_key: 'other-tool-rule',
+        count: 1,
+        allows_tool_instead: true,
+      },
+      {
+        kind: 'skill_proficiency',
+        rule_key: 'not-a-tool-rule',
+        count: 1,
+        allows_tool_instead: false,
+      },
+    ]);
+    const owner = source('feat', featId);
+    const grantId = grant(owner, 'not-a-tool-rule', 1, null);
+    const refusal = caught(() =>
+      fillSkillGrant(db, characterId, grantId, 'athletics'));
+
+    expect(refusal).toEqual(expect.objectContaining<Partial<SkillGrantRefusal>>({
+      name: 'SkillGrantRefusal',
+      reason: 'skill_not_in_pool',
+      skill: 'athletics',
+    }));
+    expect(db.scalar(
+      'SELECT skill FROM character_skill_grants WHERE id = ?',
+      [grantId],
+    )).toBeNull();
+  });
+
+  it('clearing an already-unfilled grant is a literal no-op', () => {
+    // Fill command contract: null means "make unfilled"; an already-null row
+    // is unchanged and does not acquire a fresh updated_at value.
+    const owner = source('feat');
+    const grantId = grant(owner, 'already-empty', 1, null);
+    db.exec(
+      "UPDATE character_skill_grants SET updated_at = '2005-01-01T00:00:00.000Z' WHERE id = ?",
+      [grantId],
+    );
+
+    fillSkillGrant(db, characterId, grantId, null);
+    expect(db.scalar(
+      'SELECT updated_at FROM character_skill_grants WHERE id = ?',
+      [grantId],
+    )).toBe('2005-01-01T00:00:00.000Z');
+  });
+
+  it('requires a class-level row even when multiclass traits would otherwise mint', () => {
+    // ClassEntitlement contract: no character_class_levels row means no
+    // entitlement, even if the definition advertises a nonzero entered pool.
+    const classId = classDefinition('Unowned multiclass', {
+      count: 1,
+      multiclassCount: 1,
+      multiclassPool: 'any',
+    });
+    const owner = source('class', classId);
+
+    syncClassSkillGrants(db, owner);
+    expect(rows(owner)).toEqual([]);
+  });
+
+  it('does not discover species rules through a non-species source', () => {
+    // SkillGrantSource's sourceType discriminator is authoritative; a numeric
+    // definition id from another source kind cannot opt into species grants.
+    const definitionId = speciesDefinition(
+      'Species behind feat source',
+      '2024:species:human',
+    );
+    const owner = source('feat', definitionId);
+    syncSpeciesSkillGrants(db, owner);
+    expect(rows(owner)).toEqual([]);
+  });
+
+  it('rejects colliding authored rule keys before kind lookup', () => {
+    // The parser's unique rule-key contract makes a same-key wrong-kind rule
+    // unreachable at speciesSkillPool's kind-and-key predicate.
+    const definitionId = speciesDefinition(
+      'Colliding rule kinds',
+      'fixture:species:colliding-rule-kinds',
+      [
+        {
+          kind: 'weapon_mastery',
+          rule_key: 'shared-key',
+          count: 1,
+          selection_pool: 'simple',
+        },
+        {
+          kind: 'skill_proficiency',
+          rule_key: 'shared-key',
+          count: 1,
+          skills: ['history'],
+        },
+      ],
+    );
+    const owner = source('species', definitionId);
+    grant(owner, 'shared-key', 1, null);
+
+    expect(caught(() => unfilledSpeciesSkillGrants(db, characterId))).toEqual(
+      expect.objectContaining({
+        name: 'SourceGrantRuleKeyError',
+        rule_key: 'shared-key',
+      }),
+    );
+  });
+
+  it('ignores non-skill species rules during skill-grant discovery', () => {
+    // GrantRule is a closed discriminated union: only skill_proficiency can
+    // mint a character_skill_grants row, even when another kind has a count.
+    const definitionId = speciesDefinition(
+      'Weapon mastery species',
+      'fixture:species:weapon-mastery-only',
+      [{
+        kind: 'weapon_mastery',
+        rule_key: 'not-a-skill',
+        count: 1,
+        selection_pool: 'simple',
+      }],
+    );
+    const owner = source('species', definitionId);
+    syncSpeciesSkillGrants(db, owner);
+    expect(rows(owner)).toEqual([]);
+  });
+
+  it('excludes an orphaned unfilled grant with an otherwise valid class owner', () => {
+    // ResolvedSkillGrants includes only active unfilled class ordinals; valid
+    // provenance does not revive an explicitly orphaned lifecycle state.
+    const classId = classDefinition('Orphan owner', { count: 1 }, ['arcana']);
+    ownClass(classId, true);
+    const owner = source('class', classId);
+    grant(owner, SKILL_GRANT_KEYS.classSkill, 1, null, 'orphaned');
+
+    expect(resolveSkillGrants(db, characterId).unfilledClassGrants).toEqual([]);
+  });
+
+  it('requires every authored species skill to be a known Skill member', () => {
+    // Skill[] is closed at the rule-reader boundary. A missing list and a
+    // mixed known/unknown list both yield no fillable species choice.
+    const missingId = speciesDefinition(
+      'Missing configured pool',
+      'fixture:species:missing-pool',
+      [{
+        kind: 'skill_proficiency',
+        rule_key: 'missing-pool',
+        count: 1,
+      }],
+    );
+    const missingSource = source('species', missingId);
+    grant(missingSource, 'missing-pool', 1, null);
+
+    const mixedId = speciesDefinition(
+      'Mixed configured pool',
+      'fixture:species:mixed-pool',
+      [{
+        kind: 'skill_proficiency',
+        rule_key: 'mixed-pool',
+        count: 1,
+        skills: ['arcana', 'chronomancy'],
+      }],
+    );
+    const mixedSource = source('species', mixedId);
+    grant(mixedSource, 'mixed-pool', 1, null);
+
+    expect(unfilledSpeciesSkillGrants(db, characterId)).toEqual([]);
+  });
+
+  it('excludes both filled and orphaned species grants from unfilled choices', () => {
+    // UnfilledSpeciesSkillGrant is exactly active + null skill + valid pool;
+    // each dropped clause admits a row whose lifecycle or fill state forbids it.
+    const definitionId = speciesDefinition('Human states', '2024:species:human');
+    const owner = source('species', definitionId);
+    grant(owner, SKILL_GRANT_KEYS.speciesSkillful, 1, 'arcana');
+    grant(owner, SKILL_GRANT_KEYS.speciesSkillful, 2, null, 'orphaned');
+
+    expect(unfilledSpeciesSkillGrants(db, characterId)).toEqual([]);
+  });
 });
