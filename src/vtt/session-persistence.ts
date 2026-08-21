@@ -309,7 +309,17 @@ export function deriveBranchRng(
   target: SessionRevision,
   branchId: EncounterBranchId,
 ): SerializableRng {
-  const { config: _config, ...mechanicalState } = target.encounterState;
+  const {
+    config: _config,
+    persistentAreas,
+    nextPersistentAreaSequence,
+    ...baseMechanicalState
+  } = target.encounterState;
+  // Empty additive state is mechanically neutral and does not perturb branch
+  // streams; once an area exists, both its state and allocator are authoritative.
+  const mechanicalState = persistentAreas.length === 0 && nextPersistentAreaSequence === 1
+    ? baseMechanicalState
+    : { ...baseMechanicalState, persistentAreas, nextPersistentAreaSequence };
   const digest = sha256(canonicalJson({
     encounterState: mechanicalState,
     parentRngState: target.rngState,

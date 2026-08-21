@@ -225,7 +225,8 @@
             "attack_damage_type_choice",
             "resource_die_maneuver",
             "exploding_spell_damage_die",
-            "elemental_fury"
+            "elemental_fury",
+            "persistent_area"
           ]
         }
       },
@@ -256,7 +257,8 @@
         { "$ref": "#/$defs/attackDamageTypeChoiceEffect" },
         { "$ref": "#/$defs/resourceDieManeuverEffect" },
         { "$ref": "#/$defs/explodingSpellDamageDieEffect" },
-        { "$ref": "#/$defs/elementalFuryEffect" }
+        { "$ref": "#/$defs/elementalFuryEffect" },
+        { "$ref": "#/$defs/persistentAreaEffect" }
       ]
     },
     "damageRiderEffect": {
@@ -601,6 +603,24 @@
         "spellId": { "type": "string", "minLength": 1, "maxLength": 100 },
         "triggerFace": { "const": "maximum" },
         "maximumExplosionsPerDie": { "const": 1 }
+      }
+    },
+    "persistentAreaEffect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["effectId", "kind", "trigger", "origin", "shape", "duration", "targetFilter", "difficultTerrain", "movableFeet", "hooks"],
+      "properties": {
+        "effectId": { "type": "string", "pattern": "^effect:[a-z0-9][a-z0-9:-]{0,119}$" },
+        "kind": { "const": "persistent_area" },
+        "trigger": { "enum": ["action", "bonus_action", "reaction"] },
+        "resourcePoolId": { "type": "string", "pattern": "^resource:[a-z0-9][a-z0-9-]{0,79}$" },
+        "origin": { "enum": ["self", "selected"] },
+        "shape": { "type": "object" },
+        "duration": { "type": "object" },
+        "targetFilter": { "enum": ["all", "allies", "enemies"] },
+        "difficultTerrain": { "type": "boolean" },
+        "movableFeet": { "type": ["integer", "null"], "minimum": 1, "maximum": 1000 },
+        "hooks": { "type": "array", "maxItems": 16, "items": { "type": "object" } }
       }
     },
     "elementalFuryEffect": {

@@ -110,7 +110,15 @@ function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
       return [event.target];
     case 'effect_ended':
     case 'effect_clock_ticked':
+    case 'persistent_area_ended':
       return [];
+    case 'persistent_area_created':
+    case 'persistent_area_moved':
+      return [event.owner];
+    case 'persistent_area_membership_changed':
+      return [...event.entered, ...event.exited];
+    case 'persistent_area_triggered':
+      return [event.target];
   }
 }
 

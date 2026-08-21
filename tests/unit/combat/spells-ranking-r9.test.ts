@@ -10,7 +10,7 @@ import type { EncounterCommand, EncounterEvent } from '../../../src/combat/event
 import { spellDefinition } from '../../../src/combat/spells/definitions';
 import type { SpellCastCommand } from '../../../src/combat/spells/types';
 import { feetPoint } from '../../../src/combat/templates';
-import { damageType, dieSides, feet } from '../../../src/combat/values';
+import { damageType, dieSides, feet, persistentAreaId } from '../../../src/combat/values';
 import { monsterProfile, placedToken, playerProfile } from './fixtures';
 
 function startedEncounter(
@@ -232,12 +232,18 @@ describe('r9 single-spell manifest wins', () => {
       level: 2,
       targeting: { kind: 'area', rangeFeet: 120, shape: 'cylinder', baseSizeFeet: 5, secondarySizeFeet: 40 },
       operation: {
-        kind: 'save_damage_and_effect',
-        ability: 'constitution',
-        onSuccess: 'half',
-        damageType: damageType('Radiant'),
-        dice: { baseCount: 2, sides: 10, perSlotCount: 1 },
-        effect: { payload: { kind: 'moonbeam_area', saveAbility: 'constitution', onSuccess: 'half' } },
+        kind: 'persistent_area',
+        origin: 'selected_when_cast',
+        movableFeet: 60,
+        hooks: expect.arrayContaining([
+          expect.objectContaining({
+            hook: 'on_enter', frequency: 'once_per_turn',
+            effect: expect.objectContaining({
+              kind: 'save_gated', ability: 'constitution', onSuccess: 'half',
+              payload: { kind: 'damage', damageType: damageType('Radiant'), dice: expect.objectContaining({ baseCount: 2, sides: 10, perSlotCount: 1 }) },
+            }),
+          }),
+        ]),
       },
     });
     const caster = playerProfile('moonbeam-caster', {
@@ -262,5 +268,22 @@ describe('r9 single-spell manifest wins', () => {
     const recurring = reduceEncounter(state, { type: 'end_turn', actor: target.id }, () => 0.5);
     expect(recurring.events.filter((event) => event.type === 'save_resolved')).toHaveLength(1);
     expect(recurring.state.combatants.find((combatant) => combatant.profile.id === target.id)?.hitPoints).toBe(76);
+
+    const distantTarget = monsterProfile('moonbeam-move-target', { hitPoints: 100, initiativeBonus: 0 });
+    let movable = startedEncounter(caster, distantTarget, 6);
+    movable = reduceEncounter(movable, cast(caster, 'moonbeam', 2, {
+      area: { shape: 'cylinder', template: { origin: feetPoint(15, 5), radius: feet(5), height: feet(40) } },
+    }), () => 0.5).state;
+    expect(movable.combatants.find((combatant) => combatant.profile.id === distantTarget.id)?.hitPoints).toBe(100);
+    movable = reduceEncounter(movable, { type: 'end_turn', actor: caster.id }, () => 0.5).state;
+    movable = reduceEncounter(movable, { type: 'end_turn', actor: distantTarget.id }, () => 0.5).state;
+    const movedBeam = reduceEncounter(movable, {
+      type: 'move_persistent_area', actor: caster.id, areaId: persistentAreaId('area:1'),
+      origin: { kind: 'fixed', point: feetPoint(30, 5) },
+    }, () => 0.5);
+    expect(movedBeam.events).toContainEqual(expect.objectContaining({
+      type: 'persistent_area_triggered', areaId: persistentAreaId('area:1'), hook: 'on_enter', target: distantTarget.id,
+    }));
+    expect(movedBeam.state.combatants.find((combatant) => combatant.profile.id === distantTarget.id)?.hitPoints).toBe(88);
   });
 });

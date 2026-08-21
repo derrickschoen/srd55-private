@@ -2,6 +2,7 @@ import type { Ability } from '../domain/enums';
 import type { ConditionName, ExhaustionLevel } from './conditions';
 import type { DamageRequest, RollMode } from './resolution';
 import type { AreaTemplate } from './templates';
+import type { PersistentAreaInput } from './persistent-areas';
 import type {
   CombatantId,
   DamageType,
@@ -9,6 +10,7 @@ import type {
   EffectStackingIdentity,
   EncounterEffectId,
   LimitedResourcePoolId,
+  PersistentAreaId,
 } from './values';
 
 export const featureEffectTriggers = [
@@ -135,6 +137,12 @@ export type TypedCombatFeaturePayload =
       readonly selectedDamageType: DamageType;
       readonly amount: number;
       readonly gate: 'first_hit_this_turn';
+    }
+  | {
+      readonly kind: 'persistent_area';
+      readonly area: Omit<PersistentAreaInput, 'owner' | 'origin'> & {
+        readonly origin: 'self' | 'selected';
+      };
     };
 
 /** Reducer-ready class/feat effect retained on a combatant profile. */
@@ -167,7 +175,8 @@ export function isTypedCombatFeaturePayload(
     payload.kind === 'timed_spellcasting_mode' ||
     payload.kind === 'resource_die_maneuver' ||
     payload.kind === 'exploding_spell_damage_die' ||
-    payload.kind === 'elemental_fury';
+    payload.kind === 'elemental_fury' ||
+    payload.kind === 'persistent_area';
 }
 
 export type TurnBoundary = 'start' | 'end';
@@ -910,20 +919,6 @@ export type EffectPayload =
       readonly oncePerTurn: true;
     }
   | {
-      readonly kind: 'moonbeam_area';
-      readonly placement: AreaTemplate | 'selected_when_cast';
-      readonly saveAbility: Extract<Ability, 'constitution'>;
-      readonly saveDc: number | 'resolved_when_cast';
-      readonly onSuccess: 'half';
-      readonly damageType: 'Radiant';
-      readonly damageCount: number;
-      readonly damageSides: 10;
-      readonly damagePerSlotCount: number;
-      readonly moveFeetPerMagicAction: number;
-      readonly dimLight: true;
-      readonly oncePerTurn: true;
-    }
-  | {
       readonly kind: 'charm_monster';
       readonly condition: 'Charmed';
       readonly hostileSaveMode: 'advantage';
@@ -1198,6 +1193,9 @@ export interface EffectApplication {
   readonly stacking: 'coexist' | 'replace_same_source' | 'replace_any_source';
   readonly repeatedSave: RepeatedSaveTiming | null;
   readonly payload: EffectPayload;
+  /** Present only for an effect materialized by persistent-area membership. */
+  readonly areaSource?: PersistentAreaId;
+  readonly areaMembershipBound?: true;
 }
 
 /** Read-only state; creation, ticking, target removal, and expiry live in the reducer. */
@@ -1212,4 +1210,6 @@ export interface EncounterEffect {
   readonly stacking: EffectApplication['stacking'];
   readonly repeatedSave: RepeatedSaveTiming | null;
   readonly payload: EffectPayload;
+  readonly areaSource?: PersistentAreaId;
+  readonly areaMembershipBound?: true;
 }

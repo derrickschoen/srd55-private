@@ -11,6 +11,7 @@ import {
 } from '../combat/effects';
 import type { EncounterCommand } from '../combat/events';
 import { gridDistance } from '../combat/grid';
+import type { PersistentAreaEffectSpec, PersistentAreaShape } from '../combat/persistent-areas';
 import type { SpellCastCommand } from '../combat/spells/types';
 import { SPELL_MANIFEST, type SpellManifestRow } from '../combat/spells/manifest';
 import {
@@ -180,7 +181,54 @@ export const FEATURE_EFFECT_KINDS = [
   'resource_die_maneuver',
   'exploding_spell_damage_die',
   'elemental_fury',
+  'persistent_area',
 ] as const;
+
+const persistentAreaShapeSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('sphere'), radiusFeet: distanceSchema.min(1) }),
+  z.strictObject({ kind: z.literal('cube'), sizeFeet: distanceSchema.min(1) }),
+  z.strictObject({ kind: z.literal('cylinder'), radiusFeet: distanceSchema.min(1), heightFeet: distanceSchema.min(1) }),
+  z.strictObject({
+    kind: z.literal('line'), lengthFeet: distanceSchema.min(1), widthFeet: distanceSchema.min(1),
+    direction: z.strictObject({ x: z.number().finite(), y: z.number().finite() }),
+  }),
+  z.strictObject({ kind: z.literal('emanation'), radiusFeet: distanceSchema }),
+]);
+
+const persistentAreaLifetimeSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('while_inside') }),
+  z.strictObject({ kind: z.literal('area_duration') }),
+  z.strictObject({ kind: z.literal('fixed_rounds'), rounds: integerSchema.min(1).max(1_000_000), boundary: z.enum(['start', 'end']) }),
+  z.strictObject({ kind: z.literal('save_ends'), boundary: z.enum(['start', 'end']) }),
+]);
+
+const persistentAreaPayloadSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('damage'), damage: z.array(effectDamageSchema).min(1).max(20) }),
+  z.strictObject({ kind: z.literal('condition'), conditionId: z.enum(nonExhaustionConditionNames), lifetime: persistentAreaLifetimeSchema }),
+  z.strictObject({ kind: z.literal('skill_modifier'), skillId: z.literal('stealth'), amount: modifierSchema, lifetime: persistentAreaLifetimeSchema }),
+  z.strictObject({ kind: z.literal('movement_modifier'), speedDeltaFeet: modifierSchema, lifetime: persistentAreaLifetimeSchema }),
+  z.strictObject({ kind: z.literal('armor_class_modifier'), amount: modifierSchema, lifetime: persistentAreaLifetimeSchema }),
+]);
+
+const persistentAreaEffectSpecSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('automatic'), payload: persistentAreaPayloadSchema }),
+  z.strictObject({
+    kind: z.literal('save_gated'), ability: z.enum(abilities), saveDc: integerSchema.min(1).max(50),
+    rollMode: z.enum(['normal', 'advantage', 'disadvantage']), onSuccess: z.enum(['none', 'half']),
+    payload: persistentAreaPayloadSchema,
+  }),
+]);
+
+const persistentAreaHookSchema = z.strictObject({
+  hook: z.enum(['on_enter', 'on_start_of_turn_inside', 'on_end_of_turn_inside', 'on_exit']),
+  frequency: z.enum(['once_per_turn', 'every_trigger']),
+  effect: persistentAreaEffectSpecSchema,
+});
+
+const persistentAreaDurationSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('rounds'), rounds: integerSchema.min(1).max(1_000_000) }),
+  z.strictObject({ kind: z.literal('concentration'), rounds: integerSchema.min(1).max(1_000_000) }),
+]);
 
 const featureEffectSchema = z.discriminatedUnion('kind', [
   z.strictObject({
@@ -390,6 +438,18 @@ const featureEffectSchema = z.discriminatedUnion('kind', [
     amount: integerSchema.min(0).max(100_000),
     gate: z.literal('first_hit_this_turn'),
   }),
+  z.strictObject({
+    ...featureEffectBaseShape,
+    kind: z.literal('persistent_area'),
+    trigger: z.enum(['action', 'bonus_action', 'reaction']),
+    origin: z.enum(['self', 'selected']),
+    shape: persistentAreaShapeSchema,
+    duration: persistentAreaDurationSchema,
+    targetFilter: z.enum(['all', 'allies', 'enemies']),
+    difficultTerrain: z.boolean(),
+    movableFeet: distanceSchema.min(1).nullable(),
+    hooks: z.array(persistentAreaHookSchema).max(16),
+  }),
 ]).superRefine((effect, context) => {
   if (
     'trigger' in effect &&
@@ -468,6 +528,19 @@ const featureEffectSchema = z.discriminatedUnion('kind', [
     effect.resourcePoolId !== undefined
   ) {
     context.addIssue({ code: 'custom', message: 'This typed feature is automatic and cannot spend a resource.' });
+  }
+  if (effect.kind === 'persistent_area') {
+    if (effect.origin === 'self' && effect.movableFeet !== null) {
+      context.addIssue({ code: 'custom', message: 'A self-anchored area cannot also move independently.' });
+    }
+    for (const hook of effect.hooks) {
+      if (hook.effect.kind === 'automatic' && hook.effect.payload.kind !== 'damage' && hook.effect.payload.lifetime.kind === 'save_ends') {
+        context.addIssue({ code: 'custom', message: 'A save-ends area payload requires a save gate.' });
+      }
+      if (hook.effect.kind === 'save_gated' && hook.effect.onSuccess === 'half' && hook.effect.payload.kind !== 'damage') {
+        context.addIssue({ code: 'custom', message: 'Only area damage can resolve to half on a successful save.' });
+      }
+    }
   }
 });
 
@@ -1011,6 +1084,55 @@ function loadedAttack(attack: ExternalPartyPackAttack): LoadedPartyAttack {
   };
 }
 
+type ExternalPersistentAreaEffect = Extract<ExternalPartyPackEffect, { readonly kind: 'persistent_area' }>;
+
+function loadedPersistentAreaShape(shape: ExternalPersistentAreaEffect['shape']): PersistentAreaShape {
+  switch (shape.kind) {
+    case 'sphere': return { kind: 'sphere', radius: feet(shape.radiusFeet) };
+    case 'cube': return { kind: 'cube', size: feet(shape.sizeFeet) };
+    case 'cylinder': return { kind: 'cylinder', radius: feet(shape.radiusFeet), height: feet(shape.heightFeet) };
+    case 'line': return {
+      kind: 'line', length: feet(shape.lengthFeet), width: feet(shape.widthFeet), direction: shape.direction,
+    };
+    case 'emanation': return { kind: 'emanation', radius: feet(shape.radiusFeet) };
+  }
+}
+
+function loadedPersistentAreaEffect(
+  spec: ExternalPersistentAreaEffect['hooks'][number]['effect'],
+): PersistentAreaEffectSpec {
+  const payload = (() => {
+    switch (spec.payload.kind) {
+      case 'damage':
+        return {
+          kind: 'damage' as const,
+          damage: {
+            terms: spec.payload.damage.map((term) => ({
+              type: damageType(term.damageTypeId),
+              dice: { count: term.count, sides: dieSides(term.sides), modifier: term.modifier },
+            })),
+            critical: false,
+            responses: [],
+          },
+        };
+      case 'condition':
+        return { kind: 'effect' as const, payload: { kind: 'condition' as const, condition: spec.payload.conditionId }, lifetime: spec.payload.lifetime };
+      case 'skill_modifier':
+        return { kind: 'effect' as const, payload: { kind: 'skill_modifier' as const, skill: spec.payload.skillId, amount: spec.payload.amount }, lifetime: spec.payload.lifetime };
+      case 'movement_modifier':
+        return { kind: 'effect' as const, payload: { kind: 'movement_modifier' as const, speedDeltaFeet: spec.payload.speedDeltaFeet }, lifetime: spec.payload.lifetime };
+      case 'armor_class_modifier':
+        return { kind: 'effect' as const, payload: { kind: 'armor_class_modifier' as const, amount: spec.payload.amount }, lifetime: spec.payload.lifetime };
+    }
+  })();
+  return spec.kind === 'automatic'
+    ? { kind: 'automatic', payload }
+    : {
+        kind: 'save_gated', ability: spec.ability, dc: spec.saveDc,
+        rollMode: spec.rollMode, onSuccess: spec.onSuccess, payload,
+      };
+}
+
 export function loadedFeatureEffect(
   effect: ExternalPartyPackEffect,
   totalLevel: number,
@@ -1254,6 +1376,26 @@ export function loadedFeatureEffect(
           selectedDamageType: damageType(effect.selectedDamageTypeId),
           amount: effect.amount,
           gate: effect.gate,
+        },
+      };
+    case 'persistent_area':
+      return {
+        ...common,
+        payload: {
+          kind: 'persistent_area',
+          area: {
+            origin: effect.origin,
+            shape: loadedPersistentAreaShape(effect.shape),
+            duration: { kind: effect.duration.kind, remaining: effect.duration.rounds },
+            targetFilter: { kind: effect.targetFilter },
+            difficultTerrain: effect.difficultTerrain,
+            hooks: effect.hooks.map((hook) => ({
+              hook: hook.hook,
+              frequency: hook.frequency,
+              effect: loadedPersistentAreaEffect(hook.effect),
+            })),
+            movable: effect.movableFeet === null ? null : { maximumFeet: feet(effect.movableFeet) },
+          },
         },
       };
   }
@@ -1632,6 +1774,18 @@ export function loadedPartyTurnLegalActions(
           actions.push({ type: 'activate_timed_spellcasting_mode', actor, effectId: effect.id });
         }
       }
+      if (effect.payload.kind === 'persistent_area' && effect.payload.area.origin === 'self') {
+        const pool = effect.resourcePoolId === null
+          ? null
+          : (acting.limitedResources ?? []).find((candidate) => candidate.id === effect.resourcePoolId);
+        const resourceAvailable = pool === null || (pool?.remaining ?? 0) > 0;
+        const costAvailable = effect.trigger === 'action'
+          ? acting.turn.action.kind !== 'spent'
+          : effect.trigger === 'bonus_action'
+            ? acting.turn.bonusActionAvailable
+            : false;
+        if (resourceAvailable && costAvailable) actions.push(loadedPartyEffectCommand(member, String(effect.id), []));
+      }
     }
     actions.push({ type: 'end_turn', actor });
     return { actions };
@@ -1643,7 +1797,7 @@ export function loadedPartyEffectCommand(
   member: LoadedPartyMember,
   effectId: string,
   targets: readonly Extract<EncounterCommand, { readonly type: 'apply_effect' }>['effect']['targets'][number][],
-): Extract<EncounterCommand, { readonly type: 'apply_effect' | 'grant_temporary_hit_points' }> {
+): Extract<EncounterCommand, { readonly type: 'apply_effect' | 'grant_temporary_hit_points' | 'create_persistent_area' }> {
   const effect = member.effects.find((candidate) => candidate.id === effectId);
   if (effect === undefined) throw new PartyFeatureEffectError('effect_not_referenced');
   if (
@@ -1658,6 +1812,23 @@ export function loadedPartyEffectCommand(
   const resource = effect.resourcePoolId === null
     ? {}
     : { resourcePoolId: effect.resourcePoolId };
+  if (effect.payload.kind === 'persistent_area') {
+    if (effect.payload.area.origin !== 'self') {
+      throw new RangeError('A selected persistent area requires an explicit board placement command.');
+    }
+    const { origin: _origin, ...area } = effect.payload.area;
+    return {
+      type: 'create_persistent_area',
+      actor: member.profile.id,
+      area: {
+        ...structuredClone(area),
+        owner: member.profile.id,
+        origin: { kind: 'anchored', combatant: member.profile.id },
+      },
+      cost,
+      featureEffectId: effect.id,
+    };
+  }
   if (effect.payload.kind === 'temporary_hit_points') {
     const target = targets[0];
     if (target === undefined || targets.length !== 1) {

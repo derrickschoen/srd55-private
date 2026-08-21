@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { CombatantProfile } from '../combat/combatant';
 import { monsterCombatantProfile } from '../combat/combatant';
 import type { CombatFeatureEffect } from '../combat/effects';
+import { conditionNames } from '../combat/conditions';
 import type { EncounterCommand } from '../combat/events';
 import type { MonsterAction, MonsterStatblock, MonsterStatblockInput, SenseKind } from '../combat/statblock';
 import { monsterStatblock } from '../combat/statblock';
@@ -130,6 +131,7 @@ const targetingSchema = z.discriminatedUnion('kind', [
 ]);
 
 const operationRequiredFields = {
+  persistent_area: ['origin', 'shape', 'durationRounds', 'concentration', 'targetFilter', 'includeOwner', 'difficultTerrain', 'movableFeet', 'hooks', 'initialEffects'],
   attack_damage: ['attackKind', 'damageType', 'dice', 'rider'],
   attack_then_save_damage: ['attackKind', 'attackDamageType', 'attackDice', 'saveAbility', 'saveDamageType', 'saveDice', 'onSaveSuccess', 'burstShape', 'burstRadiusFeet'],
   attack_damage_over_time: ['attackKind', 'damageType', 'initialDice', 'missDamage', 'laterDice', 'laterTiming'],
@@ -179,6 +181,85 @@ function operationKind(value: unknown): string | null {
   return operation !== null && typeof operation.kind === 'string' ? operation.kind : null;
 }
 
+const persistentAreaScaledDiceSchema = z.strictObject({
+  baseCount: nonNegativeInteger.max(100),
+  sides: positiveInteger.max(100),
+  modifier: safeInteger.min(-100_000).max(100_000),
+  perSlotCount: nonNegativeInteger.max(100),
+  perSlotModifier: safeInteger.min(-100_000).max(100_000),
+  cantripUpgrade: z.boolean(),
+});
+
+const persistentAreaShapeSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('sphere'), radius: positiveInteger.max(100_000) }),
+  z.strictObject({ kind: z.literal('cube'), size: positiveInteger.max(100_000) }),
+  z.strictObject({ kind: z.literal('cylinder'), radius: positiveInteger.max(100_000), height: positiveInteger.max(100_000) }),
+  z.strictObject({
+    kind: z.literal('line'), length: positiveInteger.max(100_000), width: positiveInteger.max(100_000),
+    direction: z.strictObject({ x: z.number().finite(), y: z.number().finite() }),
+  }),
+  z.strictObject({ kind: z.literal('emanation'), radius: nonNegativeInteger.max(100_000) }),
+]);
+
+const persistentAreaLifetimeSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('while_inside') }),
+  z.strictObject({ kind: z.literal('area_duration') }),
+  z.strictObject({ kind: z.literal('fixed_rounds'), rounds: positiveInteger.max(1_000_000), boundary: z.enum(['start', 'end']) }),
+  z.strictObject({ kind: z.literal('save_ends'), boundary: z.enum(['start', 'end']) }),
+]);
+
+const persistentAreaAppliedPayloadSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('condition'), condition: z.enum(conditionNames.filter((name) => name !== 'Exhaustion')) }),
+  z.strictObject({ kind: z.literal('skill_modifier'), skill: z.literal('stealth'), amount: safeInteger.min(-30).max(30) }),
+  z.strictObject({ kind: z.literal('armor_class_modifier'), amount: safeInteger.min(-30).max(30) }),
+  z.strictObject({ kind: z.literal('movement_modifier'), speedDeltaFeet: safeInteger.min(-1_000).max(1_000) }),
+]);
+
+const persistentAreaSpellPayloadSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('damage'), damageType: z.enum(damageTypes), dice: persistentAreaScaledDiceSchema }),
+  z.strictObject({ kind: z.literal('effect'), payload: persistentAreaAppliedPayloadSchema, lifetime: persistentAreaLifetimeSchema }),
+]);
+
+const persistentAreaSpellEffectSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('automatic'), payload: persistentAreaSpellPayloadSchema }),
+  z.strictObject({
+    kind: z.literal('save_gated'), ability: z.enum(abilities), rollMode: z.enum(['normal', 'advantage', 'disadvantage']),
+    onSuccess: z.enum(['none', 'half']), payload: persistentAreaSpellPayloadSchema,
+  }),
+]).superRefine((effect, context) => {
+  if (effect.kind === 'automatic' && effect.payload.kind === 'effect' && effect.payload.lifetime.kind === 'save_ends') {
+    context.addIssue({ code: 'custom', message: 'A save-ends area payload requires a save gate.' });
+  }
+  if (effect.kind === 'save_gated' && effect.onSuccess === 'half' && effect.payload.kind !== 'damage') {
+    context.addIssue({ code: 'custom', message: 'Only persistent-area damage can be halved.' });
+  }
+});
+
+const persistentAreaOperationSchema = z.strictObject({
+  kind: z.literal('persistent_area'),
+  origin: z.enum(['selected_when_cast', 'anchored_to_caster']),
+  shape: persistentAreaShapeSchema.nullable(),
+  durationRounds: positiveInteger.max(1_000_000),
+  concentration: z.boolean(),
+  targetFilter: z.enum(['all', 'allies', 'enemies', 'selected']),
+  includeOwner: z.boolean(),
+  difficultTerrain: z.boolean(),
+  movableFeet: positiveInteger.max(100_000).nullable(),
+  hooks: z.array(z.strictObject({
+    hook: z.enum(['on_enter', 'on_start_of_turn_inside', 'on_end_of_turn_inside', 'on_exit']),
+    frequency: z.enum(['once_per_turn', 'every_trigger']),
+    effect: persistentAreaSpellEffectSchema,
+  })).max(16),
+  initialEffects: z.array(z.strictObject({ excludeOwner: z.boolean(), effect: persistentAreaSpellEffectSchema })).max(16),
+}).superRefine((operation, context) => {
+  if ((operation.origin === 'selected_when_cast') !== (operation.shape === null)) {
+    context.addIssue({ code: 'custom', message: 'Selected areas use the cast template; anchored areas declare their shape.' });
+  }
+  if (operation.origin === 'anchored_to_caster' && operation.movableFeet !== null) {
+    context.addIssue({ code: 'custom', message: 'An anchored area cannot also move independently.' });
+  }
+});
+
 function structurallyValidOperation(value: unknown): value is SpellOperation {
   const operation = objectRecord(value);
   const kind = operationKind(value);
@@ -188,6 +269,7 @@ function structurallyValidOperation(value: unknown): value is SpellOperation {
     !SPELL_OPERATION_KINDS.includes(kind as SpellOperation['kind'])
   ) return false;
   const typedKind = kind as SpellOperation['kind'];
+  if (typedKind === 'persistent_area') return persistentAreaOperationSchema.safeParse(value).success;
   const required = operationRequiredFields[typedKind];
   if (required.some((field) => !Object.hasOwn(operation, field))) return false;
   const allowed = new Set<string>([
