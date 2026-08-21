@@ -659,6 +659,44 @@ describe('external party-pack boundary', () => {
     })).toThrow(expect.objectContaining({ reason: 'spell_not_referenced' }));
   });
 
+  it('loads every r9 prepared-spell reference through the unchanged manifest vocabulary', () => {
+    const candidate = structuredClone(pack());
+    const source = objectSpellcasting(candidate.members[0]!);
+    source.preparedSpellIds = [
+      'divine-favor',
+      'ensnaring-strike',
+      'searing-smite',
+      'heal',
+      'moonbeam',
+    ];
+    source.knownSpellIds = [];
+    source.spellSlots = [
+      { level: 1, count: 4, recharge: 'long_rest' },
+      { level: 2, count: 3, recharge: 'long_rest' },
+      { level: 6, count: 1, recharge: 'long_rest' },
+    ];
+
+    const loaded = loadExternalPartyPack(candidate);
+
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('R9 manifest spell references were refused.');
+    expect(loaded.gaps).toEqual([]);
+    expect(loaded.party.members[0]?.spellcasting[0]?.preparedSpells.map((spell) => spell.id)).toEqual([
+      'divine-favor',
+      'ensnaring-strike',
+      'searing-smite',
+      'heal',
+      'moonbeam',
+    ]);
+    expect(loaded.party.members[0]?.spells.map((spell) => spell.id)).toEqual([
+      'divine-favor',
+      'ensnaring-strike',
+      'searing-smite',
+      'heal',
+      'moonbeam',
+    ]);
+  });
+
   it('wrong_source_dc uses each prepared spell source and per_source_slots share one member pool', () => {
     const candidate = structuredClone(pack());
     const casterInput = candidate.members[0]!;
@@ -1095,7 +1133,7 @@ describe('external party-pack boundary', () => {
 
   it('unknown_spell_id_dropped refuses an unknown v2 spell id even when partial loading is allowed', () => {
     const candidate = structuredClone(pack(3, true));
-    objectSpellcasting(candidate.members[0]!).preparedSpellIds = ['not-in-the-175-spell-manifest'];
+    objectSpellcasting(candidate.members[0]!).preparedSpellIds = ['not-in-the-181-spell-manifest'];
 
     expect(loadExternalPartyPack(candidate)).toMatchObject({
       status: 'refused',

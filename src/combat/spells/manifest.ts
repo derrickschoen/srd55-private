@@ -1,9 +1,9 @@
-import type { SpellLevel } from './types';
+import type { SpellClassList, SpellLevel } from './types';
 
 export type SpellManifestStatus = 'implemented' | 'pending';
 
 export interface SpellManifestMembership {
-  readonly list: 'Cleric' | 'Warlock' | 'Wizard';
+  readonly list: SpellClassList;
   readonly source: string;
 }
 
@@ -21,6 +21,8 @@ export interface SpellManifestRow {
  * D260 level-7 Fighter/Cleric/Wizard coverage inventory. Fighter/Champion has
  * no spell list. Rows are the deduplicated union of the independently printed
  * Cleric and Wizard lists through level 4, plus their selectable cantrips.
+ * D318.1's r9 additions extend that closed inventory with five independently
+ * source-pinned spells needed by the private build matrix.
  */
 export const SPELL_MANIFEST: readonly SpellManifestRow[] = [
   { id: "acid-splash", name: "Acid Splash", level: 0, memberships: [{ list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:27" }], status: 'implemented' },
@@ -68,6 +70,8 @@ export const SPELL_MANIFEST: readonly SpellManifestRow[] = [
   { id: "grease", name: "Grease", level: 1, memberships: [{ list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:77" }], status: 'implemented', partial: 'The ground-square projection, initial save, and Prone effect execute; persistent Difficult Terrain and enter/end-turn saves await effect-backed terrain hooks.' },
   { id: "guiding-bolt", name: "Guiding Bolt", level: 1, memberships: [{ list: 'Cleric', source: "docs/srd/source/cleric-spell-list.txt:54" }], status: 'implemented' },
   { id: "healing-word", name: "Healing Word", level: 1, memberships: [{ list: 'Cleric', source: "docs/srd/source/cleric-spell-list.txt:56" }], status: 'implemented' },
+  { id: "divine-favor", name: "Divine Favor", level: 1, memberships: [{ list: 'Paladin', source: "docs/srd/source/paladin-spell-list.txt:37" }], status: 'implemented' },
+  { id: "ensnaring-strike", name: "Ensnaring Strike", level: 1, memberships: [{ list: 'Ranger', source: "docs/srd/source/ranger-spell-list.txt:30" }], status: 'implemented', partial: 'The next-hit rider, failed Strength save, Restrained condition, start-turn scaling damage, duration, and concentration execute; the SRD post-hit casting trigger is represented by pre-arming, Large-or-larger save Advantage awaits creature size, and the Athletics escape action awaits effect-removal actions.' },
   { id: "hideous-laughter", name: "Hideous Laughter", level: 1, memberships: [{ list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:79" }], status: 'implemented', partial: 'The initial save, bundled Prone/Incapacitated conditions, concentration, duration, and upcast targets execute; preventing voluntary Prone removal plus damage-triggered and end-turn repeat saves await condition ownership and multi-trigger saves.' },
   { id: "ice-knife", name: "Ice Knife", level: 1, memberships: [{ list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:80" }], status: 'implemented' },
   { id: "identify", name: "Identify", level: 1, memberships: [{ list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:81" }], status: 'implemented', partial: 'Casting cost and typed identification capability execute; item properties, charges, attunement, creation provenance, and ongoing spells affecting a creature await item and spell-instance state.' },
@@ -83,6 +87,7 @@ export const SPELL_MANIFEST: readonly SpellManifestRow[] = [
   { id: "sanctuary", name: "Sanctuary", level: 1, memberships: [{ list: 'Cleric', source: "docs/srd/source/cleric-spell-list.txt:61" }], status: 'implemented', partial: 'The ward, Wisdom-save requirement, range, and duration persist as typed state; attack redirection/loss and offensive-action expiry await pre-target interception and damage attribution hooks.' },
   { id: "shield", name: "Shield", level: 1, memberships: [{ list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:91" }], status: 'implemented' },
   { id: "shield-of-faith", name: "Shield of Faith", level: 1, memberships: [{ list: 'Cleric', source: "docs/srd/source/cleric-spell-list.txt:62" }], status: 'implemented' },
+  { id: "searing-smite", name: "Searing Smite", level: 1, memberships: [{ list: 'Paladin', source: "docs/srd/source/paladin-spell-list.txt:44" }], status: 'implemented', partial: 'The one-shot next-hit rider, initial and start-turn slot scaling, Constitution save-ended duration, and non-concentration lifecycle execute; the SRD post-hit casting trigger is represented by pre-arming.' },
   { id: "silent-image", name: "Silent Image", level: 1, memberships: [{ list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:93" }], status: 'implemented', partial: 'Size, movement capability, Investigation contest, duration, and concentration persist; absence of sound/smell/temperature, physical-interaction revelation, observer knowledge, and relocation await illusion entities.' },
   { id: "sleep", name: "Sleep", level: 1, memberships: [{ list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:95" }], status: 'implemented', partial: 'Intersection-anchored initial save and Incapacitated stage execute, with the Unconscious transition typed; second saves, wake actions, damage expiry, and sleep immunity await staged effect transitions and ancestry traits.' },
   { id: "thunderwave", name: "Thunderwave", level: 1, memberships: [{ list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:97" }], status: 'implemented', partial: 'Cube save-half damage, 10-foot creature push, and upcasting execute; unsecured-object push and the audible 300-foot boom await object and sound propagation state.' },
@@ -118,6 +123,7 @@ export const SPELL_MANIFEST: readonly SpellManifestRow[] = [
   { id: "mind-spike", name: "Mind Spike", level: 2, memberships: [{ list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:129" }], status: 'implemented', partial: 'Save-half damage and failed-save tracking state execute; same-plane location knowledge and Hidden/Invisible benefit suppression await perception resolution.' },
   { id: "mirror-image", name: "Mirror Image", level: 2, memberships: [{ list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:130" }], status: 'implemented', partial: 'Duplicate count, d6 interception threshold, and duration persist; hit interception, duplicate consumption, and sensory bypass await pre-damage attack hooks.' },
   { id: "misty-step", name: "Misty Step", level: 2, memberships: [{ list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:131" }], status: 'implemented', partial: 'Bonus-action cost, maximum distance, visibility, and unoccupied-space requirements execute as typed utility; destination input and token relocation await teleport commands.' },
+  { id: "moonbeam", name: "Moonbeam", level: 2, memberships: [{ list: 'Druid', source: "docs/srd/source/druid-spell-list.txt:84" }], status: 'implemented', partial: 'Exact cylinder placement, initial and end-turn Constitution saves, save-half scaling Radiant damage, duration, concentration, and spatial end-turn membership execute; Magic-action beam movement, move/entry triggers, once-per-turn deduplication across mixed triggers, and shapechange reversion await zone-action and form hooks.' },
   { id: "prayer-of-healing", name: "Prayer of Healing", level: 2, memberships: [{ list: 'Cleric', source: "docs/srd/source/cleric-spell-list.txt:82" }], status: 'implemented', partial: 'Ten-minute cast, five targets, healing, and upcast scaling execute; Short Rest benefits, continuous range, and once-per-Long-Rest recipient lockout await rest/history state.' },
   { id: "protection-from-poison", name: "Protection from Poison", level: 2, memberships: [{ list: 'Cleric', source: "docs/srd/source/cleric-spell-list.txt:87" }], status: 'implemented', partial: 'Poisoned removal and typed save advantage/resistance execute; poison save mode and damage resistance await generalized effect interception.' },
   { id: "ray-of-enfeeblement", name: "Ray of Enfeeblement", level: 2, memberships: [{ list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:132" }], status: 'implemented', partial: 'Both save branches, repeat saves, duration, concentration, and d8 penalty persist; Strength-test disadvantage and damage subtraction await D20/damage interception.' },
@@ -199,6 +205,7 @@ export const SPELL_MANIFEST: readonly SpellManifestRow[] = [
   { id: "stoneskin", name: "Stoneskin", level: 4, memberships: [{ list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:207" }], status: 'implemented', partial: 'Consumed component, three resistances, duration, and concentration persist; typed resistances await generalized damage-response effect interception.' },
   { id: "vitriolic-sphere", name: "Vitriolic Sphere", level: 4, memberships: [{ list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:208" }], status: 'implemented' },
   { id: "wall-of-fire", name: "Wall of Fire", level: 4, memberships: [{ list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:209" }], status: 'implemented', partial: 'Solid-surface requirement, line placement, initial save-half damage, wall/ring dimensions, side distance, opacity, scaling, duration, and concentration persist; ring placement and enter/end-turn damage await wall-zone hooks.' },
+  { id: "heal", name: "Heal", level: 6, memberships: [{ list: 'Cleric', source: "docs/srd/source/cleric-spell-list.txt:171" }, { list: 'Druid', source: "docs/srd/source/druid-spell-list.txt:174" }], status: 'implemented' },
 ] as const;
 
 export function assertSpellManifestBurnDown(

@@ -123,6 +123,25 @@ export interface RepeatedSaveTiming {
   readonly onSuccess: 'remove_target';
 }
 
+export type WeaponHitRiderFollowUp =
+  | {
+      readonly kind: 'ongoing_damage_save_ends';
+      readonly damage: DamageRequest;
+      readonly saveAbility: Ability;
+      readonly saveDc: number;
+      readonly timing: Extract<TurnBoundary, 'start'>;
+      readonly durationRounds: number;
+    }
+  | {
+      readonly kind: 'save_then_restrain';
+      readonly saveAbility: Ability;
+      readonly saveDc: number;
+      readonly rollMode: Extract<RollMode, 'normal'>;
+      readonly damage: DamageRequest;
+      readonly timing: Extract<TurnBoundary, 'start'>;
+      readonly durationRounds: number;
+    };
+
 export type EffectPayload =
   | {
       readonly kind: 'condition';
@@ -168,6 +187,16 @@ export type EffectPayload =
       readonly damage: DamageRequest;
       readonly appliesTo: 'next_attack_against_target' | 'weapon_attack_by_target';
       readonly gating?: DamageRiderGating;
+      readonly consumeOnHit?: boolean;
+      readonly followUp?: WeaponHitRiderFollowUp;
+    }
+  | {
+      readonly kind: 'ensnaring_strike';
+      readonly condition: 'Restrained';
+      readonly damage: DamageRequest;
+      readonly timing: Extract<TurnBoundary, 'start'>;
+      readonly escapeCheckAbility: Extract<Ability, 'strength'>;
+      readonly escapeCheckSkill: 'Athletics';
     }
   | {
       readonly kind: 'bonus_action_attack_grant';
@@ -796,6 +825,20 @@ export type EffectPayload =
       readonly damageType: 'Bludgeoning';
       readonly failureCondition: 'Restrained';
       readonly escapeCheckSkill: 'Athletics';
+      readonly oncePerTurn: true;
+    }
+  | {
+      readonly kind: 'moonbeam_area';
+      readonly placement: AreaTemplate | 'selected_when_cast';
+      readonly saveAbility: Extract<Ability, 'constitution'>;
+      readonly saveDc: number | 'resolved_when_cast';
+      readonly onSuccess: 'half';
+      readonly damageType: 'Radiant';
+      readonly damageCount: number;
+      readonly damageSides: 10;
+      readonly damagePerSlotCount: number;
+      readonly moveFeetPerMagicAction: number;
+      readonly dimLight: true;
       readonly oncePerTurn: true;
     }
   | {

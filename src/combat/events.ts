@@ -257,7 +257,8 @@ export type EncounterEvent =
         | 'concentration_broken'
         | 'no_targets'
         | 'dispelled'
-        | 'stacking_replaced';
+        | 'stacking_replaced'
+        | 'trigger_consumed';
     })
   | (SequencedEvent & {
       readonly type: 'effect_clock_ticked';

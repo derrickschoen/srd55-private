@@ -2,11 +2,25 @@ export type SpellSrdLocator =
   | `docs/srd/source/spell-descriptions.txt:${number}`
   | `docs/srd/source/spell-descriptions.txt:${number}-${number}`;
 
+export type SpellEngineLimitationCode =
+  | 'post_hit_cast_timing_prearmed'
+  | 'creature_size_save_mode_unavailable'
+  | 'effect_escape_action_unavailable'
+  | 'persistent_area_move_action_unavailable'
+  | 'persistent_area_entry_trigger_unavailable'
+  | 'shapechange_reversion_unavailable';
+
+export interface SpellEngineLimitation {
+  readonly code: SpellEngineLimitationCode;
+  readonly note: string;
+}
+
 export interface SpellKbEntry {
   readonly ruleId: `R-SPELL-${string}`;
   readonly spellId: string;
   readonly srdLocator: SpellSrdLocator;
   readonly rulingGuidance: string;
+  readonly limitations?: readonly SpellEngineLimitation[];
   readonly fieldCitations?: Readonly<{
     readonly identity: SpellSrdLocator;
     readonly castingTime: SpellSrdLocator;
@@ -25,7 +39,7 @@ function entry(
   return { ruleId, spellId, srdLocator: `docs/srd/source/spell-descriptions.txt:${line}`, rulingGuidance };
 }
 
-/** One decision-oriented SRD locator for every executable reference-party spell. */
+/** One decision-oriented SRD locator for every executable manifest spell. */
 export const SPELL_KB_ENTRIES = [
   entry('R-SPELL-001', 'acid-splash', '37-51', 'Place the 5-foot sphere within 60 feet; a failed Dexterity save takes scaling Acid damage.'),
   entry('R-SPELL-002', 'chill-touch', '1066', 'Resolve a melee spell attack for scaling Necrotic damage and suppress healing until the next turn.'),
@@ -210,6 +224,69 @@ export const SPELL_KB_ENTRIES = [
       components: 'docs/srd/source/spell-descriptions.txt:2615',
       targeting: 'docs/srd/source/spell-descriptions.txt:2613-2626',
       operation: 'docs/srd/source/spell-descriptions.txt:2619-2626',
+    },
+  },
+  {
+    ...entry('R-SPELL-177', 'divine-favor', '2333-2341', 'Arm a one-minute self effect whose every weapon hit deals 1d4 extra Radiant damage.'),
+    fieldCitations: {
+      identity: 'docs/srd/source/spell-descriptions.txt:2333-2334',
+      castingTime: 'docs/srd/source/spell-descriptions.txt:2336',
+      components: 'docs/srd/source/spell-descriptions.txt:2338',
+      targeting: 'docs/srd/source/spell-descriptions.txt:2337',
+      operation: 'docs/srd/source/spell-descriptions.txt:2339-2341',
+    },
+  },
+  {
+    ...entry('R-SPELL-178', 'ensnaring-strike', '2708-2728', 'Consume the armed rider on the next weapon hit; a failed Strength save Restrains and starts scaling Piercing damage.'),
+    limitations: [
+      { code: 'post_hit_cast_timing_prearmed', note: 'The reducer pre-arms the rider because post-hit spell-cast reactions are not yet commands.' },
+      { code: 'creature_size_save_mode_unavailable', note: 'Large-or-larger save Advantage awaits typed creature size on combat profiles.' },
+      { code: 'effect_escape_action_unavailable', note: 'The Strength (Athletics) escape action awaits effect-targeted action commands.' },
+    ],
+    fieldCitations: {
+      identity: 'docs/srd/source/spell-descriptions.txt:2708-2709',
+      castingTime: 'docs/srd/source/spell-descriptions.txt:2711-2712',
+      components: 'docs/srd/source/spell-descriptions.txt:2714',
+      targeting: 'docs/srd/source/spell-descriptions.txt:2713',
+      operation: 'docs/srd/source/spell-descriptions.txt:2715-2728',
+    },
+  },
+  {
+    ...entry('R-SPELL-179', 'searing-smite', '6738-6751', 'Consume the armed rider on the next weapon hit, scale both Fire damage phases by slot, and repeat the start-turn Constitution save until success.'),
+    limitations: [
+      { code: 'post_hit_cast_timing_prearmed', note: 'The reducer pre-arms the rider because post-hit spell-cast reactions are not yet commands.' },
+    ],
+    fieldCitations: {
+      identity: 'docs/srd/source/spell-descriptions.txt:6738-6739',
+      castingTime: 'docs/srd/source/spell-descriptions.txt:6740-6742',
+      components: 'docs/srd/source/spell-descriptions.txt:6744',
+      targeting: 'docs/srd/source/spell-descriptions.txt:6743',
+      operation: 'docs/srd/source/spell-descriptions.txt:6745-6751',
+    },
+  },
+  {
+    ...entry('R-SPELL-180', 'heal', '4158-4167', 'Restore exactly 70 Hit Points at level 6, add 10 per higher slot, and end Blinded, Deafened, and Poisoned.'),
+    fieldCitations: {
+      identity: 'docs/srd/source/spell-descriptions.txt:4158-4159',
+      castingTime: 'docs/srd/source/spell-descriptions.txt:4160',
+      components: 'docs/srd/source/spell-descriptions.txt:4162',
+      targeting: 'docs/srd/source/spell-descriptions.txt:4161-4164',
+      operation: 'docs/srd/source/spell-descriptions.txt:4163-4167',
+    },
+  },
+  {
+    ...entry('R-SPELL-181', 'moonbeam', '5582-5611', 'Place the exact cylinder; creatures save against scaling Radiant damage when it appears and at supported end-turn triggers.'),
+    limitations: [
+      { code: 'persistent_area_move_action_unavailable', note: 'Moving the beam up to 60 feet awaits a persistent-area Magic action command.' },
+      { code: 'persistent_area_entry_trigger_unavailable', note: 'Area movement and creature-entry triggers await movement-to-zone interception.' },
+      { code: 'shapechange_reversion_unavailable', note: 'Shapechange reversion awaits typed form ownership and restoration hooks.' },
+    ],
+    fieldCitations: {
+      identity: 'docs/srd/source/spell-descriptions.txt:5582-5583',
+      castingTime: 'docs/srd/source/spell-descriptions.txt:5585',
+      components: 'docs/srd/source/spell-descriptions.txt:5587',
+      targeting: 'docs/srd/source/spell-descriptions.txt:5586-5594',
+      operation: 'docs/srd/source/spell-descriptions.txt:5588-5611',
     },
   },
 ] as const satisfies readonly SpellKbEntry[];
