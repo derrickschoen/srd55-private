@@ -23,6 +23,7 @@ const TURN_PROGRAM_LIBRARY_LEDGER_PATH = 'docs/audits/2026-08-20-turn-program-li
 const E04_E06_LEDGER_PATH = 'docs/audits/2026-08-20-e04-e06-engine-prerequisites-mutation-ledger.md';
 const E01_EXPERIMENT_LEDGER_PATH = 'docs/audits/2026-08-20-e01-experiment-orchestrator-mutation-ledger.md';
 const PARTY_EFFECTS_LEDGER_PATH = 'docs/audits/2026-08-20-party-pack-v2-effects-mutation-ledger.md';
+const PARTY_MULTISOURCE_LEDGER_PATH = 'docs/audits/2026-08-21-party-pack-multisource-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
 function ledger(): MutationLedger {
@@ -169,5 +170,18 @@ describe('phase-2 mutation ledger manifest', () => {
     expect(ledger).toContain('exit 1');
     expect(ledger).toContain('exit 0; 98 passed');
     expect(ledger).toContain('exit 0; 1,360 passed');
+  });
+
+  it('PARTY-MULTISOURCE-MUTATION-LEDGER pins all three required controls', () => {
+    const ledger = readFileSync(PARTY_MULTISOURCE_LEDGER_PATH, 'utf8');
+    for (const name of [
+      'wrong_source_dc',
+      'per_source_slots',
+      'object_form_rejected',
+    ]) {
+      expect(ledger).toContain(`\`${name}\``);
+    }
+    expect(ledger).toContain('exit 1');
+    expect(ledger).toContain('1,553-test restored gate');
   });
 });
