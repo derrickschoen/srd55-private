@@ -99,6 +99,25 @@ describe('encounter reducer authority and action economy', () => {
     expect(state.revision).toBe(1);
   });
 
+  it('advances initiative when an active combatant was killed by a reaction during its turn', () => {
+    const active = monsterProfile('reaction-casualty', { initiativeBonus: 10 });
+    const next = playerProfile('reaction-survivor', { initiativeBonus: 0 });
+    const started = start([active, next]);
+    const killed: EncounterState = {
+      ...started,
+      combatants: started.combatants.map((combatant) =>
+        combatant.profile.id === active.id
+          ? { ...combatant, hitPoints: 0, life: 'dead', deathSaves: null }
+          : combatant),
+    };
+
+    const advanced = reduceEncounter(killed, { type: 'end_turn', actor: active.id }, () => 0.5);
+
+    expect(advanced.state.activeCombatant).toBe(next.id);
+    expect(advanced.events.map((event) => event.type)).toContain('turn_ended');
+    expect(advanced.events.map((event) => event.type)).toContain('turn_started');
+  });
+
   it('splits movement around other choices through the shared movement kernel', () => {
     const pc = playerProfile('mover', { initiativeBonus: 10 });
     const monster = monsterProfile('far', { initiativeBonus: -10 });

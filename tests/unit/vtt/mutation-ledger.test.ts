@@ -24,6 +24,7 @@ const E04_E06_LEDGER_PATH = 'docs/audits/2026-08-20-e04-e06-engine-prerequisites
 const E01_EXPERIMENT_LEDGER_PATH = 'docs/audits/2026-08-20-e01-experiment-orchestrator-mutation-ledger.md';
 const PARTY_EFFECTS_LEDGER_PATH = 'docs/audits/2026-08-20-party-pack-v2-effects-mutation-ledger.md';
 const PARTY_MULTISOURCE_LEDGER_PATH = 'docs/audits/2026-08-21-party-pack-multisource-mutation-ledger.md';
+const REGRET_ORACLE_LEDGER_PATH = 'docs/audits/2026-08-21-vtt-regret-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
 function ledger(): MutationLedger {
@@ -183,5 +184,19 @@ describe('phase-2 mutation ledger manifest', () => {
     }
     expect(ledger).toContain('exit 1');
     expect(ledger).toContain('1,553-test restored gate');
+  });
+
+  it('REGRET-ORACLE-MUTATION-LEDGER pins the three required controls and named killing tests', () => {
+    const ledger = readFileSync(REGRET_ORACLE_LEDGER_PATH, 'utf8');
+    const tests = readFileSync('tests/unit/vtt/regret.test.ts', 'utf8');
+    for (const name of [
+      'comparator_hp_before_win',
+      'rollout_rng_shared',
+      'collapse_ignores_movement_order',
+      'resource_score_inflated',
+    ]) {
+      expect(ledger).toContain(`\`${name}\``);
+      expect(tests).toContain(name);
+    }
   });
 });
