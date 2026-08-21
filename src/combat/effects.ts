@@ -6,7 +6,30 @@ import type {
   CombatantId,
   EffectStackingIdentity,
   EncounterEffectId,
+  LimitedResourcePoolId,
 } from './values';
+
+export const featureEffectTriggers = [
+  'always_on',
+  'action',
+  'bonus_action',
+  'reaction',
+  'on_hit',
+  'on_crit',
+  'on_save_fail',
+] as const;
+
+export type FeatureEffectTrigger = (typeof featureEffectTriggers)[number];
+
+/** Reducer-ready class/feat effect retained on a combatant profile. */
+export type CombatFeatureEffect = {
+  readonly id: EncounterEffectId;
+  readonly trigger: FeatureEffectTrigger;
+  readonly resourcePoolId: LimitedResourcePoolId | null;
+} & (
+  | { readonly payload: EffectPayload }
+  | { readonly payload: { readonly kind: 'temporary_hit_points'; readonly amount: number } }
+);
 
 export type TurnBoundary = 'start' | 'end';
 

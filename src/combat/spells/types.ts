@@ -1,7 +1,7 @@
 import type { Ability } from '../../domain/enums';
 import type { EffectPayload } from '../effects';
 import type { AreaTemplate } from '../templates';
-import type { CombatantId, DamageType } from '../values';
+import type { CombatantId, DamageType, LimitedResourcePoolId } from '../values';
 
 export type SpellLevel = 0 | 1 | 2 | 3 | 4;
 export type SpellCastingTime = 'action' | 'bonus_action' | 'reaction' | 'minute' | 'ten_minutes' | 'hour';
@@ -355,4 +355,6 @@ export interface SpellCastCommand {
     readonly damageModifier: number;
   };
   readonly selectedOption: string | null;
+  /** A declared class/feat pool can replace slot spending for this cast. */
+  readonly resourcePoolId?: LimitedResourcePoolId;
 }
