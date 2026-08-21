@@ -376,6 +376,48 @@ export type SpellOperation =
       readonly stateful?: true;
     };
 
+/** Runtime inventory for serializers of the closed operation union above. */
+export const SPELL_OPERATION_KINDS = [
+  'attack_damage',
+  'attack_then_save_damage',
+  'attack_damage_over_time',
+  'hit_point_maximum_increase',
+  'save_damage',
+  'save_multi_damage',
+  'save_damage_over_time',
+  'save_damage_and_effect',
+  'healing',
+  'fixed_healing',
+  'temporary_hit_points',
+  'effect',
+  'save_effect',
+  'save_push',
+  'remove_condition',
+  'remove_condition_and_effect',
+  'save_branch_effect',
+  'attack_rays',
+  'attack_beams',
+  'summoned_weapon_attack',
+  'reaction_save_cancel',
+  'dispel_magic',
+  'revive',
+  'remove_curse',
+  'lifedrain_attack',
+  'magic_missiles',
+  'stabilize',
+  'weapon_attack_augmentation',
+  'utility',
+] as const satisfies readonly SpellOperation['kind'][];
+
+type MissingSpellOperationKind = Exclude<
+  SpellOperation['kind'],
+  (typeof SPELL_OPERATION_KINDS)[number]
+>;
+const spellOperationKindInventoryIsComplete: MissingSpellOperationKind extends never
+  ? true
+  : never = true;
+void spellOperationKindInventoryIsComplete;
+
 export interface SpellDefinition {
   readonly id: string;
   readonly name: string;

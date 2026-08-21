@@ -1,0 +1,1696 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dnd-lane.invalid/schemas/content-pack-v1.json",
+  "title": "spike-vtt Content Pack v1",
+  "description": "Public engine-content interchange. Records contain typed mechanics only; imported content remains attributed by the required provenance block.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "packId",
+    "provenance",
+    "spells",
+    "features",
+    "species",
+    "backgrounds",
+    "subclasses",
+    "monsters"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "packId": {
+      "$ref": "#/$defs/sourceId"
+    },
+    "provenance": {
+      "$ref": "#/$defs/provenance"
+    },
+    "spells": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {
+        "$ref": "#/$defs/spell"
+      }
+    },
+    "features": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {
+        "$ref": "#/$defs/feature"
+      }
+    },
+    "species": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {
+        "$ref": "#/$defs/origin"
+      }
+    },
+    "backgrounds": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {
+        "$ref": "#/$defs/origin"
+      }
+    },
+    "subclasses": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {
+        "$ref": "#/$defs/subclass"
+      }
+    },
+    "monsters": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {
+        "$ref": "#/$defs/monster"
+      }
+    }
+  },
+  "$defs": {
+    "sourceId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9._-]{0,63}$"
+    },
+    "recordId": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,95}$"
+    },
+    "identity": {
+      "type": "object",
+      "required": [
+        "sourceId",
+        "recordId",
+        "name"
+      ],
+      "properties": {
+        "sourceId": {
+          "$ref": "#/$defs/sourceId"
+        },
+        "recordId": {
+          "$ref": "#/$defs/recordId"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sourceName",
+        "sourceKind",
+        "importedAt"
+      ],
+      "properties": {
+        "sourceName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sourceKind": {
+          "enum": [
+            "srd",
+            "homebrew",
+            "user_import"
+          ]
+        },
+        "importedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "spell": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/identity"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sourceId",
+            "recordId",
+            "name",
+            "level",
+            "school",
+            "castingTime",
+            "range",
+            "components",
+            "duration",
+            "concentration",
+            "targeting",
+            "operation"
+          ],
+          "properties": {
+            "sourceId": {
+              "$ref": "#/$defs/sourceId"
+            },
+            "recordId": {
+              "$ref": "#/$defs/recordId"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "level": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9
+            },
+            "school": {
+              "$ref": "#/$defs/school"
+            },
+            "castingTime": {
+              "enum": [
+                "action",
+                "bonus_action",
+                "reaction",
+                "minute",
+                "ten_minutes",
+                "hour"
+              ]
+            },
+            "ritual": {
+              "const": true
+            },
+            "range": {
+              "$ref": "#/$defs/range"
+            },
+            "components": {
+              "$ref": "#/$defs/components"
+            },
+            "duration": {
+              "$ref": "#/$defs/duration"
+            },
+            "concentration": {
+              "type": "boolean"
+            },
+            "targeting": {
+              "type": "object",
+              "required": [
+                "kind"
+              ],
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "self",
+                    "single",
+                    "multiple",
+                    "area",
+                    "area_selected",
+                    "all_in_range",
+                    "remote",
+                    "utility"
+                  ]
+                }
+              }
+            },
+            "operation": {
+              "$ref": "#/$defs/spellOperation"
+            }
+          }
+        }
+      ]
+    },
+    "school": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "name"
+          ],
+          "properties": {
+            "kind": {
+              "const": "known"
+            },
+            "name": {
+              "enum": [
+                "Abjuration",
+                "Conjuration",
+                "Divination",
+                "Enchantment",
+                "Evocation",
+                "Illusion",
+                "Necromancy",
+                "Transmutation"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "name"
+          ],
+          "properties": {
+            "kind": {
+              "const": "other"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "range": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "self",
+                "touch",
+                "sight",
+                "unlimited"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "feet"
+          ],
+          "properties": {
+            "kind": {
+              "const": "feet"
+            },
+            "feet": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      ]
+    },
+    "components": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "verbal",
+        "somatic",
+        "material"
+      ],
+      "properties": {
+        "verbal": {
+          "type": "boolean"
+        },
+        "somatic": {
+          "type": "boolean"
+        },
+        "material": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "text",
+                "consumed"
+              ],
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "consumed": {
+                  "type": "boolean"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "duration": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "instantaneous",
+                "until_dispelled"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "rounds"
+          ],
+          "properties": {
+            "kind": {
+              "const": "rounds"
+            },
+            "rounds": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "text"
+          ],
+          "properties": {
+            "kind": {
+              "const": "special"
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "spellOperation": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "attack_damage",
+            "attack_then_save_damage",
+            "attack_damage_over_time",
+            "hit_point_maximum_increase",
+            "save_damage",
+            "save_multi_damage",
+            "save_damage_over_time",
+            "save_damage_and_effect",
+            "healing",
+            "fixed_healing",
+            "temporary_hit_points",
+            "effect",
+            "save_effect",
+            "save_push",
+            "remove_condition",
+            "remove_condition_and_effect",
+            "save_branch_effect",
+            "attack_rays",
+            "attack_beams",
+            "summoned_weapon_attack",
+            "reaction_save_cancel",
+            "dispel_magic",
+            "revive",
+            "remove_curse",
+            "lifedrain_attack",
+            "magic_missiles",
+            "stabilize",
+            "weapon_attack_augmentation",
+            "utility"
+          ]
+        }
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/operation-attack_damage"
+        },
+        {
+          "$ref": "#/$defs/operation-attack_then_save_damage"
+        },
+        {
+          "$ref": "#/$defs/operation-attack_damage_over_time"
+        },
+        {
+          "$ref": "#/$defs/operation-hit_point_maximum_increase"
+        },
+        {
+          "$ref": "#/$defs/operation-save_damage"
+        },
+        {
+          "$ref": "#/$defs/operation-save_multi_damage"
+        },
+        {
+          "$ref": "#/$defs/operation-save_damage_over_time"
+        },
+        {
+          "$ref": "#/$defs/operation-save_damage_and_effect"
+        },
+        {
+          "$ref": "#/$defs/operation-healing"
+        },
+        {
+          "$ref": "#/$defs/operation-fixed_healing"
+        },
+        {
+          "$ref": "#/$defs/operation-temporary_hit_points"
+        },
+        {
+          "$ref": "#/$defs/operation-effect"
+        },
+        {
+          "$ref": "#/$defs/operation-save_effect"
+        },
+        {
+          "$ref": "#/$defs/operation-save_push"
+        },
+        {
+          "$ref": "#/$defs/operation-remove_condition"
+        },
+        {
+          "$ref": "#/$defs/operation-remove_condition_and_effect"
+        },
+        {
+          "$ref": "#/$defs/operation-save_branch_effect"
+        },
+        {
+          "$ref": "#/$defs/operation-attack_rays"
+        },
+        {
+          "$ref": "#/$defs/operation-attack_beams"
+        },
+        {
+          "$ref": "#/$defs/operation-summoned_weapon_attack"
+        },
+        {
+          "$ref": "#/$defs/operation-reaction_save_cancel"
+        },
+        {
+          "$ref": "#/$defs/operation-dispel_magic"
+        },
+        {
+          "$ref": "#/$defs/operation-revive"
+        },
+        {
+          "$ref": "#/$defs/operation-remove_curse"
+        },
+        {
+          "$ref": "#/$defs/operation-lifedrain_attack"
+        },
+        {
+          "$ref": "#/$defs/operation-magic_missiles"
+        },
+        {
+          "$ref": "#/$defs/operation-stabilize"
+        },
+        {
+          "$ref": "#/$defs/operation-weapon_attack_augmentation"
+        },
+        {
+          "$ref": "#/$defs/operation-utility"
+        }
+      ]
+    },
+    "feature": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/identity"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sourceId",
+            "recordId",
+            "name",
+            "effects",
+            "resources"
+          ],
+          "properties": {
+            "sourceId": {
+              "$ref": "#/$defs/sourceId"
+            },
+            "recordId": {
+              "$ref": "#/$defs/recordId"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "effects": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 100,
+              "items": {
+                "$ref": "#/$defs/featureEffect"
+              }
+            },
+            "resources": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "$ref": "external-party-pack.schema.json#/$defs/resourcePool"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "featureEffect": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "damage_rider",
+            "once_per_turn_damage_rider",
+            "slot_spend_damage_rider",
+            "first_hit_damage_rider",
+            "bonus_action_attack_grant",
+            "extra_attack_count_override",
+            "action_surge",
+            "attack_roll_modifier",
+            "attack_roll_mode",
+            "reckless_attack_mode",
+            "armor_class_modifier",
+            "saving_throw_modifier",
+            "skill_modifier",
+            "temporary_hit_points",
+            "condition_application",
+            "exhaustion_application",
+            "movement_modifier",
+            "attack_ability_substitution",
+            "attack_damage_die_override",
+            "attack_reach_range_override",
+            "save_gated_banishment_on_hit",
+            "spell_damage_ability_modifier",
+            "timed_spellcasting_mode",
+            "attack_damage_type_choice",
+            "resource_die_maneuver",
+            "exploding_spell_damage_die",
+            "elemental_fury"
+          ]
+        }
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/feature-damage_rider"
+        },
+        {
+          "$ref": "#/$defs/feature-once_per_turn_damage_rider"
+        },
+        {
+          "$ref": "#/$defs/feature-slot_spend_damage_rider"
+        },
+        {
+          "$ref": "#/$defs/feature-first_hit_damage_rider"
+        },
+        {
+          "$ref": "#/$defs/feature-bonus_action_attack_grant"
+        },
+        {
+          "$ref": "#/$defs/feature-extra_attack_count_override"
+        },
+        {
+          "$ref": "#/$defs/feature-action_surge"
+        },
+        {
+          "$ref": "#/$defs/feature-attack_roll_modifier"
+        },
+        {
+          "$ref": "#/$defs/feature-attack_roll_mode"
+        },
+        {
+          "$ref": "#/$defs/feature-reckless_attack_mode"
+        },
+        {
+          "$ref": "#/$defs/feature-armor_class_modifier"
+        },
+        {
+          "$ref": "#/$defs/feature-saving_throw_modifier"
+        },
+        {
+          "$ref": "#/$defs/feature-skill_modifier"
+        },
+        {
+          "$ref": "#/$defs/feature-temporary_hit_points"
+        },
+        {
+          "$ref": "#/$defs/feature-condition_application"
+        },
+        {
+          "$ref": "#/$defs/feature-exhaustion_application"
+        },
+        {
+          "$ref": "#/$defs/feature-movement_modifier"
+        },
+        {
+          "$ref": "#/$defs/feature-attack_ability_substitution"
+        },
+        {
+          "$ref": "#/$defs/feature-attack_damage_die_override"
+        },
+        {
+          "$ref": "#/$defs/feature-attack_reach_range_override"
+        },
+        {
+          "$ref": "#/$defs/feature-save_gated_banishment_on_hit"
+        },
+        {
+          "$ref": "#/$defs/feature-spell_damage_ability_modifier"
+        },
+        {
+          "$ref": "#/$defs/feature-timed_spellcasting_mode"
+        },
+        {
+          "$ref": "#/$defs/feature-attack_damage_type_choice"
+        },
+        {
+          "$ref": "#/$defs/feature-resource_die_maneuver"
+        },
+        {
+          "$ref": "#/$defs/feature-exploding_spell_damage_die"
+        },
+        {
+          "$ref": "#/$defs/feature-elemental_fury"
+        }
+      ]
+    },
+    "grants": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "abilityScoreIncreases",
+        "skills",
+        "speedFeet",
+        "senses"
+      ],
+      "properties": {
+        "abilityScoreIncreases": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "ability",
+              "amount"
+            ],
+            "properties": {
+              "ability": {
+                "enum": [
+                  "strength",
+                  "dexterity",
+                  "constitution",
+                  "intelligence",
+                  "wisdom",
+                  "charisma"
+                ]
+              },
+              "amount": {
+                "type": "integer",
+                "minimum": -30,
+                "maximum": 30
+              }
+            }
+          }
+        },
+        "skills": {
+          "type": "array",
+          "maxItems": 18,
+          "items": {
+            "type": "string"
+          }
+        },
+        "speedFeet": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000
+        },
+        "senses": {
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "rangeFeet"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "blindsight",
+                  "darkvision",
+                  "tremorsense",
+                  "truesight"
+                ]
+              },
+              "rangeFeet": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "origin": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/identity"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sourceId",
+            "recordId",
+            "name",
+            "grants"
+          ],
+          "properties": {
+            "sourceId": {
+              "$ref": "#/$defs/sourceId"
+            },
+            "recordId": {
+              "$ref": "#/$defs/recordId"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "grants": {
+              "$ref": "#/$defs/grants"
+            }
+          }
+        }
+      ]
+    },
+    "subclass": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/identity"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sourceId",
+            "recordId",
+            "name",
+            "className",
+            "featureSets"
+          ],
+          "properties": {
+            "sourceId": {
+              "$ref": "#/$defs/sourceId"
+            },
+            "recordId": {
+              "$ref": "#/$defs/recordId"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "className": {
+              "type": "string",
+              "minLength": 1
+            },
+            "featureSets": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 20,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "level",
+                  "featureIds"
+                ],
+                "properties": {
+                  "level": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 20
+                  },
+                  "featureIds": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "monster": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/identity"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sourceId",
+            "recordId",
+            "name",
+            "statblock",
+            "actions"
+          ],
+          "properties": {
+            "sourceId": {
+              "$ref": "#/$defs/sourceId"
+            },
+            "recordId": {
+              "$ref": "#/$defs/recordId"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "statblock": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "armorClass",
+                "hitPointMaximum",
+                "speedFeet",
+                "initiativeBonus",
+                "savingThrowBonuses"
+              ],
+              "properties": {
+                "armorClass": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "hitPointMaximum": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "speedFeet": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "initiativeBonus": {
+                  "type": "integer"
+                },
+                "savingThrowBonuses": {
+                  "type": "object"
+                },
+                "attacksPerAction": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "reachFeet": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "damageResponses": {
+                  "type": "array"
+                },
+                "conditionImmunities": {
+                  "type": "array"
+                },
+                "usesDeathSaves": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "actions": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "id"
+                ],
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "attack",
+                      "multiattack",
+                      "saving_throw",
+                      "spellcasting"
+                    ]
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "operation-attack_damage": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "attack_damage"
+        }
+      }
+    },
+    "operation-attack_then_save_damage": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "attack_then_save_damage"
+        }
+      }
+    },
+    "operation-attack_damage_over_time": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "attack_damage_over_time"
+        }
+      }
+    },
+    "operation-hit_point_maximum_increase": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "hit_point_maximum_increase"
+        }
+      }
+    },
+    "operation-save_damage": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "save_damage"
+        }
+      }
+    },
+    "operation-save_multi_damage": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "save_multi_damage"
+        }
+      }
+    },
+    "operation-save_damage_over_time": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "save_damage_over_time"
+        }
+      }
+    },
+    "operation-save_damage_and_effect": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "save_damage_and_effect"
+        }
+      }
+    },
+    "operation-healing": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "healing"
+        }
+      }
+    },
+    "operation-fixed_healing": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "fixed_healing"
+        }
+      }
+    },
+    "operation-temporary_hit_points": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "temporary_hit_points"
+        }
+      }
+    },
+    "operation-effect": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "effect"
+        }
+      }
+    },
+    "operation-save_effect": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "save_effect"
+        }
+      }
+    },
+    "operation-save_push": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "save_push"
+        }
+      }
+    },
+    "operation-remove_condition": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "remove_condition"
+        }
+      }
+    },
+    "operation-remove_condition_and_effect": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "remove_condition_and_effect"
+        }
+      }
+    },
+    "operation-save_branch_effect": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "save_branch_effect"
+        }
+      }
+    },
+    "operation-attack_rays": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "attack_rays"
+        }
+      }
+    },
+    "operation-attack_beams": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "attack_beams"
+        }
+      }
+    },
+    "operation-summoned_weapon_attack": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "summoned_weapon_attack"
+        }
+      }
+    },
+    "operation-reaction_save_cancel": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "reaction_save_cancel"
+        }
+      }
+    },
+    "operation-dispel_magic": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "dispel_magic"
+        }
+      }
+    },
+    "operation-revive": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "revive"
+        }
+      }
+    },
+    "operation-remove_curse": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "remove_curse"
+        }
+      }
+    },
+    "operation-lifedrain_attack": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "lifedrain_attack"
+        }
+      }
+    },
+    "operation-magic_missiles": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "magic_missiles"
+        }
+      }
+    },
+    "operation-stabilize": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "stabilize"
+        }
+      }
+    },
+    "operation-weapon_attack_augmentation": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "weapon_attack_augmentation"
+        }
+      }
+    },
+    "operation-utility": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "utility"
+        }
+      }
+    },
+    "feature-damage_rider": {
+      "allOf": [
+        {
+          "$ref": "external-party-pack.schema.json#/$defs/featureEffect"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "damage_rider"
+            }
+          }
+        }
+      ]
+    },
+    "feature-once_per_turn_damage_rider": {
+      "allOf": [
+        {
+          "$ref": "external-party-pack.schema.json#/$defs/featureEffect"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "once_per_turn_damage_rider"
+            }
+          }
+        }
+      ]
+    },
+    "feature-slot_spend_damage_rider": {
+      "allOf": [
+        {
+          "$ref": "external-party-pack.schema.json#/$defs/featureEffect"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "slot_spend_damage_rider"
+            }
+          }
+        }
+      ]
+    },
+    "feature-first_hit_damage_rider": {
+      "allOf": [
+        {
+          "$ref": "external-party-pack.schema.json#/$defs/featureEffect"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "first_hit_damage_rider"
+            }
+          }
+        }
+      ]
+    },
+    "feature-bonus_action_attack_grant": {
+      "allOf": [
+        {
+          "$ref": "external-party-pack.schema.json#/$defs/featureEffect"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "bonus_action_attack_grant"
+            }
+          }
+        }
+      ]
+    },
+    "feature-extra_attack_count_override": {
+      "allOf": [
+        {
+          "$ref": "external-party-pack.schema.json#/$defs/featureEffect"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "extra_attack_count_override"
+            }
+          }
+        }
+      ]
+    },
+    "feature-action_surge": {
+      "allOf": [
+        {
+          "$ref": "external-party-pack.schema.json#/$defs/featureEffect"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "action_surge"
+            }
+          }
+        }
+      ]
+    },
+    "feature-attack_roll_modifier": {
+      "allOf": [
+        {
+          "$ref": "external-party-pack.schema.json#/$defs/featureEffect"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "attack_roll_modifier"
+            }
+          }
+        }
+      ]
+    },
+    "feature-attack_roll_mode": {
+      "allOf": [
+        {
+          "$ref": "external-party-pack.schema.json#/$defs/featureEffect"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "attack_roll_mode"
+            }
+          }
+        }
+      ]
+    },
+    "feature-reckless_attack_mode": {
+      "allOf": [
+        {
+          "$ref": "external-party-pack.schema.json#/$defs/featureEffect"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "reckless_attack_mode"
+            }
+          }
+        }
+      ]
+    },
+    "feature-armor_class_modifier": {
+      "allOf": [
+        {
+          "$ref": "external-party-pack.schema.json#/$defs/featureEffect"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "armor_class_modifier"
+            }
+          }
+        }
+      ]
+    },
+    "feature-saving_throw_modifier": {
+      "allOf": [
+        {
+          "$ref": "external-party-pack.schema.json#/$defs/featureEffect"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "saving_throw_modifier"
+            }
+          }
+        }
+      ]
+    },
+    "feature-skill_modifier": {
+      "allOf": [
+        {
+          "$ref": "external-party-pack.schema.json#/$defs/featureEffect"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "skill_modifier"
+            }
+          }
+        }
+      ]
+    },
+    "feature-temporary_hit_points": {
+      "allOf": [
+        {
+          "$ref": "external-party-pack.schema.json#/$defs/featureEffect"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "temporary_hit_points"
+            }
+          }
+        }
+      ]
+    },
+    "feature-condition_application": {
+      "allOf": [
+        {
+          "$ref": "external-party-pack.schema.json#/$defs/featureEffect"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "condition_application"
+            }
+          }
+        }
+      ]
+    },
+    "feature-exhaustion_application": {
+      "allOf": [
+        {
+          "$ref": "external-party-pack.schema.json#/$defs/featureEffect"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "exhaustion_application"
+            }
+          }
+        }
+      ]
+    },
+    "feature-movement_modifier": {
+      "allOf": [
+        {
+          "$ref": "external-party-pack.schema.json#/$defs/featureEffect"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "movement_modifier"
+            }
+          }
+        }
+      ]
+    },
+    "feature-attack_ability_substitution": {
+      "allOf": [
+        {
+          "$ref": "external-party-pack.schema.json#/$defs/featureEffect"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "attack_ability_substitution"
+            }
+          }
+        }
+      ]
+    },
+    "feature-attack_damage_die_override": {
+      "allOf": [
+        {
+          "$ref": "external-party-pack.schema.json#/$defs/featureEffect"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "attack_damage_die_override"
+            }
+          }
+        }
+      ]
+    },
+    "feature-attack_reach_range_override": {
+      "allOf": [
+        {
+          "$ref": "external-party-pack.schema.json#/$defs/featureEffect"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "attack_reach_range_override"
+            }
+          }
+        }
+      ]
+    },
+    "feature-save_gated_banishment_on_hit": {
+      "allOf": [
+        {
+          "$ref": "external-party-pack.schema.json#/$defs/featureEffect"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "save_gated_banishment_on_hit"
+            }
+          }
+        }
+      ]
+    },
+    "feature-spell_damage_ability_modifier": {
+      "allOf": [
+        {
+          "$ref": "external-party-pack.schema.json#/$defs/featureEffect"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "spell_damage_ability_modifier"
+            }
+          }
+        }
+      ]
+    },
+    "feature-timed_spellcasting_mode": {
+      "allOf": [
+        {
+          "$ref": "external-party-pack.schema.json#/$defs/featureEffect"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "timed_spellcasting_mode"
+            }
+          }
+        }
+      ]
+    },
+    "feature-attack_damage_type_choice": {
+      "allOf": [
+        {
+          "$ref": "external-party-pack.schema.json#/$defs/featureEffect"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "attack_damage_type_choice"
+            }
+          }
+        }
+      ]
+    },
+    "feature-resource_die_maneuver": {
+      "allOf": [
+        {
+          "$ref": "external-party-pack.schema.json#/$defs/featureEffect"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "resource_die_maneuver"
+            }
+          }
+        }
+      ]
+    },
+    "feature-exploding_spell_damage_die": {
+      "allOf": [
+        {
+          "$ref": "external-party-pack.schema.json#/$defs/featureEffect"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "exploding_spell_damage_die"
+            }
+          }
+        }
+      ]
+    },
+    "feature-elemental_fury": {
+      "allOf": [
+        {
+          "$ref": "external-party-pack.schema.json#/$defs/featureEffect"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "elemental_fury"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

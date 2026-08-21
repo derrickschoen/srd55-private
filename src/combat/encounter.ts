@@ -1,5 +1,9 @@
 import type { Ability } from '../domain/enums';
 import {
+  importedSpellDefinition,
+  type LoadedContentPack,
+} from '../content/content-pack';
+import {
   conditionMechanicalState,
   conditionSpeedPenaltyFeet,
   exhaustionPenalty,
@@ -166,6 +170,8 @@ export interface EncounterState {
   readonly round: number;
   readonly effects: readonly EncounterEffect[];
   readonly eventLog: readonly EncounterEvent[];
+  /** Exact imported records plus their reducer-ready projections. */
+  readonly contentPacks?: readonly LoadedContentPack[];
 }
 
 export interface EncounterSetup {
@@ -176,6 +182,7 @@ export interface EncounterSetup {
   readonly dmNotes?: readonly string[];
   readonly combatants: readonly CombatantProfile[];
   readonly tokens: readonly CombatToken[];
+  readonly contentPacks?: readonly LoadedContentPack[];
 }
 
 export interface EncounterReduction {
@@ -359,6 +366,9 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
     round: 0,
     effects: initialEffects,
     eventLog: [],
+    ...(setup.contentPacks === undefined
+      ? {}
+      : { contentPacks: structuredClone(setup.contentPacks) }),
   };
 }
 
@@ -3448,7 +3458,8 @@ function applySpellDamageAmount(
 }
 
 function processSpellCast(context: ReductionContext, command: SpellCastCommand): void {
-  const definition = spellDefinition(command.spellId);
+  const definition = spellDefinition(command.spellId) ??
+    importedSpellDefinition(context.state.contentPacks, command.spellId);
   if (definition === null) throw new EncounterRuleError(`Spell ${command.spellId} is not implemented.`);
   const targets = selectedSpellTargets(context.state, definition, command);
   spendSpellCastingCost(context, definition, command);
@@ -3720,7 +3731,9 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
         if (!candidate.targets.some((target) => targets.includes(target))) return false;
         const identity = String(candidate.stackingIdentity);
         if (!identity.startsWith('spell:')) return false;
-        const affected = spellDefinition(identity.slice('spell:'.length));
+        const affectedId = identity.slice('spell:'.length);
+        const affected = spellDefinition(affectedId) ??
+          importedSpellDefinition(context.state.contentPacks, affectedId);
         return affected !== null && affected.level <= automaticLevel;
       });
       endEffects(context, new Set(matching.map((candidate) => candidate.id)), 'dispelled');

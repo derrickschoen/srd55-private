@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 1,
+  "packId": "greenforge-sampler",
+  "provenance": {
+    "sourceName": "Greenforge Sampler",
+    "sourceKind": "homebrew",
+    "importedAt": "2026-08-21T12:00:00Z"
+  },
+  "spells": [
+    {
+      "sourceId": "greenforge",
+      "recordId": "prism-pebble",
+      "name": "Prism Pebble",
+      "level": 1,
+      "school": { "kind": "other", "name": "Facetcraft" },
+      "castingTime": "action",
+      "range": { "kind": "feet", "feet": 30 },
+      "components": { "verbal": true, "somatic": true, "material": null },
+      "duration": { "kind": "instantaneous" },
+      "concentration": false,
+      "targeting": { "kind": "single", "rangeFeet": 30, "willing": false },
+      "operation": {
+        "kind": "attack_damage",
+        "attackKind": "ranged",
+        "damageType": "Thunder",
+        "dice": {
+          "baseCount": 1,
+          "sides": 6,
+          "modifier": 0,
+          "perSlotCount": 1,
+          "perSlotModifier": 0,
+          "cantripUpgrade": false
+        },
+        "rider": null
+      }
+    }
+  ],
+  "features": [
+    {
+      "sourceId": "greenforge",
+      "recordId": "mossglass-edge",
+      "name": "Mossglass Edge",
+      "effects": [
+        {
+          "effectId": "effect:mossglass-edge",
+          "kind": "damage_rider",
+          "trigger": "on_hit",
+          "damage": [
+            { "damageTypeId": "Acid", "count": 1, "sides": 4, "modifier": 0 }
+          ]
+        }
+      ],
+      "resources": []
+    }
+  ],
+  "species": [
+    {
+      "sourceId": "greenforge",
+      "recordId": "cloudstep-kin",
+      "name": "Cloudstep Kin",
+      "grants": {
+        "abilityScoreIncreases": [{ "ability": "dexterity", "amount": 1 }],
+        "skills": ["acrobatics"],
+        "speedFeet": 35,
+        "senses": [{ "kind": "darkvision", "rangeFeet": 45 }]
+      }
+    }
+  ],
+  "backgrounds": [
+    {
+      "sourceId": "greenforge",
+      "recordId": "lantern-keeper",
+      "name": "Lantern Keeper",
+      "grants": {
+        "abilityScoreIncreases": [{ "ability": "wisdom", "amount": 1 }],
+        "skills": ["investigation", "survival"],
+        "speedFeet": 30,
+        "senses": []
+      }
+    }
+  ],
+  "subclasses": [
+    {
+      "sourceId": "greenforge",
+      "recordId": "weathered-path",
+      "name": "Weathered Path",
+      "className": "Warden",
+      "featureSets": [
+        { "level": 3, "featureIds": ["mossglass-edge"] }
+      ]
+    }
+  ],
+  "monsters": [
+    {
+      "sourceId": "greenforge",
+      "recordId": "brassleaf-mote",
+      "name": "Brassleaf Mote",
+      "statblock": {
+        "armorClass": 12,
+        "hitPointMaximum": 9,
+        "speedFeet": 30,
+        "initiativeBonus": 1,
+        "savingThrowBonuses": {
+          "strength": 0,
+          "dexterity": 1,
+          "constitution": 0,
+          "intelligence": -1,
+          "wisdom": 1,
+          "charisma": -1
+        },
+        "attacksPerAction": 1,
+        "reachFeet": 5,
+        "damageResponses": [],
+        "conditionImmunities": [],
+        "usesDeathSaves": false
+      },
+      "actions": [
+        {
+          "kind": "attack",
+          "id": "attack:brassleaf-tap",
+          "name": "Brassleaf Tap",
+          "attackBonus": 4,
+          "delivery": { "kind": "melee", "reachFeet": 5 },
+          "damage": [
+            {
+              "average": 4,
+              "dice": { "count": 1, "sides": 6, "modifier": 1 },
+              "type": "Bludgeoning",
+              "trigger": { "kind": "always" }
+            }
+          ],
+          "attackRollAdvantage": null,
+          "onHit": []
+        }
+      ]
+    }
+  ]
+}
