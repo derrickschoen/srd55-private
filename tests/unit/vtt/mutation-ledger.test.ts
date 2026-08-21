@@ -31,6 +31,7 @@ const ATTACK_FORM_ELDRITCH_LEDGER_PATH = 'docs/audits/2026-08-21-attack-form-eld
 const R9_SPELLS_LEDGER_PATH = 'docs/audits/2026-08-21-vtt-r9-spells-mutation-ledger.md';
 const CAP_019_LEDGER_PATH = 'docs/audits/2026-08-21-cap-019-typed-effects-mutation-ledger.md';
 const CAP_019_TAIL_SWEEP_LEDGER_PATH = 'docs/audits/2026-08-21-cap-019-tail-sweep-mutation-ledger.md';
+const SPELL_BATCH_TWO_LEDGER_PATH = 'docs/audits/2026-08-21-vtt-spell-batch-2-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
 function ledger(): MutationLedger {
@@ -292,5 +293,20 @@ describe('phase-2 mutation ledger manifest', () => {
     }
     expect(ledger.match(/exit 1/gu)).toHaveLength(5);
     expect(ledger).toContain('All five source mutations were restored');
+  });
+
+  it('SPELL-BATCH-2-MUTATION-LEDGER pins all three restored controls to named killing tests', () => {
+    const ledger = readFileSync(SPELL_BATCH_TWO_LEDGER_PATH, 'utf8');
+    const spellTests = readFileSync('tests/unit/combat/spells-batch-two.test.ts', 'utf8');
+    for (const name of [
+      'hold_monster_save_end_dropped',
+      'mockery_disadvantage_persists',
+      'faerie_fire_no_advantage',
+    ]) {
+      expect(ledger).toContain(`\`${name}\``);
+      expect(spellTests).toContain(name);
+    }
+    expect(ledger.match(/exit 1/gu)).toHaveLength(3);
+    expect(ledger).toContain('All three source mutations were proved present');
   });
 });

@@ -21,8 +21,9 @@ export interface SpellManifestRow {
  * D260 level-7 Fighter/Cleric/Wizard coverage inventory. Fighter/Champion has
  * no spell list. Rows are the deduplicated union of the independently printed
  * Cleric and Wizard lists through level 4, plus their selectable cantrips.
- * D318.1's r9 additions extend that closed inventory with five independently
- * source-pinned spells needed by the private build matrix.
+ * D318.1's r9 additions extend that closed inventory with six independently
+ * source-pinned spells needed by the private build matrix. Spell batch 2 adds
+ * seven further matrix-ranked SRD spells under the same closed discipline.
  */
 export const SPELL_MANIFEST: readonly SpellManifestRow[] = [
   { id: "acid-splash", name: "Acid Splash", level: 0, memberships: [{ list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:27" }], status: 'implemented' },
@@ -206,6 +207,13 @@ export const SPELL_MANIFEST: readonly SpellManifestRow[] = [
   { id: "vitriolic-sphere", name: "Vitriolic Sphere", level: 4, memberships: [{ list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:208" }], status: 'implemented' },
   { id: "wall-of-fire", name: "Wall of Fire", level: 4, memberships: [{ list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:209" }], status: 'implemented', partial: 'Solid-surface requirement, line placement, initial save-half damage, wall/ring dimensions, side distance, opacity, scaling, duration, and concentration persist; ring placement and enter/end-turn damage await wall-zone hooks.' },
   { id: "heal", name: "Heal", level: 6, memberships: [{ list: 'Cleric', source: "docs/srd/source/cleric-spell-list.txt:171" }, { list: 'Druid', source: "docs/srd/source/druid-spell-list.txt:174" }], status: 'implemented' },
+  { id: "vicious-mockery", name: "Vicious Mockery", level: 0, memberships: [{ list: 'Bard', source: "docs/srd/source/bard-spell-list.txt:39" }], status: 'implemented', partial: 'Wisdom save, scaling Psychic damage, and next-attack-only Disadvantage execute; visible-or-audible target filtering awaits perception-aware target legality.' },
+  { id: "faerie-fire", name: "Faerie Fire", level: 1, memberships: [{ list: 'Bard', source: "docs/srd/source/bard-spell-list.txt:58" }, { list: 'Druid', source: "docs/srd/source/druid-spell-list.txt:50" }], status: 'implemented', partial: 'Cube placement, Dexterity save, attack Advantage, Invisible-condition benefit suppression, light radius, concentration, and duration execute; objects, outline color, and emitted-light rendering await object and lighting state.' },
+  { id: "entangle", name: "Entangle", level: 1, memberships: [{ list: 'Druid', source: "docs/srd/source/druid-spell-list.txt:49" }, { list: 'Ranger', source: "docs/srd/source/ranger-spell-list.txt:31" }], status: 'implemented', partial: 'Exact ground square, initial Strength save, Restrained condition, concentration, and duration execute; persistent Difficult Terrain and the Strength (Athletics) escape action await area-movement and effect-targeted action hooks.' },
+  { id: "dissonant-whispers", name: "Dissonant Whispers", level: 1, memberships: [{ list: 'Bard', source: "docs/srd/source/bard-spell-list.txt:57" }], status: 'implemented', partial: 'Wisdom save, half-on-success Psychic damage, and slot scaling execute; spending the target reaction and safest-route forced movement await a typed reaction-movement command.' },
+  { id: "goodberry", name: "Goodberry", level: 1, memberships: [{ list: 'Druid', source: "docs/srd/source/druid-spell-list.txt:52" }, { list: 'Ranger', source: "docs/srd/source/ranger-spell-list.txt:33" }], status: 'implemented', partial: 'The reducer creates ten bonus-action consumables, decrements the pool, and heals exactly 1 HP each; one-day nourishment and 24-hour expiry are outside encounter scope.' },
+  { id: "pass-without-trace", name: "Pass without Trace", level: 2, memberships: [{ list: 'Druid', source: "docs/srd/source/druid-spell-list.txt:85" }, { list: 'Ranger', source: "docs/srd/source/ranger-spell-list.txt:52" }], status: 'implemented', partial: 'Declared beneficiaries within 30 feet receive the concentration-bound +10 Stealth modifier at cast; moving-aura membership and track suppression await aura and exploration state.' },
+  { id: "hold-monster", name: "Hold Monster", level: 5, memberships: [{ list: 'Bard', source: "docs/srd/source/bard-spell-list.txt:163" }, { list: 'Sorcerer', source: "docs/srd/source/sorcerer-spell-list.txt:168" }, { list: 'Warlock', source: "docs/srd/source/warlock-spell-list.txt:98" }, { list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:223" }], status: 'implemented', partial: 'Wisdom save, Paralyzed enforcement, target-end save ending, concentration, duration, and upcast target count execute; visible-target filtering awaits perception-aware target legality.' },
 ] as const;
 
 export function assertSpellManifestBurnDown(

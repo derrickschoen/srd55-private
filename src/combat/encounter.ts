@@ -393,9 +393,12 @@ function replaceCombatant(
 function appliedConditions(effect: EncounterEffect): readonly AppliedCondition[] {
   switch (effect.payload.kind) {
     case 'ability_check_modifier':
+    case 'skill_modifier':
     case 'armor_class_modifier':
     case 'attack_roll_modifier':
     case 'attack_roll_mode_modifier':
+    case 'faerie_fire':
+    case 'consumable_healing_pool':
     case 'cannot_regain_hit_points':
     case 'creature_type_protection':
     case 'd20_test_modifier':
@@ -584,6 +587,13 @@ export function combatantConditions(
         exhaustionLevels += condition.level;
         continue;
       }
+      if (
+        condition.name === 'Invisible' &&
+        state.effects.some((candidate) =>
+          candidate.targets.includes(id) &&
+          candidate.payload.kind === 'faerie_fire' &&
+          candidate.payload.preventsInvisibleConditionBenefit)
+      ) continue;
       const key =
         'source' in condition
           ? `${condition.name}:${condition.source}`
@@ -607,6 +617,21 @@ export function combatantConditions(
     conditions.push({ name: 'Unconscious' });
   }
   return conditions;
+}
+
+/** Resolved skill modifier after encounter effects; no roll or RNG is hidden here. */
+export function effectiveSkillModifier(
+  state: EncounterState,
+  id: CombatantId,
+  skill: keyof NonNullable<CombatantProfile['rules']['skillBonuses']>,
+): number {
+  const base = combatant(state, id).profile.rules.skillBonuses?.[skill] ?? 0;
+  return state.effects.reduce((total, effect) =>
+    effect.targets.includes(id) &&
+    effect.payload.kind === 'skill_modifier' &&
+    effect.payload.skill === skill
+      ? total + effect.payload.amount
+      : total, base);
 }
 
 function effectiveSpeed(state: EncounterState, id: CombatantId): number {
@@ -680,12 +705,18 @@ function attackRollMode(
 ): RollMode {
   const modes: RollMode[] = [command.rollMode];
   for (const effect of state.effects) {
+    if (effect.payload.kind === 'faerie_fire') {
+      if (effect.targets.includes(command.target)) modes.push(effect.payload.attackModeAgainstTarget);
+      continue;
+    }
     if (effect.payload.kind !== 'attack_roll_mode_modifier') continue;
     const appliesTo = effect.payload.appliesTo;
     const applies =
       ((appliesTo.kind === 'next_attack_against_target' ||
         appliesTo.kind === 'attacks_against_target') &&
         effect.targets.includes(command.target)) ||
+      (appliesTo.kind === 'next_attack_by_target' &&
+        effect.targets.includes(command.actor)) ||
       (appliesTo.kind === 'attacks_by_target' &&
         effect.targets.includes(command.actor) &&
         command.type === 'attack' &&
@@ -1697,9 +1728,12 @@ function cloneEffectApplication(
       case 'condition':
       case 'exhaustion':
       case 'ability_check_modifier':
+      case 'skill_modifier':
       case 'armor_class_modifier':
       case 'attack_roll_modifier':
       case 'attack_roll_mode_modifier':
+      case 'faerie_fire':
+      case 'consumable_healing_pool':
       case 'cannot_regain_hit_points':
       case 'creature_type_protection':
       case 'd20_test_modifier':
@@ -2385,9 +2419,11 @@ function processAttack(
   const consumedAdvantage = new Set(
     context.state.effects
       .filter((effect) =>
-        effect.targets.includes(command.target) &&
         effect.payload.kind === 'attack_roll_mode_modifier' &&
-        effect.payload.appliesTo.kind === 'next_attack_against_target')
+        ((effect.targets.includes(command.target) &&
+          effect.payload.appliesTo.kind === 'next_attack_against_target') ||
+          (effect.targets.includes(command.actor) &&
+            effect.payload.appliesTo.kind === 'next_attack_by_target')))
       .map((effect) => effect.id),
   );
   endEffects(context, consumedAdvantage, 'duration_expired');
@@ -2951,6 +2987,7 @@ function resolvedSpellEffectPayload(
         ? { ...payload, damageType: command.selectedOption ?? 'Acid' }
         : payload;
     case 'ability_check_modifier':
+    case 'skill_modifier':
       return payload.skill === 'chosen_when_cast'
         ? { ...payload, skill: command.selectedOption ?? 'Arcana' }
         : payload;
@@ -3119,6 +3156,8 @@ function resolvedSpellEffectPayload(
     case 'minor_magic':
     case 'object_repair':
     case 'attack_roll_mode_modifier':
+    case 'faerie_fire':
+    case 'consumable_healing_pool':
     case 'creature_type_protection':
     case 'sanctuary':
     case 'magic_missile_immunity':
@@ -3203,7 +3242,7 @@ function effectApplication(
         },
     concentration: durationTier?.concentration ?? data.concentration,
     stackingIdentity: effectStackingIdentity(`spell:${definition.id}`),
-    stacking: 'replace_same_source',
+    stacking: data.stacking ?? 'replace_same_source',
     repeatedSave: data.repeatedSave === undefined
       ? null
       : {
@@ -3316,24 +3355,27 @@ function resolveSpellAttack(
   spellDamageType: DamageType,
   rider: EffectData | null,
 ): ReturnType<typeof resolveAttackRoll> {
-  const advantageEffects = context.state.effects.filter((effect) => {
-    if (
-      !effect.targets.includes(target) ||
-      effect.payload.kind !== 'attack_roll_mode_modifier'
-    ) return false;
-    return effect.payload.appliesTo.kind === 'next_attack_against_target' ||
-      effect.payload.appliesTo.kind === 'attacks_against_target';
+  const rollModeEffects = context.state.effects.filter((effect) => {
+    if (effect.payload.kind === 'faerie_fire') return effect.targets.includes(target);
+    if (effect.payload.kind !== 'attack_roll_mode_modifier') return false;
+    const appliesTo = effect.payload.appliesTo;
+    return ((appliesTo.kind === 'next_attack_against_target' ||
+      appliesTo.kind === 'attacks_against_target') && effect.targets.includes(target)) ||
+      (appliesTo.kind === 'next_attack_by_target' && effect.targets.includes(command.actor));
   });
   const attack = resolveAttackRoll({
     attackBonus: command.attackBonus + effectDiceModifier(context.state, command.actor, 'attack_roll', context.rng),
     targetArmorClass: effectiveArmorClass(context.state, target),
-    rollMode: combineRollModes(['normal', ...advantageEffects.map((effect) =>
-      effect.payload.kind === 'attack_roll_mode_modifier' ? effect.payload.mode : 'normal')]),
+    rollMode: combineRollModes(['normal', ...rollModeEffects.map((effect) =>
+      effect.payload.kind === 'faerie_fire'
+        ? effect.payload.attackModeAgainstTarget
+        : effect.payload.kind === 'attack_roll_mode_modifier' ? effect.payload.mode : 'normal')]),
     criticalFloor: 20,
   }, context.rng);
-  endEffects(context, new Set(advantageEffects.flatMap((effect) =>
+  endEffects(context, new Set(rollModeEffects.flatMap((effect) =>
     effect.payload.kind === 'attack_roll_mode_modifier' &&
-    effect.payload.appliesTo.kind === 'next_attack_against_target'
+    (effect.payload.appliesTo.kind === 'next_attack_against_target' ||
+      effect.payload.appliesTo.kind === 'next_attack_by_target')
       ? [effect.id]
       : [])), 'duration_expired');
   let result: ReturnType<typeof resolveDamage> | null = null;
@@ -4310,6 +4352,32 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
         throw new EncounterRuleError('Healing must be a non-negative safe integer.');
       }
       applyHealing(context, command.actor, command.target, command.amount);
+      return;
+    }
+    case 'consume_healing_pool': {
+      assertActiveActor(context, command.actor);
+      const pool = context.state.effects.find((effect) => effect.id === command.effectId);
+      if (pool === undefined || pool.payload.kind !== 'consumable_healing_pool') {
+        throw new EncounterRuleError(`Effect ${command.effectId} is not a consumable healing pool.`);
+      }
+      if (pool.payload.remainingUses < 1) {
+        throw new EncounterRuleError(`Healing pool ${command.effectId} is empty.`);
+      }
+      spendCost(context, command.actor, pool.payload.activation, 'Consume healing resource');
+      const remaining = pool.payload.remainingUses - 1;
+      context.state = {
+        ...context.state,
+        effects: context.state.effects.map((effect) => effect.id === pool.id
+          ? { ...effect, payload: { ...pool.payload, remainingUses: remaining } }
+          : effect),
+      };
+      applyHealing(context, command.actor, command.actor, pool.payload.healingPerUse);
+      emit(context, {
+        type: 'healing_pool_consumed',
+        combatant: command.actor,
+        effectId: pool.id,
+        remaining,
+      });
       return;
     }
     case 'apply_effect':

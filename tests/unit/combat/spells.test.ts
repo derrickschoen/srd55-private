@@ -32,21 +32,21 @@ import type {
 import { monsterProfile, placedToken, playerProfile } from './fixtures';
 
 const EXPECTED_LEVEL_TOTALS: Readonly<Record<SpellLevel, number>> = {
-  0: 21,
-  1: 46,
-  2: 46,
+  0: 22,
+  1: 50,
+  2: 47,
   3: 37,
   4: 30,
-  5: 0,
+  5: 1,
   6: 1,
   7: 0,
   8: 0,
   9: 0,
 };
-const EXPECTED_MANIFEST_TOTAL = 181;
-const EXPECTED_IMPLEMENTED = 181;
+const EXPECTED_MANIFEST_TOTAL = 188;
+const EXPECTED_IMPLEMENTED = 188;
 const EXPECTED_PENDING = 0;
-const EXPECTED_CANTRIP_AND_LEVEL_ONE_IMPLEMENTED = 67;
+const EXPECTED_CANTRIP_AND_LEVEL_ONE_IMPLEMENTED = 72;
 
 interface ValuePin {
   readonly id: string;
@@ -257,6 +257,7 @@ function pinnedEffect(
     readonly durationRounds?: number | null;
     readonly expiresAt?: EffectData['expiresAt'];
     readonly repeatedSave?: EffectData['repeatedSave'];
+    readonly stacking?: EffectData['stacking'];
   } = {},
 ): EffectData {
   return {
@@ -265,6 +266,7 @@ function pinnedEffect(
     concentration: options.concentration ?? false,
     durationRounds: options.durationRounds ?? 1,
     expiresAt: options.expiresAt ?? 'source_start',
+    ...(options.stacking === undefined ? {} : { stacking: options.stacking }),
     ...(options.repeatedSave === undefined ? {} : { repeatedSave: options.repeatedSave }),
   };
 }
@@ -613,6 +615,31 @@ const COMPLETE_MECHANICS_PINS: readonly CompleteMechanicsPin[] = [
     targeting: { kind: 'utility', rangeFeet: 60 },
     operation: { kind: 'utility', effect: { kind: 'unseen_servant', armorClass: 10, hitPoints: 1, strength: 2, moveFeetPerBonusAction: 15, maximumDistanceFeet: 60 }, concentration: false, durationRounds: 600 },
   },
+  {
+    id: 'vicious-mockery', source: 'spell-descriptions.txt:8176-8195',
+    targeting: { kind: 'single', rangeFeet: 60, willing: false },
+    operation: { kind: 'save_damage', ability: 'wisdom', onSuccess: 'none', damageType: damageType('Psychic'), dice: pinnedDice(1, 6, { cantripUpgrade: true }), riderOnFailure: pinnedEffect({ kind: 'attack_roll_mode_modifier', mode: 'disadvantage', appliesTo: { kind: 'next_attack_by_target' } }, { durationRounds: 1, expiresAt: 'target_end' }), pushFeetOnFailure: 0 },
+  },
+  {
+    id: 'faerie-fire', source: 'spell-descriptions.txt:2887-2900',
+    targeting: { kind: 'area', rangeFeet: 60, shape: 'cube', baseSizeFeet: 20, sizePerSlotFeet: 0 },
+    operation: { kind: 'save_effect', ability: 'dexterity', rollMode: 'normal', effect: pinnedEffect({ kind: 'faerie_fire', attackModeAgainstTarget: 'advantage', preventsInvisibleConditionBenefit: true, dimLightFeet: 10 }, { concentration: true, durationRounds: 10 }) },
+  },
+  {
+    id: 'entangle', source: 'spell-descriptions.txt:2729-2756',
+    targeting: { kind: 'area', rangeFeet: 90, shape: 'cube', baseSizeFeet: 20, sizePerSlotFeet: 0, surface: 'ground_square' },
+    operation: { kind: 'save_effect', ability: 'strength', rollMode: 'normal', excludeCaster: true, effect: pinnedEffect({ kind: 'condition', condition: 'Restrained' }, { concentration: true, durationRounds: 10 }) },
+  },
+  {
+    id: 'dissonant-whispers', source: 'spell-descriptions.txt:2289-2312',
+    targeting: { kind: 'single', rangeFeet: 60, willing: false },
+    operation: { kind: 'save_damage', ability: 'wisdom', onSuccess: 'half', damageType: damageType('Psychic'), dice: pinnedDice(3, 6, { perSlotCount: 1 }), riderOnFailure: null, pushFeetOnFailure: 0 },
+  },
+  {
+    id: 'goodberry', source: 'spell-descriptions.txt:3870-3881',
+    targeting: { kind: 'self' },
+    operation: { kind: 'effect', effect: pinnedEffect({ kind: 'consumable_healing_pool', remainingUses: 10, healingPerUse: 1, activation: 'bonus_action', encounterExpiry: 'not_tracked_24_hours' }, { target: 'self', durationRounds: null, stacking: 'coexist' }) },
+  },
 ];
 
 function definitionRange(definition: SpellDefinition): number {
@@ -825,7 +852,7 @@ function fixture(definition: SpellDefinition): {
 }
 
 describe('reference-party spell manifest', () => {
-  it('is the exact reference-party union through level 4 plus the five source-pinned r9 additions', () => {
+  it('is the exact reference-party union plus all source-pinned D318.1 spell additions', () => {
     const levels = new Map(parseSrdSpellDescriptions().map((spell) => [spell.name, spell.level]));
     const expected = new Map<string, Set<string>>();
     for (const list of ['Cleric', 'Wizard'] as const) {
@@ -844,6 +871,13 @@ describe('reference-party spell manifest', () => {
     expected.set('Searing Smite', new Set(['Paladin']));
     expected.set('Moonbeam', new Set(['Druid']));
     expected.set('Heal', new Set(['Cleric', 'Druid']));
+    expected.set('Vicious Mockery', new Set(['Bard']));
+    expected.set('Faerie Fire', new Set(['Bard', 'Druid']));
+    expected.set('Entangle', new Set(['Druid', 'Ranger']));
+    expected.set('Dissonant Whispers', new Set(['Bard']));
+    expected.set('Goodberry', new Set(['Druid', 'Ranger']));
+    expected.set('Pass without Trace', new Set(['Druid', 'Ranger']));
+    expected.set('Hold Monster', new Set(['Bard', 'Sorcerer', 'Warlock', 'Wizard']));
 
     expect(SPELL_MANIFEST).toHaveLength(EXPECTED_MANIFEST_TOTAL);
     expect(new Set(SPELL_MANIFEST.map((row) => row.id)).size).toBe(EXPECTED_MANIFEST_TOTAL);
@@ -861,7 +895,7 @@ describe('reference-party spell manifest', () => {
     }
   });
 
-  it('closes the manifest with exactly 181 implemented and zero pending rows', () => {
+  it('closes the manifest with exactly 188 implemented and zero pending rows', () => {
     expect(SPELL_MANIFEST.filter((row) => row.status === 'implemented')).toHaveLength(EXPECTED_IMPLEMENTED);
     expect(SPELL_MANIFEST.filter((row) => row.status === 'pending')).toHaveLength(EXPECTED_PENDING);
     expect(IMPLEMENTED_SPELL_DEFINITIONS).toHaveLength(EXPECTED_IMPLEMENTED);

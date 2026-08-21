@@ -8,7 +8,14 @@ export type SpellEngineLimitationCode =
   | 'effect_escape_action_unavailable'
   | 'persistent_area_move_action_unavailable'
   | 'persistent_area_entry_trigger_unavailable'
-  | 'shapechange_reversion_unavailable';
+  | 'shapechange_reversion_unavailable'
+  | 'perception_target_filter_unavailable'
+  | 'moving_aura_membership_unavailable'
+  | 'exploration_tracks_unavailable'
+  | 'persistent_area_terrain_unavailable'
+  | 'forced_reaction_movement_unavailable'
+  | 'encounter_expiry_unavailable'
+  | 'exploration_nourishment_unavailable';
 
 export interface SpellEngineLimitation {
   readonly code: SpellEngineLimitationCode;
@@ -296,6 +303,97 @@ export const SPELL_KB_ENTRIES = [
       components: 'docs/srd/source/spell-descriptions.txt:5587',
       targeting: 'docs/srd/source/spell-descriptions.txt:5586-5594',
       operation: 'docs/srd/source/spell-descriptions.txt:5588-5611',
+    },
+  },
+  {
+    ...entry('R-SPELL-182', 'hold-monster', '4317-4341', 'A failed Wisdom save Paralyzes the target; repeat that save at the end of each affected target turn and add targets with higher slots.'),
+    limitations: [
+      { code: 'perception_target_filter_unavailable', note: 'The visible-creature requirement awaits perception-aware spell target legality.' },
+    ],
+    fieldCitations: {
+      identity: 'docs/srd/source/spell-descriptions.txt:4317-4319',
+      castingTime: 'docs/srd/source/spell-descriptions.txt:4321',
+      components: 'docs/srd/source/spell-descriptions.txt:4326',
+      targeting: 'docs/srd/source/spell-descriptions.txt:4322-4329',
+      operation: 'docs/srd/source/spell-descriptions.txt:4327-4341',
+    },
+  },
+  {
+    ...entry('R-SPELL-183', 'faerie-fire', '2887-2900', 'Place the 20-foot cube; failed Dexterity saves grant attacks Advantage and suppress Invisible-condition benefits during concentration.'),
+    fieldCitations: {
+      identity: 'docs/srd/source/spell-descriptions.txt:2887-2888',
+      castingTime: 'docs/srd/source/spell-descriptions.txt:2889',
+      components: 'docs/srd/source/spell-descriptions.txt:2891',
+      targeting: 'docs/srd/source/spell-descriptions.txt:2890-2897',
+      operation: 'docs/srd/source/spell-descriptions.txt:2892-2900',
+    },
+  },
+  {
+    ...entry('R-SPELL-184', 'vicious-mockery', '8176-8195', 'A failed Wisdom save deals scaling Psychic damage and imposes Disadvantage on exactly the next attack before the target turn ends.'),
+    limitations: [
+      { code: 'perception_target_filter_unavailable', note: 'The visible-or-audible creature requirement awaits perception-aware spell target legality.' },
+    ],
+    fieldCitations: {
+      identity: 'docs/srd/source/spell-descriptions.txt:8176-8178',
+      castingTime: 'docs/srd/source/spell-descriptions.txt:8180',
+      components: 'docs/srd/source/spell-descriptions.txt:8185',
+      targeting: 'docs/srd/source/spell-descriptions.txt:8181-8189',
+      operation: 'docs/srd/source/spell-descriptions.txt:8186-8195',
+    },
+  },
+  {
+    ...entry('R-SPELL-185', 'pass-without-trace', '5688-5696', 'Apply the +10 Dexterity (Stealth) modifier to the declared creatures within 30 feet while concentration lasts.'),
+    limitations: [
+      { code: 'moving_aura_membership_unavailable', note: 'Beneficiaries are declared at cast because moving-aura membership is not encounter state.' },
+      { code: 'exploration_tracks_unavailable', note: 'Leaving no tracks awaits exploration and tracking state.' },
+    ],
+    fieldCitations: {
+      identity: 'docs/srd/source/spell-descriptions.txt:5688-5689',
+      castingTime: 'docs/srd/source/spell-descriptions.txt:5690',
+      components: 'docs/srd/source/spell-descriptions.txt:5692',
+      targeting: 'docs/srd/source/spell-descriptions.txt:5691-5696',
+      operation: 'docs/srd/source/spell-descriptions.txt:5693-5696',
+    },
+  },
+  {
+    ...entry('R-SPELL-186', 'entangle', '2729-2756', 'Creatures other than the caster in the exact 20-foot ground square become Restrained on a failed Strength save.'),
+    limitations: [
+      { code: 'persistent_area_terrain_unavailable', note: 'The persistent Difficult Terrain awaits area-to-movement interception.' },
+      { code: 'effect_escape_action_unavailable', note: 'The Strength (Athletics) escape action awaits effect-targeted action commands.' },
+    ],
+    fieldCitations: {
+      identity: 'docs/srd/source/spell-descriptions.txt:2729-2730',
+      castingTime: 'docs/srd/source/spell-descriptions.txt:2732',
+      components: 'docs/srd/source/spell-descriptions.txt:2736',
+      targeting: 'docs/srd/source/spell-descriptions.txt:2734-2745',
+      operation: 'docs/srd/source/spell-descriptions.txt:2738-2756',
+    },
+  },
+  {
+    ...entry('R-SPELL-187', 'dissonant-whispers', '2289-2312', 'Wisdom failure takes 3d6 Psychic plus 1d6 per higher slot; success takes half damage.'),
+    limitations: [
+      { code: 'forced_reaction_movement_unavailable', note: 'Reaction spending and safest-route forced movement await a typed reaction-movement command.' },
+    ],
+    fieldCitations: {
+      identity: 'docs/srd/source/spell-descriptions.txt:2289-2290',
+      castingTime: 'docs/srd/source/spell-descriptions.txt:2291',
+      components: 'docs/srd/source/spell-descriptions.txt:2293',
+      targeting: 'docs/srd/source/spell-descriptions.txt:2292-2300',
+      operation: 'docs/srd/source/spell-descriptions.txt:2294-2312',
+    },
+  },
+  {
+    ...entry('R-SPELL-188', 'goodberry', '3870-3881', 'Create ten bonus-action consumables; each decrements the pool and restores exactly 1 Hit Point.'),
+    limitations: [
+      { code: 'encounter_expiry_unavailable', note: 'The 24-hour expiry is intentionally outside encounter-duration state.' },
+      { code: 'exploration_nourishment_unavailable', note: 'One-day nourishment awaits exploration survival state.' },
+    ],
+    fieldCitations: {
+      identity: 'docs/srd/source/spell-descriptions.txt:3870-3871',
+      castingTime: 'docs/srd/source/spell-descriptions.txt:3872',
+      components: 'docs/srd/source/spell-descriptions.txt:3874',
+      targeting: 'docs/srd/source/spell-descriptions.txt:3873',
+      operation: 'docs/srd/source/spell-descriptions.txt:3875-3881',
     },
   },
 ] as const satisfies readonly SpellKbEntry[];

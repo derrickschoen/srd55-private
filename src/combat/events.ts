@@ -112,6 +112,11 @@ export type EncounterCommand =
       readonly cost: ActionCost;
     }
   | {
+      readonly type: 'consume_healing_pool';
+      readonly actor: CombatantId;
+      readonly effectId: EncounterEffectId;
+    }
+  | {
       readonly type: 'apply_effect';
       readonly actor: CombatantId;
       readonly effect: EffectApplication;
@@ -256,6 +261,12 @@ export type EncounterEvent =
       readonly resourcePoolId: LimitedResourcePoolId;
       readonly remaining: number;
       readonly purpose: string;
+    })
+  | (SequencedEvent & {
+      readonly type: 'healing_pool_consumed';
+      readonly combatant: CombatantId;
+      readonly effectId: EncounterEffectId;
+      readonly remaining: number;
     })
   | (SequencedEvent & {
       readonly type: 'stance_started';

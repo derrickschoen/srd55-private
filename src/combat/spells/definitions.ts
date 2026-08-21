@@ -58,6 +58,7 @@ function effect(
     readonly concentration?: boolean;
     readonly durationRounds?: number | null;
     readonly expiresAt?: EffectData['expiresAt'];
+    readonly stacking?: EffectData['stacking'];
     readonly repeatedSave?: EffectData['repeatedSave'];
     readonly durationRoundsPerSlot?: number;
     readonly slotDurationTiers?: EffectData['slotDurationTiers'];
@@ -69,6 +70,7 @@ function effect(
     concentration: options.concentration ?? false,
     durationRounds: options.durationRounds ?? 1,
     expiresAt: options.expiresAt ?? 'source_start',
+    ...(options.stacking === undefined ? {} : { stacking: options.stacking }),
     ...(options.repeatedSave === undefined ? {} : { repeatedSave: options.repeatedSave }),
     ...(options.durationRoundsPerSlot === undefined ? {} : { durationRoundsPerSlot: options.durationRoundsPerSlot }),
     ...(options.slotDurationTiers === undefined ? {} : { slotDurationTiers: options.slotDurationTiers }),
@@ -1281,6 +1283,55 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     source: 'docs/srd/source/spell-descriptions.txt:8217', castingTime: 'action', components: material('a piece of charcoal'),
     targeting: { kind: 'area', rangeFeet: 120, shape: 'line', baseSizeFeet: 60, sizePerSlotFeet: 0, secondarySizeFeet: 1 },
     operation: { kind: 'save_damage_and_effect', ability: 'dexterity', onSuccess: 'half', damageType: damageType('Fire'), dice: dice(5, 8, { perSlotCount: 1 }), effect: effect({ kind: 'wall_of_fire', placement: 'selected_when_cast', maximumLengthFeet: 60, heightFeet: 20, thicknessFeet: 1, ringDiameterFeet: 20, damagingSideDistanceFeet: 10, damageCount: 5, damageSides: 8, damagePerSlotCount: 1, damageType: 'Fire', opaque: true, requiresSolidSurface: true }, { target: 'self', concentration: true, durationRounds: 10 }) },
+  },
+  {
+    id: 'vicious-mockery', name: 'Vicious Mockery', level: 0,
+    source: 'docs/srd/source/spell-descriptions.txt:8176-8195',
+    castingTime: 'action', components: V,
+    targeting: { kind: 'single', rangeFeet: 60, willing: false },
+    operation: { kind: 'save_damage', ability: 'wisdom', onSuccess: 'none', damageType: damageType('Psychic'), dice: cantripDamage(1, 6), riderOnFailure: effect({ kind: 'attack_roll_mode_modifier', mode: 'disadvantage', appliesTo: { kind: 'next_attack_by_target' } }, { durationRounds: 1, expiresAt: 'target_end' }), pushFeetOnFailure: 0 },
+  },
+  {
+    id: 'faerie-fire', name: 'Faerie Fire', level: 1,
+    source: 'docs/srd/source/spell-descriptions.txt:2887-2900',
+    castingTime: 'action', components: V,
+    targeting: { kind: 'area', rangeFeet: 60, shape: 'cube', baseSizeFeet: 20, sizePerSlotFeet: 0 },
+    operation: { kind: 'save_effect', ability: 'dexterity', rollMode: 'normal', effect: effect({ kind: 'faerie_fire', attackModeAgainstTarget: 'advantage', preventsInvisibleConditionBenefit: true, dimLightFeet: 10 }, { concentration: true, durationRounds: 10 }) },
+  },
+  {
+    id: 'entangle', name: 'Entangle', level: 1,
+    source: 'docs/srd/source/spell-descriptions.txt:2729-2756',
+    castingTime: 'action', components: VS,
+    targeting: { kind: 'area', rangeFeet: 90, shape: 'cube', baseSizeFeet: 20, sizePerSlotFeet: 0, surface: 'ground_square' },
+    operation: { kind: 'save_effect', ability: 'strength', rollMode: 'normal', excludeCaster: true, effect: effect({ kind: 'condition', condition: 'Restrained' }, { concentration: true, durationRounds: 10 }) },
+  },
+  {
+    id: 'dissonant-whispers', name: 'Dissonant Whispers', level: 1,
+    source: 'docs/srd/source/spell-descriptions.txt:2289-2312',
+    castingTime: 'action', components: V,
+    targeting: { kind: 'single', rangeFeet: 60, willing: false },
+    operation: { kind: 'save_damage', ability: 'wisdom', onSuccess: 'half', damageType: damageType('Psychic'), dice: dice(3, 6, { perSlotCount: 1 }), riderOnFailure: null, pushFeetOnFailure: 0 },
+  },
+  {
+    id: 'goodberry', name: 'Goodberry', level: 1,
+    source: 'docs/srd/source/spell-descriptions.txt:3870-3881',
+    castingTime: 'action', components: material('a sprig of mistletoe'),
+    targeting: { kind: 'self' },
+    operation: { kind: 'effect', effect: effect({ kind: 'consumable_healing_pool', remainingUses: 10, healingPerUse: 1, activation: 'bonus_action', encounterExpiry: 'not_tracked_24_hours' }, { target: 'self', durationRounds: null, stacking: 'coexist' }) },
+  },
+  {
+    id: 'pass-without-trace', name: 'Pass without Trace', level: 2,
+    source: 'docs/srd/source/spell-descriptions.txt:5688-5696',
+    castingTime: 'action', components: material('ashes from burned mistletoe'),
+    targeting: { kind: 'all_in_range', rangeFeet: 30 },
+    operation: { kind: 'effect', effect: effect({ kind: 'skill_modifier', skill: 'stealth', amount: 10 }, { concentration: true, durationRounds: 600 }) },
+  },
+  {
+    id: 'hold-monster', name: 'Hold Monster', level: 5,
+    source: 'docs/srd/source/spell-descriptions.txt:4317-4341',
+    castingTime: 'action', components: material('a straight piece of iron'),
+    targeting: { kind: 'multiple', rangeFeet: 90, baseMaximum: 1, additionalPerSlot: 1 },
+    operation: { kind: 'save_effect', ability: 'wisdom', rollMode: 'normal', effect: effect({ kind: 'condition', condition: 'Paralyzed' }, { concentration: true, durationRounds: 10, expiresAt: 'target_end', repeatedSave: { ability: 'wisdom', rollMode: 'normal', timing: 'target_end' } }) },
   },
   {
     id: 'heal', name: 'Heal', level: 6,
