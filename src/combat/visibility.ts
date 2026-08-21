@@ -79,6 +79,7 @@ function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
     case 'death_save_resolved':
     case 'resource_spent':
     case 'limited_resource_spent':
+    case 'healing_pool_consumed':
     case 'spell_slot_spent':
     case 'temporary_hit_points_changed':
     case 'stance_started':

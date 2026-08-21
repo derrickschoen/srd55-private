@@ -1,5 +1,5 @@
 import type { Ability } from '../../domain/enums';
-import type { EffectPayload } from '../effects';
+import type { EffectApplication, EffectPayload } from '../effects';
 import type { AreaTemplate } from '../templates';
 import type { CombatantId, DamageType, LimitedResourcePoolId } from '../values';
 
@@ -76,6 +76,7 @@ export interface EffectData {
   readonly concentration: boolean;
   readonly durationRounds: number | null;
   readonly expiresAt: 'source_start' | 'source_end' | 'target_start' | 'target_end';
+  readonly stacking?: EffectApplication['stacking'];
   readonly repeatedSave?: {
     readonly ability: Ability;
     readonly rollMode: 'normal' | 'advantage' | 'disadvantage';

@@ -249,6 +249,11 @@ export type EffectPayload =
       readonly skill?: string;
     }
   | {
+      readonly kind: 'skill_modifier';
+      readonly skill: 'stealth';
+      readonly amount: number;
+    }
+  | {
       readonly kind: 'd20_test_modifier';
       readonly tests: readonly ('attack_roll' | 'saving_throw')[];
       readonly count: number;
@@ -1147,11 +1152,25 @@ export type EffectPayload =
       readonly mode: 'advantage' | 'disadvantage';
       readonly appliesTo:
         | { readonly kind: 'next_attack_against_target' }
+        | { readonly kind: 'next_attack_by_target' }
         | { readonly kind: 'attacks_against_target' }
         | {
             readonly kind: 'attacks_by_target';
             readonly attackIds: readonly string[];
           };
+    }
+  | {
+      readonly kind: 'faerie_fire';
+      readonly attackModeAgainstTarget: 'advantage';
+      readonly preventsInvisibleConditionBenefit: true;
+      readonly dimLightFeet: 10;
+    }
+  | {
+      readonly kind: 'consumable_healing_pool';
+      readonly remainingUses: number;
+      readonly healingPerUse: 1;
+      readonly activation: 'bonus_action';
+      readonly encounterExpiry: 'not_tracked_24_hours';
     }
   | {
       readonly kind: 'creature_type_protection';

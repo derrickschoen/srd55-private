@@ -42,9 +42,9 @@ function hasNamedSpellHeader(
 
 describe('spell knowledge-base completeness', () => {
   it('has exactly one source-cited KB entry for every implemented manifest spell', () => {
-    expect(SPELL_KB_ENTRIES).toHaveLength(181);
-    expect(new Set(SPELL_KB_ENTRIES.map((entry) => entry.ruleId)).size).toBe(181);
-    expect(new Set(SPELL_KB_ENTRIES.map((entry) => entry.spellId)).size).toBe(181);
+    expect(SPELL_KB_ENTRIES).toHaveLength(188);
+    expect(new Set(SPELL_KB_ENTRIES.map((entry) => entry.ruleId)).size).toBe(188);
+    expect(new Set(SPELL_KB_ENTRIES.map((entry) => entry.spellId)).size).toBe(188);
     expect(SPELL_KB_ENTRIES.map((entry) => entry.spellId).sort()).toEqual(
       IMPLEMENTED_SPELL_DEFINITIONS.map((definition) => definition.id).sort(),
     );
@@ -125,6 +125,25 @@ describe('spell knowledge-base completeness', () => {
     },
   );
 
+  it.each([
+    'hold-monster',
+    'faerie-fire',
+    'vicious-mockery',
+    'pass-without-trace',
+    'entangle',
+    'dissonant-whispers',
+    'goodberry',
+  ] as const)('%s spell-batch-2 fields cite complete non-empty SRD spans', (spellId) => {
+    const entry = SPELL_KB_ENTRIES.find((candidate) => candidate.spellId === spellId);
+    expect(Object.keys(entry?.fieldCitations ?? {}).sort()).toEqual([
+      'castingTime', 'components', 'identity', 'operation', 'targeting',
+    ]);
+    for (const locator of Object.values(entry?.fieldCitations ?? {})) {
+      const [start, end] = locatorBounds(locator);
+      expect(SPELL_DESCRIPTION_LINES.slice(start - 1, end).join(' ').trim().length).toBeGreaterThan(0);
+    }
+  });
+
   it('records every known r9 engine residual as a closed typed limitation code', () => {
     expect(SPELL_KB_ENTRIES.find((entry) => entry.spellId === 'ensnaring-strike')?.limitations?.map(
       (limitation) => limitation.code,
@@ -139,6 +158,25 @@ describe('spell knowledge-base completeness', () => {
       'persistent_area_move_action_unavailable',
       'persistent_area_entry_trigger_unavailable',
       'shapechange_reversion_unavailable',
+    ]);
+  });
+
+  it('records every spell-batch-2 residual as a closed typed limitation code', () => {
+    const limitations = (spellId: string) => SPELL_KB_ENTRIES.find(
+      (entry) => entry.spellId === spellId,
+    )?.limitations?.map((limitation) => limitation.code) ?? [];
+    expect(limitations('hold-monster')).toEqual(['perception_target_filter_unavailable']);
+    expect(limitations('faerie-fire')).toEqual([]);
+    expect(limitations('vicious-mockery')).toEqual(['perception_target_filter_unavailable']);
+    expect(limitations('pass-without-trace')).toEqual([
+      'moving_aura_membership_unavailable', 'exploration_tracks_unavailable',
+    ]);
+    expect(limitations('entangle')).toEqual([
+      'persistent_area_terrain_unavailable', 'effect_escape_action_unavailable',
+    ]);
+    expect(limitations('dissonant-whispers')).toEqual(['forced_reaction_movement_unavailable']);
+    expect(limitations('goodberry')).toEqual([
+      'encounter_expiry_unavailable', 'exploration_nourishment_unavailable',
     ]);
   });
 });

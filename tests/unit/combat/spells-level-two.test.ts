@@ -96,6 +96,7 @@ const LEVEL_TWO_MECHANICS_PINS: readonly LevelTwoMechanicsPin[] = [
   { id: 'warding-bond', source: 'spell-descriptions.txt:8388', targeting: { kind: 'single', rangeFeet: 5, willing: true }, operation: { kind: 'effect', effect: effect({ kind: 'warding_bond', maximumDistanceFeet: 60, armorClassBonus: 1, savingThrowBonus: 1, resistanceToAllDamage: true, mirrorsDamageToSource: true }, { durationRounds: 600 }) } },
   { id: 'web', source: 'spell-descriptions.txt:8453', targeting: { kind: 'area', rangeFeet: 60, shape: 'cube', baseSizeFeet: 20, sizePerSlotFeet: 0 }, operation: { kind: 'effect', effect: effect({ kind: 'web_area', placement: 'selected_when_cast', cubeFeet: 20, flatDepthFeet: 5, fireDamageCount: 2, fireDamageSides: 4 }, { target: 'self', concentration: true, durationRounds: 600 }) } },
   { id: 'zone-of-truth', source: 'spell-descriptions.txt:8699', targeting: { kind: 'area', rangeFeet: 60, shape: 'sphere', baseSizeFeet: 15, sizePerSlotFeet: 0 }, operation: { kind: 'effect', effect: effect({ kind: 'truth_zone', placement: 'selected_when_cast', radiusFeet: 15, saveAbility: 'charisma' }, { target: 'self', durationRounds: 100 }) } },
+  { id: 'pass-without-trace', source: 'spell-descriptions.txt:5688', targeting: { kind: 'all_in_range', rangeFeet: 30 }, operation: { kind: 'effect', effect: effect({ kind: 'skill_modifier', skill: 'stealth', amount: 10 }, { concentration: true, durationRounds: 600 }) } },
 ];
 
 interface LevelTwoComponentPin {
@@ -156,12 +157,13 @@ const LEVEL_TWO_COMPONENT_PINS: readonly LevelTwoComponentPin[] = [
   { id: 'warding-bond', castingTime: 'action', components: 'VSM', material: 'a pair of platinum rings worth 50+ GP each, which you and the target must wear for the duration', consumed: false, ritual: false, source: 'spell-descriptions.txt:8388' },
   { id: 'web', castingTime: 'action', components: 'VSM', material: 'a bit of spiderweb', consumed: false, ritual: false, source: 'spell-descriptions.txt:8453' },
   { id: 'zone-of-truth', castingTime: 'action', components: 'VS', material: null, consumed: false, ritual: false, source: 'spell-descriptions.txt:8699' },
+  { id: 'pass-without-trace', castingTime: 'action', components: 'VSM', material: 'ashes from burned mistletoe', consumed: false, ritual: false, source: 'spell-descriptions.txt:5688' },
 ];
 
 describe('level-2 spell mechanics pins', () => {
   it('has one exact independent pin for every implemented level-2 definition', () => {
     const implemented = IMPLEMENTED_SPELL_DEFINITIONS.filter((definition) => definition.level === 2);
-    expect(LEVEL_TWO_MECHANICS_PINS).toHaveLength(46);
+    expect(LEVEL_TWO_MECHANICS_PINS).toHaveLength(47);
     expect(LEVEL_TWO_MECHANICS_PINS.map((pin) => pin.id).sort()).toEqual(
       implemented.map((definition) => definition.id).sort(),
     );
@@ -225,7 +227,7 @@ describe('level-2 spell mechanics pins', () => {
       ? [target.id]
       : definition.targeting.kind === 'multiple'
         ? Array.from({ length: projectileCount }, () => target.id)
-        : [];
+        : definition.targeting.kind === 'all_in_range' ? [target.id] : [];
     const command: SpellCastCommand = {
       type: 'cast_spell', actor: caster.id, spellId: definition.id, slotLevel: 2,
       castAsRitual: false, casterLevel: 7, attackBonus: 100, saveDc: 100,

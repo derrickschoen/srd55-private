@@ -78,6 +78,8 @@ function actionLabel(action: EncounterCommand): string {
       return 'Activate timed spellcasting';
     case 'heal':
       return 'Heal';
+    case 'consume_healing_pool':
+      return 'Consume healing resource';
     case 'apply_effect':
       return 'Apply effect';
     case 'grant_temporary_hit_points':
