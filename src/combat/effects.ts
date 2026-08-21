@@ -53,6 +53,32 @@ export type DamageRiderGating =
       readonly gate: Extract<DamageRiderGate, 'first_hit_this_turn'>;
     };
 
+/** Always-on party-pack effects that rewrite one declared attack in place. */
+export type AttackFormSubstitutionPayload =
+  | {
+      readonly kind: 'attack_ability_substitution';
+      readonly attackId: string;
+      readonly damageTermIndex: number;
+      readonly replacesAbility: Ability;
+      readonly spellcastingAbility: Ability;
+    }
+  | {
+      readonly kind: 'attack_damage_die_override';
+      readonly attackId: string;
+      readonly damageTermIndex: number;
+      readonly levels: readonly {
+        readonly minimumLevel: number;
+        readonly count: number;
+        readonly sides: 4 | 6 | 8 | 10 | 12 | 20;
+      }[];
+    }
+  | {
+      readonly kind: 'attack_reach_range_override';
+      readonly attackId: string;
+      readonly reachFeet?: number;
+      readonly rangeFeet?: number;
+    };
+
 /** Reducer-ready class/feat effect retained on a combatant profile. */
 export type CombatFeatureEffect = {
   readonly id: EncounterEffectId;
@@ -60,8 +86,17 @@ export type CombatFeatureEffect = {
   readonly resourcePoolId: LimitedResourcePoolId | null;
 } & (
   | { readonly payload: EffectPayload }
+  | { readonly payload: AttackFormSubstitutionPayload }
   | { readonly payload: { readonly kind: 'temporary_hit_points'; readonly amount: number } }
 );
+
+export function isAttackFormSubstitutionPayload(
+  payload: CombatFeatureEffect['payload'],
+): payload is AttackFormSubstitutionPayload {
+  return payload.kind === 'attack_ability_substitution' ||
+    payload.kind === 'attack_damage_die_override' ||
+    payload.kind === 'attack_reach_range_override';
+}
 
 export type TurnBoundary = 'start' | 'end';
 

@@ -32,16 +32,16 @@ import type {
 import { monsterProfile, placedToken, playerProfile } from './fixtures';
 
 const EXPECTED_LEVEL_TOTALS: Readonly<Record<SpellLevel, number>> = {
-  0: 20,
+  0: 21,
   1: 43,
   2: 45,
   3: 37,
   4: 30,
 };
-const EXPECTED_MANIFEST_TOTAL = 175;
-const EXPECTED_IMPLEMENTED = 175;
+const EXPECTED_MANIFEST_TOTAL = 176;
+const EXPECTED_IMPLEMENTED = 176;
 const EXPECTED_PENDING = 0;
-const EXPECTED_CANTRIP_AND_LEVEL_ONE_IMPLEMENTED = 63;
+const EXPECTED_CANTRIP_AND_LEVEL_ONE_IMPLEMENTED = 64;
 
 interface ValuePin {
   readonly id: string;
@@ -58,6 +58,7 @@ const VALUE_PINS: readonly ValuePin[] = [
   { id: 'acid-splash', level: 0, operation: 'save_damage', rangeFeet: 60, baseDice: [1, 6], perSlotCount: 0, source: 'spell-descriptions.txt:37-51' },
   { id: 'chill-touch', level: 0, operation: 'attack_damage', rangeFeet: 5, baseDice: [1, 10], perSlotCount: 0, source: 'spell-descriptions.txt:1066' },
   { id: 'dancing-lights', level: 0, operation: 'utility', rangeFeet: 120, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:1906' },
+  { id: 'eldritch-blast', level: 0, operation: 'attack_beams', rangeFeet: 120, baseDice: [1, 10], perSlotCount: 0, source: 'spell-descriptions.txt:2608-2626' },
   { id: 'elementalism', level: 0, operation: 'utility', rangeFeet: 30, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:2630' },
   { id: 'fire-bolt', level: 0, operation: 'attack_damage', rangeFeet: 120, baseDice: [1, 10], perSlotCount: 0, source: 'spell-descriptions.txt:3184-3200' },
   { id: 'guidance', level: 0, operation: 'effect', rangeFeet: 5, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:4000' },
@@ -279,6 +280,11 @@ const COMPLETE_MECHANICS_PINS: readonly CompleteMechanicsPin[] = [
     id: 'dancing-lights', source: 'spell-descriptions.txt:1906',
     targeting: { kind: 'utility', rangeFeet: 120 },
     operation: { kind: 'utility', effect: { kind: 'light_source', brightFeet: 0, dimFeet: 10, maximumLights: 4, moveFeetPerBonusAction: 60 }, concentration: true, durationRounds: 10 },
+  },
+  {
+    id: 'eldritch-blast', source: 'spell-descriptions.txt:2608-2626',
+    targeting: { kind: 'multiple', rangeFeet: 120, baseMaximum: 1, additionalPerSlot: 0 },
+    operation: { kind: 'attack_beams', attackKind: 'ranged', baseBeams: 1, additionalBeamLevels: [5, 11, 17], damageType: damageType('Force'), dice: pinnedDice(1, 10) },
   },
   {
     id: 'elementalism', source: 'spell-descriptions.txt:2630',
@@ -608,6 +614,7 @@ function operationDice(definition: SpellDefinition): readonly [number, number] |
     case 'save_damage_and_effect':
       return [operation.dice.baseCount, operation.dice.sides];
     case 'attack_rays':
+    case 'attack_beams':
     case 'summoned_weapon_attack':
     case 'lifedrain_attack':
       return [operation.dice.baseCount, operation.dice.sides];
@@ -649,6 +656,7 @@ function operationPerSlot(definition: SpellDefinition): number {
     case 'save_damage_and_effect':
       return operation.dice.perSlotCount;
     case 'attack_rays':
+    case 'attack_beams':
       return operation.dice.perSlotCount;
     case 'summoned_weapon_attack':
     case 'lifedrain_attack':
@@ -712,6 +720,8 @@ function castCommand(
       ? operation.baseDarts + operation.additionalPerSlot * ((slotLevel as number) - definition.level)
       : operation.kind === 'attack_rays'
         ? operation.baseRays + operation.additionalPerSlot * ((slotLevel as number) - definition.level)
+        : operation.kind === 'attack_beams'
+          ? operation.baseBeams + operation.additionalBeamLevels.filter((level) => 7 >= level).length
         : 1;
     targets = Array.from({ length: count }, () => target.id);
   }
@@ -795,6 +805,7 @@ describe('reference-party spell manifest', () => {
         }
       }
     }
+    expected.set('Eldritch Blast', new Set(['Warlock']));
 
     expect(SPELL_MANIFEST).toHaveLength(EXPECTED_MANIFEST_TOTAL);
     expect(new Set(SPELL_MANIFEST.map((row) => row.id)).size).toBe(EXPECTED_MANIFEST_TOTAL);
@@ -807,7 +818,7 @@ describe('reference-party spell manifest', () => {
         [...(expected.get(row.name) ?? [])].sort(),
       );
       expect(row.memberships.every((membership) =>
-        /^docs\/srd\/source\/(?:cleric|wizard)-spell-list\.txt:\d+$/u.test(membership.source))).toBe(true);
+        /^docs\/srd\/source\/(?:cleric|warlock|wizard)-spell-list\.txt:\d+$/u.test(membership.source))).toBe(true);
       if ('partial' in row) expect(row.partial.trim().length).toBeGreaterThan(20);
     }
   });
@@ -1006,6 +1017,56 @@ describe('spell foundations and implemented value pins', () => {
     }
   });
 
+  it('beam_count_off_by_level pins Eldritch Blast to 1/2/3/4 beams at levels 1/5/11/17', () => {
+    const definition = spellDefinition('eldritch-blast');
+    if (definition === null) throw new Error('Eldritch Blast definition missing.');
+    expect(definition.operation).toMatchObject({
+      kind: 'attack_beams',
+      baseBeams: 1,
+      additionalBeamLevels: [5, 11, 17],
+    });
+    for (const [casterLevel, beamCount] of [[1, 1], [5, 2], [11, 3], [17, 4]] as const) {
+      const { caster, target, state } = fixture(definition);
+      const command = {
+        ...castCommand(definition, caster, target),
+        casterLevel,
+        attackBonus: -30,
+        targets: Array.from({ length: beamCount }, () => target.id),
+      };
+      const result = reduceEncounter(state, command, () => 0);
+      expect(
+        result.events.filter((event) => event.type === 'attack_resolved'),
+        `caster level ${String(casterLevel)}`,
+      ).toHaveLength(beamCount);
+    }
+  });
+
+  it('beams_share_one_roll resolves each Eldritch Blast beam separately and permits different targets', () => {
+    const definition = spellDefinition('eldritch-blast');
+    if (definition === null) throw new Error('Eldritch Blast definition missing.');
+    const caster = playerProfile('caster-eldritch-independent', { initiativeBonus: 20 });
+    const firstTarget = monsterProfile('eldritch-first-target', { hitPoints: 200, initiativeBonus: 0 });
+    const secondTarget = monsterProfile('eldritch-second-target', { hitPoints: 200, initiativeBonus: -10 });
+    let state = createEncounter({
+      bounds: { columns: 12, rows: 6 },
+      combatants: [caster, firstTarget, secondTarget],
+      tokens: [placedToken(caster, 0, 1), placedToken(firstTarget, 1, 1), placedToken(secondTarget, 2, 1)],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    const draws = [0, 0.999, 0];
+    let drawIndex = 0;
+    const result = reduceEncounter(state, {
+      ...castCommand(definition, caster, firstTarget),
+      casterLevel: 5,
+      attackBonus: -30,
+      targets: [firstTarget.id, secondTarget.id],
+    }, () => draws[drawIndex++] ?? 0);
+    expect(result.events.filter((event) => event.type === 'attack_resolved')).toMatchObject([
+      { target: firstTarget.id, attack: { roll: { faces: [1] }, outcome: 'miss' } },
+      { target: secondTarget.id, attack: { roll: { faces: [20] }, outcome: 'critical' } },
+    ]);
+  });
+
   it('rejects an out-of-range target before spending its action or slot', () => {
     const definition = spellDefinition('cure-wounds');
     if (definition === null) throw new Error('Cure Wounds definition missing.');
@@ -1063,6 +1124,7 @@ describe('every implemented cantrip and level-1 spell executes through the encou
       case 'attack_damage':
       case 'attack_damage_over_time':
       case 'attack_rays':
+      case 'attack_beams':
       case 'attack_then_save_damage':
       case 'save_damage':
       case 'magic_missiles':

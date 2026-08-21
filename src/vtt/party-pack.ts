@@ -4,6 +4,7 @@ import type { TurnLegalActions } from '../combat/coordinator';
 import { conditionNames, type ConditionName } from '../combat/conditions';
 import {
   damageRiderGates,
+  isAttackFormSubstitutionPayload,
   type CombatFeatureEffect,
   type EffectApplication,
 } from '../combat/effects';
@@ -162,6 +163,9 @@ const FEATURE_EFFECT_KINDS = [
   'condition_application',
   'exhaustion_application',
   'movement_modifier',
+  'attack_ability_substitution',
+  'attack_damage_die_override',
+  'attack_reach_range_override',
 ] as const;
 
 const featureEffectSchema = z.discriminatedUnion('kind', [
@@ -283,6 +287,32 @@ const featureEffectSchema = z.discriminatedUnion('kind', [
     trigger: activatedEffectTriggerSchema,
     speedDeltaFeet: modifierSchema,
   }),
+  z.strictObject({
+    ...featureEffectBaseShape,
+    kind: z.literal('attack_ability_substitution'),
+    attackId: attackIdSchema,
+    damageTermIndex: integerSchema.min(0).max(19),
+    replacesAbility: z.enum(abilities),
+    spellcastingAbility: z.enum(abilities),
+  }),
+  z.strictObject({
+    ...featureEffectBaseShape,
+    kind: z.literal('attack_damage_die_override'),
+    attackId: attackIdSchema,
+    damageTermIndex: integerSchema.min(0).max(19),
+    levels: z.array(z.strictObject({
+      minimumLevel: classLevelSchema,
+      count: integerSchema.min(0).max(100),
+      sides: dieSidesSchema,
+    })).min(1).max(20),
+  }),
+  z.strictObject({
+    ...featureEffectBaseShape,
+    kind: z.literal('attack_reach_range_override'),
+    attackId: attackIdSchema,
+    reachFeet: distanceSchema.optional(),
+    rangeFeet: distanceSchema.optional(),
+  }),
 ]).superRefine((effect, context) => {
   if (
     'trigger' in effect &&
@@ -309,6 +339,27 @@ const featureEffectSchema = z.discriminatedUnion('kind', [
     new Set(effect.qualifyingGates).size !== effect.qualifyingGates.length
   ) {
     context.addIssue({ code: 'custom', message: 'Once-per-turn rider gates must be unique.' });
+  }
+  if (
+    (effect.kind === 'attack_ability_substitution' ||
+      effect.kind === 'attack_damage_die_override' ||
+      effect.kind === 'attack_reach_range_override') &&
+    effect.resourcePoolId !== undefined
+  ) {
+    context.addIssue({ code: 'custom', message: 'Attack-form substitutions are always-on and cannot spend a resource.' });
+  }
+  if (
+    effect.kind === 'attack_damage_die_override' &&
+    new Set(effect.levels.map((level) => level.minimumLevel)).size !== effect.levels.length
+  ) {
+    context.addIssue({ code: 'custom', message: 'Damage-die override levels must be unique.' });
+  }
+  if (
+    effect.kind === 'attack_reach_range_override' &&
+    effect.reachFeet === undefined &&
+    effect.rangeFeet === undefined
+  ) {
+    context.addIssue({ code: 'custom', message: 'A reach/range override must replace at least one distance.' });
   }
 });
 
@@ -948,6 +999,37 @@ function loadedFeatureEffect(
       return { ...common, payload: { kind: 'exhaustion', level: effect.level } };
     case 'movement_modifier':
       return { ...common, payload: { kind: 'movement_modifier', speedDeltaFeet: effect.speedDeltaFeet } };
+    case 'attack_ability_substitution':
+      return {
+        ...common,
+        payload: {
+          kind: 'attack_ability_substitution',
+          attackId: effect.attackId,
+          damageTermIndex: effect.damageTermIndex,
+          replacesAbility: effect.replacesAbility,
+          spellcastingAbility: effect.spellcastingAbility,
+        },
+      };
+    case 'attack_damage_die_override':
+      return {
+        ...common,
+        payload: {
+          kind: 'attack_damage_die_override',
+          attackId: effect.attackId,
+          damageTermIndex: effect.damageTermIndex,
+          levels: effect.levels,
+        },
+      };
+    case 'attack_reach_range_override':
+      return {
+        ...common,
+        payload: {
+          kind: 'attack_reach_range_override',
+          attackId: effect.attackId,
+          ...(effect.reachFeet === undefined ? {} : { reachFeet: effect.reachFeet }),
+          ...(effect.rangeFeet === undefined ? {} : { rangeFeet: effect.rangeFeet }),
+        },
+      };
   }
 }
 
@@ -1072,6 +1154,59 @@ export class PartyAttackError extends Error {
   }
 }
 
+function abilityModifier(score: number): number {
+  return Math.floor((score - 10) / 2);
+}
+
+function effectiveLoadedPartyAttack(
+  member: LoadedPartyMember,
+  attack: LoadedPartyAttack,
+): LoadedPartyAttack {
+  let effective = attack;
+  const totalLevel = member.source.classes.reduce((sum, heldClass) => sum + heldClass.level, 0);
+  for (const effect of member.effects) {
+    const payload = effect.payload;
+    if (!('attackId' in payload) || payload.attackId !== attack.attackId) continue;
+    switch (payload.kind) {
+      case 'attack_ability_substitution': {
+        const modifierDelta = abilityModifier(member.source.abilities[payload.spellcastingAbility]) -
+          abilityModifier(member.source.abilities[payload.replacesAbility]);
+        effective = {
+          ...effective,
+          attackBonus: effective.attackBonus + modifierDelta,
+          damage: effective.damage.map((term, index) =>
+            index === payload.damageTermIndex
+              ? { ...term, modifier: term.modifier + modifierDelta }
+              : term),
+        };
+        break;
+      }
+      case 'attack_damage_die_override': {
+        const tier = [...payload.levels]
+          .filter((level) => level.minimumLevel <= totalLevel)
+          .sort((left, right) => right.minimumLevel - left.minimumLevel)[0];
+        if (tier === undefined) break;
+        effective = {
+          ...effective,
+          damage: effective.damage.map((term, index) =>
+            index === payload.damageTermIndex
+              ? { ...term, count: tier.count, sides: dieSides(tier.sides) }
+              : term),
+        };
+        break;
+      }
+      case 'attack_reach_range_override':
+        effective = {
+          ...effective,
+          reach: payload.reachFeet === undefined ? effective.reach : feet(payload.reachFeet),
+          range: payload.rangeFeet === undefined ? effective.range : feet(payload.rangeFeet),
+        };
+        break;
+    }
+  }
+  return effective;
+}
+
 /** Builds a standard weapon attack; on-hit/on-crit feature riders stay reducer-owned. */
 export function loadedPartyAttackCommand(
   member: LoadedPartyMember,
@@ -1085,8 +1220,9 @@ export function loadedPartyAttackCommand(
     }[];
   } = {},
 ): Extract<EncounterCommand, { readonly type: 'attack' }> {
-  const attack = member.attacks.find((candidate) => candidate.attackId === attackId);
-  if (attack === undefined) throw new PartyAttackError();
+  const declaredAttack = member.attacks.find((candidate) => candidate.attackId === attackId);
+  if (declaredAttack === undefined) throw new PartyAttackError();
+  const attack = effectiveLoadedPartyAttack(member, declaredAttack);
   return {
     type: 'attack',
     actor: member.profile.id,
@@ -1140,7 +1276,8 @@ export function loadedPartyTurnLegalActions(
     const commands = (
       bonusActionGrantEffectId?: EncounterEffectId,
     ): Extract<EncounterCommand, { readonly type: 'attack' }>[] =>
-      targets.flatMap((target) => member.attacks.flatMap((attack) => {
+      targets.flatMap((target) => member.attacks.flatMap((declaredAttack) => {
+        const attack = effectiveLoadedPartyAttack(member, declaredAttack);
         const distance = gridDistance(
           loadedMemberPosition(state, actor),
           loadedMemberPosition(state, target.profile.id),
@@ -1220,6 +1357,9 @@ export function loadedPartyEffectCommand(
       cost,
       ...resource,
     };
+  }
+  if (isAttackFormSubstitutionPayload(effect.payload)) {
+    throw new PartyFeatureEffectError('effect_is_automatic');
   }
   const application: EffectApplication = {
     targets,
@@ -1839,21 +1979,51 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
       }
 
       const resourceIds = new Set(resources.map((pool) => pool.resourcePoolId));
+      const attackFormKeys = new Set<string>();
       effects = effects.filter((effect, effectIndex) => {
         const referencedPool = effect.resourcePoolId === undefined
           ? undefined
           : resources.find((pool) => pool.resourcePoolId === effect.resourcePoolId);
+        const referencedAttack = 'attackId' in effect
+          ? attacks.find((attack) => attack.attackId === effect.attackId)
+          : undefined;
+        const damageTermIndex = 'damageTermIndex' in effect ? effect.damageTermIndex : undefined;
+        const attackFormKey = 'attackId' in effect
+          ? `${effect.kind}:${effect.attackId}:${String(damageTermIndex ?? 'distance')}`
+          : null;
+        const uniqueAttackForm = attackFormKey === null || !attackFormKeys.has(attackFormKey);
         const valid = (effect.resourcePoolId === undefined || referencedPool !== undefined) &&
           (effect.kind !== 'action_surge' || referencedPool?.recharge === 'short_rest') &&
           (effect.kind !== 'extra_attack_count_override' ||
-            effect.levels.some((level) => level.minimumLevel <= totalLevel));
+            effect.levels.some((level) => level.minimumLevel <= totalLevel)) &&
+          (!('attackId' in effect) || referencedAttack !== undefined) &&
+          (damageTermIndex === undefined || referencedAttack?.damage[damageTermIndex] !== undefined) &&
+          (effect.kind !== 'attack_ability_substitution' ||
+            parsedSpellcasting.some((source) => source.ability === effect.spellcastingAbility)) &&
+          (effect.kind !== 'attack_damage_die_override' ||
+            effect.levels.some((level) => level.minimumLevel <= totalLevel)) &&
+          uniqueAttackForm;
         if (!valid) {
+          const path = 'attackId' in effect && referencedAttack === undefined
+            ? 'attackId'
+            : damageTermIndex !== undefined && referencedAttack?.damage[damageTermIndex] === undefined
+              ? 'damageTermIndex'
+              : effect.kind === 'attack_ability_substitution' &&
+                  !parsedSpellcasting.some((source) => source.ability === effect.spellcastingAbility)
+                ? 'spellcastingAbility'
+                : effect.kind === 'attack_damage_die_override' &&
+                    !effect.levels.some((level) => level.minimumLevel <= totalLevel)
+                  ? 'levels'
+                  : attackFormKey !== null && !uniqueAttackForm
+                    ? 'kind'
+                    : effect.kind === 'extra_attack_count_override' ? 'levels' : 'resourcePoolId';
           gaps.push(issueGap(
             entry,
-            ['members', index, 'effects', effectIndex,
-              effect.kind === 'extra_attack_count_override' ? 'levels' : 'resourcePoolId'],
+            ['members', index, 'effects', effectIndex, path],
             'value_not_in_engine_vocabulary',
           ));
+        } else if (attackFormKey !== null) {
+          attackFormKeys.add(attackFormKey);
         }
         return valid;
       });

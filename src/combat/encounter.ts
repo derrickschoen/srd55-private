@@ -8,6 +8,7 @@ import {
   type ExhaustionLevel,
 } from './conditions';
 import type { CombatantProfile, CombatToken } from './combatant';
+import { isAttackFormSubstitutionPayload } from './effects';
 import type {
   CombatFeatureEffect,
   EffectApplication,
@@ -294,7 +295,11 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
   let nextEffectSequence = 1;
   for (const profile of setup.combatants) {
     for (const feature of profile.rules.featureEffects ?? []) {
-      if (feature.trigger !== 'always_on' || feature.payload.kind === 'temporary_hit_points') continue;
+      if (
+        feature.trigger !== 'always_on' ||
+        feature.payload.kind === 'temporary_hit_points' ||
+        isAttackFormSubstitutionPayload(feature.payload)
+      ) continue;
       initialEffects.push({
         id: encounterEffectId(`effect:${String(nextEffectSequence)}`),
         source: profile.id,
@@ -2035,6 +2040,16 @@ function cantripUpgradeCount(casterLevel: number): number {
   return 0;
 }
 
+function attackBeamCount(
+  casterLevel: number,
+  operation: Extract<SpellDefinition['operation'], { readonly kind: 'attack_beams' }>,
+): number {
+  cantripUpgradeCount(casterLevel);
+  return operation.baseBeams + operation.additionalBeamLevels.filter(
+    (minimumLevel) => casterLevel >= minimumLevel,
+  ).length;
+}
+
 function scaledDiceExpression(
   definition: SpellDefinition,
   scaling: ScaledDice,
@@ -2261,9 +2276,13 @@ function selectedSpellTargets(
       return command.targets;
     case 'multiple': {
       const slotDelta = definition.level === 0 ? 0 : (command.slotLevel as number) - definition.level;
-      const maximum = targeting.baseMaximum + targeting.additionalPerSlot * slotDelta;
       const operation = definition.operation;
-      const requiresEveryDart = operation.kind === 'magic_missiles' || operation.kind === 'attack_rays';
+      const maximum = operation.kind === 'attack_beams'
+        ? attackBeamCount(command.casterLevel, operation)
+        : targeting.baseMaximum + targeting.additionalPerSlot * slotDelta;
+      const requiresEveryDart = operation.kind === 'magic_missiles' ||
+        operation.kind === 'attack_rays' ||
+        operation.kind === 'attack_beams';
       if (command.targets.length < 1 || command.targets.length > maximum) {
         throw new EncounterRuleError(`${definition.name} allows at most ${maximum} targets.`);
       }
@@ -3070,6 +3089,11 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
       return;
     }
     case 'attack_rays':
+      for (const target of targets) {
+        resolveSpellAttack(context, definition, command, target, operation.dice, operation.damageType, null);
+      }
+      return;
+    case 'attack_beams':
       for (const target of targets) {
         resolveSpellAttack(context, definition, command, target, operation.dice, operation.damageType, null);
       }

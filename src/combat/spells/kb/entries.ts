@@ -1,10 +1,19 @@
+export type SpellSrdLocator =
+  | `docs/srd/source/spell-descriptions.txt:${number}`
+  | `docs/srd/source/spell-descriptions.txt:${number}-${number}`;
+
 export interface SpellKbEntry {
   readonly ruleId: `R-SPELL-${string}`;
   readonly spellId: string;
-  readonly srdLocator:
-    | `docs/srd/source/spell-descriptions.txt:${number}`
-    | `docs/srd/source/spell-descriptions.txt:${number}-${number}`;
+  readonly srdLocator: SpellSrdLocator;
   readonly rulingGuidance: string;
+  readonly fieldCitations?: Readonly<{
+    readonly identity: SpellSrdLocator;
+    readonly castingTime: SpellSrdLocator;
+    readonly components: SpellSrdLocator;
+    readonly targeting: SpellSrdLocator;
+    readonly operation: SpellSrdLocator;
+  }>;
 }
 
 function entry(
@@ -193,4 +202,14 @@ export const SPELL_KB_ENTRIES = [
   entry('R-SPELL-173', 'stoneskin', '7429', 'Consume the diamond dust to grant resistance to Bludgeoning, Piercing, and Slashing for one hour.'),
   entry('R-SPELL-174', 'vitriolic-sphere', '8196', 'Place the 20-foot-radius sphere for 10d4 Acid plus 5d4 later on failure and 2d4 upcast scaling.'),
   entry('R-SPELL-175', 'wall-of-fire', '8217', 'Place the 60-by-20-by-1-foot wall or 20-foot ring and apply scaling 5d8 Fire damage.'),
+  {
+    ...entry('R-SPELL-176', 'eldritch-blast', '2608-2626', 'Allocate one beam at levels 1-4, two at 5-10, three at 11-16, and four at 17-20; resolve a separate ranged spell attack for 1d10 Force damage against each allocated target.'),
+    fieldCitations: {
+      identity: 'docs/srd/source/spell-descriptions.txt:2608-2609',
+      castingTime: 'docs/srd/source/spell-descriptions.txt:2611',
+      components: 'docs/srd/source/spell-descriptions.txt:2615',
+      targeting: 'docs/srd/source/spell-descriptions.txt:2613-2626',
+      operation: 'docs/srd/source/spell-descriptions.txt:2619-2626',
+    },
+  },
 ] as const satisfies readonly SpellKbEntry[];

@@ -263,6 +263,9 @@ describe('external party-pack boundary', () => {
       { effectId: 'effect:inventory-condition', kind: 'condition_application', trigger: 'action', conditionId: 'Prone' },
       { effectId: 'effect:inventory-exhaustion', kind: 'exhaustion_application', trigger: 'action', level: 1 },
       { effectId: 'effect:inventory-speed', kind: 'movement_modifier', trigger: 'always_on', speedDeltaFeet: 10 },
+      { effectId: 'effect:inventory-ability-substitution', kind: 'attack_ability_substitution', attackId: 'attack:pack-member-1', damageTermIndex: 0, replacesAbility: 'strength', spellcastingAbility: 'intelligence' },
+      { effectId: 'effect:inventory-die-override', kind: 'attack_damage_die_override', attackId: 'attack:pack-member-1', damageTermIndex: 0, levels: [{ minimumLevel: 1, count: 1, sides: 8 }] },
+      { effectId: 'effect:inventory-reach-override', kind: 'attack_reach_range_override', attackId: 'attack:pack-member-1', reachFeet: 10 },
     ];
     const loaded = loadExternalPartyPack(candidate);
 
@@ -279,7 +282,106 @@ describe('external party-pack boundary', () => {
       'condition',
       'exhaustion',
       'movement_modifier',
+      'attack_ability_substitution',
+      'attack_damage_die_override',
+      'attack_reach_range_override',
     ]);
+  });
+
+  it.each([
+    { strength: 9, spellcasting: 10, expectedAttackBonus: 7, expectedDamageModifier: 4 },
+    { strength: 10, spellcasting: 11, expectedAttackBonus: 6, expectedDamageModifier: 3 },
+    { strength: 11, spellcasting: 12, expectedAttackBonus: 7, expectedDamageModifier: 4 },
+  ])('substitution_ignored uses spellcasting ability instead of Strength at $strength/$spellcasting modifier boundaries', ({
+    strength,
+    spellcasting,
+    expectedAttackBonus,
+    expectedDamageModifier,
+  }) => {
+    const candidate = structuredClone(pack());
+    const member = candidate.members[0]!;
+    member.abilities.strength = strength;
+    member.abilities.wisdom = spellcasting;
+    objectSpellcasting(member).ability = 'wisdom';
+    member.effects = [{
+      effectId: 'effect:shillelagh-shape',
+      kind: 'attack_ability_substitution',
+      attackId: member.attacks[0]!.attackId,
+      damageTermIndex: 0,
+      replacesAbility: 'strength',
+      spellcastingAbility: 'wisdom',
+    }];
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Shillelagh-shape pack was refused.');
+    const actor = loaded.party.members[0]!;
+    const command = loadedPartyAttackCommand(actor, actor.attacks[0]!.attackId, monsterProfile('ability-target').id);
+    expect(command.attackBonus).toBe(expectedAttackBonus);
+    expect(command.damage.terms[0]?.dice.modifier).toBe(expectedDamageModifier);
+  });
+
+  it('unarmed die override changes the named attack damage die at the member level', () => {
+    const candidate = structuredClone(pack());
+    const member = candidate.members[0]!;
+    member.attacks[0]!.damage[0]!.sides = 4;
+    member.effects = [{
+      effectId: 'effect:martial-arts-shape',
+      kind: 'attack_damage_die_override',
+      attackId: member.attacks[0]!.attackId,
+      damageTermIndex: 0,
+      levels: [
+        { minimumLevel: 1, count: 1, sides: 6 },
+        { minimumLevel: 5, count: 1, sides: 8 },
+        { minimumLevel: 11, count: 1, sides: 10 },
+        { minimumLevel: 17, count: 1, sides: 12 },
+      ],
+    }];
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Martial-arts-shape pack was refused.');
+    const actor = loaded.party.members[0]!;
+    const command = loadedPartyAttackCommand(actor, actor.attacks[0]!.attackId, monsterProfile('die-target').id);
+    expect(command.damage.terms[0]?.dice).toEqual({ count: 1, sides: 8, modifier: 3 });
+  });
+
+  it('dangling_attack_id_accepted refuses an attack-form substitution whose attackId is undeclared', () => {
+    const candidate = structuredClone(pack());
+    candidate.members[0]!.effects = [{
+      effectId: 'effect:dangling-attack-shape',
+      kind: 'attack_reach_range_override',
+      attackId: 'attack:not-declared',
+      reachFeet: 10,
+    }];
+    expect(loadExternalPartyPack(candidate)).toMatchObject({
+      status: 'refused',
+      refusal: { reason: 'gaps_not_allowed' },
+      gaps: [{ featurePath: 'members.0.effects.0.attackId' }],
+    });
+  });
+
+  it('applies a named reach override when enumerating existing attack commands', () => {
+    const candidate = structuredClone(pack());
+    const member = candidate.members[0]!;
+    member.effects = [{
+      effectId: 'effect:reach-shape',
+      kind: 'attack_reach_range_override',
+      attackId: member.attacks[0]!.attackId,
+      reachFeet: 10,
+    }];
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Reach-shape pack was refused.');
+    const actor = loaded.party.members[0]!;
+    const target = monsterProfile('reach-target', { initiativeBonus: -10 });
+    let state = createEncounter({
+      bounds: { columns: 4, rows: 2 },
+      combatants: [actor.profile, target],
+      tokens: [combatToken(actor.profile, { column: 0, row: 0 }), combatToken(target, { column: 2, row: 0 })],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    expect(loadedPartyTurnLegalActions(loaded.party.members)(state, actor.profile.id).actions).toContainEqual(
+      expect.objectContaining({ type: 'attack', target: target.id }),
+    );
   });
 
   it('loads all six conditional-rider and action-economy variants into the existing engine effect machinery', () => {

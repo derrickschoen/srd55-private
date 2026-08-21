@@ -42,9 +42,9 @@ function hasNamedSpellHeader(
 
 describe('spell knowledge-base completeness', () => {
   it('has exactly one source-cited KB entry for every implemented cantrip and level-1/2 spell', () => {
-    expect(SPELL_KB_ENTRIES).toHaveLength(175);
-    expect(new Set(SPELL_KB_ENTRIES.map((entry) => entry.ruleId)).size).toBe(175);
-    expect(new Set(SPELL_KB_ENTRIES.map((entry) => entry.spellId)).size).toBe(175);
+    expect(SPELL_KB_ENTRIES).toHaveLength(176);
+    expect(new Set(SPELL_KB_ENTRIES.map((entry) => entry.ruleId)).size).toBe(176);
+    expect(new Set(SPELL_KB_ENTRIES.map((entry) => entry.spellId)).size).toBe(176);
     expect(SPELL_KB_ENTRIES.map((entry) => entry.spellId).sort()).toEqual(
       IMPLEMENTED_SPELL_DEFINITIONS.map((definition) => definition.id).sort(),
     );
@@ -69,7 +69,7 @@ describe('spell knowledge-base completeness', () => {
 
   it.each(SPELL_MANIFEST)('$id class-list locators name the exact spell row', (row) => {
     for (const membership of row.memberships) {
-      const matched = /^(docs\/srd\/source\/(?:cleric|wizard)-spell-list\.txt):(\d+)$/u.exec(membership.source);
+      const matched = /^(docs\/srd\/source\/(?:cleric|warlock|wizard)-spell-list\.txt):(\d+)$/u.exec(membership.source);
       if (matched === null) throw new Error(`Invalid class-list locator: ${membership.source}`);
       const path = matched[1];
       const line = matched[2];
@@ -93,5 +93,20 @@ describe('spell knowledge-base completeness', () => {
     const entry = SPELL_KB_ENTRIES.find((candidate) => candidate.spellId === 'sending');
     expect(entry?.rulingGuidance).toContain('a creature you met or one described by someone who met it');
     expect(entry?.rulingGuidance).not.toContain('named');
+  });
+
+  it('Eldritch Blast KB fields cite the exact bundled SRD lines', () => {
+    const entry = SPELL_KB_ENTRIES.find((candidate) => candidate.spellId === 'eldritch-blast');
+    expect(entry?.fieldCitations).toEqual({
+      identity: 'docs/srd/source/spell-descriptions.txt:2608-2609',
+      castingTime: 'docs/srd/source/spell-descriptions.txt:2611',
+      components: 'docs/srd/source/spell-descriptions.txt:2615',
+      targeting: 'docs/srd/source/spell-descriptions.txt:2613-2626',
+      operation: 'docs/srd/source/spell-descriptions.txt:2619-2626',
+    });
+    for (const locator of Object.values(entry?.fieldCitations ?? {})) {
+      const [start, end] = locatorBounds(locator);
+      expect(SPELL_DESCRIPTION_LINES.slice(start - 1, end).join(' ').trim().length).toBeGreaterThan(0);
+    }
   });
 });
