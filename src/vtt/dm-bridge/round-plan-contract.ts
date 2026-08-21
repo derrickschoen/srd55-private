@@ -233,6 +233,8 @@ function programSchema(depth: number): z.ZodType<DecisionProgram> {
   return schema;
 }
 
+export const decisionProgramSchema: z.ZodType<DecisionProgram> = programSchema(0);
+
 const roundPlanSchema: z.ZodType<RoundPlan> = z.strictObject({
   kind: z.literal('round_plan'),
   protocolVersion: z.literal(DM_BRIDGE_PROTOCOL_VERSION),
@@ -242,7 +244,7 @@ const roundPlanSchema: z.ZodType<RoundPlan> = z.strictObject({
   round: nonNegativeInteger,
   monsters: z.array(z.strictObject({
     monsterId: combatantIdSchema,
-    program: programSchema(0),
+    program: decisionProgramSchema,
   })),
 });
 

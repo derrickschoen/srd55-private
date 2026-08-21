@@ -4,6 +4,7 @@ import type { CombatantId } from './values';
 import type { VisibleEncounterState } from './visibility';
 import type { DmVisibleEncounterState } from './visibility';
 import type { DecisionProgram } from '../vtt/dm-bridge/round-plan-contract';
+import { canonicalJson } from '../commands/canonical-json';
 
 export interface LegalActionSummary {
   readonly actions: readonly EncounterCommand[];
@@ -150,13 +151,23 @@ function algorithmRank(
 }
 
 export class AlgorithmController implements Controller {
-  proposeRoundProgram(
+  /**
+   * Enumerates the primitive turn programs considered by the algorithm controller.
+   * Candidates are ranked by descending heuristic score, then by canonical JSON.
+   * The canonical-JSON tie-break is the stable sort key captured by experiments,
+   * so enumeration is independent of source-array or engine sort stability.
+   */
+  enumerateTurnPrograms(
     state: DmVisibleEncounterState,
     actorId: CombatantId,
-  ): AlgorithmRoundProposal {
+    limit = 64,
+  ): readonly AlgorithmTurnCandidate[] {
+    if (!Number.isSafeInteger(limit) || limit < 1) {
+      throw new RangeError('Algorithm turn candidate limit must be a positive integer.');
+    }
     const actor = state.combatants.find((candidate) => candidate.id === actorId);
     if (actor === undefined || actor.kind !== 'monster' || actor.life !== 'living') {
-      throw new TypeError('Algorithm round proposals require a living monster in the DM projection.');
+      throw new TypeError('Algorithm turn candidates require a living monster in the DM projection.');
     }
     const enemies = state.combatants
       .filter((candidate) => candidate.kind !== actor.kind && candidate.life !== 'dead')
@@ -165,35 +176,52 @@ export class AlgorithmController implements Controller {
         return distance || left.id.localeCompare(right.id);
       });
     const nearest = enemies[0];
-    const choices: DecisionProgram[] = [];
-    const scores: number[] = [];
+    const candidates: { readonly program: DecisionProgram; readonly score: number }[] = [];
     for (const enemy of enemies) {
       const distance = gridDistance(actor.position, enemy.position);
-      choices.push({
-        kind: 'action',
-        action: { kind: 'attack', target: { kind: 'combatant', combatantId: enemy.id } },
+      candidates.push({
+        program: {
+          kind: 'action',
+          action: { kind: 'attack', target: { kind: 'combatant', combatantId: enemy.id } },
+        },
+        score: 100 - distance,
       });
-      scores.push(100 - distance);
-      choices.push({
-        kind: 'action',
-        action: { kind: 'force_save', target: { kind: 'combatant', combatantId: enemy.id } },
+      candidates.push({
+        program: {
+          kind: 'action',
+          action: { kind: 'force_save', target: { kind: 'combatant', combatantId: enemy.id } },
+        },
+        score: 96 - distance,
       });
-      scores.push(96 - distance);
     }
     if (nearest !== undefined) {
-      choices.push({
-        kind: 'action',
-        action: { kind: 'move_toward', target: { kind: 'combatant', combatantId: nearest.id } },
+      candidates.push({
+        program: {
+          kind: 'action',
+          action: { kind: 'move_toward', target: { kind: 'combatant', combatantId: nearest.id } },
+        },
+        score: 50 - gridDistance(actor.position, nearest.position),
       });
-      scores.push(50 - gridDistance(actor.position, nearest.position));
     }
-    choices.push(
-      { kind: 'action', action: { kind: 'use_action', action: 'dodge' } },
-      { kind: 'action', action: { kind: 'use_action', action: 'end_turn' } },
+    candidates.push(
+      { program: { kind: 'action', action: { kind: 'use_action', action: 'dodge' } }, score: 20 },
+      { program: { kind: 'action', action: { kind: 'use_action', action: 'end_turn' } }, score: 0 },
     );
-    scores.push(20, 0);
-    const ranked = choices.map((program, index) => ({ program, score: scores[index] ?? 0 }))
-      .sort((left, right) => right.score - left.score || JSON.stringify(left.program).localeCompare(JSON.stringify(right.program)));
+    return candidates
+      .map((candidate) => ({
+        ...candidate,
+        stableSortKey: canonicalJson(candidate.program),
+      }))
+      .sort((left, right) =>
+        right.score - left.score || left.stableSortKey.localeCompare(right.stableSortKey))
+      .slice(0, limit);
+  }
+
+  proposeRoundProgram(
+    state: DmVisibleEncounterState,
+    actorId: CombatantId,
+  ): AlgorithmRoundProposal {
+    const ranked = this.enumerateTurnPrograms(state, actorId, 20);
     const top = ranked[0]?.score ?? 0;
     const second = ranked[1]?.score ?? top;
     return {
@@ -233,6 +261,12 @@ export class AlgorithmController implements Controller {
 export interface AlgorithmRoundProposal {
   readonly program: DecisionProgram;
   readonly topActionGapPercent: number;
+}
+
+export interface AlgorithmTurnCandidate {
+  readonly program: DecisionProgram;
+  readonly score: number;
+  readonly stableSortKey: string;
 }
 
 export interface AgentControllerRequest {
