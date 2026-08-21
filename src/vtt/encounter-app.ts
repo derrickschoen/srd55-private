@@ -74,6 +74,8 @@ function actionLabel(action: EncounterCommand): string {
       return action.purpose;
     case 'activate_action_surge':
       return 'Action Surge';
+    case 'activate_timed_spellcasting_mode':
+      return 'Activate timed spellcasting';
     case 'heal':
       return 'Heal';
     case 'apply_effect':

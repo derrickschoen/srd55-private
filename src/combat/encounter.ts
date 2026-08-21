@@ -8,7 +8,7 @@ import {
   type ExhaustionLevel,
 } from './conditions';
 import type { CombatantProfile, CombatToken } from './combatant';
-import { isAttackFormSubstitutionPayload } from './effects';
+import { isAttackFormSubstitutionPayload, isTypedCombatFeaturePayload } from './effects';
 import type {
   CombatFeatureEffect,
   EffectApplication,
@@ -37,6 +37,7 @@ import {
   resolveSavingThrow,
   rollD20,
   type DamageRequest,
+  type DiceExpression,
   type DamageResponse,
   type RollMode,
 } from './resolution';
@@ -76,6 +77,8 @@ export interface TurnResources {
   readonly bonusAttacksRemaining?: number;
   readonly bonusAttackGrantEffectId?: EncounterEffectId | null;
   readonly usedDamageRiderEffectIds?: readonly EncounterEffectId[];
+  readonly usedSpellDamageModifierEffectIds?: readonly EncounterEffectId[];
+  readonly additionalLeveledSpellActionsRemaining?: 0 | 1;
   readonly reactionAvailable: boolean;
   readonly movement: TurnMovement;
   readonly disengaging: boolean;
@@ -155,6 +158,8 @@ export interface EncounterState {
   readonly dmNotes: readonly string[];
   readonly combatants: readonly EncounterCombatantState[];
   readonly tokens: readonly CombatToken[];
+  /** Tokens owned by temporary board-absence effects, including their return cells. */
+  readonly absentTokens?: readonly CombatToken[];
   readonly initiative: readonly InitiativeEntry[];
   readonly activeCombatant: CombatantId | null;
   readonly activeInitiativeIndex: number | null;
@@ -299,6 +304,7 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
         feature.trigger !== 'always_on' ||
         feature.payload.kind === 'temporary_hit_points' ||
         feature.payload.kind === 'reckless_attack_mode' ||
+        isTypedCombatFeaturePayload(feature.payload) ||
         isAttackFormSubstitutionPayload(feature.payload)
       ) continue;
       initialEffects.push({
@@ -366,6 +372,10 @@ function token(state: EncounterState, id: CombatantId): CombatToken {
   const found = state.tokens.find((candidate) => candidate.combatantId === id);
   if (found === undefined) throw new EncounterRuleError(`Combatant ${id} has no token.`);
   return found;
+}
+
+export function isCombatantOnBoard(state: EncounterState, id: CombatantId): boolean {
+  return state.tokens.some((candidate) => candidate.combatantId === id);
 }
 
 function replaceCombatant(
@@ -460,6 +470,7 @@ function appliedConditions(effect: EncounterEffect): readonly AppliedCondition[]
     case 'warding_bond':
     case 'truth_zone':
     case 'ongoing_damage':
+    case 'temporary_banishment':
     case 'summoned_undead':
     case 'beacon_of_hope':
     case 'bestow_curse':
@@ -899,12 +910,65 @@ function endEffects(
 ): void {
   if (ids.size === 0) return;
   for (const effect of context.state.effects) {
-    if (ids.has(effect.id)) emit(context, { type: 'effect_ended', effectId: effect.id, reason });
+    if (!ids.has(effect.id)) continue;
+    if (effect.payload.kind === 'temporary_banishment') {
+      restoreBanishedTargets(context, effect, reason === 'duration_expired');
+    }
+    emit(context, { type: 'effect_ended', effectId: effect.id, reason });
   }
   context.state = {
     ...context.state,
     effects: context.state.effects.filter((effect) => !ids.has(effect.id)),
   };
+}
+
+function nearestReturnPosition(state: EncounterState, origin: GridCell): GridCell {
+  const candidates: GridCell[] = [];
+  for (let row = 0; row < state.bounds.rows; row += 1) {
+    for (let column = 0; column < state.bounds.columns; column += 1) {
+      const cell = { column, row };
+      if (state.blockedCells.some((blocked) => cellKey(blocked) === cellKey(cell))) continue;
+      if (state.tokens.some((occupied) => cellKey(occupied.position) === cellKey(cell))) continue;
+      candidates.push(cell);
+    }
+  }
+  const selected = candidates.sort((left, right) =>
+    gridDistance(left, origin) - gridDistance(right, origin) ||
+    left.row - right.row ||
+    left.column - right.column)[0];
+  if (selected === undefined) {
+    throw new EncounterRuleError('A banished combatant has no unoccupied return space.');
+  }
+  return selected;
+}
+
+function restoreBanishedTargets(
+  context: ReductionContext,
+  effect: EncounterEffect,
+  applyReturnDamage: boolean,
+): void {
+  if (effect.payload.kind !== 'temporary_banishment') return;
+  for (const target of effect.targets) {
+    const absentTokens = context.state.absentTokens ?? [];
+    const stored = absentTokens.find((candidate) => candidate.combatantId === target);
+    if (stored === undefined) continue;
+    const position = nearestReturnPosition(context.state, stored.position);
+    const returned = { ...stored, position };
+    context.state = {
+      ...context.state,
+      tokens: [...context.state.tokens, returned],
+      absentTokens: absentTokens.filter((candidate) => candidate.combatantId !== target),
+    };
+    emit(context, { type: 'combatant_returned_to_board', combatant: target, effectId: effect.id, position });
+    if (!applyReturnDamage) continue;
+    const request = effect.payload.returnDamage;
+    const result = resolveDamage({
+      ...request,
+      responses: targetDamageResponses(context.state, target, request),
+    }, context.rng);
+    applyDamage(context, effect.source, target, result.total);
+    concentrationCheck(context, target, result.total);
+  }
 }
 
 function endConcentration(
@@ -1130,6 +1194,9 @@ function assertActiveActor(context: ReductionContext, actor: CombatantId): Encou
   const subject = combatant(context.state, actor);
   if (subject.life !== 'living') {
     throw new EncounterRuleError(`Combatant ${actor} cannot act while ${subject.life}.`);
+  }
+  if (!isCombatantOnBoard(context.state, actor)) {
+    throw new EncounterRuleError(`Combatant ${actor} is absent from the board.`);
   }
   return subject;
 }
@@ -1820,6 +1887,18 @@ function cloneEffectApplication(
             })),
           },
         };
+      case 'temporary_banishment':
+        return {
+          ...application.payload,
+          returnDamage: {
+            ...application.payload.returnDamage,
+            terms: application.payload.returnDamage.terms.map((term) => ({
+              ...term,
+              dice: { ...term.dice },
+            })),
+            responses: application.payload.returnDamage.responses.map((response) => ({ ...response })),
+          },
+        };
     }
   })();
   return {
@@ -1892,6 +1971,21 @@ function applyEffect(
   if (context.state.effects.some((candidate) => candidate.id === id)) {
     emit(context, { type: 'effect_applied', effectId: id, source, targets });
   }
+  if (owned.payload.kind === 'temporary_banishment') {
+    if (targets.length !== 1) {
+      throw new EncounterRuleError('Temporary banishment requires exactly one target.');
+    }
+    const target = targets[0];
+    if (target === undefined) throw new EncounterRuleError('Temporary banishment requires a target.');
+    const removed = context.state.tokens.find((candidate) => candidate.combatantId === target);
+    if (removed === undefined) throw new EncounterRuleError(`Combatant ${target} is already absent from the board.`);
+    context.state = {
+      ...context.state,
+      tokens: context.state.tokens.filter((candidate) => candidate.combatantId !== target),
+      absentTokens: [...(context.state.absentTokens ?? []), removed],
+    };
+    emit(context, { type: 'combatant_left_board', combatant: target, effectId: id });
+  }
   for (const target of targets) {
     const targetConditions = combatantConditions(context.state, target);
     if (
@@ -1933,6 +2027,7 @@ function startTurn(context: ReductionContext, id: CombatantId, round: number): v
   const speed = feet(effectiveSpeed(context.state, id));
   const incapacitated =
     beforeSave.life !== 'living' ||
+    !isCombatantOnBoard(context.state, id) ||
     isIncapacitated(combatantConditions(context.state, id));
   context.state = replaceCombatant(context.state, {
     ...beforeSave,
@@ -2084,6 +2179,129 @@ function applyWeaponHitRiderFollowUp(
   }
 }
 
+function attackDamageTypeSelection(
+  state: EncounterState,
+  command: Extract<EncounterCommand, { readonly type: 'attack' }>,
+): Extract<CombatFeatureEffect['payload'], { readonly kind: 'attack_damage_type_choice' }> | null {
+  if (command.damageTypeSelection === undefined) {
+    const requiresSelection = command.attackId !== undefined &&
+      (combatant(state, command.actor).profile.rules.featureEffects ?? []).some((effect) =>
+        effect.payload.kind === 'attack_damage_type_choice' &&
+        effect.payload.attackId === command.attackId);
+    if (requiresSelection) {
+      throw new EncounterRuleError('This attack requires a declared damage-type selection.');
+    }
+    return null;
+  }
+  const effect = featureEffect(state, command.actor, command.damageTypeSelection.effectId);
+  if (
+    effect.payload.kind !== 'attack_damage_type_choice' ||
+    command.attackId !== effect.payload.attackId ||
+    !effect.payload.options.includes(command.damageTypeSelection.damageType)
+  ) {
+    throw new EncounterRuleError('Attack damage-type selection is not declared for this attack.');
+  }
+  return effect.payload;
+}
+
+function selectedManeuver(
+  state: EncounterState,
+  command: Extract<EncounterCommand, { readonly type: 'attack' }>,
+): CombatFeatureEffect | null {
+  if (command.maneuverEffectId === undefined) return null;
+  const effect = featureEffect(state, command.actor, command.maneuverEffectId);
+  if (effect.payload.kind !== 'resource_die_maneuver' || effect.resourcePoolId === null) {
+    throw new EncounterRuleError(`Effect ${effect.id} is not a resource-die maneuver.`);
+  }
+  return effect;
+}
+
+function markDamageFeatureUsed(
+  context: ReductionContext,
+  actor: CombatantId,
+  effectId: EncounterEffectId,
+): void {
+  const current = combatant(context.state, actor);
+  context.state = replaceCombatant(context.state, {
+    ...current,
+    turn: {
+      ...current.turn,
+      usedDamageRiderEffectIds: [...(current.turn.usedDamageRiderEffectIds ?? []), effectId],
+    },
+  });
+}
+
+function applyManeuverCondition(
+  context: ReductionContext,
+  source: CombatantId,
+  target: CombatantId,
+  effect: CombatFeatureEffect,
+): void {
+  if (effect.payload.kind !== 'resource_die_maneuver') return;
+  if (combatant(context.state, target).life === 'dead') return;
+  applyEffect(context, source, {
+    targets: [target],
+    duration: {
+      kind: 'turn_boundaries',
+      timing: {
+        combatant: target,
+        boundary: 'end',
+        source: 'party-pack:resource-die-maneuver',
+      },
+      remaining: 1,
+    },
+    concentration: false,
+    stackingIdentity: effectStackingIdentity(`feature:${effect.id}:condition`),
+    stacking: 'replace_same_source',
+    repeatedSave: null,
+    payload: { kind: 'condition', condition: effect.payload.condition },
+  });
+}
+
+function applySaveGatedBanishments(
+  context: ReductionContext,
+  actor: CombatantId,
+  target: CombatantId,
+): void {
+  if (combatant(context.state, target).life === 'dead') return;
+  const effects = combatant(context.state, actor).profile.rules.featureEffects ?? [];
+  for (const effect of effects) {
+    if (effect.trigger !== 'on_hit' || effect.payload.kind !== 'save_gated_banishment_on_hit') continue;
+    const save = resolveTargetSave(
+      context,
+      actor,
+      target,
+      effect.payload.saveAbility,
+      effect.payload.saveDc,
+      effect.payload.rollMode,
+      null,
+    );
+    if (save.outcome === 'success') continue;
+    applyEffect(context, actor, {
+      targets: [target],
+      duration: {
+        kind: 'turn_boundaries',
+        timing: {
+          combatant: actor,
+          boundary: 'start',
+          source: 'party-pack:save-gated-banishment-on-hit',
+        },
+        remaining: 1,
+      },
+      concentration: false,
+      stackingIdentity: effectStackingIdentity(`feature:${effect.id}:banishment`),
+      stacking: 'replace_same_source',
+      repeatedSave: null,
+      payload: {
+        kind: 'temporary_banishment',
+        returnDamage: effect.payload.returnDamage,
+        returnPlacement: effect.payload.returnPlacement,
+      },
+    });
+    return;
+  }
+}
+
 function processAttack(
   context: ReductionContext,
   command: Extract<
@@ -2091,7 +2309,19 @@ function processAttack(
     { readonly type: 'attack' | 'opportunity_attack' }
   >,
 ): void {
+  if (!isCombatantOnBoard(context.state, command.actor)) {
+    throw new EncounterRuleError(`Combatant ${command.actor} is absent from the board.`);
+  }
+  if (!isCombatantOnBoard(context.state, command.target)) {
+    throw new EncounterRuleError(`Combatant ${command.target} is absent from the board.`);
+  }
   let wasFirstAttack = false;
+  const typeChoice = command.type === 'attack'
+    ? attackDamageTypeSelection(context.state, command)
+    : null;
+  const maneuver = command.type === 'attack'
+    ? selectedManeuver(context.state, command)
+    : null;
   if (command.type === 'attack') {
     assertActiveActor(context, command.actor);
     wasFirstAttack = combatant(context.state, command.actor).turn.action.kind === 'available';
@@ -2174,6 +2404,10 @@ function processAttack(
         ) <= clause.feet,
     );
     const attacking = combatant(context.state, command.actor);
+    const baseTerms = command.damage.terms.map((term, index) =>
+      typeChoice !== null && index === typeChoice.damageTermIndex && command.type === 'attack'
+        ? { ...term, type: command.damageTypeSelection?.damageType ?? term.type }
+        : term);
     const candidateRiders = [
       ...(attacking.profile.rules.featureEffects ?? []).flatMap((effect) =>
         effect.payload.kind === 'damage_rider'
@@ -2244,6 +2478,17 @@ function processAttack(
         spendLimitedResource(context, command.actor, rider.resourcePoolId, `Effect ${rider.id}`);
       }
     }
+    if (maneuver !== null && maneuver.resourcePoolId !== null) {
+      spendLimitedResource(context, command.actor, maneuver.resourcePoolId, `Effect ${maneuver.id}`);
+    }
+    const elementalFury = (attacking.profile.rules.featureEffects ?? []).find((effect) =>
+      effect.trigger === 'always_on' &&
+      effect.payload.kind === 'elemental_fury' &&
+      command.type === 'attack' &&
+      command.attackId !== undefined &&
+      effect.payload.attackIds.includes(command.attackId) &&
+      !(attacking.turn.usedDamageRiderEffectIds ?? []).includes(effect.id));
+    if (elementalFury !== undefined) markDamageFeatureUsed(context, command.actor, elementalFury.id);
     const riderTerms = triggeredRiders.flatMap((effect) => {
       const payload = effect.payload;
       return payload.gating?.kind === 'slot_spend' && command.type === 'attack'
@@ -2260,7 +2505,23 @@ function processAttack(
             }))
           : payload.damage.terms;
     });
-    const terms = [...command.damage.terms, ...riderTerms];
+    const primaryDamageType = baseTerms[0]?.type;
+    if (maneuver !== null && primaryDamageType === undefined) {
+      throw new EncounterRuleError('A resource-die maneuver requires primary attack damage.');
+    }
+    const maneuverTerms = maneuver?.payload.kind === 'resource_die_maneuver' && primaryDamageType !== undefined
+      ? [{
+          type: primaryDamageType,
+          dice: { count: 1, sides: maneuver.payload.dieSides, modifier: 0 },
+        }]
+      : [];
+    const elementalTerms = elementalFury?.payload.kind === 'elemental_fury'
+      ? [{
+          type: elementalFury.payload.selectedDamageType,
+          dice: { count: 0, sides: dieSides(6), modifier: elementalFury.payload.amount },
+        }]
+      : [];
+    const terms = [...baseTerms, ...riderTerms, ...maneuverTerms, ...elementalTerms];
     const request = {
       ...command.damage,
       terms,
@@ -2276,11 +2537,13 @@ function processAttack(
       request.critical,
     );
     concentrationCheck(context, command.target, damageResult.total);
+    if (maneuver !== null) applyManeuverCondition(context, command.actor, command.target, maneuver);
     for (const rider of triggeredRiders) {
       if (rider.encounterEffect === null || rider.payload.consumeOnHit !== true) continue;
       endEffects(context, new Set([rider.encounterEffect.id]), 'trigger_consumed');
       applyWeaponHitRiderFollowUp(context, rider.encounterEffect, command.target);
     }
+    applySaveGatedBanishments(context, command.actor, command.target);
   }
   emit(context, {
     type: 'attack_resolved',
@@ -2329,6 +2592,50 @@ function scaledDiceExpression(
   };
 }
 
+function scaledSpellDamageExpression(
+  context: ReductionContext,
+  definition: SpellDefinition,
+  scaling: ScaledDice,
+  command: SpellCastCommand,
+): DiceExpression {
+  let expression: DiceExpression = scaledDiceExpression(definition, scaling, command);
+  const effects = combatant(context.state, command.actor).profile.rules.featureEffects ?? [];
+  const exploding = effects.find((effect) =>
+    effect.trigger === 'always_on' &&
+    effect.payload.kind === 'exploding_spell_damage_die' &&
+    effect.payload.spellId === definition.id);
+  if (exploding?.payload.kind === 'exploding_spell_damage_die') {
+    expression = {
+      ...expression,
+      explosion: {
+        triggerFace: exploding.payload.triggerFace,
+        maximumExplosionsPerDie: exploding.payload.maximumExplosionsPerDie,
+      },
+    };
+  }
+  const actor = combatant(context.state, command.actor);
+  const modifier = effects.find((effect) =>
+    effect.trigger === 'always_on' &&
+    effect.payload.kind === 'spell_damage_ability_modifier' &&
+    effect.payload.spellId === definition.id &&
+    !(actor.turn.usedSpellDamageModifierEffectIds ?? []).includes(effect.id));
+  if (modifier !== undefined) {
+    expression = { ...expression, modifier: expression.modifier + command.spellcastingModifier };
+    const current = combatant(context.state, command.actor);
+    context.state = replaceCombatant(context.state, {
+      ...current,
+      turn: {
+        ...current.turn,
+        usedSpellDamageModifierEffectIds: [
+          ...(current.turn.usedSpellDamageModifierEffectIds ?? []),
+          modifier.id,
+        ],
+      },
+    });
+  }
+  return expression;
+}
+
 function spendSpellCastingCost(
   context: ReductionContext,
   definition: SpellDefinition,
@@ -2343,8 +2650,28 @@ function spendSpellCastingCost(
   switch (definition.castingTime) {
     case 'action':
       assertActiveActor(context, actor);
-      spendAction(context, actor, `Cast ${definition.name}`);
-      return;
+      if (combatant(context.state, actor).turn.action.kind === 'available') {
+        spendAction(context, actor, `Cast ${definition.name}`);
+        return;
+      }
+      if (
+        definition.level > 0 &&
+        combatant(context.state, actor).turn.additionalLeveledSpellActionsRemaining === 1
+      ) {
+        const subject = combatant(context.state, actor);
+        context.state = replaceCombatant(context.state, {
+          ...subject,
+          turn: { ...subject.turn, additionalLeveledSpellActionsRemaining: 0 },
+        });
+        emit(context, {
+          type: 'resource_spent',
+          combatant: actor,
+          resource: 'additional_leveled_spell_action',
+          purpose: `Cast ${definition.name}`,
+        });
+        return;
+      }
+      throw new EncounterRuleError(`Combatant ${actor} has no spell action available.`);
     case 'bonus_action':
       assertActiveActor(context, actor);
       spendCost(context, actor, 'bonus_action', `Cast ${definition.name}`);
@@ -2513,6 +2840,9 @@ function validateTargetRange(
   rangeFeet: number,
   allowDead = false,
 ): void {
+  if (!isCombatantOnBoard(state, actor) || !isCombatantOnBoard(state, target)) {
+    throw new EncounterRuleError('Spell caster and target must be present on the board.');
+  }
   if (!allowDead && combatant(state, target).life === 'dead') {
     throw new EncounterRuleError('A dead combatant is not a legal spell target.');
   }
@@ -2578,6 +2908,7 @@ function selectedSpellTargets(
     case 'remote':
       if (command.targets.length !== 1) throw new EncounterRuleError(`${definition.name} requires one remote target.`);
       if (combatant(state, command.targets[0] as CombatantId).life === 'dead') throw new EncounterRuleError('A dead combatant is not a legal spell target.');
+      if (!isCombatantOnBoard(state, command.targets[0] as CombatantId)) throw new EncounterRuleError('An absent combatant is not a legal spell target.');
       return command.targets;
     case 'utility':
       if (command.targets.length !== 0) throw new EncounterRuleError('This utility spell does not target a combatant.');
@@ -2725,6 +3056,7 @@ function resolvedSpellEffectPayload(
     case 'condition_bundle':
     case 'exhaustion':
     case 'ongoing_damage':
+    case 'temporary_banishment':
     case 'armor_class_modifier':
     case 'hit_point_maximum_modifier':
     case 'attack_roll_modifier':
@@ -3007,7 +3339,7 @@ function resolveSpellAttack(
   let result: ReturnType<typeof resolveDamage> | null = null;
   if (attack.outcome !== 'miss') {
     const baseRequest: DamageRequest = {
-      terms: [{ type: spellDamageType, dice: scaledDiceExpression(definition, damage, command) }],
+      terms: [{ type: spellDamageType, dice: scaledSpellDamageExpression(context, definition, damage, command) }],
       critical: attack.outcome === 'critical',
       responses: [],
     };
@@ -3119,7 +3451,7 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
         null,
       );
       const rolled = resolveDamage({
-        terms: [{ type: operation.saveDamageType, dice: scaledDiceExpression(definition, operation.saveDice, command) }],
+        terms: [{ type: operation.saveDamageType, dice: scaledSpellDamageExpression(context, definition, operation.saveDice, command) }],
         critical: false,
         responses: [],
       }, context.rng);
@@ -3145,7 +3477,7 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
         null,
       );
       if (attack.outcome === 'miss') {
-        const rolled = rollDice(context.rng, scaledDiceExpression(definition, operation.initialDice, command));
+        const rolled = rollDice(context.rng, scaledSpellDamageExpression(context, definition, operation.initialDice, command));
         const amount = Math.floor(rolled.total / 2);
         applyDamage(context, command.actor, target, amount);
         concentrationCheck(context, target, amount);
@@ -3183,7 +3515,7 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
     }
     case 'save_damage': {
       const roll = resolveDamage({
-        terms: [{ type: operation.damageType, dice: scaledDiceExpression(definition, operation.dice, command) }],
+        terms: [{ type: operation.damageType, dice: scaledSpellDamageExpression(context, definition, operation.dice, command) }],
         critical: false,
         responses: [],
       }, context.rng);
@@ -3207,7 +3539,7 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
         type: term.damageType,
         sides: term.dice.sides,
         total: resolveDamage({
-          terms: [{ type: term.damageType, dice: scaledDiceExpression(definition, term.dice, command) }],
+          terms: [{ type: term.damageType, dice: scaledSpellDamageExpression(context, definition, term.dice, command) }],
           critical: false,
           responses: [],
         }, context.rng).total,
@@ -3226,7 +3558,7 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
     }
     case 'save_damage_over_time': {
       const initial = resolveDamage({
-        terms: [{ type: operation.damageType, dice: scaledDiceExpression(definition, operation.initialDice, command) }],
+        terms: [{ type: operation.damageType, dice: scaledSpellDamageExpression(context, definition, operation.initialDice, command) }],
         critical: false,
         responses: [],
       }, context.rng);
@@ -3253,7 +3585,7 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
     }
     case 'save_damage_and_effect': {
       const rolled = resolveDamage({
-        terms: [{ type: operation.damageType, dice: scaledDiceExpression(definition, operation.dice, command) }],
+        terms: [{ type: operation.damageType, dice: scaledSpellDamageExpression(context, definition, operation.dice, command) }],
         critical: false,
         responses: [],
       }, context.rng);
@@ -3405,7 +3737,7 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
           (candidate.payload.kind === 'magic_missile_immunity' || candidate.payload.kind === 'shield_defense'));
         if (immune) continue;
         const baseRequest: DamageRequest = {
-          terms: [{ type: operation.damageType, dice: scaledDiceExpression(definition, operation.dice, command) }],
+          terms: [{ type: operation.damageType, dice: scaledSpellDamageExpression(context, definition, operation.dice, command) }],
           critical: false,
           responses: [],
         };
@@ -3468,7 +3800,7 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
               },
               {
                 type: operation.extraDamage.type,
-                dice: scaledDiceExpression(definition, operation.extraDamage.dice, command),
+                dice: scaledSpellDamageExpression(context, definition, operation.extraDamage.dice, command),
               },
             ],
             critical: attack.outcome === 'critical',
@@ -3942,6 +4274,32 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
       context.state = replaceCombatant(context.state, {
         ...refreshed,
         turn: { ...refreshed.turn, action: { kind: 'available' } },
+      });
+      return;
+    }
+    case 'activate_timed_spellcasting_mode': {
+      const subject = assertActiveActor(context, command.actor);
+      assertCanUseActions(context, command.actor);
+      const effect = featureEffect(context.state, command.actor, command.effectId);
+      if (
+        effect.payload.kind !== 'timed_spellcasting_mode' ||
+        effect.resourcePoolId === null ||
+        effect.trigger !== 'bonus_action'
+      ) {
+        throw new EncounterRuleError(`Effect ${effect.id} is not a resource-fueled timed spellcasting mode.`);
+      }
+      if (subject.turn.additionalLeveledSpellActionsRemaining === 1) {
+        throw new EncounterRuleError('The timed spellcasting mode is already active this turn.');
+      }
+      spendCost(context, command.actor, 'bonus_action', `Effect ${effect.id}`);
+      spendLimitedResource(context, command.actor, effect.resourcePoolId, `Effect ${effect.id}`);
+      const refreshed = combatant(context.state, command.actor);
+      context.state = replaceCombatant(context.state, {
+        ...refreshed,
+        turn: {
+          ...refreshed.turn,
+          additionalLeveledSpellActionsRemaining: effect.payload.additionalLeveledSpellActions,
+        },
       });
       return;
     }

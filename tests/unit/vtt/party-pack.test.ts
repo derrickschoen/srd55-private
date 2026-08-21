@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { combatToken } from '../../../src/combat/combatant';
-import { createEncounter, reduceEncounter } from '../../../src/combat/encounter';
+import { combatantConditions, createEncounter, reduceEncounter } from '../../../src/combat/encounter';
 import { encounterEffectId } from '../../../src/combat/values';
 import {
   externalPartyPackSchema,
@@ -220,6 +220,21 @@ function familyPack(): ExternalPartyPackV2 {
     },
   ];
   return candidate;
+}
+
+function typedShapePack(
+  effects: NonNullable<ExternalPartyPackV2['members'][number]['effects']>,
+  resources: NonNullable<ExternalPartyPackV2['members'][number]['resources']> = [],
+): ExternalPartyPackV2 {
+  const candidate = structuredClone(pack());
+  candidate.members[0]!.effects = effects;
+  candidate.members[0]!.resources = resources;
+  return candidate;
+}
+
+function sequenceRng(values: readonly number[], fallback = 0): () => number {
+  let index = 0;
+  return () => values[index++] ?? fallback;
 }
 
 describe('external party-pack boundary', () => {
@@ -1303,6 +1318,341 @@ describe('external party-pack boundary', () => {
 
     expect(resolveSaveAt(11)).toMatchObject({ save: { outcome: 'failure', total: 14 } });
     expect(resolveSaveAt(12)).toMatchObject({ save: { outcome: 'success', total: 15 } });
+  });
+
+  it('banish_return_damage_dropped enforces the save DC boundary, board absence, and sourced return damage', () => {
+    // SRD disappearance/nearest-return precedent: docs/srd/full/srd-5.2.1.txt:4590-4600;
+    // this D318.1 clean-room shape deliberately uses the requested source-start/damage-on-return clock.
+    const candidate = typedShapePack([{
+      effectId: 'effect:rift-banishment',
+      kind: 'save_gated_banishment_on_hit',
+      trigger: 'on_hit',
+      saveAbility: 'charisma',
+      saveDc: 15,
+      rollMode: 'normal',
+      returnAt: 'source_next_turn_start',
+      returnDamage: { damageTypeId: 'Psychic', count: 1, sides: 6, modifier: 0 },
+      returnPlacement: 'previous_or_nearest_unoccupied',
+    }]);
+
+    const attackAt = (saveFace: 15 | 16) => {
+      const loaded = loadExternalPartyPack(candidate);
+      expect(loaded.status).toBe('loaded');
+      if (loaded.status !== 'loaded') throw new Error('Banishment shape was refused.');
+      const actor = loaded.party.members[0]!;
+      const target = loaded.party.members[1]!;
+      let state = createEncounter({
+        bounds: { columns: 3, rows: 2 },
+        combatants: [actor.profile, target.profile],
+        tokens: [
+          combatToken(actor.profile, { column: 0, row: 0 }),
+          combatToken(target.profile, { column: 1, row: 0 }),
+        ],
+      });
+      state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+      const attacked = reduceEncounter(
+        state,
+        loadedPartyAttackCommand(actor, actor.attacks[0]!.attackId, target.profile.id),
+        sequenceRng([0.5, 0, (saveFace - 1) / 20]),
+      );
+      return { actor, target, attacked };
+    };
+
+    const failed = attackAt(15);
+    expect(failed.attacked.events).toContainEqual(expect.objectContaining({
+      type: 'save_resolved',
+      save: expect.objectContaining({ outcome: 'failure', total: 14 }),
+    }));
+    expect(failed.attacked.state.tokens.some((token) => token.combatantId === failed.target.profile.id)).toBe(false);
+    expect(failed.attacked.state.absentTokens).toContainEqual(expect.objectContaining({
+      combatantId: failed.target.profile.id,
+      position: { column: 1, row: 0 },
+    }));
+    const targetTurn = reduceEncounter(
+      failed.attacked.state,
+      { type: 'end_turn', actor: failed.actor.profile.id },
+      () => 0,
+    ).state;
+    const returned = reduceEncounter(
+      targetTurn,
+      { type: 'end_turn', actor: failed.target.profile.id },
+      () => 0,
+    );
+    expect(returned.events).toContainEqual(expect.objectContaining({
+      type: 'combatant_returned_to_board',
+      combatant: failed.target.profile.id,
+    }));
+    expect(returned.events).toContainEqual(expect.objectContaining({
+      type: 'damage_applied',
+      target: failed.target.profile.id,
+      amount: 1,
+    }));
+    expect(returned.state.absentTokens ?? []).toEqual([]);
+
+    const succeeded = attackAt(16);
+    expect(succeeded.attacked.events).toContainEqual(expect.objectContaining({
+      type: 'save_resolved',
+      save: expect.objectContaining({ outcome: 'success', total: 15 }),
+    }));
+    expect(succeeded.attacked.state.tokens.some((token) => token.combatantId === succeeded.target.profile.id)).toBe(true);
+    expect(succeeded.attacked.state.absentTokens ?? []).toEqual([]);
+  });
+
+  // SRD selected-cantrip ability-modifier precedent: docs/srd/full/srd-5.2.1.txt:4335-4342;
+  // the D318.1 typed shape adds the requested one-damage-roll-per-turn bound.
+  it('agonizing_applied_twice_per_turn adds exactly one spellcasting modifier to one named-spell damage roll', () => {
+    const candidate = typedShapePack([{
+      effectId: 'effect:focused-cantrip-damage',
+      kind: 'spell_damage_ability_modifier',
+      spellId: 'eldritch-blast',
+      application: 'one_damage_roll_per_turn',
+    }]);
+    objectSpellcasting(candidate.members[0]!).knownSpellIds.push('eldritch-blast');
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Spell-damage modifier shape was refused.');
+    const caster = loaded.party.members[0]!;
+    const target = loaded.party.members[1]!;
+    let state = createEncounter({
+      bounds: { columns: 3, rows: 2 },
+      combatants: [caster.profile, target.profile],
+      tokens: [
+        combatToken(caster.profile, { column: 0, row: 0 }),
+        combatToken(target.profile, { column: 1, row: 0 }),
+      ],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    const result = reduceEncounter(state, loadedPartySpellCastCommand(caster, 'eldritch-blast', {
+      slotLevel: null,
+      castAsRitual: false,
+      targets: [target.profile.id, target.profile.id],
+      area: null,
+      weaponAttack: null,
+      selectedOption: null,
+    }), sequenceRng([0.5, 0, 0.5, 0]));
+    const damageTotals = result.events.flatMap((event) =>
+      event.type === 'attack_resolved' && event.damage !== null ? [event.damage.total] : []);
+    expect(damageTotals).toEqual([4, 1]);
+    expect(result.state.combatants[0]?.turn.usedSpellDamageModifierEffectIds).toEqual([
+      'effect:focused-cantrip-damage',
+    ]);
+  });
+
+  it('timed spellcasting mode grants exactly one extra leveled-spell action and drains its long-rest pool', () => {
+    // SRD resource-fueled casting-time precedent: docs/srd/full/srd-5.2.1.txt:4064-4073;
+    // the clean-room engine shape is the requested one-extra-leveled-action mode.
+    const candidate = typedShapePack([{
+      effectId: 'effect:accelerated-casting',
+      kind: 'timed_spellcasting_mode',
+      trigger: 'bonus_action',
+      resourcePoolId: 'resource:accelerated-casting',
+      additionalLeveledSpellActions: 1,
+      duration: 'this_turn',
+    }], [{ resourcePoolId: 'resource:accelerated-casting', maximum: 1, recharge: 'long_rest' }]);
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Timed spellcasting shape was refused.');
+    const caster = loaded.party.members[0]!;
+    const target = loaded.party.members[1]!;
+    let state = createEncounter({
+      bounds: { columns: 3, rows: 2 },
+      combatants: [caster.profile, target.profile],
+      tokens: [
+        combatToken(caster.profile, { column: 0, row: 0 }),
+        combatToken(target.profile, { column: 1, row: 0 }),
+      ],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    const cast = () => loadedPartySpellCastCommand(caster, 'magic-missile', {
+      slotLevel: 1,
+      castAsRitual: false,
+      targets: [target.profile.id, target.profile.id, target.profile.id],
+      area: null,
+      weaponAttack: null,
+      selectedOption: null,
+    });
+    state = reduceEncounter(state, cast(), () => 0).state;
+    state = reduceEncounter(state, {
+      type: 'activate_timed_spellcasting_mode',
+      actor: caster.profile.id,
+      effectId: encounterEffectId('effect:accelerated-casting'),
+    }, () => 0).state;
+    const second = reduceEncounter(state, cast(), () => 0);
+    expect(second.state.combatants[0]?.limitedResources?.[0]?.remaining).toBe(0);
+    expect(second.state.combatants[0]?.spellSlots[0]?.remaining).toBe(2);
+    expect(second.state.combatants[0]?.turn.additionalLeveledSpellActionsRemaining).toBe(0);
+    expect(() => reduceEncounter(second.state, cast(), () => 0)).toThrow('no spell action available');
+  });
+
+  it('attack damage-type choice changes the target resistance interaction', () => {
+    const candidate = typedShapePack([{
+      effectId: 'effect:adaptive-edge',
+      kind: 'attack_damage_type_choice',
+      attackId: 'attack:pack-member-1',
+      damageTermIndex: 0,
+      damageTypeIds: ['Cold', 'Fire'],
+    }]);
+    candidate.members[1]!.passives = {
+      damageResponses: [{ damageTypeId: 'Cold', response: 'resistant' }],
+    };
+    const attackTotal = (damageTypeId: 'Cold' | 'Fire') => {
+      const loaded = loadExternalPartyPack(candidate);
+      expect(loaded.status).toBe('loaded');
+      if (loaded.status !== 'loaded') throw new Error('Damage-type choice shape was refused.');
+      const actor = loaded.party.members[0]!;
+      const target = loaded.party.members[1]!;
+      let state = createEncounter({
+        bounds: { columns: 3, rows: 2 },
+        combatants: [actor.profile, target.profile],
+        tokens: [
+          combatToken(actor.profile, { column: 0, row: 0 }),
+          combatToken(target.profile, { column: 1, row: 0 }),
+        ],
+      });
+      state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+      const result = reduceEncounter(state, loadedPartyAttackCommand(
+        actor,
+        actor.attacks[0]!.attackId,
+        target.profile.id,
+        {
+          damageTypeSelection: {
+            effectId: encounterEffectId('effect:adaptive-edge'),
+            damageTypeId,
+          },
+        },
+      ), () => 0.5);
+      return result.events.find((event) => event.type === 'attack_resolved');
+    };
+    expect(attackTotal('Cold')).toMatchObject({ damage: { total: 4 } });
+    expect(attackTotal('Fire')).toMatchObject({ damage: { total: 8 } });
+  });
+
+  it('superiority_die_free spends the resource die, adds it on hit, and applies its typed condition', () => {
+    const candidate = typedShapePack([{
+      effectId: 'effect:driving-maneuver',
+      kind: 'resource_die_maneuver',
+      trigger: 'on_hit',
+      resourcePoolId: 'resource:maneuver-dice',
+      sides: 6,
+      damageType: 'attack_primary',
+      conditionId: 'Prone',
+      conditionDuration: 'until_end_of_target_next_turn',
+    }], [{ resourcePoolId: 'resource:maneuver-dice', maximum: 2, recharge: 'short_rest' }]);
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Resource-die maneuver shape was refused.');
+    const actor = loaded.party.members[0]!;
+    const target = loaded.party.members[1]!;
+    let state = createEncounter({
+      bounds: { columns: 3, rows: 2 },
+      combatants: [actor.profile, target.profile],
+      tokens: [
+        combatToken(actor.profile, { column: 0, row: 0 }),
+        combatToken(target.profile, { column: 1, row: 0 }),
+      ],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    const result = reduceEncounter(state, loadedPartyAttackCommand(
+      actor,
+      actor.attacks[0]!.attackId,
+      target.profile.id,
+      { maneuverEffectId: encounterEffectId('effect:driving-maneuver') },
+    ), sequenceRng([0.5, 0, 0]));
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'attack_resolved',
+      damage: expect.objectContaining({ total: 5 }),
+    }));
+    expect(result.state.combatants[0]?.limitedResources?.[0]?.remaining).toBe(1);
+    expect(combatantConditions(result.state, target.profile.id)).toContainEqual({ name: 'Prone' });
+  });
+
+  it('exploding_die_unbounded explodes each maximum cantrip die exactly once', () => {
+    const candidate = typedShapePack([{
+      effectId: 'effect:volatile-cantrip',
+      kind: 'exploding_spell_damage_die',
+      spellId: 'fire-bolt',
+      triggerFace: 'maximum',
+      maximumExplosionsPerDie: 1,
+    }]);
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Exploding cantrip shape was refused.');
+    const caster = loaded.party.members[0]!;
+    const target = loaded.party.members[1]!;
+    let state = createEncounter({
+      bounds: { columns: 3, rows: 2 },
+      combatants: [caster.profile, target.profile],
+      tokens: [
+        combatToken(caster.profile, { column: 0, row: 0 }),
+        combatToken(target.profile, { column: 1, row: 0 }),
+      ],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    const result = reduceEncounter(state, loadedPartySpellCastCommand(caster, 'fire-bolt', {
+      slotLevel: null,
+      castAsRitual: false,
+      targets: [target.profile.id],
+      area: null,
+      weaponAttack: null,
+      selectedOption: null,
+    }), sequenceRng([0.5, 0.999, 0.999, 0.999, 0.999]));
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'attack_resolved',
+      damage: {
+        terms: [expect.objectContaining({
+          roll: expect.objectContaining({ faces: [10, 10, 10, 10], explosionFaces: [10, 10] }),
+          beforeResponse: 40,
+          afterResponse: 40,
+        })],
+        total: 40,
+      },
+    }));
+  });
+
+  // SRD element-choice/once-per-turn precedent: docs/srd/full/srd-5.2.1.txt:2627-2644;
+  // the imported-build shape carries its declared flat amount rather than SRD dice.
+  it('elemental fury adds the selected declared damage type to a qualifying attack', () => {
+    const candidate = typedShapePack([{
+      effectId: 'effect:elemental-fury',
+      kind: 'elemental_fury',
+      attackIds: ['attack:pack-member-1'],
+      damageTypeIds: ['Cold', 'Fire', 'Lightning', 'Thunder'],
+      selectedDamageTypeId: 'Fire',
+      amount: 4,
+      gate: 'first_hit_this_turn',
+    }]);
+    candidate.members[1]!.passives = {
+      damageResponses: [{ damageTypeId: 'Fire', response: 'resistant' }],
+    };
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Elemental Fury shape was refused.');
+    const actor = loaded.party.members[0]!;
+    const target = loaded.party.members[1]!;
+    let state = createEncounter({
+      bounds: { columns: 3, rows: 2 },
+      combatants: [actor.profile, target.profile],
+      tokens: [
+        combatToken(actor.profile, { column: 0, row: 0 }),
+        combatToken(target.profile, { column: 1, row: 0 }),
+      ],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    const result = reduceEncounter(
+      state,
+      loadedPartyAttackCommand(actor, actor.attacks[0]!.attackId, target.profile.id),
+      () => 0.5,
+    );
+    const resolved = result.events.find((event) => event.type === 'attack_resolved');
+    expect(resolved).toMatchObject({
+      damage: {
+        terms: [
+          expect.objectContaining({ type: 'Slashing', afterResponse: 8 }),
+          expect.objectContaining({ type: 'Fire', beforeResponse: 4, afterResponse: 2 }),
+        ],
+        total: 10,
+      },
+    });
   });
 
   it('out_of_union_accepted refuses an unknown effect kind and names the unsupported shape', () => {

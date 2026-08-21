@@ -5,6 +5,7 @@ import { conditionNames, type ConditionName } from '../combat/conditions';
 import {
   damageRiderGates,
   isAttackFormSubstitutionPayload,
+  isTypedCombatFeaturePayload,
   type CombatFeatureEffect,
   type EffectApplication,
 } from '../combat/effects';
@@ -172,6 +173,13 @@ const FEATURE_EFFECT_KINDS = [
   'attack_ability_substitution',
   'attack_damage_die_override',
   'attack_reach_range_override',
+  'save_gated_banishment_on_hit',
+  'spell_damage_ability_modifier',
+  'timed_spellcasting_mode',
+  'attack_damage_type_choice',
+  'resource_die_maneuver',
+  'exploding_spell_damage_die',
+  'elemental_fury',
 ] as const;
 
 const featureEffectSchema = z.discriminatedUnion('kind', [
@@ -324,6 +332,64 @@ const featureEffectSchema = z.discriminatedUnion('kind', [
     reachFeet: distanceSchema.optional(),
     rangeFeet: distanceSchema.optional(),
   }),
+  z.strictObject({
+    ...featureEffectBaseShape,
+    kind: z.literal('save_gated_banishment_on_hit'),
+    trigger: z.literal('on_hit'),
+    saveAbility: z.enum(abilities),
+    saveDc: integerSchema.min(1).max(50),
+    rollMode: z.literal('normal'),
+    returnAt: z.literal('source_next_turn_start'),
+    returnDamage: effectDamageSchema,
+    returnPlacement: z.literal('previous_or_nearest_unoccupied'),
+  }),
+  z.strictObject({
+    ...featureEffectBaseShape,
+    kind: z.literal('spell_damage_ability_modifier'),
+    spellId: z.string().min(1).max(100),
+    application: z.literal('one_damage_roll_per_turn'),
+  }),
+  z.strictObject({
+    ...featureEffectBaseShape,
+    kind: z.literal('timed_spellcasting_mode'),
+    trigger: z.literal('bonus_action'),
+    resourcePoolId: resourcePoolIdSchema,
+    additionalLeveledSpellActions: z.literal(1),
+    duration: z.literal('this_turn'),
+  }),
+  z.strictObject({
+    ...featureEffectBaseShape,
+    kind: z.literal('attack_damage_type_choice'),
+    attackId: attackIdSchema,
+    damageTermIndex: integerSchema.min(0).max(19),
+    damageTypeIds: z.array(z.enum(damageTypes)).min(2).max(3),
+  }),
+  z.strictObject({
+    ...featureEffectBaseShape,
+    kind: z.literal('resource_die_maneuver'),
+    trigger: z.literal('on_hit'),
+    resourcePoolId: resourcePoolIdSchema,
+    sides: dieSidesSchema,
+    damageType: z.literal('attack_primary'),
+    conditionId: z.enum(nonExhaustionConditionNames),
+    conditionDuration: z.literal('until_end_of_target_next_turn'),
+  }),
+  z.strictObject({
+    ...featureEffectBaseShape,
+    kind: z.literal('exploding_spell_damage_die'),
+    spellId: z.string().min(1).max(100),
+    triggerFace: z.literal('maximum'),
+    maximumExplosionsPerDie: z.literal(1),
+  }),
+  z.strictObject({
+    ...featureEffectBaseShape,
+    kind: z.literal('elemental_fury'),
+    attackIds: z.array(attackIdSchema).min(1).max(100),
+    damageTypeIds: z.array(z.enum(damageTypes)).min(2).max(4),
+    selectedDamageTypeId: z.enum(damageTypes),
+    amount: integerSchema.min(0).max(100_000),
+    gate: z.literal('first_hit_this_turn'),
+  }),
 ]).superRefine((effect, context) => {
   if (
     'trigger' in effect &&
@@ -378,6 +444,30 @@ const featureEffectSchema = z.discriminatedUnion('kind', [
     effect.rangeFeet === undefined
   ) {
     context.addIssue({ code: 'custom', message: 'A reach/range override must replace at least one distance.' });
+  }
+  if (
+    effect.kind === 'attack_damage_type_choice' &&
+    new Set(effect.damageTypeIds).size !== effect.damageTypeIds.length
+  ) {
+    context.addIssue({ code: 'custom', message: 'Attack damage-type choices must be unique.' });
+  }
+  if (
+    effect.kind === 'elemental_fury' &&
+    (new Set(effect.attackIds).size !== effect.attackIds.length ||
+      new Set(effect.damageTypeIds).size !== effect.damageTypeIds.length ||
+      !effect.damageTypeIds.includes(effect.selectedDamageTypeId))
+  ) {
+    context.addIssue({ code: 'custom', message: 'Elemental Fury requires unique attacks and elements plus a declared selection.' });
+  }
+  if (
+    (effect.kind === 'spell_damage_ability_modifier' ||
+      effect.kind === 'attack_damage_type_choice' ||
+      effect.kind === 'exploding_spell_damage_die' ||
+      effect.kind === 'elemental_fury' ||
+      effect.kind === 'save_gated_banishment_on_hit') &&
+    effect.resourcePoolId !== undefined
+  ) {
+    context.addIssue({ code: 'custom', message: 'This typed feature is automatic and cannot spend a resource.' });
   }
 });
 
@@ -1078,6 +1168,91 @@ function loadedFeatureEffect(
           ...(effect.rangeFeet === undefined ? {} : { rangeFeet: effect.rangeFeet }),
         },
       };
+    case 'save_gated_banishment_on_hit':
+      return {
+        ...common,
+        payload: {
+          kind: 'save_gated_banishment_on_hit',
+          saveAbility: effect.saveAbility,
+          saveDc: effect.saveDc,
+          rollMode: effect.rollMode,
+          returnAt: effect.returnAt,
+          returnDamage: {
+            terms: [{
+              type: damageType(effect.returnDamage.damageTypeId),
+              dice: {
+                count: effect.returnDamage.count,
+                sides: dieSides(effect.returnDamage.sides),
+                modifier: effect.returnDamage.modifier,
+              },
+            }],
+            critical: false,
+            responses: [],
+          },
+          returnPlacement: effect.returnPlacement,
+        },
+      };
+    case 'spell_damage_ability_modifier':
+      return {
+        ...common,
+        payload: {
+          kind: 'spell_damage_ability_modifier',
+          spellId: effect.spellId,
+          application: effect.application,
+        },
+      };
+    case 'timed_spellcasting_mode':
+      return {
+        ...common,
+        payload: {
+          kind: 'timed_spellcasting_mode',
+          additionalLeveledSpellActions: effect.additionalLeveledSpellActions,
+          duration: effect.duration,
+        },
+      };
+    case 'attack_damage_type_choice':
+      return {
+        ...common,
+        payload: {
+          kind: 'attack_damage_type_choice',
+          attackId: effect.attackId,
+          damageTermIndex: effect.damageTermIndex,
+          options: effect.damageTypeIds.map(damageType),
+        },
+      };
+    case 'resource_die_maneuver':
+      return {
+        ...common,
+        payload: {
+          kind: 'resource_die_maneuver',
+          dieSides: dieSides(effect.sides),
+          damageType: effect.damageType,
+          condition: effect.conditionId,
+          conditionDuration: effect.conditionDuration,
+        },
+      };
+    case 'exploding_spell_damage_die':
+      return {
+        ...common,
+        payload: {
+          kind: 'exploding_spell_damage_die',
+          spellId: effect.spellId,
+          triggerFace: effect.triggerFace,
+          maximumExplosionsPerDie: effect.maximumExplosionsPerDie,
+        },
+      };
+    case 'elemental_fury':
+      return {
+        ...common,
+        payload: {
+          kind: 'elemental_fury',
+          attackIds: effect.attackIds,
+          damageTypes: effect.damageTypeIds.map(damageType),
+          selectedDamageType: damageType(effect.selectedDamageTypeId),
+          amount: effect.amount,
+          gate: effect.gate,
+        },
+      };
   }
 }
 
@@ -1250,6 +1425,8 @@ function effectiveLoadedPartyAttack(
           range: payload.rangeFeet === undefined ? effective.range : feet(payload.rangeFeet),
         };
         break;
+      case 'attack_damage_type_choice':
+        break;
     }
   }
   return effective;
@@ -1267,11 +1444,42 @@ export function loadedPartyAttackCommand(
       readonly effectId: EncounterEffectId;
       readonly slotLevel: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
     }[];
+    readonly damageTypeSelection?: {
+      readonly effectId: EncounterEffectId;
+      readonly damageTypeId: string;
+    };
+    readonly maneuverEffectId?: EncounterEffectId;
   } = {},
 ): Extract<EncounterCommand, { readonly type: 'attack' }> {
   const declaredAttack = member.attacks.find((candidate) => candidate.attackId === attackId);
   if (declaredAttack === undefined) throw new PartyAttackError();
   const attack = effectiveLoadedPartyAttack(member, declaredAttack);
+  const declaredDamageTypeChoice = member.effects.find((candidate) =>
+    candidate.payload.kind === 'attack_damage_type_choice' &&
+    candidate.payload.attackId === attack.attackId);
+  if (declaredDamageTypeChoice !== undefined && options.damageTypeSelection === undefined) {
+    throw new PartyAttackError();
+  }
+  const damageTypeSelection = options.damageTypeSelection === undefined
+    ? undefined
+    : (() => {
+        const effect = member.effects.find((candidate) => candidate.id === options.damageTypeSelection?.effectId);
+        const selected = damageType(options.damageTypeSelection.damageTypeId);
+        if (
+          effect?.payload.kind !== 'attack_damage_type_choice' ||
+          effect.payload.attackId !== attack.attackId ||
+          !effect.payload.options.includes(selected)
+        ) {
+          throw new PartyAttackError();
+        }
+        return { effectId: effect.id, damageType: selected };
+      })();
+  if (options.maneuverEffectId !== undefined) {
+    const maneuver = member.effects.find((candidate) => candidate.id === options.maneuverEffectId);
+    if (maneuver?.payload.kind !== 'resource_die_maneuver' || maneuver.resourcePoolId === null) {
+      throw new PartyAttackError();
+    }
+  }
   return {
     type: 'attack',
     actor: member.profile.id,
@@ -1299,6 +1507,8 @@ export function loadedPartyAttackCommand(
     ...(options.riderSelections === undefined
       ? {}
       : { riderSelections: options.riderSelections }),
+    ...(damageTypeSelection === undefined ? {} : { damageTypeSelection }),
+    ...(options.maneuverEffectId === undefined ? {} : { maneuverEffectId: options.maneuverEffectId }),
   };
 }
 
@@ -1318,8 +1528,13 @@ export function loadedPartyTurnLegalActions(
     if (member === undefined) return { actions: [{ type: 'end_turn', actor }] };
     const acting = state.combatants.find((candidate) => candidate.profile.id === actor);
     if (acting === undefined) throw new Error(`Loaded party combatant ${actor} is absent from the encounter.`);
+    if (!state.tokens.some((candidate) => candidate.combatantId === actor)) {
+      return { actions: [{ type: 'end_turn', actor }] };
+    }
     const targets = state.combatants.filter((candidate) =>
-      candidate.profile.kind !== acting.profile.kind && candidate.life !== 'dead');
+      candidate.profile.kind !== acting.profile.kind &&
+      candidate.life !== 'dead' &&
+      state.tokens.some((token) => token.combatantId === candidate.profile.id));
     const smites = member.effects.filter((effect) =>
       effect.payload.kind === 'damage_rider' && effect.payload.gating?.kind === 'slot_spend');
     const riderChoices = [undefined, ...smites.flatMap((effect) =>
@@ -1344,23 +1559,41 @@ export function loadedPartyTurnLegalActions(
               effect.payload.kind === 'reckless_attack_mode' &&
               effect.payload.strengthBasedMeleeAttackIds.includes(attack.attackId)
                 ? [effect.id]
-                : [])
+              : [])
           : [];
-        return riderChoices.flatMap((riderSelections) => [
-          loadedPartyAttackCommand(member, attack.attackId, target.profile.id, {
-            ...(bonusActionGrantEffectId === undefined ? {} : { bonusActionGrantEffectId }),
-            ...(riderSelections === undefined ? {} : { riderSelections }),
-          }),
-          ...recklessChoices.map((recklessAttackEffectId) => loadedPartyAttackCommand(
-            member,
-            attack.attackId,
-            target.profile.id,
-            {
-              recklessAttackEffectId,
-              ...(riderSelections === undefined ? {} : { riderSelections }),
-            },
-          )),
-        ]);
+        const declaredDamageTypeChoices = member.effects.flatMap((effect) =>
+          effect.payload.kind === 'attack_damage_type_choice' && effect.payload.attackId === attack.attackId
+            ? effect.payload.options.map((type) => ({ effectId: effect.id, damageTypeId: String(type) }))
+            : []);
+        const damageTypeChoices = declaredDamageTypeChoices.length === 0
+          ? [undefined]
+          : declaredDamageTypeChoices;
+        const maneuverChoices = [undefined, ...member.effects.flatMap((effect) => {
+          if (effect.payload.kind !== 'resource_die_maneuver' || effect.resourcePoolId === null) return [];
+          const pool = (acting.limitedResources ?? []).find((candidate) => candidate.id === effect.resourcePoolId);
+          return (pool?.remaining ?? 0) > 0 ? [effect.id] : [];
+        })];
+        return riderChoices.flatMap((riderSelections) =>
+          damageTypeChoices.flatMap((damageTypeSelection) =>
+            maneuverChoices.flatMap((maneuverEffectId) => [
+              loadedPartyAttackCommand(member, attack.attackId, target.profile.id, {
+                ...(bonusActionGrantEffectId === undefined ? {} : { bonusActionGrantEffectId }),
+                ...(riderSelections === undefined ? {} : { riderSelections }),
+                ...(damageTypeSelection === undefined ? {} : { damageTypeSelection }),
+                ...(maneuverEffectId === undefined ? {} : { maneuverEffectId }),
+              }),
+              ...recklessChoices.map((recklessAttackEffectId) => loadedPartyAttackCommand(
+                member,
+                attack.attackId,
+                target.profile.id,
+                {
+                  recklessAttackEffectId,
+                  ...(riderSelections === undefined ? {} : { riderSelections }),
+                  ...(damageTypeSelection === undefined ? {} : { damageTypeSelection }),
+                  ...(maneuverEffectId === undefined ? {} : { maneuverEffectId }),
+                },
+              )),
+            ])));
       }));
 
     const actions: EncounterCommand[] = [];
@@ -1382,6 +1615,18 @@ export function loadedPartyTurnLegalActions(
           : (acting.limitedResources ?? []).find((candidate) => candidate.id === effect.resourcePoolId);
         if ((pool?.remaining ?? 0) > 0) {
           actions.push({ type: 'activate_action_surge', actor, effectId: effect.id });
+        }
+      }
+      if (
+        effect.payload.kind === 'timed_spellcasting_mode' &&
+        acting.turn.bonusActionAvailable &&
+        acting.turn.additionalLeveledSpellActionsRemaining !== 1
+      ) {
+        const pool = effect.resourcePoolId === null
+          ? null
+          : (acting.limitedResources ?? []).find((candidate) => candidate.id === effect.resourcePoolId);
+        if ((pool?.remaining ?? 0) > 0) {
+          actions.push({ type: 'activate_timed_spellcasting_mode', actor, effectId: effect.id });
         }
       }
     }
@@ -1426,7 +1671,8 @@ export function loadedPartyEffectCommand(
   }
   if (
     isAttackFormSubstitutionPayload(effect.payload) ||
-    effect.payload.kind === 'reckless_attack_mode'
+    effect.payload.kind === 'reckless_attack_mode' ||
+    isTypedCombatFeaturePayload(effect.payload)
   ) {
     throw new PartyFeatureEffectError('effect_is_automatic');
   }
@@ -2126,8 +2372,21 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
         const validRecklessAttacks = effect.kind !== 'reckless_attack_mode' ||
           effect.strengthBasedMeleeAttackIds.every((attackId) =>
             attacks.some((attack) => attack.attackId === attackId && attack.kind === 'melee'));
+        const validElementalAttacks = effect.kind !== 'elemental_fury' ||
+          effect.attackIds.every((attackId) => attacks.some((attack) => attack.attackId === attackId));
+        const namedSpell = 'spellId' in effect
+          ? SPELL_MANIFEST.find((spell) => spell.id === effect.spellId)
+          : undefined;
+        const validNamedCantrip =
+          (effect.kind !== 'spell_damage_ability_modifier' && effect.kind !== 'exploding_spell_damage_die') ||
+          (namedSpell?.status === 'implemented' && namedSpell.level === 0 &&
+            parsedSpellcasting.some((source) =>
+              source.preparedSpellIds.includes(effect.spellId) ||
+              source.knownSpellIds.includes(effect.spellId) ||
+              (source.grants ?? []).some((grant) => grant.spellId === effect.spellId)));
         const valid = (effect.resourcePoolId === undefined || referencedPool !== undefined) &&
           (effect.kind !== 'action_surge' || referencedPool?.recharge === 'short_rest') &&
+          (effect.kind !== 'timed_spellcasting_mode' || referencedPool?.recharge === 'long_rest') &&
           (effect.kind !== 'extra_attack_count_override' ||
             effect.levels.some((level) => level.minimumLevel <= totalLevel)) &&
           (!('attackId' in effect) || referencedAttack !== undefined) &&
@@ -2137,6 +2396,8 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           (effect.kind !== 'attack_damage_die_override' ||
             effect.levels.some((level) => level.minimumLevel <= totalLevel)) &&
           validRecklessAttacks &&
+          validElementalAttacks &&
+          validNamedCantrip &&
           uniqueAttackForm;
         if (!valid) {
           const path = 'attackId' in effect && referencedAttack === undefined
@@ -2149,6 +2410,10 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
                 : effect.kind === 'attack_damage_die_override' &&
                     !effect.levels.some((level) => level.minimumLevel <= totalLevel)
                   ? 'levels'
+                  : !validNamedCantrip
+                    ? 'spellId'
+                    : !validElementalAttacks
+                      ? 'attackIds'
                   : !validRecklessAttacks
                     ? 'strengthBasedMeleeAttackIds'
                   : attackFormKey !== null && !uniqueAttackForm

@@ -83,6 +83,8 @@ function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
     case 'temporary_hit_points_changed':
     case 'stance_started':
     case 'turn_ended':
+    case 'combatant_left_board':
+    case 'combatant_returned_to_board':
       return [event.combatant];
     case 'initiative_block_rolled':
       return event.combatants;

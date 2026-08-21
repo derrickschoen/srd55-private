@@ -77,12 +77,24 @@ export function rollDice(rng: Rng, expression: DiceExpression): DiceRollTrace {
   }
 
   const faces: number[] = [];
+  const explosionFaces: number[] = [];
   for (let index = 0; index < expression.count; index += 1) {
-    faces.push(rollDie(rng, expression.sides));
+    const face = rollDie(rng, expression.sides);
+    faces.push(face);
+    if (
+      expression.explosion?.triggerFace === 'maximum' &&
+      expression.explosion.maximumExplosionsPerDie === 1 &&
+      face === expression.sides
+    ) {
+      const explosion = rollDie(rng, expression.sides);
+      faces.push(explosion);
+      explosionFaces.push(explosion);
+    }
   }
   return {
     expression,
     faces,
+    ...(explosionFaces.length === 0 ? {} : { explosionFaces }),
     total: faces.reduce((sum, face) => sum + face, expression.modifier),
   };
 }
