@@ -26,6 +26,7 @@ const PARTY_EFFECTS_LEDGER_PATH = 'docs/audits/2026-08-20-party-pack-v2-effects-
 const EFFECT_FAMILIES_LEDGER_PATH = 'docs/audits/2026-08-21-party-pack-effect-families-mutation-ledger.md';
 const PARTY_MULTISOURCE_LEDGER_PATH = 'docs/audits/2026-08-21-party-pack-multisource-mutation-ledger.md';
 const REGRET_ORACLE_LEDGER_PATH = 'docs/audits/2026-08-21-vtt-regret-mutation-ledger.md';
+const ATTACK_FORM_ELDRITCH_LEDGER_PATH = 'docs/audits/2026-08-21-attack-form-eldritch-blast-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
 function ledger(): MutationLedger {
@@ -213,5 +214,22 @@ describe('phase-2 mutation ledger manifest', () => {
       expect(ledger).toContain(`\`${name}\``);
       expect(tests).toContain(name);
     }
+  });
+
+  it('ATTACK-FORM-ELDRITCH-MUTATION-LEDGER pins all four required controls to named killing tests', () => {
+    const ledger = readFileSync(ATTACK_FORM_ELDRITCH_LEDGER_PATH, 'utf8');
+    const partyPackTests = readFileSync('tests/unit/vtt/party-pack.test.ts', 'utf8');
+    const spellTests = readFileSync('tests/unit/combat/spells.test.ts', 'utf8');
+    for (const name of [
+      'substitution_ignored',
+      'dangling_attack_id_accepted',
+      'beam_count_off_by_level',
+      'beams_share_one_roll',
+    ]) {
+      expect(ledger).toContain(`\`${name}\``);
+      expect(`${partyPackTests}\n${spellTests}`).toContain(name);
+    }
+    expect(ledger).toContain('exit 1');
+    expect(ledger).toContain('final 1,588-test gate passed');
   });
 });

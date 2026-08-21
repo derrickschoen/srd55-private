@@ -105,6 +105,13 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     operation: { kind: 'utility', effect: { kind: 'light_source', brightFeet: 0, dimFeet: 10, maximumLights: 4, moveFeetPerBonusAction: 60 }, concentration: true, durationRounds: 10 },
   },
   {
+    id: 'eldritch-blast', name: 'Eldritch Blast', level: 0,
+    source: 'docs/srd/source/spell-descriptions.txt:2608-2626',
+    castingTime: 'action', components: VS,
+    targeting: { kind: 'multiple', rangeFeet: 120, baseMaximum: 1, additionalPerSlot: 0 },
+    operation: { kind: 'attack_beams', attackKind: 'ranged', baseBeams: 1, additionalBeamLevels: [5, 11, 17], damageType: damageType('Force'), dice: dice(1, 10) },
+  },
+  {
     id: 'elementalism', name: 'Elementalism', level: 0,
     source: 'docs/srd/source/spell-descriptions.txt:2630',
     castingTime: 'action', components: VS,

@@ -3,7 +3,7 @@ import type { SpellLevel } from './types';
 export type SpellManifestStatus = 'implemented' | 'pending';
 
 export interface SpellManifestMembership {
-  readonly list: 'Cleric' | 'Wizard';
+  readonly list: 'Cleric' | 'Warlock' | 'Wizard';
   readonly source: string;
 }
 
@@ -26,6 +26,7 @@ export const SPELL_MANIFEST: readonly SpellManifestRow[] = [
   { id: "acid-splash", name: "Acid Splash", level: 0, memberships: [{ list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:27" }], status: 'implemented' },
   { id: "chill-touch", name: "Chill Touch", level: 0, memberships: [{ list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:29" }], status: 'implemented' },
   { id: "dancing-lights", name: "Dancing Lights", level: 0, memberships: [{ list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:31" }], status: 'implemented', partial: 'Light count, radii, concentration, duration, and movement limit are typed; the combined Medium humanoid form, 20-foot adjacency constraint, and independent positions await created-object spatial state.' },
+  { id: "eldritch-blast", name: "Eldritch Blast", level: 0, memberships: [{ list: 'Warlock', source: "docs/srd/source/warlock-spell-list.txt:30" }], status: 'implemented' },
   { id: "elementalism", name: "Elementalism", level: 0, memberships: [{ list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:33" }], status: 'implemented', partial: 'All five choices are typed; doors, surfaces, containers, and elemental material mutations await encounter object state.' },
   { id: "fire-bolt", name: "Fire Bolt", level: 0, memberships: [{ list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:34" }], status: 'implemented', partial: 'Attack damage and cantrip scaling execute; unattended flammable-object ignition awaits encounter object and fire state.' },
   { id: "guidance", name: "Guidance", level: 0, memberships: [{ list: 'Cleric', source: "docs/srd/source/cleric-spell-list.txt:28" }], status: 'implemented' },

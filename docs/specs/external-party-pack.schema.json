@@ -132,9 +132,9 @@
         "ability": { "enum": ["strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"] },
         "spellSaveDc": { "type": "integer", "minimum": 1, "maximum": 50 },
         "spellAttackBonus": { "type": "integer", "minimum": -30, "maximum": 30 },
-        "preparedSpellIds": { "type": "array", "maxItems": 175, "items": { "type": "string" } },
-        "knownSpellIds": { "type": "array", "maxItems": 175, "items": { "type": "string" } },
-        "resourceSpellUses": { "type": "array", "maxItems": 175, "items": { "$ref": "#/$defs/resourceSpellUse" } }
+        "preparedSpellIds": { "type": "array", "maxItems": 176, "items": { "type": "string" } },
+        "knownSpellIds": { "type": "array", "maxItems": 176, "items": { "type": "string" } },
+        "resourceSpellUses": { "type": "array", "maxItems": 176, "items": { "$ref": "#/$defs/resourceSpellUse" } }
       }
     },
     "legacySpellcasting": {
@@ -145,10 +145,10 @@
         "ability": { "enum": ["strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"] },
         "spellSaveDc": { "type": "integer", "minimum": 1, "maximum": 50 },
         "spellAttackBonus": { "type": "integer", "minimum": -30, "maximum": 30 },
-        "preparedSpellIds": { "type": "array", "maxItems": 175, "items": { "type": "string" } },
-        "knownSpellIds": { "type": "array", "maxItems": 175, "items": { "type": "string" } },
+        "preparedSpellIds": { "type": "array", "maxItems": 176, "items": { "type": "string" } },
+        "knownSpellIds": { "type": "array", "maxItems": 176, "items": { "type": "string" } },
         "spellSlots": { "type": "array", "maxItems": 9, "items": { "$ref": "#/$defs/v2SpellSlot" } },
-        "resourceSpellUses": { "type": "array", "maxItems": 175, "items": { "$ref": "#/$defs/resourceSpellUse" } }
+        "resourceSpellUses": { "type": "array", "maxItems": 176, "items": { "$ref": "#/$defs/resourceSpellUse" } }
       }
     },
     "pactSpellSlot": {
@@ -203,7 +203,10 @@
             "temporary_hit_points",
             "condition_application",
             "exhaustion_application",
-            "movement_modifier"
+            "movement_modifier",
+            "attack_ability_substitution",
+            "attack_damage_die_override",
+            "attack_reach_range_override"
           ]
         }
       },
@@ -223,7 +226,10 @@
         { "$ref": "#/$defs/temporaryHitPointsEffect" },
         { "$ref": "#/$defs/conditionApplicationEffect" },
         { "$ref": "#/$defs/exhaustionApplicationEffect" },
-        { "$ref": "#/$defs/movementModifierEffect" }
+        { "$ref": "#/$defs/movementModifierEffect" },
+        { "$ref": "#/$defs/attackAbilitySubstitutionEffect" },
+        { "$ref": "#/$defs/attackDamageDieOverrideEffect" },
+        { "$ref": "#/$defs/attackReachRangeOverrideEffect" }
       ]
     },
     "damageRiderEffect": {
@@ -434,6 +440,52 @@
         "trigger": { "enum": ["always_on", "action", "bonus_action", "reaction"] },
         "resourcePoolId": { "type": "string", "pattern": "^resource:[a-z0-9][a-z0-9-]{0,79}$" },
         "speedDeltaFeet": { "type": "integer", "minimum": -30, "maximum": 30 }
+      }
+    },
+    "attackAbilitySubstitutionEffect": {
+      "type": "object", "additionalProperties": false,
+      "required": ["effectId", "kind", "attackId", "damageTermIndex", "replacesAbility", "spellcastingAbility"],
+      "properties": {
+        "effectId": { "type": "string", "pattern": "^effect:[a-z0-9][a-z0-9:-]{0,119}$" },
+        "kind": { "const": "attack_ability_substitution" },
+        "attackId": { "type": "string", "pattern": "^attack:[a-z0-9][a-z0-9-]{0,79}$" },
+        "damageTermIndex": { "type": "integer", "minimum": 0, "maximum": 19 },
+        "replacesAbility": { "enum": ["strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"] },
+        "spellcastingAbility": { "enum": ["strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"] }
+      }
+    },
+    "attackDamageDieOverrideEffect": {
+      "type": "object", "additionalProperties": false,
+      "required": ["effectId", "kind", "attackId", "damageTermIndex", "levels"],
+      "properties": {
+        "effectId": { "type": "string", "pattern": "^effect:[a-z0-9][a-z0-9:-]{0,119}$" },
+        "kind": { "const": "attack_damage_die_override" },
+        "attackId": { "type": "string", "pattern": "^attack:[a-z0-9][a-z0-9-]{0,79}$" },
+        "damageTermIndex": { "type": "integer", "minimum": 0, "maximum": 19 },
+        "levels": {
+          "type": "array", "minItems": 1, "maxItems": 20,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["minimumLevel", "count", "sides"],
+            "properties": {
+              "minimumLevel": { "type": "integer", "minimum": 1, "maximum": 20 },
+              "count": { "type": "integer", "minimum": 0, "maximum": 100 },
+              "sides": { "enum": [4, 6, 8, 10, 12, 20] }
+            }
+          }
+        }
+      }
+    },
+    "attackReachRangeOverrideEffect": {
+      "type": "object", "additionalProperties": false,
+      "required": ["effectId", "kind", "attackId"],
+      "anyOf": [{ "required": ["reachFeet"] }, { "required": ["rangeFeet"] }],
+      "properties": {
+        "effectId": { "type": "string", "pattern": "^effect:[a-z0-9][a-z0-9:-]{0,119}$" },
+        "kind": { "const": "attack_reach_range_override" },
+        "attackId": { "type": "string", "pattern": "^attack:[a-z0-9][a-z0-9-]{0,79}$" },
+        "reachFeet": { "type": "integer", "minimum": 0, "maximum": 1000 },
+        "rangeFeet": { "type": "integer", "minimum": 0, "maximum": 1000 }
       }
     },
     "passives": {

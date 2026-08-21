@@ -5,7 +5,7 @@ import type { CombatantId, DamageType, LimitedResourcePoolId } from '../values';
 
 export type SpellLevel = 0 | 1 | 2 | 3 | 4;
 export type SpellCastingTime = 'action' | 'bonus_action' | 'reaction' | 'minute' | 'ten_minutes' | 'hour';
-export type SpellClassList = 'Cleric' | 'Wizard';
+export type SpellClassList = 'Cleric' | 'Warlock' | 'Wizard';
 
 export interface SpellComponentsData {
   readonly verbal: boolean;
@@ -202,6 +202,14 @@ export type SpellOperation =
       readonly kind: 'attack_rays';
       readonly baseRays: number;
       readonly additionalPerSlot: number;
+      readonly damageType: DamageType;
+      readonly dice: ScaledDice;
+    }
+  | {
+      readonly kind: 'attack_beams';
+      readonly attackKind: 'ranged';
+      readonly baseBeams: number;
+      readonly additionalBeamLevels: readonly number[];
       readonly damageType: DamageType;
       readonly dice: ScaledDice;
     }
