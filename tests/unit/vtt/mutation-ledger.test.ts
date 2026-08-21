@@ -155,17 +155,19 @@ describe('phase-2 mutation ledger manifest', () => {
     }
   });
 
-  it('PARTY-EFFECTS-MUTATION-LEDGER pins all four D325.1 negative controls', () => {
+  it('PARTY-EFFECTS-MUTATION-LEDGER pins all five D325.1 negative controls', () => {
     const ledger = readFileSync(PARTY_EFFECTS_LEDGER_PATH, 'utf8');
     for (const name of [
       'rider_never_fires',
       'pool_not_decremented',
       'passive_off_by_one',
       'out_of_union_accepted',
+      'temp_hp_stacks_additively',
     ]) {
       expect(ledger).toContain(`\`${name}\``);
     }
     expect(ledger).toContain('exit 1');
     expect(ledger).toContain('exit 0; 98 passed');
+    expect(ledger).toContain('exit 0; 1,360 passed');
   });
 });
