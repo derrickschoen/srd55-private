@@ -109,13 +109,14 @@ describe('phase-2 mutation ledger manifest', () => {
     expect(ledger).toContain('Restored `z.strictObject`');
   });
 
-  it('EFFECT-FAMILIES-MUTATION-LEDGER pins all four required controls to named killing tests', () => {
+  it('EFFECT-FAMILIES-MUTATION-LEDGER pins all five required controls to named killing tests', () => {
     const ledger = readFileSync(EFFECT_FAMILIES_LEDGER_PATH, 'utf8');
     for (const name of [
       'rider_fires_twice_per_turn',
       'smite_dice_not_doubled_on_crit',
       'bonus_attack_always_legal',
       'rider_condition_ignored',
+      'schema_missing_variant',
     ]) {
       expect(ledger).toContain(`\`${name}\``);
       expect(ledger).not.toContain(`| \`${name}\` | Pending execution`);
