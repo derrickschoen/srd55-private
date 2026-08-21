@@ -80,7 +80,7 @@ const VALUE_PINS: readonly ValuePin[] = [
   { id: 'shocking-grasp', level: 0, operation: 'attack_damage', rangeFeet: 5, baseDice: [1, 8], perSlotCount: 0, source: 'spell-descriptions.txt:7006' },
   { id: 'spare-the-dying', level: 0, operation: 'stabilize', rangeFeet: 30, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:7181 (level-5 range upgrade)' },
   { id: 'thaumaturgy', level: 0, operation: 'utility', rangeFeet: 30, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:7842' },
-  { id: 'true-strike', level: 0, operation: 'weapon_attack', rangeFeet: 5, baseDice: [0, 6], perSlotCount: 0, source: 'spell-descriptions.txt:8079' },
+  { id: 'true-strike', level: 0, operation: 'weapon_attack_augmentation', rangeFeet: 5, baseDice: [0, 6], perSlotCount: 0, source: 'spell-descriptions.txt:8079-8094' },
   { id: 'bane', level: 1, operation: 'save_effect', rangeFeet: 30, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:670' },
   { id: 'bless', level: 1, operation: 'effect', rangeFeet: 30, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:824' },
   { id: 'burning-hands', level: 1, operation: 'save_damage', rangeFeet: 0, baseDice: [3, 6], perSlotCount: 1, source: 'spell-descriptions.txt:924' },
@@ -374,7 +374,14 @@ const COMPLETE_MECHANICS_PINS: readonly CompleteMechanicsPin[] = [
   {
     id: 'true-strike', source: 'spell-descriptions.txt:8079',
     targeting: { kind: 'single', rangeFeet: 5, willing: false },
-    operation: { kind: 'weapon_attack', extraDamage: pinnedDice(0, 6, { cantripUpgrade: true }), extraDamageType: damageType('Radiant') },
+    operation: {
+      kind: 'weapon_attack_augmentation',
+      timing: 'during_cast',
+      attackAbility: 'spellcasting',
+      damageAbility: 'spellcasting',
+      damageTypeChoice: 'weapon_or_radiant',
+      extraDamage: { type: damageType('Radiant'), dice: pinnedDice(0, 6, { cantripUpgrade: true }) },
+    },
   },
   {
     id: 'bane', source: 'spell-descriptions.txt:670',
@@ -409,7 +416,7 @@ const COMPLETE_MECHANICS_PINS: readonly CompleteMechanicsPin[] = [
   {
     id: 'guiding-bolt', source: 'spell-descriptions.txt:4011',
     targeting: { kind: 'single', rangeFeet: 120, willing: false },
-    operation: { kind: 'attack_damage', attackKind: 'ranged', damageType: damageType('Radiant'), dice: pinnedDice(4, 6, { perSlotCount: 1 }), rider: pinnedEffect({ kind: 'attack_roll_mode_modifier', mode: 'advantage', appliesTo: 'next_attack_against_target' }, { durationRounds: 2, expiresAt: 'source_end' }) },
+    operation: { kind: 'attack_damage', attackKind: 'ranged', damageType: damageType('Radiant'), dice: pinnedDice(4, 6, { perSlotCount: 1 }), rider: pinnedEffect({ kind: 'attack_roll_mode_modifier', mode: 'advantage', appliesTo: { kind: 'next_attack_against_target' } }, { durationRounds: 2, expiresAt: 'source_end' }) },
   },
   {
     id: 'healing-word', source: 'spell-descriptions.txt:4169',
@@ -419,12 +426,12 @@ const COMPLETE_MECHANICS_PINS: readonly CompleteMechanicsPin[] = [
   {
     id: 'divine-favor', source: 'spell-descriptions.txt:2333-2341',
     targeting: { kind: 'self' },
-    operation: { kind: 'weapon_attack_augmentation', extraDamage: { type: damageType('Radiant'), dice: pinnedDice(1, 4) }, consumeOnHit: false, concentration: false, durationRounds: 10, followUp: null },
+    operation: { kind: 'weapon_attack_augmentation', timing: 'subsequent_weapon_hits', extraDamage: { type: damageType('Radiant'), dice: pinnedDice(1, 4) }, consumeOnHit: false, concentration: false, durationRounds: 10, followUp: null },
   },
   {
     id: 'ensnaring-strike', source: 'spell-descriptions.txt:2708-2728',
     targeting: { kind: 'self' },
-    operation: { kind: 'weapon_attack_augmentation', extraDamage: null, consumeOnHit: true, concentration: true, durationRounds: 10, followUp: { kind: 'save_then_restrain', saveAbility: 'strength', rollMode: 'normal', damageType: damageType('Piercing'), dice: pinnedDice(1, 6, { perSlotCount: 1 }), timing: 'target_start', durationRounds: 10 } },
+    operation: { kind: 'weapon_attack_augmentation', timing: 'subsequent_weapon_hits', extraDamage: null, consumeOnHit: true, concentration: true, durationRounds: 10, followUp: { kind: 'save_then_restrain', saveAbility: 'strength', rollMode: 'normal', damageType: damageType('Piercing'), dice: pinnedDice(1, 6, { perSlotCount: 1 }), timing: 'target_start', durationRounds: 10 } },
   },
   {
     id: 'inflict-wounds', source: 'spell-descriptions.txt:4593',
@@ -444,7 +451,7 @@ const COMPLETE_MECHANICS_PINS: readonly CompleteMechanicsPin[] = [
   {
     id: 'searing-smite', source: 'spell-descriptions.txt:6738-6751',
     targeting: { kind: 'self' },
-    operation: { kind: 'weapon_attack_augmentation', extraDamage: { type: damageType('Fire'), dice: pinnedDice(1, 6, { perSlotCount: 1 }) }, consumeOnHit: true, concentration: false, durationRounds: 10, followUp: { kind: 'ongoing_damage_save_ends', damageType: damageType('Fire'), dice: pinnedDice(1, 6, { perSlotCount: 1 }), saveAbility: 'constitution', timing: 'target_start', durationRounds: 10 } },
+    operation: { kind: 'weapon_attack_augmentation', timing: 'subsequent_weapon_hits', extraDamage: { type: damageType('Fire'), dice: pinnedDice(1, 6, { perSlotCount: 1 }) }, consumeOnHit: true, concentration: false, durationRounds: 10, followUp: { kind: 'ongoing_damage_save_ends', damageType: damageType('Fire'), dice: pinnedDice(1, 6, { perSlotCount: 1 }), saveAbility: 'constitution', timing: 'target_start', durationRounds: 10 } },
   },
   {
     id: 'shield-of-faith', source: 'spell-descriptions.txt:6956',
@@ -638,8 +645,6 @@ function operationDice(definition: SpellDefinition): readonly [number, number] |
     case 'summoned_weapon_attack':
     case 'lifedrain_attack':
       return [operation.dice.baseCount, operation.dice.sides];
-    case 'weapon_attack':
-      return [operation.extraDamage.baseCount, operation.extraDamage.sides];
     case 'weapon_attack_augmentation':
       return operation.extraDamage === null
         ? null
@@ -688,10 +693,9 @@ function operationPerSlot(definition: SpellDefinition): number {
       return operation.dice.perSlotCount;
     case 'magic_missiles':
       return operation.dice.perSlotCount;
-    case 'weapon_attack':
-      return operation.extraDamage.perSlotCount;
     case 'weapon_attack_augmentation':
-      return operation.extraDamage?.dice.perSlotCount ?? operation.followUp?.dice.perSlotCount ?? 0;
+      return operation.extraDamage?.dice.perSlotCount ??
+        (operation.timing === 'subsequent_weapon_hits' ? operation.followUp?.dice.perSlotCount ?? 0 : 0);
     case 'fixed_healing':
       return operation.additionalPerSlot;
     case 'hit_point_maximum_increase':
@@ -1051,6 +1055,66 @@ describe('spell foundations and implemented value pins', () => {
     }
   });
 
+  it.each([
+    { casterLevel: 5, bonusDice: 1, expectedDamage: 7 },
+    { casterLevel: 11, bonusDice: 2, expectedDamage: 8 },
+    { casterLevel: 17, bonusDice: 3, expectedDamage: 9 },
+  ] as const)(
+    'true_strike_keeps_str substitutes spellcasting for attack and damage and adds $bonusDice d6 at level $casterLevel',
+    ({ casterLevel, bonusDice, expectedDamage }) => {
+      // SRD 5.2.1: docs/srd/source/spell-descriptions.txt:8086-8094.
+      // Those lines pin both substitutions, the optional Radiant conversion,
+      // and the literal level 5/11/17 progression independently of engine output.
+      const definition = spellDefinition('true-strike');
+      if (definition === null) throw new Error('True Strike definition missing.');
+      const { caster, target, state } = fixture(definition);
+      const result = reduceEncounter(state, {
+        ...castCommand(definition, caster, target),
+        casterLevel,
+        attackBonus: 7,
+        spellcastingModifier: 5,
+        selectedOption: 'Radiant',
+        weaponAttack: {
+          attackBonus: -30,
+          damageType: damageType('Slashing'),
+          damageCount: 1,
+          damageSides: 8,
+          damageModifier: -4,
+        },
+      }, () => 0);
+      const attack = result.events.find((event) => event.type === 'attack_resolved');
+      expect(attack).toMatchObject({
+        attack: { total: 8, outcome: 'miss' },
+      });
+
+      let draw = 0;
+      const hitResult = reduceEncounter(state, {
+        ...castCommand(definition, caster, target),
+        casterLevel,
+        attackBonus: 100,
+        spellcastingModifier: 5,
+        selectedOption: 'Radiant',
+        weaponAttack: {
+          attackBonus: -30,
+          damageType: damageType('Slashing'),
+          damageCount: 1,
+          damageSides: 8,
+          damageModifier: -4,
+        },
+      }, () => draw++ === 0 ? 0.5 : 0);
+      expect(hitResult.events.find((event) => event.type === 'attack_resolved')).toMatchObject({
+        attack: { total: 111, outcome: 'hit' },
+        damage: {
+          total: expectedDamage,
+          terms: [
+            { type: damageType('Radiant'), roll: { expression: { modifier: 5 } } },
+            { type: damageType('Radiant'), roll: { expression: { count: bonusDice, sides: 6 } } },
+          ],
+        },
+      });
+    },
+  );
+
   it('beam_count_off_by_level pins Eldritch Blast to 1/2/3/4 beams at levels 1/5/11/17', () => {
     const definition = spellDefinition('eldritch-blast');
     if (definition === null) throw new Error('Eldritch Blast definition missing.');
@@ -1162,10 +1226,16 @@ describe('every implemented cantrip and level-1 spell executes through the encou
       case 'attack_then_save_damage':
       case 'save_damage':
       case 'magic_missiles':
-      case 'weapon_attack':
       case 'summoned_weapon_attack':
       case 'lifedrain_attack':
         expect(afterTarget?.hitPoints).toBeLessThan(beforeTarget?.hitPoints ?? 0);
+        break;
+      case 'weapon_attack_augmentation':
+        if (definition.operation.timing === 'during_cast') {
+          expect(afterTarget?.hitPoints).toBeLessThan(beforeTarget?.hitPoints ?? 0);
+        } else {
+          expect(result.state.effects.length).toBeGreaterThan(0);
+        }
         break;
       case 'healing':
         expect(afterTarget?.hitPoints).toBeGreaterThan(beforeTarget?.hitPoints ?? 0);

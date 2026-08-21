@@ -41,6 +41,10 @@ export type EncounterCommand =
       readonly attackerCanSeeTarget: boolean;
       readonly targetCanSeeAttacker: boolean;
       readonly damage: DamageRequest;
+      /** Present for attacks selected from a typed party-pack attack form. */
+      readonly attackId?: string;
+      /** Chooses the declared first-attack Reckless Attack mode. */
+      readonly recklessAttackEffectId?: EncounterEffectId;
       readonly bonusActionGrantEffectId?: EncounterEffectId;
       readonly riderSelections?: readonly {
         readonly effectId: EncounterEffectId;

@@ -298,6 +298,7 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
       if (
         feature.trigger !== 'always_on' ||
         feature.payload.kind === 'temporary_hit_points' ||
+        feature.payload.kind === 'reckless_attack_mode' ||
         isAttackFormSubstitutionPayload(feature.payload)
       ) continue;
       initialEffects.push({
@@ -668,13 +669,18 @@ function attackRollMode(
 ): RollMode {
   const modes: RollMode[] = [command.rollMode];
   for (const effect of state.effects) {
-    if (
-      effect.targets.includes(command.target) &&
-      effect.payload.kind === 'attack_roll_mode_modifier' &&
-      effect.payload.appliesTo === 'next_attack_against_target'
-    ) {
-      modes.push(effect.payload.mode);
-    }
+    if (effect.payload.kind !== 'attack_roll_mode_modifier') continue;
+    const appliesTo = effect.payload.appliesTo;
+    const applies =
+      ((appliesTo.kind === 'next_attack_against_target' ||
+        appliesTo.kind === 'attacks_against_target') &&
+        effect.targets.includes(command.target)) ||
+      (appliesTo.kind === 'attacks_by_target' &&
+        effect.targets.includes(command.actor) &&
+        command.type === 'attack' &&
+        command.attackId !== undefined &&
+        appliesTo.attackIds.includes(command.attackId));
+    if (applies) modes.push(effect.payload.mode);
   }
   const actorClauses = conditionMechanicalState(
     combatantConditions(state, command.actor),
@@ -720,6 +726,71 @@ function attackRollMode(
     modes.push('disadvantage');
   }
   return combineRollModes(modes);
+}
+
+function activateRecklessAttack(
+  context: ReductionContext,
+  command: Extract<EncounterCommand, { readonly type: 'attack' }>,
+  wasFirstAttack: boolean,
+): void {
+  if (command.recklessAttackEffectId === undefined) return;
+  const declared = featureEffect(context.state, command.actor, command.recklessAttackEffectId);
+  if (declared.payload.kind !== 'reckless_attack_mode') {
+    throw new EncounterRuleError(`Effect ${declared.id} is not a Reckless Attack mode.`);
+  }
+  if (
+    !wasFirstAttack ||
+    command.attackId === undefined ||
+    !declared.payload.strengthBasedMeleeAttackIds.includes(command.attackId)
+  ) {
+    throw new EncounterRuleError('Reckless Attack must be chosen for the first declared Strength-based melee attack on the turn.');
+  }
+  const ownRollsIdentity = effectStackingIdentity(`feature:${declared.id}:own-rolls`);
+  applyEffect(context, command.actor, {
+    targets: [command.actor],
+    duration: {
+      kind: 'turn_boundaries',
+      timing: {
+        combatant: command.actor,
+        boundary: 'end',
+        source: 'docs/srd/full/srd-5.2.1.txt:1858-1863',
+      },
+      remaining: 1,
+    },
+    concentration: false,
+    stackingIdentity: ownRollsIdentity,
+    stacking: 'replace_same_source',
+    repeatedSave: null,
+    payload: {
+      kind: 'attack_roll_mode_modifier',
+      mode: 'advantage',
+      appliesTo: {
+        kind: 'attacks_by_target',
+        attackIds: declared.payload.strengthBasedMeleeAttackIds,
+      },
+    },
+  });
+  applyEffect(context, command.actor, {
+    targets: [command.actor],
+    duration: {
+      kind: 'turn_boundaries',
+      timing: {
+        combatant: command.actor,
+        boundary: 'start',
+        source: 'docs/srd/full/srd-5.2.1.txt:1801,1858-1863',
+      },
+      remaining: 1,
+    },
+    concentration: false,
+    stackingIdentity: effectStackingIdentity(`feature:${declared.id}:incoming-rolls`),
+    stacking: 'replace_same_source',
+    repeatedSave: null,
+    payload: {
+      kind: 'attack_roll_mode_modifier',
+      mode: 'advantage',
+      appliesTo: { kind: 'attacks_against_target' },
+    },
+  });
 }
 
 function cannotHarmTarget(
@@ -2020,9 +2091,12 @@ function processAttack(
     { readonly type: 'attack' | 'opportunity_attack' }
   >,
 ): void {
+  let wasFirstAttack = false;
   if (command.type === 'attack') {
     assertActiveActor(context, command.actor);
+    wasFirstAttack = combatant(context.state, command.actor).turn.action.kind === 'available';
     beginAttack(context, command);
+    activateRecklessAttack(context, command, wasFirstAttack);
   } else {
     const reactor = combatant(context.state, command.actor);
     if (
@@ -2083,7 +2157,7 @@ function processAttack(
       .filter((effect) =>
         effect.targets.includes(command.target) &&
         effect.payload.kind === 'attack_roll_mode_modifier' &&
-        effect.payload.appliesTo === 'next_attack_against_target')
+        effect.payload.appliesTo.kind === 'next_attack_against_target')
       .map((effect) => effect.id),
   );
   endEffects(context, consumedAdvantage, 'duration_expired');
@@ -2910,10 +2984,14 @@ function resolveSpellAttack(
   spellDamageType: DamageType,
   rider: EffectData | null,
 ): ReturnType<typeof resolveAttackRoll> {
-  const advantageEffects = context.state.effects.filter((effect) =>
-    effect.targets.includes(target) &&
-    effect.payload.kind === 'attack_roll_mode_modifier' &&
-    effect.payload.appliesTo === 'next_attack_against_target');
+  const advantageEffects = context.state.effects.filter((effect) => {
+    if (
+      !effect.targets.includes(target) ||
+      effect.payload.kind !== 'attack_roll_mode_modifier'
+    ) return false;
+    return effect.payload.appliesTo.kind === 'next_attack_against_target' ||
+      effect.payload.appliesTo.kind === 'attacks_against_target';
+  });
   const attack = resolveAttackRoll({
     attackBonus: command.attackBonus + effectDiceModifier(context.state, command.actor, 'attack_roll', context.rng),
     targetArmorClass: effectiveArmorClass(context.state, target),
@@ -2921,7 +2999,11 @@ function resolveSpellAttack(
       effect.payload.kind === 'attack_roll_mode_modifier' ? effect.payload.mode : 'normal')]),
     criticalFloor: 20,
   }, context.rng);
-  endEffects(context, new Set(advantageEffects.map((effect) => effect.id)), 'duration_expired');
+  endEffects(context, new Set(advantageEffects.flatMap((effect) =>
+    effect.payload.kind === 'attack_roll_mode_modifier' &&
+    effect.payload.appliesTo.kind === 'next_attack_against_target'
+      ? [effect.id]
+      : [])), 'duration_expired');
   let result: ReturnType<typeof resolveDamage> | null = null;
   if (attack.outcome !== 'miss') {
     const baseRequest: DamageRequest = {
@@ -3341,26 +3423,62 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
       context.state = replaceCombatant(context.state, { ...target, life: 'stable', deathSaves: null });
       return;
     }
-    case 'weapon_attack': {
-      if (command.weaponAttack === null) throw new EncounterRuleError('True Strike requires a weapon attack profile.');
-      const extra = scaledDiceExpression(definition, operation.extraDamage, command);
-      const target = targets[0] as CombatantId;
-      const attack = resolveAttackRoll({ attackBonus: command.attackBonus, targetArmorClass: effectiveArmorClass(context.state, target), rollMode: 'normal', criticalFloor: 20 }, context.rng);
-      let result: ReturnType<typeof resolveDamage> | null = null;
-      if (attack.outcome !== 'miss') {
-        result = resolveDamage({
-          terms: [
-            { type: command.weaponAttack.damageType, dice: { count: command.weaponAttack.damageCount, sides: dieSides(command.weaponAttack.damageSides), modifier: command.weaponAttack.damageModifier } },
-            { type: operation.extraDamageType, dice: extra },
-          ],
-          critical: attack.outcome === 'critical', responses: [],
-        }, context.rng);
-        applyDamage(context, command.actor, target, result.total, attack.outcome === 'critical');
-      }
-      emit(context, { type: 'attack_resolved', actor: command.actor, target, attack, damage: result });
-      return;
-    }
     case 'weapon_attack_augmentation': {
+      if (operation.timing === 'during_cast') {
+        if (command.weaponAttack === null) throw new EncounterRuleError('True Strike requires a weapon attack profile.');
+        if (command.selectedOption !== null && command.selectedOption !== 'Radiant') {
+          throw new EncounterRuleError('True Strike damage must use the weapon type or Radiant.');
+        }
+        const target = targets[0] as CombatantId;
+        const advantageEffects = context.state.effects.filter((effect) => {
+          if (
+            !effect.targets.includes(target) ||
+            effect.payload.kind !== 'attack_roll_mode_modifier'
+          ) return false;
+          return effect.payload.appliesTo.kind === 'next_attack_against_target' ||
+            effect.payload.appliesTo.kind === 'attacks_against_target';
+        });
+        const attack = resolveAttackRoll({
+          attackBonus: command.attackBonus +
+            effectDiceModifier(context.state, command.actor, 'attack_roll', context.rng),
+          targetArmorClass: effectiveArmorClass(context.state, target),
+          rollMode: combineRollModes(['normal', ...advantageEffects.map((effect) =>
+            effect.payload.kind === 'attack_roll_mode_modifier' ? effect.payload.mode : 'normal')]),
+          criticalFloor: 20,
+        }, context.rng);
+        endEffects(context, new Set(advantageEffects.flatMap((effect) =>
+          effect.payload.kind === 'attack_roll_mode_modifier' &&
+          effect.payload.appliesTo.kind === 'next_attack_against_target'
+            ? [effect.id]
+            : [])), 'duration_expired');
+        let result: ReturnType<typeof resolveDamage> | null = null;
+        if (attack.outcome !== 'miss') {
+          const weaponDamageType = command.selectedOption === 'Radiant'
+            ? operation.extraDamage.type
+            : command.weaponAttack.damageType;
+          result = resolveDamage({
+            terms: [
+              {
+                type: weaponDamageType,
+                dice: {
+                  count: command.weaponAttack.damageCount,
+                  sides: dieSides(command.weaponAttack.damageSides),
+                  modifier: command.spellcastingModifier,
+                },
+              },
+              {
+                type: operation.extraDamage.type,
+                dice: scaledDiceExpression(definition, operation.extraDamage.dice, command),
+              },
+            ],
+            critical: attack.outcome === 'critical',
+            responses: [],
+          }, context.rng);
+          applyDamage(context, command.actor, target, result.total, attack.outcome === 'critical');
+        }
+        emit(context, { type: 'attack_resolved', actor: command.actor, target, attack, damage: result });
+        return;
+      }
       const damage: DamageRequest = {
         terms: operation.extraDamage === null
           ? []

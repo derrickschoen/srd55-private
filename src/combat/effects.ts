@@ -79,6 +79,12 @@ export type AttackFormSubstitutionPayload =
       readonly rangeFeet?: number;
     };
 
+/** A first-attack choice whose two Advantage clocks are materialized by the reducer. */
+export interface RecklessAttackPayload {
+  readonly kind: 'reckless_attack_mode';
+  readonly strengthBasedMeleeAttackIds: readonly string[];
+}
+
 /** Reducer-ready class/feat effect retained on a combatant profile. */
 export type CombatFeatureEffect = {
   readonly id: EncounterEffectId;
@@ -87,6 +93,7 @@ export type CombatFeatureEffect = {
 } & (
   | { readonly payload: EffectPayload }
   | { readonly payload: AttackFormSubstitutionPayload }
+  | { readonly payload: RecklessAttackPayload }
   | { readonly payload: { readonly kind: 'temporary_hit_points'; readonly amount: number } }
 );
 
@@ -1068,7 +1075,13 @@ export type EffectPayload =
   | {
       readonly kind: 'attack_roll_mode_modifier';
       readonly mode: 'advantage' | 'disadvantage';
-      readonly appliesTo: 'next_attack_against_target';
+      readonly appliesTo:
+        | { readonly kind: 'next_attack_against_target' }
+        | { readonly kind: 'attacks_against_target' }
+        | {
+            readonly kind: 'attacks_by_target';
+            readonly attackIds: readonly string[];
+          };
     }
   | {
       readonly kind: 'creature_type_protection';

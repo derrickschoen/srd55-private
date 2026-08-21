@@ -60,7 +60,16 @@ export const SPELL_KB_ENTRIES = [
   entry('R-SPELL-017', 'shocking-grasp', '7006', 'A melee spell hit deals scaling Lightning damage and blocks opportunity attacks briefly.'),
   entry('R-SPELL-018', 'spare-the-dying', '7181', 'At reference-party level 7, stabilize a living creature at 0 HP within 30 feet.'),
   entry('R-SPELL-019', 'thaumaturgy', '7842', 'Choose a listed wonder and keep no more than three one-minute effects active.'),
-  entry('R-SPELL-020', 'true-strike', '8079', 'Make the required weapon attack and add scaling Radiant damage on a hit.'),
+  {
+    ...entry('R-SPELL-020', 'true-strike', '8079-8094', 'Use the caster’s spellcasting ability for the weapon attack and damage, optionally convert the weapon damage to Radiant, and add Radiant d6s at levels 5, 11, and 17.'),
+    fieldCitations: {
+      identity: 'docs/srd/source/spell-descriptions.txt:8079-8080',
+      castingTime: 'docs/srd/source/spell-descriptions.txt:8081',
+      components: 'docs/srd/source/spell-descriptions.txt:8083-8084',
+      targeting: 'docs/srd/source/spell-descriptions.txt:8082-8087',
+      operation: 'docs/srd/source/spell-descriptions.txt:8086-8094',
+    },
+  },
   entry('R-SPELL-021', 'bane', '670', 'Up to three targets, plus one per higher slot, subtract 1d4 after failed Charisma saves.'),
   entry('R-SPELL-022', 'charm-person', '1046', 'Targets make Wisdom saves with the hostile-combat advantage rule before becoming Charmed.'),
   entry('R-SPELL-023', 'bless', '824', 'Up to three targets, plus one per higher slot, add 1d4 to attacks and saves during concentration.'),
