@@ -13,14 +13,21 @@ import { LocalhostDmBridgeClient, type BridgeFetch } from '../src/vtt/dm-bridge/
 import {
   DEFAULT_DM_MODEL,
   DEFAULT_DM_REASONING_EFFORT,
+  decodeRoundPlanStructure,
   decodeRoundPlanReply,
   e01RoundPlanReplyContract,
+  e02RoundPlanReplyContract,
+  E02_SHARED_INSTRUCTIONS,
   type DecodedRoundPlanReply,
   type DmBridgeExchange,
   type DmBridgeModelConfig,
   type DmBridgeRequest,
   type E01PromptVariant,
+  type E01RoundPlanReplyContract,
+  type E02CompactRoundPlanReplyContract,
+  type E02PromptVariant,
   type MonsterRoundProgram,
+  type RoundPlan,
   type RoundPlanCorrectionRequest,
   type RoundPlanRequest,
 } from '../src/vtt/dm-bridge/contracts';
@@ -44,25 +51,118 @@ import {
 } from '../src/vtt/generated-encounter-fixtures';
 import { TEST_APPROVED_FIRST_SKIRMISH_FIXTURE } from '../src/vtt/test-approved-first-skirmish';
 
-export type ExperimentId = 'E01';
+export type ExperimentId = 'E01' | 'E02';
+export type ExperimentArmId = E01PromptVariant | E02PromptVariant;
 
 export interface ExperimentArmDefinition {
-  readonly id: E01PromptVariant;
+  readonly id: ExperimentArmId;
   readonly description: string;
+}
+
+export interface E02ExperimentArmDefinition extends ExperimentArmDefinition {
+  readonly id: E02PromptVariant;
+  readonly instructions: typeof E02_SHARED_INSTRUCTIONS;
+  readonly exampleBlock: string;
+  readonly workedExamples: readonly RoundPlan[];
+  readonly exampleCount: 0 | 1 | 3;
 }
 
 export interface ExperimentDefinition {
   readonly id: ExperimentId;
   readonly version: '1';
   readonly hypothesis: string;
-  readonly arms: readonly ExperimentArmDefinition[];
+  readonly arms: readonly ExperimentArmDefinition[] | readonly E02ExperimentArmDefinition[];
   readonly seedCount: 24;
   readonly replicates: 2;
   readonly rounds: 5;
   readonly enemyCount: 4;
 }
 
-export const EXPERIMENT_REGISTRY: Readonly<Record<ExperimentId, ExperimentDefinition>> = Object.freeze({
+const E02_ZERO_EXAMPLE_BLOCK = 'No worked examples are included.';
+
+function e02Example(
+  name: string,
+  monsters: unknown,
+): RoundPlan {
+  return decodeRoundPlanStructure({
+    kind: 'round_plan',
+    protocolVersion: 2,
+    encounterId: `encounter:e02-${name}`,
+    requestId: `request:e02-${name}`,
+    expectedRevision: 7,
+    round: 2,
+    monsters,
+  });
+}
+
+const E02_BRANCH_RICH_EXAMPLE = e02Example('branch-rich', [{
+  monsterId: 'combatant:example-hobgoblin',
+  program: {
+    kind: 'priority',
+    choices: [{
+      kind: 'if',
+      predicate: { kind: 'life_is', combatantId: 'combatant:example-fighter', value: 'living' },
+      then: { kind: 'action', action: { kind: 'attack', target: { kind: 'combatant', combatantId: 'combatant:example-fighter' } } },
+      else: { kind: 'action', action: { kind: 'attack', target: { kind: 'nearest_enemy' } } },
+    }, {
+      kind: 'action',
+      action: { kind: 'use_action', action: 'dodge' },
+    }],
+  },
+}]);
+
+const E02_MULTI_MONSTER_FALLBACK_EXAMPLE = e02Example('multi-monster-fallback', [{
+  monsterId: 'combatant:example-goblin-1',
+  program: {
+    kind: 'if',
+    predicate: { kind: 'life_is', combatantId: 'combatant:example-rogue', value: 'living' },
+    then: { kind: 'action', action: { kind: 'attack', target: { kind: 'combatant', combatantId: 'combatant:example-rogue' } } },
+    else: { kind: 'action', action: { kind: 'attack', target: { kind: 'nearest_enemy' } } },
+  },
+}, {
+  monsterId: 'combatant:example-goblin-2',
+  program: { kind: 'action', action: { kind: 'attack', target: { kind: 'nearest_enemy' } } },
+}]);
+
+const E02_MOVEMENT_EXAMPLE = e02Example('movement', [{
+  monsterId: 'combatant:example-wolf',
+  program: {
+    kind: 'priority',
+    choices: [
+      { kind: 'action', action: { kind: 'move_toward', target: { kind: 'nearest_enemy' } } },
+      { kind: 'action', action: { kind: 'use_action', action: 'dash' } },
+    ],
+  },
+}]);
+
+const E02_SAVE_ACTION_EXAMPLE = e02Example('save-action', [{
+  monsterId: 'combatant:example-cultist',
+  program: { kind: 'action', action: { kind: 'force_save', target: { kind: 'nearest_enemy' } } },
+}]);
+
+function exampleBlock(examples: readonly RoundPlan[]): string {
+  return examples.length === 0
+    ? E02_ZERO_EXAMPLE_BLOCK
+    : examples.map((example) => canonicalJson(example)).join('\n');
+}
+
+function e02Arm(
+  id: E02PromptVariant,
+  description: string,
+  workedExamples: readonly RoundPlan[],
+  exampleCount: 0 | 1 | 3,
+): E02ExperimentArmDefinition {
+  return Object.freeze({
+    id,
+    description,
+    instructions: E02_SHARED_INSTRUCTIONS,
+    exampleBlock: exampleBlock(workedExamples),
+    workedExamples: Object.freeze([...workedExamples]),
+    exampleCount,
+  });
+}
+
+export const EXPERIMENT_REGISTRY = Object.freeze({
   E01: Object.freeze({
     id: 'E01',
     version: '1',
@@ -77,11 +177,31 @@ export const EXPERIMENT_REGISTRY: Readonly<Record<ExperimentId, ExperimentDefini
     rounds: 5,
     enemyCount: 4,
   }),
-});
+  E02: Object.freeze({
+    id: 'E02',
+    version: '1',
+    hypothesis: 'One branch-rich example is as reliable and faster than several; zero examples increases correction traffic.',
+    arms: Object.freeze([
+      e02Arm('zero-examples', 'Use the compact grammar with no worked examples.', [], 0),
+      e02Arm('one-branch-rich-example', 'Use one branch-rich priority/if worked example.', [E02_BRANCH_RICH_EXAMPLE], 1),
+      e02Arm(
+        'three-worked-examples',
+        'Use three worked examples spanning multi-monster planning, dead-target fallback, movement, and save actions.',
+        [E02_MULTI_MONSTER_FALLBACK_EXAMPLE, E02_MOVEMENT_EXAMPLE, E02_SAVE_ACTION_EXAMPLE],
+        3,
+      ),
+    ] satisfies readonly E02ExperimentArmDefinition[]),
+    seedCount: 24,
+    replicates: 2,
+    rounds: 5,
+    enemyCount: 4,
+  }),
+} satisfies Record<ExperimentId, ExperimentDefinition>);
 
 export interface ExperimentScheduleEntry {
   readonly experimentId: ExperimentId;
-  readonly armId: E01PromptVariant;
+  readonly armId: ExperimentArmId;
+  readonly fixtureId?: string;
   readonly seed: number;
   readonly replicate: 1 | 2;
   readonly batchId: 'batch-1' | 'batch-2';
@@ -101,11 +221,22 @@ export function e01Seed(seedIndex: number): number {
   return Number.parseInt(sha256(`D320:E01:v1:paired-seed:${String(seedIndex)}`).slice(0, 8), 16) >>> 0;
 }
 
+export function experimentSeed(id: ExperimentId, seedIndex: number): number {
+  if (!Number.isSafeInteger(seedIndex) || seedIndex < 0 || seedIndex >= 24) {
+    throw new RangeError(`${id} seed index must be from 0 through 23.`);
+  }
+  return Number.parseInt(sha256(`D320:${id}:v1:paired-seed:${String(seedIndex)}`).slice(0, 8), 16) >>> 0;
+}
+
+function experimentFixtureId(id: ExperimentId): string {
+  return `experiment-fixture:${id}:approved-first-skirmish-first-four-monsters:v1`;
+}
+
 export function seededArmOrder(
-  arms: readonly E01PromptVariant[],
+  arms: readonly ExperimentArmId[],
   seed: number,
   replicate: 1 | 2,
-): readonly E01PromptVariant[] {
+): readonly ExperimentArmId[] {
   const rng = mulberry32((seed ^ Math.imul(replicate, 0x9e37_79b9)) >>> 0);
   const shuffled = [...arms];
   for (let index = shuffled.length - 1; index > 0; index -= 1) {
@@ -124,12 +255,13 @@ export function buildExperimentSchedule(id: ExperimentId): readonly ExperimentSc
   let tableIndex = 0;
   for (const replicate of [1, 2] as const) {
     for (let seedIndex = 0; seedIndex < definition.seedCount; seedIndex += 1) {
-      const seed = e01Seed(seedIndex);
+      const seed = experimentSeed(id, seedIndex);
       const order = seededArmOrder(armIds, seed, replicate);
       for (const [randomizedArmOrdinal, armId] of order.entries()) {
         schedule.push({
           experimentId: id,
           armId,
+          ...(id === 'E02' ? { fixtureId: experimentFixtureId(id) } : {}),
           seed,
           replicate,
           batchId: replicate === 1 ? 'batch-1' : 'batch-2',
@@ -169,7 +301,7 @@ export interface ExperimentPreregistration {
   readonly runOrder: readonly ExperimentScheduleEntry[];
   readonly modelId: string;
   readonly reasoningEffort: string;
-  readonly promptComponentHashes: Readonly<Record<E01PromptVariant, string>>;
+  readonly promptComponentHashes: Readonly<Record<string, string>>;
   readonly controllerConfiguration: string;
   readonly initiativeConfiguration: string;
   readonly primaryMetrics: readonly string[];
@@ -183,10 +315,43 @@ export interface ExperimentPreregistration {
   readonly digest: string;
 }
 
-function promptHash(variant: E01PromptVariant): string {
+function isE02ArmDefinition(
+  arm: ExperimentArmDefinition,
+): arm is E02ExperimentArmDefinition {
+  return 'workedExamples' in arm;
+}
+
+function isE01PromptVariant(value: ExperimentArmId): value is E01PromptVariant {
+  return value === 'duplicated-full-contract' ||
+    value === 'contract-once-by-id' ||
+    value === 'compact-grammar';
+}
+
+function e02ArmDefinition(armId: ExperimentArmId): E02ExperimentArmDefinition {
+  const arm = EXPERIMENT_REGISTRY.E02.arms.find((candidate) => candidate.id === armId);
+  if (arm === undefined || !isE02ArmDefinition(arm)) {
+    throw new TypeError(`E02 arm ${armId} is not registered.`);
+  }
+  return arm;
+}
+
+function replyContract(
+  experimentId: ExperimentId,
+  armId: ExperimentArmId,
+  callIndex: number,
+): E01RoundPlanReplyContract | E02CompactRoundPlanReplyContract {
+  if (experimentId === 'E01') {
+    if (!isE01PromptVariant(armId)) throw new TypeError(`E01 arm ${armId} is not registered.`);
+    return e01RoundPlanReplyContract(armId, callIndex);
+  }
+  const arm = e02ArmDefinition(armId);
+  return e02RoundPlanReplyContract(arm.id, arm.workedExamples);
+}
+
+function promptHash(id: ExperimentId, armId: ExperimentArmId): string {
   return sha256(canonicalJson([
-    e01RoundPlanReplyContract(variant, 0),
-    e01RoundPlanReplyContract(variant, 1),
+    replyContract(id, armId, 0),
+    replyContract(id, armId, 1),
   ]));
 }
 
@@ -199,25 +364,31 @@ export function preregisterExperiment(config: VttExperimentConfig): ExperimentPr
     experimentVersion: definition.version,
     hypothesis: definition.hypothesis,
     arms: definition.arms,
-    fixtures: ['experiment-fixture:E01:approved-first-skirmish-first-four-monsters:v1'],
+    fixtures: [experimentFixtureId(definition.id)],
     holdouts: [],
-    seedList: Array.from({ length: definition.seedCount }, (_value, index) => e01Seed(index)),
+    seedList: Array.from({ length: definition.seedCount }, (_value, index) => experimentSeed(definition.id, index)),
     runOrder: buildExperimentSchedule(definition.id),
     modelId: config.model,
     reasoningEffort: config.reasoningEffort,
     promptComponentHashes: Object.fromEntries(
-      definition.arms.map((arm) => [arm.id, promptHash(arm.id)]),
-    ) as Readonly<Record<E01PromptVariant, string>>,
+      definition.arms.map((arm) => [arm.id, promptHash(definition.id, arm.id)]),
+    ),
     controllerConfiguration: `dm-full-model-round-plan;pc-algorithm;fresh-session-per-table;candidate-turn-k=${String(config.candidateTurnK)}`,
     initiativeConfiguration: 'shared_enemy;deterministic-within-side-order',
-    primaryMetrics: ['completedRoundsPerHour', 'normalizedTacticalRegret'],
-    secondaryMetrics: ['latencyMs', 'tokenCounts', 'correctionRate', 'reconsultRate', 'round5HpDifferential'],
-    noninferiorityMargins: { normalizedTacticalRegret: 0.02, correctionPercentagePoints: 2 },
+    primaryMetrics: definition.id === 'E01'
+      ? ['completedRoundsPerHour', 'normalizedTacticalRegret']
+      : ['completedRoundsPerHour', 'normalizedTacticalRegret', 'firstPassValidity'],
+    secondaryMetrics: definition.id === 'E01'
+      ? ['latencyMs', 'tokenCounts', 'correctionRate', 'reconsultRate', 'round5HpDifferential']
+      : ['latencyMs', 'inputTokens', 'cachedInputTokens', 'outputTokens', 'reasoningTokens', 'correctionRate', 'reconsultRate', 'targetSanity'],
+    noninferiorityMargins: definition.id === 'E01'
+      ? { normalizedTacticalRegret: 0.02, correctionPercentagePoints: 2 }
+      : { normalizedTacticalRegret: 0.02, minimumFirstPassValidity: 0.99 },
     timeouts: { requestMs: config.requestTimeoutMs, tableMs: config.tableTimeoutMs },
     candidateTurnK: config.candidateTurnK,
     exclusions: [],
     infrastructureRerunRule: 'Only an infrastructure-classified failure may rerun, once, under identical manifest bytes.',
-    analysisCodeDigest: sha256('E01-analysis-v1:linear-interpolated-quartiles:aborts-retained'),
+    analysisCodeDigest: sha256(`${definition.id}-analysis-v1:linear-interpolated-quartiles:aborts-retained`),
   };
   return { ...withoutDigest, digest: sha256(canonicalJson(withoutDigest)) };
 }
@@ -383,7 +554,7 @@ interface DecisionCaptureContext {
   readonly selectedTurnPrograms: readonly MonsterRoundProgram[] | null;
 }
 
-class RecordingE01Exchange implements DmBridgeExchange {
+class RecordingExperimentExchange implements DmBridgeExchange {
   readonly calls: ExperimentCallRecord[] = [];
   readonly decisionCaptureContexts = new Map<string, DecisionCaptureContext>();
   #callIndex = 0;
@@ -401,7 +572,7 @@ class RecordingE01Exchange implements DmBridgeExchange {
     if (request.kind === 'steering_round_request') return this.delegate.exchange(request, signal);
     const callIndex = this.#callIndex;
     this.#callIndex += 1;
-    const contract = e01RoundPlanReplyContract(this.entry.armId, callIndex);
+    const contract = replyContract(this.entry.experimentId, this.entry.armId, callIndex);
     const wire: RoundPlanRequest | RoundPlanCorrectionRequest | Extract<DmBridgeRequest, { readonly kind: 'monster_reconsult_request' }> = {
       ...request,
       replyContract: contract,
@@ -453,9 +624,14 @@ class RecordingE01Exchange implements DmBridgeExchange {
     const schemaGrammar = contract.delivery === 'full'
       ? canonicalJson(contract.jsonSchema)
       : contract.delivery === 'compact' ? contract.grammar : contract.contractId;
-    const example = contract.delivery === 'full' || contract.delivery === 'compact'
-      ? canonicalJson(contract.canonicalExample)
-      : '';
+    const instructions = 'instructions' in contract
+      ? contract.instructions
+      : E02_SHARED_INSTRUCTIONS;
+    const example = 'workedExamples' in contract
+      ? exampleBlock(contract.workedExamples)
+      : contract.delivery === 'full' || contract.delivery === 'compact'
+        ? canonicalJson(contract.canonicalExample)
+        : '';
     const metrics = programMetrics(decoded);
     const legalActions = wire.projection.pendingRequest?.legalActions ?? [];
     const failed = exchangeError ?? validationError;
@@ -487,9 +663,9 @@ class RecordingE01Exchange implements DmBridgeExchange {
       latencyMs: fleet?.latencyMs ?? finished - started,
       estimatedCallCostUsd: null,
       promptComponents: {
-        instructions: component('You are the DM decision engine. Return exactly one JSON object and no markdown.', 'e01-terse-v1'),
+        instructions: component(instructions, this.entry.experimentId === 'E01' ? 'e01-terse-v1' : 'e02-shared-v1'),
         schemaGrammar: component(schemaGrammar, contract.contractId),
-        examples: component(example, example.length === 0 ? null : 'round-plan-canonical-v1'),
+        examples: component(example, this.entry.experimentId === 'E01' ? 'round-plan-canonical-v1' : 'e02-worked-examples-v1'),
         skills: component('', null),
         library: component('', null),
         projection: component(projection, 'dm-full-v1'),
@@ -618,7 +794,7 @@ export async function runE01Table(
   const decisions: { readonly round: number; readonly command: unknown }[] = [];
   const replayCommands: EncounterCommand[] = [];
   let coordinator: TurnCoordinator | null = null;
-  let recording: RecordingE01Exchange | null = null;
+  let recording: RecordingExperimentExchange | null = null;
   let abortReason: string | null = null;
   let timeoutCount = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -629,7 +805,7 @@ export async function runE01Table(
     const model = { model: config.model, reasoningEffort: config.reasoningEffort };
     const sessionId = await client.createSession(encounterId, abort.signal, model);
     const bridgeDirectory = `${config.outDirectory}/bridge/table-${String(entry.tableIndex).padStart(4, '0')}`;
-    recording = new RecordingE01Exchange(
+    recording = new RecordingExperimentExchange(
       client,
       telemetry,
       entry,
@@ -775,7 +951,7 @@ export async function runE01Table(
     tableIndex: entry.tableIndex,
     seed: entry.seed,
     randomizedArmOrdinal: entry.randomizedArmOrdinal,
-    fixtureId: preregistration.fixtures[0],
+    fixtureId: entry.fixtureId ?? experimentFixtureId(entry.experimentId),
     fixtureDigest,
     matchupFamily: 'approved-first-skirmish-first-four',
     enemyCountStratum: 4,
@@ -795,9 +971,9 @@ export async function runE01Table(
     initiativeMode: 'shared_enemy',
     initiativeOrder: state?.initiative.map((initiative) => initiative.combatant) ?? [],
     promptVariant: entry.armId,
-    schemaVariant: 'round-plan-json-ast-v1',
-    exampleCount: 1,
-    instructionVersion: 'e01-terse-v1',
+    schemaVariant: entry.experimentId === 'E01' ? 'round-plan-json-ast-v1' : 'compact-grammar-v1',
+    exampleCount: entry.experimentId === 'E01' ? 1 : e02ArmDefinition(entry.armId).exampleCount,
+    instructionVersion: entry.experimentId === 'E01' ? 'e01-terse-v1' : 'e02-shared-v1',
     skillSetVersion: 'none-v1',
     planSurface: 'json_ast',
     projectionMode: 'full',
@@ -872,6 +1048,8 @@ export async function runE01Table(
   return record;
 }
 
+export const runE02Table = runE01Table;
+
 export interface VttExperimentRuntime {
   readonly runTable?: (
     entry: ExperimentScheduleEntry,
@@ -920,6 +1098,7 @@ export async function runVttExperiment(
     if (
       record.experimentId !== entry.experimentId || record.armId !== entry.armId ||
       record.seed !== entry.seed || record.replicate !== entry.replicate ||
+      record.fixtureId !== (entry.fixtureId ?? experimentFixtureId(entry.experimentId)) ||
       record.tableIndex !== entry.tableIndex || record.randomizedArmOrdinal !== entry.randomizedArmOrdinal
     ) {
       throw new Error(`Experiment executor returned a record for the wrong scheduled table ${String(entry.tableIndex)}.`);
@@ -993,7 +1172,9 @@ export function decodeVttExperimentArguments(argv: readonly string[]): VttExperi
   ]);
   for (const name of values.keys()) if (!allowed.has(name)) throw new TypeError(`Unknown option --${name}.`);
   const experiment = optionText(values, 'experiment');
-  if (experiment !== 'E01') throw new TypeError('--experiment must name a registered experiment (currently E01).');
+  if (experiment !== 'E01' && experiment !== 'E02') {
+    throw new TypeError('--experiment must name a registered experiment (E01 or E02).');
+  }
   const effort = optionText(values, 'effort', DEFAULT_DM_REASONING_EFFORT);
   if (effort !== 'low' && effort !== 'medium' && effort !== 'high' && effort !== 'xhigh') {
     throw new TypeError('--effort must be low, medium, high, or xhigh.');

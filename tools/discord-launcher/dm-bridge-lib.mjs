@@ -8,6 +8,20 @@ function object(value, label) {
   return value;
 }
 
+function array(value, label) {
+  if (!Array.isArray(value)) throw new TypeError(`${label} must be an array`);
+  return value;
+}
+
+function workedExampleInstructions(value) {
+  const examples = array(value, 'request.replyContract.workedExamples');
+  if (examples.length === 0) return ['No worked examples are included.'];
+  return examples.flatMap((example, index) => [
+    `Worked example ${String(index + 1)}:`,
+    JSON.stringify(object(example, `request.replyContract.workedExamples[${String(index)}]`)),
+  ]);
+}
+
 function requestSessionId(request) {
   const sessionId = object(request, 'request').codexSessionId;
   if (typeof sessionId !== 'string' || sessionId.length === 0) throw new TypeError('request.codexSessionId is required');
@@ -363,6 +377,9 @@ function roundPlanPrompt(request) {
     }
     correction = `The previous reply failed strict validation with exactly this error: ${input.validatorError}`;
   }
+  const sharedInstructions = typeof contract.instructions === 'string'
+    ? contract.instructions
+    : 'You are the DM decision engine. Return exactly one JSON object and no markdown.';
   const contractInstructions = contract.delivery === 'reference'
     ? [
         `Use the strict JSON reply contract already established in this session as ${String(contract.contractId)}.`,
@@ -372,8 +389,12 @@ function roundPlanPrompt(request) {
       ? [
           `Contract ${String(contract.contractId)} compact JSON grammar:`,
           String(contract.grammar),
-          'Canonical valid example:',
-          JSON.stringify(object(contract.canonicalExample, 'request.replyContract.canonicalExample')),
+          ...('workedExamples' in contract
+            ? workedExampleInstructions(contract.workedExamples)
+            : [
+                'Canonical valid example:',
+                JSON.stringify(object(contract.canonicalExample, 'request.replyContract.canonicalExample')),
+              ]),
           'The production strict validator remains authoritative.',
         ]
       : 'jsonSchema' in contract
@@ -397,12 +418,15 @@ function roundPlanPrompt(request) {
             'Canonical valid example:',
             String(contract.canonicalExample),
           ];
+  const requestPayload = 'workedExamples' in contract
+    ? Object.fromEntries(Object.entries(input).filter(([key]) => key !== 'replyContract'))
+    : input;
   return [
-    'You are the DM decision engine. Return exactly one JSON object and no markdown.',
+    sharedInstructions,
     ...contractInstructions,
     correction,
     'Request:',
-    JSON.stringify(input),
+    JSON.stringify(requestPayload),
   ].join('\n');
 }
 
