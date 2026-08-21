@@ -7,6 +7,12 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D329 addendum — OWNER: ep-208 QUARANTINED (2026-08-21)
+
+ep-208 "Swiss Army Soul Knife" (utility build, metric=other, no combat
+routine in source): owner ruled "Quarantine" — permanently excluded from
+combat soaks, recorded in the register; no synthetic routine.
+
 ## D329 — OWNER: seventh brainstorm round — fixtures, reports, endgame (2026-08-21)
 
 1. **No-routine builds (ep-208/213/228/241): presented to the owner ONE
